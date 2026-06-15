@@ -25,6 +25,18 @@
   to = "/.netlify/functions/predict-bet"
   status = 200
 
+# Async analyst plane: start kicks off the background function, status polls it.
+# The -background function is invoked internally by predict-start, so it needs
+# no friendly /api alias of its own.
+[[redirects]]
+  from = "/api/predict-start"
+  to = "/.netlify/functions/predict-start"
+  status = 200
+[[redirects]]
+  from = "/api/predict-status"
+  to = "/.netlify/functions/predict-status"
+  status = 200
+
 # SPA fallback
 [[redirects]]
   from = "/*"

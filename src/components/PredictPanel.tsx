@@ -3,18 +3,24 @@ import { useState } from "react";
 // PredictPanel — the prediction-market plane.
 //
 // Two explicit steps, mirroring the backend's deliberate analyze/bet split:
-//   1. "Analyze market" hits the standalone analyst server (it can run 50-80s
-//      because of web search, longer than a Netlify function allows), which
-//      returns an advisory decision. READ ONLY — no funds move.
+//   1. "Analyze market" kicks off /api/predict-start, which fires the
+//      predict-analyze-background Netlify function (web search can run minutes,
+//      far longer than a sync function allows) and returns a jobId immediately.
+//      We then poll /api/predict-status until the advisory decision lands.
+//      READ ONLY — no funds move.
 //   2. "Place agent's bet" hits the /api/predict-bet Netlify function, which
 //      re-checks its own guards (OPEN, before deadline, ≤ spend cap) before the
 //      agent's wallet stakes USDC. Enabled only once a decision suggests > 0.
 //
 // The browser never holds a key for either call.
 
-// The analyst server runs separately from the Netlify functions (see the ~60s
-// web-search latency). Falls back to the local dev port.
-const ANALYST_URL = import.meta.env.VITE_ANALYST_URL || "http://localhost:8787";
+// How often to poll the job status, and how long to keep polling before giving
+// up. The background function may run up to ~15 min (Netlify Pro), so the
+// ceiling is generous.
+const POLL_INTERVAL_MS = 2500;
+const POLL_TIMEOUT_MS = 15 * 60 * 1000;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 type Decision = {
   side: "yes" | "no";
@@ -54,14 +60,38 @@ export default function PredictPanel() {
     setResult(null);
     setTxOut("");
     try {
-      const res = await fetch(`${ANALYST_URL}/analyze`, {
+      // 1. Start the async job and get a jobId back immediately.
+      const startRes = await fetch("/api/predict-start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ marketId: Number(marketId) }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || `Request failed: ${res.status}`);
-      setResult(data as AnalyzeResult);
+      const start = await startRes.json();
+      if (!startRes.ok) throw new Error(start?.error || `Request failed: ${startRes.status}`);
+      const { jobId } = start;
+      if (!jobId) throw new Error("No jobId returned");
+
+      // 2. Poll until the background analysis finishes (or we time out).
+      const deadline = Date.now() + POLL_TIMEOUT_MS;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        await sleep(POLL_INTERVAL_MS);
+        const statusRes = await fetch("/api/predict-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jobId }),
+        });
+        const status = await statusRes.json();
+        if (!statusRes.ok) throw new Error(status?.error || `Request failed: ${statusRes.status}`);
+        if (status.status === "done") {
+          const data = status.result;
+          // The job can finish with a server-side error (e.g. market not found).
+          if (data?.error) throw new Error(data.error);
+          setResult(data as AnalyzeResult);
+          break;
+        }
+        if (Date.now() > deadline) throw new Error("Analysis timed out");
+      }
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -118,7 +148,7 @@ export default function PredictPanel() {
 
       {analyzing && (
         <div className="status" style={{ marginTop: 14 }}>
-          <span className="spinner" /> Agent analyzing… (~60s)
+          <span className="spinner" /> Agent analyzing… (web search may take a minute or two)
         </div>
       )}
 
