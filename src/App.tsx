@@ -1,5 +1,6 @@
 import ConnectPasskey from "./components/ConnectPasskey";
 import AgentPanel from "./components/AgentPanel";
+import PredictPanel from "./components/PredictPanel";
 
 export default function App() {
   return (
@@ -10,6 +11,7 @@ export default function App() {
       </div>
       <ConnectPasskey />
       <AgentPanel />
+      <PredictPanel />
     </div>
   );
 }
