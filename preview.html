@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tikpema — preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Space+Mono&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #02080f;
+    --surface: #0a1420;
+    --cyan: #00d4ff;
+    --emerald: #00e5a0;
+    --text: #e6edf3;
+    --muted: #7d8ba1;
+    --border: rgba(0, 212, 255, 0.15);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Outfit", system-ui, sans-serif;
+  }
+  .mono { font-family: "Space Mono", monospace; }
+  .app { max-width: 880px; margin: 0 auto; padding: 40px 20px 80px; }
+  .title { font-size: 30px; font-weight: 700; margin-bottom: 4px; }
+  .tagline { color: var(--muted); margin-bottom: 8px; }
+  .preview-flag {
+    display: inline-block;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--emerald);
+    border: 1px solid rgba(0, 229, 160, 0.3);
+    border-radius: 6px;
+    padding: 3px 8px;
+    margin-bottom: 28px;
+  }
+  .plane {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+  .plane-head { display: flex; align-items: baseline; gap: 10px; }
+  .plane h2 { margin: 0 0 4px; font-size: 18px; }
+  .badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 20px;
+  }
+  .badge.human { color: var(--cyan); border: 1px solid var(--border); }
+  .badge.agent { color: #b9a8ff; border: 1px solid rgba(127, 119, 221, 0.4); }
+  .plane .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  button {
+    background: transparent;
+    border: 1px solid var(--cyan);
+    color: var(--cyan);
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-family: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover { background: rgba(0, 212, 255, 0.08); }
+  button.emerald { border-color: var(--emerald); color: var(--emerald); }
+  button.emerald:hover { background: rgba(0, 229, 160, 0.08); }
+  input {
+    background: #060d16;
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 10px;
+    font-family: inherit;
+    flex: 1;
+    min-width: 200px;
+  }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .status { color: var(--muted); font-size: 12px; margin-top: 14px; word-break: break-all; }
+  .status.live { color: var(--emerald); }
+  .foot { color: var(--muted); font-size: 12px; margin-top: 36px; line-height: 1.7; }
+  .foot code { color: var(--cyan); font-family: "Space Mono", monospace; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <div class="title">Tikpema</div>
+    <div class="tagline">Two planes on Arc Testnet · humans sign with passkeys, the agent acts on its own</div>
+    <div class="preview-flag">Static preview · buttons are stubbed</div>
+
+    <!-- HUMAN PLANE -->
+    <div class="plane">
+      <div class="plane-head">
+        <h2>Human plane</h2>
+        <span class="badge human">passkey · gasless</span>
+      </div>
+      <div class="sub">Modular passkey wallet · keys on device · user signs each action</div>
+      <div class="row">
+        <button onclick="stub('human')">Register passkey</button>
+        <button onclick="stub('human')">Login</button>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <input placeholder="recipient 0x…" />
+        <button class="emerald" onclick="stub('human')">Send 0.1 USDC</button>
+      </div>
+      <div class="status" id="human-status"></div>
+    </div>
+
+    <!-- AGENT PLANE -->
+    <div class="plane">
+      <div class="plane-head">
+        <h2>Agent plane</h2>
+        <span class="badge agent">dev-controlled · autonomous</span>
+      </div>
+      <div class="sub">Dev-controlled SCA wallet · server-side · ERC-8004 identity · acts unattended</div>
+      <div class="row">
+        <button onclick="stub('agent')">Init + register agent</button>
+        <button onclick="stub('agent')">Agent status</button>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <input placeholder="task for the agent, e.g. 'pay 0.05 USDC to 0x…'" />
+        <button class="emerald" onclick="stub('agent')">Run agent</button>
+      </div>
+      <div class="status" id="agent-status"></div>
+    </div>
+
+    <div class="foot">
+      This is a layout preview only. The live flows run in the full app:
+      <code>npm install</code> &rarr; fill <code>.env</code> &rarr; <code>npm run dev</code>.
+      The human plane needs the Modular client key; the agent plane runs in
+      <code>netlify/functions</code> with the entity secret server-side.
+    </div>
+  </div>
+
+  <script>
+    function stub(plane) {
+      var el = document.getElementById(plane + "-status");
+      el.className = "status live";
+      el.textContent =
+        plane === "human"
+          ? "Preview only — runs live via passkey + Gas Station in the full app (npm run dev)."
+          : "Preview only — runs live against /api/agent-* serverless functions in the full app (npm run dev).";
+    }
+  </script>
+</body>
+</html>

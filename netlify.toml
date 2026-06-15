@@ -1,0 +1,38 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+# Friendly /api/* routes -> serverless functions (the AGENT plane).
+[[redirects]]
+  from = "/api/agent-init"
+  to = "/.netlify/functions/agent-init"
+  status = 200
+[[redirects]]
+  from = "/api/agent-status"
+  to = "/.netlify/functions/agent-status"
+  status = 200
+[[redirects]]
+  from = "/api/agent-act"
+  to = "/.netlify/functions/agent-act"
+  status = 200
+[[redirects]]
+  from = "/api/predict-analyze"
+  to = "/.netlify/functions/predict-analyze"
+  status = 200
+[[redirects]]
+  from = "/api/predict-bet"
+  to = "/.netlify/functions/predict-bet"
+  status = 200
+
+# SPA fallback
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[functions]
+  # Web search + multi-round reasoning needs more than the 30s default
+  included_files = []
+[functions."predict-analyze"]
+  timeout = 60
