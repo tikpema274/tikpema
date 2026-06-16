@@ -23,11 +23,16 @@ export async function handler(event) {
 
   // Invoke the background function over HTTP. Netlify returns 202 right away and
   // runs its body asynchronously, so we don't await the analysis — only the
-  // dispatch. Build the base URL from the Netlify-provided site URL, falling
-  // back to the incoming request's host (covers `netlify dev` and deploys alike).
+  // dispatch. Target the background function on THIS exact deploy: DEPLOY_URL is
+  // the unique per-deploy permalink (https://<deploy-id>--site.netlify.app) and
+  // is the only URL guaranteed to serve the code currently running — on draft
+  // deploys, deploy previews, branch deploys, and production alike. `URL` and
+  // `DEPLOY_PRIME_URL` point at the production / branch "prime" URLs, which on a
+  // draft deploy resolve to a DIFFERENT deploy that has no predict-analyze-
+  // background function yet, so the invocation 404s. Fall back to the request
+  // host only for local `netlify dev`, where none of the deploy vars are set.
   const base =
-    process.env.URL ||
-    process.env.DEPLOY_PRIME_URL ||
+    process.env.DEPLOY_URL ||
     `${event.headers["x-forwarded-proto"] || "https"}://${event.headers.host}`;
 
   try {
