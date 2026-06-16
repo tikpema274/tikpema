@@ -37,6 +37,37 @@ type AnalyzeResult = {
   raw?: string;
 };
 
+type Proposal = {
+  outcome: "yes" | "no" | "undetermined";
+  confidence: number; // decimal 0..1
+  reasoning: string;
+  sources: string[];
+};
+
+type ResolveResult = {
+  market?: { question?: string; status?: string; resolutionTime?: number };
+  proposal: Proposal | null;
+  resolutionTimeReached?: boolean;
+  resolutionWarning?: string;
+  warning?: string;
+  raw?: string;
+};
+
+// TikpemaPrediction on Arc Testnet. The oracle (deployer EOA) commits a
+// resolution manually with `cast send`; the key lives in the contracts repo,
+// never in this app. This string is display-only.
+const PREDICTION_ADDRESS = "0xf38492403ce3f1c94ef6322b78c9024d26ed87e1";
+const ARC_RPC = "https://rpc.testnet.arc.network";
+
+// The exact command a human runs (in the contracts repo, where $PRIVATE_KEY is
+// the oracle key) to commit a YES/NO resolution on-chain. Read-only here.
+function castResolveCommand(id: string, yesWon: boolean) {
+  return (
+    `cast send ${PREDICTION_ADDRESS} "resolveMarket(uint256,bool)" ` +
+    `${id} ${yesWon} --rpc-url ${ARC_RPC} --private-key $PRIVATE_KEY`
+  );
+}
+
 const pct = (x: number) => `${(x * 100).toFixed(0)}%`;
 const signedPct = (x: number) => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}%`;
 
@@ -48,7 +79,15 @@ export default function PredictPanel() {
   const [error, setError] = useState("");
   const [txOut, setTxOut] = useState<string>("");
 
+  // Resolution-proposal plane — independent of the analyze/bet flow above.
+  const [resolveId, setResolveId] = useState("");
+  const [resolving, setResolving] = useState(false);
+  const [resolveResult, setResolveResult] = useState<ResolveResult | null>(null);
+  const [resolveError, setResolveError] = useState("");
+  const [copied, setCopied] = useState(false);
+
   const idIsValid = /^\d+$/.test(marketId.trim());
+  const resolveIdIsValid = /^\d+$/.test(resolveId.trim());
   const decision = result?.decision ?? null;
   const canBet =
     !!decision && decision.suggestedAmountUsdc > 0 && !analyzing && !betting;
@@ -122,6 +161,37 @@ export default function PredictPanel() {
       setBetting(false);
     }
   }
+
+  // Research-only: ask the agent what really happened and PROPOSE a resolution
+  // with cited sources. This NEVER signs or sends — committing is a manual
+  // `cast send` the human runs with the oracle key.
+  async function proposeResolution() {
+    if (!resolveIdIsValid) return;
+    setResolving(true);
+    setResolveError("");
+    setResolveResult(null);
+    setCopied(false);
+    try {
+      const res = await fetch("/api/predict-resolve-propose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ marketId: Number(resolveId) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `Request failed: ${res.status}`);
+      setResolveResult(data as ResolveResult);
+    } catch (e: any) {
+      setResolveError(e.message);
+    } finally {
+      setResolving(false);
+    }
+  }
+
+  const proposal = resolveResult?.proposal ?? null;
+  const castCmd =
+    proposal && (proposal.outcome === "yes" || proposal.outcome === "no")
+      ? castResolveCommand(resolveId.trim(), proposal.outcome === "yes")
+      : null;
 
   return (
     <div className="plane">
@@ -219,6 +289,141 @@ export default function PredictPanel() {
           {txOut}
         </pre>
       )}
+
+      {/* ── Propose resolution ─────────────────────────────────────────────
+          Agent researches the real-world outcome and proposes YES/NO with
+          sources. Committing is a manual `cast send` by the oracle-key holder;
+          this app never signs or sends. */}
+      <div
+        style={{
+          marginTop: 28,
+          paddingTop: 20,
+          borderTop: "1px solid rgba(255,255,255,0.12)",
+        }}
+      >
+        <h3 style={{ margin: "0 0 4px" }}>Propose resolution</h3>
+        <div className="sub">
+          Agent researches what actually happened and proposes a resolution with
+          cited sources · a human commits it manually with <code>cast send</code>
+        </div>
+
+        <div className="row" style={{ marginTop: 12 }}>
+          <input
+            type="number"
+            min={0}
+            step={1}
+            placeholder="market id, e.g. 0"
+            value={resolveId}
+            onChange={(e) => setResolveId(e.target.value)}
+            style={{ maxWidth: 160 }}
+          />
+          <button disabled={resolving || !resolveIdIsValid} onClick={proposeResolution}>
+            {resolving ? "Researching…" : "Research outcome"}
+          </button>
+        </div>
+
+        {resolving && (
+          <div className="status" style={{ marginTop: 14 }}>
+            <span className="spinner" /> Researching the real-world outcome… (web
+            search may take a minute or two)
+          </div>
+        )}
+
+        {resolveError && (
+          <pre
+            className="mono status"
+            style={{ whiteSpace: "pre-wrap", marginTop: 14 }}
+          >
+            Error: {resolveError}
+          </pre>
+        )}
+
+        {resolveResult && !resolving && (
+          <div style={{ marginTop: 16 }}>
+            {resolveResult.market?.question && (
+              <div style={{ fontSize: 15, marginBottom: 12 }}>
+                {resolveResult.market.question}
+              </div>
+            )}
+
+            {resolveResult.resolutionTimeReached === false && (
+              <div className="status" style={{ marginBottom: 12, color: "#f5a623" }}>
+                ⚠ Resolution time not reached — this proposal is premature.
+              </div>
+            )}
+
+            {proposal ? (
+              <>
+                <div className="row" style={{ gap: 20, marginBottom: 10 }}>
+                  <Stat label="Proposed outcome" value={proposal.outcome.toUpperCase()} />
+                  <Stat label="Confidence" value={pct(proposal.confidence)} />
+                </div>
+                <div className="status" style={{ marginBottom: 14 }}>
+                  {proposal.reasoning}
+                </div>
+
+                {proposal.sources?.length > 0 && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div className="status" style={{ margin: "0 0 6px", fontSize: 11 }}>
+                      Sources
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                      {proposal.sources.map((url, i) => (
+                        <li key={i} style={{ fontSize: 13, wordBreak: "break-all" }}>
+                          <a href={url} target="_blank" rel="noreferrer">
+                            {url}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {castCmd ? (
+                  <div>
+                    <div className="status" style={{ margin: "0 0 6px", fontSize: 11 }}>
+                      Commit manually — run in the contracts repo where the oracle
+                      key (<code>$PRIVATE_KEY</code>) lives:
+                    </div>
+                    <pre
+                      className="mono status"
+                      style={{ whiteSpace: "pre-wrap", margin: 0 }}
+                    >
+                      {castCmd}
+                    </pre>
+                    <button
+                      style={{ marginTop: 8 }}
+                      onClick={() => {
+                        navigator.clipboard?.writeText(castCmd);
+                        setCopied(true);
+                      }}
+                    >
+                      {copied ? "Copied ✓" : "Copy command"}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="status">
+                    Outcome is <b>UNDETERMINED</b> — no resolution command to run yet.
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="status">
+                No proposal returned
+                {resolveResult.warning ? ` — ${resolveResult.warning}` : ""}.
+                {resolveResult.raw ? (
+                  <pre
+                    className="mono status"
+                    style={{ whiteSpace: "pre-wrap", marginTop: 8 }}
+                  >
+                    {resolveResult.raw}
+                  </pre>
+                ) : null}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

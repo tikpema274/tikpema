@@ -24,6 +24,13 @@
   from = "/api/predict-bet"
   to = "/.netlify/functions/predict-bet"
   status = 200
+# Resolution-proposal plane: agent researches the real-world outcome and
+# PROPOSES a resolution with sources. READ ONLY — a human commits it manually
+# via `cast send resolveMarket(...)`. This function never signs or sends.
+[[redirects]]
+  from = "/api/predict-resolve-propose"
+  to = "/.netlify/functions/predict-resolve-propose"
+  status = 200
 
 # Async analyst plane: start kicks off the background function, status polls it.
 # The -background function is invoked internally by predict-start, so it needs
@@ -47,4 +54,6 @@
   # Web search + multi-round reasoning needs more than the 30s default
   included_files = []
 [functions."predict-analyze"]
+  timeout = 60
+[functions."predict-resolve-propose"]
   timeout = 60
