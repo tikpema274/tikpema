@@ -7,11 +7,19 @@
 // Input (POST body): { jobId }
 // Output: { status: "pending" } | { status: "done", result }
 
-import { getStore } from "@netlify/blobs";
+import { connectLambda, getStore } from "@netlify/blobs";
 import { json, parseBody } from "./_arc.mjs";
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
+
+  // Classic Lambda-signature functions must hand the Blobs client their context
+  // explicitly — see the longer note in predict-analyze-background.mjs — or
+  // getStore() throws "environment has not been configured to use Netlify
+  // Blobs". connectLambda reads the request-scoped siteID + token from
+  // event.blobs; must run before getStore. Guard on event.blobs: it's absent
+  // under local `netlify dev`, and connectLambda throws on undefined.
+  if (event.blobs) connectLambda(event);
 
   const { jobId } = parseBody(event);
   if (!jobId) return json(400, { error: "Provide 'jobId'" });

@@ -14,7 +14,7 @@
 // Input (POST body): { marketId, jobId }
 // Output: written to Blobs store "predict-jobs" under key `jobId`.
 
-import { getStore } from "@netlify/blobs";
+import { connectLambda, getStore } from "@netlify/blobs";
 import { parseBody } from "./_arc.mjs";
 import { publicClient, readMarket } from "./_predict.mjs";
 
@@ -89,6 +89,16 @@ async function analyze(marketId) {
 }
 
 export async function handler(event) {
+  // Classic Lambda-signature functions (handler(event)) do NOT get the Blobs
+  // context auto-wired into the global env the way V2 functions do — and
+  // background functions in particular run without it — so getStore() would
+  // throw "environment has not been configured to use Netlify Blobs". Feeding
+  // connectLambda the event hands the Blobs client the request-scoped siteID +
+  // token Netlify injects into event.blobs. Must run before any getStore call.
+  // Guard on event.blobs: it is absent under local `netlify dev` (which already
+  // configures Blobs via the global env), and connectLambda throws on undefined.
+  if (event.blobs) connectLambda(event);
+
   // Background functions are invoked asynchronously; the only meaningful work is
   // to compute the result and stash it in Blobs. There is no HTTP consumer.
   const { marketId, jobId } = parseBody(event);
