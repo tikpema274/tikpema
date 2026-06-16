@@ -172,14 +172,38 @@ export default function PredictPanel() {
     setResolveResult(null);
     setCopied(false);
     try {
-      const res = await fetch("/api/predict-resolve-propose", {
+      // 1. Start the async job (predict-resolve-background) and get a jobId.
+      const startRes = await fetch("/api/predict-resolve-start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ marketId: Number(resolveId) }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || `Request failed: ${res.status}`);
-      setResolveResult(data as ResolveResult);
+      const start = await startRes.json();
+      if (!startRes.ok) throw new Error(start?.error || `Request failed: ${startRes.status}`);
+      const { jobId } = start;
+      if (!jobId) throw new Error("No jobId returned");
+
+      // 2. Poll the shared predict-status until the research finishes (or times out).
+      const deadline = Date.now() + POLL_TIMEOUT_MS;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        await sleep(POLL_INTERVAL_MS);
+        const statusRes = await fetch("/api/predict-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jobId }),
+        });
+        const status = await statusRes.json();
+        if (!statusRes.ok) throw new Error(status?.error || `Request failed: ${statusRes.status}`);
+        if (status.status === "done") {
+          const data = status.result;
+          // The job can finish with a server-side error (e.g. market not found).
+          if (data?.error) throw new Error(data.error);
+          setResolveResult(data as ResolveResult);
+          break;
+        }
+        if (Date.now() > deadline) throw new Error("Resolution research timed out");
+      }
     } catch (e: any) {
       setResolveError(e.message);
     } finally {

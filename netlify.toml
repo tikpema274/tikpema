@@ -44,6 +44,15 @@
   to = "/.netlify/functions/predict-status"
   status = 200
 
+# Async resolution-proposal plane: start kicks off predict-resolve-background,
+# which writes to the same "predict-jobs" store, so it reuses predict-status for
+# polling. The -background function is invoked internally by predict-resolve-
+# start, so it needs no friendly /api alias of its own.
+[[redirects]]
+  from = "/api/predict-resolve-start"
+  to = "/.netlify/functions/predict-resolve-start"
+  status = 200
+
 # SPA fallback
 [[redirects]]
   from = "/*"
