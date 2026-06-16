@@ -24,6 +24,19 @@
   from = "/api/predict-bet"
   to = "/.netlify/functions/predict-bet"
   status = 200
+
+# Gateway plane: deposit USDC into the Circle Gateway Wallet (unified balance)
+# and read the unified balance back. Deposit EXECUTES via the dev-controlled
+# wallet; balance is a read-only Gateway API call.
+[[redirects]]
+  from = "/api/gateway-deposit"
+  to = "/.netlify/functions/gateway-deposit"
+  status = 200
+[[redirects]]
+  from = "/api/gateway-balance"
+  to = "/.netlify/functions/gateway-balance"
+  status = 200
+
 # Resolution-proposal plane: agent researches the real-world outcome and
 # PROPOSES a resolution with sources. READ ONLY — a human commits it manually
 # via `cast send resolveMarket(...)`. This function never signs or sends.
