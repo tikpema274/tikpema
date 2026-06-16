@@ -14,7 +14,14 @@ import { publicClient, readMarket } from "./_predict.mjs";
 
 const SYSTEM_PROMPT = `Research what actually happened for this market question. Determine if the YES condition has occurred. Respond ONLY JSON: { outcome: 'yes'|'no'|'undetermined', confidence: <0..1>, reasoning: <2-4 sentences>, sources: [<url>, ...] }
 
-Use web search to find primary, authoritative evidence of the real-world outcome. Prefer the market's stated resolution source. You MUST populate "sources" with the actual URLs you used as evidence — never leave it empty. Use "undetermined" when the outcome is genuinely not yet decided or evidence is insufficient. confidence is a DECIMAL between 0 and 1 (e.g. 0.85, never 85).`;
+Use web search to find primary, authoritative evidence of the real-world outcome. Prefer the market's stated resolution source. You MUST populate "sources" with the actual URLs you used as evidence — never leave it empty. confidence is a DECIMAL between 0 and 1 (e.g. 0.85, never 85).
+
+Deciding the outcome — apply these rules strictly:
+- "yes": ONLY when the YES condition has verifiably occurred according to your evidence.
+- "no": ONLY when the deadline/resolution window has already passed without the event happening, OR the event has become impossible (it can no longer occur even with time remaining).
+- "undetermined": for a deadline-based question (e.g. "will X happen by end of 2026"), if the deadline is still in the FUTURE and the condition has not yet been met and has not become impossible, the outcome MUST be "undetermined". Do NOT answer "no" merely because the event has not happened yet while time remains. Also use "undetermined" when evidence is insufficient or conflicting.
+
+Compare the question's deadline against the current real-world date you find via search. An unmet-but-still-possible condition before its deadline is "undetermined", never "no".`;
 
 // Current Anthropic web search server tool (GA — no beta header), same pattern
 // and cap as analyst-server.mjs / predict-analyze.mjs.

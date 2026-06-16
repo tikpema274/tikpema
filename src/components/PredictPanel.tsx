@@ -188,8 +188,12 @@ export default function PredictPanel() {
   }
 
   const proposal = resolveResult?.proposal ?? null;
+  // Never offer the commit command for a market whose resolution time hasn't
+  // passed — a premature market shows research + warning only, no command.
   const castCmd =
-    proposal && (proposal.outcome === "yes" || proposal.outcome === "no")
+    proposal &&
+    resolveResult?.resolutionTimeReached !== false &&
+    (proposal.outcome === "yes" || proposal.outcome === "no")
       ? castResolveCommand(resolveId.trim(), proposal.outcome === "yes")
       : null;
 
@@ -401,9 +405,14 @@ export default function PredictPanel() {
                       {copied ? "Copied ✓" : "Copy command"}
                     </button>
                   </div>
-                ) : (
+                ) : proposal.outcome === "undetermined" ? (
                   <div className="status">
                     Outcome is <b>UNDETERMINED</b> — no resolution command to run yet.
+                  </div>
+                ) : (
+                  <div className="status">
+                    Resolution time not reached — no commit command until the
+                    deadline passes.
                   </div>
                 )}
               </>
