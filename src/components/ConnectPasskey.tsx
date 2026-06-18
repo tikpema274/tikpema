@@ -4,6 +4,7 @@ import { useModularWallet } from "../wallet/useModularWallet";
 export default function ConnectPasskey() {
   const w = useModularWallet();
   const [to, setTo] = useState("");
+  const [username, setUsername] = useState("");
   const [flushNonceStr, setFlushNonceStr] = useState("");
 
   return (
@@ -13,7 +14,15 @@ export default function ConnectPasskey() {
 
       {!w.address ? (
         <div className="row">
-          <button disabled={w.busy} onClick={() => w.connectRegister()}>
+          <input
+            placeholder="choose a username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+          />
+          <button
+            disabled={w.busy || !username.trim()}
+            onClick={() => w.connectRegister(username.trim())}
+          >
             Register passkey
           </button>
           <button disabled={w.busy} onClick={() => w.connectLogin()}>

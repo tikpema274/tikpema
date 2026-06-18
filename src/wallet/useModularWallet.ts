@@ -92,7 +92,7 @@ export function useModularWallet() {
   const [status, setStatus] = useState<string>("");
   const [busy, setBusy] = useState(false);
 
-  const connect = useCallback(async (mode: WebAuthnMode, username = "tikpema-user-2") => {
+  const connect = useCallback(async (mode: WebAuthnMode, username: string) => {
     setBusy(true);
     try {
       setStatus("Waiting for passkey…");
@@ -195,8 +195,19 @@ export function useModularWallet() {
     address: account?.address ?? null,
     status,
     busy,
-    connectRegister: () => connect(WebAuthnMode.Register),
-    connectLogin: () => connect(WebAuthnMode.Login),
+    // Register requires a unique username per passkey — the authenticator
+    // rejects a duplicate handle ("username is duplicated"), so the user
+    // chooses one on the Register screen. We append a short time-based suffix
+    // as a safety net so two users picking the same handle don't collide; the
+    // chosen name still leads the displayed credential. Login uses discoverable
+    // credentials (the user picks a passkey at the OS prompt), so the username
+    // is only a hint there and a stable default is fine.
+    connectRegister: (username: string) =>
+      connect(
+        WebAuthnMode.Register,
+        `${username}-${Date.now().toString(36).slice(-4)}`
+      ),
+    connectLogin: () => connect(WebAuthnMode.Login, "tikpema-user"),
     sendUsdc,
     flushNonce,
   };
