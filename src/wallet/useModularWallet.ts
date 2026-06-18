@@ -153,43 +153,6 @@ export function useModularWallet() {
     [account]
   );
 
-  // TEMP (orphan flush): replace a stuck userOp at its EXACT nonce so it mines
-  // and frees a bundler mempool slot. A same-(sender,nonce) op is a replacement,
-  // not a new op, so the bundler accepts it even when the unstaked 4-op cap is
-  // full. Fees are bumped well above the orphans' old 1 gwei / 50 gwei so the
-  // replacement both qualifies (>+10%) and is mineable. callData is a harmless
-  // 0-value self-transfer — its only job is to consume the nonce.
-  const flushNonce = useCallback(
-    async (nonce: bigint) => {
-      if (!account) throw new Error("Connect a wallet first");
-      setBusy(true);
-      try {
-        setStatus(`Flushing nonce ${nonce}…`);
-        const bundler = createBundlerClient({
-          account,
-          chain: arcTestnet,
-          transport: modularTransport,
-        });
-        const hash = await bundler.sendUserOperation({
-          calls: [encodeTransfer(account.address, CONTRACTS.USDC as `0x${string}`, 0n)],
-          paymaster: true,
-          nonce,
-          maxPriorityFeePerGas: 2_000_000_000n, // 2 gwei
-          maxFeePerGas: 80_000_000_000n, // 80 gwei
-        });
-        const { receipt } = await bundler.waitForUserOperationReceipt({ hash, timeout: 60000 });
-        setStatus(`Flushed: ${receipt.transactionHash}`);
-        return receipt.transactionHash;
-      } catch (e: any) {
-        setStatus(`Flush error: ${e.message}`);
-        throw e;
-      } finally {
-        setBusy(false);
-      }
-    },
-    [account]
-  );
-
   return {
     account,
     address: account?.address ?? null,
@@ -209,6 +172,5 @@ export function useModularWallet() {
       ),
     connectLogin: () => connect(WebAuthnMode.Login, "tikpema-user"),
     sendUsdc,
-    flushNonce,
   };
 }

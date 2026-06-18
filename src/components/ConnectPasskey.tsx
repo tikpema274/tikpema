@@ -5,7 +5,6 @@ export default function ConnectPasskey() {
   const w = useModularWallet();
   const [to, setTo] = useState("");
   const [username, setUsername] = useState("");
-  const [flushNonceStr, setFlushNonceStr] = useState("");
 
   return (
     <div className="plane">
@@ -44,28 +43,6 @@ export default function ConnectPasskey() {
               onClick={() => w.sendUsdc(to as `0x${string}`, 100000n)}
             >
               Send 0.1 USDC
-            </button>
-          </div>
-
-          {/* TEMP: flush a stuck/orphaned userOp. Paste the nonce from the
-              dashboard (decimal or 0x hex) and flush — removable once cleared. */}
-          <div className="row" style={{ marginTop: 12 }}>
-            <input
-              placeholder="stuck nonce (decimal or 0x…) to flush"
-              value={flushNonceStr}
-              onChange={(e) => setFlushNonceStr(e.target.value)}
-            />
-            <button
-              disabled={w.busy || !flushNonceStr}
-              onClick={() => {
-                try {
-                  w.flushNonce(BigInt(flushNonceStr.trim()));
-                } catch {
-                  alert("Invalid nonce — paste a decimal or 0x-hex value");
-                }
-              }}
-            >
-              Flush nonce
             </button>
           </div>
         </>
