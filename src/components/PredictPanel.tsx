@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 // PredictPanel — the prediction-market plane.
 //
@@ -21,6 +21,20 @@ const POLL_INTERVAL_MS = 2500;
 const POLL_TIMEOUT_MS = 15 * 60 * 1000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// One market in the browsable list, as returned by /api/predict-markets
+// (already junk-filtered and de-duplicated; marketId is the real on-chain id).
+type MarketSummary = {
+  marketId: number;
+  question: string;
+  category: string;
+  status: string;
+  statusCode: number;
+  bettingDeadline: number;
+  resolutionTime: number;
+  pools: { yesUsdc: number; noUsdc: number; totalUsdc: number };
+  probabilities: { yesPct: number; noPct: number };
+};
 
 type Decision = {
   side: "yes" | "no";
@@ -70,6 +84,9 @@ function castResolveCommand(id: string, yesWon: boolean) {
 
 const pct = (x: number) => `${(x * 100).toFixed(0)}%`;
 const signedPct = (x: number) => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}%`;
+// List formatting: pool sizes are already in USDC, odds already in percent.
+const usd = (n: number) => `${(n ?? 0).toFixed(2)} USDC`;
+const odds = (n: number) => `${Math.round(n ?? 0)}%`;
 
 export default function PredictPanel() {
   const [marketId, setMarketId] = useState("");
@@ -78,6 +95,11 @@ export default function PredictPanel() {
   const [result, setResult] = useState<AnalyzeResult | null>(null);
   const [error, setError] = useState("");
   const [txOut, setTxOut] = useState<string>("");
+
+  // Browsable market list (replaces the old manual market-id input).
+  const [markets, setMarkets] = useState<MarketSummary[]>([]);
+  const [marketsLoading, setMarketsLoading] = useState(true);
+  const [marketsError, setMarketsError] = useState("");
 
   // Resolution-proposal plane — independent of the analyze/bet flow above.
   const [resolveId, setResolveId] = useState("");
@@ -91,6 +113,45 @@ export default function PredictPanel() {
   const decision = result?.decision ?? null;
   const canBet =
     !!decision && decision.suggestedAmountUsdc > 0 && !analyzing && !betting;
+
+  // Load the cleaned market list once on mount. READ ONLY.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setMarketsLoading(true);
+      setMarketsError("");
+      try {
+        const res = await fetch("/api/predict-markets");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || `Request failed: ${res.status}`);
+        if (!cancelled) setMarkets(data.markets || []);
+      } catch (e: any) {
+        if (!cancelled) setMarketsError(e.message);
+      } finally {
+        if (!cancelled) setMarketsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Selecting a market drives BOTH the analyze/bet flow and the resolution
+  // flow (which still work by id) at the chosen on-chain id, and clears any
+  // stale results from a previously selected market.
+  function selectMarket(id: number) {
+    const s = String(id);
+    setMarketId(s);
+    setResolveId(s);
+    setResult(null);
+    setError("");
+    setTxOut("");
+    setResolveResult(null);
+    setResolveError("");
+    setCopied(false);
+  }
+
+  const selectedMarket = markets.find((m) => String(m.marketId) === marketId) ?? null;
 
   async function analyze() {
     if (!idIsValid) return;
@@ -229,18 +290,82 @@ export default function PredictPanel() {
         side · betting is a separate, explicit step
       </div>
 
-      <div className="row">
-        <input
-          type="number"
-          min={0}
-          step={1}
-          placeholder="market id, e.g. 0"
-          value={marketId}
-          onChange={(e) => setMarketId(e.target.value)}
-          style={{ maxWidth: 160 }}
-        />
+      {/* Browsable market list — pick one to drive every action below. */}
+      {marketsLoading && (
+        <div className="status" style={{ marginTop: 14 }}>
+          <span className="spinner" /> Loading markets…
+        </div>
+      )}
+      {marketsError && (
+        <pre className="mono status" style={{ whiteSpace: "pre-wrap", marginTop: 14 }}>
+          Error loading markets: {marketsError}
+        </pre>
+      )}
+      {!marketsLoading && !marketsError && markets.length === 0 && (
+        <div className="status" style={{ marginTop: 14 }}>
+          No markets to show.
+        </div>
+      )}
+
+      {markets.length > 0 && (
+        <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
+          {markets.map((m) => {
+            const selected = String(m.marketId) === marketId;
+            return (
+              <button
+                key={m.marketId}
+                onClick={() => selectMarket(m.marketId)}
+                style={{
+                  textAlign: "left",
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  border: selected
+                    ? "1px solid #34d399"
+                    : "1px solid rgba(255,255,255,0.12)",
+                  background: selected
+                    ? "rgba(52,211,153,0.08)"
+                    : "rgba(255,255,255,0.03)",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 10,
+                  }}
+                >
+                  <span style={{ fontSize: 14, fontWeight: 500 }}>{m.question}</span>
+                  <span className="mono" style={{ fontSize: 11, opacity: 0.6 }}>
+                    #{m.marketId}
+                  </span>
+                </div>
+                <div
+                  className="status"
+                  style={{
+                    margin: "6px 0 0",
+                    fontSize: 12,
+                    display: "flex",
+                    gap: 14,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span>{m.category || "—"}</span>
+                  <span>{m.status}</span>
+                  <span>Pool {usd(m.pools.totalUsdc)}</span>
+                  <span>
+                    YES {odds(m.probabilities.yesPct)} · NO {odds(m.probabilities.noPct)}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="row" style={{ marginTop: 14 }}>
         <button disabled={analyzing || betting || !idIsValid} onClick={analyze}>
-          Analyze market
+          {idIsValid ? `Analyze market #${marketId}` : "Select a market to analyze"}
         </button>
       </div>
 
@@ -336,15 +461,13 @@ export default function PredictPanel() {
         </div>
 
         <div className="row" style={{ marginTop: 12 }}>
-          <input
-            type="number"
-            min={0}
-            step={1}
-            placeholder="market id, e.g. 0"
-            value={resolveId}
-            onChange={(e) => setResolveId(e.target.value)}
-            style={{ maxWidth: 160 }}
-          />
+          <div className="status" style={{ margin: 0 }}>
+            {selectedMarket
+              ? `Target: market #${selectedMarket.marketId} — ${selectedMarket.question}`
+              : "Select a market above first."}
+          </div>
+        </div>
+        <div className="row" style={{ marginTop: 10 }}>
           <button disabled={resolving || !resolveIdIsValid} onClick={proposeResolution}>
             {resolving ? "Researching…" : "Research outcome"}
           </button>

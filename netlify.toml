@@ -17,6 +17,10 @@
   to = "/.netlify/functions/agent-act"
   status = 200
 [[redirects]]
+  from = "/api/predict-markets"
+  to = "/.netlify/functions/predict-markets"
+  status = 200
+[[redirects]]
   from = "/api/predict-analyze"
   to = "/.netlify/functions/predict-analyze"
   status = 200

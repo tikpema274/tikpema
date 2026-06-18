@@ -137,3 +137,45 @@ export async function readMarket(client, marketId) {
 export function isBettable(snapshot, nowSeconds) {
   return snapshot.statusCode === 0 && nowSeconds < snapshot.bettingDeadline;
 }
+
+// Heuristic junk filter. A real market question reads as a sentence: at least
+// two letter-bearing words. This drops empty/whitespace questions and the
+// single-token keyboard-mashes early testing left on-chain (e.g.
+// "gdshgjhjkjkjbfhbhbvc?"), without touching legitimate (if typo-ridden)
+// questions like "will nroway win thw world cup?".
+export function looksLikeRealQuestion(question) {
+  const t = (question || "").trim();
+  if (!t) return false;
+  const words = t.split(/\s+/).filter((w) => /[a-z]/i.test(w));
+  return words.length >= 2;
+}
+
+// Enumerate every market on-chain and return a cleaned list. nextMarketId() is
+// the total count (ids are sequential from 0). We read each market, drop junk /
+// placeholder questions, and de-duplicate by question text keeping the FIRST
+// occurrence — while preserving each survivor's real on-chain id so the
+// analyze / bet / resolve actions still target the right market.
+export async function listMarkets(client) {
+  const address = CONTRACTS.TIKPEMA_PREDICTION;
+  const nextId = await client.readContract({
+    address,
+    abi: PREDICTION_ABI,
+    functionName: "nextMarketId",
+  });
+  const count = Number(nextId);
+
+  const ids = Array.from({ length: count }, (_, i) => i);
+  const snapshots = await Promise.all(ids.map((id) => readMarket(client, id)));
+
+  const seen = new Set();
+  const markets = [];
+  for (const m of snapshots) {
+    if (!m) continue; // never created (zero-address creator)
+    if (!looksLikeRealQuestion(m.question)) continue; // junk / placeholder
+    const key = m.question.trim().toLowerCase();
+    if (seen.has(key)) continue; // keep first occurrence of each question
+    seen.add(key);
+    markets.push(m);
+  }
+  return { count, markets };
+}
