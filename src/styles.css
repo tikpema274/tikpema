@@ -39,7 +39,7 @@ button:hover { background: rgba(0, 212, 255, 0.08); }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
 button.emerald { border-color: var(--emerald); color: var(--emerald); }
 button.emerald:hover { background: rgba(0, 229, 160, 0.08); }
-input, textarea {
+input, textarea, select {
   background: #060d16;
   border: 1px solid var(--border);
   color: var(--text);
@@ -47,6 +47,14 @@ input, textarea {
   padding: 10px;
   font-family: inherit;
   width: 100%;
+}
+textarea { resize: vertical; }
+label.field { display: block; margin-bottom: 14px; }
+label.field > span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 6px;
 }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .status { color: var(--muted); font-size: 12px; margin-top: 12px; word-break: break-all; }

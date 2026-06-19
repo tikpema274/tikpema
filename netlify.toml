@@ -70,6 +70,13 @@
   to = "/.netlify/functions/predict-resolve-start"
   status = 200
 
+# Feedback plane: relay in-app feedback to a Discord webhook (server-side
+# secret). No funds move; this never touches the agent/predict/bet logic.
+[[redirects]]
+  from = "/api/submit-feedback"
+  to = "/.netlify/functions/submit-feedback"
+  status = 200
+
 # SPA fallback
 [[redirects]]
   from = "/*"

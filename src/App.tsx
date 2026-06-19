@@ -1,6 +1,7 @@
 import ConnectPasskey from "./components/ConnectPasskey";
 import AgentPanel from "./components/AgentPanel";
 import PredictPanel from "./components/PredictPanel";
+import FeedbackPanel from "./components/FeedbackPanel";
 import { useModularWallet } from "./wallet/useModularWallet";
 
 export default function App() {
@@ -18,6 +19,7 @@ export default function App() {
       <ConnectPasskey wallet={wallet} />
       <AgentPanel />
       <PredictPanel wallet={wallet} />
+      <FeedbackPanel wallet={wallet} />
     </div>
   );
 }
