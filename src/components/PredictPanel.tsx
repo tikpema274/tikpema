@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { ModularWallet } from "../wallet/useModularWallet";
 
 // PredictPanel — the prediction-market plane.
 //
@@ -88,13 +89,18 @@ const signedPct = (x: number) => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}%`;
 const usd = (n: number) => `${(n ?? 0).toFixed(2)} USDC`;
 const odds = (n: number) => `${Math.round(n ?? 0)}%`;
 
-export default function PredictPanel() {
+export default function PredictPanel({ wallet }: { wallet: ModularWallet }) {
   const [marketId, setMarketId] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
   const [betting, setBetting] = useState(false);
   const [result, setResult] = useState<AnalyzeResult | null>(null);
   const [error, setError] = useState("");
   const [txOut, setTxOut] = useState<string>("");
+
+  // User-bet plane: a connected passkey user can stake their OWN USDC on the
+  // agent's suggested side. The editable amount defaults to the agent's
+  // suggested stake (synced whenever a fresh decision lands).
+  const [userStake, setUserStake] = useState("");
 
   // Browsable market list (replaces the old manual market-id input).
   const [markets, setMarkets] = useState<MarketSummary[]>([]);
@@ -113,6 +119,44 @@ export default function PredictPanel() {
   const decision = result?.decision ?? null;
   const canBet =
     !!decision && decision.suggestedAmountUsdc > 0 && !analyzing && !betting;
+
+  // Default the editable user stake to the agent's suggestion each time a new
+  // decision arrives; the user is free to overwrite it before placing.
+  useEffect(() => {
+    if (decision && decision.suggestedAmountUsdc > 0) {
+      setUserStake(String(decision.suggestedAmountUsdc));
+    }
+  }, [decision]);
+
+  // A connected wallet + a positive, numeric stake are required to bet.
+  const userStakeNum = Number(userStake);
+  const userStakeValid =
+    Number.isFinite(userStakeNum) && userStakeNum > 0;
+  const canUserBet =
+    !!wallet.address &&
+    !!decision &&
+    userStakeValid &&
+    !wallet.busy &&
+    !analyzing &&
+    !betting;
+
+  // Stake the connected user's OWN USDC (passkey-signed, gasless). The two-step
+  // status — "Approving stake…" → "Placing bet…" → "Bet placed: 0x…" — is
+  // surfaced via wallet.status below. Distinct from the agent's bet above.
+  async function placeUserBet() {
+    if (!canUserBet || !decision) return;
+    try {
+      await wallet.placeBetAsUser(
+        Number(marketId),
+        decision.side === "yes",
+        userStakeNum
+      );
+      // Reflect the new balance after the stake leaves the user's wallet.
+      wallet.refreshBalance().catch(() => {});
+    } catch {
+      // wallet.status already carries the error message for display.
+    }
+  }
 
   // Load the cleaned market list once on mount. READ ONLY.
   useEffect(() => {
@@ -420,6 +464,67 @@ export default function PredictPanel() {
                   ? "Placing bet…"
                   : `Place agent's bet (${decision.suggestedAmountUsdc} USDC ${decision.side.toUpperCase()})`}
               </button>
+
+              {/* ── Bet as yourself ──────────────────────────────────────────
+                  The connected passkey user stakes their OWN USDC on the
+                  agent's suggested side, with an editable amount. Shown only
+                  when a wallet is connected. */}
+              <div
+                style={{
+                  marginTop: 16,
+                  paddingTop: 14,
+                  borderTop: "1px solid rgba(255,255,255,0.08)",
+                }}
+              >
+                <div className="status" style={{ margin: "0 0 8px", fontSize: 11 }}>
+                  Or bet with your own passkey wallet
+                </div>
+
+                {wallet.address ? (
+                  <>
+                    <div
+                      className="row"
+                      style={{ alignItems: "center", gap: 10 }}
+                    >
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        style={{ maxWidth: 120 }}
+                        value={userStake}
+                        onChange={(e) => setUserStake(e.target.value)}
+                      />
+                      <span className="status" style={{ margin: 0 }}>
+                        USDC on {decision.side.toUpperCase()}
+                      </span>
+                      <button
+                        className="emerald"
+                        disabled={!canUserBet}
+                        onClick={placeUserBet}
+                        title={
+                          userStakeValid
+                            ? "Stake your own USDC on this side"
+                            : "Enter a stake greater than 0"
+                        }
+                      >
+                        {wallet.busy
+                          ? "Placing…"
+                          : `Place my bet (${userStakeValid ? userStakeNum : 0} USDC)`}
+                      </button>
+                    </div>
+                    {wallet.status && (
+                      <div className="status" style={{ marginTop: 8 }}>
+                        {wallet.status}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="status" style={{ margin: 0 }}>
+                    Register or log in with a passkey in the Human plane above to
+                    bet with your own wallet.
+                  </div>
+                )}
+              </div>
             </>
           ) : (
             <div className="status">

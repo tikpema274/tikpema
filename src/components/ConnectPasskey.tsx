@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { useModularWallet } from "../wallet/useModularWallet";
+import type { ModularWallet } from "../wallet/useModularWallet";
 
-export default function ConnectPasskey() {
-  const w = useModularWallet();
+export default function ConnectPasskey({ wallet: w }: { wallet: ModularWallet }) {
   const [to, setTo] = useState("");
   const [username, setUsername] = useState("");
 
@@ -63,16 +62,6 @@ export default function ConnectPasskey() {
               onClick={() => w.sendUsdc(to as `0x${string}`, 100000n)}
             >
               Send 0.1 USDC
-            </button>
-          </div>
-
-          {/* TEMP: throwaway test for placeBetAsUser — remove after testing. */}
-          <div className="row" style={{ marginTop: 12 }}>
-            <button
-              disabled={w.busy}
-              onClick={() => w.placeBetAsUser(7, true, 0.5)}
-            >
-              TEST: bet 0.5 on #7
             </button>
           </div>
         </>
