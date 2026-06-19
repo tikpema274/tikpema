@@ -31,6 +31,26 @@ export default function ConnectPasskey() {
       ) : (
         <>
           <div className="mono status">Smart account: {w.address}</div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <span className="status">
+              Balance: {w.usdcBalance ?? "…"} USDC
+            </span>
+            <button disabled={w.busy} onClick={() => w.refreshBalance()}>
+              Refresh
+            </button>
+          </div>
+          {w.usdcBalance === "0.00" && (
+            <div className="sub">
+              Need test USDC? Get some at{" "}
+              <a
+                href="https://faucet.circle.com"
+                target="_blank"
+                rel="noreferrer"
+              >
+                faucet.circle.com
+              </a>
+            </div>
+          )}
           <div className="row" style={{ marginTop: 12 }}>
             <input
               placeholder="recipient 0x…"

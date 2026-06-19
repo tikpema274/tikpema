@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   toPasskeyTransport,
   toWebAuthnCredential,
@@ -7,13 +7,13 @@ import {
   encodeTransfer,
   WebAuthnMode,
 } from "@circle-fin/modular-wallets-core";
-import { createPublicClient } from "viem";
+import { createPublicClient, formatUnits } from "viem";
 import {
   createBundlerClient,
   toWebAuthnAccount,
 } from "viem/account-abstraction";
 import { arcTestnet } from "../config/chain";
-import { CONTRACTS } from "../config/contracts";
+import { CONTRACTS, USDC_DECIMALS } from "../config/contracts";
 
 // -- Client-plane config. CLIENT_KEY is browser-safe (domain restricted). --
 const clientKey = import.meta.env.VITE_CLIENT_KEY as string;
@@ -51,6 +51,17 @@ async function computeArcFees() {
   const maxFeePerGas = baseFee * 2n + maxPriorityFeePerGas;
   return { maxPriorityFeePerGas, maxFeePerGas };
 }
+
+// Minimal ERC-20 read for the USDC balance display.
+const BALANCE_OF_ABI = [
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "balance", type: "uint256" }],
+  },
+] as const;
 
 // EntryPoint.getNonce(sender, key) — used to pin the 2D-nonce key to 0.
 const GET_NONCE_ABI = [
@@ -91,6 +102,30 @@ export function useModularWallet() {
   > | null>(null);
   const [status, setStatus] = useState<string>("");
   const [busy, setBusy] = useState(false);
+  const [usdcBalance, setUsdcBalance] = useState<string | null>(null);
+
+  // Read the connected smart account's USDC balance and format it (e.g. "12.50").
+  const refreshBalance = useCallback(async () => {
+    if (!account) return;
+    const raw = (await publicClient.readContract({
+      address: CONTRACTS.USDC as `0x${string}`,
+      abi: BALANCE_OF_ABI,
+      functionName: "balanceOf",
+      args: [account.address],
+    })) as bigint;
+    const formatted = Number(formatUnits(raw, USDC_DECIMALS)).toFixed(2);
+    setUsdcBalance(formatted);
+    return formatted;
+  }, [account]);
+
+  // Refresh whenever the account connects (or changes); clear when disconnected.
+  useEffect(() => {
+    if (!account) {
+      setUsdcBalance(null);
+      return;
+    }
+    refreshBalance().catch(() => setUsdcBalance(null));
+  }, [account, refreshBalance]);
 
   const connect = useCallback(async (mode: WebAuthnMode, username: string) => {
     setBusy(true);
@@ -172,5 +207,7 @@ export function useModularWallet() {
       ),
     connectLogin: () => connect(WebAuthnMode.Login, "tikpema-user"),
     sendUsdc,
+    usdcBalance,
+    refreshBalance,
   };
 }
