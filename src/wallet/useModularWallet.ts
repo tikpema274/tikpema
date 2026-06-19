@@ -7,7 +7,7 @@ import {
   encodeTransfer,
   WebAuthnMode,
 } from "@circle-fin/modular-wallets-core";
-import { createPublicClient, formatUnits } from "viem";
+import { createPublicClient, formatUnits, encodeFunctionData } from "viem";
 import {
   createBundlerClient,
   toWebAuthnAccount,
@@ -60,6 +60,34 @@ const BALANCE_OF_ABI = [
     stateMutability: "view",
     inputs: [{ name: "account", type: "address" }],
     outputs: [{ name: "balance", type: "uint256" }],
+  },
+] as const;
+
+// ERC-20 approve + the prediction contract's placeBet — used by placeBetAsUser.
+const APPROVE_ABI = [
+  {
+    type: "function",
+    name: "approve",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "spender", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+] as const;
+
+const PLACE_BET_ABI = [
+  {
+    type: "function",
+    name: "placeBet",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "marketId", type: "uint256" },
+      { name: "isYes", type: "bool" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [],
   },
 ] as const;
 
@@ -188,6 +216,76 @@ export function useModularWallet() {
     [account]
   );
 
+  // Stake USDC on a prediction market as the USER (passkey-signed, gasless).
+  // Mirrors sendUsdc's mechanism and predict-bet.mjs's approve→placeBet sequence:
+  // two sequential user-ops at nonce-key 0, the second sent only after the
+  // approve confirms (so its nonce/allowance are settled). Returns the placeBet
+  // tx hash. Separate from sendUsdc — does not touch the Send path.
+  const placeBetAsUser = useCallback(
+    async (marketId: number, isYes: boolean, amountUsdc: number) => {
+      if (!account) throw new Error("Connect a wallet first");
+      setBusy(true);
+      try {
+        const bundler = createBundlerClient({
+          account,
+          chain: arcTestnet,
+          transport: modularTransport,
+        });
+        const units = BigInt(Math.round(amountUsdc * 1e6));
+
+        // 1. Approve the prediction contract to pull the stake. Wait for confirm.
+        setStatus("Approving stake…");
+        const approveData = encodeFunctionData({
+          abi: APPROVE_ABI,
+          functionName: "approve",
+          args: [CONTRACTS.TIKPEMA_PREDICTION as `0x${string}`, units],
+        });
+        {
+          const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await Promise.all([
+            computeArcFees(),
+            nonceKeyZero(account),
+          ]);
+          const approveHash = await bundler.sendUserOperation({
+            calls: [{ to: CONTRACTS.USDC as `0x${string}`, data: approveData }],
+            paymaster: true,
+            nonce,
+            maxPriorityFeePerGas,
+            maxFeePerGas,
+          });
+          await bundler.waitForUserOperationReceipt({ hash: approveHash, timeout: 60000 });
+        }
+
+        // 2. Place the bet. Fresh nonce/fees now that the approve has settled.
+        setStatus("Placing bet…");
+        const betData = encodeFunctionData({
+          abi: PLACE_BET_ABI,
+          functionName: "placeBet",
+          args: [BigInt(marketId), isYes, units],
+        });
+        const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await Promise.all([
+          computeArcFees(),
+          nonceKeyZero(account),
+        ]);
+        const betHash = await bundler.sendUserOperation({
+          calls: [{ to: CONTRACTS.TIKPEMA_PREDICTION as `0x${string}`, data: betData }],
+          paymaster: true,
+          nonce,
+          maxPriorityFeePerGas,
+          maxFeePerGas,
+        });
+        const { receipt } = await bundler.waitForUserOperationReceipt({ hash: betHash, timeout: 60000 });
+        setStatus(`Bet placed: ${receipt.transactionHash}`);
+        return receipt.transactionHash;
+      } catch (e: any) {
+        setStatus(`Error: ${e.message}`);
+        throw e;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [account]
+  );
+
   return {
     account,
     address: account?.address ?? null,
@@ -207,6 +305,7 @@ export function useModularWallet() {
       ),
     connectLogin: () => connect(WebAuthnMode.Login, "tikpema-user"),
     sendUsdc,
+    placeBetAsUser,
     usdcBalance,
     refreshBalance,
   };

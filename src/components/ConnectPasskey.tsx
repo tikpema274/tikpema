@@ -65,6 +65,16 @@ export default function ConnectPasskey() {
               Send 0.1 USDC
             </button>
           </div>
+
+          {/* TEMP: throwaway test for placeBetAsUser — remove after testing. */}
+          <div className="row" style={{ marginTop: 12 }}>
+            <button
+              disabled={w.busy}
+              onClick={() => w.placeBetAsUser(7, true, 0.5)}
+            >
+              TEST: bet 0.5 on #7
+            </button>
+          </div>
         </>
       )}
 
