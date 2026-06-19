@@ -37,10 +37,20 @@ export default function ConnectPasskey({ wallet: w }: { wallet: ModularWallet })
             <button disabled={w.busy} onClick={() => w.refreshBalance()}>
               Refresh
             </button>
+            {/* Always reachable for a connected user, regardless of balance. */}
+            <a
+              className="status"
+              href="https://faucet.circle.com"
+              target="_blank"
+              rel="noreferrer"
+              style={{ marginTop: 0 }}
+            >
+              Get test USDC ↗
+            </a>
           </div>
           {w.usdcBalance === "0.00" && (
             <div className="sub">
-              Need test USDC? Get some at{" "}
+              Balance is empty — grab some test USDC at{" "}
               <a
                 href="https://faucet.circle.com"
                 target="_blank"
