@@ -1,19 +1,44 @@
 import { useState } from "react";
 import type { ModularWallet } from "../wallet/useModularWallet";
 
+// Shorten an address for readable confirmations: 0x1234…abcd.
+const shortAddr = (a: string) =>
+  a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
+
 export default function ConnectPasskey({ wallet: w }: { wallet: ModularWallet }) {
   const [to, setTo] = useState("");
+  const [amount, setAmount] = useState("0.1");
   const [username, setUsername] = useState("");
+  const [sendConfirm, setSendConfirm] = useState("");
+
+  const amountNum = Number(amount);
+  const amountValid = Number.isFinite(amountNum) && amountNum > 0;
+
+  // Presentation wrapper around the unchanged sendUsdc: convert the entered
+  // amount to USDC base units and surface a human-readable confirmation on
+  // success. The signing path inside sendUsdc is untouched.
+  async function send() {
+    if (!to || !amountValid) return;
+    setSendConfirm("");
+    try {
+      await w.sendUsdc(to as `0x${string}`, BigInt(Math.round(amountNum * 1e6)));
+      setSendConfirm(`Sent ${amountNum} USDC to ${shortAddr(to)}`);
+    } catch {
+      // w.status already carries the error message for display below.
+    }
+  }
 
   return (
     <div className="plane">
       <h2>Human plane</h2>
-      <div className="sub">Modular passkey wallet · gasless · keys on device</div>
+      <div className="sub">
+        Create your wallet here · modular passkey · gasless · keys on device
+      </div>
 
       {!w.address ? (
         <div className="row">
           <input
-            placeholder="choose a username"
+            placeholder="Choose a username, then tap Register passkey →"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
           />
@@ -60,19 +85,49 @@ export default function ConnectPasskey({ wallet: w }: { wallet: ModularWallet })
               </a>
             </div>
           )}
-          <div className="row" style={{ marginTop: 12 }}>
-            <input
-              placeholder="recipient 0x…"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-            />
-            <button
-              className="emerald"
-              disabled={w.busy || !to}
-              onClick={() => w.sendUsdc(to as `0x${string}`, 100000n)}
-            >
-              Send 0.1 USDC
-            </button>
+          <div style={{ marginTop: 16 }}>
+            <h3 style={{ margin: "0 0 4px" }}>Send</h3>
+            <div className="sub">Send test USDC to any address</div>
+            <div className="row">
+              <input
+                placeholder="recipient 0x…"
+                value={to}
+                onChange={(e) => {
+                  setTo(e.target.value);
+                  setSendConfirm("");
+                }}
+              />
+            </div>
+            <div className="row" style={{ marginTop: 8 }}>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                style={{ maxWidth: 120 }}
+                value={amount}
+                onChange={(e) => {
+                  setAmount(e.target.value);
+                  setSendConfirm("");
+                }}
+              />
+              <span className="status" style={{ margin: 0 }}>
+                USDC
+              </span>
+              <button
+                className="emerald"
+                disabled={w.busy || !to || !amountValid}
+                onClick={send}
+              >
+                {w.busy
+                  ? "Sending…"
+                  : `Send ${amountValid ? amountNum : 0} USDC`}
+              </button>
+            </div>
+            {sendConfirm && (
+              <div className="status" style={{ color: "var(--emerald)" }}>
+                {sendConfirm}
+              </div>
+            )}
           </div>
         </>
       )}

@@ -330,8 +330,9 @@ export default function PredictPanel({ wallet }: { wallet: ModularWallet }) {
     <div className="plane">
       <h2>Prediction plane</h2>
       <div className="sub">
-        Agent reads a TikpemaPrediction market, searches the web, and recommends a
-        side · betting is a separate, explicit step
+        Pick a market and let the agent analyze it · it reads the market,
+        searches the web, and recommends a side · betting is a separate, explicit
+        step
       </div>
 
       {/* Browsable market list — pick one to drive every action below. */}

@@ -13,8 +13,13 @@ export default function App() {
   return (
     <div className="app">
       <div className="title">Tikpema</div>
-      <div className="tagline">
+      <div className="tagline" style={{ marginBottom: 8 }}>
         Two planes on Arc Testnet · humans sign with passkeys, the agent acts on its own
+      </div>
+      <div style={{ color: "var(--muted)", fontSize: 14, marginBottom: 28 }}>
+        New here? Start in the <b>Human plane</b> — choose a username and tap{" "}
+        <b>Register passkey</b> to create your wallet. Then explore the markets
+        below.
       </div>
       <ConnectPasskey wallet={wallet} />
       <AgentPanel />
