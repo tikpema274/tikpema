@@ -32,24 +32,24 @@ export default function AgentPanel() {
 
   return (
     <div className="plane">
-      <h2>Agent plane</h2>
+      <h2>AI Assistant</h2>
       <div className="sub">
-        Give the agent a task and watch it act on its own · dev-controlled SCA ·
+        Give the AI Assistant a task and watch it act on its own · dev-controlled SCA ·
         server-side · ERC-8004 identity
       </div>
 
       <div className="row">
         <button disabled={busy} onClick={() => run("init", () => agentClient.init())}>
-          Init + register agent
+          Set up the AI Assistant
         </button>
         <button disabled={busy} onClick={() => run("status", () => agentClient.status())}>
-          Agent status
+          AI Assistant status
         </button>
       </div>
 
       <div className="row" style={{ marginTop: 12 }}>
         <input
-          placeholder="Type a task for the agent, e.g. 'pay 0.05 USDC to 0x…'"
+          placeholder="Type a task for the AI Assistant, e.g. 'pay 0.05 USDC to 0x…'"
           value={task}
           onChange={(e) => setTask(e.target.value)}
         />
@@ -58,7 +58,7 @@ export default function AgentPanel() {
           disabled={busy || !task}
           onClick={() => run("act", () => agentClient.act(task))}
         >
-          Run agent
+          Give the AI Assistant a task
         </button>
       </div>
 
@@ -99,7 +99,7 @@ function AgentSummary({ result }: { result: AgentResult }) {
   if (kind === "init") {
     return (
       <div className="status" style={{ margin: 0 }}>
-        <div>✓ Agent wallet created and identity registered on-chain.</div>
+        <div>✓ AI Assistant wallet created and identity registered on-chain.</div>
         {data.AGENT_WALLET_ADDRESS && (
           <div>
             Wallet:{" "}
@@ -119,7 +119,7 @@ function AgentSummary({ result }: { result: AgentResult }) {
     return (
       <div className="status" style={{ margin: 0 }}>
         <div>
-          Agent wallet{" "}
+          AI Assistant wallet{" "}
           <span className="mono">{shortAddr(data.agentWalletAddress)}</span> holds{" "}
           <b>{data.usdcBalance} USDC</b>.
         </div>
@@ -136,7 +136,7 @@ function AgentSummary({ result }: { result: AgentResult }) {
   if (data.executed && data.pending) {
     return (
       <div className="status" style={{ margin: 0 }}>
-        Agent submitted a transfer — still confirming.
+        AI Assistant submitted a transfer — still confirming.
         {data.txId ? ` (tx id ${data.txId})` : ""}
       </div>
     );
@@ -146,7 +146,7 @@ function AgentSummary({ result }: { result: AgentResult }) {
     return (
       <div className="status" style={{ margin: 0 }}>
         <div>
-          ✓ Agent sent <b>{d.amountUsdc} USDC</b> to{" "}
+          ✓ AI Assistant sent <b>{d.amountUsdc} USDC</b> to{" "}
           <span className="mono">{shortAddr(String(d.to))}</span>.
         </div>
         {d.reasoning && <div style={{ marginTop: 4 }}>{d.reasoning}</div>}
@@ -162,7 +162,7 @@ function AgentSummary({ result }: { result: AgentResult }) {
   if (data.blocked) {
     return (
       <div className="status" style={{ margin: 0 }}>
-        <div>Agent did not act — {data.blocked}.</div>
+        <div>AI Assistant did not act — {data.blocked}.</div>
         {d.reasoning && <div style={{ marginTop: 4 }}>{d.reasoning}</div>}
       </div>
     );
@@ -170,7 +170,7 @@ function AgentSummary({ result }: { result: AgentResult }) {
 
   return (
     <div className="status" style={{ margin: 0 }}>
-      <div>Agent decided no on-chain action was needed.</div>
+      <div>AI Assistant decided no on-chain action was needed.</div>
       {d.reasoning && <div style={{ marginTop: 4 }}>{d.reasoning}</div>}
     </div>
   );

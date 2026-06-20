@@ -256,7 +256,7 @@ export function useModularWallet() {
         }
 
         // 2. Place the bet. Fresh nonce/fees now that the approve has settled.
-        setStatus("Placing bet…");
+        setStatus("Placing prediction…");
         const betData = encodeFunctionData({
           abi: PLACE_BET_ABI,
           functionName: "placeBet",
@@ -274,7 +274,7 @@ export function useModularWallet() {
           maxFeePerGas,
         });
         const { receipt } = await bundler.waitForUserOperationReceipt({ hash: betHash, timeout: 60000 });
-        setStatus(`Bet placed: ${receipt.transactionHash}`);
+        setStatus(`Prediction placed: ${receipt.transactionHash}`);
         return receipt.transactionHash;
       } catch (e: any) {
         setStatus(`Error: ${e.message}`);

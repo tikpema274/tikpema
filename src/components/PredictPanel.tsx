@@ -328,10 +328,10 @@ export default function PredictPanel({ wallet }: { wallet: ModularWallet }) {
 
   return (
     <div className="plane">
-      <h2>Prediction plane</h2>
+      <h2>Predict</h2>
       <div className="sub">
-        Pick a market and let the agent analyze it · it reads the market,
-        searches the web, and recommends a side · betting is a separate, explicit
+        Pick a market and let the AI Assistant analyze it · it reads the market,
+        searches the web, and recommends a side · predicting is a separate, explicit
         step
       </div>
 
@@ -416,7 +416,7 @@ export default function PredictPanel({ wallet }: { wallet: ModularWallet }) {
 
       {analyzing && (
         <div className="status" style={{ marginTop: 14 }}>
-          <span className="spinner" /> Agent analyzing… (web search may take a minute or two)
+          <span className="spinner" /> AI Assistant analyzing… (web search may take a minute or two)
         </div>
       )}
 
@@ -457,13 +457,13 @@ export default function PredictPanel({ wallet }: { wallet: ModularWallet }) {
                 onClick={placeBet}
                 title={
                   decision.suggestedAmountUsdc > 0
-                    ? "Stake the agent's own USDC on this side"
-                    : "Agent suggests no bet (no clear edge)"
+                    ? "Let the AI Assistant predict on this side"
+                    : "AI Assistant suggests no prediction (no clear edge)"
                 }
               >
                 {betting
-                  ? "Placing bet…"
-                  : `Place agent's bet (${decision.suggestedAmountUsdc} USDC ${decision.side.toUpperCase()})`}
+                  ? "Predicting…"
+                  : `Let the AI Assistant predict (${decision.suggestedAmountUsdc} USDC ${decision.side.toUpperCase()})`}
               </button>
 
               {/* ── Bet as yourself ──────────────────────────────────────────
@@ -478,7 +478,7 @@ export default function PredictPanel({ wallet }: { wallet: ModularWallet }) {
                 }}
               >
                 <div className="status" style={{ margin: "0 0 8px", fontSize: 11 }}>
-                  Or bet with your own passkey wallet
+                  Or predict with your own passkey wallet
                 </div>
 
                 {wallet.address ? (
@@ -504,13 +504,13 @@ export default function PredictPanel({ wallet }: { wallet: ModularWallet }) {
                         onClick={placeUserBet}
                         title={
                           userStakeValid
-                            ? "Stake your own USDC on this side"
+                            ? "Make your prediction with your own USDC on this side"
                             : "Enter a stake greater than 0"
                         }
                       >
                         {wallet.busy
                           ? "Placing…"
-                          : `Place my bet (${userStakeValid ? userStakeNum : 0} USDC)`}
+                          : `Make my prediction (${userStakeValid ? userStakeNum : 0} USDC)`}
                       </button>
                     </div>
                     {wallet.status && (
@@ -521,8 +521,8 @@ export default function PredictPanel({ wallet }: { wallet: ModularWallet }) {
                   </>
                 ) : (
                   <div className="status" style={{ margin: 0 }}>
-                    Register or log in with a passkey in the Human plane above to
-                    bet with your own wallet.
+                    Register or log in with a passkey in Your Wallet above to
+                    predict with your own wallet.
                   </div>
                 )}
               </div>
@@ -562,7 +562,7 @@ export default function PredictPanel({ wallet }: { wallet: ModularWallet }) {
       >
         <h3 style={{ margin: "0 0 4px" }}>Propose resolution</h3>
         <div className="sub">
-          Agent researches what actually happened and proposes a resolution with
+          The AI Assistant researches what actually happened and proposes a resolution with
           cited sources · a human commits it manually with <code>cast send</code>
         </div>
 

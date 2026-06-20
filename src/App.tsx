@@ -14,10 +14,10 @@ export default function App() {
     <div className="app">
       <div className="title">Tikpema</div>
       <div className="tagline" style={{ marginBottom: 8 }}>
-        Two planes on Arc Testnet · humans sign with passkeys, the agent acts on its own
+        Predict real-world outcomes on Arc · an AI assistant helps you decide
       </div>
       <div style={{ color: "var(--muted)", fontSize: 14, marginBottom: 28 }}>
-        New here? Start in the <b>Human plane</b> — choose a username and tap{" "}
+        New here? Start in <b>Your Wallet</b> — choose a username and tap{" "}
         <b>Register passkey</b> to create your wallet. Then explore the markets
         below.
       </div>
