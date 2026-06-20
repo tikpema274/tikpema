@@ -32,7 +32,7 @@ export default function ConnectPasskey({ wallet: w }: { wallet: ModularWallet })
     <div className="plane">
       <h2>Your Wallet</h2>
       <div className="sub">
-        Create your wallet here · modular passkey · gasless · keys on device
+        Your secure wallet — no password needed, just your fingerprint or face. Free to use.
       </div>
 
       {!w.address ? (

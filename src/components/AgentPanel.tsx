@@ -34,8 +34,7 @@ export default function AgentPanel() {
     <div className="plane">
       <h2>AI Assistant</h2>
       <div className="sub">
-        Give the AI Assistant a task and watch it act on its own · dev-controlled SCA ·
-        server-side · ERC-8004 identity
+        An AI that can research and act on its own, with its own wallet.
       </div>
 
       <div className="row">
