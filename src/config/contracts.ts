@@ -8,6 +8,9 @@ export const CONTRACTS = {
   // TikpemaPrediction — parimutuel prediction market (USDC stakes), live on Arc Testnet.
   TIKPEMA_PREDICTION: "0xf38492403ce3f1c94ef6322b78c9024d26ed87e1",
 
+  // AgenticCommerce — ERC-8183 job/escrow contract (proxy), live on Arc Testnet.
+  AGENTIC_COMMERCE: "0x0747EEf0706327138c69792bF28Cd525089e4583",
+
   // ERC-8004 agent registries (the AGENT plane talks to these)
   IDENTITY_REGISTRY: "0x8004A818BFB912233c491871b3d84c89A494BD9e",
   REPUTATION_REGISTRY: "0x8004B663056A597Dffe9eCcC1965A193B7388713",

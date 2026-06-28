@@ -20,7 +20,7 @@
 // and { status, result } shape predict-status.mjs already reads).
 
 import { connectLambda, getStore } from "@netlify/blobs";
-import { ARC, CONTRACTS, parseBody } from "./_arc.mjs";
+import { ARC, CONTRACTS, parseBody, dateAnchor } from "./_arc.mjs";
 import { publicClient, readMarket } from "./_predict.mjs";
 
 const SYSTEM_PROMPT = `Research what actually happened for this market question. Determine if the YES condition has occurred. Respond ONLY JSON: { outcome: 'yes'|'no'|'undetermined', confidence: <0..1>, reasoning: <2-4 sentences>, sources: [<url>, ...] }
@@ -56,7 +56,7 @@ async function callAnthropic(apiKey, model, messages) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model, max_tokens: 1024, system: SYSTEM_PROMPT, tools: [WEB_SEARCH_TOOL], messages }),
+    body: JSON.stringify({ model, max_tokens: 1024, system: `${SYSTEM_PROMPT}\n\n${dateAnchor()}`, tools: [WEB_SEARCH_TOOL], messages }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error?.message || "Anthropic call failed");

@@ -1,4 +1,4 @@
-import { ARC, CONTRACTS, json, parseBody } from "./_arc.mjs";
+import { ARC, CONTRACTS, json, parseBody, dateAnchor } from "./_arc.mjs";
 import { publicClient, readMarket } from "./_predict.mjs";
 
 // POST /api/predict-resolve-propose { marketId: number }
@@ -64,7 +64,7 @@ async function callAnthropic(apiKey, model, messages) {
     body: JSON.stringify({
       model,
       max_tokens: 1024,
-      system: SYSTEM_PROMPT,
+      system: `${SYSTEM_PROMPT}\n\n${dateAnchor()}`,
       tools: [WEB_SEARCH_TOOL],
       messages,
     }),

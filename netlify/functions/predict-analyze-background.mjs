@@ -15,7 +15,7 @@
 // Output: written to Blobs store "predict-jobs" under key `jobId`.
 
 import { connectLambda, getStore } from "@netlify/blobs";
-import { parseBody } from "./_arc.mjs";
+import { parseBody, dateAnchor } from "./_arc.mjs";
 import { publicClient, readMarket } from "./_predict.mjs";
 
 const SYSTEM_PROMPT = `You are Tikpema's parimutuel prediction-market analyst on Arc Testnet.
@@ -46,7 +46,7 @@ async function callAnthropic(apiKey, model, messages) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model, max_tokens: 1024, system: SYSTEM_PROMPT, tools: [WEB_SEARCH_TOOL], messages }),
+    body: JSON.stringify({ model, max_tokens: 1024, system: `${SYSTEM_PROMPT}\n\n${dateAnchor()}`, tools: [WEB_SEARCH_TOOL], messages }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error?.message || "Anthropic call failed");

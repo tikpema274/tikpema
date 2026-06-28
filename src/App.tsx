@@ -1,14 +1,15 @@
 import ConnectPasskey from "./components/ConnectPasskey";
+import ResearchPanel from "./components/ResearchPanel";
 import AgentPanel from "./components/AgentPanel";
 import PredictPanel from "./components/PredictPanel";
 import FeedbackPanel from "./components/FeedbackPanel";
-import { useModularWallet } from "./wallet/useModularWallet";
+import { useWallet } from "./wallet/useWallet";
 
 export default function App() {
   // One passkey wallet instance, shared so the Predict plane can let the
   // connected user place their own bet using the same account the Human plane
   // registered/logged in with.
-  const wallet = useModularWallet();
+  const wallet = useWallet();
 
   return (
     <div className="app">
@@ -22,7 +23,8 @@ export default function App() {
         below.
       </div>
       <ConnectPasskey wallet={wallet} />
-      <AgentPanel />
+      <ResearchPanel wallet={wallet} />
+      <AgentPanel wallet={wallet} />
       <PredictPanel wallet={wallet} />
       <FeedbackPanel wallet={wallet} />
     </div>

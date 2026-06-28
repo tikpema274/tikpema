@@ -7,7 +7,12 @@ import {
   encodeTransfer,
   WebAuthnMode,
 } from "@circle-fin/modular-wallets-core";
-import { createPublicClient, formatUnits, encodeFunctionData } from "viem";
+import {
+  createPublicClient,
+  formatUnits,
+  encodeFunctionData,
+  parseEventLogs,
+} from "viem";
 import {
   createBundlerClient,
   toWebAuthnAccount,
@@ -18,6 +23,11 @@ import { CONTRACTS, USDC_DECIMALS } from "../config/contracts";
 // -- Client-plane config. CLIENT_KEY is browser-safe (domain restricted). --
 const clientKey = import.meta.env.VITE_CLIENT_KEY as string;
 const clientUrl = import.meta.env.VITE_CLIENT_URL as string;
+
+// The agent wallet — provider + evaluator for user-created ERC-8183 jobs. Read
+// from the browser-exposed env var (VITE_-prefixed so Vite bundles it).
+const AGENT_WALLET_ADDRESS = import.meta.env
+  .VITE_AGENT_WALLET_ADDRESS as `0x${string}`;
 
 // Built once at module load.
 const passkeyTransport = toPasskeyTransport(clientUrl, clientKey);
@@ -86,6 +96,50 @@ const PLACE_BET_ABI = [
       { name: "marketId", type: "uint256" },
       { name: "isYes", type: "bool" },
       { name: "amount", type: "uint256" },
+    ],
+    outputs: [],
+  },
+] as const;
+
+// AgenticCommerce createJob + the JobCreated event we parse the jobId from.
+const CREATE_JOB_ABI = [
+  {
+    type: "function",
+    name: "createJob",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "provider", type: "address" },
+      { name: "evaluator", type: "address" },
+      { name: "expiredAt", type: "uint256" },
+      { name: "description", type: "string" },
+      { name: "hook", type: "address" },
+    ],
+    outputs: [{ name: "jobId", type: "uint256" }],
+  },
+  {
+    type: "event",
+    name: "JobCreated",
+    inputs: [
+      { indexed: true, name: "jobId", type: "uint256" },
+      { indexed: true, name: "client", type: "address" },
+      { indexed: true, name: "provider", type: "address" },
+      { indexed: false, name: "evaluator", type: "address" },
+      { indexed: false, name: "expiredAt", type: "uint256" },
+      { indexed: false, name: "hook", type: "address" },
+    ],
+    anonymous: false,
+  },
+] as const;
+
+// AgenticCommerce fund — pulls job.budget from the client (no amount param).
+const FUND_JOB_ABI = [
+  {
+    type: "function",
+    name: "fund",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "jobId", type: "uint256" },
+      { name: "optParams", type: "bytes" },
     ],
     outputs: [],
   },
@@ -286,6 +340,145 @@ export function useModularWallet() {
     [account]
   );
 
+  // Create an ERC-8183 job as the USER (passkey-signed, gasless). Single user-op
+  // — createJob needs no prior approve (escrow funding/approve come later) — so
+  // unlike placeBetAsUser this is one send at nonce-key 0. provider == evaluator
+  // == the agent wallet; hook is the zero address (default non-hooked path).
+  // Returns the new jobId, parsed from the JobCreated event in the receipt.
+  const createJobAsUser = useCallback(
+    async (question: string) => {
+      if (!account) throw new Error("Connect a wallet first");
+      if (!AGENT_WALLET_ADDRESS)
+        throw new Error("Missing VITE_AGENT_WALLET_ADDRESS");
+      setBusy(true);
+      try {
+        const bundler = createBundlerClient({
+          account,
+          chain: arcTestnet,
+          transport: modularTransport,
+        });
+
+        const expiredAt = BigInt(Math.floor(Date.now() / 1000) + 86400); // +24h
+        const createJobData = encodeFunctionData({
+          abi: CREATE_JOB_ABI,
+          functionName: "createJob",
+          args: [
+            AGENT_WALLET_ADDRESS, // provider
+            AGENT_WALLET_ADDRESS, // evaluator
+            expiredAt,
+            question, // description
+            "0x0000000000000000000000000000000000000000", // hook (none)
+          ],
+        });
+
+        setStatus("Creating job…");
+        const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await Promise.all(
+          [computeArcFees(), nonceKeyZero(account)]
+        );
+        const hash = await bundler.sendUserOperation({
+          calls: [
+            { to: CONTRACTS.AGENTIC_COMMERCE as `0x${string}`, data: createJobData },
+          ],
+          paymaster: true,
+          nonce,
+          maxPriorityFeePerGas,
+          maxFeePerGas,
+        });
+        const { receipt } = await bundler.waitForUserOperationReceipt({
+          hash,
+          timeout: 60000,
+        });
+
+        // Pull the jobId out of the JobCreated event the contract emits.
+        const [created] = parseEventLogs({
+          abi: CREATE_JOB_ABI,
+          eventName: "JobCreated",
+          logs: receipt.logs,
+        });
+        if (!created) throw new Error("Could not parse JobCreated event");
+        const jobId = created.args.jobId;
+        setStatus(`Job #${jobId} created: ${receipt.transactionHash}`);
+        return jobId;
+      } catch (e: any) {
+        setStatus(`Error: ${e.message}`);
+        throw e;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [account]
+  );
+
+  // Fund an ERC-8183 job as the USER (the job's client, passkey-signed, gasless).
+  // Mirrors placeBetAsUser: two sequential user-ops at nonce-key 0, the second
+  // sent only after the approve confirms (so its nonce/allowance are settled).
+  // fund() takes no amount — the contract pulls job.budget, so the approve must
+  // cover at least that. Returns the fund tx hash.
+  const fundJobAsUser = useCallback(
+    async (jobId: number, amountUsdc: number) => {
+      if (!account) throw new Error("Connect a wallet first");
+      setBusy(true);
+      try {
+        const bundler = createBundlerClient({
+          account,
+          chain: arcTestnet,
+          transport: modularTransport,
+        });
+        const units = BigInt(Math.round(amountUsdc * 1e6));
+
+        // 1. Approve AgenticCommerce to pull the budget. Wait for confirm.
+        setStatus("Approving escrow…");
+        const approveData = encodeFunctionData({
+          abi: APPROVE_ABI,
+          functionName: "approve",
+          args: [CONTRACTS.AGENTIC_COMMERCE as `0x${string}`, units],
+        });
+        {
+          const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await Promise.all([
+            computeArcFees(),
+            nonceKeyZero(account),
+          ]);
+          const approveHash = await bundler.sendUserOperation({
+            calls: [{ to: CONTRACTS.USDC as `0x${string}`, data: approveData }],
+            paymaster: true,
+            nonce,
+            maxPriorityFeePerGas,
+            maxFeePerGas,
+          });
+          await bundler.waitForUserOperationReceipt({ hash: approveHash, timeout: 60000 });
+        }
+
+        // 2. Fund the job. Fresh nonce/fees now that the approve has settled.
+        setStatus("Funding job…");
+        const fundData = encodeFunctionData({
+          abi: FUND_JOB_ABI,
+          functionName: "fund",
+          args: [BigInt(jobId), "0x"],
+        });
+        const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await Promise.all([
+          computeArcFees(),
+          nonceKeyZero(account),
+        ]);
+        const fundHash = await bundler.sendUserOperation({
+          calls: [{ to: CONTRACTS.AGENTIC_COMMERCE as `0x${string}`, data: fundData }],
+          paymaster: true,
+          nonce,
+          maxPriorityFeePerGas,
+          maxFeePerGas,
+        });
+        const { receipt } = await bundler.waitForUserOperationReceipt({ hash: fundHash, timeout: 60000 });
+        setStatus(`Job funded: ${receipt.transactionHash}`);
+        return { txHash: receipt.transactionHash };
+      } catch (e: any) {
+        setStatus(`Error: ${e.message}`);
+        throw e;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [account]
+  );
+
   return {
     account,
     address: account?.address ?? null,
@@ -306,6 +499,8 @@ export function useModularWallet() {
     connectLogin: () => connect(WebAuthnMode.Login, "tikpema-user"),
     sendUsdc,
     placeBetAsUser,
+    createJobAsUser,
+    fundJobAsUser,
     usdcBalance,
     refreshBalance,
   };

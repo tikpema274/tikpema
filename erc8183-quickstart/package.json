@@ -1,0 +1,19 @@
+{
+  "name": "erc8183-quickstart",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "ERC-8183 job lifecycle on Arc Testnet (Circle dev-controlled wallets) — learning proof",
+  "scripts": {
+    "start": "tsx --env-file=../.env index.ts"
+  },
+  "dependencies": {
+    "@circle-fin/developer-controlled-wallets": "^9.0.0",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  }
+}

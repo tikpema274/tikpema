@@ -1,5 +1,5 @@
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
-import { ARC, CONTRACTS, USDC_DECIMALS, json, parseBody } from "./_arc.mjs";
+import { ARC, CONTRACTS, USDC_DECIMALS, json, parseBody, maxSpendUsdc, dateAnchor } from "./_arc.mjs";
 
 // POST /api/agent-act { task: string }
 //
@@ -38,7 +38,7 @@ async function decide(task) {
     body: JSON.stringify({
       model,
       max_tokens: 512,
-      system: SYSTEM_PROMPT,
+      system: `${SYSTEM_PROMPT}\n\n${dateAnchor()}`,
       messages: [{ role: "user", content: task }],
     }),
   });

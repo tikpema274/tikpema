@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { agentClient } from "../lib/agentClient";
+import type { ModularWallet } from "../wallet/useModularWallet";
 
 // Which operation produced the result, so we can summarize it in plain language.
 type AgentResult =
@@ -10,7 +11,7 @@ type AgentResult =
 const shortAddr = (a: string) =>
   a && a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
 
-export default function AgentPanel() {
+export default function AgentPanel({ wallet: _wallet }: { wallet: ModularWallet }) {
   const [task, setTask] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<AgentResult | null>(null);

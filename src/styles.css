@@ -1,11 +1,11 @@
 :root {
-  --bg: #02080f;
-  --surface: #0a1420;
-  --cyan: #00d4ff;
-  --emerald: #00e5a0;
-  --text: #e6edf3;
-  --muted: #7d8ba1;
-  --border: rgba(0, 212, 255, 0.15);
+  --bg: #0a0e14;
+  --surface: #11161f;
+  --cyan: #3d7eff;
+  --emerald: #2dd4a0;
+  --text: #e6e9ef;
+  --muted: #8b95a3;
+  --border: rgba(255, 255, 255, 0.08);
 }
 * { box-sizing: border-box; }
 body {
@@ -35,12 +35,12 @@ button {
   font-size: 14px;
   cursor: pointer;
 }
-button:hover { background: rgba(0, 212, 255, 0.08); }
+button:hover { background: rgba(61, 126, 255, 0.10); }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
 button.emerald { border-color: var(--emerald); color: var(--emerald); }
-button.emerald:hover { background: rgba(0, 229, 160, 0.08); }
+button.emerald:hover { background: rgba(45, 212, 160, 0.10); }
 input, textarea, select {
-  background: #060d16;
+  background: #0d1117;
   border: 1px solid var(--border);
   color: var(--text);
   border-radius: 8px;
