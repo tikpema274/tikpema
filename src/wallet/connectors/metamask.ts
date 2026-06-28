@@ -44,6 +44,20 @@ const BALANCE_OF_ABI = [
   },
 ] as const;
 
+// ERC-20 transfer — used by sendUsdc (the wallet card's Send box).
+const TRANSFER_ABI = [
+  {
+    type: "function",
+    name: "transfer",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "to", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+] as const;
+
 // ERC-20 approve — lets AgenticCommerce pull the job budget.
 const APPROVE_ABI = [
   {
@@ -258,12 +272,30 @@ export async function connectMetaMask() {
     return { txHash: receipt.transactionHash };
   }
 
+  // Plain USDC transfer (the wallet card's Send box). Signature matches the
+  // passkey wallet's sendUsdc exactly — `amount` is in USDC base units — so the
+  // component's call works unchanged on either path. EOA-signed, user pays gas.
+  async function sendUsdc(to: `0x${string}`, amount: bigint) {
+    await ensureBalance(Number(formatUnits(amount, USDC_DECIMALS)));
+    const hash = await walletClient.writeContract({
+      address: CONTRACTS.USDC as `0x${string}`,
+      abi: TRANSFER_ABI,
+      functionName: "transfer",
+      args: [to, amount],
+      account: address,
+      chain: arcTestnet,
+    });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    return receipt.transactionHash;
+  }
+
   return {
     kind: "metamask" as const,
     address,
     refreshBalance,
     createJobAsUser,
     fundJobAsUser,
+    sendUsdc,
     // EIP-1193 has no programmatic disconnect; the user manages this in the
     // extension. No-op to satisfy the wallet shape.
     disconnect() {},

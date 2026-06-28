@@ -12,6 +12,8 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
   const [amount, setAmount] = useState("0.1");
   const [username, setUsername] = useState("");
   const [sendConfirm, setSendConfirm] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState("");
 
   const amountNum = Number(amount);
   const amountValid = Number.isFinite(amountNum) && amountNum > 0;
@@ -22,11 +24,15 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
   async function send() {
     if (!to || !amountValid) return;
     setSendConfirm("");
+    setSendError("");
+    setSending(true);
     try {
       await w.sendUsdc(to as `0x${string}`, BigInt(Math.round(amountNum * 1e6)));
       setSendConfirm(`Sent ${amountNum} USDC to ${shortAddr(to)}`);
-    } catch {
-      // w.status already carries the error message for display below.
+    } catch (e: any) {
+      setSendError(e?.message || "Send failed");
+    } finally {
+      setSending(false);
     }
   }
 
@@ -34,7 +40,9 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
     <div className="plane">
       <h2>Your Wallet</h2>
       <div className="sub">
-        Your secure wallet — no password needed, just your fingerprint or face. Free to use.
+        {w.activeKind === "metamask"
+          ? "Connected with MetaMask. You sign and pay network fees yourself."
+          : "Your secure wallet — no password needed, just your fingerprint or face. Free to use."}
       </div>
 
       {!w.address ? (
@@ -61,7 +69,9 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
         </div>
       ) : (
         <>
-          <div className="mono status">Smart account: {w.address}</div>
+          <div className="mono status">
+            {w.activeKind === "metamask" ? "Account" : "Smart account"}: {w.address}
+          </div>
           {w.activeKind === "metamask" && (
             <div className="sub">
               Heads up: with MetaMask you pay a small network fee (in USDC) for each transaction.
@@ -127,10 +137,10 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
               </span>
               <button
                 className="emerald"
-                disabled={w.busy || !to || !amountValid}
+                disabled={sending || !to || !amountValid}
                 onClick={send}
               >
-                {w.busy
+                {sending
                   ? "Sending…"
                   : `Send ${amountValid ? amountNum : 0} USDC`}
               </button>
@@ -139,6 +149,9 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
               <div className="status" style={{ color: "var(--emerald)" }}>
                 {sendConfirm}
               </div>
+            )}
+            {sendError && (
+              <div className="status" style={{ color: "#f5a623" }}>{sendError}</div>
             )}
           </div>
         </>

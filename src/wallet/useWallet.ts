@@ -66,6 +66,7 @@ export function useWallet() {
     address: isMetaMask ? mmWallet!.address : modular.address,
     usdcBalance: isMetaMask ? mmBalance : modular.usdcBalance,
     refreshBalance: isMetaMask ? mmRefreshBalance : modular.refreshBalance,
+    sendUsdc: isMetaMask ? mmWallet!.sendUsdc : modular.sendUsdc,
     createJobAsUser: isMetaMask ? mmWallet!.createJobAsUser : modular.createJobAsUser,
     fundJobAsUser: isMetaMask ? mmWallet!.fundJobAsUser : modular.fundJobAsUser,
     connectRegister,
