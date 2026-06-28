@@ -1,11 +1,13 @@
 import { useState } from "react";
-import type { ModularWallet } from "../wallet/useModularWallet";
+import type { useWallet } from "../wallet/useWallet";
+
+type UnifiedWallet = ReturnType<typeof useWallet>;
 
 // Shorten an address for readable confirmations: 0x1234…abcd.
 const shortAddr = (a: string) =>
   a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
 
-export default function ConnectPasskey({ wallet: w }: { wallet: ModularWallet }) {
+export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet }) {
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("0.1");
   const [username, setUsername] = useState("");
@@ -51,10 +53,20 @@ export default function ConnectPasskey({ wallet: w }: { wallet: ModularWallet })
           <button disabled={w.busy} onClick={() => w.connectLogin()}>
             Login
           </button>
+          {w.connectors.find((c) => c.kind === "metamask")?.isAvailable() && (
+            <button disabled={w.busy} onClick={() => w.connectMetaMask()}>
+              Connect MetaMask
+            </button>
+          )}
         </div>
       ) : (
         <>
           <div className="mono status">Smart account: {w.address}</div>
+          {w.activeKind === "metamask" && (
+            <div className="sub">
+              Heads up: with MetaMask you pay a small network fee (in USDC) for each transaction.
+            </div>
+          )}
           <div className="row" style={{ marginTop: 8 }}>
             <span className="status">
               Balance: {w.usdcBalance ?? "…"} USDC
