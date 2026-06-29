@@ -1,6 +1,6 @@
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS, json, parseBody, maxSpendUsdc, dateAnchor } from "./_arc.mjs";
-import { agentSwap, SWAP_TOKENS } from "./_swap.mjs";
+import { agentSwap, valueInUsdc, SWAP_TOKENS } from "./_swap.mjs";
 
 // POST /api/agent-act { task: string }
 //
@@ -20,8 +20,8 @@ Given a task, respond with ONLY a JSON object, no prose, no markdown fences:
   "action": "transfer_usdc" | "swap_tokens" | "needs_confirmation" | "none",
   "to": "0x... (required if action is transfer_usdc)",
   "amountUsdc": number (required if action is transfer_usdc),
-  "tokenIn": "USDC | EURC | cirBTC (required if action is swap_tokens)",
-  "tokenOut": "USDC | EURC | cirBTC (required if action is swap_tokens)",
+  "tokenIn": "USDC | EURC (required if action is swap_tokens)",
+  "tokenOut": "USDC | EURC (required if action is swap_tokens)",
   "amountIn": number (required if action is swap_tokens),
   "unmetCondition": "string (required if action is needs_confirmation) — the part of the task you cannot fulfill",
   "reasoning": "one sentence"
@@ -29,7 +29,7 @@ Given a task, respond with ONLY a JSON object, no prose, no markdown fences:
 Choose "none" if the task is unclear, unsafe, or not a transfer.
 You can execute immediate USDC transfers and same-chain token swaps. You CANNOT schedule payments for a future time, set up recurring/conditional payments, or wait.
 If a task asks for a transfer but attaches a condition you cannot fulfil — a specific time ("at 23.25", "tonight", "in an hour"), a recurring schedule, or a trigger ("when X happens") — you MUST choose action "needs_confirmation", put the unfulfillable part in "unmetCondition", and do NOT choose transfer_usdc. Only choose transfer_usdc when the transfer is unconditional and can run right now.
-For a swap (e.g. "swap 5 USDC to EURC", "convert 2 EURC into cirBTC"), choose action "swap_tokens" with tokenIn, tokenOut, and amountIn. Only these tokens are supported: USDC, EURC, cirBTC. tokenIn and tokenOut must differ.`;
+For a swap (e.g. "swap 5 USDC to EURC", "convert 2 EURC into USDC"), choose action "swap_tokens" with tokenIn, tokenOut, and amountIn. Only these tokens are supported: USDC, EURC. tokenIn and tokenOut must differ.`;
 
 async function decide(task) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -128,14 +128,23 @@ export async function handler(event) {
       if (tokenIn === tokenOut) {
         return json(200, { executed: false, decision, blocked: "tokenIn and tokenOut must differ" });
       }
-      // NOTE: for non-USDC inputs this caps by token units, not USD value —
-      // acceptable for now (e.g. 1 cirBTC slips the same cap as 1 USDC).
       const maxSpend = Number(process.env.AGENT_MAX_SPEND_USDC || "1");
-      if (!(amountIn > 0) || amountIn > maxSpend) {
+      if (!(amountIn > 0)) {
+        return json(200, { executed: false, decision, blocked: "amountIn must be > 0" });
+      }
+      // Cap on USD VALUE of the input, not raw token units (EURC ~$1.14, so
+      // unit-capping would under-count). Fail-safe: if we can't value it, block.
+      let usdValue;
+      try {
+        usdValue = await valueInUsdc({ token: tokenIn, amount: amountIn });
+      } catch (e) {
+        return json(200, { executed: false, decision, blocked: `cannot value ${tokenIn}: ${e.message}` });
+      }
+      if (usdValue > maxSpend) {
         return json(200, {
           executed: false,
           decision,
-          blocked: `amountIn ${amountIn} exceeds AGENT_MAX_SPEND_USDC (${maxSpend})`,
+          blocked: `swap value ~${usdValue.toFixed(2)} exceeds AGENT_MAX_SPEND_USDC (${maxSpend})`,
         });
       }
 

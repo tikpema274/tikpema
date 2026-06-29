@@ -6,7 +6,7 @@ import { createCircleWalletsAdapter } from "@circle-fin/adapter-circle-wallets";
 // SEPARATE Circle entry point from _circle.mjs (different client, own execution).
 // Arc Testnet supports USDC, EURC, cirBTC only.
 
-export const SWAP_TOKENS = ["USDC", "EURC", "cirBTC"];
+export const SWAP_TOKENS = ["USDC", "EURC"];
 
 function kitAndAdapter() {
   const apiKey = process.env.CIRCLE_API_KEY;
@@ -20,6 +20,20 @@ function kitAndAdapter() {
   }
   const adapter = createCircleWalletsAdapter({ apiKey, entitySecret });
   return { kit: new AppKit(), adapter, kitKey };
+}
+
+// Value a token amount in USD via App Kit's cached token rates. USDC is treated
+// as ~$1 (no lookup). For other tokens we read the single returned rate entry
+// (avoids address-case bugs). Throws if no rate exists — callers fail-safe BLOCK.
+export async function valueInUsdc({ token, amount }) {
+  const t = String(token).toUpperCase();
+  const amt = Number(amount);
+  if (t === "USDC") return amt;
+  const { kit, kitKey } = kitAndAdapter();
+  const r = await kit.getTokenRates({ chain: "Arc_Testnet", tokens: [t], kitKey });
+  const entry = Object.values(r?.rates?.Arc_Testnet || {})[0];
+  if (!entry?.priceUSD) throw new Error(`no USD rate for ${t} on Arc Testnet`);
+  return amt * Number(entry.priceUSD);
 }
 
 // Estimate then execute a same-chain swap on Arc Testnet from the agent wallet.
