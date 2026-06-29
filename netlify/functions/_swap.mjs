@@ -4,7 +4,7 @@ import { createCircleWalletsAdapter } from "@circle-fin/adapter-circle-wallets";
 // SWAP PLANE. App Kit Swap with the Circle Wallets adapter — same dev-controlled
 // creds as _circle.mjs, plus the free KIT_KEY for the swap router. This is a
 // SEPARATE Circle entry point from _circle.mjs (different client, own execution).
-// Arc Testnet supports USDC, EURC, cirBTC only.
+// Arc Testnet supports USDC, EURC only.
 
 export const SWAP_TOKENS = ["USDC", "EURC"];
 

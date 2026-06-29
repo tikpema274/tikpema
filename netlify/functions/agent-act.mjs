@@ -123,7 +123,7 @@ export async function handler(event) {
       // Guards — enforced HERE, not by the model.
       const VALID = SWAP_TOKENS.map((t) => t.toUpperCase());
       if (!VALID.includes(tokenIn) || !VALID.includes(tokenOut)) {
-        return json(200, { executed: false, decision, blocked: "unsupported token (USDC/EURC/cirBTC only)" });
+        return json(200, { executed: false, decision, blocked: "unsupported token (USDC/EURC only)" });
       }
       if (tokenIn === tokenOut) {
         return json(200, { executed: false, decision, blocked: "tokenIn and tokenOut must differ" });
