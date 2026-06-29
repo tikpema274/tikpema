@@ -16,12 +16,15 @@ const SYSTEM_PROMPT = `You are Tikpema's autonomous on-chain agent on Arc Testne
 You control your own developer-controlled smart-account wallet and may act with its funds only.
 Given a task, respond with ONLY a JSON object, no prose, no markdown fences:
 {
-  "action": "transfer_usdc" | "none",
+  "action": "transfer_usdc" | "needs_confirmation" | "none",
   "to": "0x... (required if action is transfer_usdc)",
   "amountUsdc": number (required if action is transfer_usdc),
+  "unmetCondition": "string (required if action is needs_confirmation) — the part of the task you cannot fulfill",
   "reasoning": "one sentence"
 }
-Choose "none" if the task is unclear, unsafe, or not a transfer.`;
+Choose "none" if the task is unclear, unsafe, or not a transfer.
+You can ONLY execute an immediate USDC transfer. You CANNOT schedule payments for a future time, set up recurring/conditional payments, or wait.
+If a task asks for a transfer but attaches a condition you cannot fulfil — a specific time ("at 23.25", "tonight", "in an hour"), a recurring schedule, or a trigger ("when X happens") — you MUST choose action "needs_confirmation", put the unfulfillable part in "unmetCondition", and do NOT choose transfer_usdc. Only choose transfer_usdc when the transfer is unconditional and can run right now.`;
 
 async function decide(task) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -73,6 +76,39 @@ export async function handler(event) {
   try {
     // 1. Brain decides.
     const decision = await decide(task);
+
+    // The agent cannot schedule or condition payments. If the brain flagged an
+    // unfulfillable condition, stop and ask — never silently drop it and send.
+    if (decision.action === "needs_confirmation") {
+      return json(200, {
+        executed: false,
+        decision,
+        needsConfirmation: true,
+        message:
+          `I can only send USDC immediately — I can't schedule or set conditions. ` +
+          `This task asked for: "${decision.unmetCondition || "a condition I can't fulfil"}". ` +
+          `Resend the task without that part if you'd like me to send now.`,
+      });
+    }
+
+    // Backstop: even if the brain chose transfer_usdc, refuse if the raw task
+    // contains a scheduling/conditional cue the agent cannot honor. The model is
+    // the first classifier; this is the code not trusting a silent drop.
+    if (decision.action === "transfer_usdc") {
+      const schedulePattern =
+        /\b((at|by)\s+(\d{1,2}([:.]\d{1,2})?\s*(am|pm)?|noon|midnight|midday|morning|afternoon|evening|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|tonight|tomorrow|later|in \d+\s*(min|minute|hour|hr|day)|every|when|after|before|schedule|recurring|daily|weekly)\b/i;
+      if (schedulePattern.test(task)) {
+        return json(200, {
+          executed: false,
+          decision,
+          needsConfirmation: true,
+          message:
+            `This task looks like it has a time or condition ("${task}"). ` +
+            `I can only send USDC immediately, so I've held off. ` +
+            `Resend without the timing if you want it sent now.`,
+        });
+      }
+    }
 
     if (decision.action !== "transfer_usdc") {
       return json(200, { executed: false, decision });
