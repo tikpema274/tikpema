@@ -142,6 +142,25 @@ function AgentSummary({ result }: { result: AgentResult }) {
     );
   }
 
+  if (data.executed && d.action === "swap_tokens") {
+    const submitted = data.swap?.state === "submitted" || data.swap?.pending;
+    return (
+      <div className="status" style={{ margin: 0 }}>
+        <div>
+          ✓ AI Assistant swapped <b>{d.amountIn} {String(d.tokenIn).toUpperCase()}</b>{" "}
+          → <b>{String(d.tokenOut).toUpperCase()}</b>
+          {submitted ? " — submitted, balance updates shortly." : "."}
+        </div>
+        {d.reasoning && <div style={{ marginTop: 4 }}>{d.reasoning}</div>}
+        {data.tx && (
+          <div style={{ marginTop: 4 }}>
+            <TxLink url={data.tx} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (data.executed) {
     return (
       <div className="status" style={{ margin: 0 }}>

@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@circle-fin/adapter-circle-wallets": "^1.4.1",
+    "@circle-fin/app-kit": "^1.8.1",
     "@circle-fin/modular-wallets-core": "^1.0.0",
     "@circle-fin/x402-batching": "^2.1.0",
     "@netlify/blobs": "^10.7.9",

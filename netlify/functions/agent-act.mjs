@@ -1,5 +1,6 @@
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS, json, parseBody, maxSpendUsdc, dateAnchor } from "./_arc.mjs";
+import { agentSwap, SWAP_TOKENS } from "./_swap.mjs";
 
 // POST /api/agent-act { task: string }
 //
@@ -16,15 +17,19 @@ const SYSTEM_PROMPT = `You are Tikpema's autonomous on-chain agent on Arc Testne
 You control your own developer-controlled smart-account wallet and may act with its funds only.
 Given a task, respond with ONLY a JSON object, no prose, no markdown fences:
 {
-  "action": "transfer_usdc" | "needs_confirmation" | "none",
+  "action": "transfer_usdc" | "swap_tokens" | "needs_confirmation" | "none",
   "to": "0x... (required if action is transfer_usdc)",
   "amountUsdc": number (required if action is transfer_usdc),
+  "tokenIn": "USDC | EURC | cirBTC (required if action is swap_tokens)",
+  "tokenOut": "USDC | EURC | cirBTC (required if action is swap_tokens)",
+  "amountIn": number (required if action is swap_tokens),
   "unmetCondition": "string (required if action is needs_confirmation) — the part of the task you cannot fulfill",
   "reasoning": "one sentence"
 }
 Choose "none" if the task is unclear, unsafe, or not a transfer.
-You can ONLY execute an immediate USDC transfer. You CANNOT schedule payments for a future time, set up recurring/conditional payments, or wait.
-If a task asks for a transfer but attaches a condition you cannot fulfil — a specific time ("at 23.25", "tonight", "in an hour"), a recurring schedule, or a trigger ("when X happens") — you MUST choose action "needs_confirmation", put the unfulfillable part in "unmetCondition", and do NOT choose transfer_usdc. Only choose transfer_usdc when the transfer is unconditional and can run right now.`;
+You can execute immediate USDC transfers and same-chain token swaps. You CANNOT schedule payments for a future time, set up recurring/conditional payments, or wait.
+If a task asks for a transfer but attaches a condition you cannot fulfil — a specific time ("at 23.25", "tonight", "in an hour"), a recurring schedule, or a trigger ("when X happens") — you MUST choose action "needs_confirmation", put the unfulfillable part in "unmetCondition", and do NOT choose transfer_usdc. Only choose transfer_usdc when the transfer is unconditional and can run right now.
+For a swap (e.g. "swap 5 USDC to EURC", "convert 2 EURC into cirBTC"), choose action "swap_tokens" with tokenIn, tokenOut, and amountIn. Only these tokens are supported: USDC, EURC, cirBTC. tokenIn and tokenOut must differ.`;
 
 async function decide(task) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -94,7 +99,7 @@ export async function handler(event) {
     // Backstop: even if the brain chose transfer_usdc, refuse if the raw task
     // contains a scheduling/conditional cue the agent cannot honor. The model is
     // the first classifier; this is the code not trusting a silent drop.
-    if (decision.action === "transfer_usdc") {
+    if (decision.action === "transfer_usdc" || decision.action === "swap_tokens") {
       const schedulePattern =
         /\b((at|by)\s+(\d{1,2}([:.]\d{1,2})?\s*(am|pm)?|noon|midnight|midday|morning|afternoon|evening|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|tonight|tomorrow|later|in \d+\s*(min|minute|hour|hr|day)|every|when|after|before|schedule|recurring|daily|weekly)\b/i;
       if (schedulePattern.test(task)) {
@@ -108,6 +113,46 @@ export async function handler(event) {
             `Resend without the timing if you want it sent now.`,
         });
       }
+    }
+
+    if (decision.action === "swap_tokens") {
+      const tokenIn = String(decision.tokenIn || "").toUpperCase();
+      const tokenOut = String(decision.tokenOut || "").toUpperCase();
+      const amountIn = Number(decision.amountIn);
+
+      // Guards — enforced HERE, not by the model.
+      const VALID = SWAP_TOKENS.map((t) => t.toUpperCase());
+      if (!VALID.includes(tokenIn) || !VALID.includes(tokenOut)) {
+        return json(200, { executed: false, decision, blocked: "unsupported token (USDC/EURC/cirBTC only)" });
+      }
+      if (tokenIn === tokenOut) {
+        return json(200, { executed: false, decision, blocked: "tokenIn and tokenOut must differ" });
+      }
+      // NOTE: for non-USDC inputs this caps by token units, not USD value —
+      // acceptable for now (e.g. 1 cirBTC slips the same cap as 1 USDC).
+      const maxSpend = Number(process.env.AGENT_MAX_SPEND_USDC || "1");
+      if (!(amountIn > 0) || amountIn > maxSpend) {
+        return json(200, {
+          executed: false,
+          decision,
+          blocked: `amountIn ${amountIn} exceeds AGENT_MAX_SPEND_USDC (${maxSpend})`,
+        });
+      }
+
+      // Execute via App Kit Swap (its own Circle client; not _circle.mjs).
+      const swap = await agentSwap({
+        walletAddress,
+        tokenIn: SWAP_TOKENS.find((t) => t.toUpperCase() === tokenIn),
+        tokenOut: SWAP_TOKENS.find((t) => t.toUpperCase() === tokenOut),
+        amountIn: amountIn.toFixed(2),
+      });
+
+      return json(200, {
+        executed: true,
+        decision,
+        swap,
+        tx: swap.explorerUrl || (swap.txHash ? `${ARC.explorer}/tx/${swap.txHash}` : null),
+      });
     }
 
     if (decision.action !== "transfer_usdc") {
