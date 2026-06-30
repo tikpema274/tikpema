@@ -45,6 +45,7 @@ function paymentRequirements(resource) {
     scheme: "exact",
     network: NETWORK,
     maxAmountRequired: PRICE_ATOMIC,
+    amount: PRICE_ATOMIC,
     resource,
     description: "x402 quote (Arc Testnet, Gateway nanopayment)",
     mimeType: "application/json",
