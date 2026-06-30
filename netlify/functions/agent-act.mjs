@@ -1,6 +1,7 @@
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS, json, parseBody, maxSpendUsdc, dateAnchor } from "./_arc.mjs";
 import { agentSwap, valueInUsdc, SWAP_TOKENS } from "./_swap.mjs";
+import { agentPay } from "./_pay.mjs";
 
 // POST /api/agent-act { task: string }
 //
@@ -17,19 +18,22 @@ const SYSTEM_PROMPT = `You are Tikpema's autonomous on-chain agent on Arc Testne
 You control your own developer-controlled smart-account wallet and may act with its funds only.
 Given a task, respond with ONLY a JSON object, no prose, no markdown fences:
 {
-  "action": "transfer_usdc" | "swap_tokens" | "needs_confirmation" | "none",
+  "action": "transfer_usdc" | "swap_tokens" | "pay_for_service" | "needs_confirmation" | "none",
   "to": "0x... (required if action is transfer_usdc)",
   "amountUsdc": number (required if action is transfer_usdc),
   "tokenIn": "USDC | EURC (required if action is swap_tokens)",
   "tokenOut": "USDC | EURC (required if action is swap_tokens)",
   "amountIn": number (required if action is swap_tokens),
+  "payTo": "0x... (required if action is pay_for_service)",
+  "payAmountUsdc": number (required if action is pay_for_service),
   "unmetCondition": "string (required if action is needs_confirmation) — the part of the task you cannot fulfill",
   "reasoning": "one sentence"
 }
 Choose "none" if the task is unclear, unsafe, or not a transfer.
 You can execute immediate USDC transfers and same-chain token swaps. You CANNOT schedule payments for a future time, set up recurring/conditional payments, or wait.
 If a task asks for a transfer but attaches a condition you cannot fulfil — a specific time ("at 23.25", "tonight", "in an hour"), a recurring schedule, or a trigger ("when X happens") — you MUST choose action "needs_confirmation", put the unfulfillable part in "unmetCondition", and do NOT choose transfer_usdc. Only choose transfer_usdc when the transfer is unconditional and can run right now.
-For a swap (e.g. "swap 5 USDC to EURC", "convert 2 EURC into USDC"), choose action "swap_tokens" with tokenIn, tokenOut, and amountIn. Only these tokens are supported: USDC, EURC. tokenIn and tokenOut must differ.`;
+For a swap (e.g. "swap 5 USDC to EURC", "convert 2 EURC into USDC"), choose action "swap_tokens" with tokenIn, tokenOut, and amountIn. Only these tokens are supported: USDC, EURC. tokenIn and tokenOut must differ.
+A plain "send/pay X USDC to 0x..." is a transfer_usdc (your regular balance). Choose "pay_for_service" ONLY when the task explicitly says to pay FROM the Gateway / unified balance, or to pay FOR a service, with payTo and payAmountUsdc. When unsure between the two, prefer transfer_usdc.`;
 
 async function decide(task) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -164,6 +168,22 @@ export async function handler(event) {
       });
     }
 
+    if (decision.action === "pay_for_service") {
+      const payTo = String(decision.payTo || "");
+      const payAmount = Number(decision.payAmountUsdc);
+      const maxSpendPay = Number(process.env.AGENT_MAX_SPEND_USDC || "1");
+      if (!/^0x[0-9a-fA-F]{40}$/.test(payTo)) {
+        return json(200, { executed: false, decision, blocked: "invalid payTo address" });
+      }
+      if (!(payAmount > 0)) {
+        return json(200, { executed: false, decision, blocked: "payAmountUsdc must be > 0" });
+      }
+      if (payAmount > maxSpendPay) {
+        return json(200, { executed: false, decision, blocked: "payAmountUsdc " + payAmount + " exceeds AGENT_MAX_SPEND_USDC (" + maxSpendPay + ")" });
+      }
+      const pay = await agentPay({ recipientAddress: payTo, amountUsdc: payAmount.toFixed(2) });
+      return json(200, { executed: true, decision, pay });
+    }
     if (decision.action !== "transfer_usdc") {
       return json(200, { executed: false, decision });
     }

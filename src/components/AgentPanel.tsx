@@ -161,6 +161,20 @@ function AgentSummary({ result }: { result: AgentResult }) {
     );
   }
 
+  if (data.executed && d.action === "pay_for_service") {
+    const submitted = data.pay?.state === "submitted" || data.pay?.pending;
+    return (
+      <div className="status" style={{ margin: 0 }}>
+        <div>
+          ✓ AI Assistant paid <b>{d.payAmountUsdc} USDC</b> to{" "}
+          <span className="mono">{shortAddr(String(d.payTo))}</span>
+          {submitted ? " — submitted, balance updates shortly." : "."}
+        </div>
+        {d.reasoning && <div style={{ marginTop: 4 }}>{d.reasoning}</div>}
+      </div>
+    );
+  }
+
   if (data.executed) {
     return (
       <div className="status" style={{ margin: 0 }}>
