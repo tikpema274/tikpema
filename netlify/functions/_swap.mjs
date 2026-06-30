@@ -51,7 +51,10 @@ export async function agentSwap({ walletAddress, tokenIn, tokenOut, amountIn }) 
     // ERC-1271 signature — so the swap fails with "Transaction hash is required".
     // Forcing an onchain approve makes the SCA path work.
     allowanceStrategy: "approve",
-    config: { kitKey },
+    // Explicit 1% slippage cap. USDC/EURC are stablecoins so the rate barely
+    // moves, but setting this makes the tolerance intentional rather than relying
+    // on an SDK default — the swap reverts rather than filling at a bad rate.
+    config: { kitKey, slippageBps: 100 },
   };
   // estimateSwap is free and gives the expected output up front. Returned to the
   // caller so the UI can show value-out. (Slippage: SDK default for now — add a
