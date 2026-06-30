@@ -1,7 +1,7 @@
-import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
-import { ARC, CONTRACTS, USDC_DECIMALS, json, parseBody, maxSpendUsdc, dateAnchor } from "./_arc.mjs";
-import { agentSwap, valueInUsdc, SWAP_TOKENS } from "./_swap.mjs";
-import { agentPay } from "./_pay.mjs";
+import { TxPendingError } from "./_circle.mjs";
+import { json, parseBody, dateAnchor } from "./_arc.mjs";
+import { SWAP_TOKENS } from "./_swap.mjs";
+import { executeAction, valueOfStep } from "./_actions.mjs";
 
 // POST /api/agent-act { task: string }
 //
@@ -123,8 +123,10 @@ export async function handler(event) {
       const tokenIn = String(decision.tokenIn || "").toUpperCase();
       const tokenOut = String(decision.tokenOut || "").toUpperCase();
       const amountIn = Number(decision.amountIn);
+      const step = { type: "swap_tokens", tokenIn, tokenOut, amountIn };
 
-      // Guards — enforced HERE, not by the model.
+      // Shape guards stay explicit so cap valuation only runs on a supported
+      // token, and a bad token blocks with its own message (not a value error).
       const VALID = SWAP_TOKENS.map((t) => t.toUpperCase());
       if (!VALID.includes(tokenIn) || !VALID.includes(tokenOut)) {
         return json(200, { executed: false, decision, blocked: "unsupported token (USDC/EURC only)" });
@@ -136,11 +138,12 @@ export async function handler(event) {
       if (!(amountIn > 0)) {
         return json(200, { executed: false, decision, blocked: "amountIn must be > 0" });
       }
-      // Cap on USD VALUE of the input, not raw token units (EURC ~$1.14, so
-      // unit-capping would under-count). Fail-safe: if we can't value it, block.
+      // Spend cap stays HERE (the caller owns the cap). Cap on USD VALUE of the
+      // input, not raw token units (EURC ~$1.14, so unit-capping would
+      // under-count). Fail-safe: if we can't value it, block.
       let usdValue;
       try {
-        usdValue = await valueInUsdc({ token: tokenIn, amount: amountIn });
+        usdValue = await valueOfStep(step);
       } catch (e) {
         return json(200, { executed: false, decision, blocked: `cannot value ${tokenIn}: ${e.message}` });
       }
@@ -152,25 +155,15 @@ export async function handler(event) {
         });
       }
 
-      // Execute via App Kit Swap (its own Circle client; not _circle.mjs).
-      const swap = await agentSwap({
-        walletAddress,
-        tokenIn: SWAP_TOKENS.find((t) => t.toUpperCase() === tokenIn),
-        tokenOut: SWAP_TOKENS.find((t) => t.toUpperCase() === tokenOut),
-        amountIn: amountIn.toFixed(2),
-      });
-
-      return json(200, {
-        executed: true,
-        decision,
-        swap,
-        tx: swap.explorerUrl || (swap.txHash ? `${ARC.explorer}/tx/${swap.txHash}` : null),
-      });
+      const r = await executeAction(step, { walletAddress });
+      if (!r.ok) return json(200, { executed: false, decision, blocked: r.blocked });
+      return json(200, { executed: true, decision, swap: r.swap, tx: r.tx });
     }
 
     if (decision.action === "pay_for_service") {
       const payTo = String(decision.payTo || "");
       const payAmount = Number(decision.payAmountUsdc);
+      const step = { type: "pay_for_service", payTo, payAmountUsdc: payAmount };
       const maxSpendPay = Number(process.env.AGENT_MAX_SPEND_USDC || "1");
       if (!/^0x[0-9a-fA-F]{40}$/.test(payTo)) {
         return json(200, { executed: false, decision, blocked: "invalid payTo address" });
@@ -181,8 +174,9 @@ export async function handler(event) {
       if (payAmount > maxSpendPay) {
         return json(200, { executed: false, decision, blocked: "payAmountUsdc " + payAmount + " exceeds AGENT_MAX_SPEND_USDC (" + maxSpendPay + ")" });
       }
-      const pay = await agentPay({ recipientAddress: payTo, amountUsdc: payAmount.toFixed(2) });
-      return json(200, { executed: true, decision, pay });
+      const r = await executeAction(step, { walletAddress });
+      if (!r.ok) return json(200, { executed: false, decision, blocked: r.blocked });
+      return json(200, { executed: true, decision, pay: r.pay });
     }
     if (decision.action !== "transfer_usdc") {
       return json(200, { executed: false, decision });
@@ -192,6 +186,7 @@ export async function handler(event) {
     const maxSpend = Number(process.env.AGENT_MAX_SPEND_USDC || "1");
     const amount = Number(decision.amountUsdc);
     const to = String(decision.to || "");
+    const step = { type: "transfer_usdc", to, amountUsdc: amount };
 
     if (!/^0x[0-9a-fA-F]{40}$/.test(to)) {
       return json(200, { executed: false, decision, blocked: "invalid recipient" });
@@ -204,26 +199,12 @@ export async function handler(event) {
       });
     }
 
-    // 3. Execute: agent's own SCA wallet transfers USDC (gas sponsored).
-    const client = circle();
-    const units = BigInt(Math.round(amount * 10 ** USDC_DECIMALS)).toString();
-
-    const tx = await client.createContractExecutionTransaction({
-      walletAddress,
-      blockchain: ARC.blockchain,
-      contractAddress: CONTRACTS.USDC,
-      abiFunctionSignature: "transfer(address,uint256)",
-      abiParameters: [to, units],
-      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
-    });
-
-    const txHash = await waitForTx(client, tx.data?.id);
-
-    return json(200, {
-      executed: true,
-      decision,
-      tx: `${ARC.explorer}/tx/${txHash}`,
-    });
+    // 3. Execute: agent's own SCA wallet transfers USDC (gas sponsored). A still-
+    // pending tx surfaces as a TxPendingError that executeAction lets propagate,
+    // so the outer catch can map it to 202 (unchanged behavior).
+    const r = await executeAction(step, { walletAddress });
+    if (!r.ok) return json(200, { executed: false, decision, blocked: r.blocked });
+    return json(200, { executed: true, decision, tx: r.tx });
   } catch (e) {
     // A still-pending tx is submitted-but-slow, not failed: report it as
     // accepted with its id so callers can poll rather than treat it as an error.
