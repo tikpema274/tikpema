@@ -16,7 +16,7 @@
 
 import { connectLambda, getStore } from "@netlify/blobs";
 import { keccak256, toBytes } from "viem";
-import { ARC, CONTRACTS, parseBody, dateAnchor } from "./_arc.mjs";
+import { ARC, CONTRACTS, USDC_DECIMALS, parseBody, dateAnchor } from "./_arc.mjs";
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { research } from "./_research.mjs";
 import { publicClient } from "./_predict.mjs";
@@ -215,15 +215,22 @@ export async function handler(event) {
       return { statusCode: 202 };
     }
 
+    // The funded budget IS the job price. getJob returns it as 6-decimal atomic
+    // USDC (job-set-budget funds budgetUsdc * 10**USDC_DECIMALS), so convert back
+    // to a USDC number. Phase 2a threads this into research() so a later step can
+    // compute the per-job data allowance; it's surfaced only, not spent here.
+    const jobPrice = Number(job.budget) / 10 ** USDC_DECIMALS;
+
     // 1. Research the question into a brief via the shared engine. Opt into the
     // Exa retrieval path so the brief is grounded on real retrieved sources;
     // _research falls back to web search if Exa is unavailable. Pass the Exa
-    // system-prompt variant to match (it doesn't mention web search).
+    // system-prompt variant to match (it doesn't mention web search). Thread the
+    // job context (jobId + jobPrice) for the later autonomous-purchase budget gate.
     const result = await research(
       question,
       `${BRIEF_SYSTEM_PROMPT_EXA}\n\n${dateAnchor()}`,
       BRIEF_USER_INSTRUCTION,
-      { useExa: true }
+      { useExa: true, jobId, jobPrice }
     );
     let decision = result.decision;
 

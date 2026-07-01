@@ -31,6 +31,32 @@ const EXTRA = {
 // Price: $0.001 USDC, in 6-decimal atomic units → 1000.
 const PRICE_ATOMIC = "1000";
 
+// Canned research dataset served ONLY on a successful (paid) 200. This is the
+// testnet stand-in for a real paid data seller: a small set of {claim, source}
+// facts that a later research step (Step 2a-3) can fold into its grounding block.
+// The 402 challenge + verify/settle behavior is unchanged — this only enriches
+// the paid response body (previously just { ok: true }).
+const CANNED_DATASET = {
+  topic: "Circle / Arc / x402 — stand-in research facts (testnet)",
+  facts: [
+    {
+      claim:
+        "USDC is a fully-reserved dollar stablecoin issued by Circle, redeemable 1:1 for US dollars.",
+      source: "https://www.circle.com/usdc",
+    },
+    {
+      claim:
+        "Arc is Circle's Layer-1 blockchain where USDC is the native gas token, giving stable, predictable transaction fees.",
+      source: "https://developers.circle.com/arc",
+    },
+    {
+      claim:
+        "The x402 protocol reuses the HTTP 402 Payment Required status code so agents can pay per API call in USDC.",
+      source: "https://www.x402.org",
+    },
+  ],
+};
+
 // Gateway batched settlement runs on a delay, so the payment authorization must
 // stay valid for ~7 days. GatewayEvmScheme uses 604900s (7 days + buffer).
 const MAX_TIMEOUT_SECONDS = 604900;
@@ -139,14 +165,14 @@ export async function handler(event) {
       };
     }
 
-    // Paid. Serve the (trivial) content + the settle receipt for the buyer.
+    // Paid. Serve the canned research dataset + the settle receipt for the buyer.
     return {
       statusCode: 200,
       headers: {
         "Content-Type": "application/json",
         "PAYMENT-RESPONSE": b64encode(settlement),
       },
-      body: JSON.stringify({ ok: true, ts: Date.now() }),
+      body: JSON.stringify({ ok: true, ts: Date.now(), dataset: CANNED_DATASET }),
     };
   } catch (e) {
     return {

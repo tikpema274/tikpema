@@ -51,6 +51,15 @@ export async function research(
   if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY (server env)");
   const model = process.env.PREDICT_MODEL || "claude-sonnet-4-6";
 
+  // Phase 2a plumbing (Step 2a-2): the caller may thread job context so a LATER
+  // step can compute the per-job data allowance and gate autonomous purchases.
+  // We only SURFACE it here — no budget calls, no spending, no decision logic yet.
+  // Log so we can confirm the values arrive with the right jobId/jobPrice.
+  const { jobId, jobPrice } = opts;
+  if (jobId != null || jobPrice != null) {
+    console.log(`[research] job context: jobId=${jobId} jobPrice=${jobPrice} USDC`);
+  }
+
   // Opt-in Exa path: ground the brief on real retrieved sources instead of the
   // model's own web search. One Exa call, then a SINGLE Anthropic call with NO
   // web-search tool (so there's no pause_turn loop). On any Exa failure we do
