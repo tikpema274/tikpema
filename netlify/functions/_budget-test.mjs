@@ -1,10 +1,13 @@
-// _budget.test.mjs — ISOLATED proof of the budget/policy spine.
+// _budget-test.mjs — ISOLATED proof of the budget/policy spine.
 //
 // Runs the caps against an in-memory store (injected), so nothing touches the
 // Netlify runtime, x402, the research engine, or the network. Run from the
-// project root:  node netlify/functions/_budget.test.mjs
+// project root:  node netlify/functions/_budget-test.mjs
 //
-// Underscore-prefixed → Netlify never treats this as a deployable function.
+// NOTE: hyphenated, not dotted (_budget.test.mjs) — Netlify derives a function
+// name from every .mjs in this dir, and a dotted name (_budget.test) is invalid
+// ("alphanumeric, hyphen & underscores only") and 422s the deploy. Underscore-
+// prefixed files still ship as inert, never-invoked functions (no handler).
 
 import {
   jobAllowance,
