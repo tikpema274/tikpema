@@ -18,7 +18,7 @@ const SYSTEM_PROMPT = `You are Tikpema's autonomous on-chain agent on Arc Testne
 You control your own developer-controlled smart-account wallet and may act with its funds only.
 Given a task, respond with ONLY a JSON object, no prose, no markdown fences:
 {
-  "action": "transfer_usdc" | "swap_tokens" | "pay_for_service" | "needs_confirmation" | "none",
+  "action": "transfer_usdc" | "swap_tokens" | "pay_for_service" | "plan" | "needs_confirmation" | "none",
   "to": "0x... (required if action is transfer_usdc)",
   "amountUsdc": number (required if action is transfer_usdc),
   "tokenIn": "USDC | EURC (required if action is swap_tokens)",
@@ -26,6 +26,7 @@ Given a task, respond with ONLY a JSON object, no prose, no markdown fences:
   "amountIn": number (required if action is swap_tokens),
   "payTo": "0x... (required if action is pay_for_service)",
   "payAmountUsdc": number (required if action is pay_for_service),
+  "steps": [ { "type": "transfer_usdc"|"swap_tokens"|"pay_for_service", ...that action's fields } ] (required if action is plan; 2+ ordered steps),
   "unmetCondition": "string (required if action is needs_confirmation) — the part of the task you cannot fulfill",
   "reasoning": "one sentence"
 }
@@ -33,7 +34,8 @@ Choose "none" if the task is unclear, unsafe, or not a transfer.
 You can execute immediate USDC transfers and same-chain token swaps. You CANNOT schedule payments for a future time, set up recurring/conditional payments, or wait.
 If a task asks for a transfer but attaches a condition you cannot fulfil — a specific time ("at 23.25", "tonight", "in an hour"), a recurring schedule, or a trigger ("when X happens") — you MUST choose action "needs_confirmation", put the unfulfillable part in "unmetCondition", and do NOT choose transfer_usdc. Only choose transfer_usdc when the transfer is unconditional and can run right now.
 For a swap (e.g. "swap 5 USDC to EURC", "convert 2 EURC into USDC"), choose action "swap_tokens" with tokenIn, tokenOut, and amountIn. Only these tokens are supported: USDC, EURC. tokenIn and tokenOut must differ.
-A plain "send/pay X USDC to 0x..." is a transfer_usdc (your regular balance). Choose "pay_for_service" ONLY when the task explicitly says to pay FROM the Gateway / unified balance, or to pay FOR a service, with payTo and payAmountUsdc. When unsure between the two, prefer transfer_usdc.`;
+A plain "send/pay X USDC to 0x..." is a transfer_usdc (your regular balance). Choose "pay_for_service" ONLY when the task explicitly says to pay FROM the Gateway / unified balance, or to pay FOR a service, with payTo and payAmountUsdc. When unsure between the two, prefer transfer_usdc.
+If a task asks for MULTIPLE actions in sequence (e.g. "swap 2 USDC to EURC then pay 1 USDC to 0x...", "send A then swap B"), choose action "plan" with an ordered "steps" array, each step being one transfer_usdc/swap_tokens/pay_for_service with that action's own fields. Use plan ONLY for genuinely multi-action tasks; a single action stays its own action. A multi-step task is NOT a needs_confirmation — needs_confirmation is only for scheduling/conditional/timing you cannot fulfil.`;
 
 async function decide(task) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -97,6 +99,45 @@ export async function handler(event) {
           `I can only send USDC immediately — I can't schedule or set conditions. ` +
           `This task asked for: "${decision.unmetCondition || "a condition I can't fulfil"}". ` +
           `Resend the task without that part if you'd like me to send now.`,
+      });
+    }
+
+    // Multi-step: propose a plan for confirmation (does NOT execute here).
+    // The client holds the returned plan and POSTs it to agent-execute-plan
+    // after the user confirms. Total cap is checked here so we never offer an
+    // over-cap plan; the executor re-checks it authoritatively at run time.
+    if (decision.action === "plan") {
+      const steps = Array.isArray(decision.steps) ? decision.steps : [];
+      if (steps.length < 2) {
+        return json(200, { executed: false, decision, blocked: "a plan needs 2+ steps" });
+      }
+      const KINDS = new Set(["transfer_usdc", "swap_tokens", "pay_for_service"]);
+      for (const s of steps) {
+        if (!KINDS.has(s?.type)) {
+          return json(200, { executed: false, decision, blocked: `unknown step type "${s?.type}"` });
+        }
+      }
+      const maxSpendPlan = Number(process.env.AGENT_MAX_SPEND_USDC || "1");
+      let totalUsdc = 0;
+      try {
+        for (const s of steps) totalUsdc += await valueOfStep(s);
+      } catch (e) {
+        return json(200, { executed: false, decision, blocked: `cannot value plan: ${e.message}` });
+      }
+      if (totalUsdc > maxSpendPlan) {
+        return json(200, {
+          executed: false,
+          decision,
+          blocked: `plan total ~${totalUsdc.toFixed(2)} exceeds AGENT_MAX_SPEND_USDC (${maxSpendPlan})`,
+        });
+      }
+      return json(200, {
+        executed: false,
+        needsConfirm: true,
+        decision,
+        plan: steps,
+        totalUsdc,
+        message: `This is a ${steps.length}-step plan totaling ~${totalUsdc.toFixed(2)}. Confirm to execute.`,
       });
     }
 
