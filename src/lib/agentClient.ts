@@ -24,4 +24,7 @@ export const agentClient = {
   // Autonomous action: the agent's Claude brain decides, then (if the action
   // is allowed and within the spend guard) executes on-chain, gas sponsored.
   act: (task: string) => post("/api/agent-act", { task }),
+
+  // Execute a confirmed multi-step plan (turn 2 of plan->confirm->execute).
+  executePlan: (plan: unknown[]) => post("/api/agent-execute-plan", { plan }),
 };
