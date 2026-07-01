@@ -11,6 +11,8 @@
 // No on-chain read, no wallet, no signing, no transaction.
 
 import { exaSearch } from "./_exa.mjs";
+import { canSpend, recordSpend, recordBlocked } from "./_budget.mjs";
+import { payX402 } from "./_x402.mjs";
 
 // Current Anthropic web search server tool (GA — no beta header).
 const WEB_SEARCH_TOOL = { type: "web_search_20260209", name: "web_search", max_uses: 3 };
@@ -39,6 +41,96 @@ export async function callAnthropic(apiKey, model, messages, systemPrompt, tools
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error?.message || "Anthropic call failed");
   return data;
+}
+
+// ── Autonomous mid-research purchase loop (Phase 2a, Step 2a-3) ───────────────
+// After the initial Exa retrieval, the agent decides whether ONE paid dataset
+// would materially improve the brief. If so, the budget spine gates it; if
+// allowed, we buy it from our own testnet stand-in seller via x402 and fold the
+// facts into the grounding. Testnet only, our own seller. Graceful degradation:
+// a decline, a budget block, or ANY purchase failure degrades to Exa-only
+// grounding — a purchase problem must never fail the research job.
+
+// Where the recorded spend is attributed in the audit trail.
+const DATA_SELLER_SOURCE = "x402-quote (testnet stand-in)";
+
+// Fixed stand-in price used for the pre-purchase budget check. Matches the
+// seller's price (~0.001 USDC); overridable via DATA_PURCHASE_USDC.
+function dataPurchaseUsdc() {
+  const n = Number(process.env.DATA_PURCHASE_USDC);
+  return Number.isFinite(n) && n > 0 ? n : 0.001;
+}
+
+// The purchase-decision system prompt: a binary buy/skip over the ONE available
+// stand-in dataset (no seller menu). The model sees the question + the sources
+// already retrieved, and buys only if they're insufficient.
+const DATA_DECISION_SYSTEM = `You are a research analyst deciding whether to purchase ONE additional paid dataset to improve a client brief. You are given the research question and the sources already retrieved. Exactly one paid dataset is available at a fixed low price: a small, curated, authoritative fact set relevant to the question. Decide whether the already-retrieved sources are INSUFFICIENT and the paid dataset would MATERIALLY improve the brief's accuracy or citations. Respond with ONLY JSON: {"buy": <boolean>, "justification": "<one sentence>"} — no markdown, no fences, no preamble.`;
+
+async function decidePurchase(apiKey, model, question, groundingBlock) {
+  const user =
+    `Research question:\n${question}\n\n` +
+    `Sources already retrieved:\n${groundingBlock || "(none)"}\n\n` +
+    `Should we buy the one available paid dataset? Respond with ONLY the JSON.`;
+  const data = await callAnthropic(apiKey, model, [{ role: "user", content: user }], DATA_DECISION_SYSTEM, []);
+  const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+  return extractJson(text);
+}
+
+// Run the decision → gate → buy sequence and return the purchased facts (an
+// array of { claim, source }), or [] if we didn't buy for any reason. Never
+// throws: every failure path logs and returns [] so research proceeds Exa-only.
+// `store` is the optional injectable budget store (undefined → Netlify Blobs).
+async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jobPrice, store, forceDecision }) {
+  try {
+    // 1. Decision call — buy or not? `forceDecision` is a TEST-ONLY seam that
+    // injects the { buy, justification } verdict so the buy-branch mechanics are
+    // deterministically provable; production never sets it, so the genuine
+    // Claude decision call runs.
+    const decision = forceDecision ?? (await decidePurchase(apiKey, model, question, groundingBlock));
+    const justification = decision?.justification || "(no justification)";
+    if (!decision?.buy) {
+      console.log(`[research] purchase decision: SKIP — ${justification}`);
+      return [];
+    }
+    const amountUsdc = dataPurchaseUsdc();
+    console.log(`[research] purchase decision: BUY ($${amountUsdc}) — ${justification}`);
+
+    // 2. Budget gate.
+    const gate = await canSpend({ jobId, jobPriceUsdc: jobPrice, amountUsdc, store });
+    if (!gate.allowed) {
+      console.log(`[research] budget BLOCKED: ${gate.reason}`);
+      await recordBlocked({ jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: gate.reason, store });
+      return [];
+    }
+    console.log(`[research] budget ALLOWED — purchasing…`);
+
+    // 3. Purchase (graceful degradation — do NOT record spend until confirmed).
+    const res = await payX402({ sellerUrl: process.env.DATA_SELLER_URL, jobContext: { jobId, jobPrice } });
+    const facts = res?.body?.sellerBody?.dataset?.facts;
+    if (!res?.body?.executed || !Array.isArray(facts) || facts.length === 0) {
+      console.warn(
+        `[research] purchase yielded no data (NO spend recorded): status=${res?.status} executed=${res?.body?.executed}`
+      );
+      return [];
+    }
+
+    // 4. Record spend ONLY on confirmed success. Record the actual price paid.
+    const paidUsdc = res.body.priceUsdc ?? amountUsdc;
+    await recordSpend({
+      jobId,
+      jobPriceUsdc: jobPrice,
+      amountUsdc: paidUsdc,
+      source: DATA_SELLER_SOURCE,
+      justification,
+      store,
+    });
+    console.log(`[research] purchased ${facts.length} facts for $${paidUsdc} — spend recorded`);
+    return facts;
+  } catch (e) {
+    // ANY error degrades to Exa-only. No spend is recorded on the throw path.
+    console.warn(`[research] purchase loop error (degrading to Exa-only): ${e.message}`);
+    return [];
+  }
 }
 
 export async function research(
@@ -70,13 +162,35 @@ export async function research(
     try {
       const exaResults = await exaSearch(question);
 
-      // Numbered grounding block the model must rely on exclusively.
-      const groundingBlock = exaResults
-        .map(
-          (r, i) =>
-            `[${i + 1}] ${r.title} (${r.url}, ${r.publishedDate})\n${r.text}`
-        )
-        .join("\n\n");
+      // Numbered grounding entries the model must rely on exclusively.
+      const exaEntries = exaResults.map(
+        (r, i) => `[${i + 1}] ${r.title} (${r.url}, ${r.publishedDate})\n${r.text}`
+      );
+
+      // ── Autonomous mid-research purchase (Phase 2a) ────────────────────────
+      // Only when job context is present (jobId + jobPrice), so the budget gate
+      // can compute the per-job allowance. maybeBuyData never throws: on decline,
+      // block, or failure it returns [] and we synthesize from Exa alone.
+      let purchasedFacts = [];
+      if (jobId != null && jobPrice != null) {
+        purchasedFacts = await maybeBuyData({
+          apiKey,
+          model,
+          question,
+          groundingBlock: exaEntries.join("\n\n"),
+          jobId,
+          jobPrice,
+          store: opts.budgetStore,
+          forceDecision: opts.forceDecision, // test-only; undefined in production
+        });
+      }
+
+      // Merge: fold purchased {claim, source} facts into the grounding block,
+      // continuing the numbering after the Exa entries (claim→text, source→url).
+      const purchasedEntries = purchasedFacts.map(
+        (f, i) => `[${exaResults.length + i + 1}] Purchased data (${f.source})\n${f.claim}`
+      );
+      const groundingBlock = [...exaEntries, ...purchasedEntries].join("\n\n");
 
       const exaUser =
         question +
@@ -101,10 +215,15 @@ export async function research(
       const decision = extractJson(text);
 
       if (decision) {
-        // Override sources with EXACTLY what Exa retrieved — the brief can't
-        // cite anything that wasn't actually fetched.
-        decision.sources = exaResults.map((r) => ({ title: r.title, url: r.url }));
-        return { question, model, decision, exaUsed: true };
+        // Override sources with EXACTLY what was actually fetched — Exa results
+        // PLUS any purchased facts. Merging the purchased sources here (not just
+        // the grounding block) is what lets the brief cite them; without it the
+        // Exa-only override would silently drop them.
+        decision.sources = [
+          ...exaResults.map((r) => ({ title: r.title, url: r.url })),
+          ...purchasedFacts.map((f) => ({ title: f.claim, url: f.source })),
+        ];
+        return { question, model, decision, exaUsed: true, purchasedFacts: purchasedFacts.length };
       }
       return { question, model, decision: null, raw: text, warning: "unparseable (exa path)", exaUsed: true };
     } catch (e) {
