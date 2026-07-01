@@ -16,15 +16,16 @@
 //      payment-signature header.
 //   4. Seller settles via Circle Gateway and returns 200 + PAYMENT-RESPONSE.
 //
-// WALLET / SIGNING. The agent wallet is a Circle DEV-CONTROLLED SCA — Circle
-// custodies the key, so there is no local private key and the lib's high-level
-// GatewayClient (which wants a raw privateKey) is unusable. Instead we drive the
-// low-level BatchEvmScheme with a custom BatchEvmSigner that delegates signing to
-// Circle's signTypedData API. For an SCA that returns an ERC-1271 signature; the
-// Gateway facilitator verifies it accordingly. Unlike the swap plane there is no
-// approve/permit fallback to worry about here: Gateway batching authorizes
-// against an ALREADY-DEPOSITED balance (see gateway-deposit.mjs), so the signed
-// authorization IS the spend — no on-chain allowance step.
+// WALLET / SIGNING. The batched Gateway scheme requires ecrecover(sig) == from —
+// there is NO depositor/signer split in the batched header, so the payer must be
+// an EOA that both holds the Gateway balance and signs. We use a Circle
+// DEV-CONTROLLED EOA (DELEGATE_ADDRESS); Circle custodies the key, so there is no
+// local private key. We drive the low-level BatchEvmScheme with a custom
+// BatchEvmSigner that routes signing to Circle's signTypedData API for that EOA,
+// yielding a plain ECDSA signature that recovers to `from`. Unlike the swap plane
+// there is no approve/permit fallback: Gateway batching authorizes against an
+// ALREADY-DEPOSITED balance (the payer's own, funded via depositFor), so the
+// signed authorization IS the spend — no on-chain allowance step.
 //
 // Synchronous (NOT -background): the buyer holds the connection open across the
 // 402 → pay → 200 round trip.
@@ -96,11 +97,16 @@ export async function handler(event) {
   const body = parseBody(event);
   const sellerUrl = body.url || DEFAULT_SELLER_URL;
 
-  const address = process.env.AGENT_WALLET_ADDRESS;
-  if (!address) {
-    return json(400, { error: "AGENT_WALLET_ADDRESS not set — run agent-init." });
+  // x402 BUYER wallet. The batched Gateway scheme requires ecrecover(sig) == from
+  // (verified empirically) — there is NO depositor/signer split in the batched
+  // header, so the payer must be an EOA that BOTH holds the Gateway balance AND
+  // signs. We reuse the delegate EOA (DELEGATE_ADDRESS) as that payer; its own
+  // Gateway balance is funded via depositFor from the SCA. from == signer == this
+  // EOA. (An SCA can't be the payer here: its ERC-1271 sig doesn't ecrecover.)
+  const payer = process.env.DELEGATE_ADDRESS;
+  if (!payer) {
+    return json(400, { error: "DELEGATE_ADDRESS not set — no EOA payer for x402." });
   }
-  const walletId = process.env.AGENT_WALLET_ID || null;
 
   let step = "challenge";
   try {
@@ -163,9 +169,9 @@ export async function handler(event) {
     const client = circle();
     const signer = circleSigner({
       client,
-      address,
-      walletId,
-      walletAddress: address,
+      address: payer,             // from = payer EOA → sources the payer's OWN Gateway balance
+      walletId: null,             // resolve the EOA wallet by address + blockchain
+      walletAddress: payer,       // Circle signs with the SAME payer EOA → ecrecover(sig) == from
       blockchain: ARC.blockchain,
     });
     const scheme = new BatchEvmScheme(signer);
@@ -238,7 +244,7 @@ export async function handler(event) {
     return json(200, {
       executed: true,
       seller: sellerUrl,
-      payer: address,
+      payer,
       priceUsdc,
       atomic,
       payTo: requirements.payTo,
