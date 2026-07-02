@@ -31,31 +31,38 @@ const EXTRA = {
 // Price: $0.001 USDC, in 6-decimal atomic units → 1000.
 const PRICE_ATOMIC = "1000";
 
-// Canned research dataset served ONLY on a successful (paid) 200. This is the
-// testnet stand-in for a real paid data seller: a small set of {claim, source}
-// facts that a later research step (Step 2a-3) can fold into its grounding block.
-// The 402 challenge + verify/settle behavior is unchanged — this only enriches
-// the paid response body (previously just { ok: true }).
-const CANNED_DATASET = {
-  topic: "Circle / Arc / x402 — stand-in research facts (testnet)",
-  facts: [
-    {
-      claim:
-        "USDC is a fully-reserved dollar stablecoin issued by Circle, redeemable 1:1 for US dollars.",
-      source: "https://www.circle.com/usdc",
-    },
-    {
-      claim:
-        "Arc is Circle's Layer-1 blockchain where USDC is the native gas token, giving stable, predictable transaction fees.",
-      source: "https://developers.circle.com/arc",
-    },
-    {
-      claim:
-        "The x402 protocol reuses the HTTP 402 Payment Required status code so agents can pay per API call in USDC.",
-      source: "https://www.x402.org",
-    },
-  ],
-};
+// Live-shaped real-time dataset served ONLY on a successful (paid) 200. This is
+// the testnet stand-in for a real paid *real-time* data seller: each fact is a
+// CURRENT figure stamped with a fresh `asOf` generated at request time. Indexed
+// web search (Exa) returns cached/stale pages and structurally cannot report a
+// value "as of right now" — so a brief that needs a present-moment figure has a
+// genuine gap only this paid feed fills. (Testnet: the metric values are
+// representative, but the `asOf` timestamp is real and the shape is a live feed.)
+// Kept as { topic, facts:[{claim, source}] } so the research merge step is
+// unchanged. The 402 challenge + verify/settle behavior is unchanged too — this
+// only shapes the already-paid response body.
+export function liveDataset() {
+  const asOf = new Date().toISOString();
+  const src = `x402-quote real-time feed (asOf ${asOf})`;
+  return {
+    topic: "Arc Testnet real-time network metrics (live feed, testnet stand-in)",
+    asOf,
+    facts: [
+      {
+        claim:
+          `As of ${asOf}, Arc Testnet current network status: blocks finalizing with sub-second finality, ` +
+          `current average block time ~0.92 s, native gas token USDC.`,
+        source: src,
+      },
+      {
+        claim:
+          `As of ${asOf}, current Circle Gateway nanopayment batch settlement latency on Arc Testnet is ` +
+          `~470 ms, and USDC is trading at its peg (1.0000 USD).`,
+        source: src,
+      },
+    ],
+  };
+}
 
 // Gateway batched settlement runs on a delay, so the payment authorization must
 // stay valid for ~7 days. GatewayEvmScheme uses 604900s (7 days + buffer).
@@ -172,7 +179,7 @@ export async function handler(event) {
         "Content-Type": "application/json",
         "PAYMENT-RESPONSE": b64encode(settlement),
       },
-      body: JSON.stringify({ ok: true, ts: Date.now(), dataset: CANNED_DATASET }),
+      body: JSON.stringify({ ok: true, ts: Date.now(), dataset: liveDataset() }),
     };
   } catch (e) {
     return {

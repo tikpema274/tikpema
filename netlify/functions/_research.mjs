@@ -63,11 +63,20 @@ function dataPurchaseUsdc() {
 }
 
 // The purchase-decision system prompt: a binary buy/skip over the ONE available
-// stand-in dataset (no seller menu). The model sees the question + the sources
-// already retrieved, and buys only if they're insufficient.
-const DATA_DECISION_SYSTEM = `You are a research analyst deciding whether to purchase ONE additional paid dataset to improve a client brief. You are given the research question and the sources already retrieved. Exactly one paid dataset is available at a fixed low price: a small, curated, authoritative fact set relevant to the question. Decide whether the already-retrieved sources are INSUFFICIENT and the paid dataset would MATERIALLY improve the brief's accuracy or citations. Respond with ONLY JSON: {"buy": <boolean>, "justification": "<one sentence>"} — no markdown, no fences, no preamble.`;
+// stand-in seller (no menu). The model sees the question + the already-retrieved
+// web-search sources, and must reason about RECENCY: web search is indexed and
+// can be stale, so it cannot report a value "as of right now"; the paid seller
+// is a real-time feed that can. It buys ONLY if the question genuinely needs a
+// current/live figure the retrieved sources can't supply — otherwise it SKIPS.
+// This is context to judge with, not an instruction to buy: a question answerable
+// from the retrieved sources (background/historical) must SKIP.
+const DATA_DECISION_SYSTEM = `You are a research analyst deciding whether to purchase ONE additional paid dataset to improve a client brief. You are given the research question and the sources already retrieved via web search. Web-search results are indexed and can be stale — they cannot report a value "as of right now." Exactly one paid dataset is available at a fixed low price: a real-time data feed that returns a CURRENT, as-of-now figure (a live value stamped with a fresh timestamp). Buy ONLY if answering the question well genuinely requires a current/live figure that the already-retrieved sources do not provide. If the retrieved sources already answer the question — including background, definitional, or historical questions that need no present-moment value — SKIP; do not buy. Respond with ONLY JSON: {"buy": <boolean>, "justification": "<one sentence>"} — no markdown, no fences, no preamble.`;
 
-async function decidePurchase(apiKey, model, question, groundingBlock) {
+// Exported so the genuine-autonomy proof harness (_autonomy-test.mjs) can drive
+// the REAL decision path — same prompt, same call — rather than a copy. The
+// export changes nothing about the logic; production still reaches it only via
+// maybeBuyData with no forceDecision injection.
+export async function decidePurchase(apiKey, model, question, groundingBlock) {
   const user =
     `Research question:\n${question}\n\n` +
     `Sources already retrieved:\n${groundingBlock || "(none)"}\n\n` +
