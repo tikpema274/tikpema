@@ -1,11 +1,9 @@
 // _research.mjs — shared, reusable research engine.
 //
-// The web-search + pause-turn-resume loop, extracted from research-background.mjs
-// so multiple endpoints can reuse it. The ONE difference from the original is
-// that the system prompt is now a parameter rather than a module constant:
-// callers pass the prompt that frames the task. Everything else — the resume
-// loop, JSON extraction, and the { question, model, decision } return shape —
-// is byte-identical to research-background.mjs's original.
+// The web-search + pause-turn-resume loop, factored out so multiple endpoints
+// can reuse it. The system prompt is a parameter rather than a module constant:
+// callers pass the prompt that frames the task. Provides the resume loop, JSON
+// extraction, and the { question, model, decision } return shape.
 //
 // READ ONLY: takes a free-form question string and calls Claude with web search.
 // No on-chain read, no wallet, no signing, no transaction.

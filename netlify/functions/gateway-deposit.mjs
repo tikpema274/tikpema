@@ -6,7 +6,7 @@ import { GATEWAY } from "./_gateway.mjs";
 //
 // EXECUTES. The agent's dev-controlled wallet deposits its OWN USDC into the
 // Circle Gateway Wallet on Arc Testnet, growing its crosschain unified balance.
-// Two on-chain steps, same shape as predict-bet.mjs:
+// Two on-chain steps:
 //   1. approve the Gateway Wallet to pull USDC from the agent wallet
 //   2. deposit(usdcAddress, amount) on the Gateway Wallet
 //

@@ -19,7 +19,7 @@
 // { getJSON, setJSON } adapter). Production defaults to the Netlify Blobs store;
 // tests inject an in-memory store so the caps are provable with zero Netlify
 // runtime. Callers inside a classic-Lambda handler must connectLambda(event)
-// before the Netlify-backed default is used (see predict-status.mjs).
+// before the Netlify-backed default is used.
 
 import { getStore } from "@netlify/blobs";
 

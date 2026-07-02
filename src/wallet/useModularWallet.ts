@@ -271,8 +271,8 @@ export function useModularWallet() {
   );
 
   // Stake USDC on a prediction market as the USER (passkey-signed, gasless).
-  // Mirrors sendUsdc's mechanism and predict-bet.mjs's approve→placeBet sequence:
-  // two sequential user-ops at nonce-key 0, the second sent only after the
+  // Mirrors sendUsdc's mechanism — an approve→placeBet sequence of two
+  // sequential user-ops at nonce-key 0, the second sent only after the
   // approve confirms (so its nonce/allowance are settled). Returns the placeBet
   // tx hash. Separate from sendUsdc — does not touch the Send path.
   const placeBetAsUser = useCallback(

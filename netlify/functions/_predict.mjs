@@ -26,8 +26,8 @@ export function publicClient() {
 // Status enum order from the contract: OPEN, CLOSED, RESOLVED_YES, RESOLVED_NO, CANCELLED.
 export const STATUS = ["OPEN", "CLOSED", "RESOLVED_YES", "RESOLVED_NO", "CANCELLED"];
 
-// Only the reads we use. The placeBet/approve write signatures are passed
-// directly to Circle in predict-bet.mjs (string ABI signatures), not from here.
+// Only the reads we use. Write signatures (placeBet/approve) are not included —
+// nothing in the codebase writes to this contract anymore.
 export const PREDICTION_ABI = [
   {
     type: "function",

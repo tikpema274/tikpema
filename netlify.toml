@@ -51,7 +51,6 @@
   status = 200
 
 [functions]
-  # Web search + multi-round reasoning needs more than the 30s default
   included_files = []
   node_bundler = "esbuild"
   external_node_modules = ["@circle-fin/x402-batching", "@x402/core", "@x402/evm"]

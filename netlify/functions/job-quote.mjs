@@ -1,9 +1,9 @@
 // job-quote.mjs — price a research task before it runs.
 //
 // Given a research question, ask Claude to assess its research complexity and
-// return a suggested USDC budget. This is a slim, web-search-free sibling of
-// predict-analyze-background.mjs: a single synchronous Anthropic call with a
-// small token cap, no tools, returning a clamped budget in [2, 15] USDC.
+// return a suggested USDC budget. A slim, web-search-free call: a single
+// synchronous Anthropic call with a small token cap, no tools, returning a
+// clamped budget in [2, 15] USDC.
 //
 // Input (POST body): { question }
 // Output: { budgetUsdc, reasoning }
