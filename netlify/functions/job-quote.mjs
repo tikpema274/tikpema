@@ -3,7 +3,7 @@
 // Given a research question, ask Claude to assess its research complexity and
 // return a suggested USDC budget. A slim, web-search-free call: a single
 // synchronous Anthropic call with a small token cap, no tools, returning a
-// clamped budget in [2, 15] USDC.
+// clamped budget in [0.20, 0.60] USDC.
 //
 // Input (POST body): { question }
 // Output: { budgetUsdc, reasoning }

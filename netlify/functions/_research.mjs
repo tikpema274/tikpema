@@ -5,8 +5,11 @@
 // callers pass the prompt that frames the task. Provides the resume loop, JSON
 // extraction, and the { question, model, decision } return shape.
 //
-// READ ONLY: takes a free-form question string and calls Claude with web search.
-// No on-chain read, no wallet, no signing, no transaction.
+// SPENDING. The web-search path is read-only (Claude + web search, no funds
+// move). The Exa path, however, can autonomously PURCHASE data mid-research
+// (maybeBuyData → payX402): an on-chain x402 USDC spend, gated by the per-job
+// budget in _budget.mjs. So this module can move money — under budget control —
+// not just read.
 
 import { exaSearch } from "./_exa.mjs";
 import { canSpend, recordSpend, recordBlocked } from "./_budget.mjs";
