@@ -24,14 +24,6 @@
   from = "/api/predict-markets"
   to = "/.netlify/functions/predict-markets"
   status = 200
-[[redirects]]
-  from = "/api/predict-analyze"
-  to = "/.netlify/functions/predict-analyze"
-  status = 200
-[[redirects]]
-  from = "/api/predict-bet"
-  to = "/.netlify/functions/predict-bet"
-  status = 200
 
 # Gateway plane: deposit USDC into the Circle Gateway Wallet (unified balance)
 # and read the unified balance back. Deposit EXECUTES via the dev-controlled
@@ -43,35 +35,6 @@
 [[redirects]]
   from = "/api/gateway-balance"
   to = "/.netlify/functions/gateway-balance"
-  status = 200
-
-# Resolution-proposal plane: agent researches the real-world outcome and
-# PROPOSES a resolution with sources. READ ONLY — a human commits it manually
-# via `cast send resolveMarket(...)`. This function never signs or sends.
-[[redirects]]
-  from = "/api/predict-resolve-propose"
-  to = "/.netlify/functions/predict-resolve-propose"
-  status = 200
-
-# Async analyst plane: start kicks off the background function, status polls it.
-# The -background function is invoked internally by predict-start, so it needs
-# no friendly /api alias of its own.
-[[redirects]]
-  from = "/api/predict-start"
-  to = "/.netlify/functions/predict-start"
-  status = 200
-[[redirects]]
-  from = "/api/predict-status"
-  to = "/.netlify/functions/predict-status"
-  status = 200
-
-# Async resolution-proposal plane: start kicks off predict-resolve-background,
-# which writes to the same "predict-jobs" store, so it reuses predict-status for
-# polling. The -background function is invoked internally by predict-resolve-
-# start, so it needs no friendly /api alias of its own.
-[[redirects]]
-  from = "/api/predict-resolve-start"
-  to = "/.netlify/functions/predict-resolve-start"
   status = 200
 
 # Feedback plane: relay in-app feedback to a Discord webhook (server-side
@@ -92,7 +55,3 @@
   included_files = []
   node_bundler = "esbuild"
   external_node_modules = ["@circle-fin/x402-batching", "@x402/core", "@x402/evm"]
-[functions."predict-analyze"]
-  timeout = 60
-[functions."predict-resolve-propose"]
-  timeout = 60
