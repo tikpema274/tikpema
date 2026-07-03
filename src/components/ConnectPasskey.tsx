@@ -167,6 +167,39 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
             </div>
           )}
 
+          {/* Per-user agent wallet (Brick 2a): the user's OWN provisioned wallet,
+              resolved from their authenticated session. Shown once available;
+              not yet used by the job lifecycle (that's 2b). */}
+          {w.agentWallet && (
+            <div
+              style={{
+                marginTop: 14,
+                padding: "12px 14px",
+                background: "var(--field)",
+                border: "1px solid var(--line)",
+                borderRadius: 10,
+              }}
+            >
+              <div
+                style={{
+                  color: "var(--muted)",
+                  fontSize: "0.75rem",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  marginBottom: 6,
+                }}
+              >
+                Your agent wallet
+              </div>
+              <div className="mono" style={{ color: "var(--paper)", fontSize: "0.85rem", wordBreak: "break-all" }}>
+                {w.agentWallet.address}
+              </div>
+              <div className="status" style={{ marginTop: 6 }}>
+                Balance: {w.agentWallet.balance ?? "…"} USDC
+              </div>
+            </div>
+          )}
+
           <div
             style={{
               marginTop: 22,

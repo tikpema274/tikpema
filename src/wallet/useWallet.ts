@@ -43,6 +43,11 @@ export function useWallet() {
   // Dedupe concurrent auth attempts (e.g. login effect + a hire click racing).
   const authInFlight = useRef<Promise<string> | null>(null);
 
+  // The user's OWN per-user agent wallet (Brick 2a), provisioned + resolved from
+  // the session by /api/my-wallet. Distinct from the login/signing wallet above;
+  // not yet used by the job lifecycle (that's 2b).
+  const [agentWallet, setAgentWallet] = useState<{ address: string; balance: string | null } | null>(null);
+
   const persistSession = useCallback((s: Session | null) => {
     setSession(s);
     try {
@@ -56,6 +61,7 @@ export function useWallet() {
   const clearSession = useCallback(() => {
     authInFlight.current = null;
     persistSession(null);
+    setAgentWallet(null); // a new/cleared session must re-resolve its own wallet
   }, [persistSession]);
 
   const connectRegister = useCallback(
@@ -175,6 +181,37 @@ export function useWallet() {
     }
   }, [activeKind, mmWallet, session, ensureSession]);
 
+  // Resolve (provisioning on first call) the user's OWN agent wallet from their
+  // session. Idempotent server-side — a second call returns the same wallet.
+  const refreshAgentWallet = useCallback(async () => {
+    const token = session?.token;
+    if (!token) return null;
+    // 202 = "provisioning" (a rare sub-convergence race): the mapping exists but
+    // hasn't propagated to reads yet. Retry a few times; the store converges in
+    // ~11s. The common paths (first provision, or a returning user) return 200.
+    for (let i = 0; i < 6; i++) {
+      const r = await fetch("/api/my-wallet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      });
+      if (r.status === 202) {
+        await new Promise((res) => setTimeout(res, 3000));
+        continue;
+      }
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error || "Could not load your wallet");
+      setAgentWallet({ address: data.address, balance: data.balance ?? null });
+      return data;
+    }
+    return null; // still provisioning; a later refresh will resolve it
+  }, [session]);
+
+  // Once a session exists (login, hire-time auth, or a restored session), resolve
+  // the user's own wallet so the UI can show it. Best-effort.
+  useEffect(() => {
+    if (session && !agentWallet) refreshAgentWallet().catch(() => {});
+  }, [session, agentWallet, refreshAgentWallet]);
+
   // Refresh + cache the MetaMask balance (the modular hook owns its own).
   const mmRefreshBalance = useCallback(async () => {
     if (!mmWallet) return undefined;
@@ -214,5 +251,8 @@ export function useWallet() {
     clearSession,
     sessionIdentity: session?.identity ?? null,
     isAuthenticated: !!session && session.exp * 1000 > Date.now(),
+    // Per-user agent wallet (Brick 2a): the caller's own provisioned wallet.
+    agentWallet,
+    refreshAgentWallet,
   };
 }

@@ -14,6 +14,13 @@
   to = "/.netlify/functions/auth-verify"
   status = 200
 
+# Per-user agent wallet (Brick 2a): resolve/provision the caller's own wallet
+# from their session. No funds move.
+[[redirects]]
+  from = "/api/my-wallet"
+  to = "/.netlify/functions/my-wallet"
+  status = 200
+
 # Friendly /api/* routes -> serverless functions (the AGENT plane).
 [[redirects]]
   from = "/api/agent-init"
