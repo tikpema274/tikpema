@@ -102,20 +102,40 @@ export function useWallet() {
     }
   }, [clearSession]);
 
-  // Resolve the active wallet's identity + message signer for auth.
-  const authContext = useCallback((): {
-    address: string;
-    method: WalletKind;
-    sign: (message: string) => Promise<string>;
-  } | null => {
+  // Resolve the active wallet's identity + how to answer an auth challenge.
+  // MetaMask signs a message (ecrecover); passkey signs a hash off-chain
+  // (WebAuthn assertion) — no on-chain step, works before the SCA is deployed.
+  type AuthCtx =
+    | { address: string; kind: "metamask"; signMessage: (m: string) => Promise<string> }
+    | {
+        address: string;
+        kind: "passkey";
+        credentialId: string;
+        publicKey: string;
+        signHash: (h: `0x${string}`) => Promise<{ signature: string; webauthn: unknown }>;
+      };
+  const authContext = useCallback((): AuthCtx | null => {
     if (activeKind === "metamask" && mmWallet) {
-      return { address: mmWallet.address, method: "metamask", sign: mmWallet.signMessage };
+      return { address: mmWallet.address, kind: "metamask", signMessage: mmWallet.signMessage };
     }
-    if (modular.address) {
-      return { address: modular.address, method: "modular", sign: modular.signAuthMessage };
+    if (modular.address && modular.credentialId && modular.credentialPublicKey) {
+      return {
+        address: modular.address,
+        kind: "passkey",
+        credentialId: modular.credentialId,
+        publicKey: modular.credentialPublicKey,
+        signHash: modular.signPasskeyChallenge,
+      };
     }
     return null;
-  }, [activeKind, mmWallet, modular.address, modular.signAuthMessage]);
+  }, [
+    activeKind,
+    mmWallet,
+    modular.address,
+    modular.credentialId,
+    modular.credentialPublicKey,
+    modular.signPasskeyChallenge,
+  ]);
 
   // Return a valid session token for the connected wallet, authenticating (one
   // signature) if we don't already hold a live one. The auth proof is a plain
@@ -135,24 +155,43 @@ export function useWallet() {
     }
     if (authInFlight.current) return authInFlight.current;
 
-    // The server speaks "passkey" | "metamask"; our internal kind is "modular".
-    const method = ctx.method === "metamask" ? "metamask" : "passkey";
+    const method = ctx.kind; // server speaks "passkey" | "metamask"
 
     const run = (async () => {
       const chRes = await fetch("/api/auth-challenge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address: ctx.address, method }),
+        body: JSON.stringify({
+          address: ctx.address,
+          method,
+          ...(ctx.kind === "passkey" ? { credentialId: ctx.credentialId } : {}),
+        }),
       });
       const ch = await chRes.json();
       if (!chRes.ok) throw new Error(ch?.error || "Could not start authentication");
 
-      const signature = await ctx.sign(ch.message);
+      let verifyBody: Record<string, unknown>;
+      if (ctx.kind === "metamask") {
+        const signature = await ctx.signMessage(ch.message);
+        verifyBody = { address: ctx.address, method, nonce: ch.nonce, signature };
+      } else {
+        // Passkey: sign the challenge hash → off-chain WebAuthn assertion.
+        const { signature, webauthn } = await ctx.signHash(ch.hash);
+        verifyBody = {
+          address: ctx.address,
+          method,
+          credentialId: ctx.credentialId,
+          publicKey: ctx.publicKey, // used only on first-use registration
+          nonce: ch.nonce,
+          signature,
+          webauthn,
+        };
+      }
 
       const vRes = await fetch("/api/auth-verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address: ctx.address, method, nonce: ch.nonce, signature }),
+        body: JSON.stringify(verifyBody),
       });
       const data = await vRes.json();
       if (!vRes.ok) throw new Error(data?.error || "Authentication failed");
@@ -169,17 +208,16 @@ export function useWallet() {
     }
   }, [authContext, session, persistSession]);
 
-  // Best-effort login-time auth for MetaMask (an EOA is always "deployed", so it
-  // verifies immediately). Passkey auth is deferred to the first protected action
-  // because the smart account must be deployed (its first user-op) before the
-  // server can verify its ERC-1271 signature — so we don't prompt-then-fail here.
+  // Best-effort login-time auth for BOTH paths. Passkey now verifies OFF-CHAIN
+  // (WebAuthn), so it no longer needs a deployed smart account — a fresh passkey
+  // user can get a session immediately at login with no on-chain step.
   useEffect(() => {
-    if (activeKind === "metamask" && mmWallet && !session) {
+    if ((activeKind === "metamask" || activeKind === "modular") && !session && authContext()) {
       ensureSession().catch(() => {
-        /* user dismissed the signature — they'll be prompted again at hire */
+        /* user dismissed the passkey/signature — they'll be prompted again at hire */
       });
     }
-  }, [activeKind, mmWallet, session, ensureSession]);
+  }, [activeKind, mmWallet, modular.address, session, ensureSession, authContext]);
 
   // Resolve (provisioning on first call) the user's OWN agent wallet from their
   // session. Idempotent server-side — a second call returns the same wallet.

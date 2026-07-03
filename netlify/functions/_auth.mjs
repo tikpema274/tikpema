@@ -84,6 +84,15 @@ export function buildMessage({ address, method, nonce }) {
   ].join("\n");
 }
 
+// --- Passkey (WebAuthn) challenge -------------------------------------------
+// The 32-byte hash the authenticator signs. Derived deterministically from the
+// (server-issued, unforgeable) nonce so the server can recompute it on verify.
+// Passkey identity is verified OFF-CHAIN (webauthn-p256.verify against the stored
+// public key) — no on-chain ERC-1271, so login needs no deployed smart account.
+export function passkeyChallengeHash(nonce) {
+  return "0x" + crypto.createHash("sha256").update(String(nonce)).digest("hex");
+}
+
 // --- Session token: compact HMAC-signed `<payloadB64>.<hmac>` ---------------
 export function issueSession({ address, method }) {
   const payload = {

@@ -17,6 +17,7 @@ import {
   createBundlerClient,
   toWebAuthnAccount,
 } from "viem/account-abstraction";
+import { sign as signWebauthn } from "webauthn-p256";
 import { arcTestnet } from "../config/chain";
 import { CONTRACTS, USDC_DECIMALS } from "../config/contracts";
 
@@ -185,6 +186,9 @@ export function useModularWallet() {
   const [status, setStatus] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [usdcBalance, setUsdcBalance] = useState<string | null>(null);
+  // The WebAuthn credential (id + P-256 public key) behind the smart account.
+  // Used for OFF-CHAIN session auth (webauthn-p256) — no on-chain step to log in.
+  const [credential, setCredential] = useState<{ id: string; publicKey: string } | null>(null);
 
   // Read the connected smart account's USDC balance and format it (e.g. "12.50").
   const refreshBalance = useCallback(async () => {
@@ -209,16 +213,17 @@ export function useModularWallet() {
     refreshBalance().catch(() => setUsdcBalance(null));
   }, [account, refreshBalance]);
 
-  // Sign a plain message with the passkey smart account (ERC-1271). Used as the
-  // session auth proof — the server verifies it on-chain via verifyMessage. This
-  // triggers a WebAuthn tap but moves no funds. Requires the account to be
-  // deployed (its first user-op), so callers authenticate after createJob.
-  const signAuthMessage = useCallback(
-    async (message: string) => {
-      if (!account) throw new Error("Connect a wallet first");
-      return account.signMessage({ message });
+  // Sign the server's challenge hash with the passkey (a WebAuthn assertion).
+  // The server verifies it OFF-CHAIN against the stored public key — no on-chain
+  // ERC-1271, so this works for a fresh passkey whose smart account is not yet
+  // deployed. Triggers a passkey tap; moves no funds.
+  const signPasskeyChallenge = useCallback(
+    async (hash: `0x${string}`) => {
+      if (!credential) throw new Error("Connect a passkey first");
+      const { signature, webauthn } = await signWebauthn({ hash, credentialId: credential.id });
+      return { signature, webauthn };
     },
-    [account]
+    [credential]
   );
 
   const connect = useCallback(async (mode: WebAuthnMode, username: string) => {
@@ -235,6 +240,8 @@ export function useModularWallet() {
         owner: toWebAuthnAccount({ credential }),
       });
       setAccount(smartAccount);
+      // Keep the credential (id + public key) for off-chain session auth.
+      setCredential({ id: credential.id, publicKey: credential.publicKey });
       setStatus(`Connected: ${smartAccount.address}`);
       return smartAccount;
     } catch (e: any) {
@@ -513,7 +520,9 @@ export function useModularWallet() {
     placeBetAsUser,
     createJobAsUser,
     fundJobAsUser,
-    signAuthMessage,
+    signPasskeyChallenge,
+    credentialId: credential?.id ?? null,
+    credentialPublicKey: credential?.publicKey ?? null,
     usdcBalance,
     refreshBalance,
   };
