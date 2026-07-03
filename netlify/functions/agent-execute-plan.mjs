@@ -1,5 +1,6 @@
 import { json, parseBody } from "./_arc.mjs";
 import { executeAction, valueOfStep } from "./_actions.mjs";
+import { requireSession } from "./_auth.mjs";
 
 // POST /api/agent-execute-plan { plan: [ {type, ...}, ... ] }
 //
@@ -20,6 +21,10 @@ import { executeAction, valueOfStep } from "./_actions.mjs";
 //     what's settled vs still batching.
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
+
+  // Auth gate: only an authenticated session may execute an agent-spend plan.
+  const session = requireSession(event);
+  if (!session) return json(401, { error: "Authentication required" });
 
   const { plan } = parseBody(event);
   if (!Array.isArray(plan) || plan.length === 0) {

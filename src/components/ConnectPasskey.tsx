@@ -38,78 +38,144 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
 
   return (
     <div className="plane">
-      <h2>Your Wallet</h2>
+      <div className="panel-eyebrow">Step 01 · Your wallet</div>
+      <h2>Create your wallet</h2>
       <div className="sub">
         {w.activeKind === "metamask"
-          ? "Connected with MetaMask. You sign and pay network fees yourself."
-          : "Your secure wallet — no password needed, just your fingerprint or face. Free to use."}
+          ? "Connected with MetaMask. You sign each action and pay network fees yourself."
+          : "Secured by a passkey — no password, no seed phrase. Just your fingerprint or face, and it's free to use."}
       </div>
 
       {!w.address ? (
-        <div className="row">
-          <input
-            placeholder="Choose a username, then tap Register passkey →"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-          />
-          <button
-            disabled={w.busy || !username.trim()}
-            onClick={() => w.connectRegister(username.trim())}
-          >
-            Register passkey
-          </button>
-          <button disabled={w.busy} onClick={() => w.connectLogin()}>
-            Login
-          </button>
-          {w.connectors.find((c) => c.kind === "metamask")?.isAvailable() && (
-            <button disabled={w.busy} onClick={() => w.connectMetaMask()}>
-              Connect MetaMask
+        <>
+          <div className="row">
+            <input
+              placeholder="Pick a name for your wallet"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && username.trim() && !w.busy)
+                  w.connectRegister(username.trim());
+              }}
+            />
+            <button
+              className="emerald"
+              disabled={w.busy || !username.trim()}
+              onClick={() => w.connectRegister(username.trim())}
+            >
+              {w.busy ? "Creating…" : "Create wallet"}
             </button>
-          )}
-        </div>
+          </div>
+          <div className="sub" style={{ marginTop: 12, marginBottom: 0 }}>
+            Already have one?{" "}
+            <button
+              className="linkbtn"
+              disabled={w.busy}
+              onClick={() => w.connectLogin()}
+            >
+              Log in with your passkey
+            </button>
+            {w.connectors.find((c) => c.kind === "metamask")?.isAvailable() && (
+              <>
+                {"  ·  "}
+                <button
+                  className="linkbtn"
+                  disabled={w.busy}
+                  onClick={() => w.connectMetaMask()}
+                >
+                  Use MetaMask instead
+                </button>
+              </>
+            )}
+          </div>
+        </>
       ) : (
         <>
-          <div className="mono status">
-            {w.activeKind === "metamask" ? "Account" : "Smart account"}: {w.address}
+          <div style={{ color: "var(--success)", fontSize: "0.9rem", fontWeight: 500 }}>
+            ✓ Wallet ready
           </div>
+          <div
+            className="status"
+            style={{
+              marginTop: 10,
+              padding: "12px 14px",
+              background: "var(--field)",
+              border: "1px solid var(--line)",
+              borderRadius: 10,
+            }}
+          >
+            <div style={{ color: "var(--muted)", fontSize: "0.75rem", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6 }}>
+              {w.activeKind === "metamask" ? "Account" : "Your wallet address"}
+            </div>
+            <div className="mono" style={{ color: "var(--paper)", wordBreak: "break-all", fontSize: "0.85rem" }}>
+              {w.address}
+            </div>
+            <div className="row" style={{ marginTop: 12, alignItems: "baseline" }}>
+              <span style={{ fontSize: "1.35rem", fontWeight: 600, color: "var(--paper)" }}>
+                {w.usdcBalance ?? "…"}{" "}
+                <span style={{ fontSize: "0.85rem", color: "var(--muted)", fontWeight: 400 }}>USDC</span>
+              </span>
+              <button disabled={w.busy} onClick={() => w.refreshBalance()} style={{ padding: "6px 12px", fontSize: "0.82rem" }}>
+                Refresh
+              </button>
+            </div>
+          </div>
+
           {w.activeKind === "metamask" && (
-            <div className="sub">
-              Heads up: with MetaMask you pay a small network fee (in USDC) for each transaction.
+            <div className="sub" style={{ marginTop: 12, marginBottom: 0 }}>
+              Heads up: with MetaMask you pay a small network fee (in USDC) for each action.
             </div>
           )}
-          <div className="row" style={{ marginTop: 8 }}>
-            <span className="status">
-              Balance: {w.usdcBalance ?? "…"} USDC
-            </span>
-            <button disabled={w.busy} onClick={() => w.refreshBalance()}>
-              Refresh
-            </button>
-            {/* Always reachable for a connected user, regardless of balance. */}
-            <a
-              className="status"
-              href="https://faucet.circle.com"
-              target="_blank"
-              rel="noreferrer"
-              style={{ marginTop: 0 }}
+
+          {/* Step 02 — funding. The audit's biggest dead-end, so when the wallet
+              is empty this is the loud, guided next action rather than a link. */}
+          {w.usdcBalance === "0.00" ? (
+            <div
+              style={{
+                marginTop: 14,
+                padding: "16px 18px",
+                background: "var(--amber-soft)",
+                border: "1px solid var(--amber-line)",
+                borderRadius: 12,
+              }}
             >
-              Get test USDC ↗
-            </a>
-          </div>
-          {w.usdcBalance === "0.00" && (
-            <div className="sub">
-              Balance is empty — grab some test USDC at{" "}
+              <div className="panel-eyebrow" style={{ marginBottom: 6 }}>
+                Step 02 · Add test USDC
+              </div>
+              <div style={{ fontSize: "0.9rem", color: "var(--paper-dim)", marginBottom: 12, lineHeight: 1.5 }}>
+                Your wallet is empty. Copy your address above, open the faucet,
+                choose <b style={{ color: "var(--paper)" }}>Arc Testnet</b>, paste your
+                address, then come back and tap Refresh.
+              </div>
               <a
                 href="https://faucet.circle.com"
                 target="_blank"
                 rel="noreferrer"
+                style={{ borderBottom: "none" }}
               >
-                faucet.circle.com
+                <button className="emerald" style={{ pointerEvents: "none" }}>
+                  Open the faucet ↗
+                </button>
+              </a>
+            </div>
+          ) : (
+            <div className="sub" style={{ marginTop: 12, marginBottom: 0 }}>
+              Need more?{" "}
+              <a href="https://faucet.circle.com" target="_blank" rel="noreferrer">
+                Get test USDC from the faucet ↗
               </a>
             </div>
           )}
-          <div style={{ marginTop: 16 }}>
-            <h3 style={{ margin: "0 0 4px" }}>Send</h3>
-            <div className="sub">Send test USDC to any address</div>
+
+          <div
+            style={{
+              marginTop: 22,
+              paddingTop: 20,
+              borderTop: "1px solid var(--line)",
+            }}
+          >
+            <h3 style={{ margin: "0 0 4px" }}>Send USDC</h3>
+            <div className="sub" style={{ marginBottom: 12 }}>Optional — send test USDC to any address</div>
             <div className="row">
               <input
                 placeholder="recipient 0x…"
@@ -151,7 +217,7 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
               </div>
             )}
             {sendError && (
-              <div className="status" style={{ color: "#f5a623" }}>{sendError}</div>
+              <div className="status" style={{ color: "var(--warn)" }}>{sendError}</div>
             )}
           </div>
         </>

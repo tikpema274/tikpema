@@ -1,6 +1,7 @@
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS, json, parseBody } from "./_arc.mjs";
 import { GATEWAY } from "./_gateway.mjs";
+import { requireSession } from "./_auth.mjs";
 
 // POST /api/gateway-deposit { amountUsdc: number }
 //
@@ -19,6 +20,10 @@ import { GATEWAY } from "./_gateway.mjs";
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
+
+  // Auth gate: only an authenticated session may move the agent's USDC.
+  const session = requireSession(event);
+  if (!session) return json(401, { error: "Authentication required" });
 
   const { amountUsdc } = parseBody(event);
 

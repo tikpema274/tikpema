@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
-import type { ModularWallet } from "../wallet/useModularWallet";
+import type { useWallet } from "../wallet/useWallet";
 import { JobTimeline, isTerminal } from "./jobTimeline";
 import type { TrackedJob } from "./jobTimeline";
 
-export default function ResearchPanel({ wallet }: { wallet: ModularWallet }) {
+type UnifiedWallet = ReturnType<typeof useWallet>;
+
+export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [hireStatus, setHireStatus] = useState("");
@@ -72,15 +74,16 @@ export default function ResearchPanel({ wallet }: { wallet: ModularWallet }) {
 
   return (
     <div className="plane">
-      <h2>Hire the agent for a research job</h2>
+      <div className="panel-eyebrow">Step 03 · The research desk</div>
+      <h2>Ask your question</h2>
       <div className="sub">
-        Ask a research question, get a price, then hire and fund the agent
-        from your wallet.
+        Ask anything with a factual, sourceable answer. You'll see a price
+        first — hire the analyst only if it looks right.
       </div>
 
       <div className="row" style={{ marginTop: 12 }}>
         <input
-          placeholder="What should the agent research?"
+          placeholder="e.g. What drove the 2023 rise in global egg prices?"
           value={hireQuestion}
           onChange={(e) => setHireQuestion(e.target.value)}
         />
@@ -107,30 +110,45 @@ export default function ResearchPanel({ wallet }: { wallet: ModularWallet }) {
             })
           }
         >
-          Get quote
+          {busy ? "Pricing…" : "Get a price"}
         </button>
       </div>
 
       {quoteDeclined && (
-        <div className="status" style={{ marginTop: 12, color: "#f5a623" }}>
+        <div className="status" style={{ marginTop: 12, color: "var(--warn)" }}>
           {quoteDeclined.reason && <div>{quoteDeclined.reason}</div>}
           <div style={{ marginTop: 4 }}>
-            I do factual research with cited sources, not personal advice. Try
-            rephrasing as a factual question (e.g. "what are the historical
-            returns of index funds" instead of "what should I invest in").
+            The analyst does factual research with cited sources, not personal
+            advice. Try rephrasing as a factual question — e.g. "what are the
+            historical returns of index funds" instead of "what should I invest
+            in".
           </div>
         </div>
       )}
 
       {quote && (
-        <div className="status" style={{ marginTop: 12 }}>
-          <div>
-            Estimated budget: <b>{quote.budgetUsdc} USDC</b>
+        <div
+          className="status"
+          style={{
+            marginTop: 14,
+            padding: "16px 18px",
+            background: "var(--field)",
+            border: "1px solid var(--line)",
+            borderRadius: 12,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <span style={{ color: "var(--muted)", fontSize: "0.8rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Price to research this
+            </span>
+            <span style={{ fontSize: "1.2rem", fontWeight: 600, color: "var(--paper)" }}>
+              {quote.budgetUsdc} USDC
+            </span>
           </div>
           {quote.reasoning && (
-            <div style={{ marginTop: 4 }}>{quote.reasoning}</div>
+            <div style={{ marginTop: 6, color: "var(--paper-dim)" }}>{quote.reasoning}</div>
           )}
-          <div className="row" style={{ marginTop: 12 }}>
+          <div className="row" style={{ marginTop: 14 }}>
             <button
               className="emerald"
               disabled={busy || !wallet.address}
@@ -139,10 +157,20 @@ export default function ResearchPanel({ wallet }: { wallet: ModularWallet }) {
                   setHireStatus("Creating job…");
                   const jobId = await wallet.createJobAsUser(hireQuestion);
 
+                  // Authenticate now — the account is deployed by createJob, so
+                  // the passkey/MetaMask signature can prove ownership. One sign,
+                  // no funds move; the token gates the server spend calls below.
+                  setHireStatus("Authorizing…");
+                  const token = await wallet.ensureSession();
+                  const authHeaders = {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                  };
+
                   setHireStatus("Setting budget…");
                   const r = await fetch("/.netlify/functions/job-set-budget", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: authHeaders,
                     body: JSON.stringify({
                       jobId: jobId.toString(),
                       budgetUsdc: quote.budgetUsdc,
@@ -163,9 +191,9 @@ export default function ResearchPanel({ wallet }: { wallet: ModularWallet }) {
                   // submit once; the backend auto-chains submit→evaluate→settle.
                   // Fire-and-forget: it returns 202 immediately, so don't await.
                   setTrackedJob({ jobId: jobId.toString(), status: "funded" });
-                  fetch("/.netlify/functions/job-submit-background", {
+                  fetch("/.netlify/functions/job-submit", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: authHeaders,
                     body: JSON.stringify({
                       jobId: jobId.toString(),
                       question: hireQuestion,
@@ -177,10 +205,12 @@ export default function ResearchPanel({ wallet }: { wallet: ModularWallet }) {
                 })
               }
             >
-              Hire &amp; fund ({quote.budgetUsdc} USDC)
+              Hire the analyst · {quote.budgetUsdc} USDC
             </button>
             {!wallet.address && (
-              <span className="sub">Register a passkey first to hire.</span>
+              <span className="sub" style={{ margin: 0 }}>
+                Create your wallet above first.
+              </span>
             )}
           </div>
         </div>
@@ -199,7 +229,7 @@ export default function ResearchPanel({ wallet }: { wallet: ModularWallet }) {
       )}
 
       {error && (
-        <div className="status" style={{ marginTop: 14, color: "#f5a623" }}>
+        <div className="status" style={{ marginTop: 14, color: "var(--warn)" }}>
           Error: {error}
         </div>
       )}

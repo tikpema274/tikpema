@@ -1,11 +1,16 @@
 import { json, parseBody } from "./_arc.mjs";
 import { agentPay } from "./_pay.mjs";
+import { requireSession } from "./_auth.mjs";
 
 // POST /api/pay-service { recipientAddress, amountUsdc }
 // Standalone proof of the delegate-signed Gateway spend. Guards enforced HERE,
 // not by any model. Later wired into agent-act as a "pay_for_service" action.
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
+
+  // Auth gate: only an authenticated session may spend from the agent wallet.
+  const session = requireSession(event);
+  if (!session) return json(401, { error: "Authentication required" });
 
   const { recipientAddress, amountUsdc } = parseBody(event);
 

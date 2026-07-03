@@ -2,6 +2,7 @@ import { TxPendingError } from "./_circle.mjs";
 import { json, parseBody, dateAnchor } from "./_arc.mjs";
 import { SWAP_TOKENS } from "./_swap.mjs";
 import { executeAction, valueOfStep } from "./_actions.mjs";
+import { requireSession } from "./_auth.mjs";
 
 // POST /api/agent-act { task: string }
 //
@@ -75,6 +76,11 @@ async function decide(task) {
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
+
+  // Auth gate: only an authenticated session may trigger an agent spend.
+  // session.address is the caller's identity (owner key for Brick 2).
+  const session = requireSession(event);
+  if (!session) return json(401, { error: "Authentication required" });
 
   const { task } = parseBody(event);
   if (!task) return json(400, { error: "Provide a 'task' string" });

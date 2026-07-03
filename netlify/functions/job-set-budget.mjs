@@ -1,5 +1,6 @@
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS, json, parseBody } from "./_arc.mjs";
+import { requireSession } from "./_auth.mjs";
 
 // POST /api/job-set-budget { jobId: number|string, budgetUsdc: number }
 //
@@ -10,6 +11,10 @@ import { ARC, CONTRACTS, USDC_DECIMALS, json, parseBody } from "./_arc.mjs";
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
+
+  // Auth gate: setting a job budget signs an agent-wallet tx — require a session.
+  const session = requireSession(event);
+  if (!session) return json(401, { error: "Authentication required" });
 
   const { jobId, budgetUsdc } = parseBody(event);
 

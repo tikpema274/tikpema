@@ -289,6 +289,12 @@ export async function connectMetaMask() {
     return receipt.transactionHash;
   }
 
+  // Sign a plain message with the EOA (personal_sign). Used as the session auth
+  // proof — the server verifies it off-chain via ecrecover. Moves no funds.
+  async function signMessage(message: string) {
+    return walletClient.signMessage({ account: address, message });
+  }
+
   return {
     kind: "metamask" as const,
     address,
@@ -296,6 +302,7 @@ export async function connectMetaMask() {
     createJobAsUser,
     fundJobAsUser,
     sendUsdc,
+    signMessage,
     // EIP-1193 has no programmatic disconnect; the user manages this in the
     // extension. No-op to satisfy the wallet shape.
     disconnect() {},

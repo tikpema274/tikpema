@@ -209,6 +209,18 @@ export function useModularWallet() {
     refreshBalance().catch(() => setUsdcBalance(null));
   }, [account, refreshBalance]);
 
+  // Sign a plain message with the passkey smart account (ERC-1271). Used as the
+  // session auth proof — the server verifies it on-chain via verifyMessage. This
+  // triggers a WebAuthn tap but moves no funds. Requires the account to be
+  // deployed (its first user-op), so callers authenticate after createJob.
+  const signAuthMessage = useCallback(
+    async (message: string) => {
+      if (!account) throw new Error("Connect a wallet first");
+      return account.signMessage({ message });
+    },
+    [account]
+  );
+
   const connect = useCallback(async (mode: WebAuthnMode, username: string) => {
     setBusy(true);
     try {
@@ -501,6 +513,7 @@ export function useModularWallet() {
     placeBetAsUser,
     createJobAsUser,
     fundJobAsUser,
+    signAuthMessage,
     usdcBalance,
     refreshBalance,
   };

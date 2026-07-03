@@ -20,6 +20,7 @@ import { ARC, CONTRACTS, parseBody } from "./_arc.mjs";
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { extractJson } from "./_research.mjs";
 import { publicClient } from "./_predict.mjs";
+import { requireInternal } from "./_auth.mjs";
 
 // The evaluator is a JUDGE, not a researcher — it weighs an already-written brief
 // against its question. So we deliberately do NOT use _research.mjs's callAnthropic
@@ -99,6 +100,11 @@ export async function handler(event) {
   // Netlify injects into event.blobs. Guard on event.blobs: absent under local
   // `netlify dev` (which configures Blobs globally), and connectLambda throws on it.
   if (event.blobs) connectLambda(event);
+
+  // Internal-only: this settles escrow (complete/reject). It is called solely by
+  // job-submit-background's server-to-server chain, never by the browser, so it
+  // requires the internal token — a direct/anonymous call is rejected.
+  if (!requireInternal(event)) return { statusCode: 401, body: "unauthorized" };
 
   // The forced-reject signal arrives EXPLICITLY in the POST body (set only by
   // C1's triggerRefund), not via the eventually-consistent Blob `refund` flag.

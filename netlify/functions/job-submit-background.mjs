@@ -20,6 +20,7 @@ import { ARC, CONTRACTS, USDC_DECIMALS, parseBody, dateAnchor } from "./_arc.mjs
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { research } from "./_research.mjs";
 import { publicClient } from "./_predict.mjs";
+import { requireInternal, internalToken } from "./_auth.mjs";
 
 // Research-brief prompt — NOT the prediction-market analyst prompt. The agent is
 // a paid research analyst; the deliverable must be evidence-backed and cite real
@@ -111,6 +112,12 @@ export async function handler(event) {
   // already configures Blobs via the global env), and connectLambda throws on it.
   if (event.blobs) connectLambda(event);
 
+  // Internal-only: reached via the synchronous job-submit front door (which
+  // authenticates the user), never directly by the browser. Requires the
+  // internal token — a direct/anonymous call does no work. (Background functions
+  // always return 202, so this early-return blocks the spend, not the status.)
+  if (!requireInternal(event)) return { statusCode: 401, body: "unauthorized" };
+
   const { jobId, question } = parseBody(event);
   if (!jobId) {
     // Without a jobId there is nowhere to write the result — nothing to do.
@@ -132,7 +139,12 @@ export async function handler(event) {
     try {
       const evalRes = await fetch(`${base}/.netlify/functions/job-evaluate-background`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // Server-to-server auth: proves this is the legitimate internal chain,
+          // so job-evaluate can reject direct/anonymous calls.
+          "x-internal-token": internalToken(),
+        },
         body: JSON.stringify({ jobId, ...extra }),
       });
       if (evalRes.status !== 202) {

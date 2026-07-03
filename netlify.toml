@@ -3,6 +3,17 @@
   publish = "dist"
   functions = "netlify/functions"
 
+# Session auth (Brick 1): SIWE-style challenge + verify. Issues the session token
+# that the money-moving endpoints require. No funds move here.
+[[redirects]]
+  from = "/api/auth-challenge"
+  to = "/.netlify/functions/auth-challenge"
+  status = 200
+[[redirects]]
+  from = "/api/auth-verify"
+  to = "/.netlify/functions/auth-verify"
+  status = 200
+
 # Friendly /api/* routes -> serverless functions (the AGENT plane).
 [[redirects]]
   from = "/api/agent-init"
