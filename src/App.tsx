@@ -1,5 +1,6 @@
 import ConnectPasskey from "./components/ConnectPasskey";
 import ResearchPanel from "./components/ResearchPanel";
+import MyAgentPanel from "./components/MyAgentPanel";
 import FeedbackPanel from "./components/FeedbackPanel";
 import { useWallet } from "./wallet/useWallet";
 
@@ -78,6 +79,7 @@ export default function App() {
 
       <ConnectPasskey wallet={wallet} />
       <ResearchPanel wallet={wallet} />
+      <MyAgentPanel wallet={wallet} />
       <FeedbackPanel wallet={wallet} />
 
       <footer className="deskfoot">

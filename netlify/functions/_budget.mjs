@@ -208,3 +208,43 @@ export async function auditLog(jobId, { store } = {}) {
   const log = (await pickStore(store).getJSON(AUDIT_KEY)) ?? [];
   return jobId ? log.filter((e) => e.jobId === jobId) : log;
 }
+
+// ── Free-form agent actions (Brick C): per-DAY ceiling only ───────────────────
+// agent-act / execute-plan spends aren't tied to a job price, so the per-job
+// allowance doesn't apply — but they DO count against the same rolling-UTC-day
+// PERIOD_CEILING_USDC as research purchases (one unified daily safety cap). Pair
+// canSpendDay (gate) with recordAgentSpend (ledger) around each executed action.
+export async function canSpendDay({ amountUsdc, store, at }) {
+  const cfg = budgetConfig();
+  const amtA = atomic(amountUsdc);
+  if (amtA <= 0) return { allowed: false, reason: `amount ${amountUsdc} must be > 0` };
+  const dayA = atomic(await daySpend(utcDate(at), { store }));
+  const ceilA = atomic(cfg.PERIOD_CEILING_USDC);
+  if (dayA + amtA > ceilA) {
+    return {
+      allowed: false,
+      reason:
+        `daily agent-spend ceiling: ${round6((dayA + amtA) / 1e6)} > ${cfg.PERIOD_CEILING_USDC} USDC ` +
+        `(already spent ${round6(dayA / 1e6)} today ${utcDate(at)})`,
+    };
+  }
+  return { allowed: true };
+}
+
+export async function recordAgentSpend({ address, amountUsdc, source, justification, store, at }) {
+  const s = pickStore(store);
+  const amt = round6(amountUsdc);
+  const date = utcDate(at);
+  const dRec = (await s.getJSON(dayKey(date))) ?? { date, spentUsdc: 0 };
+  dRec.spentUsdc = round6(dRec.spentUsdc + amt);
+  await s.setJSON(dayKey(date), dRec);
+  await appendAudit(s, {
+    agent: address,
+    amountUsdc: amt,
+    source,
+    justification,
+    allowed: true,
+    timestamp: isoTs(at),
+  });
+  return { daySpentUsdc: dRec.spentUsdc };
+}

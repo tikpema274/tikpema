@@ -1,6 +1,8 @@
+import { connectLambda } from "@netlify/blobs";
 import { json, parseBody } from "./_arc.mjs";
 import { executeAction, valueOfStep } from "./_actions.mjs";
 import { requireSession } from "./_auth.mjs";
+import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 
 // POST /api/agent-execute-plan { plan: [ {type, ...}, ... ] }
 //
@@ -21,6 +23,7 @@ import { requireSession } from "./_auth.mjs";
 //     what's settled vs still batching.
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
+  if (event.blobs) connectLambda(event); // Blobs for the budget-spine day ledger
 
   // Auth gate: only an authenticated session may execute an agent-spend plan.
   const session = requireSession(event);
@@ -31,10 +34,14 @@ export async function handler(event) {
     return json(400, { error: "Provide a non-empty 'plan' array" });
   }
 
-  const walletAddress = process.env.AGENT_WALLET_ADDRESS;
-  if (!walletAddress) {
-    return json(400, { error: "AGENT_WALLET_ADDRESS not set — run agent-init." });
+  // Resolve the caller's OWN agent wallet from the session (never client-supplied,
+  // never the shared env wallet).
+  const owner = await ensureOwnerWallet(session);
+  if (owner.pending) {
+    return json(202, { status: "provisioning", message: "Your agent wallet is being set up — retry shortly." });
   }
+  const walletAddress = owner.walletAddress;
+  const actx = { walletAddress, session };
 
   // ── Total-cap check (once, before any execution) ──────────────────────────
   const maxSpend = Number(process.env.AGENT_MAX_SPEND_USDC || "1");
@@ -61,7 +68,7 @@ export async function handler(event) {
   for (let i = 0; i < plan.length; i++) {
     const step = plan[i];
     try {
-      const r = await executeAction(step, { walletAddress });
+      const r = await executeAction(step, actx);
       if (!r.ok) {
         results.push({ index: i, step, ok: false, blocked: r.blocked });
         stoppedAt = i;

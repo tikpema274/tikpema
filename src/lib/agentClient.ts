@@ -2,10 +2,14 @@
 // or entity secret — it only calls these /api/* endpoints, which run
 // server-side in netlify/functions and hold the secrets.
 
-async function post(path: string, body: unknown) {
+async function post(path: string, body: unknown, token?: string) {
   const res = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      // Money-moving agent endpoints are auth-gated (401 without a session).
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(body ?? {}),
   });
   const data = await res.json();
@@ -14,17 +18,11 @@ async function post(path: string, body: unknown) {
 }
 
 export const agentClient = {
-  // One-time bootstrap: create the agent's dev-controlled SCA wallet and
-  // register its ERC-8004 identity. Returns ids to persist in env.
-  init: (metadataUri?: string) => post("/api/agent-init", { metadataUri }),
-
-  // Read the agent's on-chain identity + USDC balance.
-  status: () => post("/api/agent-status", {}),
-
-  // Autonomous action: the agent's Claude brain decides, then (if the action
-  // is allowed and within the spend guard) executes on-chain, gas sponsored.
-  act: (task: string) => post("/api/agent-act", { task }),
+  // Autonomous action on the caller's OWN agent wallet (session-resolved
+  // server-side). The token is required — the endpoint 401s without it.
+  act: (task: string, token: string) => post("/api/agent-act", { task }, token),
 
   // Execute a confirmed multi-step plan (turn 2 of plan->confirm->execute).
-  executePlan: (plan: unknown[]) => post("/api/agent-execute-plan", { plan }),
+  executePlan: (plan: unknown[], token: string) =>
+    post("/api/agent-execute-plan", { plan }, token),
 };

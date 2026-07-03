@@ -1,8 +1,10 @@
+import { connectLambda } from "@netlify/blobs";
 import { TxPendingError } from "./_circle.mjs";
 import { json, parseBody, dateAnchor } from "./_arc.mjs";
 import { SWAP_TOKENS } from "./_swap.mjs";
 import { executeAction, valueOfStep } from "./_actions.mjs";
 import { requireSession } from "./_auth.mjs";
+import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 
 // POST /api/agent-act { task: string }
 //
@@ -76,19 +78,25 @@ async function decide(task) {
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
+  if (event.blobs) connectLambda(event); // Blobs for the budget-spine day ledger
 
   // Auth gate: only an authenticated session may trigger an agent spend.
-  // session.address is the caller's identity (owner key for Brick 2).
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });
 
   const { task } = parseBody(event);
   if (!task) return json(400, { error: "Provide a 'task' string" });
 
-  const walletAddress = process.env.AGENT_WALLET_ADDRESS;
-  if (!walletAddress) {
-    return json(400, { error: "AGENT_WALLET_ADDRESS not set — run agent-init." });
+  // Resolve the caller's OWN agent wallet from the session (never client-supplied,
+  // never the shared env wallet). Actions run on THIS wallet.
+  const owner = await ensureOwnerWallet(session);
+  if (owner.pending) {
+    return json(202, { status: "provisioning", message: "Your agent wallet is being set up — retry shortly." });
   }
+  const walletAddress = owner.walletAddress;
+  // ctx passed to executeAction: session enables per-user guardrails (block pay,
+  // budget day-ceiling, ledger); walletAddress is the per-user wallet.
+  const actx = { walletAddress, session };
 
   try {
     // 1. Brain decides.
@@ -202,7 +210,7 @@ export async function handler(event) {
         });
       }
 
-      const r = await executeAction(step, { walletAddress });
+      const r = await executeAction(step, actx);
       if (!r.ok) return json(200, { executed: false, decision, blocked: r.blocked });
       return json(200, { executed: true, decision, swap: r.swap, tx: r.tx });
     }
@@ -221,7 +229,7 @@ export async function handler(event) {
       if (payAmount > maxSpendPay) {
         return json(200, { executed: false, decision, blocked: "payAmountUsdc " + payAmount + " exceeds AGENT_MAX_SPEND_USDC (" + maxSpendPay + ")" });
       }
-      const r = await executeAction(step, { walletAddress });
+      const r = await executeAction(step, actx);
       if (!r.ok) return json(200, { executed: false, decision, blocked: r.blocked });
       return json(200, { executed: true, decision, pay: r.pay });
     }
@@ -249,7 +257,7 @@ export async function handler(event) {
     // 3. Execute: agent's own SCA wallet transfers USDC (gas sponsored). A still-
     // pending tx surfaces as a TxPendingError that executeAction lets propagate,
     // so the outer catch can map it to 202 (unchanged behavior).
-    const r = await executeAction(step, { walletAddress });
+    const r = await executeAction(step, actx);
     if (!r.ok) return json(200, { executed: false, decision, blocked: r.blocked });
     return json(200, { executed: true, decision, tx: r.tx });
   } catch (e) {
