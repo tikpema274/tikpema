@@ -110,26 +110,56 @@ export async function handler(event) {
   // C1's triggerRefund), not via the eventually-consistent Blob `refund` flag.
   // `reason` is aliased to `refundReason` to avoid colliding with the judge's
   // own `reason` declared later in the try block.
-  const { jobId, forceReject, failHash, reason: refundReason } = parseBody(event);
+  const {
+    jobId,
+    forceReject,
+    failHash,
+    reason: refundReason,
+    walletAddress,
+    // Deliverable data threaded from job-submit so we DON'T read it back from
+    // Blobs (eventual-read lag ~11s intermittently returned a stale record →
+    // spurious "no submitted deliverable" eval-error). Store read is a fallback.
+    canonicalReport: bodyReport,
+    deliverableHash: bodyHash,
+    brief: bodyBrief,
+  } = parseBody(event);
   if (!jobId) {
     // Without a jobId there is nowhere to read from or write to — nothing to do.
     return { statusCode: 400, body: "jobId required" };
   }
+  // The user's OWN agent wallet (the job's evaluator), threaded from job-submit —
+  // settlement runs on THIS wallet, never the shared env wallet.
+  if (!walletAddress) {
+    return { statusCode: 400, body: "walletAddress required" };
+  }
 
   const store = getStore("job-deliverables");
+
+  // Deliverable base from the threaded body (race-free). Seeds persist so the
+  // brief/canonicalReport are never lost to a stale merge read.
+  const threaded =
+    bodyReport && bodyHash
+      ? { status: "submitted", canonicalReport: bodyReport, deliverableHash: bodyHash, brief: bodyBrief }
+      : null;
 
   // Merge eval results onto the existing record so we never lose the brief,
   // canonicalReport, or submit tx the C1 writer persisted.
   const persist = async (patch) => {
     const prior = (await store.get(jobId, { type: "json" }).catch(() => null)) || {};
-    await store.setJSON(jobId, { ...prior, ...patch });
+    await store.setJSON(jobId, { ...(threaded || {}), ...prior, ...patch });
   };
 
   try {
-    // 1. Fetch the deliverable C1 persisted. Require a real submitted deliverable
-    // with both the canonical bytes and the hash — without them there's nothing
-    // to verify or settle.
-    const entry = await store.get(jobId, { type: "json" });
+    // 1. Get the deliverable. Prefer the threaded body (race-free); otherwise
+    // read from Blobs, RETRYING to ride out eventual-read lag rather than
+    // concluding "no submitted deliverable" on a stale read.
+    let entry = threaded;
+    if (!entry && forceReject !== true) {
+      for (let i = 0; i < 8 && !(entry && entry.status === "submitted"); i++) {
+        if (i) await new Promise((r) => setTimeout(r, 1500));
+        entry = await store.get(jobId, { type: "json" }).catch(() => null);
+      }
+    }
 
     // FORCED-REFUND PATH. C1 (job-submit-background) sets `forceReject: true` in
     // the POST body ONLY on a delivery failure, after submitting a failure-marker
@@ -146,9 +176,6 @@ export async function handler(event) {
     // undefined and a genuine deliverable ALWAYS falls through to the full
     // re-hash + judge path below. Do not key this on anything but the body flag.
     if (forceReject === true) {
-      const walletAddress = process.env.AGENT_WALLET_ADDRESS;
-      if (!walletAddress) throw new Error("AGENT_WALLET_ADDRESS not set — run agent-init.");
-
       const circleClient = circle();
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress,
@@ -226,13 +253,11 @@ export async function handler(event) {
     const verdict = judgment?.verdict === "pass" ? "pass" : "fail";
     const reason = judgment?.reason || "no reason returned";
 
-    // 5. Settle on-chain from the agent wallet (the evaluator role). The bytes32
-    // second arg is the contract's `reason` field — per scope we pass the verified
-    // deliverableHash there, tying the settlement to the exact bytes we judged.
-    // complete() pays the provider; reject() refunds the client (atomic per contract).
-    const walletAddress = process.env.AGENT_WALLET_ADDRESS;
-    if (!walletAddress) throw new Error("AGENT_WALLET_ADDRESS not set — run agent-init.");
-
+    // 5. Settle on-chain from the user's OWN agent wallet (the evaluator role,
+    // threaded in from job-submit). The bytes32 second arg is the contract's
+    // `reason` field — we pass the verified deliverableHash, tying settlement to
+    // the exact bytes judged. complete() pays the provider; reject() refunds the
+    // client (both the same wallet here, per the self-agent model).
     const circleClient = circle();
     const tx = await circleClient.createContractExecutionTransaction({
       walletAddress,

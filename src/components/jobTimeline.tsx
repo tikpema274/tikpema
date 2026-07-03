@@ -9,7 +9,8 @@
 // auto-chains submit→evaluate→settle, so the browser fires submit once then
 // polls job-deliverable for the merged status.
 export type TrackedJob = {
-  jobId: string;
+  runId?: string;
+  jobId?: string;
   status: string;
   brief?: { answer?: string; reasoning?: string; sources?: any[]; confidence?: number };
   verdict?: string;
@@ -69,12 +70,16 @@ export function Brief({ brief }: { brief: NonNullable<TrackedJob["brief"]> }) {
 // (Funded → Researching → Evaluating → Settled), showing a checkmark for passed
 // stages and a spinner for the active one, then a terminal result block.
 export function JobTimeline({ job }: { job: TrackedJob }) {
-  const STAGES = ["Funded", "Researching", "Evaluating", "Settled"];
+  const STAGES = ["Funding", "Researching", "Evaluating", "Settled"];
 
   // Map a status to how many stages are complete/active. -1 = errored (no stage
   // spinner; the error block below carries the message instead).
   const stageIndex = (status: string): number => {
     switch (status) {
+      // Server-driven create + fund on the user's own wallet (Brick 2b).
+      case "starting":
+      case "creating":
+      case "funding":
       case "funded":
         return 0;
       case "submitting":
@@ -98,7 +103,9 @@ export function JobTimeline({ job }: { job: TrackedJob }) {
 
   return (
     <div className="status" style={{ margin: 0 }}>
-      <div style={{ fontWeight: 600, marginBottom: 8 }}>Job #{job.jobId}</div>
+      <div style={{ fontWeight: 600, marginBottom: 8 }}>
+        {job.jobId ? `Job #${job.jobId}` : "Starting your job…"}
+      </div>
 
       <div className="row" style={{ gap: 16, marginBottom: 4, flexWrap: "wrap" }}>
         {STAGES.map((label, i) => {

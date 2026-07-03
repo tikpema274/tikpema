@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import { JobTimeline, isTerminal } from "./jobTimeline";
 import type { TrackedJob } from "./jobTimeline";
@@ -20,6 +20,8 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
 
   // The job whose deliver→settle timeline we're currently tracking (null = none).
   const [trackedJob, setTrackedJob] = useState<TrackedJob | null>(null);
+  // Session token captured at hire time, used to poll the (auth-gated) status.
+  const pollTokenRef = useRef<string>("");
 
   // Small local async runner: toggles busy + surfaces errors. This panel owns
   // its own busy/error so research progress doesn't clobber other panels.
@@ -35,25 +37,27 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
     }
   }
 
-  // Poll the deliverable record every 5s while the tracked job is non-terminal.
-  // Re-runs whenever jobId or status changes; the cleanup clears the interval on
-  // unmount, on a new job, and once a terminal status is reached.
+  // Poll the run status every 5s while the tracked job is non-terminal. The whole
+  // lifecycle runs server-side on the user's OWN wallet, so we poll job-run-status
+  // by runId (auth-gated — only the run's owner may read it).
   useEffect(() => {
     if (!trackedJob || isTerminal(trackedJob.status)) return;
 
-    const jobId = trackedJob.jobId;
+    const runId = trackedJob.runId;
+    if (!runId) return;
     const id = setInterval(async () => {
       try {
-        const r = await fetch(`/.netlify/functions/job-deliverable?jobId=${jobId}`);
+        const r = await fetch(`/.netlify/functions/job-run-status?runId=${runId}`, {
+          headers: { Authorization: `Bearer ${pollTokenRef.current}` },
+        });
         const data = await r.json();
         if (!r.ok) return;
-        // Nothing written yet (background fn still running) — keep the funded
-        // state and keep polling rather than clobbering it with "not_found".
         if (!data.status || data.status === "not_found") return;
         setTrackedJob((prev) =>
-          prev && prev.jobId === jobId
+          prev && prev.runId === runId
             ? {
                 ...prev,
+                jobId: data.jobId ?? prev.jobId,
                 status: data.status,
                 brief: data.brief ?? prev.brief,
                 verdict: data.verdict ?? prev.verdict,
@@ -70,7 +74,7 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
     }, 5000);
 
     return () => clearInterval(id);
-  }, [trackedJob?.jobId, trackedJob?.status]);
+  }, [trackedJob?.runId, trackedJob?.status]);
 
   return (
     <div className="plane">
@@ -154,54 +158,50 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
               disabled={busy || !wallet.address}
               onClick={() =>
                 run(async () => {
-                  setHireStatus("Creating job…");
-                  const jobId = await wallet.createJobAsUser(hireQuestion);
-
-                  // Authenticate now — the account is deployed by createJob, so
-                  // the passkey/MetaMask signature can prove ownership. One sign,
-                  // no funds move; the token gates the server spend calls below.
+                  // Authenticate (one signature, no funds move) — the session
+                  // proves which wallet is yours; the server runs the ENTIRE job
+                  // on YOUR OWN agent wallet (create → fund → research → settle),
+                  // gasless. No client-side signing of job txs anymore.
                   setHireStatus("Authorizing…");
                   const token = await wallet.ensureSession();
-                  const authHeaders = {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                  };
+                  pollTokenRef.current = token;
 
-                  setHireStatus("Setting budget…");
-                  const r = await fetch("/.netlify/functions/job-set-budget", {
+                  setHireStatus("Starting your agent…");
+                  const r = await fetch("/.netlify/functions/job-run", {
                     method: "POST",
-                    headers: authHeaders,
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${token}`,
+                    },
                     body: JSON.stringify({
-                      jobId: jobId.toString(),
+                      question: hireQuestion,
                       budgetUsdc: quote.budgetUsdc,
                     }),
                   });
-                  if (!r.ok) {
-                    const data = await r.json().catch(() => ({}));
-                    throw new Error(data.error || "Setting budget failed");
+                  const data = await r.json().catch(() => ({}));
+
+                  if (r.status === 402) {
+                    // Empty/underfunded wallet — clean message, no fallback.
+                    throw new Error(
+                      `${data.error || "Insufficient funds."}${
+                        data.need != null
+                          ? ` Need ${data.need} USDC, have ${data.have} USDC.`
+                          : ""
+                      }`
+                    );
+                  }
+                  if (r.status === 202 && data.status === "provisioning") {
+                    throw new Error(
+                      "Your agent wallet is still being set up — try again in a few seconds."
+                    );
+                  }
+                  if (!r.ok || !data.runId) {
+                    throw new Error(data.error || "Could not start the job");
                   }
 
-                  setHireStatus("Funding…");
-                  await wallet.fundJobAsUser(Number(jobId), quote.budgetUsdc);
-
                   setHireStatus("");
-
-                  // Option B: funding is done — start the deliver→settle
-                  // timeline and let it poll separately (non-blocking). Fire
-                  // submit once; the backend auto-chains submit→evaluate→settle.
-                  // Fire-and-forget: it returns 202 immediately, so don't await.
-                  setTrackedJob({ jobId: jobId.toString(), status: "funded" });
-                  fetch("/.netlify/functions/job-submit", {
-                    method: "POST",
-                    headers: authHeaders,
-                    body: JSON.stringify({
-                      jobId: jobId.toString(),
-                      question: hireQuestion,
-                    }),
-                  }).catch(() => {
-                    // The submit trigger failing doesn't undo funding; the
-                    // timeline will simply sit at "funded" and the user can retry.
-                  });
+                  // Track by runId; the poller resolves jobId + brief as it runs.
+                  setTrackedJob({ runId: data.runId, status: "starting" });
                 })
               }
             >

@@ -118,10 +118,16 @@ export async function handler(event) {
   // always return 202, so this early-return blocks the spend, not the status.)
   if (!requireInternal(event)) return { statusCode: 401, body: "unauthorized" };
 
-  const { jobId, question } = parseBody(event);
+  // walletAddress is the AUTHENTICATED user's OWN agent wallet, resolved from the
+  // session by the job-run orchestrator and threaded through the internal chain
+  // (never env, never client-supplied). All on-chain ops here run on THIS wallet.
+  const { jobId, question, walletAddress } = parseBody(event);
   if (!jobId) {
     // Without a jobId there is nowhere to write the result — nothing to do.
     return { statusCode: 400, body: "jobId required" };
+  }
+  if (!walletAddress) {
+    return { statusCode: 400, body: "walletAddress required" };
   }
 
   const store = getStore("job-deliverables");
@@ -145,7 +151,8 @@ export async function handler(event) {
           // so job-evaluate can reject direct/anonymous calls.
           "x-internal-token": internalToken(),
         },
-        body: JSON.stringify({ jobId, ...extra }),
+        // Thread the per-user wallet so settlement runs on the SAME wallet.
+        body: JSON.stringify({ jobId, walletAddress, ...extra }),
       });
       if (evalRes.status !== 202) {
         console.warn(`[job-submit] evaluate trigger for ${jobId} returned ${evalRes.status}`);
@@ -163,13 +170,8 @@ export async function handler(event) {
   // and log loudly. This helper never throws, so callers can await it safely
   // (the catch below must not re-enter the refund path on its own error).
   const triggerRefund = async (reason) => {
-    const walletAddress = process.env.AGENT_WALLET_ADDRESS;
-    if (!walletAddress) {
-      // No wallet → can't submit the marker → genuinely stuck. Record and bail.
-      console.error(`[job-submit] REFUND for job ${jobId} cannot proceed — AGENT_WALLET_ADDRESS not set`);
-      await persistFailed(store, jobId, { status: "failed", error: "AGENT_WALLET_ADDRESS not set — run agent-init." });
-      return;
-    }
+    // Refund runs on the user's OWN wallet (the job's client+provider), threaded
+    // in from job-run — NOT the shared env wallet.
     const failHash = keccak256(toBytes("RESEARCH_FAILED:" + jobId));
     try {
       const circleClient = circle();
@@ -281,13 +283,9 @@ export async function handler(event) {
       brief: decision,
     });
 
-    // 5. Submit on-chain as the provider (the agent wallet) — submit() records
-    // the deliverable hash against the job. Reuses Circle's dev-controlled
-    // wallet path (gas sponsored), mirroring job-set-budget.mjs.
-    const walletAddress = process.env.AGENT_WALLET_ADDRESS;
-    if (!walletAddress) {
-      throw new Error("AGENT_WALLET_ADDRESS not set — run agent-init.");
-    }
+    // 5. Submit on-chain as the provider (the user's OWN agent wallet, threaded
+    // in from job-run) — submit() records the deliverable hash against the job.
+    // Reuses Circle's dev-controlled wallet path (gas sponsored).
     const circleClient = circle();
     const tx = await circleClient.createContractExecutionTransaction({
       walletAddress,
@@ -310,9 +308,10 @@ export async function handler(event) {
     });
 
     // 7. Fire-and-forget: kick off evaluation so deliver→settle runs
-    // automatically. The submit already succeeded on-chain, so a trigger
-    // failure must only warn — never throw and clobber the submitted state.
-    await triggerEvaluate();
+    // automatically. Thread the deliverable data so the evaluator doesn't read
+    // it back from Blobs (avoids the eventual-read race). The submit already
+    // succeeded on-chain, so a trigger failure must only warn — never throw.
+    await triggerEvaluate({ canonicalReport, deliverableHash, brief: decision });
   } catch (e) {
     // A still-pending submit tx is submitted-but-slow, not failed — record the
     // id so the poller can distinguish "slow" from "reverted".
