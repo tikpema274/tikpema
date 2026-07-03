@@ -21,6 +21,12 @@
   to = "/.netlify/functions/my-wallet"
   status = 200
 
+# Send USDC from the caller's own agent wallet (session-resolved).
+[[redirects]]
+  from = "/api/agent-send"
+  to = "/.netlify/functions/agent-send"
+  status = 200
+
 # Friendly /api/* routes -> serverless functions (the AGENT plane).
 [[redirects]]
   from = "/api/agent-init"

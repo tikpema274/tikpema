@@ -18,16 +18,15 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
   const amountNum = Number(amount);
   const amountValid = Number.isFinite(amountNum) && amountNum > 0;
 
-  // Presentation wrapper around the unchanged sendUsdc: convert the entered
-  // amount to USDC base units and surface a human-readable confirmation on
-  // success. The signing path inside sendUsdc is untouched.
+  // Send from the user's AGENT wallet (the funded one) — resolved server-side
+  // from the session. Not the login wallet (which is identity-only now).
   async function send() {
     if (!to || !amountValid) return;
     setSendConfirm("");
     setSendError("");
     setSending(true);
     try {
-      await w.sendUsdc(to as `0x${string}`, BigInt(Math.round(amountNum * 1e6)));
+      await w.sendFromAgent(to as `0x${string}`, amountNum);
       setSendConfirm(`Sent ${amountNum} USDC to ${shortAddr(to)}`);
     } catch (e: any) {
       setSendError(e?.message || "Send failed");
@@ -42,7 +41,7 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
       <h2>Create your wallet</h2>
       <div className="sub">
         {w.activeKind === "metamask"
-          ? "Connected with MetaMask. You sign each action and pay network fees yourself."
+          ? "Connected with MetaMask — used only to sign in. Your wallet below holds your funds and pays for jobs, gaslessly."
           : "Secured by a passkey — no password, no seed phrase. Just your fingerprint or face, and it's free to use."}
       </div>
 
@@ -89,8 +88,24 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
             )}
           </div>
         </>
+      ) : !w.agentWallet ? (
+        // Connected, but the agent wallet is still resolving from the session
+        // (or auth was dismissed). This is the wallet that pays for jobs.
+        <div className="status" style={{ marginTop: 10 }}>
+          <span className="spinner" /> Preparing your wallet…
+          {!w.isAuthenticated && (
+            <div style={{ marginTop: 8 }}>
+              <button className="linkbtn" onClick={() => w.ensureSession().catch(() => {})}>
+                Tap to finish setup
+              </button>
+            </div>
+          )}
+        </div>
       ) : (
         <>
+          {/* The AGENT wallet is the user's wallet: what jobs pay from, what they
+              fund, what they send from. The login wallet is identity-only and no
+              longer surfaced as a separate fundable wallet. */}
           <div style={{ color: "var(--success)", fontSize: "0.9rem", fontWeight: 500 }}>
             ✓ Wallet ready
           </div>
@@ -105,31 +120,25 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
             }}
           >
             <div style={{ color: "var(--muted)", fontSize: "0.75rem", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6 }}>
-              {w.activeKind === "metamask" ? "Account" : "Your wallet address"}
+              Your wallet address
             </div>
             <div className="mono" style={{ color: "var(--paper)", wordBreak: "break-all", fontSize: "0.85rem" }}>
-              {w.address}
+              {w.agentWallet.address}
             </div>
             <div className="row" style={{ marginTop: 12, alignItems: "baseline" }}>
               <span style={{ fontSize: "1.35rem", fontWeight: 600, color: "var(--paper)" }}>
-                {w.usdcBalance ?? "…"}{" "}
+                {w.agentWallet.balance ?? "…"}{" "}
                 <span style={{ fontSize: "0.85rem", color: "var(--muted)", fontWeight: 400 }}>USDC</span>
               </span>
-              <button disabled={w.busy} onClick={() => w.refreshBalance()} style={{ padding: "6px 12px", fontSize: "0.82rem" }}>
+              <button disabled={w.busy} onClick={() => w.refreshAgentWallet()} style={{ padding: "6px 12px", fontSize: "0.82rem" }}>
                 Refresh
               </button>
             </div>
           </div>
 
-          {w.activeKind === "metamask" && (
-            <div className="sub" style={{ marginTop: 12, marginBottom: 0 }}>
-              Heads up: with MetaMask you pay a small network fee (in USDC) for each action.
-            </div>
-          )}
-
-          {/* Step 02 — funding. The audit's biggest dead-end, so when the wallet
-              is empty this is the loud, guided next action rather than a link. */}
-          {w.usdcBalance === "0.00" ? (
+          {/* Step 02 — funding. Points at the AGENT wallet (the one jobs pay from)
+              so funding here actually unblocks the research loop. */}
+          {w.agentWallet.balance === "0.00" ? (
             <div
               style={{
                 marginTop: 14,
@@ -167,39 +176,6 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
             </div>
           )}
 
-          {/* Per-user agent wallet (Brick 2a): the user's OWN provisioned wallet,
-              resolved from their authenticated session. Shown once available;
-              not yet used by the job lifecycle (that's 2b). */}
-          {w.agentWallet && (
-            <div
-              style={{
-                marginTop: 14,
-                padding: "12px 14px",
-                background: "var(--field)",
-                border: "1px solid var(--line)",
-                borderRadius: 10,
-              }}
-            >
-              <div
-                style={{
-                  color: "var(--muted)",
-                  fontSize: "0.75rem",
-                  letterSpacing: "0.06em",
-                  textTransform: "uppercase",
-                  marginBottom: 6,
-                }}
-              >
-                Your agent wallet
-              </div>
-              <div className="mono" style={{ color: "var(--paper)", fontSize: "0.85rem", wordBreak: "break-all" }}>
-                {w.agentWallet.address}
-              </div>
-              <div className="status" style={{ marginTop: 6 }}>
-                Balance: {w.agentWallet.balance ?? "…"} USDC
-              </div>
-            </div>
-          )}
-
           <div
             style={{
               marginTop: 22,
@@ -208,7 +184,7 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
             }}
           >
             <h3 style={{ margin: "0 0 4px" }}>Send USDC</h3>
-            <div className="sub" style={{ marginBottom: 12 }}>Optional — send test USDC to any address</div>
+            <div className="sub" style={{ marginBottom: 12 }}>Optional — send from your wallet to any address</div>
             <div className="row">
               <input
                 placeholder="recipient 0x…"

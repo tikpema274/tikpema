@@ -250,6 +250,25 @@ export function useWallet() {
     if (session && !agentWallet) refreshAgentWallet().catch(() => {});
   }, [session, agentWallet, refreshAgentWallet]);
 
+  // Send USDC FROM the user's OWN agent wallet (the funded one). The agent wallet
+  // is dev-controlled, so the transfer runs server-side (session-resolved) — not
+  // the login wallet. Refreshes the agent balance after.
+  const sendFromAgent = useCallback(
+    async (to: `0x${string}`, amountUsdc: number) => {
+      const token = await ensureSession();
+      const r = await fetch("/api/agent-send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ to, amountUsdc }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.error || "Send failed");
+      refreshAgentWallet().catch(() => {});
+      return data;
+    },
+    [ensureSession, refreshAgentWallet]
+  );
+
   // Refresh + cache the MetaMask balance (the modular hook owns its own).
   const mmRefreshBalance = useCallback(async () => {
     if (!mmWallet) return undefined;
@@ -292,5 +311,6 @@ export function useWallet() {
     // Per-user agent wallet (Brick 2a): the caller's own provisioned wallet.
     agentWallet,
     refreshAgentWallet,
+    sendFromAgent,
   };
 }
