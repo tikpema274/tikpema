@@ -186,9 +186,13 @@ export function useModularWallet() {
   const [status, setStatus] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [usdcBalance, setUsdcBalance] = useState<string | null>(null);
-  // The WebAuthn credential (id + P-256 public key) behind the smart account.
-  // Used for OFF-CHAIN session auth (webauthn-p256) — no on-chain step to log in.
-  const [credential, setCredential] = useState<{ id: string; publicKey: string } | null>(null);
+  // The WebAuthn credential (id + P-256 public key + rpId) behind the smart
+  // account. Used for OFF-CHAIN session auth (webauthn-p256) — no on-chain step.
+  // rpId is the relying-party id Circle registered under; the assertion must be
+  // requested under the SAME rpId or the browser won't find the credential.
+  const [credential, setCredential] = useState<
+    { id: string; publicKey: string; rpId?: string } | null
+  >(null);
 
   // Read the connected smart account's USDC balance and format it (e.g. "12.50").
   const refreshBalance = useCallback(async () => {
@@ -220,7 +224,13 @@ export function useModularWallet() {
   const signPasskeyChallenge = useCallback(
     async (hash: `0x${string}`) => {
       if (!credential) throw new Error("Connect a passkey first");
-      const { signature, webauthn } = await signWebauthn({ hash, credentialId: credential.id });
+      // Request the assertion under the credential's own rpId so the browser
+      // finds it (Circle may register under tikpema.xyz, not the exact origin).
+      const { signature, webauthn } = await signWebauthn({
+        hash,
+        credentialId: credential.id,
+        ...(credential.rpId ? { rpId: credential.rpId } : {}),
+      });
       return { signature, webauthn };
     },
     [credential]
@@ -240,8 +250,14 @@ export function useModularWallet() {
         owner: toWebAuthnAccount({ credential }),
       });
       setAccount(smartAccount);
-      // Keep the credential (id + public key) for off-chain session auth.
-      setCredential({ id: credential.id, publicKey: credential.publicKey });
+      // Keep the credential (id + public key + rpId) for off-chain session auth.
+      // Circle returns publicKey on BOTH register and login, so this works for a
+      // returning user too (the server also has it stored from registration).
+      setCredential({
+        id: credential.id,
+        publicKey: credential.publicKey,
+        rpId: (credential as { rpId?: string }).rpId,
+      });
       setStatus(`Connected: ${smartAccount.address}`);
       return smartAccount;
     } catch (e: any) {
