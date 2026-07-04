@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   toPasskeyTransport,
   toWebAuthnCredential,
@@ -28,6 +28,52 @@ const clientUrl = import.meta.env.VITE_CLIENT_URL as string;
 // from the browser-exposed env var (VITE_-prefixed so Vite bundles it).
 const AGENT_WALLET_ADDRESS = import.meta.env
   .VITE_AGENT_WALLET_ADDRESS as `0x${string}`;
+
+// --- Passkey credential persistence (same-device returning login) -----------
+// We persist ONLY non-secret fields: the credential id, the P-256 PUBLIC key,
+// and the rpId. The passkey's PRIVATE key never leaves the device's secure
+// enclave (that is the whole point of a passkey), so there is nothing sensitive
+// to store here. Persisting these lets a returning user on the SAME device
+// rebuild their EXACT smart account deterministically — with no dependence on
+// Circle's blind discoverable lookup, which is what silently minted new wallets.
+type StoredCredential = { id: string; publicKey: string; rpId?: string };
+const CRED_STORAGE_KEY = "tikpema.passkey.credential.v1";
+
+// Write only {id, publicKey, rpId} — never the raw credential or any secret.
+function saveStoredCredential(c: { id: string; publicKey: string; rpId?: string }) {
+  try {
+    const blob: StoredCredential = { id: c.id, publicKey: c.publicKey };
+    if (c.rpId) blob.rpId = c.rpId;
+    localStorage.setItem(CRED_STORAGE_KEY, JSON.stringify(blob));
+  } catch {
+    /* private mode / storage disabled — falls back to discoverable login */
+  }
+}
+function loadStoredCredential(): StoredCredential | null {
+  try {
+    const raw = localStorage.getItem(CRED_STORAGE_KEY);
+    if (!raw) return null;
+    const c = JSON.parse(raw);
+    // Accept ONLY the exact non-secret shape; ignore anything malformed/legacy.
+    if (c && typeof c.id === "string" && typeof c.publicKey === "string") {
+      return {
+        id: c.id,
+        publicKey: c.publicKey,
+        rpId: typeof c.rpId === "string" ? c.rpId : undefined,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+function clearStoredCredentialStorage() {
+  try {
+    localStorage.removeItem(CRED_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 // Built once at module load.
 const passkeyTransport = toPasskeyTransport(clientUrl, clientKey);
@@ -192,6 +238,13 @@ export function useModularWallet() {
   const [credential, setCredential] = useState<
     { id: string; publicKey: string; rpId?: string } | null
   >(null);
+  // Synchronous mirror of `credential` so a just-restored login can sign its
+  // auth challenge immediately, before React has flushed the state update.
+  const credentialRef = useRef<{
+    id: string;
+    publicKey: string;
+    rpId?: string;
+  } | null>(null);
 
   // Read the connected smart account's USDC balance and format it (e.g. "12.50").
   const refreshBalance = useCallback(async () => {
@@ -222,13 +275,17 @@ export function useModularWallet() {
   // deployed. Triggers a passkey tap; moves no funds.
   const signPasskeyChallenge = useCallback(
     async (hash: `0x${string}`) => {
-      if (!credential) throw new Error("Connect a passkey first");
+      // Prefer the synchronous ref so a just-restored login can sign at once.
+      const cred = credentialRef.current ?? credential;
+      if (!cred) throw new Error("Connect a passkey first");
       // Request the assertion under the credential's own rpId so the browser
       // finds it (Circle may register under tikpema.xyz, not the exact origin).
+      // This is a TARGETED assertion (allowCredentials = [cred.id]) — it works
+      // even for a non-discoverable key, unlike the blind discoverable lookup.
       const { signature, webauthn } = await signWebauthn({
         hash,
-        credentialId: credential.id,
-        ...(credential.rpId ? { rpId: credential.rpId } : {}),
+        credentialId: cred.id,
+        ...(cred.rpId ? { rpId: cred.rpId } : {}),
       });
       return { signature, webauthn };
     },
@@ -252,11 +309,18 @@ export function useModularWallet() {
       // Keep the credential (id + public key + rpId) for off-chain session auth.
       // Circle returns publicKey on BOTH register and login, so this works for a
       // returning user too (the server also has it stored from registration).
-      setCredential({
+      const cred = {
         id: credential.id,
         publicKey: credential.publicKey,
         rpId: (credential as { rpId?: string }).rpId,
-      });
+      };
+      credentialRef.current = cred;
+      setCredential(cred);
+      // Persist the NON-SECRET credential so the next visit on THIS device can
+      // restore this exact wallet directly (see restoreLogin), bypassing the
+      // blind discoverable lookup. Also captures a new-device discoverable login
+      // so its subsequent logins take the fast, deterministic path too.
+      saveStoredCredential(cred);
       setStatus(`Connected: ${smartAccount.address}`);
       return smartAccount;
     } catch (e: any) {
@@ -265,6 +329,56 @@ export function useModularWallet() {
     } finally {
       setBusy(false);
     }
+  }, []);
+
+  // Same-device returning login: rebuild the EXACT smart account from the stored
+  // non-secret credential. Pure derivation (the SCA address is keccak of the
+  // public key) — no passkey tap, no Circle round-trip — so it cannot "miss" the
+  // way a blind discoverable lookup can. The passkey tap happens later, at
+  // session auth (signPasskeyChallenge), as a TARGETED assertion. Returns the
+  // restored context, or null if there is nothing stored on this device.
+  const restoreLogin = useCallback(async () => {
+    const stored = loadStoredCredential();
+    if (!stored) return null;
+    setBusy(true);
+    try {
+      setStatus("Restoring your wallet…");
+      const smartAccount = await toCircleSmartAccount({
+        client: publicClient,
+        owner: toWebAuthnAccount({
+          credential: {
+            id: stored.id,
+            publicKey: stored.publicKey as `0x${string}`,
+          },
+        }),
+      });
+      setAccount(smartAccount);
+      credentialRef.current = stored;
+      setCredential(stored);
+      setStatus(`Connected: ${smartAccount.address}`);
+      return {
+        account: smartAccount,
+        address: smartAccount.address,
+        credentialId: stored.id,
+        credentialPublicKey: stored.publicKey,
+      };
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  // Clear in-memory wallet state (does NOT touch the stored credential).
+  const disconnect = useCallback(() => {
+    setAccount(null);
+    setCredential(null);
+    credentialRef.current = null;
+    setUsdcBalance(null);
+    setStatus("");
+  }, []);
+
+  // Forget the persisted credential — used only by an explicit "start over".
+  const clearStoredCredential = useCallback(() => {
+    clearStoredCredentialStorage();
   }, []);
 
   // NOTE: the old client-side `sendUsdc` (login-wallet direct transfer) was
@@ -498,7 +612,15 @@ export function useModularWallet() {
         WebAuthnMode.Register,
         `${username}-${Date.now().toString(36).slice(-4)}`
       ),
-    connectLogin: () => connect(WebAuthnMode.Login, "tikpema-user"),
+    // Discoverable/usernameless login — the FALLBACK for a new device or cleared
+    // storage, where there is no stored credential to restore from. May prompt
+    // the user to pick a passkey; on success the credential is persisted so the
+    // next login on that device takes the fast, deterministic restore path.
+    connectLoginDiscoverable: () => connect(WebAuthnMode.Login, "tikpema-user"),
+    restoreLogin,
+    disconnect,
+    clearStoredCredential,
+    hasStoredCredential: () => loadStoredCredential() !== null,
     placeBetAsUser,
     createJobAsUser,
     fundJobAsUser,

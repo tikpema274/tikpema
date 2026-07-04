@@ -14,6 +14,25 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
   const [sendConfirm, setSendConfirm] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
+  // Whether the deliberate "create a new wallet" sub-flow is showing. Default
+  // false: the entry screen leads with ONE passkey button that logs a returning
+  // user straight in — creation is not a co-equal primary path anymore.
+  const [showCreate, setShowCreate] = useState(false);
+
+  // Is there a passkey/wallet already on THIS device? (The stored credential the
+  // deterministic-restore login writes to localStorage.) Drives the smart button.
+  const hasPasskey = w.hasStoredCredential?.() ?? false;
+
+  // The one smart passkey action. Returning user on this device → log straight
+  // into their existing wallet (deterministic restore); no name prompt, no chance
+  // to spawn a duplicate. Genuinely new here → guide them to create a fresh one.
+  function handlePasskey() {
+    if (w.hasStoredCredential?.()) {
+      w.connectLogin().catch(() => {});
+    } else {
+      setShowCreate(true);
+    }
+  }
 
   const amountNum = Number(amount);
   const amountValid = Number.isFinite(amountNum) && amountNum > 0;
@@ -38,7 +57,7 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
   return (
     <div className="plane">
       <div className="panel-eyebrow">Step 01 · Your wallet</div>
-      <h2>Create your wallet</h2>
+      <h2>Your wallet</h2>
       <div className="sub">
         {w.activeKind === "metamask"
           ? "Connected with MetaMask — used only to sign in. Your wallet below holds your funds and pays for jobs, gaslessly."
@@ -46,37 +65,31 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
       </div>
 
       {!w.address ? (
-        <>
-          <div className="row">
-            <input
-              placeholder="Pick a name for your wallet"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && username.trim() && !w.busy)
-                  w.connectRegister(username.trim());
-              }}
-            />
+        !showCreate ? (
+          // ── Smart entry: ONE passkey button that does the right thing ──────
+          // Returning user → logs in (restore). New user → create sub-flow. No
+          // always-available "create" that lets a returning user spawn duplicates.
+          <>
             <button
               className="emerald"
-              disabled={w.busy || !username.trim()}
-              onClick={() => w.connectRegister(username.trim())}
-            >
-              {w.busy ? "Creating…" : "Create wallet"}
-            </button>
-          </div>
-          <div className="sub" style={{ marginTop: 12, marginBottom: 0 }}>
-            Already have one?{" "}
-            <button
-              className="linkbtn"
+              style={{ width: "100%", marginTop: 4 }}
               disabled={w.busy}
-              onClick={() => w.connectLogin()}
+              onClick={handlePasskey}
             >
-              Log in with your passkey
+              {w.busy
+                ? "Working…"
+                : hasPasskey
+                ? "Continue with your passkey"
+                : "Continue with passkey"}
             </button>
+            <div className="sub" style={{ marginTop: 10, marginBottom: 0 }}>
+              {hasPasskey
+                ? "You have a wallet on this device — this logs you back into it."
+                : "Creates your wallet on first use, secured by a passkey."}
+            </div>
+
             {w.connectors.find((c) => c.kind === "metamask")?.isAvailable() && (
-              <>
-                {"  ·  "}
+              <div className="sub" style={{ marginTop: 12, marginBottom: 0 }}>
                 <button
                   className="linkbtn"
                   disabled={w.busy}
@@ -84,10 +97,102 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
                 >
                   Use MetaMask instead
                 </button>
-              </>
+              </div>
             )}
+
+            {/* Deliberate, secondary escape hatch — only for a returning user who
+                genuinely wants a different/fresh wallet. Not the default; muted. */}
+            {hasPasskey && (
+              <div style={{ marginTop: 18 }}>
+                <button
+                  className="linkbtn"
+                  disabled={w.busy}
+                  onClick={() => setShowCreate(true)}
+                  style={{ color: "var(--muted)", fontSize: "0.8rem" }}
+                >
+                  Use a different wallet
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          // ── Create-a-new-wallet sub-flow (new user, or the escape hatch) ────
+          // Honest copy: a new passkey = a FRESH wallet; it does not reach the
+          // funds of a wallet you already have.
+          <>
+            <div
+              style={{
+                padding: "12px 14px",
+                background: "var(--amber-soft)",
+                border: "1px solid var(--amber-line)",
+                borderRadius: 10,
+                marginBottom: 14,
+                fontSize: "0.88rem",
+                lineHeight: 1.5,
+                color: "var(--paper-dim)",
+              }}
+            >
+              <b style={{ color: "var(--paper)" }}>This creates a brand-new wallet</b> with a
+              new passkey. It does <b>not</b> access the funds of any wallet you already have.
+              {hasPasskey
+                ? " You already have a wallet on this device — log in to get back to it (and its balance) instead."
+                : " To return to an existing wallet later, log in with its passkey. (Recovery to a previous wallet is coming soon.)"}
+            </div>
+            <div className="row">
+              <input
+                placeholder="Pick a name for your new wallet"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && username.trim() && !w.busy)
+                    w.connectRegister(username.trim());
+                }}
+              />
+              <button
+                className="emerald"
+                disabled={w.busy || !username.trim()}
+                onClick={() => w.connectRegister(username.trim())}
+              >
+                {w.busy ? "Creating…" : "Create wallet"}
+              </button>
+            </div>
+            <div className="sub" style={{ marginTop: 12, marginBottom: 0 }}>
+              <button
+                className="linkbtn"
+                disabled={w.busy}
+                onClick={() => w.connectLogin().catch(() => {})}
+              >
+                Log in with your passkey instead
+              </button>
+              {"  ·  "}
+              <button
+                className="linkbtn"
+                disabled={w.busy}
+                onClick={() => setShowCreate(false)}
+              >
+                Back
+              </button>
+            </div>
+          </>
+        )
+      ) : w.loginError ? (
+        // Saved-passkey login failed. Surface a CLEAR state with explicit
+        // recovery — never a silent fall-through to creating a new wallet.
+        <div className="status" style={{ marginTop: 10 }}>
+          <div style={{ color: "var(--warn)" }}>{w.loginError}</div>
+          <div style={{ marginTop: 12, display: "flex", gap: 12, alignItems: "center" }}>
+            <button
+              className="emerald"
+              disabled={w.busy}
+              onClick={() => w.connectLogin().catch(() => {})}
+            >
+              Try again
+            </button>
+            <button className="linkbtn" disabled={w.busy} onClick={() => w.startOver()}>
+              Start over
+            </button>
           </div>
-        </>
+        </div>
       ) : !w.agentWallet ? (
         // Connected, but the agent wallet is still resolving from the session
         // (or auth was dismissed). This is the wallet that pays for jobs.

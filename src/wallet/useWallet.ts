@@ -48,6 +48,13 @@ export function useWallet() {
   // not yet used by the job lifecycle (that's 2b).
   const [agentWallet, setAgentWallet] = useState<{ address: string; balance: string | null } | null>(null);
 
+  // Set when a returning user's SAVED passkey login fails (passkey deleted, wrong
+  // device, or the prompt was dismissed). Surfaced as a CLEAR "couldn't log in"
+  // state so the user never silently drops back to the create-wallet form and
+  // mints a new, empty wallet — the old bug. Recovery is explicit: Try again, or
+  // Start over (see startOver).
+  const [loginError, setLoginError] = useState<string | null>(null);
+
   const persistSession = useCallback((s: Session | null) => {
     setSession(s);
     try {
@@ -67,6 +74,7 @@ export function useWallet() {
   const connectRegister = useCallback(
     async (username: string) => {
       setLastTouched("modular");
+      setLoginError(null);
       clearSession(); // a new wallet must not inherit an old session
       const r = await modular.connectRegister(username);
       setActiveKind("modular");
@@ -74,13 +82,6 @@ export function useWallet() {
     },
     [modular, clearSession]
   );
-  const connectLogin = useCallback(async () => {
-    setLastTouched("modular");
-    clearSession();
-    const r = await modular.connectLogin();
-    setActiveKind("modular");
-    return r;
-  }, [modular, clearSession]);
 
   const connectMetaMask = useCallback(async () => {
     setLastTouched("metamask");
@@ -141,8 +142,10 @@ export function useWallet() {
   // signature) if we don't already hold a live one. The auth proof is a plain
   // message signature — no funds move. Called lazily before the first protected
   // request, so the passkey account is already deployed by then.
-  const ensureSession = useCallback(async (): Promise<string> => {
-    const ctx = authContext();
+  const ensureSession = useCallback(async (ctxOverride?: AuthCtx): Promise<string> => {
+    // The restore-login path passes an explicit ctx (its just-restored credential)
+    // so it doesn't have to wait for React state to flush before authenticating.
+    const ctx = ctxOverride ?? authContext();
     if (!ctx) throw new Error("Connect a wallet first");
 
     // Reuse a live token that belongs to THIS wallet.
@@ -207,6 +210,60 @@ export function useWallet() {
       authInFlight.current = null;
     }
   }, [authContext, session, persistSession]);
+
+  // Log a returning user back into their EXISTING wallet.
+  //   1. Same-device fast path: rebuild the exact wallet from the stored
+  //      (non-secret) credential, then authenticate with a TARGETED passkey tap.
+  //      Deterministic — it lands on the same address + balance every time.
+  //   2. New device / cleared storage: fall back to Circle's discoverable lookup.
+  // If the stored credential exists but authentication FAILS, we surface a clear
+  // error (loginError) — we do NOT silently fall through to creating a new wallet.
+  const connectLogin = useCallback(async () => {
+    setLastTouched("modular");
+    clearSession();
+    setLoginError(null);
+
+    const restored = await modular.restoreLogin().catch(() => null);
+    if (restored) {
+      setActiveKind("modular");
+      try {
+        await ensureSession({
+          address: restored.address,
+          kind: "passkey",
+          credentialId: restored.credentialId,
+          publicKey: restored.credentialPublicKey,
+          signHash: modular.signPasskeyChallenge,
+        });
+      } catch (e: any) {
+        // Stored credential present, but we couldn't authenticate it on this
+        // device. Stop here with a clear state — the restored address keeps the
+        // create-wallet form hidden, so there is no silent re-register.
+        setLoginError(
+          "Couldn't log in with your saved passkey. Tap Try again, or Start over to create a new wallet."
+        );
+        throw e;
+      }
+      return restored.account;
+    }
+
+    // Nothing stored on this device — discoverable lookup (may prompt the user
+    // to pick a passkey). On success the credential is persisted for next time.
+    const r = await modular.connectLoginDiscoverable();
+    setActiveKind("modular");
+    return r;
+  }, [modular, clearSession, ensureSession]);
+
+  // Explicit escape hatch after a failed saved-passkey login: forget the stored
+  // credential and reset to a clean slate so the user can DELIBERATELY create a
+  // new wallet. User-initiated only — never a silent fallback.
+  const startOver = useCallback(() => {
+    modular.clearStoredCredential();
+    modular.disconnect();
+    clearSession();
+    setLoginError(null);
+    setActiveKind(null);
+    setLastTouched(null);
+  }, [modular, clearSession]);
 
   // Best-effort login-time auth for BOTH paths. Passkey now verifies OFF-CHAIN
   // (WebAuthn), so it no longer needs a deployed smart account — a fresh passkey
@@ -300,6 +357,8 @@ export function useWallet() {
     connectRegister,
     connectLogin,
     connectMetaMask,
+    startOver,
+    loginError,
     activeKind,
     connectors,
     // Session auth surface for the panels.
