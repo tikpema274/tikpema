@@ -295,7 +295,6 @@ export function useWallet() {
     status: onMeta ? mmStatus : modular.status,
     busy: onMeta ? mmBusy : modular.busy,
     refreshBalance: isMetaMask ? mmRefreshBalance : modular.refreshBalance,
-    sendUsdc: isMetaMask ? mmWallet!.sendUsdc : modular.sendUsdc,
     createJobAsUser: isMetaMask ? mmWallet!.createJobAsUser : modular.createJobAsUser,
     fundJobAsUser: isMetaMask ? mmWallet!.fundJobAsUser : modular.fundJobAsUser,
     connectRegister,

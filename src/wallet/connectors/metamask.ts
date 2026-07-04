@@ -272,22 +272,9 @@ export async function connectMetaMask() {
     return { txHash: receipt.transactionHash };
   }
 
-  // Plain USDC transfer (the wallet card's Send box). Signature matches the
-  // passkey wallet's sendUsdc exactly — `amount` is in USDC base units — so the
-  // component's call works unchanged on either path. EOA-signed, user pays gas.
-  async function sendUsdc(to: `0x${string}`, amount: bigint) {
-    await ensureBalance(Number(formatUnits(amount, USDC_DECIMALS)));
-    const hash = await walletClient.writeContract({
-      address: CONTRACTS.USDC as `0x${string}`,
-      abi: TRANSFER_ABI,
-      functionName: "transfer",
-      args: [to, amount],
-      account: address,
-      chain: arcTestnet,
-    });
-    const receipt = await publicClient.waitForTransactionReceipt({ hash });
-    return receipt.transactionHash;
-  }
+  // NOTE: the client-side `sendUsdc` was removed — all user sends go through the
+  // single secure server endpoint /api/agent-send (auth + per-user wallet + cap +
+  // day-ceiling). No client-side USDC-move path remains.
 
   // Sign a plain message with the EOA (personal_sign). Used as the session auth
   // proof — the server verifies it off-chain via ecrecover. Moves no funds.
@@ -301,7 +288,6 @@ export async function connectMetaMask() {
     refreshBalance,
     createJobAsUser,
     fundJobAsUser,
-    sendUsdc,
     signMessage,
     // EIP-1193 has no programmatic disconnect; the user manages this in the
     // extension. No-op to satisfy the wallet shape.

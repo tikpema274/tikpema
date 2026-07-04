@@ -4,7 +4,6 @@ import {
   toWebAuthnCredential,
   toModularTransport,
   toCircleSmartAccount,
-  encodeTransfer,
   WebAuthnMode,
 } from "@circle-fin/modular-wallets-core";
 import {
@@ -268,42 +267,10 @@ export function useModularWallet() {
     }
   }, []);
 
-  // Gasless USDC transfer (Gas Station sponsors gas via paymaster: true).
-  const sendUsdc = useCallback(
-    async (to: `0x${string}`, amount: bigint) => {
-      if (!account) throw new Error("Connect a wallet first");
-      setBusy(true);
-      try {
-        setStatus("Estimating fees…");
-        const bundler = createBundlerClient({
-          account,
-          chain: arcTestnet,
-          transport: modularTransport,
-        });
-        const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await Promise.all([
-          computeArcFees(),
-          nonceKeyZero(account),
-        ]);
-        setStatus("Sending…");
-        const hash = await bundler.sendUserOperation({
-          calls: [encodeTransfer(to, CONTRACTS.USDC as `0x${string}`, amount)],
-          paymaster: true,
-          nonce,
-          maxPriorityFeePerGas,
-          maxFeePerGas,
-        });
-        const { receipt } = await bundler.waitForUserOperationReceipt({ hash, timeout: 60000 });
-        setStatus(`Done: ${receipt.transactionHash}`);
-        return receipt.transactionHash;
-      } catch (e: any) {
-        setStatus(`Error: ${e.message}`);
-        throw e;
-      } finally {
-        setBusy(false);
-      }
-    },
-    [account]
-  );
+  // NOTE: the old client-side `sendUsdc` (login-wallet direct transfer) was
+  // removed — ALL user sends now go through the single secure server endpoint
+  // /api/agent-send (auth + per-user wallet + per-tx cap + day-ceiling). There is
+  // no client-side USDC-move path anymore.
 
   // Stake USDC on a prediction market as the USER (passkey-signed, gasless).
   // Mirrors sendUsdc's mechanism — an approve→placeBet sequence of two
@@ -532,7 +499,6 @@ export function useModularWallet() {
         `${username}-${Date.now().toString(36).slice(-4)}`
       ),
     connectLogin: () => connect(WebAuthnMode.Login, "tikpema-user"),
-    sendUsdc,
     placeBetAsUser,
     createJobAsUser,
     fundJobAsUser,
