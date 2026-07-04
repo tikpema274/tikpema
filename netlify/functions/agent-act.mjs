@@ -1,10 +1,11 @@
 import { connectLambda } from "@netlify/blobs";
 import { TxPendingError } from "./_circle.mjs";
-import { json, parseBody, dateAnchor } from "./_arc.mjs";
+import { json, parseBody, dateAnchor, sendCapUsdc } from "./_arc.mjs";
 import { SWAP_TOKENS } from "./_swap.mjs";
 import { executeAction, valueOfStep } from "./_actions.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { budgetConfig } from "./_budget.mjs";
 
 // POST /api/agent-act { task: string }
 //
@@ -118,8 +119,11 @@ export async function handler(event) {
 
     // Multi-step: propose a plan for confirmation (does NOT execute here).
     // The client holds the returned plan and POSTs it to agent-execute-plan
-    // after the user confirms. Total cap is checked here so we never offer an
-    // over-cap plan; the executor re-checks it authoritatively at run time.
+    // after the user confirms. The executor is the SINGLE authoritative
+    // enforcement point (per-action cap + cumulative day-ceiling, stop-on-limit),
+    // so we PROPOSE any shape-valid plan and let it stop mid-run if it would
+    // breach the daily bound — we only reject up front for a clean early message
+    // when a SINGLE step already exceeds the per-action cap.
     if (decision.action === "plan") {
       const steps = Array.isArray(decision.steps) ? decision.steps : [];
       if (steps.length < 2) {
@@ -131,27 +135,38 @@ export async function handler(event) {
           return json(200, { executed: false, decision, blocked: `unknown step type "${s?.type}"` });
         }
       }
-      const maxSpendPlan = Number(process.env.AGENT_MAX_SPEND_USDC || "1");
+      const cap = sendCapUsdc();
+      const values = [];
       let totalUsdc = 0;
       try {
-        for (const s of steps) totalUsdc += await valueOfStep(s);
+        for (const s of steps) {
+          const v = await valueOfStep(s);
+          values.push(v);
+          totalUsdc += v;
+        }
       } catch (e) {
         return json(200, { executed: false, decision, blocked: `cannot value plan: ${e.message}` });
       }
-      if (totalUsdc > maxSpendPlan) {
+      const over = values.findIndex((v) => v > cap);
+      if (over >= 0) {
         return json(200, {
           executed: false,
           decision,
-          blocked: `plan total ~${totalUsdc.toFixed(2)} exceeds AGENT_MAX_SPEND_USDC (${maxSpendPlan})`,
+          blocked: `step ${over + 1} (~${values[over].toFixed(2)}) exceeds per-transaction limit of ${cap} USDC`,
         });
       }
+      const ceiling = budgetConfig().PERIOD_CEILING_USDC;
       return json(200, {
         executed: false,
         needsConfirm: true,
         decision,
         plan: steps,
         totalUsdc,
-        message: `This is a ${steps.length}-step plan totaling ~${totalUsdc.toFixed(2)}. Confirm to execute.`,
+        ceiling,
+        message:
+          `This is a ${steps.length}-step plan totaling ~${totalUsdc.toFixed(2)} USDC. ` +
+          `Each action is capped at ${cap} USDC and total agent spend is bounded to ${ceiling} USDC/day — ` +
+          `the plan stops if a step would exceed that. Confirm to execute.`,
       });
     }
 
@@ -237,8 +252,10 @@ export async function handler(event) {
       return json(200, { executed: false, decision });
     }
 
-    // 2. Guard rails — enforced HERE, not by the model.
-    const maxSpend = Number(process.env.AGENT_MAX_SPEND_USDC || "1");
+    // 2. Guard rails — enforced HERE, not by the model. Per-action send cap is the
+    // SAME sendCapUsdc used by the dedicated send + every plan step (one cap across
+    // the user-directed surface); the executor's day-ceiling backstops cumulatively.
+    const cap = sendCapUsdc();
     const amount = Number(decision.amountUsdc);
     const to = String(decision.to || "");
     const step = { type: "transfer_usdc", to, amountUsdc: amount };
@@ -246,11 +263,11 @@ export async function handler(event) {
     if (!/^0x[0-9a-fA-F]{40}$/.test(to)) {
       return json(200, { executed: false, decision, blocked: "invalid recipient" });
     }
-    if (!(amount > 0) || amount > maxSpend) {
+    if (!(amount > 0) || amount > cap) {
       return json(200, {
         executed: false,
         decision,
-        blocked: `amount ${amount} exceeds AGENT_MAX_SPEND_USDC (${maxSpend})`,
+        blocked: `amount ${amount} exceeds per-transaction limit of ${cap} USDC`,
       });
     }
 

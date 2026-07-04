@@ -1,8 +1,9 @@
 import { connectLambda } from "@netlify/blobs";
-import { json, parseBody } from "./_arc.mjs";
+import { json, parseBody, sendCapUsdc } from "./_arc.mjs";
 import { executeAction, valueOfStep } from "./_actions.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { daySpend, budgetConfig } from "./_budget.mjs";
 
 // POST /api/agent-execute-plan { plan: [ {type, ...}, ... ] }
 //
@@ -11,11 +12,21 @@ import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 // (agent-act returned it with needsConfirm) and POSTs it here after the user
 // confirms. The server is stateless; the plan travels in the request.
 //
-// Design (decisions locked earlier):
-//   - TOTAL cap: sum the USD value of ALL steps, check against the cap ONCE,
-//     before executing any. If the total exceeds the cap, nothing runs.
-//   - STOP-ON-FAILURE: run steps in order; on the first failure, stop and
-//     report which completed and which didn't. No rollback (on-chain can't).
+// GUARDRAILS THAT HOLD ACROSS THE CHAIN (the whole point of this endpoint):
+//   - PER-ACTION cap: every step's USD value ≤ sendCapUsdc(), checked before the
+//     step runs. Applies to ALL step types (transfer/swap/pay), not just sends.
+//   - CUMULATIVE day-ceiling: the plan's spend accumulates on top of what the
+//     agent already spent today and is bounded by PERIOD_CEILING_USDC. This is
+//     the CHAINED-DRAIN guard — many small steps that each pass the per-action
+//     cap still cannot COLLECTIVELY exceed the daily bound. Critically, the
+//     running total is tracked IN MEMORY across the loop: Netlify Blobs is
+//     eventually consistent (~11s), so a step's ledger write is NOT visible to
+//     the next step's store read within this fast loop — relying on canSpendDay's
+//     store read alone would let a chained plan blow past the ceiling. We seed a
+//     one-time baseline from the store (prior requests) and decrement in memory.
+//   - STOP-ON-LIMIT: the first step that would breach a cap/ceiling STOPS the
+//     plan there — recorded, no execution, no silent skip-and-continue, no
+//     partial-drain beyond the steps that already ran. No rollback (on-chain).
 //   - Batched settlement: a pay_for_service step settles in a Gateway batch on a
 //     delay, so executeAction returns state "submitted" (via _pay's 1098 catch),
 //     NOT a confirmed on-chain success. We treat "submitted" as success and
@@ -43,30 +54,68 @@ export async function handler(event) {
   const walletAddress = owner.walletAddress;
   const actx = { walletAddress, session };
 
-  // ── Total-cap check (once, before any execution) ──────────────────────────
-  const maxSpend = Number(process.env.AGENT_MAX_SPEND_USDC || "1");
+  // ── Value every step up front (for the total + to fail fast on an unvaluable
+  //    step). Values are USD: transfer/pay face value; swap = USD of the input. ─
+  const atomic = (usdc) => Math.round(Number(usdc) * 1e6); // micro-USDC (no float drift)
+  const usd2 = (usdc) => (Math.round(Number(usdc) * 100) / 100).toFixed(2);
+
   let totalUsdc = 0;
+  const values = [];
   try {
     for (const step of plan) {
-      totalUsdc += await valueOfStep(step);
+      const v = await valueOfStep(step);
+      values.push(v);
+      totalUsdc += v;
     }
   } catch (e) {
     return json(200, { executed: false, blocked: `cannot value plan: ${e.message}` });
   }
-  if (totalUsdc > maxSpend) {
-    return json(200, {
-      executed: false,
-      totalUsdc,
-      blocked: `plan total ~${totalUsdc.toFixed(2)} exceeds AGENT_MAX_SPEND_USDC (${maxSpend})`,
-    });
-  }
 
-  // ── Execute in order, stop on first failure ───────────────────────────────
+  // ── Cap config ────────────────────────────────────────────────────────────
+  const cap = sendCapUsdc();                       // per-action cap (e.g. 10)
+  const capA = atomic(cap);
+  const ceiling = budgetConfig().PERIOD_CEILING_USDC; // cumulative daily bound
+  const ceilingA = atomic(ceiling);
+
+  // Cumulative baseline: what the agent has ALREADY spent today (prior sends/
+  // plans/research), read ONCE from the store. The plan's spend accumulates on
+  // top of this IN MEMORY (runningA), so the ceiling holds across the chain even
+  // though this loop's own ledger writes haven't propagated back to store reads.
+  const baselineA = atomic(await daySpend());
+
+  // ── Execute in order; STOP at the first cap/ceiling breach or failure ──────
   const results = [];
   let stoppedAt = null;
+  let runningA = 0;                                // micro-USDC committed by THIS plan
 
   for (let i = 0; i < plan.length; i++) {
     const step = plan[i];
+    const vA = atomic(values[i]);
+
+    // (1) PER-ACTION cap — each step, any type. Stop here, never skip-and-continue.
+    if (vA > capA) {
+      results.push({ index: i, step, ok: false, blocked: `step ~${usd2(values[i])} exceeds per-transaction limit of ${cap} USDC` });
+      stoppedAt = i;
+      break;
+    }
+
+    // (2) CUMULATIVE day-ceiling — authoritative in-memory running total. THIS is
+    //     the chained-drain guard: small steps that each pass (1) still cannot
+    //     collectively exceed the daily bound. Checked BEFORE the step executes,
+    //     so an over-ceiling step never moves funds.
+    if (baselineA + runningA + vA > ceilingA) {
+      results.push({
+        index: i,
+        step,
+        ok: false,
+        blocked: `would exceed daily agent-spend ceiling of ${ceiling} USDC (already committed ~${usd2((baselineA + runningA) / 1e6)} today)`,
+        dayCeiling: true,
+      });
+      stoppedAt = i;
+      break;
+    }
+
+    // (3) Execute via the ONE shared executor (re-checks shape/send-cap/day + ledgers).
     try {
       const r = await executeAction(step, actx);
       if (!r.ok) {
@@ -78,6 +127,7 @@ export async function handler(event) {
       const state =
         r.pay?.state || r.swap?.state || (r.tx ? "completed" : "submitted");
       results.push({ index: i, step, ok: true, kind: r.kind, state, swap: r.swap, pay: r.pay, tx: r.tx });
+      runningA += vA;                              // commit: decrement remaining daily budget
     } catch (e) {
       // A thrown error (incl. TxPendingError) stops the plan. Record and halt.
       results.push({ index: i, step, ok: false, error: e.message, pending: e.name === "TxPendingError" });
@@ -91,8 +141,9 @@ export async function handler(event) {
     executed: true,
     completed: allOk,
     totalUsdc,
-    stoppedAt,          // null if all ran; else the index that failed
-    stepsRun: results.length,
+    ceiling,
+    stoppedAt,          // null if all ran; else the index that stopped the plan
+    stepsRun: results.filter((r) => r.ok).length,
     stepsTotal: plan.length,
     results,
   });

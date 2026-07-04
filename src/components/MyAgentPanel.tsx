@@ -71,7 +71,10 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       <h2>Give your agent a task</h2>
       <div className="sub">
         Your agent acts on-chain from its own wallet — send or swap USDC in plain
-        language. It spends only what's in your agent wallet, within safety caps.
+        language. Chain several steps in one task ("send 0.1 to A, then send 0.1
+        to B") and it proposes a plan for you to confirm before it runs. It spends
+        only what's in your agent wallet, and every step stays within safety caps —
+        a per-action limit and a cumulative daily ceiling that stops a plan mid-run.
       </div>
 
       {w.agentWallet && (
@@ -83,7 +86,7 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
 
       <div className="row" style={{ marginTop: 10 }}>
         <input
-          placeholder="e.g. swap 1 USDC to EURC · or send 0.5 USDC to 0x…"
+          placeholder="e.g. send 0.1 USDC to 0x… then send 0.1 to 0x… · or swap 1 USDC to EURC"
           value={task}
           onChange={(e) => setTask(e.target.value)}
           onKeyDown={(e) => {
@@ -169,6 +172,11 @@ function AgentSummary({
                 {describeStep(s)}
                 <b>{mark}</b>
                 <span style={{ opacity: 0.7 }}>{note}</span>
+                {r?.ok && r?.tx && (
+                  <span style={{ marginLeft: 8 }}>
+                    <TxLink url={r.tx} />
+                  </span>
+                )}
               </li>
             );
           })}
