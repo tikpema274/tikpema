@@ -239,12 +239,14 @@ export async function handler(event) {
     // Exa retrieval path so the brief is grounded on real retrieved sources;
     // _research falls back to web search if Exa is unavailable. Pass the Exa
     // system-prompt variant to match (it doesn't mention web search). Thread the
-    // job context (jobId + jobPrice) for the later autonomous-purchase budget gate.
+    // job context (jobId + jobPrice) for the later autonomous-purchase budget gate,
+    // plus `owner` (this user's server-resolved wallet) so that gate's day ceiling
+    // is keyed PER USER, not to a shared global total.
     const result = await research(
       question,
       `${BRIEF_SYSTEM_PROMPT_EXA}\n\n${dateAnchor()}`,
       BRIEF_USER_INSTRUCTION,
-      { useExa: true, jobId, jobPrice }
+      { useExa: true, jobId, jobPrice, owner: walletAddress }
     );
     let decision = result.decision;
 

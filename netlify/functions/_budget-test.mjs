@@ -109,7 +109,7 @@ async function main() {
     const b = await canSpend({ jobId: "jobB", jobPriceUsdc: 20, amountUsdc: 1.5, store, at: AT });
     check("jobB 1.5 blocked by daily ceiling", b.allowed === false, JSON.stringify(b));
     check("reason cites period ceiling", /period ceiling/.test(b.reason || ""), b.reason);
-    check("day total is 1.5 (blocked buy not recorded)", (await daySpend(AT.slice(0, 10), { store })) === 1.5);
+    check("day total is 1.5 (blocked buy not recorded)", (await daySpend({ date: AT.slice(0, 10), store })) === 1.5);
   }
 
   // ── 5. Audit log records both allowed and blocked attempts ──────────────────
@@ -142,7 +142,7 @@ async function main() {
     check("recordSpend returns running job total 0.05", r2.jobSpentUsdc === 0.05, JSON.stringify(r2));
     check("recordSpend returns allowance 0.105", r2.allowanceUsdc === 0.105, JSON.stringify(r2));
     check("jobSpend reads back 0.05", (await jobSpend("job-6", { store })) === 0.05);
-    check("daySpend reads back 0.05", (await daySpend(AT.slice(0, 10), { store })) === 0.05);
+    check("daySpend reads back 0.05", (await daySpend({ date: AT.slice(0, 10), store })) === 0.05);
     check("first recordSpend saw running total 0.02", r1.jobSpentUsdc === 0.02, JSON.stringify(r1));
   }
 

@@ -90,7 +90,7 @@ export async function decidePurchase(apiKey, model, question, groundingBlock) {
 // array of { claim, source }), or [] if we didn't buy for any reason. Never
 // throws: every failure path logs and returns [] so research proceeds Exa-only.
 // `store` is the optional injectable budget store (undefined → Netlify Blobs).
-async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jobPrice, store, forceDecision }) {
+async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jobPrice, store, forceDecision, owner }) {
   try {
     // 1. Decision call — buy or not? `forceDecision` is a TEST-ONLY seam that
     // injects the { buy, justification } verdict so the buy-branch mechanics are
@@ -105,8 +105,10 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     const amountUsdc = dataPurchaseUsdc();
     console.log(`[research] purchase decision: BUY ($${amountUsdc}) — ${justification}`);
 
-    // 2. Budget gate.
-    const gate = await canSpend({ jobId, jobPriceUsdc: jobPrice, amountUsdc, store });
+    // 2. Budget gate. The day-ceiling sub-check is keyed to `owner` — the job
+    //    client's own agent wallet — so autonomous data buys draw down THIS
+    //    user's daily budget, not a shared global one.
+    const gate = await canSpend({ jobId, jobPriceUsdc: jobPrice, amountUsdc, store, owner });
     if (!gate.allowed) {
       console.log(`[research] budget BLOCKED: ${gate.reason}`);
       await recordBlocked({ jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: gate.reason, store });
@@ -133,6 +135,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
       source: DATA_SELLER_SOURCE,
       justification,
       store,
+      owner,
     });
     console.log(`[research] purchased ${facts.length} facts for $${paidUsdc} — spend recorded`);
     return facts;
@@ -157,9 +160,9 @@ export async function research(
   // step can compute the per-job data allowance and gate autonomous purchases.
   // We only SURFACE it here — no budget calls, no spending, no decision logic yet.
   // Log so we can confirm the values arrive with the right jobId/jobPrice.
-  const { jobId, jobPrice } = opts;
+  const { jobId, jobPrice, owner } = opts;
   if (jobId != null || jobPrice != null) {
-    console.log(`[research] job context: jobId=${jobId} jobPrice=${jobPrice} USDC`);
+    console.log(`[research] job context: jobId=${jobId} jobPrice=${jobPrice} USDC owner=${owner ?? "(none)"}`);
   }
 
   // Opt-in Exa path: ground the brief on real retrieved sources instead of the
@@ -190,6 +193,7 @@ export async function research(
           groundingBlock: exaEntries.join("\n\n"),
           jobId,
           jobPrice,
+          owner, // per-user day-ceiling key (the job client's own wallet)
           store: opts.budgetStore,
           forceDecision: opts.forceDecision, // test-only; undefined in production
         });

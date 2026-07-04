@@ -77,11 +77,14 @@ export async function handler(event) {
   const ceiling = budgetConfig().PERIOD_CEILING_USDC; // cumulative daily bound
   const ceilingA = atomic(ceiling);
 
-  // Cumulative baseline: what the agent has ALREADY spent today (prior sends/
-  // plans/research), read ONCE from the store. The plan's spend accumulates on
-  // top of this IN MEMORY (runningA), so the ceiling holds across the chain even
-  // though this loop's own ledger writes haven't propagated back to store reads.
-  const baselineA = atomic(await daySpend());
+  // Cumulative baseline: what THIS user's wallet has ALREADY spent today (prior
+  // sends/plans/research), read ONCE from the store — keyed to their own wallet,
+  // so the chained-drain guard bounds THIS user's daily budget, not a shared one.
+  // The plan's spend accumulates on top of this IN MEMORY (runningA), so the
+  // ceiling holds across the chain even though this loop's own ledger writes
+  // haven't propagated back to store reads. executeAction ledgers against the
+  // same owner (walletAddress), so the baseline and the writes stay consistent.
+  const baselineA = atomic(await daySpend({ owner: walletAddress }));
 
   // ── Execute in order; STOP at the first cap/ceiling breach or failure ──────
   const results = [];

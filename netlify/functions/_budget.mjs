@@ -10,7 +10,9 @@
 //   1. DATA_ALLOWANCE_PCT   (0.30) — per-job data allowance = jobPrice × pct.
 //   2. PER_PURCHASE_PCT     (0.50) — max single buy   = jobAllowance × pct.
 //   3. PERIOD_CEILING_USDC  (2.00) — max autonomous spend per rolling UTC day,
-//                                    summed across ALL jobs.
+//                                    PER USER (per agent wallet). Each user's own
+//                                    wallet has its own daily budget; one user's
+//                                    spend never draws down another's ceiling.
 //
 // NOT WIRED into agent-act / the research engine / x402-pay in this phase. This
 // is the module + its persistence + isolated tests only.
@@ -71,7 +73,14 @@ function defaultStore() {
 const pickStore = (store) => store ?? defaultStore();
 
 const jobKey = (jobId) => `job:${jobId}`;
-const dayKey = (date) => `day:${date}`;
+// The daily ceiling is PER-USER: the day total is namespaced by the owner — the
+// SERVER-RESOLVED agent wallet address (never client-supplied). One wallet's
+// spend no longer counts against every other wallet's ceiling. A missing owner
+// falls back to a shared "_global" bucket, which only the isolated unit tests
+// hit; every production caller passes its session-resolved wallet address.
+const ownerKey = (owner) =>
+  typeof owner === "string" && owner ? owner.toLowerCase() : "_global";
+const dayKey = (owner, date) => `day:${ownerKey(owner)}:${date}`;
 
 // ── Core: the per-job allowance ───────────────────────────────────────────────
 export function jobAllowance(jobPriceUsdc) {
@@ -84,8 +93,11 @@ export async function jobSpend(jobId, { store } = {}) {
   const rec = await pickStore(store).getJSON(jobKey(jobId));
   return rec?.spentUsdc ?? 0;
 }
-export async function daySpend(date, { store } = {}) {
-  const rec = await pickStore(store).getJSON(dayKey(date ?? utcDate()));
+// Per-user day total. `owner` is the agent wallet address; omit only in tests
+// (falls back to the shared "_global" bucket). `date` or `at` select the UTC day.
+export async function daySpend({ owner, date, at, store } = {}) {
+  const d = date ?? utcDate(at);
+  const rec = await pickStore(store).getJSON(dayKey(owner, d));
   return rec?.spentUsdc ?? 0;
 }
 
@@ -94,7 +106,7 @@ export async function daySpend(date, { store } = {}) {
 //   (a) amount ≤ per-purchase sub-cap
 //   (b) job's cumulative data spend + amount ≤ job allowance
 //   (c) today's cumulative autonomous spend + amount ≤ period ceiling
-export async function canSpend({ jobId, jobPriceUsdc, amountUsdc, store, at }) {
+export async function canSpend({ jobId, jobPriceUsdc, amountUsdc, store, at, owner }) {
   const s = pickStore(store);
   const cfg = budgetConfig();
 
@@ -125,8 +137,8 @@ export async function canSpend({ jobId, jobPriceUsdc, amountUsdc, store, at }) {
     };
   }
 
-  // (c) period ceiling (rolling UTC day, across all jobs)
-  const dayA = atomic(await daySpend(utcDate(at), { store: s }));
+  // (c) period ceiling (rolling UTC day, PER USER — this owner's own budget)
+  const dayA = atomic(await daySpend({ owner, at, store: s }));
   const ceilA = atomic(cfg.PERIOD_CEILING_USDC);
   if (dayA + amtA > ceilA) {
     return {
@@ -153,7 +165,7 @@ async function appendAudit(s, entry) {
 }
 
 // ── Record an ALLOWED spend against job total + day total, and audit it ───────
-export async function recordSpend({ jobId, jobPriceUsdc, amountUsdc, source, justification, store, at }) {
+export async function recordSpend({ jobId, jobPriceUsdc, amountUsdc, source, justification, store, at, owner }) {
   const s = pickStore(store);
   const amt = round6(amountUsdc);
   const allowanceUsdc = jobAllowance(jobPriceUsdc);
@@ -170,11 +182,11 @@ export async function recordSpend({ jobId, jobPriceUsdc, amountUsdc, source, jus
   jRec.spentUsdc = round6(jRec.spentUsdc + amt);
   await s.setJSON(jobKey(jobId), jRec);
 
-  // per-day running total (rolling UTC day)
+  // per-day running total (rolling UTC day, keyed to THIS owner's wallet)
   const date = utcDate(at);
-  const dRec = (await s.getJSON(dayKey(date))) ?? { date, spentUsdc: 0 };
+  const dRec = (await s.getJSON(dayKey(owner, date))) ?? { date, owner: ownerKey(owner), spentUsdc: 0 };
   dRec.spentUsdc = round6(dRec.spentUsdc + amt);
-  await s.setJSON(dayKey(date), dRec);
+  await s.setJSON(dayKey(owner, date), dRec);
 
   // audit
   await appendAudit(s, {
@@ -212,13 +224,15 @@ export async function auditLog(jobId, { store } = {}) {
 // ── Free-form agent actions (Brick C): per-DAY ceiling only ───────────────────
 // agent-act / execute-plan spends aren't tied to a job price, so the per-job
 // allowance doesn't apply — but they DO count against the same rolling-UTC-day
-// PERIOD_CEILING_USDC as research purchases (one unified daily safety cap). Pair
-// canSpendDay (gate) with recordAgentSpend (ledger) around each executed action.
-export async function canSpendDay({ amountUsdc, store, at }) {
+// PERIOD_CEILING_USDC as research purchases (one unified daily safety cap),
+// scoped PER USER by `owner` (the caller's agent wallet). Pair canSpendDay (gate)
+// with recordAgentSpend (ledger) around each executed action — pass the SAME
+// owner to both so the gate and the ledger read/write the one per-user bucket.
+export async function canSpendDay({ amountUsdc, store, at, owner }) {
   const cfg = budgetConfig();
   const amtA = atomic(amountUsdc);
   if (amtA <= 0) return { allowed: false, reason: `amount ${amountUsdc} must be > 0` };
-  const dayA = atomic(await daySpend(utcDate(at), { store }));
+  const dayA = atomic(await daySpend({ owner, at, store }));
   const ceilA = atomic(cfg.PERIOD_CEILING_USDC);
   if (dayA + amtA > ceilA) {
     return {
@@ -231,15 +245,15 @@ export async function canSpendDay({ amountUsdc, store, at }) {
   return { allowed: true };
 }
 
-export async function recordAgentSpend({ address, amountUsdc, source, justification, store, at }) {
+export async function recordAgentSpend({ owner, amountUsdc, source, justification, store, at }) {
   const s = pickStore(store);
   const amt = round6(amountUsdc);
   const date = utcDate(at);
-  const dRec = (await s.getJSON(dayKey(date))) ?? { date, spentUsdc: 0 };
+  const dRec = (await s.getJSON(dayKey(owner, date))) ?? { date, owner: ownerKey(owner), spentUsdc: 0 };
   dRec.spentUsdc = round6(dRec.spentUsdc + amt);
-  await s.setJSON(dayKey(date), dRec);
+  await s.setJSON(dayKey(owner, date), dRec);
   await appendAudit(s, {
-    agent: address,
+    agent: ownerKey(owner),
     amountUsdc: amt,
     source,
     justification,

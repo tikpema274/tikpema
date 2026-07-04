@@ -53,8 +53,10 @@ export async function handler(event) {
   const walletAddress = wallet.walletAddress;
 
   // GUARDRAIL 2 — day-ceiling: cumulative agent sends count against the same
-  // rolling-UTC-day budget as other autonomous spend.
-  const day = await canSpendDay({ amountUsdc: amount });
+  // rolling-UTC-day budget as other autonomous spend, PER USER — keyed to this
+  // caller's own wallet (server-resolved), so it can't be blocked by, or block,
+  // any other wallet.
+  const day = await canSpendDay({ amountUsdc: amount, owner: walletAddress });
   if (!day.allowed) {
     return json(429, { error: day.reason, dayCeiling: true });
   }
@@ -92,7 +94,7 @@ export async function handler(event) {
     const txHash = await waitForTx(client, tx.data?.id);
     // Ledger the send against today's ceiling (best-effort; the tx already landed).
     await recordAgentSpend({
-      address: session.address,
+      owner: walletAddress,
       amountUsdc: amount,
       source: "agent-send",
       justification: `user send to ${to}`,

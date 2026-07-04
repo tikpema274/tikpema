@@ -89,13 +89,16 @@ export async function executeAction(step, ctx) {
   } catch (e) {
     return { ok: false, blocked: `cannot value step: ${e.message}` };
   }
-  const day = await canSpendDay({ amountUsdc: dayValue, store });
+  // Per-user day ceiling: keyed to THIS caller's own agent wallet (server-
+  // resolved), so one user's spend never blocks another's. The gate and the
+  // ledger below MUST use the same owner (walletAddress) to read/write one bucket.
+  const day = await canSpendDay({ amountUsdc: dayValue, store, owner: walletAddress });
   if (!day.allowed) return { ok: false, blocked: day.reason };
 
   // On any successful spend below, ledger it against today's ceiling + audit.
   const ledger = () =>
     recordAgentSpend({
-      address: session?.address ?? walletAddress,
+      owner: walletAddress,
       amountUsdc: dayValue,
       source: step.type,
       justification: step.reasoning,
