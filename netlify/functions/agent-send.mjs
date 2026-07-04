@@ -7,10 +7,11 @@
 // actually funds. Gasless (Gas Station sponsored).
 import { connectLambda } from "@netlify/blobs";
 import { formatUnits } from "viem";
-import { json, parseBody, ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
+import { json, parseBody, ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc } from "./_arc.mjs";
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { canSpendDay, recordAgentSpend } from "./_budget.mjs";
 import { publicClient } from "./_predict.mjs";
 
 const BALANCE_OF_ABI = [
@@ -37,12 +38,26 @@ export async function handler(event) {
   const amount = Number(amountUsdc);
   if (!(amount > 0)) return json(400, { error: "amountUsdc must be > 0" });
 
+  // GUARDRAIL 1 — per-transaction send cap (hard limit; checked first so an
+  // over-cap send returns the cap message).
+  const cap = sendCapUsdc();
+  if (amount > cap) {
+    return json(400, { error: `exceeds per-transaction limit of ${cap} USDC`, cap });
+  }
+
   // Resolve the caller's OWN wallet from the session (never client-supplied).
   const wallet = await ensureOwnerWallet(session);
   if (wallet.pending) {
     return json(202, { status: "provisioning", message: "Your agent wallet is being set up — retry shortly." });
   }
   const walletAddress = wallet.walletAddress;
+
+  // GUARDRAIL 2 — day-ceiling: cumulative agent sends count against the same
+  // rolling-UTC-day budget as other autonomous spend.
+  const day = await canSpendDay({ amountUsdc: amount });
+  if (!day.allowed) {
+    return json(429, { error: day.reason, dayCeiling: true });
+  }
 
   // Clean insufficient-funds error before attempting the transfer.
   try {
@@ -75,6 +90,13 @@ export async function handler(event) {
       fee: { type: "level", config: { feeLevel: "MEDIUM" } },
     });
     const txHash = await waitForTx(client, tx.data?.id);
+    // Ledger the send against today's ceiling (best-effort; the tx already landed).
+    await recordAgentSpend({
+      address: session.address,
+      amountUsdc: amount,
+      source: "agent-send",
+      justification: `user send to ${to}`,
+    }).catch(() => {});
     return json(200, { txHash, tx: `${ARC.explorer}/tx/${txHash}`, from: walletAddress });
   } catch (e) {
     if (e instanceof TxPendingError) {

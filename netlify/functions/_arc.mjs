@@ -58,3 +58,20 @@ export const maxSpendUsdc = () => {
   }
   return n;
 };
+
+// Per-transaction cap on agent SENDS/TRANSFERS specifically (both user-directed
+// via agent-send and autonomous via agent-act/execute-plan). Separate from
+// AGENT_MAX_SPEND_USDC so the later tiered model can raise user-directed sends
+// without loosening the autonomous cap. Conservative default so a bug or bad
+// instruction can't drain much on testnet. Same fail-closed parsing as above.
+export const sendCapUsdc = () => {
+  const raw = process.env.AGENT_SEND_CAP_USDC;
+  if (raw === undefined || raw === "") return 5; // conservative testnet default
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(
+      `AGENT_SEND_CAP_USDC is misconfigured (${JSON.stringify(raw)}); refusing to send`
+    );
+  }
+  return n;
+};

@@ -1,5 +1,5 @@
 import { circle, waitForTx } from "./_circle.mjs";
-import { ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
+import { ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc } from "./_arc.mjs";
 import { agentSwap, valueInUsdc, SWAP_TOKENS } from "./_swap.mjs";
 import { agentPay } from "./_pay.mjs";
 import { canSpendDay, recordAgentSpend } from "./_budget.mjs";
@@ -63,6 +63,16 @@ export async function executeAction(step, ctx) {
   const { walletAddress, session, store } = ctx;
   const shapeErr = validateStepShape(step);
   if (shapeErr) return { ok: false, blocked: shapeErr };
+
+  // Per-transaction SEND cap (transfers only). Checked FIRST so an over-cap send
+  // returns the cap message rather than the day-ceiling one. Applies to BOTH
+  // user-directed and autonomous transfers routed through here.
+  if (step.type === "transfer_usdc") {
+    const cap = sendCapUsdc();
+    if (Number(step.amountUsdc) > cap) {
+      return { ok: false, blocked: `exceeds per-transaction limit of ${cap} USDC` };
+    }
+  }
 
   // Per-user safety: don't let a Gateway pay fall back to the shared wallet.
   if (session && step.type === "pay_for_service") {
