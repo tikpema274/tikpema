@@ -498,3 +498,32 @@ The redesign brief described the palette as "deep navy, cyan, emerald," but the 
 
 ### State
 HEAD `982b60e`, clean, pushed, no open bugs. (Backlog + strategic items unchanged from the prior session entry above.)
+
+---
+
+## Feasibility survey — Nanopayments / user-escrow (read-only, no code changes)
+
+*Two read-only code surveys evaluating whether a user-facing "Nanopayments" payment feature is buildable on existing surfaces. No files changed. Findings only.*
+
+### A. x402 surfaces — pure pay-per-request, NO payment channel
+- **Sellers:** `x402-quote.mjs` (Gateway-batched, $0.001, via `BatchFacilitatorClient`), `x402-vanilla-seller.mjs` (vanilla EIP-3009, $0.01, settles `receiveWithAuthorization` on-chain). **Buyers:** `_x402.mjs` (`payX402`, Gateway-batched), `_x402-vanilla.mjs` (`payX402Vanilla`, token-domain), `x402-pay.mjs` (thin HTTP wrapper).
+- **Payment model:** every path is one signed EIP-3009 authorization = one HTTP call = one resource. **No channel / deposit-escrow / streaming / return-on-close anywhere.** The Gateway-batched path authorizes against an ALREADY-DEPOSITED balance (funded via `depositFor`), but still one-shot-per-request — a held pooled balance, not a per-counterparty escrow.
+- **Chain:** Arc Testnet only (`eip155:5042002`, USDC `0x3600…0000`). No Base/Solana anywhere (grep-confirmed). Consistent with the Exa note: the buyer only ever pays this repo's OWN Arc seller (`DEFAULT_SELLER_URL` → app.tikpema.xyz/x402-quote); it sidesteps Exa's Base/Solana-only x402 entirely.
+- **Live vs spike:** `_x402.mjs`/`payX402` = LIVE (called mid-research at `_research.mjs:120`, budget-gated). `x402-quote.mjs` = live seller counterparty. `x402-pay.mjs`, `x402-vanilla-seller.mjs`, `_x402-vanilla.mjs` = defined-but-unused spikes. Note: `executeAction`'s `pay_for_service` uses `agentPay` (plain transfer), NOT x402.
+- **Money-safety:** x402 buys have their OWN controls (in-buyer `AGENT_MAX_SPEND_USDC` cap + `_budget.mjs` `canSpend`/`recordSpend` per-job spine), authed as the dev-controlled `DELEGATE_ADDRESS` EOA — NOT the user session/`executeAction` path.
+
+### B. ERC-8183 escrow pipeline — separable from research, per-user auth already present
+- **Contract:** `AGENTIC_COMMERCE 0x0747EEf0…4583`. Lifecycle: `createJob → setBudget → approve → fund → submit → complete/reject`.
+- **Separable from research?** YES — cleanly layered. On-chain calls are task-agnostic (`job-run-background.mjs:68-82`, `job-submit-background.mjs:292-299`, `job-evaluate-background.mjs:262-268`); the on-chain layer only sees a generic keccak256 `deliverableHash`, never research content. Research logic is confined to `_research.mjs` + brief/judge prompts. A job's only task-descriptive field is a free-form `string description` (now `question`) — an arbitrary task fits WITHOUT changing the contract interaction.
+- **Evaluator:** hardwired, not pluggable. `job-evaluate-background.mjs:252-268` always runs the module-local Haiku/Sonnet `evaluate()` to pick `complete` vs `reject`. Swapping in human sign-off = editing this handler (settlement calls stay generic).
+- **Auth (the key finding):** `fund()` ALREADY moves the authenticated user's OWN per-user SCA wallet under their session. `job-run.mjs:33-52` does `requireSession` → `ensureOwnerWallet` → threads the resolved wallet to `job-run-background.mjs` via `internalToken()`. Per-user wallet resolution already applies to job funding. (Legacy `job-set-budget.mjs:29` still uses the shared env wallet, but it's NOT part of the live `job-run` pipeline.)
+- **Two-party gap:** today `createJob` passes `[walletAddress, walletAddress, …]` → client == provider == evaluator == the ONE user wallet ("self-agent model"). So "release" and "refund" both land back in the depositor's own wallet — money never changes hands. A real user-escrows-for-a-task feature needs DISTINCT provider + evaluator addresses — a change to the `createJob` ARGS (`job-run-background.mjs:71`), not the ABI or settlement calls.
+- **⚠️ Caps: the escrow `fund()` is UNCAPPED.** `job-run.mjs` validates only `budgetUsdc > 0` + wallet balance; no `canSpend`/`sendCapUsdc`/day-ceiling on the create→fund path. `_budget.mjs` caps cover ONLY autonomous mid-research x402 buys, not the user's escrow deposit. `job-quote.mjs:85` clamps the *suggested* budget to [0.20, 0.60] but `job-run.mjs` doesn't re-validate — deposit amount is uncapped.
+
+### Verdict (what a user-escrow feature would reuse / need)
+- **Reuse as-is:** the entire on-chain escrow spine (create/fund/submit/complete/reject, generic Circle `exec`, `waitForTx`/`TxPendingError`, `getJob` idempotency, keccak256 determinism, Blobs status stores, status/deliverable polling) AND the auth spine (`requireSession` → `ensureOwnerWallet` per-user SCA → balance gate → session→internalToken hand-off).
+- **Generalize:** factor research out of the two fused handlers (task-production in job-submit, auto-judge in job-evaluate) behind a task/evaluator interface; `description` string; research-only `job-quote.mjs` pricing.
+- **Net-new:** distinct provider/evaluator addresses in `createJob` (genuine two-party escrow vs self-agent); a real deliverable-acceptance path (human sign-off / non-research verifier); a deposit cap on the fund path (none today).
+- **Highest money-risk (careful build + live test):** `fund()` (`job-run-background.mjs:82`, uncapped user-USDC pull), the `reject()`/refund path (`job-evaluate-background.mjs:180-197`), and the `complete`-vs-`reject` branch (`:262-268`) — the three direct user-money-movement surfaces.
+
+*No code changed. This is a scoping/feasibility record only.*
