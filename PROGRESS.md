@@ -527,3 +527,33 @@ HEAD `982b60e`, clean, pushed, no open bugs. (Backlog + strategic items unchange
 - **Highest money-risk (careful build + live test):** `fund()` (`job-run-background.mjs:82`, uncapped user-USDC pull), the `reject()`/refund path (`job-evaluate-background.mjs:180-197`), and the `complete`-vs-`reject` branch (`:262-268`) — the three direct user-money-movement surfaces.
 
 *No code changed. This is a scoping/feasibility record only.*
+
+---
+
+## Session update — hard cap on the escrow fund path (money-safety fix)
+
+*Closes the ⚠️ finding from the feasibility survey directly above: the escrow `fund()` was UNCAPPED. Committed `537d747` (backup remote `tikpema274/tikpema`), deployed to prod via the Netlify CLI, verified live on `app.tikpema.xyz`.*
+
+### The problem (from the survey)
+`job-run.mjs` accepted any client-supplied `budgetUsdc > 0`, checked ONLY against wallet balance — the one uncapped money path in the app. `_budget.mjs` caps cover only autonomous mid-research x402 buys, not the user's escrow deposit; `job-quote.mjs:85` clamps the *suggested* budget to [0.20, 0.60] but is a suggestion the server never re-validated.
+
+### What shipped (`537d747`)
+- **`netlify/functions/job-run.mjs` only.** Added a per-transaction hard cap on the deposit: after the existing `budgetUsdc > 0` validation and before wallet resolution / the balance gate, `job-run.mjs:48-53`:
+  ```js
+  const cap = sendCapUsdc();
+  if (budget > cap) {
+    return json(400, { error: `Deposit ${budget} exceeds per-transaction limit of ${cap} USDC` });
+  }
+  ```
+  Plus the import (`job-run.mjs:14`).
+- **Reuses `sendCapUsdc()`** from `_arc.mjs` — the SAME per-tx cap the send / `executeAction` paths enforce (default 5 USDC on testnet). No new env var, no new number.
+- **Reject, never clamp** — over-cap returns `400` naming the limit + the requested amount, mirroring the existing cap wording (`_actions.mjs:82`, `agent-act.mjs:334`). Never funds a different amount than the user asked for. The reject returns before wallet resolution, so **no funds move**.
+- **Server-side, post-`requireSession`** — enforced in the authenticated front door, so no client can bypass it. The `job-quote.mjs` clamp stays a suggestion; this is the real enforcement.
+- **Per-tx bound only** — deliberately NOT wired into the `_budget.mjs` daily ceiling (`canSpendDay`). No lifecycle / evaluator / self-escrow-model changes. No changes to `_actions.mjs`, send, swap, or bridge.
+
+### Deploy + live verification
+- Deployed via `npm run build` + `netlify deploy --prod --dir=dist` (this project's real deploy path — CLI, not git auto-build; see the deploy memory). Live at `app.tikpema.xyz`, all 43 functions incl. `job-run` shipped.
+- **Verified live on prod (user-run, authenticated):** over-cap `budgetUsdc: 5.01` → `400` `{"error":"Deposit 5.01 exceeds per-transaction limit of 5 USDC"}` (no funds moved); at-cap `budgetUsdc: 5` → `202` (gate cleared, job started). ✅
+
+### State
+HEAD `537d747`, clean. The one uncapped user-money path is now bounded. Note: this is the *deposit* per-tx cap only — the survey's other net-new items (distinct provider/evaluator addresses for genuine two-party escrow, a non-research deliverable-acceptance path, `reject()`/refund-path review) remain open and out of scope for this change.
