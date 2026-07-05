@@ -114,9 +114,9 @@ export async function handler(event) {
         decision,
         needsConfirmation: true,
         message:
-          `I can only send USDC immediately — I can't schedule or set conditions. ` +
-          `This task asked for: "${decision.unmetCondition || "a condition I can't fulfil"}". ` +
-          `Resend the task without that part if you'd like me to send now.`,
+          `I can only send USDC right away — I can't schedule payments or wait for a condition. ` +
+          `The part I can't act on is: ${decision.unmetCondition || "a condition I can't fulfil"}. ` +
+          `Send the task again without it and I'll pay now.`,
       });
     }
 
@@ -192,9 +192,9 @@ export async function handler(event) {
           decision,
           needsConfirmation: true,
           message:
-            `This task looks like it has a time or condition ("${task}"). ` +
-            `I can only send USDC immediately, so I've held off. ` +
-            `Resend without the timing if you want it sent now.`,
+            `This task looks like it has a time or condition attached, so I've held off. ` +
+            `I can only send USDC right away, not on a schedule. ` +
+            `Send it again without the timing and I'll pay now.`,
         });
       }
     }
