@@ -474,3 +474,27 @@ HEAD `ae05381` (adds this PROGRESS.md; last code change `e58bd9e`), clean, pushe
 **Parked backlog:** prediction dead-code cleanup (SEE GOTCHA #1 — move the RPC client first), `_budget.mjs` comment fix, `maxSpendUsdc()` wiring (needs scoping), recovery (2b/2c — Circle mechanism confirmed, highest-stakes), user-configurable/tiered caps, app+landing redesigns.
 
 **Strategic (high-leverage now):** real users, Arc Builders Fund (strong story — cross-chain + Arc-roadmap fit), testnet→mainnet.
+
+---
+
+## Session update — sidebar console redesign (frontend only)
+
+*Committed + pushed to `tikpema274/tikpema`, verified live on production.*
+
+Reorganized the app from a single stacked-panel page (App.tsx rendered ConnectPasskey, ResearchPanel, MyAgentPanel, FeedbackPanel linearly, no router) into a multi-page **sidebar console**. Frontend only — no Netlify function, `_actions.mjs`, cap, auth, or `/api/*` money-path change; no new endpoints or client methods; no Swap/Bridge forms. PredictPanel/predict-markets left untouched (still dead — separate cleanup).
+
+### What shipped (`982b60e`)
+- **Routing** — lightweight **hash router**, no new dependency. Active view derives from `window.location.hash` (`parseHash()` in App.tsx) + a `hashchange` listener; nav sets `#/<route>`, so views deep-link (`#/send`, `#/research`) and the back button works. The single `const wallet = useWallet()` stays at the shell and is passed to every page as before.
+- **Sidebar shell** — left nav, 5 items in order: Dashboard · Wallet · AI Agent · Research · Send. Feedback in a muted low-priority foot slot. No Swap/Bridge/Lend/Stake/Prediction items. Swap and Bridge stay reachable **inside AI Agent via natural-language tasks**, unchanged. Same visual language (warm-ink surfaces, amber-gold accent, Space Mono) — layout, not a recolor.
+- **SendPanel.tsx (new)** — Send form lifted out of ConnectPasskey (coupling check confirmed it shared nothing but the `w` prop). `send()` logic and the `/api/agent-send` call are byte-identical; gated on `w.agentWallet` exactly as before, so Send never appears before a wallet exists.
+- **Dashboard.tsx (new)** — overview composed only from existing per-user reads (`w.agentWallet` address/balance, `w.busy`, `w.refreshAgentWallet`) + quick-links to the action pages. Deliberately does NOT call `/api/agent-status` — that endpoint reads the SHARED env demo wallet (`process.env.AGENT_WALLET_ADDRESS`), not the user's, so surfacing it here would misrepresent the balance.
+- **ConnectPasskey.tsx** — Send block + its state/helpers removed; connect flow (`username`, `showCreate`, `hasPasskey`, `handlePasskey`, `w.connect*`/`startOver`) untouched. It is now the **Wallet** page (connect + balance + funding + status).
+- **styles.css** — added `.console`/`.sidebar`/`.nav`/`.console-main`/`.quick` using existing tokens; old `.app`/`.hero` styles left in place (harmless, unused).
+
+Files: `src/App.tsx`, `src/components/ConnectPasskey.tsx` (modified); `src/components/SendPanel.tsx`, `src/components/Dashboard.tsx` (new); `src/styles.css`. Build + typecheck clean; prod serves the new bundle (verified via index.html hash + live click-through).
+
+### Note for a future palette pass
+The redesign brief described the palette as "deep navy, cyan, emerald," but the actual design is warm-ink + amber-gold. Kept the real tokens (instruction was "layout, not a recolor"). A navy/cyan reskin, if ever wanted, is a separate recolor pass.
+
+### State
+HEAD `982b60e`, clean, pushed, no open bugs. (Backlog + strategic items unchanged from the prior session entry above.)
