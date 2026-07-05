@@ -5,14 +5,14 @@ import FeedbackPanel from "./components/FeedbackPanel";
 import { useWallet } from "./wallet/useWallet";
 
 // The stranger-facing app frames ONE agent: set up a wallet, fund it, then give
-// the agent a task — research (the flagship), or send/swap/multi-step actions.
+// the agent a task — research (the flagship), or send/swap/bridge/multi-step actions.
 // AgentPanel (a dev sandbox) and PredictPanel (the same research loop wearing a
 // second hat) are intentionally NOT mounted here — their files are kept and
 // revivable, just not part of the front door. See the audit.
 
 // The four real steps of the loop, in order — a genuine sequence, so numbering
 // carries information rather than decoration. Broad enough to set up BOTH the
-// research desk and the "give your agent a task" (send/swap/multi-step) surface.
+// research desk and the "give your agent a task" (send/swap/bridge/multi-step) surface.
 const STEPS = [
   {
     n: "01",
@@ -27,12 +27,12 @@ const STEPS = [
   {
     n: "03",
     title: "Give your agent a task",
-    body: "In plain language: ask a factual question for a cited brief, or tell it to send or swap USDC — one step or several.",
+    body: "In plain language: ask a factual question for a cited brief, or tell it to send, swap, or bridge USDC cross-chain — one step or several.",
   },
   {
     n: "04",
     title: "It acts — safely",
-    body: "Your agent researches, sends, or swaps on-chain and settles in USDC — every action bounded by your per-transaction and daily caps.",
+    body: "Your agent researches, sends, swaps, or bridges USDC — on Arc or cross-chain to Ethereum, Base and more — every action bounded by your per-transaction, per-bridge, and daily caps.",
   },
 ];
 
@@ -64,9 +64,10 @@ export default function App() {
         <p className="hero-lede">
           Tikpema is an AI agent with its <b>own on-chain wallet</b>. Ask in plain
           language and it <b>researches with cited sources</b>, sends and swaps
-          USDC, and runs multi-step tasks — <b>gasless, no seed phrase</b>, and
-          kept within <b>per-transaction and daily spending caps</b>. Research is
-          its proven flagship; the rest it does on your behalf, on-chain, in seconds.
+          USDC, <b>bridges cross-chain</b> to Ethereum, Base and more, and runs
+          multi-step tasks — <b>gasless, no seed phrase</b>, and kept within{" "}
+          <b>per-transaction and daily spending caps</b>. Research is its proven
+          flagship; the rest it does on your behalf, on-chain.
         </p>
 
         <div className="process">
