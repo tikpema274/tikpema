@@ -56,7 +56,7 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
 
   return (
     <div className="plane">
-      <div className="panel-eyebrow">Step 01 · Your wallet</div>
+      <div className="panel-eyebrow">Your wallet</div>
       <h2>Your wallet</h2>
       <div className="sub">
         {w.activeKind === "metamask"
@@ -254,7 +254,7 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
               }}
             >
               <div className="panel-eyebrow" style={{ marginBottom: 6 }}>
-                Step 02 · Add test USDC
+                Add test USDC
               </div>
               <div style={{ fontSize: "0.9rem", color: "var(--paper-dim)", marginBottom: 12, lineHeight: 1.5 }}>
                 Your wallet is empty. Copy your address above, open the faucet,

@@ -78,11 +78,12 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
 
   return (
     <div className="plane">
-      <div className="panel-eyebrow">Step 03 · The research desk</div>
-      <h2>Ask your question</h2>
+      <div className="panel-eyebrow">Research</div>
+      <h2>Ask your agent a factual question</h2>
       <div className="sub">
-        Ask anything with a factual, sourceable answer. You'll see a price
-        first — hire the analyst only if it looks right.
+        Ask anything with a factual, sourceable answer. You'll see the price
+        first — your agent researches and delivers a cited brief only if you
+        approve it.
       </div>
 
       <div className="row" style={{ marginTop: 12 }}>
@@ -122,7 +123,7 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
         <div className="status" style={{ marginTop: 12, color: "var(--warn)" }}>
           {quoteDeclined.reason && <div>{quoteDeclined.reason}</div>}
           <div style={{ marginTop: 4 }}>
-            The analyst does factual research with cited sources, not personal
+            Your agent does factual research with cited sources, not personal
             advice. Try rephrasing as a factual question — e.g. "what are the
             historical returns of index funds" instead of "what should I invest
             in".
@@ -205,11 +206,11 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
                 })
               }
             >
-              Hire the analyst · {quote.budgetUsdc} USDC
+              Run research · {quote.budgetUsdc} USDC
             </button>
             {!wallet.address && (
               <span className="sub" style={{ margin: 0 }}>
-                Create your wallet above first.
+                Continue with your passkey above first.
               </span>
             )}
           </div>

@@ -99,7 +99,7 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       </div>
       {!w.address && (
         <div className="sub" style={{ marginTop: 8, marginBottom: 0 }}>
-          Create your wallet above first.
+          Continue with your passkey above first to set up your agent's wallet.
         </div>
       )}
 
