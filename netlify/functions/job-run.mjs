@@ -11,7 +11,7 @@
 import { connectLambda, getStore } from "@netlify/blobs";
 import { formatUnits } from "viem";
 import crypto from "node:crypto";
-import { json, parseBody, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
+import { json, parseBody, CONTRACTS, USDC_DECIMALS, sendCapUsdc } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 import { publicClient } from "./_predict.mjs";
@@ -39,6 +39,18 @@ export async function handler(event) {
   }
   const budget = Number(budgetUsdc);
   if (!(budget > 0)) return json(400, { error: "valid budgetUsdc required" });
+
+  // Per-transaction hard cap on the escrow deposit — the SAME sendCapUsdc used by
+  // send/executeAction across the money surface. Server-side enforcement in the
+  // authenticated path so no client can bypass it (the job-quote clamp is only a
+  // suggestion). Reject, never clamp: funding a different amount than the user
+  // asked for is never acceptable.
+  const cap = sendCapUsdc();
+  if (budget > cap) {
+    return json(400, {
+      error: `Deposit ${budget} exceeds per-transaction limit of ${cap} USDC`,
+    });
+  }
 
   // Resolve the caller's OWN wallet from the session. NEVER client-supplied,
   // NEVER the shared env wallet.
