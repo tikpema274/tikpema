@@ -42,6 +42,30 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const [bridgeRun, setBridgeRun] = useState<any>(null);
   const [bridgeBusy, setBridgeBusy] = useState(false);
   const [mint, setMint] = useState<any>(null); // { state: 'pending'|'minted'|'failed', mintTx? }
+  // Per-plan-step destination-mint status, keyed by step index (for bridge steps
+  // inside a multi-step plan — Option A: the plan doesn't wait, these poll inline).
+  const [planMints, setPlanMints] = useState<Record<number, any>>({});
+
+  // Poll IRIS for a forwarded bridge's destination mint until it settles (or the
+  // window elapses), applying each update via `onUpdate`. Shared by the standalone
+  // bridge and each bridge step inside a plan.
+  async function pollMint(
+    burnHash: string,
+    destinationKey: string,
+    token: string,
+    onUpdate: (s: any) => void
+  ) {
+    for (let i = 0; i < 48; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      try {
+        const s = await agentClient.bridgeStatus(burnHash, destinationKey, token);
+        onUpdate(s);
+        if (s.state === "minted" || s.state === "failed") break;
+      } catch {
+        /* transient IRIS hiccup — keep polling */
+      }
+    }
+  }
 
   async function runTask() {
     setBusy(true);
@@ -50,6 +74,7 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
     setPlanRun(null);
     setBridgeRun(null);
     setMint(null);
+    setPlanMints({});
     try {
       const token = await w.ensureSession(); // auth: token required by the endpoint
       const data = await agentClient.act(task, token);
@@ -63,9 +88,25 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
 
   async function confirmPlan(plan: unknown[]) {
     setPlanBusy(true);
+    setPlanMints({});
     try {
       const token = await w.ensureSession();
-      setPlanRun(await agentClient.executePlan(plan, token));
+      const res = await agentClient.executePlan(plan, token);
+      setPlanRun(res);
+      // Option A: any bridge step already fired its Arc burn and the plan moved
+      // on. Poll each bridge step's destination mint INLINE (concurrently, in the
+      // background) so its status fills in without blocking the finished plan.
+      const bridges = (res?.results || []).filter(
+        (r: any) => r?.ok && r?.kind === "bridge_usdc" && r?.burnHash
+      );
+      if (bridges.length) {
+        setPlanMints(Object.fromEntries(bridges.map((r: any) => [r.index, { state: "pending" }])));
+        bridges.forEach((r: any) =>
+          pollMint(r.burnHash, r.destination.key, token, (s) =>
+            setPlanMints((prev) => ({ ...prev, [r.index]: s }))
+          )
+        );
+      }
     } catch (e: any) {
       setPlanRun({ error: e.message });
     } finally {
@@ -84,16 +125,7 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       // Stage 2: the Arc burn is done; poll until Circle's relayer mints (or fails).
       if (res?.executed && res?.burnHash) {
         setMint({ state: "pending" });
-        for (let i = 0; i < 48; i++) {
-          await new Promise((r) => setTimeout(r, 5000));
-          try {
-            const s = await agentClient.bridgeStatus(res.burnHash, res.destination.key, token);
-            setMint(s);
-            if (s.state === "minted" || s.state === "failed") break;
-          } catch {
-            /* transient IRIS hiccup — keep polling */
-          }
-        }
+        await pollMint(res.burnHash, res.destination.key, token, setMint);
       }
     } catch (e: any) {
       setBridgeRun({ error: e.message });
@@ -159,6 +191,7 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
             data={result}
             planRun={planRun}
             planBusy={planBusy}
+            planMints={planMints}
             onConfirm={confirmPlan}
             bridgeRun={bridgeRun}
             bridgeBusy={bridgeBusy}
@@ -185,6 +218,7 @@ function AgentSummary({
   data,
   planRun,
   planBusy,
+  planMints,
   onConfirm,
   bridgeRun,
   bridgeBusy,
@@ -194,6 +228,7 @@ function AgentSummary({
   data: any;
   planRun: any;
   planBusy: boolean;
+  planMints: Record<number, any>;
   onConfirm: (plan: unknown[]) => void;
   bridgeRun: any;
   bridgeBusy: boolean;
@@ -268,17 +303,46 @@ function AgentSummary({
         <ol style={{ margin: "0 0 8px 18px", padding: 0 }}>
           {data.plan.map((s: any, i: number) => {
             const r = runResults?.[i];
+            const isBridge = r?.kind === "bridge_usdc" || s?.type === "bridge_usdc";
+            const m = planMints?.[i];
             const mark = !r ? "" : r.ok ? " ✓" : " ✗";
-            const note = !r ? "" : r.ok ? (r.state === "submitted" ? " (submitted)" : " (done)") : ` (${r.blocked || r.error || "failed"})`;
+            // Non-bridge note; a successful bridge shows its own two-stage line below.
+            const note = !r
+              ? ""
+              : r.ok
+                ? isBridge
+                  ? ""
+                  : r.state === "submitted"
+                    ? " (submitted)"
+                    : " (done)"
+                : ` (${r.blocked || r.error || "failed"})`;
             return (
               <li key={i} style={{ marginBottom: 2 }}>
                 {describeStep(s)}
                 <b>{mark}</b>
                 <span style={{ opacity: 0.7 }}>{note}</span>
-                {r?.ok && r?.tx && (
-                  <span style={{ marginLeft: 8 }}>
-                    <TxLink url={r.tx} />
-                  </span>
+                {r?.ok && isBridge ? (
+                  // Fire-and-continue bridge: Arc burn done, destination mint polls inline.
+                  <div style={{ marginTop: 2, opacity: 0.85, fontSize: "0.92em" }}>
+                    burned on Arc{" "}
+                    {r.tx && <a href={r.tx} target="_blank" rel="noreferrer">↗</a>} ·{" "}
+                    {m?.state === "minted" ? (
+                      <span>
+                        minted on {r.destination?.label ?? "destination"} ✓{" "}
+                        {m.mintTx && <a href={m.mintTx} target="_blank" rel="noreferrer">↗</a>}
+                      </span>
+                    ) : m?.state === "failed" ? (
+                      <span style={{ color: "var(--warn)" }}>mint didn't confirm yet — recoverable</span>
+                    ) : (
+                      <span><span className="spinner" /> minting on {r.destination?.label ?? "destination"}…</span>
+                    )}
+                  </div>
+                ) : (
+                  r?.ok && r?.tx && (
+                    <span style={{ marginLeft: 8 }}>
+                      <TxLink url={r.tx} />
+                    </span>
+                  )
                 )}
               </li>
             );

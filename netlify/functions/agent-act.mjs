@@ -32,7 +32,7 @@ Given a task, respond with ONLY a JSON object, no prose, no markdown fences:
   "payTo": "0x... (required if action is pay_for_service)",
   "payAmountUsdc": number (required if action is pay_for_service),
   "destination": "chain name (required if action is bridge_usdc) — e.g. Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon",
-  "steps": [ { "type": "transfer_usdc"|"swap_tokens"|"pay_for_service", ...that action's fields } ] (required if action is plan; 2+ ordered steps),
+  "steps": [ { "type": "transfer_usdc"|"swap_tokens"|"pay_for_service"|"bridge_usdc", ...that action's fields } ] (required if action is plan; 2+ ordered steps),
   "unmetCondition": "string (required if action is needs_confirmation) — the part of the task you cannot fulfill",
   "reasoning": "one sentence"
 }
@@ -42,7 +42,7 @@ If a task asks for a transfer but attaches a condition you cannot fulfil — a s
 For a swap (e.g. "swap 5 USDC to EURC", "convert 2 EURC into USDC"), choose action "swap_tokens" with tokenIn, tokenOut, and amountIn. Only these tokens are supported: USDC, EURC. tokenIn and tokenOut must differ.
 A plain "send/pay X USDC to 0x..." is a transfer_usdc (your regular balance). Choose "pay_for_service" ONLY when the task explicitly says to pay FROM the Gateway / unified balance, or to pay FOR a service, with payTo and payAmountUsdc. When unsure between the two, prefer transfer_usdc.
 For a cross-chain move (e.g. "bridge 20 USDC to Ethereum", "send 5 USDC to Base", "move 10 USDC over to Arbitrum"), choose action "bridge_usdc" with amountUsdc and destination (the chain name). This burns USDC on Arc and mints it on the destination chain. Supported destinations: Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon, Unichain, Linea. A bridge is DIFFERENT from transfer_usdc: transfer stays on Arc to a 0x address; bridge crosses to another chain. Only choose bridge_usdc when the task names another chain to move funds TO.
-If a task asks for MULTIPLE actions in sequence (e.g. "swap 2 USDC to EURC then pay 1 USDC to 0x...", "send A then swap B"), choose action "plan" with an ordered "steps" array, each step being one transfer_usdc/swap_tokens/pay_for_service with that action's own fields. Use plan ONLY for genuinely multi-action tasks; a single action stays its own action. A multi-step task is NOT a needs_confirmation — needs_confirmation is only for scheduling/conditional/timing you cannot fulfil.`;
+If a task asks for MULTIPLE actions in sequence (e.g. "swap 2 USDC to EURC then pay 1 USDC to 0x...", "send A then swap B", "swap 2 to EURC then bridge 3 to Base"), choose action "plan" with an ordered "steps" array, each step being one transfer_usdc/swap_tokens/pay_for_service/bridge_usdc with that action's own fields (a bridge_usdc step needs amountUsdc + destination). Use plan ONLY for genuinely multi-action tasks; a single action stays its own action. A multi-step task is NOT a needs_confirmation — needs_confirmation is only for scheduling/conditional/timing you cannot fulfil.`;
 
 async function decide(task) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -132,13 +132,17 @@ export async function handler(event) {
       if (steps.length < 2) {
         return json(200, { executed: false, decision, blocked: "a plan needs 2+ steps" });
       }
-      const KINDS = new Set(["transfer_usdc", "swap_tokens", "pay_for_service"]);
+      const KINDS = new Set(["transfer_usdc", "swap_tokens", "pay_for_service", "bridge_usdc"]);
       for (const s of steps) {
         if (!KINDS.has(s?.type)) {
           return json(200, { executed: false, decision, blocked: `unknown step type "${s?.type}"` });
         }
       }
       const cap = sendCapUsdc();
+      const bcap = bridgeCapUsdc();
+      // A bridge step is bounded by the per-BRIDGE cap; everything else by the
+      // per-transaction (send) cap. Same per-step caps the executor enforces.
+      const capFor = (s) => (s?.type === "bridge_usdc" ? bcap : cap);
       const values = [];
       let totalUsdc = 0;
       try {
@@ -150,15 +154,17 @@ export async function handler(event) {
       } catch (e) {
         return json(200, { executed: false, decision, blocked: `cannot value plan: ${e.message}` });
       }
-      const over = values.findIndex((v) => v > cap);
+      const over = values.findIndex((v, idx) => v > capFor(steps[idx]));
       if (over >= 0) {
+        const isBridge = steps[over]?.type === "bridge_usdc";
         return json(200, {
           executed: false,
           decision,
-          blocked: `step ${over + 1} (~${values[over].toFixed(2)}) exceeds per-transaction limit of ${cap} USDC`,
+          blocked: `step ${over + 1} (~${values[over].toFixed(2)}) exceeds per-${isBridge ? "bridge" : "transaction"} limit of ${capFor(steps[over])} USDC`,
         });
       }
       const ceiling = budgetConfig().PERIOD_CEILING_USDC;
+      const hasBridge = steps.some((s) => s?.type === "bridge_usdc");
       return json(200, {
         executed: false,
         needsConfirm: true,
@@ -168,8 +174,9 @@ export async function handler(event) {
         ceiling,
         message:
           `This is a ${steps.length}-step plan totaling ~${totalUsdc.toFixed(2)} USDC. ` +
-          `Each action is capped at ${cap} USDC and total agent spend is bounded to ${ceiling} USDC/day — ` +
-          `the plan stops if a step would exceed that. Confirm to execute.`,
+          `Sends/swaps are capped at ${cap} USDC${hasBridge ? `, bridges at ${bcap} USDC` : ""}, ` +
+          `and total agent spend is bounded to ${ceiling} USDC/day — the plan stops if a step would exceed that. ` +
+          `${hasBridge ? "A bridge step burns on Arc and continues; its destination mint completes in the background. " : ""}Confirm to execute.`,
       });
     }
 

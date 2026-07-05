@@ -1,5 +1,5 @@
 import { connectLambda } from "@netlify/blobs";
-import { json, parseBody, sendCapUsdc } from "./_arc.mjs";
+import { json, parseBody, sendCapUsdc, bridgeCapUsdc } from "./_arc.mjs";
 import { executeAction, valueOfStep } from "./_actions.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
@@ -72,8 +72,11 @@ export async function handler(event) {
   }
 
   // ── Cap config ────────────────────────────────────────────────────────────
-  const cap = sendCapUsdc();                       // per-action cap (e.g. 10)
-  const capA = atomic(cap);
+  const cap = sendCapUsdc();                       // per-action (send/swap) cap
+  const bcap = bridgeCapUsdc();                    // per-bridge cap (its own bound)
+  // A bridge step is bounded by the per-BRIDGE cap; everything else by the send
+  // cap. Same per-step caps agent-act's proposal and executeAction enforce.
+  const capForA = (step) => atomic(step?.type === "bridge_usdc" ? bcap : cap);
   const ceiling = budgetConfig().PERIOD_CEILING_USDC; // cumulative daily bound
   const ceilingA = atomic(ceiling);
 
@@ -95,9 +98,11 @@ export async function handler(event) {
     const step = plan[i];
     const vA = atomic(values[i]);
 
-    // (1) PER-ACTION cap — each step, any type. Stop here, never skip-and-continue.
-    if (vA > capA) {
-      results.push({ index: i, step, ok: false, blocked: `step ~${usd2(values[i])} exceeds per-transaction limit of ${cap} USDC` });
+    // (1) PER-ACTION cap — each step by its own type (bridge → per-bridge cap,
+    //     else send cap). Stop here, never skip-and-continue.
+    const isBridge = step?.type === "bridge_usdc";
+    if (vA > capForA(step)) {
+      results.push({ index: i, step, ok: false, blocked: `step ~${usd2(values[i])} exceeds per-${isBridge ? "bridge" : "transaction"} limit of ${isBridge ? bcap : cap} USDC` });
       stoppedAt = i;
       break;
     }
@@ -126,10 +131,18 @@ export async function handler(event) {
         stoppedAt = i;
         break;
       }
-      // Success (may be confirmed OR submitted-in-batch). Record real state.
+      // Success (confirmed, submitted-in-batch, or a fire-and-continue bridge
+      // whose Arc burn landed but destination mint is still pending). Record the
+      // real state; for a bridge, carry the async fields so the client can poll
+      // the destination mint inline (Option A — don't block the plan on it).
       const state =
-        r.pay?.state || r.swap?.state || (r.tx ? "completed" : "submitted");
-      results.push({ index: i, step, ok: true, kind: r.kind, state, swap: r.swap, pay: r.pay, tx: r.tx });
+        r.state || r.pay?.state || r.swap?.state || (r.tx ? "completed" : "submitted");
+      results.push({
+        index: i, step, ok: true, kind: r.kind, state,
+        swap: r.swap, pay: r.pay, tx: r.tx,
+        // bridge fire-and-continue payload (undefined for other step types):
+        burnHash: r.burnHash, destination: r.destination, feeUsdc: r.feeUsdc, netUsdc: r.netUsdc,
+      });
       runningA += vA;                              // commit: decrement remaining daily budget
     } catch (e) {
       // A thrown error (incl. TxPendingError) stops the plan. Record and halt.
