@@ -1,95 +1,108 @@
+import { useEffect, useState } from "react";
 import ConnectPasskey from "./components/ConnectPasskey";
 import ResearchPanel from "./components/ResearchPanel";
 import MyAgentPanel from "./components/MyAgentPanel";
 import FeedbackPanel from "./components/FeedbackPanel";
+import SendPanel from "./components/SendPanel";
+import Dashboard from "./components/Dashboard";
 import { useWallet } from "./wallet/useWallet";
 
-// The stranger-facing app frames ONE agent: set up a wallet, fund it, then give
-// the agent a task — research (the flagship), or send/swap/bridge/multi-step actions.
-// AgentPanel (a dev sandbox) and PredictPanel (the same research loop wearing a
-// second hat) are intentionally NOT mounted here — their files are kept and
-// revivable, just not part of the front door. See the audit.
-
-// The four real steps of the loop, in order — a genuine sequence, so numbering
-// carries information rather than decoration. Broad enough to set up BOTH the
-// research desk and the "give your agent a task" (send/swap/bridge/multi-step) surface.
-const STEPS = [
-  {
-    n: "01",
-    title: "Continue with your passkey",
-    body: "Log in — or create a wallet on first use — in one tap with Face or Touch ID. No seed phrase, no password. MetaMask works too.",
-  },
-  {
-    n: "02",
-    title: "Add test USDC",
-    body: "Grab free testnet USDC from the faucet. It funds your agent's own wallet — what it researches and transacts with.",
-  },
-  {
-    n: "03",
-    title: "Give your agent a task",
-    body: "In plain language: ask a factual question for a cited brief, or tell it to send, swap, or bridge USDC cross-chain — one step or several.",
-  },
-  {
-    n: "04",
-    title: "It acts — safely",
-    body: "Your agent researches, sends, swaps, or bridges USDC — on Arc or cross-chain to Ethereum, Base and more — every action bounded by your per-transaction, per-bridge, and daily caps.",
-  },
+// Multi-page console. ONE useWallet() instance lives at the shell and is passed
+// to every page exactly as before — no per-page wallet, no shared-state change.
+// Routing is a lightweight hash router (no dependency): the active view derives
+// from window.location.hash, so #/send etc. deep-link and the back button works.
+//
+// Nav is five items only — Dashboard, Wallet, AI Agent, Research, Send — every
+// one backed by working code. Swap and Bridge are NOT nav items: they remain
+// reachable inside AI Agent via natural-language tasks, exactly as today.
+// Feedback sits in a muted low-priority slot at the foot of the sidebar.
+const NAV = [
+  { id: "dashboard", label: "Dashboard" },
+  { id: "wallet", label: "Wallet" },
+  { id: "agent", label: "AI Agent" },
+  { id: "research", label: "Research" },
+  { id: "send", label: "Send" },
 ];
 
+function parseHash(): string {
+  return window.location.hash.replace(/^#\/?/, "").trim() || "dashboard";
+}
+
 export default function App() {
-  // One passkey wallet instance, shared across the wallet step and the research
-  // loop so the user hires with the exact account they created.
   const wallet = useWallet();
+  const [route, setRoute] = useState<string>(parseHash);
+
+  useEffect(() => {
+    const onHash = () => setRoute(parseHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const go = (id: string) => {
+    window.location.hash = "/" + id;
+  };
+
+  let page: JSX.Element;
+  switch (route) {
+    case "wallet":
+      page = <ConnectPasskey wallet={wallet} />;
+      break;
+    case "agent":
+      page = <MyAgentPanel wallet={wallet} />;
+      break;
+    case "research":
+      page = <ResearchPanel wallet={wallet} />;
+      break;
+    case "send":
+      page = <SendPanel wallet={wallet} />;
+      break;
+    case "feedback":
+      page = <FeedbackPanel wallet={wallet} />;
+      break;
+    case "dashboard":
+    default:
+      page = <Dashboard wallet={wallet} />;
+      break;
+  }
 
   return (
-    <div className="app">
-      <header className="masthead">
-        <div className="wordmark">
-          <b>
-            Tikpema<span className="seal">.</span>
-          </b>
-          <span className="eyebrow">Autonomous agent</span>
+    <div className="console">
+      <aside className="sidebar">
+        <div className="sidebar-head">
+          <div className="wordmark">
+            <b>
+              Tikpema<span className="seal">.</span>
+            </b>
+            <span className="eyebrow">Autonomous agent</span>
+          </div>
+          <span className="chip">
+            <span className="dot">●</span> Arc Testnet
+          </span>
         </div>
-        <span className="chip">
-          <span className="dot">●</span> Arc Testnet
-        </span>
-      </header>
 
-      <section className="hero">
-        <p className="hero-eyebrow">Autonomous AI agent · its own wallet · USDC on Arc</p>
-        <h1 className="hero-title">
-          Your autonomous agent, <em>on Arc.</em>
-        </h1>
-        <div className="hero-rule" />
-        <p className="hero-lede">
-          Tikpema is an AI agent with its <b>own on-chain wallet</b>. Ask in plain
-          language and it <b>researches with cited sources</b>, sends and swaps
-          USDC, <b>bridges cross-chain</b> to Ethereum, Base and more, and runs
-          multi-step tasks — <b>gasless, no seed phrase</b>, and kept within{" "}
-          <b>per-transaction and daily spending caps</b>. Research is its proven
-          flagship; the rest it does on your behalf, on-chain.
-        </p>
-
-        <div className="process">
-          {STEPS.map((s) => (
-            <div className="step" key={s.n}>
-              <div className="step-num">{s.n}</div>
-              <div className="step-title">{s.title}</div>
-              <div className="step-body">{s.body}</div>
-            </div>
+        <nav className="nav">
+          {NAV.map((n) => (
+            <button
+              key={n.id}
+              className={"nav-item" + (route === n.id ? " active" : "")}
+              onClick={() => go(n.id)}
+            >
+              {n.label}
+            </button>
           ))}
+        </nav>
+
+        <div className="nav nav-foot">
+          <button
+            className={"nav-item muted" + (route === "feedback" ? " active" : "")}
+            onClick={() => go("feedback")}
+          >
+            Feedback
+          </button>
         </div>
-      </section>
+      </aside>
 
-      <ConnectPasskey wallet={wallet} />
-      <ResearchPanel wallet={wallet} />
-      <MyAgentPanel wallet={wallet} />
-      <FeedbackPanel wallet={wallet} />
-
-      <footer className="deskfoot">
-        <span>Tikpema · testnet demo</span>
-        <span>Gasless USDC on Arc · passkeys by Circle</span>
-      </footer>
+      <main className="console-main">{page}</main>
     </div>
   );
 }

@@ -453,3 +453,135 @@ label.field > span {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ---------------------------------------------------------------- console
+ * Sidebar-console shell. Same visual language as the panels (warm ink surfaces,
+ * amber-gold accent, Space Mono for labels) — layout only, not a recolor.
+ */
+.console {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  max-width: 1180px;
+  margin: 0 auto;
+  min-height: 100vh;
+}
+
+.sidebar {
+  border-right: 1px solid var(--line);
+  padding: 24px 18px 28px;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+}
+.sidebar-head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 8px 18px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.sidebar-head .chip {
+  align-self: flex-start;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nav-foot {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.nav-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--paper-dim);
+  font-family: "Space Mono", monospace;
+  font-size: 0.82rem;
+  letter-spacing: 0.03em;
+}
+.nav-item:hover {
+  background: rgba(236, 230, 216, 0.05);
+  border: none;
+  color: var(--paper);
+}
+.nav-item.active {
+  background: var(--amber-soft);
+  color: var(--amber-hi);
+  box-shadow: inset 2px 0 0 var(--amber);
+}
+.nav-item.muted {
+  color: var(--muted);
+}
+
+.console-main {
+  padding: 30px 32px 60px;
+  min-width: 0;
+}
+
+/* Dashboard quick-access cards — reuse the panel surface language. */
+.quick {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.quick-card {
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+}
+.quick-card:hover {
+  background: var(--surface-2);
+  border-color: var(--amber-line);
+}
+.quick-card .qt {
+  color: var(--paper);
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 5px;
+}
+.quick-card .qd {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 760px) {
+  .console {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    position: static;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .nav-foot {
+    margin-top: 12px;
+  }
+  .console-main {
+    padding: 22px 18px 48px;
+  }
+}
+@media (max-width: 560px) {
+  .quick {
+    grid-template-columns: 1fr;
+  }
+}

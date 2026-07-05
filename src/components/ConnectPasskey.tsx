@@ -3,17 +3,8 @@ import type { useWallet } from "../wallet/useWallet";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
-// Shorten an address for readable confirmations: 0x1234…abcd.
-const shortAddr = (a: string) =>
-  a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
-
 export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet }) {
-  const [to, setTo] = useState("");
-  const [amount, setAmount] = useState("0.1");
   const [username, setUsername] = useState("");
-  const [sendConfirm, setSendConfirm] = useState("");
-  const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState("");
   // Whether the deliberate "create a new wallet" sub-flow is showing. Default
   // false: the entry screen leads with ONE passkey button that logs a returning
   // user straight in — creation is not a co-equal primary path anymore.
@@ -31,26 +22,6 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
       w.connectLogin().catch(() => {});
     } else {
       setShowCreate(true);
-    }
-  }
-
-  const amountNum = Number(amount);
-  const amountValid = Number.isFinite(amountNum) && amountNum > 0;
-
-  // Send from the user's AGENT wallet (the funded one) — resolved server-side
-  // from the session. Not the login wallet (which is identity-only now).
-  async function send() {
-    if (!to || !amountValid) return;
-    setSendConfirm("");
-    setSendError("");
-    setSending(true);
-    try {
-      await w.sendFromAgent(to as `0x${string}`, amountNum);
-      setSendConfirm(`Sent ${amountNum} USDC to ${shortAddr(to)}`);
-    } catch (e: any) {
-      setSendError(e?.message || "Send failed");
-    } finally {
-      setSending(false);
     }
   }
 
@@ -281,59 +252,6 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
             </div>
           )}
 
-          <div
-            style={{
-              marginTop: 22,
-              paddingTop: 20,
-              borderTop: "1px solid var(--line)",
-            }}
-          >
-            <h3 style={{ margin: "0 0 4px" }}>Send USDC</h3>
-            <div className="sub" style={{ marginBottom: 12 }}>Optional — send from your wallet to any address</div>
-            <div className="row">
-              <input
-                placeholder="recipient 0x…"
-                value={to}
-                onChange={(e) => {
-                  setTo(e.target.value);
-                  setSendConfirm("");
-                }}
-              />
-            </div>
-            <div className="row" style={{ marginTop: 8 }}>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                style={{ maxWidth: 120 }}
-                value={amount}
-                onChange={(e) => {
-                  setAmount(e.target.value);
-                  setSendConfirm("");
-                }}
-              />
-              <span className="status" style={{ margin: 0 }}>
-                USDC
-              </span>
-              <button
-                className="emerald"
-                disabled={sending || !to || !amountValid}
-                onClick={send}
-              >
-                {sending
-                  ? "Sending…"
-                  : `Send ${amountValid ? amountNum : 0} USDC`}
-              </button>
-            </div>
-            {sendConfirm && (
-              <div className="status" style={{ color: "var(--emerald)" }}>
-                {sendConfirm}
-              </div>
-            )}
-            {sendError && (
-              <div className="status" style={{ color: "var(--warn)" }}>{sendError}</div>
-            )}
-          </div>
         </>
       )}
 
