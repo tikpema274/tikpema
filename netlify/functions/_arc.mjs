@@ -75,3 +75,20 @@ export const sendCapUsdc = () => {
   }
   return n;
 };
+
+// Per-BRIDGE cap (cross-chain is the highest-stakes action — funds LEAVE Arc).
+// Separate from the send cap so bridges can be bounded independently. Same
+// fail-closed parsing: unset → conservative default; garbled → throw (a typo can
+// never silently widen the bound). Cumulative bridges ALSO count against the
+// _budget.mjs day-ceiling (PERIOD_CEILING_USDC), like every other agent spend.
+export const bridgeCapUsdc = () => {
+  const raw = process.env.AGENT_BRIDGE_CAP_USDC;
+  if (raw === undefined || raw === "") return 25; // conservative testnet default
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(
+      `AGENT_BRIDGE_CAP_USDC is misconfigured (${JSON.stringify(raw)}); refusing to bridge`
+    );
+  }
+  return n;
+};

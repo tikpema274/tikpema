@@ -1,8 +1,9 @@
 import { connectLambda } from "@netlify/blobs";
 import { TxPendingError } from "./_circle.mjs";
-import { json, parseBody, dateAnchor, sendCapUsdc } from "./_arc.mjs";
+import { json, parseBody, dateAnchor, sendCapUsdc, bridgeCapUsdc } from "./_arc.mjs";
 import { SWAP_TOKENS } from "./_swap.mjs";
 import { executeAction, valueOfStep } from "./_actions.mjs";
+import { resolveDestination, bridgeFee, SUPPORTED_DESTINATION_LABELS } from "./_bridge.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 import { budgetConfig } from "./_budget.mjs";
@@ -22,7 +23,7 @@ const SYSTEM_PROMPT = `You are Tikpema's autonomous on-chain agent on Arc Testne
 You control your own developer-controlled smart-account wallet and may act with its funds only.
 Given a task, respond with ONLY a JSON object, no prose, no markdown fences:
 {
-  "action": "transfer_usdc" | "swap_tokens" | "pay_for_service" | "plan" | "needs_confirmation" | "none",
+  "action": "transfer_usdc" | "swap_tokens" | "pay_for_service" | "bridge_usdc" | "plan" | "needs_confirmation" | "none",
   "to": "0x... (required if action is transfer_usdc)",
   "amountUsdc": number (required if action is transfer_usdc),
   "tokenIn": "USDC | EURC (required if action is swap_tokens)",
@@ -30,6 +31,7 @@ Given a task, respond with ONLY a JSON object, no prose, no markdown fences:
   "amountIn": number (required if action is swap_tokens),
   "payTo": "0x... (required if action is pay_for_service)",
   "payAmountUsdc": number (required if action is pay_for_service),
+  "destination": "chain name (required if action is bridge_usdc) — e.g. Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon",
   "steps": [ { "type": "transfer_usdc"|"swap_tokens"|"pay_for_service", ...that action's fields } ] (required if action is plan; 2+ ordered steps),
   "unmetCondition": "string (required if action is needs_confirmation) — the part of the task you cannot fulfill",
   "reasoning": "one sentence"
@@ -39,6 +41,7 @@ You can execute immediate USDC transfers and same-chain token swaps. You CANNOT 
 If a task asks for a transfer but attaches a condition you cannot fulfil — a specific time ("at 23.25", "tonight", "in an hour"), a recurring schedule, or a trigger ("when X happens") — you MUST choose action "needs_confirmation", put the unfulfillable part in "unmetCondition", and do NOT choose transfer_usdc. Only choose transfer_usdc when the transfer is unconditional and can run right now.
 For a swap (e.g. "swap 5 USDC to EURC", "convert 2 EURC into USDC"), choose action "swap_tokens" with tokenIn, tokenOut, and amountIn. Only these tokens are supported: USDC, EURC. tokenIn and tokenOut must differ.
 A plain "send/pay X USDC to 0x..." is a transfer_usdc (your regular balance). Choose "pay_for_service" ONLY when the task explicitly says to pay FROM the Gateway / unified balance, or to pay FOR a service, with payTo and payAmountUsdc. When unsure between the two, prefer transfer_usdc.
+For a cross-chain move (e.g. "bridge 20 USDC to Ethereum", "send 5 USDC to Base", "move 10 USDC over to Arbitrum"), choose action "bridge_usdc" with amountUsdc and destination (the chain name). This burns USDC on Arc and mints it on the destination chain. Supported destinations: Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon, Unichain, Linea. A bridge is DIFFERENT from transfer_usdc: transfer stays on Arc to a 0x address; bridge crosses to another chain. Only choose bridge_usdc when the task names another chain to move funds TO.
 If a task asks for MULTIPLE actions in sequence (e.g. "swap 2 USDC to EURC then pay 1 USDC to 0x...", "send A then swap B"), choose action "plan" with an ordered "steps" array, each step being one transfer_usdc/swap_tokens/pay_for_service with that action's own fields. Use plan ONLY for genuinely multi-action tasks; a single action stays its own action. A multi-step task is NOT a needs_confirmation — needs_confirmation is only for scheduling/conditional/timing you cannot fulfil.`;
 
 async function decide(task) {
@@ -173,7 +176,7 @@ export async function handler(event) {
     // Backstop: even if the brain chose transfer_usdc, refuse if the raw task
     // contains a scheduling/conditional cue the agent cannot honor. The model is
     // the first classifier; this is the code not trusting a silent drop.
-    if (decision.action === "transfer_usdc" || decision.action === "swap_tokens") {
+    if (decision.action === "transfer_usdc" || decision.action === "swap_tokens" || decision.action === "bridge_usdc") {
       const schedulePattern =
         /\b((at|by)\s+(\d{1,2}([:.]\d{1,2})?\s*(am|pm)?|noon|midnight|midday|morning|afternoon|evening|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|tonight|tomorrow|later|in \d+\s*(min|minute|hour|hr|day)|every|when|after|before|schedule|recurring|daily|weekly)\b/i;
       if (schedulePattern.test(task)) {
@@ -187,6 +190,60 @@ export async function handler(event) {
             `Resend without the timing if you want it sent now.`,
         });
       }
+    }
+
+    // Bridge is the highest-stakes action (funds LEAVE Arc, fee is volatile), so
+    // it is PROPOSE-then-confirm — never immediate. We validate, price it live,
+    // enforce the cap + fee-floor up front for a clean message, and return the
+    // proposal (amount / destination / fee / net) for the user to confirm. The
+    // client then POSTs to /api/agent-bridge, which is the single execute path.
+    if (decision.action === "bridge_usdc") {
+      const amount = Number(decision.amountUsdc);
+      const dest = resolveDestination(decision.destination);
+      if (!dest) {
+        return json(200, {
+          executed: false,
+          decision,
+          blocked: `unsupported destination "${decision.destination || ""}". Supported: ${SUPPORTED_DESTINATION_LABELS.join(", ")}`,
+        });
+      }
+      if (!(amount > 0)) {
+        return json(200, { executed: false, decision, blocked: "amountUsdc must be > 0" });
+      }
+      const bcap = bridgeCapUsdc();
+      if (amount > bcap) {
+        return json(200, { executed: false, decision, blocked: `exceeds per-bridge limit of ${bcap} USDC` });
+      }
+      // Live price. Fee-floor: refuse an un-settleable bridge with a clear message.
+      let fee;
+      try {
+        fee = await bridgeFee({ amountUsdc: amount, cctpDomain: dest.cctpDomain });
+      } catch (e) {
+        return json(200, { executed: false, decision, blocked: `cannot price bridge to ${dest.label}: ${e.message}` });
+      }
+      if (fee.maxFee >= fee.amountMinor) {
+        return json(200, {
+          executed: false,
+          decision,
+          blocked: `amount too small — the bridge fee to ${dest.label} is ~${fee.feeUsdc.toFixed(2)} USDC right now, so ${amount} USDC wouldn't cover it (nothing would arrive)`,
+        });
+      }
+      return json(200, {
+        executed: false,
+        needsBridgeConfirm: true,
+        decision,
+        bridge: {
+          amountUsdc: amount,
+          destination: { key: dest.key, label: dest.label },
+          feeUsdc: Number(fee.feeUsdc.toFixed(6)),
+          netUsdc: Number(fee.netUsdc.toFixed(6)),
+          cap: bcap,
+        },
+        message:
+          `Bridge ${amount} USDC from Arc to ${dest.label}. The cross-chain fee is ~${fee.feeUsdc.toFixed(2)} USDC ` +
+          `(taken from the amount), so ~${fee.netUsdc.toFixed(2)} USDC arrives on ${dest.label}. ` +
+          `The Arc burn is instant; the destination mint follows in ~1–2 min. Confirm to bridge.`,
+      });
     }
 
     if (decision.action === "swap_tokens") {

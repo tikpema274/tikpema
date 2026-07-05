@@ -44,6 +44,18 @@
   from = "/api/agent-execute-plan"
   to = "/.netlify/functions/agent-execute-plan"
   status = 200
+
+# Cross-chain bridge (propose→confirm→execute). agent-bridge EXECUTES the Arc
+# burn from the caller's session-resolved wallet; agent-bridge-status is a
+# read-only poll for the async destination mint. Both session-gated.
+[[redirects]]
+  from = "/api/agent-bridge"
+  to = "/.netlify/functions/agent-bridge"
+  status = 200
+[[redirects]]
+  from = "/api/agent-bridge-status"
+  to = "/.netlify/functions/agent-bridge-status"
+  status = 200
 [[redirects]]
   from = "/api/predict-markets"
   to = "/.netlify/functions/predict-markets"

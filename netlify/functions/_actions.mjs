@@ -1,7 +1,8 @@
 import { circle, waitForTx } from "./_circle.mjs";
-import { ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc } from "./_arc.mjs";
+import { ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc, bridgeCapUsdc } from "./_arc.mjs";
 import { agentSwap, valueInUsdc, SWAP_TOKENS } from "./_swap.mjs";
 import { agentPay } from "./_pay.mjs";
+import { agentBridge, bridgeFee, resolveDestination } from "./_bridge.mjs";
 import { canSpendDay, recordAgentSpend } from "./_budget.mjs";
 
 // Shared action layer. Both agent-act (single action) and agent-execute-plan
@@ -24,6 +25,9 @@ export async function valueOfStep(step) {
   if (type === "swap_tokens") {
     return await valueInUsdc({ token: String(step.tokenIn).toUpperCase(), amount: Number(step.amountIn) });
   }
+  // A bridge moves its full face amount OFF Arc (the fee is deducted from it on
+  // the destination), so the full amount is what counts against the day-ceiling.
+  if (type === "bridge_usdc") return Number(step.amountUsdc);
   throw new Error(`unknown step type "${type}"`);
 }
 
@@ -46,6 +50,11 @@ export function validateStepShape(step) {
     if (!VALID_TOKENS.includes(tIn) || !VALID_TOKENS.includes(tOut)) return "unsupported token (USDC/EURC only)";
     if (tIn === tOut) return "tokenIn and tokenOut must differ";
     if (!(Number(step.amountIn) > 0)) return "amountIn must be > 0";
+    return null;
+  }
+  if (type === "bridge_usdc") {
+    if (!(Number(step.amountUsdc) > 0)) return "amountUsdc must be > 0";
+    if (!resolveDestination(step.destination)) return `unsupported destination "${step.destination}"`;
     return null;
   }
   return `unknown step type "${type}"`;
@@ -71,6 +80,16 @@ export async function executeAction(step, ctx) {
     const cap = sendCapUsdc();
     if (Number(step.amountUsdc) > cap) {
       return { ok: false, blocked: `exceeds per-transaction limit of ${cap} USDC` };
+    }
+  }
+
+  // Per-BRIDGE cap — cross-chain is the highest-stakes action (funds leave Arc),
+  // so it has its own bound, checked first (like the send cap) so an over-cap
+  // bridge returns the cap message rather than the day-ceiling one.
+  if (step.type === "bridge_usdc") {
+    const bcap = bridgeCapUsdc();
+    if (Number(step.amountUsdc) > bcap) {
+      return { ok: false, blocked: `exceeds per-bridge limit of ${bcap} USDC` };
     }
   }
 
@@ -147,6 +166,42 @@ export async function executeAction(step, ctx) {
     const txHash = await waitForTx(client, tx.data?.id);
     await ledger();
     return { ok: true, kind: "transfer_usdc", tx: `${ARC.explorer}/tx/${txHash}` };
+  }
+
+  if (step.type === "bridge_usdc") {
+    const dest = resolveDestination(step.destination);
+    const amount = Number(step.amountUsdc);
+    // FEE-FLOOR refusal: the (volatile) forwarder fee is taken OUT of the amount.
+    // If it meets/exceeds the amount, the recipient nets ≤ 0 and the bridge is
+    // un-settleable — refuse BEFORE any funds move. This re-checks live at
+    // execution time (the fee may have moved since the proposal).
+    let fee;
+    try {
+      fee = await bridgeFee({ amountUsdc: amount, cctpDomain: dest.cctpDomain });
+    } catch (e) {
+      return { ok: false, blocked: `cannot price bridge to ${dest.label}: ${e.message}` };
+    }
+    if (fee.maxFee >= fee.amountMinor) {
+      return {
+        ok: false,
+        blocked: `amount too small — the bridge fee to ${dest.label} is ~${fee.feeUsdc.toFixed(2)} USDC right now (≥ your ${amount} USDC), so nothing would arrive`,
+      };
+    }
+    const r = await agentBridge({ walletAddress, destination: dest.key, amountUsdc: amount });
+    await ledger();
+    // Async two-stage: the Arc burn is done; the destination mint is completed by
+    // Circle's relayer. Caller polls agent-bridge-status for the mint tx.
+    return {
+      ok: true,
+      kind: "bridge_usdc",
+      state: "submitted",
+      burnHash: r.burnHash,
+      tx: r.burnTx,
+      destination: r.destination,
+      feeUsdc: r.feeUsdc,
+      netUsdc: r.netUsdc,
+      recipient: r.recipient,
+    };
   }
 
   return { ok: false, blocked: `unknown step type "${step.type}"` };

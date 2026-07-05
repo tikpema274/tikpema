@@ -26,6 +26,8 @@ const describeStep = (s: any): string => {
     return `Pay ${s.payAmountUsdc} USDC to ${shortAddr(String(s.payTo))}`;
   if (s?.type === "transfer_usdc")
     return `Send ${s.amountUsdc} USDC to ${shortAddr(String(s.to))}`;
+  if (s?.type === "bridge_usdc")
+    return `Bridge ${s.amountUsdc} USDC to ${s.destination}`;
   return JSON.stringify(s);
 };
 
@@ -36,12 +38,18 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const [error, setError] = useState("");
   const [planRun, setPlanRun] = useState<any>(null);
   const [planBusy, setPlanBusy] = useState(false);
+  // Bridge (propose→confirm→execute, then async destination-mint polling).
+  const [bridgeRun, setBridgeRun] = useState<any>(null);
+  const [bridgeBusy, setBridgeBusy] = useState(false);
+  const [mint, setMint] = useState<any>(null); // { state: 'pending'|'minted'|'failed', mintTx? }
 
   async function runTask() {
     setBusy(true);
     setError("");
     setResult(null);
     setPlanRun(null);
+    setBridgeRun(null);
+    setMint(null);
     try {
       const token = await w.ensureSession(); // auth: token required by the endpoint
       const data = await agentClient.act(task, token);
@@ -65,16 +73,47 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
     }
   }
 
+  // Confirm a bridge: fire the Arc burn, then poll IRIS for the destination mint.
+  async function confirmBridge(amountUsdc: number, destinationKey: string) {
+    setBridgeBusy(true);
+    setMint(null);
+    try {
+      const token = await w.ensureSession();
+      const res = await agentClient.bridge(amountUsdc, destinationKey, token);
+      setBridgeRun(res);
+      // Stage 2: the Arc burn is done; poll until Circle's relayer mints (or fails).
+      if (res?.executed && res?.burnHash) {
+        setMint({ state: "pending" });
+        for (let i = 0; i < 48; i++) {
+          await new Promise((r) => setTimeout(r, 5000));
+          try {
+            const s = await agentClient.bridgeStatus(res.burnHash, res.destination.key, token);
+            setMint(s);
+            if (s.state === "minted" || s.state === "failed") break;
+          } catch {
+            /* transient IRIS hiccup — keep polling */
+          }
+        }
+      }
+    } catch (e: any) {
+      setBridgeRun({ error: e.message });
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+
   return (
     <div className="plane">
       <div className="panel-eyebrow">Your agent</div>
       <h2>Give your agent a task</h2>
       <div className="sub">
-        Your agent acts on-chain from its own wallet — send or swap USDC in plain
-        language. Chain several steps in one task ("send 0.1 to A, then send 0.1
-        to B") and it proposes a plan for you to confirm before it runs. It spends
-        only what's in your agent wallet, and every step stays within safety caps —
-        a per-action limit and a cumulative daily ceiling that stops a plan mid-run.
+        Your agent acts on-chain from its own wallet — send or swap USDC on Arc, or
+        bridge it cross-chain to Ethereum, Base, Arbitrum and more, all in plain
+        language. Multi-step tasks and bridges are proposed for you to confirm
+        before they run (a bridge shows the live cross-chain fee and what actually
+        arrives). It spends only what's in your agent wallet, and every action stays
+        within safety caps — per-action and per-bridge limits plus a cumulative
+        daily ceiling.
       </div>
 
       {w.agentWallet && (
@@ -86,7 +125,7 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
 
       <div className="row" style={{ marginTop: 10 }}>
         <input
-          placeholder="e.g. send 0.1 USDC to 0x… then send 0.1 to 0x… · or swap 1 USDC to EURC"
+          placeholder="e.g. bridge 20 USDC to Ethereum · swap 1 USDC to EURC · send 0.1 to 0x… then 0.1 to 0x…"
           value={task}
           onChange={(e) => setTask(e.target.value)}
           onKeyDown={(e) => {
@@ -121,6 +160,10 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
             planRun={planRun}
             planBusy={planBusy}
             onConfirm={confirmPlan}
+            bridgeRun={bridgeRun}
+            bridgeBusy={bridgeBusy}
+            mint={mint}
+            onConfirmBridge={confirmBridge}
           />
         </div>
       )}
@@ -143,16 +186,76 @@ function AgentSummary({
   planRun,
   planBusy,
   onConfirm,
+  bridgeRun,
+  bridgeBusy,
+  mint,
+  onConfirmBridge,
 }: {
   data: any;
   planRun: any;
   planBusy: boolean;
   onConfirm: (plan: unknown[]) => void;
+  bridgeRun: any;
+  bridgeBusy: boolean;
+  mint: any;
+  onConfirmBridge: (amountUsdc: number, destinationKey: string) => void;
 }) {
   const d = data.decision || {};
 
   if (data.needsConfirmation) {
     return <div className="status" style={{ margin: 0 }}>{data.message}</div>;
+  }
+
+  // Bridge proposal → confirm → Arc burn → (async) destination mint.
+  if (data.needsBridgeConfirm && data.bridge) {
+    const b = data.bridge;
+    const done = bridgeRun?.executed;
+    return (
+      <div className="status" style={{ margin: 0 }}>
+        <div style={{ marginBottom: 6 }}>
+          <b>Bridge {b.amountUsdc} USDC → {b.destination.label}</b>
+        </div>
+        <div style={{ opacity: 0.85, marginBottom: 8 }}>
+          Cross-chain fee ~{Number(b.feeUsdc).toFixed(2)} USDC (taken from the amount) ·
+          {" "}~{Number(b.netUsdc).toFixed(2)} USDC arrives on {b.destination.label}.
+          <br />
+          Funds leave Arc — the burn is instant, the destination mint follows in ~1–2 min.
+        </div>
+
+        {!bridgeRun && (
+          <button className="emerald" disabled={bridgeBusy} onClick={() => onConfirmBridge(b.amountUsdc, b.destination.key)}>
+            {bridgeBusy ? "Bridging…" : "Confirm & bridge"}
+          </button>
+        )}
+
+        {bridgeRun?.blocked && <div style={{ marginTop: 6 }}>Your agent held off — {bridgeRun.blocked}.</div>}
+        {bridgeRun?.error && <div style={{ marginTop: 6, color: "var(--warn)" }}>Error — {bridgeRun.error}.</div>}
+
+        {done && (
+          <div style={{ marginTop: 8 }}>
+            <div>
+              ✓ Burned on Arc {bridgeRun.tx && <span style={{ marginLeft: 6 }}><TxLink url={bridgeRun.tx} /></span>}
+            </div>
+            <div style={{ marginTop: 6 }}>
+              {mint?.state === "minted" ? (
+                <span>
+                  ✓ Minted ~{Number(bridgeRun.netUsdc).toFixed(2)} USDC on {bridgeRun.destination.label}
+                  {mint.mintTx && <span style={{ marginLeft: 6 }}><a href={mint.mintTx} target="_blank" rel="noreferrer">View mint ↗</a></span>}
+                </span>
+              ) : mint?.state === "failed" ? (
+                <span style={{ color: "var(--warn)" }}>
+                  Destination mint didn't confirm — the burn landed, so the funds are recoverable from the attestation. Check back shortly.
+                </span>
+              ) : (
+                <span>
+                  <span className="spinner" /> Bridging… burn done, waiting for the {bridgeRun.destination.label} mint (~1–2 min).
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
   }
 
   if (data.needsConfirm && Array.isArray(data.plan)) {

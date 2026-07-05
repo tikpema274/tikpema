@@ -25,4 +25,13 @@ export const agentClient = {
   // Execute a confirmed multi-step plan (turn 2 of plan->confirm->execute).
   executePlan: (plan: unknown[], token: string) =>
     post("/api/agent-execute-plan", { plan }, token),
+
+  // Execute a confirmed cross-chain bridge (turn 2 of bridge propose->confirm).
+  // Returns after the Arc burn; the destination mint is async (poll bridgeStatus).
+  bridge: (amountUsdc: number, destination: string, token: string) =>
+    post("/api/agent-bridge", { amountUsdc, destination }, token),
+
+  // Stage-2 poll: has Circle's relayer minted on the destination yet?
+  bridgeStatus: (burnHash: string, destinationKey: string, token: string) =>
+    post("/api/agent-bridge-status", { burnHash, destinationKey }, token),
 };
