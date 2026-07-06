@@ -714,3 +714,54 @@ advertise an arbitrarily high price that still fits under the percentage allowan
 external-ready, but no actual external (non-self-loop) Arc seller has been paid yet.
 That's the next real brick: point DATA_SELLER_URL at a seller we don't control and
 prove a cross-party settle.
+
+## 2026-07-06 (pm) — x402 buyer hardened for multi-chain sellers + absolute per-buy ceiling; QuickNode settle BLOCKED at account layer
+
+**Buyer improvements (_x402.mjs) — proven against self-loop AND real external-seller PARSING:**
+- **Entry-selection (FIX 1):** fetchX402Requirements no longer assumes accepts[0]; it SELECTS the
+  entry matching our chain + scheme (network eip155:5042002 AND extra.name GatewayWalletBatched),
+  first match wins; no match → ok:false → graceful degrade. A multi-chain seller (QuickNode
+  advertises a 21-entry menu; Arc is index 16, accepts[0] is Base Sepolia) now parses correctly.
+- **Price fallback (FIX 2):** read maxAmountRequired ?? amount (v1 vs v2 sellers). QuickNode has no
+  maxAmountRequired; its `amount:"100"` (0.0001 USDC) is now read. Same fallback feeds BOTH the
+  gate (maybeBuyData advertisedUsdc) AND the signed atomic → gate-price == signed-price.
+- **Resource-binding + five-key envelope:** fetchX402Requirements now threads the challenge's
+  TOP-LEVEL `resource` and `extensions` (it previously dropped both). wirePayload is the full
+  { x402Version, payload, resource, accepted, extensions } — resource/accepted ALWAYS, extensions
+  when the challenge carried them. Byte-diffed against @quicknode/x402's own captured payment
+  (their client uses the same @circle-fin BatchEvmScheme via @x402/core createPaymentPayload):
+  OUR payload is now byte-identical to theirs for the Arc nanopayment challenge (payload.authorization,
+  signature, all three extensions [sign-in-with-x, bazaar, quicknode-session], resource, accepted).
+  Self-loop unchanged (no extensions → four-key envelope, byte-identical to before).
+- Reworded the price-guard block message (maxAmountRequired/amount).
+
+Proven (local parse-only, no deploy/money): QuickNode Arc entry selected (idx 16 of 21), priced
+0.0001 via amount-fallback, passed ceiling + canSpend; self-loop still parses; no-match degrades.
+
+**Absolute per-buy ceiling (_research.mjs) — proven binds:** dataBuyCeilingUsdc() (repurposed dead
+dataPurchaseUsdc), default 0.01, fail-safe (unset/garbled/<=0 → 0.01, never disables). In maybeBuyData
+BEFORE canSpend; refuses advertised > ceiling with recordBlocked (audit parity), returns [] → Exa-only,
+fires before signing. Proven end-to-end (real maybeBuyData, in-memory store, DELEGATE unset):
+over-ceiling 0.02 refused ("absolute ceiling: 0.02 > 0.01"); UNSET still 0.01 and still refused
+(fail-safe); QuickNode 0.0001 and self-loop 0.001 pass under. QuickNode 0.0001 << 0.01 so unaffected.
+
+**QuickNode finding — nanopayment via a hand-rolled buyer is BLOCKED at the account/session layer:**
+- Captured a QuickNode-accepted payment from @quicknode/x402 (throwaway key) and byte-diffed vs ours
+  for the SAME Arc 402. After the fixes above, our payload is byte-identical to their client's.
+- Their live verifier still rejects ours with "Unexpected error verifying payment", while their own
+  client's payment (same shape) is accepted (a broke fresh key only failed on `insufficient_balance`
+  — a funds check, i.e. the shape parsed fine). So the rejection is NOT in the x402 payload — it's
+  QuickNode's account/session context around the request (extensions carry sign-in-with-x + a
+  quicknode-session descriptor; nanopayment skips the SIWX/JWT sign path, but the server still binds
+  the request to account/session state our raw buyer doesn't establish).
+- CONCLUSION: paying QuickNode requires their SDK (@quicknode/x402), not our raw buyer. Not fixable
+  in-payload. For a general external cross-party settle, use a seller running the SAME @circle-fin
+  x402-batching middleware as our own seller (Option B) — it accepts our payload as-is.
+
+**Still OPEN — an actual external cross-party SETTLE (not just parse).** QuickNode proved PARSING
+end-to-end (select/price/gate/sign the real challenge) but not a settle. Next brick: Option B — a
+non-self-loop seller on the same @circle-fin batching middleware, to prove a real cross-party settle.
+
+Diagnostics diag-qn-settle / diag-parse / diag-reorder / diag-caps-block / diag-guard / diag-x402-buy
+all retired (404). Buyer improvements deployed live to prod before this commit (needed for the live
+QuickNode tests); this commit makes git match prod.

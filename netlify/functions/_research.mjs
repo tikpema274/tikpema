@@ -55,11 +55,14 @@ export async function callAnthropic(apiKey, model, messages, systemPrompt, tools
 // Where the recorded spend is attributed in the audit trail.
 const DATA_SELLER_SOURCE = "x402-quote (testnet stand-in)";
 
-// Fixed stand-in price used for the pre-purchase budget check. Matches the
-// seller's price (~0.001 USDC); overridable via DATA_PURCHASE_USDC.
-function dataPurchaseUsdc() {
+// Absolute per-buy hard ceiling (USDC). A seller's advertised price is refused if it
+// exceeds this, IN ADDITION TO the percentage caps in _budget.mjs — so an external
+// seller can't advertise a surprising price that still fits under the per-purchase
+// allowance. Fail-safe: unset / garbled / <=0 → the hardcoded default (never disables
+// the bound). Overridable via DATA_PURCHASE_USDC for a known pricier seller.
+function dataBuyCeilingUsdc() {
   const n = Number(process.env.DATA_PURCHASE_USDC);
-  return Number.isFinite(n) && n > 0 ? n : 0.001;
+  return Number.isFinite(n) && n > 0 ? n : 0.01;
 }
 
 // The purchase-decision system prompt: a binary buy/skip over the ONE available
@@ -111,14 +114,29 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
       console.warn(`[research] x402 challenge fetch failed (NO buy): ${chal.body?.error ?? "unknown"}`);
       return [];
     }
-    const amountUsdc = Number(chal.requirements?.maxAmountRequired) / 1e6;
+    // v1 sellers publish the price as maxAmountRequired; v2 (e.g. QuickNode) as
+    // amount — the SAME fallback precedence the buyer's signed atomic uses
+    // (_x402.mjs), so with the SAME challenge threaded into payX402 the gate-price
+    // equals the signed-price. Missing both → "" → NaN/0 → degrade to Exa-only.
+    const advAtomic = String(chal.requirements?.maxAmountRequired ?? chal.requirements?.amount ?? "");
+    const amountUsdc = Number(advAtomic) / 1e6;
     if (!Number.isFinite(amountUsdc) || amountUsdc <= 0) {
-      console.warn(`[research] x402 advertised price invalid (NO buy): "${chal.requirements?.maxAmountRequired}"`);
+      console.warn(`[research] x402 advertised price invalid (NO buy): "${advAtomic}"`);
       return [];
     }
     console.log(`[research] purchase decision: BUY (advertised $${amountUsdc}) — ${justification}`);
 
-    // 3. Budget gate on the SELLER'S advertised price. Day-ceiling sub-check is
+    // 3. Absolute per-buy hard ceiling — refuse a surprising advertised price BEFORE
+    //    the percentage gate (the buy must pass BOTH). Fires before any signing, so no
+    //    money moves on a refusal; returns [] → clean Exa-only.
+    const ceiling = dataBuyCeilingUsdc();
+    if (amountUsdc > ceiling) {
+      console.warn(`[research] advertised ${amountUsdc} exceeds absolute per-buy ceiling ${ceiling} USDC (NO buy)`);
+      await recordBlocked({ jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: `absolute ceiling: ${amountUsdc} > ${ceiling} USDC`, store });
+      return [];
+    }
+
+    // 4. Budget gate on the SELLER'S advertised price. Day-ceiling sub-check is
     //    keyed to `owner` (the job client's own wallet), so buys draw down THIS
     //    user's daily budget, not a shared global one.
     const gate = await canSpend({ jobId, jobPriceUsdc: jobPrice, amountUsdc, store, owner });
@@ -129,7 +147,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     }
     console.log(`[research] budget ALLOWED — purchasing…`);
 
-    // 4. Purchase — thread the SAME challenge (no re-fetch); bind the signed
+    // 5. Purchase — thread the SAME challenge (no re-fetch); bind the signed
     //    amount to the gated advertised price.
     const res = await payX402({ sellerUrl: process.env.DATA_SELLER_URL, challenge: chal, approvedUsdc: amountUsdc, requireApproved: true, jobContext: { jobId, jobPrice } });
     const facts = res?.body?.sellerBody?.dataset?.facts;

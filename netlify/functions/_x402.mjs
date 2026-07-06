@@ -95,8 +95,8 @@ function circleSigner({ client, address, walletId, walletAddress, blockchain }) 
 // advertised requirements + x402Version. Separated so a caller (maybeBuyData) can
 // gate the SELLER'S advertised price via canSpend BEFORE signing, then thread this
 // same challenge into payX402 — one fetch, so the price the gate saw is the price
-// signed. Returns { ok:true, requirements, x402Version } or, on a bad challenge,
-// { ok:false, status, body } using the same shapes payX402 returned inline.
+// signed. Returns { ok:true, requirements, x402Version, resource, extensions } or, on a
+// bad challenge, { ok:false, status, body } using the same shapes payX402 returned inline.
 export async function fetchX402Requirements({ sellerUrl } = {}) {
   const resolvedSeller = sellerUrl || DEFAULT_SELLER_URL;
   const challenge = await fetch(resolvedSeller, { method: "POST" });
@@ -112,18 +112,39 @@ export async function fetchX402Requirements({ sellerUrl } = {}) {
   const headerb64 = challenge.headers.get("payment-required");
   let x402Version = 1;
   let accepts;
+  let resource; // challenge's TOP-LEVEL resource {url, description, mimeType}. Multi-chain
+                // sellers (QuickNode) put it here, NOT per-entry; the signed payment must
+                // carry it so the facilitator can bind the payment to the resource URL.
+  let extensions; // challenge's TOP-LEVEL extensions (e.g. QuickNode's sign-in-with-x
+                  // nonce). When present, the seller binds the payment to it, so payX402
+                  // echoes it back; sellers that don't send extensions (our self-loop)
+                  // leave this undefined.
   if (headerb64) {
     const decoded = b64decode(headerb64);
     x402Version = decoded.x402Version ?? 1;
     accepts = decoded.accepts;
+    resource = decoded.resource;
+    extensions = decoded.extensions;
   } else {
     const j = await challenge.json();
     accepts = j.accepts;
+    resource = j.resource;
+    extensions = j.extensions;
   }
-  const requirements = Array.isArray(accepts) ? accepts[0] : null;
-  if (!requirements)
+  // Multi-chain sellers (e.g. QuickNode) advertise a MENU across many chains/tokens;
+  // accepts[0] may be a different chain. SELECT the entry matching OUR chain + batched
+  // scheme (first match wins). No match → ok:false (graceful; caller degrades to
+  // Exa-only) — never fall back to accepts[0]. A single-entry self-loop still selects
+  // correctly (its one entry matches).
+  if (!Array.isArray(accepts) || accepts.length === 0)
     return { ok: false, status: 502, body: { executed: false, step: "challenge", error: "402 had no accepts[] requirements" } };
-  return { ok: true, requirements, x402Version };
+  const requirements = accepts.find(
+    (r) => r?.network === EXPECTED_NETWORK && r?.extra?.name === BATCH_NAME
+  );
+  if (!requirements)
+    return { ok: false, status: 502, body: { executed: false, step: "challenge",
+      error: `no accepts[] entry for ${EXPECTED_NETWORK} / ${BATCH_NAME}` } };
+  return { ok: true, requirements, x402Version, resource, extensions };
 }
 
 // The buyer core: 402 → guard → sign (delegate EOA) → settle. Returns
@@ -155,7 +176,7 @@ export async function payX402({ sellerUrl, challenge, approvedUsdc, requireAppro
     // fetch, no skew. Otherwise fetch it now.
     const chal = challenge ?? (await fetchX402Requirements({ sellerUrl: resolvedSeller }));
     if (!chal.ok) return { status: chal.status ?? 502, body: chal.body };
-    const { requirements, x402Version } = chal;
+    const { requirements, x402Version, resource: challengeResource, extensions: challengeExtensions } = chal;
 
     // ── 2. Spend guard — validate the challenge BEFORE signing ───────────────
     step = "guard";
@@ -172,11 +193,15 @@ export async function payX402({ sellerUrl, challenge, approvedUsdc, requireAppro
     if (!requirements.payTo)
       return { status: 200, body: { executed: false, blocked: "requirements missing payTo" } };
 
-    // Price guard: maxAmountRequired is atomic USDC (6dp). Refuse to authorize
-    // more than AGENT_MAX_SPEND_USDC. Fail closed on a non-integer amount.
-    const atomic = String(requirements.maxAmountRequired ?? "");
+    // Price guard: the atomic USDC price (6dp). x402 v1 sellers publish it as
+    // `maxAmountRequired`; v2 sellers (e.g. QuickNode) as `amount` — prefer the
+    // former, fall back to the latter. This same-fallback value is what gets SIGNED
+    // (see schemeRequirements.amount below), and maybeBuyData reads the identical
+    // fallback for the gate, so gate-price == signed-price. Refuse to authorize more
+    // than AGENT_MAX_SPEND_USDC. Fail closed on a non-integer amount.
+    const atomic = String(requirements.maxAmountRequired ?? requirements.amount ?? "");
     if (!/^\d+$/.test(atomic) || atomic === "0")
-      return { status: 200, body: { executed: false, blocked: `invalid maxAmountRequired "${atomic}"` } };
+      return { status: 200, body: { executed: false, blocked: `invalid price (maxAmountRequired/amount) "${atomic}"` } };
     const priceUsdc = Number(atomic) / 10 ** USDC_DECIMALS;
     const cap = maxSpendUsdc();
     if (priceUsdc > cap)
@@ -227,21 +252,25 @@ export async function payX402({ sellerUrl, challenge, approvedUsdc, requireAppro
     };
     const paymentPayload = await scheme.createPaymentPayload(x402Version, schemeRequirements);
 
-    // The Circle Gateway verify/settle API expects the FULL x402 payload, not just
-    // { x402Version, payload }. Per the lib's high-level pay(), the base64 header
-    // must also carry `resource` (the paid URL) and `accepted` (the chosen
-    // requirements entry). The lib/API key off `amount` (x402 v2), while the
-    // seller publishes the v1 `maxAmountRequired`, so we mirror `amount` into the
-    // accepted entry the API reads.
+    // Envelope — echo back what the challenge carried. Byte-diffing a QuickNode-accepted
+    // payment (via @x402/core createPaymentPayload) proved its wire payload is ALL FIVE
+    // keys: { x402Version, payload, resource, accepted, extensions } — resource/accepted
+    // are ALWAYS present (not either/or with extensions). So:
+    //  - `resource` + `accepted` ALWAYS (resource from the challenge's top-level object
+    //    when present, else built from the per-entry fields for our self-loop seller).
+    //  - `extensions` only when the challenge carried them (e.g. QuickNode's
+    //    sign-in-with-x nonce); our self-loop sends none, so this key is omitted and the
+    //    envelope stays byte-identical to before the extensions work.
     const wirePayload = {
       ...paymentPayload,
       x402Version: 2,
-      resource: {
+      resource: challengeResource ?? {
         url: requirements.resource,
         description: requirements.description,
         mimeType: requirements.mimeType,
       },
       accepted: { ...requirements, amount: atomic },
+      ...(challengeExtensions ? { extensions: challengeExtensions } : {}),
     };
 
     // ── 4. Retry the seller with the signed payment ──────────────────────────
