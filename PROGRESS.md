@@ -557,3 +557,40 @@ HEAD `982b60e`, clean, pushed, no open bugs. (Backlog + strategic items unchange
 
 ### State
 HEAD `537d747`, clean. The one uncapped user-money path is now bounded. Note: this is the *deposit* per-tx cap only — the survey's other net-new items (distinct provider/evaluator addresses for genuine two-party escrow, a non-research deliverable-acceptance path, `reject()`/refund-path review) remain open and out of scope for this change.
+
+
+## 2026-07-06 — x402 Gateway-batched buy PROVEN settling on Arc (Brick D resolved)
+
+**Result: PASS.** The existing Gateway-batched x402 buyer (payX402 in _x402.mjs)
+produced a real, settled payment on Arc Testnet. Closes the long-open "has x402
+ever actually settled on Arc?" question.
+
+Evidence (from a temporary read-only diagnostic, since deleted + confirmed 404 on prod):
+- executed: true, settleReceipt.success: true
+- Settlement id (Circle Gateway batch, not a 0x tx hash): e2ee4aa4-6af5-4d86-b5a7-551197443fcf
+- Network: eip155:5042002 (Arc Testnet)
+- Payer (DELEGATE_ADDRESS): 0x6db396c1a37024fd3bee1f3dbf3020aa3b2bb380
+- Payer Gateway balance moved 4.996 -> 4.995 USDC — receipt and balance agree
+- Price: 0.001 USDC; seller advertised GatewayWalletBatched / verifyingContract
+  0x0077777d7EBA4688BDeF3E311b846F25870A19B9 (Gateway wallet) → confirms
+  Gateway-batched path, NOT raw per-tx EIP-3009 (the vanilla twin)
+- Seller returned real content — full request->402->pay->settle->deliver loop closed
+
+Scope — what this did NOT prove (still open):
+- Self-loop only: our own x402-quote was both seller and payee
+  (payTo 0xc70112c7d5ebe38cd998679594a5d082c1860df6). External-seller NOT proven.
+- Budget caps (30%/50%/period in _budget.mjs) NOT exercised — diagnostic bypassed
+  maybeBuyData's gate by design. Caps still unverified in a live buy.
+- Settlement id is a Gateway batch UUID; not yet traced to an on-chain batch tx on Arcscan.
+
+Correction: _budget.mjs header comments claiming caps are "NOT WIRED" are false —
+caps are wired; they just weren't in this test path.
+
+Op note: minting an internal token for a PROD call requires
+`netlify env:get SESSION_SECRET --context production` — the bare command returns
+the dev secret and every token 401s.
+
+Next brick: exercise the real maybeBuyData path so caps bind for the first time —
+price a job so the buy would exceed allowance, confirm it's blocked (not clamped).
+Then: external Arc seller; then audit cleanups (delete vanilla-x402 twin,
+gate/remove unauth agent-init.mjs, retire shared-wallet ghosts).
