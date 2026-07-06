@@ -594,3 +594,52 @@ Next brick: exercise the real maybeBuyData path so caps bind for the first time 
 price a job so the buy would exceed allowance, confirm it's blocked (not clamped).
 Then: external Arc seller; then audit cleanups (delete vanilla-x402 twin,
 gate/remove unauth agent-init.mjs, retire shared-wallet ghosts).
+
+## 2026-07-06 (pm) — Budget gate BLOCKS over-allowance data-buy (reject-not-clamp) PROVEN
+
+**Result: PASS.** The data-buy budget gate rejects an over-allowance buy on the
+real maybeBuyData path — it does NOT clamp — and no money moves.
+
+How tested: temporary diag-caps-block endpoint (since deleted, prod 404 confirmed)
+drove the real exported research() → private maybeBuyData with forceDecision:{buy:true},
+injecting DATA_PURCHASE_USDC=0.05 into process.env for that invocation only. At
+jobPrice 0.20: allowance 0.20 x 0.30 = 0.06; per-purchase cap 0.06 x 0.50 = 0.03.
+Injected 0.05 > 0.03 → blocks at the per-purchase branch.
+
+Evidence:
+- canSpend returned allowed:false, reason "per-purchase cap: 0.05 > 0.03 USDC
+  (0.5 of job allowance 0.06)" — per-purchase branch, not period ceiling
+- realPath.purchasedFacts = 0 — buy skipped, not shrunk (reject, not clamp)
+- Payer (0x6db3…b380) Gateway balance unchanged 4.995 → 4.995 — no money moved
+- Job still returned a clean Exa-only brief — graceful degradation intact
+- exa_branch_ran = true — precondition held, gate was actually exercised
+- Function log confirmed the clean "[research] budget BLOCKED: per-purchase cap:
+  0.05 > 0.03" path; NO "purchase loop error" line (swallowed-throw ruled out)
+- Log line "purchase decision: BUY ($0.05)" (from dataPurchaseUsdc()) independently
+  proves the injected 0.05 reached real production code — default 0.001 would have
+  been under the cap and allowed
+
+Note: the harness's injected_amount_reached_real_code assertion came back false and
+auditEntriesWrittenThisRun was empty ONLY because they keyed off the persisted
+recordBlocked audit entry, which didn't read back within the direct invocation — a
+Netlify Blobs readback artifact of the throwaway diagnostic, NOT a gate failure.
+The reason string + the BUY ($0.05) log line + unchanged balance close it fully.
+
+**Scope — what this did NOT prove (still open, more important — Brick 2):**
+- canSpend checks DATA_PURCHASE_USDC (env figure). The actual buy charges the
+  SELLER'S advertised maxAmountRequired, which the gate never sees (payX402 reads
+  it internally; maybeBuyData passes no amount). Both ~equal by coincidence today.
+  A gate validating a different number than the one charged is a latent money-safety
+  hole — it goes live the moment DATA_SELLER_URL points at an external seller with a
+  different price. Fix options drafted: (guard) payX402 refuses to sign if
+  maxAmountRequired > approved ceiling; (reorder, cleaner) fetch 402 first, gate the
+  advertised amount, then sign+settle. Lean: guard now, reorder later.
+
+**Op notes (both bit us this session):**
+- When Claude Code runs the prod deploy it MUST background it — a foreground
+  `netlify deploy` exceeds the 5-min tool timeout and gets SIGTERM'd mid-upload,
+  leaving prod half-updated (endpoint 404s). Backgrounding removes the ceiling.
+  (Deploying from your own terminal is unaffected.)
+- Audit-log readback in a directly-invoked diagnostic doesn't reliably reflect
+  Netlify Blobs writes within the same invocation. Future cap tests should assert on
+  the canSpend reason string / function logs, not the persisted recordBlocked entry.
