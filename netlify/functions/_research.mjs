@@ -117,7 +117,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     console.log(`[research] budget ALLOWED — purchasing…`);
 
     // 3. Purchase (graceful degradation — do NOT record spend until confirmed).
-    const res = await payX402({ sellerUrl: process.env.DATA_SELLER_URL, jobContext: { jobId, jobPrice } });
+    const res = await payX402({ sellerUrl: process.env.DATA_SELLER_URL, approvedUsdc: amountUsdc, requireApproved: true, jobContext: { jobId, jobPrice } });
     const facts = res?.body?.sellerBody?.dataset?.facts;
     if (!res?.body?.executed || !Array.isArray(facts) || facts.length === 0) {
       console.warn(

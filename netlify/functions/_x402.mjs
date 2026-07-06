@@ -92,9 +92,11 @@ function circleSigner({ client, address, walletId, walletAddress, blockchain }) 
 }
 
 // The buyer core: 402 → guard → sign (delegate EOA) → settle. Returns
-// { status, body } (see RETURN SHAPE above). `jobContext` is reserved for the
-// later budget/research wiring and is intentionally unused in this refactor.
-export async function payX402({ sellerUrl, jobContext } = {}) {
+// { status, body } (see RETURN SHAPE above). `approvedUsdc` is a budget-approved
+// spend ceiling (decimal USDC); `requireApproved:true` (set by maybeBuyData) makes
+// a data buy fail CLOSED when no valid ceiling is present. `jobContext` is reserved
+// and intentionally unused.
+export async function payX402({ sellerUrl, approvedUsdc, requireApproved, jobContext } = {}) {
   const resolvedSeller = sellerUrl || DEFAULT_SELLER_URL;
 
   // x402 BUYER wallet. The batched Gateway scheme requires ecrecover(sig) == from
@@ -166,6 +168,27 @@ export async function payX402({ sellerUrl, jobContext } = {}) {
     const cap = maxSpendUsdc();
     if (priceUsdc > cap)
       return { status: 200, body: { executed: false, blocked: `price ${priceUsdc} USDC exceeds AGENT_MAX_SPEND_USDC (${cap})` } };
+
+    // Approved-amount guard. `maxAmountRequired` is the SELLER's advertised price,
+    // which the budget gate (canSpend) never saw — bind the signed amount to the
+    // gate-approved ceiling instead. Atomic-integer compare (micro-USDC), like
+    // _budget.mjs (avoids float drift).
+    //
+    // FAIL-CLOSED on the data-buy path: requireApproved:true (set only by
+    // maybeBuyData) means a buy MUST carry a valid budget-approved ceiling — a
+    // missing/invalid one is refused, not waved through to the AGENT_MAX_SPEND
+    // backstop. Callers that do NOT set requireApproved (the standalone x402-pay.mjs
+    // harness) are intentionally exempt; if they pass an approvedUsdc it is still
+    // enforced.
+    if (requireApproved && !(Number.isFinite(approvedUsdc) && approvedUsdc > 0))
+      return { status: 200, body: { executed: false,
+        blocked: `fail-closed: data buy requires a budget-approved ceiling (got ${approvedUsdc})` } };
+    if (Number.isFinite(approvedUsdc) && approvedUsdc > 0) {
+      const approvedAtomic = Math.round(approvedUsdc * 10 ** USDC_DECIMALS);
+      if (Number(atomic) > approvedAtomic)
+        return { status: 200, body: { executed: false,
+          blocked: `advertised price ${priceUsdc} USDC exceeds budget-approved ${approvedUsdc} USDC` } };
+    }
 
     // ── 3. Sign the Gateway-batched payment ──────────────────────────────────
     step = "sign";

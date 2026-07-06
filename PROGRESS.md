@@ -643,3 +643,33 @@ The reason string + the BUY ($0.05) log line + unchanged balance close it fully.
 - Audit-log readback in a directly-invoked diagnostic doesn't reliably reflect
   Netlify Blobs writes within the same invocation. Future cap tests should assert on
   the canSpend reason string / function logs, not the persisted recordBlocked entry.
+
+## 2026-07-06 (pm) — payX402 approved-amount guard added + proven (gate/wire mismatch CONTAINED)
+
+**What:** Added a fail-closed approved-amount guard to payX402 (_x402.mjs) closing
+the gate/wire gap where canSpend validated DATA_PURCHASE_USDC but payX402 charged
+the seller's advertised maxAmountRequired unchecked. payX402 now takes approvedUsdc
++ requireApproved; maybeBuyData passes the canSpend-approved amount with
+requireApproved:true. Atomic-integer compare (micro-USDC), refusal fires in step
+"guard" before any signing/settlement, returns the existing {executed:false,blocked}
+shape so maybeBuyData degrades to clean Exa-only.
+
+**Posture:** research path is FAIL-CLOSED — a data buy with a missing/invalid
+ceiling is refused, not waved to the AGENT_MAX_SPEND backstop. x402-pay.mjs (test
+harness) is intentionally EXEMPT (does not set requireApproved) and runs on the
+AGENT_MAX_SPEND_USDC backstop only; if it ever becomes a real buy path, pass it an
+explicit approvedUsdc.
+
+**Proven end-to-end (temporary diag-guard, since retired):**
+- State 1 ENFORCE: approved 0.0005 < advertised 0.001 → blocked "advertised price
+  exceeds budget-approved", never reached sign, balance unchanged
+- State 2 FAIL-CLOSED: approved undefined and 0 → blocked "fail-closed: requires a
+  budget-approved ceiling", never reached sign, balance unchanged
+- State 3 HAPPY: approved 0.01 > advertised 0.001 → executed:true, settleReceipt
+  (batch afb1f2bc-…), balance 4.995 → 4.994 (−0.001). Guard does not break settlement.
+
+**Still open — this CONTAINS, does not fully close, the mismatch:** the guard binds
+the SIGNED amount to the approved ceiling (you can't sign an over-ceiling
+authorization). It does not make canSpend gate the advertised price as canonical
+input — that's the "reorder" (fetch 402 → gate advertised amount → sign+settle),
+still the cleaner eventual fix. Guard is the belt; reorder is the redesign.
