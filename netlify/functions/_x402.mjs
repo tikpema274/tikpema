@@ -51,6 +51,16 @@ const BATCH_NAME = "GatewayWalletBatched";
 const b64encode = (obj) => Buffer.from(JSON.stringify(obj), "utf8").toString("base64");
 const b64decode = (str) => JSON.parse(Buffer.from(str, "base64").toString("utf8"));
 
+// Optional request body to forward. RPC-proxy sellers (e.g. QuickNode) require the
+// PAID request to carry the call it's paying for (the JSON-RPC body); a payment with
+// no body fails their verify. Returns { headers, body } to merge into fetch init, or
+// {} when there's no body (our self-loop seller serves a fixed resource, needs none).
+function bodyInit(requestBody) {
+  if (requestBody == null) return {};
+  const body = typeof requestBody === "string" ? requestBody : JSON.stringify(requestBody);
+  return { headers: { "content-type": "application/json" }, body };
+}
+
 // Wrap the Circle dev-controlled wallet as a BatchEvmSigner. The scheme calls
 // signTypedData({ domain, types, primaryType, message }) with viem-shaped data
 // (no EIP712Domain entry; bigint values). Circle's API wants a JSON string with
@@ -97,9 +107,12 @@ function circleSigner({ client, address, walletId, walletAddress, blockchain }) 
 // same challenge into payX402 — one fetch, so the price the gate saw is the price
 // signed. Returns { ok:true, requirements, x402Version, resource, extensions } or, on a
 // bad challenge, { ok:false, status, body } using the same shapes payX402 returned inline.
-export async function fetchX402Requirements({ sellerUrl } = {}) {
+// `requestBody` (optional) is forwarded on the challenge POST for RPC-proxy sellers
+// (e.g. QuickNode) whose challenge/settle is bound to the request being paid for; omit
+// for sellers that serve a fixed resource (our self-loop needs no body).
+export async function fetchX402Requirements({ sellerUrl, requestBody } = {}) {
   const resolvedSeller = sellerUrl || DEFAULT_SELLER_URL;
-  const challenge = await fetch(resolvedSeller, { method: "POST" });
+  const challenge = await fetch(resolvedSeller, { method: "POST", ...bodyInit(requestBody) });
   if (challenge.status !== 402) {
     const text = await challenge.text();
     return { ok: false, status: 502, body: {
@@ -154,7 +167,7 @@ export async function fetchX402Requirements({ sellerUrl } = {}) {
 // optional pre-fetched result from fetchX402Requirements() — when supplied, payX402
 // skips its own 402 fetch and uses it (so the gated price == the signed price).
 // `jobContext` is reserved and intentionally unused.
-export async function payX402({ sellerUrl, challenge, approvedUsdc, requireApproved, jobContext } = {}) {
+export async function payX402({ sellerUrl, challenge, approvedUsdc, requireApproved, jobContext, requestBody } = {}) {
   const resolvedSeller = sellerUrl || DEFAULT_SELLER_URL;
 
   // x402 BUYER wallet. The batched Gateway scheme requires ecrecover(sig) == from
@@ -174,7 +187,7 @@ export async function payX402({ sellerUrl, challenge, approvedUsdc, requireAppro
     // supplied (maybeBuyData fetches it first to gate the advertised price, then
     // threads it here) so the gated price is exactly the price we sign — one
     // fetch, no skew. Otherwise fetch it now.
-    const chal = challenge ?? (await fetchX402Requirements({ sellerUrl: resolvedSeller }));
+    const chal = challenge ?? (await fetchX402Requirements({ sellerUrl: resolvedSeller, requestBody }));
     if (!chal.ok) return { status: chal.status ?? 502, body: chal.body };
     const { requirements, x402Version, resource: challengeResource, extensions: challengeExtensions } = chal;
 
@@ -274,10 +287,14 @@ export async function payX402({ sellerUrl, challenge, approvedUsdc, requireAppro
     };
 
     // ── 4. Retry the seller with the signed payment ──────────────────────────
+    // Forward the same requestBody as the challenge fetch (RPC-proxy sellers bind the
+    // payment to the request being paid for; our self-loop sends none → unchanged).
     step = "settle";
+    const bi = bodyInit(requestBody);
     const paid = await fetch(resolvedSeller, {
       method: "POST",
-      headers: { "payment-signature": b64encode(wirePayload) },
+      headers: { "payment-signature": b64encode(wirePayload), ...(bi.headers ?? {}) },
+      ...(bi.body ? { body: bi.body } : {}),
     });
 
     const paidText = await paid.text();

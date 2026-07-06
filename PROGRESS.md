@@ -765,3 +765,38 @@ non-self-loop seller on the same @circle-fin batching middleware, to prove a rea
 Diagnostics diag-qn-settle / diag-parse / diag-reorder / diag-caps-block / diag-guard / diag-x402-buy
 all retired (404). Buyer improvements deployed live to prod before this commit (needed for the live
 QuickNode tests); this commit makes git match prod.
+
+
+## 2026-07-07 — CORRECTION to the QuickNode finding: cause is the MISSING REQUEST BODY, not the account layer
+
+The prior entry (2026-07-06 pm) concluded QuickNode's rejection was "at the account/session
+layer, outside the payload." That was WRONG. Ground-truth probes found the real cause:
+
+- **Signature is valid (suspect refuted):** captured our real Circle-signed payment for the Arc
+  challenge and ecrecovered it against the exact EIP-712 TransferWithAuthorization digest
+  (domain GatewayWalletBatched/1/5042002/GatewayWallet). It recovers to the delegate
+  (0x6Db3…B380), 65 bytes, v=27 — a standard, viem-equivalent signature. Not the problem.
+- **Missing request body (the actual difference):** QuickNode is a JSON-RPC PROXY — its client
+  sends the paid request WITH the RPC body it's paying for (eth_blockNumber), on both the
+  challenge fetch and the paid retry. Our payX402 (built for x402-quote, which serves a fixed
+  resource needing no input) sent the payment header with NO body. Captured both empirically:
+  @quicknode paid retry hasBody:true; ours hasBody:false. A payment with no request is
+  nonsensical to an RPC proxy → "Unexpected error verifying payment."
+
+**Fix implemented (_x402.mjs):** optional `requestBody` threaded through fetchX402Requirements
+(challenge fetch) AND payX402 (settle) via a bodyInit() helper — forwarded on BOTH phases for
+RPC-proxy sellers, omitted for our self-loop (unchanged, bodyless). Proven locally: with
+requestBody the QuickNode challenge+settle both carry the eth_blockNumber body; self-loop
+unaffected.
+
+**Causation CONFIRMED by a live settle:** with the body-forwarding fix, payX402 settled the real
+QuickNode Arc nanopayment — executed:true, settleReceipt.success:true (batch
+21fb2402-c524-40c9-a849-8ad7c7007d04, eip155:5042002), QuickNode SERVED the RPC
+(sellerBody.result 0x3033b90 = a real eth_blockNumber), and the payer's Gateway balance moved
+4.993 → 4.9929 (−0.0001) cross-party to QuickNode's payTo 0xF463…623C. The missing request body
+WAS the cause; the earlier "account/session layer" conclusion is fully retracted.
+
+**Status: FIRST external cross-party x402 settle — DONE.** QuickNode nanopayment works via our
+hand-rolled buyer (forward the paid request's body). The "still OPEN — actual external
+cross-party settle" item from the prior entry is now CLOSED. Buyer is proven end-to-end against a
+real, non-self-loop seller: select → price → gate → sign → pay+forward → verified/settled/served.
