@@ -13,7 +13,7 @@
 
 import { exaSearch } from "./_exa.mjs";
 import { canSpend, recordSpend, recordBlocked } from "./_budget.mjs";
-import { payX402 } from "./_x402.mjs";
+import { payX402, fetchX402Requirements } from "./_x402.mjs";
 
 // Current Anthropic web search server tool (GA — no beta header).
 const WEB_SEARCH_TOOL = { type: "web_search_20260209", name: "web_search", max_uses: 3 };
@@ -102,11 +102,24 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
       console.log(`[research] purchase decision: SKIP — ${justification}`);
       return [];
     }
-    const amountUsdc = dataPurchaseUsdc();
-    console.log(`[research] purchase decision: BUY ($${amountUsdc}) — ${justification}`);
+    // 2. Fetch the seller's x402 challenge FIRST so the gate sees the SELLER'S
+    //    advertised price (maxAmountRequired) — the amount actually charged — as
+    //    the canonical input, not a separate env figure. The SAME challenge is
+    //    threaded into payX402 below (one fetch → gated price == signed price).
+    const chal = await fetchX402Requirements({ sellerUrl: process.env.DATA_SELLER_URL });
+    if (!chal.ok) {
+      console.warn(`[research] x402 challenge fetch failed (NO buy): ${chal.body?.error ?? "unknown"}`);
+      return [];
+    }
+    const amountUsdc = Number(chal.requirements?.maxAmountRequired) / 1e6;
+    if (!Number.isFinite(amountUsdc) || amountUsdc <= 0) {
+      console.warn(`[research] x402 advertised price invalid (NO buy): "${chal.requirements?.maxAmountRequired}"`);
+      return [];
+    }
+    console.log(`[research] purchase decision: BUY (advertised $${amountUsdc}) — ${justification}`);
 
-    // 2. Budget gate. The day-ceiling sub-check is keyed to `owner` — the job
-    //    client's own agent wallet — so autonomous data buys draw down THIS
+    // 3. Budget gate on the SELLER'S advertised price. Day-ceiling sub-check is
+    //    keyed to `owner` (the job client's own wallet), so buys draw down THIS
     //    user's daily budget, not a shared global one.
     const gate = await canSpend({ jobId, jobPriceUsdc: jobPrice, amountUsdc, store, owner });
     if (!gate.allowed) {
@@ -116,8 +129,9 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     }
     console.log(`[research] budget ALLOWED — purchasing…`);
 
-    // 3. Purchase (graceful degradation — do NOT record spend until confirmed).
-    const res = await payX402({ sellerUrl: process.env.DATA_SELLER_URL, approvedUsdc: amountUsdc, requireApproved: true, jobContext: { jobId, jobPrice } });
+    // 4. Purchase — thread the SAME challenge (no re-fetch); bind the signed
+    //    amount to the gated advertised price.
+    const res = await payX402({ sellerUrl: process.env.DATA_SELLER_URL, challenge: chal, approvedUsdc: amountUsdc, requireApproved: true, jobContext: { jobId, jobPrice } });
     const facts = res?.body?.sellerBody?.dataset?.facts;
     if (!res?.body?.executed || !Array.isArray(facts) || facts.length === 0) {
       console.warn(

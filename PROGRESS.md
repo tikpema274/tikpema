@@ -673,3 +673,44 @@ the SIGNED amount to the approved ceiling (you can't sign an over-ceiling
 authorization). It does not make canSpend gate the advertised price as canonical
 input — that's the "reorder" (fetch 402 → gate advertised amount → sign+settle),
 still the cleaner eventual fix. Guard is the belt; reorder is the redesign.
+
+## 2026-07-06 (pm) — payX402 reorder: canSpend now gates the SELLER'S advertised price (gate/wire mismatch CLOSED)
+
+**What:** Reordered the data-buy path so the budget gate reads the seller's
+advertised maxAmountRequired as canonical input, instead of gating DATA_PURCHASE_USDC
+and binding it afterward. Extracted fetchX402Requirements() from payX402 (exported);
+payX402 gained an optional `challenge` param (challenge ?? fetch — single fetch,
+threaded). maybeBuyData now: fetch 402 → derive advertisedUsdc → canSpend(advertised)
+→ payX402(challenge threaded, approvedUsdc=advertised). Gated price == signed price
+by construction. Guard KEPT as defense-in-depth (TOCTOU insurance + sole bound for
+x402-pay.mjs, which passes no challenge and self-fetches unchanged).
+
+**This CLOSES the gate/wire mismatch** that the earlier guard only contained: the
+gate now validates the exact amount that gets charged, not a coincidentally-equal
+env figure. External-seller-ready — single threaded fetch means no gate-vs-sign
+divergence even against a nonce-bearing seller.
+
+**Proven end-to-end on the LIVE path (temporary diag-reorder, since retired):**
+- State 1 GATE BLOCKS ON ADVERTISED: real maybeBuyData at jobPrice 0.005 blocked on
+  the FETCHED advertised 0.001 (log: "BUY (advertised $0.001)" then "budget BLOCKED:
+  per-purchase cap: 0.001 > 0.00075"). Control: same fetched 0.001 allowed at
+  jobPrice 0.20 — proves the gate reads the fetched number, not a stale env figure.
+- State 2 SINGLE-FETCH HAPPY PATH: challengeFetchedOnce + threadedIntoPayX402 (one
+  402 total), executed:true, settleReceipt (batch c76cf6ef-…), balance 4.994 → 4.993
+  (−0.001). Reorder did not break settlement.
+- State 3 FETCH-FAILURE DEGRADES: bad seller URL → [] → clean Exa-only, no throw.
+- State 4 INVALID-PRICE DEGRADES: malformed maxAmountRequired "not-a-number" → the
+  Number.isFinite guard → [] → clean Exa-only, no throw.
+
+**Note:** the reorder was deployed live to prod BEFORE commit (required to prove
+end-to-end on prod); this commit makes git match the running prod code.
+
+**Dead code:** dataPurchaseUsdc() / DATA_PURCHASE_USDC no longer feed the gate.
+Left in place. Optional follow-up (not done): repurpose as an absolute secondary
+ceiling — gate on min(advertised, DATA_PURCHASE_USDC) — so an external seller can't
+advertise an arbitrarily high price that still fits under the percentage allowance.
+
+**Now genuinely open — external seller:** the mismatch is closed and the path is
+external-ready, but no actual external (non-self-loop) Arc seller has been paid yet.
+That's the next real brick: point DATA_SELLER_URL at a seller we don't control and
+prove a cross-party settle.

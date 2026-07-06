@@ -91,12 +91,49 @@ function circleSigner({ client, address, walletId, walletAddress, blockchain }) 
   };
 }
 
+// Fetch the seller's x402 challenge (step 1 only): POST for the 402 and decode the
+// advertised requirements + x402Version. Separated so a caller (maybeBuyData) can
+// gate the SELLER'S advertised price via canSpend BEFORE signing, then thread this
+// same challenge into payX402 — one fetch, so the price the gate saw is the price
+// signed. Returns { ok:true, requirements, x402Version } or, on a bad challenge,
+// { ok:false, status, body } using the same shapes payX402 returned inline.
+export async function fetchX402Requirements({ sellerUrl } = {}) {
+  const resolvedSeller = sellerUrl || DEFAULT_SELLER_URL;
+  const challenge = await fetch(resolvedSeller, { method: "POST" });
+  if (challenge.status !== 402) {
+    const text = await challenge.text();
+    return { ok: false, status: 502, body: {
+      executed: false, step: "challenge",
+      error: `Expected 402 from seller, got ${challenge.status}`,
+      sellerBody: text.slice(0, 500),
+    } };
+  }
+  // Prefer the base64 PAYMENT-REQUIRED header; fall back to the JSON body.accepts.
+  const headerb64 = challenge.headers.get("payment-required");
+  let x402Version = 1;
+  let accepts;
+  if (headerb64) {
+    const decoded = b64decode(headerb64);
+    x402Version = decoded.x402Version ?? 1;
+    accepts = decoded.accepts;
+  } else {
+    const j = await challenge.json();
+    accepts = j.accepts;
+  }
+  const requirements = Array.isArray(accepts) ? accepts[0] : null;
+  if (!requirements)
+    return { ok: false, status: 502, body: { executed: false, step: "challenge", error: "402 had no accepts[] requirements" } };
+  return { ok: true, requirements, x402Version };
+}
+
 // The buyer core: 402 → guard → sign (delegate EOA) → settle. Returns
 // { status, body } (see RETURN SHAPE above). `approvedUsdc` is a budget-approved
 // spend ceiling (decimal USDC); `requireApproved:true` (set by maybeBuyData) makes
-// a data buy fail CLOSED when no valid ceiling is present. `jobContext` is reserved
-// and intentionally unused.
-export async function payX402({ sellerUrl, approvedUsdc, requireApproved, jobContext } = {}) {
+// a data buy fail CLOSED when no valid ceiling is present. `challenge` is an
+// optional pre-fetched result from fetchX402Requirements() — when supplied, payX402
+// skips its own 402 fetch and uses it (so the gated price == the signed price).
+// `jobContext` is reserved and intentionally unused.
+export async function payX402({ sellerUrl, challenge, approvedUsdc, requireApproved, jobContext } = {}) {
   const resolvedSeller = sellerUrl || DEFAULT_SELLER_URL;
 
   // x402 BUYER wallet. The batched Gateway scheme requires ecrecover(sig) == from
@@ -112,37 +149,13 @@ export async function payX402({ sellerUrl, approvedUsdc, requireApproved, jobCon
 
   let step = "challenge";
   try {
-    // ── 1. Fetch the challenge — expect 402 + PAYMENT-REQUIRED ───────────────
-    const challenge = await fetch(resolvedSeller, { method: "POST" });
-    if (challenge.status !== 402) {
-      const text = await challenge.text();
-      return {
-        status: 502,
-        body: {
-          executed: false,
-          step,
-          error: `Expected 402 from seller, got ${challenge.status}`,
-          sellerBody: text.slice(0, 500),
-        },
-      };
-    }
-
-    // Prefer the base64 PAYMENT-REQUIRED header; fall back to the JSON body.accepts.
-    const headerb64 = challenge.headers.get("payment-required");
-    let x402Version = 1;
-    let accepts;
-    if (headerb64) {
-      const decoded = b64decode(headerb64);
-      x402Version = decoded.x402Version ?? 1;
-      accepts = decoded.accepts;
-    } else {
-      const j = await challenge.json();
-      accepts = j.accepts;
-    }
-    const requirements = Array.isArray(accepts) ? accepts[0] : null;
-    if (!requirements) {
-      return { status: 502, body: { executed: false, step, error: "402 had no accepts[] requirements" } };
-    }
+    // ── 1. Obtain the challenge. Use the caller's PRE-FETCHED challenge when
+    // supplied (maybeBuyData fetches it first to gate the advertised price, then
+    // threads it here) so the gated price is exactly the price we sign — one
+    // fetch, no skew. Otherwise fetch it now.
+    const chal = challenge ?? (await fetchX402Requirements({ sellerUrl: resolvedSeller }));
+    if (!chal.ok) return { status: chal.status ?? 502, body: chal.body };
+    const { requirements, x402Version } = chal;
 
     // ── 2. Spend guard — validate the challenge BEFORE signing ───────────────
     step = "guard";
