@@ -922,3 +922,44 @@ run our own real-data seller on the Gateway-nanopayment middleware, or add the v
 buy path to reach Base bazaar sellers).
 
 Diagnostic diag-realbuy retired (404) after this proof.
+
+## 2026-07-07 — UI: "Nanopayments" explainer window (copy-only, no money moves)
+
+**What.** A new user-facing explainer that tells people what a nanopayment is and walks through how
+the agent uses one mid-research. Pure UI/copy — no wallet prop, no network calls, moves no money,
+no CSS changes. Read-only audit first, then built to the audit.
+
+**Placement (decided with user).** Reached at `#/nanopay` via a **4th "Nanopayments →" quick-card**
+in the Dashboard "Do something" row — deliberately NOT a nav item. The 5-item nav (Dashboard /
+Wallet / AI Agent / Research / Send) stays reserved for working tools; the hash router
+(`App.tsx` parseHash + switch) renders the route from a `case "nanopay"` with no NAV entry, which it
+supports because parseHash never validates against NAV. The 4th card wraps to a second row in the
+`repeat(3,1fr)` grid and sits alone on the left — confirmed intentional, no CSS tweak (collapses to
+one column on mobile like the rest).
+
+**Visual (matches shipped design — amber-on-ink).** Reuses existing classes only: `.plane` shell +
+serif `h2` + `.sub`; amber `.panel-eyebrow`; and the **previously-unused `.process` 4-step strip**
+(`styles.css:197-223`) as the how-it-works sequence (its intended purpose); an inset `--field`-bg
+callout for the "$0.01 max" line. NOTE: there is NO purple/teal gradient in this app — the signature
+is warm ink + a single amber-gold seal; a gradient impression from earlier was foreign to the CSS
+and was not built to.
+
+**Copy = the real flow.** The 4 steps condense the actual autonomous purchase path in
+`netlify/functions/_research.mjs`: 01 decide a live figure is needed (decidePurchase SKIPs if free
+web sources suffice) → 02 read the seller's advertised price, refuse above the 0.01 ceiling / budget
+→ 03 sign the on-chain USDC nanopayment (only a confirmed settle counts) → 04 fold the purchased
+fact into the brief with its source. This doubles as the spec for a future LIVE version of the
+window (server already logs the price/gate/settle signals it would surface).
+
+**Naming.** Feature name is plural "Nanopayments" in the card title + eyebrow; singular common-noun
+usage left as-is where it means one payment ("Pay the nanopayment", "Each buy… every purchase").
+Component file kept `NanopaymentPanel.tsx` (internal, not worth the churn).
+
+**Files.** New `src/components/NanopaymentPanel.tsx`; `src/App.tsx` (import + route case);
+`src/components/Dashboard.tsx` (4th card). Verified: `tsc --noEmit` clean, `vite build` clean, local
+`vite preview` eyeballed by user before ship.
+
+**Shipped.** Committed `0e9176d` on main, pushed to origin. Deployed to prod via Netlify CLI
+(deploy `6a4cdf71…`, "Deploy is live!"); prod `index.html` confirmed serving the new build hash
+`index-C1dH3bdq.js` (real-deploy check, not just a 200 on the hash route). Live at
+app.tikpema.xyz/#/nanopay.
