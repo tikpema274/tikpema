@@ -28,11 +28,23 @@ value) and **`:114`** (cumulative day-ceiling), BEFORE it calls `executeAction` 
 cap** (only the day-ceiling would bind). The plan-route is the cap-enforcing path —
 leave it.
 
-**DELIBERATE cap choice:** this route caps a swap at `sendCapUsdc` (**5 USDC** on
-testnet) + day-ceiling — the SAME caps a swap-as-a-plan-step gets today, but *looser*
-than the text-box **single** swap's `AGENT_MAX_SPEND_USDC` (**1**). Chosen knowingly;
-both enforce, neither bypasses. Tightening to `AGENT_MAX_SPEND_USDC` would require an
-`agent-act` structured entry (editing that handler) — not done.
+**CORRECTION (2026-07-07) — the real enforced cap is 10 USDC, not 5/1.** The two
+lines below originally read "caps a swap at `sendCapUsdc` (5 USDC) … looser than the
+text-box swap's `AGENT_MAX_SPEND_USDC` (1)". **That was a misstatement**: 5 and 1 are
+only the code *defaults* (`_arc.mjs:72` / `agent-act.mjs:271`); the **deployed prod
+env** sets both `AGENT_SEND_CAP_USDC=10` and `AGENT_MAX_SPEND_USDC=10` (confirmed via
+`netlify env:get … --context production`, which manual `netlify deploy` also uses — so
+drafts run the same 10). This doc-vs-env gap is what made a working 10-cap look like a
+bypassed 5-cap when a 10 USDC swap passed. **Verified, no code bug:** the per-action
+check is `if (vA > capForA(step))` — `>`, not `>=` (`agent-execute-plan.mjs:104`), and
+the block message says "**exceeds** … limit of 10 USDC". So a swap of **exactly 10
+passes by design** (10 is at the limit, not over); anything over 10 blocks (observed:
+10 USDC swap passed; 12 EURC ≈ 13.68 USD blocked).
+
+**Enforced cap (corrected):** the plan-route caps a swap at `sendCapUsdc` = **10 USDC**
+(deployed) + the day-ceiling — the SAME caps a swap-as-a-plan-step gets. In prod the
+text-box single swap's `AGENT_MAX_SPEND_USDC` is **also 10**, so the two paths enforce
+the *same* 10; the earlier "looser 5-vs-1" framing does not hold for the running env.
 
 **Deferred:** no pre-swap estimate preview yet (needs a `_swap.mjs` standalone
 estimate export + an `agent-act` estimate branch — left for later). `#/swap` is a
