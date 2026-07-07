@@ -65,6 +65,15 @@ function dataBuyCeilingUsdc() {
   return Number.isFinite(n) && n > 0 ? n : 0.01;
 }
 
+// Optional request body forwarded to the data seller. RPC-proxy / request-bound sellers
+// (e.g. QuickNode) require the paid request to carry the call it's paying for; our stand-in
+// seller (x402-quote) serves a fixed dataset and needs none. DATA_SELLER_BODY is sent verbatim
+// as the JSON request body; unset/blank → undefined → no body (current behavior unchanged).
+function dataSellerBody() {
+  const raw = process.env.DATA_SELLER_BODY;
+  return raw && raw.trim() ? raw : undefined;
+}
+
 // The purchase-decision system prompt: a binary buy/skip over the ONE available
 // stand-in seller (no menu). The model sees the question + the already-retrieved
 // web-search sources, and must reason about RECENCY: web search is indexed and
@@ -109,7 +118,11 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     //    advertised price (maxAmountRequired) — the amount actually charged — as
     //    the canonical input, not a separate env figure. The SAME challenge is
     //    threaded into payX402 below (one fetch → gated price == signed price).
-    const chal = await fetchX402Requirements({ sellerUrl: process.env.DATA_SELLER_URL });
+    // RPC-proxy / request-bound sellers (e.g. QuickNode) need the paid request to carry the
+    // call being paid for; DATA_SELLER_BODY supplies it. Our stand-in seller needs none →
+    // unset → bodyless. Threaded into BOTH the challenge fetch and payX402's settle so they match.
+    const requestBody = dataSellerBody();
+    const chal = await fetchX402Requirements({ sellerUrl: process.env.DATA_SELLER_URL, requestBody });
     if (!chal.ok) {
       console.warn(`[research] x402 challenge fetch failed (NO buy): ${chal.body?.error ?? "unknown"}`);
       return [];
@@ -149,7 +162,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
 
     // 5. Purchase — thread the SAME challenge (no re-fetch); bind the signed
     //    amount to the gated advertised price.
-    const res = await payX402({ sellerUrl: process.env.DATA_SELLER_URL, challenge: chal, approvedUsdc: amountUsdc, requireApproved: true, jobContext: { jobId, jobPrice } });
+    const res = await payX402({ sellerUrl: process.env.DATA_SELLER_URL, challenge: chal, requestBody, approvedUsdc: amountUsdc, requireApproved: true, jobContext: { jobId, jobPrice } });
     const facts = res?.body?.sellerBody?.dataset?.facts;
     if (!res?.body?.executed || !Array.isArray(facts) || facts.length === 0) {
       console.warn(
