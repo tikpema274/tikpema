@@ -190,17 +190,17 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     // 5. Purchase — thread the SAME challenge (no re-fetch); bind the signed
     //    amount to the gated advertised price.
     const res = await payX402({ sellerUrl: process.env.DATA_SELLER_URL, challenge: chal, requestBody, approvedUsdc: amountUsdc, requireApproved: true, jobContext: { jobId, jobPrice } });
-    // Map the seller's response into { claim, source } facts (seller-shape-aware; see
-    // extractFacts / DATA_SELLER_FACTS_PATH). res.body.seller is the resolved seller URL.
-    const facts = extractFacts(res?.body?.sellerBody, res?.body?.seller ?? process.env.DATA_SELLER_URL);
-    if (!res?.body?.executed || facts.length === 0) {
-      console.warn(
-        `[research] purchase yielded no data (NO spend recorded): status=${res?.status} executed=${res?.body?.executed}`
-      );
+
+    // 6. If the settle did NOT confirm, no money moved → return [] without recording.
+    if (!res?.body?.executed) {
+      console.warn(`[research] purchase did NOT settle (no spend): status=${res?.status} executed=${res?.body?.executed}`);
       return [];
     }
 
-    // 4. Record spend ONLY on confirmed success. Record the actual price paid.
+    // 7. Record spend on ANY confirmed settle — BEFORE extracting facts — so the
+    //    day-ceiling reflects real on-chain spend. A misconfigured DATA_SELLER_FACTS_PATH
+    //    (settle succeeds but no usable facts) must NOT hide a real debit. Record the
+    //    actual price paid.
     const paidUsdc = res.body.priceUsdc ?? amountUsdc;
     await recordSpend({
       jobId,
@@ -211,6 +211,14 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
       store,
       owner,
     });
+
+    // 8. Map the seller's response into { claim, source } facts (seller-shape-aware; see
+    //    extractFacts / DATA_SELLER_FACTS_PATH). res.body.seller is the resolved seller URL.
+    const facts = extractFacts(res?.body?.sellerBody, res?.body?.seller ?? process.env.DATA_SELLER_URL);
+    if (facts.length === 0) {
+      console.warn(`[research] settled $${paidUsdc} (spend recorded) but no usable facts — check DATA_SELLER_FACTS_PATH`);
+      return [];
+    }
     console.log(`[research] purchased ${facts.length} facts for $${paidUsdc} — spend recorded`);
     return facts;
   } catch (e) {
