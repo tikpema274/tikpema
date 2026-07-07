@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import type { useWallet } from "../wallet/useWallet";
+import AddressDisplay from "./AddressDisplay";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -6,11 +8,26 @@ const go = (id: string) => {
   window.location.hash = "/" + id;
 };
 
+// Auto-refresh cadence for the wallet balances. Manual Refresh stays.
+const BALANCE_POLL_MS = 30_000;
+
 // Dashboard — a landing/overview composed ONLY from reads the wallet hook
 // already exposes (agentWallet address + balance, busy, isAuthenticated). No new
 // endpoint, no agent-status call: agent-status reads the SHARED env demo wallet,
 // not the per-user wallet, so surfacing it here would misrepresent the balance.
 export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
+  // Auto-update balances on a timer while a wallet is connected — reuses the
+  // existing refreshAgentWallet (no new endpoint). Cleared on unmount. The
+  // manual Refresh button below is unchanged.
+  const hasWallet = !!w.agentWallet;
+  useEffect(() => {
+    if (!hasWallet) return;
+    const id = setInterval(() => {
+      w.refreshAgentWallet().catch(() => {});
+    }, BALANCE_POLL_MS);
+    return () => clearInterval(id);
+  }, [hasWallet, w.refreshAgentWallet]);
+
   return (
     <>
       <div className="plane">
@@ -45,19 +62,24 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
             >
               Your wallet
             </div>
-            <div
-              className="mono"
-              style={{ color: "var(--paper)", wordBreak: "break-all", fontSize: "0.82rem" }}
-            >
-              {w.agentWallet.address}
-            </div>
-            <div className="row" style={{ marginTop: 10, alignItems: "baseline" }}>
+            <AddressDisplay address={w.agentWallet.address} />
+            {/* USDC and EURC shown as TWO distinct labeled amounts — not summed
+                (different units; EURC != $1). */}
+            <div className="row" style={{ marginTop: 12, gap: 22, alignItems: "baseline" }}>
               <span style={{ fontSize: "1.3rem", fontWeight: 600, color: "var(--paper)" }}>
                 {w.agentWallet.balance ?? "…"}{" "}
                 <span style={{ fontSize: "0.82rem", color: "var(--muted)", fontWeight: 400 }}>
                   USDC
                 </span>
               </span>
+              <span style={{ fontSize: "1.3rem", fontWeight: 600, color: "var(--paper)" }}>
+                {w.agentWallet.eurcBalance ?? "…"}{" "}
+                <span style={{ fontSize: "0.82rem", color: "var(--muted)", fontWeight: 400 }}>
+                  EURC
+                </span>
+              </span>
+            </div>
+            <div className="row" style={{ marginTop: 12, alignItems: "baseline" }}>
               <button
                 disabled={w.busy}
                 onClick={() => w.refreshAgentWallet()}
@@ -71,13 +93,59 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
             </div>
           </div>
         ) : (
-          <div className="row" style={{ marginTop: 4 }}>
-            <button className="emerald" onClick={() => go("wallet")}>
-              Set up your wallet
-            </button>
-            <span className="sub" style={{ margin: 0 }}>
-              Connect a passkey or MetaMask to begin.
-            </span>
+          // Three explicit entry points. Passkey/MetaMask start the connect flow
+          // in THIS click (preserving the user gesture WebAuthn needs) and route
+          // to the Wallet page, where status + the duplicate-wallet guard already
+          // render. "Set up a new wallet" deep-links into that page's existing
+          // create sub-flow (which carries the guard) via ?new.
+          <div style={{ display: "grid", gap: 12, marginTop: 4 }}>
+            <div>
+              <button
+                className="emerald"
+                style={{ width: "100%" }}
+                disabled={w.busy}
+                onClick={() => {
+                  go("wallet");
+                  w.connectLogin().catch(() => {});
+                }}
+              >
+                Connect a passkey
+              </button>
+              <div className="sub" style={{ margin: "6px 0 0" }}>
+                Sign in with Face ID or fingerprint — no seed phrase.
+              </div>
+            </div>
+
+            {(w.connectors.find((c) => c.kind === "metamask")?.isAvailable() ?? false) && (
+              <div>
+                <button
+                  style={{ width: "100%" }}
+                  disabled={w.busy}
+                  onClick={() => {
+                    go("wallet");
+                    w.connectMetaMask().catch(() => {});
+                  }}
+                >
+                  Connect MetaMask
+                </button>
+                <div className="sub" style={{ margin: "6px 0 0" }}>
+                  Use your existing MetaMask wallet.
+                </div>
+              </div>
+            )}
+
+            <div>
+              <button
+                style={{ width: "100%" }}
+                disabled={w.busy}
+                onClick={() => go("wallet?new")}
+              >
+                Set up a new wallet
+              </button>
+              <div className="sub" style={{ margin: "6px 0 0" }}>
+                New here? Create a fresh agent wallet.
+              </div>
+            </div>
           </div>
         )}
       </div>

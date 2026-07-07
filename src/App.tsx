@@ -26,7 +26,9 @@ const NAV = [
 ];
 
 function parseHash(): string {
-  return window.location.hash.replace(/^#\/?/, "").trim() || "dashboard";
+  // Strip any `?intent` query (e.g. #/wallet?new) so deep-links still resolve to
+  // the base route; the target page reads the intent from the raw hash itself.
+  return window.location.hash.replace(/^#\/?/, "").split("?")[0].trim() || "dashboard";
 }
 
 export default function App() {

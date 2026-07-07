@@ -1,29 +1,28 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { useWallet } from "../wallet/useWallet";
+import AddressDisplay from "./AddressDisplay";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
 export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet }) {
   const [username, setUsername] = useState("");
-  // Whether the deliberate "create a new wallet" sub-flow is showing. Default
-  // false: the entry screen leads with ONE passkey button that logs a returning
-  // user straight in — creation is not a co-equal primary path anymore.
+  // Whether the deliberate "create a new wallet" sub-flow is showing.
   const [showCreate, setShowCreate] = useState(false);
 
   // Is there a passkey/wallet already on THIS device? (The stored credential the
-  // deterministic-restore login writes to localStorage.) Drives the smart button.
+  // deterministic-restore login writes to localStorage.) Adapts the copy and
+  // keeps the create sub-flow's duplicate-wallet warning honest.
   const hasPasskey = w.hasStoredCredential?.() ?? false;
 
-  // The one smart passkey action. Returning user on this device → log straight
-  // into their existing wallet (deterministic restore); no name prompt, no chance
-  // to spawn a duplicate. Genuinely new here → guide them to create a fresh one.
-  function handlePasskey() {
-    if (w.hasStoredCredential?.()) {
-      w.connectLogin().catch(() => {});
-    } else {
+  // Deep-link intent: the Dashboard's "Set up a new wallet" button routes here as
+  // #/wallet?new. Open the existing create sub-flow (which carries the
+  // duplicate-wallet guard) and clear the intent so a refresh doesn't re-trigger.
+  useEffect(() => {
+    if ((window.location.hash.split("?")[1] || "") === "new") {
       setShowCreate(true);
+      history.replaceState(null, "", "#/wallet");
     }
-  }
+  }, []);
 
   return (
     <div className="plane">
@@ -37,55 +36,56 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
 
       {!w.address ? (
         !showCreate ? (
-          // ── Smart entry: ONE passkey button that does the right thing ──────
-          // Returning user → logs in (restore). New user → create sub-flow. No
-          // always-available "create" that lets a returning user spawn duplicates.
-          <>
-            <button
-              className="emerald"
-              style={{ width: "100%", marginTop: 4 }}
-              disabled={w.busy}
-              onClick={handlePasskey}
-            >
-              {w.busy
-                ? "Working…"
-                : hasPasskey
-                ? "Continue with your passkey"
-                : "Continue with passkey"}
-            </button>
-            <div className="sub" style={{ marginTop: 10, marginBottom: 0 }}>
-              {hasPasskey
-                ? "You have a wallet on this device — this logs you back into it."
-                : "Creates your wallet on first use, secured by a passkey."}
+          // ── Three explicit entry points ───────────────────────────────────
+          // Passkey = sign in (returning user). New wallet = the deliberate
+          // create path, which still shows the duplicate-wallet warning when a
+          // credential already exists on this device (see the sub-flow below) —
+          // the guard is preserved, just no longer hidden behind one button.
+          <div style={{ display: "grid", gap: 12, marginTop: 4 }}>
+            <div>
+              <button
+                className="emerald"
+                style={{ width: "100%" }}
+                disabled={w.busy}
+                onClick={() => w.connectLogin().catch(() => {})}
+              >
+                {w.busy ? "Working…" : "Connect a passkey"}
+              </button>
+              <div className="sub" style={{ margin: "6px 0 0" }}>
+                {hasPasskey
+                  ? "Log back into your wallet on this device — Face ID or fingerprint."
+                  : "Sign in with Face ID or fingerprint — no seed phrase."}
+              </div>
             </div>
 
             {w.connectors.find((c) => c.kind === "metamask")?.isAvailable() && (
-              <div className="sub" style={{ marginTop: 12, marginBottom: 0 }}>
+              <div>
                 <button
-                  className="linkbtn"
+                  style={{ width: "100%" }}
                   disabled={w.busy}
-                  onClick={() => w.connectMetaMask()}
+                  onClick={() => w.connectMetaMask().catch(() => {})}
                 >
-                  Use MetaMask instead
+                  Connect MetaMask
                 </button>
+                <div className="sub" style={{ margin: "6px 0 0" }}>
+                  Use your existing MetaMask wallet.
+                </div>
               </div>
             )}
 
-            {/* Deliberate, secondary escape hatch — only for a returning user who
-                genuinely wants a different/fresh wallet. Not the default; muted. */}
-            {hasPasskey && (
-              <div style={{ marginTop: 18 }}>
-                <button
-                  className="linkbtn"
-                  disabled={w.busy}
-                  onClick={() => setShowCreate(true)}
-                  style={{ color: "var(--muted)", fontSize: "0.8rem" }}
-                >
-                  Use a different wallet
-                </button>
+            <div>
+              <button
+                style={{ width: "100%" }}
+                disabled={w.busy}
+                onClick={() => setShowCreate(true)}
+              >
+                Set up a new wallet
+              </button>
+              <div className="sub" style={{ margin: "6px 0 0" }}>
+                New here? Create a fresh agent wallet.
               </div>
-            )}
-          </>
+            </div>
+          </div>
         ) : (
           // ── Create-a-new-wallet sub-flow (new user, or the escape hatch) ────
           // Honest copy: a new passkey = a FRESH wallet; it does not reach the
@@ -198,13 +198,17 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
             <div style={{ color: "var(--muted)", fontSize: "0.75rem", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6 }}>
               Your wallet address
             </div>
-            <div className="mono" style={{ color: "var(--paper)", wordBreak: "break-all", fontSize: "0.85rem" }}>
-              {w.agentWallet.address}
-            </div>
-            <div className="row" style={{ marginTop: 12, alignItems: "baseline" }}>
+            <AddressDisplay address={w.agentWallet.address} />
+            {/* USDC and EURC as two distinct labeled amounts, matching the
+                Dashboard — not summed (different units; EURC != $1). */}
+            <div className="row" style={{ marginTop: 12, gap: 22, alignItems: "baseline" }}>
               <span style={{ fontSize: "1.35rem", fontWeight: 600, color: "var(--paper)" }}>
                 {w.agentWallet.balance ?? "…"}{" "}
                 <span style={{ fontSize: "0.85rem", color: "var(--muted)", fontWeight: 400 }}>USDC</span>
+              </span>
+              <span style={{ fontSize: "1.35rem", fontWeight: 600, color: "var(--paper)" }}>
+                {w.agentWallet.eurcBalance ?? "…"}{" "}
+                <span style={{ fontSize: "0.85rem", color: "var(--muted)", fontWeight: 400 }}>EURC</span>
               </span>
               <button disabled={w.busy} onClick={() => w.refreshAgentWallet()} style={{ padding: "6px 12px", fontSize: "0.82rem" }}>
                 Refresh
@@ -252,10 +256,26 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
             </div>
           )}
 
+          {/* Subtle, secondary. Ends the session but KEEPS the stored passkey
+              credential (see useWallet.logout) — reconnect restores this exact
+              wallet; it never forces a re-register / duplicate wallet. */}
+          <div style={{ marginTop: 18 }}>
+            <button
+              className="linkbtn"
+              disabled={w.busy}
+              onClick={() => w.logout()}
+              style={{ color: "var(--muted)", fontSize: "0.8rem" }}
+            >
+              Disconnect
+            </button>
+          </div>
         </>
       )}
 
-      {w.status && <div className="status">{w.status}</div>}
+      {/* Hidden in the logged-in view: w.status carries "Connected: <login SCA>",
+          which is signing plumbing, not the user's funds wallet. Still shown while
+          connecting / logged out so connect errors surface. */}
+      {w.status && !w.agentWallet && <div className="status">{w.status}</div>}
     </div>
   );
 }

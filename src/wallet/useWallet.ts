@@ -46,7 +46,11 @@ export function useWallet() {
   // The user's OWN per-user agent wallet (Brick 2a), provisioned + resolved from
   // the session by /api/my-wallet. Distinct from the login/signing wallet above;
   // not yet used by the job lifecycle (that's 2b).
-  const [agentWallet, setAgentWallet] = useState<{ address: string; balance: string | null } | null>(null);
+  const [agentWallet, setAgentWallet] = useState<{
+    address: string;
+    balance: string | null; // USDC
+    eurcBalance: string | null; // EURC — a second, distinct amount (not summed)
+  } | null>(null);
 
   // Set when a returning user's SAVED passkey login fails (passkey deleted, wrong
   // device, or the prompt was dismissed). Surfaced as a CLEAR "couldn't log in"
@@ -265,6 +269,23 @@ export function useWallet() {
     setLastTouched(null);
   }, [modular, clearSession]);
 
+  // Session-only logout: end the session and clear the IN-MEMORY wallet, but
+  // deliberately KEEP the stored passkey credential in localStorage. This is
+  // startOver MINUS clearStoredCredential — so a returning user reconnects with
+  // their passkey (deterministic restore) instead of being pushed to register a
+  // new, empty wallet (the duplicate-wallet footgun). Clears both the passkey
+  // (modular) and MetaMask in-memory state so the UI returns cleanly to the
+  // logged-out entry, not the "Preparing…" limbo clearSession alone would leave.
+  const logout = useCallback(() => {
+    modular.disconnect(); // in-memory only; does NOT touch the stored credential
+    setMmWallet(null);
+    setMmBalance(null);
+    clearSession();
+    setLoginError(null);
+    setActiveKind(null);
+    setLastTouched(null);
+  }, [modular, clearSession]);
+
   // Best-effort login-time auth for BOTH paths. Passkey now verifies OFF-CHAIN
   // (WebAuthn), so it no longer needs a deployed smart account — a fresh passkey
   // user can get a session immediately at login with no on-chain step.
@@ -295,7 +316,11 @@ export function useWallet() {
       }
       const data = await r.json();
       if (!r.ok) throw new Error(data?.error || "Could not load your wallet");
-      setAgentWallet({ address: data.address, balance: data.balance ?? null });
+      setAgentWallet({
+        address: data.address,
+        balance: data.balance ?? null,
+        eurcBalance: data.eurcBalance ?? null,
+      });
       return data;
     }
     return null; // still provisioning; a later refresh will resolve it
@@ -358,6 +383,7 @@ export function useWallet() {
     connectLogin,
     connectMetaMask,
     startOver,
+    logout,
     loginError,
     activeKind,
     connectors,

@@ -46,27 +46,36 @@ export async function handler(event) {
       });
     }
 
-    // Best-effort balance read; a transient RPC hiccup shouldn't fail the call.
-    let balance = null;
-    try {
-      const raw = await publicClient().readContract({
-        address: CONTRACTS.USDC,
-        abi: BALANCE_OF_ABI,
-        functionName: "balanceOf",
-        args: [wallet.walletAddress],
-      });
-      balance = Number(formatUnits(raw, USDC_DECIMALS)).toFixed(2);
-    } catch {
-      /* leave balance null; the client shows "…" */
+    // Best-effort balance reads; a transient RPC hiccup on either token shouldn't
+    // fail the call. USDC and EURC are both 6-decimal ERC-20s on Arc. They are
+    // returned as TWO distinct amounts (EURC != $1, so no summed total here).
+    async function readBalance(token) {
+      try {
+        const raw = await publicClient().readContract({
+          address: token,
+          abi: BALANCE_OF_ABI,
+          functionName: "balanceOf",
+          args: [wallet.walletAddress],
+        });
+        return Number(formatUnits(raw, USDC_DECIMALS)).toFixed(2);
+      } catch {
+        return null; // client shows "…" for a null balance
+      }
     }
+    const [balance, eurcBalance] = await Promise.all([
+      readBalance(CONTRACTS.USDC),
+      readBalance(CONTRACTS.EURC),
+    ]);
 
     // Expose only what the client needs. walletId (the Circle signer handle)
-    // stays server-side.
+    // stays server-side. `balance` remains the USDC amount (back-compat);
+    // `eurcBalance` is the new second amount.
     return json(200, {
       owner: session.address,
       method: session.method,
       address: wallet.walletAddress,
       balance,
+      eurcBalance,
       provisioned: wallet.provisioned,
     });
   } catch (e) {
