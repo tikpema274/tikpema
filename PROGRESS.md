@@ -1,6 +1,25 @@
 
 ---
 
+## 2026-07-07 — Phase 1 dashboard/wallet clarity COMMITTED (was live-but-uncommitted)
+
+**Git/prod sync fix.** Phase 1 (dashboard + wallet clarity) had shipped to prod but
+was NEVER committed — `git log` had no Phase 1 commit, so origin/main and prod were
+out of sync. Closed that gap: committed the Phase 1 files only (`9ca7a23`), leaving
+the in-progress Send brick (`MyAgentPanel.tsx`) uncommitted in the working tree.
+
+Phase 1 surface (all live on prod already): masked wallet address with click-to-expand
++ copy (new `AddressDisplay.tsx`), USDC + EURC balances, wallet auto-refresh, three
+logged-out options (incl. `#/wallet?new` create-intent), safe disconnect, and the old
+login-wallet line removed. Files: `App.tsx` (parseHash strips `?intent` query so
+deep-links resolve), `Dashboard.tsx`, `ConnectPasskey.tsx`, `useWallet.ts`, `_arc.mjs`,
+`my-wallet.mjs`, `AddressDisplay.tsx` (new). Build + tsc clean.
+
+Send brick (QUICK ACTIONS row: Send active, Swap/Bridge "Soon", repositioned
+multi-task box) stays uncommitted for continuation this session.
+
+---
+
 ## Session update — pay_for_service + shared execution refactor
 
 All committed on `main` (local; no GitHub remote configured yet).
