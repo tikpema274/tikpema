@@ -800,3 +800,49 @@ WAS the cause; the earlier "account/session layer" conclusion is fully retracted
 hand-rolled buyer (forward the paid request's body). The "still OPEN — actual external
 cross-party settle" item from the prior entry is now CLOSED. Buyer is proven end-to-end against a
 real, non-self-loop seller: select → price → gate → sign → pay+forward → verified/settled/served.
+
+## 2026-07-07 — External-seller research-buy path completed end-to-end (pay → account → consume)
+
+Built on the QuickNode live settle (logged in the correction entry above — batch 21fb2402…, the
+first real cross-party x402 payment, cause = missing request body). This session generalized the
+AUTONOMOUS research-buy path so it can pay, account for, and consume a real external / request-bound
+data seller — not just the in-repo x402-quote stand-in. Four commits (6394bcc..37268c4):
+
+- **6394bcc — payX402 forwards the request body.** bodyInit() + optional `requestBody` threaded
+  through fetchX402Requirements (challenge fetch) AND payX402 (settle). RPC-proxy sellers (QuickNode)
+  bind the payment to the request being paid for; a bodyless payment fails their verify. Proven by
+  the live QuickNode Arc nanopayment settle (executed:true, served eth_blockNumber 0x3033b90, payer
+  4.993→4.9929). Self-loop unchanged (no body). Corrected the earlier wrong "account/session layer"
+  conclusion — ground-truth probes showed our Circle signature is valid (ecrecovers to delegate,
+  v=27) and the lone asymmetry was the missing body.
+
+- **62ded10 — maybeBuyData sources DATA_SELLER_BODY** and threads it into both the challenge fetch
+  and the settle, so an autonomous research buy can target a request-bound seller. Unset → bodyless
+  (stand-in unchanged). Documented in .env.example.
+
+- **55b570f — seller-shape-aware response→facts mapping.** extractFacts(sellerBody, sellerUrl) maps a
+  paid response into { claim, source } via DATA_SELLER_FACTS_PATH (dot-path; default "dataset.facts"
+  keeps the stand-in unchanged): array of {claim,source} used as-is; array of other shapes
+  stringified; scalar/object → one labeled fact. Exported + unit-tested (6 shapes). Lets a real
+  seller's response feed the brief.
+
+- **37268c4 — record spend on ANY confirmed settle.** Reordered maybeBuyData: settle-check →
+  recordSpend → facts-extraction. recordSpend now fires as soon as executed:true (before facts), so a
+  misconfigured DATA_SELLER_FACTS_PATH (settled but no usable facts) can't hide a real on-chain debit
+  from the day-ceiling ledger. Invariant restored: money moved ⟺ spend recorded. !executed still
+  records nothing. Graceful Exa-only degradation preserved (no facts → brief proceeds without them).
+
+**Net:** the buyer + research engine now handle a real non-self-loop seller end-to-end —
+select (multi-chain menu) → price (maxAmountRequired ?? amount) → gate (percentage caps + absolute
+per-buy ceiling) → sign (Circle EOA) → pay+forward request → verify/settle/serve → always account →
+map response → feed the brief. To wire a specific external seller, set DATA_SELLER_URL +
+DATA_SELLER_BODY + DATA_SELLER_FACTS_PATH.
+
+**Open:** no real external DATA seller wired in prod yet (QuickNode proved the mechanics with an RPC
+call, not research data); DATA_SELLER_URL still defaults to the x402-quote stand-in. Next: point it
+at an actual paid data API and confirm a live research brief consumes its facts.
+
+**Method notes (this session):** all money-path changes proven no-money/no-deploy first (local
+captures, ecrecover, in-memory ledger, unit tests) before any prod deploy; the one real settle (the
+QuickNode 0.0001) confirmed the fix end-to-end. Diagnostics (diag-qn-settle etc.) all retired (404);
+scratchpad/qn-probe sandbox deleted.
