@@ -74,6 +74,33 @@ function dataSellerBody() {
   return raw && raw.trim() ? raw : undefined;
 }
 
+// Map a seller's paid response into research facts (array of { claim, source }). Sellers
+// differ: our stand-in returns { dataset: { facts: [{claim,source}] } }; an RPC/data seller
+// returns e.g. { jsonrpc, result }. DATA_SELLER_FACTS_PATH (dot-path) selects the useful
+// value; default "dataset.facts" keeps the stand-in working unchanged.
+//  - path → array of {claim,source} objects: used as-is (our stand-in).
+//  - path → array of other shapes: each stringified into a claim (source = seller url).
+//  - path → a scalar/object: ONE fact, claim="<path> = <value>", source = seller url.
+// Returns [] if the path misses or yields nothing usable. Exported for unit tests.
+export function extractFacts(sellerBody, sellerUrl) {
+  if (sellerBody == null || typeof sellerBody !== "object") return [];
+  const path = (process.env.DATA_SELLER_FACTS_PATH || "dataset.facts").trim();
+  const val = path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), sellerBody);
+  if (val == null) return [];
+  const src = sellerUrl || DATA_SELLER_SOURCE;
+  if (Array.isArray(val)) {
+    return val
+      .map((f) =>
+        f && typeof f === "object" && (f.claim != null || f.source != null)
+          ? { claim: String(f.claim ?? JSON.stringify(f)), source: String(f.source ?? src) }
+          : { claim: typeof f === "string" ? f : JSON.stringify(f), source: src }
+      )
+      .filter((f) => f.claim);
+  }
+  const claim = `${path} = ${typeof val === "object" ? JSON.stringify(val) : String(val)}`;
+  return [{ claim, source: src }];
+}
+
 // The purchase-decision system prompt: a binary buy/skip over the ONE available
 // stand-in seller (no menu). The model sees the question + the already-retrieved
 // web-search sources, and must reason about RECENCY: web search is indexed and
@@ -163,8 +190,10 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     // 5. Purchase — thread the SAME challenge (no re-fetch); bind the signed
     //    amount to the gated advertised price.
     const res = await payX402({ sellerUrl: process.env.DATA_SELLER_URL, challenge: chal, requestBody, approvedUsdc: amountUsdc, requireApproved: true, jobContext: { jobId, jobPrice } });
-    const facts = res?.body?.sellerBody?.dataset?.facts;
-    if (!res?.body?.executed || !Array.isArray(facts) || facts.length === 0) {
+    // Map the seller's response into { claim, source } facts (seller-shape-aware; see
+    // extractFacts / DATA_SELLER_FACTS_PATH). res.body.seller is the resolved seller URL.
+    const facts = extractFacts(res?.body?.sellerBody, res?.body?.seller ?? process.env.DATA_SELLER_URL);
+    if (!res?.body?.executed || facts.length === 0) {
       console.warn(
         `[research] purchase yielded no data (NO spend recorded): status=${res?.status} executed=${res?.body?.executed}`
       );
