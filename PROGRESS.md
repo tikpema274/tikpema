@@ -846,3 +846,42 @@ at an actual paid data API and confirm a live research brief consumes its facts.
 captures, ecrecover, in-memory ledger, unit tests) before any prod deploy; the one real settle (the
 QuickNode 0.0001) confirmed the fix end-to-end. Diagnostics (diag-qn-settle etc.) all retired (404);
 scratchpad/qn-probe sandbox deleted.
+
+## 2026-07-07 — DATA_SELLER_URL wired to QuickNode (prod) — first real external data seller live
+
+Recon for a real research-DATA seller first (Circle x402 marketplace + public x402 bazaar):
+NONE found that our buyer can pay. Our buyer's guard requires scheme "exact" + extra.name
+"GatewayWalletBatched" + the Gateway Wallet verifyingContract on Arc (eip155:5042002). Circle's
+own docs confirm nanopayments = the "exact" scheme signed against the GatewayWalletBatched domain.
+The mainstream x402 sellers (Coinbase Bazaar: weather/prices/news) use standard exact-onchain
+EIP-3009 against the USDC token on BASE — our Arc/Gateway-batched buyer REJECTS them (wrong network,
+not a Gateway-batched option). The only live sellers on our exact scheme+chain are QuickNode
+(blockchain RPC data) + our own x402-quote stand-in + reference samples. So there is no drop-in
+general research-data seller today.
+
+Per user decision, wired the one proven-payable real seller: **QuickNode** (accepting it serves
+on-chain RPC data, not general research facts). Prod env (production context) + redeploy:
+- DATA_SELLER_URL        = https://x402.quicknode.com/arc-testnet
+- DATA_SELLER_BODY       = {"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}
+- DATA_SELLER_FACTS_PATH = result
+
+**Proven end-to-end locally (no money — settle stubbed):** research() with those env bought from
+QuickNode → extractFacts(path=result) → the fact { "result = 0x3033bcd", url: quicknode } merged into
+the brief → model answered "current Arc Testnet block height is 0x3033bcd (50,545,613)" → spend
+recorded (0.0001). Config-only change: repo unchanged (the three vars were already documented in
+.env.example); deploy 6a4c4c0f live, job-quote 200 / x402-quote 402 / my-wallet 401.
+
+**Now live:** prod research jobs autonomously buy from QuickNode when decidePurchase judges a live
+figure is needed — ~0.0001 USDC/qualifying buy, bounded by the 0.01 absolute ceiling + per-tx cap +
+60/day per-user ceiling; recordSpend fires on any confirmed settle.
+
+**Caveats / open:**
+- SEMANTIC FIT: QuickNode's "fact" is an Arc block number — meaningful only for on-chain questions;
+  for general research decidePurchase should SKIP, so most jobs won't buy. This proves a real
+  external autonomous buy end-to-end; it is NOT a general research-data source.
+- Local .env left unset → local research still uses the x402-quote stand-in (no local spend).
+- The first REAL on-chain settle inside a prod job hasn't happened yet (user-triggered; not forced).
+- STILL OPEN: a general research-data seller our buyer can pay. Options if pursued: (1) run our own
+  seller that proxies a real data API/LLM behind the Gateway-nanopayment middleware on Arc; (2) add
+  the vanilla exact-onchain buy path (already built/proven) to maybeBuyData to reach Base bazaar
+  sellers (needs a Base USDC balance + a 2nd buy path).
