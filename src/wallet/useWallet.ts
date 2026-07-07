@@ -383,6 +383,48 @@ export function useWallet() {
     [ensureSession, refreshAgentWallet]
   );
 
+  // Bridge USDC cross-chain from the caller's agent wallet. POSTs to the DEDICATED
+  // /api/agent-bridge endpoint — the ONE guaranteed cap-enforcing door: it runs the
+  // per-bridge cap (AGENT_BRIDGE_CAP_USDC) + live fee-floor + day-ceiling inside the
+  // shared executeAction BEFORE any funds move (agent-bridge.mjs:46 → _actions.mjs:91).
+  // NOT agent-execute-plan, NOT the bridge kit directly. Returns after the Arc burn
+  // lands; the destination mint is async (~10–20 min) — poll with checkBridgeStatus.
+  const bridgeFromAgent = useCallback(
+    async (amountUsdc: number, destination: string) => {
+      const token = await ensureSession();
+      const r = await fetch("/api/agent-bridge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amountUsdc, destination }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.error || "Bridge failed");
+      // A cap / fee-floor block returns HTTP 200 { executed:false, blocked } — surface
+      // it as an error rather than a silent no-op.
+      if (data?.executed === false) throw new Error(data?.blocked || "Bridge did not execute");
+      refreshAgentWallet().catch(() => {});
+      return data; // { executed, state, burnHash, tx, destination, feeUsdc, netUsdc } | 202 { pending }
+    },
+    [ensureSession, refreshAgentWallet]
+  );
+
+  // One-shot read of a forwarded bridge's destination-mint status (no polling loop).
+  // POSTs the Arc burn hash + destination key to the read-only status endpoint.
+  const checkBridgeStatus = useCallback(
+    async (burnHash: string, destinationKey: string) => {
+      const token = await ensureSession();
+      const r = await fetch("/api/agent-bridge-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ burnHash, destinationKey }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.error || "Status check failed");
+      return data; // { state: "pending" | "minted" | "failed", mintTx?, mintTxHash? }
+    },
+    [ensureSession]
+  );
+
   // Refresh + cache the MetaMask balance (the modular hook owns its own).
   const mmRefreshBalance = useCallback(async () => {
     if (!mmWallet) return undefined;
@@ -429,5 +471,7 @@ export function useWallet() {
     refreshAgentWallet,
     sendFromAgent,
     swapFromAgent,
+    bridgeFromAgent,
+    checkBridgeStatus,
   };
 }

@@ -1,6 +1,58 @@
 
 ---
 
+## 2026-07-08 — AI Agent guided actions COMPLETE: Bridge panel SHIPPED (all 3 cards live)
+
+**Brick:** activated the last "Quick actions" card on the AI Agent page — Bridge (`Soon`
+→ active amber `Bridge →`, routes to a new **`BridgePanel.tsx`**). Send · Swap · Bridge
+are now all live guided panels. Also removed the now-dead `soonTag`/`CSSProperties` in
+`MyAgentPanel.tsx` (Bridge was its last consumer). Multi-task box untouched.
+
+**Call path (the guaranteed cap-enforcing door):** the panel POSTs to
+**`/api/agent-bridge`** (new `bridgeFromAgent` in `useWallet.ts`, raw fetch like
+SendPanel→`/api/agent-send`). It does NOT call `executeAction`/`agent-execute-plan`/the
+bridge kit directly. `agent-bridge.mjs:46` → `executeAction(step,{walletAddress,session})`
+→ the **per-bridge cap is compared at `_actions.mjs:91`** (`if (Number(step.amountUsdc) >
+bcap)`, `bcap = bridgeCapUsdc()`), **before** the Arc burn (`agentBridge` at
+`_actions.mjs:190`). Same path also enforces the live fee-floor (`:184–189`) and
+day-ceiling (`:114`). Unlike swap, the bridge cap lives INSIDE `executeAction`, so the
+dedicated endpoint is cap-safe — no one-step-plan indirection needed.
+
+**Cap (deployed-confirmed):** `AGENT_BRIDGE_CAP_USDC=25` (via `netlify env:get …
+--context production` — authoritative, not the code default). Operator is `>`, so 25
+passes at the limit; over-25 blocks. A cap/fee-floor block returns HTTP 200
+`{executed:false, blocked}`; `bridgeFromAgent` surfaces it as an error (not a silent
+no-op).
+
+**UX = Option A (fire-and-inform):** the Arc burn is synchronous; the destination mint
+is async (Circle relayer). On submit the panel shows the burn tx + net arrival and lets
+the user leave — the bridge completes server-side. One optional "Check status" button
+does a SINGLE `agent-bridge-status` poll (`submitted → pending → minted|failed`), no
+blocking loop.
+
+**Fee shown POST-submit (pre-submit preview deferred):** the live IRIS fee/net is
+surfaced from the `agent-bridge` response on the confirmation. A *pre-submit* fee preview
+isn't available via existing surfaces — it would need a small fee-quote endpoint exposing
+`bridgeFee` (`_bridge.mjs:109`), out of this UI-only brick's scope. Deferred; degrades
+gracefully (bridge never blocked on a fee estimate).
+
+**Arrival copy — aligned honestly:** originally "~10–20 min"; the prod test showed Base
+Sepolia arrives faster, so the copy now reads "in a few minutes (up to ~20 for some
+chains)" — honest across fast L2s and slower L1.
+
+**Verified on PROD (user-run, passkey wallet — the draft can't passkey-login, domain-
+bound):** (1) over-cap **26 USDC → rejected** "exceeds per-bridge limit of 25 USDC", no
+funds moved; (2) happy path **5 USDC → Base Sepolia**: burn on Arc, **ARRIVED on Base
+(~4.80 USDC, BaseScan mint tx confirmed), ~0.20 fee**; (3) "Check status" reflected the
+mint. All 3 tests pass. Prod build hash `index-jKg6nPNR.js`; endpoints healthy
+(`/api/agent-bridge` 405, `/api/agent-bridge-status` 405, `/api/my-wallet` 401).
+
+Files: `BridgePanel.tsx` (new), `useWallet.ts` (+`bridgeFromAgent`, +`checkBridgeStatus`),
+`App.tsx` (+`case "bridge"`), `MyAgentPanel.tsx` (Bridge card active, dead `soonTag`
+removed). `#/bridge` is nav-less (like `#/swap`). Backend untouched. Build + tsc clean.
+
+---
+
 ## 2026-07-07 — AI Agent page guided actions: Swap button (Swap brick) SHIPPED
 
 **Brick:** activated the Swap card on the AI Agent page (`MyAgentPanel.tsx`) from

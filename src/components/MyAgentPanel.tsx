@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 import { agentClient } from "../lib/agentClient";
 import type { useWallet } from "../wallet/useWallet";
 
@@ -18,16 +18,6 @@ type UnifiedWallet = ReturnType<typeof useWallet>;
 
 const shortAddr = (a: string) =>
   a && a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
-
-// Muted "Soon" marker for the not-yet-wired guided buttons (Swap/Bridge).
-const soonTag: CSSProperties = {
-  fontSize: "0.7rem",
-  color: "var(--muted)",
-  fontWeight: 400,
-  letterSpacing: "0.06em",
-  textTransform: "uppercase",
-  marginLeft: 6,
-};
 
 const describeStep = (s: any): string => {
   if (s?.type === "swap_tokens")
@@ -161,9 +151,9 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         </div>
       )}
 
-      {/* Guided shortcuts — reuse the Dashboard card style. "Send" and "Swap" switch
-          to their existing views via the hash router; the same panels, not
-          duplicates. Bridge is a placeholder until its own brick. */}
+      {/* Guided shortcuts — reuse the Dashboard card style. Send/Swap/Bridge each
+          switch to their existing view via the hash router; the same panels, not
+          duplicates. */}
       <div className="panel-eyebrow" style={{ marginTop: 18 }}>Quick actions</div>
       <div className="quick" style={{ marginTop: 4 }}>
         <button
@@ -180,10 +170,11 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
           <div className="qt">Swap →</div>
           <div className="qd">Swap between USDC and EURC on Arc.</div>
         </button>
-        <button className="quick-card" disabled>
-          <div className="qt">
-            Bridge <span style={soonTag}>Soon</span>
-          </div>
+        <button
+          className="quick-card"
+          onClick={() => (window.location.hash = "/bridge")}
+        >
+          <div className="qt">Bridge →</div>
           <div className="qd">Bridge USDC cross-chain to Ethereum, Base and more.</div>
         </button>
       </div>
