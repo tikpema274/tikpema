@@ -885,3 +885,40 @@ figure is needed — ~0.0001 USDC/qualifying buy, bounded by the 0.01 absolute c
   seller that proxies a real data API/LLM behind the Gateway-nanopayment middleware on Arc; (2) add
   the vanilla exact-onchain buy path (already built/proven) to maybeBuyData to reach Base bazaar
   sellers (needs a Base USDC balance + a 2nd buy path).
+
+## 2026-07-07 — RETRACTION + PROOF: autonomous QuickNode settle works end-to-end (supersedes 45d9dff conclusion)
+
+**RETRACTION.** The 45d9dff entry concluded QuickNode's rejection was an "account/session layer
+block, outside the payload — nanopayment via hand-rolled buyer is BLOCKED; use @quicknode/x402;
+for a general cross-party settle use Option B." That conclusion was WRONG. Root cause was mundane
+and in-payload: the **missing JSON-RPC request body**. QuickNode's endpoint is a JSON-RPC PROXY —
+the paid request must carry the call it is paying for (eth_blockNumber). Our buyer, built for a
+seller that serves a fixed resource (x402-quote), sent the payment header with no body, so
+QuickNode's verify errored. Ground-truth probes proved our signature was valid (ecrecovers to the
+delegate, v=27) and the body was the lone asymmetry vs @quicknode/x402's own client.
+
+**PROVEN on prod — the FULL autonomous path, not a forced/direct diag.** A genuine decidePurchase
+decision → maybeBuyData → payX402 → live QuickNode settle:
+- decidePurchase (real Claude call, no forceDecision) decided BUY for "current Arc Testnet block
+  height right now" (Exa can't supply a live block number).
+- Settle: batch **ba918c90-0fd6-47ef-bb8a-18cb2dca1ec9**, network eip155:5042002.
+- Money moved: delegate Gateway balance **4.9929 → 4.9928** (−0.0001), confirmed via the Circle
+  Gateway API INDEPENDENT of our diag.
+- The real figure flowed into the brief: Arc block **0x303d4ed**.
+This is the FIRST real autonomous cross-party x402 settle against an independent external seller
+(closes the "only proven with a stubbed settle" seam flagged during reconciliation).
+
+**Live wiring (prod).** DATA_SELLER_URL=https://x402.quicknode.com/arc-testnet,
+DATA_SELLER_BODY={"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]},
+DATA_SELLER_FACTS_PATH=result. Every autonomous buy is bounded by the 0.01 absolute per-buy ceiling
++ per-tx cap + the per-user daily ceiling, and degrades to Exa-only on any failure; recordSpend
+fires on any confirmed settle.
+
+**Semantic caveat (honest).** QuickNode's "fact" is an Arc block number — genuinely useful only for
+on-chain/crypto questions. decidePurchase SKIPS it for general research (no live on-chain figure
+needed), so most real jobs will NOT buy. A general research-DATA seller our buyer can pay is STILL
+OPEN (no third-party sells research data on our GatewayWalletBatched-on-Arc scheme; options remain:
+run our own real-data seller on the Gateway-nanopayment middleware, or add the vanilla exact-onchain
+buy path to reach Base bazaar sellers).
+
+Diagnostic diag-realbuy retired (404) after this proof.
