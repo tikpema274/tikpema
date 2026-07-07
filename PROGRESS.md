@@ -1,6 +1,29 @@
 
 ---
 
+## 2026-07-07 — AI Agent page guided actions: Send button (Send brick) SHIPPED
+
+**Brick:** the AI Agent page (`MyAgentPanel.tsx`) grew a "Quick actions" row of guided
+shortcuts above the free-text box. **Send** routes to the existing Send view (sets
+`window.location.hash = "/send"`; the sidebar highlights Send) — it reuses the same
+`SendPanel`, not a duplicate money path. **Swap** and **Bridge** are present but
+`disabled` with a muted "Soon" tag (placeholders until their own bricks; both remain
+reachable today via natural-language tasks in the box below). The free-text multi-task
+box was repositioned below the shortcuts as the general multi-step entry point, with a
+tightened intro lede. Frontend-only — no function, `_actions.mjs`, cap, auth, or
+`/api/*` change; `agent-send` untouched.
+
+**Verified end-to-end on a draft deploy** (`netlify deploy`, no `--prod`, throwaway URL
+with functions — didn't touch prod): navigation clean, one real **0.1 USDC send landed
+on-chain**. Then shipped to prod via Netlify CLI (backgrounded), verified real:
+prod `index.html` references the new build hash `index-CRUTDDnV.js` + control endpoints
+healthy (`/api/my-wallet` 401 auth-gated, `/api/agent-send` 405 POST-only).
+
+Files: `src/components/MyAgentPanel.tsx` (only). Build + tsc clean. Phase 1
+(dashboard/wallet clarity) was committed separately in `9ca7a23`/`7cfd568`.
+
+---
+
 ## 2026-07-07 — Phase 1 dashboard/wallet clarity COMMITTED (was live-but-uncommitted)
 
 **Git/prod sync fix.** Phase 1 (dashboard + wallet clarity) had shipped to prod but

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { agentClient } from "../lib/agentClient";
 import type { useWallet } from "../wallet/useWallet";
 
@@ -18,6 +18,16 @@ type UnifiedWallet = ReturnType<typeof useWallet>;
 
 const shortAddr = (a: string) =>
   a && a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
+
+// Muted "Soon" marker for the not-yet-wired guided buttons (Swap/Bridge).
+const soonTag: CSSProperties = {
+  fontSize: "0.7rem",
+  color: "var(--muted)",
+  fontWeight: 400,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  marginLeft: 6,
+};
 
 const describeStep = (s: any): string => {
   if (s?.type === "swap_tokens")
@@ -139,13 +149,9 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       <div className="panel-eyebrow">Your agent</div>
       <h2>Give your agent a task</h2>
       <div className="sub">
-        Your agent acts on-chain from its own wallet — send or swap USDC on Arc, or
-        bridge it cross-chain to Ethereum, Base, Arbitrum and more, all in plain
-        language. Multi-step tasks and bridges are proposed for you to confirm
-        before they run (a bridge shows the live cross-chain fee and what actually
-        arrives). It spends only what's in your agent wallet, and every action stays
-        within safety caps — per-action and per-bridge limits plus a cumulative
-        daily ceiling.
+        Your agent acts on-chain from its own wallet, in plain language — always
+        spending only what's in that wallet and within your per-action, per-bridge,
+        and cumulative daily safety caps.
       </div>
 
       {w.agentWallet && (
@@ -155,9 +161,43 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         </div>
       )}
 
-      <div className="row" style={{ marginTop: 10 }}>
+      {/* Guided shortcuts — reuse the Dashboard card style. "Send" switches to the
+          existing Send view (hash route → sidebar highlights Send); the same panel,
+          not a duplicate. Swap/Bridge are placeholders until their own bricks. */}
+      <div className="panel-eyebrow" style={{ marginTop: 18 }}>Quick actions</div>
+      <div className="quick" style={{ marginTop: 4 }}>
+        <button
+          className="quick-card"
+          onClick={() => (window.location.hash = "/send")}
+        >
+          <div className="qt">Send →</div>
+          <div className="qd">Send USDC to any address, gasless.</div>
+        </button>
+        <button className="quick-card" disabled>
+          <div className="qt">
+            Swap <span style={soonTag}>Soon</span>
+          </div>
+          <div className="qd">Swap between USDC and EURC on Arc.</div>
+        </button>
+        <button className="quick-card" disabled>
+          <div className="qt">
+            Bridge <span style={soonTag}>Soon</span>
+          </div>
+          <div className="qd">Bridge USDC cross-chain to Ethereum, Base and more.</div>
+        </button>
+      </div>
+
+      {/* The free-text box, unchanged — repositioned below the shortcuts as the
+          general multi-step entry point. */}
+      <div className="panel-eyebrow" style={{ marginTop: 22 }}>Multi-task</div>
+      <div className="sub" style={{ marginBottom: 8 }}>
+        Or describe any task in plain language, including multi-step plans — you'll
+        confirm anything that moves funds before it runs.
+      </div>
+
+      <div className="row" style={{ marginTop: 0 }}>
         <input
-          placeholder="e.g. bridge 20 USDC to Ethereum · swap 1 USDC to EURC · send 0.1 to 0x… then 0.1 to 0x…"
+          placeholder="e.g. swap 1 USDC to EURC then bridge 3 to Base · send 0.1 to 0x… then 0.1 to 0x…"
           value={task}
           onChange={(e) => setTask(e.target.value)}
           onKeyDown={(e) => {
