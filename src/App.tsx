@@ -4,6 +4,7 @@ import ResearchPanel from "./components/ResearchPanel";
 import MyAgentPanel from "./components/MyAgentPanel";
 import FeedbackPanel from "./components/FeedbackPanel";
 import SendPanel from "./components/SendPanel";
+import SwapPanel from "./components/SwapPanel";
 import NanopaymentPanel from "./components/NanopaymentPanel";
 import Dashboard from "./components/Dashboard";
 import { useWallet } from "./wallet/useWallet";
@@ -58,6 +59,12 @@ export default function App() {
       break;
     case "send":
       page = <SendPanel wallet={wallet} />;
+      break;
+    // Reached via the AI Agent "Quick actions" Swap card, not the nav (like
+    // #/nanopay) — Swap stays a sub-action of AI Agent, so the 5-item nav (Send is
+    // the only money tool promoted to nav) is untouched.
+    case "swap":
+      page = <SwapPanel wallet={wallet} />;
       break;
     // Reached via the Dashboard "Do something" card, not the nav — a copy-only
     // explainer, so the 5-item nav (working tools only) stays untouched.

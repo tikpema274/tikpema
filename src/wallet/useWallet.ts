@@ -351,6 +351,38 @@ export function useWallet() {
     [ensureSession, refreshAgentWallet]
   );
 
+  // Swap USDC<->EURC from the caller's agent wallet. A single swap is executed as
+  // a ONE-STEP plan through /api/agent-execute-plan — the existing structured-
+  // action executor. That route enforces the per-action cap + cumulative day-
+  // ceiling BEFORE running the step (agent-execute-plan.mjs:104 / :114) and calls
+  // the shared executeAction (:128), which runs agentSwap. So this inherits the
+  // SAME caps as a swap step in a multi-step plan, and agentSwap/kit.swap is NEVER
+  // called directly from the client. No LLM parse, no confirm round-trip: the
+  // form's submit IS the confirmation, and the tokens/amount are already structured.
+  const swapFromAgent = useCallback(
+    async (tokenIn: "USDC" | "EURC", tokenOut: "USDC" | "EURC", amountIn: number) => {
+      const token = await ensureSession();
+      const plan = [{ type: "swap_tokens", tokenIn, tokenOut, amountIn }];
+      const r = await fetch("/api/agent-execute-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ plan }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.error || "Swap failed");
+      // The executor returns a per-step result array. A cap/ceiling block comes
+      // back as HTTP 200 with results[0].ok=false + a `blocked` reason — so inspect
+      // the STEP, not just the HTTP status, and surface the block as an error.
+      const step0 = Array.isArray(data?.results) ? data.results[0] : null;
+      if (!step0 || step0.ok !== true) {
+        throw new Error(step0?.blocked || step0?.error || "Swap did not execute");
+      }
+      refreshAgentWallet().catch(() => {});
+      return step0; // { ok, kind:"swap_tokens", state, swap, tx }
+    },
+    [ensureSession, refreshAgentWallet]
+  );
+
   // Refresh + cache the MetaMask balance (the modular hook owns its own).
   const mmRefreshBalance = useCallback(async () => {
     if (!mmWallet) return undefined;
@@ -396,5 +428,6 @@ export function useWallet() {
     agentWallet,
     refreshAgentWallet,
     sendFromAgent,
+    swapFromAgent,
   };
 }

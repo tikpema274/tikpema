@@ -161,9 +161,9 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         </div>
       )}
 
-      {/* Guided shortcuts — reuse the Dashboard card style. "Send" switches to the
-          existing Send view (hash route → sidebar highlights Send); the same panel,
-          not a duplicate. Swap/Bridge are placeholders until their own bricks. */}
+      {/* Guided shortcuts — reuse the Dashboard card style. "Send" and "Swap" switch
+          to their existing views via the hash router; the same panels, not
+          duplicates. Bridge is a placeholder until its own brick. */}
       <div className="panel-eyebrow" style={{ marginTop: 18 }}>Quick actions</div>
       <div className="quick" style={{ marginTop: 4 }}>
         <button
@@ -173,10 +173,11 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
           <div className="qt">Send →</div>
           <div className="qd">Send USDC to any address, gasless.</div>
         </button>
-        <button className="quick-card" disabled>
-          <div className="qt">
-            Swap <span style={soonTag}>Soon</span>
-          </div>
+        <button
+          className="quick-card"
+          onClick={() => (window.location.hash = "/swap")}
+        >
+          <div className="qt">Swap →</div>
           <div className="qd">Swap between USDC and EURC on Arc.</div>
         </button>
         <button className="quick-card" disabled>

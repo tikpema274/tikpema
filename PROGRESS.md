@@ -1,6 +1,55 @@
 
 ---
 
+## 2026-07-07 — AI Agent page guided actions: Swap button (Swap brick) SHIPPED
+
+**Brick:** activated the Swap card on the AI Agent page (`MyAgentPanel.tsx`) from
+"Soon" to an active amber `Swap →` (identical treatment to the Send card), routing to
+a new **`SwapPanel.tsx`** — a real USDC↔EURC form matching `SendPanel` (gated on
+`w.agentWallet`, token selector + amount, async-"submitted"-aware confirmation, tx
+link). Bridge stays "Soon"; multi-task box untouched.
+
+**Call path (Option B — the cap-enforcing route, chosen deliberately):** the panel
+does NOT touch the swap engine (`_swap.mjs`/App Kit) or call `agentSwap`/`kit.swap`.
+It builds a structured one-step plan `[{type:"swap_tokens", tokenIn, tokenOut,
+amountIn}]` and POSTs it through the EXISTING **`/api/agent-execute-plan`** executor
+(new `swapFromAgent` in `useWallet.ts`; reuses `agentClient.executePlan` shape). No
+LLM parse, no confirm round-trip — the form submit IS the confirmation.
+
+**⚠️ WHY the plan-route, not a direct `executeAction` call (money-safety — do NOT
+"simplify" this):** `executeAction` does NOT enforce a per-transaction cap on swaps.
+Its per-tx caps are type-specific — send cap is `transfer_usdc`-only
+(`_actions.mjs:79`), bridge cap is `bridge_usdc`-only (`:89`); the swap branch
+(`:127`) goes straight to `agentSwap` with only the day-ceiling (`:114`) above it.
+The per-action swap cap lives in the WRAPPERS. So the swap's caps are enforced at
+**`agent-execute-plan.mjs:104`** (per-action cap, `capForA` → `sendCapUsdc` by USD
+value) and **`:114`** (cumulative day-ceiling), BEFORE it calls `executeAction` at
+**`:128`**. **Rewiring swap to call `executeAction` directly would BYPASS the per-tx
+cap** (only the day-ceiling would bind). The plan-route is the cap-enforcing path —
+leave it.
+
+**DELIBERATE cap choice:** this route caps a swap at `sendCapUsdc` (**5 USDC** on
+testnet) + day-ceiling — the SAME caps a swap-as-a-plan-step gets today, but *looser*
+than the text-box **single** swap's `AGENT_MAX_SPEND_USDC` (**1**). Chosen knowingly;
+both enforce, neither bypasses. Tightening to `AGENT_MAX_SPEND_USDC` would require an
+`agent-act` structured entry (editing that handler) — not done.
+
+**Deferred:** no pre-swap estimate preview yet (needs a `_swap.mjs` standalone
+estimate export + an `agent-act` estimate branch — left for later). `#/swap` is a
+**nav-less** route (like `#/nanopay`), reached via the AI Agent Swap card; no sidebar
+item highlights (matches the "nav = working tools only" design).
+
+**Verified end-to-end on a draft deploy** (`netlify deploy`, no `--prod`): happy-path
+swap on-chain + over-cap rejection both confirmed. Then shipped to prod via Netlify
+CLI (backgrounded), verified real: prod `index.html` references the new build hash
+`index-fn9fa5h3.js`; `/api/agent-execute-plan` 405 (POST-only), `/api/my-wallet` 401
+(auth-gated).
+
+Files: `SwapPanel.tsx` (new), `useWallet.ts` (+`swapFromAgent`), `App.tsx`
+(+`case "swap"`), `MyAgentPanel.tsx` (Swap card active). Build + tsc clean.
+
+---
+
 ## 2026-07-07 — AI Agent page guided actions: Send button (Send brick) SHIPPED
 
 **Brick:** the AI Agent page (`MyAgentPanel.tsx`) grew a "Quick actions" row of guided
