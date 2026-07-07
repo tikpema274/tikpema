@@ -104,6 +104,16 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
               Send USDC from your wallet to any address, gasless on Arc.
             </div>
           </button>
+          {/* 4th card wraps to a second row in the repeat(3,1fr) grid and sits
+              alone on the left — intentional; no CSS tweak. Reflows to a single
+              column on mobile like the rest. */}
+          <button className="quick-card" onClick={() => go("nanopay")}>
+            <div className="qt">Nanopayments →</div>
+            <div className="qd">
+              See how your agent pays a fraction of a cent for fresh data
+              mid-research.
+            </div>
+          </button>
         </div>
       </div>
     </>
