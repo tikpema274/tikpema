@@ -10,4 +10,7 @@ export const GATEWAY = {
   API_BASE: "https://gateway-api-testnet.circle.com",
   // Circle's domain id for Arc in the Gateway/CCTP domain space.
   ARC_DOMAIN: 26,
+  // Base Sepolia domain (same CCTP domain used by _bridge.mjs). Second source for
+  // the multi-chain unified-balance VIEW.
+  BASE_SEPOLIA_DOMAIN: 6,
 };

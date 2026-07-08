@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import AddressDisplay from "./AddressDisplay";
 
@@ -27,6 +27,42 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
     }, BALANCE_POLL_MS);
     return () => clearInterval(id);
   }, [hasWallet, w.refreshAgentWallet]);
+
+  // AGENT unified balance across chains — a SEPARATE, read-only fetch of the shared
+  // agent wallet's Gateway balance (/api/gateway-balance). Deliberately NOT in
+  // useWallet (that's the per-user wallet); kept independent so a failure here never
+  // touches the per-user balance above. This is the AGENT's cross-chain balance.
+  type PerChain = { chain: string; usdc: string | null; ok: boolean };
+  const [unified, setUnified] = useState<{ total: string; perChain: PerChain[] } | null>(null);
+  const [unifiedFailed, setUnifiedFailed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const r = await fetch("/api/gateway-balance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+        const d = await r.json().catch(() => null);
+        if (!alive) return;
+        if (!r.ok || !Array.isArray(d?.perChain)) {
+          setUnifiedFailed(true);
+          return;
+        }
+        setUnified({ total: d.unifiedBalanceUsdc ?? "0", perChain: d.perChain });
+        setUnifiedFailed(false);
+      } catch {
+        if (alive) setUnifiedFailed(true);
+      }
+    };
+    load();
+    const id = setInterval(load, BALANCE_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
 
   return (
     <>
@@ -148,6 +184,56 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
             </div>
           </div>
         )}
+
+        {/* AGENT unified balance — the shared agent wallet's Gateway balance across
+            chains. DISTINCT from "Your wallet" above; read-only; separate fetch, so a
+            failure here never touches the per-user balance. */}
+        <div
+          className="status"
+          style={{
+            marginTop: 14,
+            padding: "12px 16px",
+            background: "var(--field)",
+            border: "1px solid var(--line)",
+            borderRadius: 12,
+          }}
+        >
+          <div
+            style={{
+              color: "var(--muted)",
+              fontSize: "0.72rem",
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              marginBottom: 6,
+            }}
+          >
+            Agent unified balance · across chains
+          </div>
+          {!unified || unifiedFailed ? (
+            <div className="sub" style={{ margin: 0 }}>
+              Unified balance unavailable.
+            </div>
+          ) : (
+            <>
+              <span style={{ fontSize: "1.2rem", fontWeight: 600, color: "var(--paper)" }}>
+                <span className="mono">{unified.total}</span>{" "}
+                <span style={{ fontSize: "0.8rem", color: "var(--muted)", fontWeight: 400 }}>USDC</span>
+              </span>
+              <div className="sub" style={{ marginTop: 6, display: "flex", gap: 16, flexWrap: "wrap" }}>
+                {unified.perChain.map((p) => (
+                  <span key={p.chain}>
+                    {p.chain}:{" "}
+                    {p.ok ? (
+                      <span className="mono">{p.usdc} USDC</span>
+                    ) : (
+                      <span style={{ color: "var(--muted)" }}>unavailable</span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="plane">

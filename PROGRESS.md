@@ -1,6 +1,50 @@
 
 ---
 
+## 2026-07-08 — Unified Balance VIEW SHIPPED (read-only; SPEND half deferred)
+
+The safe half of the Unified Balance capability: a multi-chain **VIEW** of the agent
+wallet's Gateway/unified USDC balance. **Read-only — no deposit, no authorize, no
+spend; it cannot move money.**
+
+**What shipped:**
+- **`gateway-balance.mjs`** — extended the Arc-only `/v1/balances` read to **multi-chain**:
+  Arc Testnet (domain 26) + Base Sepolia (domain 6), read **per-domain via
+  `Promise.allSettled`** so one chain failing degrades to the other (graceful per-chain).
+  Returns `{ depositor, unifiedBalanceUsdc, perChain:[{chain,domain,usdc,ok}] }`;
+  unified = sum over the chains that read OK. Public read keyed by depositor.
+- **`_gateway.mjs`** — `+BASE_SEPOLIA_DOMAIN: 6`.
+- **`Dashboard.tsx`** — a distinct low-key **"Agent unified balance · across chains"**
+  card ("$X across chains" + per-chain breakdown Arc / Base Sepolia), its OWN
+  `useEffect` fetch of `/api/gateway-balance` (NOT in `useWallet`), so a failure never
+  touches the per-user balance. Graceful: failed chain → "unavailable"; total failure →
+  "Unified balance unavailable."
+
+**Decisions (both confirmed):**
+- **REST-extend, NOT `kit.unifiedBalance.getBalances`** — it's a public read keyed by
+  depositor; the REST path reuses proven code and needs NO kit/adapter/entity-secret,
+  avoiding the kit/1098/SCA machinery entirely.
+- **Option B (agent wallet), NOT per-user** — the depositor is the shared
+  `AGENT_WALLET_ADDRESS` (the only funded wallet); surfaced as the **agent's**
+  cross-chain balance, visually **distinct from "Your wallet"** (per-user). This avoids
+  the misrepresentation the Dashboard comment already warns against; a per-user variant
+  would read ~$0 for everyone (no user has a Gateway deposit).
+
+**Verified live on prod:** `POST /api/gateway-balance` → 200 with real data — Arc Testnet
+**0.7755 USDC**, **Base Sepolia 0** (both `ok:true`), unified **0.7755**. Build hash
+`index-eNrJOe2E.js`. **Base reads $0 by design** — the agent has no Base Sepolia deposit
+yet; the view proves multi-chain READING works, and $0 is a valid honest balance.
+
+**SPEND half DEFERRED** (deposit / `addDelegate` / cross-chain `spend`) — it carries the
+**SCA-authorization risk**: the delegate auth is out-of-band/undocumented in-repo
+(confirm via read-only `getDelegateStatus` first), and any new `depositFor`/`addDelegate`
+on the SCA hits the known 1098-async + `allowanceStrategy:"approve"` quirks (solvable via
+the catch / direct-contract path used for swap/bridge/pay). No mainnet wall (Arc Testnet
++ Base Sepolia, faucet USDC). Files: `gateway-balance.mjs`, `_gateway.mjs`,
+`Dashboard.tsx`. tsc + build clean.
+
+---
+
 ## 2026-07-08 — FIX (pre-existing, arXiv-INDEPENDENT): synthesis max_tokens 1024→8192 truncation-refund bug
 
 **The more important find of the two shipped today.** The research SYNTHESIS call was
