@@ -95,3 +95,20 @@ export const bridgeCapUsdc = () => {
   }
   return n;
 };
+
+// Per-UB-SPEND cap (the WRITE side of Unified Balance — a cross-chain spend of the
+// agent's Arc unified balance to another chain). Its own bound, same fail-closed
+// parse. CRITICAL: kit.unifiedBalance.spend / _ubspend.mjs are UNCAPPED, so the
+// wrapper (agent-ub-spend.mjs) MUST call this and reject BEFORE spending — reaching
+// the executor unguarded would bypass the cap (the swap-cap trap).
+export const ubSpendCapUsdc = () => {
+  const raw = process.env.AGENT_UB_SPEND_CAP_USDC;
+  if (raw === undefined || raw === "") return 1; // conservative testnet default
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(
+      `AGENT_UB_SPEND_CAP_USDC is misconfigured (${JSON.stringify(raw)}); refusing to spend`
+    );
+  }
+  return n;
+};

@@ -48,6 +48,13 @@
 # Cross-chain bridge (propose→confirm→execute). agent-bridge EXECUTES the Arc
 # burn from the caller's session-resolved wallet; agent-bridge-status is a
 # read-only poll for the async destination mint. Both session-gated.
+# Unified Balance cross-chain SPEND (first proof). Cap-guarded in the wrapper before
+# any UB call; delegate-signed Arc→Base Sepolia via the Forwarding Service.
+[[redirects]]
+  from = "/api/agent-ub-spend"
+  to = "/.netlify/functions/agent-ub-spend"
+  status = 200
+
 [[redirects]]
   from = "/api/agent-bridge"
   to = "/.netlify/functions/agent-bridge"

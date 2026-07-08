@@ -1,6 +1,70 @@
 
 ---
 
+## 2026-07-08 — Unified Balance SPEND PROVEN (cross-chain mechanism; full HTTP path deferred)
+
+The SPEND (write) half of Unified Balance — deferred in the VIEW entry below for
+SCA-authorization risk. That risk is now **retired for the mechanism**: a delegate-signed,
+cross-chain Arc→Base Sepolia unified-balance spend via the Forwarding Service **moves real
+money, both sides verified**.
+
+**PROVEN (hard balance movement, tied to this one spend):**
+- Fired a **0.1 USDC** spend from the agent SCA's Arc unified balance to an external
+  recipient on **Base Sepolia** (`0x1e18…31Be`).
+- **Arc unified: 0.7755 → 0.469876** (dropped) AND **recipient Base Sepolia: 0 → 0.1**
+  (rose). Both sides snapshotted before/after and tied to this transfer — not a flat
+  no-op like the earlier failed attempts.
+- Circle kit returned `state:"completed"` (no 1098 async-waiter quirk this run); all four
+  steps succeeded: buildBurnIntents → signBurnIntents → fetchAttestation → mint.
+- transferId `b2d3178a-524f-4cd3-ab27-2807044f2be1`; mint tx on Base Sepolia
+  `0xc1644c1972a9f62123299d15dd5ebaf667ca1eb661ee4501833fcfaf383c5f4e`.
+- Signing model confirmed live: `from.address` = DELEGATE (signer, ready on Arc),
+  `from.sourceAccount` = AGENT SCA (holds the balance), source `Arc_Testnet`,
+  `to = { Base_Sepolia, recipientAddress, useForwarder:true }`. A Circle SCA can't sign
+  its own Gateway spend; delegate-signed exactly like `_pay.mjs`. This works.
+
+**HOW it was proven — direct executor, NOT the HTTP endpoint:**
+- Fired via a direct `ubSpend()` call (`scripts/fire-ub-spend-direct.mjs`, uncommitted
+  proof tooling), using the same CIRCLE creds prod uses. This is the SAME on-chain spend
+  the endpoint performs; it isolates and proves the risky unknown (does the cross-chain
+  SCA-delegate spend move money?) without the session-auth layer.
+
+**NOT yet exercised end-to-end — the full HTTP path (deferred follow-up):**
+- endpoint → session auth → cap wrapper → `ubSpend()` has **not** been fired by a real
+  authenticated user call. What IS verified: the route is live and the auth gate works
+  (unauthenticated `POST /api/agent-ub-spend` → **401**), the cap lives in the wrapper
+  BEFORE any UB call (reject-not-clamp; an over-cap request → 400, nothing signs), and
+  `agent-ub-spend.mjs` is thin glue over the now-proven `ubSpend()`.
+- **Blocker:** a locally-minted session token is **rejected by prod (401)** — prod's
+  `SESSION_SECRET` ≠ local `.env`'s. Confirmed with a zero-money probe
+  (`scripts/probe-ub-auth.mjs`: valid-shape token + over-cap amount → 401, not the 400 a
+  trusted token would get). So the browser-console token method failing earlier was the
+  same root cause, not an endpoint bug.
+- **To close:** fire `scripts/fire-ub-spend.mjs` with a token prod trusts — either a real
+  browser login on prod (challenge→sign→verify), or align local/prod `SESSION_SECRET`.
+
+**⚠️ FEE FINDING (must record — economics are the real open risk, not the mechanism):**
+- Sending **0.1** cost the Arc side **0.305624** total (unified dropped by exactly that):
+  spend 0.1 + **gasFee 0.205619** + provider 0.000005 — i.e. **~2.06× the transferred
+  amount in verified on-chain fees** on Arc Testnet.
+- The kit result ALSO reported a **`forwarder` fee of 0.202124 USDC** with **no Arc
+  allocation**. It did NOT show up in the Arc balance delta (Arc dropped exactly
+  spend + maxFee) and the recipient received the full 0.1 — so **where/whether the
+  forwarder fee is actually charged is UNRECONCILED from balances alone.** Open: reconcile
+  it against an actual balance (delegate? a fee account?) before trusting the economics.
+- These are `maxFee`-style estimates (buildBurnIntents `maxFee` 0.205624 == gasFee +
+  provider), likely inflated testnet gas — actual burn may be lower. But **as-is this path
+  is uneconomical for sub-dollar transfers.** Before any user-facing spend: validate real
+  fee vs maxFee, and add a minimum-amount / fee-ratio guard + expectation-setting.
+
+**Committed:** the 4 SPEND files (`agent-ub-spend.mjs`, `_ubspend.mjs`, `_arc.mjs`
+ub-spend cap, `netlify.toml` redirect) — already deployed to prod in a prior session;
+this commit records them now that the mechanism is proven. Proof tooling
+(`scripts/fire-ub-spend*.mjs`, `scripts/probe-ub-auth.mjs`) and the durable capture
+(`scripts/ub-spend-captures/`) left uncommitted.
+
+---
+
 ## 2026-07-08 — Unified Balance VIEW SHIPPED (read-only; SPEND half deferred)
 
 The safe half of the Unified Balance capability: a multi-chain **VIEW** of the agent
