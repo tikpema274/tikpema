@@ -150,9 +150,13 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
               {quote.budgetUsdc} USDC
             </span>
           </div>
-          {quote.reasoning && (
-            <div style={{ marginTop: 6, color: "var(--paper-dim)" }}>{quote.reasoning}</div>
-          )}
+          {/* Neutral, question-agnostic line — accurate for any accepted question
+              (factual lookup, analytical synthesis, on-chain, market). Replaces the
+              per-question quote.reasoning, which read price-specific for price
+              questions ("…single current price source"). */}
+          <div style={{ marginTop: 6, color: "var(--paper-dim)" }}>
+            A research task answered from real, cited sources.
+          </div>
           <div className="row" style={{ marginTop: 14 }}>
             <button
               className="emerald"
