@@ -1,6 +1,63 @@
 
 ---
 
+## 2026-07-08 — Crypto-analysis capability (CUT 1) SHIPPED + PROVEN on prod
+
+**What:** the research agent can now fetch crypto facts mid-research and cite them —
+**on-chain** (via the existing paid QuickNode x402 path) and **market** (via free
+CoinGecko). A classifier routes each question to `onchain` / `market` / `none`.
+
+**Design (all in `_research.mjs` + new `_cryptodata.mjs`):**
+- **Classifier** — `decidePurchase` returns `{kind:"onchain"|"market"|"none", method,
+  params, justification}` (+ back-compat `buy = kind!=="none"` so `_autonomy-test.mjs`
+  and the legacy `forceDecision` seam still work). Priority rule IN the prompt: prefer
+  the paid on-chain path where a listed method can serve; use free CoinGecko ONLY for
+  price/market-cap/volume RPC can't give; else `none`.
+- **Router** — `maybeBuyData`: `market` → free `fetchMarketData` (NO challenge/gate/
+  spend); `onchain` → `buildRpcBody` → the EXISTING x402 pay path UNCHANGED (challenge
+  → ceiling → gate → `payX402` → `recordSpend`; only the request BODY varies and the
+  fact PRODUCTION swaps to the decoder). Legacy `{buy:true}` (no kind) → static-env body.
+- **Decoders** (`_cryptodata.mjs`, pure): `eth_blockNumber` hex→int, `eth_gasPrice`
+  hex wei→gwei, `eth_getBalance` hex wei→human USDC. `hexToBigInt` is the choke point —
+  any non-hex/missing result is DROPPED (returns []); a raw `0x…` can NEVER become a
+  claim. `buildRpcBody` validates the method/params and refuses unsupported methods.
+- **Market** — CoinGecko keyless public GET `/simple/price` (price/cap/vol); ids
+  restricted to an ALLOWLIST (bitcoin, ethereum, usd-coin, tether, solana, binancecoin,
+  ripple, cardano, dogecoin, avalanche-2, polygon-ecosystem-token); off-list → dropped.
+- **Merge unchanged** — both branches return `{claim,source}[]`, folded into the
+  grounding block at `_research.mjs:~305`. Graceful degradation everywhere: any failure
+  → `[]` → Exa-only, never crash, never emit garbage.
+
+**⚠️ ARC GOTCHA (recorded — cost a wrong-decimals near-miss):** `eth_getBalance` on Arc
+returns an **18-DECIMAL NATIVE** value, NOT 6 — even though **USDC the ERC-20**
+(`0x3600…0000`) is 6-dp. Both encode the SAME USDC value at different scales:
+`eth_getBalance ÷1e18 == USDC balanceOf ÷1e6`. Proven live: `0xc54d…e621` = **43.75
+USDC at ÷1e18** (matches `balanceOf ÷1e6` = the Arcscan balance; also `0x6db3…b380` =
+0.09==0.09). Decode native with **18**; `÷1e6` would print a value 1e12× too large — a
+FALSE number. The `DECIMALS_VERIFIED` gate CAUGHT the wrong 6-dp assumption at build
+time (balance decoder stayed inert AND `buildRpcBody` refused to PAY for the read until
+a live cross-check matched), then was flipped to `true` only after the match. Don't
+trust a stated decimals value — cross-check native balance vs USDC `balanceOf`.
+
+**Verified on PROD (user-run, passkey wallet — draft can't passkey-login, domain-bound):**
+- Market: BTC price via CoinGecko, decoded + cited (free, no spend).
+- On-chain: Arc block **50,762,442** via the QuickNode paid path — decoded from hex, x402
+  settled (sub-cent, through the proven ceiling + budget gate).
+- Classifier discipline: a carbon-capture question → Exa-only (no crypto over-trigger).
+
+**Scope / deferred:** cut 1 = balance + gas + block + CoinGecko market. **Deferred:**
+contract reads (`eth_call` / ABI decode), token-balance-by-contract, historical charts.
+**Known cosmetic TODO:** the research price-preview card copy is stale for non-price
+questions (says "single price source" for all) — cosmetic, not wired to the new router.
+
+**Money path UNCHANGED:** no edits to `_x402.mjs`, the per-buy ceiling, or the budget
+gate. On-chain reads reuse the proven pay path with a varying body; CoinGecko never
+touches it. Files: `_cryptodata.mjs` (new), `_research.mjs` (classifier+router). tsc +
+build clean; decoders + live CoinGecko smoke-tested; deployed to prod (functions-only,
+frontend hash unchanged `index-qEtshKBL.js`).
+
+---
+
 ## 2026-07-08 — RECON (read-only, no build): agent pays BlockRun via UB-funded Base wallet
 
 **Goal explored:** let the research agent pay **BlockRun** (a pay-per-call x402 data/LLM

@@ -14,6 +14,7 @@
 import { exaSearch } from "./_exa.mjs";
 import { canSpend, recordSpend, recordBlocked } from "./_budget.mjs";
 import { payX402, fetchX402Requirements } from "./_x402.mjs";
+import { buildRpcBody, decodeRpc, fetchMarketData } from "./_cryptodata.mjs";
 
 // Current Anthropic web search server tool (GA — no beta header).
 const WEB_SEARCH_TOOL = { type: "web_search_20260209", name: "web_search", max_uses: 3 };
@@ -101,28 +102,46 @@ export function extractFacts(sellerBody, sellerUrl) {
   return [{ claim, source: src }];
 }
 
-// The purchase-decision system prompt: a binary buy/skip over the ONE available
-// stand-in seller (no menu). The model sees the question + the already-retrieved
-// web-search sources, and must reason about RECENCY: web search is indexed and
-// can be stale, so it cannot report a value "as of right now"; the paid seller
-// is a real-time feed that can. It buys ONLY if the question genuinely needs a
-// current/live figure the retrieved sources can't supply — otherwise it SKIPS.
-// This is context to judge with, not an instruction to buy: a question answerable
-// from the retrieved sources (background/historical) must SKIP.
-const DATA_DECISION_SYSTEM = `You are a research analyst deciding whether to purchase ONE additional paid dataset to improve a client brief. You are given the research question and the sources already retrieved via web search. Web-search results are indexed and can be stale — they cannot report a value "as of right now." Exactly one paid dataset is available at a fixed low price: a real-time data feed that returns a CURRENT, as-of-now figure (a live value stamped with a fresh timestamp). Buy ONLY if answering the question well genuinely requires a current/live figure that the already-retrieved sources do not provide. If the retrieved sources already answer the question — including background, definitional, or historical questions that need no present-moment value — SKIP; do not buy. Respond with ONLY JSON: {"buy": <boolean>, "justification": "<one sentence>"} — no markdown, no fences, no preamble.`;
+// The data-decision / ROUTING system prompt (crypto-analysis first cut). The model
+// sees the question + already-retrieved web sources and routes to ONE source, or none.
+// PRIORITY RULE is in the prompt: prefer the paid on-chain path (QuickNode RPC) wherever
+// a listed method can serve; use the free CoinGecko path ONLY for market figures RPC
+// can't give (price/market-cap/volume); else "none". On-chain is LIMITED to the three
+// cleanly-decodable methods (NO eth_call / contract reads this cut).
+const DATA_DECISION_SYSTEM = `You decide whether ONE data fetch would materially improve a client research brief, and which source to use. You are given the research question and the web-search sources already retrieved.
 
-// Exported so the genuine-autonomy proof harness (_autonomy-test.mjs) can drive
-// the REAL decision path — same prompt, same call — rather than a copy. The
-// export changes nothing about the logic; production still reaches it only via
-// maybeBuyData with no forceDecision injection.
+Two data sources are available:
+- ON-CHAIN (Arc Testnet JSON-RPC, paid per call): live blockchain facts. LIMITED to exactly these methods:
+  * eth_getBalance — native USDC balance of an address. params: ["<0x address>", "latest"]
+  * eth_gasPrice — current gas price. params: []
+  * eth_blockNumber — current block height. params: []
+- MARKET (CoinGecko, free): crypto PRICE, MARKET CAP, and 24h VOLUME for well-known coins. params: {"ids": "<coingecko id(s), comma-separated>"} using canonical ids like bitcoin, ethereum, usd-coin, solana.
+
+PRIORITY RULE: if the question needs an on-chain fact one of the on-chain methods above can serve, choose "onchain" (prefer it). Choose "market" ONLY for price / market-cap / volume the on-chain methods cannot provide. If the already-retrieved sources answer the question, or the need falls OUTSIDE the listed methods (e.g. a token balance by contract, contract storage, or anything needing eth_call), choose "none".
+
+For "onchain": set method to one of the three and params exactly as specified (a valid 0x-address for eth_getBalance). For "market": set params to {"ids": "..."}.
+
+Respond with ONLY JSON, no markdown, no fences: {"kind": "onchain" | "market" | "none", "method": "<rpc method or empty string>", "params": <array or object, or []>, "justification": "<one sentence>"}`;
+
+// Exported so the genuine-autonomy proof harness (_autonomy-test.mjs) can drive the
+// REAL decision path. Returns { kind, method, params, justification } plus a back-compat
+// `buy` (= kind !== "none") so existing consumers that read `.buy` keep working.
 export async function decidePurchase(apiKey, model, question, groundingBlock) {
   const user =
     `Research question:\n${question}\n\n` +
     `Sources already retrieved:\n${groundingBlock || "(none)"}\n\n` +
-    `Should we buy the one available paid dataset? Respond with ONLY the JSON.`;
+    `Decide the data fetch. Respond with ONLY the JSON.`;
   const data = await callAnthropic(apiKey, model, [{ role: "user", content: user }], DATA_DECISION_SYSTEM, []);
   const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
-  return extractJson(text);
+  const parsed = extractJson(text) || {};
+  const kind = ["onchain", "market", "none"].includes(parsed.kind) ? parsed.kind : "none";
+  return {
+    kind,
+    method: typeof parsed.method === "string" ? parsed.method : "",
+    params: parsed.params ?? [],
+    justification: parsed.justification || "(no justification)",
+    buy: kind !== "none", // back-compat (_autonomy-test.mjs reads .buy; legacy forceDecision)
+  };
 }
 
 // Run the decision → gate → buy sequence and return the purchased facts (an
@@ -131,24 +150,50 @@ export async function decidePurchase(apiKey, model, question, groundingBlock) {
 // `store` is the optional injectable budget store (undefined → Netlify Blobs).
 async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jobPrice, store, forceDecision, owner }) {
   try {
-    // 1. Decision call — buy or not? `forceDecision` is a TEST-ONLY seam that
-    // injects the { buy, justification } verdict so the buy-branch mechanics are
-    // deterministically provable; production never sets it, so the genuine
-    // Claude decision call runs.
+    // 1. Decision + ROUTING. `forceDecision` is a TEST-ONLY seam; production runs the
+    // genuine classifier. It returns { kind: "onchain"|"market"|"none", method, params,
+    // justification } (+ back-compat `buy`). A legacy { buy:true } verdict with no `kind`
+    // maps to the static-env-body path so the existing proof/forceDecision still works.
     const decision = forceDecision ?? (await decidePurchase(apiKey, model, question, groundingBlock));
     const justification = decision?.justification || "(no justification)";
-    if (!decision?.buy) {
-      console.log(`[research] purchase decision: SKIP — ${justification}`);
+    const kind = decision?.kind ?? (decision?.buy ? "onchain-legacy" : "none");
+    if (kind === "none") {
+      console.log(`[research] data decision: NONE (skip) — ${justification}`);
       return [];
     }
+
+    // MARKET branch — FREE public data (CoinGecko). NOT the x402 pay path: no challenge,
+    // no budget gate, no on-chain spend. Returns { claim, source }[] directly; [] on any
+    // failure → Exa-only. (Price/market-cap/volume the RPC can't provide.)
+    if (kind === "market") {
+      const facts = await fetchMarketData(decision.params);
+      console.log(`[research] market data (CoinGecko, free): ${facts.length} fact(s) — ${justification}`);
+      return facts;
+    }
+
+    // ON-CHAIN branch — build the RPC body for the chosen method, then run the EXISTING,
+    // UNCHANGED x402 pay path below (challenge → ceiling → gate → payX402 → recordSpend).
+    // buildRpcBody validates the method/params (and refuses eth_getBalance until its
+    // decimals are verified — so we never PAY for a balance we'd have to drop). null → drop
+    // before any spend. Legacy verdict keeps the static env body.
+    let requestBody;
+    if (kind === "onchain-legacy") {
+      requestBody = dataSellerBody();
+    } else {
+      requestBody = buildRpcBody(decision.method, decision.params);
+      if (!requestBody) {
+        console.warn(`[research] on-chain method unavailable/invalid (NO buy, no spend): ${decision.method}`);
+        return [];
+      }
+    }
+    const asOf = new Date().toISOString();
     // 2. Fetch the seller's x402 challenge FIRST so the gate sees the SELLER'S
     //    advertised price (maxAmountRequired) — the amount actually charged — as
     //    the canonical input, not a separate env figure. The SAME challenge is
     //    threaded into payX402 below (one fetch → gated price == signed price).
     // RPC-proxy / request-bound sellers (e.g. QuickNode) need the paid request to carry the
-    // call being paid for; DATA_SELLER_BODY supplies it. Our stand-in seller needs none →
-    // unset → bodyless. Threaded into BOTH the challenge fetch and payX402's settle so they match.
-    const requestBody = dataSellerBody();
+    // call being paid for; buildRpcBody/DATA_SELLER_BODY supplies it. Threaded into BOTH the
+    // challenge fetch and payX402's settle so they match.
     const chal = await fetchX402Requirements({ sellerUrl: process.env.DATA_SELLER_URL, requestBody });
     if (!chal.ok) {
       console.warn(`[research] x402 challenge fetch failed (NO buy): ${chal.body?.error ?? "unknown"}`);
@@ -214,7 +259,10 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
 
     // 8. Map the seller's response into { claim, source } facts (seller-shape-aware; see
     //    extractFacts / DATA_SELLER_FACTS_PATH). res.body.seller is the resolved seller URL.
-    const facts = extractFacts(res?.body?.sellerBody, res?.body?.seller ?? process.env.DATA_SELLER_URL);
+    const facts =
+      kind === "onchain-legacy"
+        ? extractFacts(res?.body?.sellerBody, res?.body?.seller ?? process.env.DATA_SELLER_URL)
+        : decodeRpc(decision.method, res?.body?.sellerBody, requestBody.params, asOf);
     if (facts.length === 0) {
       console.warn(`[research] settled $${paidUsdc} (spend recorded) but no usable facts — check DATA_SELLER_FACTS_PATH`);
       return [];
