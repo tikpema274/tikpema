@@ -120,6 +120,29 @@ export default function App() {
           >
             Feedback
           </button>
+          {/* Low-key contact block — muted text, amber links, matching the nav padding. */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 3,
+              padding: "6px 12px 2px",
+              fontSize: "0.72rem",
+              color: "var(--muted)",
+            }}
+          >
+            <a href="mailto:tikpema274@gmail.com" style={{ color: "var(--amber)", textDecoration: "none" }}>
+              tikpema274@gmail.com
+            </a>
+            <a
+              href="https://x.com/tikpemaGB"
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: "var(--amber)", textDecoration: "none" }}
+            >
+              @tikpemaGB
+            </a>
+          </div>
         </div>
       </aside>
 

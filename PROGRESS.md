@@ -1,6 +1,15 @@
 
 ---
 
+## 2026-07-08 — Contact block in sidebar footer (copy-only)
+
+Contact block in sidebar footer: `tikpema274@gmail.com` mailto + `@tikpemaGB` →
+x.com/tikpemaGB, low-key (muted/amber, stacked) under Feedback. `src/App.tsx` only;
+copy+links, no backend/logic. Deployed to prod (hash `index-TWRm4hxm.js`), block
+confirmed in the live bundle.
+
+---
+
 ## 2026-07-08 — Crypto-analysis capability (CUT 1) SHIPPED + PROVEN on prod
 
 **What:** the research agent can now fetch crypto facts mid-research and cite them —
