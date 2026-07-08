@@ -1,6 +1,86 @@
 
 ---
 
+## 2026-07-08 — RECON (read-only, no build): agent pays BlockRun via UB-funded Base wallet
+
+**Goal explored:** let the research agent pay **BlockRun** (a pay-per-call x402 data/LLM
+gateway that settles USDC on **Base mainnet**) for new capabilities, by (a) funding a
+Base wallet from our Arc USDC via Circle Unified Balance + Forwarding Service, and (b)
+letting BlockRun's own SDK handle the x402 payment. Two external research streams
+(BlockRun SDK source; Circle UB docs) + codebase + Arc-mainnet status.
+
+### Verdict: both linchpins GREEN mechanically, but the seam has a FATAL premise gap
+"Fund a Base wallet **from our Arc USDC**" is **NOT achievable today** — **Arc has no
+mainnet yet** (public testnet only as of 2026-07; mainnet beta scheduled 2026, and Arc
+is not yet a Gateway mainnet source). BlockRun is **Base mainnet**. Testnet USDC can't
+become mainnet USDC, and Gateway/UB is network-segregated (testnet→testnet only). So the
+funding source must be **real mainnet USDC on an existing Gateway chain (Base/ETH/…),
+NOT our Arc testnet balance.** This is a deliberate **mainnet, real-money, multi-session**
+project — Tikpema's first mainnet crossing (the "deferred crossing" prior entries flagged).
+
+### 1. BlockRun SDK wallet model (linchpin — RESOLVED: we provide the key)
+- Accepts a key WE control: `new LLMClient({ privateKey })` or env
+  `BASE_CHAIN_WALLET_KEY`/`BLOCKRUN_WALLET_KEY`, resolved FIRST before any generation
+  (`blockrun-llm-ts/src/wallet.ts:102`; `src/types.ts` `LLMClientOptions = {privateKey?,
+  apiUrl?, timeout?}` — no signer/account/apiKey param).
+- Fallback only (no key): mints a fresh EOA, writes the raw key to `~/.blockrun/.session`
+  (`wallet.ts:41–58`), exposes it via `getWalletAddress()` (`:133`).
+- Signs with a **raw EOA private key** (viem `privateKeyToAccount`), NOT a Circle SCA/
+  delegate. Settles **Base mainnet** (`src/x402.ts`: `BASE_CHAIN_ID=8453`,
+  `USDC_BASE=0x8335…2913`), EIP-712 `TransferWithAuthorization`, **auto-pays on 402**
+  (`src/client.ts handlePaymentAndRetry`) — no explicit pay(). So the SDK handles the
+  x402 payment itself; we don't need our own x402 buyer. BlockRun is **mainnet-only** (no
+  testnet endpoint) → the first real test IS a mainnet money test; no testnet dry-run.
+
+### 2. Unified Balance fit (RESOLVED: it's the documented SCA path, already in use)
+- We ALREADY call `kit.unifiedBalance.spend()` with the delegate model, proven on-chain:
+  `_pay.mjs:47` (params `:29–44` — delegate EOA signs, SCA `sourceAccount` holds balance,
+  `to.chain="Arc_Testnet"` today).
+- Circle docs confirm this is REQUIRED for a Circle SCA ("*SCAs cannot sign their own
+  Unified Balance spends… use the delegate workflow*"; "*SCA deposits require
+  `allowanceStrategy:"approve"`*") — exactly our stack (`@circle-fin/app-kit@1.8.1` +
+  `unified-balance-kit@1.2.1` + Circle Wallets adapter, installed).
+- Fund an address we don't control: `spend({to:{chain:"Base…", recipientAddress,
+  useForwarder:true}})` (no dest adapter) — documented server-side/custodial Forwarding
+  mode. **No kit key** (just Circle API key + entity secret, which we have).
+- Same Gateway burn→attest→mint primitive as our existing `_bridge.mjs` CCTP forward,
+  which already mints to an arbitrary Base recipient (`_bridge.mjs:140,158`). Two working
+  TESTNET mechanisms for the Arc→Base hop already exist.
+
+### 3. The seam (mechanically yes; blocked by network reality)
+Plumbing closes: Arc USDC → `unifiedBalance.spend`/bridge (`useForwarder`+
+`recipientAddress`) → BlockRun EOA's Base address → BlockRun SDK signs from that key →
+auto-pays x402. Two mismatches: **(fatal) network** — Arc testnet vs Base mainnet, no
+path, Arc not a mainnet Gateway source yet → "from our Arc USDC" cannot hold; **(minor)
+signer shape** — BlockRun wants a raw EOA; our wallet is a Circle SCA, so the BlockRun
+payer is a SEPARATE raw mainnet EOA we generate + hold server-side (new hot-key mgmt).
+
+### 4. Scope / risk
+- BlockRun SDK integration: **SMALL** (`new LLMClient({privateKey})` + call; auto-pays).
+- UB/funding call: **SMALL–MEDIUM** (delta from `_pay.mjs` is `to.chain:Base` +
+  `useForwarder` + `addDelegate` on source; mainnet config net-new).
+- Base wallet mgmt: **MEDIUM** (raw mainnet EOA private key, real hot wallet, fund+monitor).
+- The mainnet crossing: **BIG** — real USDC, mainnet hot-wallet key, mainnet Gateway/UB
+  config, and the funding source can't be Arc (premise gap); possible compliance screening.
+- **Biggest risk:** testnet→mainnet real-money crossing + no Arc mainnet source + mainnet
+  hot key + no testnet dry-run (BlockRun mainnet-only). **Multi-session, gated on a
+  mainnet go/no-go — NOT a 1-session build.**
+
+### The one decision before any scoping
+Where the MAINNET USDC comes from (can't be Arc): (i) hold mainnet USDC on Base directly
+and fund the EOA locally — simplest, no cross-chain; (ii) hold it on another mainnet
+Gateway chain and spend/bridge to Base; (iii) wait for Arc mainnet + Gateway to make the
+original "from Arc USDC" story real.
+
+Sources: BlockRun `github.com/BlockRunAI/blockrun-llm-ts` (wallet.ts/types.ts/x402.ts/
+client.ts); Circle App Kit UB docs (`docs.arc.io/app-kit/unified-balance`,
+`.../use-forwarding-service`); Arc testnet-only + Gateway mainnet
+(`circle.com/blog/nanopayments-powered-by-circle-gateway-is-now-live-on-mainnet`,
+`arc.io/blog/circle-launches-arc-public-testnet`, `circle.com/gateway`). Code:
+`_pay.mjs:29–47`, `_bridge.mjs:140,158`. No code changed — recon only.
+
+---
+
 ## 2026-07-08 — AI Agent guided actions COMPLETE: Bridge panel SHIPPED (all 3 cards live)
 
 **Brick:** activated the last "Quick actions" card on the AI Agent page — Bridge (`Soon`
