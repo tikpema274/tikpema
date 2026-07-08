@@ -15,9 +15,18 @@ import { exaSearch } from "./_exa.mjs";
 import { canSpend, recordSpend, recordBlocked } from "./_budget.mjs";
 import { payX402, fetchX402Requirements } from "./_x402.mjs";
 import { buildRpcBody, decodeRpc, fetchMarketData } from "./_cryptodata.mjs";
+import { searchArxiv, arxivToFacts } from "./_arxiv.mjs";
 
 // Current Anthropic web search server tool (GA — no beta header).
 const WEB_SEARCH_TOOL = { type: "web_search_20260209", name: "web_search", max_uses: 3 };
+
+// Token budget for BRIEF-producing (synthesis) calls only. The old blanket
+// max_tokens:1024 truncated rich briefs mid-JSON → extractJson → null → "missing
+// decision or sources" refund (reproduced on the diffusion query, arXiv-independent).
+// Comfortable headroom above the longest legitimate brief; only generated tokens are
+// billed, so the cost of headroom is ~nil. The tiny classifier/filter calls keep the
+// 1024 default (they emit small JSON).
+const BRIEF_MAX_TOKENS = 8192;
 
 // Anthropic runs its own server-side search loop; on hitting the built-in cap it
 // returns stop_reason "pause_turn" with the work so far. We resume by re-sending
@@ -34,11 +43,11 @@ export function extractJson(text) {
   return null;
 }
 
-export async function callAnthropic(apiKey, model, messages, systemPrompt, tools = [WEB_SEARCH_TOOL]) {
+export async function callAnthropic(apiKey, model, messages, systemPrompt, tools = [WEB_SEARCH_TOOL], maxTokens = 1024) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model, max_tokens: 1024, system: systemPrompt, tools, messages }),
+    body: JSON.stringify({ model, max_tokens: maxTokens, system: systemPrompt, tools, messages }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error?.message || "Anthropic call failed");
@@ -102,26 +111,27 @@ export function extractFacts(sellerBody, sellerUrl) {
   return [{ claim, source: src }];
 }
 
-// The data-decision / ROUTING system prompt (crypto-analysis first cut). The model
-// sees the question + already-retrieved web sources and routes to ONE source, or none.
-// PRIORITY RULE is in the prompt: prefer the paid on-chain path (QuickNode RPC) wherever
-// a listed method can serve; use the free CoinGecko path ONLY for market figures RPC
-// can't give (price/market-cap/volume); else "none". On-chain is LIMITED to the three
-// cleanly-decodable methods (NO eth_call / contract reads this cut).
+// The data-decision / ROUTING system prompt. The model sees the question +
+// already-retrieved web sources and routes to ONE source, or none. PRIORITY RULE is
+// in the prompt: prefer the paid on-chain path (QuickNode RPC) where a listed method
+// can serve; free CoinGecko ONLY for market figures RPC can't give; free arXiv ONLY
+// for genuinely scientific/technical questions; else "none". On-chain is LIMITED to
+// the three cleanly-decodable methods (NO eth_call this cut).
 const DATA_DECISION_SYSTEM = `You decide whether ONE data fetch would materially improve a client research brief, and which source to use. You are given the research question and the web-search sources already retrieved.
 
-Two data sources are available:
+Three data sources are available:
 - ON-CHAIN (Arc Testnet JSON-RPC, paid per call): live blockchain facts. LIMITED to exactly these methods:
   * eth_getBalance — native USDC balance of an address. params: ["<0x address>", "latest"]
   * eth_gasPrice — current gas price. params: []
   * eth_blockNumber — current block height. params: []
 - MARKET (CoinGecko, free): crypto PRICE, MARKET CAP, and 24h VOLUME for well-known coins. params: {"ids": "<coingecko id(s), comma-separated>"} using canonical ids like bitcoin, ethereum, usd-coin, solana.
+- PAPERS (arXiv, free): peer-reviewed / preprint ACADEMIC PAPERS (titles, authors, abstracts) for genuinely SCIENTIFIC, TECHNICAL, or ACADEMIC questions where primary research literature would materially improve the answer (e.g. machine-learning methods, physics, mathematics, biology, algorithms, cryptography research). params: {"query": "<focused academic search terms — NOT the raw question>"}.
 
-PRIORITY RULE: if the question needs an on-chain fact one of the on-chain methods above can serve, choose "onchain" (prefer it). Choose "market" ONLY for price / market-cap / volume the on-chain methods cannot provide. If the already-retrieved sources answer the question, or the need falls OUTSIDE the listed methods (e.g. a token balance by contract, contract storage, or anything needing eth_call), choose "none".
+PRIORITY RULE: if the question needs an on-chain fact one of the on-chain methods above can serve, choose "onchain" (prefer it). Choose "market" ONLY for price / market-cap / volume the on-chain methods cannot provide. Choose "papers" ONLY for genuinely scientific / technical / academic questions as described above — NEVER for prices, market data, current events, news, product / company / person lookups, who / when / where factual lookups, or anything a general web source answers. If the already-retrieved sources already answer the question, or none of the three sources fits, choose "none".
 
-For "onchain": set method to one of the three and params exactly as specified (a valid 0x-address for eth_getBalance). For "market": set params to {"ids": "..."}.
+For "onchain": set method to one of the three and params as specified (a valid 0x-address for eth_getBalance). For "market": set params to {"ids": "..."}. For "papers": set params to {"query": "..."} with focused academic search terms.
 
-Respond with ONLY JSON, no markdown, no fences: {"kind": "onchain" | "market" | "none", "method": "<rpc method or empty string>", "params": <array or object, or []>, "justification": "<one sentence>"}`;
+Respond with ONLY JSON, no markdown, no fences: {"kind": "onchain" | "market" | "papers" | "none", "method": "<rpc method or empty string>", "params": <array or object, or []>, "justification": "<one sentence>"}`;
 
 // Exported so the genuine-autonomy proof harness (_autonomy-test.mjs) can drive the
 // REAL decision path. Returns { kind, method, params, justification } plus a back-compat
@@ -134,7 +144,7 @@ export async function decidePurchase(apiKey, model, question, groundingBlock) {
   const data = await callAnthropic(apiKey, model, [{ role: "user", content: user }], DATA_DECISION_SYSTEM, []);
   const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
   const parsed = extractJson(text) || {};
-  const kind = ["onchain", "market", "none"].includes(parsed.kind) ? parsed.kind : "none";
+  const kind = ["onchain", "market", "papers", "none"].includes(parsed.kind) ? parsed.kind : "none";
   return {
     kind,
     method: typeof parsed.method === "string" ? parsed.method : "",
@@ -142,6 +152,32 @@ export async function decidePurchase(apiKey, model, question, groundingBlock) {
     justification: parsed.justification || "(no justification)",
     buy: kind !== "none", // back-compat (_autonomy-test.mjs reads .buy; legacy forceDecision)
   };
+}
+
+// STRICT relevance filter for arXiv papers — the reliability lever. arXiv full-text
+// search returns loosely-related papers and no score, so we bias hard toward DROP:
+// keep ONLY papers that DIRECTLY address the question. A brief padded with tangential
+// citations is worse than no papers. On ANY failure (LLM error, unparseable verdict)
+// → drop ALL (return []) → Exa-only. Never keeps a paper it isn't sure about.
+const PAPER_FILTER_SYSTEM = `You are a STRICT relevance filter for academic papers. Given a research question and a numbered list of arXiv papers (title + abstract), return the indices of ONLY the papers that DIRECTLY address the question. Bias strongly toward DROPPING: keep a paper ONLY if it clearly and directly bears on the question. Drop anything loosely, tangentially, or topically-adjacent but not directly relevant. It is better to keep NONE than to keep a tangential paper. Respond with ONLY JSON, no markdown, no fences: {"keep": [<0-based integer indices>]} — an empty array if none qualify.`;
+
+async function filterRelevantPapers(apiKey, model, question, papers) {
+  try {
+    const list = papers
+      .map((p, i) => `[${i}] "${p.title}" (${p.year})\n${p.summary.slice(0, 500)}`)
+      .join("\n\n");
+    const user = `Question:\n${question}\n\nPapers:\n${list}\n\nReturn ONLY the JSON with the indices to keep.`;
+    const data = await callAnthropic(apiKey, model, [{ role: "user", content: user }], PAPER_FILTER_SYSTEM, []);
+    const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+    const parsed = extractJson(text) || {};
+    const keep = Array.isArray(parsed.keep) ? parsed.keep : null;
+    if (!keep) return []; // unparseable verdict → drop all (safe)
+    return keep
+      .filter((i) => Number.isInteger(i) && i >= 0 && i < papers.length)
+      .map((i) => papers[i]);
+  } catch {
+    return []; // LLM error → drop all → Exa-only
+  }
 }
 
 // Run the decision → gate → buy sequence and return the purchased facts (an
@@ -168,6 +204,22 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     if (kind === "market") {
       const facts = await fetchMarketData(decision.params);
       console.log(`[research] market data (CoinGecko, free): ${facts.length} fact(s) — ${justification}`);
+      return facts;
+    }
+
+    // PAPERS branch — FREE academic papers (arXiv). NOT the x402 pay path. Fetch +
+    // defensive parse (searchArxiv drops any malformed paper), then a STRICT LLM
+    // relevance filter (bias to DROP; keep only papers that directly bear on the
+    // question). Any failure / no clean papers / filter drops all → [] → Exa-only.
+    if (kind === "papers") {
+      const papers = await searchArxiv({ query: decision.params?.query });
+      if (!papers.length) {
+        console.log(`[research] arXiv: no clean papers — Exa-only. ${justification}`);
+        return [];
+      }
+      const kept = await filterRelevantPapers(apiKey, model, question, papers);
+      const facts = arxivToFacts(kept);
+      console.log(`[research] arXiv papers (free): ${papers.length} fetched → ${facts.length} kept (strict) — ${justification}`);
       return facts;
     }
 
@@ -348,7 +400,8 @@ export async function research(
         model,
         [{ role: "user", content: exaUser }],
         systemPrompt,
-        [] // no web search — single call, no pause_turn resume needed
+        [], // no web search — single call, no pause_turn resume needed
+        BRIEF_MAX_TOKENS // headroom so a long, rich brief isn't truncated → unparseable → refund
       );
 
       const text = (data.content || [])
@@ -381,7 +434,7 @@ export async function research(
     userInstruction;
 
   const messages = [{ role: "user", content: user }];
-  let data = await callAnthropic(apiKey, model, messages, systemPrompt);
+  let data = await callAnthropic(apiKey, model, messages, systemPrompt, [WEB_SEARCH_TOOL], BRIEF_MAX_TOKENS);
 
   // Resume across pause_turn boundaries: append the assistant turn verbatim and
   // re-send. Do NOT inject a "continue" message — the API detects the trailing
@@ -389,7 +442,7 @@ export async function research(
   let n = 0;
   while (data.stop_reason === "pause_turn" && n < MAX_CONTINUATIONS) {
     messages.push({ role: "assistant", content: data.content });
-    data = await callAnthropic(apiKey, model, messages, systemPrompt);
+    data = await callAnthropic(apiKey, model, messages, systemPrompt, [WEB_SEARCH_TOOL], BRIEF_MAX_TOKENS);
     n++;
   }
 

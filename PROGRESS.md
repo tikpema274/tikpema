@@ -1,6 +1,69 @@
 
 ---
 
+## 2026-07-08 — FIX (pre-existing, arXiv-INDEPENDENT): synthesis max_tokens 1024→8192 truncation-refund bug
+
+**The more important find of the two shipped today.** The research SYNTHESIS call was
+capped at `max_tokens: 1024` (in the shared `callAnthropic`, `_research.mjs`), which
+**silently TRUNCATED rich briefs mid-JSON** → `extractJson` returned null → `research()`
+returned `decision: null` (`:416` "unparseable (exa path)") → `job-submit-background.mjs:262`
+**refunded** with "no usable brief — missing decision or sources".
+
+**Pre-existing — predates arXiv AND crypto.** It was silently refunding ANY rich-answer
+job whose brief exceeded 1024 tokens, regardless of capability. Surfaced by the diffusion
+query but proven **arXiv-independent**: in the diagnostic, scenario **B (papers bypassed)**
+went from reliably-FAIL to a full parsed brief **with ONLY the cap changed** — while
+scenario A (papers included) had already passed and C (papers forced) had also failed, so
+papers-presence never determined the outcome; answer-length vs the 1024 cap did.
+
+**Fix:** added an optional `maxTokens` param to `callAnthropic` (default **1024**, so the
+tiny classifier/filter calls are untouched) and pass `BRIEF_MAX_TOKENS = 8192` at the
+THREE brief-producing calls only — the Exa synthesis + the web-search path's initial +
+pause_turn resume. 8192 is comfortable headroom (real briefs ~1200–1840 chars ≈ well
+under; only generated tokens billed, so idle headroom costs ~nil). **Root cause = the
+cap, not arXiv, not crypto.**
+
+**Verified:** local re-run of the diffusion query → all three scenarios SUCCESS (B, the
+reliable-fail case, now returns a full brief: 1815 chars, 6 sources, conf 0.93). Then
+prod-verified by user (diffusion query succeeded). Files: `_research.mjs`. tsc + build clean.
+
+---
+
+## 2026-07-08 — arXiv deeper-research capability (CUT 1) SHIPPED + PROVEN on prod
+
+**What:** the research agent now pulls real academic papers (titles, authors, abstracts,
+arXiv IDs) into briefs via arXiv's FREE public API — no key, no wallet, no payment, a
+plain HTTPS GET returning Atom XML. Simpler than crypto because it's free (no x402, no
+gate, no ceiling); it's a `market`-style FREE branch.
+
+**Design:**
+- **Classifier** — a new `"papers"` kind in `decidePurchase` (`_research.mjs`); the
+  crypto `onchain`/`market`/`none` routing is **untouched** (added a 4th kind + one
+  branch). Gated in the prompt to genuinely SCIENTIFIC/TECHNICAL/ACADEMIC questions —
+  NEVER prices, current events, or who/when/where lookups.
+- **Router** — a free `papers` branch in `maybeBuyData` (next to `market`): fetch →
+  strict filter → facts. No x402, no budget gate, no spend.
+- **`_arxiv.mjs` (new)** — `searchArxiv` (HTTPS GET, `sortBy=relevance`, `max_results=6`,
+  8s timeout) + **DEFENSIVE regex Atom parse** (no dep): a paper is emitted ONLY if ALL
+  fields (title/summary/id/year/authors) extract cleanly; any partial/malformed entry is
+  DROPPED; malformed/empty XML → `[]`; never throws. `arxivToFacts` → `{claim,source}`
+  (source = arXiv abs link).
+- **STRICT LLM relevance filter** (`filterRelevantPapers` in `_research.mjs`, default
+  1024 tokens) — biases hard to DROP ("keep ONLY papers that DIRECTLY address the
+  question; better to keep NONE than a tangential one"); any failure → drop all →
+  Exa-only. Proven dropping: 6 fetched → 5/3 kept in tests.
+- **Additive merge** — papers fold into the grounding block + sources exactly like
+  crypto/Exa (`_research.mjs:~381/:410`), source-agnostic; it **augments, never replaces**
+  the Exa/web sources, so it can't empty a brief.
+
+**Verified on prod (user-run, passkey):** transformers/RLHF questions cite relevant
+arXiv papers; a BTC-price question pulls NONE (classifier gate holds — no over-trigger).
+Money path untouched. Deferred: `eth_call`-style contract reads have no analogue here;
+out of scope = PDF full-text, pagination, non-arXiv sources. Files: `_arxiv.mjs` (new),
+`_research.mjs`. tsc + build clean.
+
+---
+
 ## 2026-07-08 — Contact block in sidebar footer (copy-only)
 
 Contact block in sidebar footer: `tikpema274@gmail.com` mailto + `@tikpemaGB` →
