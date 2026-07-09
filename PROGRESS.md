@@ -42,6 +42,17 @@ spend a real ≥10 USDC and the spend mechanism is already proven (the 0.1 direc
 Auth note: the money-safe prod check used a token minted from prod's `SESSION_SECRET` (piped,
 never printed) — the full authenticated HTTP path remains the deferred follow-up below.
 
+**UB proof helper scripts (in `scripts/`, UNTRACKED test tooling — re-run, don't rewrite).**
+A future session doing the in-range authenticated HTTP-spend proof should reuse these:
+- **`fire-ub-spend.mjs`** / **`fire-ub-spend-direct.mjs`** — fire a REAL spend (HTTP endpoint
+  vs. direct `ubSpend()` executor), snapshot Arc unified + recipient Base before/after, poll
+  the async mint, and print a PROVEN/PARTIAL/UNPROVEN verdict + a durable capture in
+  `scripts/ub-spend-captures/`. ⚠️ Move real money — an in-range amount (10–50) will spend.
+- **`probe-ub-auth.mjs`** — zero-money endpoint/auth/cap health check (mints a token, sends an
+  over-cap amount; 400 = trusted+capped, 401 = SESSION_SECRET mismatch).
+- **`verify-ub-guards.mjs`** — money-safe floor/cap check (fires only below-floor + above-cap,
+  expects 400s). Accepts `SESSION_SECRET=<prod-secret>` (piped) or `TIKPEMA_TOKEN=<bearer>`.
+
 ---
 
 ## 2026-07-08 — Unified Balance SPEND PROVEN (cross-chain mechanism; full HTTP path deferred)
