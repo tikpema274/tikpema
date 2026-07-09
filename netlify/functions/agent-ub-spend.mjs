@@ -1,4 +1,4 @@
-import { json, parseBody, ubSpendCapUsdc } from "./_arc.mjs";
+import { json, parseBody, ubSpendCapUsdc, ubSpendFloorUsdc } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ubSpend } from "./_ubspend.mjs";
 
@@ -31,7 +31,16 @@ export async function handler(event) {
     return json(400, { error: "unsupported destinationChain (first proof: Base_Sepolia only)" });
   }
 
-  // ── THE CAP — enforced BEFORE any UB call. Reject, never clamp; nothing signs. ──
+  // ── THE FLOOR + CAP — both enforced BEFORE any UB call. Reject, never clamp;
+  // nothing signs. Valid range is floor <= amount <= cap. The floor exists because the
+  // cross-chain forwarder fee is FLAT (~0.2 USDC), so smaller spends are uneconomical. ──
+  const floor = ubSpendFloorUsdc();
+  if (amount < floor) {
+    return json(400, {
+      error: `below minimum spend of ${floor} USDC — cross-chain fee (~0.2 flat) makes smaller amounts uneconomical`,
+      floor,
+    });
+  }
   const cap = ubSpendCapUsdc();
   if (amount > cap) {
     return json(400, { error: `exceeds per-spend limit of ${cap} USDC`, cap });

@@ -1,6 +1,49 @@
 
 ---
 
+## 2026-07-08 — UB SPEND fee-guard (floor + cap) SHIPPED; fee finding RESOLVED
+
+Follow-up to the SPEND-PROVEN entry below, closing its ⚠️ fee finding. Read-only fee
+diagnosis first, then economic guardrails (not a fee reduction), verified on prod.
+
+**FEE FINDING RESOLVED — the ~0.2 fee is NOT a bug, it's a FLAT per-transfer forwarder fee.**
+- Diagnosis (from the proof capture + Circle App Kit docs): the fee decomposes into a tiny
+  proportional CCTP `provider` fee (1–14 bps, ~0 on testnet), tiny real Arc gas (**~0.003** —
+  Arc's stable-cheap-fee design), and the dominant **`forwarder` fee ~0.202 which is FLAT**
+  (amount-independent). Docs confirm 0.20 flat whether sending 500 or 1,000 USDC; it's the
+  Forwarding Service's destination-mint cost priced in USDC.
+- SAME structure as our bridge (`_bridge.mjs`: `forwarderFee = fwdTier.forwardFee.high`, no
+  amount term; ~0.2 to an L2, 1.5–14 to Ethereum L1). Our 0.202 sits in the L2 band.
+- So a flat fee → tiny spends have absurd ratios (0.1 = ~200%) but realistic ones are trivial
+  (**<2% at ≥10 USDC**, 1% at 20). No cheaper mode: SLOW/STANDARD only zeroes the ~0 CCTP
+  protocol fee, not the forwarder; skipping the forwarder needs a destination signer the SCA
+  can't provide. **Fix = economic guardrails, not fee reduction.**
+
+**What shipped (2 files):**
+- **`_arc.mjs`** — new **`ubSpendFloorUsdc()`** (default 10, fail-closed same as the cap) +
+  raised **`ubSpendCapUsdc()`** default **1 → 50** (the 1 was a first-proof value).
+- **`agent-ub-spend.mjs`** — enforces **floor then cap** in the wrapper, BEFORE any UB call.
+
+**Guardrails:**
+- **MINIMUM FLOOR** `AGENT_UB_SPEND_FLOOR_USDC=10` — rejects `< 10` with an educational
+  message ("below minimum spend of 10 USDC — cross-chain fee (~0.2 flat) makes smaller
+  amounts uneconomical").
+- **CAP raised 1 → 50** `AGENT_UB_SPEND_CAP_USDC=50`. **⚠️ This raises the per-spend ceiling
+  50× — deliberate.** Operational range is now **10–50 USDC** (fee <2%).
+- Both **reject-not-clamp, before signing, fail-closed**: garbled/negative env throws
+  (refuses to spend); a `floor > cap` misconfig rejects everything (fail-safe, never opens a
+  hole). Floor checked before cap.
+
+**Verified on PROD (deploy `6a4f8401…`, live):** authenticated money-safe check —
+`amount 5 → 400` (below floor), `amount 999 → 400` (above cap), **no funds moved**. Deployed
+env is authoritative: `floor=10`, `cap=50` confirmed via `netlify env:get --context
+production` (old cap `1` overwritten). The in-range ALLOW (10–50) was NOT re-fired — it would
+spend a real ≥10 USDC and the spend mechanism is already proven (the 0.1 direct test below).
+Auth note: the money-safe prod check used a token minted from prod's `SESSION_SECRET` (piped,
+never printed) — the full authenticated HTTP path remains the deferred follow-up below.
+
+---
+
 ## 2026-07-08 — Unified Balance SPEND PROVEN (cross-chain mechanism; full HTTP path deferred)
 
 The SPEND (write) half of Unified Balance — deferred in the VIEW entry below for

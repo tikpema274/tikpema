@@ -103,11 +103,27 @@ export const bridgeCapUsdc = () => {
 // the executor unguarded would bypass the cap (the swap-cap trap).
 export const ubSpendCapUsdc = () => {
   const raw = process.env.AGENT_UB_SPEND_CAP_USDC;
-  if (raw === undefined || raw === "") return 1; // conservative testnet default
+  if (raw === undefined || raw === "") return 50; // raised from the 1 first-proof value
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) {
     throw new Error(
       `AGENT_UB_SPEND_CAP_USDC is misconfigured (${JSON.stringify(raw)}); refusing to spend`
+    );
+  }
+  return n;
+};
+
+// Per-UB-SPEND FLOOR (minimum). The Forwarding Service fee is FLAT (~0.2 USDC to an L2,
+// amount-independent), so small cross-chain spends are structurally uneconomical (a 0.1
+// spend is ~200% fee). Reject below the floor BEFORE any spend, same fail-closed parse as
+// the cap. Default 10 if unset. Valid range is floor <= amount <= cap.
+export const ubSpendFloorUsdc = () => {
+  const raw = process.env.AGENT_UB_SPEND_FLOOR_USDC;
+  if (raw === undefined || raw === "") return 10; // conservative default (fee ~<2% at 10)
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(
+      `AGENT_UB_SPEND_FLOOR_USDC is misconfigured (${JSON.stringify(raw)}); refusing to spend`
     );
   }
   return n;
