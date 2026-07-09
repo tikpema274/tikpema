@@ -7,6 +7,7 @@ import SendPanel from "./components/SendPanel";
 import SwapPanel from "./components/SwapPanel";
 import BridgePanel from "./components/BridgePanel";
 import NanopaymentPanel from "./components/NanopaymentPanel";
+import UnifiedBalancePanel from "./components/UnifiedBalancePanel";
 import Dashboard from "./components/Dashboard";
 import { useWallet } from "./wallet/useWallet";
 
@@ -76,6 +77,11 @@ export default function App() {
     // explainer, so the 5-item nav (working tools only) stays untouched.
     case "nanopay":
       page = <NanopaymentPanel />;
+      break;
+    // Reached via the Dashboard "Agent unified balance" card, nav-less like #/nanopay
+    // — a read-only cross-chain balance view, so the 5-item nav stays untouched.
+    case "unified":
+      page = <UnifiedBalancePanel />;
       break;
     case "feedback":
       page = <FeedbackPanel wallet={wallet} />;

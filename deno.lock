@@ -11,17 +11,22 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
+        "npm:@circle-fin/adapter-circle-wallets@^1.4.1",
+        "npm:@circle-fin/app-kit@^1.8.1",
         "npm:@circle-fin/developer-controlled-wallets@9",
         "npm:@circle-fin/modular-wallets-core@1",
+        "npm:@circle-fin/x402-batching@^2.1.0",
         "npm:@netlify/blobs@^10.7.9",
         "npm:@types/react-dom@^18.3.0",
         "npm:@types/react@^18.3.0",
         "npm:@vitejs/plugin-react@^4.3.0",
+        "npm:@x402/evm@^2.16.0",
         "npm:react-dom@^18.3.1",
         "npm:react@^18.3.1",
         "npm:typescript@^5.5.0",
         "npm:viem@^2.21.0",
-        "npm:vite@^5.4.0"
+        "npm:vite@^5.4.0",
+        "npm:webauthn-p256@0.0.5"
       ]
     }
   }

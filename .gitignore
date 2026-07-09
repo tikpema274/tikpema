@@ -3,3 +3,4 @@ node_modules
 dist
 .netlify
 npm-install.log
+scratchpad-netlifydev.log

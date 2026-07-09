@@ -233,6 +233,13 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
               </div>
             </>
           )}
+          {/* Entry to the full Unified Balance page (#/unified) — mirrors the
+              "Manage wallet" link on the "Your wallet" card above. */}
+          <div className="row" style={{ marginTop: 12, alignItems: "baseline" }}>
+            <button className="linkbtn" onClick={() => go("unified")}>
+              View unified balance →
+            </button>
+          </div>
         </div>
       </div>
 

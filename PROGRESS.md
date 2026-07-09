@@ -1489,3 +1489,29 @@ Component file kept `NanopaymentPanel.tsx` (internal, not worth the churn).
 (deploy `6a4cdf71…`, "Deploy is live!"); prod `index.html` confirmed serving the new build hash
 `index-C1dH3bdq.js` (real-deploy check, not just a 200 on the hash route). Live at
 app.tikpema.xyz/#/nanopay.
+
+## 2026-07-09 — UI: Unified Balance PAGE (read-only) — nav-less #/unified, funding deferred
+
+**What shipped.** A first-class page for the agent's Unified Balance, reached nav-less at `#/unified`
+from the "Agent unified balance" card on the Dashboard — same pattern as `#/nanopay` and `#/bridge`,
+so the 5-item nav stays reserved for working tools. The page shows the cross-chain unified total, the
+per-chain breakdown (Arc Testnet + Base Sepolia, each degrading to "unavailable" independently), and
+the agent wallet address that the balance is keyed to, rendered via `AddressDisplay`
+(masked `0x4c6d…f320` → click-to-expand → copy). Owner address ONLY: the delegate signer stays
+server-side and is never surfaced.
+
+**No money-path change.** The panel is prop-less, holds no signer, and its only network call is a
+`POST /api/gateway-balance` — the existing public agent-wallet-keyed read (no secrets, no kit, no
+adapter, `Promise.allSettled` per domain). Funding the unified balance (`depositFor`, a money-path
+write) is a **DISABLED "Fund — coming soon" placeholder** that reserves the layout slot and nothing
+else: hardcoded `disabled`, no `onClick`, no handler behind it. Wiring it is the next brick and is
+deferred — it inherits the SCA-auth risk already logged against the UB SPEND half.
+
+**Files.** New `src/components/UnifiedBalancePanel.tsx`; `src/App.tsx` (import + `case "unified"`);
+`src/components/Dashboard.tsx` ("View unified balance →" `linkbtn`, mirroring "Manage wallet");
+`deno.lock` (re-synced to the `package.json` deps that landed in an earlier commit — app-kit,
+adapter-circle-wallets, x402-batching, @x402/evm, webauthn-p256). `.gitignore` now covers the stray
+`scratchpad-netlifydev.log`. The UB proof helper scripts under `scripts/` stay untracked as before.
+
+**Verified.** `tsc --noEmit` clean (exit 0); `vite build` clean (exit 0), only the pre-existing
+744 kB chunk-size warning. Read-only by construction — nothing to prove on-chain.
