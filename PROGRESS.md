@@ -1578,3 +1578,53 @@ control; now takes the `wallet` prop for the session token), `App.tsx` (passes i
 stay untracked: `recon-ub-fund.mjs`, `verify-ub-deposit-guards.mjs` (10/10 guards, zero txs),
 `probe-ub-deposit-prod.mjs`. `tsc --noEmit` clean; `vite build` clean. Deploy `6a4fc4abd186…`,
 bundle `index-CaCwTiui.js`.
+
+## 2026-07-09 — UB in-range SPEND proven END-TO-END via the authenticated HTTP path (last UB item)
+
+Closes the two things `34e1d2a` deferred: the **full HTTP path** (endpoint → session auth → floor/cap
+→ `ubSpend`) and an **in-range (≥ floor)** spend. Both now exercised against prod with real money.
+
+**The spend.** 10.000000 USDC, Arc Testnet → Base Sepolia, recipient = the agent's OWN Base address
+(`0xc54d…e621`), so the funds stay under agent control — a relocation, not a payment.
+`HTTP 200 {executed:true, state:"completed"}` — no 1098 async-waiter quirk this run.
+- transferId `4b44526a-2da7-4a35-896c-501215b9345c`
+- mint tx `0xf9ac9ae42b87f6e52548f5ea2963d0738cbb76294dca0ad83fec7ea5108ec49b`
+  (Base Sepolia block 43925118, receipt `status 0x1`)
+  https://sepolia.basescan.org/tx/0xf9ac9ae42b87f6e52548f5ea2963d0738cbb76294dca0ad83fec7ea5108ec49b
+
+**Both sides, verified INDEPENDENTLY of the runner** (direct Circle Gateway API for Arc; two separate
+Base Sepolia RPCs — `sepolia.base.org` and `publicnode.com` — agreeing for Base):
+- Arc unified  **11.469876 → 1.264610**  (−10.205266)
+- Base native USDC (agent) **0 → 10.000000**  (+10)
+- Base *unified* stays 0 — the Forwarding Service mints NATIVE USDC, not a Gateway deposit. Reading
+  the unified balance on the destination would show nothing; you must read `balanceOf`.
+
+**FEE FINDING RESOLVED — flat, and cheaper than assumed.** Implied fee = **0.205266 USDC**, versus
+`0.205619` on the old 0.1 spend. A 100× change in amount moved the fee by 0.0004 → the cross-chain
+forwarder fee is **FLAT**, confirmed at scale. That is **2.05% at 10 USDC** (not the ~3% guessed).
+The floor-10 rule is validated by measurement; on this evidence the floor could safely come DOWN.
+NOTE: the earlier "~0.30 flat fee" figure was a MISREAD — `0.305624` was the TOTAL cost of the 0.1
+spend (0.1 amount + 0.205619 fee), not the fee. Corrected here.
+
+**Guards observed live on prod (all zero-movement, all before signing):**
+- unauth POST → **401**
+- below-floor `0.1` → **400** `below minimum spend of 10 USDC`
+- over-cap `55` → **400** `exceeds per-spend limit of 50 USDC` (server echoed `cap:50` — deployed
+  value observed, not inferred). Reject-not-clamp: a clamping impl would have silently spent 50.
+
+**Auth (supersedes the 34e1d2a deferral).** Prod `SESSION_SECRET` ≠ local `.env`. Minting with the
+value read from the Netlify production context yields a prod-trusted token. TRAP: `netlify env:get`
+emits a trailing blank line, so `| tail -1` alone yields `""` → an exported empty `SESSION_SECRET`
+BEATS `--env-file` (exported vars win) → the runner dies at `die(3)` with no capture and no HTTP
+call. Always `| grep -vE '^\s*$' | tail -1`. Three runs were lost to this before it was spotted.
+
+**Runner hardened** (`scripts/fire-ub-spend.mjs`, untracked): the durable capture is now written
+IMMEDIATELY after the fire (was: only after the poll loop, so a timeout destroyed the very evidence
+it existed to preserve), and a non-200 short-circuits the poll loop entirely — a rejected request
+triggers no burn and no mint, so polling for one only buried the real response. A 400 now returns in
+~5s instead of hanging for the full 2-minute poll deadline.
+
+**UB capability COMPLETE:** VIEW (read) + FUNDING (deposit) + SPEND (cross-chain write), each capped,
+auth-gated, and proven on-chain. Remaining unexercised: the deposit revoke/failure branch (happy path
+only — see `1afc101`). Arc unified now 1.264610, below the floor, so a further spend correctly cannot
+run until refunded.
