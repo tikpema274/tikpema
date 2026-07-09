@@ -55,6 +55,14 @@
   to = "/.netlify/functions/agent-ub-spend"
   status = 200
 
+# Unified Balance FUNDING (deposit). Cap-guarded in the wrapper before any tx; the SCA
+# funds its OWN unified balance via the direct-contract approve→deposit path (no App Kit,
+# so no 1098 async-hash race), with an active allowance revoke on deposit failure.
+[[redirects]]
+  from = "/api/agent-ub-deposit"
+  to = "/.netlify/functions/agent-ub-deposit"
+  status = 200
+
 [[redirects]]
   from = "/api/agent-bridge"
   to = "/.netlify/functions/agent-bridge"

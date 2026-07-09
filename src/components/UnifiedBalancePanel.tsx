@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import AddressDisplay from "./AddressDisplay";
+import type { useWallet } from "../wallet/useWallet";
+
+type UnifiedWallet = ReturnType<typeof useWallet>;
 
 const go = (id: string) => {
   window.location.hash = "/" + id;
@@ -8,21 +11,29 @@ const go = (id: string) => {
 // Poll cadence matches the Dashboard unified card.
 const BALANCE_POLL_MS = 30_000;
 
-// UnifiedBalancePanel — a first-class READ-ONLY page for the agent's Unified
-// Balance. Reached nav-less via #/unified (from the Dashboard "Agent unified
-// balance" card), mirroring #/bridge and #/nanopay: the 5-item nav stays reserved
-// for working tools.
+// UnifiedBalancePanel — a first-class page for the agent's Unified Balance. Reached
+// nav-less via #/unified (from the Dashboard "Agent unified balance" card), mirroring
+// #/bridge and #/nanopay: the 5-item nav stays reserved for working tools.
 //
-// Read-only: it reuses the public /api/gateway-balance read (agent-wallet keyed,
-// no secrets, no kit/adapter) to show the cross-chain total + per-chain breakdown
-// and the depositor (owner) address. It MOVES NO MONEY — the funding button
-// (depositFor, a money-path write) is a DISABLED placeholder here; the next brick
-// wires it. Prop-less like NanopaymentPanel; a wallet prop arrives only when
-// funding lands and needs a signer.
-export default function UnifiedBalancePanel() {
+// READ: the public /api/gateway-balance read (agent-wallet keyed, no secrets, no
+// kit/adapter) — cross-chain total + per-chain breakdown + the depositor address.
+//
+// WRITE: the FUNDING control posts /api/agent-ub-deposit (auth-gated, cap-enforced
+// server-side BEFORE any tx). The agent SCA funds its OWN unified balance from its own
+// plain Arc USDC — self-custody, nothing is sent to a third party. The cap is the
+// server's; this form only pre-checks it to give a fast, honest error. It takes the
+// wallet prop for the session token, exactly as the read-only version predicted.
+export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWallet }) {
   type PerChain = { chain: string; usdc: string | null; ok: boolean };
   const [data, setData] = useState<{ depositor: string; total: string; perChain: PerChain[] } | null>(null);
   const [failed, setFailed] = useState(false);
+
+  // Funding form state.
+  const [amount, setAmount] = useState("");
+  const [funding, setFunding] = useState(false);
+  const [fundError, setFundError] = useState("");
+  const [fundOk, setFundOk] = useState<{ amountUsdc: number; tx: string } | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -51,7 +62,37 @@ export default function UnifiedBalancePanel() {
       alive = false;
       clearInterval(id);
     };
-  }, []);
+  }, [reloadKey]);
+
+  // Fund — a money-path write. The server re-checks auth AND the cap before anything
+  // signs; this handler only shapes the request and reports what came back.
+  async function fund() {
+    const amountNum = Number(amount);
+    if (!(amountNum > 0)) {
+      setFundError("Enter an amount greater than 0.");
+      return;
+    }
+    setFunding(true);
+    setFundError("");
+    setFundOk(null);
+    try {
+      const token = await w.ensureSession();
+      const r = await fetch("/api/agent-ub-deposit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amountUsdc: amountNum }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok) throw new Error(d?.error || "Deposit failed");
+      setFundOk({ amountUsdc: d.amountUsdc, tx: d.tx });
+      setAmount("");
+      setReloadKey((k) => k + 1); // re-read the balance we just changed
+    } catch (e) {
+      setFundError(e instanceof Error ? e.message : "Deposit failed");
+    } finally {
+      setFunding(false);
+    }
+  }
 
   return (
     <div className="plane">
@@ -141,15 +182,16 @@ export default function UnifiedBalancePanel() {
         </div>
       )}
 
-      {/* Funding — placeholder for the NEXT brick (depositFor, a money-path write).
-          Disabled on purpose; this read-only brick only reserves the layout slot. */}
+      {/* Funding — a MONEY-PATH WRITE. The agent SCA deposits its own plain Arc USDC
+          into its own unified balance. Auth + per-deposit cap are enforced server-side
+          before any transaction; this form is a thin caller. */}
       <div
         className="status"
         style={{
           marginTop: 12,
           padding: "14px 16px",
           background: "var(--field)",
-          border: "1px dashed var(--line)",
+          border: "1px solid var(--line)",
           borderRadius: 12,
         }}
       >
@@ -164,12 +206,39 @@ export default function UnifiedBalancePanel() {
         >
           Fund the unified balance
         </div>
-        <button disabled style={{ opacity: 0.55, cursor: "not-allowed" }}>
-          Fund — coming soon
-        </button>
-        <div className="sub" style={{ margin: "8px 0 0" }}>
-          Depositing USDC into the unified balance arrives in the next update.
+        <div className="sub" style={{ margin: "0 0 10px" }}>
+          Move USDC from the agent wallet into its unified balance. The funds stay owned
+          by the agent — this is a deposit, not a transfer to anyone else.
         </div>
+        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+          <input
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            placeholder="Amount (USDC)"
+            value={amount}
+            disabled={funding}
+            onChange={(e) => setAmount(e.target.value)}
+            style={{ maxWidth: 180 }}
+          />
+          <button className="emerald" disabled={funding || !amount} onClick={fund}>
+            {funding ? "Depositing…" : "Fund"}
+          </button>
+        </div>
+        {fundError && (
+          <div className="sub" style={{ margin: "8px 0 0", color: "var(--danger, #e5484d)" }}>
+            {fundError}
+          </div>
+        )}
+        {fundOk && (
+          <div className="sub" style={{ margin: "8px 0 0" }}>
+            Deposited <span className="mono">{fundOk.amountUsdc}</span> USDC.{" "}
+            <a href={fundOk.tx} target="_blank" rel="noreferrer">
+              View transaction ↗
+            </a>
+          </div>
+        )}
       </div>
 
       <div className="row" style={{ marginTop: 16 }}>

@@ -1515,3 +1515,66 @@ adapter-circle-wallets, x402-batching, @x402/evm, webauthn-p256). `.gitignore` n
 
 **Verified.** `tsc --noEmit` clean (exit 0); `vite build` clean (exit 0), only the pre-existing
 744 kB chunk-size warning. Read-only by construction — nothing to prove on-chain.
+
+## 2026-07-09 — Unified Balance FUNDING shipped + PROVEN (deposit(), direct-contract path)
+
+The write half of the UB page: the **Fund** control replaces the "coming soon" placeholder.
+The agent SCA funds its **OWN** unified balance from its own plain Arc USDC — self-custody,
+nothing is sent to a third party. Depositor == credited account, which is exactly why this is
+`deposit(address,uint256)` and **not** `depositFor` (that one credits a *different* account).
+
+**Why direct-contract, not App Kit.** `kit.unifiedBalance.deposit()` routes to the provider's
+`depositWithApprove()` = approve → deposit with an `adapter.waitForTransaction` after EACH. On a
+Circle dev-controlled SCA that waiter hits the async-hash race and throws code 1098 — the same
+failure that kills `kit.bridge()`. Worse, the SDK's approve step sits OUTSIDE its own try/catch,
+so its `revokeAllowanceBestEffort` is **unreachable** when approve throws: it strands a live
+allowance. Also: `DepositForParams` is `Omit<DepositParams,'allowanceStrategy'>` and the provider
+hardcodes `'approve'` (`provider-gateway-v1/index.mjs:11653`) — no escape hatch. So we reuse the
+proven swap/bridge fix: two `createContractExecutionTransaction` calls polled by Circle tx id
+(`waitForTx`), which return the REAL hash and cannot hit 1098.
+
+**Cap.** `AGENT_UB_DEPOSIT_CAP_USDC=25` — **set in the Netlify production context and OBSERVED**
+(the server echoed `cap:25`), not merely a code default. Fail-closed parse (unset→25, "0"→frozen,
+non-numeric→throws). Enforced in the wrapper (`agent-ub-deposit.mjs`) at the top,
+**reject-before-executor**: `_ubdeposit.mjs` is UNCAPPED, so an unguarded path would bypass it
+(the swap-cap trap). Reject-not-clamp — an over-cap request returns 400 and nothing signs. No
+FLOOR: a deposit pays no flat forwarder fee, unlike the cross-chain spend.
+
+**Non-atomic safety (approve + deposit is two txs).** We own the cleanup rather than trusting the
+SDK: (1) read the CURRENT allowance first — skip a redundant approve entirely; (2) approve the
+**EXACT** amount, never infinite and never `increaseAllowance` (which is what lets a retry stack);
+(3) on deposit failure, actively `approve(gateway, 0)` to revoke. A failed revoke is NOT swallowed
+— it throws with `allowanceDangling: true`, surfaced as a distinct field on the 500, because an
+operator must know residue is on-chain. The revoke only fires when THIS call granted the allowance
+(`if (approveTxHash)`), so it can't clobber pre-existing state it didn't create.
+
+⚠️ **The revoke / deposit-failure branch is UNEXERCISED.** Only the happy path is proven. The
+allowance ending at 0 below is *self-consumption* (deposit spent exactly the approved amount) —
+NOT evidence the revoke works. Proving it needs deliberate fault injection.
+
+**PROVEN ON PROD (both, zero-money then real money):**
+- **Guard, zero-movement:** authenticated over-cap POST `{amountUsdc: 25.01}` → **400**
+  `{"error":"exceeds per-deposit limit of 25 USDC","cap":25}`. Balance + allowance unchanged.
+  Also unauth → 401 (route was 404 pre-deploy, so the 401 is genuinely new code).
+- **Real 11 USDC deposit, verified THREE ways:** plain USDC **43.75 → 32.75** (−11); unified Arc
+  **0.469876 → 11.469876** (+11); allowance **0 → 0** (clean, self-consumed not revoked).
+  tx `0x1e587f17b283072a5c8a33e17d6d7f08e3ec325ad3fbfbbbde6dfec9bfa1ece7` (block 50956038) —
+  the only SCA→GatewayWallet transfer in the scanned range, value exactly 11.000000.
+  https://testnet.arcscan.app/tx/0x1e587f17b283072a5c8a33e17d6d7f08e3ec325ad3fbfbbbde6dfec9bfa1ece7
+
+**Auth note (supersedes the 34e1d2a deferral).** Prod's `SESSION_SECRET` ≠ local `.env` (confirmed
+by hashing both: local `5f0d64e0…`, prod `96939992…`), so a locally-minted token gets 401 from prod.
+Reading the **prod** secret from the Netlify env and minting with that yields a prod-trusted token,
+which is how the authenticated over-cap probe ran. The secret is passed in-process only — never
+printed, never written to disk. This unblocks authenticated prod probes generally.
+
+**UNBLOCKS:** unified Arc balance is now **11.469876**, above the UB-spend floor of 10 → the
+in-range **≥10 authenticated spend** proof (the both-sides half deferred in `34e1d2a`) is runnable.
+
+**Files.** New `netlify/functions/_ubdeposit.mjs` (uncapped executor: allowance-check → exact
+approve → deposit → revoke-on-fail), `netlify/functions/agent-ub-deposit.mjs` (auth + cap wrapper);
+`_arc.mjs` (`ubDepositCapUsdc`), `netlify.toml` (redirect), `UnifiedBalancePanel.tsx` (real Fund
+control; now takes the `wallet` prop for the session token), `App.tsx` (passes it). Proof helpers
+stay untracked: `recon-ub-fund.mjs`, `verify-ub-deposit-guards.mjs` (10/10 guards, zero txs),
+`probe-ub-deposit-prod.mjs`. `tsc --noEmit` clean; `vite build` clean. Deploy `6a4fc4abd186…`,
+bundle `index-CaCwTiui.js`.

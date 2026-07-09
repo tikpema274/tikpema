@@ -79,9 +79,10 @@ export default function App() {
       page = <NanopaymentPanel />;
       break;
     // Reached via the Dashboard "Agent unified balance" card, nav-less like #/nanopay
-    // — a read-only cross-chain balance view, so the 5-item nav stays untouched.
+    // — a cross-chain balance view plus the (auth- and cap-gated) funding control, so
+    // the 5-item nav stays untouched.
     case "unified":
-      page = <UnifiedBalancePanel />;
+      page = <UnifiedBalancePanel wallet={wallet} />;
       break;
     case "feedback":
       page = <FeedbackPanel wallet={wallet} />;

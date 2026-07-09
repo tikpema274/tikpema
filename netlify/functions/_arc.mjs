@@ -113,6 +113,24 @@ export const ubSpendCapUsdc = () => {
   return n;
 };
 
+// Per-UB-DEPOSIT cap (funding the agent's OWN unified balance: plain Arc USDC → the
+// Gateway Wallet contract, credited to the SCA). Same fail-closed parse as the others.
+// CRITICAL: _ubdeposit.mjs is UNCAPPED, so the wrapper (agent-ub-deposit.mjs) MUST call
+// this and reject BEFORE approving/depositing — reaching the executor unguarded would
+// bypass the cap (the swap-cap trap). No FLOOR: unlike the cross-chain spend, a deposit
+// pays no flat forwarder fee, so small deposits are not uneconomical.
+export const ubDepositCapUsdc = () => {
+  const raw = process.env.AGENT_UB_DEPOSIT_CAP_USDC;
+  if (raw === undefined || raw === "") return 25; // conservative default, matches the bridge cap
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(
+      `AGENT_UB_DEPOSIT_CAP_USDC is misconfigured (${JSON.stringify(raw)}); refusing to deposit`
+    );
+  }
+  return n;
+};
+
 // Per-UB-SPEND FLOOR (minimum). The Forwarding Service fee is FLAT (~0.2 USDC to an L2,
 // amount-independent), so small cross-chain spends are structurally uneconomical (a 0.1
 // spend is ~200% fee). Reject below the floor BEFORE any spend, same fail-closed parse as
