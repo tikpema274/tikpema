@@ -1628,3 +1628,85 @@ triggers no burn and no mint, so polling for one only buried the real response. 
 auth-gated, and proven on-chain. Remaining unexercised: the deposit revoke/failure branch (happy path
 only — see `1afc101`). Arc unified now 1.264610, below the floor, so a further spend correctly cannot
 run until refunded.
+
+## 2026-07-10 — RECEIPT TRUST BOUNDARY proven (the load-bearing piece of the proposal loop)
+
+Brick 1 of the research→propose→approve→execute loop, built **receipt-first**: before any
+proposal layer exists, prove the record it produces cannot be faked. Get this wrong and the
+loop emits FALSE on-chain history inside a trust artifact — worse than a broken loop.
+
+**The invariant.** Every field of the receipt is SERVER-SOURCED. No client-asserted value can
+enter it, by construction:
+- `job-bridge-approve.mjs` reads exactly ONE field from the request body: `runId`. Destination
+  and amount come from the proposal **the server itself wrote**; the fee is re-priced LIVE
+  inside `executeAction`; `approvedBy` is `session.address`. This is STRONGER than the
+  bridge template (`agent-bridge.mjs` must re-accept `{amountUsdc, destination}` because
+  `agent-act` is stateless) — here the client cannot choose *what* is bridged, only *whether*.
+- `burnHash` comes from `executeAction`'s own return (`_actions.mjs:191-201` ← `_bridge.mjs:192`
+  `await waitForTx(...)`, a CONFIRMED hash, not the racy App Kit waiter).
+- `mintTxHash` is written only after **DOUBLE verification**: IRIS reports the forward
+  CONFIRMED/COMPLETE *and* `_receipt.mjs` independently READS the destination chain and finds
+  that exact tx — right chainId, `status 0x1`, and a USDC Transfer to our recipient.
+- The USDC contract is **pinned per chain** (doubly sourced: Circle's canonical testnet list
+  AND cross-checked on-chain 2026-07-10 — `eth_chainId` matches, code non-empty,
+  `symbol()=="USDC"`, `decimals()==6`, 8/8). So the record asserts *a USDC transfer*, not
+  merely *a token transfer*.
+- IRIS says minted but the chain disagrees → **`mint_unverified`**, a LOUD human-review state,
+  NEVER auto-retried into `minted`. The claimed hash is stored as `irisClaimedMintTxHash` so no
+  reader can mistake a claim for a fact.
+- `receipt` is a SIBLING of `canonicalReport`, never inside it — mutating those bytes would
+  break the re-hash determinism proof (`job-evaluate-background.mjs:214`) and the on-chain
+  `deliverableHash`. Two anchors (research hash on-chain; action anchored by its own tx
+  hashes), linked off-chain. Single-hash binding = future hardening.
+
+**PROVEN ADVERSARIALLY (all reads, zero money)** — `scripts/verify-receipt-adversarial.mjs`, 5/5.
+A CONTROL (the real UB-spend mint) verifies, so the verifier is not vacuously false. Then:
+bogus hash → `receipt_not_found` (keep polling); real hash on the WRONG chain →
+`receipt_not_found`; REVERTED tx (`status 0x0`) → `tx_reverted` → **mint_unverified**; real
+successful tx with the WRONG recipient → `no_usdc_transfer_to_recipient` → **mint_unverified**.
+**No attack produced `minted`.**
+
+**PROVEN DRY (write path, stubbed executeAction)** — `scripts/verify-approve-writepath.mjs`, 28/28.
+Every call made with a HOSTILE body (`burnHash`, `amountUsdc:999999`, `destination:"ethereum"`,
+`state:"minted"`): all ignored. Optimistic lock is in place BEFORE `executeAction` runs; a second
+approve → 409 with no second bridge; a guard block RELEASES the lock and writes NO receipt; an
+unexpected throw likewise; `TxPendingError` → `burn_pending` with **no burnHash**; all five
+preconditions (ownership / status / proposal / cap / destination) refuse before any execution.
+*(A test bug found here: seeding `proposal: undefined` re-triggers the JS destructuring default
+and silently supplies a VALID proposal — a test that seeds `undefined` to mean "absent" lies.)*
+
+**PROVEN WET (real money)** — 1 USDC bridged Arc → Base Sepolia, recipient = the source wallet:
+- burn `0x093cad2a1c5b12532fcf0989b69ab85109042532255b644a4167f18c87e52de0` (Arc block 51075478)
+- mint `0x7b876a98c6a28a3f71488ee7d64534a2009c58ffdbc961ddcfa400c73eca12d9` (Base block 43953706)
+  https://sepolia.basescan.org/tx/0x7b876a98c6a28a3f71488ee7d64534a2009c58ffdbc961ddcfa400c73eca12d9
+- Arc **31.940000 → 30.940000** (−1.000000); Base **10.000000 → 10.796935** (+0.796935)
+- fee **0.203065** — the fee is taken OUT OF the amount (so 1 USDC costs 1, and 0.797 arrives;
+  it does NOT cost 1.2). Consistent with the ~0.2055 FLAT forwarder fee measured on the UB spend.
+- Mint independently confirmed by TWO Base RPCs (`sepolia.base.org`, `publicnode.com`): both
+  `status 0x1`, block 43953706, USDC→SCA 0.796935. Approve 09:28:03 → minted 09:28:32 (29s).
+- The hostile body was ignored end-to-end; `canonicalReport` byte-identical throughout.
+
+**HONEST — UNEXERCISED (recorded, not buried):**
+- **Durable Netlify Blobs persistence** — the wet proof used an IN-MEMORY store.
+- **Prod day-ledger** — stubbed, so the proof did not consume the real ceiling.
+- **`burn_pending` → `burn_confirmed`** against a real Circle `txId` — the burn confirmed too
+  fast to trigger `TxPendingError`. Only the dry test covers it.
+- **Double-approve race under eventual consistency (~11s)** — the optimistic lock NARROWS the
+  window, it does not close it (the lock write has the same lag). Damage is BOUNDED to one extra
+  capped bridge by the per-bridge cap (`_actions.mjs:89-94`) + day-ceiling. Real fix = a
+  strongly-consistent idempotency key: DEFERRED. UI should disable the button on click.
+- Also noted: `agent-bridge-status.mjs:18` takes a `burnHash` from a client body. NOT a receipt
+  leak (it holds no store, writes nothing), but if a write is ever added there the trust
+  boundary breaks silently.
+Known limits (a) and (b) are recorded IN-CODE at `job-bridge-approve.mjs:39-47`.
+
+**Files.** New `netlify/functions/_receipt.mjs` (pinned chains + double verification, fail-closed),
+`job-bridge-approve.mjs` (the trust boundary), `job-bridge-receipt-background.mjs` (internal-only
+verifier state machine); `netlify.toml` (approve redirect — the verifier has NO public route);
+`job-run-status.mjs` (+`proposal`, +`receipt` projections). Proof scripts stay untracked:
+`verify-receipt-adversarial.mjs`, `verify-approve-writepath.mjs`, `fire-bridge-receipt-proof.mjs`.
+`tsc --noEmit` clean; `vite build` clean. **NOT DEPLOYED** — backend-only; prod does not yet
+serve these functions.
+
+**Next:** steps 1–4 (synthesis emits a validated `proposal`; approve button in `jobTimeline`).
+The receipt they will write is now proven unfakeable.

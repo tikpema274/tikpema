@@ -63,6 +63,15 @@
   to = "/.netlify/functions/agent-ub-deposit"
   status = 200
 
+# Proposal loop — APPROVE a server-authored bridge proposal. Reads ONLY {runId} from the
+# client; destination/amount come from the persisted proposal, burnHash from the server's
+# own executeAction return. The mint is re-verified on-chain by the background verifier
+# (job-bridge-receipt-background, internal-only, no public route).
+[[redirects]]
+  from = "/api/job-bridge-approve"
+  to = "/.netlify/functions/job-bridge-approve"
+  status = 200
+
 [[redirects]]
   from = "/api/agent-bridge"
   to = "/.netlify/functions/agent-bridge"

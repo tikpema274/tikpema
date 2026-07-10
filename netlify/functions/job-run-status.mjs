@@ -41,6 +41,12 @@ export async function handler(event) {
     walletAddress: run.walletAddress,
     status,
     brief: deliverable?.brief,
+    // Proposal loop: the server-authored bridge proposal + the server-PROVEN receipt.
+    // Both are read-only projections of what the server wrote; the client never
+    // supplies either. `receipt.state` is the ONLY field the UI may branch on, and it
+    // must never render "minted" without a `mintTxHash`.
+    proposal: deliverable?.proposal,
+    receipt: deliverable?.receipt,
     verdict: deliverable?.verdict,
     reason: deliverable?.reason ?? run.error,
     settleTx: deliverable?.settleTx,
