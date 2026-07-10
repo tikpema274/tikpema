@@ -8,6 +8,7 @@ import SwapPanel from "./components/SwapPanel";
 import BridgePanel from "./components/BridgePanel";
 import NanopaymentPanel from "./components/NanopaymentPanel";
 import UnifiedBalancePanel from "./components/UnifiedBalancePanel";
+import PlanPanel from "./components/PlanPanel";
 import Dashboard from "./components/Dashboard";
 import { useWallet } from "./wallet/useWallet";
 
@@ -77,6 +78,13 @@ export default function App() {
     // explainer, so the 5-item nav (working tools only) stays untouched.
     case "nanopay":
       page = <NanopaymentPanel />;
+      break;
+    // The proposal loop's own door — reached via the Dashboard "Plan an action" card,
+    // nav-less like #/bridge. Separate from #/research because research declines advice
+    // ("should I…") while an action plan IS a recommendation; plan-quote's guardrail is
+    // executability, not opinion. The 5-item nav stays untouched.
+    case "plan":
+      page = <PlanPanel wallet={wallet} />;
       break;
     // Reached via the Dashboard "Agent unified balance" card, nav-less like #/nanopay
     // — a cross-chain balance view plus the (auth- and cap-gated) funding control, so

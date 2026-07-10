@@ -1,10 +1,22 @@
 import { connectLambda, getStore } from "@netlify/blobs";
+import { formatUnits } from "viem";
 import { TxPendingError } from "./_circle.mjs";
-import { json, parseBody, bridgeCapUsdc } from "./_arc.mjs";
+import { json, parseBody, bridgeCapUsdc, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { executeAction } from "./_actions.mjs";
 import { resolveDestination } from "./_bridge.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { publicClient } from "./_predict.mjs";
+
+const BALANCE_OF_ABI = [
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+];
 
 // POST /api/job-bridge-approve { runId }   (auth required)
 //
@@ -108,6 +120,40 @@ export async function handler(event) {
   if (owner.pending) return json(202, { status: "provisioning", message: "Your agent wallet is being set up — retry shortly." });
   const walletAddress = owner.walletAddress;
 
+  // ── PRE-FLIGHT BALANCE GATE — runs BEFORE the lock and BEFORE any burn is submitted. ──
+  // job #155341 approved a 10 USDC bridge against a 6.30 wallet; the burn reverted on-chain
+  // with INSUFFICIENT_TOKEN ("transfer amount exceeds balance"), surfacing as a raw 500
+  // and leaving a standing allowance. This read turns that into a clean, pre-execution
+  // rejection: read → reject-or-proceed → (only if funded) submit the burn. Nothing signs
+  // on the reject path.
+  //
+  // REQUIRED = amount, NO BUFFER. The fee (~0.20) comes out of the MINTED side, not the
+  // wallet — the wallet burns the full amount. And gas is SPONSORED: two prior successful
+  // bridges each dropped the wallet by EXACTLY 10.000000 (balanceOf delta, measured).
+  // ⚠️ ASSUMES Circle gas-sponsorship — proven, but it is PLATFORM behavior. If
+  // INSUFFICIENT_TOKEN ever resurfaces on an amount the wallet appears to cover, sponsorship
+  // may have changed; revisit whether a gas buffer is now needed.
+  //
+  // Mirrors agent-send.mjs:66-81, including its swallow: a transient read hiccup must NOT
+  // block a funded user — executeAction's own INSUFFICIENT_TOKEN stays the final backstop.
+  try {
+    const raw = await publicClient().readContract({
+      address: CONTRACTS.USDC, abi: BALANCE_OF_ABI, functionName: "balanceOf", args: [walletAddress],
+    });
+    const have = Number(formatUnits(raw, USDC_DECIMALS));
+    if (have < amount) {
+      // 402, mirroring job-run.mjs:80-87 { need, have, walletAddress }. No lock taken, no burn.
+      return json(402, {
+        error: `Insufficient funds to bridge. Have ${have.toFixed(2)} USDC, need ${amount.toFixed(2)}.`,
+        need: Number(amount.toFixed(2)),
+        have: Number(have.toFixed(2)),
+        walletAddress,
+      });
+    }
+  } catch {
+    /* balance read hiccup — proceed; the burn's own INSUFFICIENT_TOKEN is the backstop */
+  }
+
   const approvedAt = new Date().toISOString();
   const base = { approvedBy: session.address, approvedAt, amountUsdc: amount, destinationKey: dest.key };
 
@@ -138,21 +184,22 @@ export async function handler(event) {
       burnHash: r.burnHash,
       burnTx: r.tx,
     };
+    // The receipt is DURABLE before the trigger exists. Nothing below can un-record the burn.
     await store.setJSON(run.jobId, { ...entry, receipt });
 
     // Hand off to the background verifier. It re-reads burnHash/destinationKey from the
     // PERSISTED receipt, not from this body — the body carries only the key to find it.
-    fireVerifier(event, run.jobId).catch(() => {});
+    const verifierTriggered = await triggerVerifier(event, run.jobId);
 
-    return json(200, { executed: true, receipt });
+    return json(200, { executed: true, receipt, verifierTriggered });
   } catch (e) {
     if (e instanceof TxPendingError) {
       // Burn submitted but not yet confirmed → we have a Circle tx id, NOT a hash.
       // HONEST INCOMPLETENESS: this is recorded as burn_pending, never as a receipt.
       const receipt = { ...base, state: "burn_pending", circleTxId: e.txId };
       await store.setJSON(run.jobId, { ...entry, receipt });
-      fireVerifier(event, run.jobId).catch(() => {});
-      return json(202, { executed: true, pending: true, receipt });
+      const verifierTriggered = await triggerVerifier(event, run.jobId);
+      return json(202, { executed: true, pending: true, receipt, verifierTriggered });
     }
     await store.setJSON(run.jobId, { ...entry, receipt: undefined }); // release lock
     return json(500, { error: e.message });
@@ -160,15 +207,50 @@ export async function handler(event) {
 }
 
 // Trigger the background verifier with the internal token (job-run-background.mjs:86-93
-// pattern). Fire-and-forget: a failure here leaves the receipt at burn_confirmed, which
-// is honest — the burn DID land; we simply have not yet proven the mint.
-async function fireVerifier(event, jobId) {
-  const base =
-    process.env.DEPLOY_URL ||
-    `${event.headers["x-forwarded-proto"] || "https"}://${event.headers.host}`;
-  await fetch(`${base}/.netlify/functions/job-bridge-receipt-background`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-internal-token": internalToken() },
-    body: JSON.stringify({ jobId }),
-  });
+// pattern). Returns true iff the platform ACKNOWLEDGED the invocation.
+//
+// ⚠️ WHY THIS IS AWAITED (the bug that stranded job #155262).
+// This used to be `fireVerifier(...).catch(() => {})` — fire-and-forget. Netlify FREEZES a
+// synchronous function's execution the moment it responds, so the outbound fetch could die
+// before the request ever left. The verifier was never invoked, and EVERY receipt stranded
+// at `burn_confirmed` while the mint had actually landed. The stubbed write-path test
+// missed it precisely because it stubbed `fetch`.
+//
+// We await the ACK ONLY — never the verifier's ~4-minute poll. Netlify acks a background
+// invocation in ~0.3s (measured: 0.29s / 0.33s / 0.73s). The AbortController caps the wait
+// at TRIGGER_TIMEOUT_MS so a hung platform cannot hang the caller.
+const TRIGGER_TIMEOUT_MS = 3000; // ~4x the slowest observed ack
+
+async function triggerVerifier(event, jobId) {
+  // ⚠️ THIS FUNCTION MUST NEVER THROW.
+  // By the time it runs, the burn has ALREADY landed on-chain, irreversibly, and the
+  // receipt is ALREADY durable. The only thing that can fail here is a notification. If we
+  // let that failure surface, the user is told their bridge failed while 10 USDC has left
+  // their wallet — the worst lie this system could tell. So: swallow, and report the
+  // trigger's fate as a hint (`verifierTriggered`), never as an error.
+  //
+  // Worst case the receipt stays `burn_confirmed`, which is RECOVERABLE: the verifier's
+  // stale-lease reclaim (or a manual invocation) closes it later. The UI copy for that
+  // state — "Burn confirmed on Arc — waiting for the destination mint…" — is TRUE either
+  // way. `verifierTriggered:false` is a hint, NOT a failure; the UI must not render it as one.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TRIGGER_TIMEOUT_MS);
+  try {
+    const base =
+      process.env.DEPLOY_URL ||
+      `${event.headers["x-forwarded-proto"] || "https"}://${event.headers.host}`;
+    const res = await fetch(`${base}/.netlify/functions/job-bridge-receipt-background`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken() },
+      body: JSON.stringify({ jobId }),
+      signal: controller.signal,
+    });
+    // Netlify acks a background function with 202. Anything 2xx counts as delivered.
+    return res.status >= 200 && res.status < 300;
+  } catch (e) {
+    console.warn(`[approve] verifier trigger failed for job ${jobId} (burn is SAFE and recorded): ${e.message}`);
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }

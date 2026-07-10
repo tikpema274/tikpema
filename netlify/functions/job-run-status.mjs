@@ -5,7 +5,15 @@
 // keyed by jobId). Ownership: only the run's owner (this session) may read it.
 import { connectLambda, getStore } from "@netlify/blobs";
 import { json, parseBody } from "./_arc.mjs";
-import { requireSession } from "./_auth.mjs";
+import { requireSession, internalToken } from "./_auth.mjs";
+
+// Self-heal thresholds. A run stalls at "starting" when Netlify acks the
+// job-run-background invocation but never runs it (observed intermittently). We only
+// re-fire from "starting" (job-run-background provably never began — nothing created),
+// after the run is old enough that "starting" is real and not a stale read, and no more
+// than once per cooldown (the browser polls every 5s).
+const STALL_MS = 30_000;         // > Blobs read lag + job-run-background cold start
+const REFIRE_COOLDOWN_MS = 30_000;
 
 export async function handler(event) {
   if (event.blobs) connectLambda(event);
@@ -24,6 +32,33 @@ export async function handler(event) {
   // Ownership: a session can only read ITS OWN runs.
   if (run.owner?.toLowerCase() !== session.address.toLowerCase()) {
     return json(403, { error: "not your job" });
+  }
+
+  // ── SELF-HEAL — recover a run stranded at "starting" by re-firing job-run-background.
+  // Safe because: (1) we re-fire ONLY from "starting" with no jobId — job-run-background
+  // never began, so nothing was created; (2) job-run-background's idempotency guard
+  // aborts any invocation that finds the run already advanced. The re-fire is idempotent
+  // and bounded to once per cooldown via `reFiredAt`. This is a fire-and-forget nudge:
+  // if the ack drops, the next poll (post-cooldown) tries again — recovery by repetition.
+  if (run.status === "starting" && !run.jobId && run.question && run.walletAddress) {
+    const age = Date.now() - Date.parse(run.createdAt || 0);
+    const sinceRefire = run.reFiredAt ? Date.now() - Date.parse(run.reFiredAt) : Infinity;
+    if (age > STALL_MS && sinceRefire > REFIRE_COOLDOWN_MS) {
+      // Stamp reFiredAt FIRST so concurrent polls don't all re-fire.
+      await runs.setJSON(`run:${runId}`, { ...run, reFiredAt: new Date().toISOString() });
+      const base =
+        process.env.DEPLOY_URL ||
+        `${event.headers["x-forwarded-proto"] || "https"}://${event.headers.host}`;
+      fetch(`${base}/.netlify/functions/job-run-background`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-internal-token": internalToken() },
+        body: JSON.stringify({
+          runId, question: run.question, budgetUsdc: run.budgetUsdc,
+          walletAddress: run.walletAddress, owner: run.owner,
+        }),
+      }).catch(() => {});
+      console.log(`[job-run-status] self-heal: re-fired job-run-background for stalled run ${runId} (age ${Math.round(age / 1000)}s)`);
+    }
   }
 
   // Merge in the deliverable record (research/submit/settle) once we have a jobId.

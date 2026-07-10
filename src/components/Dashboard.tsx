@@ -265,9 +265,18 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
               Send USDC from your wallet to any address, gasless on Arc.
             </div>
           </button>
-          {/* 4th card wraps to a second row in the repeat(3,1fr) grid and sits
-              alone on the left — intentional; no CSS tweak. Reflows to a single
-              column on mobile like the rest. */}
+          {/* The proposal loop's entry. Nav-less #/plan — distinct from Research, whose
+              guardrail correctly declines "should I…" questions. Framing leads with the
+              user deciding, because the agent proposes and only the user approves. */}
+          <button className="quick-card" onClick={() => go("plan")}>
+            <div className="qt">Plan an action →</div>
+            <div className="qd">
+              Describe an on-chain action; your agent researches it and proposes a plan
+              you approve.
+            </div>
+          </button>
+          {/* 5th card wraps to a second row in the repeat(3,1fr) grid — intentional; no
+              CSS tweak. Reflows to a single column on mobile like the rest. */}
           <button className="quick-card" onClick={() => go("nanopay")}>
             <div className="qt">Nanopayments →</div>
             <div className="qd">

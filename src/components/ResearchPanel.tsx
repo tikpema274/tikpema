@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import type { useWallet } from "../wallet/useWallet";
-import { JobTimeline, isTerminal } from "./jobTimeline";
+import { JobTimeline, isTerminal, receiptInFlight } from "./jobTimeline";
 import type { TrackedJob } from "./jobTimeline";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
@@ -23,6 +23,12 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
   // Session token captured at hire time, used to poll the (auth-gated) status.
   const pollTokenRef = useRef<string>("");
 
+  // Proposal-loop approve state. `approving` disables the button optimistically on click
+  // — the UX half of the double-approve mitigation (the server's optimistic lock is the
+  // other half; neither fully closes the eventual-consistency window).
+  const [approving, setApproving] = useState(false);
+  const [approveError, setApproveError] = useState("");
+
   // Small local async runner: toggles busy + surfaces errors. This panel owns
   // its own busy/error so research progress doesn't clobber other panels.
   async function run(fn: () => Promise<void>) {
@@ -41,7 +47,11 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
   // lifecycle runs server-side on the user's OWN wallet, so we poll job-run-status
   // by runId (auth-gated — only the run's owner may read it).
   useEffect(() => {
-    if (!trackedJob || isTerminal(trackedJob.status)) return;
+    if (!trackedJob) return;
+    // Keep polling PAST a terminal research status while a receipt is still moving —
+    // otherwise the timeline freezes on `burn_confirmed` and never shows the mint that
+    // the background verifier is, at that moment, proving.
+    if (isTerminal(trackedJob.status) && !receiptInFlight(trackedJob.receipt)) return;
 
     const runId = trackedJob.runId;
     if (!runId) return;
@@ -60,6 +70,8 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
                 jobId: data.jobId ?? prev.jobId,
                 status: data.status,
                 brief: data.brief ?? prev.brief,
+                proposal: data.proposal ?? prev.proposal,
+                receipt: data.receipt ?? prev.receipt,
                 verdict: data.verdict ?? prev.verdict,
                 reason: data.reason ?? prev.reason,
                 settleTx: data.settleTx ?? prev.settleTx,
@@ -74,7 +86,38 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
     }, 5000);
 
     return () => clearInterval(id);
-  }, [trackedJob?.runId, trackedJob?.status]);
+  }, [trackedJob?.runId, trackedJob?.status, trackedJob?.receipt?.state]);
+
+  // APPROVE the server-authored proposal. A money-path write.
+  //
+  // We POST only { runId }. Not the amount, not the destination, not a hash. The server
+  // reads those from the proposal IT wrote, re-resolves the session, re-prices the fee
+  // live, and re-checks the cap before anything signs — nothing survives this round-trip.
+  // (This is stricter than agent-bridge's turn-2, which must re-accept
+  // {amountUsdc, destination} because agent-act keeps no proposal server-side.)
+  async function approveProposal() {
+    const runId = trackedJob?.runId;
+    if (!runId || approving) return;
+    setApproving(true);
+    setApproveError("");
+    try {
+      const token = await wallet.ensureSession();
+      const r = await fetch("/api/job-bridge-approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ runId }),
+      });
+      const data = await r.json().catch(() => null);
+      if (!r.ok && r.status !== 202) throw new Error(data?.error || "Approve failed");
+      if (data?.executed === false) throw new Error(data.blocked || "The bridge was refused by a guard.");
+      // The receipt arrives via the poll (which now keeps running past `completed`).
+      if (data?.receipt) setTrackedJob((prev) => (prev ? { ...prev, receipt: data.receipt } : prev));
+    } catch (e: any) {
+      setApproveError(e.message || "Approve failed");
+    } finally {
+      setApproving(false);
+    }
+  }
 
   return (
     <div className="plane">
@@ -223,7 +266,12 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
 
       {trackedJob && (
         <div style={{ marginTop: 20 }}>
-          <JobTimeline job={trackedJob} />
+          <JobTimeline
+            job={trackedJob}
+            onApprove={approveProposal}
+            approving={approving}
+            approveError={approveError}
+          />
         </div>
       )}
 

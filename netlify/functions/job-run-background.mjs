@@ -45,6 +45,21 @@ export async function handler(event) {
   const setRun = (patch) =>
     store.setJSON(`run:${runId}`, { runId, owner, walletAddress, budgetUsdc, ...patch });
 
+  // ⚠️ IDEMPOTENCY GUARD — the safety that makes the self-heal re-fire non-dangerous.
+  // createJob below is UNCONDITIONAL: a second invocation would create a SECOND on-chain
+  // job and fund it twice (double-spend). This runs on TWO paths — the first trigger from
+  // job-run (status just "starting"), and a self-heal re-fire from job-run-status when a
+  // run stalls. Only the FIRST invocation, with status still "starting", may proceed.
+  //
+  // Abort if the run already advanced (creating/funding/funded) or has a jobId — a prior
+  // invocation already began. Do NOT abort on a missing/"starting" record: the first
+  // legit call can race Blobs' eventual read and see null, and must still proceed.
+  // (Narrows, does not close, the two-both-see-"starting" race — see job-run-status.)
+  const existing = await store.get(`run:${runId}`, { type: "json" }).catch(() => null);
+  if (existing && (existing.jobId || (existing.status && existing.status !== "starting"))) {
+    return { statusCode: 202, body: `already ${existing.jobId ? "created (" + existing.jobId + ")" : existing.status} — not re-creating` };
+  }
+
   try {
     const circleClient = circle();
     const units = BigInt(Math.round(Number(budgetUsdc) * 10 ** USDC_DECIMALS)).toString();

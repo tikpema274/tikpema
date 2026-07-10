@@ -8,17 +8,56 @@
 // The live deliver→settle record we poll after a hire+fund. The backend
 // auto-chains submit→evaluate→settle, so the browser fires submit once then
 // polls job-deliverable for the merged status.
+// A server-VALIDATED bridge proposal. The model suggested it; the server resolved the
+// destination, bounded the amount, and priced the fee itself. `indicativeFeeUsdc` is a
+// courtesy, NOT a quote — the fee is re-priced again at execution.
+export type Proposal = {
+  action: "bridge_usdc";
+  destination: string;
+  destinationLabel: string;
+  amountUsdc: number;
+  cap: number;
+  indicativeFeeUsdc: number;
+  indicativeNetUsdc: number;
+  reasoning?: string;
+};
+
+// A server-PROVEN receipt. Every field is server-sourced; the client never supplies one.
+// `state` is the ONLY field to branch on — never render "minted" without a mintTxHash.
+export type Receipt = {
+  state:
+    | "approving" | "burn_pending" | "burn_confirmed"
+    | "minted" | "mint_failed" | "mint_unconfirmed" | "mint_unverified";
+  amountUsdc?: number;
+  destinationKey?: string;
+  feeUsdc?: number;
+  netUsdc?: number;
+  burnHash?: string;
+  burnTx?: string;
+  mintTxHash?: string;
+  mintTx?: string;
+  usdcAmount?: number;
+};
+
 export type TrackedJob = {
   runId?: string;
   jobId?: string;
   status: string;
   brief?: { answer?: string; reasoning?: string; sources?: any[]; confidence?: number };
+  proposal?: Proposal;
+  receipt?: Receipt;
   verdict?: string;
   reason?: string;
   settleTx?: string;
   settleTxUrl?: string;
   error?: string;
 };
+
+// A receipt is "still moving" while the burn or the mint is unresolved — the panel must
+// keep polling past `completed` until it settles, or the UI would freeze on
+// burn_confirmed and never show the mint.
+export const RECEIPT_PENDING = ["approving", "burn_pending", "burn_confirmed"];
+export const receiptInFlight = (r?: Receipt) => !!r && RECEIPT_PENDING.includes(r.state);
 
 // Status values that end the timeline — once reached, stop polling.
 export const TERMINAL_STATUSES = ["completed", "rejected", "eval-error", "failed"];
@@ -66,10 +105,137 @@ export function Brief({ brief }: { brief: NonNullable<TrackedJob["brief"]> }) {
   );
 }
 
+// The approvable action the research produced. Rendering it is a money-path surface, so
+// the copy is deliberately unflattering: the fee is indicative, the move is one-way.
+//
+// ⚠️ THE REASONING IS LOAD-BEARING, NOT DECORATION.
+// validateProposal proves a proposal is well-FORMED (a known destination, an amount under
+// the cap) and ECONOMICAL (fee priced live, fee-floor enforced). It does NOT prove the
+// proposal is well-REASONED — an economically valid bridge can still be a bad idea. Until
+// a reasoning/vetting gate exists (a slotted future brick), the HUMAN is that gate. So the
+// agent's "why" is rendered FIRST, in body text, above the numbers and above the button —
+// the user must read the argument before they can reach the thing that spends their money.
+export function ProposalCard({
+  proposal, receipt, approving, onApprove, error,
+}: {
+  proposal: Proposal;
+  receipt?: Receipt;
+  approving?: boolean;
+  onApprove?: () => void;
+  error?: string;
+}) {
+  // Once a receipt exists the proposal is spent — never offer approve twice.
+  const alreadyActed = !!receipt;
+  return (
+    <div
+      className="status"
+      style={{ marginTop: 12, padding: "14px 16px", background: "var(--field)", border: "1px solid var(--line)", borderRadius: 12 }}
+    >
+      <div style={{ color: "var(--muted)", fontSize: "0.72rem", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>
+        Proposed action · you decide
+      </div>
+
+      <div style={{ fontSize: "1.05rem", color: "var(--paper)" }}>
+        Bridge <span className="mono">{proposal.amountUsdc}</span> USDC from Arc to{" "}
+        <b>{proposal.destinationLabel}</b>.
+      </div>
+
+      {/* The agent's argument, first and prominent. The system cannot judge whether this
+          reasoning is sound; the user must. */}
+      {proposal.reasoning && (
+        <div
+          style={{
+            marginTop: 10, padding: "10px 12px", borderRadius: 10,
+            borderLeft: "3px solid var(--amber)", background: "var(--amber-soft)",
+          }}
+        >
+          <div style={{ color: "var(--muted)", fontSize: "0.7rem", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 4 }}>
+            Why the agent proposes this
+          </div>
+          <div style={{ color: "var(--paper)" }}>{proposal.reasoning}</div>
+        </div>
+      )}
+
+      <div className="sub" style={{ margin: "10px 0 0" }}>
+        The cross-chain fee is taken <b>out of</b> the amount — about{" "}
+        <span className="mono">{proposal.indicativeFeeUsdc}</span> USDC right now, so roughly{" "}
+        <span className="mono">{proposal.indicativeNetUsdc}</span> USDC would arrive. This is an
+        indicative price, not a quote: the fee is re-checked at execution, and the bridge is
+        refused if it no longer makes sense. Bridging is one-way.
+      </div>
+
+      <div className="sub" style={{ margin: "8px 0 0", fontStyle: "italic" }}>
+        Your agent checked that this action is possible and economical. It did not, and cannot,
+        check that it is a <em>good idea</em> — read the reasoning above and decide for yourself.
+      </div>
+
+      {!alreadyActed && (
+        <div className="row" style={{ marginTop: 12 }}>
+          <button className="emerald" disabled={approving} onClick={onApprove}>
+            {approving ? "Bridging…" : `Approve — bridge ${proposal.amountUsdc} USDC`}
+          </button>
+        </div>
+      )}
+      {error && <div className="sub" style={{ margin: "8px 0 0", color: "var(--danger, #e5484d)" }}>{error}</div>}
+    </div>
+  );
+}
+
+// The server-proven record. Each state is rendered honestly — a pending mint is NOT a
+// success, and mint_unverified is an alarm, not a spinner.
+export function ReceiptCard({ receipt }: { receipt: Receipt }) {
+  const s = receipt.state;
+  const line =
+    s === "minted" ? "✓ Bridged and confirmed on both chains."
+    : s === "burn_confirmed" ? "Burn confirmed on Arc — waiting for the destination mint…"
+    : s === "burn_pending" ? "Burn submitted — waiting for its transaction hash…"
+    : s === "approving" ? "Approving…"
+    : s === "mint_failed" ? "The destination mint FAILED."
+    : s === "mint_unconfirmed" ? "Burn confirmed, but the mint could not be confirmed in time. The funds are not lost — check the burn below."
+    : "⚠ The mint could not be independently verified on the destination chain. This needs a human — it has NOT been recorded as complete.";
+
+  return (
+    <div
+      className="status"
+      style={{
+        marginTop: 12, padding: "12px 14px", background: "var(--field)",
+        border: `1px solid ${s === "mint_unverified" || s === "mint_failed" ? "var(--danger, #e5484d)" : "var(--line)"}`,
+        borderRadius: 12,
+      }}
+    >
+      <div style={{ color: "var(--muted)", fontSize: "0.72rem", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6 }}>
+        Action receipt · server-verified
+      </div>
+      <div>{line}</div>
+      {s === "minted" && receipt.usdcAmount !== undefined && (
+        <div className="sub" style={{ margin: "6px 0 0" }}>
+          <span className="mono">{receipt.usdcAmount}</span> USDC arrived (fee{" "}
+          <span className="mono">{receipt.feeUsdc}</span>). Verified by Circle's attestation{" "}
+          <b>and</b> an independent read of the destination chain.
+        </div>
+      )}
+      <div className="row" style={{ marginTop: 8, gap: 14, flexWrap: "wrap" }}>
+        {receipt.burnTx && <TxLink url={receipt.burnTx} label="Burn on Arc ↗" />}
+        {/* Only ever link a mint we PROVED. mint_unverified deliberately shows no link. */}
+        {receipt.mintTx && s === "minted" && <TxLink url={receipt.mintTx} label="Mint on destination ↗" />}
+      </div>
+    </div>
+  );
+}
+
 // The live deliver→settle timeline. Maps the merged job status to four stages
 // (Funded → Researching → Evaluating → Settled), showing a checkmark for passed
 // stages and a spinner for the active one, then a terminal result block.
-export function JobTimeline({ job }: { job: TrackedJob }) {
+export function JobTimeline({
+  job, onApprove, approving, approveError,
+}: {
+  job: TrackedJob;
+  // Optional: only ResearchPanel wires the proposal loop. PredictPanel passes none and
+  // renders exactly as before.
+  onApprove?: () => void;
+  approving?: boolean;
+  approveError?: string;
+}) {
   const STAGES = ["Funding", "Researching", "Evaluating", "Settled"];
 
   // Map a status to how many stages are complete/active. -1 = errored (no stage
@@ -127,6 +293,18 @@ export function JobTimeline({ job }: { job: TrackedJob }) {
         <div style={{ marginTop: 8 }}>
           <div>✓ Delivered &amp; settled — agent paid.</div>
           {job.brief && <Brief brief={job.brief} />}
+          {/* The proposal loop. Only a SETTLED brief may carry an approvable action —
+              you cannot act on research that was rejected or refunded. */}
+          {job.proposal && onApprove && (
+            <ProposalCard
+              proposal={job.proposal}
+              receipt={job.receipt}
+              approving={approving}
+              onApprove={onApprove}
+              error={approveError}
+            />
+          )}
+          {job.receipt && <ReceiptCard receipt={job.receipt} />}
           {job.settleTxUrl && (
             <div style={{ marginTop: 4 }}>
               <TxLink url={job.settleTxUrl} label="View settlement ↗" />

@@ -27,22 +27,96 @@ import { requireInternal } from "./_auth.mjs";
 // (which hardcodes the web_search tool): a judge with web search is slow, can drift
 // into re-researching, and bills for searches we don't want. This is a slim,
 // tools-less call, mirroring job-quote.mjs's pricing call.
-const EVALUATOR_SYSTEM_PROMPT = `You are an impartial work evaluator for a paid research job.
+// ⚠️ HARDENED after job #155217, where the judge REFUNDED a correct brief for two
+// reasons, BOTH outside its own rubric:
+//   1. "does not actually execute or provide actionable transaction steps" — that is
+//      neither (a) nor (b). It invented a criterion its prompt forbids, and penalised a
+//      plan brief for correctly proposing rather than executing.
+//   2. "cited sources cannot be verified as real existing resources" — the judge has NO
+//      browsing. It asserted non-existence from ignorance. All six URLs were live (three
+//      docs.arc.io pages, two GitHub repos returned 200; a Medium link 403'd on bot
+//      block, which is not absence).
+//
+// The second is the load-bearing one: a source list CANNOT contain fabricated URLs.
+// _research.mjs:419-422 OVERWRITES the model's `sources` with what was actually
+// fetched (Exa results + purchased facts). Existence is guaranteed upstream. What CAN
+// still go wrong is relevance — a real source that has nothing to do with the question —
+// and that is what (b) must actually police. Note some entries are deliberately NOT URLs:
+// a purchased fact's `url` is a provenance label like "Arc Testnet RPC (QuickNode)".
+//
+// Do NOT overcorrect: a brief that answers a different question, or cites sources with no
+// bearing on it, must still FAIL.
+export const EVALUATOR_SYSTEM_PROMPT = `You are an impartial work evaluator for a paid research job.
 You receive the original question and the submitted brief (answer, reasoning, sources).
-Judge two things ONLY: (a) does the brief responsively answer the question, and
-(b) does it cite real, relevant sources? You are NOT judging whether it is the best
-possible analysis — only whether it adequately addresses the question with real sources.
-Respond with ONLY JSON: {"verdict": "pass" | "fail", "reason": "<one sentence>"}
+
+Judge EXACTLY TWO things, and nothing else:
+(a) Does the brief responsively answer the question that was asked?
+(b) Are the cited sources relevant to that question?
+
+RULES YOU MUST FOLLOW:
+
+1. These two criteria are EXHAUSTIVE. You may not invent, import, or apply any other
+   standard. Do NOT judge completeness, depth, actionability, execution, next steps,
+   whether the work should have gone further, whether it is the best possible analysis,
+   or whether it took an action. A brief that ANSWERS the question is responsive even if
+   it recommends, proposes, declines to recommend, or concludes that nothing should be
+   done. If your reason for failing does not name (a) or (b) explicitly, the verdict is
+   "pass".
+
+2. You CANNOT browse the web and CANNOT check whether a URL exists. You therefore must
+   NEVER fail a brief on the grounds that a source "cannot be verified", "may not exist",
+   "appears fabricated", or that you do not recognise it. Not recognising a source is a
+   fact about you, not about the source. Unfamiliar documentation sites, GitHub
+   repositories, and blog posts are ordinarily real. Some entries are provenance labels
+   rather than links (e.g. "Arc Testnet RPC (QuickNode)") — these are legitimate.
+
+3. You SHOULD still fail under (b) when the sourcing is genuinely bad in a way visible
+   from the text alone: the sources are plainly off-topic and bear no relation to the
+   question, the source list is empty, or the answer's claims are wholly unsupported by
+   any cited source. Judge relevance, never existence.
+
+4. You SHOULD still fail under (a) when the brief answers a different question than the
+   one asked, is empty, or is evasive to the point of saying nothing.
+
+Respond with ONLY JSON: {"verdict": "pass" | "fail", "reason": "<one sentence naming (a) or (b)>"}
 with no markdown, no fences, and no preamble.`;
 
-async function evaluate(apiKey, model, question, brief) {
+// PLAN-FLOW clause — APPENDED to the base prompt ONLY when the job carries a validated
+// proposal (isPlanFlow). It is NOT part of EVALUATOR_SYSTEM_PROMPT, so a research-flow
+// evaluation sends the base prompt BYTE-FOR-BYTE unchanged. That is the regression
+// guarantee: this clause cannot leak into research-flow judgment, because for research
+// flow it is never concatenated at all.
+//
+// Fixes job #155332, where the judge failed a valid plan brief for "answers a question
+// about bridging mechanics rather than the task of bridging" — technically naming (a),
+// but applying an execution standard to a brief whose correct job is to PROPOSE. The clause
+// redefines "responsive" for plan flow (propose, don't execute) WITHOUT lowering (a)/(b),
+// and explicitly forecloses judging whether the proposal is a good idea — that is the
+// user's call, enforced by the ProposalCard, not the judge's.
+export const PLAN_FLOW_CLAUSE = `
+
+THIS IS AN ACTION-PLANNING JOB. The brief's job is to research a proposed on-chain action
+and recommend a concrete plan — NOT to execute it. Execution happens later, and only after
+the user separately approves the proposal. Therefore, for THIS brief:
+- Under (a): a brief is responsive if it researches the requested action and presents its
+  findings/recommendation. Do NOT fail it for "not executing", "not performing the
+  transfer", "answering a question about mechanics rather than doing the task", or lacking
+  transaction steps. Proposing rather than executing is the CORRECT and COMPLETE behavior.
+- Under (b): judge the sources exactly as you would otherwise — they must be relevant to
+  the action researched. Off-topic or empty sourcing still fails.
+- You are NOT assessing whether the proposed action is wise, well-reasoned, correctly
+  sized, or a good financial decision. That judgment belongs to the user, not to you.
+  Assess only that the research is responsive (a) and the sources are relevant (b).`;
+
+export async function evaluate(apiKey, model, question, brief, isPlanFlow = false) {
+  const system = isPlanFlow ? EVALUATOR_SYSTEM_PROMPT + PLAN_FLOW_CLAUSE : EVALUATOR_SYSTEM_PROMPT;
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
       model,
       max_tokens: 512,
-      system: EVALUATOR_SYSTEM_PROMPT,
+      system,
       messages: [
         {
           role: "user",
@@ -143,10 +217,59 @@ export async function handler(event) {
       : null;
 
   // Merge eval results onto the existing record so we never lose the brief,
-  // canonicalReport, or submit tx the C1 writer persisted.
+  // canonicalReport, submit tx, or PROPOSAL the C1 writer persisted.
+  //
+  // ⚠️ THE BUG THIS FIXES (job #155200). `prior` was read ONCE, with `|| {}` on miss.
+  // Blobs reads are eventually consistent (~11s — see agent-execute-plan.mjs:82-90), so a
+  // miss made `threaded` the base record and SILENTLY DESTROYED every field not in it:
+  // the validated `proposal` (→ no approve button, ever) and `txHash`/`tx` (→ settled
+  // briefs quietly lost their on-chain submit link, long before the proposal existed).
+  // We now RETRY the read, exactly as the `entry` read below already does (:157-162).
+  //
+  // ⚠️ WHY WE DO NOT SIMPLY THREAD THE PROPOSAL THROUGH THE BODY.
+  // `threaded` arrives in the internal POST body. The validated `proposal` has exactly ONE
+  // origin today: validateProposal() running server-side in job-submit-background, written
+  // straight to Blobs. job-bridge-approve reads that object for the destination and amount
+  // it executes — that single origin IS the trust boundary. Threading it over the wire
+  // would create a second, weaker origin for the one field that decides where money goes.
+  // Keep `threaded` minimal; make `prior` authoritative instead.
+  //
+  // FAIL-CLOSED: if `prior` never converges we fall back to the old seed. The proposal is
+  // then LOST (no approve button) rather than reconstructed from an untrusted source.
+  // A missing proposal is a fine outcome; a forgeable one is not.
+  // The ONLY keys the wire-supplied body may ever contribute to a persisted record. The
+  // seed is rebuilt from this whitelist rather than spread from `threaded`, so the
+  // guarantee is STRUCTURAL, not a side effect of how `threaded` happens to be built:
+  // a body carrying `proposal` / `txHash` can never have them reach the store, no matter
+  // what a future edit adds to the destructure above.
+  const SEED_KEYS = ["status", "canonicalReport", "deliverableHash", "brief"];
+  const seed = () =>
+    threaded ? Object.fromEntries(SEED_KEYS.filter((k) => threaded[k] !== undefined).map((k) => [k, threaded[k]])) : {};
+
+  const readPrior = async () => {
+    // Only wait when a record is EXPECTED (the normal submit path threads one). On the
+    // forced-refund path there may legitimately be nothing to find — don't stall 12s.
+    const tries = threaded ? 8 : 1;
+    for (let i = 0; i < tries; i++) {
+      if (i) await new Promise((r) => setTimeout(r, 1500));
+      const p = await store.get(jobId, { type: "json" }).catch(() => null);
+      if (p) return p;
+    }
+    return null;
+  };
+
   const persist = async (patch) => {
-    const prior = (await store.get(jobId, { type: "json" }).catch(() => null)) || {};
-    await store.setJSON(jobId, { ...(threaded || {}), ...prior, ...patch });
+    const prior = await readPrior();
+    if (!prior) {
+      // Never converged. Fail-closed: brief + report survive, but `proposal` and `txHash`
+      // are LOST rather than reconstructed from the wire. No approve button beats a
+      // forgeable one.
+      console.warn(`[evaluate] prior record never converged for job ${jobId}; seeding from threaded (proposal/txHash lost)`);
+      await store.setJSON(jobId, { ...seed(), ...patch });
+      return;
+    }
+    // Unchanged merge order: seed is only a floor, `prior` wins, `patch` wins over both.
+    await store.setJSON(jobId, { ...seed(), ...prior, ...patch });
   };
 
   try {
@@ -249,7 +372,15 @@ export async function handler(event) {
     const model = process.env.PREDICT_MODEL || "claude-sonnet-4-6";
     const question = JSON.parse(entry.canonicalReport).question;
 
-    const judgment = await evaluate(apiKey, model, question, entry.brief);
+    // isPlanFlow is derived from the SERVER-VALIDATED proposal, never a client flag. The
+    // threaded body may not carry the top-level `proposal` (SEED_KEYS omits it), so fall
+    // back to the persisted record — which the readPrior retry has already made visible.
+    let isPlanFlow = !!entry.proposal;
+    if (!isPlanFlow) {
+      const persisted = await store.get(jobId, { type: "json" }).catch(() => null);
+      isPlanFlow = !!persisted?.proposal;
+    }
+    const judgment = await evaluate(apiKey, model, question, entry.brief, isPlanFlow);
     const verdict = judgment?.verdict === "pass" ? "pass" : "fail";
     const reason = judgment?.reason || "no reason returned";
 

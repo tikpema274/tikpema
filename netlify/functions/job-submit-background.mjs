@@ -18,6 +18,7 @@ import { connectLambda, getStore } from "@netlify/blobs";
 import { keccak256, toBytes } from "viem";
 import { ARC, CONTRACTS, USDC_DECIMALS, parseBody, dateAnchor } from "./_arc.mjs";
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
+import { validateProposal } from "./_proposal.mjs";
 import { research } from "./_research.mjs";
 import { publicClient } from "./_predict.mjs";
 import { requireInternal, internalToken } from "./_auth.mjs";
@@ -37,9 +38,12 @@ Include only real source URLs from searches you actually performed — never inv
 const BRIEF_SYSTEM_PROMPT_EXA = `You are a research analyst producing a brief for a paying client.
 Ground your brief on the sources provided to you, then respond with ONLY JSON:
 { "answer": "<direct answer to the question>", "reasoning": "<2-5 sentences>",
-  "sources": [{"title": "<title>", "url": "<url>"}], "confidence": <decimal 0..1> }
+  "sources": [{"title": "<title>", "url": "<url>"}], "confidence": <decimal 0..1>,
+  "proposal": null | { "action": "bridge", "destination": "<chain name>", "amountUsdc": <number>, "reasoning": "<why this destination and amount>" } }
 Use only the supplied sources as evidence; do not invent URLs.
-Cite ONLY sources from the supplied set — never invent, guess, or modify a URL. If the supplied sources do not let you answer confidently — especially for a specific past date, price, or outcome — say so plainly in "answer" (state what you could not verify), set "confidence" low, and include only the real sources you do have. An honest "the available sources do not confirm this" is correct and acceptable; a fabricated source is never acceptable.`;
+Cite ONLY sources from the supplied set — never invent, guess, or modify a URL. If the supplied sources do not let you answer confidently — especially for a specific past date, price, or outcome — say so plainly in "answer" (state what you could not verify), set "confidence" low, and include only the real sources you do have. An honest "the available sources do not confirm this" is correct and acceptable; a fabricated source is never acceptable.
+
+PROPOSAL: set "proposal" to null unless the question asks whether/where/how much USDC to move CROSS-CHAIN off Arc, AND your research supports one concrete recommendation. Supported destinations: Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon, Unichain, Linea (all testnets). Do NOT propose a fee — you cannot know it; the server prices it live and will reject an uneconomical bridge. Do NOT propose an amount you cannot justify from the sources. If the honest answer is "don't bridge", set "proposal" to null and say why in "answer". A null proposal is always an acceptable outcome; a poorly-justified one is not.`;
 
 const BRIEF_USER_INSTRUCTION =
   "Research this question and produce a client-ready brief with web search, " +
@@ -263,7 +267,30 @@ export async function handler(event) {
       return { statusCode: 202 };
     }
 
+    // 2b. PROPOSAL — the model may have proposed a concrete bridge. Validate it the same
+    // way _research.mjs:419-422 overwrites the model's `sources`: the model's word is
+    // never the record. validateProposal() resolves the destination against OUR registry,
+    // bounds the amount by the deployed cap (reject, never clamp), DISCARDS the model's
+    // fee and re-prices it live, and refuses an un-settleable bridge. Any failure → null
+    // → the brief renders with no proposal, which is a fine outcome. A wrong one is not.
+    //
+    // NOTE: a proposal must never be able to abort the research. It is strictly additive,
+    // so a pricing hiccup degrades to "no proposal", never to a refund.
+    let proposal = null;
+    try {
+      proposal = await validateProposal(decision.proposal);
+    } catch (e) {
+      console.warn(`[research] proposal validation failed (no proposal, brief unaffected): ${e.message}`);
+    }
+    if (decision.proposal && !proposal) {
+      console.log("[research] model proposed a bridge; server REFUSED it (unresolvable destination, over cap, unpriceable, or fee ≥ amount)");
+    }
+
     // 3. Build the canonical report and hash its exact bytes in memory.
+    // ⚠️ The proposal is NOT part of the canonical report. The report's bytes are hashed
+    // and anchored on-chain by submit(); adding a live-priced, server-derived field would
+    // make the deliverable hash depend on IRIS at hash time. The proposal (and later the
+    // receipt) live BESIDE it — two anchors, linked off-chain. See PROGRESS.
     const report = {
       question: result.question,
       model: result.model,
@@ -283,6 +310,7 @@ export async function handler(event) {
       canonicalReport,
       deliverableHash,
       brief: decision,
+      ...(proposal ? { proposal } : {}),
     });
 
     // 5. Submit on-chain as the provider (the user's OWN agent wallet, threaded
@@ -300,11 +328,15 @@ export async function handler(event) {
     const txHash = await waitForTx(circleClient, tx.data?.id);
 
     // 6. Persist the final state with the on-chain submit tx.
+    // NOTE: this write REPLACES the record (it does not spread the prior one), so the
+    // proposal must be re-included or it would be silently dropped between step 4 and
+    // here — a brief would settle with its proposal gone and no error anywhere.
     await store.setJSON(jobId, {
       status: "submitted",
       canonicalReport,
       deliverableHash,
       brief: decision,
+      ...(proposal ? { proposal } : {}),
       txHash,
       tx: `${ARC.explorer}/tx/${txHash}`,
     });

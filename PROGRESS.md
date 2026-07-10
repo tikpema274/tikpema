@@ -1710,3 +1710,85 @@ serve these functions.
 
 **Next:** steps 1–4 (synthesis emits a validated `proposal`; approve button in `jobTimeline`).
 The receipt they will write is now proven unfakeable.
+
+## 2026-07-11 — Proposal loop (Brick 1) COMPLETE + the fixes found proving it live
+
+The research→propose→approve→execute loop shipped end-to-end, with its OWN door (`#/plan`).
+The receipt trust boundary (`14ec0d7`) was the load-bearing half; this commit is the other
+half plus every bug the live proof surfaced. Proven live on a real 1-USDC plan bridge
+(jobId 155442: auto-closed to `minted`, double-verified, no manual touch).
+
+**Proposal generation + server validation.** Synthesis emits an optional `proposal`; the
+model PROPOSES, the server VALIDATES and re-derives (`_proposal.mjs`), copying the
+sources-overwrite discipline (`_research.mjs:419-422`): destination resolved against OUR
+8-chain registry (not the model's string), amount bounded by the deployed cap
+(reject-not-clamp), the model's fee DISCARDED and re-priced live from IRIS, fee-floor
+enforced. Any failure → null → brief renders with no proposal. Persisted BESIDE
+canonicalReport (never inside — the on-chain deliverableHash must not move).
+
+**Own door — `#/plan` (PlanPanel + plan-quote).** Separate from `#/research`, whose
+guardrail correctly declines advice. `plan-quote`'s guardrail is EXECUTABILITY, not
+"no advice": ACCEPT a concrete action the agent can bound/price/refuse ("bridge 1 USDC to
+Base", even "should I bridge?"), DECLINE unbounded opinion ("what's the best chain?").
+ProposalCard renders the agent's REASONING prominently above the numbers and the button —
+the USER is the reasoning gate, because validateProposal proves ECONOMICAL, never
+WELL-REASONED (a reasoning/vetting gate is a slotted future brick).
+
+**Fixes discovered while proving it live (each real, each with its own proof):**
+- **Rebuild clobber (jobs #155262/#155315 root cause).** `job-evaluate-background`'s
+  persist read `prior` ONCE with `|| {}`; a Blobs miss (~11s lag) made `threaded` the base
+  and silently dropped `proposal` AND `txHash`. Fix: retry the read (like the `entry`
+  retry), and rebuild the seed from an explicit `SEED_KEYS` whitelist so a wire-supplied
+  proposal can NEVER be injected (structural, not incidental). Replay 15/15.
+- **Judge inventing criteria (#155217/#155332).** The evaluator refunded correct briefs
+  for "doesn't execute" (outside its own rubric) and "sources can't be verified" (it has no
+  browsing; sources are guaranteed real upstream). Hardened `EVALUATOR_SYSTEM_PROMPT`:
+  (a)/(b) are EXHAUSTIVE, reason must name (a)/(b), NEVER fail for unverifiable/unfamiliar
+  sources (judge relevance not existence). Plan-awareness added as `PLAN_FLOW_CLAUSE`
+  APPENDED only when a validated proposal exists — research-flow prompt stays BYTE-IDENTICAL
+  (regression-proof). Replays: #155332 PASS, off-topic FAIL, research-flow unchanged.
+- **Insufficient-balance revert (#155341).** A 10-USDC bridge against a 6.30 wallet reverted
+  on-chain (INSUFFICIENT_TOKEN) as a raw 500 + stranded allowance. Added a PRE-FLIGHT
+  balance gate in `job-bridge-approve` (before the lock, before any burn): `balanceOf` <
+  amount → clean 402 {need, have, walletAddress}. Gate on AMOUNT, no buffer — fee comes out
+  of the minted side, gas is SPONSORED (measured: two bridges each dropped the wallet by
+  exactly 10.000000). Stub 13/13.
+- **Stranded receipt (#155262/#155315) — the verifier never SAW the receipt.** The trigger
+  was NOT dropped (prod log: verifier invoked 9s after approve); it read the receipt ONCE,
+  lost the Blobs race, 404'd, and exited before the lease. Fix: `loadWithRetry` (bounded,
+  15s window). Also hardened the trigger to be AWAITED (was fire-and-forget → Netlify freeze
+  could drop it) + a single-flight LEASE (stale-lease reclaim self-heals a dead verifier).
+  Verifier is idempotent (reads only; submits no tx). PROVEN LIVE: #155442 auto-closed in
+  ~28s (mint attestation), double-verified [iris + destination-rpc], no manual close.
+- **Receipt telemetry.** `visibilityLagMs` + `readMarginMs` persisted on the terminal
+  receipt (readable via job-deliverable; the console.log does not surface in `netlify logs`).
+  Purely additive. Stub-proven to land on the minted receipt; the MEASURED margin off a real
+  receipt is not yet captured (telemetry deployed after #155442) — #155442's margin was
+  RECONSTRUCTED from timestamps as ~5s lag / ~10s headroom (healthy).
+
+**KNOWN LIMITS (recorded, not buried):**
+- **Provisioning stall (platform).** Netlify intermittently ACKs a `*-background` invocation
+  without running it — `job-run → job-run-background` drops, run stuck at "starting", no
+  fee, no deliverable. Worked for #155345/#155442, dropped for #155457/#155463. Not a code
+  bug (the trigger is already awaited).
+- **Self-heal is POLL-DRIVEN (incomplete).** `job-run-status` re-fires `job-run-background`
+  for a run stalled at "starting" >30s, gated by `reFiredAt` cooldown; `job-run-background`
+  has an IDEMPOTENCY GUARD (aborts if the run advanced past "starting" → no double-create).
+  Stub 10/10. BUT live it did NOT fire: `job-run-status` had 0 invocations — the browser
+  stopped polling, and the self-heal only runs while polled. The ROBUST fix is an autonomous
+  scheduled sweep (cron), independent of the browser — DEFERRED.
+- **Double-approve / double-create races** under Blobs ~11s consistency: narrowed by
+  optimistic locks + guards, bounded to one duplicate capped op, not closed (needs a
+  strongly-consistent key). DEFERRED.
+- **`#/plan` needs a connected wallet** — "Research this action" is disabled without a
+  session; `ensureSession()` on a stale session throws before job-run fires (fix: reconnect
+  passkey). Purely client-auth, no code change.
+
+**Files.** New: `_proposal.mjs`, `plan-quote.mjs`, `src/components/PlanPanel.tsx`. Modified:
+`job-evaluate-background.mjs` (persist retry + SEED_KEYS + judge hardening + plan clause),
+`job-bridge-approve.mjs` (balance gate + awaited trigger + lease-aware), `job-bridge-receipt-
+background.mjs` (read-retry + lease + telemetry), `job-run.mjs` (store question),
+`job-run-background.mjs` (idempotency guard), `job-run-status.mjs` (self-heal + proposal/
+receipt projections), `App.tsx`/`Dashboard.tsx`/`ResearchPanel.tsx`/`jobTimeline.tsx` (Plan
+route, card, ProposalCard/ReceiptCard, poll-past-terminal). Proof scripts stay untracked.
+tsc + build clean; working tree == deployed prod bundle `index-BZ3W6xVf.js`.

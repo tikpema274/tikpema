@@ -93,6 +93,10 @@ export async function handler(event) {
     runId,
     owner: session.address,
     walletAddress,
+    // `question` is stored so job-run-status can RE-FIRE job-run-background if this run
+    // stalls at "starting" (Netlify occasionally acks a background invocation without
+    // running it). createJob needs the question string, and it lives only here.
+    question: String(question),
     budgetUsdc: budget,
     status: "starting",
     createdAt: new Date().toISOString(),
