@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { agentClient } from "../lib/agentClient";
 import SignInPrompt from "./SignInPrompt";
+import AddressDisplay from "./AddressDisplay";
 import { arcTestnet } from "../config/chain";
 import type { useWallet } from "../wallet/useWallet";
 
@@ -58,9 +59,13 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const [fundBusy, setFundBusy] = useState(false);
   const [fundErr, setFundErr] = useState("");
   const [fundTx, setFundTx] = useState<string | null>(null);
+  const [showHopA, setShowHopA] = useState(false); // hop A is a disclosure, not the default
 
   const agentSca = w.agentWallet?.address ?? null;
   const agentBal = Number(w.agentWallet?.balance ?? 0);
+  // The LOGIN wallet's balance — hop A's source. A passkey login mints this EMPTY, which is
+  // why hop A can't be the primary funding door; a MetaMask login usually has real funds here.
+  const loginBal = Number(w.usdcBalance ?? 0);
 
   async function fundAgent() {
     setFundErr("");
@@ -206,60 +211,88 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         </div>
       )}
 
-      {/* HOP A — fund the agent wallet from the login wallet. Shown whenever the agent
-          wallet exists; emphasised when it's empty, because at $0 nothing else on this
-          panel can work. */}
+      {/* FUNDING THE AGENT — two paths, deliberately ranked.
+
+          PRIMARY: send USDC straight to the agent's address. This works from ANY source —
+          another wallet, an exchange, a faucet — and it is how agent wallets actually get
+          funded in practice.
+
+          SECONDARY (hop A): move funds from the LOGIN wallet. This used to be the primary
+          door, and that was wrong: it is right for a MetaMask login (the EOA holds the
+          user's real funds) but a DEAD END for a passkey login, where the login wallet is
+          minted EMPTY. A passkey user met a "Fund your agent" control that refused with
+          "insufficient funds" and no obvious next step. So it is demoted to a disclosure,
+          and hidden entirely when the login wallet has nothing to move. */}
       {agentSca && (
         <div style={{ marginTop: 12 }}>
           <div className="panel-eyebrow">
             {agentBal > 0 ? "Top up your agent" : "Fund your agent to get started"}
           </div>
-          <div className="sub" style={{ margin: "2px 0 10px" }}>
+          <div className="sub" style={{ margin: "2px 0 8px" }}>
             {agentBal > 0
-              ? "Move USDC from your login wallet into your agent's wallet."
-              : "Your agent's wallet is empty — it can't act until you move USDC into it from your login wallet."}
-            {w.usdcBalance != null && (
-              <>
-                {" "}
-                You have <span className="mono">{w.usdcBalance}</span> USDC in your login
-                wallet.
-              </>
-            )}
+              ? "Send USDC to your agent's wallet address:"
+              : "Your agent's wallet is empty — it can't act until it holds USDC. Send some to its address:"}
           </div>
-          <div className="row" style={{ gap: 8, alignItems: "center" }}>
-            <input
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="0.01"
-              placeholder="Amount (USDC)"
-              value={fundAmt}
-              disabled={fundBusy}
-              onChange={(e) => setFundAmt(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && fundAmt && !fundBusy) fundAgent();
-              }}
-              style={{ maxWidth: 180 }}
-            />
-            <button
-              className="emerald"
-              disabled={fundBusy || !fundAmt || Number(fundAmt) <= 0}
-              onClick={fundAgent}
-            >
-              {fundBusy ? "Funding…" : "Fund agent"}
-            </button>
+
+          <AddressDisplay address={agentSca} />
+
+          <div className="sub" style={{ margin: "8px 0 0" }}>
+            Anything sent here is your agent's to spend, within your safety caps. Works from
+            any wallet, exchange, or faucet.
           </div>
-          {fundErr && (
-            <div className="sub" style={{ margin: "8px 0 0", color: "var(--danger, #e5484d)" }}>
-              {fundErr}
-            </div>
-          )}
-          {fundTx && (
-            <div className="sub" style={{ margin: "8px 0 0" }}>
-              Funded your agent wallet.{" "}
-              <a href={`${EXPLORER}/tx/${fundTx}`} target="_blank" rel="noreferrer">
-                View transaction ↗
-              </a>
+
+          {/* Hop A — only offered when the login wallet actually has something to move. */}
+          {loginBal > 0 && (
+            <div style={{ marginTop: 14 }}>
+              {!showHopA ? (
+                <button className="linkbtn" onClick={() => setShowHopA(true)}>
+                  Or move USDC from your login wallet ({w.usdcBalance} USDC) →
+                </button>
+              ) : (
+                <>
+                  <div className="sub" style={{ margin: "0 0 8px" }}>
+                    Move USDC from your login wallet (
+                    <span className="mono">{w.usdcBalance}</span> USDC) into your agent's
+                    wallet.
+                  </div>
+                  <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="0.01"
+                      placeholder="Amount (USDC)"
+                      value={fundAmt}
+                      disabled={fundBusy}
+                      onChange={(e) => setFundAmt(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && fundAmt && !fundBusy) fundAgent();
+                      }}
+                      style={{ maxWidth: 180 }}
+                    />
+                    <button
+                      className="emerald"
+                      disabled={fundBusy || !fundAmt || Number(fundAmt) <= 0}
+                      onClick={fundAgent}
+                    >
+                      {fundBusy ? "Moving…" : "Move to agent"}
+                    </button>
+                  </div>
+                </>
+              )}
+              {fundErr && (
+                <div className="sub" style={{ margin: "8px 0 0", color: "var(--danger, #e5484d)" }}>
+                  {fundErr}
+                </div>
+              )}
+              {fundTx && (
+                <div className="sub" style={{ margin: "8px 0 0" }}>
+                  Moved into your agent wallet.{" "}
+                  <a href={`${EXPLORER}/tx/${fundTx}`} target="_blank" rel="noreferrer">
+                    View transaction ↗
+                  </a>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -76,7 +76,19 @@ succeeds today — but it is the only way to get real margin.
 
 ---
 
-## FOLLOW-UP (do AFTER the per-user Gateway live proof): demote hop A in the UI
+## 2026-07-11 — hop A DEMOTED (follow-up below: DONE)
+
+`MyAgentPanel`'s funding section is re-ranked. **PRIMARY** is now the agent wallet's ADDRESS
+(`AddressDisplay`, masked + copy) with "send USDC here — works from any wallet, exchange, or
+faucet". **Hop A is a disclosure** ("Or move USDC from your login wallet (N USDC) →"), and it is
+**hidden entirely when the login wallet holds 0** — which is exactly the state a fresh passkey
+login is in, and the state that made the old primary door refuse with "insufficient funds" and
+strand the user. Hop A itself is unchanged (still guarded, still refuses the shared wallet); only
+its position changed. tsc + build clean.
+
+---
+
+## FOLLOW-UP (DONE — see entry above): demote hop A in the UI
 
 **The wallet model, verified 2026-07-11 (code + Blobs + chain) — there are TWO wallets:**
 - **Login wallet** — a client-side Circle **Modular** SCA minted by the passkey
