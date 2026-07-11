@@ -2,6 +2,7 @@ import { formatUnits } from "viem";
 import { ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { GATEWAY } from "./_gateway.mjs";
 import { circle, waitForTx } from "./_circle.mjs";
+import { ensureDelegate } from "./_delegate.mjs";
 import { publicClient } from "./_predict.mjs";
 
 // UB DEPOSIT PLANE — the FUNDING side of Unified Balance. Moves the agent SCA's plain
@@ -36,6 +37,12 @@ import { publicClient } from "./_predict.mjs";
 //
 // ⚠️ NO CAP HERE. The caller (agent-ub-deposit.mjs) MUST enforce the per-deposit cap
 // and reject BEFORE calling this. This executor validates funds + moves money.
+//
+// ⚠️ NO ENV FALLBACK. `owner` is a REQUIRED param — the caller resolves it from the
+// verified session (ensureOwnerWallet). This deliberately does NOT read
+// process.env.AGENT_WALLET_ADDRESS: an env fallback here would silently deposit into the
+// SHARED agent wallet whenever a caller forgot to thread the session's address, which is
+// exactly the per-user leak we are closing. Missing owner ⇒ throw, never guess.
 
 const ERC20_ABI = [
   {
@@ -83,9 +90,9 @@ async function revokeAllowance(client, owner) {
   }
 }
 
-export async function ubDeposit({ amountUsdc }) {
-  const owner = process.env.AGENT_WALLET_ADDRESS; // SCA — payer AND credited account
-  if (!owner) throw new Error("Missing AGENT_WALLET_ADDRESS");
+export async function ubDeposit({ amountUsdc, owner }) {
+  // The session's OWN SCA — payer AND credited account. Caller-supplied, never env.
+  if (!owner) throw new Error("ubDeposit requires an `owner` (the session's agent SCA)");
 
   const units = toUnits(amountUsdc);
   if (!(units > 0n)) throw new Error("amountUsdc must be > 0");
@@ -100,6 +107,43 @@ export async function ubDeposit({ amountUsdc }) {
   if (balance < units) {
     throw new Error(
       `Insufficient funds. Have ${formatUnits(balance, USDC_DECIMALS)} USDC, need ${amountUsdc}.`
+    );
+  }
+
+  // ── 0. THE DELEGATE GRANT — the ordering hinge (fund → delegate → deposit → spend). ──
+  //
+  // This sits AFTER the insufficient-funds check above and BEFORE any approve/deposit
+  // below. Both halves of that placement are load-bearing; do NOT reorder:
+  //
+  //  · AFTER the funds check ⇒ the SCA provably holds >= the deposit amount right now, so
+  //    addDelegate (a gas-paying tx; gas IS USDC on Arc) can always be paid for. There is
+  //    NO path to attempting addDelegate on an empty wallet — the check throws first. That
+  //    is what defuses the empty-wallet chicken-and-egg, structurally rather than by
+  //    convention.
+  //
+  //  · BEFORE the approve/deposit ⇒ if the grant fails, NO funds have moved. The user's
+  //    USDC is still plain in their own SCA — a clean, retryable state. Granting AFTER the
+  //    deposit would instead park their USDC inside Gateway with no authorized spender,
+  //    which is recoverable but strictly worse.
+  //
+  // Idempotent: reads isAuthorizedForBalance first and only writes when false, so this is a
+  // single eth_call on every deposit after the first.
+  const grant = await ensureDelegate({ owner });
+
+  // The grant MAY have cost gas (it's paymaster-sponsored on Arc today, but Gas Station
+  // policies can be contract-scoped and we don't depend on GatewayWallet being in scope).
+  // If it was NOT sponsored, the fee came out of this SCA's USDC — which could drop the
+  // balance below the amount we just validated. Re-read rather than letting the deposit
+  // revert with an opaque error.
+  const afterGrant = await pc.readContract({
+    address: CONTRACTS.USDC, abi: ERC20_ABI, functionName: "balanceOf", args: [owner],
+  });
+  if (afterGrant < units) {
+    throw new Error(
+      `Authorizing the Gateway spender used ${formatUnits(balance - afterGrant, USDC_DECIMALS)} USDC ` +
+        `in gas (a one-time, first-deposit cost), leaving ${formatUnits(afterGrant, USDC_DECIMALS)} USDC — ` +
+        `less than the ${amountUsdc} you asked to deposit. No funds moved into Gateway. ` +
+        `Retry with a smaller amount; the authorization is already done, so it won't cost again.`
     );
   }
 
@@ -137,6 +181,12 @@ export async function ubDeposit({ amountUsdc }) {
       approveTxHash,
       depositTxHash,
       tx: `${ARC.explorer}/tx/${depositTxHash}`,
+      // The one-time spender authorization. `delegateTxHash` is non-null ONLY on the
+      // deposit that actually granted it (the user's first), null on every later deposit —
+      // which is how you can see the idempotence working on-chain.
+      delegateAuthorized: grant.authorized,
+      delegateAlreadyAuthorized: grant.alreadyAuthorized,
+      delegateTxHash: grant.txHash,
     };
   } catch (depositError) {
     // Only clean up an allowance THIS call granted. If we skipped the approve (one was

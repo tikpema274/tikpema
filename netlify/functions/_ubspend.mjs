@@ -7,7 +7,7 @@ import { createCircleWalletsAdapter } from "@circle-fin/adapter-circle-wallets";
 //
 // Delegate-signed exactly like _pay.mjs (a Circle SCA can't sign its own Gateway
 // spend): from.address = DELEGATE_ADDRESS (signer, 'ready' on Arc), from.sourceAccount
-// = AGENT_WALLET_ADDRESS (the SCA that holds the balance), source chain Arc_Testnet.
+// = the SPENDER'S OWN SCA (the account that holds the balance), source chain Arc_Testnet.
 // to = { chain: dest, recipientAddress, useForwarder:true } — NO destination adapter;
 // the Forwarding Service submits the destination mint (async, like our bridge).
 //
@@ -17,13 +17,23 @@ import { createCircleWalletsAdapter } from "@circle-fin/adapter-circle-wallets";
 //
 // ⚠️ NO CAP HERE. The caller (agent-ub-spend.mjs) MUST enforce the per-spend cap and
 // reject BEFORE calling this. This executor validates shape + spends only.
-export async function ubSpend({ recipientAddress, amountUsdc, destinationChain = "Base_Sepolia" }) {
+//
+// ⚠️ NO ENV FALLBACK for the source. `sourceAccount` is a REQUIRED param, resolved by the
+// caller from the verified session. Reading AGENT_WALLET_ADDRESS here would let a caller
+// that forgot to thread the session silently spend the SHARED wallet's balance — the
+// cap-bypass/per-user leak. Missing sourceAccount ⇒ throw, never guess.
+//
+// The DELEGATE stays env-sourced on purpose: it is one shared EOA *signer*, not a source
+// of funds. It can only move a balance it has been authorized over via addDelegate, which
+// each user's SCA grants for ITSELF (see _delegate.mjs) — so a shared signer cannot reach
+// a wallet that hasn't authorized it.
+export async function ubSpend({ recipientAddress, amountUsdc, destinationChain = "Base_Sepolia", sourceAccount }) {
   const apiKey = process.env.CIRCLE_API_KEY;
   const entitySecret = process.env.CIRCLE_ENTITY_SECRET;
-  const owner = process.env.AGENT_WALLET_ADDRESS;   // SCA — holds the unified balance
+  const owner = sourceAccount;                      // SCA — holds the unified balance
   const delegate = process.env.DELEGATE_ADDRESS;    // EOA signer (ready on Arc)
   if (!apiKey || !entitySecret) throw new Error("Missing CIRCLE_API_KEY or CIRCLE_ENTITY_SECRET");
-  if (!owner) throw new Error("Missing AGENT_WALLET_ADDRESS");
+  if (!owner) throw new Error("ubSpend requires a `sourceAccount` (the session's agent SCA)");
   if (!delegate) throw new Error("Missing DELEGATE_ADDRESS");
 
   const amount = String(amountUsdc);

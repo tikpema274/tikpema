@@ -1,23 +1,37 @@
+import { connectLambda } from "@netlify/blobs";
 import { json, parseBody, ubSpendCapUsdc, ubSpendFloorUsdc } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
+import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { canSpendDay, recordAgentSpend } from "./_budget.mjs";
 import { ubSpend } from "./_ubspend.mjs";
 
 // POST /api/agent-ub-spend { recipientAddress, amountUsdc, destinationChain? }  (auth)
 //
-// FIRST-PROOF endpoint for the Unified Balance SPEND (write) half: a cross-chain spend
-// of the agent's Arc unified balance to a recipient on Base Sepolia via the Forwarding
-// Service. Delegate is already 'ready' on Arc, so NO addDelegate / depositFor here.
+// Unified Balance SPEND (write): a cross-chain spend of the CALLER'S OWN Arc unified
+// balance to a recipient on Base Sepolia via the Forwarding Service.
+//
+// PER-USER: the source is resolved from the VERIFIED SESSION (ensureOwnerWallet), never
+// from env. A caller can only spend the balance their own session owns. The delegate
+// (env, one shared EOA) merely SIGNS — it can only move a balance that SCA has authorized
+// it over via addDelegate, so it cannot reach another user's funds.
 //
 // ⚠️ THE CAP IS ENFORCED HERE, AT THE TOP, BEFORE ANY UB CALL / before signing.
 // _ubspend.mjs / kit.unifiedBalance.spend are UNCAPPED — reaching them from an
 // unguarded path would bypass the cap (the swap-cap trap). Reject-not-clamp: an
 // over-cap request returns 400 and NO funds move (we return before ubSpend runs).
+//
+// ⚠️ DAY-CEILING. The per-spend cap bounds ONE spend; it does not bound the DAY. Without
+// canSpendDay this was the only money path that ignored PERIOD_CEILING_USDC — you could
+// repeat an in-cap spend indefinitely. The gate below runs BEFORE ubSpend (reject, no
+// funds move) and the ledger writes AFTER a successful spend, both keyed to the SAME owner
+// (this session's SCA) so they read/write one bucket.
 const DESTINATIONS = new Set(["Base_Sepolia"]); // first proof: Base Sepolia only
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
+  if (event.blobs) connectLambda(event); // Blobs wiring — the day-ledger lives there
 
-  // Auth gate — only an authenticated session may move the agent's funds.
+  // Auth gate — only an authenticated session may move funds.
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });
 
@@ -46,8 +60,38 @@ export async function handler(event) {
     return json(400, { error: `exceeds per-spend limit of ${cap} USDC`, cap });
   }
 
+  // The spender: THIS session's own agent SCA — holds the unified balance being spent.
+  const wallet = await ensureOwnerWallet(session);
+  if (wallet.pending) {
+    return json(202, { status: "provisioning", message: "Your wallet is being set up — retry shortly." });
+  }
+  const owner = wallet.walletAddress;
+
+  // ── THE DAY-CEILING GATE — a real gate, BEFORE any signing. Over-ceiling ⇒ 400 and
+  // NOTHING moves (we return before ubSpend). Owner-keyed, so one user's day of spending
+  // never eats another's ceiling. Mirrors the bridge/send path in _actions.mjs. ──
+  const day = await canSpendDay({ amountUsdc: amount, owner });
+  if (!day.allowed) return json(400, { error: day.reason, blocked: true });
+
   try {
-    const r = await ubSpend({ recipientAddress, amountUsdc: amount.toFixed(2), destinationChain });
+    const r = await ubSpend({
+      recipientAddress,
+      amountUsdc: amount.toFixed(2),
+      destinationChain,
+      sourceAccount: owner,
+    });
+
+    // Ledger AFTER success, against the SAME owner the gate read. "submitted" counts: the
+    // source burn has landed (only the destination mint is still in flight), so the funds
+    // ARE gone from the unified balance — not ledgering it would let a caller repeat
+    // submitted-but-unconfirmed spends past the ceiling.
+    await recordAgentSpend({
+      owner,
+      amountUsdc: amount,
+      source: "ub_spend",
+      justification: `cross-chain UB spend to ${recipientAddress} on ${destinationChain}`,
+    }).catch(() => {});
+
     return json(200, {
       executed: true,
       state: r.state,            // "completed" | "submitted"
@@ -57,6 +101,7 @@ export async function handler(event) {
       recipientAddress,
       amountUsdc: amount,
       destinationChain,
+      spender: owner,
     });
   } catch (e) {
     return json(500, { error: e.message });

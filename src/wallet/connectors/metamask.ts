@@ -272,6 +272,47 @@ export async function connectMetaMask() {
     return { txHash: receipt.transactionHash };
   }
 
+  // ── HOP A — fund the user's OWN agent SCA from their login wallet. ──────────────
+  //
+  // The MetaMask twin of the modular wallet's fundAgentWallet. One plain ERC-20 transfer
+  // (the agent SCA doesn't pull, so no approve needed). This is NOT the removed `sendUsdc`
+  // below: the destination is not arbitrary — it is the caller's own server-resolved agent
+  // wallet, and we refuse anything else.
+  //
+  // SEAM: `toAgentSca` comes from /api/my-wallet (ensureOwnerWallet(session)), never a
+  // constant. We explicitly refuse the SHARED agent wallet so a bad prop cannot route a
+  // user's funds there.
+  //
+  // GUARDS are VALIDATION, not a cap — the user's own money into the user's own wallet.
+  // ensureBalance covers amount + gas headroom (an EOA pays its own gas, unlike the
+  // paymaster-sponsored passkey path).
+  async function fundAgentWallet(toAgentSca: string, amountUsdc: number) {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(toAgentSca)) {
+      throw new Error("Your agent wallet isn't ready yet — try again in a moment.");
+    }
+    if (AGENT_WALLET_ADDRESS && toAgentSca.toLowerCase() === AGENT_WALLET_ADDRESS.toLowerCase()) {
+      throw new Error("Refusing to fund the shared agent wallet — this must go to your own.");
+    }
+    if (toAgentSca.toLowerCase() === address.toLowerCase()) {
+      throw new Error("That's your login wallet — funds would go nowhere.");
+    }
+    if (!(amountUsdc > 0)) throw new Error("Enter an amount greater than 0.");
+    await ensureBalance(amountUsdc);
+
+    const units = BigInt(Math.round(amountUsdc * 1e6));
+    const hash = await walletClient.writeContract({
+      address: CONTRACTS.USDC as `0x${string}`,
+      abi: TRANSFER_ABI,
+      functionName: "transfer",
+      args: [toAgentSca as `0x${string}`, units],
+      account: address,
+      chain: arcTestnet,
+    });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    await refreshBalance().catch(() => {});
+    return { txHash: receipt.transactionHash };
+  }
+
   // NOTE: the client-side `sendUsdc` was removed — all user sends go through the
   // single secure server endpoint /api/agent-send (auth + per-user wallet + cap +
   // day-ceiling). No client-side USDC-move path remains.
@@ -288,6 +329,7 @@ export async function connectMetaMask() {
     refreshBalance,
     createJobAsUser,
     fundJobAsUser,
+    fundAgentWallet,
     signMessage,
     // EIP-1193 has no programmatic disconnect; the user manages this in the
     // extension. No-op to satisfy the wallet shape.

@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import AddressDisplay from "./AddressDisplay";
+import SignInPrompt from "./SignInPrompt";
+import { useGatewayBalance } from "../lib/useGatewayBalance";
 import type { useWallet } from "../wallet/useWallet";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
@@ -8,26 +10,21 @@ const go = (id: string) => {
   window.location.hash = "/" + id;
 };
 
-// Poll cadence matches the Dashboard unified card.
-const BALANCE_POLL_MS = 30_000;
-
-// UnifiedBalancePanel — a first-class page for the agent's Unified Balance. Reached
-// nav-less via #/unified (from the Dashboard "Agent unified balance" card), mirroring
-// #/bridge and #/nanopay: the 5-item nav stays reserved for working tools.
+// UnifiedBalancePanel — a first-class page for YOUR OWN Unified Balance. Reached nav-less
+// via #/unified (from the Dashboard "Your unified balance" card), mirroring #/bridge and
+// #/nanopay: the 5-item nav stays reserved for working tools.
 //
-// READ: the public /api/gateway-balance read (agent-wallet keyed, no secrets, no
-// kit/adapter) — cross-chain total + per-chain breakdown + the depositor address.
+// READ: /api/gateway-balance — now AUTH-GATED and PER-USER (it used to be a public read of
+// the SHARED agent wallet). useGatewayBalance handles the three states this creates:
+// signed-out, provisioning (202, first-login race), and ready. A ready total of "0" is an
+// HONEST value for a new user, so we present it as "fund me", never as a failure.
 //
 // WRITE: the FUNDING control posts /api/agent-ub-deposit (auth-gated, cap-enforced
-// server-side BEFORE any tx). The agent SCA funds its OWN unified balance from its own
-// plain Arc USDC — self-custody, nothing is sent to a third party. The cap is the
-// server's; this form only pre-checks it to give a fast, honest error. It takes the
-// wallet prop for the session token, exactly as the read-only version predicted.
+// server-side BEFORE any tx). The user's OWN SCA funds its OWN unified balance from its own
+// plain Arc USDC — self-custody, nothing is sent to a third party. That deposit ALSO
+// performs the one-time delegate grant (server-side, inside ubDeposit, after the funds
+// check) — which is why the SCA must hold USDC first (hop A, on the My Agent page).
 export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWallet }) {
-  type PerChain = { chain: string; usdc: string | null; ok: boolean };
-  const [data, setData] = useState<{ depositor: string; total: string; perChain: PerChain[] } | null>(null);
-  const [failed, setFailed] = useState(false);
-
   // Funding form state.
   const [amount, setAmount] = useState("");
   const [funding, setFunding] = useState(false);
@@ -35,34 +32,10 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
   const [fundOk, setFundOk] = useState<{ amountUsdc: number; tx: string } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      try {
-        const r = await fetch("/api/gateway-balance", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: "{}",
-        });
-        const d = await r.json().catch(() => null);
-        if (!alive) return;
-        if (!r.ok || !Array.isArray(d?.perChain)) {
-          setFailed(true);
-          return;
-        }
-        setData({ depositor: d.depositor ?? "", total: d.unifiedBalanceUsdc ?? "0", perChain: d.perChain });
-        setFailed(false);
-      } catch {
-        if (alive) setFailed(true);
-      }
-    };
-    load();
-    const id = setInterval(load, BALANCE_POLL_MS);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
-  }, [reloadKey]);
+  const bal = useGatewayBalance(w, reloadKey);
+  const data = bal.status === "ready" ? bal : null;
+  // A brand-new user reads a true 0 — the signal to fund, not an error.
+  const isEmpty = data != null && Number(data.total) === 0;
 
   // Fund — a money-path write. The server re-checks auth AND the cap before anything
   // signs; this handler only shapes the request and reports what came back.
@@ -125,13 +98,38 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
             marginBottom: 6,
           }}
         >
-          Agent unified balance · across chains
+          Your unified balance · across chains
         </div>
-        {!data || failed ? (
+
+        {/* THE THREE STATES. Each is a distinct, honest message — none of them is a
+            broken card, a leaked shared number, or a raw 401. */}
+        {bal.status === "signed-out" && (
+          <SignInPrompt
+            wallet={w}
+            message="Sign in to see your balance."
+            onSignedIn={() => setReloadKey((k) => k + 1)}
+          />
+        )}
+
+        {bal.status === "provisioning" && (
+          <div className="sub" style={{ margin: 0 }}>
+            Setting up your wallet… this takes a few seconds.
+          </div>
+        )}
+
+        {bal.status === "loading" && (
+          <div className="sub" style={{ margin: 0 }}>
+            Reading your balance…
+          </div>
+        )}
+
+        {bal.status === "error" && (
           <div className="sub" style={{ margin: 0 }}>
             Unified balance unavailable.
           </div>
-        ) : (
+        )}
+
+        {data && (
           <>
             <span style={{ fontSize: "1.6rem", fontWeight: 600, color: "var(--paper)" }}>
               <span className="mono">{data.total}</span>{" "}
@@ -149,6 +147,17 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
                 </span>
               ))}
             </div>
+            {/* A true 0 is the signal to FUND, not a failure. Say so. */}
+            {isEmpty && (
+              <div className="sub" style={{ marginTop: 8 }}>
+                Your unified balance is empty. Deposit below to fund it — your agent's wallet
+                needs USDC in it first (
+                <button className="linkbtn" onClick={() => go("agent")}>
+                  fund your agent
+                </button>
+                ).
+              </div>
+            )}
           </>
         )}
       </div>
@@ -207,25 +216,38 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
           Fund the unified balance
         </div>
         <div className="sub" style={{ margin: "0 0 10px" }}>
-          Move USDC from the agent wallet into its unified balance. The funds stay owned
-          by the agent — this is a deposit, not a transfer to anyone else.
+          Move USDC from your agent's wallet into its unified balance. The funds stay owned
+          by your agent — this is a deposit, not a transfer to anyone else. The first
+          deposit also authorizes the Gateway spender for you, once.
         </div>
-        <div className="row" style={{ gap: 8, alignItems: "center" }}>
-          <input
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="0.01"
-            placeholder="Amount (USDC)"
-            value={amount}
-            disabled={funding}
-            onChange={(e) => setAmount(e.target.value)}
-            style={{ maxWidth: 180 }}
+        {/* The deposit needs a session AND a provisioned wallet — the server enforces both
+            (401 / 202). Disable rather than let the user fire a request that can't work. */}
+        {bal.status === "signed-out" ? (
+          <SignInPrompt
+            wallet={w}
+            message="Sign in to fund your unified balance."
+            onSignedIn={() => setReloadKey((k) => k + 1)}
           />
-          <button className="emerald" disabled={funding || !amount} onClick={fund}>
-            {funding ? "Depositing…" : "Fund"}
-          </button>
-        </div>
+        ) : bal.status === "provisioning" ? (
+          <div className="sub" style={{ margin: 0 }}>Setting up your wallet…</div>
+        ) : (
+          <div className="row" style={{ gap: 8, alignItems: "center" }}>
+            <input
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="0.01"
+              placeholder="Amount (USDC)"
+              value={amount}
+              disabled={funding}
+              onChange={(e) => setAmount(e.target.value)}
+              style={{ maxWidth: 180 }}
+            />
+            <button className="emerald" disabled={funding || !amount} onClick={fund}>
+              {funding ? "Depositing…" : "Fund"}
+            </button>
+          </div>
+        )}
         {fundError && (
           <div className="sub" style={{ margin: "8px 0 0", color: "var(--danger, #e5484d)" }}>
             {fundError}

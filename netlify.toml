@@ -85,13 +85,12 @@
   to = "/.netlify/functions/predict-markets"
   status = 200
 
-# Gateway plane: deposit USDC into the Circle Gateway Wallet (unified balance)
-# and read the unified balance back. Deposit EXECUTES via the dev-controlled
-# wallet; balance is a read-only Gateway API call.
-[[redirects]]
-  from = "/api/gateway-deposit"
-  to = "/.netlify/functions/gateway-deposit"
-  status = 200
+# Gateway plane: read the unified balance. The deposit path is /api/agent-ub-deposit
+# (capped via _arc.mjs's fail-closed ubDepositCapUsdc). The old /api/gateway-deposit was
+# REMOVED: it had zero callers and re-derived its own cap as
+# `Number(process.env.AGENT_MAX_SPEND_USDC || "1")`, which is fail-OPEN — a garbled env
+# value yields NaN, and `amount > NaN` is always false, so every spend passed. That is the
+# exact trap the fail-closed helper in _arc.mjs exists to prevent.
 [[redirects]]
   from = "/api/gateway-balance"
   to = "/.netlify/functions/gateway-balance"

@@ -10,6 +10,12 @@ export interface ExecutingWallet {
   readonly address: string | null;
   createJobAsUser(question: string): Promise<bigint>;
   fundJobAsUser(jobId: number, amountUsdc: number): Promise<{ txHash: string }>;
+  // Hop A: move USDC from this LOGIN wallet into the user's own agent SCA. The
+  // destination is resolved server-side (/api/my-wallet → ensureOwnerWallet(session)) and
+  // passed in — both connectors refuse the shared agent wallet. This is the only path by
+  // which a per-user agent wallet gets funded, and everything downstream (delegate grant,
+  // Gateway deposit, spend) depends on it.
+  fundAgentWallet(toAgentSca: string, amountUsdc: number): Promise<{ txHash: string }>;
 }
 
 export interface ConnectorInfo {

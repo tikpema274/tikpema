@@ -34,6 +34,10 @@ function memStore() {
   };
 }
 
+// 6-dp rounding, mirroring _budget.mjs's internal atomic math (not exported from there —
+// duplicated here rather than widening the module's public API just for a test).
+const round6 = (usdc) => Math.round(usdc * 1e6) / 1e6;
+
 const AT = "2026-07-01T12:00:00.000Z"; // fixed timestamp → deterministic UTC day
 const JOB_PRICE = 0.35; // → allowance 0.105, per-purchase cap 0.0525
 
@@ -95,21 +99,37 @@ async function main() {
   }
 
   // ── 4. Blocks a purchase that would exceed the per-period ceiling ───────────
-  //     Big job so per-purchase/allowance are generous; the DAY ceiling (2.00,
-  //     across all jobs) is the binding constraint. Two different jobs share it.
+  //     Big job so per-purchase/allowance are generous; the DAY ceiling (across all
+  //     jobs) is the binding constraint. Two different jobs share it.
+  //
+  //     Amounts are DERIVED from the live PERIOD_CEILING_USDC, never hardcoded. This
+  //     test used to assume the 2.00 code default and silently went stale the moment the
+  //     deployed ceiling moved to 60 — two buys of 1.5 no longer exceeded it, so the
+  //     "blocked" assertions failed against perfectly correct code. Deriving the amounts
+  //     means the test tracks whatever the ceiling is, now and after the next change.
   console.log("\n[4] block per-period ceiling (across jobs)");
   {
     const store = memStore();
-    // jobA: 1.5 (job allowance 6, per-purchase 3 → both fine); day total → 1.5
-    const a = await canSpend({ jobId: "jobA", jobPriceUsdc: 20, amountUsdc: 1.5, store, at: AT });
-    check("jobA 1.5 allowed", a.allowed === true, JSON.stringify(a));
-    await recordSpend({ jobId: "jobA", jobPriceUsdc: 20, amountUsdc: 1.5, source: "test", justification: "big1", store, at: AT });
+    const CEIL = budgetConfig().PERIOD_CEILING_USDC;
 
-    // jobB: 1.5 passes (a) and (b) but day 1.5+1.5=3.0 > 2.0 → blocked by (c)
-    const b = await canSpend({ jobId: "jobB", jobPriceUsdc: 20, amountUsdc: 1.5, store, at: AT });
-    check("jobB 1.5 blocked by daily ceiling", b.allowed === false, JSON.stringify(b));
+    // Each buy is 60% of the ceiling: one fits, two cannot (120% > 100%).
+    const buy = round6(CEIL * 0.6);
+    // Pick a job price large enough that the per-purchase sub-cap (price × 0.30 × 0.50 =
+    // price × 0.15) and the job allowance never bind — so the DAY ceiling is the only
+    // constraint under test. price × 0.15 ≥ buy  ⇒  price ≥ buy / 0.15. Use 10×CEIL, which
+    // clears that with margin for any sane pct config.
+    const price = round6(CEIL * 10);
+
+    const a = await canSpend({ jobId: "jobA", jobPriceUsdc: price, amountUsdc: buy, store, at: AT });
+    check(`jobA ${buy} allowed (ceiling ${CEIL})`, a.allowed === true, JSON.stringify(a));
+    await recordSpend({ jobId: "jobA", jobPriceUsdc: price, amountUsdc: buy, source: "test", justification: "big1", store, at: AT });
+
+    // jobB: same amount passes the per-job caps, but day total 2×buy = 120% of the
+    // ceiling → blocked by the period ceiling.
+    const b = await canSpend({ jobId: "jobB", jobPriceUsdc: price, amountUsdc: buy, store, at: AT });
+    check(`jobB ${buy} blocked by daily ceiling (${buy}+${buy} > ${CEIL})`, b.allowed === false, JSON.stringify(b));
     check("reason cites period ceiling", /period ceiling/.test(b.reason || ""), b.reason);
-    check("day total is 1.5 (blocked buy not recorded)", (await daySpend({ date: AT.slice(0, 10), store })) === 1.5);
+    check(`day total is ${buy} (blocked buy not recorded)`, (await daySpend({ date: AT.slice(0, 10), store })) === buy);
   }
 
   // ── 5. Audit log records both allowed and blocked attempts ──────────────────

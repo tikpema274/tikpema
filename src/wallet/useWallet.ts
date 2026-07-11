@@ -453,6 +453,8 @@ export function useWallet() {
     refreshBalance: isMetaMask ? mmRefreshBalance : modular.refreshBalance,
     createJobAsUser: isMetaMask ? mmWallet!.createJobAsUser : modular.createJobAsUser,
     fundJobAsUser: isMetaMask ? mmWallet!.fundJobAsUser : modular.fundJobAsUser,
+    // Hop A — login wallet → the user's own agent SCA. Same connector-switch as the rest.
+    fundAgentWallet: isMetaMask ? mmWallet!.fundAgentWallet : modular.fundAgentWallet,
     connectRegister,
     connectLogin,
     connectMetaMask,

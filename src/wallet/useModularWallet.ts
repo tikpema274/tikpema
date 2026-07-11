@@ -119,6 +119,22 @@ const BALANCE_OF_ABI = [
   },
 ] as const;
 
+// ERC-20 transfer — used by fundAgentWallet (hop A). A plain transfer, NOT approve +
+// transferFrom: the destination is the user's own agent SCA, which doesn't pull. So hop A
+// is ONE user-op, where fundJobAsUser needs two (escrow pulls, so it must approve first).
+const TRANSFER_ABI = [
+  {
+    type: "function",
+    name: "transfer",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "to", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+] as const;
+
 // ERC-20 approve + the prediction contract's placeBet — used by placeBetAsUser.
 const APPROVE_ABI = [
   {
@@ -595,11 +611,97 @@ export function useModularWallet() {
     [account]
   );
 
+  // ── HOP A — fund the user's OWN agent SCA from their login wallet. ──────────────
+  //
+  // This is the step that makes an empty per-user agent wallet actually usable: it is the
+  // ONLY way USDC gets into it, and everything downstream depends on it —
+  //   login wallet → SCA (here) → delegate grant → Gateway deposit → spend
+  // (the grant and deposit both run server-side inside ubDeposit, in that order).
+  //
+  // A simpler fundJobAsUser: a single passkey-signed, paymaster-sponsored `transfer`
+  // user-op. No approve — a plain transfer pushes, where the escrow's fund() pulls and so
+  // needs an allowance first.
+  //
+  // SEAM: `toAgentSca` MUST be the caller's own agent wallet as resolved SERVER-SIDE by
+  // /api/my-wallet (ensureOwnerWallet(session)). It is never a constant and never the
+  // shared agent wallet — we refuse that explicitly below, so a bad prop can't quietly
+  // route a user's funds into the shared SCA.
+  //
+  // GUARDS are VALIDATION, not a cap: this moves the user's own money into the user's own
+  // wallet, so there is nothing to ration. We reject only what cannot succeed.
+  const fundAgentWallet = useCallback(
+    async (toAgentSca: string, amountUsdc: number) => {
+      if (!account) throw new Error("Connect a wallet first");
+      if (!/^0x[0-9a-fA-F]{40}$/.test(toAgentSca)) {
+        throw new Error("Your agent wallet isn't ready yet — try again in a moment.");
+      }
+      if (AGENT_WALLET_ADDRESS && toAgentSca.toLowerCase() === AGENT_WALLET_ADDRESS.toLowerCase()) {
+        throw new Error("Refusing to fund the shared agent wallet — this must go to your own.");
+      }
+      if (toAgentSca.toLowerCase() === account.address.toLowerCase()) {
+        throw new Error("That's your login wallet — funds would go nowhere.");
+      }
+      if (!(amountUsdc > 0)) throw new Error("Enter an amount greater than 0.");
+
+      // Balance guard, read LIVE from the chain — not the cached display, which can be
+      // stale. Same shape as the bridge/deposit gate: reject before anything signs.
+      const raw = (await publicClient.readContract({
+        address: CONTRACTS.USDC as `0x${string}`,
+        abi: BALANCE_OF_ABI,
+        functionName: "balanceOf",
+        args: [account.address],
+      })) as bigint;
+      const units = BigInt(Math.round(amountUsdc * 1e6));
+      if (units > raw) {
+        throw new Error(
+          `Insufficient funds. You have ${Number(formatUnits(raw, USDC_DECIMALS)).toFixed(2)} USDC, need ${amountUsdc.toFixed(2)}.`
+        );
+      }
+
+      setBusy(true);
+      try {
+        const bundler = createBundlerClient({
+          account,
+          chain: arcTestnet,
+          transport: modularTransport,
+        });
+        setStatus("Funding your agent wallet…");
+        const data = encodeFunctionData({
+          abi: TRANSFER_ABI,
+          functionName: "transfer",
+          args: [toAgentSca as `0x${string}`, units],
+        });
+        const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await Promise.all([
+          computeArcFees(),
+          nonceKeyZero(account),
+        ]);
+        const hash = await bundler.sendUserOperation({
+          calls: [{ to: CONTRACTS.USDC as `0x${string}`, data }],
+          paymaster: true,
+          nonce,
+          maxPriorityFeePerGas,
+          maxFeePerGas,
+        });
+        const { receipt } = await bundler.waitForUserOperationReceipt({ hash, timeout: 60000 });
+        setStatus(`Agent wallet funded: ${receipt.transactionHash}`);
+        await refreshBalance().catch(() => {});
+        return { txHash: receipt.transactionHash };
+      } catch (e: any) {
+        setStatus(`Error: ${e.message}`);
+        throw e;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [account, refreshBalance]
+  );
+
   return {
     account,
     address: account?.address ?? null,
     status,
     busy,
+    fundAgentWallet,
     // Register requires a unique username per passkey — the authenticator
     // rejects a duplicate handle ("username is duplicated"), so the user
     // chooses one on the Register screen. We append a short time-based suffix

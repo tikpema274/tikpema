@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import type { useWallet } from "../wallet/useWallet";
+import { useGatewayBalance } from "../lib/useGatewayBalance";
 import AddressDisplay from "./AddressDisplay";
+import SignInPrompt from "./SignInPrompt";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -28,41 +30,11 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
     return () => clearInterval(id);
   }, [hasWallet, w.refreshAgentWallet]);
 
-  // AGENT unified balance across chains — a SEPARATE, read-only fetch of the shared
-  // agent wallet's Gateway balance (/api/gateway-balance). Deliberately NOT in
-  // useWallet (that's the per-user wallet); kept independent so a failure here never
-  // touches the per-user balance above. This is the AGENT's cross-chain balance.
-  type PerChain = { chain: string; usdc: string | null; ok: boolean };
-  const [unified, setUnified] = useState<{ total: string; perChain: PerChain[] } | null>(null);
-  const [unifiedFailed, setUnifiedFailed] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      try {
-        const r = await fetch("/api/gateway-balance", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: "{}",
-        });
-        const d = await r.json().catch(() => null);
-        if (!alive) return;
-        if (!r.ok || !Array.isArray(d?.perChain)) {
-          setUnifiedFailed(true);
-          return;
-        }
-        setUnified({ total: d.unifiedBalanceUsdc ?? "0", perChain: d.perChain });
-        setUnifiedFailed(false);
-      } catch {
-        if (alive) setUnifiedFailed(true);
-      }
-    };
-    load();
-    const id = setInterval(load, BALANCE_POLL_MS);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
-  }, []);
+  // YOUR unified balance across chains (/api/gateway-balance). This is now the CALLER'S OWN
+  // Gateway balance, auth-gated — it used to be a public read of the SHARED agent wallet.
+  // Kept out of useWallet (that's the plain per-user wallet balance) so a failure here never
+  // touches it. useGatewayBalance owns the signed-out / provisioning / ready states.
+  const unified = useGatewayBalance(w);
 
   return (
     <>
@@ -185,9 +157,10 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
           </div>
         )}
 
-        {/* AGENT unified balance — the shared agent wallet's Gateway balance across
-            chains. DISTINCT from "Your wallet" above; read-only; separate fetch, so a
-            failure here never touches the per-user balance. */}
+        {/* YOUR unified balance — the caller's OWN Gateway balance across chains, now
+            auth-gated and per-user (it used to read the SHARED agent wallet publicly).
+            DISTINCT from "Your wallet" above (that's the plain SCA balance); read-only;
+            separate fetch, so a failure here never touches the per-user balance. */}
         <div
           className="status"
           style={{
@@ -207,13 +180,29 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
               marginBottom: 6,
             }}
           >
-            Agent unified balance · across chains
+            Your unified balance · across chains
           </div>
-          {!unified || unifiedFailed ? (
-            <div className="sub" style={{ margin: 0 }}>
-              Unified balance unavailable.
-            </div>
-          ) : (
+
+          {/* THE THREE STATES — signed-out, provisioning, ready. None of them is a broken
+              card, a leaked shared number, or a raw 401. */}
+          {unified.status === "signed-out" && (
+            <SignInPrompt
+              wallet={w}
+              message="Sign in to see your balance."
+              onSignedIn={() => w.refreshAgentWallet().catch(() => {})}
+            />
+          )}
+          {unified.status === "provisioning" && (
+            <div className="sub" style={{ margin: 0 }}>Setting up your wallet…</div>
+          )}
+          {unified.status === "loading" && (
+            <div className="sub" style={{ margin: 0 }}>Reading your balance…</div>
+          )}
+          {unified.status === "error" && (
+            <div className="sub" style={{ margin: 0 }}>Unified balance unavailable.</div>
+          )}
+
+          {unified.status === "ready" && (
             <>
               <span style={{ fontSize: "1.2rem", fontWeight: 600, color: "var(--paper)" }}>
                 <span className="mono">{unified.total}</span>{" "}
@@ -231,6 +220,12 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
                   </span>
                 ))}
               </div>
+              {/* A true 0 means "fund me", not "broken". */}
+              {Number(unified.total) === 0 && (
+                <div className="sub" style={{ marginTop: 6 }}>
+                  Empty — deposit to fund it.
+                </div>
+              )}
             </>
           )}
           {/* Entry to the full Unified Balance page (#/unified) — mirrors the

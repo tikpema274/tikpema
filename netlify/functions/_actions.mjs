@@ -63,13 +63,15 @@ export function validateStepShape(step) {
 // Execute ONE validated action. The per-transaction cap is still enforced by the
 // CALLER (agent-act / execute-plan). This function adds the shared budget-spine
 // guardrails around the (unchanged) execution:
-//   - session present → block pay_for_service (Gateway/x402 can't run on the
-//     user's own SCA yet: needs a Gateway deposit; an SCA can't be the x402 payer),
 //   - per-DAY ceiling check (canSpendDay) before spending,
 //   - ledger the spend (recordAgentSpend) after success.
-// ctx = { walletAddress, session?, store? }. Returns { ok, kind, ... } or { ok:false, blocked }.
+//
+// EVERY money-moving branch below sources funds from ctx.walletAddress — the CALLER'S OWN
+// agent SCA, server-resolved from the verified session. No branch reads a wallet from env.
+// ctx = { walletAddress, store? }. Returns { ok, kind, ... } or { ok:false, blocked }.
 export async function executeAction(step, ctx) {
-  const { walletAddress, session, store } = ctx;
+  const { walletAddress, store } = ctx;
+  if (!walletAddress) return { ok: false, blocked: "no agent wallet resolved for this caller" };
   const shapeErr = validateStepShape(step);
   if (shapeErr) return { ok: false, blocked: shapeErr };
 
@@ -93,13 +95,14 @@ export async function executeAction(step, ctx) {
     }
   }
 
-  // Per-user safety: don't let a Gateway pay fall back to the shared wallet.
-  if (session && step.type === "pay_for_service") {
-    return {
-      ok: false,
-      blocked: "pay_for_service isn't available on your own agent wallet yet (Gateway deposit required)",
-    };
-  }
+  // NOTE: pay_for_service used to be BLOCKED here whenever a session was present, because
+  // agentPay read the shared AGENT_WALLET_ADDRESS and a per-user pay would have drained the
+  // shared Gateway balance. That fallback is gone — agentPay now REQUIRES a sourceAccount,
+  // which we thread from ctx.walletAddress below. The block is therefore obsolete: a
+  // per-user pay draws from the user's OWN Gateway balance, or fails.
+  //
+  // A caller with NO session (the internal/autonomous path) still supplies its own
+  // ctx.walletAddress, so there is no unowned spend either way.
 
   // Budget spine: per-day ceiling backstop (shared with research purchases).
   let dayValue;
@@ -143,9 +146,15 @@ export async function executeAction(step, ctx) {
   }
 
   if (step.type === "pay_for_service") {
+    // sourceAccount = the caller's OWN agent SCA (server-resolved from the session by
+    // agent-act / agent-execute-plan). agentPay has NO env fallback, so if a caller ever
+    // fails to thread a wallet here this throws rather than quietly draining the shared
+    // Gateway balance. The delegate must be authorized on THIS SCA — ensureDelegate runs
+    // at deposit time, and the Gateway itself rejects an unauthorized delegate.
     const pay = await agentPay({
       recipientAddress: String(step.payTo),
       amountUsdc: Number(step.payAmountUsdc).toFixed(2),
+      sourceAccount: walletAddress,
     });
     await ledger();
     return { ok: true, kind: "pay_for_service", pay };

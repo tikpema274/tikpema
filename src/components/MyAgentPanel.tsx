@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { agentClient } from "../lib/agentClient";
+import SignInPrompt from "./SignInPrompt";
+import { arcTestnet } from "../config/chain";
 import type { useWallet } from "../wallet/useWallet";
+
+const EXPLORER = arcTestnet.blockExplorers.default.url;
 
 // MyAgentPanel — Brick C "My Agent" surface. Re-mounts the agent-action UI (from
 // the archived AgentPanel), restyled to the current design and pointed at the
@@ -45,6 +49,42 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   // Per-plan-step destination-mint status, keyed by step index (for bridge steps
   // inside a multi-step plan — Option A: the plan doesn't wait, these poll inline).
   const [planMints, setPlanMints] = useState<Record<number, any>>({});
+
+  // ── HOP A — fund the agent wallet from the login wallet. ─────────────────────────
+  // The agent SCA is minted EMPTY, and this is the only way USDC gets into it. Every
+  // downstream capability (send/swap/bridge, and the Gateway deposit → delegate grant →
+  // spend chain) is gated on a balance nothing else can put there.
+  const [fundAmt, setFundAmt] = useState("");
+  const [fundBusy, setFundBusy] = useState(false);
+  const [fundErr, setFundErr] = useState("");
+  const [fundTx, setFundTx] = useState<string | null>(null);
+
+  const agentSca = w.agentWallet?.address ?? null;
+  const agentBal = Number(w.agentWallet?.balance ?? 0);
+
+  async function fundAgent() {
+    setFundErr("");
+    setFundTx(null);
+    if (!agentSca) {
+      setFundErr("Your agent wallet isn't ready yet — try again in a moment.");
+      return;
+    }
+    setFundBusy(true);
+    try {
+      // The destination is the SERVER-RESOLVED agent wallet (/api/my-wallet →
+      // ensureOwnerWallet(session)) — never a constant. Both connectors additionally
+      // refuse the shared agent wallet. Amount validation (>0, <= balance) lives in the
+      // connector, checked against a LIVE chain read, so nothing signs on a bad input.
+      const r = await w.fundAgentWallet(agentSca, Number(fundAmt));
+      setFundTx(r.txHash);
+      setFundAmt("");
+      await w.refreshAgentWallet().catch(() => {});
+    } catch (e: any) {
+      setFundErr(e?.message || "Funding failed");
+    } finally {
+      setFundBusy(false);
+    }
+  }
 
   // Poll IRIS for a forwarded bridge's destination mint until it settles (or the
   // window elapses), applying each update via `onUpdate`. Shared by the standalone
@@ -148,6 +188,80 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         <div className="status" style={{ marginTop: 0, marginBottom: 4 }}>
           Wallet <span className="mono">{shortAddr(w.agentWallet.address)}</span> ·{" "}
           {w.agentWallet.balance ?? "…"} USDC
+        </div>
+      )}
+
+      {/* Signed out ⇒ the agent wallet hasn't resolved, so the fund control below can't
+          render at all. Without this, the panel silently offers NO way back in — the same
+          dead-end that stopped the first deposit attempt on #/unified. A signed-out state
+          must be a door, not a wall. */}
+      {!w.isAuthenticated && (
+        <div style={{ marginTop: 12 }}>
+          <div className="panel-eyebrow">Your agent wallet</div>
+          <SignInPrompt
+            wallet={w}
+            message="Sign in to see your agent's wallet and fund it."
+            onSignedIn={() => w.refreshAgentWallet().catch(() => {})}
+          />
+        </div>
+      )}
+
+      {/* HOP A — fund the agent wallet from the login wallet. Shown whenever the agent
+          wallet exists; emphasised when it's empty, because at $0 nothing else on this
+          panel can work. */}
+      {agentSca && (
+        <div style={{ marginTop: 12 }}>
+          <div className="panel-eyebrow">
+            {agentBal > 0 ? "Top up your agent" : "Fund your agent to get started"}
+          </div>
+          <div className="sub" style={{ margin: "2px 0 10px" }}>
+            {agentBal > 0
+              ? "Move USDC from your login wallet into your agent's wallet."
+              : "Your agent's wallet is empty — it can't act until you move USDC into it from your login wallet."}
+            {w.usdcBalance != null && (
+              <>
+                {" "}
+                You have <span className="mono">{w.usdcBalance}</span> USDC in your login
+                wallet.
+              </>
+            )}
+          </div>
+          <div className="row" style={{ gap: 8, alignItems: "center" }}>
+            <input
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="0.01"
+              placeholder="Amount (USDC)"
+              value={fundAmt}
+              disabled={fundBusy}
+              onChange={(e) => setFundAmt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && fundAmt && !fundBusy) fundAgent();
+              }}
+              style={{ maxWidth: 180 }}
+            />
+            <button
+              className="emerald"
+              disabled={fundBusy || !fundAmt || Number(fundAmt) <= 0}
+              onClick={fundAgent}
+            >
+              {fundBusy ? "Funding…" : "Fund agent"}
+            </button>
+          </div>
+          {fundErr && (
+            <div className="sub" style={{ margin: "8px 0 0", color: "var(--danger, #e5484d)" }}>
+              {fundErr}
+            </div>
+          )}
+          {fundTx && (
+            <div className="sub" style={{ margin: "8px 0 0" }}>
+              Funded your agent wallet.{" "}
+              <a href={`${EXPLORER}/tx/${fundTx}`} target="_blank" rel="noreferrer">
+                View transaction ↗
+              </a>
+            </div>
+          )}
         </div>
       )}
 

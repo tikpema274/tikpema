@@ -1,6 +1,160 @@
 
 ---
 
+## 2026-07-11 — PER-USER GATEWAY: COMPLETE, proven live on prod (fund → grant → deposit → spend)
+
+Gateway (deposit + spend) is now scoped to the session's OWN agent SCA (`ensureOwnerWallet`)
+instead of the shared `AGENT_WALLET_ADDRESS`. Proven end-to-end on a **virgin** per-user wallet.
+
+**THE LIVE PROOF** — agent SCA `0xbafec950…95a3` (owner `0xe0516f81…6247`), faucet-funded 20 USDC,
+`isAuthorizedForBalance` = false at the start:
+
+| step | evidence |
+|---|---|
+| deposit #1 (2 USDC) | `delegateTxHash 0x9335b64c…` · `delegateAlreadyAuthorized:false` — **grant fired** |
+| chain | `isAuthorizedForBalance` **false → TRUE**; unified 0 → 2.0 |
+| deposit #2 (0.5) | `delegateTxHash: null` · `delegateAlreadyAuthorized:true` — **grant-once, idempotent** |
+| spend (`pay_for_service` 0.1, natural language) | unified 2.5 → 2.3965; recipient `0xc54d…e621` +0.100000 |
+| SCA plain USDC | 20.00 → 18.00 → 17.50 → 17.40 — every cent = deposits |
+
+**SPONSORSHIP — SETTLED.** The `addDelegate` tx cost the user **NOTHING**: 20.00 → 18.00 after a
+2.00 deposit, exact to 6dp. Circle's paymaster (`0x7ceA357B…0a25`) pays, and it **does** cover the
+GatewayWallet contract — the one caveat Phase 2 could not prove. (The ordering never depended on
+this; both outcomes were designed to work. Now the truth is on record rather than assumed.)
+
+**THE ORDERING (load-bearing).** `fund → ensureDelegate → deposit → spend`. `ensureDelegate` lives
+INSIDE `ubDeposit`, AFTER the insufficient-funds check — so `addDelegate` is **structurally
+unreachable on an empty wallet** (the funds check throws first), and on Arc a funded wallet is a
+gassed wallet (USDC *is* the native gas token — verified identical on 50/50 wallets). Grant runs
+BEFORE approve/deposit, so a grant failure leaves USDC plain in the user's SCA — clean and
+retryable, never stranded in Gateway. **Do not let a refactor reorder this.**
+
+**THE SEAM (cap-bypass trap) — CLOSED.** `_ubdeposit` / `_ubspend` / `_pay` no longer read
+`AGENT_WALLET_ADDRESS`; they REQUIRE an owner/sourceAccount param and **throw** rather than fall
+back. `_actions.mjs` threads `ctx.walletAddress` into `agentPay` (it previously ignored it — a
+per-user pay would have drained the SHARED balance). Zero live env reads remain in the money path.
+The `pay_for_service` block at `_actions.mjs:97` is removed — that block *was* the feature request.
+
+**DAY-LEDGER.** `agent-ub-spend` now gates on `canSpendDay` BEFORE signing and writes
+`recordAgentSpend` after — owner-keyed. It was the last money path ignoring `PERIOD_CEILING_USDC`.
+
+**AUTH.** `gateway-balance` was a PUBLIC read of the shared wallet; now `requireSession` +
+per-user. Three UI states (signed-out / provisioning-202 / ready), `$0` reads as "fund me".
+Deleted `gateway-deposit.mjs` + route — zero callers and a **fail-OPEN** cap
+(`Number(env || "1")` → NaN → `amount > NaN` always false → every spend passed).
+
+**BUG B — waitForTx poll granularity (fixed, not eliminated).** Deposits ran ~8.9s against
+Netlify's **10s** sync-function ceiling — 90% of budget, permanently. Measured the real cause:
+Circle txs confirm in **2–3s** (createDate→updateDate), but `waitForTx` slept a flat **2s** between
+polls, so a tx confirming at 3.0s wasn't seen until ~4.3s — 1–2s lost PER TX, ×2 txs. Fixed:
+1.5s first wait, then **400ms** polling, deadline-based (same 60s budget). Measured on prod:
+**8938ms → 6442ms** (−28%, now 64% of budget). Speeds every Circle path (send/swap/bridge/jobs).
+⚠️ **Irreducible floor ~6s** (2 sequential txs × 2–3s + 0.7s reads). The durable fix is a
+background function (pattern already in-repo) — see follow-up.
+
+**Test:** `scripts/verify-per-user-threading.mjs` (14/14 — no-env-fallback, seam, ledger gate,
+401s, ensureDelegate idempotence + the empty-wallet guarantee). `_budget-test.mjs` 26/26 and now
+**ceiling-agnostic** (it hardcoded 2.00 and silently went stale when the deployed ceiling moved to
+60 — it now derives amounts from the live `PERIOD_CEILING_USDC`).
+
+**⚠️ SESSION TTL IS 30 MINUTES** (`_auth.mjs:17`) and this cost most of a session: a stale
+`sessionStorage` token — **62h expired, and for a DIFFERENT passkey** than the funded wallet's
+owner — made three "deposits" silently never reach the server (zero invocations, zero on-chain
+txs). **Decode the token first** (`sub` + `exp`) before diagnosing anything else; it settles in
+seconds what took hours of wrong theories (a timeout theory and a bad bisect, both of which the
+logs later refuted).
+
+---
+
+## FOLLOW-UP: make the UB deposit a background function
+
+`agent-ub-deposit` runs ~6.4s of a 10s Netlify sync ceiling even after the waitForTx fix, with an
+irreducible ~6s floor (approve + deposit, each 2–3s on-chain). A latency blip still tips it over.
+The repo already has the pattern (`job-run-background`, `job-submit-background`): move the
+executor to a `-background` function (15-min budget) and have the UI poll. Not urgent — it
+succeeds today — but it is the only way to get real margin.
+
+---
+
+## FOLLOW-UP (do AFTER the per-user Gateway live proof): demote hop A in the UI
+
+**The wallet model, verified 2026-07-11 (code + Blobs + chain) — there are TWO wallets:**
+- **Login wallet** — a client-side Circle **Modular** SCA minted by the passkey
+  (`toCircleSmartAccount`, `useModularWallet.ts:322`). NOT on the Circle entity. It is a real
+  on-chain account that **can hold and spend USDC** (`fundJobAsUser` / `placeBetAsUser` spend
+  from it) — it is *not* auth-only.
+- **Agent SCA** — a server-side Circle **dev-controlled** SCA from `ensureOwnerWallet`. This is
+  the ONLY wallet the agent spends from; the server has no key for the login wallet.
+
+Worked example (the live-proof user): login `0xe0516f81…6247` (0.00 USDC) → agent SCA
+`0xbafec950…95a3` (20.00 USDC, faucet-funded directly).
+
+**THE PROBLEM.** Hop A ("Fund your agent" — login wallet → agent SCA) is presented as the
+PRIMARY funding door. That is right for **MetaMask** logins (the EOA holds the user's real
+funds) but a **dead end for passkey** logins: the passkey MSCA is minted EMPTY, so hop A's
+source wallet has nothing in it. A passkey user sees the primary funding control refuse with
+"insufficient funds" and has no obvious next step. **This confused an entire working session.**
+
+**THE FIX (reposition, don't delete — ~250 lines, all guarded and working):**
+1. **Primary affordance = "send USDC to your agent wallet address."** This already exists (the
+   Dashboard renders the SCA address + copy button) and already works — it is how the 20 USDC
+   above arrived. It is the path that works for EVERY login method.
+2. **Hop A demoted to secondary:** *"or move funds from your login wallet."* Keep it — it is
+   the correct path for MetaMask users.
+
+Note the `fund → delegate → deposit` ordering does NOT care how the SCA got funded — it only
+requires `balanceOf(SCA) >= amount` when `ensureDelegate` fires. So hop A is a convenience,
+never a prerequisite.
+
+---
+
+## 2026-07-11 — PER-USER GATEWAY, Phase 0: recon proven, fail-open endpoint deleted
+
+Groundwork for scoping Gateway (deposit + spend) to the session's own SCA
+(`ensureOwnerWallet`) instead of the shared `AGENT_WALLET_ADDRESS`. Read-only probes first;
+no money moved.
+
+**PROBE 1 — the delegate does NOT carry over** (`scripts/probe-delegate-status.mjs`).
+`isAuthorizedForBalance(USDC, depositor, DELEGATE)` on the deployed GatewayWallet reads
+`true` for the shared SCA (the baseline that makes spend work today) and **`false` for all
+48 other SCAs on the entity** — every per-user wallet included. Nothing in this repo ever
+called `addDelegate`, so the shared SCA's authority was established out-of-band. Each
+per-user SCA therefore needs its own one-time `addDelegate(USDC, delegate)`.
+
+**PROBE 2 — per-user SCA gas IS paymaster-sponsored** (`scripts/probe-addDelegate-gas.mjs`).
+Decoded the EntryPoint `UserOperationEvent` from real confirmed per-user-SCA txs: all 5
+sampled userOps were paid by paymaster `0x7ceA357B5AC0639F89F9e378a1f03Aa5005C0a25`, across
+different wallets AND different wallet-sets (each user gets their own set), so sponsorship
+is not a hand-tuned policy on the shared wallet. ⚠️ Caveat: Gas Station policies CAN be
+contract-scoped and GatewayWallet is not *proven* in scope — but see the ordering below,
+which makes this moot.
+
+**THE ORDERING IS THE DESIGN — do not let a refactor reorder it.**
+`fund (hop A) → ensureDelegate → deposit → spend`. Deposit is impossible before funding, so
+hop A is forced first anyway; putting `addDelegate` *after* it means the SCA already holds
+USDC — which on Arc IS gas. So if sponsorship covers GatewayWallet the paymaster pays, and
+if it doesn't the SCA self-pays (~0.07). Either way it works. **`delegate-during-provisioning`
+was REJECTED**: it is the only ordering that depends on sponsorship being true, and it would
+put an on-chain tx into a login path that is deliberately chain-free.
+
+**DELETED `gateway-deposit.mjs` + its `/api/gateway-deposit` route** — zero callers, and it
+re-derived its own cap as `Number(process.env.AGENT_MAX_SPEND_USDC || "1")`, which is
+**fail-OPEN**: a garbled env value yields `NaN` and `amount > NaN` is always false, so every
+spend passed. The live deposit path (`agent-ub-deposit`) uses the fail-closed
+`ubDepositCapUsdc()` from `_arc.mjs`. Retired `probe-gas-sponsorship.mjs` (its verdict logic
+was unsound — on Arc native gas IS USDC, so "transacted with zero native balance" reads as
+sponsorship when it actually just means "transacted then drained").
+
+**Shared SCA's Gateway balance is deliberately ORPHANED-FROM-UI post-repoint — NOT stuck.**
+Verified read-only (`scripts/probe-withdraw-path.mjs`): the deployed GatewayWallet really
+implements `withdrawingBalance` / `withdrawalBlock` (not just SDK typings), nothing is
+pending, and the exit — `initiateWithdrawal(token,value)` → delay → `withdraw(token)` — is
+called by the **depositor**, needing NO delegate. So repointing the UI/delegate at per-user
+wallets cannot strand it. Balance at time of writing: **2.0746 USDC** (grown from the 0.7755
+in the entry below).
+
+---
+
 ## 2026-07-08 — UB SPEND fee-guard (floor + cap) SHIPPED; fee finding RESOLVED
 
 Follow-up to the SPEND-PROVEN entry below, closing its ⚠️ fee finding. Read-only fee
