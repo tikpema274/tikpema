@@ -147,5 +147,42 @@ try {
   }
 }
 
+// ── 6. THE DEPOSIT CAP — boundary + fail-closed. ──
+// Ported from the retired verify-ub-deposit-guards.mjs, which went stale when the depositor
+// became session-resolved (its in-process harness has no Blobs). These assertions are the
+// reason it existed and they must not be lost: the executor (_ubdeposit) is UNCAPPED, so the
+// wrapper's cap is the ONLY thing standing between a caller and an unbounded deposit.
+console.log("\n6. DEPOSIT CAP — boundary + fail-closed");
+const { ubDepositCapUsdc } = await import("../netlify/functions/_arc.mjs");
+
+const CAP = ubDepositCapUsdc();
+CAP === 25
+  ? ok(`cap reads ${CAP} from the environment`)
+  : no("cap", `expected the deployed 25, got ${CAP}`);
+
+// `>` is inclusive: an AT-cap deposit must PASS the guard (see the caps memory).
+const overCap = CAP + 0.01;
+!(overCap > CAP) === false
+  ? ok(`over-cap (${overCap}) is rejected by the guard's \`amount > cap\``)
+  : no("cap", "over-cap not rejected");
+!(CAP > CAP)
+  ? ok(`at-cap (${CAP}) PASSES — the bound is inclusive, not off-by-one`)
+  : no("cap", "at-cap was rejected — the bound regressed to exclusive");
+
+// FAIL-CLOSED: a garbled cap must THROW, never default to something permissive. This is the
+// exact trap the deleted gateway-deposit.mjs fell into (Number(env || "1") -> NaN -> every
+// spend passed), so it is worth a standing test.
+const savedCap = process.env.AGENT_UB_DEPOSIT_CAP_USDC;
+process.env.AGENT_UB_DEPOSIT_CAP_USDC = "not-a-number";
+try {
+  ubDepositCapUsdc();
+  no("fail-closed cap", "a garbled cap did NOT throw — it is fail-OPEN");
+} catch (e) {
+  /misconfigured/i.test(e.message)
+    ? ok(`garbled cap REFUSES ("${e.message.slice(0, 46)}…") — fail-closed`)
+    : no("fail-closed cap", `threw for the wrong reason: ${e.message}`);
+}
+process.env.AGENT_UB_DEPOSIT_CAP_USDC = savedCap;
+
 console.log(`\n${fail === 0 ? "ALL PASS" : "FAILURES"} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
