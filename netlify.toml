@@ -114,3 +114,11 @@
   included_files = []
   node_bundler = "esbuild"
   external_node_modules = ["@circle-fin/x402-batching", "@x402/core", "@x402/evm"]
+
+# Autonomous provisioning-stall sweep — runs every minute, re-fires runs stranded at
+# "starting" (Netlify occasionally acks a *-background invocation without running it).
+# The in-code `export const config = { schedule }` in job-sweep.mjs was not picked up by
+# the CLI deploy; this is the canonical registration. Blobs access + logic already proven
+# via a manual invoke (listed=68 reFired=0).
+[functions."job-sweep"]
+  schedule = "* * * * *"

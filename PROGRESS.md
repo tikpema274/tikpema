@@ -1792,3 +1792,38 @@ background.mjs` (read-retry + lease + telemetry), `job-run.mjs` (store question)
 receipt projections), `App.tsx`/`Dashboard.tsx`/`ResearchPanel.tsx`/`jobTimeline.tsx` (Plan
 route, card, ProposalCard/ReceiptCard, poll-past-terminal). Proof scripts stay untracked.
 tsc + build clean; working tree == deployed prod bundle `index-BZ3W6xVf.js`.
+
+## 2026-07-11 — Autonomous provisioning-stall sweep (job-sweep) — recovery PROVEN live
+
+Follow-on to Brick 1 (`2ff9cc0`). Fixes the PROVISIONING stall (distinct from the receipt
+stranding, which loadWithRetry fixed): Netlify intermittently ACKs a `*-background`
+invocation without running it, so `job-run → job-run-background` drops and a run sticks at
+"starting" — no on-chain job, no fee, no deliverable (this was the "phantom jobId" chase:
+155448/155451/155457/155463). The poll-driven self-heal in job-run-status only fires WHILE
+the browser polls; live it never fired (job-run-status had 0 invocations). This is the
+AUTONOMOUS recovery, browser-independent.
+
+**`job-sweep.mjs`** — scheduled every minute. Lists `run:*`, re-fires runs at status
+"starting" (no jobId, question+wallet present, aged > 45s, not re-fired within 60s). Safety
+= the poll-driven discipline: re-fire ONLY from "starting" (job-run-background never began →
+nothing created); job-run-background's idempotency guard aborts any invocation that finds
+the run advanced (no double-create); `reFiredAt` cooldown; AGE CAP (> 1h → marked failed,
+not nudged forever). Stub 13/13.
+
+**PROVEN LIVE (forced, not waited-for).** `netlify blobs:set` can write the job-runs store,
+so we FORCED a stall instead of waiting for a random drop: injected a synthetic "starting"
+run (aged 90s, dummy zero-balance wallet). Within one tick the cron did it all itself —
+sweep log `listed=70 reFired=1 agedOut=0`, `reFiredAt` stamped, and job-run-background then
+RAN (run left "starting" → "failed"; the failure is the deliberately-invalid 0xdead wallet's
+Circle-404, NOT the sweep). Full chain proven: stall → autonomous cron → re-fire →
+job-run-background executes. Synthetic record deleted after.
+
+**DEPLOY GOTCHA (recorded).** `netlify deploy --dir=dist` does NOT register scheduled
+functions from in-code `export const config = { schedule }` — the deploy prints no
+"Scheduled functions" section and the cron never fires. The canonical registration is
+netlify.toml `[functions."job-sweep"] schedule = "* * * * *"`; that made it fire (first
+autonomous invocation 23:52:40). Scheduled-function Blobs access WORKS (manual invoke
+listed=68; autonomous listed=70) — the deploy-only unknown is resolved.
+
+Files: new `netlify/functions/job-sweep.mjs`; `netlify.toml` (schedule block). Proof script
+`scripts/verify-sweep.mjs` untracked. tsc + build clean.
