@@ -84,6 +84,16 @@
   to = "/.netlify/functions/job-bridge-approve"
   status = 200
 
+# Proposal loop — APPROVE a server-authored SWAP proposal (USDC↔EURC on Arc). Same trust
+# boundary as the bridge approve: {runId} is the ONLY field read from the client; tokens,
+# amount and the USDC-equivalent cap are re-derived from the persisted, server-authored
+# proposal. The swap is verified same-chain by job-swap-receipt-background — internal-only,
+# NO public route (it writes receipts; a public route would let anyone forge one).
+[[redirects]]
+  from = "/api/job-swap-approve"
+  to = "/.netlify/functions/job-swap-approve"
+  status = 200
+
 [[redirects]]
   from = "/api/agent-bridge"
   to = "/.netlify/functions/agent-bridge"

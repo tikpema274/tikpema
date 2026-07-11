@@ -39,11 +39,18 @@ const BRIEF_SYSTEM_PROMPT_EXA = `You are a research analyst producing a brief fo
 Ground your brief on the sources provided to you, then respond with ONLY JSON:
 { "answer": "<direct answer to the question>", "reasoning": "<2-5 sentences>",
   "sources": [{"title": "<title>", "url": "<url>"}], "confidence": <decimal 0..1>,
-  "proposal": null | { "action": "bridge", "destination": "<chain name>", "amountUsdc": <number>, "reasoning": "<why this destination and amount>" } }
+  "proposal": null | { "action": "bridge", "destination": "<chain name>", "amountUsdc": <number>, "reasoning": "<why this destination and amount>" }
+              | { "action": "swap", "tokenIn": "USDC"|"EURC", "tokenOut": "USDC"|"EURC", "amountIn": <number>, "reasoning": "<why this direction and size>" } }
 Use only the supplied sources as evidence; do not invent URLs.
 Cite ONLY sources from the supplied set — never invent, guess, or modify a URL. If the supplied sources do not let you answer confidently — especially for a specific past date, price, or outcome — say so plainly in "answer" (state what you could not verify), set "confidence" low, and include only the real sources you do have. An honest "the available sources do not confirm this" is correct and acceptable; a fabricated source is never acceptable.
 
-PROPOSAL: set "proposal" to null unless the question asks whether/where/how much USDC to move CROSS-CHAIN off Arc, AND your research supports one concrete recommendation. Supported destinations: Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon, Unichain, Linea (all testnets). Do NOT propose a fee — you cannot know it; the server prices it live and will reject an uneconomical bridge. Do NOT propose an amount you cannot justify from the sources. If the honest answer is "don't bridge", set "proposal" to null and say why in "answer". A null proposal is always an acceptable outcome; a poorly-justified one is not.`;
+PROPOSAL: set "proposal" to null unless the question asks for ONE of the two actions below AND your research supports one concrete recommendation.
+
+  • BRIDGE — the question asks whether/where/how much USDC to move CROSS-CHAIN off Arc. Supported destinations: Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon, Unichain, Linea (all testnets). Do NOT propose a fee — you cannot know it; the server prices it live and will reject an uneconomical bridge.
+
+  • SWAP — the question asks whether/which direction/how much to convert between USDC and EURC on Arc (a stablecoin FX conversion: USD↔EUR exposure). Only USDC and EURC exist; tokenIn and tokenOut must differ. Do NOT propose a rate or an output amount — you cannot know them; the server prices the swap live against the user's own wallet and will reject one that returns nothing.
+
+Do NOT propose an amount you cannot justify from the sources. If the honest answer is "do nothing", set "proposal" to null and say why in "answer". A null proposal is always an acceptable outcome; a poorly-justified one is not. You are proposing an action the user must then APPROVE — you are not executing it, and you are not giving investment advice.`;
 
 const BRIEF_USER_INSTRUCTION =
   "Research this question and produce a client-ready brief with web search, " +
@@ -278,12 +285,20 @@ export async function handler(event) {
     // so a pricing hiccup degrades to "no proposal", never to a refund.
     let proposal = null;
     try {
-      proposal = await validateProposal(decision.proposal);
+      // walletAddress = the AUTHENTICATED user's OWN agent SCA (resolved by the job spine
+      // from requireSession → ensureOwnerWallet, never client-supplied). A SWAP proposal is
+      // priced against THAT wallet, so the quote is the one that wallet would actually get —
+      // per-user by construction, no shared pipeline. The bridge path ignores it.
+      proposal = await validateProposal(decision.proposal, { walletAddress });
     } catch (e) {
       console.warn(`[research] proposal validation failed (no proposal, brief unaffected): ${e.message}`);
     }
     if (decision.proposal && !proposal) {
-      console.log("[research] model proposed a bridge; server REFUSED it (unresolvable destination, over cap, unpriceable, or fee ≥ amount)");
+      console.log(
+        "[research] model proposed an action; server REFUSED it " +
+          "(bridge: unresolvable destination / over cap / unpriceable / fee ≥ amount — " +
+          "swap: unknown token / same token / over cap in USDC-equivalent / unpriceable / zero out)"
+      );
     }
 
     // 3. Build the canonical report and hash its exact bytes in memory.

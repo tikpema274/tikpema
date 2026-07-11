@@ -96,6 +96,28 @@ export const bridgeCapUsdc = () => {
   return n;
 };
 
+// Per-SWAP cap (USDC↔EURC on Arc). Swap was executable with NO per-transaction bound —
+// only the day-ceiling — while send and bridge each had one. That was a real hole: a single
+// bad instruction could swap the whole wallet in one action. It becomes a worse hole the
+// moment swap is PROPOSABLE, so this lands first.
+//
+// ⚠️ The bound is in USDC-EQUIVALENT, not in the input token. A swap's amountIn may be EURC,
+// and EURC != $1 — so the caller MUST convert with valueInUsdc() before comparing. Bounding
+// the raw amountIn would silently mis-bound every EURC→USDC swap.
+//
+// Same fail-closed parse as the others: unset → conservative default; garbled → throw.
+export const swapCapUsdc = () => {
+  const raw = process.env.AGENT_SWAP_CAP_USDC;
+  if (raw === undefined || raw === "") return 25; // conservative testnet default (matches bridge)
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(
+      `AGENT_SWAP_CAP_USDC is misconfigured (${JSON.stringify(raw)}); refusing to swap`
+    );
+  }
+  return n;
+};
+
 // Per-UB-SPEND cap (the WRITE side of Unified Balance — a cross-chain spend of the
 // agent's Arc unified balance to another chain). Its own bound, same fail-closed
 // parse. CRITICAL: kit.unifiedBalance.spend / _ubspend.mjs are UNCAPPED, so the

@@ -1,5 +1,5 @@
 import { circle, waitForTx } from "./_circle.mjs";
-import { ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc, bridgeCapUsdc } from "./_arc.mjs";
+import { ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc, bridgeCapUsdc, swapCapUsdc } from "./_arc.mjs";
 import { agentSwap, valueInUsdc, SWAP_TOKENS } from "./_swap.mjs";
 import { agentPay } from "./_pay.mjs";
 import { agentBridge, bridgeFee, resolveDestination } from "./_bridge.mjs";
@@ -111,6 +111,25 @@ export async function executeAction(step, ctx) {
   } catch (e) {
     return { ok: false, blocked: `cannot value step: ${e.message}` };
   }
+
+  // Per-SWAP cap. Unlike send/bridge (checked above, before valuation), this MUST run here —
+  // AFTER valueOfStep — because a swap's amountIn may be EURC, and EURC != $1. valueOfStep
+  // has already converted it to USDC-equivalent; bounding the raw amountIn would silently
+  // mis-bound every EURC→USDC swap. But it still runs BEFORE canSpendDay, so an over-cap swap
+  // returns the CAP message rather than the day-ceiling one — same behaviour as send/bridge.
+  //
+  // Swap was the only executable action with no per-transaction bound (day-ceiling only).
+  // Reject, never clamp: nothing signs.
+  if (step.type === "swap_tokens") {
+    const scap = swapCapUsdc();
+    if (dayValue > scap) {
+      return {
+        ok: false,
+        blocked: `exceeds per-swap limit of ${scap} USDC (${Number(step.amountIn)} ${String(step.tokenIn).toUpperCase()} ≈ ${dayValue.toFixed(2)} USDC)`,
+      };
+    }
+  }
+
   // Per-user day ceiling: keyed to THIS caller's own agent wallet (server-
   // resolved), so one user's spend never blocks another's. The gate and the
   // ledger below MUST use the same owner (walletAddress) to read/write one bucket.

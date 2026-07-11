@@ -33,6 +33,18 @@ import { parseBody, json, dateAnchor } from "./_arc.mjs";
 // propose an economically valid bridge for a bad reason. Brick 1's mitigation is human:
 // the proposal card shows the agent's reasoning prominently so the USER can judge what
 // the system cannot. A reasoning/vetting gate is a slotted future brick.
+//
+// ── TWO SUPPORTED ACTIONS (this gate must know about BOTH) ──────────────────────────────
+// This classifier is the FRONT DOOR: a task it declines never reaches research, so it can
+// never become a proposal. When the proposable domain grew to include SWAP (USDC↔EURC on
+// Arc), this prompt had to grow with it — it was silently declining every swap task with
+// "the agent can only bridge", which made the whole swap path unreachable end-to-end even
+// though every layer below it worked.
+//
+// The domain is deliberately narrow: USDC↔EURC only. That is a stablecoin FX conversion
+// between two first-party Circle assets — not "which coin should I buy". An arbitrary token
+// is still DECLINED here, which is what keeps the vetting gate in _proposal.mjs legitimately
+// empty (there is nothing unvetted to refuse).
 
 const SYSTEM_PROMPT = `You are pricing an ACTION-PLANNING task for an AI agent that can execute on-chain actions.
 
@@ -40,23 +52,31 @@ The agent researches the real economics of an action, then proposes a concrete p
 
 First, CLASSIFY the task. The test is EXECUTABILITY: can this resolve into a concrete, checkable action the agent could bound, price, and either execute or refuse?
 
-- ACCEPT if it describes an on-chain action, even loosely, even as a question:
-  "bridge some USDC to Base", "move 5 USDC to Arbitrum", "should I bridge to Optimism or
-  stay on Arc?", "what would it cost to move funds to Base and is it worth it?".
-  These name an action whose economics can be researched and whose parameters the server
-  can bound and price. Asking "should I" is FINE here — the agent proposes, the user decides.
-  The only supported action today is bridging USDC off Arc to: Ethereum, Base, Arbitrum,
-  Optimism, Avalanche, Polygon, Unichain, or Linea (all testnets).
+- ACCEPT if it describes one of the TWO supported on-chain actions, even loosely, even as a
+  question. Asking "should I" is FINE here — the agent proposes, the user decides.
+
+  1. BRIDGE — moving USDC off Arc to another chain:
+     "bridge some USDC to Base", "move 5 USDC to Arbitrum", "should I bridge to Optimism or
+     stay on Arc?", "what would it cost to move funds to Base and is it worth it?".
+     Supported destinations: Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon,
+     Unichain, or Linea (all testnets).
+
+  2. SWAP — converting between USDC and EURC on Arc (a stablecoin FX conversion, USD↔EUR):
+     "swap 5 USDC to EURC", "should I convert some USDC to EURC given where EUR/USD is?",
+     "is now a good time to move into EURC?", "how much USDC should I convert to EURC?".
+     ONLY these two tokens exist on Arc. Both directions are supported.
 
 - DECLINE if there is no executable action to bound:
   "what's the best chain?", "what should I invest in?", "is crypto a good idea?",
   "which token will go up?". These are opinion with nothing to price, nothing to refuse,
-  and nothing to approve. Also DECLINE actions the agent cannot perform (swapping to an
-  arbitrary token, anything off the supported-destination list, anything not on-chain).
+  and nothing to approve. Also DECLINE actions the agent cannot perform: swapping to any
+  token OTHER than USDC or EURC, anything off the supported-destination list, and anything
+  not on-chain. Buying/holding/selling an arbitrary coin is NOT a supported action and is
+  not investment advice the agent gives — decline it.
   When declining, say plainly that it needs a concrete action, and give one example of a
-  task that would work. Keep any example amount SMALL (a few USDC) — the agent enforces a
-  per-bridge cap and would refuse a large one, so never suggest an amount you cannot know
-  is allowed.
+  task that would work. Keep any example amount SMALL (a few USDC) — the agent enforces
+  per-bridge and per-swap caps and would refuse a large one, so never suggest an amount you
+  cannot know is allowed.
 
 Then, for ACCEPTED tasks, assess research complexity: how much source-gathering and
 synthesis is needed to reason honestly about the action's economics.

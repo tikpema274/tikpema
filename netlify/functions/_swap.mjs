@@ -39,23 +39,51 @@ export async function valueInUsdc({ token, amount }) {
 // Estimate then execute a same-chain swap on Arc Testnet from the agent wallet.
 // tokenIn/tokenOut are symbols from SWAP_TOKENS; amountIn is a human decimal
 // string ("1.00"). Returns { estimate, txHash, explorerUrl }.
-export async function agentSwap({ walletAddress, tokenIn, tokenOut, amountIn }) {
+// The swap request, built ONCE so the estimate and the execution can never drift apart.
+// A proposal priced with different params than the swap that later executes would be a lie
+// at approve time — the same class of bug the bridge avoids by re-pricing from IRIS.
+function buildSwapParams({ walletAddress, tokenIn, tokenOut, amountIn }) {
   const { kit, adapter, kitKey } = kitAndAdapter();
-  const swapParams = {
-    from: { adapter, chain: "Arc_Testnet", address: walletAddress },
-    tokenIn,
-    tokenOut,
-    amountIn,
-    // The agent wallet is a dev-controlled SCA. App Kit defaults to a USDC permit
-    // (EIP-2612) signature, but permits use ecrecover, which rejects an SCA's
-    // ERC-1271 signature — so the swap fails with "Transaction hash is required".
-    // Forcing an onchain approve makes the SCA path work.
-    allowanceStrategy: "approve",
-    // Explicit 1% slippage cap. USDC/EURC are stablecoins so the rate barely
-    // moves, but setting this makes the tolerance intentional rather than relying
-    // on an SDK default — the swap reverts rather than filling at a bad rate.
-    config: { kitKey, slippageBps: 100 },
+  return {
+    kit,
+    swapParams: {
+      from: { adapter, chain: "Arc_Testnet", address: walletAddress },
+      tokenIn,
+      tokenOut,
+      // ⚠️ App Kit REQUIRES a human-decimal STRING here. Passing a number throws
+      // "Invalid swap parameters: amountIn: Expected string, received number" — which
+      // _proposal.mjs would then swallow as "cannot price it → no proposal", silently making
+      // every swap unproposable. Callers used to coerce this themselves (_actions.mjs did,
+      // validateSwapProposal didn't); coercing HERE means neither can get it wrong again.
+      amountIn: String(amountIn),
+      // The agent wallet is a dev-controlled SCA. App Kit defaults to a USDC permit
+      // (EIP-2612) signature, but permits use ecrecover, which rejects an SCA's
+      // ERC-1271 signature — so the swap fails with "Transaction hash is required".
+      // Forcing an onchain approve makes the SCA path work.
+      allowanceStrategy: "approve",
+      // Explicit 1% slippage cap. USDC/EURC are stablecoins so the rate barely
+      // moves, but setting this makes the tolerance intentional rather than relying
+      // on an SDK default — the swap reverts rather than filling at a bad rate.
+      config: { kitKey, slippageBps: 100 },
+    },
   };
+}
+
+// READ-ONLY live re-price. The swap analogue of _bridge.mjs's bridgeFee(): _proposal.mjs
+// calls this to price a swap proposal from the CHAIN rather than trusting the model's
+// numbers, exactly as the bridge re-prices its fee from IRIS. estimateSwap is free and
+// moves nothing — no approve, no swap, no signature.
+//
+// Priced against the USER'S OWN wallet (walletAddress), so the quote is the one that wallet
+// would actually get. Throws on any failure — the caller must treat "cannot price it" as
+// "cannot honestly propose it" and return null.
+export async function estimateSwapOnly({ walletAddress, tokenIn, tokenOut, amountIn }) {
+  const { kit, swapParams } = buildSwapParams({ walletAddress, tokenIn, tokenOut, amountIn });
+  return kit.estimateSwap(swapParams);
+}
+
+export async function agentSwap({ walletAddress, tokenIn, tokenOut, amountIn }) {
+  const { kit, swapParams } = buildSwapParams({ walletAddress, tokenIn, tokenOut, amountIn });
   // estimateSwap is free and gives the expected output up front. Returned to the
   // caller so the UI can show value-out. (Slippage: SDK default for now — add a
   // min-out / impact check here later if tightening is needed.)

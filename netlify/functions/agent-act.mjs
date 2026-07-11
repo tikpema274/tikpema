@@ -1,6 +1,6 @@
 import { connectLambda } from "@netlify/blobs";
 import { TxPendingError } from "./_circle.mjs";
-import { json, parseBody, dateAnchor, sendCapUsdc, bridgeCapUsdc } from "./_arc.mjs";
+import { json, parseBody, dateAnchor, sendCapUsdc, bridgeCapUsdc, swapCapUsdc, maxSpendUsdc } from "./_arc.mjs";
 import { SWAP_TOKENS } from "./_swap.mjs";
 import { executeAction, valueOfStep } from "./_actions.mjs";
 import { resolveDestination, bridgeFee, SUPPORTED_DESTINATION_LABELS } from "./_bridge.mjs";
@@ -268,24 +268,36 @@ export async function handler(event) {
       if (tokenIn === tokenOut) {
         return json(200, { executed: false, decision, blocked: "tokenIn and tokenOut must differ" });
       }
-      const maxSpend = Number(process.env.AGENT_MAX_SPEND_USDC || "1");
       if (!(amountIn > 0)) {
         return json(200, { executed: false, decision, blocked: "amountIn must be > 0" });
       }
-      // Spend cap stays HERE (the caller owns the cap). Cap on USD VALUE of the
-      // input, not raw token units (EURC ~$1.14, so unit-capping would
-      // under-count). Fail-safe: if we can't value it, block.
+      // ── THE SWAP CAP. Two bugs fixed here; both were live. ──
+      //
+      // 1. FAIL-OPEN. This was `Number(process.env.AGENT_MAX_SPEND_USDC || "1")` — a garbled
+      //    env value yields NaN, and `usdValue > NaN` is ALWAYS FALSE, so every swap passed
+      //    UNCAPPED. That is the exact bug that killed gateway-deposit.mjs. swapCapUsdc()
+      //    THROWS on a misconfigured value instead (fail-closed): a typo can never silently
+      //    remove the bound.
+      //
+      // 2. TWO CAPS FOR ONE ACTION. This path bounded swaps by AGENT_MAX_SPEND_USDC while the
+      //    PROPOSAL path (_proposal.mjs → job-swap-approve → executeAction) bounds them by
+      //    swapCapUsdc — and the proposal path, the one that executes on approval, was the
+      //    LOOSER of the two. One action, one bound: both now use swapCapUsdc().
+      //
+      // The cap is on the USD VALUE of the input, not raw token units — EURC != $1, so
+      // unit-capping would under-count. Fail-safe: if we cannot value it, we block.
       let usdValue;
       try {
         usdValue = await valueOfStep(step);
       } catch (e) {
         return json(200, { executed: false, decision, blocked: `cannot value ${tokenIn}: ${e.message}` });
       }
-      if (usdValue > maxSpend) {
+      const swapCap = swapCapUsdc();
+      if (usdValue > swapCap) {
         return json(200, {
           executed: false,
           decision,
-          blocked: `swap value ~${usdValue.toFixed(2)} exceeds AGENT_MAX_SPEND_USDC (${maxSpend})`,
+          blocked: `exceeds per-swap limit of ${swapCap} USDC (${amountIn} ${tokenIn} ≈ ${usdValue.toFixed(2)} USDC)`,
         });
       }
 
@@ -298,15 +310,24 @@ export async function handler(event) {
       const payTo = String(decision.payTo || "");
       const payAmount = Number(decision.payAmountUsdc);
       const step = { type: "pay_for_service", payTo, payAmountUsdc: payAmount };
-      const maxSpendPay = Number(process.env.AGENT_MAX_SPEND_USDC || "1");
       if (!/^0x[0-9a-fA-F]{40}$/.test(payTo)) {
         return json(200, { executed: false, decision, blocked: "invalid payTo address" });
       }
       if (!(payAmount > 0)) {
         return json(200, { executed: false, decision, blocked: "payAmountUsdc must be > 0" });
       }
+      // Same FAIL-OPEN bug as the swap cap above: this was
+      // `Number(process.env.AGENT_MAX_SPEND_USDC || "1")`, so a garbled env value became NaN
+      // and `payAmount > NaN` was always false — every pay passed UNCAPPED. maxSpendUsdc()
+      // (_arc.mjs) has always been the fail-closed helper for this env var; this path just
+      // never used it. It THROWS on a misconfigured value rather than silently uncapping.
+      const maxSpendPay = maxSpendUsdc();
       if (payAmount > maxSpendPay) {
-        return json(200, { executed: false, decision, blocked: "payAmountUsdc " + payAmount + " exceeds AGENT_MAX_SPEND_USDC (" + maxSpendPay + ")" });
+        return json(200, {
+          executed: false,
+          decision,
+          blocked: `payAmountUsdc ${payAmount} exceeds the per-payment limit of ${maxSpendPay} USDC`,
+        });
       }
       const r = await executeAction(step, actx);
       if (!r.ok) return json(200, { executed: false, decision, blocked: r.blocked });

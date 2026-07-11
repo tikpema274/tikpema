@@ -1,6 +1,105 @@
 
 ---
 
+## 2026-07-11 — SWAP IS PROPOSABLE (proposal domain expanded; Brick 2 groundwork). PROVEN LIVE.
+
+The proposal loop was bridge-ONLY. It now also proposes a **SWAP (USDC↔EURC on Arc)** — a
+stablecoin FX conversion between two first-party Circle assets. Same spine, per-user, and the
+approve→execute→receipt discipline is preserved (though the receipt is a NEW same-chain twin,
+not a reuse — a swap has no burn, no attestation, no destination mint).
+
+**Regulatory line, held deliberately.** `plan-quote` accepts "swap 5 USDC to EURC" and still
+DECLINES "should I buy PEPE?" ("investment opinion on an arbitrary token, not a supported
+on-chain action"). USDC↔EURC only. That is what keeps the vetting gate at `_proposal.mjs:86`
+legitimately empty — there is nothing unvetted to refuse. A coin-safety gate remains a FUTURE
+brick, and expanding to arbitrary tokens REQUIRES it first.
+
+### THE LIVE PROOF (agent SCA `0xbafec950…95a3`, owner `0xe0516f81…6247`)
+
+| gate | evidence |
+|---|---|
+| **cap fires** | 30 USDC → `exceeds per-swap limit of 25 USDC (30 USDC ≈ 30.00 USDC)`; reject-not-clamp, nothing signed |
+| **bound inclusive** | 25 USDC → NO cap message (passed the gate), then failed on funds |
+| **proposal validated** | server-authored: `action:"swap_tokens"` (model wrote `"swap"`), tokens re-derived from the allowlist, `valueUsdc:5`, `cap:25`, `indicativeAmountOut:4.283006` priced LIVE |
+| **hostile body ignored** | sent `tokenIn:"EURC"`, `amountIn:999999`, `txHash:"0xbadbad…"`, `state:"confirmed"` → receipt says `USDC`, `5`, `null`, `submitted_no_hash`. ONLY `runId` is read. |
+| **executed** | USDC **15.39 → 10.39** (−5.00 exact) · EURC **0 → 4.281949** |
+| **receipt** | `confirmed`, `verifiedBy:"balance-delta"`, `amountOut:4.281949` — matches chain to 6dp |
+| **day-ledger** | `{"owner":"0xbafec950…95a3","spentUsdc":5.1}` — owner-keyed (5.0 swap + 0.1 earlier pay) |
+
+**The null-hash path fired FOR REAL.** `_swap.mjs` returned `txHash: null` (the 1098
+async-waiter quirk), so the receipt went `submitted_no_hash` and was confirmed by **BALANCE
+DELTA** against the snapshot `job-swap-approve` takes before executing. That was the riskiest
+new code and it was exercised live on the first attempt.
+
+### EIGHT BUGS, NONE FINDABLE FROM STUBS
+
+1. **`agent-act` swap cap was FAIL-OPEN** (live, pre-existing): `Number(env || "1")` → NaN →
+   `usdValue > NaN` always false → **every swap passed uncapped**. The same bug that killed
+   `gateway-deposit`. Now `swapCapUsdc()`, which throws on garbled config.
+2. **Same fail-open bug on `pay_for_service`** (live, pre-existing) → now `maxSpendUsdc()`, the
+   fail-closed helper that had existed in `_arc.mjs` all along and simply wasn't used.
+   **Repo-wide audit: ZERO fail-open caps remain.**
+3. **TWO caps for one action**: chat bounded swaps at `AGENT_MAX_SPEND_USDC` (10), the PROPOSAL
+   path at `swapCapUsdc` (25) — the *executing* path was the LOOSER one. Unified.
+4. **`plan-quote` DECLINED every swap task** at the front door ("the agent can only bridge").
+   Every layer below worked; the path was unreachable end-to-end. **Expanding a proposable
+   domain means finding every gate on the way IN, not just the validator on the way out.**
+5. **Invented SDK field**: read `estimate.amountOut ?? estimate.toAmount`. The real one is
+   `estimatedOutput: { token, amount }` (amount is a decimal STRING).
+6. **Wrong SDK type**: passed `amountIn` as a NUMBER; App Kit demands a STRING. Now coerced in
+   `buildSwapParams` — one chokepoint, so no caller can get it wrong again.
+7. **Verifier had no Blobs READ-RETRY.** Blobs is eventually consistent (~11s) and
+   `job-swap-approve` writes the receipt and triggers the verifier in the same breath — the
+   first read saw nothing, returned 404, and **stranded the receipt with the swap already
+   on-chain**. `job-bridge-receipt-background` had solved this already (10 × 1.5s); mine hadn't.
+8. **(Diagnostic, mine)** `_auth.mjs`'s `hmac` is **b64url, NOT hex**. Every manual
+   internal-token call I made was malformed → silent 401 → an hour chasing ghosts.
+
+⚠️ **5 and 6 BOTH hid behind a green, fully-mocked test suite.** A mock cannot violate the
+contract it stands in for. `scripts/smoke-swap-estimate.mjs` now calls the **REAL App Kit**
+(estimateSwap is free and read-only — there was never a reason not to). It caught both.
+
+### ⚠️ A BACKGROUND FUNCTION FAILS INVISIBLY — write telemetry INTO THE RECEIPT
+
+Netlify acks 202 **before** a background function runs, so its response is discarded, and its
+`console.log`/`console.error` do **NOT** surface through `netlify logs`. A throw therefore
+strands a receipt with money already moved and **no way to learn why**. This was the single
+biggest time-sink of the session. `job-swap-receipt-background` now writes `verifierRanAt` /
+`verifierError` onto the receipt — the one place that is readable. Do the same for any future
+background worker.
+
+### CORRECTION TO `ab48f6f` (the UB deposit hardening)
+
+That commit claimed the single-use claim guard was "verified on prod with a VALID internal
+token". **It was not** — the token was hex-encoded, `requireInternal` 401'd it, and the chain
+therefore didn't move because AUTH rejected the request, NOT because the claim guard worked.
+**Now genuinely proven** with a correct b64url token (`internal=true` confirmed independently):
+replaying a COMPLETED depositId left the chain at `10.390000 / 4.506500`, unchanged.
+
+### ⚠️ THE SWAP CAP IS IN USDC-EQUIVALENT, NOT RAW TOKEN UNITS
+
+EURC != $1. **22 EURC ≈ 26.40 USDC sails straight past a raw cap of 25.** So the check runs
+AFTER `valueOfStep` converts, but BEFORE `canSpendDay`, so an over-cap swap still returns the
+CAP message rather than the ceiling one (matching send/bridge). Both `_actions.mjs` and
+`_proposal.mjs` enforce it this way.
+
+### Files
+NEW: `job-swap-approve.mjs`, `job-swap-receipt-background.mjs`, `_arc.mjs:swapCapUsdc`,
+`_swap.mjs:estimateSwapOnly` + `buildSwapParams`.
+CHANGED: `_proposal.mjs` (`validateSwapProposal`), `_actions.mjs` (swap cap), `agent-act.mjs`
+(both fail-open caps), `plan-quote.mjs` + `job-submit-background.mjs` (prompts).
+
+**Tests:** swap-cap 7 · swap-proposal 20 · swap-approve 33 · swap-receipt 16 ·
+smoke-swap-estimate 11 (REAL SDK). Regression: per-user-threading 18 · approve-writepath 25.
+
+### STILL MISSING (deliberately): the UI
+There is no swap proposal card and no approve button. `jobTimeline.tsx` needs a
+`SwapProposalCard` + swap receipt states, and `PlanPanel`/`ResearchPanel` must route approve by
+`proposal.action`. The whole cycle above was driven by curl. **A user cannot approve a swap
+from the app yet.**
+
+---
+
 ## 2026-07-11 — PER-USER GATEWAY: COMPLETE, proven live on prod (fund → grant → deposit → spend)
 
 Gateway (deposit + spend) is now scoped to the session's OWN agent SCA (`ensureOwnerWallet`)
