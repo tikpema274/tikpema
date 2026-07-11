@@ -66,7 +66,32 @@ logs later refuted).
 
 ---
 
-## FOLLOW-UP: make the UB deposit a background function
+## 2026-07-11 — UB deposit is now a BACKGROUND function (Bug B CLOSED)
+
+`agent-ub-deposit` is split into a fast sync front door + `agent-ub-deposit-background`
+(15-min budget) + `agent-ub-deposit-status` (poll). **Front door: 6442ms → 686ms** — from 64%
+of Netlify's 10s sync ceiling down to ~7%. Proven live: 202 `{depositId}` → `executing` →
+`completed` in ~7.3s of worker time; chain moved exactly 0.1 (plain 15.49→15.39, unified
+4.4065→4.5065) with `delegateTxHash: null` (grant-once still holds).
+
+**Every REJECTION stays SYNC** — auth 401, cap 400, insufficient funds 402 — so a user who
+types too large a number gets an immediate honest answer instead of polling to a "failed".
+Nothing signs on those paths, and the background worker isn't even invoked.
+
+**The ordering is untouched.** `funds-check → ensureDelegate → approve → deposit` still lives
+inside `ubDeposit`. Moving the executor off the sync clock must NOT move the grant — that is
+what keeps `addDelegate` structurally unreachable on an empty wallet.
+
+⚠️ **`agent-ub-deposit-background` is PUBLICLY REACHABLE** at `/.netlify/functions/…` (Netlify
+exposes every function there; only the `/api/*` route is withheld) and it is **UNCAPPED** — the
+guards live in the front door. `requireInternal` (HMAC over SESSION_SECRET) is the ONLY thing
+between it and an arbitrary deposit. Verified: an unauthenticated call with `amountUsdc: 999`
+produced **zero on-chain txs**. Note a background function returns **202 before the handler
+runs**, so its status code proves nothing — check the CHAIN, not the response.
+
+---
+
+## FOLLOW-UP (DONE — see entry above): make the UB deposit a background function
 
 `agent-ub-deposit` runs ~6.4s of a 10s Netlify sync ceiling even after the waitForTx fix, with an
 irreducible ~6s floor (approve + deposit, each 2–3s on-chain). A latency blip still tips it over.

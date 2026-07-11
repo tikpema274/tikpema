@@ -55,12 +55,24 @@
   to = "/.netlify/functions/agent-ub-spend"
   status = 200
 
-# Unified Balance FUNDING (deposit). Cap-guarded in the wrapper before any tx; the SCA
-# funds its OWN unified balance via the direct-contract approve→deposit path (no App Kit,
-# so no 1098 async-hash race), with an active allowance revoke on deposit failure.
+# Unified Balance FUNDING (deposit) — ASYNC. agent-ub-deposit is the SYNC front door: it
+# enforces auth + the per-deposit cap + the funds check (every REJECTION answers immediately),
+# then hands the slow on-chain half to agent-ub-deposit-background and returns 202 with a
+# depositId. The client polls agent-ub-deposit-status.
+#
+# The split exists because the deposit runs two sequential txs (approve → deposit, 2–3s each)
+# plus the one-time addDelegate grant, which sat at ~64% of Netlify's 10s SYNC ceiling even
+# after waitForTx was tightened (8938ms → 6442ms, measured). Background functions get 15 min.
+#
+# agent-ub-deposit-background gets NO public route on purpose — it is invoked internally
+# (x-internal-token) and is UNCAPPED. A public route on it would be an uncapped deposit.
 [[redirects]]
   from = "/api/agent-ub-deposit"
   to = "/.netlify/functions/agent-ub-deposit"
+  status = 200
+[[redirects]]
+  from = "/api/agent-ub-deposit-status"
+  to = "/.netlify/functions/agent-ub-deposit-status"
   status = 200
 
 # Proposal loop — APPROVE a server-authored bridge proposal. Reads ONLY {runId} from the

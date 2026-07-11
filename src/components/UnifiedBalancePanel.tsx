@@ -30,6 +30,7 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
   const [funding, setFunding] = useState(false);
   const [fundError, setFundError] = useState("");
   const [fundOk, setFundOk] = useState<{ amountUsdc: number; tx: string } | null>(null);
+  const [fundStage, setFundStage] = useState(""); // async progress: the deposit now polls
   const [reloadKey, setReloadKey] = useState(0);
 
   const bal = useGatewayBalance(w, reloadKey);
@@ -37,8 +38,37 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
   // A brand-new user reads a true 0 — the signal to fund, not an error.
   const isEmpty = data != null && Number(data.total) === 0;
 
-  // Fund — a money-path write. The server re-checks auth AND the cap before anything
-  // signs; this handler only shapes the request and reports what came back.
+  // Poll a background deposit until it settles. The deposit is ~6s+ of real chain time, so
+  // the window is generous — but bounded, so a wedged worker surfaces as an error rather
+  // than a spinner that never resolves.
+  async function pollDeposit(depositId: string, token: string) {
+    const DEADLINE_MS = 120_000;
+    const INTERVAL_MS = 2_000;
+    const giveUpAt = Date.now() + DEADLINE_MS;
+
+    while (Date.now() < giveUpAt) {
+      await new Promise((r) => setTimeout(r, INTERVAL_MS));
+      const r = await fetch(`/api/agent-ub-deposit-status?depositId=${depositId}`, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok) throw new Error(d?.error || "Could not read the deposit status");
+      if (d.status === "completed" || d.status === "failed") return d;
+      if (d.status === "executing") setFundStage("Depositing on-chain…");
+    }
+    throw new Error(
+      "The deposit is taking longer than expected. It may still land — check your balance shortly."
+    );
+  }
+
+  // Fund — a money-path write, now ASYNC. /api/agent-ub-deposit is a fast front door: it
+  // enforces auth + cap + the funds check and answers every REJECTION immediately (400/402),
+  // then returns 202 { depositId } and runs the on-chain half in a background function. We
+  // poll agent-ub-deposit-status until it settles.
+  //
+  // The deposit takes ~6s+ on-chain (approve → deposit, plus a one-time delegate grant on
+  // your first one), which is why it can't be a single sync request — see netlify.toml.
   async function fund() {
     const amountNum = Number(amount);
     if (!(amountNum > 0)) {
@@ -48,6 +78,7 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
     setFunding(true);
     setFundError("");
     setFundOk(null);
+    setFundStage("Checking your wallet…");
     try {
       const token = await w.ensureSession();
       const r = await fetch("/api/agent-ub-deposit", {
@@ -56,14 +87,34 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
         body: JSON.stringify({ amountUsdc: amountNum }),
       });
       const d = await r.json().catch(() => null);
+      // Synchronous rejections (over-cap 400, insufficient funds 402, auth 401) — nothing
+      // was kicked off, so report and stop.
       if (!r.ok) throw new Error(d?.error || "Deposit failed");
-      setFundOk({ amountUsdc: d.amountUsdc, tx: d.tx });
+      if (!d?.depositId) {
+        // 202 "provisioning" — the wallet mapping hasn't converged yet.
+        throw new Error(d?.message || "Your wallet is being set up — try again shortly.");
+      }
+
+      setFundStage("Depositing on-chain…");
+      const done = await pollDeposit(d.depositId, token);
+
+      if (done.status === "failed") {
+        // A failed delegate grant is a CLEAN state: it runs before any approve, so no funds
+        // moved. Say so plainly rather than leaving the user wondering where their USDC went.
+        throw new Error(
+          done.delegateAuthFailed
+            ? `${done.error} (no funds moved — your USDC is still in your wallet)`
+            : done.error || "Deposit failed"
+        );
+      }
+      setFundOk({ amountUsdc: done.amountUsdc, tx: done.tx });
       setAmount("");
       setReloadKey((k) => k + 1); // re-read the balance we just changed
     } catch (e) {
       setFundError(e instanceof Error ? e.message : "Deposit failed");
     } finally {
       setFunding(false);
+      setFundStage("");
     }
   }
 
@@ -246,6 +297,14 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
             <button className="emerald" disabled={funding || !amount} onClick={fund}>
               {funding ? "Depositing…" : "Fund"}
             </button>
+          </div>
+        )}
+        {/* Async progress. The deposit is real chain time (approve → deposit, plus a
+            one-time spender authorization on your first), so say what's happening rather
+            than leaving a silent spinner. */}
+        {funding && fundStage && (
+          <div className="sub" style={{ margin: "8px 0 0" }}>
+            {fundStage}
           </div>
         )}
         {fundError && (
