@@ -27,6 +27,14 @@
   to = "/.netlify/functions/agent-send"
   status = 200
 
+# Withdraw USDC from the caller's own agent wallet back to their own login wallet.
+# Destination is session-resolved (no `to` param). Deliberately NOT bound by the agent's
+# pause / day-ceiling / send-cap: those bound the agent, not the user reclaiming funds.
+[[redirects]]
+  from = "/api/agent-withdraw"
+  to = "/.netlify/functions/agent-withdraw"
+  status = 200
+
 # Friendly /api/* routes -> serverless functions (the AGENT plane).
 [[redirects]]
   from = "/api/agent-init"

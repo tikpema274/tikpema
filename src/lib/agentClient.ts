@@ -34,4 +34,11 @@ export const agentClient = {
   // Stage-2 poll: has Circle's relayer minted on the destination yet?
   bridgeStatus: (burnHash: string, destinationKey: string, token: string) =>
     post("/api/agent-bridge-status", { burnHash, destinationKey }, token),
+
+  // Reclaim the agent wallet's float back to the caller's OWN login wallet. There is no
+  // recipient argument on purpose: the server resolves the destination from the session,
+  // so a withdrawal can only ever pay the wallet the caller proved they control.
+  // Moves PLAIN USDC only — the Gateway unified balance needs a separate, delayed exit.
+  withdraw: (amountUsdc: number, token: string) =>
+    post("/api/agent-withdraw", { amountUsdc }, token),
 };

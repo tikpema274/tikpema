@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { agentClient } from "../lib/agentClient";
+import { useGatewayBalance } from "../lib/useGatewayBalance";
 import SignInPrompt from "./SignInPrompt";
 import AddressDisplay from "./AddressDisplay";
 import { arcTestnet } from "../config/chain";
@@ -51,21 +52,39 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   // inside a multi-step plan — Option A: the plan doesn't wait, these poll inline).
   const [planMints, setPlanMints] = useState<Record<number, any>>({});
 
-  // ── HOP A — fund the agent wallet from the login wallet. ─────────────────────────
-  // The agent SCA is minted EMPTY, and this is the only way USDC gets into it. Every
-  // downstream capability (send/swap/bridge, and the Gateway deposit → delegate grant →
-  // spend chain) is gated on a balance nothing else can put there.
+  // ── HOP A — fund the agent wallet from the login wallet. THE PRIMARY FUNDING PATH. ──
+  // The custody model: the LOGIN wallet (passkey MSCA / MetaMask EOA) is the USER'S — they
+  // hold the key, and that is where their funds live. The agent wallet is the AGENT'S
+  // working float — a dev-controlled SCA the user tops up, so their exposure is bounded and
+  // self-chosen. Hop A is the doorway between the two, and it is the doorway users are
+  // meant to use.
   const [fundAmt, setFundAmt] = useState("");
   const [fundBusy, setFundBusy] = useState(false);
   const [fundErr, setFundErr] = useState("");
   const [fundTx, setFundTx] = useState<string | null>(null);
-  const [showHopA, setShowHopA] = useState(false); // hop A is a disclosure, not the default
+  const [showDirect, setShowDirect] = useState(false); // agent's own address = the disclosure
+
+  // ── WITHDRAW — hop A in reverse. The float must have an EXIT. ────────────────────────
+  // Without this the agent float is custodial with no way out, which is the whole problem
+  // the user-funded-MSCA model exists to solve. The endpoint is NOT bound by the agent's
+  // pause / day-ceiling / send-cap (those bound the agent, not the user reclaiming money),
+  // and it takes no recipient — the server sends to the session's own login wallet.
+  const [wdAmt, setWdAmt] = useState("");
+  const [wdBusy, setWdBusy] = useState(false);
+  const [wdErr, setWdErr] = useState("");
+  const [wdTx, setWdTx] = useState<string | null>(null);
 
   const agentSca = w.agentWallet?.address ?? null;
   const agentBal = Number(w.agentWallet?.balance ?? 0);
-  // The LOGIN wallet's balance — hop A's source. A passkey login mints this EMPTY, which is
-  // why hop A can't be the primary funding door; a MetaMask login usually has real funds here.
+  // The LOGIN wallet's balance — hop A's source, and now the wallet users are told to fund.
   const loginBal = Number(w.usdcBalance ?? 0);
+
+  // The agent's Gateway unified balance. Shown next to Withdraw ON PURPOSE: withdraw moves
+  // the agent's PLAIN USDC only, and anything sitting in the unified balance is NOT part of
+  // it (that needs initiateWithdrawal + withdraw on the GatewayWallet, after a delay). A
+  // "Withdraw" that silently left money behind would be a lie.
+  const gw = useGatewayBalance(w, wdTx ? 1 : 0);
+  const gwParked = gw.status === "ready" ? Number(gw.total ?? 0) : 0;
 
   async function fundAgent() {
     setFundErr("");
@@ -88,6 +107,28 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       setFundErr(e?.message || "Funding failed");
     } finally {
       setFundBusy(false);
+    }
+  }
+
+  // Reclaim the float. No recipient is sent — the server withdraws to the session's own
+  // login wallet, so this can only ever pay the wallet the caller controls.
+  async function withdraw() {
+    setWdErr("");
+    setWdTx(null);
+    setWdBusy(true);
+    try {
+      const token = await w.ensureSession();
+      const r = await agentClient.withdraw(Number(wdAmt), token);
+      setWdTx(r.txHash);
+      setWdAmt("");
+      await Promise.all([
+        w.refreshAgentWallet().catch(() => {}),
+        w.refreshBalance().catch(() => {}),
+      ]);
+    } catch (e: any) {
+      setWdErr(e?.message || "Withdrawal failed");
+    } finally {
+      setWdBusy(false);
     }
   }
 
@@ -211,90 +252,177 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         </div>
       )}
 
-      {/* FUNDING THE AGENT — two paths, deliberately ranked.
+      {/* FUNDING THE AGENT — two paths, deliberately ranked. This ranking is the custody
+          model made visible.
 
-          PRIMARY: send USDC straight to the agent's address. This works from ANY source —
-          another wallet, an exchange, a faucet — and it is how agent wallets actually get
-          funded in practice.
+          YOUR wallet is the login wallet: you hold the key, and that is where your funds
+          live. The AGENT's wallet is a working float you top up — so your exposure is
+          bounded, and you chose the bound. Hop A is the door between them, and it is the
+          door users are meant to use. Hence:
 
-          SECONDARY (hop A): move funds from the LOGIN wallet. This used to be the primary
-          door, and that was wrong: it is right for a MetaMask login (the EOA holds the
-          user's real funds) but a DEAD END for a passkey login, where the login wallet is
-          minted EMPTY. A passkey user met a "Fund your agent" control that refused with
-          "insufficient funds" and no obvious next step. So it is demoted to a disclosure,
-          and hidden entirely when the login wallet has nothing to move. */}
+          PRIMARY: fund YOUR wallet (address shown), then hop A into the agent.
+          SECONDARY: send straight to the agent's address — still valid (faucet, exchange,
+          another wallet), but it puts funds where you do NOT hold the key, so it is the
+          disclosure, not the default.
+
+          (This re-ranks b522d81, which made the agent's address primary. That was right for
+          the model at the time — the passkey MSCA was minted empty, so hop A dead-ended. In
+          this model the MSCA is the funded wallet, so that premise is gone.) */}
       {agentSca && (
         <div style={{ marginTop: 12 }}>
           <div className="panel-eyebrow">
             {agentBal > 0 ? "Top up your agent" : "Fund your agent to get started"}
           </div>
-          <div className="sub" style={{ margin: "2px 0 8px" }}>
-            {agentBal > 0
-              ? "Send USDC to your agent's wallet address:"
-              : "Your agent's wallet is empty — it can't act until it holds USDC. Send some to its address:"}
+
+          {/* Step 1 — YOUR wallet. This is the address to send USDC to. */}
+          <div className="sub" style={{ margin: "2px 0 6px" }}>
+            <b>1. Your wallet</b> — you hold the key. Send USDC here from any wallet,
+            exchange, or faucet:
+          </div>
+          {w.address && <AddressDisplay address={w.address} />}
+          <div className="sub" style={{ margin: "6px 0 0" }}>
+            Balance: <span className="mono">{w.usdcBalance ?? "—"}</span> USDC
           </div>
 
-          <AddressDisplay address={agentSca} />
-
-          <div className="sub" style={{ margin: "8px 0 0" }}>
-            Anything sent here is your agent's to spend, within your safety caps. Works from
-            any wallet, exchange, or faucet.
+          {/* Step 2 — HOP A. The primary funding control. Always shown (never hidden when
+              the login wallet is empty — hiding it is what created the old dead end); it
+              just tells you to fund step 1 first. */}
+          <div style={{ marginTop: 14 }}>
+            <div className="sub" style={{ margin: "0 0 8px" }}>
+              <b>2. Move USDC to your agent</b> — this is the agent's float. It can spend
+              this, within your safety caps. You can take it back at any time.
+            </div>
+            <div className="row" style={{ gap: 8, alignItems: "center" }}>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                placeholder="Amount (USDC)"
+                value={fundAmt}
+                disabled={fundBusy || loginBal <= 0}
+                onChange={(e) => setFundAmt(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && fundAmt && !fundBusy) fundAgent();
+                }}
+                style={{ maxWidth: 180 }}
+              />
+              <button
+                className="emerald"
+                disabled={fundBusy || loginBal <= 0 || !fundAmt || Number(fundAmt) <= 0}
+                onClick={fundAgent}
+              >
+                {fundBusy ? "Moving…" : "Move to agent"}
+              </button>
+            </div>
+            {loginBal <= 0 && (
+              <div className="sub" style={{ margin: "8px 0 0" }}>
+                Your wallet is empty — fund it at step 1 first.
+              </div>
+            )}
+            {fundErr && (
+              <div className="sub" style={{ margin: "8px 0 0", color: "var(--danger, #e5484d)" }}>
+                {fundErr}
+              </div>
+            )}
+            {fundTx && (
+              <div className="sub" style={{ margin: "8px 0 0" }}>
+                Moved into your agent wallet.{" "}
+                <a href={`${EXPLORER}/tx/${fundTx}`} target="_blank" rel="noreferrer">
+                  View transaction ↗
+                </a>
+              </div>
+            )}
           </div>
 
-          {/* Hop A — only offered when the login wallet actually has something to move. */}
-          {loginBal > 0 && (
-            <div style={{ marginTop: 14 }}>
-              {!showHopA ? (
-                <button className="linkbtn" onClick={() => setShowHopA(true)}>
-                  Or move USDC from your login wallet ({w.usdcBalance} USDC) →
+          {/* WITHDRAW — the exit. The float is only "bounded exposure" if it can come back. */}
+          {agentBal > 0 && (
+            <div style={{ marginTop: 18 }}>
+              <div className="sub" style={{ margin: "0 0 8px" }}>
+                <b>Take it back</b> — return your agent's float to your own wallet.
+              </div>
+              <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.01"
+                  placeholder="Amount (USDC)"
+                  value={wdAmt}
+                  disabled={wdBusy}
+                  onChange={(e) => setWdAmt(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && wdAmt && !wdBusy) withdraw();
+                  }}
+                  style={{ maxWidth: 180 }}
+                />
+                <button
+                  disabled={wdBusy || !wdAmt || Number(wdAmt) <= 0}
+                  onClick={withdraw}
+                >
+                  {wdBusy ? "Withdrawing…" : "Withdraw to my wallet"}
                 </button>
-              ) : (
-                <>
-                  <div className="sub" style={{ margin: "0 0 8px" }}>
-                    Move USDC from your login wallet (
-                    <span className="mono">{w.usdcBalance}</span> USDC) into your agent's
-                    wallet.
-                  </div>
-                  <div className="row" style={{ gap: 8, alignItems: "center" }}>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      step="0.01"
-                      placeholder="Amount (USDC)"
-                      value={fundAmt}
-                      disabled={fundBusy}
-                      onChange={(e) => setFundAmt(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && fundAmt && !fundBusy) fundAgent();
-                      }}
-                      style={{ maxWidth: 180 }}
-                    />
-                    <button
-                      className="emerald"
-                      disabled={fundBusy || !fundAmt || Number(fundAmt) <= 0}
-                      onClick={fundAgent}
-                    >
-                      {fundBusy ? "Moving…" : "Move to agent"}
-                    </button>
-                  </div>
-                </>
-              )}
-              {fundErr && (
-                <div className="sub" style={{ margin: "8px 0 0", color: "var(--danger, #e5484d)" }}>
-                  {fundErr}
+                <button
+                  className="linkbtn"
+                  disabled={wdBusy || agentBal <= 0}
+                  onClick={() => setWdAmt(String(agentBal))}
+                >
+                  Max ({agentBal})
+                </button>
+              </div>
+
+              {/* HONESTY — withdraw moves the agent's PLAIN USDC only. Anything the agent
+                  parked in the Gateway unified balance is NOT included and needs a separate,
+                  delayed exit. Say it before the user finds money missing, not after. */}
+              <div className="sub" style={{ margin: "8px 0 0" }}>
+                Withdrawable now: <span className="mono">{agentBal}</span> USDC (your agent's
+                plain balance).
+              </div>
+              {gwParked > 0 && (
+                <div
+                  className="sub"
+                  style={{ margin: "6px 0 0", color: "var(--warn, #f0b866)" }}
+                >
+                  Not included: <span className="mono">{gw.status === "ready" ? gw.total : "—"}</span>{" "}
+                  USDC is in your agent's Gateway unified balance. Withdraw does not move
+                  that — it has to be released from Gateway first, and that release is
+                  time-delayed. It is not lost, but it will not arrive with this button.
                 </div>
               )}
-              {fundTx && (
+              {wdErr && (
+                <div className="sub" style={{ margin: "8px 0 0", color: "var(--danger, #e5484d)" }}>
+                  {wdErr}
+                </div>
+              )}
+              {wdTx && (
                 <div className="sub" style={{ margin: "8px 0 0" }}>
-                  Moved into your agent wallet.{" "}
-                  <a href={`${EXPLORER}/tx/${fundTx}`} target="_blank" rel="noreferrer">
+                  Returned to your wallet.{" "}
+                  <a href={`${EXPLORER}/tx/${wdTx}`} target="_blank" rel="noreferrer">
                     View transaction ↗
                   </a>
                 </div>
               )}
             </div>
           )}
+
+          {/* SECONDARY — the agent's own address. Still valid, but it puts funds where the
+              user does NOT hold the key, so it is a disclosure rather than the default. */}
+          <div style={{ marginTop: 16 }}>
+            {!showDirect ? (
+              <button className="linkbtn" onClick={() => setShowDirect(true)}>
+                Or send USDC straight to the agent's address →
+              </button>
+            ) : (
+              <>
+                <div className="sub" style={{ margin: "0 0 8px" }}>
+                  The agent's own address. Anything sent here skips your wallet and lands
+                  directly in the agent's float — useful for a faucet, but you do not hold
+                  the key to this one.
+                </div>
+                <AddressDisplay address={agentSca} />
+              </>
+            )}
+          </div>
         </div>
       )}
 
