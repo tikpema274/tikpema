@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import { JobTimeline, isTerminal, receiptInFlight } from "./jobTimeline";
 import type { TrackedJob } from "./jobTimeline";
+import { approveProposal as approve } from "../lib/approveProposal";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -101,20 +102,16 @@ export default function PlanPanel({ wallet }: { wallet: UnifiedWallet }) {
   // anything signs. Nothing survives this round-trip.
   async function approveProposal() {
     const runId = trackedJob?.runId;
-    if (!runId || approving) return;
+    const proposal = trackedJob?.proposal;
+    if (!runId || !proposal || approving) return;
     setApproving(true); // disables the button optimistically — the UX half of the
     setApproveError(""); // double-approve mitigation (the server lock is the other half)
     try {
       const token = await wallet.ensureSession();
-      const r = await fetch("/api/job-bridge-approve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ runId }),
-      });
-      const data = await r.json().catch(() => null);
-      if (!r.ok && r.status !== 202) throw new Error(data?.error || "Approve failed");
-      if (data?.executed === false) throw new Error(data.blocked || "The bridge was refused by a guard.");
-      if (data?.receipt) setTrackedJob((prev) => (prev ? { ...prev, receipt: data.receipt } : prev));
+      // Routed by proposal.action (bridge → job-bridge-approve, swap → job-swap-approve).
+      // Still posts ONLY { runId } — see src/lib/approveProposal.ts.
+      const { receipt } = await approve({ runId, proposal, token });
+      if (receipt) setTrackedJob((prev) => (prev ? { ...prev, receipt } : prev));
     } catch (e: any) {
       setApproveError(e.message || "Approve failed");
     } finally {
@@ -128,14 +125,15 @@ export default function PlanPanel({ wallet }: { wallet: UnifiedWallet }) {
       <h2>Describe an action. Your agent proposes; you decide.</h2>
       <div className="sub">
         Describe an on-chain action in plain language. Your agent researches its real
-        economics from cited sources, then proposes a concrete plan — destination, amount,
-        live fee. <b>Nothing moves until you approve it.</b> Today the agent can bridge USDC
-        off Arc to Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon, Unichain, or Linea.
+        economics from cited sources, then proposes a concrete plan — with live pricing.{" "}
+        <b>Nothing moves until you approve it.</b> Today the agent can{" "}
+        <b>bridge USDC off Arc</b> (Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon,
+        Unichain, Linea) or <b>convert between USDC and EURC on Arc</b>.
       </div>
 
       <div className="row" style={{ marginTop: 12 }}>
         <input
-          placeholder="e.g. Should I bridge some USDC to Base, and how much?"
+          placeholder="e.g. Should I convert 5 USDC to EURC? Or bridge some USDC to Base?"
           value={task}
           onChange={(e) => setTask(e.target.value)}
         />
@@ -169,8 +167,8 @@ export default function PlanPanel({ wallet }: { wallet: UnifiedWallet }) {
           {quoteDeclined.reason && <div>{quoteDeclined.reason}</div>}
           <div style={{ marginTop: 4 }}>
             Your agent can plan an action it is able to bound, price, and refuse — not an
-            open-ended opinion. "What's the best chain?" has nothing to approve; "bridge 2
-            USDC to Base" does.
+            open-ended opinion. "What's the best chain?" or "should I buy PEPE?" have nothing
+            to approve; "bridge 2 USDC to Base" or "convert 5 USDC to EURC" do.
           </div>
         </div>
       )}

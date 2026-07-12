@@ -92,11 +92,36 @@ CHANGED: `_proposal.mjs` (`validateSwapProposal`), `_actions.mjs` (swap cap), `a
 **Tests:** swap-cap 7 · swap-proposal 20 · swap-approve 33 · swap-receipt 16 ·
 smoke-swap-estimate 11 (REAL SDK). Regression: per-user-threading 18 · approve-writepath 25.
 
-### STILL MISSING (deliberately): the UI
-There is no swap proposal card and no approve button. `jobTimeline.tsx` needs a
-`SwapProposalCard` + swap receipt states, and `PlanPanel`/`ResearchPanel` must route approve by
-`proposal.action`. The whole cycle above was driven by curl. **A user cannot approve a swap
-from the app yet.**
+### THE UI — SHIPPED, and proven through the app (job #156134)
+
+`Proposal` is now a discriminated union (`BridgeProposal | SwapProposal`) keyed on the SAME
+`action` field the server normalizes and the approve endpoints dispatch on — so a third
+proposable action cannot silently render as a bridge; TypeScript forces every surface to
+handle it. `ProposalCard` dispatches into two bodies sharing one `ProposalShell`, so the cards
+cannot drift apart (same reasoning-first layout, same "it cannot check this is a GOOD idea"
+disclaimer). Approve routing lives once in `src/lib/approveProposal.ts` — both panels used to
+inline the same bridge fetch, and routing swap in one and not the other would have sent swap
+proposals to the bridge endpoint ("this brief carries no bridge proposal").
+
+**LIVE THROUGH THE UI (job #156134, 1 USDC → EURC):**
+`confirmed` · `verifiedBy: "balance-delta"` · `txHash: null` · `amountOut: 0.835096` ·
+verified 7s after approve. Chain: USDC **18.39 → 17.39** (−1.00 exact), EURC
+**12.636455 → 13.471551** (+0.835096 exact). Day-ledger owner-keyed. Cap re-proven live: 30
+USDC → `exceeds per-swap limit of 25 USDC`, chain unmoved; 25 USDC → NO cap message (inclusive
+bound holds).
+
+### 🔑 THE BALANCE-DELTA PATH IS THE *NORMAL* PATH, NOT AN EDGE CASE
+
+Both live swaps returned `txHash: null` (the 1098 async-waiter quirk). That is how the Circle
+SCA swap behaves in practice. **Had the receipt been keyed only on a tx hash — which is what
+the SDK's own return value invites — EVERY swap receipt would strand**, with money already
+moved and no confirmation. The balance-delta fallback (snapshot before, compare after; the
+CHAIN is the witness, not the SDK) is the primary path. Do not "simplify" it away.
+
+### FOLLOW-UP: `agent-act` has no pre-flight balance gate
+An at-cap swap the wallet can't fund fails with a raw 500 (`"No route available"`) instead of a
+clean 402 with `have`/`need`. `job-swap-approve` and `job-bridge-approve` both gate; the CHAT
+path does not. Cosmetic (nothing moves), same class as the bridge's job #155341 fix.
 
 ---
 

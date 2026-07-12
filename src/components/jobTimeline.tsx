@@ -11,7 +11,11 @@
 // A server-VALIDATED bridge proposal. The model suggested it; the server resolved the
 // destination, bounded the amount, and priced the fee itself. `indicativeFeeUsdc` is a
 // courtesy, NOT a quote — the fee is re-priced again at execution.
-export type Proposal = {
+// Two proposable actions, discriminated on `action` — the SAME field the server normalizes
+// in _proposal.mjs and the same field job-*-approve dispatches on. A new action type must
+// extend this union, so TypeScript forces every surface to handle it rather than silently
+// falling through to the bridge card.
+export type BridgeProposal = {
   action: "bridge_usdc";
   destination: string;
   destinationLabel: string;
@@ -21,13 +25,31 @@ export type Proposal = {
   indicativeNetUsdc: number;
   reasoning?: string;
 };
+export type SwapProposal = {
+  action: "swap_tokens";
+  tokenIn: "USDC" | "EURC";
+  tokenOut: "USDC" | "EURC";
+  amountIn: number;
+  valueUsdc: number;
+  cap: number;
+  indicativeAmountOut: number;
+  reasoning?: string;
+};
+export type Proposal = BridgeProposal | SwapProposal;
 
 // A server-PROVEN receipt. Every field is server-sourced; the client never supplies one.
 // `state` is the ONLY field to branch on — never render "minted" without a mintTxHash.
+// One receipt shape covering BOTH actions. A bridge's states track a CCTP burn → attestation
+// → destination mint; a swap's track a same-chain tx that either lands on Arc or does not.
+// They never overlap, so `state` alone tells you which action produced the receipt.
 export type Receipt = {
   state:
+    // bridge
     | "approving" | "burn_pending" | "burn_confirmed"
-    | "minted" | "mint_failed" | "mint_unconfirmed" | "mint_unverified";
+    | "minted" | "mint_failed" | "mint_unconfirmed" | "mint_unverified"
+    // swap — `submitted_no_hash` is the 1098 async-waiter quirk (the swap landed, but the
+    // SDK returned no hash), and it is confirmed by BALANCE DELTA, never by an invented hash.
+    | "submitted" | "submitted_no_hash" | "confirmed" | "failed" | "unconfirmed";
   amountUsdc?: number;
   destinationKey?: string;
   feeUsdc?: number;
@@ -37,6 +59,15 @@ export type Receipt = {
   mintTxHash?: string;
   mintTx?: string;
   usdcAmount?: number;
+  // swap
+  tokenIn?: "USDC" | "EURC";
+  tokenOut?: "USDC" | "EURC";
+  amountIn?: number;
+  amountOut?: number;
+  txHash?: string | null;
+  tx?: string | null;
+  verifiedBy?: "balance-delta";
+  indicativeAmountOut?: number;
 };
 
 export type TrackedJob = {
@@ -115,14 +146,37 @@ export function Brief({ brief }: { brief: NonNullable<TrackedJob["brief"]> }) {
 // a reasoning/vetting gate exists (a slotted future brick), the HUMAN is that gate. So the
 // agent's "why" is rendered FIRST, in body text, above the numbers and above the button —
 // the user must read the argument before they can reach the thing that spends their money.
-export function ProposalCard({
-  proposal, receipt, approving, onApprove, error,
-}: {
+type ProposalCardProps = {
   proposal: Proposal;
   receipt?: Receipt;
   approving?: boolean;
   onApprove?: () => void;
   error?: string;
+};
+
+// Dispatch on the SAME discriminant the server normalizes and the approve endpoints use.
+// Adding a proposable action means adding a branch here — TypeScript will not let a new
+// action silently render as a bridge.
+export function ProposalCard(props: ProposalCardProps) {
+  return props.proposal.action === "swap_tokens"
+    ? <SwapProposalBody {...props} proposal={props.proposal} />
+    : <BridgeProposalBody {...props} proposal={props.proposal} />;
+}
+
+// Shared chrome so the two cards cannot drift apart: the same eyebrow, the same
+// reasoning-first layout, the same "we cannot judge whether this is a good idea" disclaimer,
+// and the same approve button that disappears once a receipt exists.
+function ProposalShell({
+  headline, terms, reasoning, receipt, approving, onApprove, error, cta,
+}: {
+  headline: React.ReactNode;
+  terms: React.ReactNode;
+  reasoning?: string;
+  receipt?: Receipt;
+  approving?: boolean;
+  onApprove?: () => void;
+  error?: string;
+  cta: { idle: string; busy: string };
 }) {
   // Once a receipt exists the proposal is spent — never offer approve twice.
   const alreadyActed = !!receipt;
@@ -135,14 +189,11 @@ export function ProposalCard({
         Proposed action · you decide
       </div>
 
-      <div style={{ fontSize: "1.05rem", color: "var(--paper)" }}>
-        Bridge <span className="mono">{proposal.amountUsdc}</span> USDC from Arc to{" "}
-        <b>{proposal.destinationLabel}</b>.
-      </div>
+      <div style={{ fontSize: "1.05rem", color: "var(--paper)" }}>{headline}</div>
 
       {/* The agent's argument, first and prominent. The system cannot judge whether this
           reasoning is sound; the user must. */}
-      {proposal.reasoning && (
+      {reasoning && (
         <div
           style={{
             marginTop: 10, padding: "10px 12px", borderRadius: 10,
@@ -152,17 +203,11 @@ export function ProposalCard({
           <div style={{ color: "var(--muted)", fontSize: "0.7rem", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 4 }}>
             Why the agent proposes this
           </div>
-          <div style={{ color: "var(--paper)" }}>{proposal.reasoning}</div>
+          <div style={{ color: "var(--paper)" }}>{reasoning}</div>
         </div>
       )}
 
-      <div className="sub" style={{ margin: "10px 0 0" }}>
-        The cross-chain fee is taken <b>out of</b> the amount — about{" "}
-        <span className="mono">{proposal.indicativeFeeUsdc}</span> USDC right now, so roughly{" "}
-        <span className="mono">{proposal.indicativeNetUsdc}</span> USDC would arrive. This is an
-        indicative price, not a quote: the fee is re-checked at execution, and the bridge is
-        refused if it no longer makes sense. Bridging is one-way.
-      </div>
+      <div className="sub" style={{ margin: "10px 0 0" }}>{terms}</div>
 
       <div className="sub" style={{ margin: "8px 0 0", fontStyle: "italic" }}>
         Your agent checked that this action is possible and economical. It did not, and cannot,
@@ -172,7 +217,7 @@ export function ProposalCard({
       {!alreadyActed && (
         <div className="row" style={{ marginTop: 12 }}>
           <button className="emerald" disabled={approving} onClick={onApprove}>
-            {approving ? "Bridging…" : `Approve — bridge ${proposal.amountUsdc} USDC`}
+            {approving ? cta.busy : cta.idle}
           </button>
         </div>
       )}
@@ -181,12 +226,81 @@ export function ProposalCard({
   );
 }
 
+function BridgeProposalBody({ proposal, ...rest }: ProposalCardProps & { proposal: BridgeProposal }) {
+  return (
+    <ProposalShell
+      {...rest}
+      reasoning={proposal.reasoning}
+      cta={{ idle: `Approve — bridge ${proposal.amountUsdc} USDC`, busy: "Bridging…" }}
+      headline={
+        <>
+          Bridge <span className="mono">{proposal.amountUsdc}</span> USDC from Arc to{" "}
+          <b>{proposal.destinationLabel}</b>.
+        </>
+      }
+      terms={
+        <>
+          The cross-chain fee is taken <b>out of</b> the amount — about{" "}
+          <span className="mono">{proposal.indicativeFeeUsdc}</span> USDC right now, so roughly{" "}
+          <span className="mono">{proposal.indicativeNetUsdc}</span> USDC would arrive. This is an
+          indicative price, not a quote: the fee is re-checked at execution, and the bridge is
+          refused if it no longer makes sense. Bridging is one-way.
+        </>
+      }
+    />
+  );
+}
+
+// SWAP — a stablecoin FX conversion (USDC↔EURC on Arc). Deliberately NOT framed as a trade
+// or a call on the market: the agent proposes a conversion, the user approves it. The rate is
+// INDICATIVE, exactly like the bridge's fee — it is re-estimated at execution and a 1%
+// slippage cap makes the swap revert rather than fill at a bad rate.
+function SwapProposalBody({ proposal, ...rest }: ProposalCardProps & { proposal: SwapProposal }) {
+  return (
+    <ProposalShell
+      {...rest}
+      reasoning={proposal.reasoning}
+      cta={{
+        idle: `Approve — convert ${proposal.amountIn} ${proposal.tokenIn}`,
+        busy: "Converting…",
+      }}
+      headline={
+        <>
+          Convert <span className="mono">{proposal.amountIn}</span> {proposal.tokenIn} to{" "}
+          <b>{proposal.tokenOut}</b> on Arc.
+        </>
+      }
+      terms={
+        <>
+          You would receive roughly{" "}
+          <span className="mono">{proposal.indicativeAmountOut}</span> {proposal.tokenOut} at the
+          current rate. This is an indicative price, not a quote: the rate is re-checked at
+          execution, and the swap reverts rather than filling more than 1% worse. Both are
+          stablecoins, so this is a currency conversion (USD↔EUR exposure) — not a trade.
+        </>
+      }
+    />
+  );
+}
+
 // The server-proven record. Each state is rendered honestly — a pending mint is NOT a
 // success, and mint_unverified is an alarm, not a spinner.
 export function ReceiptCard({ receipt }: { receipt: Receipt }) {
   const s = receipt.state;
-  const line =
-    s === "minted" ? "✓ Bridged and confirmed on both chains."
+
+  // SWAP states. A swap has no burn and no destination mint — it either lands on Arc or it
+  // does not. `unconfirmed` is honest incompleteness, NEVER a fabricated success.
+  const isSwap =
+    s === "submitted" || s === "submitted_no_hash" || s === "confirmed" ||
+    s === "failed" || s === "unconfirmed";
+
+  const line = isSwap
+    ? s === "confirmed" ? "✓ Converted and confirmed on Arc."
+      : s === "failed" ? "The swap FAILED on-chain — it reverted, and no funds were converted."
+      : s === "submitted" ? "Swap submitted — waiting for the chain to confirm it…"
+      : s === "submitted_no_hash" ? "Swap submitted — confirming it against your balance…"
+      : "⚠ The swap was submitted, but could not be confirmed. Your balance is the source of truth — check it before retrying. This has NOT been recorded as complete."
+    : s === "minted" ? "✓ Bridged and confirmed on both chains."
     : s === "burn_confirmed" ? "Burn confirmed on Arc — waiting for the destination mint…"
     : s === "burn_pending" ? "Burn submitted — waiting for its transaction hash…"
     : s === "approving" ? "Approving…"
@@ -194,12 +308,14 @@ export function ReceiptCard({ receipt }: { receipt: Receipt }) {
     : s === "mint_unconfirmed" ? "Burn confirmed, but the mint could not be confirmed in time. The funds are not lost — check the burn below."
     : "⚠ The mint could not be independently verified on the destination chain. This needs a human — it has NOT been recorded as complete.";
 
+  const alarm = s === "mint_unverified" || s === "mint_failed" || s === "failed" || s === "unconfirmed";
+
   return (
     <div
       className="status"
       style={{
         marginTop: 12, padding: "12px 14px", background: "var(--field)",
-        border: `1px solid ${s === "mint_unverified" || s === "mint_failed" ? "var(--danger, #e5484d)" : "var(--line)"}`,
+        border: `1px solid ${alarm ? "var(--danger, #e5484d)" : "var(--line)"}`,
         borderRadius: 12,
       }}
     >
@@ -207,17 +323,37 @@ export function ReceiptCard({ receipt }: { receipt: Receipt }) {
         Action receipt · server-verified
       </div>
       <div>{line}</div>
-      {s === "minted" && receipt.usdcAmount !== undefined && (
+
+      {/* A CONFIRMED swap reports what ACTUALLY arrived, read from the chain — not the
+          indicative estimate shown at approve time. When there was no tx hash (the SDK's 1098
+          quirk), the confirmation came from the balance delta, and we say so rather than
+          quietly implying a hash we never had. */}
+      {isSwap && s === "confirmed" && receipt.amountOut !== undefined && (
+        <div className="sub" style={{ margin: "6px 0 0" }}>
+          <span className="mono">{receipt.amountIn}</span> {receipt.tokenIn} →{" "}
+          <span className="mono">{receipt.amountOut}</span> {receipt.tokenOut} arrived
+          {receipt.verifiedBy === "balance-delta" && (
+            <> — the SDK returned no transaction hash, so this was verified by reading your
+            balance on-chain</>
+          )}
+          .
+        </div>
+      )}
+
+      {!isSwap && s === "minted" && receipt.usdcAmount !== undefined && (
         <div className="sub" style={{ margin: "6px 0 0" }}>
           <span className="mono">{receipt.usdcAmount}</span> USDC arrived (fee{" "}
           <span className="mono">{receipt.feeUsdc}</span>). Verified by Circle's attestation{" "}
           <b>and</b> an independent read of the destination chain.
         </div>
       )}
+
       <div className="row" style={{ marginTop: 8, gap: 14, flexWrap: "wrap" }}>
         {receipt.burnTx && <TxLink url={receipt.burnTx} label="Burn on Arc ↗" />}
         {/* Only ever link a mint we PROVED. mint_unverified deliberately shows no link. */}
         {receipt.mintTx && s === "minted" && <TxLink url={receipt.mintTx} label="Mint on destination ↗" />}
+        {/* Swaps often have NO hash (the 1098 quirk) — link only when one genuinely exists. */}
+        {isSwap && receipt.tx && <TxLink url={receipt.tx} label="Swap on Arc ↗" />}
       </div>
     </div>
   );

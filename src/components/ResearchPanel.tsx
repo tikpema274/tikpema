@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import { JobTimeline, isTerminal, receiptInFlight } from "./jobTimeline";
 import type { TrackedJob } from "./jobTimeline";
+import { approveProposal as approve } from "../lib/approveProposal";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -97,21 +98,17 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
   // {amountUsdc, destination} because agent-act keeps no proposal server-side.)
   async function approveProposal() {
     const runId = trackedJob?.runId;
-    if (!runId || approving) return;
+    const proposal = trackedJob?.proposal;
+    if (!runId || !proposal || approving) return;
     setApproving(true);
     setApproveError("");
     try {
       const token = await wallet.ensureSession();
-      const r = await fetch("/api/job-bridge-approve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ runId }),
-      });
-      const data = await r.json().catch(() => null);
-      if (!r.ok && r.status !== 202) throw new Error(data?.error || "Approve failed");
-      if (data?.executed === false) throw new Error(data.blocked || "The bridge was refused by a guard.");
-      // The receipt arrives via the poll (which now keeps running past `completed`).
-      if (data?.receipt) setTrackedJob((prev) => (prev ? { ...prev, receipt: data.receipt } : prev));
+      // Routed by proposal.action (bridge → job-bridge-approve, swap → job-swap-approve).
+      // Still posts ONLY { runId } — see src/lib/approveProposal.ts.
+      const { receipt } = await approve({ runId, proposal, token });
+      // The receipt also arrives via the poll (which keeps running past `completed`).
+      if (receipt) setTrackedJob((prev) => (prev ? { ...prev, receipt } : prev));
     } catch (e: any) {
       setApproveError(e.message || "Approve failed");
     } finally {
