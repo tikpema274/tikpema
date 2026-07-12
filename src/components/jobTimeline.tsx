@@ -70,12 +70,42 @@ export type Receipt = {
   indicativeAmountOut?: number;
 };
 
+// Brick 2 — the SECOND, INDEPENDENT opinion. Analyst B never reads the web: it prices the
+// same action against an independent market source AND the live chain. Its verdict can KILL a
+// proposal the first analyst argued for.
+export type SecondOpinion = {
+  verdict: "proceed" | "caution" | "refuse" | "cannot_verify" | "no_action";
+  headline: string;
+  facts?: string[];
+  fairRate?: number;
+  executable?: number;
+  spreadPct?: number;
+  roundTrip?: number;
+  feeUsdc?: number;
+  netUsdc?: number;
+};
+// The reconciliation. ⚠️ Decided by PLAIN CODE, never a model — a synthesizer that adjudicates
+// would smooth over exactly the disagreement this exists to surface.
+export type Synthesis = {
+  agreement: "agree" | "caution" | "hard_disagree" | "unverified" | "no_action";
+  proposalSurvives: boolean;
+  headline: string;
+  detail: string;
+};
+
 export type TrackedJob = {
   runId?: string;
   jobId?: string;
   status: string;
-  brief?: { answer?: string; reasoning?: string; sources?: any[]; confidence?: number };
+  brief?: {
+    answer?: string; reasoning?: string; sources?: any[]; confidence?: number;
+    // A's RAW proposal — kept even when the server refused to author one, because the
+    // KILLED case needs to show what A actually argued for.
+    proposal?: { reasoning?: string; [k: string]: any } | null;
+  };
   proposal?: Proposal;
+  secondOpinion?: SecondOpinion;
+  synthesis?: Synthesis;
   receipt?: Receipt;
   verdict?: string;
   reason?: string;
@@ -152,6 +182,9 @@ type ProposalCardProps = {
   approving?: boolean;
   onApprove?: () => void;
   error?: string;
+  // Brick 2. A proposal only reaches the user if the SECOND analyst left it standing, so the
+  // fact that it survived a real, independent check is part of the offer — not a footnote.
+  secondOpinion?: SecondOpinion;
 };
 
 // Dispatch on the SAME discriminant the server normalizes and the approve endpoints use.
@@ -167,7 +200,7 @@ export function ProposalCard(props: ProposalCardProps) {
 // reasoning-first layout, the same "we cannot judge whether this is a good idea" disclaimer,
 // and the same approve button that disappears once a receipt exists.
 function ProposalShell({
-  headline, terms, reasoning, receipt, approving, onApprove, error, cta,
+  headline, terms, reasoning, receipt, approving, onApprove, error, cta, secondOpinion,
 }: {
   headline: React.ReactNode;
   terms: React.ReactNode;
@@ -177,6 +210,7 @@ function ProposalShell({
   onApprove?: () => void;
   error?: string;
   cta: { idle: string; busy: string };
+  secondOpinion?: SecondOpinion;
 }) {
   // Once a receipt exists the proposal is spent — never offer approve twice.
   const alreadyActed = !!receipt;
@@ -213,6 +247,12 @@ function ProposalShell({
         Your agent checked that this action is possible and economical. It did not, and cannot,
         check that it is a <em>good idea</em> — read the reasoning above and decide for yourself.
       </div>
+
+      {/* ⚠️ ABOVE THE BUTTON, deliberately. A second, independent analyst priced this and
+          concurred — the user reaches that fact before they reach the thing that spends their
+          money. A caveat ("agreed, but the spread is 2.3%") is preserved verbatim, NEVER
+          averaged into a confidence score. */}
+      {secondOpinion && <SecondOpinionConfirmed secondOpinion={secondOpinion} />}
 
       {!alreadyActed && (
         <div className="row" style={{ marginTop: 12 }}>
@@ -280,6 +320,145 @@ function SwapProposalBody({ proposal, ...rest }: ProposalCardProps & { proposal:
         </>
       }
     />
+  );
+}
+
+// ── BRICK 2 — THE DISAGREEMENT, RENDERED ────────────────────────────────────────────────
+//
+// ⚠️ THE KILLED CASE IS THE MOST IMPORTANT THING ON THIS PAGE, and it used to be INVISIBLE:
+// the proposal simply did not appear, so a user would assume the agent had failed. It had
+// not — it had PROTECTED them. Two analysts disagreed and the action was withdrawn.
+//
+// So this card renders WHEN THERE IS NOTHING TO APPROVE, and it must read as the system
+// working, not breaking.
+//
+// ⚠️ THE DISAGREEMENT IS PRESERVED, NEVER AVERAGED. There is no "medium confidence" blend, no
+// split-the-difference score. The user sees BOTH views — what A argued, and what B objected to
+// — because a number that hides a conflict is worse than no number at all.
+export function SecondOpinionCard({
+  synthesis, secondOpinion, analystAReasoning,
+}: {
+  synthesis: Synthesis;
+  secondOpinion?: SecondOpinion;
+  analystAReasoning?: string;
+}) {
+  const killed = !synthesis.proposalSurvives && synthesis.agreement !== "no_action";
+  const tension = synthesis.agreement === "caution";
+
+  // A killed proposal is a WITHHELD ACTION, not an error — amber (attention), not red (alarm).
+  // Red would tell the user something broke. Nothing broke.
+  const accent = killed ? "var(--amber)" : tension ? "var(--amber)" : "var(--line)";
+
+  return (
+    <div
+      className="status"
+      style={{
+        marginTop: 12, padding: "14px 16px", background: "var(--field)",
+        border: `1px solid ${accent}`, borderRadius: 12,
+      }}
+    >
+      <div style={{ color: "var(--muted)", fontSize: "0.72rem", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>
+        {killed ? "No action proposed · your analysts disagreed" : "Second opinion"}
+      </div>
+
+      <div style={{ fontSize: "1.05rem", color: "var(--paper)" }}>{synthesis.headline}</div>
+
+      {killed && (
+        <div className="sub" style={{ margin: "8px 0 0" }}>
+          Your agent has <b>withheld the action</b>. Nothing will be proposed and nothing can be
+          approved — this is the safeguard working, not a failure.
+        </div>
+      )}
+
+      {/* BOTH VIEWS, SIDE BY SIDE. The user sees the actual disagreement, not a verdict. */}
+      <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+        {analystAReasoning && (
+          <View
+            label="Your researcher argued"
+            tone="neutral"
+            body={analystAReasoning}
+          />
+        )}
+        {secondOpinion && (
+          <View
+            label={
+              secondOpinion.verdict === "refuse" ? "Your second opinion refused"
+              : secondOpinion.verdict === "caution" ? "Your second opinion cautioned"
+              : secondOpinion.verdict === "cannot_verify" ? "Your second opinion could not verify it"
+              : "Your second opinion checked it"
+            }
+            tone={secondOpinion.verdict === "refuse" ? "objection" : "neutral"}
+            body={secondOpinion.headline}
+            facts={secondOpinion.facts}
+          />
+        )}
+      </div>
+
+      <div className="sub" style={{ margin: "10px 0 0", fontStyle: "italic" }}>
+        Your second opinion never reads the web. It prices the action against an independent
+        market source and against the live chain — so it can see things a research brief cannot.
+      </div>
+    </div>
+  );
+}
+
+function View({
+  label, body, facts, tone,
+}: {
+  label: string; body: string; facts?: string[]; tone: "neutral" | "objection";
+}) {
+  return (
+    <div
+      style={{
+        padding: "10px 12px", borderRadius: 10,
+        borderLeft: `3px solid ${tone === "objection" ? "var(--amber)" : "var(--line)"}`,
+        background: tone === "objection" ? "var(--amber-soft)" : "transparent",
+      }}
+    >
+      <div style={{ color: "var(--muted)", fontSize: "0.7rem", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 4 }}>
+        {label}
+      </div>
+      <div style={{ color: "var(--paper)" }}>{body}</div>
+      {/* The NUMBERS B worked from. This is what makes the objection checkable rather than
+          another opinion — the user can see the fair rate, the executable rate, the spread. */}
+      {facts && facts.length > 0 && (
+        <ul className="sub" style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+          {facts.map((f, i) => (
+            <li key={i} style={{ marginBottom: 2 }}>{f}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// The AGREE case, shown ABOVE the approve button: a second, independent analyst priced this
+// and concurred. Not buried — the user should know the proposal survived a real check.
+export function SecondOpinionConfirmed({ secondOpinion }: { secondOpinion: SecondOpinion }) {
+  const caution = secondOpinion.verdict === "caution";
+  return (
+    <div
+      style={{
+        marginTop: 10, padding: "10px 12px", borderRadius: 10,
+        borderLeft: `3px solid ${caution ? "var(--amber)" : "var(--emerald, #74c29c)"}`,
+        background: caution ? "var(--amber-soft)" : "transparent",
+      }}
+    >
+      <div style={{ color: "var(--muted)", fontSize: "0.7rem", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 4 }}>
+        {caution ? "⚠ Second opinion — agreed, with a caveat" : "✓ Second opinion confirmed"}
+      </div>
+      <div style={{ color: "var(--paper)" }}>{secondOpinion.headline}</div>
+      {secondOpinion.facts && secondOpinion.facts.length > 0 && (
+        <ul className="sub" style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+          {secondOpinion.facts.map((f, i) => (
+            <li key={i} style={{ marginBottom: 2 }}>{f}</li>
+          ))}
+        </ul>
+      )}
+      <div className="sub" style={{ margin: "6px 0 0", fontStyle: "italic" }}>
+        Checked independently — against the market and the live chain, not the web.
+      </div>
+    </div>
   );
 }
 
@@ -438,6 +617,19 @@ export function JobTimeline({
               approving={approving}
               onApprove={onApprove}
               error={approveError}
+              secondOpinion={job.secondOpinion}
+            />
+          )}
+
+          {/* ⚠️ THE KILLED CASE. Rendered precisely BECAUSE there is no proposal.
+              Without this the user sees nothing and concludes the agent failed — when in fact
+              two independent analysts disagreed and the action was WITHHELD. The safeguard
+              working must not look like the system breaking. */}
+          {!job.proposal && job.synthesis && job.synthesis.agreement !== "no_action" && (
+            <SecondOpinionCard
+              synthesis={job.synthesis}
+              secondOpinion={job.secondOpinion}
+              analystAReasoning={job.brief?.proposal?.reasoning}
             />
           )}
           {job.receipt && <ReceiptCard receipt={job.receipt} />}

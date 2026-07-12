@@ -81,6 +81,11 @@ export async function handler(event) {
     // supplies either. `receipt.state` is the ONLY field the UI may branch on, and it
     // must never render "minted" without a `mintTxHash`.
     proposal: deliverable?.proposal,
+    // Brick 2. Projected even when the second opinion KILLED the proposal — especially then:
+    // "your analysts disagreed, so nothing is proposed" is the most valuable thing this brick
+    // produces, and it must be VISIBLE, not merely logged.
+    secondOpinion: deliverable?.secondOpinion,
+    synthesis: deliverable?.synthesis,
     receipt: deliverable?.receipt,
     verdict: deliverable?.verdict,
     reason: deliverable?.reason ?? run.error,

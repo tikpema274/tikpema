@@ -19,6 +19,8 @@ import { keccak256, toBytes } from "viem";
 import { ARC, CONTRACTS, USDC_DECIMALS, parseBody, dateAnchor } from "./_arc.mjs";
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { validateProposal } from "./_proposal.mjs";
+import { analystB } from "./_analystb.mjs";
+import { compareAnalyses } from "./_synthesis.mjs";
 import { research } from "./_research.mjs";
 import { publicClient } from "./_predict.mjs";
 import { requireInternal, internalToken } from "./_auth.mjs";
@@ -283,13 +285,52 @@ export async function handler(event) {
     //
     // NOTE: a proposal must never be able to abort the research. It is strictly additive,
     // so a pricing hiccup degrades to "no proposal", never to a refund.
+    // ── BRICK 2: THE SECOND, INDEPENDENT OPINION ────────────────────────────────────────
+    //
+    // Analyst A is the brief above (Exa-grounded narrative — it answers "SHOULD you?").
+    // Analyst B (_analystb.mjs) never touches the web: it prices the SAME action against an
+    // independent market source AND the live chain, and answers "is the rate you'd actually
+    // GET fair, and can it even execute?" — a fact A structurally cannot see.
+    //
+    // ⚠️ B IS BLINDED TO A. It receives only WHICH action to price (the raw proposal's shape),
+    // never A's prose or A's reasoning. Show B the argument and it anchors; anchor it and the
+    // independence — the only thing that makes disagreement meaningful — collapses.
+    //
+    // ⚠️ THE COMPARISON IS PLAIN CODE (_synthesis.mjs). No model adjudicates. A synthesizer
+    // LLM that decides would re-introduce the single point of failure B exists to remove, and
+    // would smooth over precisely the disagreement we built this to surface. Structure
+    // decides; the model only explains.
+    //
+    // A HARD DISAGREEMENT KILLS THE PROPOSAL. If B refuses (no route, rate far off fair, fee
+    // eats the amount), the action is NOT proposed — whatever A argued. A confidence score
+    // would not have stopped a bad action; a refusal does.
+    let secondOpinion = null;
+    let synthesis = null;
+    try {
+      secondOpinion = await analystB({ proposal: decision.proposal, walletAddress });
+      synthesis = compareAnalyses(decision.proposal, secondOpinion);
+    } catch (e) {
+      // B failing is NOT a licence to act on one analyst. Unverified ⇒ no proposal.
+      console.warn(`[analyst-b] failed: ${e.message}`);
+      secondOpinion = { verdict: "cannot_verify", headline: `The second analyst could not run (${e.message}).`, facts: [] };
+      synthesis = compareAnalyses(decision.proposal, secondOpinion);
+    }
+
     let proposal = null;
     try {
       // walletAddress = the AUTHENTICATED user's OWN agent SCA (resolved by the job spine
       // from requireSession → ensureOwnerWallet, never client-supplied). A SWAP proposal is
       // priced against THAT wallet, so the quote is the one that wallet would actually get —
       // per-user by construction, no shared pipeline. The bridge path ignores it.
-      proposal = await validateProposal(decision.proposal, { walletAddress });
+      //
+      // The second analyst gates this: a proposal only reaches validateProposal if BOTH
+      // analysts leave it standing. validateProposal remains the final chokepoint (it
+      // re-derives tokens, cap and rate server-side) — B does not weaken it, it precedes it.
+      if (synthesis?.proposalSurvives) {
+        proposal = await validateProposal(decision.proposal, { walletAddress });
+      } else if (decision.proposal) {
+        console.log(`[analyst-b] proposal KILLED by the second opinion: ${synthesis?.agreement} — ${secondOpinion?.headline}`);
+      }
     } catch (e) {
       console.warn(`[research] proposal validation failed (no proposal, brief unaffected): ${e.message}`);
     }
@@ -326,6 +367,11 @@ export async function handler(event) {
       deliverableHash,
       brief: decision,
       ...(proposal ? { proposal } : {}),
+      // The SECOND OPINION is persisted even when it KILLED the proposal — especially then.
+      // "Your analysts disagreed, so nothing is proposed" is the most valuable thing this
+      // brick produces, and it must be visible, not merely logged.
+      ...(secondOpinion ? { secondOpinion } : {}),
+      ...(synthesis ? { synthesis } : {}),
     });
 
     // 5. Submit on-chain as the provider (the user's OWN agent wallet, threaded
@@ -352,6 +398,8 @@ export async function handler(event) {
       deliverableHash,
       brief: decision,
       ...(proposal ? { proposal } : {}),
+      ...(secondOpinion ? { secondOpinion } : {}),
+      ...(synthesis ? { synthesis } : {}),
       txHash,
       tx: `${ARC.explorer}/tx/${txHash}`,
     });

@@ -17,6 +17,10 @@
 export const AGENT = {
   RESEARCHER: "researcher",
   EXECUTOR: "executor",
+  // Brick 2 — the second, INDEPENDENT opinion. Analyst A IS the Researcher (the existing
+  // narrative pipeline); Analyst B is a separate agent because it has separate SOURCES,
+  // separate failure modes, and can independently KILL a proposal.
+  ANALYST_B: "analyst_b",
 };
 
 // Order here is the order the roster renders in.
@@ -30,6 +34,18 @@ export const AGENTS = [
       "mid-research (paid APIs, on-chain reads) within its per-job allowance — that spend is " +
       "capped and every purchase is recorded below.",
     spends: "Buys data during research. Cannot move your funds.",
+  },
+  {
+    id: AGENT.ANALYST_B,
+    label: "Second opinion",
+    description:
+      "Independently checks every action your researcher proposes — but never reads the web. " +
+      "It prices the trade against an independent market source and against the live chain, and " +
+      "asks one question: is the rate you would actually get FAIR? It has no view on where " +
+      "markets are heading, and it cannot be swayed by a confident article. If it refuses — no " +
+      "route, or a rate far off fair value — the action is NOT proposed, whatever the first " +
+      "analyst argued.",
+    spends: "Reads free market data and prices the chain. Cannot move your funds.",
   },
   {
     id: AGENT.EXECUTOR,

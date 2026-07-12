@@ -1,6 +1,105 @@
 
 ---
 
+## 2026-07-12 — BRICK 2: THE SECOND ANALYST. Disagreement is the product. PROVEN LIVE.
+
+Same question, TWO INDEPENDENT analysts. When they disagree, the proposal DIES — and the user
+is shown WHY. A killed proposal is the system PROTECTING them, not failing.
+
+### INDEPENDENCE IS STRUCTURAL, NOT PROMPTED
+
+Asking one model to "double-check" itself is theatre. B is independent because it **cannot see
+A's argument and does not use A's evidence**:
+
+| | Analyst A (`job-submit-background`) | Analyst B (`_analystb.mjs`) |
+|---|---|---|
+| Evidence | Exa web retrieval — prose, news, forecasts | CoinGecko + the LIVE CHAIN — numbers only |
+| Answers | "SHOULD you?" | "Do the numbers hold?" |
+| Sees A's reasoning | — | **NO. Blinded.** Receives only the action's SHAPE. |
+
+`scripts/verify-second-opinion.mjs` has a **blinding tripwire** (`sawA`): if B's inputs ever
+carry A's prose, the suite fails. Independence is a test, not a promise.
+
+### THE SYNTHESIZER IS PLAIN CODE. NO MODEL ADJUDICATES.
+
+`_synthesis.mjs` is deliberately dumb. A model asked to reconcile two analysts would
+**smooth over exactly the conflict this brick exists to surface** — it would blend "buy" and
+"this is impossible" into "medium confidence", which is worse than either input alone.
+
+> **THE DISAGREEMENT IS PRESERVED, NEVER AVERAGED.** There is no confidence score anywhere in
+> this brick. `REFUSE` → `hard_disagree` → `proposalSurvives: false`. `CANNOT_VERIFY` → no
+> proposal. B failing is NOT a licence to act on one analyst.
+
+Four outcomes, and `no_action` is NOT a disagreement — A proposing nothing is an honest null,
+and crediting B with a save it never made would be a lie:
+
+| A proposed | B says | agreement | Proposal |
+|---|---|---|---|
+| yes | proceed | `agree` | **survives** + "second opinion confirmed" band |
+| yes | caution | `caution` | survives, tension shown VERBATIM |
+| yes | refuse | `hard_disagree` | **KILLED** |
+| yes | B crashed | `unverified` | **KILLED** (fail closed) |
+| **nothing** | — | `no_action` | none — a valid outcome, not a failure |
+
+### 🔑 THE KILLED CASE WAS INVISIBLE. THAT WAS THE BUG.
+
+Before this, a killed proposal simply *did not render* — so the user concluded the agent had
+FAILED, when in fact it had PROTECTED them. `SecondOpinionCard` now renders **precisely BECAUSE
+there is nothing to approve**: amber, not red (a withheld action is not an error), showing
+**BOTH views side by side** — what A argued, and what B objected to, with B's facts listed so
+the objection is CHECKABLE rather than just a second opinion you are asked to trust.
+(This is why `brief.proposal` — A's RAW proposal — is persisted even when it is killed.)
+
+The agree case renders the proposal as before, PLUS the confirmation band **ABOVE the approve
+button**: the user reaches "a second analyst independently priced this" BEFORE they reach the
+thing that spends their money.
+
+### WHAT B ACTUALLY CATCHES (things A structurally CANNOT see)
+
+- **ROUND-TRIP ARBITRAGE** — a round trip that GAINS is impossible. It means the quote is
+  broken. Instant refuse.
+- **ASYMMETRIC SPREAD** — the first cut waved a 16% *better-than-fair* rate through as "a
+  normal spread". An implausibly GOOD quote is a RED FLAG. Thresholds now bound **absolute**
+  spread.
+- **TWO PRICE REFERENCES** — CoinGecko vs App Kit/ECB. One reference cannot be cross-checked.
+
+### PROVEN LIVE (both directions, per-user, real chain)
+
+**KILLED** — run `d12a88ba`: A proposed swapping 5 USDC→EURC at ~0.8626. B: fair 0.877031
+(CoinGecko) / 0.876211 (ECB) — two references 0.09% apart; executable 0.788639 = **10.08% off
+fair**; round trip 5 USDC → 3.943193 EURC → 5.420943 USDC = **+8.42% IMPOSSIBLE GAIN**.
+`hard_disagree` → **proposal killed**.
+
+**AGREE** — job **#156385**, run `4a3fe340`: A proposed bridging 1 USDC → Base Sepolia (prose
+only — A's reasoning contains NO numbers). B independently priced it off live IRIS: fee
+**0.053635 USDC**, ~0.946 arrives, 5.36% burn → `proceed`. `agreement: agree`,
+`proposalSurvives: true`, band renders above the approve button (user-confirmed on prod).
+B's 0.0536 matches an INDEPENDENT pre-flight IRIS read (0.0533 flat to Base) — proof B priced
+the chain itself rather than paraphrasing A.
+
+The forwarder fee is FLAT, so burn scales INVERSELY with size: 1 USDC → 5.36% (proceed),
+0.5 USDC → would flip to `caution`. Ethereum's flat fee is **5.4465** — a 5 USDC bridge there
+nets NEGATIVE and B refuses on plain economics. Same analyst, a different failure mode from
+the swap's arbitrage kill.
+
+### A CAP TEST WAS SILENTLY NOT TESTING THE CAP
+
+`verify-swap-cap` went red. Not a prod bug — the pause chokepoint (previous brick) FAILS CLOSED,
+and with no Blobs in a zero-money test it refused every action with "could not verify the pause
+switch" **before the cap was ever reached**. The assertions were passing/failing on the PAUSE
+message; the cap was never exercised. Fixed by mocking `_pause` to "running" in that suite
+(pause has its own proof in `verify-pause-enforcement`). The EURC trap is genuinely re-proven:
+22 EURC (raw < cap 25!) ≈ 26.40 USDC → **BLOCKED**.
+
+**A fail-closed guard added upstream can silently disarm a test downstream. Green ≠ tested.**
+
+### Tests: 18 suites green, zero money
+`verify-second-opinion.mjs` (32) — blinding tripwire, round-trip arbitrage, too-good-to-be-true,
+two-references-disagree, the caution/kill boundaries. `smoke-analystb.mjs` runs B against the
+REAL CoinGecko and the REAL router (a fully-mocked suite hid two SDK bugs last brick).
+
+---
+
 ## 2026-07-12 — OBSERVABILITY + PAUSE/STOP: the AGENTS PAGE. Ledger races fixed. PROVEN LIVE.
 
 Brick 2's prerequisite. Two agents exist TODAY (not one), and the roster is built for N so the

@@ -1,5 +1,5 @@
 import { getStore } from "@netlify/blobs";
-import { AGENT, isAgent, agentLabel } from "./_agents.mjs";
+import { AGENT, AGENTS, isAgent, agentLabel } from "./_agents.mjs";
 
 // PAUSE / STOP — the kill switch.
 //
@@ -105,7 +105,11 @@ export async function setPaused({ owner, agent, paused }) {
 // fail-closed — this is a VIEW, and showing "unknown" is honest; the ENFORCEMENT path above
 // is the one that must fail closed.
 export async function pauseStates({ owner }) {
-  const ids = [ALL_AGENTS, AGENT.RESEARCHER, AGENT.EXECUTOR];
+  // ⚠️ DERIVED FROM THE REGISTRY, never a hardcoded list. The first cut hardcoded
+  // [ALL, RESEARCHER, EXECUTOR] — so the moment Analyst B was added, its pause state came back
+  // `undefined` and the roster could not show or toggle it. The whole point of _agents.mjs is
+  // that adding an agent needs no change anywhere else; a hardcoded list quietly breaks that.
+  const ids = [ALL_AGENTS, ...AGENTS.map((a) => a.id)];
   try {
     const store = getStore(PAUSE_STORE);
     const recs = await Promise.all(

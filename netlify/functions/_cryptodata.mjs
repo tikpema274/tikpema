@@ -17,6 +17,10 @@ export const ALLOWED_ONCHAIN_METHODS = new Set([
 export const MARKET_ID_ALLOWLIST = new Set([
   "bitcoin", "ethereum", "usd-coin", "tether", "solana", "binancecoin",
   "ripple", "cardano", "dogecoin", "avalanche-2", "polygon-ecosystem-token",
+  // EURC. Added for Brick 2's Analyst B: it needs a EURC price from a source that is
+  // INDEPENDENT of the swap router it is checking, otherwise its "is this rate fair?" verdict
+  // would be circular. CoinGecko is free and keyless, so this costs nothing.
+  "euro-coin",
 ]);
 
 // Arc native (gas) balance decimals for eth_getBalance.

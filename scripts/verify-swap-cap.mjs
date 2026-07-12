@@ -36,6 +36,16 @@ mock.module("../netlify/functions/_budget.mjs", {
     recordAgentSpend: async () => {},
   },
 });
+// ⚠️ NOT a weakening of the pause switch — an ISOLATION of the thing under test.
+// executeAction now calls assertNotPaused(), and _pause.mjs FAILS CLOSED: with no Blobs
+// configured (which is the case in a zero-money test) it correctly refuses every action with
+// "could not verify the pause switch". That refusal is right in production and wrong here — it
+// preempted the cap, so every assertion below was passing/failing on the PAUSE message and the
+// cap was never actually exercised. Pinning pause to "running" puts the cap back under test.
+// Pause enforcement has its own dedicated proof: scripts/verify-pause-enforcement.mjs.
+mock.module("../netlify/functions/_pause.mjs", {
+  namedExports: { assertNotPaused: async () => null },
+});
 
 let swapExecuted = false;
 const { executeAction } = await import("../netlify/functions/_actions.mjs");
