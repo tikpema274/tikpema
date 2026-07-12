@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import ConnectPasskey from "./components/ConnectPasskey";
 import ResearchPanel from "./components/ResearchPanel";
 import MyAgentPanel from "./components/MyAgentPanel";
+import AgentsPanel from "./components/AgentsPanel";
 import FeedbackPanel from "./components/FeedbackPanel";
 import SendPanel from "./components/SendPanel";
 import SwapPanel from "./components/SwapPanel";
@@ -56,6 +57,11 @@ export default function App() {
       break;
     case "agent":
       page = <MyAgentPanel wallet={wallet} />;
+      break;
+    // The AGENTS ROSTER. Nav-less (the 5-item nav stays reserved for working tools) —
+    // reached from the Dashboard card, like #/unified and #/plan.
+    case "agents":
+      page = <AgentsPanel wallet={wallet} />;
       break;
     case "research":
       page = <ResearchPanel wallet={wallet} />;

@@ -13,6 +13,8 @@
 
 import { exaSearch } from "./_exa.mjs";
 import { canSpend, recordSpend, recordBlocked } from "./_budget.mjs";
+import { AGENT } from "./_agents.mjs";
+import { assertNotPaused } from "./_pause.mjs";
 import { payX402, fetchX402Requirements } from "./_x402.mjs";
 import { buildRpcBody, decodeRpc, fetchMarketData } from "./_cryptodata.mjs";
 import { searchArxiv, arxivToFacts } from "./_arxiv.mjs";
@@ -269,17 +271,27 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     const ceiling = dataBuyCeilingUsdc();
     if (amountUsdc > ceiling) {
       console.warn(`[research] advertised ${amountUsdc} exceeds absolute per-buy ceiling ${ceiling} USDC (NO buy)`);
-      await recordBlocked({ jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: `absolute ceiling: ${amountUsdc} > ${ceiling} USDC`, store });
+      await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: `absolute ceiling: ${amountUsdc} > ${ceiling} USDC`, store });
       return [];
     }
 
     // 4. Budget gate on the SELLER'S advertised price. Day-ceiling sub-check is
     //    keyed to `owner` (the job client's own wallet), so buys draw down THIS
     //    user's daily budget, not a shared global one.
+    // ── THE KILL SWITCH, mid-research. A job already in flight must stop BUYING when the
+    // Researcher is paused. maybeBuyData never throws — it returns [] and the brief is
+    // synthesised from Exa alone, which is a graceful, honest degradation. Fail-closed. ──
+    const paused = await assertNotPaused({ owner, agent: AGENT.RESEARCHER });
+    if (paused) {
+      console.log(`[research] PAUSED: ${paused}`);
+      await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: paused, store });
+      return [];
+    }
+
     const gate = await canSpend({ jobId, jobPriceUsdc: jobPrice, amountUsdc, store, owner });
     if (!gate.allowed) {
       console.log(`[research] budget BLOCKED: ${gate.reason}`);
-      await recordBlocked({ jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: gate.reason, store });
+      await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: gate.reason, store });
       return [];
     }
     console.log(`[research] budget ALLOWED — purchasing…`);
@@ -300,6 +312,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     //    actual price paid.
     const paidUsdc = res.body.priceUsdc ?? amountUsdc;
     await recordSpend({
+      agent: AGENT.RESEARCHER,
       jobId,
       jobPriceUsdc: jobPrice,
       amountUsdc: paidUsdc,

@@ -4,6 +4,8 @@ import { agentSwap, valueInUsdc, SWAP_TOKENS } from "./_swap.mjs";
 import { agentPay } from "./_pay.mjs";
 import { agentBridge, bridgeFee, resolveDestination } from "./_bridge.mjs";
 import { canSpendDay, recordAgentSpend } from "./_budget.mjs";
+import { AGENT } from "./_agents.mjs";
+import { assertNotPaused } from "./_pause.mjs";
 
 // Shared action layer. Both agent-act (single action) and agent-execute-plan
 // (a sequence) run actions through these helpers so the execution logic lives
@@ -72,6 +74,17 @@ export function validateStepShape(step) {
 export async function executeAction(step, ctx) {
   const { walletAddress, store } = ctx;
   if (!walletAddress) return { ok: false, blocked: "no agent wallet resolved for this caller" };
+
+  // ── THE KILL SWITCH — checked FIRST, before any cap, any valuation, any signing. ──
+  // This is the MAIN chokepoint (agent-act, execute-plan, agent-bridge, and both approve
+  // endpoints all land here), but it is NOT the only one: agent-send and agent-ub-spend move
+  // funds without ever calling executeAction, so they check it themselves. A pause that one
+  // path routes around is not a pause.
+  //
+  // Fail-closed: if the switch cannot be READ, _pause.mjs returns a reason and we refuse.
+  const paused = await assertNotPaused({ owner: walletAddress, agent: AGENT.EXECUTOR });
+  if (paused) return { ok: false, blocked: paused };
+
   const shapeErr = validateStepShape(step);
   if (shapeErr) return { ok: false, blocked: shapeErr };
 
@@ -139,6 +152,7 @@ export async function executeAction(step, ctx) {
   // On any successful spend below, ledger it against today's ceiling + audit.
   const ledger = () =>
     recordAgentSpend({
+      agent: AGENT.EXECUTOR,
       owner: walletAddress,
       amountUsdc: dayValue,
       source: step.type,

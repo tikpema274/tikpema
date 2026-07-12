@@ -24,9 +24,12 @@
 // before the Netlify-backed default is used.
 
 import { getStore } from "@netlify/blobs";
+import { AGENT, normalizeAgent } from "./_agents.mjs";
 
 const BUDGET_STORE = "data-budget";
-const AUDIT_KEY = "audit:log";
+// The old single-array audit key. Entries are now per-key (see appendAudit) — this remains
+// ONLY so a future migration can find the legacy array; nothing reads or writes it.
+const LEGACY_AUDIT_KEY = "audit:log";
 
 // ── Config ──────────────────────────────────────────────────────────────────
 // Read at call time so env changes (and tests) take effect immediately. A
@@ -56,6 +59,13 @@ const utcDate = (at) => (at ? new Date(at) : new Date()).toISOString().slice(0, 
 const isoTs = (at) => (at ? new Date(at) : new Date()).toISOString();
 
 // ── Default (Netlify Blobs) store adapter — lazy, so tests never touch it ─────
+//
+// The adapter now exposes three things beyond get/set, because the naive read-modify-write it
+// used to do was LOSING DATA under concurrency (see appendAudit / bumpCounter below):
+//   · getWithEtag  — the version stamp a compare-and-set needs
+//   · setIfMatch   — conditional write; `false` means someone else wrote first, so retry
+//   · setIfNew     — create-only write; the primitive that makes an append un-clobberable
+//   · list         — enumerate by key prefix (per-entry audit records)
 let _defaultAdapter = null;
 function defaultStore() {
   if (_defaultAdapter) return _defaultAdapter;
@@ -67,10 +77,74 @@ function defaultStore() {
     async setJSON(key, value) {
       await s.setJSON(key, value);
     },
+    // Returns { value, etag }. etag is undefined when the key does not exist yet.
+    async getWithEtag(key) {
+      const res = await s.getWithMetadata(key, { type: "json" }).catch(() => null);
+      return { value: res?.data ?? null, etag: res?.etag };
+    },
+    // Compare-and-set. Returns true iff WE wrote it. A false means another writer landed
+    // between our read and our write — the caller must re-read and retry.
+    async setIfMatch(key, value, etag) {
+      const res = etag
+        ? await s.setJSON(key, value, { onlyIfMatch: etag })
+        : await s.setJSON(key, value, { onlyIfNew: true }); // no etag ⇒ the key must be new
+      return res?.modified !== false;
+    },
+    async setIfNew(key, value) {
+      const res = await s.setJSON(key, value, { onlyIfNew: true });
+      return res?.modified !== false;
+    },
+    async list(prefix) {
+      const res = await s.list({ prefix });
+      return (res?.blobs ?? []).map((b) => b.key);
+    },
   };
   return _defaultAdapter;
 }
 const pickStore = (store) => store ?? defaultStore();
+
+// ── Compare-and-set counter bump ─────────────────────────────────────────────
+// THE BUG THIS FIXES (money-safety, not bookkeeping): recordSpend/recordAgentSpend used to
+// read `spentUsdc`, add, and write it back. Two concurrent spends BOTH read X and BOTH write
+// X+amount — so one spend vanishes from the running total and the PERIOD_CEILING_USDC gate
+// silently under-counts. The ceiling did not actually hold under concurrency.
+//
+// Brick 2 (two analysts, both buying data, both ledgering) is exactly that concurrency.
+//
+// `mutate` receives the current record (or null) and returns the next one. We retry on a lost
+// CAS. The retry count is bounded — a hot key that cannot settle must FAIL LOUDLY rather than
+// silently drop a spend, because a dropped spend is a widened cap.
+// Retries are generous and BACKED OFF WITH JITTER. Without jitter, N writers that collide
+// once tend to collide again on every retry in lockstep — they livelock rather than converge.
+// A plain 6-try loop dies at ~25 concurrent writers on one key; with jitter it settles easily.
+const CAS_TRIES = 24;
+const CAS_BASE_MS = 4;
+
+async function casUpdate(s, key, mutate) {
+  // Stores injected by tests may not implement CAS. Fall back to the old read-modify-write
+  // rather than crash — such stores are single-threaded fixtures with nothing to race.
+  if (typeof s.getWithEtag !== "function" || typeof s.setIfMatch !== "function") {
+    const next = mutate((await s.getJSON(key)) ?? null);
+    await s.setJSON(key, next);
+    return next;
+  }
+
+  for (let i = 0; i < CAS_TRIES; i++) {
+    const { value, etag } = await s.getWithEtag(key);
+    const next = mutate(value);
+    if (await s.setIfMatch(key, next, etag)) return next;
+
+    // Lost the race: someone wrote between our read and our write. Re-read, re-apply — the
+    // increment is recomputed from the WINNER's value, so nothing is lost. Back off with
+    // jitter so contending writers spread out instead of colliding again in lockstep.
+    const backoff = CAS_BASE_MS * 2 ** Math.min(i, 5) * (0.5 + Math.random());
+    await new Promise((r) => setTimeout(r, backoff));
+  }
+
+  // FAIL LOUD. A dropped spend is a WIDENED CAP — the one thing this module exists to
+  // prevent. Never swallow this: the caller must know the ledger did not record the spend.
+  throw new Error(`budget: could not update ${key} after ${CAS_TRIES} attempts (contention)`);
+}
 
 const jobKey = (jobId) => `job:${jobId}`;
 // The daily ceiling is PER-USER: the day total is namespaced by the owner — the
@@ -152,73 +226,154 @@ export async function canSpend({ jobId, jobPriceUsdc, amountUsdc, store, at, own
   return { allowed: true };
 }
 
-// ── Append-only audit trail ───────────────────────────────────────────────────
-// CONCURRENCY (known limitation): appending reads the whole audit array, pushes,
-// and writes it back — last-write-wins. Two concurrent appends can drop an
-// entry, and likewise two concurrent recordSpend calls on the same job/day can
-// race on the running total. Acceptable for this phase (testnet, low volume);
-// harden later with per-entry keys or an atomic-append/compare-and-set path.
-async function appendAudit(s, entry) {
-  const log = (await s.getJSON(AUDIT_KEY)) ?? [];
-  log.push(entry);
-  await s.setJSON(AUDIT_KEY, log);
+// ── Append-only audit trail — PER-ENTRY KEYS, never a shared array ────────────
+//
+// THE BUG THIS FIXES: appending used to read the WHOLE audit array, push, and write it back.
+// Two concurrent appends both read the same array and both write their own copy — one entry
+// is silently LOST. The record of what your agent spent was itself unreliable, exactly when
+// the agent was busiest.
+//
+// Now every entry is its OWN immutable key, written create-only (`setIfNew`). An append
+// cannot clobber another append because it never touches another append's key. There is no
+// read-modify-write left to race.
+//
+// KEY SHAPE:  audit:<owner>:<date>:<ts>-<rand>
+//   owner + date in the KEY  → list({prefix}) gives one user's day, cheaply and scoped
+//   agent in the VALUE       → the per-agent breakdown the Agents page renders
+//
+// ⚠️ `agent` (WHO acted) is deliberately separate from `source` (WHICH tool/action). One
+// agent uses many sources. See _agents.mjs.
+const auditKey = (owner, date) =>
+  `audit:${ownerKey(owner)}:${date}:${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+async function appendAudit(s, { owner, at, ...entry }) {
+  const date = utcDate(at);
+  const value = {
+    ...entry,
+    owner: ownerKey(owner),
+    agent: normalizeAgent(entry.agent),
+    date,
+    timestamp: isoTs(at),
+  };
+
+  // Stores injected by tests may not implement setIfNew — fall back to a plain write.
+  const write = async (key) =>
+    typeof s.setIfNew === "function" ? s.setIfNew(key, value) : (await s.setJSON(key, value), true);
+
+  // A key collision (same ms + same random suffix) is vanishingly unlikely, but if it happens
+  // the entry must NOT be dropped — retry with a fresh key rather than lose the record.
+  for (let i = 0; i < 3; i++) {
+    if (await write(auditKey(owner, date))) return;
+  }
+  throw new Error("budget: could not write audit entry (key collision)");
 }
 
 // ── Record an ALLOWED spend against job total + day total, and audit it ───────
-export async function recordSpend({ jobId, jobPriceUsdc, amountUsdc, source, justification, store, at, owner }) {
+//
+// `agent` = WHO spent (_agents.mjs). Defaults to RESEARCHER because every recordSpend caller
+// today is the research/data-purchase path — but pass it explicitly; the default exists so an
+// un-updated caller degrades to a plausible attribution rather than "unattributed".
+export async function recordSpend({
+  jobId, jobPriceUsdc, amountUsdc, source, justification, store, at, owner,
+  agent = AGENT.RESEARCHER,
+}) {
   const s = pickStore(store);
   const amt = round6(amountUsdc);
   const allowanceUsdc = jobAllowance(jobPriceUsdc);
 
-  // per-job running total
-  const jRec = (await s.getJSON(jobKey(jobId))) ?? {
-    jobId,
-    jobPriceUsdc: Number(jobPriceUsdc),
-    allowanceUsdc,
-    spentUsdc: 0,
-  };
-  jRec.jobPriceUsdc = Number(jobPriceUsdc);
-  jRec.allowanceUsdc = allowanceUsdc;
-  jRec.spentUsdc = round6(jRec.spentUsdc + amt);
-  await s.setJSON(jobKey(jobId), jRec);
+  // Both counters are now COMPARE-AND-SET. A concurrent spend can no longer read the same
+  // total and overwrite the other's increment — which used to silently widen the ceiling.
+  const jRec = await casUpdate(s, jobKey(jobId), (cur) => {
+    const rec = cur ?? { jobId, jobPriceUsdc: Number(jobPriceUsdc), allowanceUsdc, spentUsdc: 0 };
+    return {
+      ...rec,
+      jobPriceUsdc: Number(jobPriceUsdc),
+      allowanceUsdc,
+      spentUsdc: round6((rec.spentUsdc ?? 0) + amt),
+    };
+  });
 
   // per-day running total (rolling UTC day, keyed to THIS owner's wallet)
   const date = utcDate(at);
-  const dRec = (await s.getJSON(dayKey(owner, date))) ?? { date, owner: ownerKey(owner), spentUsdc: 0 };
-  dRec.spentUsdc = round6(dRec.spentUsdc + amt);
-  await s.setJSON(dayKey(owner, date), dRec);
+  const dRec = await casUpdate(s, dayKey(owner, date), (cur) => {
+    const rec = cur ?? { date, owner: ownerKey(owner), spentUsdc: 0 };
+    return { ...rec, spentUsdc: round6((rec.spentUsdc ?? 0) + amt) };
+  });
 
-  // audit
   await appendAudit(s, {
+    owner, at, agent,
     jobId,
     amountUsdc: amt,
     source,
     justification,
     allowed: true,
-    timestamp: isoTs(at),
   });
 
   return { jobSpentUsdc: jRec.spentUsdc, daySpentUsdc: dRec.spentUsdc, allowanceUsdc };
 }
 
 // ── Record a REFUSED purchase (no spend; audit only) ──────────────────────────
-export async function recordBlocked({ jobId, amountUsdc, source, reason, store, at }) {
+// A refusal is as much a part of the record as a spend — "your agent tried to buy X and the
+// cap stopped it" is exactly what the Agents page should show.
+export async function recordBlocked({
+  jobId, amountUsdc, source, reason, store, at, owner, agent = AGENT.RESEARCHER,
+}) {
   const s = pickStore(store);
   await appendAudit(s, {
+    owner, at, agent,
     jobId,
     amountUsdc: round6(amountUsdc),
     source,
     reason,
     allowed: false,
-    timestamp: isoTs(at),
   });
   return { logged: true };
 }
 
-// ── Read the audit trail (all, or filtered by job) ────────────────────────────
-export async function auditLog(jobId, { store } = {}) {
-  const log = (await pickStore(store).getJSON(AUDIT_KEY)) ?? [];
-  return jobId ? log.filter((e) => e.jobId === jobId) : log;
+// ── Read the audit trail ─────────────────────────────────────────────────────
+//
+// Entries now live under their own keys, so a read is a prefix list + fetch. Scoped by OWNER:
+// there is no "read everyone's audit" path, because the observability surface is per-user and
+// a global read would be a leak waiting to happen.
+//
+// `date` narrows to one UTC day (what the Agents page shows); omit it for the owner's whole
+// history. `jobId` filters in-memory, as before.
+export async function auditLog({ owner, date, jobId, store } = {}) {
+  const s = pickStore(store);
+
+  // Stores injected by tests may not implement list(). Nothing to enumerate ⇒ empty trail.
+  if (typeof s.list !== "function") return [];
+
+  const prefix = date
+    ? `audit:${ownerKey(owner)}:${date}:`
+    : `audit:${ownerKey(owner)}:`;
+  const keys = await s.list(prefix);
+  const entries = await Promise.all(keys.map((k) => s.getJSON(k).catch(() => null)));
+
+  return entries
+    .filter(Boolean)
+    .filter((e) => (jobId ? e.jobId === jobId : true))
+    .sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+}
+
+// The per-agent breakdown the Agents page renders: what did each agent spend today, and what
+// did it try to spend and get refused? Derived from the AUDIT (the immutable record), never
+// from a counter — a counter can only tell you a total, not who spent it.
+export async function agentBreakdown({ owner, date, store } = {}) {
+  const entries = await auditLog({ owner, date: date ?? utcDate(), store });
+  const by = new Map();
+  for (const e of entries) {
+    const id = normalizeAgent(e.agent);
+    const cur = by.get(id) ?? { agent: id, spentUsdc: 0, actions: 0, blocked: 0 };
+    if (e.allowed) {
+      cur.spentUsdc = round6(cur.spentUsdc + Number(e.amountUsdc || 0));
+      cur.actions += 1;
+    } else {
+      cur.blocked += 1;
+    }
+    by.set(id, cur);
+  }
+  return [...by.values()];
 }
 
 // ── Free-form agent actions (Brick C): per-DAY ceiling only ───────────────────
@@ -245,20 +400,32 @@ export async function canSpendDay({ amountUsdc, store, at, owner }) {
   return { allowed: true };
 }
 
-export async function recordAgentSpend({ owner, amountUsdc, source, justification, store, at }) {
+// `agent` defaults to EXECUTOR: every recordAgentSpend caller is a fund-moving action
+// (send / swap / bridge / pay / UB-spend). Pass it explicitly anyway.
+//
+// ⚠️ NOTE the field this REPLACES. The old audit entry set `agent: ownerKey(owner)` — the
+// WALLET ADDRESS. The field was already called `agent` and was already lying: it recorded
+// WHOSE wallet, never WHICH agent. `owner` now carries the wallet; `agent` carries the actor.
+export async function recordAgentSpend({
+  owner, amountUsdc, source, justification, store, at, agent = AGENT.EXECUTOR,
+}) {
   const s = pickStore(store);
   const amt = round6(amountUsdc);
   const date = utcDate(at);
-  const dRec = (await s.getJSON(dayKey(owner, date))) ?? { date, owner: ownerKey(owner), spentUsdc: 0 };
-  dRec.spentUsdc = round6(dRec.spentUsdc + amt);
-  await s.setJSON(dayKey(owner, date), dRec);
+
+  // COMPARE-AND-SET (see casUpdate). This is the counter the daily ceiling reads, so a lost
+  // update here does not just misreport — it WIDENS the cap.
+  const dRec = await casUpdate(s, dayKey(owner, date), (cur) => {
+    const rec = cur ?? { date, owner: ownerKey(owner), spentUsdc: 0 };
+    return { ...rec, spentUsdc: round6((rec.spentUsdc ?? 0) + amt) };
+  });
+
   await appendAudit(s, {
-    agent: ownerKey(owner),
+    owner, at, agent,
     amountUsdc: amt,
     source,
     justification,
     allowed: true,
-    timestamp: isoTs(at),
   });
   return { daySpentUsdc: dRec.spentUsdc };
 }

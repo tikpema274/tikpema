@@ -1,6 +1,82 @@
 
 ---
 
+## 2026-07-12 — OBSERVABILITY + PAUSE/STOP: the AGENTS PAGE. Ledger races fixed. PROVEN LIVE.
+
+Brick 2's prerequisite. Two agents exist TODAY (not one), and the roster is built for N so the
+second analyst + synthesizer become entries in `_agents.mjs`, never a redesign.
+
+### 🔑 THE TRUST DISTINCTION IS THE PRODUCT
+**Researcher CANNOT move funds** (buys data only). **Executor CAN** (send/swap/bridge/pay/UB).
+`movesFunds` is a FIRST-CLASS API FIELD and the first badge on each card — not prose buried in
+a description. It is the single most important thing a user can know about an agent that holds
+a wallet, and it is what makes "autonomous agent with a wallet" feel safe.
+
+### THE LEDGER HAD A MONEY-SAFETY RACE, NOT A BOOKKEEPING ONE
+
+`_budget.mjs` had TWO read-modify-write races:
+1. `appendAudit` — read the whole array, push, write back → concurrent appends **drop entries**.
+2. **`recordSpend`/`recordAgentSpend` — read `spentUsdc`, add, write back → concurrent spends
+   BOTH read X and BOTH write X+amount. A SPEND VANISHES FROM THE RUNNING TOTAL, so
+   `PERIOD_CEILING_USDC` UNDER-COUNTS and the daily cap DOES NOT HOLD.**
+
+Measured against the old implementation (`scripts/verify-ledger-concurrency.mjs`):
+**25 concurrent spends of 0.1 → day total read 0.1 instead of 2.5. 24 of 25 spends vanished.**
+The ceiling was barely counting. Brick 2 (two analysts both buying data) is exactly that
+concurrency.
+
+**FIXED:** per-entry immutable audit keys (`audit:<owner>:<date>:<ts>-<rand>`, create-only
+writes — an append cannot clobber another append; there is no read-modify-write left to race)
++ **compare-and-set** on the counters (`getWithMetadata` etag → `onlyIfMatch`, retry on loss).
+⚠️ A plain 6-try CAS loop LIVELOCKS at 25 contenders — it needs **jittered exponential
+backoff**. It fails LOUD on exhaustion: a dropped spend is a WIDENED CAP, never swallow it.
+
+Also fixed a lie: `recordAgentSpend` already had a field called `agent` — set to the WALLET
+ADDRESS. It recorded *whose* wallet, never *which* agent.
+
+### ⚠️ THE CHOKEPOINT MATTERS MORE THAN THE BUTTON
+
+`executeAction` is NOT the only spend path. These move money WITHOUT it, and a pause enforced
+only there would have left them WIDE OPEN:
+- **`agent-send`** — direct `transfer()`
+- **`agent-ub-spend`** — direct `ubSpend()`
+- **`job-run`** — starts a job that funds escrow and buys data
+- **`maybeBuyData`** — the researcher's x402 purchase, mid-research
+
+All five call `assertNotPaused` directly. `agent-act` (the chat path), `agent-execute-plan`,
+`agent-bridge` and BOTH approve endpoints spend only via `executeAction`, so they are covered
+transitively. **Adding a new spend path means adding the call — there is no ambient
+enforcement that will catch you if you forget.**
+
+### FAIL CLOSED, TWICE (caps have failed OPEN three times in this repo — the halt is not the fourth)
+- **Pause flag unreadable → PAUSED.** A kill switch whose failure mode is "keep spending" is
+  not a kill switch. A Blobs hiccup blocks spending; that is the safe direction, deliberately.
+- **`AGENT_HALT` garbled → HALT.** `1/true/on/yes` halt · `0/false/off/no` run · **anything
+  else halts** — a typo must never mean "keep spending". Tested: `AGENT_HALT="banana"` halts.
+- **No owner → refuse.** We cannot read a switch we cannot key.
+
+### LIVE PROOF (chain UNCHANGED throughout: USDC 17.390000 / EURC 13.471551)
+| step | result |
+|---|---|
+| pause Executor → swap | `"Your Executor is paused."` |
+| pause Executor → **agent-ub-spend** (bypasses executeAction) | **409 paused** |
+| pause Executor → **agent-send** (bypasses executeAction) | **409 paused** |
+| resume Executor, pause Researcher → swap | **RUNS** (hit the CAP, not the pause ⇒ it got PAST the gate) |
+| …→ research job | **409** `"Your Researcher is paused."` |
+
+Per-agent independence works: "stop the executor, let the research finish" — and its inverse.
+
+**Tests:** ledger-concurrency 11 (incl. the bug demonstrated against the old impl) ·
+pause-enforcement 24 (every money-mover wired as a TRIPWIRE — the assertion is that NONE was
+reached, not that a flag flipped) · budget 28.
+
+### KNOWN (UI honesty)
+The Agents page polls every 15s and Blobs is eventually consistent (~11s), so a just-toggled
+pause can DISPLAY stale for a few seconds. ENFORCEMENT is immediate and correct; only the view
+lags. Seen live: a resumed Executor still read `paused: true` while an action provably ran.
+
+---
+
 ## 2026-07-11 — SWAP IS PROPOSABLE (proposal domain expanded; Brick 2 groundwork). PROVEN LIVE.
 
 The proposal loop was bridge-ONLY. It now also proposes a **SWAP (USDC↔EURC on Arc)** — a

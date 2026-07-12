@@ -270,6 +270,16 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
               you approve.
             </div>
           </button>
+
+          {/* The AGENTS ROSTER (#/agents, nav-less). Leads with the trust distinction —
+              only one agent can move money — because that is the thing worth knowing. */}
+          <button className="quick-card" onClick={() => go("agents")}>
+            <div className="qt">Your agents →</div>
+            <div className="qd">
+              See who acts for you, what each one spent, and stop any of them instantly.
+              Only one can move your money.
+            </div>
+          </button>
           {/* 5th card wraps to a second row in the repeat(3,1fr) grid — intentional; no
               CSS tweak. Reflows to a single column on mobile like the rest. */}
           <button className="quick-card" onClick={() => go("nanopay")}>

@@ -94,6 +94,16 @@
   to = "/.netlify/functions/job-swap-approve"
   status = 200
 
+# The AGENTS PAGE — a roster (GET) plus the pause/resume switch (POST). Owner-scoped to the
+# verified session: there is no read-anyone-else's-agents path and no pause-anyone-else's path.
+# The kill switch is ENFORCED at every spend path (_pause.mjs), not just at executeAction —
+# agent-send and agent-ub-spend move funds without it, and the researcher spends in job-run
+# and mid-research. A pause one path routes around is not a pause.
+[[redirects]]
+  from = "/api/agents"
+  to = "/.netlify/functions/agents"
+  status = 200
+
 [[redirects]]
   from = "/api/agent-bridge"
   to = "/.netlify/functions/agent-bridge"

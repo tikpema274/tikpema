@@ -12,6 +12,8 @@ import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 import { canSpendDay, recordAgentSpend } from "./_budget.mjs";
+import { AGENT } from "./_agents.mjs";
+import { assertNotPaused } from "./_pause.mjs";
 import { publicClient } from "./_predict.mjs";
 
 const BALANCE_OF_ABI = [
@@ -56,6 +58,12 @@ export async function handler(event) {
   // rolling-UTC-day budget as other autonomous spend, PER USER — keyed to this
   // caller's own wallet (server-resolved), so it can't be blocked by, or block,
   // any other wallet.
+  // ── THE KILL SWITCH. agent-send moves funds via a direct transfer() and NEVER calls
+  // executeAction, so a pause enforced only there would leave this path wide open.
+  // Fail-closed: an unreadable switch refuses. ──
+  const paused = await assertNotPaused({ owner: walletAddress, agent: AGENT.EXECUTOR });
+  if (paused) return json(409, { error: paused, paused: true });
+
   const day = await canSpendDay({ amountUsdc: amount, owner: walletAddress });
   if (!day.allowed) {
     return json(429, { error: day.reason, dayCeiling: true });
@@ -94,6 +102,7 @@ export async function handler(event) {
     const txHash = await waitForTx(client, tx.data?.id);
     // Ledger the send against today's ceiling (best-effort; the tx already landed).
     await recordAgentSpend({
+      agent: AGENT.EXECUTOR,
       owner: walletAddress,
       amountUsdc: amount,
       source: "agent-send",

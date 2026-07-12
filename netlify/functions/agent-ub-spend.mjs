@@ -3,6 +3,8 @@ import { json, parseBody, ubSpendCapUsdc, ubSpendFloorUsdc } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 import { canSpendDay, recordAgentSpend } from "./_budget.mjs";
+import { AGENT } from "./_agents.mjs";
+import { assertNotPaused } from "./_pause.mjs";
 import { ubSpend } from "./_ubspend.mjs";
 
 // POST /api/agent-ub-spend { recipientAddress, amountUsdc, destinationChain? }  (auth)
@@ -70,6 +72,12 @@ export async function handler(event) {
   // ── THE DAY-CEILING GATE — a real gate, BEFORE any signing. Over-ceiling ⇒ 400 and
   // NOTHING moves (we return before ubSpend). Owner-keyed, so one user's day of spending
   // never eats another's ceiling. Mirrors the bridge/send path in _actions.mjs. ──
+  // ── THE KILL SWITCH. This path moves funds WITHOUT executeAction, so it checks the pause
+  // ITSELF — otherwise a paused Executor could still spend the unified balance from here.
+  // Fail-closed: an unreadable switch refuses. ──
+  const paused = await assertNotPaused({ owner, agent: AGENT.EXECUTOR });
+  if (paused) return json(409, { error: paused, paused: true });
+
   const day = await canSpendDay({ amountUsdc: amount, owner });
   if (!day.allowed) return json(400, { error: day.reason, blocked: true });
 
@@ -86,6 +94,7 @@ export async function handler(event) {
     // ARE gone from the unified balance — not ledgering it would let a caller repeat
     // submitted-but-unconfirmed spends past the ceiling.
     await recordAgentSpend({
+      agent: AGENT.EXECUTOR,
       owner,
       amountUsdc: amount,
       source: "ub_spend",

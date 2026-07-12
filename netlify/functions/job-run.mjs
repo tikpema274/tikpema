@@ -14,6 +14,8 @@ import crypto from "node:crypto";
 import { json, parseBody, CONTRACTS, USDC_DECIMALS, sendCapUsdc } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { assertNotPaused } from "./_pause.mjs";
+import { AGENT } from "./_agents.mjs";
 import { publicClient } from "./_predict.mjs";
 
 const BALANCE_OF_ABI = [
@@ -77,6 +79,12 @@ export async function handler(event) {
   } catch (e) {
     return json(502, { error: `could not read wallet balance: ${e.message}` });
   }
+  // ── THE KILL SWITCH. A research job funds an escrow and then buys data — a paused
+  // Researcher must not be able to start one. Checked BEFORE the funds gate so a paused
+  // agent gets the honest reason, not "insufficient funds". Fail-closed. ──
+  const paused = await assertNotPaused({ owner: walletAddress, agent: AGENT.RESEARCHER });
+  if (paused) return json(409, { error: paused, paused: true });
+
   if (have < budget) {
     return json(402, {
       error: "Insufficient funds — please fund your agent wallet.",

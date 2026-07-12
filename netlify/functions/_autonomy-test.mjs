@@ -194,7 +194,7 @@ async function downstream(question, rows, justification) {
 
   // Record the spend — the REAL _budget.recordSpend + audit trail.
   const rec = await recordSpend({ jobId, jobPriceUsdc: jobPrice, amountUsdc, source: "x402-quote (testnet stand-in)", justification, store });
-  const log = await auditLog(jobId, { store });
+  const log = await auditLog({ jobId, store });
   check(`recordSpend logged $${amountUsdc} (running job total $${rec.jobSpentUsdc})`, rec.jobSpentUsdc === amountUsdc, JSON.stringify(rec));
   check("audit trail carries the genuine justification (not a scripted string)",
     log.length === 1 && log[0].justification === justification, JSON.stringify(log[0] || {}));

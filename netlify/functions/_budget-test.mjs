@@ -22,14 +22,45 @@ import {
 
 // Fresh in-memory store per test → full isolation. JSON round-trip mimics the
 // Blobs store's serialization.
+// ⚠️ THIS MOCK IMPLEMENTS THE FULL ADAPTER, INCLUDING REAL COMPARE-AND-SET.
+// A store that is laxer than the real one proves nothing: _budget.mjs falls back to naive
+// read-modify-write when getWithEtag/setIfMatch are missing, so a get/set-only mock would
+// exercise the very code path the CAS rewrite exists to eliminate — and the concurrency test
+// would pass against the broken implementation. The etag is a monotonic version counter,
+// which is all CAS actually needs.
 function memStore() {
   const m = new Map();
+  const etags = new Map();
+  let version = 0;
+  const bump = (k) => { etags.set(k, `v${++version}`); };
   return {
     async getJSON(k) {
       return m.has(k) ? JSON.parse(m.get(k)) : null;
     },
     async setJSON(k, v) {
       m.set(k, JSON.stringify(v));
+      bump(k);
+    },
+    async getWithEtag(k) {
+      return { value: m.has(k) ? JSON.parse(m.get(k)) : null, etag: etags.get(k) };
+    },
+    // Writes ONLY if the key's version is still the one the caller read. This is what makes a
+    // lost update detectable instead of silent.
+    async setIfMatch(k, v, etag) {
+      const cur = etags.get(k);
+      if (etag === undefined ? m.has(k) : cur !== etag) return false;
+      m.set(k, JSON.stringify(v));
+      bump(k);
+      return true;
+    },
+    async setIfNew(k, v) {
+      if (m.has(k)) return false;
+      m.set(k, JSON.stringify(v));
+      bump(k);
+      return true;
+    },
+    async list(prefix) {
+      return [...m.keys()].filter((k) => k.startsWith(prefix));
     },
   };
 }
@@ -140,7 +171,8 @@ async function main() {
     const blocked = await canSpend({ jobId: "job-5", jobPriceUsdc: JOB_PRICE, amountUsdc: 0.09, store, at: AT });
     await recordBlocked({ jobId: "job-5", amountUsdc: 0.09, source: "exa", reason: blocked.reason, store, at: AT });
 
-    const all = await auditLog(undefined, { store });
+    // auditLog is now OWNER-SCOPED (there is no read-everyone's-audit path).
+    const all = await auditLog({ store });
     check("2 audit entries total", all.length === 2, `got ${all.length}`);
     check("one allowed=true entry", all.filter((e) => e.allowed === true).length === 1);
     check("one allowed=false entry", all.filter((e) => e.allowed === false).length === 1);
@@ -149,8 +181,12 @@ async function main() {
     const blockedEntry = all.find((e) => !e.allowed);
     check("blocked entry carries reason", /per-purchase|job allowance|period/.test(blockedEntry?.reason || ""), JSON.stringify(blockedEntry));
     check("entries carry source + timestamp", all.every((e) => e.source === "exa" && !!e.timestamp));
-    check("auditLog(jobId) filters by job", (await auditLog("job-5", { store })).length === 2);
-    check("auditLog('other') returns none", (await auditLog("nope", { store })).length === 0);
+    check("auditLog(jobId) filters by job", (await auditLog({ jobId: "job-5", store })).length === 2);
+    check("auditLog('other') returns none", (await auditLog({ jobId: "nope", store })).length === 0);
+
+    // AGENT ATTRIBUTION — who spent, not just what. This is what the Agents page renders.
+    check("entries carry an agent", all.every((e) => e.agent === "researcher"), JSON.stringify(all.map((e) => e.agent)));
+    check("entries carry the owner", all.every((e) => e.owner === "_global"));
   }
 
   // ── 6. Totals read back correctly after recorded spends ─────────────────────
