@@ -143,6 +143,21 @@
   to = "/.netlify/functions/submit-feedback"
   status = 200
 
+# Parameters plane: read an agent's CURRENT, MUTABLE caps and limits. Read-only, no auth, no
+# writes, nothing on-chain — the numbers come from the same fail-closed helpers the money paths
+# enforce (_arc.mjs), so this view cannot drift from what is actually enforced. The response
+# keeps mutable `parameters` and immutable `invariants` in separate blocks on purpose: a cap is
+# a dial an operator can turn, "the Researcher cannot move funds" is a wall it cannot.
+# Must precede the SPA fallback, or /* would swallow it and return index.html.
+[[redirects]]
+  from = "/api/agent-parameters/:agent"
+  to = "/.netlify/functions/agent-parameters?agent=:agent"
+  status = 200
+[[redirects]]
+  from = "/api/agent-parameters"
+  to = "/.netlify/functions/agent-parameters"
+  status = 200
+
 # SPA fallback
 [[redirects]]
   from = "/*"
