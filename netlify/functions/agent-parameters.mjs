@@ -73,9 +73,15 @@ const cap = (label, fn, applies, bound = "maximum") => {
   }
 };
 
-// Which dials actually bind which agent. The Researcher has no send/swap/bridge cap because it
-// has no send/swap/bridge — that is an invariant, not a cap set to zero, and conflating the two
-// is exactly the confusion this endpoint exists to prevent.
+// Which dials actually bind which agent.
+//
+// ⚠️ CORRECTED. This endpoint originally reported the Researcher as having NO fund-movement path
+// and an empty `movementCaps`. THAT WAS FALSE. An audit of the call graph found exactly one exit
+// to value: _research.mjs:301 calls payX402, which signs an EIP-3009 TransferWithAuthorization
+// against the user's wallet — real USDC leaves it to pay a data seller. It is bounded, but
+// "bounded" is not "absent", and reporting a live spend path as no-path-at-all is the single
+// worst thing a parameters endpoint can do. The x402 purchase is now listed as the movement
+// surface it is.
 function parametersFor(id) {
   const cfg = budgetConfig();
   const ceiling = {
@@ -83,6 +89,7 @@ function parametersFor(id) {
     usdc: cfg.PERIOD_CEILING_USDC,
     unit: "USDC",
     per: "rolling UTC day, per user",
+    bound: "maximum",
     status: "active",
     note: "Shared across all agents for this owner — cumulative autonomous spend, whatever the action.",
   };
@@ -90,14 +97,43 @@ function parametersFor(id) {
   if (id === AGENT.RESEARCHER) {
     return {
       spendCaps: [cap("Per-purchase spend cap", maxSpendUsdc, "single autonomous data purchase")],
-      budget: [
-        ceiling,
-        { label: "Per-job data allowance", value: cfg.DATA_ALLOWANCE_PCT, unit: "fraction of job price", status: "active" },
-        { label: "Per-purchase share of allowance", value: cfg.PER_PURCHASE_PCT, unit: "fraction of job allowance", status: "active" },
+      budget: [ceiling],
+      // THE RESEARCHER'S ONE EXIT TO VALUE. Not empty. Every buy must pass ALL of these before
+      // payX402 signs anything — they are checked in canSpend() (_budget.mjs:183), which runs
+      // BEFORE the signature, so a refusal moves no money.
+      movementCaps: [
+        {
+          label: "x402 data purchase",
+          action: "Signs an EIP-3009 TransferWithAuthorization — USDC leaves your wallet to a data seller",
+          callSite: "_research.mjs:301 (payX402) — the only one",
+          gatedBy: "canSpend() — checked before signing",
+          bound: "maximum",
+          status: "active",
+          limits: [
+            {
+              label: "Per-job data allowance",
+              value: cfg.DATA_ALLOWANCE_PCT,
+              unit: "fraction of job price",
+              bound: "maximum",
+              status: "active",
+              note: "Total data spend across a job ≤ jobPrice × this.",
+            },
+            {
+              label: "Per-purchase share of allowance",
+              value: cfg.PER_PURCHASE_PCT,
+              unit: "fraction of job allowance",
+              bound: "maximum",
+              status: "active",
+              note: "Any single buy ≤ jobAllowance × this.",
+            },
+            ceiling,
+          ],
+        },
       ],
-      movementCaps: [],
       movementCapsNote:
-        "None — the Researcher has no fund-movement path at all. This is an INVARIANT (see `invariants`), not a cap set to zero.",
+        "The Researcher CAN move funds — one path only: an x402 data purchase. It holds no signer " +
+        "for a send, swap, bridge, Gateway spend, or escrow, and has no code path to any of them. " +
+        "Every buy is gated by canSpend() before the EIP-3009 authorization is signed.",
     };
   }
 
@@ -143,23 +179,53 @@ function parametersFor(id) {
   return null;
 }
 
+// WHICH AGENTS CAN MOVE VALUE. Established by auditing the call graph, not by reading the
+// roster's marketing copy — which says the Researcher "cannot move your funds" and is WRONG:
+// it buys data with real USDC. An agent moves funds if ANY reachable path signs a transfer.
+//   researcher → TRUE  (payX402 → EIP-3009 TransferWithAuthorization, _research.mjs:301)
+//   analyst_b  → false (audited: reaches only estimateSwap/bridgeFee/valueInUsdc — quotes and
+//                       HTTP reads. No executor, no signer. Verified true.)
+//   executor   → TRUE  (send / swap / bridge / Gateway)
+const MOVES_FUNDS = new Set([AGENT.RESEARCHER, AGENT.EXECUTOR]);
+
 // The things no operator can dial. Stated as prose because they are guarantees, not values.
 function invariantsFor(id) {
-  const movesFunds = id === AGENT.EXECUTOR;
   const base = [
     "Every cap is enforced fail-closed: a misconfigured limit refuses the action, it never widens it.",
     "Cumulative autonomous spend is bounded by the daily ceiling regardless of any per-transaction cap.",
   ];
-  return movesFunds
-    ? [
-        "The Executor moves funds ONLY on an action you approved or an instruction you typed — it never originates a transfer.",
-        "Caps are checked at the money chokepoint before any transaction is signed, never after.",
-        ...base,
-      ]
-    : [
-        "This agent CANNOT move your funds. There is no code path from it to a transfer, swap, or bridge.",
-        ...base,
-      ];
+
+  if (id === AGENT.EXECUTOR) {
+    return [
+      "The Executor moves funds ONLY on an action you approved or an instruction you typed — it never originates a transfer.",
+      "Caps are checked at the money chokepoint before any transaction is signed, never after.",
+      ...base,
+    ];
+  }
+
+  if (id === AGENT.RESEARCHER) {
+    return [
+      // The corrected statement. It says what the code does, not what we wish it did.
+      "The Researcher holds no signer for a transfer, swap, bridge, Gateway spend, or escrow, and " +
+        "has no code path to any of them. Its single exit to value is one x402 data purchase call " +
+        "site (_research.mjs:301), which signs an EIP-3009 authorization against your wallet. That " +
+        "spend is gated by canSpend() — per-job allowance and daily ceiling — before signing. There " +
+        "is exactly one such call site.",
+      // The escrow question, answered honestly rather than omitted.
+      "On escrow: job-submit-background.mjs calls the ERC-8183 escrow, but the Researcher cannot " +
+        "trigger it — those calls sit sequentially in the handler AFTER runResearch() returns, using " +
+        "the handler's own client. _research.mjs holds no escrow reference and no signer. That is " +
+        "shared-caller adjacency, not reachability.",
+      ...base,
+    ];
+  }
+
+  // analyst_b — audited and true: no executor, no signer, quotes and reads only.
+  return [
+    "This agent CANNOT move your funds. There is no code path from it to a transfer, swap, or bridge.",
+    "It reaches only read-only pricing (estimateSwap quotes, the Circle fee API) and holds no signer.",
+    ...base,
+  ];
 }
 
 export async function handler(event) {
@@ -186,7 +252,13 @@ export async function handler(event) {
   const p = parametersFor(id);
 
   return json(200, {
-    agent: { id: entry.id, label: entry.label, movesFunds: id === AGENT.EXECUTOR },
+    agent: {
+      id: entry.id,
+      label: entry.label,
+      // TRUE for the Researcher too — it signs an EIP-3009 transfer to buy data. Bounded, but
+      // it moves real USDC out of your wallet, so it says so.
+      movesFunds: MOVES_FUNDS.has(id),
+    },
 
     // ── THE LABEL. Unmissable, and the first thing a reader hits. ──
     kind: "live-parameters",
