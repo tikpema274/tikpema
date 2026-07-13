@@ -24,16 +24,56 @@ function kitAndAdapter() {
 
 // Value a token amount in USD via App Kit's cached token rates. USDC is treated
 // as ~$1 (no lookup). For other tokens we read the single returned rate entry
-// (avoids address-case bugs). Throws if no rate exists — callers fail-safe BLOCK.
+// (avoids address-case bugs).
+//
+// ⚠️ THIS FUNCTION IS A CAP INPUT, SO IT MUST NEVER RETURN NaN. Its result is compared with `>`
+// against a limit at FIVE sites — _proposal.mjs:165 (propose), job-swap-approve.mjs:124
+// (execute), _actions.mjs:123 (day ceiling), agent-execute-plan.mjs:66 (plan ceiling), and
+// agent-act.mjs — and every comparison against NaN is FALSE. One NaN therefore disables five
+// caps at once, and the propose/approve pair compounds: an unbounded swap gets proposed, then
+// approved, with the day ceiling that should backstop it ALSO NaN-poisoned.
+//
+// It used to return NaN two ways:
+//   1. `if (t === "USDC") return amt` with amt unvalidated — a garbled amount returned NaN.
+//   2. `if (!entry?.priceUSD) throw` only rejects FALSY. A truthy non-numeric rate — "N/A",
+//      "unavailable", "1,08" (decimal comma), an object — sailed through, and
+//      `amt * Number("N/A")` is NaN.
+//
+// So it now THROWS on anything it cannot turn into a finite positive number. That is the right
+// failure direction and it needs no caller changes: every caller already treats a throw as
+// "cannot price it → refuse". job-swap-approve returns 409 "cannot price {token} right now —
+// not approving blind"; _proposal returns null (no proposal). An upstream rate glitch must
+// REFUSE the swap, never silently un-cap it.
 export async function valueInUsdc({ token, amount }) {
   const t = String(token).toUpperCase();
   const amt = Number(amount);
+  if (!Number.isFinite(amt) || amt <= 0) {
+    throw new Error(`cannot value ${t}: amount ${JSON.stringify(amount)} is not a positive finite number`);
+  }
   if (t === "USDC") return amt;
+
   const { kit, kitKey } = kitAndAdapter();
   const r = await kit.getTokenRates({ chain: "Arc_Testnet", tokens: [t], kitKey });
   const entry = Object.values(r?.rates?.Arc_Testnet || {})[0];
   if (!entry?.priceUSD) throw new Error(`no USD rate for ${t} on Arc Testnet`);
-  return amt * Number(entry.priceUSD);
+
+  // The rate must PARSE, not merely exist. `Number(x)` on a truthy non-numeric yields NaN, and
+  // a NaN price is indistinguishable downstream from "no cap applies".
+  const price = Number(entry.priceUSD);
+  if (!Number.isFinite(price) || price <= 0) {
+    throw new Error(
+      `unusable USD rate for ${t} on Arc Testnet: ${JSON.stringify(entry.priceUSD)} — refusing to value it ` +
+        `(a NaN price would silently defeat every cap comparing against it)`
+    );
+  }
+
+  const value = amt * price;
+  // Belt and braces: the product of two finite numbers is finite, but this function's ONLY
+  // contract is "a finite positive USD value, or throw". Assert it rather than assume it.
+  if (!Number.isFinite(value)) {
+    throw new Error(`computed a non-finite USD value for ${amt} ${t} at rate ${price}`);
+  }
+  return value;
 }
 
 // Estimate then execute a same-chain swap on Arc Testnet from the agent wallet.
