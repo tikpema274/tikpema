@@ -184,6 +184,34 @@ export async function canSpend({ jobId, jobPriceUsdc, amountUsdc, store, at, own
   const s = pickStore(store);
   const cfg = budgetConfig();
 
+  // ── (0) THE GATE PROTECTS ITSELF. ──────────────────────────────────────────
+  // Every check below is a `>` comparison, and EVERY comparison against NaN is false — so a
+  // non-finite input made all three pass vacuously and this function returned {allowed: true}.
+  // That is the fail-open cap pattern, and it has bitten this project twice (see the removed
+  // /api/gateway-deposit, whose `Number(process.env.X || "1")` yielded NaN so `amount > NaN`
+  // let every spend through).
+  //
+  // It was previously survivable ONLY because the caller happened to guard first
+  // (_research.mjs:262). Safety that lives in the caller is not safety: the next caller
+  // inherits none of it, and forgets silently. So the refusal moves INTO the gate.
+  //
+  // Refuse, do not throw: canSpend's contract is a verdict, and every caller already branches
+  // on `allowed`. Throwing would turn a bad input into an unhandled 500 on a money path.
+  // `atomic()` is Math.round(Number(x) * 1e6) — check BEFORE it, since Math.round(NaN) is NaN
+  // and the NaN would simply reappear downstream.
+  // `show` prints the value as the caller actually passed it. JSON.stringify(NaN) is "null",
+  // which would send a reader debugging a garbled price hunting for a null instead of a NaN.
+  const show = (v) => (typeof v === "string" ? JSON.stringify(v) : String(v));
+  if (!Number.isFinite(Number(amountUsdc)) || Number(amountUsdc) <= 0) {
+    return { allowed: false, reason: `amount ${show(amountUsdc)} is not a positive finite number; refusing to spend` };
+  }
+  // jobPrice may legitimately be 0 (a free job buys no data — the allowance is then 0 and the
+  // per-purchase check refuses anyway), but it can never be negative or garbled. Left unguarded,
+  // a NaN here vacuously defeated checks (a) and (b), leaving only the day ceiling standing.
+  if (!Number.isFinite(Number(jobPriceUsdc)) || Number(jobPriceUsdc) < 0) {
+    return { allowed: false, reason: `jobPrice ${show(jobPriceUsdc)} is not a non-negative finite number; refusing to spend` };
+  }
+
   const amtA = atomic(amountUsdc);
   if (amtA <= 0) return { allowed: false, reason: `amount ${amountUsdc} must be > 0` };
 

@@ -16,10 +16,16 @@ import { pauseStates, setPaused, globalHalt, ALL_AGENTS } from "./_pause.mjs";
 // to the VERIFIED SESSION's own wallet — there is no read-anyone's-agents path and no
 // pause-anyone-else's-agent path.
 //
-// ⚠️ THE TRUST DISTINCTION IS THE POINT. The Researcher CANNOT move funds; the Executor CAN.
-// That is the single most important thing a user can know about an agent holding a wallet, so
-// it is a first-class field (`movesFunds`), not a sentence buried in a description. The page
-// leads with it.
+// ⚠️ THE TRUST DISTINCTION IS THE POINT — and it was WRONG here. This header used to read "The
+// Researcher CANNOT move funds; the Executor CAN." A call-graph audit found the Researcher signs
+// an EIP-3009 TransferWithAuthorization to buy data (_research.mjs:301 → payX402): real USDC
+// leaves the user's wallet. The truth is a THREE-way distinction, not two:
+//   Researcher    — moves funds, ONE way: buying data. No send/swap/bridge/Gateway/escrow path.
+//   Second opinion— moves nothing. Quotes and reads only. (Audited.)
+//   Executor      — moves funds every way: send, swap, bridge, Gateway.
+// It is the single most important thing a user can know about an agent holding a wallet, so it
+// is a first-class field (`movesFunds`) sourced from the registry — never re-derived in a view.
+// The page leads with it.
 export async function handler(event) {
   if (event.blobs) connectLambda(event);
 
@@ -65,8 +71,11 @@ export async function handler(event) {
       label: a.label,
       description: a.description,
       spends: a.spends,
-      // THE TRUST DISTINCTION, as data. Only the Executor can move the user's funds.
-      movesFunds: a.id === "executor",
+      // THE TRUST DISTINCTION, as data — now read from the registry, not re-derived here.
+      // This line used to say `a.id === "executor"`, which was FALSE: the Researcher buys data
+      // with the user's USDC (payX402 → EIP-3009, _research.mjs:301). Deriving a money claim in
+      // the VIEW is how it drifted from the code that moves the money; the registry owns it now.
+      movesFunds: a.movesFunds,
       // `paused: null` means we could not read the switch — shown as "unknown", never as
       // "running". (Enforcement fails CLOSED; this VIEW is merely honest about not knowing.)
       paused: states[ALL_AGENTS] === true ? true : states[a.id],
