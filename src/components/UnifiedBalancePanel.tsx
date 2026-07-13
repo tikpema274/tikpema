@@ -21,9 +21,17 @@ const go = (id: string) => {
 //
 // WRITE: the FUNDING control posts /api/agent-ub-deposit (auth-gated, cap-enforced
 // server-side BEFORE any tx). The user's OWN SCA funds its OWN unified balance from its own
-// plain Arc USDC — self-custody, nothing is sent to a third party. That deposit ALSO
-// performs the one-time delegate grant (server-side, inside ubDeposit, after the funds
-// check) — which is why the SCA must hold USDC first (hop A, on the My Agent page).
+// plain Arc USDC. That deposit ALSO performs the one-time delegate grant (server-side,
+// inside ubDeposit, after the funds check) — which is why the SCA must hold USDC first
+// (hop A, on the My Agent page).
+//
+// The COPY on this page is load-bearing, so treat it as such. "Nothing is sent to a third
+// party" is true of a deposit and is NOT the fact that matters here — the unified balance is
+// the one pocket the user cannot exit unilaterally. agent-withdraw returns balanceOf(SCA)
+// (plain USDC); Gateway funds are not in that number and need initiateWithdrawal +
+// withdrawalDelay + withdraw, server-side. So this page ranks the three pockets by what the
+// user can reclaim ALONE, and warns AT the deposit control, not below it. Reversibility is
+// the fact a user needs before committing money — never let reassurance crowd it out.
 export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWallet }) {
   // Funding form state.
   const [amount, setAmount] = useState("");
@@ -123,9 +131,78 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
       <div className="panel-eyebrow">Unified balance</div>
       <h2>One USDC balance, across chains.</h2>
       <div className="sub">
-        Your agent holds a single unified USDC balance that spans multiple chains
-        via Circle Gateway. This view reads it live across Arc Testnet and Base
+        This is the float <b>you chose to commit</b> to your agent: USDC you moved out of
+        your own wallet, into your agent's, and then into Circle Gateway — where it spans
+        multiple chains at once. This view reads it live across Arc Testnet and Base
         Sepolia — no seed phrase, no bridging to check a total.
+      </div>
+
+      {/* WHAT YOU CAN GET BACK — the reversibility ladder, stated before we ask for a
+          deposit rather than after.
+
+          This block exists because the copy it replaces did the opposite of its job: it
+          said the funds "stay owned by your agent — a deposit, not a transfer to anyone
+          else," which READS as reassurance while describing the ONE pocket the user
+          cannot exit on their own. The three pockets have genuinely different exits, and
+          the unified balance has the worst one:
+
+            wallet (MSCA)  → the user holds the key. Unilateral, always.
+            agent's plain  → agent-withdraw returns balanceOf(SCA). One button, no delay.
+            unified        → NOT balanceOf(SCA). Needs initiateWithdrawal +
+                             withdrawalDelay + withdraw, server-side. Not unilateral.
+
+          So we rank them by what the user can get back ALONE, and the amber line is the
+          same one that sits on the Withdraw button (MyAgentPanel) — one fact, one voice,
+          wherever the user meets it. Do not soften this to make the deposit easier. */}
+      <div
+        className="status"
+        style={{
+          marginTop: 14,
+          padding: "14px 16px",
+          background: "var(--field)",
+          border: "1px solid var(--line)",
+          borderRadius: 12,
+        }}
+      >
+        <div
+          style={{
+            color: "var(--muted)",
+            fontSize: "0.72rem",
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            marginBottom: 8,
+          }}
+        >
+          What you can get back · and how
+        </div>
+
+        <div className="sub" style={{ margin: 0 }}>
+          <b>Your wallet</b> — yours. You hold the key. Withdraw any time, even if the agent
+          is paused.
+        </div>
+        <div className="sub" style={{ margin: "6px 0 0" }}>
+          <b>Your agent's plain balance</b> — pull it back yourself with{" "}
+          <button className="linkbtn" onClick={() => go("agent")}>
+            Withdraw to my wallet
+          </button>
+          . One button, no delay, no permission needed.
+        </div>
+        {/* Name the ACTUAL number when we have one. "You cannot pull this back on your own"
+            lands differently at 12.50 USDC than in the abstract, and the user is entitled to
+            see the figure the sentence is about. Falls back to unqualified prose while the
+            balance is loading / signed-out — never to a "—" that reads as an error. */}
+        <div className="sub" style={{ margin: "6px 0 0", color: "var(--warn, #f0b866)" }}>
+          <b>Your unified balance</b>
+          {data && Number(data.total) > 0 && (
+            <>
+              {" "}
+              (<span className="mono">{data.total}</span> USDC)
+            </>
+          )}{" "}
+          — committed to your agent's float. Withdraw does not move it: releasing it from
+          Gateway is time-delayed and goes through the server. It is not lost, but it is the
+          one pocket you cannot pull back on your own.
+        </div>
       </div>
 
       {/* Balance card — same surface as the Dashboard "Agent unified balance" card.
@@ -266,10 +343,17 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
         >
           Fund the unified balance
         </div>
+        {/* The old copy here read "the funds stay owned by your agent — this is a deposit,
+            not a transfer to anyone else." True, and MISLEADING: it answers "is anyone
+            stealing this?" when the question the user actually needs answered is "can I get
+            it back?" Depositing is the one move on this page that TRADES AWAY a unilateral
+            exit. Say that at the point of commitment, not in the small print. */}
         <div className="sub" style={{ margin: "0 0 10px" }}>
-          Move USDC from your agent's wallet into its unified balance. The funds stay owned
-          by your agent — this is a deposit, not a transfer to anyone else. The first
-          deposit also authorizes the Gateway spender for you, once.
+          Move USDC from your agent's plain balance into its unified balance. Nobody else can
+          touch it — but this is a <b>commitment</b>, not a parking spot: once it is in
+          Gateway you can no longer pull it back yourself with Withdraw. Releasing it is
+          time-delayed and goes through the server. Deposit what you mean to give the agent
+          to work with.
         </div>
         {/* The deposit needs a session AND a provisioned wallet — the server enforces both
             (401 / 202). Disable rather than let the user fire a request that can't work. */}
