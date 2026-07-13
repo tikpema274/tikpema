@@ -179,14 +179,13 @@ function parametersFor(id) {
   return null;
 }
 
-// WHICH AGENTS CAN MOVE VALUE. Established by auditing the call graph, not by reading the
-// roster's marketing copy — which says the Researcher "cannot move your funds" and is WRONG:
-// it buys data with real USDC. An agent moves funds if ANY reachable path signs a transfer.
-//   researcher → TRUE  (payX402 → EIP-3009 TransferWithAuthorization, _research.mjs:301)
-//   analyst_b  → false (audited: reaches only estimateSwap/bridgeFee/valueInUsdc — quotes and
-//                       HTTP reads. No executor, no signer. Verified true.)
-//   executor   → TRUE  (send / swap / bridge / Gateway)
-const MOVES_FUNDS = new Set([AGENT.RESEARCHER, AGENT.EXECUTOR]);
+// WHICH AGENTS CAN MOVE VALUE — read from the REGISTRY (_agents.mjs), never re-derived here.
+//
+// This file briefly kept its own `new Set([RESEARCHER, EXECUTOR])`, which was a SECOND source of
+// truth for a money claim sitting in a view — the exact pattern that let agents.mjs drift into
+// telling users the Researcher could not move their funds. One registry owns it; every view
+// reads it. A second copy that happens to agree today is still the bug, just not yet visible.
+const movesFunds = (entry) => entry.movesFunds === true;
 
 // The things no operator can dial. Stated as prose because they are guarantees, not values.
 function invariantsFor(id) {
@@ -255,9 +254,9 @@ export async function handler(event) {
     agent: {
       id: entry.id,
       label: entry.label,
-      // TRUE for the Researcher too — it signs an EIP-3009 transfer to buy data. Bounded, but
-      // it moves real USDC out of your wallet, so it says so.
-      movesFunds: MOVES_FUNDS.has(id),
+      // From the registry. TRUE for the Researcher too — it signs an EIP-3009 transfer to buy
+      // data. Bounded, but it moves real USDC out of your wallet, so it says so.
+      movesFunds: movesFunds(entry),
     },
 
     // ── THE LABEL. Unmissable, and the first thing a reader hits. ──
