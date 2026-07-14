@@ -54,12 +54,17 @@ type Roster = {
 const money = (n?: number | null) => (n === undefined || n === null ? "—" : n.toFixed(n < 1 ? 4 : 2));
 const time = (ts?: string) => (ts ? new Date(ts).toLocaleTimeString() : "");
 
-// One short line per agent for the card. The full description lives in the expanded detail —
-// a roster that makes you read a paragraph per agent is not a roster.
-const ONE_LINER: Record<string, string> = {
-  researcher: "Retrieves sources and writes your brief. Buys data within its allowance.",
-  executor: "Sends, swaps, bridges and pays — only what you approved.",
-};
+// ⚠️ REMOVED: a hardcoded ONE_LINER map that rendered INSTEAD of the roster's own `spends`
+// string (`ONE_LINER[a.id] ?? a.spends` — the map always won for researcher/executor).
+//
+// It was a SECOND source of truth for a money claim, and it went stale exactly as you would
+// expect: the registry was corrected to say the Researcher spends your USDC, the API served
+// that, the ⚠ badge flipped to "Can move your money" — and the card underneath still read
+// "Buys data within its allowance", because it never consulted the API at all. The corrected
+// copy was only visible if you expanded Details.
+//
+// The card now renders `a.spends` straight from the roster. One registry owns what an agent
+// does with your money; every view reads it. A duplicate that agrees today is still the bug.
 
 export default function AgentsPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const [data, setData] = useState<Roster | null>(null);
@@ -273,8 +278,10 @@ function RosterCard({
         {a.movesFunds ? "⚠ Can move your money" : "🔒 Cannot move your money"}
       </div>
 
-      {/* 3. ONE LINE — the long description lives in the detail view. */}
-      <div className="qd">{ONE_LINER[a.id] ?? a.spends}</div>
+      {/* 3. ONE LINE — from the ROSTER, never a local copy. The long description lives in the
+             detail view. This is the line that told users the Researcher could not move their
+             funds; it says what the code does now because it reads the same source the code does. */}
+      <div className="qd">{a.spends}</div>
 
       {/* 4. TODAY */}
       <div className="qd" style={{ color: "var(--paper)" }}>
