@@ -24,6 +24,8 @@ import { compareAnalyses } from "./_synthesis.mjs";
 import { research } from "./_research.mjs";
 import { publicClient } from "./_predict.mjs";
 import { requireInternal, internalToken } from "./_auth.mjs";
+import { assertNotPaused } from "./_pause.mjs";
+import { AGENT } from "./_agents.mjs";
 
 // Research-brief prompt — NOT the prediction-market analyst prompt. The agent is
 // a paid research analyst; the deliverable must be evidence-backed and cite real
@@ -304,16 +306,41 @@ export async function handler(event) {
     // A HARD DISAGREEMENT KILLS THE PROPOSAL. If B refuses (no route, rate far off fair, fee
     // eats the amount), the action is NOT proposed — whatever A argued. A confidence score
     // would not have stopped a bad action; a refusal does.
+    // ── THE KILL SWITCH FOR THE SECOND ANALYST. ──────────────────────────────────────────
+    // This check did not exist. The Agents page OFFERED a pause toggle for the Second opinion
+    // and NOTHING HONOURED IT — analystB ran regardless. A control the UI presents and the code
+    // ignores is worse than no control: the user believes they stopped the agent, and it kept
+    // running. (Found while auditing metadata about to be recorded on-chain; `kill_switch: true`
+    // would have made a dead switch permanent.)
+    //
+    // PAUSING THE REVIEWER MUST NOT LET AN UNREVIEWED PROPOSAL THROUGH. So a paused B maps to
+    // `cannot_verify` — the SAME state as B crashing — which _synthesis.mjs already treats as
+    // "no proposal at all" (proposalSurvives: false). Fail-closed, and it falls out of the
+    // existing design rather than bolting a new branch onto it: pausing the second analyst
+    // disables PROPOSALS, it does not silently disable the CHECK on them.
+    //
+    // The brief is unaffected. Only the proposal dies. That is the honest degradation.
     let secondOpinion = null;
     let synthesis = null;
-    try {
-      secondOpinion = await analystB({ proposal: decision.proposal, walletAddress });
+    const bPaused = await assertNotPaused({ owner: walletAddress, agent: AGENT.ANALYST_B });
+    if (bPaused) {
+      console.log(`[analyst-b] PAUSED: ${bPaused} — no second opinion, so NO proposal.`);
+      secondOpinion = {
+        verdict: "cannot_verify",
+        headline: `The second analyst is paused (${bPaused}), so this action could not be independently checked.`,
+        facts: [],
+      };
       synthesis = compareAnalyses(decision.proposal, secondOpinion);
-    } catch (e) {
-      // B failing is NOT a licence to act on one analyst. Unverified ⇒ no proposal.
-      console.warn(`[analyst-b] failed: ${e.message}`);
-      secondOpinion = { verdict: "cannot_verify", headline: `The second analyst could not run (${e.message}).`, facts: [] };
-      synthesis = compareAnalyses(decision.proposal, secondOpinion);
+    } else {
+      try {
+        secondOpinion = await analystB({ proposal: decision.proposal, walletAddress });
+        synthesis = compareAnalyses(decision.proposal, secondOpinion);
+      } catch (e) {
+        // B failing is NOT a licence to act on one analyst. Unverified ⇒ no proposal.
+        console.warn(`[analyst-b] failed: ${e.message}`);
+        secondOpinion = { verdict: "cannot_verify", headline: `The second analyst could not run (${e.message}).`, facts: [] };
+        synthesis = compareAnalyses(decision.proposal, secondOpinion);
+      }
     }
 
     let proposal = null;
