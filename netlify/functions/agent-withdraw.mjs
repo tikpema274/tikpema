@@ -33,11 +33,28 @@
 // What we KEEP: session auth (401 without it) and the live balance pre-check.
 //
 // ── WHAT THIS DOES NOT COVER ─────────────────────────────────────────────────────────
-// balanceOf(SCA) is the SCA's PLAIN USDC only. USDC the agent has deposited into the
-// Circle Gateway unified balance is NOT here and is NOT retrievable by this endpoint —
-// that needs initiateWithdrawal + withdraw on the GatewayWallet, after `withdrawalDelay`
-// blocks. We report the plain balance we can actually move, and the UI says so out loud.
-// Do not let a user discover this by finding money missing.
+// balanceOf(SCA) is the SCA's PLAIN USDC only. USDC the agent has deposited into the Circle
+// Gateway unified balance is NOT here, and — say this precisely, because getting it slightly
+// wrong here poisoned the whole UI — IT CANNOT BE RETURNED TO THE USER AT ALL TODAY.
+//
+// ⚠️ THIS COMMENT WAS THE SOURCE OF A FALSE CLAIM THAT REACHED PRODUCTION. It used to say the
+// Gateway balance "needs initiateWithdrawal + withdraw on the GatewayWallet, after
+// `withdrawalDelay` blocks" — describing the CONTRACT's capability. Every downstream reader
+// (Dashboard, UnifiedBalancePanel, _arc.mjs, agent-parameters) took that to mean a release
+// path EXISTS and is merely slow, and shipped copy telling users their money could be
+// released, just not instantly. IT CANNOT. The distinction:
+//
+//   Circle's GatewayWallet CONTRACT  → does expose a delayed-withdrawal mechanism.
+//   THIS APPLICATION                 → implements NO part of it. There is no
+//                                      initiateWithdrawal call, no withdraw call, no delay
+//                                      handling, no endpoint, anywhere in this codebase.
+//                                      _gateway.mjs holds an address; the only Gateway write
+//                                      path (_ubspend.mjs) SPENDS the balance cross-chain.
+//
+// And the user cannot reach the contract themselves: the agent wallet is a dev-controlled SCA,
+// so only the server can move it. So: deposited Gateway funds are SPENDABLE CROSS-CHAIN ONLY.
+// A capability the contract has and we never built is not a capability the user has. Do not
+// describe it as one, and do not let a user discover this by finding money missing.
 import { connectLambda } from "@netlify/blobs";
 import { formatUnits } from "viem";
 import { json, parseBody, ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";

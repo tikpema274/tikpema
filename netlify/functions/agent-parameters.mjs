@@ -196,10 +196,13 @@ function parametersFor(id) {
           isAgentCap: false,
           why: "Footgun guard on the one irreversible move in the app.",
           detail:
-            "A Gateway deposit cannot be unilaterally reversed — release is time-delayed and goes " +
-            "through the server — so a mistyped DEPOSIT is not recoverable the way a mistyped " +
-            "WITHDRAWAL is (a user can simply redo a withdrawal). This bounds the blast radius of " +
-            "an extra zero. That is all it does.",
+            "A Gateway deposit CANNOT BE UNDONE BY ANYONE. There is no implemented path that returns " +
+            "unified-balance funds to the user — the only Gateway write path spends the balance " +
+            "cross-chain, and the agent wallet is a dev-controlled SCA the user cannot move directly. " +
+            "So a mistyped DEPOSIT is unrecoverable, where a mistyped WITHDRAWAL is simply redone. " +
+            "This bounds the blast radius of an extra zero. That is all it does.",
+          irreversible: true,
+          canFundsBeReturnedToTheUser: "NO — no implemented path returns them. Spendable cross-chain only.",
           notAnAgentCap:
             "NO AGENT PATH CAN REACH THE DEPOSIT ENDPOINT. `ub_deposit` is not in the executor's " +
             "action vocabulary at all — _actions.mjs knows transfer_usdc / pay_for_service / " +

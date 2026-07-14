@@ -109,9 +109,10 @@ const BALANCE_POLL_MS = 30_000;
 //   1. Your wallet     (passkey MSCA)  w.address / w.usdcBalance   → they hold the key.
 //   2. Agent's wallet  (dev SCA)       w.agentWallet.balance       → Withdraw, any time,
 //                                                                    even if paused.
-//   3. Unified balance (Gateway)       useGatewayBalance           → server-released,
-//                                                                    time-delayed. NOT
-//                                                                    unilateral.
+//   3. Unified balance (Gateway)       useGatewayBalance           → NO WAY OUT. Cannot be
+//                                                                    withdrawn to the user by
+//                                                                    ANY path. Spendable
+//                                                                    cross-chain only.
 //
 // Below, those three render left-to-right in the order money actually flows, each wearing
 // its reversibility ON ITS FACE. The badge idiom is lifted verbatim from AgentsPanel
@@ -355,9 +356,11 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
 
                 {/* ── THE AMBER LINE. IT TRAVELS WITH THE WITHDRAW FORM, ALWAYS. ──────────
                     Withdraw returns the agent's PLAIN USDC — balanceOf(SCA) — and NOTHING
-                    that is sitting in the Gateway unified balance. That money is not lost,
-                    but it needs initiateWithdrawal + withdrawalDelay + withdraw, server-side,
-                    and it will NOT arrive with this button. Say it here, next to the button,
+                    that is sitting in the Gateway unified balance. This comment used to
+                    reassure that the money was merely slow to retrieve, via a server-side
+                    contract call — DESCRIBING A MECHANISM THIS APP NEVER IMPLEMENTED. No
+                    endpoint returns Gateway funds to the user. There is no way to get it
+                    back. It can only be spent cross-chain. Say it here, next to the button,
                     BEFORE the user clicks and finds money missing. A Withdraw that silently
                     leaves funds behind is a lie, and this line is what stops it being one.
                     If this disclosure is ever separated from the button, the trap is back. */}
@@ -365,9 +368,9 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
                   <div className="qd" style={{ color: "var(--warn)" }}>
                     <b>Not included:</b>{" "}
                     <span className="mono">{unified.status === "ready" ? unified.total : "—"}</span>{" "}
-                    USDC is in your unified balance. Withdraw does not move it — it has to be
-                    released from Gateway first, and that release is time-delayed. Not lost,
-                    but it won't arrive with this button.
+                    USDC is in your unified balance. Withdraw does not move it — and{" "}
+                    <b>nothing can return it to you.</b> Unified-balance funds cannot be
+                    withdrawn; they can only be spent cross-chain.
                   </div>
                 )}
                 {wdErr && (
@@ -384,7 +387,7 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
               </Pocket>
 
               {/* 3. THE UNIFIED BALANCE (Circle Gateway) — the ONLY pocket the user cannot
-                     exit unilaterally, so it wears the amber badge. Keeps all four states
+                     exit AT ALL (no endpoint returns it), so it wears the amber badge. Keeps all four states
                      (signed-out / provisioning / loading / error) rather than rendering a
                      broken card or a bare "—" that reads as a fault. */}
               <Pocket

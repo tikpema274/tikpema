@@ -27,9 +27,11 @@ const go = (id: string) => {
 //
 // The COPY on this page is load-bearing, so treat it as such. "Nothing is sent to a third
 // party" is true of a deposit and is NOT the fact that matters here — the unified balance is
-// the one pocket the user cannot exit unilaterally. agent-withdraw returns balanceOf(SCA)
-// (plain USDC); Gateway funds are not in that number and need initiateWithdrawal +
-// withdrawalDelay + withdraw, server-side. So this page ranks the three pockets by what the
+// the one pocket THE USER CANNOT EXIT AT ALL. agent-withdraw returns balanceOf(SCA) (plain
+// USDC); Gateway funds are not in that number, and NOTHING in this codebase returns them.
+// (Comments here used to claim they "need initiateWithdrawal + withdrawalDelay + withdraw,
+// server-side" — describing a mechanism that IS NOT IMPLEMENTED. No such endpoint exists.)
+// So this page ranks the three pockets by what the
 // user can reclaim ALONE, and warns AT the deposit control, not below it. Reversibility is
 // the fact a user needs before committing money — never let reassurance crowd it out.
 export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWallet }) {
@@ -148,8 +150,9 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
 
             wallet (MSCA)  → the user holds the key. Unilateral, always.
             agent's plain  → agent-withdraw returns balanceOf(SCA). One button, no delay.
-            unified        → NOT balanceOf(SCA). Needs initiateWithdrawal +
-                             withdrawalDelay + withdraw, server-side. Not unilateral.
+            unified        → NOT balanceOf(SCA). NO EXIT AT ALL. No endpoint returns it, and
+                             the SCA is dev-controlled so the user cannot act directly.
+                             Spendable cross-chain only.
 
           So we rank them by what the user can get back ALONE, and the amber line is the
           same one that sits on the Withdraw button (MyAgentPanel) — one fact, one voice,
@@ -199,9 +202,9 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
               (<span className="mono">{data.total}</span> USDC)
             </>
           )}{" "}
-          — committed to your agent's float. Withdraw does not move it: releasing it from
-          Gateway is time-delayed and goes through the server. It is not lost, but it is the
-          one pocket you cannot pull back on your own.
+          — committed to your agent's float. Withdraw does not move it, and nothing else will:{" "}
+          <b>money here cannot be returned to you.</b> It can only be spent cross-chain. This is
+          the one pocket with no way out.
         </div>
       </div>
 
@@ -343,17 +346,26 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
         >
           Fund the unified balance
         </div>
-        {/* The old copy here read "the funds stay owned by your agent — this is a deposit,
-            not a transfer to anyone else." True, and MISLEADING: it answers "is anyone
-            stealing this?" when the question the user actually needs answered is "can I get
-            it back?" Depositing is the one move on this page that TRADES AWAY a unilateral
-            exit. Say that at the point of commitment, not in the small print. */}
+        {/* ⚠️ THIS COPY HAS BEEN WRONG TWICE. Get it right.
+            v1: "the funds stay owned by your agent — not a transfer to anyone else." True and
+                MISLEADING: it answered "is anyone stealing this?" when the question the user
+                needs answered is "CAN I GET IT BACK?"
+            v2: said the money could be released, just slowly, via the server. ALSO FALSE — it
+                implied a release path EXISTS and merely costs you patience. It does not exist.
+                There is no initiateWithdrawal, no gatewayWithdraw, no delay constant anywhere
+                in the codebase; _gateway.mjs defines only an address, and the sole Gateway
+                write path (_ubspend.mjs) SPENDS the balance cross-chain. agent-withdraw.mjs
+                says it outright: Gateway funds are "NOT retrievable by this endpoint". And the
+                user cannot route around us — the agent wallet is a Circle DEV-CONTROLLED SCA,
+                so only the server can move it at all.
+            The answer to "can I get it back?" is NO. Say exactly that, at the point of
+            commitment. No reassurance, no hedge, nothing that hints at a future path. */}
         <div className="sub" style={{ margin: "0 0 10px" }}>
-          Move USDC from your agent's plain balance into its unified balance. Nobody else can
-          touch it — but this is a <b>commitment</b>, not a parking spot: once it is in
-          Gateway you can no longer pull it back yourself with Withdraw. Releasing it is
-          time-delayed and goes through the server. Deposit what you mean to give the agent
-          to work with.
+          Move USDC from your agent's plain balance into its unified balance.{" "}
+          <b>This is one-way. Money in the unified balance cannot be withdrawn back to you —
+          not by you, not by us. There is no path that returns it.</b>{" "}
+          It can only be <i>spent</i>: sent cross-chain by your agent. Deposit only what you
+          intend the agent to spend.
         </div>
         {/* The deposit needs a session AND a provisioned wallet — the server enforces both
             (401 / 202). Disable rather than let the user fire a request that can't work. */}

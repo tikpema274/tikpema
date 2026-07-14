@@ -144,10 +144,16 @@ export const ubSpendCapUsdc = () => {
 // propose it, agent-act cannot decide it, no plan can contain it. The sole caller is
 // UnifiedBalancePanel.tsx, on a user clicking "Fund" with an amount they typed.
 //
-// IT IS A FOOTGUN GUARD ON THE ONE IRREVERSIBLE MOVE IN THE APP. A Gateway deposit cannot be
-// unilaterally reversed: release is time-delayed and goes through the server, so unlike a
-// mistyped WITHDRAWAL (which the user can simply redo) a mistyped DEPOSIT is not recoverable
-// by the user alone. This bounds the blast radius of a typo — an extra zero, a slipped
+// IT IS A FOOTGUN GUARD ON THE ONE IRREVERSIBLE MOVE IN THE APP — and "irreversible" is meant
+// literally. A Gateway deposit CANNOT BE UNDONE BY ANYONE. There is no implemented path that
+// returns unified-balance funds to the user: no initiateWithdrawal, no gatewayWithdraw, no
+// delay constant anywhere in the codebase. _gateway.mjs defines only an address; the sole
+// Gateway write path (_ubspend.mjs) SPENDS the balance cross-chain. agent-withdraw.mjs states
+// it plainly: Gateway funds are "NOT retrievable by this endpoint". The user cannot route
+// around the server either — the agent wallet is a Circle DEV-CONTROLLED SCA.
+//
+// So unlike a mistyped WITHDRAWAL (which the user simply redoes), a mistyped DEPOSIT is
+// unrecoverable, full stop. This bounds the blast radius of a typo — an extra zero, a slipped
 // decimal. That is all it does. It does not bound an agent, and it is NOT a Circle/Gateway
 // protocol limit: no such limit exists (see _ubdeposit.mjs / _gateway.mjs).
 //

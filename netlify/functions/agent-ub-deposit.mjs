@@ -61,11 +61,14 @@ import { publicClient } from "./_predict.mjs";
 // it is not an agent action in the ledger either, so pausing an agent has nothing to pause.
 //
 // THE ONE BOUND THAT STAYS — and it is not an agent bound. ubDepositMaxPerTxUsdc is a FOOTGUN
-// GUARD on the one irreversible move in the app: a Gateway deposit cannot be unilaterally
-// reversed (release is time-delayed and goes through the server), so a mistyped DEPOSIT is not
-// recoverable the way a mistyped WITHDRAWAL is — the user can simply redo a withdrawal. It
-// bounds the blast radius of an extra zero. Nothing more. It is NOT a Circle/Gateway protocol
-// limit; no such limit exists. Full reasoning, including why the value is 100, in _arc.mjs.
+// GUARD on the one irreversible move in the app. "Irreversible" is literal: a Gateway deposit
+// CANNOT BE UNDONE BY ANYONE. No implemented path returns unified-balance funds to the user —
+// no initiateWithdrawal, no gatewayWithdraw, no delay constant anywhere. The only Gateway write
+// path (_ubspend.mjs) SPENDS the balance cross-chain, and agent-withdraw.mjs says outright that
+// Gateway funds are "NOT retrievable by this endpoint". So a mistyped DEPOSIT is unrecoverable,
+// where a mistyped WITHDRAWAL is simply redone. This bounds the blast radius of an extra zero.
+// Nothing more. It is NOT a Circle/Gateway protocol limit; no such limit exists. Full reasoning,
+// including why the value is 100, in _arc.mjs.
 
 const BALANCE_OF_ABI = [
   {
