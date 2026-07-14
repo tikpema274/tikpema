@@ -5,7 +5,7 @@ import {
   swapCapUsdc,
   bridgeCapUsdc,
   ubSpendCapUsdc,
-  ubDepositCapUsdc,
+  ubDepositMaxPerTxUsdc,
   ubSpendFloorUsdc,
 } from "./_arc.mjs";
 import { AGENT, AGENTS } from "./_agents.mjs";
@@ -169,7 +169,7 @@ function parametersFor(id) {
         // A MINIMUM, not a maximum: the Forwarding Service fee is flat (~0.2 USDC), so a spend
         // below the floor is structurally uneconomical and is rejected. Valid: floor ≤ x ≤ cap.
         cap("UB spend floor", ubSpendFloorUsdc, "single cross-chain spend — REJECTED BELOW this", "minimum"),
-        cap("UB deposit cap", ubDepositCapUsdc, "single deposit into the agent's own unified balance"),
+        cap("UB deposit cap", ubDepositMaxPerTxUsdc, "single deposit into the agent's own unified balance"),
       ],
       unifiedBalanceNote:
         "Valid UB spend is floor ≤ amount ≤ cap. The floor is a MINIMUM (a smaller spend is refused, " +

@@ -135,19 +135,51 @@ export const ubSpendCapUsdc = () => {
   return n;
 };
 
-// Per-UB-DEPOSIT cap (funding the agent's OWN unified balance: plain Arc USDC → the
-// Gateway Wallet contract, credited to the SCA). Same fail-closed parse as the others.
-// CRITICAL: _ubdeposit.mjs is UNCAPPED, so the wrapper (agent-ub-deposit.mjs) MUST call
-// this and reject BEFORE approving/depositing — reaching the executor unguarded would
-// bypass the cap (the swap-cap trap). No FLOOR: unlike the cross-chain spend, a deposit
-// pays no flat forwarder fee, so small deposits are not uneconomical.
-export const ubDepositCapUsdc = () => {
-  const raw = process.env.AGENT_UB_DEPOSIT_CAP_USDC;
-  if (raw === undefined || raw === "") return 25; // conservative default, matches the bridge cap
+// Max USDC a user may commit to their unified balance IN ONE TRANSACTION.
+//
+// ⚠️ THIS IS NOT AN AGENT GUARDRAIL. It reads like the caps above it and it is not one of them.
+// No agent path can reach the deposit endpoint: `ub_deposit` is not in the executor's action
+// vocabulary at all (_actions.mjs knows transfer_usdc / pay_for_service / swap_tokens /
+// bridge_usdc and throws `unknown step type` on anything else). The proposal loop cannot
+// propose it, agent-act cannot decide it, no plan can contain it. The sole caller is
+// UnifiedBalancePanel.tsx, on a user clicking "Fund" with an amount they typed.
+//
+// IT IS A FOOTGUN GUARD ON THE ONE IRREVERSIBLE MOVE IN THE APP. A Gateway deposit cannot be
+// unilaterally reversed: release is time-delayed and goes through the server, so unlike a
+// mistyped WITHDRAWAL (which the user can simply redo) a mistyped DEPOSIT is not recoverable
+// by the user alone. This bounds the blast radius of a typo — an extra zero, a slipped
+// decimal. That is all it does. It does not bound an agent, and it is NOT a Circle/Gateway
+// protocol limit: no such limit exists (see _ubdeposit.mjs / _gateway.mjs).
+//
+// It was previously named `ubDepositCapUsdc` and justified by "the swap-cap trap" — an
+// argument about an AGENT action escaping its bound, transplanted here without re-deriving
+// whether the premise held. It did not. The old default (25) was likewise inherited from the
+// BRIDGE cap, which is an agent action moving funds off-chain — an arbitrary number here.
+//
+// VALUE: 100. The largest LEGITIMATE single commitment is roughly a day's working float —
+// PERIOD_CEILING_USDC is 60, so 100 funds a full day's ceiling plus headroom IN ONE CLICK.
+// At 25 a user committing 100 had to deposit four times, clicking through the irreversibility
+// warning on each — and a warning you dismiss four times in a row is a warning you have
+// stopped reading. Warning fatigue is itself a safety failure. No single number can catch
+// every typo (a 10 → 100 slip still passes; the cap bounds blast radius, it cannot infer
+// intent), so this is the SMALLEST bound that does not obstruct a legitimate commitment.
+//
+// Fail-closed parse, exactly as before — that part was always right: a garbled value refuses
+// the deposit, it never widens the bound.
+//
+// No FLOOR: unlike the cross-chain SPEND, a deposit pays no flat forwarder fee, so small
+// deposits are not uneconomical.
+export const ubDepositMaxPerTxUsdc = () => {
+  // Read the new name; fall back to the legacy one so a deploy that lands BEFORE the Netlify
+  // env rename cannot silently drop to the code default and quietly change the bound. (Caps
+  // come from the deployed env, not from code defaults — a default that looks plausible is
+  // the most dangerous kind of wrong.)
+  const raw = process.env.AGENT_UB_DEPOSIT_MAX_PER_TX_USDC ?? process.env.AGENT_UB_DEPOSIT_CAP_USDC;
+  if (raw === undefined || raw === "") return 100; // a day's working float (ceiling 60) + headroom
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) {
     throw new Error(
-      `AGENT_UB_DEPOSIT_CAP_USDC is misconfigured (${JSON.stringify(raw)}); refusing to deposit`
+      `AGENT_UB_DEPOSIT_MAX_PER_TX_USDC is misconfigured (${JSON.stringify(raw)}); refusing to deposit`
     );
   }
   return n;

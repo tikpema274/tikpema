@@ -1,7 +1,7 @@
 import { connectLambda, getStore } from "@netlify/blobs";
 import { formatUnits } from "viem";
 import crypto from "node:crypto";
-import { json, parseBody, ubDepositCapUsdc, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
+import { json, parseBody, ubDepositMaxPerTxUsdc, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 import { publicClient } from "./_predict.mjs";
@@ -25,12 +25,47 @@ import { publicClient } from "./_predict.mjs";
 // PER-USER: the depositor is the VERIFIED SESSION's own agent SCA (ensureOwnerWallet) —
 // never env, never the request body. You can only deposit into the wallet your session owns.
 //
-// ⚠️ THE CAP IS ENFORCED HERE, BEFORE the background worker is even invoked. _ubdeposit.mjs
-// is UNCAPPED; reaching it from an unguarded path would bypass the cap (the swap-cap trap).
-// Reject-not-clamp: an over-cap request 400s and NOTHING is kicked off.
+// ⚠️ THE PER-TX MAX IS ENFORCED HERE, BEFORE the background worker is even invoked, and
+// _ubdeposit.mjs itself enforces nothing — so every path to it must carry the bound.
+// Reject-not-clamp: an over-max request 400s and NOTHING is kicked off.
+// It is a FOOTGUN GUARD, not an agent guardrail — see ubDepositMaxPerTxUsdc in _arc.mjs and
+// the pause note below.
 //
 // NOTE: a deposit is NOT ledgered against the day-ceiling — it moves your own USDC into your
 // own Gateway balance (self-custody), not a spend. The SPEND side draws the ceiling down.
+//
+// ── WHY THIS DOES NOT CALL assertNotPaused — DELIBERATE, NOT AN OMISSION ─────────────
+// This is the USER moving their own float into their own Gateway balance. It is NOT an agent
+// action, and the pause/halt switches must not touch it. The twin of agent-withdraw: that is
+// the user RECLAIMING their float, this is the user COMMITTING it. Both are the user's own
+// money moving between the user's own pockets, and neither is the agent deciding anything.
+//
+// Pause and halt bind what the AGENT MAY SPEND. They must never bind what the USER MAY
+// COMMIT OR RECLAIM. A paused agent must not be able to trap the user's money (agent-withdraw's
+// argument) — and, symmetrically, it must not be able to freeze the user out of funding the
+// float they chose to give it. Pausing the agent stops the agent; it does not lock the door,
+// in either direction.
+//
+// NO AGENT PATH CAN REACH THIS ENDPOINT. `ub_deposit` is not in the executor's action
+// vocabulary at all — _actions.mjs knows exactly four step types (transfer_usdc,
+// pay_for_service, swap_tokens, bridge_usdc) and throws `unknown step type` on anything else.
+// The proposal loop cannot propose it, the plan executor cannot execute it, agent-act cannot
+// decide it, the researcher never touches it. A model could not emit it if it tried. Verified
+// by grep across _actions / _proposal / agent-act / agent-execute-plan / _research / _analystb:
+// zero references.
+//
+// THE SOLE CALLER is UnifiedBalancePanel.tsx, on a user clicking "Fund" with an amount they
+// typed themselves. One caller, one click, one human.
+//
+// Consistent with that: this path also records NO recordSpend and NO AGENT.* attribution —
+// it is not an agent action in the ledger either, so pausing an agent has nothing to pause.
+//
+// THE ONE BOUND THAT STAYS — and it is not an agent bound. ubDepositMaxPerTxUsdc is a FOOTGUN
+// GUARD on the one irreversible move in the app: a Gateway deposit cannot be unilaterally
+// reversed (release is time-delayed and goes through the server), so a mistyped DEPOSIT is not
+// recoverable the way a mistyped WITHDRAWAL is — the user can simply redo a withdrawal. It
+// bounds the blast radius of an extra zero. Nothing more. It is NOT a Circle/Gateway protocol
+// limit; no such limit exists. Full reasoning, including why the value is 100, in _arc.mjs.
 
 const BALANCE_OF_ABI = [
   {
@@ -54,7 +89,7 @@ export async function handler(event) {
   if (!(amount > 0)) return json(400, { error: "amountUsdc must be > 0" });
 
   // ── THE CAP — before anything is provisioned or kicked off. Reject, never clamp. ──
-  const cap = ubDepositCapUsdc();
+  const cap = ubDepositMaxPerTxUsdc();
   if (amount > cap) {
     return json(400, { error: `exceeds per-deposit limit of ${cap} USDC`, cap });
   }

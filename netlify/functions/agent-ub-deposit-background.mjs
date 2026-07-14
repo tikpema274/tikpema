@@ -1,5 +1,5 @@
 import { connectLambda, getStore } from "@netlify/blobs";
-import { ubDepositCapUsdc } from "./_arc.mjs";
+import { ubDepositMaxPerTxUsdc } from "./_arc.mjs";
 import { requireInternal } from "./_auth.mjs";
 import { ubDeposit } from "./_ubdeposit.mjs";
 
@@ -68,7 +68,7 @@ export async function handler(event) {
   const depositor = rec.walletAddress;
 
   // ── THE CAP, re-checked. Defence in depth: the executor below is uncapped. ──
-  const cap = ubDepositCapUsdc();
+  const cap = ubDepositMaxPerTxUsdc();
   if (!(amount > 0) || amount > cap) {
     await patch({ status: "failed", error: `amount ${amount} outside the per-deposit limit of ${cap} USDC`, fundsMoved: false });
     return { statusCode: 400, body: "amount outside cap" };
