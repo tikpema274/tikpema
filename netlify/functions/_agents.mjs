@@ -59,7 +59,11 @@ export const AGENTS = [
       "markets are heading, and it cannot be swayed by a confident article. If it refuses — no " +
       "route, or a rate far off fair value — the action is NOT proposed, whatever the first " +
       "analyst argued.",
-    spends: "Reads free market data and prices the chain. Cannot move your funds.",
+    // The 🔒 badge already says "cannot move your money" — so this line should carry what the
+    // badge does NOT: what the agent is actually FOR. "Buys nothing" is the stronger claim
+    // anyway: the Researcher moves money without sending anything, so "cannot move your funds"
+    // is no longer the interesting distinction between them. Spending is.
+    spends: "Reads market data and live chain prices to check the Researcher's proposals. Buys nothing.",
   },
   {
     id: AGENT.EXECUTOR,
