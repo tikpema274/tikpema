@@ -160,20 +160,57 @@ function parametersFor(id) {
         cap("Swap cap", swapCapUsdc, "single swap (USDC-equivalent, not raw amountIn)"),
         cap("Bridge cap", bridgeCapUsdc, "single bridge (funds leave Arc)"),
       ],
-      // Unified Balance (Gateway) is a SEPARATE movement surface with its own bounds — the
-      // underlying executors (_ubspend.mjs / _ubdeposit.mjs) are UNCAPPED, so these are the
-      // only thing standing between an instruction and the funds. Grouped apart from
-      // movementCaps because a send/swap/bridge cap does NOT bound them.
+      // Unified Balance (Gateway) SPEND — a separate movement surface with its own bounds. The
+      // underlying executor (_ubspend.mjs) enforces nothing itself, so these are the only thing
+      // standing between an instruction and the funds. Grouped apart from movementCaps because
+      // a send/swap/bridge cap does NOT bound them.
+      //
+      // ⚠️ THE UB *DEPOSIT* BOUND USED TO BE LISTED HERE. IT WAS WRONG. A deposit is not an
+      // Executor action at all — no agent path can reach it — so publishing it as an Executor
+      // cap told the reader the agent is bounded when depositing, which implies the agent can
+      // deposit. It cannot. Moved to `userControls` below.
       unifiedBalanceCaps: [
         cap("UB spend cap", ubSpendCapUsdc, "single cross-chain spend of the unified balance"),
         // A MINIMUM, not a maximum: the Forwarding Service fee is flat (~0.2 USDC), so a spend
         // below the floor is structurally uneconomical and is rejected. Valid: floor ≤ x ≤ cap.
         cap("UB spend floor", ubSpendFloorUsdc, "single cross-chain spend — REJECTED BELOW this", "minimum"),
-        cap("UB deposit cap", ubDepositMaxPerTxUsdc, "single deposit into the agent's own unified balance"),
       ],
       unifiedBalanceNote:
         "Valid UB spend is floor ≤ amount ≤ cap. The floor is a MINIMUM (a smaller spend is refused, " +
-        "not allowed) — the flat forwarder fee makes small cross-chain spends uneconomical.",
+        "not allowed) — the flat forwarder fee makes small cross-chain spends uneconomical. These two " +
+        "DO bind the Executor: it can spend the unified balance, and these bound that spend.",
+
+      // ── NOT AN AGENT CAP. A bound on what the USER may do, listed here only because this is
+      // where a reader comes looking for "what bounds the money". ──────────────────────────
+      userControls: [
+        {
+          // cap() carries the fail-closed contract: a garbled env surfaces as
+          // status:"misconfigured" + enforced:"REFUSED", never as a bare null that a reader
+          // could mistake for "no limit". Same guarantee as every agent cap above.
+          ...cap(
+            "UB deposit — max per transaction",
+            ubDepositMaxPerTxUsdc,
+            "single deposit the USER makes into their own unified balance"
+          ),
+          boundsWhom: "THE USER, not the agent",
+          isAgentCap: false,
+          why: "Footgun guard on the one irreversible move in the app.",
+          detail:
+            "A Gateway deposit cannot be unilaterally reversed — release is time-delayed and goes " +
+            "through the server — so a mistyped DEPOSIT is not recoverable the way a mistyped " +
+            "WITHDRAWAL is (a user can simply redo a withdrawal). This bounds the blast radius of " +
+            "an extra zero. That is all it does.",
+          notAnAgentCap:
+            "NO AGENT PATH CAN REACH THE DEPOSIT ENDPOINT. `ub_deposit` is not in the executor's " +
+            "action vocabulary at all — _actions.mjs knows transfer_usdc / pay_for_service / " +
+            "swap_tokens / bridge_usdc and throws `unknown step type` on anything else. No proposal " +
+            "can propose it, no plan can contain it, agent-act cannot decide it. The sole caller is " +
+            "the Fund button on the Unified Balance page, on a user clicking it with an amount they " +
+            "typed. It bounds the user's own typo, never the agent's spending.",
+          notAProtocolLimit:
+            "It is NOT a Circle/Gateway protocol limit — no such limit exists.",
+        },
+      ],
     };
   }
   return null;
