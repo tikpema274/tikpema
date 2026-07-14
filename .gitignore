@@ -4,3 +4,15 @@ dist
 .netlify
 npm-install.log
 scratchpad-netlifydev.log
+
+# ── COLD KEYS. Never committed, never in .env, never read at runtime. ──────────
+# The cold owner EOA for the ERC-8004 agent identities lives here. It is the root
+# of trust for the agent registry: whoever holds it OWNS the agents. It is
+# deliberately NOT in .env, because .env is loaded by the app and mirrored into
+# Netlify env — a key that no running code path can reach cannot be leaked by one.
+# Broad patterns, so a future key file cannot miss the net by being named slightly
+# differently.
+.keys/
+*.key
+*.privkey
+cold-owner*.json
