@@ -158,6 +158,27 @@
   to = "/.netlify/functions/agent-parameters"
   status = 200
 
+# ⚠️ /api/v1/… — THE CANONICAL, FROZEN PATH. DO NOT EVER CHANGE OR REMOVE THESE TWO RULES.
+#
+# This URL is about to be hardcoded into an IPFS document whose CID is written into an ERC-8004
+# agent identity on a public chain. Once that lands, the pointer is IMMUTABLE and permanent: the
+# chain will point at this path forever, and we cannot edit the document to follow a move. A
+# future API restructure MUST leave these rules standing — add new versions alongside, never
+# rename or retire /api/v1/agent-parameters.
+#
+# It is `v1` precisely so the rest of the API stays free to change. The unversioned path below
+# it remains as a convenience ALIAS for existing callers; the versioned one is the contract.
+#
+# Both must precede the SPA fallback, or /* swallows them and returns index.html.
+[[redirects]]
+  from = "/api/v1/agent-parameters/:agent"
+  to = "/.netlify/functions/agent-parameters?agent=:agent"
+  status = 200
+[[redirects]]
+  from = "/api/v1/agent-parameters"
+  to = "/.netlify/functions/agent-parameters"
+  status = 200
+
 # SPA fallback
 [[redirects]]
   from = "/*"

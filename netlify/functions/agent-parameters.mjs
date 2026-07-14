@@ -279,7 +279,7 @@ export async function handler(event) {
   const entry = AGENTS.find((a) => a.id === id);
   if (!entry) {
     return json(400, {
-      error: requested ? `unknown agent "${requested}"` : "missing agent — use /api/agent-parameters/<agent>",
+      error: requested ? `unknown agent "${requested}"` : "missing agent — use /api/v1/agent-parameters/<agent>",
       knownAgents: AGENTS.map((a) => ({ id: a.id, label: a.label })),
       aliases: Object.keys(ALIASES),
     });
@@ -304,17 +304,61 @@ export async function handler(event) {
       "LIVE AND MUTABLE. These are the agent's CURRENT operating parameters, re-read from " +
       "configuration on every request. An operator can change any of them at any time, so a " +
       "value here is true as of `readAt` and is NOT a promise about the future. They are the " +
-      "same values the money paths enforce. Do NOT read them as guarantees — the guarantees " +
-      "are in `invariants`, which are properties of the system that no operator can dial.",
+      "same values the money paths enforce. Do NOT read them as guarantees — for the guarantees " +
+      "see `invariants`, and fetch the IPFS document it points at: nothing served from this " +
+      "endpoint carries any authority, including the invariant text mirrored below.",
 
     // Dials. Mutable.
     parameters: p,
 
-    // Walls. Not mutable, not numbers.
+    // ── THE INVARIANTS: A POINTER, NOT A CLAIM. ────────────────────────────────────────────
+    //
+    // ⚠️ THIS BLOCK USED TO SAY `mutable: false` AND `kind: "immutable-invariants"`. THAT WAS A
+    // LIE — a polite one, but a lie. This is a MUTABLE endpoint. Anyone who can deploy can edit
+    // these strings, and there is no hash, no signature, and nothing a reader can check them
+    // against. Serving "immutable: true" from a server you control asserts a property you cannot
+    // provide: the reader has no way to detect that you changed it. An unverifiable claim of
+    // immutability is worse than no claim, because it invites trust it cannot earn.
+    //
+    // Immutability comes from the CHAIN, not from us. The authoritative invariants are the IPFS
+    // document whose CID is recorded on-chain in tokenURI(agentId) on the ERC-8004 identity
+    // registry. That CID is content-addressed: the bytes hash to it or they are not the document.
+    // A reader verifies by fetching the IPFS bytes and hashing them against the on-chain CID —
+    // that check does not involve us, and it is the only one worth anything.
+    //
+    // What we serve here is a CONVENIENCE COPY. It is labelled as one.
     invariants: {
-      kind: "immutable-invariants",
-      mutable: false,
-      note: "Structural properties, not configuration. Nothing in `parameters` can change these.",
+      kind: "pointer-to-authoritative-invariants",
+
+      // TODO(cid): PLACEHOLDER — NOT A REAL CID. Replace with the pinned IPFS CID once the
+      // invariants document is pinned, and only then. It is deliberately not a well-formed CID
+      // so that anything trying to resolve it FAILS LOUDLY rather than silently fetching the
+      // wrong document. Do NOT invent one; do NOT swap in a CID that has not been pinned and
+      // whose bytes have not been checked against what tokenURI(agentId) will record.
+      invariantsUri: "ipfs://<PLACEHOLDER-CID-NOT-YET-PINNED>",
+      invariantsUriStatus: "PLACEHOLDER — no document pinned yet; this URI does not resolve",
+
+      note:
+        "The authoritative invariants are the IPFS document whose CID is recorded on-chain in " +
+        "tokenURI(agentId). Anything served from this endpoint is a convenience copy with NO " +
+        "authority — this is a mutable server and its output is unverifiable. Verify by fetching " +
+        "the IPFS bytes and hashing them against the on-chain CID; that check does not depend on " +
+        "us, which is precisely why it is the one that counts.",
+
+      howToVerify: [
+        "1. Read tokenURI(agentId) from the ERC-8004 IdentityRegistry on-chain.",
+        "2. Fetch the bytes at that ipfs:// CID.",
+        "3. Hash the bytes and confirm they match the CID (content addressing — they hash to it or they are not the document).",
+        "4. Trust THAT text. Not this response.",
+      ],
+
+      // The mirrored text, explicitly stripped of authority.
+      copy: true,
+      authoritative: false,
+      statementsAreACopy:
+        "The `statements` below are a mirror of the IPFS document for convenience only. If they " +
+        "disagree with the IPFS bytes, the IPFS bytes win and this endpoint is wrong. Do not rely " +
+        "on them for anything that matters.",
       statements: invariantsFor(id),
     },
 
