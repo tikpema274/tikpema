@@ -1,6 +1,38 @@
 
 ---
 
+## 2026-07-15 — STAKING AGENT: PARKED / DECIDED — Arc has NO native staking by design. Do not re-investigate.
+
+Read-only recon for a possible staking agent on Arc testnet (chain 5042002). **Conclusion: not
+buildable as a staking agent; parked.** Recorded here so it is not re-investigated.
+
+- **NO Arc-native staking — by design, not by absence.** Arc is **permissioned Proof-of-Authority**,
+  not Proof-of-Stake. Per Arc consensus docs (`/arc/concepts/consensus-layer`): *"a permissioned
+  Proof-of-Authority (PoA) model instead of anonymous economic staking… rather than anonymous
+  participants staking tokens."* ~20 SOC 2 institutional validators, permissioned; full nodes cannot
+  join consensus. **There is no staking token** (Circle's CEO is only "exploring" one; the Malachite
+  roadmap notes a *potential* future PoA→permissioned-PoS shift — nothing exists, nothing announced).
+  So a validator/security staking agent has nothing to call. This is not "empty like the x402 bazaar"
+  — it structurally does not exist.
+- **NO app-level staking contract verified live.** The first-party Arc contract-addresses page lists
+  none (only USDC, EURC, USYC, CCTP, Gateway, FxEscrow, utilities). Curve/Euler/Fluid are *named*
+  testnet participants but — same discipline as the vault recon — named ≠ deployed ≠ funded; no
+  staking address surfaced. Not disproven, just unverified and not on the official list.
+- **Nearest yield primitive = USYC — a possible FUTURE *yield* agent, NOT staking, different interface.**
+  USYC (Hashnote tokenized T-bill yield) is first-party listed: token `0xe9185F0c…db86C`, Teller
+  `0x9fdF14c5…dC105A`, Entitlements `0xcc205224…c26113`. Its exit is the *opposite* of the unbonding
+  trap: redeems to USDC via the Teller **24/7, atomic, T+0 — no lock-up/unbonding/cooldown** (only a
+  2pm-ET pricing cutoff). **The real gate is PERMISSION, not time: whitelist-gated via Entitlements** —
+  a non-onboarded wallet can neither mint nor redeem. It is **Teller-based, NOT ERC-4626**, so the
+  vault agent's `approve→deposit→redeem` machinery does **not** transfer. One item left unverified if
+  ever revived: USYC's live testnet liquidity/funding on-chain (reads only; no writes were made).
+
+**Status: PARKED. No spec, no code, no deploy.** If yield is revisited, the target is USYC-as-yield
+(Teller + Entitlements interface), explicitly not "staking." Sources: Arc consensus-layer docs, Arc
+contract-addresses, Hashnote USYC subscription/redemption docs.
+
+---
+
 ## 2026-07-15 — THE VAULT AGENT: live rehearsal COMPLETE, chain-verified on Arc TESTNET. NOT ON MAINNET.
 
 The Vault agent's deposit → withdraw → paused-semantics rehearsal ran end-to-end on prod against a
