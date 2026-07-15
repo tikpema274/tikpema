@@ -3,7 +3,7 @@ import { ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc, bridgeCapUsdc, swapCapUsdc,
 import { agentSwap, valueInUsdc, SWAP_TOKENS } from "./_swap.mjs";
 import { agentPay } from "./_pay.mjs";
 import { agentBridge, bridgeFee, resolveDestination } from "./_bridge.mjs";
-import { resolveVault, inspectVault, gateDeposit, vaultDeposit, vaultWithdraw } from "./_vault.mjs";
+import { resolveVault, inspectVault, gateDeposit, vaultDeposit, vaultWithdraw, readShareBalance } from "./_vault.mjs";
 import { canSpendDay, recordAgentSpend } from "./_budget.mjs";
 import { AGENT } from "./_agents.mjs";
 import { assertNotPaused } from "./_pause.mjs";
@@ -76,8 +76,10 @@ export function validateStepShape(step) {
     return null;
   }
   if (type === "vault_withdraw") {
+    // No client-supplied amount: the reclaim redeems the caller's FULL on-chain share balance,
+    // read server-side at execution time (see executeAction). Only the vault key is validated here
+    // — there is deliberately no `shares` on the wire to mis-scale.
     if (!resolveVault(step.vault)) return `unsupported vault "${step.vault}" (not on the allowlist)`;
-    if (!(Number(step.shares) > 0)) return "shares must be > 0";
     return null;
   }
   return `unknown step type "${type}"`;
@@ -126,8 +128,27 @@ export async function executeAction(step, ctx) {
   // is already validated; pause is deliberately skipped above. ──
   if (step.type === "vault_withdraw") {
     const vw = resolveVault(step.vault);
-    const wd = await vaultWithdraw({ walletAddress, vault: vw, shares: String(step.shares) });
-    return { ok: true, kind: "vault_withdraw", vault: vw.key, ...wd };
+    // Derive the reclaim amount from the LIVE chain, here at execution time — never a session
+    // receipt, never a client value. A returning user whose shares came from a prior session
+    // reclaims fine, because the amount is whatever balanceOf says right now.
+    let bal;
+    try {
+      bal = await readShareBalance({ walletAddress, vault: vw });
+    } catch (e) {
+      // FAIL CLOSED: a balance we could not read is NOT treated as zero and NOT redeemed. Nothing
+      // signs. (readShareBalance throws only on read failure; a genuine zero returns 0n below.)
+      return { ok: false, blocked: `could not read your on-chain share balance — withdraw not attempted (${e.message})` };
+    }
+    if (bal.raw <= 0n) {
+      // Genuinely no shares → "nothing to reclaim". Not an error, not a redeem(0); a clean no-op the
+      // endpoint surfaces as a message.
+      return { ok: true, kind: "vault_withdraw", vault: vw.key, reclaimed: false, shareBalanceRaw: "0" };
+    }
+    // Redeem EXACTLY the on-chain balance — nothing stranded, nothing over. redeem() burns precisely
+    // this many shares; if the balance changed between read and redeem, the vault reverts (surfaced
+    // as an error) rather than over-redeeming.
+    const wd = await vaultWithdraw({ walletAddress, vault: vw, shares: bal.raw.toString() });
+    return { ok: true, kind: "vault_withdraw", vault: vw.key, reclaimed: true, ...wd };
   }
 
   // Per-transaction SEND cap (transfers only). Checked FIRST so an over-cap send

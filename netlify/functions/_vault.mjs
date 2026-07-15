@@ -19,7 +19,7 @@
 // plain-language ack before a deposit proceeds. If XyloVault ever stopped tripping the WARN,
 // that is a BUG — verify-vault.mjs asserts it does.
 
-import { getAddress, toFunctionSelector } from "viem";
+import { getAddress, toFunctionSelector, formatUnits } from "viem";
 import { createHash } from "node:crypto";
 import { circle, waitForTx } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
@@ -453,4 +453,34 @@ export async function vaultWithdraw({ walletAddress, vault, shares }) {
     usdcReceived: Number(usdcReceivedMinor) / 10 ** USDC_DECIMALS,
     verifiedBy: "usdc-balance-delta",
   };
+}
+
+// ── READ: the caller's LIVE on-chain share balance ───────────────────────────────────────────
+// The single source of truth for "how many shares does this wallet hold in this vault, right now".
+// Used by the share-balance endpoint (to show the user) AND by the withdraw path (to derive exactly
+// what to redeem) — so a returning user with shares from a PRIOR session can still reclaim, without
+// any session receipt or typed amount.
+//
+// ⚠️ SAFETY-CRITICAL, FAILS CLOSED. The reclaim amount is derived from this read, so a read that
+// cannot complete must THROW — never return 0. `0n` means "genuinely no shares" (→ nothing to
+// reclaim); a failed read must NOT masquerade as that, or a returning user's balance could be
+// silently erased. balanceOf on a real ERC-20/4626 either returns a uint or the call reverts; a
+// revert/timeout exhausts the retries and throws. `decimals()` is cosmetic (formatting only) and is
+// best-effort — its absence never blocks the balance itself.
+export async function readShareBalance({ walletAddress, vault }) {
+  const owner = getAddress(walletAddress);
+  const vaultAddr = getAddress(vault.address);
+  const pc = publicClient();
+
+  const SENTINEL = Symbol("unread");
+  const raw = await withRetry(
+    () => pc.readContract({ address: vaultAddr, abi: BAL_ABI, functionName: "balanceOf", args: [owner] }),
+    SENTINEL,
+    5 // try hard: this read is the reclaim's amount, so a transient RPC hiccup must not become a throw prematurely
+  );
+  if (typeof raw !== "bigint") throw new Error("could not read your share balance on-chain");
+
+  const decRaw = await tryRead(pc, vaultAddr, u8Fn("decimals"), "decimals", []);
+  const decimals = typeof decRaw === "bigint" ? Number(decRaw) : typeof decRaw === "number" ? decRaw : USDC_DECIMALS;
+  return { raw, decimals, formatted: formatUnits(raw, decimals) };
 }

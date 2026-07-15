@@ -462,20 +462,40 @@ export function useWallet() {
     [ensureSession, refreshAgentWallet]
   );
 
-  // Withdraw (redeem) vault shares back to USDC in the agent wallet. A reclaim — uncapped and
-  // never pause-blocked server-side. `shares` is raw base units.
+  // Read the caller's OWN live on-chain share balance in a vault (READ-ONLY). This is on-chain
+  // truth, not a session receipt — so a returning user sees shares deposited in a prior session.
+  // Throws on a fail-closed read error (the server returns 502 rather than a false zero).
+  const vaultShareBalance = useCallback(
+    async (vault: string) => {
+      const token = await ensureSession();
+      const r = await fetch("/api/agent-vault-shares", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ vault }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.error || "Could not read your share balance");
+      return data; // { shareBalanceRaw, shareBalanceFormatted, shareSymbol, hasShares, shareDecimals }
+    },
+    [ensureSession]
+  );
+
+  // Reclaim the caller's ENTIRE vault position → USDC in the agent wallet. A reclaim — uncapped and
+  // never pause-blocked server-side. NO amount is sent: the server reads the live on-chain balance
+  // and redeems exactly it, so a returning user reclaims prior-session shares and nothing can be
+  // mis-scaled on the wire.
   const withdrawFromVault = useCallback(
-    async (vault: string, shares: string) => {
+    async (vault: string) => {
       const token = await ensureSession();
       const r = await fetch("/api/agent-vault-withdraw", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ vault, shares }),
+        body: JSON.stringify({ vault }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data?.error || "Withdraw failed");
       refreshAgentWallet().catch(() => {});
-      return data; // { ok, kind:"vault_withdraw", withdrawTx, usdcReceived, ... }
+      return data; // { ok, reclaimed, withdrawTx?, usdcReceived?, message? }
     },
     [ensureSession, refreshAgentWallet]
   );
@@ -532,6 +552,7 @@ export function useWallet() {
     checkBridgeStatus,
     inspectVault,
     depositToVault,
+    vaultShareBalance,
     withdrawFromVault,
   };
 }

@@ -194,6 +194,10 @@
   from = "/api/agent-vault-withdraw"
   to = "/.netlify/functions/agent-vault-withdraw"
   status = 200
+[[redirects]]
+  from = "/api/agent-vault-shares"
+  to = "/.netlify/functions/agent-vault-shares"
+  status = 200
 
 # SPA fallback
 [[redirects]]

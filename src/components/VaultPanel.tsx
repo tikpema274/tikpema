@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { useWallet } from "../wallet/useWallet";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
@@ -22,10 +22,14 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
 
   const [amount, setAmount] = useState("1");
   const [depositing, setDepositing] = useState(false);
-  // Raw share base units from THIS session's last deposit receipt. Set ONLY from the deposit
-  // response — never from user input. A rehearsal round-trip can therefore only ever redeem
-  // exactly what the last deposit received; there is no editable path to a mis-scaled amount.
-  const [receiptShares, setReceiptShares] = useState("");
+  // The caller's LIVE on-chain share balance in the vault (read-only, from /api/agent-vault-shares).
+  // This — NOT a session deposit receipt — drives whether a reclaim is available, so a user who
+  // deposited in a PRIOR session can still withdraw. `null` = not loaded; `sharesErr` set = the read
+  // FAILED (fail-closed: we never show "nothing to reclaim" on a failed read). The reclaim amount is
+  // still never typed or sent — the server reads the balance and redeems exactly it.
+  const [shares, setShares] = useState<{ raw: string; formatted: string; symbol: string; hasShares: boolean } | null>(null);
+  const [sharesErr, setSharesErr] = useState("");
+  const [loadingShares, setLoadingShares] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
 
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -39,6 +43,30 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const blocks: Array<{ code: string; detail: string }> = inspection?.verdict?.blocks ?? [];
   const ackRequired: boolean = !!insp?.ackRequired;
   const depositable: boolean = !!insp?.depositable;
+
+  // Load the live on-chain share balance. Fail-closed: on a read error we set `sharesErr` and clear
+  // `shares` so the reclaim UI shows "can't read" (disabled), never a false "nothing to reclaim".
+  async function refreshShares() {
+    if (!w.isAuthenticated || !w.agentWallet) return;
+    setLoadingShares(true);
+    setSharesErr("");
+    try {
+      const d = await w.vaultShareBalance(VAULT_KEY);
+      setShares({ raw: d.shareBalanceRaw, formatted: d.shareBalanceFormatted, symbol: d.shareSymbol, hasShares: !!d.hasShares });
+    } catch (e: any) {
+      setSharesErr(e?.message || "Could not read your balance");
+      setShares(null);
+    } finally {
+      setLoadingShares(false);
+    }
+  }
+
+  // Read the balance as soon as the wallet is ready — so a returning user sees (and can reclaim)
+  // shares from a prior session WITHOUT having to deposit or even inspect first.
+  useEffect(() => {
+    refreshShares();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [w.isAuthenticated, w.agentWallet]);
 
   async function inspect() {
     setMsg(null);
@@ -64,8 +92,8 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       // regardless — this cannot bypass the gate.
       const data = await w.depositToVault(VAULT_KEY, amountNum, ackRequired ? insp?.ackToken : undefined);
       const got = data?.sharesReceivedRaw;
-      if (got) setReceiptShares(String(got)); // the ONLY thing withdraw can redeem this session
-      setMsg({ ok: true, text: `Deposited ${amountNum} USDC — received ${got ?? "?"} ${inspection?.funded?.shareSymbol || "shares"}. ${data?.depositTx ? "" : ""}`.trim() });
+      setMsg({ ok: true, text: `Deposited ${amountNum} USDC — received ${got ?? "?"} ${inspection?.funded?.shareSymbol || shares?.symbol || "shares"}.`.trim() });
+      refreshShares(); // the reclaim below now reflects the new on-chain position
     } catch (e: any) {
       setMsg({ ok: false, text: e?.message || "Deposit failed" });
     } finally {
@@ -74,13 +102,19 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   }
 
   async function withdraw() {
-    // Redeems EXACTLY the last deposit's receipt shares — nothing else is redeemable from here.
-    if (!/^[0-9]+$/.test(receiptShares) || BigInt(receiptShares || "0") <= 0n) return;
+    // Reclaims the ENTIRE on-chain position. No amount is sent — the server reads balanceOf and
+    // redeems exactly it. We gate the click on the live balance we read; the server re-reads anyway.
+    if (!shares?.hasShares) return;
     setMsg(null);
     setWithdrawing(true);
     try {
-      const data = await w.withdrawFromVault(VAULT_KEY, receiptShares);
-      setMsg({ ok: true, text: `Withdrew — received ${data?.usdcReceived ?? "?"} USDC back to your agent wallet.` });
+      const data = await w.withdrawFromVault(VAULT_KEY);
+      if (data?.reclaimed === false) {
+        setMsg({ ok: true, text: data?.message || "Nothing to reclaim — you hold no shares in this vault." });
+      } else {
+        setMsg({ ok: true, text: `Reclaimed — received ${data?.usdcReceived ?? "?"} USDC back to your agent wallet.` });
+      }
+      refreshShares();
     } catch (e: any) {
       setMsg({ ok: false, text: e?.message || "Withdraw failed" });
     } finally {
@@ -208,32 +242,45 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
           {depositable && ackRequired && !acked && (
             <div className="status" style={{ opacity: 0.8 }}>Tick the acknowledgment above to enable the deposit.</div>
           )}
-
-          {/* ── WITHDRAW (reclaim) ─────────────────────────────────────────────
-              Locked to the last deposit's receipt. There is NO editable amount: the only thing
-              redeemable here is exactly the shares the last deposit received (read-only), so a
-              rehearsal round-trip cannot redeem a mis-scaled amount. With no receipt this session,
-              the action is simply unavailable. */}
-          <div className="sub" style={{ marginTop: 20, marginBottom: 6 }}>
-            Withdraw (redeem shares → USDC). A reclaim — always available, never blocked by a pause.
-          </div>
-          {receiptShares ? (
-            <div className="row">
-              <span className="status mono" style={{ margin: 0 }}>
-                {receiptShares} {inspection?.funded?.shareSymbol || "shares"}
-                <span style={{ opacity: 0.7 }}> (from your last deposit — the exact amount to redeem)</span>
-              </span>
-              <button className="emerald" disabled={withdrawing} onClick={withdraw}>
-                {withdrawing ? "Withdrawing…" : "Withdraw this deposit"}
-              </button>
-            </div>
-          ) : (
-            <div className="status" style={{ opacity: 0.8 }}>
-              Nothing to withdraw yet — make a deposit above first. Withdraw redeems exactly the shares
-              that deposit receives; it is unavailable until then.
-            </div>
-          )}
         </>
+      )}
+
+      {/* ── WITHDRAW (reclaim) — driven by the LIVE on-chain balance, independent of inspect/deposit ─
+          The reclaim redeems the caller's ENTIRE current share balance, read server-side (never a
+          typed value, never a session receipt), so a user returning in a NEW session can always get
+          their funds back. Fail-closed: if the balance can't be read, the action is disabled — never
+          shown as "nothing to reclaim". Sits OUTSIDE the `insp` gate on purpose: reclaiming must not
+          require inspecting first. */}
+      <div className="sub" style={{ marginTop: 22, marginBottom: 6 }}>
+        Withdraw (reclaim shares → USDC). Always available, never blocked by a pause. Redeems your
+        entire on-chain balance — there is no amount to type.
+      </div>
+      {loadingShares && !shares && !sharesErr ? (
+        <div className="status" style={{ opacity: 0.8 }}>Checking your vault balance on-chain…</div>
+      ) : sharesErr ? (
+        <div className="row">
+          <span className="status" style={{ margin: 0, color: "var(--warn)" }}>
+            ⚠ Couldn't read your on-chain balance — reclaim is disabled until it reads (fail-safe, so a
+            read glitch never looks like an empty balance).
+          </span>
+          <button className="linkbtn" disabled={loadingShares} onClick={refreshShares}>
+            {loadingShares ? "…" : "Retry"}
+          </button>
+        </div>
+      ) : shares?.hasShares ? (
+        <div className="row">
+          <span className="status mono" style={{ margin: 0 }}>
+            {shares.formatted} {shares.symbol}
+            <span style={{ opacity: 0.7 }}> held on-chain — the exact amount that will be redeemed</span>
+          </span>
+          <button className="emerald" disabled={withdrawing} onClick={withdraw}>
+            {withdrawing ? "Withdrawing…" : "Withdraw all (reclaim)"}
+          </button>
+        </div>
+      ) : (
+        <div className="status" style={{ opacity: 0.8 }}>
+          Nothing to reclaim — you hold no shares in this vault.
+        </div>
       )}
 
       {msg && (
