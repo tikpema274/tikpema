@@ -64,7 +64,10 @@ export async function handler(event) {
 
   const byAgent = new Map(breakdown.map((b) => [b.agent, b]));
 
-  const agents = AGENTS.map((a) => {
+  // `unlisted` agents are hidden from the user-facing roster (a fund-moving agent whose live
+  // rows aren't proven yet). They remain full agents server-side — isAgent()/pause/audit all
+  // still resolve them, and their endpoints stay live — so this ONLY affects what the page shows.
+  const agents = AGENTS.filter((a) => !a.unlisted).map((a) => {
     const stats = byAgent.get(a.id) ?? { spentUsdc: 0, actions: 0, blocked: 0 };
     return {
       id: a.id,
