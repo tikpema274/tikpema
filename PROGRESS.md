@@ -1,6 +1,51 @@
 
 ---
 
+## 2026-07-15 — THE VAULT AGENT: live rehearsal COMPLETE, chain-verified on Arc TESTNET. NOT ON MAINNET.
+
+The Vault agent's deposit → withdraw → paused-semantics rehearsal ran end-to-end on prod against a
+real ERC-4626 vault, and **every UI claim was verified read-only against Arc testnet** — no number
+taken on trust. This is a **testnet dress rehearsal only. Nothing here is on mainnet, and no real
+value moved.** The agent stays hidden from the user (registry `unlisted`, Dashboard card commented
+out, `2342ed2`) — the rehearsal is done, but "rehearsed on testnet" is not "shipped."
+
+- **Vault:** XyloNet USDC Vault (`xyUSDC`) `0x240Eb85458CD41361bd8C3773253a1D78054f747` — custom,
+  unaudited ERC-4626 by ForgeLabs, the one live vault recon found on Arc testnet.
+- **Agent SCA:** `0x60C369c5d9EE7b98d32856649549528c4f462710` · **USDC:** `0x3600…0000` · chain 5042002.
+
+### THE THREE TRANSACTIONS — each confirmed `success` on-chain
+| row | action | tx | on-chain result |
+|---|---|---|---|
+| 5 | deposit 1.01 USDC | `0x7e3af6aa70cc819869d45199fc4c94f88596a6d121dc82230a60d16b5370df1f` | minted 1009998 xyUSDC; SCA USDC 3.00 → 1.99 (delta = deposit exactly, gas sponsored) |
+| 6 | withdraw (full) | `0xfd8456efc19afa057e419facf19122d6df1eac4190f066477bdb0c639ca880ab` | redeemed 1009998 sh → 1.00899 USDC net; **fee 1009 units = 0.0999% of gross** (≤ 0.10%) |
+| 7 | withdraw **while AGENT.VAULT paused** | `0x6ea7f7589c24955153d2e2c83bb94db66de8284414664726893cac55d080985a` | redeemed 5999988 sh → 5.993997 USDC net; **fee 5999 units = 0.09998% of gross** (≤ 0.10%) |
+
+### WHAT THE CHAIN PROVED (not the UI — the chain)
+- **Round-trip integrity.** Deposit minted the shares the UI reported; withdraw returned the USDC
+  the UI reported; the SCA's USDC balance moved by exactly those amounts, gas sponsored (no native-
+  USDC gas skimmed from the balance).
+- **The 0.10% exit fee is real and never exceeded.** On both withdraws the fee was a distinct
+  on-chain USDC transfer to the fee recipient `0x94e0dc7AD29b94EC9819f6cEC3364DD34f41b3c6`, and in
+  both cases the vault **rounded the fee DOWN** — 1009 vs a full 1010, 5999 vs a full 6000 — so it
+  charged one unit *under* the disclosed 0.10%, never over. Disclosure held.
+- **Pause semantics hold on-chain, not just in the UI.** With AGENT.VAULT paused: a deposit was
+  attempted and BLOCKED — and left **zero on-chain trace** (the setup shows exactly 6 pre-pause
+  deposits, no 7th; no Deposit event in the ~2.5-min gap before the paused withdraw). It was a real
+  block, not a UI message — the deposit signed nothing. The withdraw in the same window SUCCEEDED,
+  because a reclaim is deliberately pause-exempt (`_actions.mjs:107,127`).
+- **Full share reconciliation, exact.** Across the whole rehearsal: deposits total **7009986** sh ==
+  withdraws total **7009986** sh, residual **0**, live `xyUSDC.balanceOf` == **0**. A blocked deposit
+  that had leaked would show as an extra Deposit event *and* leave residual shares. Neither exists.
+
+> ⚠️ **TESTNET ONLY — NOT ON MAINNET.** Arc testnet (chainId 5042002), against an unaudited
+> third-party vault, with test USDC. The rehearsal is chain-verified and complete; a mainnet path
+> is NOT built, NOT proven, and NOT claimed. The one honest boundary: the exact instant the pause
+> flag flipped lives in Netlify Blobs (off-chain), so "the pause window" is inferred from the
+> behavioral sequence + block timestamps — every on-chain fact supports it, but that one edge is
+> not itself an on-chain record.
+
+---
+
 ## 2026-07-15 — THE THREE ERC-8004 INVARIANTS: written, audited, PINNED to IPFS, WIRED. NOT YET ON-CHAIN.
 
 The bytes we intend to record as each agent's on-chain identity now exist, are pinned, resolve
