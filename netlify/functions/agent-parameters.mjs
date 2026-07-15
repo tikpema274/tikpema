@@ -49,6 +49,23 @@ const resolveAgent = (raw) => {
   return ALIASES[k] ?? k;
 };
 
+// ── Per-agent authoritative-invariants CID. ─────────────────────────────────────────────────
+// The IPFS CIDv1 (raw-codec, "bafkrei...") of each agent's invariants document, pinned and
+// verified byte-identical to the committed agent-metadata/*.json across three independent public
+// gateways (see scripts/pin-invariants.mjs). ONE CID PER AGENT — they are content-addressed and
+// NOT interchangeable; crossing them would point an agent at another agent's guarantees.
+//
+// ⚠️ PINNED ≠ AUTHORITATIVE. These documents resolve today, but authority comes from the CHAIN:
+// a CID becomes the authoritative invariants pointer only once tokenURI(agentId) records it in
+// the ERC-8004 IdentityRegistry. NONE of these is recorded on-chain yet — so invariantsUriStatus
+// below says exactly that, and must not be upgraded to claim on-chain authority until the
+// registration actually lands.
+const INVARIANTS_CID = {
+  [AGENT.RESEARCHER]: "ipfs://bafkreicdicy7hhb45ayygkt457jfx4ucswey7nknhcvg2gexsp4opbminy",
+  [AGENT.ANALYST_B]: "ipfs://bafkreifzi7ia4djdp7ukbnf2hwndeys5p7cwre66lrlnroqmwpyaqqo7om",
+  [AGENT.EXECUTOR]: "ipfs://bafkreic5eefpf3c67l2ti2mxmgpo7qwtzao3mtrc23cmcrlrefazqgxxdi",
+};
+
 // Read one bound in isolation. A throw from the fail-closed helper is a REPORTABLE STATE, not a
 // crash: it means that action is currently refused, so say exactly that.
 //
@@ -333,13 +350,17 @@ export async function handler(event) {
     invariants: {
       kind: "pointer-to-authoritative-invariants",
 
-      // TODO(cid): PLACEHOLDER — NOT A REAL CID. Replace with the pinned IPFS CID once the
-      // invariants document is pinned, and only then. It is deliberately not a well-formed CID
-      // so that anything trying to resolve it FAILS LOUDLY rather than silently fetching the
-      // wrong document. Do NOT invent one; do NOT swap in a CID that has not been pinned and
-      // whose bytes have not been checked against what tokenURI(agentId) will record.
-      invariantsUri: "ipfs://<PLACEHOLDER-CID-NOT-YET-PINNED>",
-      invariantsUriStatus: "PLACEHOLDER — no document pinned yet; this URI does not resolve",
+      // The pinned, verified IPFS CID for THIS agent's invariants document (per-agent map above).
+      // Pinned and retrievable — but NOT yet recorded on-chain, so it is not yet authoritative.
+      // The status string carries that distinction; do not soften it until registration lands.
+      invariantsUri: INVARIANTS_CID[id],
+      invariantsUriStatus:
+        "PINNED & RETRIEVABLE, NOT YET ON-CHAIN. The invariants document is pinned to IPFS and " +
+        "resolves at this CID (bytes verified byte-identical to the committed metadata across " +
+        "independent gateways). It is NOT yet recorded on-chain in the ERC-8004 IdentityRegistry, " +
+        "so this URI is NOT yet the authoritative pointer — it becomes authoritative only once " +
+        "tokenURI(agentId) references this exact CID. Until then treat it as a pinned convenience " +
+        "pointer with NO on-chain authority, not the registered source of truth.",
 
       note:
         "The authoritative invariants are the IPFS document whose CID is recorded on-chain in " +
