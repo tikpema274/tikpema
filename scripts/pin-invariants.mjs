@@ -17,6 +17,28 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+// Compute the CIDv1 raw-codec CID ("bafkrei...") for a set of bytes. This is the
+// deterministic content address of the file as a single raw block, and — because
+// all three files are well under one IPFS chunk (256 KiB) — it equals the raw LEAF
+// that Pinata stores under the pinned DAG. It is the "bafkrei" form used elsewhere
+// in the repo (agent-init.mjs:32), distinct from the dag-pb "bafybei"/"Qm" root
+// that pinFileToIPFS returns. Derivation: multibase 'b' + base32(
+//   0x01 version | 0x55 raw codec | 0x12 sha256 | 0x20 len=32 | <32-byte digest> ).
+const B32 = "abcdefghijklmnopqrstuvwxyz234567";
+function base32NoPad(bytes) {
+  let bits = 0, val = 0, out = "";
+  for (const b of bytes) {
+    val = (val << 8) | b;
+    bits += 8;
+    while (bits >= 5) { out += B32[(val >>> (bits - 5)) & 31]; bits -= 5; }
+  }
+  if (bits > 0) out += B32[(val << (5 - bits)) & 31];
+  return out;
+}
+function bafkreiRawCid(sha256Buf) {
+  return "b" + base32NoPad(Buffer.concat([Buffer.from([0x01, 0x55, 0x12, 0x20]), sha256Buf]));
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 
@@ -125,6 +147,9 @@ async function pinRawBytes(f) {
   // Blob wraps the exact bytes; no encoding/parse round-trip.
   form.append("file", new Blob([f.bytes]), f.name);
   form.append("pinataMetadata", JSON.stringify({ name: f.name }));
+  // cidVersion: 1 -> the pinned DAG root comes back as "bafybei..." (dag-pb v1),
+  // and the raw leaf under it is the "bafkrei..." CID we report and verify below.
+  form.append("pinataOptions", JSON.stringify({ cidVersion: 1 }));
 
   const res = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
     method: "POST",
@@ -148,9 +173,17 @@ async function pinRawBytes(f) {
 }
 
 for (const f of FILES) {
-  console.log(`Pinning ${f.name} ...`);
-  f.cid = await pinRawBytes(f);
-  console.log(`  -> CID ${f.cid}\n`);
+  console.log(`Pinning ${f.name} (cidVersion: 1) ...`);
+  f.rootCid = await pinRawBytes(f); // the CID Pinata returns as the pin root
+  // The raw-codec ("bafkrei...") CID we report and verify, derived from the file's
+  // own sha256. For these single-chunk files under cidVersion:1 Pinata's returned
+  // root IS this raw leaf (nothing to wrap), so f.rootCid === f.cid here; the two
+  // are computed independently and asserted equal below as a cross-check.
+  f.cid = bafkreiRawCid(Buffer.from(f.localSha, "hex"));
+  if (f.rootCid !== f.cid) {
+    console.log(`  -> pinned root : ${f.rootCid}  (dag-pb wrapper; raw leaf differs)`);
+  }
+  console.log(`  -> raw CID     : ${f.cid}\n`);
 }
 
 // --- 4. Fetch each CID back from a NEUTRAL gateway and re-hash --------------
@@ -203,7 +236,9 @@ for (const f of FILES) {
   if (!f.match) allOk = false;
   console.log(f.name);
   console.log(`  local sha256   : ${f.localSha}`);
-  console.log(`  CID            : ${f.cid}`);
+  console.log(`  CID (bafkrei)  : ${f.cid}`);
+  console.log(`  ipfs uri       : ipfs://${f.cid}`);
+  console.log(`  pinned root    : ${f.rootCid}${f.rootCid === f.cid ? " (== raw CID)" : " (dag-pb wrapper)"}`);
   console.log(`  gateway sha256 : ${f.gatewaySha ?? "(not retrieved)"}`);
   console.log(`  verdict        : ${verdict}`);
   console.log("");
