@@ -1,6 +1,258 @@
 
 ---
 
+## 2026-07-15 — THE THREE ERC-8004 INVARIANTS: written, audited, PINNED to IPFS, WIRED. NOT YET ON-CHAIN.
+
+The bytes we intend to record as each agent's on-chain identity now exist, are pinned, resolve
+from independent public gateways, and are wired into the endpoint — **but nothing is registered
+on-chain yet.** The whole point of the exercise: an ERC-8004 identity is a permanent pointer, so
+every claim in it had to be checked against the code that RUNS, not against how it sounds.
+
+### THE DOCUMENTS — audited line by line, verified against the running code (`cdd4530`)
+`agent-metadata/{researcher,second-opinion,executor}.json`. **Four claims were FALSE and are
+fixed; three more were overstated and are reworded.** Each was checked against a code path.
+
+**FALSE — fixed:**
+| claim | truth |
+|---|---|
+| Researcher `propose_only` | → `autonomous_spend_within_caps`. It buys data with NO per-purchase approval — `decidePurchase` → `canSpend()` → signs. The user approves the JOB, not the purchase. |
+| Executor: "funds in a wallet only their passkey can open" | **The most dangerous line.** FALSE — the float is a Circle DEV-CONTROLLED SCA (only the server moves it, `agent-withdraw.mjs:7`); the passkey opens the user's OWN MSCA. Replaced with the custody truth, blunt: "custodial and we do not dress it up." |
+| Second Opinion `kill_switch: true` | Was a **DEAD switch** — nothing honoured it. Fixed in code (`89f154c`, below) BEFORE the document was allowed to assert it. |
+| Researcher: "cannot pay an arbitrary address" | `payTo` comes from the SELLER's x402 challenge — not constrained by our code. Now disclosed as a trust assumption in the configured seller, not a guarantee. |
+
+**OVERSTATED — reworded:** Executor "proven on-chain" → "BY CONSTRUCTION" (withdraw contains no
+pause check at all — a stronger, honest claim; no test proves withdraw-while-paused so we claim
+none) · Executor autonomy → `never_autonomous_user_approval_required` · Second Opinion "blinded
+from the first analyst" → sees the PROPOSAL but never the reasoning/sources, and re-derives every
+figure. `owner_key_custody` is now **byte-identical across all three** (sha256 `6743581f05c2…`) —
+three documents describing the same key must not differ by a sentence. The cold owner key stays
+untracked (`.gitignore`: `.keys/`, `*.key`, `*.privkey`, `cold-owner*.json`).
+
+### PINNED & VERIFIED (`ee40c93`, `4a7b3a2`) — `scripts/pin-invariants.mjs`
+Pins the three files to Pinata **as raw bytes** (no re-serialization), asserts each file's sha256
+against its `cdd4530` commit hash BEFORE pinning, then fetches each CID back **from a neutral
+public gateway** (ipfs.io / dweb.link / cloudflare) and re-hashes — proof the pin is real, public,
+and unmodified. `cidVersion: 1`, raw-codec `bafkrei…` CIDs (the form agent metadata URIs use),
+derived locally and deterministically from each file's own sha256 so the CID does not depend on
+what Pinata returns.
+
+> 🔑 **THE JWT-SHAPE AUTH GATE.** `PINATA_JWT` must be whitespace-free, start with `ey`, have
+> exactly 3 dot-segments, and exceed 100 chars — else it dies AT THE GATE before any network call.
+> Why shape, not non-emptiness: `netlify env:get VAR` prints "No value set…" to **stdout with exit
+> 0** when the var is absent, so `export VAR=$(…)` captures that 74-char sentence as a fake
+> non-empty value and `[ -n "$VAR" ]` waves it through — exactly the trap that made `PINATA_JWT`
+> look set when it wasn't, and Pinata then 401'd. (Same env-var trap logged in memory.)
+
+### WIRED (`a608c0d`) — the endpoint stops claiming an authority it cannot provide (`9beb394`)
+`/api/agent-parameters/<id>` now serves the per-agent CID. **DONE** — verified in the shipped file:
+```
+researcher     ipfs://bafkreicdicy7hhb45ayygkt457jfx4ucswey7nknhcvg2gexsp4opbminy
+analyst_b      ipfs://bafkreifzi7ia4djdp7ukbnf2hwndeys5p7cwre66lrlnroqmwpyaqqo7om
+executor       ipfs://bafkreic5eefpf3c67l2ti2mxmgpo7qwtzao3mtrc23cmcrlrefazqgxxdi
+```
+The block was reworked FIRST (`9beb394`): it used to serve `kind: "immutable-invariants",
+mutable: false` — a lie, because this is a mutable server anyone who can deploy can edit, and the
+reader has no hash to check it against. **An unverifiable claim of immutability is WORSE than no
+claim.** It is now `kind: "pointer-to-authoritative-invariants"` with
+`invariantsUriStatus: "PINNED & RETRIEVABLE, NOT YET ON-CHAIN"` and a `howToVerify` that routes
+the reader to `tokenURI(agentId)`, not to us. The `/api/v1/` route is frozen with a DO-NOT-CHANGE
+banner in `netlify.toml` because a chain pointer here would be permanent.
+
+### ⏳ PENDING — do not soften the status until these land
+- **On-chain registration of the three real agents — NOT DONE.** They remain UNREGISTERED. The
+  only agent on-chain is throwaway `850337` (the probe, below). Until `tokenURI(agentId)` records
+  the exact CID above, the served URI has **no on-chain authority** and the status string says so.
+- **Second-provider IPFS redundancy — NOT DONE.** Pinned to Pinata only; one pinning provider is a
+  single point of failure for a pointer meant to outlive us.
+- **`git push` — NOT DONE.** ~20 commits (this arc) are LOCAL only.
+
+---
+
+## 2026-07-14 — THE KILL SWITCH WAS DEAD: the Second opinion's pause enforced NOTHING. FIXED.
+
+The Agents page offered a pause toggle for the Second opinion and **nothing honoured it.**
+`assertNotPaused` was called for `RESEARCHER` (`_research.mjs:284`, `job-run.mjs:85`) and
+`EXECUTOR` (`agent-send:64`, `_actions:85`, `agent-ub-spend:78`) — and **NEVER for `ANALYST_B`.**
+Its sole caller ran `analystB()` regardless. A user could pause the agent, watch the UI say
+"paused", and it kept running. **A control the UI presents and the code ignores is worse than no
+control.** Found while auditing the metadata about to be recorded permanently on-chain — the
+document claimed `kill_switch: true`, which would have made a dead switch immutable.
+
+**THE FIX (`89f154c`).** `assertNotPaused({ owner, agent: ANALYST_B })` before `analystB()`. A
+paused B maps to verdict `cannot_verify` — the SAME state as B crashing — which `_synthesis.mjs`
+already treats as `proposalSurvives: false`. So:
+
+> **PAUSING THE REVIEWER DISABLES PROPOSALS. It does not silently disable the CHECK on them.**
+
+That is the only fail-closed reading — letting a proposal through unreviewed because the reviewer
+is off would turn a safety switch into a safety hole. It falls out of the existing design, not a
+new branch. **MISFIRE CHECK** (the guard must not kill every proposal in prod): `connectLambda`
+runs before the guard so Blobs is configured; `isAgent("analyst_b")` is true; owner is already
+required (400 without it). **DISARM CHECK**: the two files referencing the handler exercise neither
+`analystB` nor `compareAnalyses` — nothing downstream is neutered.
+
+---
+
+## 2026-07-14 — GATEWAY MONEY HAS NO WAY OUT: production copy said "time-delayed release" — FALSE. FIXED.
+
+The UI told users their unified-balance money could be released, just slowly:
+*"Releasing it is time-delayed and goes through the server."* **That is false. There is NO release
+path — not a slow one, none.** No `initiateWithdrawal`, no `gatewayWithdraw`, no delay constant
+anywhere in this codebase. `_gateway.mjs` holds an address and nothing else. The only Gateway WRITE
+path (`_ubspend.mjs`) **spends** the balance cross-chain. And the user cannot route around the
+server: the agent wallet is a Circle DEV-CONTROLLED SCA. **Deposited Gateway funds are SPENDABLE
+CROSS-CHAIN ONLY.**
+
+**ROOT CAUSE (`agent-withdraw.mjs:38`).** A comment described the *contract's* delayed-withdrawal
+capability (`initiateWithdrawal + withdraw after withdrawalDelay`). Every downstream reader took it
+to mean a path EXISTS and is merely slow, and shipped copy saying so. **A capability the contract
+has and we never built is not a capability the user has.** Circle's GatewayWallet exposes it; THIS
+APP IMPLEMENTS NO PART OF IT.
+
+**THE FIX (`9f2d4d0`).** All user-facing strings now say the same true thing — *"Money in the
+unified balance cannot be withdrawn back to you — not by you, not by us… It can only be spent."*
+Fixed across the Fund button + balance explainer (`UnifiedBalancePanel`), the Withdraw warning
+(`Dashboard`), and the SERVED string in `agent-parameters.mjs` (now `irreversible: true`,
+`canFundsBeReturnedToTheUser: "NO"`). Dropped "not lost" everywhere — if there's no way back,
+"not lost" is a distinction without a difference. **The claim no longer survives a grep**; every
+remaining hit is a labelled post-mortem asserting the mechanism does NOT exist.
+
+---
+
+## 2026-07-14 — THE giveFeedback PROBE: a passkey MSCA CAN attest gaslessly (agent `850337`).
+
+The question under test, and nothing more: **can a user's passkey MSCA call
+`ReputationRegistry.giveFeedback` gaslessly?** Answer: **YES.** Control (`USDC.transfer(self, 0)`)
+and test (`giveFeedback`) were BOTH sponsored by Gas Station from the same wallet in the same
+session, paymaster `0x03dF76C8…3103b`, the MSCA's USDC balance **unchanged across both**. The
+earlier *"paymaster stake or unstake-delay too low"* failure was the **account-DEPLOYMENT**
+sponsorship surface, not the target contract — it disappears once the wallet is already deployed.
+(Confirms the memory note: probe with an already-deployed wallet + a control op.)
+
+`scripts/probe-register-agent.mjs` is committed (`bcb6105`) as the **RECORD** of how throwaway
+agent `850337` came to exist — `agentId 850337`, owner `0xc54D4721…e621` (the dev SCA), tx
+`0x1ba87277…3337`. It registered from the DEV-CONTROLLED SCA self-paying gas (no paymaster) *on
+purpose*, so getting an agentId wouldn't become a second variable in the question under test.
+**Header marked ⚠️ ALREADY RUN — DO NOT RE-RUN**: running it again mints another agent on-chain
+for no reason. The three real agents remain UNREGISTERED.
+
+---
+
+## 2026-07-13 → 07-14 — /api/agent-parameters: the endpoint born, then hardened against its own lies.
+
+A read-only, public, no-auth `GET /api/agent-parameters/<agent>` reporting the caps and invariants
+each agent is actually bounded by (`90318ff`). **Every number comes from the same fail-closed
+helpers the money paths call** (`sendCap`/`swapCap`/`bridgeCap`/`maxSpend` + the `ub*` trio,
+`budgetConfig`) — it reads no env var of its own and hardcodes no value, so the view cannot drift
+from what is enforced: if it says the send cap is 10, `agent-send` rejects 10.000001. Two
+distinctions are structural: **parameters vs invariants** (a dial vs a wall — an absent code path,
+not a cap of zero) and **maximum vs minimum** (the UB spend FLOOR is a minimum; a floor of 10 in a
+list called "caps" reads exactly backwards). Misconfiguration is REPORTED, not hidden:
+`status: "misconfigured", usdc: null, enforced: "REFUSED"`.
+
+Building it forced a chain of corrections — the endpoint exists to stop a reader mistaking a dial
+for a wall, and it had no business doing the same thing itself:
+
+### 1. THE RESEARCHER DOES MOVE FUNDS — a false invariant, corrected (`c7ab2e7`, `b35e788`, `08315e0`)
+The endpoint shipped: *"This agent CANNOT move your funds. There is no code path…"* **False.** The
+call graph has exactly one exit to value: `_research.mjs:301 payX402()` → `_x402.mjs
+signTypedData()` → EIP-3009 `TransferWithAuthorization` → **real USDC leaves the user's wallet to
+pay a data seller.** A parameters endpoint reporting a live spend path as no-path-at-all is the
+worst thing it can do — the reader's takeaway is the opposite of the truth. `movesFunds` flipped to
+**TRUE** for the Researcher, the x402 purchase listed as the movement surface it is. **`movesFunds`
+is now a first-class REGISTRY field** (`researcher: true`, `analyst_b: false` — audited: quotes +
+fee API + price read, no signer; `executor: true`), set by auditing the call graph. The endpoint
+reads it from the registry, not its own `MOVES_FUNDS` copy — the **third** time a duplicate money
+claim was collapsed into the registry this arc (see the card fix below). Bonus: `/api/agents` is
+session-gated, but `/api/agent-parameters` is public, so a correct response now PROVES the registry
+field is live rather than leaving it inferred. *(Matches memory: duplicate source of truth is THE
+recurring bug.)*
+
+### 2. TWO FAIL-OPEN CAPS — the NaN pattern, twice (`b35e788`, `e7b47da`)
+> Every cap check in this repo is a `>` comparison, and **every comparison against NaN is FALSE** —
+> so ONE non-finite value disables the gate. This project has now been bitten by it repeatedly.
+
+- **`canSpend()`** returned `{allowed: true}` on a non-finite input — all three checks passed
+  vacuously. Proven: `canSpend({amountUsdc: NaN}) → allowed`. Survivable only because the caller
+  guarded first (`_research.mjs:262`) — **safety that lives in the caller is not safety.** The
+  refusal moved INTO the gate (non-finite / `<= 0` → `{allowed: false}`), the caller guard kept as
+  defence-in-depth.
+- **`valueInUsdc()`** could return NaN and it is a CAP INPUT compared with `>` at **five sites** —
+  a single NaN disabled all five at once: `_proposal.mjs:165` (over-cap swap gets PROPOSED),
+  `job-swap-approve.mjs:124` (that proposal EXECUTES, uncapped), `_actions.mjs:123` (DAY CEILING
+  fails open), `agent-execute-plan.mjs:66` (PLAN CEILING fails open), `agent-act.mjs`. **Propose
+  and approve COMPOUND**: written unbounded, approved unbounded, the day ceiling that should
+  backstop it also NaN-poisoned — no guard survived. Two NaN sources: `USDC` returned `amt`
+  unvalidated; the rate guard rejected only FALSY, so a truthy-unparseable rate (`"N/A"`, `"1,08"`,
+  an object) × amount = NaN. Now throws unless it can produce a finite POSITIVE number (amount
+  finite & `> 0`, rate PARSES & `> 0`, product asserted finite). Every caller already treats a
+  throw as "cannot price → refuse" — the correct direction, simply unreachable. Swept the other 11
+  cap comparisons; all safe. `_budget-test.mjs`: 28 passed.
+
+### 3. THE UB DEPOSIT BOUND IS NOT AN AGENT CAP — a user footgun guard (`2d74098`, `c2f445d`)
+An audit of what can reach `agent-ub-deposit` found `ub_deposit` **is not in the executor's
+vocabulary at all** — `_actions.mjs` knows `transfer_usdc`/`pay_for_service`/`swap_tokens`/
+`bridge_usdc` and throws `unknown step type` on anything else. No proposal can propose it, no plan
+can contain it; the sole caller is the **Fund button**. So it was reclassified:
+- **Moved out of `unifiedBalanceCaps` into its own `userControls` block** — `boundsWhom: "THE USER,
+  not the agent"`, `isAgentCap: false`. (The genuine UB spend cap + floor STAY — those bind the
+  Executor.)
+- **The pause skip is deliberate, not a gap.** Pause/halt bind what the AGENT may SPEND; they must
+  never bind what the USER may COMMIT or RECLAIM. A paused agent must not trap the user's money in
+  either direction — same principle as withdraw surviving pause (below).
+- **Re-justified.** The old comment defended it with "the swap-cap trap" — an agent-escape argument
+  transplanted here without checking the premise held. It didn't. The real reason: **a Gateway
+  deposit is the ONE IRREVERSIBLE MOVE in the app** (there is no release path — see the Gateway
+  copy fix), so a mistyped DEPOSIT isn't recoverable the way a mistyped WITHDRAWAL is. It bounds
+  the blast radius of an extra zero — it is NOT an agent cap and NOT a Circle protocol limit.
+- Renamed `ubDepositCapUsdc → ubDepositMaxPerTxUsdc` (it sat among the agent caps and read as one);
+  value **25 → 100** (25 was inherited from the BRIDGE cap and forced four clicks through the
+  irreversibility warning — and a warning dismissed four times is a warning nobody reads). Stale
+  `AGENT_UB_DEPOSIT_CAP_USDC=25` unset in the Netlify prod context; helper reads the new name and
+  falls back to the legacy one so a rename-before-deploy can't silently drop to a default.
+
+### 4. THE CARD READ A STALE COPY, NOT THE ROSTER (`96b3930`, `6da9db1`)
+The live Agents card showed ⚠ *Can move your money* over a stale line — `AgentsPanel` had its own
+hardcoded `ONE_LINER` map that ALWAYS won over the API's `a.spends`. So when the registry was
+corrected, the badge flipped (read from the API) but the sentence a user reads never consulted the
+API. **A second source of truth for a money claim, gone stale exactly as the pattern predicts —
+third time this arc.** `ONE_LINER` deleted; the card renders `a.spends` from the roster. Second
+opinion's line also rewritten to say what it's FOR (*"Buys nothing"* — the one agent that touches
+no money) rather than repeating the 🔒 badge.
+
+---
+
+## 2026-07-13 — ONE MONEY MAP + THE WITHDRAW EXIT: the custody model made visible. PROVEN LIVE.
+
+The custody foundation the whole arc above rests on. The agent wallet is a Circle DEV-CONTROLLED
+SCA — only the server can move it. That bounds the user's exposure (they choose the float) but
+without a withdraw path the float was **custodial with no way out** — the only exit was
+`agent-send`, governed by the AGENT's controls (send cap, day-ceiling, pause). **A paused agent
+could trap the user's money**, rebuilding the custody problem one layer down.
+
+**THE WITHDRAW EXIT (`40ed27b`).** `/api/agent-withdraw` deliberately does NOT call
+`assertNotPaused`, `canSpendDay`, or `sendCapUsdc`, and does not `recordAgentSpend` — those bound
+what the AGENT may SPEND, never what the USER may RECLAIM. **Dropping the guards NARROWS the
+surface**: there is no `to` parameter, so a withdrawal can only ever pay the session's own verified
+address. Withdraw moves PLAIN USDC only (`balanceOf(SCA)`); the Gateway unified balance is shown
+next to the button, never silently left behind. **PROVEN LIVE: a withdrawal succeeded while the
+agent was PAUSED, USDC landed in the MSCA.** That was the gate. Also re-ranks the funding panel —
+fund YOUR MSCA, then hop-A into the agent — because the passkey MSCA is now the funded wallet the
+user holds the key to (reversing `b522d81`, correct for the empty-MSCA model it was built for).
+
+**ONE MONEY MAP (`57f2f28`, `1339567`).** Six identical cards, four of which moved money, nothing
+distinguishing "between my own pockets" from "gone, no undo" — and the app's own author clicked
+Bridge when he meant Deposit. A design failure, not a user error. The Dashboard "Your wallet" card
+was reading `w.agentWallet` — the AGENT's SCA — so the user's own wallet was never shown at all
+(this is the "same address, two balances" bug: only the label lied). Now **three pockets, ranked by
+what the user can reclaim ALONE**: Your wallet (MSCA, 🔒 you hold the key) → Agent's wallet (SCA,
+🔒 withdraw any time) → Unified (Gateway, ⚠ — later corrected to "no way out"). Actions moved to
+sit beside the balances they act on; grouped by CONSEQUENCE not feature; consequence in the LABEL,
+read before the click — deliberately no confirmation dialogs (they only train click-through).
+Presentation + relocation only; same endpoints, same caps. Proven live on prod.
+
+---
+
 ## 2026-07-12 — BRICK 2: THE SECOND ANALYST. Disagreement is the product. PROVEN LIVE.
 
 Same question, TWO INDEPENDENT analysts. When they disagree, the proposal DIES — and the user
