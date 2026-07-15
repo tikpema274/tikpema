@@ -567,6 +567,15 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
               Bridging back costs a fee.
             </div>
           </button>
+          {/* The Vault agent (#/vault, nav-less). A deposit IS reversible (withdraw), but into a
+              third-party contract — the card leads with that, not with the yield. */}
+          <button className="quick-card" onClick={() => go("vault")}>
+            <div className="qt">Vault →</div>
+            <div className="qd">
+              <span style={{ color: "var(--warn)" }}>❗ Into a third-party vault.</span> Withdraw
+              any time, minus a fee — but read the owner's powers first.
+            </div>
+          </button>
         </div>
       </div>
 

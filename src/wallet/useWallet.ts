@@ -425,6 +425,61 @@ export function useWallet() {
     [ensureSession]
   );
 
+  // ── VAULT AGENT ────────────────────────────────────────────────────────────
+  // Inspect an allowlisted ERC-4626 vault (READ-ONLY). Returns the on-chain disclosure plus, if
+  // the vault raises a WARN, the exact `ackToken` a deposit must echo back. Moves nothing.
+  const inspectVault = useCallback(
+    async (vault: string) => {
+      const token = await ensureSession();
+      const r = await fetch("/api/agent-vault-inspect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ vault }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.error || "Inspection failed");
+      return data; // { vault, inspection, gate, depositable, ackRequired, ackToken }
+    },
+    [ensureSession]
+  );
+
+  // Deposit USDC into an allowlisted vault. `ackToken` is REQUIRED whenever the vault raised a
+  // WARN — the server re-inspects and refuses if it is missing/mismatched (fail-closed), so this
+  // only forwards what the user acknowledged; it cannot bypass the gate.
+  const depositToVault = useCallback(
+    async (vault: string, amountUsdc: number, ackToken?: string) => {
+      const token = await ensureSession();
+      const r = await fetch("/api/agent-vault-deposit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ vault, amountUsdc, ackToken }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.error || "Deposit failed");
+      refreshAgentWallet().catch(() => {});
+      return data; // { ok, kind:"vault_deposit", depositTx, sharesReceivedRaw, disclosure, ... }
+    },
+    [ensureSession, refreshAgentWallet]
+  );
+
+  // Withdraw (redeem) vault shares back to USDC in the agent wallet. A reclaim — uncapped and
+  // never pause-blocked server-side. `shares` is raw base units.
+  const withdrawFromVault = useCallback(
+    async (vault: string, shares: string) => {
+      const token = await ensureSession();
+      const r = await fetch("/api/agent-vault-withdraw", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ vault, shares }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.error || "Withdraw failed");
+      refreshAgentWallet().catch(() => {});
+      return data; // { ok, kind:"vault_withdraw", withdrawTx, usdcReceived, ... }
+    },
+    [ensureSession, refreshAgentWallet]
+  );
+
   // Refresh + cache the MetaMask balance (the modular hook owns its own).
   const mmRefreshBalance = useCallback(async () => {
     if (!mmWallet) return undefined;
@@ -475,5 +530,8 @@ export function useWallet() {
     swapFromAgent,
     bridgeFromAgent,
     checkBridgeStatus,
+    inspectVault,
+    depositToVault,
+    withdrawFromVault,
   };
 }

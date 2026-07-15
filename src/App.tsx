@@ -7,6 +7,7 @@ import FeedbackPanel from "./components/FeedbackPanel";
 import SendPanel from "./components/SendPanel";
 import SwapPanel from "./components/SwapPanel";
 import BridgePanel from "./components/BridgePanel";
+import VaultPanel from "./components/VaultPanel";
 import NanopaymentPanel from "./components/NanopaymentPanel";
 import UnifiedBalancePanel from "./components/UnifiedBalancePanel";
 import PlanPanel from "./components/PlanPanel";
@@ -79,6 +80,12 @@ export default function App() {
     // #/swap — Bridge stays a sub-action of AI Agent, nav untouched.
     case "bridge":
       page = <BridgePanel wallet={wallet} />;
+      break;
+    // The Vault agent — inspect an allowlisted ERC-4626 vault, then deposit/withdraw. Nav-less
+    // like #/swap and #/bridge: a sub-action reached from the Dashboard/AI Agent, so the 5-item
+    // nav (working tools only) stays untouched.
+    case "vault":
+      page = <VaultPanel wallet={wallet} />;
       break;
     // Reached via the Dashboard "Do something" card, not the nav — a copy-only
     // explainer, so the 5-item nav (working tools only) stays untouched.

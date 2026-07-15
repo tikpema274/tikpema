@@ -21,6 +21,10 @@ export const AGENT = {
   // narrative pipeline); Analyst B is a separate agent because it has separate SOURCES,
   // separate failure modes, and can independently KILL a proposal.
   ANALYST_B: "analyst_b",
+  // Vault agent — inspects an allowlisted ERC-4626 vault on-chain and, on your approval,
+  // deposits/withdraws your USDC. Its own agent (own kill switch, own audit attribution) because
+  // it has its own failure surface: a third-party vault contract and its owner's powers.
+  VAULT: "vault",
 };
 
 // ⚠️ `movesFunds` IS AUDITED, NOT ASSERTED. It was previously derived in agents.mjs as
@@ -77,6 +81,20 @@ export const AGENTS = [
     // audit falsified: the Researcher spends real money too. The warning is preserved (this IS
     // the most dangerous agent) without the false claim that it is the only spender.
     spends: "Moves your USDC/EURC — sends, swaps, bridges. This is the one that can move funds anywhere.",
+  },
+  {
+    id: AGENT.VAULT,
+    label: "Vault",
+    movesFunds: true, // deposits your USDC into an allowlisted ERC-4626 vault — approve → deposit, _vault.mjs
+    description:
+      "Inspects a yield vault on-chain BEFORE you commit — is it a real ERC-4626, what is the " +
+      "underlying, is it funded, and what powers does its owner hold (settable fees, an emergency " +
+      "drain, upgradeability)? Then, only on your approval and only for a vault on its allowlist, " +
+      "it deposits your USDC and can withdraw it back. It reads a third-party contract, so it " +
+      "shows you the vault's terms — including the uncomfortable ones — before you agree to them.",
+    // Deposits are capped per-transaction and per-day; a withdraw is a reclaim (always available,
+    // never blocked by a pause). The card leads with the move, then the guardrail.
+    spends: "Deposits your USDC into an allowlisted vault — capped per deposit and per day. Withdraw is always available. It shows the vault's owner powers before you approve.",
   },
 ];
 

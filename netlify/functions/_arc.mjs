@@ -118,6 +118,28 @@ export const swapCapUsdc = () => {
   return n;
 };
 
+// Per-VAULT-DEPOSIT cap. The Vault agent deposits the user's USDC into an allowlisted ERC-4626
+// vault (approve → deposit). Unlike the UB *deposit* bound above — a footgun guard on the USER's
+// own Gateway move — this GENUINELY bounds an AGENT action: vault_deposit IS in the executor's
+// vocabulary (_actions.mjs), so this is the thing standing between an instruction and the funds.
+//
+// The underlying vaultDeposit() in _vault.mjs enforces NOTHING itself, so executeAction MUST call
+// this and reject BEFORE approving/depositing — reaching the mechanism unguarded would bypass the
+// cap (the swap-cap trap). Same fail-closed parse as the others: unset → conservative default;
+// garbled → throw (a typo can never silently widen the bound). Cumulative deposits ALSO count
+// against the _budget.mjs day-ceiling, like every other agent spend.
+export const vaultDepositCapUsdc = () => {
+  const raw = process.env.AGENT_VAULT_DEPOSIT_CAP_USDC;
+  if (raw === undefined || raw === "") return 25; // conservative testnet default (matches bridge/swap)
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(
+      `AGENT_VAULT_DEPOSIT_CAP_USDC is misconfigured (${JSON.stringify(raw)}); refusing to deposit`
+    );
+  }
+  return n;
+};
+
 // Per-UB-SPEND cap (the WRITE side of Unified Balance — a cross-chain spend of the
 // agent's Arc unified balance to another chain). Its own bound, same fail-closed
 // parse. CRITICAL: kit.unifiedBalance.spend / _ubspend.mjs are UNCAPPED, so the

@@ -7,6 +7,7 @@ import {
   ubSpendCapUsdc,
   ubDepositMaxPerTxUsdc,
   ubSpendFloorUsdc,
+  vaultDepositCapUsdc,
 } from "./_arc.mjs";
 import { AGENT, AGENTS } from "./_agents.mjs";
 import { budgetConfig } from "./_budget.mjs";
@@ -64,6 +65,11 @@ const INVARIANTS_CID = {
   [AGENT.RESEARCHER]: "ipfs://bafkreicdicy7hhb45ayygkt457jfx4ucswey7nknhcvg2gexsp4opbminy",
   [AGENT.ANALYST_B]: "ipfs://bafkreifzi7ia4djdp7ukbnf2hwndeys5p7cwre66lrlnroqmwpyaqqo7om",
   [AGENT.EXECUTOR]: "ipfs://bafkreic5eefpf3c67l2ti2mxmgpo7qwtzao3mtrc23cmcrlrefazqgxxdi",
+  // The Vault agent is a NEW, testnet dress-rehearsal agent. No invariants document has been
+  // authored or pinned for it, and nothing is on-chain — so there is DELIBERATELY no CID here. A
+  // real CID would be a claim we cannot back; null is the honest state, and invariantsUriStatus
+  // (below) says exactly that. Do not fabricate a placeholder that looks resolvable.
+  [AGENT.VAULT]: null,
 };
 
 // Read one bound in isolation. A throw from the fail-closed helper is a REPORTABLE STATE, not a
@@ -233,6 +239,29 @@ function parametersFor(id) {
       ],
     };
   }
+
+  if (id === AGENT.VAULT) {
+    return {
+      spendCaps: [],
+      spendCapsNote:
+        "None separate from the movement cap — the Vault agent's only spend is a vault deposit, bounded below.",
+      budget: [ceiling],
+      // The per-deposit bound on committing funds into an allowlisted vault. A GENUINE agent cap
+      // (unlike the UB *deposit* footgun guard): vault_deposit IS in the executor vocabulary, so
+      // this is what stands between an instruction and the funds.
+      movementCaps: [
+        cap("Vault deposit cap", vaultDepositCapUsdc, "single deposit into an allowlisted ERC-4626 vault"),
+      ],
+      movementCapsNote:
+        "A vault DEPOSIT is capped per-transaction (above) and counts against the daily ceiling. It " +
+        "can only target a vault on the server-side allowlist (resolveVault) — never a free-form " +
+        "address — and every deposit is gated by an on-chain inspection: a vault that trips a BLOCK " +
+        "check is refused, and one that trips a WARN (e.g. an owner emergency-withdraw or settable " +
+        "fees) requires your explicit acknowledgment before it proceeds. A vault WITHDRAW is a " +
+        "RECLAIM: it is uncapped and is NOT blocked by a pause — pausing the agent must never trap " +
+        "your funds inside the vault.",
+    };
+  }
   return null;
 }
 
@@ -272,6 +301,23 @@ function invariantsFor(id) {
         "trigger it — those calls sit sequentially in the handler AFTER runResearch() returns, using " +
         "the handler's own client. _research.mjs holds no escrow reference and no signer. That is " +
         "shared-caller adjacency, not reachability.",
+      ...base,
+    ];
+  }
+
+  if (id === AGENT.VAULT) {
+    return [
+      "The Vault agent can only target a vault on the server-side allowlist (resolveVault) — never a " +
+        "free-form contract address. It has no path to deposit into an arbitrary address.",
+      "Every deposit is gated by an on-chain inspection BEFORE any approve or deposit is signed: a " +
+        "vault that trips a BLOCK check (not a contract, not ERC-4626, an empty shell, an asset " +
+        "mismatch, or a current withdraw fee over the ceiling) is refused outright.",
+      "A vault whose inspection raises a WARN (owner emergency-withdraw, settable fees, an EOA owner, " +
+        "upgradeability) cannot be deposited into without your explicit, disclosure-bound " +
+        "acknowledgment — a missing or mismatched acknowledgment refuses the deposit (fail-closed).",
+      "A vault WITHDRAW is a reclaim: it never moves funds anywhere but back to your own agent wallet " +
+        "(redeem to self), and it is deliberately NOT subject to the pause switch, so a paused agent " +
+        "cannot trap your funds in the vault.",
       ...base,
     ];
   }
@@ -353,14 +399,17 @@ export async function handler(event) {
       // The pinned, verified IPFS CID for THIS agent's invariants document (per-agent map above).
       // Pinned and retrievable — but NOT yet recorded on-chain, so it is not yet authoritative.
       // The status string carries that distinction; do not soften it until registration lands.
-      invariantsUri: INVARIANTS_CID[id],
-      invariantsUriStatus:
-        "PINNED & RETRIEVABLE, NOT YET ON-CHAIN. The invariants document is pinned to IPFS and " +
-        "resolves at this CID (bytes verified byte-identical to the committed metadata across " +
-        "independent gateways). It is NOT yet recorded on-chain in the ERC-8004 IdentityRegistry, " +
-        "so this URI is NOT yet the authoritative pointer — it becomes authoritative only once " +
-        "tokenURI(agentId) references this exact CID. Until then treat it as a pinned convenience " +
-        "pointer with NO on-chain authority, not the registered source of truth.",
+      invariantsUri: INVARIANTS_CID[id] ?? null,
+      invariantsUriStatus: INVARIANTS_CID[id]
+        ? "PINNED & RETRIEVABLE, NOT YET ON-CHAIN. The invariants document is pinned to IPFS and " +
+          "resolves at this CID (bytes verified byte-identical to the committed metadata across " +
+          "independent gateways). It is NOT yet recorded on-chain in the ERC-8004 IdentityRegistry, " +
+          "so this URI is NOT yet the authoritative pointer — it becomes authoritative only once " +
+          "tokenURI(agentId) references this exact CID. Until then treat it as a pinned convenience " +
+          "pointer with NO on-chain authority, not the registered source of truth."
+        : "NOT PINNED, NOT ON-CHAIN. No invariants document has been authored or pinned for this " +
+          "agent yet — it is a testnet dress-rehearsal agent. There is no CID to resolve, and the " +
+          "statements below are convenience copy with no authoritative pointer behind them.",
 
       note:
         "The authoritative invariants are the IPFS document whose CID is recorded on-chain in " +

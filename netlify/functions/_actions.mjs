@@ -1,8 +1,9 @@
 import { circle, waitForTx } from "./_circle.mjs";
-import { ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc, bridgeCapUsdc, swapCapUsdc } from "./_arc.mjs";
+import { ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc, bridgeCapUsdc, swapCapUsdc, vaultDepositCapUsdc } from "./_arc.mjs";
 import { agentSwap, valueInUsdc, SWAP_TOKENS } from "./_swap.mjs";
 import { agentPay } from "./_pay.mjs";
 import { agentBridge, bridgeFee, resolveDestination } from "./_bridge.mjs";
+import { resolveVault, inspectVault, gateDeposit, vaultDeposit, vaultWithdraw } from "./_vault.mjs";
 import { canSpendDay, recordAgentSpend } from "./_budget.mjs";
 import { AGENT } from "./_agents.mjs";
 import { assertNotPaused } from "./_pause.mjs";
@@ -30,6 +31,13 @@ export async function valueOfStep(step) {
   // A bridge moves its full face amount OFF Arc (the fee is deducted from it on
   // the destination), so the full amount is what counts against the day-ceiling.
   if (type === "bridge_usdc") return Number(step.amountUsdc);
+  // A vault deposit commits its full face amount into the vault — counts in full against the
+  // day-ceiling, like transfer/bridge.
+  if (type === "vault_deposit") return Number(step.amountUsdc);
+  // A vault withdraw RECLAIMS funds back to the SCA — it is not a spend, so it costs nothing
+  // against the ceiling. (executeAction returns it early, before valuation; this is here only so
+  // valueOfStep is total across the vocabulary — e.g. if a plan sums its steps.)
+  if (type === "vault_withdraw") return 0;
   throw new Error(`unknown step type "${type}"`);
 }
 
@@ -59,6 +67,19 @@ export function validateStepShape(step) {
     if (!resolveDestination(step.destination)) return `unsupported destination "${step.destination}"`;
     return null;
   }
+  // Vault target is ALLOWLISTED by key — never a free-form contract address off the wire, matching
+  // the bridge-destination / swap-token precedent. The inspection GATE (BLOCK/WARN/ack) is a
+  // separate check in executeAction, not part of shape validation.
+  if (type === "vault_deposit") {
+    if (!resolveVault(step.vault)) return `unsupported vault "${step.vault}" (not on the allowlist)`;
+    if (!(Number(step.amountUsdc) > 0)) return "amountUsdc must be > 0";
+    return null;
+  }
+  if (type === "vault_withdraw") {
+    if (!resolveVault(step.vault)) return `unsupported vault "${step.vault}" (not on the allowlist)`;
+    if (!(Number(step.shares) > 0)) return "shares must be > 0";
+    return null;
+  }
   return `unknown step type "${type}"`;
 }
 
@@ -75,6 +96,16 @@ export async function executeAction(step, ctx) {
   const { walletAddress, store } = ctx;
   if (!walletAddress) return { ok: false, blocked: "no agent wallet resolved for this caller" };
 
+  // Which agent's kill switch governs this step. vault_* steps are the VAULT agent's; everything
+  // else is the EXECUTOR's. So pausing the Vault agent stops vault deposits without touching the
+  // Executor, and vice-versa (each agent honours its OWN switch — see _agents.mjs / _pause.mjs).
+  const stepAgent = String(step?.type || "").startsWith("vault_") ? AGENT.VAULT : AGENT.EXECUTOR;
+  // A RECLAIM returns the user's funds — it must never be blocked by a pause. Same principle as
+  // agent-withdraw: pause/cap bind what an agent may SPEND, never what the user may RECLAIM, so a
+  // paused Vault agent cannot trap funds inside the vault. vault_withdraw redeems shares back to
+  // the SCA, so it is a reclaim.
+  const isReclaim = step?.type === "vault_withdraw";
+
   // ── THE KILL SWITCH — checked FIRST, before any cap, any valuation, any signing. ──
   // This is the MAIN chokepoint (agent-act, execute-plan, agent-bridge, and both approve
   // endpoints all land here), but it is NOT the only one: agent-send and agent-ub-spend move
@@ -82,11 +113,22 @@ export async function executeAction(step, ctx) {
   // path routes around is not a pause.
   //
   // Fail-closed: if the switch cannot be READ, _pause.mjs returns a reason and we refuse.
-  const paused = await assertNotPaused({ owner: walletAddress, agent: AGENT.EXECUTOR });
-  if (paused) return { ok: false, blocked: paused };
+  if (!isReclaim) {
+    const paused = await assertNotPaused({ owner: walletAddress, agent: stepAgent });
+    if (paused) return { ok: false, blocked: paused };
+  }
 
   const shapeErr = validateStepShape(step);
   if (shapeErr) return { ok: false, blocked: shapeErr };
+
+  // ── RECLAIM: vault_withdraw returns funds to the SCA — no cap, no day-ceiling, no ledger-as-
+  // spend (a reclaim is not a spend). Handled here, before all the spend machinery below. Shape
+  // is already validated; pause is deliberately skipped above. ──
+  if (step.type === "vault_withdraw") {
+    const vw = resolveVault(step.vault);
+    const wd = await vaultWithdraw({ walletAddress, vault: vw, shares: String(step.shares) });
+    return { ok: true, kind: "vault_withdraw", vault: vw.key, ...wd };
+  }
 
   // Per-transaction SEND cap (transfers only). Checked FIRST so an over-cap send
   // returns the cap message rather than the day-ceiling one. Applies to BOTH
@@ -105,6 +147,17 @@ export async function executeAction(step, ctx) {
     const bcap = bridgeCapUsdc();
     if (Number(step.amountUsdc) > bcap) {
       return { ok: false, blocked: `exceeds per-bridge limit of ${bcap} USDC` };
+    }
+  }
+
+  // Per-VAULT-DEPOSIT cap — checked first (like send/bridge) so an over-cap deposit returns the
+  // cap message rather than the day-ceiling one. amountUsdc is face USDC. vaultDepositCapUsdc()
+  // is fail-closed: a garbled env THROWS here (nothing signs) — the same discipline as the other
+  // caps, which also throw uncaught.
+  if (step.type === "vault_deposit") {
+    const vcap = vaultDepositCapUsdc();
+    if (Number(step.amountUsdc) > vcap) {
+      return { ok: false, blocked: `exceeds per-vault-deposit limit of ${vcap} USDC` };
     }
   }
 
@@ -149,10 +202,12 @@ export async function executeAction(step, ctx) {
   const day = await canSpendDay({ amountUsdc: dayValue, store, owner: walletAddress });
   if (!day.allowed) return { ok: false, blocked: day.reason };
 
-  // On any successful spend below, ledger it against today's ceiling + audit.
+  // On any successful spend below, ledger it against today's ceiling + audit. Attributed to the
+  // agent that acted (VAULT for a vault deposit, EXECUTOR otherwise) — not hardcoded, so the
+  // Agents-page breakdown stays honest.
   const ledger = () =>
     recordAgentSpend({
-      agent: AGENT.EXECUTOR,
+      agent: stepAgent,
       owner: walletAddress,
       amountUsdc: dayValue,
       source: step.type,
@@ -244,6 +299,28 @@ export async function executeAction(step, ctx) {
       netUsdc: r.netUsdc,
       recipient: r.recipient,
     };
+  }
+
+  if (step.type === "vault_deposit") {
+    const v = resolveVault(step.vault);
+    const amount = Number(step.amountUsdc);
+
+    // ── THE INSPECTION GATE. Re-inspect the vault on-chain at execution time (a stale disclosure
+    // must not outrank the live one — same discipline as re-pricing a bridge/swap at approve),
+    // then apply BLOCK / WARN+ack. This runs BEFORE any approve or deposit — nothing signs if the
+    // gate refuses. Allowlisting only got us here; it did NOT silence this. ──
+    let inspection;
+    try {
+      inspection = await inspectVault(v.address);
+    } catch (e) {
+      return { ok: false, blocked: `cannot inspect vault ${v.label}: ${e.message}` };
+    }
+    const gate = gateDeposit({ inspection, ackToken: step.ackToken, expectedAssetAddress: v.assetAddress });
+    if (!gate.ok) return { ok: false, blocked: gate.blocked, disclosure: gate.disclosure };
+
+    const dep = await vaultDeposit({ walletAddress, vault: v, amountUsdc: amount });
+    await ledger();
+    return { ok: true, kind: "vault_deposit", vault: v.key, ...dep, disclosure: gate.disclosure };
   }
 
   return { ok: false, blocked: `unknown step type "${step.type}"` };
