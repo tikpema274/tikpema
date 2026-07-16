@@ -172,17 +172,27 @@ parked is how a future revisit gets mis-triggered (and this file's own standard 
   `pause` (`pauser()` `0x3ee90d53…`, currently unpaused), `denylist`/`unDenylist`, and
   `updateWithdrawalDelay`. So: upgradeable, pausable, freezable **by Circle** — the same trust base
   as USDC itself — not by Mahshar.
-- **The trust-model objection SURVIVES, in its true form: pre-funded pool ≠ atomic per-call.** The
-  primitive is an exact lookalike and is **not interchangeable** with the Researcher's. Same EIP-712
-  struct (`TransferWithAuthorization(from,to,value,validAfter,validBefore,nonce)`), same `scheme:
-  "exact"` — but `domain.verifyingContract` is **`GatewayWalletBatched` (`0x0077777d…`), NOT the USDC
-  token (`0x3600…`)**. Different domain separator ⇒ a `_research.mjs:301` signature is invalid here.
-  Their docs: *"A raw EOA USDC balance on Arc testnet is not accepted — the facilitator checks Circle
-  Gateway balance, not the token contract."* **You must pre-load USDC into a shared Gateway pool
-  first** — which is precisely the "funds sit pre-loaded rather than leaving atomically for a specific
-  purchase" property the custody fix engineered out. It also re-hits the known
-  **`GatewayWalletBatched` requires `from == signer`** wall: the agent SCA cannot spend via a delegate
-  signer. See [[batched-x402-requires-from-equals-signer]].
+- **The BUYER-SIDE objection survives; the general "pooled ≠ atomic" framing does NOT — see the
+  correction below.** The primitive is an exact lookalike and is **not interchangeable** with the
+  Researcher's. Same EIP-712 struct (`TransferWithAuthorization(from,to,value,validAfter,validBefore,nonce)`),
+  same `scheme: "exact"` — but `domain.verifyingContract` is **`GatewayWalletBatched` (`0x0077777d…`),
+  NOT the USDC token (`0x3600…`)**. Different domain separator ⇒ a `_research.mjs:301` signature is
+  invalid here. Their docs: *"A raw EOA USDC balance on Arc testnet is not accepted — the facilitator
+  checks Circle Gateway balance, not the token contract."* **To BUY, we would have to pre-load USDC
+  into Circle's Gateway pool and then hit the known `GatewayWalletBatched` requires `from == signer`
+  wall — the agent SCA cannot spend via a delegate signer.** That is a real, unchanged blocker. See
+  [[batched-x402-requires-from-equals-signer]].
+- **⚠️ CORRECTION (2026-07-16, found by reading our OWN prod): "pre-loaded pool" is NOT a stick to beat
+  Mahshar with — WE SHIP THAT SCHEME.** `netlify/functions/x402-quote.mjs` is a **live seller on prod**
+  (`POST app.tikpema.xyz/.netlify/functions/x402-quote` → real 402) and it advertises
+  **`extra: {name:"GatewayWalletBatched", version:"1", verifyingContract:"0x0077777d…"}`** — the *same
+  scheme and the same contract* as Mahshar. Our buyers must pre-fund Circle's Gateway to pay us. So
+  pooled pre-deposit is **a property of Circle's nanopayments design, not a Mahshar defect**, and it
+  cannot be cited as a trust-model demerit while we run it in production.
+  **The Mahshar-specific disqualifier is narrower and still stands: the OPERATOR HOP.** Its `payTo` is
+  an operator EOA that then pays the seller, with nothing on-chain enforcing that second leg. **Our
+  `payTo` is our own wallet — the buyer pays the seller directly, no hop.** That distinction — not
+  Gateway itself — is the whole objection. Keep it precise.
 - **Real per-call settlement HAS occurred (also contra the original reasoning) — but it is de
   minimis and burst-shaped.** Confirmed: **126 `gatewayMint` payouts of exactly 0.0009 USDC** to
   seller `0x9bb9a984…`, **0.1134 USDC total** (~11 cents, lifetime, whole marketplace), window
@@ -195,20 +205,38 @@ parked is how a future revisit gets mis-triggered (and this file's own standard 
   `uptime` null on **all 118**. The upstreams are the well-known **free public-API directory**
   (`dog.ceo`, `catfact.ninja`, `pokeapi.co`, `jsonplaceholder`, `api.ipify.org`, `open-meteo`) resold
   at $0.001–$0.01/call.
-- **Three flags found in passing, if ever revisited.** (1) **Fee is ~18%, not the 10% advertised**: a
+- **Flags found in passing, if ever revisited.** (1) **Fee is ~18%, not the 10% advertised**: a
   listed 0.001 API bills **1100** micro-USDC (10% *on top*) while the seller receives **0.0009** (10%
-  *off* the list) — Mahshar keeps 0.0002 of every 0.0011. (2) **~7-day authorization window** — their
-  docs recommend `validBefore = now + 604900`, versus ~60s for vanilla x402: a week-long signed claim
-  on your Gateway balance, payable to an operator EOA. (3) **Every 402 co-offers Base MAINNET**
+  *off* the list) — Mahshar keeps 0.0002 of every 0.0011. (2) **Every 402 co-offers Base MAINNET**
   (`eip155:8453`, same `payTo`, same amount) — picking the wrong `accepts` entry spends **real money**.
+- **⚠️ RETRACTED FLAG — the ~7-day authorization window was NOT a Mahshar red flag.** Originally filed
+  as *"their docs recommend `validBefore = now + 604900`, versus ~60s for vanilla x402"*, implying they
+  chose a footgun. **False. 604900 is Circle's `GatewayEvmScheme` DEFAULT**, inherited by anyone
+  porting `circlefin/arc-nanopayments` — **including us**: `x402-quote.mjs:68-69` reads
+  *"GatewayEvmScheme uses 604900s (7 days + buffer)"* and our **live prod 402 returns
+  `maxTimeoutSeconds: 604900`**. A 7-day signed claim is still worth knowing about as a property of the
+  batched scheme; it is **not evidence about Mahshar**, and the ~60s comparison was against a different
+  scheme (token-domain vanilla), which is not what either of us runs here.
 
-**Status: PARKED. No spec, no code, no integration, no payment.** Revisit only if BOTH: (a) Mahshar
-settles **non-custodially per call** — buyer signs a specific payment that lands at the *seller*,
-against the **USDC token domain** (EIP-3009), with no operator EOA holding funds mid-flight and no
-pre-loaded pooled balance; **and** (b) it shows real volume from **independent** buyers and sellers
-(the bar is not "any settlement" — that already exists at 11 cents — but organic third-party demand
-not sourced from the operator's own wallet). Sources: `mahshar.xyz/api/agent/discover`, `/api/apis`,
-a live unpaid 402 challenge, arcscan contract verification, Arc RPC `eth_getCode`/`eth_call`/storage.
+**Status: PARKED. No spec, no code, no integration, no payment.** Revisit only if ALL THREE — and note
+each clause exists for a **different** reason, so do not collapse them (the first draft did, by
+demanding they drop a pooled balance while we ship one):
+1. **TRUST — the operator hop is gone.** `payTo` must be the **seller**, not an operator EOA that
+   promises to forward. This is the actual disqualifier and it is about *them*. (Gateway/pooled
+   pre-deposit is NOT part of this bar — we run that scheme ourselves on prod.)
+2. **ABILITY — we can actually sign it.** Either it settles against the **USDC token domain**
+   (EIP-3009, our `_research.mjs:301` primitive), **or** the `GatewayWalletBatched`
+   **`from == signer`** wall is resolved for our agent SCA. This clause is about *us*, not a
+   criticism of them: it is the buyer-side blocker.
+3. **DEMAND — organic third-party volume.** The bar is not "any settlement" (that already exists, at
+   11 cents) but volume from **independent** buyers/sellers not sourced from the operator's own
+   wallet. Test it the way anchor-x402 was tested: a self-test fleet shows **one funder fanning out to
+   many buyer wallets**; independent demand shows many buyers with **distinct** funders and no
+   operator-funding link.
+
+Sources: `mahshar.xyz/api/agent/discover`, `/api/apis`, a live unpaid 402 challenge, arcscan contract
+verification, Arc RPC `eth_getCode`/`eth_call`/storage; corrections cross-checked against our own
+`netlify/functions/x402-quote.mjs` and its live prod 402.
 
 ---
 
