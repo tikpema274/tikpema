@@ -85,13 +85,6 @@ export const AGENTS = [
   {
     id: AGENT.VAULT,
     label: "Vault",
-    // ⚠️ UNLISTED — hidden from the user-facing roster while its live deposit/withdraw rows are
-    // still being proven (rehearsal only). It stays a FULL agent everywhere that matters: its
-    // kill switch, cap enforcement, and audit attribution all key off this registry entry, and
-    // its endpoints (agent-vault-inspect/deposit/withdraw) stay live — so #/vault works for the
-    // rehearsal. Only the roster READ drops it (agents.mjs filters `unlisted`). Delete this line
-    // to list it once the live rows are proven.
-    unlisted: true,
     movesFunds: true, // deposits your USDC into an allowlisted ERC-4626 vault — approve → deposit, _vault.mjs
     description:
       "Inspects a yield vault on-chain BEFORE you commit — is it a real ERC-4626, what is the " +
