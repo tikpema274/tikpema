@@ -15,9 +15,10 @@
 import * as codeExists from "./checks/code-exists.mjs";
 import * as repoAddressAudit from "./checks/repo-address-audit.mjs";
 import * as ownerPowers from "./checks/owner-powers.mjs";
+import * as payToVsToken from "./checks/payto-vs-token.mjs";
 
 // Adding a check is one line here + one file in checks/.
-const CHECKS = [codeExists, repoAddressAudit, ownerPowers];
+const CHECKS = [codeExists, repoAddressAudit, ownerPowers, payToVsToken];
 const byId = new Map(CHECKS.map((c) => [c.id, c]));
 
 function parseArgs(argv) {
@@ -89,6 +90,24 @@ function print(fact) {
         console.log(`       re-check declared chain: ${s.reproduce.otherChains.map((o) => o.chain).join(", ")}`);
       }
     }
+  } else if (Array.isArray(fact.result?.entries)) {
+    // payto-vs-token
+    console.log(`  HTTP 402 : x402Version=${fact.result.x402Version} · ${fact.result.entryCount} accepts entr(ies)`);
+    if (fact.result.classification === "NO_TERMS_ADVERTISED") console.log(`  result   : NO_TERMS_ADVERTISED — ${fact.result.note}`);
+    for (const e of fact.result.entries) {
+      console.log(`\n    ── ${e.network}  (chainKnown=${e.chainKnown})`);
+      console.log(`       classification         : ${e.classification}`);
+      console.log(`       scheme / amount        : ${e.scheme} / ${e.amount}`);
+      console.log(`       asset  (the token)     : ${e.asset}`);
+      console.log(`       extra.verifyingContract: ${e.declaredVerifyingContract ?? "(absent ⇒ implicitly the asset = vanilla)"}`);
+      console.log(`       effective EIP-712 domain: ${e.effectiveVerifyingContract}`);
+      console.log(`       payTo                  : ${e.payTo}${e.onChain?.payToType ? `  [${e.onChain.payToType}]` : ""}`);
+      if (e.onChain && !e.onChain.error) {
+        console.log(`       extra.name vs token name(): ${JSON.stringify(e.extraName)} vs ${JSON.stringify(e.onChain.tokenName)}  → match=${e.onChain.domainNameMatchesToken}`);
+      } else if (e.onChain?.error) {
+        console.log(`       on-chain cross-check   : UNAVAILABLE (${e.onChain.error})`);
+      }
+    }
   } else if (fact.result?.powers !== undefined) {
     // owner-powers. The scannedAddress line matters more than it looks: on a proxy the powers come
     // from the IMPLEMENTATION's code, and a reader must see which blob was actually scanned.
@@ -117,6 +136,19 @@ function print(fact) {
       console.log(`             HTTP ${fact.evidence.httpStatus}`);
     }
   }
+  // ⚠️ COVERAGE IS PRINTED ON EVERY RESULT, especially clean ones. A pass that hides its blind spots
+  // is the false clean bill this engine exists to prevent — so the limits sit next to the verdict,
+  // not in a README nobody opens.
+  const cov = fact.result?.coverage;
+  if (cov) {
+    console.log(`\n  ── COVERAGE — what this result does and does NOT cover ──`);
+    for (const v of cov.checkedVia) console.log(`     ✓ checked via  : ${v}`);
+    for (const n of cov.notCheckedFor) {
+      console.log(`     ✗ NOT checked  : ${n.id}`);
+      console.log(`                      ${trunc(n.why, 150)}`);
+    }
+  }
+
   // Two query shapes: an RPC read (method/params/reproduce) or a composite (extraction + per-flag
   // curls). Printing `undefined(...)` for the composite was a real bug on the first run — a tool
   // whose product IS provenance cannot be sloppy about rendering it.

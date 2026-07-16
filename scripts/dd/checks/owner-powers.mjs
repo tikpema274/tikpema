@@ -64,6 +64,44 @@ const hasSel = (code, sig) => code.includes(sel(sig));
 const addrFromWord = (w) => (w && w !== "0x" ? "0x" + w.slice(-40) : null);
 const isZeroAddr = (a) => !a || /^0x0+$/.test(a);
 
+// ── COVERAGE — every clean bill states its own limits, on its face ────────────────────────────────
+//
+// ⚠️ THIS IS NOT DOCUMENTATION, IT IS OUTPUT. A check that reports "powers: []" is issuing a PASS, and
+// a pass is the one result nobody double-checks — a false flag gets argued with, a false clean bill
+// gets believed and acted on. So the limits ride ON the fact, not in a README the reader never opens.
+// If this check cannot see a class of power, the fact must say so in the same breath as the result.
+//
+// Each entry names a way this check could hand you a clean bill on a contract that is not clean.
+const COVERAGE = {
+  checkedVia: [
+    "selector-in-bytecode (Solidity dispatcher embeds every external selector)",
+    "erc1967-proxy-resolution (implementation slot read, implementation scanned)",
+    "owner-fn (owner() + classification of the owner's own bytecode)",
+  ],
+  notCheckedFor: [
+    {
+      id: "eip2535-diamond-facets",
+      why: "A diamond's powers live in FACET contracts reached via its selector table, not in the diamond's own bytecode. This scan would find none of them and report a clean bill on a fully-powered contract.",
+    },
+    {
+      id: "accesscontrol-roles",
+      why: "owner() is a convention. A contract using OpenZeppelin AccessControl (DEFAULT_ADMIN_ROLE, grantRole) has no owner() — this check reports 'no-owner-fn' and the contract LOOKS ownerless while a role-holder retains every power.",
+    },
+    {
+      id: "non-1967-proxies",
+      why: "Beacon proxies, transparent proxies with custom slots, UUPS variants storing the impl elsewhere, and metamorphic (CREATE2-redeploy) contracts are not resolved. The stub gets scanned; the logic behind it does not.",
+    },
+    {
+      id: "unreachable-or-unlisted-selectors",
+      why: "A selector present in bytecode may be unreachable, and a power may be exercised via delegatecall/fallback with no selector at all. Presence is evidence of a power; absence is NOT proof of its absence.",
+    },
+    {
+      id: "off-chain-and-economic-control",
+      why: "Upgrade keys held by a custodian, an RPC/frontend that can lie, or a token the contract depends on being pausable elsewhere. This check reads one contract's code, not the system around it.",
+    },
+  ],
+};
+
 /** Scan a blob of bytecode for every signature group. Returns which matched, and the selector it matched on. */
 function scanPowers(code) {
   const out = {};
@@ -108,6 +146,7 @@ export async function run({ address, chain: chainName, block, client }) {
           owner: null,
           isProxy: null,
           note: "no bytecode at this address on this chain — powers cannot be observed (this is NOT 'no powers')",
+          coverage: COVERAGE,
           chainId,
           blockNumber: blk.number,
         },
@@ -191,6 +230,8 @@ export async function run({ address, chain: chainName, block, client }) {
         powersPresent: Object.entries(powers).filter(([, v]) => v.present).map(([k]) => k),
         powers,
         owner,
+        // ⚠️ Rides on EVERY result, especially the clean ones. See COVERAGE above.
+        coverage: COVERAGE,
         chainId,
         blockNumber: blk.number,
       },
