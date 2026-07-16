@@ -14,9 +14,10 @@
 
 import * as codeExists from "./checks/code-exists.mjs";
 import * as repoAddressAudit from "./checks/repo-address-audit.mjs";
+import * as ownerPowers from "./checks/owner-powers.mjs";
 
 // Adding a check is one line here + one file in checks/.
-const CHECKS = [codeExists, repoAddressAudit];
+const CHECKS = [codeExists, repoAddressAudit, ownerPowers];
 const byId = new Map(CHECKS.map((c) => [c.id, c]));
 
 function parseArgs(argv) {
@@ -88,6 +89,26 @@ function print(fact) {
         console.log(`       re-check declared chain: ${s.reproduce.otherChains.map((o) => o.chain).join(", ")}`);
       }
     }
+  } else if (fact.result?.powers !== undefined) {
+    // owner-powers. The scannedAddress line matters more than it looks: on a proxy the powers come
+    // from the IMPLEMENTATION's code, and a reader must see which blob was actually scanned.
+    const r = fact.result;
+    if (!r.powersObservable) {
+      console.log(`  result   : hasCode=false — POWERS NOT OBSERVABLE (this is NOT "no powers")`);
+      console.log(`             ${r.note}`);
+    } else {
+      console.log(`  proxy    : ${r.isProxy ? `YES → implementation ${r.implementation}` : "no"}`);
+      if (r.eip1967Admin) console.log(`  1967admin: ${r.eip1967Admin}`);
+      console.log(`  scanned  : ${r.scannedAddress} (${r.scannedBytecodeBytes} bytes, codeHash ${r.scannedCodeHash.slice(0, 16)}…)`);
+      console.log(`  owner    : ${r.owner?.address ?? "—"}  [${r.owner?.type}] ${r.owner?.label}`);
+      console.log(`  powers   : ${r.powersPresent.length ? r.powersPresent.join(", ") : "(none of the scanned groups matched)"}`);
+      for (const [group, v] of Object.entries(r.powers)) {
+        if (!v.present) continue;
+        for (const m of v.matched) console.log(`      ${group.padEnd(18)} ${m.signature.padEnd(42)} ${m.selector}`);
+      }
+    }
+    console.log(`  re-verify: ${fact.query.queries.length} raw call(s):`);
+    for (const q of fact.query.queries) console.log(`      ${q.what.padEnd(24)} ${q.reproduce}`);
   } else {
     console.log(`  result   :`);
     for (const [k, v] of Object.entries(fact.result)) console.log(`      ${k.padEnd(14)} ${JSON.stringify(v)}`);
