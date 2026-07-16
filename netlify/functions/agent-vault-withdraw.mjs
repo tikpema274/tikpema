@@ -10,8 +10,10 @@
 // agent-withdraw — it is deliberately NOT capped and NOT blocked by a pause. Pausing the Vault agent
 // must never trap funds inside the vault. Withdraw carries the ~0.1% exit fee (see the inspection).
 //
-// Three outcomes: reclaimed (200, tx + USDC received) · nothing to reclaim (200, reclaimed:false,
-// balance was genuinely 0) · could-not-read-balance (502, FAIL CLOSED — nothing signed).
+// Outcomes: reclaimed (200, tx + REAL on-chain USDC delta) · nothing to reclaim (200,
+// reclaimed:false, balance was genuinely 0) · unconfirmed (502, FAIL CLOSED — the reclaim was not
+// PROVEN on-chain: balance unreadable, tx not mined status:success, or no USDC delta. Carries an
+// honest reason and the tx hash if one exists; NEVER a computed/placeholder amount).
 import { connectLambda } from "@netlify/blobs";
 import { json, parseBody } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
@@ -39,9 +41,9 @@ export async function handler(event) {
       { type: "vault_withdraw", vault: v.key, reasoning: "user vault withdraw (reclaim full balance)" },
       { walletAddress }
     );
-    // FAIL CLOSED: the only way a reclaim is !ok is a balance-read failure (it is uncapped and
-    // pause-exempt). Surface it as 502 — the read failed, nothing was redeemed — never a success.
-    if (!r.ok) return json(502, { error: r.blocked, blocked: true });
+    // FAIL CLOSED: a reclaim is only !ok when it could not be PROVEN on-chain (uncapped, pause-exempt,
+    // so no cap/pause path). Surface the honest reason as 502 — never a success, never a number.
+    if (!r.ok) return json(502, { error: r.blocked, blocked: true, unconfirmed: !!r.unconfirmed, withdrawHash: r.withdrawHash ?? null });
     // Genuinely no shares → a clear "nothing to reclaim", NOT an error and NOT a redeem.
     if (r.reclaimed === false) {
       return json(200, { ok: true, reclaimed: false, shareBalanceRaw: r.shareBalanceRaw ?? "0",

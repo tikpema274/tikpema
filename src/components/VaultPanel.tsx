@@ -110,9 +110,16 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
     try {
       const data = await w.withdrawFromVault(VAULT_KEY);
       if (data?.reclaimed === false) {
+        // Genuine empty position (server read balance == 0). Not a failure.
         setMsg({ ok: true, text: data?.message || "Nothing to reclaim — you hold no shares in this vault." });
+      } else if (data?.ok && data?.confirmed && data?.withdrawTx && Number.isFinite(data?.usdcReceived)) {
+        // Success ONLY when the server proved it: mined tx + a real on-chain USDC delta. `usdcReceived`
+        // is the real balance delta, so no "?" placeholder and no computed 70.772 can appear here.
+        setMsg({ ok: true, text: `Reclaimed — received ${data.usdcReceived} USDC back to your agent wallet.` });
       } else {
-        setMsg({ ok: true, text: `Reclaimed — received ${data?.usdcReceived ?? "?"} USDC back to your agent wallet.` });
+        // Resolved but NOT a proven reclaim with a real amount (e.g. an empty/intercepted 200). Render
+        // failure honestly — never a computed or placeholder number. This also kills "received ? USDC".
+        setMsg({ ok: false, text: "Reclaim didn't confirm — your shares are still in the vault. Please try again." });
       }
       refreshShares();
     } catch (e: any) {

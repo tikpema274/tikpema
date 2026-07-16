@@ -148,6 +148,12 @@ export async function executeAction(step, ctx) {
     // this many shares; if the balance changed between read and redeem, the vault reverts (surfaced
     // as an error) rather than over-redeeming.
     const wd = await vaultWithdraw({ walletAddress, vault: vw, shares: bal.raw.toString() });
+    // A reclaim is only a success if it is PROVEN on-chain (mined status:success + a real +USDC
+    // delta). An unproven reclaim is an honest failure carrying its reason — never a fabricated
+    // amount. The caller surfaces `blocked` to the user.
+    if (!wd.confirmed) {
+      return { ok: false, blocked: wd.reason, unconfirmed: true, withdrawHash: wd.withdrawHash ?? null };
+    }
     return { ok: true, kind: "vault_withdraw", vault: vw.key, reclaimed: true, ...wd };
   }
 

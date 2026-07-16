@@ -135,6 +135,22 @@ async function tryRead(pc, address, abi, functionName, args = []) {
   }
 }
 
+// Strict balance read for a MONEY WITNESS: retries hard, then THROWS if it still cannot read. It
+// never returns a fallback value, because a fabricated balance corrupts a delta silently. This is
+// the fix for the 70.772 bug: a withdraw's `usdcBefore` used `?? 0n`, so a single failed read made
+// the "amount received" delta equal the wallet's ENTIRE balance. A witness that guesses is not a
+// witness — if we cannot read it, we refuse rather than invent a number.
+async function readBalanceStrict(pc, token, owner) {
+  const SENTINEL = Symbol("unread");
+  const v = await withRetry(
+    () => pc.readContract({ address: token, abi: BAL_ABI, functionName: "balanceOf", args: [owner] }),
+    SENTINEL,
+    6
+  );
+  if (typeof v !== "bigint") throw new Error("balance read failed");
+  return v;
+}
+
 // Batch many single-return view reads into ONE Multicall3 call. allowFailure → an absent/reverting
 // method comes back null (not a thrown call), so a general vault missing withdrawFee()/MAX_FEE()/
 // owner() degrades gracefully. Retried as a unit; a total failure yields all-null.
@@ -423,15 +439,30 @@ export async function vaultDeposit({ walletAddress, vault, amountUsdc }) {
 
 // ── MOVE: WITHDRAW (redeem) — single call, NO approve ────────────────────────────────────────
 // redeem(shares, receiver=self, owner=self). msg.sender == owner, so the vault's allowance path
-// is skipped (see XyloVault source). `shares` is in the share token's base units (raw). Receipt is
-// verified by USDC-BALANCE DELTA on the SCA.
+// is skipped (see XyloVault source). `shares` is in the share token's base units (raw).
+//
+// `usdcReceived` is the REAL on-chain USDC balance delta of the SCA (after − before), read from the
+// chain — never a shares×price estimate, never an SDK-returned figure. Same balance-delta-as-witness
+// discipline as the swap and deposit receipts. Returns a discriminated result:
+//   { confirmed: true,  usdcReceived, withdrawTx, … }  — mined status:success AND a real +delta read
+//   { confirmed: false, reason, withdrawHash? }        — anything unproven; the caller reports failure
+// It NEVER returns a computed/placeholder amount for an unproven reclaim (that was the 70.772 bug and
+// yesterday's "received ? USDC").
 export async function vaultWithdraw({ walletAddress, vault, shares }) {
   const owner = getAddress(walletAddress);
   const vaultAddr = getAddress(vault.address);
+  const assetAddr = getAddress(vault.assetAddress);
   const client = circle();
   const pc = publicClient();
 
-  const usdcBefore = (await tryRead(pc, getAddress(vault.assetAddress), BAL_ABI, "balanceOf", [owner])) ?? 0n;
+  // WITNESS #1 (fail-closed): USDC balance BEFORE. If we cannot read it we cannot form a truthful
+  // delta, so we refuse BEFORE signing — nothing is submitted, the shares are untouched.
+  let usdcBefore;
+  try {
+    usdcBefore = await readBalanceStrict(pc, assetAddr, owner);
+  } catch {
+    return { confirmed: false, reason: "couldn't read your balance to verify the reclaim — not attempted; your shares are unchanged" };
+  }
 
   const redTx = await client.createContractExecutionTransaction({
     walletAddress,
@@ -441,16 +472,35 @@ export async function vaultWithdraw({ walletAddress, vault, shares }) {
     abiParameters: [String(shares), owner, owner],
     fee: { type: "level", config: { feeLevel: "MEDIUM" } },
   });
-  const redHash = await waitForTx(client, redTx.data?.id);
+  const redHash = await waitForTx(client, redTx.data?.id); // COMPLETE → hash; FAILED/timeout → throws
 
-  const usdcAfter = (await tryRead(pc, getAddress(vault.assetAddress), BAL_ABI, "balanceOf", [owner])) ?? usdcBefore;
-  const usdcReceivedMinor = BigInt(usdcAfter) - BigInt(usdcBefore);
+  // The redeem must be MINED with status:success on-chain. (For an ERC-4337 SCA the OUTER tx can be
+  // 'success' while the inner redeem reverted and moved nothing — WITNESS #2 below catches that.)
+  const receipt = await withRetry(() => pc.getTransactionReceipt({ hash: redHash }), null, 6);
+  if (!receipt || receipt.status !== "success") {
+    return { confirmed: false, withdrawHash: redHash, reason: "reclaim didn't confirm on-chain — your shares are still in the vault" };
+  }
+
+  // WITNESS #2 (fail-closed): USDC balance AFTER. The delta is the truth of what returned.
+  let usdcAfter;
+  try {
+    usdcAfter = await readBalanceStrict(pc, assetAddr, owner);
+  } catch {
+    return { confirmed: false, withdrawHash: redHash, reason: "reclaim submitted, but we couldn't read the amount returned — check your wallet balance before retrying" };
+  }
+  const deltaMinor = BigInt(usdcAfter) - BigInt(usdcBefore);
+  if (deltaMinor <= 0n) {
+    // Mined 'success' but no USDC arrived → the redeem did not actually return funds. Honest failure,
+    // never a fabricated number.
+    return { confirmed: false, withdrawHash: redHash, reason: "reclaim didn't confirm — no USDC was returned; your shares are still in the vault" };
+  }
 
   return {
+    confirmed: true,
     withdrawHash: redHash,
     withdrawTx: `${ARC.explorer}/tx/${redHash}`,
     sharesRedeemedRaw: String(shares),
-    usdcReceived: Number(usdcReceivedMinor) / 10 ** USDC_DECIMALS,
+    usdcReceived: Number(deltaMinor) / 10 ** USDC_DECIMALS, // REAL on-chain balance delta
     verifiedBy: "usdc-balance-delta",
   };
 }
