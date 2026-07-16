@@ -34,7 +34,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { observed, failed, normalizeAddress } from "../fact.mjs";
-import { chainNames } from "../chains.mjs";
+import { CHAINS, chainNames, getChain } from "../chains.mjs";
 import { runBatch } from "../batch.mjs";
 import * as codeExists from "./code-exists.mjs";
 
@@ -56,6 +56,48 @@ const SKIP_FILES = /(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|deno\.lock|\.
 const CODE_EXT = /\.(m?[jt]sx?|json|toml|ya?ml|env|sol|cfg|ini|sh)$/i;
 const DOC_EXT = /\.(md|txt|rst|adoc)$/i;
 const ADDRESS_RE = /0x[0-9a-fA-F]{40}/g;
+
+// ── DECLARED-CHAIN CONTEXT — the multi-chain refinement ──────────────────────────────────────────
+//
+// THE PROBLEM IT FIXES. tikpema's _receipt.mjs:44 reads
+//   base: { rpc: "https://sepolia.base.org", chainId: 84532, usdc: "0x036CbD53…" }
+// Audited against arc-testnet, that address is empty-here/live-there — a TRUE observation of zero
+// significance, because the repo never claims it is Arc's. It says, on the same line, that it is
+// 84532's. Flagging it is how a tool earns a reputation for crying wolf.
+//
+// THE RULE. Suppress only when BOTH hold:
+//   (a) EVERY source site declares a chainId that is a known chain and is NOT the claimed chain, and
+//   (b) each declared chain is one where the address is CONFIRMED LIVE by our own eth_getCode.
+// So "the repo says this is chain X's address" is only accepted once we have independently seen the
+// address alive on chain X. A declaration is a claim; this engine does not suppress on claims.
+//
+// ⚠️ FAIL-CLOSED, DELIBERATELY. No declaration found → FLAG. Declaration we cannot resolve to a known
+// chain → FLAG. Declaration naming the CLAIMED chain → FLAG (that is the bug: the repo treating a
+// foreign address as if it were the claimed chain's). Suppression is the narrow, evidenced exception;
+// flagging is the default. Getting this backwards would silence exactly the case the tool exists for.
+//
+// ⚠️ WHY THIS STILL CATCHES ARCENT. Its sites are not uniformly foreign-declared: x402Client.js:58 is
+//   5042002: '0x036CbD53…'  // Arc Testnet (placeholder)
+// which declares the CLAIMED chain, and arcExecutor.js:16 sits inside a config block whose chainId is
+// 5042002. The repo genuinely treats a Base Sepolia token AS Arc's. Rule (a) fails → it still fires.
+const KNOWN_CHAIN_IDS = Object.entries(CHAINS).map(([name, c]) => ({ name, id: c.id }));
+const CONTEXT_WINDOW = 3; // lines either side — configs put chainId next to the address, not on it
+
+/** Nearest declared chainId to a source line, with the exact line it was declared on (the evidence). */
+export function declaredChainNear(lines, idx, window = CONTEXT_WINDOW) {
+  for (let d = 0; d <= window; d++) {
+    for (const j of d === 0 ? [idx] : [idx - d, idx + d]) {
+      if (j < 0 || j >= lines.length) continue;
+      for (const k of KNOWN_CHAIN_IDS) {
+        // \b so 84532 does not match inside 845321 — a declaration is a number, not a substring.
+        if (new RegExp(`\\b${k.id}\\b`).test(lines[j])) {
+          return { chainId: k.id, chain: k.name, at: { line: j + 1, text: lines[j].trim().slice(0, 160) } };
+        }
+      }
+    }
+  }
+  return null;
+}
 
 /**
  * Walk the repo, collecting every 0x+40hex with the file/line it came from — the address's provenance.
@@ -85,14 +127,17 @@ export function extractAddresses(root, { includeDocs = false, skipPaths = [] } =
       if (SKIP_FILES.test(e.name) || !matches(e.name)) continue;
       try {
         if (statSync(p).size > 2_000_000) continue; // skip giant generated blobs
-        const text = readFileSync(p, "utf8");
-        text.split("\n").forEach((line, i) => {
+        const lines = readFileSync(p, "utf8").split("\n");
+        lines.forEach((line, i) => {
           for (const m of line.matchAll(ADDRESS_RE)) {
             hits.push({
               address: m[0].toLowerCase(),
               file: relative(root, p),
               line: i + 1,
               text: line.trim().slice(0, 160),
+              // The chain this SITE says the address belongs to, plus where it said so. Captured at
+              // extraction because only here do we still have the surrounding lines.
+              declared: declaredChainNear(lines, i),
             });
           }
         });
@@ -159,15 +204,16 @@ export async function run({
     return failed({ check: id, input, error: e });
   }
 
-  // Unique addresses, each remembering every source site it appeared at.
+  // Unique addresses, each remembering every source site it appeared at + what chain that site declared.
   const sites = new Map();
   for (const h of hits) {
     const a = normalizeAddress(h.address);
     if (!a) continue;
     if (!sites.has(a)) sites.set(a, []);
-    sites.get(a).push({ file: h.file, line: h.line, text: h.text });
+    sites.get(a).push({ file: h.file, line: h.line, text: h.text, declared: h.declared });
   }
   const addresses = [...sites.keys()];
+  const claimedChainId = getChain(claimedChain).id;
 
   if (addresses.length === 0) {
     return observed({
@@ -203,6 +249,7 @@ export async function run({
 
     // ── Classification. Pure function of the facts above. No inference, no model. ──
     const flags = [];
+    const suppressed = [];
     const classified = {};
     for (const a of addresses) {
       const cf = claimedBy.get(a);
@@ -222,11 +269,67 @@ export async function run({
         classification === "INDETERMINATE_ON_CLAIMED_CHAIN";
       if (!isFlag) continue;
 
+      // ── The multi-chain refinement. Only ever narrows EMPTY_ON_CLAIMED__LIVE_ELSEWHERE; an
+      // INDETERMINATE is never suppressed, because we do not silence what we could not read. ──
+      if (classification === "EMPTY_ON_CLAIMED_CHAIN__LIVE_ON_OTHER_CHAIN") {
+        const siteList = sites.get(a);
+        const liveChainIds = new Set(liveElsewhere.map((f) => f.result.chainId));
+        // (a) every site declares a KNOWN, non-claimed chain …
+        const allForeignDeclared = siteList.every((s) => s.declared && s.declared.chainId !== claimedChainId);
+        // (b) … and we have SEEN the address alive on every chain those sites named.
+        const declarationsConfirmedLive =
+          allForeignDeclared && siteList.every((s) => liveChainIds.has(s.declared.chainId));
+
+        if (declarationsConfirmedLive) {
+          classified[classification] -= 1;
+          classified.SUPPRESSED_DECLARED_FOREIGN = (classified.SUPPRESSED_DECLARED_FOREIGN ?? 0) + 1;
+          suppressed.push({
+            address: a,
+            claimedChain,
+            wouldHaveBeen: classification,
+            reason: "EVERY_SOURCE_SITE_DECLARES_A_FOREIGN_CHAIN_AND_THE_ADDRESS_IS_CONFIRMED_LIVE_THERE",
+            // Evidence for the SUPPRESSION itself — a suppressed address must be as auditable as a
+            // flagged one, or the refinement becomes a place for real bugs to hide.
+            declaredBy: siteList.map((s) => ({
+              file: s.file,
+              line: s.line,
+              text: s.text,
+              declaredChainId: s.declared.chainId,
+              declaredChain: s.declared.chain,
+              declaredAt: s.declared.at, // the exact line the chainId was read from
+            })),
+            confirmedLiveOn: liveElsewhere.map((f) => ({
+              chain: f.input.chain,
+              chainId: f.result.chainId,
+              blockNumber: f.result.blockNumber,
+              bytecodeBytes: f.result.bytecodeBytes,
+              codeHash: f.result.codeHash,
+            })),
+            reproduce: {
+              claimedChain: cf.query?.reproduce ?? null,
+              otherChains: liveElsewhere.map((f) => ({ chain: f.input.chain, curl: f.query.reproduce })),
+              source: `grep -rn '${a}' ${root}`,
+            },
+          });
+          continue;
+        }
+      }
+
       flags.push({
         address: a,
         claimedChain,
         classification,
-        source: sites.get(a),
+        // Why this was NOT suppressed — the same evidence a suppression carries, so the two are
+        // comparable side by side. `declared: null` means no chainId near that site; a declared id
+        // equal to the claimed chain is the smoking gun (the repo treats a foreign address as ours).
+        source: sites.get(a).map((s) => ({
+          file: s.file,
+          line: s.line,
+          text: s.text,
+          declaredChainId: s.declared?.chainId ?? null,
+          declaredChain: s.declared?.chain ?? null,
+          declaredAt: s.declared?.at ?? null,
+        })),
         onClaimedChain: cf.status === "observed"
           ? { hasCode: cf.result.hasCode, chainId: cf.result.chainId, blockNumber: cf.result.blockNumber }
           : { error: cf.error },
@@ -248,7 +351,7 @@ export async function run({
     return observed({
       check: id,
       input,
-      result: { addressesFound: addresses.length, flags, classified },
+      result: { addressesFound: addresses.length, flags, suppressed, classified },
       evidence: {
         extraction: { root, occurrences: hits.length, uniqueAddresses: addresses.length },
         facts: {

@@ -60,12 +60,33 @@ function print(fact) {
         console.log(`       LIVE on ${l.chain.padEnd(9)}: ${l.bytecodeBytes} bytes @ block ${l.blockNumber}  codeHash=${l.codeHash.slice(0, 16)}…`);
       }
       console.log(`       source :`);
-      for (const s of f.source.slice(0, 4)) console.log(`         ${s.file}:${s.line}  ${trunc(s.text, 96)}`);
+      for (const s of f.source.slice(0, 4)) {
+        const d = s.declaredChainId ? `  [site declares chainId ${s.declaredChainId} @ line ${s.declaredAt.line}]` : `  [no chainId declared near site]`;
+        console.log(`         ${s.file}:${s.line}  ${trunc(s.text, 76)}${d}`);
+      }
       if (f.source.length > 4) console.log(`         …and ${f.source.length - 4} more site(s)`);
       console.log(`       re-verify:`);
       if (f.reproduce.claimedChain) console.log(`         claimed  : ${f.reproduce.claimedChain}`);
       for (const o of f.reproduce.otherChains) console.log(`         ${o.chain.padEnd(9)}: ${o.curl}`);
       console.log(`         source   : ${f.reproduce.source}`);
+    }
+
+    // Suppressions are PRINTED, never hidden. A refinement that silences quietly is a place for real
+    // bugs to live; the reader must be able to re-check every suppression's declared chainId.
+    if (fact.result.suppressed?.length) {
+      console.log(`\n  suppressed: ${fact.result.suppressed.length} (declared-foreign, confirmed live there — shown so you can audit the suppression)`);
+      for (const s of fact.result.suppressed) {
+        console.log(`\n    ── ${s.address}  (would have been ${s.wouldHaveBeen})`);
+        console.log(`       reason : ${s.reason}`);
+        for (const d of s.declaredBy) {
+          console.log(`       site   : ${d.file}:${d.line}  declares chainId ${d.declaredChainId} (${d.declaredChain}) @ line ${d.declaredAt.line}`);
+          console.log(`                ${trunc(d.declaredAt.text, 100)}`);
+        }
+        for (const l of s.confirmedLiveOn) {
+          console.log(`       live   : ${l.chain} (chainId ${l.chainId}) — ${l.bytecodeBytes} bytes @ block ${l.blockNumber}`);
+        }
+        console.log(`       re-check declared chain: ${s.reproduce.otherChains.map((o) => o.chain).join(", ")}`);
+      }
     }
   } else {
     console.log(`  result   :`);
