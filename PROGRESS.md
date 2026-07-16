@@ -52,11 +52,23 @@ Honorable Mention, Agentic Commerce on Arc).
   before signing. **An independent live mainnet operator converged on the same design as
   [[vanilla-x402-pair-built-proven]] and the same objection we used to park Mahshar.** That is the
   strongest external validation of the primitive choice we have.
-- **Real mainnet volume (modest):** `payTo` `0x127462e2…` (**EOA**) held **15.113 USDC**, with **5
-  inbound 0.001 USDC transfers in the last ~10k Base blocks (~5.5h)**, at Base block ~48,722,545 on
-  2026-07-16. A **steady drip, not a burst** — contrast Mahshar's Arc-testnet 0.1134 USDC lifetime with
-  114/126 in a single day. **Caveat, unverified:** buyer identity was NOT checked; the drip's *shape*
-  differs from a self-test burst, but "organic third-party demand" is inferred, not proven.
+- **Real mainnet volume (modest):** `payTo` `0x127462e2…` (**EOA**) held **15.113 USDC**, with **25
+  inbound payments over ~33h** (~60k Base blocks, tip ~48,723,024 on 2026-07-16). A **steady drip, not
+  a burst** — contrast Mahshar's Arc-testnet 0.1134 USDC lifetime with 114/126 in a single day.
+- **✅ BUYER IDENTITY CHECKED (upgraded from "inferred" — the demand looks genuinely independent).**
+  The 25 payments came from **9 DISTINCT buyer EOAs** (11 / 4 / 3 / 2 / 1×5 payments each), spending
+  **0.001–0.35 USDC across different endpoints** — i.e. exercising the catalogue, not replaying one
+  call. Then the decisive test: **who funded the buyers?** A self-test fleet shows **one funder fanning
+  out to many wallets**. That is **NOT** the pattern — the 9 buyers were funded by **11 DISTINCT
+  sources** (49.96, 50.0, 30.0, 5.0 USDC etc.), each buyer with its own funder(s), and **the operator's
+  `payTo` is NOT among the funders** (verified over ~240k blocks ≈ 5.5 days). One buyer has
+  **nonce 605** — a long-lived wallet with real history, not freshly minted for a demo.
+  - **Why several buyers show nonce 0 — this is CORRECT, not suspicious:** in vanilla x402 the buyer
+    only **signs**; the facilitator submits and pays gas. A buyer that never sends a tx is the expected
+    signature of a working EIP-3009 flow. (Useful tell for reading any x402 seller's books.)
+  - **Residual caveat (unfalsifiable from chain alone):** common ownership across wallets can never be
+    fully disproven, and one buyer self-transferred 20 USDC (mild clustering). But there is **no
+    operator-funding link**, which is the falsifiable part — and it came back clean.
 - **NOT on Arc, and not a competitor.** Rails are Base USDC / Solana USDC / JPYC-on-Polygon
   (`0x431D5dfF…`, `"JPY Coin"` v1). **Arc appears nowhere.** And it is the **SELL side** (18 paid
   services + a chat client); Tikpema is the **buy side** (agent console + roster). **It is a supplier,
