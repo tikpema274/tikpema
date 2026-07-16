@@ -86,6 +86,17 @@ export const AGENTS = [
     id: AGENT.VAULT,
     label: "Vault",
     movesFunds: true, // deposits your USDC into an allowlisted ERC-4626 vault — approve → deposit, _vault.mjs
+    // ⚠️ THE ONLY AGENT WITH ITS OWN PAGE — hence the only one carrying a `route`.
+    //
+    // The roster is a monitoring view: every agent is pausable and inspectable, none was
+    // enterable. Vault broke that assumption by having a 1:1 front door (#/vault), and the
+    // roster had no slot to say so. It lives HERE rather than as an `id === "vault"` test in
+    // the panel for the same reason `movesFunds` does: the registry owns what is true of an
+    // agent, views read it. An agent with no route renders no Open control — routing the other
+    // three would be nav to nowhere (the Executor is the engine behind #/send, #/swap and
+    // #/bridge, so it has four surfaces and no page; Second opinion runs inside #/plan and has
+    // none at all). Give an agent its own page, add its route here — that is the whole change.
+    route: "vault",
     description:
       "Inspects a yield vault on-chain BEFORE you commit — is it a real ERC-4626, what is the " +
       "underlying, is it funded, and what powers does its owner hold (settable fees, an emergency " +

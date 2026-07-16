@@ -27,6 +27,7 @@ type Agent = {
   description: string;
   spends: string;
   movesFunds: boolean;
+  route?: string | null; // the agent's own page, from the registry. null/absent = it has none.
   paused: boolean | null; // null = the switch could not be read — "unknown", never "running"
   pausedByAll: boolean;
   spentTodayUsdc: number;
@@ -305,6 +306,16 @@ function RosterCard({
         <button className="linkbtn" onClick={onExpand}>
           {open ? "Hide details" : "Details"}
         </button>
+        {/* OPEN — only for an agent the registry gives a `route`, today just the Vault (#/vault).
+            It is a SEPARATE control on purpose. "Details" means the same thing on all four cards
+            (expand the description + activity in place, right here); if Vault's Details had
+            quietly navigated away instead, one label would mean two things and the divergence
+            would be invisible until a user clicked it. The special case is worth a word. */}
+        {a.route && (
+          <button className="linkbtn" onClick={() => { window.location.hash = "/" + a.route; }}>
+            Open →
+          </button>
+        )}
       </div>
     </div>
   );

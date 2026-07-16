@@ -79,6 +79,10 @@ export async function handler(event) {
       // with the user's USDC (payX402 → EIP-3009, _research.mjs:301). Deriving a money claim in
       // the VIEW is how it drifted from the code that moves the money; the registry owns it now.
       movesFunds: a.movesFunds,
+      // The agent's own page, or null if it has none (most of them). The roster renders an
+      // "Open →" control only when this is set — so "has a page" stays a registry fact, not a
+      // hardcoded id check in the view.
+      route: a.route ?? null,
       // `paused: null` means we could not read the switch — shown as "unknown", never as
       // "running". (Enforcement fails CLOSED; this VIEW is merely honest about not knowing.)
       paused: states[ALL_AGENTS] === true ? true : states[a.id],
