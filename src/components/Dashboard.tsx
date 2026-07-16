@@ -606,13 +606,18 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
             </div>
           </button>
 
-          {/* The AGENTS ROSTER (#/agents, nav-less). Leads with the trust distinction —
-              only one agent can move money — because that is the thing worth knowing. */}
+          {/* The AGENTS ROSTER (#/agents, nav-less). Leads with the trust distinction, because
+              that is the thing worth knowing — but states NO COUNT.
+              This card used to end "Only one can move your money." It was false (three of the
+              four do: the Researcher buys data with your USDC, plus the Executor and the Vault)
+              and it was false in the reassuring direction. The roster's own headline counts its
+              cards, but this card never fetches the roster — it has nothing to count, so it
+              must not imply a number. The roster page itself does the counting. */}
           <button className="quick-card" onClick={() => go("agents")}>
             <div className="qt">Your agents →</div>
             <div className="qd">
-              See who acts for you, what each one spent, and stop any of them instantly.
-              Only one can move your money.
+              See who acts for you, what each one spent, and stop any of them instantly. Each
+              one says whether it can move your money.
             </div>
           </button>
           <button className="quick-card" onClick={() => go("nanopay")}>

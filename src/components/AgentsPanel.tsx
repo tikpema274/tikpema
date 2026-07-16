@@ -12,9 +12,14 @@ type UnifiedWallet = ReturnType<typeof useWallet>;
 // makes the roster read as what it IS: agents lined up side by side.
 //
 // ⚠️ THE `movesFunds` BADGE IS NON-NEGOTIABLE. It must stay legible at grid width, because it
-// is the most important thing on this page: the Researcher CANNOT move your money; the
-// Executor CAN. Everything else on a card — the long description, that agent's own activity —
-// is secondary and moves behind a tap, so the roster stays scannable at six agents, not two.
+// is the most important thing on this page: it is where a user learns that the Researcher CAN
+// move their money (it buys data with their USDC) and the Second opinion cannot. Everything
+// else on a card — the long description, that agent's own activity — is secondary and moves
+// behind a tap, so the roster stays scannable at six agents, not two.
+//
+// (This comment used to read "the Researcher CANNOT move your money; the Executor CAN" — the
+// same falsehood the registry audit removed from the card copy, left behind in the doc of the
+// invariant. A stale comment about a money claim is how the next reader recreates the bug.)
 //
 // Reuses `.quick` / `.quick-card` / `.qt` / `.qd` from styles.css (already 3-across, already
 // collapsing to 1-across under 760px). No new classes. Note the card is a <div>, not the
@@ -54,6 +59,24 @@ type Roster = {
 
 const money = (n?: number | null) => (n === undefined || n === null ? "—" : n.toFixed(n < 1 ? 4 : 2));
 const time = (ts?: string) => (ts ? new Date(ts).toLocaleTimeString() : "");
+
+// ⚠️ THE HEADLINE COUNTS THE CARDS. It never states a number of its own.
+//
+// It read "Only one of them can move your money" — true when the roster was Researcher +
+// Executor and the Researcher was (wrongly) believed to be read-only. The registry audit then
+// flipped the Researcher to movesFunds: true, and the Vault agent arrived a third mover, and
+// the headline sat there asserting "only one" directly above THREE ⚠ badges saying otherwise.
+// It was the reassuring claim, and it was the false one.
+//
+// So the summary is derived from the same `agents` array the badges render from. It cannot
+// disagree with the cards, because it is counting them. Add a fifth agent and this sentence
+// updates itself — no one has to remember it exists. A hand-written number here is a second
+// source of truth for a money claim, and this file already has the post-mortem for that.
+function moversClaim(movers: number, total: number): string {
+  if (movers === 0) return "None of them can move your money";
+  if (movers === total) return `All ${total} of them can move your money`;
+  return `${movers} of these ${total} can move your money`;
+}
 
 // ⚠️ REMOVED: a hardcoded ONE_LINER map that rendered INSTEAD of the roster's own `spends`
 // string (`ONE_LINER[a.id] ?? a.spends` — the map always won for researcher/executor).
@@ -141,8 +164,14 @@ export default function AgentsPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       <div className="panel-eyebrow">Your agents</div>
       <h2>Who acts for you, and what each one may touch.</h2>
       <div className="sub">
-        Each agent has a job and a boundary. <b>Only one of them can move your money</b> — and
-        you can stop any of them, instantly, at any time.
+        Each agent has a job and a boundary.{" "}
+        {/* Signed out, the roster hasn't loaded and there is nothing to count — so the claim
+            drops to the cautious, uncountable one. Never "only one" on an unknown: the same
+            fail-safe direction as `paused: null` rendering "unknown" and never "running". */}
+        <b>{data ? moversClaim(data.agents.filter((a) => a.movesFunds).length, data.agents.length)
+              : "Some of them can move your money"}</b>{" "}
+        — the badge on each card says which — and you can stop any of them, instantly, at any
+        time.
       </div>
 
       {!authed && (
