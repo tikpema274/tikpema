@@ -1,6 +1,205 @@
 
 ---
 
+## 2026-07-16 — COMPETITIVE RECON (read-only): is anyone building Tikpema on Arc? Arcent + anchor-x402 chain-checked.
+
+**Not a park — a landscape read.** Question asked: are many Arc builders building something similar to
+Tikpema? Answer: **the category is crowded, the discipline is not, and on Arc specifically there is
+currently no working competitor.** Nothing built, integrated, signed, or paid; GETs and unpaid 402
+challenges only.
+
+### The ecosystem is agent-saturated
+[ETHGlobal HackMoney 2026](https://www.arc.io/blog/meet-the-arc-track-winners-from-the-hackmoney-2026-hackathon-and-what-we-learned):
+**155 teams on Arc Testnet**, and per the organizers **97% of submissions used AI agents**, 56%
+crosschain. Agora Agent Hackathon: 252 submissions. lablab has run ≥3 Arc agent hackathons. So
+"AI agent that pays with USDC on Arc" is **the single most common idea on the chain** — not a niche.
+Winners were capability plays: **arctan(x)** (institutional FX DEX), **Text-to-Chain** (SMS wallets),
+**ArcFlow** (self-paying treasury), **Versus** (creator-economy agents); honorable mentions for invoice
+escrow, treasury rebalance, prediction-market capital. **Per that write-up, NONE documents** a passkey
+wallet, multi-agent spending caps/kill switches, an audit trail of agent spend, x402-paid research, or
+ERC-4626 owner-power inspection. Everyone builds what an agent *can do*; almost nobody builds proof it
+*cannot rob you*. That gap is Tikpema's actual differentiator — not the agent, the disclosure layer.
+
+### ARCENT (`github.com/cutepawss/arcent`) — claim UNSUPPORTED. Not a competitor.
+Claims *"The first x402 implementation on Arc Network with Pay-on-Success Protection"* (Gemini
+Honorable Mention, Agentic Commerce on Arc).
+- **Its Arc settlement path targets a contract that does not exist on Arc.**
+  `gateway/services/arcExecutor.js` — header: *"Executes real on-chain transactions using
+  transferWithAuthorization … submits Agent's signed authorization"* — hardcodes
+  `usdc: '0x036CbD53842c5426634e7929541eC2318f3dCF7e'`. That is **Base Sepolia's USDC**. Verified:
+  `eth_getCode` on Arc testnet returns **`0x` — NO CODE** at that address, while Arc's real USDC
+  (`0x3600…`) returns 3,598 chars. The address is **hardcoded with no env override**, so it was never
+  configurable. Every `transferWithAuthorization` on that path calls a non-contract ⇒ **it cannot have
+  settled on Arc.**
+- **No counter-evidence exists:** zero tx hashes in the repo, no arcscan links. `arcent.vercel.app`
+  serves a frontend (200) but every gateway API path **404s** — backend not deployed.
+- **Dead:** created 2026-01-21, **last pushed 2026-01-22** (a 2-day hackathon build, cold ~6 months),
+  0 stars, 0 forks.
+- **Read it as an unchecked copy-paste, not dishonesty** — but the lesson is the file's own:
+  a badge is not a deployment. **The only claimed Arc x402 implementation does not work. Nobody is
+  competing with Tikpema on Arc today.** (Its "executor pays gas, agents only sign" idea is sound —
+  Tikpema does that properly via Gas Station + paymaster.)
+
+### ANCHOR-X402 (`api.anchor-x402.com`) — REAL, and it independently validates our primitive.
+- **Live and maintained:** `/health` ok, OpenAPI **v0.3.0**, 21 paths, **18 services** on three rails,
+  uptime monitor, npm `anchor-x402-mcp`, MIT.
+- **⚠️ It runs OUR EXACT PRIMITIVE — verified on the wire.** Unpaid 402 on `/v1/roll` returns
+  `network eip155:8453`, `scheme "exact"`, `asset 0x833589fC…` (Base USDC), and
+  **`extra: {"name": "USD Coin", "version": "2"}`** — i.e. **the USDC token's own EIP-712 domain**
+  (cross-checked on-chain: Base USDC `name()`=`"USD Coin"`, `version()`=`"2"`). **Token-domain
+  EIP-3009, `payTo` straight to the seller EOA, no operator hop, no pooled pre-deposit.** Its docs
+  state the same rule we enforce: *"no standing approval"*, one signature per call, exact amount shown
+  before signing. **An independent live mainnet operator converged on the same design as
+  [[vanilla-x402-pair-built-proven]] and the same objection we used to park Mahshar.** That is the
+  strongest external validation of the primitive choice we have.
+- **Real mainnet volume (modest):** `payTo` `0x127462e2…` (**EOA**) held **15.113 USDC**, with **5
+  inbound 0.001 USDC transfers in the last ~10k Base blocks (~5.5h)**, at Base block ~48,722,545 on
+  2026-07-16. A **steady drip, not a burst** — contrast Mahshar's Arc-testnet 0.1134 USDC lifetime with
+  114/126 in a single day. **Caveat, unverified:** buyer identity was NOT checked; the drip's *shape*
+  differs from a self-test burst, but "organic third-party demand" is inferred, not proven.
+- **NOT on Arc, and not a competitor.** Rails are Base USDC / Solana USDC / JPYC-on-Polygon
+  (`0x431D5dfF…`, `"JPY Coin"` v1). **Arc appears nowhere.** And it is the **SELL side** (18 paid
+  services + a chat client); Tikpema is the **buy side** (agent console + roster). **It is a supplier,
+  not a rival** — precisely what our Researcher would buy from *if we were on Base*.
+
+### Strategic implications (no action taken)
+1. **No Arc competitor exists today.** The only claimed one is a dead repo pointed at the wrong chain's
+   token address.
+2. **The primitive choice is externally validated.** The one real operator found uses token-domain
+   EIP-3009 with no standing approval — the same conclusion we reached independently.
+3. **The real x402 economy — actual money, actual sellers — is on Base/Solana MAINNET, not Arc.** This
+   does not overturn the BlockRun/AgentCash parks; it explains *why* someone would eventually cross, and
+   those entries already require the crossing to be **its own deliberate mainnet decision**, never a side
+   effect of wanting a data source. **Unchanged: do not cross now.**
+
+Sources: Arc HackMoney-2026 winners blog; lablab Arc hackathon recaps; `raw.githubusercontent.com/cutepawss/arcent`
+(`README.md`, `gateway/services/arcExecutor.js`) + GitHub API repo meta; `api.anchor-x402.com`
+(`/health`, `/openapi.json`, `/.well-known/x402.json`, unpaid 402 on `/v1/roll`); Arc RPC + Base RPC
+`eth_getCode`/`eth_call`/`eth_getLogs`.
+
+---
+
+## 2026-07-16 — AGENTCASH (agentcash.dev): PARKED / DO NOT INTEGRATE — same reasoning as BlockRun (wrong chain).
+
+Read-only recon of AgentCash, an x402 agent-payments platform. **Verdict: PARKED, do not integrate
+— same reasoning as the BlockRun park (2026-07-08): it is a MAINNET/Base crossing, not an Arc
+integration.** Nothing was built, integrated, signed, or paid.
+
+- **It is a real x402 surface.** `/.well-known/x402` (version 1) and `/openapi.json` (v0.1.2,
+  "Wallet management, search, and payment APIs") both serve live. `POST /api/search` with no payment
+  returns a real **HTTP 402**, `x402Version: 2`, with a proper `resource` block. This is not vapor.
+- **It settles on Base mainnet / Solana. There is NO Arc option — confirmed on the wire.** The 402's
+  `supportedChains` are **`eip155:8453` (Base mainnet)** and **`solana:5eykt4Us…` (Solana mainnet)**.
+  **Chain 5042002 is not offered.** So integrating means bridging to Base and signing **real mainnet
+  USDC** — precisely the BlockRun trap already parked: it splits the one-chain Arc trust story and
+  forces Tikpema's deferred mainnet crossing as a side effect of buying data.
+- **The EIP-712 domain-mismatch hazard is REAL — now verified on-chain, both sides.** Arc USDC
+  (`0x3600…`) `name()` = **`"USDC"`**; Base mainnet USDC (`0x8335…`) `name()` = **`"USD Coin"`**,
+  `version()` = `"2"`. Different domain ⇒ **silent signature-verification failure**, not a loud error:
+  a signature built with Arc's domain is simply invalid on Base. See [[arc-usdc-supports-eip3009-vanilla-x402]].
+- **⚠️ Its non-custodial model is NOT chain-verified — do not record it as confirmed.** The 402
+  returned **`accepts: []`**, because AgentCash gates payment terms behind **SIWX** (sign-in-with-X,
+  `eip191`) *before* it will quote an asset, amount, or `payTo`. **So the settlement path — custodial
+  vs. per-call non-custodial, and the signing domain — was NOT observable without authenticating, and
+  I did not authenticate.** Per-call-x402-shaped is what the docs and the ecosystem
+  (x402scan / mppscan) assert; it is **not disproven, just unverified** — this file's standard
+  (`named ≠ deployed ≠ funded`). Any revisit must re-check it on the wire, not from the landing page.
+- **Not permissionless, contra the usual x402 "no signup" pitch.** It requires a **SIWX wallet
+  sign-in** before quoting a price, and exposes an `/api/invite-codes` endpoint — i.e. an identity
+  gate plus a plausible invite gate. Vanilla x402's selling point is that neither exists.
+- **Provider-side quickstart.** The quickstart reviewed was the **PROVIDER/sell side**
+  (`/docs/sell-to-agents`), not the agent-buy path Tikpema would actually need. (The site does appear
+  to document both; only the sell-side flow was read, so the buy-side integration surface is
+  unassessed.)
+
+**⚠️ Correction carried in from the Mahshar entry below — do NOT reintroduce it.** This park was
+originally reasoned as "correct non-custodial model, **unlike Mahshar's drainable pool**." **Mahshar
+has no pool and no drain — it has no contract at all** (verified: its `payTo` is an operator EOA and
+settlement rides Circle's Gateway, whose ABI has no drain function and does have depositor-initiated
+`initiateWithdrawal`/`withdraw`). Mahshar's real disqualifier is **counterparty risk — you pay an
+operator's private key and nothing on-chain enforces the seller's payout**. The contrast to draw
+against AgentCash is that one, not a drainable pool that does not exist.
+
+**Status: PARKED. No spec, no code, no integration, no signature, no payment.** Revisit only if
+EITHER: (a) AgentCash — or x402 generally — settles **natively on Arc** (chain 5042002, against the
+Arc USDC token domain `name: "USDC"`), **or** (b) Tikpema itself moves to mainnet and the
+Base-trust-story tradeoff is reconsidered **deliberately**, as its own decision rather than a
+side effect of wanting a data source. On any revisit, re-verify the settlement model past the SIWX
+gate first — it is currently unverified. Sources: `agentcash.dev/.well-known/x402`, `/openapi.json`,
+a live unpaid 402 on `/api/search`, Arc RPC + Base RPC `eth_call` (`name()`/`version()`).
+
+---
+
+## 2026-07-16 — MAHSHAR (mahshar.xyz) x402 MARKETPLACE: PARKED / DO NOT INTEGRATE.
+
+Read-only recon of Mahshar, an x402 API marketplace on Arc testnet (chain 5042002). **Verdict:
+PARKED, do not integrate.** Nothing was built, integrated, or paid. Every fact below was verified
+against `rpc.testnet.arc.network` + `testnet.arcscan.app`, not taken from Mahshar's docs.
+
+**The verdict is right; the mechanism is NOT what it looks like from the outside.** The park was
+originally reasoned as "a pooled `depositFunds` contract with an `onlyOwner emergencyWithdraw`,
+owner-drainable, no depositor-withdraw path, and no confirmed settlement." **On-chain, all four of
+those are false**, and they are recorded here corrected — a park note that misdescribes the thing
+parked is how a future revisit gets mis-triggered (and this file's own standard is
+"named ≠ deployed ≠ funded").
+
+- **Mahshar has NO contract. Not a drainable one — none at all.** There is no `depositFunds`, no
+  `emergencyWithdraw`, no escrow, no pool of theirs. The entire advertised payment path is
+  **Circle's**: GatewayWallet `0x0077777d7EBA4688BDeF3E311b846F25870A19B9` (ERC1967Proxy → impl
+  `0x44eedDc963A48Eaff9e05200CaFf733f3721fC17`, **verified** on arcscan) and the Gateway Minter
+  `0x0022222ABE238Cc2C7Bb1f21003F0a260052475B`. Mahshar's on-chain footprint is one private key.
+- **The custodial risk is REAL but it is counterparty, not owner-drain.** The 402's `payTo` is
+  `0x052650D1764406d702252B20B2294346A594A1ef` — **an EOA** (no bytecode; 17.06 USDC; 456 txs) and
+  the *same* address that submits the `gatewayMint`. **The buyer pays the operator, not the seller.**
+  Mahshar then pays the seller separately, and **nothing on-chain enforces that second leg**. The
+  counterparty is a private key, not a contract you can read. That is the disqualifier.
+- **A depositor-withdraw path EXISTS and is NOT owner-drainable** (the opposite of the original
+  reasoning). Circle's GatewayWallet ABI carries `initiateWithdrawal` / `withdraw` /
+  `withdrawableBalance` / `withdrawalDelay` — depositor-initiated, behind a delay. There is **no**
+  drain/rescue/sweep function. Circle *can* `upgradeToAndCall` (UUPS; `owner()` `0x5b967871…`),
+  `pause` (`pauser()` `0x3ee90d53…`, currently unpaused), `denylist`/`unDenylist`, and
+  `updateWithdrawalDelay`. So: upgradeable, pausable, freezable **by Circle** — the same trust base
+  as USDC itself — not by Mahshar.
+- **The trust-model objection SURVIVES, in its true form: pre-funded pool ≠ atomic per-call.** The
+  primitive is an exact lookalike and is **not interchangeable** with the Researcher's. Same EIP-712
+  struct (`TransferWithAuthorization(from,to,value,validAfter,validBefore,nonce)`), same `scheme:
+  "exact"` — but `domain.verifyingContract` is **`GatewayWalletBatched` (`0x0077777d…`), NOT the USDC
+  token (`0x3600…`)**. Different domain separator ⇒ a `_research.mjs:301` signature is invalid here.
+  Their docs: *"A raw EOA USDC balance on Arc testnet is not accepted — the facilitator checks Circle
+  Gateway balance, not the token contract."* **You must pre-load USDC into a shared Gateway pool
+  first** — which is precisely the "funds sit pre-loaded rather than leaving atomically for a specific
+  purchase" property the custody fix engineered out. It also re-hits the known
+  **`GatewayWalletBatched` requires `from == signer`** wall: the agent SCA cannot spend via a delegate
+  signer. See [[batched-x402-requires-from-equals-signer]].
+- **Real per-call settlement HAS occurred (also contra the original reasoning) — but it is de
+  minimis and burst-shaped.** Confirmed: **126 `gatewayMint` payouts of exactly 0.0009 USDC** to
+  seller `0x9bb9a984…`, **0.1134 USDC total** (~11 cents, lifetime, whole marketplace), window
+  2026-06-27 → 2026-07-16, most recent **today**. But **114 of the 126 landed on one day** (07-14, the
+  day after a 101-listing bulk import), then 7, then 1. That is the shape of an operator testing its
+  own marketplace, not organic demand. Both seller wallets currently hold 0.000000 USDC.
+- **Thinly populated, and the sellers do not own what they sell.** 118 listings (all `is_active`;
+  the `/api/agent/discover` view caps at 50 and understates it) — but **107 of 118 from ONE wallet**,
+  only **two distinct sellers total**, 101 created on a single day. `verified_at` set on **1 of 118**;
+  `uptime` null on **all 118**. The upstreams are the well-known **free public-API directory**
+  (`dog.ceo`, `catfact.ninja`, `pokeapi.co`, `jsonplaceholder`, `api.ipify.org`, `open-meteo`) resold
+  at $0.001–$0.01/call.
+- **Three flags found in passing, if ever revisited.** (1) **Fee is ~18%, not the 10% advertised**: a
+  listed 0.001 API bills **1100** micro-USDC (10% *on top*) while the seller receives **0.0009** (10%
+  *off* the list) — Mahshar keeps 0.0002 of every 0.0011. (2) **~7-day authorization window** — their
+  docs recommend `validBefore = now + 604900`, versus ~60s for vanilla x402: a week-long signed claim
+  on your Gateway balance, payable to an operator EOA. (3) **Every 402 co-offers Base MAINNET**
+  (`eip155:8453`, same `payTo`, same amount) — picking the wrong `accepts` entry spends **real money**.
+
+**Status: PARKED. No spec, no code, no integration, no payment.** Revisit only if BOTH: (a) Mahshar
+settles **non-custodially per call** — buyer signs a specific payment that lands at the *seller*,
+against the **USDC token domain** (EIP-3009), with no operator EOA holding funds mid-flight and no
+pre-loaded pooled balance; **and** (b) it shows real volume from **independent** buyers and sellers
+(the bar is not "any settlement" — that already exists at 11 cents — but organic third-party demand
+not sourced from the operator's own wallet). Sources: `mahshar.xyz/api/agent/discover`, `/api/apis`,
+a live unpaid 402 challenge, arcscan contract verification, Arc RPC `eth_getCode`/`eth_call`/storage.
+
+---
+
 ## 2026-07-15 — STAKING AGENT: PARKED / DECIDED — Arc has NO native staking by design. Do not re-investigate.
 
 Read-only recon for a possible staking agent on Arc testnet (chain 5042002). **Conclusion: not
