@@ -1,0 +1,112 @@
+// run.mjs — the runner. Prints facts and the evidence they were read from. Nothing else.
+//
+// ⚠️ NO SUMMARY, NO ROLL-UP, NO SCORE. The temptation at the end of a run is a tidy verdict line —
+// "3 checks, 1 problem". That line is the product turning into an opinion, and it is where a DD tool
+// starts being believed instead of checked. The runner's job is to make facts legible and their
+// provenance one copy-paste away. Reading them is the analyst's job, and the analyst is the user.
+//
+//   node scripts/dd/run.mjs code-exists --address 0x036CbD53842c5426634e7929541eC2318f3dCF7e --chain arc-testnet
+//   node scripts/dd/run.mjs --list
+//   … --json     full machine-readable fact (evidence untruncated) for piping/archiving
+//
+// NOT WIRED TO PROD. scripts/dd/ imports nothing from netlify/ or src/, and prod imports nothing
+// from here. It reads public chain state; it holds no key and signs nothing.
+
+import * as codeExists from "./checks/code-exists.mjs";
+import * as repoAddressAudit from "./checks/repo-address-audit.mjs";
+
+// Adding a check is one line here + one file in checks/.
+const CHECKS = [codeExists, repoAddressAudit];
+const byId = new Map(CHECKS.map((c) => [c.id, c]));
+
+function parseArgs(argv) {
+  const out = { _: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a.startsWith("--")) {
+      const k = a.slice(2);
+      const next = argv[i + 1];
+      if (next === undefined || next.startsWith("--")) out[k] = true;
+      else (out[k] = next), i++;
+    } else out._.push(a);
+  }
+  return out;
+}
+
+const trunc = (s, n = 80) => (typeof s === "string" && s.length > n ? `${s.slice(0, n)}… (${s.length} chars)` : s);
+
+/** Human view. The full, untruncated evidence is always one `--json` away. */
+function print(fact) {
+  const mark = fact.status === "observed" ? "▪" : "✖";
+  console.log(`\n${mark} ${fact.check}  [${fact.status}]  ${fact.observedAt}`);
+  console.log(`  input    : ${JSON.stringify(fact.input)}`);
+
+  if (fact.status === "error") {
+    // Loud, and explicitly not a finding — the distinction this engine is built on.
+    console.log(`  error    : ${fact.error}`);
+    console.log(`  result   : (none — INDETERMINATE, not a negative observation)`);
+  } else if (Array.isArray(fact.result?.flags)) {
+    // Composite (repo-address-audit): render each flag with its provenance. Still no verdict — the
+    // counts say what was CLASSIFIED, not what it means, and every flag ships its own curls.
+    console.log(`  scanned  : ${fact.result.addressesFound} unique address(es) from ${fact.evidence.extraction.occurrences} occurrence(s)`);
+    console.log(`  classified:`);
+    for (const [k, v] of Object.entries(fact.result.classified)) console.log(`      ${String(v).padStart(3)} × ${k}`);
+    console.log(`  flags    : ${fact.result.flags.length}`);
+    for (const f of fact.result.flags) {
+      console.log(`\n    ── ${f.address}`);
+      console.log(`       classification : ${f.classification}`);
+      console.log(`       on ${String(f.claimedChain).padEnd(12)}: ${JSON.stringify(f.onClaimedChain)}`);
+      for (const l of f.liveOn) {
+        console.log(`       LIVE on ${l.chain.padEnd(9)}: ${l.bytecodeBytes} bytes @ block ${l.blockNumber}  codeHash=${l.codeHash.slice(0, 16)}…`);
+      }
+      console.log(`       source :`);
+      for (const s of f.source.slice(0, 4)) console.log(`         ${s.file}:${s.line}  ${trunc(s.text, 96)}`);
+      if (f.source.length > 4) console.log(`         …and ${f.source.length - 4} more site(s)`);
+      console.log(`       re-verify:`);
+      if (f.reproduce.claimedChain) console.log(`         claimed  : ${f.reproduce.claimedChain}`);
+      for (const o of f.reproduce.otherChains) console.log(`         ${o.chain.padEnd(9)}: ${o.curl}`);
+      console.log(`         source   : ${f.reproduce.source}`);
+    }
+  } else {
+    console.log(`  result   :`);
+    for (const [k, v] of Object.entries(fact.result)) console.log(`      ${k.padEnd(14)} ${JSON.stringify(v)}`);
+    if (fact.evidence?.bytecode !== undefined) {
+      console.log(`  evidence : bytecode ${trunc(fact.evidence.bytecode)}`);
+      console.log(`             HTTP ${fact.evidence.httpStatus}`);
+    }
+  }
+  // Two query shapes: an RPC read (method/params/reproduce) or a composite (extraction + per-flag
+  // curls). Printing `undefined(...)` for the composite was a real bug on the first run — a tool
+  // whose product IS provenance cannot be sloppy about rendering it.
+  if (fact.query?.method) {
+    console.log(`  query    : ${fact.query.method}(${JSON.stringify(fact.query.params ?? [])})`);
+    console.log(`  reproduce: ${fact.query.reproduce}`);
+    if (fact.query.explorer) console.log(`  explorer : ${fact.query.explorer}`);
+  } else if (fact.query?.extraction) {
+    console.log(`  extraction: ${fact.query.extraction}`);
+    console.log(`  chainReads: ${fact.query.chainReads}`);
+  }
+}
+
+const args = parseArgs(process.argv.slice(2));
+const name = args._[0];
+
+if (args.list || !name) {
+  console.log("\ndd — deterministic due-diligence checks. Facts + provenance. No verdicts.\n");
+  for (const c of CHECKS) console.log(`  ${c.id.padEnd(16)} ${c.describe}\n  ${" ".repeat(16)} usage: ${c.usage}\n`);
+  process.exit(name ? 0 : 1);
+}
+
+const check = byId.get(name);
+if (!check) {
+  console.error(`unknown check "${name}" — known: ${[...byId.keys()].join(", ")}`);
+  process.exit(1);
+}
+
+const fact = await check.run(args);
+if (args.json) console.log(JSON.stringify(fact, null, 2));
+else print(fact);
+
+// Exit code reflects WHETHER WE COULD OBSERVE, never what we observed. `hasCode: false` is a
+// successful run. A tool that exits non-zero on an unwelcome fact is a tool with an opinion.
+process.exit(fact.status === "observed" ? 0 : 2);
