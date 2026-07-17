@@ -174,20 +174,34 @@ function summarize(e) {
 // already authorized us, the read says `true` and we succeed anyway. A duplicate grant is
 // harmless (it sets an already-true mapping); a lost race is invisible. The only state that
 // matters is on-chain, and we always re-derive it rather than trusting our own attempt.
-export async function ensureDelegate({ owner, delegate = process.env.DELEGATE_ADDRESS }) {
+// `knownAuthorized` (optional): the result of an isAuthorizedForBalance read the CALLER
+// already did — so ubDeposit can fold this read into the single Multicall3 it does for
+// balanceOf (they are genuinely simultaneous: both pre-write, and addDelegate is the only
+// intervening write, which touches a different mapping). When passed, we skip our own read;
+// when absent, we do it ourselves, so every other (future) caller keeps the self-contained
+// "source of truth, never cached" behaviour unchanged. The value is still same-block fresh —
+// it came from one multicall a few lines up, not a stored flag.
+export async function ensureDelegate({ owner, delegate = process.env.DELEGATE_ADDRESS, knownAuthorized }) {
   if (!owner) throw new Error("ensureDelegate requires an owner (the session's agent SCA)");
   if (!delegate) throw new Error("Missing DELEGATE_ADDRESS");
 
   // 1. Already authorized? Then this is a no-op — the common case on every deposit after
   //    the first.
   //
-  // ⚠️ THIS READ IS WHERE THE RAW HEX CAME FROM. It had no error handling at all (the
-  // try/catch below wraps only the addDelegate WRITE), so a throttled eth_call threw viem's
-  // ~15-line dump straight up through ubDeposit into the Blobs record and onto the user's
-  // screen. Proof it was this line and not the catch below: all three prod failures recorded
-  // `delegateAuthFailed: false`, which is set from `e.name === "DelegateAuthError"` — so the
-  // error never reached the throw at the end of this function.
-  const first = await readAuthorizationTriState(owner, delegate);
+  // ⚠️ THIS READ IS WHERE THE RAW HEX CAME FROM (when we do it here). It had no error
+  // handling at all (the try/catch below wraps only the addDelegate WRITE), so a throttled
+  // eth_call threw viem's ~15-line dump straight up through ubDeposit into the Blobs record
+  // and onto the user's screen. Proof it was this line and not the catch below: all three
+  // prod failures recorded `delegateAuthFailed: false`, set from `e.name ===
+  // "DelegateAuthError"` — so the error never reached the throw at the end of this function.
+  //
+  // When the caller pre-fetched it (ubDeposit's multicall), a THROTTLE on that read surfaces
+  // there as a TransientChainError, before this function is ever entered — same honest
+  // transient class, one fewer round-trip.
+  const first =
+    knownAuthorized === undefined
+      ? await readAuthorizationTriState(owner, delegate)
+      : { authorized: knownAuthorized };
   if (first.unknown) {
     // We could not read. Do NOT fall through to addDelegate: that would submit a gas-paying
     // tx on the assumption of a `false` we never actually observed.

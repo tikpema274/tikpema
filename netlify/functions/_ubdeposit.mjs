@@ -62,6 +62,23 @@ const ERC20_ABI = [
   },
 ];
 
+// Just the one Gateway view we batch here. The write path (addDelegate) and its own ABI stay
+// in _delegate.mjs — this is only the read we fold into ubDeposit's pre-write multicall, and
+// it must match _delegate.mjs's GATEWAY_ABI shape exactly (named inputs, bool out).
+const GATEWAY_AUTH_ABI = [
+  {
+    type: "function",
+    name: "isAuthorizedForBalance",
+    stateMutability: "view",
+    inputs: [
+      { name: "token", type: "address" },
+      { name: "depositor", type: "address" },
+      { name: "addr", type: "address" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+];
+
 const toUnits = (amountUsdc) => BigInt(Math.round(Number(amountUsdc) * 10 ** USDC_DECIMALS));
 
 // ── EVERY READ ON THIS PATH GOES THROUGH HERE. ───────────────────────────────────────
@@ -120,12 +137,41 @@ export async function ubDeposit({ amountUsdc, owner }) {
   const client = circle();
   const pc = publicClient();
 
-  // Insufficient-funds check BEFORE any tx, so a doomed deposit never approves.
-  const balance = await read("check your wallet balance", () =>
-    pc.readContract({
-      address: CONTRACTS.USDC, abi: ERC20_ABI, functionName: "balanceOf", args: [owner],
+  // ── THE ONE PRE-WRITE BATCH. ─────────────────────────────────────────────────────────
+  // balanceOf(owner) and isAuthorizedForBalance(USDC, owner, delegate) are the only two reads
+  // on this path that are genuinely SIMULTANEOUS — both read state before any write, and the
+  // sole intervening write (addDelegate, inside ensureDelegate) touches a DIFFERENT mapping on
+  // a DIFFERENT contract, so neither read depends on it. They collapse into ONE Multicall3
+  // round-trip instead of two, against Arc's rate-limited RPC. (The post-grant balance re-read
+  // below CANNOT join this batch: it exists precisely to observe the change addDelegate may
+  // have made — batching it here would read stale pre-grant state.)
+  //
+  // Multicall3 is verified on Arc testnet at 0xcA11…CA11 (3808 bytes of code; an aggregate3 of
+  // these exact calls was cross-checked against the direct reads and agreed on both contracts).
+  // The whole batch is wrapped in withRetry, so a throttle on it is retried and, if it
+  // exhausts, surfaces as one honest TransientChainError — same class as before, half the calls.
+  // Guard the env BEFORE the batch. A missing DELEGATE_ADDRESS would make
+  // isAuthorizedForBalance read against the zero address and quietly return a WRONG `false`,
+  // which would then drive a needless addDelegate. ensureDelegate makes the same check; do it
+  // here too, because here is where the value first enters a chain read.
+  const delegateAddr = process.env.DELEGATE_ADDRESS;
+  if (!delegateAddr) throw new Error("Missing DELEGATE_ADDRESS");
+  const [balance, alreadyAuthorized] = await read("check your wallet balance", () =>
+    pc.multicall({
+      allowFailure: false, // any sub-call failure throws — withRetry then classifies it
+      contracts: [
+        { address: CONTRACTS.USDC, abi: ERC20_ABI, functionName: "balanceOf", args: [owner] },
+        {
+          address: GATEWAY.WALLET,
+          abi: GATEWAY_AUTH_ABI,
+          functionName: "isAuthorizedForBalance",
+          args: [CONTRACTS.USDC, owner, delegateAddr],
+        },
+      ],
     })
   );
+
+  // Insufficient-funds check BEFORE any tx, so a doomed deposit never approves.
   if (balance < units) {
     throw new Error(
       `Insufficient funds. Have ${formatUnits(balance, USDC_DECIMALS)} USDC, need ${amountUsdc}.`
@@ -150,7 +196,9 @@ export async function ubDeposit({ amountUsdc, owner }) {
   //
   // Idempotent: reads isAuthorizedForBalance first and only writes when false, so this is a
   // single eth_call on every deposit after the first.
-  const grant = await ensureDelegate({ owner });
+  // Pass the authorization we just read in the batch above — ensureDelegate skips its own read
+  // and either no-ops (already authorized) or writes the grant. The value is same-block fresh.
+  const grant = await ensureDelegate({ owner, knownAuthorized: alreadyAuthorized });
 
   // The grant MAY have cost gas (it's paymaster-sponsored on Arc today, but Gas Station
   // policies can be contract-scoped and we don't depend on GatewayWallet being in scope).
@@ -171,31 +219,38 @@ export async function ubDeposit({ amountUsdc, owner }) {
     );
   }
 
-  // ── 1. Current allowance — don't blindly re-approve. ──
-  // ⚠️ THIS IS THE READ THAT THROTTLED ON 2026-07-17 09:58 (record dep:07fdbcb0, selector
-  // 0xdd62ed3e), one step past the delegate reads the first fix protected. It is why `read`
-  // above exists.
-  const existing = await read("check the existing Gateway allowance", () =>
-    pc.readContract({
-      address: CONTRACTS.USDC, abi: ERC20_ABI, functionName: "allowance",
-      args: [owner, GATEWAY.WALLET],
-    })
-  );
-
-  // ── 2. Approve the EXACT amount, only if the standing allowance is short. ──
-  let approveTxHash = null;
-  if (existing < units) {
-    // A non-zero-but-short allowance must go to 0 first: USDC's approve() is a plain
-    // setter here, but resetting makes the intent explicit and defeats any stacking.
-    if (existing > 0n) {
-      const reset = await revokeAllowance(client, owner);
-      if (!reset.revoked) throw new Error(`Could not reset stale allowance: ${reset.error}`);
-    }
-    approveTxHash = await execute(client, owner, CONTRACTS.USDC, "approve(address,uint256)", [
-      GATEWAY.WALLET,
-      units.toString(),
-    ]);
-  }
+  // ── 1. Approve the EXACT amount. Unconditionally. ──
+  //
+  // ⚠️ THERE USED TO BE AN `allowance()` READ HERE, AND IT IS DELIBERATELY GONE. It read the
+  // standing allowance to decide whether to approve at all, and to reset a non-zero-but-short
+  // one to 0 first. Both are unnecessary, and it cost an RPC round-trip on Arc's rate-limited
+  // endpoint — it is the read that throttled on 2026-07-17 09:58 (record dep:07fdbcb0,
+  // selector 0xdd62ed3e).
+  //
+  // WHY REMOVING IT IS SAFE — PROVEN ON-CHAIN, not assumed from the old comment here (which
+  // asserted "USDC's approve() is a plain setter" without evidence):
+  //   · USDC on Arc is FiatTokenV2 — name() = "USDC", version() = "2".
+  //   · Multicall3 aggregate3 executes sequentially in one context, so an eth_call of
+  //     [approve(GW,100), approve(GW,200), allowance(mc3,GW)] proves the semantics with no tx
+  //     and no money: both approves SUCCEEDED and the final allowance read 200. A non-zero →
+  //     non-zero approve overwrites directly. There is no USDT-style require(allowance == 0),
+  //     so the reset-to-0 dance was defending against a hazard this token does not have.
+  //   · Re-run that probe if the token is ever swapped or upgraded — it is the whole basis
+  //     for this being one write instead of a read plus a conditional write.
+  //
+  // WHY IT COSTS US ~NOTHING: a successful deposit consumes the allowance (depositFor pulls
+  // exactly `units`), and a failed one revokes it below. So the standing allowance is ~always
+  // 0 and the old code approved anyway — the read was paying a round-trip to skip a write that
+  // almost never got skipped. It reads 0n on the live wallet today.
+  //
+  // AND IT MAKES THE CLEANUP STRICTLY SAFER: `approveTxHash` is now always set, so the
+  // failure path below can no longer take its "we skipped the approve, don't clobber
+  // pre-existing state" branch — because there is no such case. We always granted it, so
+  // revoking it on failure is always the right move.
+  const approveTxHash = await execute(client, owner, CONTRACTS.USDC, "approve(address,uint256)", [
+    GATEWAY.WALLET,
+    units.toString(),
+  ]);
 
   // ── 3. Deposit. On ANY failure, actively revoke the allowance we just granted. ──
   try {
@@ -218,8 +273,10 @@ export async function ubDeposit({ amountUsdc, owner }) {
       delegateTxHash: grant.txHash,
     };
   } catch (depositError) {
-    // Only clean up an allowance THIS call granted. If we skipped the approve (one was
-    // already sufficient), revoking would clobber pre-existing state we didn't create.
+    // We ALWAYS granted the allowance above (the conditional approve is gone), so cleaning it
+    // up on failure is always correct — there is no "someone else's pre-existing allowance" to
+    // clobber, because we set it ourselves this call. `approveTxHash` is always truthy here;
+    // the guard is kept as a belt-and-braces invariant, not a real branch.
     if (approveTxHash) {
       const cleanup = await revokeAllowance(client, owner);
       if (!cleanup.revoked) {

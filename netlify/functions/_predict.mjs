@@ -17,6 +17,13 @@ export const arcChain = defineChain({
   name: "Arc Testnet",
   nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
   rpcUrls: { default: { http: [ARC.rpc] } },
+  // Multicall3 at its canonical cross-chain address — VERIFIED deployed on Arc testnet
+  // (eth_getCode → 3808 bytes) and cross-checked: an aggregate3 of our exact reads agreed
+  // with the direct reads on both USDC and the Gateway Wallet. This only ENABLES pc.multicall();
+  // every existing pc.readContract() is unaffected. Re-run the code-exists + agreement probe if
+  // the RPC or a fork ever changes under us — a wrong/absent multicall address would batch
+  // against nothing.
+  contracts: { multicall3: { address: "0xcA11bde05977b3631167028862bE2a173976CA11" } },
 });
 
 export function publicClient() {
