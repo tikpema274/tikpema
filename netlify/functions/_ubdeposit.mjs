@@ -4,6 +4,7 @@ import { GATEWAY } from "./_gateway.mjs";
 import { circle, waitForTx } from "./_circle.mjs";
 import { ensureDelegate } from "./_delegate.mjs";
 import { publicClient } from "./_predict.mjs";
+import { withRetry } from "./_retry.mjs";
 
 // UB DEPOSIT PLANE — the FUNDING side of Unified Balance. Moves the agent SCA's plain
 // Arc USDC into the Gateway Wallet contract, credited to the SCA itself. Self-custody:
@@ -63,6 +64,25 @@ const ERC20_ABI = [
 
 const toUnits = (amountUsdc) => BigInt(Math.round(Number(amountUsdc) * 10 ** USDC_DECIMALS));
 
+// ── EVERY READ ON THIS PATH GOES THROUGH HERE. ───────────────────────────────────────
+// Arc's public RPC rate-limits at a few calls/sec and answers "request limit reached"
+// (see _retry.mjs for the full evidence and why viem does not retry it). This path makes
+// FOUR reads — three below plus isAuthorizedForBalance inside ensureDelegate — and the
+// limiter does not care which one it hits.
+//
+// ⚠️ THE LESSON THAT PUT THIS HELPER HERE. The first version of this fix wrapped only the
+// two reads that appeared in the logs (the delegate reads). The very next deposit throttled
+// on `allowance` instead (record dep:07fdbcb0, 2026-07-17 09:58) — the throttle simply moved
+// to the nearest unprotected read, and because nothing wrapped it, the failure was recorded
+// with `transient: false` while its own errorDetail said "request limit reached". Fixing the
+// observed read rather than the CLASS of read bought nothing and produced a lying flag.
+// So: no bare `pc.readContract` on this path. Add a read, wrap it.
+//
+// ⚠️ READS ONLY — NEVER `execute`. Every retry re-runs the thunk, so this is safe exactly
+// because eth_call is idempotent. A retried createContractExecutionTransaction is a
+// double-spend. The writes below are deliberately NOT wrapped; keep it that way.
+const read = (label, fn) => withRetry(fn, { label });
+
 // One direct contract call through the Circle dev-controlled client, polled by tx id.
 async function execute(client, walletAddress, contractAddress, abiFunctionSignature, abiParameters) {
   const tx = await client.createContractExecutionTransaction({
@@ -101,9 +121,11 @@ export async function ubDeposit({ amountUsdc, owner }) {
   const pc = publicClient();
 
   // Insufficient-funds check BEFORE any tx, so a doomed deposit never approves.
-  const balance = await pc.readContract({
-    address: CONTRACTS.USDC, abi: ERC20_ABI, functionName: "balanceOf", args: [owner],
-  });
+  const balance = await read("check your wallet balance", () =>
+    pc.readContract({
+      address: CONTRACTS.USDC, abi: ERC20_ABI, functionName: "balanceOf", args: [owner],
+    })
+  );
   if (balance < units) {
     throw new Error(
       `Insufficient funds. Have ${formatUnits(balance, USDC_DECIMALS)} USDC, need ${amountUsdc}.`
@@ -135,9 +157,11 @@ export async function ubDeposit({ amountUsdc, owner }) {
   // If it was NOT sponsored, the fee came out of this SCA's USDC — which could drop the
   // balance below the amount we just validated. Re-read rather than letting the deposit
   // revert with an opaque error.
-  const afterGrant = await pc.readContract({
-    address: CONTRACTS.USDC, abi: ERC20_ABI, functionName: "balanceOf", args: [owner],
-  });
+  const afterGrant = await read("re-check your wallet balance", () =>
+    pc.readContract({
+      address: CONTRACTS.USDC, abi: ERC20_ABI, functionName: "balanceOf", args: [owner],
+    })
+  );
   if (afterGrant < units) {
     throw new Error(
       `Authorizing the Gateway spender used ${formatUnits(balance - afterGrant, USDC_DECIMALS)} USDC ` +
@@ -148,10 +172,15 @@ export async function ubDeposit({ amountUsdc, owner }) {
   }
 
   // ── 1. Current allowance — don't blindly re-approve. ──
-  const existing = await pc.readContract({
-    address: CONTRACTS.USDC, abi: ERC20_ABI, functionName: "allowance",
-    args: [owner, GATEWAY.WALLET],
-  });
+  // ⚠️ THIS IS THE READ THAT THROTTLED ON 2026-07-17 09:58 (record dep:07fdbcb0, selector
+  // 0xdd62ed3e), one step past the delegate reads the first fix protected. It is why `read`
+  // above exists.
+  const existing = await read("check the existing Gateway allowance", () =>
+    pc.readContract({
+      address: CONTRACTS.USDC, abi: ERC20_ABI, functionName: "allowance",
+      args: [owner, GATEWAY.WALLET],
+    })
+  );
 
   // ── 2. Approve the EXACT amount, only if the standing allowance is short. ──
   let approveTxHash = null;

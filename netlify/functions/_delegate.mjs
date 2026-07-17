@@ -87,16 +87,37 @@ export async function isDelegateAuthorized(owner, delegate = process.env.DELEGAT
 // — an INDETERMINATE collapsed into a definite FAIL, on the path that gates a fund action.
 // A throttled re-read would then report the user's spender as unauthorized when it may well
 // have been authorized all along. Unknown must never wear the face of a definite answer.
+// ⚠️ THE UNKNOWN CARRIES ITS REASON. Both branches below return `unknown` — that part is
+// right, because neither is an answer about authorization. But they are unknown for DIFFERENT
+// reasons, and the caller must not describe one as the other. The first version of this
+// hardcoded "Arc's network is rate-limiting requests" into every unknown's message, which
+// would have asserted a throttle for a revert or a bad address — inventing a cause the
+// evidence doesn't support. That is the same sin as writing "Arc RPC rate-limited" on a card
+// that reads a REST API, and it was in this file.
 async function readAuthorizationTriState(owner, delegate) {
   try {
     return { authorized: await isDelegateAuthorized(owner, delegate) };
   } catch (e) {
     // Couldn't read. Say THAT — do not guess, in either direction.
-    if (e instanceof TransientChainError || isTransient(e)) return { unknown: true, cause: e };
+    if (e instanceof TransientChainError || isTransient(e)) {
+      return { unknown: true, reason: "transient", cause: e };
+    }
     // A non-transient read failure (bad address, ABI mismatch, chain gone) is also not a
-    // `false`. It is a different unknown, and it is equally not an answer about authorization.
-    return { unknown: true, cause: e };
+    // `false`. It is a different unknown, and it is equally not an answer about authorization
+    // — but it is NOT a rate limit, and must never claim to be.
+    return { unknown: true, reason: "other", cause: e };
   }
+}
+
+// The words for an unknown, matched to WHY it is unknown. Only the transient branch names a
+// cause, because only it has one on the evidence.
+function unknownMessage(reason, verb) {
+  const tail = `No funds moved; your USDC is still in your wallet.`;
+  return reason === "transient"
+    ? `Couldn't ${verb} the Gateway spender authorization — Arc's network is rate-limiting ` +
+        `requests. ${tail} Try the deposit again in a moment.`
+    : `Couldn't ${verb} the Gateway spender authorization. ${tail} ` +
+        `This isn't a temporary network problem — please report it if it repeats.`;
 }
 
 // Exhausted retries while trying to VERIFY authorization. Distinct from DelegateAuthError:
@@ -107,12 +128,17 @@ async function readAuthorizationTriState(owner, delegate) {
 // approve/deposit (see the ordering note in _ubdeposit.mjs), so nothing can have moved by
 // the time either is thrown.
 export class DelegateAuthUnknownError extends Error {
-  constructor(message, cause) {
+  constructor(message, cause, reason = "other") {
     super(message);
     this.name = "DelegateAuthUnknownError";
     this.cause = cause;
+    this.reason = reason; // "transient" | "other"
     this.recoverable = true;
-    this.transient = true;
+    // ⚠️ NOT unconditionally true. This was `this.transient = true` for every unknown, which
+    // would flag a revert or a bad address as a rate limit — the same false flag that misled
+    // a reader on record dep:07fdbcb0, just pointed the other way. A flag must describe what
+    // happened, not what usually happens.
+    this.transient = reason === "transient";
     this.indeterminate = true; // NOT a definite "unauthorized" — do not render it as one
   }
 }
@@ -166,10 +192,9 @@ export async function ensureDelegate({ owner, delegate = process.env.DELEGATE_AD
     // We could not read. Do NOT fall through to addDelegate: that would submit a gas-paying
     // tx on the assumption of a `false` we never actually observed.
     throw new DelegateAuthUnknownError(
-      `Couldn't verify the Gateway spender authorization right now — Arc's network is ` +
-        `rate-limiting requests. No funds moved; your USDC is still in your wallet. ` +
-        `Try the deposit again in a moment.`,
-      first.cause
+      unknownMessage(first.reason, "verify"),
+      first.cause,
+      first.reason
     );
   }
   if (first.authorized) {
@@ -213,10 +238,9 @@ export async function ensureDelegate({ owner, delegate = process.env.DELEGATE_AD
       // still safe to retry — ensureDelegate re-reads first, and a duplicate grant is a
       // harmless no-op. But we must not claim the definite negative we did not observe.
       throw new DelegateAuthUnknownError(
-        `Couldn't confirm whether the Gateway spender authorization went through — Arc's ` +
-          `network is rate-limiting requests. No funds moved; your USDC is still in your ` +
-          `wallet. Try the deposit again in a moment.`,
-        recheck.cause
+        unknownMessage(recheck.reason, "confirm"),
+        recheck.cause,
+        recheck.reason
       );
     }
     // Genuinely not authorized — the chain ANSWERED, and the answer was no. NO FUNDS HAVE

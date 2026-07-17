@@ -1,4 +1,5 @@
 import { connectLambda, getStore } from "@netlify/blobs";
+import { isTransient } from "./_retry.mjs";
 import { ubDepositMaxPerTxUsdc } from "./_arc.mjs";
 import { requireInternal } from "./_auth.mjs";
 import { ubDeposit } from "./_ubdeposit.mjs";
@@ -55,9 +56,22 @@ export async function handler(event) {
   const userMessage = (e) => {
     if (e?.name === "DelegateAuthError" || e?.name === "DelegateAuthUnknownError") return e.message;
     if (e?.transient === true || e?.name === "TransientChainError") return e.message;
+    // A transient that reached here UNSTAMPED (an unwrapped read, or a future one someone
+    // forgets to wrap) still deserves its real cause, not the generic line. Say what actually
+    // happened — the evidence supports it, because isTransient read it off the error.
+    if (isTransient(e)) {
+      return (
+        "Arc's network is rate-limiting requests right now, so the deposit couldn't be " +
+        "completed. Nothing was changed — try again in a moment."
+      );
+    }
     const first = String(e?.message ?? "").split("\n")[0].trim();
+    // ⚠️ NOT-transient reaching here is a GENUINE failure, and this generic line must not
+    // dress it up as a passing glitch. "Try again in a moment" would be a lie for a revert or
+    // a bad address — it says the fault is temporary when we have no evidence it is. Say only
+    // what we know: it failed, and we're not summarizing a viem dump at the user.
     if (!first || /^RPC Request failed|^HTTP request failed|^The contract function/i.test(first)) {
-      return "The deposit couldn't be completed right now. Please try again in a moment.";
+      return "The deposit failed. This isn't a temporary network problem — please report it if it repeats.";
     }
     return first.slice(0, 200);
   };
@@ -117,7 +131,19 @@ export async function handler(event) {
     // line was `error: e.message`, and a throttled eth_call put viem's full hex dump on the
     // user's screen (records dep:07960ec2 / dep:1533b09c / dep:648c1c0b). Store the SHORT
     // message; the raw text stays for operators in `errorDetail`, which no view renders.
-    const transient = e.transient === true || e.name === "TransientChainError";
+    // ⚠️ DERIVED FROM THE ERROR, NOT FROM WHO CAUGHT IT. This used to read
+    // `e.transient === true || e.name === "TransientChainError"` — i.e. it trusted a stamp
+    // that only withRetry applies. Record dep:07fdbcb0 (2026-07-17 09:58) throttled on an
+    // UNWRAPPED read, so nothing stamped it, and the record was written `transient: false`
+    // while its own errorDetail said "request limit reached". A reader then took the flag as
+    // ground truth and concluded the throttle wasn't a throttle. A flag that can be a false
+    // negative is worse than no flag: it invites exactly that reasoning.
+    //
+    // isTransient() inspects the error ITSELF (walking .cause), so it is true whenever the
+    // failure really was the transient class — wrapped, unwrapped, retried or not. Every read
+    // on this path is wrapped as of this change, but the flag must not DEPEND on that being
+    // true forever: someone will add read #5 and forget.
+    const transient = isTransient(e) || e.transient === true || e.name === "TransientChainError";
     const indeterminate = e.indeterminate === true;
     await patch({
       status: "failed",
