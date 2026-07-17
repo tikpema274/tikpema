@@ -1,12 +1,4 @@
-import { useEffect, useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
-import { useGatewayBalance } from "../lib/useGatewayBalance";
-import { agentClient } from "../lib/agentClient";
-import { arcTestnet } from "../config/chain";
-import AddressDisplay from "./AddressDisplay";
-import SignInPrompt from "./SignInPrompt";
-
-const EXPLORER = arcTestnet.blockExplorers.default.url;
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -14,210 +6,25 @@ const go = (id: string) => {
   window.location.hash = "/" + id;
 };
 
-// ── THE REVERSIBILITY BADGE ──────────────────────────────────────────────────────────
-// Lifted from AgentsPanel's `movesFunds` badge, same visual grammar: bordered, its own
-// line, AMBER when the fact constrains you and neutral when it doesn't. There it marks
-// "can this agent move my money?"; here it marks "can I get this money back alone?".
-// Same question from the other side, so it earns the same styling.
-function Reversibility({ warn, children }: { warn?: boolean; children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        padding: "5px 8px",
-        borderRadius: 7,
-        fontSize: "0.73rem",
-        lineHeight: 1.3,
-        border: `1px solid ${warn ? "var(--amber)" : "var(--line)"}`,
-        background: warn ? "var(--amber-soft)" : "transparent",
-        color: "var(--paper)",
-      }}
-    >
-      {warn ? "⚠ " : "🔒 "}
-      {children}
-    </div>
-  );
-}
-
-// One pocket. Balance and reversibility on the SAME face — a number the user cannot act
-// on is just decoration, and a warning they meet after committing is just an alibi.
-function Pocket({
-  label,
-  amount,
-  unit = "USDC",
-  badge,
-  warn,
-  children,
-}: {
-  label: string;
-  amount: React.ReactNode;
-  unit?: string;
-  badge: React.ReactNode;
-  warn?: boolean;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div
-      className="status"
-      style={{
-        margin: 0,
-        padding: "14px 16px",
-        background: "var(--field)",
-        border: "1px solid var(--line)",
-        borderRadius: 12,
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-      }}
-    >
-      <div
-        style={{
-          color: "var(--muted)",
-          fontSize: "0.72rem",
-          letterSpacing: "0.06em",
-          textTransform: "uppercase",
-        }}
-      >
-        {label}
-      </div>
-      <div style={{ fontSize: "1.3rem", fontWeight: 600, color: "var(--paper)" }}>
-        {amount}{" "}
-        <span style={{ fontSize: "0.82rem", color: "var(--muted)", fontWeight: 400 }}>
-          {unit}
-        </span>
-      </div>
-      <Reversibility warn={warn}>{badge}</Reversibility>
-      {children}
-    </div>
-  );
-}
-
-// Auto-refresh cadence for the wallet balances. Manual Refresh stays.
-const BALANCE_POLL_MS = 30_000;
-
-// Dashboard — a landing/overview composed ONLY from reads the wallet hook
-// already exposes (agentWallet address + balance, busy, isAuthenticated). No new
-// endpoint, no agent-status call: agent-status reads the SHARED env demo wallet,
-// not the per-user wallet, so surfacing it here would misrepresent the balance.
+// Dashboard — a landing/overview. It shows NO balance and moves NO money.
 //
-// ── WHY THIS PAGE IS SHAPED THE WAY IT IS ────────────────────────────────────────────
-// The page used to show one balance card titled "Your wallet" — which read
-// w.agentWallet, i.e. the AGENT'S dev-controlled SCA, NOT the user's passkey MSCA.
-// Post-40ed27b that label is simply false, and it hid the thing that matters: there are
-// THREE pockets, and they differ in the only dimension a user cares about under stress —
-// can I get this back, alone?
+// ── WHAT LEFT THIS PAGE, AND WHY ─────────────────────────────────────────────────────
+// The "Your money" block — the three pockets (Your wallet / Agent's wallet / Unified
+// balance) with Fund, Withdraw, Max, Refresh and Deposit — used to render inline here.
+// It now lives on the Wallet page (#/wallet), in YourMoney.tsx, which is the page whose
+// entire subject is the user's money; this page's subject is what the agent can do.
 //
-//   1. Your wallet     (passkey MSCA)  w.address / w.usdcBalance   → they hold the key.
-//   2. Agent's wallet  (dev SCA)       w.agentWallet.balance       → Withdraw, any time,
-//                                                                    even if paused.
-//   3. Unified balance (Gateway)       useGatewayBalance           → NO WAY OUT. Cannot be
-//                                                                    withdrawn to the user by
-//                                                                    ANY path. Spendable
-//                                                                    cross-chain only.
+// It was MOVED, not copied. Nothing here reads w.usdcBalance, w.agentWallet.balance or
+// the Gateway balance any more, and nothing here should start: a money figure duplicated
+// into a second view is a figure that drifts out of date, which has bitten this app
+// before. The registry of truth is the Wallet page; this page links to it.
 //
-// Below, those three render left-to-right in the order money actually flows, each wearing
-// its reversibility ON ITS FACE. The badge idiom is lifted verbatim from AgentsPanel
-// (amber = this one constrains you; 🔒 = you're free) because that page already works:
-// it answers "who can touch my money?" at a glance. This one has to answer "where is my
-// money, and which way does it move?"
-//
-// The action grid is grouped BY CONSEQUENCE, not by feature. A flat six-card grid gave
-// Bridge and Deposit identical visual weight, and the author of this app clicked the
+// The action grid below is grouped BY CONSEQUENCE, not by feature. A flat six-card grid
+// gave Bridge and Deposit identical visual weight, and the author of this app clicked the
 // wrong one — moving money OUT when they meant to move it between their own pockets.
 // The consequence therefore lives IN THE LABEL, read BEFORE the click. Deliberately NO
 // confirmation dialogs: those train people to click through.
 export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
-  // Auto-update balances on a timer while a wallet is connected — reuses the
-  // existing refreshAgentWallet (no new endpoint). Cleared on unmount. The
-  // manual Refresh button below is unchanged.
-  const hasWallet = !!w.agentWallet;
-  useEffect(() => {
-    if (!hasWallet) return;
-    const id = setInterval(() => {
-      w.refreshAgentWallet().catch(() => {});
-      // The LOGIN wallet (MSCA) is now ON this page, so it has to be kept live too —
-      // previously nothing here read it, which is precisely how it stayed invisible.
-      // Read-only; a failure here must never disturb the agent balance above.
-      w.refreshBalance?.().catch(() => {});
-    }, BALANCE_POLL_MS);
-    return () => clearInterval(id);
-  }, [hasWallet, w.refreshAgentWallet, w.refreshBalance]);
-
-  // ── HOP A (fund) and its REVERSE (withdraw) — relocated here from MyAgentPanel. ──────
-  // Unchanged money paths: the same connector for hop A (destination = the SERVER-RESOLVED
-  // agent wallet, never a constant) and the same agent-withdraw endpoint (which takes NO
-  // recipient — the server pays the session's own login wallet, so it can only ever pay the
-  // caller). Same caps, same guardrails. What changed is only WHERE the controls live:
-  // beside the balance they act on, because a card that promises "Withdraw any time" and
-  // then sends you to another page to do it is a broken promise.
-  const [fundAmt, setFundAmt] = useState("");
-  const [fundBusy, setFundBusy] = useState(false);
-  const [fundErr, setFundErr] = useState("");
-  const [fundTx, setFundTx] = useState<string | null>(null);
-
-  const [wdAmt, setWdAmt] = useState("");
-  const [wdBusy, setWdBusy] = useState(false);
-  const [wdErr, setWdErr] = useState("");
-  const [wdTx, setWdTx] = useState<string | null>(null);
-
-  const agentSca = w.agentWallet?.address ?? null;
-  const agentBal = Number(w.agentWallet?.balance ?? 0);
-  const loginBal = Number(w.usdcBalance ?? 0);
-
-  // YOUR unified balance across chains (/api/gateway-balance). This is now the CALLER'S OWN
-  // Gateway balance, auth-gated — it used to be a public read of the SHARED agent wallet.
-  // Kept out of useWallet (that's the plain per-user wallet balance) so a failure here never
-  // touches it. useGatewayBalance owns the signed-out / provisioning / ready states.
-  // The `wdTx` nonce re-reads it after a withdrawal, exactly as MyAgentPanel did.
-  const unified = useGatewayBalance(w, wdTx ? 1 : 0);
-  const gwParked = unified.status === "ready" ? Number(unified.total ?? 0) : 0;
-
-  async function fundAgent() {
-    setFundErr("");
-    setFundTx(null);
-    if (!agentSca) {
-      setFundErr("Your agent wallet isn't ready yet — try again in a moment.");
-      return;
-    }
-    setFundBusy(true);
-    try {
-      // Destination is the server-resolved agent wallet (/api/my-wallet →
-      // ensureOwnerWallet(session)), never a constant. Amount validation (>0, <= balance)
-      // lives in the connector against a LIVE chain read, so nothing signs on a bad input.
-      const r = await w.fundAgentWallet(agentSca, Number(fundAmt));
-      setFundTx(r.txHash);
-      setFundAmt("");
-      await w.refreshAgentWallet().catch(() => {});
-      await w.refreshBalance?.().catch(() => {});
-    } catch (e: any) {
-      setFundErr(e?.message || "Funding failed");
-    } finally {
-      setFundBusy(false);
-    }
-  }
-
-  // Reclaim the float. No recipient is sent — the server withdraws to the session's own
-  // login wallet. NOT bound by the agent's pause / day-ceiling / send-cap: those bound the
-  // AGENT, not the user reclaiming their own money. Withdraw must survive a pause.
-  async function withdraw() {
-    setWdErr("");
-    setWdTx(null);
-    setWdBusy(true);
-    try {
-      const token = await w.ensureSession();
-      const r = await agentClient.withdraw(Number(wdAmt), token);
-      setWdTx(r.txHash);
-      setWdAmt("");
-      await Promise.all([
-        w.refreshAgentWallet().catch(() => {}),
-        w.refreshBalance().catch(() => {}),
-      ]);
-    } catch (e: any) {
-      setWdErr(e?.message || "Withdrawal failed");
-    } finally {
-      setWdBusy(false);
-    }
-  }
-
   return (
     <>
       <div className="plane">
@@ -231,225 +38,20 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
         </div>
 
         {w.agentWallet ? (
-          <>
-            {/* ── YOUR MONEY — the three pockets, left to right in the order money flows.
-                One glance must answer: where is every USDC, and which of these can I
-                exit ALONE? The old single card could not answer either question: it
-                showed the agent's float under the title "Your wallet" and never showed
-                the user's actual wallet at all. */}
-            <div
-              style={{
-                color: "var(--muted)",
-                fontSize: "0.72rem",
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                margin: "0 0 10px",
-              }}
-            >
-              Your money
+          // ── WHERE THE THREE POCKETS USED TO BE. ──────────────────────────────────────
+          // The "Your money" block (Your wallet / Agent's wallet / Unified balance, with
+          // Fund, Withdraw, Max, Refresh and Deposit) now lives on the Wallet page — see
+          // YourMoney.tsx. It is NOT duplicated here: a balance rendered in two places is
+          // two balances that drift, and the money copy on this page has drifted before.
+          // One number, one home; this page points at it.
+          <div style={{ marginTop: 4 }}>
+            <button className="emerald" onClick={() => go("wallet")}>
+              Your money →
+            </button>
+            <div className="sub" style={{ margin: "8px 0 0" }}>
+              Your balances, funding and withdrawal are on your Wallet page.
             </div>
-            <div className="quick" style={{ marginBottom: 4 }}>
-              {/* 1. THE USER'S OWN WALLET (passkey MSCA) — w.address / w.usdcBalance.
-                     Never previously surfaced here. Fully theirs; no caveat to make. */}
-              <Pocket
-                label="Your wallet"
-                amount={w.usdcBalance ?? "…"}
-                badge="You hold the key"
-              >
-                <AddressDisplay address={w.address} />
-                <div className="qd">
-                  Yours. Send USDC here from any wallet, exchange, or faucet.
-                </div>
-
-                {/* HOP A — the doorway from the user's wallet into the agent's float. Lives
-                    on the pocket the money LEAVES, not on a separate page. Never hidden when
-                    the wallet is empty (hiding it is what built the old dead end) — it just
-                    says so. */}
-                <div className="row" style={{ gap: 8, alignItems: "center" }}>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min="0"
-                    step="0.01"
-                    placeholder="Amount"
-                    value={fundAmt}
-                    disabled={fundBusy || loginBal <= 0}
-                    onChange={(e) => setFundAmt(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && fundAmt && !fundBusy) fundAgent();
-                    }}
-                    style={{ maxWidth: 110 }}
-                  />
-                  <button
-                    className="emerald"
-                    disabled={fundBusy || loginBal <= 0 || !fundAmt || Number(fundAmt) <= 0}
-                    onClick={fundAgent}
-                  >
-                    {fundBusy ? "Moving…" : "Fund agent →"}
-                  </button>
-                </div>
-                {loginBal <= 0 && (
-                  <div className="qd">Empty — send USDC to the address above first.</div>
-                )}
-                {fundErr && (
-                  <div className="qd" style={{ color: "var(--danger, #e5484d)" }}>{fundErr}</div>
-                )}
-                {fundTx && (
-                  <div className="qd">
-                    Moved into your agent's wallet.{" "}
-                    <a href={`${EXPLORER}/tx/${fundTx}`} target="_blank" rel="noreferrer">
-                      View transaction ↗
-                    </a>
-                  </div>
-                )}
-              </Pocket>
-
-              {/* 2. THE AGENT'S FLOAT (dev-controlled SCA) — what the agent actually
-                     spends from. Reversible in one button: agent-withdraw returns
-                     balanceOf(SCA), and it survives a pause. EURC lives here too, and is
-                     shown as a SEPARATE amount — never summed (EURC != $1). */}
-              <Pocket
-                label="Agent's wallet"
-                amount={w.agentWallet.balance ?? "…"}
-                badge="Withdraw any time"
-              >
-                <AddressDisplay address={w.agentWallet.address} />
-                <div className="qd">
-                  The working float.{" "}
-                  <span className="mono">{w.agentWallet.eurcBalance ?? "…"}</span> EURC also
-                  held here.
-                </div>
-
-                {/* THE EXIT. The badge above promises "Withdraw any time" — so the button
-                    that honours it lives HERE, on the balance it returns. It is not bound by
-                    the agent's pause or caps: those bound the agent, not the user reclaiming
-                    their own money. */}
-                <div className="row" style={{ gap: 8, alignItems: "center" }}>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min="0"
-                    step="0.01"
-                    placeholder="Amount"
-                    value={wdAmt}
-                    disabled={wdBusy || agentBal <= 0}
-                    onChange={(e) => setWdAmt(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && wdAmt && !wdBusy) withdraw();
-                    }}
-                    style={{ maxWidth: 110 }}
-                  />
-                  <button
-                    disabled={wdBusy || agentBal <= 0 || !wdAmt || Number(wdAmt) <= 0}
-                    onClick={withdraw}
-                  >
-                    {wdBusy ? "Withdrawing…" : "Withdraw ↩"}
-                  </button>
-                  <button
-                    className="linkbtn"
-                    disabled={wdBusy || agentBal <= 0}
-                    onClick={() => setWdAmt(String(agentBal))}
-                  >
-                    Max ({agentBal})
-                  </button>
-                </div>
-
-                {/* ── THE AMBER LINE. IT TRAVELS WITH THE WITHDRAW FORM, ALWAYS. ──────────
-                    Withdraw returns the agent's PLAIN USDC — balanceOf(SCA) — and NOTHING
-                    that is sitting in the Gateway unified balance. This comment used to
-                    reassure that the money was merely slow to retrieve, via a server-side
-                    contract call — DESCRIBING A MECHANISM THIS APP NEVER IMPLEMENTED. No
-                    endpoint returns Gateway funds to the user. There is no way to get it
-                    back. It can only be spent cross-chain. Say it here, next to the button,
-                    BEFORE the user clicks and finds money missing. A Withdraw that silently
-                    leaves funds behind is a lie, and this line is what stops it being one.
-                    If this disclosure is ever separated from the button, the trap is back. */}
-                {gwParked > 0 && (
-                  <div className="qd" style={{ color: "var(--warn)" }}>
-                    <b>Not included:</b>{" "}
-                    <span className="mono">{unified.status === "ready" ? unified.total : "—"}</span>{" "}
-                    USDC is in your unified balance. Withdraw does not move it — and{" "}
-                    <b>nothing can return it to you.</b> Unified-balance funds cannot be
-                    withdrawn; they can only be spent cross-chain.
-                  </div>
-                )}
-                {wdErr && (
-                  <div className="qd" style={{ color: "var(--danger, #e5484d)" }}>{wdErr}</div>
-                )}
-                {wdTx && (
-                  <div className="qd">
-                    Returned to your wallet.{" "}
-                    <a href={`${EXPLORER}/tx/${wdTx}`} target="_blank" rel="noreferrer">
-                      View transaction ↗
-                    </a>
-                  </div>
-                )}
-              </Pocket>
-
-              {/* 3. THE UNIFIED BALANCE (Circle Gateway) — the ONLY pocket the user cannot
-                     exit AT ALL (no endpoint returns it), so it wears the amber badge. Keeps all four states
-                     (signed-out / provisioning / loading / error) rather than rendering a
-                     broken card or a bare "—" that reads as a fault. */}
-              <Pocket
-                label="Unified balance"
-                amount={unified.status === "ready" ? unified.total : "…"}
-                badge="Server-released, delayed"
-                warn
-              >
-                {unified.status === "signed-out" && (
-                  <SignInPrompt
-                    wallet={w}
-                    message="Sign in to see your balance."
-                    onSignedIn={() => w.refreshAgentWallet().catch(() => {})}
-                  />
-                )}
-                {unified.status === "provisioning" && (
-                  <div className="qd">Setting up your wallet…</div>
-                )}
-                {unified.status === "loading" && <div className="qd">Reading your balance…</div>}
-                {unified.status === "error" && <div className="qd">Unified balance unavailable.</div>}
-                {unified.status === "ready" && (
-                  <>
-                    <div className="qd" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                      {unified.perChain.map((p) => (
-                        <span key={p.chain}>
-                          {p.chain}:{" "}
-                          {p.ok ? (
-                            <span className="mono">{p.usdc}</span>
-                          ) : (
-                            <span style={{ color: "var(--muted)" }}>unavailable</span>
-                          )}
-                        </span>
-                      ))}
-                    </div>
-                    {/* A true 0 means "fund me", not "broken". */}
-                    {Number(unified.total) === 0 && (
-                      <div className="qd">Empty — nothing committed yet.</div>
-                    )}
-                  </>
-                )}
-                <button className="linkbtn" onClick={() => go("unified")}>
-                  Deposit →
-                </button>
-              </Pocket>
-            </div>
-
-            <div className="row" style={{ marginTop: 12, alignItems: "baseline" }}>
-              <button
-                disabled={w.busy}
-                onClick={() => {
-                  w.refreshAgentWallet().catch(() => {});
-                  w.refreshBalance?.().catch(() => {});
-                }}
-                style={{ padding: "6px 12px", fontSize: "0.8rem" }}
-              >
-                Refresh
-              </button>
-              <button className="linkbtn" onClick={() => go("wallet")}>
-                Manage wallet
-              </button>
-            </div>
-          </>
+          </div>
         ) : (
           // Three explicit entry points. Passkey/MetaMask start the connect flow
           // in THIS click (preserving the user gesture WebAuthn needs) and route
@@ -506,7 +108,6 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
             </div>
           </div>
         )}
-
       </div>
 
       {/* ── DO SOMETHING — GROUPED BY CONSEQUENCE, NOT BY FEATURE ────────────────────────
@@ -519,19 +120,21 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
           So: three groups, ordered by escalating consequence, and the consequence is IN THE
           LABEL where it is read BEFORE the decision — not behind a confirmation dialog,
           which only teaches people to click through. */}
-      {/* NOTE — there is no longer a "Fund your agent" or "Withdraw" CARD here. Both used
-          to be cards that linked to #/agent, where the forms lived. The forms now live in
-          the pockets above, on this same screen, beside the balances they act on. A card
-          that scrolls you 200px up to a control already in view is not navigation, it is
-          the same duplication we just deleted from MyAgentPanel — one control, one home.
+      {/* NOTE — there is no "Fund your agent" or "Withdraw" CARD here, and there must not
+          be one. Those forms live in the pockets they act on, which are now on the Wallet
+          page. One control, one home: re-adding a card here would be the duplication that
+          was already deleted from MyAgentPanel once.
 
           Deposit KEEPS its card, because #/unified is a genuinely different page with its
           own explanation, its own cap, and its own commitment warning. */}
       <div className="plane">
         <div className="panel-eyebrow">Move money between your accounts</div>
         <div className="sub">
-          Nothing leaves you. Fund and withdraw are in <b>Your money</b> above, beside the
-          balances they move.
+          Nothing leaves you. Fund and withdraw live beside the balances they move, on your{" "}
+          <button className="linkbtn" onClick={() => go("wallet")}>
+            Wallet page
+          </button>
+          .
         </div>
         <div className="quick">
           {/* The ONE reversible-looking move that ISN'T fully reversible. It sits in this
