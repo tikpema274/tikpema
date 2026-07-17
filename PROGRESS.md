@@ -1,6 +1,74 @@
 
 ---
 
+## 2026-07-17 — #/unified deposit throttle handling: hex fix → tri-state → widen → Lever 1 (Multicall). Lever 2 parked.
+
+**Shipped to `main`, NOT deployed (deploy is the user's terminal).** Four commits, one UI + three on the
+unified-balance deposit path. Prompted by a prod screenshot: `#/unified` deposit rendered a wall of raw
+viem hex ("request limit reached"). Evidence throughout is prod Blobs records in the `ub-deposits` store,
+not guesses — pulled with `netlify blobs:get ub-deposits dep:<id>`.
+
+### What the throttle actually is (settled from source + records, several wrong theories discarded)
+Arc's public RPC (`rpc.testnet.arc.network`) rate-limits at a few calls/sec and answers with a **JSON-RPC
+error body** — viem's `RpcRequestError`, message `RPC Request failed.` + `Details: request limit reached`,
+**no HTTP status**. viem's `shouldRetry` retries only the numeric codes `-1/-32005/-32603/429` (verified
+verbatim in viem 2.52.2, `shouldRetry` in `utils/buildRequest.js`: `-1`, `LimitExceededRpcError.code`=−32005,
+`InternalRpcError.code`=−32603, `429`, then `return false` for any other numeric code). Arc's code isn't
+among them, so **viem never retried** — proven independently by timing: its backoff forces ≥1.05s, yet two
+failures finished the whole function in ~0.61s. (The timing is what's directly observed; "Arc's code is
+outside the retry set" is what that timing ENTAILS — the records captured the text "request limit reached",
+not Arc's numeric JSON-RPC code, so don't go hunting for a captured code that was never recorded.) NOT an
+HTTP 429, so "429-without-Retry-After" is the wrong
+mechanism — corrected before it entered a commit message. The reliable classifier is therefore a **message-regex on
+`request limit`** (the DD tool's `TRANSIENT` pattern), not viem tuning.
+
+### The commits (newest last)
+- **`08b53ec`** — UI only: moved the "Your money" three-card block off the Dashboard onto `#/wallet`'s
+  connected state (`YourMoney.tsx`). Onboarding path preserved; faucet/Disconnect/EURC carried over.
+- **`e796a80`** — `_retry.mjs` (bounded backoff, `TRANSIENT` regex + 250·2ⁿ, own copy — no prod→`scripts/dd`
+  dependency); `_delegate.mjs` `.catch(()=>false)` → tri-state (`readAuthorizationTriState`): a throttled
+  auth read is **UNKNOWN** (`DelegateAuthUnknownError`), never a false "not authorized", and never falls
+  through to a gas-paying `addDelegate` on unobserved state. Raw `e.message` → `errorDetail` (unrendered).
+- **`14f5bee`** — widened: ALL four reads via `withRetry` (the first fix wrapped only the two in the logs;
+  the next deposit throttled on the unwrapped `allowance` read — record `dep:07fdbcb0`). Flag honesty:
+  `transient` now derived from `isTransient(e)` walking `.cause`, not a `withRetry` stamp (a stamp
+  false-negatives on any unwrapped read). Fixed unconditional `this.transient=true` that would flag a revert
+  as a rate-limit; generic fallback no longer asserts "temporary" for genuine failures.
+- **`19a1cfd`** — Lever 1 (below).
+
+### Lever 1 — DONE (commit `19a1cfd`). Fewer RPC round-trips.
+Removed the redundant `allowance` read (**proven safe on-chain**: USDC on Arc is FiatTokenV2, and a
+Multicall3 `[approve(100), approve(200), allowance]` eth_call returned `200` — a non-zero→non-zero approve
+overwrites directly; no USDT-style `require(allowance==0)`, so the reset-to-0 dance defended a hazard this
+token doesn't have). Batched the **two genuinely pre-write reads** — `balanceOf` + `isAuthorizedForBalance`,
+both before the `addDelegate` write at `_ubdeposit.mjs:201` (batch at :160, only an in-memory funds check
+between) — into **one Multicall3 call** (verified deployed on Arc testnet at `0xcA11…CA11`, 3808 bytes,
+aggregate3 agreed with direct reads on both contracts). The post-grant `balanceOf` re-read stays sequential
+by design — it exists to observe the grant's gas effect, so batching it would read stale pre-grant state.
+**Net: common deposit path 3 reads → 1 round-trip** (first deposit 3 → 2).
+
+**Effect: REDUCES throttle EXPOSURE** (fewer round-trips = fewer chances to hit the limiter). It does **NOT**
+make a deposit survive a **sustained (90s+) throttle** — one Multicall3 call is still one call, and a
+limiter saturated beyond `withRetry`'s ~3.75s budget still fails (now with correct `transient:true` + a calm
+message, no hex). This morning's throttle outlived 90s, so that case is real.
+
+### Lever 2 — PARKED (the reliability fix for sustained throttle). Do not re-investigate Lever 1.
+The fix for a **sustained** throttle is **Lever 2 ONLY** — a better/paid RPC endpoint or a fallback
+provider — **not** more read-shaving. Lever 1 is done and there is no further safe batch: the remaining
+reads are write-separated (the post-grant re-read must see the grant), so they cannot be collapsed. **Pull
+Lever 2 only if a sustained throttle bites a real deposit in practice.** Recorded so Lever 1 is not
+re-opened.
+
+### Honest limits (unchanged by any commit above)
+- **Live throttle across the batched path is still unproven** — the batch is verified end-to-end against a
+  quiet chain; no throttle has hit the widened/batched code in prod yet.
+- One reporting nuance: a throttle on the (now batched) `isAuthorizedForBalance` read surfaces as
+  `TransientChainError` (`fundsMoved: undefined`) rather than `DelegateAuthUnknownError` (`fundsMoved:
+  false`). User message is equivalent; makes the two pre-write reads consistent. Plumb back only if that bit
+  matters when seen in a record.
+
+---
+
 ## 2026-07-16 — COMPETITIVE RECON (read-only): is anyone building Tikpema on Arc? Arcent + anchor-x402 chain-checked.
 
 **Not a park — a landscape read.** Question asked: are many Arc builders building something similar to
