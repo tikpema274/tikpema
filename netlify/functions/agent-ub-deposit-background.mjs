@@ -48,6 +48,19 @@ export async function handler(event) {
   if (!depositId) return { statusCode: 400, body: "depositId required" };
 
   const store = getStore("ub-deposits");
+  // Last line of defence before a raw error reaches a user. Our own error classes already
+  // carry short, honest messages — pass those through untouched. Anything else may be a viem
+  // block ("Raw Call Arguments", hex calldata, a docs link): take its first line only, and if
+  // even that looks like a dump, say something true and plain instead of leaking it.
+  const userMessage = (e) => {
+    if (e?.name === "DelegateAuthError" || e?.name === "DelegateAuthUnknownError") return e.message;
+    if (e?.transient === true || e?.name === "TransientChainError") return e.message;
+    const first = String(e?.message ?? "").split("\n")[0].trim();
+    if (!first || /^RPC Request failed|^HTTP request failed|^The contract function/i.test(first)) {
+      return "The deposit couldn't be completed right now. Please try again in a moment.";
+    }
+    return first.slice(0, 200);
+  };
   const patch = async (fields) => {
     const prev = (await store.get(`dep:${depositId}`, { type: "json" }).catch(() => null)) ?? {};
     await store.setJSON(`dep:${depositId}`, { ...prev, ...fields, updatedAt: new Date().toISOString() });
@@ -94,15 +107,34 @@ export async function handler(event) {
     // Persist the failure SHAPE, not just a string — the poller surfaces these distinctly.
     //  · delegateAuthFailed: the grant failed BEFORE any approve, so no funds moved and the
     //    user's USDC is still plain in their own SCA. Clean and retryable.
+    //  · transient: the chain DID NOT ANSWER (Arc rate-limit). Not a failure of the deposit's
+    //    logic and NOT a definite negative — see _retry.mjs. Kept separate from
+    //    delegateAuthFailed precisely so "we don't know" never renders as "it didn't work".
     //  · allowanceDangling: a deposit failed AND the revoke also failed — real on-chain
     //    residue an operator must know about.
+    //
+    // ⚠️ `error` IS USER-FACING — UnifiedBalancePanel prints it verbatim. On 2026-07-17 this
+    // line was `error: e.message`, and a throttled eth_call put viem's full hex dump on the
+    // user's screen (records dep:07960ec2 / dep:1533b09c / dep:648c1c0b). Store the SHORT
+    // message; the raw text stays for operators in `errorDetail`, which no view renders.
+    const transient = e.transient === true || e.name === "TransientChainError";
+    const indeterminate = e.indeterminate === true;
     await patch({
       status: "failed",
-      error: e.message,
+      error: userMessage(e),
+      errorDetail: String(e.cause?.message ?? e.message ?? "").slice(0, 2000), // operators only
       delegateAuthFailed: e.name === "DelegateAuthError",
+      delegateAuthUnknown: e.name === "DelegateAuthUnknownError",
+      transient,
+      indeterminate,
       allowanceDangling: e.allowanceDangling === true,
       allowanceRevoked: e.allowanceRevoked === true,
-      fundsMoved: e.name === "DelegateAuthError" ? false : undefined,
+      // Both delegate errors are thrown BEFORE any approve/deposit (see the ordering note in
+      // _ubdeposit.mjs), so "no funds moved" is a structural fact here, not an inference.
+      fundsMoved:
+        e.name === "DelegateAuthError" || e.name === "DelegateAuthUnknownError"
+          ? false
+          : undefined,
     });
   }
 

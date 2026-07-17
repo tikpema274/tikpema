@@ -111,8 +111,18 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
       if (done.status === "failed") {
         // A failed delegate grant is a CLEAN state: it runs before any approve, so no funds
         // moved. Say so plainly rather than leaving the user wondering where their USDC went.
+        //
+        // ⚠️ THREE OUTCOMES, NOT TWO. The server now distinguishes "the chain said no"
+        // (delegateAuthFailed) from "the chain didn't answer" (transient / delegateAuthUnknown
+        // — Arc rate-limited us). Both are safe and retryable, but they are NOT the same claim,
+        // and flattening the second into the first would re-create the bug this fixes on the
+        // client side. The server already words each one honestly; don't second-guess it here.
+        //
+        // The server's `error` is now always a short line — the raw viem dump lives in
+        // `errorDetail`, which nothing renders. Never surface errorDetail to a user.
+        const noFundsMoved = done.fundsMoved === false;
         throw new Error(
-          done.delegateAuthFailed
+          noFundsMoved && !/no funds moved/i.test(done.error ?? "")
             ? `${done.error} (no funds moved — your USDC is still in your wallet)`
             : done.error || "Deposit failed"
         );

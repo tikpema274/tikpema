@@ -2,6 +2,7 @@ import { ARC, CONTRACTS } from "./_arc.mjs";
 import { GATEWAY } from "./_gateway.mjs";
 import { circle, waitForTx } from "./_circle.mjs";
 import { publicClient } from "./_predict.mjs";
+import { withRetry, isTransient, TransientChainError } from "./_retry.mjs";
 
 // DELEGATE AUTHORIZATION PLANE — the one-time grant that lets the shared EOA signer spend
 // a user's OWN Gateway balance.
@@ -57,15 +58,63 @@ const GATEWAY_ABI = [
 // Is `delegate` already authorized to spend `owner`'s Gateway USDC? A pure read — this is
 // the SOURCE OF TRUTH for authorization, never a cached flag. A Blobs mirror could go stale
 // against the chain (or lie after a failed tx); the chain cannot.
+//
+// ⚠️ TWO OUTCOMES, THREE MEANINGS. This returns a boolean, so it can only express "yes" and
+// "no" — the third meaning, "the chain did not answer", is expressed by THROWING. A rate-limit
+// is not a `false`. Retrying the transient class here (see _retry.mjs for the evidence that
+// viem does not) turns most throttles back into a real answer; when it can't, the throw is a
+// TransientChainError and callers must keep it distinct from `false`. Never .catch(() => false).
 export async function isDelegateAuthorized(owner, delegate = process.env.DELEGATE_ADDRESS) {
   if (!owner) throw new Error("isDelegateAuthorized requires an owner");
   if (!delegate) throw new Error("Missing DELEGATE_ADDRESS");
-  return publicClient().readContract({
-    address: GATEWAY.WALLET,
-    abi: GATEWAY_ABI,
-    functionName: "isAuthorizedForBalance",
-    args: [CONTRACTS.USDC, owner, delegate],
-  });
+  return withRetry(
+    () =>
+      publicClient().readContract({
+        address: GATEWAY.WALLET,
+        abi: GATEWAY_ABI,
+        functionName: "isAuthorizedForBalance",
+        args: [CONTRACTS.USDC, owner, delegate],
+      }),
+    { label: "check the Gateway spender authorization" }
+  );
+}
+
+// The same read, as an explicit TRI-STATE for the one caller that must not conflate the
+// third meaning with the second: { authorized: true } | { authorized: false } | { unknown: true }.
+//
+// ⚠️ THIS IS THE FIX FOR THE REAL BUG. ensureDelegate's post-failure re-read used to be
+// `.catch(() => false)`, which turned "I could not read the chain" into "the chain says NO"
+// — an INDETERMINATE collapsed into a definite FAIL, on the path that gates a fund action.
+// A throttled re-read would then report the user's spender as unauthorized when it may well
+// have been authorized all along. Unknown must never wear the face of a definite answer.
+async function readAuthorizationTriState(owner, delegate) {
+  try {
+    return { authorized: await isDelegateAuthorized(owner, delegate) };
+  } catch (e) {
+    // Couldn't read. Say THAT — do not guess, in either direction.
+    if (e instanceof TransientChainError || isTransient(e)) return { unknown: true, cause: e };
+    // A non-transient read failure (bad address, ABI mismatch, chain gone) is also not a
+    // `false`. It is a different unknown, and it is equally not an answer about authorization.
+    return { unknown: true, cause: e };
+  }
+}
+
+// Exhausted retries while trying to VERIFY authorization. Distinct from DelegateAuthError:
+// that one means "we tried to authorize and the chain said it didn't happen" (a definite
+// negative). This one means "we do not know" — and the honest words are different.
+//
+// Both share `fundsMoved: false`, and that is not a guess: ensureDelegate runs BEFORE any
+// approve/deposit (see the ordering note in _ubdeposit.mjs), so nothing can have moved by
+// the time either is thrown.
+export class DelegateAuthUnknownError extends Error {
+  constructor(message, cause) {
+    super(message);
+    this.name = "DelegateAuthUnknownError";
+    this.cause = cause;
+    this.recoverable = true;
+    this.transient = true;
+    this.indeterminate = true; // NOT a definite "unauthorized" — do not render it as one
+  }
 }
 
 export class DelegateAuthError extends Error {
@@ -74,6 +123,18 @@ export class DelegateAuthError extends Error {
     this.name = "DelegateAuthError";
     this.recoverable = true; // no funds moved; retrying the deposit re-runs this
   }
+}
+
+// One short line from an error that may be a 15-line viem dump.
+//
+// viem's ContractFunctionExecutionError.message is a formatted BLOCK — "Raw Call Arguments",
+// the hex calldata, "Docs: https://viem.sh/...", "Version: viem@2.52.2". Interpolating it into
+// a user-facing string is what put a wall of hex on the screen on 2026-07-17. viem also
+// carries the one line that actually means something in `.shortMessage` / `.details`, so
+// prefer those; fall back to the first line, never the block.
+function summarize(e) {
+  const pick = e?.details || e?.shortMessage || e?.message || String(e);
+  return String(pick).split("\n")[0].trim().slice(0, 160);
 }
 
 // Grant the delegate authority over `owner`'s Gateway balance — ONCE. Idempotent: reads
@@ -93,7 +154,25 @@ export async function ensureDelegate({ owner, delegate = process.env.DELEGATE_AD
 
   // 1. Already authorized? Then this is a no-op — the common case on every deposit after
   //    the first.
-  if (await isDelegateAuthorized(owner, delegate)) {
+  //
+  // ⚠️ THIS READ IS WHERE THE RAW HEX CAME FROM. It had no error handling at all (the
+  // try/catch below wraps only the addDelegate WRITE), so a throttled eth_call threw viem's
+  // ~15-line dump straight up through ubDeposit into the Blobs record and onto the user's
+  // screen. Proof it was this line and not the catch below: all three prod failures recorded
+  // `delegateAuthFailed: false`, which is set from `e.name === "DelegateAuthError"` — so the
+  // error never reached the throw at the end of this function.
+  const first = await readAuthorizationTriState(owner, delegate);
+  if (first.unknown) {
+    // We could not read. Do NOT fall through to addDelegate: that would submit a gas-paying
+    // tx on the assumption of a `false` we never actually observed.
+    throw new DelegateAuthUnknownError(
+      `Couldn't verify the Gateway spender authorization right now — Arc's network is ` +
+        `rate-limiting requests. No funds moved; your USDC is still in your wallet. ` +
+        `Try the deposit again in a moment.`,
+      first.cause
+    );
+  }
+  if (first.authorized) {
     return { authorized: true, alreadyAuthorized: true, txHash: null };
   }
 
@@ -117,15 +196,42 @@ export async function ensureDelegate({ owner, delegate = process.env.DELEGATE_AD
     //    have granted it (our tx would then revert as a duplicate), or the tx may have
     //    landed while our poll timed out. Re-derive from the chain before calling it a
     //    failure. This is what makes the lock-free design safe.
-    if (await isDelegateAuthorized(owner, delegate).catch(() => false)) {
+    //
+    // ⚠️ THIS RE-READ USED TO BE `.catch(() => false)` — THE REAL BUG. A throttled re-read
+    // returned `false`, and `false` here means "the chain says the delegate is NOT
+    // authorized", which we then reported to the user as a definite authorization failure.
+    // It was an INDETERMINATE wearing the face of a FAIL, and it gated a fund action: the
+    // user could have been authorized all along and been told otherwise. The re-read is
+    // now a tri-state, and `unknown` gets its own words.
+    const recheck = await readAuthorizationTriState(owner, delegate);
+    if (recheck.authorized) {
       return { authorized: true, alreadyAuthorized: true, txHash: null, raced: true };
     }
-    // Genuinely not authorized. NO FUNDS HAVE MOVED — ubDeposit calls this BEFORE any
-    // approve/deposit, so the user's USDC is still plain in their own SCA. This is a clean,
-    // retryable state, not a stranded one: running the deposit again re-runs ensureDelegate.
-    throw new DelegateAuthError(
-      `Could not authorize the spender for your Gateway balance: ${e.message}. ` +
-        `No funds moved — your USDC is still in your wallet. Retry the deposit.`
+    if (recheck.unknown) {
+      // The write failed AND we cannot read the state back. We genuinely do not know whether
+      // the grant landed. Still no funds moved (this is all pre-approve), and the deposit is
+      // still safe to retry — ensureDelegate re-reads first, and a duplicate grant is a
+      // harmless no-op. But we must not claim the definite negative we did not observe.
+      throw new DelegateAuthUnknownError(
+        `Couldn't confirm whether the Gateway spender authorization went through — Arc's ` +
+          `network is rate-limiting requests. No funds moved; your USDC is still in your ` +
+          `wallet. Try the deposit again in a moment.`,
+        recheck.cause
+      );
+    }
+    // Genuinely not authorized — the chain ANSWERED, and the answer was no. NO FUNDS HAVE
+    // MOVED: ubDeposit calls this BEFORE any approve/deposit, so the user's USDC is still
+    // plain in their own SCA. A clean, retryable state, not a stranded one.
+    //
+    // The cause is summarized, NOT interpolated raw: `${e.message}` on a viem error is a
+    // ~15-line dump of the eth_call, its hex calldata and a docs link, and it used to go
+    // straight to the user's screen. Operators get the full object on `.cause`.
+    throw Object.assign(
+      new DelegateAuthError(
+        `Could not authorize the spender for your Gateway balance: ${summarize(e)}. ` +
+          `No funds moved — your USDC is still in your wallet. Retry the deposit.`
+      ),
+      { cause: e }
     );
   }
 }
