@@ -175,6 +175,33 @@ export async function daySpend({ owner, date, at, store } = {}) {
   return rec?.spentUsdc ?? 0;
 }
 
+// ── DCA'S DAILY SHARE — a per-owner-per-day sub-counter, so an autonomous DCA tick can be
+// bounded to a FRACTION of the daily ceiling and the rest stays reserved for the user's own
+// actions. This is a PARALLEL counter to the day-ledger above, not a replacement: the day-ledger
+// stores one per-owner TOTAL with no per-source split, so DCA's share cannot be read from it.
+// It reuses the SAME per-owner-per-day keying and the SAME casUpdate atomic increment (so it
+// inherits the concurrency-safe accounting, never the read-modify-write under-count). The
+// scheduler increments this on each successful DCA fill; the hard `canSpendDay` (total ≤ full
+// ceiling) remains the absolute backstop underneath.
+const dcaDayKey = (owner, date) => `dca-day:${ownerKey(owner)}:${date}`;
+
+export async function dcaDaySpend({ owner, date, at, store } = {}) {
+  const d = date ?? utcDate(at);
+  const rec = await pickStore(store).getJSON(dcaDayKey(owner, d));
+  return rec?.spentUsdc ?? 0;
+}
+
+export async function recordDcaSpend({ owner, amountUsdc, at, store } = {}) {
+  const s = pickStore(store);
+  const amt = round6(amountUsdc);
+  const date = utcDate(at);
+  const rec = await casUpdate(s, dcaDayKey(owner, date), (cur) => {
+    const r = cur ?? { date, owner: ownerKey(owner), spentUsdc: 0 };
+    return { ...r, spentUsdc: round6((r.spentUsdc ?? 0) + amt) };
+  });
+  return rec.spentUsdc;
+}
+
 // ── The gate: canSpend ────────────────────────────────────────────────────────
 // Checks in order and returns the FIRST failing reason:
 //   (a) amount ≤ per-purchase sub-cap

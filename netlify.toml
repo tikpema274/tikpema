@@ -217,3 +217,11 @@
 # via a manual invoke (listed=68 reFired=0).
 [functions."job-sweep"]
   schedule = "* * * * *"
+
+# DCA scheduler — runs every minute, fills due DCA mandates autonomously (custodial swaps
+# while the user is offline). Registered HERE (not the in-code config) for the same reason as
+# job-sweep: the CLI deploy does not pick up `export const config = { schedule }`. Every fill
+# routes through executeAction, so it inherits pause + per-swap cap + day ceiling; the tick
+# writes an unconditional heartbeat to the dca-heartbeat store so liveness is checkable.
+[functions."dca-tick"]
+  schedule = "* * * * *"
