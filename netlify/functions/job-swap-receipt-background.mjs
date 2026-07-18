@@ -1,8 +1,7 @@
 import { connectLambda, getStore } from "@netlify/blobs";
-import { formatUnits } from "viem";
-import { CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { requireInternal } from "./_auth.mjs";
 import { publicClient } from "./_predict.mjs";
+import { confirmSwapLanded } from "./_swap-confirm.mjs";
 
 // job-swap-receipt-background — the same-chain twin of job-bridge-receipt-background.
 //
@@ -11,21 +10,18 @@ import { publicClient } from "./_predict.mjs";
 // this verifier is small, and it answers exactly one question — did the swap actually
 // happen? — from the CHAIN, never from the SDK's own say-so.
 //
-// TWO PATHS, because _swap.mjs can return a NULL txHash (the 1098 async-waiter quirk: the
-// Circle SCA submits asynchronously and App Kit throws "transaction hash is required" even
-// though the swap lands). A receipt keyed only on a hash would be unverifiable precisely
-// when the SDK is least reliable — so:
+// The single witness lives in _swap-confirm.mjs (confirmSwapLanded) and is SHARED with the DCA
+// scheduler — one copy of a money-gating decision, never two that can drift. It answers hash-first
+// (eth_getTransactionReceipt on the SDK's event hash) and, when _swap.mjs returned a NULL txHash
+// (the 1098 async-waiter quirk: the Circle SCA submits asynchronously and App Kit throws
+// "transaction hash is required" even though the swap lands), by a TWO-LEGGED LOG-SCAN: the one tx
+// that both spent exactly amountIn of tokenIn from the wallet AND delivered tokenOut to it. That
+// tx-shape match identifies OUR swap even if the wallet's balances moved for other reasons in the
+// window — strictly stronger than the old aggregate `balanceAfter > balanceBefore` delta.
 //
-//   1. HASH PATH   (state "submitted")         → eth_getTransactionReceipt.
-//                                                 status 'success' → confirmed
-//                                                 status 'reverted' → failed
-//   2. DELTA PATH  (state "submitted_no_hash") → compare tokenOut's balance against the
-//                                                 snapshot job-swap-approve took BEFORE
-//                                                 executing. If tokenOut went UP, the swap
-//                                                 landed. The chain is the witness.
-//
-// If neither can answer within the window, the receipt terminates at `unconfirmed` — honest
-// incompleteness, never a fabricated success. (Bridge does the same with mint_unconfirmed.)
+// This verifier owns the RETRY CADENCE: it polls the single-shot witness to a 90s deadline. If it
+// never confirms, the receipt terminates at `unconfirmed` — honest incompleteness, never a
+// fabricated success. (Bridge does the same with mint_unconfirmed.)
 //
 // ⚠️ Publicly reachable at /.netlify/functions/… like every Netlify function, and it WRITES
 // receipts — so requireInternal (HMAC over SESSION_SECRET) guards it. It moves no money and
@@ -34,27 +30,11 @@ import { publicClient } from "./_predict.mjs";
 const POLL_MS = 2_000;
 const DEADLINE_MS = 90_000; // same-chain finality is sub-second on Arc; this is generous
 
-const BALANCE_OF_ABI = [
-  {
-    type: "function",
-    name: "balanceOf",
-    stateMutability: "view",
-    inputs: [{ name: "account", type: "address" }],
-    outputs: [{ name: "", type: "uint256" }],
-  },
-];
-
-const tokenAddress = (sym) => (String(sym).toUpperCase() === "EURC" ? CONTRACTS.EURC : CONTRACTS.USDC);
-
-async function readBalance(token, wallet) {
-  const raw = await publicClient().readContract({
-    address: tokenAddress(token),
-    abi: BALANCE_OF_ABI,
-    functionName: "balanceOf",
-    args: [wallet],
-  });
-  return Number(formatUnits(raw, USDC_DECIMALS));
-}
+// The log-scan window's lower bound. job-swap-approve does not persist a pre-swap block, and the
+// swap landed shortly before this verifier was triggered, so we look back generously from the
+// current head. Arc blocks are ~0.5s, so this spans ~15 min — far more than the approve→verify gap
+// plus blob eventual-consistency — while the exact-amountIn two-legged match keeps it unambiguous.
+const LOOKBACK_BLOCKS = 2000n;
 
 export async function handler(event) {
   // ⚠️ A BACKGROUND FUNCTION FAILS INVISIBLY. Netlify acks 202 before it runs, so its response
@@ -141,66 +121,59 @@ async function verify(event) {
   // diagnosable from the record itself.
   await settle({ verifierRanAt: new Date().toISOString(), verifierStage: "loaded" });
 
-  const giveUpAt = Date.now() + DEADLINE_MS;
-
-  // ── PATH 1: we have a hash. Ask the chain what happened to it. ──
-  if (receipt.state === "submitted" && receipt.txHash) {
-    while (Date.now() < giveUpAt) {
-      try {
-        const r = await publicClient().getTransactionReceipt({ hash: receipt.txHash });
-        if (r?.status === "success") {
-          await settle({ state: "confirmed", blockNumber: Number(r.blockNumber) });
-          return { statusCode: 200, body: "confirmed" };
-        }
-        if (r?.status === "reverted") {
-          await settle({ state: "failed", error: "swap reverted on-chain", blockNumber: Number(r.blockNumber) });
-          return { statusCode: 200, body: "failed" };
-        }
-      } catch {
-        /* not mined yet — keep polling */
-      }
-      await new Promise((r) => setTimeout(r, POLL_MS));
-    }
-    await settle({ state: "unconfirmed", note: "swap submitted; the chain did not confirm it within the window" });
-    return { statusCode: 200, body: "unconfirmed" };
-  }
-
-  // ── PATH 2: no hash (the 1098 quirk). Verify by BALANCE DELTA against the pre-swap
-  // snapshot. Without a snapshot there is nothing honest to compare, so we say so. ──
-  const before = receipt.balancesBefore;
-  // From the PERSISTED receipt (job-swap-approve wrote it), never from this request body.
+  // The wallet + amount come from the PERSISTED receipt (job-swap-approve wrote them), never from
+  // this request body — the verifier cannot be told what to believe.
   const walletAddress = receipt.walletAddress ?? null;
-  if (!before || !walletAddress) {
+  if (!walletAddress || receipt.amountIn == null) {
     await settle({
       state: "unconfirmed",
-      note: "swap submitted, but no tx hash was returned and no pre-swap balance snapshot exists — cannot verify",
+      note: "swap submitted, but the receipt lacks the wallet/amount needed to witness it on-chain",
     });
     return { statusCode: 200, body: "unconfirmed (no evidence)" };
   }
 
+  // Anchor the log-scan window ONCE (stable across polls). The swap already landed shortly before
+  // we were triggered, so look back from the current head.
+  let fromBlock;
+  try { fromBlock = (await publicClient().getBlockNumber()) - LOOKBACK_BLOCKS; }
+  catch { fromBlock = 0n; }
+  if (fromBlock < 0n) fromBlock = 0n;
+
+  const giveUpAt = Date.now() + DEADLINE_MS;
+  let lastReason = "pending";
+
+  // Poll the SHARED single-shot witness to the deadline. Hash-first, else the two-legged log-scan.
   while (Date.now() < giveUpAt) {
-    try {
-      const nowOut = await readBalance(receipt.tokenOut, walletAddress);
-      // tokenOut went UP ⇒ the swap landed. Strictly greater: a stablecoin swap always
-      // returns something, and the fee comes out of the OUTPUT, so any increase is proof.
-      if (nowOut > before[receipt.tokenOut]) {
-        await settle({
-          state: "confirmed",
-          verifiedBy: "balance-delta",
-          amountOut: Number((nowOut - before[receipt.tokenOut]).toFixed(6)),
-        });
-        return { statusCode: 200, body: "confirmed (balance delta)" };
-      }
-    } catch {
-      /* read hiccup — keep polling */
+    const res = await confirmSwapLanded({
+      walletAddress,
+      tokenIn: receipt.tokenIn,
+      tokenOut: receipt.tokenOut,
+      amountIn: receipt.amountIn,
+      fromBlock,
+      eventTxHash: receipt.txHash || null,
+    });
+    if (res.confirmed) {
+      await settle({
+        state: "confirmed",
+        verifiedBy: res.verifiedBy,
+        txHash: res.txHash,
+        tx: res.tx ?? receipt.tx ?? null,
+        blockNumber: res.blockNumber ?? null,
+        amountOut: res.amountOut ?? null,
+      });
+      return { statusCode: 200, body: `confirmed (${res.verifiedBy})` };
     }
+    if (res.reason === "reverted") {
+      await settle({ state: "failed", error: "swap reverted on-chain", txHash: res.txHash });
+      return { statusCode: 200, body: "failed" };
+    }
+    lastReason = res.reason;
     await new Promise((r) => setTimeout(r, POLL_MS));
   }
 
   await settle({
     state: "unconfirmed",
-    verifiedBy: "balance-delta",
-    note: "swap submitted; no hash returned and the output balance did not move within the window",
+    note: `swap submitted; no on-chain witness within the window (${lastReason})`,
   });
   return { statusCode: 200, body: "unconfirmed" };
 }

@@ -4,6 +4,8 @@ import { assertNotPaused } from "./_pause.mjs";
 import { AGENT } from "./_agents.mjs";
 import { swapCapUsdc } from "./_arc.mjs";
 import { valueInUsdc } from "./_swap.mjs";
+import { publicClient } from "./_predict.mjs";
+import { confirmSwapLanded } from "./_swap-confirm.mjs";
 import { recordDcaSpend } from "./_budget.mjs";
 import {
   MANDATE_STORE,
@@ -18,6 +20,8 @@ import {
   OUTCOME,
   MAX_CONSECUTIVE_FAILURES,
   FAILURE_WINDOW_MS,
+  CONFIRM_GRACE_MS,
+  MAX_CONSECUTIVE_UNCONFIRMED,
 } from "./_dca.mjs";
 
 // dca-tick.mjs — THE DCA SCHEDULER. Runs every minute; fills due mandates autonomously.
@@ -25,21 +29,32 @@ import {
 // This is the one place in Tikpema that moves money with NO user present. The ordering is
 // load-bearing; do not reorder:
 //
-//   heartbeat(always) · per due mandate:
-//     PAUSE(fail-closed) → value → CAP → YIELD-to-user → FUNDS → idempotency-claim → FILL
+//   heartbeat(always) · per mandate:
+//     RECONCILE any in-flight fill · else if due:
+//       PAUSE(fail-closed) → value → CAP → YIELD-to-user → FUNDS → idempotency-claim → SUBMIT
 //
-// Every skip category is recorded as a durable OUTCOME so "is my DCA working?" is answerable and
-// a failure never reads as success. The FILL routes through executeAction (never agentSwap
-// directly), so it inherits the SAME swapCapUsdc + pause + day-ceiling + ledger a manual swap
-// obeys. The pre-checks above categorize skips precisely (so insufficient-funds is a retryable
-// SKIP, not a mandate-killing failure); only a THROWN fill error reaches the transient/genuine
-// classifier.
+// ⚠️ SUBMIT ≠ SPENT. A swap SUBMITTED this tick has not necessarily LANDED — the Circle SCA
+// submits its userOp asynchronously and App Kit can return txHash:null even as the swap lands
+// (the 1098 quirk). So a submit records PENDING_CONFIRM and does NOT touch spentAmount. The
+// mandate's budget advances ONLY in RECONCILE, when the on-chain witness (confirmSwapLanded)
+// confirms the fill landed — by hash, or by the two-legged log-scan. A tick that cannot confirm
+// leaves the budget EXACTLY intact and records failed-unconfirmed: a phantom fill (swapped +
+// budget spent + nothing on-chain) is therefore structurally impossible, because the one place
+// spentAmount moves is gated on the chain saying yes.
+//
+// Every skip/outcome is a durable OUTCOME so "is my DCA working?" is answerable and a failure
+// never reads as success. The SUBMIT routes through executeAction (never agentSwap directly), so
+// it inherits the SAME swapCapUsdc + pause + day-ceiling + ledger a manual swap obeys.
 //
 // ⚠️ Schedule registered in netlify.toml ([functions."dca-tick"]); the in-code config is
 // documentation (the CLI deploy did not pick up job-sweep's, so netlify.toml is authoritative).
 export const config = { schedule: "* * * * *" };
 
-const MAX_FILLS_PER_TICK = 8; // bound work per invocation; excess pages to the next minute
+// Bound the EXPENSIVE work (new submits, each an on-chain swap) per invocation so the tick stays
+// well under the synchronous function timeout. RECONCILES of already-submitted fills are cheap
+// (read-only chain lookups) and are NOT capped — they must never be starved, or a fill could sit
+// pending forever. Lowered from 8 now that each submit also carries a snapshot + confirm handoff.
+const MAX_SUBMITS_PER_TICK = 3;
 
 export async function handler(event) {
   if (event?.blobs) connectLambda(event);
@@ -48,7 +63,7 @@ export async function handler(event) {
 
   // ── UNCONDITIONAL HEARTBEAT — written every invocation regardless of work (the job-sweep
   // blind-spot fix: a quiet cron must be distinguishable from a dead one by reading ONE blob).
-  const beat = { tickAt: startedAt, scanned: 0, fired: 0, skipped: 0, failed: 0, stopped: 0, terminal: 0, errors: 0, details: [] };
+  const beat = { tickAt: startedAt, scanned: 0, submitted: 0, fired: 0, skipped: 0, failed: 0, stopped: 0, terminal: 0, errors: 0, details: [] };
   const writeHeartbeat = async () => {
     try { await getStore(HEARTBEAT_STORE).setJSON("last", beat); } catch { /* observability only */ }
   };
@@ -63,28 +78,143 @@ export async function handler(event) {
     return { statusCode: 200, body: "stores-unavailable" };
   }
 
-  // Record one durable outcome: update the mandate (with any patch), append to its recent
-  // outcomes (capped), write the per-(mandate,period) fill record, and tally the heartbeat.
-  const record = async (m, key, period, outcome, { reason = null, tx = null, patch = {} } = {}) => {
+  // Tally one outcome into the heartbeat. FAILED_UNCONFIRMED counts with the failures; a submit
+  // (PENDING_CONFIRM) counts as `submitted` — it becomes `fired` only when it later confirms.
+  const tally = (outcome, tx, reason, id) => {
+    if (outcome === OUTCOME.SWAPPED) beat.fired++;
+    else if (outcome === OUTCOME.PENDING_CONFIRM) beat.submitted++;
+    else if (outcome === OUTCOME.STOPPED_FAILED) beat.stopped++;
+    else if (outcome === OUTCOME.FAILED_TRANSIENT || outcome === OUTCOME.FAILED_UNCONFIRMED) beat.failed++;
+    else beat.skipped++;
+    beat.details.push({ id, outcome, ...(tx ? { tx } : {}), ...(reason ? { reason: String(reason).slice(0, 80) } : {}) });
+  };
+
+  // Update the mandate blob: prepend to recentOutcomes (capped), set lastOutcome/at/reason, apply
+  // patch. Does NOT write the fill claim (submit vs resolve write different claim shapes).
+  const patchMandate = async (m, key, outcome, { reason = null, tx = null, patch = {}, period = null } = {}) => {
     const entry = { period, outcome, reason, tx, at: startedAt };
     const recentOutcomes = [entry, ...(m.recentOutcomes || [])].slice(0, 5);
     const next = { ...m, ...patch, recentOutcomes, lastOutcome: outcome, lastOutcomeAt: startedAt, lastReason: reason };
     await mandates.setJSON(key, next);
-    await fills.setJSON(fillClaimKey(m.id, period), { mandateId: m.id, period, outcome, reason, tx, at: startedAt });
-    if (outcome === OUTCOME.SWAPPED) beat.fired++;
-    else if (outcome === OUTCOME.STOPPED_FAILED) beat.stopped++;
-    else if (outcome === OUTCOME.FAILED_TRANSIENT) beat.failed++;
-    else beat.skipped++;
-    beat.details.push({ id: m.id, outcome, ...(tx ? { tx } : {}), ...(reason ? { reason: String(reason).slice(0, 80) } : {}) });
+    tally(outcome, tx, reason, m.id);
+  };
+
+  // A RESOLVED fill claim — terminal for (mandate, period). `status` ABSENT ⇒ resolved ⇒ the
+  // submit-guard treats the period as done (no re-fill this period; retry is a future period).
+  const resolveClaim = async (id, period, outcome, { reason = null, tx = null } = {}) => {
+    await fills.setJSON(fillClaimKey(id, period), { mandateId: id, period, outcome, reason, tx, at: startedAt });
+  };
+
+  // The immediate-resolve path (all the pre-submit SKIPs): patch the mandate AND resolve the claim.
+  const record = async (m, key, period, outcome, { reason = null, tx = null, patch = {} } = {}) => {
+    await patchMandate(m, key, outcome, { reason, tx, patch, period });
+    await resolveClaim(m.id, period, outcome, { reason, tx });
+  };
+
+  // ── RECONCILE an in-flight fill (submitted a prior tick, awaiting the witness). THE ONLY PLACE
+  // spentAmount advances. Confirm → decrement + record swapped + recover the real hash. Can't
+  // confirm within grace → failed-unconfirmed, budget intact. Reverted → stop. RPC hiccup → leave
+  // pending (never fail a fill because we couldn't look). ──
+  const reconcilePending = async (m, key) => {
+    const period = m.pendingPeriod;
+    const claim = await fills.get(fillClaimKey(m.id, period), { type: "json" }).catch(() => null);
+    // Defensive: the pending claim vanished or is no longer 'submitted' — drop the pointer.
+    if (!claim || claim.status !== "submitted") {
+      await mandates.setJSON(key, { ...m, pendingPeriod: null });
+      return;
+    }
+
+    const res = await confirmSwapLanded({
+      walletAddress: m.walletAddress,
+      tokenIn: m.tokenIn,
+      tokenOut: m.tokenOut,
+      amountIn: m.perTickAmount,
+      fromBlock: BigInt(claim.snapshotBlock),
+      eventTxHash: claim.eventTxHash || null,
+    });
+
+    if (res.confirmed) {
+      // ── THE WITNESS CONFIRMED — advance the budget now, and ONLY now. Recover the real hash
+      // (log-scan or receipt) into lastFillTx; reset every failure streak. Patch mandate FIRST so
+      // a crash before the claim write cannot lose the decrement (it under-counts at worst). ──
+      const spentAmount = Number((m.spentAmount + m.perTickAmount).toFixed(6));
+      const reason = `confirmed by ${res.verifiedBy}${res.amountOut != null ? ` (+${res.amountOut} ${m.tokenOut})` : ""}`;
+      await patchMandate(m, key, OUTCOME.SWAPPED, {
+        reason, tx: res.tx || res.txHash || null, period,
+        patch: {
+          spentAmount,
+          lastFilledPeriod: period,
+          lastFillAt: claim.submittedAt,
+          lastFillTx: res.tx || res.txHash || null,
+          pendingPeriod: null,
+          consecutiveFailures: 0,
+          firstFailureAt: null,
+          consecutiveUnconfirmed: 0,
+          needsAttention: false,
+        },
+      });
+      await resolveClaim(m.id, period, OUTCOME.SWAPPED, { reason, tx: res.tx || res.txHash || null });
+      return;
+    }
+
+    // A REVERTED tx is a genuine failure — the revert reverts state, so no funds moved. Stop the
+    // mandate on the first occurrence, exactly like a slippage/genuine failure.
+    if (res.reason === "reverted") {
+      const reason = `swap reverted on-chain (${res.txHash})`;
+      await patchMandate(m, key, OUTCOME.STOPPED_FAILED, {
+        reason, period,
+        patch: { status: STATUS.STOPPED_FAILED, stoppedAt: startedAt, pendingPeriod: null, needsAttention: true },
+      });
+      await resolveClaim(m.id, period, OUTCOME.STOPPED_FAILED, { reason });
+      return;
+    }
+
+    // Couldn't READ the chain this tick (rpc-error) — NOT a "did not land". Leave pending, consume
+    // no grace; next tick re-checks. We never fail a fill because we couldn't look.
+    if (String(res.reason).startsWith("rpc-error")) return;
+
+    // not-found or ambiguous: still no witness. Inside the grace window, keep it pending (a
+    // healthy-but-slow tx just hasn't settled). Past grace, declare it unconfirmed — BUDGET INTACT
+    // — and count it toward the consecutive-unconfirmed stop.
+    const ageMs = now - Date.parse(claim.submittedAt);
+    if (ageMs < CONFIRM_GRACE_MS) return;
+
+    const consecutiveUnconfirmed = (m.consecutiveUnconfirmed || 0) + 1;
+    const ambiguous = String(res.reason).startsWith("ambiguous");
+    const detail = ambiguous
+      ? `${res.reason} — refusing to attribute one to this fill (fail-closed)`
+      : `no on-chain witness within ${Math.round(CONFIRM_GRACE_MS / 1000)}s of submit`;
+
+    if (consecutiveUnconfirmed >= MAX_CONSECUTIVE_UNCONFIRMED) {
+      const reason = `stopped after ${consecutiveUnconfirmed} unconfirmed fills — last: ${detail}`;
+      await patchMandate(m, key, OUTCOME.STOPPED_FAILED, {
+        reason, period,
+        patch: { status: STATUS.STOPPED_FAILED, stoppedAt: startedAt, pendingPeriod: null, consecutiveUnconfirmed, needsAttention: true },
+      });
+      await resolveClaim(m.id, period, OUTCOME.STOPPED_FAILED, { reason });
+    } else {
+      await patchMandate(m, key, OUTCOME.FAILED_UNCONFIRMED, {
+        reason: detail, period,
+        patch: { pendingPeriod: null, consecutiveUnconfirmed, needsAttention: true },
+      });
+      await resolveClaim(m.id, period, OUTCOME.FAILED_UNCONFIRMED, { reason: detail });
+    }
   };
 
   try {
     const { blobs } = await mandates.list({ prefix: "mandate:" });
     for (const { key } of blobs) {
-      if (beat.fired >= MAX_FILLS_PER_TICK) break; // page remaining mandates to next tick
       const m = await mandates.get(key, { type: "json" }).catch(() => null);
       if (!m || m.status !== STATUS.ACTIVE) continue;
       beat.scanned++;
+
+      // ── RECONCILE FIRST — an in-flight fill is settled (or left pending) before anything else,
+      // and uncapped, so it can never be starved by the submit budget. One action per mandate per
+      // tick: a mandate with a fill in flight neither evaluates nor submits a new one. ──
+      if (m.pendingPeriod != null) {
+        await reconcilePending(m, key);
+        continue;
+      }
 
       const decision = evaluate(m, now);
 
@@ -96,6 +226,10 @@ export async function handler(event) {
       }
       if (!decision.due) continue; // not this period
       const period = decision.period;
+
+      // Cap NEW submits (the expensive on-chain path). `continue`, not `break`: later mandates may
+      // still need RECONCILING above, which must not be blocked by the submit budget.
+      if (beat.submitted >= MAX_SUBMITS_PER_TICK) continue;
 
       // ── 1. PAUSE — fail-closed, BEFORE anything else. A truthy reason (paused / halted /
       // UNREADABLE) means DO NOT SWAP. Enforced HERE in the scheduler, not just the UI. ──
@@ -149,12 +283,13 @@ export async function handler(event) {
         continue;
       }
 
-      // ── 6. IDEMPOTENCY — claim (mandate, period) BEFORE the swap. If a non-"claimed" record
-      // already exists, another invocation already resolved this period → skip (no double-spend).
-      // This is a read-before-write claim; `lastFilledPeriod` (checked in evaluate) is the second
-      // guard. (Netlify Blobs DOES support CAS via getWithEtag/setIfMatch — see _budget casUpdate —
-      // so this could be made strictly atomic if the race ever proves real; the read-before-write
-      // is adequate for one cron invoker per minute.) ──
+      // ── 6. IDEMPOTENCY — claim (mandate, period) BEFORE the swap. If a claim already exists and
+      // is NOT still "claimed" (i.e. it's "submitted" or resolved), another invocation already
+      // acted on this period → skip (no double-spend, no double-submit). A "claimed" claim is a
+      // prior attempt that died before submit → retry. This same guard closes the submit→reconcile
+      // gap: a fill in flight persists as status:"submitted", so a concurrent tick cannot re-submit
+      // it. (Netlify Blobs supports CAS via getWithEtag/setIfMatch if the race ever proves real;
+      // read-before-write is adequate for one cron invoker per minute.) ──
       const claimKey = fillClaimKey(m.id, period);
       const existingClaim = await fills.get(claimKey, { type: "json" }).catch(() => null);
       if (existingClaim && existingClaim.status !== "claimed") {
@@ -163,10 +298,17 @@ export async function handler(event) {
       }
       await fills.setJSON(claimKey, { mandateId: m.id, period, status: "claimed", claimedAt: startedAt });
 
-      // ── 7. THE FILL — via executeAction, NEVER agentSwap directly. Inherits pause + cap +
-      // day-ceiling + ledger. CRASH WINDOW (bounded): die after the swap lands but before the
-      // record below → spentAmount undercounts by one tick → at most ONE extra fill over the
-      // mandate's life, itself capped and ceiling-bound. Documented, acceptable. ──
+      // ── 7. SNAPSHOT the block height immediately BEFORE submit — the tight lower bound of the
+      // log-scan window the reconcile uses to witness THIS fill unambiguously. A read failure here
+      // is a fail-closed skip (we won't submit a swap we then can't witness). ──
+      let snapshotBlock;
+      try { snapshotBlock = Number(await publicClient().getBlockNumber()); } catch (e) {
+        await record(m, key, period, OUTCOME.SKIPPED_BLOCKED, { reason: `cannot read block height: ${e.message}` });
+        continue;
+      }
+
+      // ── 8. SUBMIT — via executeAction, NEVER agentSwap directly. Inherits pause + cap +
+      // day-ceiling + ledger. Its ok:true means SUBMITTED, not confirmed. ──
       let result, threw = null;
       try {
         result = await executeAction(
@@ -176,23 +318,24 @@ export async function handler(event) {
       } catch (e) { threw = e; }
 
       if (result?.ok) {
-        // Success — advance the period, decrement the mandate budget, increment DCA's daily share
-        // (the parallel per-owner counter the yield rule reads), and RESET the failure streak:
-        // consecutiveFailures = 0 AND firstFailureAt = null, so a healthy mandate that throttled
-        // once and then filled starts its streak fresh. Also clears needsAttention.
-        const spentAmount = Number((m.spentAmount + m.perTickAmount).toFixed(6));
+        // ── SUBMITTED — not yet confirmed. Record DCA's daily share now (mirrors executeAction's
+        // own hard-ceiling ledger, which also records at submit), but DO NOT touch spentAmount:
+        // the mandate budget advances only when reconcile witnesses the fill on-chain. Persist the
+        // pending claim with everything reconcile needs (block window + any event hash), and mark
+        // the mandate PENDING_CONFIRM with a pointer to the period awaiting confirmation. ──
         await recordDcaSpend({ owner: m.walletAddress, amountUsdc: fillValueUsdc, at: now }).catch(() => {});
-        await record(m, key, period, OUTCOME.SWAPPED, {
-          tx: result.tx || result.swap?.txHash || null,
-          patch: {
-            spentAmount,
-            lastFilledPeriod: period,
-            lastFillAt: startedAt,
-            lastFillTx: result.tx || null,
-            consecutiveFailures: 0,
-            firstFailureAt: null,
-            needsAttention: false,
-          },
+        await fills.setJSON(claimKey, {
+          mandateId: m.id,
+          period,
+          status: "submitted",
+          snapshotBlock,
+          eventTxHash: result.swap?.txHash || null,
+          submittedAt: startedAt,
+        });
+        await patchMandate(m, key, OUTCOME.PENDING_CONFIRM, {
+          reason: "swap submitted — awaiting on-chain confirmation",
+          patch: { pendingPeriod: period },
+          period,
         });
         continue;
       }
@@ -247,5 +390,5 @@ export async function handler(event) {
   }
 
   await writeHeartbeat();
-  return { statusCode: 200, body: JSON.stringify({ scanned: beat.scanned, fired: beat.fired, skipped: beat.skipped, failed: beat.failed, stopped: beat.stopped }) };
+  return { statusCode: 200, body: JSON.stringify({ scanned: beat.scanned, submitted: beat.submitted, fired: beat.fired, skipped: beat.skipped, failed: beat.failed, stopped: beat.stopped }) };
 }

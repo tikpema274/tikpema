@@ -59,15 +59,33 @@ export const STATUS = {
 // proves the SCHEDULER fired; this proves what happened to each SWAP, so "is my DCA actually
 // working?" is answerable and a failure never reads as a success (the withdraw-reporting rule).
 export const OUTCOME = {
-  SWAPPED: "swapped",                 // filled, tx recorded
+  SWAPPED: "swapped",                 // filled AND witnessed on-chain, tx recorded
+  PENDING_CONFIRM: "pending-confirm", // submitted; awaiting the on-chain witness (budget NOT yet spent)
   SKIPPED_PAUSED: "skipped-paused",   // kill switch — normal, retry next period
   SKIPPED_CEILING: "skipped-ceiling", // yielded headroom to the user — normal, retry
   SKIPPED_CAPPED: "skipped-capped",   // per-tick now exceeds the swap cap — needs attention
   SKIPPED_FUNDS: "skipped-funds",     // wallet underfunded — needs attention, retry
   SKIPPED_BLOCKED: "skipped-blocked", // executeAction refusal / cannot value — retry, fail-closed
   FAILED_TRANSIENT: "failed-transient", // throttle/network — retry, counts toward the stop limit
-  STOPPED_FAILED: "stopped-failed",   // genuine failure, or N transient in a row — mandate stopped
+  FAILED_UNCONFIRMED: "failed-unconfirmed", // submitted but the witness never confirmed within grace —
+  //                                     BUDGET INTACT (no decrement). Never a phantom fill.
+  STOPPED_FAILED: "stopped-failed",   // genuine failure, or N transient/unconfirmed in a row — stopped
 };
+
+// ── CONFIRMATION GATE — the budget (spentAmount) advances ONLY when the on-chain witness confirms
+// a fill landed; a submit alone never spends it. These bound how long we wait and how many blind
+// submits we tolerate before pulling in a human. ─────────────────────────────────────────────────
+//
+// A submitted fill has this long to be witnessed on-chain before it is declared unconfirmed. It is
+// deliberately larger than the ~5s async lag observed on a real fill AND spans more than one
+// reconcile tick (the scheduler runs every 60s), so a healthy-but-slow tx gets multiple chances to
+// be seen; short enough that any over-buy is tightly bounded when paired with the stop below.
+export const CONFIRM_GRACE_MS = 2 * 60 * 1000; // 120s
+
+// N submitted-but-never-witnessed fills IN A ROW stops the mandate. This bounds the worst case —
+// a swap that actually landed but we could not confirm, so spentAmount never advanced and the
+// mandate keeps buying — to at most N ticks before it halts and flags for a human.
+export const MAX_CONSECUTIVE_UNCONFIRMED = 3;
 
 // A single Arc throttle must not kill a healthy mandate; N transient failures IN A ROW must not
 // be invisible. On the Nth consecutive transient failure the mandate STOPS (stopped-failed) so a
