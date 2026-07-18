@@ -193,16 +193,36 @@ or a tx that landed while the record says "failed." We check for both.
     `lastFilledPeriod` unchanged; **no swap tx from the SCA in the tick window**; **no balance
     delta**.
   - **Pass:** `skipped-funds` AND every state/chain check shows nothing moved.
-- **Setup B — genuine failure stops immediately:** hard to force honestly on a stablecoin pair;
-  do **not** fabricate. If a real genuine failure occurs (revert/slippage), the record must show
-  `status == "stopped-failed"`, `recentOutcomes[0].outcome == "stopped-failed"` with the reason,
-  and — critically — `spentAmount` unchanged and **no tx**. **Pass:** stopped with reason, nothing
-  moved.
-- **Setup C — transient streak (observe during a real Arc throttle):** a single throttle →
-  `failed-transient (n/3, Hh)`, mandate still active, streak carried; a 3rd consecutive →
-  `stopped-failed` (count); a streak whose first failure is >24h old → `stopped-failed` (window).
-  A subsequent **success resets** the streak (`consecutiveFailures → 0`, `firstFailureAt → null`).
-  Every non-`swapped` tick in the streak must leave `spentAmount`/`dca-day` unchanged.
+### P7-B (genuine failure → stop) and P7-C (transient streak → stop) — OBSERVE-ONLY, not forced
+
+These two are **not force-triggered** — no fault-injection instrumentation is added to the money
+path (a deliberate choice: no synthetic-throw code ships in a path that moves funds). Instead they
+rest on three independent legs, two already proven and one observed opportunistically:
+
+1. **State machine — harness-proven.** The transient/genuine → skip/stop transitions, the
+   3-consecutive-OR-24h-window stop, and the reset-on-success were verified by unit harness against
+   `_dca.mjs` (`classifyFillError`, `MAX_CONSECUTIVE_FAILURES`, `FAILURE_WINDOW_MS`): `1 fail/1h →
+   retry`, `3 fails → STOP (count)`, `2 fails/25h → STOP (window)`, `success → streak 0 +
+   firstFailureAt null`. The *decision logic* is proven independent of any live throttle.
+
+2. **Classifier — already live-proven on the deposit path.** DCA's `classifyFillError` is literally
+   `isTransient(err) ? …` importing from `_retry.mjs` — the **same single classifier**
+   (`_retry.mjs:60`, grep-confirmed: `_dca.mjs`, `_delegate.mjs`, and
+   `agent-ub-deposit-background.mjs` all import it from `./_retry.mjs`) that was **live-proven
+   against real Arc throttles on the deposit path** (commits `e796a80` / `14f5bee`; prod records
+   `dep:07960ec2` / `dep:1533b09c` / `dep:648c1c0b` / `dep:07fdbcb0` carried `request limit
+   reached` and classified transient). No new classifier, so nothing new to live-prove.
+
+3. **DCA-tick live categorization — observed opportunistically, NOT forced.** When Arc genuinely
+   throttles during a DCA fill (it will, at a few calls/sec), the tick records
+   `failed-transient (n/3, Hh)` with `spentAmount`/`dca-day` unchanged and no tx; a genuine
+   revert/slippage records `stopped-failed` likewise. **What to observe if it arises:** the outcome
+   is a non-`swapped` category with the right reason, spend state untouched, and the both-directions
+   reconciliation below holds. Do **not** fabricate one.
+
+**Pass (P7-B/C):** legs 1 and 2 hold as recorded here; any opportunistic leg-3 observation is
+consistent (non-`swapped` outcome, nothing moved). **Fail:** any live categorization that
+contradicts the harnessed state machine, or a failure that moved funds.
 - **The both-directions reconciliation (the core of this property):**
   - **Record → chain:** for every non-`swapped` outcome, confirm the SCA made **no swap tx** in
     that tick's minute window (scan the SCA's tx list on the explorer). A "failed" record with a
@@ -232,5 +252,16 @@ a claim is checkable or it doesn't count).
 | 5 · ceiling yields | | | |
 | 6 · idempotent | | | |
 | 7 · failure honest | | | |
+
+## Pre-ship checklist (before the DCA UI ships)
+
+- [ ] Properties 1–6 pass live, with evidence recorded in the table above.
+- [ ] Property 7: legs 1 (harness) + 2 (shared classifier, grep-confirmed) recorded; any
+      opportunistic leg-3 observation noted. No fabricated failure.
+- [ ] **No fault-injection / synthetic-throw instrumentation in the money path** — grep the
+      `netlify/functions/dca-*` and `_dca.mjs` for `SYNTHETIC` / `FAULT` / test-only throws and
+      confirm zero matches. (This rehearsal is run observe-only, by design; nothing to remove.)
+- [ ] Set the production caps intentionally: `AGENT_SWAP_CAP_USDC`, `PERIOD_CEILING_USDC`,
+      `DCA_CEILING_RESERVE_FRACTION` (all fail-closed to conservative defaults if unset).
 
 **Not run yet.** Written to be executed step by step against the deploy.
