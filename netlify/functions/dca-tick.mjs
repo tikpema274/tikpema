@@ -25,6 +25,7 @@ import {
   CONFIRM_RPC_TIMEOUT_MS,
   MAX_RECONCILES_PER_TICK,
   MAX_PENDING_AGE_MS,
+  SCAN_WINDOW_BLOCKS,
 } from "./_dca.mjs";
 import { isBlobsTransient } from "./_retry.mjs";
 
@@ -177,6 +178,7 @@ export async function handler(event) {
         amountIn: m.perTickAmount,
         fromBlock: BigInt(claim.snapshotBlock),
         eventTxHash: claim.eventTxHash || null,
+        scanWindowBlocks: SCAN_WINDOW_BLOCKS, // bounded window — a fill lands within seconds of snapshot
       }),
       new Promise((resolve) =>
         setTimeout(() => resolve({ confirmed: false, reason: "rpc-error: confirm timeout" }), CONFIRM_RPC_TIMEOUT_MS)

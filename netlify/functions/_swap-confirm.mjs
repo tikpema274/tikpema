@@ -71,14 +71,19 @@ function amountOutFromLogs(logs, tokenOutAddr, wallet) {
 }
 
 // confirmSwapLanded — witness THIS fill on-chain, single-shot.
-//   { walletAddress, tokenIn, tokenOut, amountIn, fromBlock, eventTxHash }
+//   { walletAddress, tokenIn, tokenOut, amountIn, fromBlock, eventTxHash, scanWindowBlocks }
 //     fromBlock  — BigInt lower bound of the log-scan window (the block BEFORE submit for a tight,
 //                  unambiguous window; a generous lookback where no exact snapshot exists).
 //     eventTxHash— the SDK's event hash if one arrived, else null (then PATH 2 is the only witness).
+//     scanWindowBlocks — OPTIONAL upper bound: scan fromBlock..min(fromBlock+N, head) instead of
+//                  ..latest. On Arc this is REQUIRED for a tight snapshot that can age past the
+//                  10,000-block getLogs limit (a swap lands within seconds, so a small N loses
+//                  nothing). OMIT it to keep the exact prior behaviour (toBlock:"latest") — the
+//                  research->swap job-verifier omits it and is therefore unchanged.
 // Returns:
 //   { confirmed:true,  verifiedBy:"hash"|"logscan", txHash, tx, blockNumber, amountOut }
 //   { confirmed:false, reason }  where reason ∈ reverted | not-found | ambiguous:… | rpc-error:…
-export async function confirmSwapLanded({ walletAddress, tokenIn, tokenOut, amountIn, fromBlock, eventTxHash }) {
+export async function confirmSwapLanded({ walletAddress, tokenIn, tokenOut, amountIn, fromBlock, eventTxHash, scanWindowBlocks }) {
   const pc = publicClient();
   const wallet = getAddress(walletAddress);
   const inAddr = tokenAddr(tokenIn);
@@ -114,13 +119,24 @@ export async function confirmSwapLanded({ walletAddress, tokenIn, tokenOut, amou
   // ── PATH 2: TWO-LEGGED LOG-SCAN — identify our swap by its shape, not by a balance total. ──
   let inLegs, outLegs;
   try {
+    // Bound the scan when a window is given (dca-tick): toBlock = min(fromBlock + N, head). REQUIRED
+    // on Arc — eth_getLogs is capped at a 10,000-block range (-32614), so an unbounded
+    // snapshot->latest scan HARD-FAILS once a fill ages past ~10k blocks, and a wide scan throttles
+    // more. head is read FIRST because Arc REJECTS toBlock > head (the clamp is not optional).
+    // Omitted (the job-verifier) -> toBlock:"latest", exactly as before.
+    let toBlock = "latest";
+    if (scanWindowBlocks != null) {
+      const head = await withRetry(() => pc.getBlockNumber(), { ...RETRY, label: "read head" });
+      const upper = fromBlock + BigInt(scanWindowBlocks);
+      toBlock = upper < head ? upper : head;
+    }
     // Wrap the parallel read as ONE retry unit: a throttle on either leg retries both (idempotent
     // reads). A SUCCESSFUL scan — empty, one match, or ambiguous — is returned unchanged and never
     // retried, so not-found/ambiguous/confirmed semantics are exactly as before; only a transient
     // read FAILURE now backs off instead of fast-failing to rpc-error.
     [inLegs, outLegs] = await withRetry(() => Promise.all([
-      pc.getLogs({ address: inAddr, event: TRANSFER, args: { from: wallet }, fromBlock, toBlock: "latest" }),
-      pc.getLogs({ address: outAddr, event: TRANSFER, args: { to: wallet }, fromBlock, toBlock: "latest" }),
+      pc.getLogs({ address: inAddr, event: TRANSFER, args: { from: wallet }, fromBlock, toBlock }),
+      pc.getLogs({ address: outAddr, event: TRANSFER, args: { to: wallet }, fromBlock, toBlock }),
     ]), { ...RETRY, label: "scan swap legs" });
   } catch (e) {
     // Cannot read the chain → cannot witness. Fail closed, and let the caller distinguish this

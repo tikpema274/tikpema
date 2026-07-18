@@ -99,6 +99,17 @@ export const MAX_RECONCILES_PER_TICK = 1;         // chain-witnessing reconciles
 // forever. Well above CONFIRM_GRACE_MS so a healthy-but-slow tx is never prematurely failed.
 export const MAX_PENDING_AGE_MS = 60 * 60 * 1000; // 1h
 
+// Upper bound on the reconcile log-scan window: toBlock = min(snapshotBlock + this, head). A swap
+// lands within seconds of submit (~10 blocks observed for fill 495663: snapshot 52457045 -> tx
+// 52457055), so a 500-block window (~4 min at ~0.5s/block, well past the 120s CONFIRM_GRACE_MS)
+// always contains a landed fill with margin. REQUIRED, not just an optimization: Arc caps
+// eth_getLogs at a 10,000-block range (-32614), so the old snapshotBlock->latest scan HARD-FAILED
+// for any fill older than ~83 min (aged fills became permanently unconfirmable) AND a wide scan is
+// far more throttle-prone. 500 is well under 10,000 and keeps each getLogs cheap. Only dca-tick
+// passes this; the research->swap job-verifier omits it (keeps toBlock:"latest" over its own
+// <=10,000 lookback), so its behaviour is unchanged.
+export const SCAN_WINDOW_BLOCKS = 500;
+
 // A single Arc throttle must not kill a healthy mandate; N transient failures IN A ROW must not
 // be invisible. On the Nth consecutive transient failure the mandate STOPS (stopped-failed) so a
 // persistently-broken DCA doesn't silently pretend to run forever. A genuine failure stops on the
