@@ -102,12 +102,14 @@ export const MAX_PENDING_AGE_MS = 60 * 60 * 1000; // 1h
 // Upper bound on the reconcile log-scan window: toBlock = min(snapshotBlock + this, head). A swap
 // lands within seconds of submit (~10 blocks observed for fill 495663: snapshot 52457045 -> tx
 // 52457055), so a 500-block window (~4 min at ~0.5s/block, well past the 120s CONFIRM_GRACE_MS)
-// always contains a landed fill with margin. REQUIRED, not just an optimization: Arc caps
-// eth_getLogs at a 10,000-block range (-32614), so the old snapshotBlock->latest scan HARD-FAILED
-// for any fill older than ~83 min (aged fills became permanently unconfirmable) AND a wide scan is
-// far more throttle-prone. 500 is well under 10,000 and keeps each getLogs cheap. Only dca-tick
-// passes this; the research->swap job-verifier omits it (keeps toBlock:"latest" over its own
-// <=10,000 lookback), so its behaviour is unchanged.
+// always contains a landed fill with margin. DEFENCE-IN-DEPTH against Arc's 10,000-block eth_getLogs
+// cap (-32614) — NOT a correctness fix: a DCA fill ages out at MAX_PENDING_AGE_MS (~7,200 blocks)
+// BEFORE an unbounded snapshotBlock->latest scan could reach 10k (~83 min), so the cap is never
+// actually hit today; the bound guards a faster block time or a raised age-out. (fb7adf9's message
+// overclaimed this as fixing a live "aged fills permanently unconfirmable" bug — corrected here.) It
+// does NOT fix the throttle either: that is a request-RATE limit (see WITNESS_RPC_URL, Part B), not
+// query size. 500 is well under 10,000. Only dca-tick passes this; the research->swap job-verifier
+// omits it (keeps toBlock:"latest" over its own <=10,000 lookback), so its behaviour is unchanged.
 export const SCAN_WINDOW_BLOCKS = 500;
 
 // A single Arc throttle must not kill a healthy mandate; N transient failures IN A ROW must not

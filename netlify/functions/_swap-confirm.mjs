@@ -1,6 +1,6 @@
-import { parseAbiItem, parseUnits, formatUnits, getAddress, pad } from "viem";
+import { parseAbiItem, parseUnits, formatUnits, getAddress, pad, createPublicClient, http } from "viem";
 import { CONTRACTS, USDC_DECIMALS, ARC } from "./_arc.mjs";
-import { publicClient } from "./_predict.mjs";
+import { publicClient, arcChain } from "./_predict.mjs";
 import { withRetry } from "./_retry.mjs";
 
 // Arc's public RPC answers a throttle with "request limit reached", which viem does NOT retry (it
@@ -11,6 +11,41 @@ import { withRetry } from "./_retry.mjs";
 // worst-case backoff (~1.75s + read time ≈ ~2.85s) comfortably inside dca-tick's 6s confirm timeout;
 // the every-minute reconcile provides additional cross-tick retries beyond these.
 const RETRY = { retries: 3 };
+
+// ── DEDICATED WITNESS ENDPOINT (Part B) ──────────────────────────────────────────────────────────
+// The public RPC's request-RATE throttle starves this witness's read burst (getReceipt / getLogs /
+// the head-clamp read), so a genuinely-landed swap can go unconfirmed tick after tick (observed:
+// fill 495664 pending while its swap 0x204d94f8 was on-chain). WITNESS_RPC_URL points these reads —
+// and ONLY these — at a dedicated keyed Arc-testnet endpoint. Scoped on purpose: the rest of the app
+// keeps publicClient() (public RPC); nothing else is repointed. UNSET -> falls back to public
+// (today's behaviour), so this is INERT until an endpoint is provisioned.
+//
+// CHAIN GUARD (non-negotiable): a wrong-chain endpoint returns logs from ANOTHER chain, which could
+// make the log-scan FALSELY CONFIRM a swap that never happened on Arc -> spentAmount advances on
+// nothing = a real wrong-spend, the exact phantom-fill class this whole witness exists to prevent.
+// So verify getChainId() === ARC.chainId (5042002) ONCE per cold-start; on mismatch OR unreachable,
+// FAIL SAFE to the public RPC (never trust that an operator-supplied endpoint is on the right chain).
+// Memoised -> one verification read per container lifetime, not per call.
+let _witness = null;
+let _witnessResolved = false;
+async function witnessClient() {
+  if (_witnessResolved) return _witness;
+  const url = process.env.WITNESS_RPC_URL;
+  if (!url) { _witness = publicClient(); _witnessResolved = true; return _witness; } // inert fallback
+  const dedicated = createPublicClient({ chain: arcChain, transport: http(url) });
+  try {
+    const id = await dedicated.getChainId();
+    if (id !== ARC.chainId) {
+      // Wrong chain — do NOT witness against it; fall back to the (correct-chain) public RPC.
+      _witness = publicClient(); _witnessResolved = true; return _witness;
+    }
+    _witness = dedicated; _witnessResolved = true; return _witness;
+  } catch {
+    // Couldn't verify the chain this cold-start — use public for THIS call and re-check next call.
+    // Do NOT cache: an unverified endpoint must never become the witness by default.
+    return publicClient();
+  }
+}
 
 // _swap-confirm.mjs — THE SINGLE on-chain WITNESS for "did this swap actually land?".
 //
@@ -84,7 +119,7 @@ function amountOutFromLogs(logs, tokenOutAddr, wallet) {
 //   { confirmed:true,  verifiedBy:"hash"|"logscan", txHash, tx, blockNumber, amountOut }
 //   { confirmed:false, reason }  where reason ∈ reverted | not-found | ambiguous:… | rpc-error:…
 export async function confirmSwapLanded({ walletAddress, tokenIn, tokenOut, amountIn, fromBlock, eventTxHash, scanWindowBlocks }) {
-  const pc = publicClient();
+  const pc = await witnessClient(); // WITNESS_RPC_URL if set + on-chain 5042002, else public RPC
   const wallet = getAddress(walletAddress);
   const inAddr = tokenAddr(tokenIn);
   const outAddr = tokenAddr(tokenOut);
@@ -119,11 +154,13 @@ export async function confirmSwapLanded({ walletAddress, tokenIn, tokenOut, amou
   // ── PATH 2: TWO-LEGGED LOG-SCAN — identify our swap by its shape, not by a balance total. ──
   let inLegs, outLegs;
   try {
-    // Bound the scan when a window is given (dca-tick): toBlock = min(fromBlock + N, head). REQUIRED
-    // on Arc — eth_getLogs is capped at a 10,000-block range (-32614), so an unbounded
-    // snapshot->latest scan HARD-FAILS once a fill ages past ~10k blocks, and a wide scan throttles
-    // more. head is read FIRST because Arc REJECTS toBlock > head (the clamp is not optional).
-    // Omitted (the job-verifier) -> toBlock:"latest", exactly as before.
+    // Bound the scan when a window is given (dca-tick): toBlock = min(fromBlock + N, head). This is
+    // DEFENCE-IN-DEPTH against Arc's 10,000-block eth_getLogs cap (-32614), NOT a live bug fix: a DCA
+    // fill ages out at MAX_PENDING_AGE_MS (~7,200 blocks) BEFORE an unbounded snapshot->latest scan
+    // could reach 10k (~83 min), so the cap is never actually hit today — the bound guards a faster
+    // block time or a raised age-out. (fb7adf9's message overclaimed this as fixing a live "aged
+    // fills permanently unconfirmable" bug — corrected here.) head is read FIRST because Arc REJECTS
+    // toBlock > head (the clamp is not optional). Omitted (the job-verifier) -> toBlock:"latest".
     let toBlock = "latest";
     if (scanWindowBlocks != null) {
       const head = await withRetry(() => pc.getBlockNumber(), { ...RETRY, label: "read head" });
