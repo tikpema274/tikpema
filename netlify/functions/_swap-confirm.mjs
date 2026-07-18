@@ -1,6 +1,16 @@
 import { parseAbiItem, parseUnits, formatUnits, getAddress, pad } from "viem";
 import { CONTRACTS, USDC_DECIMALS, ARC } from "./_arc.mjs";
 import { publicClient } from "./_predict.mjs";
+import { withRetry } from "./_retry.mjs";
+
+// Arc's public RPC answers a throttle with "request limit reached", which viem does NOT retry (it
+// arrives as a JSON-RPC error body, not an HTTP 429 — see _retry.mjs). An UN-retried witness read
+// therefore fast-fails to rpc-error on every throttled tick, so a LANDED swap is never confirmed
+// (observed: DCA fill 495663 sat pending while its swap was on-chain). So the two chain reads below
+// are wrapped in the SAME withRetry the deposit path uses. retries:3 (not the default 4) keeps the
+// worst-case backoff (~1.75s + read time ≈ ~2.85s) comfortably inside dca-tick's 6s confirm timeout;
+// the every-minute reconcile provides additional cross-tick retries beyond these.
+const RETRY = { retries: 3 };
 
 // _swap-confirm.mjs — THE SINGLE on-chain WITNESS for "did this swap actually land?".
 //
@@ -78,7 +88,11 @@ export async function confirmSwapLanded({ walletAddress, tokenIn, tokenOut, amou
   // ── PATH 1: HASH — the SDK gave us a hash; ask the chain what became of it. ──
   if (eventTxHash) {
     try {
-      const r = await pc.getTransactionReceipt({ hash: eventTxHash });
+      // A THROTTLE retries with backoff; a not-mined-yet receipt (TransactionReceiptNotFoundError,
+      // not the transient class) is NOT retried — it throws straight through to the fall-through
+      // below and PATH 2 witnesses by log-scan. A reverted/success receipt is a SUCCESSFUL read,
+      // returned on the first attempt (never retried), so revert still surfaces immediately.
+      const r = await withRetry(() => pc.getTransactionReceipt({ hash: eventTxHash }), { ...RETRY, label: "get swap receipt" });
       if (r?.status === "reverted") {
         return { confirmed: false, reason: "reverted", txHash: eventTxHash };
       }
@@ -100,10 +114,14 @@ export async function confirmSwapLanded({ walletAddress, tokenIn, tokenOut, amou
   // ── PATH 2: TWO-LEGGED LOG-SCAN — identify our swap by its shape, not by a balance total. ──
   let inLegs, outLegs;
   try {
-    [inLegs, outLegs] = await Promise.all([
+    // Wrap the parallel read as ONE retry unit: a throttle on either leg retries both (idempotent
+    // reads). A SUCCESSFUL scan — empty, one match, or ambiguous — is returned unchanged and never
+    // retried, so not-found/ambiguous/confirmed semantics are exactly as before; only a transient
+    // read FAILURE now backs off instead of fast-failing to rpc-error.
+    [inLegs, outLegs] = await withRetry(() => Promise.all([
       pc.getLogs({ address: inAddr, event: TRANSFER, args: { from: wallet }, fromBlock, toBlock: "latest" }),
       pc.getLogs({ address: outAddr, event: TRANSFER, args: { to: wallet }, fromBlock, toBlock: "latest" }),
-    ]);
+    ]), { ...RETRY, label: "scan swap legs" });
   } catch (e) {
     // Cannot read the chain → cannot witness. Fail closed, and let the caller distinguish this
     // "couldn't look" from a real "did not land" (it must NOT consume the grace window).
