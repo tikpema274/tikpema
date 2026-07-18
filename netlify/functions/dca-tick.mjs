@@ -22,7 +22,11 @@ import {
   FAILURE_WINDOW_MS,
   CONFIRM_GRACE_MS,
   MAX_CONSECUTIVE_UNCONFIRMED,
+  CONFIRM_RPC_TIMEOUT_MS,
+  MAX_RECONCILES_PER_TICK,
+  MAX_PENDING_AGE_MS,
 } from "./_dca.mjs";
+import { isBlobsTransient } from "./_retry.mjs";
 
 // dca-tick.mjs — THE DCA SCHEDULER. Runs every minute; fills due mandates autonomously.
 //
@@ -51,9 +55,12 @@ import {
 export const config = { schedule: "* * * * *" };
 
 // Bound the EXPENSIVE work (new submits, each an on-chain swap) per invocation so the tick stays
-// well under the synchronous function timeout. RECONCILES of already-submitted fills are cheap
-// (read-only chain lookups) and are NOT capped — they must never be starved, or a fill could sit
-// pending forever. Lowered from 8 now that each submit also carries a snapshot + confirm handoff.
+// well under the synchronous function timeout. Lowered from 8 now that each submit also carries a
+// snapshot + confirm handoff. RECONCILES were once left uncapped as "cheap read-only lookups" — but
+// under Arc throttling confirmSwapLanded is NOT cheap, and a burst of slow reconciles is exactly what
+// ages the request-scoped Blobs token out mid-tick. So chain-witnessing reconciles are now bounded
+// too (MAX_RECONCILES_PER_TICK, each timed out at CONFIRM_RPC_TIMEOUT_MS); a capped-out reconcile
+// DEFERS (pointer stays → next tick), so a fill is delayed, never starved forever.
 const MAX_SUBMITS_PER_TICK = 3;
 
 export async function handler(event) {
@@ -61,9 +68,33 @@ export async function handler(event) {
   const startedAt = new Date().toISOString();
   const now = Date.now();
 
+  // ── TOKEN-EXP DIAGNOSTIC (observability only; logs NO secret) — decode the injected Blobs token's
+  // expiry to learn whether the scheduled-function token arrives NEAR-DEAD (so bounding can never be
+  // enough → a long-lived credential is eventually unavoidable) or only dies UNDER LONG WORK (so the
+  // code-only bounding below is the permanent fix). Best-effort: a malformed token must never break
+  // the tick, and only the derived deltas — never the token itself — are written to the heartbeat.
+  const tokenExp = (() => {
+    try {
+      if (!event?.blobs) return { note: "no event.blobs (local dev / http path)" };
+      const ctx = JSON.parse(Buffer.from(event.blobs, "base64").toString("utf8"));
+      const seg = String(ctx.token || "").split(".")[1]; // JWT payload segment
+      if (!seg) return { note: "token not a decodable JWT" };
+      const payload = JSON.parse(Buffer.from(seg.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"));
+      if (!payload.exp) return { note: "JWT has no exp" };
+      return {
+        remainingAtStartMs: payload.exp * 1000 - now,
+        totalTtlMs: payload.iat ? (payload.exp - payload.iat) * 1000 : null,
+      };
+    } catch (e) { return { note: `decode failed: ${e.message}` }; }
+  })();
+
+  // Slow (chain-witnessing) reconciles run this invocation. Bounded per tick so a burst of throttled
+  // confirms can't age the Blobs token out; the rest DEFER (pointer stays → next tick re-checks).
+  let slowReconciles = 0;
+
   // ── UNCONDITIONAL HEARTBEAT — written every invocation regardless of work (the job-sweep
   // blind-spot fix: a quiet cron must be distinguishable from a dead one by reading ONE blob).
-  const beat = { tickAt: startedAt, scanned: 0, submitted: 0, fired: 0, skipped: 0, failed: 0, stopped: 0, terminal: 0, errors: 0, details: [] };
+  const beat = { tickAt: startedAt, tokenExp, scanned: 0, submitted: 0, fired: 0, skipped: 0, failed: 0, stopped: 0, terminal: 0, deferred: 0, errors: 0, details: [] };
   const writeHeartbeat = async () => {
     try { await getStore(HEARTBEAT_STORE).setJSON("last", beat); } catch { /* observability only */ }
   };
@@ -124,14 +155,33 @@ export async function handler(event) {
       return;
     }
 
-    const res = await confirmSwapLanded({
-      walletAddress: m.walletAddress,
-      tokenIn: m.tokenIn,
-      tokenOut: m.tokenOut,
-      amountIn: m.perTickAmount,
-      fromBlock: BigInt(claim.snapshotBlock),
-      eventTxHash: claim.eventTxHash || null,
-    });
+    // ── BOUND THE SLOW WITNESS so it can't age the Blobs token out mid-tick. Only N chain-witnessing
+    // reconciles run per invocation; the rest DEFER (pointer stays set → next tick re-checks), so a
+    // fill is never starved, only delayed. ──
+    if (slowReconciles >= MAX_RECONCILES_PER_TICK) {
+      beat.deferred++;
+      beat.details.push({ id: m.id, outcome: "deferred-reconcile-cap" });
+      return;
+    }
+    slowReconciles++;
+
+    // Hard timeout on the single confirm. A timeout is "couldn't LOOK", NOT "did not land": shape it
+    // as rpc-error so the pending-AGE logic below (not the grace/unconfirmed logic) governs it. The
+    // underlying viem calls are abandoned (harmless) — the shared witness itself is left untouched, so
+    // the research→swap path that also calls it is unaffected.
+    const res = await Promise.race([
+      confirmSwapLanded({
+        walletAddress: m.walletAddress,
+        tokenIn: m.tokenIn,
+        tokenOut: m.tokenOut,
+        amountIn: m.perTickAmount,
+        fromBlock: BigInt(claim.snapshotBlock),
+        eventTxHash: claim.eventTxHash || null,
+      }),
+      new Promise((resolve) =>
+        setTimeout(() => resolve({ confirmed: false, reason: "rpc-error: confirm timeout" }), CONFIRM_RPC_TIMEOUT_MS)
+      ),
+    ]);
 
     if (res.confirmed) {
       // ── THE WITNESS CONFIRMED — advance the budget now, and ONLY now. Recover the real hash
@@ -169,9 +219,15 @@ export async function handler(event) {
       return;
     }
 
-    // Couldn't READ the chain this tick (rpc-error) — NOT a "did not land". Leave pending, consume
-    // no grace; next tick re-checks. We never fail a fill because we couldn't look.
-    if (String(res.reason).startsWith("rpc-error")) return;
+    // Couldn't READ the chain this tick (rpc-error / confirm timeout) — NOT a "did not land". A YOUNG
+    // fill: leave pending, consume no grace; next tick re-checks. We never fail a fill because we
+    // couldn't look. BUT a fill we have been UNABLE to witness for longer than MAX_PENDING_AGE_MS
+    // (persistent throttle) must not sit pending forever — fall through to unconfirmed handling below
+    // (budget intact, needsAttention). A false-unconfirmed only asks a human to look; a false-confirm
+    // is the sin this design exists to prevent.
+    if (String(res.reason).startsWith("rpc-error")) {
+      if (now - Date.parse(claim.submittedAt) < MAX_PENDING_AGE_MS) return;
+    }
 
     // not-found or ambiguous: still no witness. Inside the grace window, keep it pending (a
     // healthy-but-slow tx just hasn't settled). Past grace, declare it unconfirmed — BUDGET INTACT
@@ -181,8 +237,11 @@ export async function handler(event) {
 
     const consecutiveUnconfirmed = (m.consecutiveUnconfirmed || 0) + 1;
     const ambiguous = String(res.reason).startsWith("ambiguous");
+    const couldntLook = String(res.reason).startsWith("rpc-error");
     const detail = ambiguous
       ? `${res.reason} — refusing to attribute one to this fill (fail-closed)`
+      : couldntLook
+      ? `chain unreadable (throttled/timeout) for >${Math.round((now - Date.parse(claim.submittedAt)) / 60000)}m — escalating for review`
       : `no on-chain witness within ${Math.round(CONFIRM_GRACE_MS / 1000)}s of submit`;
 
     if (consecutiveUnconfirmed >= MAX_CONSECUTIVE_UNCONFIRMED) {
@@ -207,6 +266,12 @@ export async function handler(event) {
       const m = await mandates.get(key, { type: "json" }).catch(() => null);
       if (!m || m.status !== STATUS.ACTIVE) continue;
       beat.scanned++;
+
+      // ── PER-MANDATE BOUNDARY (see the catch at the end of this block). A Blobs write that expired
+      // mid-tick DEFERS and retries next tick with a fresh token; any other error is isolated to this
+      // one mandate. Neither aborts the loop — the old outer-catch-only structure let the first throw
+      // abort every remaining mandate. (Body left at its original indent to keep this diff reviewable.)
+      try {
 
       // ── RECONCILE FIRST — an in-flight fill is settled (or left pending) before anything else,
       // and uncapped, so it can never be starved by the submit budget. One action per mandate per
@@ -383,12 +448,28 @@ export async function handler(event) {
           patch: { status: STATUS.STOPPED_FAILED, stoppedAt: startedAt, needsAttention: true },
         });
       }
+      } catch (e) {
+        // A Blobs write threw MID-INVOCATION (the request-scoped token aged out during this tick's
+        // throttled chain I/O). It is TRANSIENT: the write did NOT commit, so this mandate's durable
+        // state is unchanged on disk (a pending pointer stays set; a claim keeps its prior shape), and
+        // the next tick redoes the identical, idempotent step with a FRESH injected token. So DEFER —
+        // never abort the tick, never freeze the mandate. Any OTHER error is recorded against this one
+        // mandate and the loop moves on, so one bad mandate can't starve the rest.
+        if (isBlobsTransient(e)) {
+          beat.deferred++;
+          beat.details.push({ id: m.id, outcome: "deferred-blobs-transient", reason: String(e?.message || e).slice(0, 80) });
+        } else {
+          beat.errors++;
+          beat.details.push({ id: m.id, outcome: "error", reason: String(e?.message || e).slice(0, 80) });
+        }
+      }
     }
   } catch (e) {
     beat.errors++;
     beat.note = `tick error (partial): ${e.message}`;
   }
 
+  beat.tickElapsedMs = Date.now() - now;
   await writeHeartbeat();
-  return { statusCode: 200, body: JSON.stringify({ scanned: beat.scanned, submitted: beat.submitted, fired: beat.fired, skipped: beat.skipped, failed: beat.failed, stopped: beat.stopped }) };
+  return { statusCode: 200, body: JSON.stringify({ scanned: beat.scanned, submitted: beat.submitted, fired: beat.fired, skipped: beat.skipped, failed: beat.failed, stopped: beat.stopped, deferred: beat.deferred }) };
 }

@@ -69,6 +69,31 @@ export function isTransient(e) {
 }
 
 /**
+ * The Netlify Blobs TRANSIENT class — a request-scoped Blobs token that expired MID-INVOCATION
+ * (the injected `event.blobs` token is short-lived; a tick that spends seconds in throttled chain
+ * I/O between token acquisition and a Blobs WRITE can outlive it), or a transient Blobs-service
+ * internal error. Kept SEPARATE from the chain TRANSIENT regex above on purpose: this is retryable
+ * ACROSS ticks (the next scheduled invocation gets a FRESH injected token — re-acquiring within the
+ * same invocation does NOT, since `event.blobs` is fixed), and must never be conflated with a
+ * chain-read throttle. The observed prod text is "Netlify Blobs has generated an internal error
+ * (Failed to decode token: Token expired)".
+ *
+ * ⚠️ This classifies a BLOBS write, which is idempotent (same key, same value) and safe to redo on
+ * a later tick. It must NEVER be used to retry a CHAIN submit — see dca-tick, where a Blobs-transient
+ * DEFERS (leaves durable state untouched so the next tick redoes it), it does not resubmit.
+ */
+export const BLOBS_TRANSIENT =
+  /failed to decode token|token expired|blobs.*internal error|internal error.*token|BlobsInternalError/i;
+export function isBlobsTransient(e) {
+  if (!e) return false;
+  let text = "";
+  for (let cur = e, depth = 0; cur && depth < 5; cur = cur.cause, depth++) {
+    text += ` ${cur.name ?? ""} ${cur.message ?? ""} ${cur.details ?? ""} ${cur.shortMessage ?? ""}`;
+  }
+  return BLOBS_TRANSIENT.test(text);
+}
+
+/**
  * Run `fn` with bounded exponential backoff over the transient class ONLY.
  *
  * Delays: 250/500/1000/2000ms + jitter (scripts/dd/rpc.mjs:81), ~3.75s worst case over 4

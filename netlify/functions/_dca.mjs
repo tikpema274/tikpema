@@ -87,6 +87,18 @@ export const CONFIRM_GRACE_MS = 2 * 60 * 1000; // 120s
 // mandate keeps buying — to at most N ticks before it halts and flags for a human.
 export const MAX_CONSECUTIVE_UNCONFIRMED = 3;
 
+// ── TICK BOUNDING — cap the slow, throttle-prone on-chain work per invocation so the request-scoped
+// Netlify Blobs token (injected per-invocation, short-lived) is far less likely to age out between
+// acquisition and the reconcile WRITE. Belt to dca-tick's braces: when the token DOES expire, the
+// write is caught as Blobs-transient and DEFERS to the next tick rather than freezing the mandate.
+export const CONFIRM_RPC_TIMEOUT_MS = 6 * 1000;   // hard cap on ONE confirmSwapLanded call
+export const MAX_RECONCILES_PER_TICK = 1;         // chain-witnessing reconciles per invocation; rest defer
+// A fill pending this long with NO usable witness (persistent throttle/timeouts — we keep being
+// unable to LOOK, which is not the same as "did not land") escalates to failed-unconfirmed +
+// needsAttention: budget intact, a human looks. So an un-witnessable fill can never sit pending
+// forever. Well above CONFIRM_GRACE_MS so a healthy-but-slow tx is never prematurely failed.
+export const MAX_PENDING_AGE_MS = 60 * 60 * 1000; // 1h
+
 // A single Arc throttle must not kill a healthy mandate; N transient failures IN A ROW must not
 // be invisible. On the Nth consecutive transient failure the mandate STOPS (stopped-failed) so a
 // persistently-broken DCA doesn't silently pretend to run forever. A genuine failure stops on the
