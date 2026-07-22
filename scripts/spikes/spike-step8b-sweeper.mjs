@@ -60,7 +60,7 @@ mock.module("../../netlify/functions/_circle.mjs", {
   },
 });
 
-const { handler } = await import("../../netlify/functions/budget-sweep.mjs");
+const { sweep: sweepFn } = await import("../../netlify/functions/budget-sweep.mjs"); // pure internal fn — NOT the auth-guarded HTTP handler
 const { recordAgentSpend, daySpend, reverseAgentSpend } = await import("../../netlify/functions/_budget.mjs");
 
 let fails = 0;
@@ -77,7 +77,7 @@ async function seedCharge({ id, amount = 1, ageMs }) {
   await recordAgentSpend({ owner: OWNER, amountUsdc: amount, source: "swap_tokens", justification: "t", at, confirmation: "submitted", circleId: id });
   return at;
 }
-const sweep = async () => JSON.parse((await handler({})).body);
+const sweep = async () => sweepFn(); // sweep() returns the beat object directly
 
 console.log(`\n════ STEP 8 · PART 3 · budget sweeper — ZERO MONEY, ZERO NETWORK ════`);
 

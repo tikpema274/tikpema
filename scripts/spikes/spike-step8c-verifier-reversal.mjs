@@ -66,7 +66,7 @@ mock.module("../../netlify/functions/_circle.mjs", {
 });
 
 const { handler: verify } = await import("../../netlify/functions/job-swap-receipt-background.mjs");
-const { handler: sweep } = await import("../../netlify/functions/budget-sweep.mjs");
+const { sweep } = await import("../../netlify/functions/budget-sweep.mjs"); // pure internal fn, not the guarded handler
 const { recordAgentSpend, daySpend } = await import("../../netlify/functions/_budget.mjs");
 
 let fails = 0;
@@ -157,7 +157,7 @@ console.log(`\n── 3 · ⭐ interaction: verifier missed it (transient) → d
   const at = await seedCharge({ id: "cid-late", ageMs: 7 * HOUR });
   check("precondition: the charge is now readable and unresolved", (await daySpend({ owner: OWNER, at })) === 1 && !hasKey("resolution-cid-late"), "unmarked");
   SCRIPT.set("cid-late", { state: "FAILED" });
-  const beat = JSON.parse((await sweep({})).body);
+  const beat = await sweep({});
   check("⭐ THE BACKSTOP REVERSES IT LATER (re-read): 1 → 0", (await daySpend({ owner: OWNER, at })) === 0, `daySpend=${await daySpend({ owner: OWNER, at })}`);
   check("…so a transient miss at verifier-time is NOT a permanent gap", beat.reversed === 1 && hasKey("reversal-cid-late"), `reversed=${beat.reversed}`);
 }
@@ -186,7 +186,7 @@ console.log(`\n── 5 · no double-reverse across verifier + backstop ──`)
   await runVerifier("j5");
   check("verifier reversed once (re-read)", (await daySpend({ owner: OWNER, at })) === 0, `daySpend=${await daySpend({ owner: OWNER, at })}`);
   SCRIPT.set("cid-idem", { state: "FAILED" });
-  const beat = JSON.parse((await sweep({})).body);
+  const beat = await sweep({});
   check("backstop SKIPS it (retired by the key scan — never even queried)", beat.open === 0 && beat.reversed === 0, `open=${beat.open} reversed=${beat.reversed}`);
   check("daySpend still moved exactly once", (await daySpend({ owner: OWNER, at })) === 0 && dayRec(at).reversedIds.length === 1, JSON.stringify(dayRec(at).reversedIds));
 

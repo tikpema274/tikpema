@@ -1,4 +1,5 @@
 import { connectLambda, getStore } from "@netlify/blobs";
+import { requireInternal } from "./_auth.mjs";
 import { circle } from "./_circle.mjs";
 import { withRetry } from "./_retry.mjs";
 import { listUnresolvedCharges, reverseAgentSpend, markChargeResolved } from "./_budget.mjs";
@@ -34,9 +35,15 @@ import { listUnresolvedCharges, reverseAgentSpend, markChargeResolved } from "./
 // config" is an observation from ONE function on ONE deploy — not a guarantee. Leaving a schedule
 // declared here would mean the only thing keeping this function switched off is a vendor quirk.
 //
-// This function is INERT BY CONSTRUCTION: no schedule exists anywhere for it. Turning it on is a
-// deliberate, reviewable act — add a [functions."budget-sweep"] entry to netlify.toml.
-// WHEN IT IS TURNED ON: every 10-15 min is ample (see RESOLVE_AFTER_MS below).
+// This function is INERT BY CONSTRUCTION: no schedule exists anywhere for it, and the HTTP `handler`
+// now REQUIRES internal auth, so it is inert on-demand too (not just off-schedule). Turning it on is a
+// deliberate, reviewable act.
+// ⚠️ HOW TO SCHEDULE IT — NOT by adding a [functions."budget-sweep"] entry to netlify.toml. A Netlify
+// cron invocation does NOT carry x-internal-token, so it would hit the guard and 401 on every tick —
+// the sweep would silently never run (and never even write a heartbeat, so it would look dead). The
+// correct path uses the pure `sweep()` export, which is UNGUARDED and untouched: a scheduled trigger
+// calls sweep() through an authenticated/internal path (mirror how job-swap-approve triggers
+// job-swap-receipt-background WITH the internal token). Decide that mechanism when scheduling.
 // ⚠️ Do not enable it on a design argument. Path B: the shipped `confirmation:"submitted"` field makes
 // the real phantom rate MEASURABLE — schedule this once an observed rate says it is needed.
 
@@ -84,6 +91,15 @@ const TERMINAL_FAILED = new Set(["FAILED", "CANCELLED", "DENIED"]);
 const KNOWN_PENDING = new Set(["INITIATED", "QUEUED", "SENT", "CONFIRMED", "ACCELERATED", "PENDING_RISK_SCREENING"]);
 
 export async function handler(event) {
+  // 🔒 SECURITY — FIRST, before ANY sweep logic. This is the only cap-WIDENING entry point in the
+  // codebase, so an unauthenticated caller must never reach the sweep. Same mechanism as
+  // job-swap-receipt-background (requireInternal / x-internal-token) — one auth path, not a variant.
+  // (Found the hard way: a public POST to this endpoint during deploy verification RAN the sweeper.
+  // It was matrix-safe and found nothing, but "inert on schedule" is not "inert on demand".)
+  if (!requireInternal(event)) {
+    console.error("[budget-sweep] rejected: bad or missing x-internal-token");
+    return { statusCode: 401, body: "unauthorized" };
+  }
   if (event?.blobs) connectLambda(event);
   const beat = await sweep();
   return { statusCode: 200, body: JSON.stringify(beat) };
