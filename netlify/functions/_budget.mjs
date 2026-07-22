@@ -461,8 +461,13 @@ export async function canSpendDay({ amountUsdc, store, at, owner }) {
 // ⚠️ NOTE the field this REPLACES. The old audit entry set `agent: ownerKey(owner)` — the
 // WALLET ADDRESS. The field was already called `agent` and was already lying: it recorded
 // WHOSE wallet, never WHICH agent. `owner` now carries the wallet; `agent` carries the actor.
+// `confirmation` (OPTIONAL) — what the caller knows about the on-chain outcome AT LEDGER TIME:
+// "submitted" (spend authorized + counted, chain outcome not yet verified) or "confirmed" (witnessed
+// on-chain before this call). Recorded so the audit never asserts more than was observed. It is
+// forwarded ONLY when present, so callers that don't pass it (transfers, pays, vault deposits, sends)
+// keep byte-identical audit entries rather than gaining an `undefined` field.
 export async function recordAgentSpend({
-  owner, amountUsdc, source, justification, store, at, agent = AGENT.EXECUTOR,
+  owner, amountUsdc, source, justification, store, at, agent = AGENT.EXECUTOR, confirmation,
 }) {
   const s = pickStore(store);
   const amt = round6(amountUsdc);
@@ -480,7 +485,8 @@ export async function recordAgentSpend({
     amountUsdc: amt,
     source,
     justification,
-    allowed: true,
+    allowed: true, // authorized + counted against the ceiling — NOT a claim about the chain
+    ...(confirmation ? { confirmation } : {}), // conditional: absent for callers that don't know
   });
   return { daySpentUsdc: dRec.spentUsdc };
 }

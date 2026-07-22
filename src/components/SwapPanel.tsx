@@ -37,10 +37,15 @@ export default function SwapPanel({ wallet: w }: { wallet: UnifiedWallet }) {
     setSwapping(true);
     try {
       const r = await w.swapFromAgent(tokenIn, tokenOut, amountNum);
-      // The Circle SCA swap submits async (App Kit's 1098 race), so the executor
-      // may report "submitted" rather than a confirmed hash — word it the same way
-      // the agent panel does so the user isn't told it failed.
-      const submitted = r?.state === "submitted";
+      // The MANUAL swap path submits and returns; the on-chain confirm happens
+      // out-of-band (job-swap-receipt-background), so there is deliberately no tx
+      // hash yet. Word it the same way the agent panel does, so a merely-SUBMITTED
+      // swap is never reported as done.
+      // ⚠️ `state` is nested under `swap` (executeAction returns { ok, kind, swap, tx }
+      // — no top-level state). Reading r?.state made this ALWAYS false, so the hedge
+      // never rendered; with tx now always null on the manual path that left the UI
+      // claiming a bare "✓ Swapped." for an unconfirmed swap.
+      const submitted = r?.swap?.state === "submitted";
       setConfirm(
         `Swapped ${amountNum} ${tokenIn} → ${tokenOut}` +
           (submitted ? " — submitted, balance updates shortly." : ".")

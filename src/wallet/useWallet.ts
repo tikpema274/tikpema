@@ -378,7 +378,7 @@ export function useWallet() {
         throw new Error(step0?.blocked || step0?.error || "Swap did not execute");
       }
       refreshAgentWallet().catch(() => {});
-      return step0; // { ok, kind:"swap_tokens", state, swap, tx }
+      return step0; // { ok, kind:"swap_tokens", swap, tx } — state lives at swap.state, NOT top level
     },
     [ensureSession, refreshAgentWallet]
   );

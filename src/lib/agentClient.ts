@@ -17,6 +17,15 @@ async function post(path: string, body: unknown, token?: string) {
   return data;
 }
 
+async function get(path: string, token?: string) {
+  const res = await fetch(path, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || `Request failed: ${res.status}`);
+  return data;
+}
+
 export const agentClient = {
   // Autonomous action on the caller's OWN agent wallet (session-resolved
   // server-side). The token is required — the endpoint 401s without it.
@@ -41,4 +50,11 @@ export const agentClient = {
   // Moves PLAIN USDC only — the Gateway unified balance needs a separate, delayed exit.
   withdraw: (amountUsdc: number, token: string) =>
     post("/api/agent-withdraw", { amountUsdc }, token),
+
+  // ── DCA MANDATES (custodial autonomous swaps). ────────────────────────────────────
+  // Create is the authorization moment (session required); the server fills mandates later
+  // with NO session. Cancel is always-available (reclaim-class, never blocked). List is read.
+  dcaCreate: (mandate: unknown, token: string) => post("/api/dca-create", mandate, token),
+  dcaCancel: (id: string, token: string) => post("/api/dca-cancel", { id }, token),
+  dcaList: (token: string) => get("/api/dca-list", token),
 };

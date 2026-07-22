@@ -232,7 +232,11 @@ export async function executeAction(step, ctx) {
   // On any successful spend below, ledger it against today's ceiling + audit. Attributed to the
   // agent that acted (VAULT for a vault deposit, EXECUTOR otherwise) — not hardcoded, so the
   // Agents-page breakdown stays honest.
-  const ledger = () =>
+  //
+  // `extra` lets a branch record what it actually KNOWS about on-chain confirmation at ledger time
+  // (see the swap branch's `confirmation`). Branches that confirm inline before ledgering, or that
+  // have nothing to add, call ledger() with no argument and the audit entry is unchanged.
+  const ledger = (extra = {}) =>
     recordAgentSpend({
       agent: stepAgent,
       owner: walletAddress,
@@ -240,18 +244,35 @@ export async function executeAction(step, ctx) {
       source: step.type,
       justification: step.reasoning,
       store,
+      ...extra,
     }).catch(() => {});
 
   if (step.type === "swap_tokens") {
     const tokenIn = String(step.tokenIn).toUpperCase();
     const tokenOut = String(step.tokenOut).toUpperCase();
+    // confirm: DCA-ONLY inline-confirm (dca-tick sets ctx.confirmSwap; it's scheduled, so it can wait to
+    // COMPLETE). Manual/sync callers leave it unset → submit-and-return, keeping their existing async
+    // verification and their 10s budget. A confirm:true swap that stays pending THROWS (SwapPendingConfirm /
+    // Error) out of agentSwap — so `ledger()` below is reached ONLY on a confirmed swap (day-ceiling
+    // stays confirm-gated for DCA). See _swap.agentSwap + dca-agentswap-refactor-state.
     const swap = await agentSwap({
       walletAddress,
       tokenIn: SWAP_TOKENS.find((t) => t.toUpperCase() === tokenIn),
       tokenOut: SWAP_TOKENS.find((t) => t.toUpperCase() === tokenOut),
       amountIn: Number(step.amountIn).toFixed(2),
+      confirm: ctx.confirmSwap === true,
     });
-    await ledger();
+    // ⚠️ AUDIT HONESTY — the record must not assert more than the chain has said.
+    // The MANUAL path (confirm:false) is submit-and-return: this ledger() runs at SUBMIT, before any
+    // on-chain confirmation, and NOTHING reverses the day-ceiling charge if the swap later reverts or
+    // is refused pre-broadcast (both classes proven real in step 4). That budget-reversal reconcile is
+    // owed separately (step 8) — but the AUDIT ENTRY must not claim a completed swap in the meantime.
+    // So it records what agentSwap actually returned: "submitted" (manual, outcome not yet verified)
+    // or "confirmed" (DCA inline-confirm, which waits for COMPLETE before this line is reached).
+    // `allowed` stays TRUE and unchanged — it means "authorized and counted against the ceiling",
+    // which IS true; flipping it would make agentBreakdown report a BLOCKED action while the counter
+    // still incremented, desyncing the audit from the ledger.
+    await ledger({ confirmation: swap.state });
     return {
       ok: true,
       kind: "swap_tokens",

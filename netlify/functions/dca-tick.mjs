@@ -4,9 +4,11 @@ import { assertNotPaused } from "./_pause.mjs";
 import { AGENT } from "./_agents.mjs";
 import { swapCapUsdc } from "./_arc.mjs";
 import { valueInUsdc } from "./_swap.mjs";
-import { publicClient } from "./_predict.mjs";
-import { confirmSwapLanded } from "./_swap-confirm.mjs";
-import { recordDcaSpend } from "./_budget.mjs";
+import { circle } from "./_circle.mjs";
+// NOTE: confirmSwapLanded (_swap-confirm log-scan / PATH 2) is NO LONGER imported here — the DCA reconcile
+// now confirms by authoritative Circle tx id (getTransaction). _swap-confirm.mjs stays for its OTHER
+// consumer, job-swap-receipt-background (the research→swap verifier). See reconcilePending below.
+import { recordDcaSpend, recordAgentSpend } from "./_budget.mjs";
 import {
   MANDATE_STORE,
   FILLS_STORE,
@@ -25,7 +27,6 @@ import {
   CONFIRM_RPC_TIMEOUT_MS,
   MAX_RECONCILES_PER_TICK,
   MAX_PENDING_AGE_MS,
-  SCAN_WINDOW_BLOCKS,
 } from "./_dca.mjs";
 import { isBlobsTransient } from "./_retry.mjs";
 
@@ -38,14 +39,15 @@ import { isBlobsTransient } from "./_retry.mjs";
 //     RECONCILE any in-flight fill · else if due:
 //       PAUSE(fail-closed) → value → CAP → YIELD-to-user → FUNDS → idempotency-claim → SUBMIT
 //
-// ⚠️ SUBMIT ≠ SPENT. A swap SUBMITTED this tick has not necessarily LANDED — the Circle SCA
-// submits its userOp asynchronously and App Kit can return txHash:null even as the swap lands
-// (the 1098 quirk). So a submit records PENDING_CONFIRM and does NOT touch spentAmount. The
-// mandate's budget advances ONLY in RECONCILE, when the on-chain witness (confirmSwapLanded)
-// confirms the fill landed — by hash, or by the two-legged log-scan. A tick that cannot confirm
-// leaves the budget EXACTLY intact and records failed-unconfirmed: a phantom fill (swapped +
-// budget spent + nothing on-chain) is therefore structurally impossible, because the one place
-// spentAmount moves is gated on the chain saying yes.
+// ⚠️ SUBMIT NOW MEANS LANDED (Drill #1, inline-confirm). agentSwap runs the B1 execute path and
+// waits for the Circle tx to reach COMPLETE (waitForTx) BEFORE executeAction returns ok — so a
+// swap that "submitted" this tick has already been witnessed on-chain by the authoritative Circle
+// tx id, not App Kit's async 1098-quirk hash. spentAmount therefore advances in the SAME ok-branch
+// as the confirm (below), gated on the chain saying yes. A phantom fill (spentAmount up + nothing
+// on-chain) stays structurally impossible: a swap that does not confirm THROWS, and the throw
+// short-circuits before any ledger runs. (PATH 2 — the old two-legged confirmSwapLanded log-scan
+// reconcile — is now vestigial for DCA; it survives only to drain legacy in-flight fills and for
+// the SHARED job-swap-receipt-background verifier. See the ok-branch note below.)
 //
 // Every skip/outcome is a durable OUTCOME so "is my DCA working?" is answerable and a failure
 // never reads as success. The SUBMIT routes through executeAction (never agentSwap directly), so
@@ -55,13 +57,14 @@ import { isBlobsTransient } from "./_retry.mjs";
 // documentation (the CLI deploy did not pick up job-sweep's, so netlify.toml is authoritative).
 export const config = { schedule: "* * * * *" };
 
-// Bound the EXPENSIVE work (new submits, each an on-chain swap) per invocation so the tick stays
-// well under the synchronous function timeout. Lowered from 8 now that each submit also carries a
-// snapshot + confirm handoff. RECONCILES were once left uncapped as "cheap read-only lookups" — but
-// under Arc throttling confirmSwapLanded is NOT cheap, and a burst of slow reconciles is exactly what
-// ages the request-scoped Blobs token out mid-tick. So chain-witnessing reconciles are now bounded
-// too (MAX_RECONCILES_PER_TICK, each timed out at CONFIRM_RPC_TIMEOUT_MS); a capped-out reconcile
-// DEFERS (pointer stays → next tick), so a fill is delayed, never starved forever.
+// Bound the EXPENSIVE work per invocation so the tick stays within budget. A new submit is now the
+// heaviest item — it INLINE-CONFIRMS (approve-wait + swap-wait to COMPLETE), so keep MAX_SUBMITS_PER_TICK
+// small. Reconciles are now cheap id lookups (getTransaction, a fast Circle API call — no throttled RPC
+// log-scan), but stay bounded (MAX_RECONCILES_PER_TICK, each timed out at CONFIRM_RPC_TIMEOUT_MS) so a
+// burst can't age the request-scoped Blobs token out mid-tick; a capped-out reconcile DEFERS (pointer
+// stays → next tick), so a fill is delayed, never starved forever.
+// ⚠️ RE-PROVE: with inline-confirm, a tick of 3 submits can block on up to 6 waitForTx (3 approve + 3 swap).
+// Confirm the scheduled-function budget absorbs that under Arc latency, or lower MAX_SUBMITS_PER_TICK.
 const MAX_SUBMITS_PER_TICK = 3;
 
 export async function handler(event) {
@@ -143,22 +146,25 @@ export async function handler(event) {
     await resolveClaim(m.id, period, outcome, { reason, tx });
   };
 
-  // ── RECONCILE an in-flight fill (submitted a prior tick, awaiting the witness). THE ONLY PLACE
-  // spentAmount advances. Confirm → decrement + record swapped + recover the real hash. Can't
-  // confirm within grace → failed-unconfirmed, budget intact. Reverted → stop. RPC hiccup → leave
-  // pending (never fail a fill because we couldn't look). ──
+  // ── RECONCILE an in-flight fill. NOW REACHED ONLY when inline-confirm TIMED OUT at submit (agentSwap
+  // threw SwapPendingConfirm, handing us the swap's circleId) — the slow-but-maybe-real fill. THE ONLY
+  // PLACE spentAmount advances for such a fill. Confirmation is now ID-BASED: poll the AUTHORITATIVE
+  // Circle tx state via getTransaction({id}), NOT an RPC log-scan. This is throttle-free (Circle API, not
+  // the rate-limited public RPC) and unambiguous (a tx id is unique — sibling-fill ambiguity is gone), so
+  // it REPLACES PATH 2 (confirmSwapLanded) for DCA. _swap-confirm.mjs is untouched — job-swap-receipt-
+  // background still uses it. COMPLETE → advance all three ledgers + record swapped. FAILED/CANCELLED/DENIED
+  // → stop. Unreachable / still non-terminal within grace → leave pending (never fail a fill we couldn't read). ──
+  const RECONCILE_TERMINAL_FAIL = new Set(["FAILED", "CANCELLED", "DENIED"]);
   const reconcilePending = async (m, key) => {
     const period = m.pendingPeriod;
     const claim = await fills.get(fillClaimKey(m.id, period), { type: "json" }).catch(() => null);
-    // Defensive: the pending claim vanished or is no longer 'submitted' — drop the pointer.
-    if (!claim || claim.status !== "submitted") {
+    // Defensive: the pending claim vanished, is no longer 'submitted', or carries no circleId — drop the pointer.
+    if (!claim || claim.status !== "submitted" || !claim.circleId) {
       await mandates.setJSON(key, { ...m, pendingPeriod: null });
       return;
     }
 
-    // ── BOUND THE SLOW WITNESS so it can't age the Blobs token out mid-tick. Only N chain-witnessing
-    // reconciles run per invocation; the rest DEFER (pointer stays set → next tick re-checks), so a
-    // fill is never starved, only delayed. ──
+    // Bound reconciles per tick so a burst can't age the Blobs token out mid-tick; the rest DEFER.
     if (slowReconciles >= MAX_RECONCILES_PER_TICK) {
       beat.deferred++;
       beat.details.push({ id: m.id, outcome: "deferred-reconcile-cap" });
@@ -166,38 +172,37 @@ export async function handler(event) {
     }
     slowReconciles++;
 
-    // Hard timeout on the single confirm. A timeout is "couldn't LOOK", NOT "did not land": shape it
-    // as rpc-error so the pending-AGE logic below (not the grace/unconfirmed logic) governs it. The
-    // underlying viem calls are abandoned (harmless) — the shared witness itself is left untouched, so
-    // the research→swap path that also calls it is unaffected.
-    const res = await Promise.race([
-      confirmSwapLanded({
-        walletAddress: m.walletAddress,
-        tokenIn: m.tokenIn,
-        tokenOut: m.tokenOut,
-        amountIn: m.perTickAmount,
-        fromBlock: BigInt(claim.snapshotBlock),
-        eventTxHash: claim.eventTxHash || null,
-        scanWindowBlocks: SCAN_WINDOW_BLOCKS, // bounded window — a fill lands within seconds of snapshot
-      }),
-      new Promise((resolve) =>
-        setTimeout(() => resolve({ confirmed: false, reason: "rpc-error: confirm timeout" }), CONFIRM_RPC_TIMEOUT_MS)
-      ),
-    ]);
+    // AUTHORITATIVE confirm by Circle tx id, hard-timed-out so a slow API call can't hang the tick. A throw
+    // here = "couldn't LOOK" (lookErr), NOT "did not land" — governed by the pending-AGE logic below.
+    let state = null, txHash = null, lookErr = null;
+    try {
+      const { data } = await Promise.race([
+        circle().getTransaction({ id: claim.circleId }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("getTransaction timeout")), CONFIRM_RPC_TIMEOUT_MS)),
+      ]);
+      state = data?.transaction?.state ?? null;
+      txHash = data?.transaction?.txHash ?? null;
+    } catch (e) { lookErr = e; }
 
-    if (res.confirmed) {
-      // ── THE WITNESS CONFIRMED — advance the budget now, and ONLY now. Recover the real hash
-      // (log-scan or receipt) into lastFillTx; reset every failure streak. Patch mandate FIRST so
-      // a crash before the claim write cannot lose the decrement (it under-counts at worst). ──
+    if (state === "COMPLETE") {
+      // ── CONFIRMED (slow path) — advance the budget now, and ONLY now. Because executeAction NEVER
+      // ledgered this fill (agentSwap threw SwapPendingConfirm on the inline timeout, short-circuiting
+      // ledger()), ALL THREE ledgers must advance HERE: spentAmount + recordDcaSpend + the day-ceiling
+      // recordAgentSpend that would otherwise have fired inside executeAction. Value = the amount captured
+      // at submit (no re-price). Exactly-once: a period confirms EITHER inline OR here, never both. ──
+      const fillValueUsdc = Number(claim.fillValueUsdc);
       const spentAmount = Number((m.spentAmount + m.perTickAmount).toFixed(6));
-      const reason = `confirmed by ${res.verifiedBy}${res.amountOut != null ? ` (+${res.amountOut} ${m.tokenOut})` : ""}`;
+      await recordDcaSpend({ owner: m.walletAddress, amountUsdc: fillValueUsdc, at: now }).catch(() => {});
+      // confirmation:"confirmed" — this branch runs ONLY after getTransaction({id}) returned COMPLETE,
+      // so the chain has witnessed it. Distinct from a manual submit-time entry, which records "submitted".
+      await recordAgentSpend({ agent: AGENT.EXECUTOR, owner: m.walletAddress, amountUsdc: fillValueUsdc, source: "swap_tokens", justification: `DCA mandate ${m.id}`, at: now, confirmation: "confirmed" }).catch(() => {});
       await patchMandate(m, key, OUTCOME.SWAPPED, {
-        reason, tx: res.tx || res.txHash || null, period,
+        reason: `confirmed by id-reconcile (circleId ${claim.circleId})`, tx: txHash, period,
         patch: {
           spentAmount,
           lastFilledPeriod: period,
           lastFillAt: claim.submittedAt,
-          lastFillTx: res.tx || res.txHash || null,
+          lastFillTx: txHash,
           pendingPeriod: null,
           consecutiveFailures: 0,
           firstFailureAt: null,
@@ -205,14 +210,14 @@ export async function handler(event) {
           needsAttention: false,
         },
       });
-      await resolveClaim(m.id, period, OUTCOME.SWAPPED, { reason, tx: res.tx || res.txHash || null });
+      await resolveClaim(m.id, period, OUTCOME.SWAPPED, { reason: "confirmed by id-reconcile", tx: txHash });
       return;
     }
 
-    // A REVERTED tx is a genuine failure — the revert reverts state, so no funds moved. Stop the
-    // mandate on the first occurrence, exactly like a slippage/genuine failure.
-    if (res.reason === "reverted") {
-      const reason = `swap reverted on-chain (${res.txHash})`;
+    // A FAILED/CANCELLED/DENIED tx is a genuine failure — the revert reverts state, so no funds moved. Stop
+    // the mandate on the first occurrence, exactly like a slippage/genuine failure.
+    if (state && RECONCILE_TERMINAL_FAIL.has(state)) {
+      const reason = `swap ${state.toLowerCase()} (circleId ${claim.circleId})`;
       await patchMandate(m, key, OUTCOME.STOPPED_FAILED, {
         reason, period,
         patch: { status: STATUS.STOPPED_FAILED, stoppedAt: startedAt, pendingPeriod: null, needsAttention: true },
@@ -221,30 +226,22 @@ export async function handler(event) {
       return;
     }
 
-    // Couldn't READ the chain this tick (rpc-error / confirm timeout) — NOT a "did not land". A YOUNG
-    // fill: leave pending, consume no grace; next tick re-checks. We never fail a fill because we
-    // couldn't look. BUT a fill we have been UNABLE to witness for longer than MAX_PENDING_AGE_MS
-    // (persistent throttle) must not sit pending forever — fall through to unconfirmed handling below
-    // (budget intact, needsAttention). A false-unconfirmed only asks a human to look; a false-confirm
-    // is the sin this design exists to prevent.
-    if (String(res.reason).startsWith("rpc-error")) {
-      if (now - Date.parse(claim.submittedAt) < MAX_PENDING_AGE_MS) return;
-    }
+    // Couldn't READ Circle this tick (lookErr) — NOT a "did not land". A YOUNG fill: leave pending, consume
+    // no grace; next tick re-checks. A fill UNREADABLE for longer than MAX_PENDING_AGE_MS falls through to
+    // unconfirmed handling below (budget intact, needsAttention). A false-unconfirmed only asks a human to
+    // look; a false-confirm is the sin this design exists to prevent.
+    if (lookErr && now - Date.parse(claim.submittedAt) < MAX_PENDING_AGE_MS) return;
 
-    // not-found or ambiguous: still no witness. Inside the grace window, keep it pending (a
-    // healthy-but-slow tx just hasn't settled). Past grace, declare it unconfirmed — BUDGET INTACT
-    // — and count it toward the consecutive-unconfirmed stop.
+    // Non-terminal (INITIATED/QUEUED/SENT/…) or read-failed-and-old. Inside the grace window, keep it pending
+    // (a healthy-but-slow tx just hasn't finalized). Past grace, declare it unconfirmed — BUDGET INTACT — and
+    // count it toward the consecutive-unconfirmed stop.
     const ageMs = now - Date.parse(claim.submittedAt);
     if (ageMs < CONFIRM_GRACE_MS) return;
 
     const consecutiveUnconfirmed = (m.consecutiveUnconfirmed || 0) + 1;
-    const ambiguous = String(res.reason).startsWith("ambiguous");
-    const couldntLook = String(res.reason).startsWith("rpc-error");
-    const detail = ambiguous
-      ? `${res.reason} — refusing to attribute one to this fill (fail-closed)`
-      : couldntLook
-      ? `chain unreadable (throttled/timeout) for >${Math.round((now - Date.parse(claim.submittedAt)) / 60000)}m — escalating for review`
-      : `no on-chain witness within ${Math.round(CONFIRM_GRACE_MS / 1000)}s of submit`;
+    const detail = lookErr
+      ? `Circle tx unreadable for >${Math.round(ageMs / 60000)}m — escalating for review`
+      : `tx still ${state ?? "pending"} >${Math.round(CONFIRM_GRACE_MS / 1000)}s after submit — escalating for review`;
 
     if (consecutiveUnconfirmed >= MAX_CONSECUTIVE_UNCONFIRMED) {
       const reason = `stopped after ${consecutiveUnconfirmed} unconfirmed fills — last: ${detail}`;
@@ -365,42 +362,70 @@ export async function handler(event) {
       }
       await fills.setJSON(claimKey, { mandateId: m.id, period, status: "claimed", claimedAt: startedAt });
 
-      // ── 7. SNAPSHOT the block height immediately BEFORE submit — the tight lower bound of the
-      // log-scan window the reconcile uses to witness THIS fill unambiguously. A read failure here
-      // is a fail-closed skip (we won't submit a swap we then can't witness). ──
-      let snapshotBlock;
-      try { snapshotBlock = Number(await publicClient().getBlockNumber()); } catch (e) {
-        await record(m, key, period, OUTCOME.SKIPPED_BLOCKED, { reason: `cannot read block height: ${e.message}` });
-        continue;
-      }
+      // (No block snapshot — id-based confirm needs no log-scan window; the old step 7 is gone.)
 
-      // ── 8. SUBMIT — via executeAction, NEVER agentSwap directly. Inherits pause + cap +
-      // day-ceiling + ledger. Its ok:true means SUBMITTED, not confirmed. ──
+      // ── 7. SUBMIT — via executeAction, NEVER agentSwap directly. Inherits pause + cap + day-ceiling +
+      // ledger. confirmSwap:true asks agentSwap to INLINE-CONFIRM (DCA-only; the tick is scheduled, so it
+      // can wait to COMPLETE). Its ok:true therefore means CONFIRMED, not just submitted. An inline-confirm
+      // TIMEOUT throws SwapPendingConfirm (carrying the circleId → id-reconcile net); a real failure throws. ──
       let result, threw = null;
       try {
         result = await executeAction(
           { type: "swap_tokens", tokenIn: m.tokenIn, tokenOut: m.tokenOut, amountIn: m.perTickAmount, reasoning: `DCA mandate ${m.id}` },
-          { walletAddress: m.walletAddress } // no session — executeAction keys guards on walletAddress
+          { walletAddress: m.walletAddress, confirmSwap: true } // no session; confirmSwap = DCA inline-confirm
         );
       } catch (e) { threw = e; }
 
       if (result?.ok) {
-        // ── SUBMITTED — not yet confirmed. Record DCA's daily share now (mirrors executeAction's
-        // own hard-ceiling ledger, which also records at submit), but DO NOT touch spentAmount:
-        // the mandate budget advances only when reconcile witnesses the fill on-chain. Persist the
-        // pending claim with everything reconcile needs (block window + any event hash), and mark
-        // the mandate PENDING_CONFIRM with a pointer to the period awaiting confirmation. ──
+        // ── CONFIRMED (Drill #1) — agentSwap now INLINE-CONFIRMS: executeAction returns ok:true only
+        // AFTER waitForTx(circleId) reached COMPLETE, so ok:true means LANDED, not merely submitted. The
+        // three ledgers are therefore all confirm-gated. Advance the mandate budget (spentAmount) AND
+        // DCA's daily share (recordDcaSpend) TOGETHER here — both gated on the SAME on-chain confirm — and
+        // resolve SWAPPED. No pendingPeriod, no reconcile round-trip. (The day-ceiling recordAgentSpend
+        // already fired inside executeAction's own ledger(), post-confirm.)
+        //
+        // PATH 2 (confirmSwapLanded log-scan) + sibling-fill ambiguity are now DELETED from the DCA path:
+        // a slow fill no longer logs-scans — it enters the ID-reconcile net (SwapPendingConfirm branch below).
+        // _swap-confirm.mjs is untouched (still used by job-swap-receipt-background, the research→swap verifier).
+        const confirmedTx = result.swap?.txHash || null; // the confirmed Arc tx hash from waitForTx
+        const spentAmount = Number((m.spentAmount + m.perTickAmount).toFixed(6));
         await recordDcaSpend({ owner: m.walletAddress, amountUsdc: fillValueUsdc, at: now }).catch(() => {});
+        await patchMandate(m, key, OUTCOME.SWAPPED, {
+          reason: `confirmed inline (circleId ${result.swap?.circleId ?? "?"})`,
+          tx: confirmedTx,
+          period,
+          patch: {
+            spentAmount,
+            lastFilledPeriod: period,
+            lastFillAt: startedAt,
+            lastFillTx: confirmedTx,
+            pendingPeriod: null,
+            consecutiveFailures: 0,
+            firstFailureAt: null,
+            consecutiveUnconfirmed: 0,
+            needsAttention: false,
+          },
+        });
+        await resolveClaim(m.id, period, OUTCOME.SWAPPED, { reason: "confirmed inline", tx: confirmedTx });
+        continue;
+      }
+
+      // ── SLOW FILL (Drill #2 net) — inline-confirm timed out but the swap IS submitted: agentSwap threw
+      // SwapPendingConfirm carrying the authoritative circleId. This is NOT a failure — a slow-but-real fill
+      // must never be abandoned un-ledgered. Persist the claim with the circleId + the fill value (so the
+      // reconcile can advance all three ledgers on confirm), mark PENDING_CONFIRM, and let next tick's
+      // ID-reconcile poll getTransaction({id}). NOTHING is ledgered here (nothing confirmed yet). ──
+      if (threw?.name === "SwapPendingConfirm") {
         await fills.setJSON(claimKey, {
           mandateId: m.id,
           period,
           status: "submitted",
-          snapshotBlock,
-          eventTxHash: result.swap?.txHash || null,
+          circleId: threw.circleId,
+          fillValueUsdc, // captured at submit → the reconcile ledgers exactly this on confirm (no re-price)
           submittedAt: startedAt,
         });
         await patchMandate(m, key, OUTCOME.PENDING_CONFIRM, {
-          reason: "swap submitted — awaiting on-chain confirmation",
+          reason: `swap submitted — inline confirm slow, awaiting id-reconcile (circleId ${threw.circleId})`,
           patch: { pendingPeriod: period },
           period,
         });

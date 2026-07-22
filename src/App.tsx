@@ -6,6 +6,7 @@ import AgentsPanel from "./components/AgentsPanel";
 import FeedbackPanel from "./components/FeedbackPanel";
 import SendPanel from "./components/SendPanel";
 import SwapPanel from "./components/SwapPanel";
+import DcaPanel from "./components/DcaPanel";
 import BridgePanel from "./components/BridgePanel";
 import VaultPanel from "./components/VaultPanel";
 import NanopaymentPanel from "./components/NanopaymentPanel";
@@ -75,6 +76,12 @@ export default function App() {
     // the only money tool promoted to nav) is untouched.
     case "swap":
       page = <SwapPanel wallet={wallet} />;
+      break;
+    // DCA — recurring custodial swaps. Nav-less (#/dca), reached from the swap area, like
+    // #/bridge and #/vault. Leads with the custodial disclosure band; the scheduler
+    // (dca-tick) fills mandates autonomously, routed through the same capped executeAction.
+    case "dca":
+      page = <DcaPanel wallet={wallet} />;
       break;
     // Also reached via the AI Agent "Quick actions" Bridge card, nav-less like
     // #/swap — Bridge stays a sub-action of AI Agent, nav untouched.

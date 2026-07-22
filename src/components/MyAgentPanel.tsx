@@ -423,7 +423,12 @@ function AgentSummary({
               : r.ok
                 ? isBridge
                   ? ""
-                  : r.state === "submitted"
+                  : // `state` is nested under the step's own payload — executeAction returns
+                    // { ok, kind, swap, tx } with NO top-level state (only bridge_usdc has one,
+                    // and bridges are handled above). Reading r.state made this always false, so
+                    // a merely-SUBMITTED swap rendered " (done)". Non-swap kinds have no
+                    // swap payload and correctly fall through to " (done)" — they confirm inline.
+                    r.swap?.state === "submitted"
                     ? " (submitted)"
                     : " (done)"
                 : ` (${r.blocked || r.error || "failed"})`;
