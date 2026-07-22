@@ -187,6 +187,15 @@ export async function handler(event) {
       ...base,
       state: txHash ? "submitted" : "submitted_no_hash",
       txHash,
+      // The AUTHORITATIVE Circle id for this submit. Persisted so the verifier can name the exact
+      // day-ceiling charge to reverse when it finds the swap failed — without it the verifier knows
+      // a swap failed but not WHICH charge it created.
+      // ⚠️ Since the B1 refactor this path returns txHash:null ALWAYS (manual = submit-and-return),
+      // so `submitted_no_hash` is now the only state here and the circleId is the only handle.
+      // ⚠️ GENERATIONAL BOUNDARY: receipts written before this line carry no circleId — the verifier
+      // cannot reverse those, and they fall to the scheduled backstop instead. That is exactly the
+      // orphan case the backstop exists for; never guess an id for them.
+      circleId: r.swap?.circleId ?? null,
       tx: r.tx ?? null,
       indicativeAmountOut: proposal.indicativeAmountOut ?? null,
     };

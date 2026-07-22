@@ -2,6 +2,7 @@ import { connectLambda, getStore } from "@netlify/blobs";
 import { requireInternal } from "./_auth.mjs";
 import { publicClient } from "./_predict.mjs";
 import { confirmSwapLanded } from "./_swap-confirm.mjs";
+import { reverseChargeById } from "./_budget.mjs";
 
 // job-swap-receipt-background — the same-chain twin of job-bridge-receipt-background.
 //
@@ -165,6 +166,59 @@ async function verify(event) {
     }
     if (res.reason === "reverted") {
       await settle({ state: "failed", error: "swap reverted on-chain", txHash: res.txHash });
+
+      // ── PRIMARY PHANTOM-CHARGE REVERSAL (step 8) ────────────────────────────────────────────
+      // This path ledgers the day ceiling at SUBMIT (executeAction, manual submit-and-return), so a
+      // swap that fails afterwards leaves a charge for a spend that never happened. We are the one
+      // place that KNOWS it failed, with the id in hand — so reverse here: no age threshold, no
+      // re-query, no scan, and no window in which a slow-but-real swap could be mistaken for a dead
+      // one (we are not guessing from timing; we observed the revert).
+      //
+      // ⚠️ The day the charge lands in comes from the CHARGE's own audit timestamp, never from now —
+      // this verifier runs later than the charge and may cross UTC midnight. reverseAgentSpend
+      // derives it that way internally; do not pass a date from here.
+      //
+      // Crash-safe without a transaction: reverseAgentSpend is idempotent (reversedIds inside its
+      // CAS), so a crash between reversing and marking is recovered by the next attempt — and the
+      // scheduled backstop reaching the same charge cannot double-reverse it either.
+      //
+      // Best-effort: a failure here must NOT change the receipt outcome the caller already settled.
+      // An un-reversed charge is the pre-step-8 status quo and the backstop will catch it.
+      if (receipt.circleId) {
+        try {
+          const rev = await reverseChargeById({
+            circleId: receipt.circleId,
+            reason: `job-swap ${jobId} reverted on-chain`,
+          });
+          // ⚠️ A FAILED LOOKUP IS NOT A LICENCE TO GUESS. If the charge could not be found at all
+          // (no entry AND no marker) we reverse NOTHING here and raise needsAttention — we do not
+          // assume it was never charged, and we do not reverse "just in case". Reversing on an absent
+          // read is the fail-OPEN direction of the absence-as-safe family.
+          // A miss because it is ALREADY handled (backstop or an earlier attempt) is benign: no flag.
+          //
+          // ACCEPTED BEHAVIOUR ON A FAILED LOOKUP (decided, not an oversight): the day-ceiling charge
+          // STANDS. That is fail-CLOSED — it over-restricts the user by at most one cap for the rest
+          // of the UTC day, and never widens one — and it self-heals at UTC rollover.
+          // ⚠️ IT IS NOT STRANDED: because we write NO marker here, the charge stays unresolved, so
+          // the backstop sweeper's ordinary scan finds it on a later run and reverses it then
+          // (proven: spike-step8c case 3). No retry machinery lives here, by decision — adding
+          // reversal attempts to speed up a recovery that is already safe would only widen the
+          // fail-open surface.
+          await settle({
+            dayCeilingReversed: rev.reversed === true,
+            reversalNote: rev.refused ?? null,
+            ...(rev.anomalous ? { needsAttention: true } : {}),
+          });
+        } catch (e) {
+          // The lookup or the write threw — same rule: never reverse on a failed read, flag instead.
+          await settle({ dayCeilingReversed: false, needsAttention: true, reversalNote: `reversal failed: ${e.message}` });
+        }
+      } else {
+        // Pre-step-8 receipt: no id was persisted, so we cannot name the charge. Say so in the
+        // record rather than guessing — the scheduled backstop handles these orphans.
+        await settle({ dayCeilingReversed: false, reversalNote: "no circleId on receipt (pre-step-8) — left for the backstop" });
+      }
+
       return { statusCode: 200, body: "failed" };
     }
     lastReason = res.reason;

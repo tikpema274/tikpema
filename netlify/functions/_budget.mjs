@@ -301,7 +301,13 @@ export async function canSpend({ jobId, jobPriceUsdc, amountUsdc, store, at, own
 const auditKey = (owner, date) =>
   `audit:${ownerKey(owner)}:${date}:${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
-async function appendAudit(s, { owner, at, ...entry }) {
+// `dedupeKey` (OPTIONAL) — write at a DETERMINISTIC suffix instead of a random one, where
+// "the key already exists" is SUCCESS, not a collision to retry. That inverts the usual meaning of
+// setIfNew here on purpose: a random-suffix entry must never be lost (retry with a new key), but a
+// deterministic MARKER must never be duplicated (a second writer is a no-op). It is what makes the
+// sweeper's resolve-marking safe against two ticks racing the same charge, with no lock — and it lets
+// handled-ness be read from KEYS ALONE, without fetching a single value.
+async function appendAudit(s, { owner, at, dedupeKey, ...entry }) {
   const date = utcDate(at);
   const value = {
     ...entry,
@@ -314,6 +320,11 @@ async function appendAudit(s, { owner, at, ...entry }) {
   // Stores injected by tests may not implement setIfNew — fall back to a plain write.
   const write = async (key) =>
     typeof s.setIfNew === "function" ? s.setIfNew(key, value) : (await s.setJSON(key, value), true);
+
+  if (dedupeKey) {
+    await write(`audit:${ownerKey(owner)}:${date}:${dedupeKey}`);
+    return; // already-exists => another writer got there first => nothing to do
+  }
 
   // A key collision (same ms + same random suffix) is vanishingly unlikely, but if it happens
   // the entry must NOT be dropped — retry with a fresh key rather than lose the record.
@@ -419,8 +430,22 @@ export async function agentBreakdown({ owner, date, store } = {}) {
   const by = new Map();
   for (const e of entries) {
     const id = normalizeAgent(e.agent);
-    const cur = by.get(id) ?? { agent: id, spentUsdc: 0, actions: 0, blocked: 0 };
-    if (e.allowed) {
+    const cur = by.get(id) ?? { agent: id, spentUsdc: 0, actions: 0, blocked: 0, reversals: 0 };
+    if (e.kind === "resolution") {
+      // Sweeper bookkeeping, not money — it retires a charge from the queue and says nothing about
+      // spending. Skipped FIRST so it can never fall through to the allowed/blocked branches and be
+      // mis-counted as an action or a refusal.
+      continue;
+    }
+    if (e.kind === "reversal") {
+      // A reversal SUBTRACTS from the total but is NOT an action — the agent did not do another
+      // thing, a previous thing was undone. Counting it as an action would inflate the activity
+      // count; carrying a negative amountUsdc instead (the rejected alternative) would have done
+      // BOTH: inflate actions AND make the trail read as a negative "spend". Kept a positive
+      // amount + an explicit kind so the record stays legible to a human.
+      cur.spentUsdc = round6(cur.spentUsdc - Number(e.amountUsdc || 0));
+      cur.reversals += 1;
+    } else if (e.allowed) {
       cur.spentUsdc = round6(cur.spentUsdc + Number(e.amountUsdc || 0));
       cur.actions += 1;
     } else {
@@ -466,8 +491,18 @@ export async function canSpendDay({ amountUsdc, store, at, owner }) {
 // on-chain before this call). Recorded so the audit never asserts more than was observed. It is
 // forwarded ONLY when present, so callers that don't pass it (transfers, pays, vault deposits, sends)
 // keep byte-identical audit entries rather than gaining an `undefined` field.
+//
+// `circleId` (OPTIONAL) — the AUTHORITATIVE Circle transaction id this charge belongs to, so a later
+// reconcile can RESOLVE the charge's real outcome (getTransaction({id})) instead of inferring it.
+// ⚠️ GENERATIONAL BOUNDARY: entries written BEFORE this field existed carry no id and are therefore
+// PERMANENTLY UNRESOLVABLE. A reconcile must SKIP + REPORT those — never guess an outcome for them,
+// because guessing wrong reverses a charge for a spend that actually happened (a fail-OPEN error that
+// widens the cap). Same conditional-forward rule as `confirmation`.
+// ⚠️ NAMED `circleId`, not a generic `txId`, deliberately: it says WHICH RESOLVER applies. bridge_usdc
+// carries a chain burnHash, not a Circle id — a single overloaded field would let a sweeper call the
+// wrong resolver on it. Bridge adds its own field in its own pass.
 export async function recordAgentSpend({
-  owner, amountUsdc, source, justification, store, at, agent = AGENT.EXECUTOR, confirmation,
+  owner, amountUsdc, source, justification, store, at, agent = AGENT.EXECUTOR, confirmation, circleId,
 }) {
   const s = pickStore(store);
   const amt = round6(amountUsdc);
@@ -487,6 +522,220 @@ export async function recordAgentSpend({
     justification,
     allowed: true, // authorized + counted against the ceiling — NOT a claim about the chain
     ...(confirmation ? { confirmation } : {}), // conditional: absent for callers that don't know
+    ...(circleId ? { circleId } : {}), // conditional: absent => unresolvable, a reconcile must skip it
   });
   return { daySpentUsdc: dRec.spentUsdc };
+}
+
+// ── REVERSE a submit-time day-ceiling charge that never confirmed (step 8) ─────────────────────
+//
+// 🚨 THIS IS THE ONLY FUNCTION IN THIS MODULE THAT CAN *WIDEN* A CAP. Everything else here
+// over-restricts when it goes wrong — a NaN cap refuses, a lost CAS throws, an unconfirmed swap
+// holds. A REVERSAL RUNS THE OTHER WAY: it credits budget back, so an over-reversal returns
+// headroom the user never spent and lets them spend PAST the day ceiling. Read every guard below
+// as money-safety, not hygiene, and keep the reflex: WHEN IN DOUBT, DON'T REVERSE.
+//
+// Takes the ORIGINAL audit entry (not loose numbers) so the amount, the id and the confirmation
+// state are read from the record itself — never re-derived, never re-priced.
+//
+// GUARD 1 — REFUSES anything whose `confirmation` is not exactly "submitted".
+//   The selection invariant lives HERE, inside the primitive, NOT only in the caller's filter. A
+//   "confirmed" entry is a chain-witnessed spend; reversing one would decrement the day counter
+//   while its paired mandate sub-ledger (recordDcaSpend, written in the same confirm-gated branch
+//   of dca-tick) stayed put — desyncing the pair in the FAIL-OPEN direction. Enforcing it here
+//   means a future sweeper bug that selected the wrong rows still CANNOT decrement a confirmed
+//   fill: it is unreversible BY CONSTRUCTION.
+//
+// GUARD 2 — exactly-once is STRUCTURAL, not check-then-write. The id membership test and the
+//   arithmetic happen INSIDE one CAS mutate(), so a concurrent second reversal of the same id
+//   loses the race, re-reads the winner's record, finds its id already in `reversedIds`, and
+//   becomes a no-op. There is no window between "check" and "write" for a double-credit.
+//
+// GUARD 3 — ZERO-CLAMP + needsAttention. A reversal must never push day-spend below zero (a
+//   negative counter widens the cap outright). If it WOULD have gone negative we clamp AND raise
+//   `needsAttention` on the record: that means a double-reverse or a reversal of something never
+//   charged — a bug UPSTREAM. Surface it, never silently absorb it.
+//
+// APPEND-NEVER-NEGATE: the trail gets a NEW immutable `kind:"reversal"` entry pointing at what it
+//   reverses. The original charge entry is left untouched — it is immutable by construction, and
+//   erasing it would hide a real event. The charge DID happen and it WAS reversed; both are true.
+//
+// ⚠️ PRECONDITION FOR WHOEVER ADDS A NEW SUBMIT-TIME LEDGER: this primitive reverses the DAY
+//   ledger ONLY, which is sound TODAY because the only submit-time charges are manual-path swaps,
+//   and those never write a paired sub-ledger (`recordDcaSpend` has exactly two call sites, both
+//   confirm-gated — traced 2026-07-22). IF YOU ADD A PATH THAT LEDGERS AT SUBMIT *AND* WRITES A
+//   PAIRED SUB-LEDGER, THIS FUNCTION MUST BE EXTENDED TO ATOMIC-PAIR SEMANTICS *BEFORE* THAT PATH
+//   SHIPS — a partial reversal desyncs the two counters, and the desync direction is fail-open.
+export async function reverseAgentSpend({ entry, reason, store, at }) {
+  const s = pickStore(store);
+
+  // GUARD 1 — the refusal. Anything not explicitly a submit-time charge is untouchable.
+  if (!entry || entry.confirmation !== "submitted") {
+    return { reversed: false, refused: "not a submit-time charge (confirmation !== 'submitted')" };
+  }
+  const id = entry.circleId;
+  if (!id) {
+    // No authoritative id => the outcome was never resolvable => we cannot know it failed.
+    return { reversed: false, refused: "no circleId — unresolvable entry, never guess an outcome" };
+  }
+  const amt = round6(entry.amountUsdc);
+  if (!Number.isFinite(amt) || amt <= 0) {
+    return { reversed: false, refused: `unusable amount ${JSON.stringify(entry.amountUsdc)}` };
+  }
+
+  const owner = entry.owner;
+  // ⚠️ THE DAY IS THE CHARGE'S, NEVER THE SWEEP'S. A charge from 23:58 swept at 00:03 must be
+  // reversed against the day it LANDED in. Deriving the day from the sweep time would credit
+  // today's counter for yesterday's charge — creating a phantom credit today AND leaving the real
+  // charge standing yesterday. BOTH halves of that mistake are fail-open, so `at` (the sweep time)
+  // must NOT participate in choosing the day key. It is recorded as `reversedAt` instead, so the
+  // real reversal time is not lost.
+  // The audit entry is filed in the SAME day bucket for the same reason: agentBreakdown({date})
+  // sums per-day, so a reversal filed under the sweep day would leave the charge day's view
+  // inflated while showing a stray negative on the sweep day.
+  const date = utcDate(entry.timestamp);
+  let applied = false;
+  let clamped = false;
+
+  const dRec = await casUpdate(s, dayKey(owner, date), (cur) => {
+    const rec = cur ?? { date, owner: ownerKey(owner), spentUsdc: 0 };
+    // Defensive read — NOT a migration. Day records written before this field existed simply
+    // have no `reversedIds`, and must keep working untouched.
+    const already = rec.reversedIds ?? [];
+
+    // GUARD 2 — membership test and arithmetic in the SAME atomic mutate.
+    if (already.includes(id)) {
+      applied = false;
+      return rec; // no-op: this id has already been reversed
+    }
+
+    // GUARD 3 — clamp at zero, and flag rather than hide.
+    const raw = round6((rec.spentUsdc ?? 0) - amt);
+    clamped = raw < 0;
+    applied = true;
+    return {
+      ...rec,
+      spentUsdc: clamped ? 0 : raw,
+      reversedIds: [...already, id],
+      ...(clamped ? { needsAttention: true } : {}),
+    };
+  });
+
+  if (!applied) return { reversed: false, refused: "already reversed (id present in reversedIds)" };
+
+  // APPEND — a new immutable entry; the original charge is never mutated.
+  await appendAudit(s, {
+    owner,
+    at: entry.timestamp, // file it in the CHARGE's day bucket — see the note above
+    dedupeKey: `reversal-${id}`, // deterministic: one reversal record per charge, ever
+    agent: entry.agent,
+    kind: "reversal",
+    amountUsdc: amt,
+    reverses: id,
+    source: entry.source,
+    justification: reason,
+    reversedAt: isoTs(at), // when the reversal ACTUALLY ran — not lost, just not the bucket key
+    allowed: true, // the REVERSAL itself is an authorized bookkeeping event
+  });
+
+  return { reversed: true, amountUsdc: amt, clamped, daySpentUsdc: dRec.spentUsdc };
+}
+
+// ── SWEEPER SUPPORT: the audit log INDEXES ITSELF ─────────────────────────────────────────────
+// No separate claim store. A second store tracking "which charges are open" would be a SECOND
+// SOURCE OF TRUTH that can desync from the log — re-creating the very phantom class step 8 exists
+// to remove. Instead the log answers both questions: the charges are in it, and so are the markers
+// that retire them.
+//
+// HANDLED-NESS IS READ FROM KEYS, NOT VALUES: `reversal-<id>` / `resolution-<id>` suffixes are
+// deterministic, so one list() yields the retired set with zero value reads. Only genuinely open
+// charges are fetched.
+export async function listUnresolvedCharges({ store, at, olderThanMs = 0 } = {}) {
+  const s = pickStore(store);
+  if (typeof s.list !== "function") return []; // fixtures without list() ⇒ nothing to enumerate
+  const keys = await s.list("audit:");
+
+  const handled = new Set();
+  const candidates = [];
+  for (const k of keys) {
+    const suffix = k.split(":").slice(3).join(":"); // audit:<owner>:<date>:<suffix>
+    if (suffix.startsWith("reversal-")) handled.add(suffix.slice(9));
+    else if (suffix.startsWith("resolution-")) handled.add(suffix.slice(11));
+    else candidates.push(k);
+  }
+
+  const now = at ? new Date(at).getTime() : Date.now();
+  const out = [];
+  for (const k of candidates) {
+    const e = await s.getJSON(k).catch(() => null);
+    if (!e || e.kind) continue;                     // markers and non-charge kinds
+    if (e.confirmation !== "submitted") continue;   // ⚠️ ONLY submit-time charges are ever candidates
+    if (!e.circleId) continue;                      // unresolvable — never guess (see the field docs)
+    if (handled.has(e.circleId)) continue;          // already reversed or resolved
+    const ageMs = now - Date.parse(e.timestamp);
+    if (!Number.isFinite(ageMs) || ageMs < olderThanMs) continue; // too young: a real swap may still be confirming
+    out.push({ ...e, ageMs });
+  }
+  return out.sort((a, b) => b.ageMs - a.ageMs); // oldest first
+}
+
+// ── REVERSE BY ID — for a caller that ALREADY KNOWS the outcome (the job-swap verifier). ──────
+// The verifier holds a KNOWN-FAILED swap in hand, so it needs no age guess, no Circle re-query and
+// no scan: it names the charge and reverses it. This resolves the audit-keyspace lookup HERE rather
+// than teaching a second file the key format ([[duplicate-source-of-truth]]).
+//
+// Selection is deliberately narrow: `listUnresolvedCharges({olderThanMs:0})` returns ONLY entries
+// that are `confirmation:"submitted"`, carry a circleId, and are not already reversed/resolved. So a
+// confirmed fill, an already-handled charge, or an id-less legacy entry is unreachable from here —
+// and `reverseAgentSpend` re-checks all of that again anyway.
+export async function reverseChargeById({ circleId, reason, store, at } = {}) {
+  if (!circleId) return { reversed: false, refused: "no circleId" };
+  const open = await listUnresolvedCharges({ store, at, olderThanMs: 0 });
+  const entry = open.find((e) => e.circleId === circleId);
+  if (!entry) {
+    // ⚠️ A MISS IS NOT ONE THING — and the caller must not treat it as one. Distinguish:
+    //   BENIGN   — a marker already exists, i.e. the backstop (or an earlier attempt) already
+    //              reversed or resolved this charge. Nothing to do, nothing to flag.
+    //   ANOMALOUS — no charge AND no marker: the entry we expected is missing or unreadable. NEVER
+    //              guess an outcome for it (that is the absence-as-safe family, in the fail-open
+    //              direction). Report it so the caller can raise needsAttention instead.
+    const s = pickStore(store);
+    const keys = typeof s.list === "function" ? await s.list("audit:").catch(() => []) : [];
+    const handled = keys.some((k) => k.endsWith(`reversal-${circleId}`) || k.endsWith(`resolution-${circleId}`));
+    return handled
+      ? { reversed: false, refused: "already handled (reversed or resolved)", anomalous: false }
+      : { reversed: false, refused: "no charge found for this circleId", anomalous: true };
+  }
+
+  const r = await reverseAgentSpend({ entry, reason, store, at });
+  const alreadyDone = r.reversed === false && /already reversed/.test(r.refused || "");
+  // Mark on success OR on "already reversed" — the latter means a previous attempt reversed but died
+  // before marking; without this the charge would stay queued for the backstop forever.
+  if (r.reversed || alreadyDone) {
+    await markChargeResolved({ entry, outcome: "FAILED", reason, store, at });
+  }
+  return { ...r, marked: r.reversed || alreadyDone };
+}
+
+// RETIRE a charge from the sweeper's queue. Append-only, like everything else in this log — the
+// original entry is never mutated. Deterministic key ⇒ two ticks racing produce ONE marker.
+// ⚠️ This records BOOKKEEPING, never money: amountUsdc is 0 and `allowed` is false, so even a future
+// consumer that forgets the `kind === "resolution"` branch cannot add spend from it.
+export async function markChargeResolved({ entry, outcome, reason, store, at } = {}) {
+  const s = pickStore(store);
+  if (!entry?.circleId) return { marked: false, refused: "no circleId" };
+  await appendAudit(s, {
+    owner: entry.owner,
+    at: entry.timestamp,                            // the CHARGE's day bucket (instance-5 rule)
+    dedupeKey: `resolution-${entry.circleId}`,
+    agent: entry.agent,
+    kind: "resolution",
+    resolves: entry.circleId,
+    outcome,                                        // what the resolver actually observed
+    justification: reason,
+    amountUsdc: 0,
+    allowed: false,
+    observedAt: isoTs(at),                          // when the sweeper looked
+  });
+  return { marked: true, outcome };
 }

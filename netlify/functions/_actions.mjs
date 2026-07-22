@@ -272,7 +272,13 @@ export async function executeAction(step, ctx) {
     // `allowed` stays TRUE and unchanged — it means "authorized and counted against the ceiling",
     // which IS true; flipping it would make agentBreakdown report a BLOCKED action while the counter
     // still incremented, desyncing the audit from the ledger.
-    await ledger({ confirmation: swap.state });
+    //
+    // `circleId` is the AUTHORITATIVE id the step-8 sweeper will resolve this charge against
+    // (getTransaction({id})). Without it, `confirmation:"submitted"` says a charge is unresolved but
+    // NOT which transaction to resolve it against — so the entry would be permanently unresolvable
+    // and the sweeper must skip it rather than guess (guessing reverses a charge for a swap that
+    // actually landed). agentSwap already returns it, so this is plumbing, not derivation.
+    await ledger({ confirmation: swap.state, circleId: swap.circleId });
     return {
       ok: true,
       kind: "swap_tokens",

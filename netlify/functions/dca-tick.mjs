@@ -195,7 +195,11 @@ export async function handler(event) {
       await recordDcaSpend({ owner: m.walletAddress, amountUsdc: fillValueUsdc, at: now }).catch(() => {});
       // confirmation:"confirmed" — this branch runs ONLY after getTransaction({id}) returned COMPLETE,
       // so the chain has witnessed it. Distinct from a manual submit-time entry, which records "submitted".
-      await recordAgentSpend({ agent: AGENT.EXECUTOR, owner: m.walletAddress, amountUsdc: fillValueUsdc, source: "swap_tokens", justification: `DCA mandate ${m.id}`, at: now, confirmation: "confirmed" }).catch(() => {});
+      // circleId recorded for PROVENANCE, not for reversal: this entry is "confirmed", and the step-8
+      // sweeper selects ONLY "submitted" entries. It must never touch a confirmed DCA fill — reversing
+      // one would decrement the day counter while recordDcaSpend above stayed put, desyncing the pair
+      // in the fail-OPEN direction.
+      await recordAgentSpend({ agent: AGENT.EXECUTOR, owner: m.walletAddress, amountUsdc: fillValueUsdc, source: "swap_tokens", justification: `DCA mandate ${m.id}`, at: now, confirmation: "confirmed", circleId: claim.circleId }).catch(() => {});
       await patchMandate(m, key, OUTCOME.SWAPPED, {
         reason: `confirmed by id-reconcile (circleId ${claim.circleId})`, tx: txHash, period,
         patch: {
