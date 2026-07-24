@@ -30,6 +30,30 @@ import { publicClient } from "./_predict.mjs";
 // bridge destinations (BRIDGE_DESTINATIONS) and swap tokens (SWAP_TOKENS) — never a free-form
 // contract address off the wire. Adding one is a line here + an env cap, never arbitrary
 // execution. ─────────────────────────────────────────────────────────────────────────────────
+//
+// ⚠️⚠️ ADDING AN ENTRY HERE ARMS THREE KNOWN FAIL-OPEN DEFECTS IN inspectVault(). ⚠️⚠️
+// This is not a general "be careful" — it is what YOUR EDIT DOES. The disclosure the user reads
+// and ACKNOWLEDGES before a deposit currently asserts three things it did not establish:
+//
+//   1. An UNREAD owner() is reported as "Ownership renounced" — the only owner class that
+//      raises NO warning (see classifyOwner, and the warn list in the verdict block).
+//   2. An UNREAD EIP-1967 slot is reported as "Not upgradeable … (no proxy slot, no upgrade
+//      function)" — a positive claim that the slot was checked and found empty. It wasn't read.
+//   3. lock/delay/cooldown are HARDCODED false and never checked for any vault, yet the
+//      disclosure states "Reversible in the same transaction (no lock/delay) … NOT a one-way
+//      trap." A vault with a withdrawal queue would be disclosed as instantly reversible.
+//
+// WHAT KEEPS THEM CONTAINED TODAY is not the inspector — it is this list being one entry long,
+// plus the fact that conformance is a selector scan of the address's OWN bytecode, so proxied
+// vaults BLOCK as `not-erc4626` before the defects matter. Both are properties of the current
+// CONFIG, not of the code. A second entry — especially a non-proxy vault on mainnet — removes
+// both at once and all three defects go live simultaneously. The trigger is ordinary RPC
+// flakiness on a public endpoint we already document as throttled.
+//
+// 📄 READ VAULT_INSPECT_DEFECTS.md BEFORE WIDENING THIS LIST. It has line refs, the honest
+// blast-radius argument, and the recommended fix (a tri-state present/absent/unreadable in the
+// reading primitive). As of that report NOTHING IS FIXED — it is a report, not a changelog.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
 export const VAULT_ALLOWLIST = {
   "xylo-usdc": {
     key: "xylo-usdc",
