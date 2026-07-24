@@ -16,3 +16,13 @@ scratchpad-netlifydev.log
 *.key
 *.privkey
 cold-owner*.json
+
+# ── Incidental run output from scripts/register-identity.mjs ───────────────────
+# Raw dump of this wallet's NFT holdings, written as audit evidence for the
+# existence check. Not credentials — just noise that shouldn't be committed
+# carelessly.
+# NOTE the deliberate asymmetry: agent-metadata/REGISTERED-IDENTITY.json is NOT
+# ignored. The agentId is public, persisting it is the entire point of that
+# script, and committing it is a durable copy of the value whose loss caused the
+# orphan-wallet excavation in the first place.
+agent-metadata/.nft-enumeration.json
