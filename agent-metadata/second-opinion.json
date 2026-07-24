@@ -4,35 +4,23 @@
   "version": "1.0.0",
   "agent_type": "review",
   "chain_id": 5042002,
-
-  "owner": "0xc85b3d9BdEb3703c5778E817b8bC30c96f1cB006",
-  "owner_key_custody": "Held offline. Not present in any production environment or runtime code path. No deployed service can load it.",
-
+  "owner": "SELF-OWNED by the agent's Circle dev-controlled SCA (custodial). STALE/ASPIRATIONAL — the prior value 0xc85b3d9BdEb3703c5778E817b8bC30c96f1cB006 was a cold-owner entry that was NEVER the on-chain owner; do not reuse it. The real owner is the dev SCA that holds the token (to be filled with the canonical agentId's owner at clean registration).",
+  "owner_key_custody": "CUSTODIAL / SELF-OWNED. This identity's ERC-8004 token is held by the agent's own Circle DEVELOPER-CONTROLLED smart account (same account class as the agent float). Only the operator, via Circle, can move or re-point it. There is NO offline cold-key owner. A prior version of this field claimed the key was 'held offline / not in any runtime path' — that was never true and is removed.",
   "moves_funds": false,
   "autonomy": "review_only",
   "kill_switch": true,
   "self_attestation": "never",
-
   "invariants": [
     "This agent cannot move funds. Audited by call graph, not by claim: it reaches only read-only pricing (swap quotes, valuation, the Circle fee API). It holds no signer and reaches no executor.",
-
     "It sees the first analyst's PROPOSAL — the action, the tokens, the amount — but never its reasoning, its narrative, or its sources. It does not read the web. It re-derives every figure independently from market data and the live chain, and asks one question: is the rate you would actually get FAIR?",
-
     "The synthesizer is deterministic plain code. No model adjudicates between the two analysts and nothing is averaged or blended into a compromise.",
-
     "If the second analyst refuses, or cannot verify, no proposal is produced at all — not a degraded one, none.",
-
     "If it agrees on the action but disputes the price, the proposal IS produced, with the disagreement stated above the approve button. The user decides whether the cost is worth it.",
-
     "Its kill switch is enforced. Pausing this agent maps to 'cannot verify', which produces NO PROPOSAL. Pausing the reviewer disables proposals; it does not silently disable the check on them.",
-
     "Caps are enforced fail-closed.",
-
     "Tikpema does not and cannot attest for this agent. The owner address is blocked by the ReputationRegistry contract, which reverts 'Self-feedback not allowed'. Only a user who approved the action may attest.",
-
     "Where a short label and a full description disagree, we treat the misleading summary as a false statement, not a simplification."
   ],
-
   "parameters_uri": "https://app.tikpema.xyz/api/v1/agent-parameters/analyst_b",
   "parameters_note": "LIVE AND MUTABLE. Not guarantees."
 }

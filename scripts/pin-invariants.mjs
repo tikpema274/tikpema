@@ -1,16 +1,27 @@
 #!/usr/bin/env node
-// pin-invariants.mjs — pin the three committed agent-metadata invariants files to
-// Pinata (IPFS), then independently verify each pin is real and unmodified by
+// pin-invariants.mjs — pin the unified agent-metadata identity document to
+// Pinata (IPFS), then independently verify the pin is real and unmodified by
 // fetching it back from a NEUTRAL public gateway and re-hashing.
 //
 // This script pins and verifies ONLY. It moves no money and registers nothing
 // on-chain. It reads PINATA_JWT from the environment; if that is missing it exits
 // loudly rather than proceeding unauthenticated.
 //
-// Byte-fidelity contract: each file is read as raw bytes and pinned exactly as it
+// TARGET: agent-metadata/unified.json. It supersedes the three per-role files
+// (researcher/second-opinion/executor), which are dead under one-identity — their
+// hardcoded sha256s were invalidated by the Route A edits and are NOT pinned here.
+//
+// Byte-fidelity contract: the file is read as raw bytes and pinned exactly as it
 // sits on disk. It is NEVER JSON.parse'd, re-serialized, or reformatted — the bytes
-// that reach Pinata must be byte-identical to what is committed at cdd4530, so that
-// the resulting CID corresponds only to bytes that were actually reviewed.
+// that reach Pinata must be byte-identical to what was reviewed, so that the
+// resulting CID corresponds only to bytes that were actually reviewed.
+//
+// SELF-REFERENCE — why the expected CID is a hard gate, not a nicety: the document
+// asserts its own address ("tokenURI(agentId) == the CID of this exact document").
+// EXPECTED_CID below is the CID computed from the reviewed bytes BEFORE pinning. If
+// the pinned/derived CID differs by one character, the bytes changed since review and
+// the document's central claim would point at a CID that is not itself — false from
+// birth. A mismatch aborts before verification and must never reach registration.
 
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -19,7 +30,7 @@ import path from "node:path";
 
 // Compute the CIDv1 raw-codec CID ("bafkrei...") for a set of bytes. This is the
 // deterministic content address of the file as a single raw block, and — because
-// all three files are well under one IPFS chunk (256 KiB) — it equals the raw LEAF
+// the document is well under one IPFS chunk (256 KiB) — it equals the raw LEAF
 // that Pinata stores under the pinned DAG. It is the "bafkrei" form used elsewhere
 // in the repo (agent-init.mjs:32), distinct from the dag-pb "bafybei"/"Qm" root
 // that pinFileToIPFS returns. Derivation: multibase 'b' + base32(
@@ -42,26 +53,20 @@ function bafkreiRawCid(sha256Buf) {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 
-// The authoritative sha256 of each file as committed at cdd4530. If a local file
-// has drifted from these, we abort BEFORE pinning — we will not mint a CID for
-// bytes that differ from what was reviewed.
+// The authoritative sha256 of the reviewed document. If the local file has drifted
+// from this, we abort BEFORE pinning — we will not mint a CID for bytes that differ
+// from what was reviewed.
 const FILES = [
   {
-    name: "researcher.json",
-    rel: "agent-metadata/researcher.json",
-    sha256: "4340b1f39c3ce831832a7cefd25bf28295898fb54d38aa6d189793f8e785886e",
-  },
-  {
-    name: "second-opinion.json",
-    rel: "agent-metadata/second-opinion.json",
-    sha256: "b947d00e0d237fe8a0b4ba3d9a32625d7fc56893de5c56d8ba0cb3f00841df73",
-  },
-  {
-    name: "executor.json",
-    rel: "agent-metadata/executor.json",
-    sha256: "5d210af2ec5efaf5346997619eefc2d3c81db64e22d6c4c145712141981af71a",
+    name: "unified.json",
+    rel: "agent-metadata/unified.json",
+    sha256: "6e239a3d815595844d939aebba68970695625c2c90558133a1dc013d8f568901",
   },
 ];
+
+// The CID computed from the reviewed bytes BEFORE pinning — the value the document
+// asserts about itself. Every CID this script derives or receives must equal it.
+const EXPECTED_CID = "bafkreidoeond3akvswce3e425o5grfygsvrfyleqkwathio4ae6y6vujae";
 
 // Neutral public gateways — deliberately NOT Pinata's own gateway. Retrievability
 // from a third-party gateway is what proves the pin is real and public, not just
@@ -139,7 +144,27 @@ for (const f of FILES) {
     );
   }
 }
-console.log("\nAll three files match their committed sha256. Proceeding to pin.\n");
+// --- 2b. Self-reference gate: derive the CID from the reviewed bytes ---------
+// This runs BEFORE pinning. The CID is a pure function of the bytes, so if it does
+// not equal the CID the document asserts about itself, the bytes are not the ones
+// that were reviewed — stop here rather than minting an address for the wrong bytes.
+for (const f of FILES) {
+  f.cid = bafkreiRawCid(Buffer.from(f.localSha, "hex"));
+  console.log(`\n  derived CID    : ${f.cid}`);
+  console.log(`  expected CID   : ${EXPECTED_CID}`);
+  if (f.cid !== EXPECTED_CID) {
+    die(
+      `CID MISMATCH before pinning.\n` +
+        `  expected ${EXPECTED_CID}\n  derived  ${f.cid}\n` +
+        `The document asserts tokenURI(agentId) == the CID of itself. These bytes address ` +
+        `differently than the reviewed bytes, so that claim would be false from birth. ` +
+        `Not pinning, and NOT eligible for registration.`
+    );
+  }
+  console.log(`  -> CID matches the document's self-reference.`);
+}
+
+console.log("\nDocument matches its reviewed sha256 and its self-asserted CID. Proceeding to pin.\n");
 
 // --- 3. Pin each file's raw bytes to Pinata --------------------------------
 async function pinRawBytes(f) {
@@ -175,57 +200,69 @@ async function pinRawBytes(f) {
 for (const f of FILES) {
   console.log(`Pinning ${f.name} (cidVersion: 1) ...`);
   f.rootCid = await pinRawBytes(f); // the CID Pinata returns as the pin root
-  // The raw-codec ("bafkrei...") CID we report and verify, derived from the file's
-  // own sha256. For these single-chunk files under cidVersion:1 Pinata's returned
-  // root IS this raw leaf (nothing to wrap), so f.rootCid === f.cid here; the two
-  // are computed independently and asserted equal below as a cross-check.
-  f.cid = bafkreiRawCid(Buffer.from(f.localSha, "hex"));
+  // f.cid (the raw-codec "bafkrei..." leaf) was derived from the file's own sha256
+  // in step 2b. For a single-chunk file under cidVersion:1 Pinata's returned root IS
+  // that raw leaf (nothing to wrap), so rootCid should equal it — the two are computed
+  // independently, which makes this an honest cross-check of what Pinata actually stored.
+  console.log(`  -> pinned root : ${f.rootCid}`);
+  console.log(`  -> raw CID     : ${f.cid}`);
   if (f.rootCid !== f.cid) {
-    console.log(`  -> pinned root : ${f.rootCid}  (dag-pb wrapper; raw leaf differs)`);
+    console.log(
+      `  -> NOTE: Pinata's root differs from the raw leaf (dag-pb wrapper), so the ` +
+        `root is not the self-referenced address. Verification below uses the raw CID.`
+    );
   }
-  console.log(`  -> raw CID     : ${f.cid}\n`);
+  console.log("");
 }
 
 // --- 4. Fetch each CID back from a NEUTRAL gateway and re-hash --------------
-async function fetchFromGateway(cid) {
+// Each gateway is tried INDEPENDENTLY and its own result recorded, rather than
+// stopping at the first success — so the report can say which gateways actually
+// served the bytes and whether each one's re-hash matched. A gateway that never
+// serves is recorded as "not retrieved", which is an ABSENCE, not a pass.
+async function fetchOneGateway(gw, cid) {
   for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++) {
-    for (const gw of GATEWAYS) {
-      const url = gw(cid);
-      try {
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 20000);
-        const res = await fetch(url, { signal: ctrl.signal });
-        clearTimeout(t);
-        if (res.ok) {
-          const buf = Buffer.from(await res.arrayBuffer());
-          return { buf, url };
-        }
-      } catch {
-        // ignore and try the next gateway / attempt
+    const url = gw(cid);
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 20000);
+      const res = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (res.ok) {
+        const buf = Buffer.from(await res.arrayBuffer());
+        return { buf, url, status: res.status };
       }
+      var lastStatus = res.status;
+    } catch (e) {
+      var lastErr = e?.message || String(e);
     }
-    if (attempt < FETCH_ATTEMPTS) {
-      process.stdout.write(
-        `  ...not retrievable yet (attempt ${attempt}/${FETCH_ATTEMPTS}), waiting for propagation\n`
-      );
-      await sleep(FETCH_BACKOFF_MS);
-    }
+    if (attempt < FETCH_ATTEMPTS) await sleep(FETCH_BACKOFF_MS);
   }
-  return null;
+  return { buf: null, url: gw(cid), status: lastStatus ?? null, err: lastErr ?? null };
 }
 
-console.log("Verifying each pin via a neutral public gateway (ipfs.io / dweb.link / cloudflare)...\n");
+console.log("Verifying the pin via neutral public gateways (ipfs.io / dweb.link / cloudflare)...\n");
 for (const f of FILES) {
-  const got = await fetchFromGateway(f.cid);
-  if (!got) {
-    f.gatewaySha = null;
-    f.match = false;
-    console.log(`  ${f.name}: could not retrieve ${f.cid} from any neutral gateway`);
-    continue;
+  f.gatewayResults = [];
+  for (const gw of GATEWAYS) {
+    const host = new URL(gw(f.cid)).host;
+    process.stdout.write(`  ${host} ... `);
+    const got = await fetchOneGateway(gw, f.cid);
+    if (!got.buf) {
+      f.gatewayResults.push({ host, url: got.url, served: false, sha: null, match: false });
+      console.log(`NOT RETRIEVED (${got.err ? `error: ${got.err}` : `HTTP ${got.status}`})`);
+      continue;
+    }
+    const sha = sha256Hex(got.buf);
+    const match = sha === f.sha256;
+    f.gatewayResults.push({ host, url: got.url, served: true, sha, match, bytes: got.buf.length });
+    console.log(`served ${got.buf.length} bytes -> re-hash ${match ? "MATCH" : "MISMATCH"}`);
   }
-  f.gatewaySha = sha256Hex(got.buf);
-  f.match = f.gatewaySha === f.sha256;
-  console.log(`  ${f.name}: fetched from ${got.url} -> ${f.match ? "MATCH" : "MISMATCH"}`);
+  const served = f.gatewayResults.filter((r) => r.served);
+  // A pin verifies only if at least one neutral gateway actually served the bytes
+  // AND no gateway that served them returned different bytes.
+  f.match = served.length > 0 && served.every((r) => r.match);
+  f.gatewaySha = served[0]?.sha ?? null;
 }
 
 // --- 5. Final report -------------------------------------------------------
@@ -237,15 +274,24 @@ for (const f of FILES) {
   console.log(f.name);
   console.log(`  local sha256   : ${f.localSha}`);
   console.log(`  CID (bafkrei)  : ${f.cid}`);
+  console.log(`  expected CID   : ${EXPECTED_CID}  ${f.cid === EXPECTED_CID ? "MATCH" : "MISMATCH"}`);
   console.log(`  ipfs uri       : ipfs://${f.cid}`);
   console.log(`  pinned root    : ${f.rootCid}${f.rootCid === f.cid ? " (== raw CID)" : " (dag-pb wrapper)"}`);
-  console.log(`  gateway sha256 : ${f.gatewaySha ?? "(not retrieved)"}`);
+  console.log(`  gateways       :`);
+  for (const r of f.gatewayResults) {
+    console.log(
+      `    ${r.host.padEnd(22)} ${r.served ? `served  re-hash ${r.match ? "MATCH   " : "MISMATCH"} ${r.sha}` : "NOT RETRIEVED"}`
+    );
+  }
   console.log(`  verdict        : ${verdict}`);
   console.log("");
 }
 
 if (!allOk) {
-  die("One or more files did not verify MATCH end-to-end. Do NOT record these CIDs on-chain.");
+  die(
+    "The document did not verify MATCH end-to-end (no neutral gateway served it, or one served different bytes). " +
+      "Do NOT record this CID on-chain."
+  );
 }
-console.log("All three pins verified byte-identical via a neutral gateway.");
-console.log("Reminder: this script pinned + verified only. Nothing was moved on-chain.");
+console.log(`Pin verified byte-identical via a neutral gateway, at the self-asserted CID ${EXPECTED_CID}.`);
+console.log("Reminder: this script pinned + verified only. Nothing was registered or moved on-chain.");

@@ -1,0 +1,98 @@
+{
+  "name": "Tikpema Agent",
+  "description": "One custodial agent system on Arc, operated as a single identity. Four internal roles (Researcher, Second Opinion, Executor, Vault) share one Circle dev-controlled agent wallet, one set of fail-closed caps, and one operator. The roles are attribution + kill-switch boundaries, not independent actors, and not separate reputation subjects.",
+  "version": "2.0.0",
+  "supersedes": "researcher/second-opinion/executor v1.0.0 (three separate per-role documents)",
+  "agent_type": "multi-role-single-identity",
+  "chain_id": 5042002,
+  "ownership": "CUSTODIAL / SELF-OWNED, STATED PLAINLY. This identity's ERC-8004 token is held by the agent's own Circle DEVELOPER-CONTROLLED smart account (the same account class that holds the agent float). Only the operator, through Circle, can move or re-point it. THERE IS NO OFFLINE COLD-KEY OWNER — a prior version of this metadata claimed 'held offline', which was never true and has been removed. What self-custody DOES mean: the operator controls the identity and its metadata pointer. What it does NOT mean: this is not an independent third party vouching for the agent, and ownership alone is not tamper-evidence — the tamper-evidence comes from content-addressing + on-chain anchoring (see invariants_authority), not from who holds the key. The stale cold-owner address 0xc85b3d9BdEb… was never the on-chain owner; it is not used. CONCRETE OWNER (for verification): the canonical identity is owned by the agent's Circle dev-controlled wallet at 0xc54d47211997aca90ef4fcfbc742a3b511b4e621. This document cannot name its own agentId — the id is minted by registering THIS document as metadataUri — so the canonical identity is the one satisfying BOTH: ownerOf(agentId) == 0xc54d47211997aca90ef4fcfbc742a3b511b4e621 AND tokenURI(agentId) == the CID of this exact document. Two earlier orphan identities are owned by the SAME wallet but carry a DIFFERENT tokenURI, so the tokenURI==this-CID half is the discriminator.",
+  "self_attestation": "never — Tikpema cannot attest for its own agent. The identity owner (the agent's dev SCA) is blocked from ReputationRegistry.giveFeedback by a self-feedback guard: the deployed ReputationRegistry implementation (EIP-1967 proxy → impl 0x16e0fa7f7c56b9a767e34b192b51f921be31da34) contains the revert reason 'Self-feedback not allowed'. ⚠️ VERIFICATION LEVEL: confirmed by reading the DEPLOYED BYTECODE (2026-07-23), NOT by a full call simulation — the exact giveFeedback ABI was unavailable to build a clean simulation, so this document deliberately does NOT claim 'verified by simulation'. Only a user who approved an action may attest, signing with their own passkey.",
+  "system_invariants": [
+    "Every cap is enforced fail-closed: a misconfigured limit refuses the action, it never widens it. (Source: the cap helpers in _arc.mjs throw on a garbled value — swapCapUsdc/sendCapUsdc/bridgeCapUsdc/maxSpendUsdc/vaultDepositCapUsdc; the parameters endpoint surfaces the throw as enforced:REFUSED.)",
+    "Cumulative autonomous spend is bounded by a daily ceiling regardless of any per-transaction cap. (Source: canSpendDay / _budget.mjs.)",
+    "Pause binds the agent, never the user, in either direction. A paused agent cannot act; pause never blocks a user from moving their own money. (Source: assertNotPaused on the agent spend paths; agent-withdraw calls no pause guard by construction.)",
+    "Where a short label and a full description disagree, the short label is what users read; we treat a misleading summary as a false statement, not a simplification.",
+    "UPGRADEABLE REGISTRY, DISCLOSED: the ERC-8004 IdentityRegistry this claim is anchored in is an EIP-1967 PROXY (impl 0x7274e874ca62410a93bd8bf61c69d8045e399c02 as of 2026-07-23). Its admin can change the registry's contract behaviour — including, in principle, what tokenURI/ownerOf return. This is the same class of owner-power the agent's own DD engine flags on third-party vaults. We neither control this registry nor represent its upgrade behaviour as fixed."
+  ],
+  "roles": {
+    "researcher": {
+      "moves_funds": true,
+      "autonomy": "autonomous_spend_within_caps",
+      "invariants": [
+        "Moves funds: signs an EIP-3009 TransferWithAuthorization at exactly one call site (_research.mjs, payX402) to pay a data seller. Real USDC leaves the wallet.",
+        "Buys data AUTONOMOUSLY (a model decides via decidePurchase; the user approves the JOB, not each purchase). Bounded by per-job allowance, per-purchase share, an absolute per-buy ceiling, and the daily ceiling, all checked by canSpend() BEFORE signing — but it is autonomy, and this document does not call it 'propose only'.",
+        "Payment target is the pre-configured data seller; the payment ADDRESS is taken from that seller's x402 challenge and is not otherwise constrained by our code. We verify price and domain, not payee — a disclosed trust assumption in the configured seller, not a guarantee.",
+        "Holds no signer for a send, swap, bridge, Gateway spend, or escrow, and has no code path to any of them.",
+        "Every purchase is gated by canSpend() BEFORE signing; a refusal moves no money.",
+        "Escrow adjacency, stated honestly: job-submit-background.mjs calls the ERC-8183 escrow, but the Researcher cannot trigger it — those calls run after runResearch() returns, using the handler's own client. _research.mjs holds no escrow reference and no signer. Shared-caller adjacency, not reachability."
+      ]
+    },
+    "analyst_b": {
+      "moves_funds": false,
+      "autonomy": "review_only",
+      "invariants": [
+        "Cannot move funds — audited by call graph, not claim: reaches only read-only pricing (swap quotes, valuation, the Circle fee API), holds no signer, reaches no executor.",
+        "Sees the first analyst's PROPOSAL (action, tokens, amount) but never its reasoning, narrative, or sources; does not read the web; re-derives every figure independently from market data and the live chain, asking one question: is the rate you would actually get FAIR?",
+        "The synthesizer is deterministic plain code — no model adjudicates between the two analysts; nothing is averaged or blended into a compromise.",
+        "If the second analyst refuses or cannot verify, NO proposal is produced — not a degraded one, none.",
+        "If it agrees on the action but disputes the price, the proposal IS produced with the disagreement stated above the approve button; the user decides.",
+        "Its kill switch is enforced: pausing it maps to 'cannot verify' → no proposal. Pausing the reviewer disables proposals; it does not silently disable the check on them."
+      ]
+    },
+    "executor": {
+      "moves_funds": true,
+      "autonomy": "never_autonomous_user_approval_required",
+      "capabilities": [
+        "transfer_usdc (arbitrary address)",
+        "pay_for_service (arbitrary payTo)",
+        "swap_tokens",
+        "bridge_usdc (funds leave Arc)",
+        "gateway_spend (cross-chain UB spend, separate endpoint)"
+      ],
+      "invariants": [
+        "Moves funds to arbitrary destinations; five paths to value (transfer, pay-for-service, swap, bridge, Gateway spend); two (transfer, pay-for-service) send to a caller/model-supplied address. It is the most dangerous agent in this system and this document says so.",
+        "Never originates a transfer: every path is session-gated — it acts only on an action a user approved or an instruction a user typed. It executes, it does not propose, and it never initiates on its own.",
+        "Disclosed: a scheduled sweep runs every minute and can re-fire a USER-INITIATED job run that provably never started (funding the job escrow). It cannot invent a job or a transfer, and it carries no Executor attribution.",
+        "Caps are checked BEFORE any transaction is signed, on every path. Not one chokepoint but THREE: executeAction (transfer, pay-for-service, swap, bridge); agent-send and agent-ub-spend bypass executeAction and enforce their own caps + pause before signing. Three places to get right — this document says three because three is the truth. (Verified line-by-line: agent-send cap sendCapUsdc:45 → pause assertNotPaused:64 → day canSpendDay:67 → sign createContractExecutionTransaction:94; agent-ub-spend cap ubSpendCapUsdc:60 → pause assertNotPaused:78 → day canSpendDay:81 → sign ubSpend:85. Every guard on the linear path, none in a skippable branch, all before the money call.)",
+        "Receipts are verified against chain state, not SDK return values: an SCA swap can return a null tx hash; the receipt is then verified by balance delta against a pre-execution snapshot. The chain is the witness.",
+        "CUSTODY, PLAINLY: the agent float is a Circle DEV-CONTROLLED smart account — only the server can move it. This is custodial. The user's exit is agent-withdraw, which returns plain USDC to the SESSION'S OWN verified address (no destination parameter — it can only pay the wallet the caller proved they control). Caps bind what the agent may spend, never what the user may reclaim. The user's passkey login wallet is a DIFFERENT wallet from the agent float; this document does not conflate them.",
+        "The one bound on a USER is a typo guard, named as such: a per-transaction maximum on Gateway deposits (a deposit is irreversible; it bounds the blast radius of an extra zero). It is not an agent cap — no agent path reaches the deposit endpoint.",
+        "HARD LIMITATION — GATEWAY UNIFIED BALANCE IS ONE-WAY. Funds committed to the Gateway unified balance CANNOT be returned — no implemented path, not slow, not server-mediated, none; they can only be spent cross-chain. Circle's GatewayWallet supports delayed withdrawal; this application has not implemented it. A capability the contract has and we have not built is not a capability the user has. Disclosed in the UI above the deposit control and here."
+      ]
+    },
+    "vault": {
+      "moves_funds": true,
+      "autonomy": "deposit_requires_user_approval; withdraw_reclaim_always_available",
+      "invariants": [
+        "Can only target a vault on the SERVER-SIDE ALLOWLIST (resolveVault) — never a free-form contract address off the wire. There is no code path to deposit into an arbitrary address. (Source: _actions.mjs shape + execution both gate on resolveVault; a non-allowlisted vault is rejected before anything signs.)",
+        "Every deposit is gated by an ON-CHAIN INSPECTION before any approve or deposit is signed (inspectVault → gateDeposit, _actions.mjs:341-352). A vault that trips a BLOCK check — not a contract, not ERC-4626, an empty shell, an asset mismatch, or a current withdraw fee over the ceiling — is refused outright, fail-closed. The inspection is re-run on-chain at execution time, so a stale disclosure cannot be reused.",
+        "A vault whose inspection raises a WARN (owner emergency-withdraw power, settable fees, an EOA owner, upgradeability) CANNOT be deposited into without your explicit, disclosure-bound acknowledgment. A missing or mismatched acknowledgment refuses the deposit (fail-closed). This is the DD-engine owner-power check applied at the point of your own money moving in.",
+        "A vault WITHDRAW is a RECLAIM: it redeems your shares back to your own agent wallet ONLY (redeem-to-self, no destination parameter), and it is deliberately NOT subject to the pause switch — a paused Vault agent cannot trap your funds inside the vault. (Source: _actions.mjs isReclaim path; withdraw carries no pause guard.)"
+      ]
+    }
+  },
+  "parameters": {
+    "parameters_uri": "https://app.tikpema.xyz/api/v1/agent-parameters",
+    "parameters_note": "LIVE AND MUTABLE. Current operating values, changeable by the operator. NOT guarantees. The guarantees are the invariants above, fixed by this document's content hash.",
+    "governance": {
+      "code_governed_caps": "The per-swap cap (25 USDC) and the per-vault-deposit cap (25 USDC) are UNSET in env and served from the CODE DEFAULT — so changing either requires a DEPLOY, not an env flip. This makes them more auditable (a git-traceable change), not less.",
+      "env_governed_caps": "The per-send cap, per-bridge cap, and daily ceiling are set in env and changeable without a deploy.",
+      "fail_closed": "Every cap, code- or env-governed, is fail-closed: a garbled value refuses the action (enforced:REFUSED), it never widens it."
+    }
+  },
+  "invariants_authority": {
+    "kind": "content-addressed, chain-anchored, mutable-pointer",
+    "pointer_mutability": "The metadata pointer is MUTABLE. The identity owner (the operator, via the dev SCA) can call setAgentURI(agentId, newCid) to re-point this at any time. This document does NOT claim the pointer is beyond operator reach — it is not.",
+    "what_remains_true_regardless": [
+      "Each CID is CONTENT-ADDRESSED and immutable: the bytes hash to it or they are not this document.",
+      "Every re-point is an ON-CHAIN EVENT — supersessions are publicly visible, not silent.",
+      "Verification is SERVER-INDEPENDENT: read tokenURI(agentId), fetch the CID, hash the bytes, compare. That check does not involve us, which is why it is the only one worth anything."
+    ],
+    "howToVerify": [
+      "1. Read tokenURI(agentId) from the ERC-8004 IdentityRegistry on-chain.",
+      "2. Fetch the bytes at that ipfs:// CID.",
+      "3. Hash the bytes; confirm they match the CID (content addressing — they hash to it or they are not the document).",
+      "4. Trust THAT text — not any server response, including this one."
+    ]
+  }
+}

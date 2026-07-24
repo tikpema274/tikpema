@@ -4,39 +4,25 @@
   "version": "1.0.0",
   "agent_type": "research",
   "chain_id": 5042002,
-
-  "owner": "0xc85b3d9BdEb3703c5778E817b8bC30c96f1cB006",
-  "owner_key_custody": "Held offline. Not present in any production environment or runtime code path. No deployed service can load it.",
-
+  "owner": "SELF-OWNED by the agent's Circle dev-controlled SCA (custodial). STALE/ASPIRATIONAL — the prior value 0xc85b3d9BdEb3703c5778E817b8bC30c96f1cB006 was a cold-owner entry that was NEVER the on-chain owner; do not reuse it. The real owner is the dev SCA that holds the token (to be filled with the canonical agentId's owner at clean registration).",
+  "owner_key_custody": "CUSTODIAL / SELF-OWNED. This identity's ERC-8004 token is held by the agent's own Circle DEVELOPER-CONTROLLED smart account (same account class as the agent float). Only the operator, via Circle, can move or re-point it. There is NO offline cold-key owner. A prior version of this field claimed the key was 'held offline / not in any runtime path' — that was never true and is removed.",
   "moves_funds": true,
   "autonomy": "autonomous_spend_within_caps",
   "kill_switch": true,
   "self_attestation": "never",
-
   "invariants": [
     "This agent moves funds. It signs an EIP-3009 TransferWithAuthorization at exactly one call site (_research.mjs, payX402) to pay a data seller. Real USDC leaves the user's wallet.",
-
     "It buys data AUTONOMOUSLY. No user approves each purchase: a model decides (decidePurchase), and the decision goes straight to the budget gate and then to signing. The user approves the JOB, not the individual purchase. That autonomy is bounded — per-job data allowance, per-purchase share of that allowance, an absolute per-buy ceiling, and the daily ceiling, all checked by canSpend() BEFORE the authorization is signed — but it is autonomy, and this document does not call it 'propose only'.",
-
     "Its payment target is the pre-configured data seller and no other. The payment ADDRESS, however, is taken from that seller's x402 challenge and is not otherwise constrained by our code — we verify the price and the domain, not the payee. This is a trust assumption in the configured seller, disclosed here rather than described as a guarantee.",
-
     "It holds no signer for a send, swap, bridge, Gateway spend, or escrow, and has no code path to any of them.",
-
     "Every purchase is gated by canSpend() BEFORE the authorization is signed. A refusal moves no money.",
-
     "Escrow adjacency, stated honestly: job-submit-background.mjs calls the ERC-8183 escrow, but the Researcher cannot trigger it. Those calls run sequentially in the handler after runResearch() returns, using the handler's own client. _research.mjs holds no escrow reference and no signer. That is shared-caller adjacency, not reachability.",
-
     "Caps are enforced fail-closed: a misconfigured limit refuses the action, it never widens it.",
-
     "Cumulative autonomous spend is bounded by a daily ceiling regardless of any per-transaction cap.",
-
     "Pause binds the agent, never the user. A paused agent cannot act. Pause never blocks a user from moving their own money, in either direction.",
-
     "Tikpema does not and cannot attest for this agent. The owner address is blocked from ReputationRegistry.giveFeedback — the contract reverts 'Self-feedback not allowed'. Enforced by the contract, not by our promise, and verified by simulation against the deployed registry. The only legitimate attester is a user who approved the action, signing with their own passkey.",
-
     "Where a short label and a full description disagree, the short label is what users read. We treat a misleading summary as a false statement, not a simplification."
   ],
-
   "parameters_uri": "https://app.tikpema.xyz/api/v1/agent-parameters/researcher",
   "parameters_note": "LIVE AND MUTABLE. Current operating values, changeable by the operator at any time. Not guarantees. The guarantees are the invariants above, fixed by this document's content hash."
 }

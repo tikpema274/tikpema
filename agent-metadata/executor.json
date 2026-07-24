@@ -4,15 +4,12 @@
   "version": "1.0.0",
   "agent_type": "execution",
   "chain_id": 5042002,
-
-  "owner": "0xc85b3d9BdEb3703c5778E817b8bC30c96f1cB006",
-  "owner_key_custody": "Held offline. Not present in any production environment or runtime code path. No deployed service can load it.",
-
+  "owner": "SELF-OWNED by the agent's Circle dev-controlled SCA (custodial). STALE/ASPIRATIONAL — the prior value 0xc85b3d9BdEb3703c5778E817b8bC30c96f1cB006 was a cold-owner entry that was NEVER the on-chain owner; do not reuse it. The real owner is the dev SCA that holds the token (to be filled with the canonical agentId's owner at clean registration).",
+  "owner_key_custody": "CUSTODIAL / SELF-OWNED. This identity's ERC-8004 token is held by the agent's own Circle DEVELOPER-CONTROLLED smart account (same account class as the agent float). Only the operator, via Circle, can move or re-point it. There is NO offline cold-key owner. A prior version of this field claimed the key was 'held offline / not in any runtime path' — that was never true and is removed.",
   "moves_funds": true,
   "autonomy": "never_autonomous_user_approval_required",
   "kill_switch": true,
   "self_attestation": "never",
-
   "capabilities": [
     "transfer_usdc — send to an arbitrary address",
     "pay_for_service — x402 paid-service call to an arbitrary payTo address",
@@ -20,35 +17,21 @@
     "bridge_usdc — funds leave Arc",
     "gateway_spend — cross-chain spend of the unified balance (separate endpoint, not an executeAction step)"
   ],
-
   "invariants": [
     "This agent moves funds to arbitrary destinations. It has five paths to value: transfer, pay-for-service, swap, bridge, and Gateway spend. Two of them (transfer, pay-for-service) send to an address supplied by the caller or the model. It is the most dangerous agent in this system and this document says so.",
-
     "It never originates a transfer. Every path to it is session-gated: it acts only on an action a user approved or an instruction a user typed. It EXECUTES those actions — it is not a proposer — but it never initiates one on its own.",
-
     "Disclosed, so a reader need not find it themselves: a scheduled sweep runs every minute. It can re-fire a USER-INITIATED job run that provably never started, which funds the job escrow. It cannot invent a job or a transfer, and it is not the Executor — escrow funding carries no Executor attribution.",
-
     "Caps are checked BEFORE any transaction is signed, on every path. There is not one chokepoint but three: executeAction covers transfer, pay-for-service, swap, and bridge; agent-send and agent-ub-spend bypass executeAction and enforce their own caps and pause checks before signing. Three places to get right, not one. This document says three because three is the truth.",
-
     "Caps are enforced fail-closed: a misconfigured limit refuses the action, it never widens it.",
-
     "Cumulative autonomous spend is bounded by a daily ceiling regardless of any per-transaction cap.",
-
     "PAUSE BINDS THE AGENT, NEVER THE USER — in either direction. A paused agent cannot act. Withdraw contains no pause check BY CONSTRUCTION (agent-withdraw.mjs calls no pause guard at all), so a paused agent cannot trap the user's money; and deposit contains none either, so a paused agent cannot freeze the user out of committing funds they choose to commit.",
-
     "CUSTODY, STATED PLAINLY: the agent's float is held in a Circle DEV-CONTROLLED smart account. Only the server can move it. This is custodial and we do not dress it up. The user's exit is agent-withdraw, which returns the agent's plain USDC to the SESSION'S OWN verified address — there is no destination parameter in that endpoint, so it can only ever pay the wallet the caller proved they control. Caps bind what the agent may spend; they never bind what the user may reclaim. The user's login wallet is a passkey account they alone control — that is a DIFFERENT wallet from the agent's float, and this document does not conflate them.",
-
     "The one bound on a user is a typo guard, and it is named as such: a per-transaction maximum on Gateway deposits. A deposit is irreversible, so a mistyped amount is unrecoverable in a way a mistyped withdrawal is not. It bounds the blast radius of an extra zero. It is not an agent cap — no agent path can reach the deposit endpoint at all.",
-
     "Receipts are verified against chain state, not against SDK return values. Circle's SCA swap can return a null transaction hash; the receipt is then verified by balance delta against a pre-execution snapshot. The chain is the witness, not the SDK.",
-
     "HARD LIMITATION — GATEWAY UNIFIED BALANCE IS ONE-WAY. Funds a user commits to the Gateway unified balance CANNOT be returned to them. There is no implemented path — not slow, not server-mediated, none. They can only be spent cross-chain. Circle's GatewayWallet contract supports delayed withdrawal; this application has not implemented it. A capability the contract has and we have not built is not a capability the user has. This is disclosed in the product UI above the deposit control, and it is disclosed here.",
-
     "Tikpema does not and cannot attest for this agent. The owner address is blocked by the ReputationRegistry contract, which reverts 'Self-feedback not allowed'. Only a user who approved the action may attest.",
-
     "Where a short label and a full description disagree, we treat the misleading summary as a false statement, not a simplification."
   ],
-
   "parameters_uri": "https://app.tikpema.xyz/api/v1/agent-parameters/executor",
   "parameters_note": "LIVE AND MUTABLE. Current caps, changeable by the operator. Not guarantees."
 }
