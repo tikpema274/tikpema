@@ -1,13 +1,15 @@
 # Defect report — `inspectVault` disclosure asserts facts it did not establish
 
-> ## ⚠️ MOSTLY A REPORT, PARTLY A CHANGELOG — read the per-defect status
-> **A and B are STILL LIVE IN SHIPPED CODE**, in the path that gates real USDC deposits. **C and D
-> have been fixed** (the free string/declaration fixes only — see each section). Nothing else was
-> touched. Do not read "there is a fix commit" as "the report is closed": the two unread-value
-> defects, which are the ones a tri-state would address, remain exactly as described.
+> ## ⚠️ NOW A CHANGELOG — all four defects are fixed. What is left is COVERAGE, not fail-open.
+> **A and B are FIXED** by a tri-state (`UNREADABLE`) in the reading layer: an unread value can no
+> longer reach a branch that asserts a reassuring fact. **C and D were fixed earlier** (the free
+> string/declaration fixes only). Do not read "the report is closed" as "the inspector is thorough":
+> lock/delay is still NOT CHECKED, three power groups are still NOT SCANNED, proxy coverage is still
+> the EIP-1967 implementation slot only, and two fields still degrade lossily (see A's fix note).
+> The inspector is now honest about its blind spots. Honest ≠ covered.
 
-**Date:** 2026-07-24 · **updated** 2026-07-24 (C and D fixed)
-**Report status:** **PARTIALLY OPEN — A and B open and live; C and D fixed.**
+**Date:** 2026-07-24 · **updated** 2026-07-24 (C and D fixed) · **updated** 2026-07-24 (A and B fixed)
+**Report status:** **CLOSED as a defect report — all four fixed. Coverage limits remain, tracked above.**
 **Component:** `netlify/functions/_vault.mjs` — `inspectVault()` and the disclosure it feeds
 **Component status:** in production, on the path that gates real USDC deposits.
 **Method:** Static trace of the file against its callers (`_actions.mjs:368-372`,
@@ -26,13 +28,59 @@ did not happen**. The user reads these statements and acknowledges them before a
 
 | # | Line | The disclosure asserts | What was actually true | Shape |
 |---|---|---|---|---|
-| **A** | `168-169`, `299-300` | "Ownership renounced (owner is the zero address)" | `owner()` was **unread or absent** | unread → safe — 🔴 **LIVE** |
-| **B** | `232-234`, `280` | "Not upgradeable — logic is fixed at this address (no proxy slot, no upgrade function)" | The proxy-slot read **failed** | unread → safe — 🔴 **LIVE** |
+| **A** | `168-169`, `299-300` | "Ownership renounced (owner is the zero address)" | `owner()` was **unread or absent** | unread → safe — ✅ **FIXED** |
+| **B** | `232-234`, `280` | "Not upgradeable — logic is fixed at this address (no proxy slot, no upgrade function)" | The proxy-slot read **failed** | unread → safe — ✅ **FIXED** |
 | **C** | `240-242`, `247-250` | "Reversible in the same transaction (no lock/delay)" | **No lock/delay/cooldown check exists** | described, not coded — ✅ **FIXED** |
 
 **A and B are the same bug** — an unread value falls through to the safest interpretation.
 **C is a different bug** — the check was never written, but its conclusion is stated anyway. They
 need different fixes, and C's fix is free.
+
+### How A and B were fixed (2026-07-24)
+
+A `const UNREADABLE = Symbol("unreadable")` sentinel in the reading layer, **not** per-caller
+patches — the defect was one mistake repeated at two sites, so the fix belongs at the primitive.
+A Symbol specifically: it is not falsy, compares equal to nothing, and throws on arithmetic, so a
+caller that forgets the third state fails loudly instead of silently taking the safe-looking branch.
+
+- `multiRead` now separates a **per-call** failure (the chain answered; the method reverted or is
+  absent → `null`) from a **total** multicall failure (we learned nothing → `UNREADABLE` for every
+  entry). Previously both were `null`, so an RPC outage was indistinguishable from eleven
+  confirmed absences.
+- `classifyOwner` gained three classes — `unreadable`, `unreadable-kind` (owner address known, its
+  bytecode not), `no-owner-fn` (chain confirmed there is no `owner()`; a role-based admin may still
+  hold every power). **`renounced` is now reachable only from a confirmed zero-address read.**
+  `unreadable`/`unreadable-kind` raise `owner-unreadable`; `no-owner-fn` raises `owner-not-exposed`.
+  They **WARN**, because the owner's *powers* are bytecode-derived and still disclosed — what is
+  unknown is who holds them, a self-contained gap a human can accept via the ack.
+- The EIP-1967 slot read falls back to `UNREADABLE`, and `upgradeable.present` is now tri-state
+  (`true` / `false` / `null`). An unreadable slot **BLOCKS** (`proxy-status-unreadable`), because
+  every selector-derived finding in the report scans *this address's own* bytecode and is valid
+  only if the address is not a delegating proxy — an undetected proxy does not make one field
+  wrong, it makes the whole report a scan of the wrong contract and calls it clean. Not a
+  tightening: a *known* proxy already blocks as `not-erc4626`.
+
+**The rule, stated so it ports:** *an unreadable input BLOCKS when another conclusion in the report
+is conditional on it, and WARNS when the unknown is terminal.*
+
+**Still lossy on a degraded read, and NOT fixed:** an unreadable `totalAssets` leaves `isShell`
+false so the empty-shell BLOCK does not fire; an unreadable `performanceFee` drops that WARN. Both
+are fail-closed on *persistence* (the digest moves, live acks die) but not on *occurrence*. Fixing
+them means new warn codes → a moved digest → every outstanding ack invalidated, which is money-path
+work needing its own proof run.
+
+**Verification — measured, not claimed.** Healthy path: full inspection diffed before/after against
+the real XyloVault; the only deltas were live yield accrual and one new field
+(`upgradeable.proxySlotUnreadable`). Digest `…|warns:emergency-withdraw,fees-settable,owner-is-eoa,
+performance-fee|wf:10|df:0|v1` and ack `e5b7b88…` **byte-identical**, so no outstanding ack was
+invalidated. `verify-vault.mjs` 35/0 (32 + 3 new strict-comparison guards), `tsc --noEmit` clean.
+
+Degraded path — **`scripts/verify-vault-degraded.mjs`, 21/0, new**. A byte-identical healthy digest
+proves the fix changed nothing; it cannot prove the fix does anything. This file injects each read
+failure and asserts the disclosure reports the unknown *as* unknown, with both controls (a confirmed
+zero owner still reports `renounced`; a read-and-empty slot still reports "not upgradeable"). The
+degraded digest is `…|warns:owner-unreadable|wf:n|df:n|v1` — provably not the healthy one, so an ack
+taken on a good day cannot authorise a deposit on a bad one.
 
 ---
 
@@ -60,7 +108,7 @@ generalised.
 
 ---
 
-## Defect A — an unread `owner()` is reported as "Ownership renounced"
+## Defect A — ✅ FIXED — an unread `owner()` was reported as "Ownership renounced"
 
 **Line 168-169** (`classifyOwner`), with the consequence at **299-300**.
 
@@ -88,7 +136,7 @@ failure on a contract without an `asset()` selector, does not trigger it.
 
 ---
 
-## Defect B — an unread proxy slot is reported as "Not upgradeable"
+## Defect B — ✅ FIXED — an unread proxy slot was reported as "Not upgradeable"
 
 **Line 232-234**, with the consequence at **280**.
 
@@ -216,9 +264,16 @@ The honest summary: **not an incident, and a hazard that arms itself the moment 
 
 ---
 
-## Recommended fix
+## Recommended fix — ✅ APPLIED 2026-07-24 (see "How A and B were fixed" in the TL;DR)
 
 **Put a tri-state in the primitive, not patches at each call site.**
+
+> Applied as written, with one deviation worth recording: the states below are named
+> `present`/`absent`/`unreadable` conceptually, but in code `absent` stays plain `null` and only the
+> third state gets a sentinel (`UNREADABLE`). Introducing a wrapper object for all three would have
+> touched all eleven value fields and every consumer; the sentinel isolates the change to the two
+> fields whose absence was being rendered as a safety claim. The rendering rule below is what
+> actually enforces correctness, and it is enforced.
 
 Every read that feeds a disclosure should resolve to one of three states, and the distinction must
 live in the reading layer (`withRetry` / `multiRead` / `tryRead`) rather than being reconstructed by
@@ -241,7 +296,7 @@ future consumer rather than confined to vault deposits.
 invent. Tri-state is the same principle applied where refusing outright is too blunt, because a
 disclosure should still render with a hole in it rather than fail entirely.
 
-### ✅ C was fixed for free — DONE (A and B are not)
+### ✅ C was fixed for free — DONE (A and B are now fixed too, via the tri-state above)
 
 C does not need the tri-state and should not wait for it. The check does not exist, so the only
 defect is the **claim** — and the claim is a string.

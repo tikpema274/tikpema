@@ -31,28 +31,30 @@ import { publicClient } from "./_predict.mjs";
 // contract address off the wire. Adding one is a line here + an env cap, never arbitrary
 // execution. ─────────────────────────────────────────────────────────────────────────────────
 //
-// ⚠️⚠️ ADDING AN ENTRY HERE ARMS THREE KNOWN FAIL-OPEN DEFECTS IN inspectVault(). ⚠️⚠️
-// This is not a general "be careful" — it is what YOUR EDIT DOES. The disclosure the user reads
-// and ACKNOWLEDGES before a deposit currently asserts three things it did not establish:
+// ⚠️⚠️ WHAT ADDING AN ENTRY HERE ACTUALLY ARMS. ⚠️⚠️
+// The four fail-open defects this warning used to enumerate are FIXED (A and B by the tri-state in
+// the reading layer; C and D by telling the truth about what is not checked). The disclosure no
+// longer asserts anything it did not establish. What remains is COVERAGE — things the inspector
+// cannot see and now says so, which is honest but still limits what a second entry is safe to be:
 //
-//   1. An UNREAD owner() is reported as "Ownership renounced" — the only owner class that
-//      raises NO warning (see classifyOwner, and the warn list in the verdict block).
-//   2. An UNREAD EIP-1967 slot is reported as "Not upgradeable … (no proxy slot, no upgrade
-//      function)" — a positive claim that the slot was checked and found empty. It wasn't read.
-//   3. lock/delay/cooldown are HARDCODED false and never checked for any vault, yet the
-//      disclosure states "Reversible in the same transaction (no lock/delay) … NOT a one-way
-//      trap." A vault with a withdrawal queue would be disclosed as instantly reversible.
+//   1. NOT CHECKED AT ALL: withdrawal locks, delays and cooldowns (the fields are `null`, and the
+//      disclosure names the gap). A vault with a withdrawal queue is not detected — it is merely
+//      no longer described as instantly reversible.
+//   2. DECLARED BUT NOT SCANNED: setStrategy / setFeeRecipient / transferOwnership, in
+//      POWER_SIGS_UNSCANNED. A vault whose only owner power is one of these discloses no power.
+//   3. PROXY COVERAGE IS THE EIP-1967 IMPLEMENTATION SLOT ONLY. No beacon slot, no admin slot, no
+//      EIP-1167 clones, no diamonds. A vault behind any of those is scanned as its own stub. It
+//      BLOCKs as `not-erc4626` today, which is fail-closed but blind, and excludes most real vaults.
+//   4. STILL LOSSY ON A DEGRADED READ: an unreadable totalAssets does not fire the empty-shell
+//      BLOCK, and an unreadable performanceFee drops that WARN. See the collapse comment in
+//      inspectVault — fail-closed on persistence (the digest moves, live acks die), not on
+//      occurrence (a user can still ack the degraded disclosure in the moment).
 //
-// WHAT KEEPS THEM CONTAINED TODAY is not the inspector — it is this list being one entry long,
-// plus the fact that conformance is a selector scan of the address's OWN bytecode, so proxied
-// vaults BLOCK as `not-erc4626` before the defects matter. Both are properties of the current
-// CONFIG, not of the code. A second entry — especially a non-proxy vault on mainnet — removes
-// both at once and all three defects go live simultaneously. The trigger is ordinary RPC
-// flakiness on a public endpoint we already document as throttled.
+// A second entry — especially a non-proxy vault on mainnet — is what makes these matter. The
+// inspector is now honest about its blind spots, but honest ≠ covered.
 //
-// 📄 READ VAULT_INSPECT_DEFECTS.md BEFORE WIDENING THIS LIST. It has line refs, the honest
-// blast-radius argument, and the recommended fix (a tri-state present/absent/unreadable in the
-// reading primitive). As of that report NOTHING IS FIXED — it is a report, not a changelog.
+// 📄 READ VAULT_INSPECT_DEFECTS.md BEFORE WIDENING THIS LIST for line refs and the blast-radius
+// argument. It is a report with a fix log, not a changelog — check the code, not its status lines.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 export const VAULT_ALLOWLIST = {
   "xylo-usdc": {
@@ -104,6 +106,23 @@ async function withRetry(fn, fallback, tries = 3) {
   }
   return fallback;
 }
+
+// ── THE THIRD STATE ────────────────────────────────────────────────────────────────────────
+// A read has THREE outcomes, not two: a VALUE, a confirmed ABSENCE (`null` — we asked, the chain
+// answered "no such method" / the call reverted), and UNREADABLE (we could not ask at all).
+//
+// ⚠️ Collapsing the third into the second is defects A and B (VAULT_INSPECT_DEFECTS.md). Both were
+// the same three-line mistake: a falsy fallback flowed into a branch whose prose asserted the
+// REASSURING answer — an unread owner() became "Ownership renounced", an unread EIP-1967 slot became
+// "Not upgradeable". An absent answer and an answer of "absent" are different things.
+//
+// ⚠️ UNREADABLE MUST NEVER RENDER AS A SAFETY CLAIM, and must never clear or suppress a warning.
+// A Symbol is deliberate: it is not falsy, does not compare equal to null/false/0/"", and throws if
+// anything tries arithmetic on it. A caller that forgets the third state fails LOUDLY rather than
+// silently taking the safe-looking branch — which is the entire failure mode being fixed.
+// (Same rule as scripts/dd/fact.mjs, whose `error` facts carry `result: null` for this reason.)
+const UNREADABLE = Symbol("unreadable");
+const unread = (v) => v === UNREADABLE;
 
 // ── Function signatures we look for ────────────────────────────────────────────────────────
 // Conformance is detected by SELECTOR-IN-BYTECODE (works for state-changing functions too — the
@@ -190,20 +209,50 @@ async function readBalanceStrict(pc, token, owner) {
 // Batch many single-return view reads into ONE Multicall3 call. allowFailure → an absent/reverting
 // method comes back null (not a thrown call), so a general vault missing withdrawFee()/MAX_FEE()/
 // owner() degrades gracefully. Retried as a unit; a total failure yields all-null.
+// ⚠️ The two failure modes here are NOT the same thing, and the whole tri-state depends on the
+// distinction: a PER-CALL failure is a real observation (the aggregate call succeeded, the chain
+// executed this sub-call and it reverted / the method is absent) → `null`. A TOTAL failure means the
+// multicall itself never landed after 5 tries, so we learned NOTHING about ANY field → UNREADABLE,
+// every entry. Before this, both collapsed to `null` and an RPC outage was indistinguishable from
+// eleven confirmed absences.
 async function multiRead(pc, calls) {
   const res = await withRetry(
     () => pc.multicall({ allowFailure: true, multicallAddress: MULTICALL3, contracts: calls }),
-    null,
+    UNREADABLE,
     5 // this read carries the value fields; a total failure would misreport the vault, so try hard
   );
-  if (!Array.isArray(res)) return calls.map(() => null);
+  if (!Array.isArray(res)) return calls.map(() => UNREADABLE);
   return res.map((r) => (r && r.status === "success" ? r.result : null));
 }
 
-// Classify an owner address: renounced (zero), EOA (no code), or a contract we try to fingerprint.
+// Classify an owner address. FIVE outcomes over two reads — the owner ADDRESS, then the owner's own
+// BYTECODE — and each read carries its own third state.
+//
+// 🚨 DEFECT A LIVED IN THE FIRST LINE OF THIS FUNCTION. It read `if (!owner || isZero(owner))` →
+// "Ownership renounced". `!owner` is true for an owner() that was never read, so an RPC failure
+// produced the single most reassuring owner class — and the ONLY one that raises no WARN. The user
+// then acknowledged a disclosure stating nobody controls the vault, on no evidence whatsoever.
+//
+// `renounced` is now reachable ONLY from a confirmed zero-address read. Every other path that used
+// to land there now says what actually happened.
 async function classifyOwner(pc, owner) {
-  if (!owner || /^0x0+$/.test(String(owner))) return { address: owner ?? null, type: "renounced", label: "Ownership renounced (owner is the zero address)" };
-  const code = await withRetry(() => pc.getBytecode({ address: getAddress(owner) }), "0x");
+  // We could not ask. NOT renounced, NOT ownerless — unknown.
+  if (unread(owner)) {
+    return { address: null, type: "unreadable", label: "⚠️ The owner could not be read — who controls this vault is UNKNOWN. This is NOT a renounced or absent owner; the read failed" };
+  }
+  // We asked and the chain answered: there is no owner() here. A real observation, but NOT proof of
+  // ownerlessness — a role-based admin (OpenZeppelin AccessControl) exposes no owner() and holds
+  // every power. Reported as its own class rather than folded into `renounced`.
+  if (owner === null || owner === undefined) {
+    return { address: null, type: "no-owner-fn", label: "⚠️ This contract exposes no owner() — ownership is not disclosed by that convention. A role-based admin may still hold every power above" };
+  }
+  if (/^0x0+$/.test(String(owner))) return { address: owner, type: "renounced", label: "Ownership renounced (owner is the zero address)" };
+  const code = await withRetry(() => pc.getBytecode({ address: getAddress(owner) }), UNREADABLE);
+  // The owner's address is known but its bytecode is not, so we cannot tell a single key from a
+  // multisig from a timelock. Must not default to `eoa` — that would be a guess wearing a verdict.
+  if (unread(code) || (code !== undefined && code !== null && typeof code !== "string")) {
+    return { address: owner, type: "unreadable-kind", label: "⚠️ The owner's code could not be read — whether it is a single key, a multisig or a timelock is UNKNOWN" };
+  }
   const c = String(code || "0x").toLowerCase();
   if (c === "0x" || c === "") return { address: owner, type: "eoa", label: "A single externally-owned key (EOA) controls this vault" };
   if (SAFE_SIGS.every((s) => hasSel(c, s))) return { address: owner, type: "multisig", label: "Owner is a multisig (Gnosis Safe-shaped)" };
@@ -246,11 +295,29 @@ export async function inspectVault(address) {
   // asset() is the load-bearing one (drives conformance + the deposit asset-match gate), so we key
   // the re-read on it.
   const assetSelPresent = isContract && hasSel(code, "asset()");
-  for (let i = 0; i < 3 && assetSelPresent && values[0] == null; i++) {
+  for (let i = 0; i < 3 && assetSelPresent && (values[0] == null || unread(values[0])); i++) {
     await sleep(250 * (i + 1));
     values = await multiRead(pc, VALUE_CALLS);
   }
-  const [assetAddr, totalAssets, decimals, symbol, name, totalSupply, withdrawFee, depositFee, performanceFee, maxFee, ownerRaw] = values;
+
+  // owner() keeps its THIRD STATE all the way to classifyOwner — it is the field where conflating
+  // unreadable with absent produced defect A.
+  const ownerRaw = values[10];
+
+  // ⚠️ THE OTHER TEN FIELDS DELIBERATELY COLLAPSE UNREADABLE → null, AND THIS IS NOT "ALSO FIXED".
+  // It is safe for these ten only because `null` already renders as UNKNOWN rather than as a safety
+  // claim: an unread withdrawFee gives `withdrawFeePct: null` and reversibility "unknown", and the
+  // digest records `wf:n`. Nothing here asserts a reassuring fact from an absent read, which is what
+  // made A and B defects. TWO known lossy cases remain and are NOT fixed by this change:
+  //   · an unreadable totalAssets leaves `isShell` false, so the empty-shell BLOCK does not fire;
+  //   · an unreadable performanceFee drops the `performance-fee` WARN from the disclosure.
+  // Both are fail-closed on PERSISTENCE (the digest changes, so an outstanding ack stops matching)
+  // but not on OCCURRENCE (a user can still ack the degraded disclosure in the moment). Widening
+  // them means new warn codes, which moves disclosureDigest() and invalidates every live ack —
+  // money-path work that needs its own proof run, exactly like the unscanned powers.
+  const collapse = (v) => (unread(v) ? null : v);
+  const [assetAddr, totalAssets, decimals, symbol, name, totalSupply, withdrawFee, depositFee, performanceFee, maxFee] =
+    values.slice(0, 10).map(collapse);
 
   const withdrawFeeBps = withdrawFee === null ? null : Number(withdrawFee);
   const depositFeeBps = depositFee === null ? null : Number(depositFee);
@@ -265,9 +332,27 @@ export async function inspectVault(address) {
   const pausable = hasAny(code, POWER_SIGS.pausable).length > 0;
   // Upgradeability: an upgrade selector OR a non-zero EIP-1967 implementation slot.
   const upgradeSel = hasAny(code, POWER_SIGS.upgradeable).length > 0;
-  const implSlot = await withRetry(() => pc.getStorageAt({ address: addr, slot: EIP1967_IMPL_SLOT }), null);
-  const proxyImpl = implSlot && !/^0x0*$/.test(implSlot);
-  const upgradeable = upgradeSel || !!proxyImpl;
+  // 🚨 DEFECT B WAS THE FALLBACK ON THIS LINE. It was `null` → falsy → `proxyImpl` false →
+  // "Not upgradeable — logic is fixed at this address (no proxy slot, no upgrade function)", a
+  // positive claim that the slot was read and found empty, from a read that never landed.
+  //
+  // ⚠️ AN UNREADABLE SLOT IS A **BLOCK**, NOT A WARN — and that is a stronger rule than it looks.
+  // Every selector-derived finding in this whole inspection (conformance, emergency-withdraw,
+  // settable fees, pausable) is a scan of THIS address's own bytecode, and is only meaningful if
+  // this address is not a delegating proxy. A proxy's stub contains none of the implementation's
+  // selectors, so an undetected proxy does not make one field wrong — it makes the entire report a
+  // scan of the wrong contract, and reports it as CLEAN. That is the worst output this inspector
+  // can produce (proven shape: Circle's GatewayWallet proxy is ~163 bytes with 0 of 5 power
+  // selectors; the implementation behind it has 5 of 5).
+  //
+  // This is also NOT a tightening: a KNOWN proxy already BLOCKs here as `not-erc4626`, because
+  // conformance scans the stub. An UNKNOWN proxy status must not be treated more favourably than a
+  // confirmed one.
+  const implSlotRaw = await withRetry(() => pc.getStorageAt({ address: addr, slot: EIP1967_IMPL_SLOT }), UNREADABLE);
+  // Closed outcome set: anything that is not a string we can test is UNREADABLE, never "empty".
+  const proxySlotUnreadable = unread(implSlotRaw) || typeof implSlotRaw !== "string";
+  const proxyImpl = !proxySlotUnreadable && !/^0x0*$/.test(implSlotRaw);
+  const upgradeable = upgradeSel || proxyImpl;
   const ownerIdentity = await classifyOwner(pc, ownerRaw);
 
   // Withdraw mechanics. No lock/delay/cooldown selector is a WARN or BLOCK on its own; the fee is
@@ -296,7 +381,10 @@ export async function inspectVault(address) {
 
   const ownerPowers = {
     owner: ownerIdentity.address,
-    ownerIdentity: ownerIdentity.type, // eoa | multisig | timelock | contract | renounced
+    // eoa | multisig | timelock | contract | renounced | unreadable | unreadable-kind | no-owner-fn
+    // ⚠️ `renounced` means a CONFIRMED zero-address read and nothing else. The last three are the
+    // classes that used to masquerade as it (defect A) — do not treat them as ownerless.
+    ownerIdentity: ownerIdentity.type,
     ownerIdentityLabel: ownerIdentity.label,
     settableFees: {
       present: feesSet.length > 0,
@@ -318,10 +406,16 @@ export async function inspectVault(address) {
           : "No owner emergency-withdraw / sweep found.",
     },
     upgradeable: {
-      present: upgradeable,
+      // `present` is TRI-STATE: true / false / null. null means UNKNOWN — never read it as "no".
+      present: upgradeSel ? true : proxySlotUnreadable ? null : proxyImpl,
       viaSelector: upgradeSel,
-      viaProxySlot: !!proxyImpl,
-      note: upgradeable ? "The vault's logic can be replaced (proxy/upgradeable). Its rules can change without moving your funds." : "Not upgradeable — logic is fixed at this address (no proxy slot, no upgrade function).",
+      viaProxySlot: proxySlotUnreadable ? null : proxyImpl,
+      proxySlotUnreadable,
+      note: proxySlotUnreadable
+        ? "⚠️ Whether this address is a proxy could NOT be determined — the EIP-1967 implementation slot was not read. This is not a claim that the slot is empty. Because every finding above comes from scanning THIS address's bytecode, and a proxy holds its logic elsewhere, the whole inspection is unverified while this is unknown."
+        : upgradeable
+          ? "The vault's logic can be replaced (proxy/upgradeable). Its rules can change without moving your funds."
+          : "Not upgradeable — logic is fixed at this address (no proxy slot, no upgrade function).",
     },
     pausable: {
       present: pausable,
@@ -338,10 +432,25 @@ export async function inspectVault(address) {
   if (withdrawFeeBps !== null && withdrawFeeBps > WITHDRAW_FEE_BLOCK_BPS)
     blocks.push({ code: "withdraw-fee-too-high", detail: `Current withdraw fee ${(withdrawFeeBps / 100).toFixed(2)}% exceeds the ${(WITHDRAW_FEE_BLOCK_BPS / 100).toFixed(2)}% ceiling.` });
 
+  // 🚨 DEFECT B (see the implementation-slot read): an unreadable proxy status invalidates every
+  // selector-derived finding in this report, so it BLOCKS rather than warns. Blocks are not part of
+  // disclosureDigest() and do not need to be — gateDeposit() refuses on BLOCK before the ack is
+  // consulted, so there is no disclosure for a user to acknowledge their way past.
+  if (proxySlotUnreadable)
+    blocks.push({ code: "proxy-status-unreadable", detail: "Could not read the EIP-1967 implementation slot, so whether this address is a proxy is UNKNOWN. Every check above scans this address's own bytecode and would report a proxy stub as clean, so the inspection cannot be trusted. Refusing rather than disclosing an unverified vault." });
+
   if (ownerPowers.emergencyWithdraw.present) warns.push({ code: "emergency-withdraw", detail: ownerPowers.emergencyWithdraw.note });
   if (ownerPowers.settableFees.present) warns.push({ code: "fees-settable", detail: ownerPowers.settableFees.note });
   if (ownerIdentity.type === "eoa") warns.push({ code: "owner-is-eoa", detail: ownerIdentity.label + ". A single compromised key can exercise every owner power above." });
   if (ownerIdentity.type === "contract") warns.push({ code: "owner-is-unidentified-contract", detail: ownerIdentity.label });
+  // 🚨 DEFECT A: these two classes previously arrived here as `renounced`, which raises NO warn at
+  // all — the unknown was rendered as the single most reassuring outcome and then acknowledged.
+  // They WARN rather than BLOCK because the owner's POWERS are bytecode-derived and still disclosed
+  // above; what is unknown is who holds them, which is a self-contained gap a human can accept.
+  if (ownerIdentity.type === "unreadable" || ownerIdentity.type === "unreadable-kind")
+    warns.push({ code: "owner-unreadable", detail: ownerIdentity.label + ". Treat every owner power above as held by an unknown party." });
+  if (ownerIdentity.type === "no-owner-fn")
+    warns.push({ code: "owner-not-exposed", detail: ownerIdentity.label + "." });
   if (performanceFeeBps !== null && performanceFeeBps > 0) warns.push({ code: "performance-fee", detail: `A ${(performanceFeeBps / 100).toFixed(2)}% performance fee is taken on harvested yield.` });
   if (upgradeable) warns.push({ code: "upgradeable", detail: ownerPowers.upgradeable.note });
 

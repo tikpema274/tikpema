@@ -71,8 +71,17 @@ check("lock / delay / cooldown reported as UNKNOWN, not absent",
   insp.withdraw.lock === null && insp.withdraw.delay === null && insp.withdraw.cooldown === null);
 check("owner emergency-withdraw present", insp.ownerPowers.emergencyWithdraw.present === true, insp.ownerPowers.emergencyWithdraw.via.join(", "));
 check("fees settable, max 20% (2000 bps)", insp.ownerPowers.settableFees.present === true && insp.ownerPowers.settableFees.maxBps === 2000, insp.ownerPowers.settableFees.maxPct ?? "");
-check("owner identity is an EOA", insp.ownerPowers.ownerIdentity === "eoa", insp.ownerPowers.owner ?? "");
-check("not upgradeable (no proxy slot, no upgrade fn)", insp.ownerPowers.upgradeable.present === false);
+// ⚠️ `=== "eoa"` and `=== false` are STRICT ON PURPOSE. Both fields are now tri-state: ownerIdentity
+// can be "unreadable"/"unreadable-kind"/"no-owner-fn", and upgradeable.present can be null (UNKNOWN,
+// proxy slot not read). A truthiness test (`!insp.ownerPowers.upgradeable.present`) would pass on
+// UNKNOWN and re-create defect B inside its own regression test. Identity comparison, always.
+check("owner identity is an EOA (strict — not 'unreadable')", insp.ownerPowers.ownerIdentity === "eoa", insp.ownerPowers.owner ?? "");
+check("not upgradeable — proxy slot READ and empty (strict false, not null)", insp.ownerPowers.upgradeable.present === false);
+check("proxy slot was actually read (defect B guard)", insp.ownerPowers.upgradeable.proxySlotUnreadable === false);
+// Defect A guard: `renounced` must be unreachable from anything but a confirmed zero-address read.
+// XyloVault has a real EOA owner, so any renounced/unknown class here means a read silently failed.
+check("owner NOT reported as renounced or unknown", !["renounced", "unreadable", "unreadable-kind", "no-owner-fn"].includes(insp.ownerPowers.ownerIdentity), insp.ownerPowers.ownerIdentity);
+check("no fail-open verdict codes on a healthy read", !insp.verdict.warns.some((w) => ["owner-unreadable", "owner-not-exposed"].includes(w.code)) && !insp.verdict.blocks.some((b) => b.code === "proxy-status-unreadable"));
 check("verdict level = WARN", insp.verdict.level === "WARN", `blocks:${insp.verdict.blocks.length} warns:${insp.verdict.warns.length}`);
 
 // ── ROW 2 — BLOCK FIRES ──────────────────────────────────────────────────────────────────────
