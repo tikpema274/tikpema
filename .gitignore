@@ -5,13 +5,26 @@ dist
 npm-install.log
 scratchpad-netlifydev.log
 
-# ── COLD KEYS. Never committed, never in .env, never read at runtime. ──────────
-# The cold owner EOA for the ERC-8004 agent identities lives here. It is the root
-# of trust for the agent registry: whoever holds it OWNS the agents. It is
-# deliberately NOT in .env, because .env is loaded by the app and mirrored into
-# Netlify env — a key that no running code path can reach cannot be leaked by one.
-# Broad patterns, so a future key file cannot miss the net by being named slightly
-# differently.
+# ── KEY MATERIAL. Never committed, never in .env, never read at runtime. ───────
+# Anything key-shaped stays out of the repo on principle, regardless of what it
+# currently controls. It is deliberately NOT in .env either, because .env is
+# loaded by the app and mirrored into Netlify env — a key that no running code
+# path can reach cannot be leaked by one. The patterns are broad so a future key
+# file cannot miss the net by being named slightly differently.
+#
+# ⚠️ CORRECTED 2026-07-24. This block used to claim the cold owner EOA in .keys/
+# was "the root of trust for the agent registry: whoever holds it OWNS the
+# agents." THAT WAS NEVER TRUE. The cold owner 0xc85b3d9BdEb… has never owned any
+# agent identity on-chain. The ERC-8004 identities are owned by the agent's Circle
+# DEVELOPER-CONTROLLED SCA at 0xc54d47211997aca90ef4fcfbc742a3b511b4e621 — the
+# same custodial account class that holds the agent float. Confirmed on-chain:
+# ownerOf(850337) == 0xc54D47211997aCA90Ef4fCfBc742a3b511B4e621.
+#
+# The same false claim was removed from agent-metadata/*.json when the ownership
+# model was stated plainly; this copy was missed because it lives in a comment.
+# Holding .keys/cold-owner.json grants NO authority over the agent identities.
+# The patterns below stay anyway — key hygiene does not depend on the key
+# mattering.
 .keys/
 *.key
 *.privkey
