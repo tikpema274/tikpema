@@ -129,12 +129,24 @@ const ERC4626_REQUIRED = [
 const POWER_SIGS = {
   emergencyWithdraw: ["emergencyWithdraw(address,uint256)", "emergencyWithdraw()", "sweep(address)", "rescueTokens(address,uint256)", "rescue(address,uint256)"],
   feesSettable: ["setFees(uint256,uint256,uint256)", "setFee(uint256)", "setWithdrawFee(uint256)", "setDepositFee(uint256)", "setPerformanceFee(uint256)"],
-  setStrategy: ["setStrategy(address)"],
-  setFeeRecipient: ["setFeeRecipient(address)"],
-  transferOwnership: ["transferOwnership(address)"],
   pausable: ["pause()", "paused()"],
   upgradeable: ["upgradeTo(address)", "upgradeToAndCall(address,bytes)"],
 };
+
+// ⚠️ DECLARED BUT NOT SCANNED — these are NOT part of the disclosure. They sat inside POWER_SIGS
+// while never being passed to hasAny(), so the list READ AS COVERAGE that did not exist
+// (VAULT_INSPECT_DEFECTS.md, defect D). They are separated here so the omission is visible rather
+// than inferred: nothing below is detected, and the disclosure never mentions these powers.
+//
+// 🚨 WIRING THESE IN IS NOT A FREE CHANGE. Each would raise a NEW warn code, which moves
+// disclosureDigest(), which INVALIDATES every outstanding ack token and forces re-acknowledgement.
+// That is money-path work and needs its own proof run — do NOT fold it into a cleanup.
+const POWER_SIGS_UNSCANNED = {
+  setStrategy: ["setStrategy(address)"],
+  setFeeRecipient: ["setFeeRecipient(address)"],
+  transferOwnership: ["transferOwnership(address)"],
+};
+void POWER_SIGS_UNSCANNED; // referenced so it cannot be mistaken for dead code and deleted
 // Owner-contract fingerprints (to classify a contract owner: safe / timelock / other).
 const SAFE_SIGS = ["getThreshold()", "getOwners()"];
 const TIMELOCK_SIGS = ["getMinDelay()", "TIMELOCK_ADMIN_ROLE()"];
@@ -261,17 +273,25 @@ export async function inspectVault(address) {
   // Withdraw mechanics. No lock/delay/cooldown selector is a WARN or BLOCK on its own; the fee is
   // reported plainly, and a CURRENT fee over the ceiling is a BLOCK.
   const withdraw = {
-    lock: false, // XyloVault has none; a general vault with a lock would surface as a selector, TODO on demand
-    delay: false,
-    cooldown: false,
+    // ⚠️ NOT CHECKED — null means UNKNOWN, never "absent". No selector scan, storage read, or call
+    // is performed for withdrawal locks/delays/cooldowns, for ANY vault. These were previously
+    // hardcoded `false`, which made the disclosure state "no lock/delay" as an established fact for
+    // a check that does not exist (VAULT_INSPECT_DEFECTS.md, defect C). Until the check is written,
+    // the honest value is UNKNOWN. Do not compare these with `!x` — that treats unknown as absent,
+    // which is the whole bug.
+    lock: null,
+    delay: null,
+    cooldown: null,
     pausable,
     withdrawFeeBps,
     withdrawFeePct: withdrawFeeBps === null ? null : `${(withdrawFeeBps / 100).toFixed(2)}%`,
     roundTripRetainedPct: withdrawFeeBps === null ? null : `${((10000 - withdrawFeeBps) / 100).toFixed(2)}%`,
+    // Reports ONLY what was measured (the fee), and names what was not (lock/delay/cooldown).
+    // It must not say "no lock/delay" or "NOT a one-way trap" — neither was established.
     reversibility:
       withdrawFeeBps === null
         ? "unknown"
-        : `Reversible in the same transaction (no lock/delay). A withdraw retains ~${((10000 - withdrawFeeBps) / 100).toFixed(2)}% (a ${(withdrawFeeBps / 100).toFixed(2)}% exit fee). This is NOT a one-way trap — but the exit terms can be changed by the owner (see owner powers).`,
+        : `A withdraw retains ~${((10000 - withdrawFeeBps) / 100).toFixed(2)}% (a ${(withdrawFeeBps / 100).toFixed(2)}% exit fee). ⚠️ Withdrawal locks, delays and cooldowns are NOT CHECKED by this inspector — whether an exit is immediate is UNKNOWN, not confirmed absent. Exit terms can also be changed by the owner (see owner powers).`,
   };
 
   const ownerPowers = {

@@ -190,8 +190,13 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
               Funded: {inspection.funded?.isShell ? "EMPTY SHELL ✗" : `~${Number(inspection.funded?.totalAssetsUsdc ?? 0).toLocaleString()} USDC held`}
             </li>
             <li>
-              Withdraw: {inspection.withdraw?.withdrawFeePct ?? "?"} exit fee · no lock/delay ·
-              retains ~{inspection.withdraw?.roundTripRetainedPct ?? "?"} on a round trip
+              {/* "no lock/delay" was hardcoded HERE, independently of the inspector — the claim the
+                  user actually read came from this line, not from inspection.withdraw. The inspector
+                  does not check locks/delays/cooldowns at all, so this now says so.
+                  See VAULT_INSPECT_DEFECTS.md (defect C). */}
+              Withdraw: {inspection.withdraw?.withdrawFeePct ?? "?"} exit fee ·
+              retains ~{inspection.withdraw?.roundTripRetainedPct ?? "?"} on a round trip ·
+              lock/delay <strong>not checked</strong>
             </li>
             <li>Owner: {inspection.ownerPowers?.ownerIdentityLabel ?? "unknown"} <span style={{ opacity: 0.7 }}>({shortAddr(inspection.ownerPowers?.owner)})</span></li>
           </ul>

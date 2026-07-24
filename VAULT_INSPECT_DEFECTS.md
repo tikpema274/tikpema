@@ -1,17 +1,19 @@
 # Defect report — `inspectVault` disclosure asserts facts it did not establish
 
-> ## ⚠️ THIS IS A REPORT, NOT A CHANGELOG
-> **Nothing here has been fixed.** Every defect described below is **LIVE IN SHIPPED CODE** as of
-> the date on this file, in the path that gates real USDC deposits. This document records findings
-> only — no code was changed when it was written. If you are reading it to find out what was fixed,
-> the answer is nothing; check `git log -- netlify/functions/_vault.mjs` for that.
+> ## ⚠️ MOSTLY A REPORT, PARTLY A CHANGELOG — read the per-defect status
+> **A and B are STILL LIVE IN SHIPPED CODE**, in the path that gates real USDC deposits. **C and D
+> have been fixed** (the free string/declaration fixes only — see each section). Nothing else was
+> touched. Do not read "there is a fix commit" as "the report is closed": the two unread-value
+> defects, which are the ones a tri-state would address, remain exactly as described.
 
-**Date:** 2026-07-24
-**Report status:** **OPEN — findings only, no fix applied, no fix scheduled here.**
+**Date:** 2026-07-24 · **updated** 2026-07-24 (C and D fixed)
+**Report status:** **PARTIALLY OPEN — A and B open and live; C and D fixed.**
 **Component:** `netlify/functions/_vault.mjs` — `inspectVault()` and the disclosure it feeds
 **Component status:** in production, on the path that gates real USDC deposits.
 **Method:** Static trace of the file against its callers (`_actions.mjs:368-372`,
-`agent-vault-inspect.mjs:30-48`, `src/components/VaultPanel.tsx`). No code changed, nothing run.
+`agent-vault-inspect.mjs:30-48`, `src/components/VaultPanel.tsx`). The original report changed no
+code. The later C/D fixes are recorded per-defect below and were verified by before/after
+measurement (verdict, disclosure digest, ack token, `verify-vault.mjs`, `tsc`) — not by assertion.
 **Scope:** This is a report against shipped code. It is deliberately SEPARATE from the DD-engine
 design — the design must not be the vehicle for fixing a live defect, and this must not wait on it.
 
@@ -24,9 +26,9 @@ did not happen**. The user reads these statements and acknowledges them before a
 
 | # | Line | The disclosure asserts | What was actually true | Shape |
 |---|---|---|---|---|
-| **A** | `168-169`, `299-300` | "Ownership renounced (owner is the zero address)" | `owner()` was **unread or absent** | unread → safe |
-| **B** | `232-234`, `280` | "Not upgradeable — logic is fixed at this address (no proxy slot, no upgrade function)" | The proxy-slot read **failed** | unread → safe |
-| **C** | `240-242`, `247-250` | "Reversible in the same transaction (no lock/delay)" | **No lock/delay/cooldown check exists** | described, not coded |
+| **A** | `168-169`, `299-300` | "Ownership renounced (owner is the zero address)" | `owner()` was **unread or absent** | unread → safe — 🔴 **LIVE** |
+| **B** | `232-234`, `280` | "Not upgradeable — logic is fixed at this address (no proxy slot, no upgrade function)" | The proxy-slot read **failed** | unread → safe — 🔴 **LIVE** |
+| **C** | `240-242`, `247-250` | "Reversible in the same transaction (no lock/delay)" | **No lock/delay/cooldown check exists** | described, not coded — ✅ **FIXED** |
 
 **A and B are the same bug** — an unread value falls through to the safest interpretation.
 **C is a different bug** — the check was never written, but its conclusion is stated anyway. They
@@ -111,7 +113,7 @@ slot, empty admin slot).
 
 ---
 
-## Defect C — a check that was never written, whose conclusion is stated anyway
+## Defect C — ✅ FIXED — a check that was never written, whose conclusion is stated anyway
 
 **Lines 240-242**, with the consequence at **247-250**. **This is a different defect class.**
 
@@ -142,9 +144,26 @@ or telling the truth about not having written it.
 
 ---
 
+### ✅ C — what was fixed
+
+`lock`/`delay`/`cooldown` now report **`null` = UNKNOWN**, never `false`, and `reversibility` states
+the gap instead of denying it. **The scan was NOT written** — the fields are honest about being
+unchecked, nothing more.
+
+🚨 **The inspector fix alone would have been COSMETIC.** `reversibility` has **no consumer anywhere
+in the codebase**, and the claim users actually read — `· no lock/delay ·` — was **hardcoded as
+literal JSX in `src/components/VaultPanel.tsx`**, independently of the inspector. The duplicate lived
+in a different language and layer, so grepping the module would never have found it. Both were fixed;
+the panel now reads `lock/delay **not checked**`.
+
+Also replaced a **vacuous test**: `verify-vault.mjs:65` asserted
+`!insp.withdraw.lock && !insp.withdraw.delay && !insp.withdraw.cooldown` — three hardcoded literals,
+so it could never fail, and `!x` treats UNKNOWN as ABSENT, which is the defect itself. It now asserts
+the fields are explicitly `null`.
+
 ## Secondary findings (same family, lower severity)
 
-**D — three power groups are defined but never scanned.** `POWER_SIGS` (`105-113`) declares
+**D — ✅ FIXED (free version only) — three power groups were defined but never scanned.** `POWER_SIGS` (`105-113`) declares
 `setStrategy`, `setFeeRecipient`, and `transferOwnership`; only `emergencyWithdraw`, `feesSettable`,
 `pausable`, and `upgradeable` are ever passed to `hasAny` (`227-231`). The disclosure therefore
 never mentions that the owner can redirect the strategy, redirect fee recipients, or transfer
@@ -222,7 +241,7 @@ future consumer rather than confined to vault deposits.
 invent. Tri-state is the same principle applied where refusing outright is too blunt, because a
 disclosure should still render with a hole in it rather than fail entirely.
 
-### C can be fixed for free, today
+### ✅ C was fixed for free — DONE (A and B are not)
 
 C does not need the tri-state and should not wait for it. The check does not exist, so the only
 defect is the **claim** — and the claim is a string.
@@ -233,8 +252,12 @@ and with no new reads. The pattern is already in the file, one line away. Writin
 lock/delay detection can then be scheduled on its merits instead of being the blocker on not
 misleading anyone.
 
-D is the same free fix: either wire the three declared power groups into `hasAny`, or delete them so
-they stop reading as coverage.
+D got the same free fix: the three groups were moved to `POWER_SIGS_UNSCANNED` and declared
+unscanned so they stop reading as coverage. **No scan was wired in** — that would raise new warn
+codes, move the digest, and invalidate every outstanding ack, which is money-path work needing its
+own proof. The byte-identical digest across the change is what demonstrates no scan was added.
+
+**A and B remain unfixed and live.** They need the tri-state, which is the non-free part.
 
 ---
 

@@ -62,7 +62,13 @@ check("ERC-4626 conformant (all 12 methods present)", insp.conformance.erc4626 =
 check("underlying asset is USDC", insp.asset.isUsdc === true, insp.asset.address ?? "null");
 check("funded, not a shell", insp.funded.isShell === false && Number(insp.funded.totalAssetsUsdc) > 0, `totalAssets ≈ ${Number(insp.funded.totalAssetsUsdc).toLocaleString()} USDC`);
 check("withdraw fee = 0.10% (10 bps)", insp.withdraw.withdrawFeeBps === 10, insp.withdraw.withdrawFeePct);
-check("no lock / delay / cooldown", !insp.withdraw.lock && !insp.withdraw.delay && !insp.withdraw.cooldown);
+// Was: check("no lock / delay / cooldown", !insp.withdraw.lock && ...) — a VACUOUS assertion. Those
+// fields were hardcoded `false`, so it asserted three literals and could never fail. Worse, `!x`
+// treats UNKNOWN as ABSENT, which is the defect itself. The inspector performs no lock/delay check,
+// so the only honest assertion is that it REPORTS the gap. Flip this to a real check the day the
+// scan is written. (VAULT_INSPECT_DEFECTS.md, defect C)
+check("lock / delay / cooldown reported as UNKNOWN, not absent",
+  insp.withdraw.lock === null && insp.withdraw.delay === null && insp.withdraw.cooldown === null);
 check("owner emergency-withdraw present", insp.ownerPowers.emergencyWithdraw.present === true, insp.ownerPowers.emergencyWithdraw.via.join(", "));
 check("fees settable, max 20% (2000 bps)", insp.ownerPowers.settableFees.present === true && insp.ownerPowers.settableFees.maxBps === 2000, insp.ownerPowers.settableFees.maxPct ?? "");
 check("owner identity is an EOA", insp.ownerPowers.ownerIdentity === "eoa", insp.ownerPowers.owner ?? "");
