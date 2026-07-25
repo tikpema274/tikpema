@@ -81,7 +81,12 @@ export async function rpcCall({ endpoint, method, params, retries = 4 }) {
       await sleep(250 * 2 ** attempt + Math.floor(Math.random() * 100)); // 250/500/1000/2000ms + jitter
     }
   }
-  throw Object.assign(new Error(String(last.message)), { query });
+  // `.transient` tags WHY the read failed, so a caller can tell a transport-defeated read (retries
+  // exhausted on the transient class → INDETERMINATE) from a genuine JSON-RPC answer such as
+  // "execution reverted" (a real fact about the chain). The loop only reaches here on a non-transient
+  // error (broke immediately) or a transient one on the last attempt (exhausted), so testing the last
+  // message is an exact discriminator. Consumed by owner-powers' defect-A fix; harmless to ignore.
+  throw Object.assign(new Error(String(last.message)), { query, transient: TRANSIENT.test(String(last.message)) });
 }
 
 /**

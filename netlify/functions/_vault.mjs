@@ -19,11 +19,23 @@
 // plain-language ack before a deposit proceeds. If XyloVault ever stopped tripping the WARN,
 // that is a BUG — verify-vault.mjs asserts it does.
 
-import { getAddress, toFunctionSelector, formatUnits } from "viem";
+import { getAddress, formatUnits } from "viem";
 import { createHash } from "node:crypto";
 import { circle, waitForTx } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { publicClient } from "./_predict.mjs";
+// Shared fact-production primitives (single source of truth; also consumed by scripts/dd/). The
+// tri-state UNREADABLE, the selector-in-bytecode primitives, the owner-power catalogue (a UNION —
+// see below), and the PURE owner classifier all live there. Transport (the reads) stays here.
+import {
+  UNREADABLE,
+  unread,
+  hasSel,
+  hasAny,
+  POWER_SIGS,
+  EIP1967_IMPL_SLOT,
+  classifyOwnerType,
+} from "../../shared/onchain-facts/index.mjs";
 
 // ── The allowlist. One entry today — recon found exactly one live vault on Arc testnet and no
 // registry (see PROGRESS). A vault the agent may run against is a CONFIG decision, exactly like
@@ -84,9 +96,7 @@ export const SUPPORTED_VAULT_KEYS = Object.keys(VAULT_ALLOWLIST);
 // ceiling read from env would be one more fail-open surface, and the whole point here is that a
 // bad reading refuses. (The OWNER being able to raise the fee to MAX_FEE is a separate WARN.)
 const WITHDRAW_FEE_BLOCK_BPS = 100; // 1.00%
-// EIP-1967 implementation storage slot — a non-zero value here means the contract is a proxy,
-// i.e. its logic is upgradeable behind the same address. keccak256("eip1967.proxy.implementation")-1.
-const EIP1967_IMPL_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+// EIP1967_IMPL_SLOT now imported from shared/onchain-facts (single source of truth).
 // Multicall3 (canonical address, deployed on Arc testnet — see Arc docs contract-addresses). The
 // value reads go through ONE multicall instead of a burst of ~11 parallel eth_calls: the public
 // RPC throttles bursts, and a throttled read that silently returns null would MISREPORT the vault
@@ -107,22 +117,10 @@ async function withRetry(fn, fallback, tries = 3) {
   return fallback;
 }
 
-// ── THE THIRD STATE ────────────────────────────────────────────────────────────────────────
-// A read has THREE outcomes, not two: a VALUE, a confirmed ABSENCE (`null` — we asked, the chain
-// answered "no such method" / the call reverted), and UNREADABLE (we could not ask at all).
-//
-// ⚠️ Collapsing the third into the second is defects A and B (VAULT_INSPECT_DEFECTS.md). Both were
-// the same three-line mistake: a falsy fallback flowed into a branch whose prose asserted the
-// REASSURING answer — an unread owner() became "Ownership renounced", an unread EIP-1967 slot became
-// "Not upgradeable". An absent answer and an answer of "absent" are different things.
-//
-// ⚠️ UNREADABLE MUST NEVER RENDER AS A SAFETY CLAIM, and must never clear or suppress a warning.
-// A Symbol is deliberate: it is not falsy, does not compare equal to null/false/0/"", and throws if
-// anything tries arithmetic on it. A caller that forgets the third state fails LOUDLY rather than
-// silently taking the safe-looking branch — which is the entire failure mode being fixed.
-// (Same rule as scripts/dd/fact.mjs, whose `error` facts carry `result: null` for this reason.)
-const UNREADABLE = Symbol("unreadable");
-const unread = (v) => v === UNREADABLE;
+// ── THE THIRD STATE — now shared/onchain-facts ───────────────────────────────────────────────
+// UNREADABLE / unread moved to shared/onchain-facts (imported above). A read has THREE outcomes:
+// a VALUE, a confirmed ABSENCE (`null`), and UNREADABLE (could not ask). Collapsing the third into
+// the second is defects A and B (VAULT_INSPECT_DEFECTS.md). See the shared module for the full rule.
 
 // ── Function signatures we look for ────────────────────────────────────────────────────────
 // Conformance is detected by SELECTOR-IN-BYTECODE (works for state-changing functions too — the
@@ -143,36 +141,16 @@ const ERC4626_REQUIRED = [
   "redeem(uint256,address,address)",
 ];
 
-// Owner-power signatures. Presence of ANY variant in a group flips that disclosure on. We report
-// WHICH matched so the disclosure is specific, not hand-wavy.
-const POWER_SIGS = {
-  emergencyWithdraw: ["emergencyWithdraw(address,uint256)", "emergencyWithdraw()", "sweep(address)", "rescueTokens(address,uint256)", "rescue(address,uint256)"],
-  feesSettable: ["setFees(uint256,uint256,uint256)", "setFee(uint256)", "setWithdrawFee(uint256)", "setDepositFee(uint256)", "setPerformanceFee(uint256)"],
-  pausable: ["pause()", "paused()"],
-  upgradeable: ["upgradeTo(address)", "upgradeToAndCall(address,bytes)"],
-};
-
-// ⚠️ DECLARED BUT NOT SCANNED — these are NOT part of the disclosure. They sat inside POWER_SIGS
-// while never being passed to hasAny(), so the list READ AS COVERAGE that did not exist
-// (VAULT_INSPECT_DEFECTS.md, defect D). They are separated here so the omission is visible rather
-// than inferred: nothing below is detected, and the disclosure never mentions these powers.
+// Owner-power catalogue, selector primitives (sel/hasSel/hasAny) and the owner fingerprints
+// (SAFE_SIGS/TIMELOCK_SIGS) now live in shared/onchain-facts. POWER_SIGS imported above is the
+// UNION of what all callers scan for — nine groups.
 //
-// 🚨 WIRING THESE IN IS NOT A FREE CHANGE. Each would raise a NEW warn code, which moves
-// disclosureDigest(), which INVALIDATES every outstanding ack token and forces re-acknowledgement.
-// That is money-path work and needs its own proof run — do NOT fold it into a cleanup.
-const POWER_SIGS_UNSCANNED = {
-  setStrategy: ["setStrategy(address)"],
-  setFeeRecipient: ["setFeeRecipient(address)"],
-  transferOwnership: ["transferOwnership(address)"],
-};
-void POWER_SIGS_UNSCANNED; // referenced so it cannot be mistaken for dead code and deleted
-// Owner-contract fingerprints (to classify a contract owner: safe / timelock / other).
-const SAFE_SIGS = ["getThreshold()", "getOwners()"];
-const TIMELOCK_SIGS = ["getMinDelay()", "TIMELOCK_ADMIN_ROLE()"];
-
-const sel = (sig) => toFunctionSelector(sig).slice(2).toLowerCase(); // 8-hex, no 0x
-const hasSel = (code, sig) => code.includes(sel(sig));
-const hasAny = (code, sigs) => sigs.filter((s) => hasSel(code, s));
+// 🚨 THIS INSPECTOR SCANS ONLY FOUR OF THEM — emergencyWithdraw, feesSettable, pausable, upgradeable
+// (see the owner-powers section of inspectVault). The other five (setStrategy, setFeeRecipient,
+// transferOwnership, denylist, withdrawalDelay) are in the catalogue but are DELIBERATELY NOT
+// scanned here. This scan SELECTION is frozen: wiring any of them in raises a new warn code, which
+// moves disclosureDigest(), which INVALIDATES every outstanding ack token. That is money-path work
+// with its own proof run — never a cleanup. (VAULT_INSPECT_DEFECTS.md, defect D.)
 
 // Minimal single-method ABIs for the value reads (each wrapped in try/catch → null on absence).
 const uintFn = (name) => [{ type: "function", name, stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] }];
@@ -225,39 +203,32 @@ async function multiRead(pc, calls) {
   return res.map((r) => (r && r.status === "success" ? r.result : null));
 }
 
-// Classify an owner address. FIVE outcomes over two reads — the owner ADDRESS, then the owner's own
-// BYTECODE — and each read carries its own third state.
+// Classify the vault's owner. The owner TYPE decision is the shared, defect-A-free primitive
+// (classifyOwnerType, shared/onchain-facts); this wrapper does the reads (transport stays here) and
+// attaches _vault's human labels. `renounced` is reachable ONLY from a confirmed zero-address read.
 //
-// 🚨 DEFECT A LIVED IN THE FIRST LINE OF THIS FUNCTION. It read `if (!owner || isZero(owner))` →
-// "Ownership renounced". `!owner` is true for an owner() that was never read, so an RPC failure
-// produced the single most reassuring owner class — and the ONLY one that raises no WARN. The user
-// then acknowledged a disclosure stating nobody controls the vault, on no evidence whatsoever.
-//
-// `renounced` is now reachable ONLY from a confirmed zero-address read. Every other path that used
-// to land there now says what actually happened.
+// The labels are _vault-specific prose ("...this vault") and stay here on purpose — the shared
+// classifier returns type + address only, so one caller's wording can never leak into another's.
+// disclosureDigest() depends on the owner TYPE (via warn codes), never on this label text.
+const OWNER_LABELS = {
+  unreadable: "⚠️ The owner could not be read — who controls this vault is UNKNOWN. This is NOT a renounced or absent owner; the read failed",
+  "no-owner-fn": "⚠️ This contract exposes no owner() — ownership is not disclosed by that convention. A role-based admin may still hold every power above",
+  renounced: "Ownership renounced (owner is the zero address)",
+  "unreadable-kind": "⚠️ The owner's code could not be read — whether it is a single key, a multisig or a timelock is UNKNOWN",
+  eoa: "A single externally-owned key (EOA) controls this vault",
+  multisig: "Owner is a multisig (Gnosis Safe-shaped)",
+  timelock: "Owner is a timelock contract",
+  contract: "Owner is a contract (not identified as a known multisig or timelock)",
+};
 async function classifyOwner(pc, owner) {
-  // We could not ask. NOT renounced, NOT ownerless — unknown.
-  if (unread(owner)) {
-    return { address: null, type: "unreadable", label: "⚠️ The owner could not be read — who controls this vault is UNKNOWN. This is NOT a renounced or absent owner; the read failed" };
-  }
-  // We asked and the chain answered: there is no owner() here. A real observation, but NOT proof of
-  // ownerlessness — a role-based admin (OpenZeppelin AccessControl) exposes no owner() and holds
-  // every power. Reported as its own class rather than folded into `renounced`.
-  if (owner === null || owner === undefined) {
-    return { address: null, type: "no-owner-fn", label: "⚠️ This contract exposes no owner() — ownership is not disclosed by that convention. A role-based admin may still hold every power above" };
-  }
-  if (/^0x0+$/.test(String(owner))) return { address: owner, type: "renounced", label: "Ownership renounced (owner is the zero address)" };
-  const code = await withRetry(() => pc.getBytecode({ address: getAddress(owner) }), UNREADABLE);
-  // The owner's address is known but its bytecode is not, so we cannot tell a single key from a
-  // multisig from a timelock. Must not default to `eoa` — that would be a guess wearing a verdict.
-  if (unread(code) || (code !== undefined && code !== null && typeof code !== "string")) {
-    return { address: owner, type: "unreadable-kind", label: "⚠️ The owner's code could not be read — whether it is a single key, a multisig or a timelock is UNKNOWN" };
-  }
-  const c = String(code || "0x").toLowerCase();
-  if (c === "0x" || c === "") return { address: owner, type: "eoa", label: "A single externally-owned key (EOA) controls this vault" };
-  if (SAFE_SIGS.every((s) => hasSel(c, s))) return { address: owner, type: "multisig", label: "Owner is a multisig (Gnosis Safe-shaped)" };
-  if (TIMELOCK_SIGS.some((s) => hasSel(c, s))) return { address: owner, type: "timelock", label: "Owner is a timelock contract" };
-  return { address: owner, type: "contract", label: "Owner is a contract (not identified as a known multisig or timelock)" };
+  // Read the owner's own bytecode ONLY for a real, non-zero address — the unread / absent / zero
+  // classes are decided without it, exactly as before (those paths never touched the chain). Same
+  // read, same UNREADABLE fallback; relocated out of the classifier so the classifier can be pure.
+  let ownerCode;
+  const realAddr = !unread(owner) && owner != null && !/^0x0+$/.test(String(owner));
+  if (realAddr) ownerCode = await withRetry(() => pc.getBytecode({ address: getAddress(owner) }), UNREADABLE);
+  const { address, type } = classifyOwnerType(owner, ownerCode);
+  return { address, type, label: OWNER_LABELS[type] };
 }
 
 // ── INSPECT ────────────────────────────────────────────────────────────────────────────────

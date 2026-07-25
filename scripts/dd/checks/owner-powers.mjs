@@ -26,41 +26,38 @@
 // which reads as "clean". It yields `powers: null` + `powersObservable: false`. Same fail-open shape
 // the whole engine is built to refuse.
 
-import { toFunctionSelector } from "viem";
 import { observed, failed, sha256, normalizeAddress } from "../fact.mjs";
 import { chainClient } from "../client.mjs";
+// Shared fact-production primitives — the SINGLE SOURCE OF TRUTH shared with
+// netlify/functions/_vault.mjs. Previously these tables and helpers were "COPIED VERBATIM" here
+// (the old comment said so), which is the duplicate-source-of-truth bug: the copies had already
+// drifted. `POWER_SIGS` is the UNION and equals this engine's old ALL_SIGS exactly (same nine
+// groups, same order), so scanPowers is unchanged.
+//
+// ⚠️ ADOPTING classifyOwnerType FIXES THIS FILE'S DEFECT A. See the owner block in run(): an
+// RPC-exhausted owner() read used to be caught and reported as `no-owner-fn`, indistinguishable
+// from a genuine "no owner() function". The shared classifier distinguishes the third state, and
+// the owner block now feeds it UNREADABLE on a transport-defeated read.
+import {
+  UNREADABLE,
+  unread,
+  sel,
+  hasSel,
+  POWER_SIGS,
+  SAFE_SIGS,
+  TIMELOCK_SIGS,
+  EIP1967_IMPL_SLOT,
+  classifyOwnerType,
+} from "../../../shared/onchain-facts/index.mjs";
 
 export const id = "owner-powers";
 export const describe = "selector-scan a contract's (or its proxy implementation's) bytecode for owner powers, and classify the owner";
 export const usage = "--address 0x… --chain <name> [--block <n>]";
 
-// keccak256("eip1967.proxy.implementation") - 1 — non-zero here means upgradeable logic behind this address.
-const EIP1967_IMPL_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+// keccak256("eip1967.proxy.admin") - 1. dd/-specific and kept local: reading the admin slot is part
+// of this engine's proxy handling (Step-2 extended shapes will build on it); the impl slot is shared.
 const EIP1967_ADMIN_SLOT = "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103";
 
-// ── COPIED VERBATIM FROM _vault.mjs:105-116. Presence of ANY variant in a group flips that group on;
-// we report WHICH signature matched so the disclosure is specific rather than hand-wavy. ──
-const POWER_SIGS = {
-  emergencyWithdraw: ["emergencyWithdraw(address,uint256)", "emergencyWithdraw()", "sweep(address)", "rescueTokens(address,uint256)", "rescue(address,uint256)"],
-  feesSettable: ["setFees(uint256,uint256,uint256)", "setFee(uint256)", "setWithdrawFee(uint256)", "setDepositFee(uint256)", "setPerformanceFee(uint256)"],
-  setStrategy: ["setStrategy(address)"],
-  setFeeRecipient: ["setFeeRecipient(address)"],
-  transferOwnership: ["transferOwnership(address)"],
-  pausable: ["pause()", "paused()"],
-  upgradeable: ["upgradeTo(address)", "upgradeToAndCall(address,bytes)"],
-};
-// Extra groups this engine cares about that a vault does not — seen on Circle's Gateway today.
-const EXTRA_SIGS = {
-  denylist: ["denylist(address)", "unDenylist(address)", "blacklist(address)", "unBlacklist(address)", "isDenylisted(address)"],
-  withdrawalDelay: ["updateWithdrawalDelay(uint256)", "withdrawalDelay()", "initiateWithdrawal(address,uint256)"],
-};
-const ALL_SIGS = { ...POWER_SIGS, ...EXTRA_SIGS };
-
-const SAFE_SIGS = ["getThreshold()", "getOwners()"];
-const TIMELOCK_SIGS = ["getMinDelay()", "TIMELOCK_ADMIN_ROLE()"];
-
-const sel = (sig) => toFunctionSelector(sig).slice(2).toLowerCase(); // 8-hex, no 0x
-const hasSel = (code, sig) => code.includes(sel(sig));
 const addrFromWord = (w) => (w && w !== "0x" ? "0x" + w.slice(-40) : null);
 const isZeroAddr = (a) => !a || /^0x0+$/.test(a);
 
@@ -105,7 +102,7 @@ const COVERAGE = {
 /** Scan a blob of bytecode for every signature group. Returns which matched, and the selector it matched on. */
 function scanPowers(code) {
   const out = {};
-  for (const [group, sigs] of Object.entries(ALL_SIGS)) {
+  for (const [group, sigs] of Object.entries(POWER_SIGS)) {
     const matched = sigs.filter((s) => hasSel(code, s)).map((s) => ({ signature: s, selector: "0x" + sel(s) }));
     out[group] = { present: matched.length > 0, matched };
   }
@@ -185,35 +182,63 @@ export async function run({ address, chain: chainName, block, client }) {
     const powers = scanPowers(scannedCode.toLowerCase());
 
     // 4. Who is the owner? owner() is a convention, not a guarantee — absence is reported, not assumed.
-    let owner = null;
+    //
+    // 🚨 DEFECT A FIX. Before, the owner() read and the owner-code read shared ONE try/catch that
+    // turned ANY failure — including an RPC-exhausted read that never reached the chain — into
+    // `no-owner-fn`, indistinguishable from a genuine "no owner() function". The owner TYPE decision
+    // is now the shared, tri-state-correct classifyOwnerType; TRANSPORT stays here. A transport-
+    // defeated read is fed in as UNREADABLE → `unreadable` / `unreadable-kind` (INDETERMINATE), never
+    // the reassuring "no owner". `err.transient` (tagged by rpcCall) is the discriminator: a genuine
+    // JSON-RPC error such as "execution reverted" is a real answer (absent → null); an exhausted
+    // transient is not (→ UNREADABLE). dd/'s historical output shape — its type strings (it emits
+    // `safe-multisig` where the canonical type is `multisig`), labels, the fingerprint field, the
+    // error string — is reattached below so nothing but the defect-A classes moves.
+    const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
+    let ownerValue;   // address | zero-address (renounced) | null (genuinely absent) | UNREADABLE
+    let ownerCode;    // hex string | UNREADABLE | undefined (not read: early classes never touch it)
+    let ownerErr = null;
     try {
       const o = await c.call({ method: "eth_call", params: [{ to: addr, data: "0x8da5cb5b" }, blk.tag] });
       queries.push({ what: "owner()", ...o.query });
-      const oa = addrFromWord(o.result);
-      if (isZeroAddr(oa)) {
-        owner = { address: oa, type: "renounced", label: "ownership renounced (zero address)" };
-      } else if (oa) {
-        // Classify by the owner's OWN bytecode: no code = a single key; else fingerprint it.
-        const oc = await c.call({ method: "eth_getCode", params: [oa, blk.tag] });
-        queries.push({ what: "code@owner", ...oc.query });
-        if (oc.result === "0x") {
-          owner = { address: oa, type: "eoa", label: "a single externally-owned key controls this contract" };
-        } else {
-          const code = oc.result.toLowerCase();
-          const isSafe = SAFE_SIGS.every((s) => hasSel(code, s));
-          const isTimelock = TIMELOCK_SIGS.some((s) => hasSel(code, s));
-          owner = {
-            address: oa,
-            type: isSafe ? "safe-multisig" : isTimelock ? "timelock" : "contract",
-            label: isSafe ? "a Safe multisig" : isTimelock ? "a timelock contract" : "a contract (unfingerprinted)",
-            fingerprint: { safeSigsPresent: isSafe, timelockSigsPresent: isTimelock },
-          };
-        }
-      }
+      // An empty word reads as the zero address (renounced), unchanged from before.
+      ownerValue = addrFromWord(o.result) ?? ZERO_ADDR;
     } catch (e) {
-      // owner() reverting/absent is an OBSERVATION about the contract, not a failure of the check.
-      owner = { address: null, type: "no-owner-fn", label: "owner() absent or reverted — ownership not exposed by that convention", error: String(e.message) };
+      ownerValue = e.transient ? UNREADABLE : null; // the ONLY behavioural change: transient ≠ absent
+      ownerErr = String(e.message);
+      if (e.query) queries.push({ what: "owner()", ...e.query });
     }
+    // Read the owner's OWN bytecode only for a real, non-zero address (as before). Any failure to
+    // read it is UNREADABLE → `unreadable-kind`, never a silent downgrade to no-owner-fn.
+    if (!unread(ownerValue) && ownerValue && !isZeroAddr(ownerValue)) {
+      try {
+        const oc = await c.call({ method: "eth_getCode", params: [ownerValue, blk.tag] });
+        queries.push({ what: "code@owner", ...oc.query });
+        ownerCode = oc.result;
+      } catch (e) {
+        ownerCode = UNREADABLE;
+        if (e.query) queries.push({ what: "code@owner", ...e.query });
+      }
+    }
+    const { address: ownerAddr, type: ownerType } = classifyOwnerType(ownerValue, ownerCode);
+    // Map the canonical type back to dd/'s historical output (strings + labels), so only the
+    // defect-A classes are new. `multisig` → this engine's long-standing `safe-multisig`.
+    const DD_OWNER = {
+      renounced: { type: "renounced", label: "ownership renounced (zero address)" },
+      eoa: { type: "eoa", label: "a single externally-owned key controls this contract" },
+      multisig: { type: "safe-multisig", label: "a Safe multisig" },
+      timelock: { type: "timelock", label: "a timelock contract" },
+      contract: { type: "contract", label: "a contract (unfingerprinted)" },
+      "no-owner-fn": { type: "no-owner-fn", label: "owner() absent or reverted — ownership not exposed by that convention" },
+      unreadable: { type: "unreadable", label: "owner() could not be read (RPC exhausted) — ownership INDETERMINATE, not absent" },
+      "unreadable-kind": { type: "unreadable-kind", label: "the owner's code could not be read — kind (key / multisig / timelock) INDETERMINATE" },
+    };
+    const owner = { address: ownerAddr, ...DD_OWNER[ownerType] };
+    // The fingerprint rides on the fingerprinted-owner classes exactly as before.
+    if (typeof ownerCode === "string" && ownerCode !== "0x" && (ownerType === "multisig" || ownerType === "timelock" || ownerType === "contract")) {
+      const code = ownerCode.toLowerCase();
+      owner.fingerprint = { safeSigsPresent: SAFE_SIGS.every((s) => hasSel(code, s)), timelockSigsPresent: TIMELOCK_SIGS.some((s) => hasSel(code, s)) };
+    }
+    if (ownerErr) owner.error = ownerErr;
 
     return observed({
       check: id,
