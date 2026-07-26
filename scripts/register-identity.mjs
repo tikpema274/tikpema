@@ -60,6 +60,7 @@ import path from "node:path";
 import { createPublicClient, http, parseEventLogs } from "viem";
 import { circle, waitForTx, TxPendingError } from "../netlify/functions/_circle.mjs";
 import { ARC } from "../netlify/functions/_arc.mjs";
+import { mergePreservingProvenance } from "./_identity-record.mjs";
 
 // ═══════════════════════ THE CONSTANTS THAT MUST NOT DRIFT ═══════════════════════
 
@@ -172,6 +173,30 @@ One would overwrite the other's record. Refusing to run.
 const CONFIRM = process.argv.includes("--confirm");
 const RESUME_IX = process.argv.indexOf("--resume");
 const RESUME_TX = RESUME_IX >= 0 ? process.argv[RESUME_IX + 1] : null;
+
+// ⭐ ONE FLAG GOVERNS EVERY DISK WRITE — not just the chain write.
+//
+// The dry run's banner says "nothing was written", and that was FALSE. Two writes ran before it:
+// the NFT enumeration dump, and — after registration — persistId() from the ALREADY-REGISTERED
+// branch, which overwrote the committed record with `txHash: null, circleTxId: null` and destroyed
+// the on-chain provenance. A read-only-looking run mutated a tracked file.
+//
+// The lesson generalises past this script: "dry run" must constrain the METHOD, not the intent. A
+// run that advertises it changed nothing must be incapable of changing anything, which means the
+// gate belongs at the write itself and not at each call site that might remember to check.
+const WRITES_ENABLED = CONFIRM || Boolean(RESUME_TX);
+
+/** The ONLY place this script writes to disk. Refuses in a dry run, and says what it skipped —
+ *  silence would leave a reader unable to tell "nothing to write" from "write suppressed". */
+async function writeArtifact(file, contents, what) {
+  if (!WRITES_ENABLED) {
+    console.log(`  ⃠ dry run — NOT writing ${what}; ${path.relative(REPO_ROOT, file)} is left untouched`);
+    return false;
+  }
+  await mkdir(OUT_DIR, { recursive: true });
+  await writeFile(file, contents);
+  return true;
+}
 
 const ARC_CHAIN = {
   id: ARC.chainId,
@@ -339,16 +364,20 @@ let alreadyRegistered = null;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${API_KEY}` } });
   if (!res.ok) die(`Circle GET /wallets/${WALLET_ID}/nfts → HTTP ${res.status}.\nThe existence check could not run. Refusing: proceeding blind is how a duplicate gets minted.`);
   const body = await res.json();
-  await mkdir(OUT_DIR, { recursive: true });
-  await writeFile(NFT_DUMP, JSON.stringify(body, null, 2)); // raw evidence for audit
+  const dumped = await writeArtifact(NFT_DUMP, JSON.stringify(body, null, 2), "the raw NFT enumeration"); // evidence for audit
+  // The dump is the evidence a reader needs when the response is unparseable — so when it was NOT
+  // written, hand them the body inline instead of pointing at a file that does not exist.
+  const rawEvidence = dumped
+    ? `Raw body dumped to ${NFT_DUMP}`
+    : `Raw body (dry run — not written to disk): ${JSON.stringify(body)?.slice(0, 400)}`;
   const nfts = body?.data?.nfts;
-  if (!Array.isArray(nfts)) die(`Circle response had no data.nfts array (got ${typeof nfts}).\nAn unparseable response is INDETERMINATE, not "no NFTs". Refusing. Raw body dumped to ${NFT_DUMP}`);
+  if (!Array.isArray(nfts)) die(`Circle response had no data.nfts array (got ${typeof nfts}).\nAn unparseable response is INDETERMINATE, not "no NFTs". Refusing. ${rawEvidence}`);
 
-  console.log(`  wallet holds ${nfts.length} NFT(s) total  (raw dump → ${path.relative(REPO_ROOT, NFT_DUMP)})`);
+  console.log(`  wallet holds ${nfts.length} NFT(s) total  ${dumped ? `(raw dump → ${path.relative(REPO_ROOT, NFT_DUMP)})` : "(raw dump not written — dry run)"}`);
   // Completeness: we must not silently truncate. If the page came back full we cannot
   // prove we saw everything, so we refuse rather than guess a cursor field.
   if (nfts.length >= PAGE_SIZE) {
-    die(`Circle returned a FULL page (${nfts.length} ≥ pageSize ${PAGE_SIZE}), so the enumeration may be truncated.\nA truncated list could miss an existing identity and let this script mint a duplicate.\nRefusing until cursor pagination is implemented against the real response shape in ${NFT_DUMP}`);
+    die(`Circle returned a FULL page (${nfts.length} ≥ pageSize ${PAGE_SIZE}), so the enumeration may be truncated.\nA truncated list could miss an existing identity and let this script mint a duplicate.\nRefusing until cursor pagination is implemented against the real response shape. ${rawEvidence}`);
   }
 
   const candidates = nfts.filter((n) => n?.token?.tokenAddress?.toLowerCase() === IDENTITY_REGISTRY.toLowerCase());
@@ -400,6 +429,15 @@ let alreadyRegistered = null;
 // ══════════════════ ID PERSISTENCE (guard 3 of 3) — the helper ══════════════════
 // Called the INSTANT an id is known, before anything that could throw.
 async function persistId(record) {
+  // ⭐ GATE 0 — A DRY RUN PERSISTS NOTHING. This is the branch that caused the defect: STEP 2's
+  // ALREADY-REGISTERED path called persistId() BEFORE the dry-run early-exit, so a read-only run
+  // rewrote a committed record. Nothing is lost by refusing here — a dry run mints no id, and in
+  // the already-registered case the id is on screen and re-discoverable by re-running.
+  if (!WRITES_ENABLED) {
+    console.log(`  ⃠ dry run — NOT writing ${path.relative(REPO_ROOT, ID_FILE)}; it is left byte-identical`);
+    if (record.agentId) console.log(`     (agentId ${record.agentId} — re-run with --confirm to record it)`);
+    return null;
+  }
   await mkdir(OUT_DIR, { recursive: true });
 
   // 🚨 CLOBBER GUARD. writeFile does not merge. If this file already records a DIFFERENT,
@@ -420,7 +458,19 @@ async function persistId(record) {
         `This target appears already registered — re-run the dry run to confirm before proceeding.`);
   }
 
-  const payload = { ...record, target: TARGET_NAME, registry: IDENTITY_REGISTRY, chainId: ARC.chainId, walletId: WALLET_ID, writtenAt: new Date().toISOString() };
+  // 🚨 NEVER-DOWNGRADE GUARD — the generalisation of the two guards above.
+  // Those protect `agentId`, which is the field their author had in mind, not the invariant. This
+  // one states the invariant: NEVER REPLACE A RICHER RECORD WITH A POORER ONE. The
+  // ALREADY-REGISTERED branch legitimately knows no txHash (it discovered the id rather than
+  // minting it), so it passes null — and `writeFile` does not merge. Preserving is correct rather
+  // than refusing, because the guards above have already established that both records describe the
+  // SAME identity, and within one identity its own earlier provenance is still its provenance.
+  const { merged, preserved } = mergePreservingProvenance(prior, record);
+  if (preserved.length) {
+    console.log(`  🛡 preserved from the existing record rather than nulling it: ${preserved.join(", ")}`);
+  }
+
+  const payload = { ...merged, target: TARGET_NAME, registry: IDENTITY_REGISTRY, chainId: ARC.chainId, walletId: WALLET_ID, writtenAt: new Date().toISOString() };
   await writeFile(ID_FILE, JSON.stringify(payload, null, 2) + "\n");
   console.log(`  💾 PERSISTED → ${ID_FILE}`);
   return payload;
