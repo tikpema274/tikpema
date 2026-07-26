@@ -5,9 +5,14 @@
 // ═══ ⚠️ REAL ON-CHAIN WRITE + REAL TESTNET USDC. Requires --confirm; a bare run
 // ═══ prints the plan and exits without touching anything.
 //
-//   node --env-file=.env scripts/register-identity.mjs            # dry run (default)
-//   node --env-file=.env scripts/register-identity.mjs --confirm  # writes on-chain
-//   node --env-file=.env scripts/register-identity.mjs --resume <circleTxId>
+//   node --env-file=.env scripts/register-identity.mjs --target <name>            # dry run
+//   node --env-file=.env scripts/register-identity.mjs --target <name> --confirm   # WRITES
+//   node --env-file=.env scripts/register-identity.mjs --target <name> --resume <circleTxId>
+//
+// --target IS REQUIRED — see TARGETS below. There is no default: one script now serves
+// several frozen documents, and letting it guess which one is how the wrong document gets
+// a permanent on-chain pointer. Each profile owns its own idFile / nftDump / env key, so
+// registering a second identity cannot overwrite the first one's recovered agentId.
 //
 // WHAT THIS IS NOT: it is not agent-init.mjs. It creates NO wallet. It registers
 // from the wallet id below, which already exists. agent-init.mjs mints a brand-new
@@ -68,11 +73,6 @@ const EXPECTED_ADDRESS = "0xc54d47211997aca90ef4fcfbc742a3b511b4e621";
 
 const IDENTITY_REGISTRY = "0x8004A818BFB912233c491871b3d84c89A494BD9e";
 
-// The frozen document. Any drift here is a stop, not a warning.
-const TARGET_CID = "bafkreidoeond3akvswce3e425o5grfygsvrfyleqkwathio4ae6y6vujae";
-const TARGET_SHA = "6e239a3d815595844d939aebba68970695625c2c90558133a1dc013d8f568901";
-const AGENT_URI = `ipfs://${TARGET_CID}`;
-
 const GATEWAYS = [
   (cid) => `https://ipfs.io/ipfs/${cid}`,
   (cid) => `https://dweb.link/ipfs/${cid}`,
@@ -80,11 +80,94 @@ const GATEWAYS = [
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
-const LOCAL_DOC = path.join(REPO_ROOT, "agent-metadata/unified.json");
 // Where the agentId lands. Committed-adjacent and obvious — NOT a temp dir.
 const OUT_DIR = path.join(REPO_ROOT, "agent-metadata");
-const ID_FILE = path.join(OUT_DIR, "REGISTERED-IDENTITY.json");
-const NFT_DUMP = path.join(OUT_DIR, ".nft-enumeration.json"); // raw evidence, for audit
+
+// ═════════════════════ TARGETS — ONE PROFILE PER FROZEN DOCUMENT ═════════════════════
+//
+// ⚠️ WHY THIS IS A MAP AND NOT SIX EDITED CONSTANTS. This script produced agentId 851823
+// against unified.json with these values hardcoded. Registering a SECOND identity by
+// editing them in place would (a) destroy the ability to re-run the 851823 shape, and
+// (b) silently repoint ID_FILE at agent-metadata/REGISTERED-IDENTITY.json — which HOLDS
+// THE 851823 RECORD. persistId() writes with writeFile, no merge: the first call would
+// have erased the only local copy of an id recovered at real cost. The script written to
+// prevent id-archaeology would have caused it. Profiles make that collision structurally
+// impossible: each target owns its own idFile and nftDump.
+//
+// Every profile field is a claim that must be true BEFORE a run:
+//   cid/sha  — the frozen document's content address and hash, derived from ITS bytes
+//   localDoc — the file those bytes live in (drift-checked in STEP 1)
+//   idFile   — where THIS identity's id is persisted. MUST be unique per target.
+//   envKey   — the prod env var for THIS id. A second identity must NOT reuse AGENT_ID.
+const TARGETS = {
+  // The Tikpema Agent identity. ALREADY REGISTERED as agentId 851823 — a run against
+  // this target is expected to be INERT (STEP 2 finds it and refuses to mint a duplicate).
+  unified: {
+    label: "Tikpema Agent (unified identity)",
+    cid: "bafkreidoeond3akvswce3e425o5grfygsvrfyleqkwathio4ae6y6vujae",
+    sha: "6e239a3d815595844d939aebba68970695625c2c90558133a1dc013d8f568901",
+    localDoc: path.join(REPO_ROOT, "agent-metadata/unified.json"),
+    idFile: path.join(OUT_DIR, "REGISTERED-IDENTITY.json"),
+    nftDump: path.join(OUT_DIR, ".nft-enumeration.json"),
+    envKey: "AGENT_ID",
+    mirror: "https://github.com/tikpema274/tikpema-agent-identity",
+  },
+  // The DD service. A SECOND identity from the SAME wallet — same operator, separate
+  // reputation subject, exactly as the frozen document publishes it. No new wallet.
+  "dd-service": {
+    label: "Tikpema DD Service",
+    cid: "bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4",
+    sha: "d3734accb6390a361df2daf87b49c41d4a44d30bfc9285f47be3c3284dbb402f",
+    localDoc: path.join(REPO_ROOT, "agent-metadata/dd-service.json"),
+    idFile: path.join(OUT_DIR, "REGISTERED-IDENTITY-dd-service.json"),
+    nftDump: path.join(OUT_DIR, ".nft-enumeration-dd-service.json"),
+    envKey: "DD_AGENT_ID",
+    mirror: "(NOT YET CREATED — Phase A mirror + pin still pending)",
+  },
+};
+
+// ⚠️ NO DEFAULT TARGET, ON PURPOSE. A default is how --confirm registers the wrong
+// document: the operator omits a flag and the script picks for them. Fail closed.
+const TARGET_IX = process.argv.indexOf("--target");
+const TARGET_NAME = TARGET_IX >= 0 ? process.argv[TARGET_IX + 1] : null;
+if (!TARGET_NAME || !TARGETS[TARGET_NAME]) {
+  console.error(`\n╔══ ABORT ═══════════════════════════════════════════════
+--target is REQUIRED and must name a known profile. There is deliberately no default:
+picking a document on the operator's behalf is how the wrong one gets registered.
+
+  known targets: ${Object.keys(TARGETS).join(", ")}
+  usage: node --env-file=.env scripts/register-identity.mjs --target <name> [--confirm]
+╚════════════════════════════════════════════════════════`);
+  process.exit(1);
+}
+const TARGET = TARGETS[TARGET_NAME];
+
+// Derived from the selected profile. Any drift against the local file is a stop, not a warning.
+const TARGET_CID = TARGET.cid;
+const TARGET_SHA = TARGET.sha;
+const AGENT_URI = `ipfs://${TARGET_CID}`;
+const LOCAL_DOC = TARGET.localDoc;
+const ID_FILE = TARGET.idFile;
+const NFT_DUMP = TARGET.nftDump;
+
+// Cross-profile collision guard: two targets sharing an idFile would let one overwrite
+// the other's recovered id. Asserted at startup rather than trusted to review.
+{
+  const seen = new Map();
+  for (const [name, t] of Object.entries(TARGETS)) {
+    for (const key of ["idFile", "nftDump", "envKey", "cid"]) {
+      const k = `${key}:${t[key]}`;
+      if (seen.has(k)) {
+        console.error(`\n╔══ ABORT ═══════════════════════════════════════════════
+Targets "${seen.get(k)}" and "${name}" share ${key} = ${t[key]}.
+One would overwrite the other's record. Refusing to run.
+╚════════════════════════════════════════════════════════`);
+        process.exit(1);
+      }
+      seen.set(k, name);
+    }
+  }
+}
 
 const CONFIRM = process.argv.includes("--confirm");
 const RESUME_IX = process.argv.indexOf("--resume");
@@ -144,6 +227,8 @@ console.log("\n╔════════════════════�
 console.log("║  ERC-8004 IDENTITY REGISTRATION — register-only, existing wallet   ║");
 console.log("╚════════════════════════════════════════════════════════════════════╝\n");
 console.log(`  mode          : ${RESUME_TX ? `RESUME (${RESUME_TX})` : CONFIRM ? "⚠️  CONFIRM — WILL WRITE ON-CHAIN" : "DRY RUN (default)"}`);
+console.log(`  target        : ${TARGET_NAME}  — ${TARGET.label}`);
+console.log(`  document      : ${path.relative(REPO_ROOT, LOCAL_DOC)}  (sha256 ${TARGET_SHA.slice(0, 12)}…)`);
 console.log(`  wallet id     : ${WALLET_ID}`);
 console.log(`  registry      : ${IDENTITY_REGISTRY}  (Arc Testnet ${ARC.chainId})`);
 console.log(`  agent URI     : ${AGENT_URI}`);
@@ -304,7 +389,26 @@ let alreadyRegistered = null;
 // Called the INSTANT an id is known, before anything that could throw.
 async function persistId(record) {
   await mkdir(OUT_DIR, { recursive: true });
-  const payload = { ...record, registry: IDENTITY_REGISTRY, chainId: ARC.chainId, walletId: WALLET_ID, writtenAt: new Date().toISOString() };
+
+  // 🚨 CLOBBER GUARD. writeFile does not merge. If this file already records a DIFFERENT,
+  // non-null agentId, writing would erase the only local copy of an id that may have cost
+  // a registry hunt to recover — the exact archaeology guard 3 exists to prevent, turned
+  // against itself by a mis-set --target. Profiles make the collision unlikely; this makes
+  // it impossible. Re-persisting the SAME id is allowed (that is the recovery path).
+  const prior = await readFile(ID_FILE, "utf8").then((s) => JSON.parse(s)).catch(() => null);
+  if (prior?.agentId && record.agentId && String(prior.agentId) !== String(record.agentId)) {
+    die(`${ID_FILE} already records agentId ${prior.agentId}, and this run wants to write ${record.agentId}.\n` +
+        `REFUSING to overwrite. That file may be the only local copy of ${prior.agentId}.\n` +
+        `If this is genuinely a different identity, it needs its own --target profile with its own idFile.`);
+  }
+  if (prior?.agentId && !record.agentId) {
+    // A "SUBMITTED, id not yet known" write must never blank an id that is already known.
+    die(`${ID_FILE} already records agentId ${prior.agentId}, but this run is about to write a\n` +
+        `null agentId (pre-settlement handle). That would erase a known id. REFUSING.\n` +
+        `This target appears already registered — re-run the dry run to confirm before proceeding.`);
+  }
+
+  const payload = { ...record, target: TARGET_NAME, registry: IDENTITY_REGISTRY, chainId: ARC.chainId, walletId: WALLET_ID, writtenAt: new Date().toISOString() };
   await writeFile(ID_FILE, JSON.stringify(payload, null, 2) + "\n");
   console.log(`  💾 PERSISTED → ${ID_FILE}`);
   return payload;
@@ -414,18 +518,18 @@ console.log(`
 ║  A file on your disk is one machine away from being lost. The run is
 ║  NOT complete until the agentId is in prod:
 ║
-║    netlify env:set AGENT_ID ${agentId} --context production
+║    netlify env:set ${TARGET.envKey} ${agentId} --context production
 ║
 ║  Then confirm it took (env:list lies; env:get prints "No value set"
 ║  to stdout at exit 0 when unset, so read the actual value):
 ║
-║    netlify env:get AGENT_ID --context production
+║    netlify env:get ${TARGET.envKey} --context production
 ║
-║  Then update the public mirror's README with the concrete agentId —
-║  it currently states "NOT YET REGISTERED". The README is not part of
-║  the CID, so that edit is free:
-║    https://github.com/tikpema274/tikpema-agent-identity
+║  Then update the public mirror's README with the concrete agentId.
+║  The README is not part of the CID, so that edit is free:
+║    ${TARGET.mirror}
 ║
-║  ⛔ unified.json MUST NOT be edited. Ever. It is self-referential.
+║  ⛔ ${path.relative(REPO_ROOT, LOCAL_DOC)} MUST NOT be edited. Ever. It is
+║     self-referential: it asserts tokenURI == the CID of its own bytes.
 ╚════════════════════════════════════════════════════════════════════
 `);

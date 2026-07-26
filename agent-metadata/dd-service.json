@@ -1,0 +1,203 @@
+{
+  "_notice": "FROZEN — v1.0.0. These bytes are FINAL and content-addressed. The document asserts that tokenURI(agentId) equals the CID of this exact file, so ANY byte change (reformatting, a trailing newline, re-serialising through JSON.parse) makes its own central claim false. Corrections happen by SUPERSESSION — a new version with 'supersedes' set — never by editing these bytes. ⚠️ STATUS AT FREEZE: NO WALLET EXISTS FOR THIS SERVICE, NOTHING IS REGISTERED, AND NO agentId EXISTS. Phase B (wallet) and Phase C (on-chain registration) are a separate deliberate session using the register-ONLY playbook; agent-init.mjs must never be used for it, because it mints a new wallet on every run. Reports from this service are NOT signed or attested by any identity today. The public mirror's README is NOT part of this CID and is where the agentId and owner address are recorded after registration.",
+  "name": "Tikpema DD Service",
+  "description": "A read-only on-chain due-diligence service. Given a contract address on Arc, it returns an INVENTORY of what the contract's privileged holder can do to a depositor — enumerated from the deployed bytecode — together with a machine-generated manifest of what it did NOT check. It emits no verdict, no score and no recommendation.",
+  "version": "1.0.0",
+  "supersedes": null,
+  "service_type": "onchain-due-diligence/read-only",
+  "chain_id": 5042002,
+  "network": "Arc Testnet",
+  "code_provenance": {
+    "repository": "github.com/tikpema274/tikpema (private working repo)",
+    "module": "shared/onchain-analyze/",
+    "commit_describing_this_document": "3e27042",
+    "engine_schema_version": "onchain-analyze/0.1.0",
+    "note": "EVERY capability and limit claim in this document describes the code at commit 3e27042 and nowhere else. The service is under active development: when its coverage changes, this document becomes STALE rather than merely imprecise, and the correct response is a superseding version (see mutability_posture), not an edit."
+  },
+  "operator_and_independence": {
+    "headline": "OPERATED BY TIKPEMA. THIS IS NOT AN INDEPENDENT AUDITOR. It is the same operator that builds and runs the Tikpema agent, offering a service — not a separate party vouching for anything.",
+    "why_this_is_stated_first": "A due-diligence service's entire value is that its output is checkable rather than believable. A reader who mistakes this for third-party attestation would be relying on exactly the assurance it cannot provide. Stating the limit plainly is cheaper than being caught glossing it, and a prior version of the sibling agent document claimed an 'offline cold-key owner' that was never true — that claim was removed. This section exists so the same class of overstatement is not repeated one product later.",
+    "three_distinct_limits": {
+      "1_operator_independence": {
+        "limit": "The service and the agent it most often serves have ONE operator. There is no separation of duties, no independent review board, and no third party with the ability to overrule a report.",
+        "consequence": "A report about a contract the operator has an interest in carries the operator's incentives. Nothing in the engine detects or corrects for that.",
+        "conflict_of_interest_disclosed": "The Tikpema agent's own vault-deposit path gates on an allowlist that today contains XyloVault (0x240Eb85458CD41361bd8C3773253a1D78054f747). The DD service can be asked about that same contract. Same operator on both sides of that question."
+      },
+      "2_code_independence": {
+        "limit": "THE AUDITOR SHARES CODE WITH THE AUDITED SYSTEM. shared/onchain-analyze (this service) and netlify/functions/_vault.mjs (the production deposit gate) both import the same fact-production primitive, shared/onchain-facts/index.mjs — the same privileged-function catalogue (POWER_SIGS), the same selector-scanning helpers, and the same tri-state read interpretation.",
+        "verification": "Citable: shared/onchain-analyze/shape.mjs:24 and netlify/functions/_vault.mjs:38 both import from ../../shared/onchain-facts/index.mjs.",
+        "consequence": "A blind spot in that shared catalogue is a blind spot in BOTH the service and the production deposit gate simultaneously, and the service cannot detect it — it would report the same clean bill twice for the same reason. This is a real coupling, accepted deliberately to keep one source of truth for the catalogue rather than two copies that drift, and disclosed here because the reader is entitled to know the auditor is not code-independent of the audited.",
+        "what_is_NOT_shared": "Transport is per-caller and the verdict layer is not shared: shared/onchain-facts contains zero reads and zero awaits, and holds no severity, no pass/fail and no digest."
+      },
+      "3_data_source_independence": {
+        "limit": "The multi-endpoint quorum's independence is ASSERTED, NOT PROVEN. Every report carries sources.independenceVerified = false.",
+        "what_was_actually_verified": "The two endpoints in use (https://rpc.testnet.arc.network, https://arc-testnet.drpc.org) were shown to be DIFFERENT BACKENDS by node-local values that must differ between distinct nodes even when chain state is identical: net_peerCount 0x4 vs 0x2a, eth_gasPrice 0x5d21dba00 vs 0x5e1046c80, eth_maxPriorityFeePerGas 0x12a05f200 vs 0x138eca480, debug_traceBlockByNumber supported vs -32602, txpool_status -32604 vs -32601. A third candidate (arc-testnet.rpc.thirdweb.com) was REJECTED for returning byte-identical gas heuristics and the same non-standard -32604 code and message as the Arc public endpoint, indicating a probable shared backend.",
+        "what_remains_unproven": "dRPC self-describes as an aggregator with a multi-provider architecture, so a distinct backend is proven for those probes but NOT guaranteed per call — it may route to the Arc public endpoint on any given request. Endpoint agreement is therefore not evidence of endpoint independence: two mirrors of one node agree perfectly and are worth nothing.",
+        "scope_of_what_quorum_defends": "PROVIDER integrity only — a proxy bug, a stale or pruned cache, a misconfigured or hijacked endpoint, a lying aggregator. NOT consensus integrity: every Arc RPC provider syncs from the same PERMISSIONED validator set, so no number of endpoints checks the validators."
+      }
+    },
+    "relationship_to_agentId_851823": "The Tikpema Agent identity (agentId 851823, owner 0xc54d47211997aca90ef4fcfbc742a3b511b4e621) is a DIFFERENT subject. That identity's reputation concerns an agent that MOVES FUNDS — swaps, bridges, vault deposits, x402 purchases. This service's reputation concerns whether its READ-ONLY REPORTS were accurate and honestly bounded. Good swap execution is not evidence of good reporting and vice versa. The two must not be merged into one score, and a reader should not transfer trust between them. Shared operator, separate subjects."
+  },
+  "reputation_subject": {
+    "headline": "REPORT ACCURACY AND HONEST BOUNDING — not 'verdict accuracy', because THE SERVICE EMITS NO VERDICTS.",
+    "why_not_verdict_accuracy": "There is deliberately no verdict layer. The engine's fact contract states that a fact is not a verdict — there is no pass, no ok, no severity ranking, and no recommendation — because the moment a check starts concluding, the tool acquires an opinion, and an opinion is the one thing it must not ship. Scoring the service on 'was the verdict right' would invent a product it does not offer and would reward exactly the overreach the design refuses.",
+    "falsifiable_claim_classes": [
+      {
+        "class": "A. Presence claims",
+        "claim_shape": "At block N, the effective bytecode of address X contained selector S.",
+        "how_to_falsify": "Every report carries reads[] with one copy-pasteable curl per endpoint per read, at a pinned block. Re-run them and re-scan. A presence claim that cannot be reproduced is a defect."
+      },
+      {
+        "class": "B. Coverage-honesty claims",
+        "claim_shape": "Everything the engine did not check is listed, with a reason.",
+        "how_to_falsify": "The coverage manifest is generated from what actually ran, not hand-maintained, and a completeness invariant asserts every group in the shared catalogue appears in exactly one of checked/notChecked — refusing to return a report if not. A power group that was silently neither scanned nor listed is a defect of this class."
+      },
+      {
+        "class": "C. Refusal claims",
+        "claim_shape": "When the engine could not determine something, it said so rather than guessing.",
+        "how_to_falsify": "Fault injection. Force a read to fail or two endpoints to disagree and check the report reports the unknown AS unknown. A reassuring answer produced on absent evidence is a defect of this class, and historically the most dangerous one here."
+      }
+    ],
+    "explicitly_NOT_the_reputation_subject": [
+      "Whether a contract was 'safe' — the service does not answer that question.",
+      "Whether depositing into an analysed contract was a good decision.",
+      "Whether an absent selector means an absent power — the report explicitly disclaims this inference (see method.absence_is_not_proof).",
+      "The execution quality of the Tikpema agent's swaps, bridges or deposits — a different subject (see operator_and_independence.relationship_to_agentId_851823)."
+    ],
+    "self_attestation": "The operator cannot attest to this service's reports. On the deployed ReputationRegistry (EIP-1967 proxy, implementation 0x16e0fa7f7c56b9a767e34b192b51f921be31da34) a self-feedback guard is present: the implementation bytecode contains the revert reason 'Self-feedback not allowed'. ⚠️ VERIFICATION LEVEL: confirmed by reading the DEPLOYED BYTECODE (2026-07-23), NOT by call simulation — the exact giveFeedback ABI was unavailable to build a clean simulation, so this document does NOT claim 'verified by simulation'."
+  },
+  "method": {
+    "technique": "Selector-in-bytecode scanning. The Solidity dispatcher embeds every external function selector in deployed code, so scanning bytecode finds state-changing functions. It works on UNVERIFIED contracts, needs no block explorer, and cannot be fooled by a wrong or partial ABI. An ABI is somebody's claim about a contract; the bytecode is the contract.",
+    "shape_resolution_first": "Which bytecode is scanned depends on the contract's shape, and getting that wrong invalidates everything downstream. A proxy's own code is a delegatecall stub holding no business selectors; a minimal clone is ~45 bytes of jump; a diamond's logic lives in facet contracts. Scanning any of those directly would return an empty power list — a FALSE CLEAN BILL, the worst output a DD tool can produce, because a false flag gets argued with and a false clean bill gets believed.",
+    "absence_is_not_proof": "⚠️ PRESENCE of a selector is evidence of a power. ABSENCE IS NOT PROOF THE POWER IS ABSENT. A selector may be present but unreachable, and a power may be exercised through a fallback or delegatecall with no selector of its own. Any reading of this service's output that treats an empty power list as a guarantee is a misreading.",
+    "severity_is_scope_not_rank": "Each reported power carries a SCOPE class describing what the power can reach (funds-movement, code-replacement, parameter-change, access-restriction, ownership-transfer). These are NON-ORDINAL by construction — there is no natural order between them, the engine exports no comparator, aggregator or total, and a numeric severity is rejected by its validator. A summable severity would be a verdict in disguise: 'three highs and a medium' reads as a score, a score reads as advice. The output is an inventory; the reader decides what it means.",
+    "refusal_is_an_answer": "When the engine cannot classify a contract's shape, it returns a FULL REPORT with shape 'unknown', empty powers, and a manifest stating it classified nothing and therefore checked nothing. It does not throw and does not return null. An honest 'I cannot assess this' is a valid answer that settles; an exception reads as 'the service broke' and invites a retry or a shrug, neither of which is the finding."
+  },
+  "capabilities_at_commit_3e27042": {
+    "input": "One 0x-prefixed 20-byte address. EVM only. See chain_scope — Arc Testnet is the only network on which this service has been exercised.",
+    "shapes_detected": [
+      "eoa",
+      "plain-contract",
+      "eip1967-transparent",
+      "eip1967-uups",
+      "eip1967-proxy (variant indeterminate)",
+      "eip1167-clone (canonical 45-byte pattern)",
+      "eip2535-diamond (loupe selectors)",
+      "unknown (a shape-determining read did not complete → refuse)"
+    ],
+    "privileged_function_groups_enumerated": [
+      "emergencyWithdraw",
+      "feesSettable",
+      "setStrategy",
+      "setFeeRecipient",
+      "transferOwnership",
+      "pausable",
+      "upgradeable",
+      "denylist",
+      "withdrawalDelay"
+    ],
+    "holder_classification": [
+      "eoa",
+      "multisig",
+      "timelock",
+      "contract",
+      "renounced",
+      "no-owner-fn",
+      "unreadable",
+      "unreadable-kind"
+    ],
+    "multi_endpoint_quorum": "BUILT, AND OPT-IN. When enabled, critical reads are taken from two endpoints and must AGREE; agreement is the only path to a value. On disagreement the engine records rpc-disagreement in the coverage manifest carrying what EACH endpoint said, and reports the value as unreadable — it NEVER picks a winner. One-answers-one-throws yields rpc-quorum-unmet rather than accepting the survivor, because a surviving single source is the trust quorum exists to refuse. Both-throw yields rpc-unreadable. Verified by fault injection, including an end-to-end run against the real endpoints with one tampered response.",
+    "evidence_per_finding": "Each reported power names the read that produced it, resolving to an entry in reads[] with a copy-pasteable curl at a pinned block.",
+    "verification_of_this_engine": "As of commit 3e27042: 78 assertions pass in the engine's own fault-injection harness (which forces read failures and endpoint disagreements rather than only exercising healthy paths); a further 19 assertions confirm the service agrees with the production vault inspector (netlify/functions/_vault.mjs) on a live contract across all four privileged-function groups both scan, plus owner address and classification. ⚠️ THAT CROSS-CHECK IS NOT AN INDEPENDENT ONE: the vault inspector imports the SAME catalogue from shared/onchain-facts, so the two agreeing rules out a transcription error between them but CANNOT detect a shared blind spot. It is a consistency check, not corroboration. See operator_and_independence.2_code_independence.",
+    "default_read_mode": "SINGLE ENDPOINT BY DEFAULT. A report produced without the quorum option carries sources.mode = 'single-rpc' and states on its face: 'Single endpoint. No cross-check: a wrong answer from this provider is reported as fact.' ⚠️ THE CROSS-CHECK IS OPT-IN, NOT AUTOMATIC (scripts/dd/analyze-run.mjs:127 — the default entry point is analyzeOnArc, single-RPC; analyzeOnArcQuorum is a separate call). Any reading of this document that assumes every report was cross-checked is wrong, and the report itself is the authority on which mode produced it.",
+    "chain_scope": "EXERCISED AND VERIFIED ON ARC TESTNET (chainId 5042002) ONLY. The transport's chain registry (scripts/dd/chains.mjs) also defines base (8453) and base-sepolia (84532), so the code would RUN against them — but analyze() has never been run on either, no corpus or assertion covers them, and the shape/power catalogue has not been reviewed for chains other than Arc. Stated as 'reachable in principle, unexercised', NOT as 'not built' and emphatically NOT as multi-chain coverage. Treat any non-Arc result as unverified."
+  },
+  "coverage_limits": {
+    "preamble": "⚠️ THIS SECTION IS THE POINT, NOT A DISCLAIMER APPENDIX. A report that says 'no powers found' is issuing a pass, and a pass is the result nobody double-checks. These are the ways this service could hand a reader a clean bill on a contract that is not clean. Per-report, the machine-generated coverage manifest states which of these applied to THAT report; this list is the standing set at commit 3e27042.",
+    "not_implemented": [
+      {
+        "id": "eip2535-facet-traversal",
+        "effect": "A diamond's powers live in facet contracts reached through its selector table. The service DETECTS diamonds and then refuses to enumerate, listing every group as not-checked with that reason. It does not scan the diamond's own bytecode and call it clean."
+      },
+      {
+        "id": "accesscontrol-roles",
+        "effect": "owner() is a convention. A contract using role-based administration (e.g. DEFAULT_ADMIN_ROLE / grantRole) exposes no owner(); the service reports 'no-owner-fn' and the contract LOOKS ownerless while a role-holder retains every power. Roles are not read."
+      },
+      {
+        "id": "ownable2step-pending-owner",
+        "effect": "The catalogue has no acceptOwnership signature, so a two-step ownership transfer's PENDING owner is invisible. transferOwnership is reported; who is mid-transfer to is not."
+      },
+      {
+        "id": "non-standard-proxies",
+        "effect": "Proxy resolution covers the EIP-1967 implementation slot, the canonical EIP-1167 clone pattern, and EIP-2535 loupe selectors. Beacon proxies, implementations stored in non-standard slots, non-canonical clone variants, and metamorphic (CREATE2-redeploy) contracts are NOT resolved."
+      },
+      {
+        "id": "lock-delay-cooldown",
+        "effect": "Withdrawal locks, delays and cooldowns beyond the withdrawalDelay selector group are not analysed."
+      },
+      {
+        "id": "economic-and-offchain-control",
+        "effect": "Upgrade keys held by a custodian, a frontend or RPC that can lie, or a dependency that is pausable elsewhere. The service reads one contract's code, not the system around it."
+      }
+    ],
+    "known_imprecision": [
+      {
+        "id": "pausable-getter-conflation",
+        "effect": "The pausable group matches paused(), a read-only getter, as evidence of the pause POWER. A contract exposing only paused() is reported as pausable: PRESENT. The per-finding evidence shows exactly which selector matched, so the imprecision is visible, but the boolean overstates.",
+        "status": "Known and deliberately not yet fixed: the catalogue is shared with the production deposit gate, so narrowing it would move that gate's disclosure digest and invalidate outstanding user acknowledgements. It is money-path work, not a cleanup."
+      },
+      {
+        "id": "plain-contract-is-a-residual",
+        "effect": "'plain-contract' means NONE of the shapes tested for matched — it is not a positive identification of an ordinary contract. Every report states which shapes were tested for and which were not, because a shape nobody looks for produces no not-checked entry, and the absence of a warning would otherwise come from the absence of a check."
+      },
+      {
+        "id": "absent-owner-under-quorum",
+        "effect": "A genuinely absent owner() reads as 'unreadable' rather than 'no-owner-fn' when quorum is active. Both endpoints reverting IS an agreed negative observation, but error responses cannot be compared textually across these providers — they use different codes AND different messages for the same condition (-32604 'this request method is not supported' vs -32601 'method is not available'). Treated as unreadable: fail-closed, and disclosed rather than left to be discovered."
+      }
+    ],
+    "not_built": [
+      "payment / x402 metering — NOT built",
+      "HTTP interface — NOT built (the service is a callable function, not an endpoint)",
+      "cryptographically signed reports — NOT built. No signing code exists. ⚠️ Signing is DESIGNED AGAINST A DEV/THROWAWAY KEY ONLY; there is no registered service identity, and THIS DOCUMENT IS THE PREREQUISITE for one. A report from this service is NOT attested by any identity today.",
+      "block-pinned response caching — DESIGN ONLY, not built",
+      "bytecode-hash pinning for upgrade detection — DESIGN ONLY, not built",
+      "canary / liveness attestation — NOT built",
+      "any chain beyond Arc Testnet — see capabilities.chain_scope: reachable in principle, never exercised or verified"
+    ]
+  },
+  "mutability_posture": {
+    "decision": "REUSE THE ASYMMETRY: an immutable content-addressed document, a mutable on-chain pointer, and supersession by new version rather than edit. Same pattern as the Tikpema Agent identity document.",
+    "the_document_is_frozen_once_pinned": "After Phase B the bytes are final. The CID is a pure function of the bytes, and the document asserts that tokenURI(agentId) equals its own CID — so ANY byte change makes its own central claim false. Reformatting, a trailing newline, or re-serialising through JSON.parse all count.",
+    "the_pointer_is_mutable_and_that_is_disclosed": "The identity owner can re-point tokenURI to a different CID at any time. ⭐ THE SYMMETRY IS DELIBERATE AND UNCOMFORTABLE: this service's product is flagging exactly this power class — code-replacement, ownership-transfer, re-pointable metadata — in other people's contracts. It has the same power over its own metadata, and the ERC-8004 IdentityRegistry it registers into (0x8004A818BFB912233c491871b3d84c89A494BD9e) is ITSELF an upgradeable EIP-1967 proxy whose admin could in principle change what tokenURI and ownerOf return. A reader is entitled to know the service does not exempt itself from its own findings.",
+    "why_not_something_simpler": "A mutable document would let the operator silently restate what the service claimed to cover after a report was relied upon. The frozen-plus-supersede pattern makes a change of claims OBSERVABLE: an old CID keeps resolving to the old bytes, and the pointer moving is visible on-chain. The cost is that a stale document is stale rather than quietly corrected — which is the correct trade for an honesty artifact.",
+    "why_capability_claims_are_commit_scoped": "The service is under active development, so a frozen document enumerating capabilities would be false within weeks. Binding every capability and limit claim to commit 3e27042 means a superseded document is honestly OUT OF DATE about a specific known tree rather than WRONG about the present. Supersession, not edit, is the update path.",
+    "supersession_rules": "A new version sets 'supersedes' to the prior version and CID. Prior CIDs are not unpinned: a report relied upon under an older document must remain checkable against the claims that were live when it was produced.",
+    "mutable_companion": "A README in the public mirror is deliberately NOT part of the CID, so it can carry the agentId after registration and be corrected freely. That asymmetry is what lets the frozen document stay frozen.",
+    "pointer_mutability_verified_on_chain": "The re-point power is CITED, not assumed. A selector scan of the deployed IdentityRegistry implementation (EIP-1967 impl 0x7274e874ca62410a93bd8bf61c69d8045e399c02, read 2026-07-26) finds: setAgentURI(uint256,string) 0x0af28bd3 PRESENT — the metadata pointer can be re-pointed; upgradeToAndCall(address,bytes) 0x4f1ef286 PRESENT — the registry itself is upgradeable; transferFrom(address,address,uint256) 0x23b872dd PRESENT — the identity token is transferable. ⚠️ VERIFICATION LEVEL: selector present in deployed bytecode, NOT a call simulation and NOT a proof of reachability — the same standard, and the same caveat, this service applies to third-party contracts.",
+    "caller_guarantee": "A caller verifies claims against a FIXED CID: the document's bytes are immutable and content-addressed, so the claims a report was produced under cannot be silently restated. A change of claims is a DETECTABLE ON-CHAIN EVENT — setAgentURI moving the pointer — rather than an invisible edit. Prior CIDs are not unpinned, so a report relied upon under an earlier document stays checkable against the claims that were live."
+  },
+  "ownership_deferred_to_phase_B_C": {
+    "status": "NO WALLET CREATED, NOTHING REGISTERED, NO agentId EXISTS FOR THIS SERVICE.",
+    "this_document_cannot_name_its_own_agentId": "The id is minted by registering THIS document as metadataUri, so the document cannot name it. ⭐ THE DISCRIMINATOR IS tokenURI(agentId) == THE CID OF THIS EXACT DOCUMENT, and that condition ALONE is sufficient: the CID is a pure function of these bytes, so no other document can satisfy it. ⚠️ THIS DOCUMENT DELIBERATELY DECLARES NO OWNER ADDRESS. The sibling agent document could name a concrete owner because its wallet already existed; here the wallet is a Phase B decision that has not been made, so naming one would be asserting something not yet true. A reader must therefore NOT expect a two-condition owner+tokenURI test from these bytes — the owner is recorded in the public mirror's README after registration, which is outside the CID precisely so it can be. Until then, tokenURI==CID is the whole test. Context for why a discriminator is needed at all: 103 orphan wallets and 2 orphan identities already exist under the operator's wallet, so owner alone would not have identified a canonical record even if declared.",
+    "registration_precondition": "Registration must be a register-ONLY call from an EXISTING wallet id. agent-init.mjs must never be used: it mints a brand-new wallet on every run, which is how the 103 orphan wallets came to exist. All chain writes are run by the operator, not by an agent.",
+    "open_decision_for_phase_B": "Whether this service registers under the SAME wallet as agentId 851823 (simpler, and honest about shared operation) or a distinct wallet (cleaner subject separation on-chain, but does NOT create independence — the operator is the same either way and this document must not imply otherwise)."
+  },
+  "never_returns_safe": {
+    "claim": "No analyze() path emits a verdict, a score, or a reassurance. VERIFIED AGAINST ACTUAL OUTPUT at commit 3e27042 across four paths, not asserted from design intent.",
+    "audit_method": "Every report from each path was walked recursively; all keys were tested against a verdict-key pattern (status|verdict|result|score|rating|risk|grade|level|ok|pass|safe|recommendation|advice) and all string values against a reassurance pattern (safe|secure|trusted|ok|pass|clean|healthy|no risk|approved|all clear|looks good).",
+    "paths_audited": {
+      "normal, powers present (live Arc contract)": "9 powers reported (5 present, 4 absent) · coverage 13 checked / 0 not · NO verdict-like key · NO reassuring string",
+      "normal, ZERO powers found — the clean-bill worst case": "9 powers reported, ALL present:false · coverage 13/0 · no refusal · NO verdict-like key · NO reassuring string",
+      "unknown shape (a shape-determining read defeated)": "0 powers · coverage 0 checked / 12 not · refusal 'shape-unclassified' · NO verdict-like key",
+      "quorum disagreement on owner()": "9 powers still reported · coverage 11/2 · holder degraded to unreadable · NO verdict-like key · NO reassuring string"
+    },
+    "what_stops_the_zero_powers_case_reading_as_a_clean_bill": [
+      "Every power finding carries, in the built output: 'presence of a selector is evidence of the power; ABSENCE is not proof of its absence'.",
+      "A plain-contract report carries shape.evidence.residual: 'NONE of the shapes tested for matched. This is the residual class, not a positive identification of an ordinary contract.', plus shapesTestedFor (4) and shapesNotTestedFor (4).",
+      "severityMeaning rides on every report: scope-not-rank, non-ordinal, MUST NOT be summed or aggregated into a score.",
+      "sources.note rides on every report and, in the default single-endpoint mode, says a wrong answer from that provider is reported as fact.",
+      "The refusal path's own coverage summary reads 'This is an INDETERMINATE result, not a clean bill.'"
+    ],
+    "the_residual_risk_stated_plainly": "A report with nine absent powers and a full coverage manifest is the closest this service comes to a clean bill, and a determined reader can still choose to read it as one. The engine does not prevent that; it refuses to encourage it. Nothing in the output says the contract is safe, because the service cannot know that."
+  }
+}
