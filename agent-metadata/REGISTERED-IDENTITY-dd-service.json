@@ -1,0 +1,15 @@
+{
+  "agentId": "851891",
+  "owner": "0xc54D47211997aCA90Ef4fCfBc742a3b511B4e621",
+  "tokenURI": "ipfs://bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4",
+  "cid": "bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4",
+  "sha256": "d3734accb6390a361df2daf87b49c41d4a44d30bfc9285f47be3c3284dbb402f",
+  "txHash": "0xd33cb296ba2dcc68c29e29cef055f9b959973b11eea3d0a97dadfa9437db20f1",
+  "circleTxId": "1d4ba798-adcb-50d1-85d4-9f0e1c961d5f",
+  "note": "REGISTERED by this run.",
+  "target": "dd-service",
+  "registry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+  "chainId": 5042002,
+  "walletId": "2c93ca5d-be5c-5f51-883d-1a220647f7b1",
+  "writtenAt": "2026-07-26T16:38:58.253Z"
+}
