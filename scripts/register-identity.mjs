@@ -122,7 +122,7 @@ const TARGETS = {
     idFile: path.join(OUT_DIR, "REGISTERED-IDENTITY-dd-service.json"),
     nftDump: path.join(OUT_DIR, ".nft-enumeration-dd-service.json"),
     envKey: "DD_AGENT_ID",
-    mirror: "(NOT YET CREATED — Phase A mirror + pin still pending)",
+    mirror: "https://github.com/tikpema274/tikpema-agent-identity",
   },
 };
 
@@ -222,6 +222,18 @@ async function readWithRetry(pub, fn, label, attempts = 5) {
 }
 
 const norm = (uri) => String(uri || "").trim().replace(/^ipfs:\/\//, "").replace(/^\/ipfs\//, "");
+
+// PRINT-ONLY — feeds a console.log and nothing else. Never consulted by a guard or by the write.
+//
+// A non-target identity on this wallet is NOT automatically an orphan. agentId 851823 is a live,
+// first-class identity (the Tikpema Agent) that simply points at a different document, and printing
+// it as "(orphan / other)" is false — the wallet holds real siblings and real orphans, and the
+// operator reading this list needs to tell them apart. Derived from TARGETS rather than hardcoded,
+// so it stays true as profiles are added.
+const describeOther = (cid) => {
+  const sibling = Object.values(TARGETS).find((t) => t.cid === cid);
+  return sibling ? `(${sibling.label} — a sibling identity, not this target)` : "(orphan / other)";
+};
 
 console.log("\n╔════════════════════════════════════════════════════════════════════╗");
 console.log("║  ERC-8004 IDENTITY REGISTRATION — register-only, existing wallet   ║");
@@ -355,7 +367,7 @@ let alreadyRegistered = null;
           `Refusing. Re-run when the RPC is responsive — waiting costs nothing, a duplicate identity is permanent.`);
     }
     const isTarget = norm(uri) === TARGET_CID;
-    console.log(`    agentId ${String(tokenId).padEnd(10)} tokenURI ${norm(uri).slice(0, 24)}…  ${isTarget ? "◀ TARGET" : "(orphan / other)"}`);
+    console.log(`    agentId ${String(tokenId).padEnd(10)} tokenURI ${norm(uri).slice(0, 24)}…  ${isTarget ? "◀ TARGET" : describeOther(norm(uri))}`);
     if (isTarget) alreadyRegistered = { agentId: String(tokenId), tokenURI: uri };
   }
 
@@ -382,7 +394,7 @@ let alreadyRegistered = null;
     process.exit(0);
   }
   console.log(`  ✓ no existing identity on this wallet points at the target CID → safe to register`);
-  console.log(`    (any ids listed above are the known orphans — different tokenURI, left alone)\n`);
+  console.log(`    (every id above carries a DIFFERENT tokenURI and is left untouched — each is labelled\n     as either a sibling Tikpema identity or an orphan; they are not all orphans)\n`);
 }
 
 // ══════════════════ ID PERSISTENCE (guard 3 of 3) — the helper ══════════════════
