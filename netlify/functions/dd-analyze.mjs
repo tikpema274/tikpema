@@ -29,7 +29,10 @@
 // to run on a DRAFT deploy until step 2 adds payment.
 
 import { randomUUID } from "node:crypto";
+import { connectLambda } from "@netlify/blobs";
 import { json } from "./_arc.mjs";
+import { codeIdentity, evaluateHealth } from "../../shared/dd-canary/health.mjs";
+import { readHealth } from "./_dd-health.mjs";
 import { chainClient } from "../../scripts/dd/client.mjs";
 import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { baseReport, assertReportValid, SCHEMA_VERSION } from "../../shared/onchain-analyze/schema.mjs";
@@ -95,6 +98,28 @@ function refusalReport({ address = null, chainName = null, chainId = null, reaso
 export async function handler(event) {
   const correlationId = randomUUID();
   try {
+    if (event?.blobs) connectLambda(event);
+
+    // ── ⭐ RUNG 0: IS THIS SERVICE KNOWN GOOD? ────────────────────────────────────────────────
+    // FIRST, before anything else, so an unverified service is uniformly UNAVAILABLE rather than
+    // selectively degraded. A detector that fails its own known-shape fixtures must not answer
+    // questions about anyone else's contracts — a wrong confident answer is worse than no answer.
+    //
+    // This requires a POSITIVE, FRESH, VERSION-MATCHED pass. Absence, staleness, unreadability,
+    // malformation and version drift all refuse. "No news is good news" is structurally impossible
+    // here, which is the entire point: the last safety layer must not itself fail open.
+    {
+      const identity = codeIdentity({ schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS });
+      const { record, readable } = await readHealth(identity);
+      const health = evaluateHealth({ record, readable, now: Date.now(), expect: identity });
+      if (!health.serve) {
+        return json(503, refusalReport({
+          reason: "service-unverified",
+          detail: `${health.detail} (${health.reason}). The service is REFUSING TO SERVE rather than answering from a detector that is not known good. This is not a degraded result — it is no result.`,
+        }));
+      }
+    }
+
     // ── rung 1: method ────────────────────────────────────────────────────────────────────────
     if (event.httpMethod !== "POST") {
       return json(405, refusalReport({
