@@ -1,15 +1,24 @@
 #!/usr/bin/env node
-// pin-invariants.mjs — pin the unified agent-metadata identity document to
-// Pinata (IPFS), then independently verify the pin is real and unmodified by
-// fetching it back from a NEUTRAL public gateway and re-hashing.
+// pin-invariants.mjs — pin a FROZEN agent-metadata document to Pinata (IPFS), then
+// independently verify the pin is real and unmodified by fetching it back from a
+// NEUTRAL public gateway and re-hashing.
 //
 // This script pins and verifies ONLY. It moves no money and registers nothing
 // on-chain. It reads PINATA_JWT from the environment; if that is missing it exits
 // loudly rather than proceeding unauthenticated.
 //
-// TARGET: agent-metadata/unified.json. It supersedes the three per-role files
-// (researcher/second-opinion/executor), which are dead under one-identity — their
-// hardcoded sha256s were invalidated by the Route A edits and are NOT pinned here.
+//   node --env-file=.env scripts/pin-invariants.mjs --target <name>
+//   export PINATA_JWT=… && node scripts/pin-invariants.mjs --target <name>
+//
+// ⚠️ PINATA_JWT IS READ FROM process.env AND NOWHERE ELSE. There is no dotenv import,
+// and nothing here reads Netlify — setting it in the Netlify prod context does NOT help
+// a local pin. Use `--env-file=.env` (Node >=20.6 loads it into process.env; .env is
+// gitignored) or a shell export.
+//
+// --target IS REQUIRED — see TARGETS below. Targets: `unified` (already pinned) and
+// `dd-service` (frozen 634f3b4, NOT yet pinned — the thing blocking Phase C). The three
+// dead per-role files (researcher/second-opinion/executor) are NOT pinnable: their
+// hardcoded sha256s were invalidated by the Route A edits.
 //
 // Byte-fidelity contract: the file is read as raw bytes and pinned exactly as it
 // sits on disk. It is NEVER JSON.parse'd, re-serialized, or reformatted — the bytes
@@ -53,20 +62,79 @@ function bafkreiRawCid(sha256Buf) {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 
-// The authoritative sha256 of the reviewed document. If the local file has drifted
-// from this, we abort BEFORE pinning — we will not mint a CID for bytes that differ
-// from what was reviewed.
-const FILES = [
-  {
+// ═════════════════════ TARGETS — ONE PROFILE PER FROZEN DOCUMENT ═════════════════════
+//
+// ⚠️ WHY A MAP AND NOT EDITED CONSTANTS. This script pinned unified.json with `rel`,
+// `sha256` and EXPECTED_CID hardcoded. Pinning a SECOND frozen document by editing them
+// in place would destroy the ability to re-run the proven unified path, and — worse —
+// a half-finished edit (new rel, stale sha/CID, or vice versa) would abort in step 2/2b
+// having *looked* like it was pinning the intended document. Profiles keep each
+// document's three facts together so they cannot drift apart.
+//
+// Each profile's sha256 and expectedCid MUST be derived from that document's own bytes.
+// They are hard gates, not labels: step 2 refuses on sha drift, step 2b refuses on CID
+// mismatch, both BEFORE anything is uploaded. A CID is never minted for unreviewed bytes.
+const TARGETS = {
+  // The Tikpema Agent identity. ALREADY PINNED and gateway-verified 2026-07-24; a re-run
+  // is expected to be a no-op that re-confirms retrievability.
+  unified: {
     name: "unified.json",
     rel: "agent-metadata/unified.json",
     sha256: "6e239a3d815595844d939aebba68970695625c2c90558133a1dc013d8f568901",
+    expectedCid: "bafkreidoeond3akvswce3e425o5grfygsvrfyleqkwathio4ae6y6vujae",
   },
-];
+  // The DD service document, frozen 2026-07-26 (commit 634f3b4). NOT YET PINNED — this
+  // is what blocks Phase C: register-identity.mjs STEP 1 refuses while no gateway serves
+  // the CID, because registering a tokenURI pointing at unfetchable bytes is the one
+  // irreversible mistake in that flow.
+  "dd-service": {
+    name: "dd-service.json",
+    rel: "agent-metadata/dd-service.json",
+    sha256: "d3734accb6390a361df2daf87b49c41d4a44d30bfc9285f47be3c3284dbb402f",
+    expectedCid: "bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4",
+  },
+};
+
+// ⚠️ NO DEFAULT TARGET. Pinning is an outward-facing publish: the bytes become
+// retrievable by anyone. Letting the script pick which document to publish is not a
+// convenience, it is a way to publish the wrong one. Fail closed.
+const TARGET_IX = process.argv.indexOf("--target");
+const TARGET_NAME = TARGET_IX >= 0 ? process.argv[TARGET_IX + 1] : null;
+if (!TARGET_NAME || !TARGETS[TARGET_NAME]) {
+  console.error(
+    `\nABORT: --target is REQUIRED and must name a known profile. There is deliberately no\n` +
+      `default — pinning PUBLISHES the bytes, so the document must be named explicitly.\n\n` +
+      `  known targets: ${Object.keys(TARGETS).join(", ")}\n` +
+      `  usage: node --env-file=.env scripts/pin-invariants.mjs --target <name>\n` +
+      `         (or: export PINATA_JWT=… && node scripts/pin-invariants.mjs --target <name>)\n`
+  );
+  process.exit(1);
+}
+
+// Cross-profile collision guard: two profiles sharing a rel/sha/CID would mean one
+// document's gates were silently checking another's bytes. Asserted, not reviewed.
+{
+  const seen = new Map();
+  for (const [n, t] of Object.entries(TARGETS)) {
+    for (const k of ["rel", "sha256", "expectedCid", "name"]) {
+      const key = `${k}:${t[k]}`;
+      if (seen.has(key)) {
+        console.error(`\nABORT: targets "${seen.get(key)}" and "${n}" share ${k} = ${t[k]}. Refusing.`);
+        process.exit(1);
+      }
+      seen.set(key, n);
+    }
+  }
+}
+
+const TARGET = TARGETS[TARGET_NAME];
+// Single-element list: the loop structure below is the proven unified.json path and is
+// deliberately left untouched.
+const FILES = [{ name: TARGET.name, rel: TARGET.rel, sha256: TARGET.sha256 }];
 
 // The CID computed from the reviewed bytes BEFORE pinning — the value the document
 // asserts about itself. Every CID this script derives or receives must equal it.
-const EXPECTED_CID = "bafkreidoeond3akvswce3e425o5grfygsvrfyleqkwathio4ae6y6vujae";
+const EXPECTED_CID = TARGET.expectedCid;
 
 // Neutral public gateways — deliberately NOT Pinata's own gateway. Retrievability
 // from a third-party gateway is what proves the pin is real and public, not just
@@ -127,6 +195,9 @@ if (segments.length !== 3 || !JWT.startsWith("ey") || JWT.length <= MIN_LEN) {
 }
 
 // --- 2. Load + integrity-check each file (no pinning yet) -------------------
+console.log(`Target: ${TARGET_NAME} — ${TARGET.rel}`);
+console.log(`  expected sha256: ${TARGET.sha256}`);
+console.log(`  expected CID   : ${TARGET.expectedCid}\n`);
 console.log("Reading and hashing local files (raw bytes, no re-serialization)...\n");
 for (const f of FILES) {
   f.abs = path.join(REPO_ROOT, f.rel);
