@@ -34,6 +34,13 @@ import { enumeratePowers, resolveOwner } from "./powers.mjs";
 import { baseReport, assertReportValid } from "./schema.mjs";
 
 export { SCHEMA_VERSION, SEVERITY_MEANING, SCOPE_CLASSES, POWER_SCOPE } from "./schema.mjs";
+// Attestation is OPT-IN and additive: analyze() neither signs nor requires a signer, so an
+// unattested report is exactly what it was before. See docs/dd-attestation-canon1.md.
+export {
+  CANON_VERSION, DOMAIN, VALIDITY_MEANING,
+  canonicalize, signingMessage, attestationDigest,
+  attachAttestation, verifyAttestation, unsignedAttestation,
+} from "./attest.mjs";
 
 /**
  * Analyze one address.
