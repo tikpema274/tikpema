@@ -234,3 +234,20 @@
 # writes an unconditional heartbeat to the dca-heartbeat store so liveness is checkable.
 [functions."dca-tick"]
   schedule = "* * * * *"
+
+# DD canary — re-runs the known-shape fixtures and refreshes the health artifact the DD service
+# needs in order to serve at all. SAFE-PUBLIC by construction, not by guarding: the handler reads
+# NOTHING from the request except `event.blobs` (platform-injected), so no caller can steer the
+# verdict, skip a fixture, or assert health. The worst a public hit achieves is making it RUN, and
+# every run writes the truth.
+#
+# ⚠️ THE PERIOD IS PART OF A LOAD-BEARING ORDERING: MIN_RERUN_MS (5m) < this period (10m) <
+# DEFAULT_TTL_MS (30m). Shorten this below the dedupe window and the SCHEDULED run would dedupe
+# itself, the artifact would stop refreshing, and the service would refuse on staleness. Lengthen it
+# past the TTL and the service refuses between runs. The acceptance test asserts this ordering
+# against this very file — change one number and it fails.
+#
+# Guards the DD SERVICE ONLY: dd-canary imports nothing from _vault.mjs or _pause.mjs and writes to
+# its own blob store (dd-canary-health, not agent-pause).
+[functions."dd-canary"]
+  schedule = "*/10 * * * *"

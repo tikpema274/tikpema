@@ -37,6 +37,48 @@ export const HEALTH_REASON = Object.freeze({
 export const DEFAULT_TTL_MS = 30 * 60 * 1000;
 
 /**
+ * Anti-amplification: how recently a run must have happened for an invocation to be a cheap no-op.
+ *
+ * ⚠️ THE ORDERING INVARIANT IS LOAD-BEARING: MIN_RERUN_MS < cron period < DEFAULT_TTL_MS.
+ *   · If MIN_RERUN_MS ever reached the cron period, the SCHEDULED run would dedupe itself, the
+ *     artifact would stop refreshing, and the service would eventually refuse on staleness. Dedupe
+ *     starving the refresh is the failure mode to design against.
+ *   · If it reached the TTL, a stale artifact could coast — the exact thing the canary exists to
+ *     prevent.
+ * Asserted by the acceptance test against the real netlify.toml schedule, not left to comment.
+ */
+export const MIN_RERUN_MS = 5 * 60 * 1000;
+
+/**
+ * Should this invocation SKIP the fixture sweep and reuse the existing artifact?
+ *
+ * ⭐ DELIBERATELY INDEPENDENT OF THE VERDICT. Reusing evaluateHealth here would be a bug: it reports
+ * serve:false for a FAILING record, so a failing service would re-sweep on every single hit —
+ * amplification precisely when the system is already broken, which is when an attacker would hammer
+ * it. Dedupe asks only "did a run for THIS build happen recently", never "was it good".
+ *
+ * Also deliberately not bypassable: there is no force flag, because a force flag would re-open both
+ * the amplification vector and the request-input-to-behaviour channel that this endpoint does not
+ * otherwise have. The operator's force mechanism is a DEPLOY, which changes the code identity and
+ * invalidates the artifact.
+ */
+export function shouldSkipRerun(record, { now, expect, minRerunMs = MIN_RERUN_MS, readable = true }) {
+  if (readable !== true) return { skip: false, reason: "store-unreadable" };
+  if (!record || typeof record !== "object" || Array.isArray(record)) return { skip: false, reason: "no-record" };
+  const { producedAt, identity } = record;
+  if (typeof producedAt !== "string" || !identity || typeof identity !== "object") return { skip: false, reason: "malformed" };
+  // A record for a different build says nothing about this one — never dedupe across builds.
+  if (["schemaVersion", "catalogueFingerprint", "build"].some((k) => identity[k] !== expect[k])) {
+    return { skip: false, reason: "version-mismatch" };
+  }
+  const at = Date.parse(producedAt);
+  if (!Number.isFinite(at)) return { skip: false, reason: "malformed" };
+  const ageMs = now - at;
+  if (ageMs < 0 || ageMs > minRerunMs) return { skip: false, reason: ageMs < 0 ? "future-dated" : "older-than-window" };
+  return { skip: true, reason: "recent-run", ageMs };
+}
+
+/**
  * Identity of the CODE this record vouches for. A health record from an older deploy must never
  * vouch for new code — the same reasoning as pass 2's six-part cache key: an artifact is a function
  * of the inputs AND of how it was produced.

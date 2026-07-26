@@ -20,12 +20,54 @@ import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { SCHEMA_VERSION } from "../../shared/onchain-analyze/schema.mjs";
 import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
 import { runFixtures } from "../../shared/dd-canary/fixtures.mjs";
-import { codeIdentity } from "../../shared/dd-canary/health.mjs";
-import { writeHealth } from "./_dd-health.mjs";
+import { codeIdentity, shouldSkipRerun, MIN_RERUN_MS } from "../../shared/dd-canary/health.mjs";
+import { readHealth, writeHealth } from "./_dd-health.mjs";
+
+// ═══ ⭐ SAFE-PUBLIC: A TRIGGER, NOT AN ORACLE ═════════════════════════════════════════════════
+// This endpoint is publicly invocable (every file in netlify/functions is, whether scheduled or
+// not — the `_` prefix is a repo convention, not protection). That is SAFE, and the reason is
+// structural rather than defensive:
+//
+//   THE VERDICT IS SEALED FROM REQUEST INPUT BY ABSENCE OF A CHANNEL, NOT BY VALIDATION.
+//
+// `event` is read for exactly one thing — `event.blobs`, which Netlify's Lambda shim injects and an
+// HTTP caller cannot set. No query string, no body, no headers are read anywhere. `runFixtures()`
+// receives NOTHING derived from the request. There is no parameter to sanitise because there is no
+// parameter, and an absent channel cannot drift the way a validator can.
+//
+// So the worst a public caller can do is make it RUN, and every run writes the TRUTH: a pass is
+// written only when the fixtures actually pass. An anonymous caller cannot forge a pass and cannot
+// force a fail. If they could write a pass, they could un-refuse a broken service — turning the last
+// safety layer into an attack surface. That is the property the acceptance test attacks directly.
+//
+// 🚨 THE INVARIANT TO KEEP: `runFixtures` must never receive anything derived from `event`, and
+// `event` must never be read except for `.blobs`. Adding a "harmless" debug flag would break the
+// seal. The acceptance test enforces this by feeding hostile input to a DELIBERATELY FAILING suite
+// and asserting the written verdict is still "fail".
 
 export async function handler(event) {
   if (event?.blobs) connectLambda(event);
   const identity = codeIdentity({ schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS });
+
+  // ── ANTI-AMPLIFICATION: reuse a recent run rather than re-sweeping on every hit ──────────────
+  // Today's fixtures are hermetic (no RPC), so a hit costs CPU and one Blobs round trip rather than
+  // upstream calls. The dedupe is built now anyway because it is the STRUCTURAL place a future live
+  // Arc probe stays bounded — build the guard before the thing it guards, or whoever adds the probe
+  // silently creates the amplifier. Applies regardless of verdict; see shouldSkipRerun.
+  const prior = await readHealth(identity);
+  const dedupe = shouldSkipRerun(prior.record, { now: Date.now(), expect: identity, readable: prior.readable });
+  if (dedupe.skip) {
+    const passing = prior.record.verdict === "pass";
+    return json(passing ? 200 : 503, {
+      ok: passing,
+      reran: false,
+      deduped: true,
+      reason: `a run for this build completed ${Math.round(dedupe.ageMs / 1000)}s ago (window ${Math.round(MIN_RERUN_MS / 1000)}s) — reusing it instead of re-sweeping`,
+      identity,
+      verdict: prior.record.verdict,
+      failures: (prior.record.fixtures ?? []).filter((f) => !f.ok).map((f) => ({ id: f.id, problems: f.problems })),
+    });
+  }
 
   let suite;
   try {
@@ -54,6 +96,8 @@ export async function handler(event) {
 
   return json(suite.passed ? 200 : 503, {
     ok: suite.passed,
+    reran: true,
+    deduped: false,
     wrote,
     identity,
     failures: suite.results.filter((r) => !r.ok).map((r) => ({ id: r.id, problems: r.problems })),
