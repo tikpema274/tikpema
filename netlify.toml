@@ -27,6 +27,15 @@
   to = "/.netlify/functions/agent-send"
   status = 200
 
+# DD engine — read-only on-chain due diligence. A NEW route on a NEW function; it imports nothing
+# from _vault.mjs and cannot reach the deposit path. No payment and no auth yet (step 1 of 3), so it
+# spends RPC quota and Circle signing calls on demand — intended for DRAFT deploys until step 2 adds
+# payment. Every response, including every refusal, is the same report schema.
+[[redirects]]
+  from = "/api/dd-analyze"
+  to = "/.netlify/functions/dd-analyze"
+  status = 200
+
 # Withdraw USDC from the caller's own agent wallet back to their own login wallet.
 # Destination is session-resolved (no `to` param). Deliberately NOT bound by the agent's
 # pause / day-ceiling / send-cap: those bound the agent, not the user reclaiming funds.

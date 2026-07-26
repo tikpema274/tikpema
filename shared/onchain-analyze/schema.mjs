@@ -22,8 +22,12 @@
 // believable. The report is an INVENTORY. The reader decides what it means.
 
 import { POWER_SIGS } from "../onchain-facts/index.mjs";
+import { unsignedAttestation } from "./attest.mjs";
 
-export const SCHEMA_VERSION = "onchain-analyze/0.1.0";
+// 0.2.0 — `attestation` is now present on EVERY report (see baseReport). The bump is deliberate:
+// `schemaVersion` sits INSIDE the signed payload, so a different report shape must be a different
+// claim rather than the same claim with extra fields.
+export const SCHEMA_VERSION = "onchain-analyze/0.2.0";
 
 /** Rides on every report, machine-readable, so no consumer can claim it was not told. */
 export const SEVERITY_MEANING =
@@ -108,7 +112,15 @@ export function assertReportValid(report) {
   };
 }
 
-/** The empty report skeleton — every field present on every report, including refusals. */
+/** The empty report skeleton — every field present on every report, including refusals.
+ *
+ * ⭐ `attestation` DEFAULTS TO `{status:"unsigned"}` AND IS NEVER ABSENT. A missing field reads as
+ * safe — a consumer that checks `report.attestation?.status === "signed"` on a report which simply
+ * lacks the key gets `undefined`, and the difference between "nobody signed this" and "this schema
+ * predates signing" vanishes. A present `status:"unsigned"` cannot be misread. Signing REPLACES this
+ * object via attachAttestation(); it is excluded from canon/1 by object, so its presence moves no
+ * signature.
+ */
 export function baseReport({ address, chainId, chainName, blockNumber }) {
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -119,5 +131,6 @@ export function baseReport({ address, chainId, chainName, blockNumber }) {
     coverage: { checked: [], notChecked: [], totals: { checked: 0, notChecked: 0 } },
     reads: [],
     refusal: null,
+    attestation: unsignedAttestation("this report was not signed by the producing run"),
   };
 }
