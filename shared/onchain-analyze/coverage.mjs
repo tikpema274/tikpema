@@ -45,42 +45,56 @@ export function makeCoverage() {
      * is DATA about coverage, not an exception. (Programmer error still throws; see index.mjs.)
      */
     async runCheck(id, meta, fn) {
+      // One read, or N reads when a quorum client fanned the same call out to several endpoints.
+      // Recording ALL of them is what makes a disagreement REPRODUCIBLE: the reader gets one curl
+      // per endpoint and can re-run the split themselves.
+      const record = (qs, { failed = false, evidence = null } = {}) =>
+        (qs ?? []).map((q) => {
+          const readId = `r${reads.length}`;
+          reads.push({
+            readId, endpoint: q.endpoint, method: q.method, params: q.params, reproduce: q.reproduce,
+            httpStatus: failed ? null : evidence?.httpStatus ?? null,
+            ...(failed ? { failed: true } : {}),
+            ...(evidence?.retriedAttempts ? { retriedAttempts: evidence.retriedAttempts } : {}),
+          });
+          return readId;
+        });
+
       try {
         const out = await fn();
-        // An RPC-shaped return carries `query`; record it once and hand back a reference, so nine
-        // powers derived from one bytecode read do not carry nine copies of the same curl.
-        let readId = null;
-        if (out && typeof out === "object" && out.query) {
-          readId = `r${reads.length}`;
-          reads.push({
-            readId,
-            endpoint: out.query.endpoint,
-            method: out.query.method,
-            params: out.query.params,
-            reproduce: out.query.reproduce,
-            httpStatus: out.evidence?.httpStatus ?? null,
-            ...(out.evidence?.retriedAttempts ? { retriedAttempts: out.evidence.retriedAttempts } : {}),
-          });
-        }
-        checked.push({ id, ...meta, outcome: "ran", ...(readId ? { readId } : {}) });
-        return { ok: true, value: out && out.query ? out.result : out, readId };
+        const isRpc = out && typeof out === "object" && (out.query || out.queries);
+        const readIds = isRpc ? record(out.queries ?? [out.query], { evidence: out.evidence }) : [];
+        checked.push({
+          id, ...meta, outcome: "ran",
+          ...(readIds.length ? { readId: readIds[0] } : {}),
+          ...(readIds.length > 1 ? { readIds } : {}),
+          ...(out?.evidence?.quorum ? { quorum: out.evidence.quorum } : {}),
+        });
+        return { ok: true, value: isRpc ? out.result : out, readId: readIds[0] ?? null };
       } catch (e) {
+        // ⭐ THE REASON LADDER. Quorum outcomes are tested FIRST and deliberately: a disagreement
+        // error can also look transient, and misclassifying a SPLIT as "rpc-unreadable" would hide
+        // the single most interesting thing the quorum layer can tell you — that two endpoints gave
+        // different answers about the same slot at the same block.
+        //
         // `.transient` is tagged by scripts/dd/rpc.mjs:89 and is the exact discriminator between
         // "we could not ask" (retries exhausted on the transient class) and "the chain answered, and
         // the answer was an error" (e.g. execution reverted). Collapsing those is defect A's shape.
-        const reason = e?.transient ? "rpc-unreadable" : e?.unreadableInput ? "input-unreadable" : "check-error";
-        notChecked.push({ id, ...meta, reason, detail: String(e?.message ?? e) });
-        if (e?.query) {
-          reads.push({
-            readId: `r${reads.length}`,
-            endpoint: e.query.endpoint,
-            method: e.query.method,
-            params: e.query.params,
-            reproduce: e.query.reproduce,
-            httpStatus: null,
-            failed: true,
-          });
-        }
+        const reason =
+          e?.quorumFailed
+            ? ({ disagreement: "rpc-disagreement", "chain-disagreement": "rpc-disagreement",
+                 "quorum-unmet": "rpc-quorum-unmet", unreadable: "rpc-unreadable" }[e.quorumReason] ?? "rpc-quorum-unmet")
+            : e?.transient ? "rpc-unreadable"
+            : e?.unreadableInput ? "input-unreadable"
+            : "check-error";
+        const readIds = record(e?.queries ?? (e?.query ? [e.query] : []), { failed: true });
+        notChecked.push({
+          id, ...meta, reason, detail: String(e?.message ?? e),
+          // WHAT each endpoint actually said. "Two endpoints disagreed" is useless without this,
+          // and it is the part a human re-runs.
+          ...(e?.responses ? { responses: e.responses } : {}),
+          ...(readIds.length ? { readIds } : {}),
+        });
         return { ok: false, error: e };
       }
     },

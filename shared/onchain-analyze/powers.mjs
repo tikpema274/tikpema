@@ -111,7 +111,13 @@ export async function resolveOwner(cov, client, addr, blk, shape) {
   if (o.ok) {
     ownerValue = addrFromWord(o.value) ?? ZERO_ADDR;
   } else {
-    ownerValue = o.error?.transient ? UNREADABLE : null; // transient ≠ absent
+    // 🚨 DEFECT A, ONE LEVEL UP — caught by quorum fault injection, not by reasoning.
+    // The discriminator is "did we LEARN anything?", not "was it transient". A quorum failure
+    // (disagreement / quorum-unmet / all-endpoints-down) carries `.quorumFailed` but NOT
+    // `.transient`, so the old test fell through to `null` → `no-owner-fn` — rendering "two
+    // endpoints told us different owners" as the definite observation "this contract has no
+    // owner() function". An unknown wearing a verdict, exactly the family this work exists to close.
+    ownerValue = o.error?.transient || o.error?.quorumFailed ? UNREADABLE : null;
   }
 
   let ownerCode; // undefined = correctly not read (the early classes never touch it)

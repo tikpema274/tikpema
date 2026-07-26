@@ -83,6 +83,14 @@ export async function analyze(address, { client } = {}) {
     owner: { address: owner.address, kind: owner.type },
     powers,
     powersPresent: powers.filter((p) => p.present).map((p) => p.power),
+    // ⚠️ A quorum that cannot attest its own independence but implies it is itself a false clean
+    // bill. So the endpoint set rides on every report, and `independenceVerified` is FALSE unless
+    // something out of band proved it — agreement between endpoints is NOT that proof.
+    sources: client.endpoints
+      ? { mode: "quorum", endpoints: client.endpoints, ...client.quorum,
+          note: "Quorum covers PROVIDER integrity (proxy bug, stale/pruned cache, hijacked endpoint, lying aggregator). It does NOT cover consensus integrity: every Arc provider syncs from the same permissioned validator set. Endpoint agreement is not evidence of endpoint independence." }
+      : { mode: "single-rpc", endpoints: [client.chain?.rpc ?? "unknown"],
+          note: "Single endpoint. No cross-check: a wrong answer from this provider is reported as fact." },
     coverage: {
       ...manifest,
       summary:

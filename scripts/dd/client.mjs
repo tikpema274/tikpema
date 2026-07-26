@@ -15,9 +15,16 @@
 import { getChain } from "./chains.mjs";
 import { rpcCall, assertChain, resolveBlock } from "./rpc.mjs";
 
-/** A memoizing client for one chain. Guard and pin resolve at most once, lazily. */
-export function chainClient(chainName, { block } = {}) {
-  const chain = getChain(chainName);
+/**
+ * A memoizing client for one chain. Guard and pin resolve at most once, lazily.
+ *
+ * `rpc` overrides the registry endpoint for the SAME chain — used by the quorum layer to reach the
+ * same chain through a different provider. The override is deliberately NOT trusted: assertChain()
+ * still compares eth_chainId against the registry's declared id, so an alternate endpoint that is
+ * actually on another chain is excluded loudly instead of silently contributing a wrong-chain answer.
+ */
+export function chainClient(chainName, { block, rpc } = {}) {
+  const chain = rpc ? { ...getChain(chainName), rpc } : getChain(chainName);
   let guardP = null;
   let blockP = null;
 
