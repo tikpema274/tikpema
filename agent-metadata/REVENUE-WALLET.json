@@ -1,0 +1,13 @@
+{
+  "walletSetId": "ac404fd9-dc16-5ae5-9180-150c6147a88f",
+  "walletSetName": "Tikpema DD Service Revenue",
+  "purpose": "DD service x402 revenue (payTo)",
+  "writtenAt": "2026-07-27T21:31:04.987Z",
+  "walletId": "819fe387-f553-554d-b095-9b7ced9e49a4",
+  "address": "0xb407967319d56218c7e1c369125490e665a16ac4",
+  "accountType": "SCA",
+  "blockchain": "ARC-TESTNET",
+  "state": "LIVE",
+  "createDate": "2026-07-27T21:31:04Z",
+  "note": "CREATED by create-revenue-wallet.mjs. This is payTo for DD-service x402 revenue. It must receive NOTHING else — reconciliation attributes every inbound USDC Transfer to a DD payment."
+}
