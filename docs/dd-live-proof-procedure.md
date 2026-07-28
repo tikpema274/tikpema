@@ -119,16 +119,41 @@ identical from outside. **Verify by the shape of the JSON body**, and if you get
 ## 4. Wait for the canary (~10 min), or the service refuses
 
 RUNG 0 requires a **fresh, version-matched** health artifact. A brand-new build has none, so
-`dd-analyze` returns `503 service-unverified` until the next `*/10` canary tick produces one for
-**that build**. This is correct behaviour, not a fault.
+`dd-analyze` returns `503 service-unverified` until a canary run produces one for **that build**.
+This is correct behaviour, not a fault.
+
+🚨 **DO NOT WAIT FOR THE `*/10` CRON — IT DOES NOT FIRE ON A DRAFT.** Netlify runs scheduled
+functions on the published deploy, not on drafts. On a draft the canary produces an artifact **only
+when you invoke it by hand**, and `DEFAULT_TTL_MS` expires it 30 minutes later with nothing to
+refresh it. Measured symptom: a record 60 minutes old under a `*/10` schedule — six missed ticks —
+refusing as `stale`. That is what a cron that never ran looks like from the endpoint's side.
+
+**So: trigger it yourself, immediately before each run.**
 
 ```bash
-curl -s "<draft>/.netlify/functions/dd-canary" | head -c 400    # or just wait ~10 minutes
+curl -s "<draft>/.netlify/functions/dd-canary" | python3 -m json.tool | head -20
 ```
 
 (Functions path here too, for the same reason as step 3 — `/api/*` tests routing, not the service.)
 
-Proceed when the probe in step 5 stops saying `service-unverified`.
+Check `identity.buildResolved: true` and a real `identity.build`, then **proceed within 30 minutes**.
+Re-trigger whenever you are about to start a run. A repeat call inside 5 minutes returns
+`deduped:true` and does NOT refresh `producedAt` — harmless, since the dedupe window is far inside
+the TTL, but do not read a dedupe as a refresh.
+
+⭐ **A stale artifact CANNOT strand a payment.** Retrieve sits ahead of the health gate deliberately
+(`dd-analyze.mjs` — retrieve at rung -0.5, health at rung 0), so a handle stays redeemable even if
+the canary goes stale mid-settlement. That matters here in practice: settlement can take ~15.4 min
+against a 30-minute TTL, so an artifact expiring during a poll is likely and is a non-event.
+
+⚠️ Diagnosing a refusal at this step — the reason discriminates, so read it rather than retrying:
+
+| `refusal.diagnostic.healthReason` | Meaning |
+|---|---|
+| `stale` | ⭐ the binding WORKS — the record was found and matched. Just re-trigger the canary |
+| `no-record` | no artifact under this build's key — canary has not run on this deploy yet |
+| `version-mismatch` | found, but for a different build; `mismatchedFields` names which |
+| `build-unresolved` | this deploy resolved no build id — set `DD_BUILD_ID` (step 2) |
 
 ---
 
