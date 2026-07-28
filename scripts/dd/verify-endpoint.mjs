@@ -12,10 +12,37 @@
 // The three refusals short-circuit before analyze() is ever called, so they need no RPC and no
 // signer — which is why they are the cheap, always-run half.
 
-import { handler } from "../../netlify/functions/dd-analyze.mjs";
 import { assertReportValid, SCHEMA_VERSION } from "../../shared/onchain-analyze/schema.mjs";
 import { verifyAttestation } from "../../shared/onchain-analyze/attest.mjs";
 import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
+
+// ⚠️ dd-analyze's exposure gate (RUNG -1, unset = DISABLED) sits before every other rung. This suite
+// exercises the rungs BEHIND it, so open it explicitly rather than letting a 503 masquerade as a
+// failure of the logic under test. The gate's own coverage is scripts/dd/verify-dd-exposure.mjs.
+process.env.DD_PUBLIC_ENABLED = "1";
+
+// ⚠️ dd-analyze's health gate (RUNG 0) refuses unless a fresh, version-matched canary artifact exists.
+// This suite tests the rungs BEHIND it, so vouch for health the same way verify-canary.mjs does.
+// (These two suites silently rotted when the health gate landed in 1f6f106 — they were not in any npm
+// script, so nothing re-ran them. They are in `test:dd` now.)
+import { mock } from "node:test";
+import { SCHEMA_VERSION as _SV } from "../../shared/onchain-analyze/schema.mjs";
+import { POWER_SIGS as _PS } from "../../shared/onchain-facts/index.mjs";
+import { codeIdentity as _ci } from "../../shared/dd-canary/health.mjs";
+const _identity = _ci({ schemaVersion: _SV, powerSigs: _PS });
+mock.module("../../netlify/functions/_dd-health.mjs", {
+  namedExports: {
+    readHealth: async () => ({
+      record: { verdict: "pass", producedAt: new Date().toISOString(), identity: _identity, fixtures: [] },
+      readable: true,
+    }),
+    writeHealth: async () => true,
+    DD_HEALTH_STORE: "mock",
+    healthKey: () => "mock",
+  },
+});
+
+const { handler } = await import("../../netlify/functions/dd-analyze.mjs");
 
 let pass = 0, fail = 0;
 const check = (label, cond, extra = "") => {

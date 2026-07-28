@@ -19,6 +19,11 @@ import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
 import { runFixtures, FIXTURES } from "../../shared/dd-canary/fixtures.mjs";
 import { codeIdentity, evaluateHealth, HEALTH_REASON, DEFAULT_TTL_MS } from "../../shared/dd-canary/health.mjs";
 
+// ⚠️ dd-analyze's exposure gate (RUNG -1, unset = DISABLED) sits before every other rung. This suite
+// exercises the rungs BEHIND it, so open it explicitly rather than letting a 503 masquerade as a
+// failure of the logic under test. The gate's own coverage is scripts/dd/verify-dd-exposure.mjs.
+process.env.DD_PUBLIC_ENABLED = "1";
+
 let pass = 0, fail = 0;
 const check = (label, cond, extra = "") => {
   if (cond) { pass++; console.log(`  ✅ ${label}${extra ? ` — ${extra}` : ""}`); }

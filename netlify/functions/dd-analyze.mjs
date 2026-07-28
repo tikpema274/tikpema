@@ -33,6 +33,7 @@ import { connectLambda } from "@netlify/blobs";
 import { json } from "./_arc.mjs";
 import { codeIdentity, evaluateHealth } from "../../shared/dd-canary/health.mjs";
 import { readHealth } from "./_dd-health.mjs";
+import { exposureState } from "./_dd-exposure.mjs";
 import { chainClient } from "../../scripts/dd/client.mjs";
 import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { baseReport, assertReportValid, SCHEMA_VERSION } from "../../shared/onchain-analyze/schema.mjs";
@@ -99,6 +100,24 @@ export async function handler(event) {
   const correlationId = randomUUID();
   try {
     if (event?.blobs) connectLambda(event);
+
+    // ── ⭐ RUNG -1: IS THIS SERVICE EVEN SUPPOSED TO ANSWER THE PUBLIC? ───────────────────────
+    // FIRST — before the health check, before validation, before anything. Deploying this function
+    // must NOT be the same act as publishing it: `/api/dd-analyze` is committed and Netlify has no
+    // per-function deploy, so without this gate a routine `netlify deploy --prod` would stand up a
+    // free public signed-attestation endpoint under agentId 851891 by accident.
+    //
+    // UNSET = DISABLED, and so is anything unrecognised. Deployed-but-inert is the default; serving
+    // is the deliberate act. Cheapest possible check too — no blob read, no chain read, no analysis.
+    {
+      const exposure = exposureState();
+      if (!exposure.enabled) {
+        return json(503, refusalReport({
+          reason: "service-not-enabled",
+          detail: `${exposure.detail} (${exposure.reason}). The service is deployed but not published. Set DD_PUBLIC_ENABLED to enable it deliberately.`,
+        }));
+      }
+    }
 
     // ── ⭐ RUNG 0: IS THIS SERVICE KNOWN GOOD? ────────────────────────────────────────────────
     // FIRST, before anything else, so an unverified service is uniformly UNAVAILABLE rather than
