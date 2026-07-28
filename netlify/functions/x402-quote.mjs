@@ -62,33 +62,52 @@ const EXTRA = {
 // Price: $0.001 USDC, in 6-decimal atomic units → 1000.
 const PRICE_ATOMIC = "1000";
 
-// Live-shaped real-time dataset served ONLY on a successful (paid) 200. This is
-// the testnet stand-in for a real paid *real-time* data seller: each fact is a
-// CURRENT figure stamped with a fresh `asOf` generated at request time. Indexed
-// web search (Exa) returns cached/stale pages and structurally cannot report a
-// value "as of right now" — so a brief that needs a present-moment figure has a
-// genuine gap only this paid feed fills. (Testnet: the metric values are
-// representative, but the `asOf` timestamp is real and the shape is a live feed.)
-// Kept as { topic, facts:[{claim, source}] } so the research merge step is
-// unchanged. The 402 challenge + verify/settle behavior is unchanged too — this
-// only shapes the already-paid response body.
+// SYNTHETIC demo payload served ONLY on a confirmed-paid 200. This endpoint is a self-loop x402
+// SELLER used to exercise the payment mechanics (402 → sign → settle → confirm → serve); it is NOT a
+// data product. The real paid data path in production is QuickNode (DATA_SELLER_URL); nothing in prod
+// consumes this.
+//
+// ═══ 🚨 WHY THE LABELS BELOW ARE WORDED SO BLUNTLY ═══════════════════════════════════════════
+// These values used to be phrased as present-tense measurements — "As of <now>, … ~0.92 s",
+// "settlement latency … ~470 ms" — carrying `source: "x402-quote real-time feed"`. That mislabel
+// escaped and did real damage: the fabricated ~470 ms figure was quoted back as EVIDENCE in a design
+// discussion about Gateway settlement timing, while the probe was measuring the true value at
+// anywhere from 42 SECONDS to 14.5 MINUTES (scripts/dd/probe-settlement-batch.mjs). Fiction labelled
+// as fact does not stay contained — it gets cited.
+//
+// ⭐ AND THE HONEST LABEL WAS THE ONE BEING DISCARDED. `_research.mjs`'s extractFacts resolves
+// `source: String(f.source ?? src)` — a fact's OWN source wins, and the honest fallback
+// ("x402-quote (testnet stand-in)") applies only when a fact carries none. So the qualifier lived
+// exactly where it was dropped and the unqualified "real-time feed" was what propagated into
+// citations. The fix therefore targets the PER-FACT `source` string, not the fallback.
+//
+// The shape { topic, facts:[{claim, source}] } is unchanged so the merge step still works, and the
+// 402 challenge is untouched (it never claimed real-time). No value here is measured.
 export function liveDataset() {
-  const asOf = new Date().toISOString();
-  const src = `x402-quote real-time feed (asOf ${asOf})`;
+  const generatedAt = new Date().toISOString();
+  // ⭐ THIS is the string that propagates into citations. It must be self-evidently synthetic.
+  const src = "x402-quote (Arc testnet SYNTHETIC DEMO — not a live feed, values not measured)";
   return {
-    topic: "Arc Testnet real-time network metrics (live feed, testnet stand-in)",
-    asOf,
+    topic: "SYNTHETIC demo payload — illustrative Arc Testnet figures, NOT live measurements",
+    synthetic: true,
+    notMeasured: true,
+    generatedAt,
+    asOf: null, // deliberately null: an `asOf` on unmeasured values invites reading them as current
     facts: [
       {
         claim:
-          `As of ${asOf}, Arc Testnet current network status: blocks finalizing with sub-second finality, ` +
-          `current average block time ~0.92 s, native gas token USDC.`,
+          "SYNTHETIC EXAMPLE, not a measurement: Arc Testnet is described as finalising blocks with " +
+          "sub-second finality and using USDC as the native gas token. The illustrative block-time " +
+          "figure that used to appear here has been removed rather than restated, because a precise " +
+          "number reads as measured however it is labelled.",
         source: src,
       },
       {
         claim:
-          `As of ${asOf}, current Circle Gateway nanopayment batch settlement latency on Arc Testnet is ` +
-          `~470 ms, and USDC is trading at its peg (1.0000 USD).`,
+          "SYNTHETIC EXAMPLE, not a measurement: this payload previously asserted a Circle Gateway " +
+          "batch settlement latency of ~470 ms. That number was invented and is WRONG — real " +
+          "settlements measured on Arc Testnet ranged from ~42 s to ~14.5 min. Do not cite any " +
+          "latency figure from this endpoint; measure it with scripts/dd/probe-settlement-batch.mjs.",
         source: src,
       },
     ],
