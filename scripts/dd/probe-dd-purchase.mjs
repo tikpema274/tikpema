@@ -5,11 +5,22 @@
 // checks the quote is what we think we built, and snapshots the revenue wallet's Gateway balance.
 // That half is worth running on its own — it catches a wrong payTo or a wrong price BEFORE money.
 //
-//   node --env-file=.env scripts/dd/probe-dd-purchase.mjs --url <draft>/api/dd-analyze
-//   node --env-file=.env scripts/dd/probe-dd-purchase.mjs --url <draft>/api/dd-analyze --confirm
+//   node --env-file=.env scripts/dd/probe-dd-purchase.mjs --url <draft>/.netlify/functions/dd-analyze
+//   node --env-file=.env scripts/dd/probe-dd-purchase.mjs --url <draft>/.netlify/functions/dd-analyze --confirm
 //
 // ⚠️ --url IS REQUIRED. There is deliberately no default: the whole point of this run is that it
 // happens against a DRAFT, and a default would eventually be pointed at production by omission.
+//
+// ⭐ ON A DRAFT, PREFER /.netlify/functions/dd-analyze OVER /api/dd-analyze. Both work on a healthy
+// deploy — the handler builds `resource` from event.path either way, so the payment binds to whatever
+// URL you actually hit and the retrieve URL derives from the same string. But /api/* depends on the
+// netlify.toml redirect RESOLVING on that particular deploy, and a draft has been observed serving
+// SPA HTML there while /.netlify/functions/dd-analyze answered normally. The functions path bypasses
+// redirect resolution entirely, so it tests the SERVICE rather than the routing.
+//
+// 🚨 Never conclude "not deployed" from an HTML response at /api/*. This site's catch-all serves the
+// SPA for anything unmatched, so a routing miss and a missing function look identical from outside.
+// Ask the functions path before believing either.
 //
 // Flags:
 //   --url <u>       the dd-analyze endpoint to buy from        (required)
@@ -110,17 +121,31 @@ try {
   chal = await fetchX402Requirements({ sellerUrl: URL, requestBody: { address: SUBJECT, chain: "arc-testnet" } });
 } catch (e) {
   console.log(`  ❌ could not reach the seller at all: ${e?.cause?.code ?? e?.message ?? e}`);
-  console.log(`     Check the --url. A CLI draft prints TWO usable forms; both work:`);
-  console.log(`       https://<deploy-id>--<site>.netlify.app/api/dd-analyze`);
-  console.log(`       https://<deploy-id>.app.tikpema.xyz.tikpema.xyz/api/dd-analyze   (doubled domain is NOT a typo)`);
+  console.log(`     Check the --url. A CLI draft prints TWO usable host forms; both work:`);
+  console.log(`       https://<deploy-id>--<site>.netlify.app/.netlify/functions/dd-analyze`);
+  console.log(`       https://<deploy-id>.app.tikpema.xyz.tikpema.xyz/.netlify/functions/dd-analyze   (doubled domain is NOT a typo)`);
+  console.log(`     ⭐ Use /.netlify/functions/dd-analyze on a draft, not /api/dd-analyze — the latter`);
+  console.log(`        depends on the netlify.toml redirect resolving, which tests routing, not the service.`);
   process.exit(1);
 }
 if (!chal.ok) {
-  console.log(`  ❌ no usable 402 challenge — ${JSON.stringify(chal.body).slice(0, 300)}`);
-  console.log(`\n  ⚠️ A 503 here is EXPECTED and informative, not a bug:`);
-  console.log(`     service-not-enabled  → DD_PUBLIC_ENABLED is not set in the context this deploy reads`);
-  console.log(`     service-unverified   → the canary has not produced a health artifact for THIS build yet`);
-  console.log(`     payment-misconfigured→ DD_PAYTO_ADDRESS is not set in that context`);
+  const raw = JSON.stringify(chal.body ?? {});
+  console.log(`  ❌ no usable 402 challenge — ${raw.slice(0, 300)}`);
+
+  // ⭐ HTML back means the ROUTE missed, not that the service is down. The catch-all serves the SPA
+  // for anything unmatched, so "routing miss" and "function missing" are indistinguishable from here.
+  if (/<!doctype html|<html/i.test(raw) || /got 404|got 200/.test(raw)) {
+    console.log(`\n  🚨 That looks like SPA HTML, i.e. NOTHING MATCHED THIS PATH — a routing answer,`);
+    console.log(`     not a statement about the service. If you targeted /api/dd-analyze, the`);
+    console.log(`     netlify.toml redirect did not resolve on this deploy. Ask the function directly:`);
+    console.log(`\n       node --env-file=.env scripts/dd/probe-dd-purchase.mjs --url ${String(URL).replace(/\/api\/dd-analyze\/?$/, "/.netlify/functions/dd-analyze")}\n`);
+    console.log(`     If THAT answers, the service is fine and only /api/* routing is at fault.`);
+  } else {
+    console.log(`\n  ⚠️ A 503 here is EXPECTED and informative, not a bug:`);
+    console.log(`     service-not-enabled  → DD_PUBLIC_ENABLED is not set in the context this deploy reads`);
+    console.log(`     service-unverified   → the canary has not produced a health artifact for THIS build yet`);
+    console.log(`     payment-misconfigured→ DD_PAYTO_ADDRESS is not set in that context`);
+  }
   process.exit(1);
 }
 

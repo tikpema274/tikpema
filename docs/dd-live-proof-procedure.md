@@ -98,11 +98,21 @@ Run it backgrounded; it takes a while.
 - `https://<deploy-id>--<site>.netlify.app`
 - `https://<deploy-id>.app.tikpema.xyz.tikpema.xyz` — the doubled custom domain is **not** a typo
 
+⭐ **Append `/.netlify/functions/dd-analyze`, NOT `/api/dd-analyze`.** Both work on a healthy deploy —
+the handler builds the x402 `resource` from `event.path` either way, so the payment binds to the URL
+you actually hit and the retrieve URL derives from the same string (verified). But `/api/*` depends on
+the `netlify.toml` redirect resolving on that specific deploy, and a draft has been observed serving
+SPA HTML there while the functions path answered normally. The functions path bypasses redirect
+resolution, so it tests the **service** rather than the **routing**.
+
 An automated grep for `\.netlify\.app` has previously reported "NO URL FOUND" on a deploy that
 succeeded. Match on the deploy id, or read it yourself.
 
-🚨 **Never verify a deployment by probing for HTTP 200.** A nonexistent function path on this site
-returns **200 with SPA HTML**, not 404. Verify by the *shape* of the JSON body.
+🚨 **Never verify a deployment by status code alone.** Unmatched paths on this site are answered by
+the SPA catch-all, and the status observed has varied — **200** with SPA HTML in one case, **404**
+with SPA HTML in another. Either way the body is HTML, so a routing miss and a missing function look
+identical from outside. **Verify by the shape of the JSON body**, and if you get HTML, ask
+`/.netlify/functions/<name>` before concluding anything about the service.
 
 ---
 
@@ -113,8 +123,10 @@ RUNG 0 requires a **fresh, version-matched** health artifact. A brand-new build 
 **that build**. This is correct behaviour, not a fault.
 
 ```bash
-curl -s "<draft>/api/dd-canary" | head -c 400      # or just wait ~10 minutes
+curl -s "<draft>/.netlify/functions/dd-canary" | head -c 400    # or just wait ~10 minutes
 ```
+
+(Functions path here too, for the same reason as step 3 — `/api/*` tests routing, not the service.)
 
 Proceed when the probe in step 5 stops saying `service-unverified`.
 
@@ -123,7 +135,7 @@ Proceed when the probe in step 5 stops saying `service-unverified`.
 ## 5. Read-only probe — the last checkpoint before money
 
 ```bash
-node --env-file=.env scripts/dd/probe-dd-purchase.mjs --url "<draft>/api/dd-analyze"
+node --env-file=.env scripts/dd/probe-dd-purchase.mjs --url "<draft>/.netlify/functions/dd-analyze"
 ```
 
 This fetches the 402 and **stops**. It must print:
@@ -147,7 +159,7 @@ Note the baseline it prints. That is the number the chain must beat.
 ## 6. 🚨 THE PAYMENT — $0.06 USDC
 
 ```bash
-node --env-file=.env scripts/dd/probe-dd-purchase.mjs --url "<draft>/api/dd-analyze" --confirm
+node --env-file=.env scripts/dd/probe-dd-purchase.mjs --url "<draft>/.netlify/functions/dd-analyze" --confirm
 ```
 
 Expected sequence:
@@ -168,7 +180,7 @@ from seconds to a quarter of an hour, and do not read a slow one as a fault.
 probe prints the handle; redeem it any time, even hours later:
 
 ```bash
-node --env-file=.env scripts/dd/probe-dd-purchase.mjs --url "<draft>/api/dd-analyze" --handle <handle>
+node --env-file=.env scripts/dd/probe-dd-purchase.mjs --url "<draft>/.netlify/functions/dd-analyze" --handle <handle>
 ```
 
 **If the buyer's Gateway balance is short**, `settle()` returns `success:false` → the seller returns
@@ -254,7 +266,7 @@ step 10.
 Then buy again:
 
 ```bash
-node --env-file=.env scripts/dd/probe-dd-purchase.mjs --url "<new-draft>/api/dd-analyze" --confirm
+node --env-file=.env scripts/dd/probe-dd-purchase.mjs --url "<new-draft>/.netlify/functions/dd-analyze" --confirm
 ```
 
 Expected — **HTTP 200, not 402, not 502**:
