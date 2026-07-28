@@ -1,5 +1,151 @@
 ---
 
+## 2026-07-29 — DD FACILITATOR BUILT + LIVE-PROOF TO THE 402. Caught a REAL PROD FAIL-OPEN in the canary version binding.
+
+**Draft deploy only. NO MONEY MOVED. Production verified INERT throughout** — `DD_PUBLIC_ENABLED`
+returns *"No value set in the production context"* at the start and end of the session.
+
+Stopped **deliberately** at the last checkpoint before the money step: a real 402 challenge, quoting
+the right wallet at the right price, with the read-only half of the purchase probe green.
+
+### ⭐⭐ THE FIND: the canary version binding was a NO-OP, and it was heading for PROD
+
+`codeIdentity().build` fell back to the literal string `"unknown"`:
+
+```js
+build: build ?? process.env.COMMIT_REF ?? process.env.BUILD_ID ?? "unknown"
+```
+
+When the build id could not be resolved, **both** the canary and the endpoint stamped `"unknown"` —
+and `"unknown" === "unknown"` **MATCHES**. So the binding did not fail closed, it silently became a
+no-op: **an old deploy's passing canary would have vouched for new code.** The deploy gate — the
+entire reason shipping new code invalidates the old vouch — had stopped existing, and nothing said so.
+
+⚠️ **Why it was always unresolved here:** `COMMIT_REF` / `BUILD_ID` are **build-time** Netlify
+variables, and a CLI manual deploy (`netlify deploy --dir=dist`) **runs no build**. That is the deploy
+type this service is tested on, so the binding was inert on exactly the path being exercised.
+
+**THE FIX — `1dd8f75`:** a single `resolveBuildId()` in `shared/dd-canary/health.mjs`, source order
+`DD_BUILD_ID → COMMIT_REF → DEPLOY_ID → BUILD_ID`. Unresolvable returns **`null`, never a placeholder**
+— any constant returned on failure compares equal to itself on the other side, which was the whole
+bug. The literal `"unknown"` is also **rejected as an env value**, so it cannot be reintroduced by
+setting a variable. Three consumers refuse instead of comparing: `evaluateHealth` step 0 (ahead of
+the record, so `build-unresolved` outranks stale/no-record/malformed), `shouldSkipRerun`, and
+`dd-canary` rung 0 — which now writes **nothing**, killing the green-canary-beside-refusing-service
+contradiction that made this hard to read. Same commit surfaces the identity evidence
+`dd-analyze` had been computing and discarding (`refusal.diagnostic`).
+
+⚠️ **`b9de582` is TEST-ONLY — no source change.** The reported symptom was *"dd-analyze resolves from
+a different source than the canary"*; investigation found **no second source to repoint**.
+`resolveBuildId` and `codeIdentity` each have **one** definition, both handlers make **byte-identical**
+calls (`dd-canary.mjs:50`, `dd-analyze.mjs:186`) into the same module instance
+(`a.codeIdentity === b.codeIdentity` at runtime). "Pointing it at the shared resolver" would have been
+a **no-op that looked like a fix** — the worst outcome for a gate, since the next failure arrives with
+the repair apparently already applied. So `b9de582` adds the proof instead:
+`verify-canary-endpoint-binding.mjs`, the first test that runs the **real canary handler → real
+endpoint handler through one shared store**.
+
+**Verified live:** the canary reported `buildResolved:true, build:1dd8f75…, buildSource:"DD_BUILD_ID"`
+(read directly). The endpoint side is proven by its refusal turning to **`stale`** — a reason only
+reachable *after* the record is found and its identity matched, i.e. `healthKey(canary) ===
+healthKey(endpoint)`. Both sides agree.
+
+### ⭐ FIVE DEPLOY-ONLY GAPS THAT TWELVE GREEN OFFLINE SUITES COULD NOT SEE
+
+1. **Routing, not the service** (`49dfe8e`) — the probe and doc targeted `/api/dd-analyze`; the
+   redirect did not resolve on that draft while `/.netlify/functions/dd-analyze` answered normally.
+   The catch-all serves SPA HTML for anything unmatched, so a routing miss and a missing function are
+   **indistinguishable by status code** (observed as 404 here, 200 previously). Verified both paths
+   produce a valid 402 and bind `resource` from `event.path`, so the functions path is
+   self-consistent — it tests the **service** rather than the **routing**.
+2. **The build fail-open** — above.
+3. **Reported as a half-wired binding** (canary resolved, endpoint did not) — **no such code defect
+   existed.** Do not go looking for one. See 4.
+4. **Refusals were being read off a STALE PRE-FIX DRAFT.** The draft under test (`6a690473…`, 19:35)
+   **predated `1dd8f75`**, so its endpoint was running the old code. ⭐ The discriminator that settles
+   this class of confusion: after `1dd8f75` the string `"unknown"` can no longer be **produced** — it
+   survives only as a value the resolver **rejects**. So `running.build:"unknown"` means *old code
+   deployed*; `null` + `build-unresolved` means *new code, env not reaching it*. Different repairs.
+5. **Canary artifact staleness** (`0713b11`) — 🚨 **the `*/10` cron does NOT fire on a draft.** Netlify
+   runs scheduled functions on the **published** deploy only. On a draft the canary produces an
+   artifact **only when invoked by hand**, and the 30-minute TTL expires it with nothing to refresh
+   it. Measured: a record **60 minutes old** under a `*/10` schedule — six missed ticks. This is very
+   likely the ORIGINAL `service-unverified` that opened this thread, predating all the build work.
+
+⭐ **A stale artifact CANNOT strand a payment** — retrieve sits **ahead** of the health gate by
+deliberate placement (retrieve rung -0.5, health rung 0). Settlement takes ~15.4 min against a 30-min
+TTL, so an artifact expiring mid-poll is *likely* — and is a non-event, because an already-paid handle
+never consults health. An earlier design decision paying off exactly where it was aimed.
+
+### THE FACILITATOR — BUILT (`961ff80`)
+
+`netlify/functions/_dd-x402.mjs`. Ordering is the product: **analyze → decide → snapshot → persist →
+settle**, so a slow analysis burns the request budget *before* any settlement is attempted and a
+timeout costs the caller nothing. The report is **frozen at settle time** and stored with the handle;
+retrieve serves those exact bytes and never re-runs. **Persist happens BEFORE broadcast** — if the
+process dies between the two, the caller still holds a redeemable handle; the natural order loses the
+entitlement in exactly the case where the money *did* move. Two throw classes kept distinct because
+collapsing them would be the whole bug: `SettleAborted` (nothing broadcast, `charged:false` is a
+structural fact) vs `SettleIndeterminate` (`charged:null`, **not false**, and a handle survives).
+`payTo` has **no fallback** — `SELLER_ADDRESS` sits in the same env and would "work" while destroying
+the zero-history property that makes aggregate reconciliation attributable.
+
+**⭐ UNSIGNED DOES NOT SETTLE** (`settleDecision` condition 4). The 402 advertises a signed ERC-1271
+attestation; `attachAttestation` degrades to `{status:"unsigned"}` on a signer outage. *"Do not
+destroy the report"* and *"charge full price for it"* are different decisions and only the first had
+been made. A signer outage is **our** failure — same category as the RPC outage that already does not
+settle. Fail-closed via a `Set`, not truthiness, and `status:"signed"` alone is **not enough**: without
+`signature/agentId/verifyingContract/chainId` nobody can check it, so that is a separate reason
+(`attestation-unverifiable`) — which also means a bug in the signing path cannot silently start
+billing. The caller still gets the complete report, **free**.
+
+### END STATE — the chain is wired end to end over live HTTP
+
+**exposure flag ✅ → build binding ✅ (matched) → canary health ✅ (fresh) → real 402 challenge**,
+quoting revenue wallet **`0xb407967319d56218c7e1c369125490e665a16ac4`** at **60000 atomic ($0.06)**.
+The read-only half of `probe-dd-purchase.mjs` confirmed payTo and price. **STOPPED before `--confirm`
+deliberately** — money-moving proof is the operator's to run.
+
+### ⭐ THE PORTABLE LESSON
+
+**A binding can only be tested across the thing it binds.** Twelve green suites missed a live
+fail-open because every one of them ran in ONE process with ONE environment, where the two sides are
+trivially identical and the comparison succeeds **for the wrong reason** — and the suites that mock
+`readHealth` to always vouch cannot see a disagreement at all, because they remove it. Six suites went
+red the instant the binding was made fail-closed: direct proof they had never exercised resolution.
+Same family as [[absence-must-never-read-as-safe]] — an absence filled the result slot and read as
+**agreement**.
+
+### Commits
+`961ff80` facilitator + unsigned-doesn't-settle · `609bec6` live-proof procedure + purchase probe ·
+`49dfe8e` functions path on drafts · `1dd8f75` build binding fails closed (+ endpoint diagnostic) ·
+`b9de582` cross-handler binding test (TEST-ONLY) · `0713b11` cron does not fire on drafts ·
+(`9168a9b` exposure-flag drift correction). All pushed. **13 DD suites, `test:dd` exit 0.**
+Deposit path untouched throughout: `_vault.mjs` and `shared/onchain-facts/` pass `git diff --quiet`.
+
+### NEXT SESSION — THE MONEY STEP (fresh start, `docs/dd-live-proof-procedure.md`)
+
+1. **Re-trigger the canary by hand** (the cron will not do it), then proceed **within 30 minutes**.
+2. `probe-dd-purchase.mjs --confirm` — spends **$0.06 USDC**.
+3. `202 + handle → retrieve polls → 200`. Settlement is a ~15.4 min batch flush, so expect anywhere in
+   (0, ~15.4 min). Running out of poll budget is **not** a loss — the entitlement is permanent.
+4. Confirm **from chain, not from the seller**: report `attestation.status === "signed"` and verifying
+   on-chain (`isValidSignature → 0x1626ba7e`, EIP-191 digest **not** raw keccak256), and the revenue
+   wallet's Gateway balance up **exactly 60000** (`availableBalance`, selector `0x3ccb64ae` — **not**
+   an ERC-20 Transfer, which is never emitted).
+5. **Then the no-charge path**: break the signer on the draft (invalid `CIRCLE_API_KEY`,
+   `deploy-preview` only) and buy again. Must cost **$0.00** — and the proof is not the JSON saying
+   `charged:false`, it is the **balance NOT moving**.
+
+🚨 **Prod `DD_PUBLIC_ENABLED` is still "No value set" — KEEP IT THAT WAY.** All env work stays
+`--context deploy-preview` (confirmed: CLI drafts land in that context). **NEVER `--context all`** —
+that includes production and re-arms exactly what `210ffeb` disarmed.
+
+⚠️ Also still open: the frozen service doc (`bafkreigton…`) says *"payment / x402 metering — NOT
+built"*. Its bytes cannot change; the correction goes in the **mirror README**.
+
+---
+
 ## 2026-07-28 — DD SERVICE: engine COMPLETE, facilitator DECIDED + DE-RISKED (not built). x402 phantom-charge fixed in prod code.
 
 **Everything below is on `main` and pushed. NOTHING is deployed to prod** — all wire-proof ran on
