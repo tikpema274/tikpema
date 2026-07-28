@@ -34,6 +34,11 @@ const RPC = "https://rpc.testnet.arc.network";
 const USDC = "0x3600000000000000000000000000000000000000";
 const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const CONFIRM = process.argv.includes("--confirm");
+// --url <sellerUrl> targets a specific deployment (e.g. a DRAFT) instead of the prod default. The
+// deployed contract can only be proven against a real deployment, and a draft proves it without
+// publishing anything to prod.
+const URL_IX = process.argv.indexOf("--url");
+const SELLER = URL_IX >= 0 ? process.argv[URL_IX + 1] : DEFAULT_SELLER_URL;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pad = (a) => a.replace(/^0x/, "").toLowerCase().padStart(64, "0");
 
@@ -57,11 +62,12 @@ const usdcBalance = async (a) => {
 console.log("╔══════════════════════════════════════════════════════════════════════╗");
 console.log("║  SETTLEMENT PROBE — is `success` backed by an on-chain movement?     ║");
 console.log("╚══════════════════════════════════════════════════════════════════════╝");
+console.log(`  seller: ${SELLER}`);
 console.log(`  mode: ${CONFIRM ? "⚠️  CONFIRM — WILL SPEND 0.001 USDC" : "READ-ONLY half (no payment)"}\n`);
 
 // ── the 402 challenge (read-only) ─────────────────────────────────────────────────────────────
 console.log("── the 402 challenge ───────────────────────────────────────────────");
-const chal = await fetchX402Requirements({ sellerUrl: DEFAULT_SELLER_URL });
+const chal = await fetchX402Requirements({ sellerUrl: SELLER });
 if (!chal.ok) { console.log("  ✗ could not fetch challenge:", JSON.stringify(chal.body).slice(0, 200)); process.exit(1); }
 const req = chal.requirements ?? chal.body?.accepts?.[0];
 const payTo = (req?.payTo || "").toLowerCase();
@@ -91,10 +97,28 @@ console.log("\n── paying (0.001 USDC from the DELEGATE Gateway balance) ─�
 // ⭐ A CLI probe can afford to wait where a Netlify function cannot: pass a generous poll budget so
 // the 202 → retrieve → 200 round trip completes here instead of returning pending.
 const POLL_BUDGET_MS = 6 * 60 * 1000;   // ~2x the single observed ~3min settlement. PROVISIONAL (n=1).
-const res = await payX402({ sellerUrl: DEFAULT_SELLER_URL, challenge: chal, approvedUsdc: 0.01, requireApproved: false, pollBudgetMs: POLL_BUDGET_MS });
+const paidAt = Date.now();
+const res = await payX402({ sellerUrl: SELLER, challenge: chal, approvedUsdc: 0.01, requireApproved: false, pollBudgetMs: POLL_BUDGET_MS });
 console.log(`  http status : ${res.status}`);
 console.log(`  executed    : ${res.body?.executed}`);
 console.log(`  pending     : ${res.body?.pending ?? false}   handle: ${res.body?.handle ?? "-"}   polls: ${res.body?.polls ?? 0}`);
+// ⭐ (1) did the DEPLOYED contract complete? Proven by BEHAVIOUR, not status codes — a nonexistent
+// Netlify route answers 200 with SPA HTML, so a bare 200 proves nothing.
+const gotHandle = Boolean(res.body?.handle);
+const gotData   = Boolean(res.body?.sellerBody?.dataset);
+console.log(`\n── ⭐ (1) deployed contract 402 → 202+handle → retrieve → 200 ──────`);
+console.log(`  402 challenge received   : ${chal.ok ? "YES" : "NO"}`);
+console.log(`  202 + handle issued      : ${gotHandle ? "YES" : "NO"}  ${res.body?.handle ?? ""}`);
+console.log(`  retrieve polled          : ${res.body?.polls ?? 0} time(s)`);
+console.log(`  200 + dataset served     : ${gotData ? "YES" : "NO"}`);
+console.log(`  ⇒ end-to-end             : ${chal.ok && gotHandle && gotData ? "✅ COMPLETE" : "❌ INCOMPLETE"}`);
+// ⭐ (2)+(3) latency, and that the accepted-but-unconfirmed window actually withheld the artifact.
+const elapsedMs = Date.now() - paidAt;
+console.log(`\n── ⭐ (2) measured settle → confirmation latency ───────────────────`);
+console.log(`  ~${(elapsedMs/1000).toFixed(1)}s  (polls ${res.body?.polls ?? 0} x ${2}s)`);
+console.log(`\n── ⭐ (3) accepted-but-unconfirmed window ─────────────────────────`);
+console.log(`  polls returning 202 before the 200: ${Math.max(0,(res.body?.polls ?? 1) - 1)}`);
+console.log(`  ⇒ artifact withheld while unconfirmed: ${(res.body?.polls ?? 0) > 1 ? "✅ YES" : "⚠️ confirmed on first poll — window not observed this run"}`);
 if (res.body?.pending) console.log(`  ⚠️ budget exhausted before confirmation — NOT a failure; handle stays redeemable`);
 if (res.body?.blocked) console.log(`  BLOCKED     : ${res.body.blocked}`);
 
