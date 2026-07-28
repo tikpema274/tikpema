@@ -26,12 +26,31 @@ fixed in the already-shipped `x402-quote`.
   handler reads only platform-injected `event.blobs`; 9 hostile payloads + an empty request produced
   BYTE-IDENTICAL records.
 
-🚨 **THE PUBLIC ROUTE IS NOT "WITHHELD" IN CODE — THAT IS A TRAP, NOT A DECISION.** The
-`/api/dd-analyze` redirect is COMMITTED in `netlify.toml`. Prod is clean today only because nobody has
-run `netlify deploy --prod`; the next one publishes a free public signed-attestation endpoint (and the
-`dd-canary` cron) with no further action. Netlify has no per-function deploy. **Deployed-but-inert
-requires an in-code fail-closed flag (unset = DISABLED) — NOT removing the redirect**, because every
-deployed function is reachable at `/.netlify/functions/<name>` regardless of redirects. NOT BUILT.
+🚨 **THE PUBLIC ROUTE WAS NEVER "WITHHELD" IN CODE — THAT WAS A TRAP, NOT A DECISION.** The
+`/api/dd-analyze` redirect is COMMITTED in `netlify.toml`. Prod was clean only because nobody had run
+`netlify deploy --prod`; the next one would have published a free public signed-attestation endpoint
+with no further action. Netlify has no per-function deploy, and **removing the redirect would NOT have
+fixed it** — every deployed function is reachable at `/.netlify/functions/<name>` regardless of
+redirects. Deployed-but-inert therefore required an in-code fail-closed flag.
+
+✅ **CLOSED — the flag is BUILT (`210ffeb`, 36/0).** `netlify/functions/_dd-exposure.mjs`, checked at
+**RUNG -1** in `dd-analyze` (before health, before validation, no blob or chain read).
+**`DD_PUBLIC_ENABLED` unset = DISABLED**, and so is anything unrecognised — only
+`{1,true,on,yes,enabled}` (trimmed, case-folded) serve. Refusal is a structured `service-not-enabled`
+/ 503 / unsigned report, so it composes with the settle gate for free via `refusal !== null`.
+⭐ The INVERSE of `_pause.mjs`: that is a kill switch (unset = RUNNING), this is an exposure flag
+(unset = OFF). Same rule — a typo must never widen — opposite directions.
+**Verified in prod 2026-07-28**: `netlify env:get DD_PUBLIC_ENABLED --context production` returns the
+*"No value set…"* sentinel, i.e. UNSET → DISABLED. Deploying is no longer the same act as publishing.
+
+⚠️ **PRECISION — the gate covers `dd-analyze`, NOT `dd-canary`.** `dd-canary` has zero references to
+`_dd-exposure`/`DD_PUBLIC_ENABLED` and its `*/10` schedule is in `netlify.toml`, so **a prod deploy
+starts the canary cron**. That is the INTENDED design, not an oversight: the canary is hermetic and
+safe-public (it reads only platform-injected `event.blobs`, writes only PASS, and touches neither
+`_vault.mjs` nor `_pause.mjs`), and it must run to keep the health artifact warm — without it
+`dd-analyze` would refuse `service-unverified` anyway. So the correct framing of a prod deploy today
+is **"lands `dd-analyze` inert and starts the canary cron by design"** — NOT "publishes free
+attestations".
 
 ### FACILITATOR — decided + de-risked, BUILD NOT STARTED
 - **Confirmation read**: `availableBalance(USDC, payTo)` on GatewayWallet
@@ -123,12 +142,15 @@ validity, not settlement).
 
 ### Commits this thread
 `75bd7bc` probe · `235d6dc` revenue wallet · `1ac1388` x402-quote phantom fix (both sides) ·
-`b906a42` x402-quote relabelled honest · (earlier: `885d1be` endpoint, `375993f` attestation,
+`b906a42` x402-quote relabelled honest · `210ffeb` inert-deploy exposure flag ·
+(earlier: `885d1be` endpoint, `375993f` attestation,
 `d9df4fa` settle-gate, `1f6f106` canary, `ff46b1d` safe-public schedule)
 
 ### Honest limits
 - **Nothing is deployed to prod.** All wire-proof is on draft deploys.
-- The DD `/api` route is committed — see the trap above. The inert-deploy flag is NOT built.
+- The DD `/api` route is committed — see the trap above. The inert-deploy flag IS built (`210ffeb`)
+  and prod's `DD_PUBLIC_ENABLED` is verified UNSET, so a prod deploy would land `dd-analyze` inert.
+  ⚠️ The same deploy DOES start the `dd-canary` `*/10` cron — by design, and not covered by the flag.
 - Facilitator build not started. `SettleResponse.transaction` contents still unknown (`_x402.mjs`
   discards the receipt).
 - x402-quote is publicly payable by anyone; now honestly labelled, still a demo instrument.
