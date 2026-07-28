@@ -20,6 +20,15 @@ import { SCHEMA_VERSION } from "../../shared/onchain-analyze/schema.mjs";
 import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
 import { codeIdentity, shouldSkipRerun, MIN_RERUN_MS, DEFAULT_TTL_MS } from "../../shared/dd-canary/health.mjs";
 
+// ⭐ A REAL BUILD ID, because "unknown" is exactly the bug this suite failed to catch. The build
+// binding used to fall back to the literal string "unknown" on BOTH the canary and the endpoint, so
+// it compared equal to itself and the deploy gate silently became a no-op. Every suite here ran in
+// ONE process with ONE env, where both sides are trivially identical — which is why none of them
+// could ever have seen it. A binding is only testable across the thing it binds, so these now run
+// with a resolvable id and the cross-build cases live in verify-build-binding.mjs.
+process.env.DD_BUILD_ID = process.env.DD_BUILD_ID || "test-build-0000000000000000000000000000000000000000";
+
+
 let pass = 0, fail = 0;
 const check = (label, cond, extra = "") => {
   if (cond) { pass++; console.log(`  ✅ ${label}${extra ? ` — ${extra}` : ""}`); }

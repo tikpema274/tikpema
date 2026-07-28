@@ -107,7 +107,7 @@ const rpcCall = async ({ method, params }) => {
  * An empty coverage block would pass through assertReportValid as "coverage-incomplete", turning a
  * clean refusal into a second, confusing one.
  */
-function refusalReport({ address = null, chainName = null, chainId = null, reason, detail }) {
+function refusalReport({ address = null, chainName = null, chainId = null, reason, detail, diagnostic = null }) {
   const notChecked = Object.keys(POWER_SIGS).map((group) => ({
     id: `power:${group}`,
     kind: "power",
@@ -124,7 +124,7 @@ function refusalReport({ address = null, chainName = null, chainId = null, reaso
       summary:
         "NOTHING was checked: the request was refused before analysis began. This is an INDETERMINATE result, not a clean bill.",
     },
-    refusal: { reason, detail },
+    refusal: { reason, detail, ...(diagnostic ? { diagnostic } : {}) },
     // Input-validation refusals are deliberately NOT signed. They are statements about a REQUEST,
     // not about a subject on chain, and signing anonymous malformed input would turn this endpoint
     // into an unmetered signing oracle over attacker-chosen bytes.
@@ -187,9 +187,27 @@ export async function handler(event) {
       const { record, readable } = await readHealth(identity);
       const health = evaluateHealth({ record, readable, now: Date.now(), expect: identity });
       if (!health.serve) {
+        // ⭐ The identity evidence is INCLUDED, not discarded. evaluateHealth computes exactly what
+        // an operator needs to diagnose a refusal — which fields differ, and the two identities side
+        // by side — and forwarding only `reason` made a build-binding failure indistinguishable from
+        // a stale record from outside. Diagnosing the "unknown"-build defect required this and it
+        // was thrown away one line before it would have helped.
+        //
+        // Safe to expose: a schema version, a truncated catalogue hash, and a deploy/build id. No
+        // secret, no key, no address, and nothing an attacker can act on — a caller who can reach
+        // this endpoint already knows which deploy answered them.
+        const ev = health.evidence ?? {};
         return json(503, refusalReport({
           reason: "service-unverified",
           detail: `${health.detail} (${health.reason}). The service is REFUSING TO SERVE rather than answering from a detector that is not known good. This is not a degraded result — it is no result.`,
+          diagnostic: {
+            healthReason: health.reason,
+            ...(ev.mismatched ? { mismatchedFields: ev.mismatched } : {}),
+            ...(ev.running ? { running: ev.running } : {}),
+            ...(ev.recorded ? { recorded: ev.recorded } : {}),
+            ...(ev.buildSources ? { buildSources: ev.buildSources } : {}),
+            ...(ev.ageMs !== undefined ? { ageMs: ev.ageMs, ttlMs: ev.ttlMs } : {}),
+          },
         }));
       }
     }

@@ -29,7 +29,75 @@ export const HEALTH_REASON = Object.freeze({
   NOT_PASSING: "not-passing",
   VERSION_MISMATCH: "version-mismatch",
   STALE: "stale",
+  BUILD_UNRESOLVED: "build-unresolved",
 });
+
+// ═══ 🚨 THE `"unknown"` FAIL-OPEN THIS REPLACES — KEEP THE REASONING ══════════════════════════
+// `build` used to fall back to the literal string `"unknown"`:
+//
+//     build: build ?? process.env.COMMIT_REF ?? process.env.BUILD_ID ?? "unknown"
+//
+// When the build id could not be resolved, BOTH the canary and the endpoint stamped `"unknown"` —
+// and `"unknown" === "unknown"` MATCHES. So the version binding did not fail closed, it silently
+// became a no-op: an OLD deploy's passing artifact satisfied a NEW deploy's gate, because the only
+// field that distinguishes deploys had collapsed to a constant. The deploy gate — the thing that is
+// supposed to make shipping new code invalidate the old vouch — stops existing, and nothing says so.
+//
+// ⚠️ It also went undetected because every offline suite ran in one process with one env, where the
+// two sides are trivially identical. **A binding can only be tested across the thing it binds**, and
+// nothing exercised build resolution across two different builds. That gap is the real defect;
+// `"unknown"` was just how it showed up.
+//
+// The rule now: an UNRESOLVED build is not a value, it is the ABSENCE of one, and an absence must
+// never satisfy a check. `null` is not compared — it REFUSES, before any comparison happens.
+// (Same family as [[absence-must-never-read-as-safe]]: the failure was an absence filling the
+// result slot and reading as agreement.)
+
+/**
+ * Where a build identifier may come from, in order. Extended beyond the original two because a
+ * Netlify CLI manual deploy (`netlify deploy --dir=dist`) does NOT run the build pipeline, so the
+ * build-time variables are simply absent — which is exactly the deploy type used to test this
+ * service, and exactly where an always-"unknown" binding hid.
+ *
+ * `DD_BUILD_ID` is first so an operator can always pin one explicitly when the platform gives none.
+ */
+export const BUILD_ID_SOURCES = Object.freeze(["DD_BUILD_ID", "COMMIT_REF", "DEPLOY_ID", "BUILD_ID"]);
+
+/**
+ * Resolve the build identifier, or say plainly that it could not be resolved.
+ *
+ * ⭐ NEVER returns a placeholder. There is no sentinel value, because a sentinel is precisely what
+ * broke this: any constant returned on failure will compare equal to itself on the other side.
+ * The literal string "unknown" is also REJECTED as an env value, so the old fail-open cannot be
+ * reintroduced by setting a variable to it.
+ *
+ * @returns {{resolved: boolean, id: string|null, source: string|null, detail: string}}
+ */
+export function resolveBuildId({ build = null, env = process.env } = {}) {
+  const usable = (v) =>
+    typeof v === "string" && v.trim() !== "" && v.trim().toLowerCase() !== "unknown";
+
+  if (usable(build)) {
+    return { resolved: true, id: String(build).trim(), source: "explicit", detail: "build id supplied explicitly" };
+  }
+  for (const key of BUILD_ID_SOURCES) {
+    const v = env?.[key];
+    if (usable(v)) {
+      return { resolved: true, id: String(v).trim(), source: key, detail: `build id resolved from ${key}` };
+    }
+  }
+  return {
+    resolved: false,
+    id: null,
+    source: null,
+    detail:
+      `no build identifier could be resolved (checked ${BUILD_ID_SOURCES.join(", ")}). The version ` +
+      `binding cannot distinguish this deploy from any other, so the health record cannot be trusted ` +
+      `to vouch for THIS code. Set DD_BUILD_ID on the deploy to fix it. Refusing is deliberate: the ` +
+      `previous behaviour substituted "unknown" here, which made every deploy look identical to every ` +
+      `other and silently disabled the deploy gate.`,
+  };
+}
 
 /** How long a PASS vouches for the service. Should be ~2x the canary period so one missed run is
  *  tolerated and two are not. Deliberately short: a stale record is a refusal, and a refusal is
@@ -63,6 +131,11 @@ export const MIN_RERUN_MS = 5 * 60 * 1000;
  * invalidates the artifact.
  */
 export function shouldSkipRerun(record, { now, expect, minRerunMs = MIN_RERUN_MS, readable = true }) {
+  // ⭐ Same rule as evaluateHealth step 0, for the same reason. Without a build id, "did a run for
+  //    THIS build happen recently" is unanswerable — every build looks like every other — so the
+  //    honest answer is "do not dedupe", i.e. re-sweep. Erring toward doing the work is the safe
+  //    direction here; erring toward skipping would let one stale artifact suppress all future runs.
+  if (!buildIsBound(expect)) return { skip: false, reason: "build-unresolved" };
   if (readable !== true) return { skip: false, reason: "store-unreadable" };
   if (!record || typeof record !== "object" || Array.isArray(record)) return { skip: false, reason: "no-record" };
   const { producedAt, identity } = record;
@@ -83,17 +156,27 @@ export function shouldSkipRerun(record, { now, expect, minRerunMs = MIN_RERUN_MS
  * vouch for new code — the same reasoning as pass 2's six-part cache key: an artifact is a function
  * of the inputs AND of how it was produced.
  */
-export function codeIdentity({ schemaVersion, powerSigs, build = null }) {
+export function codeIdentity({ schemaVersion, powerSigs, build = null, env = process.env }) {
   const catalogue = Object.entries(powerSigs)
     .map(([group, sigs]) => `${group}:${[...sigs].sort().join(",")}`)
     .sort()
     .join("|");
+  const b = resolveBuildId({ build, env });
   return {
     schemaVersion,
     catalogueFingerprint: createHash("sha256").update(catalogue).digest("hex").slice(0, 16),
-    build: build ?? process.env.COMMIT_REF ?? process.env.BUILD_ID ?? "unknown",
+    // ⭐ null, NOT a placeholder. Consumers must refuse on null rather than compare it.
+    build: b.id,
+    buildResolved: b.resolved,
+    buildSource: b.source,
+    buildDetail: b.detail,
   };
 }
+
+/** Is this identity usable for binding at all? Exported so callers can refuse EARLY and say why,
+ *  rather than discovering it as a comparison that happens to succeed. */
+export const buildIsBound = (identity) =>
+  !!identity && identity.buildResolved === true && typeof identity.build === "string" && identity.build.trim() !== "";
 
 /**
  * Decide whether the service may serve. FAIL CLOSED on every path: `serve` starts false and is only
@@ -104,6 +187,19 @@ export function codeIdentity({ schemaVersion, powerSigs, build = null }) {
  */
 export function evaluateHealth({ record, readable, now, expect, ttlMs = DEFAULT_TTL_MS }) {
   const no = (reason, detail, evidence = {}) => ({ serve: false, reason, detail, evidence });
+
+  // 0 — ⭐ IS THE BINDING EVEN MEANINGFUL? Checked FIRST, before the record is looked at, because a
+  //     comparison against an unresolved build is not a weak check — it is a check that always
+  //     passes, and one that always passes must never run. `null === null` would MATCH.
+  //
+  //     This refuses even when a perfectly good, freshly-written PASS is sitting in the store. That
+  //     is correct and intended: without a build id we cannot tell whether that pass is about THIS
+  //     code or about something deployed weeks ago. "Probably fine" is not what this gate answers.
+  if (!buildIsBound(expect)) {
+    return no(HEALTH_REASON.BUILD_UNRESOLVED,
+      `the running code has no resolvable build identifier, so no health record can be shown to vouch for it. ${expect?.buildDetail ?? ""}`.trim(),
+      { running: expect ?? null, buildSources: BUILD_ID_SOURCES });
+  }
 
   // 1 — could we even read the store? An unreadable health record is NOT a healthy one.
   if (readable !== true) {

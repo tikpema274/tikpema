@@ -22,6 +22,14 @@ import { codeIdentity, evaluateHealth, HEALTH_REASON, DEFAULT_TTL_MS } from "../
 // ⚠️ dd-analyze's exposure gate (RUNG -1, unset = DISABLED) sits before every other rung. This suite
 // exercises the rungs BEHIND it, so open it explicitly rather than letting a 503 masquerade as a
 // failure of the logic under test. The gate's own coverage is scripts/dd/verify-dd-exposure.mjs.
+// ⭐ A REAL BUILD ID, because "unknown" is exactly the bug this suite failed to catch. The build
+// binding used to fall back to the literal string "unknown" on BOTH the canary and the endpoint, so
+// it compared equal to itself and the deploy gate silently became a no-op. Every suite here ran in
+// ONE process with ONE env, where both sides are trivially identical — which is why none of them
+// could ever have seen it. A binding is only testable across the thing it binds, so these now run
+// with a resolvable id and the cross-build cases live in verify-build-binding.mjs.
+process.env.DD_BUILD_ID = process.env.DD_BUILD_ID || "test-build-0000000000000000000000000000000000000000";
+
 process.env.DD_PUBLIC_ENABLED = "1";
 
 let pass = 0, fail = 0;

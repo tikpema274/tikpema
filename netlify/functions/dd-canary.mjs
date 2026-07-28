@@ -20,7 +20,7 @@ import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { SCHEMA_VERSION } from "../../shared/onchain-analyze/schema.mjs";
 import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
 import { runFixtures } from "../../shared/dd-canary/fixtures.mjs";
-import { codeIdentity, shouldSkipRerun, MIN_RERUN_MS } from "../../shared/dd-canary/health.mjs";
+import { codeIdentity, shouldSkipRerun, buildIsBound, BUILD_ID_SOURCES, MIN_RERUN_MS } from "../../shared/dd-canary/health.mjs";
 import { readHealth, writeHealth } from "./_dd-health.mjs";
 
 // ═══ ⭐ SAFE-PUBLIC: A TRIGGER, NOT AN ORACLE ═════════════════════════════════════════════════
@@ -48,6 +48,27 @@ import { readHealth, writeHealth } from "./_dd-health.mjs";
 export async function handler(event) {
   if (event?.blobs) connectLambda(event);
   const identity = codeIdentity({ schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS });
+
+  // ── ⭐ RUNG 0: CAN THIS RUN VOUCH FOR ANYTHING AT ALL? ───────────────────────────────────────
+  // Refuse BEFORE sweeping if the build cannot be identified. Running the fixtures and writing a
+  // PASS would be actively misleading: the record could never satisfy the endpoint's gate, yet this
+  // handler would answer `ok:true, wrote:true` — a green canary next to a refusing service, with
+  // nothing connecting the two. That exact combination is what made this defect hard to diagnose.
+  //
+  // ⚠️ The old code could not reach this state because `build` fell back to "unknown" on BOTH sides,
+  // which MATCHED — so the binding silently became a no-op instead of failing. Refusing loudly here
+  // is the whole point of the change.
+  if (!buildIsBound(identity)) {
+    return json(503, {
+      ok: false,
+      reran: false,
+      wrote: false,
+      reason: "build-unresolved",
+      detail: identity.buildDetail,
+      identity,
+      remedy: `set one of ${BUILD_ID_SOURCES.join(", ")} on this deploy — DD_BUILD_ID is the explicit lever when the platform provides none (e.g. a CLI manual deploy, which runs no build and therefore sets no build-time variables).`,
+    });
+  }
 
   // ── ANTI-AMPLIFICATION: reuse a recent run rather than re-sweeping on every hit ──────────────
   // Today's fixtures are hermetic (no RPC), so a hit costs CPU and one Blobs round trip rather than
