@@ -1,3 +1,117 @@
+---
+
+## 2026-07-28 — DD SERVICE: engine COMPLETE, facilitator DECIDED + DE-RISKED (not built). x402 phantom-charge fixed in prod code.
+
+**Everything below is on `main` and pushed. NOTHING is deployed to prod** — all wire-proof ran on
+DRAFT deploys, deliberately (see the exposure trap below). Covers the DD engine finish (endpoint,
+settle-gate, ERC-1271 attestation, canary), the facilitator decisions, and two defects found and
+fixed in the already-shipped `x402-quote`.
+
+### DD ENGINE — COMPLETE
+- **`POST /api/dd-analyze`** (`885d1be`) — analyze() exposed. Wire-verified on a draft: 108/0, including
+  the property only a real deploy can show — Netlify does NOT interpose its own error page on bad input,
+  so the handler's structured 400/405 refusals arrive intact.
+- **ERC-1271 attestation under agentId 851891** (`375993f`) — canon/1 + signing, 55/0 incl. a live pass.
+  Binding is two on-chain reads (`ownerOf` → the SCA, then `isValidSignature` → `0x1626ba7e`); nothing
+  is declared, so nothing must be trusted. ⚠️ The digest is the **EIP-191** hash, NOT raw keccak256 —
+  raw returns `0xffffffff` and a verifier hashing report bytes directly reads a VALID signature as
+  invalid.
+- **x402 settle-gate** (`d9df4fa`) — 48/0. ⭐ Charge for answers, not outages. The gate is NOT "did
+  analyze() return a report object" (that would have CHARGED FOR AN OUTAGE — analyze returns a report
+  for everything except programmer error); it requires a report + a coverage manifest accounting for the
+  whole catalogue + `refusal === null`. THIN reports settle; outages do not.
+- **Canary + safe-public schedule** (`1f6f106`, `ff46b1d`) — 54/0 and 58/0. Dead-man's switch INVERTED:
+  the canary only ever writes PASS, so absence / staleness / unreadability / version-drift all REFUSE.
+  12 ways it can die, none returns `serve:true`. Public invocation is safe by ABSENCE OF A CHANNEL — the
+  handler reads only platform-injected `event.blobs`; 9 hostile payloads + an empty request produced
+  BYTE-IDENTICAL records.
+
+🚨 **THE PUBLIC ROUTE IS NOT "WITHHELD" IN CODE — THAT IS A TRAP, NOT A DECISION.** The
+`/api/dd-analyze` redirect is COMMITTED in `netlify.toml`. Prod is clean today only because nobody has
+run `netlify deploy --prod`; the next one publishes a free public signed-attestation endpoint (and the
+`dd-canary` cron) with no further action. Netlify has no per-function deploy. **Deployed-but-inert
+requires an in-code fail-closed flag (unset = DISABLED) — NOT removing the redirect**, because every
+deployed function is reachable at `/.netlify/functions/<name>` regardless of redirects. NOT BUILT.
+
+### FACILITATOR — decided + de-risked, BUILD NOT STARTED
+- **Confirmation read**: `availableBalance(USDC, payTo)` on GatewayWallet
+  `0x0077777d7EBA4688BDeF3E311b846F25870A19B9`, selector **`0x3ccb64ae`**, threshold against a baseline
+  snapshotted BEFORE settle. Fail-closed: an unreadable balance is INDETERMINATE, never "unpaid".
+  ⚠️ **NOT nonce-scoped, and NOT per-payment attributable.** `authorizationState(address,bytes32)`
+  (`0xe94a0102`) exists on Arc USDC but **REVERTS on GatewayWalletBatched**, so the exact per-payment
+  read is unavailable on this path. `availableBalance` is an AGGREGATE, so concurrent equal-amount
+  payments CROSS-CONFIRM. Aggregate-correct only — do not let anything needing true attribution inherit
+  it. (A dedicated payTo is what keeps it sound at all.)
+- **payTo**: dedicated revenue wallet **`0xb407967319d56218c7e1c369125490e665a16ac4`**
+  (walletId `819fe387-f553-554d-b095-9b7ced9e49a4`, `235d6dc`). Verified 0.000000 at creation. ⭐ Its
+  zero history IS the design — Transfer/balance reconciliation is attributable ONLY if the wallet's
+  entire history is DD revenue. **It must receive nothing else and must not be funded.** Every existing
+  wallet was disqualified by holding a float (VANILLA_SELLER's non-round 0.308114 = prior receipts).
+- **v1 pricing**: flat **$0.06/report**. Thin and unknown-shape reports SETTLE — coverage is a
+  first-class answer and the manifest ships inside the artifact.
+- **Shape**: `402 → pay → 202 + handle → retrieve → 200`. Built and WIRE-PROVEN on `x402-quote`
+  (`1ac1388`), end-to-end on a real draft deploy: 165 retrieve polls all `202`, then `200` with evidence
+  `baseline 8000 → balanceNow 9000, amount 1000`.
+
+### ⭐ SETTLEMENT LATENCY IS UNTUNABLE — the most important finding
+Measured by real settlements (`scripts/dd/probe-settlement.mjs`, `probe-settlement-batch.mjs`):
+
+| sample | latency |
+| --- | --- |
+| 1 | ~3 min |
+| 2 | 14.5 min |
+| 3 | **41.9 s** |
+| 4 | **928.3 s (15.5 min)** |
+| 5 | **930.1 s (15.5 min)** |
+
+**~22x spread**, and samples 4-5 EXCEEDED the 15-minute `RETRIEVE_TIMEOUT_MS`. There is no safe fixed
+number: one sample under a minute, three over fourteen.
+
+⚠️ **Samples 4 and 5 landed within 2 SECONDS of each other** (928.3 s, 930.1 s) after an outlier at
+41.9 s — consistent with a **periodic batch flush**, where latency is "time until the next flush"
+rather than a per-payment cost. That would bound the tail near the flush interval instead of leaving
+it open-ended. **NOT asserted** — a hypothesis from five points, and the batch was still running when
+this was written. It changes nothing about the design either way: the entitlement must not depend on
+the number. **So timeouts bound POLLING ADVICE ONLY and must
+NEVER gate the entitlement.** Proven, not argued — sample 4 blew the timeout and the artifact was still
+delivered, because the handle stays redeemable and a timed-out payment stays PENDING rather than
+decaying to failed or paid. ⭐ *Choose the failure direction so a wrong number costs a round trip, never
+a paid-for entitlement.*
+
+⚠️ Two latency figures previously cited were NOT measurements: "~470 ms" was **canned demo text** inside
+`liveDataset()`, and "7 days" was over-reading `minValiditySeconds` (which bounds the AUTHORISATION's
+validity, not settlement).
+
+### x402-quote — TWO defects found in shipped code, both fixed
+1. **Phantom charge, mirror image** (`1ac1388`) — it served the artifact on `facilitator.settle()`
+   success, which is ~3 min to 15.5 min BEFORE the money moves. Now serves on CONFIRMATION. The shape
+   change was unavoidable: the file's own header said settlement "must finish inline", impossible at
+   minutes against a 10s ceiling. Buyer (`_x402.mjs`) taught the 202 shape in the same commit — without
+   it a working payment reads as a 502 seller failure. 34/0.
+   ⚠️ Settlement is an **INTERNAL GATEWAY LEDGER credit, NOT an ERC-20 Transfer** — payTo's token
+   balance never moves and ZERO Transfer logs are emitted, so the obvious `eth_getLogs` confirmation
+   would have found nothing FOREVER while failing to look exactly like "payments pending".
+2. **Fiction labelled as fact** (`b906a42`) — the payload asserted invented figures as present-tense
+   measurements. ⭐ The honest qualifier was in the field being DISCARDED: `extractFacts` resolves
+   `source: String(f.source ?? src)`, so a fact's own source wins and the honest fallback applies only
+   when a fact has none. Fixed at the per-fact `source`; `asOf` → null (a fresh timestamp on unmeasured
+   values is what made them read as current); the precise `~0.92 s` figure REMOVED rather than
+   relabelled; the `~470 ms` claim now states it was wrong and gives the measured range.
+   🚨 This was not hypothetical: that fabricated ~470 ms was cited back as EVIDENCE in this thread's own
+   design discussion while probes measured 42 s to 15.5 min.
+
+### Commits this thread
+`75bd7bc` probe · `235d6dc` revenue wallet · `1ac1388` x402-quote phantom fix (both sides) ·
+`b906a42` x402-quote relabelled honest · (earlier: `885d1be` endpoint, `375993f` attestation,
+`d9df4fa` settle-gate, `1f6f106` canary, `ff46b1d` safe-public schedule)
+
+### Honest limits
+- **Nothing is deployed to prod.** All wire-proof is on draft deploys.
+- The DD `/api` route is committed — see the trap above. The inert-deploy flag is NOT built.
+- Facilitator build not started. `SettleResponse.transaction` contents still unknown (`_x402.mjs`
+  discards the receipt).
+- x402-quote is publicly payable by anyone; now honestly labelled, still a demo instrument.
+
 
 ---
 
