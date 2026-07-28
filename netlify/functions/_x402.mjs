@@ -36,9 +36,21 @@ import { BatchEvmScheme } from "@circle-fin/x402-batching/client";
 import { circle } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS, maxSpendUsdc } from "./_arc.mjs";
 import { GATEWAY } from "./_gateway.mjs";
+// The seller's provisional retrieve window, IMPORTED rather than re-declared. A second copy would
+// drift from the seller's the moment the probe re-runs and the number is revised — and the whole
+// point of it being provisional is that it will be.
+import { RETRIEVE_TIMEOUT_MS, RETRIEVE_TIMEOUT_PROVENANCE } from "./_x402-confirm.mjs";
 
 // The seller this buyer pays — Tikpema's own already-live x402 endpoint. Callers
 // override via sellerUrl; defaults to the deployed seller.
+// Poll cadence + budgets for the seller's 202→retrieve contract. RETRIEVE_TIMEOUT_MS is IMPORTED,
+// not re-declared — a second copy of that number would drift from the seller's, and the whole point
+// of it being provisional is that it changes when the probe re-runs.
+const POLL_INTERVAL_MS = 2000;
+/** Function-safe default: payX402 is called inside a Netlify handler under a 10s ceiling, so it must
+ *  NOT try to outlast confirmation. A CLI caller passes something generous instead. */
+export const DEFAULT_POLL_BUDGET_MS = 6000;
+
 export const DEFAULT_SELLER_URL = "https://app.tikpema.xyz/.netlify/functions/x402-quote";
 
 // What we REQUIRE the seller's 402 to declare before we will sign anything. A
@@ -167,7 +179,7 @@ export async function fetchX402Requirements({ sellerUrl, requestBody } = {}) {
 // optional pre-fetched result from fetchX402Requirements() — when supplied, payX402
 // skips its own 402 fetch and uses it (so the gated price == the signed price).
 // `jobContext` is reserved and intentionally unused.
-export async function payX402({ sellerUrl, challenge, approvedUsdc, requireApproved, jobContext, requestBody } = {}) {
+export async function payX402({ sellerUrl, challenge, approvedUsdc, requireApproved, jobContext, requestBody, pollBudgetMs = DEFAULT_POLL_BUDGET_MS } = {}) {
   const resolvedSeller = sellerUrl || DEFAULT_SELLER_URL;
 
   // x402 BUYER wallet. The batched Gateway scheme requires ecrecover(sig) == from
@@ -305,6 +317,85 @@ export async function payX402({ sellerUrl, challenge, approvedUsdc, requireAppro
       sellerBody = paidText.slice(0, 1000);
     }
 
+    // ═══ ⭐ 202 = ACCEPTED, NOT PAID — the seller now withholds the artifact ═════════════════════
+    // The seller used to return 200 + data on facilitator acceptance. A measured settlement showed
+    // that acceptance precedes the money by ~3 minutes, so it now returns 202 + a handle and serves
+    // only once payTo's Gateway balance reflects the payment. This branch is the buyer half of that
+    // contract; without it a 202 would fall through below and be reported as a 502 seller failure.
+    //
+    // ⚠️ THE BUYER CANNOT WAIT EITHER. payX402 runs inside a Netlify function under a 10s ceiling
+    // while confirmation takes minutes, so polling to the seller's full timeout is impossible here.
+    // The poll budget is therefore a PARAMETER: small by default (function-safe), generous for a CLI
+    // caller like scripts/dd/probe-settlement.mjs that can afford to wait.
+    //
+    // ⭐ RUNNING OUT OF BUDGET IS NOT A FAILURE. It returns pending:true WITH the handle, and the
+    // handle stays redeemable indefinitely — the seller's entitlement never expires. So an under-set
+    // budget costs a round trip and can never void a paid entitlement, exactly as on the seller side.
+    if (paid.status === 202) {
+      const handle = sellerBody?.handle ?? paid.headers.get("x-payment-handle");
+      const retrieveUrl = sellerBody?.retrieve
+        ?? (handle ? `${resolvedSeller}?handle=${encodeURIComponent(handle)}` : null);
+      if (!handle || !retrieveUrl) {
+        return { status: 502, body: { executed: false, step,
+          error: "Seller returned 202 without a usable handle — cannot retrieve the paid artifact", sellerBody } };
+      }
+
+      step = "retrieve";
+      const deadline = Date.now() + pollBudgetMs;
+      let last = sellerBody;
+      let polls = 0;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        polls++;
+        let got;
+        try {
+          got = await fetch(retrieveUrl, { method: "GET" });
+        } catch (e) {
+          last = { pollError: String(e?.message ?? e) };   // transient — keep polling
+          continue;
+        }
+        const text = await got.text();
+        try { last = JSON.parse(text); } catch { last = text.slice(0, 500); }
+        if (got.status === 200) {
+          return {
+            status: 200,
+            body: {
+              executed: true, seller: resolvedSeller, payer, priceUsdc, atomic,
+              payTo: requirements.payTo, handle, polls,
+              payment: last?.payment ?? { status: "confirmed", confirmed: true },
+              settleReceipt: decodeReceipt(paid),
+              sellerBody: last,
+            },
+          };
+        }
+        // 202 → still confirming. 404/5xx → stop; something is wrong with the handle itself.
+        if (got.status !== 202) {
+          return { status: 502, body: { executed: false, step, handle, polls,
+            error: `retrieve returned ${got.status}`, sellerBody: last } };
+        }
+      }
+
+      // Budget exhausted. NOT an error, and emphatically not "unpaid".
+      return {
+        status: 202,
+        body: {
+          executed: false,
+          pending: true,
+          seller: resolvedSeller, payer, priceUsdc, atomic, payTo: requirements.payTo,
+          handle, retrieve: retrieveUrl, polls,
+          payment: { status: "accepted", confirmed: false },
+          detail:
+            "The payment was ACCEPTED into a settlement batch but the chain has not yet witnessed it, " +
+            "and this caller's poll budget ran out first. This is NOT a failure and NOT a refund case.",
+          entitlement:
+            "PERMANENT — the handle stays redeemable. Retrieve again later; a late-settling batch is still honoured.",
+          pollBudgetMs, retrieveTimeoutMs: RETRIEVE_TIMEOUT_MS,
+          retrieveTimeoutProvenance: RETRIEVE_TIMEOUT_PROVENANCE,
+          settleReceipt: decodeReceipt(paid),
+        },
+      };
+    }
+
     if (paid.status !== 200) {
       return {
         status: paid.status === 402 ? 402 : 502,
@@ -361,4 +452,12 @@ export async function payX402({ sellerUrl, challenge, approvedUsdc, requireAppro
       },
     };
   }
+}
+
+/** Decode the settle receipt from a PAYMENT-RESPONSE header. Never throws — a receipt we cannot
+ *  read is metadata we lack, not a payment failure. */
+function decodeReceipt(res) {
+  const b64 = res?.headers?.get?.("payment-response");
+  if (!b64) return null;
+  try { return b64decode(b64); } catch { return { decodeError: "PAYMENT-RESPONSE not base64 JSON" }; }
 }

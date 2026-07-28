@@ -16,7 +16,38 @@
 // Synchronous function (NOT -background): the buyer holds the connection open
 // across the 402 → pay → 200 round trip, so settlement must finish inline.
 
+// ═══ ⭐ THIS ENDPOINT SERVES ON CONFIRMATION, NOT ON ACCEPTANCE ═══════════════════════════════
+// It used to return 200 + the dataset the moment facilitator.settle() reported success. A real
+// settlement was then MEASURED (scripts/dd/probe-settlement.mjs): `success:true` came back while the
+// money sat untouched for ~3 MINUTES. So the old flow served the artifact roughly three minutes
+// before the payment existed — the phantom charge in mirror image, in production.
+//
+// The flow is therefore no longer a single round trip. It CANNOT be: this is a synchronous function
+// under a 10s ceiling and confirmation takes minutes, so "wait inline" is not available at any price.
+//   402 → pay → 202 + handle → retrieve(handle) → 200 once the Gateway balance reflects the payment.
+//
+// ⚠️ The exposure here is low — the payload is a canned testnet stand-in — and the fix is applied
+// ANYWAY, deliberately. Leaving one documented "serve-on-acceptance is fine here" endpoint means the
+// next person to make it serve something real inherits a serve-before-confirm design.
+
+import { getStore, connectLambda } from "@netlify/blobs";
+import { randomUUID } from "node:crypto";
 import { BatchFacilitatorClient } from "@circle-fin/x402-batching/server";
+import { readGatewayBalance, confirmPayment, CONFIRM_REASON, RETRIEVE_TIMEOUT_MS, RETRIEVE_TIMEOUT_PROVENANCE } from "./_x402-confirm.mjs";
+
+const PENDING_STORE = "x402-quote-pending";
+const ARC_RPC = "https://rpc.testnet.arc.network";
+
+/** Transport for the Gateway balance read. Injected into _x402-confirm so that module stays testable. */
+const rpcCall = async ({ method, params }) => {
+  const r = await fetch(ARC_RPC, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message || "rpc error");
+  return j.result;
+};
 
 // --- Arc Testnet / Gateway batching constants (do not change) ---------------
 const NETWORK = "eip155:5042002"; // Arc Testnet, CAIP-2
@@ -90,6 +121,17 @@ function paymentRequirements(resource) {
 }
 
 export async function handler(event) {
+  if (event?.blobs) connectLambda(event);
+
+  // ── RETRIEVE: the second half of the round trip ────────────────────────────────────────────
+  // A handle is only ever redeemable for the artifact once payTo's Gateway balance actually
+  // reflects the payment. Until then this returns 202 — never the dataset.
+  {
+    const q = event.queryStringParameters || {};
+    const handle = q.handle || (event.headers || {})["x-payment-handle"];
+    if (handle) return await retrieve(handle);
+  }
+
   if (!process.env.SELLER_ADDRESS) {
     return {
       statusCode: 500,
@@ -156,6 +198,21 @@ export async function handler(event) {
       };
     }
 
+    // ⭐ SNAPSHOT BEFORE SETTLING. The confirmation test is a threshold against this baseline, so it
+    // must be read before the money can possibly move. An unreadable baseline is fatal to the whole
+    // test — refuse rather than settle a payment we could never confirm.
+    const baseline = await readGatewayBalance({ rpcCall, payTo: requirements.payTo });
+    if (baseline === null) {
+      return {
+        statusCode: 503,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          error: "Cannot establish a payment baseline",
+          detail: "payTo's Gateway balance could not be read, so a settled payment could never be confirmed. Refusing to settle rather than take a payment we cannot verify landed.",
+        }),
+      };
+    }
+
     const settlement = await facilitator.settle(payload, requirements);
     if (!settlement?.success) {
       return {
@@ -172,14 +229,43 @@ export async function handler(event) {
       };
     }
 
-    // Paid. Serve the canned research dataset + the settle receipt for the buyer.
+    // ⛔ ACCEPTED — NOT PAID. This is the ~3-minute window the probe measured, and it is exactly
+    // where the artifact used to be handed over. Nothing is served here. The payment is recorded
+    // against its baseline and the caller gets a handle to redeem once the chain agrees.
+    const handle = randomUUID();
+    await getStore(PENDING_STORE).setJSON(handle, {
+      handle,
+      payTo: requirements.payTo,
+      amountAtomic: requirements.maxAmountRequired,
+      baseline: baseline.toString(),
+      settledAt: Date.now(),
+      payer: settlement.payer ?? null,
+      settleTransaction: settlement.transaction ?? null,
+      settleNetwork: settlement.network ?? null,
+      served: false,
+    });
+
     return {
-      statusCode: 200,
+      statusCode: 202,
       headers: {
         "Content-Type": "application/json",
         "PAYMENT-RESPONSE": b64encode(settlement),
+        "X-PAYMENT-HANDLE": handle,
       },
-      body: JSON.stringify({ ok: true, ts: Date.now(), dataset: liveDataset() }),
+      body: JSON.stringify({
+        ok: false,
+        served: false,
+        handle,
+        retrieve: `${resource}?handle=${handle}`,
+        payment: {
+          status: "accepted",
+          confirmed: false,
+          meaning:
+            "Circle's facilitator accepted this authorization into a settlement batch. The chain has NOT yet witnessed the transfer, so this is not a receipt and the artifact is not served yet. Measured settlement latency was ~3 minutes (n=1).",
+        },
+        retrieveTimeoutMs: RETRIEVE_TIMEOUT_MS,
+        retrieveTimeoutProvenance: RETRIEVE_TIMEOUT_PROVENANCE,
+      }),
     };
   } catch (e) {
     return {
@@ -189,3 +275,75 @@ export async function handler(event) {
     };
   }
 }
+
+// ═══ RETRIEVE — the ONLY path that can hand over the artifact ═════════════════════════════════
+// It serves if and only if confirmPayment() says the Gateway balance cleared the threshold. Every
+// other outcome — pending, indeterminate, unreadable, malformed — returns 202 and no data.
+//
+// ⭐ THE ENTITLEMENT NEVER EXPIRES. The pending record outlives RETRIEVE_TIMEOUT_MS, so a payment
+// that confirms late is still redeemable by the same handle. The timeout only stops recommending
+// that the caller keep polling. That is what makes a provisional (n=1) number safe: getting it wrong
+// costs a round trip, never a paid-for artifact.
+async function retrieve(handle) {
+  const store = getStore(PENDING_STORE);
+  let rec = null;
+  try {
+    rec = await store.get(handle, { type: "json" });
+  } catch {
+    // Store unreadable ≠ no such payment. Fail closed toward the caller: tell them to retry.
+    return json202({ handle, status: CONFIRM_REASON.INDETERMINATE,
+      detail: "the pending-payment store could not be read; this is not a statement that you did not pay. Retry." });
+  }
+  if (!rec) {
+    return {
+      statusCode: 404,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "unknown handle", handle }),
+    };
+  }
+
+  const balanceNow = await readGatewayBalance({ rpcCall, payTo: rec.payTo });
+  const verdict = confirmPayment({
+    balanceNow,
+    baseline: rec.baseline,
+    amountAtomic: rec.amountAtomic,
+    settledAt: rec.settledAt,
+    now: Date.now(),
+  });
+
+  if (!verdict.confirmed) {
+    return json202({
+      handle,
+      status: verdict.reason,
+      detail: verdict.detail,
+      evidence: verdict.evidence,
+      payment: { status: "accepted", confirmed: false },
+      retrieveTimeoutMs: RETRIEVE_TIMEOUT_MS,
+      retrieveTimeoutProvenance: RETRIEVE_TIMEOUT_PROVENANCE,
+      entitlement: "PERMANENT — this handle stays redeemable after the timeout. A late-settling batch is still honoured.",
+    });
+  }
+
+  // Confirmed on-chain. Now, and only now, the artifact.
+  try {
+    await store.setJSON(handle, { ...rec, served: true, servedAt: Date.now(), confirmedEvidence: verdict.evidence });
+  } catch { /* serving matters more than the bookkeeping write; a re-serve is harmless */ }
+
+  return {
+    statusCode: 200,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ok: true,
+      served: true,
+      ts: Date.now(),
+      payment: { status: "confirmed", confirmed: true, evidence: verdict.evidence },
+      dataset: liveDataset(),
+    }),
+  };
+}
+
+const json202 = (body) => ({
+  statusCode: 202,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ ok: false, served: false, ...body }),
+});

@@ -88,9 +88,14 @@ if (!CONFIRM) {
 
 // ── settle ONE real payment ───────────────────────────────────────────────────────────────────
 console.log("\n── paying (0.001 USDC from the DELEGATE Gateway balance) ───────────");
-const res = await payX402({ sellerUrl: DEFAULT_SELLER_URL, challenge: chal, approvedUsdc: 0.01, requireApproved: false });
+// ⭐ A CLI probe can afford to wait where a Netlify function cannot: pass a generous poll budget so
+// the 202 → retrieve → 200 round trip completes here instead of returning pending.
+const POLL_BUDGET_MS = 6 * 60 * 1000;   // ~2x the single observed ~3min settlement. PROVISIONAL (n=1).
+const res = await payX402({ sellerUrl: DEFAULT_SELLER_URL, challenge: chal, approvedUsdc: 0.01, requireApproved: false, pollBudgetMs: POLL_BUDGET_MS });
 console.log(`  http status : ${res.status}`);
 console.log(`  executed    : ${res.body?.executed}`);
+console.log(`  pending     : ${res.body?.pending ?? false}   handle: ${res.body?.handle ?? "-"}   polls: ${res.body?.polls ?? 0}`);
+if (res.body?.pending) console.log(`  ⚠️ budget exhausted before confirmation — NOT a failure; handle stays redeemable`);
 if (res.body?.blocked) console.log(`  BLOCKED     : ${res.body.blocked}`);
 
 // ⭐ Q1 — what is actually in the settlement receipt?
