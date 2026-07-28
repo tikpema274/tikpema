@@ -53,30 +53,51 @@ deployed function is reachable at `/.netlify/functions/<name>` regardless of red
   (`1ac1388`), end-to-end on a real draft deploy: 165 retrieve polls all `202`, then `200` with evidence
   `baseline 8000 → balanceNow 9000, amount 1000`.
 
-### ⭐ SETTLEMENT LATENCY IS UNTUNABLE — the most important finding
-Measured by real settlements (`scripts/dd/probe-settlement.mjs`, `probe-settlement-batch.mjs`):
+### ⭐ SETTLEMENT LATENCY — a ~15.4 min BATCH FLUSH CYCLE, not open-ended variance
+Measured by real settlements (`scripts/dd/probe-settlement.mjs`, `probe-settlement-batch.mjs`),
+n=5 confirmed of 5 attempted:
 
-| sample | latency |
+**RANDOM-PHASE samples — these characterise a real payment** (each fired cold, from a separate probe
+run, so it arrived at an arbitrary point in the cycle):
+
+| # | latency |
 | --- | --- |
-| 1 | ~3 min |
-| 2 | 14.5 min |
-| 3 | **41.9 s** |
-| 4 | **928.3 s (15.5 min)** |
-| 5 | **930.1 s (15.5 min)** |
+| A | **41.9 s** |
+| B | ~3 min |
+| C | 14.5 min |
 
-**~22x spread**, and samples 4-5 EXCEEDED the 15-minute `RETRIEVE_TIMEOUT_MS`. There is no safe fixed
-number: one sample under a minute, three over fourteen.
+**SEQUENTIAL samples — these measure the CYCLE, not a payment** (each fired immediately after the
+previous confirmed, i.e. right after a flush, so each waited a full cycle):
 
-⚠️ **Samples 4 and 5 landed within 2 SECONDS of each other** (928.3 s, 930.1 s) after an outlier at
-41.9 s — consistent with a **periodic batch flush**, where latency is "time until the next flush"
-rather than a per-payment cost. That would bound the tail near the flush interval instead of leaving
-it open-ended. **NOT asserted** — a hypothesis from five points, and the batch was still running when
-this was written. It changes nothing about the design either way: the entitlement must not depend on
-the number. **So timeouts bound POLLING ADVICE ONLY and must
-NEVER gate the entitlement.** Proven, not argued — sample 4 blew the timeout and the artifact was still
-delivered, because the handle stays redeemable and a timed-out payment stays PENDING rather than
-decaying to failed or paid. ⭐ *Choose the failure direction so a wrong number costs a round trip, never
-a paid-for entitlement.*
+| # | latency |
+| --- | --- |
+| D | 928.3 s (15.5 min) |
+| E | 930.1 s (15.5 min) |
+| F | 929.4 s (15.5 min) |
+| G | 914.7 s (15.2 min) |
+
+⭐ **D-G agree to within 15 s on ~925 s (1.7% variation). That is a CLOCK, not a distribution — the
+Gateway BATCH FLUSH INTERVAL, measured four times.** And A-C (0.7 / 3 / 14.5 min) are spread across
+that interval exactly as uniform arrival into a fixed cycle predicts.
+
+🚨 **METHODOLOGICAL FLAW, stated because it inverts the naive reading.** The batch prober is
+STRICTLY SEQUENTIAL — necessarily so, because concurrent payments to one payTo CROSS-CONFIRM against
+an aggregate balance and would have fabricated a fast distribution. But sequencing means each run
+fired *immediately after the previous one confirmed*, i.e. immediately after a flush, so every run
+after the first waited a FULL cycle. **The design systematically worst-cased samples 2-5.** Only
+sample 1 (41.9 s) observed a random arrival phase.
+
+**So the earlier "untunable, ~22x spread" framing was TOO STRONG and is corrected here.** The 22.2x
+figure is a measurement artifact, not system variability. For a randomly-timed payment the expected
+behaviour is ~uniform over **(0, ~15.4 min)**, averaging ~7.7 min, with the tail **BOUNDED BY THE
+FLUSH CYCLE** rather than open-ended.
+
+**What survives the correction, and is still the point:** a payment DID exceed the 15-minute
+`RETRIEVE_TIMEOUT_MS` and the artifact was **still delivered**, because timeouts bound POLLING ADVICE
+ONLY and never gate the entitlement. That structural property does not depend on the flush interval
+being knowable — and a flush interval is Circle infrastructure that can change without notice, so an
+entitlement that survives a wrong timeout stays correct either way. ⭐ *Choose the failure direction
+so a wrong number costs a round trip, never a paid-for entitlement.*
 
 ⚠️ Two latency figures previously cited were NOT measurements: "~470 ms" was **canned demo text** inside
 `liveDataset()`, and "7 days" was over-reading `minValiditySeconds` (which bounds the AUTHORISATION's
