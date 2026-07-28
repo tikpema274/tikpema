@@ -19,10 +19,35 @@
 //   1. a report object at all                    (nothing came back → nothing to sell)
 //   2. a coverage manifest that ACCOUNTS FOR THE WHOLE CATALOGUE
 //   3. refusal === null
+//   4. a VERIFIABLE SIGNED ATTESTATION
 //
 // (2) and (3) independently catch an outage, which is the point of having both. A `chain-unreachable`
 // report carries an EMPTY manifest (baseReport's skeleton, never populated because nothing ran), so
 // it fails (2) even before (3) is consulted. Two structural facts, one conclusion.
+//
+// ═══ ⭐ WHY (4): SETTLING ON AN UNSIGNED REPORT SELLS X AND DELIVERS NOT-X ════════════════════
+// The 402 challenge advertises "a signed on-chain due-diligence report… ERC-1271, verifiable against
+// the on-chain owner of agentId 851891". Signing is a live Circle round trip, and attachAttestation
+// DEGRADES to {status:"unsigned"} rather than failing — deliberately, so a signer outage cannot
+// destroy an otherwise-good report. But "do not destroy the report" and "charge full price for it"
+// are different decisions, and only the first one was ever made.
+//
+// A signer outage is OUR failure, in exactly the same category as the RPC outage that already does
+// not settle. Charging for it is charging for our own outage. And the caller who paid for a signed
+// report and received an unsigned one has been given the phantom-charge treatment this codebase
+// prevents everywhere else — the same advertised-vs-delivered defect class as x402-quote's
+// "real-time feed" label over canned values.
+//
+// FAIL-CLOSED, therefore: attestation ABSENT, `unsigned`, indeterminate, or any status this gate does
+// not recognise → DOES NOT SETTLE. Only a positively-established signed attestation settles, and
+// "signed" means the artifact actually carries what a verifier needs to check it — a status field
+// with no signature behind it is a claim, not an attestation, and must never be enough.
+//
+// ⚠️ WHAT THIS PREDICATE CANNOT DO. It is pure and synchronous, so it cannot call isValidSignature
+// and does not pretend to. It establishes that the artifact is VERIFIABLE — every field a verifier
+// needs is present and well-formed — never that the signature is valid. That check belongs to the
+// verifier (scripts/dd/verify-attestation.mjs, eth_call → 0x1626ba7e), and stating the boundary here
+// is what stops "the gate checked it" being read as "the signature is good".
 //
 // ═══ WHY THIS IS AN ALLOWLIST, NOT A DENYLIST ═════════════════════════════════════════════════
 // The gate settles only on a positively-established answer. A denylist ("settle unless the reason is
@@ -43,7 +68,17 @@ export const SETTLE_REASON = Object.freeze({
   NO_COVERAGE_MANIFEST: "no-coverage-manifest",
   COVERAGE_UNACCOUNTED: "coverage-unaccounted",
   REFUSED: "refused",
+  UNSIGNED: "unsigned-attestation",
+  ATTESTATION_UNVERIFIABLE: "attestation-unverifiable",
 });
+
+/** The ONLY attestation status that may be charged for. A set, not a truthiness check, so a status
+ *  nobody anticipated is refused rather than coerced into meaning "fine". */
+const CHARGEABLE_ATTESTATION_STATUS = new Set(["signed"]);
+
+/** Fields a verifier MUST have to check the signature at all. Their presence does not make the
+ *  signature valid — it makes the claim checkable, which is the most a pure predicate can establish. */
+const REQUIRED_ATTESTATION_FIELDS = ["signature", "agentId", "verifyingContract", "chainId"];
 
 /**
  * Decide whether this report may be charged for.
@@ -91,6 +126,35 @@ export function settleDecision(report) {
       { refusalReason: report.refusal.reason });
   }
 
+  // 4 — is the artifact the SIGNED one we advertised?
+  //     Checked LAST, after refusal, so the more specific cause wins: a refusal report is unsigned by
+  //     design (signing anonymous malformed input would make this a signing oracle), and reporting
+  //     that as "unsigned" instead of "refused" would name our symptom rather than the real reason.
+  const att = report.attestation;
+  if (!att || typeof att !== "object" || !CHARGEABLE_ATTESTATION_STATUS.has(att.status)) {
+    return no(SETTLE_REASON.UNSIGNED,
+      "the report could not be signed on this run, so it is not the signed attestation that was quoted. " +
+      "A signer outage is OUR failure, in the same category as an unreachable chain — charging for it " +
+      "would be charging for our own outage, and delivering an unsigned report against a price quoted " +
+      "for a signed one would be selling one thing and handing over another. No charge; retry.",
+      { attestationStatus: att && typeof att === "object" ? (att.status ?? "absent-status") : att === undefined ? "absent" : typeof att });
+  }
+  const missingFields = REQUIRED_ATTESTATION_FIELDS.filter((f) => {
+    const v = att[f];
+    return v === undefined || v === null || String(v).trim() === "";
+  });
+  const sigWellFormed = typeof att.signature === "string" && /^0x[0-9a-fA-F]+$/.test(att.signature);
+  if (missingFields.length || !sigWellFormed) {
+    // ⭐ status:"signed" is a CLAIM. Without the fields a verifier needs, nobody can ever check it,
+    // and an unverifiable attestation is worth exactly as much as no attestation — so it is priced
+    // the same. Refusing here also means a bug in the signing path cannot silently start billing.
+    return no(SETTLE_REASON.ATTESTATION_UNVERIFIABLE,
+      "the report claims to be signed but does not carry what a verifier needs to check it, so the " +
+      "attestation cannot be validated by anyone. That is not a signed report, whatever the status " +
+      "field says. No charge; retry.",
+      { status: att.status, missingFields, signatureWellFormed: sigWellFormed });
+  }
+
   return {
     settle: true,
     reason: SETTLE_REASON.ANSWERED,
@@ -109,6 +173,19 @@ export function settleDecision(report) {
       coverageRatio: (cov.checked.length + cov.notChecked.length)
         ? +(cov.checked.length / (cov.checked.length + cov.notChecked.length)).toFixed(3)
         : 0,
+      // Recorded so the settled artifact says WHAT was charged for — a signed report — and names the
+      // binding a verifier must check it against. ⚠️ `verifiable` means the fields are present and
+      // well-formed, NOT that isValidSignature returned the magic value; this predicate never calls
+      // the chain. Saying "verifiable" where a reader might hear "verified" is worth being precise
+      // about, because the whole point of the field is that someone goes and checks.
+      attestation: {
+        status: att.status,
+        method: att.method ?? null,
+        agentId: att.agentId ?? null,
+        verifyingContract: att.verifyingContract ?? null,
+        verifiable: true,
+        verifiedHere: false,
+      },
     },
   };
 }

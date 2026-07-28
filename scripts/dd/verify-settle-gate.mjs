@@ -16,6 +16,7 @@
 
 import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { settleDecision, runThenSettle, noChargeResponse, SETTLE_REASON } from "../../shared/x402/settle-gate.mjs";
+import { attachAttestation, unsignedAttestation } from "../../shared/onchain-analyze/attest.mjs";
 import { POWER_SIGS, sel, EIP1967_IMPL_SLOT } from "../../shared/onchain-facts/index.mjs";
 
 // ⚠️ dd-analyze's exposure gate (RUNG -1, unset = DISABLED) sits before every other rung. This suite
@@ -79,6 +80,26 @@ function mockClient(handlers = {}) {
 }
 const transientThrow = () => { throw Object.assign(new Error("request limit reached"), { transient: true, query: { endpoint: "mock://", method: "m", params: [], reproduce: "# m" } }); };
 
+// ═══ ⭐ FIXTURES MUST BE SIGNED NOW, AND THAT IS THE POINT ═══════════════════════════════════
+// settleDecision gained a 4th condition: only a VERIFIABLE SIGNED attestation settles. Every fixture
+// here comes from the real analyze(), and analyze() returns `attestation: {status:"unsigned"}` from
+// baseReport — so before this helper existed, EVERY settling case in this suite silently became a
+// non-settling one the moment the condition landed. That is the correct failure: the suite was
+// asserting a charge for an artifact the 402 never promised.
+//
+// The signer below is a FAKE — this suite holds no key, makes no Circle call, and signs nothing real.
+// It produces a well-formed attestation so the gate's structural check can be exercised offline. The
+// REAL signature's validity is verify-attestation.mjs's job (eth_call → 0x1626ba7e); this file only
+// proves the gate refuses to bill for an artifact nobody could check.
+const FAKE_SIG = "0x" + "ab".repeat(65);
+const signFixture = (report) => attachAttestation(report, {
+  sign: async () => FAKE_SIG,
+  agentId: "851891",
+  verifyingContract: "0xc54D47211997aCA90Ef4fCfBc742a3b511B4e621",
+  registry: "0x8004A8180E2Cb8B1D4Cb0eB0Cd5b0b8bA0Ee0000",
+  chainId: "5042002",
+});
+
 /** An injected settler that MOVES NO MONEY and records whether it was reached, and when. */
 function settlerSpy(log) {
   return async (report) => {
@@ -102,7 +123,7 @@ section("CASE 1 — FULL report → SETTLES");
     [`call@0x8da5cb5b`]: word(OWNER),
     [`code@${OWNER}`]: "0x",
   });
-  const report = await analyze(SUBJ, { client });
+  const report = await signFixture(await analyze(SUBJ, { client }));
   const d = settleDecision(report);
   check("engine answered (refusal null)", report.refusal === null, report.refusal?.reason ?? "null");
   check("⭐ SETTLES", d.settle === true && d.reason === SETTLE_REASON.ANSWERED, `${d.reason}`);
@@ -110,7 +131,7 @@ section("CASE 1 — FULL report → SETTLES");
   check("coverageRatio reported", d.evidence.coverageRatio === 1, String(d.evidence.coverageRatio));
 
   const log = [];
-  const out = await runThenSettle({ produceReport: () => analyze(SUBJ, { client }), settle: settlerSpy(log) });
+  const out = await runThenSettle({ produceReport: async () => signFixture(await analyze(SUBJ, { client })), settle: settlerSpy(log) });
   check("settle WAS invoked", log.includes("SETTLE"));
   check("body says charged", out.body.charged === true && out.body.settled === true);
 }
@@ -126,7 +147,7 @@ section("CASE 2 — THIN report → STILL SETTLES");
   // answer is the no-bytecode case: the engine reads successfully, finds no code, and correctly
   // records every power as UNOBSERVABLE rather than absent.
   const client = mockClient({ [`code@${SUBJ}`]: "0x" });
-  const report = await analyze(SUBJ, { client });
+  const report = await signFixture(await analyze(SUBJ, { client }));
   const d = settleDecision(report);
   const nc = report.coverage.notChecked.filter((n) => n.kind === "power").length;
   const ck = report.coverage.checked.filter((c) => c.kind === "power").length;
@@ -148,7 +169,7 @@ section("CASE 2 — THIN report → STILL SETTLES");
     [...report.coverage.checked, ...report.coverage.notChecked].some((e) => e.group === g)));
 
   const log = [];
-  const out = await runThenSettle({ produceReport: () => analyze(SUBJ, { client }), settle: settlerSpy(log) });
+  const out = await runThenSettle({ produceReport: async () => signFixture(await analyze(SUBJ, { client })), settle: settlerSpy(log) });
   check("settle WAS invoked for the thin report", log.includes("SETTLE"));
   check("body says charged, with the thin report attached", out.body.charged === true && out.body.report?.coverage?.totals?.notChecked === 11);
 }
@@ -160,7 +181,7 @@ section("CASE 2b — a defeated OWNER read is thin too, and also settles");
     [`slot@${EIP1967_IMPL_SLOT}`]: ZERO_WORD,
     [`call@0x8da5cb5b`]: transientThrow,
   });
-  const report = await analyze(SUBJ, { client });
+  const report = await signFixture(await analyze(SUBJ, { client }));
   const d = settleDecision(report);
   const ownerSkipped = report.coverage.notChecked.some((n) => /owner/i.test(n.id));
   check("the owner read landed in notChecked", ownerSkipped,
@@ -215,7 +236,7 @@ section("ORDERING — settle is strictly downstream of the answer");
     [`call@0x8da5cb5b`]: word(OWNER), [`code@${OWNER}`]: "0x",
   });
   await runThenSettle({
-    produceReport: async () => { log.push("ANALYZE"); return analyze(SUBJ, { client }); },
+    produceReport: async () => { log.push("ANALYZE"); return signFixture(await analyze(SUBJ, { client })); },
     settle: settlerSpy(log),
   });
   check("⭐ ANALYZE ran before SETTLE", log.indexOf("ANALYZE") < log.indexOf("SETTLE"), `order=[${log}]`);
@@ -242,6 +263,80 @@ section("COMPOSITION — a refused request never reaches the settle path");
     check(`  …and the settle gate ALSO refuses it`, d.settle === false, d.reason);
   }
   check("⭐ two fail-closed layers compose: refusal is upstream of settlement, and neither alone is load-bearing", true);
+}
+
+// ═══════════ CASE 4 — ⭐ UNSIGNED: we quoted a signed report, so unsigned is not the product ═══════
+section("CASE 4 — unsigned / unverifiable attestation → does NOT settle");
+{
+  const client = mockClient({
+    [`code@${SUBJ}`]: codeWith(allPowerSigs),
+    [`slot@${EIP1967_IMPL_SLOT}`]: ZERO_WORD,
+    [`call@0x8da5cb5b`]: word(OWNER),
+    [`code@${OWNER}`]: "0x",
+  });
+  const good = await signFixture(await analyze(SUBJ, { client }));
+
+  // Sanity: the ONLY difference between the settling and non-settling cases below is the attestation.
+  check("control: the signed version of this exact report DOES settle", settleDecision(good).settle === true);
+
+  // ⭐ The real degradation path — attachAttestation throws, dd-analyze catches and attaches this.
+  {
+    const r = { ...good, attestation: unsignedAttestation("the signer was unavailable on this run") };
+    const d = settleDecision(r);
+    check("⭐⭐ signer outage (status:'unsigned') → does NOT settle", d.settle === false && d.reason === SETTLE_REASON.UNSIGNED, d.reason);
+    check("  …and names it as OUR outage, not the caller's problem", /our failure|our own outage/i.test(d.detail));
+    check("  …and says selling unsigned against a signed price is the defect", /selling one thing and handing over another/i.test(d.detail));
+    check("  …and tells them to retry", /retry/i.test(d.detail));
+  }
+
+  // Fail-closed across every non-"signed" status, including ones nobody has invented yet.
+  for (const status of ["unsigned", "indeterminate", "pending", "partial", "SIGNED", "ok", "true", ""]) {
+    const d = settleDecision({ ...good, attestation: { ...good.attestation, status } });
+    check(`  status ${JSON.stringify(status)} → does NOT settle`, d.settle === false && d.reason === SETTLE_REASON.UNSIGNED, d.reason);
+  }
+  for (const [label, att] of [["absent", undefined], ["null", null], ["a string", "signed"], ["an array", []]]) {
+    const d = settleDecision({ ...good, attestation: att });
+    check(`  attestation ${label} → does NOT settle`, d.settle === false && d.reason === SETTLE_REASON.UNSIGNED, d.reason);
+  }
+
+  // ⭐ status:"signed" is a CLAIM. Without what a verifier needs, nobody can ever check it.
+  for (const field of ["signature", "agentId", "verifyingContract", "chainId"]) {
+    const att = { ...good.attestation };
+    delete att[field];
+    const d = settleDecision({ ...good, attestation: att });
+    check(`⭐ claims signed but ${field} missing → does NOT settle`, d.settle === false && d.reason === SETTLE_REASON.ATTESTATION_UNVERIFIABLE, d.reason);
+    check(`  …and names the missing field`, (d.evidence.missingFields ?? []).includes(field), String(d.evidence.missingFields));
+  }
+  {
+    const d = settleDecision({ ...good, attestation: { ...good.attestation, signature: "not-hex" } });
+    check("⭐ claims signed with a malformed signature → does NOT settle", d.settle === false && d.reason === SETTLE_REASON.ATTESTATION_UNVERIFIABLE, d.reason);
+    check("  …flagged as not well-formed", d.evidence.signatureWellFormed === false);
+  }
+
+  // ⚠️ ORDER: a refusal report is unsigned BY DESIGN, so the more specific cause must win.
+  {
+    const dead = mockClient({});
+    const outage = await analyze(SUBJ, { client: dead });
+    const d = settleDecision(outage);
+    check("⭐ an outage still reports REFUSED/coverage, not 'unsigned' — the specific cause wins",
+      d.settle === false && d.reason !== SETTLE_REASON.UNSIGNED, d.reason);
+  }
+
+  // ⭐ END TO END: no charge is ACTUALLY no charge — settle is never invoked, nothing is deferred.
+  {
+    const log = [];
+    const out = await runThenSettle({
+      produceReport: async () => ({ ...(await analyze(SUBJ, { client })), attestation: unsignedAttestation("signer down") }),
+      settle: settlerSpy(log),
+    });
+    check("⭐⭐ settle was NEVER invoked for an unsigned report", !log.includes("SETTLE"), `log=[${log}]`);
+    check("  …caller is told charged:false", out.body.charged === false);
+    check("  …and retryable:true", out.body.retryable === true);
+    check("  …and that the authorization is UNSPENT", /unspent/i.test(out.body.payment));
+    check("  …and that nothing will be settled later (no silent keep-the-money)",
+      /none will be attempted later/i.test(out.body.payment));
+    check("⭐ the report is STILL handed over, free", out.body.report?.subject?.address === SUBJ);
+  }
 }
 
 console.log(`\n╔══════════════════════════════════════════════════════════════════════`);

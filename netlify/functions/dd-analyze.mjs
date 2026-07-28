@@ -23,14 +23,35 @@
 // 200 = the service answered, INCLUDING when the answer is "I cannot assess this".
 // Never a bare error envelope at either — the body is always a report.
 //
-// ═══ NOT IN THIS STEP ═════════════════════════════════════════════════════════════════════════
-// No payment (step 2), no auth, no rate limiting, no batch, no chains beyond Arc Testnet, no cache.
-// ⚠️ Consequently this endpoint spends RPC quota and Circle signing calls on demand. It is intended
-// to run on a DRAFT deploy until step 2 adds payment.
+// ═══ PAYMENT (step 2) — x402 over Circle Gateway ══════════════════════════════════════════════
+// The analysis is PAID. The flow is 402 → pay → 202 + handle → retrieve → 200, because Gateway
+// settles in delayed batches and facilitator acceptance is not payment. All the money logic lives in
+// _dd-x402.mjs; this file owns transport (the SDK client and the RPC) and the ladder below.
+//
+// ⭐ Three things stay FREE, deliberately:
+//   · every input-validation refusal (400) — pre-402, zero RPC. Charging for "that is not a
+//     well-formed question" would quote a price for something we answer for free, and would reward
+//     narrowing the supported chain set.
+//   · every engine outage or refusal — the report comes back with charged:false and the
+//     authorization unspent. Charging for our own failure is the thing settle-gate.mjs exists to
+//     prevent.
+//   · retrieval of an already-paid report, forever.
+//
+// Still NOT in this step: auth, rate limiting, batch, chains beyond Arc Testnet, caching.
 
 import { randomUUID } from "node:crypto";
-import { connectLambda } from "@netlify/blobs";
+import { getStore, connectLambda } from "@netlify/blobs";
+import { BatchFacilitatorClient } from "@circle-fin/x402-batching/server";
 import { json } from "./_arc.mjs";
+import {
+  PENDING_STORE,
+  resolvePayTo,
+  ddPaymentRequirements,
+  challenge402,
+  b64decodePayment,
+  runPaidAnalysis,
+  retrievePaid,
+} from "./_dd-x402.mjs";
 import { codeIdentity, evaluateHealth } from "../../shared/dd-canary/health.mjs";
 import { readHealth } from "./_dd-health.mjs";
 import { exposureState } from "./_dd-exposure.mjs";
@@ -62,6 +83,21 @@ const SUPPORTED_CHAINS = Object.freeze(["arc-testnet"]);
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const MAX_BODY_BYTES = 4096;
+
+const ARC_RPC = "https://rpc.testnet.arc.network";
+
+/** Transport for the Gateway balance read. Injected into _dd-x402 / _x402-confirm so those modules
+ *  stay testable without a chain, and so this file remains the only place that knows a URL. */
+const rpcCall = async ({ method, params }) => {
+  const r = await fetch(ARC_RPC, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message || "rpc error");
+  return j.result;
+};
 
 /**
  * A refusal that is a REPORT, not an error.
@@ -116,6 +152,25 @@ export async function handler(event) {
           reason: "service-not-enabled",
           detail: `${exposure.detail} (${exposure.reason}). The service is deployed but not published. Set DD_PUBLIC_ENABLED to enable it deliberately.`,
         }));
+      }
+    }
+
+    // ── ⭐ RETRIEVE: redeem a handle for a report already paid for ────────────────────────────
+    // Placed HERE on purpose: behind the exposure gate, but AHEAD of the health gate.
+    //
+    // · Behind exposure, because if the service was never published there can be no paid callers,
+    //   and serving reports while "not published" would contradict the flag outright.
+    // · AHEAD of health, because this report was ALREADY produced and paid for, back when the
+    //   detector was known good. Re-checking health now would strand a paying caller on a canary
+    //   blip that has nothing to do with the artifact they bought. The health gate guards the
+    //   PRODUCTION of new answers, not the delivery of old ones.
+    //
+    // Also ahead of the POST check — a redemption is a retrieval, not a new question.
+    {
+      const q = event.queryStringParameters || {};
+      const handle = q.handle || (event.headers || {})["x-payment-handle"];
+      if (handle) {
+        return await retrievePaid({ handle, store: getStore(PENDING_STORE), rpcCall });
       }
     }
 
@@ -194,38 +249,87 @@ export async function handler(event) {
       }));
     }
 
-    // ── the analysis ──────────────────────────────────────────────────────────────────────────
-    // Wrapped: analyze() reserves exceptions for programmer error, but this caller is untrusted, so
-    // an unexpected throw must become a report rather than a stack trace.
-    let report;
-    try {
-      report = await analyze(addr, { client: chainClient(chain) });
-    } catch (e) {
-      console.error(`[dd-analyze ${correlationId}] analyze threw:`, e);
-      return json(500, refusalReport({
+    // ── rung 5: is there a revenue address to be paid? ────────────────────────────────────────
+    // Checked BEFORE the 402 so we never quote a price payable to nowhere. Fail-closed: an unset
+    // payTo refuses the request rather than silently downgrading a paid service to a free one.
+    const payToResolution = resolvePayTo();
+    if (!payToResolution.ok) {
+      console.error(`[dd-analyze ${correlationId}] payTo unresolved: ${payToResolution.reason}`);
+      return json(503, refusalReport({
         address: addr,
         chainName: chain,
-        reason: "internal-error",
-        detail: `the analysis could not run. This is INDETERMINATE, not a clean bill. Reference: ${correlationId}`,
+        reason: "payment-misconfigured",
+        detail: `${payToResolution.detail} (${payToResolution.reason})`,
       }));
     }
 
-    // ── attestation: sign, but DEGRADE rather than fail ───────────────────────────────────────
-    // A signer outage must not destroy an otherwise-good report — the same "answers, not outages"
-    // rule step 2 applies to payment. `attestation.status` already models the unsigned case, which
-    // is exactly why it is a status field and not a promise.
-    let signed = report;
+    // ── the analysis, as a thunk ──────────────────────────────────────────────────────────────
+    // NOT run here. It is handed to runThenSettle(), which guarantees it runs BEFORE anything
+    // touches money — that ordering is the product, and it is enforced structurally rather than by
+    // this file remembering to do it in the right order.
+    //
+    // Wrapped: analyze() reserves exceptions for programmer error, but this caller is untrusted, so
+    // an unexpected throw must become a report rather than a stack trace. It returns a REFUSAL
+    // report, which the settle gate then declines to charge for — an outage bills nothing.
+    const produceReport = async () => {
+      let report;
+      try {
+        report = await analyze(addr, { client: chainClient(chain) });
+      } catch (e) {
+        console.error(`[dd-analyze ${correlationId}] analyze threw:`, e);
+        return refusalReport({
+          address: addr,
+          chainName: chain,
+          reason: "internal-error",
+          detail: `the analysis could not run. This is INDETERMINATE, not a clean bill. Reference: ${correlationId}`,
+        });
+      }
+
+      // ── attestation: sign, but DEGRADE rather than fail ─────────────────────────────────────
+      // A signer outage must not destroy an otherwise-good report. `attestation.status` already
+      // models the unsigned case, which is exactly why it is a status field and not a promise.
+      try {
+        return await attachAttestation(report, ddAttestationOptions());
+      } catch (e) {
+        console.error(`[dd-analyze ${correlationId}] signing failed:`, e);
+        return {
+          ...report,
+          attestation: unsignedAttestation(`the report is complete but could not be signed on this run. Reference: ${correlationId}`),
+        };
+      }
+    };
+
+    // ── rung 6: payment ───────────────────────────────────────────────────────────────────────
+    const headers = event.headers || {};
+    const proto = headers["x-forwarded-proto"] || "https";
+    const host = headers["host"] || "";
+    const resource = `${proto}://${host}${event.path || "/api/dd-analyze"}`;
+    const requirements = ddPaymentRequirements({ resource, payTo: payToResolution.payTo });
+
+    const paymentHeader = headers["payment-signature"];
+    if (!paymentHeader) return challenge402({ requirements });
+
+    let payload;
     try {
-      signed = await attachAttestation(report, ddAttestationOptions());
-    } catch (e) {
-      console.error(`[dd-analyze ${correlationId}] signing failed:`, e);
-      signed = {
-        ...report,
-        attestation: unsignedAttestation(`the report is complete but could not be signed on this run. Reference: ${correlationId}`),
-      };
+      payload = b64decodePayment(paymentHeader);
+    } catch {
+      return json(400, refusalReport({
+        address: addr,
+        chainName: chain,
+        reason: "malformed-payment",
+        detail: "the payment-signature header is not base64-encoded JSON",
+      }));
     }
 
-    return json(200, signed);
+    return await runPaidAnalysis({
+      facilitator: new BatchFacilitatorClient(),
+      rpcCall,
+      store: getStore(PENDING_STORE),
+      payload,
+      requirements,
+      produceReport,
+      resource,
+    });
   } catch (e) {
     // Last resort. The real error goes to logs; the caller gets a report and a reference, never a
     // stack, a path, or a message we did not choose.
