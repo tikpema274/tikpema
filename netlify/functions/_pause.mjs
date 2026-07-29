@@ -23,8 +23,34 @@ import { AGENT, AGENTS, isAgent, agentLabel } from "./_agents.mjs";
 //      therefore blocks spending — that is the safe direction, and it is deliberate.
 //   2. If AGENT_HALT is set to anything we do not recognise, we HALT. Same discipline as the
 //      fail-closed caps in _arc.mjs: a typo must never widen what the agent may do.
+//   3. ⭐ If the flag is READ FROM A CACHE, it may be a LIE — so every read below is
+//      consistency:"strong". See the note on READ_CONSISTENCY.
 
 const PAUSE_STORE = "agent-pause";
+
+// ═══ 🚨 STRONG CONSISTENCY — THE THIRD FAIL-CLOSED, AND THE ONE THAT WAS MISSING ═════════════
+// Netlify Blobs reads default to consistency:"eventual" — a CDN-cached edge read, not the origin.
+//
+// ⚠️ THE GAP THIS CLOSES IS NARROW AND EXACT. Rule 1 above covers UNREADABLE: the read throws, the
+// catch fires, we refuse. It does NOT cover STALE. A cached read does not throw — it succeeds, and
+// returns a confident `{paused:false}` (or nothing at all) from before the pause was written. That
+// sails straight past the catch and `pauseReason` returns null, meaning "may act".
+//
+//   operator hits STOP  ->  setPaused writes {paused:true} to origin
+//   spend path reads    ->  gets the CACHED pre-pause value  ->  returns null  ->  FUNDS MOVE
+//
+// The kill switch does not stop anything during the exact emergency it exists for, and nothing
+// anywhere reports a failure — the read "worked". "Could not read" was handled; "read something
+// out of date" was not, and the two are indistinguishable at the call site.
+//
+// MEASURED ON THE SISTER PATH, not theorised here: the DD canary's health artifact showed exactly
+// this, with a freshly written record invisible to the reader for ~1 hour (aca4d31). Same store
+// technology, same default, same class of verdict. This path was found by auditing every Blobs read
+// after that one, and is strictly more dangerous: that one gated ANSWERS, this one gates MONEY.
+//
+// The cost is one uncached round trip per spend decision — on a path that already refuses outright
+// when the read fails, and that is about to move funds.
+const READ_CONSISTENCY = "strong";
 
 // `*` pauses EVERY agent for this owner — the "stop everything" switch, distinct from
 // pausing one agent. Kept as a real key rather than a loop so a global pause is a single
@@ -70,8 +96,8 @@ export async function pauseReason({ owner, agent }) {
   try {
     const store = getStore(PAUSE_STORE);
     const [all, mine] = await Promise.all([
-      store.get(pauseKey(owner, ALL_AGENTS), { type: "json" }),
-      store.get(pauseKey(owner, id), { type: "json" }),
+      store.get(pauseKey(owner, ALL_AGENTS), { type: "json", consistency: READ_CONSISTENCY }),
+      store.get(pauseKey(owner, id), { type: "json", consistency: READ_CONSISTENCY }),
     ]);
     if (all?.paused) return "All of your agents are paused. Resume them to act again.";
     if (mine?.paused) return `Your ${agentLabel(id)} is paused. Resume it to act again.`;
@@ -113,7 +139,11 @@ export async function pauseStates({ owner }) {
   try {
     const store = getStore(PAUSE_STORE);
     const recs = await Promise.all(
-      ids.map((id) => store.get(pauseKey(owner, id), { type: "json" }).catch(() => null))
+      // Strong here too. This is a VIEW, but it is the OPERATOR'S FEEDBACK LOOP ON A SAFETY
+      // CONTROL: after hitting STOP they look at this roster to confirm the stop took. A cached
+      // "not paused" tells them the pause failed when it did not — during an emergency, that
+      // invites exactly the wrong reaction.
+      ids.map((id) => store.get(pauseKey(owner, id), { type: "json", consistency: READ_CONSISTENCY }).catch(() => null))
     );
     return Object.fromEntries(ids.map((id, i) => [id, !!recs[i]?.paused]));
   } catch {
