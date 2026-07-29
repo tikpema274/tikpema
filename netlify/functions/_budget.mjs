@@ -66,20 +66,52 @@ const isoTs = (at) => (at ? new Date(at) : new Date()).toISOString();
 //   · setIfMatch   — conditional write; `false` means someone else wrote first, so retry
 //   · setIfNew     — create-only write; the primitive that makes an append un-clobberable
 //   · list         — enumerate by key prefix (per-entry audit records)
+// ═══ 🚨 STRONG CONSISTENCY — A CACHED COUNTER IS A WIDENED CAP ═══════════════════════════════
+// Netlify Blobs reads default to consistency:"eventual" — a CDN-cached edge read, not the origin.
+// For a SPEND COUNTER that fails in the permissive direction, and quietly:
+//
+//   spend $1.90 of a $2.00 daily ceiling  ->  written to ORIGIN
+//   next spend reads the counter          ->  gets a CACHED, LOWER total
+//   dayA + amtA > ceilA                   ->  FALSE when it should be TRUE  ->  SPEND ALLOWED
+//
+// ⚠️ AND THE MISS DEFAULTS TO ZERO, which is the worst possible value. Every reader does
+// `rec?.spentUsdc ?? 0`, so a cache that has not yet seen today's key at all reports "nothing spent
+// today" and hands over the ENTIRE ceiling. A stale read does not merely under-count; it can reset
+// the day.
+//
+// This is the same defect measured on the DD canary health artifact (aca4d31) and fixed on the
+// kill switch (da3aee0) — found by auditing every Blobs read after the first. The module's own
+// header already names this exact failure from the concurrency angle: "a dropped spend is a
+// WIDENED CAP — the one thing this module exists to prevent." A cached read drops it just as
+// effectively as a lost update did, and neither throws.
+//
+// ⭐ THIS DOES NOT WEAKEN THE EXISTING FAIL-CLOSED BEHAVIOUR. `getJSON` deliberately has no catch:
+// an unreadable counter THROWS, propagates out through daySpend -> canSpend/canSpendDay -> the
+// caller, and the spend never happens. Adding a read option adds no catch and swallows nothing.
+const READ_CONSISTENCY = "strong";
+
 let _defaultAdapter = null;
 function defaultStore() {
   if (_defaultAdapter) return _defaultAdapter;
   const s = getStore(BUDGET_STORE);
   _defaultAdapter = {
     async getJSON(key) {
-      return (await s.get(key, { type: "json" })) ?? null;
+      return (await s.get(key, { type: "json", consistency: READ_CONSISTENCY })) ?? null;
     },
     async setJSON(key, value) {
       await s.setJSON(key, value);
     },
     // Returns { value, etag }. etag is undefined when the key does not exist yet.
+    //
+    // ⭐ Strong here too, for a LIVENESS reason rather than a safety one — worth stating, because
+    // the safety argument does NOT apply and someone will check. A cached read here is already
+    // SAFE: it yields a stale etag, `setIfMatch` therefore fails, and casUpdate re-reads and
+    // retries, so no wrong total can be committed. But it retries against the same stale cache up
+    // to CAS_TRIES, then throws "could not update after 24 attempts (contention)" — diagnosing as
+    // write contention something that is actually a cold read. Reading origin makes the retry loop
+    // converge on the first attempt instead of burning 24 and failing loud for the wrong reason.
     async getWithEtag(key) {
-      const res = await s.getWithMetadata(key, { type: "json" }).catch(() => null);
+      const res = await s.getWithMetadata(key, { type: "json", consistency: READ_CONSISTENCY }).catch(() => null);
       return { value: res?.data ?? null, etag: res?.etag };
     },
     // Compare-and-set. Returns true iff WE wrote it. A false means another writer landed
