@@ -25,10 +25,37 @@ export const healthKey = (identity) =>
  * @returns {Promise<{record: object|null, readable: boolean, error?: string}>}
  *          `readable:false` means the STORE failed, which is NOT the same as "no record".
  */
+// ═══ 🚨 STRONG CONSISTENCY IS LOAD-BEARING — DO NOT DROP IT ══════════════════════════════════
+// Netlify Blobs reads default to `consistency: "eventual"` — a CDN-cached edge read, not the origin.
+// For a SAFETY VERDICT that is wrong in the most dangerous possible way.
+//
+// MEASURED 2026-07-29, not theorised: a freshly-written health artifact was invisible to the reader.
+// The canary reported ok:true / wrote:true while dd-analyze kept refusing `stale` with an `ageMs`
+// that CLIMBED PAST the canary run — pinned at 3601018 ms, i.e. exactly one hour, a cache-shaped
+// number rather than a staleness-shaped one. The write went to origin; the read came off a stale edge
+// copy. A tight curl-then-probe chain worked the night before only because nothing had cached the key
+// yet.
+//
+// ⭐ THE FAIL-OPEN THIS PREVENTS, which is the reason it matters — the symptom above is the SAFE
+// direction, and the same defect runs the other way:
+//
+//     canary detects a regression → writes verdict:"fail"
+//     dd-analyze reads a CACHED PASSING artifact → KEEPS SERVING
+//
+// The entire dead-man's-switch design assumes the endpoint reads the LATEST artifact. An eventually
+// consistent read silently voids that assumption, and a broken detector would go on answering
+// questions about other people's contracts. Same family as the build-id sentinel and every other
+// entry in this codebase's recurring failure mode: a stale value quietly filled the result slot and
+// read as a verdict about NOW.
+//
+// The cost is one uncached round trip on a path that already refuses on absence — negligible against
+// serving from a detector nobody has checked.
+const READ_CONSISTENCY = "strong";
+
 export async function readHealth(identity) {
   try {
     const store = getStore(DD_HEALTH_STORE);
-    const raw = await store.get(healthKey(identity), { type: "json" });
+    const raw = await store.get(healthKey(identity), { type: "json", consistency: READ_CONSISTENCY });
     return { record: raw ?? null, readable: true };
   } catch (e) {
     return { record: null, readable: false, error: String(e?.message ?? e) };
