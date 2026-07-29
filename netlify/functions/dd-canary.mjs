@@ -14,7 +14,9 @@
 //
 // ⚠️ Guards the DD SERVICE ONLY. Imports nothing from _vault.mjs and writes to its own store.
 
-import { connectLambda } from "@netlify/blobs";
+// ⭐ connectBlobs, NOT connectLambda — the shim drops event.blobs' `url_uncached`, without which
+// _dd-health's strong-consistency read throws. See _blobs.mjs.
+import { connectBlobs } from "./_blobs.mjs";
 import { json } from "./_arc.mjs";
 import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { SCHEMA_VERSION } from "../../shared/onchain-analyze/schema.mjs";
@@ -46,7 +48,7 @@ import { readHealth, writeHealth } from "./_dd-health.mjs";
 // and asserting the written verdict is still "fail".
 
 export async function handler(event) {
-  if (event?.blobs) connectLambda(event);
+  if (event?.blobs) connectBlobs(event);
   const identity = codeIdentity({ schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS });
 
   // ── ⭐ RUNG 0: CAN THIS RUN VOUCH FOR ANYTHING AT ALL? ───────────────────────────────────────

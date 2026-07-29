@@ -50,7 +50,7 @@ export const healthKey = (identity) =>
 //
 // The cost is one uncached round trip on a path that already refuses on absence — negligible against
 // serving from a detector nobody has checked.
-const READ_CONSISTENCY = "eventual"; // ⚠️ DEGRADED — see INCIDENT note above
+const READ_CONSISTENCY = "strong";
 
 export async function readHealth(identity) {
   try {

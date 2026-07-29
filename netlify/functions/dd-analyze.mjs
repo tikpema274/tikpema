@@ -40,7 +40,10 @@
 // Still NOT in this step: auth, rate limiting, batch, chains beyond Arc Testnet, caching.
 
 import { randomUUID } from "node:crypto";
-import { getStore, connectLambda } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+// ⭐ connectBlobs, NOT connectLambda — the shim drops event.blobs' `url_uncached`, without which
+// _dd-health's strong-consistency read throws. See _blobs.mjs.
+import { connectBlobs } from "./_blobs.mjs";
 import { BatchFacilitatorClient } from "@circle-fin/x402-batching/server";
 import { json } from "./_arc.mjs";
 import {
@@ -135,7 +138,7 @@ function refusalReport({ address = null, chainName = null, chainId = null, reaso
 export async function handler(event) {
   const correlationId = randomUUID();
   try {
-    if (event?.blobs) connectLambda(event);
+    if (event?.blobs) connectBlobs(event);
 
     // ── ⭐ RUNG -1: IS THIS SERVICE EVEN SUPPOSED TO ANSWER THE PUBLIC? ───────────────────────
     // FIRST — before the health check, before validation, before anything. Deploying this function
