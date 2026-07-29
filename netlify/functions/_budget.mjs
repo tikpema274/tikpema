@@ -88,7 +88,7 @@ const isoTs = (at) => (at ? new Date(at) : new Date()).toISOString();
 // ⭐ THIS DOES NOT WEAKEN THE EXISTING FAIL-CLOSED BEHAVIOUR. `getJSON` deliberately has no catch:
 // an unreadable counter THROWS, propagates out through daySpend -> canSpend/canSpendDay -> the
 // caller, and the spend never happens. Adding a read option adds no catch and swallows nothing.
-const READ_CONSISTENCY = "strong";
+const READ_CONSISTENCY = "eventual"; // ⚠️ DEGRADED — see INCIDENT note above
 
 let _defaultAdapter = null;
 function defaultStore() {

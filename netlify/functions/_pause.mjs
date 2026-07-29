@@ -50,7 +50,7 @@ const PAUSE_STORE = "agent-pause";
 //
 // The cost is one uncached round trip per spend decision — on a path that already refuses outright
 // when the read fails, and that is about to move funds.
-const READ_CONSISTENCY = "strong";
+const READ_CONSISTENCY = "eventual"; // ⚠️ DEGRADED — see INCIDENT note above
 
 /** Sentinel for "this key could not be read", distinct from a readable-and-absent flag. A plain
  *  `null` was indistinguishable from "no record" and collapsed to false = running. */
