@@ -1,4 +1,5 @@
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { isTransient } from "./_retry.mjs";
 import { ubDepositMaxPerTxUsdc } from "./_arc.mjs";
 import { requireInternal } from "./_auth.mjs";
@@ -38,7 +39,7 @@ import { ubDeposit } from "./_ubdeposit.mjs";
 // unchanged and still load-bearing: moving the executor off the sync clock must not move
 // the grant, which is what keeps addDelegate structurally unreachable on an empty wallet.
 export async function handler(event) {
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   // Only our own trigger may run this. A public caller would otherwise reach a raw executor.
   if (!requireInternal(event)) return { statusCode: 401, body: "unauthorized" };

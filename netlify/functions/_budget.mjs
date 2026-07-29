@@ -20,10 +20,11 @@
 // STORE INJECTION. Every function takes an optional `store` (a tiny
 // { getJSON, setJSON } adapter). Production defaults to the Netlify Blobs store;
 // tests inject an in-memory store so the caps are provable with zero Netlify
-// runtime. Callers inside a classic-Lambda handler must connectLambda(event)
+// runtime. Callers inside a classic-Lambda handler must connectBlobs(event)
 // before the Netlify-backed default is used.
 
 import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { AGENT, normalizeAgent } from "./_agents.mjs";
 
 const BUDGET_STORE = "data-budget";
@@ -88,7 +89,7 @@ const isoTs = (at) => (at ? new Date(at) : new Date()).toISOString();
 // ⭐ THIS DOES NOT WEAKEN THE EXISTING FAIL-CLOSED BEHAVIOUR. `getJSON` deliberately has no catch:
 // an unreadable counter THROWS, propagates out through daySpend -> canSpend/canSpendDay -> the
 // caller, and the spend never happens. Adding a read option adds no catch and swallows nothing.
-const READ_CONSISTENCY = "eventual"; // ⚠️ DEGRADED — see INCIDENT note above
+const READ_CONSISTENCY = "strong";
 
 let _defaultAdapter = null;
 function defaultStore() {

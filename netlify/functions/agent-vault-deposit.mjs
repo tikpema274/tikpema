@@ -5,8 +5,8 @@
 // key (never a free-form address). All the guardrails live in executeAction — the ONE secure
 // path: AGENT.VAULT pause, the fail-closed vault-deposit cap, the daily ceiling, and the on-chain
 // inspection GATE (BLOCK / WARN+ack) — so this handler is thin and cannot bypass any of them.
-import { connectLambda } from "@netlify/blobs";
 import { formatUnits } from "viem";
+import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
@@ -18,7 +18,7 @@ const BAL_ABI = [{ type: "function", name: "balanceOf", stateMutability: "view",
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });

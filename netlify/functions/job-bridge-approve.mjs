@@ -1,4 +1,5 @@
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { formatUnits } from "viem";
 import { TxPendingError } from "./_circle.mjs";
 import { json, parseBody, bridgeCapUsdc, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
@@ -62,7 +63,7 @@ const RECEIPT_TERMINAL = new Set(["minted", "mint_failed", "mint_unconfirmed", "
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
-  if (event.blobs) connectLambda(event); // Blobs: deliverable store + day ledger
+  if (event.blobs) connectBlobs(event); // Blobs: deliverable store + day ledger
 
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });

@@ -12,7 +12,8 @@
 // Output: the stored record (status, deliverableHash, canonicalReport, brief,
 //   txHash — whatever's persisted) | { status: "not_found" }.
 
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody } from "./_arc.mjs";
 
 export async function handler(event) {
@@ -22,7 +23,7 @@ export async function handler(event) {
   // Blobs". connectLambda reads the request-scoped siteID + token from
   // event.blobs; must run before getStore. Guard on event.blobs: it's absent
   // under local `netlify dev`, and connectLambda throws on undefined.
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   // Accept jobId from the query string (GET) or the JSON body (POST).
   const jobId = event.queryStringParameters?.jobId || parseBody(event).jobId;

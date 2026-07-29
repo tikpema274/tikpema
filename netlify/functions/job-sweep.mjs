@@ -1,4 +1,5 @@
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { internalToken } from "./_auth.mjs";
 
 // job-sweep.mjs — SCHEDULED sweep that recovers runs stranded at "starting".
@@ -34,7 +35,7 @@ const COOLDOWN_MS = 60_000;   // at most one re-fire per run per minute
 const MAX_AGE_MS = 60 * 60_000; // 1h — beyond this, stop nudging and mark failed
 
 export async function handler(event) {
-  if (event?.blobs) connectLambda(event);
+  if (event?.blobs) connectBlobs(event);
 
   let runs;
   try {

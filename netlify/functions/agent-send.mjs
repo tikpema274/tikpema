@@ -5,8 +5,8 @@
 // client-supplied. The agent wallet is a Circle dev-controlled SCA, so only the
 // server can move it; this is the server-side "send" for the wallet the user
 // actually funds. Gasless (Gas Station sponsored).
-import { connectLambda } from "@netlify/blobs";
 import { formatUnits } from "viem";
+import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody, ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc } from "./_arc.mjs";
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { requireSession } from "./_auth.mjs";
@@ -28,7 +28,7 @@ const BALANCE_OF_ABI = [
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });

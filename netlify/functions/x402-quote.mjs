@@ -30,7 +30,8 @@
 // ANYWAY, deliberately. Leaving one documented "serve-on-acceptance is fine here" endpoint means the
 // next person to make it serve something real inherits a serve-before-confirm design.
 
-import { getStore, connectLambda } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { randomUUID } from "node:crypto";
 import { BatchFacilitatorClient } from "@circle-fin/x402-batching/server";
 import { readGatewayBalance, confirmPayment, CONFIRM_REASON, RETRIEVE_TIMEOUT_MS, RETRIEVE_TIMEOUT_PROVENANCE } from "./_x402-confirm.mjs";
@@ -140,7 +141,7 @@ function paymentRequirements(resource) {
 }
 
 export async function handler(event) {
-  if (event?.blobs) connectLambda(event);
+  if (event?.blobs) connectBlobs(event);
 
   // ── RETRIEVE: the second half of the round trip ────────────────────────────────────────────
   // A handle is only ever redeemable for the artifact once payTo's Gateway balance actually

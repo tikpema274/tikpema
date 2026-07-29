@@ -9,7 +9,8 @@
 //
 // This is contained to WALLET RESOLUTION + orchestration — it reuses the exact
 // contract calls the client-side path used, just signed by the per-user wallet.
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { parseEventLogs } from "viem";
 import { ARC, CONTRACTS, USDC_DECIMALS, parseBody } from "./_arc.mjs";
 import { circle, waitForTx } from "./_circle.mjs";
@@ -35,7 +36,7 @@ const JOB_CREATED_ABI = [
 ];
 
 export async function handler(event) {
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
   if (!requireInternal(event)) return { statusCode: 401, body: "unauthorized" };
 
   const { runId, question, budgetUsdc, walletAddress, owner } = parseBody(event);

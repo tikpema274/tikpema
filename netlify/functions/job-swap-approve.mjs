@@ -1,4 +1,5 @@
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { formatUnits } from "viem";
 import { json, parseBody, CONTRACTS, USDC_DECIMALS, swapCapUsdc } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
@@ -55,7 +56,7 @@ async function readBalance(token, wallet) {
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });

@@ -1,4 +1,5 @@
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { executeAction } from "./_actions.mjs";
 import { assertNotPaused } from "./_pause.mjs";
 import { AGENT } from "./_agents.mjs";
@@ -68,7 +69,7 @@ export const config = { schedule: "* * * * *" };
 const MAX_SUBMITS_PER_TICK = 3;
 
 export async function handler(event) {
-  if (event?.blobs) connectLambda(event);
+  if (event?.blobs) connectBlobs(event);
   const startedAt = new Date().toISOString();
   const now = Date.now();
 

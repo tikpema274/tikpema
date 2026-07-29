@@ -1,4 +1,5 @@
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { formatUnits } from "viem";
 import crypto from "node:crypto";
 import { json, parseBody, ubDepositMaxPerTxUsdc, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
@@ -82,7 +83,7 @@ const BALANCE_OF_ABI = [
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });

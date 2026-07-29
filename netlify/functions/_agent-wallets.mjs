@@ -13,9 +13,10 @@
 // WRITE authoritative with an atomic `onlyIfNew` conditional set: only one
 // record can ever exist per owner, regardless of a stale read. On a losing
 // write we discard our just-created (empty, harmless) wallet and return the
-// winner. Requires the caller's handler to have run connectLambda(event) first.
+// winner. Requires the caller's handler to have run connectBlobs(event) first.
 
 import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { circle } from "./_circle.mjs";
 import { ARC } from "./_arc.mjs";
 

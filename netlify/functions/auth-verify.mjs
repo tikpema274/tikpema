@@ -9,7 +9,8 @@
 //     return it) into a Blobs store, trust-on-first-use with onlyIfNew. No
 //     on-chain ERC-1271, so a fresh passkey needs no deployed smart account.
 // Identity stays the SCA address for BOTH methods (2a/2b mappings unchanged).
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { recoverMessageAddress } from "viem";
 import { verify as verifyWebauthn } from "webauthn-p256";
 import { json, parseBody } from "./_arc.mjs";
@@ -21,7 +22,7 @@ const CRED_STORE = "passkey-credentials";
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   const { address, method, credentialId, publicKey, nonce, signature, webauthn } = parseBody(event);
   if (!isAddr(address)) return json(400, { error: "valid 'address' required" });

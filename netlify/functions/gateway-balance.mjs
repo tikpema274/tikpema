@@ -1,5 +1,5 @@
-import { connectLambda } from "@netlify/blobs";
 import { json } from "./_arc.mjs";
+import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 import { GATEWAY } from "./_gateway.mjs";
@@ -46,7 +46,7 @@ async function readDomain(depositor, domain) {
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
-  if (event.blobs) connectLambda(event); // Blobs wiring for classic-Lambda handlers
+  if (event.blobs) connectBlobs(event); // Blobs wiring for classic-Lambda handlers
 
   // Auth gate — a balance is now per-user, so it needs a proven identity to key on.
   const session = requireSession(event);

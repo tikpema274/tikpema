@@ -1,4 +1,5 @@
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
 
@@ -11,7 +12,7 @@ import { requireSession } from "./_auth.mjs";
 // tells you nothing — the tx hashes and the wallet address are their business, not yours.
 // Mismatch answers 404, not 403: a 403 would confirm the id exists.
 export async function handler(event) {
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });

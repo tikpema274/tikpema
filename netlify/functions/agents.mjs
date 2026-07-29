@@ -1,5 +1,5 @@
-import { connectLambda } from "@netlify/blobs";
 import { json, parseBody } from "./_arc.mjs";
+import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 import { AGENTS, isAgent } from "./_agents.mjs";
@@ -27,7 +27,7 @@ import { pauseStates, setPaused, globalHalt, ALL_AGENTS } from "./_pause.mjs";
 // is a first-class field (`movesFunds`) sourced from the registry — never re-derived in a view.
 // The page leads with it.
 export async function handler(event) {
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });

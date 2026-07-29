@@ -14,8 +14,8 @@
 // reclaimed:false, balance was genuinely 0) · unconfirmed (502, FAIL CLOSED — the reclaim was not
 // PROVEN on-chain: balance unreadable, tx not mined status:success, or no USDC delta. Carries an
 // honest reason and the tx hash if one exists; NEVER a computed/placeholder amount).
-import { connectLambda } from "@netlify/blobs";
 import { json, parseBody } from "./_arc.mjs";
+import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 import { executeAction } from "./_actions.mjs";
@@ -23,7 +23,7 @@ import { resolveVault, SUPPORTED_VAULT_KEYS } from "./_vault.mjs";
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });

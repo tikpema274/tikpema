@@ -8,15 +8,15 @@
 // FAILS CLOSED: if the balance cannot be read, this returns 502 — it never reports an unread balance
 // as zero (which would falsely tell a user they have nothing to reclaim). `readShareBalance` throws
 // on read failure and returns 0n only for a genuine empty position.
-import { connectLambda } from "@netlify/blobs";
 import { json, parseBody } from "./_arc.mjs";
+import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 import { resolveVault, readShareBalance, SUPPORTED_VAULT_KEYS } from "./_vault.mjs";
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });

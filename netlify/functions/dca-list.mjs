@@ -1,4 +1,5 @@
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { json } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
 import { MANDATE_STORE, ownerPrefix } from "./_dca.mjs";
@@ -6,7 +7,7 @@ import { MANDATE_STORE, ownerPrefix } from "./_dca.mjs";
 // GET /api/dca-list — the caller's OWN mandates, for the UI. Read-only. Owner-prefixed list,
 // keyed on the verified session, so a caller only ever sees their own. No cross-user read.
 export async function handler(event) {
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });

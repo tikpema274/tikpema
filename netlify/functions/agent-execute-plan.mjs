@@ -1,5 +1,5 @@
-import { connectLambda } from "@netlify/blobs";
 import { json, parseBody, sendCapUsdc, bridgeCapUsdc } from "./_arc.mjs";
+import { connectBlobs } from "./_blobs.mjs";
 import { executeAction, valueOfStep } from "./_actions.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
@@ -34,7 +34,7 @@ import { daySpend, budgetConfig } from "./_budget.mjs";
 //     what's settled vs still batching.
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
-  if (event.blobs) connectLambda(event); // Blobs for the budget-spine day ledger
+  if (event.blobs) connectBlobs(event); // Blobs for the budget-spine day ledger
 
   // Auth gate: only an authenticated session may execute an agent-spend plan.
   const session = requireSession(event);

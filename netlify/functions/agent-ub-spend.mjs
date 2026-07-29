@@ -1,5 +1,5 @@
-import { connectLambda } from "@netlify/blobs";
 import { json, parseBody, ubSpendCapUsdc, ubSpendFloorUsdc } from "./_arc.mjs";
+import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 import { canSpendDay, recordAgentSpend } from "./_budget.mjs";
@@ -31,7 +31,7 @@ const DESTINATIONS = new Set(["Base_Sepolia"]); // first proof: Base Sepolia onl
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
-  if (event.blobs) connectLambda(event); // Blobs wiring — the day-ledger lives there
+  if (event.blobs) connectBlobs(event); // Blobs wiring — the day-ledger lives there
 
   // Auth gate — only an authenticated session may move funds.
   const session = requireSession(event);

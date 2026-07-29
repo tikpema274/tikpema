@@ -1,4 +1,5 @@
 import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { AGENT, AGENTS, isAgent, agentLabel } from "./_agents.mjs";
 
 // PAUSE / STOP — the kill switch.
@@ -50,7 +51,7 @@ const PAUSE_STORE = "agent-pause";
 //
 // The cost is one uncached round trip per spend decision — on a path that already refuses outright
 // when the read fails, and that is about to move funds.
-const READ_CONSISTENCY = "eventual"; // ⚠️ DEGRADED — see INCIDENT note above
+const READ_CONSISTENCY = "strong";
 
 /** Sentinel for "this key could not be read", distinct from a readable-and-absent flag. A plain
  *  `null` was indistinguishable from "no record" and collapsed to false = running. */
@@ -82,7 +83,7 @@ export function globalHalt() {
 // ── Per-owner, per-agent pause ───────────────────────────────────────────────
 // Returns a REASON string when the agent must not act, or null when it may.
 //
-// The caller must have run connectLambda(event) if it is a classic-Lambda handler; a Blobs
+// The caller must have run connectBlobs(event) if it is a classic-Lambda handler; a Blobs
 // failure here is treated as PAUSED (see the fail-closed note above), so a missing
 // connectLambda would block spending loudly rather than let it through silently.
 export async function pauseReason({ owner, agent }) {

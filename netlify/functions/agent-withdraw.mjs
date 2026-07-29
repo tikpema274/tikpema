@@ -55,8 +55,8 @@
 // so only the server can move it. So: deposited Gateway funds are SPENDABLE CROSS-CHAIN ONLY.
 // A capability the contract has and we never built is not a capability the user has. Do not
 // describe it as one, and do not let a user discover this by finding money missing.
-import { connectLambda } from "@netlify/blobs";
 import { formatUnits } from "viem";
+import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody, ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { requireSession } from "./_auth.mjs";
@@ -75,7 +75,7 @@ const BALANCE_OF_ABI = [
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });

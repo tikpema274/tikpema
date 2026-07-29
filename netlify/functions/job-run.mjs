@@ -8,7 +8,8 @@
 // balance, and — if funded — kick off the background worker. The insufficient-
 // funds case returns cleanly here (402); there is NO fallback to a shared wallet.
 // The full create→fund→research→settle cycle (~26s) runs in job-run-background.
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { formatUnits } from "viem";
 import crypto from "node:crypto";
 import { json, parseBody, CONTRACTS, USDC_DECIMALS, sendCapUsdc } from "./_arc.mjs";
@@ -30,7 +31,7 @@ const BALANCE_OF_ABI = [
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });

@@ -14,7 +14,8 @@
 // Input (POST body): { jobId, question }
 // Output: written to Blobs store "job-deliverables" under key `jobId`.
 
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { keccak256, toBytes } from "viem";
 import { ARC, CONTRACTS, USDC_DECIMALS, parseBody, dateAnchor } from "./_arc.mjs";
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
@@ -125,7 +126,7 @@ export async function handler(event) {
   // hands the client the request-scoped siteID + token Netlify injects into
   // event.blobs. Guard on event.blobs: absent under local `netlify dev` (which
   // already configures Blobs via the global env), and connectLambda throws on it.
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   // Internal-only: reached via the synchronous job-submit front door (which
   // authenticates the user), never directly by the browser. Requires the

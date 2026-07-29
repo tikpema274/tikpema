@@ -1,5 +1,5 @@
-import { connectLambda } from "@netlify/blobs";
 import { TxPendingError } from "./_circle.mjs";
+import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody, dateAnchor, sendCapUsdc, bridgeCapUsdc, swapCapUsdc, maxSpendUsdc } from "./_arc.mjs";
 import { SWAP_TOKENS } from "./_swap.mjs";
 import { executeAction, valueOfStep } from "./_actions.mjs";
@@ -82,7 +82,7 @@ async function decide(task) {
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
-  if (event.blobs) connectLambda(event); // Blobs for the budget-spine day ledger
+  if (event.blobs) connectBlobs(event); // Blobs for the budget-spine day ledger
 
   // Auth gate: only an authenticated session may trigger an agent spend.
   const session = requireSession(event);

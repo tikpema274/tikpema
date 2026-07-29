@@ -7,14 +7,14 @@
 // disclosure, so a UI that shows the warnings and has the user tick "I understand" simply echoes
 // this token back on deposit; if the vault's terms change in between, the token no longer matches
 // and the deposit refuses (fail-closed — see _vault.gateDeposit).
-import { connectLambda } from "@netlify/blobs";
 import { json, parseBody } from "./_arc.mjs";
+import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
 import { resolveVault, inspectVault, gateDeposit, ackTokenFor, SUPPORTED_VAULT_KEYS } from "./_vault.mjs";
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });

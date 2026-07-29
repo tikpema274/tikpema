@@ -1,4 +1,5 @@
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody } from "./_arc.mjs";
 import { requireInternal } from "./_auth.mjs";
 import { circle, waitForTx } from "./_circle.mjs";
@@ -38,7 +39,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
   if (!requireInternal(event)) return json(401, { error: "internal only" });
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   const { jobId } = parseBody(event); // a KEY, not a claim
   if (!jobId) return json(400, { error: "'jobId' required" });

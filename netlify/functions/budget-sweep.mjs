@@ -1,4 +1,5 @@
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { requireInternal } from "./_auth.mjs";
 import { circle } from "./_circle.mjs";
 import { withRetry } from "./_retry.mjs";
@@ -100,7 +101,7 @@ export async function handler(event) {
     console.error("[budget-sweep] rejected: bad or missing x-internal-token");
     return { statusCode: 401, body: "unauthorized" };
   }
-  if (event?.blobs) connectLambda(event);
+  if (event?.blobs) connectBlobs(event);
   const beat = await sweep();
   return { statusCode: 200, body: JSON.stringify(beat) };
 }

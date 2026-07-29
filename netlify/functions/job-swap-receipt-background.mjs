@@ -1,4 +1,5 @@
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { requireInternal } from "./_auth.mjs";
 import { publicClient } from "./_predict.mjs";
 import { confirmSwapLanded } from "./_swap-confirm.mjs";
@@ -53,7 +54,7 @@ export async function handler(event) {
     try {
       const { jobId } = JSON.parse(event.body || "{}");
       if (jobId) {
-        if (event.blobs) connectLambda(event);
+        if (event.blobs) connectBlobs(event);
         const store = getStore("job-deliverables");
         const entry = await store.get(String(jobId), { type: "json" });
         if (entry?.receipt) {
@@ -69,7 +70,7 @@ export async function handler(event) {
 }
 
 async function verify(event) {
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
   if (!requireInternal(event)) {
     console.error("[swap-verifier] rejected: bad or missing x-internal-token");
     return { statusCode: 401, body: "unauthorized" };

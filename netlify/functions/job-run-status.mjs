@@ -3,7 +3,8 @@
 // Poll a running job by its runId. Merges the "job-runs" record (create/fund
 // progress) with the "job-deliverables" record (research → submit → settle,
 // keyed by jobId). Ownership: only the run's owner (this session) may read it.
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
 
@@ -16,7 +17,7 @@ const STALL_MS = 30_000;         // > Blobs read lag + job-run-background cold s
 const REFIRE_COOLDOWN_MS = 30_000;
 
 export async function handler(event) {
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });

@@ -14,7 +14,8 @@
 // Input (POST body): { jobId }
 // Output: written to Blobs store "job-deliverables" under key `jobId`.
 
-import { connectLambda, getStore } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
 import { keccak256, toBytes } from "viem";
 import { ARC, CONTRACTS, parseBody } from "./_arc.mjs";
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
@@ -173,7 +174,7 @@ export async function handler(event) {
   // Blobs". connectLambda hands the client the request-scoped siteID + token
   // Netlify injects into event.blobs. Guard on event.blobs: absent under local
   // `netlify dev` (which configures Blobs globally), and connectLambda throws on it.
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   // Internal-only: this settles escrow (complete/reject). It is called solely by
   // job-submit-background's server-to-server chain, never by the browser, so it

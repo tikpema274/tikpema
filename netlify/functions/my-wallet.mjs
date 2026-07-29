@@ -5,8 +5,8 @@
 // server-verified session identity; the client cannot ask for anyone else's
 // wallet. Sub-brick 2a: this wallet is provisioned + shown but NOT yet used by
 // the job lifecycle (jobs still run on the shared env wallet — that's 2b).
-import { connectLambda } from "@netlify/blobs";
 import { formatUnits } from "viem";
+import { connectBlobs } from "./_blobs.mjs";
 import { json, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
@@ -27,7 +27,7 @@ export async function handler(event) {
     return json(405, { error: "POST or GET only" });
   }
   // Blobs wiring for classic-Lambda handlers (see job-deliverable for the note).
-  if (event.blobs) connectLambda(event);
+  if (event.blobs) connectBlobs(event);
 
   // Owner = the verified session identity, never a client-supplied value.
   const session = requireSession(event);
