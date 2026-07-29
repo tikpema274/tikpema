@@ -251,3 +251,21 @@
 # its own blob store (dd-canary-health, not agent-pause).
 [functions."dd-canary"]
   schedule = "*/10 * * * *"
+
+# Strong-read watch — is the TIKPEMA APP's money path still able to do a strong Blobs read on prod?
+#
+# ⚠️ DELIBERATELY NOT PART OF dd-canary. That one guards the DD ENGINE, which is going standalone
+# and will leave this repo; this one guards the kill switch and the spend ceiling. Folding them
+# together would mean pause and budget silently lose their monitor the day DD moves out.
+#
+# It makes ONE real HTTP request per run to the deployed blobs-probe. In-process would measure the
+# SCHEDULED runtime rather than the runtime _pause.mjs executes in, and could go green while the
+# kill switch is bricked.
+#
+# ⚠️ SAME LOAD-BEARING ORDERING AS THE CANARY, DIFFERENT NUMBERS ON PURPOSE:
+# MIN_RERUN_MS (7m) < this period (15m) < TTL_MS (45m). Shorten this below the dedupe window and
+# the SCHEDULED run dedupes itself into silence; lengthen it past the TTL and every record is stale
+# on arrival. The numbers differ from dd-canary's 5/10/30 so nobody assumes one monitor covers the
+# other. scripts/verify-strong-read-watch.mjs asserts this ordering against THIS FILE.
+[functions."strong-read-watch"]
+  schedule = "*/15 * * * *"
