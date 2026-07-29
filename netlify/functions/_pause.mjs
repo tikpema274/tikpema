@@ -52,6 +52,10 @@ const PAUSE_STORE = "agent-pause";
 // when the read fails, and that is about to move funds.
 const READ_CONSISTENCY = "strong";
 
+/** Sentinel for "this key could not be read", distinct from a readable-and-absent flag. A plain
+ *  `null` was indistinguishable from "no record" and collapsed to false = running. */
+const UNREADABLE = Symbol("unreadable");
+
 // `*` pauses EVERY agent for this owner — the "stop everything" switch, distinct from
 // pausing one agent. Kept as a real key rather than a loop so a global pause is a single
 // atomic write.
@@ -143,9 +147,18 @@ export async function pauseStates({ owner }) {
       // CONTROL: after hitting STOP they look at this roster to confirm the stop took. A cached
       // "not paused" tells them the pause failed when it did not — during an emergency, that
       // invites exactly the wrong reaction.
-      ids.map((id) => store.get(pauseKey(owner, id), { type: "json", consistency: READ_CONSISTENCY }).catch(() => null))
+      //
+      // ⭐ UNREADABLE IS A THIRD STATE, NOT "RUNNING". The per-key catch used to yield `null`, which
+      // `!!null` then rendered as FALSE — so a single unreadable flag showed the operator a GREEN,
+      // RUNNING agent whose state was in fact unknown. That is the wrong direction on a safety
+      // control, and it disagreed with the outer catch below, which already returns `null` (unknown)
+      // when the whole store is unreadable. One key failing now behaves exactly like all of them
+      // failing. Same tri-state lesson as the vault inspector's UNREADABLE.
+      ids.map((id) =>
+        store.get(pauseKey(owner, id), { type: "json", consistency: READ_CONSISTENCY }).catch(() => UNREADABLE))
     );
-    return Object.fromEntries(ids.map((id, i) => [id, !!recs[i]?.paused]));
+    return Object.fromEntries(
+      ids.map((id, i) => [id, recs[i] === UNREADABLE ? null : !!recs[i]?.paused]));
   } catch {
     return Object.fromEntries(ids.map((id) => [id, null])); // unknown, not "running"
   }

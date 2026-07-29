@@ -168,6 +168,30 @@ section("7 — the operator's feedback loop is not stale either");
   check("  …so the operator can confirm the stop actually took", states[AGENT] === true);
 }
 
+// ═══════════ 7b — ⭐ UNREADABLE IS NOT "RUNNING" in the roster ═══════════
+// The per-key catch used to yield null, which !!null rendered as FALSE — so ONE unreadable flag
+// showed the operator a GREEN, RUNNING agent whose state was actually unknown. Wrong direction on a
+// safety control, and it disagreed with the whole-store catch, which already returns null.
+section("7b — one unreadable key → unknown (null), never 'running'");
+{
+  reset();
+  await setPaused({ owner: OWNER, agent: AGENT, paused: true });
+  // Fail exactly ONE key, leaving the store otherwise healthy.
+  const realGet = fakeStore.get;
+  fakeStore.get = async (key, opts) => {
+    if (key === kMine) throw new Error("this one key is unreadable");
+    return realGet(key, opts);
+  };
+  const states = await pauseStates({ owner: OWNER });
+  fakeStore.get = realGet;
+
+  check("⭐⭐ the unreadable agent reads as NULL (unknown), not false",
+    states[AGENT] === null, JSON.stringify(states[AGENT]));
+  check("  …it is NOT rendered as running", states[AGENT] !== false);
+  check("  …other agents still report normally", states[ALL_AGENTS] === false, JSON.stringify(states[ALL_AGENTS]));
+  check("⭐ one key failing now behaves like the whole store failing (both → null)", states[AGENT] === null);
+}
+
 // ═══════════ 8 — structural: the spend paths still route through this gate ═══════════
 section("8 — the chokepoint is still wired");
 {
