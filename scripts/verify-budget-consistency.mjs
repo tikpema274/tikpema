@@ -269,6 +269,25 @@ section("8 — UNREADABLE is refused; ABSENT still starts the day");
   check("  …and nothing was written — the mutate never reached a setIfMatch", mutated === false);
 }
 
+// ═══════════ 8b — the PERSISTED shape must be unchanged ═══════════
+// ⚠️ Only the in-memory ADAPTER RETURN gained `readable`. The stored record is `mutate(value)`,
+// which never sees the wrapper. This matters concretely during a rollout: a draft on new code and
+// prod on old code share the site-scoped budget store IN BOTH DIRECTIONS, so a shape change would
+// corrupt records for whichever side is older.
+section("8b — the stored record shape did not change");
+{
+  seed({});
+  await recordDcaSpend({ owner: OWNER, amountUsdc: 0.25 });
+  const persisted = origin.get(dcaKey)?.data ?? {};
+  check("⭐⭐ `readable` is NOT persisted — it never reaches mutate()",
+    !("readable" in persisted), JSON.stringify(persisted));
+  check("  …nor `etag` or `value` (the wrapper fields)",
+    !("etag" in persisted) && !("value" in persisted));
+  check("  …the record still carries exactly spentUsdc + date",
+    typeof persisted.spentUsdc === "number" && typeof persisted.date === "string",
+    Object.keys(persisted).sort().join(","));
+}
+
 // ═══════════ 9 — no etag ⇒ onlyIfNew: the guard that made this SAFE, not URGENT ═══════════
 // ⚠️ DO NOT REMOVE. This is the ONLY reason the old defect was a mis-diagnosis rather than a
 // fail-open, and it lives in the same function just refactored. Defence in depth now that
