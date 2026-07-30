@@ -1,5 +1,120 @@
 ---
 
+## 2026-07-30 (afternoon) — the watch is LIVE; a hardcoded rollback target that pointed at the fail-open build; and why a draft cannot prove a fund-moving path
+
+### IS PROD HEALTHY? — two reads, no interpretation needed
+
+    GET https://app.tikpema.xyz/.netlify/functions/blobs-probe
+      -> verdict "D" AND calibrated true. Anything else, including UNCALIBRATED, is a failure.
+
+    netlify blobs:get strong-read-watch latest
+      -> the last cron observation: ok, reason, probe arms, build, lastGood, notify.
+
+⚠️ **SILENCE IS THE HEALTHY SIGNAL.** The monitor pushes on transitions only, so no Discord message
+is the expected steady state. Liveness is `producedAt` advancing in the record, **never** an alert
+arriving. A healthy first run after any promotion is silent by design.
+
+### SHIPPED
+
+**The strong-read watch is in production**, `*/15`, polling `blobs-probe` over HTTP and pushing to a
+dedicated Discord channel. All seven post-promotion checks passed. ⭐ **Money path FIRST** — the probe
+was verified `verdict D` before anything about the monitor was assessed, because the watch ships to
+the same site as `_pause.mjs` and `_budget.mjs`; a monitor is never the reason to accept a money-path
+risk.
+
+**🚨 THE ROLLBACK TARGET IN THE ALERT WAS THE FAIL-OPEN BUILD.** The known-broken message hardcoded
+the HOTFIX deploy — the build with all three safety reads degraded to `eventual`. Following it at 3am
+would have landed prod in precisely the state the money path had just been rescued from, and it was a
+**no-op anyway** if the probe genuinely reported HOTFIX. The most dangerous line in an alert is the
+one telling you what to do about it.
+
+Now **derived**: the last deploy whose probe *this monitor observed* reporting `verdict D`, carried
+forward from healthy runs only, with the **age** stated (14 minutes and 9 days are different
+instructions). Absence says so loudly — no constant, no omission, because omitting reads as "no
+rollback needed".
+
+⚠️ **Sourced from the `x-nf-deploy-id` HEADER, not `DEPLOY_ID`.** A CLI deploy runs no build, so
+build-time variables are absent — the same reason `commit_ref` is null on every deploy this project
+makes. Shape-validated, because the value *becomes an instruction*.
+
+**⭐ DESIGN COMMITMENT, PINNED STRUCTURALLY: a tree change can never CAUSE an alert, only decorate
+one.** Every legitimate deploy changes the tree; if that paged, every deploy would page and the
+channel becomes noise — which costs you the alert that matters. `decideNotify` does not take
+`treeChanged` as a parameter at all, and a suite assertion reads the function's own source, so a
+future change wiring it in fails immediately rather than being discovered by someone getting paged
+on a routine promotion.
+
+### DIAGNOSED, NOT SHIPPED — `_budget.mjs` `catch(() => null)`
+
+**It is NOT a fail-open.** Two states collapsed into one `null` — key absent (the first spend of the
+day) and store unreadable — and `mutate(null)` builds a **from-zero record**, i.e. the full daily
+ceiling handed over. But `setIfMatch` degrades to `onlyIfNew` when there is no etag, so an existing
+key **rejects** the write and the counter cannot be reset.
+
+⭐ **Fail-closed by a guard one layer BELOW the defect.** The catch is load-bearing-*adjacent*, not
+load-bearing — worth stating precisely, because "it's safe" and "the thing next to it is safe" invite
+different amounts of care.
+
+**The real defect was a FALSE DIAGNOSIS**: an unreadable store reported as `(contention)`, a cause
+never established — after ~19 futile retries at full backoff inside a 10s ceiling, so the likely
+user-visible result was a **timeout**, not the intended loud error. Same shape as the alert fixed
+this morning: a failure to *observe* reported as an observed failure of a different kind.
+
+Fix built, committed and suite-covered; **NOT DEPLOYED**. Money-path module, unproven on a deploy.
+
+### OPERATIONAL FACTS MEASURED TODAY — the durable part
+
+**A scheduled function CANNOT be HTTP-invoked.** Netlify 403s any function carrying a schedule, and
+cron does not fire on drafts — unreachable by BOTH routes. The only way to exercise one on a draft is
+comment the schedule out, deploy, invoke, **restore**. ⚠️ **Gate the restore**: `netlify.toml` is
+outside the build stamp's hashed surface, so a forgotten restore produces an identical tree hash, a
+passing provenance check, and a monitor that never runs. Silently.
+
+**`function_schedules` on the deploy is the authority on what cron was REGISTERED.** Do not infer it
+from observed intervals: records exist only at firing times, so an observed gap is a MULTIPLE of the
+interval, and dedupe plus eventual reads only ever LENGTHEN it. Timing bounds the interval from
+ABOVE and is blind to a schedule that is too FAST — the unsafe direction.
+
+**🚨 CIRCLE CLIENT KEYS ARE DOMAIN-RESTRICTED, so a real-client wallet connect has never worked on a
+draft origin and never will without a Circle-console allowlist.** Proven by elimination rather than
+guessed: the client bundle is BYTE-IDENTICAL between prod and draft, so the baked credentials are the
+same; same key + same code + different result leaves only the origin. Draft URLs are unique per
+deploy, so unless Circle supports a wildcard, **every draft needs re-allowlisting**. `SESSION_SECRET`
+is production-only — a second, independent blocker on the same path.
+
+⭐ **This changes how any fund-moving proof must be planned.** "Prove it on a draft first" is not
+available for anything requiring a real wallet connect. Either arrange the Circle-side allowlist in
+advance, or accept that the proof happens on production and choose that deliberately.
+
+**Verify a draft is serving the build you think it is** — match `blobs-probe`'s `build.commit` and
+`build.tree` before using it. ⚠️ The CLI's printed "Draft URL" is MALFORMED on this site (renders as
+`…app.tikpema.xyz.tikpema.xyz`); the form that resolves is
+`https://<deploy-id>--tikpema-predict-test.netlify.app`.
+
+**`WATCH_ALERT_WEBHOOK` must NEVER be `--secret`** — the promotion gate's existence check has to READ
+the URL to perform its live GET. Its credential hygiene comes from fingerprinting instead of printing.
+
+**`WATCH_STORE` at deploy-preview is DELIBERATE ISOLATION, not a leftover to tidy.** Removing it
+would let a future draft write into production's store.
+
+### CORRECTIONS TO THE RECORD
+
+**Yesterday's 0.1 USDC send went through PRODUCTION, not a draft** — settled by checking which deploy
+was published when it landed, not by recollection.
+
+**🚧 OPEN — was Option D ever actually proven on a draft?** The session handoff described a
+draft-based pause-toggle proof with a real client. If a real-client connect cannot work on a draft
+origin, that proof either used a different auth path or also ran against production. **Method to
+settle it:** identify the send, then check which deploy was published at that timestamp — the same
+method that settled the question above. ⚠️ This does **not** change the outcome: D is independently
+proven on production by `blobs-probe`'s two-arm differential, which needs no wallet at all.
+
+*(Checked while here: the pre/post-`210ffeb` contradiction over the DD exposure guard was already
+corrected by `9168a9b` — no surviving "not built" claim remains. And the specific `22.08 → 21.98`
+figure does not appear in this file; that came from the handoff, not the record.)*
+
+---
+
 ## 2026-07-29 → 07-30 — A PROMOTION THAT SILENTLY FAILED FOR 7.5 HOURS, and the discriminator + monitor built because of it
 
 **Prod is on `6a6b4b7ac6918d8872b521f3`, tree `de91653b…`, verified.** Money path green throughout.
