@@ -135,6 +135,38 @@ consumes it.
 **What made this acceptable is (1) and (3). Absent a fail-closed failure mode, the correct call would
 have been to defer, not to promote.**
 
+### ✅ THE EXCEPTION, DISCHARGED — both spends run on production, promptly
+
+`_budget.mjs` promoted. Prod verified serving the promoted build BEFORE spending (`blobs-probe`
+`build.commit` + `build.tree` matched), money path checked FIRST (`verdict D`, `calibrated true`),
+and the once-per-UTC-day window confirmed still open immediately before spend 1.
+
+| path | result |
+|---|---|
+| fresh record — readable + ABSENT key (first spend of the day) | ✅ created, amount correct |
+| CAS increment — existing key (second spend) | ✅ total **advanced**, did not reset |
+| persisted shape `{date, owner, spentUsdc}` | ✅ unchanged — `readable` never reaches the store |
+| `readable:false` refusal branch | **SUITE-ONLY** — not inducible anywhere, safe because it fails closed |
+
+⚠️ That last row is not written up as proven and should not be. The refusal branch has executed
+nowhere but the suite; its safety rests on the failure direction, not on observation.
+
+**The verification was not deferred, and that was the load-bearing condition.** Nothing monitors the
+budget path — the strong-read watch observes strong reads, not spend accounting — so if this had
+broken, spends would refuse and the only detection would be a human noticing.
+
+⭐⭐ **THE METHOD POINT, WHICH NEARLY COST THE WINDOW.** The spending wallet was NOT the address
+inferred from the previous day's send. The plan was to **LIST the store, not probe the expected
+key** — and probing the inferred address would have found it ABSENT, which on the fresh-record path
+reads as *"the record was not created"*: a FALSE FAILURE on a one-shot window, manufactured by
+confirming an inference instead of reading a value. Same shape as reading `function_schedules`
+rather than inferring cron from observed gaps, and `published_deploy` rather than trusting that a
+deploy command succeeded.
+
+🔍 **Worth a look later:** the two spends were 0.1 then 0.2, and the stored total is EXACTLY `0.3` —
+not the `0.30000000000000004` a naive IEEE-754 add would produce. So the counter is not accumulating
+float error, but the mechanism has not been read. These are the amounts that would expose it.
+
 ### CORRECTIONS TO THE RECORD
 
 **Yesterday's 0.1 USDC send went through PRODUCTION, not a draft** — settled by checking which deploy
