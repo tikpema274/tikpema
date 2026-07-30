@@ -97,6 +97,44 @@ the URL to perform its live GET. Its credential hygiene comes from fingerprintin
 **`WATCH_STORE` at deploy-preview is DELIBERATE ISOLATION, not a leftover to tidy.** Removing it
 would let a future draft write into production's store.
 
+### ⚠️ A DOCUMENTED EXCEPTION TO "PROVE IT ON A DRAFT FIRST" — `_budget.mjs`
+
+**The rule is not optional. This is an exception with a stated reason, and the reason is that the
+rule is STRUCTURALLY UNAVAILABLE here — not inconvenient, not expensive. Unavailable.**
+
+Settled against Circle's own documentation, not by inference:
+
+* A client key carries a **Web Allowed Domain**. Exact domains only; **no wildcard form is
+  documented**, and draft URLs are unique per deploy.
+* The **Passkey Domain Name** is a second console setting, and Circle requires it to **match the
+  client key's Allowed Domain exactly**. It is ONE domain, not a list — pointing it at a draft would
+  BREAK PRODUCTION.
+* `toCircleSmartAccount` is called with **no explicit `address`**, so the smart account is derived
+  from the passkey credential. Passkeys are origin-bound, so a draft would need a NEW passkey — a
+  new owner, **a different wallet address**, no funds, and a different `day:<owner>:<date>` key.
+
+⭐ So a draft could not have exercised the same owner even with a per-draft allowlist and a second
+client key. It would have proven something about a different wallet.
+
+**Why promoting anyway is defensible here, and would NOT be in general:**
+
+1. The change **FAILS CLOSED**. If `readable` is wrong, spends REFUSE. The failure mode is a blocked
+   spend, never a widened cap — the opposite direction from the defect it fixes.
+2. The branch that actually matters (`readable:false`) is **not inducible on a draft either** — you
+   cannot make a Blobs store unreadable on demand. A draft could only ever have shown the refactor
+   did not break the happy paths.
+3. Both nulls, the persisted record shape, and the `onlyIfNew` guard beneath it are all suite-pinned.
+
+🚨 **AND THE VERIFICATION IS NOT DEFERRED.** Nothing monitors the budget path — the strong-read watch
+observes strong reads, not spend accounting. If this breaks, spends refuse and the only detection is
+a human noticing. So the two spends ARE the verification and they happen promptly, not tomorrow:
+a first spend of the UTC day (readable + absent → fresh record) and a second (existing key → CAS
+increment, total advances). ⚠️ The first is a ONE-SHOT-PER-UTC-DAY window; any autonomous spend
+consumes it.
+
+**What made this acceptable is (1) and (3). Absent a fail-closed failure mode, the correct call would
+have been to defer, not to promote.**
+
 ### CORRECTIONS TO THE RECORD
 
 **Yesterday's 0.1 USDC send went through PRODUCTION, not a draft** — settled by checking which deploy
