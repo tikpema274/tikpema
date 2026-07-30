@@ -62,6 +62,41 @@ export const CRON_MS = Number(EXPECTED_CRON.match(/^\*\/(\d+) \* \* \* \*$/)[1])
 /** The function name netlify.toml must register on that schedule. */
 export const FUNCTION_NAME = "strong-read-watch";
 
+/** What production MUST watch, and the default when WATCH_TARGET_URL is unset. Declared here rather
+ *  than only in the handler so the promotion gate can check the deployed env against it — one
+ *  source of truth, not a second copy that drifts. */
+export const DEFAULT_TARGET_URL = "https://app.tikpema.xyz/.netlify/functions/blobs-probe";
+
+/** The store production MUST use. Same reasoning as DEFAULT_TARGET_URL. */
+export const DEFAULT_STORE_NAME = "strong-read-watch";
+
+/**
+ * ═══ 🚨 A LEFTOVER DRAFT-PROOF OVERRIDE MUST NOT REACH PRODUCTION ════════════════════════════
+ * `public/__watch-test-fixture-hotfix.json` ships to prod (it is a static asset). If
+ * WATCH_TARGET_URL were still pointing at it after a promotion, the monitor would watch a file that
+ * always says HOTFIX: a permanent fake outage, paging hourly, while the real money path went
+ * unwatched. WATCH_STORE has a quieter version of the same failure — prod would read and write the
+ * draft-proof namespace, so the real record would never be written and would age into `stale`.
+ *
+ * Unsetting these has been a MANUAL step on every proof so far. This turns it into an enforced one.
+ * Overrides remain legitimate OUTSIDE production, which is the only place they are useful.
+ *
+ * @returns {{ok:boolean, reason:string, detail:string}}
+ */
+export function checkEnvOverride(name, raw, expected) {
+  const v = raw === undefined || raw === null ? "" : String(raw).trim();
+  if (v === "") return { ok: true, reason: "unset", detail: `${name} is unset — the code default applies (${expected})` };
+  if (v === expected) return { ok: true, reason: "explicit-default", detail: `${name} is set, but to the production default` };
+  return {
+    ok: false, reason: "overridden",
+    detail:
+      `${name} is overridden to ${JSON.stringify(v)}. In production it must be unset or equal ` +
+      `${JSON.stringify(expected)}. A leftover draft-proof value — the HOTFIX fixture especially — ` +
+      `would make the monitor report a permanent fake failure and page hourly while the real money ` +
+      `path went unwatched.`,
+  };
+}
+
 export const SCHEMA = "strong-read-watch/1";
 
 /** The shape the probe must self-identify as. A body that does not say this is not the probe, no
@@ -89,7 +124,7 @@ const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
  *          timedOut:boolean}} res
  */
 export function judgeProbe(res) {
-  const fail = (reason, detail) => ({ ok: false, reason, detail, probe: null, build: null });
+  const fail = (reason, detail) => ({ ok: false, reason, detail, probe: null, build: null, deploy: null });
 
   if (res?.timedOut) return fail(REASON.TIMEOUT, "the probe did not answer before the deadline");
   if (res?.networkError) {
@@ -127,18 +162,23 @@ export function judgeProbe(res) {
   const build = isObj(body.build)
     ? { commit: body.build.commit ?? null, tree: body.build.tree ?? null, dirty: body.build.dirty ?? null }
     : null;
+  // Runtime identity of the deploy that answered. Only a RESOLVED id counts — the probe reports
+  // {resolved:false, id:null} rather than guessing, and a guess here becomes a rollback instruction.
+  const deploy = isObj(body.deploy) && body.deploy.resolved === true && typeof body.deploy.id === "string"
+    ? { id: body.deploy.id, source: body.deploy.source ?? null }
+    : null;
 
   // UNCALIBRATED is a failure, not an unknown. A monitor that records "couldn't tell" as fine is
   // the same fail-open this whole line of work exists to close.
   if (probe.calibrated !== true) {
-    return { ok: false, reason: REASON.UNCALIBRATED, probe, build,
+    return { ok: false, reason: REASON.UNCALIBRATED, probe, build, deploy,
       detail: `the probe could not discriminate (${probe.reason ?? "no reason given"}) — its negative control did not fire, so it measured nothing` };
   }
   if (probe.verdict !== "D") {
-    return { ok: false, reason: REASON.HOTFIX, probe, build,
+    return { ok: false, reason: REASON.HOTFIX, probe, build, deploy,
       detail: `the deployed build cannot do a strong read (verdict ${JSON.stringify(probe.verdict)}) — the kill switch, the spend ceiling and the DD health verdict are all reading a cache` };
   }
-  return { ok: true, reason: REASON.OK, probe, build, detail: "strong reads work on the deployed build" };
+  return { ok: true, reason: REASON.OK, probe, build, deploy, detail: "strong reads work on the deployed build" };
 }
 
 /**
@@ -233,7 +273,7 @@ const noEmbed = (url) => `<${url}>`;
 
 /** The message body. Plain text, no remote content echoed back — everything here is either our own
  *  closed-set code or a value the probe self-reported from OUR deploy. */
-export function notifyMessage({ kind, judgement, record, target }) {
+export function notifyMessage({ kind, judgement, record, target, now = Date.now() }) {
   const cls = judgement.ok ? "ok" : verdictClass(judgement.reason);
 
   const head =
@@ -284,16 +324,62 @@ export function notifyMessage({ kind, judgement, record, target }) {
 
   // ⭐ The rollback id belongs ONLY where a breakage was actually observed. On the cannot-verify
   // path it is the single most dangerous line in the message.
+  //
+  // 🚨 IT USED TO BE HARDCODED `6a69be4fc7aa0d2c6843fc3c` — WHICH IS THE HOTFIX, the build WITHOUT
+  // Option D. Following it at 3am would have landed prod in the FAIL-OPEN state the whole strong-read
+  // effort exists to close, and if the probe genuinely reported HOTFIX the rollback would have been a
+  // no-op anyway. It is now DERIVED from the last run this monitor actually observed healthy.
   if (cls === "known-broken") {
-    lines.push("**Rollback:** restore deploy `6a69be4fc7aa0d2c6843fc3c` if the money path is refusing.");
+    const g = record?.lastGood;
+    if (g?.deployId) {
+      lines.push(
+        `**Rollback:** restore deploy \`${g.deployId}\` — last observed healthy **${ago(g.observedAt, now)}** ` +
+          `(${g.observedAt})${g.tree ? `, tree \`${String(g.tree).slice(0, 16)}…\`` : ""}.`
+      );
+    } else {
+      // ⚠️ ABSENCE MUST READ AS NEITHER SAFE NOR AS A TARGET. Omitting the line would read as "no
+      // rollback needed"; falling back to a constant is what caused the defect above. Say it.
+      lines.push(
+        "**Rollback:** ⚠️ **NO KNOWN-GOOD DEPLOY ON RECORD** — this monitor has not yet seen a healthy " +
+          "run it could quote. **Do not roll back blind.** Check the deploy list and pick one whose " +
+          "`/.netlify/functions/blobs-probe` reports `verdict:\"D\"`."
+      );
+    }
   }
   return lines.join("\n");
+}
+
+/**
+ * Human age. A rollback target seen 14 minutes ago and one seen 9 days ago are completely
+ * different instructions, and only the age tells them apart.
+ */
+export function ago(iso, now) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "at an unknown time";
+  const s = Math.max(0, Math.round((now - t) / 1000));
+  if (s < 90) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 90) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `${h}h ago`;
+  return `${Math.round(h / 24)} days ago`;
 }
 
 /** Build the record. Pure, so the suite can assert its shape without touching Blobs. */
 export function buildRecord({ judgement, prev, nowIso, target, storeName }) {
   const prevTree = prev?.build?.tree ?? null;
   const tree = judgement.build?.tree ?? null;
+
+  // ⭐ THE ROLLBACK TARGET, CARRIED FORWARD FROM A HEALTHY RUN — never taken from the failing run
+  // that is about to be alerted on, and never a hardcoded constant. Updated only when a run is BOTH
+  // ok AND carries a resolved deploy id; otherwise the previous known-good is carried through
+  // untouched, so an outage cannot erase the last thing that worked.
+  const prevGood = prev?.lastGood ?? null;
+  const lastGood =
+    judgement.ok && judgement.deploy?.id
+      ? { deployId: judgement.deploy.id, tree, commit: judgement.build?.commit ?? null, observedAt: nowIso }
+      : prevGood;
+
   return {
     schema: SCHEMA,
     producedAt: nowIso,
@@ -302,6 +388,8 @@ export function buildRecord({ judgement, prev, nowIso, target, storeName }) {
     detail: judgement.detail,
     probe: judgement.probe,
     build: judgement.build,
+    deploy: judgement.deploy,
+    lastGood,
     // A tree hash that moves without a deploy you remember making is its own finding.
     treeChanged: prevTree === null || tree === null ? null : prevTree !== tree,
     previousTree: prevTree,

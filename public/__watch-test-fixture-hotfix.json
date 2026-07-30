@@ -1,0 +1,23 @@
+{
+  "_comment": "TEST FIXTURE — NOT A REAL VERDICT. This is a static file, not the live probe. It exists so the strong-read-watch monitor's KNOWN-BROKEN alert path can be exercised end to end on a draft without breaking anything real: point WATCH_TARGET_URL at this file and invoke the monitor. The live answer is always /.netlify/functions/blobs-probe — if you are reading this file looking for the state of production, you are reading the wrong thing.",
+  "_why_it_is_committed": "The known-broken path is the one that carries a rollback instruction. Inventing a genuinely broken production state to test it would be reckless; a static fixture makes it re-testable forever, at zero risk.",
+  "probe": "blobs-strong-read/1",
+  "verdict": "HOTFIX",
+  "reason": "strong-reads-throw",
+  "detail": "FIXTURE: simulated hotfix build — a strong read throws even through connectBlobs",
+  "calibrated": true,
+  "strongReads": false,
+  "arms": {
+    "A_connectLambda_only": { "outcome": "consistency-error", "errorName": "BlobsConsistencyError", "stage": "read" },
+    "B_connectBlobs": { "outcome": "consistency-error", "errorName": "BlobsConsistencyError", "stage": "read" },
+    "A2_connectLambda_after_B": { "outcome": "consistency-error", "errorName": "BlobsConsistencyError", "stage": "read" }
+  },
+  "eventualReachable": true,
+  "claimedRepaired": false,
+  "selfChecks": [],
+  "runtime": { "globalThisBlobsContextPresent": false, "envKind": "process.env", "blobsContextInjected": true },
+  "build": { "resolved": true, "commit": "0000000000000000000000000000000000000000", "dirty": false, "tree": "0000000000000000000000000000000000000000000000000000000000000000", "fileCount": 0, "generatedAt": "2026-07-30T00:00:00.000Z", "detail": "FIXTURE" },
+  "deploy": { "resolved": false, "id": null, "source": null, "detail": "FIXTURE: a static file is not served by a function, so no deploy id is claimed" },
+  "store": "agent-pause",
+  "key": "__strong-read-probe__"
+}

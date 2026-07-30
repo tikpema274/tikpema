@@ -3,6 +3,7 @@ import { connectBlobs } from "./_blobs.mjs";
 import {
   MIN_RERUN_MS, TTL_MS, REMINDER_MS, REASON,
   judgeProbe, shouldSkipRerun, decideNotify, notifyMessage, buildRecord,
+  DEFAULT_TARGET_URL, DEFAULT_STORE_NAME,
 } from "../../shared/strong-read-watch/watch.mjs";
 
 // strong-read-watch — is the money path's strong Blobs read still working ON PROD?
@@ -52,12 +53,12 @@ import {
  *  NOT part of the build stamp's hashed surface (netlify/functions + shared only), so the
  *  schedule-off draft and the schedule-on production deploy carry an IDENTICAL tree hash: the
  *  function code is provably the same, only the registration differs. */
-const DEFAULT_STORE = "strong-read-watch";
+const DEFAULT_STORE = DEFAULT_STORE_NAME;   // single source: shared/strong-read-watch/watch.mjs
 const LATEST_KEY = "latest";
 
 /** Where the money path actually lives. Overridable so the draft proof can aim elsewhere; recorded
  *  in every record so a result can never be mistaken for a different target's. */
-const DEFAULT_TARGET = "https://app.tikpema.xyz/.netlify/functions/blobs-probe";
+const DEFAULT_TARGET = DEFAULT_TARGET_URL;  // single source: shared/strong-read-watch/watch.mjs
 
 /** Netlify's sync ceiling is 10s. Leave room to still write the record after a slow probe. */
 const PROBE_TIMEOUT_MS = 6000;

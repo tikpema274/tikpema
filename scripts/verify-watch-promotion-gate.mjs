@@ -43,7 +43,8 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { EXPECTED_CRON, FUNCTION_NAME } from "../shared/strong-read-watch/watch.mjs";
+import { EXPECTED_CRON, FUNCTION_NAME, DEFAULT_TARGET_URL, DEFAULT_STORE_NAME, checkEnvOverride }
+  from "../shared/strong-read-watch/watch.mjs";
 
 /**
  * 🚨 STANDING CONSTRAINT: THIS VARIABLE MUST NEVER BE SET `--secret`.
@@ -222,13 +223,20 @@ export function interpretWebhookProbe(res) {
 /** Truncated fingerprint. Enough to compare two channels; useless for posting to one. */
 export const fingerprint = (v) => createHash("sha256").update(String(v)).digest("hex").slice(0, 12);
 
-const readVar = (name, context) => {
+const readVar = (name, context, { raw = false } = {}) => {
   try {
     const stdout = execFileSync("npx", ["netlify", "env:get", name, "--context", context], {
       encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
     });
+    // raw mode: these are not webhooks, so skip the webhook-shape classification and hand back the
+    // literal value (or "" when unset) for an exact comparison.
+    if (raw) {
+      const line = stdout.split("\n").map((l) => l.trim()).find((l) => l !== "");
+      return { value: /no value set/i.test(stdout) ? "" : (line ?? "") };
+    }
     return interpretEnvGet({ stdout, status: 0 });
   } catch (err) {
+    if (raw) return { value: "" };
     return interpretEnvGet({
       stdout: err?.stdout ?? "", status: err?.status ?? null,
       error: err?.status === undefined ? String(err?.code || err?.name || "spawn-failed") : null,
@@ -278,6 +286,26 @@ async function main() {
     console.log("     (not gating: this is not the production context. It MUST be restored before promotion.)");
   }
 
+  // ⭐ LEFTOVER DRAFT-PROOF OVERRIDES. The HOTFIX fixture is a static asset that ships to prod, so a
+  // stale WATCH_TARGET_URL would make the monitor watch a file that always says HOTFIX — a permanent
+  // fake outage, paging hourly, while the real money path went unwatched. Unsetting these has been a
+  // manual step on every proof; this enforces it. Legitimate outside production.
+  const overrides = [
+    ["WATCH_TARGET_URL", DEFAULT_TARGET_URL],
+    ["WATCH_STORE", DEFAULT_STORE_NAME],
+  ].map(([name, expected]) => {
+    const r = readVar(name, context, { raw: true });
+    return { name, ...checkEnvOverride(name, r.value, expected) };
+  });
+  for (const o of overrides) {
+    const mark = o.ok ? "✅" : isProd ? "❌" : "⚠️ ";
+    console.log(`  ${mark} override  — ${o.name}: ${o.reason}`);
+    if (!o.ok) console.log(`     ${o.detail}`);
+  }
+  if (overrides.some((o) => !o.ok) && !isProd) {
+    console.log("     (not gating: not the production context. These MUST be cleared before promotion.)");
+  }
+
   const watch = readVar(WATCH_WEBHOOK_VAR, context);
   console.log(`  ${watch.resolved ? "✅" : "❌"} shape     — ${watch.reason}: ${watch.detail}`);
 
@@ -295,7 +323,8 @@ async function main() {
     }
   }
 
-  const pass = watch.resolved && live?.exists === true && (schedule.ok || !isProd);
+  const pass = watch.resolved && live?.exists === true && (schedule.ok || !isProd)
+    && (overrides.every((o) => o.ok) || !isProd);
 
   // Informational, not a pass/fail criterion. Which channel it is, is the operator's call — but if
   // it is the SAME one the in-app feedback form posts to, say so now rather than during an outage.

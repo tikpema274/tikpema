@@ -25,7 +25,7 @@ console.log("║  STRONG-READ WATCH — acceptance                              
 console.log("╚══════════════════════════════════════════════════════════════════════╝");
 
 const W = await import("../shared/strong-read-watch/watch.mjs");
-const { REASON, judgeProbe, shouldSkipRerun, evaluateRecord, decideNotify, notifyMessage, buildRecord, verdictClass,
+const { REASON, judgeProbe, shouldSkipRerun, evaluateRecord, decideNotify, notifyMessage, buildRecord, verdictClass, ago,
         MIN_RERUN_MS, TTL_MS, REMINDER_MS } = W;
 
 const goodProbe = (over = {}) => JSON.stringify({
@@ -157,7 +157,9 @@ const jFail = judgeProbe(res({ body: goodProbe({ verdict: "HOTFIX", calibrated: 
 const msg = notifyMessage({ kind: "regressed", judgement: jFail, record: { failingSince: "2026-07-30T11:00:00Z" }, target: "https://app.tikpema.xyz/x" });
 check("KNOWN-BROKEN names the money-path consequence, not just a status code", /kill switch/.test(msg) && /spend ceiling/.test(msg));
 check("  …carries the arm outcomes", /arms A=/.test(msg));
-check("  …carries the rollback deploy id", /6a69be4fc7aa0d2c6843fc3c/.test(msg));
+check("  …always carries a ROLLBACK SECTION — a derived id, or an explicit no-known-good",
+  /\*\*Rollback:\*\*/.test(msg) && /NO KNOWN-GOOD DEPLOY ON RECORD/.test(msg),
+  "this msg has no lastGood, so the absence line is correct here");
 check("  …and its headline is the siren", /STRONG READS ARE BROKEN/.test(msg));
 
 // The exact shape of the false alert that was actually sent.
@@ -182,7 +184,11 @@ check("⭐⭐ EVERY cannot-verify reason produces the cannot-verify shape",
 check("⭐⭐ EVERY known-broken reason produces the siren + consequence + rollback",
   [REASON.HOTFIX, REASON.UNCALIBRATED].every((reason) => {
     const m = notifyMessage({ kind: "regressed", judgement: { ok: false, reason, detail: "d", probe: null, build: null }, record: {}, target: "t" });
-    return /ARE BROKEN/.test(m) && /kill switch/.test(m) && /6a69be4fc7aa0d2c6843fc3c/.test(m);
+    // The rollback SECTION must always be present on known-broken; with no lastGood in this
+    // fixture it must be the explicit absence, never a hardcoded constant.
+    return /ARE BROKEN/.test(m) && /kill switch/.test(m)
+      && /\*\*Rollback:\*\*/.test(m) && /NO KNOWN-GOOD DEPLOY ON RECORD/.test(m)
+      && !/6a69be4f/.test(m);
   }));
 check("⭐⭐ an UNRECOGNISED reason falls to CANNOT-VERIFY — never claim a breakage you did not see",
   verdictClass("something-new-nobody-added-yet") === "cannot-verify" &&
@@ -197,6 +203,64 @@ check("recovery reads as recovery, with no consequence or rollback text",
 
 check("⭐ URLs are wrapped in <> so Discord does not unfurl a marketing card under a siren",
   /\*\*Target:\*\* <https:\/\/app\.tikpema\.xyz\/x>/.test(msgUnreach));
+
+section("  …🚨 the ROLLBACK TARGET is DERIVED, never hardcoded");
+// It used to be the literal 6a69be4f — which is the HOTFIX, the build WITHOUT Option D. Following it
+// lands prod fail-open, and it is a no-op if the probe really said HOTFIX.
+const NOW2 = Date.parse("2026-07-30T12:00:00.000Z");
+const GOOD = { deployId: "6a6b31c221584e047b927297", tree: "e".repeat(64), commit: "f".repeat(40), observedAt: "2026-07-30T11:46:00.000Z" };
+const mk = (rec) => notifyMessage({ kind: "regressed", judgement: jFail, record: rec, target: "t", now: NOW2 });
+
+check("⭐⭐ the retired hardcoded HOTFIX id appears NOWHERE in the module",
+  !/6a69be4f/.test(readFileSync("shared/strong-read-watch/watch.mjs", "utf8").replace(/^\s*\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "")));
+check("⭐⭐ with a known-good on record, the alert quotes THAT deploy id",
+  /restore deploy `6a6b31c221584e047b927297`/.test(mk({ lastGood: GOOD })));
+check("⭐⭐ …and states HOW OLD it is — 14 min vs 9 days are different instructions",
+  /last observed healthy \*\*14 min ago\*\*/.test(mk({ lastGood: GOOD })), ago(GOOD.observedAt, NOW2));
+check("  …with the absolute timestamp too, not just the relative age",
+  /2026-07-30T11:46:00\.000Z/.test(mk({ lastGood: GOOD })));
+
+// ⭐⭐ THE ABSENCE CASE. Live for the first ~15 min after any promotion, before the first ok run of
+// the new build populates lastGood — so it is observable, not hypothetical.
+for (const rec of [{}, { lastGood: null }, { lastGood: { deployId: null, observedAt: "x" } }]) {
+  const m = mk(rec);
+  check(`⭐⭐ no known-good (${JSON.stringify(rec).slice(0, 22)}) -> says so LOUDLY, does not omit`,
+    /NO KNOWN-GOOD DEPLOY ON RECORD/.test(m) && /Do not roll back blind/.test(m));
+  check("  …and quotes NO deploy id at all — absence must not become a target",
+    !/restore deploy `/.test(m) && !/6a69be4f/.test(m));
+}
+check("  …it tells you how to find one yourself",
+  /verdict.*D/.test(mk({})) && /blobs-probe/.test(mk({})));
+
+section("  …lastGood is carried forward, never taken from the failing run");
+const okJ = judgeProbe(res({ body: goodProbe({ deploy: { resolved: true, id: "a".repeat(24), source: "x-nf-deploy-id" } }) }));
+const rGood = buildRecord({ judgement: okJ, prev: null, nowIso: "2026-07-30T12:00:00.000Z", target: "T", storeName: "S" });
+check("⭐ an ok run WITH a resolved deploy id records it as lastGood",
+  rGood.lastGood?.deployId === "a".repeat(24) && rGood.lastGood.observedAt === "2026-07-30T12:00:00.000Z");
+check("⭐⭐ a FAILING run carries the previous known-good FORWARD — an outage cannot erase it",
+  buildRecord({ judgement: jFail, prev: { lastGood: GOOD }, nowIso: "x", target: "T", storeName: "S" }).lastGood.deployId === GOOD.deployId);
+check("⭐⭐ the failing run's OWN deploy id is never promoted to lastGood",
+  buildRecord({ judgement: { ...jFail, deploy: { id: "b".repeat(24) } }, prev: { lastGood: GOOD }, nowIso: "x", target: "T", storeName: "S" }).lastGood.deployId === GOOD.deployId);
+check("⭐ an ok run with NO resolved deploy id does not overwrite a good one with a blank",
+  buildRecord({ judgement: judgeProbe(res()), prev: { lastGood: GOOD }, nowIso: "x", target: "T", storeName: "S" }).lastGood.deployId === GOOD.deployId);
+check("  …and with no prior it stays null rather than inventing one",
+  buildRecord({ judgement: judgeProbe(res()), prev: null, nowIso: "x", target: "T", storeName: "S" }).lastGood === null);
+
+section("  …the probe reports a deploy id, shape-validated");
+const P = await import("../netlify/functions/blobs-probe.mjs");
+const RD = (o) => P.resolveDeployId(o);
+check("resolves from the x-nf-deploy-id HEADER (present even on a CLI deploy, unlike DEPLOY_ID)",
+  RD({ event: { headers: { "x-nf-deploy-id": "6a6b31c221584e047b927297" } }, env: {} }).id === "6a6b31c221584e047b927297");
+check("  …header case-insensitively", RD({ event: { headers: { "X-NF-Deploy-Id": "a".repeat(24) } }, env: {} }).resolved === true);
+check("  …falls back to DEPLOY_ID for a git-triggered build",
+  RD({ event: { headers: {} }, env: { DEPLOY_ID: "b".repeat(24) } }).source === "DEPLOY_ID");
+check("⭐⭐ a MALFORMED id resolves to null — it would become a rollback instruction",
+  ["", "nope", "123", "z".repeat(24), "a".repeat(23), "a".repeat(25)].every((v) =>
+    RD({ event: { headers: { "x-nf-deploy-id": v } }, env: {} }).resolved === false));
+check("  …absent everywhere -> resolved:false, id null, no placeholder",
+  RD({ event: { headers: {} }, env: {} }).resolved === false && RD({ event: {}, env: {} }).id === null);
+check("⭐ the judge only accepts a RESOLVED id from the probe body",
+  judgeProbe(res({ body: goodProbe({ deploy: { resolved: false, id: "c".repeat(24) } }) })).deploy === null);
 
 const msgTree = notifyMessage({ kind: "regressed", judgement: jFail, record: { treeChanged: true, previousTree: "a".repeat(64) }, target: "x" });
 check("⭐ flags a tree hash that moved — a deploy you don't remember making is its own finding", /tree hash CHANGED/.test(msgTree));
@@ -249,8 +313,10 @@ check("⭐⭐ imports NOTHING from the money path, the auth surface, or the cana
   !imports.some((i) => FORBIDDEN.some((f) => i.includes(f))), imports.join(", "));
 check("⭐⭐ the monitor does not IMPORT blobs-probe — it must go over HTTP, or it measures the SCHEDULED runtime instead of the one _pause.mjs executes in",
   !imports.some((i) => i.includes("blobs-probe")));
+// The literal URL now lives in shared/ as DEFAULT_TARGET_URL (single source), so assert the
+// handler fetches AND that the shared constant actually points at the probe.
 check("  …and it reaches the probe by URL over fetch",
-  /fetch\(/.test(code) && /https:\/\/[^"]*blobs-probe/.test(code));
+  /fetch\(/.test(code) && /DEFAULT_TARGET_URL/.test(code) && /blobs-probe/.test(W.DEFAULT_TARGET_URL));
 
 section("  …and blobs-probe stays read-only");
 const probeSrc = readFileSync("netlify/functions/blobs-probe.mjs", "utf8");
@@ -496,6 +562,32 @@ check("⭐⭐ every log line touching a resolved value hashes it — the URL is 
   valueLogs.length > 0 && valueLogs.every((l) => /fingerprint\(/.test(l)),
   `${valueLogs.length} such line(s), all hashed`);
 check("  …and the output says so explicitly", /value withheld/.test(gateSrc));
+
+section("  …🚨 leftover draft-proof overrides must not reach production");
+// public/__watch-test-fixture-hotfix.json ships to prod. A stale WATCH_TARGET_URL pointing at it
+// would make the monitor watch a file that ALWAYS says HOTFIX: a permanent fake outage, paging
+// hourly, while the real money path went unwatched. Unsetting has been a MANUAL step every time.
+const { checkEnvOverride, DEFAULT_TARGET_URL: DTU, DEFAULT_STORE_NAME: DSN } = W;
+check("unset -> ok (the code default applies)", checkEnvOverride("WATCH_TARGET_URL", undefined, DTU).ok === true);
+check("  …empty string is also unset", checkEnvOverride("WATCH_TARGET_URL", "   ", DTU).reason === "unset");
+check("explicitly set to the production default -> ok", checkEnvOverride("WATCH_TARGET_URL", DTU, DTU).reason === "explicit-default");
+check("⭐⭐ pointed at the HOTFIX FIXTURE -> REFUSED",
+  checkEnvOverride("WATCH_TARGET_URL", "https://app.tikpema.xyz/__watch-test-fixture-hotfix.json", DTU).ok === false);
+check("  …and the detail names the consequence: permanent fake failure, hourly paging",
+  /fake failure/.test(checkEnvOverride("WATCH_TARGET_URL", "https://x/y.json", DTU).detail));
+check("⭐ any other override is refused too — only unset or the exact default pass",
+  ["https://app.tikpema.xyz/.netlify/functions/no-such", "http://x", "nonsense"]
+    .every((v) => checkEnvOverride("WATCH_TARGET_URL", v, DTU).ok === false));
+check("⭐⭐ WATCH_STORE gets the same treatment — prod must write the real store",
+  checkEnvOverride("WATCH_STORE", "watch-draft-proof", DSN).ok === false &&
+  checkEnvOverride("WATCH_STORE", DSN, DSN).ok === true &&
+  checkEnvOverride("WATCH_STORE", undefined, DSN).ok === true);
+const gateOv = readFileSync("scripts/verify-watch-promotion-gate.mjs", "utf8");
+check("⭐ the gate checks BOTH overrides and gates production only",
+  /WATCH_TARGET_URL", DEFAULT_TARGET_URL/.test(gateOv) && /WATCH_STORE", DEFAULT_STORE_NAME/.test(gateOv)
+  && /overrides\.every\(\(o\) => o\.ok\) \|\| !isProd/.test(gateOv));
+check("⭐ the target/store defaults have ONE source, shared by handler and gate",
+  /DEFAULT_TARGET_URL/.test(readFileSync("netlify/functions/strong-read-watch.mjs","utf8")));
 
 section("  …and the monitor has NO webhook fallback");
 const monSrc = readFileSync("netlify/functions/strong-read-watch.mjs", "utf8");

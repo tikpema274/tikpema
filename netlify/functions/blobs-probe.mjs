@@ -63,6 +63,47 @@ export const PROBE_STORE = "agent-pause";
  *  written — only read, and expected to be absent. */
 export const PROBE_KEY = "__strong-read-probe__";
 
+/**
+ * WHICH DEPLOY IS ANSWERING? Needed so a monitor can quote a ROLLBACK TARGET instead of hardcoding
+ * one — see shared/strong-read-watch/watch.mjs.
+ *
+ * ⭐ DELIBERATELY NOT PART OF THE BUILD STAMP. The stamp is generated at BUILD time and cannot know
+ * which deploy it lands in; the deploy id is a RUNTIME fact. Folding them together would let a
+ * stale stamp appear to name a live deploy.
+ *
+ * ⭐ THE HEADER IS THE SOURCE, NOT `DEPLOY_ID`. A CLI deploy runs no build, so build-time env vars
+ * are absent — the same reason commit_ref is null on every deploy this project makes. The header is
+ * what `connectLambda` itself reads (@netlify/blobs main.js:20), so it is present wherever Blobs
+ * works at all. `DEPLOY_ID` is kept only as a second source for a git-triggered build.
+ *
+ * ⚠️ SHAPE-VALIDATED, because this value becomes a ROLLBACK INSTRUCTION. A Netlify deploy id is 24
+ * hex characters. Anything else resolves to null rather than being passed along — quoting garbage
+ * as a rollback target is worse than admitting we do not know.
+ */
+export const DEPLOY_ID_SOURCES = Object.freeze(["x-nf-deploy-id", "DEPLOY_ID"]);
+
+export function resolveDeployId({ event, env = process.env } = {}) {
+  const headers = event?.headers || {};
+  // Netlify lowercases header keys, but do not rely on it.
+  const hdr = Object.keys(headers).find((k) => k.toLowerCase() === "x-nf-deploy-id");
+  const candidates = [
+    ["x-nf-deploy-id", hdr ? headers[hdr] : undefined],
+    ["DEPLOY_ID", env?.DEPLOY_ID],
+  ];
+  for (const [source, raw] of candidates) {
+    const v = typeof raw === "string" ? raw.trim() : "";
+    if (/^[a-f0-9]{24}$/i.test(v)) {
+      return { resolved: true, id: v.toLowerCase(), source, detail: `deploy id resolved from ${source}` };
+    }
+  }
+  return {
+    resolved: false, id: null, source: null,
+    detail:
+      `no deploy id could be resolved (checked ${DEPLOY_ID_SOURCES.join(", ")}). Reported as ` +
+      `UNRESOLVED rather than guessed: a wrong id here would become a wrong rollback instruction.`,
+  };
+}
+
 /** CLOSED SET. An unrecognised failure must land in `other-error`, never widen into "ok" and
  *  never leak its message. */
 export const OUTCOME = Object.freeze({
@@ -243,6 +284,8 @@ export const handler = async (event) => {
           blobsContextInjected: Boolean(event?.blobs),
         },
         build: stamp,
+        // Runtime, not build-time — kept separate from `build` on purpose.
+        deploy: resolveDeployId({ event }),
         store: PROBE_STORE,
         key: PROBE_KEY,
       },
