@@ -11,6 +11,7 @@
 
 import { mock } from "node:test";
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 
 let pass = 0, fail = 0;
 const check = (label, cond, extra = "") => {
@@ -24,7 +25,7 @@ console.log("║  STRONG-READ WATCH — acceptance                              
 console.log("╚══════════════════════════════════════════════════════════════════════╝");
 
 const W = await import("../shared/strong-read-watch/watch.mjs");
-const { REASON, judgeProbe, shouldSkipRerun, evaluateRecord, decideNotify, notifyMessage, buildRecord,
+const { REASON, judgeProbe, shouldSkipRerun, evaluateRecord, decideNotify, notifyMessage, buildRecord, verdictClass,
         MIN_RERUN_MS, TTL_MS, REMINDER_MS } = W;
 
 const goodProbe = (over = {}) => JSON.stringify({
@@ -104,8 +105,15 @@ check("⭐⭐ ABSENCE does not serve — presence is never freshness",
 check("  …malformed does not serve", evaluateRecord({ record: { producedAt: rec(0).producedAt }, now: NOW }).serve === false);
 check("  …future-dated does not serve", evaluateRecord({ record: rec(-60_000), now: NOW }).serve === false);
 
-// ⭐ the ordering invariant, asserted against the REAL file
-const toml = readFileSync("netlify.toml", "utf8");
+// ⭐ the ordering invariant, asserted against the COMMITTED netlify.toml.
+//
+// ⚠️ NOT the working tree. Proving this monitor on a draft REQUIRES commenting the schedule out
+// (403 on HTTP invoke of a scheduled function; crons do not fire on drafts), so mid-proof the
+// on-disk file legitimately has no schedule and this suite would go red for the wrong reason —
+// the same mistake the build-stamp suite made by asserting against a file that is stamped between
+// build and deploy. git is where the design intent lives; the WORKING TREE is the promotion gate's
+// job, and gate:watch refuses production if it is still commented out.
+const toml = execFileSync("git", ["show", "HEAD:netlify.toml"], { encoding: "utf8" });
 const block = toml.match(/\[functions\."strong-read-watch"\]\s*\n\s*schedule\s*=\s*"([^"]+)"/);
 check("netlify.toml registers strong-read-watch on a schedule", !!block, block?.[1]);
 const cron = block?.[1] ?? "";
@@ -140,13 +148,56 @@ check("⭐⭐ still failing, notified 61m ago -> REMINDS (transition-only would 
 check("  …a malformed lastNotifiedAt is treated as never-notified, not as just-notified",
   D({ prevOk: false, ok: false, lastNotifiedAt: "not-a-date" }).notify === true);
 
-section("  …the message says what broke and what it costs");
+section("  …🚨 A FAILURE TO OBSERVE IS NOT AN OBSERVED FAILURE");
+// The first real alert this monitor sent was WRONG in the way that matters: the probe target did
+// not exist, so nothing was observed — yet the message asserted the kill switch and spend ceiling
+// were reading a cache, and offered a rollback id. Strong reads were fine. The consequence
+// paragraph, not the headline, is what would send someone rolling back a HEALTHY deploy at 3am.
 const jFail = judgeProbe(res({ body: goodProbe({ verdict: "HOTFIX", calibrated: true }) }));
 const msg = notifyMessage({ kind: "regressed", judgement: jFail, record: { failingSince: "2026-07-30T11:00:00Z" }, target: "https://app.tikpema.xyz/x" });
-check("names the money-path consequence, not just a status code", /kill switch/.test(msg) && /spend ceiling/.test(msg));
-check("carries the arm outcomes", /arms A=/.test(msg));
-check("carries the rollback deploy id", /6a69be4fc7aa0d2c6843fc3c/.test(msg));
-check("carries the target", /app\.tikpema\.xyz/.test(msg));
+check("KNOWN-BROKEN names the money-path consequence, not just a status code", /kill switch/.test(msg) && /spend ceiling/.test(msg));
+check("  …carries the arm outcomes", /arms A=/.test(msg));
+check("  …carries the rollback deploy id", /6a69be4fc7aa0d2c6843fc3c/.test(msg));
+check("  …and its headline is the siren", /STRONG READS ARE BROKEN/.test(msg));
+
+// The exact shape of the false alert that was actually sent.
+const jUnreach = judgeProbe(res({ body: SPA, contentType: "text/html" }));
+const msgUnreach = notifyMessage({ kind: "first-failure", judgement: jUnreach, record: {}, target: "https://app.tikpema.xyz/x" });
+check("⭐⭐ CANNOT-VERIFY headline says CANNOT VERIFY, not BROKEN",
+  /CANNOT VERIFY/.test(msgUnreach) && !/ARE BROKEN/.test(msgUnreach));
+check("⭐⭐ it makes NO consequence claim — the kill switch is never mentioned",
+  !/kill switch/.test(msgUnreach) && !/spend ceiling/.test(msgUnreach) && !/reading a CDN cache/.test(msgUnreach));
+check("⭐⭐ it carries NO rollback id — the single most dangerous line on this path",
+  !/6a69be4fc7aa0d2c6843fc3c/.test(msgUnreach));
+check("  …it says plainly this is not evidence the money path is broken",
+  /not\*{0,2} evidence/.test(msgUnreach));
+check("  …and the action is to check the site is up",
+  /check the site/.test(msgUnreach) && /Do NOT roll back/.test(msgUnreach));
+
+check("⭐⭐ EVERY cannot-verify reason produces the cannot-verify shape",
+  [REASON.UNREACHABLE, REASON.TIMEOUT, REASON.HTTP_ERROR, REASON.NOT_JSON, REASON.WRONG_SHAPE].every((reason) => {
+    const m = notifyMessage({ kind: "regressed", judgement: { ok: false, reason, detail: "d", probe: null, build: null }, record: {}, target: "t" });
+    return /CANNOT VERIFY/.test(m) && !/kill switch/.test(m) && !/6a69be4fc7aa0d2c6843fc3c/.test(m);
+  }));
+check("⭐⭐ EVERY known-broken reason produces the siren + consequence + rollback",
+  [REASON.HOTFIX, REASON.UNCALIBRATED].every((reason) => {
+    const m = notifyMessage({ kind: "regressed", judgement: { ok: false, reason, detail: "d", probe: null, build: null }, record: {}, target: "t" });
+    return /ARE BROKEN/.test(m) && /kill switch/.test(m) && /6a69be4fc7aa0d2c6843fc3c/.test(m);
+  }));
+check("⭐⭐ an UNRECOGNISED reason falls to CANNOT-VERIFY — never claim a breakage you did not see",
+  verdictClass("something-new-nobody-added-yet") === "cannot-verify" &&
+  !/kill switch/.test(notifyMessage({ kind: "regressed", judgement: { ok: false, reason: "brand-new", detail: "d", probe: null, build: null }, record: {}, target: "t" })));
+check("  …the two classes are disjoint and cover every REASON except ok",
+  Object.values(REASON).filter((r) => r !== REASON.OK).every((r) => ["known-broken", "cannot-verify"].includes(verdictClass(r))) &&
+  verdictClass(REASON.OK) === "ok");
+
+check("recovery reads as recovery, with no consequence or rollback text",
+  /RECOVERED/.test(notifyMessage({ kind: "recovered", judgement: judgeProbe(res()), record: {}, target: "t" })) &&
+  !/kill switch/.test(notifyMessage({ kind: "recovered", judgement: judgeProbe(res()), record: {}, target: "t" })));
+
+check("⭐ URLs are wrapped in <> so Discord does not unfurl a marketing card under a siren",
+  /\*\*Target:\*\* <https:\/\/app\.tikpema\.xyz\/x>/.test(msgUnreach));
+
 const msgTree = notifyMessage({ kind: "regressed", judgement: jFail, record: { treeChanged: true, previousTree: "a".repeat(64) }, target: "x" });
 check("⭐ flags a tree hash that moved — a deploy you don't remember making is its own finding", /tree hash CHANGED/.test(msgTree));
 
@@ -385,7 +436,7 @@ const { checkScheduleDeclared } = await import("../scripts/verify-watch-promotio
 const { EXPECTED_CRON, CRON_MS, FUNCTION_NAME } = W;
 const TOML_ON = `[functions."strong-read-watch"]\n  schedule = "${EXPECTED_CRON}"\n`;
 
-check("⭐ the real netlify.toml currently declares it, uncommented",
+check("⭐ the COMMITTED netlify.toml declares it, uncommented (git, not the working tree — see above)",
   checkScheduleDeclared(toml).ok === true, checkScheduleDeclared(toml).cron ?? "—");
 check("  …and the expectation lives in CODE, with the file checked against it (one source of truth)",
   cron === EXPECTED_CRON && cronMs === CRON_MS, `${cron} === ${EXPECTED_CRON}`);

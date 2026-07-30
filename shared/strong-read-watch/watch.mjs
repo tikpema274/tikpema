@@ -194,24 +194,78 @@ export function decideNotify({ prevOk, ok, lastNotifiedAt, now, reminderMs = REM
   return { notify: false, kind: "still-failing-quiet" };
 }
 
+/**
+ * ═══ 🚨 A FAILURE TO OBSERVE IS NOT AN OBSERVED FAILURE ══════════════════════════════════════
+ * The first real alert this monitor ever sent was WRONG in the way that matters. The probe target
+ * did not exist, so the monitor never reached it — and the message asserted that "the kill switch,
+ * the spend ceiling and the DD health verdict are reading a CDN cache". They were not. Strong reads
+ * were fine on 6a6a49ae. The alert inferred a broken state it had never observed, and the
+ * consequence paragraph was an instruction to roll back a HEALTHY deploy, read at 3am.
+ *
+ * The headline was merely alarming; the consequence claim was the dangerous part. So BOTH are now
+ * derived from what the probe actually said:
+ *
+ *   CANNOT VERIFY — the probe never answered (unreachable / timeout / http-error / not-json /
+ *                   wrong-shape). We know NOTHING about strong reads. No consequence claim, no
+ *                   rollback id. The action is "check the site is up", because the likeliest cause
+ *                   is the monitor's own reach, not the money path.
+ *   KNOWN BROKEN  — the probe answered and said so (hotfix / uncalibrated). NOW the consequence
+ *                   paragraph is true and the rollback id belongs.
+ *
+ * ⚠️ AN UNRECOGNISED REASON MAPS TO CANNOT-VERIFY, never to known-broken. Claiming a breakage you
+ * did not see is the costlier error: it spends a rollback on a healthy deploy.
+ */
+export const CANNOT_VERIFY_REASONS = Object.freeze([
+  REASON.UNREACHABLE, REASON.TIMEOUT, REASON.HTTP_ERROR, REASON.NOT_JSON, REASON.WRONG_SHAPE,
+]);
+export const KNOWN_BROKEN_REASONS = Object.freeze([REASON.HOTFIX, REASON.UNCALIBRATED]);
+
+/** @returns {"ok"|"known-broken"|"cannot-verify"} */
+export function verdictClass(reason) {
+  if (reason === REASON.OK) return "ok";
+  if (KNOWN_BROKEN_REASONS.includes(reason)) return "known-broken";
+  return "cannot-verify";
+}
+
+/** ⚠️ Discord auto-unfurls bare links, which put a marketing card under a siren. Angle brackets
+ *  suppress the embed and keep the link clickable. */
+const noEmbed = (url) => `<${url}>`;
+
 /** The message body. Plain text, no remote content echoed back — everything here is either our own
  *  closed-set code or a value the probe self-reported from OUR deploy. */
 export function notifyMessage({ kind, judgement, record, target }) {
-  const head = {
-    regressed: "🚨 **STRONG READS ARE BROKEN ON PROD**",
-    "first-failure": "🚨 **STRONG READS ARE BROKEN ON PROD** (first observation)",
-    "still-failing": "🚨 **STILL BROKEN** — strong reads on prod",
-    recovered: "✅ **RECOVERED** — strong reads work on prod again",
-  }[kind] ?? "ℹ️ strong-read watch";
+  const cls = judgement.ok ? "ok" : verdictClass(judgement.reason);
+
+  const head =
+    cls === "ok"
+      ? "✅ **RECOVERED** — strong reads work on prod again"
+      : cls === "known-broken"
+        ? {
+            regressed: "🚨 **STRONG READS ARE BROKEN ON PROD**",
+            "first-failure": "🚨 **STRONG READS ARE BROKEN ON PROD** (first observation)",
+            "still-failing": "🚨 **STILL BROKEN** — strong reads on prod",
+          }[kind] ?? "🚨 **STRONG READS ARE BROKEN ON PROD**"
+        : {
+            regressed: "⚠️ **CANNOT VERIFY strong reads on prod**",
+            "first-failure": "⚠️ **CANNOT VERIFY strong reads on prod** (first observation)",
+            "still-failing": "⚠️ **STILL CANNOT VERIFY** strong reads on prod",
+          }[kind] ?? "⚠️ **CANNOT VERIFY strong reads on prod**";
 
   const lines = [head, `\`${judgement.reason}\` — ${judgement.detail}`];
 
-  if (!judgement.ok) {
+  if (cls === "known-broken") {
     lines.push(
       "**What this means:** the kill switch, the spend ceiling and the DD health verdict are reading a CDN cache, " +
         "so a pause or a ceiling written now may not be seen by the next spend."
     );
+  } else if (cls === "cannot-verify") {
+    lines.push(
+      "**What this means:** NOTHING about strong reads — the probe never answered, so the monitor could not tell. " +
+        "This is **not** evidence that the money path is broken."
+    );
+    lines.push("**Do:** check the site and the probe endpoint are up. Do NOT roll back on this alert alone.");
   }
+
   if (judgement.probe) {
     lines.push(
       `**Probe:** verdict \`${judgement.probe.verdict}\` calibrated \`${judgement.probe.calibrated}\` · ` +
@@ -226,8 +280,13 @@ export function notifyMessage({ kind, judgement, record, target }) {
     lines.push(`⚠️ **The deployed tree hash CHANGED** since the last run (was \`${String(record.previousTree ?? "").slice(0, 16)}…\`). If you did not deploy, that is its own finding.`);
   }
   if (record?.failingSince && !judgement.ok) lines.push(`**Failing since:** ${record.failingSince}`);
-  lines.push(`**Target:** ${target}`);
-  lines.push("**Rollback:** restore deploy `6a69be4fc7aa0d2c6843fc3c` if the money path is refusing.");
+  lines.push(`**Target:** ${noEmbed(target)}`);
+
+  // ⭐ The rollback id belongs ONLY where a breakage was actually observed. On the cannot-verify
+  // path it is the single most dangerous line in the message.
+  if (cls === "known-broken") {
+    lines.push("**Rollback:** restore deploy `6a69be4fc7aa0d2c6843fc3c` if the money path is refusing.");
+  }
   return lines.join("\n");
 }
 
