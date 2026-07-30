@@ -45,6 +45,20 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { EXPECTED_CRON, FUNCTION_NAME } from "../shared/strong-read-watch/watch.mjs";
 
+/**
+ * 🚨 STANDING CONSTRAINT: THIS VARIABLE MUST NEVER BE SET `--secret`.
+ *
+ * `netlify env:set --secret` makes a value unreadable afterwards. That is normally good hygiene for
+ * a credential, and here it would BREAK THE GATE: the existence check below has to READ the URL to
+ * perform the live GET. A secret value would come back unset/unparseable, the gate would refuse a
+ * perfectly good channel — or worse, a future "fix" would relax the parser to accommodate it and
+ * we would be back to a syntax check that cannot tell a real channel from a well-formed dead one.
+ * That is the exact false-negative class this whole gate exists to eliminate.
+ *
+ * The credential hygiene here comes from FINGERPRINT-NOT-PRINT, not from unreadability: the value
+ * is never logged, only its truncated sha256. Copying it between contexts is done through a shell
+ * variable, verified by comparing fingerprints, never by echoing the URL.
+ */
 export const WATCH_WEBHOOK_VAR = "WATCH_ALERT_WEBHOOK";
 const PROBE_TIMEOUT_MS = 8000;
 
