@@ -350,6 +350,57 @@ export function notifyMessage({ kind, judgement, record, target, now = Date.now(
 }
 
 /**
+ * ═══ 🔍 DIAGNOSTIC — WHAT DOES A *SCHEDULED* RUNTIME ACTUALLY SEE? ══════════════════════════
+ * `resolveBuildId` (shared/dd-canary/health.mjs) reads DD_BUILD_ID → COMMIT_REF → DEPLOY_ID →
+ * BUILD_ID from **env only**. In production none of them resolve, so `dd-canary` refuses at rung 0
+ * and has written NOTHING for days — which means the moment DD_PUBLIC_ENABLED is set, dd-analyze
+ * refuses everything as `service-unverified`. That gates the DD launch, not just the money step.
+ *
+ * ⚠️ AND `netlify env:get` CANNOT ANSWER IT. Measured 2026-07-30: it reports COMMIT_REF as the
+ * LOCAL git HEAD and DEPLOY_ID/BUILD_ID as "0" — values synthesised by the CLI, absent from
+ * `env:list`, and never seen by the deployed function. The only authority is what the function
+ * itself observes, which is why this rides on a real scheduled invocation.
+ *
+ * ⭐ THREE STATES FOR THE HEADER, NOT TWO. `headers` absent, `headers` present but the key missing,
+ * and the key present with a value are three different answers implying three different fixes. A
+ * bare boolean would collapse the first two — the absence-vs-false defect this whole line of work
+ * exists to close, reintroduced inside the instrument built to investigate it.
+ *
+ * Env vars are recorded the same way: `null` = ABSENT, `""` = present-but-empty, else the value.
+ * These four are PUBLIC BUILD IDENTIFIERS, not credentials — recording the value is the point,
+ * since the question is precisely which one `resolveBuildId` would pick.
+ *
+ * ⚠️ DIAGNOSTIC ONLY. This must never reach `decideNotify` — a field that can page someone is a
+ * field that gets deleted in anger. Asserted structurally in the suite, as `treeChanged` is.
+ */
+export const BUILD_ID_ENV_KEYS = Object.freeze(["DD_BUILD_ID", "COMMIT_REF", "DEPLOY_ID", "BUILD_ID"]);
+export const DEPLOY_ID_HEADER = "x-nf-deploy-id";
+
+export function captureBuildIdSources(event, env = process.env) {
+  const h = event?.headers;
+  let headerState, headerValue = null;
+  if (h === undefined || h === null || typeof h !== "object") {
+    headerState = "headers-absent";
+  } else {
+    // Netlify lowercases header keys, but do not depend on it.
+    const key = Object.keys(h).find((k) => k.toLowerCase() === DEPLOY_ID_HEADER);
+    if (key === undefined) {
+      headerState = "key-missing";
+    } else {
+      headerState = "present";
+      headerValue = h[key] === undefined || h[key] === null ? null : String(h[key]);
+    }
+  }
+
+  const envSeen = {};
+  for (const k of BUILD_ID_ENV_KEYS) {
+    const v = env?.[k];
+    envSeen[k] = v === undefined || v === null ? null : String(v);
+  }
+  return { headerState, headerValue, env: envSeen };
+}
+
+/**
  * Human age. A rollback target seen 14 minutes ago and one seen 9 days ago are completely
  * different instructions, and only the age tells them apart.
  */
@@ -366,7 +417,7 @@ export function ago(iso, now) {
 }
 
 /** Build the record. Pure, so the suite can assert its shape without touching Blobs. */
-export function buildRecord({ judgement, prev, nowIso, target, storeName }) {
+export function buildRecord({ judgement, prev, nowIso, target, storeName, runtimeSources = null }) {
   const prevTree = prev?.build?.tree ?? null;
   const tree = judgement.build?.tree ?? null;
 
@@ -390,6 +441,8 @@ export function buildRecord({ judgement, prev, nowIso, target, storeName }) {
     build: judgement.build,
     deploy: judgement.deploy,
     lastGood,
+    // 🔍 DIAGNOSTIC ONLY — see captureBuildIdSources. Never an input to any decision.
+    runtimeSources,
     // A tree hash that moves without a deploy you remember making is its own finding.
     treeChanged: prevTree === null || tree === null ? null : prevTree !== tree,
     previousTree: prevTree,

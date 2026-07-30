@@ -232,6 +232,45 @@ for (const rec of [{}, { lastGood: null }, { lastGood: { deployId: null, observe
 check("  …it tells you how to find one yourself",
   /verdict.*D/.test(mk({})) && /blobs-probe/.test(mk({})));
 
+section("  …🔍 the scheduled-runtime capture: THREE states, and it can never page anyone");
+// resolveBuildId reads env ONLY, and in production nothing resolves — so dd-canary refuses at
+// rung 0 and has written nothing for days. `netlify env:get` cannot answer why: measured
+// 2026-07-30, it reports COMMIT_REF as the LOCAL git HEAD and DEPLOY_ID/BUILD_ID as "0", values
+// absent from env:list and never seen by the deployed function. Only the function can say.
+const { captureBuildIdSources, BUILD_ID_ENV_KEYS, DEPLOY_ID_HEADER } = W;
+
+check("⭐⭐ state 1 — NO headers object at all -> 'headers-absent'",
+  captureBuildIdSources({}, {}).headerState === "headers-absent" &&
+  captureBuildIdSources({ headers: null }, {}).headerState === "headers-absent");
+check("⭐⭐ state 2 — headers present but the KEY missing -> 'key-missing' (a different fix)",
+  captureBuildIdSources({ headers: { "content-type": "x" } }, {}).headerState === "key-missing");
+check("⭐⭐ state 3 — key present -> 'present', with the value",
+  captureBuildIdSources({ headers: { "x-nf-deploy-id": "a".repeat(24) } }, {}).headerState === "present" &&
+  captureBuildIdSources({ headers: { "x-nf-deploy-id": "a".repeat(24) } }, {}).headerValue === "a".repeat(24));
+check("  …the three states are DISTINCT — a boolean would collapse 1 and 2",
+  new Set(["headers-absent", "key-missing", "present"]).size === 3);
+check("  …header lookup is case-insensitive",
+  captureBuildIdSources({ headers: { "X-NF-Deploy-Id": "b".repeat(24) } }, {}).headerState === "present");
+
+check("⭐ env: ABSENT is null, present-but-EMPTY is \"\" — also three states, not two",
+  captureBuildIdSources({}, {}).env.DEPLOY_ID === null &&
+  captureBuildIdSources({}, { DEPLOY_ID: "" }).env.DEPLOY_ID === "" &&
+  captureBuildIdSources({}, { DEPLOY_ID: "x" }).env.DEPLOY_ID === "x");
+check("  …all four resolveBuildId sources are captured in one shot",
+  BUILD_ID_ENV_KEYS.length === 4 &&
+  ["DD_BUILD_ID","COMMIT_REF","DEPLOY_ID","BUILD_ID"].every((k) => k in captureBuildIdSources({}, {}).env));
+
+// 🚨 REQUIREMENT 3 — structural, not behavioural. A diagnostic that can page someone is a
+// diagnostic that gets deleted in anger. Same discipline as treeChanged.
+check("⭐⭐ runtimeSources is NOT an input to decideNotify (structurally cannot trigger an alert)",
+  !/runtimeSources|captureBuildIdSources|headerState/.test(String(decideNotify)));
+check("  …nor does the alert message mention it",
+  !/runtimeSources|headerState/.test(String(notifyMessage)));
+check("⭐ it IS carried on the record, where a human reads it",
+  "runtimeSources" in buildRecord({ judgement: judgeProbe(res()), prev: null, nowIso: "x", target: "T", storeName: "S", runtimeSources: { headerState: "present" } }));
+check("  …and defaults to null when not supplied, never to a fabricated shape",
+  buildRecord({ judgement: judgeProbe(res()), prev: null, nowIso: "x", target: "T", storeName: "S" }).runtimeSources === null);
+
 section("  …lastGood is carried forward, never taken from the failing run");
 const okJ = judgeProbe(res({ body: goodProbe({ deploy: { resolved: true, id: "a".repeat(24), source: "x-nf-deploy-id" } }) }));
 const rGood = buildRecord({ judgement: okJ, prev: null, nowIso: "2026-07-30T12:00:00.000Z", target: "T", storeName: "S" });

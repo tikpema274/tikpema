@@ -2,7 +2,7 @@ import { getStore } from "@netlify/blobs";
 import { connectBlobs } from "./_blobs.mjs";
 import {
   MIN_RERUN_MS, TTL_MS, REMINDER_MS, REASON,
-  judgeProbe, shouldSkipRerun, decideNotify, notifyMessage, buildRecord,
+  judgeProbe, shouldSkipRerun, decideNotify, notifyMessage, buildRecord, captureBuildIdSources,
   DEFAULT_TARGET_URL, DEFAULT_STORE_NAME,
 } from "../../shared/strong-read-watch/watch.mjs";
 
@@ -152,7 +152,10 @@ export const handler = async (event) => {
   }
 
   const judgement = judgeProbe(await fetchProbe(target));
-  const record = buildRecord({ judgement, prev, nowIso, target, storeName: store.name });
+  // 🔍 What does a SCHEDULED runtime actually see? env:get cannot answer this (it synthesises
+  // COMMIT_REF from local git HEAD), so the function reports it itself. Diagnostic only.
+  const runtimeSources = captureBuildIdSources(event, env);
+  const record = buildRecord({ judgement, prev, nowIso, target, storeName: store.name, runtimeSources });
 
   const prevOk = prev && typeof prev.ok === "boolean" ? prev.ok : null;
   const decision = decideNotify({ prevOk, ok: judgement.ok, lastNotifiedAt: prev?.lastNotifiedAt, now });
