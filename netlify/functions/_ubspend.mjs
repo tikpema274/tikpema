@@ -46,8 +46,28 @@ export async function ubSpend({ recipientAddress, amountUsdc, destinationChain =
     from: [{
       adapter,
       address: delegate,        // delegate signs
-      sourceAccount: owner,     // funds drawn from the SCA's Arc unified balance
-      allocations: [{ amount, chain: "Arc_Testnet" }],
+      sourceAccount: owner,     // funds drawn from the SCA's unified balance
+      // ⭐ NO `allocations` — AUTO-ALLOCATION ENABLED. Supplying the key disables it; omitting it
+      // makes the kit call getBalances and allocate greedily: tier 1 = SAME CHAIN AS THE
+      // DESTINATION, tier 2 = other non-Ethereum chains by balance descending, tier 3 = Ethereum.
+      //
+      // 🚨 UNLIKE _pay.mjs, THIS IS NOT A PERMANENT NO-OP. That path is same-chain (Arc -> Arc), so
+      // Arc is tier 1 forever. THIS path is CROSS-CHAIN (Arc -> Base_Sepolia), so the destination
+      // chain is tier 1 — meaning the moment a Base Sepolia balance exists, auto-allocation will
+      // PREFER BASE and stop drawing from Arc. That is the economically right choice (it avoids the
+      // crosschain transfer fee entirely) but it is a REAL BEHAVIOUR CHANGE triggered by a DATA
+      // condition, with no code change and no deploy.
+      //
+      // ⚠️ WHAT IS THEREFORE STILL UNPROVEN: the delegate's authority on Base Sepolia. _delegate.mjs
+      // grants the shared delegate authority per-SCA, and only Arc has ever been exercised. A Base
+      // draw needs that grant to exist and work there. Measured 2026-07-30: every wallet's Base
+      // Sepolia unified balance is 0.0, so today the greedy pass has exactly one candidate and picks
+      // Arc — identical to the old hardcoded allocation. ⭐ ENABLING IT NOW PROVES THE SHAPE IS
+      // ACCEPTED AND THE ARC PATH STILL WORKS; IT DOES NOT PRE-PROVE THE BASE DRAW. Fund Base and
+      // this path changes source chain silently — verify the delegate there BEFORE that happens.
+      //
+      // Runtime-verified: unified-balance-kit@1.2.1 spendSourceSchema declares
+      // `allocations: z.union([...]).optional()`.
     }],
     to: {
       chain: destinationChain,  // e.g. Base_Sepolia

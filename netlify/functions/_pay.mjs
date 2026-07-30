@@ -38,7 +38,20 @@ export async function agentPay({ recipientAddress, amountUsdc, sourceAccount }) 
       adapter,
       address: delegate,        // delegate signs
       sourceAccount: owner,     // funds drawn from the SCA's Gateway balance
-      allocations: [{ amount, chain: "Arc_Testnet" }],
+      // ⭐ NO `allocations` — this is how AUTO-ALLOCATION IS ENABLED. Supplying the key (for any
+      // source) disables it and pins the draw to whatever we name. Omitting it makes the kit call
+      // getBalances and pick chains itself, greedily: tier 1 = SAME CHAIN AS THE DESTINATION,
+      // tier 2 = other non-Ethereum chains by balance descending, tier 3 = Ethereum last.
+      //
+      // ⚠️ SAFE HERE BY GEOMETRY, not by luck: this spend is SAME-CHAIN (Arc -> Arc, see `to`
+      // below), so Arc IS tier 1 and auto-allocation picks it first whenever Arc can cover the
+      // amount. This path therefore behaves identically to the old hardcoded allocation for as
+      // long as the Arc balance suffices — and if it ever does NOT, drawing from elsewhere is the
+      // behaviour we want rather than a failure.
+      //
+      // Runtime-verified, not assumed: @circle-fin/unified-balance-kit@1.2.1 declares
+      // `allocations: z.union([...]).optional()` in spendSourceSchema, so omission is accepted by
+      // the VALIDATOR, not merely permitted by the types.
     }],
     to: {
       adapter,
