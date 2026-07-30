@@ -42,7 +42,7 @@ function memStore() {
       bump(k);
     },
     async getWithEtag(k) {
-      return { value: m.has(k) ? JSON.parse(m.get(k)) : null, etag: etags.get(k) };
+      return { value: m.has(k) ? JSON.parse(m.get(k)) : null, etag: etags.get(k), readable: true };
     },
     // Writes ONLY if the key's version is still the one the caller read. This is what makes a
     // lost update detectable instead of silent.

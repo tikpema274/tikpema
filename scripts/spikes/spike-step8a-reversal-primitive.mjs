@@ -34,7 +34,7 @@ function makeStore() {
     _m: m, _stats: stats,
     async getJSON(k) { return m.get(k)?.value ?? null; },
     async setJSON(k, v) { stats.writes++; m.set(k, { value: v, etag: `e${++seq}` }); },
-    async getWithEtag(k) { const e = m.get(k); return { value: e?.value ?? null, etag: e?.etag }; },
+    async getWithEtag(k) { const e = m.get(k); return { value: e?.value ?? null, etag: e?.etag, readable: true }; },
     async setIfMatch(k, v, etag) {
       stats.casAttempts++;
       const cur = m.get(k);

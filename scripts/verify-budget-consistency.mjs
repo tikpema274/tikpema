@@ -41,6 +41,7 @@ const section = (t) => console.log(`\n── ${t} ${"─".repeat(Math.max(0, 62 
 const origin = new Map();
 const edge = new Map();
 const reads = [];          // {key, consistency, via}
+const writes = [];         // {key, opts} — pins the no-etag ⇒ onlyIfNew guard (§9)
 let throwOnRead = false;
 let etagSeq = 0;
 
@@ -60,6 +61,7 @@ const fakeStore = {
     return hit ? { data: hit.data, etag: hit.etag } : null;
   },
   async setJSON(key, value, opts = {}) {
+    writes.push({ key, opts });
     const cur = origin.get(key);
     if (opts.onlyIfMatch && cur?.etag !== opts.onlyIfMatch) return { modified: false };
     if (opts.onlyIfNew && cur) return { modified: false };
@@ -78,11 +80,12 @@ const { canSpendDay, daySpend, recordDcaSpend, budgetConfig } =
 const OWNER = "0xbud0000000000000000000000000000000000001";
 const today = new Date().toISOString().slice(0, 10);
 const dayKey = `day:${OWNER}:${today}`;
+const dcaKey = `dca-day:${OWNER}:${today}`;   // recordDcaSpend writes here, not to dayKey
 const CEIL = budgetConfig().PERIOD_CEILING_USDC;          // 2.00 USDC by default
 
 /** Put a total at ORIGIN (what was really spent) and, optionally, a different one at the EDGE. */
 const seed = ({ atOrigin, atEdge }) => {
-  origin.clear(); edge.clear(); reads.length = 0; throwOnRead = false;
+  origin.clear(); edge.clear(); reads.length = 0; writes.length = 0; throwOnRead = false;
   if (atOrigin !== undefined) origin.set(dayKey, stamp({ spentUsdc: atOrigin, date: today }));
   if (atEdge !== undefined) edge.set(dayKey, stamp({ spentUsdc: atEdge, date: today }));
 };
@@ -217,6 +220,75 @@ section("7 — under the ceiling → still ALLOWED");
   check("⭐⭐ allowed — reads the truth in BOTH directions, not jammed shut",
     gate.allowed === true, `allowed=${gate.allowed} reason=${gate.reason ?? "-"}`);
   check("  …while the stale edge would have blocked it", 1.99 + 0.5 > CEIL);
+}
+
+// ═══════════ 8 — getWithEtag: UNREADABLE is not ABSENT ═══════════
+// The old `.catch(() => null)` collapsed two states into {value:null, etag:undefined}. mutate(null)
+// builds a FRESH record — today's spend counted from ZERO. It never actually committed, but only
+// because setIfMatch degrades to onlyIfNew without an etag and an existing key rejects the write:
+// the guard sat one layer BELOW the defect. And a store outage surfaced as "(contention)" after
+// ~19 full-backoff retries, on a request with a 10s ceiling — a timeout, not the intended error.
+section("8 — UNREADABLE is refused; ABSENT still starts the day");
+{
+  // ⭐⭐ (3) THE LEGITIMATE NULL — first spend of the day: key genuinely absent, read SUCCEEDED.
+  seed({});                                   // nothing at origin, throwOnRead = false
+  let ok = true, e1 = null;
+  await recordDcaSpend({ owner: OWNER, amountUsdc: 0.4 }).catch((e) => { ok = false; e1 = e; });
+  check("⭐⭐ readable + ABSENT key -> proceeds and creates the record",
+    ok && origin.has(dcaKey), e1 ? e1.message.slice(0, 50) : "created");
+  check("  …with the spend actually counted", origin.get(dcaKey)?.data?.spentUsdc === 0.4);
+
+  // ⭐⭐ (1) UNREADABLE -> refuse, and say the true cause.
+  seed({ atOrigin: 1.0 }); throwOnRead = true;
+  const before = reads.length;
+  let err = null;
+  await recordDcaSpend({ owner: OWNER, amountUsdc: 0.4 }).catch((e) => { err = e; });
+  check("⭐⭐ readable:false -> REFUSES, no from-zero record written", err !== null);
+  check("  …names UNREADABLE as the cause", err && /UNREADABLE/.test(err.message));
+  check("⭐⭐ …and does NOT assert contention (the old false diagnosis)",
+    err && !/\(contention\)/.test(err.message), err ? err.message.slice(0, 64) + "…" : "");
+  check("⭐ refuses on the FIRST read — no 24-attempt storm against a store that will not answer",
+    reads.length - before === 1, `${reads.length - before} read(s)`);
+  throwOnRead = false;
+
+  // ⭐⭐ (1) THE DEFAULT — an adapter predating the field returns `readable: undefined`.
+  // `!readable` must refuse. Written `readable === false` it would sail straight through, which is
+  // the `!!null`-renders-as-running shape all over again.
+  let err2 = null, mutated = false;
+  const legacyStore = {
+    async getJSON() { return null; },
+    async setJSON() {},
+    async getWithEtag() { return { value: null, etag: undefined }; },   // NO `readable`
+    async setIfMatch() { mutated = true; return true; },
+    async setIfNew() { return true; },
+    async list() { return []; },
+  };
+  await recordDcaSpend({ owner: OWNER, amountUsdc: 0.4, store: legacyStore }).catch((e) => { err2 = e; });
+  check("⭐⭐ `readable` ABSENT -> treated as UNREADABLE and refused",
+    err2 !== null && /UNREADABLE/.test(err2.message));
+  check("  …and nothing was written — the mutate never reached a setIfMatch", mutated === false);
+}
+
+// ═══════════ 9 — no etag ⇒ onlyIfNew: the guard that made this SAFE, not URGENT ═══════════
+// ⚠️ DO NOT REMOVE. This is the ONLY reason the old defect was a mis-diagnosis rather than a
+// fail-open, and it lives in the same function just refactored. Defence in depth now that
+// UNREADABLE refuses earlier — but the layer below must keep holding on its own.
+section("9 — no etag ⇒ onlyIfNew (the fail-closed guard)");
+{
+  seed({});                                   // absent key -> read succeeds, etag undefined
+  writes.length = 0;
+  await recordDcaSpend({ owner: OWNER, amountUsdc: 0.1 });
+  check("⭐⭐ NO etag -> the write is onlyIfNew (a from-zero record can never overwrite a counter)",
+    writes.length > 0 && writes[0].opts.onlyIfNew === true, JSON.stringify(writes[0]?.opts ?? null));
+  check("  …and it is NOT an unguarded write", writes.every((w) => w.opts.onlyIfNew || w.opts.onlyIfMatch));
+
+  seed({});                                   // fresh, then seed the DCA key specifically
+  origin.set(dcaKey, stamp({ spentUsdc: 0.5, date: today }));   // existing key -> read yields an etag
+  writes.length = 0;
+  await recordDcaSpend({ owner: OWNER, amountUsdc: 0.1 });
+  check("⭐ WITH an etag -> the write is onlyIfMatch on that exact etag",
+    writes.length > 0 && typeof writes[0].opts.onlyIfMatch === "string");
+  check("  …so a lost update stays detectable", writes[0].opts.onlyIfNew === undefined);
 }
 
 console.log(`\n╔══════════════════════════════════════════════════════════════════════`);

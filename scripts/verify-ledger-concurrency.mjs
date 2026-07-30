@@ -46,7 +46,7 @@ function casStore({ latencyMs = 0 } = {}) {
   return {
     async getJSON(k) { await tick(); return m.has(k) ? JSON.parse(m.get(k)) : null; },
     async setJSON(k, v) { await tick(); m.set(k, JSON.stringify(v)); bump(k); },
-    async getWithEtag(k) { await tick(); return { value: m.has(k) ? JSON.parse(m.get(k)) : null, etag: etags.get(k) }; },
+    async getWithEtag(k) { await tick(); return { value: m.has(k) ? JSON.parse(m.get(k)) : null, etag: etags.get(k), readable: true }; },
     async setIfMatch(k, v, etag) {
       await tick();
       const cur = etags.get(k);

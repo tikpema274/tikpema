@@ -111,9 +111,25 @@ function defaultStore() {
     // to CAS_TRIES, then throws "could not update after 24 attempts (contention)" — diagnosing as
     // write contention something that is actually a cold read. Reading origin makes the retry loop
     // converge on the first attempt instead of burning 24 and failing loud for the wrong reason.
+    //
+    // ⚠️ `readable` EXISTS BECAUSE THE OLD `.catch(() => null)` COLLAPSED TWO DIFFERENT STATES.
+    // A missing key and an UNREADABLE STORE both produced {value:null, etag:undefined}, and
+    // `mutate(null)` builds a FRESH record — i.e. today's spend counted from zero. That never
+    // actually committed, but only because `setIfMatch` degrades to `onlyIfNew` without an etag and
+    // an existing key rejects the write. The guard was one layer BELOW the defect, and it turned a
+    // store outage into "could not update after 24 attempts (contention)" — a false cause, after
+    // ~19 full-backoff retries against a store that was never going to answer, on a request with a
+    // 10s ceiling. The likely user-visible result was a timeout, not the intended loud error.
     async getWithEtag(key) {
-      const res = await s.getWithMetadata(key, { type: "json", consistency: READ_CONSISTENCY }).catch(() => null);
-      return { value: res?.data ?? null, etag: res?.etag };
+      try {
+        const res = await s.getWithMetadata(key, { type: "json", consistency: READ_CONSISTENCY });
+        // ⭐ A SUCCESSFUL READ OF AN ABSENT KEY IS `value:null` WITH `readable:true`. That is the
+        // first spend of the day and it MUST still build a fresh record. Only the catch below is
+        // "unreadable" — conflating the two in either direction breaks something real.
+        return { value: res?.data ?? null, etag: res?.etag, readable: true };
+      } catch {
+        return { value: null, etag: undefined, readable: false };
+      }
     },
     // Compare-and-set. Returns true iff WE wrote it. A false means another writer landed
     // between our read and our write — the caller must re-read and retry.
@@ -163,7 +179,24 @@ async function casUpdate(s, key, mutate) {
   }
 
   for (let i = 0; i < CAS_TRIES; i++) {
-    const { value, etag } = await s.getWithEtag(key);
+    const { value, etag, readable } = await s.getWithEtag(key);
+
+    // 🚨 DEFAULTS TO NOT-READABLE. `!readable`, NEVER `readable === false`: an adapter that predates
+    // this field returns `undefined`, and `undefined` must mean UNKNOWN — which is refused. Writing
+    // the comparison the other way would let exactly the adapters that cannot report readability
+    // sail through, reproducing the `!!null`-renders-as-false defect this field exists to fix.
+    //
+    // Refuse IMMEDIATELY rather than retrying: an unreadable store is not a race, so the retry loop
+    // cannot help, and spending the backoff budget on it converts a clear refusal into a timeout.
+    // A refused spend is the safe direction — a dropped spend is a widened cap.
+    if (!readable) {
+      throw new Error(
+        `budget: ${key} is UNREADABLE (the store did not answer) — refusing the spend. This is NOT ` +
+          `contention: no read succeeded, so the current total is unknown and proceeding would count ` +
+          `today's spend from zero.`
+      );
+    }
+
     const next = mutate(value);
     if (await s.setIfMatch(key, next, etag)) return next;
 
