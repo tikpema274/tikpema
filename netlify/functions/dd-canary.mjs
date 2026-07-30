@@ -22,7 +22,7 @@ import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { SCHEMA_VERSION } from "../../shared/onchain-analyze/schema.mjs";
 import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
 import { runFixtures } from "../../shared/dd-canary/fixtures.mjs";
-import { codeIdentity, shouldSkipRerun, buildIsBound, BUILD_ID_SOURCES, MIN_RERUN_MS } from "../../shared/dd-canary/health.mjs";
+import { codeIdentityForEvent, shouldSkipRerun, buildIsBound, BUILD_ID_SOURCES, MIN_RERUN_MS } from "../../shared/dd-canary/health.mjs";
 import { readHealth, writeHealth } from "./_dd-health.mjs";
 
 // ═══ ⭐ SAFE-PUBLIC: A TRIGGER, NOT AN ORACLE ═════════════════════════════════════════════════
@@ -49,7 +49,10 @@ import { readHealth, writeHealth } from "./_dd-health.mjs";
 
 export async function handler(event) {
   if (event?.blobs) connectBlobs(event);
-  const identity = codeIdentity({ schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS });
+  // ⭐ codeIdentityForEvent, NOT codeIdentity — the deploy id comes from THIS invocation's
+  // x-nf-deploy-id header, derived by the SAME function dd-analyze uses. Env sources never resolve
+  // on a CLI deploy, which is why this canary wrote nothing for days.
+  const identity = codeIdentityForEvent(event, { schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS });
 
   // ── ⭐ RUNG 0: CAN THIS RUN VOUCH FOR ANYTHING AT ALL? ───────────────────────────────────────
   // Refuse BEFORE sweeping if the build cannot be identified. Running the fixtures and writing a

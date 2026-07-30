@@ -55,7 +55,7 @@ import {
   runPaidAnalysis,
   retrievePaid,
 } from "./_dd-x402.mjs";
-import { codeIdentity, evaluateHealth } from "../../shared/dd-canary/health.mjs";
+import { codeIdentityForEvent, evaluateHealth } from "../../shared/dd-canary/health.mjs";
 import { readHealth } from "./_dd-health.mjs";
 import { exposureState } from "./_dd-exposure.mjs";
 import { chainClient } from "../../scripts/dd/client.mjs";
@@ -186,7 +186,9 @@ export async function handler(event) {
     // malformation and version drift all refuse. "No news is good news" is structurally impossible
     // here, which is the entire point: the last safety layer must not itself fail open.
     {
-      const identity = codeIdentity({ schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS });
+      // ⭐ SAME derivation as dd-canary (codeIdentityForEvent). The cron WRITES the artifact and
+      // this HTTP path READS it; if the two derived the id differently the keys would never match.
+      const identity = codeIdentityForEvent(event, { schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS });
       const { record, readable } = await readHealth(identity);
       const health = evaluateHealth({ record, readable, now: Date.now(), expect: identity });
       if (!health.serve) {

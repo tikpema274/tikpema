@@ -73,6 +73,55 @@ export const BUILD_ID_SOURCES = Object.freeze(["DD_BUILD_ID", "COMMIT_REF", "DEP
  *
  * @returns {{resolved: boolean, id: string|null, source: string|null, detail: string}}
  */
+/**
+ * ═══ 🚨 THE ONLY PLACE A DEPLOY ID IS DERIVED ════════════════════════════════════════════════
+ * `resolveBuildId` reads env ONLY, and on this project NOTHING resolves in production: a CLI
+ * deploy runs no build, so COMMIT_REF / BUILD_ID / DEPLOY_ID are never injected. MEASURED from a
+ * real scheduled invocation 2026-07-30 — all four env sources came back ABSENT, while the request
+ * carried `x-nf-deploy-id` equal to the published deploy id. So the canary refused at rung 0 and
+ * wrote nothing for days, which would have made dd-analyze refuse EVERYTHING the moment
+ * DD_PUBLIC_ENABLED was set.
+ *
+ * ⚠️ `netlify env:get` CANNOT be used to check this — it synthesises COMMIT_REF from the local git
+ * HEAD and reports DEPLOY_ID/BUILD_ID as "0". Only the running function can say.
+ *
+ * ⭐ WHY A DEPLOY ID IS THE RIGHT BINDING, not merely the available one: it changes on EVERY
+ * deploy. COMMIT_REF would be identical across two deploys of the same commit, so it could not
+ * distinguish them — and distinguishing deploys is the entire job of this binding.
+ *
+ * 🚨 WHY THIS LIVES IN ONE FUNCTION. dd-canary (CRON) writes the artifact and dd-analyze (HTTP)
+ * reads it, in different runtimes. If they derived the id even slightly differently the keys would
+ * never match and the gate would refuse forever — or worse, match for the wrong reason. That is
+ * exactly how the binding was a silent no-op before 1dd8f75, when both sides independently fell
+ * back to the literal "unknown" and `"unknown" === "unknown"` MATCHED. A binding can only be
+ * tested across the thing it binds, so BOTH sides must call THIS, and nothing else.
+ *
+ * ⚠️ SHAPE-VALIDATED, and refusing is the safe direction: an unrecognised value returns null,
+ * `buildIsBound` goes false, the canary writes nothing and the service refuses. Binding to a
+ * garbage id would be worse — it would look bound while vouching for nothing.
+ */
+export const DEPLOY_ID_HEADER = "x-nf-deploy-id";
+const DEPLOY_ID_RE = /^[a-f0-9]{24}$/i;
+
+/** @returns {string|null} the deploy id, or null when it cannot be read — never a placeholder. */
+export function deployIdFromEvent(event) {
+  const h = event?.headers;
+  if (!h || typeof h !== "object") return null;
+  const key = Object.keys(h).find((k) => k.toLowerCase() === DEPLOY_ID_HEADER);
+  if (key === undefined) return null;
+  const v = h[key] === undefined || h[key] === null ? "" : String(h[key]).trim();
+  return DEPLOY_ID_RE.test(v) ? v.toLowerCase() : null;
+}
+
+/**
+ * THE call both handlers make. Takes the request/invocation event so the deploy id is derived
+ * identically on the cron side and the HTTP side. Falls through to resolveBuildId's env sources
+ * when no header is present, so a git-triggered build still works.
+ */
+export function codeIdentityForEvent(event, { schemaVersion, powerSigs, env = process.env }) {
+  return codeIdentity({ schemaVersion, powerSigs, build: deployIdFromEvent(event), env });
+}
+
 export function resolveBuildId({ build = null, env = process.env } = {}) {
   const usable = (v) =>
     typeof v === "string" && v.trim() !== "" && v.trim().toLowerCase() !== "unknown";

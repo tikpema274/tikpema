@@ -23,8 +23,10 @@
 // suite that sets one process-wide id would reintroduce exactly the same-env blind spot.
 
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   codeIdentity, evaluateHealth, shouldSkipRerun, resolveBuildId, buildIsBound,
+  codeIdentityForEvent, deployIdFromEvent, DEPLOY_ID_HEADER,
   HEALTH_REASON, BUILD_ID_SOURCES, DEFAULT_TTL_MS,
 } from "../../shared/dd-canary/health.mjs";
 import { healthKey } from "../../netlify/functions/_dd-health.mjs";
@@ -61,6 +63,59 @@ console.log("║  BUILD BINDING — does a deploy actually invalidate the old vo
 console.log("╚══════════════════════════════════════════════════════════════════════╝");
 
 // ═══════════ 1 — resolution, with no placeholder anywhere ═══════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+section("0 — THE DEPLOY-ID BINDING: one derivation, used by both sides");
+// MEASURED 2026-07-30 on a real scheduled invocation: all four env sources ABSENT, while the
+// request carried x-nf-deploy-id equal to the published deploy id. So the canary refused at rung 0
+// and wrote nothing for days — and dd-analyze would have refused EVERYTHING once DD_PUBLIC_ENABLED
+// was set. env:get could not have told us: it synthesises COMMIT_REF from local git HEAD.
+{
+  const DEP = "6a6b7cf6a8646a0087041f42";
+  const ev = (h) => ({ headers: h });
+
+  check("⭐⭐ reads the deploy id from the header", deployIdFromEvent(ev({ [DEPLOY_ID_HEADER]: DEP })) === DEP);
+  check("  …case-insensitively", deployIdFromEvent(ev({ "X-NF-Deploy-Id": DEP })) === DEP);
+  check("⭐ no headers / no key -> null, never a placeholder",
+    deployIdFromEvent({}) === null && deployIdFromEvent(ev({ "content-type": "x" })) === null &&
+    deployIdFromEvent(undefined) === null);
+  check("⭐⭐ a MALFORMED id -> null (refusing beats binding to garbage)",
+    ["", "nope", "0", "z".repeat(24), "a".repeat(23), "a".repeat(25), "unknown"]
+      .every((v) => deployIdFromEvent(ev({ [DEPLOY_ID_HEADER]: v })) === null));
+
+  // ⭐⭐ THE ACTUAL BINDING TEST — across the two sides, not on one of them.
+  // dd-canary (cron) WRITES the artifact; dd-analyze (HTTP) READS it. Same event id must yield the
+  // same identity, or the keys never match. This is the assertion that would have caught the
+  // pre-1dd8f75 no-op, where both sides independently produced "unknown" and matched for the
+  // WRONG reason.
+  const cronEv = { headers: { [DEPLOY_ID_HEADER]: DEP }, blobs: "x" };          // scheduled shape
+  const httpEv = { headers: { [DEPLOY_ID_HEADER]: DEP, "user-agent": "curl" }, httpMethod: "POST" };
+  const a = codeIdentityForEvent(cronEv, { schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS, env: {} });
+  const b = codeIdentityForEvent(httpEv, { schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS, env: {} });
+  check("⭐⭐ cron-shaped and http-shaped events yield the SAME identity",
+    JSON.stringify(a) === JSON.stringify(b), a.build);
+  check("  …and it is BOUND, with NO env source present at all",
+    buildIsBound(a) === true && a.build === DEP);
+
+  // The header must WIN over env, or a stale DD_BUILD_ID would silently pin the binding.
+  const withEnv = codeIdentityForEvent(cronEv, { schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS, env: { DD_BUILD_ID: "stale-pinned-value" } });
+  check("⭐ the header WINS over env sources (resolveBuildId prefers an explicit build)",
+    withEnv.build === DEP);
+
+  // And with no header it must still fall through to env, so a git-triggered build keeps working.
+  const envOnly = codeIdentityForEvent({ headers: {} }, { schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS, env: { DD_BUILD_ID: BUILD_A } });
+  check("⭐ no header -> falls through to env (a git build still binds)", envOnly.build === BUILD_A);
+  check("⭐⭐ neither header nor env -> UNBOUND, and the canary must refuse",
+    buildIsBound(codeIdentityForEvent({ headers: {} }, { schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS, env: {} })) === false);
+
+  // 🚨 STRUCTURAL: both handlers must call the SHARED derivation, never codeIdentity directly.
+  const canary = readFileSync("netlify/functions/dd-canary.mjs", "utf8").replace(/^\s*\/\/.*$/gm, "");
+  const analyze = readFileSync("netlify/functions/dd-analyze.mjs", "utf8").replace(/^\s*\/\/.*$/gm, "");
+  check("⭐⭐ dd-canary uses codeIdentityForEvent and NOT bare codeIdentity",
+    /codeIdentityForEvent\(event,/.test(canary) && !/[^r]codeIdentity\(\{/.test(canary));
+  check("⭐⭐ dd-analyze uses codeIdentityForEvent and NOT bare codeIdentity",
+    /codeIdentityForEvent\(event,/.test(analyze) && !/[^r]codeIdentity\(\{/.test(analyze));
+}
+
 section("1 — resolveBuildId never invents a value");
 {
   check("explicit build wins", resolveBuildId({ build: BUILD_A, env: {} }).id === BUILD_A);
