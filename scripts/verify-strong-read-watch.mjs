@@ -265,6 +265,17 @@ check("⭐ the judge only accepts a RESOLVED id from the probe body",
 const msgTree = notifyMessage({ kind: "regressed", judgement: jFail, record: { treeChanged: true, previousTree: "a".repeat(64) }, target: "x" });
 check("⭐ flags a tree hash that moved — a deploy you don't remember making is its own finding", /tree hash CHANGED/.test(msgTree));
 
+// ⭐⭐ A TREE CHANGE MUST NEVER *CAUSE* AN ALERT, ONLY DECORATE ONE. Every legitimate deploy changes
+// the tree; if that paged, every deploy would page and the channel would be trained into noise.
+// Structural, not incidental: treeChanged is not a parameter of decideNotify at all.
+check("⭐⭐ treeChanged is NOT an input to the notify decision (structurally cannot trigger one)",
+  !/treeChanged/.test(String(decideNotify)));
+check("⭐⭐ an ok->ok run is SILENT regardless of a tree change — a deploy does not page",
+  decideNotify({ prevOk: true, ok: true, lastNotifiedAt: null, now: NOW }).notify === false &&
+  decideNotify({ prevOk: true, ok: true, lastNotifiedAt: null, now: NOW }).kind === "steady-ok");
+check("  …and a first-ever ok run is silent too, tree change or not",
+  decideNotify({ prevOk: null, ok: true, lastNotifiedAt: null, now: NOW }).notify === false);
+
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 section("4 — the record");
 
