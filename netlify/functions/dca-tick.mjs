@@ -68,6 +68,49 @@ export const config = { schedule: "* * * * *" };
 // Confirm the scheduled-function budget absorbs that under Arc latency, or lower MAX_SUBMITS_PER_TICK.
 const MAX_SUBMITS_PER_TICK = 3;
 
+// ═══ 🚨 A LEDGER WRITE THAT FAILS AFTER A CONFIRMED FILL ═══════════════════════════════════════
+//
+// These writes used to be `.catch(() => {})`. The fill is already on-chain by the time they run, so
+// a swallowed failure meant: MONEY MOVED AND NOTHING COUNTED IT. `recordAgentSpend` is the DAY
+// CEILING, so every later spend — not just DCA's — would be measured against an understated total.
+// A widened cap, arriving silently, in the path whose own comment says all three ledgers must
+// advance here.
+//
+// ⚠️ BUT SIMPLY REMOVING THE CATCH WOULD BE WORSE. Neither write is idempotent (`recordAgentSpend`
+// does a CAS increment AND appends an audit entry). Throwing would skip the mandate patch below, so
+// `pendingPeriod` stays set, the next tick re-reconciles, `getTransaction` returns COMPLETE again —
+// and whichever write SUCCEEDED gets applied a second time. Under-count traded for double-count.
+//
+// ⭐ SO: ALWAYS COMPLETE THE PATCH (no re-reconcile, no double-count), and make the failure
+// FAIL-CLOSED ON THE FUTURE instead. The past fill cannot be un-spent; the NEXT one can be
+// prevented. A mandate whose ledger write failed goes STOPPED_FAILED, which `evaluate()` enforces
+// via `status !== ACTIVE`.
+//
+// ⚠️ `needsAttention` ALONE WOULD NOT DO IT — nothing gates on that flag; it is for humans and the
+// UI. Set it too, but the STATUS is what actually stops the next fill.
+//
+// This bounds the damage; it does NOT repair the counter. One fill stays uncounted and a human must
+// reconcile it — which is why the reason string carries the amount and the ids.
+export async function runLedgerWrites(writes) {
+  const failed = [];
+  for (const [name, run] of writes) {
+    try {
+      await run();
+    } catch (err) {
+      failed.push(`${name} (${String(err?.message || err?.name || "error").slice(0, 120)})`);
+    }
+  }
+  return { ok: failed.length === 0, failed };
+}
+
+/** The patch fields that turn a confirmed-but-unledgered fill into a stopped, visible one. */
+export const ledgerFailurePatch = (failed) => ({
+  status: STATUS.STOPPED_FAILED,
+  stoppedAt: Date.now(),
+  needsAttention: true,
+  ledgerUnrecorded: failed,
+});
+
 export async function handler(event) {
   if (event?.blobs) connectBlobs(event);
   const startedAt = new Date().toISOString();
@@ -193,16 +236,23 @@ export async function handler(event) {
       // at submit (no re-price). Exactly-once: a period confirms EITHER inline OR here, never both. ──
       const fillValueUsdc = Number(claim.fillValueUsdc);
       const spentAmount = Number((m.spentAmount + m.perTickAmount).toFixed(6));
-      await recordDcaSpend({ owner: m.walletAddress, amountUsdc: fillValueUsdc, at: now }).catch(() => {});
       // confirmation:"confirmed" — this branch runs ONLY after getTransaction({id}) returned COMPLETE,
       // so the chain has witnessed it. Distinct from a manual submit-time entry, which records "submitted".
       // circleId recorded for PROVENANCE, not for reversal: this entry is "confirmed", and the step-8
       // sweeper selects ONLY "submitted" entries. It must never touch a confirmed DCA fill — reversing
       // one would decrement the day counter while recordDcaSpend above stayed put, desyncing the pair
       // in the fail-OPEN direction.
-      await recordAgentSpend({ agent: AGENT.EXECUTOR, owner: m.walletAddress, amountUsdc: fillValueUsdc, source: "swap_tokens", justification: `DCA mandate ${m.id}`, at: now, confirmation: "confirmed", circleId: claim.circleId }).catch(() => {});
-      await patchMandate(m, key, OUTCOME.SWAPPED, {
-        reason: `confirmed by id-reconcile (circleId ${claim.circleId})`, tx: txHash, period,
+      // Both ledgers, failures CAPTURED not swallowed. Order preserved: the DCA sub-ledger first,
+      // then the day ceiling — the one whose loss widens the global cap.
+      const led = await runLedgerWrites([
+        ["recordDcaSpend", () => recordDcaSpend({ owner: m.walletAddress, amountUsdc: fillValueUsdc, at: now })],
+        ["recordAgentSpend(day-ceiling)", () => recordAgentSpend({ agent: AGENT.EXECUTOR, owner: m.walletAddress, amountUsdc: fillValueUsdc, source: "swap_tokens", justification: `DCA mandate ${m.id}`, at: now, confirmation: "confirmed", circleId: claim.circleId })],
+      ]);
+      await patchMandate(m, key, led.ok ? OUTCOME.SWAPPED : OUTCOME.STOPPED_FAILED, {
+        reason: led.ok
+          ? `confirmed by id-reconcile (circleId ${claim.circleId})`
+          : `FILLED BUT NOT LEDGERED — ${fillValueUsdc} USDC moved on-chain (circleId ${claim.circleId}, tx ${txHash ?? "?"}) and these ledger writes FAILED: ${led.failed.join("; ")}. The mandate is STOPPED so no further fill is measured against an understated counter. A human must reconcile the missing amount.`,
+        tx: txHash, period,
         patch: {
           spentAmount,
           lastFilledPeriod: period,
@@ -212,7 +262,9 @@ export async function handler(event) {
           consecutiveFailures: 0,
           firstFailureAt: null,
           consecutiveUnconfirmed: 0,
-          needsAttention: false,
+          // ⭐ ALWAYS patched, ledger success or not — leaving pendingPeriod set would re-reconcile
+          // next tick and re-apply whichever write succeeded.
+          ...(led.ok ? { needsAttention: false } : ledgerFailurePatch(led.failed)),
         },
       });
       await resolveClaim(m.id, period, OUTCOME.SWAPPED, { reason: "confirmed by id-reconcile", tx: txHash });
@@ -394,9 +446,17 @@ export async function handler(event) {
         // _swap-confirm.mjs is untouched (still used by job-swap-receipt-background, the research→swap verifier).
         const confirmedTx = result.swap?.txHash || null; // the confirmed Arc tx hash from waitForTx
         const spentAmount = Number((m.spentAmount + m.perTickAmount).toFixed(6));
-        await recordDcaSpend({ owner: m.walletAddress, amountUsdc: fillValueUsdc, at: now }).catch(() => {});
-        await patchMandate(m, key, OUTCOME.SWAPPED, {
-          reason: `confirmed inline (circleId ${result.swap?.circleId ?? "?"})`,
+        // ⚠️ NARROWER THAN THE RECONCILE PATH: the day-ceiling recordAgentSpend already fired inside
+        // executeAction's own post-confirm ledger(), so only DCA's sub-ledger is at risk here. Still
+        // not swallowed — a lost sub-ledger write understates DCA's daily share, and the same
+        // stop-the-next-fill rule applies.
+        const ledInline = await runLedgerWrites([
+          ["recordDcaSpend", () => recordDcaSpend({ owner: m.walletAddress, amountUsdc: fillValueUsdc, at: now })],
+        ]);
+        await patchMandate(m, key, ledInline.ok ? OUTCOME.SWAPPED : OUTCOME.STOPPED_FAILED, {
+          reason: ledInline.ok
+            ? `confirmed inline (circleId ${result.swap?.circleId ?? "?"})`
+            : `FILLED BUT NOT LEDGERED — ${fillValueUsdc} USDC moved on-chain (circleId ${result.swap?.circleId ?? "?"}, tx ${confirmedTx ?? "?"}) and these ledger writes FAILED: ${ledInline.failed.join("; ")}. The day ceiling WAS recorded by executeAction; DCA's own share was not. Mandate STOPPED pending reconciliation.`,
           tx: confirmedTx,
           period,
           patch: {
@@ -408,7 +468,7 @@ export async function handler(event) {
             consecutiveFailures: 0,
             firstFailureAt: null,
             consecutiveUnconfirmed: 0,
-            needsAttention: false,
+            ...(ledInline.ok ? { needsAttention: false } : ledgerFailurePatch(ledInline.failed)),
           },
         });
         await resolveClaim(m.id, period, OUTCOME.SWAPPED, { reason: "confirmed inline", tx: confirmedTx });
