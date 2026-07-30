@@ -1,5 +1,165 @@
 ---
 
+## 2026-07-29 → 07-30 — A PROMOTION THAT SILENTLY FAILED FOR 7.5 HOURS, and the discriminator + monitor built because of it
+
+**Prod is on `6a6b4b7ac6918d8872b521f3`, tree `de91653b…`, verified.** Money path green throughout.
+
+### 🚨 THE FIND: Option D was NOT in production, and everything said it was
+
+Yesterday's fix (`connectBlobs` re-injecting the `url_uncached` that `connectLambda` drops) was
+reported promoted and verified. It was not. `getSite.published_deploy` was still
+`6a69be4fc7aa0d2c6843fc3c` — the **hotfix**, all three safety reads degraded to `eventual`, fail-opens
+open — and had been for **7.5 hours**.
+
+The prod deploy `6a69ff28…` (13:24:56Z) died mid-upload with 23 function bundles outstanding and was
+canceled ~29 min in. Not a build error: `summary.status:"unavailable"`, no messages, nothing rejected.
+It simply never finished, and **the failure was silent to whoever ran it**.
+
+⭐⭐ **WHY NOTHING CAUGHT IT — three checks that could not see what they claimed to check:**
+
+| check | why it was blind |
+|---|---|
+| 12 green suites | run in-process against the **working tree**; they cannot see a deployed build |
+| the live pause toggle | **passes on BOTH builds** — an eventual read still blocks correctly whenever the flag is readable and fresh. "Blocks-then-allows" never discriminated |
+| the build stamp / platform | Netlify records `commit_ref: null`, `build_id: null` on every CLI deploy — no build runs |
+
+The chain balance was also wrong in the handoff: chain says **17.399 → 17.299** (tx
+`0x7f8a243b…`, block 54260785, gas fully sponsored), not 17.30 → 17.20. And the send landed
+**13:19:20Z**, five minutes *before* the canceled promotion — so the whole prod verification ran
+against the hotfix.
+
+### ⭐ THE DISCRIMINATOR — `GET /.netlify/functions/blobs-probe` (`127c563`)
+
+Asks the DEPLOYED artifact whether a strong read works, **by doing one**, with the negative control
+carried INSIDE every invocation:
+
+    ARM A   connectLambda alone      -> MUST THROW BlobsConsistencyError  (the hotfix's own path)
+    ARM B   connectBlobs             -> ok under D
+    ARM A2  connectLambda after B    -> MUST THROW (proves B's mutation did not leak)
+
+PASS = `verdict:"D"` **AND** `calibrated:true`. Arm A returning ok ⇒ **UNCALIBRATED**, never a verdict.
+Across all 64 arm combinations "D" is reachable from **exactly one**.
+
+⚠️ **The two-tree calibration was NOT CONSTRUCTIBLE** — `connectBlobs` was *added* by the fix, so on
+the hotfix tree the probe's own mechanism does not exist. Hence the in-invocation control, which also
+never expires (prod-as-negative-control disappears the moment D publishes).
+
+⚠️ **`strongReadAvailable()` CAN LIE.** `getEnvironmentContext` reads `globalThis.netlifyBlobsContext`
+BEFORE `process.env`; `getEnvironment()` prefers `Netlify.env`/`Deno.env`. `_blobs.mjs` repairs only
+the `process.env` copy. Measured on prod: globalThis absent, `envKind:"process.env"` — sound today, but
+a platform change could un-repair it with no commit of ours. Never gate on it.
+
+### BUILD STAMP — provenance baked into the artifact (`127c563`)
+
+`commit` + `dirty` + `tree`. A commit SHA alone is not enough when `--dir=dist` ships the **working
+tree**: `dirty:true` means the commit is a *label*, not an identity. **`tree` is the identity.**
+Committed value is **`null`** — an unstamped deploy self-reports UNRESOLVED rather than a stale SHA.
+
+🪤 Its own first bug: `git()` trimmed the whole `git status --porcelain` blob, eating the leading
+status column of the **first line only** and shifting its path by one char, so the self-exclusion
+missed and `dirty` was permanently true. A dirty flag that cries wolf is one people learn to ignore.
+
+### ⭐ STRONG-READ WATCH — the monitor (`3a49136`, `a2ff8ac`, `cf9bc6c`, `de47b5c`, `b071f19`)
+
+`*/15` cron → HTTP-polls `blobs-probe` → records → **pushes to Discord**. 188/0.
+
+🚨 **NAMES NO READ MODE ANYWHERE.** Strong bookkeeping would make the monitor die in exactly the
+outage it exists to report. And "don't read with strong" is **not a strong enough rule**:
+`getFinalRequest` serves EVERY op and resolves `opConsistency ?? this.consistency`, so a STORE-LEVEL
+default leaks into **writes**. Rule = zero occurrences in code, bare `getStore(name)`, grep-asserted.
+
+⭐ **Detection cannot live on the read side.** Cached bookkeeping ⇒ a reader can be served a stale
+record. Append-only `failure:<ISO>` keys narrow it and do NOT close it — an eventual LIST can also
+miss the newest key. Structural: **the record is the audit trail, the push is the detection.**
+Record FIRST, notify SECOND; `lastNotifiedAt` advances only on CONFIRMED delivery.
+
+### 🚨 A FAILURE TO OBSERVE IS NOT AN OBSERVED FAILURE (`a2ff8ac`)
+
+The first real alert was wrong in the costly way. The target did not exist, so **nothing was
+observed** — yet the message asserted the kill switch was reading a cache AND attached a rollback id.
+An instruction, read at 3am, to roll back a **healthy** deploy. The headline was merely alarming;
+**the consequence paragraph was the danger.**
+
+| class | reasons | headline | consequence | rollback id |
+|---|---|---|---|---|
+| cannot-verify | unreachable, timeout, http-error, not-json, wrong-shape | ⚠️ CANNOT VERIFY | none — "not evidence the money path is broken" | **absent** |
+| known-broken | hotfix, uncalibrated | 🚨 ARE BROKEN | kill-switch/spend-ceiling text | present |
+
+An UNRECOGNISED reason falls to **cannot-verify**. Claiming a breakage you did not see costs a
+rollback on a healthy deploy.
+
+### 🚨 THE ROLLBACK ID WAS THE FAIL-OPEN BUILD (`de47b5c`)
+
+The known-broken alert said *restore `6a69be4f`* — **the hotfix**. Following it lands prod in the
+fail-open state this whole effort exists to close, and it is a **no-op** if the probe really said
+HOTFIX. Now **derived**: `blobs-probe` reports `deploy:{resolved,id,source}` from the
+**`x-nf-deploy-id` header** (not `DEPLOY_ID` — a CLI deploy runs no build), shape-validated to 24 hex
+because it *becomes an instruction*; the watch carries `lastGood:{deployId,tree,commit,observedAt}`
+forward from healthy runs only. **Absence says so loudly** (no constant, no omission — omitting reads
+as "no rollback needed") and the alert states the **age**: 14 minutes vs 9 days are different
+instructions.
+
+⭐ Deliberately **not** in the build stamp: the stamp is made at BUILD time and cannot know which
+deploy it lands in.
+
+### PROMOTION GATE — `npm run gate:watch`, five checks, every one earned
+
+1. **schedule declared AND uncommented** in the working-tree `netlify.toml` (`commented-out` is its
+   own reason code — the build stamp is structurally blind, `netlify.toml` is outside the hashed
+   surface, so a forgotten restore yields an IDENTICAL tree hash)
+2/3. **`WATCH_TARGET_URL` / `WATCH_STORE` unset or equal the default** — the HOTFIX fixture ships to
+   prod; a leftover pointer would mean a permanent fake outage paging hourly
+4. **webhook shape** — ⭐ a `discord.gg` INVITE LINK is a valid https URL and **PASSED** the original
+   prefix-only check. URL-shaped is not usable
+5. **existence** — a live read-only GET; a Discord webhook returns its own metadata and posts NOTHING
+
+Calibrated in **four** directions on real infrastructure: `unset` → fail, literal `<url>` → fail,
+invite link → fail, real webhook → `GET 200` live.
+⚠️ **`WATCH_ALERT_WEBHOOK` must never be `--secret`** — the gate must READ it. Hygiene =
+fingerprint-not-print.
+
+### MEASURED, NOT ASSUMED (Netlify)
+
+- 🚨 **Scheduled functions return 403 to HTTP invocation.** Measured 4 paths on one draft: unscheduled
+  200 JSON, `strong-read-watch` 403, `dd-canary` 403, absent path 200 SPA HTML. Combined with "crons
+  do not fire on drafts", a scheduled function is unreachable on a draft by **BOTH** routes. Only
+  route = comment the schedule out, deploy, invoke, restore. **This corrects the previous
+  "trigger it by hand" instruction, which was impossible.**
+- **Env changes require a redeploy** to reach a live function. CLI says so; A/B measured it.
+- ⭐ **Read the REGISTERED schedule as a value** (`getDeploy` → `function_schedules`), never infer it
+  from timing. Records exist only at firing times, so an observed gap is a MULTIPLE of the interval;
+  dedupe and eventual reads only LENGTHEN it. Timing can never rule out a schedule **faster** than
+  observed — the unsafe direction. Confirmed `strong-read-watch` on `*/15`, `dd-canary` on `*/10`.
+- Deploys here run **15–28 min**; two have died near the ~29 min mark.
+
+### Live proof — every notify branch fired on real infrastructure
+
+none→fail ✅ · dedupe ✅ · corrected cannot-verify wording ✅ · still-failing-quiet (<60m) ✅ ·
+still-failing (≥60m, `lastNotifiedAt` advanced) ✅ · fail→pass `recovered` ✅
+
+Post-promotion, all seven checks: money path `D`/calibrated ✅ · published_deploy changed + tree
+`de91653b` ✅ · **`deploy.id` == published id ON PRODUCTION** ✅ (closes the deploy-preview
+inference — one measured context licenses nothing about another) · **`lastGood` populated** ✅ ·
+**first-ever `treeChanged:true` and SILENT** (`steady-ok`, nothing sent — a legitimate deploy must
+never page) ✅ · absence window observed as `lastGood:null` **in the record**, not as an alert ✅ ·
+`producedAt` advanced ✅
+
+### 🚧 OPEN
+
+- `WATCH_STORE=watch-rollback-proof` still set at **deploy-preview** (harmless, fails safe; prod clean
+  and gate-enforced)
+- Untouched backlog: DD-standalone scoping comments for `_dd-health.mjs`/`_blobs.mjs`,
+  `pauseStates:116` roster fix, `_budget.mjs:115` `getWithMetadata(...).catch(() => null)`
+
+### The thread
+
+Every real defect today was found where **a check could not see what it claimed to check**: suites
+blind to the deployed build, a pause toggle blind to strong-vs-eventual, a stamp blind to
+`netlify.toml`, a gate that accepted URL-shaped as usable, an alert asserting a state it never
+observed, and a timing measurement that could only bound the interval from one side.
+
+---
+
 ## 2026-07-29 — DD FACILITATOR BUILT + LIVE-PROOF TO THE 402. Caught a REAL PROD FAIL-OPEN in the canary version binding.
 
 **Draft deploy only. NO MONEY MOVED. Production verified INERT throughout** — `DD_PUBLIC_ENABLED`
