@@ -33,17 +33,21 @@ console.log("╚═════════════════════�
 // ── the derivation, mirrored exactly from _research.mjs ──────────────────────────────────────
 const normUrl = (u) => String(u || "").trim().replace(/[/#?]+$/, "").toLowerCase();
 function derive(decision, retrieved) {
+  const modelSources = Array.isArray(decision.sources) ? decision.sources : [];
   const claimedUrls = new Set(
-    (Array.isArray(decision.sources) ? decision.sources : [])
-      .map((s) => normUrl(typeof s === "string" ? s : s?.url))
-      .filter(Boolean)
+    modelSources.map((s) => normUrl(typeof s === "string" ? s : s?.url)).filter(Boolean)
   );
   const prose = `${decision.answer || ""}\n${decision.reasoning || ""}`;
   const markedIdx = new Set([...prose.matchAll(/\[(\d{1,2})\]/g)].map((m) => Number(m[1]) - 1));
-  const isCited = (r, i) => claimedUrls.has(normUrl(r.url)) || markedIdx.has(i);
+  // PRECEDENCE, not union — see the block comment in _research.mjs (job #160637).
+  const modelAnswered = modelSources.length > 0;
+  const isCited = modelAnswered
+    ? (r) => claimedUrls.has(normUrl(r.url))
+    : (_r, i) => markedIdx.has(i);
   return {
-    cited: retrieved.filter(isCited),
+    cited: retrieved.filter((r, i) => isCited(r, i)),
     notCited: retrieved.filter((r, i) => !isCited(r, i)),
+    citedSignal: modelAnswered ? "model-sources" : "inline-markers",
   };
 }
 
@@ -59,15 +63,23 @@ section("1 — THE ACTUAL DEFECT: job #160108 reproduced");
     { title: "Unified balance explainer", url: "https://example.com/unified" },
     { title: "Random unified account post", url: "https://example.com/post" },
   ];
+  // ⚠️ #160108 carried ONLY the marker form — `sources` empty, [1]/[2] in the prose. The
+  // original model array is unrecoverable from the stored record (the old override replaced
+  // it with the retrieval set), so this fixture models the marker-only shape deliberately.
+  // Giving it BOTH signals would test a case #160108 never exhibited, and under precedence
+  // it would (correctly) return 1 — which is a fact about the fixture, not about the job.
   const decision = {
     answer: "Withdrawal is delayed about seven days [1].",
     reasoning: "The Gateway exposes initiateWithdrawal and withdraw [1], with the delay documented [2].",
-    sources: [{ title: "Arc Gateway docs", url: "https://arc.io/docs/gateway" }],
+    sources: [],
   };
-  const { cited, notCited } = derive(decision, retrieved);
+  const { cited, notCited, citedSignal } = derive(decision, retrieved);
   check("⭐⭐ exactly 2 sources cited, not 6", cited.length === 2, `got ${cited.length}`);
   check("  …[1] and [2] are the ones kept",
-    cited[0].url.includes("arc.io") && cited[1].url.includes("circle.com"));
+    cited.length === 2 &&
+      cited[0].url.includes("arc.io") && cited[1].url.includes("circle.com"));
+  check("  …decided by the marker fallback, since the array was absent",
+    citedSignal === "inline-markers");
   check("⭐⭐ the Bybit FAQ is NOT cited (matched on the word 'Unified')",
     !cited.some((s) => /bybit/i.test(s.url)));
   check("⭐⭐ the Bitget FAQ is NOT cited", !cited.some((s) => /bitget/i.test(s.url)));
@@ -97,28 +109,78 @@ section("2 — FABRICATION STAYS SHUT (the layer below must not regress)");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
-section("3 — TWO INDEPENDENT DERIVATIONS, unioned (neither alone suffices)");
+section("3 — PRECEDENCE, not union: the model's own array WINS when present");
 {
   const retrieved = [
     { title: "A", url: "https://a.example" },
     { title: "B", url: "https://b.example" },
     { title: "C", url: "https://c.example" },
   ];
-  // (a) prose markers only — the model populated no `sources` array at all
-  const markersOnly = derive(
-    { answer: "See [2].", reasoning: "", sources: [] }, retrieved);
-  check("⭐ inline [n] alone is enough (job #160108's actual shape)",
+  // (b) fallback — no `sources` array at all, so markers decide (job #160108's shape)
+  const markersOnly = derive({ answer: "See [2].", reasoning: "", sources: [] }, retrieved);
+  check("⭐ inline [n] decides when the array is ABSENT (job #160108 still works)",
     markersOnly.cited.length === 1 && markersOnly.cited[0].url === "https://b.example");
-  // (b) sources array only — the model cited without inline markers
-  const arrayOnly = derive(
-    { answer: "No markers here.", reasoning: "", sources: [{ url: "https://c.example" }] }, retrieved);
-  check("⭐ the `sources` array alone is enough (no inline markers)",
-    arrayOnly.cited.length === 1 && arrayOnly.cited[0].url === "https://c.example");
-  // union, not intersection — requiring BOTH would drop real citations
+  check("  …and the signal is reported as the fallback",
+    markersOnly.citedSignal === "inline-markers");
+
+  // (a) preferred — array present, so markers are IGNORED even though they disagree
   const both = derive(
     { answer: "See [1].", reasoning: "", sources: [{ url: "https://c.example" }] }, retrieved);
-  check("⭐⭐ the two signals UNION (requiring both would drop real citations)",
-    both.cited.length === 2);
+  check("⭐⭐ the array WINS over a conflicting marker (union would have given 2)",
+    both.cited.length === 1 && both.cited[0].url === "https://c.example",
+    `got ${both.cited.length}: ${both.cited.map((c) => c.url).join(",")}`);
+  check("  …and the signal is reported as model-sources", both.citedSignal === "model-sources");
+
+  // fabrication guard: array present but nothing matches retrieval ⇒ EMPTY, not a fallback
+  const unmatched = derive(
+    { answer: "See [1] and [2].", reasoning: "", sources: [{ url: "https://invented.example" }] },
+    retrieved);
+  check("⭐⭐ array present but NO match ⇒ cited EMPTY (must NOT fall through to markers)",
+    unmatched.cited.length === 0,
+    "falling back would let the weaker signal overrule an explicit answer, reopening #160637");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+section("3b — REGRESSION: job #160637, where a UNION cited sources the answer DISMISSED");
+{
+  // Five sources referenced in the prose; only two support the answer. [3][4][5] are named
+  // ONLY to say they are irrelevant — dismissal is a form of reference, which is exactly what
+  // an [n]-marker derivation cannot see.
+  const retrieved = [
+    { title: "Arc docs", url: "https://arc.io/docs" },
+    { title: "Circle Gateway", url: "https://developers.circle.com/gateway" },
+    { title: "Kraken support", url: "https://support.kraken.com/articles/deposits" },
+    { title: "Wirex help", url: "https://wirex.com/help/fees" },
+    { title: "Kraken fees", url: "https://kraken.com/features/fee-schedule" },
+    { title: "Astar", url: "https://astar.network/blog" },
+  ];
+  const decision = {
+    answer:
+      "Withdrawal is delayed about seven days [1], and the Gateway exposes the call [2]. " +
+      "Sources [3], [4] and [5] are Kraken and Wirex exchange pages — none of these are " +
+      "relevant to the question.",
+    reasoning: "Only [1] and [2] bear on Arc's Gateway.",
+    sources: [
+      { title: "Arc docs", url: "https://arc.io/docs" },
+      { title: "Circle Gateway", url: "https://developers.circle.com/gateway" },
+    ],
+  };
+  const { cited, notCited, citedSignal } = derive(decision, retrieved);
+  check("⭐⭐ exactly 2 cited, though FIVE are referenced in the prose",
+    cited.length === 2, `got ${cited.length}`);
+  check("⭐⭐ Kraken is NOT cited — it was named only to dismiss it",
+    !cited.some((s) => /kraken/i.test(s.url)),
+    "a union promoted it precisely BECAUSE the answer explained it was irrelevant");
+  check("⭐⭐ Wirex is NOT cited, same reason",
+    !cited.some((s) => /wirex/i.test(s.url)));
+  check("  …both dismissed sources land in retrieved-not-cited, not discarded",
+    notCited.some((s) => /kraken/i.test(s.url)) && notCited.some((s) => /wirex/i.test(s.url)));
+  check("  …Astar (referenced by nothing) is also not-cited — the half that already worked",
+    notCited.some((s) => /astar/i.test(s.url)));
+  check("  …decided by the model's array, not the markers", citedSignal === "model-sources");
+  check("  …markers [1]-[5] were present and DELIBERATELY ignored",
+    /\[5\]/.test(decision.answer) && cited.length === 2,
+    "the marker signal said 5; precedence said 2");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════

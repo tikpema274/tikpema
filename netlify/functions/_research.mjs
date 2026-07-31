@@ -447,26 +447,50 @@ export async function research(
           ...exaResults.map((r) => ({ title: r.title, url: r.url })),
           ...purchasedFacts.map((f) => ({ title: f.claim, url: f.source })),
         ];
-        // TWO INDEPENDENT DERIVATIONS, unioned — neither is individually reliable.
-        //   (a) the model's own `sources` claim, matched by URL;
+        // TWO DERIVATIONS IN STRICT PRECEDENCE — NOT a union. Order matters:
+        //   (a) the model's own `sources` claim, matched by URL — PREFERRED;
         //   (b) inline [n] markers in the prose, resolved against the grounding block's
-        //       numbering (exaEntries then purchasedEntries — same order as `retrieved`).
-        // (b) is what job #160108 actually carried; (a) is what the JSON contract asks
-        // for. Requiring both would drop real citations; using either alone misses cases.
+        //       numbering (exaEntries then purchasedEntries — same order as `retrieved`)
+        //       — FALLBACK, used only when (a) is absent.
+        //
+        // 🚨 WHY NOT A UNION — job #160637. A UNION was the first fix and it was WRONG, for
+        // a reason worth stating exactly: **[n] marks a REFERENCE, not SUPPORT, and
+        // DISMISSAL IS A FORM OF REFERENCE.** That answer said sources [3], [4], [5] were
+        // Kraken and Wirex and that "none of these are relevant" — and the union promoted
+        // all three into "Sources:" precisely BECAUSE the answer named them. The derivation
+        // identified REFERENCED sources while the heading claimed SUPPORTING ones.
+        // ⚠️ The perverse incentive is the tell: the more honestly an answer explained why a
+        // retrieval was irrelevant, the more certainly it got cited for it.
+        //
+        // ⭐ AND DO NOT "FIX" THIS BY SNIFFING NEGATIVE CONTEXT IN THE PROSE. Detecting
+        // "not relevant" / "none of these" near a marker is the fragile version: it is
+        // unbounded natural language, it fails on negation-of-negation, and it would put a
+        // regex in the path of what gets billed. The model already answers this question
+        // directly in `sources` — prefer the direct answer over inferring intent from text.
+        // #160108 still works because it carried ONLY the marker form, so (b) still applies.
         const normUrl = (u) =>
           String(u || "").trim().replace(/[/#?]+$/, "").toLowerCase();
+        const modelSources = Array.isArray(decision.sources) ? decision.sources : [];
         const claimedUrls = new Set(
-          (Array.isArray(decision.sources) ? decision.sources : [])
-            .map((s) => normUrl(typeof s === "string" ? s : s?.url))
-            .filter(Boolean)
+          modelSources.map((s) => normUrl(typeof s === "string" ? s : s?.url)).filter(Boolean)
         );
         const prose = `${decision.answer || ""}\n${decision.reasoning || ""}`;
         const markedIdx = new Set(
           [...prose.matchAll(/\[(\d{1,2})\]/g)].map((m) => Number(m[1]) - 1)
         );
-        const isCited = (r, i) => claimedUrls.has(normUrl(r.url)) || markedIdx.has(i);
 
-        const cited = retrieved.filter(isCited);
+        // ⚠️ The gate is "did the model ANSWER the question", i.e. is its array non-empty —
+        // NOT "did its answer intersect retrieval". If it named sources and none of them
+        // match what we retrieved, that is a FABRICATION signal and `cited` must come out
+        // EMPTY (→ the uncited guard), never silently fall through to markers. Falling back
+        // there would let the weaker signal overrule an explicit answer, reopening #160637.
+        const modelAnswered = modelSources.length > 0;
+        const citedSignal = modelAnswered ? "model-sources" : "inline-markers";
+        const isCited = modelAnswered
+          ? (r) => claimedUrls.has(normUrl(r.url))
+          : (_r, i) => markedIdx.has(i);
+
+        const cited = retrieved.filter((r, i) => isCited(r, i));
         const notCited = retrieved.filter((r, i) => !isCited(r, i));
 
         // 🚨 REVIVES A GUARD THAT WAS DEAD ON THIS PATH. job-submit-background refuses to
@@ -492,6 +516,10 @@ export async function research(
           retrievedCount: retrieved.length,
           citedCount: cited.length,
           notCitedCount: notCited.length,
+          // WHICH signal decided this brief. Needed to read the measurement window: a
+          // marker-derived list is the weaker path and its false-empty rate should be
+          // tracked separately from the model-sources path.
+          citedSignal,
           modelSourceUrls: [...claimedUrls],
           inlineMarkers: [...markedIdx].map((i) => i + 1).sort((a, b) => a - b),
           retrievedUrls: retrieved.map((r) => r.url),
