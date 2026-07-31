@@ -63,6 +63,42 @@ const BRIEF_USER_INSTRUCTION =
   "respond in the exact JSON format specified, and include real source URLs " +
   "from the searches you performed.";
 
+// ── CITATION ENFORCEMENT FLAG ────────────────────────────────────────────────────────────────
+// 🚨🚨 THE SAFE DEFAULT IS INVERTED HERE. READ THIS BEFORE "HARMONISING" IT.
+//
+// DD_PUBLIC_ENABLED: unset ⇒ REFUSE to serve ⇒ fail-CLOSED. Absence is the safe state.
+// THIS FLAG:         unset ⇒ LOG-ONLY ⇒ SHIP the uncited brief ⇒ fail-OPEN. Absence is the
+//                    PERMISSIVE state, and it is permissive ON PURPOSE, temporarily.
+//
+// Same STRUCTURE (only an explicit recognised value switches behaviour; anything else falls
+// to the default), OPPOSITE safety direction. The two must NOT be made to match: a reader who
+// notices "our other flag is fail-closed" and flips this one turns a measurement window into
+// a live refund path with no data behind it. If you are here to make them consistent — don't.
+//
+// ⚠️ BECAUSE THE DEFAULT IS PERMISSIVE, A TYPO CANNOT FAIL CLOSED. `RESEARCH_CITATION_ENFORCE
+// =enforcee` silently ships. So a set-but-unrecognised value is LOGGED LOUDLY — the absence
+// of a fail-closed backstop is replaced by noise, which is the only defence left.
+//
+// ⏳ TIME-BOXED — THIS IS THE THIRD CHANCE TO KILL THIS GUARD, AND THE FIRST TWO SUCCEEDED.
+//   1. dead by ACCIDENT: the old override always filled `sources`, so the branch never fired;
+//   2. revived by the citation derivation (commit 1244aea);
+//   3. ⚠️ dead by DRIFT if this flag is never flipped — log-only becomes permanent because
+//      nobody owns the decision. Deliberate-by-inaction is still dead.
+//
+// EXIT CRITERION, fixed now while the reasoning is fresh — flip to "enforce" when BOTH hold:
+//   · ≥50 evaluable briefs observed under this flag WITH at least one derivation signal
+//     present (the backtest could only replay markers; live carries both), AND
+//   · the false-empty rate among them is <10% — i.e. [research][citation-shadow] fires on
+//     fewer than 1 in 10, and spot-checking the empties shows genuinely uncited answers
+//     rather than good briefs that merely omitted markers.
+// REVIEW BY 2026-08-31. If the data is not there by then, that is itself the finding:
+// either traffic is too low to measure (decide on principle, don't keep waiting) or nobody
+// is looking (assign it). Do not silently extend.
+//
+// Re-run scripts/backtest-citation-derivation.mjs against records written under this flag —
+// unlike the historical corpus, those retain BOTH signals, so it measures rather than bounds.
+const CITATION_ENFORCE_VALUE = "enforce";
+
 // Canonical JSON: sort keys at EVERY level (recursive) so identical content
 // always yields identical bytes — the evaluator hashes the same bytes we did.
 // Mirrors the quickstart's recursive key-sorting replacer (an array replacer
@@ -295,7 +331,44 @@ export async function handler(event) {
     // kill it again on purpose. See PROGRESS.md and scripts/verify-citation-derivation.mjs.
     const uncited =
       decision != null && Array.isArray(decision.sources) && decision.sources.length === 0;
-    if (decision == null || !Array.isArray(decision.sources) || decision.sources.length === 0) {
+    const noBrief = decision == null || !Array.isArray(decision.sources);
+
+    // Only an explicit recognised value enforces. See the flag block at the top of this file
+    // for WHY the default is permissive and why that is the opposite of DD_PUBLIC_ENABLED.
+    const rawFlag = process.env.RESEARCH_CITATION_ENFORCE;
+    const citationEnforcing = rawFlag === CITATION_ENFORCE_VALUE;
+    if (rawFlag !== undefined && !citationEnforcing) {
+      // A permissive default cannot fail closed on a typo, so make the typo audible.
+      console.warn(
+        `[research][citation-flag] RESEARCH_CITATION_ENFORCE is set to ${JSON.stringify(rawFlag)}, ` +
+          `which is NOT the recognised value ${JSON.stringify(CITATION_ENFORCE_VALUE)} — ` +
+          `falling back to LOG-ONLY (uncited briefs will SHIP). This is fail-OPEN by design; ` +
+          `if you meant to enforce, the value is exactly "enforce".`
+      );
+    }
+
+    // ⭐ RETENTION, LOGGED ON EVERY BRIEF — the second signal from the same instrumentation.
+    // The backtest measured 174 → 112 sources retained (64.4%) on briefs that cited anything.
+    // A live figure far from that after the "cite inline" prompt change means something else
+    // moved (prompt, retrieval breadth, or model behaviour) and the derivation is not the only
+    // variable — worth knowing BEFORE reading the false-empty rate as if it were clean.
+    if (result.citation) {
+      const c = result.citation;
+      console.warn(
+        "[research][citation-retention] " +
+          JSON.stringify({
+            jobId: String(jobId),
+            retrieved: c.retrievedCount,
+            cited: c.citedCount,
+            retainedPct: c.retrievedCount ? +((c.citedCount / c.retrievedCount) * 100).toFixed(1) : null,
+            backtestBaselinePct: 64.4,
+            markers: c.inlineMarkers,
+            modelSourceCount: c.modelSourceUrls.length,
+          })
+      );
+    }
+
+    if (noBrief || (uncited && citationEnforcing)) {
       // ⭐ INSTRUMENT THE RATE, DO NOT ESTIMATE IT. Every firing carries the full
       // derivation input set so a false empty can be reconstructed and counted, rather
       // than argued about. Stable prefix so the rate is greppable in function logs.
@@ -326,6 +399,39 @@ export async function handler(event) {
         uncited ? "uncited" : "no-brief"
       );
       return { statusCode: 202 };
+    }
+
+    // ── LOG-ONLY: uncited, but enforcement is off ────────────────────────────────────────
+    // 🚨 SHIPPING `sources: []` WOULD NOT BE LOG-ONLY — IT WOULD BE A RELABELLED REFUND.
+    // The judge is instructed to FAIL a brief under (b) when "the source list is empty"
+    // (job-evaluate-background). So an uncited brief sent on with an empty list gets
+    // rejected by the judge, refunds anyway, and lands under the WORST headline —
+    // "the deliverable didn't meet the bar" — blaming the analyst for what is our own
+    // derivation artifact. The measurement window would measure nothing and cost the
+    // same refunds it exists to avoid.
+    //
+    // So during log-only we restore EXACTLY the pre-derivation behaviour for this case:
+    // the full retrieval set as `sources`. ⚠️ That means the old retrieved≠supporting
+    // defect persists — DELIBERATELY, TEMPORARILY, and ONLY for briefs that cite nothing.
+    // Every brief that cites anything still gets the correct short list. This is the
+    // narrowest possible carve-out, and it disappears the moment the flag flips.
+    if (uncited) {
+      console.warn(
+        "[research][citation-shadow] " +
+          JSON.stringify({
+            jobId: String(jobId),
+            wouldRefund: true,
+            // ⭐ the CLASS it would have used, so the eventual rate is per-class, not aggregate
+            wouldRefundClass: "uncited",
+            enforcing: false,
+            citation: result.citation ?? null,
+            answer: decision.answer ?? null,
+            reasoning: decision.reasoning ?? null,
+            retrievedUrls: decision.retrievedNotCited?.map((s) => s?.url) ?? null,
+          })
+      );
+      decision.sources = decision.retrievedNotCited ?? [];
+      decision.retrievedNotCited = [];
     }
 
     // 2b. PROPOSAL — the model may have proposed a concrete bridge. Validate it the same

@@ -268,6 +268,56 @@ section("8 — REFUND CLASSES: disjoint, covering, and vague-by-default");
   check("  …and the evaluator persists it", /refundClass: forcedRefundClass \?\? null/.test(ev));
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+section("9 — THE ENFORCEMENT FLAG: permissive default, stated as such, time-boxed");
+{
+  const sub = readFileSync("netlify/functions/job-submit-background.mjs", "utf8");
+
+  // (1) the inversion is recorded AT the flag, not elsewhere
+  check("⭐⭐ the INVERTED default is stated at the flag itself",
+    /SAFE DEFAULT IS INVERTED/i.test(sub) && /DD_PUBLIC_ENABLED/.test(sub),
+    "without it someone 'harmonises' the two flags and turns a measurement window into refunds");
+  check("  …and names which direction each one fails",
+    /fail-CLOSED/i.test(sub) && /fail-OPEN/i.test(sub));
+  check("⭐ only an explicit recognised value enforces",
+    /rawFlag === CITATION_ENFORCE_VALUE/.test(sub) && /const CITATION_ENFORCE_VALUE = "enforce"/.test(sub));
+  check("⭐⭐ a set-but-UNRECOGNISED value is logged loudly",
+    /citation-flag/.test(sub) && /rawFlag !== undefined && !citationEnforcing/.test(sub),
+    "a permissive default cannot fail closed on a typo, so noise is the only defence left");
+
+  // (2) time-box + exit criterion, concrete
+  check("⭐⭐ an EXIT CRITERION is fixed with numbers, not 'later'",
+    /≥50 evaluable briefs|>=50 evaluable briefs/.test(sub) && /<10%/.test(sub));
+  check("  …with a review DATE", /REVIEW BY 2026-08-31/.test(sub));
+  check("⭐⭐ it names 'dead by drift' as the THIRD kill, counting the first two",
+    /dead by DRIFT/i.test(sub) && /dead by ACCIDENT/i.test(sub));
+
+  // (3) per-class, not aggregate
+  check("⭐ the shadow log records the CLASS it would have used",
+    /wouldRefundClass: "uncited"/.test(sub), "so the eventual rate is per-class");
+
+  // (4) retention as a second signal
+  check("⭐⭐ retention is logged on EVERY brief, against the backtest baseline",
+    /citation-retention/.test(sub) && /backtestBaselinePct: 64\.4/.test(sub),
+    "a live figure far from 64.4% means something other than the derivation moved");
+
+  // (5) THE TRAP — log-only must not be a relabelled refund
+  check("⭐⭐ log-only RESTORES the retrieval set for the uncited case",
+    /decision\.sources = decision\.retrievedNotCited/.test(sub),
+    "the judge FAILS an empty source list, so shipping [] would refund anyway — under the " +
+    "worst headline — and the window would measure nothing");
+  check("  …and that trap is written down, not just coded around",
+    /WOULD NOT BE LOG-ONLY|RELABELLED REFUND/i.test(sub));
+  check("  …the carve-out is scoped to uncited briefs ONLY",
+    /if \(uncited\) \{/.test(sub) && /narrowest possible carve-out/i.test(sub));
+
+  // enforcement still reachable
+  check("⭐ enforcement is still WIRED (the flag gates it, it was not removed)",
+    /noBrief \|\| \(uncited && citationEnforcing\)/.test(sub));
+  check("  …and a missing brief refunds REGARDLESS of the flag",
+    /noBrief \|\|/.test(sub), "no-brief is not part of the measurement window");
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");
