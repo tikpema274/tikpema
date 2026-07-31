@@ -234,6 +234,21 @@ export const buildIsBound = (identity) =>
  * @param {{record: object|null, readable: boolean, now: number, expect: object, ttlMs?: number}} input
  * @returns {{serve: boolean, reason: string, detail: string, evidence: object}}
  */
+/**
+ * The running identity, reported so it can never be MISSING. `runningBuild` is the derived id or
+ * the literal "unbound" — never absent, never a bare null, because an omitted field reads as "we
+ * did not say" and a null reads as "we tried and failed", and those are different states.
+ *
+ * ⭐ The build comes from `expect`, which the handlers derive via codeIdentityForEvent — the SAME
+ * single derivation dd-canary uses to WRITE the artifact. There is deliberately no second way to
+ * obtain it here: a parallel path is exactly what 324c75c removed, and it is how the binding became
+ * a no-op the first time.
+ */
+const runningEvidence = (expect) => ({
+  running: expect ?? null,
+  runningBuild: expect?.build ?? "unbound",
+});
+
 export function evaluateHealth({ record, readable, now, expect, ttlMs = DEFAULT_TTL_MS }) {
   const no = (reason, detail, evidence = {}) => ({ serve: false, reason, detail, evidence });
 
@@ -247,7 +262,10 @@ export function evaluateHealth({ record, readable, now, expect, ttlMs = DEFAULT_
   if (!buildIsBound(expect)) {
     return no(HEALTH_REASON.BUILD_UNRESOLVED,
       `the running code has no resolvable build identifier, so no health record can be shown to vouch for it. ${expect?.buildDetail ?? ""}`.trim(),
-      { running: expect ?? null, buildSources: BUILD_ID_SOURCES });
+      // Uses the SAME runningEvidence helper, so `runningBuild` is present here too — reporting
+      // the literal "unbound" rather than omitting the field. This is the branch where an
+      // unresolvable build actually surfaces, so it is the one that must say so out loud.
+      { ...runningEvidence(expect), buildSources: BUILD_ID_SOURCES });
   }
 
   // 1 — could we even read the store? An unreadable health record is NOT a healthy one.
@@ -259,9 +277,31 @@ export function evaluateHealth({ record, readable, now, expect, ttlMs = DEFAULT_
   // 2 — is there a record at all? A fresh deploy has none until the canary runs. That is the deploy
   //     gate, and it costs nothing to state plainly.
   if (record === null || record === undefined) {
+    // ⭐ NO-RECORD IS THE COMMONEST REFUSAL THIS SERVICE WILL EVER EMIT. Deploy-id binding
+    // guarantees it on EVERY deploy: between publishing and the canary's first run there is by
+    // construction no artifact for the new build id. version-mismatch, by contrast, is rare. The
+    // evidence used to be `{}` — richest where it fires least, EMPTY WHERE IT FIRES MOST — so a
+    // caller hitting it learned nothing and could not distinguish "this deploy's canary has not run
+    // yet" from "the service is broken".
+    //
+    // ⚠️ DIAGNOSTIC ONLY. This adds evidence to an ALREADY-DECIDED refusal. The verdict, the reason
+    // and the detail are untouched; nothing here can widen what the service will do.
+    //
+    // ⚠️ THE RUNNING BUILD IS REPORTED, NEVER OMITTED. `runningBuild` is always present — the id, or
+    // the literal "unbound". Omitting it on failure would make "we could not derive a build" look
+    // identical to "we did not bother to say", which is the absence-reads-as-safe shape.
+    //
+    // ⚠️ AND ABSENT-BECAUSE-NOTHING-RECORDED IS SAID EXPLICITLY, not encoded as an empty or null
+    // `recorded` field. Nothing-was-written and we-could-not-read-it are different states with
+    // different fixes; `recorded: null` would collapse them.
     return no(HEALTH_REASON.NO_RECORD,
       "no canary has vouched for this build yet. The service does not serve on the assumption that silence means health.",
-      {});
+      {
+        ...runningEvidence(expect),
+        recordedNote:
+          "none — no health artifact exists for this build id, so there is nothing to compare against. " +
+          "This is the EXPECTED state between publishing a deploy and its first canary run, not a fault.",
+      });
   }
   if (typeof record !== "object" || Array.isArray(record)) {
     return no(HEALTH_REASON.MALFORMED, "the health record is not an object", { got: typeof record });

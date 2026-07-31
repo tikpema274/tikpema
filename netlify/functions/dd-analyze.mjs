@@ -209,6 +209,12 @@ export async function handler(event) {
             healthReason: health.reason,
             ...(ev.mismatched ? { mismatchedFields: ev.mismatched } : {}),
             ...(ev.running ? { running: ev.running } : {}),
+            // ⭐ Always forwarded when present — the no-record path (the commonest refusal) now
+            // carries the derived build so a caller can tell "this deploy's canary has not run yet"
+            // from "the service is broken". `runningBuild` is a string ("<id>" or "unbound"), so it
+            // is never dropped by this truthiness spread.
+            ...(ev.runningBuild ? { runningBuild: ev.runningBuild } : {}),
+            ...(ev.recordedNote ? { recordedNote: ev.recordedNote } : {}),
             ...(ev.recorded ? { recorded: ev.recorded } : {}),
             ...(ev.buildSources ? { buildSources: ev.buildSources } : {}),
             ...(ev.ageMs !== undefined ? { ageMs: ev.ageMs, ttlMs: ev.ttlMs } : {}),

@@ -116,6 +116,78 @@ section("0 — THE DEPLOY-ID BINDING: one derivation, used by both sides");
     /codeIdentityForEvent\(event,/.test(analyze) && !/[^r]codeIdentity\(\{/.test(analyze));
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+section("0b — no-record carries the DERIVED BUILD (the commonest refusal)");
+// Deploy-id binding GUARANTEES no-record on every deploy: between publishing and the canary's first
+// run there is by construction no artifact for the new id. version-mismatch is the rare case, yet it
+// carried both identities while no-record carried `{}` — richest where it fires least.
+{
+  const RUN = codeIdentity({ schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS, build: BUILD_A });
+  const nr = evaluateHealth({ record: null, readable: true, now: Date.now(), expect: RUN });
+
+  check("⭐⭐ no-record now reports the DERIVED build", nr.evidence.runningBuild === BUILD_A);
+  check("  …and the full running identity", nr.evidence.running?.build === BUILD_A);
+  check("⭐⭐ …and says explicitly that NOTHING was recorded, not an empty/null field",
+    typeof nr.evidence.recordedNote === "string" && /no health artifact exists/.test(nr.evidence.recordedNote));
+  check("  …and frames it as EXPECTED after a deploy, not a fault",
+    /EXPECTED state between publishing/.test(nr.evidence.recordedNote));
+  check("⭐ `recorded` is NOT emitted as null — nothing-written and could-not-read stay distinct",
+    !("recorded" in nr.evidence));
+
+  // ⭐⭐ DIAGNOSTIC-ONLY. The verdict, reason and detail must be untouched.
+  check("⭐⭐ the VERDICT is unchanged — still refusing", nr.serve === false);
+  check("⭐⭐ the REASON is unchanged — still no-record", nr.reason === HEALTH_REASON.NO_RECORD);
+  check("  …and the detail still says silence is not health", /silence means health/.test(nr.detail));
+
+  // ⭐ UNBOUND must SAY unbound, never omit. (Rung 0 catches it before no-record, so assert the
+  // helper's contract directly through the branch that does surface an unresolved build.)
+  const UNB = codeIdentity({ schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS, env: {} });
+  const unb = evaluateHealth({ record: null, readable: true, now: Date.now(), expect: UNB });
+  check("⭐⭐ an UNBOUND build reports \"unbound\" and the field is PRESENT, not omitted",
+    unb.evidence.runningBuild === "unbound" && "runningBuild" in unb.evidence);
+  check("  …and it still refuses at rung 0 (build-unresolved outranks no-record)",
+    unb.serve === false && unb.reason === HEALTH_REASON.BUILD_UNRESOLVED);
+
+  // Every other branch's verdict must be untouched by the added evidence.
+  const REC = (over) => ({ verdict: "pass", producedAt: new Date().toISOString(), identity: { ...RUN }, ...over });
+  check("⭐ a HEALTHY record still serves — nothing was made stricter",
+    evaluateHealth({ record: REC({}), readable: true, now: Date.now(), expect: RUN }).serve === true);
+  check("  …version-mismatch still refuses with both identities",
+    (() => { const r = evaluateHealth({ record: REC({ identity: { ...RUN, build: BUILD_B } }), readable: true, now: Date.now(), expect: RUN });
+             return r.serve === false && r.reason === HEALTH_REASON.VERSION_MISMATCH && !!r.evidence.recorded && !!r.evidence.running; })());
+  check("  …unreadable still refuses", evaluateHealth({ record: null, readable: false, now: Date.now(), expect: RUN }).serve === false);
+
+  // ⭐ ONE derivation. dd-analyze must not obtain a build id any other way.
+  const az = readFileSync("netlify/functions/dd-analyze.mjs", "utf8").replace(/^\s*\/\/.*$/gm, "");
+  check("⭐⭐ dd-analyze derives the identity ONLY via codeIdentityForEvent",
+    /codeIdentityForEvent\(event,/.test(az) && !/resolveBuildId\(/.test(az) && !/x-nf-deploy-id/.test(az));
+  check("  …and forwards runningBuild + recordedNote into the diagnostic",
+    /ev\.runningBuild/.test(az) && /ev\.recordedNote/.test(az));
+
+  // ⭐⭐ AND IT MUST NOT REACH THE MONEY DECISION. settle-gate keys on `report.refusal` and its
+  // `reason` — never the diagnostic. Asserted rather than reasoned about: two reports identical
+  // except for diagnostic richness must settle the same way.
+  const { settleDecision } = await import("../../shared/x402/settle-gate.mjs");
+  const base = (diag) => ({
+    refusal: { reason: "service-unverified", detail: "x", ...(diag ? { diagnostic: diag } : {}) },
+    shape: { class: "unknown" }, powers: [],
+    // Full power-group coverage, so the gate reaches the REFUSAL rung rather than short-circuiting
+    // at coverage-unaccounted — the rung this assertion is actually about.
+    coverage: {
+      checked: [],
+      notChecked: Object.keys(POWER_SIGS).map((g) => ({ id: `power:${g}`, kind: "power", group: g, reason: "refused before analysis" })),
+      totals: { checked: 0, notChecked: Object.keys(POWER_SIGS).length },
+    },
+    attestation: { status: "unsigned" },
+  });
+  const bare = settleDecision(base(null));
+  const rich = settleDecision(base({ healthReason: "no-record", runningBuild: BUILD_A, recordedNote: "none — ..." }));
+  check("⭐⭐ a RICHER diagnostic does not change the settle decision",
+    bare.settle === rich.settle && bare.reason === rich.reason,
+    `settle=${rich.settle} reason=${rich.reason}`);
+  check("  …and it still refuses to charge for a refusal", rich.settle === false);
+}
+
 section("1 — resolveBuildId never invents a value");
 {
   check("explicit build wins", resolveBuildId({ build: BUILD_A, env: {} }).id === BUILD_A);
