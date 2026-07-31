@@ -34,9 +34,20 @@ the expected steady state. Liveness is `producedAt` advancing — **never** an a
 ⚠️ A 200 proves nothing on its own: an unmatched Netlify path returns **SPA HTML with status 200**.
 Judge by body, never by status.
 
-**Current:** production **[DEPLOY ID]** `6a6c51fb4fbfe3695064c0f3`, built from **[COMMIT]** `4b940d8`,
-tree `ba7da4076bce605410718c7a32864f16b9b2dcfa6fb5657b2e70b0bcb131539a` (clean at stamp time).
-Deployed 2026-07-31T08:04:59Z; rollback target is the prior published deploy `6a6c2a74b0db965c94b85a3b`.
+**Current:** production **[DEPLOY ID]** `6a6c696ae1ea3868860a4bd3`, built from **[COMMIT]** `aa60f1b`,
+tree `31ecb354a70253680b8f9caa5727c9fb0e94ffdc5c4326dc24bee7a50bb3b085` (clean at stamp time).
+Deployed 2026-07-31T09:48:30Z; rollback target is the prior published deploy `6a6c51fb4fbfe3695064c0f3`.
+
+⏳ **THE CITATION MEASUREMENT WINDOW IS OPEN.** `RESEARCH_CITATION_ENFORCE` is **UNSET in
+production** (read back after the deploy, not assumed) ⇒ **LOG-ONLY**, which here is the
+**PERMISSIVE** state — an uncited brief SHIPS. ⚠️ That is the OPPOSITE of `DD_PUBLIC_ENABLED`,
+where unset = refuse. Do not "harmonise" them; see the flag block in `job-submit-background.mjs`.
+**Exit criterion: ≥50 evaluable briefs with a signal present AND false-empty <10%, or 2026-08-31,
+whichever first.** Grep `[research][citation-shadow]` (would-have-refunded, per-class) and
+`[research][citation-retention]` (against the 64.4% backtest baseline). 🚨 If nobody flips this,
+the guard is dead a THIRD time — by drift.
+🚧 **UNVERIFIED ON A LIVE PATH:** no job has run since the deploy, so neither half of the
+citation change (short list where cited / full retrieval where not) has been seen in production.
 Money path `verdict D`. Watch on `*/15`. Canary writing deploy-id-bound artifacts. **DD is INERT**
 (`DD_PUBLIC_ENABLED` unset in production). Live values come from the build stamp and `git`, not here.
 
