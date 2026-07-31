@@ -35,6 +35,42 @@ the build source. Same slot, two different kinds of value.
     GET https://app.tikpema.xyz/.netlify/functions/blobs-probe   -> verdict "D" AND calibrated true
     netlify blobs:get strong-read-watch latest                   -> last cron observation
 
+### 🚨 THE MONEY STEP — SEQUENCE TIGHTENED BY THIS WEEK'S OWN FIX (appended after a4fa1f9)
+
+`DD_PAYTO_ADDRESS` is now SET at **deploy-preview only** (`0xb407967319d56218c7e1c369125490e665a16ac4`,
+the clean revenue wallet), verified by READ-BACK. Production remains unset.
+⚠️ `env:set` has silently no-opped three times in this project — **the confirmation line only means a
+command ran.** Always read back.
+
+**Setting it is NECESSARY BUT NOT SUFFICIENT.** On a draft the request now passes rung −1 (exposure)
+and refuses at the **HEALTH** rung with `no-record`, because the draft's canary can never run
+(scheduled functions 403 on HTTP invoke; cron does not fire on drafts). `dd-analyze` therefore never
+reaches the payment gate and **no 402 is issued**.
+
+**The route** is the one already proven on `strong-read-watch`:
+
+1. comment out `dd-canary`'s `netlify.toml` schedule
+2. deploy
+3. invoke `dd-canary` over HTTP so it WRITES a health artifact
+4. run `scripts/dd/probe-dd-purchase.mjs` (bare first, then `--confirm`)
+5. **gated restore** of the schedule — `npm run gate:watch` enforces the equivalent restore for the
+   watch; do not leave this one to memory
+
+⭐⭐ **NEW CONSTRAINT, AND IT IS THE EXPENSIVE ONE.** Since the deploy-id binding landed, the health
+artifact is keyed to a **SPECIFIC 24-hex DEPLOY ID** — no longer to a pinned `DD_BUILD_ID` **[COMMIT]**
+that could span deploys. So **the canary run AND the purchase must happen on THE SAME DRAFT DEPLOY,
+with NO redeploy in between.** Any redeploy mints a new **[DEPLOY ID]**, the artifact stops matching,
+`no-record` returns, and the sequence restarts — another ~25 minutes.
+
+⚠️ **THEREFORE SET EVERYTHING BEFORE DEPLOYING:** the schedule comment-out, `DD_PUBLIC_ENABLED`,
+`DD_PAYTO_ADDRESS`, and any probe config. **Env changes do not reach a live function** (measured),
+so a variable set after the deploy costs a redeploy — which is exactly what invalidates the artifact.
+
+⚠️ And the money-step guardrails still stand: a 502 means `charged: null`, **NEVER blind-retry**;
+strictly sequential (the confirmation read is `availableBalance(USDC, payTo)`, an AGGREGATE, so two
+concurrent equal payments cross-confirm); baseline the revenue wallet IMMEDIATELY before; read the
+amount off the 402 rather than from memory.
+
 ### MEASURED vs INFERRED — do not promote one to the other
 
 | claim | status |
