@@ -94,6 +94,31 @@ grant covers *spends* and may not extend to `withdraw()`. That is a **read, not 
 commits us in a way a backlog entry does not — if this sits untouched, "we haven't built it" quietly
 becomes a promise.
 
+### 🚧 BACKLOG — the copy guard must assert on RENDERED OUTPUT, not source regex
+
+**Not started. Deferred deliberately, `eb459a1` shipped without it.**
+
+The guard that keeps the unified-balance falsehood from returning is currently a **source regex over
+two files**. It must instead **render the components in a test and assert on the resulting text
+content.**
+
+⭐ **One move closes four blind spots at once:** line wrapping, template literals, text built from
+variables, and **text in PROPS**. Plus the one a two-file scan **structurally cannot** cover — a
+**new file** carrying the falsehood.
+
+🚨 **WHY THIS IS NOT COSMETIC.** Building the guard, the source regex produced a **false alarm**
+(JSX wrapped `"Tikpema controls that account"` across a line break; the comment-stripper missed `//`
+lines and flagged a comment *quoting* the old falsehood). Benign in that direction. **The same regex
+can produce a false ALL-CLEAR** — and for a guard whose entire job is catching a falsehood
+reappearing, that is the only failure that matters.
+
+⚠️ The guard currently has **the exact blind-spot class it was built to close.** A source scan
+focused on prose is **precisely how `badge="Server-released, delayed"` survived three careful
+reviews** — nobody counted four words in a prop as copy.
+
+⭐ **The rule, general:** **assert against STRUCTURE, not against text the asserter is part of.**
+Same rule as the `_budget.mjs` / build-binding work this week.
+
 ### MEASURED vs INFERRED — do not promote one to the other
 
 | claim | status |
