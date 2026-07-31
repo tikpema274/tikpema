@@ -34,7 +34,9 @@ the expected steady state. Liveness is `producedAt` advancing — **never** an a
 ⚠️ A 200 proves nothing on its own: an unmatched Netlify path returns **SPA HTML with status 200**.
 Judge by body, never by status.
 
-**Current:** production **[DEPLOY ID]** `6a6c2a74b0db965c94b85a3b`, built from **[COMMIT]** `de60384`.
+**Current:** production **[DEPLOY ID]** `6a6c51fb4fbfe3695064c0f3`, built from **[COMMIT]** `4b940d8`,
+tree `ba7da4076bce605410718c7a32864f16b9b2dcfa6fb5657b2e70b0bcb131539a` (clean at stamp time).
+Deployed 2026-07-31T08:04:59Z; rollback target is the prior published deploy `6a6c2a74b0db965c94b85a3b`.
 Money path `verdict D`. Watch on `*/15`. Canary writing deploy-id-bound artifacts. **DD is INERT**
 (`DD_PUBLIC_ENABLED` unset in production). Live values come from the build stamp and `git`, not here.
 
