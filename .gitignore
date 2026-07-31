@@ -38,4 +38,9 @@ cold-owner*.json
 # ignored. The agentId is public, persisting it is the entire point of that
 # script, and committing it is a durable copy of the value whose loss caused the
 # orphan-wallet excavation in the first place.
-agent-metadata/.nft-enumeration.json
+# ⚠️ BROADENED 2026-07-31 — the exact-path form ALREADY FAILED ONCE. A second dump written
+# as `.nft-enumeration-dd-service.json` did not match `.nft-enumeration.json` and sat
+# untracked-but-unignored, one `git add .` from being committed. That is precisely the miss
+# the broad `.keys/` and `*.key` patterns above exist to prevent, so this pattern is broad
+# for the same reason: a future dump must not escape by being named slightly differently.
+agent-metadata/.nft-enumeration*.json
