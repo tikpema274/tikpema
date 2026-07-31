@@ -147,6 +147,60 @@ result.**
    what exposed it, and it was **incidental**. ⭐ **A verdict hides its own inputs — `✅ VERIFIED`
    is unfalsifiable by inspection, `838` is not.**
 
+### 🔎 CIRCLE x402 MARKETPLACE — can DD get listed? (measured 2026-07-31, nothing registered)
+
+**THE CLI IS CONSUMER-ONLY.** `circle services` = `search` / `inspect` / `pay`. Ten seller verbs
+probed (`register`, `publish`, `list`, `add`, `create`, `submit`, `onboard`, `seller`, `provider`,
+`directory`) — **all absent**. No publish path anywhere in the CLI, and none of Circle's seven
+published skills is seller-side. ⚠️ `--help` works WITHOUT accepting the Terms; everything else is
+gated. **How a third party gets listed is STILL UNKNOWN** — not the CLI, not a skill, no advertised
+write method (`OPTIONS` on the discovery API → 404). Remaining candidates: an off-CLI form, a
+partner process, or crawler ingestion (`lastUpdated` + a `stripe_payment_intent_id` in one row's
+`extra` hint at a pipeline). `circle feedback submit` exists as a channel but is outbound contact.
+
+**THE DIRECTORY, MEASURED IN FULL.** `GET https://api.circle.com/v2/x402/discovery/resources`
+— public, no auth, **636 listings** (all 7 pages fetched, 636 unique). **15 networks:**
+Base 802, Polygon 742, **Base Sepolia 396, Polygon Amoy 396**, Avalanche 141, Ethereum/Arbitrum/
+Optimism/Unichain 99 each, Solana 35, X Layer 31, Sonic/World/Sei/HyperEVM 12 each.
+⭐ **Arc (`eip155:5042002`) appears ZERO times.** Chain id resolved authoritatively — live
+`eth_chainId` = `0x4cef52` = 5042002, matching `_arc.mjs:4`. ⚠️ **"It's a testnet" does NOT explain
+it** — Base Sepolia and Polygon Amoy are a third of the directory.
+
+**🚨 BUT THE DIRECTORY ROW IS STALE, AND THAT INVERTS THE CONCLUSION.** The one Arc-adjacent row is
+`https://x402.quicknode.com/arc-testnet/` — **the seller Tikpema ALREADY PAYS.** Its directory row
+(`lastUpdated` 2026-06-25) advertises **12 accepts[] entries, all Base/Polygon, no Arc**. The
+**LIVE 402 challenge from the same URL returns 21 entries INCLUDING `eip155:5042002`**
+(`GatewayWalletBatched`, amount `100` = 0.0001 USDC). So **Arc x402 settlement is live and
+sellable TODAY; the directory index simply does not reflect it.** The absence of Arc in 636 rows is
+an **INDEXING artifact, not a platform refusal** — do not read it as "Arc cannot be listed".
+
+**HOW WE ALREADY PAY (read, not designed).** Production `DATA_SELLER_URL` =
+`https://x402.quicknode.com/arc-testnet`. `_x402.mjs` hard-enforces
+`EXPECTED_NETWORK = eip155:${ARC.chainId}` and selects the `accepts[]` entry matching Arc +
+`BATCH_NAME = "GatewayWalletBatched"`, 502-ing if absent — so **the Arc path is not optional in our
+buyer, and it works in prod.** Payer is the **delegate EOA** (`from == signer`, no depositor/signer
+split in the batched header — see [[batched-x402-requires-from-equals-signer]]).
+
+**⭐ NO ERC-8004 FIELD IN THE LISTING SCHEMA — AND THAT IS NOT A VERDICT ON THE IDENTITY WORK.**
+A listing carries `resource, type, x402Version, lastUpdated, accepts[], metadata{provider{name,
+website, docsUrl, description, category, tags}, path, method, description, mimeType, input, output,
+siwx, supportsVanillax402, supportsCircleGateway}`. `metadata.provider` is **free text**, so
+**agentId 851891 has nowhere to go IN A LISTING**. ⚠️ **Do NOT conclude the identity work was
+wasted.** An **on-chain-verifiable ERC-1271 attestation is strictly stronger than anything a
+listing carries** — every field above is self-asserted, unverifiable prose. It remains a real
+differentiator **in the PRODUCT and the PITCH**; it just cannot be the differentiator **inside the
+directory**, because the directory has no slot for it and no verification of it.
+
+**⚠️ IF A BASE `payTo` IS EVER CHOSEN, IT COSTS A SECOND REVENUE WALLET.** DD's `payTo` is
+`0xb407967319d56218c7e1c369125490e665a16ac4` (Arc). **Its clean history IS the design** — see
+[[dd-revenue-wallet]]: Transfer-to-payTo reconciliation is attributable ONLY because that wallet's
+entire history is DD revenue, so it must receive nothing else. A Base `payTo` therefore cannot
+reuse it and needs a **second, equally clean wallet**, doubling the invariant to maintain.
+🚧 And it is **blocked on an open precondition already recorded here: VERIFY THE BASE SEPOLIA
+DELEGATE BEFORE FUNDING IT** — `_ubspend.mjs` warns the delegate grant is per-SCA and only Arc has
+ever been exercised. ⭐ **Given the QuickNode finding, a Base `payTo` may be unnecessary** — the
+Arc-serve/Base-settle workaround was inferred from a STALE row, not from a platform limit.
+
 ### MEASURED vs INFERRED — do not promote one to the other
 
 | claim | status |
