@@ -190,6 +190,9 @@ export async function handler(event) {
     forceReject,
     failHash,
     reason: refundReason,
+    // Threaded from C1's triggerRefund. A CLOSED SET — see job-submit-background. The UI
+    // derives its headline from this, never from parsing `reason`.
+    refundClass: forcedRefundClass,
     walletAddress,
     // Deliverable data threaded from job-submit so we DON'T read it back from
     // Blobs (eventual-read lag ~11s intermittently returned a stale record →
@@ -316,6 +319,8 @@ export async function handler(event) {
         refunded: true,
         refund: true,
         reason: refundReason,
+        // null when C1 didn't characterise it → the UI falls to its vaguest headline.
+        refundClass: forcedRefundClass ?? null,
         settleTx,
         settleTxUrl: `${ARC.explorer}/tx/${settleTx}`,
       });
@@ -405,6 +410,10 @@ export async function handler(event) {
     // 6. Persist the final settled state (hashVerified records that determinism held).
     await persist({
       status: verdict === "pass" ? "completed" : "rejected",
+      // ⭐ THE ONE PATH WHERE "didn't meet the bar" IS TRUE: a judge read the deliverable
+      // and failed it on merit. The old headline said this about EVERY refund, including
+      // ones where no judgement happened at all.
+      ...(verdict === "fail" ? { refundClass: "judge-rejected" } : {}),
       evalStatus: "settled",
       verdict,
       reason,

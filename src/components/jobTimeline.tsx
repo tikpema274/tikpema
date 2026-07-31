@@ -99,6 +99,10 @@ export type TrackedJob = {
   status: string;
   brief?: {
     answer?: string; reasoning?: string; sources?: any[]; confidence?: number;
+    // Retrieved but carrying no claim. SEPARATE from `sources` by design — merging them
+    // is the defect this field exists to prevent. Optional: briefs written before the
+    // derivation landed have no such field, and must still render.
+    retrievedNotCited?: any[];
     // A's RAW proposal — kept even when the server refused to author one, because the
     // KILLED case needs to show what A actually argued for.
     proposal?: { reasoning?: string; [k: string]: any } | null;
@@ -109,6 +113,9 @@ export type TrackedJob = {
   receipt?: Receipt;
   verdict?: string;
   reason?: string;
+  // Which KIND of refusal this was. Optional: jobs refunded before the class existed
+  // carry none, and must fall to the vaguest headline rather than borrow a specific one.
+  refundClass?: string | null;
   settleTx?: string;
   settleTxUrl?: string;
   error?: string;
@@ -132,6 +139,30 @@ export function TxLink({ url, label }: { url: string; label?: string }) {
   );
 }
 
+// ── THE REFUND HEADLINE ──────────────────────────────────────────────────────────────
+// Every refund used to read "Refunded — deliverable didn't meet the bar." That sentence
+// is TRUE for exactly one path — a judge read the deliverable and failed it on merit —
+// and it was being said about paths where NO JUDGEMENT HAPPENED AT ALL: an uncited brief,
+// an unparseable one, an internal throw. It implied a verdict we never reached.
+//
+// ⭐ SAME SHAPE AS THE WATCH ALERT'S cannot-verify / known-broken SPLIT. A failure to
+// EVALUATE is not an evaluated failure, and the vaguer statement is the safe one: an
+// UNRECOGNISED class must fall to the vaguest headline, NEVER to a specific one, because
+// claiming a cause we did not establish is the costlier error. The map is exhaustive over
+// the classes producers actually write, and `default` catches everything else — including
+// jobs refunded before `refundClass` existed, which carry none.
+const REFUND_HEADLINES: Record<string, string> = {
+  uncited: "Refunded — we couldn't evidence this answer.",
+  "no-brief": "Refunded — we couldn't produce a usable brief.",
+  // We threw. The cause is ours and uncharacterised — say less, don't guess.
+  "internal-error": "Refunded — this job didn't complete.",
+  // The ONLY class for which a quality judgement was actually made.
+  "judge-rejected": "Refunded — the deliverable didn't meet the bar.",
+};
+function refundHeadline(refundClass?: string | null): string {
+  return (refundClass && REFUND_HEADLINES[refundClass]) || "Refunded.";
+}
+
 // Render the research brief: answer, reasoning, and sources as clickable links.
 // Sources may be {title, url} objects or bare URL strings — handle both.
 export function Brief({ brief }: { brief: NonNullable<TrackedJob["brief"]> }) {
@@ -143,6 +174,13 @@ export function Brief({ brief }: { brief: NonNullable<TrackedJob["brief"]> }) {
         </div>
       )}
       {brief.reasoning && <div style={{ marginTop: 4 }}>{brief.reasoning}</div>}
+      {/* ⚠️ "Sources:" ASSERTS SUPPORT. It must therefore list only what the answer
+          actually cites — see _research.mjs, where the list is derived from the brief's
+          own references rather than passed through from retrieval. Anything retrieved and
+          NOT used renders below under its own heading, deliberately un-clickable-as-
+          evidence in tone. Never merge the two lists: that is the exact defect this fixes
+          (job #160108 listed six sources for an answer that referenced two, including two
+          exchange FAQs matched on the word "Unified"). */}
       {Array.isArray(brief.sources) && brief.sources.length > 0 && (
         <div style={{ marginTop: 4 }}>
           <b>Sources:</b>
@@ -154,6 +192,28 @@ export function Brief({ brief }: { brief: NonNullable<TrackedJob["brief"]> }) {
               return (
                 <li key={i}>
                   <a href={url} target="_blank" rel="noreferrer">
+                    {title}
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+      {Array.isArray(brief.retrievedNotCited) && brief.retrievedNotCited.length > 0 && (
+        <div style={{ marginTop: 6 }}>
+          <b style={{ color: "var(--muted)" }}>Retrieved, not used:</b>{" "}
+          <span className="qd" style={{ color: "var(--muted)" }}>
+            searched and read, but no claim above rests on them.
+          </span>
+          <ul style={{ margin: "4px 0 0", paddingLeft: 18, color: "var(--muted)" }}>
+            {brief.retrievedNotCited.map((s: any, i: number) => {
+              const url = typeof s === "string" ? s : s?.url;
+              const title = typeof s === "string" ? s : s?.title || s?.url;
+              if (!url) return null;
+              return (
+                <li key={i}>
+                  <a href={url} target="_blank" rel="noreferrer" style={{ color: "var(--muted)" }}>
                     {title}
                   </a>
                 </li>
@@ -643,7 +703,7 @@ export function JobTimeline({
 
       {job.status === "rejected" && (
         <div style={{ marginTop: 8 }}>
-          <div>Refunded — deliverable didn't meet the bar.</div>
+          <div>{refundHeadline(job.refundClass)}</div>
           {job.reason && <div style={{ marginTop: 4 }}>{job.reason}</div>}
           {job.brief && <Brief brief={job.brief} />}
           {job.settleTxUrl && (

@@ -47,6 +47,7 @@ Ground your brief on the sources provided to you, then respond with ONLY JSON:
   "proposal": null | { "action": "bridge", "destination": "<chain name>", "amountUsdc": <number>, "reasoning": "<why this destination and amount>" }
               | { "action": "swap", "tokenIn": "USDC"|"EURC", "tokenOut": "USDC"|"EURC", "amountIn": <number>, "reasoning": "<why this direction and size>" } }
 Use only the supplied sources as evidence; do not invent URLs.
+Reference each source you rely on INLINE in "answer" / "reasoning" using its supplied number, e.g. [1] or [2], and list in "sources" ONLY the sources you actually relied on. A source you did not use must NOT appear — breadth is not evidence, and an uncited source listed as a source misrepresents the work.
 Cite ONLY sources from the supplied set — never invent, guess, or modify a URL. If the supplied sources do not let you answer confidently — especially for a specific past date, price, or outcome — say so plainly in "answer" (state what you could not verify), set "confidence" low, and include only the real sources you do have. An honest "the available sources do not confirm this" is correct and acceptable; a fabricated source is never acceptable.
 
 PROPOSAL: set "proposal" to null unless the question asks for ONE of the two actions below AND your research supports one concrete recommendation.
@@ -185,7 +186,15 @@ export async function handler(event) {
   // ITSELF throws is genuinely stuck; there we fall back to a "failed" record
   // and log loudly. This helper never throws, so callers can await it safely
   // (the catch below must not re-enter the refund path on its own error).
-  const triggerRefund = async (reason) => {
+  // ⭐ `refundClass` is a CLOSED SET, threaded explicitly — never inferred later by
+  // parsing `reason`. The UI derives its headline from this, and a headline that names a
+  // cause we did not establish is the costlier error (same rule as the watch alert:
+  // an unknown reason goes to cannot-verify, never to known-broken). Classes:
+  //   "uncited"        — a brief whose answer cites nothing we retrieved
+  //   "no-brief"       — nothing parseable came back at all
+  //   "internal-error" — we threw; the cause is ours and not characterised
+  //   "judge-rejected" — set by the EVALUATOR, not here (the judge failed it on merit)
+  const triggerRefund = async (reason, refundClass) => {
     // Refund runs on the user's OWN wallet (the job's client+provider), threaded
     // in from job-run — NOT the shared env wallet.
     const failHash = keccak256(toBytes("RESEARCH_FAILED:" + jobId));
@@ -211,12 +220,13 @@ export async function handler(event) {
         deliverableHash: failHash,
         canonicalReport: null,
         reason,
+        refundClass: refundClass ?? null,
         submitTx,
       });
 
       // Pass the forced-reject signal EXPLICITLY in the body so the evaluator
       // doesn't have to read it back from the Blob.
-      await triggerEvaluate({ forceReject: true, failHash, reason });
+      await triggerEvaluate({ forceReject: true, failHash, reason, refundClass: refundClass ?? null });
     } catch (e) {
       // The failure-marker submit ITSELF failed — the escrow stays FUNDED with
       // no way to refund from here. This is the genuinely-stuck case: log loudly.
@@ -268,14 +278,53 @@ export async function handler(event) {
 
     // 2. Guard: never submit a brief we can't stand behind. Abort if the model
     // returned nothing parseable, or a brief with no real sources.
-    if (
-      decision == null ||
-      !Array.isArray(decision.sources) ||
-      decision.sources.length === 0
-    ) {
+    //
+    // 🚨 WHY AN UNCITED BRIEF REFUNDS — AND WHY THIS IS *NOT* THE SETTLE-GATE'S THIN CASE.
+    // The DD settle-gate deliberately CHARGES for a THIN report (0/9 powers checked) and
+    // refuses only an OUTAGE, on the reasoning that thin coverage is still an answer. It
+    // is tempting to reconcile this guard with that rule and conclude we should ship an
+    // uncited brief too. DO NOT. They are different products:
+    //   · a thin DD report is the same deliverable with LESS of it — coverage is a dial;
+    //   · a research brief with no citations is a DIFFERENT deliverable. THE CITATIONS ARE
+    //     THE PRODUCT. An answer with no evidentiary basis is closer to FABRICATION than
+    //     to thin coverage — the client is paying for "this is true, and here is why",
+    //     and we would be billing for the first half with the second half absent.
+    // ⚠️ This guard was DEAD before the citation derivation landed: the old override set
+    // `sources` to the whole retrieval set, so it was never empty and this branch could
+    // not fire. It went dead once by accident. Reconciling it with the settle-gate would
+    // kill it again on purpose. See PROGRESS.md and scripts/verify-citation-derivation.mjs.
+    const uncited =
+      decision != null && Array.isArray(decision.sources) && decision.sources.length === 0;
+    if (decision == null || !Array.isArray(decision.sources) || decision.sources.length === 0) {
+      // ⭐ INSTRUMENT THE RATE, DO NOT ESTIMATE IT. Every firing carries the full
+      // derivation input set so a false empty can be reconstructed and counted, rather
+      // than argued about. Stable prefix so the rate is greppable in function logs.
+      console.warn(
+        "[research][citation-refusal] " +
+          JSON.stringify({
+            jobId: String(jobId),
+            cause: decision == null ? "no-decision" : "no-cited-sources",
+            citation: result.citation ?? null,
+            answer: decision?.answer ?? null,
+            reasoning: decision?.reasoning ?? null,
+            modelSources: decision?.sources ?? null,
+            retrievedNotCited: decision?.retrievedNotCited?.map((s) => s?.url) ?? null,
+          })
+      );
       // No usable brief — don't leave the escrow stuck at FUNDED. Submit a
       // failure marker and let the evaluator force-reject it (client refunded).
-      await triggerRefund("research returned no usable brief (missing decision or sources)");
+      //
+      // ⭐ THE REFUSAL MUST BE LEGIBLE. A bare refund reads as the product silently
+      // breaking; a stated reason reads as the system doing its job. Same standard the
+      // vault card holds — say what happened and what it means for the reader's money.
+      await triggerRefund(
+        uncited
+          ? "We couldn't verify sources for this answer, so you weren't charged. " +
+            "The research ran and produced an answer, but none of the sources we retrieved " +
+            "actually supported it — and we don't bill for an answer we can't evidence."
+          : "We couldn't produce a usable brief for this question, so you weren't charged.",
+        uncited ? "uncited" : "no-brief"
+      );
       return { statusCode: 202 };
     }
 
@@ -445,7 +494,9 @@ export async function handler(event) {
     } else {
       // A real failure (research threw, etc.) — don't leave the escrow stuck at
       // FUNDED. Submit a failure marker and let the evaluator refund the client.
-      await triggerRefund(e.message);
+      // ⚠️ NOT a characterised failure — we threw, and the message is internal. It must
+      // fall to the VAGUEST headline, never borrow a specific one.
+      await triggerRefund(e.message, "internal-error");
     }
   }
   // 202 is conventional for an accepted-and-finished background invocation.

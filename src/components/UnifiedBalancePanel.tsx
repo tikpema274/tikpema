@@ -415,8 +415,8 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
           <b>Tikpema controls that account</b> — so what stops a withdrawal today is that we
           haven't built one, not that no path exists. Arc's Gateway provides a trustless
           withdrawal with a delay of about seven days; <b>we haven't implemented it or tested
-          that it works end to end.</b> Until we do, treat this as one-way. Deposit only what
-          you intend the agent to spend.
+          that it works end to end.</b> Until then, deposit only what you intend the agent
+          to spend.
         </div>
         {/* The deposit needs a session AND a provisioned wallet — the server enforces both
             (401 / 202). Disable rather than let the user fire a request that can't work. */}

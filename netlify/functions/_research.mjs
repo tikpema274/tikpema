@@ -425,15 +425,87 @@ export async function research(
       const decision = extractJson(text);
 
       if (decision) {
-        // Override sources with EXACTLY what was actually fetched — Exa results
-        // PLUS any purchased facts. Merging the purchased sources here (not just
-        // the grounding block) is what lets the brief cite them; without it the
-        // Exa-only override would silently drop them.
-        decision.sources = [
+        // ── RETRIEVED IS NOT SUPPORTING ────────────────────────────────────────────
+        // This block used to be a straight override: decision.sources = every Exa result.
+        // That made the list RETRIEVAL OUTPUT rendered under a heading ("Sources:") that
+        // asserts SUPPORT. Job #160108 is the proof: the answer referenced [1] and [2],
+        // six sources were listed, and the Bybit / Bitget "Unified Trading Account" FAQs
+        // — matched on the word "Unified" — appeared as if they backed a claim about
+        // Arc's Gateway. The answer was correct; the citation layer lied about it.
+        //
+        // ⚠️ THE OVERRIDE EXISTED FOR A REASON — do not simply trust the model's list.
+        // It is the NO-FABRICATION guard: model-emitted URLs can be invented, so "the
+        // model's word is never the record" (see job-submit-background.mjs). Reverting to
+        // decision.sources would reopen fabrication, which is strictly worse.
+        //
+        // ⭐ SO: INTERSECT, don't choose. Keep only retrieved entries the answer actually
+        // cites. Every surviving URL still comes from retrieval (fabrication stays shut),
+        // and every listed source now carries a claim (retrieved≠supporting closes too).
+        // The list is DERIVED FROM THE WORK rather than passed through, so it cannot rot
+        // into a static list that outlives what produced it.
+        const retrieved = [
           ...exaResults.map((r) => ({ title: r.title, url: r.url })),
           ...purchasedFacts.map((f) => ({ title: f.claim, url: f.source })),
         ];
-        return { question, model, decision, exaUsed: true, purchasedFacts: purchasedFacts.length };
+        // TWO INDEPENDENT DERIVATIONS, unioned — neither is individually reliable.
+        //   (a) the model's own `sources` claim, matched by URL;
+        //   (b) inline [n] markers in the prose, resolved against the grounding block's
+        //       numbering (exaEntries then purchasedEntries — same order as `retrieved`).
+        // (b) is what job #160108 actually carried; (a) is what the JSON contract asks
+        // for. Requiring both would drop real citations; using either alone misses cases.
+        const normUrl = (u) =>
+          String(u || "").trim().replace(/[/#?]+$/, "").toLowerCase();
+        const claimedUrls = new Set(
+          (Array.isArray(decision.sources) ? decision.sources : [])
+            .map((s) => normUrl(typeof s === "string" ? s : s?.url))
+            .filter(Boolean)
+        );
+        const prose = `${decision.answer || ""}\n${decision.reasoning || ""}`;
+        const markedIdx = new Set(
+          [...prose.matchAll(/\[(\d{1,2})\]/g)].map((m) => Number(m[1]) - 1)
+        );
+        const isCited = (r, i) => claimedUrls.has(normUrl(r.url)) || markedIdx.has(i);
+
+        const cited = retrieved.filter(isCited);
+        const notCited = retrieved.filter((r, i) => !isCited(r, i));
+
+        // 🚨 REVIVES A GUARD THAT WAS DEAD ON THIS PATH. job-submit-background refuses to
+        // submit a brief whose `sources` is empty — but the old override always produced a
+        // non-empty retrieval set, so that check could never fire here. An answer citing
+        // NOTHING used to ship with a full source list; it now reaches the guard, which is
+        // the point ("never submit a brief we can't stand behind"). ⚠️ That is a MONEY-PATH
+        // behaviour change: such a brief now refunds instead of shipping.
+        decision.sources = cited;
+        // Kept BESIDE the brief, never merged into `sources` — see job-submit-background,
+        // where `report` is canonicalized into the on-chain deliverable hash. Breadth is
+        // shown to the reader under its own heading, never as citation.
+        decision.retrievedNotCited = notCited;
+
+        // ⭐ THE DERIVATION'S INPUTS, RETURNED FOR MEASUREMENT — not for logic.
+        // The empty-cited case now refunds, and nobody can say how often that SHOULD
+        // happen. Estimating it would be a guess; this makes it a number. Everything the
+        // derivation consumed is carried out so a firing can be reconstructed exactly:
+        // what the model claimed, what markers appeared in the prose, what was retrieved,
+        // and which signal matched each survivor. Kept OFF `decision` deliberately — the
+        // brief is the deliverable, and diagnostics are not part of the product.
+        const citation = {
+          retrievedCount: retrieved.length,
+          citedCount: cited.length,
+          notCitedCount: notCited.length,
+          modelSourceUrls: [...claimedUrls],
+          inlineMarkers: [...markedIdx].map((i) => i + 1).sort((a, b) => a - b),
+          retrievedUrls: retrieved.map((r) => r.url),
+          matchedBy: retrieved.map((r, i) => ({
+            url: r.url,
+            byModelSources: claimedUrls.has(normUrl(r.url)),
+            byInlineMarker: markedIdx.has(i),
+          })).filter((m) => m.byModelSources || m.byInlineMarker),
+        };
+        return {
+          question, model, decision, exaUsed: true,
+          purchasedFacts: purchasedFacts.length,
+          citation,
+        };
       }
       return { question, model, decision: null, raw: text, warning: "unparseable (exa path)", exaUsed: true };
     } catch (e) {
