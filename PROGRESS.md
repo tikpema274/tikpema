@@ -38,6 +38,62 @@ Judge by body, never by status.
 Money path `verdict D`. Watch on `*/15`. Canary writing deploy-id-bound artifacts. **DD is INERT**
 (`DD_PUBLIC_ENABLED` unset in production). Live values come from the build stamp and `git`, not here.
 
+### 🚨 UNIFIED BALANCE COPY IS FALSE — investigated, resolved, not yet fixed
+
+The page says **"not by you, not by us. There is no path that returns it."**
+Measured, **state (a): the path EXISTS and is REACHABLE.**
+
+* SDK `@circle-fin/unified-balance-kit@1.2.1` exports `initiateRemoveFund` / `removeFund`.
+  ⚠️ **NOTE the SDK names differ from the contract names** — `removeFund` calls `withdraw()`.
+  **Selector-checking the SDK name finds nothing.**
+* Gateway `0x0077777d7EBA4688BDeF3E311b846F25870A19B9` is a **PROXY (163 bytes)** where even
+  `availableBalance` appears absent. **Resolve EIP-1967 to
+  `0xa33d52b46964495ea6e2bb09ce85faed05776e28` (22,818 bytes) before scanning**, or you get a
+  confident **false negative**.
+* Present: `initiateWithdrawal(address,uint256)`, `withdraw(address)`, `withdrawalDelay()`, plus
+  controls `availableBalance` and `deposit`.
+* `availableBalance(USDC, 0x3cb76ac688f3fc02dfe4033d388989a44f132de9)` = **exactly 2 USDC**,
+  matching the UI. `withdraw()` takes **no beneficiary**, so the withdrawing account is
+  `msg.sender` = that SCA, **which we drive**.
+* `withdrawalDelay()` = **1209600 BLOCKS, not seconds.** Arc block time measured at **0.5097 s/block
+  over 20,000 blocks** ⇒ **about 7 days**. `1209600 = 14 × 86400` is a **COINCIDENCE**. The figure is
+  **derived**, so copy must say **"about seven days"**.
+
+**VERDICT: "not by you" TRUE, "not by us" FALSE.** Copy drafted, not applied.
+
+**STATUS as of 2026-07-31 — the copy lived in FOUR places, not two. All four now fixed,
+`tsc --noEmit` clean, WORKING TREE ONLY / UNCOMMITTED:**
+
+| site | state |
+|---|---|
+| `UnifiedBalancePanel.tsx` — "What you can get back" bullet | ✅ fixed |
+| `UnifiedBalancePanel.tsx` — "Fund the unified balance" card | ✅ fixed |
+| `YourMoney.tsx` — amber line pinned to Withdraw | ✅ fixed |
+| `YourMoney.tsx` — `badge="Server-released, delayed"` → `"No withdrawal built"` | ✅ fixed |
+
+⚠️ **A BADGE IS COPY.** The badge was false in the **v2 (optimistic) direction** — it claimed a
+release mechanism we do not operate — and it **outlived the copy it belonged to**, sitting above a
+v3 body that contradicted it on the same card. Prose got reviewed three times; the four words next
+to it never did. **Audit labels, badges and column headers with the sentences.**
+
+⚠️ Four guard comments carried the falsehood too, including `YourMoney.tsx`'s file-header pocket
+table ("NO WAY OUT… by ANY path"), which is the file's organising principle. All corrected — a
+comment that states the falsehood as rationale will regenerate it.
+
+🚧 **DELIBERATELY WITHHELD — "and we drive that account" is NOT in any of the four sites.** It
+asserts a capability for `withdraw()` that nobody has verified (see the delegate row below). The
+wording chosen is true **regardless of how that read resolves.** ⭐ It is **deferred, not dropped**:
+once the delegate question is answered, the disclosure **should go in**, per the vault-card standard
+we hold others to. The guard comment in `UnifiedBalancePanel.tsx` says so, so the next editor does
+not read the absence as a settled decision.
+
+⭐ **`removeFund` is a REAL backlog item, not a euphemism.** The machinery is the same
+dev-controlled-SCA `contractExecution` path withdraw/swap already use. **One genuine unknown:**
+whether the **delegate** can sign it, or whether `msg.sender` must be the SCA itself — the delegate
+grant covers *spends* and may not extend to `withdraw()`. That is a **read, not a build**. ⚠️ The copy
+commits us in a way a backlog entry does not — if this sits untouched, "we haven't built it" quietly
+becomes a promise.
+
 ### MEASURED vs INFERRED — do not promote one to the other
 
 | claim | status |
@@ -50,6 +106,8 @@ Money path `verdict D`. Watch on `*/15`. Canary writing deploy-id-bound artifact
 | `_budget.mjs` `readable:false` refusal | ⚠️ SUITE-ONLY — not inducible; safe because it fails closed |
 | DCA ledger-failure branch | ⚠️ SUITE-ONLY — live but unexercised (all 7 mandates cancelled/expired) |
 | UB auto-allocation drawing from Base | ⚠️ UNPROVEN — no-op today (every Base Sepolia balance is 0.0) |
+| Gateway withdrawal path exists + is reachable | ✅ **MEASURED** on the resolved implementation — selectors present, balance keyed to an SCA we drive |
+| ~~the DELEGATE can sign `withdraw()`~~ → **MOOT.** We own the account outright | ✅ **MEASURED 2026-07-31 — the question was mis-framed.** The delegate is a **Gateway-level** grant for *spends*; it is **not the only way we drive the SCA**. Agent SCAs are **dev-controlled** (`_agent-wallets.mjs:61` `createWallets({accountType:"SCA"})` under `CIRCLE_ENTITY_SECRET` — the passkey is the *identity key* for mapping, **not** the signer). **`getInstalledPlugins()` = 0 on all three SCAs**, incl. the one we demonstrably drive → **no permission module, no selector allowlist**. Impl `0xd206ac7f…` exposes native `execute(address,uint256,bytes)`. ⭐ **Owner directly, unrestricted ⇒ `withdraw()` available BY CONSTRUCTION.** We never needed the delegate |
 
 ### STANDING CONSTRAINTS — each next to what it guards
 

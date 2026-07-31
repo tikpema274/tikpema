@@ -112,10 +112,15 @@ const BALANCE_POLL_MS = 30_000;
 //   1. Your wallet     (passkey MSCA)  w.address / w.usdcBalance   → they hold the key.
 //   2. Agent's wallet  (dev SCA)       w.agentWallet.balance       → Withdraw, any time,
 //                                                                    even if paused.
-//   3. Unified balance (Gateway)       useGatewayBalance           → NO WAY OUT. Cannot be
-//                                                                    withdrawn to the user by
-//                                                                    ANY path. Spendable
-//                                                                    cross-chain only.
+//   3. Unified balance (Gateway)       useGatewayBalance           → NO EXIT WE HAVE BUILT.
+//                                                                    Spendable cross-chain only.
+//
+// ⚠️ Pocket 3 read "NO WAY OUT… by ANY path" until 2026-07-31. That was FALSE, and the
+// falsehood is instructive: it was inferred from OUR repo (no withdrawal endpoint exists —
+// still true) and then stated about THE PROTOCOL. Arc's Gateway does expose a trustless
+// withdrawal, and the balance is keyed to an account only the agent can act as. The true
+// statement is narrower — WE HAVE NOT BUILT IT — and the narrowness is the point. Anything
+// absolute here is a claim about a contract this file has never read.
 //
 // They render left-to-right in the order money actually flows, each wearing its
 // reversibility ON ITS FACE. The badge idiom is lifted from AgentsPanel (amber = this one
@@ -337,20 +342,29 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
 
           {/* ── THE AMBER LINE. IT TRAVELS WITH THE WITHDRAW FORM, ALWAYS. ──────────
               Withdraw returns the agent's PLAIN USDC — balanceOf(SCA) — and NOTHING
-              that is sitting in the Gateway unified balance. No endpoint returns Gateway
-              funds to the user. There is no way to get it back. It can only be spent
-              cross-chain. Say it here, next to the button, BEFORE the user clicks and
-              finds money missing. A Withdraw that silently leaves funds behind is a lie,
-              and this line is what stops it being one. If this disclosure is ever
-              separated from the button, the trap is back — that includes moving the
-              block between pages, which is exactly what just happened to it. */}
+              that is sitting in the Gateway unified balance. Say it here, next to the
+              button, BEFORE the user clicks and finds money missing. A Withdraw that
+              silently leaves funds behind is a lie, and this line is what stops it being
+              one. If this disclosure is ever separated from the button, the trap is back
+              — that includes moving the block between pages, which is exactly what just
+              happened to it.
+
+              ⚠️ This line USED to say "nothing can return it to you… cannot be withdrawn".
+              That was FALSE — see the v3 note in UnifiedBalancePanel.tsx. The Gateway
+              withdrawal path exists on-chain and the balance is keyed to an account only
+              your agent can act as. What is true is narrower and must stay narrow: WE
+              HAVE NOT BUILT IT. Do not restore an absolute. */}
           {gwParked > 0 && (
             <div className="qd" style={{ color: "var(--warn)" }}>
               <b>Not included:</b>{" "}
               <span className="mono">{unified.status === "ready" ? unified.total : "—"}</span>{" "}
-              USDC is in your unified balance. Withdraw does not move it — and{" "}
-              <b>nothing can return it to you.</b> Unified-balance funds cannot be
-              withdrawn; they can only be spent cross-chain.
+              USDC is in your unified balance. Committed to your agent's float. Only your
+              agent's own account can release these funds, and <b>Tikpema controls that
+              account</b> — so what stops a withdrawal today is that we haven't built one,
+              not that no path exists. Arc's Gateway provides a trustless withdrawal with a
+              delay of about seven days; <b>we haven't implemented it or tested that it works
+              end to end.</b> Until we do, treat this as one-way. It can be spent cross-chain,
+              not pulled back.
             </div>
           )}
           {wdErr && (
@@ -366,14 +380,20 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
           )}
         </Pocket>
 
-        {/* 3. THE UNIFIED BALANCE (Circle Gateway) — the ONLY pocket the user cannot
-               exit AT ALL (no endpoint returns it), so it wears the amber badge. Keeps all
-               four states (signed-out / provisioning / loading / error) rather than
-               rendering a broken card or a bare "—" that reads as a fault. */}
+        {/* 3. THE UNIFIED BALANCE (Circle Gateway) — the only pocket with NO EXIT WE HAVE
+               BUILT, so it wears the amber badge. Keeps all four states (signed-out /
+               provisioning / loading / error) rather than rendering a broken card or a
+               bare "—" that reads as a fault.
+
+               ⚠️ THE BADGE WAS "Server-released, delayed" — false in the OPTIMISTIC
+               direction: it claimed a release mechanism we do not operate. It outlived the
+               v2 copy it belonged to and sat contradicting the body text on its own card.
+               A badge is copy. It must clear the same bar. Whatever it says must not imply
+               a release we do not perform. */}
         <Pocket
           label="Unified balance"
           amount={unified.status === "ready" ? unified.total : "…"}
-          badge="Server-released, delayed"
+          badge="No withdrawal built"
           warn
         >
           {unified.status === "signed-out" && (

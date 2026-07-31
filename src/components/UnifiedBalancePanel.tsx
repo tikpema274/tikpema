@@ -203,7 +203,13 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
         {/* Name the ACTUAL number when we have one. "You cannot pull this back on your own"
             lands differently at 12.50 USDC than in the abstract, and the user is entitled to
             see the figure the sentence is about. Falls back to unqualified prose while the
-            balance is loading / signed-out — never to a "—" that reads as an error. */}
+            balance is loading / signed-out — never to a "—" that reads as an error.
+
+            ⚠️ "about seven days" is DERIVED, never fixed. withdrawalDelay() returns 1209600
+            and that is a BLOCK COUNT, not seconds — ~7.14 days at Arc's measured ~0.5097 s/block,
+            which is why the SDK's own prose says "7-day" in five places. Reading it as seconds
+            gives 14 days, a tidy-looking wrong answer. If block time drifts, the wall clock
+            drifts with it — so this must never harden into a promised number. */}
         <div className="sub" style={{ margin: "6px 0 0", color: "var(--warn, #f0b866)" }}>
           <b>Your unified balance</b>
           {data && Number(data.total) > 0 && (
@@ -212,9 +218,13 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
               (<span className="mono">{data.total}</span> USDC)
             </>
           )}{" "}
-          — committed to your agent's float. Withdraw does not move it, and nothing else will:{" "}
-          <b>money here cannot be returned to you.</b> It can only be spent cross-chain. This is
-          the one pocket with no way out.
+          — committed to your agent's float. Withdraw doesn't move it, and there's no button
+          here that does. Only your agent's own account can release these funds, and{" "}
+          <b>Tikpema controls that account</b> — so what stops a withdrawal today is that we
+          haven't built one, not that no path exists. Arc's Gateway provides a trustless
+          withdrawal with a delay of about seven days; <b>we haven't implemented it or tested
+          that it works end to end.</b> Until we do, treat this as one-way: it can be spent
+          cross-chain, not pulled back.
         </div>
       </div>
 
@@ -356,26 +366,57 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
         >
           Fund the unified balance
         </div>
-        {/* ⚠️ THIS COPY HAS BEEN WRONG TWICE. Get it right.
+        {/* ⚠️ THIS COPY HAS BEEN WRONG THREE TIMES. Get it right.
             v1: "the funds stay owned by your agent — not a transfer to anyone else." True and
                 MISLEADING: it answered "is anyone stealing this?" when the question the user
                 needs answered is "CAN I GET IT BACK?"
-            v2: said the money could be released, just slowly, via the server. ALSO FALSE — it
-                implied a release path EXISTS and merely costs you patience. It does not exist.
-                There is no initiateWithdrawal, no gatewayWithdraw, no delay constant anywhere
-                in the codebase; _gateway.mjs defines only an address, and the sole Gateway
-                write path (_ubspend.mjs) SPENDS the balance cross-chain. agent-withdraw.mjs
-                says it outright: Gateway funds are "NOT retrievable by this endpoint". And the
-                user cannot route around us — the agent wallet is a Circle DEV-CONTROLLED SCA,
-                so only the server can move it at all.
-            The answer to "can I get it back?" is NO. Say exactly that, at the point of
-            commitment. No reassurance, no hedge, nothing that hints at a future path. */}
+            v2: said the money could be released, just slowly, via the server. FALSE in the
+                other direction — it implied a built release path EXISTS and merely costs you
+                patience.
+            v3: "not by you, not by us. There is no path that returns it." Overcorrected from
+                v2 into a DIFFERENT falsehood. The first clause was right, the second wasn't.
+                v3 reasoned from OUR codebase ("no initiateWithdrawal anywhere in the repo",
+                which is still true) to a claim about THE PROTOCOL. Those are not the same
+                question, and the repo cannot answer the second one. Resolved by reading the
+                chain, not the docs: Gateway 0x0077777d…19B9 is a proxy whose implementation
+                0xa33d52b4…76e28 carries initiateWithdrawal(address,uint256) [c8393ba9],
+                withdraw(address) [51cff8d9] and withdrawalDelay() [a7ab6961] — all present.
+                availableBalance(USDC, <the user's agent SCA>) returns exactly the balance the
+                UI shows, and withdraw() takes no beneficiary, so the releasing account is
+                msg.sender = that SCA. So "not by us" was false; only "not by you" survived.
+            The honest answer is: the path exists, and we haven't built it. Say both parts.
+
+            ✅ "Tikpema controls that account" is MEASURED (2026-07-31), no longer withheld.
+            Agent SCAs are DEV-CONTROLLED: _agent-wallets.mjs createWallets({accountType:
+            "SCA"}) under CIRCLE_ENTITY_SECRET — the passkey is the IDENTITY key used to map
+            owner→wallet, NOT the signer. getInstalledPlugins() == 0 on all three SCAs
+            (incl. the one we demonstrably drive, which signs ERC-1271 attestations today),
+            so there is NO permission module and NO selector allowlist. Impl 0xd206ac7f…
+            exposes native execute(address,uint256,bytes). Owner directly + unrestricted ⇒
+            withdraw() is available BY CONSTRUCTION. ⚠️ The DELEGATE question was MIS-FRAMED:
+            the delegate is a GATEWAY-level grant for spends and gates nothing here — we
+            drive the SCA as OWNER via contractExecution and never need it.
+
+            🚨 THE BOUNDARY MOVED — DO NOT "COMPLETE" THIS INTO A PROMISE. What is measured
+            is the ACCOUNT MODEL: nothing blocks us from calling withdraw(). What is NOT
+            tested is EXECUTION — initiateWithdrawal → ~7-day delay → withdraw has never been
+            run, and how a pending withdrawal interacts with a balance being spent is unknown.
+            "We could build it" is TRUE; "it works" is UNVERIFIED. A fourth false claim is now
+            the EASY one to make, and it is the most damaging yet: implying a working recovery
+            invites a user to deposit expecting an exit that has never once been exercised.
+            Say control, say the absent build, say untested. See PROGRESS.md, "MEASURED vs
+            INFERRED".
+            ⚠️ "about seven days" is DERIVED — see the note on the balance bullet above.
+            Never state it as a fixed number. */}
         <div className="sub" style={{ margin: "0 0 10px" }}>
           Move USDC from your agent's plain balance into its unified balance.{" "}
-          <b>This is one-way. Money in the unified balance cannot be withdrawn back to you —
-          not by you, not by us. There is no path that returns it.</b>{" "}
-          It can only be <i>spent</i>: sent cross-chain by your agent. Deposit only what you
-          intend the agent to spend.
+          <b>Treat this as one-way. You can't withdraw it yourself: the balance belongs to
+          your agent's account, and only that account can release these funds.</b>{" "}
+          <b>Tikpema controls that account</b> — so what stops a withdrawal today is that we
+          haven't built one, not that no path exists. Arc's Gateway provides a trustless
+          withdrawal with a delay of about seven days; <b>we haven't implemented it or tested
+          that it works end to end.</b> Until we do, treat this as one-way. Deposit only what
+          you intend the agent to spend.
         </div>
         {/* The deposit needs a session AND a provisioned wallet — the server enforces both
             (401 / 202). Disable rather than let the user fire a request that can't work. */}
