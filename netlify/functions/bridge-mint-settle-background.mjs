@@ -62,13 +62,23 @@ export async function handler(event) {
   //
   // That is not a hole — requireInternal still runs, before any read or write — but it
   // makes the guard UNOBSERVABLE from outside, and an unobservable guard is one nobody
-  // can prove still works. These two log lines are the only externally checkable
-  // evidence, so BOTH sides are logged: refusal AND acceptance. Logging only the
-  // refusal would mean an accepted call left no trace, and silence would have to be
-  // read as "it refused" — an absence standing in for a safety property, which is the
-  // failure this repo keeps re-learning.
+  // can prove still works.
   //
-  //   netlify logs --source functions --function bridge-mint-settle-background --since 10m
+  // 🚨 THESE LOG LINES DO NOT CLOSE THAT, AND THE REPO ALREADY KNEW IT. Measured
+  // 2026-07-31 on deploy 6a6cbce03b33755e6be09601: two unauthenticated probes appear in
+  // `netlify logs --source functions --function bridge-mint-settle-background` as EMPTY
+  // `INFO` lines — the invocation is listed, the message text never is. See
+  // job-bridge-receipt-background.mjs:50-54, which records the same constraint
+  // ("the console.log content does not surface through `netlify logs`") and is exactly
+  // why that verifier attaches its telemetry to the RECORD instead of logging it.
+  //
+  // They are kept because they cost nothing and would become useful behind a log drain,
+  // but they are NOT evidence. ⭐ THE ONLY SOUND PROOF IS BEHAVIOURAL AND NEGATIVE:
+  // invoke this function unauthenticated with a REAL receipt's owner/burnHash and
+  // confirm the record does NOT change — no `settlingSince`, no state transition. That
+  // reads the guard through the one surface this platform does expose: the store.
+  // ⚠️ A refused call must never WRITE anything to prove it was refused — that would put
+  // a write on the unauthenticated path, which is the thing being guarded against.
   if (event.httpMethod !== "POST") {
     console.warn(`[bridge-settle] REFUSED — method ${event.httpMethod} (POST only)`);
     return json(405, { error: "POST only" });

@@ -143,9 +143,18 @@ await seed();
   const settlerSrc = await import("node:fs").then((fs) =>
     fs.readFileSync("netlify/functions/bridge-mint-settle-background.mjs", "utf8")
   );
-  check("⭐⭐ the refusal is LOGGED — a 202 alone cannot prove it refused", /REFUSED — no valid x-internal-token/.test(settlerSrc));
-  check("⭐⭐ acceptance is logged TOO — silence must not have to mean 'refused'", /ACCEPTED — internal token valid/.test(settlerSrc));
+  check("  both sides are logged (kept for a future log drain — NOT evidence today)",
+    /REFUSED — no valid x-internal-token/.test(settlerSrc) && /ACCEPTED — internal token valid/.test(settlerSrc));
   check("  …and the wrong-method refusal is logged as well", /REFUSED — method/.test(settlerSrc));
+  // 🚨 Measured: `netlify logs` lists the invocation but NOT the message text, so the lines above
+  // cannot prove a refusal. The file must say so, or the next reader trusts a check that does not
+  // work — the same trap as asserting "no /api route" and calling the guard verified.
+  check("⭐⭐ the file states that logs do NOT surface content, so they are not treated as proof",
+    /does not surface|never is/.test(settlerSrc) && /job-bridge-receipt-background\.mjs:50-54/.test(settlerSrc));
+  check("⭐⭐ …and names the BEHAVIOURAL proof that does work (no mutation on a real receipt)",
+    /unauthenticated with a REAL receipt/.test(settlerSrc) && /does NOT change/.test(settlerSrc));
+  check("⭐ …and forbids writing to prove a refusal (that would put a write on the guarded path)",
+    /must never WRITE anything to prove/.test(settlerSrc));
   check("⭐ requireInternal is checked BEFORE connectBlobs — no store touched on refusal",
     settlerSrc.indexOf("requireInternal(event)") < settlerSrc.indexOf("connectBlobs(event)"));
 }

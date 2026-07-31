@@ -34,17 +34,44 @@ the expected steady state. Liveness is `producedAt` advancing — **never** an a
 ⚠️ A 200 proves nothing on its own: an unmatched Netlify path returns **SPA HTML with status 200**.
 Judge by body, never by status.
 
-**Current:** production **[DEPLOY ID]** `6a6c9ec1faace12931e10cb8`, built from **[COMMIT]** `ea2c275`,
-tree `62abe1e54682b1b2b2f5151c5feb59254de482ecb5dd541d7428934f0ffade95` (clean at stamp time).
-Deployed 2026-07-31T13:34:11Z; rollback target is the prior published deploy `6a6c696ae1ea3868860a4bd3`.
+**Current:** production **[DEPLOY ID]** `6a6cbce03b33755e6be09601`, built from **[COMMIT]** `a652ab6`,
+tree `586c1757a8c0350772d434c3ae40022bd07c56e95ef22c898f509d03a2c02226`, **`dirty:false`**.
+Rollback target is the prior published deploy `6a6cb349bf7d962dc069fa5f`.
+(`f06469e` landed after this build started; it touches `scripts/` only — outside the hashed
+surface — so the artifact is unaffected.)
 
-Verified green at this deploy (2026-07-31T14:13Z, all three read-only):
-`blobs-probe` **verdict D / calibrated true**, arms A=consistency-error · B=ok · A2=consistency-error,
-`selfChecks: []`, deploy id resolved from `x-nf-deploy-id`. `strong-read-watch latest` **ok:true /
-reason "ok" / notify.kind "steady-ok"**, `treeChanged:false`, `lastGood` pinned to this deploy.
-`dd-canary-health` holds a record **keyed to this deploy id** — `verdict:"pass"`, 5/5 fixtures.
-⚠️ One sample each, so this proves the watch and canary ran **after** this deploy (both name the new
-deploy id); `producedAt` ADVANCING still needs a second read ~15 min later.
+Verified green here: `blobs-probe` **verdict D / calibrated true**, `selfChecks: []`, deploy id from
+`x-nf-deploy-id`, stamp clean. Watch + canary rotate on their own schedules and were one tick behind
+at check time (canary keyed to `6a6cb349…`, watch `producedAt` 15:32:41Z) — **rotation observed
+across three deploys, so that is lag, not failure.**
+
+🚨 **THE DEPLOY BEFORE THIS ONE SHIPPED DIRTY.** `6a6cb349bf7d962dc069fa5f` carried `dirty:true` —
+three untracked files under `netlify/functions` plus a modified `agent-bridge.mjs`. Production ran
+code that was in **NO COMMIT**: unreproducible, with no real rollback target, because the
+deploy-id ↔ commit binding this document's identifier rule rests on was simply **false** for that
+artifact. The stamp said so in its own `detail` field ("the commit names a starting point and does
+not identify this artifact") and it went out anyway. Fixed forward: `3dab626` committed that exact
+surface and re-stamping reproduced the LIVE tree `22caf6e0…` byte-for-byte, and **`gate:watch` now
+REFUSES on a dirty surface** (`f06469e`). ⭐ The stamp had always MEASURED `dirty` and nothing ever
+acted on it — the same gap the schedule assertion closed. A measured-and-displayed value that
+nothing refuses on is a value that gets scrolled past.
+
+🚨 **`netlify logs` DOES NOT SURFACE console OUTPUT — do not build a check on it.** Measured
+2026-07-31 on this deploy: two unauthenticated probes of `bridge-mint-settle-background` appear as
+**empty `INFO` lines** — the invocation is listed, the message text never is. `a652ab6` added
+REFUSED/ACCEPTED log lines intending to make the internal-auth guard observable; **that does not
+work**, and the constraint was already written down at `job-bridge-receipt-background.mjs:50-54`,
+which is exactly why that verifier attaches telemetry to the RECORD instead. The lines are kept
+(free, useful behind a log drain) but are **not evidence**.
+⭐ **A background function's return value is DISCARDED** — Netlify answers every caller `202` with an
+empty body, including no token, a bogus token, and the wrong HTTP method. So `return json(401)` never
+reaches the wire and **an external probe cannot distinguish "refused" from "ran"**. "No `/api` route"
+is necessary but NOT sufficient — every function is reachable at `/.netlify/functions/<name>`
+regardless (same lesson as removing the `/api/dd-analyze` redirect and fixing nothing).
+**THE ONLY SOUND PROOF IS BEHAVIOURAL AND NEGATIVE:** invoke it unauthenticated with a REAL
+receipt's `owner`/`burnHash` and confirm the record does NOT change — no `settlingSince`, no state
+transition. ⚠️ A refused call must never WRITE to prove it was refused; that puts a write on the very
+path being guarded. **STILL OPEN — rides on the first deliberate bridge.**
 
 ⏳ **THE CITATION MEASUREMENT WINDOW IS OPEN.** `RESEARCH_CITATION_ENFORCE` is **UNSET in
 production** (read back after the deploy, not assumed) ⇒ **LOG-ONLY**, which here is the
