@@ -164,6 +164,18 @@ result.**
 
 ### STANDING CONSTRAINTS — each next to what it guards
 
+* **The pre-commit hook needs `gitleaks` ON PATH, and it FAILS CLOSED without it.** `.githooks/`
+  is tracked and activated by `core.hooksPath` (`npm run hooks:install`, also `postinstall`), but
+  **the binary is not in the repo.** On this machine it lives at `~/.local/bin/gitleaks` (8.30.1)
+  — `/usr/local/bin` is not writable and sudo needs a password — and `~/.local/bin` was **not on
+  PATH**, so `~/.bashrc` now prepends it (guarded by a `case` so re-sourcing cannot duplicate it;
+  backup at `~/.bashrc.bak-20260731`). ⚠️ **THIS IS MACHINE-LOCAL AND DOES NOT TRAVEL.** A fresh
+  clone on a new machine gets the hook but not the binary, so **every commit there blocks** until
+  gitleaks is installed — that is the intended behaviour (a scanner that silently no-ops is absent
+  exactly where it is needed), and the block message carries the install commands. If commits
+  suddenly fail on a new box, this is why. ⭐ The hook raises the floor only: `--no-verify` skips
+  it and there is **no CI backstop**, since deploys are CLI-only.
+
 * **`WATCH_ALERT_WEBHOOK` must NEVER be `--secret`.** `gate:watch`'s existence check READS the URL to
   perform a live GET; a secret value breaks the gate. Hygiene is fingerprint-not-print.
 * **`WATCH_STORE` at deploy-preview is DELIBERATE ISOLATION, not a leftover.** Removing it lets a
