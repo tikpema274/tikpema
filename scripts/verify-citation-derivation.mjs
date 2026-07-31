@@ -44,10 +44,12 @@ function derive(decision, retrieved) {
   const isCited = modelAnswered
     ? (r) => claimedUrls.has(normUrl(r.url))
     : (_r, i) => markedIdx.has(i);
+  const cited = retrieved.filter((r, i) => isCited(r, i));
   return {
-    cited: retrieved.filter((r, i) => isCited(r, i)),
+    cited,
     notCited: retrieved.filter((r, i) => !isCited(r, i)),
     citedSignal: modelAnswered ? "model-sources" : "inline-markers",
+    emptyReason: cited.length > 0 ? null : modelAnswered ? "unmatched-model-sources" : "no-signal",
   };
 }
 
@@ -181,6 +183,44 @@ section("3b — REGRESSION: job #160637, where a UNION cited sources the answer 
   check("  …markers [1]-[5] were present and DELIBERATELY ignored",
     /\[5\]/.test(decision.answer) && cited.length === 2,
     "the marker signal said 5; precedence said 2");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+section("3c — EMPTY IS NOT ONE EVENT: zero-intersection gets its own reason code");
+{
+  const retrieved = [{ title: "A", url: "https://a.example" }];
+  // (i) the model NAMED sources and none matched retrieval — fabrication OR a
+  //     URL-normalisation bug on our side. Actionable, and NOT "the model didn't cite".
+  const unmatched = derive(
+    { answer: "See [1].", reasoning: "", sources: [{ url: "https://invented.example" }] }, retrieved);
+  check("⭐⭐ named-but-unmatched ⇒ emptyReason 'unmatched-model-sources'",
+    unmatched.cited.length === 0 && unmatched.emptyReason === "unmatched-model-sources",
+    "fabricated URLs and a normalisation bug look identical here — both need seeing");
+  // (ii) ordinary silence — nothing named, no marker resolved
+  const silent = derive({ answer: "No citation.", reasoning: "", sources: [] }, retrieved);
+  check("⭐⭐ nothing named, no markers ⇒ emptyReason 'no-signal'",
+    silent.cited.length === 0 && silent.emptyReason === "no-signal");
+  check("⭐ the two are DISTINCT (averaging them hides a normalisation bug as 'models don't cite')",
+    unmatched.emptyReason !== silent.emptyReason);
+  // (iii) non-empty ⇒ no reason at all
+  const ok = derive({ answer: "", reasoning: "", sources: [{ url: "https://a.example" }] }, retrieved);
+  check("  …a non-empty list carries emptyReason null",
+    ok.cited.length === 1 && ok.emptyReason === null);
+
+  const research = readFileSync("netlify/functions/_research.mjs", "utf8");
+  check("⭐ the raw named-count ships too (distinguishes 'named 5, matched 0' from 'named 0')",
+    /modelSourceCountRaw: modelSources\.length/.test(research));
+  const job = readFileSync("netlify/functions/job-submit-background.mjs", "utf8");
+  check("  …and both log sites carry emptyReason",
+    (job.match(/emptyReason: result\.citation\?\.emptyReason/g) || []).length === 2);
+  check("⭐⭐ it is a SUB-REASON, not a new refund class (headline copy is unchanged)",
+    /wouldRefundClass: "uncited"/.test(job) &&
+    !/REFUND_HEADLINES[\s\S]{0,400}unmatched-model-sources/.test(
+      readFileSync("src/components/jobTimeline.tsx", "utf8")));
+
+  check("⭐⭐ the measurement window RESET is recorded at the flag",
+    /THE WINDOW RESTARTED/.test(job) && /MUST NOT BE MET WITH A\s*\n\/\/ BLEND/.test(job),
+    "a blended sample would satisfy 50/<10% without measuring the derivation being judged");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════

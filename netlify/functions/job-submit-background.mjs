@@ -85,6 +85,15 @@ const BRIEF_USER_INSTRUCTION =
 //   3. ⚠️ dead by DRIFT if this flag is never flipped — log-only becomes permanent because
 //      nobody owns the decision. Deliberate-by-inaction is still dead.
 //
+// 🚨 THE WINDOW RESTARTED. Production served the UNION derivation until the deploy that
+// shipped PRECEDENCE (commit 9a93c10 + this change). Every [research][citation-shadow] and
+// [research][citation-refusal] line emitted before that cutoff describes a derivation THAT NO
+// LONGER EXISTS — the union cited sources the answer DISMISSED (job #160637), so its
+// false-empty rate is not comparable. ⚠️ THE 50-BRIEF / <10% CRITERION MUST NOT BE MET WITH A
+// BLEND: count only lines at or after the cutoff deploy id recorded in PROGRESS.md. If in
+// doubt about a line's provenance, discard it — a mixed sample would satisfy the criterion
+// without ever having measured the derivation being judged.
+//
 // EXIT CRITERION, fixed now while the reasoning is fresh — flip to "enforce" when BOTH hold:
 //   · ≥50 evaluable briefs observed under this flag WITH at least one derivation signal
 //     present (the backtest could only replay markers; live carries both), AND
@@ -377,6 +386,7 @@ export async function handler(event) {
           JSON.stringify({
             jobId: String(jobId),
             cause: decision == null ? "no-decision" : "no-cited-sources",
+            emptyReason: result.citation?.emptyReason ?? null,
             citation: result.citation ?? null,
             answer: decision?.answer ?? null,
             reasoning: decision?.reasoning ?? null,
@@ -423,6 +433,10 @@ export async function handler(event) {
             wouldRefund: true,
             // ⭐ the CLASS it would have used, so the eventual rate is per-class, not aggregate
             wouldRefundClass: "uncited",
+            // Sub-reason, NOT a separate refund class: the user-facing headline is the same
+            // either way, but "named sources, none matched" (fabrication / normalisation bug)
+            // and "named nothing" are different engineering events.
+            emptyReason: result.citation?.emptyReason ?? null,
             enforcing: false,
             citation: result.citation ?? null,
             answer: decision.answer ?? null,

@@ -493,6 +493,19 @@ export async function research(
         const cited = retrieved.filter((r, i) => isCited(r, i));
         const notCited = retrieved.filter((r, i) => !isCited(r, i));
 
+        // ⭐ WHY the list came out empty — two DIFFERENT events that must not be averaged.
+        //   "unmatched-model-sources": the model NAMED sources and NONE matched retrieval.
+        //       That is either FABRICATED URLs (the layer-below failure this whole filter
+        //       assumes is shut) or a URL-NORMALISATION BUG on our side (trailing slash,
+        //       encoding, redirect target ≠ advertised URL). Both are actionable and neither
+        //       is "the model didn't cite" — an unmatched claim is a claim.
+        //   "no-signal": the model named nothing and no marker resolved. Ordinary silence.
+        // Aggregated as plain "uncited" these cancel out: a normalisation bug would look
+        // exactly like models declining to cite, and the fix for one is not the fix for the
+        // other. `citedCount > 0` ⇒ null.
+        const emptyReason =
+          cited.length > 0 ? null : modelAnswered ? "unmatched-model-sources" : "no-signal";
+
         // 🚨 REVIVES A GUARD THAT WAS DEAD ON THIS PATH. job-submit-background refuses to
         // submit a brief whose `sources` is empty — but the old override always produced a
         // non-empty retrieval set, so that check could never fire here. An answer citing
@@ -520,6 +533,12 @@ export async function research(
           // marker-derived list is the weaker path and its false-empty rate should be
           // tracked separately from the model-sources path.
           citedSignal,
+          emptyReason,
+          // Raw count of what the model NAMED, before intersecting with retrieval. With
+          // emptyReason="unmatched-model-sources" this separates "named 5, matched 0"
+          // (fabrication or normalisation) from "named 0" — the counts differ, the
+          // conclusions differ, and only the pair distinguishes them.
+          modelSourceCountRaw: modelSources.length,
           modelSourceUrls: [...claimedUrls],
           inlineMarkers: [...markedIdx].map((i) => i + 1).sort((a, b) => a - b),
           retrievedUrls: retrieved.map((r) => r.url),
