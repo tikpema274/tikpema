@@ -1,7 +1,7 @@
 import { connectBlobs } from "./_blobs.mjs";
 import { json } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
-import { listByOwner, isPastDeadline } from "./_bridge-receipts.mjs";
+import { listByOwner, isPastDeadline, isRecheckable } from "./_bridge-receipts.mjs";
 
 // GET|POST /api/bridge-receipts   (auth required)
 //
@@ -42,8 +42,12 @@ export async function handler(event) {
   // the settler owns every write and is idempotent and lease-guarded, so a duplicate
   // trigger costs a wasted read, never a wrong receipt. Only receipts PAST THE DEADLINE
   // and holding no lease qualify — a healthy in-flight bridge is left alone.
+  // Two kinds qualify: a burn that was never settled (a lost trigger), and a PROVISIONAL
+  // `mint_unconfirmed` — which only ever meant "we stopped waiting", and must be allowed to
+  // resolve if the mint has since landed. Excluding the second is what made "unproven"
+  // permanent for mints that had actually succeeded.
   const stranded = receipts.filter(
-    (r) => r.state === "burn_confirmed" && !r.settlingSince && isPastDeadline(r)
+    (r) => !r.settlingSince && ((r.state === "burn_confirmed" && isPastDeadline(r)) || isRecheckable(r))
   );
   for (const r of stranded.slice(0, 3)) { // bounded: a page load must not fan out
     try {

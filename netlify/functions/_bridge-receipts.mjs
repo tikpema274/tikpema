@@ -28,8 +28,35 @@ import { getStore } from "@netlify/blobs";
 
 export const BRIDGE_RECEIPTS_STORE = "bridge-receipts";
 
-/** Terminal states release the in-flight lease and stop all polling. */
+/** States that release the in-flight lease — the receipt is no longer "still going". */
 export const TERMINAL_STATES = new Set(["minted", "mint_failed", "mint_unconfirmed", "mint_unverified"]);
+
+/**
+ * RESOLVED vs PROVISIONAL — not the same thing, and conflating them foreclosed receipts.
+ *
+ * 🚨 `mint_unconfirmed` is NOT a verdict about the mint. It means "we stopped waiting", and a
+ * mint can land after we stop waiting. Treating it as resolved made it permanent: a later
+ * settler invocation returned "already terminal" and the receipt could never reach `measured`,
+ * so a bridge that demonstrably succeeded on-chain was labelled unproven forever.
+ *
+ * So `mint_unconfirmed` is RE-CHECKABLE. The other three are genuinely resolved:
+ *   minted          — verified on-chain, nothing left to learn
+ *   mint_failed     — IRIS reported an explicit failure
+ *   mint_unverified — IRIS and the chain DISAGREE. Never auto-retried, by design: retrying
+ *                     would paper over whichever side is wrong. A human must look.
+ */
+export const RESOLVED_STATES = new Set(["minted", "mint_failed", "mint_unverified"]);
+
+/** A provisional receipt may be re-checked, but not on every page load. */
+export const RECHECK_MIN_INTERVAL_MS = 5 * 60 * 1000;
+
+/** Is this receipt worth asking about again? */
+export function isRecheckable(receipt, now = Date.now()) {
+  if (receipt?.state !== "mint_unconfirmed") return false;
+  const last = Date.parse(receipt?.lastCheckedAt || "");
+  if (!Number.isFinite(last)) return true; // never recorded a check ⇒ ask
+  return now - last >= RECHECK_MIN_INTERVAL_MS;
+}
 
 /** How long a forwarded mint gets before we stop claiming it is merely "still going".
  *  4 minutes, matching MAX_POLLS×POLL_MS on the plan path, so BOTH flows tell the user

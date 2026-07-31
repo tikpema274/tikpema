@@ -3,7 +3,7 @@ import { json, parseBody } from "./_arc.mjs";
 import { requireInternal } from "./_auth.mjs";
 import { bridgeMintStatus, BRIDGE_DESTINATIONS } from "./_bridge.mjs";
 import { verifyMintOnChain } from "./_receipt.mjs";
-import { readWithRetry, saveReceipt, isPastDeadline, TERMINAL_STATES } from "./_bridge-receipts.mjs";
+import { readWithRetry, saveReceipt, isPastDeadline, isRecheckable, RESOLVED_STATES } from "./_bridge-receipts.mjs";
 
 // POST /.netlify/functions/bridge-mint-settle-background { owner, burnHash }  (INTERNAL ONLY)
 //
@@ -32,14 +32,19 @@ import { readWithRetry, saveReceipt, isPastDeadline, TERMINAL_STATES } from "./_
 // `pending` forever. Client-side polling cannot cover that — the UI invites the user to
 // leave, and a closed tab polls nothing. So the server keeps its own clock.
 //
-// ══ THE FOUR TERMINAL STATES ═══════════════════════════════════════════════════════
+// ══ THREE RESOLVED STATES, ONE PROVISIONAL ═════════════════════════════════════════
 //   minted           — IRIS says minted AND we read the mint on the destination chain.
-//                      ONLY here does delivery become "measured".
-//   mint_failed      — IRIS reported an explicit failure.
-//   mint_unconfirmed — the deadline passed with no confirmation. The burn is real; the
-//                      mint is unproven. NOT a success and NOT a failure.
+//                      ONLY here does delivery become "measured".            RESOLVED
+//   mint_failed      — IRIS reported an explicit failure.                    RESOLVED
 //   mint_unverified  — IRIS claims minted, the chain disagrees. LOUD. Never auto-retried
-//                      into `minted`; a human must look.
+//                      into `minted`; a human must look.                     RESOLVED
+//   mint_unconfirmed — WE STOPPED WAITING. Not a verdict about the mint.  PROVISIONAL
+//
+// ⭐ THE DISTINCTION IS LOAD-BEARING. `mint_unconfirmed` was treated as resolved, so once
+// written it could never be revisited — and a mint that landed AFTER we stopped waiting
+// stayed labelled "unproven" forever. It is re-checkable now (rate limited), because
+// "we stopped waiting" and "it did not arrive" are different claims.
+//
 // In three of the four, `delivery` stays "predicted". A failed or absent chain read must
 // never silently promote an arithmetic estimate into an observation.
 
@@ -98,10 +103,19 @@ export async function handler(event) {
   if (!found) return json(404, { error: "no receipt to settle" });
   let receipt = found;
 
-  if (TERMINAL_STATES.has(receipt.state)) {
-    return json(200, { state: receipt.state, note: "already terminal" });
+  // RESOLVED means nothing left to learn. `mint_unconfirmed` is NOT resolved — it records
+  // that we stopped waiting, and a mint can land after we stop waiting. Refusing to look
+  // again is what made a mislabel permanent, so a provisional receipt is re-checked (rate
+  // limited, so a page load cannot hammer IRIS).
+  if (RESOLVED_STATES.has(receipt.state)) {
+    return json(200, { state: receipt.state, note: "already resolved" });
   }
-  if (receipt.state !== "burn_confirmed") {
+  if (receipt.state === "mint_unconfirmed") {
+    if (!isRecheckable(receipt)) {
+      return json(200, { state: receipt.state, note: "provisional — re-checked too recently" });
+    }
+    console.log(`[bridge-settle] RE-CHECKING provisional receipt burnHash=${burnHash}`);
+  } else if (receipt.state !== "burn_confirmed") {
     return json(200, { state: receipt.state, note: "nothing to do" });
   }
   if (!BRIDGE_DESTINATIONS[receipt.destinationKey]) {
@@ -135,30 +149,52 @@ export async function handler(event) {
     return next;
   };
 
+  // ⭐ ASK BEFORE DECIDING. THE DEADLINE BOUNDS WAITING, NOT CHECKING.
+  //
+  // 🚨 THE BUG THIS ORDERING FIXES. The deadline used to be evaluated at the TOP of the
+  // loop, before IRIS was ever consulted. A stranded receipt is past deadline BY
+  // DEFINITION — that is the condition recovery selects on — so a recovered settler wrote
+  // `mint_unconfirmed` on its first iteration without ever asking whether the mint had
+  // landed. It had: burn 0x0175cf7b… shows 0.946797 USDC minted on Base while its receipt
+  // said "unproven". And because `mint_unconfirmed` was treated as resolved, every later
+  // invocation returned "already terminal", so the mislabel was PERMANENT. Recovery did not
+  // heal a stranded receipt; it foreclosed one.
+  //
+  // Now every iteration asks first and only lets the deadline speak about a mint that is
+  // still UNRESOLVED. A late answer is still an answer.
   for (let i = 0; i < MAX_POLLS; i++) {
-    await sleep(POLL_MS);
-
-    // ⚠️ THE DEADLINE IS CHECKED ON EVERY ITERATION, not only after the loop bound.
-    // A settler that was restarted late (stale-lease takeover) would otherwise start a
-    // fresh 4-minute budget on a burn that is already an hour old, and "Still bridging"
-    // would outlive any honest claim to it.
-    if (isPastDeadline(receipt)) {
-      await finish({ state: "mint_unconfirmed", delivery: "predicted", lastCheckedAt: new Date().toISOString() });
-      return json(200, { state: "mint_unconfirmed", reason: "deadline_passed" });
-    }
+    // No sleep on entry: a recovery invocation must check IMMEDIATELY. Sleeping first cost
+    // a wasted round trip on exactly the path that already waited hours.
+    if (i) await sleep(POLL_MS);
 
     let status;
     try {
       status = await bridgeMintStatus({ burnHash: receipt.burnHash, destinationKey: receipt.destinationKey });
     } catch {
-      continue; // transient IRIS hiccup — keep polling
+      // Transient IRIS hiccup. Fall through to the deadline check — being unable to ask is
+      // not evidence the mint failed, but it must not spin forever either.
+      status = null;
+      if (isPastDeadline(receipt)) {
+        await finish({ state: "mint_unconfirmed", delivery: "predicted", lastCheckedAt: new Date().toISOString() });
+        return json(200, { state: "mint_unconfirmed", reason: "deadline_passed_iris_unreachable" });
+      }
+      continue;
     }
 
     if (status.state === "failed") {
       await finish({ state: "mint_failed", delivery: "predicted", failedAt: new Date().toISOString() });
       return json(200, { state: "mint_failed" });
     }
-    if (status.state !== "minted") continue; // pending — keep polling
+    if (status.state !== "minted") {
+      // Genuinely still pending. NOW the deadline may speak — we asked, and the answer was
+      // "not yet". Checked every iteration so a late stale-lease takeover cannot start a
+      // fresh 4-minute budget on a burn that is already hours old.
+      if (isPastDeadline(receipt)) {
+        await finish({ state: "mint_unconfirmed", delivery: "predicted", lastCheckedAt: new Date().toISOString() });
+        return json(200, { state: "mint_unconfirmed", reason: "deadline_passed" });
+      }
+      continue;
+    }
 
     // IRIS claims the mint landed. CHECK IT OURSELVES before believing it.
     const chk = await verifyMintOnChain({
@@ -169,9 +205,23 @@ export async function handler(event) {
 
     if (!chk.verified) {
       // rpc_error / receipt_not_found can just mean the destination node has not caught
-      // up — not disagreement, so keep polling (the deadline check above still bounds
-      // us). Anything else IS disagreement: stop and escalate to a human.
-      if (chk.reason === "rpc_error" || chk.reason === "receipt_not_found") continue;
+      // up — not disagreement, so keep polling. Anything else IS disagreement: stop and
+      // escalate to a human.
+      if (chk.reason === "rpc_error" || chk.reason === "receipt_not_found") {
+        // ⚠️ IRIS says minted but we could not READ it. That is unresolved, not resolved —
+        // so the deadline applies here too, and the result stays re-checkable rather than
+        // asserting an arrival we never measured.
+        if (isPastDeadline(receipt)) {
+          await finish({
+            state: "mint_unconfirmed",
+            delivery: "predicted",
+            lastCheckedAt: new Date().toISOString(),
+            lastVerifyFailure: chk.reason,
+          });
+          return json(200, { state: "mint_unconfirmed", reason: "deadline_passed_chain_unreadable" });
+        }
+        continue;
+      }
 
       await finish({
         state: "mint_unverified",

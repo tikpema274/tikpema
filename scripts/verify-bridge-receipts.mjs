@@ -220,8 +220,64 @@ section("3 — PREDICTED MUST NOT SILENTLY BECOME MEASURED");
   irisResult = { state: "minted", mintTxHash: "0x" + "33".repeat(32) };
   chainResult = { verified: true, chainId: 84532, blockNumber: 1, usdcAddress: "0xU", usdcAmount: 0.9459 };
   const res = await call({ owner: OWNER, burnHash: BURN });
-  check("⭐⭐ mint_unverified is NEVER auto-retried into minted", JSON.parse(res.body).note === "already terminal");
+  check("⭐⭐ mint_unverified is NEVER auto-retried into minted", JSON.parse(res.body).note === "already resolved");
   check("  …and the record still reads mint_unverified", (await stored()).state === "mint_unverified");
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("3b — A LATE ANSWER IS STILL AN ANSWER (the foreclosure bug)");
+{
+  // 🚨 THE BUG. The deadline used to be evaluated BEFORE IRIS was consulted, so a receipt
+  // past deadline was written `mint_unconfirmed` without anyone asking whether the mint had
+  // landed — and a stranded receipt is past deadline BY DEFINITION, which is exactly what
+  // recovery selects on. Real case: burn 0x0175cf7b… showed 0.946797 USDC minted on Base
+  // while its receipt said "unproven". Worse, `mint_unconfirmed` counted as terminal, so the
+  // mislabel was PERMANENT. The deadline bounds WAITING, never CHECKING.
+  irisResult = { state: "minted", mintTxHash: "0x" + "55".repeat(32), mintTx: "https://x/5" };
+  chainResult = { verified: true, chainId: 84532, blockNumber: 7, usdcAddress: "0xU", usdcAmount: 0.946797 };
+  await seed({ burnedAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() }); // 3h stranded
+  const res = await call({ owner: OWNER, burnHash: BURN });
+  const r = await stored();
+  check("⭐⭐ hours past deadline, but the mint LANDED ⇒ minted, not mint_unconfirmed",
+    JSON.parse(res.body).state === "minted" && r.state === "minted");
+  check("⭐⭐ …and it measures (the foreclosure would have left this 'predicted' forever)",
+    r.delivery === "measured" && r.amountDelivered === 0.946797);
+}
+{
+  // A provisional receipt must be re-openable, or recovery cannot heal what it mislabelled.
+  irisResult = { state: "minted", mintTxHash: "0x" + "66".repeat(32), mintTx: "https://x/6" };
+  chainResult = { verified: true, chainId: 84532, blockNumber: 8, usdcAddress: "0xU", usdcAmount: 0.9468 };
+  await seed({
+    state: "mint_unconfirmed",
+    delivery: "predicted",
+    burnedAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+    lastCheckedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(), // an hour ago
+  });
+  const res = await call({ owner: OWNER, burnHash: BURN });
+  const r = await stored();
+  check("⭐⭐ mint_unconfirmed is PROVISIONAL — re-checked, and resolves when the mint landed",
+    JSON.parse(res.body).state === "minted" && r.delivery === "measured");
+
+  // …but not on every page load.
+  await seed({
+    state: "mint_unconfirmed",
+    burnedAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+    lastCheckedAt: new Date().toISOString(), // just now
+  });
+  const soon = await call({ owner: OWNER, burnHash: BURN });
+  check("⭐ …rate limited, so a reload cannot hammer IRIS",
+    /re-checked too recently/.test(JSON.parse(soon.body).note || ""));
+}
+{
+  // The deadline must still fire when the mint genuinely has NOT landed.
+  irisResult = { state: "pending" };
+  chainResult = { verified: false, reason: "receipt_not_found" };
+  await seed({ burnedAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() });
+  const res = await call({ owner: OWNER, burnHash: BURN });
+  check("⭐ genuinely unresolved past deadline still escalates",
+    JSON.parse(res.body).state === "mint_unconfirmed" && JSON.parse(res.body).reason === "deadline_passed");
+  check("  …and records lastCheckedAt so the re-check can be rate limited",
+    !!(await stored()).lastCheckedAt);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════

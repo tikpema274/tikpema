@@ -143,8 +143,10 @@ section("6 — THE TRIGGER MUST BE AWAITED (the bug that stranded 0x0175cf7b…)
   const readEndpoint = readFileSync(new URL("../netlify/functions/bridge-receipts.mjs", import.meta.url), "utf8");
   check("⭐⭐ a stranded receipt is RE-TRIGGERED — one lost fire must not strand it forever",
     /RE-TRIGGERED stranded settle/.test(readEndpoint));
-  check("  …only past-deadline, unleased receipts qualify",
-    /state === "burn_confirmed" && !r\.settlingSince && isPastDeadline\(r\)/.test(readEndpoint));
+  check("  …only unleased receipts qualify — a healthy in-flight bridge is left alone",
+    /!r\.settlingSince &&/.test(readEndpoint));
+  check("⭐⭐ …and a PROVISIONAL mint_unconfirmed is re-triggered too — 'we stopped waiting' is not 'it never arrived'",
+    /isRecheckable\(r\)/.test(readEndpoint));
   check("  …and the recovery is bounded so a page load cannot fan out", /slice\(0, 3\)/.test(readEndpoint));
 }
 
