@@ -1,5 +1,108 @@
 ---
 
+## 2026-07-31 — HANDOFF: read this first
+
+### 🚨 IDENTIFIER RULE — READ BEFORE ANY OTHER LINE
+
+Two kinds of hex string appear everywhere below and **conflating them cost hours**:
+
+| length | what it is | example |
+|---|---|---|
+| **24 hex** | **NETLIFY DEPLOY ID** | `6a6c2a74b0db965c94b85a3b` |
+| **40 hex** | **GIT COMMIT SHA** | `de60384cac85…` (shown short as `de60384`) |
+
+⭐ **The length IS the discriminator.** Every identifier in this file is labelled `[DEPLOY ID]` or
+`[COMMIT]`. Keep doing that. ⚠️ The trap is real and live: the health-artifact store contains a key
+ending `…:1dd8f75f8a0d36f5a81904fec55291d346c74cea` — that is a **40-hex COMMIT SHA** sitting in a
+slot that now holds **24-hex DEPLOY IDs**, because it was written when `DD_BUILD_ID` (a commit) was
+the build source. Same slot, two different kinds of value.
+
+### WHERE PRODUCTION IS
+
+* **Deployed:** `6a6c2a74b0db965c94b85a3b` **[DEPLOY ID]**, published 2026-07-31T05:10:15Z
+* **From:** `de60384` **[COMMIT]** — `main`, pushed, in sync
+* **Rollback target:** `6a6bc374aa0bbeb30fa22680` **[DEPLOY ID]** (the previous prod build, itself
+  probe-verified)
+* **Money path:** `blobs-probe` → `verdict D`, `calibrated true`, arms
+  `consistency-error / ok / consistency-error`, `selfChecks: []`
+* **strong-read-watch:** live on `*/15`. **SILENCE IS THE HEALTHY SIGNAL** — it pushes on
+  transitions only. Liveness = `producedAt` advancing, never an alert arriving.
+* **dd-canary:** writing **deploy-id-bound** artifacts, one per deploy.
+* **DD is INERT** — `DD_PUBLIC_ENABLED` unset in production.
+
+**Is prod healthy? Two reads:**
+
+    GET https://app.tikpema.xyz/.netlify/functions/blobs-probe   -> verdict "D" AND calibrated true
+    netlify blobs:get strong-read-watch latest                   -> last cron observation
+
+### MEASURED vs INFERRED — do not promote one to the other
+
+| claim | status |
+|---|---|
+| canary binds to the **[DEPLOY ID]** from `x-nf-deploy-id` | ✅ **MEASURED** in prod, twice, value-vs-value against `published_deploy` |
+| scheduled invocations carry `x-nf-deploy-id` | ✅ **MEASURED** on a genuine cron tick (22.5 min after a publish-triggered one) |
+| all four env build sources absent at runtime | ✅ **MEASURED** (`DD_BUILD_ID`/`COMMIT_REF`/`DEPLOY_ID`/`BUILD_ID` all null) |
+| **split-brain across URL paths — DRAFTS** | ✅ **MEASURED**: `/api/dd-analyze` and `/.netlify/functions/dd-analyze` both returned the SAME 24-hex id, equal to the draft's own **[DEPLOY ID]** `6a6c251d5f3163e95a1a519a` |
+| **split-brain across URL paths — PRODUCTION** | ⚠️ **INFERRED ONLY.** Same `netlify.toml`, same redirect config, so the same result is expected — **but it is NOT measurable until `DD_PUBLIC_ENABLED` is set**, because rung −1 (exposure) refuses BEFORE any identity is computed. Measured live: `service-not-enabled`, no diagnostic, no identity. There is **no window to race**. |
+| `readable:false` refusal in `_budget.mjs` | ⚠️ **SUITE-ONLY** — not inducible anywhere; safe because it fails closed |
+| DCA ledger-failure branch | ⚠️ **SUITE-ONLY** — live but unexercised (all 7 mandates cancelled/expired) |
+| UB auto-allocation drawing from Base | ⚠️ **UNPROVEN** — no-op today (every Base Sepolia balance is 0.0) |
+
+### CARRY-FORWARD, IN ORDER, WITH PRECONDITIONS
+
+1. **🚨 The moment `DD_PUBLIC_ENABLED` is set in production, run the three-way check BEFORE trusting
+   any served report.** Hit both `/api/dd-analyze` and `/.netlify/functions/dd-analyze`; compare
+   `refusal.diagnostic.runningBuild` on each against the published **[DEPLOY ID]**. All three must
+   agree. This is the only outstanding inference, and enable-time is the first moment it is testable.
+   ⭐ The risk is bounded precisely because it surfaces then.
+2. **`DD_PAYTO_ADDRESS` is unset in BOTH contexts** — `_dd-x402.mjs` refuses to quote rather than
+   serve free, so the $0.06 money step is gated on this independently of everything else.
+3. **No gate enforces `DD_PUBLIC_ENABLED`** the way `gate:watch` enforces `WATCH_*`. Convention only.
+   ⚠️ `--context all` is literally the switch that arms DD in production. Never use it.
+4. **🚨 VERIFY THE DELEGATE ON BASE SEPOLIA *BEFORE* FUNDING IT.** UB auto-allocation is now ON
+   (both spend sites omit `from.allocations`). `_pay.mjs` is same-chain so it is a permanent no-op;
+   **`_ubspend.mjs` is cross-chain, so the DESTINATION is tier 1** — the first Base balance flips its
+   source chain to Base silently, on a DATA condition, with no deploy. `_delegate.mjs` grants
+   per-SCA and only Arc has ever been exercised.
+5. `dca-tick` is largely untested beyond the ledger-failure branch (`npm run test:dca`).
+6. The budget counter stores exactly `0.3` after spends of 0.1 + 0.2 — no float accumulation, but
+   the mechanism is unread.
+7. DD-standalone scoping comments for `_dd-health.mjs`/`_blobs.mjs`; `pauseStates:116` roster fix.
+
+### ⚠️ TOOLING FIX — DO THIS BEFORE THE NEXT LONG SESSION
+
+**WATCH A PID, NEVER A `pgrep` PATTERN.** `pgrep -f "netlify deploy --prod"` matches any process
+whose command line CONTAINS that string — including the monitor shell running the `pgrep`. It
+happened twice:
+
+* a monitor latched onto itself and reported **its own age** (7h) as the deploy's elapsed time;
+* a `pkill -f` killed **the shell issuing the kill** (exit 144).
+
+Capture the PID once and `kill -0 <pid>` on it. ⭐ And prefer the **deploy record state** from
+`netlify api listSiteDeploys` (`new` → `uploading` with `req` counting down → `ready`) over guessing
+phase from process lists — esbuild is a persistent `--service` process, so its presence says nothing
+about progress. I misread that twice.
+
+### OPERATIONAL FACTS THAT COST TIME TO LEARN
+
+* Scheduled functions **403** on HTTP invoke, and cron does not fire on drafts → unreachable by BOTH
+  routes. To exercise one on a draft: comment its `netlify.toml` schedule out, deploy, invoke,
+  **restore** — and `npm run gate:watch` enforces the restore, because `netlify.toml` is OUTSIDE the
+  build stamp's hashed surface so a forgotten restore yields an IDENTICAL tree hash.
+* **`netlify env:get` LIES about build vars** — it synthesises `COMMIT_REF` from the LOCAL git HEAD
+  and reports `DEPLOY_ID`/`BUILD_ID` as `"0"`; none appear in `env:list` and none reach the function.
+* Env changes **require a redeploy** to reach a live function (measured A/B).
+* **Circle client keys are DOMAIN-RESTRICTED** and the Passkey Domain must match exactly → a
+  real-client wallet connect has NEVER worked on a draft origin and cannot without a console change;
+  `toCircleSmartAccount` derives the account from the passkey, so a draft would be a DIFFERENT
+  wallet. **"Prove it on a draft first" is structurally unavailable for wallet-connect paths.**
+* Deploys take **15–28 min**; two have died near ~29 min. The CLI's printed "Draft URL" is malformed
+  on this site — use `https://<deploy-id>--tikpema-predict-test.netlify.app`.
+* Verify a draft is serving the intended build by matching `blobs-probe`'s `build.commit` **[COMMIT]**
+  and `build.tree` before using it.
+
+---
+
 ## 2026-07-30 (afternoon) — the watch is LIVE; a hardcoded rollback target that pointed at the fail-open build; and why a draft cannot prove a fund-moving path
 
 ### IS PROD HEALTHY? — two reads, no interpretation needed
