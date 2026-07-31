@@ -572,6 +572,36 @@ check("  …and it explains that the tree hash CANNOT catch this",
   /tree hash matches/.test(checkScheduleDeclared(TOML_COMMENTED).detail));
 check("⭐⭐ a naive raw-text regex WOULD have passed the commented file — the comment strip is load-bearing",
   /\[functions\."strong-read-watch"\]/.test(TOML_COMMENTED));
+
+// ── THE DIRTY GATE ───────────────────────────────────────────────────────────────────────────
+// The stamp has always COMPUTED `dirty`; nothing refused on it, so on 2026-07-31 deploy
+// 6a6cb349bf7d962dc069fa5f shipped with dirty:true — three untracked files under
+// netlify/functions. Prod ran code in no commit. Same gap the schedule assertion closed: a value
+// that is measured and displayed but never acted upon gets scrolled past.
+const { checkTreeClean } = await import("../scripts/verify-watch-promotion-gate.mjs");
+{
+  const real = checkTreeClean();
+  check("⭐ checkTreeClean returns a closed verdict, never undefined",
+    typeof real.ok === "boolean" && typeof real.reason === "string", real.reason);
+  check("  …and its dirty list is an array whenever it reports clean",
+    real.ok ? Array.isArray(real.dirtyPaths) : true);
+
+  // FAILS CLOSED: an unreadable stamp script must refuse, not assume clean. Pointing `root` at a
+  // directory with no scripts/stamp-build.mjs is the cheapest way to induce that.
+  const noStamp = checkTreeClean({ root: new URL("file:///nonexistent-root-for-gate-test/") });
+  check("⭐⭐ an unreadable stamp script REFUSES — 'I could not tell' must not read as clean",
+    noStamp.ok === false && noStamp.reason === "stamp-script-unreadable");
+  check("  …and says why it cannot confirm the surface",
+    /same surface the stamp hashes/.test(noStamp.detail));
+
+  // The surface definition is asserted against stamp-build.mjs rather than copied — drift must be
+  // LOUD, or the gate silently checks paths the stamp no longer hashes.
+  const stampSrc = readFileSync(new URL("../scripts/stamp-build.mjs", import.meta.url), "utf8");
+  check("⭐⭐ the gate's SURFACES are pinned to the stamp's, not a second copy",
+    stampSrc.includes('"netlify/functions"') && stampSrc.includes('"shared"'));
+  check("  …and the self-exclusion is pinned too",
+    stampSrc.includes("shared/build-stamp.generated.mjs"));
+}
 check("  …indented comments are caught too",
   checkScheduleDeclared(`   # [functions."strong-read-watch"]\n   #  schedule = "${EXPECTED_CRON}"`).reason === "commented-out");
 

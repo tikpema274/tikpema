@@ -83,6 +83,89 @@ const PROBE_TIMEOUT_MS = 8000;
  *
  * @returns {{ok:boolean, reason:string, detail:string, cron:string|null}}
  */
+/**
+ * Is the DEPLOYED SURFACE clean in git?
+ *
+ * ═══ WHY THIS IS A GATE ══════════════════════════════════════════════════════════════════════
+ * The stamp already COMPUTES `dirty` and prints it. Nothing ever REFUSED on it — the same gap the
+ * schedule assertion closed: a value that is measured, displayed, and then not acted upon is a
+ * value that gets scrolled past.
+ *
+ * It got scrolled past on 2026-07-31. Deploy `6a6cb349bf7d962dc069fa5f` shipped with
+ * `dirty:true` — three untracked files under netlify/functions and a modified agent-bridge.mjs.
+ * Prod ran code that existed in no commit: unreproducible, and with no meaningful rollback target,
+ * because the deploy id ↔ commit binding the whole identifier discipline rests on was simply false
+ * for that artifact. The stamp said so plainly in its own `detail` field and the deploy went out
+ * anyway.
+ *
+ * ⚠️ A DIRTY DEPLOY IS NOT MERELY UNTIDY. `commit` names a STARTING POINT, not the artifact. Two
+ * deploys can carry the same commit and different code, so "roll back to the last good commit"
+ * silently means "roll back to something that was never deployed".
+ *
+ * ═══ THE SURFACE DEFINITION IS NOT COPIED — DRIFT IS MADE LOUD ═══════════════════════════════
+ * `SURFACES` and the self-exclusion live in scripts/stamp-build.mjs. A second hardcoded copy here
+ * would be exactly the duplicate-source-of-truth bug this repo keeps hitting: the stamp would
+ * start hashing a directory this gate never checks, and the gate would pass while the artifact
+ * drifted. So the literals are ASSERTED against that file's source, and a mismatch FAILS with its
+ * own reason code rather than silently checking the wrong paths.
+ *
+ * ⚠️ FAILS CLOSED. No git, an unreadable stamp script, or drifted surfaces all return ok:false.
+ * "I could not tell" must never render as "clean" — that is the absence-reads-as-safe family.
+ *
+ * @returns {{ok:boolean, reason:string, detail:string, dirtyPaths:string[]|null}}
+ */
+export function checkTreeClean({ root = new URL("..", import.meta.url) } = {}) {
+  const SURFACES = ["netlify/functions", "shared"];
+  const SELF = "shared/build-stamp.generated.mjs";
+  const no = (reason, detail, dirtyPaths = null) => ({ ok: false, reason, detail, dirtyPaths });
+
+  // 1. The surface definition must still match the stamp's. If it moved, this gate is checking
+  //    the wrong thing and must say so rather than pass.
+  let stampSrc;
+  try {
+    stampSrc = readFileSync(new URL("scripts/stamp-build.mjs", root), "utf8");
+  } catch (err) {
+    return no("stamp-script-unreadable",
+      `could not read scripts/stamp-build.mjs (${err?.code || err?.name}) — cannot confirm this gate ` +
+      `checks the same surface the stamp hashes`);
+  }
+  for (const dir of SURFACES) {
+    if (!stampSrc.includes(`"${dir}"`)) {
+      return no("surfaces-drifted",
+        `scripts/stamp-build.mjs no longer names "${dir}" in its SURFACES. The stamp and this gate ` +
+        `would be measuring different things. Update BOTH, deliberately.`);
+    }
+  }
+  if (!stampSrc.includes(SELF)) {
+    return no("surfaces-drifted",
+      `scripts/stamp-build.mjs no longer names ${SELF} as its self-exclusion; the generated stamp ` +
+      `would be counted as drift by one side and not the other.`);
+  }
+
+  // 2. Ask git about the surface only. Untracked files COUNT — three of them are what shipped
+  //    unreproducibly. `--porcelain` lines are `XY <path>`: the status columns are POSITIONAL, so
+  //    slice at a fixed offset rather than trimming (trimming eats the leading space of an
+  //    unstaged change and shifts the path by one character).
+  let out;
+  try {
+    out = execFileSync("git", ["status", "--porcelain", "--", ...SURFACES], {
+      cwd: new URL(".", root), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch (err) {
+    return no("git-unavailable",
+      `git status failed (${err?.code || err?.message}). Cannot prove the surface is clean, so this ` +
+      `refuses rather than assuming it is.`);
+  }
+
+  const dirtyPaths = out.split("\n").map((l) => l.slice(3)).filter((p) => p && p !== SELF);
+  if (dirtyPaths.length) {
+    return no("dirty",
+      `${dirtyPaths.length} uncommitted path(s) on the deployed surface — the artifact would not be ` +
+      `reproducible from any commit`, dirtyPaths);
+  }
+  return { ok: true, reason: "clean", detail: `deployed surface clean across ${SURFACES.join(", ")}`, dirtyPaths: [] };
+}
+
 export function checkScheduleDeclared(tomlText, { functionName = FUNCTION_NAME, expectedCron = EXPECTED_CRON } = {}) {
   const no = (reason, detail, cron = null) => ({ ok: false, reason, detail, cron });
   const blockRe = new RegExp(
@@ -286,6 +369,18 @@ async function main() {
     console.log("     (not gating: this is not the production context. It MUST be restored before promotion.)");
   }
 
+  // The stamp measures `dirty` and prints it; until now nothing refused on it. See checkTreeClean.
+  const tree = checkTreeClean();
+  const treeMark = tree.ok ? "✅" : isProd ? "❌" : "⚠️ ";
+  console.log(`  ${treeMark} tree      — ${tree.reason}: ${tree.detail}`);
+  if (tree.dirtyPaths?.length) {
+    for (const p of tree.dirtyPaths.slice(0, 12)) console.log(`     ${p}`);
+    if (tree.dirtyPaths.length > 12) console.log(`     …and ${tree.dirtyPaths.length - 12} more`);
+  }
+  if (!tree.ok && !isProd) {
+    console.log("     (not gating: not the production context. A draft may legitimately be dirty.)");
+  }
+
   // ⭐ LEFTOVER DRAFT-PROOF OVERRIDES. The HOTFIX fixture is a static asset that ships to prod, so a
   // stale WATCH_TARGET_URL would make the monitor watch a file that always says HOTFIX — a permanent
   // fake outage, paging hourly, while the real money path went unwatched. Unsetting these has been a
@@ -324,6 +419,7 @@ async function main() {
   }
 
   const pass = watch.resolved && live?.exists === true && (schedule.ok || !isProd)
+    && (tree.ok || !isProd)
     && (overrides.every((o) => o.ok) || !isProd);
 
   // Informational, not a pass/fail criterion. Which channel it is, is the operator's call — but if
@@ -356,6 +452,14 @@ async function main() {
       console.log("║  surface, so the tree hash matches a scheduled build exactly. Restore:");
       console.log(`║    [functions."${FUNCTION_NAME}"]`);
       console.log(`║      schedule = "${EXPECTED_CRON}"`);
+    }
+    if (isProd && !tree.ok) {
+      console.log("║");
+      console.log(`║  TREE (${tree.reason}): a dirty deploy ships code that is in NO COMMIT. Its`);
+      console.log("║  build stamp says so — `commit` then names a starting point, not the");
+      console.log("║  artifact — so the deploy-id ↔ commit binding is false and there is no");
+      console.log("║  real rollback target. This shipped once already (6a6cb349…). Commit the");
+      console.log("║  surface, or deploy from a clean tree.");
     }
     if (!watch.resolved || live?.exists !== true) {
       console.log("║");
