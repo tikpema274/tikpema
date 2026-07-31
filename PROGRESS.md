@@ -34,9 +34,17 @@ the expected steady state. Liveness is `producedAt` advancing — **never** an a
 ⚠️ A 200 proves nothing on its own: an unmatched Netlify path returns **SPA HTML with status 200**.
 Judge by body, never by status.
 
-**Current:** production **[DEPLOY ID]** `6a6c696ae1ea3868860a4bd3`, built from **[COMMIT]** `aa60f1b`,
-tree `31ecb354a70253680b8f9caa5727c9fb0e94ffdc5c4326dc24bee7a50bb3b085` (clean at stamp time).
-Deployed 2026-07-31T09:48:30Z; rollback target is the prior published deploy `6a6c51fb4fbfe3695064c0f3`.
+**Current:** production **[DEPLOY ID]** `6a6c9ec1faace12931e10cb8`, built from **[COMMIT]** `ea2c275`,
+tree `62abe1e54682b1b2b2f5151c5feb59254de482ecb5dd541d7428934f0ffade95` (clean at stamp time).
+Deployed 2026-07-31T13:34:11Z; rollback target is the prior published deploy `6a6c696ae1ea3868860a4bd3`.
+
+Verified green at this deploy (2026-07-31T14:13Z, all three read-only):
+`blobs-probe` **verdict D / calibrated true**, arms A=consistency-error · B=ok · A2=consistency-error,
+`selfChecks: []`, deploy id resolved from `x-nf-deploy-id`. `strong-read-watch latest` **ok:true /
+reason "ok" / notify.kind "steady-ok"**, `treeChanged:false`, `lastGood` pinned to this deploy.
+`dd-canary-health` holds a record **keyed to this deploy id** — `verdict:"pass"`, 5/5 fixtures.
+⚠️ One sample each, so this proves the watch and canary ran **after** this deploy (both name the new
+deploy id); `producedAt` ADVANCING still needs a second read ~15 min later.
 
 ⏳ **THE CITATION MEASUREMENT WINDOW IS OPEN.** `RESEARCH_CITATION_ENFORCE` is **UNSET in
 production** (read back after the deploy, not assumed) ⇒ **LOG-ONLY**, which here is the
@@ -46,10 +54,72 @@ where unset = refuse. Do not "harmonise" them; see the flag block in `job-submit
 whichever first.** Grep `[research][citation-shadow]` (would-have-refunded, per-class) and
 `[research][citation-retention]` (against the 64.4% backtest baseline). 🚨 If nobody flips this,
 the guard is dead a THIRD time — by drift.
-🚧 **UNVERIFIED ON A LIVE PATH:** no job has run since the deploy, so neither half of the
+🚨 **THE MEASUREMENT WINDOW RESTARTS AT DEPLOY `6a6c9ec1faace12931e10cb8` (2026-07-31T13:34:11Z).**
+Production served the **union** derivation until this deploy. Every `[research][citation-shadow]`,
+`[research][citation-refusal]` and `[research][citation-retention]` line emitted **before** that
+timestamp describes a derivation **THAT NO LONGER EXISTS** — `9a93c10` replaced union with
+**PRECEDENCE** (a marker can dismiss a source) and `ea2c275` split the empty case into
+`emptyReason: "unmatched-model-sources" | "no-signal"`. ⚠️ **THE ≥50-BRIEF / <10% FALSE-EMPTY
+CRITERION MUST NOT BE MET WITH UNION-ERA AND PRECEDENCE-ERA DATA BLENDED** — the false-empty rate
+is not comparable across the cutoff. Count only lines at or after this deploy.
+⭐ `unmatched-model-sources` ("model named sources, none matched retrieval") means **fabricated URLs
+or a URL-normalisation bug on our side** — both actionable, neither meaning "the model declined to
+cite". It is a SUB-REASON, not a new refund class; the user-facing headline is unchanged.
+
+🚧 **UNVERIFIED ON A LIVE PATH:** no research job has run since this deploy, so neither half of the
 citation change (short list where cited / full retrieval where not) has been seen in production.
+⚠️ A live check is **T's to run** — `_research.mjs` can autonomously buy data via `payX402`
+(the ON-CHAIN branch), so a research job is fund-moving. Read the result from the
+`job-deliverables` store (keyed by raw jobId) and from `jobTimeline.tsx:203-224`, which renders
+`Sources:` and `Retrieved, not used:` as SEPARATE lists. Regression case: job **#160637**
+(Kraken/Wirex called irrelevant in the answer, listed as sources anyway); job #160108 is the same
+defect (two exchange FAQs matched on the word "Unified").
 Money path `verdict D`. Watch on `*/15`. Canary writing deploy-id-bound artifacts. **DD is INERT**
 (`DD_PUBLIC_ENABLED` unset in production). Live values come from the build stamp and `git`, not here.
+
+### ⚠️ A DOCUMENTED EXCEPTION TO "PROVE IT ON A DRAFT FIRST" — the bridge settler
+
+**Same shape as the `_budget.mjs` exception below, same reason: the rule is STRUCTURALLY
+UNAVAILABLE here, not inconvenient.** `bridge-mint-settle-background.mjs` shipped without ever
+having run against real IRIS. Every branch in it is proven by INJECTION only
+(`npm run test:bridge`, 48/0).
+
+**Why a draft cannot exercise it:**
+
+* The settler only runs after a **real Arc burn**, and a burn requires a **real browser wallet
+  connect**. Circle client keys are **domain-restricted** and the SCA derives from the **passkey**,
+  so a draft is a **different owner with a different wallet address** — the same wall documented for
+  `_budget.mjs`.
+* The branch that matters most — a **stalled mint** — is not inducible on demand anywhere. IRIS
+  reports `failed` only on an explicit `forwardState==="FAILED"`; a true stall just stays `pending`.
+  You cannot ask Circle's relayer to hang.
+* A draft could therefore only ever have shown that the happy path did not break, on a wallet that
+  is not the production wallet.
+
+**Why promoting anyway is defensible here, and would NOT be in general:**
+
+1. **The receipt write CANNOT FAIL THE BRIDGE.** It runs after the burn has landed, and
+   `writeReceiptNeverThrows` swallows every error. The worst outcome is *no receipt* — which
+   degrades the UI to exactly what it did before receipts existed. It can never turn a successful
+   bridge into a reported failure, which is the one lie that would make a user retry and burn twice.
+2. **`delivery` NEVER SELF-ADVANCES.** `predicted → measured` happens on exactly one path: a
+   destination-chain read that returned `verified`. Every other exit — deadline, poll exhaustion,
+   RPC error, IRIS/chain disagreement — leaves it `predicted`. So the failure direction is always
+   "we still call this an estimate", never "we assert an arrival that did not happen".
+3. All four terminal states, both termination bounds, the owner scope, the never-throw write and the
+   absent `/api` route are **suite-pinned by fault injection**, including the deadline branch that is
+   untestable by waiting.
+
+⭐ **(1) and (2) are what make it acceptable.** Both failure modes point at *less* claim, not more.
+Absent that, the correct call would have been to defer.
+
+🚨 **THE VERIFICATION IS NOT DEFERRED — the first real bridge after this deploy IS the test, run
+DELIBERATELY rather than waited for.** Watch one receipt through `burn_confirmed` →
+`delivery:"predicted"` → `delivery:"measured"`, and confirm `amountDelivered` is **read from the
+destination-chain Transfer log**, not equal to `netPredicted` (they differ: the fee is quoted as a
+`maxFee` ceiling). ⚠️ Until that run happens, treat the settler as **unproven on a live path** — and
+note the double-approve race, documented as narrowed-not-closed, is now also a `burnHash`-keyed-write
+hazard.
 
 ### 🚨 UNIFIED BALANCE COPY IS FALSE — investigated, resolved, not yet fixed
 

@@ -129,6 +129,15 @@
   from = "/api/agent-bridge-status"
   to = "/.netlify/functions/agent-bridge-status"
   status = 200
+# Owner-scoped list of the caller's own bridge receipts — survives a reload, which
+# component state did not. Session-gated, read-only.
+# 🚨 DELIBERATELY ABSENT: any route for bridge-mint-settle-background. It MUTATES
+# receipt state and is internal-only (requireInternal). Netlify exposes every function
+# at /.netlify/functions/* regardless, so the guard is in the code, not in this file.
+[[redirects]]
+  from = "/api/bridge-receipts"
+  to = "/.netlify/functions/bridge-receipts"
+  status = 200
 [[redirects]]
   from = "/api/predict-markets"
   to = "/.netlify/functions/predict-markets"

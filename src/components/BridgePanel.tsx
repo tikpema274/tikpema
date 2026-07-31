@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
@@ -38,6 +38,28 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const [error, setError] = useState("");
   const [mint, setMint] = useState<any>(null); // one-shot status-check result
   const [checking, setChecking] = useState(false);
+  // Server-side receipts. These are the reason a reload no longer strands anyone: the
+  // burn is recorded server-side under the caller's own owner scope, so the client can
+  // ask "what do I have in flight?" without holding the burnHash in memory.
+  const [receipts, setReceipts] = useState<any[]>([]);
+  const [receiptsDegraded, setReceiptsDegraded] = useState(false);
+
+  const loadReceipts = async () => {
+    try {
+      const d = await w.listBridgeReceipts();
+      setReceipts(d.receipts || []);
+      setReceiptsDegraded(!!d.degraded);
+    } catch {
+      // A listing failure must never take the bridge form down — but it must not read as
+      // "nothing in flight" either.
+      setReceiptsDegraded(true);
+    }
+  };
+
+  useEffect(() => {
+    if (w.agentWallet) loadReceipts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [w.agentWallet?.address]);
 
   const amountNum = Number(amount);
   const amountValid = Number.isFinite(amountNum) && amountNum > 0;
@@ -56,6 +78,11 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
     try {
       const res = await w.bridgeFromAgent(amountNum, destination);
       setRun(res);
+      // Blobs is eventually consistent (~11s), so the receipt we just wrote may not be
+      // visible yet. Refresh now AND after the window, rather than concluding absence
+      // from one early miss.
+      loadReceipts();
+      setTimeout(loadReceipts, 12000);
     } catch (e: any) {
       setError(e?.message || "Bridge failed");
     } finally {
@@ -172,9 +199,20 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
 
       {done && (
         <div className="status" style={{ color: "var(--emerald)" }}>
-          Bridge submitted ✓ — ~{Number(run.netUsdc).toFixed(2)} USDC will arrive on{" "}
+          {/* ⭐ THIS IS AN ESTIMATE AND MUST SAY SO. netUsdc is arithmetic — the amount
+              burned minus the fee quoted at execution — not an observation of what landed.
+              The exact delivered figure appears below once the destination chain has been
+              read. A "~" alone did not carry that distinction. */}
+          Bridge submitted ✓ — <b>estimated</b> {Number(run.netUsdc).toFixed(4)} USDC to arrive on{" "}
           {run.destination?.label ?? destLabel} in a few minutes (up to ~20 for some chains)
-          {run.feeUsdc != null && <> (fee ~{Number(run.feeUsdc).toFixed(2)} USDC)</>}.
+          {run.feeUsdc != null && (
+            <>
+              {" "}
+              — a flat network fee of {Number(run.feeUsdc).toFixed(4)} USDC, quoted at execution,
+              is taken out of the amount
+            </>
+          )}
+          .
           {run.tx && (
             <>
               {" "}
@@ -219,6 +257,91 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
               </span>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ══ YOUR BRIDGES — server-side receipts, four states, never two ══════════════
+          Survives a reload: the burnHash lives in the receipt store under this owner,
+          not in component state.
+
+          ⭐ The estimate/measured distinction is carried by `delivery`, which the SERVER
+          sets and only ever advances to "measured" after it has read the destination
+          chain itself. The UI must not infer it — a receipt that reached a terminal
+          state without a successful chain read still reads "predicted", and is shown
+          as an estimate, not as an arrival. */}
+      {(receipts.length > 0 || receiptsDegraded) && (
+        <div style={{ marginTop: 22 }}>
+          <div className="panel-eyebrow">Your bridges</div>
+          {receiptsDegraded && (
+            <div className="status" style={{ color: "var(--warn)" }}>
+              Couldn't load your bridge history just now — this is <b>not</b> confirmation that
+              nothing is in flight. Try again shortly.
+            </div>
+          )}
+          {receipts.map((r) => {
+            const measured = r.delivery === "measured" && r.amountDelivered != null;
+            return (
+              <div key={r.burnHash} className="status" style={{ marginTop: 8 }}>
+                <span className="mono">{Number(r.amountRequested).toFixed(4)}</span> USDC →{" "}
+                {r.destinationLabel ?? r.destinationKey}
+                {" · "}
+                {r.state === "burn_confirmed" && (
+                  <span>
+                    in flight — <b>estimated</b> {Number(r.netPredicted).toFixed(4)} USDC to arrive
+                  </span>
+                )}
+                {r.state === "minted" && measured && (
+                  <span style={{ color: "var(--emerald)" }}>
+                    ✓ arrived — <b>exactly {Number(r.amountDelivered).toFixed(4)} USDC</b>, read from
+                    the destination chain
+                  </span>
+                )}
+                {/* Defensive: `minted` without a measured amount should be unreachable — the
+                    server only writes that state after a verified read. If it ever appears,
+                    say so rather than presenting the estimate as an arrival. */}
+                {r.state === "minted" && !measured && (
+                  <span style={{ color: "var(--warn)" }}>
+                    ✓ mint reported, but no measured amount was recorded — treat the figure as an
+                    estimate
+                  </span>
+                )}
+                {r.state === "mint_unconfirmed" && (
+                  <span style={{ color: "var(--warn)" }}>
+                    not confirmed in time — the Arc burn is real and final; the destination mint is{" "}
+                    <b>unproven</b>. Estimated {Number(r.netPredicted).toFixed(4)} USDC. This is not
+                    a failure — it may still land.
+                  </span>
+                )}
+                {r.state === "mint_failed" && (
+                  <span style={{ color: "var(--warn)" }}>bridge failed on the destination</span>
+                )}
+                {r.state === "mint_unverified" && (
+                  <span style={{ color: "var(--warn)" }}>
+                    ⚠ <b>needs review</b> — Circle reported a mint that our own read of the
+                    destination chain could not confirm
+                    {r.verifyFailure?.reason ? ` (${r.verifyFailure.reason})` : ""}. Deliberately not
+                    retried automatically.
+                  </span>
+                )}
+                {r.burnTx && (
+                  <>
+                    {" · "}
+                    <a href={r.burnTx} target="_blank" rel="noreferrer">
+                      burn tx
+                    </a>
+                  </>
+                )}
+                {r.mintTx && (
+                  <>
+                    {" · "}
+                    <a href={r.mintTx} target="_blank" rel="noreferrer">
+                      mint tx
+                    </a>
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

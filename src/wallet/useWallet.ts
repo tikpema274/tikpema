@@ -425,6 +425,26 @@ export function useWallet() {
     [ensureSession]
   );
 
+  // The caller's OWN bridge receipts, owner-scoped SERVER-SIDE from the session — there is
+  // no parameter here that selects whose receipts come back.
+  //
+  // ⭐ This is what makes a reload survivable. burnHash used to live in BridgePanel's
+  // component state, so refreshing the page stranded the user with funds mid-flight and no
+  // way to ask about them. Persisting server-side without this read would have been
+  // localStorage with extra steps: the client could not name the key.
+  const listBridgeReceipts = useCallback(async () => {
+    const token = await ensureSession();
+    const r = await fetch("/api/bridge-receipts", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data?.error || "Could not load bridge receipts");
+    // `degraded` distinguishes "none in flight" from "we couldn't look" — the caller must
+    // not render an empty list as certainty.
+    return data as { receipts: any[]; degraded: boolean };
+  }, [ensureSession]);
+
   // ── VAULT AGENT ────────────────────────────────────────────────────────────
   // Inspect an allowlisted ERC-4626 vault (READ-ONLY). Returns the on-chain disclosure plus, if
   // the vault raises a WARN, the exact `ackToken` a deposit must echo back. Moves nothing.
@@ -550,6 +570,7 @@ export function useWallet() {
     swapFromAgent,
     bridgeFromAgent,
     checkBridgeStatus,
+    listBridgeReceipts,
     inspectVault,
     depositToVault,
     vaultShareBalance,
