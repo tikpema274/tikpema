@@ -119,6 +119,21 @@ reviews** — nobody counted four words in a prop as copy.
 ⭐ **The rule, general:** **assert against STRUCTURE, not against text the asserter is part of.**
 Same rule as the `_budget.mjs` / build-binding work this week.
 
+**🚨 FOLD ALL THREE INTO THE GUARD WHEN BUILT — one alone would NOT have caught the near-miss.**
+Verifying the memory-index compaction (2026-07-31), a transcript extractor matched **its own bash
+command** and reported `✅ VERIFIED: all 0 shortened entries` — **zero entries examined, green
+result.**
+
+1. **EXCLUDE SELF from the corpus.** ⚠️ **Fourth instance this week:** `pgrep` matching its own
+   wrapper shell, `pkill` killing the shell that issued it, a suite matching its own header
+   comment, now an extractor matching its own command.
+2. **ASSERT THE EXPECTED COUNT, not non-zero.** `=== 43`, never `> 0`. A self-including extractor
+   usually matches *something* — **the zero-match was luck.** Had it matched one, a non-zero test
+   would have passed cleanly.
+3. **PRINT THE RAW MAGNITUDES the verdict rests on.** `pre-image chars: 838` (for a 20.9KB file) is
+   what exposed it, and it was **incidental**. ⭐ **A verdict hides its own inputs — `✅ VERIFIED`
+   is unfalsifiable by inspection, `838` is not.**
+
 ### MEASURED vs INFERRED — do not promote one to the other
 
 | claim | status |
