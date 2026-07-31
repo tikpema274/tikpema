@@ -69,13 +69,17 @@ export async function handler(event) {
   // makes the guard UNOBSERVABLE from outside, and an unobservable guard is one nobody
   // can prove still works.
   //
-  // 🚨 THESE LOG LINES DO NOT CLOSE THAT, AND THE REPO ALREADY KNEW IT. Measured
-  // 2026-07-31 on deploy 6a6cbce03b33755e6be09601: two unauthenticated probes appear in
-  // `netlify logs --source functions --function bridge-mint-settle-background` as EMPTY
-  // `INFO` lines — the invocation is listed, the message text never is. See
-  // job-bridge-receipt-background.mjs:50-54, which records the same constraint
-  // ("the console.log content does not surface through `netlify logs`") and is exactly
-  // why that verifier attaches its telemetry to the RECORD instead of logging it.
+  // 🚨 THESE LOG LINES DO NOT CLOSE THAT. Measured 2026-07-31: unauthenticated probes of
+  // THIS function appear in `netlify logs` as EMPTY `INFO` lines — the invocation is
+  // listed, the message text never is.
+  //
+  // ⚠️ NARROWLY: it is *-background functions whose console output is dropped, NOT every
+  // function. The same `netlify logs` query against agent-bridge returns full text
+  // ("[bridge-receipt] settle trigger sent … status=202"), and both appeared side by side
+  // in one output on 2026-08-01. An earlier note here generalised this to all functions;
+  // that was wrong and would have discouraged logging where logging works.
+  // job-bridge-receipt-background.mjs:50-54 records the same constraint for the same
+  // reason, and is why that verifier attaches telemetry to the RECORD instead.
   //
   // They are kept because they cost nothing and would become useful behind a log drain,
   // but they are NOT evidence. ⭐ THE ONLY SOUND PROOF IS BEHAVIOURAL AND NEGATIVE:

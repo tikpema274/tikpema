@@ -37,8 +37,12 @@ export const agentClient = {
 
   // Execute a confirmed cross-chain bridge (turn 2 of bridge propose->confirm).
   // Returns after the Arc burn; the destination mint is async (poll bridgeStatus).
-  bridge: (amountUsdc: number, destination: string, token: string) =>
-    post("/api/agent-bridge", { amountUsdc, destination }, token),
+  // ackToken carries the user's acceptance of a high-fee disclosure. Optional: it is only
+  // required when agent-act's quote returned band "acknowledge". Without it the server
+  // REFUSES that bridge — which, before this was wired, made the agent panel a dead end
+  // rather than a gate: refused with no disclosure and no way to accept.
+  bridge: (amountUsdc: number, destination: string, token: string, ackToken?: string) =>
+    post("/api/agent-bridge", { amountUsdc, destination, ackToken }, token),
 
   // Stage-2 poll: has Circle's relayer minted on the destination yet?
   bridgeStatus: (burnHash: string, destinationKey: string, token: string) =>

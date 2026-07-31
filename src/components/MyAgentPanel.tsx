@@ -60,6 +60,12 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   // Bridge (propose→confirm→execute, then async destination-mint polling).
   const [bridgeRun, setBridgeRun] = useState<any>(null);
   const [bridgeBusy, setBridgeBusy] = useState(false);
+  // Acceptance of a high-fee disclosure on THIS surface. The same 0.1 USDC bridge used to
+  // behave differently depending on which page you reached: the Bridge page disclosed that
+  // the fee EXCEEDS the arrival and required a tick, while here it was refused server-side
+  // with no disclosure and no way to accept. This panel is the plain-language surface a user
+  // is most likely to reach, so the honest path was the one they were least likely to find.
+  const [bridgeAcked, setBridgeAcked] = useState(false);
   const [mint, setMint] = useState<any>(null); // { state: 'pending'|'minted'|'failed', mintTx? }
 
   // ⭐ THE SINGLE SOURCE OF TRUTH FOR DELIVERY. Chain-verified receipts, owner-scoped
@@ -158,12 +164,12 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   }
 
   // Confirm a bridge: fire the Arc burn, then poll IRIS for the destination mint.
-  async function confirmBridge(amountUsdc: number, destinationKey: string) {
+  async function confirmBridge(amountUsdc: number, destinationKey: string, ackToken?: string) {
     setBridgeBusy(true);
     setMint(null);
     try {
       const token = await w.ensureSession();
-      const res = await agentClient.bridge(amountUsdc, destinationKey, token);
+      const res = await agentClient.bridge(amountUsdc, destinationKey, token, ackToken);
       setBridgeRun(res);
       // Stage 2: the Arc burn is done; poll until Circle's relayer mints (or fails).
       //
@@ -291,6 +297,8 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
             onConfirm={confirmPlan}
             bridgeRun={bridgeRun}
             bridgeBusy={bridgeBusy}
+            bridgeAcked={bridgeAcked}
+            onAckChange={setBridgeAcked}
             mint={mint}
             onConfirmBridge={confirmBridge}
           />
@@ -364,6 +372,8 @@ function AgentSummary({
   onConfirm,
   bridgeRun,
   bridgeBusy,
+  bridgeAcked,
+  onAckChange,
   mint,
   onConfirmBridge,
 }: {
@@ -375,8 +385,10 @@ function AgentSummary({
   onConfirm: (plan: unknown[]) => void;
   bridgeRun: any;
   bridgeBusy: boolean;
+  bridgeAcked: boolean;
+  onAckChange: (v: boolean) => void;
   mint: any;
-  onConfirmBridge: (amountUsdc: number, destinationKey: string) => void;
+  onConfirmBridge: (amountUsdc: number, destinationKey: string, ackToken?: string) => void;
 }) {
     // ⭐ ONE ANSWER TO "DID IT ARRIVE, AND HOW MUCH". Resolves a burnHash against the
     // chain-verified receipts and returns BOTH the claim and the number together, so no
@@ -425,8 +437,58 @@ function AgentSummary({
           Funds leave Arc — the burn is instant, the destination mint follows in ~1–2 min.
         </div>
 
+        {/* ── THE FEE BAND, ON THE SURFACE USERS ACTUALLY REACH ─────────────────────────
+            agent-act's quote already carries feeDisclosure, so this discloses BEFORE the
+            submit rather than round-tripping through a refusal. The band is computed
+            server-side by bridgeFeeBand() and threaded — this renders the verdict, it does
+            not re-derive one from feeUsdc and amountUsdc. Re-deriving per surface is how
+            the same bridge came to behave differently on two pages. */}
+        {b.feeDisclosure?.band === "warn" && (
+          <div className="status" style={{ color: "var(--warn)", marginBottom: 8 }}>
+            Heads up — {(b.feeDisclosure.feeRatio * 100).toFixed(1)}% of this bridge goes to the
+            network fee. The fee is flat, so bridging more at once costs the same.
+          </div>
+        )}
+        {b.feeDisclosure?.band === "acknowledge" && (
+          <div
+            className="status"
+            style={{ border: "1px solid var(--warn)", borderRadius: 8, padding: 12, marginBottom: 8 }}
+          >
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>
+              This bridge loses {(b.feeDisclosure.feeRatio * 100).toFixed(1)}% to fees
+            </div>
+            <div style={{ lineHeight: 1.5 }}>
+              {Number(b.feeUsdc) > Number(b.netUsdc) ? (
+                <>
+                  More goes to the fee ({Number(b.feeUsdc).toFixed(4)} USDC) than arrives
+                  ({Number(b.netUsdc).toFixed(4)} USDC).{" "}
+                </>
+              ) : null}
+              The cross-chain fee is flat, so it costs the same whether you bridge 0.1 or 100 USDC —
+              on a small amount that is most of it. Bridging a larger amount at once, or not bridging,
+              both leave you with more.
+            </div>
+            <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 10, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={bridgeAcked}
+                onChange={(e) => onAckChange(e.target.checked)}
+                style={{ marginTop: 3 }}
+              />
+              <span style={{ lineHeight: 1.5 }}>
+                I understand most of this amount will be spent on the network fee, and I want to
+                bridge anyway.
+              </span>
+            </label>
+          </div>
+        )}
+
         {!bridgeRun && (
-          <button className="emerald" disabled={bridgeBusy} onClick={() => onConfirmBridge(b.amountUsdc, b.destination.key)}>
+          <button
+            className="emerald"
+            disabled={bridgeBusy || (b.feeDisclosure?.band === "acknowledge" && !bridgeAcked)}
+            onClick={() => onConfirmBridge(b.amountUsdc, b.destination.key, b.feeDisclosure?.ackToken)}
+          >
             {bridgeBusy ? "Bridging…" : "Confirm & bridge"}
           </button>
         )}

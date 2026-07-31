@@ -56,9 +56,13 @@ REFUSES on a dirty surface** (`f06469e`). ⭐ The stamp had always MEASURED `dir
 acted on it — the same gap the schedule assertion closed. A measured-and-displayed value that
 nothing refuses on is a value that gets scrolled past.
 
-🚨 **`netlify logs` DOES NOT SURFACE console OUTPUT — do not build a check on it.** Measured
-2026-07-31 on this deploy: two unauthenticated probes of `bridge-mint-settle-background` appear as
-**empty `INFO` lines** — the invocation is listed, the message text never is. `a652ab6` added
+🚨 **`netlify logs` DROPS console OUTPUT FOR `*-background` FUNCTIONS — do not build a check on
+one.** Measured 2026-07-31: unauthenticated probes of `bridge-mint-settle-background` appear as
+**empty `INFO` lines** — the invocation is listed, the message text never is.
+⚠️ **NARROWLY SCOPED, corrected 2026-08-01:** this is NOT true of every function. The same query
+against `agent-bridge` returns full text (`[bridge-receipt] settle trigger sent … status=202`), and
+both appeared in one output. An earlier note here said "console output" flatly; that was too broad
+and would have discouraged logging on the many surfaces where it works. `a652ab6` added
 REFUSED/ACCEPTED log lines intending to make the internal-auth guard observable; **that does not
 work**, and the constraint was already written down at `job-bridge-receipt-background.mjs:50-54`,
 which is exactly why that verifier attaches telemetry to the RECORD instead. The lines are kept

@@ -127,6 +127,16 @@ export async function handler(event) {
         // The discriminator constraint 2 turns on. It NEVER advances on its own.
         delivery: "predicted",
         amountDelivered: null,
+        // ⭐ THE GATE LEAVES EVIDENCE. Without these the receipt could not answer "was the
+        // user warned, and did they accept?" — for a disclosure whose whole purpose is
+        // consent to lose most of the amount, that belonged in the record rather than in
+        // someone's memory of what the screen said. All server-sourced: `feeBand` is what
+        // we priced, `acknowledged` is true only because the token we recomputed matched.
+        feeRatio: r.feeRatio ?? null,
+        ackBand: r.feeBand ?? null,
+        ackRequired: r.ackRequired ?? false,
+        ackAcceptedAt: r.acknowledged ? burnedAt : null,
+        ackToken: r.ackToken ?? null,
       });
       // AWAIT THE TRIGGER — see the block comment on triggerSettle. This waits only for
       // the background function to ACK (202, immediate); it does not host the 4-minute

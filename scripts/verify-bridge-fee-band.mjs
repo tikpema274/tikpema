@@ -150,6 +150,46 @@ section("6 — THE TRIGGER MUST BE AWAITED (the bug that stranded 0x0175cf7b…)
   check("  …and the recovery is bounded so a page load cannot fan out", /slice\(0, 3\)/.test(readEndpoint));
 }
 
+section("7 — THE GATE EXISTS ON BOTH SURFACES, AND LEAVES EVIDENCE");
+{
+  // 🚨 THE DEFECT THIS PINS. The same 0.1 USDC bridge behaved differently by surface: the
+  // Bridge page disclosed that the fee EXCEEDS the arrival and required a tick, while the
+  // agent panel — the plain-language surface a user is most likely to reach — was refused
+  // server-side with NO disclosure and NO way to accept. A dead end, not a gate. The honest
+  // path was the one users were least likely to find.
+  const client = readFileSync(new URL("../src/lib/agentClient.ts", import.meta.url), "utf8");
+  check("⭐⭐ the agent client can CARRY an ack token (it could not, so that path was a dead end)",
+    /bridge: \(amountUsdc: number, destination: string, token: string, ackToken\?: string\)/.test(client) &&
+    /\{ amountUsdc, destination, ackToken \}/.test(client));
+
+  const panel = readFileSync(new URL("../src/components/MyAgentPanel.tsx", import.meta.url), "utf8");
+  check("⭐⭐ the agent panel RENDERS the acknowledge disclosure", /feeDisclosure\?\.band === "acknowledge"/.test(panel));
+  check("⭐ …gates its button on the tick", /b\.feeDisclosure\?\.band === "acknowledge" && !bridgeAcked/.test(panel));
+  check("⭐ …passes the token through on confirm", /onConfirmBridge\(b\.amountUsdc, b\.destination\.key, b\.feeDisclosure\?\.ackToken\)/.test(panel));
+  check("  …and surfaces the warn band too, not only the hard gate", /feeDisclosure\?\.band === "warn"/.test(panel));
+  check("⭐ …says plainly when the fee EXCEEDS the arrival", /More goes to the fee/.test(panel));
+  // Receipt refresh rides the same path — one missing wiring caused two symptoms.
+  check("⭐⭐ the agent panel refreshes receipts, so recovery is reachable from it",
+    /const loadReceipts = async/.test(panel) && /await loadReceipts\(\)/.test(panel));
+
+  // The gate must leave evidence, SERVER-SOURCED. A client-asserted "I accepted" is worthless.
+  const actions = readFileSync(new URL("../netlify/functions/_actions.mjs", import.meta.url), "utf8");
+  check("⭐⭐ a SUCCESSFUL bridge reports the band it was priced under", /feeBand: bandInfo\.band/.test(actions));
+  check("⭐⭐ …and `acknowledged` is set by the server that verified the token, not by the caller",
+    /acknowledged: bandInfo\.band === "acknowledge"/.test(actions));
+
+  const bridgeFn = readFileSync(new URL("../netlify/functions/agent-bridge.mjs", import.meta.url), "utf8");
+  check("⭐⭐ the receipt records ackBand and ackAcceptedAt — consent survives the session",
+    /ackBand: r\.feeBand/.test(bridgeFn) && /ackAcceptedAt: r\.acknowledged \? burnedAt : null/.test(bridgeFn));
+  check("  …and the owner-scoped read projects them",
+    /ackAcceptedAt: r\.ackAcceptedAt/.test(readFileSync(new URL("../netlify/functions/bridge-receipts.mjs", import.meta.url), "utf8")));
+
+  // The log claim was too broad and is now scoped.
+  const settler = readFileSync(new URL("../netlify/functions/bridge-mint-settle-background.mjs", import.meta.url), "utf8");
+  check("⭐ the log-drop claim is scoped to *-background, not all functions",
+    /it is \*-background functions whose console output is dropped, NOT every/.test(settler));
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

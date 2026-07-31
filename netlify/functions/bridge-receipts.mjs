@@ -90,6 +90,11 @@ export async function handler(event) {
       // Surfaced so the UI can be loud about the state that needs a human.
       irisClaimedMintTxHash: r.irisClaimedMintTxHash ?? null,
       verifyFailure: r.verifyFailure ?? null,
+      // The disclosure that was shown and (if required) accepted.
+      feeRatio: r.feeRatio ?? null,
+      ackBand: r.ackBand ?? null,
+      ackRequired: r.ackRequired ?? false,
+      ackAcceptedAt: r.ackAcceptedAt ?? null,
     })),
     degraded,
   });
