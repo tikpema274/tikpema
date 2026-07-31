@@ -19,7 +19,9 @@
     "test:dca": "node scripts/verify-dca-ledger-failclosed.mjs",
     "test:ub": "node scripts/verify-ub-auto-allocation.mjs",
     "test:research": "node scripts/verify-citation-derivation.mjs",
-    "test:copy": "node scripts/verify-unified-balance-copy.mjs"
+    "test:copy": "node scripts/verify-unified-balance-copy.mjs",
+    "hooks:install": "git config core.hooksPath .githooks && echo \"core.hooksPath -> .githooks\"",
+    "postinstall": "git config core.hooksPath .githooks 2>/dev/null || true"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",

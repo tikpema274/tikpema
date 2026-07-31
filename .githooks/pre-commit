@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# pre-commit — scan STAGED changes for secrets before they enter history.
+#
+# ═══ WHY THIS LIVES HERE AND NOT IN .git/hooks/ ══════════════════════════════════════════
+# .git/hooks/ IS NOT VERSION-CONTROLLED. A hook installed there exists only on the machine
+# that installed it and is ABSENT on every fresh clone — including the clone a collaborator,
+# a judge, or a future you makes. The guard would be missing exactly where nobody knows to
+# look for it. So the hook is TRACKED here and activated by pointing git at this directory:
+#
+#     git config core.hooksPath .githooks        # run once per clone
+#
+# `npm run hooks:install` does that, and `npm install` runs it automatically via postinstall.
+#
+# ═══ WHAT THIS DOES AND DOES NOT PROMISE ═════════════════════════════════════════════════
+# ⚠️ IT RAISES THE FLOOR. IT DOES NOT CLOSE THE DOOR. Be honest about both limits:
+#   · `git commit --no-verify` skips it entirely, by design and by one flag;
+#   · there is NO CI BACKSTOP — deploys are CLI-only (`netlify deploy --prod`), so nothing
+#     re-scans server-side. This hook is the only automated check, and it is opt-outable.
+# A determined or hurried commit gets through. That is acceptable for what it costs; it is
+# not acceptable to describe this as "secrets cannot be committed".
+#
+# ⭐ `protect --staged`, NOT `detect`. protect scans only what is staged, which is fast
+# enough to run on every commit. `detect` walks history and would make this hook slow enough
+# that people disable it — which is how hooks die, and a dead hook still looks installed.
+
+set -uo pipefail
+
+BOLD=$'\033[1m'; RED=$'\033[31m'; GRN=$'\033[32m'; YEL=$'\033[33m'; OFF=$'\033[0m'
+
+# ── 1. THE BINARY MUST EXIST, OR WE BLOCK ────────────────────────────────────────────────
+# 🚨 A hook that no-ops when gitleaks is missing is ABSENT PRECISELY ON A NEW MACHINE — the
+# fresh clone with no tooling, which is the case this hook exists for. That is
+# absence-reads-as-safe living inside the guard itself: the commit succeeds, the check never
+# ran, and nothing says so. So: missing binary ⇒ FAIL CLOSED, with the install command.
+if ! command -v gitleaks >/dev/null 2>&1; then
+  cat >&2 <<EOF
+${RED}${BOLD}✖ pre-commit BLOCKED — gitleaks is not installed.${OFF}
+
+This hook fails closed on purpose. A missing scanner means the commit was NOT
+checked, and a silent pass would be indistinguishable from a clean scan.
+
+Install it, then commit again:
+
+  ${BOLD}macOS${OFF}        brew install gitleaks
+  ${BOLD}Linux/WSL${OFF}    VER=\$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep -oP '"tag_name":\\s*"v\\K[^"]+')
+                curl -sL "https://github.com/gitleaks/gitleaks/releases/download/v\${VER}/gitleaks_\${VER}_linux_x64.tar.gz" \\
+                  | tar xz gitleaks && sudo mv gitleaks /usr/local/bin/
+  ${BOLD}Go${OFF}           go install github.com/gitleaks/gitleaks/v8@latest
+
+To commit anyway (you are choosing to skip the scan): git commit --no-verify
+EOF
+  exit 1
+fi
+
+# ── 2. REPORT WHAT WAS SCANNED, NOT JUST THE VERDICT ─────────────────────────────────────
+# ⭐ "✅ no leaks found" is unfalsifiable by inspection: it looks IDENTICAL whether it scanned
+# 14 files or zero. A count someone can sanity-check against what they just staged is the
+# difference between a verdict and evidence. Same reason the money-path checks print arms
+# and byte counts rather than a bare PASS.
+STAGED_COUNT=$(git diff --cached --name-only --diff-filter=ACMR | wc -l | tr -d ' ')
+
+if [ "$STAGED_COUNT" -eq 0 ]; then
+  echo "${YEL}⚠ pre-commit: nothing staged — no scan performed.${OFF}" >&2
+  exit 0
+fi
+
+REPORT="$(mktemp -t gitleaks-precommit.XXXXXX.json)"
+trap 'rm -f "$REPORT"' EXIT
+
+gitleaks protect --staged \
+  --redact \
+  --report-format json \
+  --report-path "$REPORT" \
+  --no-banner >/dev/null 2>&1
+STATUS=$?
+
+LEAKS=0
+if [ -s "$REPORT" ]; then
+  LEAKS=$(grep -o '"RuleID"' "$REPORT" | wc -l | tr -d ' ')
+fi
+
+if [ "$STATUS" -ne 0 ] && [ "$LEAKS" -gt 0 ]; then
+  echo "" >&2
+  echo "${RED}${BOLD}✖ pre-commit BLOCKED — ${LEAKS} potential secret(s) in ${STAGED_COUNT} staged file(s).${OFF}" >&2
+  echo "" >&2
+  gitleaks protect --staged --redact --no-banner 2>&1 | sed 's/^/    /' >&2
+  cat >&2 <<EOF
+
+${BOLD}If it is REAL:${OFF} do not just unstage it — if it ever reached a remote, ROTATE the
+credential. History rewrites do not reach forks, clones or GitHub's caches;
+rotation is what actually invalidates the exposure.
+
+${BOLD}If it is a FALSE POSITIVE:${OFF} add its fingerprint to .gitleaksignore WITH A REASON.
+An entry without a reason is how a real finding gets silenced later.
+EOF
+  exit 1
+fi
+
+# A non-zero status with no parsed findings means the scanner itself failed (bad config,
+# unreadable report). Do not treat a broken scanner as a clean scan — that is the same
+# absence-reads-as-safe trap as the missing binary, one layer in.
+if [ "$STATUS" -ne 0 ]; then
+  echo "${RED}${BOLD}✖ pre-commit BLOCKED — gitleaks exited ${STATUS} but reported no findings.${OFF}" >&2
+  echo "  The scan did not complete, so the commit is UNCHECKED. Re-run:" >&2
+  echo "    gitleaks protect --staged --verbose" >&2
+  exit 1
+fi
+
+echo "${GRN}✔ gitleaks: 0 leaks in ${STAGED_COUNT} staged file(s).${OFF} (staged only; --no-verify bypasses this)"
+exit 0

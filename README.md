@@ -53,6 +53,27 @@ npm run dev                   # netlify dev: serves frontend + /api functions to
 ```
 `netlify dev` is required (not plain `vite`) so the `/api/agent-*` functions run locally.
 
+### 3b. Secret-scanning pre-commit hook (one line, per clone)
+```bash
+npm run hooks:install        # git config core.hooksPath .githooks
+```
+`npm install` already runs this via `postinstall`, so most people get it for free. Run it
+manually if you cloned without installing.
+
+The hook lives in **`.githooks/`, which is tracked** — `.git/hooks/` is not version-controlled,
+so a hook installed there would be missing on every fresh clone, which is exactly where nobody
+thinks to look for it. It runs `gitleaks protect --staged` (staged changes only, so it's fast
+enough to survive daily use) and **fails closed if `gitleaks` isn't installed** — a scanner that
+silently no-ops when absent is missing precisely on a new machine. The error message carries the
+install command for macOS, Linux/WSL and Go.
+
+Known false positives live in **`.gitleaksignore`, each with its reason** — an allowlist entry
+without a reason is how a real finding gets silenced later.
+
+⚠️ **It raises the floor; it does not close the door.** `git commit --no-verify` skips it, and
+there is **no CI backstop** — deploys are CLI-only, so nothing re-scans server-side. Treat it as
+a cheap net, not a guarantee.
+
 ### 4. Bootstrap the agent (one time)
 Click **Init + register agent** in the UI (or `POST /api/agent-init`). It creates the
 agent's SCA wallet and registers ERC-8004 identity. **Copy the returned ids into your
