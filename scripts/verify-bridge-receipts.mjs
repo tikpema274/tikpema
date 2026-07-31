@@ -135,6 +135,19 @@ await seed();
   mem.clear();
   const missing = await call({ owner: OWNER, burnHash: BURN }, true);
   check("  …an absent receipt is 404, not an invented one", missing.statusCode === 404);
+
+  // ⚠️ A background function's return value is DISCARDED — Netlify answers 202 to every
+  // caller, so the 401 above never reaches the wire and an external probe cannot tell
+  // "refused" from "ran". The log lines are the ONLY externally checkable evidence, so
+  // they are pinned here: lose them and the guard silently becomes unverifiable again.
+  const settlerSrc = await import("node:fs").then((fs) =>
+    fs.readFileSync("netlify/functions/bridge-mint-settle-background.mjs", "utf8")
+  );
+  check("⭐⭐ the refusal is LOGGED — a 202 alone cannot prove it refused", /REFUSED — no valid x-internal-token/.test(settlerSrc));
+  check("⭐⭐ acceptance is logged TOO — silence must not have to mean 'refused'", /ACCEPTED — internal token valid/.test(settlerSrc));
+  check("  …and the wrong-method refusal is logged as well", /REFUSED — method/.test(settlerSrc));
+  check("⭐ requireInternal is checked BEFORE connectBlobs — no store touched on refusal",
+    settlerSrc.indexOf("requireInternal(event)") < settlerSrc.indexOf("connectBlobs(event)"));
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════

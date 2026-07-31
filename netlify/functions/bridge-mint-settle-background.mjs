@@ -55,8 +55,29 @@ const LEASE_MS = 5 * 60 * 1000; // > the poll window, so a live loop always hold
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export async function handler(event) {
-  if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
-  if (!requireInternal(event)) return json(401, { error: "internal only" });
+  // ⚠️ A BACKGROUND FUNCTION'S RETURN VALUE IS DISCARDED. Netlify answers every caller
+  // 202 with an empty body — including a caller with no token, a bogus token, or the
+  // wrong HTTP method. So the `json(401)` below is NEVER TRANSMITTED, and an external
+  // probe cannot tell "refused" from "ran to completion": both look like 202.
+  //
+  // That is not a hole — requireInternal still runs, before any read or write — but it
+  // makes the guard UNOBSERVABLE from outside, and an unobservable guard is one nobody
+  // can prove still works. These two log lines are the only externally checkable
+  // evidence, so BOTH sides are logged: refusal AND acceptance. Logging only the
+  // refusal would mean an accepted call left no trace, and silence would have to be
+  // read as "it refused" — an absence standing in for a safety property, which is the
+  // failure this repo keeps re-learning.
+  //
+  //   netlify logs --source functions --function bridge-mint-settle-background --since 10m
+  if (event.httpMethod !== "POST") {
+    console.warn(`[bridge-settle] REFUSED — method ${event.httpMethod} (POST only)`);
+    return json(405, { error: "POST only" });
+  }
+  if (!requireInternal(event)) {
+    console.warn("[bridge-settle] REFUSED — no valid x-internal-token; nothing was read or written");
+    return json(401, { error: "internal only" });
+  }
+  console.log("[bridge-settle] ACCEPTED — internal token valid, proceeding");
   if (event.blobs) connectBlobs(event);
 
   const { owner, burnHash } = parseBody(event); // KEYS, not claims
