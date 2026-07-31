@@ -35,6 +35,24 @@ const pad32 = (h) => h.replace(/^0x/, "").padStart(64, "0");
 const word = (n) => pad32(BigInt(n).toString(16));
 
 // ── fixtures ──────────────────────────────────────────────────────────────────────────────────
+// ⚠️ THESE TWO PRIVATE KEYS ARE PUBLIC BY DESIGN — NOT A LEAK, NOTHING TO ROTATE.
+// They are the CANONICAL ANVIL / HARDHAT DEFAULT TEST KEYS, published verbatim in the
+// Foundry and Hardhat docs and printed by `anvil` on every start. Every developer on earth
+// already has them, which is exactly why they are safe to commit and why a secret scanner
+// flagging them (gitleaks `generic-api-key`, on entropy) is a FALSE POSITIVE.
+//
+//   KEY       = anvil account #1 -> 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+//   OTHER_KEY = anvil account #5 -> 0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc
+//
+// They are used here ONLY as signing keypairs against mockClient() below — this suite makes
+// no network calls and holds no funds. Nothing in this repo funds these addresses and no
+// test depends on their balances. ⚠️ They DO carry Arc-testnet balance put there by faucets
+// and other developers (they are a shared public sandbox); anyone can sweep it at any time.
+// Never send anything you care about to them, and never reuse them for a real account.
+//
+// ⭐ RULE THIS ENCODES: a key in a repo is assumed real until proven otherwise. If you add
+// another test keypair, say WHICH well-known key it is right here — the cost of the doubt
+// lands on whoever reads this next, and on a public repo that is everyone.
 const KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 const OTHER_KEY = "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba";
 const owner = privateKeyToAccount(KEY);
