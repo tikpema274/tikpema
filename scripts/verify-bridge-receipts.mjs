@@ -304,7 +304,17 @@ section("8 — THE 202 PENDING-BURN PATH WRITES NO RECEIPT");
   const src = await import("node:fs").then((fs) => fs.readFileSync("netlify/functions/agent-bridge.mjs", "utf8"));
   check("⭐ the receipt write is gated on a real burnHash", /if \(r\.burnHash\)/.test(src));
   check("⭐⭐ the write is awaited (an un-awaited write can be frozen away)", /await writeReceiptNeverThrows\(/.test(src));
-  check("⭐⭐ the settler trigger is NOT awaited — no 4-min loop in a sync handler", /\n\s*triggerSettle\(\{/.test(src));
+  // 🚨 THIS CHECK USED TO ASSERT THE OPPOSITE, and it passed for the whole life of the bug.
+  // It read "the settler trigger is NOT awaited — no 4-min loop in a sync handler", conflating
+  // two different things: not hosting the POLL (correct) and not awaiting the TRIGGER (the
+  // defect). Burn 0x0175cf7b… stranded for three hours because an un-awaited fetch is frozen
+  // away when the handler returns. A test can pin a bug as an invariant; when the fix landed,
+  // this is the assertion that failed. ⭐ The poll is bounded by the settler being a separate
+  // background function, NOT by whether the caller awaits the 202.
+  check("⭐⭐ the settler trigger IS awaited — an un-awaited fetch may never be sent",
+    /await triggerSettle\(\{/.test(src));
+  check("  …and the 4-minute poll still lives in the background function, not this handler",
+    !/MAX_POLLS|for \(let i = 0; i < 48/.test(src));
   check("  …and the handler never branches on the write result", !/writeReceiptNeverThrows\([\s\S]{0,400}?\)\s*;?\s*if\s*\(/.test(src));
   const toml = await import("node:fs").then((fs) => fs.readFileSync("netlify.toml", "utf8"));
   check("⭐⭐ the settler has NO public /api route", !/bridge-mint-settle/.test(toml.replace(/#.*$/gm, "")));

@@ -260,7 +260,7 @@ async function analyseBridge({ destination, amountUsdc }) {
   facts.push(`The fee is ${pct(burn)}% of the amount — and it is taken OUT of what you send.`);
 
   if (net <= 0) {
-    return { verdict: "refuse", headline: `The fee (${feeUsdc.toFixed(2)}) meets or exceeds the amount — nothing would arrive.`, facts, feeUsdc, netUsdc: net };
+    return { verdict: "refuse", headline: `The fee (${feeUsdc.toFixed(4)}) meets or exceeds the amount — nothing would arrive.`, facts, feeUsdc, netUsdc: net };
   }
   if (burn >= 0.10) {
     return {

@@ -390,17 +390,23 @@ export function useWallet() {
   // NOT agent-execute-plan, NOT the bridge kit directly. Returns after the Arc burn
   // lands; the destination mint is async (~10–20 min) — poll with checkBridgeStatus.
   const bridgeFromAgent = useCallback(
-    async (amountUsdc: number, destination: string) => {
+    async (amountUsdc: number, destination: string, ackToken?: string) => {
       const token = await ensureSession();
       const r = await fetch("/api/agent-bridge", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ amountUsdc, destination }),
+        body: JSON.stringify({ amountUsdc, destination, ackToken }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data?.error || "Bridge failed");
       // A cap / fee-floor block returns HTTP 200 { executed:false, blocked } — surface
       // it as an error rather than a silent no-op.
+      //
+      // ⭐ EXCEPT the high-fee band, which is SATISFIABLE: it carries a feeDisclosure and
+      // an ackToken, and the caller is meant to show the disclosure and retry WITH the
+      // token. Throwing there would turn "confirm you accept this" into "it failed", and
+      // the user would have no way to proceed. Returned, not thrown.
+      if (data?.executed === false && data?.feeDisclosure?.ackToken) return data;
       if (data?.executed === false) throw new Error(data?.blocked || "Bridge did not execute");
       refreshAgentWallet().catch(() => {});
       return data; // { executed, state, burnHash, tx, destination, feeUsdc, netUsdc } | 202 { pending }

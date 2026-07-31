@@ -2,7 +2,7 @@ import { circle, waitForTx } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc, bridgeCapUsdc, swapCapUsdc, vaultDepositCapUsdc } from "./_arc.mjs";
 import { agentSwap, valueInUsdc, SWAP_TOKENS } from "./_swap.mjs";
 import { agentPay } from "./_pay.mjs";
-import { agentBridge, bridgeFee, resolveDestination } from "./_bridge.mjs";
+import { agentBridge, bridgeFee, resolveDestination, bridgeFeeBand, bridgeAckToken } from "./_bridge.mjs";
 import { resolveVault, inspectVault, gateDeposit, vaultDeposit, vaultWithdraw, readShareBalance } from "./_vault.mjs";
 import { canSpendDay, recordAgentSpend } from "./_budget.mjs";
 import { AGENT } from "./_agents.mjs";
@@ -335,8 +335,33 @@ export async function executeAction(step, ctx) {
     if (fee.maxFee >= fee.amountMinor) {
       return {
         ok: false,
-        blocked: `amount too small — the bridge fee to ${dest.label} is ~${fee.feeUsdc.toFixed(2)} USDC right now (≥ your ${amount} USDC), so nothing would arrive`,
+        blocked: `amount too small — the bridge fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC right now (≥ your ${amount} USDC), so nothing would arrive`,
       };
+    }
+
+    // ── THE BAND GATE — disclosure alone is not consent ──────────────────────────────
+    // The floor above only fires when NOTHING would arrive. Between "covers the fee" and
+    // "worth doing" sits a gap where a bridge succeeds while most of the money becomes
+    // fee (0.1 USDC → 53% gone, and it clears the floor). At/above the acknowledge band
+    // we REFUSE until the caller returns the exact ackToken for the disclosure they saw —
+    // the same fail-closed shape as the vault deposit gate (_vault.mjs gateDeposit), and
+    // for the same reason: a warning someone scrolls past is not acceptance.
+    // ⚠️ The refusal is NOT a new floor. It is satisfiable — by acknowledging.
+    const bandInfo = bridgeFeeBand({ amountUsdc: amount, feeUsdc: fee.feeUsdc, netUsdc: fee.netUsdc });
+    if (bandInfo.band === "acknowledge") {
+      const expected = bridgeAckToken({ destinationKey: dest.key, amountUsdc: amount, band: bandInfo.band });
+      if (step.ackToken !== expected) {
+        const pct = (bandInfo.feeRatio * 100).toFixed(1);
+        return {
+          ok: false,
+          blocked:
+            `this bridge would lose ${pct}% to fees — the fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC ` +
+            `of your ${amount} USDC, so only ~${fee.netUsdc.toFixed(4)} would arrive. Confirm you accept that before it runs.`,
+          // Threaded so the UI renders the disclosure and can return the ack — it never
+          // re-derives the band from the two numbers.
+          feeDisclosure: { ...bandInfo, destinationKey: dest.key, amountUsdc: amount, ackToken: expected },
+        };
+      }
     }
     const r = await agentBridge({ walletAddress, destination: dest.key, amountUsdc: amount });
     await ledger();

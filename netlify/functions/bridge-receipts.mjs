@@ -1,7 +1,7 @@
 import { connectBlobs } from "./_blobs.mjs";
 import { json } from "./_arc.mjs";
-import { requireSession } from "./_auth.mjs";
-import { listByOwner } from "./_bridge-receipts.mjs";
+import { requireSession, internalToken } from "./_auth.mjs";
+import { listByOwner, isPastDeadline } from "./_bridge-receipts.mjs";
 
 // GET|POST /api/bridge-receipts   (auth required)
 //
@@ -26,6 +26,43 @@ export async function handler(event) {
   if (!session) return json(401, { error: "Authentication required" });
 
   const { receipts, degraded } = await listByOwner(session.address);
+
+  // ── SELF-HEALING: RE-TRIGGER A STRANDED SETTLE ───────────────────────────────────
+  // A single fire-and-forget trigger is one lost request away from a receipt that sits
+  // at `burn_confirmed` forever — which the panel renders as "in flight" indefinitely,
+  // the exact failure this design exists to remove. Burn 0x0175cf7b… proved it: three
+  // hours stranded while the mint had actually landed.
+  //
+  // Awaiting the trigger (agent-bridge.mjs) fixes the common case; this covers the rest
+  // — a trigger that was sent and lost, a settler that died mid-poll, a deploy that
+  // interrupted one. The client already calls this endpoint on mount, so recovery costs
+  // no cron and happens exactly when someone is looking.
+  //
+  // ⚠️ THIS ENDPOINT STILL WRITES NOTHING ITSELF. It asks the internal settler to run;
+  // the settler owns every write and is idempotent and lease-guarded, so a duplicate
+  // trigger costs a wasted read, never a wrong receipt. Only receipts PAST THE DEADLINE
+  // and holding no lease qualify — a healthy in-flight bridge is left alone.
+  const stranded = receipts.filter(
+    (r) => r.state === "burn_confirmed" && !r.settlingSince && isPastDeadline(r)
+  );
+  for (const r of stranded.slice(0, 3)) { // bounded: a page load must not fan out
+    try {
+      const base =
+        process.env.DEPLOY_URL ||
+        `${event.headers?.["x-forwarded-proto"] || "https"}://${event.headers?.host}`;
+      // Awaited for the same reason agent-bridge awaits it: an un-awaited fetch in a
+      // handler that then returns may never be sent at all. The settler acks 202 at once.
+      const res = await fetch(`${base}/.netlify/functions/bridge-mint-settle-background`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-internal-token": internalToken() },
+        body: JSON.stringify({ owner: session.address, burnHash: r.burnHash }),
+      });
+      console.log(`[bridge-receipt] RE-TRIGGERED stranded settle burnHash=${r.burnHash} status=${res.status}`);
+    } catch (e) {
+      // Swallowed: recovery is best-effort and must never break the read it rides on.
+      console.warn(`[bridge-receipt] re-trigger failed (swallowed) burnHash=${r.burnHash}: ${e?.message}`);
+    }
+  }
 
   // ⚠️ `degraded` is the difference between "you have no bridges in flight" and "we
   // could not look". An empty list rendered as certainty is exactly the absence-reads-

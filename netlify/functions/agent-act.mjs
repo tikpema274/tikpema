@@ -3,7 +3,7 @@ import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody, dateAnchor, sendCapUsdc, bridgeCapUsdc, swapCapUsdc, maxSpendUsdc } from "./_arc.mjs";
 import { SWAP_TOKENS } from "./_swap.mjs";
 import { executeAction, valueOfStep } from "./_actions.mjs";
-import { resolveDestination, bridgeFee, SUPPORTED_DESTINATION_LABELS } from "./_bridge.mjs";
+import { resolveDestination, bridgeFee, SUPPORTED_DESTINATION_LABELS, bridgeFeeBand, bridgeAckToken } from "./_bridge.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 import { budgetConfig } from "./_budget.mjs";
@@ -232,9 +232,14 @@ export async function handler(event) {
         return json(200, {
           executed: false,
           decision,
-          blocked: `amount too small — the bridge fee to ${dest.label} is ~${fee.feeUsdc.toFixed(2)} USDC right now, so ${amount} USDC wouldn't cover it (nothing would arrive)`,
+          blocked: `amount too small — the bridge fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC right now, so ${amount} USDC wouldn't cover it (nothing would arrive)`,
         });
       }
+      // The band, computed by the SAME helper the execution gate uses. The quote carries
+      // the verdict and the ackToken; the UI renders them and hands the token back. No
+      // surface re-derives a ratio from feeUsdc and amountUsdc — that is how three
+      // renderings of one fact drifted apart in the first place.
+      const band = bridgeFeeBand({ amountUsdc: amount, feeUsdc: fee.feeUsdc, netUsdc: fee.netUsdc });
       return json(200, {
         executed: false,
         needsBridgeConfirm: true,
@@ -245,10 +250,20 @@ export async function handler(event) {
           feeUsdc: Number(fee.feeUsdc.toFixed(6)),
           netUsdc: Number(fee.netUsdc.toFixed(6)),
           cap: bcap,
+          feeDisclosure: {
+            feeRatio: band.feeRatio,
+            band: band.band,
+            // Present only when acceptance is REQUIRED, so its presence is the signal to
+            // gate the button rather than something the client infers from a number.
+            ackToken:
+              band.band === "acknowledge"
+                ? bridgeAckToken({ destinationKey: dest.key, amountUsdc: amount, band: band.band })
+                : null,
+          },
         },
         message:
-          `Bridge ${amount} USDC from Arc to ${dest.label}. The cross-chain fee is ~${fee.feeUsdc.toFixed(2)} USDC ` +
-          `(taken from the amount), so ~${fee.netUsdc.toFixed(2)} USDC arrives on ${dest.label}. ` +
+          `Bridge ${amount} USDC from Arc to ${dest.label}. The cross-chain fee is ~${fee.feeUsdc.toFixed(4)} USDC ` +
+          `(taken from the amount), so ~${fee.netUsdc.toFixed(4)} USDC arrives on ${dest.label}. ` +
           `The Arc burn is instant; the destination mint follows in ~1–2 min. Confirm to bridge.`,
       });
     }

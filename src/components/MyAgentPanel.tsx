@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { agentClient } from "../lib/agentClient";
 import SignInPrompt from "./SignInPrompt";
 import type { useWallet } from "../wallet/useWallet";
@@ -61,6 +61,25 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const [bridgeRun, setBridgeRun] = useState<any>(null);
   const [bridgeBusy, setBridgeBusy] = useState(false);
   const [mint, setMint] = useState<any>(null); // { state: 'pending'|'minted'|'failed', mintTx? }
+
+  // ⭐ THE SINGLE SOURCE OF TRUTH FOR DELIVERY. Chain-verified receipts, owner-scoped
+  // server-side. Every "did it arrive / how much arrived" question on this page answers
+  // from here — never from IRIS, which attests completion but returns no amount.
+  // Before this, three surfaces answered that question three different ways and could
+  // disagree on screen ("Check status: Arrived" beside "in flight").
+  const [bridgeReceipts, setBridgeReceipts] = useState<any[]>([]);
+  const loadReceipts = async () => {
+    try {
+      const d = await w.listBridgeReceipts();
+      setBridgeReceipts(d.receipts || []);
+    } catch {
+      /* read-only enrichment: never break the panel over it */
+    }
+  };
+  useEffect(() => {
+    if (w.agentWallet) loadReceipts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [w.agentWallet?.address]);
   // Per-plan-step destination-mint status, keyed by step index (for bridge steps
   // inside a multi-step plan — Option A: the plan doesn't wait, these poll inline).
   const [planMints, setPlanMints] = useState<Record<number, any>>({});
@@ -147,9 +166,19 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       const res = await agentClient.bridge(amountUsdc, destinationKey, token);
       setBridgeRun(res);
       // Stage 2: the Arc burn is done; poll until Circle's relayer mints (or fails).
+      //
+      // ⚠️ IRIS IS A HINT HERE, NOT THE ANSWER. Its `minted` says an attestation exists;
+      // it carries NO amount and is not a chain read. The displayed arrival comes from
+      // the RECEIPT (chain-verified by the settler), so the poll's only job now is to
+      // tell us WHEN to re-read the receipt. See arrivalFrom() in AgentSummary.
       if (res?.executed && res?.burnHash) {
         setMint({ state: "pending" });
+        await loadReceipts();
         await pollMint(res.burnHash, res.destination.key, token, setMint);
+        // The settler verifies on-chain a moment after IRIS confirms; re-read then, and
+        // again past the Blobs visibility window, rather than trusting one look.
+        await loadReceipts();
+        setTimeout(loadReceipts, 12000);
       }
     } catch (e: any) {
       setBridgeRun({ error: e.message });
@@ -258,6 +287,7 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
             planRun={planRun}
             planBusy={planBusy}
             planMints={planMints}
+            bridgeReceipts={bridgeReceipts}
             onConfirm={confirmPlan}
             bridgeRun={bridgeRun}
             bridgeBusy={bridgeBusy}
@@ -330,6 +360,7 @@ function AgentSummary({
   planRun,
   planBusy,
   planMints,
+  bridgeReceipts,
   onConfirm,
   bridgeRun,
   bridgeBusy,
@@ -340,12 +371,33 @@ function AgentSummary({
   planRun: any;
   planBusy: boolean;
   planMints: Record<number, any>;
+  bridgeReceipts: any[];
   onConfirm: (plan: unknown[]) => void;
   bridgeRun: any;
   bridgeBusy: boolean;
   mint: any;
   onConfirmBridge: (amountUsdc: number, destinationKey: string) => void;
 }) {
+    // ⭐ ONE ANSWER TO "DID IT ARRIVE, AND HOW MUCH". Resolves a burnHash against the
+    // chain-verified receipts and returns BOTH the claim and the number together, so no
+    // caller can pair one source's confidence with another source's figure.
+    // `verified` is true ONLY when the receipt says `minted` AND `delivery === "measured"`
+    // AND an amount is present — the settler sets that combination on exactly one path, a
+    // destination-chain read that succeeded. IRIS can never produce it: it returns no amount.
+    const arrivalFor = (burnHash?: string) => {
+      const rec = burnHash
+        ? bridgeReceipts.find((x: any) => String(x.burnHash).toLowerCase() === String(burnHash).toLowerCase())
+        : null;
+      const verified =
+        rec?.state === "minted" && rec?.delivery === "measured" && rec?.amountDelivered != null;
+      return {
+        verified,
+        amount: verified ? Number(rec.amountDelivered) : null,
+        mintTx: rec?.mintTx ?? null,
+        state: rec?.state ?? null,
+      };
+    };
+    const arrival = arrivalFor(bridgeRun?.burnHash);
   const d = data.decision || {};
 
   if (data.needsConfirmation) {
@@ -362,8 +414,13 @@ function AgentSummary({
           <b>Bridge {b.amountUsdc} USDC → {b.destination.label}</b>
         </div>
         <div style={{ opacity: 0.85, marginBottom: 8 }}>
-          Cross-chain fee ~{Number(b.feeUsdc).toFixed(2)} USDC (taken from the amount) ·
-          {" "}~{Number(b.netUsdc).toFixed(2)} USDC arrives on {b.destination.label}.
+          {/* ⚠️ 4dp MINIMUM ON EVERY BRIDGE AMOUNT. At 2dp the fee and the arrival collapse into
+              the SAME displayed number: bridging 0.1 USDC the true split is 0.0532 fee /
+              0.0468 arriving, and both render "~0.05" — the user cannot see that 53% went to
+              fees. The fee is FLAT, so the smaller the bridge the worse the ratio, and 2dp is
+              exactly where it becomes invisible. USDC is 6dp; never round bridge amounts to 2. */}
+          Cross-chain fee ~{Number(b.feeUsdc).toFixed(4)} USDC (taken from the amount) ·
+          {" "}~{Number(b.netUsdc).toFixed(4)} USDC arrives on {b.destination.label}.
           <br />
           Funds leave Arc — the burn is instant, the destination mint follows in ~1–2 min.
         </div>
@@ -383,10 +440,37 @@ function AgentSummary({
               ✓ Burned on Arc {bridgeRun.tx && <span style={{ marginLeft: 6 }}><TxLink url={bridgeRun.tx} /></span>}
             </div>
             <div style={{ marginTop: 6 }}>
-              {mint?.state === "minted" ? (
+              {/* ⭐ GATE AND FIGURE FROM THE SAME SOURCE.
+                  This line used to read `✓ Minted ~{netUsdc}` where the ✓ came from IRIS
+                  and the NUMBER was `amount − maxFee`, computed at submit time before the
+                  mint existed. It asserted an arrival nobody had verified, and at 2dp the
+                  fee and the arrival printed as the same "~0.05".
+                  Now both halves come from the receipt: if it says `minted` AND carries a
+                  chain-read `amountDelivered`, we claim arrival and print the exact figure.
+                  Otherwise we say the arrival is not yet verified — we do NOT borrow IRIS's
+                  confidence, because a ✓ beside a measured amount would still be a
+                  composite claim, just a better-sourced one. */}
+              {arrival.verified ? (
                 <span>
-                  ✓ Minted ~{Number(bridgeRun.netUsdc).toFixed(2)} USDC on {bridgeRun.destination.label}
+                  ✓ Arrived — <b>exactly {arrival.amount!.toFixed(6)} USDC</b> on {bridgeRun.destination.label}
+                  <span style={{ opacity: 0.7 }}> (read from the destination chain)</span>
+                  {arrival.mintTx && <span style={{ marginLeft: 6 }}><a href={arrival.mintTx} target="_blank" rel="noreferrer">View mint ↗</a></span>}
+                </span>
+              ) : arrival.state === "mint_unverified" ? (
+                <span style={{ color: "var(--warn)" }}>
+                  ⚠ Needs review — Circle reported a mint our own read of {bridgeRun.destination.label} could not
+                  confirm. Deliberately not retried automatically.
+                </span>
+              ) : arrival.state === "mint_unconfirmed" ? (
+                <span style={{ color: "var(--warn)" }}>
+                  Not confirmed in time — the Arc burn is final; the destination mint is <b>unproven</b>.
+                  Estimated {Number(bridgeRun.netUsdc).toFixed(4)} USDC. It may still land.
+                </span>
+              ) : mint?.state === "minted" ? (
+                <span>
+                  Circle reports the mint landed — <b>arrival not yet verified</b> on-chain
                   {mint.mintTx && <span style={{ marginLeft: 6 }}><a href={mint.mintTx} target="_blank" rel="noreferrer">View mint ↗</a></span>}
+                  <span style={{ opacity: 0.7 }}> · estimated {Number(bridgeRun.netUsdc).toFixed(4)} USDC</span>
                 </span>
               ) : mint?.state === "failed" ? (
                 <span style={{ color: "var(--warn)" }}>
@@ -409,13 +493,14 @@ function AgentSummary({
     return (
       <div className="status" style={{ margin: 0 }}>
         <div style={{ marginBottom: 6 }}>
-          <b>Proposed {data.plan.length}-step plan</b> — total ~{Number(data.totalUsdc).toFixed(2)} USDC:
+          <b>Proposed {data.plan.length}-step plan</b> — total ~{Number(data.totalUsdc).toFixed(4)} USDC:
         </div>
         <ol style={{ margin: "0 0 8px 18px", padding: 0 }}>
           {data.plan.map((s: any, i: number) => {
             const r = runResults?.[i];
             const isBridge = r?.kind === "bridge_usdc" || s?.type === "bridge_usdc";
             const m = planMints?.[i];
+            const stepArrival = arrivalFor(r?.burnHash);
             const mark = !r ? "" : r.ok ? " ✓" : " ✗";
             // Non-bridge note; a successful bridge shows its own two-stage line below.
             const note = !r
@@ -442,9 +527,23 @@ function AgentSummary({
                   <div style={{ marginTop: 2, opacity: 0.85, fontSize: "0.92em" }}>
                     burned on Arc{" "}
                     {r.tx && <a href={r.tx} target="_blank" rel="noreferrer">↗</a>} ·{" "}
-                    {m?.state === "minted" ? (
+                    {/* Same rule as the single-action path: the ✓ and the amount come from
+                        the receipt, or neither does. Plan completion used to show checkmarks
+                        and no numbers at all, while `usdcAmount` sat unread in the receipt
+                        job-run-status.mjs:90 already projects. */}
+                    {stepArrival.verified ? (
                       <span>
-                        minted on {r.destination?.label ?? "destination"} ✓{" "}
+                        arrived on {r.destination?.label ?? "destination"} ✓{" "}
+                        <b>exactly {stepArrival.amount!.toFixed(6)} USDC</b>{" "}
+                        {stepArrival.mintTx && <a href={stepArrival.mintTx} target="_blank" rel="noreferrer">↗</a>}
+                      </span>
+                    ) : stepArrival.state === "mint_unverified" ? (
+                      <span style={{ color: "var(--warn)" }}>⚠ mint reported but unverified on-chain — needs review</span>
+                    ) : stepArrival.state === "mint_unconfirmed" ? (
+                      <span style={{ color: "var(--warn)" }}>mint unproven — burn is final, may still land</span>
+                    ) : m?.state === "minted" ? (
+                      <span>
+                        Circle reports minted on {r.destination?.label ?? "destination"} — arrival not yet verified{" "}
                         {m.mintTx && <a href={m.mintTx} target="_blank" rel="noreferrer">↗</a>}
                       </span>
                     ) : m?.state === "failed" ? (

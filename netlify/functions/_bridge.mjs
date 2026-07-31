@@ -16,6 +16,7 @@
 // The fee is VOLATILE (destination gas priced in USDC): ~0.2 USDC to an L2,
 // ~1.5–14 USDC to Ethereum L1. Callers MUST refuse a bridge where fee ≥ amount.
 
+import { createHash } from "node:crypto";
 import { encodeFunctionData, pad, getAddress } from "viem";
 import { circle, waitForTx } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
@@ -128,6 +129,57 @@ export async function bridgeFee({ amountUsdc, cctpDomain }) {
     providerFeeUsdc: toUsdc(providerFee),
     forwarderFeeUsdc: toUsdc(forwarderFee),
   };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════
+// THE FEE BAND — "covers the fee" and "worth doing" are different thresholds
+// ══════════════════════════════════════════════════════════════════════════════════════
+// The fee-floor refuses only when `fee >= amount`, i.e. when NOTHING would arrive. That
+// leaves a wide gap in which a bridge is technically settleable and economically absurd,
+// and nothing sat in it. At today's flat ~0.0532 fee to Base:
+//     1.0   USDC ->  5.3% fee     fine
+//     0.1   USDC -> 53.2% fee     passes the floor, over half the money is gone
+//     0.054 USDC -> 98.5% fee     passes the floor, 0.0008 arrives
+// The fee is FLAT, so the ratio worsens as the amount shrinks — the smaller the bridge,
+// the more it needs saying.
+//
+// ⭐ COMPUTED ONCE, HERE, AND THREADED. Every caller (agent-act's quote, _actions'
+// execution gate, every UI surface) reads the SAME structured verdict rather than
+// re-deriving a ratio from two numbers. That is the refundClass pattern: the producer
+// decides the class, and no surface re-computes it. Three surfaces re-deriving one fact
+// is precisely how this product ended up with three different bridge renderings.
+export const FEE_BAND_WARN = 0.10;        // >=10% of the amount: disclose prominently
+export const FEE_BAND_ACKNOWLEDGE = 0.25; // >=25%: disclosure alone is not consent
+
+/** @returns {{feeRatio:number, band:"none"|"warn"|"acknowledge", feeUsdc:number, netUsdc:number}} */
+export function bridgeFeeBand({ amountUsdc, feeUsdc, netUsdc }) {
+  const amount = Number(amountUsdc);
+  const fee = Number(feeUsdc);
+  // A non-finite or non-positive amount cannot be reasoned about. Return the STRICTEST
+  // band rather than "none": an unknown ratio must never read as a safe one.
+  if (!Number.isFinite(amount) || !Number.isFinite(fee) || amount <= 0) {
+    return { feeRatio: 1, band: "acknowledge", feeUsdc: fee, netUsdc: Number(netUsdc) };
+  }
+  const feeRatio = fee / amount;
+  const band =
+    feeRatio >= FEE_BAND_ACKNOWLEDGE ? "acknowledge" : feeRatio >= FEE_BAND_WARN ? "warn" : "none";
+  return { feeRatio, band, feeUsdc: fee, netUsdc: Number(netUsdc) };
+}
+
+/**
+ * The acknowledgment token, same shape as the vault card's (`ackTokenFor`): a hash of the
+ * disclosure the user actually saw, so a stale acknowledgment cannot be replayed against a
+ * different one.
+ *
+ * ⚠️ IT BINDS TO THE BAND, NOT THE EXACT FEE. The fee is re-quoted live at execution and
+ * moves constantly (0.0541 / 0.053520 / 0.053196 on one route in a single day). Binding to
+ * the number would invalidate every acknowledgment on the next tick and train people to
+ * click through a box that always complains. Binding to the BAND means small drift is
+ * tolerated and crossing into a worse disclosure correctly invalidates the ack.
+ */
+export function bridgeAckToken({ destinationKey, amountUsdc, band }) {
+  const digest = `bridge|${String(destinationKey)}|${Number(amountUsdc)}|band:${band}|v1`;
+  return createHash("sha256").update(digest).digest("hex");
 }
 
 // Build the bridgeWithPreapprovalAndHook calldata (byte-identical to App Kit's

@@ -43,6 +43,12 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
   // ask "what do I have in flight?" without holding the burnHash in memory.
   const [receipts, setReceipts] = useState<any[]>([]);
   const [receiptsDegraded, setReceiptsDegraded] = useState(false);
+  // High-fee band: the server REFUSES until the disclosure is acknowledged, and hands back
+  // the exact token for the disclosure it showed. Same grammar as the vault owner-power
+  // card — disclose, require a tick, and enforce it SERVER-SIDE (the tick alone only
+  // enables the button; _actions re-derives the expected token and compares).
+  const [disclosure, setDisclosure] = useState<any>(null);
+  const [acked, setAcked] = useState(false);
 
   const loadReceipts = async () => {
     try {
@@ -69,14 +75,29 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
     setRun(null);
     setError("");
     setMint(null);
+    // A changed amount or destination invalidates the disclosure AND its acknowledgment —
+    // the ackToken binds to both, so a stale tick must never carry over to a new quote.
+    setDisclosure(null);
+    setAcked(false);
   };
 
   async function bridge() {
     if (!amountValid) return;
+    // Captured BEFORE reset(), which clears the disclosure. Relying on the closure to
+    // out-race a setState is the kind of subtlety that breaks silently later.
+    const ack = acked ? disclosure?.ackToken : undefined;
     reset();
     setBridging(true);
     try {
-      const res = await w.bridgeFromAgent(amountNum, destination);
+      const res = await w.bridgeFromAgent(amountNum, destination, ack);
+      // A high-fee refusal is satisfiable: show the disclosure and let the user accept it.
+      if (res?.executed === false && res?.feeDisclosure) {
+        setDisclosure(res.feeDisclosure);
+        setAcked(false);
+        setError(res.blocked || "This bridge needs your acknowledgment before it can run.");
+        return;
+      }
+      setDisclosure(null);
       setRun(res);
       // Blobs is eventually consistent (~11s), so the receipt we just wrote may not be
       // visible yet. Refresh now AND after the window, rather than concluding absence
@@ -174,7 +195,13 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
         <span className="status" style={{ margin: 0 }}>
           USDC
         </span>
-        <button className="emerald" disabled={bridging || !amountValid} onClick={bridge}>
+        {/* Acceptance gates the button, exactly as the vault card gates its deposit. The
+            server refuses independently — this is the affordance, not the enforcement. */}
+        <button
+          className="emerald"
+          disabled={bridging || !amountValid || (disclosure?.band === "acknowledge" && !acked)}
+          onClick={bridge}
+        >
           {bridging ? "Bridging…" : `Bridge ${amountValid ? amountNum : 0} USDC → ${destLabel}`}
         </button>
       </div>
@@ -188,6 +215,32 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
       {error && (
         <div className="status" style={{ color: "var(--warn)" }}>
           {error}
+        </div>
+      )}
+
+      {/* ── THE FEE BAND — disclosure, then explicit acceptance ─────────────────────────
+          The fee-floor only refuses when NOTHING would arrive. Between that and "worth
+          doing" is a gap where the bridge succeeds and most of the money becomes fee:
+          0.1 USDC to Base loses ~53%, and it clears the floor. A warning someone scrolls
+          past is not consent, so at/above the acknowledge band the action stays DISABLED
+          until this is ticked — and the server refuses independently if the token is
+          missing or stale (fail-closed, exactly like the vault deposit gate). */}
+      {disclosure?.band === "acknowledge" && (
+        <div className="status" style={{ border: "1px solid var(--warn)", borderRadius: 8, padding: 12, marginTop: 8 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            This bridge loses {(disclosure.feeRatio * 100).toFixed(1)}% to fees
+          </div>
+          <div style={{ lineHeight: 1.5 }}>
+            The cross-chain fee is flat, so it costs the same whether you bridge 0.1 or 100 USDC —
+            on a small amount that is most of it. Bridging a larger amount at once, or not bridging,
+            both leave you with more.
+          </div>
+          <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 10, cursor: "pointer" }}>
+            <input type="checkbox" checked={acked} onChange={(e) => setAcked(e.target.checked)} style={{ marginTop: 3 }} />
+            <span style={{ lineHeight: 1.5 }}>
+              I understand most of this amount will be spent on the network fee, and I want to bridge anyway.
+            </span>
+          </label>
         </div>
       )}
 

@@ -21,26 +21,46 @@ import { writeReceiptNeverThrows } from "./_bridge-receipts.mjs";
 //     bypasses them.
 // Returns after the Arc burn lands; the destination mint is async (poll
 // /api/agent-bridge-status with the returned burnHash + destination key).
-// Kick the settler and DO NOT WAIT. Failures are logged and swallowed: the settler is
-// an optimisation over the client's own polling, not a precondition for the bridge
-// having worked. `.catch()` on the promise (rather than await in a try) is what keeps
-// this off the request's critical path.
+// Kick the settler. The FETCH IS AWAITED; only its FAILURE is swallowed.
+//
+// 🚨 THE BUG THIS FIXES (burn 0x0175cf7b…, 2026-07-31). This used to be
+// `fetch(...).catch(...)` with no await, on the reasoning that not awaiting keeps the
+// trigger off the request's critical path. It keeps it off the critical path by never
+// happening: A NETLIFY FUNCTION CAN FREEZE THE MOMENT THE HANDLER RETURNS, so an
+// un-awaited fetch is often never sent. That receipt sat at `burn_confirmed` for three
+// hours with `settlingSince` never set — the settler was never invoked — while the mint
+// had in fact landed on Base. The UI rendered "in flight" indefinitely: the exact
+// "Still bridging forever" failure this whole design existed to remove, reintroduced
+// through a different door.
+//
+// ⚠️ The identical warning was already written twelve lines below, over the receipt
+// write ("an un-awaited write may simply never happen"), and the repo's own precedent
+// awaits its trigger (job-submit-background.mjs:208, `const evalRes = await fetch(...)`).
+// The lesson was applied to the write and violated for the trigger in the same function.
+//
+// Awaiting costs one in-region round trip to a function that returns 202 immediately —
+// it does NOT wait for the settling itself. Errors stay swallowed: the settler is an
+// optimisation over the client's own polling, never a precondition for the bridge
+// having worked, so a trigger failure must not fail a bridge whose money already moved.
 //
 // The body carries KEYS ONLY — owner and burnHash. Everything the settler acts on it
 // reads from the receipt WE wrote. Same discipline as the plan-path verifier: no hash
 // or amount ever enters that system from a caller.
-function triggerSettle({ event, owner, burnHash }) {
+async function triggerSettle({ event, owner, burnHash }) {
   try {
     const base =
       process.env.DEPLOY_URL ||
       `${event.headers?.["x-forwarded-proto"] || "https"}://${event.headers?.host}`;
-    fetch(`${base}/.netlify/functions/bridge-mint-settle-background`, {
+    const r = await fetch(`${base}/.netlify/functions/bridge-mint-settle-background`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-internal-token": internalToken() },
       body: JSON.stringify({ owner, burnHash }),
-    }).catch((e) => console.warn(`[bridge-receipt] settle trigger failed (swallowed): ${e?.message}`));
+    });
+    console.log(`[bridge-receipt] settle trigger sent burnHash=${burnHash} status=${r.status}`);
+    return true;
   } catch (e) {
-    console.warn(`[bridge-receipt] settle trigger threw (swallowed): ${e?.message}`);
+    console.warn(`[bridge-receipt] settle trigger FAILED (swallowed) burnHash=${burnHash}: ${e?.message}`);
+    return false;
   }
 }
 
@@ -51,7 +71,7 @@ export async function handler(event) {
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });
 
-  const { amountUsdc, destination } = parseBody(event);
+  const { amountUsdc, destination, ackToken } = parseBody(event);
   const amount = Number(amountUsdc);
   if (!(amount > 0)) return json(400, { error: "amountUsdc must be > 0" });
   const dest = resolveDestination(destination);
@@ -64,11 +84,17 @@ export async function handler(event) {
   }
   const walletAddress = owner.walletAddress;
 
-  const step = { type: "bridge_usdc", amountUsdc: amount, destination: dest.key, reasoning: `bridge ${amount} USDC to ${dest.label}` };
+  // ackToken is the ONLY client-supplied value that reaches the gate, and it is not
+  // trusted: _actions recomputes the expected token from the destination, amount and band
+  // it priced ITSELF, and compares. A forged or stale token fails the comparison — the
+  // same fail-closed shape as the vault deposit gate.
+  const step = { type: "bridge_usdc", amountUsdc: amount, destination: dest.key, ackToken, reasoning: `bridge ${amount} USDC to ${dest.label}` };
 
   try {
     const r = await executeAction(step, { walletAddress, session });
-    if (!r.ok) return json(200, { executed: false, blocked: r.blocked });
+    // A high-fee refusal carries its disclosure so the panel can render the band and
+    // return the acknowledgment. The refusal is satisfiable, not terminal.
+    if (!r.ok) return json(200, { executed: false, blocked: r.blocked, feeDisclosure: r.feeDisclosure ?? null });
 
     // ── RECEIPT: written AFTER the burn landed, and it MUST NOT be able to fail this
     //    request. The money has already moved by the time we get here, so a Blobs
@@ -102,9 +128,11 @@ export async function handler(event) {
         delivery: "predicted",
         amountDelivered: null,
       });
-      // Fire-and-continue: hand the 4-minute poll to a background function. We never
-      // await its completion — a ~10s sync handler must not host a 4-minute loop.
-      triggerSettle({ event, owner: session.address, burnHash: r.burnHash });
+      // AWAIT THE TRIGGER — see the block comment on triggerSettle. This waits only for
+      // the background function to ACK (202, immediate); it does not host the 4-minute
+      // poll, which still runs off this request. An un-awaited call here is not "fire
+      // and continue", it is "fire and maybe never send".
+      await triggerSettle({ event, owner: session.address, burnHash: r.burnHash });
     }
 
     return json(200, {
