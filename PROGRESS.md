@@ -125,9 +125,92 @@ gate was required — and a gate that fires spuriously TRAINS CLICK-THROUGH AND 
 VALUE.** A consent control that appears when it should not is not a harmless false positive; it is
 the mechanism by which the control stops being read at all.
 
-### 🚨 DIAGNOSABILITY GAP — `agent-act` DOES NOT LOG THE PLAN IT PRICED. BUILD THIS FIRST.
+### ✅ BUILT — `agent-act` NOW RECORDS THE PLAN IT PRICED (the gap below is closed in code)
 
-The quote is the ONE artifact that answers "what was proposed vs what ran", and it is not kept
+**Store `agent-quotes`, key `q/<owner>/<ISO>-<quoteId>`. `netlify/functions/_quote-record.mjs`.
+Suite `npm run test:quote` (also chained into `test:bridge`) — 66/0.**
+
+The quote branch computed `stepDisclosures` and the totals, handed them to the browser and kept
+nothing, so the ack anomaly above was answerable only from a screenshot. It is now persisted:
+raw task text, the brain's steps and its `reasoning`, per-step value, per-step `feeUsdc`/`netUsdc`/
+`feeRatio`/`band`/`ackTokenIssued`, both totals, the model that priced it, and the caps in force at
+quote time. Every field server-sourced; the client sends only `task`.
+
+⭐ **THE JOIN IS THE POINT, AND IT IS ONE IDENTIFIER.** `quoteId` is minted at pricing time,
+echoed to the client, handed back on confirm, and landed on every bridge receipt that plan produces
+(`quoteId` + `quoteStepIndex`). "Proposed vs ran" is now two lookups against one id instead of a
+reconstruction. It is **client-echoed and unverifiable** — a client could send an id from a
+different quote — which is acceptable ONLY because it is a pointer: the record it points at holds
+the priced steps, so a false join is **detectable on inspection**, never authoritative.
+
+🚨 **DIAGNOSTIC ONLY, AND THE PROHIBITION IS STRUCTURAL.** The next reasonable-sounding idea is the
+trap: *"we already have the priced plan stored — validate the confirm against it instead of
+re-pricing."* That deletes the pre-flight re-price, whose whole purpose is that the fee is volatile
+and an on-screen quote goes stale, and makes a stored client-facing value load-bearing for consent.
+⭐ So the module **exports no reader** — no `readQuote`, no `listQuotes`, no `/api` route. Reaching
+the data needs the Netlify CLI, i.e. a human deciding to look. The suite fails the build if a
+reader appears, if a money-path function imports one, or if the re-price/ackToken recomputation
+stops being what decides.
+
+**RETENTION IS A DECISION, NOT A DISCOVERY.** Most quotes are never confirmed, so this store grows
+forever by default. **14-day TTL + a 200-per-owner cap**, pruned by the write path itself (no cron
+to schedule, notice, or keep alive — the code that creates the garbage collects it), hard-bounded
+at 25 deletes per write with the unfinished remainder logged rather than implied away. ⭐ **Two
+bounds because either alone leaks:** the TTL cannot stop a burst inside its window, and the cap is
+what eventually evicts a key whose timestamp cannot be read.
+
+**TWO DEFECTS THE SUITE CAUGHT IN THE PRUNE ITSELF, BOTH FIXED BEFORE SHIPPING:**
+
+1. **The budget is WALL CLOCK; the TTL is LOGICAL.** Deriving the prune deadline from the caller's
+   injected `now` conflated two clocks — the deadline landed in the past and the prune deleted
+   NOTHING while correctly reporting a backlog. In production that reads as a store that never
+   shrinks, with no error anywhere.
+2. 🚨 **`Date.parse` IS LENIENT: `Date.parse("NOT-A-DATE-0")` returns a real year-2000 timestamp.**
+   So a key with no date in it read as a definite, ancient one and was deleted for age, while the
+   code claimed to be conservative about unreadable dates. Same family as every other bug here
+   where an absence quietly filled a result slot. The ISO shape is now checked before parsing.
+
+### ⚠️ A DOCUMENTED FORCED PROMOTE-THEN-PROVE — the quote record (same shape as `_budget.mjs`)
+
+**Shipped to production having never run against a live server.** Every branch is proven by
+injection only (66/0), including the handler end-to-end with its network edges mocked and its real
+pricing intact.
+
+**Why a draft could not prove it — UNAVAILABLE, NOT SKIPPED.** A quote needs an authenticated
+session, and a session needs a real browser wallet connect. Circle client keys are domain-restricted,
+the Passkey Domain must match exactly, and `toCircleSmartAccount` derives the account from the
+passkey — so a draft origin is **a different owner entirely** and connect fails with "Invalid
+credentials". `SESSION_SECRET` is production-only besides. This is the same wall already documented
+for `_budget.mjs` and the bridge settler. A draft `6a6e609e14b3bb1227cdccb8` was built and reached
+`blobs-probe verdict D`, and could confirm only that `agent-act` deploys and 401s — nothing about
+the record.
+
+**Why promoting anyway is defensible here, and would not be in general:**
+
+1. **NOTHING ON THIS PATH MOVES MONEY.** The quote branch proposes; it never executes. The worst
+   available outcome is a missing diagnostic.
+2. **IT CANNOT BREAK QUOTING.** `recordQuoteNeverThrows` swallows everything and the call site is
+   fire-and-continue, suite-proven by injecting a store that throws: the plan is still quoted, with
+   its disclosures intact. Same rule as the receipt write, for the opposite reason — the receipt
+   write may not throw because the money already moved; this may not throw because a diagnostics
+   failure would trade a real capability for an observation.
+3. **IT AUTHORIZES NOTHING**, by absence of mechanism (above), so a wrong record cannot become a
+   wrong decision.
+
+🚨 **THE PROOF IS NOT DEFERRED, IT IS SCHEDULED:** a two-bridge plan quote on prod (`bridge 1 USDC
+to Base then bridge 0.1 USDC to Base`), **stopped at the plan card**, then
+`netlify blobs:list agent-quotes --prefix q/<owner>/`. Expect step 1 `band:"none"` and step 2
+`band:"acknowledge"` — the exact discrimination the open anomaly lacked. Until that runs, treat the
+record as **unproven on a live path**. ⭐ Quoting costs nothing, so unlike the settler this proof has
+no price at all — there is no excuse for it to stay pending.
+
+⚠️ **THE JOIN IS COMPLETE ONLY FOR BRIDGE STEPS.** A bridge lands `quoteId` on a durable receipt;
+no other step type has a receipt to carry it, so a plan that stopped before its first bridge leaves
+only a log line. "The plan ran" is still not persisted anywhere. Stated, not papered over.
+
+### 🚨 (CLOSED IN CODE, ABOVE) DIAGNOSABILITY GAP — `agent-act` DID NOT LOG THE PLAN IT PRICED
+
+The quote is the ONE artifact that answers "what was proposed vs what ran", and it was not kept
 server-side. `agent-act`'s plan branch computes `stepDisclosures` (per-step band, fee, net, token)
 plus `totalUsdc`/`totalFeeUsdc`, returns them to the browser, and keeps nothing. So the anomaly
 above can only be settled from a **screenshot** — which is why it is still open.
