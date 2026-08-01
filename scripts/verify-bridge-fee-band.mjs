@@ -244,6 +244,63 @@ section("7 — THE GATE EXISTS ON BOTH SURFACES, AND LEAVES EVIDENCE");
     /it is \*-background functions whose console output is dropped, NOT every/.test(settler));
 }
 
+section("8 — CONSENT ON THE PLAN PATH: refuse at plan stage, never mid-flight");
+{
+  const act = readFileSync(new URL("../netlify/functions/agent-act.mjs", import.meta.url), "utf8");
+  const plan = readFileSync(new URL("../netlify/functions/agent-execute-plan.mjs", import.meta.url), "utf8");
+  const panel = readFileSync(new URL("../src/components/MyAgentPanel.tsx", import.meta.url), "utf8");
+  const client = readFileSync(new URL("../src/lib/agentClient.ts", import.meta.url), "utf8");
+
+  // The quote priced NOTHING per step, so a plan disclosed no bridge fee and a high-fee
+  // step was refused at execution with no way to accept.
+  check("⭐⭐ the plan quote prices each bridge step and emits a per-step disclosure",
+    /stepDisclosures\[i\] = \{/.test(act) && /bridgeFeeBand\(\{ amountUsdc: amt/.test(act));
+  check("⭐ …and surfaces the fee the total silently omitted", /totalFeeUsdc/.test(act) && /totalFeeUsdc/.test(panel));
+  check("⭐ a token is minted ONLY where acceptance is required", /band\.band === "acknowledge"\s*\n\s*\? bridgeAckToken/.test(act));
+
+  // ⭐⭐ THE PRE-FLIGHT. Two purposes, and it must SAY so — someone will otherwise read it
+  // as redundant with the monotonic rule and delete it.
+  check("⭐⭐ every bridge step is re-priced BEFORE any step executes",
+    /PRE-FLIGHT: RE-PRICE EVERY BRIDGE STEP BEFORE EXECUTING ANY OF THEM/.test(plan));
+  check("⭐⭐ …and it records BOTH reasons it exists, so it is not removed as redundant",
+    /PREVENTS A MID-PLAN ABORT AFTER FUNDS HAVE MOVED/.test(plan) &&
+    /RE-PRICES A PLAN THAT SAT UNCONFIRMED ON SCREEN/.test(plan));
+  check("⭐⭐ a step needing an unheld ack refuses the WHOLE plan with nothing executed",
+    /Nothing was executed\. Confirm you accept that/.test(plan) && /needsAck: true/.test(plan));
+  check("⭐ …and returns a FRESH disclosure so the ask reflects the current price",
+    /stepDisclosures: \{\s*\n\s*\[i\]: \{/.test(plan));
+
+  // ⚠️ Unreachable pricing != too expensive. Collapsing them gives the wrong advice.
+  check("⭐⭐ IRIS-unreachable is a DISTINCT message from a band refusal, on both paths",
+    /cannot reach the bridge pricing service right now/.test(act) &&
+    /cannot reach the bridge pricing service right now/.test(plan));
+  check("  …flagged structurally, not only in prose", /priceUnavailable: true/.test(act) && /priceUnavailable: true/.test(plan));
+  check("  …and the plan one says nothing executed, so retrying is safe",
+    /nothing was executed; try again shortly/.test(plan));
+
+  // Bounded: each priced step is a live IRIS round trip inside a ~10s sync handler.
+  check("⭐⭐ the priced-step count is BOUNDED on both sides of the flow",
+    /MAX_PRICED_BRIDGE_STEPS = 4/.test(act) && /MAX_PREFLIGHT_BRIDGE_STEPS = 4/.test(plan));
+  check("  …and the executor does not trust that the plan came from a quote",
+    /must not trust that it came from a quote/.test(plan));
+
+  // Per-step, because two bridges in one plan can sit in different bands.
+  check("⭐⭐ acceptance is PER STEP, not one blanket tick", /planAcked\[i\]/.test(panel) && /Record<number, boolean>/.test(panel));
+  check("⭐ the confirm button is gated until every required step is accepted",
+    /disabled=\{planBusy \|\| !allPlanAcksGiven\}/.test(panel));
+  check("⭐ only tokens for steps actually accepted are sent",
+    /if \(planAcked\[i\\] && planDisclosures/.test(panel) || /planAcked\[i\] && planDisclosures/.test(panel));
+  check("  …and the client can carry them", /ackTokens\?: Record<number, string>/.test(client) && /\{ plan, ackTokens \}/.test(client));
+  check("⭐ the panel renders the warn band too, not only the hard gate", /d\.band === "warn"/.test(panel));
+
+  // ⭐ The monotonic rule needs NO code: `acknowledge` is the top band and the only one
+  // that gates, so an exact token match already means "no worse than acknowledged".
+  const actions = readFileSync(new URL("../netlify/functions/_actions.mjs", import.meta.url), "utf8");
+  check("⭐⭐ _actions still gates on exactly ONE band — that IS the monotonic rule",
+    /if \(bandInfo\.band === "acknowledge"\)/.test(actions) &&
+    (actions.match(/bandInfo\.band === "acknowledge"/g) || []).length >= 1);
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

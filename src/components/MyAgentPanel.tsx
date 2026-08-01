@@ -66,6 +66,10 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   // with no disclosure and no way to accept. This panel is the plain-language surface a user
   // is most likely to reach, so the honest path was the one they were least likely to find.
   const [bridgeAcked, setBridgeAcked] = useState(false);
+  // Per-STEP acceptance for a multi-step plan. A plan can hold two bridges in different
+  // bands, so this is keyed by step index rather than a single flag — one blanket tick
+  // would be consent to whichever disclosure happened to render last.
+  const [planAcked, setPlanAcked] = useState<Record<number, boolean>>({});
   const [mint, setMint] = useState<any>(null); // { state: 'pending'|'minted'|'failed', mintTx? }
 
   // ⭐ THE SINGLE SOURCE OF TRUTH FOR DELIVERY. Chain-verified receipts, owner-scoped
@@ -156,12 +160,12 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
     }
   }
 
-  async function confirmPlan(plan: unknown[]) {
+  async function confirmPlan(plan: unknown[], ackTokens?: Record<number, string>) {
     setPlanBusy(true);
     setPlanMints({});
     try {
       const token = await w.ensureSession();
-      const res = await agentClient.executePlan(plan, token);
+      const res = await agentClient.executePlan(plan, token, ackTokens);
       setPlanRun(res);
       // Option A: any bridge step already fired its Arc burn and the plan moved
       // on. Poll each bridge step's destination mint INLINE (concurrently, in the
@@ -314,6 +318,8 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
             planRun={planRun}
             planBusy={planBusy}
             planMints={planMints}
+            planAcked={planAcked}
+            onPlanAckChange={setPlanAcked}
             bridgeReceipts={bridgeReceipts}
             onConfirm={confirmPlan}
             bridgeRun={bridgeRun}
@@ -390,6 +396,8 @@ function AgentSummary({
   planRun,
   planBusy,
   planMints,
+  planAcked,
+  onPlanAckChange,
   bridgeReceipts,
   onConfirm,
   bridgeRun,
@@ -404,8 +412,10 @@ function AgentSummary({
   planRun: any;
   planBusy: boolean;
   planMints: Record<number, any>;
+  planAcked: Record<number, boolean>;
+  onPlanAckChange: (v: Record<number, boolean>) => void;
   bridgeReceipts: any[];
-  onConfirm: (plan: unknown[]) => void;
+  onConfirm: (plan: unknown[], ackTokens?: Record<number, string>) => void;
   bridgeRun: any;
   bridgeBusy: boolean;
   bridgeAcked: boolean;
@@ -583,10 +593,31 @@ function AgentSummary({
 
   if (data.needsConfirm && Array.isArray(data.plan)) {
     const runResults = planRun?.results;
+    // Server-priced, per step index. Absent for a plan with no bridge steps.
+    const planDisclosures: Record<string, any> = data.stepDisclosures || {};
+    // Every step that REQUIRES acceptance must have it before the plan can run. The server
+    // re-prices and refuses independently — this only decides whether the button is live.
+    const needAck = Object.entries(planDisclosures)
+      .filter(([, d]: [string, any]) => d?.band === "acknowledge")
+      .map(([k]) => Number(k));
+    const allPlanAcksGiven = needAck.every((i) => planAcked[i]);
+    // Only tokens for steps the user actually accepted are sent.
+    const planAckTokens: Record<number, string> = {};
+    for (const i of needAck) {
+      if (planAcked[i] && planDisclosures[String(i)]?.ackToken) {
+        planAckTokens[i] = planDisclosures[String(i)].ackToken;
+      }
+    }
     return (
       <div className="status" style={{ margin: 0 }}>
         <div style={{ marginBottom: 6 }}>
-          <b>Proposed {data.plan.length}-step plan</b> — total ~{Number(data.totalUsdc).toFixed(4)} USDC:
+          <b>Proposed {data.plan.length}-step plan</b> — total ~{Number(data.totalUsdc).toFixed(4)} USDC
+          {/* The fee the total used to omit entirely. `totalUsdc` sums REQUESTED amounts;
+              a bridge takes its fee out of that, so without this line the plan described
+              money the user would never see arrive. Priced per step at plan time. */}
+          {Number(data.totalFeeUsdc) > 0 && (
+            <> + ~{Number(data.totalFeeUsdc).toFixed(4)} USDC in cross-chain fees</>
+          )}:
         </div>
         <ol style={{ margin: "0 0 8px 18px", padding: 0 }}>
           {data.plan.map((s: any, i: number) => {
@@ -656,8 +687,57 @@ function AgentSummary({
             );
           })}
         </ol>
+        {/* ── PER-STEP FEE DISCLOSURE ──────────────────────────────────────────────
+            A plan can hold two bridges in DIFFERENT bands, so each is disclosed and
+            accepted on its own. Rendered from the server's `stepDisclosures` — the band
+            is never re-derived here from two numbers, which is how three surfaces came to
+            disagree about one fact. */}
+        {Object.entries(planDisclosures).map(([k, d]: [string, any]) => {
+          const i = Number(k);
+          if (d.band === "warn") {
+            return (
+              <div key={k} className="status" style={{ color: "var(--warn)", marginBottom: 8 }}>
+                Step {i + 1} — {(d.feeRatio * 100).toFixed(1)}% of that bridge goes to the network fee
+                ({Number(d.feeUsdc).toFixed(4)} USDC of {Number(d.amountUsdc).toFixed(4)}).
+              </div>
+            );
+          }
+          if (d.band !== "acknowledge") return null;
+          return (
+            <div key={k} className="status" style={{ border: "1px solid var(--warn)", borderRadius: 8, padding: 12, marginBottom: 8 }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                Step {i + 1} loses {(d.feeRatio * 100).toFixed(1)}% to fees
+              </div>
+              <div style={{ lineHeight: 1.5 }}>
+                {Number(d.feeUsdc) > Number(d.netUsdc) ? (
+                  <>More goes to the fee ({Number(d.feeUsdc).toFixed(4)} USDC) than arrives
+                  ({Number(d.netUsdc).toFixed(4)} USDC). </>
+                ) : null}
+                Bridging {Number(d.amountUsdc).toFixed(4)} USDC to {d.destinationLabel}. The fee is flat,
+                so it costs the same whether you bridge this or far more.
+              </div>
+              <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 10, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={!!planAcked[i]}
+                  onChange={(e) => onPlanAckChange({ ...planAcked, [i]: e.target.checked })}
+                  style={{ marginTop: 3 }}
+                />
+                <span style={{ lineHeight: 1.5 }}>
+                  I understand most of step {i + 1} will be spent on the network fee, and I want to run
+                  this plan anyway.
+                </span>
+              </label>
+            </div>
+          );
+        })}
+
         {!planRun && (
-          <button className="emerald" disabled={planBusy} onClick={() => onConfirm(data.plan)}>
+          <button
+            className="emerald"
+            disabled={planBusy || !allPlanAcksGiven}
+            onClick={() => onConfirm(data.plan, planAckTokens)}
+          >
             {planBusy ? "Executing…" : "Confirm & execute"}
           </button>
         )}

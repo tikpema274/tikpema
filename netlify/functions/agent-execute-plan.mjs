@@ -5,6 +5,7 @@ import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 import { daySpend, budgetConfig } from "./_budget.mjs";
 import { recordBridge } from "./_bridge-record.mjs";
+import { resolveDestination, bridgeFee, bridgeFeeBand, bridgeAckToken } from "./_bridge.mjs";
 
 // POST /api/agent-execute-plan { plan: [ {type, ...}, ... ] }
 //
@@ -41,7 +42,7 @@ export async function handler(event) {
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });
 
-  const { plan } = parseBody(event);
+  const { plan, ackTokens } = parseBody(event); // ackTokens: { [stepIndex]: token }
   if (!Array.isArray(plan) || plan.length === 0) {
     return json(400, { error: "Provide a non-empty 'plan' array" });
   }
@@ -90,6 +91,88 @@ export async function handler(event) {
   // same owner (walletAddress), so the baseline and the writes stay consistent.
   const baselineA = atomic(await daySpend({ owner: walletAddress }));
 
+  // ══ PRE-FLIGHT: RE-PRICE EVERY BRIDGE STEP BEFORE EXECUTING ANY OF THEM ═══════════
+  //
+  // 🚨 THIS IS NOT REDUNDANT WITH THE MONOTONIC ACK RULE. It serves TWO purposes, and
+  // removing it because the rule "already handles band changes" reintroduces both:
+  //
+  //   1. IT PREVENTS A MID-PLAN ABORT AFTER FUNDS HAVE MOVED. The executor stops at the
+  //      first refusal, so an unacknowledged bridge at step 3 aborts steps 3+ — with
+  //      steps 1-2 already on-chain and irreversible. Consent collected after a partial
+  //      execution is not consent. Checking here means the refusal costs nothing.
+  //   2. IT RE-PRICES A PLAN THAT SAT UNCONFIRMED ON SCREEN. The quote is a snapshot; a
+  //      user can leave it open for an hour. The fee is VOLATILE — 0.0541 / 0.053520 /
+  //      0.053196 / 0.053635 in one day, and 0.203065 three weeks earlier — so a plan
+  //      quoted below the acknowledge band can genuinely reach execution above it. The
+  //      monotonic rule decides WHETHER that is acceptable; this decides WHEN we find out.
+  //
+  // The monotonic rule itself needs no code: `acknowledge` is the top band and the only
+  // one that gates, so an exact token match in _actions already means "current band is no
+  // worse than the one acknowledged". An improvement simply stops gating.
+  //
+  // ⚠️ BOUNDED — one live IRIS round trip per bridge step inside a ~10s sync handler that
+  // must still execute the plan. agent-act refuses to quote more bridge steps than this,
+  // so a plan reaching here is already within budget; the guard is repeated because this
+  // endpoint accepts a plan array directly and must not trust that it came from a quote.
+  const MAX_PREFLIGHT_BRIDGE_STEPS = 4;
+  const bridgeIdx = plan.map((s, i) => (s?.type === "bridge_usdc" ? i : -1)).filter((i) => i >= 0);
+  if (bridgeIdx.length > MAX_PREFLIGHT_BRIDGE_STEPS) {
+    return json(200, { executed: false, blocked: `too many bridge steps (${bridgeIdx.length}); ${MAX_PREFLIGHT_BRIDGE_STEPS} is the most one plan may contain` });
+  }
+
+  const ackFor = {};
+  for (const i of bridgeIdx) {
+    const s = plan[i];
+    const amt = Number(s.amountUsdc);
+    const dest = resolveDestination(s.destination);
+    if (!dest) return json(200, { executed: false, blocked: `step ${i + 1}: unsupported destination "${s.destination}"` });
+
+    let fee;
+    try {
+      fee = await bridgeFee({ amountUsdc: amt, cctpDomain: dest.cctpDomain });
+    } catch (e) {
+      // ⚠️ DISTINCT FROM A BAND REFUSAL. Unreachable pricing is transient and upstream;
+      // telling the user to reconsider their amount would be wrong advice. Nothing has
+      // executed at this point, so retrying is safe and is the right response.
+      return json(200, {
+        executed: false,
+        blocked: `step ${i + 1}: cannot reach the bridge pricing service right now (${e.message}) — nothing was executed; try again shortly`,
+        priceUnavailable: true,
+      });
+    }
+
+    const band = bridgeFeeBand({ amountUsdc: amt, feeUsdc: fee.feeUsdc, netUsdc: fee.netUsdc });
+    if (band.band === "acknowledge") {
+      const expected = bridgeAckToken({ owner: session.address, destinationKey: dest.key, amountUsdc: amt, band: band.band });
+      if ((ackTokens || {})[i] !== expected) {
+        // Either never acknowledged, or the band WORSENED since the quote. Refuse the
+        // WHOLE plan with a fresh disclosure — before step 1 — so acceptance is asked
+        // for while it can still be given freely.
+        return json(200, {
+          executed: false,
+          blocked:
+            `step ${i + 1} would lose ${(band.feeRatio * 100).toFixed(1)}% to fees — the fee to ${dest.label} is ` +
+            `~${fee.feeUsdc.toFixed(4)} USDC of ${amt} USDC, so only ~${fee.netUsdc.toFixed(4)} would arrive. ` +
+            `Nothing was executed. Confirm you accept that and run the plan again.`,
+          needsAck: true,
+          stepDisclosures: {
+            [i]: {
+              amountUsdc: amt,
+              destinationKey: dest.key,
+              destinationLabel: dest.label,
+              feeUsdc: Number(fee.feeUsdc.toFixed(6)),
+              netUsdc: Number(fee.netUsdc.toFixed(6)),
+              feeRatio: band.feeRatio,
+              band: band.band,
+              ackToken: expected,
+            },
+          },
+        });
+      }
+      ackFor[i] = expected;
+    }
+  }
+
   // ── Execute in order; STOP at the first cap/ceiling breach or failure ──────
   const results = [];
   let stoppedAt = null;
@@ -126,7 +209,10 @@ export async function handler(event) {
 
     // (3) Execute via the ONE shared executor (re-checks shape/send-cap/day + ledgers).
     try {
-      const r = await executeAction(step, actx);
+      // The token the PRE-FLIGHT verified, not one the client handed us for this step —
+      // _actions recomputes and compares it again, so this is belt-and-braces rather than
+      // trust, and it keeps the executor's gate identical on both bridge paths.
+      const r = await executeAction(ackFor[i] ? { ...step, ackToken: ackFor[i] } : step, actx);
       if (!r.ok) {
         results.push({ index: i, step, ok: false, blocked: r.blocked });
         stoppedAt = i;

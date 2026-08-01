@@ -19,6 +19,11 @@ import { budgetConfig } from "./_budget.mjs";
 //
 // The brain decides; this function — not the model — enforces what is allowed.
 
+// Bounded per plan: each priced bridge step costs a live IRIS round trip inside a ~10s
+// sync handler that has already called the model. Beyond this, refuse loudly rather than
+// time out mid-quote — a timeout reads as the plan failing, not the pricing.
+const MAX_PRICED_BRIDGE_STEPS = 4;
+
 const SYSTEM_PROMPT = `You are Tikpema's autonomous on-chain agent on Arc Testnet.
 You control your own developer-controlled smart-account wallet and may act with its funds only.
 Given a task, respond with ONLY a JSON object, no prose, no markdown fences:
@@ -165,12 +170,92 @@ export async function handler(event) {
       }
       const ceiling = budgetConfig().PERIOD_CEILING_USDC;
       const hasBridge = steps.some((s) => s?.type === "bridge_usdc");
+
+      // ── PRICE EACH BRIDGE STEP AT PLAN TIME ──────────────────────────────────────
+      // The quote used to sum `totalUsdc` from requested amounts and price NOTHING
+      // per-step, so a plan disclosed no bridge fee at all — and a bridge step in the
+      // acknowledge band was refused at EXECUTION with no disclosure and no way to
+      // accept. Pricing here produces both: the per-step disclosure the panel renders,
+      // and the fee the total was silently omitting.
+      //
+      // ⚠️ BOUNDED. Each priced step costs a live IRIS round trip, inside a ~10s sync
+      // handler that has already called the model. A plan with many bridges would spend
+      // its budget here and time out mid-quote, which reads to the user as a failure of
+      // the plan rather than of the pricing. Refusing loudly is better than a timeout.
+      const bridgeIdx = steps.map((s, i) => (s?.type === "bridge_usdc" ? i : -1)).filter((i) => i >= 0);
+      if (bridgeIdx.length > MAX_PRICED_BRIDGE_STEPS) {
+        return json(200, {
+          executed: false,
+          decision,
+          blocked:
+            `this plan has ${bridgeIdx.length} bridge steps; ${MAX_PRICED_BRIDGE_STEPS} is the most that can be priced ` +
+            `and disclosed in one plan. Split it into smaller plans.`,
+        });
+      }
+
+      const stepDisclosures = {};
+      let totalFeeUsdc = 0;
+      for (const i of bridgeIdx) {
+        const s = steps[i];
+        const amt = Number(s.amountUsdc);
+        const dest = resolveDestination(s.destination);
+        if (!dest) {
+          return json(200, { executed: false, decision, blocked: `step ${i + 1}: unsupported destination "${s.destination}"` });
+        }
+        let fee;
+        try {
+          fee = await bridgeFee({ amountUsdc: amt, cctpDomain: dest.cctpDomain });
+        } catch (e) {
+          // ⚠️ SEPARATE FROM A BAND REFUSAL. "We could not reach the pricing service" and
+          // "this bridge costs too much" are different facts, and collapsing them tells
+          // the user to reconsider an amount when the real problem is upstream and
+          // transient. Retrying is the right response to this one; changing the amount is
+          // the right response to the other.
+          return json(200, {
+            executed: false,
+            decision,
+            blocked: `step ${i + 1}: cannot reach the bridge pricing service right now (${e.message}) — this is not a limit on your amount; try again shortly`,
+            priceUnavailable: true,
+          });
+        }
+        // Fee-floor at PLAN time — refuse to propose a bridge where nothing would arrive,
+        // rather than letting the user confirm and be refused at execution.
+        if (fee.maxFee >= fee.amountMinor) {
+          return json(200, {
+            executed: false,
+            decision,
+            blocked: `step ${i + 1}: amount too small — the fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC (≥ your ${amt} USDC), so nothing would arrive`,
+          });
+        }
+        const band = bridgeFeeBand({ amountUsdc: amt, feeUsdc: fee.feeUsdc, netUsdc: fee.netUsdc });
+        totalFeeUsdc += fee.feeUsdc;
+        stepDisclosures[i] = {
+          amountUsdc: amt,
+          destinationKey: dest.key,
+          destinationLabel: dest.label,
+          feeUsdc: Number(fee.feeUsdc.toFixed(6)),
+          netUsdc: Number(fee.netUsdc.toFixed(6)),
+          feeRatio: band.feeRatio,
+          band: band.band,
+          // Present ONLY when acceptance is required, so its presence is the signal to
+          // gate — the panel never re-derives a band from two numbers.
+          ackToken:
+            band.band === "acknowledge"
+              ? bridgeAckToken({ owner: session.address, destinationKey: dest.key, amountUsdc: amt, band: band.band })
+              : null,
+        };
+      }
+
       return json(200, {
         executed: false,
         needsConfirm: true,
         decision,
         plan: steps,
         totalUsdc,
+        // The fee the total never disclosed. Keyed by step index so a plan with two
+        // bridges in different bands is described correctly rather than averaged.
+        totalFeeUsdc: Number(totalFeeUsdc.toFixed(6)),
+        stepDisclosures,
         ceiling,
         message:
           `This is a ${steps.length}-step plan totaling ~${totalUsdc.toFixed(2)} USDC. ` +

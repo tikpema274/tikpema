@@ -32,8 +32,11 @@ export const agentClient = {
   act: (task: string, token: string) => post("/api/agent-act", { task }, token),
 
   // Execute a confirmed multi-step plan (turn 2 of plan->confirm->execute).
-  executePlan: (plan: unknown[], token: string) =>
-    post("/api/agent-execute-plan", { plan }, token),
+  // ackTokens: { [stepIndex]: token } — acceptance of a high-fee bridge step. The server
+  // RE-PRICES every bridge step before executing any of them and refuses the whole plan
+  // if one needs an acknowledgment it does not have, so a missing token costs nothing.
+  executePlan: (plan: unknown[], token: string, ackTokens?: Record<number, string>) =>
+    post("/api/agent-execute-plan", { plan, ackTokens }, token),
 
   // Execute a confirmed cross-chain bridge (turn 2 of bridge propose->confirm).
   // Returns after the Arc burn; the destination mint is async (poll bridgeStatus).
