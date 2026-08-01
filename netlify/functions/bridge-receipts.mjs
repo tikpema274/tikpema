@@ -46,9 +46,13 @@ export async function handler(event) {
   // `mint_unconfirmed` — which only ever meant "we stopped waiting", and must be allowed to
   // resolve if the mint has since landed. Excluding the second is what made "unproven"
   // permanent for mints that had actually succeeded.
+  console.log(
+    `[bridge-receipt] READ owner=${session.address} receipts=${receipts.length} degraded=${degraded}`
+  );
   const stranded = receipts.filter(
     (r) => !r.settlingSince && ((r.state === "burn_confirmed" && isPastDeadline(r)) || isRecheckable(r))
   );
+  console.log(`[bridge-receipt] STRANDED candidates=${stranded.length} of ${receipts.length}`);
   for (const r of stranded.slice(0, 3)) { // bounded: a page load must not fan out
     try {
       const base =

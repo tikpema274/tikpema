@@ -156,17 +156,34 @@ export async function readWithRetry(owner, burnHash) {
  *  not look" so the caller can say so rather than render an empty list as certainty. */
 export async function listByOwner(owner) {
   try {
-    const { blobs } = await store().list({ prefix: `o/${norm(owner)}/` });
+    const prefix = `o/${norm(owner)}/`;
+    const { blobs } = await store().list({ prefix });
+    // ⚠️ INSTRUMENTATION, NOT DECORATION. On 2026-08-01 this returned an empty list for an
+    // owner whose receipts demonstrably exist in the store, and four successive hypotheses
+    // (wallet not connected, wrong route, stale bundle, wrong owner) were all wrong — each
+    // guessed at from the UI instead of measured. An empty result here is indistinguishable
+    // from "you have no bridges", so the COUNTS have to be visible: how many keys the prefix
+    // matched, and how many survived the owner cross-check. `netlify logs` carries full text
+    // for non-background functions, so these are readable.
+    let matched = 0, skipped = 0;
     const out = [];
     for (const b of blobs || []) {
+      matched++;
       try {
         const r = await store().get(b.key, { type: "json" });
         // Cross-check the index against the truth it indexes.
         if (r && norm(r.owner) === norm(owner)) out.push(r);
+        else skipped++;
       } catch {
+        skipped++;
         /* one unreadable blob must not sink the list */
       }
     }
+    console.log(
+      `[bridge-receipt] LIST prefix=${prefix} matchedKeys=${matched} returned=${out.length} skipped=${skipped}` +
+        (matched === 0 ? " — PREFIX MATCHED NOTHING" : "") +
+        (matched > 0 && out.length === 0 ? " — ALL DROPPED BY THE OWNER CROSS-CHECK" : "")
+    );
     out.sort((a, b) => String(b.burnedAt || "").localeCompare(String(a.burnedAt || "")));
     return { receipts: out, degraded: false };
   } catch (e) {
