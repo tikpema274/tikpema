@@ -148,10 +148,13 @@ section("5 — 4dp MINIMUM: 2dp COLLAPSES FEE AND ARRIVAL INTO ONE NUMBER");
 
 section("6 — THE TRIGGER MUST BE AWAITED (the bug that stranded 0x0175cf7b…)");
 {
-  const src = readFileSync(new URL("../netlify/functions/agent-bridge.mjs", import.meta.url), "utf8");
+  // Lives in _bridge-record.mjs now, shared by agent-bridge and agent-execute-plan. The
+  // invariant follows the code — dropping it because the file moved is how a fixed bug
+  // quietly comes back.
+  const src = readFileSync(new URL("../netlify/functions/_bridge-record.mjs", import.meta.url), "utf8");
   check("⭐⭐ triggerSettle is AWAITED — an un-awaited fetch can be frozen away at handler return",
     /await triggerSettle\(\{/.test(src));
-  check("⭐⭐ and the fetch inside it is awaited too", /const r = await fetch\(`\$\{base\}/.test(src));
+  check("⭐⭐ and the fetch inside it is awaited too", /const res = await fetch\(`\$\{base\}/.test(src));
   check("  …its failure is still swallowed (a trigger must not fail a bridge whose money moved)",
     /settle trigger FAILED \(swallowed\)/.test(src));
   check("  …the bug is recorded at the site so it is not 'optimised' back",
@@ -195,9 +198,31 @@ section("7 — THE GATE EXISTS ON BOTH SURFACES, AND LEAVES EVIDENCE");
   check("⭐⭐ …and `acknowledged` is set by the server that verified the token, not by the caller",
     /acknowledged: bandInfo\.band === "acknowledge"/.test(actions));
 
-  const bridgeFn = readFileSync(new URL("../netlify/functions/agent-bridge.mjs", import.meta.url), "utf8");
+  const record = readFileSync(new URL("../netlify/functions/_bridge-record.mjs", import.meta.url), "utf8");
   check("⭐⭐ the receipt records ackBand and ackAcceptedAt — consent survives the session",
-    /ackBand: r\.feeBand/.test(bridgeFn) && /ackAcceptedAt: r\.acknowledged \? burnedAt : null/.test(bridgeFn));
+    /ackBand: r\.feeBand/.test(record) && /ackAcceptedAt: r\.acknowledged \? burnedAt : null/.test(record));
+
+  // 🚨 A BRIDGE INSIDE A PLAN LEFT NO RECORD AT ALL: the write lived in the agent-bridge
+  // HTTP handler, not in executeAction, so plan bridges wrote no receipt, triggered no
+  // settler, were invisible to the sweeper, and could never show a measured delivery.
+  const planFn = readFileSync(new URL("../netlify/functions/agent-execute-plan.mjs", import.meta.url), "utf8");
+  const bridgeFn = readFileSync(new URL("../netlify/functions/agent-bridge.mjs", import.meta.url), "utf8");
+  check("⭐⭐ the PLAN path records its bridges too — they were invisible before",
+    /recordBridge\(\{ r, session, event, amountRequested: step\.amountUsdc \}\)/.test(planFn));
+  check("⭐⭐ …via the SAME helper as agent-bridge, not a second copy",
+    /from "\.\/_bridge-record\.mjs"/.test(planFn) && /from "\.\/_bridge-record\.mjs"/.test(bridgeFn));
+  check("  …and it is gated on a real bridge with a burnHash", /r\.kind === "bridge_usdc" && r\.burnHash/.test(planFn));
+
+  // ⭐ THE EXCLUSION IS DELIBERATE. job-bridge-approve has its OWN receipt system in
+  // job-deliverables with its own verifier; a write inside executeAction would give it a
+  // SECOND receipt in a SECOND store, drifting independently.
+  const approveFn = readFileSync(new URL("../netlify/functions/job-bridge-approve.mjs", import.meta.url), "utf8");
+  check("⭐⭐ job-bridge-approve does NOT double-record — it owns its own receipt",
+    !/_bridge-record\.mjs|recordBridge/.test(approveFn));
+  check("⭐⭐ …which is why the write stays at the BOUNDARY, not in the shared executor",
+    !/recordBridge|writeReceiptNeverThrows/.test(actions));
+  check("  …and the reason is written down where the next editor will look",
+    /job-bridge-approve` ALREADY HAS A COMPLETE RECEIPT SYSTEM|ALREADY HAS A COMPLETE RECEIPT SYSTEM/.test(record));
   check("  …and the owner-scoped read projects them",
     /ackAcceptedAt: r\.ackAcceptedAt/.test(readFileSync(new URL("../netlify/functions/bridge-receipts.mjs", import.meta.url), "utf8")));
 

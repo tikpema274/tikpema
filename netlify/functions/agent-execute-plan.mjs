@@ -4,6 +4,7 @@ import { executeAction, valueOfStep } from "./_actions.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 import { daySpend, budgetConfig } from "./_budget.mjs";
+import { recordBridge } from "./_bridge-record.mjs";
 
 // POST /api/agent-execute-plan { plan: [ {type, ...}, ... ] }
 //
@@ -143,6 +144,18 @@ export async function handler(event) {
         // bridge fire-and-continue payload (undefined for other step types):
         burnHash: r.burnHash, destination: r.destination, feeUsdc: r.feeUsdc, netUsdc: r.netUsdc,
       });
+
+      // 🚨 A BRIDGE INSIDE A PLAN USED TO LEAVE NO RECORD AT ALL. The receipt write lived
+      // in agent-bridge.mjs — the HTTP handler — not in executeAction, so a bridge reached
+      // this way wrote no receipt, triggered no settler, was invisible to the sweeper, and
+      // could never show a measured delivery. Everything built for the direct path simply
+      // did not apply here: it fired, polled IRIS, showed a checkmark, and forgot.
+      // ⭐ Same helper as agent-bridge, deliberately NOT inside executeAction — see the
+      // block comment in _bridge-record.mjs for why job-bridge-approve must stay excluded.
+      // It cannot fail this step: the burn has already landed, and the plan must continue.
+      if (r.kind === "bridge_usdc" && r.burnHash) {
+        await recordBridge({ r, session, event, amountRequested: step.amountUsdc });
+      }
       runningA += vA;                              // commit: decrement remaining daily budget
     } catch (e) {
       // A thrown error (incl. TxPendingError) stops the plan. Record and halt.
