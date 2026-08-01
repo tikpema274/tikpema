@@ -377,6 +377,61 @@ section("8 — THE 202 PENDING-BURN PATH WRITES NO RECEIPT");
   check("  …while the owner-scoped read does", /\/api\/bridge-receipts/.test(toml));
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("9 — THE SWEEPER: recovery that needs no one to be looking");
+{
+  const { listAllStranded, isStranded } = await import("../netlify/functions/_bridge-receipts.mjs");
+  const OLD = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+
+  // ONE definition of "stranded", shared by the owner-scoped read and the sweeper, so the
+  // two can never drift into disagreeing about what needs rescuing.
+  check("⭐ a burn past deadline with no lease is stranded",
+    isStranded({ state: "burn_confirmed", burnedAt: OLD }) === true);
+  check("  …a fresh burn is not", isStranded({ state: "burn_confirmed", burnedAt: new Date().toISOString() }) === false);
+  check("⭐⭐ a LEASED receipt is never swept — someone is already on it",
+    isStranded({ state: "burn_confirmed", burnedAt: OLD, settlingSince: new Date().toISOString() }) === false);
+  check("⭐ a PROVISIONAL mint_unconfirmed due a re-check is stranded",
+    isStranded({ state: "mint_unconfirmed", burnedAt: OLD, lastCheckedAt: OLD }) === true);
+  check("⭐⭐ a RESOLVED receipt is never swept", isStranded({ state: "minted", burnedAt: OLD }) === false &&
+    isStranded({ state: "mint_unverified", burnedAt: OLD }) === false);
+
+  // Across ALL owners — the read path only ever saw one.
+  mem.clear();
+  await writeReceiptNeverThrows({ owner: "0xAAA", burnHash: "0x" + "a1".repeat(32), burnedAt: OLD, state: "burn_confirmed" });
+  await writeReceiptNeverThrows({ owner: "0xBBB", burnHash: "0x" + "b1".repeat(32), burnedAt: OLD, state: "burn_confirmed" });
+  await writeReceiptNeverThrows({ owner: "0xCCC", burnHash: "0x" + "c1".repeat(32), burnedAt: OLD, state: "minted" });
+  const all = await listAllStranded();
+  check("⭐⭐ the sweep spans OWNERS — the read path saw one, this sees everyone",
+    all.total === 2 && new Set(all.stranded.map((r) => r.owner)).size === 2);
+  check("  …and leaves resolved receipts alone", all.scanned === 3 && all.total === 2);
+
+  // No silent truncation: a cap must report what it deferred.
+  const capped = await listAllStranded({ limit: 1 });
+  check("⭐⭐ a capped sweep reports the TRUE total, not the truncated one",
+    capped.stranded.length === 1 && capped.total === 2);
+
+  failMode = "list";
+  const broken = await listAllStranded();
+  check("⭐⭐ an unreadable store is degraded, NOT 'nothing stranded'",
+    broken.degraded === true && broken.total === 0);
+  failMode = null;
+
+  const sweepSrc = await import("node:fs").then((fs) =>
+    fs.readFileSync("netlify/functions/bridge-mint-sweep.mjs", "utf8"));
+  check("⭐⭐ the sweeper reports DEGRADED loudly instead of logging a clean tick",
+    /this tick proves nothing/.test(sweepSrc));
+  check("⭐ …names the deferred remainder rather than dropping it", /CAPPED at \$\{MAX_PER_TICK\}\/tick/.test(sweepSrc));
+  check("⭐ …awaits each trigger (an un-awaited fetch may never be sent)", /await fetch\(`\$\{base\}/.test(sweepSrc));
+  check("  …and writes nothing itself — the settler owns every write",
+    !/saveReceipt|setJSON|writeReceipt/.test(sweepSrc));
+
+  const toml = await import("node:fs").then((fs) => fs.readFileSync("netlify.toml", "utf8"));
+  const live = toml.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
+  check("⭐⭐ the schedule is DECLARED and uncommented (a commented one leaves an identical tree hash)",
+    /\[functions\."bridge-mint-sweep"\]\s*\n\s*schedule = "\*\/10 \* \* \* \*"/.test(live));
+  check("⭐ …and it has NO public /api route", !/\/api\/bridge-mint-sweep/.test(live));
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

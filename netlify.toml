@@ -261,6 +261,16 @@
 [functions."dd-canary"]
   schedule = "*/10 * * * *"
 
+# Bridge receipt sweeper — finds stranded receipts across ALL owners and asks the settler
+# to resolve them. Recovery previously rode the owner-scoped read, which needs a live
+# session + the owning wallet + a page that calls it; on 2026-08-01 each failed
+# independently while a receipt sat stranded for 7h58m with its mint already on Base.
+# ⭐ The case only a cron can cover: a user who bridges once and never returns.
+# Every 10 min — the mint deadline is 4 min, so staleness is bounded at ~10.
+# 🚨 NOT HTTP-invokable (Netlify 403s scheduled functions) and deliberately no /api route.
+[functions."bridge-mint-sweep"]
+  schedule = "*/10 * * * *"
+
 # Strong-read watch — is the TIKPEMA APP's money path still able to do a strong Blobs read on prod?
 #
 # ⚠️ DELIBERATELY NOT PART OF dd-canary. That one guards the DD ENGINE, which is going standalone

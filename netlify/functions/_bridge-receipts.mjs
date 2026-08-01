@@ -192,6 +192,54 @@ export async function listByOwner(owner) {
   }
 }
 
+/** Is this receipt waiting for someone to look at it? Shared by the owner-scoped read
+ *  (which sees one owner's) and the sweeper (which sees everyone's), so "stranded" has ONE
+ *  definition rather than two that drift.
+ *    · burn_confirmed past its deadline with no lease — a trigger that never landed
+ *    · a PROVISIONAL mint_unconfirmed due a re-check — we stopped waiting, not "it failed" */
+export function isStranded(receipt, now = Date.now()) {
+  if (receipt?.settlingSince) return false; // someone is already on it
+  if (receipt?.state === "burn_confirmed") return isPastDeadline(receipt, now);
+  return isRecheckable(receipt, now);
+}
+
+/**
+ * Every stranded receipt in the store, across ALL owners.
+ *
+ * ═══ WHY THIS EXISTS ═════════════════════════════════════════════════════════════════
+ * Recovery previously rode the owner-scoped read, which needs THREE things to line up: a
+ * live session, the right wallet, and a page that actually calls it. On 2026-08-01 all
+ * three failed independently over several hours while `0x0175cf7b…` sat stranded — its
+ * mint had landed on Base the whole time. A user who bridges once and never returns is
+ * never recovered at all.
+ *
+ * ⚠️ FAILS SOFT, LIKE listByOwner: a store error returns `degraded`, never an empty list
+ * presented as "nothing stranded". The sweeper logs the difference.
+ */
+export async function listAllStranded({ limit = 50, now = Date.now() } = {}) {
+  try {
+    const { blobs } = await store().list({ prefix: "o/" });
+    const out = [];
+    let scanned = 0;
+    for (const b of blobs || []) {
+      scanned++;
+      try {
+        const r = await store().get(b.key, { type: "json" });
+        if (r && isStranded(r, now)) out.push(r);
+      } catch {
+        /* one unreadable blob must not sink the sweep */
+      }
+    }
+    // ⭐ NO SILENT TRUNCATION. If more are stranded than we will act on this tick, the
+    // caller is told the real number — a capped list reported as complete reads as
+    // "everything is handled" when it is not.
+    return { scanned, stranded: out.slice(0, limit), total: out.length, degraded: false };
+  } catch (e) {
+    console.error(`[bridge-sweep] LIST FAILED — ${e?.message}`);
+    return { scanned: 0, stranded: [], total: 0, degraded: true };
+  }
+}
+
 /** Has this receipt outlived its mint deadline? Pure, so the fault-injection suite can
  *  drive it without waiting 4 real minutes. */
 export function isPastDeadline(receipt, now = Date.now()) {
