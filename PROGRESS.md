@@ -34,16 +34,110 @@ the expected steady state. Liveness is `producedAt` advancing — **never** an a
 ⚠️ A 200 proves nothing on its own: an unmatched Netlify path returns **SPA HTML with status 200**.
 Judge by body, never by status.
 
-**Current:** production **[DEPLOY ID]** `6a6cbce03b33755e6be09601`, built from **[COMMIT]** `a652ab6`,
-tree `586c1757a8c0350772d434c3ae40022bd07c56e95ef22c898f509d03a2c02226`, **`dirty:false`**.
-Rollback target is the prior published deploy `6a6cb349bf7d962dc069fa5f`.
-(`f06469e` landed after this build started; it touches `scripts/` only — outside the hashed
-surface — so the artifact is unaffected.)
+**Current:** production **[DEPLOY ID]** `6a6dc255e453268b8bd46c45`, built from **[COMMIT]** `42f9b1d`,
+**`dirty:false`**. Rollback target is the prior published deploy `6a6dbae99a8be64c68cbd530`.
 
 Verified green here: `blobs-probe` **verdict D / calibrated true**, `selfChecks: []`, deploy id from
-`x-nf-deploy-id`, stamp clean. Watch + canary rotate on their own schedules and were one tick behind
-at check time (canary keyed to `6a6cb349…`, watch `producedAt` 15:32:41Z) — **rotation observed
-across three deploys, so that is lag, not failure.**
+`x-nf-deploy-id`, stamp clean. ⭐ **`gate:watch` now REFUSES a dirty surface** (`f06469e`) and ran
+before every deploy in this run.
+
+### ✅ BRIDGE RECEIPTS — the direct path now records what the money DID, and proves it
+
+**Shipped and proven on real money 2026-07-31 → 08-01.** The direct BridgePanel path kept
+`burnHash` in component state (a reload stranded the user) and reported the amount REQUESTED, never
+the amount that ARRIVED. Those were one gap. Server-side receipts keyed `o/<owner>/<burnHash>`,
+a chain-verifying settler, an owner-scoped read, and a scheduled sweeper now close it.
+
+⭐ **`delivery` advances `predicted → measured` on EXACTLY ONE PATH:** a destination-chain read that
+returned `verified`. Deadline, poll exhaustion, RPC error and IRIS/chain disagreement all leave it
+`predicted`. Both failure directions point at LESS claim, never at an arrival that did not happen.
+
+**FOUR INDEPENDENT CHAIN MATCHES — receipt value == chain value, to 6dp:**
+
+| burn | requested | fee | delivered (receipt) | chain |
+|---|---|---|---|---|
+| `0x0175cf7b…` | 1.0 | 0.053196 | **0.946804** | 0.946804 |
+| `0xd65544dc…` | 1.0 | 0.053203 | 0.946797 | 0.946797 |
+| `0x54678bf3…` | 1.0 | 0.053199 | **0.946801** | 0.946801 |
+| `0x44bbdc76…` | **0.1** | **0.053212** | **0.046788** | 0.046788 |
+
+🚨 **READ THE LAST ROW.** `fee 0.053212 > delivered 0.046788` — MORE WENT TO THE FEE THAN ARRIVED.
+At the 2dp the UI used to render, both printed `~0.05` and that fact was **invisible**. The fee is
+FLAT (the IRIS fee endpoint takes no amount parameter), so the ratio worsens as the amount shrinks.
+**Never render a bridge amount at 2dp.** Measured drift on ONE route in ONE day: 0.0541 → 0.053520 →
+0.053196 → 0.053212 → 0.0533, which is also why the copy renders `feeUsdc` and never a literal.
+
+**THE THREE BUGS, EACH PROVEN FIXED ON REAL DATA:**
+
+1. **The trigger was never sent.** `fetch(...).catch()` un-awaited — a Netlify function can freeze
+   the moment the handler returns. `0x0175cf7b…` sat at `burn_confirmed` for **7h58m** while its
+   mint had already landed. ⚠️ The identical warning was written twelve lines below it over the
+   receipt write; the lesson was applied to the write and violated for the trigger in the same
+   function. Fixed → two bridges settled in **21s and 25s** with `settle trigger sent … status=202`.
+   ⚠️ The suite had pinned the BUG as an invariant ("the trigger is NOT awaited"), conflating
+   *don't host the poll* with *don't await the trigger*. It passed for the defect's whole life.
+2. **The deadline spoke before IRIS was asked.** A stranded receipt is past deadline BY DEFINITION —
+   that is what recovery selects on — so a recovered settler wrote `mint_unconfirmed` without ever
+   asking whether the mint landed, and `mint_unconfirmed` counted as terminal, making it PERMANENT.
+   ⭐ **RESOLVED vs PROVISIONAL:** "we stopped waiting" is not "it did not arrive". Fixed → ask
+   first, deadline only speaks about an unresolved mint; provisional receipts are re-checkable.
+3. **Recovery needed a human to be looking.** It rode the owner-scoped read, which needs a live
+   session **and** the owning wallet **and** a route that calls it. All three failed independently
+   over hours. ⭐ **The case only a cron covers: a user who bridges once and never returns.**
+   `bridge-mint-sweep` (`*/10`) → first tick: `scanned=11 stranded=2 triggered=2 remaining=0`,
+   both settled 2s later, **no wallet, no page load**.
+
+**CONSENT.** `bridgeFeeBand()` decides once and is threaded (the refundClass pattern) — warn ≥10%,
+acknowledge ≥25%, fee-floor refusal unchanged. Above the acknowledge band `_actions` REFUSES until
+the caller returns an ackToken it recomputes itself (the vault `gateDeposit` shape). The token binds
+to owner|destination|amount|**band** — not the exact fee, or every tick would invalidate it and
+train people to click through. `ackBand`/`feeRatio`/`ackAcceptedAt` persist on the receipt.
+🚧 **UNEXERCISED: the `acknowledge` band has never fired against a live server**, so `ackAcceptedAt`
+has never been written. Every live bridge was 1.0 at 5.3%.
+
+⚠️ **THE SAME BRIDGE BEHAVED DIFFERENTLY BY SURFACE.** The Bridge page disclosed and gated; the
+agent panel — the plain-language surface users actually reach — was refused server-side with no
+disclosure and no way to accept. **The honest path was the one users were least likely to find.**
+`agentClient.bridge` carried no ackToken. One missing wiring, two symptoms: `loadReceipts` lives on
+the same path, so bridging from the agent panel never called `/api/bridge-receipts` either.
+
+### 🚨 DEBUGGING DISCIPLINE — the three hours this cost, and exactly how
+
+**The bugs above took a few edits each. Finding out WHERE they were took hours, and every hour lost
+went the same way: a conclusion drawn from something that was never measured.** Recorded because the
+failure was in the METHOD, not the code, so it will recur on unrelated work.
+
+1. ⭐⭐ **AN EMPTY LOG WINDOW IS NOT PROOF OF ABSENCE.** Three separate times,
+   `netlify logs --since Nm` returned "No logs found" and it was read as "the endpoint was never
+   called". Twice the query simply ran BEFORE the invocation it was looking for; the calls were
+   there all along, timestamped later. **The instrument was never validated.** The fix that finally
+   worked: fire a call you KNOW happened, confirm it appears, and only then trust a negative — and
+   always check returned timestamps are later than the event.
+2. ⭐⭐ **A BINARY QUESTION CAN ONLY RETURN ONE OF ITS OPTIONS.** Asked "is it wallet A or wallet B?"
+   The answer was a THIRD wallet (`0x74b7b561…`), invisible to the question. The instrumented log
+   line named the owner outright the moment it existed. **Ask the system, not the person, and never
+   offer a closed choice about an open set.**
+3. ⭐ **FIVE HYPOTHESES, NONE MEASURED** — wallet not connected, wrong route, stale cached bundle,
+   wrong owner, broken `list({prefix})`. Each was inferred from what the screen showed. The counts
+   (`matchedKeys=N returned=M`) resolved it in ONE page load. **Instrument earlier: a hypothesis you
+   can't measure is a guess, and guesses that look reasonable are the expensive kind.**
+4. ⚠️ **`netlify logs` DROPS console output for `*-background` FUNCTIONS ONLY.** An earlier note
+   generalised this to all functions — too broad, and it would have discouraged logging where it
+   works. `agent-bridge` returns full text; `bridge-mint-settle-background` returns empty `INFO`
+   lines. Both appeared side by side in one output.
+5. ⚠️ **THE CLIENT FAILED SILENTLY, WHICH IS WHAT MADE ALL OF THIS POSSIBLE.** `loadReceipts`
+   swallowed its error and a gated panel looks identical to an idle one, so "I loaded the app and
+   accepted the disclosure" and "no request left the browser" were **the same picture**. A stale
+   quote even rendered a live-looking consent box with no session behind it. ⭐ **A consent flow
+   attached to nothing is not a consent flow** (`606a17b`).
+6. ⚠️ **`git add -A` COMMITTED A NON-NULL BUILD STAMP** (`c5d368b`). Caught by `test:probe`, not by
+   review. The deployed artifact was fine — `prebuild` regenerates it — but a deploy that skipped
+   stamping would then have reported a STALE commit instead of `unresolved`. **Clear the stamp
+   before committing, or stage explicitly.**
+
+⭐ **THE COMMON SHAPE, AND IT IS THE ONE THIS REPO KEEPS RE-LEARNING:** an absence — no logs, no
+receipts, no error, no section on screen — was read as information. It never is. Every one of these
+was closed by making the system SAY the number rather than inferring it from what was missing.
 
 🚨 **THE DEPLOY BEFORE THIS ONE SHIPPED DIRTY.** `6a6cb349bf7d962dc069fa5f` carried `dirty:true` —
 three untracked files under `netlify/functions` plus a modified `agent-bridge.mjs`. Production ran
