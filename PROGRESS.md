@@ -103,10 +103,15 @@ disclosure and no way to accept. **The honest path was the one users were least 
 `agentClient.bridge` carried no ackToken. One missing wiring, two symptoms: `loadReceipts` lives on
 the same path, so bridging from the agent panel never called `/api/bridge-receipts` either.
 
-### 🚧 OPEN — an ack box fired where no gate was required (or a plan step vanished)
+### ✅ (CLOSED 2026-08-02 — SEE THE RESOLUTION ABOVE) an ack box fired where no gate was required
 
-**UNRESOLVED, deliberately recorded rather than dropped. 2026-08-01, deploy
-`6a6dea1ff6e9ccf6b543c031`.** A plan was run with the intent of exercising the acknowledge band.
+🚨 **DO NOT RE-INVESTIGATE THIS.** The box was **correct and earned** — a 0.1 USDC step was
+genuinely priced — and **the plan was never confirmed**, so it produced no receipt at all. The
+1.0 USDC receipt below came from a different run. Every branch enumerated here rests on a join
+between the box and that receipt that was **inferred, never observed**. The text is kept only
+because the reasoning error is worth seeing; **its conclusions are void.**
+
+**Written as UNRESOLVED on 2026-08-01, deploy `6a6dea1ff6e9ccf6b543c031`.** A plan was run with the intent of exercising the acknowledge band.
 The ack box **appeared and was ticked** — but the only new receipt was:
 
     0xe98e31697a…  requested 1.0000  fee 0.0537  feeRatio 5.4%  ackBand none  minted/measured
@@ -124,6 +129,64 @@ that is a plan-path defect. **If the plan held only 1.0 bridges, then an ack box
 gate was required — and a gate that fires spuriously TRAINS CLICK-THROUGH AND DESTROYS ITS OWN
 VALUE.** A consent control that appears when it should not is not a harmless false positive; it is
 the mechanism by which the control stops being read at all.
+
+### ✅ CLOSED — THE ACK ANOMALY WAS NEVER A DEFECT. The box was correct and earned.
+
+**Resolved 2026-08-02 by reading the plan card that had been open in a browser tab since
+14:37Z — the artifact the original entry said was never read out. It was still there.**
+
+The card reads: step 2 = **"bridge 0.1 USDC to Base"**, priced, with the acknowledge box. So a
+0.1 step WAS quoted — **shape (c) is dead**, nothing rewrote the amount between the phrasing and
+the quote, and the gate fired exactly where it should have. And:
+
+    step 1: NO mark.   no "Plan blocked — …" line.   "Confirm & execute" STILL SHOWING.
+
+⭐ **That triple means the plan was NEVER CONFIRMED.** Nothing was executed, so of course no
+receipt bearing an acknowledgment exists. The 1.0 USDC receipt came from a **different run**.
+
+🚨 **WHY IT SURVIVED AS AN ANOMALY: THE LINK BETWEEN THE BOX AND THE RECEIPT WAS AN INFERENCE,
+NEVER AN OBSERVATION.** Two facts were true — a box appeared, and a 1.0 bridge landed — and they
+were joined by assumption. Every branch of the original entry ((a) priced but not run, (b) ran and
+refused, (c) amount changed) presupposed that join. It was false, so all three branches were
+answers to a question that did not exist. The same shape the debugging-discipline section below
+already records: **a conclusion drawn from something that was never measured.**
+
+⚠️ **THE ORIGINAL ENTRY ALSO MIS-ATTRIBUTED THE RECEIPT.** It named `0xe98e31697a…` as "the only
+new receipt". The unfiltered log shows **TWO** plan runs that afternoon, each producing exactly one
+1.0 USDC bridge at band `none`:
+
+| quote | executor | burn | requested | fee | ratio | band | ackAcceptedAt |
+|---|---|---|---|---|---|---|---|
+| `agent-act` 14:08:49Z (1832ms) | `agent-execute-plan` 14:08:53Z (13039ms) | `0xe98e3169…` | 1.0 | 0.053669 | 5.4% | none | null |
+| `agent-act` 14:37:27Z (1690ms) | `agent-execute-plan` 14:37:31Z (8924ms) | `0x1675ce4b…` | 1.0 | 0.053588 | 5.4% | none | null |
+
+Neither is the card's plan. `ackAcceptedAt` is null on **all 11** receipts for
+`0xfd801d08…`, consistent throughout.
+
+### 🚨 THE PLAN CARD CANNOT DISTINGUISH "REFUSED" FROM "NEVER REACHED" — and that is three silences
+
+**Found while closing the above; NOT yet fixed. Deliberately recorded before building.** A
+server-side refusal on the plan path leaves **no receipt, no persisted outcome, and — in one case —
+no visible mark**. Three independent silences for one event, which is why an unexecuted plan looked
+like an executed one.
+
+Reading `MyAgentPanel` (`mark = !r ? "" : r.ok ? " ✓" : " ✗"`), there are THREE cases, not two:
+
+1. **A step that STOPPED the plan** (per-action cap, day ceiling, `executeAction` refusal) IS in
+   `results` with `ok:false` → renders **✗ and the reason**. Already distinguished; fine.
+2. **A step NEVER REACHED** (after the stop) has no entry → renders **blank**.
+3. ⭐ **A WHOLE-PLAN PRE-FLIGHT REFUSAL** (the ack gate, or IRIS unreachable) returns
+   `{executed:false, blocked, needsAck}` with **NO `results` array at all** → *every* step renders
+   blank, and the only trace is one plan-level `Plan blocked — …` line.
+
+**3-vs-2 is the ambiguity.** ⭐ The fix is cheaper than it looks: that refusal response **already
+carries `stepDisclosures` keyed by the step index it refused**, so the data needed to mark the
+right step is in the payload and simply is not used. Render the named index as refused-with-reason
+and the remainder as explicitly not-run; then persist per-step outcomes, not only bridge receipts —
+which is the same gap as "**the plan ran** is not persisted anywhere".
+
+⚠️ Do NOT let the card's *absence of a mark* mean anything until then. Here it meant "never
+confirmed", and it reads identically to "refused".
 
 ### ✅ BUILT — `agent-act` NOW RECORDS THE PLAN IT PRICED (the gap below is closed in code)
 
@@ -227,6 +290,13 @@ the priced plan is the same gap for quotes.
 
 ### 🚧 THE ACKNOWLEDGE BAND HAS STILL NEVER FIRED LIVE — ON ANY SURFACE
 
+⭐ **AND AS OF 2026-08-02 WE KNOW WHY, WHICH IS NEW.** The one plan that would have fired it — the
+0.1 USDC step in the card above — **was never confirmed**. So this is not a gap in the gate; it is
+simply a run that was quoted and abandoned. The proof therefore requires **pressing Confirm &
+execute** on a plan with a 0.1 bridge step, which is the only step in this whole sequence that
+costs money (~0.0536 to fee, ~0.046 arriving). Everything else here — quoting, the record, the
+disclosure — is free.
+
 `ackAcceptedAt` has **never been written**. The band classification records correctly everywhere
 (`ackBand`/`feeRatio` are on every receipt), and the gate is suite-proven fail-closed, but the
 `acknowledge` path itself has not executed against a running server on the Bridge page, the agent
@@ -270,6 +340,23 @@ failure was in the METHOD, not the code, so it will recur on unrelated work.
    review. The deployed artifact was fine — `prebuild` regenerates it — but a deploy that skipped
    stamping would then have reported a STALE commit instead of `unresolved`. **Clear the stamp
    before committing, or stage explicitly.**
+
+7. ⭐⭐ **A FILTERED READ IS NOT A MEASUREMENT OF ABSENCE — 2026-08-02, and it cost a full round
+   trip.** `netlify logs --function agent-act` returned nothing for the window, and that was stated
+   as "the request never arrived" while the user was looking at a rendered plan card. Two errors in
+   one move: the filter presupposed which function was involved (a candidate rename would have been
+   invisible to it), and `--since 6h` presupposed the window. ⭐ **The unfiltered read settled it in
+   one command** — `netlify logs --source functions --since 24h` — and simultaneously refuted the
+   rename hypothesis (nothing else ran at all), proved no session was ever established (no
+   `auth-challenge`/`auth-verify`), and surfaced a SECOND plan run that a `tail -30` had silently
+   cropped out of an earlier read. **Read the whole listing before concluding anything about what
+   did not happen; a `grep`/`tail` on a diagnostic listing is itself an untested hypothesis.**
+8. ⭐⭐ **ASK FOR THE DISCRIMINATOR, NOT THE INTERESTING FIELD.** Closing the ack anomaly, the
+   obvious thing to read out was step 2 — the step with the box on it. Step 2 could not distinguish
+   any of the branches. **Step 1's mark could**, and so could two things nobody had thought to ask
+   for (whether a `Plan blocked` line was present, and whether the confirm button was still
+   showing). The right question came from enumerating what each possible answer would RULE OUT,
+   which is a different exercise from asking about the part that looks suspicious.
 
 ⭐ **THE COMMON SHAPE, AND IT IS THE ONE THIS REPO KEEPS RE-LEARNING:** an absence — no logs, no
 receipts, no error, no section on screen — was read as information. It never is. Every one of these
