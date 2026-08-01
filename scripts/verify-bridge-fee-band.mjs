@@ -208,7 +208,10 @@ section("7 — THE GATE EXISTS ON BOTH SURFACES, AND LEAVES EVIDENCE");
   const planFn = readFileSync(new URL("../netlify/functions/agent-execute-plan.mjs", import.meta.url), "utf8");
   const bridgeFn = readFileSync(new URL("../netlify/functions/agent-bridge.mjs", import.meta.url), "utf8");
   check("⭐⭐ the PLAN path records its bridges too — they were invisible before",
-    /recordBridge\(\{ r, session, event, amountRequested: step\.amountUsdc \}\)/.test(planFn));
+    // ⚠️ Deliberately NOT pinned to the full argument list — the quote-record join later added
+    // `quoteId`/`stepIndex` here and broke this check without changing the property it guards.
+    // What matters is that the plan path calls the shared helper with the step's own amount.
+    /recordBridge\(\{ r, session, event, amountRequested: step\.amountUsdc[,)]/.test(planFn));
   check("⭐⭐ …via the SAME helper as agent-bridge, not a second copy",
     /from "\.\/_bridge-record\.mjs"/.test(planFn) && /from "\.\/_bridge-record\.mjs"/.test(bridgeFn));
   check("  …and it is gated on a real bridge with a burnHash", /r\.kind === "bridge_usdc" && r\.burnHash/.test(planFn));
@@ -290,7 +293,8 @@ section("8 — CONSENT ON THE PLAN PATH: refuse at plan stage, never mid-flight"
     /disabled=\{planBusy \|\| !allPlanAcksGiven\}/.test(panel));
   check("⭐ only tokens for steps actually accepted are sent",
     /if \(planAcked\[i\\] && planDisclosures/.test(panel) || /planAcked\[i\] && planDisclosures/.test(panel));
-  check("  …and the client can carry them", /ackTokens\?: Record<number, string>/.test(client) && /\{ plan, ackTokens \}/.test(client));
+  check("  …and the client can carry them",
+    /ackTokens\?: Record<number, string>/.test(client) && /\{ plan, ackTokens[,\s}]/.test(client));
   check("⭐ the panel renders the warn band too, not only the hard gate", /d\.band === "warn"/.test(panel));
 
   // ⭐ The monotonic rule needs NO code: `acknowledge` is the top band and the only one

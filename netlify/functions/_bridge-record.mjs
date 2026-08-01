@@ -74,11 +74,14 @@ async function triggerSettle({ event, owner, burnHash }) {
  * @param session  the verified session — `session.address` is the receipt's owner
  * @param event    the request, for the settle trigger's base URL
  * @param amountRequested  the amount the caller asked to bridge
+ * @param quoteId  OPTIONAL join key to the priced plan in the `agent-quotes` store, or null
+ *                 on a path that had no quote (the direct Bridge page). See below.
+ * @param stepIndex which step of that plan this was, or null outside a plan.
  *
  * No-ops without a burnHash: the 202 TxPendingError path has no hash to key on, so there
  * is nothing to record and today's behaviour is preserved.
  */
-export async function recordBridge({ r, session, event, amountRequested }) {
+export async function recordBridge({ r, session, event, amountRequested, quoteId = null, stepIndex = null }) {
   if (!r?.burnHash) return { recorded: false, reason: "no_burn_hash" };
 
   const burnedAt = new Date().toISOString();
@@ -107,6 +110,17 @@ export async function recordBridge({ r, session, event, amountRequested }) {
     ackRequired: r.ackRequired ?? false,
     ackAcceptedAt: r.acknowledged ? burnedAt : null,
     ackToken: r.ackToken ?? null,
+    // ⭐ THE JOIN TO WHAT WAS PROPOSED. Every other field here says what the bridge DID; these
+    // two say which priced plan it came from, so `agent-quotes` and this receipt can be read
+    // together. Without a shared identifier they are two records nobody can correlate, which
+    // is the state that left the 2026-08-01 ack anomaly unanswerable.
+    //
+    // 🚨 NULL IS NORMAL AND MEANS NOTHING BAD. The direct Bridge page and the agent
+    // single-action panel produce no plan quote, so their receipts carry null here. An
+    // absent join must never be read as a defect — and, like the rest of this pair, it is
+    // DIAGNOSTIC: no gate anywhere reads `quoteId`.
+    quoteId: quoteId ?? null,
+    quoteStepIndex: Number.isInteger(stepIndex) ? stepIndex : null,
   });
 
   await triggerSettle({ event, owner: session.address, burnHash: r.burnHash });

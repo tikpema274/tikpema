@@ -160,12 +160,15 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
     }
   }
 
-  async function confirmPlan(plan: unknown[], ackTokens?: Record<number, string>) {
+  // quoteId comes straight from the quote that produced this plan and is passed through
+  // untouched — it exists so the server-side record of what was PRICED can be joined to the
+  // receipts of what RAN. It is not a credential and gates nothing.
+  async function confirmPlan(plan: unknown[], ackTokens?: Record<number, string>, quoteId?: string) {
     setPlanBusy(true);
     setPlanMints({});
     try {
       const token = await w.ensureSession();
-      const res = await agentClient.executePlan(plan, token, ackTokens);
+      const res = await agentClient.executePlan(plan, token, ackTokens, quoteId);
       setPlanRun(res);
       // Option A: any bridge step already fired its Arc burn and the plan moved
       // on. Poll each bridge step's destination mint INLINE (concurrently, in the
@@ -415,7 +418,7 @@ function AgentSummary({
   planAcked: Record<number, boolean>;
   onPlanAckChange: (v: Record<number, boolean>) => void;
   bridgeReceipts: any[];
-  onConfirm: (plan: unknown[], ackTokens?: Record<number, string>) => void;
+  onConfirm: (plan: unknown[], ackTokens?: Record<number, string>, quoteId?: string) => void;
   bridgeRun: any;
   bridgeBusy: boolean;
   bridgeAcked: boolean;
@@ -736,7 +739,7 @@ function AgentSummary({
           <button
             className="emerald"
             disabled={planBusy || !allPlanAcksGiven}
-            onClick={() => onConfirm(data.plan, planAckTokens)}
+            onClick={() => onConfirm(data.plan, planAckTokens, data.quoteId)}
           >
             {planBusy ? "Executing…" : "Confirm & execute"}
           </button>

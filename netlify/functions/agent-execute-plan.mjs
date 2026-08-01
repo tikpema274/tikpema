@@ -6,6 +6,7 @@ import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 import { daySpend, budgetConfig } from "./_budget.mjs";
 import { recordBridge } from "./_bridge-record.mjs";
 import { resolveDestination, bridgeFee, bridgeFeeBand, bridgeAckToken } from "./_bridge.mjs";
+import { safeQuoteId } from "./_quote-record.mjs";
 
 // POST /api/agent-execute-plan { plan: [ {type, ...}, ... ] }
 //
@@ -42,10 +43,26 @@ export async function handler(event) {
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });
 
-  const { plan, ackTokens } = parseBody(event); // ackTokens: { [stepIndex]: token }
+  const { plan, ackTokens, quoteId: rawQuoteId } = parseBody(event); // ackTokens: { [stepIndex]: token }
   if (!Array.isArray(plan) || plan.length === 0) {
     return json(400, { error: "Provide a non-empty 'plan' array" });
   }
+
+  // ── THE JOIN KEY, AND EXACTLY WHAT IT IS WORTH ────────────────────────────────────────
+  // `quoteId` names the priced plan agent-act recorded (store `agent-quotes`). It rides on
+  // every bridge receipt this run produces, which is what makes "proposed vs ran" one lookup
+  // instead of a reconstruction from a screenshot.
+  //
+  // 🚨 IT AUTHORIZES NOTHING, AND THE SERVER TRUSTS NOTHING IN IT. It is client-echoed and
+  // unverifiable — a client could send an id belonging to a different quote. That is
+  // acceptable BECAUSE it is only ever a pointer: the record it points at holds the priced
+  // steps, so a false join is DETECTABLE on inspection rather than authoritative. Every gate
+  // below re-prices and recomputes independently of this value.
+  //
+  // Normalized to a well-formed id or null so a client cannot push arbitrary bytes into a
+  // receipt field. That is hygiene, not a security check.
+  const quoteId = safeQuoteId(rawQuoteId);
+  console.log(`[agent-plan] RUN quoteId=${quoteId ?? "none"} steps=${plan.length}`);
 
   // Resolve the caller's OWN agent wallet from the session (never client-supplied,
   // never the shared env wallet).
@@ -240,7 +257,7 @@ export async function handler(event) {
       // block comment in _bridge-record.mjs for why job-bridge-approve must stay excluded.
       // It cannot fail this step: the burn has already landed, and the plan must continue.
       if (r.kind === "bridge_usdc" && r.burnHash) {
-        await recordBridge({ r, session, event, amountRequested: step.amountUsdc });
+        await recordBridge({ r, session, event, amountRequested: step.amountUsdc, quoteId, stepIndex: i });
       }
       runningA += vA;                              // commit: decrement remaining daily budget
     } catch (e) {
@@ -252,9 +269,14 @@ export async function handler(event) {
   }
 
   const allOk = stoppedAt === null;
+  // ⚠️ THE JOIN IS COMPLETE ONLY FOR BRIDGE STEPS. A bridge lands `quoteId` on a durable
+  // receipt; every other step type has no receipt to carry it, so a plan that stopped before
+  // its first bridge leaves only the log line above. That is a real remaining gap, stated
+  // rather than papered over — "the plan ran" is not itself persisted anywhere.
   return json(200, {
     executed: true,
     completed: allOk,
+    quoteId,
     totalUsdc,
     ceiling,
     stoppedAt,          // null if all ran; else the index that stopped the plan

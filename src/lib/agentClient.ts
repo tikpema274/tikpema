@@ -35,8 +35,11 @@ export const agentClient = {
   // ackTokens: { [stepIndex]: token } — acceptance of a high-fee bridge step. The server
   // RE-PRICES every bridge step before executing any of them and refuses the whole plan
   // if one needs an acknowledgment it does not have, so a missing token costs nothing.
-  executePlan: (plan: unknown[], token: string, ackTokens?: Record<number, string>) =>
-    post("/api/agent-execute-plan", { plan, ackTokens }, token),
+  // quoteId names the priced plan the server recorded when it quoted this. It is echoed back
+  // PURELY so the run can be joined to the quote in diagnostics — it authorizes nothing, and
+  // the server re-prices and recomputes every gate whether or not it arrives.
+  executePlan: (plan: unknown[], token: string, ackTokens?: Record<number, string>, quoteId?: string) =>
+    post("/api/agent-execute-plan", { plan, ackTokens, quoteId }, token),
 
   // Execute a confirmed cross-chain bridge (turn 2 of bridge propose->confirm).
   // Returns after the Arc burn; the destination mint is async (poll bridgeStatus).

@@ -7,6 +7,7 @@ import { resolveDestination, bridgeFee, SUPPORTED_DESTINATION_LABELS, bridgeFeeB
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet } from "./_agent-wallets.mjs";
 import { budgetConfig } from "./_budget.mjs";
+import { mintQuoteId, recordQuoteNeverThrows } from "./_quote-record.mjs";
 
 // POST /api/agent-act { task: string }
 //
@@ -49,10 +50,15 @@ A plain "send/pay X USDC to 0x..." is a transfer_usdc (your regular balance). Ch
 For a cross-chain move (e.g. "bridge 20 USDC to Ethereum", "send 5 USDC to Base", "move 10 USDC over to Arbitrum"), choose action "bridge_usdc" with amountUsdc and destination (the chain name). This burns USDC on Arc and mints it on the destination chain. Supported destinations: Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon, Unichain, Linea. A bridge is DIFFERENT from transfer_usdc: transfer stays on Arc to a 0x address; bridge crosses to another chain. Only choose bridge_usdc when the task names another chain to move funds TO.
 If a task asks for MULTIPLE actions in sequence (e.g. "swap 2 USDC to EURC then pay 1 USDC to 0x...", "send A then swap B", "swap 2 to EURC then bridge 3 to Base"), choose action "plan" with an ordered "steps" array, each step being one transfer_usdc/swap_tokens/pay_for_service/bridge_usdc with that action's own fields (a bridge_usdc step needs amountUsdc + destination). Use plan ONLY for genuinely multi-action tasks; a single action stays its own action. A multi-step task is NOT a needs_confirmation — needs_confirmation is only for scheduling/conditional/timing you cannot fulfil.`;
 
+/** Which brain priced this. ONE definition: `decide` calls it and the quote record names it.
+ *  Reading the env var again at the record site would be a second copy of the same claim, and
+ *  second copies drift — the quote would then name a model that did not produce the plan. */
+export const agentModel = () => process.env.AGENT_MODEL || "claude-haiku-4-5-20251001";
+
 async function decide(task) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY (server env)");
-  const model = process.env.AGENT_MODEL || "claude-haiku-4-5-20251001";
+  const model = agentModel();
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -246,10 +252,76 @@ export async function handler(event) {
         };
       }
 
+      // ══ RECORD THE PLAN AS PRICED ════════════════════════════════════════════════════
+      // Everything above this line was computed server-side and then handed to the browser
+      // and forgotten. That is why "was an ack box shown for a step that never ran?" had no
+      // server-side answer at all — see the block comment in _quote-record.mjs.
+      //
+      // ⭐ THE quoteId IS THE JOIN, AND THE JOIN IS THE POINT. Two records nobody can
+      // correlate answer nothing. This id travels with the plan to agent-execute-plan and
+      // lands on every bridge receipt that plan produces, so "proposed vs ran" is one lookup.
+      //
+      // 🚨 DIAGNOSTIC ONLY — nothing may ever read this back to authorize a bridge. The
+      // pre-flight in agent-execute-plan RE-PRICES rather than trusting this, deliberately.
+      //
+      // ⚠️ FIRE-AND-CONTINUE. `recordQuoteNeverThrows` swallows everything: this is the quote
+      // path, and losing the ability to propose a plan because diagnostics failed would trade
+      // a capability for an observation. The return value is not branched on.
+      const quotedAt = new Date().toISOString();
+      const quoteId = mintQuoteId();
+      await recordQuoteNeverThrows({
+        schema: "agent-quote/1",
+        note: "DIAGNOSTIC ONLY — never read back to authorize. Consent is the ackToken recomputation in _actions.mjs.",
+        quoteId,
+        quotedAt,
+        owner: session.address,          // the login wallet — same key space as bridge receipts
+        agentWallet: walletAddress,      // the wallet that would actually spend
+        // The raw phrasing AND what the brain made of it, together. One of the three unresolved
+        // shapes of the 2026-08-01 anomaly was "bridge 0.1 became 1.0 somewhere between the
+        // phrasing and the quote" — only these two side by side can tell that apart from a step
+        // that was priced and never ran.
+        task,
+        model: agentModel(),
+        reasoning: decision.reasoning ?? null,
+        stepCount: steps.length,
+        steps: steps.map((s, i) => ({
+          index: i,
+          type: s?.type,
+          step: s,
+          valueUsdc: values[i],
+          // Present only for bridge steps — the disclosure the panel rendered, verbatim, so the
+          // record answers "what did the user SEE" and not merely "what did the server think".
+          // The token itself is NOT stored: `ackTokenIssued` says whether the box appeared,
+          // which is the fact in question, and a record is a poor place for a credential.
+          ...(stepDisclosures[i]
+            ? {
+                bridge: {
+                  destinationKey: stepDisclosures[i].destinationKey,
+                  destinationLabel: stepDisclosures[i].destinationLabel,
+                  feeUsdc: stepDisclosures[i].feeUsdc,
+                  netUsdc: stepDisclosures[i].netUsdc,
+                  feeRatio: stepDisclosures[i].feeRatio,
+                  band: stepDisclosures[i].band,
+                  ackTokenIssued: stepDisclosures[i].ackToken != null,
+                },
+              }
+            : {}),
+        })),
+        totalUsdc,
+        totalFeeUsdc: Number(totalFeeUsdc.toFixed(6)),
+        // The bounds in force AT QUOTE TIME. They come from env and can change between a quote
+        // and its execution; a stop-on-limit later reads very differently once you can see
+        // which ceiling was quoted against.
+        caps: { sendCapUsdc: cap, bridgeCapUsdc: bcap, periodCeilingUsdc: ceiling },
+      });
+
       return json(200, {
         executed: false,
         needsConfirm: true,
         decision,
+        // Echoed so the client can hand it back on confirm. It authorizes NOTHING — the
+        // executor re-prices and recomputes every gate regardless of what comes with it.
+        quoteId,
         plan: steps,
         totalUsdc,
         // The fee the total never disclosed. Keyed by step index so a plan with two
