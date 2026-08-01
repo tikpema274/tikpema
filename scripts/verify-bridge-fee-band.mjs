@@ -19,7 +19,7 @@
 // Zero network. Zero money. Pure functions plus source assertions on the gate.
 
 import { readFileSync } from "node:fs";
-import { bridgeFeeBand, bridgeAckToken, FEE_BAND_WARN, FEE_BAND_ACKNOWLEDGE } from "../netlify/functions/_bridge.mjs";
+import { bridgeFeeBand, bridgeAckToken, FEE_BAND_WARN, FEE_BAND_ACKNOWLEDGE, FEE_BANDS, GATING_BANDS } from "../netlify/functions/_bridge.mjs";
 
 let pass = 0, fail = 0;
 const check = (label, cond, extra = "") => {
@@ -296,6 +296,26 @@ section("8 — CONSENT ON THE PLAN PATH: refuse at plan stage, never mid-flight"
   // ⭐ The monotonic rule needs NO code: `acknowledge` is the top band and the only one
   // that gates, so an exact token match already means "no worse than acknowledged".
   const actions = readFileSync(new URL("../netlify/functions/_actions.mjs", import.meta.url), "utf8");
+  // 🚨 THE ASSUMPTION THE WHOLE CONSENT DESIGN RESTS ON, PINNED STRUCTURALLY. A comment
+  // cannot stop anyone; this fails the build. The monotonic rule needs no code ONLY
+  // because `acknowledge` is the sole gating band and the top of the order — add a gating
+  // band above it and a user holding an `acknowledge` token is refused MID-PLAN, after
+  // earlier steps moved funds. Whoever adds a band will not be reading the token check.
+  check("⭐⭐ the band vocabulary is UNCHANGED — a new band silently breaks the monotonic rule",
+    JSON.stringify(FEE_BANDS) === JSON.stringify(["none", "warn", "acknowledge"]),
+    JSON.stringify(FEE_BANDS));
+  check("⭐⭐ …and EXACTLY ONE band gates, which is what makes an exact token match sufficient",
+    JSON.stringify(GATING_BANDS) === JSON.stringify(["acknowledge"]), JSON.stringify(GATING_BANDS));
+  check("⭐ …`acknowledge` is the TOP of the order (nothing can be worse than what was accepted)",
+    FEE_BANDS[FEE_BANDS.length - 1] === GATING_BANDS[0]);
+  check("⭐ bridgeFeeBand only ever returns a band from that vocabulary",
+    [{ amountUsdc: 1, feeUsdc: 0.01 }, { amountUsdc: 1, feeUsdc: 0.15 }, { amountUsdc: 1, feeUsdc: 0.5 },
+     { amountUsdc: 0, feeUsdc: 1 }, { amountUsdc: NaN, feeUsdc: 1 }]
+      .every((c) => FEE_BANDS.includes(bridgeFeeBand(c).band)));
+  check("  …and the consequence of adding one is written AT the definition, not at the check",
+    /ADD A GATING BAND ABOVE `acknowledge` AND THAT REASONING SILENTLY BREAKS/.test(
+      readFileSync(new URL("../netlify/functions/_bridge.mjs", import.meta.url), "utf8")));
+
   check("⭐⭐ _actions still gates on exactly ONE band — that IS the monotonic rule",
     /if \(bandInfo\.band === "acknowledge"\)/.test(actions) &&
     (actions.match(/bandInfo\.band === "acknowledge"/g) || []).length >= 1);

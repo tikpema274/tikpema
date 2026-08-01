@@ -151,6 +151,32 @@ export async function bridgeFee({ amountUsdc, cctpDomain }) {
 export const FEE_BAND_WARN = 0.10;        // >=10% of the amount: disclose prominently
 export const FEE_BAND_ACKNOWLEDGE = 0.25; // >=25%: disclosure alone is not consent
 
+// 🚨 READ THIS BEFORE ADDING A BAND — CONSENT CORRECTNESS DEPENDS ON IT.
+//
+// The bands are ORDERED by severity and `acknowledge` is the TOP one. Exactly ONE band
+// gates execution (see the `bandInfo.band === "acknowledge"` check in _actions.mjs), and
+// a whole rule rests silently on that fact:
+//
+//   THE FEE IS VOLATILE, so a plan quoted below the acknowledge band can reach execution
+//   above it. The agreed rule is: accept an acknowledgment if the CURRENT band is no
+//   WORSE than the one acknowledged; refuse only on a genuine worsening. That rule needs
+//   NO CODE today — because `acknowledge` is the top band, a token can only exist for it,
+//   so an EXACT token match already means "current is no worse than acknowledged", and
+//   any improvement simply stops gating.
+//
+// ⚠️ ADD A GATING BAND ABOVE `acknowledge` AND THAT REASONING SILENTLY BREAKS. A user who
+// accepted `acknowledge` would hold a token that no longer matches the new top band, and
+// `_actions` would refuse them MID-PLAN — after earlier steps have moved funds, which is
+// the exact outcome the pre-flight in agent-execute-plan.mjs exists to prevent. Nobody
+// adding a band would be reading the token check, which is why this is written HERE.
+//
+// If you add one, you must ALSO: mint a token per band, send the acknowledged band
+// alongside the token, authenticate it (recompute and compare), and replace the exact
+// match with an explicit `severity(current) <= severity(acknowledged)` comparison.
+// `verify-bridge-fee-band.mjs` pins this vocabulary and will fail if you change it.
+export const FEE_BANDS = ["none", "warn", "acknowledge"]; // ordered least → most severe
+export const GATING_BANDS = ["acknowledge"];              // the ONLY bands that refuse
+
 /** @returns {{feeRatio:number, band:"none"|"warn"|"acknowledge", feeUsdc:number, netUsdc:number}} */
 export function bridgeFeeBand({ amountUsdc, feeUsdc, netUsdc }) {
   const amount = Number(amountUsdc);
