@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { agentClient } from "../lib/agentClient";
 import SignInPrompt from "./SignInPrompt";
 import type { useWallet } from "../wallet/useWallet";
@@ -85,6 +85,27 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   useEffect(() => {
     if (w.agentWallet) loadReceipts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [w.agentWallet?.address]);
+
+  // 🚨 A QUOTE BELONGS TO THE WALLET IT WAS PRICED FOR. Twice on 2026-08-01 a stale
+  // agent-act result survived a session change, so the panel rendered a live-looking
+  // bridge disclosure — fee band, checkbox, enabled button — with no session behind it.
+  // Ticking it and confirming threw at ensureSession() before any request left the
+  // browser, which is indistinguishable from "nothing happened" to the person doing it.
+  // ⭐ A consent flow that can be read and accepted while attached to nothing is not a
+  // consent flow. Changing wallets clears the quote, its acknowledgment, and the run.
+  const lastOwner = useRef<string | null>(null);
+  useEffect(() => {
+    const addr = w.agentWallet?.address ?? null;
+    if (lastOwner.current !== null && lastOwner.current !== addr) {
+      setResult(null);
+      setBridgeRun(null);
+      setBridgeAcked(false);
+      setMint(null);
+      setPlanRun(null);
+      setPlanMints({});
+    }
+    lastOwner.current = addr;
   }, [w.agentWallet?.address]);
   // Per-plan-step destination-mint status, keyed by step index (for bridge steps
   // inside a multi-step plan — Option A: the plan doesn't wait, these poll inline).
@@ -298,6 +319,7 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
             bridgeRun={bridgeRun}
             bridgeBusy={bridgeBusy}
             bridgeAcked={bridgeAcked}
+            walletReady={!!w.agentWallet}
             onAckChange={setBridgeAcked}
             mint={mint}
             onConfirmBridge={confirmBridge}
@@ -373,6 +395,7 @@ function AgentSummary({
   bridgeRun,
   bridgeBusy,
   bridgeAcked,
+  walletReady,
   onAckChange,
   mint,
   onConfirmBridge,
@@ -386,6 +409,7 @@ function AgentSummary({
   bridgeRun: any;
   bridgeBusy: boolean;
   bridgeAcked: boolean;
+  walletReady: boolean;
   onAckChange: (v: boolean) => void;
   mint: any;
   onConfirmBridge: (amountUsdc: number, destinationKey: string, ackToken?: string) => void;
@@ -483,10 +507,17 @@ function AgentSummary({
           </div>
         )}
 
+        {!bridgeRun && !walletReady && (
+          <div className="status" style={{ color: "var(--warn)" }}>
+            Your wallet isn't connected — this quote can't be acted on. Reconnect, then ask again
+            so it can be re-priced for that wallet.
+          </div>
+        )}
+
         {!bridgeRun && (
           <button
             className="emerald"
-            disabled={bridgeBusy || (b.feeDisclosure?.band === "acknowledge" && !bridgeAcked)}
+            disabled={bridgeBusy || !walletReady || (b.feeDisclosure?.band === "acknowledge" && !bridgeAcked)}
             onClick={() => onConfirmBridge(b.amountUsdc, b.destination.key, b.feeDisclosure?.ackToken)}
           >
             {bridgeBusy ? "Bridging…" : "Confirm & bridge"}

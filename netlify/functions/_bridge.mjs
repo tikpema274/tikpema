@@ -176,9 +176,20 @@ export function bridgeFeeBand({ amountUsdc, feeUsdc, netUsdc }) {
  * the number would invalidate every acknowledgment on the next tick and train people to
  * click through a box that always complains. Binding to the BAND means small drift is
  * tolerated and crossing into a worse disclosure correctly invalidates the ack.
+ *
+ * ⭐ IT ALSO BINDS TO THE OWNER. Without that, one token was valid for ANY wallet at the
+ * same amount/destination/band — and a quote priced for one wallet stayed acknowledgeable
+ * after switching to another, which is exactly what a stale on-screen quote invited. Not
+ * exploitable on its own (the server re-prices, and a caller can only acknowledge their own
+ * bridge), but the token is EVIDENCE OF CONSENT, and evidence not bound to who consented is
+ * weaker than it looks. `v2` because adding the field changes every digest.
+ * ⚠️ Owner may legitimately be absent on paths that carry no session; it degrades to "anon",
+ * which is consistent within a request and so never causes a false refusal — it only makes
+ * the binding weaker there.
  */
-export function bridgeAckToken({ destinationKey, amountUsdc, band }) {
-  const digest = `bridge|${String(destinationKey)}|${Number(amountUsdc)}|band:${band}|v1`;
+export function bridgeAckToken({ owner, destinationKey, amountUsdc, band }) {
+  const who = owner ? String(owner).toLowerCase() : "anon";
+  const digest = `bridge|${who}|${String(destinationKey)}|${Number(amountUsdc)}|band:${band}|v2`;
   return createHash("sha256").update(digest).digest("hex");
 }
 

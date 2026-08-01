@@ -88,6 +88,21 @@ section("3 — THE ACK TOKEN BINDS TO THE BAND, NOT THE VOLATILE FEE");
   check("⭐ a different destination invalidates it",
     bridgeAckToken({ destinationKey: "linea", amountUsdc: 0.1, band: "acknowledge" }) !== a);
   check("  …and it is a sha256 hex digest, like the vault's ackToken", /^[0-9a-f]{64}$/.test(a));
+
+  // ⭐ OWNER BINDING. Without it one token was valid for ANY wallet at the same
+  // amount/destination/band — so a quote priced for one wallet stayed acknowledgeable after
+  // switching to another, which is exactly what a stale on-screen quote invited. The token is
+  // EVIDENCE OF CONSENT; evidence not bound to who consented is weaker than it looks.
+  const forA = bridgeAckToken({ owner: "0xAAA", destinationKey: "base", amountUsdc: 0.1, band: "acknowledge" });
+  const forB = bridgeAckToken({ owner: "0xBBB", destinationKey: "base", amountUsdc: 0.1, band: "acknowledge" });
+  check("⭐⭐ a DIFFERENT owner gets a different token — an ack cannot cross wallets", forA !== forB);
+  check("  …owner comparison is case-insensitive (checksummed vs lowercased addresses)",
+    forA === bridgeAckToken({ owner: "0xaaa", destinationKey: "base", amountUsdc: 0.1, band: "acknowledge" }));
+  check("  …an absent owner degrades to a stable 'anon' rather than throwing or refusing",
+    bridgeAckToken({ destinationKey: "base", amountUsdc: 0.1, band: "acknowledge" }) ===
+    bridgeAckToken({ owner: null, destinationKey: "base", amountUsdc: 0.1, band: "acknowledge" }));
+  check("⭐ the digest is versioned, so adding the field invalidates old tokens by construction",
+    forA !== a);
 }
 
 section("4 — THE GATE IS SERVER-SIDE AND FAIL-CLOSED");
@@ -96,7 +111,9 @@ section("4 — THE GATE IS SERVER-SIDE AND FAIL-CLOSED");
   check("⭐⭐ execution REFUSES when the returned token does not match the expected one",
     /bridgeAckToken\(\{[\s\S]{0,160}?\}\)/.test(actions) && /step\.ackToken !== expected/.test(actions));
   check("⭐ the expected token is RECOMPUTED server-side from server-priced inputs",
-    /const expected = bridgeAckToken\(\{ destinationKey: dest\.key, amountUsdc: amount, band: bandInfo\.band \}\)/.test(actions));
+    /const expected = bridgeAckToken\(\{ owner: ctx\.session\?\.address, destinationKey: dest\.key, amountUsdc: amount, band: bandInfo\.band \}\)/.test(actions));
+  check("⭐⭐ …including the OWNER, taken from the session and never from the request body",
+    /owner: ctx\.session\?\.address/.test(actions) && !/owner: step\./.test(actions));
   check("  …and the refusal carries the disclosure so the UI need not re-derive it",
     /feeDisclosure: \{ \.\.\.bandInfo/.test(actions));
   check("  …the fee-floor refusal is still separate and unchanged",
@@ -186,6 +203,18 @@ section("7 — THE GATE EXISTS ON BOTH SURFACES, AND LEAVES EVIDENCE");
 
   // The log claim was too broad and is now scoped.
   const settler = readFileSync(new URL("../netlify/functions/bridge-mint-settle-background.mjs", import.meta.url), "utf8");
+  // 🚨 A STALE QUOTE IS NOT AN ACTIONABLE ONE. Twice on 2026-08-01 an agent-act result
+  // survived a session change, so the panel rendered a live-looking disclosure — band,
+  // checkbox, enabled button — with no session behind it. Confirming threw before any
+  // request left the browser, which reads as "nothing happened" to the person doing it.
+  check("⭐⭐ changing wallet clears the quote AND its acknowledgment",
+    /lastOwner\.current !== null && lastOwner\.current !== addr/.test(panel) &&
+    /setResult\(null\)/.test(panel) && /setBridgeAcked\(false\)/.test(panel));
+  check("⭐⭐ the confirm button is gated on a connected wallet, not only on the tick",
+    /disabled=\{bridgeBusy \|\| !walletReady/.test(panel));
+  check("  …and an unactionable quote SAYS so rather than looking live",
+    /this quote can't be acted on/.test(panel));
+
   check("⭐ the log-drop claim is scoped to *-background, not all functions",
     /it is \*-background functions whose console output is dropped, NOT every/.test(settler));
 }

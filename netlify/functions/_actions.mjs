@@ -348,7 +348,7 @@ export async function executeAction(step, ctx) {
     // for the same reason: a warning someone scrolls past is not acceptance.
     // ⚠️ The refusal is NOT a new floor. It is satisfiable — by acknowledging.
     const bandInfo = bridgeFeeBand({ amountUsdc: amount, feeUsdc: fee.feeUsdc, netUsdc: fee.netUsdc });
-    const expected = bridgeAckToken({ destinationKey: dest.key, amountUsdc: amount, band: bandInfo.band });
+    const expected = bridgeAckToken({ owner: ctx.session?.address, destinationKey: dest.key, amountUsdc: amount, band: bandInfo.band });
     if (bandInfo.band === "acknowledge") {
       if (step.ackToken !== expected) {
         const pct = (bandInfo.feeRatio * 100).toFixed(1);

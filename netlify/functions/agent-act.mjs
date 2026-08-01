@@ -257,7 +257,7 @@ export async function handler(event) {
             // gate the button rather than something the client infers from a number.
             ackToken:
               band.band === "acknowledge"
-                ? bridgeAckToken({ destinationKey: dest.key, amountUsdc: amount, band: band.band })
+                ? bridgeAckToken({ owner: session.address, destinationKey: dest.key, amountUsdc: amount, band: band.band })
                 : null,
           },
         },
