@@ -34,8 +34,10 @@ the expected steady state. Liveness is `producedAt` advancing — **never** an a
 ⚠️ A 200 proves nothing on its own: an unmatched Netlify path returns **SPA HTML with status 200**.
 Judge by body, never by status.
 
-**Current:** production **[DEPLOY ID]** `6a6dc255e453268b8bd46c45`, built from **[COMMIT]** `42f9b1d`,
-**`dirty:false`**. Rollback target is the prior published deploy `6a6dbae99a8be64c68cbd530`.
+**Current:** production **[DEPLOY ID]** `6a6dea1ff6e9ccf6b543c031`, built from **[COMMIT]** `1955667`,
+**`dirty:false`**. Rollback target is the prior published deploy `6a6ddc3a087fae16cef2c0de`.
+Live here: plan-path bridge receipts, per-step consent + pre-flight re-price, the
+IRIS-unreachable/band message split, and the structurally pinned band vocabulary.
 
 Verified green here: `blobs-probe` **verdict D / calibrated true**, `selfChecks: []`, deploy id from
 `x-nf-deploy-id`, stamp clean. ⭐ **`gate:watch` now REFUSES a dirty surface** (`f06469e`) and ran
@@ -100,6 +102,57 @@ agent panel — the plain-language surface users actually reach — was refused 
 disclosure and no way to accept. **The honest path was the one users were least likely to find.**
 `agentClient.bridge` carried no ackToken. One missing wiring, two symptoms: `loadReceipts` lives on
 the same path, so bridging from the agent panel never called `/api/bridge-receipts` either.
+
+### 🚧 OPEN — an ack box fired where no gate was required (or a plan step vanished)
+
+**UNRESOLVED, deliberately recorded rather than dropped. 2026-08-01, deploy
+`6a6dea1ff6e9ccf6b543c031`.** A plan was run with the intent of exercising the acknowledge band.
+The ack box **appeared and was ticked** — but the only new receipt was:
+
+    0xe98e31697a…  requested 1.0000  fee 0.0537  feeRatio 5.4%  ackBand none  minted/measured
+
+5.4% is **below the 10% warn threshold**, so that step correctly required no acknowledgment. **The
+box was not for that step.** Three shapes, unresolved because the plan card was not read out:
+
+  (a) a 0.1 step WAS priced (box correct) but only the 1.0 executed
+  (b) the 0.1 ran AFTER the 1.0 and was refused/errored, leaving no receipt — the executor stops at
+      the first failure, so a later step that never ran leaves no trace in the store
+  (c) "bridge 0.1" became 1.0 somewhere between the phrasing and the quote (model or parsing)
+
+🚨 **EITHER BRANCH MATTERS, AND THE SECOND IS WORSE.** If a 0.1 step existed and did not execute,
+that is a plan-path defect. **If the plan held only 1.0 bridges, then an ack box rendered where no
+gate was required — and a gate that fires spuriously TRAINS CLICK-THROUGH AND DESTROYS ITS OWN
+VALUE.** A consent control that appears when it should not is not a harmless false positive; it is
+the mechanism by which the control stops being read at all.
+
+### 🚨 DIAGNOSABILITY GAP — `agent-act` DOES NOT LOG THE PLAN IT PRICED. BUILD THIS FIRST.
+
+The quote is the ONE artifact that answers "what was proposed vs what ran", and it is not kept
+server-side. `agent-act`'s plan branch computes `stepDisclosures` (per-step band, fee, net, token)
+plus `totalUsdc`/`totalFeeUsdc`, returns them to the browser, and keeps nothing. So the anomaly
+above can only be settled from a **screenshot** — which is why it is still open.
+
+⭐ **Logging the priced plan is cheap and would have resolved it in one query:** step list with
+types and amounts, per-step band and fee, the totals, and the owner. `netlify logs` carries full
+text for non-background functions (proven — see the scoping note below), so it is directly
+readable. **This is the first thing to build next session** — not because the log is valuable in
+itself, but because this class of question recurs and currently has no server-side answer at all.
+
+⚠️ Same family as the `listByOwner` counts added on 2026-08-01: an outcome that cannot be
+distinguished from a different outcome is not an observation. The counts closed that gap for reads;
+the priced plan is the same gap for quotes.
+
+### 🚧 THE ACKNOWLEDGE BAND HAS STILL NEVER FIRED LIVE — ON ANY SURFACE
+
+`ackAcceptedAt` has **never been written**. The band classification records correctly everywhere
+(`ackBand`/`feeRatio` are on every receipt), and the gate is suite-proven fail-closed, but the
+`acknowledge` path itself has not executed against a running server on the Bridge page, the agent
+single-action panel, or a plan.
+
+⭐ **ONE RUN PROVES ALL THREE AT ONCE:** a plan with a **0.1 USDC bridge step** exercises the gate,
+the per-step token surviving the pre-flight re-price, and `ackAcceptedAt` landing on the receipt.
+At a ~0.0536 fee, anything under **0.213 USDC** crosses the 25% threshold. Cost of the proof is the
+~0.0536 that becomes fee — which is precisely the loss the disclosure exists to make visible.
 
 ### 🚨 DEBUGGING DISCIPLINE — the three hours this cost, and exactly how
 
