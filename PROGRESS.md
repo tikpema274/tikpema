@@ -188,6 +188,44 @@ which is the same gap as "**the plan ran** is not persisted anywhere".
 ⚠️ Do NOT let the card's *absence of a mark* mean anything until then. Here it meant "never
 confirmed", and it reads identically to "refused".
 
+### 🚧 BACKLOG — A RENDERED PLAN OUTLIVES ITS SESSION AND LOOKS IDENTICAL TO A FRESH ONE
+
+**THREE PHANTOM RUNS IN TWO DAYS, ALL THE SAME MECHANISM. Not yet fixed; recorded before
+building.** A plan card is `useState` only — nothing persists it, and nothing invalidates it. The
+ONLY thing that clears `result` is a change of agent-wallet ADDRESS (`MyAgentPanel` useEffect). A
+session expiring, or a card belonging to a tab that never had a session, clears nothing. So a quote
+from hours earlier renders **pixel-identical to one just served**, ack box live and tickable.
+
+**What it has cost, three times:**
+
+* 2026-08-01 — the ack anomaly itself. A card from an abandoned quote was read as belonging to a
+  bridge from a different run, and the false join survived a whole session (closed above).
+* 2026-08-02 ~23:4x — "quote is done" against a card last served at 14:37Z. Zero server traffic.
+* 2026-08-02 ~00:0x — "plan ran, confirmed with the box ticked". `auth-challenge`/`auth-verify` at
+  23:55:42–51 and `bridge-receipts` ×2 at 23:55:52 prove a **fresh tab with a live session talking
+  to the server** — `MyAgentPanel.tsx:90` calls `loadReceipts()` on panel load. Then nothing. ⭐ So
+  the connect happened in the NEW tab and the confirm was pressed in an OLD one, whose session
+  belongs to a different tab entirely (`sessionStorage` is per-tab). Receipt count stayed 11,
+  `agent-quotes` stayed empty, no `agent-act`, no `agent-execute-plan`. Nothing moved.
+
+🚨 **THE CONSENT ANGLE IS WHY THIS IS NOT COSMETIC.** The stale card renders a *live-looking
+acknowledge box*. Ticking it feels like consent and produces nothing — and the flip side, a box that
+appears where nothing can act on it, is exactly the "gate that fires spuriously trains
+click-through" failure the band design exists to avoid. Already noted once in the discipline list
+("a stale quote even rendered a live-looking consent box with no session behind it"); it has now
+recurred twice more, so noting is not enough.
+
+**FIX (two parts, neither started):**
+1. **Invalidate or visibly mark a plan quoted under a session that is no longer present.** Tie the
+   card's validity to the session it was quoted under, not to the wallet address. An expired or
+   foreign session must make the card say so and refuse to look actionable.
+2. ⭐ **MAKE A FAILED CONFIRM LOUD.** `confirmPlan`'s catch sets `planRun.error`, which renders as
+   one line *under* the steps — the same near-invisible failure shape as the `loadReceipts` silent
+   catch. A confirm that never became a request must not be reportable as "it ran".
+
+⚠️ Same family as everything else in this document: **a stale value rendering as current**, and an
+absence (no session) with no visible representation.
+
 ### ✅ BUILT — `agent-act` NOW RECORDS THE PLAN IT PRICED (the gap below is closed in code)
 
 **Store `agent-quotes`, key `q/<owner>/<ISO>-<quoteId>`. `netlify/functions/_quote-record.mjs`.
