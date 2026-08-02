@@ -22,9 +22,42 @@ export const CONTRACTS = {
 
 export const USDC_DECIMALS = 6;
 
+// ══ NO API RESPONSE MAY BE STORED. THIS IS A MONEY-PATH HEADER. ═══════════════════════════
+//
+// 🚨 THE INCIDENT: `/api/agent-act` returned `200 OK` with a valid plan, `Age: 9`, and **the
+// function was never invoked** — no log line, no quote record, no receipt. Three separate
+// "the plan ran" reports over two days produced ZERO server traffic, and from the server side
+// a replayed response is INDISTINGUISHABLE from a request that was never sent. It recurred
+// because the same task text was retried each time; the one request with different text got
+// through and left a record.
+//
+// ⭐ WHY THIS IS NOT A TEST NUISANCE. `agent-act` is the QUOTE endpoint. A stored quote is a
+// STALE FEE PRESENTED AS CURRENT — the exact failure the fee-volatility work exists to
+// prevent (0.0541 / 0.053520 / 0.053196 / 0.053212 / 0.0533 in one day; 0.203065 three weeks
+// earlier). Worse, the acknowledge BAND is derived from that fee, so a replayed quote can show
+// a gate that no longer applies — or omit one that now does. Execution stayed safe only
+// because agent-execute-plan RE-PRICES; the disclosure a user consents to would be stale.
+//
+// ⚠️ `no-cache` IS NOT `no-store`. `no-cache` permits storage and requires revalidation; only
+// `no-store` forbids keeping a copy. Netlify's CDN also reads its own directive in preference
+// to `Cache-Control`, so the browser-facing header alone does not reach it.
+//
+// ⭐ SET IN THE SHARED HELPER, NOT ON agent-act. Every /api/* endpoint answers through this
+// one function, so gating here is the same rule as gating at the write rather than at each
+// call site — a new endpoint is covered the day it is written, by default and without anyone
+// remembering. ⚠️ TRADE-OFF, STATED: this also makes genuinely cacheable reads
+// (predict-markets, agent-parameters) uncacheable at the edge, costing invocations. Accepted
+// deliberately: on this surface a stale answer is worse than a slow one, and a per-endpoint
+// opt-in is the safe direction to add later — a per-endpoint opt-OUT is how this comes back.
+const NO_STORE = {
+  "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+  "CDN-Cache-Control": "no-store",
+  "Netlify-CDN-Cache-Control": "no-store",
+};
+
 export const json = (statusCode, body) => ({
   statusCode,
-  headers: { "Content-Type": "application/json" },
+  headers: { "Content-Type": "application/json", ...NO_STORE },
   body: JSON.stringify(body),
 });
 

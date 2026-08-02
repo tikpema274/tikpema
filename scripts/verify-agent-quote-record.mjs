@@ -314,6 +314,37 @@ globalThis.fetch = async () => ({
     rec.steps.every((s) => s.bridge === undefined || typeof s.bridge.feeUsdc === "number"));
 }
 
+section("5b — ⭐⭐ THE QUOTE RESPONSE MUST NEVER BE STORABLE");
+{
+  // 🚨 A REPLAYED QUOTE IS A STALE FEE SHOWN AS CURRENT, and the acknowledge band is derived
+  // from that fee. It also makes the function look uninvoked from the server side, which is
+  // what let three "the plan ran" reports produce zero traffic. `no-cache` is NOT enough: it
+  // permits storage with revalidation. Only `no-store` forbids keeping a copy, and Netlify's
+  // CDN reads its own directive in preference to Cache-Control.
+  const { json: jsonHelper } = await import("../netlify/functions/_arc.mjs");
+  const h = jsonHelper(200, { ok: true }).headers;
+  const cc = String(h["Cache-Control"] || "");
+  check("⭐⭐ the shared json() helper forbids STORAGE, not merely reuse", /no-store/.test(cc), cc);
+  check("  …and still sends no-cache/must-revalidate for caches that ignore no-store",
+    /no-cache/.test(cc) && /must-revalidate/.test(cc));
+  check("⭐ the Netlify CDN gets its OWN directive — it does not read Cache-Control",
+    h["Netlify-CDN-Cache-Control"] === "no-store" && h["CDN-Cache-Control"] === "no-store");
+  check("  …and the body is still JSON", h["Content-Type"] === "application/json");
+
+  // Pinned at the HELPER, so a new endpoint is covered the day it is written. If someone moves
+  // the header onto agent-act alone, this fails.
+  const arc = readFileSync(new URL("../netlify/functions/_arc.mjs", import.meta.url), "utf8");
+  check("⭐ set in the shared helper, not at one call site",
+    /const NO_STORE = \{/.test(arc) && /THIS IS A MONEY-PATH HEADER/.test(arc));
+
+  // ⚠️ WHAT THIS SUITE CANNOT PROVE: that the platform HONOURS the header. Only two presses of
+  // the SAME task text can — different text always missed the cache, so testing with different
+  // text proves nothing. Pass = two agent-act invocations AND two quote records with distinct
+  // quoteIds for one task string.
+  check("⭐ the suite states what it cannot prove (the platform honouring it)",
+    /two presses of/i.test(readFileSync(new URL("./verify-agent-quote-record.mjs", import.meta.url), "utf8")));
+}
+
 section("6 — A DIAGNOSTICS FAILURE MUST NOT COST THE QUOTE");
 {
   mem.clear();

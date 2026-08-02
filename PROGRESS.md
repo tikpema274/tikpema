@@ -188,6 +188,27 @@ which is the same gap as "**the plan ran** is not persisted anywhere".
 ⚠️ Do NOT let the card's *absence of a mark* mean anything until then. Here it meant "never
 confirmed", and it reads identically to "refused".
 
+### 🚧 BACKLOG — THE PLAN TOTAL SUMS WHAT IS **TOUCHED**, NOT WHAT IS **LOST**
+
+**Found in the first live quote record, 2026-08-02. Not fixed; deliberately NOT folded into the
+cache fix.** The record for `"swap 1 usdc to eurc and then bridge 1 usdc to base"` reads
+`totalUsdc: 2` — and the card says *"This is a 2-step plan totaling ~2.00 USDC"*.
+
+⭐ **BUT ONLY THE BRIDGE TAKES MONEY OUT.** The swap stays with the user and changes denomination.
+About **1 USDC plus the fee** actually leaves; `~2.00` reads as the cost and is nearly double it.
+`totalUsdc` is `Σ valueOfStep`, which is a **cap-checking** quantity (what each step touches, the
+right basis for a per-action bound) being reused as a **user-facing cost**. Two different
+questions, one number.
+
+⭐ **THE VOCABULARY ALREADY EXISTS IN THIS PRODUCT** — the dashboard distinguishes *"This leaves
+you"* from *"Stays with you — only the denomination changes"*. The plan summary should say the same
+three things: **what leaves, what stays, and the fee.**
+
+⚠️ Same class as the two disclosure bugs already fixed on this path: the plan total that omitted the
+bridge fee entirely, and the bridge that reported the amount REQUESTED rather than the amount that
+ARRIVED. Each time, a number that was correct for an internal purpose was rendered as if it answered
+the user's question.
+
 ### 🚧 BACKLOG — A RENDERED PLAN OUTLIVES ITS SESSION AND LOOKS IDENTICAL TO A FRESH ONE
 
 **THREE PHANTOM RUNS IN TWO DAYS, ALL THE SAME MECHANISM. Not yet fixed; recorded before
