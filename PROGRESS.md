@@ -222,6 +222,17 @@ recurred twice more, so noting is not enough.
 2. ⭐ **MAKE A FAILED CONFIRM LOUD.** `confirmPlan`'s catch sets `planRun.error`, which renders as
    one line *under* the steps — the same near-invisible failure shape as the `loadReceipts` silent
    catch. A confirm that never became a request must not be reportable as "it ran".
+3. 🚨 **DOUBLE CONFIRM IS UNGUARDED, AND THE PHANTOM RUNS ARE EXACTLY HOW IT GETS TRIGGERED.** A
+   silent no-op invites a second press, and **nothing today distinguishes a repeat confirm of the
+   same quote from a new plan** — so one intended bridge becomes two real ones. Disable the button
+   on first press, and key execution idempotently on `quoteId` so a repeat is recognisable
+   server-side.
+   ⚠️ **BOUNDS ON THAT, STATED UP FRONT:** `quoteId` is client-echoed and unverifiable, so this
+   makes a repeat **recognisable, never prevented** — a client can withhold or vary the id. And it
+   must NOT become an authorization input: the moment a stored quote decides whether execution may
+   proceed, the pre-flight re-price is back to being bypassable. Treat a repeat as a signal to
+   REFUSE-AND-ASK, not as a fact to trust. (The genuine fix for at-most-once is a server-minted,
+   server-stored single-use execution token — a bigger change, deliberately not smuggled in here.)
 
 ⚠️ Same family as everything else in this document: **a stale value rendering as current**, and an
 absence (no session) with no visible representation.
