@@ -25,11 +25,12 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
-  codeIdentity, evaluateHealth, shouldSkipRerun, resolveBuildId, buildIsBound,
+  codeIdentity, evaluateHealth, shouldSkipRerun, buildIsBound,
   codeIdentityForEvent, deployIdFromEvent, DEPLOY_ID_HEADER,
-  HEALTH_REASON, BUILD_ID_SOURCES, DEFAULT_TTL_MS,
+  HEALTH_REASON, DEFAULT_TTL_MS,
 } from "../../shared/dd-canary/health.mjs";
 import { healthKey } from "../../netlify/functions/_dd-health.mjs";
+import { ddCodeIdentity } from "../../shared/build-stamp.mjs";
 import { SCHEMA_VERSION } from "../../shared/onchain-analyze/schema.mjs";
 import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
 
@@ -40,11 +41,17 @@ const check = (label, cond, extra = "") => {
 };
 const section = (t) => console.log(`\n── ${t} ${"─".repeat(Math.max(0, 62 - t.length))}`);
 
-const BUILD_A = "6a690473aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const BUILD_B = "b2c3d4e5ffffffffffffffffffffffffffffffff";
+const BUILD_A = "a1".repeat(32);   // a DD-surface content hash (64 hex)
+const BUILD_B = "b2".repeat(32);   // a DIFFERENT DD surface
 
-/** Identity as a given deploy would compute it — env passed EXPLICITLY, never ambient. */
-const idFor = (env) => codeIdentity({ schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS, env });
+/** A stamp carrying a given DD-surface hash. `null` ddTree = the surface could not be identified. */
+const stampWith = (ddTree) => ({
+  commit: "a".repeat(40), dirty: false, dirtyCount: 0,
+  tree: "f".repeat(64), ddTree, ddFileCount: 19, generatedAt: "2026-08-11T00:00:00.000Z",
+});
+/** Identity as a given DEPLOY OF THAT CODE would compute it — stamp passed EXPLICITLY, never ambient.
+ *  ⚠️ `idFor(null)` is the UNBOUND case: no stamp at all, i.e. a deploy that skipped stamping. */
+const idFor = (stamp) => codeIdentity({ schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS, stamp });
 
 /** A passing canary record produced BY a given build. */
 const recordFrom = (identity, ageMs = 0) => ({
@@ -89,23 +96,33 @@ section("0 — THE DEPLOY-ID BINDING: one derivation, used by both sides");
   // WRONG reason.
   const cronEv = { headers: { [DEPLOY_ID_HEADER]: DEP }, blobs: "x" };          // scheduled shape
   const httpEv = { headers: { [DEPLOY_ID_HEADER]: DEP, "user-agent": "curl" }, httpMethod: "POST" };
-  const a = codeIdentityForEvent(cronEv, { schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS, env: {} });
-  const b = codeIdentityForEvent(httpEv, { schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS, env: {} });
+  const a = codeIdentityForEvent(cronEv, { schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS });
+  const b = codeIdentityForEvent(httpEv, { schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS });
   check("⭐⭐ cron-shaped and http-shaped events yield the SAME identity",
     JSON.stringify(a) === JSON.stringify(b), a.build);
-  check("  …and it is BOUND, with NO env source present at all",
-    buildIsBound(a) === true && a.build === DEP);
 
-  // The header must WIN over env, or a stale DD_BUILD_ID would silently pin the binding.
-  const withEnv = codeIdentityForEvent(cronEv, { schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS, env: { DD_BUILD_ID: "stale-pinned-value" } });
-  check("⭐ the header WINS over env sources (resolveBuildId prefers an explicit build)",
-    withEnv.build === DEP);
+  // ═══ 🚨 REWRITTEN 2026-08-11 — THE BINDING IS NO LONGER THE DEPLOY ID ═══════════════════════
+  // What stood here asserted `a.build === DEP` and that a header "WINS over env sources". Both are
+  // now false BY DESIGN: the identity is a content hash of the DD surface, and there is NO env
+  // lever at all. The deploy id is still parsed and shape-validated (above) but is recorded for
+  // DIAGNOSIS only. ⭐ Keeping the old assertions would have pinned the very behaviour that made
+  // every unrelated deploy a DD outage — 18 of the last 20 stamp-dirty commits touched no DD code.
+  check("⭐⭐ the identity is the DD-surface hash, NOT the deploy id", a.build !== DEP && /^[0-9a-f]{64}$/.test(a.build ?? ""));
+  check("  …and the deploy id is still recorded, for diagnosis only", a.deployId === DEP);
+  check("⭐⭐ TWO DIFFERENT DEPLOYS OF THE SAME CODE SHARE ONE IDENTITY (no refusal window)",
+    codeIdentityForEvent({ headers: { [DEPLOY_ID_HEADER]: "c".repeat(24) } },
+      { schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS }).build === a.build);
 
-  // And with no header it must still fall through to env, so a git-triggered build keeps working.
-  const envOnly = codeIdentityForEvent({ headers: {} }, { schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS, env: { DD_BUILD_ID: BUILD_A } });
-  check("⭐ no header -> falls through to env (a git build still binds)", envOnly.build === BUILD_A);
-  check("⭐⭐ neither header nor env -> UNBOUND, and the canary must refuse",
-    buildIsBound(codeIdentityForEvent({ headers: {} }, { schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS, env: {} })) === false);
+  // 🚨 THERE IS DELIBERATELY NO ENV LEVER. A variable that sets the code identity is
+  // `unknown === unknown` with a knob: both sides would compute it identically and a stale artifact
+  // would vouch for new code. Assert its ABSENCE, so it cannot be quietly reintroduced.
+  const withStaleEnv = codeIdentity({
+    schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS, stamp: stampWith(BUILD_A),
+    env: { DD_BUILD_ID: "stale-pinned-value", COMMIT_REF: "x".repeat(40), DEPLOY_ID: DEP, BUILD_ID: "9" },
+  });
+  check("⭐⭐ NO env var can override the identity (DD_BUILD_ID/COMMIT_REF/DEPLOY_ID/BUILD_ID ignored)",
+    withStaleEnv.build === BUILD_A, withStaleEnv.build?.slice(0, 12));
+  check("⭐⭐ no stamp -> UNBOUND, and the canary must refuse", buildIsBound(idFor(null)) === false);
 
   // 🚨 STRUCTURAL: both handlers must call the SHARED derivation, never codeIdentity directly.
   const canary = readFileSync("netlify/functions/dd-canary.mjs", "utf8").replace(/^\s*\/\/.*$/gm, "");
@@ -141,7 +158,10 @@ section("0b — no-record carries the DERIVED BUILD (the commonest refusal)");
 
   // ⭐ UNBOUND must SAY unbound, never omit. (Rung 0 catches it before no-record, so assert the
   // helper's contract directly through the branch that does surface an unresolved build.)
-  const UNB = codeIdentity({ schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS, env: {} });
+  // ⚠️ `stamp: null` is the UNBOUND lever now — `env: {}` no longer produces one, because env
+  // is not a source of identity at all. Passing `env:{}` here would silently fall through to the
+  // REAL baked stamp and test nothing.
+  const UNB = codeIdentity({ schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS, stamp: null });
   const unb = evaluateHealth({ record: null, readable: true, now: Date.now(), expect: UNB });
   check("⭐⭐ an UNBOUND build reports \"unbound\" and the field is PRESENT, not omitted",
     unb.evidence.runningBuild === "unbound" && "runningBuild" in unb.evidence);
@@ -188,32 +208,31 @@ section("0b — no-record carries the DERIVED BUILD (the commonest refusal)");
   check("  …and it still refuses to charge for a refusal", rich.settle === false);
 }
 
-section("1 — resolveBuildId never invents a value");
+section("1 — ddCodeIdentity never invents a value");
 {
-  check("explicit build wins", resolveBuildId({ build: BUILD_A, env: {} }).id === BUILD_A);
-  for (const key of BUILD_ID_SOURCES) {
-    const r = resolveBuildId({ env: { [key]: BUILD_A } });
-    check(`resolves from ${key}`, r.resolved === true && r.id === BUILD_A && r.source === key, r.source);
-  }
-  check("⭐ DD_BUILD_ID takes precedence over platform vars",
-    resolveBuildId({ env: { DD_BUILD_ID: BUILD_A, COMMIT_REF: BUILD_B } }).id === BUILD_A);
+  check("a well-formed ddTree resolves", ddCodeIdentity(stampWith(BUILD_A)).id === BUILD_A);
+  check("  …and names its source, so an operator knows where to look",
+    ddCodeIdentity(stampWith(BUILD_A)).source === "build-stamp:ddTree");
 
-  const none = resolveBuildId({ env: {} });
-  check("⭐⭐ nothing available → resolved:false, id NULL (not a placeholder)",
+  const none = ddCodeIdentity(null);
+  check("⭐⭐ no stamp → resolved:false, id NULL (not a placeholder)",
     none.resolved === false && none.id === null, JSON.stringify(none.id));
-  check("  …and it names the remedy", /DD_BUILD_ID/.test(none.detail));
+  check("  …and it names the remedy, which is a BUILD STEP not a config knob",
+    /npm run build/.test(none.detail));
 
-  // ⭐ The old sentinel must not be reintroducible through the env either.
-  const literal = resolveBuildId({ env: { COMMIT_REF: "unknown" } });
-  check('⭐⭐ the literal string "unknown" is REJECTED as a value', literal.resolved === false && literal.id === null);
-  check('  …and so is "UNKNOWN" / whitespace', resolveBuildId({ env: { COMMIT_REF: " UNKNOWN " } }).resolved === false
-    && resolveBuildId({ env: { COMMIT_REF: "   " } }).resolved === false);
+  // ⭐ The old sentinel must not be reintroducible through the stamp either.
+  for (const bad of ["unknown", "UNKNOWN", "  ", "", "deadbeef", "z".repeat(64), null, undefined, 42, {}]) {
+    const r = ddCodeIdentity(stampWith(bad));
+    check(`⭐ ddTree ${JSON.stringify(bad)} is REJECTED → UNBOUND`, r.resolved === false && r.id === null);
+  }
+  check("⭐⭐ a malformed stamp object is UNBOUND, never partially trusted",
+    ddCodeIdentity([]).resolved === false && ddCodeIdentity("nope").resolved === false);
 }
 
 // ═══════════ 2 — ⭐⭐ THE REGRESSION: unresolved must NEVER match itself ═══════════
 section("2 — unresolved on BOTH sides → REFUSE (the old fail-open)");
 {
-  const idNone = idFor({});                       // a deploy with no build id
+  const idNone = idFor(null);                       // a deploy with no build id
   check("identity.build is null, not 'unknown'", idNone.build === null, JSON.stringify(idNone.build));
   check("buildIsBound() says no", buildIsBound(idNone) === false);
 
@@ -239,11 +258,11 @@ section("2 — unresolved on BOTH sides → REFUSE (the old fail-open)");
 // ═══════════ 3 — ⭐ SAME BUILD MATCHES (the binding must still let real health through) ═══════════
 section("3 — same build → SERVES");
 {
-  const canarySide = idFor({ DD_BUILD_ID: BUILD_A });
-  const endpointSide = idFor({ DD_BUILD_ID: BUILD_A });
+  const canarySide = idFor(stampWith(BUILD_A));
+  const endpointSide = idFor(stampWith(BUILD_A));
   check("both sides resolved a real id", buildIsBound(canarySide) && buildIsBound(endpointSide), canarySide.build);
   check("  …and it is NOT the sentinel", canarySide.build === BUILD_A && canarySide.build !== "unknown");
-  check("  …recording which source it came from", canarySide.buildSource === "DD_BUILD_ID", canarySide.buildSource);
+  check("  …recording which source it came from", canarySide.buildSource === "build-stamp:ddTree", canarySide.buildSource);
 
   const g = gate(recordFrom(canarySide), endpointSide);
   check("⭐⭐ a fresh pass from the SAME build SERVES", g.serve === true && g.reason === HEALTH_REASON.OK, g.reason);
@@ -254,8 +273,8 @@ section("3 — same build → SERVES");
 // ═══════════ 4 — ⭐⭐ DIFFERENT BUILD REFUSES (the deploy gate, actually gating) ═══════════
 section("4 — different build → REFUSES (this is the deploy gate)");
 {
-  const oldDeploy = idFor({ DD_BUILD_ID: BUILD_A });
-  const newDeploy = idFor({ DD_BUILD_ID: BUILD_B });
+  const oldDeploy = idFor(stampWith(BUILD_A));
+  const newDeploy = idFor(stampWith(BUILD_B));
 
   const g = gate(recordFrom(oldDeploy), newDeploy);
   check("⭐⭐⭐ an old build's PASSING, FRESH record does NOT vouch for the new build",
@@ -274,7 +293,7 @@ section("4 — different build → REFUSES (this is the deploy gate)");
 // ═══════════ 5 — a resolved build must not paper over the OTHER identity fields ═══════════
 section("5 — build is one of three bound fields, not a replacement for them");
 {
-  const base = idFor({ DD_BUILD_ID: BUILD_A });
+  const base = idFor(stampWith(BUILD_A));
   for (const [field, mutated] of [
     ["schemaVersion", { ...base, schemaVersion: "onchain-analyze/9.9.9" }],
     ["catalogueFingerprint", { ...base, catalogueFingerprint: createHash("sha256").update("different").digest("hex").slice(0, 16) }],
@@ -288,7 +307,7 @@ section("5 — build is one of three bound fields, not a replacement for them");
 // ═══════════ 6 — ordering: the build check precedes everything it could be confused with ═══════════
 section("6 — build-unresolved outranks staleness, absence and unreadability");
 {
-  const idNone = idFor({});
+  const idNone = idFor(null);
   // Each of these would produce a DIFFERENT refusal reason if the build check were not first — and
   // each of those reasons would have sent an operator chasing the wrong thing, which is precisely
   // what happened on the draft (a green canary, and a refusal that read like a TTL problem).
@@ -310,7 +329,7 @@ section("6 — build-unresolved outranks staleness, absence and unreadability");
 // ═══════════ 7 — with a real build id, the other reasons work normally again ═══════════
 section("7 — a bound build restores the normal reason ladder");
 {
-  const id = idFor({ DD_BUILD_ID: BUILD_A });
+  const id = idFor(stampWith(BUILD_A));
   check("no record → no-record", gate(null, id).reason === HEALTH_REASON.NO_RECORD);
   check("unreadable → unreadable", evaluateHealth({ record: null, readable: false, now: Date.now(), expect: id }).reason === HEALTH_REASON.UNREADABLE);
   check("stale → stale", gate(recordFrom(id, DEFAULT_TTL_MS * 4), id).reason === HEALTH_REASON.STALE);

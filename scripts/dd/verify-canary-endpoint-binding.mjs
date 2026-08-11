@@ -40,6 +40,30 @@ mock.module("../../netlify/functions/_dd-health.mjs", {
   },
 });
 
+// ═══ 🚨 THE IDENTITY LEVER IS NOW THE BUILD STAMP, NOT AN ENV VAR ══════════════════════════════
+// Rewritten 2026-08-11. This suite used to drive both handlers with process.env.DD_BUILD_ID. That
+// variable no longer influences anything: the DD identity is a CONTENT HASH of the DD surface, baked
+// at build time, and there is deliberately no env lever — a variable that sets the code identity is
+// `unknown === unknown` with a knob.
+//
+// ⭐ So the lever is mocked at shared/build-stamp.mjs, the ONE place both handlers reach it through
+// (health.mjs imports ddCodeIdentity from there). The real implementation is imported first and the
+// non-mocked exports pass straight through, so this suite still exercises the real key formula and
+// the real refusal ladder — only the *value* of the DD hash is under test control.
+import * as realStamp from "../../shared/build-stamp.mjs";
+let CURRENT_DD = null;   // null ⇒ UNBOUND (a deploy that skipped stamping)
+mock.module("../../shared/build-stamp.mjs", {
+  namedExports: {
+    ...realStamp,
+    ddCodeIdentity: () =>
+      CURRENT_DD === null
+        ? { resolved: false, id: null, source: null,
+            detail: "no build stamp was baked into this artifact (test lever): DD identity UNBOUND" }
+        : { resolved: true, id: CURRENT_DD, source: "build-stamp:ddTree",
+            detail: "DD surface identified by content hash (test lever)" },
+  },
+});
+
 const { handler: canary } = await import("../../netlify/functions/dd-canary.mjs");
 const { handler: endpoint } = await import("../../netlify/functions/dd-analyze.mjs");
 
@@ -51,18 +75,18 @@ const check = (label, cond, extra = "") => {
 const section = (t) => console.log(`\n── ${t} ${"─".repeat(Math.max(0, 62 - t.length))}`);
 const body = (r) => JSON.parse(r.body);
 
-const BUILD_A = "1dd8f75aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const BUILD_B = "49dfe8ebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const BUILD_A = "1d".repeat(32);   // a DD-surface content hash (64 hex)
+const BUILD_B = "49".repeat(32);   // a DIFFERENT DD surface
 const SUBJ = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
 
 /** Run the canary as a deploy stamped with `build`. */
 const runCanary = async (build) => {
-  if (build === null) delete process.env.DD_BUILD_ID; else process.env.DD_BUILD_ID = build;
+  CURRENT_DD = build;
   return canary({ httpMethod: "POST", headers: {} });
 };
 /** Ask the endpoint, as a deploy stamped with `build`. Stops at the health rung — no payment needed. */
 const askEndpoint = async (build) => {
-  if (build === null) delete process.env.DD_BUILD_ID; else process.env.DD_BUILD_ID = build;
+  CURRENT_DD = build;
   return endpoint({
     httpMethod: "POST", headers: { host: "draft.test" },
     body: JSON.stringify({ address: SUBJ, chain: "arc-testnet" }),
@@ -83,7 +107,7 @@ section("1 — same deploy → same identity, same key");
   STORE.clear();
   const c = body(await runCanary(BUILD_A));
   check("canary resolved a real build id", c.identity?.buildResolved === true && c.identity?.build === BUILD_A, c.identity?.build);
-  check("  …and names the source", c.identity?.buildSource === "DD_BUILD_ID", c.identity?.buildSource);
+  check("  …and names the source", c.identity?.buildSource === "build-stamp:ddTree", c.identity?.buildSource);
   check("  …and it is NOT the old sentinel", c.identity?.build !== "unknown");
   check("canary wrote an artifact", c.wrote === true && STORE.size === 1, `store=${STORE.size}`);
 
@@ -146,7 +170,12 @@ section("4 — canary unresolvable → refuses to sweep or write");
   check("⭐⭐ canary REFUSES (503) instead of reporting a green run", r.statusCode === 503 && c.ok === false, `${r.statusCode}`);
   check("  …reason build-unresolved", c.reason === "build-unresolved", c.reason);
   check("⭐⭐ and writes NOTHING — no artifact that could never bind", c.wrote === false && STORE.size === 0, `store=${STORE.size}`);
-  check("  …offering the remedy", /DD_BUILD_ID/.test(c.remedy ?? ""));
+  // ⭐ THE REMEDY MUST BE A BUILD STEP, NOT A CONFIG KNOB. The old text told operators to set
+  // DD_BUILD_ID/COMMIT_REF/DEPLOY_ID/BUILD_ID — advice that now does NOTHING, and would have burned
+  // an operator's time during an outage. Assert the new remedy AND the absence of the old one.
+  check("  …offering a remedy that is a BUILD STEP", /npm run build/.test(c.remedy ?? ""), c.remedy?.slice(0, 60));
+  check("⭐⭐ …and NOT the retired env knobs (following them would waste an outage)",
+    !/DD_BUILD_ID|COMMIT_REF|DEPLOY_ID|BUILD_ID/.test(c.remedy ?? ""));
 
   // The state that made this defect so hard to read: green canary, refusing service. Now impossible.
   const e = await askEndpoint(null);

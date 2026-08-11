@@ -22,7 +22,7 @@ import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { SCHEMA_VERSION } from "../../shared/onchain-analyze/schema.mjs";
 import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
 import { runFixtures } from "../../shared/dd-canary/fixtures.mjs";
-import { codeIdentityForEvent, shouldSkipRerun, buildIsBound, BUILD_ID_SOURCES, MIN_RERUN_MS } from "../../shared/dd-canary/health.mjs";
+import { codeIdentityForEvent, shouldSkipRerun, buildIsBound, MIN_RERUN_MS } from "../../shared/dd-canary/health.mjs";
 import { readHealth, writeHealth } from "./_dd-health.mjs";
 
 // ═══ ⭐ SAFE-PUBLIC: A TRIGGER, NOT AN ORACLE ═════════════════════════════════════════════════
@@ -71,7 +71,18 @@ export async function handler(event) {
       reason: "build-unresolved",
       detail: identity.buildDetail,
       identity,
-      remedy: `set one of ${BUILD_ID_SOURCES.join(", ")} on this deploy — DD_BUILD_ID is the explicit lever when the platform provides none (e.g. a CLI manual deploy, which runs no build and therefore sets no build-time variables).`,
+      // 🚨 THE REMEDY IS A BUILD STEP, NOT A CONFIG KNOB — corrected 2026-08-11 when the identity
+      // moved from the deploy id to a content hash of the DD surface. The old text advised setting
+      // DD_BUILD_ID / COMMIT_REF / DEPLOY_ID / BUILD_ID, which no longer influence this at all;
+      // following it would have wasted an operator's time during an outage. There is deliberately NO
+      // env lever any more: a variable that overrides the code identity is `unknown === unknown`
+      // with a knob, and would let a stale artifact vouch for new code.
+      remedy:
+        "run `npm run build` (which runs scripts/stamp-build.mjs) and redeploy — the DD identity is " +
+        "a content hash of the DD surface baked into the artifact at build time. `deploy:draft` and " +
+        "`deploy:prod` already do this; a bare `netlify deploy` that skips the build does not. " +
+        "If the stamp is present but ddTree is null, the DD surface could not be fully read at " +
+        "stamp time (see DD_SURFACE_FILES in scripts/stamp-build.mjs).",
     });
   }
 

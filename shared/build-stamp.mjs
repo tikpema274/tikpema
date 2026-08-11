@@ -68,3 +68,58 @@ export function buildStamp(raw = RAW_BUILD_STAMP) {
 
 /** True only when this artifact can name the source that produced it, with no uncommitted drift. */
 export const provenanceIsBound = (s = buildStamp()) => s.resolved === true && s.commit !== null && s.dirty === false;
+
+/**
+ * ⭐⭐ THE DD HEALTH IDENTITY — a content hash of the DD surface, NOT the deploy id.
+ *
+ * The health artifact must be keyed by "which DD code is this", and the deploy id answered a
+ * different question: "which deployment event was this". Those differ on every redeploy of identical
+ * code (measured 2026-08-11: tree 931f6666… shipped twice under two deploy ids), and — the reason
+ * this changed — they differ on every UNRELATED deploy. Over the last 40 commits, 20 touched the
+ * stamped surface and only 2 touched DD; **18 were stamp-dirty but DD-clean**, and each of those
+ * caused a DD refusal window once the service was public.
+ *
+ * 🚨 UNAVAILABLE ⇒ UNBOUND. `null`, never a fallback and NEVER the deploy id. A fallback both sides
+ * compute identically is `unknown === unknown` wearing a new name — the exact fail-open the version
+ * binding exists to close, and one this codebase has already shipped once (fixed in 1dd8f75).
+ *
+ * ⚠️ THIS IS A BUILD-TIME VALUE, WHICH MAKES THE STAMP SAFETY-CRITICAL. esbuild inlines shared/ into
+ * each function, so the source files do not exist at runtime and cannot be re-hashed there. A deploy
+ * that SKIPS stamping therefore carries a stale ddTree that both sides read identically — they would
+ * match, and old canary evidence would vouch for new code. What contains it: `prebuild` regenerates
+ * on every `npm run build`; `deploy:draft`/`deploy:prod` both run it; the COMMITTED value is `null`
+ * (suite-asserted), so a skipped stamp yields UNBOUND rather than stale. A bare `netlify deploy`
+ * that skips the build still bypasses this — the same bound as `--no-verify` on the pre-commit hook.
+ *
+ * @returns {{resolved:boolean, id:string|null, source:string|null, detail:string}}
+ */
+export function ddCodeIdentity(raw = RAW_BUILD_STAMP) {
+  const unbound = (detail) => ({ resolved: false, id: null, source: null, detail });
+
+  if (raw === null || raw === undefined) {
+    return unbound(
+      "no build stamp was baked into this artifact, so the DD surface cannot be identified. The " +
+        "health record cannot be bound to code and MUST NOT be written or trusted. Run " +
+        "`npm run build` (which stamps) before deploying."
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return unbound("build stamp is malformed (not an object) — DD identity is UNBOUND");
+  }
+  if (!usableHex(raw.ddTree, HEX64)) {
+    return unbound(
+      "the build stamp carries no usable ddTree. Either it predates the DD-surface hash, or the " +
+        "surface could not be fully read at stamp time (a missing file makes ddTree null on " +
+        "purpose — a surface we cannot fully read is one we cannot claim to have hashed). " +
+        "UNBOUND: the canary must refuse to write and dd-analyze must refuse to serve."
+    );
+  }
+  return {
+    resolved: true,
+    id: raw.ddTree.trim().toLowerCase(),
+    source: "build-stamp:ddTree",
+    detail: `DD surface identified by content hash over ${
+      Number.isInteger(raw.ddFileCount) ? raw.ddFileCount : "?"
+    } files — a redeploy of identical DD code keeps the same identity, and any DD byte change mints a new one`,
+  };
+}

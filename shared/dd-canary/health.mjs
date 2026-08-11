@@ -19,6 +19,9 @@
 // mechanisms with separate stores — one being unavailable must not disable the other.
 
 import { createHash } from "node:crypto";
+// ⭐ ONE derivation, imported — not re-implemented here. Independent computation is how the two
+// handlers drift apart, which is the whole reason codeIdentityForEvent exists.
+import { ddCodeIdentity } from "../build-stamp.mjs";
 
 /** Closed outcome set. Anything unrecognised is a programming error, never a new "serve" case. */
 export const HEALTH_REASON = Object.freeze({
@@ -85,9 +88,24 @@ export const BUILD_ID_SOURCES = Object.freeze(["DD_BUILD_ID", "COMMIT_REF", "DEP
  * ⚠️ `netlify env:get` CANNOT be used to check this — it synthesises COMMIT_REF from the local git
  * HEAD and reports DEPLOY_ID/BUILD_ID as "0". Only the running function can say.
  *
- * ⭐ WHY A DEPLOY ID IS THE RIGHT BINDING, not merely the available one: it changes on EVERY
- * deploy. COMMIT_REF would be identical across two deploys of the same commit, so it could not
- * distinguish them — and distinguishing deploys is the entire job of this binding.
+ * 🚨 SUPERSEDED 2026-08-11 — THE DEPLOY ID IS NO LONGER THE BINDING. The paragraph that stood here
+ * argued it was "the right binding, not merely the available one, because it changes on EVERY
+ * deploy". That reasoning was WRONG IN ITS PREMISE: changing on every deploy is the DEFECT, not the
+ * virtue. "Distinguishing deploys" was never the job — distinguishing CODE is. A deploy id answers
+ * "which deployment event", and two deploys of byte-identical DD code genuinely deserve one verdict.
+ *
+ * ⭐ MEASURED: over the last 40 commits, 20 touched the stamped surface and only 2 touched DD —
+ * **18 were stamp-dirty but DD-CLEAN.** Under deploy-id binding each of those 18 rotated the health
+ * key and refused the service for up to the cron period, on deploys the canary's verdict says
+ * nothing about. Once DD went public that became an outage caused by unrelated work.
+ *
+ * The binding is now `ddCodeIdentity()` (shared/build-stamp.mjs): a content hash of the DD surface.
+ * COMMIT_REF was correctly rejected above for being identical across deploys of the same commit —
+ * but a CONTENT hash is not the same thing: it changes when the bytes change, including uncommitted
+ * edits, which is precisely the property wanted.
+ *
+ * ⚠️ `deployIdFromEvent` is KEPT and still derived here — recorded on the identity for DIAGNOSIS
+ * only, never compared. An operator can still see which deploy wrote a record.
  *
  * 🚨 WHY THIS LIVES IN ONE FUNCTION. dd-canary (CRON) writes the artifact and dd-analyze (HTTP)
  * reads it, in different runtimes. If they derived the id even slightly differently the keys would
@@ -119,7 +137,13 @@ export function deployIdFromEvent(event) {
  * when no header is present, so a git-triggered build still works.
  */
 export function codeIdentityForEvent(event, { schemaVersion, powerSigs, env = process.env }) {
-  return codeIdentity({ schemaVersion, powerSigs, build: deployIdFromEvent(event), env });
+  // ⚠️ THE DEPLOY ID IS NO LONGER THE IDENTITY — it is recorded for DIAGNOSIS ONLY and is never
+  // compared. evaluateHealth/shouldSkipRerun compare exactly {schemaVersion, catalogueFingerprint,
+  // build}, so an extra field cannot cause a mismatch. Keeping it means an operator can still see
+  // WHICH DEPLOY wrote a record without the identity being a property of the deployment event.
+  const identity = codeIdentity({ schemaVersion, powerSigs, env });
+  const deployId = deployIdFromEvent(event);
+  return deployId === null ? identity : { ...identity, deployId };
 }
 
 export function resolveBuildId({ build = null, env = process.env } = {}) {
@@ -205,12 +229,27 @@ export function shouldSkipRerun(record, { now, expect, minRerunMs = MIN_RERUN_MS
  * vouch for new code — the same reasoning as pass 2's six-part cache key: an artifact is a function
  * of the inputs AND of how it was produced.
  */
-export function codeIdentity({ schemaVersion, powerSigs, build = null, env = process.env }) {
+export function codeIdentity({ schemaVersion, powerSigs, build = null, env = process.env, stamp = undefined }) {
   const catalogue = Object.entries(powerSigs)
     .map(([group, sigs]) => `${group}:${[...sigs].sort().join(",")}`)
     .sort()
     .join("|");
-  const b = resolveBuildId({ build, env });
+
+  // ⭐⭐ THE IDENTITY IS NOW A CONTENT HASH OF THE DD SURFACE, not the deploy id.
+  //
+  // An explicit `build` still wins — it is how the suites inject an identity — but there is NO
+  // fallback chain behind the stamp any more. Previously an unresolved id fell through to
+  // DD_BUILD_ID → COMMIT_REF → DEPLOY_ID → BUILD_ID; that made the key a property of the DEPLOYMENT
+  // EVENT, so every unrelated deploy rotated it and the service refused for up to the cron period.
+  // Measured: 18 of the last 20 stamp-dirty commits changed no DD code at all.
+  //
+  // 🚨 UNAVAILABLE ⇒ UNBOUND, never the deploy id and never a constant. Both sides derive through
+  // THIS function (codeIdentityForEvent → codeIdentity), which is what stops the two handlers
+  // drifting apart — the same rule that b9de582 exists to prove.
+  const b = usableExplicit(build)
+    ? { resolved: true, id: String(build).trim(), source: "explicit", detail: "identity supplied explicitly" }
+    : ddCodeIdentity(stamp === undefined ? undefined : stamp);
+
   return {
     schemaVersion,
     catalogueFingerprint: createHash("sha256").update(catalogue).digest("hex").slice(0, 16),
@@ -221,6 +260,10 @@ export function codeIdentity({ schemaVersion, powerSigs, build = null, env = pro
     buildDetail: b.detail,
   };
 }
+
+/** An explicitly supplied identity, held to the same rejection rules as everything else. */
+const usableExplicit = (v) =>
+  typeof v === "string" && v.trim() !== "" && v.trim().toLowerCase() !== "unknown";
 
 /** Is this identity usable for binding at all? Exported so callers can refuse EARLY and say why,
  *  rather than discovering it as a comparison that happens to succeed. */
