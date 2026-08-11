@@ -45,6 +45,10 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { EXPECTED_CRON, FUNCTION_NAME, DEFAULT_TARGET_URL, DEFAULT_STORE_NAME, checkEnvOverride }
   from "../shared/strong-read-watch/watch.mjs";
+// ⭐ The DD watcher's own defaults, imported so the gate compares against the SAME constants the
+// monitor uses — a transcribed copy here would drift and the gate would pass a redirected watcher.
+import { DEFAULT_PATHS as DD_DEFAULT_PATHS, DEFAULT_STORE_NAME as DD_DEFAULT_STORE_NAME }
+  from "../shared/dd-watch/watch.mjs";
 
 /**
  * EVERY schedule a draft proof is known to comment out. The gate refuses production until ALL of
@@ -74,6 +78,10 @@ export const GUARDED_SCHEDULES = [
   //
   // ⭐ draftMustBeCommented: the tension runs BOTH WAYS, and each direction has now cost real time.
   { functionName: "dd-canary", expectedCron: "*/10 * * * *", draftMustBeCommented: true },
+  // The DD availability monitor. NOT draft-must-be-commented: it is never HTTP-invoked during a
+  // proof (its probe targets the DEPLOYED URLs), so commenting it out would buy nothing and only
+  // risk a forgotten restore.
+  { functionName: "dd-watch", expectedCron: "*/5 * * * *", draftMustBeCommented: false },
 ];
 
 /**
@@ -132,6 +140,21 @@ export function checkDraftInvocability(tomlText, schedules = GUARDED_SCHEDULES) 
  * variable, verified by comparing fingerprints, never by echoing the URL.
  */
 export const WATCH_WEBHOOK_VAR = "WATCH_ALERT_WEBHOOK";
+
+/**
+ * ⭐ THE DD AVAILABILITY CHANNEL — deliberately SEPARATE from the money-path channel.
+ *
+ * 🚨 THE ARGUMENT IS NOT "different urgency", IT IS THAT MUTING IS PER-CHANNEL. strong-read-watch's
+ * whole design rests on SILENCE BEING THE HEALTHY SIGNAL. Share the channel and silence stops
+ * meaning "the money path can do a strong read" and starts meaning "neither of two things fired".
+ * Worse: a DD availability alert that chatters during a deploy train is exactly what someone mutes —
+ * and muting it MUTES THE MONEY-PATH SIREN WITH IT.
+ *
+ * ⚠️ A separate channel is only better IF it is proven to deliver. A second channel that was never
+ * verified is a monitor that fails silently, which is the thing it exists to prevent — so it gets
+ * the SAME live existence GET, and gates production identically.
+ */
+export const DD_WEBHOOK_VAR = "DD_WATCH_WEBHOOK";
 const PROBE_TIMEOUT_MS = 8000;
 
 /**
@@ -482,9 +505,25 @@ async function main() {
   // stale WATCH_TARGET_URL would make the monitor watch a file that always says HOTFIX — a permanent
   // fake outage, paging hourly, while the real money path went unwatched. Unsetting these has been a
   // manual step on every proof; this enforces it. Legitimate outside production.
+  // ═══ 🚨 CALIBRATION LEVERS MUST NOT SURVIVE THE CALIBRATION ════════════════════════════════════
+  // Proving an alert path works means pointing the monitor at a deliberately broken target. That is
+  // the ONLY way to see the alert branch execute — it never fires naturally while the service is
+  // healthy, the same first-success-branch problem that let a probe assertion sit unexecuted for the
+  // whole life of the DD service.
+  //
+  // ⚠️ BUT THE ACT OF PROVING IT LEAVES THE LEVER SET, AND A MONITOR AIMED AT A FAKE TARGET WATCHES
+  // NOTHING WHILE LOOKING PERFECTLY HEALTHY. That is strictly worse than no monitor: it manufactures
+  // the reassurance it was built to earn. So every override that can redirect a watcher is gated to
+  // production, exactly as WATCH_TARGET_URL already is.
+  //
+  // ⭐ THESE ROWS EXIST BEFORE THE FIRST CALIBRATION RUN, DELIBERATELY. Adding them afterwards would
+  // leave the one window — the calibration itself — during which nothing is watching the watcher.
   const overrides = [
     ["WATCH_TARGET_URL", DEFAULT_TARGET_URL],
     ["WATCH_STORE", DEFAULT_STORE_NAME],
+    ["DD_WATCH_URL_API", DD_DEFAULT_PATHS.api],
+    ["DD_WATCH_URL_FN", DD_DEFAULT_PATHS.functions],
+    ["DD_WATCH_STORE", DD_DEFAULT_STORE_NAME],
   ].map(([name, expected]) => {
     const r = readVar(name, context, { raw: true });
     return { name, ...checkEnvOverride(name, r.value, expected) };
@@ -515,7 +554,33 @@ async function main() {
     }
   }
 
-  const pass = watch.resolved && live?.exists === true && (schedulesOk || !isProd)
+  // ── the DD availability channel: same treatment, its own row ─────────────────────────────────
+  const ddw = readVar(DD_WEBHOOK_VAR, context);
+  console.log(`  ${ddw.resolved ? "✅" : isProd ? "❌" : "⚠️ "} shape     — ${DD_WEBHOOK_VAR}: ${ddw.reason}: ${ddw.detail}`);
+  let ddLive = null;
+  if (ddw.resolved) {
+    console.log(`     fingerprint: ${fingerprint(ddw.value)}  (value withheld)`);
+    ddLive = noNetwork
+      ? { exists: false, reason: "unverified", detail: "--no-network was passed, so existence was NOT checked.", meta: null }
+      : await probeWebhook(ddw.value);
+    console.log(`  ${ddLive.exists ? "✅" : isProd ? "❌" : "⚠️ "} existence — ${DD_WEBHOOK_VAR}: ${ddLive.reason}: ${ddLive.detail}`);
+    if (ddLive.meta) console.log(`     channel: name=${JSON.stringify(ddLive.meta.name)} channel_id=${ddLive.meta.channelId}`);
+
+    // 🚨 SAME URL IN BOTH VARS WOULD SILENTLY DEFEAT THE ENTIRE SEPARATION ARGUMENT — and it would
+    // look configured from the dashboard. Compared by FINGERPRINT so neither value is printed.
+    if (watch.resolved && fingerprint(ddw.value) === fingerprint(watch.value)) {
+      ddLive = { ...ddLive, exists: false, reason: "same-as-money-channel",
+        detail: `${DD_WEBHOOK_VAR} is the SAME channel as ${WATCH_WEBHOOK_VAR}. That defeats the separation: a chatty DD alert would train people to mute the channel, and muting is per-channel — it would take the money-path siren down with it. Point it at a DIFFERENT channel.` };
+      console.log(`  ❌ separation — ${ddLive.reason}: ${ddLive.detail}`);
+    } else if (watch.resolved) {
+      console.log(`  ✅ separation — DD alerts go to a DIFFERENT channel from the money path (${fingerprint(ddw.value)} vs ${fingerprint(watch.value)})`);
+    }
+  } else if (!isProd) {
+    console.log("     (not gating: this is not the production context. It MUST resolve before promotion.)");
+  }
+  const ddChannelOk = ddw.resolved && ddLive?.exists === true;
+
+  const pass = watch.resolved && live?.exists === true && (ddChannelOk || !isProd) && (schedulesOk || !isProd)
     && draftInvocable.ok
     && (tree.ok || !isProd)
     && (overrides.every((o) => o.ok) || !isProd);
@@ -567,6 +632,14 @@ async function main() {
       console.log("║  artifact — so the deploy-id ↔ commit binding is false and there is no");
       console.log("║  real rollback target. This shipped once already (6a6cb349…). Commit the");
       console.log("║  surface, or deploy from a clean tree.");
+    }
+    if (isProd && !ddChannelOk) {
+      console.log("║");
+      console.log(`║  DD CHANNEL (${ddw.resolved ? (ddLive?.reason ?? "unverified") : ddw.reason}): the DD availability monitor would have`);
+      console.log("║  nowhere to report. A monitor that cannot reach anyone is a log file, and it");
+      console.log("║  looks healthy precisely because it is silent — the same failure this gate");
+      console.log("║  exists to catch for the money path. It must be a DIFFERENT channel:");
+      console.log(`║    netlify env:set ${DD_WEBHOOK_VAR} "<a DIFFERENT webhook URL>" --context ${context}`);
     }
     if (!watch.resolved || live?.exists !== true) {
       console.log("║");

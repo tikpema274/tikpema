@@ -271,6 +271,28 @@
 [functions."bridge-mint-sweep"]
   schedule = "*/10 * * * *"
 
+# DD availability watch — is the PUBLIC DD SERVICE answering, on BOTH of its paths?
+#
+# ⭐ THE PROBE IS FREE. dd-analyze's rungs are exposure(-1) -> retrieve(-0.5) -> HEALTH(0) -> ... ->
+# payment(6), so an unauthenticated POST can only reach the 402 challenge: it never settles, never
+# charges, needs no session. 402 = past the health rung, 503 = refusing. That is why this can run
+# every 5 minutes forever.
+#
+# ⚠️ LOAD-BEARING ORDERING, WITH NUMBERS DELIBERATELY UNLIKE THE OTHER TWO MONITORS:
+# MIN_RERUN_MS (3m) < this period (5m) < TTL_MS (20m). They differ from dd-canary's 5/10/30 and from
+# strong-read-watch's 7/15/45 so nobody assumes one monitor covers another.
+#
+# ⭐ AND THE GRACE WINDOW IS SIZED AGAINST THE CANARY, NOT AGAINST THIS PERIOD: a DD-code deploy
+# rotates the health key, so `no-record` is CORRECT for up to a */10 canary period. Alerting on that
+# would fire on every DD deploy BY CONSTRUCTION, and an alert that fires on routine work is one
+# nobody reads. Grace = 2 canary periods (20m); first alert lands at ~t+25m.
+#
+# ⚠️ SEPARATE FROM strong-read-watch by design: that guards the MONEY path, this guards DD
+# AVAILABILITY. Own store, own channel (DD_WATCH_WEBHOOK) — muting is per-channel, so a chatty DD
+# alert sharing the money channel would take the siren that matters down with it.
+[functions."dd-watch"]
+  schedule = "*/5 * * * *"
+
 # Strong-read watch — is the TIKPEMA APP's money path still able to do a strong Blobs read on prod?
 #
 # ⚠️ DELIBERATELY NOT PART OF dd-canary. That one guards the DD ENGINE, which is going standalone
