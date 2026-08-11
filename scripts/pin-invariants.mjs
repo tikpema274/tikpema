@@ -62,6 +62,39 @@ function bafkreiRawCid(sha256Buf) {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 
+// ═══ 🚨🚨 A PIN HERE IS A PERMANENT OBLIGATION, AND THE SET ONLY GROWS ═══════════════════════════
+//
+// ⭐ SELLING A REPORT CHANGED WHAT A PIN MEANS. Before 2026-08-11 these CIDs were provenance: nice
+// to keep, harmless to drop. On 2026-08-11 the DD service sold TWO REAL REPORTS for USDC
+// (handles 397b67b1…, e7e855fb…), each carrying an ERC-1271 attestation. Verifying one runs
+// `tokenURI(851891)` → the identity document → the capability and coverage claims that were LIVE
+// when that report was produced.
+//
+// 🚨 IF THE PIN LAPSES, THE SOLD REPORTS STOP BEING CHECKABLE against the claims they were produced
+// under. The signature still verifies — `isValidSignature` is a chain call and needs no IPFS — but
+// WHAT WAS BEING ATTESTED TO becomes unresolvable. A buyer left holding a valid signature over
+// claims nobody can retrieve has an artifact they cannot audit, which is precisely the property they
+// paid for. That is not a degraded state; it is the product failing after delivery.
+//
+// ⚠️ THIS IS MONOTONIC. The document's own `supersession_rules` require that "prior CIDs are not
+// unpinned: a report relied upon under an older document must remain checkable against the claims
+// that were live when it was produced." So EVERY supersession adds a CID to this list and removes
+// none, for as long as any report sold under it might be relied upon — effectively forever.
+// **Budget for it, and never unpin to save quota.** The cheap-looking cleanup is the one that
+// silently breaks delivered products.
+//
+// MUST-STAY-PINNED (append on every supersession; never remove a row):
+//   · bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4  — dd-service.json, agentId 851891.
+//     ⭐ TWO PAID REPORTS WERE PRODUCED UNDER THIS DOCUMENT. Load-bearing, not historical.
+//   · bafkreidoeond3akvswce3e425o5grfygsvrfyleqkwathio4ae6y6vujae  — unified.json, agentId 851823.
+//
+// ⚠️ The frozen dd-service doc is KNOWN STALE on four capability claims (x402 metering, HTTP
+// interface, signed reports, canary — all "NOT built", all now built). Per its own
+// `why_capability_claims_are_commit_scoped` that is not a defect: the claims are scoped to commit
+// 3e27042, so the document is OUT OF DATE ABOUT A KNOWN TREE rather than WRONG ABOUT THE PRESENT.
+// The fix is SUPERSESSION (a new version + `setAgentURI`), never an edit and never an unpin.
+// See agent-metadata/dd-service.MIRROR-README.md.
+//
 // ═════════════════════ TARGETS — ONE PROFILE PER FROZEN DOCUMENT ═════════════════════
 //
 // ⚠️ WHY A MAP AND NOT EDITED CONSTANTS. This script pinned unified.json with `rel`,

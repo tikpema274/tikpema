@@ -987,6 +987,22 @@ Arc-serve/Base-settle workaround was inferred from a STALE row, not from a platf
   suddenly fail on a new box, this is why. ⭐ The hook raises the floor only: `--no-verify` skips
   it and there is **no CI backstop**, since deploys are CLI-only.
 
+* 🚨 **PINNED CIDs ARE NOW A PERMANENT, GROWING OBLIGATION — created by the first sale (2026-08-11).**
+  `bafkreigton…` (dd-service.json, agentId 851891) must stay pinned **indefinitely**: two paid
+  reports were produced under it, and verifying either resolves `tokenURI(851891)` → that document →
+  the claims that were **live when the report was produced**. ⭐ **If the pin lapses the signature
+  still verifies — `isValidSignature` is a chain call — but WHAT WAS ATTESTED TO becomes
+  unresolvable**, leaving a buyer with a valid signature over claims nobody can retrieve. The product
+  fails *after* delivery. ⚠️ **Monotonic:** `supersession_rules` forbids unpinning priors, so every
+  future version ADDS a CID and removes none. **Never unpin to reclaim quota.** Operational copy is
+  at the top of `scripts/pin-invariants.mjs`; reader-facing copy in
+  `agent-metadata/dd-service.MIRROR-README.md`.
+* **The frozen DD identity doc is KNOWN STALE on four capability claims — fix by SUPERSESSION, never
+  by edit or mirror.** Its own `mutability_posture` prescribes it, and `setAgentURI` (`0x0af28bd3`)
+  is verified present. ⚠️ **DEFERRED until the launch work settles** (exposure, refusal window,
+  monitoring, any MCP surface) — a commit-scoped doc authored mid-flight needs superseding twice.
+  ⭐ It is a precondition for **LISTING**, not for enabling: unlisted, no verifier arrives; a listing
+  is what brings them, and they would read a document denying that signing exists.
 * **`WATCH_ALERT_WEBHOOK` must NEVER be `--secret`.** `gate:watch`'s existence check READS the URL to
   perform a live GET; a secret value breaks the gate. Hygiene is fingerprint-not-print.
 * **`WATCH_STORE` at deploy-preview is DELIBERATE ISOLATION, not a leftover.** Removing it lets a

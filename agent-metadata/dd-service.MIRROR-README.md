@@ -58,6 +58,47 @@ report       refusal:null · coverage 15 checked / 0 not
 attestation  signed · agentId 851891 · canon/1 · ERC-1271 valid:true on chain
 ```
 
-⚠️ **The service is NOT publicly enabled.** `DD_PUBLIC_ENABLED` and `DD_PAYTO_ADDRESS` are set on
-`deploy-preview` only; both are **unset in production**, so DD is inert there by design. This
-document describes a capability that is proven, not one that is published.
+## 🚨 THE PIN IS NOW A PERMANENT OBLIGATION — created by the first sale
+
+`bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4` **must stay pinned indefinitely.**
+
+Two paid reports were produced under it. Verifying either runs `tokenURI(851891)` → this identity
+document → the capability and coverage claims that were **live when that report was produced**.
+
+⭐ **IF THE PIN LAPSES, THOSE REPORTS STOP BEING CHECKABLE.** The signature keeps verifying —
+`isValidSignature` is a chain call and needs no IPFS — but *what was being attested to* becomes
+unresolvable. A buyer is left holding a valid signature over claims nobody can retrieve, which is
+exactly the auditability they paid for. The product fails **after** delivery, silently.
+
+⚠️ **AND THE SET ONLY GROWS.** `supersession_rules` requires prior CIDs stay pinned, so every future
+version **adds** a CID and removes none — a monotonically increasing commitment that **did not exist
+before the first sale**. Budget for it; never unpin to reclaim quota. Operational copy lives at the
+top of `scripts/pin-invariants.mjs`, where anyone touching Pinata will meet it.
+
+## Supersession, not a mirror, is the fix for the stale claims above
+
+⭐ **This README is the wrong instrument for correcting a load-bearing claim, and the frozen document
+says so.** Its `mutable_companion` note reserves the mirror for what *cannot* be frozen — "carry the
+agentId after registration" — not for restating capability. And `mutable_companion` is **`null`**, so
+nothing points here: a verifier following `tokenURI` reads the stale document and never arrives.
+
+The document's own `mutability_posture.decision` prescribes the remedy: *"an immutable
+content-addressed document, a mutable on-chain pointer, and **supersession by new version rather than
+edit**."* The re-point power is verified — `setAgentURI(uint256,string)` selector `0x0af28bd3` present
+in the deployed registry implementation.
+
+**A superseding version must:** state capability scoped to the **then-current commit** (not to "now",
+or it rots identically); set `supersedes` to the prior version **and CID**; and set
+`mutable_companion` to this file, closing the `null` that left the frozen document pointing nowhere.
+
+⚠️ **Deliberately deferred until the launch work settles** — exposure, the refusal window, monitoring
+and any MCP surface are all in flight, and a commit-scoped document authored mid-flight would need
+superseding twice.
+
+⭐ **The uncomfortable symmetry, which the frozen document names about itself:** `setAgentURI` is the
+*same power class* this service flags in other people's contracts — re-pointable metadata. Exercising
+it is honest only because the pointer move is **visible on-chain** and prior CIDs stay resolvable.
+
+⚠️ **The service is NOT publicly enabled** at the time of writing. `DD_PUBLIC_ENABLED` and
+`DD_PAYTO_ADDRESS` were set on `deploy-preview` only. This document describes a capability that is
+proven, not necessarily one that is published — check the live environment, not this sentence.
