@@ -146,6 +146,22 @@ the TTL, but do not read a dedupe as a refresh.
 the canary goes stale mid-settlement. That matters here in practice: settlement can take ~15.4 min
 against a 30-minute TTL, so an artifact expiring during a poll is likely and is a non-event.
 
+🪤 **THE WRONG RE-DERIVATION, WRITTEN OUT BECAUSE IT WAS ACTUALLY MADE (2026-08-11).** Facing an
+unresolved purchase hours later, the natural chain of reasoning is: *"the 30-min TTL means the
+artifact is long stale → a stale artifact refuses `service-unverified` → that would look like the
+entitlement failing when it is only staleness → so refresh the canary **before redeeming**."* Every
+step of that is sound **except the second's scope**, and the conclusion is wrong: **staleness can
+never block a redemption at all**, because retrieve never consults health. The rung ordering above
+is the whole answer, and it is easy to skip past because it reads as a design note rather than as an
+operational rule.
+
+⭐ **THE RULE, STATED AS AN OPERATION:** refresh the canary before **BUYING** (a new 402 must pass
+rung 0). Never before **REDEEMING** (`--handle` bypasses rung 0 entirely). If a redemption fails,
+health is not a candidate explanation — **look at the handle and the chain, and do not touch the
+canary**, because refreshing it will appear to fix nothing and will cost the real cause a diagnosis.
+⚠️ Note which direction the error runs: it is harmless here (an unnecessary canary run is free and
+idempotent), but it points attention at the wrong subsystem, which is the expensive part.
+
 ⚠️ Diagnosing a refusal at this step — the reason discriminates, so read it rather than retrying:
 
 | `refusal.diagnostic.healthReason` | Meaning |

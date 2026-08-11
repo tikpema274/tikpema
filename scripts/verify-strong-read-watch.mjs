@@ -622,7 +622,26 @@ check("a trailing comment after the value is harmless",
 
 const gateSrcLive = readFileSync("scripts/verify-watch-promotion-gate.mjs", "utf8");
 check("⭐ the schedule check gates PRODUCTION and only warns elsewhere (a draft proof needs it off)",
-  /schedule\.ok \|\| !isProd/.test(gateSrcLive) && /not gating/.test(gateSrcLive));
+  /schedulesOk \|\| !isProd/.test(gateSrcLive) && /not gating/.test(gateSrcLive));
+
+// ⭐⭐ THE REAL INVARIANT, asserted STRUCTURALLY rather than by grepping the gate's source.
+//
+// 🚨 Found 2026-08-11: gate:watch checked strong-read-watch ONLY, so a DD money-step draft could
+// leave dd-canary's schedule commented out and the gate still exited 0 — while PROGRESS.md and the
+// comment at the top of this section BOTH asserted it was covered. A claimed guarantee that does
+// not exist is worse than no guarantee.
+//
+// ⚠️ This file asserts dd-canary against the COMMITTED toml (git show, above) on purpose, so it is
+// structurally blind to a working-tree comment-out. The working tree is gate:watch's job. That
+// division only holds if dd-canary is actually IN the gate's table — which is what this checks.
+// The line above is a source regex and would go green on a rename that deleted the coverage; this
+// one imports the table and cannot.
+const { GUARDED_SCHEDULES: gateTable } = await import("./verify-watch-promotion-gate.mjs");
+check("⭐⭐ gate:watch's table covers dd-canary (the schedule a draft proof MUST comment out)",
+  gateTable.some((g) => g.functionName === "dd-canary" && g.expectedCron === "*/10 * * * *"),
+  gateTable.map((g) => g.functionName).join(", "));
+check("  …and still covers strong-read-watch",
+  gateTable.some((g) => g.functionName === "strong-read-watch" && g.expectedCron === EXPECTED_CRON));
 check("⭐ the gate still says the schedule being DECLARED is not the schedule FIRING",
   /NOT THAT IT FIRES/.test(gateSrcLive) && /producedAt advance/.test(gateSrcLive));
 check("⭐⭐ the liveness check is a GET — a POST would put a test message in the channel",

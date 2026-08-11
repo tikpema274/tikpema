@@ -47,6 +47,34 @@ import { EXPECTED_CRON, FUNCTION_NAME, DEFAULT_TARGET_URL, DEFAULT_STORE_NAME, c
   from "../shared/strong-read-watch/watch.mjs";
 
 /**
+ * EVERY schedule a draft proof is known to comment out. The gate refuses production until ALL of
+ * them are restored.
+ *
+ * 🚨 WHY THIS IS A TABLE AND NOT ONE CHECK — a real gap, found 2026-08-11 mid-proof. This gate
+ * checked `strong-read-watch` ONLY, so a DD money-step draft could comment out `dd-canary`'s
+ * schedule and the gate still exited 0. Two documents asserted the coverage that did not exist:
+ * PROGRESS.md's standing constraint ("`npm run gate:watch` refuses production while it is
+ * commented") and verify-strong-read-watch.mjs's own comment ("the WORKING TREE is the promotion
+ * gate's job"). Only half of that was ever implemented.
+ *
+ * ⭐ AND THE OTHER SUITE CANNOT COVER IT, BY DESIGN. `verify-strong-read-watch.mjs` asserts
+ * dd-canary's schedule against `git show HEAD:netlify.toml` — the COMMITTED file — precisely so a
+ * mid-proof comment-out does not turn it red for the wrong reason. That is correct, and it means it
+ * is structurally blind to working-tree drift. The working tree is THIS file's job, for BOTH.
+ *
+ * ⚠️ A claimed guarantee that does not exist is worse than no guarantee: it is the exact
+ * absence-reads-as-safety shape this repo keeps re-learning. Add a row here whenever a schedule
+ * becomes comment-out-able, or the claim rots again.
+ */
+export const GUARDED_SCHEDULES = [
+  { functionName: FUNCTION_NAME, expectedCron: EXPECTED_CRON },
+  // Guards the DD SERVICE's health artifact. Commenting this out is the ONLY way to invoke the
+  // canary over HTTP on a draft (scheduled functions 403), so it is the schedule most likely to be
+  // left commented — and the DD money step requires doing exactly that.
+  { functionName: "dd-canary", expectedCron: "*/10 * * * *" },
+];
+
+/**
  * 🚨 STANDING CONSTRAINT: THIS VARIABLE MUST NEVER BE SET `--secret`.
  *
  * `netlify env:set --secret` makes a value unreadable afterwards. That is normally good hygiene for
@@ -357,17 +385,29 @@ async function main() {
   // deploy-preview draft legitimately has the schedule commented out, because that is the only way
   // to invoke a scheduled function at all. Promotion is the act that needs it back.
   const isProd = context === "production";
-  let schedule;
+  let schedules;
   try {
-    schedule = checkScheduleDeclared(readFileSync(new URL("../netlify.toml", import.meta.url), "utf8"));
+    const tomlText = readFileSync(new URL("../netlify.toml", import.meta.url), "utf8");
+    schedules = GUARDED_SCHEDULES.map(({ functionName, expectedCron }) => ({
+      functionName,
+      ...checkScheduleDeclared(tomlText, { functionName, expectedCron }),
+    }));
   } catch (err) {
-    schedule = { ok: false, reason: "toml-unreadable", detail: `could not read netlify.toml (${err?.code || err?.name})`, cron: null };
+    schedules = GUARDED_SCHEDULES.map(({ functionName }) => ({
+      functionName, ok: false, reason: "toml-unreadable",
+      detail: `could not read netlify.toml (${err?.code || err?.name})`, cron: null,
+    }));
   }
-  const schedMark = schedule.ok ? "✅" : isProd ? "❌" : "⚠️ ";
-  console.log(`  ${schedMark} schedule  — ${schedule.reason}: ${schedule.detail}`);
-  if (!schedule.ok && !isProd) {
-    console.log("     (not gating: this is not the production context. It MUST be restored before promotion.)");
+  for (const s of schedules) {
+    const mark = s.ok ? "✅" : isProd ? "❌" : "⚠️ ";
+    console.log(`  ${mark} schedule  — ${s.functionName}: ${s.reason}: ${s.detail}`);
+    if (!s.ok && !isProd) {
+      console.log("     (not gating: this is not the production context. It MUST be restored before promotion.)");
+    }
   }
+  // The strong-read-watch entry, kept as a named binding for the messaging below.
+  const schedule = schedules.find((s) => s.functionName === FUNCTION_NAME) ?? schedules[0];
+  const schedulesOk = schedules.every((s) => s.ok);
 
   // The stamp measures `dirty` and prints it; until now nothing refused on it. See checkTreeClean.
   const tree = checkTreeClean();
@@ -418,7 +458,7 @@ async function main() {
     }
   }
 
-  const pass = watch.resolved && live?.exists === true && (schedule.ok || !isProd)
+  const pass = watch.resolved && live?.exists === true && (schedulesOk || !isProd)
     && (tree.ok || !isProd)
     && (overrides.every((o) => o.ok) || !isProd);
 
@@ -444,14 +484,14 @@ async function main() {
     console.log("║  twice, treat the monitor as unproven in production.");
   } else {
     console.log(`║  ❌ GATE FAILS in ${context}. DO NOT PROMOTE.`);
-    if (isProd && !schedule.ok) {
+    for (const s of isProd ? schedules.filter((x) => !x.ok) : []) {
       console.log("║");
-      console.log(`║  SCHEDULE (${schedule.reason}): a monitor that is never invoked reports nothing,`);
-      console.log("║  and reporting nothing is indistinguishable from a healthy money path.");
-      console.log("║  The build stamp CANNOT catch this — netlify.toml is outside the hashed");
-      console.log("║  surface, so the tree hash matches a scheduled build exactly. Restore:");
-      console.log(`║    [functions."${FUNCTION_NAME}"]`);
-      console.log(`║      schedule = "${EXPECTED_CRON}"`);
+      console.log(`║  SCHEDULE ${s.functionName} (${s.reason}): a monitor that is never invoked reports`);
+      console.log("║  nothing, and reporting nothing is indistinguishable from a healthy money");
+      console.log("║  path. The build stamp CANNOT catch this — netlify.toml is outside the");
+      console.log("║  hashed surface, so the tree hash matches a scheduled build exactly. Restore:");
+      console.log(`║    [functions."${s.functionName}"]`);
+      console.log(`║      schedule = "${GUARDED_SCHEDULES.find((g) => g.functionName === s.functionName)?.expectedCron}"`);
     }
     if (isProd && !tree.ok) {
       console.log("║");

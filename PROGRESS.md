@@ -725,6 +725,25 @@ Arc-serve/Base-settle workaround was inferred from a STALE row, not from a platf
 * **Restore any schedule commented out for a draft proof.** `netlify.toml` is OUTSIDE the build
   stamp's hashed surface, so a forgotten restore yields an **identical tree hash** and is invisible
   to every provenance check. `npm run gate:watch` refuses production while it is commented.
+  🚨 **CORRECTED 2026-08-11 — THAT LAST SENTENCE WAS FALSE FOR `dd-canary` UNTIL THIS DATE.**
+  `gate:watch` checked **`strong-read-watch` only** and had zero references to `dd-canary`, so a DD
+  money-step draft — the one proof that *requires* commenting `dd-canary` out — left the gate
+  exiting **0** with the schedule still commented. Measured, not theorised: the gate passed while
+  the stanza was commented, in front of the operator who was relying on it.
+  ⭐ **AND THE OTHER SUITE COULD NOT COVER IT, BY DESIGN.** `verify-strong-read-watch.mjs` asserts
+  dd-canary's schedule against `git show HEAD:netlify.toml` — the **committed** file — precisely so
+  a mid-proof comment-out does not turn it red for the wrong reason. Correct, and it means it is
+  structurally blind to working-tree drift. Its own comment said "the WORKING TREE is the promotion
+  gate's job"; only half of that was ever implemented, and **both documents asserted the whole.**
+  ✅ **FIXED:** `gate:watch` now iterates `GUARDED_SCHEDULES` (exported table, `strong-read-watch`
+  + `dd-canary`) and refuses production if **any** is commented; both directions proven (fails
+  commented, passes restored), and `test:watch` now imports that table and asserts dd-canary is in
+  it — a **structural** check, where the neighbouring one is a source regex that would go green on
+  a rename that deleted the coverage. 207/0.
+  ⚠️ **THE LESSON IS THE CLAIM, NOT THE CODE.** A documented guarantee that does not exist is worse
+  than no guarantee: it is the [[absence-must-never-read-as-safe]] shape aimed at the operator
+  rather than the machine. **Add a row to `GUARDED_SCHEDULES` whenever a schedule becomes
+  comment-out-able**, or this rots again.
 * **A draft proof is STRUCTURALLY IMPOSSIBLE for anything needing a real wallet connect.** Circle
   client keys are domain-restricted, the Passkey Domain must match exactly, and
   `toCircleSmartAccount` derives the account from the passkey — so a draft origin would be a

@@ -61,6 +61,29 @@ if (!URL) {
 const pad = (a) => String(a).replace(/^0x/, "").toLowerCase().padStart(64, "0");
 const usdc = (atomic) => (Number(atomic) / 1e6).toFixed(6);
 
+// ═══ WHY THIS FILE TIMES OUT AND NARRATES ═══════════════════════════════════════════════════════
+// Measured 2026-08-11: two --confirm runs hung with NO output and no way to attribute it. One
+// stalled inside payX402; the other stalled on the FIRST await below, printing the "PHASE 0" header
+// and nothing under it. From outside, a hang before the 402 and a hang after signing look identical
+// — and they demand opposite responses, so "it hung" was not an observation anyone could act on.
+//
+// ⭐ THE ASYMMETRY THAT SHAPES ALL OF THIS: everything BEFORE the paid POST may be abandoned freely
+// (no authorization has been sent, so nothing can be charged). Everything AFTER it must NEVER be
+// abandoned on a timer — a client-side timeout there produces exactly the `charged: null` state
+// this whole design exists to avoid, and would throw away the handle needed to resolve it.
+// So: HARD TIMEOUTS before the money, OBSERVATION ONLY after it.
+const STEP_TIMEOUT_MS = 25_000;
+const stamp = () => new Date().toISOString().slice(11, 19);
+const step = (msg) => console.log(`  [${stamp()}] ${msg}`);
+
+/** Race a promise against a named timeout. PRE-MONEY USE ONLY — see the note above. */
+const withTimeout = (promise, ms, label) =>
+  Promise.race([
+    promise,
+    new Promise((_, rej) =>
+      setTimeout(() => rej(new Error(`TIMEOUT after ${ms}ms in: ${label}`)), ms).unref?.()),
+  ]);
+
 /** availableBalance(USDC, depositor) on the Gateway Wallet. null = UNREADABLE, never zero. */
 async function gatewayBalance(who) {
   try {
@@ -70,6 +93,9 @@ async function gatewayBalance(who) {
         jsonrpc: "2.0", id: 1, method: "eth_call",
         params: [{ to: GATEWAY, data: AVAILABLE_BALANCE_SEL + pad(USDC) + pad(who) }, "latest"],
       }),
+      // ⭐ The probe's own read, bounded. Its absence is why a stalled baseline read presented as a
+      // bare "PHASE 0" header with no line under it, indistinguishable from a stalled seller.
+      signal: AbortSignal.timeout(STEP_TIMEOUT_MS),
     });
     const j = await r.json();
     if (j.error || typeof j.result !== "string") return null;
@@ -108,9 +134,12 @@ if (HANDLE) {
 // ═══ PHASE 0 — READ-ONLY. Everything that can be checked before money. ═══
 console.log(`\n── PHASE 0 — the quote, checked before any payment ──────────────`);
 
+step(`reading revenue wallet baseline (availableBalance, ${STEP_TIMEOUT_MS / 1000}s cap)…`);
 const baselineBefore = await gatewayBalance(EXPECTED_PAYTO);
 ok("revenue wallet Gateway balance is READABLE", baselineBefore !== null,
-  baselineBefore === null ? "UNREADABLE — a payment could never be confirmed; STOP" : `${usdc(baselineBefore)} USDC`);
+  baselineBefore === null
+    ? `UNREADABLE or TIMED OUT after ${STEP_TIMEOUT_MS / 1000}s — a payment could never be confirmed; STOP`
+    : `${usdc(baselineBefore)} USDC`);
 if (baselineBefore === null) process.exit(1);
 
 // ⚠️ Wrapped. An unreachable seller (bad draft URL, DNS, TLS) THROWS out of fetch, and an instrument
@@ -118,7 +147,11 @@ if (baselineBefore === null) process.exit(1);
 // know "I could not reach it", not read a Node dump and guess.
 let chal;
 try {
-  chal = await fetchX402Requirements({ sellerUrl: URL, requestBody: { address: SUBJECT, chain: "arc-testnet" } });
+  step(`fetching the 402 challenge from the seller (${STEP_TIMEOUT_MS / 1000}s cap)…`);
+  chal = await withTimeout(
+    fetchX402Requirements({ sellerUrl: URL, requestBody: { address: SUBJECT, chain: "arc-testnet" } }),
+    STEP_TIMEOUT_MS, "fetchX402Requirements (the 402 challenge)");
+  step("challenge received");
 } catch (e) {
   console.log(`  ❌ could not reach the seller at all: ${e?.cause?.code ?? e?.message ?? e}`);
   console.log(`     Check the --url. A CLI draft prints TWO usable host forms; both work:`);
@@ -176,15 +209,35 @@ if (!CONFIRM) {
 
 // ═══ PHASE 1 — PAY. Past this line, real USDC moves. ═══
 console.log(`\n── PHASE 1 — 🚨 PAYING $0.06 USDC ──────────────────────────────`);
+step("entering payX402 — it signs via Circle, POSTs the payment, then polls retrieve");
+console.log(`  ⚠️ NO TIMEOUT IS APPLIED HERE, DELIBERATELY. Past this line an authorization may`);
+console.log(`     already be in flight, and abandoning on a timer would produce charged:null and`);
+console.log(`     discard the handle needed to resolve it. The ticker below OBSERVES ONLY.`);
 const t0 = Date.now();
-const res = await payX402({
-  sellerUrl: URL,
-  challenge: chal,
-  requestBody: { address: SUBJECT, chain: "arc-testnet" },
-  approvedUsdc: 0.10,
-  requireApproved: false,
-  pollBudgetMs: POLL_MIN * 60 * 1000,
-});
+
+// ⭐ Heartbeat, not a watchdog. It can never cancel anything — it exists so that a stall has a
+// TIMESTAMP and a duration instead of being an empty terminal. `unref` so it cannot hold the
+// process open once payX402 resolves.
+const ticker = setInterval(() => {
+  const s = Math.round((Date.now() - t0) / 1000);
+  console.log(`  [${stamp()}] …still inside payX402 at ${s}s (no output ≠ nothing happening; ` +
+    `settlement polling is silent by design)`);
+}, 15_000);
+ticker.unref?.();
+
+let res;
+try {
+  res = await payX402({
+    sellerUrl: URL,
+    challenge: chal,
+    requestBody: { address: SUBJECT, chain: "arc-testnet" },
+    approvedUsdc: 0.10,
+    requireApproved: false,
+    pollBudgetMs: POLL_MIN * 60 * 1000,
+  });
+} finally {
+  clearInterval(ticker);
+}
 const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
 console.log(`\n── PHASE 2 — outcome after ${elapsed}s ─────────────────────────────`);
