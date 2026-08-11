@@ -54,6 +54,8 @@ import {
   b64decodePayment,
   runPaidAnalysis,
   retrievePaid,
+  readSubjectCode,
+  subjectPreview,
 } from "./_dd-x402.mjs";
 import { codeIdentityForEvent, evaluateHealth } from "../../shared/dd-canary/health.mjs";
 import { readHealth } from "./_dd-health.mjs";
@@ -336,7 +338,21 @@ export async function handler(event) {
     const requirements = ddPaymentRequirements({ resource, payTo: payToResolution.payTo });
 
     const paymentHeader = headers["payment-signature"];
-    if (!paymentHeader) return challenge402({ requirements });
+    if (!paymentHeader) {
+      // ⭐ ONE eth_getCode, so the buyer learns which coverage case THEY are in before paying —
+      // the thin outcome is fully determined by the subject, and we already know the subject here.
+      //
+      // 🚨 THIS MUST NEVER BLOCK THE 402. The challenge is free, and refusing to quote because a
+      // diagnostic read failed would trade a real capability for an observation — the same rule the
+      // quote record and the bridge receipt write follow. readSubjectCode never throws; a failure
+      // resolves to UNREADABLE, which the preview renders as an explicit UNKNOWN rather than as
+      // either reassurance or alarm.
+      const code = await readSubjectCode({ rpcCall, address: addr });
+      return challenge402({
+        requirements,
+        preview: subjectPreview({ address: addr, code }),
+      });
+    }
 
     let payload;
     try {

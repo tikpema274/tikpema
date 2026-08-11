@@ -48,6 +48,10 @@
 import { randomUUID } from "node:crypto";
 import { runThenSettle, settleDecision, SETTLE_REASON, noChargeResponse } from "../../shared/x402/settle-gate.mjs";
 import { readGatewayBalance, confirmPayment, CONFIRM_REASON, RETRIEVE_TIMEOUT_MS, RETRIEVE_TIMEOUT_PROVENANCE } from "./_x402-confirm.mjs";
+// ⭐ The power catalogue is the SOURCE OF TRUTH for the floor stated in the 402. Imported, never
+// transcribed: a literal count in buyer-facing text is a second source of truth that rots silently
+// the day the catalogue changes, and this repo has been bitten by exactly that before.
+import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
 
 export const PENDING_STORE = "dd-analyze-pending";
 
@@ -141,12 +145,124 @@ export function ddPaymentRequirements({ resource, payTo }) {
 const b64encode = (obj) => Buffer.from(JSON.stringify(obj), "utf8").toString("base64");
 export const b64decodePayment = (str) => JSON.parse(Buffer.from(str, "base64").toString("utf8"));
 
+// ═══ ⭐ SUBJECT PREVIEW — telling the buyer what THEIR purchase will look like ═══════════════════
+// A stranger decides from the 402, not from the delivered report. Measured 2026-08-11: a no-bytecode
+// address was sold a report covering ONE catalogue item, at full price. The terms warned that thin
+// coverage still settles — but "could check little" reads as "occasionally fewer checks", not "8%",
+// and the buyer had no way to know which case they were in. The seller did: eth_getCode is one call,
+// and the subject is already named in the request that triggers this challenge.
+//
+// ⭐ THIS IS A PREDICTION, NOT A PROMISE. It reuses the bridge's `predicted` / `measured` vocabulary
+// deliberately rather than inventing a second dialect for the same distinction: `predicted` here is
+// exactly what `delivery: "predicted"` means there — our best statement before the authoritative
+// read exists. The delivered coverage manifest is the `measured` value and is the authority.
+//
+// 🚨 THREE STATES, NEVER TWO. A failed read must not block the 402 (the challenge is free and
+// refusing to quote over a diagnostic would be worse), and it must NEVER default to "has code" or to
+// "full coverage" — that is absence-reads-as-safe arriving in a brand-new field. `null` means
+// UNKNOWN and says so in words.
+export const SUBJECT_CODE = Object.freeze({
+  HAS_CODE: "has-code",
+  NO_CODE: "no-code",
+  UNREADABLE: "unreadable",
+});
+
+/**
+ * One `eth_getCode` at quote time. NEVER THROWS — every failure resolves to UNREADABLE.
+ * @returns {Promise<{state: string, codeLen: number|null, detail: string}>}
+ */
+export async function readSubjectCode({ rpcCall, address }) {
+  const unreadable = (why) => ({ state: SUBJECT_CODE.UNREADABLE, codeLen: null, detail: why });
+  if (typeof address !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
+    return unreadable("no well-formed subject address was supplied with the challenge request");
+  }
+  try {
+    const res = await rpcCall({ method: "eth_getCode", params: [address, "latest"] });
+    const hex = typeof res === "string" ? res : res?.result;
+    if (typeof hex !== "string" || !hex.startsWith("0x")) {
+      return unreadable("the node did not return a bytecode string for this address");
+    }
+    const codeLen = (hex.length - 2) / 2;
+    return codeLen === 0
+      ? { state: SUBJECT_CODE.NO_CODE, codeLen: 0, detail: "eth_getCode returned empty — no contract code at this address" }
+      : { state: SUBJECT_CODE.HAS_CODE, codeLen, detail: `eth_getCode returned ${codeLen} bytes of contract code` };
+  } catch (e) {
+    return unreadable(`the bytecode read failed at quote time (${e?.message ?? e})`);
+  }
+}
+
+/** The buyer-facing preview. Pure — takes the tri-state, returns what goes in the 402. */
+export function subjectPreview({ address = null, code } = {}) {
+  const powerGroups = Object.keys(POWER_SIGS).length;
+  const common = {
+    address,
+    basis: "predicted",
+    observedAt: "quote-time",
+    authority:
+      "PREDICTED, not promised. This is derived from a single bytecode read taken when this quote " +
+      "was issued. The coverage manifest inside the delivered report is the MEASURED value and is " +
+      "the authority; if the address changes between this quote and the analysis, the manifest wins.",
+  };
+
+  if (code?.state === SUBJECT_CODE.NO_CODE) {
+    return {
+      ...common,
+      hasCode: false,
+      expectedCoverage: "MINIMAL",
+      detail:
+        `This address has NO CONTRACT CODE. All ${powerGroups} power groups in the catalogue are ` +
+        `unobservable on it — there is no bytecode to find them in — so the report you receive will ` +
+        `record nearly the whole catalogue as NOT CHECKED, with the reason for each. In a measured ` +
+        `case this resolved to a single checked item out of the whole catalogue.`,
+      stillCharged: true,
+      stillChargedWhy:
+        "You are still charged the full price, and that is deliberate — see priceIsFlat. " +
+        "\"There is no contract code here, so none of these powers exist\" is an ANSWER about the " +
+        "subject, not a failure to answer. If you wanted a contract analysed, check the address " +
+        "before paying.",
+    };
+  }
+
+  if (code?.state === SUBJECT_CODE.HAS_CODE) {
+    return {
+      ...common,
+      hasCode: true,
+      expectedCoverage: "NOT PREDICTED",
+      codeLen: code.codeLen,
+      detail:
+        `This address has ${code.codeLen} bytes of contract code, so the powers catalogue is at ` +
+        `least applicable to it. ⚠️ That is NOT a prediction of high coverage: proxies, unreadable ` +
+        `slots and RPC failures can still leave much unchecked, and only the delivered manifest says ` +
+        `what was actually reached.`,
+      stillCharged: true,
+    };
+  }
+
+  // ⭐ UNREADABLE. The dangerous branch: it must not resemble either of the above.
+  return {
+    ...common,
+    hasCode: null,
+    expectedCoverage: null,
+    detail:
+      "WE COULD NOT READ THIS ADDRESS'S BYTECODE AT QUOTE TIME, so we cannot tell you which case " +
+      "you are in. ⚠️ Read this as UNKNOWN, not as reassurance: it is NOT a statement that the " +
+      "address has code, and NOT a prediction of full coverage. A no-code address — the minimal " +
+      "coverage case — is entirely consistent with this result. " +
+      (code?.detail ?? ""),
+    stillCharged: true,
+    stillChargedWhy:
+      "This failed read is a DIAGNOSTIC at quote time and has no effect on billing. It is not the " +
+      "same as the engine failing during analysis, which does return the report free (see notCharged).",
+  };
+}
+
 /**
  * The 402 challenge. Carries what the caller is buying AND what they are not — the coverage promise
  * is "an honest manifest", never "a clean bill", and saying so at quote time is what stops a thin
  * report reading as a bait-and-switch after payment.
  */
-export function challenge402({ requirements, detail = null }) {
+export function challenge402({ requirements, detail = null, preview = null }) {
+  const powerGroups = Object.keys(POWER_SIGS).length;
   return {
     statusCode: 402,
     headers: {
@@ -157,6 +273,9 @@ export function challenge402({ requirements, detail = null }) {
       error: detail ? "Payment required" : "Payment required",
       ...(detail ? { reason: detail } : {}),
       accepts: [requirements],
+      // ⭐ Present ONLY when a subject was named and a preview could be formed. Its absence is not a
+      // silent "fine" — the coverage text below states the floor unconditionally.
+      ...(preview ? { subjectPreview: preview } : {}),
       whatYouAreBuying: {
         artifact: "one signed on-chain due-diligence report about the address and chain you named",
         price: DD_PRICE_HUMAN,
@@ -164,11 +283,32 @@ export function challenge402({ requirements, detail = null }) {
         coverage:
           "an HONEST COVERAGE MANIFEST, not a clean bill. A report that could check little still " +
           "settles and is still the product — it tells you exactly what was and was not checked, " +
-          "and that manifest is inside the signed payload so it cannot be stripped.",
+          "and that manifest is inside the signed payload so it cannot be stripped. " +
+          "⚠️ THE FLOOR IS LOW, REAL, AND PREDICTABLE: for an address with NO CONTRACT CODE, all " +
+          `${powerGroups} power groups are unobservable and the report can come back with a single ` +
+          "checked item out of the whole catalogue — at the same full price. That is not a " +
+          "degraded case; it is the deterministic answer for such an address, and subjectPreview " +
+          "above tells you in advance whether you are in it.",
+        // ⭐ THE FLOOR AND THE REASON TRAVEL TOGETHER. Disclosing "you may get ~8% coverage" without
+        // saying why the price does not scale makes the terms read as worse, not more honest — the
+        // buyer's immediate question is "then why full price?", and the answer is the strongest
+        // thing this service has to say. It lived only in a code comment where no buyer could read it.
+        priceIsFlat:
+          "The price does NOT scale with coverage, and that is deliberate. A coverage-scaled price " +
+          "would pay us more for reporting more coverage — an incentive to overstate what we " +
+          "actually checked, on the one number you cannot independently audit before you buy. A " +
+          "flat price removes that incentive entirely: we gain nothing from claiming a check we did " +
+          "not make, so the manifest can be believed. You are paying for a truthful account of what " +
+          "is knowable about this address — including, when it is the truth, \"almost nothing is " +
+          "knowable here, and here is exactly why\".",
         notCharged:
           "you are not charged if the engine could not produce an answer about the subject — an " +
           "outage, an unreachable chain, or a refusal returns the report free and leaves your " +
-          "authorization unspent.",
+          "authorization unspent. " +
+          "⭐ THE DISTINCTION THAT DECIDES WHETHER YOU PAY: \"there was NOTHING to check\" is an " +
+          "ANSWER and IS charged — an address with no contract code has no powers to find, and " +
+          "establishing that is a finding. \"We COULD NOT check\" is OUR instrument failing and is " +
+          "FREE. Thin coverage by itself is never a refund reason; a broken instrument always is.",
       },
       settlement: {
         model: "402 → pay → 202 + handle → retrieve → 200",
