@@ -122,9 +122,80 @@ function circleSigner({ client, address, walletId, walletAddress, blockchain }) 
 // `requestBody` (optional) is forwarded on the challenge POST for RPC-proxy sellers
 // (e.g. QuickNode) whose challenge/settle is bound to the request being paid for; omit
 // for sellers that serve a fixed resource (our self-loop needs no body).
+// ═══ 🚨 BOUNDED FETCHES — WHY EVERY CALL HERE HAS A DEADLINE ════════════════════════════════════
+// Until 2026-08-11 this module had NO AbortSignal anywhere. A stalled call therefore produced no
+// persist, no handle, no money AND NO ERROR — the caller simply never returned. Measured three
+// times on the DD money step: two runs stalled at different stages and the only observable was an
+// empty terminal. Four hypotheses (RPC throttle, Node fetch, proxy env, lingering process) were each
+// measured and refuted because nothing could say WHICH call was stuck.
+//
+// ⭐ THE STAGE LABEL IS THE POINT, NOT THE TIMEOUT. "Circle signing stalled" and "the settle POST
+// stalled" are different diagnoses with different responses; a bare timeout that does not name the
+// stage would have refuted none of those hypotheses either.
+//
+// ⚠️ THIS IS A SHARED PRODUCTION MONEY PATH — _research.mjs buys data through it (the Researcher
+// moves funds), as do x402-pay.mjs and the DD probes. The budgets differ per stage on purpose; see
+// X402_TIMEOUTS.
+export class X402Timeout extends Error {
+  constructor(stage, ms) {
+    super(`x402 stage "${stage}" exceeded ${ms}ms with no response`);
+    this.name = "X402Timeout";
+    this.stage = stage;
+    this.ms = ms;
+  }
+}
+
+/**
+ * Per-stage deadlines. NOT one number, because the stages differ in kind:
+ *
+ *  · challenge — one POST to the seller for a 402. Cheap; a slow one is a broken seller.
+ *  · sign      — Circle's dev-controlled wallet signs typed data. Their API, not a chain write.
+ *  · settle    — the paid POST. GENEROUS: the seller analyses, decides, snapshots, persists and
+ *                settles through Circle infrastructure before answering 202.
+ *  · retrieve  — one poll GET. Short: it repeats, and a slow poll must not eat the poll budget.
+ *
+ * ⚠️ RAISING `settle` IS SAFE; LOWERING IT IS NOT. A short settle deadline converts a healthy slow
+ * payment into an indeterminate one, and indeterminate is expensive to resolve (see below).
+ */
+export const X402_TIMEOUTS = Object.freeze({
+  challenge: 20_000,
+  sign: 30_000,
+  settle: 90_000,
+  retrieve: 20_000,
+});
+
+/** fetch() with a named, staged deadline. Throws X402Timeout carrying the stage. */
+async function fetchStage(url, init, stage, ms) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: ac.signal });
+  } catch (e) {
+    // An abort we caused is a TIMEOUT; anything else (DNS, TLS, ECONNREFUSED) is its own error and
+    // must NOT be relabelled — mislabelling a connect failure as a timeout would restart the same
+    // guessing this exists to end.
+    if (ac.signal.aborted) throw new X402Timeout(stage, ms);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Bound a non-fetch promise (the Circle SDK, which takes no signal) by the same named deadline.
+ *  ⚠️ The underlying call is NOT cancelled — it is abandoned. Safe ONLY where abandoning cannot
+ *  leave money in flight, i.e. everywhere except the settle POST. */
+function promiseStage(promise, stage, ms) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, rej) => { timer = setTimeout(() => rej(new X402Timeout(stage, ms)), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 export async function fetchX402Requirements({ sellerUrl, requestBody } = {}) {
   const resolvedSeller = sellerUrl || DEFAULT_SELLER_URL;
-  const challenge = await fetch(resolvedSeller, { method: "POST", ...bodyInit(requestBody) });
+  const challenge = await fetchStage(
+    resolvedSeller, { method: "POST", ...bodyInit(requestBody) }, "challenge", X402_TIMEOUTS.challenge);
   if (challenge.status !== 402) {
     const text = await challenge.text();
     return { ok: false, status: 502, body: {
@@ -275,7 +346,12 @@ export async function payX402({ sellerUrl, challenge, approvedUsdc, requireAppro
       maxTimeoutSeconds: requirements.maxTimeoutSeconds,
       extra: requirements.extra,
     };
-    const paymentPayload = await scheme.createPaymentPayload(x402Version, schemeRequirements);
+    // ⭐ BOUNDED, AND ABANDONING IS SAFE HERE. createPaymentPayload calls Circle's signTypedData;
+    // nothing has been sent to the seller yet, so a signature that arrives after we stop waiting is
+    // simply never used. No authorization can be in flight, so this cannot be a charge.
+    // ⚠️ The distinction from the settle POST below is the whole reason these are separate stages.
+    const paymentPayload = await promiseStage(
+      scheme.createPaymentPayload(x402Version, schemeRequirements), "sign", X402_TIMEOUTS.sign);
 
     // Envelope — echo back what the challenge carried. Byte-diffing a QuickNode-accepted
     // payment (via @x402/core createPaymentPayload) proved its wire payload is ALL FIVE
@@ -303,11 +379,58 @@ export async function payX402({ sellerUrl, challenge, approvedUsdc, requireAppro
     // payment to the request being paid for; our self-loop sends none → unchanged).
     step = "settle";
     const bi = bodyInit(requestBody);
-    const paid = await fetch(resolvedSeller, {
-      method: "POST",
-      headers: { "payment-signature": b64encode(wirePayload), ...(bi.headers ?? {}) },
-      ...(bi.body ? { body: bi.body } : {}),
-    });
+
+    // ═══ 🚨 THE ONLY STAGE WHERE A TIMEOUT IS NOT A NEGATIVE RESULT ═══════════════════════════
+    // Aborting this fetch stops US waiting. It does NOT stop the SELLER: the request has already
+    // left, and the seller's own ordering is analyze → decide → snapshot → PERSIST → settle. So on
+    // a timeout the seller may have persisted a handle AND broadcast the payment.
+    //
+    // ⭐ THEREFORE: `charged: null`, NEVER `charged: false`. "We stopped waiting" is not "it did not
+    // happen" — the same RESOLVED-vs-PROVISIONAL distinction the bridge settler had to learn. A
+    // timeout that reported `charged:false` would turn a possible payment into a reported
+    // non-payment, and the natural response to that report is to retry — i.e. PAY TWICE.
+    //
+    // ⚠️ THE BUYER CANNOT MINT THE HANDLE. Handles are seller-side, created at persist and returned
+    // in the 202 we never received. There is nothing for this side to persist. What it CAN do is
+    // refuse to claim a negative and hand back everything needed to resolve it from the two
+    // authoritative sources — the seller's pending store and the chain.
+    let paid;
+    try {
+      paid = await fetchStage(resolvedSeller, {
+        method: "POST",
+        headers: { "payment-signature": b64encode(wirePayload), ...(bi.headers ?? {}) },
+        ...(bi.body ? { body: bi.body } : {}),
+      }, "settle", X402_TIMEOUTS.settle);
+    } catch (e) {
+      if (!(e instanceof X402Timeout)) throw e;
+      return { status: 502, body: {
+        executed: false,
+        step: "settle",
+        indeterminate: true,
+        charged: null,                       // ⭐ null. NOT false. See above.
+        settled: null,
+        retryable: false,                    // ⚠️ NOT retryable: a blind retry is a DOUBLE PAY.
+        reason: "settle-timeout",
+        timeoutMs: e.ms,
+        error:
+          `The signed payment was SENT and no response arrived within ${e.ms}ms. This is NOT a ` +
+          `statement that you were not charged — the seller persists a handle BEFORE it broadcasts, ` +
+          `so it may have both minted an entitlement and moved the money.`,
+        doNotRetry:
+          "Do NOT re-run this payment. Retrying an indeterminate settle is how one intended payment " +
+          "becomes two real ones.",
+        resolveBy: [
+          "1. Read the chain: availableBalance(USDC, payTo). A rise of the price means it SETTLED.",
+          "2. List the seller's pending store — a handle keyed there means the entitlement exists " +
+            "and is redeemable permanently, with no second payment.",
+          "3. Only if BOTH show nothing, after the settlement batch window has fully elapsed, is a " +
+            "retry defensible.",
+        ],
+        payTo: requirements.payTo,
+        amountAtomic: String(atomic),
+        seller: resolvedSeller,
+      } };
+    }
 
     const paidText = await paid.text();
     let sellerBody;
@@ -349,9 +472,15 @@ export async function payX402({ sellerUrl, challenge, approvedUsdc, requireAppro
         polls++;
         let got;
         try {
-          got = await fetch(retrieveUrl, { method: "GET" });
+          // ⭐ Bounded so ONE hung poll cannot silently consume the entire poll budget — the failure
+          // this whole change exists to end. A timeout here is TRANSIENT by construction: the money
+          // is already committed and the handle is already held, so the only correct response is to
+          // keep polling. Never abandon a paid entitlement on a slow read.
+          got = await fetchStage(retrieveUrl, { method: "GET" }, "retrieve", X402_TIMEOUTS.retrieve);
         } catch (e) {
-          last = { pollError: String(e?.message ?? e) };   // transient — keep polling
+          last = e instanceof X402Timeout
+            ? { pollError: `retrieve poll timed out after ${e.ms}ms (transient — still redeemable)`, stage: e.stage }
+            : { pollError: String(e?.message ?? e) };      // transient — keep polling
           continue;
         }
         const text = await got.text();
@@ -434,6 +563,32 @@ export async function payX402({ sellerUrl, challenge, approvedUsdc, requireAppro
       },
     };
   } catch (e) {
+    // ⭐ A staged timeout is reported as a TIMEOUT NAMING ITS STAGE, not as a generic failure. The
+    // settle stage never reaches here (it returns its own indeterminate body above), so anything
+    // arriving as X402Timeout is PRE-BROADCAST: challenge or sign. Nothing was sent, so
+    // `charged:false` is a structural fact here — the opposite of the settle case, and the reason
+    // the two are handled in different places rather than by one catch that would have to guess.
+    if (e instanceof X402Timeout) {
+      console.error(`payX402 TIMEOUT at stage="${e.stage}" after ${e.ms}ms (pre-broadcast; nothing charged)`);
+      return {
+        status: 504,
+        body: {
+          executed: false,
+          step: e.stage,
+          timeout: true,
+          timeoutMs: e.ms,
+          charged: false,          // safe to assert: no authorization left this process
+          settled: false,
+          retryable: true,         // and safe to retry, for the same reason
+          error: e.message,
+          detail: e.stage === "sign"
+            ? "Circle's signer did not return a signature in time. Nothing was sent to the seller, " +
+              "so no payment authorization exists and nothing can settle. Safe to retry."
+            : "The seller did not return its 402 challenge in time. No payment was signed or sent. " +
+              "Safe to retry.",
+        },
+      };
+    }
     // Circle SDK throws axios errors; the useful detail lives in e.response.data.
     const status = e.response?.status;
     const detail = e.response?.data ?? null;
