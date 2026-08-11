@@ -1,5 +1,146 @@
 ---
 
+## 2026-08-11 (pm) — THE BUYER NOW LEARNS THE COVERAGE CASE BEFORE PAYING. Plus both directions of the schedule conflict, gated.
+
+**Draft `6a7b3db92363d31633c5b6a8`, commit `61cd6e7`, tree `931f6666…`. Production INERT throughout.
+NO MONEY MOVED this round** — revenue wallet steady at `0.120000 USDC` from the two earlier purchases.
+
+### The gap: honest terms are not informed consent
+
+The thin purchase charged full price for a report covering **1 of 12** catalogue items. That is the
+design working — but a stranger decides from the **402**, and *"a report that could check little"*
+reads as *"occasionally fewer checks"*, not *"one item"*. **The seller could tell in advance**
+(`eth_getCode` is one call, and the subject is named in the request that triggers the challenge)
+**and did not say.**
+
+Three changes, one deploy: `subjectPreview` (a real chain read at quote time), a stated **floor** in
+`coverage`, and a new **`priceIsFlat`**.
+
+⭐ **THE FLOOR AND THE REASON SHIP IN THE SAME BREATH, and that ordering is the point.** Disclosing
+*"you may get minimal coverage"* alone makes the terms read WORSE, not more honest — the buyer's
+immediate question is *"then why full price?"*. The answer is the strongest thing this service has to
+say and it lived only in a code comment: **a coverage-scaled price would pay us more for reporting
+more coverage — an incentive to overstate the one number a buyer cannot audit before purchase.**
+A flat price removes the incentive, so the manifest can be believed.
+
+`notCharged` now resolves a tension it always had with `coverage`: **"there was NOTHING to check" is
+an ANSWER and IS charged; "we COULD NOT check" is our instrument failing and is FREE.** Thin coverage
+alone is never a refund reason; a broken instrument always is.
+
+### ⭐⭐ THE READ-ONLY VERIFICATION PATTERN — pre-payment disclosure is FREE to prove
+
+**The 402 is issued BEFORE payment, so both live `subjectPreview` branches were proven at zero cost:**
+
+| subject | bytecode | `hasCode` | `expectedCoverage` |
+|---|---|---|---|
+| `0x6db396c1…` | **0 bytes** | `false` | **MINIMAL** |
+| `0x0077777d…` | **163 bytes** | `true` | **NOT PREDICTED** |
+
+Both HTTP 402, both `basis:"predicted"` / `observedAt:"quote-time"`, the `9` derived from
+`POWER_SIGS` at runtime rather than transcribed.
+
+⭐ **GENERALISE THIS: any future change to pre-payment disclosure is verifiable for free, on a real
+deploy, by POSTing for a 402 and reading the body.** No purchase, no settlement wait, no money at
+risk. The paid path costs $0.06 and ~13 minutes per iteration; the disclosure path costs nothing —
+so there is no excuse for shipping unverified copy on the pre-payment side. ⚠️ It does NOT extend
+past the 402: anything in the delivered report still needs a real purchase or the suite.
+
+### ⚠️ THE THIRD STATE IS SUITE-ONLY — two green branches do NOT imply three
+
+**`could-not-read` (RPC failure at quote time) has never executed against a live server** and cannot
+be induced without breaking RPC. It is proven by INJECTION only — throw, malformed reply, null, bad
+address, missing address all resolve to `UNREADABLE` with `hasCode:null`, `expectedCoverage:null`.
+
+🚨 **DO NOT LET THE PASS RATE SPEAK FOR IT.** `verify-subject-preview.mjs` is 55/0, and that means the
+branch is **specified**, not that it has **run**. Same family as [[binding-tested-across-what-it-binds]]
+— and *this very session* produced the cautionary case: a suite went green on `dd-canary` schedule
+coverage that did not exist, because it asserted against the COMMITTED file.
+
+⭐ **The design rule it encodes is the one that matters:** a failed read must never default to "has
+code" or "full coverage". It renders `null` and **denies both readings in words** — *"NOT a statement
+that the address has code, and NOT a prediction of full coverage… a no-code address is entirely
+consistent with this result."* A new field is a new place for [[absence-must-never-read-as-safe]].
+
+### ✅ PROVEN PROPERTY — THE ENTITLEMENT SURVIVES A REDEPLOY AND A NEW DEPLOY ID
+
+**Observed, not argued from the comment.** Both handles were redeemed against a **different deploy**
+than the one that sold them, after two intervening deploys:
+
+| handle | HTTP | attestation | coverage | subject |
+|---|---|---|---|---|
+| `397b67b1-76fe-4578-9b88-ccf1e3773a3b` | **200** | signed | 15 / 0 | `0x0077777d…` |
+| `e7e855fb-f477-4c49-bf42-f728289cd5c1` | **200** | signed | **1 / 11** | `0x6db396c1…` |
+
+⭐⭐ **THIS IS WHAT MAKES "the entitlement never expires" TRUE RATHER THAN INTENDED.** Two mechanisms
+were only ever *asserted* before: `getStore(PENDING_STORE)` is **site-scoped, not deploy-scoped**, and
+**retrieve sits at rung −0.5, ahead of the health gate at rung 0**. A new deploy id orphans the health
+artifact — and the handles redeemed anyway. **Retrieve works across deploy boundaries.** The 402
+advertises `entitlementNeverExpires: true`; that promise is now measured across the exact event most
+likely to break it.
+
+⚠️ **A FABRICATED HANDLE NEARLY BECAME A FALSE ALARM ABOUT THIS.** The second handle was first tried
+with a UUID **invented to fill an ellipsis** (`e7e855fb…` was truncated in the request; the remainder
+was made up rather than looked up). It 404'd — correctly — and that 404 read exactly like *"the thin
+entitlement did not survive the deploy"*, i.e. a defect in the property under test. ⭐ **The fix is
+the rule: enumerate identifiers FROM THE STORE, never from memory or from a truncated display.**
+Same family as every other invented-value failure here.
+
+### 🚨 BOTH DIRECTIONS OF THE SCHEDULE CONFLICT ARE NOW GATED (`59fd8f8`)
+
+**The same stanza is CORRECT for production and FATAL for a draft. That conflict is permanent** — and
+each direction cost real time on the same day:
+
+* **morning** — schedule left COMMENTED, promotion gate exited 0 anyway (`37cfefd`).
+* **afternoon** — schedule correctly RESTORED, then a **draft deployed with it active**. On a draft
+  `dd-canary` **403s on HTTP invoke AND its cron does not fire**, so it is unreachable by BOTH routes:
+  no health artifact can exist, `dd-analyze` refuses `service-unverified` at rung 0, **no 402 is ever
+  issued**. The draft was unusable the moment it was built. **~25 minutes lost.**
+
+⭐⭐ **NO PROVENANCE CHECK CAN CATCH EITHER DIRECTION.** `netlify.toml` is outside the stamp's hashed
+surface — both builds that day produced the **byte-identical** tree `931f6666…`. Only a gate reading
+the working tree can see it.
+
+**`npm run gate:draft`** refuses a draft while a draft-invoked schedule is restored; `gate:watch`
+still refuses production while one is commented. Both proven in both directions.
+🚨 **AND BOTH ARE NOW WIRED INTO THE DEPLOY COMMANDS** — `deploy:draft` / `deploy:prod` run their gate
+first, and npm's `&&` halts on failure (**proven**: with the schedule commented, `deploy:prod` exits 1
+and **no `vite build` line is emitted** — the build never runs). There had been **no deploy script at
+all**, so `gate:watch` was guarded purely by habit; wiring only the new gate would have left the old
+one depending on memory. ⚠️ **HONEST BOUND:** `netlify deploy` invoked directly still bypasses both,
+exactly as `--no-verify` bypasses the pre-commit hook. This makes the guarded path the easy path; it
+cannot make the unguarded one impossible.
+
+### ⭐ THE RESTING STATE AFTER THE RESTORE — state it, so nobody rediscovers it by losing 25 minutes
+
+`netlify.toml` is restored to the committed shape (`dd-canary` scheduled). **The consequence is
+asymmetric and worth knowing before you next reach for a draft:**
+
+* ✅ **THE EXISTING DRAFT `6a7b3db92363d31633c5b6a8` STAYS USABLE.** Its `netlify.toml` is **baked
+  into the deployed artifact** with the schedule commented, so its canary remains HTTP-invocable and
+  its health artifact refreshable. Restoring the file in the repo does not reach back into a deploy
+  that already shipped. Both handles stay redeemable regardless (proven above).
+* 🚨 **A NEW DRAFT CUT FROM HEAD WOULD HAVE `dd-canary` SCHEDULED** — 403 on HTTP invoke, cron does
+  not fire, **no artifact, no 402**. Unusable for a DD proof the moment it is built. That is exactly
+  the failure `gate:draft` now refuses, and the reason it is wired into `deploy:draft`.
+
+⭐⭐ **THEREFORE `gate:watch` GREEN / `gate:draft` RED IS THE CORRECT RESTING STATE FOR THIS REPO,**
+because HEAD is production-shaped. **A red `gate:draft` on a clean HEAD is not a defect and must not
+be "fixed"** — it is the gate correctly reporting that HEAD is not draft-shaped. Comment the stanza
+out when you want a draft, restore it when you are done; the two gates disagree by design and always
+will, and that disagreement is the signal, not noise.
+
+### Commits
+
+`61cd6e7` subjectPreview + floor + priceIsFlat (`verify-subject-preview.mjs` 55/0, wired into
+`test:dd`) · `59fd8f8` both-direction schedule gate + deploy wiring (`test:watch` 212/0).
+
+**Restore verified three ways:** `netlify.toml` byte-identical to HEAD (`git diff --quiet`);
+`gate:watch` exit **0** and `gate:draft` exit **1** — the disagreement above; and the existing draft's
+`dd-canary` still answering **HTTP 200**, which measures the "baked into the artifact" claim rather
+than arguing it.
+
+---
+
 ## 2026-08-11 — 🎉 THE DD SERVICE TOOK ITS FIRST REAL PAYMENT. And the probe called it a failure.
 
 **Draft `6a7ada8e57557d271adc561e`. Production INERT throughout** (`DD_PUBLIC_ENABLED` and
