@@ -67,12 +67,55 @@ import { EXPECTED_CRON, FUNCTION_NAME, DEFAULT_TARGET_URL, DEFAULT_STORE_NAME, c
  * becomes comment-out-able, or the claim rots again.
  */
 export const GUARDED_SCHEDULES = [
-  { functionName: FUNCTION_NAME, expectedCron: EXPECTED_CRON },
+  { functionName: FUNCTION_NAME, expectedCron: EXPECTED_CRON, draftMustBeCommented: false },
   // Guards the DD SERVICE's health artifact. Commenting this out is the ONLY way to invoke the
   // canary over HTTP on a draft (scheduled functions 403), so it is the schedule most likely to be
   // left commented — and the DD money step requires doing exactly that.
-  { functionName: "dd-canary", expectedCron: "*/10 * * * *" },
+  //
+  // ⭐ draftMustBeCommented: the tension runs BOTH WAYS, and each direction has now cost real time.
+  { functionName: "dd-canary", expectedCron: "*/10 * * * *", draftMustBeCommented: true },
 ];
+
+/**
+ * 🚨 THE INVERSE GATE — refuse a DRAFT deploy while a draft-invoked schedule is RESTORED.
+ *
+ * **Measured 2026-08-11, and it cost a full ~25-minute deploy cycle.** `gate:watch` was extended
+ * that morning to catch a FORGOTTEN RESTORE before promotion. Hours later the opposite mistake was
+ * made: the schedule was correctly restored, committed, and then a DRAFT was deployed with it
+ * active. On that artifact `dd-canary` 403s on HTTP invoke AND its cron does not fire (Netlify runs
+ * scheduled functions on the published deploy only), so it is unreachable by BOTH routes — no health
+ * artifact can exist, and `dd-analyze` refuses `service-unverified` at rung 0 before any 402 is
+ * issued. The whole draft was unusable for its purpose the moment it was built.
+ *
+ * ⭐⭐ THE BUILD STAMP IS BLIND TO THIS IN BOTH DIRECTIONS. `netlify.toml` is outside the hashed
+ * surface, so commenting the stanza produced a tree hash **byte-identical** to the restored build
+ * (`931f6666…` on both). No provenance check can ever see it; only a gate reading the working tree
+ * can, which is why this lives here and not in the stamp.
+ *
+ * ⚠️ A restored schedule is CORRECT for production and WRONG for a draft proof. That is a permanent
+ * conflict, not a bug to fix — so both directions are gated and neither is left to memory.
+ */
+export function checkDraftInvocability(tomlText, schedules = GUARDED_SCHEDULES) {
+  const blockers = [];
+  for (const g of schedules) {
+    if (!g.draftMustBeCommented) continue;
+    const r = checkScheduleDeclared(tomlText, g);
+    // `scheduled` here is the FAILURE: on a draft it means unreachable by HTTP and by cron.
+    if (r.ok) {
+      blockers.push({
+        functionName: g.functionName,
+        detail:
+          `[functions."${g.functionName}"] is SCHEDULED. On a draft that makes it unreachable by ` +
+          `BOTH routes — scheduled functions 403 on HTTP invoke, and cron fires only on the ` +
+          `published deploy. It cannot produce its artifact, so anything gated on that artifact ` +
+          `refuses. Comment the stanza out before deploying a draft, and restore it before promoting.`,
+      });
+    }
+  }
+  return blockers.length
+    ? { ok: false, reason: "scheduled-on-draft", blockers }
+    : { ok: true, reason: "draft-invocable", blockers: [], detail: "no draft-invoked schedule is active" };
+}
 
 /**
  * 🚨 STANDING CONSTRAINT: THIS VARIABLE MUST NEVER BE SET `--secret`.
@@ -405,6 +448,20 @@ async function main() {
       console.log("     (not gating: this is not the production context. It MUST be restored before promotion.)");
     }
   }
+
+  // ⭐ THE INVERSE, gating ONLY off production. A restored schedule is correct for prod and fatal
+  // for a draft proof; whichever context you are in, one of these two checks is the live one.
+  let draftInvocable = { ok: true, reason: "not-applicable", blockers: [], detail: "production context — the inverse check does not apply" };
+  if (!isProd) {
+    try {
+      draftInvocable = checkDraftInvocability(readFileSync(new URL("../netlify.toml", import.meta.url), "utf8"));
+    } catch (err) {
+      draftInvocable = { ok: false, reason: "toml-unreadable", blockers: [], detail: `could not read netlify.toml (${err?.code || err?.name})` };
+    }
+    const m = draftInvocable.ok ? "✅" : "❌";
+    console.log(`  ${m} draft     — ${draftInvocable.reason}: ${draftInvocable.detail ?? ""}`);
+    for (const b of draftInvocable.blockers) console.log(`     ${b.functionName}: ${b.detail}`);
+  }
   // The strong-read-watch entry, kept as a named binding for the messaging below.
   const schedule = schedules.find((s) => s.functionName === FUNCTION_NAME) ?? schedules[0];
   const schedulesOk = schedules.every((s) => s.ok);
@@ -459,6 +516,7 @@ async function main() {
   }
 
   const pass = watch.resolved && live?.exists === true && (schedulesOk || !isProd)
+    && draftInvocable.ok
     && (tree.ok || !isProd)
     && (overrides.every((o) => o.ok) || !isProd);
 
@@ -484,6 +542,15 @@ async function main() {
     console.log("║  twice, treat the monitor as unproven in production.");
   } else {
     console.log(`║  ❌ GATE FAILS in ${context}. DO NOT PROMOTE.`);
+    if (!draftInvocable.ok) {
+      console.log("║");
+      console.log(`║  DRAFT (${draftInvocable.reason}): a schedule that must be HTTP-invocable on a draft is`);
+      console.log("║  RESTORED, so on this artifact it is unreachable by BOTH routes — scheduled");
+      console.log("║  functions 403 on invoke, and cron fires only on the published deploy. Nothing");
+      console.log("║  gated on its artifact can pass. THE BUILD STAMP CANNOT SEE THIS: netlify.toml");
+      console.log("║  is outside the hashed surface, so the tree hash is byte-identical either way.");
+      for (const b of draftInvocable.blockers) console.log(`║    comment out [functions."${b.functionName}"] before deploying a draft`);
+    }
     for (const s of isProd ? schedules.filter((x) => !x.ok) : []) {
       console.log("║");
       console.log(`║  SCHEDULE ${s.functionName} (${s.reason}): a monitor that is never invoked reports`);

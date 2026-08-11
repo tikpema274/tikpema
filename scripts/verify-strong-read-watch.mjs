@@ -636,12 +636,40 @@ check("⭐ the schedule check gates PRODUCTION and only warns elsewhere (a draft
 // division only holds if dd-canary is actually IN the gate's table — which is what this checks.
 // The line above is a source regex and would go green on a rename that deleted the coverage; this
 // one imports the table and cannot.
-const { GUARDED_SCHEDULES: gateTable } = await import("./verify-watch-promotion-gate.mjs");
+const { GUARDED_SCHEDULES: gateTable, checkDraftInvocability } = await import("./verify-watch-promotion-gate.mjs");
 check("⭐⭐ gate:watch's table covers dd-canary (the schedule a draft proof MUST comment out)",
   gateTable.some((g) => g.functionName === "dd-canary" && g.expectedCron === "*/10 * * * *"),
   gateTable.map((g) => g.functionName).join(", "));
 check("  …and still covers strong-read-watch",
   gateTable.some((g) => g.functionName === "strong-read-watch" && g.expectedCron === EXPECTED_CRON));
+
+// ═══ 🚨 THE INVERSE DIRECTION — added 2026-08-11 after it cost a ~25-minute deploy cycle ════════
+// The morning's fix caught a FORGOTTEN RESTORE before promotion. The afternoon made the opposite
+// mistake: schedule correctly restored, then a DRAFT deployed with it active — on which dd-canary
+// 403s on HTTP AND its cron does not fire, so no health artifact can exist and dd-analyze refuses at
+// rung 0 before issuing any 402. The draft was unusable the moment it was built.
+// ⭐⭐ THE TREE HASH WAS BYTE-IDENTICAL ACROSS BOTH BUILDS (931f6666…) because netlify.toml is
+// outside the hashed surface — no provenance check can ever catch this, in either direction.
+{
+  const RESTORED = `[functions."strong-read-watch"]\n  schedule = "${EXPECTED_CRON}"\n[functions."dd-canary"]\n  schedule = "*/10 * * * *"\n`;
+  const COMMENTED = RESTORED.replace(
+    `[functions."dd-canary"]\n  schedule = "*/10 * * * *"`,
+    `# [functions."dd-canary"]\n#   schedule = "*/10 * * * *"`);
+  const restored = checkDraftInvocability(RESTORED);
+  const commented = checkDraftInvocability(COMMENTED);
+  check("⭐⭐ a DRAFT with dd-canary SCHEDULED is REFUSED (unreachable by HTTP and by cron)",
+    restored.ok === false && restored.reason === "scheduled-on-draft",
+    restored.blockers.map((b) => b.functionName).join(","));
+  check("⭐⭐ …and a draft with it COMMENTED passes (the gate is not unpassable)",
+    commented.ok === true && commented.reason === "draft-invocable");
+  check("⭐ only rows flagged draftMustBeCommented can block a draft",
+    restored.blockers.length === gateTable.filter((g) => g.draftMustBeCommented).length);
+  check("  …so strong-read-watch never blocks a draft (it is not HTTP-invoked during a proof)",
+    !restored.blockers.some((b) => b.functionName === "strong-read-watch"));
+  check("⭐ BOTH DIRECTIONS ARE GATED — the conflict is permanent, so neither is left to memory",
+    restored.ok === false && commented.ok === true
+      && checkScheduleDeclared(RESTORED, { functionName: "dd-canary", expectedCron: "*/10 * * * *" }).ok === true);
+}
 check("⭐ the gate still says the schedule being DECLARED is not the schedule FIRING",
   /NOT THAT IT FIRES/.test(gateSrcLive) && /producedAt advance/.test(gateSrcLive));
 check("⭐⭐ the liveness check is a GET — a POST would put a test message in the channel",
