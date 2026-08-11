@@ -1,5 +1,133 @@
 ---
 
+## 2026-08-11 — 🎉 THE DD SERVICE TOOK ITS FIRST REAL PAYMENT. And the probe called it a failure.
+
+**Draft `6a7ada8e57557d271adc561e`. Production INERT throughout** (`DD_PUBLIC_ENABLED` and
+`DD_PAYTO_ADDRESS` both *"No value set"* at start and end; never `--context all`).
+
+**402 → pay → 202 + handle → retrieve → 200, end to end, on real money, for the first time on any
+surface.**
+
+```
+handle       397b67b1-76fe-4578-9b88-ccf1e3773a3b        polls 353
+elapsed      798.5s  (13.3 min — INSIDE the measured 42s–15.5min band)
+revenue      0 → 60000 atomic = EXACTLY 0.060000 USDC    (chain read, availableBalance)
+report       refusal:null · coverage 15 checked / 0 not
+attestation  signed · agentId 851891 · canon/1
+             verifyAttestation vs live Arc → valid:true reason:"ok" method:"erc1271"
+             keyClass:"registered" · ownerOnChain 0xc54D4721… · block 56435867
+```
+
+⭐ **THE JSON IS THE HANDLER'S WORD; THE CHAIN IS THE WITNESS.** Both agree, and they were read
+independently — the operator ran the same `availableBalance` call by hand before and after.
+
+### ⭐⭐ THE FINDING: A SUCCESS PATH IS THE LEAST-TESTED CODE IN A FAIL-CLOSED SYSTEM
+
+The probe printed **`❌ 1 CHECK(S) FAILED`** and exited 1 on a transaction that had just succeeded
+completely. Its assertion read `b.data.report`; `payX402`'s 200 branch returns the seller's response
+under **`sellerBody`**, and there is no `data` key — there never was. So `executed:true`,
+`payment.confirmed:true`, `polls:353`, HTTP 200 and a chain-verified signature all fell through to a
+generic `else` that said "unexpected outcome".
+
+🚨 **THAT ASSERTION HAD NEVER EXECUTED ONCE IN THE SERVICE'S LIFE.** Not "was under-tested" — had
+**literally never run**, because there had never been a success for it to run on.
+
+⭐ **THE CLASS, WHICH IS THE REUSABLE PART: FAILURE PATHS GET EXERCISED BY ACCIDENT; SUCCESS PATHS
+ONLY BY SUCCESS.** Every refusal, gate, timeout and 503 on this path had been hit dozens of times
+across three sessions — by draft misconfigurations, stale artifacts, routing misses, exposure flags.
+The one branch that requires everything to go right had zero exercise. **In a fail-closed system that
+has never succeeded, the success branch is by construction the least-tested code in it**, and it is
+also the branch nobody thinks to review, because attention follows failures.
+
+⚠️ **THIS NOW APPLIES TO EVERY OTHER FIRST-SUCCESS BRANCH ON THE PAID PATH.** Each of these has now
+run exactly once (some zero times): the 200-serve branch, the `served:true` re-read, the settle
+receipt decode, the confirmed-payment evidence block. **Treat "it worked once" as the beginning of
+testing that branch, not the end.** The `--handle` redemption path was live-tested immediately after
+this fix for exactly that reason (green, exit 0).
+
+**Fixed:** the probe reads the shape defensively (`sellerBody.report` → `data.report`), and — more
+importantly — an `executed:true` with **no report at any known key** now fails LOUDLY, names the
+top-level keys actually present, and tells the operator to check the handle before concluding
+anything. A generic "unexpected outcome" is what disguised a complete success as a failure.
+Verified by replaying the REAL sold payload: every check resolves, and the old assertion resolves
+`false`.
+
+### 🚧 THE NOW-UNEXERCISED BRANCH — the THIN report, and it is the most-argued one in the design
+
+**The sold report was `15 checked / 0 notChecked` — full coverage. So the settle gate's
+THIN-REPORT-STILL-SETTLES path has never run on real money.**
+
+⭐ **THE MOST DEBATED DECISION IN THIS SERVICE IS THE ONE NO PURCHASE HAS TOUCHED.** "A report that
+could check little still settles and is still the product" is asserted in the 402's own
+`whatYouAreBuying.coverage` — we are *selling* that promise — and it is proven by injection only.
+Its neighbour is proven the same way and matters as much: **the engine failing to produce an answer
+returns the report FREE with the authorization unspent.** Those two branches decide, on live money,
+whether a caller is charged.
+
+🚨 **BUY A DELIBERATELY THIN SUBJECT BEFORE ANY LAUNCH — an address with little to check (an EOA, or
+a contract with no recognised powers). ~$0.06.** Discovering that branch with a paying stranger is
+the expensive way, and the failure mode is the worst available: charging full price for a near-empty
+artifact, or refusing to settle something we advertised as sellable. Neither is recoverable by
+apology.
+
+### Also this session — two real defects, both found while proving something else
+
+1. **`gate:watch` NEVER GUARDED `dd-canary`** (`37cfefd`) — the one schedule a draft proof *must*
+   comment out. The gate exited 0 with it commented, while PROGRESS.md's standing constraint AND
+   `verify-strong-read-watch.mjs`'s own comment both asserted coverage. `verify-strong-read-watch`
+   reads `git show HEAD:netlify.toml` — the COMMITTED file — by design, so it is structurally blind
+   to working-tree drift; only half the division of labour was implemented. Now an exported
+   `GUARDED_SCHEDULES` table, proven **both** directions (exit 1 commented, exit 0 restored).
+2. **`_x402.mjs` HAD NO `AbortSignal` ANYWHERE** (`2fcedbf`) — a stall produced no persist, no
+   handle, no money **and no error**. Per-stage deadlines with named stages (challenge 20s / sign
+   30s / settle 90s / retrieve 20s). ⭐ **A settle timeout reports `charged: NULL`, never `false`** —
+   aborting stops US waiting, not the seller, and `charged:false` invites the retry that is a double
+   pay. Shared production money path: `_research.mjs` buys data through it.
+
+### 🚨 DEBUGGING DISCIPLINE — three sessions chasing a stall that did not exist
+
+**There was never a hang. There was settlement nobody waited out.** 798.5s is well inside the
+measured band. Every earlier "hang" was almost certainly a normal batch flush, and the reason it was
+unreadable is that **silence carried no timestamps**. The heartbeat ticker — 53 lines, 15s→795s —
+converted "it hung" into "it is 13 minutes into a 15-minute window."
+
+1. ⭐⭐ **THE INSTRUMENT MUST BE VALIDATED IN BOTH DIRECTIONS BEFORE A NEGATIVE MEANS ANYTHING.**
+   Log absence was read as "the request never arrived" until five known-good origin hits were fired
+   and confirmed to appear within ~19s, and the 402 was shown to be **never cached**
+   (`cache-control:no-cache`, durable `fwd=bypass`, edge `fwd=miss`, distinct `x-nf-request-id`).
+   Only then was a negative worth anything.
+2. ⚠️ **FOUR HYPOTHESES MEASURED AND REFUTED** — Arc RPC throttle (115–138ms), Node fetch (54–159ms),
+   proxy env vars (none), lingering processes (none). All refuted, none of them the answer, because
+   **the premise — that something was stuck — was itself never measured.**
+3. ⭐ **AN `awk` FILTER SILENTLY PRINTED EVERYTHING** (the `[𝒇 name]` prefix shifts field positions),
+   nearly turning a filtered read into a false conclusion. Same family as
+   [[filtered-read-is-not-absence]]: **read the unfiltered listing.**
+4. ⭐⭐ **THREE OF THE NEW SUITE'S OWN CHECKS FAILED AGAINST CORRECT CODE**, each a documented
+   failure mode: the settle window caught `charged:false` from the **comment forbidding it**;
+   `indexOf` found the settle guard instead of the outer catch, pointing three assertions at the
+   wrong block *while looking authoritative*; and a bare-`fetch` count matched **fetchStage's own
+   implementation** (fifth instance of a checker including itself in its corpus). Fixed by stripping
+   comments, delimiting by code landmarks, `lastIndexOf`, and asserting the **expected count** (=== 1)
+   rather than zero.
+
+### The frozen service doc — corrected in a mirror, not edited
+
+`agent-metadata/dd-service.MIRROR-README.md`. **FOUR** claims were stale, not one: x402 metering,
+HTTP interface, signed reports (including *"dev/throwaway key only, no registered service
+identity"* — now an ERC-1271 attestation bound to registered agentId 851891) and canary/liveness.
+⚠️ `mutable_companion` is **`null`**, so the frozen doc points nowhere; the mirror is discoverable
+only from the repo, and says so. `dd-service.json` verified **byte-intact**, sha256
+`d3734acc…` == the registered value, so `tokenURI == CID` still discriminates 851891 from 851823.
+
+### State
+
+Draft `6a7ada8e…` live; canary artifact deploy-id-bound. `netlify.toml` restored byte-identical to
+HEAD, `gate:watch` green. `test:dd` 13 suites green · `test:watch` 207/0 · `test:probe` 71/0.
+⚠️ Tree hash is now ahead of the deployed draft (`_x402.mjs` changed) — **the draft was NOT
+redeployed**, deliberately, since that would mint a new deploy id and invalidate the health artifact.
+
+---
+
 ## HANDOFF — start here. Current as of 2026-07-31.
 
 ⚠️ **THIS ENTRY IS AUTHORITATIVE FOR CURRENT STATE.** Everything below it is DATED and describes what

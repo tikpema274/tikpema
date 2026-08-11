@@ -243,8 +243,31 @@ const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 console.log(`\n── PHASE 2 — outcome after ${elapsed}s ─────────────────────────────`);
 const b = res.body ?? res;
 
-if (b?.executed && b?.data?.report) {
-  const rpt = b.data.report;
+// ═══ 🚨 THE SUCCESS BRANCH HAD NEVER RUN — and that is a CLASS, not an oversight ════════════════
+// This block asserted on `b.data.report`. payX402's 200 branch returns the seller's response under
+// `sellerBody`; there is no `data` key and never was. So on 2026-08-11 — the FIRST successful round
+// trip in the service's life, real money, chain-confirmed +0.060000 USDC, a signed and on-chain
+// verified attestation — the probe printed "❌ unexpected outcome" and exited 1.
+//
+// ⭐⭐ FAILURE PATHS GET EXERCISED BY ACCIDENT; SUCCESS PATHS ONLY BY SUCCESS. In a fail-closed
+// system that has never once succeeded, the success branch is the LEAST-TESTED CODE IN IT — every
+// refusal, timeout and gate had been hit dozens of times while this ran zero times. The asymmetry is
+// structural, so it applies to every other first-success branch on the paid path.
+//
+// ⚠️ Hence the shape is now read DEFENSIVELY and a mismatch REPORTS ITSELF rather than falling
+// through to a generic "unexpected outcome", which is what disguised a complete success as a failure.
+const served = b?.sellerBody?.report ? b.sellerBody : (b?.data?.report ? b.data : null);
+const rpt = served?.report ?? null;
+
+if (b?.executed && !rpt) {
+  // Loud, specific, and it names the keys actually present — the diagnostic that was missing.
+  ok("🚨 executed:true but NO report found at any known key (sellerBody.report / data.report)", false,
+    `top-level keys: [${Object.keys(b ?? {}).join(", ")}]`);
+  console.log(`     This is a PROBE/SHAPE defect, not necessarily a delivery failure — the money may`);
+  console.log(`     well have moved and the report been served. Check the handle before concluding:`);
+  if (b?.handle) console.log(`       node --env-file=.env scripts/dd/probe-dd-purchase.mjs --url ${URL} --handle ${b.handle}`);
+} else if (b?.executed && rpt) {
+  const pay = served.payment ?? b.payment ?? {};
   ok("⭐⭐⭐ 200 SERVED — the full round trip completed", true, `${elapsed}s`);
   ok("⭐ a REPORT was served, not a canned payload", rpt.subject?.address?.toLowerCase() === SUBJECT.toLowerCase(), rpt.subject?.address);
   ok("⭐⭐ the attestation is SIGNED", rpt.attestation?.status === "signed", rpt.attestation?.status);
@@ -252,8 +275,9 @@ if (b?.executed && b?.data?.report) {
   ok("  …carrying a signature a verifier can check", /^0x[0-9a-f]+$/i.test(rpt.attestation?.signature ?? ""));
   ok("coverage manifest accounts for the catalogue", (rpt.coverage?.totals?.checked ?? 0) + (rpt.coverage?.totals?.notChecked ?? 0) > 0,
     `${rpt.coverage?.totals?.checked} checked / ${rpt.coverage?.totals?.notChecked} not`);
-  ok("⭐ confirmation is disclosed as AGGREGATE-ONLY", /AGGREGATE-ONLY/.test(b.data.payment?.attribution ?? ""));
-  console.log(`\n  confirmation evidence: ${JSON.stringify(b.data.payment?.evidence)}`);
+  ok("⭐ confirmation is disclosed as AGGREGATE-ONLY", /AGGREGATE-ONLY/.test(pay.attribution ?? ""));
+  console.log(`\n  confirmation evidence: ${JSON.stringify(pay.evidence)}`);
+  console.log(`  handle (redeemable indefinitely): ${b.handle ?? served.handle ?? "(none reported)"}`);
 } else if (b?.pending) {
   console.log(`  ⏳ PENDING at budget exhaustion — this is NOT a failure and NOT a loss.`);
   console.log(`     handle   : ${b.handle}`);
