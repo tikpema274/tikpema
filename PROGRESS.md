@@ -1,5 +1,92 @@
 ---
 
+## 2026-08-11 (evening) — 🟢 DD IS LIVE ON PRODUCTION. The service is public, and three things changed character the moment it was.
+
+**Deploy `6a7b57501c0748c9f7711418`, commit `d030f30`, tree `931f6666…`, `verdict D / calibrated true
+/ selfChecks []`.** `DD_PUBLIC_ENABLED=true` and `DD_PAYTO_ADDRESS` set on the **production** context,
+each read back by payload. `deploy-preview` untouched; **`--context all` never used.**
+
+Deployed via `npm run deploy:prod`, so `gate:watch` ran automatically — the wiring built this morning
+guarding its first real promotion.
+
+### Step 4 — THE PRODUCTION SPLIT-BRAIN IS MEASURED. There is no split.
+
+| path | HTTP | `resource` | payTo | amount |
+|---|---|---|---|---|
+| `/api/dd-analyze` | **402** | `https://app.tikpema.xyz/api/dd-analyze` | `0xb407967319d5…` | 60000 |
+| `/.netlify/functions/dd-analyze` | **402** | `https://app.tikpema.xyz/.netlify/functions/dd-analyze` | `0xb407967319d5…` | 60000 |
+
+⭐ **`/api/*` RESOLVES ON PRODUCTION** — unlike the draft, where it served SPA HTML. Identical payTo,
+identical price, `subjectPreview` live on both. **The `MEASURED vs INFERRED` row for production
+split-brain moves to MEASURED.**
+
+**Step 5 — `resource` is CLEAN: `https://app.tikpema.xyz/…`, no doubled host.** The draft's
+`…tikpema.xyz.tikpema.xyz` was the draft's own hostname, never a code defect — now confirmed on the
+live surface rather than inferred.
+
+⭐ **CANONICAL PATH: `https://app.tikpema.xyz/api/dd-analyze`.** Platform-independent, survives a move
+off Netlify, and is the string a listing must carry. The functions path stays for diagnostics — it
+tests the SERVICE rather than the ROUTING. ⚠️ **The two `resource` values differ by design** (it binds
+to the URL actually hit), which is exactly why one had to be named before exposure: changing it later
+invalidates anything pointing at the other.
+
+### ⚠️ THE REFUSAL WINDOW WENT UNMEASURED — that is not the same as zero
+
+The deploy published just before `:40`, the `*/10` canary tick fired, and the first probe at
+**17:40:33Z** already got a 402. **No 503 was ever observed.**
+
+🚨 **THAT WAS LUCK, NOT METHOD, AND IT MUST NOT BE RECORDED AS A RESULT.** Deploy duration varies
+15–28 min against a 10-minute period, so landing near a tick is not controllable. **This run produced
+NO evidence about the window's typical size** — treat it as unmeasured, not as measured-at-zero. Same
+discipline as everything else here: an absence of observation is not an observation.
+
+### 🚨 THE WINDOW IS NOW A SITE-WIDE, PUBLIC-FACING PROPERTY — and it is the TOP priority
+
+**It fires on EVERY deploy to this site — bridge, research, agent, anything — not only DD deploys.**
+Any deploy rotates the deploy id, which rotates the health key, and `dd-analyze` then refuses
+`service-unverified` for up to the `*/10` period. Before today that was an internal inconvenience.
+**DD is now a public service, so it is a public outage on every unrelated deploy.**
+
+Escapes, each checked and closed: **manual canary trigger** — no, it is scheduled on prod, so 403;
+**shorten the cron** — bounded by `MIN_RERUN(5m) < cron < TTL(30m)` plus `TTL ≥ 3×cron` and
+`TTL < 4×cron`, leaving only `7.5 < c ≤ 10`, and `*/10` is suite-pinned exactly; **pre-warm the key**
+— impossible, it contains a deploy id that does not exist until deployed; **loosen the binding** —
+reopens the fail-open the build binding closed. ⭐ It is **fail-closed** (503 → no 402 → no
+authorization can be signed), so it costs availability, never money.
+
+### 🚨 THE REVENUE WALLET IS NO LONGER A CONTROLLED NUMBER
+
+**`0.120000 USDC` was two KNOWN purchases, both ours.** From this deploy onward it is a **public
+endpoint quoting a real price to anyone who finds it.**
+
+⭐ **A BALANCE CHANGE IS NOW THE ONLY SIGNAL THAT SOMEONE EXTERNAL BOUGHT SOMETHING** — and nothing
+watches it. There is no monitor, no alert, no ledger. The first external sale will be discovered by
+someone happening to run a chain read.
+
+⚠️ **This also degrades the reconciliation property.** The wallet's zero-history was what made
+aggregate `availableBalance` attributable, and that worked because **every credit was one we made**.
+With external buyers, the aggregate read can no longer be assumed to correspond to a purchase we
+know about. It is still sound for "did the balance rise", but **"which payment" is now genuinely
+unanswerable** rather than merely deferred — and `authorizationState` reverts on
+`GatewayWalletBatched`, so the exact per-payment read remains unavailable.
+
+### ⭐ ORDER OF THE NEXT THREE — deliberately reordered at exposure
+
+1. **THE REFUSAL WINDOW.** Promoted to first because it changed character: site-wide, public-facing,
+   and triggered by deploys that have nothing to do with DD.
+2. **A MONITOR.** The service is live and unwatched. Until one exists, an external sale is invisible
+   and so is an outage. ⚠️ Note the shape from [[strong-read-watch-monitor]]: silence must be the
+   healthy signal, and liveness must be a value advancing — never an alert arriving.
+3. **THE SUPERSESSION DOC.** Deliberately LAST. It is the **listing** precondition, and listing is not
+   imminent — so **nobody is verifying `tokenURI(851891)` yet**. And because the frozen doc is
+   commit-scoped to `3e27042`, it stays **honestly out-of-date rather than wrong** in the meantime.
+   ⚠️ It becomes urgent the moment a listing is real, because a listing is exactly what brings
+   verifiers to a document that denies signing exists.
+
+**NO MONEY MOVED this round.** Revenue wallet steady at `0.120000`; both handles still redeemable.
+
+---
+
 ## 2026-08-11 (pm) — THE BUYER NOW LEARNS THE COVERAGE CASE BEFORE PAYING. Plus both directions of the schedule conflict, gated.
 
 **Draft `6a7b3db92363d31633c5b6a8`, commit `61cd6e7`, tree `931f6666…`. Production INERT throughout.
@@ -761,8 +848,12 @@ citation change (short list where cited / full retrieval where not) has been see
 `Sources:` and `Retrieved, not used:` as SEPARATE lists. Regression case: job **#160637**
 (Kraken/Wirex called irrelevant in the answer, listed as sources anyway); job #160108 is the same
 defect (two exchange FAQs matched on the word "Unified").
-Money path `verdict D`. Watch on `*/15`. Canary writing deploy-id-bound artifacts. **DD is INERT**
-(`DD_PUBLIC_ENABLED` unset in production). Live values come from the build stamp and `git`, not here.
+Money path `verdict D`. Watch on `*/15`. Canary writing deploy-id-bound artifacts.
+🚨 **SUPERSEDED 2026-08-11 (evening): DD IS NO LONGER INERT — it is LIVE AND SERVING on production**
+(`DD_PUBLIC_ENABLED=true`, `DD_PAYTO_ADDRESS` set, deploy `6a7b57501c0748c9f7711418`). The sentence
+that stood here — *"DD is INERT"* — is FALSE as of that deploy. See the evening entry: canonical
+resource is `https://app.tikpema.xyz/api/dd-analyze`, and **the revenue wallet is no longer a
+controlled number.** Live values come from the build stamp and `git`, not here.
 
 ### ⚠️ A DOCUMENTED EXCEPTION TO "PROVE IT ON A DRAFT FIRST" — the bridge settler
 
@@ -966,7 +1057,7 @@ Arc-serve/Base-settle workaround was inferred from a STALE row, not from a platf
 | scheduled invocations carry that header | ✅ MEASURED on a genuine cron tick |
 | all four env build sources absent at runtime | ✅ MEASURED — `DD_BUILD_ID`/`COMMIT_REF`/`DEPLOY_ID`/`BUILD_ID` all null |
 | **URL-path split-brain — DRAFTS** | ✅ **MEASURED**: both paths returned the same 24-hex id, equal to the draft's own **[DEPLOY ID]** |
-| **URL-path split-brain — PRODUCTION** | ⚠️ **INFERRED ONLY.** Same `netlify.toml`, same redirect, so the same result is expected — **NOT measurable until `DD_PUBLIC_ENABLED` is set**, because rung −1 refuses before any identity is computed (measured: `service-not-enabled`, no diagnostic). There is **no window to race.** |
+| **URL-path split-brain — PRODUCTION** | ✅ **MEASURED 2026-08-11 (evening), the moment exposure made it observable.** BOTH paths return a valid **402** with the same `payTo` and price; `/api/*` resolves on prod (it served SPA HTML on a draft). `resource` differs BY DESIGN — `https://app.tikpema.xyz/api/dd-analyze` vs `…/.netlify/functions/dd-analyze` — since it binds to the URL actually hit. ⭐ **Canonical = `/api/dd-analyze`.** |
 | `_budget.mjs` `readable:false` refusal | ⚠️ SUITE-ONLY — not inducible; safe because it fails closed |
 | DCA ledger-failure branch | ⚠️ SUITE-ONLY — live but unexercised (all 7 mandates cancelled/expired) |
 | UB auto-allocation drawing from Base | ⚠️ UNPROVEN — no-op today (every Base Sepolia balance is 0.0) |
@@ -1074,13 +1165,23 @@ before. Read the amount off the 402, not from memory.
 
 ### OPEN WORK — preconditions attached, not listed separately
 
-1. **The money step** — as above. First thing for a fresh session.
-2. **Enabling DD in production** — ⚠️ **PRECONDITION: the moment `DD_PUBLIC_ENABLED` is set, run the
-   three-way check BEFORE trusting any served report.** Hit `/api/dd-analyze` and
-   `/.netlify/functions/dd-analyze`; `refusal.diagnostic.runningBuild` on each must equal the other
-   AND the published **[DEPLOY ID]**. This is the only outstanding inference and enable-time is the
-   first moment it is testable. ⚠️ Never `--context all` — that is the switch that arms DD in prod,
-   and nothing enforces this variable the way `gate:watch` enforces `WATCH_*`.
+1. ✅ **The money step — DONE 2026-08-11.** Two real purchases, full and thin, chain-verified.
+2. ✅ **Enabling DD in production — DONE 2026-08-11 (evening).** Three-way check run at exposure:
+   both paths serve valid 402s, `resource` clean on `app.tikpema.xyz`, canonical =
+   `/api/dd-analyze`. `--context all` never used.
+   ⭐ **THE THREE THAT REPLACED IT, IN THIS ORDER — the ordering is the decision, not a list:**
+   1. 🚨 **THE REFUSAL WINDOW.** It changed character at exposure: **site-wide** (every deploy to this
+      site rotates the deploy id, so bridge/research/agent deploys all trigger it) and now
+      **public-facing**. Fail-closed, so it costs availability, never money. All four escapes are
+      closed — see the evening entry. **Its typical size is UNMEASURED**: the one production run
+      happened to land on a tick and never showed a 503.
+   2. 🚨 **A MONITOR — the service is LIVE AND UNWATCHED.** Until one exists, both an external sale
+      and an outage are invisible. Shape it like [[strong-read-watch-monitor]]: silence is the
+      healthy signal, liveness is a value advancing, never an alert arriving.
+   3. **THE SUPERSESSION DOC — deliberately LAST.** It is the **LISTING** precondition and listing is
+      not imminent, so nobody is verifying `tokenURI(851891)` yet; and being commit-scoped to
+      `3e27042`, the frozen doc stays **honestly out-of-date rather than wrong**. ⚠️ Urgent the moment
+      a listing is real — a listing is what brings verifiers to a doc denying signing exists.
 3. **Funding Base Sepolia** — 🚨 **PRECONDITION: verify the delegate on Base Sepolia FIRST.** UB
    auto-allocation is ON (both spend sites omit `from.allocations`). `_pay.mjs` is same-chain, a
    permanent no-op; **`_ubspend.mjs` is cross-chain, so the DESTINATION is tier 1** — the first Base
