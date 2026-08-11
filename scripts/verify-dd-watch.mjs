@@ -12,6 +12,7 @@
 // the same first-success-branch problem that left a probe assertion unexecuted for the whole life of
 // the service. Both directions must ALSO be calibrated live against the real channel.
 
+import { readFileSync } from "node:fs";
 import {
   judge, judgePath, alertHeadline, decideNotify, windowFrom,
   OUTCOME, GRACE_MS, CANARY_PERIOD_MS, CRON_MS, MIN_RERUN_MS, TTL_MS,
@@ -126,6 +127,23 @@ section("8 — the refusal window is MEASURED, which two prod deploys failed to 
   const closed = windowFrom({ prev: { refusingSince: new Date(NOW - 7 * 60000).toISOString() }, judgement: { refusingSince: null, refusingMs: 0 }, nowIso: new Date(NOW).toISOString() });
   check("⭐⭐ closing records a DURATION", closed.event === "window-closed" && closed.ms === 7 * 60000, `${closed.ms}ms`);
   check("steady healthy is neither", windowFrom({ prev: null, judgement: { refusingSince: null, refusingMs: 0 }, nowIso: new Date(NOW).toISOString() }).event === "steady");
+}
+
+section("9 — 🚨 THE MONITOR MUST NEVER BE ABLE TO REFUSE ITSELF");
+{
+  // Shipped 2026-08-11 and caught the same night: the handler refused any invocation carrying an
+  // httpMethod without an internal token. Netlify delivers SCHEDULED invocations WITH an httpMethod,
+  // so the cron itself was refused — five runs, nothing written, no error anywhere. Durations gave it
+  // away (22–29ms, when two HTTPS probes cannot finish under ~200ms).
+  // ⭐ Asserted on the SOURCE because the failure was structural, not a judgement branch: there is no
+  // input to judge() that could have exposed it.
+  const src = readFileSync(new URL("../netlify/functions/dd-watch.mjs", import.meta.url), "utf8");
+  const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  check("⭐⭐ the handler contains NO early-return that refuses an invocation",
+    !/return json\(401/.test(code), "a 401 path would refuse the cron itself");
+  check("⭐ the token is RECORDED, not enforced", /invokedWithToken/.test(code) && !/!requireInternal\(event\)/.test(code));
+  check("  …and the reasoning survives in the comments, so it is not re-introduced",
+    /refuse itself/i.test(src) && /403/.test(src));
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

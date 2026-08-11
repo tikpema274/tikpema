@@ -71,28 +71,25 @@ async function probePath(url) {
 export const handler = async (event) => {
   connectBlobs(event);
 
-  // ═══ 🚨 AUTH — AND THE ASYMMETRY THAT DECIDES ITS SHAPE ════════════════════════════════════════
-  // Netlify 403s external HTTP invocations of a SCHEDULED function, so practical exposure is already
-  // nil and this is defence in depth. But the two ways to get it wrong are NOT equal:
+  // ═══ 🚨 AUTH — AND THE BUG THIS BLOCK ALREADY SHIPPED ONCE ═════════════════════════════════════
+  // The first version refused any invocation carrying an httpMethod without an internal token. It
+  // ran five times on schedule (22:05→22:25) and wrote NOTHING, because **Netlify delivers SCHEDULED
+  // invocations WITH an httpMethod** — so `looksHttp` was true for the cron itself, every run
+  // returned 401, and the monitor silently never ran. Durations gave it away: 22–29ms, when two
+  // HTTPS probes cannot complete in under ~200ms.
   //
-  //   · too permissive → someone triggers a free, side-effect-light probe. Annoying.
-  //   · too strict     → THE CRON ITSELF IS REFUSED, the monitor never runs, and it fails SILENTLY —
-  //                      precisely the failure this monitor exists to prevent. A monitor that cannot
-  //                      run looks exactly like a system with nothing to report.
+  // ⚠️ THE WARNING FOR EXACTLY THIS WAS WRITTEN IN THIS BLOCK AT THE TIME ("too strict → the cron
+  // itself is refused, the monitor never runs, and it fails SILENTLY"). Naming a failure mode is not
+  // the same as choosing a discriminator that avoids it.
   //
-  // ⭐ So the token is required only for requests that are clearly EXTERNAL HTTP (they carry an
-  // httpMethod). A scheduled invocation is never gated on a header it does not control. The refusal
-  // names itself loudly, so a misconfiguration can never be mistaken for a healthy silence.
-  const looksHttp = typeof event?.httpMethod === "string" && event.httpMethod !== "";
-  if (looksHttp && !requireInternal(event)) {
-    return json(401, {
-      ok: false,
-      reason: "internal-only",
-      detail:
-        "dd-watch runs from its schedule, not from callers. An HTTP invocation must carry a valid " +
-        "x-internal-token. ⚠️ THIS REFUSAL IS NOT A HEALTH REPORT — it means the run did not happen.",
-    });
-  }
+  // ⭐ THE ENFORCEMENT IS THE PLATFORM, AND IT IS MEASURED, NOT ASSUMED: an external
+  // `POST /.netlify/functions/dd-watch` returns **403** because the function is SCHEDULED — Netlify
+  // blocks it before any of this code runs. There is therefore no reachable external caller for an
+  // in-code check to protect against, and the check could only ever do harm: its false-positive kills
+  // the monitor, while its true-positive is unreachable.
+  //
+  // So the token is RECORDED, never enforced. A monitor must never be able to refuse itself.
+  const invokedWithToken = requireInternal(event);
 
   const env = process.env;
   const now = Date.now();
@@ -150,6 +147,7 @@ export const handler = async (event) => {
       ...(Array.isArray(prev?.windowHistory) ? prev.windowHistory : []),
       ...(win.event === "window-closed" ? [{ openedAt: win.openedAt, closedAt: win.closedAt, ms: win.ms }] : []),
     ].slice(-20),
+    invokedWithToken,
     lastNotifiedAt: prev?.lastNotifiedAt ?? null,
     notify: { kind: null, delivered: null, error: null },
     ttlMs: TTL_MS, cronMs: CRON_MS, canaryPeriodMs: CANARY_PERIOD_MS, graceMs: GRACE_MS,
