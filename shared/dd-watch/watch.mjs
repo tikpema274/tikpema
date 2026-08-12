@@ -227,16 +227,39 @@ export function judge({ paths, prev = null, now, graceMs = GRACE_MS }) {
  * ⭐ THE REFUSAL WINDOW, MEASURED FOR FREE. Two production deploys failed to observe it by hand;
  * this records every start and end so its real size stops being a guess.
  */
-export function windowFrom({ prev, judgement, nowIso }) {
+export function windowFrom({ prev, judgement, nowIso, induced = false }) {
   const wasRefusing = !!prev?.refusingSince;
   const isRefusing = !!judgement.refusingSince;
-  if (!wasRefusing && isRefusing) return { event: "window-opened", openedAt: nowIso, closedAt: null, ms: null };
+  // ⚠️ `induced` is CARRIED FORWARD from the opening observation: a window that OPENED under a
+  // calibration lever stays labelled induced even if the lever is removed while it is still open.
+  const carried = induced || prev?.window?.induced === true;
+  if (!wasRefusing && isRefusing) return { event: "window-opened", openedAt: nowIso, closedAt: null, ms: null, induced };
   if (wasRefusing && !isRefusing) {
     const ms = Date.parse(nowIso) - Date.parse(prev.refusingSince);
-    return { event: "window-closed", openedAt: prev.refusingSince, closedAt: nowIso, ms: Number.isFinite(ms) ? ms : null };
+    return { event: "window-closed", openedAt: prev.refusingSince, closedAt: nowIso, ms: Number.isFinite(ms) ? ms : null, induced: carried };
   }
-  return { event: isRefusing ? "window-open" : "steady", openedAt: judgement.refusingSince, closedAt: null, ms: judgement.refusingMs || null };
+  return { event: isRefusing ? "window-open" : "steady", openedAt: judgement.refusingSince, closedAt: null, ms: judgement.refusingMs || null, induced: carried };
 }
+
+/**
+ * ⭐⭐ IS A CALIBRATION LEVER ACTIVE? — the automatic INDUCED/REAL discriminator.
+ *
+ * 🚨 WHY THIS EXISTS. windowHistory is the record of how long DD refused, and its whole value is
+ * answering "how big is the post-deploy refusal window really?" — a number three production deploys
+ * have failed to capture by hand. But a CALIBRATION also opens a window, and an induced entry looks
+ * identical to a real one. Someone reading the history in a month would average them and conclude
+ * the window is ~N minutes, when the largest entries are ones we caused ON PURPOSE.
+ *
+ * ⭐ The monitor already knows: if either target differs from its default, a lever is set. So the
+ * label is DERIVED, never remembered — no operator has to tag anything, and forgetting is impossible.
+ *
+ * ⚠️ THE ONE IT STILL CANNOT SEE: an outage caused by something other than a lever (a bad deploy,
+ * say) is REAL by this test, which is correct — but it is still not the CANARY-KEY-ROTATION window
+ * that motivated the measurement. `induced:false` means "not caused by a lever", not "caused by a
+ * key rotation". Read the reasons alongside it: only `no-record` is the rotation case.
+ */
+export const leverActive = (targets) =>
+  targets?.api !== DEFAULT_PATHS.api || targets?.functions !== DEFAULT_PATHS.functions;
 
 /**
  * ⭐⭐ TWO REASONS TO ALERT, AND THEY ARE NOT THE SAME EVENT — so they do not share a headline.

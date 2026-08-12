@@ -137,6 +137,26 @@ section("8 — the refusal window is MEASURED, which two prod deploys failed to 
   check("steady healthy is neither", windowFrom({ prev: null, judgement: { refusingSince: null, refusingMs: 0 }, nowIso: new Date(NOW).toISOString() }).event === "steady");
 }
 
+section("8b — 🚨 INDUCED vs REAL: a calibration window must not pass as a measurement");
+{
+  const { leverActive, DEFAULT_PATHS: DP } = await import("../shared/dd-watch/watch.mjs");
+  check("defaults → no lever", leverActive(DP) === false);
+  check("⭐ a redirected api → lever active", leverActive({ ...DP, api: "https://x/nope" }) === true);
+  check("  …and a redirected functions path too", leverActive({ ...DP, functions: "https://x/nope" }) === true);
+  const opened = windowFrom({ prev: null, judgement: { refusingSince: "2026-08-12T07:35:00Z" }, nowIso: "2026-08-12T07:35:00Z", induced: true });
+  check("⭐⭐ a window opened under a lever is labelled INDUCED", opened.induced === true);
+  // ⚠️ The lever is typically removed WHILE the window is still open — that is how the calibration
+  // ends. Without carry-forward the CLOSING entry would be labelled real and would lie.
+  const closed = windowFrom({ prev: { refusingSince: "2026-08-12T07:35:00Z", window: { induced: true } },
+    judgement: { refusingSince: null, refusingMs: 0 }, nowIso: "2026-08-12T07:45:00Z", induced: false });
+  check("⭐⭐ …and it CARRIES FORWARD after the lever is removed", closed.induced === true, `ms=${closed.ms}`);
+  const real = windowFrom({ prev: { refusingSince: "2026-08-12T07:35:00Z" },
+    judgement: { refusingSince: null, refusingMs: 0 }, nowIso: "2026-08-12T07:45:00Z", induced: false });
+  check("⭐ a genuine outage is NOT labelled induced", real.induced === false);
+  check("⭐ the label is DERIVED from targets, never remembered by an operator",
+    /leverActive/.test(readFileSync(new URL("../netlify/functions/dd-watch.mjs", import.meta.url), "utf8")));
+}
+
 section("9 — 🚨 THE MONITOR MUST NEVER BE ABLE TO REFUSE ITSELF");
 {
   // Shipped 2026-08-11 and caught the same night: the handler refused any invocation carrying an

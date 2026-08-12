@@ -5,7 +5,7 @@ import {
   SCHEMA, MIN_RERUN_MS, TTL_MS, REMINDER_MS, GRACE_MS, CANARY_PERIOD_MS, CRON_MS,
   DEFAULT_PATHS, CANONICAL_PATH_KEY, PROBE_SUBJECT, PROBE_MARKER, PROBE_UA,
   DEFAULT_STORE_NAME, WEBHOOK_VAR,
-  judge, alertHeadline, decideNotify, windowFrom,
+  judge, alertHeadline, decideNotify, windowFrom, leverActive,
 } from "../../shared/dd-watch/watch.mjs";
 
 // dd-watch — is the PUBLIC DD SERVICE answering, on BOTH of its paths?
@@ -123,7 +123,12 @@ export const handler = async (event) => {
   const paths = { api: await probePath(targets.api), functions: await probePath(targets.functions) };
 
   const judgement = judge({ paths, prev, now, graceMs: GRACE_MS });
-  const win = windowFrom({ prev, judgement, nowIso });
+  // ⭐ INDUCED vs REAL, derived not remembered. A calibration lever opens a window that looks
+  // identical to a real outage in windowHistory — and the history's whole purpose is answering how
+  // big the post-deploy refusal window actually is. Labelling it automatically means nobody has to
+  // tag it and nobody can forget.
+  const induced = leverActive(targets);
+  const win = windowFrom({ prev, judgement, nowIso, induced });
 
   const record = {
     schema: SCHEMA,
@@ -139,13 +144,14 @@ export const handler = async (event) => {
     refusingMs: judgement.refusingMs,
     resources: judgement.resources,
     targets,
+    leverActive: induced,
     canonical: targets[CANONICAL_PATH_KEY],
     // ⭐ THE REFUSAL WINDOW, MEASURED FOR FREE. Two production deploys failed to catch it by hand;
     // every open and close is now recorded with a duration, so its size stops being a guess.
     window: win,
     windowHistory: [
       ...(Array.isArray(prev?.windowHistory) ? prev.windowHistory : []),
-      ...(win.event === "window-closed" ? [{ openedAt: win.openedAt, closedAt: win.closedAt, ms: win.ms }] : []),
+      ...(win.event === "window-closed" ? [{ openedAt: win.openedAt, closedAt: win.closedAt, ms: win.ms, induced: win.induced === true }] : []),
     ].slice(-20),
     invokedWithToken,
     lastNotifiedAt: prev?.lastNotifiedAt ?? null,
