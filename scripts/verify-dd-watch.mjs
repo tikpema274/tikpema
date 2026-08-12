@@ -144,6 +144,21 @@ section("9 — 🚨 THE MONITOR MUST NEVER BE ABLE TO REFUSE ITSELF");
   check("⭐ the token is RECORDED, not enforced", /invokedWithToken/.test(code) && !/!requireInternal\(event\)/.test(code));
   check("  …and the reasoning survives in the comments, so it is not re-introduced",
     /refuse itself/i.test(src) && /403/.test(src));
+
+  // ⭐⭐ PERSIST BEFORE BROADCAST. The first version notified FIRST and wrote LAST: a failed write
+  // meant the message went out and `prev` stayed null, so the NEXT run classified a continuing
+  // problem as `first-alert` and sent again — every 5 minutes, forever. The reminder window that
+  // exists to stop a firehose would never be consulted, because the state proving there was
+  // anything to remind about is precisely what failed to persist.
+  const firstWrite = code.indexOf("setJSON");
+  const sendIdx = code.indexOf("await fetch(hook");
+  check("⭐⭐ the alert state is PERSISTED BEFORE any message is sent",
+    firstWrite !== -1 && sendIdx !== -1 && firstWrite < sendIdx,
+    `write@${firstWrite} send@${sendIdx}`);
+  check("⭐ the delivery outcome is written AFTER, and is best-effort",
+    /setJSON\(LATEST_KEY, record\)\.catch\(/.test(code));
+  check("  …so a failed outcome-write costs ONE repeat, never a loop and never silence",
+    /one repeated message, not a loop/i.test(src));
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

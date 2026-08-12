@@ -160,6 +160,22 @@ export const handler = async (event) => {
   });
   record.notify.kind = decision.kind;
 
+  // ═══ 🚨 PERSIST BEFORE BROADCAST — the same inversion _dd-x402 already had to learn ════════════
+  // The first version notified FIRST and wrote LAST. If that write ever failed, the message went out
+  // and `prev` stayed null — so the NEXT run would see prevAlert=false, classify a continuing
+  // problem as `first-alert` again, and send again. Every five minutes. Forever. The reminder
+  // window that exists to stop a firehose would never be consulted, because the state proving there
+  // was anything to remind about is exactly what failed to persist.
+  //
+  // ⭐ SO THE ALERT STATE IS PERSISTED BEFORE ANY MESSAGE IS SENT. If the process dies between the
+  // two, the next run sees prevAlert=true and takes the reminder path — one repeat, rate-limited,
+  // instead of an unbounded loop. The failure direction is a duplicate, never a storm and never
+  // silence.
+  //
+  // ⚠️ The natural order fails in the direction that punishes the reader, which is the same reason
+  // the facilitator writes its pending record before it broadcasts a payment.
+  await blobs.setJSON(LATEST_KEY, record);
+
   if (decision.notify) {
     const hook = (env[WEBHOOK_VAR] || "").trim();
     if (!hook) {
@@ -199,8 +215,14 @@ export const handler = async (event) => {
     // ⭐ lastNotifiedAt advances ONLY on confirmed delivery, so an undelivered alert is retried
     // rather than suppressed by a reminder window it never earned.
     if (record.notify.delivered) record.lastNotifiedAt = nowIso;
+
+    // Second write: the delivery OUTCOME. ⚠️ Best-effort by design — if THIS fails the alert state
+    // is already safe on disk, so the cost is one repeated message, not a loop and not silence.
+    await blobs.setJSON(LATEST_KEY, record).catch(() => {});
   }
 
-  await blobs.setJSON(LATEST_KEY, record);
+  // ⭐ No trailing write here. The record was persisted BEFORE the broadcast (above), and the
+  // delivery outcome was written after it. A third write would only re-save what is already on disk
+  // and would blur which write is the load-bearing one.
   return json(200, record);
 };
