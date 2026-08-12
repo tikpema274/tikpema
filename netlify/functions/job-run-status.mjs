@@ -1,4 +1,14 @@
-// GET/POST /api/job-run-status?runId=...  (auth required)  — Sub-brick 2b
+// GET/POST /.netlify/functions/job-run-status?runId=...  (auth required)  — Sub-brick 2b
+//
+// ⚠️ THERE IS NO `/api/` ROUTE FOR THIS FUNCTION — call `/.netlify/functions/job-run-status`.
+// The `/api/*` redirect covers 31 of 57 functions; the job plane (job-run, job-run-status,
+// job-quote, job-set-budget, job-submit-background, plan-quote) is called DIRECTLY by the front end.
+//
+// 🚨 AND GETTING THIS WRONG FAILS SILENTLY, NOT LOUDLY. An unmatched `/api/*` GET is served by the
+// SPA catch-all as **200 with an HTML body** (measured 2026-08-12). A caller doing
+// `if (!res.ok) throw` sees res.ok === TRUE, and with `.catch(() => ({}))` on the parse it becomes
+// an empty object treated as a successful response. A POST returns 404 (the SPA rule skips POST),
+// so the failure mode DIFFERS BY METHOD and the GET one is the quiet one.
 //
 // Poll a running job by its runId. Merges the "job-runs" record (create/fund
 // progress) with the "job-deliverables" record (research → submit → settle,
