@@ -168,11 +168,11 @@ section("7 — transitions only; silence is the healthy signal");
 
 section("8 — the refusal window is MEASURED, which two prod deploys failed to do by hand");
 {
-  const open = windowFrom({ prev: null, judgement: { refusingSince: new Date(NOW).toISOString(), refusingMs: 0 }, nowIso: new Date(NOW).toISOString() });
+  const open = windowFrom({ prev: null, judgement: { unhealthySince: new Date(NOW).toISOString(), unhealthyMs: 0 }, nowIso: new Date(NOW).toISOString() });
   check("opening is recorded", open.event === "window-opened");
-  const closed = windowFrom({ prev: { refusingSince: new Date(NOW - 7 * 60000).toISOString() }, judgement: { refusingSince: null, refusingMs: 0 }, nowIso: new Date(NOW).toISOString() });
+  const closed = windowFrom({ prev: { unhealthySince: new Date(NOW - 7 * 60000).toISOString() }, judgement: { unhealthySince: null, unhealthyMs: 0 }, nowIso: new Date(NOW).toISOString() });
   check("⭐⭐ closing records a DURATION", closed.event === "window-closed" && closed.ms === 7 * 60000, `${closed.ms}ms`);
-  check("steady healthy is neither", windowFrom({ prev: null, judgement: { refusingSince: null, refusingMs: 0 }, nowIso: new Date(NOW).toISOString() }).event === "steady");
+  check("steady healthy is neither", windowFrom({ prev: null, judgement: { unhealthySince: null, unhealthyMs: 0 }, nowIso: new Date(NOW).toISOString() }).event === "steady");
 }
 
 section("8b — 🚨 INDUCED vs REAL: a calibration window must not pass as a measurement");
@@ -185,14 +185,53 @@ section("8b — 🚨 INDUCED vs REAL: a calibration window must not pass as a me
   check("⭐⭐ a window opened under a lever is labelled INDUCED", opened.induced === true);
   // ⚠️ The lever is typically removed WHILE the window is still open — that is how the calibration
   // ends. Without carry-forward the CLOSING entry would be labelled real and would lie.
-  const closed = windowFrom({ prev: { refusingSince: "2026-08-12T07:35:00Z", window: { induced: true } },
-    judgement: { refusingSince: null, refusingMs: 0 }, nowIso: "2026-08-12T07:45:00Z", induced: false });
+  const closed = windowFrom({ prev: { unhealthySince: "2026-08-12T07:35:00Z", window: { induced: true } },
+    judgement: { unhealthySince: null, unhealthyMs: 0 }, nowIso: "2026-08-12T07:45:00Z", induced: false });
   check("⭐⭐ …and it CARRIES FORWARD after the lever is removed", closed.induced === true, `ms=${closed.ms}`);
-  const real = windowFrom({ prev: { refusingSince: "2026-08-12T07:35:00Z" },
-    judgement: { refusingSince: null, refusingMs: 0 }, nowIso: "2026-08-12T07:45:00Z", induced: false });
+  const real = windowFrom({ prev: { unhealthySince: "2026-08-12T07:35:00Z" },
+    judgement: { unhealthySince: null, unhealthyMs: 0 }, nowIso: "2026-08-12T07:45:00Z", induced: false });
   check("⭐ a genuine outage is NOT labelled induced", real.induced === false);
   check("⭐ the label is DERIVED from targets, never remembered by an operator",
     /leverActive/.test(readFileSync(new URL("../netlify/functions/dd-watch.mjs", import.meta.url), "utf8")));
+}
+
+section("8c — 🚨 THE WINDOW MEASURES UNHEALTHY, NOT MERELY 'REFUSING'");
+{
+  // MEASURED 2026-08-12 during a live calibration: /api served SPA HTML while /.netlify kept
+  // serving. A real outage — the CANONICAL payment target broken while the service looked fine —
+  // and it left NO TRACE in windowHistory, because the window was keyed on `refusingSince`, which
+  // only the `refusing` outcome sets. ⭐ A history of availability that silently omits a whole class
+  // of unavailability is worse than none: it reads as complete.
+  const nowIso = new Date(NOW).toISOString();
+  const cases = [
+    ["not-json (SPA HTML)", p(HTML, OK_FN)],
+    ["unreachable", p({ status: 0, body: null, error: "TimeoutError" }, OK_FN)],
+    ["unexpected status", p({ status: 500, body: {} }, OK_FN)],
+    ["quote-divergence (BOTH serving!)", p(OK_API, chal("https://app.tikpema.xyz/.netlify/functions/dd-analyze", "0xdead"))],
+    ["refusing", p(refuse("stale"), refuse("stale"))],
+  ];
+  for (const [label, paths] of cases) {
+    const j = judge({ paths, prev: null, now: NOW });
+    const w = windowFrom({ prev: null, judgement: j, nowIso, induced: false });
+    check(`⭐ ${label} OPENS a window`, w.event === "window-opened" && !!j.unhealthySince, w.event);
+  }
+  const healthy = judge({ paths: p(OK_API, OK_FN), prev: null, now: NOW });
+  check("⭐⭐ a healthy run opens NOTHING", windowFrom({ prev: null, judgement: healthy, nowIso, induced: false }).event === "steady"
+    && healthy.unhealthySince === null);
+
+  // ⚠️ TWO CLOCKS, deliberately separate: widening refusingSince would break the grace decision,
+  // which is specifically about no-record after a key rotation.
+  const nj = judge({ paths: p(HTML, OK_FN), prev: null, now: NOW });
+  check("⭐⭐ refusingSince stays REFUSAL-only (grace logic untouched)", nj.refusingSince === null);
+  check("  …while unhealthySince covers it", nj.unhealthySince !== null);
+
+  // ⭐ AND THE CARRY-FORWARD NOW RUNS THROUGH A not-json WINDOW — the path the last calibration
+  // could not exercise, because no window ever opened.
+  const prevOpen = { unhealthySince: nowIso, window: { induced: true } };
+  const closed = windowFrom({ prev: prevOpen, judgement: judge({ paths: p(OK_API, OK_FN), prev: prevOpen, now: NOW + 9 * 60000 }),
+    nowIso: new Date(NOW + 9 * 60000).toISOString(), induced: false });
+  check("⭐⭐ a not-json window CLOSES with a duration and keeps induced:true",
+    closed.event === "window-closed" && closed.ms === 540000 && closed.induced === true);
 }
 
 section("9 — 🚨 THE MONITOR MUST NEVER BE ABLE TO REFUSE ITSELF");

@@ -226,8 +226,28 @@ export function judge({ paths, prev = null, now, graceMs = GRACE_MS }) {
     alertReason = onlyNoRecord ? "no-record-persisting" : `refusing:${reasons.join(",")}`;
   }
 
+  // ═══ 🚨 THE WINDOW MEASURES UNHEALTHY, NOT MERELY "REFUSING" ══════════════════════════════════
+  // MEASURED 2026-08-12: a calibration made /api serve SPA HTML while /.netlify kept serving. That
+  // is a REAL outage — arguably the worst shape available, since the CANONICAL payment target a
+  // listing names is broken while the service looks fine — and it left NO TRACE in windowHistory,
+  // because `refusingSince` is only set for the `refusing` outcome. not-json, unreachable, unexpected
+  // and quote-divergence were all invisible to the measurement.
+  //
+  // ⭐ THE DATASET THIS MONITOR EXISTS TO BUILD WOULD HAVE UNDER-REPORTED ITS OWN SUBJECT. A history
+  // of availability that silently omits a whole class of unavailability is worse than none: it reads
+  // as complete.
+  //
+  // ⚠️ TWO CLOCKS, DELIBERATELY SEPARATE, because they answer different questions:
+  //   · refusingSince  — REFUSALS only. Feeds the grace/persistence decision, which is specifically
+  //                      about `no-record` after a key rotation. Widening it would break that.
+  //   · unhealthySince — ANY not-ok state. Feeds windowHistory, i.e. "how long was DD not healthy".
+  // Conflating them is exactly what produced the blind spot.
+  const unhealthySince = ok ? null : (prev?.unhealthySince ?? new Date(now).toISOString());
+  const unhealthyMs = unhealthySince ? now - Date.parse(unhealthySince) : 0;
+
   return {
     ok, alert, alertReason,
+    unhealthySince, unhealthyMs: Number.isFinite(unhealthyMs) ? unhealthyMs : 0,
     outcomes: Object.fromEntries(keys.map((k) => [k, results[k].outcome])),
     results,
     reasons,
@@ -248,17 +268,19 @@ export function judge({ paths, prev = null, now, graceMs = GRACE_MS }) {
  * this records every start and end so its real size stops being a guess.
  */
 export function windowFrom({ prev, judgement, nowIso, induced = false }) {
-  const wasRefusing = !!prev?.refusingSince;
-  const isRefusing = !!judgement.refusingSince;
+  // ⭐ Keyed on UNHEALTHY, not on refusing — see the note in judge(). `refusingSince` is kept for the
+  // grace decision and is deliberately NOT the window clock.
+  const wasRefusing = !!prev?.unhealthySince;
+  const isRefusing = !!judgement.unhealthySince;
   // ⚠️ `induced` is CARRIED FORWARD from the opening observation: a window that OPENED under a
   // calibration lever stays labelled induced even if the lever is removed while it is still open.
   const carried = induced || prev?.window?.induced === true;
   if (!wasRefusing && isRefusing) return { event: "window-opened", openedAt: nowIso, closedAt: null, ms: null, induced };
   if (wasRefusing && !isRefusing) {
-    const ms = Date.parse(nowIso) - Date.parse(prev.refusingSince);
-    return { event: "window-closed", openedAt: prev.refusingSince, closedAt: nowIso, ms: Number.isFinite(ms) ? ms : null, induced: carried };
+    const ms = Date.parse(nowIso) - Date.parse(prev.unhealthySince);
+    return { event: "window-closed", openedAt: prev.unhealthySince, closedAt: nowIso, ms: Number.isFinite(ms) ? ms : null, induced: carried };
   }
-  return { event: isRefusing ? "window-open" : "steady", openedAt: judgement.refusingSince, closedAt: null, ms: judgement.refusingMs || null, induced: carried };
+  return { event: isRefusing ? "window-open" : "steady", openedAt: judgement.unhealthySince, closedAt: null, ms: judgement.unhealthyMs || null, induced: carried };
 }
 
 /**

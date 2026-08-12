@@ -142,6 +142,10 @@ export const handler = async (event) => {
     expectedWindow: judgement.expectedWindow,
     refusingSince: judgement.refusingSince,
     refusingMs: judgement.refusingMs,
+    // ⭐ The window clock — ANY not-ok state, not just refusals. See judge()'s note: a path serving
+    // SPA HTML is a real outage and used to leave no trace here.
+    unhealthySince: judgement.unhealthySince,
+    unhealthyMs: judgement.unhealthyMs,
     resources: judgement.resources,
     targets,
     leverActive: induced,
