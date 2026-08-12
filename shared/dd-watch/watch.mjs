@@ -273,14 +273,30 @@ export function windowFrom({ prev, judgement, nowIso, induced = false }) {
   const wasRefusing = !!prev?.unhealthySince;
   const isRefusing = !!judgement.unhealthySince;
   // ⚠️ `induced` is CARRIED FORWARD from the opening observation: a window that OPENED under a
-  // calibration lever stays labelled induced even if the lever is removed while it is still open.
+  // calibration lever stays labelled induced even if the lever is removed while it is still open —
+  // which is how a calibration always ends, so without this the CLOSING entry would lie.
+  //
+  // 🚨 BUT IT MUST DIE WITH THE WINDOW IT BELONGS TO. Found 2026-08-12 while waiting on a
+  // calibration: a HEALTHY run was reporting `window: steady, induced: true`, because `carried` was
+  // applied unconditionally — including when there was no window at all. Cosmetic in itself (a
+  // steady window archives nothing), but the consequence is not: a future GENUINE outage opening
+  // while that stale label sat in `prev.window` would inherit it and be recorded as induced.
+  //
+  // ⭐ THAT IS THE EXACT INVERSION OF THE BUG THIS FLAG EXISTS TO PREVENT. The flag was built so a
+  // calibration cannot masquerade as a real outage; stale carry-forward lets a REAL outage
+  // masquerade as a calibration — and get discounted by whoever reads the history. Same cost,
+  // opposite direction, and the discounting one is worse because it silences a true signal.
   const carried = induced || prev?.window?.induced === true;
+
   if (!wasRefusing && isRefusing) return { event: "window-opened", openedAt: nowIso, closedAt: null, ms: null, induced };
   if (wasRefusing && !isRefusing) {
     const ms = Date.parse(nowIso) - Date.parse(prev.unhealthySince);
     return { event: "window-closed", openedAt: prev.unhealthySince, closedAt: nowIso, ms: Number.isFinite(ms) ? ms : null, induced: carried };
   }
-  return { event: isRefusing ? "window-open" : "steady", openedAt: judgement.unhealthySince, closedAt: null, ms: judgement.unhealthyMs || null, induced: carried };
+  // Still open → carry. Steady (no window at all) → there is nothing to label, so the chain ENDS.
+  return isRefusing
+    ? { event: "window-open", openedAt: judgement.unhealthySince, closedAt: null, ms: judgement.unhealthyMs || null, induced: carried }
+    : { event: "steady", openedAt: null, closedAt: null, ms: null, induced: false };
 }
 
 /**

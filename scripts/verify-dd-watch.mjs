@@ -191,6 +191,27 @@ section("8b — 🚨 INDUCED vs REAL: a calibration window must not pass as a me
   const real = windowFrom({ prev: { unhealthySince: "2026-08-12T07:35:00Z" },
     judgement: { unhealthySince: null, unhealthyMs: 0 }, nowIso: "2026-08-12T07:45:00Z", induced: false });
   check("⭐ a genuine outage is NOT labelled induced", real.induced === false);
+
+  // 🚨 THE LABEL MUST DIE WITH ITS WINDOW. Found 2026-08-12: a HEALTHY run reported
+  // `window: steady, induced: true`, because carry-forward applied unconditionally. Cosmetic alone —
+  // a steady window archives nothing — but a future GENUINE outage opening while that stale label
+  // sat in prev.window would INHERIT it and be recorded as induced.
+  // ⭐ That is the exact INVERSION of the bug this flag exists to prevent: instead of a calibration
+  // masquerading as real, a REAL outage masquerades as a calibration and gets discounted by whoever
+  // reads the history. The discounting direction is worse — it silences a true signal.
+  const iso = (m) => new Date(NOW + m * 60000).toISOString();
+  const closedInduced = { event: "window-closed", induced: true };
+  const steadyAfter = windowFrom({ prev: { unhealthySince: null, window: closedInduced },
+    judgement: { unhealthySince: null, unhealthyMs: 0 }, nowIso: iso(5), induced: false });
+  check("⭐⭐ a STEADY run after a calibration is NOT induced — the label dies with the window",
+    steadyAfter.event === "steady" && steadyAfter.induced === false, `induced=${steadyAfter.induced}`);
+  const genuineAfter = windowFrom({ prev: { unhealthySince: null, window: steadyAfter },
+    judgement: { unhealthySince: iso(10) }, nowIso: iso(10), induced: false });
+  check("⭐⭐ a GENUINE outage opening afterwards does NOT inherit induced",
+    genuineAfter.event === "window-opened" && genuineAfter.induced === false);
+  check("  …while a STILL-OPEN window keeps carrying it (check 1 must not regress)",
+    windowFrom({ prev: { unhealthySince: iso(0), window: { induced: true } },
+      judgement: { unhealthySince: iso(0), unhealthyMs: 60000 }, nowIso: iso(1), induced: false }).induced === true);
   check("⭐ the label is DERIVED from targets, never remembered by an operator",
     /leverActive/.test(readFileSync(new URL("../netlify/functions/dd-watch.mjs", import.meta.url), "utf8")));
 }
