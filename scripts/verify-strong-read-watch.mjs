@@ -640,6 +640,14 @@ const { GUARDED_SCHEDULES: gateTable, checkDraftInvocability } = await import(".
 check("⭐⭐ gate:watch's table covers dd-canary (the schedule a draft proof MUST comment out)",
   gateTable.some((g) => g.functionName === "dd-canary" && g.expectedCron === "*/10 * * * *"),
   gateTable.map((g) => g.functionName).join(", "));
+// 🚨 THE MONEY-CRITICAL ROW. Without this schedule, a user who asked for their money back has a
+// clock running that NOTHING FINISHES. And unlike a forgotten dd-canary — which makes DD refuse,
+// loudly and fail-closed — this failure is SILENT: the promise "we complete this automatically,
+// you do not need to come back" simply stops being true. Nothing errors, nobody is paged, and the
+// money stays where it is.
+check("⭐⭐ …and covers ub-withdraw-sweep, the UB exit's HOP 2 driver (silent failure if lost)",
+  gateTable.some((g) => g.functionName === "ub-withdraw-sweep" && g.expectedCron === "*/30 * * * *"),
+  gateTable.map((g) => g.functionName).join(", "));
 check("  …and still covers strong-read-watch",
   gateTable.some((g) => g.functionName === "strong-read-watch" && g.expectedCron === EXPECTED_CRON));
 

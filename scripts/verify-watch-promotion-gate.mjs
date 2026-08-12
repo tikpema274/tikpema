@@ -82,6 +82,19 @@ export const GUARDED_SCHEDULES = [
   // proof (its probe targets the DEPLOYED URLs), so commenting it out would buy nothing and only
   // risk a forgotten restore.
   { functionName: "dd-watch", expectedCron: "*/5 * * * *", draftMustBeCommented: false },
+  // 🚨🚨 THE HIGHEST-CONSEQUENCE ROW IN THIS TABLE. ub-withdraw-sweep drives HOP 2 of the
+  // unified-balance exit: without it, a user who asked for their money back has a clock
+  // running that NOTHING WILL EVER FINISH.
+  //
+  // ⭐ COMPARE THE FAILURE MODES. A forgotten dd-canary schedule means DD refuses — an
+  // availability cost, fail-closed, and loud. A forgotten ub-withdraw-sweep schedule means
+  // withdrawals silently never complete: the user was told "we complete this automatically,
+  // you do not need to come back", and that promise quietly stops being true. Nothing errors.
+  // Nobody is paged. The money simply stays where it is.
+  //
+  // ⚠️ It is NOT draftMustBeCommented — it is never HTTP-invoked during a proof, so commenting
+  // it out buys nothing and only risks the forgotten restore above.
+  { functionName: "ub-withdraw-sweep", expectedCron: "*/30 * * * *", draftMustBeCommented: false },
 ];
 
 /**

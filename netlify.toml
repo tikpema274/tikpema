@@ -36,6 +36,17 @@
   to = "/.netlify/functions/dd-analyze"
   status = 200
 
+# Unified Balance EXIT — the user reclaiming their own Gateway balance.
+# GET = their exit state + open withdrawals. POST = start the ~7 day delay.
+# ⭐ A RECLAIM, NOT A SPEND — same reasoning as agent-withdraw below, one layer up: those
+# controls bound what the AGENT may spend, and a paused agent must never trap the user's money.
+# No `to` param anywhere; withdraw(address) takes no beneficiary, so funds can only land in the
+# caller's own SCA.
+[[redirects]]
+  from = "/api/ub-withdraw"
+  to = "/.netlify/functions/ub-withdraw"
+  status = 200
+
 # Withdraw USDC from the caller's own agent wallet back to their own login wallet.
 # Destination is session-resolved (no `to` param). Deliberately NOT bound by the agent's
 # pause / day-ceiling / send-cap: those bound the agent, not the user reclaiming funds.
@@ -270,6 +281,25 @@
 # 🚨 NOT HTTP-invokable (Netlify 403s scheduled functions) and deliberately no /api route.
 [functions."bridge-mint-sweep"]
   schedule = "*/10 * * * *"
+
+# UB withdrawal sweeper — drives HOP 2 of the exit: the withdraw() call that lands a matured
+# Gateway balance back in the user's agent SCA.
+#
+# 🚨 THIS SCHEDULE IS WHAT MAKES THE EXIT AN EXIT. The exit is two on-chain calls ~7 days apart.
+# If the second required the user to come back and click, the design collapses into a clock
+# started that nobody finishes while the user believes they are leaving. On the bridge, "a user
+# who never comes back" was the EDGE case; for a WITHDRAWAL it is the ORDINARY one — someone
+# asking for their money back is, by definition, leaving.
+#
+# ⚠️ Every 30 min against a ~7 DAY delay, so the period only bounds how long a MATURED
+# withdrawal waits after maturing — minutes against a week. Sweeping harder buys nothing and
+# costs RPC on every tick for every open record.
+#
+# 🚨 NO AUTH GUARD, DELIBERATELY. Netlify 403s HTTP invocation of a scheduled function, and
+# dd-watch shipped a guard keyed on httpMethod on 2026-08-11 that REFUSED ITS OWN CRON for five
+# runs — nothing written, no error anywhere. A sweeper must never be able to refuse itself.
+[functions."ub-withdraw-sweep"]
+  schedule = "*/30 * * * *"
 
 # DD availability watch — is the PUBLIC DD SERVICE answering, on BOTH of its paths?
 #
