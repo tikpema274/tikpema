@@ -1,5 +1,181 @@
 ---
 
+## 2026-08-12 — THE REFUSAL WINDOW, THEN THE MONITOR. And the monitor's first live outage found three of its own bugs.
+
+**Two items off the post-exposure list. `dd-watch` is live on `*/5`, DD serving on both paths,
+production healthy.** Commits `f714bb9` · `90879f7` · `2d48790` · `59bff5d` · `edbbe11` · `e1b41a5` ·
+`9d2bc06`.
+
+### ⭐⭐ ITEM 1 — THE REFUSAL WINDOW: the health key was bound to the WRONG THING
+
+**Measured over the last 40 commits: 20 touched the stamped surface, only 2 touched DD, and
+18 WERE STAMP-DIRTY BUT DD-CLEAN.** Under deploy-id binding every one of those 18 rotated the health
+key and refused the public service for up to a canary period — an outage caused by bridge, research
+or agent work the canary's verdict says nothing about.
+
+🚨 **THE PREMISE IN THE CODE WAS WRONG, NOT JUST THE VALUE.** `health.mjs` argued a deploy id was
+*"the right binding, not merely the available one, because it changes on EVERY deploy."* **Changing
+on every deploy is the DEFECT.** "Distinguishing deploys" was never the job — distinguishing CODE is.
+Two deploys of byte-identical DD code deserve one verdict; we had already shipped tree `931f6666…`
+twice under two deploy ids and watched the key rotate for nothing.
+
+**The identity is now `ddCodeIdentity()` — a sha256 over the DD surface** (engine + facts + canary +
+the DD handlers + the two modules `dd-canary` imports), emitted as `ddTree` by `stamp-build.mjs`.
+
+* **BUILD TIME, NECESSARILY.** esbuild inlines `shared/` into each function, so the sources do not
+  exist at runtime and cannot be re-hashed there.
+* ⚠️ **THAT MAKES THE BUILD STAMP SAFETY-CRITICAL** — and that is not theoretical: see the outage below.
+* 🚨 **UNAVAILABLE ⇒ UNBOUND.** `null`, never a fallback, never the deploy id. **There is NO env
+  lever**: a variable that sets the code identity is `unknown === unknown` with a knob.
+  `DD_BUILD_ID`/`COMMIT_REF`/`DEPLOY_ID`/`BUILD_ID` are now ignored, asserted.
+* ⭐ **Content hashing absorbs dirtiness for free** — bytes on disk, not git state, so an uncommitted
+  DD edit earns its own key and its own canary run.
+
+⭐⭐ **PRODUCTION-PROVEN TWICE, ON TWO SEPARATE DD-CLEAN DEPLOYS.** Each time `tree` changed and
+`ddTree` did not, and the key read back **by exact string**:
+
+    tree   b4733fe9… → f31d1181… → 22b294b5…   CHANGED each time
+    ddTree 9773162902932b73…4015d               UNCHANGED, and the key never moved
+
+The first deploy after the change could not prove this — its fresh key was equally consistent with
+the fix working and with it doing nothing. **Only a DD-CLEAN deploy producing the SAME key is
+evidence**, and there have now been two.
+
+### ⚠️ THE REMEDY IT INVALIDATED — a live misleading instruction
+
+`dd-canary`'s rung-0 refusal told operators to *"set one of DD_BUILD_ID, COMMIT_REF, DEPLOY_ID,
+BUILD_ID"* — knobs that are now inert. **Following that mid-outage would have burned an operator's
+time on a disconnected lever.** It now names the build step, and the suite asserts the retired knobs
+do NOT appear in the remedy.
+
+### ITEM 2 — `dd-watch`: DD availability, both paths, every 5 minutes
+
+⭐ **THE PROBE IS FREE, WHICH IS WHAT MAKES THE CADENCE AFFORDABLE.** `dd-analyze`'s rungs are
+exposure(−1) → retrieve(−0.5) → HEALTH(0) → … → payment(6), so an unauthenticated POST can only reach
+the 402: never settles, never charges, needs no session. **402 = past the health rung, 503 =
+refusing.** The analyzer never runs, so the only per-probe cost is `subjectPreview`'s single
+`eth_getCode`.
+
+**BOTH PATHS, because divergence is its own event.** `/api/*` depends on a redirect that has been
+observed serving SPA HTML while the functions path answered. That was measured ONCE; polling both
+makes it a standing invariant. ⚠️ Differing `resource` between paths is **EXPECTED** (it binds to the
+URL hit); differing `payTo` or price is a **split-brain in the money path** and gets its own critical
+headline, never sharing one with "DD is refusing".
+
+**THE PROBE SUBJECT IS THE ZERO ADDRESS, chosen deliberately:** nobody holds the key so it can NEVER
+gain bytecode (any change in the preview is a real signal, not subject drift), it belongs to nobody
+(hitting a third party ~576×/day reads as surveillance), and it exercises the thin `hasCode:false`
+path. ⚠️ **Rejected: the delegate wallet an early draft used** — that is the wallet that BUYS.
+
+**THE PROBE IDENTIFIES ITSELF** (`user-agent` + `x-tikpema-monitor`). A `dd-analyze` invocation is one
+of the only signals a STRANGER touched DD; ~576 self-generated invocations a day would bury it.
+⚠️ A marked probe can never be mistaken for a **purchase** — a 402 ends the exchange — only for
+**interest**.
+
+**SEPARATE CHANNEL (`DD_WATCH_WEBHOOK` → "DD-service"), gated like the money channel** — shape, live
+existence GET, and a check that **FAILS** if the two fingerprints match. ⭐ The argument is not
+"different urgency": **MUTING IS PER-CHANNEL**, so a chatty DD alert sharing the money channel would
+train someone to mute the siren that matters.
+
+⭐ **GATE ROWS FOR THE CALIBRATION LEVERS LANDED BEFORE THE FIRST CALIBRATION RUN.** Proving an alert
+requires pointing the monitor at a broken target, and the act of proving it leaves the lever set — a
+monitor aimed at a fake target watches nothing while looking healthy. `DD_WATCH_URL_API`/`_FN` and
+`DD_WATCH_STORE` now gate production. Adding those rows afterwards would have left exactly one
+unwatched window: the calibration itself.
+
+### 🚨 THE MONITOR'S FIRST LIVE OUTAGE WAS NOT A DRILL — and it exposed three of its own bugs
+
+**A calibration lever made `/api` return `not-json`. But `functions: refusing` had NO LEVER ON IT.**
+That was a genuine production outage — `build-unresolved`, ~30 minutes — caught by a monitor live for
+under an hour. ⚠️ **And then it mishandled the ending.** Both halves belong here; the catch alone
+would be flattering and false.
+
+**Cause of the outage, and it is mine:** the commit step ran `npm run stamp:clear` **while a deploy
+was still bundling**. Netlify packages functions from `netlify/functions` + `shared` AT DEPLOY TIME,
+so it shipped a **nulled stamp** → no `ddTree` → unbound → refuse. ⭐ **That is exactly the
+safety-critical-stamp hazard written into `ddCodeIdentity` when it was built**, defeated by not
+treating "a deploy is in flight" as a reason to leave the stamp alone.
+⭐⭐ **IT FAILED CLOSED** — an unresolvable identity refused rather than serving unverified. Which is
+the entire point of `null`-not-placeholder, demonstrated by accident on production.
+
+**BUG A — THE MONITOR REFUSED ITS OWN CRON.** Five scheduled runs, store empty, no error anywhere.
+**Netlify delivers scheduled invocations WITH an `httpMethod`**, so the auth guard's `looksHttp` was
+true for the cron itself and every run returned 401 before probing. Durations gave it away: **23ms,
+when two HTTPS probes cannot finish under ~200ms.**
+⚠️ **THE WARNING FOR EXACTLY THIS WAS WRITTEN IN THAT BLOCK AT THE TIME.** Naming a failure mode is
+not the same as choosing a discriminator that avoids it. **Fixed by REMOVING the enforcement:** the
+platform 403s external HTTP on a scheduled function (measured), so no reachable external caller
+exists — the check's false-positive kills the monitor and its true-positive is unreachable.
+**A monitor must never be able to refuse itself.**
+
+**BUG B — NOTIFY BEFORE PERSIST.** A failed write would have left `prev` null, so every run would
+read `first-alert` and re-send **every 5 minutes forever** — and the reminder window built to prevent
+that firehose would never be consulted, because the state proving there was anything to remind about
+is what failed to persist. ⭐ **The same inversion `_dd-x402` already learned**, pointed at a webhook
+instead of a payment. Now: **write state → send → write outcome (best-effort)**.
+
+**BUG C — THE CLOSED SET POINTED THE WRONG WAY, AND THE STAND-DOWN LIED.**
+🚨 `reasons: ['stale']` produced **`alert: false`**. `stale` was not in the alert-worthy allow-list
+and was not `no-record`, so it fell through EVERY branch into **silence** — and `stale` is the canary
+having STOPPED WRITING. **DD refused for 25 minutes and the monitor never alerted for the right
+reason.** ⭐ The defect was the **DIRECTION OF THE ENUMERATION**: listing what alerts and letting
+everything else be quiet means any reason added later, or any typo, is silently unmonitored. Now
+inverted — **a refusal alerts unless it is specifically `no-record` inside grace** — so an
+unrecognised reason alerts. Pinned with an invented future reason so the rule cannot rot.
+🚨 And `decideNotify` transitioned on `alert` while the message claimed `ok`: it announced
+**"✅ DD RECOVERED — both paths serving again" WHILE BOTH PATHS WERE REFUSING.**
+⭐⭐ **A FALSE ALL-CLEAR IS WORSE THAN A MISSED ALERT: a missed alert leaves you looking, an all-clear
+tells you to STOP.** The stand-down now requires `ok`; a de-escalation that is still unhealthy says
+so in its own words and explicitly denies being a recovery.
+
+⭐ **ALL THREE WERE ABSENCES, NOT WRONG VALUES** — a run that did not happen, a write that did not
+land, an alert that did not fire. No suite was going to surface them; a real outage running through
+the whole state machine did.
+
+### ⭐ NOT FIRING ON ROUTINE WORK — the constraint that shaped the design
+
+A DD-code deploy legitimately rotates the health key, so `no-record` is CORRECT until the next canary
+tick. Paging on that would fire on **every** DD deploy by construction, and **an alert that fires
+predictably on routine work is one nobody reads** — already recorded here for the ack gate.
+⭐ **GRACE IS DERIVED FROM THE CANARY PERIOD (2 × `*/10`), never from the monitor's own `*/5`:**
+silent through t+20m, first alert at t+25m, after the canary has had 2½ chances to write.
+
+### WHAT IS PROVEN, AND WHAT IS NOT
+
+| claim | status |
+|---|---|
+| code-hash binding survives a DD-clean deploy | ✅ **MEASURED TWICE**, exact string |
+| monitor runs, both paths, `*/5` | ✅ live (durations 23ms → ~550ms once it stopped refusing itself) |
+| alert fires and DELIVERS to DD-service | ✅ live |
+| rate limiting | ✅ **MEASURED** — ~25 min in alert, exactly ONE message |
+| `steady-ok` (the state it lives in) | ✅ **read from `notify.kind`**, never from Discord being quiet |
+| a GENUINE `recovered` | 🚧 **UNPROVEN** — the only one that fired was the FALSE one |
+| `no-record-persisting` + always-real renderings | 🚧 **SUITE-ONLY** — the calibration exercised `not-json` |
+| **the post-deploy refusal window** | 🚧 **STILL UNMEASURED after five production deploys** |
+
+🚨 **`windowHistory`'s only entry (29.9 min) IS INDUCED** — a calibration lever plus the
+`build-unresolved` outage. It closed on a build predating the induced flag, so it defaulted to
+`false` and was **patched to `induced: true` with a self-explaining note**, because a wrong label in
+the data outlives any commentary about it. ⚠️ **It is NOT a refusal-window measurement.** The
+rotation window has never been captured — and the binding fix makes it **rarer by design**, since
+only DD-code deploys rotate the key now, so it may take a while to observe. That is the good kind of
+problem.
+
+⭐ **The `induced` label is DERIVED from `targets`, never remembered** — if either target differs from
+its default a lever is set — **and it carries forward**, because the lever is normally removed while
+the window is still open, which is how a calibration ends. Without carry-forward the CLOSING entry —
+the one with the duration on it — would be labelled real and would lie.
+
+### Suites
+
+`test:ddwatch` **83/0** · `test:dd` 17 suites (incl. `verify-dd-code-identity` 30/0) ·
+`test:watch` 212/0 · `test:probe` 71/0 · `gate:watch` exit 0.
+⚠️ `verify-build-binding` and `verify-canary-endpoint-binding` were **REWRITTEN, not deleted** — the
+latter is the only test that runs the real canary handler into the real endpoint handler through one
+store, i.e. the only one that could catch the two sides drifting apart.
+
+---
+
 ## 2026-08-11 (evening) — 🟢 DD IS LIVE ON PRODUCTION. The service is public, and three things changed character the moment it was.
 
 **Deploy `6a7b57501c0748c9f7711418`, commit `d030f30`, tree `931f6666…`, `verdict D / calibrated true
@@ -1170,14 +1346,15 @@ before. Read the amount off the 402, not from memory.
    both paths serve valid 402s, `resource` clean on `app.tikpema.xyz`, canonical =
    `/api/dd-analyze`. `--context all` never used.
    ⭐ **THE THREE THAT REPLACED IT, IN THIS ORDER — the ordering is the decision, not a list:**
-   1. 🚨 **THE REFUSAL WINDOW.** It changed character at exposure: **site-wide** (every deploy to this
-      site rotates the deploy id, so bridge/research/agent deploys all trigger it) and now
-      **public-facing**. Fail-closed, so it costs availability, never money. All four escapes are
-      closed — see the evening entry. **Its typical size is UNMEASURED**: the one production run
-      happened to land on a tick and never showed a 503.
-   2. 🚨 **A MONITOR — the service is LIVE AND UNWATCHED.** Until one exists, both an external sale
-      and an outage are invisible. Shape it like [[strong-read-watch-monitor]]: silence is the
-      healthy signal, liveness is a value advancing, never an alert arriving.
+   1. ✅ **THE REFUSAL WINDOW — ADDRESSED 2026-08-12.** The health key was bound to the DEPLOY ID, a
+      bad proxy for "this code": 18 of the last 20 stamp-dirty commits were DD-CLEAN, and each
+      rotated the key for nothing. Now a content hash of the DD surface (`ddTree`), **production-
+      proven twice on DD-clean deploys**. ⚠️ The window still exists for DD-CODE deploys and its
+      size is **STILL UNMEASURED after five production deploys** — but it is now rare by design.
+   2. ✅ **A MONITOR — `dd-watch` IS LIVE (2026-08-12).** `*/5`, both paths, own store, own channel.
+      Its first live outage was NOT a drill and found three of its own bugs. ⚠️ Two gaps remain: a
+      genuine `recovered` is unproven (the only one that fired was false), and the always-real alert
+      renderings are suite-only.
    3. **THE SUPERSESSION DOC — deliberately LAST.** It is the **LISTING** precondition and listing is
       not imminent, so nobody is verifying `tokenURI(851891)` yet; and being commit-scoped to
       `3e27042`, the frozen doc stays **honestly out-of-date rather than wrong**. ⚠️ Urgent the moment
