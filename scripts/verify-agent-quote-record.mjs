@@ -236,7 +236,7 @@ mock.module("../netlify/functions/_auth.mjs", {
   },
 });
 mock.module("../netlify/functions/_agent-wallets.mjs", {
-  namedExports: { ensureOwnerWallet: async () => ({ walletAddress: AGENT_WALLET }) },
+  namedExports: { WALLET_PROVISIONING_STATUS: 503, walletProvisioningRefusal: () => ({ error: "provisioning", reason: "wallet-provisioning", retryable: true, whatHappened: "nothing" }), ensureOwnerWallet: async () => ({ walletAddress: AGENT_WALLET }) },
 });
 mock.module("../netlify/functions/_actions.mjs", {
   namedExports: {

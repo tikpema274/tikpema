@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { connectBlobs } from "./_blobs.mjs";
 import { json } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
-import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
 import { readExitState, ubInitiateWithdrawal } from "./_ubwithdraw.mjs";
 import { createRecord, patchRecord, listByOwner, STATE } from "./_ubwithdraw-record.mjs";
 
@@ -65,38 +65,10 @@ export async function handler(event) {
   if (!session) return json(401, { error: "Authentication required" });
 
   const wallet = await ensureOwnerWallet(session);
-  // ═══ 🚨 503, NOT 202 — ONE STATUS CODE MUST NOT MEAN BOTH "retry freely" AND "you cannot undo
-  // this" ═══════════════════════════════════════════════════════════════════════════════════
-  // The repo-wide idiom returns 202 here. On THIS endpoint that collided with the 202 below,
-  // which means an IRREVERSIBLE ~7-day clock has started — so the two most different outcomes the
-  // endpoint has shared a status code, discriminated only by a `status` field in the body.
-  //
-  // ⭐ MEASURED COST, 2026-08-12: a provisioning 202 was read as a started withdrawal three times
-  // in one session. It sent the operator chasing a missing record and an unchanged balance for an
-  // hour, and the obvious "fix" for a 202-with-no-record is to POST AGAIN — which, had the first
-  // one been real, is a second clock on the same funds.
-  //
-  // ⚠️ 503 is deliberate and matches the balance-unreadable refusal below: both mean NOTHING
-  // HAPPENED and a retry is safe. 202 on this endpoint now means exactly one thing.
-  //
-  // ⚠️ CHANGED HERE ONLY. gateway-balance and my-wallet's callers branch on the CODE
-  // (useGatewayBalance.ts:51, useWallet.ts:313), so a repo-wide change breaks polling. This
-  // endpoint has no front-end caller, which is why it is safe to fix first.
-  // 🚧 The same collision exists on agent-send, agent-withdraw, agent-bridge, agent-act,
-  // job-bridge-approve and agent-ub-deposit, where the second 202 means a transaction is IN
-  // FLIGHT. There a mistaken retry is a DOUBLE SPEND, not a double clock. Not fixed here: those
-  // have live front-end callers and need their own change and proof.
-  if (wallet.pending) {
-    return json(503, {
-      error: "Your agent wallet is still being set up, so nothing has been started.",
-      reason: "wallet-provisioning",
-      retryable: true,
-      retryAfterSeconds: 15,
-      // ⭐ Say the safe thing explicitly. This is the response most likely to be misread as
-      // "something began", and the cost of that misreading is a duplicate withdrawal.
-      whatHappened: "nothing. No record was written and no funds moved. Retrying is safe.",
-    });
-  }
+  // ⭐ 503, NOT 202 — see walletProvisioningRefusal() in _agent-wallets.mjs for the full reasoning.
+  // One status code must not mean both "retry freely" and "you cannot undo this"; the 202 below
+  // means an IRREVERSIBLE ~7-day clock has started, and this one means nothing happened at all.
+  if (wallet.pending) return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   const owner = wallet.walletAddress;
 
   // ── GET: what can this caller see about their own exit? ────────────────────────────

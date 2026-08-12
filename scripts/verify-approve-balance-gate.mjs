@@ -22,7 +22,7 @@ const mkStore = (name) => {
 };
 mock.module("@netlify/blobs", { namedExports: { connectLambda: () => {}, getStore: mkStore } });
 mock.module("../netlify/functions/_auth.mjs", { namedExports: { requireSession: () => ({ address: OWNER, method: "metamask" }), internalToken: () => "t", requireInternal: () => true } });
-mock.module("../netlify/functions/_agent-wallets.mjs", { namedExports: { ensureOwnerWallet: async () => ({ walletAddress: OWNER, pending: false }) } });
+mock.module("../netlify/functions/_agent-wallets.mjs", { namedExports: { WALLET_PROVISIONING_STATUS: 503, walletProvisioningRefusal: () => ({ error: "provisioning", reason: "wallet-provisioning", retryable: true, whatHappened: "nothing" }), ensureOwnerWallet: async () => ({ walletAddress: OWNER, pending: false }) } });
 
 // ── the balance the pre-flight read returns (6-dp minor units) ──
 let balanceMinor = 0n;

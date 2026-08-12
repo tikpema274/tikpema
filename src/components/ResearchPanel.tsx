@@ -235,10 +235,12 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
                       }`
                     );
                   }
-                  if (r.status === 202 && data.status === "provisioning") {
-                    throw new Error(
-                      "Your agent wallet is still being set up — try again in a few seconds."
-                    );
+                  // ⭐ Provisioning is now 503 with `retryable: true` (walletProvisioningRefusal),
+                  // NOT 202 — 202 on this endpoint means a run STARTED. The old branch matched
+                  // `202 + status:"provisioning"` and would now never fire; a dead check that looks
+                  // like protection is worse than none, so it is replaced rather than left.
+                  if (r.status === 503 && data.reason === "wallet-provisioning") {
+                    throw new Error(data.error || "Your agent wallet is still being set up — try again in a few seconds.");
                   }
                   if (!r.ok || !data.runId) {
                     throw new Error(data.error || "Could not start the job");

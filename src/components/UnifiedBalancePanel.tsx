@@ -101,8 +101,10 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
       // was kicked off, so report and stop.
       if (!r.ok) throw new Error(d?.error || "Deposit failed");
       if (!d?.depositId) {
-        // 202 "provisioning" — the wallet mapping hasn't converged yet.
-        throw new Error(d?.message || "Your wallet is being set up — try again shortly.");
+        // ⚠️ NOT the provisioning case any more — that is now a 503 caught by `!r.ok` above, with
+        // its own message. This is the residual "2xx with no depositId" guard: a success-shaped
+        // response that names nothing to poll is not a started deposit.
+        throw new Error(d?.message || "The deposit did not start — nothing to track, so nothing moved.");
       }
 
       setFundStage("Depositing on-chain…");

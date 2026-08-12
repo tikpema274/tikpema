@@ -4,7 +4,7 @@ import { formatUnits } from "viem";
 import crypto from "node:crypto";
 import { json, parseBody, ubDepositMaxPerTxUsdc, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
-import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
 import { publicClient } from "./_predict.mjs";
 
 // POST /api/agent-ub-deposit { amountUsdc }  (auth)  →  202 { depositId }
@@ -101,7 +101,7 @@ export async function handler(event) {
   // The depositor: THIS session's own agent SCA. Provisioned on first touch.
   const wallet = await ensureOwnerWallet(session);
   if (wallet.pending) {
-    return json(202, { status: "provisioning", message: "Your wallet is being set up — retry shortly." });
+    return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   }
   const owner = wallet.walletAddress;
 

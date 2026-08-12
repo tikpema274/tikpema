@@ -4,7 +4,7 @@ import { json, parseBody } from "./_arc.mjs";
 import { executeAction } from "./_actions.mjs";
 import { resolveDestination } from "./_bridge.mjs";
 import { requireSession } from "./_auth.mjs";
-import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
 import { recordBridge } from "./_bridge-record.mjs";
 
 // POST /api/agent-bridge { amountUsdc, destination }  (auth required)
@@ -37,7 +37,7 @@ export async function handler(event) {
   // Resolve the caller's OWN agent wallet from the session (never client-supplied).
   const owner = await ensureOwnerWallet(session);
   if (owner.pending) {
-    return json(202, { status: "provisioning", message: "Your agent wallet is being set up — retry shortly." });
+    return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   }
   const walletAddress = owner.walletAddress;
 

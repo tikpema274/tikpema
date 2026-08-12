@@ -110,3 +110,36 @@ export async function ensureOwnerWallet(identity) {
 
   return { ...record, provisioned: true };
 }
+
+// ═══ 🚨 THE PROVISIONING REFUSAL — ONE BODY, SEVEN CALLERS ═══════════════════════════════════
+// `ensureOwnerWallet` can report `pending` on a first-login race. Endpoints used to answer that
+// with **202**, which on every money endpoint ALSO means "your transaction is in flight". Two
+// opposite meanings — "nothing happened, retry freely" and "retrying double-spends" — behind one
+// status code, discriminated only by a body field.
+//
+// ⭐ MEASURED 2026-08-12 on ub-withdraw: a provisioning 202 was read as a started withdrawal three
+// times in one session, costing ~2 hours. The obvious remedy for a 202-with-no-effect is to POST
+// AGAIN — which, against a REAL 202, is a duplicate money movement.
+//
+// ⭐⭐ AND IT WAS ALREADY WRONG IN THE CLIENT, NOT ONLY CONFUSING. 202 passes `res.ok`, so
+// agent-send, agent-withdraw, agent-bridge, agent-act and job-bridge-approve all handed this body
+// back to their callers AS A SUCCESSFUL RESULT. `sendFromAgent` returned `{status:"provisioning"}`
+// where a receipt belonged. The absence of a transaction was reading as a completed one — this
+// repo's recurring failure family, on the money path.
+//
+// ⭐ 503 IS THE HONEST CODE: transient, nothing happened, retry safe. It matches the
+// balance-unreadable refusals already in this codebase, and `!res.ok` makes every existing client
+// throw the message instead of silently succeeding.
+//
+// ⚠️ ONE DEFINITION ON PURPOSE. Seven copies of a constant is the duplicate-source-of-truth failure
+// this repo keeps meeting; a guard asserts every call site uses THIS.
+export const WALLET_PROVISIONING_STATUS = 503;
+export const walletProvisioningRefusal = () => ({
+  error: "Your agent wallet is still being set up, so nothing has been started.",
+  reason: "wallet-provisioning",
+  retryable: true,
+  retryAfterSeconds: 15,
+  // ⭐ State the safe fact explicitly. This is the response most likely to be misread as "something
+  // began", and the cost of that misreading is a duplicate payment.
+  whatHappened: "nothing. No funds moved and no job was started. Retrying is safe.",
+});

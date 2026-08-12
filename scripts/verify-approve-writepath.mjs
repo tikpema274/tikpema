@@ -37,7 +37,7 @@ mock.module("../netlify/functions/_auth.mjs", {
   namedExports: { requireSession: () => SESSION, internalToken: () => "test-internal" },
 });
 mock.module("../netlify/functions/_agent-wallets.mjs", {
-  namedExports: { ensureOwnerWallet: async () => ({ walletAddress: OWNER, pending: false }) },
+  namedExports: { WALLET_PROVISIONING_STATUS: 503, walletProvisioningRefusal: () => ({ error: "provisioning", reason: "wallet-provisioning", retryable: true, whatHappened: "nothing" }), ensureOwnerWallet: async () => ({ walletAddress: OWNER, pending: false }) },
 });
 
 // ── executeAction stub — the money path, replaced ────────────────────────────

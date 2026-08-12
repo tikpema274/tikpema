@@ -6,7 +6,7 @@ import { json, parseBody, bridgeCapUsdc, CONTRACTS, USDC_DECIMALS } from "./_arc
 import { executeAction } from "./_actions.mjs";
 import { resolveDestination } from "./_bridge.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
-import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
 import { publicClient } from "./_predict.mjs";
 
 const BALANCE_OF_ABI = [
@@ -118,7 +118,7 @@ export async function handler(event) {
   if (amount > cap) return json(409, { error: `proposal exceeds current per-bridge limit of ${cap} USDC`, cap });
 
   const owner = await ensureOwnerWallet(session);
-  if (owner.pending) return json(202, { status: "provisioning", message: "Your agent wallet is being set up — retry shortly." });
+  if (owner.pending) return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   const walletAddress = owner.walletAddress;
 
   // ── PRE-FLIGHT BALANCE GATE — runs BEFORE the lock and BEFORE any burn is submitted. ──

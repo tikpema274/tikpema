@@ -14,7 +14,7 @@ import { formatUnits } from "viem";
 import crypto from "node:crypto";
 import { json, parseBody, CONTRACTS, USDC_DECIMALS, sendCapUsdc } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
-import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
 import { assertNotPaused } from "./_pause.mjs";
 import { AGENT } from "./_agents.mjs";
 import { publicClient } from "./_predict.mjs";
@@ -59,10 +59,7 @@ export async function handler(event) {
   // NEVER the shared env wallet.
   const wallet = await ensureOwnerWallet(session);
   if (wallet.pending) {
-    return json(202, {
-      status: "provisioning",
-      message: "Your agent wallet is being set up — retry shortly.",
-    });
+    return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   }
   const walletAddress = wallet.walletAddress;
 

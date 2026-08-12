@@ -5,7 +5,7 @@ import { SWAP_TOKENS } from "./_swap.mjs";
 import { executeAction, valueOfStep } from "./_actions.mjs";
 import { resolveDestination, bridgeFee, SUPPORTED_DESTINATION_LABELS, bridgeFeeBand, bridgeAckToken } from "./_bridge.mjs";
 import { requireSession } from "./_auth.mjs";
-import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
 import { budgetConfig } from "./_budget.mjs";
 import { mintQuoteId, recordQuoteNeverThrows } from "./_quote-record.mjs";
 
@@ -106,7 +106,7 @@ export async function handler(event) {
   // never the shared env wallet). Actions run on THIS wallet.
   const owner = await ensureOwnerWallet(session);
   if (owner.pending) {
-    return json(202, { status: "provisioning", message: "Your agent wallet is being set up — retry shortly." });
+    return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   }
   const walletAddress = owner.walletAddress;
   // ctx passed to executeAction: session enables per-user guardrails (block pay,

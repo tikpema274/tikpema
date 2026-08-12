@@ -60,7 +60,7 @@ import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody, ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { requireSession } from "./_auth.mjs";
-import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
 import { publicClient } from "./_predict.mjs";
 
 const BALANCE_OF_ABI = [
@@ -95,7 +95,7 @@ export async function handler(event) {
   // The SOURCE — the caller's own agent wallet, also server-resolved.
   const wallet = await ensureOwnerWallet(session);
   if (wallet.pending) {
-    return json(202, { status: "provisioning", message: "Your agent wallet is being set up — retry shortly." });
+    return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   }
   const walletAddress = wallet.walletAddress;
 
