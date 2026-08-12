@@ -157,6 +157,86 @@ Mitigations only: `gate:watch` guards the schedule (**the highest-consequence ro
 whether to build that watcher — or point `dd-watch`/`strong-read-watch` at the heartbeat — is the
 last structural gap in this feature and is OPEN.
 
+### ✅ 1 USDC WITHDRAWAL INITIATED 2026-08-12 20:49Z — the exit has been used, end to end.
+
+```
+owner          0x058957deff333c47c15c208a4425420af6947f9e   ⚠️ NOT 0x3cb76ac6… (see below)
+withdrawalId   16be509f-b3fd-467e-8d2e-b68159b9ffe0
+txHash         0x79d06776caeb5c33f90c33605b8bbe91e2c43cc775cdfb53cc0c2e57a3150899
+amount         1000000 atomic (1.000000 USDC)
+MATURES        2026-08-19T23:13:09.662Z   ← the date to come back for
+```
+
+**FOUR VERIFICATIONS, none trusting the endpoint's own claim:**
+
+| # | check | result |
+|---|---|---|
+| 1 | **tx on Arc** (needs nothing from Netlify) | receipt `success`, block `56671240`; **the GATEWAY emitted `log[1]`**; callData carries `0xc8393ba9` + the Gateway + the SCA + `0xf4240` |
+| 2 | **record, direct key read** | `state: waiting`, `initiateTxHash` identical to the chain hash, `amountAtomic 1000000`, `delayBlocks 1209600` |
+| 3 | **balance** | `2510000 → 1510000` atomic — **delta exactly 1000000** |
+| 4 | **sweeper** `21:00:48` | `scanned=1 open=1 waiting=1 failed=0`; heartbeat `open` 0 → **1** |
+
+⚠️ `to` on the receipt is the **ERC-4337 EntryPoint** (`0x5ff137d4…`, selector `0x1fad948c` = `handleOps`),
+NOT the Gateway. That is correct for a Circle SCA and it read as a red flag first time. The proof the
+Gateway ran is that it **emitted a log**, not that it was the `to`.
+
+### 🚨 WHAT THIS RUN COST, AND THE TWO RULES THAT CAME OUT OF IT
+
+Roughly two hours were spent verifying withdrawals that had never started. Three separate causes,
+each of which produced a "202" the operator reported in good faith:
+
+1. **A provisioning 202** (`20:02:34`) — `ensureOwnerWallet` returns `202 {status:"provisioning"}`,
+   which shares a code with `202 {status:"started"}`. **FIXED — see below.**
+2. **A 401 read off the wrong console line** (`20:47:55`, 4.85 ms) — an expired session, 73 s before
+   the real call.
+3. **A deploy-preview session** — which also made the CLI's PRODUCTION-scoped logs void as evidence,
+   and pointed the chain read at the WRONG SCA for an hour.
+
+⭐⭐ **RULE 1 — RESPONSE DURATION IS A CHEAP AUTHENTICITY CHECK ON A CLAIMED ACTION.** A real
+initiation must do a chain read, a blob write, a Circle execution and `waitForTx` polling. The
+measurements are unambiguous:
+
+```
+  4.85 ms   401, expired session
+244.24 ms   202 provisioning
+3325.51 ms  ⭐ 202 STARTED — the only one that did any work
+```
+
+Anything claiming an on-chain action back in double-digit milliseconds did not perform one. This is
+free, needs no ids, and would have collapsed every false round in seconds.
+
+⭐⭐ **RULE 2 — PAIR IT WITH A RUN MARKER.** `RUN-<epoch>` printed on the same line as the status
+binds a claim to ONE invocation. **The marker says WHICH call; the duration says whether it did any
+work.** Every wasted round came from comparing a bare status code against artifacts with no way to
+tell which call produced it.
+
+⚠️ **AND: A PRODUCTION-SCOPED INSTRUMENT SAYS NOTHING ABOUT A PREVIEW.** `netlify logs` cannot scope
+to a deploy preview. Reading them UNFILTERED does not help when the SCOPE is wrong — confirm the
+origin (`location.origin`) before treating any prod-side read as evidence. Blobs, by contrast, are
+SITE-scoped, so a preview write does land in the same store; that instrument survived.
+
+### ✅ FIXED: the overloaded 202 on ub-withdraw
+
+`202 {status:"provisioning"}` → **`503 {reason:"wallet-provisioning", retryable:true}`**, so the
+STATUS CODE alone separates "nothing happened, retry freely" from "an irreversible ~7-day clock is
+running". Same class as the balance-unreadable refusal, which already returns 503.
+Guard: `scripts/verify-ub-withdraw-status-codes.mjs` 6/0, mutation-tested (restoring the 202 → 4 red).
+
+🚧 **THE SAME COLLISION IS LIVE ON SIX MONEY PATHS AND IS WORSE THERE** — `agent-send:114`,
+`agent-withdraw:152`, `agent-bridge:77`, `agent-act:541`, `job-bridge-approve:203`,
+`agent-ub-deposit:163` all return 202 for provisioning AND for a transaction **IN FLIGHT**. A
+mistaken retry there is a **DOUBLE SPEND**, not a double clock. NOT fixed: the front end branches on
+the CODE in both directions (`useGatewayBalance.ts:51` and `useWallet.ts:313` read 202 as
+provisioning; `approveProposal.ts:44` reads it as success), so this needs its own change and proof.
+
+🚧 **`ensureOwnerWallet` WENT READY → PENDING** between the `19:59:46` GET (resolved an owner) and
+the `20:02:34` POST (reported provisioning). Backwards, and both were cold starts. It failed safe
+here, but the same helper gates every money endpoint above and may not fail as safely elsewhere.
+
+🚧 **THERE IS STILL NO UI PATH.** `grep -rn "ub-withdraw" src/` returns NOTHING. The panel says
+"Exit built · about seven days" to a user with no button. An exit reachable only from a devtools
+console is not an exit for the person whose money it is — the original problem moved one layer down.
+
 ### NEXT, IN ORDER
 
 1. ✅ DONE — deploy published `7f5d5de`, heartbeat appeared, calibration ran and cleaned up.
