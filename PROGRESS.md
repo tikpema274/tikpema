@@ -33,7 +33,30 @@ Plus the chain: `availableBalance` is still **2 USDC**; an initiation would have
 ⚠️ **Same inference-recorded-as-observation shape as the ack anomaly.** Do not reopen this without
 new evidence; re-deriving it cost a full round trip.
 
-### 🚧 THE CALIBRATION — UNSTARTED. Read all five steps before beginning.
+### 🟡 THE CALIBRATION — STEP 2 DONE, RECORD IS LIVE IN THE STORE. RESUME AT STEP 3.
+
+🚨 **A SYNTHETIC RECORD IS SITTING IN PRODUCTION RIGHT NOW AND MUST BE DELETED.**
+
+    store  ub-withdrawals
+    key    o/0x000000000000000000000000000000000000dead/calibration-1786550171
+    state  waiting · overdueAlerted false · maturesApprox 2026-08-11T15:56:11Z (24h past, grace 6h)
+
+**Written 2026-08-12 ~15:56Z**, deliberately split from the rest so the session did not end between
+"record written" and "record deleted". Production is on `7f5d5de` (alerting live), verified.
+
+**RESUME HERE:**
+3. Wait for a `*/30` sweeper tick (`netlify logs --source functions | grep ub-withdraw-sweep`);
+   expect `overdue=1` in its body.
+4. Confirm `overdueAlerted: true` on the record, AND have a human eyeball the message in the MONEY
+   channel (`WATCH_ALERT_WEBHOOK`, "Spidey Bot") — `delivered` only proves Discord accepted the POST.
+5. 🚨 **DELETE THE RECORD:** `netlify blobs:delete ub-withdrawals "o/0x0000…dead/calibration-1786550171"`
+   then confirm the store is EMPTY again.
+
+⭐ Safety re-verified before writing: the burn address has 0.05 USDC in the Gateway but **withdrawable
+is 0**, so `ubCompleteWithdrawal` returns `not-yet-matured` and never reaches a chain write — and it
+is not a Circle wallet we can sign for, so it cannot become withdrawable.
+
+### (original procedure, for reference) — the calibration as designed
 
 The overdue alert fires only when a record is past maturity **+ 6h grace**, which cannot occur
 naturally for ≥7 days. So it is **suite-proven only**, and the first time it would ever run for real
