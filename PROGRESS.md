@@ -9,11 +9,11 @@ because that procedure ends in a cleanup step that a context-exhausted session w
 
 | thing | value |
 |---|---|
-| HEAD / origin | `7f5d5de` — in sync, working tree clean but for untracked `dd-service.DRAFT.json` |
-| production | `d71022c` → **deploy of `7f5d5de` was IN FLIGHT** (launched 15:32:01Z). Confirm what actually published before trusting anything below. |
+| HEAD / origin | in sync; working tree clean but for untracked `dd-service.DRAFT.json` |
+| production | ✅ **`7f5d5de`** — published 15:50:39Z (deploy `6a7c91fcf9f1`). Alerting IS live. |
+| `ub-withdrawals` store | ✅ **only `heartbeat`** — the calibration record was deleted and witnessed |
 | chain (test SCA `0x3cb76ac6…`) | **2.000000 USDC available, 0 withdrawable** |
-| `ub-withdrawals` store | **EMPTY** |
-| sweeper | live, `*/30`, last seen reporting `clean — scanned=0 open=0` |
+| sweeper | ✅ live on `*/30`, last tick `16:31:03` reporting `clean — scanned=0 open=0` |
 | suites | `verify-ub-withdraw` 24/0 · `test:copy` 23/0 · `test:watch` 213/0 · `test:dd` green |
 
 ### ✅ RESOLVED — `4f2a1c8e-…` DOES NOT EXIST. NO CLOCK IS RUNNING.
@@ -33,28 +33,35 @@ Plus the chain: `availableBalance` is still **2 USDC**; an initiation would have
 ⚠️ **Same inference-recorded-as-observation shape as the ack anomaly.** Do not reopen this without
 new evidence; re-deriving it cost a full round trip.
 
-### 🟡 THE CALIBRATION — STEP 2 DONE, RECORD IS LIVE IN THE STORE. RESUME AT STEP 3.
+### ✅ THE CALIBRATION IS COMPLETE — the overdue-alert branch has EXECUTED, and the store is clean.
 
-🚨 **A SYNTHETIC RECORD IS SITTING IN PRODUCTION RIGHT NOW AND MUST BE DELETED.**
+**Ran 2026-08-12 15:56Z → 16:31Z, deliberately SPLIT across sessions** so no session ended between
+"record written" and "record deleted". Production was verified on `7f5d5de` first — a record swept by
+the older build would have proved nothing.
 
-    store  ub-withdrawals
-    key    o/0x000000000000000000000000000000000000dead/calibration-1786550171
-    state  waiting · overdueAlerted false · maturesApprox 2026-08-11T15:56:11Z (24h past, grace 6h)
+| step | evidence |
+|---|---|
+| synthetic record written | `o/0x0000…dead/calibration-1786550171`, 24h past maturity vs a 6h grace |
+| sweeper saw it | `16:01:02 scanned=1 open=1 waiting=1 failed=0` |
+| ⭐⭐ **alert fired and DELIVERED** | `overdueAlerted:true`, `lastAlertedAt 16:01:04`, `lastError:null` |
+| message visible in the money channel | ✅ **confirmed by a human** — `lastAlertedAt` only proves Discord returned 2xx |
+| record deleted | `blobs:get` → "does not exist" |
+| ⭐ **witness** | heartbeat `16:31:03 {"open":0,"totalKeys":0}` + `clean — scanned=0 open=0` |
 
-**Written 2026-08-12 ~15:56Z**, deliberately split from the rest so the session did not end between
-"record written" and "record deleted". Production is on `7f5d5de` (alerting live), verified.
+⭐ **THE OVERDUE BRANCH IS NO LONGER SUITE-ONLY.** It has run against the real webhook, so its first
+real firing will not be the day someone's money is genuinely stuck — the same first-success-branch
+gap the DD alert path had, closed BEFORE it mattered rather than after.
 
-**RESUME HERE:**
-3. Wait for a `*/30` sweeper tick (`netlify logs --source functions | grep ub-withdraw-sweep`);
-   expect `overdue=1` in its body.
-4. Confirm `overdueAlerted: true` on the record, AND have a human eyeball the message in the MONEY
-   channel (`WATCH_ALERT_WEBHOOK`, "Spidey Bot") — `delivered` only proves Discord accepted the POST.
-5. 🚨 **DELETE THE RECORD:** `netlify blobs:delete ub-withdrawals "o/0x0000…dead/calibration-1786550171"`
-   then confirm the store is EMPTY again.
+⭐ **THE DISCRIMINATOR HELD UNDER REAL CONDITIONS:** the same tick reported `waiting=1 failed=0` AND
+judged the record overdue. The alert came from TIME PAST MATURITY, not from a completion failure —
+had those been coupled, `failed` would have been 1.
 
-⭐ Safety re-verified before writing: the burn address has 0.05 USDC in the Gateway but **withdrawable
-is 0**, so `ubCompleteWithdrawal` returns `not-yet-matured` and never reaches a chain write — and it
-is not a Circle wallet we can sign for, so it cannot become withdrawable.
+⭐ **THE HEARTBEAT EARNED ITSELF TWICE:** its first appearance proved the new build's sweeper was
+live (it does not exist in `d71022c`), and its `open:0` proved the cleanup — the sweeper's OWN
+account from a separate process, not the delete command repeating its own claim.
+
+⚠️ **NOTHING IS OUTSTANDING FROM THIS PROCEDURE.** The store holds only `heartbeat`. If a
+`calibration-*` key ever reappears, it is from a NEW run, not this one.
 
 ### (original procedure, for reference) — the calibration as designed
 
@@ -152,10 +159,9 @@ last structural gap in this feature and is OPEN.
 
 ### NEXT, IN ORDER
 
-1. Confirm what the in-flight deploy published; confirm the heartbeat appears.
-2. **Run the calibration above — including step 5.**
-3. Decide the independent watcher for the heartbeat.
-4. **Then** initiate 1 USDC (operator-run; the endpoint needs a browser session and manufacturing one
+1. ✅ DONE — deploy published `7f5d5de`, heartbeat appeared, calibration ran and cleaned up.
+2. **Decide the independent watcher for the heartbeat** (the last structural gap — see above).
+3. **Then** initiate 1 USDC (operator-run; the endpoint needs a browser session and manufacturing one
    is ruled out). Verify: chain 2→1, a record in `waiting` with an `initiateTxHash`, sweeper reporting
    `open=1`. ⭐ **Completion can only be confirmed ~7 days later** — the first thing here whose proof
    takes a week, and the first real test that a `*/30` schedule survives that long.
