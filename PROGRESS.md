@@ -1,5 +1,61 @@
 ---
 
+## 2026-08-12 — UNIFIED BALANCE EXIT: the capability is VERIFIED. 🚨 THE DECISION IS DUE, AND IT IS NOT AN ENGINEERING ONE.
+
+**Read-only probe. NO state changed, nothing signed, nothing broadcast.** `eth_call` simulates
+execution without touching the chain, which is what makes a capability answerable for free.
+
+### WHAT IS NOW VERIFIED (was selector-presence only, since 2026-07-31)
+
+| question | answer |
+|---|---|
+| Gateway proxy resolves to the same impl as July? | ✅ `0xa33d52b4…`, 22,818 bytes, **unchanged** |
+| withdraw path present? | ✅ `initiateWithdrawal` `c8393ba9` · `withdraw` `51cff8d9` · `withdrawableBalance` `3bbe1ecd` |
+| would `initiateWithdrawal` revert from our SCA? | ⭐⭐ **NO — simulated, would succeed** |
+| can `execute()` drive it? | ⭐⭐ **YES**, and **a random EOA is REFUSED** |
+| permission module blocking it? | ✅ `getInstalledPlugins()` → **empty**; no selector allowlist |
+| the wait | ⚠️ **1,209,600 BLOCKS ≈ 7.1 days** |
+
+⭐ **THE RANDOM-EOA REFUSAL IS THE LOAD-BEARING CONTROL.** Without it, "would succeed" could just mean
+simulation is permissive. Authorisation is genuinely enforced and the owning account passes it.
+
+⚠️ **`removeFund` IS ABSENT FROM THE CONTRACT** — it is the SDK name and calls `withdraw()`.
+Selector-checking the SDK name yields a confident FALSE NEGATIVE. (Recorded before; re-confirmed.)
+⚠️ **`getOwners()`/`entryPoint()` REVERT** on this impl, so the owner cannot be enumerated on-chain;
+control comes from the Circle wallet model (`createWallets({accountType:"SCA"})`), not a chain read.
+⚠️ **`withdrawalDelay` is BLOCKS, not seconds.** `1209600 = 14 × 86400` is a COINCIDENCE. The ~7.1
+days is DERIVED from measured block time (0.5097 s/block), so copy must say **"about seven days"**.
+
+🚧 **THE REMAINING INFERENCE, STATED:** `eth_call` sets the sender WITHOUT a signature. This proves
+the CONTRACT would accept the call from that address; it does NOT prove Circle's signer will produce
+a valid userOp for it. That closes only by executing one, which moves real money.
+
+### 🚨 THE DECISION IS DUE — AND IT IS NOT ENGINEERING'S TO MAKE
+
+**The probe is done; the decision is not.** Do not read "capability verified" as "path chosen".
+Three honest options:
+
+* **(a) BUILD IT.** Two calls, ~7 days apart, **with the wait disclosed BEFORE deposit** — not at
+  withdrawal time, which is the same copy trap already fixed once on this page.
+* **(b) DON'T BUILD IT, AND SAY SO PLAINLY.** Which is what the corrected copy already does.
+* **(c) BUILD ONLY `initiateWithdrawal`**, disclosing that completion needs a second step.
+
+🚨 **(c) IS THE TRAP AND SHOULD BE REJECTED ON SIGHT. A half-built exit that starts a clock nobody
+finishes is WORSE THAN NO EXIT, because the user believes they are leaving.** An exit that exists
+only up to the point of commitment is not an exit; it is a delay with a UI.
+
+⭐⭐ **THE MAINNET FRAME DECIDES IT.** On testnet (b) is defensible — the money is play money and the
+copy is honest. **With REAL USER MONEY, a pocket with no exit that the user was TOLD about is still a
+pocket with no exit.** Disclosure changes who is culpable; it does not change what the user can do.
+**Whether we are willing to ship that is the actual question, and it is the operator's to answer, not
+an engineering one.** ⚠️ Mainnet is **2026-09-16**.
+
+⚠️ **AND THE ASYMMETRY IS WHY THIS OUTRANKS THE DD BACKLOG:** every DD failure this week was
+fail-closed and cost AVAILABILITY. This is the only open item where being wrong costs **someone else
+their funds**.
+
+---
+
 ## 2026-08-12 (later) — ✅ DD THREAD CLOSED. Alert path proven live end to end; three more monitor bugs found while proving it.
 
 **Commits `9317cdf` · `b93d071` · `6679d99`. Production `6679d99`.** DD live, monitored, paid twice on
@@ -1450,11 +1506,15 @@ before. Read the amount off the 402, not from memory.
       store, own channel. **Every transition observed live**, including a genuine `recovered` and the
       `induced` carry-forward. ⚠️ Residual: the always-real alert RENDERINGS are suite-only, and both
       `windowHistory` entries are induced.
-   3. 🚨 **⭐⭐ THE UNIFIED BALANCE HAS NO EXIT PATH — NOTHING BUILT, MAINNET 2026-09-16.** Real user
-      money with no way out. Copy corrected (`eb459a1`) and `removeFund` confirmed REACHABLE, but
-      `withdraw()` has never been exercised and no code exists. ⭐ **THIS OUTRANKS EVERYTHING ELSE:
-      it is the only open item where being wrong costs SOMEONE ELSE something** — every DD failure
-      this week was fail-closed and cost availability, not funds.
+   3. 🚨 **⭐⭐ UNIFIED BALANCE EXIT — CAPABILITY VERIFIED 2026-08-12, DECISION DUE. MAINNET 09-16.**
+      `initiateWithdrawal` would SUCCEED from our SCA (simulated), `execute()` drives it, a random
+      EOA is REFUSED, no permission module. ⚠️ The wait is **~7.1 days** (1,209,600 BLOCKS).
+      🚨 **THE PROBE IS DONE; THE DECISION IS NOT** — (a) build it with the wait disclosed BEFORE
+      deposit, (b) don'''t build it and say so plainly, or (c) build only the first half.
+      **(c) IS THE TRAP: a half-built exit that starts a clock nobody finishes is worse than no exit,
+      because the user believes they are leaving.** ⭐ On testnet (b) is defensible; with REAL money a
+      disclosed pocket with no exit is still a pocket with no exit. **Operator'''s call, not
+      engineering'''s.**
    3. **THE SUPERSESSION DOC — deliberately LAST.** It is the **LISTING** precondition and listing is
       not imminent, so nobody is verifying `tokenURI(851891)` yet; and being commit-scoped to
       `3e27042`, the frozen doc stays **honestly out-of-date rather than wrong**. ⚠️ Urgent the moment
