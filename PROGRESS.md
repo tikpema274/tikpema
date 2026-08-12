@@ -1,5 +1,144 @@
 ---
 
+## 🔻 HANDOFF — UB EXIT. Written 2026-08-12 ~15:40Z, mid-deploy, before an UNSTARTED calibration.
+
+⚠️ **START HERE for the unified-balance exit.** Written deliberately before the calibration below,
+because that procedure ends in a cleanup step that a context-exhausted session would drop.
+
+### STATE AT HANDOFF
+
+| thing | value |
+|---|---|
+| HEAD / origin | `7f5d5de` — in sync, working tree clean but for untracked `dd-service.DRAFT.json` |
+| production | `d71022c` → **deploy of `7f5d5de` was IN FLIGHT** (launched 15:32:01Z). Confirm what actually published before trusting anything below. |
+| chain (test SCA `0x3cb76ac6…`) | **2.000000 USDC available, 0 withdrawable** |
+| `ub-withdrawals` store | **EMPTY** |
+| sweeper | live, `*/30`, last seen reporting `clean — scanned=0 open=0` |
+| suites | `verify-ub-withdraw` 24/0 · `test:copy` 23/0 · `test:watch` 213/0 · `test:dd` green |
+
+### ✅ RESOLVED — `4f2a1c8e-…` DOES NOT EXIST. NO CLOCK IS RUNNING.
+
+A withdrawal with that id was believed to have been initiated. **It was not.** Five independent
+checks, and the last is decisive on its own:
+
+1. `ub-withdrawals` listed unfiltered → **empty**
+2. grep for `4f2a1c8e` across all keys → **no match**
+3. instrument validated — `blobs:list` shows `dd-watch`'s keys, so the empty listing is meaningful
+4. `/api/ub-withdraw` invocations, all time → **exactly two**, both at 14:44:38/39Z, both my own
+   unauthenticated 401 probes
+5. ⭐ **THE ROUTE DID NOT EXIST UNTIL 14:43:45Z.** Any 202 from it before that is impossible — an
+   unmatched path on this site returns SPA HTML.
+
+Plus the chain: `availableBalance` is still **2 USDC**; an initiation would have left 1.
+⚠️ **Same inference-recorded-as-observation shape as the ack anomaly.** Do not reopen this without
+new evidence; re-deriving it cost a full round trip.
+
+### 🚧 THE CALIBRATION — UNSTARTED. Read all five steps before beginning.
+
+The overdue alert fires only when a record is past maturity **+ 6h grace**, which cannot occur
+naturally for ≥7 days. So it is **suite-proven only**, and the first time it would ever run for real
+is the day someone's money is genuinely stuck — the worst moment to discover a typo in the webhook
+call. Same first-success-branch problem as the DD alert path, which needed a deliberate calibration.
+
+**Preconditions:** production must be running `7f5d5de` or later (the alerting is NOT in `d71022c`).
+
+**The synthetic record** — write directly into the `ub-withdrawals` store:
+
+    key           o/0x000000000000000000000000000000000000dead/calibration-<epoch>
+    owner         0x000000000000000000000000000000000000dEaD   ← burn address
+    withdrawalId  calibration-<epoch>                          ← NOT a UUID, unmistakable
+    amountUsdc    "0"
+    state         "waiting"
+    maturesApprox <now − 24h>                                  ← well past the 6h grace
+    schema        "ub-withdrawal/1"
+
+⭐ **WHY A SYNTHETIC OWNER IS LOAD-BEARING.** The sweeper calls `ubCompleteWithdrawal(owner)` on every
+open record BEFORE the overdue check. With the burn address, `readExitState` returns zero withdrawable
+⇒ `not-yet-matured` ⇒ **no chain write at all**. The real test SCA would also be safe *today* (its
+withdrawable is 0) but only by luck of current state; this is safe **by construction**.
+
+**Steps:** 1. confirm prod ≥ `7f5d5de` · 2. write the record · 3. wait ≤30 min for a tick ·
+4. confirm `overdueAlerted: true` AND have a human eyeball the message ·
+5. 🚨 **DELETE THE RECORD.**
+
+🚨 **STEP 5 IS THE ONE THAT GETS DROPPED.** If the store contains any `calibration-*` key, the
+cleanup did not happen — delete it. Leaving it pollutes the store and misleads the next reader.
+⚠️ The alert goes to **`WATCH_ALERT_WEBHOOK`** (the MONEY channel, "Spidey Bot"), not the DD one, so
+a test message lands in the channel that guards the kill switch. Deliberate — this is user funds —
+but say so before anyone sees it.
+
+### THE EXIT — what is built, and what is still inference
+
+**Three hops:** `initiateWithdrawal` → ~1,209,600 BLOCKS (**≈7.1 days**, DERIVED at 0.5097 s/block;
+`1209600 = 14 × 86400` is a COINCIDENCE) → `withdraw()` lands funds **in the SCA** → `agent-withdraw`
+(pre-existing) returns them to the login wallet.
+
+✅ **VERIFIED READ-ONLY:** Gateway impl unchanged (`0xa33d52b4…`, 22,818 bytes); `initiateWithdrawal`
+simulated from our SCA **would succeed**; `execute()` drives it and **a random EOA is REFUSED** (the
+load-bearing control — without it, "would succeed" could just mean simulation is permissive);
+`getInstalledPlugins()` empty ⇒ no permission module. `readExitState` live-verified against chain.
+
+🚧 **STILL INFERENCE — DO NOT PROMOTE:**
+* ⚠️ **`eth_call` with `account:` sets the sender WITHOUT a signature.** It proves the CONTRACT would
+  accept the call from that address. It does **NOT** prove Circle's signer produces a valid userOp.
+  **That closes only by executing one.**
+* 🚧 **The WRITE paths have never run with real funds** — `initiateWithdrawal` and `withdraw` both.
+* 🚧 The sweeper has never completed a real withdrawal; every branch is injection-proven.
+* ⚠️ **No cancel path found** (`cancelWithdrawal`/`abortWithdrawal`/`revokeWithdrawal` all absent) —
+  so treat initiating as COMMITTING. **Absence is evidence about those NAMES only.**
+* ⭐ **Initiate 1 USDC, not 2**: if the path is wrong you have committed half the balance to a week's
+  wait and retain 1 to retry with.
+
+### ⚠️ THE SWEEPER DECISION — recorded because it is a judgement, not a mechanism
+
+**Hop 2 runs UNATTENDED, ~7 days after the request, with no human at the moment of movement.** This
+is the first thing in this system that moves user funds with nobody present.
+
+⭐ **IT WAS THE ONLY WAY TO GET OPTION (a) RATHER THAN (c).** "The user comes back in a week and
+clicks" is a half-built exit wearing a nicer face: a clock started that nobody finishes while the
+user believes they are leaving. On the bridge, "a user who never comes back" was the EDGE case; for a
+WITHDRAWAL it is the ORDINARY one — someone asking for their money back is, by definition, leaving.
+
+⭐⭐ **THE BOUNDS ARE LOAD-BEARING AND MUST NOT BE RELAXED.** The guarantee is **absence of
+mechanism**: the sweeper can only call `withdraw(token)` for an owner who ALREADY initiated; it takes
+**no amount** (the contract decides what matured); and `withdraw` pays **`msg.sender`** — the user's
+own SCA. There is no code path in that function that can move money anywhere else. **Adding an
+amount parameter or a destination would turn a bounded automation into an unbounded one.**
+
+### ALERTING + `maturesApprox` — built `7f5d5de`, deployed only if that deploy landed
+
+* Alerts when a record is **past maturity + 6h grace** and still open → **`WATCH_ALERT_WEBHOOK`**.
+* ⭐ **The discriminator is TIME PAST MATURITY, never "completion failed."** A failed tick is normal
+  (RPC blips, Circle 500s, and the contract refuses a premature withdraw); paging on it would fire
+  every 30 min through a healthy week — the ack-gate failure.
+* ⭐ **Unknown maturity ≠ expired**: no `maturesApprox` ⇒ never overdue, so a legacy record cannot page.
+* ⭐ `maturesApprox` is **written at creation**, returned by the front door and quoted in the alert —
+  "recompute it from `createdAt + delayBlocks`" is what nobody does a week later.
+* Transition-only via `overdueAlerted` ON THE RECORD; the flag advances **only on confirmed
+  delivery**, so an undelivered alert retries rather than being suppressed.
+
+🚨 **THE STRUCTURAL GAP, UNRESOLVED:** the alert lives INSIDE the sweeper, so **a sweeper that never
+runs cannot alert about itself** — the same silence this feature exists to break, one level up.
+Mitigations only: `gate:watch` guards the schedule (**the highest-consequence row in
+`GUARDED_SCHEDULES`** — a forgotten `dd-canary` makes DD refuse loudly; a forgotten
+`ub-withdraw-sweep` makes withdrawals silently never complete), and the sweeper now writes a
+**HEARTBEAT every tick including clean ones**, so its absence is detectable by something else.
+⭐ **That heartbeat is a HOOK for an independent watcher, not a substitute for one.** Deciding
+whether to build that watcher — or point `dd-watch`/`strong-read-watch` at the heartbeat — is the
+last structural gap in this feature and is OPEN.
+
+### NEXT, IN ORDER
+
+1. Confirm what the in-flight deploy published; confirm the heartbeat appears.
+2. **Run the calibration above — including step 5.**
+3. Decide the independent watcher for the heartbeat.
+4. **Then** initiate 1 USDC (operator-run; the endpoint needs a browser session and manufacturing one
+   is ruled out). Verify: chain 2→1, a record in `waiting` with an `initiateTxHash`, sweeper reporting
+   `open=1`. ⭐ **Completion can only be confirmed ~7 days later** — the first thing here whose proof
+   takes a week, and the first real test that a `*/30` schedule survives that long.
+
+---
+
 ## 2026-08-12 — ✅ THE UNIFIED BALANCE HAS AN EXIT. Option (a) built: two calls ~7 days apart, a sweeper that finishes it, and the wait disclosed BEFORE deposit.
 
 **Commits `06d3a94` (the exit) · `ffe5ac3` (a suite that was passing on build residue) ·
