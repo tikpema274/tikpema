@@ -306,8 +306,19 @@ export function decideNotify({ prevAlert, alert, lastNotifiedAt, now, reminderMs
   if (alert && !prevAlert) return { notify: true, kind: "first-alert" };
   if (!alert && prevAlert) return { notify: true, kind: "recovered" };
   if (alert && prevAlert) {
-    const since = lastNotifiedAt ? now - Date.parse(lastNotifiedAt) : Infinity;
-    return Number.isFinite(since) && since < reminderMs
+    // ⭐⭐ THE NEVER-DELIVERED BRANCH, EXPLICIT — and it is the MIRROR of the persist-before-broadcast
+    // bug. Because `lastNotifiedAt` advances ONLY on confirmed delivery, a successful state write
+    // followed by a FAILED send leaves prevAlert=true with nothing ever delivered. Suppressing that
+    // as a "reminder" would silence an alert nobody has ever seen, using a window it never earned.
+    //
+    // ⚠️ THIS WAS PREVIOUSLY CORRECT ONLY BY FALL-THROUGH: `since` became Infinity and
+    // `Number.isFinite(Infinity)` happened to be false. A refactor tightening that predicate would
+    // have inverted it silently, and the reported kind said "reminder" when nobody had been
+    // reminded of anything. Its sibling (strong-read-watch) states the case outright; so does this.
+    const at = Date.parse(lastNotifiedAt);
+    const told = Number.isFinite(at);
+    if (!told) return { notify: true, kind: "never-delivered" };
+    return now - at < reminderMs
       ? { notify: false, kind: "suppressed-reminder" }
       : { notify: true, kind: "reminder" };
   }

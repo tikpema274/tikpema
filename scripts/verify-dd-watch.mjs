@@ -116,8 +116,16 @@ section("7 — transitions only; silence is the healthy signal");
   check("sustained alert is SUPPRESSED inside the reminder window",
     decideNotify({ prevAlert: true, alert: true, lastNotifiedAt: at(10), now: NOW }).notify === false);
   check("  …and re-pings once past it", decideNotify({ prevAlert: true, alert: true, lastNotifiedAt: at(90), now: NOW }).kind === "reminder");
-  check("⭐ a never-delivered alert is NOT suppressed (lastNotifiedAt null → retry)",
-    decideNotify({ prevAlert: true, alert: true, lastNotifiedAt: null, now: NOW }).notify === true);
+  // ⭐⭐ THE MIRROR OF THE PERSIST-BEFORE-BROADCAST BUG. lastNotifiedAt advances only on confirmed
+  // delivery, so a successful state write + a FAILED send leaves prevAlert=true with nobody told.
+  // Suppressing that would silence an alert nobody has ever seen, on a window it never earned.
+  for (const [label, v] of [["null", null], ["undefined", undefined], ["malformed", "not-a-date"], ["empty", ""]]) {
+    const d = decideNotify({ prevAlert: true, alert: true, lastNotifiedAt: v, now: NOW });
+    check(`⭐⭐ never-delivered (${label}) NOTIFIES, and says so by name`,
+      d.notify === true && d.kind === "never-delivered", d.kind);
+  }
+  check("⭐ it is an EXPLICIT branch, not a fall-through a refactor could invert",
+    /kind: "never-delivered"/.test(readFileSync(new URL("../shared/dd-watch/watch.mjs", import.meta.url), "utf8")));
 }
 
 section("8 — the refusal window is MEASURED, which two prod deploys failed to do by hand");
