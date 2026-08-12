@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
+import { readJson } from "./readJson";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -49,7 +50,7 @@ export function useGatewayBalance(w: UnifiedWallet, reloadKey = 0): GatewayBalan
       });
       if (r.status === 401) return { status: "signed-out" };
       if (r.status === 202) return { status: "provisioning" }; // first-provision race
-      const d = await r.json().catch(() => null);
+      const d = await readJson(r);
       if (!r.ok || !Array.isArray(d?.perChain)) return { status: "error" };
       return {
         status: "ready",

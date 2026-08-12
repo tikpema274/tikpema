@@ -3,6 +3,7 @@ import type { useWallet } from "../wallet/useWallet";
 import { JobTimeline, isTerminal, receiptInFlight } from "./jobTimeline";
 import type { TrackedJob } from "./jobTimeline";
 import { approveProposal as approve } from "../lib/approveProposal";
+import { readJson } from "../lib/readJson";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -223,7 +224,7 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
                       budgetUsdc: quote.budgetUsdc,
                     }),
                   });
-                  const data = await r.json().catch(() => ({}));
+                  const data = await readJson(r);
 
                   if (r.status === 402) {
                     // Empty/underfunded wallet — clean message, no fallback.

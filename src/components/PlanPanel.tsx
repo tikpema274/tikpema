@@ -3,6 +3,7 @@ import type { useWallet } from "../wallet/useWallet";
 import { JobTimeline, isTerminal, receiptInFlight } from "./jobTimeline";
 import type { TrackedJob } from "./jobTimeline";
 import { approveProposal as approve } from "../lib/approveProposal";
+import { readJson } from "../lib/readJson";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -206,7 +207,7 @@ export default function PlanPanel({ wallet }: { wallet: UnifiedWallet }) {
                     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
                     body: JSON.stringify({ question: task, budgetUsdc: quote.budgetUsdc }),
                   });
-                  const data = await r.json().catch(() => ({}));
+                  const data = await readJson(r);
                   if (r.status === 402) throw new Error(data.error || "Insufficient funds.");
                   if (!r.ok) throw new Error(data.error || "Could not start the plan");
 

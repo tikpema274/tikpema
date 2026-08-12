@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { ModularWallet } from "../wallet/useModularWallet";
+import { readJson } from "../lib/readJson";
 
 // FeedbackPanel — a plain in-app feedback form that relays to a Discord webhook
 // via /api/submit-feedback. The webhook URL is a server-side secret; the
@@ -35,7 +36,7 @@ export default function FeedbackPanel({ wallet }: { wallet: ModularWallet }) {
           walletAddress: wallet.address ?? "",
         }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = await readJson(res);
       if (!res.ok) throw new Error(data?.error || `Request failed: ${res.status}`);
       // Clear the form only once it's safely delivered.
       setThoughts("");

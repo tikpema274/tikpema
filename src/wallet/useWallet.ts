@@ -7,6 +7,7 @@ import {
   type MetaMaskWallet,
 } from "./connectors/metamask";
 import type { ConnectorInfo, WalletKind } from "./types";
+import { readJson } from "../lib/readJson";
 
 type SessionIdentity = { address: string; method: WalletKind };
 type Session = { token: string; exp: number; identity: SessionIdentity };
@@ -343,7 +344,7 @@ export function useWallet() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ to, amountUsdc }),
       });
-      const data = await r.json().catch(() => ({}));
+      const data = await readJson(r);
       if (!r.ok) throw new Error(data?.error || "Send failed");
       refreshAgentWallet().catch(() => {});
       return data;
@@ -368,7 +369,7 @@ export function useWallet() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ plan }),
       });
-      const data = await r.json().catch(() => ({}));
+      const data = await readJson(r);
       if (!r.ok) throw new Error(data?.error || "Swap failed");
       // The executor returns a per-step result array. A cap/ceiling block comes
       // back as HTTP 200 with results[0].ok=false + a `blocked` reason — so inspect
@@ -397,7 +398,7 @@ export function useWallet() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ amountUsdc, destination, ackToken }),
       });
-      const data = await r.json().catch(() => ({}));
+      const data = await readJson(r);
       if (!r.ok) throw new Error(data?.error || "Bridge failed");
       // A cap / fee-floor block returns HTTP 200 { executed:false, blocked } — surface
       // it as an error rather than a silent no-op.
@@ -424,7 +425,7 @@ export function useWallet() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ burnHash, destinationKey }),
       });
-      const data = await r.json().catch(() => ({}));
+      const data = await readJson(r);
       if (!r.ok) throw new Error(data?.error || "Status check failed");
       return data; // { state: "pending" | "minted" | "failed", mintTx?, mintTxHash? }
     },
@@ -444,7 +445,7 @@ export function useWallet() {
       method: "GET",
       headers: { Authorization: `Bearer ${token}` },
     });
-    const data = await r.json().catch(() => ({}));
+    const data = await readJson(r);
     if (!r.ok) throw new Error(data?.error || "Could not load bridge receipts");
     // `degraded` distinguishes "none in flight" from "we couldn't look" — the caller must
     // not render an empty list as certainty.
@@ -462,7 +463,7 @@ export function useWallet() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ vault }),
       });
-      const data = await r.json().catch(() => ({}));
+      const data = await readJson(r);
       if (!r.ok) throw new Error(data?.error || "Inspection failed");
       return data; // { vault, inspection, gate, depositable, ackRequired, ackToken }
     },
@@ -480,7 +481,7 @@ export function useWallet() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ vault, amountUsdc, ackToken }),
       });
-      const data = await r.json().catch(() => ({}));
+      const data = await readJson(r);
       if (!r.ok) throw new Error(data?.error || "Deposit failed");
       refreshAgentWallet().catch(() => {});
       return data; // { ok, kind:"vault_deposit", depositTx, sharesReceivedRaw, disclosure, ... }
@@ -499,7 +500,7 @@ export function useWallet() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ vault }),
       });
-      const data = await r.json().catch(() => ({}));
+      const data = await readJson(r);
       if (!r.ok) throw new Error(data?.error || "Could not read your share balance");
       return data; // { shareBalanceRaw, shareBalanceFormatted, shareSymbol, hasShares, shareDecimals }
     },
@@ -518,7 +519,7 @@ export function useWallet() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ vault }),
       });
-      const data = await r.json().catch(() => ({}));
+      const data = await readJson(r);
       if (!r.ok) throw new Error(data?.error || "Withdraw failed");
       refreshAgentWallet().catch(() => {});
       return data; // { ok, reclaimed, withdrawTx?, usdcReceived?, message? }

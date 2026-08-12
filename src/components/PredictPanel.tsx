@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ModularWallet } from "../wallet/useModularWallet";
 import { JobTimeline, isTerminal } from "./jobTimeline";
 import type { TrackedJob } from "./jobTimeline";
+import { readJson } from "../lib/readJson";
 
 // PredictPanel — browse prediction markets, then pay the agent for sourced
 // research on the one you pick. No betting, no advice: selecting a market runs
@@ -292,7 +293,7 @@ export default function PredictPanel({ wallet }: { wallet: ModularWallet }) {
                     }),
                   });
                   if (!r.ok) {
-                    const data = await r.json().catch(() => ({}));
+                    const data = await readJson(r);
                     throw new Error(data.error || "Setting budget failed");
                   }
 

@@ -1,4 +1,5 @@
 import type { Proposal, Receipt } from "../components/jobTimeline";
+import { readJson } from "./readJson";
 
 // ONE approve path, shared by PlanPanel and ResearchPanel.
 //
@@ -38,7 +39,7 @@ export async function approveProposal({
     body: JSON.stringify({ runId }),
   });
 
-  const data = await r.json().catch(() => null);
+  const data = await readJson(r);
 
   // 202 = a slow bridge burn (submitted, hash pending) — a real, recorded outcome, not an error.
   if (!r.ok && r.status !== 202) throw new Error(data?.error || "Approve failed");

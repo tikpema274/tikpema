@@ -1,3 +1,4 @@
+import { readJson } from "./readJson";
 // Thin client for the AGENT plane. The browser NEVER touches Circle's API key
 // or entity secret — it only calls these /api/* endpoints, which run
 // server-side in netlify/functions and hold the secrets.
@@ -12,7 +13,9 @@ async function post(path: string, body: unknown, token?: string) {
     },
     body: JSON.stringify(body ?? {}),
   });
-  const data = await res.json();
+  // ⭐ readJson, not res.json(): an /api path that misses its route returns an HTML page, and
+  // `Unexpected token '<'` tells the user nothing. See src/lib/readJson.ts.
+  const data = await readJson(res);
   if (!res.ok) throw new Error(data?.error || `Request failed: ${res.status}`);
   return data;
 }
@@ -21,7 +24,9 @@ async function get(path: string, token?: string) {
   const res = await fetch(path, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
-  const data = await res.json();
+  // ⭐ readJson, not res.json(): an /api path that misses its route returns an HTML page, and
+  // `Unexpected token '<'` tells the user nothing. See src/lib/readJson.ts.
+  const data = await readJson(res);
   if (!res.ok) throw new Error(data?.error || `Request failed: ${res.status}`);
   return data;
 }

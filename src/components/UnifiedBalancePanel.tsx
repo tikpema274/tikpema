@@ -3,6 +3,7 @@ import AddressDisplay from "./AddressDisplay";
 import SignInPrompt from "./SignInPrompt";
 import { useGatewayBalance } from "../lib/useGatewayBalance";
 import type { useWallet } from "../wallet/useWallet";
+import { readJson } from "../lib/readJson";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -62,7 +63,7 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
         method: "GET",
         headers: { Authorization: `Bearer ${token}` },
       });
-      const d = await r.json().catch(() => null);
+      const d = await readJson(r);
       if (!r.ok) throw new Error(d?.error || "Could not read the deposit status");
       if (d.status === "completed" || d.status === "failed") return d;
       if (d.status === "executing") setFundStage("Depositing on-chain…");
@@ -96,7 +97,7 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ amountUsdc: amountNum }),
       });
-      const d = await r.json().catch(() => null);
+      const d = await readJson(r);
       // Synchronous rejections (over-cap 400, insufficient funds 402, auth 401) — nothing
       // was kicked off, so report and stop.
       if (!r.ok) throw new Error(d?.error || "Deposit failed");
