@@ -1,5 +1,100 @@
 ---
 
+## 2026-08-12 (later) — ✅ DD THREAD CLOSED. Alert path proven live end to end; three more monitor bugs found while proving it.
+
+**Commits `9317cdf` · `b93d071` · `6679d99`. Production `6679d99`.** DD live, monitored, paid twice on
+real money, three production-proven bindings, every monitor branch observed. **Treating this as
+finished** — see the pivot at the end.
+
+### ⭐ EVERY TRANSITION OBSERVED, NOT SUITE-PROVEN
+
+`first-alert`+delivered · `suppressed-reminder` (~25 min, **exactly one message**) · **genuine
+`recovered`** (`ok:true`; the only earlier one was FALSE) · `steady-ok` (read from `notify.kind`,
+never from Discord being quiet) · **`path-divergence` derived cleanly** · **window opened+closed with
+a 34.6 min duration** · **`induced` carry-forward `true` on close while `leverActive` was already
+`false`** · **label dies with its window** (`false` on the next steady tick, same build).
+
+### 🚨 THREE MORE BUGS, ALL ABSENCES
+
+**D — `stale` COULD NEVER ALERT, AND THE STAND-DOWN LIED.** `reasons:['stale']` → `alert:false`: not
+in the allow-list, not `no-record`, so it fell through into **silence** — and `stale` is the canary
+having STOPPED WRITING. 25 minutes of refusal, no correct alert. ⭐ **The defect was the DIRECTION OF
+THE ENUMERATION** — listing what alerts leaves anything added later silently unmonitored. Now
+inverted: **a refusal alerts unless it is specifically `no-record` inside grace.** And
+`decideNotify` transitioned on `alert` while claiming `ok`, announcing **"RECOVERED — both paths
+serving again" WHILE BOTH WERE REFUSING**. ⭐⭐ **A false all-clear is worse than a missed alert: a
+missed alert leaves you looking, an all-clear tells you to STOP.** ⭐ The fix earned itself in
+minutes — 11:30:48, both paths `stale`, alerted correctly. ⚠️ That was **TTL expiry, not a rotation**.
+
+**E — `windowHistory` RECORDED REFUSALS, NOT UNAVAILABILITY.** A path serving SPA HTML — **the
+canonical payment target broken while the service looks fine** — left NO trace, because the window
+was keyed on `refusingSince`. ⭐ **The dataset this monitor exists to build was under-reporting its own
+subject**; a history that omits a class of unavailability reads as complete. Fixed by **splitting**
+the clock (`refusingSince` for grace, `unhealthySince` for the window), not widening it.
+
+**F — THE INDUCED LABEL OUTLIVED ITS WINDOW.** A healthy run showed `steady, induced:true`, so a
+future **genuine** outage would inherit it. ⭐⭐ **The exact inversion of the bug the flag prevents:**
+instead of a calibration masquerading as real, a real outage masquerades as a calibration and gets
+**discounted** — worse, because it silences a true signal. ⭐ Fixing it exposed an assertion that was
+**green from the wrong branch** (a `refusingSince` fixture never reached `window-opened`). **An
+assertion that names a branch it does not reach reads as coverage.**
+
+### ⭐ SELF-ATTRIBUTION — timestamps cannot attribute across a deploy
+
+The stale-label fix changes only the steady ticks *after* a recovery, landing a minute from the
+deploy that ships it. **A tick can straddle the transition**, so clock-based attribution credits old
+code to new. Every record now carries `build:{commit,tree,resolved}` — **self-proving on arrival**,
+since the field does not exist in the prior build. Measured: `11:25:24 build=ABSENT` →
+`11:30:48 build=6679d99`. ⚠️ Same class as the settler probe: **a concurrent change makes an
+observation unattributable however clean it looks.**
+
+### 🚨 DISCIPLINE — I READ A STALE RECORD AND ACCUSED THE PLATFORM
+
+**Third time today.** Read `leverActive:false`, concluded *"the deploy did not pick up the env
+change"*, and started proposing remedies. Wrong:
+
+    deploy created 10:35:57  published 10:55:19
+    env set        10:35:17  ← 40s BEFORE creation, picked up correctly
+    record read    10:55:08  ← 11 SECONDS BEFORE publish, on a */5 monitor
+
+⭐ **`published_at` from `netlify api listSiteDeploys` is the discriminator; CLI exit is NOT publish.**
+⚠️ Same shape each time: **query an eventually-updating source, get a pre-event value, treat it as
+evidence about after.** Twice it produced a wrong accusation — once against the operator's sighting,
+once against Netlify.
+
+### ⚠️ TWO CALIBRATIONS WASTED, BOTH ON SEQUENCING
+
+Unset a lever while its deploy was still resolving env (published inactive); ran `stamp:clear` while
+a deploy was bundling (**nulled stamp → `build-unresolved` → ~30 min of real production outage**).
+⭐ It **FAILED CLOSED**, which is the whole point of `null`-not-placeholder — demonstrated by accident
+on production. ⭐ **THE RULE BOTH VIOLATE: a deploy in flight is a reason to touch nothing it reads** —
+env, the stamp, the working tree.
+
+### STILL NOT PROVEN
+
+* 🚧 **POST-DEPLOY REFUSAL WINDOW UNMEASURED — eight deploys.** Today's `stale` was TTL expiry; the
+  key never rotated. ⭐ The binding fix makes rotation **rare by design**, so it may be a long wait.
+* 🚧 **Both `windowHistory` entries are INDUCED** — a genuine one has nothing to sit beside.
+* ⚠️ **The 34.6-min entry has TWO causes** (induced lever + the real `stale` refusal). Correct for the
+  carry-forward test; **not a clean "what a calibration costs" number.**
+* 🚧 `no-record-persisting` and the always-real **renderings** remain suite-only.
+
+`test:ddwatch` **98/0** · `test:dd` 17 suites · `test:watch` 212/0 · `gate:watch` exit 0.
+
+### 🚨 PIVOT — DD IS DONE; THE MAINNET RISK HAS HAD NO WORK
+
+**DD is a finished piece: live, monitored, paid twice on real money, three production-proven
+bindings, every monitor branch observed.** Remaining DD items are refinements, not risks.
+
+⭐⭐ **THE TOP MAINNET ITEM IS THE UNIFIED BALANCE HAVING NO EXIT PATH — real user money with no way
+out — and it has had NO work at all. Mainnet is 2026-09-16.** Copy was corrected (`eb459a1`) and
+`removeFund` was confirmed reachable, but **nothing is built**, and `withdraw()` has never been
+exercised. ⚠️ **This is the one where being wrong costs SOMEONE ELSE something**, rather than costing
+us a refusal — every DD failure this week was fail-closed and cost availability. That asymmetry is
+why it outranks everything above.
+
+---
+
 ## 2026-08-12 — THE REFUSAL WINDOW, THEN THE MONITOR. And the monitor's first live outage found three of its own bugs.
 
 **Two items off the post-exposure list. `dd-watch` is live on `*/5`, DD serving on both paths,
@@ -1351,10 +1446,15 @@ before. Read the amount off the 402, not from memory.
       rotated the key for nothing. Now a content hash of the DD surface (`ddTree`), **production-
       proven twice on DD-clean deploys**. ⚠️ The window still exists for DD-CODE deploys and its
       size is **STILL UNMEASURED after five production deploys** — but it is now rare by design.
-   2. ✅ **A MONITOR — `dd-watch` IS LIVE (2026-08-12).** `*/5`, both paths, own store, own channel.
-      Its first live outage was NOT a drill and found three of its own bugs. ⚠️ Two gaps remain: a
-      genuine `recovered` is unproven (the only one that fired was false), and the always-real alert
-      renderings are suite-only.
+   2. ✅ **A MONITOR — `dd-watch` IS LIVE AND FULLY CALIBRATED (2026-08-12).** `*/5`, both paths, own
+      store, own channel. **Every transition observed live**, including a genuine `recovered` and the
+      `induced` carry-forward. ⚠️ Residual: the always-real alert RENDERINGS are suite-only, and both
+      `windowHistory` entries are induced.
+   3. 🚨 **⭐⭐ THE UNIFIED BALANCE HAS NO EXIT PATH — NOTHING BUILT, MAINNET 2026-09-16.** Real user
+      money with no way out. Copy corrected (`eb459a1`) and `removeFund` confirmed REACHABLE, but
+      `withdraw()` has never been exercised and no code exists. ⭐ **THIS OUTRANKS EVERYTHING ELSE:
+      it is the only open item where being wrong costs SOMEONE ELSE something** — every DD failure
+      this week was fail-closed and cost availability, not funds.
    3. **THE SUPERSESSION DOC — deliberately LAST.** It is the **LISTING** precondition and listing is
       not imminent, so nobody is verifying `tokenURI(851891)` yet; and being commit-scoped to
       `3e27042`, the frozen doc stays **honestly out-of-date rather than wrong**. ⚠️ Urgent the moment
