@@ -181,8 +181,12 @@ section("8b — 🚨 INDUCED vs REAL: a calibration window must not pass as a me
   check("defaults → no lever", leverActive(DP) === false);
   check("⭐ a redirected api → lever active", leverActive({ ...DP, api: "https://x/nope" }) === true);
   check("  …and a redirected functions path too", leverActive({ ...DP, functions: "https://x/nope" }) === true);
-  const opened = windowFrom({ prev: null, judgement: { refusingSince: "2026-08-12T07:35:00Z" }, nowIso: "2026-08-12T07:35:00Z", induced: true });
-  check("⭐⭐ a window opened under a lever is labelled INDUCED", opened.induced === true);
+  // ⚠️ This fixture used `refusingSince` and therefore hit the STEADY branch, never window-opened —
+  // it was green only because `carried` used to apply unconditionally. It asserted a branch it did
+  // not reach. Rekeyed to `unhealthySince`, and now also asserts the EVENT so it cannot pass from
+  // the wrong branch again.
+  const opened = windowFrom({ prev: null, judgement: { unhealthySince: "2026-08-12T07:35:00Z" }, nowIso: "2026-08-12T07:35:00Z", induced: true });
+  check("⭐⭐ a window opened under a lever is labelled INDUCED", opened.induced === true && opened.event === "window-opened", opened.event);
   // ⚠️ The lever is typically removed WHILE the window is still open — that is how the calibration
   // ends. Without carry-forward the CLOSING entry would be labelled real and would lie.
   const closed = windowFrom({ prev: { unhealthySince: "2026-08-12T07:35:00Z", window: { induced: true } },
