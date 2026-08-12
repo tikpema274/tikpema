@@ -161,7 +161,7 @@ export const handler = async (event) => {
 
   // ── notify on TRANSITIONS only; silence is the healthy signal ────────────────────────────────
   const decision = decideNotify({
-    prevAlert: prev?.alert === true, alert: judgement.alert,
+    prevAlert: prev?.alert === true, alert: judgement.alert, ok: judgement.ok,
     lastNotifiedAt: prev?.lastNotifiedAt ?? null, now, reminderMs: REMINDER_MS,
   });
   record.notify.kind = decision.kind;
@@ -190,9 +190,13 @@ export const handler = async (event) => {
     } else {
       // ⭐ RECOVERY IS NEWS TOO. A monitor that can alarm but never stands down trains you to ignore
       // it: every alert becomes permanent, so none of them mean anything.
+      // ⭐ The headline is chosen from the DECISION KIND, not from `alert` alone — that conflation is
+      // what let a stand-down fire into a live outage.
       const head = judgement.alert
         ? alertHeadline(judgement)
-        : { severity: "info", headline: "✅ DD RECOVERED — both paths serving again", why: "" };
+        : decision.kind === "de-escalated"
+          ? alertHeadline({ alertReason: "de-escalated" })
+          : { severity: "info", headline: "✅ DD RECOVERED — both paths serving again", why: "" };
       const lines = [
         head.headline,
         head.why ? `> ${head.why}` : null,

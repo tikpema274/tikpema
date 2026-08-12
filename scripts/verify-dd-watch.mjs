@@ -77,6 +77,44 @@ for (const r of ["version-mismatch", "unreadable", "malformed", "not-passing", "
   check(`⭐ ${r} → alert on FIRST sighting`, j.alert === true, j.alertReason);
 }
 
+section("4b — 🚨 THE CLOSED SET IS INVERTED: an UNKNOWN reason must ALERT");
+{
+  // MEASURED 2026-08-12: reasons:['stale'] gave alert:false. `stale` was not in the alert-worthy
+  // allow-list and was not `no-record`, so it fell through every branch into SILENCE — and `stale`
+  // is the canary having stopped writing. DD refused for 25 minutes with no correct alert.
+  // ⭐ The defect was the DIRECTION of the enumeration, not a missing entry.
+  const old = { refusingSince: new Date(NOW - 25 * 60000).toISOString() };
+  for (const r of ["stale", "version-mismatch", "unreadable", "malformed", "not-passing",
+                   "build-unresolved", "a-reason-invented-in-2027", "", "undefined"]) {
+    const j = judge({ paths: p(refuse(r), refuse(r)), prev: null, now: NOW });
+    check(`⭐ '${r}' alerts on FIRST sighting`, j.alert === true, j.alertReason);
+  }
+  check("⭐⭐ no-record is the ONLY suppressed reason, and only inside grace",
+    judge({ paths: p(refuse("no-record"), refuse("no-record")), prev: null, now: NOW }).alert === false);
+  check("  …and it alerts once persisted",
+    judge({ paths: p(refuse("no-record"), refuse("no-record")), prev: old, now: NOW }).alertReason === "no-record-persisting");
+  check("⭐ ALWAYS_REAL_REASONS no longer GATES — the inverse rule does",
+    /no longer GATES? ANYTHING|no longer gates anything/i.test(
+      readFileSync(new URL("../shared/dd-watch/watch.mjs", import.meta.url), "utf8")));
+}
+
+section("5b — 🚨 A FALSE ALL-CLEAR IS WORSE THAN A MISSED ALERT");
+{
+  // MEASURED 2026-08-12: the stand-down fired on `alert` going false and announced "both paths
+  // serving again" WHILE BOTH PATHS WERE REFUSING. Nothing had recovered — the reason had merely
+  // changed to one the old gate did not recognise. A missed alert leaves you looking; an all-clear
+  // tells you to STOP.
+  const d = (ok) => decideNotify({ prevAlert: true, alert: false, ok, lastNotifiedAt: null, now: NOW });
+  check("⭐⭐ stand-down requires ok:true — the thing it actually claims", d(true).kind === "recovered");
+  check("⭐⭐ alert cleared but STILL refusing → de-escalated, NOT recovered", d(false).kind === "de-escalated");
+  check("  …and it still notifies (silence would read as recovery too)", d(false).notify === true);
+  const h = alertHeadline({ alertReason: "de-escalated" });
+  check("⭐ its headline says NOT SERVING in plain words", /STILL NOT SERVING/i.test(h.headline));
+  check("  …and explicitly denies being a recovery", /NOT a recovery/i.test(h.why));
+  check("⭐ default ok=true keeps old callers honest rather than silently de-escalating",
+    decideNotify({ prevAlert: true, alert: false, lastNotifiedAt: null, now: NOW }).kind === "recovered");
+}
+
 section("5 — both paths, and what counts as divergence");
 {
   const okj = judge({ paths: p(OK_API, OK_FN), prev: null, now: NOW });

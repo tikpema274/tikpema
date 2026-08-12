@@ -111,7 +111,12 @@ export const OUTCOME = Object.freeze({
   UNEXPECTED: "unexpected",           // any status/body we do not have a rule for
 });
 
-/** Refusal reasons that are NEVER a normal consequence of deploying. */
+/**
+ * Refusal reasons that are NEVER a normal consequence of deploying.
+ * ⚠️ THIS NO LONGER GATES ANYTHING — it is documentation and severity only. It USED to be the
+ * allow-list of alert-worthy reasons, and that is exactly how `stale` fell through to silence.
+ * The gate is now the inverse: everything alerts except no-record inside the grace window.
+ */
 export const ALWAYS_REAL_REASONS = Object.freeze([
   "version-mismatch", "unreadable", "malformed", "not-passing", "build-unresolved",
 ]);
@@ -184,7 +189,19 @@ export function judge({ paths, prev = null, now, graceMs = GRACE_MS }) {
   // ── refusal duration ─────────────────────────────────────────────────────────────────────────
   const refusing = keys.filter((k) => results[k].outcome === OUTCOME.REFUSING);
   const reasons = [...new Set(refusing.map((k) => results[k].healthReason ?? results[k].reason))];
-  const anyAlwaysReal = reasons.some((r) => ALWAYS_REAL_REASONS.includes(r));
+  // ═══ 🚨 CLOSED SET, INVERTED — enumerate what is NOT alert-worthy ═════════════════════════════
+  // MEASURED 2026-08-12: `reasons: ['stale']` produced alert:false. `stale` was not in
+  // ALWAYS_REAL_REASONS and was not `no-record`, so it fell through EVERY branch into silence — and
+  // `stale` is the canary having stopped writing, i.e. exactly what the canary exists to signal. DD
+  // refused continuously for 25 minutes and this monitor never alerted for the right reason.
+  //
+  // ⭐ THE DEFECT WAS THE DIRECTION OF THE ENUMERATION. I listed the reasons that DO alert and let
+  // everything else fall through to quiet. Any reason added to the health ladder later — or any typo
+  // — would be silently unmonitored. The closed-set discipline was applied to OUTCOME and not to
+  // reasons, inside the monitor built to stop absences reading as safety.
+  //
+  // So the rule is now: A REFUSAL ALERTS UNLESS IT IS SPECIFICALLY THE EXPECTED POST-DEPLOY WINDOW.
+  // An unrecognised reason alerts, which is the safe direction and cannot rot.
   const onlyNoRecord = reasons.length > 0 && reasons.every((r) => r === "no-record");
 
   const stillRefusing = refusing.length > 0;
@@ -203,8 +220,11 @@ export function judge({ paths, prev = null, now, graceMs = GRACE_MS }) {
   else if (divergent) { alert = true; alertReason = "path-divergence"; }
   else if (keys.some((k) => [OUTCOME.NOT_JSON, OUTCOME.UNREACHABLE, OUTCOME.UNEXPECTED].includes(results[k].outcome))) {
     alert = true; alertReason = results[keys.find((k) => results[k].outcome !== OUTCOME.SERVING)].outcome;
-  } else if (anyAlwaysReal) { alert = true; alertReason = `refusing:${reasons.join(",")}`; }
-  else if (onlyNoRecord && persisted) { alert = true; alertReason = "no-record-persisting"; }
+  } else if (stillRefusing && !(onlyNoRecord && !persisted)) {
+    // Any refusal EXCEPT no-record inside the grace window. Unknown reasons land here by design.
+    alert = true;
+    alertReason = onlyNoRecord ? "no-record-persisting" : `refusing:${reasons.join(",")}`;
+  }
 
   return {
     ok, alert, alertReason,
@@ -278,6 +298,16 @@ export const leverActive = (targets) =>
  */
 export function alertHeadline(judgement) {
   const r = judgement.alertReason ?? "";
+  if (r === "de-escalated") {
+    return {
+      severity: "warning",
+      headline: "⚠️ DD NO LONGER ALERT-WORTHY — but it is STILL NOT SERVING",
+      why:
+        "The alert condition cleared while the service is still refusing, so this is NOT a recovery. " +
+        "It usually means a DD-code deploy rotated the health key and the refusal is now the expected " +
+        "post-deploy window. Keep watching: a real all-clear says both paths are serving.",
+    };
+  }
   if (r === "quote-divergence") {
     return {
       severity: "critical",
@@ -325,9 +355,23 @@ export function alertHeadline(judgement) {
 }
 
 /** Transition-only notification with a rate-limited reminder. Silence is the healthy signal. */
-export function decideNotify({ prevAlert, alert, lastNotifiedAt, now, reminderMs = REMINDER_MS }) {
+export function decideNotify({ prevAlert, alert, ok = true, lastNotifiedAt, now, reminderMs = REMINDER_MS }) {
   if (alert && !prevAlert) return { notify: true, kind: "first-alert" };
-  if (!alert && prevAlert) return { notify: true, kind: "recovered" };
+
+  // ═══ 🚨 "RECOVERED" IS A CLAIM ABOUT `ok`, NOT ABOUT `alert` ══════════════════════════════════
+  // MEASURED 2026-08-12: this branch fired on `alert` going false and sent "✅ DD RECOVERED — both
+  // paths serving again" WHILE BOTH PATHS WERE REFUSING. Nothing had recovered; the reason had
+  // merely changed from `not-json` to `stale`, which the old alert gate did not recognise.
+  //
+  // ⭐ A FALSE ALL-CLEAR IS WORSE THAN A MISSED ALERT: a missed alert leaves you looking, an
+  // all-clear tells you to stop. So the stand-down requires the thing it claims — `ok` — and a
+  // de-escalation that is still unhealthy says so in its own words instead of borrowing the
+  // recovery headline.
+  if (!alert && prevAlert) {
+    return ok
+      ? { notify: true, kind: "recovered" }
+      : { notify: true, kind: "de-escalated" };
+  }
   if (alert && prevAlert) {
     // ⭐⭐ THE NEVER-DELIVERED BRANCH, EXPLICIT — and it is the MIRROR of the persist-before-broadcast
     // bug. Because `lastNotifiedAt` advances ONLY on confirmed delivery, a successful state write
