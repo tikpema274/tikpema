@@ -24,6 +24,11 @@
 // Zero network, zero money.
 
 import { mock } from "node:test";
+// ⚠️ FIRST: pin the build stamp so this suite does NOT read the generated, uncommitted
+// file on disk. Without it the suite passes or fails on local build residue — see
+// scripts/dd/_test-stamp.mjs for the measurement (7 of 17 suites flipped).
+import { mockBuildStamp } from "./_test-stamp.mjs";
+mockBuildStamp();
 
 let pass = 0, fail = 0;
 const check = (label, cond, extra = "") => {

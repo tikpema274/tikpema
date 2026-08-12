@@ -36,7 +36,32 @@ process.env.DD_PUBLIC_ENABLED = "1";
 import { mock } from "node:test";
 import { SCHEMA_VERSION as _SV } from "../../shared/onchain-analyze/schema.mjs";
 import { POWER_SIGS as _PS } from "../../shared/onchain-facts/index.mjs";
-import { codeIdentity as _ci } from "../../shared/dd-canary/health.mjs";
+
+// ═══ 🚨 THE STAMP IS INJECTED, NOT READ FROM DISK ════════════════════════════════════════════
+// This suite used to call codeIdentity() with no stamp, so it read shared/build-stamp.generated.mjs
+// — a GENERATED, UNCOMMITTED file whose committed value is deliberately `null`. Since f714bb9 made
+// that stamp the DD identity, the consequence was: run `npm run build` and this suite passes; run
+// `npm run stamp:clear` and 18 assertions fail, because an unbound identity makes dd-analyze refuse
+// `build-unresolved` at rung 0 — BEFORE the address validation these tests are actually about.
+//
+// ⭐ SO ITS RESULT DEPENDED ON LOCAL BUILD RESIDUE. Measured: 18 failures with the stamp cleared,
+// 0 with it set, same commit. A suite that is green or red depending on what you last ran is not
+// reporting on the code; the failures it produced named the wrong thing entirely ("expected 400
+// invalid-address, got 503 service-unverified"), which is how it survived unnoticed.
+//
+// ⚠️ Mocked BEFORE health.mjs is imported, because that module resolves ddCodeIdentity at load.
+mock.module("../../shared/build-stamp.mjs", {
+  namedExports: {
+    ddCodeIdentity: () => ({
+      resolved: true, id: "e".repeat(64), source: "test-injected",
+      detail: "deterministic identity injected by the suite — never the on-disk stamp",
+    }),
+    buildStamp: () => ({ resolved: true, commit: "a".repeat(40), dirty: false, tree: "b".repeat(64),
+      fileCount: 1, generatedAt: "2026-01-01T00:00:00.000Z", detail: "test-injected" }),
+    provenanceIsBound: () => true,
+  },
+});
+const { codeIdentity: _ci } = await import("../../shared/dd-canary/health.mjs");
 const _identity = _ci({ schemaVersion: _SV, powerSigs: _PS });
 mock.module("../../netlify/functions/_dd-health.mjs", {
   namedExports: {
