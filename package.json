@@ -11,7 +11,7 @@
     "stamp": "node scripts/stamp-build.mjs",
     "stamp:clear": "node scripts/stamp-build.mjs --clear",
     "test:probe": "node --experimental-test-module-mocks scripts/verify-blobs-probe.mjs",
-    "test:watch": "node --experimental-test-module-mocks scripts/verify-strong-read-watch.mjs",
+    "test:watch": "node --experimental-test-module-mocks scripts/verify-strong-read-watch.mjs && node scripts/verify-sweeper-heartbeat.mjs",
     "gate:draft": "node scripts/verify-watch-promotion-gate.mjs --context deploy-preview",
     "gate:watch": "node scripts/verify-watch-promotion-gate.mjs",
     "preview": "vite preview",

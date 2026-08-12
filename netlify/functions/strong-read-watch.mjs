@@ -5,6 +5,9 @@ import {
   judgeProbe, shouldSkipRerun, decideNotify, notifyMessage, buildRecord, captureBuildIdSources,
   DEFAULT_TARGET_URL, DEFAULT_STORE_NAME,
 } from "../../shared/strong-read-watch/watch.mjs";
+import {
+  SWEEPER_STORE, HEARTBEAT_KEY, observeSweeper, composeVerdict, sweeperPrev, sweeperMessage,
+} from "../../shared/strong-read-watch/sweeper-heartbeat.mjs";
 
 // strong-read-watch — is the money path's strong Blobs read still working ON PROD?
 //
@@ -157,10 +160,33 @@ export const handler = async (event) => {
   const runtimeSources = captureBuildIdSources(event, env);
   const record = buildRecord({ judgement, prev, nowIso, target, storeName: store.name, runtimeSources });
 
+  // ─── SECOND, INDEPENDENT CONCERN: is ub-withdraw-sweep still alive? ─────────────────────────
+  // 🚨 observeSweeper NEVER THROWS and its result carries `sweeperOk`, not `ok` — so this cannot
+  // take the money-path verdict down with it, by construction rather than by care. Pinned in
+  // scripts/verify-sweeper-heartbeat.mjs; see that module's header.
+  const sweeper = await observeSweeper({
+    read: () => getStore(SWEEPER_STORE).get(HEARTBEAT_KEY, { type: "json" }),
+    now,
+  });
+  record.sweeper = sweeper;
+  record.sweeperLastNotifiedAt = prev?.sweeperLastNotifiedAt ?? null;
+  record.sweeperNotify = { planned: null, delivered: null, kind: null, error: null };
+
   const prevOk = prev && typeof prev.ok === "boolean" ? prev.ok : null;
   const decision = decideNotify({ prevOk, ok: judgement.ok, lastNotifiedAt: prev?.lastNotifiedAt, now });
   record.notify.planned = decision.notify;
   record.notify.kind = decision.kind;
+
+  // ⭐⭐ ITS OWN PREV, NOT A SHARED ONE. Same transition function (one implementation, no drift),
+  // different state. Sharing prevOk would let a recovering money path consume the transition and
+  // silence a still-stale sweeper — two concerns collapsed into one alarm is how a real problem
+  // gets fixed-adjacent and reported resolved.
+  const sp = sweeperPrev(prev);
+  const sweeperDecision = decideNotify({
+    prevOk: sp.prevOk, ok: sweeper.sweeperOk, lastNotifiedAt: sp.lastNotifiedAt, now,
+  });
+  record.sweeperNotify.planned = sweeperDecision.notify;
+  record.sweeperNotify.kind = sweeperDecision.kind;
 
   // ─── WRITE FIRST ────────────────────────────────────────────────────────────────────────────
   // The record is the authoritative artifact. Everything after this point can fail without
@@ -178,41 +204,61 @@ export const handler = async (event) => {
   }
 
   // ─── NOTIFY SECOND ──────────────────────────────────────────────────────────────────────────
-  if (decision.notify) {
+  /** One delivery, reporting into its own slot. Shared so the two concerns cannot drift on what
+   *  "delivered" means — but they never share the SLOT, which is what keeps them independent. */
+  const deliver = async (content, slot) => {
     const hook = resolveWebhook(env);
     if (!hook.url) {
-      record.notify.delivered = false;
-      record.notify.error = `no webhook configured (checked ${WEBHOOK_SOURCES.join(", ")}) — this monitor cannot reach anyone`;
-    } else {
-      try {
-        const res = await fetch(hook.url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: notifyMessage({ kind: decision.kind, judgement, record, target }) }),
-        });
-        record.notify.delivered = res.ok;
-        if (!res.ok) record.notify.error = `webhook rejected the message (HTTP ${res.status})`;
-      } catch (err) {
-        record.notify.delivered = false;
-        record.notify.error = String(err?.name || "Error");
-      }
+      slot.delivered = false;
+      slot.error = `no webhook configured (checked ${WEBHOOK_SOURCES.join(", ")}) — this monitor cannot reach anyone`;
+      return;
     }
+    try {
+      const res = await fetch(hook.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      });
+      slot.delivered = res.ok;
+      if (!res.ok) slot.error = `webhook rejected the message (HTTP ${res.status})`;
+    } catch (err) {
+      slot.delivered = false;
+      slot.error = String(err?.name || "Error");
+    }
+  };
+
+  if (decision.notify) {
+    await deliver(notifyMessage({ kind: decision.kind, judgement, record, target }), record.notify);
     // ⭐ lastNotifiedAt advances ONLY on confirmed delivery, so an undelivered alert is retried on
     // the next run instead of being silently rate-limited away by a send that never landed.
     if (record.notify.delivered === true) record.lastNotifiedAt = nowIso;
-
-    // Patch the record with the notify outcome. If THIS write fails the earlier one still stands —
-    // that is the whole point of writing first.
-    if (recordWritten) {
-      await blobs.setJSON(LATEST_KEY, record).catch(() => {});
-      if (!judgement.ok) await blobs.setJSON(`failure:${nowIso}`, record).catch(() => {});
-    }
   }
 
+  // ⭐ SEPARATE SEND, SEPARATE CLOCK. Two concerns can page in the same tick, and a delivery
+  // failure on one must not advance the other's suppression window.
+  if (sweeperDecision.notify) {
+    await deliver(sweeperMessage({ kind: sweeperDecision.kind, observation: sweeper }), record.sweeperNotify);
+    if (record.sweeperNotify.delivered === true) record.sweeperLastNotifiedAt = nowIso;
+  }
+
+  // Patch the record with the notify outcomes. If THIS write fails the earlier one still stands —
+  // that is the whole point of writing first.
+  if (recordWritten && (decision.notify || sweeperDecision.notify)) {
+    await blobs.setJSON(LATEST_KEY, record).catch(() => {});
+    if (!judgement.ok) await blobs.setJSON(`failure:${nowIso}`, record).catch(() => {});
+  }
+
+  // ⭐ THE ADDITIVE PROPERTY, ROUTED THROUGH ONE FUNCTION SO A SUITE CAN PIN IT: `ok` is the money
+  // path's verdict and nothing else. A dead sweeper must never make this monitor report that
+  // strong reads are broken — that would be an inferred failure, the exact error its own header
+  // records as the costliest one it has made.
+  const verdict = composeVerdict({ moneyJudgement: judgement, sweeperObservation: sweeper });
+
   return json(200, {
-    ok: judgement.ok,
+    ok: verdict.ok,
     reason: judgement.reason,
     detail: judgement.detail,
+    sweeper: { ...sweeper, notify: record.sweeperNotify },
     notify: record.notify,
     treeChanged: record.treeChanged,
     recordWritten,

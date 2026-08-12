@@ -11,6 +11,7 @@
 
 import { mock } from "node:test";
 import { readFileSync } from "node:fs";
+import { SWEEPER_STORE, HEARTBEAT_KEY, STALE_AFTER_MS } from "../shared/strong-read-watch/sweeper-heartbeat.mjs";
 import { execFileSync } from "node:child_process";
 
 let pass = 0, fail = 0;
@@ -381,18 +382,47 @@ const writes = [];
 let webhookCalls = [];
 let blobFail = false;
 
-const makeStore = () => ({
-  get: async () => (writes.length ? writes[writes.length - 1].value : null),
-  setJSON: async (key, value) => { if (blobFail) throw Object.assign(new Error("down"), { name: "BlobsError" }); writes.push({ key, value }); },
-});
+// ⚠️ THE FIXTURE IS STORE- AND KEY-AWARE ON PURPOSE. It used to be a single fake that ignored both
+// arguments, which was a faithful model only while the handler touched exactly one store and one
+// key. The moment the sweeper-heartbeat check landed, that fixture silently served the monitor's
+// OWN record in answer to a heartbeat read — producing three failures that looked like defects in
+// the new code and were actually the test double lying. A fake that ignores the arguments it is
+// given cannot distinguish "read the right thing" from "read anything at all".
+let heartbeatFixture = { at: "FRESH", open: 0, totalKeys: 1 };
+let heartbeatThrows = false;
 
-mock.module("@netlify/blobs", { namedExports: { getStore: () => makeStore(), connectLambda: () => {} } });
+const makeStore = (name) => {
+  if (name === SWEEPER_STORE) {
+    return {
+      get: async (key) => {
+        if (heartbeatThrows) throw Object.assign(new Error("down"), { name: "BlobsError" });
+        if (key !== HEARTBEAT_KEY) return null;
+        if (heartbeatFixture?.at === "FRESH") return { ...heartbeatFixture, at: new Date().toISOString() };
+        return heartbeatFixture;
+      },
+      setJSON: async () => { throw new Error("the monitor must never WRITE to the sweeper's store"); },
+    };
+  }
+  return {
+    get: async () => (writes.length ? writes[writes.length - 1].value : null),
+    setJSON: async (key, value) => { if (blobFail) throw Object.assign(new Error("down"), { name: "BlobsError" }); writes.push({ key, value }); },
+  };
+};
+
+mock.module("@netlify/blobs", { namedExports: { getStore: (name) => makeStore(name), connectLambda: () => {} } });
 // Path is relative to THIS file, not to the importer. `../../` resolved outside the repo.
 mock.module("../netlify/functions/_blobs.mjs", { namedExports: { connectBlobs: () => {}, strongReadAvailable: () => true } });
 
 const origFetch = globalThis.fetch;
-const runHandler = async ({ probeBody = goodProbe(), probeStatus = 200, env = {}, webhookOk = true, webhookThrows = false }) => {
+const runHandler = async ({ probeBody = goodProbe(), probeStatus = 200, env = {}, webhookOk = true, webhookThrows = false,
+                           heartbeat = { at: "FRESH", open: 0, totalKeys: 1 }, hbThrows = false,
+                           prevRecord = null }) => {
   writes.length = 0; webhookCalls = [];
+  // ⭐ A PRIOR RECORD, SEEDED. Without this the fake store returns null for `prev` on every run, so
+  // EVERY transition reads as first-observation — and any test of a transition passes from the
+  // wrong branch while looking green. That has happened in this repo before.
+  if (prevRecord) writes.push({ key: "latest", value: prevRecord });
+  heartbeatFixture = heartbeat; heartbeatThrows = hbThrows;
   const saved = { ...process.env };
   for (const k of ["WATCH_STORE", "WATCH_TARGET_URL", "WATCH_ALERT_WEBHOOK", "DISCORD_FEEDBACK_WEBHOOK"]) delete process.env[k];
   Object.assign(process.env, env);
@@ -456,6 +486,72 @@ r = await runHandler({ probeBody: goodProbe({ verdict: "HOTFIX" }), env: { WATCH
 blobFail = false;
 check("⭐⭐ an UNWRITABLE store still NOTIFIES — losing the record must not also lose the alert",
   r.recordWritten === false && webhookCalls.length === 1);
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+section("  …🚨 THE SWEEPER HEARTBEAT MUST NOT BE ABLE TO DEGRADE THIS MONITOR");
+// scripts/verify-sweeper-heartbeat.mjs pins the property on the pure functions. THIS pins it on
+// the WIRING — the composition function can be perfect and the handler can still ignore it.
+// A binding can only be tested across what it binds.
+
+const HB_ENV = { WATCH_ALERT_WEBHOOK: "https://hook.example/x" };
+
+r = await runHandler({ env: HB_ENV, hbThrows: true });
+check("⭐⭐ a THROWING heartbeat store does not throw the monitor, and ok stays the money path's",
+  r.ok === true && r.reason === REASON.OK, `ok=${r.ok} reason=${r.reason}`);
+check("  …the sweeper is reported UNREADABLE, not as a healthy sweeper",
+  r.sweeper.sweeperOk === false && r.sweeper.reason === "unreadable");
+check("  …and the record was still written",
+  writes.some((w) => w.key === "latest"));
+
+r = await runHandler({ env: HB_ENV, heartbeat: null });
+check("⭐⭐ a MISSING heartbeat leaves ok:true — a dead sweeper must never read as broken strong reads",
+  r.ok === true && r.sweeper.sweeperOk === false && r.sweeper.reason === "missing");
+
+r = await runHandler({ env: HB_ENV, heartbeat: { at: new Date(Date.now() - STALE_AFTER_MS - 60_000).toISOString() } });
+check("⭐⭐ a STALE heartbeat alerts…", webhookCalls.length === 1 && r.sweeper.notify.delivered === true);
+check("  …with the SWEEPER's headline, not the strong-read one",
+  /UB SWEEPER/.test(webhookCalls[0].body) && !/blobs-probe/.test(webhookCalls[0].body));
+check("  …while the money path stays silent and ok", r.ok === true && r.notify.planned === false);
+
+// ⭐⭐ BOTH CONCERNS CAN PAGE IN ONE TICK — two sends, two independent slots.
+r = await runHandler({ probeBody: goodProbe({ verdict: "HOTFIX" }), env: HB_ENV,
+                       heartbeat: { at: new Date(Date.now() - STALE_AFTER_MS - 60_000).toISOString() } });
+check("⭐⭐ a broken money path AND a stale sweeper send TWO messages, not one",
+  webhookCalls.length === 2, `sent ${webhookCalls.length}`);
+check("  …one of each headline — neither concern is swallowed by the other",
+  webhookCalls.some((c) => /UB SWEEPER/.test(c.body)) && webhookCalls.some((c) => !/UB SWEEPER/.test(c.body)));
+check("  …and the two delivery outcomes land in SEPARATE slots",
+  r.notify.delivered === true && r.sweeper.notify.delivered === true);
+// ⭐⭐ THE DURABLE EVIDENCE: two suppression clocks on one record. If these were a single field,
+// one concern's delivery would rate-limit the other's next alert away.
+const bothPaged = writes.filter((w) => w.key === "latest").pop().value;
+check("  …and TWO independent suppression clocks are persisted, not one shared one",
+  typeof bothPaged.lastNotifiedAt === "string" && typeof bothPaged.sweeperLastNotifiedAt === "string" &&
+  bothPaged.lastNotifiedAt !== undefined,
+  `money=${bothPaged.lastNotifiedAt} sweeper=${bothPaged.sweeperLastNotifiedAt}`);
+
+// ⭐⭐ AND THE CASE THAT MOTIVATED THE SPLIT, ACROSS TWO TICKS: prev = money BROKEN + sweeper
+// STALE-and-already-paged. Now the money path recovers while the sweeper is still stale.
+// ⚠️ Replaying `bothPaged` is what makes this a real transition rather than a first observation —
+// verify the kinds below are NOT "first-failure", or this test is measuring nothing.
+// ⚠️ BACK-DATED past MIN_RERUN_MS. A prev stamped "now" makes the handler take its dedupe
+// early-return, and the assertions below would then be reading a skipped run.
+const stalePrev = { ...bothPaged, producedAt: new Date(Date.now() - MIN_RERUN_MS - 60_000).toISOString() };
+r = await runHandler({ env: HB_ENV, prevRecord: stalePrev,
+                       heartbeat: { at: new Date(Date.now() - STALE_AFTER_MS - 60_000).toISOString() } });
+check("⭐ …and it really is a transition, not a first observation",
+  r.notify.kind === "recovered", `money kind=${r.notify.kind}`);
+check("⭐⭐ the money path RECOVERING does not consume the sweeper's transition — it is still stale",
+  r.ok === true && r.sweeper.sweeperOk === false && r.sweeper.notify.kind === "still-failing-quiet",
+  `sweeper kind=${r.sweeper.notify.kind}`);
+check("  …the sweeper stays suppressed by ITS OWN clock, not by the money path's recovery",
+  r.sweeper.notify.planned === false && r.notify.planned === true);
+
+r = await runHandler({ env: HB_ENV });
+check("⭐ a fresh heartbeat is silent — the sweeper concern does not chatter on a healthy tick",
+  webhookCalls.length === 0 && r.sweeper.sweeperOk === true);
+check("  …and the monitor never WRITES to the sweeper's store (the fixture throws if it tries)",
+  r.ok === true && writes.every((w) => w.key === "latest" || w.key.startsWith("failure:")));
 
 section("  …store namespace isolation (change 3)");
 r = await runHandler({ env: { WATCH_STORE: "watch-draft-proof", WATCH_ALERT_WEBHOOK: "https://hook.example/x" } });

@@ -160,7 +160,15 @@ last structural gap in this feature and is OPEN.
 ### NEXT, IN ORDER
 
 1. ✅ DONE — deploy published `7f5d5de`, heartbeat appeared, calibration ran and cleaned up.
-2. **Decide the independent watcher for the heartbeat** (the last structural gap — see above).
+2. ✅ DONE — the independent watcher is **strong-read-watch**, not a new function and not dd-watch.
+   Decided by the precedent already written into that monitor's own header: dd-watch guards DD,
+   *which is going standalone and will leave this repo*, so folding user-funds monitoring into it
+   would mean the exit loses its watcher the day DD moves out. A new function would have added a
+   fourth schedule without adding the independence that matters — the independence needed is from
+   THE SWEEPER, which strong-read-watch already has (different process, schedule and store).
+   `shared/strong-read-watch/sweeper-heartbeat.mjs`, 55/0 + 16 handler-level checks in test:watch.
+   ⚠️ **The bound, stated rather than discovered later:** this closes the sweeper-died gap only. If
+   strong-read-watch itself dies nothing watches it. Recursion stops there, deliberately.
 3. **Then** initiate 1 USDC (operator-run; the endpoint needs a browser session and manufacturing one
    is ruled out). Verify: chain 2→1, a record in `waiting` with an `initiateTxHash`, sweeper reporting
    `open=1`. ⭐ **Completion can only be confirmed ~7 days later** — the first thing here whose proof
