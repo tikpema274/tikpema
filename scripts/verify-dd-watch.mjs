@@ -259,6 +259,19 @@ section("8c — 🚨 THE WINDOW MEASURES UNHEALTHY, NOT MERELY 'REFUSING'");
     closed.event === "window-closed" && closed.ms === 540000 && closed.induced === true);
 }
 
+section("8d — ⭐ EVERY RECORD MUST SAY WHICH CODE WROTE IT");
+{
+  // Attributing an observation to a code change by TIMESTAMP is unsound: the window closes and the
+  // code changes at roughly the same moment, and a tick can straddle the transition. A result from
+  // the OLD code then gets credited to the new one. Same shape as the settler probe — a concurrent
+  // change makes an observation unattributable however clean the result looks.
+  const src = readFileSync(new URL("../netlify/functions/dd-watch.mjs", import.meta.url), "utf8");
+  check("⭐⭐ the record carries a build identity", /build:\s*\{\s*commit:/.test(src));
+  check("  …sourced from the baked stamp, not from env or a guess", /buildStamp\(\)/.test(src));
+  check("  …and reports `resolved` so an unstamped deploy says so instead of guessing",
+    /resolved:\s*stamp\.resolved/.test(src));
+}
+
 section("9 — 🚨 THE MONITOR MUST NEVER BE ABLE TO REFUSE ITSELF");
 {
   // Shipped 2026-08-11 and caught the same night: the handler refused any invocation carrying an

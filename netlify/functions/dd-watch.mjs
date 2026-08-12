@@ -1,6 +1,12 @@
 import { getStore } from "@netlify/blobs";
 import { connectBlobs } from "./_blobs.mjs";
 import { requireInternal } from "./_auth.mjs";
+// ⭐ SO EVERY RECORD SAYS WHICH CODE WROTE IT. Without this, attributing an observation to a code
+// change means comparing a timestamp against a fuzzy publish moment — and a tick can straddle the
+// transition, so a result from the OLD code gets credited to the new one. Same attribution problem
+// as the settler probe: a concurrent change makes an observation unattributable however clean it
+// looks. The stamp is baked at build time, so it identifies the artifact that produced the record.
+import { buildStamp } from "../../shared/build-stamp.mjs";
 import {
   SCHEMA, MIN_RERUN_MS, TTL_MS, REMINDER_MS, GRACE_MS, CANARY_PERIOD_MS, CRON_MS,
   DEFAULT_PATHS, CANONICAL_PATH_KEY, PROBE_SUBJECT, PROBE_MARKER, PROBE_UA,
@@ -130,9 +136,12 @@ export const handler = async (event) => {
   const induced = leverActive(targets);
   const win = windowFrom({ prev, judgement, nowIso, induced });
 
+  const stamp = buildStamp();
   const record = {
     schema: SCHEMA,
     producedAt: nowIso,
+    // ⭐ SELF-ATTRIBUTION. `resolved:false` means the deploy skipped stamping — reported, never guessed.
+    build: { commit: stamp.commit, tree: stamp.tree, resolved: stamp.resolved },
     ok: judgement.ok,
     alert: judgement.alert,
     alertReason: judgement.alertReason,
