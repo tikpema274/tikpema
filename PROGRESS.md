@@ -1,5 +1,122 @@
 ---
 
+## 2026-08-12 — ✅ THE UNIFIED BALANCE HAS AN EXIT. Option (a) built: two calls ~7 days apart, a sweeper that finishes it, and the wait disclosed BEFORE deposit.
+
+**Commits `06d3a94` (the exit) · `ffe5ac3` (a suite that was passing on build residue) ·
+`a8060ed` (v4 copy).** Decision was (a), taken deliberately: on testnet (b) was defensible, but with
+real user money **a pocket with no exit that the user was TOLD about is still a pocket with no
+exit** — disclosure changes who is culpable, not what the user can do. Mainnet **2026-09-16**.
+
+### THE SHAPE — three hops, and hop 3 already existed
+
+    1. initiateWithdrawal(token, amount)   starts a delay set by the CONTRACT
+    2. ~1,209,600 BLOCKS ≈ 7.1 days        DERIVED at 0.5097 s/block
+    3. withdraw(token)                     funds land in the user's SCA
+    → agent-withdraw (pre-existing)        SCA → the user's login wallet
+
+⚠️ **THE DELAY IS BLOCKS, NOT SECONDS.** `1209600 = 14 × 86400` is a COINCIDENCE that has already
+misled a reader. Every user-facing string says **"about seven days"** and never a precise figure.
+
+### 🚨 THE SWEEPER IS WHAT MAKES THIS AN EXIT RATHER THAN THE OPTION WE REJECTED
+
+Option (c) — build only step 1 — was rejected on sight: **a half-built exit that starts a clock
+nobody finishes is worse than no exit, because the user believes they are leaving.** But "the user
+comes back in a week and clicks again" is the same failure wearing a nicer face.
+
+⭐ **ON THE BRIDGE, "a user who never comes back" WAS THE EDGE CASE. FOR A WITHDRAWAL IT IS THE
+ORDINARY ONE** — someone asking for their money back is, by definition, leaving. So `ub-withdraw-sweep`
+(`*/30`) drives hop 2 with no session, no page load and no human.
+
+⚠️ **THAT MEANS THE SERVER MOVES USER FUNDS UNATTENDED, ~7 DAYS AFTER THE REQUEST.** Deliberate and
+bounded: it can only call `withdraw(token)` for an owner who ALREADY initiated, it takes no amount
+(the contract decides what matured), and `withdraw` pays `msg.sender` — the user's own SCA. ⭐ The
+guarantee is **absence of mechanism**: no path in that function can move money anywhere but back.
+
+⭐⭐ **AND IT IS NOW THE HIGHEST-CONSEQUENCE ROW IN `GUARDED_SCHEDULES`.** A forgotten `dd-canary`
+schedule makes DD refuse — loud, fail-closed, obvious. A forgotten `ub-withdraw-sweep` schedule means
+withdrawals **silently never complete**: the promise "you do not have to come back" quietly stops
+being true, nothing errors, nobody is paged, and the money stays put.
+
+### DESIGN RULES CARRIED IN
+
+* ⭐ **A RECLAIM IS NOT A SPEND.** No `assertNotPaused`, `canSpendDay`, `sendCapUsdc` or
+  `recordAgentSpend` — those bound what the AGENT may spend, and **a paused agent must never trap the
+  user's money.** Removing them NARROWS the surface: there is no `to` parameter anywhere and
+  `withdraw(address)` takes no beneficiary, so funds can only land in the caller's own SCA.
+* 🚨 **RECORD BEFORE CHAIN CALL.** The sweeper scans RECORDS, so an unrecorded initiation is a clock
+  nothing finishes. If the handler dies or the 10s ceiling cuts it, the record survives in
+  `initiating` and the sweeper RECONCILES against the chain — which is why the front door can stay
+  synchronous. **Third time this codebase has needed this ordering** (`_dd-x402`, `dd-watch`).
+* ⭐ **"COMPLETED" ≠ THE USER HAS THEIR MONEY.** Records carry `landedIn` + `stillNeedsAgentWithdraw`
+  so nothing downstream can render "your money is back" from state alone.
+* ⭐ **TRI-STATE TO THE EDGE.** Unreadable chain or store ⇒ `readable:false`, NEVER zero. "We could
+  not read your balance" and "your balance is zero" are different answers to someone asking where
+  their money is. The sweeper reports `store-unreadable` rather than a clean tick.
+* ⚠️ **`not-yet-matured` IS A NORMAL RESULT**, seen every tick for a week — logging it as failure
+  would alarm every 30 min and train everyone to ignore it.
+* ⚠️ **IDEMPOTENCE IS THE CHAIN'S:** a premature or duplicate `withdraw` REVERTS (measured `"N;O"`),
+  so open records can be retried safely. No guard that merely looks like the real protection.
+* ⚠️ **NO `httpMethod` AUTH GUARD on the sweeper** — `dd-watch` shipped one and refused its own cron
+  for five runs. A sweeper must never be able to refuse itself.
+
+`scripts/verify-ub-withdraw.mjs` **15/0** — every branch by injection, including chain-unreadable,
+store-down, a throwing completion, and INITIATING reconciled against the chain.
+
+### 🚨 THE COPY GUARD HAD BECOME THE FALSEHOOD IT EXISTED TO PREVENT
+
+`verify-unified-balance-copy` **REQUIRED** the strings *"we haven't implemented it or tested that it
+works end to end"* and *"not that no path exists"*. Both were true and load-bearing when written.
+**The moment the exit shipped, the guard would have FAILED THE BUILD FOR TELLING USERS THE TRUTH.**
+
+⭐⭐ **THE MECHANISM WAS NEVER WRONG — IT OUTLIVED THE FACT IT PROTECTED.** A copy guard pins a claim,
+and a claim has a shelf life. This is the **fourth** distinct way this paragraph has been wrong, and
+the only one where the guard was the problem rather than the catch. Those strings are now FORBIDDEN
+alongside every v1–v3 falsehood, for exactly the same reason.
+
+**v4 IS NOT "you can get your money back."** The path is built and has **never been run end to end
+with real funds**; claiming more repeats v2's error of inferring a working release path from the
+existence of code. Both halves are asserted: **built and automatic** ("you do not have to come
+back") **and unexercised** ("nobody has taken this route with real funds yet").
+
+⭐⭐ **THE BEFORE-DEPOSIT DISCLOSURE IS THE SKIM-LINE.** The deposit card still LED with *"Treat this
+as one-way"* while the paragraph beneath described a working exit. **The lead is what gets read; a
+correct paragraph under a wrong skim-line is a wrong card.** It now reads *"Money goes in instantly
+and takes about seven days to come back out"* — and the guard asserts the ORDER (cost before
+mechanism), not merely the presence of the words.
+⚠️ **I MISSED THAT SITE WITH A CASE-SENSITIVE GREP** ("Treat" vs "treat"); the guard's `/gi` caught
+it — the same failure mode that let `badge="Server-released, delayed"` survive three reviews.
+The badge has now been wrong twice and right twice: it reads **"Exit built · about seven days"**.
+
+### 🚨 `test:dd` WAS PASSING OR FAILING ON LOCAL BUILD RESIDUE — 7 OF 17 SUITES
+
+Same commit, two states: `npm run build` → `verify-endpoint` **77/0**; `npm run stamp:clear` →
+**18 FAILURES**. `f714bb9` made the build stamp the DD identity, and every suite that let
+`codeIdentity()` fall through to disk inherited a dependency on **whatever the developer last ran**.
+
+⭐ **AND THE FAILURES NAMED THE WRONG THING** — *"expected 400 invalid-address, got 503
+service-unverified"*. Nothing pointed at the stamp, which is how it went unnoticed. `test:dd` was
+green earlier that day only because deploys had been running. **I introduced the coupling and did not
+notice the suites had become dependent on it.**
+
+**FIXED:** `verify-endpoint` + `verify-health-read-consistency` inject a deterministic stamp
+(`scripts/dd/_test-stamp.mjs`) and pass identically in both states.
+⚠️ **ONLY MITIGATED:** **ESM hoists static imports above module-level code**, so the mock lands too
+late for suites importing the module under test statically — and it **no-ops silently**. ⭐ **A
+mechanism that works in some callers and quietly not in others is worse than none**, so those three
+calls were REMOVED rather than left looking like protection. `test:dd` now runs `npm run stamp` first
+— reliable in aggregate, but a single suite run against a cleared stamp still fails with the same
+misleading message.
+
+### 🚧 WHAT IS NOT PROVEN
+
+* 🚨 **THE WRITE PATHS HAVE NEVER RUN.** `initiateWithdrawal` and `withdraw` are unexercised with
+  real funds — which is exactly what the copy now says. The read half IS live-verified.
+* 🚧 The sweeper has never completed a real withdrawal; every branch is injection-proven only.
+* ⚠️ `eth_call` proved the CONTRACT would accept the call; it does not prove Circle's signer produces
+  a valid userOp. That closes only by executing one.
+
+---
+
 ## 2026-08-12 — UNIFIED BALANCE EXIT: the capability is VERIFIED. 🚨 THE DECISION IS DUE, AND IT IS NOT AN ENGINEERING ONE.
 
 **Read-only probe. NO state changed, nothing signed, nothing broadcast.** `eth_call` simulates
@@ -1506,27 +1623,12 @@ before. Read the amount off the 402, not from memory.
       store, own channel. **Every transition observed live**, including a genuine `recovered` and the
       `induced` carry-forward. ⚠️ Residual: the always-real alert RENDERINGS are suite-only, and both
       `windowHistory` entries are induced.
-   3. 🚨 **⭐⭐ UNIFIED BALANCE EXIT — CAPABILITY VERIFIED 2026-08-12, DECISION DUE. MAINNET 09-16.**
-      `initiateWithdrawal` would SUCCEED from our SCA (simulated), `execute()` drives it, a random
-      EOA is REFUSED, no permission module. ⚠️ The wait is **~7.1 days** (1,209,600 BLOCKS).
-      🚨 **THE PROBE IS DONE; THE DECISION IS NOT** — (a) build it with the wait disclosed BEFORE
-      deposit, (b) don'''t build it and say so plainly, or (c) build only the first half.
-      **(c) IS THE TRAP: a half-built exit that starts a clock nobody finishes is worse than no exit,
-      because the user believes they are leaving.** ⭐ On testnet (b) is defensible; with REAL money a
-      disclosed pocket with no exit is still a pocket with no exit. **Operator'''s call, not
-      engineering'''s.**
-   3. **THE SUPERSESSION DOC — deliberately LAST.** It is the **LISTING** precondition and listing is
-      not imminent, so nobody is verifying `tokenURI(851891)` yet; and being commit-scoped to
-      `3e27042`, the frozen doc stays **honestly out-of-date rather than wrong**. ⚠️ Urgent the moment
-      a listing is real — a listing is what brings verifiers to a doc denying signing exists.
-3. **Funding Base Sepolia** — 🚨 **PRECONDITION: verify the delegate on Base Sepolia FIRST.** UB
-   auto-allocation is ON (both spend sites omit `from.allocations`). `_pay.mjs` is same-chain, a
-   permanent no-op; **`_ubspend.mjs` is cross-chain, so the DESTINATION is tier 1** — the first Base
-   balance silently flips its source chain, on a DATA condition, with no deploy. `_delegate.mjs`
-   grants per-SCA and only Arc has been exercised.
-4. `dca-tick` is untested beyond the ledger-failure branch (`npm run test:dca`).
-5. The budget counter stores exactly `0.3` after 0.1 + 0.2 — no float accumulation, mechanism unread.
-6. DD-standalone scoping comments for `_dd-health.mjs`/`_blobs.mjs`; `pauseStates:116` roster fix.
+   3. ✅ **UNIFIED BALANCE EXIT — BUILT 2026-08-12 (option a).** `initiateWithdrawal` → ~7 days →
+      `ub-withdraw-sweep` (`*/30`) completes it automatically → `agent-withdraw` returns it to the
+      login wallet. Wait disclosed in the deposit card's LEAD sentence. `verify-ub-withdraw` 15/0.
+      🚨 **THE WRITE PATHS HAVE NEVER RUN WITH REAL FUNDS** — the read half is live-verified, the
+      sweeper has never completed a real withdrawal, and the copy says so. That proof is the
+      operator's to run and is the last thing between this and mainnet (2026-09-16).
 
 ### SUITES
 
