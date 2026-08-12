@@ -114,10 +114,16 @@ export async function handler(event) {
   // ═══ RECORD FIRST. See the header — this ordering is the design, not bookkeeping. ═══
   const withdrawalId = randomUUID();
   await createRecord({ owner, amountUsdc: amount, withdrawalId });
+  // ⭐ THE MATURITY DATE IS WRITTEN AT CREATION, not derived later. It is the one fact a human
+  // needs a week from now, and "recompute it from createdAt + delayBlocks" is exactly what nobody
+  // does at the moment it matters. ⚠️ APPROXIMATE — derived from a BLOCK count, so it drifts with
+  // block time and must never be rendered as a precise deadline.
+  const maturesApprox = new Date(Date.now() + state.approxDelayDays * 86400 * 1000).toISOString();
   await patchRecord({ owner, withdrawalId, fields: {
     amountAtomic: BigInt(Math.round(amount * 1e6)).toString(),
     delayBlocks: state.delayBlocks,
     approxDelayDays: state.approxDelayDays,
+    maturesApprox,
   } });
 
   try {
@@ -134,6 +140,7 @@ export async function handler(event) {
       amountUsdc: String(amount),
       // ⚠️ Say precisely what has and has not happened. Nothing has moved yet.
       whatHappened: "the delay has started. No funds have moved yet.",
+      maturesApprox,
       whatHappensNext:
         "after about seven days we complete this automatically and the funds arrive in your agent " +
         "wallet. Moving them on to your login wallet is a separate step you control.",

@@ -69,12 +69,22 @@ export async function createRecord({ owner, amountUsdc, withdrawalId, now = () =
     // reproducible after the fact.
     delayBlocks: null,
     approxDelayDays: null,
+    // ⭐ WRITTEN, NOT REMEMBERED. The maturity date is the one fact a human needs a week from
+    // now, and "derive it from createdAt + delayBlocks" is exactly the sort of thing nobody
+    // does at the moment it matters. APPROXIMATE by construction — the delay is in BLOCKS, so
+    // this drifts with block time and must never be shown as a precise deadline.
+    maturesApprox: null,
     // ⭐ The honest end-state marker. `completed` means the funds reached the SCA; it does
     // NOT mean they reached the user. Anything rendering "your money is back" must consult
     // this, not the state alone.
     landedIn: null,
     stillNeedsAgentWithdraw: true,
     lastError: null,
+    // ⭐ ALERT STATE ON THE RECORD, so a transition survives across sweeper ticks and a restart
+    // cannot re-page. Same rule as dd-watch: lastAlertedAt advances ONLY on confirmed delivery,
+    // so an undelivered alert is retried rather than suppressed by a window it never earned.
+    overdueAlerted: false,
+    lastAlertedAt: null,
   };
   await store().setJSON(key(owner, withdrawalId), rec);
   return rec;
@@ -151,4 +161,41 @@ export async function listAllOpen({ limit = 50 } = {}) {
     return { readable: false, open: [], scanned: 0, unreadable: 0, totalKeys: null, remaining: null,
       error: String(e?.message ?? e).slice(0, 200) };
   }
+}
+
+/**
+ * ⭐⭐ IS THIS RECORD OVERDUE? — the alert discriminator.
+ *
+ * 🚨 NOT "did completion fail". A single failed tick is normal: RPC blips, Circle 500s, and the
+ * contract itself refuses a premature withdraw. Alerting on that would page every 30 minutes
+ * through a perfectly healthy week and train everyone to ignore it — the ack-gate failure, and
+ * the same reason dd-watch keys on REASON + DURATION rather than on the refusal itself.
+ *
+ * ⭐ THE REAL SIGNAL IS TIME PAST MATURITY. A withdrawal that should have completed and has not
+ * is a user's money behind an expired clock — and the product told them it completes
+ * automatically. That is the worst state this feature has, so it is the one that pages.
+ *
+ * ⚠️ GRACE EXISTS BECAUSE MATURITY IS APPROXIMATE. `maturesApprox` is derived from a BLOCK count
+ * at a measured block time; real maturity drifts. A grace shorter than that drift would page on
+ * arithmetic rather than on a problem.
+ */
+export const OVERDUE_GRACE_MS = 6 * 60 * 60 * 1000; // 6h against a ~7-day delay
+
+export function isOverdue(rec, now = Date.now()) {
+  if (!rec || rec.state === STATE.COMPLETED || rec.state === STATE.FAILED) return false;
+  const m = Date.parse(rec.maturesApprox ?? "");
+  // ⭐ NO maturesApprox ⇒ NOT overdue. An unknown maturity is not an expired one, and guessing
+  // here would page on every legacy record ever written.
+  if (!Number.isFinite(m)) return false;
+  return now > m + OVERDUE_GRACE_MS;
+}
+
+/** The sweeper's own liveness marker. ⭐ Written EVERY tick, including clean ones, so that its
+ *  ABSENCE is detectable by something other than itself — an alarm inside the thing that goes
+ *  quiet inherits the silence it is supposed to break. */
+export async function writeHeartbeat(fields = {}) {
+  await store().setJSON("heartbeat", { at: new Date().toISOString(), ...fields }).catch(() => {});
+}
+export async function readHeartbeat() {
+  return store().get("heartbeat", { type: "json" }).catch(() => null);
 }

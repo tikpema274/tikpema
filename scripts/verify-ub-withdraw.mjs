@@ -88,6 +88,37 @@ const w2b = await R.readRecord({ owner: OWNER, withdrawalId: "w2" });
 ck("lastError recorded on the record", /circle 500/.test(w2b.lastError ?? ""));
 ck("state STILL waiting → retried next tick", w2b.state === "waiting");
 
+console.log("\n── ⭐⭐ OVERDUE ALERTING — the discriminator is MATURITY, not failure ──");
+{
+  const { isOverdue, OVERDUE_GRACE_MS } = R;
+  const iso = (ms) => new Date(Date.now() + ms).toISOString();
+  const rec = (over) => ({ state: R.STATE.WAITING, maturesApprox: iso(-1), ...over });
+
+  // 🚨 A failing tick during the ~7-day wait is NORMAL. Paging on it would fire every 30 minutes
+  // through a healthy week and train everyone to ignore the channel — the ack-gate failure.
+  ck("⭐⭐ still-waiting, well before maturity → NOT overdue",
+    isOverdue(rec({ maturesApprox: iso(5 * 86400e3) })) === false);
+  ck("  …even with a recent failure recorded (a failed tick is not the signal)",
+    isOverdue(rec({ maturesApprox: iso(5 * 86400e3), lastError: "circle 500" })) === false);
+  ck("⭐ just past maturity but inside grace → still NOT overdue (maturity is APPROXIMATE)",
+    isOverdue(rec({ maturesApprox: iso(-OVERDUE_GRACE_MS / 2) })) === false);
+  ck("⭐⭐ past maturity + grace → OVERDUE (money behind an expired clock)",
+    isOverdue(rec({ maturesApprox: iso(-OVERDUE_GRACE_MS - 60000) })) === true);
+  ck("completed is never overdue", isOverdue(rec({ state: R.STATE.COMPLETED, maturesApprox: iso(-9e9) })) === false);
+  // ⭐ An unknown maturity is not an expired one — guessing would page on every legacy record.
+  ck("⭐ NO maturesApprox → NOT overdue (unknown is not expired)",
+    isOverdue({ state: R.STATE.WAITING }) === false && isOverdue({ state: R.STATE.WAITING, maturesApprox: "nonsense" }) === false);
+  ck("null/undefined records are not overdue", isOverdue(null) === false && isOverdue(undefined) === false);
+}
+
+console.log("\n── ⭐ HEARTBEAT — so the sweeper's ABSENCE is detectable by something else ──");
+{
+  await R.writeHeartbeat({ open: 0 });
+  const hb = await R.readHeartbeat();
+  ck("⭐⭐ a heartbeat is written even on a CLEAN tick", !!hb && !!hb.at);
+  ck("  …carrying what the tick saw", hb.open === 0);
+}
+
 console.log("\n── ⭐⭐ STORE DOWN must not report a clean tick ──");
 STORE_DOWN = true;
 r = await run();

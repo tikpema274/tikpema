@@ -1,6 +1,6 @@
 import { connectBlobs } from "./_blobs.mjs";
 import { json } from "./_arc.mjs";
-import { listAllOpen, patchRecord, STATE } from "./_ubwithdraw-record.mjs";
+import { listAllOpen, patchRecord, STATE, isOverdue, OVERDUE_GRACE_MS, writeHeartbeat } from "./_ubwithdraw-record.mjs";
 import { readExitState, ubCompleteWithdrawal } from "./_ubwithdraw.mjs";
 
 // SCHEDULED — the UB withdrawal sweeper. Drives HOP 2 of the exit: the `withdraw(address)`
@@ -50,6 +50,12 @@ export const handler = async (event) => {
     console.error(`[ub-withdraw-sweep] DEGRADED — store unreadable; this tick proves NOTHING: ${listing.error}`);
     return json(200, { ok: false, reason: "store-unreadable", detail: listing.error });
   }
+
+  // ⭐ HEARTBEAT ON EVERY TICK, including clean ones. The alert below lives INSIDE this sweeper,
+  // so a sweeper that never runs cannot alert about itself — that is the same silence this whole
+  // feature exists to break, one level up. Writing liveness unconditionally is what lets something
+  // ELSE notice the absence. ⚠️ It does not close the gap by itself; see the header.
+  await writeHeartbeat({ open: listing.open.length, totalKeys: listing.totalKeys });
 
   if (listing.open.length === 0) {
     console.log(`[ub-withdraw-sweep] clean — scanned=${listing.scanned} open=0 totalKeys=${listing.totalKeys}`);
@@ -115,8 +121,47 @@ export const handler = async (event) => {
     }
   }
 
+  // ═══ 🚨 OVERDUE ALERTING — a user's money behind an EXPIRED clock ═════════════════════════
+  // The discriminator is TIME PAST MATURITY, never "completion failed once". A single failed tick
+  // is normal (RPC blips, Circle 500s, and the contract itself refuses a premature withdraw), and
+  // paging on it would fire every 30 minutes through a healthy week — the ack-gate failure.
+  //
+  // ⭐ THIS GOES TO THE MONEY CHANNEL, not the DD one. DD availability is a $0.06 service; this is
+  // someone's funds not arriving after the product promised they would. Same urgency class as the
+  // kill switch and the spend ceiling that WATCH_ALERT_WEBHOOK already guards.
+  const overdue = listing.open.filter((r) => isOverdue(r));
+  for (const r of overdue) {
+    if (r.overdueAlerted) continue;  // transition only — the record carries the state
+    const hook = (process.env.WATCH_ALERT_WEBHOOK || "").trim();
+    if (!hook) {
+      console.error(`[ub-withdraw-sweep] OVERDUE ${r.withdrawalId} and NO WATCH_ALERT_WEBHOOK — nobody can be told`);
+      continue;
+    }
+    const lines = [
+      "🚨 UB WITHDRAWAL OVERDUE — a user's funds are behind an expired clock",
+      `> They asked to withdraw ${r.amountUsdc} USDC and were told it completes automatically. It has not.`,
+      `• withdrawalId: ${r.withdrawalId}`,
+      `• owner: ${r.owner}`,
+      `• matured (approx): ${r.maturesApprox} — grace ${OVERDUE_GRACE_MS / 3600000}h has since elapsed`,
+      `• state: ${r.state}${r.lastError ? ` · lastError: ${r.lastError}` : ""}`,
+      "• the sweeper keeps retrying every 30 min; the manual completion path is POST /api/ub-withdraw (GET first to see state).",
+    ];
+    try {
+      const res = await fetch(hook, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: lines.join("\n") }), signal: AbortSignal.timeout(15_000) });
+      // ⭐ Flag advances ONLY on confirmed delivery, so an undelivered alert is retried next tick
+      // rather than suppressed by a transition it never actually made.
+      if (res.ok) await patchRecord({ owner: r.owner, withdrawalId: r.withdrawalId,
+        fields: { overdueAlerted: true, lastAlertedAt: new Date().toISOString() } });
+      else console.error(`[ub-withdraw-sweep] overdue alert REJECTED (HTTP ${res.status}) for ${r.withdrawalId}`);
+    } catch (e) {
+      console.error(`[ub-withdraw-sweep] overdue alert FAILED for ${r.withdrawalId}: ${String(e?.name ?? e)}`);
+    }
+  }
+
   const body = {
     ok: true,
+    overdue: overdue.length,
     scanned: listing.scanned,
     open: listing.open.length,
     totalKeys: listing.totalKeys,
