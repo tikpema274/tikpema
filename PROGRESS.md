@@ -167,6 +167,16 @@ last structural gap in this feature and is OPEN.
    fourth schedule without adding the independence that matters — the independence needed is from
    THE SWEEPER, which strong-read-watch already has (different process, schedule and store).
    `shared/strong-read-watch/sweeper-heartbeat.mjs`, 55/0 + 16 handler-level checks in test:watch.
+   ✅ **PRODUCTION-CONFIRMED** on deploy `6a7cab04` (published `17:40:36Z`): the first post-publish
+   tick, `17:45:46Z`, carries `sweeperOk:true / reason:"alive" / ageMs 891698 / staleAfterMs 4200000`.
+   ⭐ The record's `heartbeatAt` is `17:30:54.618Z` and `ub-withdrawals/heartbeat` reads
+   `17:30:54.618Z` — a VALUE-vs-VALUE match, so it read the real store rather than a default.
+   ⭐ Two kinds on one tick from separate prevs: money `steady-ok`, sweeper `first-ok`, both silent —
+   the split is visible in production, and the gap closed without adding noise.
+   ⚠️ **THE ALERTING SIDE IS STILL SUITE-ONLY.** `stale` / `missing` / `unreadable`, and the
+   two-concern split UNDER FAILURE, have never run on prod. Proving them needs the same shape of
+   calibration as the overdue alert (a back-dated heartbeat), and it touches the store the sweeper
+   uses — so it is a decision, not a follow-on.
    ⚠️ **The bound, stated rather than discovered later:** this closes the sweeper-died gap only. If
    strong-read-watch itself dies nothing watches it. Recursion stops there, deliberately.
 3. **Then** initiate 1 USDC (operator-run; the endpoint needs a browser session and manufacturing one
