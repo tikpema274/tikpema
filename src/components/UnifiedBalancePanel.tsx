@@ -220,11 +220,12 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
           )}{" "}
           — committed to your agent's float. Withdraw doesn't move it, and there's no button
           here that does. Only your agent's own account can release these funds, and{" "}
-          <b>Tikpema controls that account</b> — so what stops a withdrawal today is that we
-          haven't built one, not that no path exists. Arc's Gateway provides a trustless
-          withdrawal with a delay of about seven days; <b>we haven't implemented it or tested
-          that it works end to end.</b> Until we do, treat this as one-way: it can be spent
-          cross-chain, not pulled back.
+          <b>Tikpema controls that account</b> — so the exit runs through us. <b>It is built
+          now:</b> you ask, Arc's Gateway holds the funds for a delay of about seven days, and
+          we finish it automatically — <b>you do not have to come back</b>. It lands in your
+          agent's balance, which you can then withdraw yourself. <b>⚠️ Nobody has taken this
+          route with real funds yet</b>, so treat the wait as the floor rather than the
+          ceiling, and deposit only what you intend the agent to spend.
         </div>
       </div>
 
@@ -410,12 +411,13 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
             Never state it as a fixed number. */}
         <div className="sub" style={{ margin: "0 0 10px" }}>
           Move USDC from your agent's plain balance into its unified balance.{" "}
-          <b>Treat this as one-way. You can't withdraw it yourself: the balance belongs to
-          your agent's account, and only that account can release these funds.</b>{" "}
-          <b>Tikpema controls that account</b> — so what stops a withdrawal today is that we
-          haven't built one, not that no path exists. Arc's Gateway provides a trustless
-          withdrawal with a delay of about seven days; <b>we haven't implemented it or tested
-          that it works end to end.</b> Until then, deposit only what you intend the agent
+          <b>Money goes in instantly and takes about seven days to come back out.</b>{" "}
+          You can't withdraw it yourself: the balance belongs to your agent's account, and
+          only that account can release these funds.{" "}
+          <b>Tikpema controls that account</b> — so the exit runs through us. <b>It is built
+          now:</b> you ask, Arc's Gateway holds the funds for a delay of about seven days, and
+          we finish it automatically — <b>you do not have to come back</b>. <b>⚠️ Nobody has
+          taken this route with real funds yet.</b> Until then, deposit only what you intend the agent
           to spend.
         </div>
         {/* The deposit needs a session AND a provisioned wallet — the server enforces both

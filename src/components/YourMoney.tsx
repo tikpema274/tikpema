@@ -360,11 +360,10 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
               <span className="mono">{unified.status === "ready" ? unified.total : "—"}</span>{" "}
               USDC is in your unified balance. Committed to your agent's float. Only your
               agent's own account can release these funds, and <b>Tikpema controls that
-              account</b> — so what stops a withdrawal today is that we haven't built one,
-              not that no path exists. Arc's Gateway provides a trustless withdrawal with a
-              delay of about seven days; <b>we haven't implemented it or tested that it works
-              end to end.</b> Until we do, treat this as one-way. It can be spent cross-chain,
-              not pulled back.
+              account</b> — so the exit runs through us. <b>It is built now:</b> you ask, Arc's
+              Gateway holds the funds for a delay of about seven days, and we finish it
+              automatically — <b>you do not have to come back</b>. <b>⚠️ Nobody has taken this
+              route with real funds yet</b>, so treat the wait as the floor, not the ceiling.
             </div>
           )}
           {wdErr && (
@@ -393,7 +392,7 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
         <Pocket
           label="Unified balance"
           amount={unified.status === "ready" ? unified.total : "…"}
-          badge="No withdrawal built"
+          badge="Exit built · about seven days"
           warn
         >
           {unified.status === "signed-out" && (

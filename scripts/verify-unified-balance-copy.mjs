@@ -53,18 +53,36 @@ const n = (s, re) => (s.match(re) || []).length;
 section("1 — the disclosure is PRESENT at all three body sites");
 // UnifiedBalancePanel carries TWO body sites (the "what you can get back" bullet and the
 // "fund the unified balance" card); YourMoney carries ONE (the amber line by Withdraw).
+// ═══ 🚨 v4 — AND THE MOMENT THIS GUARD ITSELF BECAME THE FALSEHOOD ═══════════════════════════
+// This block used to REQUIRE "we haven't implemented it or tested that it works end to end" and
+// "not that no path exists". Both were true and load-bearing when written. On 2026-08-12 the exit
+// was BUILT (06d3a94), and at that instant the guard against a falsehood became the thing
+// ENFORCING one: it would have failed the build for telling users the truth.
+//
+// ⭐ THE MECHANISM WAS NEVER WRONG — IT OUTLIVED THE FACT IT PROTECTED. A copy guard pins a claim,
+// and a claim has a shelf life. That is the fourth distinct way this one paragraph has been wrong,
+// and the only one where the guard was the problem rather than the catch.
+//
+// ⚠️ v4 IS NOT "YOU CAN GET YOUR MONEY BACK". The path is built and has NEVER been run end to end
+// with real funds. Saying more than that repeats v2's error — implying a working release path
+// because the code exists. So the required strings below assert BOTH halves: the exit is built and
+// automatic, AND nobody has taken it yet.
 for (const [label, re, eYM, eUB] of [
   ["control is stated", /Tikpema controls that account/g, 1, 2],
-  ["execution is stated UNTESTED", /haven't implemented it or tested that it works end to end/g, 1, 2],
-  ["the reason is stated", /not that no path exists/g, 1, 2],
-  ["the delay is DERIVED, never fixed", /about seven days/g, 1, 2],
+  ["⭐ the exit is stated as BUILT", /It is built\s*\n?\s*now:/g, 1, 2],
+  ["⭐⭐ the user is told they need NOT return (this is what makes it an exit)", /you do not have to come back/g, 1, 2],
+  ["⭐⭐ …and that it is UNEXERCISED — the honesty v2 lacked", /Nobody has taken this\s*\n?\s*route with real funds yet/g, 1, 2],
+  ["the delay is DERIVED, never fixed", /about seven days/g, 2, 3],
 ]) {
   const a = n(ym, re), b = n(ub, re);
   check(`⭐ ${label}`, a === eYM && b === eUB, `YourMoney ${a}/${eYM}, UnifiedBalancePanel ${b}/${eUB}`);
 }
-check("⭐⭐ the BADGE names an absent build, not an impossibility",
-  /badge="No withdrawal built"/.test(readFileSync(YM, "utf8")),
-  "it read 'Server-released, delayed' — false in the OPTIMISTIC direction — and survived three reviews");
+// The badge has now been wrong twice and right twice. "Server-released, delayed" was false in the
+// OPTIMISTIC direction; "No withdrawal built" was true until the exit shipped and false the moment
+// it did. ⭐ Four words next to a number get read more than the paragraph under it.
+check("⭐⭐ the BADGE names the exit AND its cost",
+  /badge="Exit built · about seven days"/.test(readFileSync(YM, "utf8")),
+  "it read 'No withdrawal built' — true until 06d3a94, false the instant the exit shipped");
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 section("2 — every prior falsehood is ABSENT (present-only would not prove this)");
@@ -77,6 +95,15 @@ for (const [s, why] of [
   ["cannot be withdrawn", "v3"],
   ["cannot be returned to you", "v3"],
   ["we drive that account", "superseded wording"],
+  // 🚨 v3.5 — TRUE WHEN WRITTEN, FALSE SINCE 06d3a94. Forbidden for the same reason as every
+  // line above it: a claim that has stopped being true is a falsehood regardless of how it got
+  // there. This guard REQUIRED these strings until today.
+  ["haven't implemented it or tested that it works end to end", "v3.5 — denied a built exit"],
+  ["not that no path exists", "v3.5 — the reason clause, now moot"],
+  ["what stops a withdrawal today", "v3.5"],
+  ["No withdrawal built", "v3.5 — the badge"],
+  // ⚠️ "one-way" was accurate for v1–v3.5 and is now simply wrong: there is a way back.
+  ["treat this as one-way", "v3.5 — there is a way back now"],
 ]) {
   const re = new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
   const a = n(ym, re), b = n(ub, re);
@@ -84,24 +111,26 @@ for (const [s, why] of [
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
-section("3 — no phrase is REPEATED within a site");
-// "Treat this as one-way" is the skim-line on the deposit card. It also closed the same
-// paragraph, so the instruction was preceded by a restatement of itself. Merging the tail
-// into the closing instruction drops the count on that site by exactly one.
+section("3 — ⭐⭐ THE BEFORE-DEPOSIT DISCLOSURE — the sentence read before committing funds");
 {
   const cardStart = ub.indexOf("Move USDC from your agent");
-  const card = ub.slice(cardStart, cardStart + 800);
-  check("⭐⭐ the deposit card carries 'treat this as one-way' EXACTLY ONCE",
-    n(card, /treat this as one-way/gi) === 1,
-    "once as the skim-line; the closing instruction inherits the reason directly");
-  check("  …and closes by inheriting the reason, not restating it",
-    /Until then, deposit only what you intend the agent to spend/.test(card));
-  // RE-DERIVED, not loosened: card 2→1, bullet keeps its single payoff instance.
-  check("⭐ file-level count re-derived after the merge (3 → 2)",
-    n(ub, /treat this as one-way/gi) === 2, `got ${n(ub, /treat this as one-way/gi)}`);
-  check("  …YourMoney's single instance is the payoff clause, untouched",
-    n(ym, /treat this as one-way/gi) === 1);
+  const card = ub.slice(cardStart, cardStart + 900);
+  // ⚠️ THE SKIM-LINE IS THE DISCLOSURE. Until 06d3a94 this card LED with "Treat this as one-way",
+  // which contradicted the paragraph beneath it the moment the exit shipped — and the lead is what
+  // gets read. A correct paragraph under a wrong skim-line is a wrong card.
+  check("⭐⭐ the deposit card names the WAIT in its lead sentence, before any mechanism",
+    /Money goes in instantly and takes about seven days to come back out/.test(card));
+  check("  …and it precedes the explanation of WHY (cost first, mechanism second)",
+    card.indexOf("about seven days") < card.indexOf("belongs to"));
+  check("⭐ the card still says the exit is automatic", /you do not have to come back/.test(card));
+  check("⭐ …and still says nobody has used it yet", /Nobody has\s*\n?\s*taken this route with real funds yet/.test(card));
 }
+
+section("3b — the repeated-phrase check RETIRED with the phrase it counted");
+// It counted "treat this as one-way" per site. That phrase is now FORBIDDEN outright (there is a
+// way back), so counting its occurrences would be asserting on something that must not exist.
+// ⭐ Deleted rather than loosened: a check kept alive past its subject is how a suite starts
+// passing for reasons nobody remembers.
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
