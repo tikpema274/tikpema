@@ -173,10 +173,29 @@ last structural gap in this feature and is OPEN.
    `17:30:54.618Z` — a VALUE-vs-VALUE match, so it read the real store rather than a default.
    ⭐ Two kinds on one tick from separate prevs: money `steady-ok`, sweeper `first-ok`, both silent —
    the split is visible in production, and the gap closed without adding noise.
-   ⚠️ **THE ALERTING SIDE IS STILL SUITE-ONLY.** `stale` / `missing` / `unreadable`, and the
-   two-concern split UNDER FAILURE, have never run on prod. Proving them needs the same shape of
-   calibration as the overdue alert (a back-dated heartbeat), and it touches the store the sweeper
-   uses — so it is a decision, not a follow-on.
+   ✅ **STALE + RECOVERED CALIBRATED ON PROD 2026-08-12**, both messages human-confirmed in the
+   money channel. Method: wrote a back-dated heartbeat (`at` 14:45:00Z, carrying a `calibration`
+   marker) into `ub-withdrawals/heartbeat` immediately after a genuine sweeper tick.
+   | time | branch | outcome |
+   |---|---|---|
+   | 18:15:47 | `stale` → **`regressed`** | delivered ✓, human-confirmed. 211 min vs 70 min |
+   | 18:30:59 | `alive` → **`recovered`** | delivered ✓, human-confirmed |
+   ⭐⭐ **THE ADDITIVE PROPERTY HELD IN PRODUCTION UNDER REAL FAILURE:** both ticks reported money
+   `ok:true` / `steady-ok` / `planned:false` while the sweeper verdict was false. That was 12
+   fixtures and a mocked handler; it is now an observation.
+   ⭐ `regressed` (not `first-failure`) proves the transition came off the sweeper's OWN prev.
+   ⭐ **THE MUTATION ERRED TOWARD ALARM.** A back-dated heartbeat can only produce a false "sweeper
+   down"; it cannot make a real outage look healthy. That is what made the drill safe to run against
+   a live key rather than needing a synthetic one.
+   ⭐⭐ **ATTRIBUTION BEFORE JUDGEMENT — and it earned its keep.** Recovery fired at 18:30:59, a full
+   cycle EARLIER than predicted, because the sweeper wrote at 18:30:58.129 — **1.45 s** before the
+   monitor read. Without a provenance check the natural move is to ask why the monitor stood down
+   early, which is the wrong question. The discriminator was the `calibration` KEY's absence, not the
+   timestamp: a timestamp invites inference, a marker names the author. A sweeper that failed to tick
+   would otherwise look identical to a monitor that failed to stand down.
+   ⚠️ **STILL SUITE-ONLY:** `still-failing-quiet` for the sweeper concern (the sweeper recovered 1.5 s
+   before the tick that would have shown it — exercising it needs the stale state held across TWO
+   monitor ticks, ~35 min not ~30), plus `missing` and `unreadable`.
    ⚠️ **The bound, stated rather than discovered later:** this closes the sweeper-died gap only. If
    strong-read-watch itself dies nothing watches it. Recursion stops there, deliberately.
 3. **Then** initiate 1 USDC (operator-run; the endpoint needs a browser session and manufacturing one
