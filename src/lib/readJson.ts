@@ -23,6 +23,16 @@
 // ⚠️ WHAT CHANGES: a non-JSON body now THROWS instead of yielding {} or null. Any caller that
 // depended on the old value for a 200-HTML response was depending on a bug. Genuine JSON error
 // responses are unaffected — they parse, and the caller's existing `if (!res.ok)` handling runs.
+//
+// ═══ 🚨 THE HOLE THIS DOES **NOT** COVER — do not read it as blanket containment ══════════════
+// This catches an UNPARSEABLE body. It cannot catch a SEMANTICALLY WRONG 2xx from the function
+// itself, because that body is valid JSON. A `202 {status:"provisioning"}` passes `res.ok` AND
+// passes this helper — so "nothing happened" still reaches the caller as a successful result.
+//
+// ⚠️ FIVE MONEY PATHS STILL DO THIS: agent-ub-spend, agent-execute-plan, dca-create,
+// agent-vault-deposit, agent-vault-withdraw. The fix for them is the STATUS CODE (503, as on the
+// eight already converted) — not this helper, which is the wrong layer for it. Recorded as its own
+// open gap rather than filed under "contained by readJson".
 
 /** An empty body is a legitimate answer (204, or a 4xx with no payload) — not an unreadable one. */
 const EMPTY = Object.freeze({});

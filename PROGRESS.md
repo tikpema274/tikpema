@@ -367,6 +367,45 @@ Said rather than left as a silent gap.
 that used to cause the lockout. 21/0 offline is the coverage, and that is a deliberate stopping
 point rather than an oversight.
 
+### 📊 THE WALLET LEAK, COUNTED — 10 abandoned sets, ~20% of all provisions
+
+Read-only census via `listWalletSets` (no create, no update, no transaction):
+
+```
+wallet sets total                     98
+  named "Tikpema owner …"             49
+  DISTINCT owner names                39
+  ⭐ SETS BEYOND ONE-PER-OWNER        10      ← one leaked provision each
+```
+
+⭐⭐ **~10 of 49 provisions were leaks (~20%).** The read-miss was not rare — it fired roughly one
+time in five. That is a much stronger justification for the confirm-read than "it happened once at
+20:02", and it is the kind of number that only exists because someone asked for a count.
+
+⚠️ **THREE CAVEATS, so the number is not over-read:**
+1. Names use `address.slice(0,10)`, so a prefix collision between two real owners would inflate a
+   duplicate. `extra` is an ESTIMATE, not a proof.
+2. `0x70997970…` and `0x3c44cddd…` are the standard Hardhat/Anvil test accounts — part of this
+   population is DEV CHURN, not real users.
+3. Not every extra is necessarily read-lag: two genuinely concurrent first-logins produce the same
+   shape. `onlyIfNew` handles both identically, so they are indistinguishable after the fact.
+
+⚠️ The abandoned sets hold nothing (created BEFORE mapping, never funded) but they exist under the
+entity secret and are not cleaned up. No action taken — deleting wallet sets is a mutation and would
+need its own decision.
+
+### 🚨 readJson DOES NOT CONTAIN THE FIVE 202 PATHS — recorded as its own gap
+
+`readJson` catches an UNPARSEABLE body. It **cannot** catch a semantically-wrong 2xx from the
+function itself, because that body is valid JSON. A `202 {status:"provisioning"}` passes `res.ok`
+**and** passes the helper — so "nothing happened" still reaches the caller as a successful result.
+
+⚠️ Filing that under "contained by readJson" would have been wrong, and the containment sits at the
+wrong layer to fix it. **The fix is the STATUS CODE** (503, as on the eight already converted).
+Still open on: `agent-ub-spend`, `agent-execute-plan`, `dca-create`, `agent-vault-deposit`,
+`agent-vault-withdraw`. Now asserted in `verify-read-json` (9/0) so the bound is pinned rather than
+assumed.
+
 ### NEXT, IN ORDER
 
 1. ✅ DONE — deploy published `7f5d5de`, heartbeat appeared, calibration ran and cleaned up.

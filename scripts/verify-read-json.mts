@@ -37,6 +37,17 @@ const threw = async (res: Response) => {
 
 console.log("\n── readJson: unreadable ≠ empty ────────────────────────────────");
 
+await t("⭐⭐ THE BOUND: a semantically-wrong 2xx with VALID JSON passes — by design, not by accident", async () => {
+  // 🚨 This is the hole the helper does NOT cover. A `202 {status:"provisioning"}` is valid JSON and
+  // res.ok, so it reaches the caller as a successful result. Five money paths still return it
+  // (agent-ub-spend, agent-execute-plan, dca-create, agent-vault-deposit, agent-vault-withdraw).
+  // The fix for those is the STATUS CODE, not this helper — asserted here so nobody records the
+  // gap as "contained by readJson".
+  const v: any = await readJson(mk(202, '{"status":"provisioning","message":"being set up"}'));
+  assert.equal(v.status, "provisioning",
+    "readJson passes it through — it is well-formed. Only a non-2xx status can stop it.");
+});
+
 await t("⭐⭐ 200 + SPA HTML THROWS — the exact response that read as success", async () => {
   const m = await threw(mk(200, "<!doctype html><html><head>…"));
   assert.ok(m, "a 200 HTML page must NOT be returned as an object — that is the silent-success path");
