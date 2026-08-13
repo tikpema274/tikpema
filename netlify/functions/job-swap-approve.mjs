@@ -3,7 +3,7 @@ import { connectBlobs } from "./_blobs.mjs";
 import { formatUnits } from "viem";
 import { json, parseBody, CONTRACTS, USDC_DECIMALS, swapCapUsdc } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
-import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal } from "./_agent-wallets.mjs";
 import { executeAction } from "./_actions.mjs";
 import { SWAP_TOKENS, valueInUsdc } from "./_swap.mjs";
 import { publicClient } from "./_predict.mjs";
@@ -107,7 +107,11 @@ export async function handler(event) {
   const amountIn = Number(proposal.amountIn);
   if (!(amountIn > 0)) return json(409, { error: "proposal amount is not > 0" });
 
-  const owner = await ensureOwnerWallet(session);
+  let owner;
+  // ⭐ A THROW HERE IS A REFUSAL, NOT A CRASH. Unwrapped it surfaced as a bare 500 that said
+  // nothing about retryability or whether anything happened. See walletUnresolvableRefusal.
+  try { owner = await ensureOwnerWallet(session); }
+  catch (e) { return json(WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal(e)); }
   if (owner.pending) {
     return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   }

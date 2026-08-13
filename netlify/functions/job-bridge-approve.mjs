@@ -6,7 +6,7 @@ import { json, parseBody, bridgeCapUsdc, CONTRACTS, USDC_DECIMALS } from "./_arc
 import { executeAction } from "./_actions.mjs";
 import { resolveDestination } from "./_bridge.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
-import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal } from "./_agent-wallets.mjs";
 import { publicClient } from "./_predict.mjs";
 
 const BALANCE_OF_ABI = [
@@ -117,7 +117,11 @@ export async function handler(event) {
   const cap = bridgeCapUsdc();
   if (amount > cap) return json(409, { error: `proposal exceeds current per-bridge limit of ${cap} USDC`, cap });
 
-  const owner = await ensureOwnerWallet(session);
+  let owner;
+  // ⭐ A THROW HERE IS A REFUSAL, NOT A CRASH. Unwrapped it surfaced as a bare 500 that said
+  // nothing about retryability or whether anything happened. See walletUnresolvableRefusal.
+  try { owner = await ensureOwnerWallet(session); }
+  catch (e) { return json(WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal(e)); }
   if (owner.pending) return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   const walletAddress = owner.walletAddress;
 

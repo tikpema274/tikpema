@@ -15,6 +15,13 @@
 // the REAL verifier handler in-process, so we observe the trigger actually reaching it.
 import { mock } from "node:test";
 
+// ⭐⭐ SPREAD THE REAL MODULE, OVERRIDE ONLY WHAT THIS SUITE NEEDS. An explicit namedExports
+// list breaks every time _agent-wallets gains an export — it has now done so TWICE
+// (WALLET_PROVISIONING_STATUS, then WALLET_UNRESOLVABLE_STATUS), each time failing at module
+// INSTANTIATION with a message about the export rather than about the test. Spreading makes the
+// mock track the module instead of a snapshot of it.
+const REAL_WALLETS = await import("../netlify/functions/_agent-wallets.mjs");
+
 const OWNER = "0xc54d47211997aca90ef4fcfbc742a3b511b4e621";
 const BURN = "0xaaaabbbbccccddddeeeeffff00001111222233334444555566667777888899990";
 
@@ -29,7 +36,7 @@ mock.module("../netlify/functions/_auth.mjs", {
   namedExports: { requireSession: () => ({ address: OWNER, method: "metamask" }), internalToken: () => "tok", requireInternal: () => true },
 });
 mock.module("../netlify/functions/_agent-wallets.mjs", {
-  namedExports: { WALLET_PROVISIONING_STATUS: 503, walletProvisioningRefusal: () => ({ error: "provisioning", reason: "wallet-provisioning", retryable: true, whatHappened: "nothing" }), ensureOwnerWallet: async () => ({ walletAddress: OWNER, pending: false }) },
+  namedExports: { ...REAL_WALLETS,  ensureOwnerWallet: async () => ({ walletAddress: OWNER, pending: false }) },
 });
 mock.module("../netlify/functions/_actions.mjs", {
   namedExports: {

@@ -94,5 +94,30 @@ await t("truncated JSON throws rather than yielding a partial object", async () 
   assert.doesNotMatch(m!, /did not reach the server/i, "not HTML — must not blame the address");
 });
 
+
+await t("⭐⭐ a 5xx HTML body blames the SERVER, not the address", async () => {
+  // ⚠️ An unhandled handler throw IS a 5xx, often with an HTML error page. Calling that "the
+  // address is wrong" sends the reader to check a URL that is fine. The STATUS decides, not the
+  // body type. Found while wrapping ensureOwnerWallet's throw.
+  const m = await threw(mk(500, "<!doctype html><html><head><title>Error</title>"));
+  assert.match(m!, /server hit an error/i);
+  assert.doesNotMatch(m!, /did not reach the server/i, "the request DID reach the server");
+  assert.doesNotMatch(m!, /address is wrong/i);
+  assert.match(m!, /Nothing was started/i, "a 5xx must still say nothing happened");
+  assert.match(m!, /safe to try again/i, "…and that it is retryable");
+});
+
+await t("⭐ a 502/504 gets the same treatment — the whole 5xx class", async () => {
+  for (const code of [502, 503, 504]) {
+    const m = await threw(mk(code, "<html>gateway</html>"));
+    assert.match(m!, /server hit an error/i, `HTTP ${code} must not blame the address`);
+  }
+});
+
+await t("⭐ …while a 404 HTML body STILL blames the address — the SPA catch-all case", async () => {
+  const m = await threw(mk(404, "<!DOCTYPE html><html>"));
+  assert.match(m!, /did not reach the server/i, "the 4xx branch must survive the 5xx split");
+});
+
 console.log(`\n${fail === 0 ? "✅" : "❌"} verify-read-json: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

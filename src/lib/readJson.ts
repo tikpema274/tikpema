@@ -55,12 +55,23 @@ export async function readJson<T = any>(res: Response): Promise<T> {
     // function — almost always a wrong or missing route, not a server fault. Saying so turns a
     // baffling "Unexpected token <" into an actionable message.
     const html = /^\s*(<!doctype|<html)/i.test(text);
+    const serverFault = res.status >= 500;
     const where = `${res.status} ${res.url || ""}`.trim();
+    // ⭐⭐ HTML ALONE DOES NOT MEAN "WRONG ADDRESS" — THE STATUS DECIDES WHICH.
+    // A 2xx/4xx HTML body is the SPA catch-all: the request never reached a function, so the
+    // address is the likely fault. A 5xx HTML body is the opposite — it DID reach the server and
+    // the server failed. Blaming the address there sends the reader to check a URL that is fine,
+    // which is exactly the mis-attribution this repo keeps paying for.
+    // ⚠️ FOUND while wrapping ensureOwnerWallet's throw: an unhandled handler throw is precisely a
+    // 5xx, and this helper would have called it a bad address.
     throw new Error(
-      html
-        ? `The request did not reach the server (${where}). It returned a web page instead of data, ` +
-          `which usually means the address is wrong. Nothing was sent or changed.`
-        : `The server's reply could not be read (${where}): ${String((e as Error).message).slice(0, 120)}`
+      serverFault
+        ? `The server hit an error and could not complete this (${where}). Nothing was started — ` +
+          `this is usually temporary, so it is safe to try again shortly.`
+        : html
+          ? `The request did not reach the server (${where}). It returned a web page instead of data, ` +
+            `which usually means the address is wrong. Nothing was sent or changed.`
+          : `The server's reply could not be read (${where}): ${String((e as Error).message).slice(0, 120)}`
     );
   }
 }

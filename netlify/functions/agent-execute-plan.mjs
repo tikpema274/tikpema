@@ -2,7 +2,7 @@ import { json, parseBody, sendCapUsdc, bridgeCapUsdc } from "./_arc.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { executeAction, valueOfStep } from "./_actions.mjs";
 import { requireSession } from "./_auth.mjs";
-import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal } from "./_agent-wallets.mjs";
 import { daySpend, budgetConfig } from "./_budget.mjs";
 import { recordBridge } from "./_bridge-record.mjs";
 import { resolveDestination, bridgeFee, bridgeFeeBand, bridgeAckToken } from "./_bridge.mjs";
@@ -66,7 +66,11 @@ export async function handler(event) {
 
   // Resolve the caller's OWN agent wallet from the session (never client-supplied,
   // never the shared env wallet).
-  const owner = await ensureOwnerWallet(session);
+  let owner;
+  // ⭐ A THROW HERE IS A REFUSAL, NOT A CRASH. Unwrapped it surfaced as a bare 500 that said
+  // nothing about retryability or whether anything happened. See walletUnresolvableRefusal.
+  try { owner = await ensureOwnerWallet(session); }
+  catch (e) { return json(WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal(e)); }
   if (owner.pending) {
     return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   }

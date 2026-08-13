@@ -24,7 +24,7 @@ import { formatUnits } from "viem";
 import crypto from "node:crypto";
 import { json, parseBody, CONTRACTS, USDC_DECIMALS, sendCapUsdc } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
-import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal } from "./_agent-wallets.mjs";
 import { assertNotPaused } from "./_pause.mjs";
 import { AGENT } from "./_agents.mjs";
 import { publicClient } from "./_predict.mjs";
@@ -67,7 +67,11 @@ export async function handler(event) {
 
   // Resolve the caller's OWN wallet from the session. NEVER client-supplied,
   // NEVER the shared env wallet.
-  const wallet = await ensureOwnerWallet(session);
+  let wallet;
+  // ⭐ A THROW HERE IS A REFUSAL, NOT A CRASH. Unwrapped it surfaced as a bare 500 that said
+  // nothing about retryability or whether anything happened. See walletUnresolvableRefusal.
+  try { wallet = await ensureOwnerWallet(session); }
+  catch (e) { return json(WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal(e)); }
   if (wallet.pending) {
     return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   }

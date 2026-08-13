@@ -60,7 +60,7 @@ import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody, ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { requireSession } from "./_auth.mjs";
-import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal } from "./_agent-wallets.mjs";
 import { publicClient } from "./_predict.mjs";
 
 const BALANCE_OF_ABI = [
@@ -93,7 +93,11 @@ export async function handler(event) {
   if (!(amount > 0)) return json(400, { error: "amountUsdc must be > 0" });
 
   // The SOURCE — the caller's own agent wallet, also server-resolved.
-  const wallet = await ensureOwnerWallet(session);
+  let wallet;
+  // ⭐ A THROW HERE IS A REFUSAL, NOT A CRASH. Unwrapped it surfaced as a bare 500 that said
+  // nothing about retryability or whether anything happened. See walletUnresolvableRefusal.
+  try { wallet = await ensureOwnerWallet(session); }
+  catch (e) { return json(WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal(e)); }
   if (wallet.pending) {
     return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   }

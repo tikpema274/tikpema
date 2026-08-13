@@ -4,7 +4,7 @@ import { json, parseBody } from "./_arc.mjs";
 import { executeAction } from "./_actions.mjs";
 import { resolveDestination } from "./_bridge.mjs";
 import { requireSession } from "./_auth.mjs";
-import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal } from "./_agent-wallets.mjs";
 import { recordBridge } from "./_bridge-record.mjs";
 
 // POST /api/agent-bridge { amountUsdc, destination }  (auth required)
@@ -35,7 +35,11 @@ export async function handler(event) {
   if (!dest) return json(400, { error: `unsupported destination "${destination || ""}"` });
 
   // Resolve the caller's OWN agent wallet from the session (never client-supplied).
-  const owner = await ensureOwnerWallet(session);
+  let owner;
+  // ⭐ A THROW HERE IS A REFUSAL, NOT A CRASH. Unwrapped it surfaced as a bare 500 that said
+  // nothing about retryability or whether anything happened. See walletUnresolvableRefusal.
+  try { owner = await ensureOwnerWallet(session); }
+  catch (e) { return json(WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal(e)); }
   if (owner.pending) {
     return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   }

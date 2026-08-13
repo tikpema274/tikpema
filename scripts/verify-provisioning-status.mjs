@@ -127,5 +127,43 @@ t("⭐ …and those three are READS, not money movements", () => {
   }
 });
 
+
+// ═══ 🚨 THE THROW PATH — 18 of 19 callers did not catch it ═══════════════════════════════════
+t("⭐⭐ every caller wraps ensureOwnerWallet — an unhandled throw is a bare 500", () => {
+  // ⚠️ A 500 is loud and fail-closed, so this is not a safety hole — but it says NOTHING about
+  // whether it is safe to retry or whether anything happened, which are the two facts a caller
+  // most needs. ⭐ THE THROW IS KEPT: returning a failure VALUE would make `wallet.walletAddress`
+  // undefined and flow into chain calls. A throw cannot be accidentally ignored; a falsy field can.
+  const unwrapped = [];
+  for (const f of files) {
+    const src = readFileSync(`${DIR}/${f}`, "utf8");
+    if (!/ensureOwnerWallet\(session\)/.test(strip(src))) continue;
+    if (!/walletUnresolvableRefusal/.test(strip(src))) unwrapped.push(f);
+  }
+  assert.deepEqual(unwrapped, [],
+    "these call ensureOwnerWallet without converting a throw into a refusal:\n       " + unwrapped.join("\n       "));
+});
+
+await ta("⭐ the refusal is 503, retryable, and says nothing happened", async () => {
+  const m = await import("../netlify/functions/_agent-wallets.mjs");
+  assert.equal(m.WALLET_UNRESOLVABLE_STATUS, 503, "not a 500 — nothing was started and a retry is safe");
+  const b = m.walletUnresolvableRefusal(Object.assign(new Error("x"), { name: "CircleError" }));
+  assert.equal(b.reason, "wallet-unresolvable");
+  assert.equal(b.retryable, true);
+  assert.match(b.whatHappened, /nothing/i);
+});
+
+await ta("⭐⭐ the refusal carries the error NAME only — never the message", async () => {
+  const m = await import("../netlify/functions/_agent-wallets.mjs");
+  // ⚠️ A Circle error message can carry request ids or key fragments, and this body reaches the
+  // browser. Asserted because "we would never log that" is exactly what gets forgotten.
+  const b = m.walletUnresolvableRefusal(
+    Object.assign(new Error("apiKey=SK_live_SECRET request=abc123"), { name: "CircleError" }));
+  const blob = JSON.stringify(b);
+  assert.equal(b.detail, "CircleError");
+  assert.ok(!blob.includes("SECRET"), "the error MESSAGE leaked into a browser-facing body");
+  assert.ok(!blob.includes("abc123"), "a request id leaked into a browser-facing body");
+});
+
 console.log(`\n${fail === 0 ? "✅" : "❌"} verify-provisioning-status: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

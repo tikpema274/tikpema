@@ -12,6 +12,13 @@
 //   • TxPendingError yields burn_pending (no burnHash) — honest incompleteness
 //   • ownership / status / proposal / cap preconditions all refuse before any execution
 import { mock } from "node:test";
+
+// ⭐⭐ SPREAD THE REAL MODULE, OVERRIDE ONLY WHAT THIS SUITE NEEDS. An explicit namedExports
+// list breaks every time _agent-wallets gains an export — it has now done so TWICE
+// (WALLET_PROVISIONING_STATUS, then WALLET_UNRESOLVABLE_STATUS), each time failing at module
+// INSTANTIATION with a message about the export rather than about the test. Spreading makes the
+// mock track the module instead of a snapshot of it.
+const REAL_WALLETS = await import("../netlify/functions/_agent-wallets.mjs");
 import { TxPendingError } from "../netlify/functions/_circle.mjs";
 
 const OWNER = "0xc54d47211997aca90ef4fcfbc742a3b511b4e621";
@@ -37,7 +44,7 @@ mock.module("../netlify/functions/_auth.mjs", {
   namedExports: { requireSession: () => SESSION, internalToken: () => "test-internal" },
 });
 mock.module("../netlify/functions/_agent-wallets.mjs", {
-  namedExports: { WALLET_PROVISIONING_STATUS: 503, walletProvisioningRefusal: () => ({ error: "provisioning", reason: "wallet-provisioning", retryable: true, whatHappened: "nothing" }), ensureOwnerWallet: async () => ({ walletAddress: OWNER, pending: false }) },
+  namedExports: { ...REAL_WALLETS,  ensureOwnerWallet: async () => ({ walletAddress: OWNER, pending: false }) },
 });
 
 // ── executeAction stub — the money path, replaced ────────────────────────────

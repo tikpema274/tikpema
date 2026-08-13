@@ -10,7 +10,7 @@ import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody, ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc } from "./_arc.mjs";
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { requireSession } from "./_auth.mjs";
-import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal } from "./_agent-wallets.mjs";
 import { canSpendDay, recordAgentSpend } from "./_budget.mjs";
 import { AGENT } from "./_agents.mjs";
 import { assertNotPaused } from "./_pause.mjs";
@@ -48,7 +48,11 @@ export async function handler(event) {
   }
 
   // Resolve the caller's OWN wallet from the session (never client-supplied).
-  const wallet = await ensureOwnerWallet(session);
+  let wallet;
+  // ⭐ A THROW HERE IS A REFUSAL, NOT A CRASH. Unwrapped it surfaced as a bare 500 that said
+  // nothing about retryability or whether anything happened. See walletUnresolvableRefusal.
+  try { wallet = await ensureOwnerWallet(session); }
+  catch (e) { return json(WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal(e)); }
   if (wallet.pending) {
     return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   }

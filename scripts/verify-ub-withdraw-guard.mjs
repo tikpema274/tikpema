@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { mock } from "node:test";
 
+// ⭐⭐ SPREAD THE REAL MODULE, OVERRIDE ONLY WHAT THIS SUITE NEEDS. An explicit namedExports
+// list breaks every time _agent-wallets gains an export — it has now done so TWICE
+// (WALLET_PROVISIONING_STATUS, then WALLET_UNRESOLVABLE_STATUS), each time failing at module
+// INSTANTIATION with a message about the export rather than about the test. Spreading makes the
+// mock track the module instead of a snapshot of it.
+const REAL_WALLETS = await import("../netlify/functions/_agent-wallets.mjs");
+
 // verify-ub-withdraw-guard — one open withdrawal at a time, enforced where the money moves.
 //
 //   node --experimental-test-module-mocks scripts/verify-ub-withdraw-guard.mjs
@@ -33,7 +40,7 @@ mock.module("../netlify/functions/_auth.mjs", {
   namedExports: { requireSession: () => ({ address: "0xowner", method: "passkey" }) },
 });
 mock.module("../netlify/functions/_agent-wallets.mjs", {
-  namedExports: {
+  namedExports: { ...REAL_WALLETS, 
     ensureOwnerWallet: async () => ({ walletAddress: "0x058957de", pending: false }),
     WALLET_PROVISIONING_STATUS: 503,
     walletProvisioningRefusal: () => ({ error: "provisioning", reason: "wallet-provisioning" }),

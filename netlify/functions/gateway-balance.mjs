@@ -1,7 +1,7 @@
 import { json } from "./_arc.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
-import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal } from "./_agent-wallets.mjs";
 import { GATEWAY } from "./_gateway.mjs";
 
 // POST /api/gateway-balance — read-only. Reads THE CALLER'S OWN unified USDC balance
@@ -54,7 +54,11 @@ export async function handler(event) {
 
   // The depositor: THIS session's own agent SCA. Provisioned on first touch, so a brand-new
   // user reads their own (honest) $0 rather than someone else's balance.
-  const wallet = await ensureOwnerWallet(session);
+  let wallet;
+  // ⭐ A THROW HERE IS A REFUSAL, NOT A CRASH. Unwrapped it surfaced as a bare 500 that said
+  // nothing about retryability or whether anything happened. See walletUnresolvableRefusal.
+  try { wallet = await ensureOwnerWallet(session); }
+  catch (e) { return json(WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal(e)); }
   if (wallet.pending) {
     return json(202, { status: "provisioning", message: "Your wallet is being set up — retry shortly." });
   }

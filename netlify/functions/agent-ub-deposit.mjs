@@ -4,7 +4,7 @@ import { formatUnits } from "viem";
 import crypto from "node:crypto";
 import { json, parseBody, ubDepositMaxPerTxUsdc, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
-import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal } from "./_agent-wallets.mjs";
 import { publicClient } from "./_predict.mjs";
 
 // POST /api/agent-ub-deposit { amountUsdc }  (auth)  →  202 { depositId }
@@ -99,7 +99,11 @@ export async function handler(event) {
   }
 
   // The depositor: THIS session's own agent SCA. Provisioned on first touch.
-  const wallet = await ensureOwnerWallet(session);
+  let wallet;
+  // ⭐ A THROW HERE IS A REFUSAL, NOT A CRASH. Unwrapped it surfaced as a bare 500 that said
+  // nothing about retryability or whether anything happened. See walletUnresolvableRefusal.
+  try { wallet = await ensureOwnerWallet(session); }
+  catch (e) { return json(WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal(e)); }
   if (wallet.pending) {
     return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   }

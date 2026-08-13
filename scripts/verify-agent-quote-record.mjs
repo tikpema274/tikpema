@@ -27,6 +27,13 @@
 // Zero network. Zero money. Zero real Blobs. Zero model calls.
 
 import { mock } from "node:test";
+
+// ⭐⭐ SPREAD THE REAL MODULE, OVERRIDE ONLY WHAT THIS SUITE NEEDS. An explicit namedExports
+// list breaks every time _agent-wallets gains an export — it has now done so TWICE
+// (WALLET_PROVISIONING_STATUS, then WALLET_UNRESOLVABLE_STATUS), each time failing at module
+// INSTANTIATION with a message about the export rather than about the test. Spreading makes the
+// mock track the module instead of a snapshot of it.
+const REAL_WALLETS = await import("../netlify/functions/_agent-wallets.mjs");
 import { readFileSync } from "node:fs";
 
 // The REAL band logic — imported before any mock so the suite prices with the same helper
@@ -236,7 +243,7 @@ mock.module("../netlify/functions/_auth.mjs", {
   },
 });
 mock.module("../netlify/functions/_agent-wallets.mjs", {
-  namedExports: { WALLET_PROVISIONING_STATUS: 503, walletProvisioningRefusal: () => ({ error: "provisioning", reason: "wallet-provisioning", retryable: true, whatHappened: "nothing" }), ensureOwnerWallet: async () => ({ walletAddress: AGENT_WALLET }) },
+  namedExports: { ...REAL_WALLETS,  ensureOwnerWallet: async () => ({ walletAddress: AGENT_WALLET }) },
 });
 mock.module("../netlify/functions/_actions.mjs", {
   namedExports: {

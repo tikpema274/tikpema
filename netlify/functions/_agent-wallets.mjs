@@ -168,3 +168,28 @@ export const walletProvisioningRefusal = () => ({
   // began", and the cost of that misreading is a duplicate payment.
   whatHappened: "nothing. No funds moved and no job was started. Retrying is safe.",
 });
+
+// ═══ 🚨 WHEN THE WALLET CANNOT BE RESOLVED AT ALL ════════════════════════════════════════════
+// `ensureOwnerWallet` THROWS on a failed store read or a Circle failure (`createWalletSet`,
+// `createWallets`, "wallet creation returned no wallet"). 18 of its 19 callers do not catch it, so
+// it surfaced as a bare 500 — loud and fail-closed, but saying NOTHING about whether it is safe to
+// retry or whether anything happened. Those are the two facts a caller most needs.
+//
+// ⭐⭐ THE THROW IS KEPT ON PURPOSE. Returning a failure VALUE instead would be strictly worse:
+// callers do `const owner = wallet.walletAddress`, which would become `undefined` and flow into
+// chain calls. A throw cannot be accidentally ignored; a falsy field can. So this fixes how the
+// failure SURFACES, not whether it stops the request.
+//
+// ⭐ IT IS A REFUSAL, NOT AN ERROR REPORT: nothing was started, and a retry is safe. Same shape and
+// status as walletProvisioningRefusal — both mean "we could not get you a wallet right now".
+export const WALLET_UNRESOLVABLE_STATUS = 503;
+export const walletUnresolvableRefusal = (e) => ({
+  error: "We couldn’t reach your wallet service just now, so nothing has been started.",
+  reason: "wallet-unresolvable",
+  retryable: true,
+  retryAfterSeconds: 20,
+  whatHappened: "nothing. No funds moved and no job was started. Retrying is safe.",
+  // ⚠️ NAME ONLY, never the message: a Circle error can carry request ids or key fragments, and this
+  // body is returned to the browser.
+  detail: String(e?.name || "Error"),
+});
