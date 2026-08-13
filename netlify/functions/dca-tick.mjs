@@ -142,7 +142,7 @@ export async function handler(event) {
 
   // ── UNCONDITIONAL HEARTBEAT — written every invocation regardless of work (the job-sweep
   // blind-spot fix: a quiet cron must be distinguishable from a dead one by reading ONE blob).
-  const beat = { tickAt: startedAt, tokenExp, scanned: 0, submitted: 0, fired: 0, skipped: 0, failed: 0, stopped: 0, terminal: 0, deferred: 0, errors: 0, details: [] };
+  const beat = { tickAt: startedAt, tokenExp, total: 0, inactive: 0, unreadable: 0, scanned: 0, submitted: 0, fired: 0, skipped: 0, failed: 0, stopped: 0, terminal: 0, notDue: 0, deferred: 0, errors: 0, details: [] };
   const writeHeartbeat = async () => {
     try { await getStore(HEARTBEAT_STORE).setJSON("last", beat); } catch { /* observability only */ }
   };
@@ -320,7 +320,13 @@ export async function handler(event) {
     const { blobs } = await mandates.list({ prefix: "mandate:" });
     for (const { key } of blobs) {
       const m = await mandates.get(key, { type: "json" }).catch(() => null);
-      if (!m || m.status !== STATUS.ACTIVE) continue;
+      // ⭐ COUNT WHAT WE SKIPPED, or `scanned:0` is ambiguous. On 2026-08-13 a heartbeat read
+      // `scanned:0` and there was no way to tell "the store is empty" from "seven mandates exist and
+      // all are cancelled" — two very different facts behind one number. `total` and `inactive`
+      // separate them, and `unreadable` keeps a failed GET from masquerading as either.
+      beat.total++;
+      if (!m) { beat.unreadable++; continue; }
+      if (m.status !== STATUS.ACTIVE) { beat.inactive++; continue; }
       beat.scanned++;
 
       // ── PER-MANDATE BOUNDARY (see the catch at the end of this block). A Blobs write that expired
@@ -345,7 +351,16 @@ export async function handler(event) {
         beat.terminal++;
         continue;
       }
-      if (!decision.due) continue; // not this period
+      // ⭐⭐ NOT-DUE MUST LEAVE A TRACE. This `continue` used to be silent, so a scanned mandate that
+      // simply was not due produced `scanned=1` and NOTHING ELSE — indistinguishable from a tick that
+      // examined it and inexplicably declined. That is the exact question we could not answer on
+      // 2026-08-13. The reason ("already filled this period") is the whole diagnosis.
+      // ⚠️ Detail bounded so a wide fan-out cannot flood the heartbeat; the COUNT is always exact.
+      if (!decision.due) {
+        beat.notDue++;
+        if (beat.details.length < 8) beat.details.push({ id: m.id, outcome: "not-due", reason: decision.reason });
+        continue;
+      }
       const period = decision.period;
 
       // Cap NEW submits (the expensive on-chain path). `continue`, not `break`: later mandates may
@@ -563,5 +578,31 @@ export async function handler(event) {
 
   beat.tickElapsedMs = Date.now() - now;
   await writeHeartbeat();
+
+  // ═══ ⭐⭐ THE DECISION LINE — because the heartbeat DOES NOT SURVIVE ═══════════════════════
+  // `beat` already records everything this tick decided. It goes to dca-heartbeat/"last" — ONE KEY,
+  // OVERWRITTEN EVERY 60 SECONDS. So the observation exists and then does not: 2026-08-13, a mandate
+  // was created, never filled, and by the time anyone asked why, ~15 ticks had overwritten the only
+  // record of the answer. The state was diagnosable for one minute.
+  //
+  // ⭐ A LOG LINE PERSISTS WHERE A SINGLE-KEY HEARTBEAT CANNOT. `netlify logs --since 40m` can then
+  // answer "what did the scheduler decide at 19:27?" — which the heartbeat structurally never could.
+  // Same shape as the other three sweepers (ub-withdraw-sweep, bridge-mint-sweep, job-sweep), which
+  // all log a summary; this was the only money-moving scheduler that did not.
+  //
+  // ⚠️ THE `details` ARE THE POINT, NOT THE COUNTS. A count of `skipped:1` says the tick declined to
+  // fill; only the reason says WHY (skipped-paused / skipped-ceiling / skipped-capped / cannot
+  // value). Bounded to the first few so a wide fan-out cannot flood the log, and the REMAINDER IS
+  // REPORTED — a cap that hides its own truncation reads as "that was everything".
+  const shown = beat.details.slice(0, 5);
+  const more = beat.details.length - shown.length;
+  const why = shown.map((d) => `${String(d.id).slice(0, 8)}:${d.outcome}${d.reason ? `(${String(d.reason).slice(0, 60)})` : ""}`).join(" ");
+  console.log(
+    `[dca-tick] total=${beat.total} inactive=${beat.inactive} unreadable=${beat.unreadable} scanned=${beat.scanned} submitted=${beat.submitted} fired=${beat.fired} ` +
+    `skipped=${beat.skipped} failed=${beat.failed} stopped=${beat.stopped} terminal=${beat.terminal} ` +
+    `notDue=${beat.notDue} deferred=${beat.deferred} errors=${beat.errors} ms=${beat.tickElapsedMs}` +
+    (why ? ` | ${why}` : "") + (more > 0 ? ` (+${more} more)` : "") +
+    (beat.note ? ` | note=${beat.note}` : "")
+  );
   return { statusCode: 200, body: JSON.stringify({ scanned: beat.scanned, submitted: beat.submitted, fired: beat.fired, skipped: beat.skipped, failed: beat.failed, stopped: beat.stopped, deferred: beat.deferred }) };
 }
