@@ -58,6 +58,10 @@ const ENDPOINTS = [
   { path: "/api/dca-create", note: "redirect added — was 404 in prod" },
   { path: "/api/dca-cancel", note: "redirect added — was 404 in prod" },
   { path: "/api/dca-list", note: "redirect added — was 404 in prod" },
+  // ⭐ The description document. A POST returns 405 {error:"GET only"}, which fits this suite's
+  // shape — and its RESOLVING is the point: howToCall publishes this URL, and a published
+  // address nobody fetched is how /api/dca-* was dead for 22 days.
+  { path: "/api/dd-openapi", note: "openApiUrl target — must resolve" },
   { path: "/api/agents", note: "POLLER — must keep 202" },
   { path: "/api/gateway-balance", note: "POLLER — must keep 202" },
   { path: "/api/my-wallet", note: "POLLER — must keep 202" },
