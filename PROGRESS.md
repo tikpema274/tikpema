@@ -237,6 +237,50 @@ here, but the same helper gates every money endpoint above and may not fail as s
 "Exit built · about seven days" to a user with no button. An exit reachable only from a devtools
 console is not an exit for the person whose money it is — the original problem moved one layer down.
 
+### ✅ THE EXIT HAS A UI — shipped `3b695e1`, live on `6a7d8e54` (published 2026-08-13 09:49:42Z)
+
+Verified against a KNOWN VALUE rather than an empty state — the reason status shipped before the
+button. The live withdrawal renders as **`1.000000 USDC — waiting — about seven days`**.
+
+| # | check | result |
+|---|---|---|
+| 1a | money path, POST-publish tick `10:01:01` | `ok` / `steady-ok`; sweeper alive; **`open:1`** |
+| 1b | DD health key | ✅ **UNMOVED — 6/6** |
+| 1c | server smoke + bundle fingerprint | 8/8; all four new UI strings in the shipped JS |
+| 2 | session owner | ✅ matches `0x058957de…` — the prerequisite, not a formality |
+| 3 | known-value render | ✅ `1.000000 USDC waiting` |
+| 4 | the 409 | ⚠️ **NEVER EXERCISED** — see below |
+
+⭐ **1b WAS A PREDICTION, NOT AN OBSERVATION.** The local `ddTree` was read BEFORE deploying and
+matched the live key, so "DD-clean deploy ⇒ key must not move" was falsifiable in advance; a second
+64-hex key would have refuted the binding. ⚠️ What it does NOT prove: the deploy touched
+`ub-withdraw.mjs` and frontend files, none of which are in the DD surface — so the honest reading is
+"the hash correctly ignored changes OUTSIDE its surface", not "the hash ignores changes".
+
+⚠️ **`open:1` ANSWERS THE DURABILITY QUESTION** raised when the sweeper was built: the record and its
+monitoring survived a full production deploy.
+
+⚠️ **I READ A PRE-PUBLISH RECORD FIRST.** The initial money-path reading was `producedAt 09:45:11`,
+BEFORE the `09:49:42` publish — the old build. Caught by comparing against `published_at` rather
+than trusting recency. That is now the fourth time in two days.
+
+### 🚧 THE 409 IS AN UNEXERCISED SERVER GUARD — do not let the disabled button imply coverage
+
+`POST /api/ub-withdraw` now refuses a second open withdrawal with **409** (`withdrawal-already-open`,
+naming the existing id/amount/maturity, `retryable:false`), and refuses **503** when the list is
+UNREADABLE rather than guessing. 11/0 offline, mutation-tested (remove guard → 4 red; unreadable
+falls through → 1 red; treat `completed` as open → 2 red).
+
+⚠️ **It has never run on prod.** The disabled button is SINGLE-TAB containment and is NOT evidence
+about the guard — a refresh, a second tab or a direct call all bypass React state, which is exactly
+why the server guard exists. Proving it needs a deliberate double-press. Same standing as
+`still-failing-quiet` on the sweeper watcher: written, tested offline, unexercised live.
+
+⭐ **WHY THE GUARD MATTERS MORE THAN "two clocks":** hop 2 is `withdraw(address)` — no amount, sweeps
+everything matured in ONE tx. Two records maturing together are completed by a single transaction:
+the sweeper marks one COMPLETED, the second reads `withdrawable:0` → `not-yet-matured` FOREVER, until
+it trips the overdue alert as a stuck withdrawal that is not stuck.
+
 ### NEXT, IN ORDER
 
 1. ✅ DONE — deploy published `7f5d5de`, heartbeat appeared, calibration ran and cleaned up.
