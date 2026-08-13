@@ -281,6 +281,56 @@ everything matured in ONE tx. Two records maturing together are completed by a s
 the sweeper marks one COMPLETED, the second reads `withdrawable:0` → `not-yet-matured` FOREVER, until
 it trips the overdue alert as a stuck withdrawal that is not stuck.
 
+### ✅ THE 409 IS PROVEN LIVE — and proving it exposed a LOCKOUT the guard itself created
+
+A single POST while `16be509f` was `waiting` returned **409 naming `16be509f`** on production.
+⭐ **No double-press was needed** — the first press happened the night before, so one request tested
+the same thing at half the risk. Logic proven, not merely the fail-closed branch.
+
+### 🚨 TWO CORRECT FEATURES COMPOSED INTO A DENIAL OF THE FEATURE
+
+Preparing the test surfaced it, before it could bite:
+
+1. **The validation and the conversion disagreed.** `amount > 0` passes for `0.0000001`, but
+   `Math.round(amount * 1e6)` is **0**. So: `createRecord` wrote a record → `ubInitiateWithdrawal`
+   threw on `units > 0n` BEFORE the chain call → the record was left `initiating`.
+2. **The sweeper leaves an unconfirmable `initiating` record in that state FOREVER, on purpose**
+   ("we cannot see it yet is not it did not happen"). And for `amountAtomic: "0"` its `landed`
+   heuristic is `1510000n < 0n` — false forever, so it can never even reconcile.
+3. **The 409 guard counted every `OPEN_STATE` as blocking.**
+
+⭐⭐ Each is correct alone. Together, one malformed input would have blocked EVERY future withdrawal,
+tripped the overdue alert, and never cleared — **no user-facing way out of the exit path**. The
+original "a pocket with no exit" rebuilt by the guard meant to protect it.
+
+**FIX 1 — validate the CONVERTED UNITS.** `units <= 0n` → 400 `amount-below-one-atomic-unit`,
+BEFORE any record is written. ⭐ Two representations of one quantity must be validated as one;
+checking the decimal and acting on the atomic value is duplicate-source-of-truth inside a function.
+
+**FIX 2 — `blocksNewWithdrawal()`, separate from `OPEN_STATES`.** They answer different questions:
+`OPEN_STATES` = "must the SWEEPER keep watching?" (deliberately generous — a record it drops is a
+withdrawal nobody finishes). The guard = "could this be running a CLOCK?" (must be narrower — a
+false yes denies the exit). Blocks on `waiting`/`completing` always; on `initiating` only when the
+chain call *could* have happened:
+  · `amountAtomic` 0 or absent ⇒ **provably never broadcast** — the sub-atomic case, AND the
+    half-written case, because `amountAtomic` is written BEFORE the chain call. ⚠️ That ordering is
+    load-bearing and is now noted at both ends.
+  · older than **2× the sweeper period** ⇒ the sweeper has looked twice and found nothing.
+⭐ THE TRADE, STATED: a false NO risks two clocks (usually both complete). A false YES is a
+PERMANENT LOCKOUT with no recourse. The lockout is strictly worse, so it errs toward letting the
+user act. Nothing is deleted or marked failed — the sweeper keeps watching what the guard ignores.
+
+⚠️ **THE NEAR-MISS WAS MINE.** My own "use the smallest amount the endpoint accepts" advice is what
+would have caused it. Caught by reading the CONVERSION rather than the VALIDATION — the endpoint
+accepts `0.0000001` and it is the rounding, one line later, that makes it poison.
+
+⚠️ **AND A TEST THAT PASSED FOR THE WRONG REASON.** The original "every OPEN state blocks" fixture
+omitted `amountAtomic` and `createdAt`, so under the new logic `initiating` read as
+never-broadcast — it had been passing on a shape no real record has.
+
+Guard 19/0, mutation-tested three ways: revert to OPEN_STATES → 3 red; drop the units check → 2 red;
+remove the age bound → 1 red.
+
 ### NEXT, IN ORDER
 
 1. ✅ DONE — deploy published `7f5d5de`, heartbeat appeared, calibration ran and cleaned up.

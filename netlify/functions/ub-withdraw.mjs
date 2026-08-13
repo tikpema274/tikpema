@@ -4,7 +4,7 @@ import { json } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
 import { readExitState, ubInitiateWithdrawal } from "./_ubwithdraw.mjs";
-import { createRecord, patchRecord, listByOwner, STATE, OPEN_STATES } from "./_ubwithdraw-record.mjs";
+import { createRecord, patchRecord, listByOwner, STATE, blocksNewWithdrawal } from "./_ubwithdraw-record.mjs";
 
 // UB WITHDRAW — the front door for the unified-balance EXIT.
 //
@@ -92,6 +92,23 @@ export async function handler(event) {
   const { amountUsdc } = parseBody(event);
   const amount = Number(amountUsdc);
   if (!(amount > 0)) return json(400, { error: "amountUsdc must be > 0" });
+  // ═══ 🚨 VALIDATE THE CONVERTED UNITS, NOT THE DECIMAL ═══════════════════════════════════
+  // `amount > 0` and `Math.round(amount * 1e6) > 0` DISAGREE below 1e-6. A sub-atomic input like
+  // 0.0000001 passed the decimal check, rounded to ZERO atomic units, and then: createRecord wrote
+  // a record, ubInitiateWithdrawal threw on `units > 0n` BEFORE reaching the chain, and the record
+  // was left `initiating` — which the sweeper deliberately never clears and the 409 guard counts as
+  // open. One malformed input would have LOCKED THE USER OUT OF THEIR OWN EXIT permanently.
+  // ⭐ Two representations of one quantity must be validated as one. Checking the decimal and then
+  // acting on the atomic value is the duplicate-source-of-truth failure inside a single function.
+  const units = BigInt(Math.round(amount * 1e6));
+  if (units <= 0n) {
+    return json(400, {
+      error: "That amount is too small to withdraw. The smallest is 0.000001 USDC.",
+      reason: "amount-below-one-atomic-unit",
+      // ⚠️ Say that nothing happened: this refusal lands BEFORE any record is written.
+      whatHappened: "nothing. No record was written and no funds moved.",
+    });
+  }
 
   // Read BEFORE writing anything, so an unreadable chain refuses cheaply.
   const state = await readExitState({ owner });
@@ -105,7 +122,7 @@ export async function handler(event) {
       retryable: true,
     });
   }
-  if (BigInt(Math.round(amount * 1e6)) > BigInt(state.availableAtomic)) {
+  if (units > BigInt(state.availableAtomic)) {
     return json(400, {
       error: `You asked to withdraw ${amount} USDC but your unified balance holds ${state.availableUsdc} USDC.`,
       availableUsdc: state.availableUsdc,
@@ -138,7 +155,10 @@ export async function handler(event) {
       whatHappened: "nothing. No record was written and no funds moved. Retrying is safe.",
     });
   }
-  const alreadyOpen = mine.rows.filter((r) => OPEN_STATES.includes(r.state));
+  // ⭐⭐ blocksNewWithdrawal, NOT OPEN_STATES. OPEN_STATES answers "must the SWEEPER keep watching
+  // this?" — deliberately generous. This asks "could this be running a CLOCK?" and must be
+  // narrower, or one unconfirmable record denies the exit forever. See _ubwithdraw-record.mjs.
+  const alreadyOpen = mine.rows.filter((r) => blocksNewWithdrawal(r));
   if (alreadyOpen.length > 0) {
     const first = alreadyOpen[0];
     return json(409, {
@@ -170,7 +190,7 @@ export async function handler(event) {
   // block time and must never be rendered as a precise deadline.
   const maturesApprox = new Date(Date.now() + state.approxDelayDays * 86400 * 1000).toISOString();
   await patchRecord({ owner, withdrawalId, fields: {
-    amountAtomic: BigInt(Math.round(amount * 1e6)).toString(),
+    amountAtomic: units.toString(),
     delayBlocks: state.delayBlocks,
     approxDelayDays: state.approxDelayDays,
     maturesApprox,

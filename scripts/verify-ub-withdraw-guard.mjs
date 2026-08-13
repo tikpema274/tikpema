@@ -26,6 +26,8 @@ let listReadable = true;
 let initiateCalls = 0;
 let createdRecords = 0;
 
+const REAL = await import("../netlify/functions/_ubwithdraw-record.mjs");
+
 mock.module("../netlify/functions/_blobs.mjs", { namedExports: { connectBlobs: () => {} } });
 mock.module("../netlify/functions/_auth.mjs", {
   namedExports: { requireSession: () => ({ address: "0xowner", method: "passkey" }) },
@@ -52,6 +54,10 @@ mock.module("../netlify/functions/_ubwithdraw-record.mjs", {
     STATE: { INITIATING: "initiating", WAITING: "waiting", COMPLETING: "completing", COMPLETED: "completed", FAILED: "failed" },
     OPEN_STATES: ["initiating", "waiting", "completing"],
     createRecord: async () => { createdRecords++; return {}; },
+    // ⭐ THE REAL IMPLEMENTATION, imported rather than stubbed. A stubbed predicate would make every
+    // lockout assertion below test a fiction — the whole point is what the real one decides.
+    blocksNewWithdrawal: REAL.blocksNewWithdrawal,
+    INITIATING_BLOCKS_MS: REAL.INITIATING_BLOCKS_MS,
     patchRecord: async () => ({}),
     listByOwner: async () => (listReadable
       ? { readable: true, rows: openRows, matchedKeys: openRows.length, returned: openRows.length, skipped: 0 }
@@ -93,10 +99,14 @@ await t("⭐ …and it NAMES the existing one, so nobody hunts a withdrawal that
   assert.equal(b.retryable, false, "retrying changes nothing until the open one completes");
 });
 
+// ⚠️ FIXTURES CARRY amountAtomic AND createdAt because REAL records do. The original fixture
+// omitted both, which made `initiating` look like a never-broadcast record — the test passed for a
+// reason that had nothing to do with the state name it claimed to be checking.
 for (const state of ["initiating", "waiting", "completing"]) {
   await t(`⭐ every OPEN state blocks — "${state}"`, async () => {
     reset();
-    openRows = [{ withdrawalId: "x", state, amountUsdc: "1" }];
+    openRows = [{ withdrawalId: "x", state, amountUsdc: "1", amountAtomic: "1000000",
+                  createdAt: new Date().toISOString() }];
     const res = await post();
     assert.equal(res.statusCode, 409, `"${state}" is open and must block a second start`);
     assert.equal(initiateCalls, 0);
@@ -146,6 +156,81 @@ await t("the guard runs AFTER cheap validation — a bad amount still 400s", asy
   openRows = [{ withdrawalId: "x", state: "waiting" }];
   assert.equal((await post({ amountUsdc: 0 })).statusCode, 400,
     "an invalid request should not be reported as a conflict");
+});
+
+
+// ═══ 🚨 THE LOCKOUT: two correct features composing into a denial of the feature ═════════════
+// The sweeper leaves an unconfirmable `initiating` record in that state FOREVER, on purpose. The
+// guard counted every OPEN_STATE as blocking. Together: one stuck record blocks every future
+// withdrawal, trips the overdue alert, and never clears — the "pocket with no exit" rebuilt by the
+// guard meant to protect it.
+
+const ago = (ms) => new Date(Date.now() - ms).toISOString();
+const HOUR = 60 * 60 * 1000;
+
+await t("⭐⭐ a SUB-ATOMIC stuck record does NOT lock the user out", async () => {
+  reset();
+  // amountAtomic "0" ⇒ ubInitiateWithdrawal threw BEFORE the chain call, so nothing can be running.
+  openRows = [{ withdrawalId: "stuck", state: "initiating", amountAtomic: "0", createdAt: ago(5 * 60_000) }];
+  const res = await post();
+  assert.equal(res.statusCode, 202,
+    "a record that provably never broadcast must not deny the exit — that is a permanent lockout");
+});
+
+await t("⭐ a FRESH initiating record with real units DOES block — the chain call may have landed", async () => {
+  reset();
+  openRows = [{ withdrawalId: "fresh", state: "initiating", amountAtomic: "1000000", createdAt: ago(60_000) }];
+  assert.equal((await post()).statusCode, 409, "caution while the sweeper has not yet reconciled");
+});
+
+await t("⭐⭐ …but an OLD one stops blocking — the sweeper has looked twice and found nothing", async () => {
+  reset();
+  openRows = [{ withdrawalId: "old", state: "initiating", amountAtomic: "1000000", createdAt: ago(3 * HOUR) }];
+  assert.equal((await post()).statusCode, 202,
+    "continuing to block past 2 sweeper periods is a lockout, not caution");
+});
+
+await t("⭐ WAITING blocks regardless of age — a real clock IS running", async () => {
+  reset();
+  openRows = [{ withdrawalId: "old-waiting", state: "waiting", amountAtomic: "1000000", createdAt: ago(30 * 24 * HOUR) }];
+  assert.equal((await post()).statusCode, 409, "age must never release a genuinely running clock");
+});
+
+await t("⭐ an unparseable createdAt errs toward CAUTION (blocks), not toward a second clock", async () => {
+  reset();
+  openRows = [{ withdrawalId: "nodate", state: "initiating", amountAtomic: "1000000", createdAt: "???" }];
+  assert.equal((await post()).statusCode, 409);
+});
+
+// ═══ FIX 1: the decimal check and the atomic conversion must agree ═══════════════════════════
+await t("⭐⭐ a SUB-ATOMIC amount is refused 400 BEFORE any record is written", async () => {
+  reset();
+  const res = await post({ amountUsdc: 0.0000001 });
+  assert.equal(res.statusCode, 400, "0.0000001 passes `amount > 0` but rounds to ZERO atomic units");
+  assert.equal(createdRecords, 0, "🚨 writing a record here is what created the lockout");
+  assert.equal(initiateCalls, 0);
+  const b = JSON.parse(res.body);
+  assert.equal(b.reason, "amount-below-one-atomic-unit");
+  assert.match(b.whatHappened, /nothing/i);
+});
+
+await t("⭐ the smallest ACCEPTED amount is exactly one atomic unit", async () => {
+  reset();
+  assert.equal((await post({ amountUsdc: 0.000001 })).statusCode, 202, "0.000001 = 1 atomic unit must work");
+  reset();
+  assert.equal((await post({ amountUsdc: 0.0000004 })).statusCode, 400, "rounds to 0 — refused");
+});
+
+
+await t("⭐⭐ an initiating record with NO amountAtomic does not block — it died before the chain call", async () => {
+  reset();
+  // ub-withdraw writes amountAtomic BEFORE calling the chain, so `null` proves nothing was
+  // broadcast. ⚠️ If that ordering ever changes, this assertion becomes wrong — see the note in
+  // blocksNewWithdrawal.
+  openRows = [{ withdrawalId: "half-written", state: "initiating", amountAtomic: null,
+                createdAt: new Date().toISOString() }];
+  assert.equal((await post()).statusCode, 202,
+    "a half-written record must not deny the exit — nothing was started");
 });
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} verify-ub-withdraw-guard: ${pass} passed, ${fail} failed`);

@@ -164,6 +164,56 @@ export async function listAllOpen({ limit = 50 } = {}) {
 }
 
 /**
+ * ═══ 🚨 DOES THIS RECORD BLOCK A NEW WITHDRAWAL? ════════════════════════════════════════════
+ *
+ * ⭐⭐ NOT THE SAME QUESTION AS `OPEN_STATES`, AND CONFLATING THEM LOCKS THE USER OUT.
+ * `OPEN_STATES` answers "must the SWEEPER keep watching this?" — deliberately generous, because a
+ * record it stops watching is a withdrawal nobody finishes. This answers "could this record be
+ * running a CLOCK right now?" — and it must be narrower, because a false yes denies the exit
+ * entirely.
+ *
+ * 🚨 THE COMPOSITION THAT PRODUCED THIS FUNCTION. The sweeper leaves an unconfirmable `initiating`
+ * record in that state FOREVER, on purpose ("we cannot see it yet is not it did not happen"). The
+ * 409 guard counted every OPEN_STATE as blocking. Each is correct alone; together, one stuck record
+ * would block every future withdrawal, trip the overdue alert, and never clear — with no
+ * user-facing way out. TWO CORRECT FEATURES COMPOSING INTO A DENIAL OF THE FEATURE, which is the
+ * original "a pocket with no exit" rebuilt by the safety guard meant to protect it.
+ *
+ * ⭐ THE TRADE, STATED: a false NO risks two clocks (both usually complete; the bad case needs them
+ * maturing in the same tick). A false YES is a PERMANENT LOCKOUT with no recourse. The lockout is
+ * strictly worse, so this errs toward letting the user act.
+ *
+ * ⚠️ NOTHING IS DELETED OR MARKED FAILED HERE. The sweeper keeps watching a record this function
+ * ignores — it stops holding the user hostage, it does not stop being reconciled.
+ */
+export const INITIATING_BLOCKS_MS = 60 * 60 * 1000; // 2 × the sweeper's 30-min period
+
+export function blocksNewWithdrawal(rec, now = Date.now()) {
+  if (!rec) return false;
+  if (rec.state === STATE.WAITING || rec.state === STATE.COMPLETING) return true;
+  if (rec.state !== STATE.INITIATING) return false;
+
+  // ⭐⭐ PROVABLY NEVER BROADCAST — TWO INDEPENDENT REASONS, both certainties rather than heuristics:
+  //   · ZERO units: `ubInitiateWithdrawal` throws on `units > 0n` BEFORE calling the chain, so a
+  //     sub-atomic record (`Math.round(0.0000001 * 1e6) === 0`) cannot have started anything.
+  //   · ABSENT units: ub-withdraw.mjs writes `amountAtomic` (line ~193) BEFORE the chain call
+  //     (~200), so a record still carrying `null` died in between — the call had not been made.
+  // ⚠️ This ordering is load-bearing. If a future edit moves the chain call ahead of the amount
+  // patch, an absent amountAtomic would stop proving anything and this must change with it.
+  let units = null;
+  try { units = BigInt(rec.amountAtomic ?? "0"); } catch { units = 0n; }
+  if (units <= 0n) return false;
+
+  // ⚠️ A FRESH `initiating` DOES block: the chain call may have landed and the sweeper has not yet
+  // had a tick to reconcile it. Bounded at 2× the sweeper period — past that, the sweeper has
+  // looked at least twice and found nothing, so continuing to block is a lockout rather than
+  // caution.
+  const started = Date.parse(rec.createdAt ?? "");
+  if (!Number.isFinite(started)) return true; // unknown age ⇒ assume fresh, the cautious side
+  return now - started < INITIATING_BLOCKS_MS;
+}
+
+/**
  * ⭐⭐ IS THIS RECORD OVERDUE? — the alert discriminator.
  *
  * 🚨 NOT "did completion fail". A single failed tick is normal: RPC blips, Circle 500s, and the
