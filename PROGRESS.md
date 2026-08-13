@@ -331,6 +331,42 @@ never-broadcast — it had been passing on a shape no real record has.
 Guard 19/0, mutation-tested three ways: revert to OPEN_STATES → 3 red; drop the units check → 2 red;
 remove the age bound → 1 red.
 
+### ✅ THE 409 SURVIVED THE PREDICATE REWRITE — proven live TWICE, and it wrote nothing
+
+Live on **`6a7d9ddb`** (published 2026-08-13 10:52:12Z). A POST of `0.000001` while `16be509f` was
+`waiting` returned **409 naming `16be509f`**.
+
+⭐ **THE RE-TEST WAS NOT CEREMONY.** The guard's predicate changed from
+`OPEN_STATES.includes(state)` to `blocksNewWithdrawal(rec)` — a completely different route to the
+same decision — so the thing proven live two hours earlier was exactly what the change could break.
+Re-proving after the rewrite is what makes the first proof still worth anything.
+
+**AND IT WROTE NOTHING**, checked four ways rather than inferred from the status code:
+
+| check | result |
+|---|---|
+| record count | **1** — no phantom written |
+| ⭐⭐ the record itself | `waiting`, `updatedAt` **still `2026-08-12T20:49:12.640Z`**, `lastError: null` |
+| chain | `1510000` atomic — unchanged |
+| sweeper | `open:1 totalKeys:1` |
+
+⭐⭐ **THE `updatedAt` CHECK IS THE LOAD-BEARING ONE.** A 409 that looked right but had written or
+patched a record would be WORSE than no guard — the sweeper would then track a withdrawal that never
+started. A timestamp frozen at the original initiation proves the refusal touched nothing. Value vs
+value, not an absence.
+
+⚠️ The sweeper's log LINE was not captured (the 15-min window had rolled past the 11:00:53 tick). The
+heartbeat carries `open:1`, so the fact holds; the corroborating line simply was not read in time.
+Said rather than left as a silent gap.
+
+**Post-deploy checks:** money path `ok`/`steady-ok` on a post-publish tick (`11:00:51`); health key
+**UNMOVED — 7/7**, predicted in advance from the local `ddTree` before deploying; smoke 8/8.
+⭐ `open:1` also confirms `16be509f` has now survived THREE production deploys while still tracked.
+
+⚠️ **THE SUB-ATOMIC 400 IS OFFLINE-ONLY BY CHOICE.** Triggering it live means sending the exact input
+that used to cause the lockout. 21/0 offline is the coverage, and that is a deliberate stopping
+point rather than an oversight.
+
 ### NEXT, IN ORDER
 
 1. ✅ DONE — deploy published `7f5d5de`, heartbeat appeared, calibration ran and cleaned up.
