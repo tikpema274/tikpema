@@ -92,6 +92,31 @@ export async function ensureOwnerWallet(identity) {
   const existing = await readRecord(store, key);
   if (existing?.walletId) return { ...existing, provisioned: false };
 
+  // ═══ 🚨 CONFIRM THE ABSENCE BEFORE ACTING ON IT ═════════════════════════════════════════
+  // ⭐ A SINGLE MISSED READ USED TO MINT A REAL CIRCLE WALLET. This store is eventually
+  // consistent, so one read returning nothing does NOT mean no mapping exists — and the next
+  // line creates a wallet SET and a WALLET at Circle before we ever discover otherwise. The
+  // `onlyIfNew` write below then correctly refuses to remap, and that wallet is abandoned.
+  // MEASURED: this happened on 2026-08-12 at 20:02, three minutes after the same session read
+  // the mapping successfully at 19:59.
+  //
+  // ⭐⭐ AN ABSENCE MUST BE CONFIRMED BEFORE IT AUTHORISES AN IRREVERSIBLE ACT. The recurring
+  // failure family in this repo is an absence READING AS SAFE; this is its mirror — an absence
+  // reading as PERMISSION. Creating a wallet is not reversible, so the absence must be worth
+  // more than one lagging read.
+  //
+  // ⚠️ THIS REDUCES THE LEAK, IT DOES NOT ELIMINATE IT. Lag longer than the short-read window
+  // still provisions and abandons. Eliminating it entirely means CLAIMING the key with a
+  // placeholder BEFORE provisioning — but then a provision that throws leaves a placeholder with
+  // no walletId, and every later call reads it, fails the walletId test, and returns `pending`
+  // FOREVER. That is a permanent lockout, the exact shape just fixed in ub-withdraw. A bounded
+  // leak is strictly better than an unbounded lockout, so this stops here deliberately.
+  //
+  // ⚠️ COST: ~1.5s added to a GENUINE first provision (3 × 500ms). That happens ONCE per user;
+  // a read-miss can happen on any cold start. The asymmetry is what makes the trade worth it.
+  const confirmed = await readRecordShort(store, key);
+  if (confirmed?.walletId) return { ...confirmed, provisioned: false };
+
   // No mapping seen — provision, then commit atomically. `onlyIfNew` is
   // server-authoritative: it succeeds only if the key is genuinely absent, so a
   // stale read above can't cause a duplicate mapping.
