@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { connectBlobs } from "./_blobs.mjs";
 import { json } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
-import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { readExitState, ubInitiateWithdrawal } from "./_ubwithdraw.mjs";
 import { createRecord, patchRecord, listByOwner, STATE, blocksNewWithdrawal } from "./_ubwithdraw-record.mjs";
 
@@ -68,7 +68,13 @@ export async function handler(event) {
   // ⭐ A THROW HERE IS A REFUSAL, NOT A CRASH. Unwrapped it surfaced as a bare 500 that said
   // nothing about retryability or whether anything happened. See walletUnresolvableRefusal.
   try { wallet = await ensureOwnerWallet(session); }
-  catch (e) { return json(WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal(e)); }
+  // ⚠️ ONLY the tagged external failure earns this diagnosis. Anything else — a TypeError from
+  // a bad refactor, say — RE-THROWS and surfaces unclaimed, rather than borrowing a
+  // "temporary, please retry" it cannot honour.
+  catch (e) {
+    if (!isWalletUnresolvable(e)) throw e;
+    return json(WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal(e));
+  }
   // ⭐ 503, NOT 202 — see walletProvisioningRefusal() in _agent-wallets.mjs for the full reasoning.
   // One status code must not mean both "retry freely" and "you cannot undo this"; the 202 below
   // means an IRREVERSIBLE ~7-day clock has started, and this one means nothing happened at all.

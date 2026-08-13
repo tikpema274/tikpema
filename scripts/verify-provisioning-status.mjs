@@ -165,5 +165,50 @@ await ta("⭐⭐ the refusal carries the error NAME only — never the message",
   assert.ok(!blob.includes("abc123"), "a request id leaked into a browser-facing body");
 });
 
+
+// ═══ 🚨 THE DIAGNOSIS MUST BE EARNED — the over-claim risk of catching on 18 endpoints ═══════
+await ta("⭐⭐ an EXTERNAL failure is tagged and earns the retryable refusal", async () => {
+  const m = await import("../netlify/functions/_agent-wallets.mjs");
+  const tagged = Object.assign(new Error("blobs down"), { name: "WalletUnresolvable", op: "store-read" });
+  assert.equal(m.isWalletUnresolvable(tagged), true);
+});
+
+await ta("⭐⭐ a PROGRAMMING error is NOT tagged — it must surface unclaimed", async () => {
+  const m = await import("../netlify/functions/_agent-wallets.mjs");
+  // 🚨 THE OVER-CLAIM THIS PREVENTS: a TypeError from a bad refactor reported as "transient
+  // provisioning race, retry shortly" would send the user retrying something that can NEVER work —
+  // on 18 endpoints at once. A bare 500 is the honest answer for a bug.
+  for (const e of [new TypeError("x is not a function"), new ReferenceError("y is not defined"),
+                   new RangeError("bad"), new Error("plain untagged")]) {
+    assert.equal(m.isWalletUnresolvable(e), false, `${e.name} must not borrow the refusal`);
+  }
+});
+
+t("⭐⭐ every catch RE-THROWS what it did not earn", () => {
+  const missing = [];
+  for (const f of files) {
+    const code = strip(readFileSync(`${DIR}/${f}`, "utf8"));
+    if (!/walletUnresolvableRefusal\(e\)/.test(code)) continue;
+    // the guard must appear BEFORE the refusal, or the refusal is unconditional
+    const i = code.indexOf("isWalletUnresolvable(e)");
+    const j = code.indexOf("walletUnresolvableRefusal(e)");
+    if (i === -1 || i > j) missing.push(f);
+  }
+  assert.deepEqual(missing, [],
+    "these catch ANY throw and answer with a transient-retry diagnosis they have not earned:\n       " +
+    missing.join("\n       "));
+});
+
+t("⭐ the catch is scoped to the CALL, never wrapping the whole handler", () => {
+  // ⚠️ A handler-wide try/catch would convert genuine bugs anywhere in the endpoint into a wallet
+  // diagnosis. The try must contain the ensureOwnerWallet call and nothing else.
+  for (const f of files) {
+    const code = strip(readFileSync(`${DIR}/${f}`, "utf8"));
+    if (!/walletUnresolvableRefusal/.test(code)) continue;
+    assert.match(code, /try \{ \w+ = await ensureOwnerWallet\(session\); \}/,
+      `${f}: the try block must contain ONLY the ensureOwnerWallet call`);
+  }
+});
+
 console.log(`\n${fail === 0 ? "✅" : "❌"} verify-provisioning-status: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

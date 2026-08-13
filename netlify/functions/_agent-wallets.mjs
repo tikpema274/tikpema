@@ -76,6 +76,40 @@ async function provisionWallet(identity) {
   };
 }
 
+// ═══ 🚨 A DIAGNOSIS MUST BE EARNED, NOT BORROWED ═════════════════════════════════════════════
+// The `wallet-unresolvable` refusal tells the user "this is temporary, retry shortly". That is TRUE
+// for a Blobs outage or a Circle failure. It is FALSE for a programming error — and a catch that
+// says "anything thrown here is a transient race" would hand a permanent bug a retry instruction
+// that can never succeed, on 18 endpoints at once. Same shape as one headline stretched across four
+// refund paths, multiplied.
+//
+// ⭐ SO THE FAILURE IS TAGGED AT THE SOURCE, where we know WHY it failed. Only calls to something
+// EXTERNAL (the blob store, Circle) are tagged. Anything else propagates UNCLAIMED and surfaces as
+// the bare 500 it deserves — loud, unexplained, and correctly so.
+class WalletUnresolvable extends Error {
+  constructor(cause, op) {
+    super(`wallet unresolvable during ${op}`);
+    this.name = "WalletUnresolvable";
+    this.op = op;
+    this.cause = cause;
+  }
+}
+export const isWalletUnresolvable = (e) => e?.name === "WalletUnresolvable";
+
+// ⚠️ PROGRAMMING ERRORS ARE NEVER "THE SERVICE IS DOWN". A TypeError from a bad refactor inside this
+// module would otherwise be tagged as external and told to retry. These pass through untagged.
+const PROGRAMMING = [TypeError, ReferenceError, SyntaxError, RangeError];
+
+/** Run an EXTERNAL call, tagging its failure as unresolvable-but-retryable. */
+async function attempt(op, fn) {
+  try {
+    return await fn();
+  } catch (e) {
+    if (PROGRAMMING.some((C) => e instanceof C)) throw e;   // unclaimed, on purpose
+    throw new WalletUnresolvable(e, op);
+  }
+}
+
 // Read this identity's mapped wallet, or null if none provisioned yet.
 export async function getOwnerWallet(identity) {
   const store = getStore(STORE);
@@ -89,7 +123,7 @@ export async function ensureOwnerWallet(identity) {
   const key = ownerKey(identity);
 
   // Fast path: an already-mapped wallet.
-  const existing = await readRecord(store, key);
+  const existing = await attempt("store-read", () => readRecord(store, key));
   if (existing?.walletId) return { ...existing, provisioned: false };
 
   // ═══ 🚨 CONFIRM THE ABSENCE BEFORE ACTING ON IT ═════════════════════════════════════════
@@ -114,21 +148,21 @@ export async function ensureOwnerWallet(identity) {
   //
   // ⚠️ COST: ~1.5s added to a GENUINE first provision (3 × 500ms). That happens ONCE per user;
   // a read-miss can happen on any cold start. The asymmetry is what makes the trade worth it.
-  const confirmed = await readRecordShort(store, key);
+  const confirmed = await attempt("store-read", () => readRecordShort(store, key));
   if (confirmed?.walletId) return { ...confirmed, provisioned: false };
 
   // No mapping seen — provision, then commit atomically. `onlyIfNew` is
   // server-authoritative: it succeeds only if the key is genuinely absent, so a
   // stale read above can't cause a duplicate mapping.
-  const record = await provisionWallet(identity);
-  const res = await store.set(key, JSON.stringify(record), { onlyIfNew: true });
+  const record = await attempt("circle-provision", () => provisionWallet(identity));
+  const res = await attempt("store-write", () => store.set(key, JSON.stringify(record), { onlyIfNew: true }));
 
   if (res && res.modified === false) {
     // We lost the race (or our read was stale): a mapping already exists — our
     // just-created wallet is abandoned (empty, never funded), NOT a duplicate
     // mapping. Try a short read for the winner; if it hasn't propagated yet,
     // signal pending so the caller returns 202 and the client retries.
-    const winner = await readRecordShort(store, key);
+    const winner = await attempt("store-read", () => readRecordShort(store, key));
     if (winner?.walletId) return { ...winner, provisioned: false };
     return { pending: true };
   }

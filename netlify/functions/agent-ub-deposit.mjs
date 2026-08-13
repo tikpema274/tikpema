@@ -4,7 +4,7 @@ import { formatUnits } from "viem";
 import crypto from "node:crypto";
 import { json, parseBody, ubDepositMaxPerTxUsdc, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
-import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { publicClient } from "./_predict.mjs";
 
 // POST /api/agent-ub-deposit { amountUsdc }  (auth)  →  202 { depositId }
@@ -103,7 +103,13 @@ export async function handler(event) {
   // ⭐ A THROW HERE IS A REFUSAL, NOT A CRASH. Unwrapped it surfaced as a bare 500 that said
   // nothing about retryability or whether anything happened. See walletUnresolvableRefusal.
   try { wallet = await ensureOwnerWallet(session); }
-  catch (e) { return json(WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal(e)); }
+  // ⚠️ ONLY the tagged external failure earns this diagnosis. Anything else — a TypeError from
+  // a bad refactor, say — RE-THROWS and surfaces unclaimed, rather than borrowing a
+  // "temporary, please retry" it cannot honour.
+  catch (e) {
+    if (!isWalletUnresolvable(e)) throw e;
+    return json(WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal(e));
+  }
   if (wallet.pending) {
     return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   }

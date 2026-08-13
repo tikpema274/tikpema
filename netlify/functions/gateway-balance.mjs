@@ -1,7 +1,7 @@
 import { json } from "./_arc.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
-import { ensureOwnerWallet, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { GATEWAY } from "./_gateway.mjs";
 
 // POST /api/gateway-balance — read-only. Reads THE CALLER'S OWN unified USDC balance
@@ -58,7 +58,13 @@ export async function handler(event) {
   // ⭐ A THROW HERE IS A REFUSAL, NOT A CRASH. Unwrapped it surfaced as a bare 500 that said
   // nothing about retryability or whether anything happened. See walletUnresolvableRefusal.
   try { wallet = await ensureOwnerWallet(session); }
-  catch (e) { return json(WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal(e)); }
+  // ⚠️ ONLY the tagged external failure earns this diagnosis. Anything else — a TypeError from
+  // a bad refactor, say — RE-THROWS and surfaces unclaimed, rather than borrowing a
+  // "temporary, please retry" it cannot honour.
+  catch (e) {
+    if (!isWalletUnresolvable(e)) throw e;
+    return json(WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal(e));
+  }
   if (wallet.pending) {
     return json(202, { status: "provisioning", message: "Your wallet is being set up — retry shortly." });
   }
