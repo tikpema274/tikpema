@@ -541,6 +541,46 @@ whichever one you asked first.
 | UB 409 wrote nothing | `blobs:get` by exact key + chain read | ✅ survives — the load-bearing evidence was `updatedAt`, not the listing |
 | DCA "22 days dead" | `blobs:list` for mandate existence | ⚠️ that part is suspect — but the ROUTING bug was proven by `curl` 404, which is independent |
 
+### ✅ dca-tick NOW SAYS WHAT IT DECIDED — live on `6a7e1f21` (20:17:08Z)
+
+```
+[dca-tick] 20:18:08  total=7 inactive=7 unreadable=0 scanned=0 submitted=0 fired=0
+                     skipped=0 failed=0 stopped=0 terminal=0 notDue=0 deferred=0 errors=0 ms=264
+```
+Three consecutive ticks. Health key **UNMOVED — 13/13**. Smoke **20/20**.
+
+⭐ **THE SHARPEST POST-DEPLOY CHECK OF THE SESSION.** `[dca-tick]` had **ZERO** occurrences in the
+entire log history — its absence was the ground truth all evening. Predicting a specific string into
+a place it has never appeared is falsifiable in a way "confirm X is still true" is not.
+
+⭐⭐ **AND THE FIX DEMONSTRATES ITSELF IN ITS OWN FIRST OUTPUT:** `total=7 inactive=7 scanned=0`. That
+is exactly the ambiguity hit two hours earlier, when a bare `scanned:0` could not distinguish "the
+store is empty" from "seven mandates exist and all are cancelled".
+
+### 🚨 THE DEFECT WAS SUBTLER THAN "IT DOESN'T LOG"
+
+`beat` recorded every outcome all along — into `dca-heartbeat/"last"`, **ONE KEY OVERWRITTEN EVERY 60
+SECONDS**. The state was diagnosable for one minute; by the time anyone asked, ~15 ticks had
+overwritten the answer.
+⚠️ I called this *"no diagnosable cause, by construction"* — **my third wrong explanation for the same
+question** (the first two: list lag, then a period boundary). **THE OBSERVATION EXISTED AND DID NOT
+SURVIVE**, which is a different defect from not observing and much harder to spot: reading the code,
+the instrumentation looks complete.
+
+**Two silent paths closed**, both producing a number that cannot be read:
+· `if (!decision.due) continue;` left NO trace — a not-due mandate showed `scanned=1` and nothing
+  else, indistinguishable from a tick that examined it and inexplicably declined. **That is the exact
+  case we could not answer.** Now counted WITH `decision.reason`.
+· the pre-scan skip made `scanned:0` ambiguous. Now `total` / `inactive` / `unreadable`.
+
+⚠️ The heartbeat is written BEFORE the log line and unchanged — asserted, so a logging throw can
+never cost the record.
+⚠️ **THIS DOES NOT EXPLAIN THE ORIGINAL MANDATE.** That record was overwritten within 60s and is
+gone. It makes the NEXT occurrence diagnosable; it does not recover the last one.
+
+Guard: `verify-dca-tick-observability` 6/0 in `test:dca`, mutation-tested (bare continue → 2 red;
+remove the log → 4 red).
+
 ### NEXT, IN ORDER
 
 1. ✅ DONE — deploy published `7f5d5de`, heartbeat appeared, calibration ran and cleaned up.
