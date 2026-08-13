@@ -581,6 +581,50 @@ gone. It makes the NEXT occurrence diagnosable; it does not recover the last one
 Guard: `verify-dca-tick-observability` 6/0 in `test:dca`, mutation-tested (bare continue → 2 red;
 remove the log → 4 red).
 
+### ✅ THE DD DISCOVERY GAP IS CLOSED — the curl from the refusal RUNS, live on `6a7e39bf` (22:01:53Z)
+
+Extracted from the live 405 and run **verbatim**, no retyping:
+```
+curl -sS -X POST https://app.tikpema.xyz/api/dd-analyze -H 'Content-Type: application/json' \
+  -d '{"address":"0x3600000000000000000000000000000000000000","chain":"arc-testnet"}'
+→ HTTP 402 · accepts present · whatYouAreBuying present · price $0.06 USDC · subjectPreview present
+```
+⭐ A curious reader now gets from a clicked link to a working call without asking anyone — and
+`subjectPreview` means they learn BEFORE paying whether the subject has contract code at all.
+⭐ Extracting the string rather than retyping it is the point: retyping would have tested my
+transcription, not what a reader copies.
+
+### ⭐⭐ THE HEALTH KEY MOVED — TO THE EXACT HASH PREDICTED BEFORE DEPLOYING
+
+```
+9773162902932b73…4015d   ← the old surface
+b17f491d37339372…28f4e6  ← computed locally BEFORE the deploy, and present after
+```
+**This is the strongest test the content-hash binding has had.** 13/13 DD-clean deploys only proved
+it does not move SPURIOUSLY; a binding that never moves and one that tracks code are
+indistinguishable until the code changes. This proves it moves WHEN IT SHOULD, and to the SPECIFIC
+hash — not merely to something different.
+
+⚠️ **THE PLAN SAID "DD-CLEAN → ANOTHER FREE FALSIFICATION". IT WAS NOT.** `dd-analyze.mjs` is in the
+hashed surface (`stamp-build.mjs:68`), so the key HAD to move — and "unmoved" would have been the
+failure. Caught by predicting the value before deploying instead of assuming the usual outcome.
+
+### 🚨 THE REFUSAL WINDOW OPENED, AND ONE TEST WOULD HAVE MISREAD IT
+
+`service-unverified` for **TWELVE consecutive attempts** (~8 min) while `dd-canary` attested the new
+surface. ⭐⭐ Had the curl been tested ONCE and reported, the honest-looking conclusion would have
+been "the example is broken" — when the endpoint was CORRECTLY REFUSING. The warned-about failure
+(a reader concludes the service does not work) would have arrived by a route neither of us named:
+not a malformed curl, but a correct one tested at the wrong moment.
+⚠️ The verifier's own `count: 1` health reading in that run is STALE — taken pre-canary. Re-read
+after: 2, as predicted. A number captured before the event it describes is not evidence.
+
+⚠️ Money-path tick was still pre-publish at the time of reading (`22:01:09` vs `22:01:53`); sweeper
+alive with `open:1`. Not counted — confirms on the next `*/15`.
+
+🚧 **Content negotiation remains the proper version** — HTML for `Accept: text/html`, JSON for
+machines, which also yields the `openApiUrl` Circle's Discovery schema wants. Before any listing.
+
 ### NEXT, IN ORDER
 
 1. ✅ DONE — deploy published `7f5d5de`, heartbeat appeared, calibration ran and cleaned up.
