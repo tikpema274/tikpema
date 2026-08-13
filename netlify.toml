@@ -42,6 +42,29 @@
 # controls bound what the AGENT may spend, and a paused agent must never trap the user's money.
 # No `to` param anywhere; withdraw(address) takes no beneficiary, so funds can only land in the
 # caller's own SCA.
+# ═══ 🚨 THESE WERE MISSING, AND THE DCA PANEL WAS 404ing IN PRODUCTION ═══════════════════
+# src/lib/agentClient.ts has called "/api/dca-create", "/api/dca-cancel" and "/api/dca-list" since
+# 19405ad, and netlify.toml never had a redirect for any of them. All three returned 404 (SPA HTML)
+# while /.netlify/functions/<name> returned 401 — so every action on the DCA page failed.
+# ⭐ FOUND while adding those functions to the post-deploy smoke set: the smoke test insists on
+# EXPLICIT paths rather than assuming the /api convention, and checking each one is what surfaced it.
+# ⚠️ Redirects added rather than changing the client, because the client's expectation is the one
+# that matches the other 31 /api routes — the job plane is the deliberate exception, this was not.
+[[redirects]]
+  from = "/api/dca-create"
+  to = "/.netlify/functions/dca-create"
+  status = 200
+
+[[redirects]]
+  from = "/api/dca-cancel"
+  to = "/.netlify/functions/dca-cancel"
+  status = 200
+
+[[redirects]]
+  from = "/api/dca-list"
+  to = "/.netlify/functions/dca-list"
+  status = 200
+
 [[redirects]]
   from = "/api/ub-withdraw"
   to = "/.netlify/functions/ub-withdraw"

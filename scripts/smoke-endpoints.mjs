@@ -45,6 +45,19 @@ const ENDPOINTS = [
   // wrongly-503'd poller fails SILENTLY (the card just never fills) rather than loudly.
   // ⚠️ THIS CHECKS INSTANTIATION ONLY. The 202 branch needs a first-login race and cannot be
   // triggered on demand — the source-level allowlist in verify-provisioning-status is what pins it.
+  // ⭐ THE REMAINING SEVEN from the 18-handler wrap. Same edit, same instantiation risk — inferring
+  // they are fine because eleven others passed is reasoning, not measurement.
+  { path: "/api/agent-execute-plan" },
+  { path: "/api/agent-ub-spend" },
+  { path: "/api/agent-vault-deposit" },
+  { path: "/api/agent-vault-withdraw" },
+  { path: "/api/agent-vault-shares" },
+  { path: "/api/job-swap-approve" },
+  // 🚨 /api/dca-create 404'd until the redirect was added (see netlify.toml). Listed at the /api
+  // path ON PURPOSE: that is what agentClient calls, so this entry stays red until the fix ships.
+  { path: "/api/dca-create", note: "redirect added — was 404 in prod" },
+  { path: "/api/dca-cancel", note: "redirect added — was 404 in prod" },
+  { path: "/api/dca-list", note: "redirect added — was 404 in prod" },
   { path: "/api/agents", note: "POLLER — must keep 202" },
   { path: "/api/gateway-balance", note: "POLLER — must keep 202" },
   { path: "/api/my-wallet", note: "POLLER — must keep 202" },
