@@ -14,6 +14,7 @@
     "test:watch": "node --experimental-test-module-mocks scripts/verify-strong-read-watch.mjs && node scripts/verify-sweeper-heartbeat.mjs",
     "gate:draft": "node scripts/verify-watch-promotion-gate.mjs --context deploy-preview",
     "gate:watch": "node scripts/verify-watch-promotion-gate.mjs",
+    "gate:routes": "node scripts/verify-api-routes.mjs",
     "smoke": "node scripts/smoke-endpoints.mjs",
     "test:client": "npx tsx scripts/verify-read-json.mts && npx tsx scripts/verify-format-usdc.mts",
     "preview": "vite preview",
