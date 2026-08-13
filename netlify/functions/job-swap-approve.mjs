@@ -3,7 +3,7 @@ import { connectBlobs } from "./_blobs.mjs";
 import { formatUnits } from "viem";
 import { json, parseBody, CONTRACTS, USDC_DECIMALS, swapCapUsdc } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
-import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
 import { executeAction } from "./_actions.mjs";
 import { SWAP_TOKENS, valueInUsdc } from "./_swap.mjs";
 import { publicClient } from "./_predict.mjs";
@@ -109,7 +109,7 @@ export async function handler(event) {
 
   const owner = await ensureOwnerWallet(session);
   if (owner.pending) {
-    return json(202, { status: "provisioning", message: "Your agent wallet is being set up — retry shortly." });
+    return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   }
   const walletAddress = owner.walletAddress;
 

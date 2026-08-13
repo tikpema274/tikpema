@@ -1,7 +1,7 @@
 import { json, parseBody, ubSpendCapUsdc, ubSpendFloorUsdc } from "./_arc.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
-import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
 import { canSpendDay, recordAgentSpend } from "./_budget.mjs";
 import { AGENT } from "./_agents.mjs";
 import { assertNotPaused } from "./_pause.mjs";
@@ -65,7 +65,7 @@ export async function handler(event) {
   // The spender: THIS session's own agent SCA — holds the unified balance being spent.
   const wallet = await ensureOwnerWallet(session);
   if (wallet.pending) {
-    return json(202, { status: "provisioning", message: "Your wallet is being set up — retry shortly." });
+    return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   }
   const owner = wallet.walletAddress;
 

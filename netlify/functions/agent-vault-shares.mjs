@@ -11,7 +11,7 @@
 import { json, parseBody } from "./_arc.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
-import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
 import { resolveVault, readShareBalance, SUPPORTED_VAULT_KEYS } from "./_vault.mjs";
 
 export async function handler(event) {
@@ -26,7 +26,7 @@ export async function handler(event) {
   if (!v) return json(400, { error: `unsupported vault "${vault}" (not on the allowlist)`, supported: SUPPORTED_VAULT_KEYS });
 
   const wallet = await ensureOwnerWallet(session);
-  if (wallet.pending) return json(202, { status: "provisioning", message: "Your agent wallet is being set up — retry shortly." });
+  if (wallet.pending) return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
 
   try {
     const bal = await readShareBalance({ walletAddress: wallet.walletAddress, vault: v });

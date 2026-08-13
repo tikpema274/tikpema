@@ -52,7 +52,14 @@ t("⭐⭐ no endpoint uses 202 for BOTH provisioning and an action", () => {
 
 // ═══ 2. THE SEVEN THAT WERE FIXED USE THE SHARED HELPER ══════════════════════════════════════
 const FIXED = ["agent-send", "agent-withdraw", "agent-bridge", "agent-act",
-               "job-bridge-approve", "agent-ub-deposit", "job-run", "ub-withdraw"];
+               "job-bridge-approve", "agent-ub-deposit", "job-run", "ub-withdraw",
+               // ⭐ ROUND 2: these had only ONE 202 (unambiguous) but still answered "nothing
+               // happened" with a 2xx that `res.ok` accepts — the same latent bug without the
+               // ambiguity. ⚠️ job-swap-approve was NOT on the list I was given; the enumeration
+               // found it, and it was the worst of them (see POLLERS below).
+               "agent-ub-spend", "agent-execute-plan", "dca-create",
+               "agent-vault-deposit", "agent-vault-withdraw",
+               "job-swap-approve", "agent-vault-shares"];
 
 for (const name of FIXED) {
   t(`${name}: provisioning refuses via the shared helper, not a local copy`, () => {
@@ -98,7 +105,18 @@ t("⭐ ub-withdraw: the sole 202 is the STARTED withdrawal", () => {
 });
 
 // ═══ 5. THE ENDPOINTS DELIBERATELY LEFT ALONE ════════════════════════════════════════════════
-t("⭐ unambiguous provisioning-only endpoints keep their 202 (their clients branch on the code)", () => {
+t("⭐⭐ ONLY the three POLLERS may still answer provisioning with 202", () => {
+  // ⚠️ THE WHOLE LIST, so a new 202 cannot appear unnoticed. These three are the ONLY endpoints
+  // whose clients branch on the STATUS CODE to drive a poll — useGatewayBalance.ts:51,
+  // useWallet.ts:313, AgentsPanel.tsx:105. Changing them breaks polling for no safety gain.
+  const POLLERS = ["agents.mjs", "gateway-balance.mjs", "my-wallet.mjs"];
+  const found = files.filter((f) => /status:\s*"provisioning"/.test(strip(readFileSync(`${DIR}/${f}`, "utf8"))));
+  assert.deepEqual(found.sort(), POLLERS.sort(),
+    "an endpoint outside the three pollers still answers provisioning with 202 — it will read as a " +
+    "successful result to any client doing `if (!res.ok) throw`");
+});
+
+t("⭐ …and those three are READS, not money movements", () => {
   // ⚠️ NOT an oversight. useGatewayBalance.ts:51, useWallet.ts:313 and AgentsPanel.tsx:105 read 202
   // as provisioning; changing these would break polling for no safety gain, because on these
   // endpoints 202 is not ambiguous — nothing irreversible shares it.

@@ -2,7 +2,7 @@ import { json, parseBody, sendCapUsdc, bridgeCapUsdc } from "./_arc.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { executeAction, valueOfStep } from "./_actions.mjs";
 import { requireSession } from "./_auth.mjs";
-import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
 import { daySpend, budgetConfig } from "./_budget.mjs";
 import { recordBridge } from "./_bridge-record.mjs";
 import { resolveDestination, bridgeFee, bridgeFeeBand, bridgeAckToken } from "./_bridge.mjs";
@@ -68,7 +68,7 @@ export async function handler(event) {
   // never the shared env wallet).
   const owner = await ensureOwnerWallet(session);
   if (owner.pending) {
-    return json(202, { status: "provisioning", message: "Your agent wallet is being set up — retry shortly." });
+    return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   }
   const walletAddress = owner.walletAddress;
   const actx = { walletAddress, session };

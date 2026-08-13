@@ -2,7 +2,7 @@ import { getStore } from "@netlify/blobs";
 import { connectBlobs } from "./_blobs.mjs";
 import { json } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
-import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
 import { MANDATE_STORE, mandateKey, validateAndBuildMandate } from "./_dca.mjs";
 
 // POST /api/dca-create — create a DCA mandate. THE authorization moment: this is where a user,
@@ -25,7 +25,7 @@ export async function handler(event) {
   // scheduler never resolves a wallet without a session. Provisioning race → 202, retry.
   const owner = await ensureOwnerWallet(session);
   if (owner.pending) {
-    return json(202, { status: "provisioning", message: "Your agent wallet is being set up — retry shortly." });
+    return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   }
 
   let input;
