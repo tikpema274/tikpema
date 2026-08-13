@@ -445,6 +445,62 @@ reasoned about.
 ⚠️ Money-path tick was still pre-publish at 16:27 (`16:15:21`); the previous deploy's post-publish
 tick was clean, and this one is due on the next `*/15`.
 
+### 🚨 THE DCA PANEL HAD BEEN 404ing FOR 22 DAYS — fixed, live on `6a7e108a` (19:16:21Z)
+
+`src/lib/agentClient.ts` called `/api/dca-create`, `/api/dca-cancel` and `/api/dca-list` from
+**19405ad (2026-07-22)**. `netlify.toml` never had a redirect for any of them — only the `dca-tick`
+SCHEDULE. `DcaPanel` (rendered at `App.tsx:84`) reaches all three ONLY through `agentClient`, so
+list, create and cancel were all dead.
+
+⭐ **NOT A REGRESSION — BORN BROKEN.** `19405ad` ADDED all three methods with `/api` paths; there are
+no removed lines and no earlier reference. The panel has never worked.
+
+⭐⭐ **AND IT WAS RECORDED AS VERIFIED, THE SAME DAY.** The refactor note says *"SHIPPED + FULLY
+VERIFIED — BACKEND AND UI… live in prod and IDLE — the correct resting state"*. The UI check was of
+the MANUAL SWAP render, not of DCA creation — a verification of one surface recorded as verification
+of the feature.
+⭐⭐⭐ **"IDLE" WAS THE TELL.** A panel that cannot create anything is GUARANTEED to be idle, so idle
+was indistinguishable from dead — and it was read as health. The same family as a zero balance from
+an unreadable chain, but pointed at a whole feature. The 11 mandates in the store came from elsewhere.
+
+**THE FLIP — the most falsifiable check of the session**, because a measured broken state existed
+BEFORE:
+```
+/api/dca-create   404 → 401 ✓        smoke 17/3 → 20/20
+/api/dca-cancel   404 → 401 ✓        health key UNMOVED 12/12
+/api/dca-list     404 → 401 ✓
+```
+⚠️ A 401 proves the ROUTE RESOLVES. It does NOT prove creation works end to end — and the "idle"
+reading that hid this for three weeks would look identical. That needs a signed-in create.
+
+### ⭐⭐ HOW IT WAS FOUND, AND THE GUARD THAT NOW DERIVES IT
+
+Found while adding the remaining seven handlers to the smoke set. The smoke test's own rule —
+**EXPLICIT paths, never derived from the `/api` convention**, added after the `job-run` false pass —
+is what surfaced it. Assuming the convention would have reproduced the bug INSIDE THE TEST.
+
+⚠️ **THE `/api` CONVENTION HAS NOW FAILED THREE TIMES**: `job-run` and `job-run-status` DELIBERATELY
+(a direct-called family), DCA ACCIDENTALLY. It must never be assumed.
+
+⭐ **AND THE 20-PATH SMOKE LIST WAS ITSELF AN ASSUMPTION.** A hand list answers "did I remember this
+one?"; it cannot answer "is there anything I did NOT remember?". `npm run gate:routes`
+(`verify-api-routes.mjs`, 5/0) now DERIVES both sides: every `/api` path referenced in `src/` against
+every redirect in `netlify.toml` — **26 referenced against 31 declared**, and the three DCA ones were
+the only gap. Matches template literals as well as quoted strings, pinned by an assertion.
+
+⚠️⚠️ **A BUG IN THAT GUARD, CAUGHT BY MUTATION BEFORE IT SHIPPED.** Its first "every redirect points
+at a real function" check tested the **FROM** path's name — silently assuming from and to always
+match. Mutating a `to` target to a typo left the suite GREEN. It now captures the from/to PAIR and
+checks the TARGET, plus an assertion that every route parsed WITH a target (else `routes` empties and
+the check passes vacuously — the shape that let the typo through).
+⭐ A dangling target is worse than a missing redirect: a 404 whose config READS as correct.
+
+⚠️ **THE FIRST DEPLOY ATTEMPT FAILED CLEANLY** — `getaddrinfo EAI_AGAIN api.netlify.com`. Build
+succeeded, upload never started, NO deploy record created, prod untouched. Loud (`CLI_EXIT=1`), not a
+partial publish. ⚠️ My watcher only matched `Deploy failed|Build failed`, so it would have polled
+forever for a publish that was never coming — `EAI_AGAIN|FetchError` added. Silence-isn't-success, in
+my own tooling.
+
 ### NEXT, IN ORDER
 
 1. ✅ DONE — deploy published `7f5d5de`, heartbeat appeared, calibration ran and cleaned up.
