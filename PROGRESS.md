@@ -406,6 +406,45 @@ Still open on: `agent-ub-spend`, `agent-execute-plan`, `dca-create`, `agent-vaul
 `agent-vault-withdraw`. Now asserted in `verify-read-json` (9/0) so the bound is pinned rather than
 assumed.
 
+### ✅ PROVISIONING IS 503 EVERYWHERE IT SHOULD BE — 13 endpoints, live on `6a7de9e9` (16:21:45Z)
+
+⭐⭐ **THE ENUMERATION FOUND A SIXTH THAT WAS NOT ON THE LIST, AND IT WAS THE WORST.**
+`job-swap-approve`'s caller (`approveProposal.ts`) does `if (!r.ok && r.status !== 202) throw` — so a
+provisioning 202 passed **deliberately**, fell through `data?.executed === false` (no such field on
+that body), and returned `{ receipt: undefined }`: **a swap approval reported as successful with no
+receipt**. And `approveProposal` routes BOTH `bridge_usdc` → `job-bridge-approve` (503 since round 1)
+and `swap_tokens` → `job-swap-approve` (still 202), so one shared client function was seeing two
+different contracts depending on the proposal. The fourth-refund-path shape: a list has what someone
+remembered; an enumeration has what is there.
+
+Also fixed `agent-vault-shares` — a read over POST, but its caller does `if (!r.ok) throw; return
+data`, so provisioning arrived where share data belonged.
+
+⭐ **THE JUSTIFICATION DIFFERS FROM ROUND 1.** These had only ONE 202, so it was never AMBIGUOUS. The
+bug is the other half: `pending` means "nothing happened" and 202 passes `res.ok`. Ambiguity was a
+separate, worse problem — this one exists without it.
+
+⭐⭐ **THE GUARD NOW ALLOWLISTS INSTEAD OF SPOT-CHECKING.** It asserts the ONLY endpoints still
+answering provisioning with 202 are exactly `agents`, `gateway-balance`, `my-wallet` — the three
+whose clients branch on the STATUS CODE to drive a poll, and all three reads. A new 202 anywhere else
+now fails the suite rather than waiting for the next enumeration. Spot-checks find what you thought
+to look for.
+
+**Post-deploy:** health key **UNMOVED — 9/9** (predicted from the local `ddTree` before deploying);
+smoke **11/11**, now including the three pollers.
+⭐ Live poller evidence via the DURATION discriminator: `16:26` showed `gateway-balance 201.90 ms`
+and `my-wallet 193.51 ms` — ~4 ms is a 401, ~200 ms is real work, so authenticated polls are
+completing on the new build.
+
+⚠️ **WHAT IS STILL NOT PROVEN, STATED PLAINLY.** None of the above exercises the 202 branch itself —
+it needs a first-login wallet race and cannot be triggered on demand. The normal path was never at
+risk. What covers it: the source ALLOWLIST, and the caller check done BEFORE changing anything (none
+of the seven branched on 202). ⚠️ A wrongly-503'd poller would fail SILENTLY — a NEW user's card
+never fills, existing sessions show nothing — which is why it went in the smoke set rather than being
+reasoned about.
+⚠️ Money-path tick was still pre-publish at 16:27 (`16:15:21`); the previous deploy's post-publish
+tick was clean, and this one is due on the next `*/15`.
+
 ### NEXT, IN ORDER
 
 1. ✅ DONE — deploy published `7f5d5de`, heartbeat appeared, calibration ran and cleaned up.
