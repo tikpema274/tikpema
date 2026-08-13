@@ -233,5 +233,22 @@ await t("⭐⭐ an initiating record with NO amountAtomic does not block — it 
     "a half-written record must not deny the exit — nothing was started");
 });
 
+
+await t("⭐⭐ the age bound EXCEEDS the sweeper period — that is the whole safety argument", async () => {
+  // The harmful case is two records maturing in the SAME sweeper tick (one withdraw() completes
+  // both; the loser reads withdrawable:0 forever). A second withdrawal permitted at this age
+  // matures ≥ 2 sweeper periods after the first, so they land on SEPARATE ticks.
+  assert.ok(REAL.INITIATING_BLOCKS_MS > REAL.SWEEPER_PERIOD_MS,
+    "at or below one sweeper period, a permitted second withdrawal could mature in the same tick");
+  assert.equal(REAL.INITIATING_BLOCKS_MS, 2 * REAL.SWEEPER_PERIOD_MS,
+    "the 2× margin exists for block-time drift — maturity is block-derived, so wall-clock spacing compresses");
+});
+
+await t("⭐ the bound is tied to the sweeper period, not a hardcoded clock", async () => {
+  // ⚠️ If the sweeper's schedule changes, this must change with it. Pinning the RELATIONSHIP is
+  // what makes that a suite failure rather than a silent drift.
+  assert.equal(REAL.SWEEPER_PERIOD_MS, 30 * 60 * 1000, "matches ub-withdraw-sweep's */30 schedule");
+});
+
 console.log(`\n${fail === 0 ? "✅" : "❌"} verify-ub-withdraw-guard: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

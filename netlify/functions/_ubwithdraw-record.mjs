@@ -186,7 +186,37 @@ export async function listAllOpen({ limit = 50 } = {}) {
  * ⚠️ NOTHING IS DELETED OR MARKED FAILED HERE. The sweeper keeps watching a record this function
  * ignores — it stops holding the user hostage, it does not stop being reconciled.
  */
-export const INITIATING_BLOCKS_MS = 60 * 60 * 1000; // 2 × the sweeper's 30-min period
+/**
+ * ═══ ⭐⭐ THE AGE BOUND — A CHOSEN NUMBER, AND WHY IT IS THIS ONE ═════════════════════════════
+ *
+ * This single value sets how long a GENUINE in-flight initiation is protected from a second
+ * withdrawal, against how long a STUCK record blocks the exit. Both directions have a real cost, so
+ * it must not be incidental.
+ *
+ * ⚠️ MY FIRST DERIVATION ANSWERED THE WRONG QUESTION. "2 × the sweeper period, so the sweeper has
+ * looked twice" answers *has anyone checked?* — but the sweeper looking proves nothing about a
+ * userOp that has not mined YET. On this stack orphaned ops can sit unmined indefinitely
+ * (see the unstaked-nonce trap), so there is no age at which "still initiating" means "dead".
+ *
+ * ⭐ THE QUESTION THAT DECIDES IT IS: *can the second withdrawal this permits actually do harm?*
+ * The harmful case is narrow and structural — two records maturing in the SAME sweeper tick, where
+ * one `withdraw()` completes both, one record is marked COMPLETED and the other reads
+ * `withdrawable:0` forever. Two withdrawals started more than one sweeper period apart mature more
+ * than one sweeper period apart, so they land on SEPARATE ticks and both resolve cleanly.
+ *
+ * ⭐⭐ SO THE BOUND MUST EXCEED THE SWEEPER PERIOD, and 2× gives margin for block-time drift
+ * (maturity is block-derived, so wall-clock spacing can compress). 60 min against a 30-min tick.
+ *
+ * ⚠️ THE RESIDUAL RISK, STATED: a real initiation that confirms LATER than this bound can coexist
+ * with a second one. That is the accepted false NO — and it is acceptable only because the spacing
+ * makes both complete normally, NOT because it cannot happen. If the sweeper period ever changes,
+ * THIS MUST CHANGE WITH IT; it is derived from that period, not from a clock.
+ * ⚠️ It is also NOT derived from any measurement of how long a stalled userOp takes to mine. No
+ * such measurement exists here. What would ground it: the observed distribution of SENT→mined
+ * latency on Arc for this SCA.
+ */
+export const SWEEPER_PERIOD_MS = 30 * 60 * 1000;
+export const INITIATING_BLOCKS_MS = 2 * SWEEPER_PERIOD_MS; // 60 min — see the derivation above
 
 export function blocksNewWithdrawal(rec, now = Date.now()) {
   if (!rec) return false;
