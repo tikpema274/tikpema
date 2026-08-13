@@ -39,6 +39,15 @@ const ENDPOINTS = [
   { path: "/api/agent-ub-deposit" },
   { path: "/api/ub-withdraw" },
   { path: "/.netlify/functions/job-run", note: "no /api route — see the file header" },
+  // ⭐⭐ THE THREE ALLOWLISTED POLLERS. They must KEEP their 202-on-provisioning, because
+  // useGatewayBalance.ts:51, useWallet.ts:313 and AgentsPanel.tsx:105 branch on that CODE to drive a
+  // poll. A sweep that changes 202 → 503 is exactly the change that could catch one of them, and a
+  // wrongly-503'd poller fails SILENTLY (the card just never fills) rather than loudly.
+  // ⚠️ THIS CHECKS INSTANTIATION ONLY. The 202 branch needs a first-login race and cannot be
+  // triggered on demand — the source-level allowlist in verify-provisioning-status is what pins it.
+  { path: "/api/agents", note: "POLLER — must keep 202" },
+  { path: "/api/gateway-balance", note: "POLLER — must keep 202" },
+  { path: "/api/my-wallet", note: "POLLER — must keep 202" },
 ];
 
 const looksLikeHtml = (b) => /^\s*(<!doctype|<html)/i.test(b);
