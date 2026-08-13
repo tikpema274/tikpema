@@ -59,6 +59,11 @@ import {
   DD_PRICE_HUMAN,
 } from "./_dd-x402.mjs";
 import { codeIdentityForEvent, evaluateHealth } from "../../shared/dd-canary/health.mjs";
+import {
+  SUPPORTED_CHAINS, DD_RESOURCE_URL, DD_OPENAPI_URL, DD_SAMPLE_ADDRESS, DD_SAMPLE_ADDRESS_IS,
+  wantsHtml,
+} from "./_dd-descriptor.mjs";
+import { discoveryPage } from "./_dd-discovery-page.mjs";
 import { readHealth } from "./_dd-health.mjs";
 import { exposureState } from "./_dd-exposure.mjs";
 import { chainClient } from "../../scripts/dd/client.mjs";
@@ -85,7 +90,9 @@ import { ddAttestationOptions } from "../../scripts/dd/attest-circle.mjs";
 // scripts/dd/chains.mjs also knows `base` and `base-sepolia`. They stay REFUSED: the frozen service
 // document says of any chain beyond Arc Testnet "reachable in principle, never exercised or
 // verified", and an unexercised path must not first be exercised by an anonymous caller.
-const SUPPORTED_CHAINS = Object.freeze(["arc-testnet"]);
+// ⭐ MOVED to _dd-descriptor.mjs: the endpoint validates against it and every descriptor (405
+// JSON, HTML page, OpenAPI) advertises from it, so an example can never name a chain the
+// endpoint would reject — they cannot disagree because they read the same array.
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const MAX_BODY_BYTES = 4096;
@@ -248,23 +255,40 @@ export async function handler(event) {
       // 🚧 NOT CONTENT NEGOTIATION. The proper fix is HTML for `Accept: text/html` and JSON for
       // machines, which also yields the openApiUrl Circle's Discovery schema wants. That is worth
       // doing before any listing — not before this.
+      // ═══ 🚨 CONTENT NEGOTIATION — JSON IS THE DEFAULT, ALWAYS ═══════════════════════════
+      // A human gets a page; a machine gets the JSON refusal UNCHANGED. The failure that matters
+      // is the reverse: serving HTML to a client expecting data is exactly what `readJson` was
+      // written to catch. So HTML requires an EXPLICIT `text/html`, and `*/*` (curl's default), an
+      // absent header, and anything unparseable all fall through to JSON. See wantsHtml().
+      // ⚠️ THE STATUS STAYS 405 for both. The method IS unsupported; a 200 would be a nicer lie,
+      // and browsers render the body regardless.
+      if (wantsHtml(event.headers ?? {})) {
+        return {
+          statusCode: 405,
+          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+          body: discoveryPage({ method: event.httpMethod }),
+        };
+      }
       return json(405, {
         ...refusalReport({
           reason: "unsupported-method",
           detail: `this endpoint accepts POST; received ${event.httpMethod}`,
         }),
         howToCall: {
-          resource: "https://app.tikpema.xyz/api/dd-analyze",
+          resource: DD_RESOURCE_URL,
           method: "POST",
           contentType: "application/json",
           body: { address: "0x<20-byte hex>", chain: SUPPORTED_CHAINS[0] },
+          // ⚠️ MUST RESOLVE — a published URL nobody fetched is the DCA bug with a longer fuse.
+          openApiUrl: DD_OPENAPI_URL,
+          humanReadable: "the same URL with `Accept: text/html` returns a page instead of this JSON",
           curl:
-            "curl -sS -X POST https://app.tikpema.xyz/api/dd-analyze " +
+            `curl -sS -X POST ${DD_RESOURCE_URL} ` +
             "-H 'Content-Type: application/json' " +
-            `-d '{"address":"0x3600000000000000000000000000000000000000","chain":"${SUPPORTED_CHAINS[0]}"}'`,
+            `-d '{"address":"${DD_SAMPLE_ADDRESS}","chain":"${SUPPORTED_CHAINS[0]}"}'`,
           // ⚠️ A REAL address on the supported chain (Arc USDC), so the sample is a call that
           // actually returns a report rather than a placeholder that 400s.
-          sampleAddressIs: "Arc testnet USDC — a real contract, so the sample returns a real report",
+          sampleAddressIs: DD_SAMPLE_ADDRESS_IS,
           supportedChains: SUPPORTED_CHAINS,
           price: DD_PRICE_HUMAN,
           youGet:

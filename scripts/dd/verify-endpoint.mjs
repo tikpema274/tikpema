@@ -17,6 +17,9 @@ import { verifyAttestation } from "../../shared/onchain-analyze/attest.mjs";
 import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
 // ⭐ imported, so a drifting price fails this suite instead of misleading a buyer
 import { DD_PRICE_HUMAN } from "../../netlify/functions/_dd-x402.mjs";
+import { wantsHtml, DD_RESOURCE_URL, DD_OPENAPI_URL, SUPPORTED_CHAINS as DESC_CHAINS }
+  from "../../netlify/functions/_dd-descriptor.mjs";
+import { discoveryPage } from "../../netlify/functions/_dd-discovery-page.mjs";
 
 // ⚠️ dd-analyze's exposure gate (RUNG -1, unset = DISABLED) sits before every other rung. This suite
 // exercises the rungs BEHIND it, so open it explicitly rather than letting a 503 masquerade as a
@@ -93,11 +96,11 @@ const LIVE = process.argv.includes("--live") || Boolean(TARGET_URL);
 const VAULT = "0x240Eb85458CD41361bd8C3773253a1D78054f747";
 
 /** One request, either in-process or over the wire — the SAME assertions apply to both. */
-async function call(body, { method = "POST" } = {}) {
+async function call(body, { method = "POST", headers = {} } = {}) {
   if (TARGET_URL) {
     const r = await fetch(TARGET_URL, {
       method,
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...headers },
       body: method === "POST" ? (typeof body === "string" ? body : JSON.stringify(body)) : undefined,
     });
     const text = await r.text();
@@ -105,8 +108,12 @@ async function call(body, { method = "POST" } = {}) {
     try { parsed = JSON.parse(text); } catch { /* left null — asserted below */ }
     return { status: r.status, body: parsed, raw: text };
   }
-  const res = await handler({ httpMethod: method, body: typeof body === "string" ? body : JSON.stringify(body) });
-  return { status: res.statusCode, body: JSON.parse(res.body), raw: res.body };
+  const res = await handler({ httpMethod: method, headers, body: typeof body === "string" ? body : JSON.stringify(body) });
+  // ⚠️ NOT EVERY RESPONSE IS JSON ANY MORE. The HTML discovery page must not be forced through
+  // JSON.parse — a throw here would look like a handler fault rather than a negotiated page.
+  let parsed = null;
+  try { parsed = JSON.parse(res.body); } catch { /* left null — callers assert on `raw` */ }
+  return { status: res.statusCode, body: parsed, raw: res.body, headers: res.headers ?? {} };
 }
 
 /** Every response must satisfy these, refusal or not. This is the "one parser" promise. */
@@ -301,6 +308,69 @@ console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES PRESENT"}   pas
     `address=${JSON.stringify(b?.subject?.address)} block=${JSON.stringify(b?.subject?.blockNumber)}`);
   check("  …severityMeaning survives — scope-not-rank, the claim the whole report rests on",
     /scope-not-rank/.test(b?.severityMeaning ?? ""));
+}
+
+
+// ═══ 🚨 CONTENT NEGOTIATION — THE FAILURE THAT MATTERS IS HTML TO A MACHINE ══════════════════
+// This is a money endpoint. A client that receives a web page where it expected data is exactly
+// what readJson exists to catch. So JSON is the DEFAULT and HTML needs an explicit signal — these
+// assertions weigh far more than the ones checking the page renders.
+{
+  // ⭐ THE WILDCARD IS THE ONE THAT WOULD HAVE BITTEN: curl sends it by default, and a naive
+  // "does Accept allow html" check hands a page to every curl in the world.
+  check("⭐⭐ a WILDCARD accept gets JSON, not HTML", wantsHtml({ accept: "*/*" }) === false);
+  check("⭐⭐ an ABSENT accept gets JSON — fetch() sends none", wantsHtml({}) === false);
+  check("  …explicit application/json gets JSON", wantsHtml({ accept: "application/json" }) === false);
+  check("  …a non-string Accept cannot throw or pass", wantsHtml({ accept: 12345 }) === false);
+  check("  …'text/html' inside a PARAMETER is not a type match",
+    wantsHtml({ accept: 'application/json; profile="text/htmlish"' }) === false);
+  check("⭐ a real browser Accept DOES get HTML",
+    wantsHtml({ accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" }) === true);
+  check("  …and the header name is case-insensitive", wantsHtml({ Accept: "text/html" }) === true);
+
+  // ⭐ ONE SOURCE FOR EVERY PUBLISHED STRING — the page, the JSON and the OpenAPI cannot drift.
+  const page = discoveryPage({ method: "GET" });
+  check("⭐ the HTML page is self-contained — no CDN, font, script or image fetch",
+    !/<script|src=|@import|https?:\/\/(?!app\.tikpema\.xyz)/i.test(page.replace(/<a [^>]*>/g, "")));
+  check("  …it advertises the SAME chain the endpoint validates against",
+    page.includes(DESC_CHAINS[0]) && DESC_CHAINS.length > 0);
+  check("  …the SAME price as the 402", page.includes(DD_PRICE_HUMAN));
+  check("  …and the SAME canonical resource URL", page.includes(DD_RESOURCE_URL));
+
+  // 🚨 A FRIENDLY PAGE IS EXACTLY WHERE THE HARD TERMS GET TRIMMED FOR TONE.
+  check("⭐⭐ the page keeps the COVERAGE FLOOR, not a softened version",
+    /not a clean bill/i.test(page) && /single checked item/i.test(page) && /same full price/i.test(page));
+  check("⭐⭐ …and keeps WHY the price does not scale",
+    /incentive to overstate/i.test(page) && /cannot independently audit/i.test(page));
+  check("  …and points at subjectPreview as the before-you-pay signal", /subjectPreview/.test(page));
+}
+
+
+// ═══ ⭐ NEGOTIATION THROUGH THE REAL HANDLER — the suite is the instrument that reaches the 405 ══
+// ⚠️ Four ad-hoc harnesses built to check this returned 503, never 405: they omitted the
+// publication and health mocks and stopped at an earlier rung. A weaker parallel harness is not a
+// second opinion, it is a second chance to be wrong. These go through `call`.
+{
+  const asCurl = await call({}, { method: "GET", headers: { accept: "*/*" } });
+  check("⭐⭐ curl's wildcard Accept gets JSON from the REAL handler",
+    asCurl.status === 405 && asCurl.body?.refusal?.reason === "unsupported-method" &&
+    !/^\s*<!doctype/i.test(asCurl.raw ?? ""), `ct=${asCurl.headers?.["Content-Type"]}`);
+
+  const asFetch = await call({}, { method: "GET", headers: {} });
+  check("⭐⭐ an absent Accept gets JSON", asFetch.status === 405 && !!asFetch.body?.howToCall);
+
+  const asBrowser = await call({}, { method: "GET", headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8" } });
+  check("⭐ a browser Accept gets the HTML page", /^\s*<!doctype html>/i.test(asBrowser.raw ?? ""));
+  check("  …with an html content-type",
+    /text\/html/i.test(String(asBrowser.headers?.["Content-Type"] ?? "")));
+  check("  …still 405 — the method IS unsupported; 200 would be a nicer lie",
+    asBrowser.status === 405);
+  check("  …and no-store, so a CDN cannot pin a discovery page over a changing service",
+    /no-store/i.test(String(asBrowser.headers?.["Cache-Control"] ?? "")));
+
+  check("⭐ openApiUrl is published in howToCall", asFetch.body?.howToCall?.openApiUrl === DD_OPENAPI_URL);
+  check("  …and the resource URL comes from the ONE descriptor",
+    asFetch.body?.howToCall?.resource === DD_RESOURCE_URL);
 }
 
 console.log(`╚══════════════════════════════════════════════════════════════════════`);

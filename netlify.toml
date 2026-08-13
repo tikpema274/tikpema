@@ -31,6 +31,14 @@
 # from _vault.mjs and cannot reach the deposit path. No payment and no auth yet (step 1 of 3), so it
 # spends RPC quota and Circle signing calls on demand — intended for DRAFT deploys until step 2 adds
 # payment. Every response, including every refusal, is the same report schema.
+# The machine-readable description. ⚠️ MUST RESOLVE: howToCall.openApiUrl and the OpenAPI document
+# itself both publish this URL, and a published address nobody fetched is exactly how /api/dca-* was
+# dead for 22 days.
+[[redirects]]
+  from = "/api/dd-openapi"
+  to = "/.netlify/functions/dd-openapi"
+  status = 200
+
 [[redirects]]
   from = "/api/dd-analyze"
   to = "/.netlify/functions/dd-analyze"
