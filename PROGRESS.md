@@ -470,8 +470,16 @@ BEFORE:
 /api/dca-cancel   404 → 401 ✓        health key UNMOVED 12/12
 /api/dca-list     404 → 401 ✓
 ```
-⚠️ A 401 proves the ROUTE RESOLVES. It does NOT prove creation works end to end — and the "idle"
-reading that hid this for three weeks would look identical. That needs a signed-in create.
+✅ **AND PROVEN FROM THE BROWSER, SIGNED IN:** `/api/dca-list` returns **200 with a mandates array**.
+That is `DcaPanel.tsx:58`'s exact call — the panel's LOAD path works for the first time in 22 days,
+verified rather than inferred from a status code.
+⚠️ **CREATE IS STILL UNPROVEN.** `dca-list` is read-only; `dca-create` returns 201 and makes a mandate
+`active` immediately, which `dca-tick` then acts on — a real swap. So the read half is closed and the
+write half is not, and the "idle" reading that hid this for three weeks would look identical on the
+write side. ⭐ The smallest honest test is one tick of budget with `endAt` ~65 min out, so it can fire
+at most once and expires by construction rather than by anyone remembering to cancel.
+⚠️ `mandates: []` would ALSO have been a pass — the list is OWNER-SCOPED, so contents prove nothing
+about the route. The 200 is the signal.
 
 ### ⭐⭐ HOW IT WAS FOUND, AND THE GUARD THAT NOW DERIVES IT
 
