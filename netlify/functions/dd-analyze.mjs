@@ -56,6 +56,7 @@ import {
   retrievePaid,
   readSubjectCode,
   subjectPreview,
+  DD_PRICE_HUMAN,
 } from "./_dd-x402.mjs";
 import { codeIdentityForEvent, evaluateHealth } from "../../shared/dd-canary/health.mjs";
 import { readHealth } from "./_dd-health.mjs";
@@ -227,10 +228,57 @@ export async function handler(event) {
 
     // ── rung 1: method ────────────────────────────────────────────────────────────────────────
     if (event.httpMethod !== "POST") {
-      return json(405, refusalReport({
-        reason: "unsupported-method",
-        detail: `this endpoint accepts POST; received ${event.httpMethod}`,
-      }));
+      // ═══ ⭐ THE DISCOVERY GAP ══════════════════════════════════════════════════════════════
+      // A human who clicks the link gets a GET, and a GET gets this. The refusal was CORRECT and
+      // UNUSABLE: it said what was wrong and nothing about how to be right, so the only route to a
+      // working call was asking someone. `howToCall` closes that with one field.
+      //
+      // ⚠️ THE REFUSAL ITSELF IS UNCHANGED — same coverage manifest, same severityMeaning and
+      // validityMeaning, same nulls-not-invented-values, same "INDETERMINATE result, not a clean
+      // bill". This ADDS a field; it does not soften a single claim.
+      //
+      // ⭐⭐ THE PRICE IS IMPORTED, NEVER RESTATED. DD_PRICE_HUMAN lives in _dd-x402.mjs beside the
+      // atomic value the 402 actually charges. A second copy here would be the duplicate-source-of-
+      // truth failure this repo keeps meeting, on the one number a buyer acts on.
+      //
+      // ⚠️ AND IT POINTS AT THE 402 RATHER THAN SUMMARISING IT. The real terms — the coverage floor,
+      // why the price is flat, subjectPreview — are long, load-bearing, and already written once.
+      // Paraphrasing them here would create a second version to drift.
+      //
+      // 🚧 NOT CONTENT NEGOTIATION. The proper fix is HTML for `Accept: text/html` and JSON for
+      // machines, which also yields the openApiUrl Circle's Discovery schema wants. That is worth
+      // doing before any listing — not before this.
+      return json(405, {
+        ...refusalReport({
+          reason: "unsupported-method",
+          detail: `this endpoint accepts POST; received ${event.httpMethod}`,
+        }),
+        howToCall: {
+          resource: "https://app.tikpema.xyz/api/dd-analyze",
+          method: "POST",
+          contentType: "application/json",
+          body: { address: "0x<20-byte hex>", chain: SUPPORTED_CHAINS[0] },
+          curl:
+            "curl -sS -X POST https://app.tikpema.xyz/api/dd-analyze " +
+            "-H 'Content-Type: application/json' " +
+            `-d '{"address":"0x3600000000000000000000000000000000000000","chain":"${SUPPORTED_CHAINS[0]}"}'`,
+          // ⚠️ A REAL address on the supported chain (Arc USDC), so the sample is a call that
+          // actually returns a report rather than a placeholder that 400s.
+          sampleAddressIs: "Arc testnet USDC — a real contract, so the sample returns a real report",
+          supportedChains: SUPPORTED_CHAINS,
+          price: DD_PRICE_HUMAN,
+          youGet:
+            "one signed on-chain due-diligence report, with an HONEST COVERAGE MANIFEST of what was " +
+            "and was not checked, attested via ERC-1271 against the on-chain owner of ERC-8004 " +
+            "agentId 851891.",
+          // ⭐ POINT, do not paraphrase. The full terms are already written in one place.
+          fullTerms:
+            "POST the call above WITHOUT payment: the 402 response carries `whatYouAreBuying` — the " +
+            "coverage floor, why the price does not scale with coverage, and `subjectPreview`, " +
+            "which tells you BEFORE paying whether your subject has contract code at all.",
+          paymentProtocol: "x402 (EIP-3009 on Arc); the 402 body's `accepts` carries the requirements.",
+        },
+      });
     }
 
     // ── rung 2: body ──────────────────────────────────────────────────────────────────────────

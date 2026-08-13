@@ -15,6 +15,8 @@
 import { assertReportValid, SCHEMA_VERSION } from "../../shared/onchain-analyze/schema.mjs";
 import { verifyAttestation } from "../../shared/onchain-analyze/attest.mjs";
 import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
+// ⭐ imported, so a drifting price fails this suite instead of misleading a buyer
+import { DD_PRICE_HUMAN } from "../../netlify/functions/_dd-x402.mjs";
 
 // ⚠️ dd-analyze's exposure gate (RUNG -1, unset = DISABLED) sits before every other rung. This suite
 // exercises the rungs BEHIND it, so open it explicitly rather than letting a 503 masquerade as a
@@ -253,5 +255,53 @@ if (!LIVE) {
 
 console.log(`\n╔══════════════════════════════════════════════════════════════════════`);
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES PRESENT"}   pass ${pass} / fail ${fail}`);
+
+
+
+// ═══ ⭐ THE DISCOVERY GAP — a correct refusal that nobody could act on ═══════════════════════
+// A human who clicks the link sends a GET and gets the 405. It said what was wrong and NOTHING
+// about how to be right, so the only route to a working call was asking someone.
+// ⚠️ HALF THESE ASSERTIONS PROTECT WHAT DID **NOT** CHANGE. A "help the reader" edit is exactly the
+// kind that quietly softens a claim, and the refusal's honesty is the product here.
+{
+  const res = await call({}, { method: "GET" });
+  const b = res.body;
+  const h = b?.howToCall;
+
+  check("⭐ the 405 carries howToCall", res.status === 405 && !!h);
+  check("  …the canonical /api resource, not the .netlify/functions path",
+    h?.resource === "https://app.tikpema.xyz/api/dd-analyze", h?.resource);
+  check("  …a runnable curl: POST, content-type, address AND chain",
+    /curl .*-X POST/.test(h?.curl ?? "") && /Content-Type: application\/json/.test(h?.curl ?? "") &&
+    /"address"/.test(h?.curl ?? "") && /"chain"/.test(h?.curl ?? ""));
+  check("  …whose sample chain is one the endpoint ACTUALLY accepts",
+    (h?.supportedChains ?? []).some((c) => (h?.curl ?? "").includes(c)),
+    `chains=${JSON.stringify(h?.supportedChains)}`);
+  check("⭐⭐ the price is the ONE from _dd-x402, not a second copy",
+    typeof h?.price === "string" && h.price === DD_PRICE_HUMAN, `${h?.price} vs ${DD_PRICE_HUMAN}`);
+  check("  …and it POINTS at the 402's terms rather than paraphrasing them",
+    /whatYouAreBuying/.test(h?.fullTerms ?? "") && /subjectPreview/.test(h?.fullTerms ?? ""));
+
+  // ⚠️⚠️ THE REFUSAL IS UNCHANGED — every claim that made it honest must still be there.
+  check("⭐⭐ the coverage manifest survives: nothing checked, and it SAYS so",
+    b?.coverage?.totals?.checked === 0 &&
+    /INDETERMINATE result, not a clean bill/.test(b?.coverage?.summary ?? ""));
+  check("  …every power group still appears in notChecked",
+    (b?.coverage?.notChecked?.length ?? 0) > 0 &&
+    b.coverage.notChecked.length === b.coverage.totals.notChecked);
+  check("  …reason and detail intact",
+    b?.refusal?.reason === "unsupported-method" && /accepts POST/.test(b?.refusal?.detail ?? ""));
+  check("  …still UNSIGNED — a statement about a REQUEST, not an on-chain claim",
+    !!b?.attestation && b.attestation.signature == null);
+  // ⚠️ MY FIRST VERSION ASSERTED b.address / b.blockNumber AT THE TOP LEVEL. They live under
+  // `subject`. The check FAILED for the right reason — the shape was not what I assumed — and is
+  // now written against the shape the endpoint actually emits, verified by printing it.
+  check("  …and nulls are still nulls, never invented values",
+    b?.subject?.address === null && b?.subject?.blockNumber === null,
+    `address=${JSON.stringify(b?.subject?.address)} block=${JSON.stringify(b?.subject?.blockNumber)}`);
+  check("  …severityMeaning survives — scope-not-rank, the claim the whole report rests on",
+    /scope-not-rank/.test(b?.severityMeaning ?? ""));
+}
+
 console.log(`╚══════════════════════════════════════════════════════════════════════`);
 process.exit(fail === 0 ? 0 : 1);
