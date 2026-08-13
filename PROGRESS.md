@@ -509,6 +509,38 @@ partial publish. ⚠️ My watcher only matched `Deploy failed|Build failed`, so
 forever for a publish that was never coming — `EAI_AGAIN|FetchError` added. Silence-isn't-success, in
 my own tooling.
 
+### ✅ DCA CREATE PROVEN END TO END — and a near-miss false defect report
+
+`0d9f0e14`, `status: active`, created through the panel's own path and visible via `dca-list`. With
+the earlier signed-in `dca-list` 200, the DCA feature is proven: **route, list, and create**. The
+22-day outage is closed on both halves.
+
+### 🚨🚨 I ALMOST FILED A FALSE DEFECT — "two independent reads" were ONE instrument, six times
+
+`netlify blobs:list dca-mandates` showed **7 keys across six reads spanning ~8 minutes** after the
+create. It still does. The FUNCTION's own read saw the mandate immediately.
+
+I wrote: *"two independent reads agree — a 201 with no record, which is a real defect."*
+⭐⭐ **THEY WERE NOT INDEPENDENT.** It was the same eventually-consistent instrument queried six
+times. Repeating a lagging read does not corroborate it — it makes it CONSISTENTLY WRONG, which is
+indistinguishable from consistently right. One more message and `dca-create` would have had a defect
+filed against it for a bug it does not have.
+
+⭐ **THE RULE, WHICH I HAD ALREADY WRITTEN DOWN AND THEN DID NOT APPLY:** `blobs:list` is eventually
+consistent; `blobs:get` BY EXACT KEY is not. I used that correctly for the withdrawal record on
+2026-08-12 ("direct key read, immune to list lag"), then reached for `list` here because I lacked the
+id — and treated its repetition as confirmation instead of admitting I had no independent check.
+⭐⭐ **THE GENUINELY INDEPENDENT PATH WAS THE FUNCTION ITSELF** (`dca-list`), which reads through a
+different runtime. When two paths disagree, that disagreement IS the finding — not evidence for
+whichever one you asked first.
+
+⚠️ **WHAT THIS RETROACTIVELY WEAKENS, AUDITED RATHER THAN ASSUMED:**
+| conclusion | instrument | verdict |
+|---|---|---|
+| wallet-leak census (10) | Circle `listWalletSets` — not blobs | ✅ unaffected |
+| UB 409 wrote nothing | `blobs:get` by exact key + chain read | ✅ survives — the load-bearing evidence was `updatedAt`, not the listing |
+| DCA "22 days dead" | `blobs:list` for mandate existence | ⚠️ that part is suspect — but the ROUTING bug was proven by `curl` 404, which is independent |
+
 ### NEXT, IN ORDER
 
 1. ✅ DONE — deploy published `7f5d5de`, heartbeat appeared, calibration ran and cleaned up.
