@@ -4,6 +4,7 @@ import SignInPrompt from "./SignInPrompt";
 import { useGatewayBalance } from "../lib/useGatewayBalance";
 import type { useWallet } from "../wallet/useWallet";
 import { readJson } from "../lib/readJson";
+import UbExitStatus from "./UbExitStatus";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -221,14 +222,14 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
               (<span className="mono">{data.total}</span> USDC)
             </>
           )}{" "}
-          — committed to your agent's float. Withdraw doesn't move it, and there's no button
-          here that does. Only your agent's own account can release these funds, and{" "}
+          — committed to your agent's float. Withdraw doesn't move it — getting it out is a
+          separate, slower route, shown below. Only your agent's own account can release these funds, and{" "}
           <b>Tikpema controls that account</b> — so the exit runs through us. <b>It is built
           now:</b> you ask, Arc's Gateway holds the funds for a delay of about seven days, and
           we finish it automatically — <b>you do not have to come back</b>. It lands in your
-          agent's balance, which you can then withdraw yourself. <b>⚠️ Nobody has taken this
-          route with real funds yet</b>, so treat the wait as the floor rather than the
-          ceiling, and deposit only what you intend the agent to spend.
+          agent's balance, which you can then withdraw yourself. <b>⚠️ This has now been done once</b>, with 1 USDC on
+          2026-08-12 — one real run, not a track record. Treat the wait as the floor rather
+          than the ceiling, and deposit only what you intend the agent to spend.
         </div>
       </div>
 
@@ -314,6 +315,14 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
               </div>
             )}
           </>
+        )}
+
+        {/* ═══ ⭐ THE EXIT, VISIBLE ═══════════════════════════════════════════════════════
+            A live withdrawal existed for hours that NOBODY COULD SEE IN THE APP. Read-only:
+            it renders what /api/ub-withdraw already returns. Sits inside the balance card
+            because "what's in here" and "what's on its way out" are one question. */}
+        {bal.status === "ready" && (
+          <UbExitStatus token={() => w.ensureSession()} reloadKey={reloadKey} />
         )}
       </div>
 
@@ -419,9 +428,9 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
           only that account can release these funds.{" "}
           <b>Tikpema controls that account</b> — so the exit runs through us. <b>It is built
           now:</b> you ask, Arc's Gateway holds the funds for a delay of about seven days, and
-          we finish it automatically — <b>you do not have to come back</b>. <b>⚠️ Nobody has
-          taken this route with real funds yet.</b> Until then, deposit only what you intend the agent
-          to spend.
+          we finish it automatically — <b>you do not have to come back</b>. <b>⚠️ This has now been done once</b>, with
+          1 USDC on 2026-08-12 — one real run, not a track record, and treat the wait as a
+          floor. Deposit only what you intend the agent to spend.
         </div>
         {/* The deposit needs a session AND a provisioned wallet — the server enforces both
             (401 / 202). Disable rather than let the user fire a request that can't work. */}

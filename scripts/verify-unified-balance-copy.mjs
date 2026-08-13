@@ -63,15 +63,31 @@ section("1 — the disclosure is PRESENT at all three body sites");
 // and a claim has a shelf life. That is the fourth distinct way this one paragraph has been wrong,
 // and the only one where the guard was the problem rather than the catch.
 //
-// ⚠️ v4 IS NOT "YOU CAN GET YOUR MONEY BACK". The path is built and has NEVER been run end to end
+// ⚠️ v4 IS NOT "YOU CAN GET YOUR MONEY BACK". The path is built and had NEVER been run end to end
 // with real funds. Saying more than that repeats v2's error — implying a working release path
 // because the code exists. So the required strings below assert BOTH halves: the exit is built and
-// automatic, AND nobody has taken it yet.
+// automatic, AND the user is told how little has actually been proven.
+//
+// ═══ ⭐⭐ v5 — 2026-08-12: THE "UNEXERCISED" CLAIM EXPIRED THE WAY v4's PREDECESSOR DID ════════
+// At 20:49Z a real 1 USDC withdrawal was initiated (16be509f, chain-verified). "Nobody has taken
+// this route with real funds yet" became FALSE, and this guard was REQUIRING it — so a green suite
+// was enforcing a lie. That is the SECOND time this file has pinned a claim past its shelf life,
+// and the fifth distinct way this one paragraph has been wrong.
+//
+// ⭐ THE FIX IS NOT TO DROP THE HONESTY, IT IS TO MOVE IT. The replacement claim is narrower and
+// harder to outgrow: ONE run is not a track record. It stays true whether the count is one or ten,
+// because it describes the WEIGHT of the evidence rather than its absence.
+// ⚠️ HOP 2 HAS STILL NEVER RUN. The withdrawal completes ~2026-08-19; until a sweeper tick moves
+// real funds, "we finish it automatically" remains unproven and the floor-not-ceiling line must
+// stay. Do not soften it when the first completion lands — soften it when several have.
 for (const [label, re, eYM, eUB] of [
   ["control is stated", /Tikpema controls that account/g, 1, 2],
   ["⭐ the exit is stated as BUILT", /It is built\s*\n?\s*now:/g, 1, 2],
   ["⭐⭐ the user is told they need NOT return (this is what makes it an exit)", /you do not have to come back/g, 1, 2],
-  ["⭐⭐ …and that it is UNEXERCISED — the honesty v2 lacked", /Nobody has taken this\s*\n?\s*route with real funds yet/g, 1, 2],
+  // ⭐ v5: the claim is now ONE RUN, NOT NONE. Pinned on "not a track record" because that is the
+  // load-bearing half — a single success is the easiest thing in this whole surface to over-read.
+  ["⭐⭐ …and that the evidence is THIN — one run, not a track record", /one real run, not a track record/g, 1, 2],
+  ["⭐ …and the wait is still a FLOOR, because hop 2 has never run", /floor/g, 1, 2],
   ["the delay is DERIVED, never fixed", /about seven days/g, 2, 3],
 ]) {
   const a = n(ym, re), b = n(ub, re);
@@ -123,7 +139,10 @@ section("3 — ⭐⭐ THE BEFORE-DEPOSIT DISCLOSURE — the sentence read before
   check("  …and it precedes the explanation of WHY (cost first, mechanism second)",
     card.indexOf("about seven days") < card.indexOf("belongs to"));
   check("⭐ the card still says the exit is automatic", /you do not have to come back/.test(card));
-  check("⭐ …and still says nobody has used it yet", /Nobody has\s*\n?\s*taken this route with real funds yet/.test(card));
+  // ⭐ v5: not "nobody has used it" — that expired at 20:49Z on 2026-08-12. The deposit card must
+  // still convey how THIN the evidence is, because this is the lead a depositor reads.
+  check("⭐ …and still says how little has been proven — one run, not a track record",
+    /one real run, not a track record/.test(card));
 }
 
 section("3b — the repeated-phrase check RETIRED with the phrase it counted");

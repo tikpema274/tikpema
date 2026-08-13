@@ -4,7 +4,7 @@ import { json } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal } from "./_agent-wallets.mjs";
 import { readExitState, ubInitiateWithdrawal } from "./_ubwithdraw.mjs";
-import { createRecord, patchRecord, listByOwner, STATE } from "./_ubwithdraw-record.mjs";
+import { createRecord, patchRecord, listByOwner, STATE, OPEN_STATES } from "./_ubwithdraw-record.mjs";
 
 // UB WITHDRAW — the front door for the unified-balance EXIT.
 //
@@ -109,6 +109,55 @@ export async function handler(event) {
     return json(400, {
       error: `You asked to withdraw ${amount} USDC but your unified balance holds ${state.availableUsdc} USDC.`,
       availableUsdc: state.availableUsdc,
+    });
+  }
+
+  // ═══ 🚨 ONE OPEN WITHDRAWAL AT A TIME — THE SERVER'S JOB, NOT THE BUTTON'S ═══════════════
+  // Until now nothing stopped a second POST. `randomUUID()` mints a fresh id, `createRecord`
+  // writes a fresh record, and the only bound was `amount <= available` — so a double press with
+  // 1.51 available started a SECOND independent seven-day clock.
+  //
+  // ⭐⭐ AND THE COST IS WORSE THAN TWO CLOCKS. Hop 2 is `withdraw(address)`: it takes NO amount and
+  // sweeps everything matured in ONE transaction. Two records maturing together are completed by a
+  // single tx — the sweeper marks one COMPLETED, and the second then reads withdrawable:0 →
+  // "not-yet-matured" FOREVER, until it trips the overdue alert as a stuck withdrawal that is not
+  // stuck. A double press manufactures a permanently-open record and a false page.
+  //
+  // ⭐ A DISABLED BUTTON CANNOT DO THIS. A refresh, a second tab, a stale session or a direct call
+  // all bypass client state. The guard has to live where the money moves.
+  //
+  // ⚠️ FAIL CLOSED ON AN UNREADABLE LIST. If the store cannot be read we do NOT know whether one is
+  // open, and starting a second clock on a guess is exactly the fail-open this codebase keeps
+  // closing. An absence of evidence is not evidence of absence — refuse and let the caller retry.
+  const mine = await listByOwner({ owner });
+  if (!mine.readable) {
+    return json(503, {
+      error: "We couldn’t check your existing withdrawals, so we haven’t started anything.",
+      reason: "withdrawals-unreadable",
+      retryable: true,
+      whatHappened: "nothing. No record was written and no funds moved. Retrying is safe.",
+    });
+  }
+  const alreadyOpen = mine.rows.filter((r) => OPEN_STATES.includes(r.state));
+  if (alreadyOpen.length > 0) {
+    const first = alreadyOpen[0];
+    return json(409, {
+      error: "You already have a withdrawal on its way out. We haven’t started another.",
+      reason: "withdrawal-already-open",
+      // ⭐ NAME THE EXISTING ONE. "You already have one" without saying which is what sends a user
+      // looking for a second withdrawal that does not exist.
+      existing: {
+        withdrawalId: first.withdrawalId,
+        amountUsdc: first.amountUsdc,
+        state: first.state,
+        maturesApprox: first.maturesApprox,
+      },
+      openCount: alreadyOpen.length,
+      whatHappened: "nothing new. Your existing withdrawal is unaffected and still on its way.",
+      // ⚠️ 409, not 400: this is a state conflict a caller can resolve by WAITING, not a malformed
+      // request they should fix. And explicitly NOT retryable — retrying changes nothing until the
+      // open one completes.
+      retryable: false,
     });
   }
 
