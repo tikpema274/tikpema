@@ -5,7 +5,7 @@ import { executeAction } from "./_actions.mjs";
 import { resolveDestination } from "./_bridge.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
-import { recordBridge } from "./_bridge-record.mjs";
+import { recordBridge, recordPendingBridge } from "./_bridge-record.mjs";
 
 // POST /api/agent-bridge { amountUsdc, destination }  (auth required)
 //
@@ -84,6 +84,12 @@ export async function handler(event) {
   } catch (e) {
     // A still-pending Arc burn is submitted-but-slow, not failed.
     if (e instanceof TxPendingError) {
+      // ⭐ RECORD IT. This path used to answer 202 and write nothing — losing the consent
+      // evidence for a disclosure the user HAD accepted, and leaving a submitted burn with
+      // no key anyone could reconcile later. Same never-throws contract as the confirmed
+      // write and for a stronger reason: we are already telling the caller "we don't know
+      // yet", and a diagnostics failure must not turn that into an error.
+      await recordPendingBridge({ e, session, amountRequested: amount });
       return json(202, { executed: true, pending: true, txId: e.txId, error: e.message });
     }
     return json(500, { error: e.message });

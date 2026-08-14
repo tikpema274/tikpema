@@ -4,7 +4,8 @@ import { executeAction, valueOfStep } from "./_actions.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { daySpend, budgetConfig } from "./_budget.mjs";
-import { recordBridge } from "./_bridge-record.mjs";
+import { recordBridge, recordPendingBridge } from "./_bridge-record.mjs";
+import { TxPendingError } from "./_circle.mjs";
 import { resolveDestination, bridgeFee, bridgeFeeBand, bridgeAckToken } from "./_bridge.mjs";
 import { safeQuoteId } from "./_quote-record.mjs";
 
@@ -271,6 +272,14 @@ export async function handler(event) {
       }
       runningA += vA;                              // commit: decrement remaining daily budget
     } catch (e) {
+      // ⭐ A PENDING BRIDGE INSIDE A PLAN HAS THE SAME GAP AS THE DIRECT PATH, AND IT IS
+      // WORSE HERE: the plan halts, so the step renders ✗ with an error while a userOp may
+      // still be in flight. Without this write, the plan reports a failure for a bridge that
+      // was SUBMITTED — and the consent the user gave for it is recorded nowhere.
+      // Keyed on the txId and joined to the quote, exactly like the confirmed path.
+      if (e instanceof TxPendingError) {
+        await recordPendingBridge({ e, session, amountRequested: step.amountUsdc, quoteId, stepIndex: i });
+      }
       // A thrown error (incl. TxPendingError) stops the plan. Record and halt.
       results.push({ index: i, step, ok: false, error: e.message, pending: e.name === "TxPendingError" });
       stoppedAt = i;

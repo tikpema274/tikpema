@@ -76,6 +76,31 @@ export function receiptKey(owner, burnHash) {
   return `o/${norm(owner)}/${norm(burnHash)}`;
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════
+// THE PROVISIONAL RECEIPT — submitted, burn not yet confirmed
+// ══════════════════════════════════════════════════════════════════════════════════
+// 🚨 THE GAP THIS CLOSES, OBSERVED LIVE 2026-08-14. A Circle userOp that has not settled
+// within the deadline raises TxPendingError, and agent-bridge answers 202. Until now that
+// path wrote NOTHING — no receipt, no key, no consent record. So:
+//   · the user had ACCEPTED a 53% fee, the server had verified the token and acted on it,
+//     and `ackBand`/`feeRatio`/`ackAcceptedAt` existed nowhere;
+//   · a burn that later lands has no record, no settle trigger and is invisible to the sweep.
+// ⭐⭐ THE ONE OUTCOME THAT COULD NOT BE RECOVERED WAS THE ONE WHERE NOBODY KNEW WHAT
+// HAPPENED — success recorded, refusal recorded, PENDING silent. Backwards for a receipt
+// system whose whole premise is that an unattended bridge is recoverable.
+//
+// ⚠️ KEYED ON THE txId, NOT A HASH, BECAUSE THERE IS NO HASH YET. The `tx-` prefix makes a
+// provisional key unmistakable at a glance in `blobs:list` and impossible to confuse with a
+// 0x burn hash. When the burn is later reconciled, the durable record is written under its
+// REAL hash key and this one is retired — never mutated into it, so a provisional key can
+// never masquerade as a confirmed receipt.
+export const SUBMITTED_STATE = "burn_submitted";
+
+/** `o/<owner>/tx-<txId>` — the provisional index. See the block above. */
+export function pendingReceiptKey(owner, txId) {
+  return `o/${norm(owner)}/tx-${norm(txId)}`;
+}
+
 function store() {
   return getStore(BRIDGE_RECEIPTS_STORE);
 }
@@ -108,6 +133,39 @@ export async function writeReceiptNeverThrows(receipt) {
   } catch (e) {
     // Swallowed ON PURPOSE. See the block comment above.
     console.error(`[bridge-receipt] WRITE FAILED (swallowed) burnHash=${receipt?.burnHash} — ${e?.message}`);
+    return { written: false, reason: "write_error", detail: e?.message };
+  }
+}
+
+/**
+ * The provisional twin of writeReceiptNeverThrows, for the 202 path.
+ *
+ * ⚠️ SEPARATE FUNCTION, NOT A LOOSENED GUARD. `writeReceiptNeverThrows` refuses a receipt
+ * with no `burnHash`, and that refusal is load-bearing — relaxing it so this case could
+ * share the writer would let a genuinely malformed confirmed-receipt through silently.
+ * Two writers, two key shapes, two explicit contracts.
+ *
+ * Never throws, for the same reason as its sibling and one more: a diagnostics failure must
+ * not turn a SUBMITTED transaction into an error response. The caller is answering 202 —
+ * "we don't know yet" — and that answer must survive a Blobs hiccup.
+ */
+export async function writePendingReceiptNeverThrows(receipt) {
+  try {
+    if (!receipt?.owner || !receipt?.txId) {
+      console.warn("[bridge-receipt] refusing to write a provisional receipt with no owner/txId");
+      return { written: false, reason: "missing_key_fields" };
+    }
+    // ⚠️ A provisional receipt MUST NOT carry a burnHash. If one exists the confirmed path
+    // should have run; writing both shapes for one bridge is the duplicate-source-of-truth
+    // bug this store's key layout exists to avoid.
+    if (receipt.burnHash) {
+      console.warn(`[bridge-receipt] refusing a provisional receipt that already has a burnHash txId=${receipt.txId}`);
+      return { written: false, reason: "has_burn_hash" };
+    }
+    await store().setJSON(pendingReceiptKey(receipt.owner, receipt.txId), receipt);
+    return { written: true };
+  } catch (e) {
+    console.error(`[bridge-receipt] PROVISIONAL WRITE FAILED (swallowed) txId=${receipt?.txId} — ${e?.message}`);
     return { written: false, reason: "write_error", detail: e?.message };
   }
 }
@@ -184,7 +242,12 @@ export async function listByOwner(owner) {
         (matched === 0 ? " — PREFIX MATCHED NOTHING" : "") +
         (matched > 0 && out.length === 0 ? " — ALL DROPPED BY THE OWNER CROSS-CHECK" : "")
     );
-    out.sort((a, b) => String(b.burnedAt || "").localeCompare(String(a.burnedAt || "")));
+    // ⚠️ SORT ON THE RECEIPT'S OWN CLOCK, whichever it has. A provisional receipt has
+    // `submittedAt` and no `burnedAt`; sorting on `burnedAt` alone silently sank every
+    // pending bridge to the BOTTOM of the list — the newest and most actionable item
+    // rendered last, which is how a "we don't know yet" gets overlooked.
+    const at = (r) => String(r?.burnedAt || r?.submittedAt || "");
+    out.sort((a, b) => at(b).localeCompare(at(a)));
     return { receipts: out, degraded: false };
   } catch (e) {
     console.error(`[bridge-receipt] LIST FAILED owner=${owner} — ${e?.message}`);
@@ -199,6 +262,14 @@ export async function listByOwner(owner) {
  *    · a PROVISIONAL mint_unconfirmed due a re-check — we stopped waiting, not "it failed" */
 export function isStranded(receipt, now = Date.now()) {
   if (receipt?.settlingSince) return false; // someone is already on it
+  // 🚨 EXPLICIT, THOUGH THE FALL-THROUGH WOULD ALSO SAY NO. A provisional receipt has NO
+  // burn hash, so the settler has nothing to settle and IRIS has nothing to be asked about
+  // — handing it one would make it chase a mint for a burn that may never exist. It is
+  // excluded BY NAME rather than by happening to miss two other conditions, because
+  // safety that is inherited rather than stated is safety nobody knows they can break.
+  // ⚠️ Reconciling these against Circle is a SEPARATE, UNBUILT job (see PROGRESS): this
+  // record is the hook that makes it possible, not the recovery itself.
+  if (receipt?.state === SUBMITTED_STATE) return false;
   if (receipt?.state === "burn_confirmed") return isPastDeadline(receipt, now);
   return isRecheckable(receipt, now);
 }

@@ -1,5 +1,5 @@
 import { internalToken } from "./_auth.mjs";
-import { writeReceiptNeverThrows } from "./_bridge-receipts.mjs";
+import { writeReceiptNeverThrows, writePendingReceiptNeverThrows, SUBMITTED_STATE } from "./_bridge-receipts.mjs";
 
 // RECORD A BRIDGE — the write-and-trigger pair, in ONE place, called from the HTTP
 // boundaries that own it.
@@ -142,4 +142,65 @@ export async function recordBridge({ r, session, event, amountRequested, quoteId
 
   await triggerSettle({ event, owner: session.address, burnHash: r.burnHash });
   return { recorded: write.written === true, burnedAt };
+}
+
+/**
+ * THE PROVISIONAL RECORD — written when the burn is SUBMITTED but not confirmed (202).
+ *
+ * 🚨 THE OUTCOME THAT USED TO WRITE NOTHING. Success wrote a receipt; a band refusal wrote
+ * nothing because nothing happened; and PENDING — the only state that actually needs
+ * someone to follow up — also wrote nothing. Observed live 2026-08-14: a user accepted a
+ * 53% fee, the server verified the token and submitted, and no record of that acceptance
+ * existed anywhere.
+ *
+ * It writes TWO things at once, which is why it is one change rather than two:
+ *   1. THE CONSENT EVIDENCE — band, ratio, and `ackAcceptedAt` for a disclosure that was
+ *      genuinely accepted and acted upon.
+ *   2. THE RECOVERY HOOK — a durable key carrying the Circle `txId`, so a later job can ask
+ *      Circle what became of it and backfill the burn hash if it landed.
+ *
+ * ⚠️ `ackAcceptedAt` HERE MEANS "ACCEPTED AND ACTED UPON", NOT "MONEY MOVED". The gate ran
+ * and the submission followed; whether the burn lands is a different question this record
+ * exists to keep askable. Same transitive caveat as the confirmed receipt (see above): the
+ * value is derived from the BAND, and it is a refusal elsewhere that makes it mean consent.
+ *
+ * NO SETTLE TRIGGER. There is no burn hash, so there is nothing for the settler to settle
+ * and nothing for IRIS to be asked about. Triggering here would have it chase a mint for a
+ * burn that may never exist.
+ */
+export async function recordPendingBridge({ e, session, amountRequested, quoteId = null, stepIndex = null }) {
+  const txId = e?.txId;
+  if (!txId) return { recorded: false, reason: "no_tx_id" };
+  const c = e?.consent || {};
+
+  const submittedAt = new Date().toISOString();
+  const write = await writePendingReceiptNeverThrows({
+    schema: "bridge-receipt/1",
+    owner: session.address,
+    txId,
+    // ⚠️ EXPLICITLY NULL, NOT ABSENT. A reader must be able to tell "no hash yet" from a
+    // field nobody thought about — and the writer refuses any provisional receipt that
+    // carries one, so this can never quietly become a confirmed receipt in place.
+    burnHash: null,
+    burnedAt: null,
+    submittedAt,
+    state: SUBMITTED_STATE,
+    pendingReason: e?.message ?? null,
+    destinationKey: c.destinationKey ?? null,
+    destinationLabel: c.destinationLabel ?? null,
+    amountRequested: Number(amountRequested),
+    feeUsdc: c.feeUsdc ?? null,
+    netPredicted: c.netUsdc ?? null,
+    delivery: "predicted",
+    amountDelivered: null,
+    feeRatio: c.feeRatio ?? null,
+    ackBand: c.feeBand ?? null,
+    ackRequired: c.ackRequired ?? false,
+    ackAcceptedAt: c.acknowledged ? submittedAt : null,
+    ackToken: c.ackToken ?? null,
+    quoteId: quoteId ?? null,
+    quoteStepIndex: Number.isInteger(stepIndex) ? stepIndex : null,
+  });
+
+  return { recorded: write.written === true, submittedAt, txId };
 }

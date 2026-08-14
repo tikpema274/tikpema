@@ -84,8 +84,10 @@ mock.module("../netlify/functions/_blobs.mjs", { namedExports: { connectBlobs: (
 
 const { handler: settle } = await import("../netlify/functions/bridge-mint-settle-background.mjs");
 const { handler: listHandler } = await import("../netlify/functions/bridge-receipts.mjs");
-const { writeReceiptNeverThrows, isPastDeadline, listByOwner, readReceipt, receiptKey } =
+const { writeReceiptNeverThrows, isPastDeadline, listByOwner, readReceipt, receiptKey,
+        pendingReceiptKey, isStranded, SUBMITTED_STATE } =
   await import("../netlify/functions/_bridge-receipts.mjs");
+const { recordPendingBridge } = await import("../netlify/functions/_bridge-record.mjs");
 
 const OWNER = "0xOWNER";
 const BURN = "0x" + "ab".repeat(32);
@@ -434,6 +436,82 @@ section("9 — THE SWEEPER: recovery that needs no one to be looking");
   check("⭐⭐ the schedule is DECLARED and uncommented (a commented one leaves an identical tree hash)",
     /\[functions\."bridge-mint-sweep"\]\s*\n\s*schedule = "\*\/10 \* \* \* \*"/.test(live));
   check("⭐ …and it has NO public /api route", !/\/api\/bridge-mint-sweep/.test(live));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("THE PROVISIONAL RECEIPT — behaviour, not source text");
+// 🚨 THE GAP, OBSERVED LIVE 2026-08-14: a userOp that had not settled raised TxPendingError,
+// agent-bridge answered 202, and NOTHING was written — losing the consent evidence for a 53%
+// fee the user had explicitly accepted. These drive the real writer against the real store.
+//
+// ⚠️ COVERAGE BOUNDARY, STATED RATHER THAN IMPLIED. What runs for real here: the writer, the key
+// layout, the owner cross-check, the sort, and every field on the record. What is pinned ONLY by
+// source assertion (verify-bridge-fee-band §10): that `_actions` attaches `e.consent` to the
+// throw, and that the two HTTP boundaries call the recorder. Driving those needs executeAction
+// with a mocked chain — a heavier harness than this suite has. Mutation-tested: removing the
+// attach, or the call site, leaves THIS suite green and turns the source suite red. The two
+// suites cover different halves of one chain and NEITHER ALONE COVERS IT.
+{
+  mem.clear();
+  const TXID = "9f3a1c22-0000-4a11-9c3e-abcdefabcdef";
+  const err = Object.assign(new Error("Transaction still pending after timeout"), {
+    name: "TxPendingError",
+    txId: TXID,
+    consent: {
+      destinationKey: "base", destinationLabel: "Base (Sepolia)", amountRequested: 0.1,
+      feeUsdc: 0.053216, netUsdc: 0.046784, feeBand: "acknowledge", feeRatio: 0.53216,
+      ackRequired: true, acknowledged: true, ackToken: "tok_abc",
+    },
+  });
+  const out = await recordPendingBridge({ e: err, session: { address: OWNER }, amountRequested: 0.1 });
+  check("⭐⭐ the pending path WRITES (it used to write nothing at all)", out.recorded === true);
+
+  const rec = await (await import("@netlify/blobs")).getStore("x").get(pendingReceiptKey(OWNER, TXID));
+  check("⭐⭐ …under a txId key, not a hash key", !!rec, pendingReceiptKey(OWNER, TXID));
+  check("⭐⭐ ackAcceptedAt IS WRITTEN — the whole point", typeof rec?.ackAcceptedAt === "string" && rec.ackAcceptedAt.length > 10, rec?.ackAcceptedAt);
+  check("⭐ …with the band and ratio that were accepted", rec?.ackBand === "acknowledge" && rec?.feeRatio === 0.53216);
+  check("⭐⭐ burnHash is explicitly NULL, never absent", rec !== null && "burnHash" in rec && rec.burnHash === null);
+  check("⭐ state is the submitted one, distinguishable from burn_confirmed", rec?.state === SUBMITTED_STATE && rec.state !== "burn_confirmed");
+  check("⭐ the Circle txId is retained as the recovery hook", rec?.txId === TXID);
+
+  // 🚨 THE COMPOSITION RISK — a new record type in a store several jobs scan.
+  // ⚠️ THIS ASSERTS THE OUTCOME, NOT THE EXPLICIT GUARD. Deleting the by-name exclusion in
+  // isStranded leaves this GREEN, because the fall-through also answers false. Mutation-tested
+  // and confirmed. The explicitness is pinned by source assertion in verify-bridge-fee-band §10,
+  // and it earns its place against a FUTURE state joining the recheckable set — not against
+  // today's behaviour. Said out loud so nobody reads this line as covering it.
+  check("⭐⭐ the sweeper does NOT treat it as stranded (nothing to settle without a hash)", isStranded(rec) === false);
+
+  // Sorting: a pending row must not sink below older confirmed ones.
+  mem.set(receiptKey(OWNER, BURN), JSON.stringify({
+    schema: "bridge-receipt/1", owner: OWNER, burnHash: BURN, state: "burn_confirmed",
+    burnedAt: "2020-01-01T00:00:00.000Z", amountRequested: 1,
+  }));
+  const listed = await listByOwner(OWNER);
+  check("⭐ both receipts are listed for the owner", listed.receipts.length === 2);
+  check("⭐⭐ the NEWER pending receipt sorts FIRST (it has submittedAt, not burnedAt)",
+    listed.receipts[0]?.txId === TXID, listed.receipts.map((r) => r.state).join(" → "));
+
+  // Missing consent context must degrade the EVIDENCE, never the write: a submitted tx
+  // still needs its recovery hook even if the disclosure fields are unavailable.
+  const bare = await recordPendingBridge({
+    e: Object.assign(new Error("x"), { txId: "t2" }),
+    session: { address: OWNER }, amountRequested: 1,
+  });
+  const bareRec = await (await import("@netlify/blobs")).getStore("x").get(pendingReceiptKey(OWNER, "t2"));
+  check("⭐ no consent context ⇒ still recorded, with the ack fields NULL rather than invented",
+    bare.recorded === true && bareRec?.ackAcceptedAt === null && bareRec?.ackBand === null);
+
+  // ⚠️ THE GUARD IS ON THE WRITER, AND recordPendingBridge CANNOT REACH IT (it always sets
+  // burnHash: null). So drive the writer DIRECTLY — otherwise this check would assert a
+  // branch nothing exercises, which is how a suite ends up pinning a bug as an invariant.
+  const { writePendingReceiptNeverThrows } = await import("../netlify/functions/_bridge-receipts.mjs");
+  const impostor = await writePendingReceiptNeverThrows({ owner: OWNER, txId: "t3", burnHash: BURN });
+  check("⭐⭐ a provisional receipt carrying a burnHash is REFUSED — it would impersonate a confirmed one",
+    impostor.written === false && impostor.reason === "has_burn_hash");
+
+  const none = await recordPendingBridge({ e: new Error("no txId"), session: { address: OWNER }, amountRequested: 1 });
+  check("⭐⭐ …but with NO txId there is no key, so it declines rather than inventing one", none.recorded === false && none.reason === "no_tx_id");
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

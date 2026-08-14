@@ -363,7 +363,41 @@ export async function executeAction(step, ctx) {
         };
       }
     }
-    const r = await agentBridge({ walletAddress, destination: dest.key, amountUsdc: amount });
+    // ⭐⭐ THE CONSENT CONTEXT MUST SURVIVE A THROW, AND IT MUST LEAVE HERE AS DATA.
+    //
+    // A userOp that has not settled within the deadline raises TxPendingError from inside
+    // agentBridge. Everything needed to record WHAT THE USER ACCEPTED — the band we priced,
+    // the ratio, whether a token was required and matched — lives in THIS scope and died
+    // with the throw, so the 202 path wrote no consent evidence at all (observed live
+    // 2026-08-14, on the first run that ever reached the acknowledge band).
+    //
+    // 🚨 WHY ATTACH RATHER THAN WRITE HERE. The receipt write belongs at the BOUNDARY, never
+    // in the shared executor: `job-bridge-approve` has its own receipt system, and a write
+    // in here would give it a SECOND receipt in a SECOND store, drifting independently.
+    // ⚠️ `verify-bridge-fee-band.mjs` enforces that by SUBSTRING over this whole file, so even
+    // NAMING the receipt helpers in a comment fails the build — as this comment originally
+    // did. Blunt, and deliberately so: a guard that reads the file is one nobody can quietly
+    // satisfy. The executor hands the facts outward; the boundary decides what to persist.
+    let r;
+    try {
+      r = await agentBridge({ walletAddress, destination: dest.key, amountUsdc: amount });
+    } catch (e) {
+      // Enrich and RETHROW — never swallow. The caller's error handling is unchanged;
+      // it simply now has the disclosure attached if it wants to persist it.
+      e.consent = {
+        destinationKey: dest.key,
+        destinationLabel: dest.label,
+        amountRequested: amount,
+        feeUsdc: fee.feeUsdc,
+        netUsdc: fee.netUsdc,
+        feeBand: bandInfo.band,
+        feeRatio: bandInfo.feeRatio,
+        ackRequired: bandInfo.band === "acknowledge",
+        acknowledged: bandInfo.band === "acknowledge",
+        ackToken: bandInfo.band === "acknowledge" ? expected : null,
+      };
+      throw e;
+    }
     await ledger();
     // Async two-stage: the Arc burn is done; the destination mint is completed by
     // Circle's relayer. Caller polls agent-bridge-status for the mint tx.

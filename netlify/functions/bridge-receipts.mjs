@@ -99,6 +99,11 @@ export async function handler(event) {
       ackBand: r.ackBand ?? null,
       ackRequired: r.ackRequired ?? false,
       ackAcceptedAt: r.ackAcceptedAt ?? null,
+      // ⭐ THE PROVISIONAL PAIR. A submitted-but-unconfirmed bridge has no burnHash, so the
+      // UI needs its own identity (`txId`) and its own clock (`submittedAt`) — otherwise a
+      // pending row is keyless and undateable, and React renders several of them as one.
+      txId: r.txId ?? null,
+      submittedAt: r.submittedAt ?? null,
     })),
     degraded,
   });

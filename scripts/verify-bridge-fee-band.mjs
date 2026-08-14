@@ -372,6 +372,59 @@ section("9 — ackAcceptedAt IS EVIDENCE OF ACCEPTANCE ONLY TRANSITIVELY");
     /_actions refuses on mismatch/.test(record) && /agent-execute-plan's pre-flight/.test(record));
 }
 
+section("10 — THE PENDING PATH KEEPS THE CONSENT EVIDENCE (the 202 wrote NOTHING)");
+{
+  // 🚨 OBSERVED LIVE 2026-08-14, the first run that ever reached the acknowledge band: the
+  // user accepted a 53% fee, _actions verified the token and submitted, Circle did not settle
+  // inside the deadline, agent-bridge answered 202 — and NOTHING was written. Success was
+  // recorded, refusal was recorded, and PENDING (the only state needing follow-up) was silent.
+  const actions = readFileSync(new URL("../netlify/functions/_actions.mjs", import.meta.url), "utf8");
+  const record = readFileSync(new URL("../netlify/functions/_bridge-record.mjs", import.meta.url), "utf8");
+  const receipts = readFileSync(new URL("../netlify/functions/_bridge-receipts.mjs", import.meta.url), "utf8");
+  const bridgeFn = readFileSync(new URL("../netlify/functions/agent-bridge.mjs", import.meta.url), "utf8");
+  const planFn = readFileSync(new URL("../netlify/functions/agent-execute-plan.mjs", import.meta.url), "utf8");
+  const reader = readFileSync(new URL("../netlify/functions/bridge-receipts.mjs", import.meta.url), "utf8");
+  const panel = readFileSync(new URL("../src/components/BridgePanel.tsx", import.meta.url), "utf8");
+
+  check("⭐⭐ the executor ATTACHES the consent context to a throw and RETHROWS it",
+    /e\.consent = \{/.test(actions) && /throw e;/.test(actions));
+  check("⭐⭐ …and STILL does not write a receipt itself — the boundary rule is intact",
+    !/recordBridge|recordPendingBridge|writeReceiptNeverThrows/.test(actions));
+  check("⭐ the attached context carries the BAND, not just the numbers",
+    /feeBand: bandInfo\.band/.test(actions) && /acknowledged: bandInfo\.band === "acknowledge"/.test(actions));
+
+  check("⭐⭐ the 202 path RECORDS before answering", /recordPendingBridge\(\{ e, session/.test(bridgeFn));
+  check("⭐⭐ …and the PLAN path does too — the same gap existed there",
+    /recordPendingBridge\(\{ e, session, amountRequested: step\.amountUsdc, quoteId, stepIndex: i \}\)/.test(planFn));
+  check("⭐ …gated on TxPendingError, not on every throw (a 500 must not mint a receipt)",
+    /e instanceof TxPendingError/.test(bridgeFn) && /e instanceof TxPendingError/.test(planFn));
+
+  check("⭐⭐ the provisional receipt carries ackAcceptedAt", /ackAcceptedAt: c\.acknowledged \? submittedAt : null/.test(record));
+  check("⭐ …and the band/ratio alongside it", /ackBand: c\.feeBand/.test(record) && /feeRatio: c\.feeRatio/.test(record));
+  check("⭐⭐ …keyed on the txId, because there is no hash yet",
+    /pendingReceiptKey\(receipt\.owner, receipt\.txId\)/.test(receipts) && /`o\/\$\{norm\(owner\)\}\/tx-\$\{norm\(txId\)\}`/.test(receipts));
+  check("⭐⭐ …and a provisional receipt may NEVER carry a burnHash (it would masquerade as confirmed)",
+    /if \(receipt\.burnHash\) \{/.test(receipts) && /has_burn_hash/.test(receipts));
+  check("⭐ the write never throws — a 202 means 'we don't know yet' and must survive a Blobs hiccup",
+    /PROVISIONAL WRITE FAILED \(swallowed\)/.test(receipts));
+  check("⭐ …and it is a SEPARATE writer, so the confirmed path's no-burnHash guard is not loosened",
+    /if \(!receipt\?\.owner \|\| !receipt\?\.burnHash\)/.test(receipts));
+
+  // 🚨 THE COMPOSITION RISK: a new record type entering a store several jobs scan.
+  check("⭐⭐ the sweeper will NOT chase a provisional receipt — excluded BY NAME, not by fall-through",
+    /if \(receipt\?\.state === SUBMITTED_STATE\) return false;/.test(receipts));
+  check("⭐ no settle trigger on the pending path — there is no burn hash to settle",
+    /NO SETTLE TRIGGER/.test(record));
+  check("⭐⭐ the owner list sorts on the receipt's OWN clock, so a pending row does not sink to the bottom",
+    /r\?\.burnedAt \|\| r\?\.submittedAt/.test(receipts));
+  check("⭐ the reader projects txId and submittedAt, so the UI can identify and date a pending row",
+    /txId: r\.txId \?\? null/.test(reader) && /submittedAt: r\.submittedAt \?\? null/.test(reader));
+  check("⭐⭐ the panel keys on whichever identity exists (else React collapses pending rows into one)",
+    /key=\{r\.burnHash \?\? r\.txId\}/.test(panel));
+  check("⭐⭐ …and SUBMITTED does not render as 'in flight' — we have not observed the burn",
+    /r\.state === "burn_submitted"/.test(panel) && /has not been confirmed yet/.test(panel));
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

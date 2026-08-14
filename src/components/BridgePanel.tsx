@@ -334,10 +334,21 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
           {receipts.map((r) => {
             const measured = r.delivery === "measured" && r.amountDelivered != null;
             return (
-              <div key={r.burnHash} className="status" style={{ marginTop: 8 }}>
+              // A provisional receipt has no burnHash — key on whichever identity it has,
+              // or React collapses every pending row into one.
+              <div key={r.burnHash ?? r.txId} className="status" style={{ marginTop: 8 }}>
                 <span className="mono">{Number(r.amountRequested).toFixed(4)}</span> USDC →{" "}
                 {r.destinationLabel ?? r.destinationKey}
                 {" · "}
+                {/* ⚠️ SUBMITTED IS NOT IN FLIGHT. The burn was sent to Circle and has not
+                    been confirmed on Arc — it may still land, or may never have. Saying
+                    "in flight" here would promise a burn we have not observed. */}
+                {r.state === "burn_submitted" && (
+                  <span style={{ color: "var(--warn)" }}>
+                    submitted — the Arc burn has not been confirmed yet. Nothing has been
+                    observed leaving your wallet.
+                  </span>
+                )}
                 {r.state === "burn_confirmed" && (
                   <span>
                     in flight — <b>estimated</b> {Number(r.netPredicted).toFixed(4)} USDC to arrive
