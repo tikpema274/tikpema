@@ -325,6 +325,53 @@ section("8 — CONSENT ON THE PLAN PATH: refuse at plan stage, never mid-flight"
     (actions.match(/bandInfo\.band === "acknowledge"/g) || []).length >= 1);
 }
 
+section("9 — ackAcceptedAt IS EVIDENCE OF ACCEPTANCE ONLY TRANSITIVELY");
+{
+  // 🚨 THE FINDING THIS PINS. `ackAcceptedAt` is derived from the BAND at execution
+  // (`acknowledged` = `bandInfo.band === "acknowledge"`), never from the token. What makes it
+  // mean "the user accepted" is that a REFUSAL made this line unreachable without a matching
+  // token — and one of those refusals lives in a DIFFERENT MODULE. Weaken either and the field
+  // keeps being written, keeps reading as consent, and stops being evidence of any; no test of
+  // the record module would notice. Confidence from one place, value from another.
+  //
+  // ⚠️ These are ORDERING assertions, not presence ones. Presence is what the existing checks
+  // already cover, and presence is not the property: a refusal that runs AFTER the value can be
+  // produced protects nothing. Ordering is the weakest thing that is actually load-bearing here
+  // and is still readable from source alone — the honest bound is that source order is not
+  // execution order for code the regexes cannot see between them.
+  const actions = readFileSync(new URL("../netlify/functions/_actions.mjs", import.meta.url), "utf8");
+  const plan = readFileSync(new URL("../netlify/functions/agent-execute-plan.mjs", import.meta.url), "utf8");
+  const record = readFileSync(new URL("../netlify/functions/_bridge-record.mjs", import.meta.url), "utf8");
+
+  check("the value is derived from the BAND, not from the token — the whole reason it is transitive",
+    /ackAcceptedAt: r\.acknowledged \? burnedAt : null/.test(record) &&
+    /acknowledged: bandInfo\.band === "acknowledge"/.test(actions));
+
+  // Refusal 1 — the executor's own, guarding BOTH bridge surfaces.
+  const mismatchIdx = actions.indexOf('if (step.ackToken !== expected)');
+  const acknowledgedIdx = actions.indexOf('acknowledged: bandInfo.band === "acknowledge"');
+  check("⭐⭐ _actions REFUSES on a token mismatch BEFORE it can report `acknowledged`",
+    mismatchIdx > -1 && acknowledgedIdx > -1 && mismatchIdx < acknowledgedIdx,
+    `mismatch@${mismatchIdx} < acknowledged@${acknowledgedIdx}`);
+  check("  …and that refusal RETURNS rather than falling through",
+    /if \(step\.ackToken !== expected\) \{[\s\S]{0,400}?return \{\s*\n\s*ok: false,/.test(actions));
+
+  // Refusal 2 — the plan pre-flight, which is what makes the refusal cost nothing.
+  const needsAckIdx = plan.indexOf("needsAck: true");
+  const execLoopIdx = plan.indexOf("for (let i = 0; i < plan.length; i++)");
+  check("⭐⭐ the plan pre-flight refuses BEFORE the execution loop — no step has moved funds",
+    needsAckIdx > -1 && execLoopIdx > -1 && needsAckIdx < execLoopIdx,
+    `needsAck@${needsAckIdx} < execute@${execLoopIdx}`);
+
+  // ⭐ The caveat must travel WITH the value. A reader who finds `ackAcceptedAt: <timestamp>`
+  // in a receipt and goes looking for what wrote it lands in _bridge-record.mjs, not here.
+  check("⭐⭐ the derivation SAYS what the field does not establish on its own",
+    /WHAT `ackAcceptedAt` ACTUALLY WITNESSES/.test(record) &&
+    /carried by a REFUSAL/.test(record));
+  check("  …and names the two refusals it depends on, so neither is edited unaware",
+    /_actions refuses on mismatch/.test(record) && /agent-execute-plan's pre-flight/.test(record));
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

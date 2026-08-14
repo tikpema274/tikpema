@@ -1,5 +1,194 @@
 ---
 
+## 2026-08-14 — 🚨 A `no-store` QUOTE WAS SERVED FROM THE CDN. `4c6af65`'s verification arrived sideways and FAILED — and the ack-gate proof could not start because of it.
+
+**Set out to fire the acknowledge band live (`ackAcceptedAt` is null on all 15 receipts). Spent the
+session unable to obtain a server-priced quote at all.** Nothing was spent; wallet unchanged at
+15.635654 USDC; 15 receipts; 2 quote records.
+
+### 🚨🚨 THIS ENTRY IS PROVISIONAL — the "platform ignored `no-store`" reading may be WRONG
+
+**Added 08:26Z, after a paired probe.** A 401 fired from the browser and an identical 401 fired from
+the CLI **1 minute apart, same URL, same method**: only the CLI's appears in the published deploy's
+log stream (2 invocations in the window, both mine). ⭐ **So that tab's requests are served by
+something the published deploy's logs cannot see** — most likely a PINNED DEPLOY (`nf_dpl`).
+
+⚠️ **IF THE SERVING DEPLOY PREDATES `4c6af65`, ITS RESPONSES NEVER CARRIED `no-store` AT ALL** — and
+the Durable Cache storing them is CORRECT behaviour, not a platform defect. The observations below
+(a `hit`, no invocation, no quote record) all stand; **their ATTRIBUTION does not.** Do not cite this
+as "Netlify ignores `no-store`" until the serving deploy id is known and compared against
+`6a7e46c0c5a0a131d2a1d9ca`. The same shape as every other error in this document: two true facts
+joined by an inference.
+
+### THE FINDING — the directive is correct on the wire, and pre-existing entries are served anyway
+
+A `POST /api/agent-act` from a fresh tab, live session, correct owner returned **200 in 1.8 s with
+`cache-status: "Netlify Durable"; hit`**. No function ran. No quote record was written. The card
+rendered from bytes stored before `4c6af65` shipped `no-store`.
+
+| checked | result |
+|---|---|
+| `4c6af65` deployed? | ✅ ancestor of the live commit `f8e18e7` |
+| does `agent-act` use the shared helper? | ✅ imports `json` from `_arc.mjs`, all 42 exits |
+| is `no-store` on the wire? | ✅ `cache-control: no-store,…` + `cdn-cache-control: no-store`, measured live |
+| competing rule in the repo? | ✅ none — **no `[[headers]]` blocks at all**, plain `status = 200` rewrite |
+
+⭐ **THE FIX WAS PARTIAL IN A WAY NOBODY WOULD PREDICT FROM READING IT.** `4c6af65` stops NEW
+responses being stored. It cannot evict what was stored BEFORE it, and `netlify-vary: body` keys the
+cache on the request body — so **re-typing a phrasing used before the fix re-serves the pre-fix
+entry, indefinitely.** A unique body bypasses (measured: `fwd=bypass` on a novel body, `hit` on a
+familiar one). The fix's own "two-press verification outstanding" line should be replaced with this.
+
+### 🚨 THE CONSENT CONSEQUENCE — the first mechanism that could write a FALSE `ackAcceptedAt`
+
+The `ackToken` binds to `owner|destination|amount|band` and deliberately **not** to the fee, so it
+survives fee drift. That is exactly what makes it survive being served from a cache. A card cached on
+2026-08-01 carries a token that **still verifies today**: tick it, confirm, and `_actions` recomputes,
+matches, executes, and writes a real `ackAcceptedAt` for a disclosure priced weeks ago and never shown
+live. ⚠️ The band-binding that makes the token robust to volatility is what makes it replayable.
+
+⚠️ **AND IT REOPENS `a7ca274` SELECTIVELY.** A cached response means no function ran, so no quote
+record exists — the runs that get cached are precisely the runs with no provenance. "What was
+proposed" is unrecoverable for exactly the cards most likely to be stale.
+
+⚠️ **RETRO-SUSPICION, NOT A FINDING:** the 2026-08-01 "a rendered plan outlives its session" item may
+always have been this, one layer lower. Testable; not tested.
+
+### ⭐⭐ `Age` IS NOT THE DETECTOR — `cache-status` IS
+
+A probe with a novel body, a proven MISS that definitely ran the function, returned **`age: 2`**
+(slow cold-start origin; `age` counts from generation, not from cache insertion). Reading a non-zero
+`Age` as "served from cache" would have convicted the platform of ignoring `no-store` on a request it
+honoured. **Checking `cache-status` before trusting a quote card is now permanent.**
+
+### ⚠️ THREE INSTRUMENT FAILURES OF MY OWN, ALL THE SAME FAMILY
+
+1. **A `grep -v` of the cron noise, then reading the tail as complete** — the filtered-read trap,
+   run by the person who wrote the rule down.
+2. **`netlify logs --since 6m` CLIPPED a known-present line** (my own probe, 21 s inside the window);
+   the same query at `15m` shows it. ⭐ **Short windows are unreliable — use ≥15m and always carry a
+   known-present control.**
+3. **The `x-nf-request-id` join is IMPOSSIBLE** against `netlify logs --source functions`: the format
+   carries no ids at all (0 ULIDs in any window), and the field where one would sit reads `undefined`.
+   ⭐ Proven by POSITIVE CONTROL — a request I knew was logged failed the join — rather than asserted.
+
+### ⭐ ackAcceptedAt IS EVIDENCE OF ACCEPTANCE ONLY TRANSITIVELY (recorded before the run, unrelated to the cache)
+
+The field is derived from the **band** at execution (`acknowledged = bandInfo.band === "acknowledge"`),
+never from the token. What makes it mean "the user accepted" is that a **refusal** made that line
+unreachable without a matching token — `_actions` ~25 lines above, and on the plan path
+`agent-execute-plan`'s pre-flight, **in a different module**. Weaken either and the field keeps being
+written, keeps reading as consent, and stops witnessing any; no test of the record module would fail.
+Comment at `_bridge-record.mjs:103`, pinned in `verify-bridge-fee-band.mjs` §9 as **ordering**
+assertions (presence was already covered and is not the property). 93/0, mutation-tested: bypassing
+the executor refusal → 3 red, removing the plan refusal → 2 red, deleting the comment → 1 red.
+
+### 🚨 THE AFTERNOON: A BROWSER THAT REPORTS SUCCESS, AND THREE SYSTEMS THAT SEE NOTHING
+
+After the purge, a second route was tried — **the Bridge page (`BridgePanel` → `/api/agent-bridge`),
+which needs no `agent-act`, no plan and no quote record.** Press 1 (no ack) returned the refusal and
+the disclosure box rendered: ⭐ **the acknowledge band DID fire against a live server.** Press 2
+(ticked) reported `cache-status: miss`, **6.2 s**, and a `burnHash`.
+
+**Nothing happened.** Verified against three independent systems:
+
+| instrument | reading |
+|---|---|
+| Arc — SCA USDC balance | `15.635654 → 15.635654`, **delta 0** |
+| Arc — USDC `Transfer` logs, ±25 min | **0 in, 0 out** |
+| Arc — EntryPoint `UserOperationEvent`, sender = our SCA, ~34 min | **0** — while 10 OTHER senders fired 60+ in the same window (instrument validated) |
+| `bridge-receipts` | 15 (ours) / 22 (all owners), unchanged 8+ min later |
+
+⭐ **THE REVERT HYPOTHESIS IS RULED OUT, BY THE READ THAT WOULD HAVE CONFIRMED IT.** A reverted inner
+call still emits `UserOperationEvent{success:false}`. Zero events means nothing was ever included.
+(It was the best explanation available — real hash, real 6.2 s, unmoved balance — and it was right to
+chase.)
+
+⚠️ **A CIRCLE SCA'S ACTIVITY IS NOT VISIBLE UNDER "transactions from this address."** userOps arrive
+via the EntryPoint, so `from` is a bundler. The decisive reads are **ERC-20 `Transfer` logs** and
+**`UserOperationEvent` filtered on `sender`**. Reading an empty address page as "nothing was
+submitted" would have manufactured the alarming branch out of normal SCA behaviour.
+
+### 🚨 THE UNRESOLVED FINDING — THIS TAB'S INVOCATIONS ARE INVISIBLE TO `netlify logs`
+
+Established by paired probes, same endpoint, same window, seconds apart:
+
+```
+08:30:48  blobs-probe   scheduled tick        ← visible
+~08:31    blobs-probe   FROM THE BROWSER      ← ABSENT
+08:33:49  blobs-probe   from my curl          ← visible
+08:33:50  blobs-probe   from my curl          ← visible
+```
+
+The browser's fetch **executed** — it returned a live-computed `verdict D` with
+`build.commit f8e18e72…` / `deploy 6a7e46c0…`, i.e. the SAME build I was watching, on an endpoint I
+measured as never cached (`fwd=bypass`, `cache-control: no-store`). Same for three `agent-act`
+probes: mine logged, the browser's never.
+
+⚠️ **BUT IT IS NOT UNIFORM, AND THE CLAIM MUST NOT BE OVERSTATED:** at `07:17:09–07:17:21` the same
+browser's `auth-challenge` / `auth-verify` / `my-wallet` / `gateway-balance` **did** appear. Something
+separates the visible from the invisible and it is NOT "browser vs CLI". **Mechanism unknown.**
+
+🚨 **THE CONSEQUENCE IS BROADER THAN THIS SESSION.** `netlify logs` is the instrument this repo has
+used to answer "was this endpoint ever called?" — including the 2026-08-02 phantom-run diagnosis.
+**A partial instrument was read as a complete one.** Every conclusion of the form "no log ⇒ it never
+ran" is now suspect and needs re-deriving from stores or chain.
+
+**FIVE HYPOTHESES DIED TODAY, EACH KILLED BY A READ RATHER THAN AN ARGUMENT:** deploy pin (no
+`nf_dpl`), service worker (none registered), proxy/VPN/DNS (`Remote Address` identical to mine,
+`63.176.8.218`), `no-store` violation (attribution retracted above), reverted tx (no
+`UserOperationEvent`). ⭐ The OBSERVATIONS have held up throughout; only the MECHANISMS were wrong.
+
+### ⭐⭐ IT IS NEW, NOT CONSTANT — AND THAT BOUNDS THE SEARCH TO ~48 HOURS
+
+**On 2026-08-12 the SAME browser initiated the UB withdrawal and it verified on Arc**: `txHash
+0x79d06776…`, receipt `success`, block `56671240`, Gateway log emitted — plus three independent
+server-side reads corroborating the 409 guard test the same day. So this browser was producing
+chain-verifiable, server-visible effects **within the last 48 hours** and is not now.
+
+⭐ **THAT ARGUES FOR A CHANGE, NOT A LONGSTANDING DEFECT** — a browser update, a new/updated
+extension, or a changed network path — and it bounds the window to 2026-08-12 → 2026-08-14. Search
+there first; a defect that has "always been there" would have broken the UB withdrawal too.
+
+### 🚧 AUDIT LIST TO WRITE (not assumed short) — WHICH PROOFS REST SOLELY ON A BROWSER-REPORTED RESULT?
+
+**STANDING (chain- or store-verified, independent of any browser claim):** both DD purchases, the UB
+withdrawal (`0x79d06776…`, block 56671240), the code-hash binding, and anything verified by reading a
+blob store or an on-chain receipt.
+
+🚧 **NEEDS RE-DERIVING:** any proof whose evidence is a status code, a duration, or a rendered state
+read off a console or a panel — including conclusions of the form *"no log ⇒ it never ran"*, since
+`netlify logs` is now known to be partial. **Write the list rather than assuming it is short.**
+
+### ⚠️ CORRECTION MADE IN-FLIGHT — two different consent surfaces, and I conflated them
+
+"Rows 5 and 6 cleared" was **WRONG**. Those rows were about the **plan card's per-step box**
+(`d64bb7f`). What fired was **`BridgePanel`'s single-action disclosure** (`bdb7446`) — different
+component, different endpoint, different code path. The single-action band is now known to fire live;
+**the plan path's per-step consent remains completely untested**, as does the ⭐ discriminator
+(`ackAcceptedAt` on the 0.1 receipt ONLY).
+
+### STATE / NEXT
+
+* 🚧 **`ackAcceptedAt` HAS STILL NEVER BEEN WRITTEN.** Still null on all 15 receipts. The blocker is
+  exactly where it was this morning. Fee measured repeatedly and stable all day: Base 1.0 → 5.32%
+  `none`, 0.1 → 53.22% `acknowledge` (0.053216 / 0.053215). Bands unchanged (warn 0.10 / ack 0.25).
+  Caps 25/10/60, day spend 0. Wallet **15.635654 USDC, untouched — nothing was spent today.**
+* ✅ **CDN purge RUN AND VERIFIED** (site-wide, `202` at 08:20:48Z, confirmed by a cold `fwd=miss` on
+  a path that had been cached). It changed the `hit` to a `miss` — and the run still did nothing.
+* 🚨 **THE BLOCKING QUESTION IS NO LONGER THE GATE.** It is: *why does this browser report 200s,
+  `cache-status: miss`, 6.2 s durations and a burnHash for operations that leave no trace in the
+  function log, either blob store, or on Arc?* Until that is answered, **no browser-driven proof of
+  anything on this site can be trusted** — which is a far larger finding than the one we set out for.
+* ⭐ **NEXT SESSION SHOULD START HERE, NOT AT THE GATE.** Suggested first read: a money-path action
+  from a DIFFERENT browser/profile, with the same three-instrument check (chain + store + log). That
+  discriminates "this browser/tab" from "this site" in one run and costs nothing.
+* ⭐ **Whether `a7ca274`'s record write works on a live server is STILL UNKNOWN** — every run that
+  would have exercised it was served from cache. A third key in `agent-quotes` is a first, not a
+  formality.
+
+---
+
 ## 🔻 HANDOFF — UB EXIT. Written 2026-08-12 ~15:40Z, mid-deploy, before an UNSTARTED calibration.
 
 ⚠️ **START HERE for the unified-balance exit.** Written deliberately before the calibration below,

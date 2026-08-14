@@ -105,6 +105,23 @@ export async function recordBridge({ r, session, event, amountRequested, quoteId
     // lose most of the amount, that belongs in the record, not in someone's memory of
     // what the screen said. `acknowledged` is true only because the server recomputed the
     // token and it matched.
+    //
+    // 🚨 WHAT `ackAcceptedAt` ACTUALLY WITNESSES — READ THIS BEFORE TRUSTING IT AS CONSENT.
+    // Its value is derived from the BAND at execution time (`acknowledged` is
+    // `bandInfo.band === "acknowledge"` in _actions.mjs), NOT from the token. What makes it
+    // mean "the user accepted" is that the caller could not have REACHED this line without a
+    // matching token: _actions refuses on mismatch ~25 lines above, and on the plan path
+    // agent-execute-plan's pre-flight refuses the whole plan before step 1. So the claim is
+    // carried by a REFUSAL — one of them in a different module — and arrives here only
+    // transitively, through control flow rather than through the value itself.
+    //
+    // ⭐ THE CONSEQUENCE: weaken or bypass either refusal and this field keeps being written,
+    // keeps reading as acceptance, and silently stops being evidence of any. Nothing here
+    // would change; no test of THIS module would fail. The name asserts something its own
+    // derivation does not establish — the composite-claim shape, where the confidence comes
+    // from one place and the value from another.
+    // Pinned in verify-bridge-fee-band.mjs §9: the two refusals must PRECEDE the code that
+    // can produce `acknowledged`, which is the property this field actually rests on.
     feeRatio: r.feeRatio ?? null,
     ackBand: r.feeBand ?? null,
     ackRequired: r.ackRequired ?? false,
