@@ -104,6 +104,90 @@ call still emits `UserOperationEvent{success:false}`. Zero events means nothing 
 (It was the best explanation available — real hash, real 6.2 s, unmoved balance — and it was right to
 chase.)
 
+### ✅ RESOLVED — IT WAS A **202 `TxPendingError`**. THE BRIDGE IS STUCK, NOT FAILED.
+
+**The question nobody asked for two hours was the STATUS CODE.** It was **202**, and the identifier
+was a **UUID, not a hash** — `agent-bridge.mjs:87`, the `TxPendingError` path. Everything reconciles
+with nothing left over:
+
+| observation | cause |
+|---|---|
+| 6.2 s of real work | the gate ran, the token verified, the userOp was **submitted** |
+| a UUID | Circle's `txId`, not a burn hash |
+| **no receipt** | **BY DESIGN** — `recordBridge` runs only on the 200 path (`_bridge-record.mjs:81`) |
+| nothing on chain | the userOp never mined — 0 userOps, balance unchanged **50 min later** |
+| request arrived | independently certified by Test A below |
+
+⭐ **This is the Circle unstaked-nonce trap already in this project's memory** (userOps stick in SENT
+on Arc). Not new, not a code defect here — but its consequences below are.
+
+⚠️⚠️ **A FABRICATED UI DEFECT, MANUFACTURED BY BOTH OF US IN TWO STEPS. THE UI WAS HONEST.**
+`BridgePanel:145` has a dedicated branch — `pendingBurn = run && !error && !run.burnHash` — rendering
+*"Bridge submitted — the Arc burn is still confirming. Check back shortly."* It never claimed success.
+
+1. **The assistant inferred it**: from the operator's shorthand ("burnHash 0x…") it claimed the panel
+   "rendered a txId where a burnHash belongs", **without reading the branch**.
+2. ⭐ **The operator then amplified it**: restating that inference as an established defect rather
+   than as *the assistant's reading of the operator's own question* — so a guess acquired a second
+   apparent source and started to look corroborated.
+
+⭐⭐ **THIS IS THE HOUSE FAILURE MODE WITH TWO PARTICIPANTS INSTEAD OF ONE.** Every other instance in
+this document is one party joining two facts by inference; here the inference was laundered into
+evidence by being repeated back. **A claim does not gain support by being restated by the person it
+came from.** Recorded because it is the exact thing this document exists to catch, and it nearly
+survived — the entry was drafted before anyone read `BridgePanel:145`.
+
+### ⭐ PARTIAL SUCCESS — THE GATE IS PROVEN TO **RUN**. WHAT FAILS IS THE **EVIDENCE LAYER**.
+
+🚨 **"The acknowledge band has never fired live" IS NO LONGER TRUE, and the replacement sentence is
+materially different.** On 2026-08-14, on the single-action surface, ALL of this executed against a
+running server for the first time:
+
+* the band was computed live from a real fee (53.2%) → `acknowledge`
+* the server **REFUSED** and returned a disclosure with a token it minted
+* the disclosure **RENDERED** (box, copy, disabled button)
+* the returned token was **recomputed server-side and MATCHED**
+* execution **proceeded only because of that match**, and a userOp was submitted
+
+⭐ The consent mechanism is proven end-to-end **up to the point where money moves**. What is unproven
+is the DURABLE EVIDENCE: `ackAcceptedAt` has still never been written, because the transaction went
+pending and the receipt write lives on the success path only.
+
+### 🚨 THE DEFECT — CONSENT EVIDENCE IS LOST EXACTLY WHEN A TRANSACTION GOES PENDING
+
+The user acknowledged a 53% fee; `_actions` recomputed the token, matched it, passed the band gate
+and submitted. **The gate ran end-to-end.** But the response was 202, so **no receipt was written** —
+`ackBand`, `feeRatio` and `ackAcceptedAt` exist nowhere.
+
+⭐⭐ **"Who accepted losing 53%, and when" is unrecorded for PRECISELY the case that most needs
+following up: a money movement that is stuck.** The receipt write is gated on the success path, so
+consent evidence survives only when nothing went wrong. Same absence-fills-the-slot family as the
+rest of this document; **first ever exercised 2026-08-14**, because the acknowledge band had never
+fired live before.
+
+🚧 **LIVE LOOSE END — WATCH IT.** If that userOp ever lands, 0.1 USDC bridges with **no receipt, no
+settler trigger, and invisible to the sweeper** — an unrecorded bridge, the same class as
+"plan bridges left NO record at all". The Circle txId (the UUID from that 202) needs checking for a
+terminal state, and a landed burn needs its receipt backfilled.
+
+### ⭐⭐ THE FIX IS ONE CHANGE THAT CLOSES BOTH GAPS — a PROVISIONAL record on the 202 path
+
+**Write a receipt keyed on the `txId` when the 202 fires**, carrying the consent fields
+(`ackBand`/`feeRatio`/`ackAcceptedAt`) and a state meaning *submitted, burn unconfirmed*. That single
+write yields **both** missing things: the consent evidence, and a **recovery hook the sweeper can
+act on** — a key to reconcile against Circle and to backfill the burn hash if it lands.
+
+🚨 **THE PREMISE IT RESTORES.** This receipt system exists so that an unattended bridge is
+recoverable. Today **the ONE outcome that cannot be recovered is the one where nobody knows what
+happened** — success is recorded, refusal is recorded, and *pending* — the only state that actually
+needs following up — writes nothing at all. That is backwards.
+
+⚠️ Design notes for whoever builds it: the key must be the `txId` (there is no burn hash yet — the
+`_bridge-record.mjs:81` no-op exists precisely because the current key is the hash); the state must
+be distinguishable from `burn_confirmed` so the settler does not chase a mint for a burn that may
+never exist; and the write must stay `neverThrows`, because a diagnostics failure must not turn a
+submitted transaction into an error.
+
 ⚠️ **A CIRCLE SCA'S ACTIVITY IS NOT VISIBLE UNDER "transactions from this address."** userOps arrive
 via the EntryPoint, so `from` is a bundler. The decisive reads are **ERC-20 `Transfer` logs** and
 **`UserOperationEvent` filtered on `sender`**. Reading an empty address page as "nothing was
@@ -124,6 +208,12 @@ The browser's fetch **executed** — it returned a live-computed `verdict D` wit
 `build.commit f8e18e72…` / `deploy 6a7e46c0…`, i.e. the SAME build I was watching, on an endpoint I
 measured as never cached (`fwd=bypass`, `cache-control: no-store`). Same for three `agent-act`
 probes: mine logged, the browser's never.
+
+⭐⭐ **PROVEN THE STRONG WAY BY TEST A (below): a request CERTIFIED to have executed does not appear
+in the log.** The browser POSTed a never-before-sent amount to `/api/ub-withdraw` and got back
+`400 availableUsdc: 1.51` — a value read live off the Gateway contract, **predicted from chain BEFORE
+the test**. The 08:50:09→09:04:13 window is populated (2 sweeper ticks) and contains **no
+`ub-withdraw` invocation**. That is a positive control, not an argument from absence.
 
 ⚠️ **BUT IT IS NOT UNIFORM, AND THE CLAIM MUST NOT BE OVERSTATED:** at `07:17:09–07:17:21` the same
 browser's `auth-challenge` / `auth-verify` / `my-wallet` / `gateway-balance` **did** appear. Something
@@ -178,16 +268,20 @@ CLI-side verification is the one channel with a positive control behind it.
 
 **⚠️ WEAKENED — the corroboration is entirely NEGATIVE, so it cannot exclude non-arrival**
 
-* ⚠️ **"THE 409 IS PROVEN LIVE"** (2026-08-13) and ⚠️ **"THE 409 SURVIVED THE PREDICATE REWRITE —
-  proven live TWICE"** (2026-08-13 10:52Z). The 409 itself was read off the browser. Every
-  corroborating check — record count 1, `updatedAt` frozen at `20:49:12.640Z`, chain `1510000`
-  unchanged, sweeper `open:1` — establishes that **nothing was written**, which is exactly what a
-  request that never arrived would also produce.
-  ⭐ **The entry's own reasoning is right about the risk it was aimed at and silent on this one:**
-  `updatedAt` was called "value vs value, not an absence", and it IS decisive against a *phantom
-  write*. It says nothing about *non-arrival*. Two different failure modes, one piece of evidence.
-  🚧 **RE-DERIVE BY:** repeating the POST and requiring a POSITIVE trace — a log line, or better, a
-  deliberate 400 (`amount-below-one-atomic-unit`) whose refusal path is distinguishable from silence.
+* ✅ **UPGRADED — RE-DERIVED 2026-08-14 AND NOW STANDS.** "THE 409 IS PROVEN LIVE" and "THE 409
+  SURVIVED THE PREDICATE REWRITE — proven live TWICE" (2026-08-13). Their only real weakness was that
+  **non-arrival** could not be excluded: every corroborating check (record count 1, `updatedAt`
+  frozen at `20:49:12.640Z`, chain `1510000` unchanged, sweeper `open:1`) establishes only that
+  *nothing was written* — which non-arrival also produces.
+  ⭐ **TEST A CLOSED THAT LEG POSITIVELY.** A never-before-sent `amountUsdc: 9.876543` POSTed from the
+  same browser to the same endpoint returned **`400` with `availableUsdc: 1.51`** — the Gateway
+  contract's live `availableBalance`, **predicted from chain before the test**. A value the browser
+  cannot hold, computed fresh, for a body no cache can have seen. **Arrival is demonstrated; the
+  competing hypothesis is gone.** Store unchanged afterwards (`heartbeat` + one record,
+  `updatedAt` still `2026-08-12T20:49:12.640Z`) — a refusal 60 lines above `createRecord` touched
+  nothing, as designed.
+  ⭐ **THE METHOD IS THE REUSABLE PART:** to prove a REFUSAL live, do not look for what it didn't
+  write. Send an input whose refusal must echo **server-held state you predicted independently**.
 
 **🚧 NEEDS RE-DERIVING — browser-reported and nothing else**
 
@@ -221,8 +315,12 @@ component, different endpoint, different code path. The single-action band is no
 
 ### STATE / NEXT
 
-* 🚧 **`ackAcceptedAt` HAS STILL NEVER BEEN WRITTEN.** Still null on all 15 receipts. The blocker is
-  exactly where it was this morning. Fee measured repeatedly and stable all day: Base 1.0 → 5.32%
+* ⭐ **THE GATE IS PROVEN TO RUN; THE EVIDENCE LAYER IS NOT.** Band computed live, refusal issued,
+  disclosure rendered, token recomputed and matched, execution gated on that match — all first-ever,
+  on the single-action surface. 🚧 **`ackAcceptedAt` still never written** (null on all 15 receipts),
+  because the tx went 202-pending and the receipt write is on the success path only.
+  ⭐ **ONE CHANGE CLOSES IT** — the provisional 202 record above — and it is now a code task with a
+  known shape rather than a live-run task blocked on a browser. Fee measured repeatedly and stable all day: Base 1.0 → 5.32%
   `none`, 0.1 → 53.22% `acknowledge` (0.053216 / 0.053215). Bands unchanged (warn 0.10 / ack 0.25).
   Caps 25/10/60, day spend 0. Wallet **15.635654 USDC, untouched — nothing was spent today.**
 * ✅ **CDN purge RUN AND VERIFIED** (site-wide, `202` at 08:20:48Z, confirmed by a cold `fwd=miss` on
