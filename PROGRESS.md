@@ -625,6 +625,51 @@ alive with `open:1`. Not counted — confirms on the next `*/15`.
 🚧 **Content negotiation remains the proper version** — HTML for `Accept: text/html`, JSON for
 machines, which also yields the `openApiUrl` Circle's Discovery schema wants. Before any listing.
 
+### ✅ CONTENT NEGOTIATION IS LIVE — `6a7e46c0` (2026-08-13 23:03:05Z)
+
+```
+browser (Accept: text/html)  → HTML discovery page ✓
+curl    (no Accept override) → application/json ✓      ← the failure that mattered did not happen
+/api/dd-openapi              → HTTP 200, openapi 3.1.0, self-consistent openApiUrl
+smoke                        → 21/21 (dd-openapi now covered on every deploy)
+```
+⭐ The OpenAPI document's own `openApiUrl` points at the address it was FETCHED FROM. That is the
+exact property `/api/dca-*` lacked for 22 days: a published URL nobody dereferenced.
+
+⭐⭐ **THE HEALTH KEY MOVED TO THE PREDICTED HASH AGAIN** — `f4c8ec9b…32b8ea`, three keys now. Two
+consecutive DD-code changes, each tracked to a value computed BEFORE deploying. Far stronger than
+13 deploys where it stayed put: those prove it does not move spuriously, these prove it moves when
+it should, and to the right value.
+
+⚠️ **JSON IS THE DEFAULT AND HTML NEEDS AN EXPLICIT SIGNAL.** Wildcard Accept (curl), absent Accept
+(fetch), `application/json`, a non-string header, and `text/html` inside a PARAMETER all get JSON;
+only a real browser Accept gets the page. Mutation-tested: loosening the matcher serves
+`text/html; charset=utf-8` to curl. The status stays 405 for both — the method IS unsupported, and
+200 would be a nicer lie.
+
+⚠️ **ONE DESCRIPTOR, THREE SURFACES.** `_dd-descriptor.mjs` owns the chains, resource URL, openApiUrl
+and sample address; the 405 JSON, the HTML page and the OpenAPI document all read from it — these are
+the strings a STRANGER COPIES, and a drift sends a reader to a 404.
+
+🚧 **NOT A CIRCLE DISCOVERY ENVELOPE.** The field names that registry wants could not be found in
+Circle's published docs (searched: x402, discovery, marketplace metadata), so nothing claims to
+satisfy a schema nobody here has read. `openApiUrl` is the OpenAPI convention and correct on its own
+terms; service-specific fields are namespaced under `x-tikpema`. **Verify before submitting anywhere.**
+
+### ⚠️ MY OWN TOOLING REPRODUCED THREE OF TONIGHT'S OWN LESSONS
+
+1. **FOUR ad-hoc harnesses** built to check negotiation all returned 503, never 405 — each omitted the
+   publication/health mocks and stopped at an earlier rung. I had COMMITTED that lesson an hour
+   earlier. Fixed by extending the suite's own `call` helper to take headers.
+2. **`reason=?` for ten retries**: the script did `curl | head -c 60` and then JSON-parsed those 60
+   bytes. Truncated JSON never parses — a filtered read fed to a parser, printing `?` instead of the
+   cause. The same silent-continue shape fixed in `dca-tick` two hours before.
+3. **A health-key reading taken seconds after publish** reported "not yet" for a canary on a `*/10`
+   schedule — a number captured before the event it describes.
+⭐ None cost a wrong conclusion, because each was caught by re-reading rather than by trusting the
+first answer. But the pattern is worth naming: the failure modes this codebase is built to resist
+show up just as readily in the scripts written to verify it.
+
 ### NEXT, IN ORDER
 
 1. ✅ DONE — deploy published `7f5d5de`, heartbeat appeared, calibration ran and cleaned up.
