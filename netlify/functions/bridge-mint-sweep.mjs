@@ -41,7 +41,7 @@ export const handler = async (event) => {
   connectBlobs(event);
 
   const started = Date.now();
-  const { scanned, stranded, total, degraded } = await listAllStranded({ limit: MAX_PER_TICK });
+  const { scanned, stranded, total, provisional, degraded } = await listAllStranded({ limit: MAX_PER_TICK });
 
   if (degraded) {
     // ⚠️ An unreadable store is NOT "nothing stranded". Say so loudly — this is the
@@ -50,9 +50,31 @@ export const handler = async (event) => {
     return json(200, { ok: false, reason: "store-unreadable" });
   }
 
+  // ⭐⭐ THE PROVISIONAL CENSUS — LOGGED BEFORE THE CLEAN EARLY-RETURN, DELIBERATELY.
+  //
+  // 🚨 A provisional receipt is never `stranded`, so `total === 0` is the NORMAL state of a store
+  // that is full of aged-out `tx-` records needing a human. Logging the census after that return
+  // would mean the one condition worth escalating is the one condition that prints "clean" and
+  // exits — which is how this sweeper's own log line would have become the thing hiding it.
+  //
+  // ⚠️ THE SWEEP STILL OWNS NO WRITES. This is a count and a sentence, nothing more; the
+  // reconcile job that could act on it is unbuilt, and that is stated rather than implied.
+  if (provisional) {
+    const { settling, unwitnessed, unresolved } = provisional;
+    if (unresolved > 0) {
+      console.error(
+        `[bridge-sweep] 🚨 ${unresolved} PROVISIONAL RECEIPT(S) PAST THE 24h CAP — submitted, never ` +
+          `confirmed, and nothing will resolve them automatically. Each needs its txId reconciled ` +
+          `against Circle BY HAND. (also settling=${settling} unwitnessed=${unwitnessed})`
+      );
+    } else if (settling + unwitnessed > 0) {
+      console.log(`[bridge-sweep] provisional census — settling=${settling} unwitnessed=${unwitnessed} unresolved=0`);
+    }
+  }
+
   if (total === 0) {
     console.log(`[bridge-sweep] clean — scanned=${scanned} stranded=0`);
-    return json(200, { ok: true, scanned, stranded: 0, triggered: 0 });
+    return json(200, { ok: true, scanned, stranded: 0, triggered: 0, provisional });
   }
 
   const base = process.env.DEPLOY_URL || process.env.URL;
@@ -89,5 +111,5 @@ export const handler = async (event) => {
     `[bridge-sweep] scanned=${scanned} stranded=${total} triggered=${triggered} remaining=${remaining} ms=${Date.now() - started}` +
       (remaining > 0 ? ` — CAPPED at ${MAX_PER_TICK}/tick, ${remaining} deferred to the next run` : "")
   );
-  return json(200, { ok: true, scanned, stranded: total, triggered, remaining });
+  return json(200, { ok: true, scanned, stranded: total, triggered, remaining, provisional });
 };

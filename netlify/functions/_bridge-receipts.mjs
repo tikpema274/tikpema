@@ -101,6 +101,97 @@ export function pendingReceiptKey(owner, txId) {
   return `o/${norm(owner)}/tx-${norm(txId)}`;
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════
+// ⭐⭐ THE AGE CAP — because the record above was WRITE-ONLY AND IMMORTAL
+// ══════════════════════════════════════════════════════════════════════════════════
+// 🚨 THE DEFECT, AUDITED 2026-08-14 the day the provisional record shipped. `412e8d0` added a
+// writer, a by-name exclusion from the sweep, and a renderer — and nothing else. The complete
+// set of things that touch a `tx-` record was: two writers, `isStranded` (returns false), and
+// the panel. NO sweeper, NO cron, NO settler, NO reconcile job. `burn_submitted` is in neither
+// TERMINAL_STATES nor RESOLVED_STATES, so no state machine could move it either.
+//
+// ⭐ THE FEAR GOING IN WAS THE WRONG ONE. The worry was that it would inherit the unbounded
+// RETRY the 12-day Polygon record demonstrates. It could not — nothing retries it at all. What
+// it had instead is arguably worse, because it has no cost signal to notice: the record was
+// IMMORTAL AND INERT, and the panel rendered "the Arc burn has not been confirmed yet" for it
+// forever. ⚠️ THE WORD THAT WAS THE LIE IS "YET". "Yet" says someone is still waiting. Nobody
+// was — not after the deadline, not ever, because the thing that would wait was never built.
+//
+// ⚠️ SO THE CAP IS DERIVED AT READ TIME AND NEVER WRITTEN. Three reasons, in order of weight:
+//   1. This repo has already been burned by a WRITTEN terminal state. `mint_unconfirmed` was
+//      treated as resolved, which made it permanent, and a bridge that demonstrably succeeded
+//      on-chain was labelled unproven forever (fixed 2026-08-01 by making it re-checkable).
+//      Writing `burn_abandoned` here would repeat that exact mistake one record-type over.
+//   2. A derived band is correct AS OF NOW and needs no migration: the day a reconcile job is
+//      built and backfills a real burn hash, these ages stop being consulted at all.
+//   3. No writer means no cron, no lease, no eventual-consistency seam, and no new way for the
+//      202 path — which already answers "we don't know yet" — to fail.
+//
+// The record is a FACT (submitted at T, txId X). Only its INTERPRETATION ages.
+
+/** Past this, Circle settling the userOp is no longer the likely explanation. Deliberately far
+ *  longer than `waitForTx`'s 60s budget: a userOp can stick in SENT on Arc behind a nonce, and
+ *  calling that "unresolved" inside a few minutes would cry wolf on the common recoverable case. */
+export const SUBMITTED_SETTLE_DEADLINE_MS = 30 * 60 * 1000;
+
+/** ⭐ THE CAP ITSELF. Past this a provisional record is TERMINAL — no more "maybe", it needs a
+ *  human to reconcile the txId against Circle. 24h is chosen to be unambiguous rather than tight:
+ *  anything Circle was ever going to do with a userOp, it has done. */
+export const SUBMITTED_AGE_CAP_MS = 24 * 60 * 60 * 1000;
+
+/** The closed set of bands. ⭐ CLOSED ON PURPOSE — an open-ended status string is how an unknown
+ *  slips in wearing the name of a known-good state. */
+export const PROVISIONAL_BANDS = Object.freeze(["settling", "unwitnessed", "unresolved"]);
+
+/**
+ * What is true about a provisional receipt RIGHT NOW. Pure — `now` is injected so the suite can
+ * reach the 24h branch without waiting a day.
+ *
+ * · `settling`    — inside the settle deadline. Circle may still land this; the only band where
+ *                   "not confirmed yet" is an honest thing to say.
+ * · `unwitnessed` — past the deadline, under the cap. Submitted, never observed, and ⚠️ NOTHING
+ *                   IS CHECKING — the same "we stopped waiting" that `mint_unconfirmed` means,
+ *                   except here nothing was ever waiting in the first place. Said plainly,
+ *                   because a user who thinks a process is watching will not go look themselves.
+ * · `unresolved`  — past the cap. TERMINAL. Needs a human against Circle's record of the txId.
+ *
+ * ⚠️ AN UNDATEABLE RECORD IS `unresolved`, NOT `settling` — and this deliberately diverges from
+ * `isPastDeadline`, which returns false on an unparseable timestamp. The divergence is the whole
+ * point: THERE, the predicate gates an ACTION (re-trigger a settle), so an unknown must not
+ * escalate. HERE it gates a CLAIM, so an unknown must not read as fresh. A record nobody can date
+ * can never age out on its own — it is unresolvable BY DEFINITION, and the honest band says so.
+ * Absence must not read as safe, including the absence of a clock.
+ */
+export function provisionalStatus(receipt, now = Date.now()) {
+  if (receipt?.state !== SUBMITTED_STATE) {
+    return { provisional: false, band: null, ageMs: null, terminal: false, needsHuman: false, detail: "not a provisional receipt" };
+  }
+  const submittedAt = Date.parse(receipt?.submittedAt || "");
+  if (!Number.isFinite(submittedAt)) {
+    return {
+      provisional: true, band: "unresolved", ageMs: null, terminal: true, needsHuman: true,
+      detail: "this provisional receipt carries no readable submittedAt, so it can never age out on its own — it is unresolvable by definition and needs a human",
+    };
+  }
+  const ageMs = Math.max(0, now - submittedAt);
+  if (ageMs >= SUBMITTED_AGE_CAP_MS) {
+    return {
+      provisional: true, band: "unresolved", ageMs, terminal: true, needsHuman: true,
+      detail: "submitted over 24h ago and never confirmed — reconcile the txId against Circle by hand",
+    };
+  }
+  if (ageMs >= SUBMITTED_SETTLE_DEADLINE_MS) {
+    return {
+      provisional: true, band: "unwitnessed", ageMs, terminal: false, needsHuman: false,
+      detail: "submitted, never observed on Arc, and nothing is checking automatically",
+    };
+  }
+  return {
+    provisional: true, band: "settling", ageMs, terminal: false, needsHuman: false,
+    detail: "submitted within the settle window — Circle may still land this",
+  };
+}
+
 function store() {
   return getStore(BRIDGE_RECEIPTS_STORE);
 }
@@ -269,6 +360,10 @@ export function isStranded(receipt, now = Date.now()) {
   // safety that is inherited rather than stated is safety nobody knows they can break.
   // ⚠️ Reconciling these against Circle is a SEPARATE, UNBUILT job (see PROGRESS): this
   // record is the hook that makes it possible, not the recovery itself.
+  // ⭐ EXCLUDED FROM RECOVERY IS NOT EXCLUDED FROM VISIBILITY — that conflation is what let a
+  // `tx-` record age forever with nothing anywhere saying so. `provisionalStatus` puts a cap on
+  // it and `listAllStranded` counts the bands in the same scan, so the sweeper reports what it
+  // deliberately does not act on. Returning false here stays correct; silence did not.
   if (receipt?.state === SUBMITTED_STATE) return false;
   if (receipt?.state === "burn_confirmed") return isPastDeadline(receipt, now);
   return isRecheckable(receipt, now);
@@ -291,12 +386,32 @@ export async function listAllStranded({ limit = 50, now = Date.now() } = {}) {
   try {
     const { blobs } = await store().list({ prefix: "o/" });
     const out = [];
+    // ⭐⭐ THE PROVISIONAL CENSUS — COUNTED IN THIS SAME PASS, NEVER ACTED ON.
+    //
+    // 🚨 THE ESCALATION THE `tx-` RECORD DID NOT HAVE. A provisional receipt is excluded from
+    // `isStranded` by name and correctly so — it has no burn hash, so there is nothing to settle
+    // and nothing to ask IRIS. But "no automatic recovery" was silently turned into "no
+    // visibility at all": a record could reach the 24h cap and NOTHING anywhere would say so.
+    //
+    // ⭐ THE LESSON IS THE ONE THIS SWEEPER WAS BUILT ON, APPLIED TO ITSELF. It exists because
+    // recovery that rides the read path needs a human to happen to look. An aged-out provisional
+    // record had exactly that defect: visible only in a panel, only to the one owner, only if
+    // they came back — and the case that produces it is precisely the user who does NOT come
+    // back. So the count goes where a cron can see it, every tick, for every owner.
+    //
+    // ⚠️ COUNTED, NOT TRIGGERED. This function still hands the sweeper nothing to act on: the
+    // reconcile job that would ask Circle about a txId remains unbuilt, and inventing a trigger
+    // for it here would have the settler chase a mint for a burn that may never exist.
+    const provisional = { settling: 0, unwitnessed: 0, unresolved: 0 };
     let scanned = 0;
     for (const b of blobs || []) {
       scanned++;
       try {
         const r = await store().get(b.key, { type: "json" });
-        if (r && isStranded(r, now)) out.push(r);
+        if (!r) continue;
+        if (isStranded(r, now)) out.push(r);
+        const p = provisionalStatus(r, now);
+        if (p.provisional) provisional[p.band]++;
       } catch {
         /* one unreadable blob must not sink the sweep */
       }
@@ -304,10 +419,13 @@ export async function listAllStranded({ limit = 50, now = Date.now() } = {}) {
     // ⭐ NO SILENT TRUNCATION. If more are stranded than we will act on this tick, the
     // caller is told the real number — a capped list reported as complete reads as
     // "everything is handled" when it is not.
-    return { scanned, stranded: out.slice(0, limit), total: out.length, degraded: false };
+    return { scanned, stranded: out.slice(0, limit), total: out.length, provisional, degraded: false };
   } catch (e) {
     console.error(`[bridge-sweep] LIST FAILED — ${e?.message}`);
-    return { scanned: 0, stranded: [], total: 0, degraded: true };
+    // ⚠️ NULL, NOT ZEROS. A degraded scan that reported `unresolved: 0` would be an unreadable
+    // store answering "nothing needs a human" — the absence-reads-as-safe shape this file is
+    // full of warnings about. Zero must only ever mean "we looked and there were none".
+    return { scanned: 0, stranded: [], total: 0, provisional: null, degraded: true };
   }
 }
 

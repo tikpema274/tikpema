@@ -1,5 +1,107 @@
 ---
 
+## 2026-08-14 (later still) — ⭐ THE PROVISIONAL RECORD IS CAPPED. The word that was the lie was "yet".
+
+🚨 **NOT DEPLOYED.** This touches `netlify/functions` and `src/`, so the tree hash has moved and prod
+still serves `412e8d0`'s surface. `npm run gate:deployed` will report the mismatch until it ships —
+which is the entire point of the gate added an hour ago, now doing its job on the very next commit.
+
+**The defect, from the audit that went in expecting the opposite.** The fear was that `tx-<txId>`
+would inherit the unbounded RETRY the 12-day Polygon record demonstrates. It could not — nothing
+retries it at all. What it had instead is worse in one specific way: **it had no cost signal to
+notice.** A record that retries forever burns invocations somebody eventually sees. A record that is
+write-only and immortal costs nothing and says the wrong thing forever, for free.
+
+⭐⭐ **THE WORD THAT WAS THE LIE IS "YET".** The panel said *"the Arc burn has not been confirmed yet"*
+for the entire life of the record. "Yet" tells the reader someone is still waiting. **Nobody was** —
+there is no sweeper, no settler and no reconcile job for a `tx-` record, so the sentence was false
+from the first second, not merely aged. ⚠️ And it was false in the costly direction: **a user who
+believes a process is watching will not go look themselves.** The copy was quietly discouraging the
+only action that could have resolved it.
+
+### ⚠️ CORRECTION to yesterday's entry — the sort claim was overstated
+
+That entry said the sort *"floats it to the TOP permanently"*. Precisely: `listByOwner` sorts on
+`burnedAt || submittedAt` **descending**, so a provisional record takes its normal chronological
+place and sinks as soon as anything newer exists. It is pinned to the top only when nothing newer is
+ever written — which is exactly the bridge-once-and-never-return user the sweeper was built for, so
+the case is real, but it is conditional and was stated as unconditional.
+
+⭐ **AND THAT IS WHY THE SORT IS LEFT ALONE.** Once the copy earns its prominence — an aged record now
+says *"needs review, this will not resolve on its own"* — being first is correct, not a defect. The
+bug was never the position; it was a permanent claim that got less true the more visible it became.
+
+### THE CAP — derived at read time, never written
+
+`provisionalStatus(receipt, now)` in `_bridge-receipts.mjs`, pure and `now`-injectable. Three bands,
+a CLOSED set:
+
+| band | age | says |
+|---|---|---|
+| `settling` | < 30 min | "not confirmed **yet**" — the only band where "yet" is honest |
+| `unwitnessed` | 30 min – 24 h | "still unconfirmed, and **nothing is checking this automatically**" |
+| `unresolved` | > 24 h | TERMINAL — "**will not** resolve on its own; reconcile against Circle by hand" |
+
+⭐⭐ **DERIVED, NOT WRITTEN, AND THE REASON IS IN THIS FILE ALREADY.** A *written* terminal state is a
+mistake this repo has already made one record-type over: `mint_unconfirmed` was treated as resolved,
+which made it permanent, and a bridge that demonstrably succeeded on-chain was labelled unproven
+forever (fixed 2026-08-01 by making it re-checkable). Writing `burn_abandoned` would repeat it
+exactly. A derived band is correct as of now, needs no migration, adds no writer, no cron, no lease
+and no consistency seam — and stops being consulted the day a reconcile job backfills a real hash.
+**The record is a fact; only its interpretation ages.**
+
+⚠️ **AN UNDATEABLE RECORD IS `unresolved`, NOT `settling` — deliberately diverging from
+`isPastDeadline`**, which returns false on an unparseable clock. The divergence IS the point: there
+the predicate gates an **action** (re-trigger a settle), so an unknown must not escalate; here it
+gates a **claim**, so an unknown must not read as fresh. A record nobody can date can never age out
+on its own. Both directions are asserted, so nobody "fixes" them into agreement.
+
+### ⭐ THE ESCALATION — excluded from recovery is not excluded from visibility
+
+`isStranded` still returns false for a provisional record, correctly: no burn hash means nothing to
+settle and nothing to ask IRIS. But that exclusion had been silently widened into *no visibility at
+all* — a record could pass 24 h and **nothing anywhere would say so.**
+
+`listAllStranded` now counts the bands **in the same scan pass** (no second listing) and the sweeper
+logs the census — ⚠️ **before the `total === 0` early return, which is load-bearing.** A provisional
+record is never stranded, so `stranded=0` is the NORMAL state of a store full of aged-out `tx-`
+records; logging after that return would have made the one condition worth escalating the one
+condition that prints "clean" and exits. ⭐ Same lesson the sweeper itself was built on — recovery
+that needs a human to happen to look — applied to the sweeper's own log line.
+
+⚠️ **A degraded scan reports `provisional: null`, never zeros.** An unreadable store answering
+"nobody needs help" is the absence-reads-as-safe shape, and zero must only ever mean *we looked*.
+⚠️ **The sweep still owns no writes** — a census is a count, not a state machine. The reconcile job
+remains unbuilt and is not faked with a trigger that would chase a mint for a burn that may not exist.
+
+### PROOF
+
+`verify-bridge-receipts` **111/0** (22 new, up from 89), fee-band 111/0, quote 72/0, tsc + build clean.
+⭐ **MUTATION-TESTED — six mutations, all red, restore green:** delete the 24h branch (→ 5 red, incl.
+the pinned *"a 30-DAY-old record is not still settling"*), drop the census, return zeros instead of
+null on degraded, let an undateable record fall through to `settling`, move the census after the clean
+return, and revert the panel to the single unconditional "yet" row (→ 4 red).
+
+⚠️ **COVERAGE BOUNDARY STATED, NOT IMPLIED.** The predicate, the census, the degraded path and the
+READER's projection are driven for real against the real store and the real key layout. **The panel
+copy is SOURCE-pinned only** — this suite has no React renderer, so those four checks prove the
+branches exist and that the unconditional "yet" is gone; they do not prove what a browser paints.
+`assert-on-rendered-output-not-source-regex` remains unmet there and is named in the suite rather
+than glossed. ⭐ It also demonstrated itself: the fallback-branch check FAILED first because JSX had
+wrapped *"could not be / determined"* across two lines — text that exists on screen and not in the
+source as one string. Left visible, with the reason, inside the check whose own comment admits it
+cannot render.
+
+### STATE
+
+* ⛔ **UNDEPLOYED — prod serves `412e8d0`'s surface.** Ship with `npm run deploy:prod` (foreground,
+  budget ~30 min); `gate:deployed` now runs automatically at the end and will confirm or refuse.
+* 🚧 Still unbuilt, and now clearly named in code rather than implied: **the reconcile job** that asks
+  Circle what became of a `txId` and backfills a landed burn. The cap makes its absence loud instead
+  of silent; it does not replace it.
+* 🚧 OPEN, untouched: the Polygon record's own unbounded `isRecheckable` / missing sweeper age cap.
+  Its own item — the same shape as this one, on the retry side rather than the inert side.
+
 ## 2026-08-14 (later) — ✅ `412e8d0` IS LIVE. 🚨 AND THE REASON IT WAS NOT IS A FAILURE CLASS WITH NO SYMPTOM: five deploys were created and never finished, and every one read as a success.
 
 **The previous session built `412e8d0`, tested it 89/0 + 111/0 + 72/0, committed it, issued the deploy

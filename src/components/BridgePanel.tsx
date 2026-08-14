@@ -342,11 +342,45 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
                 {" · "}
                 {/* ⚠️ SUBMITTED IS NOT IN FLIGHT. The burn was sent to Circle and has not
                     been confirmed on Arc — it may still land, or may never have. Saying
-                    "in flight" here would promise a burn we have not observed. */}
-                {r.state === "burn_submitted" && (
+                    "in flight" here would promise a burn we have not observed.
+
+                    ⭐⭐ AND IT IS NOT ONE SENTENCE, BECAUSE IT WAS NOT ONE SITUATION. This row
+                    previously said "has not been confirmed YET" for the entire life of the
+                    record — forever, since nothing resolves a provisional receipt. "Yet" tells
+                    the reader someone is still waiting. Nobody is: there is no sweeper, no
+                    settler and no reconcile job for a `tx-` record. ⚠️ THAT MATTERS BECAUSE A
+                    USER WHO BELIEVES A PROCESS IS WATCHING WILL NOT GO LOOK THEMSELVES — the
+                    copy was quietly discouraging the only action that could resolve it.
+                    The band comes from the server (provisionalStatus), so the age cap has ONE
+                    definition and the panel cannot drift from the sweeper's census. */}
+                {r.state === "burn_submitted" && r.provisional?.band === "settling" && (
                   <span style={{ color: "var(--warn)" }}>
                     submitted — the Arc burn has not been confirmed yet. Nothing has been
                     observed leaving your wallet.
+                  </span>
+                )}
+                {r.state === "burn_submitted" && r.provisional?.band === "unwitnessed" && (
+                  <span style={{ color: "var(--warn)" }}>
+                    submitted, still unconfirmed — and <b>nothing is checking this
+                    automatically</b>. Nothing has been observed leaving your wallet. If it
+                    matters now, check the transaction with Circle rather than waiting.
+                  </span>
+                )}
+                {r.state === "burn_submitted" && r.provisional?.band === "unresolved" && (
+                  <span style={{ color: "var(--warn)" }}>
+                    ⚠ <b>needs review</b> — submitted over 24h ago and never confirmed. This will{" "}
+                    <b>not</b> resolve on its own: reconcile this transaction against Circle's
+                    record by hand. Nothing has been observed leaving your wallet.
+                  </span>
+                )}
+                {/* Defensive: `burn_submitted` with no band means the server did not project one
+                    (an older deploy, or a shape change). Say the true, weaker thing rather than
+                    fall through to NO status line at all — a row that renders an amount and no
+                    state reads as normal, which is the failure this whole panel exists to avoid. */}
+                {r.state === "burn_submitted" && !r.provisional?.band && (
+                  <span style={{ color: "var(--warn)" }}>
+                    submitted — the Arc burn has not been confirmed, and its age could not be
+                    determined. Nothing has been observed leaving your wallet.
                   </span>
                 )}
                 {r.state === "burn_confirmed" && (

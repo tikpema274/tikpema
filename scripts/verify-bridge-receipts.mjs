@@ -514,6 +514,112 @@ section("THE PROVISIONAL RECEIPT — behaviour, not source text");
   check("⭐⭐ …but with NO txId there is no key, so it declines rather than inventing one", none.recorded === false && none.reason === "no_tx_id");
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("11 — THE AGE CAP: a provisional record must not be immortal");
+// 🚨 THE DEFECT, AUDITED 2026-08-14: `412e8d0` shipped the provisional record with two writers, a
+// by-name exclusion from the sweep, and a renderer — and NOTHING that could ever move it. No
+// terminal state, no age cap, no escalation. The panel said "has not been confirmed YET" forever.
+// ⭐ These drive the real predicate, the real store and the real reader; the band boundaries are
+// reached by INJECTING `now`, not by waiting 24 hours — the same reason section 2 injects a stall.
+{
+  const {
+    provisionalStatus, PROVISIONAL_BANDS, SUBMITTED_SETTLE_DEADLINE_MS, SUBMITTED_AGE_CAP_MS,
+    listAllStranded, isStranded, writePendingReceiptNeverThrows,
+  } = await import("../netlify/functions/_bridge-receipts.mjs");
+
+  const aged = (agoMs) => ({ state: "burn_submitted", submittedAt: new Date(Date.now() - agoMs).toISOString() });
+
+  check("⭐ a fresh provisional receipt is `settling` — Circle may still land it",
+    provisionalStatus(aged(60_000)).band === "settling");
+  check("⭐ past the settle deadline it is `unwitnessed`",
+    provisionalStatus(aged(SUBMITTED_SETTLE_DEADLINE_MS + 1000)).band === "unwitnessed");
+  check("  …the settle boundary is inclusive", provisionalStatus(aged(SUBMITTED_SETTLE_DEADLINE_MS)).band === "unwitnessed");
+
+  const capped = provisionalStatus(aged(SUBMITTED_AGE_CAP_MS + 1000));
+  check("⭐⭐ past the 24h CAP it is `unresolved` — TERMINAL, and it asks for a human",
+    capped.band === "unresolved" && capped.terminal === true && capped.needsHuman === true);
+  check("  …the cap boundary is inclusive", provisionalStatus(aged(SUBMITTED_AGE_CAP_MS)).band === "unresolved");
+
+  // ⭐⭐ THE BUG ITSELF, PINNED. Before the cap this record reported the same thing at 30 seconds
+  // and 30 days. If this check ever goes green on "settling" again, immortality is back.
+  check("⭐⭐ a 30-DAY-old record is NOT still 'settling' — the immortality bug, pinned",
+    provisionalStatus(aged(30 * 24 * 3600_000)).band === "unresolved");
+
+  check("⭐ every band comes from the CLOSED set — an open status string is how an unknown wears a known name",
+    [60_000, SUBMITTED_SETTLE_DEADLINE_MS, SUBMITTED_AGE_CAP_MS, 30 * 24 * 3600_000]
+      .every((a) => PROVISIONAL_BANDS.includes(provisionalStatus(aged(a)).band)));
+
+  check("  a confirmed/minted receipt is not provisional at all",
+    provisionalStatus({ state: "burn_confirmed", burnedAt: new Date().toISOString() }).provisional === false &&
+    provisionalStatus({ state: "minted" }).provisional === false);
+
+  // ⚠️ THE DELIBERATE DIVERGENCE FROM isPastDeadline, asserted so nobody "fixes" it into agreement.
+  check("⭐⭐ an UNDATEABLE provisional record is `unresolved`, never `settling` — it can never age out on its own",
+    provisionalStatus({ state: "burn_submitted" }).band === "unresolved" &&
+    provisionalStatus({ state: "burn_submitted", submittedAt: "not-a-date" }).band === "unresolved");
+  check("  …while isPastDeadline still REFUSES to escalate on an unknown clock (it gates an ACTION, this gates a CLAIM)",
+    isPastDeadline({}) === false);
+
+  check("⭐⭐ capping it does NOT make it stranded — there is still no burn hash to settle or ask IRIS about",
+    [60_000, SUBMITTED_SETTLE_DEADLINE_MS + 1000, SUBMITTED_AGE_CAP_MS + 1000].every((a) => isStranded(aged(a)) === false));
+
+  // ── THE CENSUS, through the real store ─────────────────────────────────────────────────────
+  mem.clear();
+  await writePendingReceiptNeverThrows({ owner: "0xAAA", txId: "t-fresh", state: "burn_submitted", submittedAt: new Date().toISOString() });
+  await writePendingReceiptNeverThrows({ owner: "0xBBB", txId: "t-old", state: "burn_submitted", submittedAt: new Date(Date.now() - SUBMITTED_AGE_CAP_MS - 1000).toISOString() });
+  await writeReceiptNeverThrows({ owner: "0xCCC", burnHash: "0x" + "c2".repeat(32), burnedAt: new Date().toISOString(), state: "minted" });
+  const census = await listAllStranded();
+  check("⭐⭐ the sweep COUNTS the provisional records it deliberately does not act on",
+    census.provisional.settling === 1 && census.provisional.unresolved === 1 && census.provisional.unwitnessed === 0);
+  check("⭐⭐ …on a tick that reports stranded=0 — which is why the census cannot live after the 'clean' return",
+    census.total === 0 && census.scanned === 3);
+
+  failMode = "list";
+  const dark = await listAllStranded();
+  check("⭐⭐ a DEGRADED scan reports provisional:null, never zeros — an unreadable store must not answer 'nobody needs help'",
+    dark.provisional === null && dark.degraded === true);
+  failMode = null;
+
+  // ── THE SWEEPER'S ORDERING, which is the whole escalation ───────────────────────────────────
+  const sweepSrc = await import("node:fs").then((fs) => fs.readFileSync("netlify/functions/bridge-mint-sweep.mjs", "utf8"));
+  check("⭐⭐ the census is logged BEFORE the clean early-return — provisional records make stranded=0 the NORMAL case",
+    sweepSrc.indexOf("PAST THE 24h CAP") > 0 && sweepSrc.indexOf("PAST THE 24h CAP") < sweepSrc.indexOf("[bridge-sweep] clean"));
+  check("  …and the sweeper STILL writes nothing — a census is a count, not a state machine",
+    !/saveReceipt|setJSON|writeReceipt/.test(sweepSrc));
+
+  // ── THE READER PROJECTS IT, so the panel cannot drift from the sweeper ──────────────────────
+  mem.clear();
+  await writePendingReceiptNeverThrows({
+    owner: OWNER, txId: "t-aged", state: "burn_submitted",
+    submittedAt: new Date(Date.now() - SUBMITTED_AGE_CAP_MS - 1000).toISOString(),
+  });
+  const body = JSON.parse((await listHandler({ httpMethod: "GET", headers: { authorization: "Bearer x" } })).body);
+  const row = body.receipts.find((r) => r.txId === "t-aged");
+  check("⭐⭐ the READER derives the band — ONE definition of the cap, so the panel cannot compute a second one",
+    row?.provisional?.band === "unresolved" && row?.provisional?.needsHuman === true);
+  check("  …and a confirmed receipt projects provisional:null rather than a fabricated band",
+    provisionalStatus({ state: "minted" }).provisional === false);
+
+  // ── THE COPY ────────────────────────────────────────────────────────────────────────────────
+  // ⚠️ COVERAGE BOUNDARY, STATED: these are SOURCE checks. This suite has no React renderer, so
+  // they prove the branches EXIST and that the unconditional "yet" is gone — they do not prove
+  // what a browser paints. `assert-on-rendered-output` remains the standing rule and remains
+  // unmet here; a rendering test belongs with the other copy suites, not bolted on to this one.
+  const panelSrc = await import("node:fs").then((fs) => fs.readFileSync("src/components/BridgePanel.tsx", "utf8"));
+  check("⭐⭐ 'not been confirmed yet' is no longer unconditional — it is gated on the `settling` band alone",
+    /band === "settling"[\s\S]{0,240}has not been confirmed yet/.test(panelSrc));
+  check("⭐ the `unwitnessed` row says nothing is checking, rather than implying someone is",
+    /band === "unwitnessed"[\s\S]{0,400}nothing is checking this/.test(panelSrc));
+  check("⭐⭐ the `unresolved` row says it will NOT resolve on its own and names the manual step",
+    /band === "unresolved"[\s\S]{0,400}reconcile this transaction against Circle/.test(panelSrc));
+  // ⚠️ `\s+` BETWEEN THE WORDS, NOT A SPACE — and this check FAILED first for exactly that reason:
+  // JSX wrapped the sentence, so "could not be determined" exists on screen and not in the source
+  // as one string. ⭐ That is `assert-on-rendered-output-not-source-regex` demonstrating itself
+  // inside the very check whose comment above admits it cannot render. Left visible on purpose.
+  check("⭐ a provisional row with NO band still renders a status — a row with an amount and no state reads as normal",
+    /!r\.provisional\?\.band[\s\S]{0,300}age could not be\s+determined/.test(panelSrc));
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

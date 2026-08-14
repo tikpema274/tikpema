@@ -1,7 +1,7 @@
 import { connectBlobs } from "./_blobs.mjs";
 import { json } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
-import { listByOwner, isPastDeadline, isRecheckable } from "./_bridge-receipts.mjs";
+import { listByOwner, isPastDeadline, isRecheckable, provisionalStatus } from "./_bridge-receipts.mjs";
 
 // GET|POST /api/bridge-receipts   (auth required)
 //
@@ -104,6 +104,17 @@ export async function handler(event) {
       // pending row is keyless and undateable, and React renders several of them as one.
       txId: r.txId ?? null,
       submittedAt: r.submittedAt ?? null,
+      // ⭐⭐ THE AGE CAP, DERIVED HERE AND NOT STORED. A provisional receipt has no automatic
+      // resolver — no sweeper, no settler, no reconcile job — so "not confirmed yet" was a claim
+      // that aged into a falsehood the moment nobody was waiting, which was immediately. The band
+      // is computed per read against the CURRENT clock, so it is right without a migration and
+      // stops being consulted the day a reconcile job backfills a real burn hash.
+      // ⚠️ The panel must key its copy on THIS, not on `state` alone — `state` is `burn_submitted`
+      // for a 10-second-old record and a 10-month-old one alike.
+      provisional: (() => {
+        const p = provisionalStatus(r);
+        return p.provisional ? { band: p.band, ageMs: p.ageMs, terminal: p.terminal, needsHuman: p.needsHuman, detail: p.detail } : null;
+      })(),
     })),
     degraded,
   });
