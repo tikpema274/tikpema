@@ -41,7 +41,8 @@ export const handler = async (event) => {
   connectBlobs(event);
 
   const started = Date.now();
-  const { scanned, stranded, total, provisional, degraded } = await listAllStranded({ limit: MAX_PER_TICK });
+  const { scanned, stranded, total, provisional, reconcilable, reconcilableTotal, degraded } =
+    await listAllStranded({ limit: MAX_PER_TICK });
 
   if (degraded) {
     // ⚠️ An unreadable store is NOT "nothing stranded". Say so loudly — this is the
@@ -72,15 +73,44 @@ export const handler = async (event) => {
     }
   }
 
-  if (total === 0) {
-    console.log(`[bridge-sweep] clean — scanned=${scanned} stranded=0`);
-    return json(200, { ok: true, scanned, stranded: 0, triggered: 0, provisional });
-  }
-
   const base = process.env.DEPLOY_URL || process.env.URL;
   if (!base) {
     console.error("[bridge-sweep] no DEPLOY_URL/URL — cannot reach the settler");
     return json(500, { ok: false, reason: "no-base-url" });
+  }
+
+  // ⭐⭐ ASK CIRCLE WHAT BECAME OF EACH PROVISIONAL SUBMISSION — the recovery the `tx-` record was
+  // written as a hook for, and which the cap could only make LOUD rather than fix.
+  //
+  // ⚠️ THIS FUNCTION STILL OWNS NO WRITES. It triggers; `bridge-reconcile-background` performs
+  // every write, exactly as it does for the settler. That invariant is asserted by substring in
+  // verify-bridge-receipts.mjs and is worth more than doing the work inline.
+  //
+  // ⚠️ AND IT RUNS BEFORE THE `total === 0` RETURN, for the same reason the census does: a
+  // provisional record is NEVER stranded, so `stranded=0` is the normal state of a store full of
+  // records this job is the only thing that can resolve. Reconciling after that return would mean
+  // never reconciling at all.
+  let reconciled = 0;
+  for (const r of reconcilable) {
+    try {
+      const res = await fetch(`${base}/.netlify/functions/bridge-reconcile-background`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-internal-token": internalToken() },
+        body: JSON.stringify({ owner: r.owner, txId: r.txId }),
+      });
+      reconciled++;
+      console.log(`[bridge-sweep] reconcile triggered owner=${r.owner} txId=${r.txId} status=${res.status}`);
+    } catch (e) {
+      console.warn(`[bridge-sweep] reconcile trigger failed txId=${r.txId}: ${e?.message}`);
+    }
+  }
+  if (reconcilableTotal > reconciled) {
+    console.log(`[bridge-sweep] reconcile CAPPED at ${MAX_PER_TICK}/tick — ${reconcilableTotal - reconciled} deferred`);
+  }
+
+  if (total === 0) {
+    console.log(`[bridge-sweep] clean — scanned=${scanned} stranded=0 reconcileTriggered=${reconciled}`);
+    return json(200, { ok: true, scanned, stranded: 0, triggered: 0, provisional, reconciled });
   }
 
   let triggered = 0;

@@ -96,6 +96,38 @@ export function receiptKey(owner, burnHash) {
 // never masquerade as a confirmed receipt.
 export const SUBMITTED_STATE = "burn_submitted";
 
+/**
+ * ⭐⭐ WHICH `waitForTx` TIMED OUT — AND WHY A RECONCILE JOB CANNOT WORK WITHOUT IT.
+ *
+ * `agentBridge` awaits Circle TWICE: once for the USDC approve, once for the bridge call
+ * (_bridge.mjs). BOTH raise TxPendingError, and the error carries only the id of whichever one
+ * stalled. So the `txId` on a provisional record is NOT necessarily the burn transaction.
+ *
+ * 🚨 THE DEFECT THIS PREVENTS. Reconciling an APPROVE's id yields the allowance transaction's
+ * `txHash`. Writing that as a `burnHash` fabricates a money-movement record: the panel would say
+ * "in flight — estimated N USDC to arrive" for a bridge whose burn was never submitted, and the
+ * settler would spend its life asking IRIS about a hash that is not a CCTP burn. ⭐ The fabricated
+ * receipt would read as MORE trustworthy than the provisional record it replaced.
+ *
+ * ⚠️ A CLOSED SET, AND AN ABSENT VALUE IS NOT A MEMBER. Records written before this field existed
+ * (everything from `412e8d0`) carry no stage, and the reconcile job REFUSES them rather than
+ * guessing "burn". Absence must not read as safe — including the absence of a stage.
+ */
+export const PENDING_STAGES = Object.freeze(["approve", "burn"]);
+
+/** The submission is over and NO burn exists. Terminal. ⚠️ It keeps the `tx-` key and never gains
+ *  a burnHash, so it can never masquerade as a confirmed receipt. */
+export const SUBMIT_FAILED_STATE = "submit_failed";
+
+/** ⭐ ONE DEFINITION OF "LANDED", shared with `waitForTx` (_circle.mjs), which also accepts only
+ *  COMPLETE. Two definitions would eventually disagree about whether money moved. */
+export const CIRCLE_LANDED_STATE = "COMPLETE";
+
+/** Circle states meaning the transaction is over and did nothing. ⚠️ Anything neither COMPLETE nor
+ *  in this list is treated as STILL PENDING and named in the log — an unrecognised state must never
+ *  be bucketed into a known outcome. */
+export const CIRCLE_DEAD_STATES = Object.freeze(["FAILED", "CANCELLED", "DENIED"]);
+
 /** `o/<owner>/tx-<txId>` — the provisional index. See the block above. */
 export function pendingReceiptKey(owner, txId) {
   return `o/${norm(owner)}/tx-${norm(txId)}`;
@@ -261,6 +293,34 @@ export async function writePendingReceiptNeverThrows(receipt) {
   }
 }
 
+/** Single read of a provisional record. Null on miss OR store error — the reconcile job treats
+ *  "cannot read" as "do nothing", never as "nothing to do". */
+export async function readPendingReceipt(owner, txId) {
+  try {
+    return await store().get(pendingReceiptKey(owner, txId), { type: "json" });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Delete a provisional record once its durable receipt exists.
+ *
+ * ⚠️ RETIRED, NEVER MUTATED INTO THE CONFIRMED ONE — the property the `tx-` key layout exists to
+ * guarantee. The durable receipt is written under the real burn hash FIRST and this key removed
+ * after: write-then-delete leaves, at worst, a visible duplicate that the next tick cleans up,
+ * whereas delete-first risks losing the record entirely if the write then fails.
+ */
+export async function retirePendingReceipt(owner, txId) {
+  try {
+    await store().delete(pendingReceiptKey(owner, txId));
+    return { retired: true };
+  } catch (e) {
+    console.warn(`[bridge-receipt] could not retire provisional key txId=${txId} — ${e?.message}`);
+    return { retired: false, reason: e?.message };
+  }
+}
+
 /** Save from the settler. MAY throw — the settler is a background function with no user
  *  waiting on it, so a failed write there should surface, not hide. */
 export async function saveReceipt(receipt) {
@@ -403,6 +463,11 @@ export async function listAllStranded({ limit = 50, now = Date.now() } = {}) {
     // reconcile job that would ask Circle about a txId remains unbuilt, and inventing a trigger
     // for it here would have the settler chase a mint for a burn that may never exist.
     const provisional = { settling: 0, unwitnessed: 0, unresolved: 0 };
+    // ⭐ THE RECONCILABLE ONES — records the reconcile job should ask Circle about this tick.
+    // ⚠️ BOUNDED BY THE SAME CAP AS THE CLAIM. Past 24h the panel says a human is needed, so the
+    // machine stops asking; polling forever behind that text would make it false AND would be the
+    // 12-day Polygon record's unbounded re-check wearing a new name.
+    const reconcilable = [];
     let scanned = 0;
     for (const b of blobs || []) {
       scanned++;
@@ -411,7 +476,10 @@ export async function listAllStranded({ limit = 50, now = Date.now() } = {}) {
         if (!r) continue;
         if (isStranded(r, now)) out.push(r);
         const p = provisionalStatus(r, now);
-        if (p.provisional) provisional[p.band]++;
+        if (p.provisional) {
+          provisional[p.band]++;
+          if (!p.terminal) reconcilable.push(r);
+        }
       } catch {
         /* one unreadable blob must not sink the sweep */
       }
@@ -419,13 +487,18 @@ export async function listAllStranded({ limit = 50, now = Date.now() } = {}) {
     // ⭐ NO SILENT TRUNCATION. If more are stranded than we will act on this tick, the
     // caller is told the real number — a capped list reported as complete reads as
     // "everything is handled" when it is not.
-    return { scanned, stranded: out.slice(0, limit), total: out.length, provisional, degraded: false };
+    return {
+      scanned, stranded: out.slice(0, limit), total: out.length, provisional,
+      // Same no-silent-truncation rule as `stranded`: the cap is reported, never hidden.
+      reconcilable: reconcilable.slice(0, limit), reconcilableTotal: reconcilable.length,
+      degraded: false,
+    };
   } catch (e) {
     console.error(`[bridge-sweep] LIST FAILED — ${e?.message}`);
     // ⚠️ NULL, NOT ZEROS. A degraded scan that reported `unresolved: 0` would be an unreadable
     // store answering "nothing needs a human" — the absence-reads-as-safe shape this file is
     // full of warnings about. Zero must only ever mean "we looked and there were none".
-    return { scanned: 0, stranded: [], total: 0, provisional: null, degraded: true };
+    return { scanned: 0, stranded: [], total: 0, provisional: null, reconcilable: [], reconcilableTotal: 0, degraded: true };
   }
 }
 

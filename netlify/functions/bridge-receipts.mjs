@@ -104,6 +104,14 @@ export async function handler(event) {
       // pending row is keyless and undateable, and React renders several of them as one.
       txId: r.txId ?? null,
       submittedAt: r.submittedAt ?? null,
+      // ⭐ WHAT THE RECONCILE JOB LEARNED. `submitFailureDetail` is the sentence the panel shows
+      // for a submission Circle has told us is over; the attempt count is what makes an aged-out
+      // row EVIDENCE rather than inference — "we asked N times" versus a silent 0, which would mean
+      // the reconcile job never ran at all. Those are different problems and must not look alike.
+      submitFailureReason: r.submitFailureReason ?? null,
+      submitFailureDetail: r.submitFailureDetail ?? null,
+      reconcileAttempts: Number.isInteger(r.reconcileAttempts) ? r.reconcileAttempts : 0,
+      lastReconciledAt: r.lastReconciledAt ?? null,
       // ⭐⭐ THE AGE CAP, DERIVED HERE AND NOT STORED. A provisional receipt has no automatic
       // resolver — no sweeper, no settler, no reconcile job — so "not confirmed yet" was a claim
       // that aged into a falsehood the moment nobody was waiting, which was immediately. The band

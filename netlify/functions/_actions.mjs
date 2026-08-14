@@ -387,6 +387,13 @@ export async function executeAction(step, ctx) {
       e.consent = {
         destinationKey: dest.key,
         destinationLabel: dest.label,
+        // ⚠️ LOAD-BEARING, NOT DECORATION — and it can only be captured here. `verifyMintOnChain`
+        // REFUSES with `bad_recipient` when this is missing, so a receipt later recovered without
+        // it parks at `mint_unconfirmed` and gets re-checked every 10 minutes forever: the exact
+        // unbounded shape of the 12-day Polygon record. agentBridge defaults the recipient to the
+        // wallet address, and that wallet is the AGENT'S SCA — not the session owner — so nothing
+        // downstream can re-derive it from the record's own keys.
+        recipient: walletAddress,
         amountRequested: amount,
         feeUsdc: fee.feeUsdc,
         netUsdc: fee.netUsdc,

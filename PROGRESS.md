@@ -1,5 +1,106 @@
 ---
 
+## 2026-08-14 (evening) — ⭐⭐ THE RECONCILE JOB IS BUILT. And building it found two ways it would have FABRICATED a money-movement record.
+
+✅ **The cap deployed first** — `7622cd3` is live as `6a7f7912ba99f16548d51726`, and ⭐ **`gate:deployed`
+ran AUTOMATICALLY at the end of the chain**, its first real execution: published deploy `ready`, served
+tree `bbb9a639…` == local, both instruments agreeing, no orphans. The guard added that morning did its
+job on the very next deploy without anyone invoking it. Bundling took 21m 54s.
+
+**Why this job exists.** The cap made an aged-out row honest — *"needs review, this will not resolve on
+its own, reconcile against Circle by hand."* True, and still asking a person to do something the server
+can do itself. ⭐ **The cap makes the absence LOUD; it does not replace the thing that is absent.** This
+is the thing.
+
+### 🚨 TWO DEFECTS FOUND WHILE BUILDING IT — both would have written a receipt for money that never moved
+
+**1. `waitForTx` IS CALLED TWICE, AND THE ERROR ONLY CARRIES AN ID.** `agentBridge` awaits Circle for
+the USDC **approve** (`_bridge.mjs:270`) and then for the **burn** (`:281`). Both raise `TxPendingError`,
+which carries only the id of whichever stalled — so a provisional `txId` is **not necessarily the burn
+transaction**.
+
+⭐⭐ **A NAIVE RECONCILE WOULD HAVE READ THE APPROVE'S `txHash` AND WRITTEN IT AS A `burnHash`.** The panel
+would then say *"in flight — estimated N USDC to arrive"* for a bridge whose burn was never submitted,
+and the settler would spend its life asking IRIS about a hash that is not a CCTP burn. ⚠️ **The
+fabricated receipt would read as MORE trustworthy than the provisional record it replaced** — the worst
+possible direction for a mistake in a receipt system.
+
+Fixed upstream (`_bridge.mjs` tags `e.stage`), enforced downstream: ⚠️ **an absent or out-of-set stage is
+REFUSED, never assumed to be `burn`.** Every record written by the deploy that shipped `412e8d0` has no
+stage, and those land in the refusal branch **by design** — they need a human. Absence must not read as
+safe, including the absence of a stage. The closed set is enforced at the WRITE too, so a junk value
+becomes `null` rather than passing through.
+
+**2. `verifyMintOnChain` HARD-REQUIRES `recipient`** and answers `bad_recipient` without it. A recovered
+receipt missing it would park at `mint_unconfirmed` and be re-checked every 10 minutes **forever** —
+landing precisely in the 12-day Polygon shape this session spent the morning documenting. ⚠️ The
+recipient is the **agent's SCA**, not the session owner, so nothing downstream can re-derive it from the
+record's own keys; it must be captured in `_actions.mjs` at throw time and carried on the provisional
+record. It now is.
+
+### THE JOB — `bridge-reconcile-background.mjs`
+
+| Circle says | stage | outcome |
+|---|---|---|
+| `COMPLETE` | `burn` | durable receipt written under the REAL hash, settler triggered, provisional retired |
+| `COMPLETE` | `approve` | terminal — the allowance landed, the bridge call was never made, **no burn exists** |
+| `FAILED`/`CANCELLED`/`DENIED` | any | terminal — **no funds moved** |
+| anything else | any | still pending, attempt recorded, record untouched |
+
+⭐ **THE SWEEP TRIGGERS, THE JOB WRITES** — the same split the settler already uses, so
+`bridge-mint-sweep` keeps its no-writes invariant (asserted by substring). ⚠️ The trigger runs **before**
+the `total === 0` return, for the same reason the census does: a provisional record is never *stranded*,
+so reconciling after that return would mean never reconciling at all.
+
+⭐ **WRITE-THEN-DELETE, AND NEVER CLOBBER.** The durable receipt is written first and the `tx-` key
+retired after; a failure between leaves a visible duplicate the next tick cleans up, where delete-first
+risks losing the record. And a receipt the settler has already advanced is **never overwritten** — a
+second tick must not replace `minted` + a measured amount with a fresh `burn_confirmed` and un-prove a
+proven bridge.
+
+⚠️ **CONSENT EVIDENCE IS CARRIED, NEVER RE-DERIVED.** `ackAcceptedAt` was the entire reason the
+provisional record exists; recomputing it here would invent evidence rather than preserve it. The
+recovered receipt is also marked `reconciledFromTxId`/`reconciledAt` — ⭐ it was **recovered, not
+observed live**, and a reader who cannot tell the difference cannot weigh it.
+
+⚠️ **AN UNREACHABLE CIRCLE IS NOT AN ANSWER** — the record is left exactly as it was. ⚠️ **An
+unrecognised Circle state is treated as pending and NAMED**, never bucketed into a known outcome.
+⚠️ **`COMPLETE` with no usable `txHash` writes nothing** — a hash is never invented to fill the slot.
+
+### ⭐ THE EFFORT BOUND IS THE SAME BOUND AS THE CLAIM
+
+Past the 24h cap the job **stops asking Circle**. Polling forever behind a row that says *"a human must
+look"* would make that text false — and would be the Polygon record's unbounded re-check wearing a new
+name, re-introduced by the very commit meant to answer it. Instead the record now carries
+`reconcileAttempts`, so ⭐⭐ **an aged-out row is EVIDENCE rather than inference**: *"we asked Circle N
+times and never got a confirmation"* versus a silent `0`, which means **nothing ever checked it** — a
+different and more alarming problem, and the panel says so in those words.
+
+### PROOF
+
+`verify-bridge-receipts` **138/0** (27 new, from 111), fee-band 111/0, quote 72/0, `gate:routes` 5/0,
+tsc + build clean. ⭐ **MUTATION-TESTED — seven mutations, all red, restore green:** drop the stage
+guard, treat an approve as a burn (the fabricated-hash bug, 2 red), clobber an already-settled receipt,
+stop carrying the recipient, let an unreachable Circle terminate the record, remove the 24h effort
+bound, and let the writer pass an out-of-set stage through.
+
+⚠️ Same coverage boundary as the cap: the job, the guards and the writer run for real against the real
+store and key layout with Circle's answer injected; **the panel copy is SOURCE-pinned only.** ⭐ That
+regex broke a third time here — the `unresolved` row grew an attempt-count branch and the matched phrase
+moved past the window. Nothing a user sees changed. The note stands: this needs a rendering test, and a
+source regex keeps proving why.
+
+### STATE
+
+* ⛔ **UNDEPLOYED** — moves the stamped surface. `npm run deploy:prod` (foreground, ~25 min);
+  `gate:deployed` will confirm or refuse.
+* ⚠️ **Existing provisional records cannot be reconciled** — they predate `pendingStage` and are refused
+  by design. There are currently **zero** in the store, so this is a statement about the mechanism, not
+  a backlog.
+* 🚧 OPEN, still untouched: the Polygon record's unbounded `isRecheckable` and the missing age cap in
+  `bridge-mint-sweep`. Its own item. ⭐ This commit repeatedly declined to re-create that bug; it has
+  still not fixed the original.
+
 ## 2026-08-14 (later still) — ⭐ THE PROVISIONAL RECORD IS CAPPED. The word that was the lie was "yet".
 
 🚨 **NOT DEPLOYED.** This touches `netlify/functions` and `src/`, so the tree hash has moved and prod

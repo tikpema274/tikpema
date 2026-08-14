@@ -1,5 +1,5 @@
 import { internalToken } from "./_auth.mjs";
-import { writeReceiptNeverThrows, writePendingReceiptNeverThrows, SUBMITTED_STATE } from "./_bridge-receipts.mjs";
+import { writeReceiptNeverThrows, writePendingReceiptNeverThrows, SUBMITTED_STATE, PENDING_STAGES } from "./_bridge-receipts.mjs";
 
 // RECORD A BRIDGE — the write-and-trigger pair, in ONE place, called from the HTTP
 // boundaries that own it.
@@ -186,8 +186,17 @@ export async function recordPendingBridge({ e, session, amountRequested, quoteId
     submittedAt,
     state: SUBMITTED_STATE,
     pendingReason: e?.message ?? null,
+    // 🚨 WHICH AWAIT STALLED — the field a reconcile job cannot work without. `agentBridge` awaits
+    // Circle twice (approve, then burn) and TxPendingError carries only an id, so without this the
+    // txId cannot say whether its eventual txHash is an ALLOWANCE or a BURN. ⚠️ NULL WHEN UNKNOWN,
+    // never defaulted to "burn": the reconcile job refuses an untagged record rather than guessing,
+    // because a wrong guess writes a fabricated burnHash into a durable receipt.
+    pendingStage: PENDING_STAGES.includes(e?.stage) ? e.stage : null,
     destinationKey: c.destinationKey ?? null,
     destinationLabel: c.destinationLabel ?? null,
+    // Carried so a recovered receipt can be verified on the destination chain — see the note in
+    // _actions.mjs on why its absence causes an unbounded re-check.
+    recipient: c.recipient ?? null,
     amountRequested: Number(amountRequested),
     feeUsdc: c.feeUsdc ?? null,
     netPredicted: c.netUsdc ?? null,

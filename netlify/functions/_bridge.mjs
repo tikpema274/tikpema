@@ -267,7 +267,18 @@ export async function agentBridge({ walletAddress, destination, amountUsdc, reci
       abiParameters: [BRIDGE_CONTRACT, fee.amountMinor.toString()],
       fee: { type: "level", config: { feeLevel: "MEDIUM" } },
     });
-    await waitForTx(client, apTx.data?.id);
+    // 🚨 TAG WHICH AWAIT STALLED. TxPendingError carries only a transaction id, and there are TWO
+    // awaits in this function — so downstream, `txId` alone cannot say whether it names an
+    // ALLOWANCE or a BURN. A reconcile job that assumed "burn" would read this transaction's
+    // txHash and write it as a burnHash: a fabricated money-movement record for a burn that was
+    // never submitted. ⭐ Nothing about the money moves here — an approve grants an allowance —
+    // so the honest downstream outcome for this one is "no burn exists and none is coming".
+    try {
+      await waitForTx(client, apTx.data?.id);
+    } catch (e) {
+      if (e?.name === "TxPendingError") e.stage = "approve";
+      throw e;
+    }
   }
 
   // 2) The bridge call itself (Arc burn + forwarding hook).
@@ -278,7 +289,16 @@ export async function agentBridge({ walletAddress, destination, amountUsdc, reci
     callData,
     fee: { type: "level", config: { feeLevel: "MEDIUM" } },
   });
-  const burnHash = await waitForTx(client, brTx.data?.id);
+  // The burn's own await — tagged for the same reason as the approve above. This is the ONLY
+  // stage whose eventual txHash is a real burn hash, which is exactly why it must be named
+  // rather than inferred from being "the one that usually times out".
+  let burnHash;
+  try {
+    burnHash = await waitForTx(client, brTx.data?.id);
+  } catch (e) {
+    if (e?.name === "TxPendingError") e.stage = "burn";
+    throw e;
+  }
 
   return {
     burnHash,

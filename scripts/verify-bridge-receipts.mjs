@@ -34,6 +34,24 @@ const check = (label, cond, extra = "") => {
 };
 const section = (t) => console.log(`\n── ${t} ${"─".repeat(Math.max(0, 62 - t.length))}`);
 
+// ── a Circle whose answer we choose ──────────────────────────────────────────────────────────
+// The reconcile job's entire job is acting on what Circle says about a transaction id. Mocking the
+// SDK factory (rather than _circle.mjs) keeps `circle()`'s own env guard under test and leaves ONE
+// definition of "landed" — COMPLETE — shared with waitForTx.
+process.env.CIRCLE_API_KEY = process.env.CIRCLE_API_KEY || "test-key";
+process.env.CIRCLE_ENTITY_SECRET = process.env.CIRCLE_ENTITY_SECRET || "test-entity-secret";
+let circleAnswer = null; // an object -> the transaction; an Error -> the API throws
+mock.module("@circle-fin/developer-controlled-wallets", {
+  namedExports: {
+    initiateDeveloperControlledWalletsClient: () => ({
+      getTransaction: async ({ id }) => {
+        if (circleAnswer instanceof Error) throw circleAnswer;
+        return { data: { transaction: { id, ...(circleAnswer || {}) } } };
+      },
+    }),
+  },
+});
+
 // ── an in-memory Blobs, with failure injection ───────────────────────────────────────────────
 // Mocking the STORE rather than _bridge-receipts.mjs keeps the real key layout, the real
 // owner cross-check and the real never-throw wrapper under test.
@@ -54,6 +72,13 @@ mock.module("@netlify/blobs", {
       list: async ({ prefix } = {}) => {
         if (failMode === "list") throw new Error("injected Blobs list failure");
         return { blobs: [...mem.keys()].filter((k) => !prefix || k.startsWith(prefix)).map((key) => ({ key })) };
+      },
+      // The reconcile job RETIRES a provisional key once its durable receipt exists. Injectable
+      // like the rest, because "the write landed but the delete failed" is the state that leaves a
+      // duplicate, and it is reachable only here.
+      delete: async (k) => {
+        if (failMode === "delete") throw new Error("injected Blobs delete failure");
+        mem.delete(k);
       },
     }),
   },
@@ -610,14 +635,169 @@ section("11 — THE AGE CAP: a provisional record must not be immortal");
     /band === "settling"[\s\S]{0,240}has not been confirmed yet/.test(panelSrc));
   check("⭐ the `unwitnessed` row says nothing is checking, rather than implying someone is",
     /band === "unwitnessed"[\s\S]{0,400}nothing is checking this/.test(panelSrc));
+  // ⚠️ WINDOW WIDENED WHEN THE RECONCILE JOB LANDED — the row grew an attempt-count branch and the
+  // phrase moved past 400 chars. Third time a source regex has been brittle here for a reason that
+  // has nothing to do with what the user sees; the boundary note above is not theoretical.
   check("⭐⭐ the `unresolved` row says it will NOT resolve on its own and names the manual step",
-    /band === "unresolved"[\s\S]{0,400}reconcile this transaction against Circle/.test(panelSrc));
+    /band === "unresolved"[\s\S]{0,900}econcile this transaction against Circle/.test(panelSrc));
+  check("⭐⭐ …and DISTINGUISHES 'we asked N times' from 'nothing ever checked it' — different problems, different urgency",
+    /reconcileAttempts > 0[\s\S]{0,300}We asked Circle[\s\S]{0,300}Nothing ever checked it automatically/.test(panelSrc));
+  check("⭐ a `submit_failed` row leads with the good news — no funds left the wallet",
+    /state === "submit_failed"[\s\S]{0,400}No funds left your wallet/.test(panelSrc));
   // ⚠️ `\s+` BETWEEN THE WORDS, NOT A SPACE — and this check FAILED first for exactly that reason:
   // JSX wrapped the sentence, so "could not be determined" exists on screen and not in the source
   // as one string. ⭐ That is `assert-on-rendered-output-not-source-regex` demonstrating itself
   // inside the very check whose comment above admits it cannot render. Left visible on purpose.
   check("⭐ a provisional row with NO band still renders a status — a row with an amount and no state reads as normal",
     /!r\.provisional\?\.band[\s\S]{0,300}age could not be\s+determined/.test(panelSrc));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("12 — THE RECONCILE JOB: the system does what it was telling the user to do by hand");
+// ⭐ The cap made an unresolved record LOUD. It still asked a person to go ask Circle something the
+// server can ask itself. This is that, and every branch below is reached by injecting Circle's
+// answer — the same discipline as section 2, because "Circle eventually said FAILED" cannot be
+// summoned on demand and would otherwise first execute in production.
+{
+  const { handler: reconcile } = await import("../netlify/functions/bridge-reconcile-background.mjs");
+  const {
+    writePendingReceiptNeverThrows, readPendingReceipt, pendingReceiptKey, receiptKey,
+    saveReceipt: saveDurable, SUBMIT_FAILED_STATE, SUBMITTED_AGE_CAP_MS, PENDING_STAGES,
+  } = await import("../netlify/functions/_bridge-receipts.mjs");
+  const { internalToken } = await import("../netlify/functions/_auth.mjs");
+
+  const HASH = "0x" + "d4".repeat(32);
+  const RECIP = "0x" + "ab".repeat(20);
+  const call = (body) => reconcile({
+    httpMethod: "POST",
+    headers: { "x-internal-token": internalToken() },
+    body: JSON.stringify(body),
+  });
+  const seed = async (over = {}) => {
+    mem.clear();
+    circleAnswer = null;
+    await writePendingReceiptNeverThrows({
+      owner: OWNER, txId: "tx-1", state: "burn_submitted",
+      submittedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      pendingStage: "burn", recipient: RECIP, destinationKey: "base", destinationLabel: "Base",
+      amountRequested: 1, feeUsdc: 0.05, netPredicted: 0.95,
+      ackBand: "acknowledge", ackRequired: true, ackAcceptedAt: "2026-08-14T10:00:00.000Z",
+      ...over,
+    });
+  };
+  const durable = async () => (await import("@netlify/blobs")).getStore("x").get(receiptKey(OWNER, HASH));
+
+  // ── THE GUARD THAT STOPS A FABRICATED BURN HASH ────────────────────────────────────────────
+  await seed({ pendingStage: null });
+  circleAnswer = { state: "COMPLETE", txHash: HASH };
+  let r = JSON.parse((await call({ owner: OWNER, txId: "tx-1" })).body);
+  check("⭐⭐ an UNTAGGED record is REFUSED — guessing 'burn' would write an APPROVE's hash as a burnHash",
+    r.outcome === "unknown_stage" && (await durable()) == null);
+  check("  …and the provisional record is left submitted, not terminated on a guess",
+    (await readPendingReceipt(OWNER, "tx-1"))?.state === "burn_submitted");
+  check("  …while still counting the attempt, so a stuck record is not also a silent one",
+    (await readPendingReceipt(OWNER, "tx-1"))?.reconcileAttempts === 1);
+
+  // ⭐ THE APPROVE CASE — the whole reason the stage exists.
+  await seed({ pendingStage: "approve" });
+  circleAnswer = { state: "COMPLETE", txHash: HASH };
+  r = JSON.parse((await call({ owner: OWNER, txId: "tx-1" })).body);
+  check("⭐⭐ a COMPLETE **approve** writes NO durable receipt — the allowance landed, the burn was never submitted",
+    r.outcome === "submit_failed" && (await durable()) == null);
+  check("  …and the record becomes terminal with a reason naming what actually happened",
+    (await readPendingReceipt(OWNER, "tx-1"))?.submitFailureReason === "approve_completed_bridge_never_submitted");
+
+  // ── THE RECOVERY ───────────────────────────────────────────────────────────────────────────
+  await seed();
+  circleAnswer = { state: "COMPLETE", txHash: HASH, updateDate: "2026-08-14T11:00:00.000Z" };
+  r = JSON.parse((await call({ owner: OWNER, txId: "tx-1" })).body);
+  const rec = await durable();
+  check("⭐⭐ a COMPLETE **burn** writes the durable receipt under its REAL hash key", r.outcome === "recovered" && rec?.burnHash === HASH);
+  check("⭐⭐ …carrying the CONSENT EVIDENCE forward rather than re-deriving it",
+    rec?.ackAcceptedAt === "2026-08-14T10:00:00.000Z" && rec?.ackBand === "acknowledge");
+  check("⭐⭐ …and the RECIPIENT, without which verifyMintOnChain says bad_recipient and the settler re-checks forever",
+    rec?.recipient === RECIP);
+  check("⭐ …marked as RECOVERED, never presented as observed live", rec?.reconciledFromTxId === "tx-1" && !!rec?.reconciledAt);
+  check("⭐ …with burn_confirmed so the settler can take it from here", rec?.state === "burn_confirmed");
+  check("⭐⭐ …and the provisional key is RETIRED, never mutated into the confirmed one",
+    (await readPendingReceipt(OWNER, "tx-1")) == null);
+
+  // ── NEVER CLOBBER PROGRESS ─────────────────────────────────────────────────────────────────
+  await seed();
+  await saveDurable({ owner: OWNER, burnHash: HASH, state: "minted", delivery: "measured", amountDelivered: 0.94 });
+  circleAnswer = { state: "COMPLETE", txHash: HASH };
+  r = JSON.parse((await call({ owner: OWNER, txId: "tx-1" })).body);
+  const kept = await durable();
+  check("⭐⭐ an ALREADY-SETTLED receipt is never overwritten — a second tick must not un-prove a proven bridge",
+    r.outcome === "already_recorded" && kept?.state === "minted" && kept?.amountDelivered === 0.94);
+  check("  …and the provisional key is still retired", (await readPendingReceipt(OWNER, "tx-1")) == null);
+
+  // ── THE DEAD AND THE UNKNOWN ───────────────────────────────────────────────────────────────
+  await seed();
+  circleAnswer = { state: "FAILED" };
+  r = JSON.parse((await call({ owner: OWNER, txId: "tx-1" })).body);
+  check("⭐ a FAILED transaction is terminal and writes no receipt", r.outcome === "submit_failed" && (await durable()) == null);
+  check("  …and the row can say no funds moved", (await readPendingReceipt(OWNER, "tx-1"))?.state === SUBMIT_FAILED_STATE);
+
+  await seed();
+  circleAnswer = { state: "SOME_NEW_STATE_CIRCLE_INVENTED" };
+  r = JSON.parse((await call({ owner: OWNER, txId: "tx-1" })).body);
+  check("⭐⭐ an UNRECOGNISED Circle state is treated as pending and NAMED — never bucketed into a known outcome",
+    r.outcome === "pending" && r.circleState === "SOME_NEW_STATE_CIRCLE_INVENTED" &&
+    (await readPendingReceipt(OWNER, "tx-1"))?.state === "burn_submitted");
+
+  await seed();
+  circleAnswer = { state: "COMPLETE", txHash: "not-a-hash" };
+  r = JSON.parse((await call({ owner: OWNER, txId: "tx-1" })).body);
+  check("⭐⭐ COMPLETE with no usable txHash writes NOTHING — a hash is never invented to fill the slot",
+    r.outcome === "complete_without_hash" && (await durable()) == null);
+
+  await seed();
+  circleAnswer = new Error("Circle is down");
+  r = JSON.parse((await call({ owner: OWNER, txId: "tx-1" })).body);
+  check("⭐⭐ an UNREACHABLE Circle never downgrades the record — 'we could not ask' is not an answer",
+    r.outcome === "circle_unreachable" && (await readPendingReceipt(OWNER, "tx-1"))?.state === "burn_submitted");
+
+  // ── BOUNDED EFFORT: the same bound as the claim ─────────────────────────────────────────────
+  await seed({ submittedAt: new Date(Date.now() - SUBMITTED_AGE_CAP_MS - 1000).toISOString() });
+  circleAnswer = { state: "COMPLETE", txHash: HASH };
+  r = JSON.parse((await call({ owner: OWNER, txId: "tx-1" })).body);
+  check("⭐⭐ past the 24h cap it STOPS ASKING — polling forever behind a row that says 'a human must look' would make that text false",
+    r.outcome === "past_cap" && (await durable()) == null);
+
+  // ── INTERNAL ONLY ──────────────────────────────────────────────────────────────────────────
+  const anon = await reconcile({ httpMethod: "POST", headers: {}, body: JSON.stringify({ owner: OWNER, txId: "tx-1" }) });
+  check("⭐⭐ it is INTERNAL ONLY — every file here is a public URL, and this one creates durable receipts",
+    anon.statusCode === 401 || anon.statusCode === 403);
+
+  // ── THE UPSTREAM TAG AND THE WIRING ────────────────────────────────────────────────────────
+  const fs = await import("node:fs");
+  const bridgeSrc = fs.readFileSync("netlify/functions/_bridge.mjs", "utf8");
+  check("⭐⭐ BOTH waitForTx calls tag the stage — the approve one is the whole point",
+    /e\.stage = "approve"/.test(bridgeSrc) && /e\.stage = "burn"/.test(bridgeSrc));
+  const sweepSrc2 = fs.readFileSync("netlify/functions/bridge-mint-sweep.mjs", "utf8");
+  check("⭐⭐ the sweep triggers reconcile BEFORE the clean early-return — a provisional record is never 'stranded'",
+    sweepSrc2.indexOf("bridge-reconcile-background") < sweepSrc2.indexOf("[bridge-sweep] clean"));
+  check("  …and the sweep STILL owns no writes", !/saveReceipt|setJSON|writeReceipt/.test(sweepSrc2));
+
+  // ⭐ The stage must survive the WRITER, not just exist upstream — driven through recordPendingBridge.
+  mem.clear();
+  const { recordPendingBridge: rpb } = await import("../netlify/functions/_bridge-record.mjs");
+  await rpb({
+    e: Object.assign(new Error("pending"), { txId: "tx-staged", stage: "burn", consent: { recipient: RECIP } }),
+    session: { address: OWNER }, amountRequested: 1,
+  });
+  const staged = await readPendingReceipt(OWNER, "tx-staged");
+  check("⭐ the writer persists the stage AND the recipient — the two fields reconcile cannot work without",
+    staged?.pendingStage === "burn" && staged?.recipient === RECIP);
+  await rpb({
+    e: Object.assign(new Error("pending"), { txId: "tx-bogus", stage: "not-a-stage" }),
+    session: { address: OWNER }, amountRequested: 1,
+  });
+  check("⭐⭐ an out-of-set stage is stored as NULL, never passed through — the closed set is enforced at the write",
+    (await readPendingReceipt(OWNER, "tx-bogus"))?.pendingStage === null && PENDING_STAGES.length === 2);
+
+  circleAnswer = null;
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

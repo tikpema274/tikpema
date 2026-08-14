@@ -366,11 +366,34 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
                     matters now, check the transaction with Circle rather than waiting.
                   </span>
                 )}
+                {/* ⭐ THE AGED-OUT ROW NOW REPORTS WHAT WAS TRIED. `reconcileAttempts > 0` means we
+                    asked Circle repeatedly and never got an answer — a genuine dead end. A count of
+                    ZERO means nobody ever asked, which is a DIFFERENT and more alarming problem (the
+                    reconcile job is not running), and the two must not read alike. */}
                 {r.state === "burn_submitted" && r.provisional?.band === "unresolved" && (
                   <span style={{ color: "var(--warn)" }}>
-                    ⚠ <b>needs review</b> — submitted over 24h ago and never confirmed. This will{" "}
-                    <b>not</b> resolve on its own: reconcile this transaction against Circle's
-                    record by hand. Nothing has been observed leaving your wallet.
+                    ⚠ <b>needs review</b> — submitted over 24h ago and never confirmed.{" "}
+                    {r.reconcileAttempts > 0 ? (
+                      <>
+                        We asked Circle {r.reconcileAttempts} times and never got a confirmation.
+                      </>
+                    ) : (
+                      <>
+                        <b>Nothing ever checked it automatically</b> — that itself needs looking at.
+                      </>
+                    )}{" "}
+                    Reconcile this transaction against Circle's record by hand. Nothing has been
+                    observed leaving your wallet.
+                  </span>
+                )}
+                {/* ⭐⭐ THE OUTCOME THE RECONCILE JOB CAN NOW PROVE: Circle says the submission is
+                    over and no burn exists. This is the one provisional ending that is genuinely
+                    GOOD NEWS — nothing was burned, so nothing is lost — and it must not be dressed
+                    in the warning grammar the unresolved case earns. */}
+                {r.state === "submit_failed" && (
+                  <span>
+                    not submitted — {r.submitFailureDetail ?? "the transaction never landed"}.{" "}
+                    <b>No funds left your wallet.</b> Nothing to recover.
                   </span>
                 )}
                 {/* Defensive: `burn_submitted` with no band means the server did not project one
