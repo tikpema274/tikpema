@@ -1,5 +1,143 @@
 ---
 
+## 2026-08-14 (later) — ✅ `412e8d0` IS LIVE. 🚨 AND THE REASON IT WAS NOT IS A FAILURE CLASS WITH NO SYMPTOM: five deploys were created and never finished, and every one read as a success.
+
+**The previous session built `412e8d0`, tested it 89/0 + 111/0 + 72/0, committed it, issued the deploy
+instruction and closed. It never shipped.** Production served `f8e18e7` for the next six hours, so the
+202 provisional record was absent from prod the entire time — confirmed at the data layer, not inferred:
+`blobs:list bridge-receipts` returned 24 keys and **zero** with the `tx-` prefix.
+
+### 🚨 THE FINDING — a `new` deploy record is indistinguishable from a shipped one
+
+`app.tikpema.xyz` served commit `f8e18e7`, deploy `6a7e46c0c5a0a131d2a1d9ca`, stamped 2026-08-13T22:35Z.
+The working tree's build stamp said `412e8d0`, clean, generated 2026-08-14T13:40:17Z — so `npm run build`
+HAD run. The publish is what died:
+
+| deploy | state | context | created |
+|---|---|---|---|
+| `6a7f1abe639d3c2d0e78aedf` | **new** | production | 2026-08-14T13:40:14Z ← `412e8d0` |
+| `6a7ee3dbd437680889f43855` | **new** | production | 2026-08-14T09:46:03Z |
+| `6a7ee1a41cdeffd1fc5cf58e` | **new** | production | 2026-08-14T09:36:36Z |
+| `6a7e46c0c5a0a131d2a1d9ca` | ready | production | 2026-08-13T22:35:44Z ← actually serving |
+
+⭐⭐ **THE RECORD CARRIES NO SYMPTOM.** `error_message: null`. Nothing red anywhere. `updated_at ==
+created_at` and `required_functions: null` — the CLI created the deploy and never reached the
+function-digest step. Five accumulated across one day; the only thing that surfaced any of them was a
+human asking a fresh session *"did it actually ship?"*
+
+### ⚠️ CORRECTION — the first attribution was WRONG, and the foreground deploy disproved it
+
+The initial read was *"a backgrounded deploy whose session ended underneath it."* Then this session ran
+`npm run deploy:prod` in the FOREGROUND and watched it sit at `new` while `netlify deploy` burned 150%
+CPU alongside an esbuild service. It finished, and reported why: **`Functions bundling completed in
+25m 5.4s`**, 28m 41.6s total. The deploy is not dying instantly — it is bundling 102 functions, and the
+record legitimately reads `new` for that entire window. Anything that kills the CLI inside it — a closed
+session, a reaped background job, a 600s tool timeout — orphans the deploy in exactly this state.
+⭐ **The cause is not carelessness about backgrounding; it is that this deploy takes far longer than the
+window it kept being given.** A 10-minute patience budget cannot ship a 25-minute bundle.
+
+### ⭐ THE MISSING GUARD WAS POST-DEPLOY. `gate:watch` runs before; nothing ran after.
+
+`deploy:prod` was `gate:watch && build && netlify deploy --prod` — every link runs BEFORE the artifact
+leaves the machine. New: **`scripts/verify-deployed.mjs`** (`npm run gate:deployed`), appended to
+`deploy:prod` and runnable standalone. Five checks:
+
+1. the LOCAL build is stamped — else there is no identity to compare against
+2. the PUBLISHED deploy reached `ready` — every other state is named and failed
+3. the SERVED tree == the local tree — `ready` proves *a* deploy landed, never *which*
+4. the two instruments AGREE on the deploy id — Netlify's control plane vs the running function's own
+   `x-nf-deploy-id`. A gap here is the signature of a pinned deploy (`nf_dpl`) — the open question from
+   this morning's `no-store` entry, now permanently instrumented
+5. NO ORPHANED production deploys
+
+⚠️ **COMPARE ON `tree`, NOT `commit`** — `shared/build-stamp.mjs` is explicit that the tree is the identity
+and a dirty commit names only a starting point. ⚠️ **Every unknown is a FAILURE** — unreachable probe,
+absent field, unreadable deploy list. This file exists because an absence was read as a success.
+
+⚠️ **THE COVERAGE BOUNDARY, STATED RATHER THAN IMPLIED.** Checks 1–4 chain on `&&`, so they run only if the
+CLI EXITS — and the five failures did not exit, they were killed. A killed shell takes its own later
+commands with it; nothing inside a process tree survives its own death. **So checks 1–4 would NOT have
+caught the five.** They cover a different class: *the CLI returned success and production still serves
+something else.* ⭐ **Check 5 is what closes the killed case**, because an orphan is DURABLE — run
+standalone at the top of any session it finds deploys abandoned days earlier. ⚠️ It scopes to orphans
+NEWER than the published deploy: once a good deploy lands, earlier attempts stop being "a change you
+believe shipped" and check 3 answers that directly. So the scan narrows to zero after a successful
+publish — correct for *"did I lose MY deploy"*, and not a claim the old records vanished.
+
+⭐ **CALIBRATED BEFORE IT WAS TRUSTED.** Run while prod provably served the OLD build, it FAILED and named
+`local tree 5dd4439eb404 / production serves 1c1f6e7076bd`. Check 5 listed exactly the three orphans above
+while correctly excluding the then-in-flight deploy as in flight. ⭐ That run also found a real bug in the
+gate itself: `listSiteDeploys` blew `execFileSync`'s 1MB default with `ENOBUFS`. The fail-closed design
+reported it as **FAILED** rather than "no orphans found" — the correct shape — but check 5 would have been
+useless on every run. Fixed with an explicit `maxBuffer`. *A probe that has only ever returned ok is
+uncalibrated*, and this one was made to return not-ok first.
+
+**VERIFIED GREEN on the real deploy:** all five pass against `6a7f6b98151f1e3cff8cd0cc`, published
+2026-08-14T19:53:53Z, serving tree `5dd4439eb404` / commit `412e8d0e0382`, both instruments agreeing.
+
+### ⚠️ PROGRESS.md WAS ACTIVELY MISDESCRIBING THE STATE
+
+The top section still read *"⭐ ONE CHANGE CLOSES IT — the provisional 202 record — and it is now a code
+task with a known shape"*, i.e. **unwritten**, when `412e8d0` was written, tested and merely unshipped.
+⭐⭐ **A session trusting PROGRESS.md would have rebuilt it; one trusting `git log` would have assumed it
+was live. Both wrong, in opposite directions.** The clause is now marked SUPERSEDED **in place** rather
+than rewritten — it is the exact sentence a later session would have believed, and deleting it hides the
+failure mode.
+
+### 🚨 WHAT `412e8d0` DOES NOT DO — the provisional record is INERT FOREVER
+
+Audited on the way in, because the fear was that `tx-<txId>` would inherit the unbounded retry the Polygon
+record demonstrates. **It does not — the opposite, and worse in one way.** Every consumer in the tree:
+
+| site | role |
+|---|---|
+| `agent-bridge.mjs:92` | writes it |
+| `agent-execute-plan.mjs:281` | writes it |
+| `_bridge-receipts.mjs:272` | `isStranded` → `false`, by name |
+| `BridgePanel.tsx:346` | renders it |
+
+That is the complete list. No sweeper, no cron, no settler, no reconcile job. `burn_submitted` is in
+**neither** `TERMINAL_STATES` nor `RESOLVED_STATES`, so no existing state machine can move it, and the
+reconcile job that would is explicitly unbuilt. The record is **write-only and immortal**: no age cap, no
+escalation, no path to a terminal state.
+
+⭐ **AND THE SAME COMMIT'S SORT FIX FLOATS IT TO THE TOP.** `listByOwner` now sorts on `burnedAt ||
+submittedAt` — correct, and it means a provisional record renders FIRST, permanently. *"The Arc burn has
+not been confirmed yet"* is displayed most prominently exactly when it has aged into meaning least.
+🚧 **CAPPING IT IS THE NEXT TASK** — deliberately not folded into this deploy.
+
+### 🚧 STILL OPEN — the Polygon record, unchanged and its own item
+
+`o/0xfd801d08…/0xccc02035…` — 1 USDC to Polygon Amoy, burned 2026-08-02, still `mint_unconfirmed`
+**twelve days later** with `lastVerifyFailure: "rpc_error"`. Read live this session:
+`lastCheckedAt: 2026-08-14T19:10:24Z` — re-checked minutes before the read, and due again every 10.
+
+Mechanism, confirmed in code: `isRecheckable` gates only on state plus a 5-minute floor and has **no upper
+bound**; `bridge-mint-sweep` runs `*/10` with `MAX_PER_TICK` as its only cap and **no age logic at all**.
+⭐ Contrast `job-sweep.mjs`, written from the same template, which does carry *"AGE CAP (> 1h → marked
+failed, not nudged forever)"* — the clause was simply never carried across. `mint_unconfirmed` being
+re-checkable is the CORRECT 2026-08-01 fix (a mint can land after we stop waiting); it just has no floor.
+**"Re-checkable" was never bounded to "re-checkable for a while."**
+
+⚠️ **Any alert keyed on `stranded > 0` is permanently noisy from this one record.** On the observed
+`stranded=1`/`stranded=0` flap: `settledAt == lastCheckedAt` exactly, so the settler is taking its
+`!isRecheckable` early return rather than polling — consistent with the sweeper's eventually-consistent
+list and the settler's own read disagreeing across the 5-minute boundary. ⚠️ Measured from the record and
+the code, NOT from the log stream — strong, not confirmed.
+
+⚠️ Independently: `rpc_error` for twelve straight days is its own signal. This is not a mint we are waiting
+on, it is a chain we cannot read — and nothing in the record distinguishes those two.
+
+### STATE
+
+* ✅ **`412e8d0` LIVE** — deploy `6a7f6b98151f1e3cff8cd0cc`, verified green on all five checks.
+* ✅ `gate:deployed` wired into `deploy:prod`, calibrated against a known-bad state before being trusted.
+* ⚠️ **DEPLOY DISCIPLINE CHANGED: run `deploy:prod` in the FOREGROUND and budget ~30 minutes.** The old
+  note "run it backgrounded" is what produced five orphans; backgrounding is safe only if nothing reaps
+  the process, and something always did.
+* 🚧 **NEXT: cap the provisional record** — terminal state + age cap + what the panel says once it ages out.
+* 🚧 OPEN: the Polygon record — age cap / escalation / terminal state. Its own item, not folded in.
+
 ## 2026-08-14 — 🚨 A `no-store` QUOTE WAS SERVED FROM THE CDN. `4c6af65`'s verification arrived sideways and FAILED — and the ack-gate proof could not start because of it.
 
 **Set out to fire the acknowledge band live (`ackAcceptedAt` is null on all 15 receipts). Spent the
@@ -320,7 +458,12 @@ component, different endpoint, different code path. The single-action band is no
   on the single-action surface. 🚧 **`ackAcceptedAt` still never written** (null on all 15 receipts),
   because the tx went 202-pending and the receipt write is on the success path only.
   ⭐ **ONE CHANGE CLOSES IT** — the provisional 202 record above — and it is now a code task with a
-  known shape rather than a live-run task blocked on a browser. Fee measured repeatedly and stable all day: Base 1.0 → 5.32%
+  known shape rather than a live-run task blocked on a browser.
+  🛑 **SUPERSEDED — DO NOT READ THE CLAUSE ABOVE AS OPEN WORK.** That change was WRITTEN, TESTED AND
+  COMMITTED as `412e8d0` later the same day; it then sat unshipped for six hours because the deploy
+  never landed. See the `412e8d0` entry at the top of this file. This paragraph is left in place
+  rather than rewritten because it is the exact sentence a later session would have believed.
+  Fee measured repeatedly and stable all day: Base 1.0 → 5.32%
   `none`, 0.1 → 53.22% `acknowledge` (0.053216 / 0.053215). Bands unchanged (warn 0.10 / ack 0.25).
   Caps 25/10/60, day spend 0. Wallet **15.635654 USDC, untouched — nothing was spent today.**
 * ✅ **CDN purge RUN AND VERIFIED** (site-wide, `202` at 08:20:48Z, confirmed by a cold `fwd=miss` on
