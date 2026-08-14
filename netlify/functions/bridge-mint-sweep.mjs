@@ -1,7 +1,7 @@
 import { connectBlobs } from "./_blobs.mjs";
 import { json } from "./_arc.mjs";
 import { internalToken } from "./_auth.mjs";
-import { listAllStranded } from "./_bridge-receipts.mjs";
+import { listAllStranded, mintRecoveryStatus } from "./_bridge-receipts.mjs";
 
 // SCHEDULED — bridge receipt sweeper. Finds stranded receipts across ALL owners and asks
 // the settler to resolve them. Writes NOTHING itself.
@@ -41,7 +41,7 @@ export const handler = async (event) => {
   connectBlobs(event);
 
   const started = Date.now();
-  const { scanned, stranded, total, provisional, reconcilable, reconcilableTotal, degraded } =
+  const { scanned, stranded, total, provisional, reconcilable, reconcilableTotal, abandoned, abandonedTotal, degraded } =
     await listAllStranded({ limit: MAX_PER_TICK });
 
   if (degraded) {
@@ -108,9 +108,35 @@ export const handler = async (event) => {
     console.log(`[bridge-sweep] reconcile CAPPED at ${MAX_PER_TICK}/tick — ${reconcilableTotal - reconciled} deferred`);
   }
 
+  // ⭐⭐ THE ABANDONED CENSUS — reported EVERY tick, and before the clean return.
+  //
+  // 🚨 WHAT THIS REPLACES: `0xccc02035…` sat stranded for twelve days and was re-triggered ~1,730
+  // times, so `stranded` was permanently ≥ 1 and flapping. An alert on it was noise from ONE stale
+  // record — and an alert that is always firing is an alert nobody reads, which is worse than none.
+  // Past its retry budget a receipt leaves that bucket, so `stranded` means "act on this" again.
+  //
+  // ⚠️ LEAVING THE QUEUE IS NOT LEAVING THE SYSTEM. These are named, counted and reported on every
+  // tick precisely so that "we stopped retrying" can never quietly become "we stopped mentioning".
+  // ⭐ AND THE CAUSE IS NAMED, because it decides WHO OWNS THE PROBLEM: `chain_unreadable` means
+  // IRIS reported the mint as landed and OUR rpc could not confirm it — an infrastructure fault on
+  // our side, not a failed bridge. Twelve days of that were filed as "unproven mint".
+  if (abandoned && abandonedTotal > 0) {
+    for (const r of abandoned) {
+      const st = mintRecoveryStatus(r);
+      const days = st.ageMs == null ? "unknown" : Math.floor(st.ageMs / 86_400_000);
+      console.error(
+        `[bridge-sweep] 🚨 ABANDONED burnHash=${r.burnHash} owner=${r.owner} age=${days}d cause=${st.cause} ` +
+          `failedReads=${st.verifyFailureCount} — no longer auto-retried. ${st.detail}.` +
+          (st.irisClaimedMintTxHash ? ` IRIS-claimed mint tx: ${st.irisClaimedMintTxHash}` : " NO claimed mint hash was recorded.")
+      );
+    }
+  }
+
   if (total === 0) {
-    console.log(`[bridge-sweep] clean — scanned=${scanned} stranded=0 reconcileTriggered=${reconciled}`);
-    return json(200, { ok: true, scanned, stranded: 0, triggered: 0, provisional, reconciled });
+    console.log(
+      `[bridge-sweep] clean — scanned=${scanned} stranded=0 abandoned=${abandonedTotal} reconcileTriggered=${reconciled}`
+    );
+    return json(200, { ok: true, scanned, stranded: 0, triggered: 0, provisional, reconciled, abandoned: abandonedTotal });
   }
 
   let triggered = 0;
@@ -141,5 +167,5 @@ export const handler = async (event) => {
     `[bridge-sweep] scanned=${scanned} stranded=${total} triggered=${triggered} remaining=${remaining} ms=${Date.now() - started}` +
       (remaining > 0 ? ` — CAPPED at ${MAX_PER_TICK}/tick, ${remaining} deferred to the next run` : "")
   );
-  return json(200, { ok: true, scanned, stranded: total, triggered, remaining, provisional });
+  return json(200, { ok: true, scanned, stranded: total, triggered, remaining, provisional, reconciled, abandoned: abandonedTotal });
 };

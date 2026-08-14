@@ -221,6 +221,17 @@ export async function handler(event) {
             delivery: "predicted",
             lastCheckedAt: new Date().toISOString(),
             lastVerifyFailure: chk.reason,
+            // 🚨 THE ONE DATUM A HUMAN NEEDS, PREVIOUSLY DISCARDED ON THIS EXACT PATH. IRIS has
+            // just handed us the mint hash it claims landed, and this branch used to drop it —
+            // ~1,730 times over twelve days for `0xccc02035…`, once per retry. A record that ends
+            // up telling someone "check this by hand" had thrown away the thing they would check.
+            // ⚠️ `irisClaimedMintTxHash`, never `mintTxHash`: we did NOT read it, IRIS asserted it,
+            // and the field name is the only thing keeping that distinction alive downstream.
+            irisClaimedMintTxHash: status.mintTxHash ?? null,
+            // ⭐ EVIDENCE, NOT INFERENCE. With a streak, "we failed to read the chain 1,730 times"
+            // is a measurement; without one it can only be guessed at from the record's age — and
+            // a guess cannot distinguish a persistent RPC fault from a settler that never ran.
+            verifyFailureCount: (Number.isInteger(receipt.verifyFailureCount) ? receipt.verifyFailureCount : 0) + 1,
           });
           return json(200, { state: "mint_unconfirmed", reason: "deadline_passed_chain_unreadable" });
         }

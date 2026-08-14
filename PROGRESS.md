@@ -1,5 +1,99 @@
 ---
 
+## 2026-08-14 (night) — 🚨 THE 12-DAY RECORD WAS NEVER A PENDING MINT. IRIS SAID IT LANDED, AND WE THREW AWAY THE HASH 1,730 TIMES.
+
+✅ **The reconcile job deployed first** — `d8483f1` is live as `6a7f842d8f85092df7456b94`, and
+⭐ **`gate:deployed` ran automatically again** (three for three): published `ready`, served tree
+`c39ab9f0927e` == local, both instruments agreeing, no orphans.
+
+### 🚨 THE REFRAME — verified at a single write site
+
+`lastVerifyFailure` is written on **exactly one line** of `bridge-mint-settle-background.mjs`, and
+that line is reachable **only** after `status.state === "minted"`. The branch structure is decisive:
+
+```
+if (status.state === "failed")  -> mint_failed              (no lastVerifyFailure)
+if (status.state !== "minted")  -> pending; deadline -> mint_unconfirmed  (no lastVerifyFailure)
+// ==> from here, IRIS HAS SAID "minted"
+chk = verifyMintOnChain(...)
+  if (rpc_error | receipt_not_found) and past deadline -> mint_unconfirmed + lastVerifyFailure  ← the only site
+```
+
+⭐⭐ **THEREFORE `lastVerifyFailure` PRESENT ⟹ IRIS REPORTED THE MINT AS LANDED.** So
+`o/0xfd801d08…/0xccc02035…` was never "a mint we are waiting on". It is: *Circle reported this mint
+completed on Polygon Amoy on 2026-08-02, and our own read of that chain has failed every time since.*
+**The money almost certainly arrived.** The panel called it *"unproven … it may still land"* — wrong
+in both halves, and it filed **an infrastructure fault on our side as a pending bridge** for twelve days.
+
+⚠️ Yesterday's entry said *"a chain we cannot read"* and that this was "its own signal". Correct, and
+weaker than the truth: the record could always distinguish these two, and nothing ever read the field
+that distinguished them.
+
+### 🚨 THE SECOND DEFECT — the one datum a human needs was DISCARDED, once per retry
+
+On that same branch the settler has `status.mintTxHash` in scope — IRIS has just supplied the hash it
+claims landed — and **did not record it**. `irisClaimedMintTxHash` was written only on the
+`mint_unverified` branch. Confirmed absent from the live record.
+
+⭐ **A record whose whole remaining value is "a human should check this" had thrown away the thing
+they would check — ~1,730 times over twelve days.** Now recorded, alongside a `verifyFailureCount`
+streak so "we failed to read the chain N times" is a **measurement** rather than an inference from
+age — and so a persistent RPC fault is distinguishable from a settler that never ran.
+
+### THE BOUND — on unattended retry, NOT on recovery
+
+`MINT_AUTO_RETRY_MAX_AGE_MS` = 7 days, measured off `burnedAt`. ⭐ **`job-sweep.mjs` has carried
+exactly this clause all along** — *"AGE CAP (> 1h → marked failed, not nudged forever)"* — and it was
+simply never carried across to the bridge sweeper.
+
+⚠️ **WHAT IT MUST NOT DO, AND DOES NOT: undo the 2026-08-01 fix.** `mint_unconfirmed` was made
+re-checkable *because a mint can land after we stop waiting*, and treating it as resolved had made a
+demonstrably-successful bridge read "unproven" forever. So this bounds **the cron's unattended
+retry** and nothing else: a 12-day record is still `isRecheckable`, still `isStranded`, and still
+recovered by the owner-scoped read path when a human opens the panel. ⭐ **A human looking is a
+bounded, paid-for retry; a cron is not.** Mutation-tested in both directions — bounding it by
+foreclosing recovery turns the suite red.
+
+⭐ **AND `isStranded` KEEPS ONE DEFINITION.** The sweeper does not get a second, drifted copy; it
+composes the shared predicate with a *named* `isAutoRetryExhausted`, so the difference between the
+cron and the read path is a visible clause rather than a divergence.
+
+⚠️ An **undateable** burn counts as exhausted — diverging from `isPastDeadline` for the same reason
+`provisionalStatus` does: that predicate *starts* an action so an unknown must not trigger it; this
+one *stops* one, and a record nobody can date must not receive infinite machine effort.
+
+### ⭐ STRANDED vs ABANDONED — the alert-noise fix, at its source
+
+One stale record kept `stranded` permanently ≥ 1 and flapping, so any alert on it was noise from a
+single case — **and an alert that always fires is one nobody reads, which is worse than none.** Past
+its retry budget a receipt leaves that bucket, so `stranded` means "act on this" again.
+
+⚠️ **LEAVING THE QUEUE IS NOT LEAVING THE SYSTEM.** Abandoned records are counted, named and logged
+`console.error` on **every** tick, before the clean early-return — so "we stopped retrying" can never
+quietly become "we stopped mentioning". ⭐ The log names the **cause**, because it decides who owns
+the problem: `chain_unreadable` is our RPC, `never_appeared` is the bridge. ⚠️ A degraded scan reports
+`abandoned: null`, never `[]`.
+
+### PROOF
+
+`verify-bridge-receipts` **163/0** (25 new, from 138), fee-band 111/0, quote 72/0, `gate:routes` 5/0,
+tsc + build clean. ⭐ **MUTATION-TESTED — seven mutations, all red, restore green:** remove the bound,
+**bound it by foreclosing recovery** (the one that matters), let an undateable burn retry forever,
+collapse the two causes into one, put abandoned records back in the stranded bucket, discard the IRIS
+hash again, and report `abandoned: []` instead of `null` on a degraded scan.
+
+### STATE
+
+* ⛔ **UNDEPLOYED** — moves the stamped surface.
+* ⚠️ **The existing record cannot be retro-repaired.** Its IRIS-claimed mint hash was discarded on
+  every one of ~1,730 retries and is not recoverable from the record; `verifyFailureCount` starts at 0
+  for it. The sweeper will say so in as many words — *"NO claimed mint hash was recorded"* — rather
+  than printing a confident zero. Both are captured for every future occurrence.
+* 🚧 **STILL NOT ANSWERED: why the Polygon Amoy read fails at all.** This makes twelve days of RPC
+  failure legible, bounded and correctly attributed; it does not fix the RPC. That is now a named
+  problem with an owner instead of an unexplained "unproven mint", which is the point — but it is
+  not the same as fixed.
+
 ## 2026-08-14 (evening) — ⭐⭐ THE RECONCILE JOB IS BUILT. And building it found two ways it would have FABRICATED a money-movement record.
 
 ✅ **The cap deployed first** — `7622cd3` is live as `6a7f7912ba99f16548d51726`, and ⭐ **`gate:deployed`

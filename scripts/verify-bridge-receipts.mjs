@@ -800,6 +800,95 @@ section("12 — THE RECONCILE JOB: the system does what it was telling the user 
   circleAnswer = null;
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("13 — THE 12-DAY RECORD: bounding unattended retry without foreclosing recovery");
+// 🚨 `o/0xfd801d08…/0xccc02035…` — 1 USDC to Polygon Amoy, burned 2026-08-02, still
+// `mint_unconfirmed` twelve days later, re-triggered every ~10 min (~1,730 times) with
+// lastVerifyFailure "rpc_error". isRecheckable had a 5-minute FLOOR and no ceiling.
+{
+  const {
+    isAutoRetryExhausted, mintRecoveryStatus, MINT_AUTO_RETRY_MAX_AGE_MS,
+    listAllStranded: listAll, isRecheckable: recheckable,
+  } = await import("../netlify/functions/_bridge-receipts.mjs");
+
+  const old = (days, over = {}) => ({
+    state: "mint_unconfirmed",
+    burnedAt: new Date(Date.now() - days * 86_400_000).toISOString(),
+    lastCheckedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    ...over,
+  });
+
+  check("⭐ a young unconfirmed mint is still auto-retried", isAutoRetryExhausted(old(1)) === false);
+  check("⭐⭐ a 12-DAY-old one is NOT — the actual record, bounded", isAutoRetryExhausted(old(12)) === true);
+  check("  …the boundary is 7 days exactly", isAutoRetryExhausted(old(7)) === true && isAutoRetryExhausted(old(6.9)) === false);
+  check("⭐⭐ an UNDATEABLE burn counts as exhausted — no infinite machine effort on a record nobody can date",
+    isAutoRetryExhausted({ state: "mint_unconfirmed" }) === true);
+  check("  …while isPastDeadline still refuses to ESCALATE on the same unknown clock (it starts an action; this stops one)",
+    isPastDeadline({}) === false);
+
+  // ⭐⭐ THE 2026-08-01 FIX MUST SURVIVE. Bounding the cron must not make the record unresolvable.
+  check("⭐⭐ a 12-day record is STILL re-checkable — the cron stops, the possibility of learning does not",
+    recheckable(old(12)) === true);
+  check("  …so the owner-scoped read path can still recover it when a human looks",
+    isStranded(old(12)) === true);
+
+  // ── THE CAUSE — the distinction the record could never make ────────────────────────────────
+  const unreadable = mintRecoveryStatus(old(12, { lastVerifyFailure: "rpc_error", verifyFailureCount: 1730 }));
+  check("⭐⭐ lastVerifyFailure ⇒ cause is `chain_unreadable` — it is written ONLY after IRIS said `minted`",
+    unreadable.cause === "chain_unreadable");
+  check("  …and the detail says IRIS reported it landed, not that it is pending",
+    /IRIS reported this mint as landed/.test(unreadable.detail));
+  check("⭐ no verify failure ⇒ `never_appeared` — a genuinely unseen mint is a DIFFERENT problem",
+    mintRecoveryStatus(old(12)).cause === "never_appeared");
+  check("  …and a confirmed receipt has no mint-recovery status at all",
+    mintRecoveryStatus({ state: "minted" }).applicable === false);
+  check("⭐ the failed-read streak is carried, so 'we could not read it N times' is EVIDENCE not inference",
+    unreadable.verifyFailureCount === 1730);
+
+  // ── STRANDED vs ABANDONED — the alert-noise fix ────────────────────────────────────────────
+  mem.clear();
+  await writeReceiptNeverThrows({ owner: "0xAAA", burnHash: "0x" + "e1".repeat(32), ...old(12, { lastVerifyFailure: "rpc_error" }) });
+  await writeReceiptNeverThrows({ owner: "0xBBB", burnHash: "0x" + "e2".repeat(32), ...old(1) });
+  const split = await listAll();
+  check("⭐⭐ the 12-day record leaves the STRANDED bucket — one stale case made every `stranded>0` alert noise",
+    split.total === 1 && split.stranded[0].owner === "0xBBB");
+  check("⭐⭐ …and lands in ABANDONED, counted and named — leaving the queue is not leaving the system",
+    split.abandonedTotal === 1 && split.abandoned[0].owner === "0xAAA");
+
+  failMode = "list";
+  const darkSplit = await listAll();
+  check("⭐⭐ a degraded scan reports abandoned:null, never an empty list — 'nothing abandoned' must mean we looked",
+    darkSplit.abandoned === null && darkSplit.degraded === true);
+  failMode = null;
+
+  // ── THE SWEEP REPORTS IT, AND STILL TRIGGERS NOTHING FOR IT ───────────────────────────────
+  const fs2 = await import("node:fs");
+  const sweepSrc3 = fs2.readFileSync("netlify/functions/bridge-mint-sweep.mjs", "utf8");
+  check("⭐⭐ the abandoned census is logged BEFORE the clean early-return",
+    sweepSrc3.indexOf("ABANDONED burnHash") < sweepSrc3.indexOf("[bridge-sweep] clean"));
+  check("⭐ …and names the CAUSE, because it decides who owns the problem", /cause=\$\{st\.cause\}/.test(sweepSrc3));
+  check("⭐⭐ …and the abandoned list is never passed to the settler trigger",
+    !/for \(const r of abandoned\)[\s\S]{0,400}bridge-mint-settle-background/.test(sweepSrc3));
+  check("  …the sweep STILL owns no writes", !/saveReceipt|setJSON|writeReceipt/.test(sweepSrc3));
+
+  // ── THE SETTLER NO LONGER DISCARDS THE HASH ────────────────────────────────────────────────
+  const settleSrc = fs2.readFileSync("netlify/functions/bridge-mint-settle-background.mjs", "utf8");
+  check("⭐⭐ the rpc_error path RECORDS the IRIS-claimed mint hash — it was discarded ~1,730 times",
+    /lastVerifyFailure: chk\.reason,[\s\S]{0,900}irisClaimedMintTxHash: status\.mintTxHash/.test(settleSrc));
+  check("⭐ …as `irisClaimedMintTxHash`, never `mintTxHash` — we did not read it, IRIS asserted it",
+    !/lastVerifyFailure: chk\.reason,[\s\S]{0,900}\bmintTxHash: status\.mintTxHash/.test(settleSrc));
+  check("⭐ …and increments the failed-read streak", /verifyFailureCount: \(Number\.isInteger/.test(settleSrc));
+
+  // ── THE COPY (source-pinned; see the boundary note in §11) ─────────────────────────────────
+  const panelSrc2 = fs2.readFileSync("src/components/BridgePanel.tsx", "utf8");
+  check('⭐⭐ the chain-unreadable row says the mint was REPORTED COMPLETE and blames our read, not the bridge',
+    /cause === "chain_unreadable"[\s\S]{0,900}reported the destination mint as[\s\S]{0,400}our own read/.test(panelSrc2));
+  check("⭐⭐ …and says it most likely ARRIVED, rather than 'unproven, may still land'",
+    /cause === "chain_unreadable"[\s\S]{0,1400}most likely arrived/.test(panelSrc2));
+  check("⭐ the never-appeared row still exists and is NOT given the same sentence",
+    /cause !== "chain_unreadable"[\s\S]{0,600}has not been reported by Circle either/.test(panelSrc2));
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

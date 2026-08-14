@@ -50,6 +50,79 @@ export const RESOLVED_STATES = new Set(["minted", "mint_failed", "mint_unverifie
 /** A provisional receipt may be re-checked, but not on every page load. */
 export const RECHECK_MIN_INTERVAL_MS = 5 * 60 * 1000;
 
+// ══════════════════════════════════════════════════════════════════════════════════
+// ⭐⭐ THE BOUND ON UNATTENDED RETRY — the 12-day record
+// ══════════════════════════════════════════════════════════════════════════════════
+// 🚨 THE CASE, MEASURED LIVE 2026-08-14. `o/0xfd801d08…/0xccc02035…` — 1 USDC to Polygon Amoy,
+// burned 2026-08-02 — was still `mint_unconfirmed` TWELVE DAYS LATER, re-triggered by
+// bridge-mint-sweep every ~10 minutes (~1,730 times) with `lastVerifyFailure: "rpc_error"` each
+// time. `isRecheckable` has only a 5-minute FLOOR and no ceiling; the sweeper's only cap is
+// throughput. Nothing anywhere bounded the total.
+//
+// ⭐ CONTRAST job-sweep.mjs, written from the same template, which does carry
+// "AGE CAP (> 1h → marked failed, not nudged forever)". The clause was simply never carried across.
+//
+// ⚠️ WHAT THIS MUST NOT DO: undo the 2026-08-01 fix. `mint_unconfirmed` was made RE-CHECKABLE
+// because a mint can land after we stop waiting, and treating it as resolved had made a bridge
+// that demonstrably succeeded on-chain read "unproven" forever. So this bounds the CRON'S
+// UNATTENDED RETRY — not the possibility of learning. The owner-scoped read path keeps using
+// plain `isStranded`: a human opening the panel is a bounded, paid-for retry; a cron is not.
+//
+// ⭐ AND `isStranded` KEEPS EXACTLY ONE DEFINITION. The sweeper does not get a second, drifted
+// copy — it COMPOSES the shared predicate with the explicitly named `isAutoRetryExhausted` below,
+// so the difference between the two callers is a visible clause rather than a divergence.
+export const MINT_AUTO_RETRY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Has the unattended retry budget for this receipt run out?
+ *
+ * ⚠️ AN UNDATEABLE BURN COUNTS AS EXHAUSTED, and this deliberately diverges from `isPastDeadline`
+ * (which refuses to escalate on an unparseable clock). Same reasoning as `provisionalStatus`:
+ * there the predicate STARTS an action, so an unknown must not trigger it; here it STOPS one, and
+ * a record nobody can date must not receive infinite machine effort. It stays recoverable through
+ * the read path and is reported as abandoned, so nothing is lost by declining to spin on it.
+ */
+export function isAutoRetryExhausted(receipt, now = Date.now()) {
+  const burnedAt = Date.parse(receipt?.burnedAt || "");
+  if (!Number.isFinite(burnedAt)) return true;
+  return now - burnedAt >= MINT_AUTO_RETRY_MAX_AGE_MS;
+}
+
+/**
+ * ⭐⭐ WHY THIS RECEIPT IS UNPROVEN — and the distinction the record could not previously make.
+ *
+ * 🚨 `lastVerifyFailure` IS WRITTEN ON EXACTLY ONE LINE (bridge-mint-settle-background.mjs), and
+ * that line is reachable ONLY after `status.state === "minted"`. So its presence is not a detail:
+ * **it means IRIS REPORTED THE MINT AS LANDED and our own read of the destination chain failed.**
+ *
+ * That is a completely different situation from "the mint never appeared", and the two were
+ * rendering identically. For the Polygon record it means the money most likely ARRIVED — the burn
+ * is real and final, and the arrival is unverified because WE CANNOT READ THE CHAIN. The panel was
+ * saying "unproven … it may still land" about a mint IRIS had already reported as landed.
+ *
+ * ⭐ DIFFERENT PROBLEMS, DIFFERENT OWNERS: `chain_unreadable` is OUR rpc, `never_appeared` is the
+ * bridge's. Collapsing them sent twelve days of an infrastructure fault to the wrong place.
+ */
+export function mintRecoveryStatus(receipt, now = Date.now()) {
+  if (receipt?.state !== "mint_unconfirmed") {
+    return { applicable: false, cause: null, exhausted: false, ageMs: null, detail: "not an unconfirmed mint" };
+  }
+  const burnedAt = Date.parse(receipt?.burnedAt || "");
+  const ageMs = Number.isFinite(burnedAt) ? Math.max(0, now - burnedAt) : null;
+  const chainUnreadable = !!receipt?.lastVerifyFailure;
+  return {
+    applicable: true,
+    cause: chainUnreadable ? "chain_unreadable" : "never_appeared",
+    exhausted: isAutoRetryExhausted(receipt, now),
+    ageMs,
+    verifyFailureCount: Number.isInteger(receipt?.verifyFailureCount) ? receipt.verifyFailureCount : 0,
+    irisClaimedMintTxHash: receipt?.irisClaimedMintTxHash ?? null,
+    detail: chainUnreadable
+      ? `IRIS reported this mint as landed; our own read of the destination chain failed (${receipt.lastVerifyFailure})`
+      : "the destination mint has not been observed, and IRIS has not reported it either",
+  };
+}
+
 /** Is this receipt worth asking about again? */
 export function isRecheckable(receipt, now = Date.now()) {
   if (receipt?.state !== "mint_unconfirmed") return false;
@@ -468,13 +541,26 @@ export async function listAllStranded({ limit = 50, now = Date.now() } = {}) {
     // machine stops asking; polling forever behind that text would make it false AND would be the
     // 12-day Polygon record's unbounded re-check wearing a new name.
     const reconcilable = [];
+    /** Stranded, but past the unattended-retry budget — reported, never triggered. */
+    const abandoned = [];
     let scanned = 0;
     for (const b of blobs || []) {
       scanned++;
       try {
         const r = await store().get(b.key, { type: "json" });
         if (!r) continue;
-        if (isStranded(r, now)) out.push(r);
+        // ⭐⭐ STRANDED vs ABANDONED — the split that makes an alert usable again.
+        // Before this, ONE 12-day record kept `stranded` permanently ≥ 1 (and flapping), so any
+        // alert keyed on it was noise from a single stale case and would have hidden a real one.
+        // A record past its unattended-retry budget is no longer something the cron will act on,
+        // so it must stop occupying the bucket that means "act on this".
+        // ⚠️ It is REMOVED FROM THE CRON'S QUEUE, NOT FROM THE SYSTEM: still `isStranded` by the
+        // shared definition, still recoverable when a human opens the panel, and now counted and
+        // logged under its own name so it is visible rather than merely quiet.
+        if (isStranded(r, now)) {
+          if (isAutoRetryExhausted(r, now)) abandoned.push(r);
+          else out.push(r);
+        }
         const p = provisionalStatus(r, now);
         if (p.provisional) {
           provisional[p.band]++;
@@ -491,6 +577,9 @@ export async function listAllStranded({ limit = 50, now = Date.now() } = {}) {
       scanned, stranded: out.slice(0, limit), total: out.length, provisional,
       // Same no-silent-truncation rule as `stranded`: the cap is reported, never hidden.
       reconcilable: reconcilable.slice(0, limit), reconcilableTotal: reconcilable.length,
+      // ⚠️ CARRIED IN FULL, NOT CAPPED. `abandoned` drives no work, so there is nothing to defer —
+      // truncating it would only under-report how many receipts nobody is coming back for.
+      abandoned, abandonedTotal: abandoned.length,
       degraded: false,
     };
   } catch (e) {
@@ -498,7 +587,12 @@ export async function listAllStranded({ limit = 50, now = Date.now() } = {}) {
     // ⚠️ NULL, NOT ZEROS. A degraded scan that reported `unresolved: 0` would be an unreadable
     // store answering "nothing needs a human" — the absence-reads-as-safe shape this file is
     // full of warnings about. Zero must only ever mean "we looked and there were none".
-    return { scanned: 0, stranded: [], total: 0, provisional: null, reconcilable: [], reconcilableTotal: 0, degraded: true };
+    // ⚠️ `abandoned: null`, not `[]` — same rule as `provisional`. An unreadable store must never
+    // answer "nothing was abandoned"; zero may only ever mean we looked and found none.
+    return {
+      scanned: 0, stranded: [], total: 0, provisional: null, reconcilable: [], reconcilableTotal: 0,
+      abandoned: null, abandonedTotal: 0, degraded: true,
+    };
   }
 }
 

@@ -426,11 +426,39 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
                     estimate
                   </span>
                 )}
-                {r.state === "mint_unconfirmed" && (
+                {/* ⭐⭐ TWO DIFFERENT FAILURES THAT RENDERED IDENTICALLY FOR TWELVE DAYS.
+                    `lastVerifyFailure` is written on exactly one line of the settler, reachable
+                    ONLY after IRIS reported the mint as `minted` — so `cause: "chain_unreadable"`
+                    means THE MINT WAS REPORTED AS LANDED and our own read of the destination chain
+                    failed. The old single sentence said "unproven … it may still land" about a mint
+                    IRIS had already said landed: wrong in both halves, and it filed an rpc fault on
+                    our side as a pending bridge. */}
+                {r.state === "mint_unconfirmed" && r.mintRecovery?.cause === "chain_unreadable" && (
+                  <span style={{ color: "var(--warn)" }}>
+                    the Arc burn is real and final, and Circle reported the destination mint as
+                    completed — but <b>our own read of {r.destinationLabel ?? r.destinationKey} has
+                    never succeeded</b>
+                    {r.mintRecovery.verifyFailureCount > 0
+                      ? ` (${r.mintRecovery.verifyFailureCount} failed reads)`
+                      : ""}
+                    , so we will not claim it as measured. Estimated{" "}
+                    {Number(r.netPredicted).toFixed(4)} USDC.{" "}
+                    <b>This most likely arrived</b> — the gap is in our verification, not the bridge.
+                    {r.mintRecovery.exhausted && <> We have stopped re-checking automatically.</>}
+                  </span>
+                )}
+                {r.state === "mint_unconfirmed" && r.mintRecovery?.cause !== "chain_unreadable" && (
                   <span style={{ color: "var(--warn)" }}>
                     not confirmed in time — the Arc burn is real and final; the destination mint is{" "}
-                    <b>unproven</b>. Estimated {Number(r.netPredicted).toFixed(4)} USDC. This is not
-                    a failure — it may still land.
+                    <b>unproven</b> and has not been reported by Circle either. Estimated{" "}
+                    {Number(r.netPredicted).toFixed(4)} USDC.{" "}
+                    {r.mintRecovery?.exhausted ? (
+                      <>
+                        ⚠ <b>Needs review</b> — we have stopped re-checking automatically.
+                      </>
+                    ) : (
+                      <>This is not a failure — it may still land.</>
+                    )}
                   </span>
                 )}
                 {r.state === "mint_failed" && (

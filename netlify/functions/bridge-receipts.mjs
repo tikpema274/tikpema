@@ -1,7 +1,7 @@
 import { connectBlobs } from "./_blobs.mjs";
 import { json } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
-import { listByOwner, isPastDeadline, isRecheckable, provisionalStatus } from "./_bridge-receipts.mjs";
+import { listByOwner, isPastDeadline, isRecheckable, provisionalStatus, mintRecoveryStatus } from "./_bridge-receipts.mjs";
 
 // GET|POST /api/bridge-receipts   (auth required)
 //
@@ -122,6 +122,17 @@ export async function handler(event) {
       provisional: (() => {
         const p = provisionalStatus(r);
         return p.provisional ? { band: p.band, ageMs: p.ageMs, terminal: p.terminal, needsHuman: p.needsHuman, detail: p.detail } : null;
+      })(),
+      // ⭐⭐ WHY an unconfirmed mint is unconfirmed — the distinction the record could make all
+      // along and never surfaced. `chain_unreadable` means IRIS REPORTED THE MINT AS LANDED and our
+      // own read failed; `never_appeared` means nobody has seen it at all. Twelve days of the first
+      // rendered as the second, which sent an infrastructure fault to the wrong owner entirely.
+      mintRecovery: (() => {
+        const m = mintRecoveryStatus(r);
+        return m.applicable
+          ? { cause: m.cause, exhausted: m.exhausted, ageMs: m.ageMs, verifyFailureCount: m.verifyFailureCount,
+              irisClaimedMintTxHash: m.irisClaimedMintTxHash, detail: m.detail }
+          : null;
       })(),
     })),
     degraded,
