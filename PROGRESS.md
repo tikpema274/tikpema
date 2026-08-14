@@ -150,15 +150,66 @@ chain-verifiable, server-visible effects **within the last 48 hours** and is not
 extension, or a changed network path — and it bounds the window to 2026-08-12 → 2026-08-14. Search
 there first; a defect that has "always been there" would have broken the UB withdrawal too.
 
-### 🚧 AUDIT LIST TO WRITE (not assumed short) — WHICH PROOFS REST SOLELY ON A BROWSER-REPORTED RESULT?
+### ✅ THE AUDIT LIST — WRITTEN 2026-08-14, derived from the document rather than from memory
 
-**STANDING (chain- or store-verified, independent of any browser claim):** both DD purchases, the UB
-withdrawal (`0x79d06776…`, block 56671240), the code-hash binding, and anything verified by reading a
-blob store or an on-chain receipt.
+⭐⭐ **THE DISCRIMINATOR IS NOT "browser vs CLI". IT IS POSITIVE ARTIFACT vs NEGATIVE CORROBORATION.**
+A browser-reported result is trustworthy when the server left something **only it could have
+created** — a tx, a record with server-set fields, a Circle-side object. It is NOT rescued by
+corroboration that consists of *nothing changed*, because **"the guard refused" and "the request
+never arrived" produce identical negative evidence.** That equivalence is what today's anomaly
+creates, and it is the whole audit.
 
-🚧 **NEEDS RE-DERIVING:** any proof whose evidence is a status code, a duration, or a rendered state
-read off a console or a panel — including conclusions of the form *"no log ⇒ it never ran"*, since
-`netlify logs` is now known to be partial. **Write the list rather than assuming it is short.**
+**✅ STANDS — a positive artifact exists, immune to how the browser reported it**
+
+| proof | the artifact |
+|---|---|
+| UB withdrawal, 2026-08-12 | tx `0x79d06776…`, block 56671240, Gateway log, balance delta exactly `1000000`, record carrying `initiateTxHash`. ⭐ **also the positive control that dates the anomaly** |
+| DCA create end-to-end, 2026-08-13 | mandate `0d9f0e14` `status:active`, read back through **`dca-list` — a different runtime**, not the writing path |
+| Overdue-alert calibration, 2026-08-12 | `overdueAlerted:true` + `lastAlertedAt` written by the SWEEPER (cron, no browser), message human-confirmed in the money channel |
+| strong-read-watch stale→recovered, 2026-08-12 | cron-written records, both Discord messages human-confirmed, `calibration` marker attributing authorship |
+| both DD purchases · code-hash binding | chain + store, pre-window |
+
+**✅ STANDS — verified from the CLI/suite side, which is demonstrably visible**
+
+Content negotiation + `/api/dd-openapi` (2026-08-13, my curl + smoke 21/21); provisioning-503 across
+13 endpoints (offline allowlist guard); health-key hash predictions (store reads). ⭐ My own requests
+were proven this session to reach the origin AND appear in the log — three paired probes — so
+CLI-side verification is the one channel with a positive control behind it.
+
+**⚠️ WEAKENED — the corroboration is entirely NEGATIVE, so it cannot exclude non-arrival**
+
+* ⚠️ **"THE 409 IS PROVEN LIVE"** (2026-08-13) and ⚠️ **"THE 409 SURVIVED THE PREDICATE REWRITE —
+  proven live TWICE"** (2026-08-13 10:52Z). The 409 itself was read off the browser. Every
+  corroborating check — record count 1, `updatedAt` frozen at `20:49:12.640Z`, chain `1510000`
+  unchanged, sweeper `open:1` — establishes that **nothing was written**, which is exactly what a
+  request that never arrived would also produce.
+  ⭐ **The entry's own reasoning is right about the risk it was aimed at and silent on this one:**
+  `updatedAt` was called "value vs value, not an absence", and it IS decisive against a *phantom
+  write*. It says nothing about *non-arrival*. Two different failure modes, one piece of evidence.
+  🚧 **RE-DERIVE BY:** repeating the POST and requiring a POSITIVE trace — a log line, or better, a
+  deliberate 400 (`amount-below-one-atomic-unit`) whose refusal path is distinguishable from silence.
+
+**🚧 NEEDS RE-DERIVING — browser-reported and nothing else**
+
+* 🚧 "**DCA read path proven signed-in — 200 from the browser, not inferred**" (`25580bd`,
+  2026-08-13). Partly rescued by the create above (the path demonstrably works), but the specific
+  signed-in-200 claim has no artifact.
+* 🚧 "**Known-value render — `1.000000 USDC — waiting`**" (2026-08-13). A screen observation. Low
+  stakes, listed because it is the class, not because it is dangerous.
+
+**🚧 SEPARATE AND OLDER — the `netlify logs` absence family (start date UNKNOWN, so not bounded to 48h)**
+
+* 🚨 **2026-08-02 "PHANTOM RUNS" MAY HAVE BEEN THIS ANOMALY, NOT OPERATOR ERROR.** That entry
+  concluded *"the connect happened in the NEW tab and the confirm was pressed in an OLD one"* from
+  `Zero server traffic` — no `agent-act`, no `agent-execute-plan`, `agent-quotes` empty. **Today
+  produced exactly that signature from a tab we watched do the opposite.** ⭐ A diagnosis that
+  attributed the failure to the person at the keyboard now has a competing mechanism that does not.
+  Do not cite it as settled.
+* ✅ **`4f2a1c8e` "DOES NOT EXIST" SURVIVES** — its check #4 was log-absence, but checks #1-3 and #5
+  (the route did not exist yet) plus the chain balance are independent and decisive. ⭐ **A worked
+  example of why five checks beat one:** the audit removes one leg and the conclusion still stands.
+* 🚧 The standing rule *"an empty log window is not proof of absence"* is **reinforced and now has a
+  mechanism** — it was written as a timing caution; it is also a completeness one.
 
 ### ⚠️ CORRECTION MADE IN-FLIGHT — two different consent surfaces, and I conflated them
 
