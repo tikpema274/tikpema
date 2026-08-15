@@ -15,7 +15,7 @@
 // "this address is empty here" into "…because it was copy-pasted from over there".
 
 import { observed, failed, sha256, normalizeAddress } from "../fact.mjs";
-import { chainClient } from "../client.mjs";
+import { chainClient } from "../../../shared/dd/client.mjs";
 
 export const id = "code-exists";
 export const describe = "eth_getCode at a pinned block: does this address hold bytecode on this chain?";

@@ -1,5 +1,84 @@
 ---
 
+## 2026-08-16 (night) — ⭐⭐ THE CODE THAT SIGNS THE ATTESTATION WAS OUTSIDE THE HASH THAT IDENTIFIES THE CODE.
+
+`dd-analyze` imported `chainClient` and `ddAttestationOptions` from `scripts/dd/`, pulling
+`client / chains / rpc / attest-circle` into the deployed bundle. `scripts/` is in **neither**
+`SURFACES` nor `DD_SURFACE_DIRS`, so a change to any of them produced an identical `tree`, an
+identical `ddTree`, **and no dirty flag** — invisible in all three channels at once.
+
+⭐⭐ **INCLUDING `attest-circle.mjs`: the signing path.** The code that produces the signature sat
+outside the hash whose entire job is to say which code produced it. Old canary evidence would vouch
+for new signing code — the exact fail-open the binding exists to close.
+
+### ✅ FIRST, THE QUESTION THAT DECIDED URGENCY
+
+**`dd-canary` reaches none of the four.** Its transitive closure is 18 modules and touches no
+`scripts/` code, so the thing that vouches was never itself produced by unhashed code. That is what
+made this cleanup rather than an emergency — and it was worth answering before anything else leaned
+on the binding.
+
+### ⚠️ THE MOVE ALONE WOULD NOT HAVE FIXED IT
+
+`shared/` is inside `SURFACES`, so relocating repairs the `tree` hash. But `ddTree` filters by
+`DD_SURFACE_DIRS`, and `shared/` root matches none of them — the health key still would not have
+rotated on a signing change, and **the binding would have looked fixed while remaining open.** Both
+gaps closed deliberately: files to `shared/dd/`, and `shared/dd` added as a DD surface dir.
+
+⚠️ The stamper's own rule already said this — *"ADD A ROW HERE WHENEVER THE CANARY GAINS AN IMPORT,
+or the binding silently stops covering it."* The import arrived through `dd-analyze` rather than
+`dd-canary`, and the row was never added.
+
+### MEASURED
+
+| | before | after |
+|---|---|---|
+| `ddTree` | `f4c8ec9bfa4d…` (19 files) | **`d1cd378608e0…` (24 files)** |
+| `tree` | 155 files | **160 files** |
+| dd-analyze modules under `scripts/` | 4 | **0** |
+
+24 = 19 + `endpoints.mjs` + the four. The counts reconcile exactly.
+
+### ⚠️ MY IMPORT SURVEY WAS INCOMPLETE, AND THE SUITE CAUGHT IT
+
+The first pass grepped for `from "./client.mjs"` and `scripts/dd/client` — and **missed every
+`../client.mjs` from a subdirectory.** Ten stale imports across `scripts/dd/checks/` and
+`scripts/spikes/` survived the move; `test:dd` died on the first one. ⭐ Fixed by RESOLVING every
+relative import in the repo against the moved set instead of pattern-matching paths — the same
+"a filtered read is not a measurement" lesson, in the tool I was using to check for it.
+
+🚧 `scripts/spikes/spike-phase0.mjs` was ALREADY broken before this move (`./dd/rpc.mjs` from
+`scripts/spikes/` resolves nowhere; `ERR_MODULE_NOT_FOUND` on load). Left alone — not this commit's
+business, and silently "fixing" a spike I have not reasoned about is worse than leaving it.
+
+### THE GUARD — derived from the real import graph, not a list
+
+`verify-quorum-billing.mjs` now walks `dd-analyze`'s transitive imports and asserts **none** come
+from `scripts/`, that `shared/dd` is a DD surface dir, and that the signing path specifically is
+inside the code-identity hash. ⭐ Computed from the graph precisely because the rule that failed here
+was a human-maintained list.
+
+⚠️ **AND THE MUTATION WAS MADE HONEST.** Pointing `dd-analyze` back at `scripts/` first made the
+suite CRASH (`ERR_MODULE_NOT_FOUND`) — the module loader catching it, not the check. Re-run with a
+resolvable stub at the old path, the CHECK fails on its own merits, naming `scripts/dd/client.mjs`.
+A guard credited for work the loader did is a guard nobody has actually tested.
+
+### PROOF
+
+All 14 DD suites green, `verify-quorum-billing` 24/0 (3 new), bridge green, copy 32/0, tsc + build
+clean. Mutations: drop `shared/dd` from the DD dirs → red; re-import from `scripts/` → red (with the
+stub, i.e. by the check).
+
+### STATE
+
+* ⛔ **UNDEPLOYED.**
+* 🚧 **STILL OUTSIDE `ddTree`, and now the largest remaining gap:** `shared/x402/settle-gate.mjs` and
+  `netlify/functions/_x402-confirm.mjs` — **the code that decides whether a buyer is charged** — plus
+  `_circle.mjs`, `_dd-descriptor.mjs`, `_dd-discovery-page.mjs`, and `shared/build-stamp.mjs` (the
+  code that COMPUTES the identity). By the stamper's own conservative rule these are candidates for
+  rows; adding them widens the DD re-verification surface, so it is a deliberate call, not a tidy-up.
+* 🚧 The `chain-disagreement` → `rpc-disagreement` mapping is still duplicated across two files.
+
 ## 2026-08-16 (later) — ⭐⭐ QUORUM ON THE PAID PATH. The service that SELLS a claim about chain state was reading it from one endpoint.
 
 `dd-analyze` — the public, paid endpoint — called `analyze(addr, { client: chainClient(chain) })`.

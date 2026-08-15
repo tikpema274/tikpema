@@ -66,14 +66,14 @@ import {
 import { discoveryPage } from "./_dd-discovery-page.mjs";
 import { readHealth } from "./_dd-health.mjs";
 import { exposureState } from "./_dd-exposure.mjs";
-import { chainClient } from "../../scripts/dd/client.mjs";
+import { chainClient } from "../../shared/dd/client.mjs";
 import { quorumClient } from "../../shared/onchain-analyze/quorum.mjs";
 import { ARC_QUORUM_ENDPOINTS, INTEGRITY_OUTCOMES } from "../../shared/onchain-analyze/endpoints.mjs";
 import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { baseReport, assertReportValid, SCHEMA_VERSION } from "../../shared/onchain-analyze/schema.mjs";
 import { attachAttestation, unsignedAttestation } from "../../shared/onchain-analyze/attest.mjs";
 import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
-import { ddAttestationOptions } from "../../scripts/dd/attest-circle.mjs";
+import { ddAttestationOptions } from "../../shared/dd/attest-circle.mjs";
 
 // ⭐ `chain` IS REQUIRED, AND ONLY ARC IS ACCEPTED — this is the fail-closed boundary.
 //

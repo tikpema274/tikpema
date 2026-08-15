@@ -83,7 +83,22 @@ const SELF = "shared/build-stamp.generated.mjs";
 // unsure, add the file.
 //
 // 🚨 ADD A ROW HERE WHENEVER THE CANARY GAINS AN IMPORT, or the binding silently stops covering it.
-const DD_SURFACE_DIRS = ["shared/onchain-analyze", "shared/onchain-facts", "shared/dd-canary"];
+// ⭐⭐ `shared/dd` ADDED 2026-08-16 — AND THE MOVE ALONE WOULD NOT HAVE BEEN ENOUGH.
+//
+// 🚨 `dd-analyze` imported `chainClient` and `ddAttestationOptions` from `scripts/dd/`, pulling
+// `client/chains/rpc/attest-circle` into the deployed bundle. `scripts/` is in NEITHER `SURFACES`
+// nor here, so a change to any of them produced an identical `tree`, an identical `ddTree`, AND no
+// dirty flag — invisible in all three channels at once. ⚠️ Including `attest-circle.mjs`: the code
+// that SIGNS the attestation sat outside the hash whose whole job is to say which code produced it.
+//
+// ⭐ RELOCATING TO `shared/` FIXES ONLY HALF. `shared/` is inside SURFACES, so the move repairs the
+// `tree` hash — but `ddTree` is filtered by THESE dirs, and `shared/` root files match none of them.
+// Without this row the health key still would not rotate on an attestation-signing change, and the
+// binding would look fixed while remaining open. Two gaps, closed deliberately, not as a side effect.
+//
+// ⚠️ The rule two paragraphs down already said this: "ADD A ROW HERE WHENEVER THE CANARY GAINS AN
+// IMPORT." The import arrived through dd-analyze rather than dd-canary, and the row was never added.
+const DD_SURFACE_DIRS = ["shared/onchain-analyze", "shared/onchain-facts", "shared/dd-canary", "shared/dd"];
 const DD_SURFACE_FILES = [
   "netlify/functions/dd-analyze.mjs",
   "netlify/functions/dd-canary.mjs",

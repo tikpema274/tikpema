@@ -27,7 +27,7 @@
 // the whole engine is built to refuse.
 
 import { observed, failed, sha256, normalizeAddress } from "../fact.mjs";
-import { chainClient } from "../client.mjs";
+import { chainClient } from "../../../shared/dd/client.mjs";
 // Shared fact-production primitives — the SINGLE SOURCE OF TRUTH shared with
 // netlify/functions/_vault.mjs. Previously these tables and helpers were "COPIED VERBATIM" here
 // (the old comment said so), which is the duplicate-source-of-truth bug: the copies had already

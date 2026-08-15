@@ -13,7 +13,7 @@
 // fast and noisy. The client pool already removed the 3x overhead that mattered.
 
 import { failed } from "./fact.mjs";
-import { clientPool } from "./client.mjs";
+import { clientPool } from "../../shared/dd/client.mjs";
 
 /**
  * @param {Array<{address:string, chain:string}>} entries

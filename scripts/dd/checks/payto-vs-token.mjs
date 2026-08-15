@@ -21,9 +21,9 @@
 // limit is in `coverage.notCheckedFor` and it is the most important line in the file.
 
 import { observed, failed, normalizeAddress } from "../fact.mjs";
-import { CHAINS } from "../chains.mjs";
-import { chainClient } from "../client.mjs";
-import { curlFor } from "../rpc.mjs";
+import { CHAINS } from "../../../shared/dd/chains.mjs";
+import { chainClient } from "../../../shared/dd/client.mjs";
+import { curlFor } from "../../../shared/dd/rpc.mjs";
 
 export const id = "payto-vs-token";
 export const describe = "decode a live 402 challenge: is the EIP-712 domain the token (vanilla EIP-3009) or some other contract?";

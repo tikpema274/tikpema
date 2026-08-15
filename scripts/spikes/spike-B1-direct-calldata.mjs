@@ -36,8 +36,8 @@
 import { createPublicClient, http } from "viem";
 import { createViemAdapterFromProvider, resolveChainIdentifier } from "@circle-fin/adapter-viem-v2";
 import { CONTRACTS, ARC } from "../../netlify/functions/_arc.mjs";
-import { rpcCall, assertChain } from "../dd/rpc.mjs";
-import { getChain } from "../dd/chains.mjs";
+import { rpcCall, assertChain } from "../../shared/dd/rpc.mjs";
+import { getChain } from "../../shared/dd/chains.mjs";
 
 const KIT_KEY = process.env.KIT_KEY;
 const WALLET = (process.env.WALLET_ADDRESS || "").toLowerCase();

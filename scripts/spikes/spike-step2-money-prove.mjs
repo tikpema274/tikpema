@@ -32,8 +32,8 @@
 import { agentSwap, SwapPendingConfirm } from "../../netlify/functions/_swap.mjs";
 import { circle } from "../../netlify/functions/_circle.mjs";
 import { CONTRACTS, ARC, USDC_DECIMALS } from "../../netlify/functions/_arc.mjs";
-import { rpcCall, assertChain } from "../dd/rpc.mjs";
-import { getChain } from "../dd/chains.mjs";
+import { rpcCall, assertChain } from "../../shared/dd/rpc.mjs";
+import { getChain } from "../../shared/dd/chains.mjs";
 
 const WALLET = (process.env.WALLET_ADDRESS || "").toLowerCase();
 const ADAPTER = "0xbbd70b01a1cabc96d5b7b129ae1aaabdf50dd40b";

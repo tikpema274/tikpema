@@ -10,7 +10,7 @@
 //   node scripts/dd/analyze-run.mjs --full 0x…       # full JSON instead of the digest view
 //   node scripts/dd/analyze-run.mjs --quorum 0x…     # read every slot from >=2 endpoints
 
-import { chainClient } from "./client.mjs";
+import { chainClient } from "../../shared/dd/client.mjs";
 import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { quorumClient } from "../../shared/onchain-analyze/quorum.mjs";
 

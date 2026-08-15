@@ -12,7 +12,7 @@
 //
 // Run:  node scripts/dd/demo-quorum-disagreement.mjs [--full]
 
-import { chainClient } from "./client.mjs";
+import { chainClient } from "../../shared/dd/client.mjs";
 import { quorumClient } from "../../shared/onchain-analyze/quorum.mjs";
 import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { digest, QUORUM_ENDPOINTS } from "./analyze-run.mjs";

@@ -122,6 +122,47 @@ const epSrc = readFileSync(new URL("../../shared/onchain-analyze/endpoints.mjs",
 ok("⭐ …and it lives under shared/, which the build stamp hashes (scripts/ does not)",
   /rpc\.testnet\.arc\.network/.test(epSrc) && /drpc\.org/.test(epSrc));
 
+console.log("\n── ⭐⭐ EVERY MODULE dd-analyze RUNS IS INSIDE THE CODE-IDENTITY HASH ──");
+// 🚨 THE FAIL-OPEN THIS CLOSES. `ddCodeIdentity` is the health artifact's identity: the canary's
+// verdict is supposed to vouch for THIS code. `dd-analyze` imported chainClient and
+// ddAttestationOptions from `scripts/dd/`, which is in NEITHER the stamp's SURFACES nor the DD
+// surface — so a change to the ATTESTATION SIGNING path produced an identical tree, an identical
+// ddTree, and no dirty flag. Old canary evidence would vouch for new code, which is the exact
+// fail-open the binding exists to close.
+//
+// ⚠️ AND THE RELOCATION ALONE WOULD NOT HAVE CLOSED IT: `shared/` is inside SURFACES (fixing `tree`)
+// but ddTree filters by DD_SURFACE_DIRS, which `shared/` root does not match. Both had to move.
+//
+// ⭐ COMPUTED FROM THE REAL IMPORT GRAPH, not from a list someone remembers to update — the
+// stamper's own rule ("ADD A ROW WHENEVER THE CANARY GAINS AN IMPORT") is exactly what was missed,
+// because the import arrived through dd-analyze rather than dd-canary.
+{
+  const { readdirSync } = await import("node:fs");
+  const path = await import("node:path");
+  const stampSrc = readFileSync(new URL("../stamp-build.mjs", import.meta.url), "utf8");
+  const ddDirs = [...(stampSrc.match(/const DD_SURFACE_DIRS = \[([^\]]*)\]/)?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  const ddFiles = [...(stampSrc.match(/const DD_SURFACE_FILES = \[([\s\S]*?)\];/)?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  const root = path.resolve(new URL("../../", import.meta.url).pathname);
+  const covered = (p) => ddDirs.some((d) => p.startsWith(d + "/")) || ddFiles.includes(p);
+  const imports = (f) => { try { return [...readFileSync(path.join(root, f), "utf8").matchAll(/from\s+"(\.[^"]+)"/g)].map((m) => m[1]); } catch { return []; } };
+  const seen = new Set(); const stack = ["netlify/functions/dd-analyze.mjs"];
+  while (stack.length) {
+    const cur = stack.pop(); if (seen.has(cur)) continue; seen.add(cur);
+    for (const spec of imports(cur)) {
+      const r = path.posix.normalize(path.posix.join(path.posix.dirname(cur), spec));
+      if (!seen.has(r)) stack.push(r);
+    }
+  }
+  const fromScripts = [...seen].filter((p) => p.startsWith("scripts/"));
+  ok("⭐⭐ dd-analyze runs NO code from scripts/ — everything it imports is inside a stamped surface",
+    fromScripts.length === 0, fromScripts.join(", ") || "none");
+  ok("⭐⭐ …and shared/dd is a DD surface dir, so an attestation-signing change ROTATES the health key",
+    ddDirs.includes("shared/dd"), ddDirs.join(", "));
+  const signer = "shared/dd/attest-circle.mjs";
+  ok("⭐⭐ the SIGNING path specifically is inside the code-identity hash",
+    seen.has(signer) && covered(signer));
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

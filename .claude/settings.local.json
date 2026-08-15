@@ -8,7 +8,9 @@
       "mcp__arc-docs__query_docs_filesystem_arc_docs",
       "Bash(node -e \"const v=require\\('viem/package.json'\\); console.log\\('viem version:', v.version\\)\")",
       "Bash(node -e \"const c=require\\('viem/chains'\\); console.log\\('arcTestnet' in c ? 'PRESENT: '+JSON.stringify\\({id:c.arcTestnet.id,name:c.arcTestnet.name}\\) : 'MISSING'\\)\")",
-      "Bash(node -e \"const c=require\\('viem/chains'\\); console.log\\(Object.keys\\(c\\).filter\\(k=>/arc/i.test\\(k\\)\\).join\\(', '\\)||'\\(none\\)'\\)\")"
+      "Bash(node -e \"const c=require\\('viem/chains'\\); console.log\\(Object.keys\\(c\\).filter\\(k=>/arc/i.test\\(k\\)\\).join\\(', '\\)||'\\(none\\)'\\)\")",
+      "Bash(npm run *)",
+      "Bash(echo \"CHAIN_EXIT=$?\")"
     ]
   }
 }

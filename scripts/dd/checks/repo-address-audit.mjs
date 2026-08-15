@@ -34,7 +34,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { observed, failed, normalizeAddress } from "../fact.mjs";
-import { CHAINS, chainNames, getChain } from "../chains.mjs";
+import { CHAINS, chainNames, getChain } from "../../../shared/dd/chains.mjs";
 import { runBatch } from "../batch.mjs";
 import * as codeExists from "./code-exists.mjs";
 

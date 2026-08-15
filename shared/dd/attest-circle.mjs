@@ -18,7 +18,7 @@
 // contract with no private key at all — see attest.mjs for why that makes ERC-1271 the binding.
 
 import { circle } from "../../netlify/functions/_circle.mjs";
-import { DOMAIN } from "../../shared/onchain-analyze/attest.mjs";
+import { DOMAIN } from "../onchain-analyze/attest.mjs";
 
 /** The DD service's production identity. These are ASSERTED against the chain by verifyAttestation —
  *  nothing here is trusted merely because it is written down. */
