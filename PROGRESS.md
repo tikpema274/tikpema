@@ -1,5 +1,93 @@
 ---
 
+## 2026-08-16 — ⭐⭐ ONE RPC PER CHAIN WAS THE ARCHITECTURE, NOT THE INCIDENT. Every chain now has two.
+
+### 🚨 THE RECORD HAS NOT RESOLVED — and that is the honest headline
+
+`o/0xfd801d08…/0xccc02035…` still reads `mint_unconfirmed`, `delivery: predicted`,
+`amountDelivered: null`, `lastCheckedAt: 2026-08-14T22:20:22Z` — unchanged, `settlingSince` absent.
+**No settler has run since the RPC fix.** Not a failed fix; nothing invoked it.
+
+⭐ **BUT THE MONEY IS PROVEN TO HAVE ARRIVED**, read-only, replicating exactly what the settler does:
+
+| instrument | result |
+|---|---|
+| IRIS | `status: complete`, `forwardState: COMPLETE`, `forwardTxHash 0x7953bfb9…` |
+| Polygon Amoy, new RPC | receipt `status 0x1`, block **43,849,013** |
+| USDC Transfer log | **0.94899 USDC** to `0x058957de…` |
+
+The record's `netPredicted` is **0.94899** — the arrival matches the prediction exactly. ⭐⭐ **The
+bridge worked perfectly on 2026-08-02; only our ability to READ it failed.** The verification that
+failed ~1,730 times now succeeds on the first attempt.
+
+### ⚠️ THREE CORRECTIONS TO THE GENERALISATION
+
+The instinct — *one endpoint per chain is a single point of failure* — is **right**, and is now fixed.
+Three details were not:
+
+1. **Wrong file.** The incident came from `DESTINATION_CHAINS` in `netlify/functions/_receipt.mjs`.
+   `scripts/dd/chains.mjs` is the DD engine's separate table and had nothing to do with it. Both had
+   the SPOF; only one caused this.
+2. **Quorum's second endpoint IS configured** — `QUORUM_ENDPOINTS` has two (Arc public + dRPC, with a
+   documented distinct-backend check). ⭐ The real gap is worse: **the live `dd-analyze` endpoint does
+   not use quorum at all** (`analyze(addr, { client: chainClient(chain) })`, single endpoint).
+   Quorum is reachable only from the CLI and tests. **Still open.**
+3. **"Nothing distinguishes waiting-on-a-mint from can't-read-the-chain"** was true when written, but
+   that is option (b) and it shipped in `b7f6f35`/`2fa7378`: `cause: chain_unreadable` vs
+   `never_appeared`, plus `lastVerifyFailureKind: unreachable|transient`.
+
+So (b)'s core existed; **(a) was the one still missing.**
+
+### THE FIX — FALLBACK, DELIBERATELY NOT QUORUM
+
+All 8 chains now carry two endpoints from different providers, each verified live (16/16).
+⚠️ **Fallback, not quorum, and the distinction is load-bearing.** Integrity here is already pinned
+three ways — chainId, the USDC contract address, and a Transfer log paying the recorded recipient —
+so requiring AGREEMENT would convert a second endpoint being down into a **refusal**: an availability
+fix that invents a new way to fail. That is the same BLOCK-rate objection `quorum.mjs` itself raises
+against putting quorum on the deposit path.
+
+⚠️ **A chain-id mismatch is NOT retried onto the sibling.** That is a configuration fault, not an
+availability one; falling through would hide the very misconfiguration the pin exists to catch.
+⚠️ **The aggregate kind is `unreachable` only if EVERY endpoint was** — one transient alongside a dead
+host must not be reported as permanent.
+
+### ⭐⭐ THE FALLBACK CREATES A NEW WAY TO GO QUIET, AND THE GATE NOW COVERS IT
+
+With two endpoints, a dead one is **invisible at runtime** — the survivor answers and verification
+succeeds, while the chain is silently back to a single point of failure. **An availability
+improvement that hides its own degradation is how the original defect returns wearing a redundancy
+badge.** So `gate:rpc` checks EVERY endpoint, fails on any permanently-dead one, names a
+single-endpoint chain as the residual SPOF, and headlines `REDUNDANCY DEGRADED`.
+
+### PROOF
+
+Calibrated on three real configurations: a dead secondary (**fails**, and is not mistaken for
+healthy), a chain reduced to one endpoint (**warns**, named as a SPOF), and both endpoints dead
+(**fails**). ⭐ **That calibration caught a defect in the new gate itself:** with 0/2 usable, the
+summary claimed *"verification still works"* about a chain that could not be read at all. Fixed with
+a `healthy >= 1` guard — the same false-reassurance class this whole thread has been about.
+
+**Five mutations, all red, restore green:** remove the fallback, let a wrong-chain primary fall
+through, force the aggregate kind to `unreachable`, drop a chain to one endpoint, delete the
+degraded-redundancy headline.
+
+`verify-bridge-receipts` **180/0** (9 new), copy 32/0, gate:rpc 8 chains / 16 endpoints, routes 5/0,
+tsc + build clean.
+
+⭐ **A live transient was observed and handled correctly mid-run:** `1rpc.io/sepolia` failed one gate
+pass and passed 6/6 on direct probing — warned, not failed, exactly as the transient/permanent split
+intends.
+
+### STATE
+
+* ⛔ **UNDEPLOYED.**
+* 🚧 **The record still needs a settle.** It resolves when the owner opens the Bridge panel — the
+  read path re-triggers on `isRecheckable`, deliberately NOT on the auto-retry bound. Expect
+  `minted` / `measured` / `0.94899`.
+* 🚧 **`dd-analyze` still reads from a single endpoint** while a tested quorum layer sits unused.
+  That is the same SPOF, one subsystem over, on the path that takes money.
+
 ## 2026-08-15 (night) — ⭐ `src` JOINS THE STAMPED SURFACE. Two production deploys had passed a tree check that could not see what changed.
 
 ✅ **The copy-suite conversion deployed first** — `dd16f23` live as `6a80206da3bffeead9e12042`,

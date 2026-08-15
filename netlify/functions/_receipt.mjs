@@ -39,28 +39,41 @@ const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a
 // A doc page is a claim; the chain is the fact. Both had to agree before pinning.
 // (Base independently corroborated by the real UB-spend mint, which emitted from
 //  0x036CbD…dcF7e — see scripts/verify-receipt-adversarial.mjs CONTROL.)
+/**
+ * ⭐⭐ TWO ENDPOINTS PER CHAIN — A FALLBACK, DELIBERATELY NOT A QUORUM.
+ *
+ * 🚨 WHY (2026-08-15): every entry here carried ONE `rpc`, so each chain was a single point of
+ * failure for VERIFICATION. When `rpc-amoy.polygon.technology` was decommissioned, mint verification
+ * on Polygon failed 100% of the time for twelve days and the receipt simply accumulated as an
+ * "unconfirmed bridge". ⭐ Swapping that one URL fixed the instance and left the architecture
+ * unchanged: the next dead endpoint reproduces the same silence on whichever chain it lands on, and
+ * the only reason this one surfaced at all is that someone went looking at an unrelated record.
+ *
+ * ⚠️ FALLBACK, NOT QUORUM, AND THE DISTINCTION IS LOAD-BEARING. `shared/onchain-analyze/quorum.mjs`
+ * requires ≥2 endpoints to AGREE and refuses otherwise — correct there, because its threat model is
+ * PROVIDER INTEGRITY. Here the question is availability of a read whose integrity is ALREADY pinned
+ * three ways: the chainId must match, the USDC contract address is pinned, and the Transfer log must
+ * pay the recorded recipient. Requiring agreement would convert a second endpoint being down into a
+ * REFUSAL — turning an availability improvement into a new way to fail, which is exactly the
+ * BLOCK-rate objection quorum.mjs itself raises against putting quorum on the deposit path.
+ *
+ * ⚠️ INDEPENDENCE IS ASSERTED, NOT PROVEN. Each pair uses two different providers (publicnode /
+ * official / dRPC / 1rpc), and dRPC is an aggregator that may route anywhere. Two mirrors of one
+ * node agree perfectly and are worth nothing. `gate:rpc` verifies each endpoint answers for the
+ * right chain; it cannot verify they are independent operators.
+ */
 export const DESTINATION_CHAINS = {
-  ethereum:  { rpc: "https://ethereum-sepolia-rpc.publicnode.com", chainId: 11155111, usdc: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" },
-  base:      { rpc: "https://sepolia.base.org",                    chainId: 84532,    usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e" },
-  arbitrum:  { rpc: "https://sepolia-rollup.arbitrum.io/rpc",      chainId: 421614,   usdc: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d" },
-  optimism:  { rpc: "https://sepolia.optimism.io",                 chainId: 11155420, usdc: "0x5fd84259d66Cd46123540766Be93DFE6D43130D7" },
-  avalanche: { rpc: "https://api.avax-test.network/ext/bc/C/rpc",  chainId: 43113,    usdc: "0x5425890298aed601595a70AB815c96711a31Bc65" },
-  // 🚨 WAS `https://rpc-amoy.polygon.technology` — THE HOST HAS NO DNS RECORD AT ALL.
-  // Measured 2026-08-15 with two independent resolvers: the local one returns NO RESOLUTION, and
-  // Google's public DoH returns NOERROR with an SOA and **no A record**. `polygon.technology`
-  // itself resolves fine, so the apex is alive and this subdomain is simply gone.
-  // ⭐⭐ THAT IS WHY `0xccc02035…` FAILED VERIFICATION 100% OF THE TIME FOR TWELVE DAYS. It was never
-  // flakiness or rate-limiting — those are intermittent. `fetch` could not resolve the name, threw,
-  // and `verifyMintOnChain` caught it as `rpc_error` on every single one of ~1,730 attempts. A
-  // permanent config fault was wearing the costume of a transient one.
-  // ⚠️ publicnode is already this file's choice for ethereum-sepolia, so this is not a new
-  // dependency. Verified live: chainId 80002, eth_getTransactionReceipt allowed (null for an
-  // unknown hash rather than an error), synced at block 44,954,674, and the PINNED Amoy USDC
-  // address below has 1798 bytes of code on it — which cross-checks the endpoint really is Amoy.
-  polygon:   { rpc: "https://polygon-amoy-bor-rpc.publicnode.com", chainId: 80002,    usdc: "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582" },
-  unichain:  { rpc: "https://sepolia.unichain.org",                chainId: 1301,     usdc: "0x31d0220469e10c4E71834a79b1f276d740d3768F" },
-  linea:     { rpc: "https://rpc.sepolia.linea.build",             chainId: 59141,    usdc: "0xFEce4462D57bD51A6A552365A011b95f0E16d9B7" },
+  ethereum:  { rpcs: ["https://ethereum-sepolia-rpc.publicnode.com", "https://1rpc.io/sepolia"],                          chainId: 11155111, usdc: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" },
+  base:      { rpcs: ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"],                             chainId: 84532,    usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e" },
+  arbitrum:  { rpcs: ["https://sepolia-rollup.arbitrum.io/rpc", "https://arbitrum-sepolia-rpc.publicnode.com"],           chainId: 421614,   usdc: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d" },
+  optimism:  { rpcs: ["https://sepolia.optimism.io", "https://optimism-sepolia-rpc.publicnode.com"],                      chainId: 11155420, usdc: "0x5fd84259d66Cd46123540766Be93DFE6D43130D7" },
+  avalanche: { rpcs: ["https://api.avax-test.network/ext/bc/C/rpc", "https://avalanche-fuji-c-chain-rpc.publicnode.com"], chainId: 43113,    usdc: "0x5425890298aed601595a70AB815c96711a31Bc65" },
+  // 🚨 THE ONE THAT BIT. Primary was `rpc-amoy.polygon.technology`, which has NO DNS RECORD.
+  polygon:   { rpcs: ["https://polygon-amoy-bor-rpc.publicnode.com", "https://polygon-amoy.drpc.org"],                    chainId: 80002,    usdc: "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582" },
+  unichain:  { rpcs: ["https://sepolia.unichain.org", "https://unichain-sepolia-rpc.publicnode.com"],                     chainId: 1301,     usdc: "0x31d0220469e10c4E71834a79b1f276d740d3768F" },
+  linea:     { rpcs: ["https://rpc.sepolia.linea.build", "https://linea-sepolia-rpc.publicnode.com"],                     chainId: 59141,    usdc: "0xFEce4462D57bD51A6A552365A011b95f0E16d9B7" },
 };
+
 
 /**
  * ⭐ IS THIS ENDPOINT BROKEN, OR MERELY UNHAPPY? — the discriminator that was missing.
@@ -82,6 +95,49 @@ export function classifyRpcFailure(e) {
     failureKind: isUnreachable ? "unreachable" : "transient",
     detail: code ? `${msg} (${code})` : msg,
   };
+}
+
+/**
+ * ⭐⭐ READ A CHAIN, TRYING EACH ENDPOINT IN TURN — the fix for the single point of failure.
+ *
+ * Returns `{ result, rpc, attempts }` from the FIRST endpoint that answers, so callers can record
+ * WHICH endpoint served them. Throws only when every endpoint has failed, carrying the per-endpoint
+ * reasons — because "all of them failed" is a materially different claim from "it failed", and the
+ * twelve-day incident is what a system that could not tell them apart looks like.
+ *
+ * ⚠️ A CHAIN-ID MISMATCH IS NOT RETRIED ONTO THE NEXT ENDPOINT. An endpoint answering for the wrong
+ * chain is a CONFIGURATION fault, not an availability one; silently falling through to a sibling
+ * would hide exactly the misconfiguration the chainId pin exists to catch, and `gate:rpc` would be
+ * the only thing left that could see it.
+ */
+export async function rpcFallback(chain, method, params) {
+  const endpoints = chain.rpcs;
+  const failures = [];
+  for (const url of endpoints) {
+    try {
+      // The chain guard runs against the endpoint that is about to answer, never once for the set:
+      // two endpoints are two chances to be pointed at the wrong chain.
+      const idHex = await rpc(url, "eth_chainId", []);
+      if (Number(BigInt(idHex)) !== chain.chainId) {
+        const e = new Error(`endpoint reports chain ${Number(BigInt(idHex))}, expected ${chain.chainId}`);
+        e.chainMismatch = true;
+        e.saw = Number(BigInt(idHex));
+        throw e;
+      }
+      return { result: await rpc(url, method, params), rpc: url, attempts: failures.length + 1 };
+    } catch (e) {
+      if (e?.chainMismatch) throw e; // configuration fault — see above
+      failures.push({ rpc: url, ...classifyRpcFailure(e) });
+    }
+  }
+  const err = new Error(
+    `all ${endpoints.length} endpoint(s) failed: ` + failures.map((f) => `${f.rpc} [${f.failureKind}] ${f.detail}`).join(" | ")
+  );
+  err.allFailed = failures;
+  // ⭐ The AGGREGATE kind: only `unreachable` if EVERY endpoint was unreachable. One transient
+  // failure alongside a dead host must not be reported as a permanent, ours-to-fix fault.
+  err.aggregateKind = failures.every((f) => f.failureKind === "unreachable") ? "unreachable" : "transient";
+  throw err;
 }
 
 async function rpc(url, method, params) {
@@ -117,14 +173,13 @@ export async function verifyMintOnChain({ destinationKey, mintTxHash, recipient 
 
   // 1. The RPC must be the chain we think it is. Without this pin, a tx hash that
   //    exists on some OTHER chain would sail through.
-  let chainIdHex, receipt;
+  let receipt, servedBy = null;
   try {
-    chainIdHex = await rpc(chain.rpc, "eth_chainId", []);
-    if (Number(BigInt(chainIdHex)) !== chain.chainId) {
-      return { verified: false, reason: "chain_mismatch", saw: Number(BigInt(chainIdHex)) };
-    }
-    receipt = await rpc(chain.rpc, "eth_getTransactionReceipt", [mintTxHash]);
+    const got = await rpcFallback(chain, "eth_getTransactionReceipt", [mintTxHash]);
+    receipt = got.result;
+    servedBy = got.rpc;
   } catch (e) {
+    if (e?.chainMismatch) return { verified: false, reason: "chain_mismatch", saw: e.saw };
     // ⭐⭐ A DEAD ENDPOINT AND A SLOW ONE ARE NOT THE SAME PROBLEM, AND FOR TWELVE DAYS THEY
     // PRODUCED THE SAME WORD. `rpc_error` covered "this host does not exist" — a one-line config
     // fault that will NEVER fix itself — and "the node timed out", which usually will. The first
@@ -132,7 +187,16 @@ export async function verifyMintOnChain({ destinationKey, mintTxHash, recipient 
     // let a decommissioned URL sit in production unnoticed.
     // ⚠️ `reason` stays `rpc_error`: it is part of this function's documented closed set and other
     // code branches on it. The DISCRIMINATOR is added alongside rather than smuggled into it.
-    return { verified: false, reason: "rpc_error", ...classifyRpcFailure(e), rpc: chain.rpc };
+    // ⚠️ EVERY endpoint failed. The aggregate kind is what decides who owns it: `unreachable`
+    // across the whole set is a configuration fault on our side, and one that `gate:rpc` should
+    // have caught before the deploy.
+    return {
+      verified: false, reason: "rpc_error",
+      failureKind: e?.aggregateKind ?? classifyRpcFailure(e).failureKind,
+      detail: e?.message ?? String(e),
+      rpc: (chain.rpcs || []).join(", "),
+      endpointsTried: (e?.allFailed || []).length || (chain.rpcs || []).length,
+    };
   }
 
   // 2. The tx must exist and have SUCCEEDED. A reverted mint is not a mint.

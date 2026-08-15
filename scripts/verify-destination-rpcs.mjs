@@ -72,68 +72,103 @@ async function call(url, method, params) {
 
 console.log("\nverify-destination-rpcs — can we actually read every chain we bridge to?\n");
 
+// ⭐⭐ EVERY ENDPOINT IS CHECKED, NOT JUST THE ONE THAT ANSWERS.
+//
+// 🚨 THE FALLBACK CREATES A NEW WAY TO GO QUIET. With two endpoints per chain, a dead one is
+// INVISIBLE at runtime — the survivor answers and verification succeeds. The chain is silently back
+// to a single point of failure, and nobody learns until the second one dies too and the twelve-day
+// silence returns. ⚠️ An availability improvement that hides its own degradation is how the original
+// defect comes back wearing a redundancy badge.
+//
+// So: a chain FAILS only when it can no longer be read at all, but a DEAD ENDPOINT INSIDE A HEALTHY
+// CHAIN is reported loudly every run. And a chain configured with a single endpoint is called out as
+// the residual SPOF it is.
 for (const [key, chain] of Object.entries(DESTINATION_CHAINS)) {
-  const row = { key, rpc: chain.rpc, problems: [], kind: null };
+  const endpoints = chain.rpcs || [];
+  const healthy = [], broken = [];
 
-  // 1 + 2 — alive, and the chain it claims to be.
-  let sawChainId = null;
-  try {
-    sawChainId = Number(BigInt(await call(chain.rpc, "eth_chainId", [])));
-    if (sawChainId !== chain.chainId) {
-      // ⚠️ ALWAYS FATAL, never "transient". A healthy endpoint serving the wrong chain is a
-      // misconfiguration that no amount of waiting fixes, and verifyMintOnChain would refuse
-      // every mint while this looked green.
-      row.problems.push(`CHAIN MISMATCH — pinned ${chain.chainId}, endpoint reports ${sawChainId}`);
-      row.kind = "unreachable";
-    }
-  } catch (e) {
-    const c = classifyRpcFailure(e);
-    row.kind = c.failureKind;
-    row.problems.push(`eth_chainId failed [${c.failureKind}] — ${c.detail}`);
-  }
-
-  // 3 + 4 — only meaningful if the endpoint answered at all.
-  if (sawChainId !== null && row.problems.length === 0) {
+  for (const url of endpoints) {
+    const problems = [];
+    let kind = null, usdcBytes = null;
+    let sawChainId = null;
     try {
-      // An unknown hash must return null, NOT an error. An error here means the method is
-      // unavailable — which would surface for the first time on a real bridge.
-      await call(chain.rpc, "eth_getTransactionReceipt", ["0x" + "00".repeat(31) + "01"]);
-    } catch (e) {
-      const c = classifyRpcFailure(e);
-      row.kind = row.kind ?? c.failureKind;
-      row.problems.push(`eth_getTransactionReceipt unavailable [${c.failureKind}] — ${c.detail}`);
-    }
-    try {
-      const code = await call(chain.rpc, "eth_getCode", [chain.usdc, "latest"]);
-      const bytes = typeof code === "string" ? (code.length - 2) / 2 : 0;
-      if (bytes === 0) {
-        // The pinned USDC has no code here. Either the address is wrong or this is not that
-        // chain — and Transfer-log matching would silently never match. Permanent either way.
-        row.problems.push(`PINNED USDC ${chain.usdc} HAS NO CODE on this endpoint`);
-        row.kind = "unreachable";
-      } else {
-        row.usdcBytes = bytes;
+      sawChainId = Number(BigInt(await call(url, "eth_chainId", [])));
+      if (sawChainId !== chain.chainId) {
+        // ⚠️ ALWAYS FATAL, never "transient": a healthy endpoint serving the WRONG chain is a
+        // misconfiguration no amount of waiting fixes, and `rpcFallback` deliberately refuses to
+        // fall through it — so one bad entry breaks the chain even though a sibling works.
+        problems.push(`CHAIN MISMATCH — pinned ${chain.chainId}, endpoint reports ${sawChainId}`);
+        kind = "unreachable";
       }
     } catch (e) {
       const c = classifyRpcFailure(e);
-      row.kind = row.kind ?? c.failureKind;
-      row.problems.push(`eth_getCode failed [${c.failureKind}] — ${c.detail}`);
+      kind = c.failureKind;
+      problems.push(`eth_chainId failed [${c.failureKind}] — ${c.detail}`);
     }
+
+    if (problems.length === 0) {
+      try {
+        // An unknown hash must return null, NOT an error. An error means the method is unavailable —
+        // which would otherwise surface for the first time on a real bridge.
+        await call(url, "eth_getTransactionReceipt", ["0x" + "00".repeat(31) + "01"]);
+      } catch (e) {
+        const c = classifyRpcFailure(e);
+        kind = kind ?? c.failureKind;
+        problems.push(`eth_getTransactionReceipt unavailable [${c.failureKind}] — ${c.detail}`);
+      }
+      try {
+        const code = await call(url, "eth_getCode", [chain.usdc, "latest"]);
+        const bytes = typeof code === "string" ? (code.length - 2) / 2 : 0;
+        if (bytes === 0) {
+          problems.push(`PINNED USDC ${chain.usdc} HAS NO CODE on this endpoint`);
+          kind = "unreachable";
+        } else usdcBytes = bytes;
+      } catch (e) {
+        const c = classifyRpcFailure(e);
+        kind = kind ?? c.failureKind;
+        problems.push(`eth_getCode failed [${c.failureKind}] — ${c.detail}`);
+      }
+    }
+
+    (problems.length === 0 ? healthy : broken).push({ url, problems, kind, usdcBytes });
   }
 
-  if (row.problems.length === 0) {
+  const fatal = broken.some((b) => b.kind === "unreachable") || healthy.length === 0 || STRICT && broken.length;
+  if (broken.length === 0) {
     pass++;
-    console.log(`  ✓ ${key.padEnd(10)} chainId ${chain.chainId}, receipts OK, USDC ${row.usdcBytes}B — ${chain.rpc}`);
-  } else if (row.kind === "unreachable" || STRICT) {
+    console.log(`  ✓ ${key.padEnd(10)} chainId ${chain.chainId}, ${healthy.length} endpoint(s) OK, USDC ${healthy[0].usdcBytes}B`);
+    for (const h of healthy) console.log(`      · ${h.url}`);
+  } else if (fatal) {
     fail++;
-    console.log(`  ✗ ${key.padEnd(10)} ${chain.rpc}`);
-    for (const p of row.problems) console.log(`      ${p}`);
+    console.log(`  ✗ ${key.padEnd(10)} ${healthy.length}/${endpoints.length} endpoint(s) usable`);
+    for (const b of broken) { console.log(`      ✗ ${b.url}`); for (const p of b.problems) console.log(`          ${p}`); }
   } else {
     warn++;
-    console.log(`  ⚠ ${key.padEnd(10)} ${chain.rpc} — TRANSIENT, not failing the gate`);
-    for (const p of row.problems) console.log(`      ${p}`);
+    console.log(`  ⚠ ${key.padEnd(10)} ${healthy.length}/${endpoints.length} usable — TRANSIENT on the rest, not failing the gate`);
+    for (const b of broken) { console.log(`      ⚠ ${b.url}`); for (const p of b.problems) console.log(`          ${p}`); }
   }
-  results.push(row);
+
+  // ⭐ THE RESIDUAL SPOF, NAMED. One endpoint is the exact configuration that produced twelve days
+  // of silence. It does not fail the gate — a chain with one working endpoint still works — but it
+  // must never be mistaken for a healthy row.
+  if (endpoints.length < 2) {
+    warn++;
+    console.log(`      ⚠ ${key} has ONLY ${endpoints.length} endpoint — a single point of failure for verification`);
+  }
+  results.push({ key, healthy: healthy.length, total: endpoints.length });
+}
+
+// ⭐ DEGRADED REDUNDANCY IS ITS OWN HEADLINE. A chain reading fine on one of two endpoints is not
+// "ok" — it is one outage from the original incident, and the fallback is what makes that invisible.
+// ⚠️ `healthy >= 1` IS LOAD-BEARING, AND ITS ABSENCE WAS CAUGHT BY THIS GATE'S OWN CALIBRATION.
+// Without it a chain with 0/2 usable endpoints was swept into this sentence and told the reader
+// "verification still works" — about a chain that cannot be read at all. A fully-dead chain is
+// already reported above as UNUSABLE; this line is only about chains that are one outage away.
+const degraded = results.filter((r) => r.total > 1 && r.healthy >= 1 && r.healthy < r.total);
+if (degraded.length) {
+  console.log(`\n⚠️  REDUNDANCY DEGRADED on ${degraded.length} chain(s): ` +
+    degraded.map((d) => `${d.key} ${d.healthy}/${d.total}`).join(", ") +
+    ` — verification still works, but these are back to a single surviving endpoint.`);
 }
 
 console.log("\n" + "─".repeat(92));

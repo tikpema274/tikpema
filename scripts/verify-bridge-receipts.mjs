@@ -903,8 +903,8 @@ section("14 — THE DEAD ENDPOINT: a permanent fault must not wear a transient c
   // ── THE URL ITSELF ─────────────────────────────────────────────────────────────────────────
   check("⭐⭐ the DEAD host is gone from the config — it resolved nowhere for twelve days",
     !Object.values(DESTINATION_CHAINS).some((c) => /rpc-amoy\.polygon\.technology/.test(c.rpc)));
-  check("  …polygon points at a host that answers, and the chainId pin is unchanged at 80002",
-    /^https:\/\//.test(DESTINATION_CHAINS.polygon.rpc) && DESTINATION_CHAINS.polygon.chainId === 80002);
+  check("  …polygon points at hosts that answer, and the chainId pin is unchanged at 80002",
+    DESTINATION_CHAINS.polygon.rpcs.every((u) => /^https:\/\//.test(u)) && DESTINATION_CHAINS.polygon.chainId === 80002);
   check("⭐ every destination still pins BOTH a chainId and a USDC address — the two things that make a read PROOF",
     Object.values(DESTINATION_CHAINS).every((c) => Number.isInteger(c.chainId) && /^0x[0-9a-fA-F]{40}$/.test(c.usdc)));
 
@@ -925,13 +925,86 @@ section("14 — THE DEAD ENDPOINT: a permanent fault must not wear a transient c
     pkg.scripts["deploy:prod"].indexOf("gate:rpc") < pkg.scripts["deploy:prod"].indexOf("netlify deploy"));
   const gateSrc = fs3.readFileSync("scripts/verify-destination-rpcs.mjs", "utf8");
   check("⭐⭐ the gate fails on `unreachable` but only WARNS on transient — a gate that blocks on someone else's bad minute gets disabled",
-    /row\.kind === "unreachable" \|\| STRICT/.test(gateSrc));
+    /kind === "unreachable"\) \|\| healthy\.length === 0 \|\| STRICT/.test(gateSrc));
+  check("⭐⭐ …and a chain with only ONE endpoint is called out as the residual single point of failure",
+    /single point of failure for verification/.test(gateSrc));
+  check("⭐⭐ …and DEGRADED redundancy is its own headline — a dead SECONDARY is invisible at runtime",
+    /REDUNDANCY DEGRADED/.test(gateSrc) && /r\.healthy >= 1/.test(gateSrc));
   check("⭐ …checks the chainId PIN, not merely liveness — a healthy RPC for the wrong chain is worse than a dead one",
     /CHAIN MISMATCH/.test(gateSrc));
   check("⭐ …checks eth_getTransactionReceipt is actually permitted, not just eth_chainId",
     /eth_getTransactionReceipt/.test(gateSrc));
   check("⭐⭐ …and that the PINNED USDC has code — proof the endpoint is that chain AND the address is real",
     /HAS NO CODE/.test(gateSrc));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("15 — TWO ENDPOINTS PER CHAIN: the single point of failure, closed");
+// 🚨 Swapping the dead Amoy URL fixed ONE instance and left the architecture unchanged: every chain
+// still had exactly one endpoint, so the next decommissioned host reproduces the same twelve-day
+// silence elsewhere. ⚠️ FALLBACK, NOT QUORUM — integrity here is already pinned three ways (chainId,
+// USDC address, recipient), so requiring AGREEMENT would turn a second endpoint being down into a
+// REFUSAL: an availability fix that invents a new way to fail.
+{
+  const { DESTINATION_CHAINS: CH, verifyMintOnChain } = await import("../netlify/functions/_receipt.mjs?real2");
+  const RECIP = "0x" + "ab".repeat(20);
+  const HASH = "0x" + "d4".repeat(32);
+  const TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+  const padded = "0x" + "0".repeat(24) + RECIP.slice(2);
+
+  check("⭐⭐ EVERY chain carries at least two endpoints — no chain is one dead host from silence",
+    Object.values(CH).every((c) => Array.isArray(c.rpcs) && c.rpcs.length >= 2),
+    Object.entries(CH).map(([k, c]) => `${k}:${c.rpcs.length}`).join(" "));
+  check("⭐ …and the two are DIFFERENT hosts (a duplicate would be redundancy in name only)",
+    Object.values(CH).every((c) => new Set(c.rpcs.map((u) => new URL(u).host)).size === c.rpcs.length));
+
+  // ⚠️ `base`, NOT `polygon`: this suite mocks _bridge.mjs with a BRIDGE_DESTINATIONS containing only
+  // `base`, and verifyMintOnChain refuses an unlisted destination before it ever reads a chain. The
+  // fixture must live inside the mock's world or it tests the refusal instead of the fallback.
+  // A fetch stub keyed on URL: each endpoint can succeed, throw, or lie about its chain.
+  const realFetch = globalThis.fetch;
+  const ok = (result) => ({ ok: true, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+  const receipt = { status: "0x1", blockNumber: "0x10", logs: [
+    { address: CH.base.usdc, topics: [TRANSFER, padded, padded], data: "0x" + (949990).toString(16) },
+  ] };
+  const drive = (behaviour) => {
+    globalThis.fetch = async (url, init) => {
+      const m = JSON.parse(init.body).method;
+      const b = behaviour[new URL(url).host];
+      if (b === "dead") { const e = new Error("fetch failed"); e.cause = { code: "ENOTFOUND" }; throw e; }
+      if (b === "slow") { const e = new Error("timeout"); e.cause = { code: "UND_ERR_HEADERS_TIMEOUT" }; throw e; }
+      if (b === "wrongchain") return ok("0x1");
+      if (m === "eth_chainId") return ok("0x" + CH.base.chainId.toString(16));
+      if (m === "eth_getTransactionReceipt") return ok(receipt);
+      return ok("0x00");
+    };
+  };
+  const [P1, P2] = CH.base.rpcs.map((u) => new URL(u).host);
+  const verify = () => verifyMintOnChain({ destinationKey: "base", mintTxHash: HASH, recipient: RECIP });
+
+  drive({ [P1]: "dead", [P2]: "live" });
+  let r = await verify();
+  check("⭐⭐ PRIMARY DEAD, secondary alive ⇒ the mint still VERIFIES — the twelve-day silence, prevented",
+    r.verified === true, JSON.stringify(r).slice(0, 90));
+
+  drive({ [P1]: "dead", [P2]: "dead" });
+  r = await verify();
+  check("⭐⭐ BOTH dead ⇒ rpc_error with aggregate kind `unreachable` — ours, permanent, gate-catchable",
+    r.verified === false && r.reason === "rpc_error" && r.failureKind === "unreachable");
+  check("  …and it names how many endpoints were tried, so 'it failed' cannot hide 'all of them failed'",
+    r.endpointsTried === 2);
+
+  drive({ [P1]: "dead", [P2]: "slow" });
+  r = await verify();
+  check("⭐⭐ one dead + one TIMED OUT ⇒ aggregate is `transient`, NOT unreachable — a mixed set must not be called permanent",
+    r.failureKind === "transient");
+
+  drive({ [P1]: "wrongchain", [P2]: "live" });
+  r = await verify();
+  check("⭐⭐ a WRONG-CHAIN primary is NOT retried onto the sibling — that is a config fault, and falling through would hide it",
+    r.verified === false && r.reason === "chain_mismatch" && r.saw === 1);
+
+  globalThis.fetch = realFetch;
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
