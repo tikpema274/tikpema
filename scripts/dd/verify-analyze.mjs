@@ -318,6 +318,24 @@ console.log("\n── ROW 8 · ⭐ QUORUM MATRIX: agree→value, everything else
      bothDown.coverage.notChecked.every((n) => n.reason !== "rpc-disagreement"),
      "BOTH-THROW is an instrument failure, NOT a provider disagreement — the two must not blur");
 
+  // ─── ⭐⭐ ROW 8c · ONE MAPPING, AND IT IS THE ONE THAT OWNS THE TAGS ──────────────────────────
+  // 🚨 quorum.mjs raises the failure tags AND exported `quorumReasonFor` to translate them — and
+  // coverage.mjs carried its own INLINE COPY of the same table. ⚠️ The function had ZERO CALLERS
+  // while its own docblock said "Consumed by coverage.runCheck": the extraction had been done, the
+  // consumption never happened, and the comment asserted a relationship that did not exist.
+  // ⭐ THE BEHAVIOURAL PROOF IS THE MUTATION, NOT THIS GREP: changing the single mapping turns six
+  // checks in this row red. Before the dedupe the same mutation changed NOTHING, because nothing
+  // called it. These two checks only stop the copy coming back.
+  {
+    const fs = await import("node:fs");
+    const pkg = ["quorum.mjs", "coverage.mjs", "index.mjs", "endpoints.mjs"]
+      .map((f) => fs.readFileSync(new URL(`../../shared/onchain-analyze/${f}`, import.meta.url), "utf8"));
+    const copies = pkg.filter((src) => /"chain-disagreement":\s*"rpc-disagreement"/.test(src)).length;
+    ok(copies === 1, `the tag→reason table is defined EXACTLY ONCE across the package (found ${copies})`);
+    ok(/import \{ quorumReasonFor \} from "\.\/quorum\.mjs"/.test(pkg[1]),
+       "…and coverage.mjs imports it rather than re-listing it");
+  }
+
   // 6. Nothing ever escapes as an exception.
   let threw = false;
   try { await analyze(SUBJ, { client: q({ [`code@${SUBJ}`]: transientThrow }, { [`code@${SUBJ}`]: revertThrow }) }); } catch { threw = true; }

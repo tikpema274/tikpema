@@ -1,5 +1,50 @@
 ---
 
+## 2026-08-16 (latest) — ⭐ THE DUPLICATE MAPPING WAS NOT AN OVERSIGHT ANYONE COULD SEE: the extraction was already done and never consumed.
+
+✅ The six DD-surface rows deployed first — `5197f78` live as `6a80684d87024bbcbb019123`, gate 13/13,
+both commits pushed.
+
+### THE FINDING — worse than a duplicate, and self-concealing
+
+`quorum.mjs` raises the failure tags and **already exported `quorumReasonFor(e)`** to translate them,
+with a docblock reading *"Consumed by coverage.runCheck."* Meanwhile `coverage.mjs` carried its own
+**inline copy** of the same table.
+
+⭐⭐ **THE EXPORTED FUNCTION HAD ZERO CALLERS.** So this was not a copy someone forgot to remove — the
+extraction HAD been done, the consumption never happened, and the comment asserted a relationship
+that did not exist. Reading either file alone showed a correct, deduplicated design.
+
+⚠️ **AND IT IS THE SWEEP ITEM AGAIN, IN THE WILD:** *"the string appears" is not "the call happens."*
+An exported, documented, well-named function that nothing calls reads exactly like a single source of
+truth — right up until you grep for callers.
+
+### ✅ CHECKED FOR DRIFT BEFORE MERGING
+
+The two tables were **byte-identical** — no drift yet. That matters: had they drifted, deduping would
+have silently changed behaviour on one path, and the merge would have needed a decision rather than a
+deletion. Verified first, merged second.
+
+### THE PROOF IS BEHAVIOURAL, NOT A GREP
+
+⭐⭐ Mutating the SINGLE mapping (`disagreement → "rpc-MUTATED"`) turns **six checks red** in
+verify-analyze. **Before the dedupe that same mutation changed nothing**, because nothing called the
+function — which is the cleanest possible demonstration that the call now happens.
+
+Two structural guards stop the copy returning: the tag→reason table must appear **exactly once**
+across the package, and `coverage.mjs` must import it. Mutation-tested by re-inserting the inline
+copy → red (`found 2`).
+
+`verify-analyze` 85 → **87/0**. All 14 DD suites, bridge, tsc + build clean.
+
+### STATE
+
+* ⛔ **UNDEPLOYED.**
+* 🚧 The source-grep sweep is now the last item on this thread — and this entry is the third distinct
+  instance in two days (a dead `indexOf` check, a tautological `||`, and an exported function nobody
+  called). The pattern is not "regexes are brittle"; it is **assertions that confirm the presence of
+  a thing rather than the occurrence of an action.**
+
 ## 2026-08-16 (late) — ⭐ THE CODE-IDENTITY HASH NOW COVERS EVERYTHING `dd-analyze` RUNS. Six rows, and the decision was measured.
 
 ✅ The `shared/dd` move deployed first — `70b92c0` live as `6a8061f296b74871ed42fc9f`, gate 12/12.

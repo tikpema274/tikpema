@@ -30,6 +30,8 @@
  * A coverage recorder. One per analyze() call, threaded through BOTH the shape stage and the
  * enumeration stage — shape reads can fail too, and a failed shape read belongs in the manifest.
  */
+import { quorumReasonFor } from "./quorum.mjs";
+
 export function makeCoverage() {
   const checked = [];
   const notChecked = [];
@@ -80,10 +82,15 @@ export function makeCoverage() {
         // `.transient` is tagged by scripts/dd/rpc.mjs:89 and is the exact discriminator between
         // "we could not ask" (retries exhausted on the transient class) and "the chain answered, and
         // the answer was an error" (e.g. execution reverted). Collapsing those is defect A's shape.
+        // ⭐⭐ THE MAPPING LIVES IN quorum.mjs, WHICH RAISES THE TAGS — one definition, and the one
+        // that owns them. It was already exported as `quorumReasonFor`, already documented as
+        // "Consumed by coverage.runCheck", and had ZERO callers: this file carried its own inline
+        // copy of the same table. ⚠️ So the duplicate was not an oversight anyone could see — the
+        // extraction HAD been done, the consumption never happened, and the comment asserted a
+        // relationship that did not exist. "The string appears" is not "the call happens", again.
         const reason =
           e?.quorumFailed
-            ? ({ disagreement: "rpc-disagreement", "chain-disagreement": "rpc-disagreement",
-                 "quorum-unmet": "rpc-quorum-unmet", unreadable: "rpc-unreadable" }[e.quorumReason] ?? "rpc-quorum-unmet")
+            ? quorumReasonFor(e)
             : e?.transient ? "rpc-unreadable"
             : e?.unreadableInput ? "input-unreadable"
             : "check-error";
