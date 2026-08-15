@@ -23,6 +23,15 @@
 // code for another day. The failure has no symptom at the place a human looks — which is the
 // same absence-reads-as-safety shape this repo keeps re-learning, moved up into the deploy step.
 //
+// 🚨 "FIVE" WAS AN UNDERCOUNT BY 7×. An UNFILTERED scan on 2026-08-15 (300 deploys, 3 pages) found
+// 36 abandoned records — 27 production, 9 deploy-preview — going back to 2026-07-01, which is only
+// as far as the API reaches. 35 of 36 carried `updated_at == created_at`; one died mid-UPLOAD, 12.5
+// minutes in. All were cancelled, so the deploy list can no longer be used to count this class —
+// the tally survives ONLY in PROGRESS.md. ⭐ Check 5 could never have surfaced them: it scopes to
+// deploys newer than the published one, so it asks "did I lose the deploy I just ran", never "is
+// this still happening". Every earlier look used per_page:25 — a filtered read is not a measurement
+// of absence, and one page deeper turned an incident into a rate.
+//
 // ⚠️ WHY IT TAKES SO LONG TO FAIL, and why the window is wide enough to matter: the CLI bundles
 // ~60 functions with esbuild before it uploads them. That phase ran 15+ minutes on the 2026-08-14
 // deploy, at 150% CPU, with the deploy record sitting at `new` and `updated_at == created_at` the

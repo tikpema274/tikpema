@@ -194,9 +194,10 @@ fixture into a phantom defect in the entry below.
 
 ### ⚠️ WHAT THIS DOES NOT CLAIM
 
-* **The orphan record is still there.** `6a80c2a311767fb9e735f610` will sit at `new` forever. Check 5
-  now passes because its scope is *deploys newer than the published one* — correct for "did I lose MY
-  deploy", and **not** a claim that old records were cleaned up.
+* **Check 5's scope is "did I lose MY deploy", not "has this ever happened".** It looks only at
+  deploys *newer than the published one*, so once a good deploy lands it narrows to zero — correct
+  for its question, and **not** a claim that old records were cleaned up. See the backlog below,
+  which check 5 was structurally incapable of surfacing.
 * **Both tests are about THIS machine.** A deploy driven from another machine or from CI reads as
   dead here. Deliberate trade, and the costs are asymmetric: a false ORPHANED costs one redundant
   ~26-minute deploy, a false IN FLIGHT costs a change everyone believes shipped and nobody re-checks.
@@ -208,6 +209,60 @@ fixture into a phantom defect in the entry below.
 Files: new `scripts/lib/deploy-liveness.mjs`, new `scripts/verify-deploy-liveness.mjs`; modified
 `scripts/verify-deployed.mjs` (check 5 rewritten, helpers imported), `package.json` (`test:liveness`).
 All outside the stamped surface, so the verified deploy identity is untouched.
+
+### 🚨🚨 THEN AN UNFILTERED SCAN FOUND **36** OF THEM, NOT FIVE — GOING BACK TO THE FIRST DAY THE API CAN SEE
+
+Cleaning up the one orphan meant listing the deploys without a filter. `deploy:prod` has been
+silently losing deploys **since at least 2026-07-01**, and "the five silent failures, 2026-08-14" was
+an undercount by a factor of seven.
+
+| | |
+|---|---|
+| deploys scanned (3 pages) | **300**, oldest `2026-07-01T07:26:39Z` |
+| non-`ready` | **44** |
+| **limbo** (`new` 35 + `uploading` 1) | **36** — 27 production, 9 deploy-preview |
+| of those with `updated_at == created_at` | **35 of 36** — the killed-instantly signature |
+| already terminal, left untouched | 8 — five prior `Deploy canceled`, plus two REAL build errors |
+
+⭐ **The one exception is the most informative record in the set.** `6a5a0230d556905d8ebd9efd` sat in
+state **`uploading`**, created `10:21:36Z` and last touched `10:34:09Z` — it died **12.5 minutes in,
+during the upload**, not at creation. Every other one was killed before it could touch its own
+record. That is a second death, at a second point in the deploy, that the gate had no name for.
+
+⭐⭐ **CHECK 5 WOULD NEVER HAVE FOUND ANY OF THESE, AND THAT IS BY DESIGN.** It scopes to deploys
+*newer than the published one*. The 2026-08-14 five were visible only because production was, at that
+moment, stuck behind them. Every deploy that dies and is then succeeded by a good one becomes
+invisible to the gate the instant the good one publishes. So the gate answers *"did I lose the deploy
+I just ran"* — it has never answered *"is this still happening"*, and a class that only shows up when
+you are already in trouble looks like it is not happening at all.
+
+⚠️ **This was found only because the read was UNFILTERED.** Every previous look was `per_page:25` and
+scoped past the published deploy — the repo's own rule, [filtered-read-is-not-absence], applied to
+the deploy list itself. One page deeper and the incident stops being an incident and becomes a rate.
+
+### WHAT WAS ACTUALLY DONE TO THEM — AND WHAT IT COST
+
+🚨 **DELETE IS NOT AVAILABLE.** Both `deleteDeploy` and `deleteSiteDeploy` return **405 Method Not
+Allowed**; Netlify's UI offers only a bulk site-wide purge. All 36 were **cancelled** instead
+(`cancelSiteDeploy`), which is strictly less destructive and achieves the real goal: the failure was
+never that the records existed, it was that they *read as successes*. Each now carries
+`state: error`, `error_message: "Deploy canceled"`, `updated_at != created_at` — none of the three
+signatures survives. Verified by re-listing all 300 afterwards: **0 limbo remaining**, 256 `ready` +
+44 `error`, published head `6a80cdb7…` untouched and still serving (HTTP 200).
+
+⚠️ **THE COST, STATED PLAINLY: cancelling OVERWROTE the evidence.** A cancelled orphan is now
+indistinguishable from a deploy a human cancelled on purpose — the five that were already
+`Deploy canceled` before today may themselves have been orphans, and that is no longer knowable. **The
+deploy list can no longer be used to count this class, and the tally in this entry is now the only
+surviving record of it.** That is why the numbers above are written down instead of merely acted on.
+
+⚠️ **`2026-07-01` IS THE API'S REACH, NOT THE BEGINNING.** 300 records is where the scan stopped.
+Whether deploys were being lost before that is **unknown**, not zero.
+
+**Still open:** nothing here changes `deploy:prod`. The class is now measured, named, and the gate
+catches the *current* deploy — but the standing question this raises is whether a periodic unfiltered
+sweep should exist at all, since the only reason 36 records surfaced today is that somebody happened
+to look sideways while cleaning up one of them.
 
 ---
 
