@@ -1,5 +1,74 @@
 ---
 
+## 2026-08-15 (night) — ⭐ `src` JOINS THE STAMPED SURFACE. Two production deploys had passed a tree check that could not see what changed.
+
+✅ **The copy-suite conversion deployed first** — `dd16f23` live as `6a80206da3bffeead9e12042`,
+`gate:deployed` ran (eight for eight), and pushed.
+
+### 🚨 THE DEFECT, VISIBLE IN THE GATE'S OWN OUTPUT TWICE
+
+`SURFACES` was `["netlify/functions", "shared"]`. The tree hash is documented as THE IDENTITY of a
+deployed artifact, and `verify-deployed` compares it to decide whether production serves the build in
+hand. But a commit touching only `src/` produced a **byte-identical tree** — so `0d16bfc` and
+`dd16f23` both reported `✓ production serves THIS tree` against a hash that could not have
+distinguished them. ⭐⭐ **THE CHECK PASSED WITHOUT EXAMINING THE THING THAT CHANGED: the client
+bundle.** Only the COMMIT line verified those two deploys, and the commit is explicitly documented as
+provenance rather than identity.
+
+⚠️ A hash that cannot see the change under test is not a weaker check — it is a check reporting on
+something else, and it reported PASS both times.
+
+### ⭐ AND THE DRIFT GUARD WAS BLIND IN EXACTLY THE DIRECTION THIS CHANGE MOVES
+
+`checkTreeClean` keeps a deliberate second copy of `SURFACES` and asserts it against the stamp's
+source, with a header warning about precisely this: *"the stamp would start hashing a directory this
+gate never checks, and the gate would pass while the artifact drifted."* But the comparison asked
+only **"is every dir I know still named in the stamp?"** — which catches a REMOVAL and is blind to an
+ADDITION. ⭐⭐ **Widening SURFACES would have sailed straight past it**, leaving the gate checking the
+narrower surface while the stamp hashed the wider one.
+
+It now parses the real array and compares **as a set, in both directions**, naming which side is
+missing what and why it matters.
+
+### MEASURED, NOT ASSUMED
+
+| | before | after |
+|---|---|---|
+| `tree` | `3a18eb54d4db…` | **`5f45be3be525…`** changed |
+| `ddTree` | `f4c8ec9bfa4d…` | **`f4c8ec9bfa4d…`** UNCHANGED |
+| files | 119 | 155 |
+
+⭐ **I HAD WARNED THAT WIDENING WOULD SHIFT `ddCodeIdentity`. THAT WAS WRONG.** `ddPaths` is filtered
+out of the same walk by `DD_SURFACE_DIRS`/`DD_SURFACE_FILES`, none of which match `src/` — so the DD
+health identity keeps its exact meaning and no DD refusal window opens. Checked in the code and then
+confirmed by the regenerated stamp, rather than trusted either way.
+
+⚠️ **`dist/` stays excluded** — it is build OUTPUT, so hashing it would make the stamp depend on the
+build it is stamping. `src/` is that output's INPUT and is stamped in `prebuild`, before vite runs.
+
+### PROOF
+
+**Four mutations, all red, restore green:**
+
+| mutation | verdict |
+|---|---|
+| stamp ADDS a surface the gate does not check | ❌ *"The stamp hashes config and this gate does NOT — a dirty deploy on those paths would pass unnoticed"* |
+| stamp REMOVES a surface | ❌ named in the other direction |
+| the SURFACES array becomes unparseable | ❌ refuses rather than guessing |
+| a DIRTY `src/` file | ❌ **GATE FAILS. DO NOT PROMOTE** — the new behavioural consequence |
+
+Full repo green: DD 14 suites, bridge 171/111/72/78, copy 32, vault, ub, quote, routes, rpc,
+strong-read-watch 230, blobs-probe 71, tsc + build clean. `gate:watch` now reports
+*"clean across netlify/functions, shared, src"*.
+
+### STATE
+
+* ⛔ **UNDEPLOYED** — and this deploy is the one that matters: it is the first whose tree hash
+  genuinely covers the client. Every subsequent client-only change will be verified by the tree
+  rather than by the commit alone.
+* ⚠️ **A DIRTY `src/` NOW BLOCKS PROMOTION.** That is the intended consequence and it is stricter
+  than before — an uncommitted client edit is now deploy drift, because it now IS.
+
 ## 2026-08-15 (evening) — ⭐ THE LAST SOURCE-SCANNING COPY GUARD IS GONE. Its own header asked for this, and had done since the day it was written.
 
 ✅ **The silent-row fix deployed first** — `af28b53` live as `6a80187cb24a4ab9c0828c46`, both gates

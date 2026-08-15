@@ -245,10 +245,17 @@ if (probe) {
     //
     // It originally FAILED on any commit mismatch. Minutes after being committed it reported
     // "❌ DEPLOY NOT VERIFIED — local 2c904a6 vs served 412e8d0" for a production site that was
-    // serving a byte-identical deployed surface. The stamped surface is `netlify/functions` and
-    // `shared` ONLY (scripts/stamp-build.mjs SURFACES), so a commit touching PROGRESS.md, package.json
-    // or scripts/ advances HEAD and changes NOTHING that is deployed. The tree hash proved it: same
-    // 5dd4439e… on both sides, different commits.
+    // serving a byte-identical deployed surface. The stamped surface is a fixed set of directories
+    // (scripts/stamp-build.mjs SURFACES), so a commit touching PROGRESS.md, package.json or scripts/
+    // advances HEAD and changes NOTHING that is deployed. The tree hash proved it: same 5dd4439e…
+    // on both sides, different commits.
+    //
+    // ⚠️ UPDATED 2026-08-15 — THE SURFACE WAS TOO NARROW, AND THIS CHECK IS WHY WE KNOW. It was
+    // `netlify/functions` + `shared` only, which meant a commit touching just `src/` also produced a
+    // byte-identical tree. Two production deploys (`0d16bfc`, `dd16f23`) passed check 3 against a
+    // hash that could not have distinguished them, and only the commit line verified them.
+    // ⭐ `src` is now part of SURFACES, so the tree once again identifies the whole artifact and this
+    // clause covers only what it should: commits outside the deployed surface entirely.
     //
     // ⚠️ THAT IS A FALSE ALARM ON A SAFETY GATE, which is not a small bug — it is how a gate teaches
     // people to ignore it, and an ignored gate is the same as no gate. It is also the identical shape

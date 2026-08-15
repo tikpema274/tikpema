@@ -694,7 +694,15 @@ const { checkTreeClean } = await import("../scripts/verify-watch-promotion-gate.
   // LOUD, or the gate silently checks paths the stamp no longer hashes.
   const stampSrc = readFileSync(new URL("../scripts/stamp-build.mjs", import.meta.url), "utf8");
   check("⭐⭐ the gate's SURFACES are pinned to the stamp's, not a second copy",
-    stampSrc.includes('"netlify/functions"') && stampSrc.includes('"shared"'));
+    stampSrc.includes('"netlify/functions"') && stampSrc.includes('"shared"') && stampSrc.includes('"src"'));
+  // ⭐⭐ `src` JOINED THE SURFACE 2026-08-15, because a commit touching only the client produced a
+  // byte-identical tree and `verify-deployed` reported "production serves THIS tree" twice against
+  // a hash that could not have distinguished those deploys.
+  // ⚠️ AND THE DRIFT CHECK ITSELF WAS ONE-DIRECTIONAL — it asked only whether every dir the gate
+  // knows is still named in the stamp, so ADDING a surface passed silently and the gate would have
+  // gone on checking the narrower one. It now compares the parsed arrays as SETS, both ways.
+  check("⭐⭐ the drift check compares SURFACES as a SET, so an ADDED surface is caught too",
+    /missingHere|missingThere/.test(readFileSync(new URL("../scripts/verify-watch-promotion-gate.mjs", import.meta.url), "utf8")));
   check("  …and the self-exclusion is pinned too",
     stampSrc.includes("shared/build-stamp.generated.mjs"));
 }

@@ -34,9 +34,29 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "shared", "build-stamp.generated.mjs");
 
-/** Everything Netlify actually deploys as function code. `dist/` is excluded on purpose: it is a
- *  build OUTPUT, so hashing it would make the stamp depend on the build it is stamping. */
-const SURFACES = ["netlify/functions", "shared"];
+/**
+ * Everything Netlify actually deploys — server functions AND the client the browser runs.
+ *
+ * ⚠️ `dist/` is excluded on purpose: it is a build OUTPUT, so hashing it would make the stamp
+ * depend on the build it is stamping. `src/` is that output's INPUT and is stamped in `prebuild`,
+ * before vite runs, so hashing it is stable and non-circular.
+ *
+ * ═══ 🚨 WHY `src` WAS ADDED (2026-08-15) ═════════════════════════════════════════════════════
+ * The tree hash is documented as THE IDENTITY of a deployed artifact, and `verify-deployed`
+ * compares it to decide whether production is serving the build in hand. With only the two server
+ * surfaces, a commit touching ONLY `src/` produced a byte-identical tree — so two consecutive
+ * production deploys (`0d16bfc`, `dd16f23`) both reported "production serves THIS tree" against a
+ * hash that could not have distinguished them. ⭐⭐ THE CHECK PASSED WITHOUT EXAMINING THE THING
+ * THAT CHANGED: the client bundle. Only the COMMIT check verified those deploys, and the commit is
+ * explicitly documented here as provenance rather than identity.
+ *
+ * ⚠️ A hash that cannot see the change under test is not a weaker check, it is a check that reports
+ * on something else entirely — and it reported PASS both times.
+ *
+ * ⭐ `ddTree` is UNAFFECTED: it is filtered out of this same walk by DD_SURFACE_DIRS/FILES, none of
+ * which match `src/`, so the DD health identity keeps its exact meaning. Verified, not assumed.
+ */
+const SURFACES = ["netlify/functions", "shared", "src"];
 
 /** Excluded from BOTH the tree hash and the dirty check — hashing the stamp into itself is
  *  circular, and its own regeneration is not source drift. */

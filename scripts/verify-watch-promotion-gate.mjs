@@ -222,7 +222,7 @@ const PROBE_TIMEOUT_MS = 8000;
  * @returns {{ok:boolean, reason:string, detail:string, dirtyPaths:string[]|null}}
  */
 export function checkTreeClean({ root = new URL("..", import.meta.url) } = {}) {
-  const SURFACES = ["netlify/functions", "shared"];
+  const SURFACES = ["netlify/functions", "shared", "src"];
   const SELF = "shared/build-stamp.generated.mjs";
   const no = (reason, detail, dirtyPaths = null) => ({ ok: false, reason, detail, dirtyPaths });
 
@@ -236,12 +236,37 @@ export function checkTreeClean({ root = new URL("..", import.meta.url) } = {}) {
       `could not read scripts/stamp-build.mjs (${err?.code || err?.name}) — cannot confirm this gate ` +
       `checks the same surface the stamp hashes`);
   }
-  for (const dir of SURFACES) {
-    if (!stampSrc.includes(`"${dir}"`)) {
-      return no("surfaces-drifted",
-        `scripts/stamp-build.mjs no longer names "${dir}" in its SURFACES. The stamp and this gate ` +
-        `would be measuring different things. Update BOTH, deliberately.`);
-    }
+  // ⭐⭐ COMPARED AS A SET, IN BOTH DIRECTIONS — this check used to be one-directional.
+  //
+  // 🚨 IT ASKED ONLY "is every dir I know still named in the stamp?", which catches a REMOVAL or a
+  // rename and is blind to an ADDITION. So the stamp could start hashing a new surface while this
+  // gate went on checking the old, narrower one — silently passing a dirty deploy on the very
+  // directory that had just been declared deployable. ⚠️ That is precisely the failure its own
+  // header warns about ("the stamp would start hashing a directory this gate never checks"), left
+  // reachable by the shape of the comparison.
+  //
+  // ⭐ FOUND BY ADDING `src` ON 2026-08-15: the widening would have passed this check untouched.
+  // Parsing the real array and comparing sets makes both directions loud.
+  const declared = (() => {
+    const m = stampSrc.match(/const\s+SURFACES\s*=\s*\[([^\]]*)\]/);
+    if (!m) return null;
+    return [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
+  })();
+  if (!declared) {
+    return no("surfaces-drifted",
+      `could not parse the SURFACES array out of scripts/stamp-build.mjs — this gate cannot confirm ` +
+      `it checks the same surface the stamp hashes, so it refuses rather than guessing.`);
+  }
+  const missingHere = declared.filter((d) => !SURFACES.includes(d));
+  const missingThere = SURFACES.filter((d) => !declared.includes(d));
+  if (missingHere.length || missingThere.length) {
+    return no("surfaces-drifted",
+      `SURFACES disagree. The stamp hashes [${declared.join(", ")}]; this gate checks ` +
+      `[${SURFACES.join(", ")}].` +
+      (missingHere.length ? ` The stamp hashes ${missingHere.join(", ")} and this gate does NOT — a dirty ` +
+        `deploy on those paths would pass unnoticed.` : "") +
+      (missingThere.length ? ` This gate checks ${missingThere.join(", ")} and the stamp does NOT.` : "") +
+      ` Update BOTH, deliberately.`);
   }
   if (!stampSrc.includes(SELF)) {
     return no("surfaces-drifted",
