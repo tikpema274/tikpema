@@ -201,6 +201,32 @@ export const CIRCLE_LANDED_STATE = "COMPLETE";
  *  be bucketed into a known outcome. */
 export const CIRCLE_DEAD_STATES = Object.freeze(["FAILED", "CANCELLED", "DENIED"]);
 
+/** The burn is on Arc and confirmed; the destination mint is Circle's to complete. */
+export const BURN_CONFIRMED_STATE = "burn_confirmed";
+
+/**
+ * ⭐⭐ EVERY STATE A RECEIPT CAN HOLD — COMPOSED, NEVER TRANSCRIBED.
+ *
+ * 🚨 WHY THIS EXISTS: the panel renders one branch per state, and a state it does not recognise
+ * rendered NOTHING — a row showing an amount and a destination with no status at all, which reads
+ * as ordinary. That is this panel's own core failure mode, and it was invisible to every source
+ * regex ever pointed at it; only rendering the component surfaced it.
+ *
+ * ⚠️ THE DANGEROUS VERSION OF THAT BUG IS NOT A TYPO — it is someone adding a legitimate new state
+ * on the server and not knowing the client had to learn it. Nothing would fail, nothing would look
+ * wrong, and one row would quietly go silent.
+ *
+ * ⭐ SO THIS IS BUILT FROM THE EXISTING CONSTANTS RATHER THAN LISTED AGAIN: a second hand-written
+ * list is a duplicate source of truth, and duplicates drift. `verify-bridge-copy.tsx` asserts BOTH
+ * directions across the server/client boundary — every state here renders a status, and every
+ * `state:` literal any writer emits appears here.
+ */
+export const ALL_RECEIPT_STATES = Object.freeze(
+  [SUBMITTED_STATE, SUBMIT_FAILED_STATE, BURN_CONFIRMED_STATE, ...TERMINAL_STATES].filter(
+    (v, i, a) => a.indexOf(v) === i
+  )
+);
+
 /** `o/<owner>/tx-<txId>` — the provisional index. See the block above. */
 export function pendingReceiptKey(owner, txId) {
   return `o/${norm(owner)}/tx-${norm(txId)}`;

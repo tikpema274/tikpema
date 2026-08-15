@@ -34,7 +34,7 @@
 // for a rendering test is the stronger guarantee anyway, and `npm run test:bridgecopy` runs it.
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { BridgeReceiptStatus, type BridgeReceiptView } from "../src/components/bridgeReceiptStatus";
+import { BridgeReceiptStatus, KNOWN_RECEIPT_STATES, type BridgeReceiptView } from "../src/components/bridgeReceiptStatus";
 
 let pass = 0, fail = 0;
 const check = (label: string, cond: boolean, extra = "") => {
@@ -56,8 +56,13 @@ const text = (r: BridgeReceiptView) =>
 
 /** How many status branches rendered at once. ⭐ A row must say exactly ONE thing; two matching
  *  branches would paint two contradictory sentences and no source regex could ever notice. */
-const spans = (r: BridgeReceiptView) =>
-  (renderToStaticMarkup(<BridgeReceiptStatus r={r} />).match(/<span/g) || []).length;
+const spans = (r: BridgeReceiptView) => {
+  // ⚠️ The fallback nests a `<span class="mono">` to show the raw state, so a naive `<span` count
+  // reports 2 for a row that says exactly one thing. Count STATUS spans only — the nested
+  // identifier is part of one sentence, not a second sentence.
+  const html = renderToStaticMarkup(<BridgeReceiptStatus r={r} />);
+  return (html.match(/<span/g) || []).length - (html.match(/<span class="mono"/g) || []).length;
+};
 
 console.log("╔══════════════════════════════════════════════════════════════════════╗");
 console.log("║  BRIDGE RECEIPT COPY — RENDERED, not grepped                         ║");
@@ -172,17 +177,102 @@ section("6 — NUMBERS ARE FORMATTED, NOT DUMPED");
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
 section("7 — THE UNKNOWN STATE MUST NOT RENDER SILENCE");
-// ⭐⭐ THE ONE A REGEX COULD NEVER CATCH. A receipt in a state this component does not know about
-// would render an EMPTY status — a row with an amount and no words, which reads as normal.
+// ⭐⭐ THE GAP RENDERING FOUND, NOW CLOSED. A receipt in an unrecognised state used to render
+// NOTHING — a row with an amount and a destination and no status, indistinguishable from an
+// ordinary one. Strictly worse than an error: an error prompts someone to look, a blank does not.
 {
   const alien = text({ state: "some_state_from_a_future_deploy" });
-  check("🚧 KNOWN GAP, ASSERTED SO IT CANNOT BE FORGOTTEN: an unknown state renders NOTHING",
-    alien === "", `rendered ${JSON.stringify(alien)}`);
-  console.log("      ⚠️ This is a REAL gap, recorded rather than hidden. The row still shows the amount");
-  console.log("         and destination, so an unknown state paints a row that looks ordinary. Closing it");
-  console.log("         needs a fallback branch; it is NOT closed by this commit, and this check will");
-  console.log("         start failing the moment someone adds one — which is the reminder.");
-  check("  …and an empty receipt likewise renders nothing", text({}) === "");
+  check("⭐⭐ an unknown state now renders a status instead of silence", alien.length > 0, alien.slice(0, 78));
+  check("⭐⭐ …it NAMES the raw state, the one datum that makes the row actionable",
+    /some_state_from_a_future_deploy/.test(alien));
+  check("⭐⭐ …and claims NOTHING in either direction about the money",
+    /not.{0,40}evidence that funds did or did not move/i.test(alien));
+  check("⭐ …it does not imply arrival", !/arrived|most likely arrived/i.test(alien));
+  check("⭐ …and does not imply failure either", !/\bfailed\b/i.test(alien));
+  check("  …exactly one status renders", spans({ state: "some_state_from_a_future_deploy" }) === 1);
+
+  const none = text({});
+  check("⭐⭐ a receipt with NO state says so, rather than rendering blank", /no status was recorded/i.test(none));
+  check("  …and still refuses to characterise the money", /did or did not move/i.test(none));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("8 — THE BINDING: the client must know every state the SERVER can write");
+// ⭐⭐ A GUARD CAN ONLY BE TRUSTED ACROSS WHAT IT BINDS. `KNOWN_RECEIPT_STATES` is a transcribed
+// copy of the server's vocabulary — unavoidable, since _bridge-receipts.mjs imports @netlify/blobs
+// and cannot enter the browser bundle — so the duplication is made safe HERE, by reading both
+// sides, rather than by hoping they stay in step.
+// 🚨 THE REALISTIC BUG IS NOT A TYPO: it is a legitimate new state added server-side that the
+// client never learned. Before the fallback that blanked a row silently; now it fails this suite.
+{
+  const server = await import("../netlify/functions/_bridge-receipts.mjs");
+  const ALL: string[] = [...server.ALL_RECEIPT_STATES];
+
+  check("⭐ the server exposes its state vocabulary as ONE composed list", ALL.length > 0, ALL.join(", "));
+  for (const st of ALL) {
+    const t = text({ state: st });
+    check(`⭐⭐ server state \`${st}\` renders a real status, not the fallback`,
+      t.length > 0 && !/unrecognised status/i.test(t), t.slice(0, 56));
+  }
+  check("⭐⭐ the client list and the server list are the SAME SET, both directions",
+    [...KNOWN_RECEIPT_STATES].sort().join("|") === ALL.slice().sort().join("|"),
+    `client=[${[...KNOWN_RECEIPT_STATES].sort()}] server=[${ALL.slice().sort()}]`);
+
+  // ⭐ AND EVERY WRITER IS CHECKED AGAINST THE VOCABULARY — a writer inventing a state that no
+  // constant declares would satisfy both lists above and still blank a row in production.
+  // ⚠️ SCOPED TO THE WRITERS OF *THIS* STORE, AND THE LIST IS DERIVED, NOT HARDCODED. A first
+  // attempt scanned every function and flagged `approving`, `burn_pending`, `pending`, `completed`
+  // … — the vocabularies of the JOB, DCA and x402 state machines, which are different stores and
+  // none of this component's business. ⭐ job-bridge-approve.mjs writes its own `burn_confirmed`
+  // into a SEPARATE receipt system (see 412e8d0) and is correctly excluded by this derivation.
+  // Deriving from "who imports a writer" means a NEW writer file is in scope automatically —
+  // a hardcoded list would go stale exactly when it mattered.
+  const { readdirSync, readFileSync } = await import("node:fs");
+  const dir = "netlify/functions";
+  const strip = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+  const writers = readdirSync(dir)
+    .filter((f) => f.endsWith(".mjs"))
+    .filter((f) => {
+      const src = strip(readFileSync(`${dir}/${f}`, "utf8"));
+      return /_bridge-receipts\.mjs/.test(src) &&
+        /\b(saveReceipt|writeReceiptNeverThrows|writePendingReceiptNeverThrows)\s*\(/.test(src);
+    });
+  check("⭐ the writer set is DERIVED from who imports a receipt writer, so a new one cannot escape it",
+    writers.length >= 3, writers.join(", "));
+  const emitted = new Set<string>();
+  for (const f of writers) {
+    for (const m of strip(readFileSync(`${dir}/${f}`, "utf8")).matchAll(/\bstate:\s*"([a-z_]+)"/g)) emitted.add(m[1]);
+  }
+  const strays = [...emitted].filter((s) => !ALL.includes(s));
+  check("⭐⭐ no writer emits a receipt state outside the declared vocabulary",
+    strays.length === 0, strays.length ? `STRAY: ${strays.join(", ")}` : `${emitted.size} literals, all declared`);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("9 — A MISSING AMOUNT MUST NOT BECOME A CONFIDENT NUMBER");
+// 🚨 FOUND BY RENDERING. `Number(null)` is 0, not NaN — so a receipt with `netPredicted: null`
+// rendered "in flight — estimated 0.0000 USDC to arrive": a specific, confident, WRONG figure for
+// an amount nobody recorded. ⚠️ And it is REACHABLE: recordPendingBridge writes
+// `netPredicted: c.netUsdc ?? null` with no consent context, and the reconcile job carries that
+// null into the durable receipt. NaN at least looks broken; 0.0000 looks like an answer.
+{
+  const nullAmt = text({ state: "burn_confirmed", netPredicted: null as any });
+  const absent  = text({ state: "burn_confirmed" });
+  check("⭐⭐ netPredicted:null NEVER renders 0.0000", !/0\.0000/.test(nullAmt), nullAmt.slice(0, 76));
+  check("⭐⭐ …and says the amount was not recorded", /estimated arrival amount was not recorded/i.test(nullAmt));
+  check("⭐⭐ an ABSENT amount never renders NaN", !/NaN/.test(absent), absent.slice(0, 76));
+  check("⭐ …and both still say the burn is confirmed", /burn is confirmed/i.test(nullAmt) && /burn is confirmed/i.test(absent));
+  check("⭐ a REAL amount is still shown, to 4dp", /estimated 0\.9400 USDC to arrive/.test(text({ state: "burn_confirmed", netPredicted: 0.94 })));
+
+  const unconfNull = text({ state: "mint_unconfirmed", netPredicted: null as any, mintRecovery: { cause: "never_appeared" } });
+  check("⭐⭐ the unconfirmed row does not print a fake estimate either",
+    !/0\.0000/.test(unconfNull) && /not recorded/i.test(unconfNull), unconfNull.slice(0, 90));
+  check("  …and still shows a real one when present",
+    /0\.9400 USDC/.test(text({ state: "mint_unconfirmed", netPredicted: 0.94, mintRecovery: { cause: "never_appeared" } })));
+
+  check("⭐ NO rendered status anywhere contains NaN, for ANY known state and a null amount",
+    [...KNOWN_RECEIPT_STATES].every((st) =>
+      !/NaN/.test(text({ state: st, netPredicted: null as any, amountDelivered: null, delivery: "measured" }))));
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

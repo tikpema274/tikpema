@@ -1,5 +1,78 @@
 ---
 
+## 2026-08-15 (later still) — ⭐ THE SILENT ROW IS CLOSED — and closing it found a receipt row showing a FABRICATED `0.0000 USDC`.
+
+✅ **The rendering test deployed first** — `0d16bfc` live as `6a8010faba99f17f3fd516e2`, both gates
+ran (`gate:rpc` 8/8 pre-build, `gate:deployed` post-deploy, six for six), and pushed.
+
+⚠️ **One honest note on that deploy:** its served tree `a6fb033d967b` was **identical to the previous
+one**, because the stamped surface is `netlify/functions` + `shared` and that commit touched only
+`src/` and `scripts/`. So the tree check was a NO-OP; what verified it was the COMMIT check. For a
+client-only change the tree hash is blind. 🚧 Widening `SURFACES` would shift `ddCodeIdentity` and
+every tree hash in the repo — flagged, not done.
+
+### THE FALLBACK — silence was the worst available answer
+
+An unrecognised state rendered **nothing**: the row still showed an amount and a destination, so it
+looked like every ordinary row while saying nothing about the money. ⚠️ **Strictly worse than an
+error** — an error prompts someone to look, a blank does not.
+
+The fallback names the raw state (the one datum that makes the row actionable) and ⭐ **claims
+nothing in either direction** — asserted both ways: it must not imply arrival, and must not imply
+failure. A receipt with no state at all says *"no status was recorded"*.
+
+### ⭐⭐ THE BINDING — because the realistic bug is not a typo
+
+The dangerous version is someone adding a **legitimate new state server-side** that the client never
+learned. Nothing would fail; one row would quietly go silent. So:
+
+* `ALL_RECEIPT_STATES` is now **composed** on the server from the existing constants, never
+  transcribed — `SUBMITTED_STATE + SUBMIT_FAILED_STATE + BURN_CONFIRMED_STATE + TERMINAL_STATES`.
+* `KNOWN_RECEIPT_STATES` in the client **is** a transcribed copy, and that is stated plainly as a
+  duplicate source of truth. It is unavoidable — `_bridge-receipts.mjs` imports `@netlify/blobs` and
+  cannot enter the browser bundle — so ⭐ **the duplication is made safe by a test that reads BOTH
+  SIDES**, in both directions, rather than by hoping. *A binding can only be tested across what it
+  binds.*
+* And every **writer** is checked against the vocabulary, with the writer list **derived** from "who
+  imports a receipt writer" rather than hardcoded — so a new writer file cannot escape it.
+  ⚠️ A first attempt scanned every function and flagged `approving`, `pending`, `completed`… — the
+  JOB/DCA/x402 state machines, different stores entirely. `job-bridge-approve.mjs` writes its own
+  `burn_confirmed` into a **separate** receipt system and is correctly excluded by the derivation.
+
+### 🚨 AND RENDERING FOUND ANOTHER ONE: `0.0000 USDC`, FABRICATED
+
+`Number(null)` is **0**, not NaN. So a receipt with `netPredicted: null` rendered:
+
+> *"in flight — estimated **0.0000 USDC** to arrive"*
+
+⚠️ **A specific, confident, WRONG figure for an amount nobody ever recorded** — and REACHABLE:
+`recordPendingBridge` writes `netPredicted: c.netUsdc ?? null` when there is no consent context, and
+the reconcile job carries that null into the **durable** receipt. So a bridge recovered by the job I
+wrote two commits ago could show a user `0.0000` as an estimate. ⭐ **NaN at least looks broken;
+0.0000 looks like an answer.** An absent field rendered `NaN` — bad, but the less dangerous of the two.
+
+All four amount sites now go through a `usdc()` helper returning **null rather than a number** when
+there is nothing to show, and each call site says something true instead. Measured before and after,
+not assumed.
+
+### PROOF
+
+**Six mutations, all red, restore green:** remove the fallback (silence returns, 6 red), make the
+fallback claim funds are safe, have the client forget a state the server writes, have the **server
+add a state the client never learned**, have a **writer emit an undeclared state**, and restore the
+`0.0000` fabrication (5 red).
+
+`verify-bridge-receipts` 171/0, fee-band 111/0, quote 72/0, **bridge-copy 78/0** (25 new, from 53),
+tsc + build clean.
+
+### STATE
+
+* ⛔ **UNDEPLOYED** — moves the stamped surface (this one genuinely does: `netlify/functions`).
+* ⭐ Both defects in this entry were found by RENDERING, neither by a test anyone thought to write.
+  That is now two commits running where the rendering harness paid for itself immediately.
+* 🚧 `verify-unified-balance-copy.mjs` still carries the identical source-regex limitation,
+  documented in its own header since it was written. The pattern to copy is now proven twice.
+
 ## 2026-08-15 (later) — ⭐⭐ THE RENDERING TEST — and on its FIRST RUN it caught a sentence the source regex had let me silently delete.
 
 ✅ **The RPC fix deployed first** — `2fa7378` live as `6a800701563075acd9f6ffeb`; **both** gates ran:

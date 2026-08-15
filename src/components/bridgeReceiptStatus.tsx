@@ -43,8 +43,46 @@ export type BridgeReceiptView = {
   mintRecovery?: { cause?: string; exhausted?: boolean; verifyFailureCount?: number } | null;
 };
 
+/**
+ * ⭐⭐ THE STATES THIS COMPONENT CAN SPEAK. Anything else gets the fallback below.
+ *
+ * ⚠️ THIS IS A TRANSCRIBED COPY OF `ALL_RECEIPT_STATES` (_bridge-receipts.mjs), AND THAT IS A
+ * DUPLICATE SOURCE OF TRUTH — the bug this codebase keeps re-learning. It is unavoidable here: that
+ * module is server code importing @netlify/blobs and cannot be pulled into the browser bundle.
+ * ⭐ SO THE DUPLICATION IS MADE SAFE BY A TEST THAT READS BOTH SIDES rather than by hoping. A guard
+ * can only be trusted ACROSS what it binds, so `verify-bridge-copy.tsx` asserts both directions:
+ * every server state renders a status here, and every `state:` literal any writer emits is known
+ * here. Change one list without the other and that suite goes red.
+ */
+export const KNOWN_RECEIPT_STATES = [
+  "burn_submitted",
+  "submit_failed",
+  "burn_confirmed",
+  "minted",
+  "mint_unconfirmed",
+  "mint_failed",
+  "mint_unverified",
+] as const;
+
+/**
+ * ⭐⭐ A MONEY FIGURE, OR NOTHING — never a fabricated one.
+ *
+ * 🚨 FOUND BY RENDERING, 2026-08-15. `Number(null)` is **0**, not NaN, so a receipt whose
+ * `netPredicted` is null rendered "in flight — estimated 0.0000 USDC to arrive": a confident,
+ * specific, WRONG number for an amount nobody ever recorded. An absent field rendered "NaN".
+ * ⚠️ THE NULL CASE IS THE DANGEROUS ONE AND THE REACHABLE ONE — `recordPendingBridge` writes
+ * `netPredicted: c.netUsdc ?? null` when there is no consent context, and the reconcile job carries
+ * that null into the DURABLE receipt. So a recovered bridge could show a user 0.0000 USDC as an
+ * estimate. NaN at least looks broken; 0.0000 looks like an answer.
+ *
+ * Returns null when there is no figure, so each call site can say something true instead.
+ */
+const usdc = (v?: number | null): string | null =>
+  v == null || !Number.isFinite(Number(v)) ? null : Number(v).toFixed(4);
+
 export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
   const measured = r.delivery === "measured" && r.amountDelivered != null;
+  const known = (KNOWN_RECEIPT_STATES as readonly string[]).includes(r.state ?? "");
   return (
     <>
       {/* ⚠️ SUBMITTED IS NOT IN FLIGHT. The burn was sent to Circle and has not
@@ -123,12 +161,14 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
       )}
       {r.state === "burn_confirmed" && (
         <span>
-          in flight — <b>estimated</b> {Number(r.netPredicted).toFixed(4)} USDC to arrive
+          {usdc(r.netPredicted)
+            ? <>in flight — <b>estimated</b> {usdc(r.netPredicted)} USDC to arrive</>
+            : <>in flight — the Arc burn is confirmed; <b>the estimated arrival amount was not recorded</b></>}
         </span>
       )}
       {r.state === "minted" && measured && (
         <span style={{ color: "var(--emerald)" }}>
-          ✓ arrived — <b>exactly {Number(r.amountDelivered).toFixed(4)} USDC</b>, read from
+          ✓ arrived — <b>exactly {usdc(r.amountDelivered)} USDC</b>, read from
           the destination chain
         </span>
       )}
@@ -157,7 +197,7 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
             ? ` (${r.mintRecovery.verifyFailureCount} failed reads)`
             : ""}
           , so we will not claim it as measured. Estimated{" "}
-          {Number(r.netPredicted).toFixed(4)} USDC.{" "}
+{usdc(r.netPredicted) ? <>{usdc(r.netPredicted)} USDC. </> : <>not recorded. </>}
           <b>This most likely arrived</b> — the gap is in our verification, not the bridge.
           {r.mintRecovery.exhausted && <> We have stopped re-checking automatically.</>}
         </span>
@@ -166,7 +206,7 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
         <span style={{ color: "var(--warn)" }}>
           not confirmed in time — the Arc burn is real and final; the destination mint is{" "}
           <b>unproven</b> and has not been reported by Circle either. Estimated{" "}
-          {Number(r.netPredicted).toFixed(4)} USDC.{" "}
+{usdc(r.netPredicted) ? <>{usdc(r.netPredicted)} USDC. </> : <>not recorded. </>}
           {r.mintRecovery?.exhausted ? (
             <>
               ⚠ <b>Needs review</b> — we have stopped re-checking automatically.
@@ -185,6 +225,33 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
           destination chain could not confirm
           {r.verifyFailure?.reason ? ` (${r.verifyFailure.reason})` : ""}. Deliberately not
           retried automatically.
+        </span>
+      )}
+      {/* ⭐⭐ THE FALLBACK — because SILENCE WAS THE WORST AVAILABLE ANSWER.
+          Before this, a receipt in an unrecognised state rendered NOTHING: the row still showed an
+          amount and a destination, so it looked like every other ordinary row while saying nothing
+          about the money. ⚠️ That is strictly worse than an error, because an error prompts someone
+          to look and a blank does not. No source regex could ever detect it; rendering the component
+          is what surfaced it.
+
+          ⚠️ IT MUST CLAIM NOTHING IN EITHER DIRECTION. We do not know whether the funds moved — so
+          this refuses to imply arrival OR failure, and says plainly that the page cannot interpret
+          the record. Naming the raw state is deliberate: it is the one datum that makes the row
+          actionable for whoever has to work out what happened.
+
+          🚧 The realistic cause is not a typo but a legitimate new state added server-side that the
+          client never learned. `KNOWN_RECEIPT_STATES` is bound to the server's `ALL_RECEIPT_STATES`
+          by verify-bridge-copy.tsx, so that mistake now fails a suite instead of blanking a row. */}
+      {!known && (
+        <span style={{ color: "var(--warn)" }}>
+          ⚠ <b>unrecognised status</b>
+          {r.state ? (
+            <> (<span className="mono">{r.state}</span>)</>
+          ) : (
+            <> — no status was recorded</>
+          )}
+          . This page cannot interpret this record, and it is <b>not</b> evidence that funds did or
+          did not move. Check the burn transaction directly, or come back after the next update.
         </span>
       )}
     </>
