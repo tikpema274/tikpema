@@ -167,5 +167,23 @@ console.log("\n── ⭐⭐ THE COINCIDENTAL SAFETY, PINNED · an unreadable VA
   }
 }
 
+console.log("\n── ⭐⭐ THE DISCLOSURE CARRIES ITS OWN DIGEST INPUTS ──");
+// 🚨 A moved digest invalidates an acknowledgement, and the UI must be able to say WHAT moved.
+// `disclosureDigest` is `address | warn codes | withdrawFee | depositFee`; shipping only
+// {level, blocks, warns, digest} made a FEE-ONLY change unexplainable — the digest moves and the
+// payload contains nothing that accounts for it. The inputs must travel with the digest.
+{
+  const { inspectVault, gateDeposit } = await load({});
+  const i = await inspectVault(XYLO);
+  const g = gateDeposit({ inspection: i, ackToken: undefined });
+  const d = g.disclosure;
+  check("⭐⭐ the disclosure carries the withdraw fee (a digest input)", "withdrawFeeBps" in d, String(d.withdrawFeeBps));
+  check("⭐⭐ …and the deposit fee (the other one)", "depositFeeBps" in d, String(d.depositFeeBps));
+  check("⭐ …alongside the digest itself, so a consumer can explain a move", typeof d.digest === "string" && d.digest.length > 0);
+  check("⭐ …and the warn codes, the third input", Array.isArray(d.warns));
+  // ⚠️ The address is the fourth input and is already known to any caller, so it is not duplicated.
+  check("  the digest is built from exactly those inputs", /\|warns:.*\|wf:.*\|df:/.test(d.digest), d.digest);
+}
+
 console.log(`\n${fail === 0 ? "✅ ALL PASS" : "❌ FAILURES"} — ${pass} passed, ${fail} failed. Zero money, zero network.`);
 process.exit(fail === 0 ? 0 : 1);

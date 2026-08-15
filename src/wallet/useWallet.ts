@@ -7,6 +7,7 @@ import {
   type MetaMaskWallet,
 } from "./connectors/metamask";
 import type { ConnectorInfo, WalletKind } from "./types";
+import { errorWithPayload } from "../lib/httpError";
 import { readJson } from "../lib/readJson";
 
 type SessionIdentity = { address: string; method: WalletKind };
@@ -482,7 +483,16 @@ export function useWallet() {
         body: JSON.stringify({ vault, amountUsdc, ackToken }),
       });
       const data = await readJson(r);
-      if (!r.ok) throw new Error(data?.error || "Deposit failed");
+      if (!r.ok) {
+        // ⭐⭐ THE BODY MUST SURVIVE THE THROW. A gate refusal is a 409 carrying the FRESH
+        // `disclosure` — the server says so at agent-vault-deposit.mjs: "carrying the disclosure so
+        // the UI can render exactly what must be acknowledged". Throwing `new Error(data.error)`
+        // discarded it, so that sentence described a capability with no consumer, and a user whose
+        // acknowledgement had been invalidated got a bare refusal with no way to see what changed.
+        // ⚠️ Attached rather than returned: every existing caller reads `e.message` and must keep
+        // working. The payload is additive.
+        throw errorWithPayload(data, "Deposit failed");
+      }
       refreshAgentWallet().catch(() => {});
       return data; // { ok, kind:"vault_deposit", depositTx, sharesReceivedRaw, disclosure, ... }
     },

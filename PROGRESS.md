@@ -1,5 +1,79 @@
 ---
 
+## 2026-08-16 (late evening) — ⭐ THE GATE THAT REFUSED WITHOUT SAYING WHY. Fixed, with the change COMPUTED rather than announced.
+
+### THE DEFECT, SHIPPED
+
+A vault gate refusal is a **409 carrying the fresh disclosure** — `agent-vault-deposit.mjs` says so:
+*"carrying the disclosure so the UI can render exactly what must be acknowledged."* The client did
+`throw new Error(data?.error)` and **discarded the body**. ⭐ That sentence described a capability
+with NO CONSUMER — the same "the string appears, the call never happens" shape, one layer up.
+
+So a user whose acknowledgement had been invalidated saw a bare refusal beside a disclosure they had
+already ticked, **tick still set**, nothing indicating anything had moved underneath them.
+
+### ⭐ FIRST, THE COUNT — THE INVALIDATION COST WAS THEORETICAL
+
+**Vault acks are never persisted. There is no ack store.** `ackTokenFor(inspection)` is computed
+client-side from the disclosure rendered, sent with the deposit, and `_actions.mjs:444` **re-inspects
+and re-derives** at execute time. So "outstanding acks" is not a backlog — it is the set of browser
+tabs holding a rendered disclosure with the box ticked that submit after a change. We reasoned
+carefully about a cost bounded by page-session lifetime. ⚠️ The MECHANISM the `_vault.mjs` comment
+warns about is real; the stored population behind it is zero.
+
+### THE FIX — THREE PARTS, EACH ADDRESSING A DIFFERENT FAILURE
+
+1. **The disclosure now carries its own digest inputs.** `disclosureDigest` is
+   `address | warn codes | withdrawFee | depositFee`, but the payload shipped only
+   `{level, blocks, warns, digest}` — so a **fee-only change moved the digest and was unexplainable**.
+   The inputs must travel with the digest or the change cannot be described.
+2. **The body survives the throw**, via `errorWithPayload` — extracted as a function precisely so the
+   behaviour can be TESTED rather than grepped for. Additive: `e.message` is unchanged, so every
+   existing caller keeps working.
+3. **The delta is computed, not announced.** `diffDisclosure` reports which warns appeared or
+   disappeared, which named fee moved and from what to what, and any verdict-level move. ⚠️ Clearing
+   the tick alone would have left the user to diff two things they cannot see — the old disclosure is
+   gone the moment the new one renders — and **a re-tick nobody can check is a formality, which is
+   trained click-through**, already a recorded hazard on the fee-band surface.
+
+⭐⭐ **AND THE CASE THAT MUST NEVER BE SILENT:** if the refusal happened but none of the four inputs
+explains it, `unexplained` fires and the UI says *"changed in a way this page cannot itemise"*. An
+empty panel reads as "nothing important happened".
+
+⚠️ **THE CLIENT CANNOT COMPARE DIGESTS** — it holds `ackToken`, a HASH, while the disclosure carries
+the raw string. So the authoritative "something moved" signal is the REFUSAL itself, passed
+explicitly. Without that, `unexplained` could never fire and the honest case would be unreachable.
+
+### PROOF
+
+`verify-disclosure-diff` **20/0** (new), `verify-vault-degraded` **31/0** (5 new pinning the digest
+inputs), vault 35/0, DD, copy, routes, tsc + build clean. **Four mutations, all red:** unexplained
+silently becomes "no change"; a null fee treated as 0; removed warns dropped; the refusal signal
+ignored. ⭐ The end-to-end chain is tested by CALLING it — a 409 body through `errorWithPayload` into
+an itemised delta.
+
+### 🚨 AN OPEN FAILURE I MUST NOT DRESS UP, AND A CORRECTION TO MY OWN REPORTING
+
+**`test:quote` (`verify-agent-quote-record.mjs`) FAILS, and so does `test:bridge` through it.**
+The written key and the computed key are byte-identical strings, yet `mem.has(key)` is false — the
+test's in-memory store and the module's are DIFFERENT INSTANCES, a module-mocking registry problem,
+not a logic bug.
+
+* ⭐ **NOT caused by this work:** a CLEAN WORKTREE at `7622cd3` (early this session) fails identically.
+* ⚠️ **But it passed earlier in this session** — 72/0 was observed repeatedly. So the transition is
+  real and I have NOT isolated its trigger. Recorded as undiagnosed rather than explained away.
+* 🚨 **AND MY GREEN CHECKS WERE UNSOUND.** I verified suites with `grep -c "FAILURES"` and mapped 0 to
+  green — but **a CRASH prints no "FAILURES" line**, so a crashing suite counted as passing. Every
+  "bridge green" I reported after the transition was false. ⭐ Now checked by EXIT CODE, which is what
+  should have been used from the start: a test harness verified by grepping its own output is the
+  same defect class as everything else in this thread.
+
+### STATE
+
+* ⛔ **UNDEPLOYED.**
+* 🚧 `verify-agent-quote-record.mjs` — undiagnosed store-instance mismatch. Its own item.
+* 🚧 The in-app report route is still next: shared rung helper, then the route.
+
 ## 2026-08-16 (evening) — ⭐ `evaluatePolicy` BUILT, and the coincidental vault safety is now a guarantee.
 
 ### 1 ✅ THE hasAny QUESTION — ALREADY HANDLED, AND NOW PINNED

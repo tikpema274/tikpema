@@ -477,7 +477,26 @@ export function ackTokenFor(inspection) {
 // `expectedAssetAddress` folds in the deposit-context asset check: the allowlisted vault's
 // on-chain asset() MUST match what we allowlisted, else BLOCK (defense in depth).
 export function gateDeposit({ inspection, ackToken, expectedAssetAddress }) {
-  const disclosure = { level: inspection.verdict.level, blocks: [...inspection.verdict.blocks], warns: [...inspection.verdict.warns], digest: disclosureDigest(inspection) };
+  // ⭐⭐ THE DISCLOSURE CARRIES EVERY INPUT ITS OWN DIGEST IS COMPUTED FROM.
+  //
+  // `disclosureDigest` is `address | warn codes | withdrawFee | depositFee`. Shipping only
+  // {level, blocks, warns, digest} meant a consumer could see the digest MOVE and be unable to say
+  // WHY — a fee-only change is invisible, because the fees were never in the payload.
+  //
+  // ⚠️ THAT MATTERS BECAUSE A MOVED DIGEST INVALIDATES AN ACKNOWLEDGEMENT. Telling a user "this
+  // changed, look again" without showing WHAT changed leaves them to diff two things they cannot
+  // see, and a re-tick nobody can check is a formality — trained click-through, which this codebase
+  // has already recorded as a hazard. The digest's inputs must travel with it or the change cannot
+  // be explained.
+  const disclosure = {
+    level: inspection.verdict.level,
+    blocks: [...inspection.verdict.blocks],
+    warns: [...inspection.verdict.warns],
+    digest: disclosureDigest(inspection),
+    // The remaining two digest inputs. `address` is the third and is already known to any caller.
+    withdrawFeeBps: inspection?.withdraw?.withdrawFeeBps ?? null,
+    depositFeeBps: inspection?.ownerPowers?.settableFees?.currentBps?.deposit ?? null,
+  };
 
   // Asset mismatch is a hard BLOCK, evaluated here because only the deposit context knows the
   // expected underlying.

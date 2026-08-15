@@ -7,6 +7,8 @@ type UnifiedWallet = ReturnType<typeof useWallet>;
 // free-form address — only this key.
 const VAULT_KEY = "xylo-usdc";
 
+import { diffDisclosure, bps, type DisclosureDelta } from "../lib/disclosureDiff";
+
 const shortAddr = (a?: string | null) => (a && a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a || "—");
 
 // VaultPanel — the Vault agent's UI. Two halves, in order:
@@ -19,6 +21,9 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const [insp, setInsp] = useState<any>(null); // full agent-vault-inspect response
   const [inspecting, setInspecting] = useState(false);
   const [acked, setAcked] = useState(false);
+  // ⭐ The delta between the disclosure the user ACCEPTED and the one now in force. Set only when a
+  // refusal carries a fresh disclosure; rendered instead of a bare error.
+  const [delta, setDelta] = useState<{ d: DisclosureDelta; level: string | null } | null>(null);
 
   const [amount, setAmount] = useState("1");
   const [depositing, setDepositing] = useState(false);
@@ -71,6 +76,7 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   async function inspect() {
     setMsg(null);
     setAcked(false);
+    setDelta(null);
     setInspecting(true);
     try {
       const data = await w.inspectVault(VAULT_KEY);
@@ -95,6 +101,31 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       setMsg({ ok: true, text: `Deposited ${amountNum} USDC — received ${got ?? "?"} ${inspection?.funded?.shareSymbol || shares?.symbol || "shares"}.`.trim() });
       refreshShares(); // the reclaim below now reflects the new on-chain position
     } catch (e: any) {
+      // ⭐⭐ A GATE REFUSAL CARRIES THE FRESH DISCLOSURE — USE IT. The server returns 409 with the
+      // server-computed disclosure precisely so the UI can show what must be acknowledged. It used
+      // to be discarded: the user saw a bare refusal beside a disclosure they had already ticked,
+      // with the tick still set and no indication anything had moved underneath them. A gate
+      // refusing without saying why.
+      //
+      // ⚠️ AND THE TICK IS CLEARED ONLY ALONGSIDE THE DELTA. Clearing it on its own would demand a
+      // re-tick with nothing new to read, which is a formality — and a formality is trained
+      // click-through.
+      const fresh = e?.payload?.disclosure ?? null;
+      if (fresh) {
+        // The accepted side is assembled from the inspection the user was actually shown. ⚠️ The
+        // third argument is TRUE because the server REFUSED an acknowledgement it issued — that
+        // refusal is the authoritative "something moved", since the client holds only a hash of the
+        // old digest and cannot compare it to the raw one.
+        const acceptedSide = insp?.verdict
+          ? { level: insp.verdict.level, warns: insp.verdict.warns, blocks: insp.verdict.blocks,
+              withdrawFeeBps: insp?.withdraw?.withdrawFeeBps ?? null,
+              depositFeeBps: insp?.ownerPowers?.settableFees?.currentBps?.deposit ?? null }
+          : null;
+        const d = diffDisclosure(acceptedSide, fresh, true);
+        setDelta({ d, level: fresh.level ?? null });
+        setAcked(false);
+        setInsp((prev: any) => (prev ? { ...prev, verdict: { ...prev.verdict, level: fresh.level, warns: fresh.warns, blocks: fresh.blocks } } : prev));
+      }
       setMsg({ ok: false, text: e?.message || "Deposit failed" });
     } finally {
       setDepositing(false);
@@ -167,6 +198,51 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         </button>
         <span className="status" style={{ margin: 0 }}>XyloNet USDC Vault (xyUSDC)</span>
       </div>
+
+      {/* ⭐⭐ WHAT CHANGED SINCE YOU ACCEPTED — computed, not announced. Rendered ABOVE the
+          disclosure band so it is read before the tick is offered again. A bare "this changed,
+          look again" would leave the user to diff two things they cannot see, and a re-tick nobody
+          can check is a formality. */}
+      {delta && delta.d.changed && (
+        <div className="status" style={{ marginBottom: 14, padding: "12px 14px", border: "1px solid var(--warn)", borderRadius: 8 }}>
+          <b>Your acknowledgement no longer applies — this vault&apos;s disclosure changed.</b>
+          <div style={{ marginTop: 8 }}>
+            {delta.d.levelChange && (
+              <div>Overall verdict moved from <b>{delta.d.levelChange.from ?? "unknown"}</b> to <b>{delta.d.levelChange.to ?? "unknown"}</b>.</div>
+            )}
+            {delta.d.warnsAdded.length > 0 && (
+              <div style={{ marginTop: 6 }}>
+                <b>New since you accepted:</b>
+                <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                  {delta.d.warnsAdded.map((w) => (<li key={w.code}><span className="mono">{w.code}</span>{w.detail ? ` — ${w.detail}` : ""}</li>))}
+                </ul>
+              </div>
+            )}
+            {delta.d.warnsRemoved.length > 0 && (
+              <div style={{ marginTop: 6 }}>
+                <b>No longer reported:</b>{" "}
+                {delta.d.warnsRemoved.map((w) => (<span key={w.code} className="mono" style={{ marginRight: 8 }}>{w.code}</span>))}
+              </div>
+            )}
+            {delta.d.feeChanges.map((f) => (
+              <div key={f.label} style={{ marginTop: 6 }}>
+                The <b>{f.label}</b> moved from <b>{bps(f.fromBps)}</b> to <b>{bps(f.toBps)}</b>.
+              </div>
+            ))}
+            {/* ⚠️ NEVER SILENT. The digest moved and none of the inputs we render explains it — say
+                exactly that rather than showing an empty panel that reads as "nothing important". */}
+            {delta.d.unexplained && (
+              <div style={{ marginTop: 6 }}>
+                ⚠️ The disclosure changed in a way this page cannot itemise. Re-inspect before depositing,
+                and treat the vault as unreviewed until you have.
+              </div>
+            )}
+          </div>
+          <div style={{ marginTop: 10 }}>
+            Read the disclosure below again before accepting it. Your previous acknowledgement has been cleared.
+          </div>
+        </div>
+      )}
 
       {/* ── The disclosure band ──────────────────────────────────────────── */}
       {inspection && (
