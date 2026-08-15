@@ -1,5 +1,59 @@
 ---
 
+## 2026-08-16 (night) — 🚨 THE QUOTE SUITE'S "DEFECT" WAS A FIXTURE AGEING PAST A TTL. I had it backwards.
+
+### ⚠️ FIRST, THE CORRECTION
+
+Last entry I wrote *"the test isn't broken; the module is."* **That was wrong.** `pruneOwnerQuotes` is
+correct — a fourteen-day-old quote SHOULD be pruned. The **test** hardcoded
+`quotedAt: "2026-08-01T12:34:56.789Z"`, and at **2026-08-15T12:34:56.789Z** that literal crossed
+`QUOTE_TTL_MS` (14 days). From that moment `recordQuoteNeverThrows` wrote the record and the prune
+immediately expired it: `SET …q_msu… | DELETE …q_msu…`, `written: true`, `mem.size 0`.
+
+Measured, not inferred: fixture age **14.29 days** against a **14 day** TTL, boundary crossed about
+seven hours before the diagnosis.
+
+### ⭐⭐ AND THE BISECT COULD NOT HAVE FOUND IT
+
+I ran clean worktrees at twelve commits back to `a7ca274` — the commit that INTRODUCED the suite —
+and got FAIL at every one, and concluded "it never passed". **That conclusion was an artefact of the
+method.** A test evaluated against `Date.now()` fails at *every* commit once the wall clock passes
+the boundary, because every worktree run shares one clock. History showed a defect that was never
+there, and the real transition — a calendar boundary — is invisible to bisection by construction.
+
+⚠️ The instruction not to anchor on "it passed earlier" was right in spirit, and the observation
+itself turned out to be **accurate**: it did pass, until 12:34 today. It was my *evidence against it*
+that was unsound.
+
+### THE FIX
+
+Fresh fixtures derive from `Date.now()`. ⭐ And the TTL boundary is now tested **on purpose** with an
+injected clock — `pruneOwnerQuotes(owner, now)` has always taken one — so one second inside the TTL
+survives, exactly at the TTL expires, and neither depends on what day it is.
+
+⚠️ **Recorded while it was in view:** a quote written ALREADY older than the TTL returns
+`written: true` and is gone immediately. Production never hits it (`quotedAt` is minted at write
+time), but the return value can describe a record that no longer exists.
+
+### ⭐⭐ `npm run test:all` — THE RULE BECOMES A MECHANISM
+
+"Read `$?`, never grep" is written down from the bridge-suite incident and **failed again today**:
+suites were checked with `grep -c "FAILURES"` and `0` read as green — but **a crash prints no summary
+line**, so a crashing suite counted as passing, and every "bridge green" I reported for those hours
+was false.
+
+Second occurrence, so it gets a mechanism rather than a third entry: `test:all` chains all 13 suites
+with `&&`, so there is nothing to grep — one command, one exit code, first failure stops the run.
+`scripts/README-testing.md` states the rule and both incidents. ⚠️ A crashing suite and a failing
+suite are the SAME outcome, non-zero, and that is the point: any check that can tell them apart by
+reading text can also be defeated by text.
+
+### STATE
+
+* ⛔ **UNDEPLOYED.** `test:all` exits 0 across all 13 suites; tsc + build clean.
+* ⭐ The three "open failures" from the last entry are resolved: the module was never broken, and the
+  suite is green — the only real defect was in how I verified.
+
 ## 2026-08-16 (late evening) — ⭐ THE GATE THAT REFUSED WITHOUT SAYING WHY. Fixed, with the change COMPUTED rather than announced.
 
 ### THE DEFECT, SHIPPED

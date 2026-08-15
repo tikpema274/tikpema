@@ -119,7 +119,20 @@ section("1 — THE IDENTIFIER CANNOT BE CONFUSED WITH THE OTHER TWO");
 section("2 — THE WRITE, AND THE KEY THAT MAKES IT FINDABLE");
 {
   mem.clear(); failMode = null;
-  const quotedAt = "2026-08-01T12:34:56.789Z";
+// ⭐⭐ FIXTURE DATES MUST BE RELATIVE, NOT WALL-CLOCK LITERALS — AND THIS SUITE PROVED IT THE HARD
+// WAY. Every `quotedAt` below was a hardcoded "2026-08-01T…". `recordQuoteNeverThrows` writes and
+// then prunes, and the prune expires anything older than QUOTE_TTL_MS (14 days) against the REAL
+// clock. So at 2026-08-15T12:34:56.789Z — fourteen days after the literal — the fixture aged past
+// the TTL and the suite began deleting the record it had just written. Nothing in the code changed.
+//
+// ⚠️ THE MODULE WAS CORRECT THE WHOLE TIME. A fourteen-day-old quote SHOULD be pruned; the test was
+// asking it to keep one. ⭐ AND THE FAILURE WAS UNBISECTABLE BY RE-RUNNING OLD COMMITS: a
+// time-dependent test evaluated against `Date.now()` fails at EVERY commit once the wall clock
+// passes the boundary, so history shows a defect that was never there.
+//
+// So: dates that must stay FRESH are derived from now; the TTL boundary is tested DELIBERATELY
+// below with an injected clock, which is what `pruneOwnerQuotes(owner, now)` takes a `now` for.
+  const quotedAt = new Date(Date.now() - 1000).toISOString(); // fresh: this record must SURVIVE the prune
   const quoteId = Q.mintQuoteId();
   const r = await Q.recordQuoteNeverThrows({
     schema: "agent-quote/1", quoteId, quotedAt, owner: OWNER, task: "t", stepCount: 1,
@@ -143,20 +156,20 @@ section("3 — IT MUST NEVER BREAK QUOTING");
   mem.clear();
   failMode = "set";
   let threw = false, r;
-  try { r = await Q.recordQuoteNeverThrows({ quoteId: "q_a_0000000000000000", quotedAt: "2026-08-01T00:00:00.000Z", owner: OWNER }); }
+  try { r = await Q.recordQuoteNeverThrows({ quoteId: "q_a_0000000000000000", quotedAt: new Date(Date.now() - 1000).toISOString(), owner: OWNER }); }
   catch { threw = true; }
   check("⭐⭐ a store that throws on write does NOT propagate", threw === false);
   check("  …and says so honestly", r?.written === false && r?.reason === "write_error");
 
   failMode = "list"; // the prune's list — runs AFTER a successful write
   threw = false;
-  try { r = await Q.recordQuoteNeverThrows({ quoteId: "q_b_0000000000000000", quotedAt: "2026-08-01T00:00:00.000Z", owner: OWNER }); }
+  try { r = await Q.recordQuoteNeverThrows({ quoteId: "q_b_0000000000000000", quotedAt: new Date(Date.now() - 1000).toISOString(), owner: OWNER }); }
   catch { threw = true; }
   check("⭐ a prune failure does not propagate either", threw === false);
   check("  …and the write still counts as landed", r?.written === true);
 
   failMode = null;
-  const bad = await Q.recordQuoteNeverThrows({ quotedAt: "2026-08-01T00:00:00.000Z" });
+  const bad = await Q.recordQuoteNeverThrows({ quotedAt: new Date(Date.now() - 1000).toISOString() });
   check("refuses a record with no owner/quoteId rather than writing an unfindable blob",
     bad.written === false && bad.reason === "missing_key_fields");
 }
@@ -434,6 +447,51 @@ section("7 — ⭐⭐ IT AUTHORIZES NOTHING, AND CANNOT LEARN TO");
   // Retention is a decision. If both bounds vanish, this fails.
   check("⭐ retention is bounded by BOTH a TTL and a per-owner cap",
     Q.QUOTE_TTL_MS > 0 && Q.MAX_QUOTES_PER_OWNER > 0 && /RETENTION — decided, not discovered/.test(quote));
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+section("⭐⭐ THE TTL BOUNDARY, TESTED ON PURPOSE INSTEAD OF BY CALENDAR ACCIDENT");
+// 🚨 THIS SECTION EXISTS BECAUSE THE SUITE ONCE TESTED THIS BY ACCIDENT AND CALLED IT A DEFECT.
+// A hardcoded `quotedAt: "2026-08-01T…"` aged past QUOTE_TTL_MS on 2026-08-15T12:34:56.789Z, and
+// from that moment `recordQuoteNeverThrows` wrote the record and the prune immediately expired it —
+// correct behaviour, reported as a failure, and UNBISECTABLE by re-running old commits because a
+// wall-clock test fails at every commit once the boundary passes.
+// ⭐ `pruneOwnerQuotes(owner, now)` takes an injected clock precisely so this can be exercised
+// without waiting fourteen days or depending on what day it is.
+{
+  mem.clear();
+  const t0 = Date.parse("2026-01-01T00:00:00.000Z");
+  const mk = async (isoOffsetMs, id) => {
+    const quotedAt = new Date(t0 + isoOffsetMs).toISOString();
+    await Q.recordQuoteNeverThrows({ quoteId: id, quotedAt, owner: OWNER, agentWallet: AGENT_WALLET, steps: [], totalUsdc: 1, totalFeeUsdc: 0 });
+    return Q.quoteKey(OWNER, quotedAt, id);
+  };
+  // Written far in the "past" relative to the injected now, but the WRITE's own prune runs against
+  // the real clock — so seed first, then prune with an explicit `now`.
+  mem.clear();
+  const fresh = await mk(0, "q_fresh_00000000000");
+  const old = await mk(0, "q_old_000000000000");
+  mem.set(old.replace(/\/[^/]+$/, "/2026-01-01T00:00:00.000Z-q_old_000000000000"), JSON.stringify({ owner: OWNER }));
+
+  const justInside = Q.QUOTE_TTL_MS - 1000;
+  const r1 = await Q.pruneOwnerQuotes(OWNER, t0 + justInside);
+  check("⭐⭐ a record ONE SECOND inside the TTL survives", r1.expired === 0, `expired=${r1.expired}`);
+
+  const r2 = await Q.pruneOwnerQuotes(OWNER, t0 + Q.QUOTE_TTL_MS);
+  check("⭐⭐ …and at EXACTLY the TTL it expires — the boundary is inclusive, pinned deliberately",
+    r2.expired > 0, `expired=${r2.expired}`);
+  check("  …the TTL is 14 days, stated so a change to it is visible here",
+    Q.QUOTE_TTL_MS === 14 * 24 * 60 * 60 * 1000);
+
+  // ⚠️ AND THE CONSEQUENCE WORTH KNOWING: a quote written ALREADY older than the TTL is written and
+  // then immediately deleted, while `recordQuoteNeverThrows` still returns written:true. Production
+  // never hits it (quotedAt is minted at write time), but the return value can describe a record
+  // that no longer exists — recorded here rather than discovered again.
+  mem.clear();
+  const stale = new Date(Date.now() - Q.QUOTE_TTL_MS - 60_000).toISOString();
+  const rs = await Q.recordQuoteNeverThrows({ quoteId: "q_stale_0000000000", quotedAt: stale, owner: OWNER, agentWallet: AGENT_WALLET, steps: [], totalUsdc: 1, totalFeeUsdc: 0 });
+  check("⚠️ (recorded) a pre-expired quote returns written:true and is gone immediately",
+    rs.written === true && mem.size === 0, `written=${rs.written} memSize=${mem.size}`);
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

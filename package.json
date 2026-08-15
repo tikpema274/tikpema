@@ -34,7 +34,8 @@
     "postinstall": "git config core.hooksPath .githooks 2>/dev/null || true",
     "deploy:draft": "npm run gate:draft && npm run build && netlify deploy --dir=dist",
     "deploy:prod": "npm run gate:watch && npm run gate:rpc && npm run build && netlify deploy --prod --dir=dist && npm run gate:deployed",
-    "test:ddwatch": "node scripts/verify-dd-watch.mjs"
+    "test:ddwatch": "node scripts/verify-dd-watch.mjs",
+    "test:all": "npm run test:probe && npm run test:watch && npm run test:vault && npm run test:dd && npm run test:dca && npm run test:ub && npm run test:research && npm run test:bridge && npm run test:quote && npm run test:copy && npm run test:disclosure && npm run test:client && npm run gate:routes"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
