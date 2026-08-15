@@ -16,6 +16,11 @@ import { POWER_SIGS, sel } from "../../shared/onchain-facts/index.mjs";
 import { DIAMOND_LOUPE_SIGS, UUPS_SIGS, EIP1967_ADMIN_SLOT, EIP1167_PREFIX, EIP1167_SUFFIX } from "../../shared/onchain-analyze/slots.mjs";
 import { quorumClient } from "../../shared/onchain-analyze/quorum.mjs";
 import { EIP1967_IMPL_SLOT } from "../../shared/onchain-facts/index.mjs";
+// ⭐ THE MOCK CHAIN IS SHARED, NOT COPIED — see _mock-chain.mjs. It defines what "a report" looks
+// like offline, so a second copy would let two suites drift into exercising different engines while
+// both stayed green.
+import { SUBJ, IMPL, OWNER, ZERO_WORD, word, codeWith, mockClient, transientThrow, revertThrow, mkc }
+  from "./_mock-chain.mjs";
 import { analyzeOnArc } from "./analyze-run.mjs";
 
 let pass = 0, fail = 0;
@@ -24,34 +29,8 @@ const ok = (cond, label, detail = "") => {
   else { fail++; console.log(`  ❌ ${label}${detail ? `\n       ${detail}` : ""}`); }
 };
 
-const SUBJ = "0x1111111111111111111111111111111111111111";
-const IMPL = "0x2222222222222222222222222222222222222222";
-const OWNER = "0x3333333333333333333333333333333333333333";
-const ZERO_WORD = "0x" + "0".repeat(64);
-const word = (a) => "0x" + a.replace(/^0x/, "").padStart(64, "0");
-const codeWith = (sigs) => "0x60806040" + sigs.map((s) => sel(s)).join("") + "00";
 
 /** A mock client. `handlers` maps a key to a value, a thrower, or omits it (→ default). */
-function mockClient(handlers = {}) {
-  return {
-    chain: { name: "mock-chain" },
-    assert: async () => 5042002,
-    pin: async () => ({ number: 1000, tag: "0x3e8" }),
-    async call({ method, params }) {
-      const key =
-        method === "eth_getCode" ? `code@${String(params[0]).toLowerCase()}`
-        : method === "eth_getStorageAt" ? `slot@${String(params[1]).toLowerCase()}`
-        : method === "eth_call" ? `call@${String(params[0]?.data)}`
-        : method;
-      const h = handlers[key];
-      if (h === undefined) throw Object.assign(new Error(`mock: unhandled ${key}`), { transient: false });
-      if (typeof h === "function") return h();               // a thrower
-      return { result: h, query: { endpoint: "mock://", method, params, reproduce: `# mock ${key}` }, evidence: { httpStatus: 200 } };
-    },
-  };
-}
-const transientThrow = () => { throw Object.assign(new Error("request limit reached"), { transient: true, query: { endpoint: "mock://", method: "m", params: [], reproduce: "# mock" } }); };
-const revertThrow = () => { throw Object.assign(new Error("execution reverted"), { transient: false, query: { endpoint: "mock://", method: "m", params: [], reproduce: "# mock" } }); };
 
 const powerGroups = Object.keys(POWER_SIGS);
 const notCheckedPowers = (r) => r.coverage.notChecked.filter((n) => n.kind === "power").map((n) => n.group);
@@ -232,7 +211,6 @@ console.log("\n── ROW 7 · SEVERITY IS SCOPE, NOT A SCORE ──");
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 console.log("\n── ROW 8 · ⭐ QUORUM MATRIX: agree→value, everything else→unreadable via coverage ──");
 {
-  const mkc = (rpc, handlers, chainId = 5042002) => ({ ...mockClient(handlers), chain: { name: "mock", rpc }, assert: async () => chainId });
   const A = "https://endpoint-a.example", B = "https://endpoint-b.example";
   const base = (code) => ({ [`code@${SUBJ}`]: code, [`slot@${EIP1967_IMPL_SLOT}`]: ZERO_WORD, [`call@0x8da5cb5b`]: word(OWNER), [`code@${OWNER}`]: "0x" });
   const q = (ha, hb) => quorumClient([mkc(A, ha), mkc(B, hb)]);

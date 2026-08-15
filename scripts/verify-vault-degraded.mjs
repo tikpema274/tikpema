@@ -35,10 +35,12 @@ const check = (label, cond, extra = "") => {
 // A fake public client. Each read is independently switchable to "throws" so we can degrade exactly
 // one surface at a time — a blanket outage would prove less, because it could not show that an
 // unreadable owner alone is enough to change the disclosure.
-function fakeClient({ ownerValue = EOA, multicallThrows = false, storageThrows = false, ownerCodeThrows = false }) {
+function fakeClient({ ownerValue = EOA, multicallThrows = false, storageThrows = false, ownerCodeThrows = false, vaultCodeThrows = false }) {
   return () => ({
     getBytecode: async ({ address }) => {
       if (ownerCodeThrows && address.toLowerCase() !== XYLO.toLowerCase()) throw new Error("injected: owner bytecode read failed");
+      // ⭐ THE VAULT'S OWN bytecode — the read every selector scan depends on.
+      if (vaultCodeThrows && address.toLowerCase() === XYLO.toLowerCase()) throw new Error("injected: vault bytecode read failed");
       return address.toLowerCase() === XYLO.toLowerCase() ? SOME_CODE : "0x";
     },
     multicall: async ({ contracts }) => {
@@ -115,6 +117,54 @@ console.log("\n── CONTROL · a slot that WAS read and is empty still says 'n
   const i = await inspectVault(XYLO);
   check("present === false (a real observation)", i.ownerPowers.upgradeable.present === false);
   check("no proxy block on a healthy read", !i.verdict.blocks.some((b) => b.code === "proxy-status-unreadable"));
+}
+
+console.log("\n── ⭐⭐ THE COINCIDENTAL SAFETY, PINNED · an unreadable VAULT bytecode ──");
+// 🚨 WHY THIS ASSERTION EXISTS. Every owner-power scan in _vault.mjs runs `hasAny(code, …)` over the
+// vault's own bytecode. If that read fails, `withRetry` falls back to the literal string "0x" — NOT
+// to the UNREADABLE sentinel — so the tri-state is destroyed BEFORE `hasAny` is ever called, and
+// "0x" scans legitimately as "no selectors found".
+//
+// ⚠️ ON ITS OWN THAT WOULD TELL A USER a contract we could not read has no emergency withdraw, no
+// settable fees and no pause — on the surface that GATES DEPOSITS. It does not, because the same
+// "0x" makes `isContract` false and raises the `not-a-contract` BLOCK, and gateDeposit refuses on
+// BLOCK before any disclosure is rendered.
+//
+// ⭐⭐ SO THE SAFETY IS REAL BUT COINCIDENTAL: two independent mechanisms happen to agree, and only
+// one is documented as the guard. Contrast `proxy-status-unreadable`, which is the SAME instinct
+// done deliberately and explained at the code; the bytecode read arrives there by a different route.
+//
+// ⚠️ A PREDICTION MADE HERE WAS WRONG, AND THE MUTATION DISPROVED IT. This comment first claimed
+// that "fixing" the fallback to the UNREADABLE symbol would crash — `hasAny` calls
+// `code.includes(...)` and a Symbol has no `.includes`. It does not: line 241 wraps the value in
+// `String(codeRaw || "0x")`, and `String(symbol)` is LEGAL (only implicit coercion throws). The
+// result is the string "symbol(unreadable)", which scans as no selectors and blocks as
+// `not-erc4626` instead — still fail-closed, by a third route nobody designed either.
+// ⭐ Recorded rather than quietly edited: a guard whose rationale is measured beats one whose
+// rationale is plausible, and this file is where the next person will look for the reasoning.
+//
+// This converts the coincidence into a guarantee: break either mechanism and it goes red.
+{
+  const { inspectVault, gateDeposit } = await load({ vaultCodeThrows: true });
+  let i = null, threw = null;
+  try { i = await inspectVault(XYLO); } catch (e) { threw = e; }
+
+  check("⭐⭐ an unreadable vault bytecode does NOT crash the inspection",
+    threw === null, threw ? `${threw.constructor.name}: ${String(threw.message).slice(0, 60)}` : "");
+  if (i) {
+    const blocks = i.verdict.blocks.map((b) => b.code);
+    check("⭐⭐ …it BLOCKS on not-a-contract — never a clean report",
+      i.verdict.level === "BLOCK" && blocks.includes("not-a-contract"), blocks.join(",") || "(no blocks)");
+    check("⭐⭐ …and the deposit gate REFUSES, so the reassuring copy is unreachable",
+      gateDeposit({ inspection: i, ackToken: undefined }).ok === false);
+    // ⚠️ The powers DO read as absent underneath — that is the coincidence. What makes it safe is
+    // that BLOCK short-circuits before anyone is shown them. Asserted so the dependency is EXPLICIT:
+    // if the BLOCK ever stops firing, these absences become user-visible claims.
+    check("⚠️ (recorded) underneath, the powers DO read as absent — the BLOCK is what makes that safe",
+      i.ownerPowers.emergencyWithdraw.present === false && i.ownerPowers.settableFees.present === false);
+    check("⭐ an ack cannot buy past it — BLOCK outranks acknowledgement",
+      gateDeposit({ inspection: i, ackToken: "f".repeat(64) }).ok === false);
+  }
 }
 
 console.log(`\n${fail === 0 ? "✅ ALL PASS" : "❌ FAILURES"} — ${pass} passed, ${fail} failed. Zero money, zero network.`);

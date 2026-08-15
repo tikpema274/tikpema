@@ -1,5 +1,86 @@
 ---
 
+## 2026-08-16 (evening) — ⭐ `evaluatePolicy` BUILT, and the coincidental vault safety is now a guarantee.
+
+### 1 ✅ THE hasAny QUESTION — ALREADY HANDLED, AND NOW PINNED
+
+**The shipped vault card does NOT tell users an unreadable contract is clean.** Traced end to end:
+`withRetry(() => pc.getBytecode(...), "0x")` falls back to the literal `"0x"` — NOT the UNREADABLE
+sentinel — so the tri-state dies before `hasAny` is called and the selector scan legitimately finds
+nothing. ⭐ But the SAME `"0x"` makes `isContract` false and raises the **`not-a-contract` BLOCK**,
+and `gateDeposit` refuses on BLOCK before any disclosure renders. The reassuring sentences are
+unreachable.
+
+⚠️ **THE SAFETY WAS REAL BUT COINCIDENTAL** — two independent mechanisms agreeing, only one
+documented as the guard. Now pinned by five assertions in `verify-vault-degraded` (26/0): no crash,
+BLOCK on `not-a-contract`, gate refuses, an ack cannot buy past it, and — recorded explicitly — that
+the powers DO read as absent underneath, so the dependency on the BLOCK is visible rather than
+assumed. Mutation-tested both ways: remove the BLOCK → red; change the fallback → red.
+
+⭐⭐ **AND A PREDICTION IN THAT COMMENT WAS WRONG, DISPROVED BY ITS OWN MUTATION.** I claimed
+switching the fallback to `UNREADABLE` would crash (`code.includes` on a Symbol). It does not:
+line 241 wraps it in `String(codeRaw || "0x")`, and `String(symbol)` is legal — the result blocks as
+`not-erc4626` instead. Still fail-closed, by a **third** route nobody designed. Corrected at the
+code rather than quietly edited.
+
+### 2 ⭐ `evaluatePolicy(report, policy)` — pure, in `shared/onchain-analyze/policy.mjs`
+
+Inside the stamped surface AND inside `ddTree`, so a change to the evaluator rotates the health key.
+
+* **Unreadable never passes.** Each rule asks the MANIFEST first: `notChecked` → `unreadableFailures`.
+  ⭐ It iterates the USER'S RULES, never `coverage.checked` — that inversion is the optimisation that
+  turns a wholly-unreadable refused set into a silent pass, because an unchecked group is never visited.
+* **Two buckets, never one**, with wording that distinguishes *"this vault is upgradeable"* from
+  *"we could not establish whether it is."*
+* **No score.** One accept/refuse per group; the report's own `severityMeaning` forbids aggregation.
+* **A coverage threshold**, which catches what per-group rules cannot: everything read passed, but
+  little was read.
+
+⚠️ **A LIMIT ON WHAT ANY PASS CAN MEAN, surfaced from the engine's own evidence note:** *"presence of
+a selector is evidence of the power; ABSENCE is not proof of its absence (a power may be reachable
+via fallback/delegatecall)."* So `present: false` means "no selector found", not "cannot do this".
+⭐ We still pass on it — refusing on "not proven absent" would fail every refuse rule against every
+contract forever, a lockout rather than a safety property — but the pass text now says exactly what
+was established. The overclaim was in the wording, not the logic.
+
+### 3 THE FIXTURES — 31/0, and two findings from building them
+
+Named shapes all covered: absent policy, empty rules, empty manifest, and every-refused-group-
+unreadable. Plus adversarial reports from REAL quorum runs (disagreement, quorum-unmet, all-down).
+
+🚨 **FINDING: power groups are ALL-OR-NOTHING.** All nine derive from the ONE bytecode read, so
+knocking it out makes the SHAPE unclassifiable and the report becomes a refusal with all nine
+unchecked — verified 9/0 on a healthy read. **The engine cannot currently emit partial power
+coverage**, so the trap fixture is hand-built from a real report and labelled as such. Today the trap
+is defended by a different branch (`REPORT_UNUSABLE`); the per-rule branch is pinned for the moment
+any group gains its own read. ⭐ A branch unreachable today and load-bearing tomorrow is exactly the
+kind that ships broken.
+
+⚠️ **AND MY FIRST MOCK CLIENT WAS WRONG IN A SILENT WAY.** `analyze()` takes ONE `call({method,
+params})` returning `{result, query, evidence}`; a plausible client with `getCode`/`getStorageAt`
+produces a **`chain-unreachable` REFUSAL, not an error** — so every fixture asserted against a
+refusal while looking fine. ⭐ Fixed by EXTRACTING the working harness to `scripts/dd/_mock-chain.mjs`
+and having `verify-analyze` consume it too (87/0 unchanged, proving the extraction is behaviour-
+neutral). A second copy of the mock would be a duplicate source of truth over the thing the tests
+measure WITH.
+
+### PROOF
+
+`verify-policy` **31/0**, `verify-analyze` 87/0, `verify-vault-degraded` 26/0, vault 35/0, all 14 DD
+suites, bridge, tsc + build clean. **Six mutations on the evaluator, all red:** notChecked-as-absent,
+absent-policy-passes, empty-rules-passes, empty-manifest-passes, buckets-collapse, threshold-ungated.
+
+⚠️ Two of those first CRASHED the suite instead of reporting, because a failing assertion was
+followed by an indexed access on an empty array — hiding every later check. Guarded; a failure must
+report, not take the run down. ⚠️ And a `\&` escape in a `python -c` corrupted `package.json`
+mid-run; caught immediately by the JSON parse and repaired.
+
+### STATE
+
+* ⛔ **UNDEPLOYED.** No wiring yet — `evaluatePolicy` has no consumer.
+* 🚧 NEXT, in order: the in-app report route (same interface a buyer uses, not engine internals),
+  policy storage at `agent-policy` / `o/<owner>`, then the override token binding the policy digest.
+
 ## 2026-08-16 (latest) — ⭐ THE DUPLICATE MAPPING WAS NOT AN OVERSIGHT ANYONE COULD SEE: the extraction was already done and never consumed.
 
 ✅ The six DD-surface rows deployed first — `5197f78` live as `6a80684d87024bbcbb019123`, gate 13/13,
