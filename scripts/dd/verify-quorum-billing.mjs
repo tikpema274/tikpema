@@ -161,6 +161,37 @@ console.log("\n── ⭐⭐ EVERY MODULE dd-analyze RUNS IS INSIDE THE CODE-IDE
   const signer = "shared/dd/attest-circle.mjs";
   ok("⭐⭐ the SIGNING path specifically is inside the code-identity hash",
     seen.has(signer) && covered(signer));
+
+  // ⭐⭐ THE CHARGING DECISION AND THE IDENTITY LOGIC, ADDED 2026-08-16 after measuring their churn
+  // over the full 354-commit history (5 changes total, on 5 distinct days). The canary's verdict
+  // vouches for a PAID report; leaving out the code that decides whether the buyer is billed made
+  // that vouching narrower than it reads.
+  for (const f of ["shared/x402/settle-gate.mjs", "netlify/functions/_x402-confirm.mjs"]) {
+    ok(`⭐⭐ the charging path is inside the code-identity hash — ${f}`, covered(f));
+  }
+  // ⚠️ THE ONE THAT CAN INVALIDATE EVERY OTHER ROW: build-stamp.mjs COMPUTES ddCodeIdentity, so a
+  // change to it can alter what the identity MEANS without any identity rotating to say so.
+  ok("⭐⭐ the code that COMPUTES the identity is itself inside the identity", covered("shared/build-stamp.mjs"));
+  // ⚠️ …but NOT the generated file: hashing the stamp into its own hash is circular.
+  // 🚨 THIS CHECK WAS A TAUTOLOGY AND A MUTATION EXPOSED IT. It read
+  //     !covered(generated) || stampSrc.includes("const SELF")
+  // — and since the generated file is not in DD_SURFACE_FILES, the left side is ALWAYS true and the
+  // right side was never evaluated. Renaming `SELF` out of existence left it green. ⭐ An `||` whose
+  // first operand is always true is not a check, it is a comment with a green tick.
+  // Now it asserts the stamper's ACTUAL exclusion mechanism: the filter that drops SELF from the walk.
+  ok("⭐⭐ the GENERATED stamp is excluded from the hash BY THE WALK — circular otherwise",
+    /const SELF = /.test(stampSrc) && /\.filter\(\(p\) => p !== SELF\)/.test(stampSrc));
+  ok("  …and it is genuinely absent from the DD surface list", !covered("shared/build-stamp.generated.mjs"));
+
+  // ⭐ EVERY module dd-analyze reaches is now either covered or a KNOWN, NAMED exclusion. Derived
+  // from the graph, so a new uncovered import fails here instead of being noticed months later.
+  const KNOWN_UNCOVERED = new Set(["shared/build-stamp.generated.mjs"]);
+  const uncovered = [...seen].filter((p) => {
+    try { readFileSync(path.join(root, p)); } catch { return false; }
+    return !covered(p) && !KNOWN_UNCOVERED.has(p);
+  });
+  ok("⭐⭐ NOTHING dd-analyze runs is outside the code-identity hash except the documented SELF exclusion",
+    uncovered.length === 0, uncovered.join(", ") || "none");
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

@@ -1,5 +1,72 @@
 ---
 
+## 2026-08-16 (late) — ⭐ THE CODE-IDENTITY HASH NOW COVERS EVERYTHING `dd-analyze` RUNS. Six rows, and the decision was measured.
+
+✅ The `shared/dd` move deployed first — `70b92c0` live as `6a8061f296b74871ed42fc9f`, gate 12/12.
+
+### THE MEASUREMENT THAT DECIDED IT
+
+Same method that justified the binding originally. ⚠️ A 40-commit window said **0 of 40** for all
+three candidates and was **misleading** — roughly half that window was one session's bridge work,
+which would never touch them. Over the **full 354-commit history**:
+
+| file | commits ever | last change |
+|---|---:|---|
+| `shared/x402/settle-gate.mjs` | 2 | 2026-07-28 |
+| `netlify/functions/_x402-confirm.mjs` | 1 | 2026-07-28 |
+| `shared/build-stamp.mjs` | 2 | 2026-08-11 |
+| `netlify/functions/_circle.mjs` | 2 | 2026-07-11 |
+| `_dd-descriptor.mjs` / `_dd-discovery-page.mjs` | 1 each | 2026-08-14 |
+| *`dd-analyze.mjs` (already in the surface)* | *13* | — |
+
+**Nine changes across 354 commits.** At the measured ~5m refusal window per DD-dirty deploy, that is
+~45 minutes bought over the project's lifetime — every minute of it on a commit that genuinely
+changed money-path or identity code, which is exactly when re-verification should fire.
+
+⚠️ **I EXPECTED `_circle.mjs` TO CHURN** — it is shared with bridge and swap — **and it does not.**
+Two commits, last touched over a month ago. The measurement contradicted the intuition, which is the
+entire reason the rule is to measure.
+
+### ⭐⭐ COMPLETING THE SET BEAT MAINTAINING AN EXCLUSION LIST
+
+Adding the three requested rows left exactly three modules still outside — **surfaced by the
+graph-derived guard, not by memory.** The alternative was a `KNOWN_UNCOVERED` list in the verifier.
+⭐ But a human-maintained list is precisely what failed here: the stamper's *"add a row whenever the
+canary gains an import"* rule was never applied because the import arrived through `dd-analyze`. With
+full coverage the guard asserts a clean property — **nothing `dd-analyze` runs is outside the hash,
+full stop** — and a new import fails it instead of being quietly listed.
+
+`ddTree`: 24 → **30 files**. `shared/build-stamp.mjs` is the strongest addition on grounds other than
+frequency: it COMPUTES the identity, so a change there can alter what the identity MEANS without
+anything rotating to say so.
+
+### 🚨 FOUR MUTATIONS THAT DID NOT MUTATE, AND ONE CHECK THAT WAS A TAUTOLOGY
+
+⚠️ **Dropping `settle-gate` and `_x402-confirm` both reported GREEN — and neither mutation had
+applied.** Those two rows carry trailing comments (`"…settle-gate.mjs",  // decides whether a buyer
+is CHARGED`), so a string match on `"  \"path\",\n"` never matched. Redone line-based with an
+applied/not-applied report, both fail correctly. ⭐ **That is the fourth malformed mutation this
+session; the rule now has a mechanism — every mutation prints whether it changed anything.**
+
+⭐⭐ **AND ONE CHECK WAS GENUINELY DEAD.** The SELF assertion read
+`!covered(generated) || stampSrc.includes("const SELF")` — the left operand is ALWAYS true, so the
+right was never evaluated and renaming `SELF` out of existence left it green. **An `||` whose first
+operand is always true is not a check, it is a comment with a green tick.** It now asserts the
+stamper's actual mechanism — the `.filter((p) => p !== SELF)` in the walk — and fails when that
+filter is removed.
+
+### PROOF
+
+All 14 DD suites, `verify-quorum-billing` **30/0**, bridge green, tsc + build clean.
+**Mutations, each verified as applied:** drop any of the six rows → red; remove the SELF filter → red.
+
+### STATE
+
+* ⛔ **UNDEPLOYED.**
+* ✅ The `ddTree` coverage gap is CLOSED and the property is now self-maintaining.
+* 🚧 The `chain-disagreement` → `rpc-disagreement` mapping is still duplicated across two files.
+* 🚧 The source-grep sweep (*"the string appears" ≠ "the call happens"*) is still outstanding.
+
 ## 2026-08-16 (night) — ⭐⭐ THE CODE THAT SIGNS THE ATTESTATION WAS OUTSIDE THE HASH THAT IDENTIFIES THE CODE.
 
 `dd-analyze` imported `chainClient` and `ddAttestationOptions` from `scripts/dd/`, pulling
