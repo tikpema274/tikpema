@@ -102,6 +102,90 @@ the artifact — and **has no consumer yet**. Settled design, not yet built:
 
 ---
 
+## 2026-08-15 (night, later) — ⭐⭐ THE SWEEP IS BUILT — AND ITS FIRST RUN PROVED MY OWN BASELINE WAS A FILTERED READ
+
+`deploy-loss-sweep` counts the deploys `deploy:prod` silently loses. It exists because check 5
+answers *"did I lose the deploy I just ran"* and structurally cannot answer *"is this still
+happening"* — it scopes to deploys newer than the published one, so every corpse goes invisible the
+moment a good deploy publishes.
+
+### 🚨🚨 THE FINDING, AND IT IS ABOUT THE ENTRY DIRECTLY ABOVE THIS ONE
+
+The first live run scanned **437 deploys over 5 pages** and found **23 more abandoned production
+deploys**, `2026-06-24` → `2026-06-28`. Every one `new`, every one production, every one
+`updated_at == created_at`. **Corrected total: 59, not 36.**
+
+⭐⭐ **THE SCAN THAT DIAGNOSED A FILTERED READ WAS ITSELF A FILTERED READ.** Hours earlier I wrote
+that `per_page:25` had hidden 36 records for six weeks, quoted this repo's own rule that *a filtered
+read is not a measurement of absence* — and then established the zero baseline with a **3-page cap I
+chose myself**, saw the oldest returned record was `2026-07-01`, and wrote it down as *"the API's
+reach"*. It was not the API's reach. It was where I stopped asking. The 23 were sitting on page 4.
+
+⚠️ **"The oldest record I saw is X" is not "the record begins at X".** A self-imposed cap is still a
+filter, and it is more dangerous than an inherited default because it arrives feeling like a
+decision. This is the single strongest argument for why `listAllDeploys` pages to exhaustion and
+returns `exhausted` rather than a page count — and the sweep's own `beforeBaseline` branch is what
+flagged the contradiction, on its first run, against its author.
+
+### THE FOUR CONSTRAINTS, AND HOW EACH IS ENFORCED RATHER THAN PROMISED
+
+1. **⭐⭐ REPORTS, NEVER CLEANS.** No cancel, no delete, no retry. Enforced by INJECTION, not by a
+   comment: `api` is a parameter, and the suite passes one that THROWS on any method outside a read
+   allowlist, then runs the real code path through it. Tested by calling, not by grepping for
+   `cancel`. Auto-remediation would repeat today's evidence loss on a schedule and permanently
+   destroy the ability to measure the class.
+2. **⚠️ UNFILTERED AND PAGED TO EXHAUSTION.** `per_page` is always explicit, never the API's default;
+   nothing is scoped past the published deploy. Asserted on the actual request objects. ⭐ Hitting
+   the page cap sets `exhausted: false`, the report says the number is a **FLOOR, not a total**, and
+   the process exits **2** — no silent caps.
+3. **⭐ AGE IS THE RIGHT INSTRUMENT HERE, AND THE REASON IS PHYSICAL.** Check 5 judges ONE deploy in
+   real time **on the machine that ran it**, where `/proc/stat` and a process table exist — so an
+   elapsed-time guess there is a proxy standing in for evidence sitting right beside it, and it
+   needs PRECISION. The sweep counts a POPULATION over time from wherever it runs; both liveness
+   tests are **machine-local and simply do not exist** for a deploy that died three weeks ago on a
+   box that is gone. It needs RECALL, and age is not a proxy for anything — it IS the measurement.
+   Default **6 hours**, ~14× the longest real deploy ever observed here (~26 min). No real deploy
+   runs that long, so a generous threshold has no false positives. 🚨 The code says all of this at
+   the constant so nobody "corrects" it to match check 5.
+4. **⭐ `uploading` IS ITS OWN CLASS.** `6a5a0230…` died **12.5 minutes in, during the upload** — the
+   only one of the 36 whose `updated_at` moved. Counting only `new` erases the sole example of a
+   second death at a second point in the deploy.
+
+### ⭐ THE 23 SURVIVORS ARE NOW THE ONLY CLEAN EVIDENCE LEFT
+
+They were found **after** the report-do-not-clean rule was in force, so they were left exactly as
+they died: `new`, `error_message: null`, `updated_at == created_at`. Everything cancelled on
+2026-08-15 now reads as a deliberate human cancel and can never be counted again. These 23 cannot.
+
+⚠️ They are **named explicitly by id** and excluded from the loss count — not because they do not
+matter, but because *a monitor that reports the same 23 forever is one people stop reading*, and it
+is then worth nothing on the day the number changes. They are reported as a standing named quantity.
+A new loss beside them is still reported; the suite asserts the exclusion cannot mask one.
+
+### ALSO
+
+* **⭐ The ledger.** Every run appends one line to `deploy-loss-log.jsonl` — tally plus ids, including
+  survivors. Cancelling erases evidence and the deploy list is not permanent; an observation that
+  lives only in a terminal does not survive. *"Was it recorded"* is a different question from *"how
+  long does it last"*.
+* **Exit codes are the signal:** `0` nothing lost · `1` losses found · `2` **could not measure**
+  (no site id, API failure, paging capped). ⭐ `2` is deliberately not folded into `0` — a sweep that
+  cannot see is not a sweep that found nothing.
+* **One API layer, not two.** `siteId`/`netlifyApi` moved to `scripts/lib/netlify-api.mjs` and are
+  now shared with `verify-deployed`. A second copy would have drifted from the `maxBuffer` ENOBUFS
+  fix. `gate:deployed` re-verified live after the refactor: **DEPLOY VERIFIED**, all five checks.
+* **Steady state today:** `437` scanned, `0` new losses, `23` survivors, `46` ambiguous
+  `Deploy canceled`, exit `0`.
+
+**Still open — and it is now a decision, not a task.** The sweep is a script; nothing schedules it.
+Running it on a cron needs a `NETLIFY_AUTH_TOKEN` wherever it runs, and a token that can cancel and
+create deploys is a real blast-radius question. Deliberately not decided here.
+
+Files: new `scripts/lib/deploy-loss-sweep.mjs`, `scripts/lib/netlify-api.mjs`,
+`scripts/deploy-loss-sweep.mjs`, `scripts/verify-deploy-loss-sweep.mjs` (42/0), `deploy-loss-log.jsonl`;
+modified `scripts/verify-deployed.mjs` (shared API layer, corrected header figures), `package.json`
+(`test:sweep`, `sweep:deploys`). All outside the stamped surface.
+
 ## 2026-08-15 (night) — 🚨🚨 THE DEPLOY GATE'S OWN IN-FLIGHT BRANCH SAID "FINE" ABOUT A DEAD DEPLOY. A timeout was standing in for evidence.
 
 `verify-deployed` exists because a `new` deploy record reads exactly like a success. This session it
@@ -218,7 +302,7 @@ an undercount by a factor of seven.
 
 | | |
 |---|---|
-| deploys scanned (3 pages) | **300**, oldest `2026-07-01T07:26:39Z` |
+| deploys scanned (3 pages) | **300**, oldest `2026-07-01T07:26:39Z` — ⚠️ **this cap was itself wrong; see the next entry** |
 | non-`ready` | **44** |
 | **limbo** (`new` 35 + `uploading` 1) | **36** — 27 production, 9 deploy-preview |
 | of those with `updated_at == created_at` | **35 of 36** — the killed-instantly signature |
@@ -256,8 +340,10 @@ indistinguishable from a deploy a human cancelled on purpose — the five that w
 deploy list can no longer be used to count this class, and the tally in this entry is now the only
 surviving record of it.** That is why the numbers above are written down instead of merely acted on.
 
-⚠️ **`2026-07-01` IS THE API'S REACH, NOT THE BEGINNING.** 300 records is where the scan stopped.
-Whether deploys were being lost before that is **unknown**, not zero.
+⚠️ **`2026-07-01` IS WHERE THE SCAN STOPPED, NOT THE API'S REACH — AND CALLING IT THE REACH WAS THE
+SAME MISTAKE AGAIN.** 300 records is three pages, chosen by me. The site has **437**. The sweep built
+in the next entry paged to exhaustion and found **23 more** abandoned deploys, 2026-06-24 → 06-28,
+one page past where this scan stopped. Corrected total: **59**.
 
 **Still open:** nothing here changes `deploy:prod`. The class is now measured, named, and the gate
 catches the *current* deploy — but the standing question this raises is whether a periodic unfiltered

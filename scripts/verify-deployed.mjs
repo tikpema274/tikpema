@@ -23,14 +23,19 @@
 // code for another day. The failure has no symptom at the place a human looks — which is the
 // same absence-reads-as-safety shape this repo keeps re-learning, moved up into the deploy step.
 //
-// 🚨 "FIVE" WAS AN UNDERCOUNT BY 7×. An UNFILTERED scan on 2026-08-15 (300 deploys, 3 pages) found
-// 36 abandoned records — 27 production, 9 deploy-preview — going back to 2026-07-01, which is only
-// as far as the API reaches. 35 of 36 carried `updated_at == created_at`; one died mid-UPLOAD, 12.5
-// minutes in. All were cancelled, so the deploy list can no longer be used to count this class —
-// the tally survives ONLY in PROGRESS.md. ⭐ Check 5 could never have surfaced them: it scopes to
-// deploys newer than the published one, so it asks "did I lose the deploy I just ran", never "is
-// this still happening". Every earlier look used per_page:25 — a filtered read is not a measurement
-// of absence, and one page deeper turned an incident into a rate.
+// 🚨 "FIVE" WAS AN UNDERCOUNT BY 12×. Scans on 2026-08-15 found 36 abandoned records, then 23 MORE
+// once the listing was paged to exhaustion (437 deploys, 5 pages) — 59 total, back to 2026-06-24.
+// Nearly all carried `updated_at == created_at`; one died mid-UPLOAD, 12.5 minutes in.
+//
+// ⭐ Check 5 could never have surfaced any of them: it scopes to deploys newer than the published
+// one, so it asks "did I lose the deploy I just ran", never "is this still happening". That second
+// question belongs to scripts/deploy-loss-sweep.mjs, which pages to exhaustion and only counts.
+//
+// ⚠️ THE FIRST 36 WERE CANCELLED, so they now read as deliberate cancellations and can never be
+// counted again; the surviving 23 were deliberately left untouched and are the only clean evidence
+// of this class. ⭐⭐ AND THE 36-RECORD SCAN WAS ITSELF FILTERED — a self-chosen 3-page cap, whose
+// oldest row was written down as "the API's reach". It was where the scan stopped. The 23 were on
+// page 4. A cap you choose yourself is still a filter, and it arrives feeling like a decision.
 //
 // ⚠️ WHY IT TAKES SO LONG TO FAIL, and why the window is wide enough to matter: the CLI bundles
 // ~60 functions with esbuild before it uploads them. That phase ran 15+ minutes on the 2026-08-14
@@ -85,14 +90,15 @@
 // URL on this exact schedule, so the gate adds one invocation per deploy to a path that is already
 // continuously exercised.
 
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { buildStamp } from "../shared/build-stamp.mjs";
 // ⭐ The monitor's own constant, imported rather than transcribed, for the same reason the
 // promotion gate imports its constants: a second copy of the target URL drifts, and a gate
 // pointed at the wrong host passes while production is broken.
 import { DEFAULT_TARGET_URL } from "../shared/strong-read-watch/watch.mjs";
 import { bootTimeMs, buildProcesses, livenessOf } from "./lib/deploy-liveness.mjs";
+// ⭐ siteId/netlifyApi live in ONE place, shared with deploy-loss-sweep.mjs. A second copy would
+// have drifted from the maxBuffer fix that keeps the deploy listing from dying at ENOBUFS.
+import { siteId, netlifyApi } from "./lib/netlify-api.mjs";
 
 const argv = process.argv.slice(2);
 const flag = (name, fallback = null) => {
@@ -112,38 +118,6 @@ const notes = [];
 const fail = (check, detail) => { failures.push({ check, detail }); console.log(`  ✗ ${check}\n      ${detail}`); };
 const pass = (check, detail) => console.log(`  ✓ ${check}${detail ? `\n      ${detail}` : ""}`);
 const short = (v, n = 12) => (typeof v === "string" ? v.slice(0, n) : String(v));
-
-// ── site id ──────────────────────────────────────────────────────────────────────────────────
-// From .netlify/state.json — the same linkage `netlify deploy` itself uses, so the gate can
-// never assert against a different site than the one just deployed to.
-function siteId() {
-  try {
-    const id = JSON.parse(readFileSync(new URL("../.netlify/state.json", import.meta.url), "utf8"))?.siteId;
-    if (typeof id === "string" && id.length > 0) return id;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function netlifyApi(method, payload) {
-  const stdout = execFileSync("npx", ["netlify", "api", method, "--data", JSON.stringify(payload)], {
-    encoding: "utf8",
-    timeout: 90_000,
-    // ⚠️ FOUND BY THIS GATE'S OWN CALIBRATION RUN. `listSiteDeploys` with per_page:25 returns well
-    // over the 1MB execFileSync default and died with ENOBUFS — which the fail-closed design
-    // correctly reported as FAILED rather than "no orphans found", but it was still a real bug
-    // that would have made check 5 useless on every run.
-    maxBuffer: 64 * 1024 * 1024,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  return JSON.parse(stdout);
-}
-
-// ── deploy liveness ──────────────────────────────────────────────────────────────────────────
-// ⭐⭐ Extracted to scripts/lib/deploy-liveness.mjs so the branches that only fire when something
-// is ALREADY going wrong (no process found; both instruments unreadable) are tested by CALLING
-// them — see scripts/verify-deploy-liveness.mjs. The full reasoning lives in that module's header.
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
