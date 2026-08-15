@@ -1,5 +1,17 @@
 ---
 
+# ✅ HANDOFF RESOLVED — the deploy it was written about did NOT land; it has now been redeployed
+
+**Answered 2026-08-15 21:02Z.** The handoff below did its job exactly as designed, and the answer to
+its first question was **no**. Production was serving `8e8c2b6` — two commits behind, missing both
+`63e7dac` and `1835499`. The deploy started at 19:48:51Z died mid-bundle and its record is still
+sitting at `new`. A fresh `deploy:prod` at 20:36:07Z published at 21:02:28Z (~26 min), and
+`gate:deployed` now reports **DEPLOY VERIFIED** on tree `f3bbc36fd6bc` / commit `f4cb3e78fb76` under
+deploy `6a80cdb71972b88faccfb167`. See the entry directly below for what the redeploy exposed in the
+gate itself. The handoff text is kept verbatim as the record of a prediction that came true.
+
+---
+
 # 🚨 HANDOFF — WRITTEN BEFORE A DEPLOY THAT MAY NOT FINISH
 
 **Written 2026-08-15 ~19:40Z at 97% context, deliberately before starting a ~25-minute foreground
@@ -87,6 +99,115 @@ the artifact — and **has no consumer yet**. Settled design, not yet built:
   must print whether it changed anything.
 
 ---
+
+---
+
+## 2026-08-15 (night) — 🚨🚨 THE DEPLOY GATE'S OWN IN-FLIGHT BRANCH SAID "FINE" ABOUT A DEAD DEPLOY. A timeout was standing in for evidence.
+
+`verify-deployed` exists because a `new` deploy record reads exactly like a success. This session it
+found the failure it was built for — and, in the same run, printed a reassuring line about a second
+deploy that was already dead. **The gate had the defect it guards against, one level in.**
+
+### WHAT THE THREE OPENING CHECKS FOUND
+
+| check | result |
+|---|---|
+| handoff written for `63e7dac` / `1835499`? | ✅ present and accurate at the top of this file |
+| does prod report those commits? | ❌ **no** — prod served `8e8c2b6` (tree `91f49acf318e`), two commits behind |
+| a deploy stuck at `new`? | ❌ **yes** — `6a80c2a311767fb9e735f610`, `updated_at == created_at`, `error_message: null`, `required: []` |
+
+So the 1b vault-gate fix was **not live**, and had been believed shipped. Redeployed: created
+20:36:07Z, published **21:02:28Z** (~26 min), `gate:deployed` green on all five checks — tree
+`f3bbc36fd6bc`, commit `f4cb3e78fb76`, deploy `6a80cdb71972b88faccfb167`.
+
+### ⭐⭐ THE FINDING — AND IT IS NOT THE DEAD DEPLOY
+
+Check 5 classified that orphan as **`presumed in flight, not orphaned`**. It was 9 minutes old, and
+the rule was "under 30 minutes ⇒ presumed in flight". What the rule could not see: **the machine had
+REBOOTED at 19:53:15Z**, four minutes after the deploy was created. Every process that could have
+been working on it was gone before the session even opened.
+
+⭐ **The reassurance was strongest exactly when someone was looking.** The 30-minute window covers
+precisely the minutes right after a deploy dies — which is when a human asks "did it ship?". A guess
+tuned to avoid false alarms is silent in the one window where the alarm matters.
+
+⭐⭐ **THE CLASS: a guard that accepts a TIMEOUT in place of EVIDENCE has the same shape as the thing
+it guards against.** This file's own thesis is that an absence must never fill a result slot and read
+as safety. *"Thirty minutes have not yet elapsed"* is an absence — of elapsed time — standing in for
+a presence of work. The fix is never a longer window; it is to test for the work. This is the same
+family as [absence-must-never-read-as-safe], now found **inside a defense**, which is the harder
+place to see it: the surrounding file is entirely correct about the hazard and still reached for a
+proxy in the one branch where the direct measurement was slightly less convenient.
+
+### THE FIX — TWO POSITIVE TESTS, BOTH CHEAP AND IMMEDIATE
+
+`scripts/lib/deploy-liveness.mjs`. The 30-minute constant is deleted.
+
+* **A — the deploy's `created_at` predates the current boot.** Decisive on its own: no process
+  survives its machine. Read from `/proc/stat`'s `btime` — the boot *instant* in epoch seconds, not
+  arithmetic against an uptime counter that a clock adjustment would skew. `sysctl kern.boottime`
+  fallback for BSD.
+* **B — no netlify/esbuild process exists at all.** The independent second instrument (⭐ *two
+  instruments, not two reads of one*, same discipline as check 4), and it catches what A cannot: a
+  CLI killed **without** a reboot.
+
+**A is evaluated first, and that ordering is load-bearing.** During the live run there *were* build
+processes running — they belonged to the *replacement* deploy. Test B alone would have called the
+dead one alive. Elapsed time cannot express that distinction at all.
+
+### ⚠️ THREE THINGS BUILDING IT SURFACED
+
+1. **🚨 THE FALSE "IN FLIGHT" HAS A BACK DOOR WITH NO TIMEOUT IN IT.** `deploy:prod` is a single
+   `sh -c "… && netlify deploy --prod --dir=dist && npm run gate:deployed"`. When the gate runs as
+   the **last link of that chain**, the shell holding the whole chain is still alive with the literal
+   string `netlify deploy --prod` in its argv. Matching it would report an already-exited CLI as
+   still working — reintroducing the exact bug by a different route. Confirmed on the real deploy:
+   pid 2474 was that shell. ⭐ **A command chain is a plan, not a running command**, and the argv of
+   a shell is a *description* of work, not evidence of it — the same "the string appears ≠ the call
+   happens" trap already on the open-items list.
+2. **The unknown is its OWN outcome.** `livenessOf` returns `dead: true | false | null`; `null` fails
+   check 5 on its own line. Had an unreadable instrument collapsed to "in flight", the gate would go
+   quiet precisely when it had lost the ability to see. Every helper returns `null` for "could not
+   tell" and **never a convenient zero** — a boot time of `0` would make every deploy predate the
+   boot, and an empty process list where `ps` itself failed reads as "nothing is running".
+3. **Placement was a correctness decision, not tidiness.** `SURFACES = ["netlify/functions",
+   "shared", "src"]`, so a new file under `shared/` would have moved the `tree` hash while a deploy
+   stamped `f3bbc36` was mid-flight — the next `npm run stamp` would report a mismatch that is not a
+   deploy failure. `scripts/` is in neither surface, which is also where build tooling belongs.
+   Verified after the fact: re-stamping post-change reproduces `f3bbc36fd6bc` unchanged.
+
+### PROVEN, NOT ASSUMED
+
+**Live, during the redeploy — the discriminating case ran for real.** Two production deploys sat at
+`new` simultaneously, byte-identical in the API, and were judged **oppositely and correctly** in one
+run: `6a80cdb7…` in flight (`node(2933), esbuild(2995)`), `6a80c2a3…` orphaned (created 19:48:51.556Z,
+before the 19:53:15Z boot). **The old rule would have called both of them in flight.**
+
+**`scripts/verify-deploy-liveness.mjs` — 30/0**, wired into `test:all` as `test:liveness`. It exists
+because the live run could only exercise two of the four branches; the other two — *no process found*
+and *both instruments unreadable* — fire only when something is already going wrong, which is the
+worst moment to run them for the first time. §5 replays the 2026-08-15 record to the millisecond and
+asserts **both** that the old rule would have passed it and that the new one fails it, so the
+elapsed-time rule cannot quietly return. ⚠️ **Every timestamp is injected** — a `Date.now()`-relative
+test fails at every commit once the wall clock passes the boundary, which is what turned the quote
+fixture into a phantom defect in the entry below.
+
+### ⚠️ WHAT THIS DOES NOT CLAIM
+
+* **The orphan record is still there.** `6a80c2a311767fb9e735f610` will sit at `new` forever. Check 5
+  now passes because its scope is *deploys newer than the published one* — correct for "did I lose MY
+  deploy", and **not** a claim that old records were cleaned up.
+* **Both tests are about THIS machine.** A deploy driven from another machine or from CI reads as
+  dead here. Deliberate trade, and the costs are asymmetric: a false ORPHANED costs one redundant
+  ~26-minute deploy, a false IN FLIGHT costs a change everyone believes shipped and nobody re-checks.
+  The old comment ranked those the other way round and was wrong to.
+* **The gate still cannot save its own process.** Checks run only if the CLI exits; a killed shell
+  takes its chain with it. That is why check 5 is durable and standalone — it is what a *later*
+  session runs to find what an earlier one lost, and it is now the reason this entry exists.
+
+Files: new `scripts/lib/deploy-liveness.mjs`, new `scripts/verify-deploy-liveness.mjs`; modified
+`scripts/verify-deployed.mjs` (check 5 rewritten, helpers imported), `package.json` (`test:liveness`).
+All outside the stamped surface, so the verified deploy identity is untouched.
 
 ---
 

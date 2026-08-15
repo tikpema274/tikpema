@@ -83,6 +83,7 @@ import { buildStamp } from "../shared/build-stamp.mjs";
 // promotion gate imports its constants: a second copy of the target URL drifts, and a gate
 // pointed at the wrong host passes while production is broken.
 import { DEFAULT_TARGET_URL } from "../shared/strong-read-watch/watch.mjs";
+import { bootTimeMs, buildProcesses, livenessOf } from "./lib/deploy-liveness.mjs";
 
 const argv = process.argv.slice(2);
 const flag = (name, fallback = null) => {
@@ -129,6 +130,11 @@ function netlifyApi(method, payload) {
   });
   return JSON.parse(stdout);
 }
+
+// ── deploy liveness ──────────────────────────────────────────────────────────────────────────
+// ⭐⭐ Extracted to scripts/lib/deploy-liveness.mjs so the branches that only fire when something
+// is ALREADY going wrong (no process found; both instruments unreadable) are tested by CALLING
+// them — see scripts/verify-deploy-liveness.mjs. The full reasoning lives in that module's header.
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -313,18 +319,23 @@ if (probe) {
 // invisible everywhere else: null error_message, nothing red, the CLI's shell prompt long since
 // returned. And it is DURABLE — which is what lets this run find it days later.
 //
-// ⚠️ A deploy in flight RIGHT NOW looks identical to an abandoned one; the only difference is
-// whether a process is still working on it. So a fresh non-ready deploy is reported as IN FLIGHT
-// (a note) and an old one as ORPHANED (a failure). The boundary is stated, not implied.
+// ⭐⭐ A deploy in flight and an abandoned one differ by exactly one thing — whether a process is
+// still working on it — so that is what this asks. It used to ask how OLD the record was and
+// presume anything under 30 minutes was in flight. That guess printed "presumed in flight, not
+// orphaned" about a deploy whose machine had since REBOOTED, on 2026-08-15, at the top of the
+// session convened to find out whether the deploy had landed. The reassurance was strongest
+// exactly when someone was looking, because the window covers the moment right after the failure.
+//
+// ⭐ THE CLASS: a guard that accepts a TIMEOUT in place of EVIDENCE has the same shape as the
+// thing it guards against. This file's own thesis is that an absence must not fill a result slot
+// — and "30 minutes have not yet elapsed" is an absence of elapsed time standing in for a
+// presence of work. Both positive tests below are cheap and immediate; neither one waits.
 //
 // ⚠️ SCOPED TO ORPHANS NEWER THAN THE PUBLISHED DEPLOY, deliberately. Once a good deploy lands,
 // earlier abandoned attempts stop being "a change you believe shipped" — check 3 now answers that
 // question directly by comparing trees. So this scan narrows to zero the moment a publish succeeds,
 // which is correct for "did I lose MY deploy" and is NOT a claim that the old records are gone.
 console.log("\n5. ORPHANED DEPLOYS");
-/** Below this age a non-ready deploy is presumed in-flight. The 2026-08-14 deploy bundled for
- *  20+ minutes, so this is deliberately generous — a false ORPHANED is worse than a late one. */
-const IN_FLIGHT_GRACE_MS = 30 * 60 * 1000;
 if (!site) {
   console.log("      – skipped: no site id");
 } else {
@@ -334,23 +345,51 @@ if (!site) {
     const suspects = (Array.isArray(deploys) ? deploys : []).filter(
       (d) => d?.context === "production" && d?.state !== "ready" && Date.parse(d?.created_at ?? 0) > publishedAt
     );
-    const orphans = suspects.filter((d) => Date.now() - Date.parse(d.created_at) > IN_FLIGHT_GRACE_MS);
-    const inFlight = suspects.filter((d) => Date.now() - Date.parse(d.created_at) <= IN_FLIGHT_GRACE_MS);
 
-    for (const d of inFlight) {
-      notes.push(`deploy ${d.id} is "${d.state}", created ${d.created_at} — presumed IN FLIGHT (< ${IN_FLIGHT_GRACE_MS / 60000}min old)`);
-      console.log(`      ⚠️  ${d.id} is "${d.state}" and ${Math.round((Date.now() - Date.parse(d.created_at)) / 60000)}min old — presumed in flight, not orphaned`);
+    // ⚠️ SCOPE: both tests are about THIS machine. A deploy running from another machine or CI
+    // would read as dead here. That is the deliberate trade — this gate's question is "did I lose
+    // MY deploy", it runs on the box that deploys, and the costs are asymmetric: a false ORPHANED
+    // costs one redundant 25-minute deploy, a false IN FLIGHT costs a change everyone believes
+    // shipped and nobody re-checks. The old comment ranked those the other way round.
+    const boot = bootTimeMs();
+    const procs = buildProcesses();
+    if (suspects.length > 0) {
+      console.log(
+        `      liveness instruments: boot ${boot === null ? "UNREADABLE" : new Date(boot).toISOString()}` +
+          ` · build processes ${procs === null ? "UNREADABLE (ps failed)" : procs.length}`
+      );
     }
-    if (orphans.length === 0) {
+
+    const judged = suspects.map((d) => ({ d, live: livenessOf(d.created_at, boot, procs) }));
+    const orphans = judged.filter((j) => j.live.dead === true);
+    const inFlight = judged.filter((j) => j.live.dead === false);
+    const undetermined = judged.filter((j) => j.live.dead === null);
+
+    for (const { d, live } of inFlight) {
+      notes.push(`deploy ${d.id} is "${d.state}" and IN FLIGHT — ${live.why}`);
+      console.log(`      ⚠️  ${d.id} is "${d.state}" — in flight, not orphaned (${live.why})`);
+    }
+    if (orphans.length === 0 && undetermined.length === 0) {
       pass("no abandoned production deploys", `scanned ${deploys.length} deploys newer than the published one`);
-    } else {
+    } else if (orphans.length > 0) {
       fail(
         "no abandoned production deploys",
-        `${orphans.length} production deploy(s) were created after the published one and never reached \`ready\`:\n` +
-          orphans.map((d) => `        ${d.id} | ${d.state} | ${d.created_at}`).join("\n") +
+        `${orphans.length} production deploy(s) were created after the published one, never reached \`ready\`, ` +
+          `and are PROVABLY not being worked on:\n` +
+          orphans.map(({ d, live }) => `        ${d.id} | ${d.state} | ${d.created_at}\n          ↳ ${live.why}`).join("\n") +
           `\n      Each was started and never finished — almost certainly a CLI killed mid-bundle. They ` +
           `carry no error and are invisible in every other view. Nothing is broken by leaving them, but ` +
           `each one is a change somebody believed had shipped.`
+      );
+    }
+    // ⚠️ Undetermined is its OWN failure, not folded into either verdict: neither "abandoned" nor
+    // "in flight" was established, and silently picking the calmer one is the original bug.
+    if (undetermined.length > 0) {
+      fail(
+        "liveness of every non-ready deploy is established",
+        `${undetermined.length} non-ready production deploy(s) could not be judged either way:\n` +
+          undetermined.map(({ d, live }) => `        ${d.id} | ${d.state} | ${d.created_at}\n          ↳ ${live.why}`).join("\n") +
+          `\n      Check by hand before assuming anything: \`ps -ef | grep -E "netlify|esbuild"\`.`
       );
     }
   } catch (e) {
