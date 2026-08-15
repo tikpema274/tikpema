@@ -36,10 +36,12 @@ const CHAIN = "arc-testnet";
 //    2. Every Arc provider syncs from the same PERMISSIONED validator set. Quorum covers PROVIDER
 //       integrity (proxy bug, stale/pruned cache, hijacked endpoint, lying aggregator), never
 //       consensus integrity. Re-verify out of band; do not let agreement imply independence.
-export const QUORUM_ENDPOINTS = [
-  "https://rpc.testnet.arc.network", // Arc public — direct reth/v1.11.3, no CDN
-  "https://arc-testnet.drpc.org",    // dRPC — verified distinct backend
-];
+// ⭐ RE-EXPORTED, NOT RE-LISTED. The endpoint set moved to shared/onchain-analyze/endpoints.mjs when
+// the PAID path started reading through it: `shared/` is inside the build stamp's SURFACES and
+// `scripts/` is not, so production config living here would ship with a byte-identical tree hash.
+// A second literal list would be the duplicate-source-of-truth bug — the CLI and the sold service
+// must not be able to disagree about who they trust.
+export { ARC_QUORUM_ENDPOINTS as QUORUM_ENDPOINTS } from "../../shared/onchain-analyze/endpoints.mjs";
 
 /** One-argument entry point, for humans and for the verify harness. Single RPC. */
 export const analyzeOnArc = (address, { block } = {}) =>

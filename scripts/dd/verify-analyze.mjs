@@ -297,6 +297,27 @@ console.log("\n── ROW 8 · ⭐ QUORUM MATRIX: agree→value, everything else
   ok(bothDown.shape.class === "unknown", "BOTH-THROW → shape unknown");
   ok(bothDown.coverage.notChecked.some((n) => n.reason === "rpc-unreadable"), "…reason 'rpc-unreadable' (distinct from a disagreement)");
 
+  // ─── ⭐⭐ ROW 8b · THE SPLIT IS DISCLOSED AT REPORT LEVEL, NOT ONLY ON THE SLOT ────────────────
+  // A buyer paying for a claim about a subject deserves to know the providers underneath disagreed:
+  // it bears on the reliability of EVERY check in the same report, because the slots that AGREED
+  // were read from the same set — one member of which is now known to be wrong about something.
+  ok(agree.sources.integrity?.providerDisagreement === false,
+     "no split → integrity.providerDisagreement === false");
+  ok(/not a claim that the endpoints are independent/i.test(agree.sources.integrity?.note ?? ""),
+     "…and 'no disagreement' is explicitly NOT a claim of independence");
+  ok(dis.sources.integrity?.providerDisagreement === true,
+     "⭐⭐ a split → integrity.providerDisagreement === true AT REPORT LEVEL");
+  ok(dis.sources.integrity.splits.some((x) => x.id === "owner:owner()"),
+     "…naming which slot split");
+  ok(/bears on EVERY check in this report/i.test(dis.sources.integrity.note),
+     "⭐ …and saying it bears on the whole report, not just the split slot");
+  ok(/serving something false/i.test(dis.sources.integrity.note),
+     "…in the language of a POSITIVE finding, not of an unreadable instrument");
+  // ⚠️ The distinction the whole design rests on: an outage must NOT claim provider integrity is fine.
+  ok(bothDown.sources.integrity?.providerDisagreement === false &&
+     bothDown.coverage.notChecked.every((n) => n.reason !== "rpc-disagreement"),
+     "BOTH-THROW is an instrument failure, NOT a provider disagreement — the two must not blur");
+
   // 6. Nothing ever escapes as an exception.
   let threw = false;
   try { await analyze(SUBJ, { client: q({ [`code@${SUBJ}`]: transientThrow }, { [`code@${SUBJ}`]: revertThrow }) }); } catch { threw = true; }

@@ -67,6 +67,8 @@ import { discoveryPage } from "./_dd-discovery-page.mjs";
 import { readHealth } from "./_dd-health.mjs";
 import { exposureState } from "./_dd-exposure.mjs";
 import { chainClient } from "../../scripts/dd/client.mjs";
+import { quorumClient } from "../../shared/onchain-analyze/quorum.mjs";
+import { ARC_QUORUM_ENDPOINTS, INTEGRITY_OUTCOMES } from "../../shared/onchain-analyze/endpoints.mjs";
 import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { baseReport, assertReportValid, SCHEMA_VERSION } from "../../shared/onchain-analyze/schema.mjs";
 import { attachAttestation, unsignedAttestation } from "../../shared/onchain-analyze/attest.mjs";
@@ -93,6 +95,71 @@ import { ddAttestationOptions } from "../../scripts/dd/attest-circle.mjs";
 // ⭐ MOVED to _dd-descriptor.mjs: the endpoint validates against it and every descriptor (405
 // JSON, HTML page, OpenAPI) advertises from it, so an example can never name a chain the
 // endpoint would reject — they cannot disagree because they read the same array.
+
+// ═══ ⭐⭐ THE ESCALATION, AND WHY IT IS STRUCTURALLY UNREACHABLE FROM THE BILLING BRANCH ═══════════
+//
+// 🚨 THE INCENTIVE THIS AVOIDS. The flat price exists to keep incentive gradients off the money path:
+// "a coverage-scaled price would pay us more for reporting more coverage — an incentive to
+// overstate." Charging for a report whose providers DISAGREED points the same shape at a different
+// variable: a provider-integrity failure becomes revenue-positive. It is small at partial scope —
+// one split slot in an otherwise-full report — but the direction is wrong, and the defence is not
+// vigilance.
+//
+// ⭐ SO THE DEFENCE IS STRUCTURAL, NOT PROCEDURAL. This function takes the REPORT and nothing else.
+// It is called from inside `produceReport`, which runs BEFORE `runPaidAnalysis` decides anything
+// about settlement and never learns the outcome — the charge decision is not in scope here and
+// cannot be branched on, because it does not exist yet. ⚠️ DO NOT "simplify" this by moving the
+// alert next to the settle result or passing it `charged`: the moment those meet, whether we shout
+// about a bad provider becomes a function of whether we got paid.
+//
+// ⚠️ NEVER THROWS. An alerting failure must not destroy a report the buyer may have paid for.
+export function escalateProviderIntegrity(report, correlationId) {
+  try {
+const integrity = report?.sources?.integrity;
+if (!integrity?.providerDisagreement) return;
+console.error(
+  `[dd-analyze ${correlationId}] 🚨 PROVIDER DISAGREEMENT — endpoints returned different values ` +
+    `for the same call at the same block. At least one source is serving something FALSE. ` +
+    `subject=${report?.subject?.address} chain=${report?.subject?.chainId} ` +
+    `block=${report?.subject?.blockNumber} splits=${integrity.splits.map((x) => x.id).join(",")} ` +
+    `endpoints=${(report?.sources?.endpoints || []).join(" | ")} — ⚠️ a single-endpoint build of ` +
+    `this service would have SIGNED AND SOLD this answer. Re-verify endpoint independence out of ` +
+    `band; a retry may return agreement and erase the evidence.`
+);
+  } catch {
+/* an alert that breaks the response is worse than a missed alert */
+  }
+}
+
+/**
+ * Did our INSTRUMENT fail, as opposed to the subject having little to find?
+ *
+ * ⭐⭐ THIS IS THE BILLING BOUNDARY, AND IT IS THE ONE THING THE "route quorum failures into
+ * coverage" design gets wrong if left implicit. The settle gate requires a coverage manifest that
+ * ACCOUNTS FOR THE WHOLE CATALOGUE — and today an outage fails that test precisely because nothing
+ * populates the manifest. Routing every group into `notChecked` with a reason would make a total
+ * outage structurally identical to a thin answer, and the service would BILL FULL PRICE for a report
+ * that checked nothing because our own endpoints were down.
+ *
+ * ⚠️ THE PUBLISHED TERMS FORBID THAT IN SO MANY WORDS: "you are not charged if the engine could not
+ * produce an answer — an outage, AN UNREACHABLE CHAIN, or a refusal returns the report free… 'We
+ * COULD NOT check' is OUR instrument failing and is FREE."
+ *
+ * So: partial instrument failure = a thin answer and BILLS. Total instrument failure = a broken
+ * instrument and must REFUSE.
+ *
+ * ⚠️ A DISAGREEMENT IS NOT AN INSTRUMENT FAILURE and is deliberately excluded. We did read; they
+ * conflicted. That is a finding about the providers, it bills by the same terms that bill thin
+ * coverage, and it must never be laundered into a free outage.
+ */
+export function isSystemicReadFailure(report) {
+  const cov = report?.coverage;
+  if (!cov || !Array.isArray(cov.checked) || !Array.isArray(cov.notChecked)) return false;
+  if (cov.checked.length > 0) return false;              // something was established → an answer
+  if (cov.notChecked.length === 0) return false;         // nothing to judge
+  const INSTRUMENT = ["rpc-unreadable", "rpc-quorum-unmet"];
+  return cov.notChecked.every((n) => INSTRUMENT.includes(n.reason));
+}
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const MAX_BODY_BYTES = 4096;
@@ -374,10 +441,44 @@ export async function handler(event) {
     // Wrapped: analyze() reserves exceptions for programmer error, but this caller is untrusted, so
     // an unexpected throw must become a report rather than a stack trace. It returns a REFUSAL
     // report, which the settle gate then declines to charge for — an outage bills nothing.
+
     const produceReport = async () => {
       let report;
       try {
-        report = await analyze(addr, { client: chainClient(chain) });
+        // ⭐⭐ QUORUM ON THE PAID PATH. Until now this sold a signed claim about chain state read
+        // from ONE endpoint — and said so in its own report: "Single endpoint. No cross-check: a
+        // wrong answer from this provider is reported as fact." A wrong read here is not a delayed
+        // bridge; it is an attestation asserting something false that a buyer paid for and can
+        // verify against nothing.
+        //
+        // ⚠️ QUORUM FOR THE READ, COVERAGE FOR THE DISAGREEMENT. A split or an unmet quorum must NOT
+        // become a service refusal — it routes into the coverage manifest as a reasoned `notChecked`
+        // and the report settles as a THIN one. That is what keeps fail-closed (never claim a power
+        // is absent when it could not be checked) without turning an endpoint outage into a service
+        // outage. `coverage.runCheck` already routes the tagged throws, and already records one read
+        // PER ENDPOINT so a split is reproducible by the buyer.
+        report = await analyze(addr, {
+          client: quorumClient(ARC_QUORUM_ENDPOINTS.map((rpc) => chainClient(chain, { rpc }))),
+        });
+
+        // ⭐ Escalate FIRST, and from a scope that has no billing outcome in it. See the comment on
+        // escalateProviderIntegrity: this ordering is the guarantee, not a preference.
+        escalateProviderIntegrity(report, correlationId);
+
+        // ⚠️ TOTAL INSTRUMENT FAILURE STAYS FREE. A thin report is an answer; a report that checked
+        // nothing because our endpoints were down is not, and the terms promise it costs nothing.
+        if (isSystemicReadFailure(report)) {
+          console.error(`[dd-analyze ${correlationId}] systemic read failure — every check unreadable; refusing so the buyer is not charged`);
+          return refusalReport({
+            address: addr,
+            chainName: report?.subject?.chainName ?? null,
+            chainId: report?.subject?.chainId ?? null,
+            reason: "chain-unreadable",
+            detail:
+              "no check could be completed: every read failed across the whole endpoint set, so this " +
+              "is our instrument failing rather than a thin subject. You are not charged.",
+          });
+        }
       } catch (e) {
         console.error(`[dd-analyze ${correlationId}] analyze threw:`, e);
         return refusalReport({

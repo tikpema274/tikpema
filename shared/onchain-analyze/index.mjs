@@ -28,6 +28,7 @@
 // caller must fix in code, never things the chain told us.
 
 import { normalizeAddress } from "./normalize.mjs";
+import { INTEGRITY_OUTCOMES } from "./endpoints.mjs";
 import { makeCoverage } from "./coverage.mjs";
 import { detectShape } from "./shape.mjs";
 import { enumeratePowers, resolveOwner } from "./powers.mjs";
@@ -95,8 +96,31 @@ export async function analyze(address, { client } = {}) {
     // something out of band proved it — agreement between endpoints is NOT that proof.
     sources: client.endpoints
       ? { mode: "quorum", endpoints: client.endpoints, ...client.quorum,
+          // ⭐⭐ THE SPLIT IS DISCLOSED AT REPORT LEVEL, NOT ONLY ON THE SLOT THAT SPLIT.
+          //
+          // A buyer paying for a claim about a subject deserves to know the providers underneath
+          // DISAGREED — and it bears on the reliability of EVERYTHING ELSE in the same report, not
+          // just the one check. If two endpoints served different values for one slot at one pinned
+          // block, then every OTHER slot they agreed on was read from a set containing a source now
+          // known to be wrong about something. Agreement from a compromised set is not corroboration.
+          //
+          // ⚠️ SO IT MUST NOT READ AS AN ORDINARY `unreadable`. Unreadable says our instrument
+          // failed and implies nothing about the data. A split says at least one provider served
+          // something FALSE — a positive finding, and the only one that proves a single-endpoint
+          // build of this service would have signed and sold it.
+          integrity: (() => {
+            const split = manifest.notChecked.filter((n) => INTEGRITY_OUTCOMES.includes(n.reason));
+            return split.length === 0
+              ? { providerDisagreement: false, splits: [],
+                  note: "No endpoint disagreed on any slot that was read. This is not a claim that the endpoints are independent — see independenceVerified." }
+              : { providerDisagreement: true,
+                  splits: split.map((n) => ({ id: n.id, group: n.group ?? null, reason: n.reason })),
+                  note: "⚠️ ENDPOINTS DISAGREED. Two sources returned different values for the same call at the same block, so at least one is serving something false. This bears on EVERY check in this report, not only the ones listed: the slots that agreed were read from the same set. Treat corroboration here as unproven until the endpoint set is re-verified out of band." };
+          })(),
           note: "Quorum covers PROVIDER integrity (proxy bug, stale/pruned cache, hijacked endpoint, lying aggregator). It does NOT cover consensus integrity: every Arc provider syncs from the same permissioned validator set. Endpoint agreement is not evidence of endpoint independence." }
       : { mode: "single-rpc", endpoints: [client.chain?.rpc ?? "unknown"],
+          integrity: { providerDisagreement: null, splits: [],
+            note: "⚠️ UNKNOWABLE on a single endpoint: with nothing to compare against, a provider serving something false is indistinguishable from one serving the truth. `null` is not `false`." },
           note: "Single endpoint. No cross-check: a wrong answer from this provider is reported as fact." },
     coverage: {
       ...manifest,

@@ -1,5 +1,102 @@
 ---
 
+## 2026-08-16 (later) — ⭐⭐ QUORUM ON THE PAID PATH. The service that SELLS a claim about chain state was reading it from one endpoint.
+
+`dd-analyze` — the public, paid endpoint — called `analyze(addr, { client: chainClient(chain) })`.
+⭐ **The report already said so about itself:** *"Single endpoint. No cross-check: a wrong answer
+from this provider is reported as fact."* A tested quorum layer existed and ran only from the CLI.
+
+### THE SHAPE, CONFIRMED BEFORE WRITING — quorum for the READ, coverage for the DISAGREEMENT
+
+Three independent confirmations, none of them inference:
+* `quorum.mjs` already declares its four tagged throws reach the caller "which `coverage.runCheck`
+  already routes into notChecked".
+* `coverage.runCheck` already records **one read PER ENDPOINT** — "what makes a disagreement
+  REPRODUCIBLE: the reader gets one curl per endpoint and can re-run the split themselves." The
+  manifest was built for a quorum client that had never run in production.
+* The completeness invariant means a thin report is still a VALID report.
+
+### ⚠️ THE ONE THING THAT SHAPE GETS WRONG IF LEFT IMPLICIT — the billing boundary
+
+The settle gate requires *"a coverage manifest that ACCOUNTS FOR THE WHOLE CATALOGUE"*, and its own
+comment explains why: *"A `chain-unreachable` report carries an EMPTY manifest… so it fails (2) even
+before (3) is consulted."* ⭐⭐ **COVERAGE-EMPTINESS IS HOW THE GATE CURRENTLY DETECTS AN OUTAGE.**
+Populate every group with a reasoned `notChecked` and a total outage becomes structurally identical
+to a thin answer — and the service bills full price for a report that checked nothing because our own
+endpoints were down. The published terms forbid it verbatim: *"an outage, AN UNREACHABLE CHAIN, or a
+refusal returns the report free… 'We COULD NOT check' is OUR instrument failing and is FREE."*
+
+So: **partial instrument failure BILLS** (a thin answer is an answer); **total instrument failure
+REFUSES**. ⚠️ A DISAGREEMENT is neither — we DID read, they conflicted — and bills, because it is a
+finding about the providers rather than about us. Laundering it into a free outage is explicitly
+tested against.
+
+### THE THREE STATES, WHICH ARE NOT INTERCHANGEABLE
+
+| tag | about | retryable | bills |
+|---|---|---|---|
+| `rpc-unreadable` | **us** — the instrument failed; says nothing about the chain | yes | free if total |
+| `rpc-disagreement` | **them** — a provider is serving something FALSE | ⚠️ no: a retry may return agreement and ERASE the evidence | yes |
+| `rpc-quorum-unmet` | a value EXISTS and is refused — a lone survivor is a one-step downgrade | yes | free if total |
+
+⭐ A disagreement is **the only signal that proves a single-endpoint build would have SIGNED AND SOLD
+a false claim.** Everything else is a non-event.
+
+### ⭐⭐ CONDITION 2: THE ESCALATION IS STRUCTURALLY UNREACHABLE FROM THE BILLING BRANCH
+
+Charging for a disagreement makes a provider-integrity failure **revenue-positive** — the flat-price
+argument (*"a coverage-scaled price would pay us more for reporting more coverage, an incentive to
+overstate"*) aimed at a different variable. The defence is **structural, not procedural**:
+`escalateProviderIntegrity(report, correlationId)` takes the report and nothing else, and is called
+from inside `produceReport` — which runs BEFORE `runPaidAnalysis` decides anything and never learns
+the outcome. **The charge decision is not in scope and cannot be branched on, because it does not
+exist yet.** The reason is written at the code, with a "do not simplify these together" warning.
+
+### CONDITION 1: the split is disclosed at REPORT level
+
+`sources.integrity` now carries `providerDisagreement` + the splitting slots + a note saying it
+**bears on every check in the report, not only the ones listed** — because the slots that AGREED were
+read from the same set, one member of which is now known to be wrong about something. ⚠️ Single-RPC
+mode reports `providerDisagreement: null`, never `false`: with nothing to compare against, a provider
+serving something false is indistinguishable from one serving the truth.
+
+### ⚠️ TWO CORRECTIONS MADE WHILE BUILDING
+
+* **Three manifest reasons, not four.** Both mappers deliberately collapse `chain-disagreement` into
+  `rpc-disagreement`. Defensible — the chain guard catches it before any slot is read — but claiming
+  a fourth would be inventing a state nothing emits. 🚧 The mapping is duplicated in `quorum.mjs`
+  AND `coverage.mjs`.
+* 🚨 **`scripts/` IS DEPLOYED CODE OUTSIDE THE STAMPED SURFACE.** `dd-analyze` imports `chainClient`
+  and `attest-circle.mjs` from `scripts/dd/`, pulling in `client/chains/rpc/attest-circle` — none of
+  them hashed. ⭐ **Including `scripts/dd/chains.mjs`, the file this thread originally pointed at.**
+  The new endpoint set was put in `shared/` so it adds no debt; the pre-existing gap is ITS OWN item
+  — a file move does not belong in a money-path behaviour change.
+
+### PROOF — and the mutation testing earned its keep twice
+
+`verify-quorum-billing.mjs` (new, 21 checks) + `verify-analyze` 85/0 (8 new) + all 14 DD suites +
+bridge green + tsc + build clean.
+
+**Mutations:** systemic failure bills → red. A disagreement laundered into a free outage → red.
+Report-level disclosure removed → red (4).
+
+⭐⭐ **AND ONE MUTATION EXPOSED A DEAD CHECK — TWICE OVER.** Deleting the escalation call left the
+suite GREEN. First cause: `indexOf` returns `-1` when absent and `-1 < anything` is TRUE — absence
+reading as safe, inside a check written about structural guarantees. Second cause, found after fixing
+the first: the search string also matched the FUNCTION DECLARATION, so the check would have passed
+forever while the escalation never ran. ⭐ **"The string appears" is not "the call happens."** Now
+matched as a statement form, and the mutation fails as it should.
+
+⚠️ A malformed mutation also nearly produced a false pass again (the deletion did not apply the first
+time). **Verify the mutation mutated before believing the green** — that is now three times this
+session.
+
+### STATE
+
+* ⛔ **UNDEPLOYED.**
+* 🚧 **`scripts/dd/{client,chains,rpc,attest-circle}.mjs` deploy unhashed.** Its own commit.
+* 🚧 The `chain-disagreement` → `rpc-disagreement` collapse is duplicated across two mappers.
+
 ## 2026-08-16 — ⭐⭐ ONE RPC PER CHAIN WAS THE ARCHITECTURE, NOT THE INCIDENT. Every chain now has two.
 
 ### 🚨 THE RECORD HAS NOT RESOLVED — and that is the honest headline
