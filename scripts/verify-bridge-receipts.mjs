@@ -874,9 +874,9 @@ section("13 — THE 12-DAY RECORD: bounding unattended retry without foreclosing
   // ── THE SETTLER NO LONGER DISCARDS THE HASH ────────────────────────────────────────────────
   const settleSrc = fs2.readFileSync("netlify/functions/bridge-mint-settle-background.mjs", "utf8");
   check("⭐⭐ the rpc_error path RECORDS the IRIS-claimed mint hash — it was discarded ~1,730 times",
-    /lastVerifyFailure: chk\.reason,[\s\S]{0,900}irisClaimedMintTxHash: status\.mintTxHash/.test(settleSrc));
+    /lastVerifyFailure: chk\.reason,[\s\S]{0,2200}irisClaimedMintTxHash: status\.mintTxHash/.test(settleSrc));
   check("⭐ …as `irisClaimedMintTxHash`, never `mintTxHash` — we did not read it, IRIS asserted it",
-    !/lastVerifyFailure: chk\.reason,[\s\S]{0,900}\bmintTxHash: status\.mintTxHash/.test(settleSrc));
+    !/lastVerifyFailure: chk\.reason,[\s\S]{0,2200}\bmintTxHash: status\.mintTxHash/.test(settleSrc));
   check("⭐ …and increments the failed-read streak", /verifyFailureCount: \(Number\.isInteger/.test(settleSrc));
 
   // ── THE COPY (source-pinned; see the boundary note in §11) ─────────────────────────────────
@@ -887,6 +887,70 @@ section("13 — THE 12-DAY RECORD: bounding unattended retry without foreclosing
     /cause === "chain_unreadable"[\s\S]{0,1400}most likely arrived/.test(panelSrc2));
   check("⭐ the never-appeared row still exists and is NOT given the same sentence",
     /cause !== "chain_unreadable"[\s\S]{0,600}has not been reported by Circle either/.test(panelSrc2));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("14 — THE DEAD ENDPOINT: a permanent fault must not wear a transient costume");
+// 🚨 THE ROOT CAUSE of the twelve-day record, measured 2026-08-15: `rpc-amoy.polygon.technology`
+// HAS NO DNS RECORD (two independent resolvers agree; `polygon.technology` itself resolves fine).
+// So verification failed 100% of the time — and 100% is the tell, because rate limits and flaky
+// nodes are INTERMITTENT. Nothing could see it, because nothing ever asked "is this endpoint
+// alive?" outside a money-path check that only runs when a bridge needs it.
+{
+  // ⚠️ `_receipt.mjs` is MOCKED at the top of this suite (verifyMintOnChain is stubbed so the
+  // settler's branches can be driven). A plain import here would hand back that stub, so these
+  // checks would silently test the mock instead of the code — the exact shape of a test that
+  // proves nothing. The query suffix resolves to a DISTINCT module specifier, bypassing the mock
+  // and loading the real file. Pure functions only; nothing here touches the network.
+  const { classifyRpcFailure, DESTINATION_CHAINS } = await import("../netlify/functions/_receipt.mjs?real");
+  const withCause = (code) => Object.assign(new Error("fetch failed"), { cause: { code } });
+
+  check("⭐⭐ a DNS failure classifies as `unreachable` — permanent, ours, one line to fix",
+    classifyRpcFailure(withCause("ENOTFOUND")).failureKind === "unreachable");
+  check("  …as do refused connections and bad certs",
+    classifyRpcFailure(withCause("ECONNREFUSED")).failureKind === "unreachable" &&
+    classifyRpcFailure(withCause("ERR_TLS_CERT_ALTNAME_INVALID")).failureKind === "unreachable");
+  check("⭐ a timeout classifies as `transient` — someone else's node, probably fine in a minute",
+    classifyRpcFailure(Object.assign(new Error("The operation was aborted due to timeout"), { cause: { code: "UND_ERR_HEADERS_TIMEOUT" } })).failureKind === "transient");
+  check("⭐⭐ an UNKNOWN failure defaults to `transient`, not `unreachable`",
+    classifyRpcFailure(new Error("something we have never seen")).failureKind === "transient");
+  check("  …because calling it permanent SENDS A HUMAN to change config — permanence must be EARNED",
+    classifyRpcFailure({}).failureKind === "transient");
+  check("⭐ the message is carried with its code, so the record can name the actual fault",
+    /ENOTFOUND/.test(classifyRpcFailure(withCause("ENOTFOUND")).detail));
+
+  // ── THE URL ITSELF ─────────────────────────────────────────────────────────────────────────
+  check("⭐⭐ the DEAD host is gone from the config — it resolved nowhere for twelve days",
+    !Object.values(DESTINATION_CHAINS).some((c) => /rpc-amoy\.polygon\.technology/.test(c.rpc)));
+  check("  …polygon points at a host that answers, and the chainId pin is unchanged at 80002",
+    /^https:\/\//.test(DESTINATION_CHAINS.polygon.rpc) && DESTINATION_CHAINS.polygon.chainId === 80002);
+  check("⭐ every destination still pins BOTH a chainId and a USDC address — the two things that make a read PROOF",
+    Object.values(DESTINATION_CHAINS).every((c) => Number.isInteger(c.chainId) && /^0x[0-9a-fA-F]{40}$/.test(c.usdc)));
+
+  // ── THE SETTLER MUST STOP DISCARDING THE DIAGNOSIS ─────────────────────────────────────────
+  const fs3 = await import("node:fs");
+  const settleSrc2 = fs3.readFileSync("netlify/functions/bridge-mint-settle-background.mjs", "utf8");
+  check("⭐⭐ the rpc_error path now records the DETAIL — it was computed and thrown away ~1,730 times",
+    /lastVerifyFailure: chk\.reason,[\s\S]{0,900}lastVerifyFailureDetail: chk\.detail/.test(settleSrc2));
+  check("⭐⭐ …and the `unreachable`/`transient` discriminator, which is who-owns-this",
+    /lastVerifyFailureKind: chk\.failureKind/.test(settleSrc2));
+  check("⭐ …and WHICH endpoint failed, so a future dead URL names itself",
+    /lastVerifyRpc: chk\.rpc/.test(settleSrc2));
+
+  // ── THE GATE EXISTS AND BLOCKS DEPLOYS ─────────────────────────────────────────────────────
+  const pkg = JSON.parse(fs3.readFileSync("package.json", "utf8"));
+  check("⭐⭐ `gate:rpc` runs BEFORE the build in deploy:prod — a dead endpoint blocks the deploy",
+    /gate:rpc/.test(pkg.scripts["deploy:prod"]) &&
+    pkg.scripts["deploy:prod"].indexOf("gate:rpc") < pkg.scripts["deploy:prod"].indexOf("netlify deploy"));
+  const gateSrc = fs3.readFileSync("scripts/verify-destination-rpcs.mjs", "utf8");
+  check("⭐⭐ the gate fails on `unreachable` but only WARNS on transient — a gate that blocks on someone else's bad minute gets disabled",
+    /row\.kind === "unreachable" \|\| STRICT/.test(gateSrc));
+  check("⭐ …checks the chainId PIN, not merely liveness — a healthy RPC for the wrong chain is worse than a dead one",
+    /CHAIN MISMATCH/.test(gateSrc));
+  check("⭐ …checks eth_getTransactionReceipt is actually permitted, not just eth_chainId",
+    /eth_getTransactionReceipt/.test(gateSrc));
+  check("⭐⭐ …and that the PINNED USDC has code — proof the endpoint is that chain AND the address is real",
+    /HAS NO CODE/.test(gateSrc));
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

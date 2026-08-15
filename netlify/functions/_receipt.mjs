@@ -45,10 +45,44 @@ export const DESTINATION_CHAINS = {
   arbitrum:  { rpc: "https://sepolia-rollup.arbitrum.io/rpc",      chainId: 421614,   usdc: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d" },
   optimism:  { rpc: "https://sepolia.optimism.io",                 chainId: 11155420, usdc: "0x5fd84259d66Cd46123540766Be93DFE6D43130D7" },
   avalanche: { rpc: "https://api.avax-test.network/ext/bc/C/rpc",  chainId: 43113,    usdc: "0x5425890298aed601595a70AB815c96711a31Bc65" },
-  polygon:   { rpc: "https://rpc-amoy.polygon.technology",         chainId: 80002,    usdc: "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582" },
+  // 🚨 WAS `https://rpc-amoy.polygon.technology` — THE HOST HAS NO DNS RECORD AT ALL.
+  // Measured 2026-08-15 with two independent resolvers: the local one returns NO RESOLUTION, and
+  // Google's public DoH returns NOERROR with an SOA and **no A record**. `polygon.technology`
+  // itself resolves fine, so the apex is alive and this subdomain is simply gone.
+  // ⭐⭐ THAT IS WHY `0xccc02035…` FAILED VERIFICATION 100% OF THE TIME FOR TWELVE DAYS. It was never
+  // flakiness or rate-limiting — those are intermittent. `fetch` could not resolve the name, threw,
+  // and `verifyMintOnChain` caught it as `rpc_error` on every single one of ~1,730 attempts. A
+  // permanent config fault was wearing the costume of a transient one.
+  // ⚠️ publicnode is already this file's choice for ethereum-sepolia, so this is not a new
+  // dependency. Verified live: chainId 80002, eth_getTransactionReceipt allowed (null for an
+  // unknown hash rather than an error), synced at block 44,954,674, and the PINNED Amoy USDC
+  // address below has 1798 bytes of code on it — which cross-checks the endpoint really is Amoy.
+  polygon:   { rpc: "https://polygon-amoy-bor-rpc.publicnode.com", chainId: 80002,    usdc: "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582" },
   unichain:  { rpc: "https://sepolia.unichain.org",                chainId: 1301,     usdc: "0x31d0220469e10c4E71834a79b1f276d740d3768F" },
   linea:     { rpc: "https://rpc.sepolia.linea.build",             chainId: 59141,    usdc: "0xFEce4462D57bD51A6A552365A011b95f0E16d9B7" },
 };
+
+/**
+ * ⭐ IS THIS ENDPOINT BROKEN, OR MERELY UNHAPPY? — the discriminator that was missing.
+ *
+ * `fetch` reports a dead DNS name and a timed-out node as the same opaque "fetch failed"; the real
+ * cause hides in `e.cause.code`. Splitting them decides WHO ACTS: `unreachable` is a config fault we
+ * own and can fix in one line, `transient` is someone else's node having a bad minute.
+ *
+ * ⚠️ UNKNOWN CLASSIFIES AS `transient`, deliberately. Calling something permanent is a claim that a
+ * human must go change configuration; the conservative default is the one that does not send people
+ * chasing a fault that may not exist. Permanence has to be EARNED by a recognised signal.
+ */
+export function classifyRpcFailure(e) {
+  const code = e?.cause?.code || e?.code || "";
+  const msg = String(e?.message || "");
+  const permanent = ["ENOTFOUND", "EAI_AGAIN", "ERR_TLS_CERT_ALTNAME_INVALID", "ECONNREFUSED", "ERR_INVALID_URL"];
+  const isUnreachable = permanent.includes(code) || /could not resolve|getaddrinfo|ENOTFOUND/i.test(msg);
+  return {
+    failureKind: isUnreachable ? "unreachable" : "transient",
+    detail: code ? `${msg} (${code})` : msg,
+  };
+}
 
 async function rpc(url, method, params) {
   const r = await fetch(url, {
@@ -91,7 +125,14 @@ export async function verifyMintOnChain({ destinationKey, mintTxHash, recipient 
     }
     receipt = await rpc(chain.rpc, "eth_getTransactionReceipt", [mintTxHash]);
   } catch (e) {
-    return { verified: false, reason: "rpc_error", detail: e.message };
+    // ⭐⭐ A DEAD ENDPOINT AND A SLOW ONE ARE NOT THE SAME PROBLEM, AND FOR TWELVE DAYS THEY
+    // PRODUCED THE SAME WORD. `rpc_error` covered "this host does not exist" — a one-line config
+    // fault that will NEVER fix itself — and "the node timed out", which usually will. The first
+    // is ours and permanent; the second is theirs and transient. Filing one as the other is what
+    // let a decommissioned URL sit in production unnoticed.
+    // ⚠️ `reason` stays `rpc_error`: it is part of this function's documented closed set and other
+    // code branches on it. The DISCRIMINATOR is added alongside rather than smuggled into it.
+    return { verified: false, reason: "rpc_error", ...classifyRpcFailure(e), rpc: chain.rpc };
   }
 
   // 2. The tx must exist and have SUCCEEDED. A reverted mint is not a mint.

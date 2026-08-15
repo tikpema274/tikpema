@@ -1,5 +1,101 @@
 ---
 
+## 2026-08-15 — 🚨🚨 THE ROOT CAUSE: `rpc-amoy.polygon.technology` HAS NO DNS RECORD. Twelve days, ~1,730 failures, one decommissioned hostname.
+
+✅ **The Polygon record fix deployed first** — `b7f6f35` is live as `6a7f8fd24bbcc3c88c0684c9`,
+`gate:deployed` ran automatically (four for four) and was **independently re-run ~7h later** against
+live prod: still `ready`, still serving tree `db19a528b135`.
+
+### 🚨 THE MEASUREMENT — two independent resolvers, and a differential
+
+| instrument | `rpc-amoy.polygon.technology` | control |
+|---|---|---|
+| local resolver | **NO RESOLUTION** | `polygon.technology` resolves |
+| Google public DoH | **NOERROR, SOA only, NO A RECORD** | `polygon.technology` → 104.18.41.110 |
+| `curl` | **exit 6, "Could not resolve host"** | base/optimism/ethereum RPCs → HTTP 200 |
+
+⭐ **THE DIFFERENTIAL IS WHAT MAKES IT CONCLUSIVE.** Three other testnet RPCs answered 200 from the
+same machine in the same second, so this is not a sandbox network fault. The endpoint is
+**decommissioned**. A full audit of all 8 destinations: **7 healthy, polygon the only dead one.**
+
+⭐⭐ **AND 100% FAILURE WAS THE TELL NOBODY READ.** Rate limits and flaky nodes are INTERMITTENT; a
+dead DNS name fails *every single time*. Twelve days of a perfect failure rate was itself the
+evidence, and it was visible from the first hour. ⚠️ Yesterday's entry called this "a chain we cannot
+read" — right, but it read as bad luck. It was a one-line config fault the whole time.
+
+**Fixed:** `https://polygon-amoy-bor-rpc.publicnode.com` — chainId 80002, `eth_getTransactionReceipt`
+permitted (returns `null` for an unknown hash rather than erroring), synced at block 44,954,674, and
+⭐ the **pinned Amoy USDC address has 1,798 bytes of code on it**, which cross-checks that the
+endpoint really is Amoy and the address we match Transfer logs against is real. publicnode was
+already this file's choice for ethereum-sepolia, so it is not a new dependency.
+
+### 🚨 THE THIRD THING THAT LINE DISCARDED
+
+`verifyMintOnChain` has **always** returned a `detail`, and the settler has **always** stored only
+the one-word `reason`. So the record said `rpc_error` while the actual message — a DNS failure naming
+a host that no longer exists — was computed, thrown away, and recomputed ~1,730 times.
+⭐⭐ **THE DIAGNOSIS WAS IN HAND ON EVERY SINGLE ATTEMPT AND WAS NEVER WRITTEN DOWN.** Now persisted
+as `lastVerifyFailureDetail`, `lastVerifyFailureKind` and `lastVerifyRpc`.
+
+*(That is three separate discards on one line, found on three consecutive passes: the IRIS-claimed
+mint hash, the failure detail, and the cause. Each was in scope; each was dropped.)*
+
+### ⭐ THE DISCRIMINATOR — permanent vs transient
+
+`classifyRpcFailure` splits `unreachable` (ENOTFOUND / ECONNREFUSED / bad cert — **ours, permanent,
+one line**) from `transient` (timeout / 5xx — **theirs, probably fine in a minute**). `fetch` reports
+both as an opaque "fetch failed"; the real cause hides in `e.cause.code`.
+⚠️ **UNKNOWN DEFAULTS TO `transient`, deliberately** — calling something permanent is a claim that a
+human must go change configuration, so permanence has to be EARNED by a recognised signal.
+
+### ⭐⭐ THE CLASS FIX — `gate:rpc`, because the URL is not the fix
+
+The URL is one line. The actual defect is that **a decommissioned endpoint could decay silently for
+twelve days**, because nothing ever asked "is this endpoint alive?" outside a money-path check that
+only runs when a bridge happens to need it. `scripts/verify-destination-rpcs.mjs`, wired into
+`deploy:prod` **before the build**, asks per chain:
+
+1. does it answer `eth_chainId` at all
+2. does that chainId **equal the pinned one** — ⚠️ a healthy RPC for the WRONG chain is worse than a
+   dead one, because the chain-pin would reject every mint while the endpoint looked green
+3. is `eth_getTransactionReceipt` **permitted** — some endpoints answer `eth_chainId` and refuse the
+   method we actually depend on, which would fail for the first time on a user's bridge
+4. does the **pinned USDC contract have code** there — proof of both the chain and the address
+
+⚠️ **A TRANSIENT FAILURE WARNS, IT DOES NOT FAIL THE GATE.** If a third-party testnet node having a
+bad minute could block a deploy, the gate would be disabled within a week — and a disabled gate
+protects nothing. `--strict` fails on both. ⭐ That split is what makes a blocking gate survivable.
+
+### PROOF
+
+⭐ **CALIBRATED ON ALL THREE FAILURE BRANCHES BEFORE BEING TRUSTED** — each proven by a real run:
+· the dead URL → `✗ polygon … eth_chainId failed [unreachable] — fetch failed (ENOTFOUND)`, exit 1,
+  **in one second** (the diagnosis that took twelve days)
+· a healthy endpoint on the wrong chain → `CHAIN MISMATCH — pinned 80002, endpoint reports 84532`
+· a bogus pinned USDC → `PINNED USDC 0x…dEaD HAS NO CODE on this endpoint`
+
+`verify-bridge-receipts` **180/0** (17 new, from 163), fee-band 111/0, quote 72/0, tsc + build clean,
+`gate:rpc` 8/8 healthy. ⭐ **MUTATION-TESTED — six mutations, all red, restore green:** default
+unknown failures to `unreachable`, classify DNS as `transient`, restore the dead URL, discard the
+detail again, remove `gate:rpc` from `deploy:prod`, and drop the chainId-pin check.
+
+⚠️ **A TEST-INFRASTRUCTURE TRAP WORTH RECORDING:** `_receipt.mjs` is mocked at the top of the receipt
+suite, so the first version of these checks imported the STUB and would have tested the mock rather
+than the code. Bypassed with a `?real` query specifier, and said so in the file — a green check
+against a stub is worse than no check.
+
+### STATE
+
+* ⛔ **UNDEPLOYED** — moves the stamped surface.
+* ⚠️ **The 12-day record still will not self-heal**, and that is correct: it is past the 7-day
+  unattended-retry bound from `b7f6f35`. It is now recoverable **on demand** — the owner opening the
+  panel re-triggers a settle, and that settle will now reach a working RPC. ⭐ The two fixes compose:
+  the bound stopped the pointless retrying, this makes the retry that a human triggers actually work.
+* ⚠️ Its IRIS-claimed mint hash is still unrecoverable (discarded before the fix), so verification
+  will re-derive it from IRIS on the next attempt rather than reading it from the record.
+* 🚧 The panel copy is STILL source-pinned only. The regex has now broken **four** times across four
+  commits, every time from text moving rather than meaning changing. It needs a rendering test.
+
 ## 2026-08-14 (night) — 🚨 THE 12-DAY RECORD WAS NEVER A PENDING MINT. IRIS SAID IT LANDED, AND WE THREW AWAY THE HASH 1,730 TIMES.
 
 ✅ **The reconcile job deployed first** — `d8483f1` is live as `6a7f842d8f85092df7456b94`, and

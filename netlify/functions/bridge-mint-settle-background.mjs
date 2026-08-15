@@ -221,6 +221,16 @@ export async function handler(event) {
             delivery: "predicted",
             lastCheckedAt: new Date().toISOString(),
             lastVerifyFailure: chk.reason,
+            // 🚨 THE THIRD THING THIS LINE THREW AWAY. `verifyMintOnChain` has always returned a
+            // `detail` and this branch has always stored only the one-word `reason`. So the record
+            // said `rpc_error` for twelve days while the actual message — a DNS failure naming a
+            // host that no longer exists — was computed, discarded, and recomputed ~1,730 times.
+            // ⭐ THE DIAGNOSIS WAS IN HAND ON EVERY SINGLE ATTEMPT AND WAS NEVER WRITTEN DOWN.
+            // `failureKind` is the discriminator: `unreachable` is a config fault we own, and
+            // `transient` is a node having a bad minute. They were the same word before today.
+            lastVerifyFailureDetail: chk.detail ?? null,
+            lastVerifyFailureKind: chk.failureKind ?? null,
+            lastVerifyRpc: chk.rpc ?? null,
             // 🚨 THE ONE DATUM A HUMAN NEEDS, PREVIOUSLY DISCARDED ON THIS EXACT PATH. IRIS has
             // just handed us the mint hash it claims landed, and this branch used to drop it —
             // ~1,730 times over twelve days for `0xccc02035…`, once per retry. A record that ends

@@ -16,6 +16,7 @@
     "gate:watch": "node scripts/verify-watch-promotion-gate.mjs",
     "gate:routes": "node scripts/verify-api-routes.mjs",
     "gate:deployed": "node scripts/verify-deployed.mjs",
+    "gate:rpc": "node scripts/verify-destination-rpcs.mjs",
     "smoke": "node scripts/smoke-endpoints.mjs",
     "test:client": "npx tsx scripts/verify-read-json.mts && npx tsx scripts/verify-format-usdc.mts",
     "preview": "vite preview",
@@ -30,7 +31,7 @@
     "hooks:install": "git config core.hooksPath .githooks && echo \"core.hooksPath -> .githooks\"",
     "postinstall": "git config core.hooksPath .githooks 2>/dev/null || true",
     "deploy:draft": "npm run gate:draft && npm run build && netlify deploy --dir=dist",
-    "deploy:prod": "npm run gate:watch && npm run build && netlify deploy --prod --dir=dist && npm run gate:deployed",
+    "deploy:prod": "npm run gate:watch && npm run gate:rpc && npm run build && netlify deploy --prod --dir=dist && npm run gate:deployed",
     "test:ddwatch": "node scripts/verify-dd-watch.mjs"
   },
   "dependencies": {
