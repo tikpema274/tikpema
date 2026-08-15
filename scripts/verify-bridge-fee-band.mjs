@@ -421,8 +421,16 @@ section("10 — THE PENDING PATH KEEPS THE CONSENT EVIDENCE (the 202 wrote NOTHI
     /txId: r\.txId \?\? null/.test(reader) && /submittedAt: r\.submittedAt \?\? null/.test(reader));
   check("⭐⭐ the panel keys on whichever identity exists (else React collapses pending rows into one)",
     /key=\{r\.burnHash \?\? r\.txId\}/.test(panel));
-  check("⭐⭐ …and SUBMITTED does not render as 'in flight' — we have not observed the burn",
-    /r\.state === "burn_submitted"/.test(panel) && /has not been confirmed yet/.test(panel));
+  // ⭐⭐ RETIRED — THE FIFTH BREAK OF THIS EXACT KIND. This asserted the SUBMITTED copy by reading
+  // BridgePanel.tsx, and it went red the moment that copy moved into `bridgeReceiptStatus.tsx`
+  // — code MOVING, meaning unchanged, for the fifth time across five commits. Every previous break
+  // was answered by loosening the pattern; the loosening is how `d8483f1` silently deleted "This
+  // will not resolve on its own" with a green suite.
+  // ⭐ The claim is now owned by `scripts/verify-bridge-copy.tsx`, which RENDERS the component and
+  // asserts that `settling` is the only band permitted to say "yet" and that a submitted row never
+  // reads as "in flight". A rendered assertion cannot be defeated by a file reorganisation.
+  check("⭐ the panel delegates receipt copy to the rendered-and-tested component",
+    /<BridgeReceiptStatus r=\{r\} \/>/.test(panel));
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

@@ -1,5 +1,83 @@
 ---
 
+## 2026-08-15 (later) — ⭐⭐ THE RENDERING TEST — and on its FIRST RUN it caught a sentence the source regex had let me silently delete.
+
+✅ **The RPC fix deployed first** — `2fa7378` live as `6a800701563075acd9f6ffeb`; **both** gates ran:
+the new `gate:rpc` pre-build (8/8 healthy, polygon now green) and `gate:deployed` post-deploy (five
+for five). All nine commits then **pushed** — `044ab44..2fa7378`, origin and local now equal.
+
+### 🚨 THE GUARD WAS WORSE THAN NOTHING, AND HERE IS THE PROOF
+
+The panel copy was guarded by source regexes. Across five commits they broke **five times**, and
+every break was text **MOVING**, never meaning changing:
+
+| # | what moved | it was "fixed" by |
+|---|---|---|
+| 1 | JSX wrapped `could not be / determined` onto two lines | matching `\s+` |
+| 2 | the `unresolved` row grew an attempt branch, pushing the phrase past the window | widening 400→900 |
+| 3 | the settler gained three fields between two anchors | widening 900→2200 |
+| 4 | (same shape again in the receipts suite) | widening |
+| 5 | the copy moved to a new file entirely | retired today |
+
+⭐⭐ **FIVE FALSE ALARMS, ZERO TRUE ONES — AND THE "FIXES" WERE ALL LOOSENING.** Then it missed a real
+one. `d8483f1` rewrote the `unresolved` row to add the attempt count and **silently deleted "This
+will not resolve on its own"**. The regex — widened in that very commit — still passed, because it
+only asserted the phrase that survived (`reconcile this transaction against Circle`).
+
+⚠️ **THAT SENTENCE IS LOAD-BEARING.** "Reconcile by hand" is an instruction; only "this will not
+resolve on its own" tells a user that **waiting is futile**. Without it someone can reasonably sit
+and wait for a record nothing will ever resolve. Restored, verified against `7622cd3` in git rather
+than from memory.
+
+### THE FIX IS ARCHITECTURAL, NOT A BETTER PATTERN
+
+**`src/components/bridgeReceiptStatus.tsx`** — the copy extracted as a pure component: no hooks, no
+wallet, no fetch, no props but the receipt. ⚠️ It holds **no logic of its own** — every band, cause
+and cap is computed server-side and arrives on the receipt; a second copy of the age cap in the
+client is the duplicate-source-of-truth bug this system keeps designing around.
+
+**`scripts/verify-bridge-copy.tsx`** (`npm run test:bridgecopy`, chained into `test:bridge`) renders
+it with `react-dom/server` and asserts on **TEXT CONTENT** — 53 checks. It sees four things no regex
+can: a branch present in source that never renders; text assembled from variables; **two branches
+matching at once** (two contradictory sentences in one row); and a state that renders **nothing**.
+
+### PROOF — the mutation result is the whole argument
+
+⭐⭐ **SEVEN MUTATIONS. THE FORMATTING ONE STAYS GREEN; ALL SIX MEANING ONES GO RED.**
+
+| mutation | verdict |
+|---|---|
+| **wrap a phrase across four lines** (what broke the regex 5×) | ✅ **STAYS GREEN** |
+| delete "will not resolve on its own" again (the real regression) | ❌ red |
+| let "yet" back into the `unwitnessed` row | ❌ red |
+| `chain_unreadable` reverts to "it may still land" | ❌ red |
+| two branches match at once | ❌ red |
+| a state renders nothing | ❌ red |
+| the attempt count stops being interpolated | ❌ red |
+
+**Insensitive to formatting, sensitive to meaning** — exactly inverted from what it replaces.
+
+`verify-bridge-receipts` 171/0, fee-band 111/0, quote 72/0, **bridge-copy 53/0**, tsc + build clean.
+
+⭐ **THE SUPERSEDED REGEXES ARE DELETED, NOT KEPT ALONGSIDE.** Two guards on one claim, one of which
+cries wolf, teaches people to ignore both — and the ignoring is what let a real deletion through.
+
+### 🚧 A GAP FOUND BY RENDERING, ASSERTED RATHER THAN HIDDEN
+
+An **unknown state renders NOTHING** — a row showing an amount and destination with no status,
+which reads as ordinary. That is the panel's own core failure mode, and no source regex could ever
+have detected it. ⚠️ **It is NOT fixed here.** It is pinned by a check that asserts the empty render,
+so the check **starts failing the moment someone adds a fallback** — which is the reminder to.
+
+### STATE
+
+* ⛔ **UNDEPLOYED** — moves the stamped surface.
+* ⚠️ `tsconfig` `include`s only `src`, so `tsc --noEmit` does **not** typecheck the test file; it is
+  verified by RUNNING. Same gap forces an explicit `import React` (classic transform under `tsx`);
+  a `@jsxImportSource` pragma does not help, as that only redirects an already-automatic transform.
+* 🚧 `verify-unified-balance-copy.mjs` still carries the identical limitation, documented in its own
+  header since it was written. It now has a working pattern to copy.
+
 ## 2026-08-15 — 🚨🚨 THE ROOT CAUSE: `rpc-amoy.polygon.technology` HAS NO DNS RECORD. Twelve days, ~1,730 failures, one decommissioned hostname.
 
 ✅ **The Polygon record fix deployed first** — `b7f6f35` is live as `6a7f8fd24bbcc3c88c0684c9`,

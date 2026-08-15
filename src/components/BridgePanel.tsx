@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
+import { BridgeReceiptStatus } from "./bridgeReceiptStatus";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -332,7 +333,6 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
             </div>
           )}
           {receipts.map((r) => {
-            const measured = r.delivery === "measured" && r.amountDelivered != null;
             return (
               // A provisional receipt has no burnHash — key on whichever identity it has,
               // or React collapses every pending row into one.
@@ -340,138 +340,13 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
                 <span className="mono">{Number(r.amountRequested).toFixed(4)}</span> USDC →{" "}
                 {r.destinationLabel ?? r.destinationKey}
                 {" · "}
-                {/* ⚠️ SUBMITTED IS NOT IN FLIGHT. The burn was sent to Circle and has not
-                    been confirmed on Arc — it may still land, or may never have. Saying
-                    "in flight" here would promise a burn we have not observed.
-
-                    ⭐⭐ AND IT IS NOT ONE SENTENCE, BECAUSE IT WAS NOT ONE SITUATION. This row
-                    previously said "has not been confirmed YET" for the entire life of the
-                    record — forever, since nothing resolves a provisional receipt. "Yet" tells
-                    the reader someone is still waiting. Nobody is: there is no sweeper, no
-                    settler and no reconcile job for a `tx-` record. ⚠️ THAT MATTERS BECAUSE A
-                    USER WHO BELIEVES A PROCESS IS WATCHING WILL NOT GO LOOK THEMSELVES — the
-                    copy was quietly discouraging the only action that could resolve it.
-                    The band comes from the server (provisionalStatus), so the age cap has ONE
-                    definition and the panel cannot drift from the sweeper's census. */}
-                {r.state === "burn_submitted" && r.provisional?.band === "settling" && (
-                  <span style={{ color: "var(--warn)" }}>
-                    submitted — the Arc burn has not been confirmed yet. Nothing has been
-                    observed leaving your wallet.
-                  </span>
-                )}
-                {r.state === "burn_submitted" && r.provisional?.band === "unwitnessed" && (
-                  <span style={{ color: "var(--warn)" }}>
-                    submitted, still unconfirmed — and <b>nothing is checking this
-                    automatically</b>. Nothing has been observed leaving your wallet. If it
-                    matters now, check the transaction with Circle rather than waiting.
-                  </span>
-                )}
-                {/* ⭐ THE AGED-OUT ROW NOW REPORTS WHAT WAS TRIED. `reconcileAttempts > 0` means we
-                    asked Circle repeatedly and never got an answer — a genuine dead end. A count of
-                    ZERO means nobody ever asked, which is a DIFFERENT and more alarming problem (the
-                    reconcile job is not running), and the two must not read alike. */}
-                {r.state === "burn_submitted" && r.provisional?.band === "unresolved" && (
-                  <span style={{ color: "var(--warn)" }}>
-                    ⚠ <b>needs review</b> — submitted over 24h ago and never confirmed.{" "}
-                    {r.reconcileAttempts > 0 ? (
-                      <>
-                        We asked Circle {r.reconcileAttempts} times and never got a confirmation.
-                      </>
-                    ) : (
-                      <>
-                        <b>Nothing ever checked it automatically</b> — that itself needs looking at.
-                      </>
-                    )}{" "}
-                    Reconcile this transaction against Circle's record by hand. Nothing has been
-                    observed leaving your wallet.
-                  </span>
-                )}
-                {/* ⭐⭐ THE OUTCOME THE RECONCILE JOB CAN NOW PROVE: Circle says the submission is
-                    over and no burn exists. This is the one provisional ending that is genuinely
-                    GOOD NEWS — nothing was burned, so nothing is lost — and it must not be dressed
-                    in the warning grammar the unresolved case earns. */}
-                {r.state === "submit_failed" && (
-                  <span>
-                    not submitted — {r.submitFailureDetail ?? "the transaction never landed"}.{" "}
-                    <b>No funds left your wallet.</b> Nothing to recover.
-                  </span>
-                )}
-                {/* Defensive: `burn_submitted` with no band means the server did not project one
-                    (an older deploy, or a shape change). Say the true, weaker thing rather than
-                    fall through to NO status line at all — a row that renders an amount and no
-                    state reads as normal, which is the failure this whole panel exists to avoid. */}
-                {r.state === "burn_submitted" && !r.provisional?.band && (
-                  <span style={{ color: "var(--warn)" }}>
-                    submitted — the Arc burn has not been confirmed, and its age could not be
-                    determined. Nothing has been observed leaving your wallet.
-                  </span>
-                )}
-                {r.state === "burn_confirmed" && (
-                  <span>
-                    in flight — <b>estimated</b> {Number(r.netPredicted).toFixed(4)} USDC to arrive
-                  </span>
-                )}
-                {r.state === "minted" && measured && (
-                  <span style={{ color: "var(--emerald)" }}>
-                    ✓ arrived — <b>exactly {Number(r.amountDelivered).toFixed(4)} USDC</b>, read from
-                    the destination chain
-                  </span>
-                )}
-                {/* Defensive: `minted` without a measured amount should be unreachable — the
-                    server only writes that state after a verified read. If it ever appears,
-                    say so rather than presenting the estimate as an arrival. */}
-                {r.state === "minted" && !measured && (
-                  <span style={{ color: "var(--warn)" }}>
-                    ✓ mint reported, but no measured amount was recorded — treat the figure as an
-                    estimate
-                  </span>
-                )}
-                {/* ⭐⭐ TWO DIFFERENT FAILURES THAT RENDERED IDENTICALLY FOR TWELVE DAYS.
-                    `lastVerifyFailure` is written on exactly one line of the settler, reachable
-                    ONLY after IRIS reported the mint as `minted` — so `cause: "chain_unreadable"`
-                    means THE MINT WAS REPORTED AS LANDED and our own read of the destination chain
-                    failed. The old single sentence said "unproven … it may still land" about a mint
-                    IRIS had already said landed: wrong in both halves, and it filed an rpc fault on
-                    our side as a pending bridge. */}
-                {r.state === "mint_unconfirmed" && r.mintRecovery?.cause === "chain_unreadable" && (
-                  <span style={{ color: "var(--warn)" }}>
-                    the Arc burn is real and final, and Circle reported the destination mint as
-                    completed — but <b>our own read of {r.destinationLabel ?? r.destinationKey} has
-                    never succeeded</b>
-                    {r.mintRecovery.verifyFailureCount > 0
-                      ? ` (${r.mintRecovery.verifyFailureCount} failed reads)`
-                      : ""}
-                    , so we will not claim it as measured. Estimated{" "}
-                    {Number(r.netPredicted).toFixed(4)} USDC.{" "}
-                    <b>This most likely arrived</b> — the gap is in our verification, not the bridge.
-                    {r.mintRecovery.exhausted && <> We have stopped re-checking automatically.</>}
-                  </span>
-                )}
-                {r.state === "mint_unconfirmed" && r.mintRecovery?.cause !== "chain_unreadable" && (
-                  <span style={{ color: "var(--warn)" }}>
-                    not confirmed in time — the Arc burn is real and final; the destination mint is{" "}
-                    <b>unproven</b> and has not been reported by Circle either. Estimated{" "}
-                    {Number(r.netPredicted).toFixed(4)} USDC.{" "}
-                    {r.mintRecovery?.exhausted ? (
-                      <>
-                        ⚠ <b>Needs review</b> — we have stopped re-checking automatically.
-                      </>
-                    ) : (
-                      <>This is not a failure — it may still land.</>
-                    )}
-                  </span>
-                )}
-                {r.state === "mint_failed" && (
-                  <span style={{ color: "var(--warn)" }}>bridge failed on the destination</span>
-                )}
-                {r.state === "mint_unverified" && (
-                  <span style={{ color: "var(--warn)" }}>
-                    ⚠ <b>needs review</b> — Circle reported a mint that our own read of the
-                    destination chain could not confirm
-                    {r.verifyFailure?.reason ? ` (${r.verifyFailure.reason})` : ""}. Deliberately not
-                    retried automatically.
-                  </span>
-                )}
+                {/* ⭐ THE COPY LIVES IN bridgeReceiptStatus.tsx — a pure component with no hooks,
+                    no wallet and no props but the receipt, so scripts/verify-bridge-copy.tsx can
+                    RENDER it and assert on the text a browser actually paints. It was inline here,
+                    guarded only by a source regex that broke four times across four commits — every
+                    break caused by text moving rather than meaning changing, and each "fix" widened
+                    the regex, loosening the guard by way of its own false alarms. */}
+                <BridgeReceiptStatus r={r} />
                 {r.burnTx && (
                   <>
                     {" · "}

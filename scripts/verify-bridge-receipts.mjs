@@ -625,31 +625,19 @@ section("11 — THE AGE CAP: a provisional record must not be immortal");
   check("  …and a confirmed receipt projects provisional:null rather than a fabricated band",
     provisionalStatus({ state: "minted" }).provisional === false);
 
-  // ── THE COPY ────────────────────────────────────────────────────────────────────────────────
-  // ⚠️ COVERAGE BOUNDARY, STATED: these are SOURCE checks. This suite has no React renderer, so
-  // they prove the branches EXIST and that the unconditional "yet" is gone — they do not prove
-  // what a browser paints. `assert-on-rendered-output` remains the standing rule and remains
-  // unmet here; a rendering test belongs with the other copy suites, not bolted on to this one.
-  const panelSrc = await import("node:fs").then((fs) => fs.readFileSync("src/components/BridgePanel.tsx", "utf8"));
-  check("⭐⭐ 'not been confirmed yet' is no longer unconditional — it is gated on the `settling` band alone",
-    /band === "settling"[\s\S]{0,240}has not been confirmed yet/.test(panelSrc));
-  check("⭐ the `unwitnessed` row says nothing is checking, rather than implying someone is",
-    /band === "unwitnessed"[\s\S]{0,400}nothing is checking this/.test(panelSrc));
-  // ⚠️ WINDOW WIDENED WHEN THE RECONCILE JOB LANDED — the row grew an attempt-count branch and the
-  // phrase moved past 400 chars. Third time a source regex has been brittle here for a reason that
-  // has nothing to do with what the user sees; the boundary note above is not theoretical.
-  check("⭐⭐ the `unresolved` row says it will NOT resolve on its own and names the manual step",
-    /band === "unresolved"[\s\S]{0,900}econcile this transaction against Circle/.test(panelSrc));
-  check("⭐⭐ …and DISTINGUISHES 'we asked N times' from 'nothing ever checked it' — different problems, different urgency",
-    /reconcileAttempts > 0[\s\S]{0,300}We asked Circle[\s\S]{0,300}Nothing ever checked it automatically/.test(panelSrc));
-  check("⭐ a `submit_failed` row leads with the good news — no funds left the wallet",
-    /state === "submit_failed"[\s\S]{0,400}No funds left your wallet/.test(panelSrc));
-  // ⚠️ `\s+` BETWEEN THE WORDS, NOT A SPACE — and this check FAILED first for exactly that reason:
-  // JSX wrapped the sentence, so "could not be determined" exists on screen and not in the source
-  // as one string. ⭐ That is `assert-on-rendered-output-not-source-regex` demonstrating itself
-  // inside the very check whose comment above admits it cannot render. Left visible on purpose.
-  check("⭐ a provisional row with NO band still renders a status — a row with an amount and no state reads as normal",
-    /!r\.provisional\?\.band[\s\S]{0,300}age could not be\s+determined/.test(panelSrc));
+  // ── THE COPY — NOW OWNED BY A RENDERING TEST ───────────────────────────────────────────────
+  // ⭐⭐ THE SOURCE REGEXES THAT LIVED HERE ARE DELETED, NOT WEAKENED. Across four commits they
+  // failed four times and caught ZERO real defects — every failure was text MOVING (JSX wrapping a
+  // phrase across lines, a branch growing and pushing the match past the char window) — and each
+  // failure was "fixed" by WIDENING the window, so the guard was progressively loosened by its own
+  // false alarms. Then it missed a real one: `d8483f1` silently deleted "This will not resolve on
+  // its own" from the unresolved row and the widened regex still passed, because it only asserted
+  // the phrase that survived.
+  // ⚠️ KEEPING THEM ALONGSIDE THE RENDERING TEST WOULD KEEP THE COST AND ADD NOTHING — two guards
+  // on one claim, one of which cries wolf, teaches people to ignore both.
+  // ⭐ `scripts/verify-bridge-copy.tsx` (npm run test:bridgecopy, chained into test:bridge) renders
+  // BridgeReceiptStatus with react-dom/server and asserts on the TEXT A BROWSER PAINTS. It found
+  // that deletion on its first run.
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
@@ -879,14 +867,7 @@ section("13 — THE 12-DAY RECORD: bounding unattended retry without foreclosing
     !/lastVerifyFailure: chk\.reason,[\s\S]{0,2200}\bmintTxHash: status\.mintTxHash/.test(settleSrc));
   check("⭐ …and increments the failed-read streak", /verifyFailureCount: \(Number\.isInteger/.test(settleSrc));
 
-  // ── THE COPY (source-pinned; see the boundary note in §11) ─────────────────────────────────
-  const panelSrc2 = fs2.readFileSync("src/components/BridgePanel.tsx", "utf8");
-  check('⭐⭐ the chain-unreadable row says the mint was REPORTED COMPLETE and blames our read, not the bridge',
-    /cause === "chain_unreadable"[\s\S]{0,900}reported the destination mint as[\s\S]{0,400}our own read/.test(panelSrc2));
-  check("⭐⭐ …and says it most likely ARRIVED, rather than 'unproven, may still land'",
-    /cause === "chain_unreadable"[\s\S]{0,1400}most likely arrived/.test(panelSrc2));
-  check("⭐ the never-appeared row still exists and is NOT given the same sentence",
-    /cause !== "chain_unreadable"[\s\S]{0,600}has not been reported by Circle either/.test(panelSrc2));
+  // ── THE COPY — see §11: owned by scripts/verify-bridge-copy.tsx, which renders it. ─────────
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
