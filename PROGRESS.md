@@ -1,5 +1,75 @@
 ---
 
+## 2026-08-15 (evening) — ⭐ THE LAST SOURCE-SCANNING COPY GUARD IS GONE. Its own header asked for this, and had done since the day it was written.
+
+✅ **The silent-row fix deployed first** — `af28b53` live as `6a80187cb24a4ab9c0828c46`, both gates
+ran, seven for seven, and pushed. ⭐ Unlike the previous deploy, that one's tree hash was a **real**
+comparison (`3a18eb54d4db`, new) because it touched `netlify/functions`.
+
+⚠️ **A deploy-hygiene note worth keeping:** the push was made WHILE the deploy was bundling, and
+`npm run stamp:clear` was deliberately NOT run until it finished. esbuild inlines
+`shared/build-stamp.generated.mjs` into each function as it bundles, so clearing the stamp mid-bundle
+could bake a NULL stamp into functions not yet processed — producing an artifact that reports
+UNRESOLVED provenance and fails `gate:deployed`'s third check. Uncommitted changes are not pushed, so
+the push needed no such step anyway.
+
+### THE CONVERSION — `verify-unified-balance-copy.mjs` → `.tsx`
+
+Its own header had carried this since it was written: *"this reads SOURCE, not rendered output. It
+cannot see text built from variables, text in props of components it does not know about, or a NEW
+file carrying the falsehood. See PROGRESS.md: the guard should render the components."*
+
+⭐ **RENDERING TURNED OUT TO NEED NO EXTRACTION HERE** — unlike the bridge panel. Both components
+render under `renderToStaticMarkup` with a plain wallet stub. Only `useGatewayBalance` had to be
+mocked, and for a precise reason: **SSR does not run effects**, so the hook would sit at `loading`
+forever and the parked-funds branch — the one carrying the disclosure — is unreachable otherwise.
+Mocking the DATA renders the REAL component in the REAL state a user with parked funds sees.
+
+### THREE THINGS THE SOURCE SCAN COULD NOT DO
+
+1. ⭐⭐ **`badge="Exit built · about seven days"` is a PROP handed to `<Pocket>`** — a component the
+   old guard never opened. "The literal exists in the file" was the most it could ever say; this
+   proves it **reaches the output**. That badge has been wrong twice, and four words next to a
+   number get read more than the paragraph beneath them.
+2. ⭐⭐ **The YourMoney disclosure is gated on `gwParked > 0`** — and the old count of `1` was silent
+   on whether a user ever reaches it. Now asserted in BOTH directions: present when funds are
+   parked, **correctly absent when none are** (nothing at stake to disclose). That pins the GATE, so
+   neither a user with funds losing the warning nor an empty account growing a spurious one can
+   happen unnoticed. ⭐ And the counterpart is pinned too: the **before-deposit** disclosure in
+   UnifiedBalancePanel must NOT be balance-gated — it is read before there is a balance.
+3. ⭐ **Forbidden phrases are checked against the whole rendered tree in three states** (parked,
+   empty, signed-out), so a falsehood cannot hide in a branch that happens not to render — nor in a
+   child component whose file the old scan never opened.
+
+### PROOF
+
+**Six mutations. The formatting one stays green; all five meaning ones go red.**
+
+| mutation | verdict |
+|---|---|
+| **wrap a phrase across four lines** | ✅ **stays green** |
+| restore the v3 falsehood "There is no path that returns it" | ❌ red |
+| the badge reverts to "No withdrawal built" | ❌ red (4 checks) |
+| the warning fires when NOTHING is parked | ❌ red |
+| the before-deposit disclosure becomes balance-gated | ❌ red |
+| a site is silently dropped (count 2 → 1) | ❌ red |
+
+⚠️ **ONE MUTATION WAS MALFORMED AND I ALMOST RECORDED A FALSE PASS.** The balance-gate mutation first
+inserted a dead `{false && …}` expression, which gates nothing — the suite stayed green and briefly
+looked like a hole. Re-run as a REAL gate it failed, on exactly the check named for it. ⭐ A mutation
+that does not actually change behaviour proves nothing about the test; the green was evidence about
+my sed, not about the suite.
+
+`test:copy` **32/0** rendered, bridge 171/111/72/78, tsc + build clean. The `.mjs` is **deleted, not
+kept alongside** — two guards on one claim, one of which cries wolf, teaches people to ignore both.
+
+### STATE
+
+* ⛔ **UNDEPLOYED** — but this one touches only `src/` and `scripts/`, so the stamped surface is
+  unchanged and the tree check will again be a no-op. The COMMIT check is what will verify it.
+* ⭐ Every copy guard in this repo now asserts on rendered output. The `.mjs`-era note in
+  `assert-on-rendered-output-not-source-regex` finally has mechanisms everywhere it pointed.
+
 ## 2026-08-15 (later still) — ⭐ THE SILENT ROW IS CLOSED — and closing it found a receipt row showing a FABRICATED `0.0000 USDC`.
 
 ✅ **The rendering test deployed first** — `0d16bfc` live as `6a8010faba99f17f3fd516e2`, both gates
@@ -70,8 +140,8 @@ tsc + build clean.
 * ⛔ **UNDEPLOYED** — moves the stamped surface (this one genuinely does: `netlify/functions`).
 * ⭐ Both defects in this entry were found by RENDERING, neither by a test anyone thought to write.
   That is now two commits running where the rendering harness paid for itself immediately.
-* 🚧 `verify-unified-balance-copy.mjs` still carries the identical source-regex limitation,
-  documented in its own header since it was written. The pattern to copy is now proven twice.
+* ✅ **CLOSED 2026-08-15** — `verify-unified-balance-copy` is now a RENDERING suite too. See the
+  entry above.
 
 ## 2026-08-15 (later) — ⭐⭐ THE RENDERING TEST — and on its FIRST RUN it caught a sentence the source regex had let me silently delete.
 
@@ -148,8 +218,7 @@ so the check **starts failing the moment someone adds a fallback** — which is 
 * ⚠️ `tsconfig` `include`s only `src`, so `tsc --noEmit` does **not** typecheck the test file; it is
   verified by RUNNING. Same gap forces an explicit `import React` (classic transform under `tsx`);
   a `@jsxImportSource` pragma does not help, as that only redirects an already-automatic transform.
-* 🚧 `verify-unified-balance-copy.mjs` still carries the identical limitation, documented in its own
-  header since it was written. It now has a working pattern to copy.
+* ✅ **CLOSED 2026-08-15** — converted to a rendering suite. See the entry above.
 
 ## 2026-08-15 — 🚨🚨 THE ROOT CAUSE: `rpc-amoy.polygon.technology` HAS NO DNS RECORD. Twelve days, ~1,730 failures, one decommissioned hostname.
 
