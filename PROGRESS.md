@@ -1,5 +1,95 @@
 ---
 
+# 🚨 HANDOFF — WRITTEN BEFORE A DEPLOY THAT MAY NOT FINISH
+
+**Written 2026-08-15 ~19:40Z at 97% context, deliberately before starting a ~25-minute foreground
+deploy.** The session will probably end mid-flight. That is exactly how five deploys ended up in
+state `new` on 2026-08-14, so this exists so the next session does not have to reconstruct it.
+
+## ⭐ FIRST THING TO CHECK: DID THE DEPLOY LAND?
+
+The deploy being started carries **`1835499`** (or whatever `git log -1` shows if this file is
+newer). `gate:deployed` is chained into `deploy:prod` and runs automatically — **but a completed
+deploy self-verifies into a log nobody reads, and a deploy that DIED DURING UPLOAD leaves a silent
+`new` record with `error_message: null` and nothing red anywhere.**
+
+Run this first. It answers both cases:
+
+```bash
+npm run stamp && npm run gate:deployed   # then: npm run stamp:clear
+```
+
+* ✅ `DEPLOY VERIFIED` → it landed; nothing to do.
+* ❌ `the published deploy is `ready`` fails, or **check 5 lists an orphan** → the deploy died
+  mid-flight. Re-run `npm run deploy:prod` (foreground, budget ~25 min).
+* ⚠️ A commit-mismatch under a MATCHING tree is NOT a failure — it means later commits touched only
+  files outside the stamped surface.
+
+## WHAT SHIPPED IN THE LAST THREE COMMITS
+
+| commit | what |
+|---|---|
+| **`63e7dac`** | **1b — the vault gate refused without saying why.** A 409 carries the fresh disclosure; the client did `throw new Error(data.error)` and discarded the body, so the server's *"carrying the disclosure so the UI can render exactly what must be acknowledged"* had NO CONSUMER. Fixed with `errorWithPayload` (extracted so it is TESTED by calling, not grepped for), a computed `diffDisclosure` (which warn appeared/disappeared, which named fee moved and from what to what), and the **`unexplained`** case — a refusal none of the four digest inputs explains says so, because an empty panel reads as "nothing important happened". The disclosure now also carries its own digest inputs, since a fee-only change was previously unexplainable. |
+| **`8e8c2b6`** | `POLICY_CEILING` rides on every `evaluatePolicy` result — *a policy gate can never say "safe", only "nothing was found against your rules"* — written before the UI copy exists. Plus the three accidental safety mechanisms on the vault path, recorded as a table. |
+| **`1835499`** | **The quote-suite "defect" was a fixture ageing past a TTL**, plus `test:all`. |
+
+## ⚠️ TWO CORRECTIONS THE NEXT SESSION MUST NOT RE-LEARN
+
+1. **`pruneOwnerQuotes` was NEVER broken.** I wrote "the test isn't broken; the module is" — wrong.
+   The test hardcoded `quotedAt: "2026-08-01T12:34:56.789Z"`, which crossed `QUOTE_TTL_MS` (14 days)
+   at **2026-08-15T12:34:56.789Z**. After that the write-then-prune correctly expired the record it
+   had just written. Fixture age 14.29 days vs a 14-day TTL. **Production is unaffected** — `quotedAt`
+   is minted at write time.
+2. **A bisect could not have found it.** Clean worktrees at twelve commits back to `a7ca274` (the
+   commit that INTRODUCED the suite) all failed, and I concluded "it never passed". That was an
+   artefact of the method: **a `Date.now()`-relative test fails at EVERY commit once the wall clock
+   passes the boundary**, because every run shares one clock. History showed a defect that was never
+   there. The TTL boundary is now pinned deliberately with an injected clock.
+
+## ⭐⭐ `npm run test:all` — USE IT, AND READ `$?`
+
+13 suites chained with `&&`. **Never grep suite output.** "Read the exit code" was already written
+down from the bridge-suite incident and failed AGAIN on 2026-08-15: suites were checked with
+`grep -c "FAILURES"` and `0` read as green — but **a crash prints no summary line**, so a crashing
+suite counted as passing and several "bridge green" reports were false. See
+`scripts/README-testing.md`. As of this handoff **`test:all` exits 0**, tsc + build clean.
+
+## WHERE THE POLICY THREAD IS
+
+`evaluatePolicy` (`shared/onchain-analyze/policy.mjs`) is built, tested 36/0, mutation-tested, live in
+the artifact — and **has no consumer yet**. Settled design, not yet built:
+
+* **The in-app report route** — same schema and code path a buyer gets, session-authed instead of
+  x402. Skip exposure, skip payment, **KEEP health** (the card gates deposits, a stronger reason to
+  respect it than a buyer has). ⭐ The rung ladder goes in ONE shared helper both entry points call.
+* **Quorum accepted**, ~8 RPC calls per render, **no cache first — measure real load**. Arc's public
+  RPC has throttled this repo before. Any cache later inherits the CDN lesson: `no-store` stops new
+  storage and cannot evict what is stored.
+* **The three-way warn split**: power warns → the report; owner-identity warns → the report;
+  `performance-fee` → stays in `inspection` (no report equivalent). ⚠️ ALL BLOCKs stay, especially
+  `not-a-contract` — it is what makes the three accidental safety mechanisms safe.
+* **Ack invalidation accepted**; there are **zero persisted acks** (no ack store), so the cost is
+  bounded by open browser tabs.
+* Then: policy storage at `agent-policy` / `o/<owner>`, and an override token binding the **policy
+  digest** (without it a later edit makes the receipt claim a rule that no longer means the same).
+
+## OTHER OPEN ITEMS
+
+* 🚧 **The Polygon record** — PROVEN arrived on-chain (IRIS `complete`; Amoy receipt `0x1` at block
+  43,849,013; 0.94899 USDC to the recorded recipient, matching `netPredicted` exactly) but still reads
+  `mint_unconfirmed`. Past the 7-day auto-retry bound by design; **resolves when the owner opens the
+  Bridge panel**.
+* 🚧 **Hop 2 of the unified-balance exit has never run.** Matures ~2026-08-19.
+* 🚧 **The source-grep sweep** — *"the string appears" is not "the call happens."* Four instances now:
+  a dead `indexOf` (`-1 < anything`), a tautological `||`, an exported function with zero callers, and
+  the 409 disclosure with no consumer.
+* ⚠️ **Mutation hygiene:** five mutations this session reported green without applying. Every mutation
+  must print whether it changed anything.
+
+---
+
+---
+
 ## 2026-08-16 (night) — 🚨 THE QUOTE SUITE'S "DEFECT" WAS A FIXTURE AGEING PAST A TTL. I had it backwards.
 
 ### ⚠️ FIRST, THE CORRECTION
