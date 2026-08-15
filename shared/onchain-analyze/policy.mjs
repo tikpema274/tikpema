@@ -42,6 +42,29 @@ export const POLICY_REASON = Object.freeze({
   COVERAGE_BELOW_THRESHOLD: "coverage-below-threshold",
 });
 
+/**
+ * ⭐⭐ THE CEILING ON WHAT ANY POLICY VERDICT CAN MEAN — WRITTEN BEFORE THE COPY EXISTS.
+ *
+ * A POLICY GATE CAN NEVER SAY "SAFE". It can only say "nothing was found against your rules."
+ *
+ * Three independent reasons, none of which a nicer UI can remove:
+ *   1. A power is detected by finding its SELECTOR in bytecode. The report says it plainly:
+ *      "ABSENCE is not proof of its absence — a power may be reachable via fallback/delegatecall
+ *      with no selector." A pass means no selector was found.
+ *   2. The rules are the USER'S. A contract can be dangerous in ways they never wrote a rule about,
+ *      and the catalogue is nine groups, not every way a contract can take your money.
+ *   3. Coverage is a floor, not a guarantee: `checked` counts what was ASKED, and a read that
+ *      succeeded is not a read that saw everything.
+ *
+ * ⚠️ THIS RIDES ON EVERY RESULT, machine-readable, for the same reason `severityMeaning` rides on
+ * every report: so no consumer can claim it was not told. A UI that renders a green tick and the
+ * word "safe" is contradicting a string it was handed in the same object.
+ */
+export const POLICY_CEILING =
+  "no-clearance: a pass means NOTHING WAS FOUND AGAINST YOUR RULES — never that this contract is safe. " +
+  "Powers are detected by selector presence, and absence of a selector is not proof the power is absent; " +
+  "the rules are yours and cover nine catalogue groups, not every way a contract can take your funds.";
+
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
 /**
@@ -53,7 +76,7 @@ const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
  */
 export function evaluatePolicy(report, policy) {
   const no = (reason, detail, extra = {}) => ({
-    passes: false, reason, failures: [], unreadableFailures: [],
+    passes: false, reason, ceiling: POLICY_CEILING, failures: [], unreadableFailures: [],
     coverage: { checked: 0, total: Object.keys(POWER_SIGS).length, threshold: null, meets: null },
     evaluated: [], detail, ...extra,
   });
@@ -183,6 +206,7 @@ export function evaluatePolicy(report, policy) {
 
   return {
     passes,
+    ceiling: POLICY_CEILING,
     reason: passes ? null
       : failures.length ? POLICY_REASON.POWER_PRESENT
       : unreadableFailures.length ? POLICY_REASON.POWER_UNREADABLE

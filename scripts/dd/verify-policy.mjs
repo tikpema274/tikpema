@@ -24,7 +24,7 @@
 
 import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { quorumClient } from "../../shared/onchain-analyze/quorum.mjs";
-import { evaluatePolicy, RULE, POLICY_REASON } from "../../shared/onchain-analyze/policy.mjs";
+import { evaluatePolicy, RULE, POLICY_REASON, POLICY_CEILING } from "../../shared/onchain-analyze/policy.mjs";
 import { POWER_SIGS, EIP1967_IMPL_SLOT } from "../../shared/onchain-facts/index.mjs";
 // ⭐ THE SHARED HARNESS, NOT A SECOND COPY. A hand-rolled client that looks plausible produces a
 // `chain-unreachable` REFUSAL rather than an error — so a wrong mock silently tests refusals instead
@@ -194,6 +194,32 @@ section("5 — THE POLICY ITSELF MUST BE WELL-FORMED");
     !("severity" in evaluatePolicy(cleanReport, REFUSE_UPGRADEABLE)));
   ok("⭐ the function is PURE — the same inputs give an identical result",
     JSON.stringify(evaluatePolicy(cleanReport, REFUSE_UPGRADEABLE)) === JSON.stringify(evaluatePolicy(cleanReport, REFUSE_UPGRADEABLE)));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("6 — ⭐⭐ THE CEILING RIDES ON EVERY RESULT");
+// A policy gate can never say "safe" — only "nothing found against your rules". That sentence is
+// written BEFORE the copy exists, and it is machine-readable on every return for the same reason
+// `severityMeaning` rides on every report: so no consumer can claim it was not told. A UI that
+// renders a green tick and the word "safe" is contradicting a string handed to it in the same object.
+{
+  const results = [
+    evaluatePolicy(cleanReport, null),
+    evaluatePolicy(cleanReport, { rules: {} }),
+    evaluatePolicy(cleanReport, REFUSE_UPGRADEABLE),                       // a PASS
+    evaluatePolicy(cleanReport, { rules: { pausable: RULE.REFUSE } }),     // a FAIL
+    evaluatePolicy(cleanReport, "nonsense"),
+  ];
+  ok("⭐⭐ every result carries the ceiling — pass, fail, malformed and no-policy alike",
+    results.every((r) => typeof r.ceiling === "string" && r.ceiling.length > 40),
+    `${results.filter((r) => r.ceiling).length}/${results.length}`);
+  ok("⭐⭐ …and the PASS result carries it too — that is the case it exists for",
+    results[2].passes === true && /NOTHING WAS FOUND AGAINST YOUR RULES/.test(results[2].ceiling));
+  ok("⭐ …it says a pass is never a claim of safety", /never that this contract is safe/i.test(POLICY_CEILING));
+  ok("⭐ …and names the selector limit, so the UI cannot claim more than the evidence supports",
+    /absence of a selector is not proof/i.test(POLICY_CEILING));
+  ok("  the word 'safe' never appears as a verdict anywhere in a result",
+    !results.some((r) => /\bis safe\b/i.test(JSON.stringify({ ...r, ceiling: "" }))));
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

@@ -11,17 +11,32 @@ nothing. ⭐ But the SAME `"0x"` makes `isContract` false and raises the **`not-
 and `gateDeposit` refuses on BLOCK before any disclosure renders. The reassuring sentences are
 unreachable.
 
-⚠️ **THE SAFETY WAS REAL BUT COINCIDENTAL** — two independent mechanisms agreeing, only one
-documented as the guard. Now pinned by five assertions in `verify-vault-degraded` (26/0): no crash,
-BLOCK on `not-a-contract`, gate refuses, an ack cannot buy past it, and — recorded explicitly — that
-the powers DO read as absent underneath, so the dependency on the BLOCK is visible rather than
-assumed. Mutation-tested both ways: remove the BLOCK → red; change the fallback → red.
+### ⭐⭐ THREE INDEPENDENT ACCIDENTAL SAFETY MECHANISMS ON ONE PATH — THIS IS WHY THE PIN WAS NECESSARY
 
-⭐⭐ **AND A PREDICTION IN THAT COMMENT WAS WRONG, DISPROVED BY ITS OWN MUTATION.** I claimed
-switching the fallback to `UNREADABLE` would crash (`code.includes` on a Symbol). It does not:
-line 241 wraps it in `String(codeRaw || "0x")`, and `String(symbol)` is legal — the result blocks as
-`not-erc4626` instead. Still fail-closed, by a **third** route nobody designed. Corrected at the
-code rather than quietly edited.
+Not a footnote. The reason.
+
+| # | mechanism | designed for this? |
+|---|---|---|
+| 1 | the `"0x"` fallback makes `isContract` false → **`not-a-contract` BLOCK** | no — it is a default value |
+| 2 | `hasAny` would THROW on a real `UNREADABLE` symbol (`code.includes` is not a function) | no — a type accident |
+| 3 | `String(symbol)` is legal, so an `UNREADABLE` fallback yields `"symbol(unreadable)"` → **`not-erc4626` BLOCK** | no — discovered by mutation |
+
+⭐ **I PREDICTED (2) AND THE MUTATION DISPROVED IT.** The comment claimed switching the fallback to
+`UNREADABLE` "would turn a stated refusal into a 500". It does not — line 241 wraps the value in
+`String(codeRaw || "0x")`, and explicit `String()` on a Symbol is legal (only implicit coercion
+throws). It blocks as `not-erc4626` instead. **Fail-closed held anyway, by a third route nobody
+designed and nobody had noticed.** Corrected at the code rather than quietly edited.
+
+⚠️ **THREE ACCIDENTS AGREEING IS NOT A SAFETY PROPERTY — IT IS A COINCIDENCE WITH A GOOD TRACK
+RECORD.** Nothing documented tied them together, so any one of them could have been "cleaned up" by
+someone reasoning correctly about the other two. That is precisely what makes a pin necessary rather
+than optional: the behaviour was right, the *reason* was unrecorded, and an unrecorded reason is one
+edit away from being removed for tidiness.
+
+Now pinned by five assertions in `verify-vault-degraded` (26/0): no crash, BLOCK on
+`not-a-contract`, gate refuses, an ack cannot buy past it, and — recorded explicitly — that the
+powers DO read as absent underneath, so the dependency on the BLOCK is visible rather than assumed.
+Mutation-tested both ways: remove the BLOCK → red; change the fallback → red.
 
 ### 2 ⭐ `evaluatePolicy(report, policy)` — pure, in `shared/onchain-analyze/policy.mjs`
 
@@ -78,6 +93,14 @@ mid-run; caught immediately by the JSON parse and repaired.
 ### STATE
 
 * ⛔ **UNDEPLOYED.** No wiring yet — `evaluatePolicy` has no consumer.
+* ⭐⭐ **THE CEILING IS WRITTEN DOWN BEFORE THE COPY EXISTS**, and it rides on every result as
+  `POLICY_CEILING` — machine-readable, on pass and fail alike, for the same reason `severityMeaning`
+  rides on every report: **so no consumer can claim it was not told.**
+  > **A policy gate can never say "safe". Only: "nothing was found against your rules."**
+  Three reasons no UI can design away: a power is detected by SELECTOR PRESENCE and absence of a
+  selector is not proof of absence; the rules are the user's and cover nine catalogue groups, not
+  every way a contract can take funds; and coverage counts what was ASKED. ⚠️ A green tick with the
+  word "safe" would contradict a string handed to the UI in the same object.
 * 🚧 NEXT, in order: the in-app report route (same interface a buyer uses, not engine internals),
   policy storage at `agent-policy` / `o/<owner>`, then the override token binding the policy digest.
 
