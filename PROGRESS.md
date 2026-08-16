@@ -1,5 +1,101 @@
 ---
 
+# ✅ CREDENTIAL AUDIT CLOSED — and the real exposure was never the `is_secret` flag
+
+**2026-08-16.** Commits `9360413` (audit doc), `82df505` (spike guard), `d09af6e` (smoke scripts),
+`9bfa810` (repath + per-file guards). Nothing deployed — this touched no prod code path.
+
+## The finding that reframed the whole task
+
+`KIT_KEY` and `ANTHROPIC_API_KEY` were the last two vars still carrying the `builds` scope. Both
+dropped to `functions, runtime`, values proven unchanged by sha256 before/after.
+`ANTHROPIC_API_KEY` also went `is_secret` — safe on both axes at once: regenerable from the console
+AND `.env` proven a real backup by hash comparison first (the pre-flight that caught the genuine
+`SESSION_SECRET` divergence).
+
+⭐⭐ **`KIT_KEY` HELD AT `is_secret: false` — DECIDED, NOT DEFERRED.** It IS regenerable
+(`console.circle.com/api-keys`, free, no KYC — confirmed from Circle's docs, not assumed), so the
+stated criterion was met. It was declined because the pre-flight grep found **20 files** running
+`netlify env:get KIT_KEY --context production` while Netlify held the ONLY readable copy — no `.env`
+entry, and Circle's console does not re-display a kit key.
+
+🚨 **`is_secret` protects against console access; the dependency tree was the bigger surface.**
+Flipping first would have made recovery a REISSUE — invalidating the live value and breaking prod
+swap/bridge. A protection whose recovery path is a money-path outage is not the one to take first.
+So the order was inverted: shrink the tree, then close the readback.
+
+## Triage before deleting — and the answer was DELETE NOTHING
+
+18 of the 20 were one-shot spikes. The instinct to retire them was wrong, and the repo had already
+recorded why in two independent places: `scripts/spikes/README.md` ("a claim about money is only as
+good as the run you can repeat") and PROGRESS.md:8277 ("Spike scripts kept under scripts/ as the
+proven reference"). Every indexed spike is the provenance for a specific money claim — step2's net
+USDC −2 / EURC +1.488895, step4c's `DeadlineExpired()` differential at 52942858/52943700, design2b's
+1-approve-across-3-swaps. **Deleting them converts recorded results into unverifiable claims.**
+
+⭐ So the credential SOURCE changed and the code did not. `scripts/_kit-key.mjs` is now the one place
+a script obtains the key: it refuses missing, `"No value set"`-contaminated, prefix-stripped and
+malformed values, reports shape only, and reaches for nothing itself. Its refusal teaches
+`read -rs` — **not** `KIT_KEY=… node …`, which lands in shell history AND argv
+(`/proc/<pid>/cmdline` is world-readable), and **not** a file on disk, which is `.env`'s problem one
+level down and is how the `SESSION_SECRET` divergence went unnoticed.
+
+⚠️ The 12 "dead" spikes were **mis-pathed, not rotted** — every target still existed. Two positional
+causes: `scripts/dd` → `shared/dd`, and one directory level from the move into `spikes/`.
+
+## 🚨 THE DEFECT THIS SURFACED: phase0e sent money before validating its credential
+
+`spike-phase0e-approve.mjs` — the one money-moving script — **never validated `KIT_KEY` at all**.
+Its only use is the rebuild that runs AFTER the real `approve(adapter, 1 USDC)` is broadcast. So a
+missing or prefix-stripped key meant: **money moves, THEN the run dies on a credential that was
+knowable at second zero.** Now checked before the approve, gated on `--confirm` so the dry-run
+preflight is unaffected. It was also PRINTING `KIT_KEY=… node …` at runtime while provisioning —
+actively teaching the leak the audit was closing.
+
+## ⭐ Repathing made them runnable, so the deferred decision went live — six answers, not one
+
+Verified by **STATIC IMPORT RESOLUTION only; no spike was executed.** Running a money-path spike to
+confirm a repath worked is precisely the thing that must not happen, and it is the obvious
+temptation once the paths are fixed. Fixed by RESOLVING each specifier against the real filesystem
+rather than pattern-matching paths — PROGRESS.md:1797's lesson from the original move — and the
+computed paths came out identical to what the living spikes already use.
+
+Reading each file produced six different skip-vs-fail answers:
+* **design2a KEEPS its skip** — cases 1/2 are its primary claim and need no network. Made SHAPE-aware:
+  a prefix-stripped key is non-empty, so the old presence test sent it down the LIVE branch to die at
+  a 401 while `fails++` — which exists so a skipped claim never reads as passed — never ran.
+* **design2b / step4b / step5b / step8d** — guard placed BELOW the dry-run exit; line ordering asserted.
+* **step2 / step4a / step4c / step5a** — unconditional; even the dry run prices a real quote.
+* **step3** — inside the Part B branch; Part A is zero-money and stays runnable.
+* **phase0** — never checked, then passed inline into AppKit at two call sites.
+
+## Two defects the new suites caught in MY OWN work
+
+* The guard diagnosed `KIT_KEY:abc123` (missing secret half) as PREFIX-STRIPPED, because `KIT_KEY` is
+  itself a valid segment — advice that produces `KIT_KEY:KIT_KEY:abc123`. **A wrong diagnosis costs
+  more than none, because it gets acted on.**
+* The purity check matched the guard's own PROSE about the trap rather than a use of it —
+  `assert-on-rendered-output-not-source-regex`, occurring inside the test written to enforce it.
+
+## The index was missing four rows
+
+`spike-step8a/8b/8c/8d` were unindexed while the reversal code they evidence was already live
+(`676768f`). ⚠️ That is absence-reads-as-safe aimed at the INDEX: a reader of a complete-looking
+table concludes those spikes are not provenance. Added, and `verify-spike-index.mjs` now checks
+**both directions** — the one-way form would have stayed green through exactly this failure.
+
+## State
+
+* prod-Netlify `KIT_KEY` dependency: **20 → 0**.
+* New suites wired into `test:all` as `test:spikes`: 34/0 (guard) + 8/0 (index).
+* ⚠️ **UNPROVEN:** no spike or smoke script has been RUN end-to-end under the new recipe. The guard's
+  refusal path is proven by 34 real subprocesses; the ACCEPT path with a genuine Circle key is not.
+* ⏭️ `is_secret` on `KIT_KEY` is now unblocked. Hold until a key you hold is confirmed working via
+  `read -rs` — after flipping there is no way back to the deployed value.
+* ⏭️ Still open from earlier: `CIRCLE_ENTITY_SECRET` offsite copy; the Circle-support question about
+  validating a recovery file without a reset; whether the `SESSION_SECRET` `.env`/Netlify divergence
+  is deliberate or accidental.
+
 # ✅ HANDOFF RESOLVED — the deploy it was written about did NOT land; it has now been redeployed
 
 **Answered 2026-08-15 21:02Z.** The handoff below did its job exactly as designed, and the answer to
