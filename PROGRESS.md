@@ -76,9 +76,9 @@ Still ahead on this thread:
 
 * **The UI consumer.** The route exists and **nothing calls it** — no card, no fetch. This is the
   mirror of the DCA bug and `gate:routes` structurally cannot see it (see OTHER OPEN ITEMS).
-* **Policy storage** at `agent-policy` / `o/<owner>`. Until it exists the policy is client-supplied,
-  so the verdict ships marked `authority: "display-only"` **in the payload** and must not gate
-  anything. A caller who chooses their own rules can choose rules that pass.
+* ✅ **DONE 2026-08-16 — policy storage.** `agent-policy` / `o/<owner>`, four states, unknown groups
+  rejected at write AND read, server-computed digest, threshold bounds. ⚠️ Still `display-only`, and
+  the flip is blocked by a THROW in `assertMayGate` until the override ships.
 * **The override token binding the policy digest** — without it a later edit makes the receipt claim
   a rule that no longer means the same.
 * **Step 2 of the warn migration:** `gateDeposit` must READ `holder`/`holderKind` and the power
@@ -168,6 +168,84 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
 ---
 
 ---
+
+## 2026-08-16 (policy storage) — ⭐⭐ RULES ARE SERVER-SOURCED NOW — AND STILL CANNOT GATE, BY A THROW
+
+`POST/GET/DELETE /api/agent-policy`, one record per owner at `agent-policy` / `o/<owner>`, keyed by
+the SESSION address and never by anything from a body.
+
+### ⚠️⚠️ (1) THE DECISION: STORAGE FIRST, AUTHORITY LAST — AND THE FLIP IS BLOCKED BY A THROW
+
+Storage is exactly what would let a policy stop being advisory: a server-stored policy has none of
+the *"the caller chose their own rules"* defect. **Which is why it becomes dangerous.** Storage
+WITHOUT the digest-bound override token is a policy that can BLOCK a deposit with no escape — and the
+rules are the user's own, so the lockout is self-inflicted and unappealable. Same 409-lockout shape
+already rejected here once.
+
+⭐ **So `authority` stays `display-only`, and it is not merely SET to a safe value.** `assertMayGate()`
+**THROWS** while `OVERRIDE_TOKEN_EXISTS = false` — even when passed `ENFORCING`. The first author to
+wire a gate meets an exception naming the file and the flag, not a silent enforcement. ⚠️ Leaving a
+field on a safe value and trusting the next person to notice is how a safe default becomes an unsafe
+one, quietly, in a diff about something else.
+
+### ⭐⭐ (2) FOUR STATES, AND COLLAPSING ANY TWO IS A CONSENT BUG
+
+| state | why it is its own |
+|---|---|
+| `absent` | never expressed a preference |
+| **`empty`** | ⚠️ a record whose `rules` is `{}` — **the shape a WIPE leaves behind** (failed migration, half-completed delete). A user whose rules got wiped has made NO decision, and reading `{}` as consent is how a cleared policy becomes a green tick |
+| **`all-allow`** | ⭐ **this one IS a decision.** It legitimately PASSES — and the copy says *"they pass because you refuse nothing, not because nothing was found"*, which is a different sentence from the normal pass |
+| `active` | at least one rule refuses |
+
+Each has its OWN sentence in the response; the suite asserts all four sentences are distinct, because
+a shared string would re-collapse them in the UI regardless of the enum.
+
+### ⚠️ (3) UNKNOWN GROUPS REJECTED AT WRITE **AND** AT READ
+
+A policy naming `upgradable` would silently fail to refuse `upgradeable` — **the user's own safety
+rule, quietly doing nothing, with a UI still showing it as set.** Rejected whole, offender named, real
+catalogue listed so the error is actionable. ⚠️ Dropping the bad key is WORSE than rejecting, because
+the user keeps believing they are protected.
+
+⭐ **READ-TIME IS NOT REDUNDANT.** A policy stored before a catalogue change can name a group that no
+longer exists; validating only on write would let it read back, silently skip the vanished rule, and
+evaluate as though the user never wrote it — **the same evaporation arriving through time instead of
+through a typo.** `readPolicy` runs the same normaliser and returns errors instead of a usable policy.
+
+### ⭐ (4) SERVER-COMPUTED DIGEST, AND THRESHOLD BOUNDS
+
+* **The digest is never accepted from a caller** — a body carrying `digest` is REJECTED, not ignored
+  (a caller that sent one believed it would be used). The future override token binds to this digest;
+  a client-supplied one would bind an override to rules nobody stored.
+* **Canonical** — rule order does not change it, a changed verdict does. Versioned `v1` from the
+  start, because the vault digest's v1→v2 bump only worked because the marker was already there.
+* ⭐ **`null` ≠ `0`.** `null` = no threshold. `0` = trivially met, which is a STATEMENT, not an
+  absence. They digest differently, and `null` renders as `cov:none` rather than an empty slot.
+* 🚨 **A threshold above the catalogue size is REJECTED** — it can never be satisfied by any report
+  about any contract, so every evaluation would refuse forever **for a reason that looks like a
+  finding about the vault.** Caught where it is still a typo.
+
+### ⭐ AND THE REPORT ROUTE PREFERS THE STORED POLICY
+
+Stored wins; a request policy is accepted only when nothing is stored, and `source: "stored" |
+"request" | "none"` says which. ⚠️ **An UNREADABLE store REFUSES rather than falling back to the
+body** — a store outage silently downgrading a user's real rules to whatever this browser sent would
+replace the safety input at the worst moment. A stored-but-invalid policy surfaces as
+`stored-policy-invalid` and is not evaluated.
+
+### ⭐ THE REVERSE ROUTE AUDIT EARNED ITS KEEP AGAIN
+
+`/api/agent-policy` shipped with a redirect and no caller, and `gate:routes` **failed**. The honest
+fix is wiring, not an exemption — **storage nobody can reach is not storage** — so the card now loads
+stored rules on mount and has a Save button. ⚠️ It states STORED vs LOCAL rather than implying it,
+and a failed read renders *"couldn't check"*, never *"you have none"*.
+
+⚠️ **One of my own source-regexes broke on a legitimate refactor** — it grepped for the literal
+`authority: "display-only"` and went red when the route switched to the `POLICY_AUTHORITY` constant.
+A change that made the guarantee stronger breaking the check that guards it. Rewritten to assert the
+VALUE, not the spelling.
+
+`verify-policy-store` **42/0** (new, wired into `test:dd`). `test:all` exit 0, tsc + build clean.
 
 ## 2026-08-16 — 🚨🚨 THERE IS NO CANONICAL UNISWAP FACTORY ON ARC, AND THAT IS WHY DISCOVERY CANNOT BE BUILT HONESTLY
 

@@ -257,8 +257,15 @@ section("E ⭐⭐ SAME PRODUCER — the card evaluates what a buyer could verify
   // verdict is derived from fields the buyer's copy does not contain.
   check("⭐⭐ the in-app route returns the FULL report object, not a projection",
     /\breport,\n/.test(route) && !/report:\s*\{/.test(route));
-  check("⭐ …and the policy verdict is marked display-only in the PAYLOAD, not only in a comment",
-    /authority: "display-only"/.test(route) && /MUST NOT gate anything/.test(route));
+  // ⚠️ ASSERT THE VALUE, NOT THE SPELLING. This grepped for the literal `authority: "display-only"`
+  // and went red when the route switched to the POLICY_AUTHORITY constant — a refactor that made the
+  // guarantee STRONGER breaking the check that guards it. The claim is what the payload carries.
+  const { POLICY_AUTHORITY } = await import("../../shared/onchain-analyze/policy-doc.mjs");
+  check("⭐ …and the payload's authority resolves to display-only",
+    /authority: POLICY_AUTHORITY\.DISPLAY_ONLY/.test(route) &&
+    POLICY_AUTHORITY.DISPLAY_ONLY === "display-only");
+  check("🚨 …and it says the verdict gates nothing, in words",
+    /gates nothing|MUST NOT gate anything/.test(route));
 
   // ⚠️ NO CACHE ON THIS CUT — asserted, because "we decided not to cache" is otherwise unfalsifiable.
   // ⚠️ BOTH COMMENT FORMS STRIPPED FIRST, and that is a bug this check HAD on its first run: the

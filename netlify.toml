@@ -252,6 +252,12 @@
 # which ladder rungs it skips and why HEALTH is not one of them.
 # ⚠️ A route with no redirect 404s while the function deploys fine — the exact defect that left
 # /api/dca-* dead for 22 days while its notes claimed "FULLY VERIFIED … UI". gate:routes covers it.
+# ⭐ The owner's standing policy. Read-only with respect to money; gates nothing until the
+# digest-bound override token ships (see policy-doc.mjs assertMayGate).
+[[redirects]]
+  from = "/api/agent-policy"
+  to = "/.netlify/functions/agent-policy"
+  status = 200
 [[redirects]]
   from = "/api/agent-dd-report"
   to = "/.netlify/functions/agent-dd-report"

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { useWallet } from "../wallet/useWallet";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
@@ -269,6 +269,48 @@ export default function DdReportCard({
   const [refuseUpgradeable, setRefuseUpgradeable] = useState(true);
   const [refuseEmergency, setRefuseEmergency] = useState(true);
   const [refuseFees, setRefuseFees] = useState(false);
+  // ⭐ WHERE THE RULES LIVE. `stored` means the server holds them and the verdict is server-sourced;
+  // `local` means they exist only in this browser. ⚠️ The distinction is shown rather than implied —
+  // a user who thinks their rules are saved and finds them gone has been misled by an omission.
+  const [policyState, setPolicyState] = useState<string | null>(null);
+  const [policyMeaning, setPolicyMeaning] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Load the stored rules once. ⚠️ A failure is SILENT for the checkboxes but never claims "no rules"
+  // — `policyState` stays null, which renders as "couldn't check" rather than as "nothing stored".
+  useEffect(() => {
+    if (!w.isAuthenticated) return;
+    let live = true;
+    w.getPolicy()
+      .then((p) => {
+        if (!live) return;
+        setPolicyState(p.state);
+        setPolicyMeaning(p.meaning);
+        const rules = p.policy?.rules ?? {};
+        if (p.state === "active" || p.state === "all-allow") {
+          setRefuseUpgradeable(rules.upgradeable === "refuse");
+          setRefuseEmergency(rules.emergencyWithdraw === "refuse");
+          setRefuseFees(rules.feesSettable === "refuse");
+        }
+      })
+      .catch(() => { if (live) setPolicyState(null); });
+    return () => { live = false; };
+  }, [w.isAuthenticated]);
+
+  async function save() {
+    setSaving(true); setSaveMsg(null);
+    try {
+      const r = await w.savePolicy(policy);
+      setPolicyState(r.state); setPolicyMeaning(r.meaning);
+      setSaveMsg({ ok: true, text: "Saved. These are now your rules, not this browser's." });
+    } catch (e: any) {
+      // ⚠️ THE SERVER'S REASONS ARE SHOWN. "Rejected" alone is unactionable, and the rejections that
+      // matter — an unknown group name, an unsatisfiable threshold — are exactly the fixable ones.
+      const errs: string[] = e?.errors ?? [];
+      setSaveMsg({ ok: false, text: errs.length ? errs.join(" · ") : (e?.message || "Could not save") });
+    } finally { setSaving(false); }
+  }
 
   const policy = {
     rules: {
@@ -331,6 +373,28 @@ export default function DdReportCard({
       {!hasRules && (
         <div style={{ marginTop: 8, fontSize: ".82rem", color: "var(--muted)" }}>
           No rules ticked — the check will report that <b>nothing was evaluated</b>. That is not a pass.
+        </div>
+      )}
+
+      {/* ⭐ STORED vs LOCAL is a real distinction and is stated, never implied. */}
+      <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: ".82rem" }}>
+        <button className="linkbtn" onClick={save} disabled={saving || !hasRules || !w.isAuthenticated}>
+          {saving ? "Saving…" : "Save these rules"}
+        </button>
+        <span style={{ color: "var(--muted)" }}>
+          {policyState === null
+            ? "Couldn't check whether you have stored rules — not the same as having none."
+            : policyState === "absent"
+              ? "Not stored: these rules live only in this browser."
+              : `Stored (${policyState}).`}
+        </span>
+      </div>
+      {policyMeaning && (
+        <div style={{ marginTop: 6, fontSize: ".8rem", color: "var(--muted)" }}>{policyMeaning}</div>
+      )}
+      {saveMsg && (
+        <div style={{ marginTop: 6, fontSize: ".82rem", color: saveMsg.ok ? "var(--success)" : "var(--warn)" }}>
+          {saveMsg.text}
         </div>
       )}
 

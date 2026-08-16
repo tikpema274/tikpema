@@ -510,6 +510,33 @@ export function useWallet() {
     [ensureSession]
   );
 
+  // ── STANDING POLICY (read-only with respect to money) ──────────────────────────────────────
+  // ⚠️ The DIGEST is never sent — it is computed server-side, because a future override token binds
+  // to it and a caller-supplied digest would bind an override to rules nobody stored. The server
+  // REJECTS a body carrying one rather than ignoring it.
+  const getPolicy = useCallback(async () => {
+    const token = await ensureSession();
+    const r = await fetch("/api/agent-policy", { headers: { Authorization: `Bearer ${token}` } });
+    const data = await readJson(r);
+    if (!r.ok) throw new Error(data?.error || "Could not read your policy");
+    return data as { state: string; meaning: string | null; policy: any; digest: string | null;
+                     invalid?: boolean; errors?: string[]; authority: string };
+  }, [ensureSession]);
+
+  const savePolicy = useCallback(async (policy: unknown) => {
+    const token = await ensureSession();
+    const r = await fetch("/api/agent-policy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ policy }),
+    });
+    const data = await readJson(r);
+    // ⚠️ A REJECTION CARRIES THE REASONS — an unknown group name or an unsatisfiable threshold is
+    // actionable, and throwing away `errors` would leave the user with "rejected" and nothing to fix.
+    if (!r.ok) throw Object.assign(new Error(data?.error || "Policy rejected"), { errors: data?.errors });
+    return data as { ok: true; state: string; meaning: string | null; digest: string; storedAt: string };
+  }, [ensureSession]);
+
   // Deposit USDC into an allowlisted vault. `ackToken` is REQUIRED whenever the vault raised a
   // WARN — the server re-inspects and refuses if it is missing/mismatched (fail-closed), so this
   // only forwards what the user acknowledged; it cannot bypass the gate.
@@ -629,6 +656,8 @@ export function useWallet() {
     listBridgeReceipts,
     inspectVault,
     ddReport,
+    getPolicy,
+    savePolicy,
     depositToVault,
     vaultShareBalance,
     withdrawFromVault,

@@ -53,6 +53,8 @@ import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
 import { RUNG, runLadder, makeProduceReport, newCorrelationId, refusalReport } from "./_dd-rungs.mjs";
 import { evaluatePolicy, POLICY_CEILING } from "../../shared/onchain-analyze/policy.mjs";
+import { readPolicy } from "./_policy-store.mjs";
+import { POLICY_STATE, POLICY_AUTHORITY } from "../../shared/onchain-analyze/policy-doc.mjs";
 
 export async function handler(event) {
   const correlationId = newCorrelationId();
@@ -98,8 +100,37 @@ export async function handler(event) {
     // `passes:false, reason:"no-policy"` — "no rules set" is not "every rule satisfied". Passing
     // undefined through is therefore SAFE by construction rather than by this handler remembering
     // to special-case it.
-    const policy = body?.policy ?? null;
-    const verdict = evaluatePolicy(report, policy);
+    // ⭐⭐ THE STORED POLICY WINS. It is SERVER-SOURCED — the caller cannot choose it — which is the
+    // whole difference between a verdict worth acting on and one worth looking at. A body policy is
+    // still accepted for the "try some rules" case, but only when nothing is stored, and the response
+    // says which was used so no reader has to guess.
+    const stored = await readPolicy(session.address);
+
+    // ⚠️ AN UNREADABLE STORE IS NOT AN ABSENT POLICY. Falling back to the request body here would
+    // silently downgrade a user's real rules to whatever this browser happened to send — a store
+    // outage quietly replacing the safety input. Refuse instead.
+    if (!stored.readable) {
+      return json(503, {
+        error: "Could not read your stored policy",
+        note: "This is our store failing, NOT a statement that you have no rules. Refusing rather than " +
+              "evaluating against rules you did not set.",
+        errors: stored.errors,
+      });
+    }
+
+    // ⚠️ A STORED-BUT-INVALID POLICY SURFACES AND IS NOT EVALUATED. Most likely it names a power
+    // group a catalogue change removed. Silently skipping the vanished rule would evaluate the user
+    // as though they had never written it.
+    const storedInvalid = stored.state !== POLICY_STATE.ABSENT && stored.errors.length > 0;
+
+    const usingStored = stored.state !== POLICY_STATE.ABSENT && !storedInvalid;
+    const policy = usingStored ? stored.policy : (body?.policy ?? null);
+    const verdict = storedInvalid
+      ? { passes: false, reason: "stored-policy-invalid", ceiling: POLICY_CEILING,
+          failures: [], unreadableFailures: [],
+          coverage: { checked: 0, total: null, threshold: null, meets: null }, evaluated: [],
+          detail: `your stored policy can no longer be evaluated: ${stored.errors.join("; ")}` }
+      : evaluatePolicy(report, policy);
 
     return json(200, {
       subject: { address: addr, chain },
@@ -111,14 +142,22 @@ export async function handler(event) {
         // every report: so no consumer can claim it was not told. A UI rendering a green tick and
         // the word "safe" is contradicting a string handed to it in the same object.
         ceiling: POLICY_CEILING,
-        // 🚨 STATED IN THE PAYLOAD, not only in this comment. A future reader of the JSON must be
-        // able to see that this verdict authorises nothing.
-        authority: "display-only",
-        authorityNote:
-          "This verdict was computed from a policy supplied in the request, so it is NOT server-sourced " +
-          "and MUST NOT gate anything. It is shown so a user can see their own rules applied to a " +
-          "report a buyer of this service could independently verify. Binding a policy to an action " +
-          "requires server-side storage and a digest-bound override token, which do not exist yet.",
+        // 🚨 STATED IN THE PAYLOAD, not only in this comment.
+        authority: POLICY_AUTHORITY.DISPLAY_ONLY,
+        // ⭐ WHERE THE RULES CAME FROM IS NOW A DISTINCT FACT from whether they may gate. A stored
+        // policy IS server-sourced and has none of the "the caller chose their own rules" defect —
+        // and it STILL does not gate, because the digest-bound override token does not exist and a
+        // refusing policy with no escape is a lockout the user wrote themselves.
+        source: usingStored ? "stored" : (policy ? "request" : "none"),
+        storedState: stored.state,
+        storedDigest: usingStored ? stored.digest : null,
+        authorityNote: usingStored
+          ? "These are your STORED rules, so this verdict is server-sourced. It still gates nothing: " +
+            "a policy that can refuse a deposit needs a digest-bound override token so you are never " +
+            "locked out of your own funds by your own rules, and that token does not exist yet."
+          : "This verdict was computed from a policy supplied in the request, so it is NOT " +
+            "server-sourced and MUST NOT gate anything. Store your rules at /api/agent-policy to make " +
+            "them yours rather than this browser's.",
       },
       // The two things that make the artifact checkable by someone who was not in this session.
       verifiability: {
