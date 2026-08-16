@@ -44,3 +44,7 @@ cold-owner*.json
 # the broad `.keys/` and `*.key` patterns above exist to prevent, so this pattern is broad
 # for the same reason: a future dump must not escape by being named slightly differently.
 agent-metadata/.nft-enumeration*.json
+
+# Money-path run records from scripts/fire-ub-spend.mjs — hold a live transferId/txHash.
+# Durable ON DISK by design (evidence must survive a timeout), but never committed.
+ub-spend-capture-*.json
