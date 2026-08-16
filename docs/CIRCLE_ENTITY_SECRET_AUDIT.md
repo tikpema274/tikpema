@@ -103,11 +103,58 @@ could never afterwards be diagnosed.
 and the deliberate trade.
 ⚠️ **Latent until the next deploy.** Env changes take effect on redeploy; runtime is unverified.
 
+### ⭐⭐ THE LIVE-BUNDLE SWEEP — the most reassuring result of the audit
+
+All five audited secrets grepped **by actual value** against the served 837 KB production bundle
+(`assets/index-Bb568jJa.js`):
+
+| secret | in bundle | what it would have meant |
+|---|---|---|
+| `SESSION_SECRET` | ✅ absent | 🚨 anyone could mint a valid session token for ANY owner — total account takeover on a money path |
+| `CIRCLE_ENTITY_SECRET` | ✅ absent | 🚨 full custody of every Circle-custodied wallet |
+| `CIRCLE_API_KEY` | ✅ absent | Circle API access |
+| `KIT_KEY` | ✅ absent | swap/bridge quota abuse |
+| `ANTHROPIC_API_KEY` | ✅ absent | model-spend abuse |
+
+⭐ Measured, not reasoned from vite's `VITE_`-prefix rule. The worst outcome in the whole audit is
+ruled out by evidence.
+
+### ✅ DONE 2026-08-16 — `SESSION_SECRET`: builds dropped, `is_secret` HELD
+
+Now `functions,post_processing,runtime`, still **production-only**, `is_secret` deliberately **False**.
+
+🚨 **THE PRE-FLIGHT CAUGHT A REAL MISMATCH AND STOPPED THE CHANGE.** `.env` and Netlify hold
+**DIFFERENT** `SESSION_SECRET` values — both well-formed, both 64 chars, so not a corrupted copy but
+two different secrets (`5f0d64e0bb9fdbe0` local vs `96939992a2874587` production). Production signs
+with the Netlify value by construction; `.env` is never deployed.
+
+⚠️ **THAT INVERTED THE `is_secret` DECISION.** For `CIRCLE_API_KEY` the pre-flight proved `.env` was a
+faithful second copy, so making Netlify write-only left one readable copy. Here it is not, so marking
+it secret would leave **ZERO readable copies of the production session secret anywhere**. Held
+pending reconciliation.
+
+⚠️ **AND THE ROTATION COST IS LARGER THAN "EVERYONE LOGS OUT".** `_auth.mjs` derives `internalToken()`
+from this same secret, so rotation ALSO invalidates the server-to-server token —
+`job-submit-background → job-evaluate-background` and similar chains fail mid-flight, not just user
+sessions. Belongs in the rotation runbook, alongside mid-deposit/mid-bridge.
+
+⭐ **THE TRAP IS NOW LABELLED, IN BOTH PLACES.** `.env` carries a DEV ONLY warning at the line; and
+because `.env` is gitignored — the label would die with this machine — the same warning is mirrored
+into the TRACKED `.env.example`, which is what anyone setting up or recovering actually reads.
+**A silent booby-trap became a visible one without deciding anything.**
+
+⚠️ **OPEN, NOT GUESSED AT: is the divergence DELIBERATE or ACCIDENTAL?** Dev/prod separation is good
+practice and would merely be undocumented; a half-finished rotation is a different problem. That
+answer decides whether reconciliation means CHANGING `.env` or WRITING DOWN what is already true.
+Deliberately not resolved late at night on a money path.
+
+⚠️ **A CLI CONSTRAINT WORTH KNOWING:** `env:set` refuses `--context` and `--scope` together on an
+existing var. Omitting `--context` was the working form — and whether that WIDENS a production-only
+var was tested on a `CTX_TEST_CANARY` first. It does not; production-only survived.
+
 ### 🥈 B(iii) · still carrying `builds`
-⚠️ `SESSION_SECRET`, `KIT_KEY`, `ANTHROPIC_API_KEY`. Each needs its own read-check before dropping,
-exactly as the two above got. ⚠️ `SESSION_SECRET` is the interesting one: it is NOT regenerable in the
-same sense — rotating it invalidates every live session, so its `is_secret` question needs its own
-answer rather than inheriting this one.
+⚠️ `KIT_KEY` and `ANTHROPIC_API_KEY` only. Each needs its own read-check before dropping, exactly as
+the three above got.
 
 ### 🥉 C · `context: all`
 Set in production, deploy-preview AND branch-deploy — every preview carries production wallet
