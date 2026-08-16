@@ -83,6 +83,19 @@ export const WEBHOOK_VAR = "DD_WATCH_WEBHOOK";
 // After grace: the budget is nearly spent, and that is a money-path fact.
 export const MONEY_WEBHOOK_VAR = "WATCH_ALERT_WEBHOOK";
 
+// ═══ 🚨🚨 TWO CONSTANTS ARE CALLED "TTL" HERE, AND THE ALERT REACHED FOR THE WRONG ONE ═══════════
+// `TTL_MS` above is THIS MODULE's — how long a watch RECORD stays fresh (20m). The number an operator
+// needs mid-outage is a different one: `DEFAULT_TTL_MS` in shared/dd-canary/health.mjs, the HEALTH
+// ARTIFACT's TTL (30m), which is what actually decides when serving — and now depositing — stops.
+//
+// ⚠️ THE FIRST CALIBRATION RUN PRINTED "health TTL is 20m", WHICH IS FALSE. It also made the sentence
+// self-contradictory: the grace is 20m, so "past the 20m grace; health TTL is 20m" states zero
+// margin. An operator reading that mid-outage would believe deposits were already unrecoverable when
+// there were in fact ten more minutes. ⭐ Aliased rather than re-declared, so there is one source of
+// truth and the name says WHICH ttl it is.
+export { DEFAULT_TTL_MS as HEALTH_TTL_MS } from "../dd-canary/health.mjs";
+import { DEFAULT_TTL_MS as _HEALTH_TTL_MS } from "../dd-canary/health.mjs";
+
 /**
  * Does this judgement have a DEPOSIT consequence, not merely an availability one?
  *
@@ -91,6 +104,29 @@ export const MONEY_WEBHOOK_VAR = "WATCH_ALERT_WEBHOOK";
  * ⭐ AND A RECOVERY IS NOT ESCALATED — the money channel is told when the risk STARTS, not when a
  * thing it was never told about stops.
  */
+/**
+ * ⭐⭐ THE MONEY-CHANNEL MESSAGE, AS A PURE FUNCTION — AND THAT EXTRACTION IS THE POINT.
+ *
+ * 🚨 THIS BRANCH WAS UNTESTABLE BECAUSE IT WAS UNREACHABLE EXCEPT THROUGH ITS CONDITION. Built
+ * inline in the handler, the only way to see the bytes it sends was to hold a real 20-minute DD
+ * outage — so "suite-proven only" was not a judgement about cost, it was a property of the SHAPE of
+ * the code. Lifting the payload out makes it reachable WITHOUT the condition: the message can now be
+ * built, inspected and actually delivered against a throwaway endpoint at zero cost.
+ *
+ * ⚠️ THE HANDLER CALLS THIS EXACT FUNCTION, so a calibration run exercises the real bytes rather
+ * than a second copy that would drift from the one that fires at 3am.
+ */
+export function moneyAlertLines({ judgement, canonical, graceMs = GRACE_MS, ttlMs = _HEALTH_TTL_MS }) {
+  return [
+    "🚨 DEPOSITS BLOCKED — the DD health artifact is not serving",
+    "> Vault deposits gate on the DD report since step 2, so while this refuses the deposit path REFUSES too. This is fail-closed and correct; it is not a data loss.",
+    `• refusing ${Math.round(Number(judgement?.refusingMs ?? 0) / 60000)}m (past the ${graceMs / 60000}m grace; the health artifact goes stale at ${ttlMs / 60000}m)`,
+    `• reason: ${judgement?.alertReason ?? "unknown"}`,
+    "• likeliest cause: the dd-canary cron has not fired. Margin is TWO missed ticks; the third blocks deposits.",
+    `• canonical: ${canonical ?? "unknown"}`,
+  ];
+}
+
 export function blocksDeposits(judgement, graceMs = GRACE_MS) {
   if (!judgement?.alert) return false;
   return Number(judgement.refusingMs ?? 0) >= graceMs;

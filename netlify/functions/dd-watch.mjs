@@ -11,7 +11,7 @@ import {
   SCHEMA, MIN_RERUN_MS, TTL_MS, REMINDER_MS, GRACE_MS, CANARY_PERIOD_MS, CRON_MS,
   DEFAULT_PATHS, CANONICAL_PATH_KEY, PROBE_SUBJECT, PROBE_MARKER, PROBE_UA,
   DEFAULT_STORE_NAME, WEBHOOK_VAR, MONEY_WEBHOOK_VAR,
-  judge, alertHeadline, decideNotify, windowFrom, leverActive, blocksDeposits,
+  judge, alertHeadline, decideNotify, windowFrom, leverActive, blocksDeposits, moneyAlertLines,
 } from "../../shared/dd-watch/watch.mjs";
 
 // dd-watch — is the PUBLIC DD SERVICE answering, on BOTH of its paths?
@@ -237,8 +237,20 @@ export const handler = async (event) => {
     }
     // ── ⭐⭐ THE SECOND ROUTE: past the grace, this is a MONEY-PATH event ─────────────────────
     //
-    // ⚠️⚠️ THIS BRANCH IS SUITE-PROVEN ONLY. IT HAS NEVER FIRED IN PRODUCTION, AND IT MUST NOT
-    // INHERIT THE CONFIDENCE OF THE DD POST ABOVE IT.
+    // ⚠️ THIS BRANCH HAS NEVER FIRED IN PRODUCTION — but it is no longer merely suite-proven, and
+    // the distinction is worth keeping straight.
+    //
+    // ⭐⭐ THE PAYLOAD WAS LIFTED OUT OF THIS HANDLER (`moneyAlertLines`) PRECISELY SO IT COULD BE
+    // FIRED WITHOUT ITS CONDITION. `npm run calibrate:moneyalert` forces a past-grace judgement and
+    // delivers the REAL bytes through a REAL fetch to a throwaway endpoint — no outage, no deploy,
+    // no deposit blocked. 🚨 Its FIRST run found a real defect: this message quoted the watch
+    // module's own `TTL_MS` (20m) while calling it the health TTL (30m), which also read as ZERO
+    // margin since the grace is 20m. An operator mid-outage would have believed deposits were
+    // already beyond recovery with ten minutes still on the clock.
+    //
+    // ⚠️ WHAT IS STILL UNPROVEN, EXACTLY: that the REAL `WATCH_ALERT_WEBHOOK` accepts these bytes and
+    // that the env var is set in production. Delivery is proven against a capture server; the live
+    // endpoint is not, and firing THAT still costs a deliberate 20-minute outage.
     //
     // The DD-channel path above is exercised live on every deploy — the post-deploy `no-record`
     // window fires it routinely, so its delivery, its formatting and its webhook are all continuously
@@ -271,14 +283,8 @@ export const handler = async (event) => {
       } else {
         // ⭐ REFRAMED, NOT MIRRORED. The DD message describes availability; this one has to say what
         // it MEANS where money moves, because the reader of this channel is not tracking DD at all.
-        const moneyLines = [
-          "🚨 DEPOSITS BLOCKED — the DD health artifact is not serving",
-          "> Vault deposits gate on the DD report since step 2, so while this refuses the deposit path REFUSES too. This is fail-closed and correct; it is not a data loss.",
-          `• refusing ${Math.round(judgement.refusingMs / 60000)}m (past the ${GRACE_MS / 60000}m grace; health TTL is ${TTL_MS / 60000}m)`,
-          `• reason: ${judgement.alertReason ?? "unknown"}`,
-          "• likeliest cause: the dd-canary cron has not fired. Margin is TWO missed ticks; the third blocks deposits.",
-          `• canonical: ${record.canonical}`,
-        ];
+        // ⭐ THE SAME PURE BUILDER the calibration script fires, so what was rehearsed is what ships.
+        const moneyLines = moneyAlertLines({ judgement, canonical: record.canonical });
         try {
           const r2 = await fetch(moneyHook, {
             method: "POST", headers: { "Content-Type": "application/json" },

@@ -174,7 +174,12 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
   mainnet.
 * ✅ **DONE 2026-08-16 — `capture:window` now waits for the close** and reports the duration as
   "deposits were unavailable for this long"; a window that never closes exits 1.
-* ⚠️ **THE MONEY-CHANNEL ESCALATION HAS NEVER FIRED IN PRODUCTION.** `dd-watch`'s dual-route is
+* ⚠️ **THE MONEY-CHANNEL ESCALATION'S LIVE WEBHOOK IS UNPROVEN.** ✅ The payload, the gate and the
+  delivery path are now REHEARSED end-to-end (`npm run calibrate:moneyalert`, in `test:dd`) — and
+  that rehearsal's first run caught the alert quoting the wrong TTL. ⚠️ What remains: nobody has
+  confirmed the real `WATCH_ALERT_WEBHOOK` accepts these bytes or is even set in prod, and firing
+  THAT still costs a deliberate 20-minute outage.
+* ~~⚠️ **THE MONEY-CHANNEL ESCALATION HAS NEVER FIRED IN PRODUCTION.**~~ `dd-watch`'s dual-route is
   suite-proven only: it is gated past a 20-minute grace, so firing it live means a deliberate
   20-minute DD outage during which **deposits are blocked**. Accepted as suite-proven, deliberately —
   but the first time it fires will be the first time anyone sees it, mid-outage, which is the worst
@@ -186,6 +191,57 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
 ---
 
 ---
+
+## 2026-08-16 (calibration) — 🚨🚨 THE ESCALATION FIRED FOR THE FIRST TIME, AND ITS FIRST FIRING WAS WRONG
+
+The money-channel escalation is no longer suite-proven-only, and the run that proved it **found a
+real defect in the message it would have sent**.
+
+### ⭐⭐ THE DEFERRAL ARGUMENT DID NOT SURVIVE ITS OWN WORDING
+
+"Suite-proven only, because firing it live costs a deliberate 20-minute DD outage" — true, and it
+**only ever applied to the LIVE route.** A forced invocation against a webhook nobody depends on
+costs nothing: no outage, no deploy, no deposit blocked. The same move that calibrated `dd-watch`
+itself, which caught two real bugs on its first run.
+
+⭐⭐ **AND THE BRANCH WAS UNTESTABLE BECAUSE OF ITS SHAPE, NOT ITS COST.** Built inline in the
+handler, the only way to see its bytes was to satisfy its condition. `moneyAlertLines()` is now a
+PURE exported builder — **reachable without the condition** — and the handler calls that exact
+function, so a rehearsal exercises the bytes that fire at 3am rather than a second copy.
+
+### 🚨🚨 WHAT THE FIRST RUN CAUGHT — THE ALERT LIED ABOUT THE MARGIN
+
+    • refusing 25m (past the 20m grace; health TTL is 20m)     ← WRONG
+
+**Two constants are called TTL in adjacent modules.** `watch.mjs`'s `TTL_MS` is the WATCH RECORD's
+freshness (20m); `health.mjs`'s `DEFAULT_TTL_MS` is the HEALTH ARTIFACT's TTL (30m) — the one that
+decides when serving, and now depositing, stops. **The message reached for the wrong one and labelled
+it "health TTL".**
+
+⚠️ **AND IT READ AS ZERO MARGIN.** The grace is also 20m, so "past the 20m grace; health TTL is 20m"
+states that the budget is already spent. **An operator reading that mid-outage would believe deposits
+were beyond recovery with ten minutes still on the clock** — in the one message whose entire job is
+to convey the margin. Now: *"past the 20m grace; the health artifact goes stale at 30m"*, aliased as
+`HEALTH_TTL_MS` so the name says WHICH ttl it is.
+
+### ⭐ WHAT THE CALIBRATION PROVES, AND WHAT IT STILL DOES NOT
+
+**Proven:** the gate crosses at the grace and does NOT inside it · the exact rendered bytes ·
+consequence-first framing · fail-closed-not-data-loss · the cause and the margin named · **valid JSON
+under Discord's `content` key** · **within the 2000-char limit** (471) · a REAL fetch delivered and
+accepted (HTTP 204) · the receiver got byte-identical content with the right content-type.
+
+⚠️ **NOT proven:** that the REAL `WATCH_ALERT_WEBHOOK` accepts these bytes, or that it is even set in
+production. Delivery is proven against a capture server; the live endpoint is not, and firing THAT
+still costs the 20-minute outage. That is the honest remaining edge and it is written at the code.
+
+🚨 **IT CANNOT PAGE THE REAL CHANNEL BY ACCIDENT.** `WATCH_ALERT_WEBHOOK` is never read as a
+destination; `--webhook` must be explicit, and passing the real one is REFUSED by comparison. Default
+is a local capture server — a calibration tool that could reach the money channel by default is one
+that will, on the day somebody runs it half-awake.
+
+⭐ Wired into `test:dd`, so the rehearsal runs on every suite pass rather than the day someone
+remembers. `verify-dd-report` **175/0**. `test:all` exit 0, tsc + build clean.
 
 ## 2026-08-16 (follow-ups) — ⭐⭐ THE DEAD-CANARY ALERT IS DUAL-ROUTED, AND THE CAPTURE NOW TIMES THE OUTAGE
 
