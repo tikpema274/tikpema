@@ -392,5 +392,84 @@ section("I — the shared producer's honesty boundary still holds");
   check("something established ⇒ an answer", isSystemicReadFailure(cov([{ id: "a" }], [{ reason: "rpc-unreadable" }])) === false);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+section("J 🚨 THE CAPTURE'S OWN FAILURE PATHS — exercised by CALLING, against a fixture server");
+{
+  // ⚠️ THE BRANCHES THAT MATTER FIRE ONLY WHEN SOMETHING IS ALREADY WRONG, which is the worst
+  // moment to run them for the first time. The live dry-run only ever exercises "no window"; the
+  // regression and could-not-measure paths would otherwise ship untried. Same reasoning as the
+  // deploy-liveness suite: two of four branches were unreachable in the live run.
+  const http = await import("node:http");
+  const { execFile } = await import("node:child_process");
+  const { mkdtempSync } = await import("node:fs");
+  const os = await import("node:os"), path = await import("node:path");
+
+  const PAGE = (banner) => `<!doctype html><html><body>
+${banner ? `<div class="down"><b>⚠️ This service is REFUSING right now — the command below will return <code>503</code></b>
+Reason: <code>no-record</code>. This clears by itself, usually within minutes, when the scheduled self-check next runs.</div>` : ""}
+<pre>curl -sS -X POST https://example/api/dd-analyze</pre></body></html>`;
+
+  const serve = (handler) => new Promise((res) => {
+    const s = http.createServer(handler);
+    s.listen(0, "127.0.0.1", () => res({ s, url: `http://127.0.0.1:${s.address().port}` }));
+  });
+  const run = (url) => new Promise((res) => {
+    // ⭐ A FRESH CWD PER CASE, so each run writes its own ledger and cannot read a prior entry's
+    // ddTree — otherwise case order would silently change the discriminator branch taken.
+    const cwd = mkdtempSync(path.join(os.tmpdir(), "cap-"));
+    execFile(process.execPath,
+      [path.resolve("scripts/dd/capture-refusal-window.mjs"), "--url", url, "--seconds", "6"],
+      { cwd, timeout: 45000 },
+      (err, stdout) => res({ code: err?.code ?? 0, out: stdout }));
+  });
+
+  // ✅ banner present → observed, exit 0
+  {
+    const { s, url } = await serve((_q, r) => { r.writeHead(405, { "content-type": "text/html" }); r.end(PAGE(true)); });
+    const r = await run(url); s.close();
+    check("✅ banner during a refusal → OBSERVED, exit 0", r.code === 0 && /WINDOW OBSERVED/.test(r.out), `exit ${r.code}`);
+    check("  …and it names the variant it saw", /self-clearing/.test(r.out));
+    check("  …and confirms the banner sits above the curl", /banner above curl : true/.test(r.out));
+  }
+
+  // 🚨 the original defect returning: html asked for, json served
+  {
+    const { s, url } = await serve((_q, r) => { r.writeHead(503, { "content-type": "application/json" }); r.end('{"refusal":{"reason":"service-unverified"}}'); });
+    const r = await run(url); s.close();
+    check("🚨🚨 an html GET answered with JSON → REGRESSION, exit 1", r.code === 1 && /REGRESSION/.test(r.out), `exit ${r.code}`);
+    check("  …and it names the cause — discovery fell back behind health",
+      /no longer ahead of the health gate/.test(r.out));
+  }
+
+  // ⚠️ banner rendered but BELOW the curl — a caveat readers never reach
+  {
+    const bad = `<!doctype html><html><body><pre>curl -sS -X POST x</pre>
+<div class="down">⚠️ This service is REFUSING right now. This clears by itself, usually within minutes.</div></body></html>`;
+    const { s, url } = await serve((_q, r) => { r.writeHead(405, { "content-type": "text/html" }); r.end(bad); });
+    const r = await run(url); s.close();
+    check("⚠️ a banner placed BELOW the curl FAILS the capture, exit 1",
+      r.code === 1 && /malformed/.test(r.out), `exit ${r.code}`);
+  }
+
+  // ⚠️ nothing answering → could-not-measure, exit 2, NOT folded into "no window"
+  {
+    const r = await run("http://127.0.0.1:1");
+    check("⚠️ nothing reachable → COULD NOT MEASURE, exit 2 (never 'saw nothing')",
+      r.code === 2 && /COULD NOT MEASURE/.test(r.out), `exit ${r.code}`);
+    check("⭐ …and it says why that is not the same as a clean run",
+      /cannot see is not/.test(r.out));
+  }
+
+  // ⚠️ serving, no banner → NOT a pass, and it must say so in those words
+  {
+    const { s, url } = await serve((_q, r) => { r.writeHead(405, { "content-type": "text/html" }); r.end(PAGE(false)); });
+    const r = await run(url); s.close();
+    check("⚠️⚠️ no window → exit 0 but explicitly NOT reported as a pass",
+      r.code === 0 && /NO WINDOW OBSERVED — and this is NOT a pass/.test(r.out), `exit ${r.code}`);
+    check("⭐ …and it says the banner stays proven only in-process until a DD change ships",
+      /proven only in-process/.test(r.out));
+  }
+}
+
 console.log(`\n${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}\n`);
 process.exit(fail === 0 ? 0 : 1);

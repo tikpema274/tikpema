@@ -110,6 +110,19 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
   **route with no reference** is what this session just shipped. One audit covering one of them is
   **half a guard**. ⚠️ A dangling redirect is the cheaper failure — it 404s nobody — but it is also
   the one that lets a route be believed shipped when no code path reaches it.
+* 🚧 **THE BANNER IS UNWITNESSED IN PRODUCTION — and the capture is now ARMED, not scheduled.**
+  `verify-dd-report.mjs` proves the banner in-process across all three health states, but the
+  DISCOVERY rung actually threading `healthDisclosure()` into the page ON A REAL DEPLOY has never
+  been seen. ⚠️ **It is observable only during the post-deploy refusal window**, which opens when a
+  publish rotates the DD key and closes by itself within one canary period — and manufacturing one
+  on prod means deliberately corrupting the health artifact, the one thing between a broken detector
+  and somebody's deposit. So `capture:window` is wired into `deploy:prod` and fires automatically on
+  **the next deploy that changes DD-surface bytes**. ⭐ A no-op redeploy will NOT trigger it: the DD
+  identity is a content hash, so identical DD code keeps its key and no window opens.
+  🚨 Its three outcomes are enforced: OBSERVED+banner → pass · OBSERVED+no banner (or JSON served to
+  an HTML GET) → **exit 1, the defect is back** · NO WINDOW → exit 0 but printed as **"NOT a pass"**.
+  ⭐ Each run records the local `ddTree`, so "no window" can be told apart from "no rotation" —
+  without it, *nothing happened* quietly becomes *nothing is wrong*.
 * ✅ **DONE 2026-08-16 — the discovery page moved ahead of health.** It was unreachable during every
   post-deploy refusal window (measured on prod: a `text/html` GET got `application/json` 503). Fixed
   as `RUNG.DISCOVERY`, placed between RETRIEVE and HEALTH for the reason already written one rung
@@ -180,6 +193,50 @@ anything the page module can read, so a hardcoded "10 minutes" would be a second
 goes wrong silently the day the schedule changes — [duplicate-source-of-truth-is-the-recurring-bug]
 on a **user-facing promise**. "Minutes, without anyone doing anything" stays true across a change.
 The suite greps for a quoted period and fails if one appears.
+
+### ⭐⭐ AND THE PROOF THAT CANNOT BE RE-RUN IS NOW CAPTURED AUTOMATICALLY
+
+The banner is proven in-process across all three states. What that CANNOT see is the DISCOVERY rung
+actually threading `healthDisclosure()` into the page on a real deploy —
+[binding-tested-across-what-it-binds], where both sides are trivially identical inside one process.
+
+⚠️ **AND THE ONLY MOMENT IT IS OBSERVABLE CLOSES BY ITSELF.** Every publish that changes DD-surface
+bytes mints a new health key, the canary has no artifact for it, and the service refuses until the
+next scheduled run. That guaranteed, self-healing outage is the ONLY time the banner appears in
+production — and forcing one means corrupting the health artifact on purpose, which is the single
+thing standing between a broken detector and somebody's deposit. **It was missed once already:** the
+window after `4712479` had closed by the time the first probe ran, two minutes after publish.
+
+So `scripts/dd/capture-refusal-window.mjs` runs as the last link of `deploy:prod` rather than
+depending on a human being at the terminal in the right ninety seconds.
+
+🚨 **THREE OUTCOMES, AND "NOT OBSERVED" IS NOT "PASSED":**
+
+| | |
+|---|---|
+| OBSERVED + banner, html, above the curl | ✅ proven across the process boundary |
+| OBSERVED + banner absent, **or JSON served to an `Accept: text/html` GET** | 🚨 exit **1** — the defect is back |
+| NO WINDOW | exit 0, printed verbatim as **"and this is NOT a pass"** |
+| nothing reachable | exit **2** — ⭐ deliberately not folded into "no window"; a capture that cannot see is not one that saw nothing |
+
+⭐ **IT CARRIES ITS OWN DISCRIMINATOR.** Each run records the local `ddTree`. "No window" is EXPECTED
+when the hash matches the previous entry and **SUSPICIOUS when it rotated** — a rotated key with no
+refusal is what a fail-open would look like. Without the recorded hash those are indistinguishable,
+which is exactly how *nothing happened* becomes *nothing is wrong*.
+
+⭐ **ITS OWN FAILURE PATHS ARE TESTED BY CALLING**, against a local fixture server — all five
+branches, including the two that only fire when something is already broken, which is the worst
+moment to run them for the first time. (The live dry-run against prod only ever exercises "no
+window".) A banner rendered BELOW the curl fails too: a caveat under the command it qualifies is one
+most readers never reach.
+
+⚠️ **THE LEDGER IS TRACKED IN GIT**, following `deploy-loss-log.jsonl`. Gitignoring it was the first
+instinct and the wrong one — it would leave the single entry that ever matters living only on
+whichever machine ran the deploy. The cost is a modified root file after every prod deploy; it does
+not touch SURFACES, so it cannot dirty the next deploy's tree gate.
+
+⚠️ **A NO-OP REDEPLOY WILL NOT TRIGGER IT.** The DD identity is a content hash over 34 files —
+identical DD code keeps its key and opens no window. The proof lands on the next real DD change.
 
 ### ALSO
 
