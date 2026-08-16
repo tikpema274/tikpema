@@ -530,15 +530,30 @@ export const POWER_DISCLOSURE = Object.freeze({
     detail: "The owner can block specific addresses. A blocked holder may be unable to withdraw their own funds, while the vault continues to look healthy to everyone else." },
 
   // ── deliberately silent, each for its own reason ────────────────────────────────────────────
-  // 🚨 setStrategy IS `funds-movement` CLASS AND IS PRESENT ON THE LIVE VAULT (measured 2026-08-16).
-  // It is the strongest candidate for the next widening and is NOT excluded on merit — only on
-  // scope, because this pass was asked to add the denylist. See PROGRESS; this row is the reminder.
-  setStrategy: { warn: false,
-    why: "🚨 PENDING DECISION — severity `funds-movement`, and PRESENT on XyloVault today. Not excluded on merit; excluded because this pass widened the denylist only." },
+  // ⭐⭐ ADDED 2026-08-16 — CONSISTENCY, NOT EXPANSION. `setStrategy` carries severity
+  // `funds-movement`, the SAME class as `emergencyWithdraw`, which has always warned. Two powers in
+  // one severity class, one disclosed and one silent, is not a threshold — it is an inconsistency,
+  // and it was silent on the live vault while the card claimed to disclose what the owner can do.
+  setStrategy: { warn: true, code: "set-strategy",
+    detail: "The owner can change where the vault's assets are deployed. Your funds can be moved into a different strategy without your consent." },
+
+  // ── deliberately silent, each decided on its own terms ─────────────────────────────────────
+  // ⭐⭐ transferOwnership DOES NOT WARN, AND THE REASON IS THAT A WARN WOULD NOT FIX ITS PROBLEM.
+  // It adds no power; it makes the OWNER-IDENTITY disclosure PERISHABLE — the holder you
+  // acknowledged can be replaced and the card's claim about who holds these powers silently becomes
+  // false. A warn would say "this can happen" once, at acknowledgement time, and then never fire
+  // again when it actually did. ⭐ THE FIX IS IN THE DIGEST: `holder` and `holderKind` are digest
+  // inputs (see disclosureDigest v2), so an ownership transfer invalidates every outstanding
+  // acknowledgement at the moment the holder ACTUALLY changes — which is the right trigger, and the
+  // one a warn cannot provide.
   transferOwnership: { warn: false,
-    why: "🚨 PENDING DECISION — present on XyloVault today. It does not add a power, it makes the OWNER-IDENTITY disclosure perishable: the holder you acknowledged can be replaced without any warn moving." },
+    why: "Adds no power; it makes the owner-identity claim perishable. Handled in the DIGEST instead — holder/holderKind are digest inputs, so an ack dies when the holder actually changes. A warn would fire once at ack time and never when it mattered." },
+  // ⭐ DECIDED ON ITS OWN TERMS, not deferred. It redirects WHERE fees go, which is a matter between
+  // the owner and a recipient. The DEPOSITOR's exposure is the fee AMOUNT, and that is already
+  // covered by `feesSettable`. ⚠️ Warning on it would add a line that does not change what a
+  // depositor stands to lose — and this card's value depends on every line mattering.
   setFeeRecipient: { warn: false,
-    why: "PENDING — `parameter-change`: redirects fees, not principal. Weakest of the three present powers." },
+    why: "Redirects WHERE fees go, between owner and recipient. The depositor's exposure is the fee AMOUNT, already covered by feesSettable. A line that changes nothing for the depositor is noise on a card whose value depends on every line mattering." },
   pausable: { warn: false,
     why: "PENDING — `access-restriction`, absent on XyloVault. A pause stops everyone rather than singling a holder out, which is why the denylist went first." },
   withdrawalDelay: { warn: false,
@@ -660,6 +675,11 @@ export function applyReportDisclosure(inspection, report) {
       source: "report",
       established: true,
       reportSubject: subj,
+      // ⭐⭐ THE HOLDER IS A DISCLOSURE INPUT, because it is a DIGEST input (v2). Carried here so
+      // `disclosureDigest` never has to reach back into the report, and so the value the ack is
+      // bound to is the value that was displayed.
+      holder: report?.owner?.address ? String(report.owner.address).toLowerCase() : null,
+      holderKind: kind ?? null,
       reportBlock: report?.subject?.blockNumber ?? null,
       reportSources: report?.sources?.mode ?? null,
       // ⚠️ A SPLIT RIDES ALONG. It bears on every fact above, not just the slot that split.
@@ -679,7 +699,26 @@ export function disclosureDigest(inspection) {
   const warnCodes = [...(inspection?.verdict?.warns ?? [])].map((w) => w.code).sort().join(",");
   const wf = inspection?.withdraw?.withdrawFeeBps ?? "n";
   const df = inspection?.ownerPowers?.settableFees?.currentBps?.deposit ?? "n";
-  return `${String(inspection?.address ?? "").toLowerCase()}|warns:${warnCodes}|wf:${wf}|df:${df}|v1`;
+  // ═══ ⭐⭐ v2 — THE HOLDER IS IN THE DIGEST ═══════════════════════════════════════════════════
+  // 🚨 THE HOLE v1 HAD. The digest was `address | warn codes | withdrawFee | depositFee`, and THE
+  // OWNER WAS NOT IN IT. So an ownership transfer from one EOA to a DIFFERENT EOA left every input
+  // identical — the warn code is still `owner-is-eoa` — the digest did not move, and an
+  // acknowledgement taken against "the owner is 0xABC" stayed valid for a vault now owned by 0xDEF.
+  // The user acked a holder claim that had silently become false.
+  //
+  // ⚠️ AND IT FAILED ASYMMETRICALLY, WHICH IS WORSE THAN FAILING ALWAYS. EOA → multisig DID move the
+  // digest, because the warn code disappeared. So the transitions that changed the disclosure's
+  // CHARACTER invalidated acks, while the transitions that merely changed WHO HOLDS THE KEYS did
+  // not — exactly backwards from what a depositor cares about.
+  //
+  // ⭐ BOTH ADDRESS AND KIND. `renounced` is address 0x000…0 while `no-owner-fn` has no address at
+  // all; without the kind those two would be distinguishable only by a null, and "we asked and there
+  // is no owner()" must never collapse into "ownership was renounced".
+  // ⚠️ `none` is an explicit marker, not an empty string — an absent holder must not render as a
+  // prefix of, or collide with, any real value.
+  const holder = inspection?.disclosure?.holder ?? "none";
+  const holderKind = inspection?.disclosure?.holderKind ?? "none";
+  return `${String(inspection?.address ?? "").toLowerCase()}|warns:${warnCodes}|wf:${wf}|df:${df}|holder:${holder}|kind:${holderKind}|v2`;
 }
 export function ackTokenFor(inspection) {
   return createHash("sha256").update(disclosureDigest(inspection)).digest("hex");
@@ -735,9 +774,15 @@ export function gateDeposit({ inspection, ackToken, expectedAssetAddress }) {
     blocks: [...inspection.verdict.blocks],
     warns: [...inspection.verdict.warns],
     digest: disclosureDigest(inspection),
-    // The remaining two digest inputs. `address` is the third and is already known to any caller.
+    // The remaining digest inputs. `address` is already known to any caller.
     withdrawFeeBps: inspection?.withdraw?.withdrawFeeBps ?? null,
     depositFeeBps: inspection?.ownerPowers?.settableFees?.currentBps?.deposit ?? null,
+    // ⭐⭐ ADDED WITH v2, AND NOT OPTIONAL. Shipping a new digest input WITHOUT shipping the input
+    // itself would recreate the `unexplained` case that 63e7dac fixed: the digest moves, the ack
+    // dies, and the panel can show the user nothing that accounts for it. An ownership transfer is
+    // precisely the change most worth explaining, so it must be the most explainable.
+    holder: inspection?.disclosure?.holder ?? null,
+    holderKind: inspection?.disclosure?.holderKind ?? null,
   };
 
   // Asset mismatch is a hard BLOCK, evaluated here because only the deposit context knows the

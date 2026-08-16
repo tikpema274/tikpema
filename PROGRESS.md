@@ -145,7 +145,10 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
   above — documentation is not an answer about a subject. HTML only; the JSON `howToCall` refusal
   stays behind health. See the entry below for the honesty problem the move created and how the
   banner solves it.
-* 🚨 **`setStrategy` IS PRESENT ON THE LIVE VAULT AND THE CARD IS SILENT ABOUT IT.** `funds-movement`
+* ⚠️ **`pausable` and `withdrawalDelay` are the last two undecided power groups.** Both ABSENT on the
+  live vault, so neither is a silent gap today — but that is a fact about our one allowlisted vault,
+  not a decision. Named in `POWER_DISCLOSURE` with `PENDING` and pinned by a suite assertion.
+* ✅ ~~**`setStrategy` IS PRESENT ON THE LIVE VAULT AND THE CARD IS SILENT ABOUT IT.**~~ `funds-movement`
   class — the same class as `emergencyWithdraw`, which does warn. Plus `transferOwnership` (makes the
   owner-identity disclosure perishable: the holder you acknowledged can be replaced without any warn
   moving) and `setFeeRecipient`. All three measured present on XyloVault 2026-08-16. Recorded as
@@ -157,6 +160,61 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
 ---
 
 ---
+
+## 2026-08-16 (consistency + digest v2) — ⭐⭐ `setStrategy` DISCLOSES, AND THE HOLDER IS FINALLY IN THE DIGEST
+
+Three decisions, each taken on its own terms rather than as one "widen the set" sweep.
+
+### 1 ⭐ `setStrategy` WARNS — CONSISTENCY, NOT EXPANSION
+
+Severity `funds-movement`, the **same class as `emergencyWithdraw`**, which has always warned. Two
+powers in one severity class — one disclosed, one silent — is not a threshold, it is an
+inconsistency. And it was silent **on the live vault** while the card claimed to disclose what the
+owner can do. Now visible: XyloVault's warns are `emergency-withdraw, fees-settable, **set-strategy**,
+owner-is-eoa, performance-fee`.
+
+### 2 🚨🚨 `transferOwnership` DOES **NOT** WARN — IT WAS A DIGEST BUG ALL ALONG
+
+⭐ **A WARN WOULD NOT HAVE FIXED ITS PROBLEM.** It adds no power; it makes the owner-identity
+disclosure PERISHABLE. A warn says *"this can happen"* once, at acknowledgement time, and then never
+fires again when it actually did.
+
+🚨 **THE HOLE:** `disclosureDigest` v1 was `address | warn codes | withdrawFee | depositFee` — **the
+owner was not in it.** So an ownership transfer from one EOA to a DIFFERENT EOA left every input
+identical (the warn code is still `owner-is-eoa`), the digest did not move, and an acknowledgement
+taken against *"the owner is 0xABC"* stayed valid for a vault now owned by 0xDEF. **The user acked a
+holder claim that had silently become false.**
+
+⚠️ **AND IT FAILED ASYMMETRICALLY, WHICH IS WORSE THAN FAILING ALWAYS.** EOA → multisig *did* move
+the digest, because the warn code disappeared. So transitions that changed the disclosure's
+CHARACTER invalidated acks, while transitions that merely changed **who holds the keys** did not —
+exactly backwards from what a depositor cares about.
+
+**Digest v2** = `… | holder | holderKind | v2`. ⭐ Both address AND kind: `renounced` is address
+0x000…0 while `no-owner-fn` has no address at all, and *"we asked and there is no owner()"* must
+never collapse into *"ownership was renounced"*. An absent holder renders `holder:none`, an explicit
+marker rather than an empty string that could prefix a real value.
+
+⚠️ **AND THE INPUT TRAVELS WITH THE DIGEST.** Shipping a new digest input without shipping the input
+itself would have swapped one silent failure for another: the ack would die correctly and the panel
+would render `unexplained` — *"it changed and we cannot show you how"* — **for the single change most
+worth naming.** `holder`/`holderKind` are on the disclosure payload, `diffDisclosure` gained a
+first-class `holderChange`, and `VaultPanel` renders *"The owner changed. 0xABC… (eoa) → 0xDEF…
+(eoa)"* above the re-tick. Addresses are case-normalised first — a case-only difference is not an
+ownership transfer, and a false alarm on this surface is exactly the wrong failure.
+
+### 3 ⭐ `setFeeRecipient` STAYS SILENT — DECIDED, NOT DEFERRED
+
+It redirects **where** fees go, which is between the owner and a recipient. The DEPOSITOR's exposure
+is the fee **amount**, already covered by `feesSettable`. ⚠️ A line that changes nothing a depositor
+stands to lose is noise on a card **whose value depends on every line mattering.** Its `why` no
+longer says PENDING.
+
+⚠️ **`pausable` and `withdrawalDelay` remain genuinely undecided** and still say so. Both are ABSENT
+on the live vault, so neither is a silent gap today — but *"absent from the one vault we allowlist"*
+is not a decision, and a suite assertion names exactly those two so they cannot quietly become one.
+
+`verify-dd-report` **150/0** (new §G3 for digest v2). `test:all` exit 0, tsc + build clean.
 
 ## 2026-08-16 (widening) — ⭐ THE DENYLIST WARNS — AND THE REAL FINDING IS THE THREE POWERS THAT STILL DO NOT
 

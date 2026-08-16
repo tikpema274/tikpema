@@ -339,8 +339,7 @@ section("G ⭐⭐ STEP 2 COMPLETE — the seven warns are GONE and the report su
     "denylist" in REPORT_POWER_WARNS && REPORT_POWER_WARNS.denylist.code === "denylist");
   check("⭐ …and the wording says the vault keeps looking healthy to everyone else",
     /look healthy to everyone else/.test(REPORT_POWER_WARNS.denylist.detail));
-  check("⭐ four groups warn now, not three", Object.keys(REPORT_POWER_WARNS).length === 4,
-    Object.keys(REPORT_POWER_WARNS).join(","));
+  check("⭐ denylist is in the warning set", "denylist" in REPORT_POWER_WARNS);
 
   // 🚨🚨 THE REAL SAFETY PROPERTY OF THIS PASS: no catalogue group can be excluded by SILENCE.
   // Before, only warning groups were listed, so a TENTH power added later would have been left out
@@ -362,10 +361,29 @@ section("G ⭐⭐ STEP 2 COMPLETE — the seven warns are GONE and the report su
   check("⭐ …and a decision for a DELETED group throws too (no stale rows)",
     !!threwOnStale && /non-existent group/.test(threwOnStale.message));
 
-  // ⚠️ THE PENDING ONES ARE NAMED, NOT FORGOTTEN — setStrategy is `funds-movement` and PRESENT on
-  // the live vault. This assertion is the reminder; delete it when the decision is taken.
-  check("⚠️ setStrategy is recorded as a PENDING decision, not an oversight",
-    POWER_DISCLOSURE.setStrategy.warn === false && /PENDING DECISION/.test(POWER_DISCLOSURE.setStrategy.why));
+  // ⭐⭐ setStrategy — CONSISTENCY, NOT EXPANSION. Two powers in one severity class, one disclosed
+  // and one silent, is an inconsistency rather than a threshold.
+  check("⭐⭐ `setStrategy` now warns — same `funds-movement` class as emergencyWithdraw",
+    POWER_DISCLOSURE.setStrategy.warn === true && REPORT_POWER_WARNS.setStrategy?.code === "set-strategy");
+  check("⭐ five groups warn now", Object.keys(REPORT_POWER_WARNS).length === 5,
+    Object.keys(REPORT_POWER_WARNS).join(","));
+
+  // ⭐⭐ transferOwnership STAYS SILENT ON PURPOSE, and the reason is that a warn cannot fix its
+  // problem — perishability is a DIGEST question. Pinned so nobody "completes the set" later.
+  check("⭐⭐ transferOwnership does NOT warn — it is handled in the digest instead",
+    POWER_DISCLOSURE.transferOwnership.warn === false && /DIGEST/i.test(POWER_DISCLOSURE.transferOwnership.why));
+  // ⭐ DECIDED ON ITS OWN TERMS, not deferred: the depositor's exposure is the fee AMOUNT, already
+  // covered by feesSettable, so this line would change nothing a depositor stands to lose.
+  check("⭐ setFeeRecipient is DECIDED (no PENDING), on the depositor-exposure argument",
+    POWER_DISCLOSURE.setFeeRecipient.warn === false &&
+    !/PENDING/.test(POWER_DISCLOSURE.setFeeRecipient.why) &&
+    /feesSettable/.test(POWER_DISCLOSURE.setFeeRecipient.why));
+  // ⚠️ AND THE GENUINELY-UNDECIDED ONES STAY NAMED. Both are ABSENT on the live vault, so neither is
+  // a silent gap today — but "absent from the one vault we allowlist" is not a decision, and this
+  // assertion is what keeps them from quietly becoming one.
+  const stillPending = Object.entries(POWER_DISCLOSURE).filter(([, d]) => /PENDING/.test(d.why ?? "")).map(([g]) => g);
+  check("⚠️ exactly `pausable` and `withdrawalDelay` remain undecided, and say so",
+    stillPending.sort().join(",") === "pausable,withdrawalDelay", stillPending.join(",") || "(none)");
   check("⚠️ …and multisig/timelock/renounced still raise nothing",
     !["multisig", "timelock", "renounced"].some((k) => k in REPORT_OWNER_WARNS));
 
@@ -425,6 +443,51 @@ section("G ⭐⭐ STEP 2 COMPLETE — the seven warns are GONE and the report su
   const quiet = applyReportDisclosure(insp(), rpt({ powersPresent: [], owner: { kind: "multisig" } }));
   check("⭐ …while a multisig owner still raises nothing (unchanged behaviour)",
     !quiet.verdict.warns.some((w) => w.code.startsWith("owner-")) && quiet.verdict.level === "OK");
+}
+
+section("G3 🚨🚨 DIGEST v2 — THE HOLDER IS IN IT, SO AN ACK DIES WHEN THE OWNER CHANGES");
+{
+  const { applyReportDisclosure, disclosureDigest, ackTokenFor, gateDeposit } =
+    await import("../../netlify/functions/_vault.mjs");
+  const base = {
+    address: "0x240eb85458cd41361bd8c3773253a1d78054f747", chainId: 5042002,
+    verdict: { level: "OK", blocks: [], warns: [] },
+    withdraw: { withdrawFeeBps: 10 }, ownerPowers: { settableFees: { currentBps: { deposit: 0 } } },
+  };
+  const rpt = (ownerAddr, kind) => ({
+    subject: { address: base.address, chainId: 5042002, blockNumber: 1 },
+    powersPresent: [], owner: { address: ownerAddr, kind },
+    coverage: { notChecked: [] }, sources: { mode: "quorum", integrity: { providerDisagreement: false } },
+  });
+
+  // 🚨🚨 THE v1 HOLE, PINNED. Both are EOAs, so the warn code is identical and every other input is
+  // identical. Under v1 the digest did not move and the acknowledgement SURVIVED a holder claim that
+  // had become false.
+  const A = applyReportDisclosure(base, rpt("0xAAAA000000000000000000000000000000000001", "eoa"));
+  const B = applyReportDisclosure(base, rpt("0xBBBB000000000000000000000000000000000002", "eoa"));
+  check("🚨🚨 EOA → a DIFFERENT EOA MOVES the digest (v1 did not)",
+    disclosureDigest(A) !== disclosureDigest(B));
+  check("🚨🚨 …so the old acknowledgement no longer matches", ackTokenFor(A) !== ackTokenFor(B));
+  check("🚨🚨 …and the gate REFUSES the stale ack against the new holder",
+    gateDeposit({ inspection: B, ackToken: ackTokenFor(A) }).ok === false);
+  check("⭐ …while the SAME holder still validates (not a blanket invalidation)",
+    gateDeposit({ inspection: A, ackToken: ackTokenFor(A) }).ok === true);
+  check("⭐ the digest is stamped v2, so the format change is explicit",
+    /\|v2$/.test(disclosureDigest(A)), disclosureDigest(A));
+
+  // ⭐ KIND MATTERS INDEPENDENTLY: renounced (0x0) and no-owner-fn (no address) must never collide.
+  const ren = applyReportDisclosure(base, rpt("0x0000000000000000000000000000000000000000", "renounced"));
+  const nof = applyReportDisclosure(base, rpt(null, "no-owner-fn"));
+  check("⭐⭐ `renounced` and `no-owner-fn` produce DIFFERENT digests",
+    disclosureDigest(ren) !== disclosureDigest(nof));
+  check("⭐ an absent holder renders as an explicit marker, not an empty string",
+    /holder:none\|kind:no-owner-fn/.test(disclosureDigest(nof)), disclosureDigest(nof));
+
+  // ⭐⭐ THE INPUT TRAVELS WITH THE DIGEST, or the move becomes unexplainable — the 63e7dac defect.
+  const g = gateDeposit({ inspection: A, ackToken: undefined });
+  check("⭐⭐ the disclosure payload carries `holder` and `holderKind` (new digest inputs)",
+    "holder" in g.disclosure && "holderKind" in g.disclosure,
+    `${g.disclosure.holder}/${g.disclosure.holderKind}`);
 }
 
 section("G2 🚨🚨 THE DEPOSIT GATE RESPECTS THE HEALTH VERDICT TOO");

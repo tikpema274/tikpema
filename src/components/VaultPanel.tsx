@@ -229,6 +229,24 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
                 {delta.d.warnsRemoved.map((w) => (<span key={w.code} className="mono" style={{ marginRight: 8 }}>{w.code}</span>))}
               </div>
             )}
+            {/* ⭐⭐ THE OWNERSHIP TRANSFER — the change v1 could not even detect. It is rendered
+                FIRST-CLASS rather than folded into the warn list, because "a warn appeared" and
+                "the people who hold every power above are now different people" are not the same
+                sentence, and only one of them is why the acknowledgement died. */}
+            {delta.d.holderChange && (
+              <div style={{ marginTop: 6 }}>
+                <b>The owner changed.</b>{" "}
+                <span className="mono">{shortAddr(delta.d.holderChange.fromAddress) || "none"}</span>
+                {delta.d.holderChange.fromKind ? ` (${delta.d.holderChange.fromKind})` : ""}
+                {" → "}
+                <span className="mono">{shortAddr(delta.d.holderChange.toAddress) || "none"}</span>
+                {delta.d.holderChange.toKind ? ` (${delta.d.holderChange.toKind})` : ""}
+                <div style={{ fontSize: ".85rem" }}>
+                  Every owner power disclosed above is now held by a different party than the one you
+                  acknowledged.
+                </div>
+              </div>
+            )}
             {delta.d.feeChanges.map((f) => (
               <div key={f.label} style={{ marginTop: 6 }}>
                 The <b>{f.label}</b> moved from <b>{bps(f.fromBps)}</b> to <b>{bps(f.toBps)}</b>.

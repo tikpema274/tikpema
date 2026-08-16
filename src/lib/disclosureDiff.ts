@@ -7,10 +7,16 @@
 // renders. A re-tick nobody can check is a formality, and a formality is trained click-through,
 // which this codebase has already recorded as a hazard on the fee-band surface.
 //
-// ⭐ THE CHANGE IS COMPUTABLE, so it must be computed. `disclosureDigest` is
-// `address | warn codes | withdrawFee | depositFee` — four inputs, all of them now carried on the
-// disclosure itself. Every possible digest move is therefore explainable as: a warn appeared, a warn
-// disappeared, or a named fee moved from X to Y.
+// ⭐ THE CHANGE IS COMPUTABLE, so it must be computed. `disclosureDigest` (v2) is
+// `address | warn codes | withdrawFee | depositFee | holder | holderKind` — every input carried on
+// the disclosure itself. A digest move is therefore explainable as: a warn appeared, a warn
+// disappeared, a named fee moved, or THE HOLDER CHANGED.
+//
+// ⭐⭐ `holder` JOINED IN v2 AND ITS DIFF LINE IS NOT OPTIONAL. The owner was absent from v1, so an
+// ownership transfer between two EOAs moved nothing and an ack survived a holder claim that had
+// become false. Adding the input without adding this diff line would have swapped one silent failure
+// for another: the ack would die correctly and the panel would render `unexplained` — "it changed
+// and we cannot show you how" — for the single change most worth naming.
 //
 // ⚠️ IF NOTHING EXPLAINS IT, SAY SO RATHER THAN IMPLY NOTHING CHANGED. A digest that moved with no
 // visible delta means an input we are not showing — a schema change, a version bump in the digest
@@ -25,6 +31,9 @@ export type Disclosure = {
   digest?: string | null;
   withdrawFeeBps?: number | null;
   depositFeeBps?: number | null;
+  /** v2 digest inputs — who holds the owner powers, and what kind of account they are. */
+  holder?: string | null;
+  holderKind?: string | null;
 };
 
 export type DisclosureDelta = {
@@ -35,6 +44,9 @@ export type DisclosureDelta = {
   warnsRemoved: Warn[];
   /** Named fee movements, in basis points. */
   feeChanges: Array<{ label: string; fromBps: number | null; toBps: number | null }>;
+  /** ⚠️ The owner changed. `null` when it did not. ⭐ A kind-only move (EOA → multisig) counts:
+   *  the address may be the same contract gaining code, and the depositor's exposure differs. */
+  holderChange: { fromAddress: string | null; toAddress: string | null; fromKind: string | null; toKind: string | null } | null;
   /** ⚠️ The digest moved but nothing above explains it — an input we do not render. */
   unexplained: boolean;
   /** The verdict level, if it moved (OK → WARN → BLOCK). */
@@ -59,7 +71,7 @@ export function diffDisclosure(
   changeIsKnown = false,
 ): DisclosureDelta {
   const none: DisclosureDelta = {
-    changed: false, warnsAdded: [], warnsRemoved: [], feeChanges: [], unexplained: false, levelChange: null,
+    changed: false, warnsAdded: [], warnsRemoved: [], feeChanges: [], holderChange: null, unexplained: false, levelChange: null,
   };
   // ⚠️ WITHOUT BOTH SIDES THERE IS NO DIFF, AND PRETENDING OTHERWISE IS THE DEFECT AGAIN. If we
   // cannot compare, say the change is unexplained rather than reporting an empty (reassuring) delta.
@@ -79,19 +91,31 @@ export function diffDisclosure(
     if (f !== t) feeChanges.push({ label, fromBps: f, toBps: t });
   }
 
+  // ⚠️ NORMALISED BEFORE COMPARING — an address differing only in case is not an ownership transfer,
+  // and rendering one would be a false alarm on the surface built to stop false reassurance.
+  const norm = (v: unknown) => (typeof v === "string" && v ? v.toLowerCase() : null);
+  const holderChange =
+    norm(accepted.holder) !== norm(current.holder) || (accepted.holderKind ?? null) !== (current.holderKind ?? null)
+      ? {
+          fromAddress: norm(accepted.holder), toAddress: norm(current.holder),
+          fromKind: accepted.holderKind ?? null, toKind: current.holderKind ?? null,
+        }
+      : null;
+
   const levelChange =
     (accepted.level ?? null) !== (current.level ?? null)
       ? { from: accepted.level ?? null, to: current.level ?? null }
       : null;
 
   const digestMoved = changeIsKnown || (!!accepted.digest && !!current.digest && accepted.digest !== current.digest);
-  const explained = warnsAdded.length > 0 || warnsRemoved.length > 0 || feeChanges.length > 0;
+  const explained = warnsAdded.length > 0 || warnsRemoved.length > 0 || feeChanges.length > 0 || !!holderChange;
 
   return {
     changed: digestMoved || explained || !!levelChange,
     warnsAdded,
     warnsRemoved,
     feeChanges,
+    holderChange,
     // ⭐ The case that must never be silent: the digest moved and none of the four inputs we render
     // accounts for it.
     unexplained: digestMoved && !explained,
