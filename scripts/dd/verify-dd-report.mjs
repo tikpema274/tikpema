@@ -332,10 +332,40 @@ section("G ⭐⭐ STEP 2 COMPLETE — the seven warns are GONE and the report su
                    "owner-is-eoa", "owner-is-unidentified-contract", "owner-unreadable", "owner-not-exposed"])
     check(`⭐ "${c}" is still produced, now from the report`, codes.includes(c));
 
-  // ⚠️ MIGRATION, NOT WIDENING — asserted, because a wider gate is a real behaviour change that
-  // should be a decision rather than a side effect of moving where these come from.
-  check("⚠️ exactly THREE power groups map to a warn (denylist/setStrategy/… deliberately excluded)",
-    Object.keys(REPORT_POWER_WARNS).length === 3, Object.keys(REPORT_POWER_WARNS).join(","));
+  // ⭐⭐ THE DENYLIST WIDENING (2026-08-16) — a DELIBERATE behaviour change, not a migration.
+  const { POWER_DISCLOSURE, assertDisclosureComplete } = await import("../../netlify/functions/_vault.mjs");
+  const { POWER_SIGS } = await import("../../shared/onchain-facts/index.mjs");
+  check("⭐⭐ `denylist` now warns — a blocked holder may be unable to withdraw their own funds",
+    "denylist" in REPORT_POWER_WARNS && REPORT_POWER_WARNS.denylist.code === "denylist");
+  check("⭐ …and the wording says the vault keeps looking healthy to everyone else",
+    /look healthy to everyone else/.test(REPORT_POWER_WARNS.denylist.detail));
+  check("⭐ four groups warn now, not three", Object.keys(REPORT_POWER_WARNS).length === 4,
+    Object.keys(REPORT_POWER_WARNS).join(","));
+
+  // 🚨🚨 THE REAL SAFETY PROPERTY OF THIS PASS: no catalogue group can be excluded by SILENCE.
+  // Before, only warning groups were listed, so a TENTH power added later would have been left out
+  // of every vault card by an omission nobody wrote — absence-reads-as-safe aimed at the disclosure.
+  check("🚨🚨 EVERY catalogue group has an explicit disclosure decision",
+    Object.keys(POWER_SIGS).every((g) => g in POWER_DISCLOSURE),
+    Object.keys(POWER_SIGS).filter((g) => !(g in POWER_DISCLOSURE)).join(",") || "all accounted for");
+  check("⭐ …and every SILENT group states a reason", 
+    Object.entries(POWER_DISCLOSURE).filter(([, d]) => !d.warn).every((e) => (e[1].why ?? "").length >= 20));
+  // ⭐ Proven by CALLING: a catalogue that gains a group without a decision THROWS.
+  let threwOnDrift = null;
+  try { assertDisclosureComplete({ ...POWER_SIGS, brandNewPower: ["x()"] }, POWER_DISCLOSURE); }
+  catch (e) { threwOnDrift = e; }
+  check("🚨🚨 a NEW catalogue group with no disclosure decision THROWS (never silently silent)",
+    !!threwOnDrift && /no disclosure decision for: brandNewPower/.test(threwOnDrift.message));
+  let threwOnStale = null;
+  try { assertDisclosureComplete({ emergencyWithdraw: ["x()"] }, POWER_DISCLOSURE); }
+  catch (e) { threwOnStale = e; }
+  check("⭐ …and a decision for a DELETED group throws too (no stale rows)",
+    !!threwOnStale && /non-existent group/.test(threwOnStale.message));
+
+  // ⚠️ THE PENDING ONES ARE NAMED, NOT FORGOTTEN — setStrategy is `funds-movement` and PRESENT on
+  // the live vault. This assertion is the reminder; delete it when the decision is taken.
+  check("⚠️ setStrategy is recorded as a PENDING decision, not an oversight",
+    POWER_DISCLOSURE.setStrategy.warn === false && /PENDING DECISION/.test(POWER_DISCLOSURE.setStrategy.why));
   check("⚠️ …and multisig/timelock/renounced still raise nothing",
     !["multisig", "timelock", "renounced"].some((k) => k in REPORT_OWNER_WARNS));
 

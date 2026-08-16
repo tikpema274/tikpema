@@ -145,12 +145,75 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
   above — documentation is not an answer about a subject. HTML only; the JSON `howToCall` refusal
   stays behind health. See the entry below for the honesty problem the move created and how the
   banner solves it.
+* 🚨 **`setStrategy` IS PRESENT ON THE LIVE VAULT AND THE CARD IS SILENT ABOUT IT.** `funds-movement`
+  class — the same class as `emergencyWithdraw`, which does warn. Plus `transferOwnership` (makes the
+  owner-identity disclosure perishable: the holder you acknowledged can be replaced without any warn
+  moving) and `setFeeRecipient`. All three measured present on XyloVault 2026-08-16. Recorded as
+  PENDING DECISION rows in `POWER_DISCLOSURE`, so they cannot be forgotten — but they are still
+  undisclosed today, and the denylist widening did nothing about them.
 * ⚠️ **Mutation hygiene:** five mutations this session reported green without applying. Every mutation
   must print whether it changed anything.
 
 ---
 
 ---
+
+## 2026-08-16 (widening) — ⭐ THE DENYLIST WARNS — AND THE REAL FINDING IS THE THREE POWERS THAT STILL DO NOT
+
+`denylist` joins the acknowledged set. ⭐ It is not about what the owner can TAKE; it is about
+whether **you can leave**. A blocked holder may be unable to withdraw their own funds while every
+other line on the card still reads normal — solvent vault, sane fees, exit shut for you specifically.
+That asymmetry is why it belongs behind an acknowledgement.
+
+### 🚨🚨 MEASURED FIRST, AND THE MEASUREMENT CHANGED WHAT MATTERS
+
+XyloVault does **NOT** have `denylist`, `pausable` or `withdrawalDelay`. It **DOES** have:
+
+| power | severity | disclosed? |
+|---|---|---|
+| `emergencyWithdraw` | funds-movement | ✅ warns |
+| `feesSettable` | economics | ✅ warns |
+| **`setStrategy`** | **funds-movement** | 🚨 **SILENT** |
+| **`transferOwnership`** | ownership-transfer | 🚨 **SILENT** |
+| **`setFeeRecipient`** | parameter-change | 🚨 **SILENT** |
+
+⚠️ **SO THE WIDENING AS ASKED IS A NO-OP ON THE ONLY ALLOWLISTED VAULT** — the digest is unchanged,
+`level` is still WARN on the same four codes. It is correct and forward-looking (a second vault with
+a denylist is now caught), and it is **not** where the live gap is.
+
+🚨 **THE LIVE GAP IS `setStrategy`: `funds-movement` class, the SAME class as `emergencyWithdraw`,
+present on the vault right now, and the card says nothing about it.** Recorded as a PENDING DECISION
+row rather than quietly left out. `transferOwnership` is subtler and worth its own sentence: it adds
+no power, it makes the OWNER-IDENTITY disclosure **perishable** — the holder you acknowledged can be
+replaced without any warn moving.
+
+### ⭐⭐ AND THE STRUCTURAL FIX IS BIGGER THAN THE ONE GROUP
+
+The old table listed only the groups that WARN, so the other six were excluded **by silence** —
+nothing recorded that a decision had been taken, and a TENTH catalogue group added later would have
+been left off every vault card by an omission nobody wrote. That is
+[absence-must-never-read-as-safe] aimed at the disclosure itself.
+
+`POWER_DISCLOSURE` now carries **every** catalogue group with an explicit `warn`, and every silent
+one must state a `why`. `assertDisclosureComplete()` runs **at module load** and throws if the table
+and `POWER_SIGS` disagree in either direction. ⚠️ A module-load throw on the money path is
+deliberate: it can only fire on a code-level inconsistency between two constants in this repo, every
+test run catches it long before a deploy, and taking the vault path DOWN beats serving a disclosure
+that silently omits a power somebody added on purpose. Proven by CALLING with a drifted catalogue.
+
+### ⚠️ A STALE COMMENT ON THE MONEY PATH, CORRECTED
+
+The allowlist header said *"DECLARED BUT NOT SCANNED: setStrategy / setFeeRecipient /
+transferOwnership … A vault whose only owner power is one of these discloses no power."* **That
+stopped being true at step 2** — the disclosure comes from the report, which checks all nine groups
+(13/13 measured). The SCAN gap is closed; what remained was a DISCLOSURE decision, and the comment
+was describing the wrong one. ⭐ A comment that misnames which gap is open is worse than none: it
+sends the next reader to fix something already fixed.
+
+⚠️ **`ddTree` UNCHANGED** (`b32d3e590968`) — `_vault.mjs` is a report CONSUMER, not the engine, so it
+is correctly outside the DD surface. No refusal window from this deploy.
+
+`verify-dd-report` **138/0**. `test:all` exit 0, tsc + build clean.
 
 ## 2026-08-16 (step 2) — ⭐⭐ THE DEPOSIT GATE NOW READS THE DD REPORT, AND THE SEVEN WARNS ARE DELETED
 

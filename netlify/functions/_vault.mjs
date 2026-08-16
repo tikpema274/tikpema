@@ -52,8 +52,15 @@ import {
 //   1. NOT CHECKED AT ALL: withdrawal locks, delays and cooldowns (the fields are `null`, and the
 //      disclosure names the gap). A vault with a withdrawal queue is not detected — it is merely
 //      no longer described as instantly reversible.
-//   2. DECLARED BUT NOT SCANNED: setStrategy / setFeeRecipient / transferOwnership, in
-//      POWER_SIGS_UNSCANNED. A vault whose only owner power is one of these discloses no power.
+//   2. ⭐ SCANNED SINCE STEP 2, BUT DELIBERATELY NOT DISCLOSED — and the distinction now matters.
+//      This used to read "DECLARED BUT NOT SCANNED: setStrategy / setFeeRecipient /
+//      transferOwnership". That is NO LONGER TRUE: the disclosure comes from the DD report, which
+//      checks all nine catalogue groups (measured 13/13 on XyloVault, 2026-08-16) — so the SCAN gap
+//      is closed. What remains is a DISCLOSURE decision, recorded per group in POWER_DISCLOSURE.
+//      🚨 AND THE MEASUREMENT IS UNCOMFORTABLE: setStrategy (`funds-movement`), setFeeRecipient and
+//      transferOwnership are all PRESENT on XyloVault right now and none of them raises a warn. The
+//      card is silent about a funds-movement power the owner actually holds. That is a pending
+//      decision with a row of its own, not an unknown.
 //   3. PROXY COVERAGE IS THE EIP-1967 IMPLEMENTATION SLOT ONLY. No beacon slot, no admin slot, no
 //      EIP-1167 clones, no diamonds. A vault behind any of those is scanned as its own stub. It
 //      BLOCKs as `not-erc4626` today, which is fail-closed but blind, and excludes most real vaults.
@@ -488,13 +495,80 @@ export async function inspectVault(address) {
 // makes more vaults require an ack. That is a decision to take deliberately, not a side effect of
 // moving where these seven come from.
 
-/** The report power groups that map to a vault warn. ⭐ CLOSED, and deliberately the same three the
- *  bytecode scan raised — see the migration-not-widening note above. */
-export const REPORT_POWER_WARNS = Object.freeze({
-  emergencyWithdraw: { code: "emergency-withdraw", detail: "The owner can withdraw assets outside the normal redeem path." },
-  feesSettable: { code: "fees-settable", detail: "The owner can change fees, up to the contract's maximum." },
-  upgradeable: { code: "upgradeable", detail: "The implementation can be replaced, changing every rule above." },
+/**
+ * ⭐⭐ THE DISCLOSURE DECISION FOR **EVERY** CATALOGUE GROUP — including the ones that do NOT warn.
+ *
+ * The previous shape listed only the groups that warn, which meant the other six were excluded by
+ * SILENCE. Nothing recorded that a decision had been taken about them, and — the part that actually
+ * bites — a TENTH group added to `POWER_SIGS` later would have been excluded automatically, by an
+ * omission nobody wrote. That is absence-reads-as-safe aimed at the disclosure itself.
+ *
+ * ⭐ So every group appears here with an explicit `warn`, and a non-warning group must say WHY.
+ * `assertDisclosureComplete()` (called at module load) throws if this table and the catalogue ever
+ * disagree in either direction — a new power cannot reach a user's vault card by default, and a
+ * deleted one cannot leave a stale row behind.
+ *
+ * ⚠️ THE THROW IS AT MODULE LOAD, ON THE MONEY PATH, DELIBERATELY. It can only fire on a code-level
+ * inconsistency between two constants in this repo, which every test run catches long before a
+ * deploy. Taking the vault path DOWN is the correct failure: the alternative is serving a disclosure
+ * that silently omits a power somebody added to the catalogue on purpose.
+ */
+export const POWER_DISCLOSURE = Object.freeze({
+  // ── warns ──────────────────────────────────────────────────────────────────────────────────
+  emergencyWithdraw: { warn: true, code: "emergency-withdraw",
+    detail: "The owner can withdraw assets outside the normal redeem path." },
+  feesSettable: { warn: true, code: "fees-settable",
+    detail: "The owner can change fees, up to the contract's maximum." },
+  upgradeable: { warn: true, code: "upgradeable",
+    detail: "The implementation can be replaced, changing every rule above." },
+  // ⭐⭐ ADDED 2026-08-16 — THE DENYLIST WIDENING, a deliberate behaviour change and not a migration.
+  // A denylist is not about what the owner can take; it is about whether YOU can leave. A holder who
+  // is denylisted may be unable to withdraw their own funds while every other disclosure on the card
+  // still reads as normal — the vault is solvent, the fees are fine, and the exit is shut for you
+  // specifically. That asymmetry is why it belongs in the acknowledged set.
+  denylist: { warn: true, code: "denylist",
+    detail: "The owner can block specific addresses. A blocked holder may be unable to withdraw their own funds, while the vault continues to look healthy to everyone else." },
+
+  // ── deliberately silent, each for its own reason ────────────────────────────────────────────
+  // 🚨 setStrategy IS `funds-movement` CLASS AND IS PRESENT ON THE LIVE VAULT (measured 2026-08-16).
+  // It is the strongest candidate for the next widening and is NOT excluded on merit — only on
+  // scope, because this pass was asked to add the denylist. See PROGRESS; this row is the reminder.
+  setStrategy: { warn: false,
+    why: "🚨 PENDING DECISION — severity `funds-movement`, and PRESENT on XyloVault today. Not excluded on merit; excluded because this pass widened the denylist only." },
+  transferOwnership: { warn: false,
+    why: "🚨 PENDING DECISION — present on XyloVault today. It does not add a power, it makes the OWNER-IDENTITY disclosure perishable: the holder you acknowledged can be replaced without any warn moving." },
+  setFeeRecipient: { warn: false,
+    why: "PENDING — `parameter-change`: redirects fees, not principal. Weakest of the three present powers." },
+  pausable: { warn: false,
+    why: "PENDING — `access-restriction`, absent on XyloVault. A pause stops everyone rather than singling a holder out, which is why the denylist went first." },
+  withdrawalDelay: { warn: false,
+    why: "PENDING — `access-restriction`, absent on XyloVault. Delay is not denial, and the withdraw mechanics are already reported as plain fields." },
 });
+
+/** 🚨 Catalogue and disclosure must account for each other, in BOTH directions. */
+export function assertDisclosureComplete(sigs = POWER_SIGS, table = POWER_DISCLOSURE) {
+  const missing = Object.keys(sigs).filter((g) => !(g in table));
+  const stale = Object.keys(table).filter((g) => !(g in sigs));
+  if (missing.length || stale.length) {
+    throw new Error(
+      `POWER_DISCLOSURE is out of step with the power catalogue — ` +
+      `${missing.length ? `no disclosure decision for: ${missing.join(", ")}. ` : ""}` +
+      `${stale.length ? `decision for non-existent group(s): ${stale.join(", ")}. ` : ""}` +
+      `Every catalogue group must be either warned on or explicitly silent WITH A REASON.`
+    );
+  }
+  const unexplained = Object.entries(table).filter(([, d]) => !d.warn && (!d.why || d.why.length < 20)).map(([g]) => g);
+  if (unexplained.length) {
+    throw new Error(`POWER_DISCLOSURE: silent group(s) with no stated reason: ${unexplained.join(", ")}`);
+  }
+  return true;
+}
+assertDisclosureComplete();
+
+/** The warning subset, DERIVED so it can never drift from the decision table above. */
+export const REPORT_POWER_WARNS = Object.freeze(Object.fromEntries(
+  Object.entries(POWER_DISCLOSURE).filter(([, d]) => d.warn).map(([g, d]) => [g, { code: d.code, detail: d.detail }])
+));
 
 /** Owner kind → warn. ⭐ `multisig`, `timelock` and `renounced` raise none, exactly as before. */
 export const REPORT_OWNER_WARNS = Object.freeze({
