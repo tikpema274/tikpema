@@ -236,6 +236,26 @@ export const handler = async (event) => {
       }
     }
     // ── ⭐⭐ THE SECOND ROUTE: past the grace, this is a MONEY-PATH event ─────────────────────
+    //
+    // ⚠️⚠️ THIS BRANCH IS SUITE-PROVEN ONLY. IT HAS NEVER FIRED IN PRODUCTION, AND IT MUST NOT
+    // INHERIT THE CONFIDENCE OF THE DD POST ABOVE IT.
+    //
+    // The DD-channel path above is exercised live on every deploy — the post-deploy `no-record`
+    // window fires it routinely, so its delivery, its formatting and its webhook are all continuously
+    // demonstrated. THIS one is gated past a 20-minute grace, which by construction never happens on
+    // a healthy system: proving it live would mean holding a DELIBERATE 20-minute DD outage purely to
+    // calibrate an alert, and during that window vault deposits are blocked. That is the same cost
+    // class as the still-failing-quiet branch this repo already accepted as suite-proven.
+    //
+    // ⭐ SO THE HONEST STATEMENT IS: `blocksDeposits()` is unit-tested at the grace boundary in both
+    // directions, the message text is asserted, and the ORDERING (after the DD post, never throwing)
+    // is asserted — but NO BYTE OF THIS HAS EVER REACHED THE MONEY CHANNEL. The first time it fires
+    // will be the first time anyone sees it, in the middle of a real outage, which is the worst
+    // moment to discover a malformed payload or an unset `WATCH_ALERT_WEBHOOK`.
+    //
+    // ⚠️ THE ONE THING THAT WOULD BE CHEAP: a manual invocation with a forced `refusingMs` past the
+    // grace against a throwaway webhook. Not built here, and its absence is the reason this comment
+    // exists rather than a claim that the dual-route is proven.
     // 🚨 A stale health artifact blocks the vault DEPOSIT since step 2, not just report sales. The
     // DD channel above still gets everything; the money channel gets ONLY the deposit-blocking case,
     // so the separation that keeps the kill-switch siren audible survives intact.

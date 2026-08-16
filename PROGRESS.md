@@ -170,6 +170,12 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
   mainnet.
 * ✅ **DONE 2026-08-16 — `capture:window` now waits for the close** and reports the duration as
   "deposits were unavailable for this long"; a window that never closes exits 1.
+* ⚠️ **THE MONEY-CHANNEL ESCALATION HAS NEVER FIRED IN PRODUCTION.** `dd-watch`'s dual-route is
+  suite-proven only: it is gated past a 20-minute grace, so firing it live means a deliberate
+  20-minute DD outage during which **deposits are blocked**. Accepted as suite-proven, deliberately —
+  but the first time it fires will be the first time anyone sees it, mid-outage, which is the worst
+  moment to discover a malformed payload or an unset `WATCH_ALERT_WEBHOOK`. ⭐ The cheap thing nobody
+  built: a manual invocation with a forced `refusingMs` past the grace against a throwaway webhook.
 * ⚠️ **Mutation hygiene:** five mutations this session reported green without applying. Every mutation
   must print whether it changed anything.
 
@@ -202,6 +208,25 @@ on **every single deploy**. So `blocksDeposits()` gates the second route on the 
   tick of margin remains, so it is the moment the risk becomes real rather than theoretical.
 * a recovery is **never** escalated — the money channel is told when risk starts, not when something
   it was never told about stops.
+
+### ⚠️⚠️ AND THE ESCALATION BRANCH IS SUITE-PROVEN ONLY — IT HAS NEVER FIRED
+
+🚨 **IT MUST NOT INHERIT THE CONFIDENCE OF THE BRANCH BESIDE IT.** The DD-channel post is exercised
+LIVE on every deploy — the post-deploy `no-record` window fires it routinely, so its delivery, its
+formatting and its webhook are continuously demonstrated. **The money-channel escalation is gated
+past a 20-minute grace, which by construction never happens on a healthy system.**
+
+⚠️ Proving it live would mean holding a **deliberate 20-minute DD outage** purely to calibrate an
+alert — and during that window **vault deposits are blocked**. Same cost class as the
+still-failing-quiet branch already accepted as suite-proven, and accepting this one the same way is
+reasonable. **Saying so is what keeps it honest.**
+
+⭐ What IS proven: `blocksDeposits()` unit-tested at the grace boundary in both directions, the
+message text asserted, the ordering (after the DD post, never throwing) asserted. ⚠️ What is NOT:
+**no byte of it has ever reached the money channel.** The first time it fires will be the first time
+anyone sees it, mid-outage — the worst moment to discover a malformed payload or an unset
+`WATCH_ALERT_WEBHOOK`. The cheap thing nobody built: a manual invocation with a forced `refusingMs`
+against a throwaway webhook.
 
 ⭐ **AND THE MESSAGE IS REFRAMED, NOT MIRRORED.** The DD text describes availability; the money text
 has to say what it MEANS where money moves, because that channel's reader is not tracking DD at all:

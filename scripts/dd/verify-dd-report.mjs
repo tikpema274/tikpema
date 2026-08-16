@@ -586,6 +586,20 @@ section("G4 🚨🚨 THE DEPOSIT PATH'S CANARY MARGIN — asserted, not just doc
     /DEPOSITS BLOCKED/.test(watchSrc) && /deposit path REFUSES/.test(watchSrc));
   check("⚠️ …and it runs AFTER the DD post, so a second-channel failure costs nothing",
     watchSrc.indexOf("blocksDeposits(judgement)") > watchSrc.indexOf("record.notify.delivered = res.ok"));
+  // ⚠️⚠️ AND THE LIMIT IS ASSERTED, NOT JUST HOPED FOR. This branch is suite-proven only: firing it
+  // live would mean a deliberate 20-minute DD outage, during which deposits are blocked. The comment
+  // saying so is load-bearing — without it the dual-route reads as proven because the branch beside
+  // it genuinely is, and that inherited confidence is exactly what this check exists to prevent.
+  check("⚠️⚠️ the escalation is recorded AT THE CODE as never having fired in production",
+    /SUITE-PROVEN ONLY/.test(watchSrc) && /NEVER FIRED IN PRODUCTION/.test(watchSrc));
+  // ⚠️ NORMALISED AND CASE-INSENSITIVE. The first version matched neither: the phrase is WRAPPED
+  // across two comment lines and the word is capitalised for emphasis. Asserting on prose means
+  // asserting on something authors reflow and re-emphasise — the same wrapping trap that produced
+  // four false alarms in the bridge panel, which is why the CLAIM here is the sentence's substance
+  // and not its typography.
+  const watchProse = watchSrc.replace(/\s+/g, " ").toLowerCase();
+  check("⭐ …and says why proving it live is not worth the cost",
+    /deliberate 20-minute dd outage/.test(watchProse) && /deposits are blocked/.test(watchProse));
 }
 
 section("H ⚠️ THE BLOCK LADDER IS UNTOUCHED");
