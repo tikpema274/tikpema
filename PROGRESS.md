@@ -106,9 +106,25 @@ table concludes those spikes are not provenance. Added, and `verify-spike-index.
   refusal path is proven by 34 real subprocesses; the ACCEPT path with a genuine Circle key is not.
 * ⏭️ `is_secret` on `KIT_KEY` is now unblocked. Hold until a key you hold is confirmed working via
   `read -rs` — after flipping there is no way back to the deployed value.
+* ✅ **`SESSION_SECRET` divergence RESOLVED — accidental in origin, deliberate in retention.** A
+  half-finished rotation is ruled out (no `env:set` in shell history — all 7 hits are `env:get` — no
+  rotating commit, and `.env.example` introduced the var once at `7c6a51a` and never changed it).
+  Designed separation is ALSO ruled out: PROGRESS.md:7511 records it as a **"Blocker"** found while
+  debugging a 401, and lists "align local/prod `SESSION_SECRET`" as one of two ways to CLOSE it —
+  nobody proposes aligning what they deliberately separated. Two values were generated
+  independently; the mismatch was found expensively, alignment was **declined**, and reading the prod
+  value at call time became the documented method. Defensible end state, rationalised rather than
+  designed.
+  🚨 **The consequence outranks the label:** that workaround is a READBACK DEPENDENCY on
+  `env:get SESSION_SECRET --context production` — the KIT_KEY shape exactly. Holding `is_secret` was
+  right for a reason not yet identified at the time; flipping it kills authenticated prod probing
+  except via a real browser login. ⚠️ And the tooling (`probe-ub-auth.mjs`, `fire-ub-spend.mjs`) was
+  untracked and **is already gone** — the method survives only as prose.
+  ⚠️ Evidence strength stated: Netlify exposes NO created/updated timestamps on env values, and
+  `~/.bash_history` is one machine and length-capped, so "no rotation" rests on shell + commit
+  history, not an authoritative log.
 * ⏭️ Still open from earlier: `CIRCLE_ENTITY_SECRET` offsite copy; the Circle-support question about
-  validating a recovery file without a reset; whether the `SESSION_SECRET` `.env`/Netlify divergence
-  is deliberate or accidental.
+  validating a recovery file without a reset.
 
 # ✅ HANDOFF RESOLVED — the deploy it was written about did NOT land; it has now been redeployed
 

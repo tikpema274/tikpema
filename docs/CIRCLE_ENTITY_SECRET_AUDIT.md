@@ -143,10 +143,55 @@ because `.env` is gitignored — the label would die with this machine — the s
 into the TRACKED `.env.example`, which is what anyone setting up or recovering actually reads.
 **A silent booby-trap became a visible one without deciding anything.**
 
-⚠️ **OPEN, NOT GUESSED AT: is the divergence DELIBERATE or ACCIDENTAL?** Dev/prod separation is good
-practice and would merely be undocumented; a half-finished rotation is a different problem. That
-answer decides whether reconciliation means CHANGING `.env` or WRITING DOWN what is already true.
-Deliberately not resolved late at night on a money path.
+### ✅ RESOLVED 2026-08-16 — accidental in ORIGIN, deliberate in RETENTION
+
+The question was whether the divergence is designed dev/prod separation or a half-finished rotation.
+**It is neither, and the repo answered it — this was already known and recorded long before the
+audit re-found it.**
+
+🚫 **A HALF-FINISHED ROTATION IS RULED OUT.** No `env:set`/`env:unset` for `SESSION_SECRET` in shell
+history (7 occurrences, every one an `env:get`), no commit rotating it, and `.env.example` introduced
+the var exactly once — `7c6a51a`, "Brick 1: session auth on money-moving endpoints" — and never
+changed it. A rotation leaves a new value and a trail; there is neither.
+
+🚫 **DESIGNED SEPARATION IS ALSO RULED OUT.** PROGRESS.md:7511 records it as a **"Blocker"**,
+discovered the hard way: a locally-minted token got 401 from prod, and "the browser-console token
+method failing earlier was **the same root cause, not an endpoint bug**." You do not discover your
+own design while debugging. The same entry then lists "**align local/prod `SESSION_SECRET`**" as one
+of two ways to CLOSE the blocker — nobody proposes aligning what they deliberately separated.
+
+⭐ **WHAT ACTUALLY HAPPENED:** two values were generated independently (both well-formed 64-char, so
+not a corrupted copy). The mismatch was found while debugging, alignment was considered and
+**declined**, and a third path was adopted instead — read the prod secret from the Netlify context
+and mint in-process, never printed, never written to disk — and documented as the standard method
+("This unblocks authenticated prod probes generally", PROGRESS.md:8984). It kept costing time
+afterwards: the `| tail -1` empty-var trap that lost three runs was a *consequence* of the workaround
+the divergence forced.
+
+**So: nobody designed it, nobody rotated it. It happened, was found expensively, assessed, and
+kept.** The end state is defensible — dev/prod secret separation IS good practice, and
+`SESSION_SECRET` being production-only on Netlify is consistent with it — but it is rationalised,
+not designed. The `DEV ONLY` label added at the `.env` line on 2026-08-16 is the first time that
+intent was written down anywhere near the value.
+
+### 🚨 THE CONSEQUENCE THAT MATTERS MORE THAN THE LABEL
+The divergence created a **readback dependency**: `netlify env:get SESSION_SECRET --context
+production` is how every authenticated prod probe mints a trusted token. **That is the KIT_KEY shape
+exactly** — a credential whose only readable copy is Netlify, with tooling that depends on reading it
+back. Holding `is_secret` on `SESSION_SECRET` therefore turns out to have been the right call for a
+reason the audit had not yet identified: flipping it kills authenticated prod probing outright,
+leaving only a real browser login (challenge→sign→verify).
+
+⚠️ **AND THE TOOLING IS ALREADY GONE.** `scripts/probe-ub-auth.mjs` and `scripts/fire-ub-spend.mjs`
+were untracked and no longer exist — the method survives only as prose in PROGRESS.md. Rebuilding it
+is a prerequisite for any future authenticated prod probe, and that rebuild should route through
+`scripts/_kit-key.mjs`-style discipline rather than re-deriving the `env:get` recipe.
+
+⚠️ **STRENGTH OF EVIDENCE, STATED:** `~/.bash_history` covers this machine only and is length-capped,
+and Netlify exposes **no created/updated timestamps** on env-var values (confirmed: every value
+returns `created_at: None`). So "no rotation" rests on shell history plus commit history, not on an
+authoritative audit log. Nothing contradicts it; it is not provable to the same standard as the
+git-history scan.
 
 ⚠️ **A CLI CONSTRAINT WORTH KNOWING:** `env:set` refuses `--context` and `--scope` together on an
 existing var. Omitting `--context` was the working form — and whether that WIDENS a production-only
