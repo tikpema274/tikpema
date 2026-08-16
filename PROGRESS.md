@@ -91,6 +91,14 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
 
 ## OTHER OPEN ITEMS
 
+* ⭐⭐ **POOL DISCOVERY IS PARKED, AND THE REASON IS ON-CHAIN, NOT A PREFERENCE.** Measured
+  2026-08-16: **no canonical Uniswap factory exists on Arc** — every canonical address has NO CODE
+  (control: Arc USDC returns 1,798 bytes, so the probe is not vacuously empty), and **48 different
+  addresses run byte-identical V3 Factory code under 48 DIFFERENT owners**. There is nothing to
+  anchor "is this pool legitimate" to. ⚠️ And the **131,327** total is the residue of a stopped bot
+  farm — **~19 pools/hour now against 45,021 in July**. ⭐ The buildable version is a POLICY SUBJECT
+  (*"evaluate this pool against your rules"*, reusing `analyze` → `evaluatePolicy`), never a browse
+  surface: a browse surface needs an authority that does not exist. Full census in the entry below.
 * 🚧 **The Polygon record** — PROVEN arrived on-chain (IRIS `complete`; Amoy receipt `0x1` at block
   43,849,013; 0.94899 USDC to the recorded recipient, matching `netPredicted` exactly) but still reads
   `mint_unconfirmed`. Past the 7-day auto-retry bound by design; **resolves when the owner opens the
@@ -160,6 +168,93 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
 ---
 
 ---
+
+## 2026-08-16 — 🚨🚨 THERE IS NO CANONICAL UNISWAP FACTORY ON ARC, AND THAT IS WHY DISCOVERY CANNOT BE BUILT HONESTLY
+
+A READ, not a build. No money, no deploy, no third party — `eth_getLogs` over chain data only.
+
+### ⭐⭐ THE FINDING: THE THING DISCOVERY WOULD ANCHOR TRUST TO DOES NOT EXIST
+
+Any pool-discovery feature has to answer *"whose factory made this pool"*, because that is the only
+cheap proxy for legitimacy available. On Arc there is no answer.
+
+* **EVERY canonical Uniswap address has NO CODE.** V3 Factory `0x1F98431c8aD98523631AE4a59f267346ea31F984`,
+  V2 Factory `0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f`, V4 PoolManager `0x000000000004444c5dc75cB358380D2e3dE08A90`,
+  plus the Base and BNB variants. All empty.
+* ⭐ **THE CONTROL PROVES THE PROBE IS NOT VACUOUSLY EMPTY** — the same `eth_getCode` against Arc's
+  USDC `0x3600…0000` returns **1,798 bytes**. Without that control, "no code anywhere" is
+  indistinguishable from a broken reader, and this file's whole thesis is that an absence must never
+  fill a result slot unchallenged.
+* 🚨 **48 DIFFERENT ADDRESSES RUN BYTE-IDENTICAL UNISWAP V3 FACTORY CODE.** Diffed against Ethereum
+  mainnet's real one: **24,535 bytes on both sides, differing in exactly 20 bytes** — the factory's
+  own embedded address — with `uniswapV3{Swap,Mint,Flash}Callback` selectors intact and an identical
+  solc-0.7.6 metadata trailer. ⚠️ **And each has a DIFFERENT `owner()`.** Forty-eight unrelated
+  parties deploying the same audited source. Genuine Uniswap CODE, zero Uniswap AUTHORITY.
+* **The largest are rebranded forks**, identified from error strings in the deployed bytecode —
+  `ArcFlowV25: FORBIDDEN` (43,762 pairs), `Apexiswap: PAIR_EXISTS`, plus Curve- and Pancake-branded.
+  `0xab6a8aab…` is ArcFlow's V3: Uniswap V3 source with the three callbacks RENAMED, same `owner()`
+  as its V2 factory and its V4 PoolManager.
+
+⚠️ **SO "WHICH FACTORY IS REAL" HAS NO ON-CHAIN ANSWER HERE**, and a UI that ranked or listed pools
+would be inventing one. That is the same shape as the accidental clean bill this repo keeps closing,
+scaled to a browse surface.
+
+### ⭐⭐ AND THE COUNT IS AN ARTIFACT, NOT A MARKET — THE ARITHMETIC IS WHAT SHOWS IT
+
+**131,327** pool-creation events sounds like a live ecosystem. Re-scanning 8h16m later found
+**+156 events — about 19 pools/hour.** July alone produced **45,021**. One factory (`0xba27c71b…`,
+genuine Uniswap V3 bytecode) made **59,620** pools in three weeks, every one USDC-paired against a
+fresh single-use token.
+
+⭐ **The bot farm has STOPPED.** The total is the residue of a burst, not a rate — and a number that
+describes a finished burst reads exactly like a number describing a thriving market. That difference
+is invisible in the total and obvious in the delta, which is why the re-scan was worth doing.
+
+### THE NUMBERS
+
+| | |
+|---|---|
+| pool-creation events, all time | **131,327** (V2 65,216 · V3 64,345 · V4 1,766) |
+| distinct factory contracts | **492** |
+| distinct tokens | 116,433 — **86.4% appear in exactly ONE pool** |
+| **USDC-paired** (`0x3600…0000`) | **62,646 (47.7%)** |
+| EURC-paired / USYC-paired | 1,126 / 6 |
+| earliest pool | block 6,535,750 — **2025-10-18T20:48:16Z** (V3, `0x23dbcec2…`) |
+| most recent pool | block 57,310,387 — **2026-08-16T15:38:00Z** (V4, `0x33c02bfb…`) |
+
+⚠️ **13,431 pools use the ZERO ADDRESS as a token side**, which Arc's own porting guide warns
+against. **`WUSDC` (`0x911b4000…`) appears in 40,205 pools** — a wrapped-native token Arc's docs say
+should not exist ("no wrapped native token on Arc and no `WUSDC`/`WETH` equivalent is needed").
+
+⭐ **CREDIBLE SUBSET** — both sides used in ≥5 pools, neither the zero address:
+**7,969 pools · 1,109 tokens · 382 USDC-paired · 192 factories.**
+
+### METHOD, AND HOW IT WAS CORROBORATED
+
+Unfiltered `eth_getLogs` topic scan over **every block, 0 → head**, HEAD pinned first so the interval
+is fixed and reproducible. 5,726 windows of 10,000 blocks, **retried internally until ZERO windows
+were unmeasured**, coverage asserted against the full window list at the end. Topic0 values computed
+with viem, not recalled. ⚠️ An earlier attempt was DISCARDED because its cross-run checkpoint file
+proved unreliable — [filtered-read-is-not-absence] applied to the scan's own bookkeeping.
+
+**Two independent instruments agree:**
+1. A separate scan run, deduped by `txHash:logIndex`, produced the identical total.
+2. Factory `0xd67f63a4…` reports `allPairsLength() = 43,762` **on-chain**; the log enumeration counts
+   **43,762** for that factory. The contract's own counter matches the event count exactly.
+
+### ⭐ WHAT THIS DECIDES
+
+Not a handful — but it does not say "build discovery" either. **131,327 pools carry no signal about
+which are legitimate, and there is no canonical factory to anchor trust to.** Listing or ranking them
+surfaces junk behind a confident UI.
+
+⭐ **THE BUILDABLE VERSION IS A POLICY SUBJECT, NOT A DISCOVERY SURFACE:** *"evaluate THIS pool
+against your rules"* — the same `analyze` → `evaluatePolicy` path pointed at a pool address. It
+reuses the foundation completed today, needs no index, no ranking, and no trust in a factory nobody
+can verify. **A browse surface needs an authority that does not exist; a policy check does not.**
+
+⚠️ The raw corpus (96MB of logs, `pools.json`, `classified.json`, `ARC_POOL_CENSUS.md`) lived only in
+a session scratchpad and will not survive. This entry is the record.
 
 ## 2026-08-16 (catalogue complete) — ⭐⭐ `pausable` AND `withdrawalDelay` DECIDED — BOTH WARN, AND ONE OF MY OWN REASONS WAS FALSE
 
