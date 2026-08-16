@@ -25,7 +25,71 @@ const esc = (s) =>
   String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
-export function discoveryPage({ method }) {
+/**
+ * ⭐⭐ THE HEALTH BANNER — WHY A PAGE THAT RENDERS DURING AN OUTAGE MUST SAY SO.
+ *
+ * The page moved AHEAD of the health gate so it stays reachable during the post-deploy refusal
+ * window (measured on prod 2026-08-16). That fix creates its own hazard: **a page that renders
+ * unchanged while the service is refusing implies the service is fine.** A reader copies the curl,
+ * runs it, gets a 503, and reasonably concludes they got the call wrong — which is worse than the
+ * bare 503 they used to get, because the bare 503 at least named what was happening.
+ *
+ * This page's entire job is "here is how to call it". If calling it RIGHT NOW would fail, that
+ * belongs on the page. Omitting it would be disclosure-by-omission on the one surface built
+ * specifically to be honest to a stranger who has no other source.
+ *
+ * ⚠️ IT SITS ABOVE THE CURL, not at the foot of the page. A caveat below the thing it qualifies is
+ * a caveat most readers never reach — they copy the command and leave.
+ *
+ * 🚨 AND IT DOES NOT PROMISE THAT WAITING HELPS UNLESS IT DOES. `selfClearing` distinguishes
+ * "the canary has not run for this build yet" (true, resolves by itself) from "a fixture actually
+ * regressed" (false, will keep failing until somebody fixes the code). Telling a stranger to retry
+ * in a few minutes when the detector is genuinely broken would be a fresh lie, printed on the
+ * honesty surface, to make an error message feel friendlier.
+ *
+ * ⚠️ NO CRON PERIOD IS QUOTED. The schedule lives in netlify.toml, outside anything this module can
+ * read, and a hardcoded "10 minutes" here would be a second source of truth that silently goes wrong
+ * the day the schedule changes — [duplicate-source-of-truth-is-the-recurring-bug] on a user-facing
+ * promise. The page says "minutes, without anyone doing anything", which stays true across a change.
+ */
+function healthBanner(health) {
+  if (!health || health.serving === true) return "";
+
+  const reason = health.reason ? `<code>${esc(health.reason)}</code>` : "<code>unknown</code>";
+  const detail = health.detail ? `<p class="sub">${esc(health.detail)}</p>` : "";
+
+  // ⚠️ COULD-NOT-TELL IS ITS OWN BANNER. It must not borrow either the reassuring wording or the
+  // alarming one — an unknown rendered as a known is the failure this whole codebase is built around.
+  if (health.serving === null) {
+    return `<div class="down">
+<b>⚠️ We could not determine whether this service is currently answering.</b>
+The command below may return <code>503</code> rather than the <code>402</code> challenge. That would
+be the service refusing, not a mistake in your call. Reason: ${reason}.
+${detail}</div>`;
+  }
+
+  if (health.selfClearing) {
+    return `<div class="down">
+<b>⚠️ This service is REFUSING right now — the command below will return <code>503</code>, not the
+<code>402</code> challenge.</b>
+Nothing is wrong with your call. The detector publishes a freshness artifact and refuses to answer
+without a current one; right now there isn't one. Reason: ${reason}.
+<b>This clears by itself, usually within minutes</b>, when the scheduled self-check next runs — you
+do not need to do anything except try again.
+${detail}</div>`;
+  }
+
+  return `<div class="down">
+<b>🚨 This service is REFUSING right now — the command below will return <code>503</code>, not the
+<code>402</code> challenge.</b>
+Nothing is wrong with your call. Reason: ${reason}.
+<b>⚠️ This will NOT clear by waiting.</b> The refusal reflects a problem with the service itself
+rather than a missing freshness check, so retrying will keep returning <code>503</code> until it is
+fixed. The service is deliberately refusing rather than answering from a detector it cannot vouch for.
+${detail}</div>`;
+}
+
+export function discoveryPage({ method, health = null }) {
   const chain = SUPPORTED_CHAINS[0];
   const curl =
     `curl -sS -X POST ${DD_RESOURCE_URL} \\\n` +
@@ -48,6 +112,11 @@ export function discoveryPage({ method }) {
         overflow-x:auto; font-size:.85rem; }
   .sub { color:#a09a92; margin:.25rem 0 0; }
   .warn { border-left:3px solid #d9a441; padding:.6rem 0 .6rem .9rem; margin:1rem 0; background:#1a170f; }
+  /* ⚠️ Visually louder than .warn and placed ABOVE the curl: it qualifies a command the reader is
+     about to copy, and a caveat under the thing it qualifies is one most readers never reach. */
+  .down { border:1px solid #7d4a2e; border-left:4px solid #e0763c; border-radius:8px;
+          padding:.85rem 1rem; margin:1.25rem 0; background:#1c120c; }
+  .down .sub { margin-top:.5rem; font-size:.85rem; }
   a { color:#e0b25c; }
   table { border-collapse:collapse; width:100%; font-size:.9rem; }
   td { padding:.35rem .6rem .35rem 0; vertical-align:top; border-bottom:1px solid #232327; }
@@ -57,7 +126,7 @@ export function discoveryPage({ method }) {
 
 <h1>On-chain due diligence, per call</h1>
 <p class="sub">You sent a <code>${esc(method)}</code>. This endpoint takes <b>POST</b> — here is how to call it.</p>
-
+${healthBanner(health)}
 <h2>Try it — this costs nothing</h2>
 <p>A POST without payment returns the <code>402</code> challenge and the full terms.</p>
 <pre>${esc(curl)}</pre>

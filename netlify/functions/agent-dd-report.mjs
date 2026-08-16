@@ -29,6 +29,8 @@
 //     mean shipping the service disabled — the correct, deliberate default — also silently removes
 //     the deposit disclosure from the app.
 //   · RETRIEVE   — redemption of a paid handle. There is no payment, so there is no handle.
+//   · DISCOVERY  — the public human-facing page telling a stranger how to buy a report. This
+//     route's only caller is our own fetch, which never asks for HTML and never needs selling to.
 //   · PAYTO      — nothing is being sold, so there is no price to quote payable to nowhere.
 //
 // ═══ 🚨 HEALTH IS NOT SKIPPED, AND IT IS UNSKIPPABLE BY CONSTRUCTION ══════════════════════════
@@ -71,7 +73,7 @@ export async function handler(event) {
     // appear here at all — assertSkipSet refuses it.
     const climbed = await runLadder({
       event,
-      skip: [RUNG.EXPOSURE, RUNG.RETRIEVE, RUNG.PAYTO],
+      skip: [RUNG.EXPOSURE, RUNG.RETRIEVE, RUNG.DISCOVERY, RUNG.PAYTO],
       deps: {},
     });
     if (climbed.done) return climbed.done;

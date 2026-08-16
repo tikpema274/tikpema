@@ -47,12 +47,103 @@ section("A ⭐⭐ ONE LADDER — the order is a single array, and skips are a cl
   // ⭐ THE ORDER ITSELF IS THE PRODUCT. Pinned so a reorder is a deliberate, reviewed act rather
   // than a diff nobody reads. Retrieve AHEAD of health is the subtle one: an already-paid report
   // must not be stranded by a canary blip that postdates its production.
-  check("⭐⭐ the pinned order: exposure → retrieve → health → method → body → address → chain → payTo",
-    LADDER.join(",") === "exposure,retrieve,health,method,body,address,chain,payTo", LADDER.join(","));
+  check("⭐⭐ the pinned order: exposure → retrieve → discovery → health → method → body → address → chain → payTo",
+    LADDER.join(",") === "exposure,retrieve,discovery,health,method,body,address,chain,payTo", LADDER.join(","));
   check("⭐ retrieve comes BEFORE health (delivery of an old report is not production of a new one)",
     LADDER.indexOf(RUNG.RETRIEVE) < LADDER.indexOf(RUNG.HEALTH));
+  // 🚨 THE 2026-08-16 PROD DEFECT, PINNED. The page is documentation, not an answer about a subject.
+  // Behind health it was unreachable during every post-deploy refusal window — exactly when a human
+  // looks. Same reasoning and same placement as RETRIEVE.
+  check("🚨 discovery comes BEFORE health (documentation is not an answer about a subject)",
+    LADDER.indexOf(RUNG.DISCOVERY) < LADDER.indexOf(RUNG.HEALTH));
+  check("⚠️ …but AFTER retrieve, so a paid redemption still wins over a marketing page",
+    LADDER.indexOf(RUNG.RETRIEVE) < LADDER.indexOf(RUNG.DISCOVERY));
   check("⭐ health comes BEFORE every request-shape rung (unverified ⇒ uniformly unavailable)",
     LADDER.indexOf(RUNG.HEALTH) < LADDER.indexOf(RUNG.METHOD));
+  check("⚠️ the JSON method refusal stays BEHIND health — only the HTML page moved",
+    LADDER.indexOf(RUNG.METHOD) > LADDER.indexOf(RUNG.HEALTH));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+section("A2 🚨 THE PAGE RENDERS DURING AN OUTAGE — AND SAYS SO");
+{
+  const { SELF_CLEARING_HEALTH } = await import("../../netlify/functions/_dd-rungs.mjs");
+  const { discoveryPage } = await import("../../netlify/functions/_dd-discovery-page.mjs");
+  const { HEALTH_REASON } = await import("../../shared/dd-canary/health.mjs");
+
+  const page = (health) => discoveryPage({ method: "GET", health });
+  const curlAt = (h) => page(h).indexOf("curl -sS");
+  const bannerAt = (h) => page(h).indexOf('class="down"');
+
+  // ⭐ SERVING: no banner at all. A permanent scare line would be its own dishonesty.
+  const up = page({ serving: true });
+  check("⭐ health OK → the page carries NO outage banner", !up.includes('class="down"'));
+  check("  …and still carries the terms it must never soften",
+    /coverage manifest, not a clean bill/i.test(up) && /does not scale with coverage/i.test(up));
+
+  // 🚨 THE CORE CLAIM: refusing → the page still renders AND names it.
+  const noRec = { serving: false, reason: HEALTH_REASON.NO_RECORD, detail: "no artifact yet", selfClearing: true };
+  const p1 = page(noRec);
+  check("🚨🚨 health REFUSING → the page still renders (it is documentation, not an answer)",
+    p1.includes("<h1>") && p1.includes("curl -sS"));
+  check("🚨🚨 …and says the service is REFUSING right now", /REFUSING right now/.test(p1));
+  check("🚨 …and warns the command below will 503, so a reader does not blame their own call",
+    /will return <code>503<\/code>/.test(p1) && /Nothing is wrong with your call/.test(p1));
+  check("⭐⭐ …and the banner is ABOVE the curl, not below it (a caveat under the command is unread)",
+    bannerAt(noRec) > 0 && bannerAt(noRec) < curlAt(noRec), `banner@${bannerAt(noRec)} curl@${curlAt(noRec)}`);
+  check("⭐ …and names the reason", new RegExp(HEALTH_REASON.NO_RECORD).test(p1));
+  check("⭐ …and says it clears by itself within minutes", /clears by itself, usually within minutes/.test(p1));
+
+  // 🚨🚨 THE REFINEMENT THAT MATTERS: not every refusal self-clears.
+  const broken = { serving: false, reason: HEALTH_REASON.NOT_PASSING, detail: "a fixture regressed", selfClearing: false };
+  const p2 = page(broken);
+  check("🚨🚨 a NOT-PASSING detector must NOT be told to just wait — that would be a fresh lie",
+    /will NOT clear by waiting/.test(p2) && !/clears by itself/.test(p2));
+  check("⭐ …and it is the louder banner", /🚨/.test(p2));
+
+  // ⭐ COULD-NOT-TELL IS ITS OWN BANNER — never borrows either wording.
+  const unknown = { serving: null, reason: "disclosure-unreadable", detail: "blobs down", selfClearing: null };
+  const p3 = page(unknown);
+  check("⭐⭐ unknown health renders an EXPLICIT unknown, not silence and not reassurance",
+    /could not determine whether this service is currently answering/i.test(p3));
+  check("  …and does not claim it clears by itself", !/clears by itself/.test(p3));
+  check("  …and does not claim it will never clear", !/will NOT clear by waiting/.test(p3));
+
+  // ⚠️ NO CRON PERIOD ANYWHERE — netlify.toml is unreadable from here and a hardcoded number would
+  // be a second source of truth that quietly goes wrong the day the schedule changes.
+  for (const h of [noRec, broken, unknown])
+    check("⚠️ the banner quotes NO cron period (it would be a duplicate source of truth)",
+      !/\b(10|ten|five|5)\s*(-|\s)?minute/i.test(page(h)));
+
+  // ⭐ THE SELF-CLEARING SET IS CLOSED AND CONSERVATIVE.
+  check("⭐⭐ only no-record and stale are self-clearing",
+    [...SELF_CLEARING_HEALTH].sort().join(",") === [HEALTH_REASON.NO_RECORD, HEALTH_REASON.STALE].sort().join(","),
+    SELF_CLEARING_HEALTH.join(","));
+  for (const r of [HEALTH_REASON.NOT_PASSING, HEALTH_REASON.VERSION_MISMATCH, HEALTH_REASON.MALFORMED,
+                   HEALTH_REASON.UNREADABLE, HEALTH_REASON.BUILD_UNRESOLVED])
+    check(`🚨 "${r}" is NOT self-clearing (waiting does not fix a broken detector)`,
+      !SELF_CLEARING_HEALTH.includes(r));
+  check("⭐ a health reason invented later is NOT self-clearing by default",
+    !SELF_CLEARING_HEALTH.includes("some-future-reason"));
+
+  // ⚠️ ESCAPED. health.detail is server-derived today, but the banner must not be an injection point.
+  const evil = page({ serving: false, reason: "x", detail: "<script>alert(1)</script>", selfClearing: true });
+  check("⚠️ the banner escapes its detail — no markup injection through health text",
+    !/<script>/.test(evil) && /&lt;script&gt;/.test(evil));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+section("A3 ⭐ healthDisclosure — never gates, never throws, never defaults to healthy");
+{
+  const { healthDisclosure } = await import("../../netlify/functions/_dd-rungs.mjs");
+  // No blobs bound in-process ⇒ the read fails. It must resolve to the UNKNOWN tri-state.
+  const d = await healthDisclosure({ headers: {} });
+  check("⭐⭐ a failed health read resolves, it does not throw (docs must survive an outage)",
+    d && typeof d === "object");
+  check("🚨🚨 …and NEVER to serving:true — could-not-tell is its own outcome",
+    d.serving !== true, `serving=${JSON.stringify(d.serving)}`);
+  check("⭐ …and selfClearing is null, not a convenient false-or-true",
+    d.serving !== false ? d.selfClearing === null : typeof d.selfClearing === "boolean");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -86,8 +177,14 @@ section("B 🚨 UNSKIPPABLE IS A THROW, NOT A COMMENT — tested by calling");
   // this whole section proves a property of a literal in a test file.
   const routeSrc = (await import("node:fs")).readFileSync("netlify/functions/agent-dd-report.mjs", "utf8");
   const declared = [...(routeSrc.match(/skip:\s*\[([^\]]*)\]/)?.[1] ?? "").matchAll(/RUNG\.(\w+)/g)].map((m) => RUNG[m[1]]);
-  check("⭐⭐ the in-app route's ACTUAL skip list is valid and health-free",
-    declared.length === 3 && !!assertSkipSet(declared) && !declared.includes(RUNG.HEALTH), declared.join(","));
+  // ⚠️ ASSERT THE PROPERTY, NOT THE COUNT. An earlier version pinned `length === 3` and went red the
+  // moment a legitimate fourth skip was added — a test that fails on correct change teaches people
+  // to edit the test, which is how a real guarantee gets weakened by a routine diff.
+  check("⭐⭐ the in-app route's ACTUAL skip list parses, validates, and is health-free",
+    declared.length > 0 && declared.every(Boolean) && !!assertSkipSet(declared) &&
+    !declared.includes(RUNG.HEALTH), declared.join(","));
+  check("🚨 …and every UNSKIPPABLE rung is absent from it",
+    UNSKIPPABLE.every((r) => !declared.includes(r)));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════

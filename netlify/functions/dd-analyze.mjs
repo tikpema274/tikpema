@@ -59,7 +59,6 @@ import {
 } from "./_dd-x402.mjs";
 import {
   SUPPORTED_CHAINS, DD_RESOURCE_URL, DD_OPENAPI_URL, DD_SAMPLE_ADDRESS, DD_SAMPLE_ADDRESS_IS,
-  wantsHtml,
 } from "./_dd-descriptor.mjs";
 import { discoveryPage } from "./_dd-discovery-page.mjs";
 // ⭐⭐ THE LADDER IS NOT DEFINED HERE ANY MORE — see _dd-rungs.mjs. This handler climbs the SAME
@@ -125,8 +124,9 @@ export async function handler(event) {
     // now live in ONE array that the in-app report route climbs too, so the two cannot drift into
     // checking different things while both keep returning well-formed reports.
     //
-    // ⚠️ The discovery decoration on a non-POST is passed in rather than moved: the REFUSAL is
-    // shared, the marketing surface hung off it is this endpoint's alone. See decorateMethodRefusal.
+    // ⚠️ The DISCOVERY rung renders the human page and sits AHEAD of health; the JSON `howToCall`
+    // decoration stays behind it. Both surfaces are this endpoint's alone and are passed in as deps,
+    // so the shared ladder owns the ORDER while this file owns what it hangs off each refusal.
     const climbed = await runLadder({
       event,
       skip: [],
@@ -137,21 +137,13 @@ export async function handler(event) {
           if (!r.ok) console.error(`[dd-analyze ${correlationId}] payTo unresolved: ${r.reason}`);
           return r;
         },
-        decorateMethodRefusal: (refusal, ev) => {
-          // ═══ 🚨 CONTENT NEGOTIATION — JSON IS THE DEFAULT, ALWAYS ═══════════════════════════
-          // A human gets a page; a machine gets the JSON refusal UNCHANGED. The failure that matters
-          // is the reverse: serving HTML to a client expecting data is exactly what `readJson` was
-          // written to catch. So HTML requires an EXPLICIT `text/html`, and `*/*` (curl's default), an
-          // absent header, and anything unparseable all fall through to JSON. See wantsHtml().
-          // ⚠️ THE STATUS STAYS 405 for both. The method IS unsupported; a 200 would be a nicer lie,
-          // and browsers render the body regardless.
-          if (wantsHtml(ev.headers ?? {})) {
-            return {
-              statusCode: 405,
-              headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
-              body: discoveryPage({ method: ev.httpMethod }),
-            };
-          }
+        // ⭐⭐ THE HUMAN PAGE IS NO LONGER RENDERED HERE. It moved to the DISCOVERY rung, which sits
+        // AHEAD of health — documentation is not an answer about a subject, and behind health it was
+        // unreachable during every post-deploy refusal window (measured on prod 2026-08-16).
+        // ⚠️ Only the HTML branch moved. The JSON refusal below still lives behind health, because a
+        // report about a request belongs under the same gate as any other report.
+        discoveryPage,
+        decorateMethodRefusal: (refusal) => {
           // ═══ ⭐ THE DISCOVERY GAP ══════════════════════════════════════════════════════════
           // A refusal that says what was wrong and nothing about how to be right leaves asking
           // someone as the only route to a working call. `howToCall` closes that with one field.

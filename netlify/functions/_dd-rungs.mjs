@@ -33,8 +33,8 @@ import { randomUUID } from "node:crypto";
 import { json } from "./_arc.mjs";
 import { exposureState } from "./_dd-exposure.mjs";
 import { readHealth } from "./_dd-health.mjs";
-import { codeIdentityForEvent, evaluateHealth } from "../../shared/dd-canary/health.mjs";
-import { SUPPORTED_CHAINS } from "./_dd-descriptor.mjs";
+import { codeIdentityForEvent, evaluateHealth, HEALTH_REASON } from "../../shared/dd-canary/health.mjs";
+import { SUPPORTED_CHAINS, wantsHtml } from "./_dd-descriptor.mjs";
 import { chainClient } from "../../shared/dd/client.mjs";
 import { quorumClient } from "../../shared/onchain-analyze/quorum.mjs";
 import { ARC_QUORUM_ENDPOINTS } from "../../shared/onchain-analyze/endpoints.mjs";
@@ -51,6 +51,7 @@ export const MAX_BODY_BYTES = 4096;
 export const RUNG = Object.freeze({
   EXPOSURE: "exposure",
   RETRIEVE: "retrieve",
+  DISCOVERY: "discovery",
   HEALTH: "health",
   METHOD: "method",
   BODY: "body",
@@ -58,6 +59,26 @@ export const RUNG = Object.freeze({
   CHAIN: "chain",
   PAYTO: "payTo",
 });
+
+/**
+ * ⭐⭐ WHICH HEALTH REFUSALS CLEAR BY THEMSELVES — AND WHICH EMPHATICALLY DO NOT.
+ *
+ * The discovery page tells a stranger whether waiting will help. Getting this wrong in the
+ * reassuring direction would put a fresh lie on the one surface built specifically to be honest:
+ * "try again in a few minutes" is actively misleading when the detector has FAILED ITS OWN FIXTURES
+ * and will keep failing until somebody fixes the code.
+ *
+ *   · NO_RECORD — the canary has not run for THIS build yet. Guaranteed after every deploy, and the
+ *     scheduled sweep resolves it with nobody doing anything.
+ *   · STALE     — the artifact aged past its TTL. The next scheduled run refreshes it.
+ *
+ * ⚠️ EVERYTHING ELSE IS EXCLUDED, and each for its own reason: NOT_PASSING means a fixture actually
+ * regressed; VERSION_MISMATCH and BUILD_UNRESOLVED mean the identity does not line up; MALFORMED
+ * means the artifact is corrupt; UNREADABLE means we could not see. None of those is a waiting
+ * problem. ⭐ CLOSED SET, tested by enumeration — a health reason added later is NOT self-clearing
+ * until somebody decides it is, which is the safe direction for a page that tells people what to do.
+ */
+export const SELF_CLEARING_HEALTH = Object.freeze([HEALTH_REASON.NO_RECORD, HEALTH_REASON.STALE]);
 
 /**
  * ⭐⭐ THE ORDER. Changing this array changes both entry points at once, which is the entire point.
@@ -68,7 +89,20 @@ export const RUNG = Object.freeze({
  *   · RETRIEVE second — behind exposure (no paid callers if never published), but AHEAD of health,
  *     because an already-paid report was produced when the detector was known good and must not be
  *     stranded by a later canary blip. The health gate guards PRODUCTION, not DELIVERY.
- *   · HEALTH third    — before any validation, so an unverified service is uniformly UNAVAILABLE
+ *   · DISCOVERY third — ⭐⭐ AHEAD OF HEALTH FOR EXACTLY THE REASON RETRIEVE IS. The page is not an
+ *     answer about a subject; it is DOCUMENTATION. The health gate guards the production of new
+ *     answers, and a page explaining how to call the service is not one.
+ *
+ *     🚨 THE DEFECT THIS FIXES, MEASURED ON PROD 2026-08-16: with the page behind health, a browser
+ *     sending `Accept: text/html` during the post-deploy refusal window got `application/json` 503
+ *     `service-unverified` instead of the page. That window is up to the canary period and lands
+ *     EXACTLY when a human is most likely to look — right after a change. They got a message about
+ *     a detector instead of the one page that tells them how to call the thing.
+ *
+ *     ⚠️ HTML ONLY. A non-POST asking for JSON still falls through to the METHOD rung BEHIND health,
+ *     because that response is a report about a request and belongs under the same gate as any
+ *     other. Only the human-facing documentation moves.
+ *   · HEALTH fourth   — before any validation, so an unverified service is uniformly UNAVAILABLE
  *     rather than selectively degraded.
  *   · then the request-shape rungs, cheapest first.
  *   · PAYTO last of the gates — never quote a price payable to nowhere.
@@ -78,7 +112,8 @@ export const RUNG = Object.freeze({
  * ladder ends where the paths legitimately diverge; everything above it is shared by construction.
  */
 export const LADDER = Object.freeze([
-  RUNG.EXPOSURE, RUNG.RETRIEVE, RUNG.HEALTH, RUNG.METHOD, RUNG.BODY, RUNG.ADDRESS, RUNG.CHAIN, RUNG.PAYTO,
+  RUNG.EXPOSURE, RUNG.RETRIEVE, RUNG.DISCOVERY, RUNG.HEALTH,
+  RUNG.METHOD, RUNG.BODY, RUNG.ADDRESS, RUNG.CHAIN, RUNG.PAYTO,
 ]);
 
 /**
@@ -126,6 +161,54 @@ export function refusalReport({ address = null, chainName = null, chainId = null
     // into an unmetered signing oracle over attacker-chosen bytes.
     attestation: unsignedAttestation("input rejected before analysis — there is no on-chain claim to attest"),
   });
+}
+
+/**
+ * ⭐⭐ THE SAME HEALTH READ, USED FOR DISCLOSURE INSTEAD OF FOR GATING.
+ *
+ * The discovery page now renders AHEAD of the health gate, which creates a new hazard the move
+ * itself does not solve: **a page served while health is down must not imply the service is up.**
+ * If it rendered unchanged, a reader would copy the curl, run it, get a 503, and reasonably conclude
+ * they had done something wrong. That is worse than the bare 503 they used to get, because the bare
+ * 503 at least said what was happening. Rendering unchanged would be disclosure-by-omission on the
+ * one surface built specifically to be honest to a stranger.
+ *
+ * ⭐ SAME DISCIPLINE AS `POLICY_CEILING` RIDING ON EVERY POLICY RESULT: the constraint travels WITH
+ * the artifact rather than depending on the reader already knowing it.
+ *
+ * ⚠️ IT NEVER GATES AND IT NEVER THROWS. This is a statement attached to a page, not a decision. A
+ * failure to read health must not take the documentation down with it — the page's whole value is
+ * being available when other things are not.
+ *
+ * 🚨 AND IT NEVER RESOLVES TO "HEALTHY" ON FAILURE. `serving` is a TRI-STATE: `true`, `false`, or
+ * `null` for could-not-tell, and `null` renders as an explicit unknown. A catch that returned
+ * `{serving: true}` would be [absence-must-never-read-as-safe] on the honesty surface itself.
+ *
+ * @returns {Promise<{serving: boolean|null, reason: string|null, detail: string|null,
+ *                    selfClearing: boolean|null}>}
+ */
+export async function healthDisclosure(event) {
+  try {
+    const identity = codeIdentityForEvent(event, { schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS });
+    const { record, readable } = await readHealth(identity);
+    const h = evaluateHealth({ record, readable, now: Date.now(), expect: identity });
+    if (h.serve) return { serving: true, reason: null, detail: null, selfClearing: null };
+    return {
+      serving: false,
+      reason: h.reason ?? null,
+      detail: h.detail ?? null,
+      // ⚠️ MEMBERSHIP IN A CLOSED SET, never a truthiness test. An unrecognised reason is NOT
+      // self-clearing, so a new health outcome cannot inherit "just wait" by default.
+      selfClearing: SELF_CLEARING_HEALTH.includes(h.reason),
+    };
+  } catch (e) {
+    return {
+      serving: null,
+      reason: "disclosure-unreadable",
+      detail: `could not determine the service's current health: ${String(e?.message ?? e)}`,
+      selfClearing: null,
+    };
+  }
 }
 
 /**
@@ -200,6 +283,38 @@ export async function runLadder({ event, skip = [], deps = {} }) {
       const q = event.queryStringParameters || {};
       const handle = q.handle || (event.headers || {})["x-payment-handle"];
       if (handle) return { done: await deps.retrieve(handle), ran };
+      continue;
+    }
+
+    // ── ⭐⭐ DISCOVERY: THE DOCUMENTATION, WHICH IS NOT AN ANSWER ABOUT A SUBJECT ───────────────
+    // Ahead of health for the same reason RETRIEVE is: the health gate guards the PRODUCTION of new
+    // answers. A page saying how to call the service is not one.
+    //
+    // ⚠️ HTML ONLY — `wantsHtml` requires an EXPLICIT `text/html`, so `*/*` (curl's default), an
+    // absent header and anything unparseable all fall through to the METHOD rung behind health.
+    // Machines are unaffected by this move; only humans are.
+    //
+    // ⭐ THE HEALTH DISCLOSURE RIDES ALONG. See healthDisclosure(): the page renders whether or not
+    // the service is serving, and SAYS WHICH — a page that looked identical during a refusal window
+    // would send a reader to a curl that 503s and let them conclude they got it wrong.
+    if (rung === RUNG.DISCOVERY) {
+      if (event.httpMethod !== "POST" && wantsHtml(event.headers ?? {})) {
+        if (typeof deps.discoveryPage !== "function") {
+          throw new Error("runLadder(): rung `discovery` is not skipped but no deps.discoveryPage was supplied");
+        }
+        const health = await healthDisclosure(event);
+        return {
+          done: {
+            statusCode: 405,
+            // ⚠️ THE STATUS STAYS 405 whatever health says. The METHOD is what is unsupported; a 503
+            // here would describe the service when the sentence being answered is about the request,
+            // and a 200 would be a nicer lie. The banner carries the health fact; the code does not.
+            headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+            body: deps.discoveryPage({ method: event.httpMethod, health }),
+          },
+          ran,
+        };
+      }
       continue;
     }
 

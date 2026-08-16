@@ -110,25 +110,89 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
   **route with no reference** is what this session just shipped. One audit covering one of them is
   **half a guard**. ⚠️ A dangling redirect is the cheaper failure — it 404s nobody — but it is also
   the one that lets a route be believed shipped when no code path reaches it.
-* ⭐ **THE DISCOVERY PAGE IS UNREACHABLE DURING EVERY POST-DEPLOY REFUSAL WINDOW — and that is a
-  DEFECT, not a confirmation of the order.** Found on the 2026-08-16 draft: a **GET** to
-  `/api/dd-analyze` returned `service-unverified` JSON instead of the discovery page, because
-  **health (rung 0) precedes method (rung 1)**. The window is up to the `*/10` canary period after
-  every deploy — ⚠️ **precisely when a human is most likely to be looking, right after a change.**
-  They get a 503 about a detector instead of the page that tells them how to call the thing.
-  ⭐ **THE CODEBASE ALREADY CONTAINS THE PRINCIPLE, one rung above:** `retrieve` sits at −0.5 with
-  *"the health gate guards the PRODUCTION of new answers, not the delivery of old ones."* The
-  discovery page is not an answer about a subject either — **it is documentation**. Same reasoning,
-  same placement: the `wantsHtml` branch belongs ahead of HEALTH.
-  ⚠️ Scope: move ONLY the HTML/`howToCall` branch. The `service-unverified` refusal for a real POST
-  must stay exactly where it is — that one IS a claim about a subject.
-  A small move in a frozen array, with the justification already written in the file.
+* ✅ **DONE 2026-08-16 — the discovery page moved ahead of health.** It was unreachable during every
+  post-deploy refusal window (measured on prod: a `text/html` GET got `application/json` 503). Fixed
+  as `RUNG.DISCOVERY`, placed between RETRIEVE and HEALTH for the reason already written one rung
+  above — documentation is not an answer about a subject. HTML only; the JSON `howToCall` refusal
+  stays behind health. See the entry below for the honesty problem the move created and how the
+  banner solves it.
 * ⚠️ **Mutation hygiene:** five mutations this session reported green without applying. Every mutation
   must print whether it changed anything.
 
 ---
 
 ---
+
+## 2026-08-16 (later) — ⭐⭐ THE DOCUMENTATION MOVED AHEAD OF THE HEALTH GATE — AND HAD TO LEARN TO SAY THE SERVICE IS DOWN
+
+Fixes the defect the earlier draft found: with the discovery page behind health, a browser sending
+`Accept: text/html` during the post-deploy refusal window got `application/json` 503
+`service-unverified` instead of the page. Measured on PROD, not theorised. New `RUNG.DISCOVERY`
+sits between RETRIEVE and HEALTH.
+
+⭐ **THE ARGUMENT WAS ALREADY IN THE FILE, ONE RUNG ABOVE.** RETRIEVE sits ahead of health because
+*"the health gate guards the PRODUCTION of new answers, not the delivery of old ones."* A page
+explaining how to call the service is not an answer about a subject either — **it is documentation**.
+Same reasoning, same placement.
+
+⚠️ **HTML ONLY.** A non-POST asking for JSON still falls through to the METHOD rung BEHIND health,
+because that response is a report about a request and belongs under the same gate as every other
+report. `wantsHtml` requires an explicit `text/html`, so `*/*` (curl's default) and an absent header
+are unaffected. **Machines see no change; only humans do.**
+
+### 🚨🚨 THE FIX CREATED ITS OWN HAZARD, AND IT IS WORSE THAN WHAT IT REPLACED
+
+**A page that renders unchanged while the service is refusing implies the service is fine.** A reader
+copies the curl, runs it, gets a 503, and reasonably concludes THEY got the call wrong — which is
+worse than the bare 503 they used to get, because the bare 503 at least named what was happening.
+
+⭐ The page's entire job is *"here is how to call it"*. **If calling it right now would fail, that
+belongs on the page.** Omitting it is disclosure-by-omission on the one surface built specifically to
+be honest to a stranger who has no other source. ⭐ Same discipline as `POLICY_CEILING` riding on
+every policy result: **the constraint travels WITH the artifact** instead of depending on the reader
+already knowing it.
+
+So the page always renders, and carries a banner **ABOVE the curl** — a caveat placed under the
+command it qualifies is one most readers never reach, because they copy and leave.
+
+### ⭐⭐ AND NOT EVERY REFUSAL CLEARS BY WAITING — THE SPLIT THAT KEEPS THE BANNER HONEST
+
+The obvious banner says "try again in a few minutes". **That is a fresh lie whenever the detector has
+FAILED ITS OWN FIXTURES**, and it would be printed on the honesty surface to make an error message
+feel friendlier. `SELF_CLEARING_HEALTH` is a **closed set of exactly two**:
+
+| | |
+|---|---|
+| `no-record` · `stale` | ✅ resolves by itself — the scheduled sweep refreshes the artifact |
+| `not-passing` · `version-mismatch` · `malformed` · `unreadable` · `build-unresolved` | 🚨 **NOT** a waiting problem; the banner says so and says it louder |
+
+⭐ **A health reason invented later is NOT self-clearing until somebody decides it is** — the safe
+direction for a page that tells strangers what to do. Asserted by enumeration.
+
+⭐ **THREE STATES, NOT TWO.** `healthDisclosure()` returns `serving: true | false | null`, never
+gates, and **never throws** — the docs must survive the outage they are describing. 🚨 The catch
+resolves to `null`, **never to `true`**: a reassuring default there would be
+[absence-must-never-read-as-safe] on the honesty surface itself. `null` renders its own explicit
+"we could not determine" banner that borrows neither the reassuring nor the alarming wording.
+
+⚠️ **NO CRON PERIOD IS QUOTED ANYWHERE ON THE PAGE.** The schedule lives in `netlify.toml`, outside
+anything the page module can read, so a hardcoded "10 minutes" would be a second source of truth that
+goes wrong silently the day the schedule changes — [duplicate-source-of-truth-is-the-recurring-bug]
+on a **user-facing promise**. "Minutes, without anyone doing anything" stays true across a change.
+The suite greps for a quoted period and fails if one appears.
+
+### ALSO
+
+* ⚠️ **A test that pinned `skip.length === 3` went red on a legitimate fourth skip.** Rewritten to
+  assert the PROPERTY (parses, validates, health-free, no UNSKIPPABLE member). ⭐ A test that fails
+  on correct change teaches people to edit the test, which is how a real guarantee gets weakened by
+  a routine diff.
+* The banner escapes `health.detail` — server-derived today, but a page we serve must not become an
+  injection point through text that might later carry env-derived content.
+
+`verify-dd-report.mjs` **98/0** (was 67). `test:all` exit 0, tsc + build clean.
+Files: `_dd-rungs.mjs` (`RUNG.DISCOVERY`, `SELF_CLEARING_HEALTH`, `healthDisclosure`),
+`_dd-discovery-page.mjs` (`healthBanner`), `dd-analyze.mjs`, `agent-dd-report.mjs` (skips discovery).
 
 ## 2026-08-16 — ⭐⭐ `evaluatePolicy` HAS A CONSUMER, AND THE LADDER IT CLIMBS EXISTS ONCE
 
