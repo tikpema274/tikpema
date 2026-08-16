@@ -8,6 +8,7 @@ type UnifiedWallet = ReturnType<typeof useWallet>;
 const VAULT_KEY = "xylo-usdc";
 
 import { diffDisclosure, bps, type DisclosureDelta } from "../lib/disclosureDiff";
+import DdReportCard from "./DdReportCard";
 
 const shortAddr = (a?: string | null) => (a && a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a || "—");
 
@@ -43,6 +44,10 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const amountValid = Number.isFinite(amountNum) && amountNum > 0;
 
   const inspection = insp?.inspection ?? null;
+  // ⭐ THE ADDRESS COMES FROM THE SERVER'S OWN RESOLUTION, never re-typed here. A second literal
+  // would be a duplicate source of truth on the one field that decides WHAT was audited — the
+  // card would happily report on a different contract than the one the gate inspected.
+  const vaultAddress: string | null = insp?.vault?.address ?? null;
   const level: string | null = inspection?.verdict?.level ?? null;
   const warns: Array<{ code: string; detail: string }> = inspection?.verdict?.warns ?? [];
   const blocks: Array<{ code: string; detail: string }> = inspection?.verdict?.blocks ?? [];
@@ -307,6 +312,18 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
             </label>
           )}
         </div>
+      )}
+
+      {/* ── ⭐ DUE DILIGENCE — the same signed report sold to outside callers ──────────────
+          Rendered only AFTER an inspection, and deliberately BETWEEN the disclosure and the
+          deposit: it is a second, independent reading of the same contract, and it belongs where
+          the user is deciding rather than after they have committed.
+
+          ⚠️ IT DOES NOT GATE THE DEPOSIT AND MUST NOT LOOK LIKE IT DOES. The deposit gate is the
+          inspection + acknowledgement below, unchanged. The policy verdict here is display-only
+          (client-supplied rules, no server store yet), and the card says so in those words. */}
+      {vaultAddress && (
+        <DdReportCard wallet={w} address={vaultAddress} label={insp?.vault?.label} />
       )}
 
       {/* ── STEP 2 · DEPOSIT ─────────────────────────────────────────────── */}

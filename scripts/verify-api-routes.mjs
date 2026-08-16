@@ -54,8 +54,10 @@ const NO_FRONTEND_CALLER = new Map([
   ["/api/agent-status", "read-only operator diagnostic (wallet + identity), curled by hand."],
   ["/api/agent-parameters", "read-only cap/parameter dump for operators and smoke checks."],
   ["/api/agent-ub-spend", "agent-facing spend endpoint, exercised by scripts/smoke-endpoints.mjs rather than by a panel."],
-  // ── 🚧 GENUINELY NOT WIRED YET — this is a TODO, not an exemption ──
-  ["/api/agent-dd-report", "🚧 BUILT 2026-08-16, NO UI CONSUMER YET. The in-app DD report route awaits its card. ⚠️ This entry is a placeholder for work in flight and MUST be deleted once the panel calls it — leaving it would hide the exact class this reverse audit exists to catch."],
+  // ⭐ `/api/agent-dd-report` WAS HERE and is deliberately gone: DdReportCard now calls it, so the
+  // exemption's own claim ("nothing calls this") became false and the suite FAILED on it — the
+  // expires-when-contradicted check doing its job on the very entry it was written for. The route is
+  // now covered by the ordinary referenced→redirect pass like every other live path.
 ]);
 
 const SRC = "src";
@@ -176,8 +178,11 @@ t("⭐⭐ /api/agent-dd-report — the route with no caller that this reverse au
   // caller, and the one-directional suite passed. Whichever way it is resolved — a card that calls
   // it, or the redirect removed — this assertion must be updated deliberately rather than drift.
   assert.ok(declared.has("/api/agent-dd-report"), "the in-app DD report route lost its redirect");
-  assert.ok(referenced.has("/api/agent-dd-report") || NO_FRONTEND_CALLER.has("/api/agent-dd-report"),
-    "it is neither called nor exempted — decide which");
+  // ⭐ IT NOW HAS A REAL CALLER, and that is the resolution this assertion was waiting for. It
+  // deliberately does NOT accept the exemption any more: re-adding one would mean the card stopped
+  // calling it, which is precisely the regression worth failing on.
+  assert.ok(referenced.has("/api/agent-dd-report"),
+    "nothing in src/ calls it any more — the card regressed, or the route should be deleted");
 });
 
 console.log(`\n  audited ${referenced.size} referenced paths against ${declared.size} redirects`);

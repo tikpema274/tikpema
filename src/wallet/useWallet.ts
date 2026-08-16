@@ -471,6 +471,45 @@ export function useWallet() {
     [ensureSession]
   );
 
+  // ── DD REPORT (read-only) ──────────────────────────────────────────────────
+  // The SAME signed due-diligence report /api/dd-analyze sells over x402, session-authed instead of
+  // paid, plus the caller's standing policy evaluated against it.
+  //
+  // ⚠️ THE FULL REPORT COMES BACK AND IS RETURNED UNTOUCHED. No projection here — the card renders
+  // less, the wire carries everything. A client-side trim would be the "lite report" the server
+  // deliberately refuses to produce, reintroduced one layer up: the moment the UI reads from a
+  // narrower object than the buyer receives, the policy verdict stops being about a verifiable
+  // artifact.
+  //
+  // ⚠️ POLICY IS DISPLAY-ONLY on this cut and the response says so (`policy.authority`). It gates
+  // nothing, here or on the server.
+  const ddReport = useCallback(
+    async (address: string, policy?: unknown) => {
+      const token = await ensureSession();
+      const r = await fetch("/api/agent-dd-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ address, chain: "arc-testnet", ...(policy ? { policy } : {}) }),
+      });
+      const data = await readJson(r);
+      // ⚠️ A REFUSAL IS A REPORT, NOT AN ERROR — the server's whole contract. A 503
+      // `service-unverified` carries a full schema-valid body, so throwing away the payload on
+      // !r.ok would discard exactly the disclosure the caller needs. Only a genuinely bodiless
+      // failure becomes a throw.
+      if (!r.ok && !data?.report && !data?.refusal) {
+        throw new Error(data?.error || "Could not load the due-diligence report");
+      }
+      return data as {
+        subject?: { address: string; chain: string };
+        report?: any;
+        policy?: any;
+        verifiability?: { attestation: string | null; note: string };
+        refusal?: { reason: string; detail: string };
+      };
+    },
+    [ensureSession]
+  );
+
   // Deposit USDC into an allowlisted vault. `ackToken` is REQUIRED whenever the vault raised a
   // WARN — the server re-inspects and refuses if it is missing/mismatched (fail-closed), so this
   // only forwards what the user acknowledged; it cannot bypass the gate.
@@ -589,6 +628,7 @@ export function useWallet() {
     checkBridgeStatus,
     listBridgeReceipts,
     inspectVault,
+    ddReport,
     depositToVault,
     vaultShareBalance,
     withdrawFromVault,

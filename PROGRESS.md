@@ -121,7 +121,12 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
   **route with no reference** is what this session just shipped. One audit covering one of them is
   **half a guard**. ⚠️ A dangling redirect is the cheaper failure — it 404s nobody — but it is also
   the one that lets a route be believed shipped when no code path reaches it.
-* 🚧 **THE BANNER IS UNWITNESSED IN PRODUCTION — and the capture is now ARMED, not scheduled.**
+* 🚧 **THE BANNER IS STILL UNWITNESSED — armed, and NOT fired by either of the last two changes.**
+  ⚠️ Neither the reverse route audit (`scripts/`) nor the DD card (`src/`) rotates `ddTree`, so
+  neither opened a window. Measured both times rather than assumed. ⭐ Only a change under
+  `shared/onchain-*`, `shared/dd*`, or the listed `netlify/functions` DD files will fire it — the
+  likeliest genuine candidate is step 2 of the warn migration touching the report shape.
+* 🚧 **(original note) THE BANNER IS UNWITNESSED IN PRODUCTION — the capture is ARMED, not scheduled.**
   `verify-dd-report.mjs` proves the banner in-process across all three health states, but the
   DISCOVERY rung actually threading `healthDisclosure()` into the page ON A REAL DEPLOY has never
   been seen. ⚠️ **It is observable only during the post-deploy refusal window**, which opens when a
@@ -146,6 +151,69 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
 ---
 
 ---
+
+## 2026-08-16 (later still) — ⭐ THE CARD — `evaluatePolicy` NOW HAS A UI CONSUMER, AND THE TWO "COVERAGE" NUMBERS ARE PULLED APART
+
+`DdReportCard` renders inside the vault panel, BETWEEN the disclosure and the deposit: a second,
+independent reading of the same contract, placed where the user is still deciding.
+
+⚠️ **IT DOES NOT GATE THE DEPOSIT AND SAYS SO IN WORDS A USER READS.** The gate remains the vault
+inspection + acknowledgement, untouched. The policy is client-supplied, so `authority` is
+`display-only` and the card prints *"This verdict does not gate anything."*
+
+### 🚨 THE OWNER'S CATCH: TWO CORRECT NUMBERS, ONE WORD
+
+The prod response carries both, and they measure different things:
+
+| field | value | what it counts |
+|---|---|---|
+| `policy.coverage` | **9 of 9** | POWER GROUPS — ⭐ **what `coverageThreshold` applies to** |
+| `report.coverage.totals` | **13** | every CHECK RUN — the nine groups PLUS shape detection and the owner reads |
+
+⚠️ A reader who takes the threshold to apply to 13 concludes the rules demanded far less of the
+catalogue than they did. ⭐ So they are labelled **at the point of display** — "Power groups checked"
+vs "Individual checks run" — never in a legend, which is a second place to read and therefore a
+second place to not read. The word "coverage" appears **nowhere** in the rendered card, and the suite
+asserts its absence.
+
+### ⭐⭐ THE COPY SUITE ASSERTS ORDER, NOT JUST PRESENCE
+
+`verify-dd-card-copy.tsx` (22/0) renders `DdReportResult` with react-dom/server and reads TEXT.
+The threshold sentence must sit **under** the 9-of-9 number and the "does not apply" disclaimer
+**under** the 13 — ⚠️ a regex on either sentence alone passes with them swapped, which IS the
+confusion. Layout is the claim, and layout is exactly what source regexes cannot see.
+
+⭐ **A PURE COMPONENT, NOT A TEST-ONLY PROP.** `DdReportResult` was extracted so the suite renders the
+REAL path; an `initialData` seam would exist only for tests and therefore be exercised by nobody.
+
+⚠️ **AND THE SUITE'S FIRST VERSION WAS WRONG IN AN INSTRUCTIVE WAY.** It asserted the word "safe"
+appears nowhere and went red — because `POLICY_CEILING` itself says *"never that this contract is
+safe"*, the sentence we most want rendered. A blanket ban on a word would have forced the ceiling to
+be TRIMMED to satisfy a test written to guard the ceiling. ⭐ The claim is narrower and truer: the
+VERDICT region must not say it; the ceiling must.
+
+### ⭐ THE REVERSE ROUTE AUDIT CAUGHT ITS OWN STALE ENTRY
+
+Wiring the card made `NO_FRONTEND_CALLER["/api/agent-dd-report"]` false, and `gate:routes` **failed**
+on the expires-when-contradicted check — the exemption-rot guard firing on the very entry it was
+written for, one commit after being written. Entry deleted; the route is now covered by the ordinary
+referenced→redirect pass. Exemptions 7 → 6.
+
+### ⚠️ AND IT STILL DOES NOT OPEN A REFUSAL WINDOW — MY PREDICTION WAS WRONG
+
+I expected the card to touch `agent-dd-report.mjs` ("a card wants a vault key, probably a shaped
+response") and so rotate `ddTree`. **It did not need to.** The card passes the address the SERVER
+already resolved (`insp.vault.address`) rather than re-typing a literal, so no server change was
+required. Measured, not assumed: `tree` c024addde35c **ROTATED** (real UI ships) while `ddTree`
+2848a3d6fdea is **UNCHANGED**.
+
+⭐ **THE RIGHT CALL WAS NOT TO TOUCH THE SERVER ANYWAY.** Editing a DD-surface file to make a test
+fire is inventing work to satisfy an instrument, which is the failure mode this repo keeps naming
+from the other direction. `capture:window` stays armed and unfired.
+
+Files: new `src/components/DdReportCard.tsx`, `scripts/verify-dd-card-copy.tsx`; modified
+`src/wallet/useWallet.ts` (`ddReport`), `src/components/VaultPanel.tsx`, `scripts/verify-api-routes.mjs`,
+`package.json` (`test:ddcopy`). `test:all` exit 0, tsc + build clean.
 
 ## 2026-08-16 (later) — ⭐⭐ THE DOCUMENTATION MOVED AHEAD OF THE HEALTH GATE — AND HAD TO LEARN TO SAY THE SERVICE IS DOWN
 
