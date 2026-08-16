@@ -152,6 +152,79 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
 
 ---
 
+## 2026-08-16 (step 2) — ⭐⭐ THE DEPOSIT GATE NOW READS THE DD REPORT, AND THE SEVEN WARNS ARE DELETED
+
+The `deleteWhen` condition written at the code — *"gateDeposit reads holder/holderKind from the DD
+report instead of inspection.verdict.warns"* — is met, so the marking and the warns both go.
+`inspectVault` no longer derives any of the seven; `applyReportDisclosure(inspection, report)` does,
+from the same artifact the paid endpoint sells and the card shows. **The card and the deposit gate
+can no longer disagree about what a vault's owner can do: they read one object.**
+
+⚠️ `performance-fee` stays — a fee VALUE the report never reads, no replacement, never had a
+`deleteWhen`. The BLOCK ladder is untouched.
+
+### 🚨🚨 WHAT MAKES DELETING THEM SAFE: THE GATE REFUSES A RAW INSPECTION
+
+An inspection that never went through `applyReportDisclosure` carries none of the seven, so its
+`warns` look reassuringly SHORT — a deposit sailing through on a disclosure that omits every power
+the owner holds. That is the silent-consent removal the retain-and-mark ordering was built to avoid,
+arriving by a different door.
+
+⭐ So `gateDeposit` requires `disclosure.source === "report"` and BLOCKS otherwise. **Fail-closed by
+construction, not by call sites remembering** — there is no path from a raw inspection to an approved
+deposit. Asserted by CALLING the gate with one.
+
+### 🚨 EVERY WAY THE SECOND SUBSYSTEM CAN FAIL TO ESTABLISH SOMETHING IS A BLOCK
+
+| | |
+|---|---|
+| no report | `dd-report-missing` — an absent report is not an absence of powers |
+| `report.refusal` | `dd-report-indeterminate` — it established nothing |
+| **different address** | `dd-report-subject-mismatch` — 🚨 would disclose ANOTHER contract's powers under this vault's name |
+| different chainId | `dd-report-chain-mismatch` |
+| power group in `notChecked` | WARN `owner-powers-unreadable` — **not established is not absent** |
+| owner kind outside the known set | WARN `owner-unreadable` — an unrecognised kind is not benign |
+
+⭐ Not-checked is tested BEFORE present, the same ordering `evaluatePolicy` uses and for the same
+reason: asking `present` first lets an unchecked group fall through to "absent".
+
+### 🚨🚨 AND BUILDING IT SURFACED A REAL DEFECT — ON THE MONEY PATH
+
+The first cut of `_vault-report.mjs` called `analyze()` **directly, skipping the health gate.**
+`/api/dd-analyze` refuses when the detector is not known good, and so does the card — but the DEPOSIT
+GATE would have consumed that same detector's output regardless. **A detector too broken to sell a
+report or draw a card would still have been trusted to say whether a vault's owner can drain it.**
+⭐ And the stakes run the other way: a buyer loses the price of a report; a depositor loses the
+deposit. Fixed — `serving !== true` refuses, and an UNKNOWN health state refuses too.
+
+⚠️ `_vault-report.mjs` added to the DD surface (34 → **35 files**): a change there can silently
+reconnect the money path to a detector the canary already condemned, which is this binding's own
+fail-open reachable from the one path where money moves.
+
+### ⚠️ THE COSTS, STATED RATHER THAN DISCOVERED
+
+* **The deposit path now depends on the analyze engine** — ~9 RPC calls through a quorum against an
+  RPC that has throttled this repo. **An engine outage BLOCKS deposits that previously succeeded.**
+  Fail-closed and correct (`proxy-status-unreadable` already blocks for the same reason), but a real
+  availability trade.
+* **The digest moved**, as accepted — the warn codes are the same strings, but they now arrive from
+  the report. Ack population is zero (no ack store), so the cost stays theoretical.
+* ⚠️ **MIGRATION, NOT WIDENING.** Exactly the same three power warns and four owner warns. The report
+  also knows `denylist` — which can freeze a holder's funds — plus `setStrategy`, `setFeeRecipient`,
+  `transferOwnership`, `pausable`, `withdrawalDelay`. Warning on those is a genuine improvement AND a
+  behaviour change making more vaults require an ack. **A decision to take deliberately, not a side
+  effect of moving where seven things come from.** Asserted: `REPORT_POWER_WARNS` has exactly three.
+
+### ⭐ AND IT FINALLY ROTATES THE DD KEY
+
+`ddTree` 2848a3d6fdea → **b32d3e590968**. The next deploy opens a genuine post-deploy refusal window,
+which is what `capture:window` has been armed and waiting for since it was built. ⚠️ Not engineered
+for that: the rotation comes from `_vault-report.mjs` joining the DD surface because the money path
+became a DD consumer — a reason that stands on its own.
+
+Suites: `verify-vault` 43/0 (new §ROW 1b), `verify-vault-degraded` 32/0, `verify-dd-report` **131/0**
+(new §G rewritten, new §G2 for the health gate). `test:all` exit 0, tsc + build clean.
+
 ## 2026-08-16 (later still) — ⭐ THE CARD — `evaluatePolicy` NOW HAS A UI CONSUMER, AND THE TWO "COVERAGE" NUMBERS ARE PULLED APART
 
 `DdReportCard` renders inside the vault panel, BETWEEN the disclosure and the deposit: a second,

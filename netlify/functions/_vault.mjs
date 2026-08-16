@@ -410,26 +410,19 @@ export async function inspectVault(address) {
   if (proxySlotUnreadable)
     blocks.push({ code: "proxy-status-unreadable", detail: "Could not read the EIP-1967 implementation slot, so whether this address is a proxy is UNKNOWN. Every check above scans this address's own bytecode and would report a proxy stub as clean, so the inspection cannot be trusted. Refusing rather than disclosing an unverified vault." });
 
-  if (ownerPowers.emergencyWithdraw.present) warns.push({ code: "emergency-withdraw", detail: ownerPowers.emergencyWithdraw.note });
-  if (ownerPowers.settableFees.present) warns.push({ code: "fees-settable", detail: ownerPowers.settableFees.note });
-  if (ownerIdentity.type === "eoa") warns.push({ code: "owner-is-eoa", detail: ownerIdentity.label + ". A single compromised key can exercise every owner power above." });
-  if (ownerIdentity.type === "contract") warns.push({ code: "owner-is-unidentified-contract", detail: ownerIdentity.label });
-  // 🚨 DEFECT A: these two classes previously arrived here as `renounced`, which raises NO warn at
-  // all — the unknown was rendered as the single most reassuring outcome and then acknowledged.
-  // They WARN rather than BLOCK because the owner's POWERS are bytecode-derived and still disclosed
-  // above; what is unknown is who holds them, which is a self-contained gap a human can accept.
-  if (ownerIdentity.type === "unreadable" || ownerIdentity.type === "unreadable-kind")
-    warns.push({ code: "owner-unreadable", detail: ownerIdentity.label + ". Treat every owner power above as held by an unknown party." });
-  if (ownerIdentity.type === "no-owner-fn")
-    warns.push({ code: "owner-not-exposed", detail: ownerIdentity.label + "." });
+  // ═══ ⭐⭐ THE SEVEN MIGRATED WARNS ARE GONE FROM HERE — STEP 2 IS DONE ════════════════════════
+  // `emergency-withdraw`, `fees-settable`, `upgradeable` and the four owner-identity codes are now
+  // derived by `applyReportDisclosure()` from the DD report. They were RETAINED and marked
+  // `deleteWhen: "gateDeposit reads … from the DD report"`; that condition is now met, so they go.
+  //
+  // 🚨 AND THE ORDER MATTERED. Deleting them BEFORE the gate read the report would have dropped
+  // `level` from WARN to OK for a vault whose only warns were these — a deposit proceeding with no
+  // acknowledgement at all. The gate now REFUSES any inspection that has not been through
+  // `applyReportDisclosure`, so there is no window in which nothing covers them.
+  //
+  // ⚠️ `performance-fee` STAYS. It derives from a fee VALUE the report does not read, so it has no
+  // replacement and never had a `deleteWhen`.
   if (performanceFeeBps !== null && performanceFeeBps > 0) warns.push({ code: "performance-fee", detail: `A ${(performanceFeeBps / 100).toFixed(2)}% performance fee is taken on harvested yield.` });
-  if (upgradeable) warns.push({ code: "upgradeable", detail: ownerPowers.upgradeable.note });
-
-  // ⭐ ANNOTATE, NEVER REMOVE. See WARN_SUPERSESSION for the whole argument.
-  for (const w of warns) {
-    const s = WARN_SUPERSESSION[w.code];
-    if (s) { w.supersededBy = s.supersededBy; w.deleteWhen = s.deleteWhen; }
-  }
 
   const level = blocks.length ? "BLOCK" : warns.length ? "WARN" : "OK";
 
@@ -457,82 +450,149 @@ export async function inspectVault(address) {
   };
 }
 
-// ═══ ⭐⭐ WARN SUPERSESSION — MARKED COEXISTENCE, ON PURPOSE, WITH A DELETION CONDITION ═══════
+// ═══ ⭐⭐ STEP 2 — THE DISCLOSURE NOW COMES FROM THE DD REPORT ════════════════════════════════
 //
-// The DD report (shared/onchain-analyze) now covers most of what these warns say, and the in-app
-// card can render it. The obvious next move is to delete the duplicated warns from `inspection`.
+// `inspectVault` no longer derives the seven migrated warns. They are derived HERE, from the same
+// signed artifact `/api/dd-analyze` sells and `/api/agent-dd-report` shows the owner — so the card
+// and the deposit gate cannot disagree about what a vault's owner can do. They read one object.
 //
-// 🚨 DELETING THEM NOW WOULD SILENTLY REMOVE AN ACK REQUIREMENT, AND THAT IS THE WHOLE REASON THIS
-// TABLE EXISTS INSTEAD.
+// ⭐ PURE, OVER VALUES THE CALLER ALREADY FETCHED — the rule this whole module follows. The report
+// arrives as a parameter; nothing here touches the wire. That is also what keeps `_vault.mjs` free
+// of a dependency on the analyze engine's transport.
 //
-// `inspection` is NOT only a display vocabulary — it is the GATE's input. `gateDeposit` consumes it
-// server-side, `level` is derived from `warns.length`, and the warn CODES are the substance of
-// `disclosureDigest`. So dropping `owner-unreadable` from `warns` before `gateDeposit` reads
-// `holder`/`holderKind` from the report does not "move" the disclosure anywhere: for a vault whose
-// only warns were the migrated ones, `level` falls WARN → OK and the deposit proceeds with NO
-// acknowledgement at all. A gate that quietly stops asking for consent is the worst available
-// version of this change, and it is exactly [absence-must-never-read-as-safe] — an absence filling
-// a result slot and reading as safety.
+// ═══ 🚨 EVERY WAY THE REPORT CAN FAIL TO ESTABLISH SOMETHING IS A **BLOCK** ═══════════════════
+// This is the whole risk of the migration, and it runs in one direction only. Before, the powers
+// came from a scan that always produced an answer. Now they come from a second subsystem that can
+// be missing, stale, about the wrong contract, or a refusal — and every one of those must refuse
+// the deposit rather than resolve to "no powers found".
 //
-// ⭐ SO THE MIGRATION HAS AN ORDER, AND DELETING FIRST INVERTS IT:
-//      1. the report carries the disclosure                      ← done
-//      2. `gateDeposit` READS the report for it                  ← NOT DONE
-//      3. only then, delete the superseded warns from here
+//   · no report            → BLOCK. An absent report is not an absence of powers.
+//   · report.refusal       → BLOCK. A refusal established NOTHING; it is indeterminate, not clean.
+//   · different address    → BLOCK. 🚨 A report about another contract would disclose another
+//                            contract's powers under this vault's name — the single most dangerous
+//                            shape available here, and the reason subject binding is asserted
+//                            rather than assumed.
+//   · different chainId    → BLOCK. The same address holds different code on different chains.
+//   · a power group in `notChecked` → a WARN naming it. Not established is NOT absent.
 //
-// ⭐ AND THE DELETION CONDITION IS WRITTEN AT THE CODE, not in a commit message or a doc. Temporary,
-// deliberate, MARKED coexistence is a different thing from permanent duplication — an UNMARKED
-// leftover is precisely what becomes drift, and this repo already lists
-// [duplicate-source-of-truth-is-the-recurring-bug] as a recurring cost. `deleteWhen` is the marking.
+// ⚠️ THE COST, STATED PLAINLY: the deposit path now depends on the analyze engine, which is ~9 RPC
+// calls through a quorum against an RPC that has throttled this repo. An engine outage BLOCKS
+// deposits that previously succeeded. That is fail-closed and correct — `proxy-status-unreadable`
+// already blocks on an unreadable read for the same reason — but it is a real availability trade
+// and it is written down rather than discovered.
 //
-// ⚠️ ANNOTATION ONLY — THE DIGEST MUST NOT MOVE. `disclosureDigest` reads `w.code` and nothing else,
-// so adding `supersededBy`/`deleteWhen` to a warn object leaves every digest byte-identical and
-// invalidates no outstanding acknowledgement. verify-vault asserts that by CALLING it, not by
-// trusting this sentence.
-//
-// ⚠️ THE THREE-WAY SPLIT, AND WHY `performance-fee` IS ABSENT FROM THIS TABLE:
-//   · power-scan warns  → the report's power catalogue covers them (a bytecode selector scan)
-//   · owner-identity warns → the report's `holder`/`holderKind` covers them
-//   · `performance-fee` → derives from a fee VALUE the report does not read at all. It is not
-//     superseded by anything, it is not migrating, and it STAYS. Listing it here would schedule the
-//     deletion of a disclosure with no replacement.
-//
-// ⚠️ THE BLOCK LADDER IS UNTOUCHED and must stay that way — `not-a-contract`, `not-erc4626`,
-// `empty-shell`, `withdraw-fee-too-high`, `proxy-status-unreadable`, `asset-mismatch`. Blocks are not
-// in the digest and are refused BEFORE any ack is consulted. `not-a-contract` in particular is what
-// makes the three accidental safety mechanisms on this path safe; removing power disclosure must not
-// disturb it.
-export const WARN_SUPERSESSION = Object.freeze({
-  // ── power-scan warns ──────────────────────────────────────────────────────────────────────
-  "emergency-withdraw": Object.freeze({
-    supersededBy: "report.powers[] group `emergencyWithdraw`",
-    deleteWhen: "gateDeposit reads the power catalogue from the DD report instead of inspection.verdict.warns",
-  }),
-  "fees-settable": Object.freeze({
-    supersededBy: "report.powers[] group `settableFees`",
-    deleteWhen: "gateDeposit reads the power catalogue from the DD report instead of inspection.verdict.warns",
-  }),
-  "upgradeable": Object.freeze({
-    supersededBy: "report.powers[] group `upgradeable`",
-    deleteWhen: "gateDeposit reads the power catalogue from the DD report instead of inspection.verdict.warns",
-  }),
-  // ── owner-identity warns ──────────────────────────────────────────────────────────────────
-  "owner-is-eoa": Object.freeze({
-    supersededBy: "report.holder / report.holderKind",
-    deleteWhen: "gateDeposit reads holder/holderKind from the DD report instead of inspection.verdict.warns",
-  }),
-  "owner-is-unidentified-contract": Object.freeze({
-    supersededBy: "report.holder / report.holderKind",
-    deleteWhen: "gateDeposit reads holder/holderKind from the DD report instead of inspection.verdict.warns",
-  }),
-  "owner-unreadable": Object.freeze({
-    supersededBy: "report.holder / report.holderKind (UNREADABLE tri-state)",
-    deleteWhen: "gateDeposit reads holder/holderKind from the DD report instead of inspection.verdict.warns",
-  }),
-  "owner-not-exposed": Object.freeze({
-    supersededBy: "report.holder / report.holderKind (no owner function)",
-    deleteWhen: "gateDeposit reads holder/holderKind from the DD report instead of inspection.verdict.warns",
-  }),
+// ⚠️ THIS IS A MIGRATION, NOT A WIDENING. Exactly the same three power warns and four owner warns
+// as before. The report also knows about `denylist`, `setStrategy`, `setFeeRecipient`,
+// `transferOwnership`, `pausable` and `withdrawalDelay` — `denylist` in particular can freeze a
+// holder's funds — and warning on those would be a genuine improvement AND a behaviour change that
+// makes more vaults require an ack. That is a decision to take deliberately, not a side effect of
+// moving where these seven come from.
+
+/** The report power groups that map to a vault warn. ⭐ CLOSED, and deliberately the same three the
+ *  bytecode scan raised — see the migration-not-widening note above. */
+export const REPORT_POWER_WARNS = Object.freeze({
+  emergencyWithdraw: { code: "emergency-withdraw", detail: "The owner can withdraw assets outside the normal redeem path." },
+  feesSettable: { code: "fees-settable", detail: "The owner can change fees, up to the contract's maximum." },
+  upgradeable: { code: "upgradeable", detail: "The implementation can be replaced, changing every rule above." },
 });
+
+/** Owner kind → warn. ⭐ `multisig`, `timelock` and `renounced` raise none, exactly as before. */
+export const REPORT_OWNER_WARNS = Object.freeze({
+  eoa: { code: "owner-is-eoa", detail: "The owner is an externally-owned account. A single compromised key can exercise every owner power above." },
+  contract: { code: "owner-is-unidentified-contract", detail: "The owner is a contract we could not identify as a multisig or timelock." },
+  unreadable: { code: "owner-unreadable", detail: "The owner could not be read. Treat every owner power above as held by an unknown party." },
+  "unreadable-kind": { code: "owner-unreadable", detail: "The owner address is known but its code could not be read, so who holds these powers is unknown." },
+  "no-owner-fn": { code: "owner-not-exposed", detail: "This contract exposes no owner(). That is NOT proof it is ownerless — a role-based admin holds every power without one." },
+});
+
+/**
+ * Merge the DD report's disclosure into an inspection. Returns a NEW inspection.
+ *
+ * ⭐⭐ THE RESULT CARRIES `disclosure.source`, AND `gateDeposit` REFUSES WITHOUT IT. That flag is
+ * what makes the migration safe by construction rather than by every call site remembering: an
+ * inspection that never went through here CANNOT be gated on, so there is no path where the powers
+ * silently go undisclosed. Tested by calling the gate with a raw inspection.
+ */
+export function applyReportDisclosure(inspection, report) {
+  const blocks = [...(inspection?.verdict?.blocks ?? [])];
+  const warns = [...(inspection?.verdict?.warns ?? [])];
+  const addr = String(inspection?.address ?? "").toLowerCase();
+
+  const refuse = (code, detail) => ({
+    ...inspection,
+    verdict: { level: "BLOCK", blocks: [...blocks, { code, detail }], warns },
+    disclosure: { source: "report", established: false, reason: code },
+  });
+
+  if (!report || typeof report !== "object") {
+    return refuse("dd-report-missing",
+      "No due-diligence report was supplied, so the owner's powers were not established. An absent report is not an absence of powers.");
+  }
+  if (report.refusal) {
+    return refuse("dd-report-indeterminate",
+      `The due-diligence report is a refusal (${report.refusal.reason}) — it established nothing about this contract. This is INDETERMINATE, not a clean bill.`);
+  }
+  const subj = String(report?.subject?.address ?? "").toLowerCase();
+  if (!subj || subj !== addr) {
+    return refuse("dd-report-subject-mismatch",
+      `The report describes ${subj || "an unknown address"}, not ${addr}. Refusing rather than disclosing another contract's powers under this vault's name.`);
+  }
+  if (inspection?.chainId != null && report?.subject?.chainId != null &&
+      Number(report.subject.chainId) !== Number(inspection.chainId)) {
+    return refuse("dd-report-chain-mismatch",
+      `The report is for chain ${report.subject.chainId}, not ${inspection.chainId}. The same address holds different code on different chains.`);
+  }
+
+  // ── the powers ────────────────────────────────────────────────────────────────────────────
+  const present = new Set(Array.isArray(report.powersPresent) ? report.powersPresent : []);
+  const groupOf = (e) => e?.group ?? (typeof e?.id === "string" && e.id.startsWith("power:") ? e.id.slice(6) : null);
+  const notChecked = new Set((report?.coverage?.notChecked ?? []).map(groupOf).filter(Boolean));
+
+  const unestablished = [];
+  for (const [group, w] of Object.entries(REPORT_POWER_WARNS)) {
+    // ⚠️ NOT-CHECKED IS TESTED BEFORE PRESENT — the same ordering evaluatePolicy uses, and for the
+    // same reason: asking `present` first lets an unchecked group fall through to "absent".
+    if (notChecked.has(group)) { unestablished.push(group); continue; }
+    if (present.has(group)) warns.push({ code: w.code, detail: w.detail, from: "dd-report" });
+  }
+  if (unestablished.length) {
+    warns.push({
+      code: "owner-powers-unreadable",
+      detail: `These owner powers could not be established: ${unestablished.join(", ")}. Not established is NOT absent — treat them as possibly present.`,
+      from: "dd-report",
+    });
+  }
+
+  // ── the owner ─────────────────────────────────────────────────────────────────────────────
+  // ⚠️ AN UNRECOGNISED KIND IS NOT A SILENT PASS. `multisig`/`timelock`/`renounced`/`not-applicable`
+  // deliberately raise nothing; anything OUTSIDE the whole known set means the vocabulary moved
+  // underneath us and the safe reading is "we do not know who holds these powers".
+  const KNOWN_QUIET = new Set(["multisig", "timelock", "renounced", "not-applicable"]);
+  const kind = report?.owner?.kind ?? null;
+  const ow = REPORT_OWNER_WARNS[kind];
+  if (ow) warns.push({ code: ow.code, detail: ow.detail, from: "dd-report" });
+  else if (!KNOWN_QUIET.has(kind)) {
+    warns.push({
+      code: "owner-unreadable",
+      detail: `The report classified the owner as ${JSON.stringify(kind)}, which this gate does not recognise. Treating the holder as unknown rather than assuming it is benign.`,
+      from: "dd-report",
+    });
+  }
+
+  return {
+    ...inspection,
+    verdict: { level: blocks.length ? "BLOCK" : warns.length ? "WARN" : "OK", blocks, warns },
+    disclosure: {
+      source: "report",
+      established: true,
+      reportSubject: subj,
+      reportBlock: report?.subject?.blockNumber ?? null,
+      reportSources: report?.sources?.mode ?? null,
+      // ⚠️ A SPLIT RIDES ALONG. It bears on every fact above, not just the slot that split.
+      providerDisagreement: report?.sources?.integrity?.providerDisagreement ?? null,
+    },
+  };
+}
 
 // ── ACK TOKEN (fail-closed) ────────────────────────────────────────────────────────────────
 // The ack is bound to the SPECIFIC disclosure the user saw. It is a deterministic digest over
@@ -560,6 +620,31 @@ export function ackTokenFor(inspection) {
 // `expectedAssetAddress` folds in the deposit-context asset check: the allowlisted vault's
 // on-chain asset() MUST match what we allowlisted, else BLOCK (defense in depth).
 export function gateDeposit({ inspection, ackToken, expectedAssetAddress }) {
+  // ═══ 🚨🚨 THE MIGRATION'S SAFETY CATCH — FAIL-CLOSED BY CONSTRUCTION ═════════════════════════
+  // Since step 2, the owner powers and the holder's identity come from the DD report via
+  // `applyReportDisclosure`. An inspection that never went through it carries NONE of them, and its
+  // `warns` would therefore look reassuringly short — a deposit sailing through on a disclosure that
+  // silently omits every power the owner holds.
+  //
+  // ⭐ SO THE GATE REQUIRES THE FLAG RATHER THAN TRUSTING CALL SITES TO REMEMBER. This is the one
+  // check that makes deleting the seven warns safe: there is no path from a raw inspection to an
+  // approved deposit. ⚠️ Asserted by CALLING the gate with a raw inspection, not by grepping.
+  if (inspection?.disclosure?.source !== "report") {
+    return {
+      ok: false,
+      blocked:
+        "the vault disclosure has not been established from a due-diligence report — refusing rather " +
+        "than depositing against a disclosure that omits the owner's powers",
+      disclosure: {
+        level: "BLOCK",
+        blocks: [{ code: "disclosure-not-established", detail: "applyReportDisclosure() was not applied to this inspection." }],
+        warns: [],
+        digest: null,
+        withdrawFeeBps: inspection?.withdraw?.withdrawFeeBps ?? null,
+        depositFeeBps: inspection?.ownerPowers?.settableFees?.currentBps?.deposit ?? null,
+      },
+    };
+  }
   // ⭐⭐ THE DISCLOSURE CARRIES EVERY INPUT ITS OWN DIGEST IS COMPUTED FROM.
   //
   // `disclosureDigest` is `address | warn codes | withdrawFee | depositFee`. Shipping only

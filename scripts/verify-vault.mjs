@@ -44,7 +44,23 @@ mock.module("../netlify/functions/_circle.mjs", {
   },
 });
 
-const { inspectVault, gateDeposit, ackTokenFor, resolveVault } = await import("../netlify/functions/_vault.mjs");
+// ⭐⭐ HEALTH IS MOCKED TO "SERVING", and that is not a shortcut — it is the ONLY way to test the
+// step-2 path in-process. `_vault-report.mjs` now refuses to analyse unless the DD detector is known
+// good, and health lives in Netlify Blobs, which do not exist here. Without this mock every deposit
+// below would BLOCK on `dd-report-missing` — the correct production behaviour, but it would test the
+// health gate over and over instead of the disclosure it guards.
+// ⚠️ THE HEALTH REFUSAL IS STILL PROVEN, just not here: verify-dd-report §G2 calls the REAL
+// `vaultDdReport` with no mock, gets null, and asserts the deposit blocks. Both halves exist.
+mock.module("../netlify/functions/_dd-rungs.mjs", {
+  namedExports: { healthDisclosure: async () => ({ serving: true, reason: null, detail: null, selfClearing: null }) },
+});
+
+const { inspectVault, gateDeposit, applyReportDisclosure, ackTokenFor, resolveVault } = await import("../netlify/functions/_vault.mjs");
+// ⭐ STEP 2: the owner powers and the holder now come from the DD report, so every gate call in
+// this suite must go through `applyReportDisclosure` first — exactly as the real call sites do.
+// A raw inspection is REFUSED by construction, and §0 below proves that rather than assuming it.
+const { vaultDdReport } = await import("../netlify/functions/_vault-report.mjs");
+const established = async (i, addr) => applyReportDisclosure(i, await vaultDdReport(addr));
 const { executeAction, validateStepShape } = await import("../netlify/functions/_actions.mjs");
 const { vaultDepositCapUsdc } = await import("../netlify/functions/_arc.mjs");
 
@@ -56,7 +72,8 @@ const check = (name, ok, detail = "") => {
 
 // ── ROW 1 — INSPECTION MATCHES CHAIN ─────────────────────────────────────────────────────────
 console.log("\n── ROW 1 · inspection matches chain (real read of XyloVault) ──");
-const insp = await inspectVault(XYLO);
+const inspRaw = await inspectVault(XYLO);
+const insp = await established(inspRaw, XYLO);
 check("is a deployed contract", insp.conformance.isContract === true);
 check("ERC-4626 conformant (all 12 methods present)", insp.conformance.erc4626 === true, `missing: [${insp.conformance.missingMethods.join(", ")}]`);
 check("underlying asset is USDC", insp.asset.isUsdc === true, insp.asset.address ?? "null");
@@ -84,9 +101,43 @@ check("owner NOT reported as renounced or unknown", !["renounced", "unreadable",
 check("no fail-open verdict codes on a healthy read", !insp.verdict.warns.some((w) => ["owner-unreadable", "owner-not-exposed"].includes(w.code)) && !insp.verdict.blocks.some((b) => b.code === "proxy-status-unreadable"));
 check("verdict level = WARN", insp.verdict.level === "WARN", `blocks:${insp.verdict.blocks.length} warns:${insp.verdict.warns.length}`);
 
+// ── ⭐⭐ ROW 1b — THE MIGRATION'S FAIL-CLOSED CATCH ──────────────────────────────────────────
+// 🚨 THE ONE CHECK THAT MAKES DELETING THE SEVEN WARNS SAFE. Since step 2 the powers and the holder
+// come from the DD report; an inspection that never went through `applyReportDisclosure` carries
+// NONE of them and its `warns` look reassuringly short. If the gate accepted it, a deposit would
+// proceed against a disclosure that silently omits every power the owner holds — which is the exact
+// silent-consent-removal the retain-and-mark ordering was built to avoid, arriving by another door.
+console.log("\n── ROW 1b · a raw inspection can never be gated on ──");
+{
+  const g = gateDeposit({ inspection: inspRaw, ackToken: ackTokenFor(insp), expectedAssetAddress: USDC });
+  check("🚨🚨 a RAW inspection is REFUSED even with a valid-looking ack", g.ok === false, g.blocked);
+  check("🚨 …and says the disclosure was never established",
+    g.disclosure?.blocks?.some((b) => b.code === "disclosure-not-established"), JSON.stringify(g.disclosure?.blocks?.[0]?.code));
+  check("⭐ the established inspection carries its provenance",
+    insp.disclosure?.source === "report" && insp.disclosure?.established === true);
+  // ⚠️ ABSENCE, WRONG SUBJECT AND A REFUSAL ALL BLOCK — tested by calling, because each is a way the
+  // second subsystem can fail to establish something, and none may resolve to "no powers found".
+  const noRpt = applyReportDisclosure(inspRaw, null);
+  check("🚨 a MISSING report BLOCKs (an absent report is not an absence of powers)",
+    noRpt.verdict.level === "BLOCK" && noRpt.verdict.blocks.some((b) => b.code === "dd-report-missing"));
+  const wrongSubj = applyReportDisclosure(inspRaw, { subject: { address: "0x" + "9".repeat(40), chainId: 5042002 }, powersPresent: [], coverage: { notChecked: [] }, owner: { kind: "multisig" } });
+  check("🚨🚨 a report about ANOTHER contract BLOCKs — never another contract's powers under this name",
+    wrongSubj.verdict.level === "BLOCK" && wrongSubj.verdict.blocks.some((b) => b.code === "dd-report-subject-mismatch"));
+  const refused = applyReportDisclosure(inspRaw, { subject: { address: XYLO.toLowerCase(), chainId: 5042002 }, refusal: { reason: "chain-unreachable" } });
+  check("🚨 a REFUSAL report BLOCKs — it established nothing",
+    refused.verdict.level === "BLOCK" && refused.verdict.blocks.some((b) => b.code === "dd-report-indeterminate"));
+  const unchecked = applyReportDisclosure(inspRaw, { subject: { address: XYLO.toLowerCase(), chainId: 5042002 }, powersPresent: [], owner: { kind: "multisig" }, coverage: { notChecked: [{ group: "upgradeable" }] } });
+  check("⭐⭐ an UNCHECKED power warns rather than reading as absent",
+    unchecked.verdict.warns.some((w) => w.code === "owner-powers-unreadable"));
+  const weirdOwner = applyReportDisclosure(inspRaw, { subject: { address: XYLO.toLowerCase(), chainId: 5042002 }, powersPresent: [], owner: { kind: "brand-new-kind" }, coverage: { notChecked: [] } });
+  check("⭐ an UNRECOGNISED owner kind is treated as unknown, not as benign",
+    weirdOwner.verdict.warns.some((w) => w.code === "owner-unreadable"));
+}
+
 // ── ROW 2 — BLOCK FIRES ──────────────────────────────────────────────────────────────────────
 console.log("\n── ROW 2 · BLOCK fires (non-ERC-4626 + non-allowlisted) ──");
-const inspUsdc = await inspectVault(USDC);
+const inspUsdcRaw = await inspectVault(USDC);
+const inspUsdc = await established(inspUsdcRaw, USDC);
 check("USDC token (not a vault) → not-erc4626 BLOCK", inspUsdc.verdict.level === "BLOCK" && inspUsdc.verdict.blocks.some((b) => b.code === "not-erc4626"));
 const gUsdc = gateDeposit({ inspection: inspUsdc, ackToken: ackTokenFor(inspUsdc), expectedAssetAddress: USDC });
 check("gate refuses the non-vault even WITH an ack", gUsdc.ok === false && /failed inspection/.test(gUsdc.blocked || ""), gUsdc.blocked);

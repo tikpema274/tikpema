@@ -3,7 +3,8 @@ import { ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc, bridgeCapUsdc, swapCapUsdc,
 import { agentSwap, valueInUsdc, SWAP_TOKENS } from "./_swap.mjs";
 import { agentPay } from "./_pay.mjs";
 import { agentBridge, bridgeFee, resolveDestination, bridgeFeeBand, bridgeAckToken } from "./_bridge.mjs";
-import { resolveVault, inspectVault, gateDeposit, vaultDeposit, vaultWithdraw, readShareBalance } from "./_vault.mjs";
+import { resolveVault, inspectVault, gateDeposit, applyReportDisclosure, vaultDeposit, vaultWithdraw, readShareBalance } from "./_vault.mjs";
+import { vaultDdReport } from "./_vault-report.mjs";
 import { canSpendDay, recordAgentSpend } from "./_budget.mjs";
 import { AGENT } from "./_agents.mjs";
 import { assertNotPaused } from "./_pause.mjs";
@@ -445,6 +446,11 @@ export async function executeAction(step, ctx) {
     } catch (e) {
       return { ok: false, blocked: `cannot inspect vault ${v.label}: ${e.message}` };
     }
+    // ⭐ THE DISCLOSURE IS ESTABLISHED FROM THE DD REPORT, at execute time, on a FRESH read — the
+    // same discipline the re-inspection already followed. A report fetched when the user was
+    // reading the card is not evidence about the vault now.
+    // ⚠️ A null report BLOCKS inside applyReportDisclosure; that decision is not duplicated here.
+    inspection = applyReportDisclosure(inspection, await vaultDdReport(v.address));
     const gate = gateDeposit({ inspection, ackToken: step.ackToken, expectedAssetAddress: v.assetAddress });
     if (!gate.ok) return { ok: false, blocked: gate.blocked, disclosure: gate.disclosure };
 

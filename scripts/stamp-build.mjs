@@ -145,6 +145,15 @@ const DD_SURFACE_FILES = [
   // ⚠️ Churn measured before adding, per the rule established above: 2 commits over the full
   // history, last 2026-07-03. Adding it costs ~nothing and closes a real gap.
   "netlify/functions/_auth.mjs",
+
+  // ⭐⭐ ADDED 2026-08-16 (step 2) — THE MONEY PATH BECAME A DD CONSUMER.
+  // 🚨 The vault DEPOSIT GATE now derives the owner's powers from a DD report, and this file is what
+  // decides whether it gets one — including whether it respects the health verdict. A change here can
+  // silently reconnect the deposit path to a detector the canary has already condemned, which is the
+  // fail-open this binding exists to close, now reachable from the one path where money moves.
+  // ⚠️ Conservative inclusion, per the rule above: widening only ever costs an extra correct
+  // re-verification; narrowing risks vouching across a change that mattered.
+  "netlify/functions/_vault-report.mjs",
   // ⭐ THE STRONGEST CASE, AND NOT ON FREQUENCY GROUNDS: this file COMPUTES ddCodeIdentity. A change
   // here can silently alter what the identity MEANS — its own header warns that a fallback would be
   // "unknown === unknown wearing a new name — the exact fail-open the version binding exists to

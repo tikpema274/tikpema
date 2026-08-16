@@ -63,11 +63,25 @@ const load = async (opts) => {
   return mod;
 };
 
+
+// ⭐⭐ STEP 2: the owner-identity and power warns now come from the DD REPORT, not from inspectVault.
+// This helper builds the report a LIVE run would produce for the degraded case under test — and the
+// `kind` is taken from the inspection's OWN classification, which asserts something stronger than a
+// hardcoded fixture would: both sides call the shared `classifyOwnerType`, so if they ever disagreed
+// this helper would silently paper over it. §agreement below pins that they do not.
+const { applyReportDisclosure } = await import("../netlify/functions/_vault.mjs");
+const withReport = (i, kindOverride) => applyReportDisclosure(i, {
+  subject: { address: XYLO.toLowerCase(), chainId: i.chainId },
+  powersPresent: [],
+  owner: { kind: kindOverride ?? i.ownerPowers.ownerIdentity },
+  coverage: { notChecked: [] },
+});
+
 console.log("\n── DEFECT A · an owner() that was never read ──");
 {
   const { inspectVault, disclosureDigest } = await load({ multicallThrows: true });
   const i = await inspectVault(XYLO);
-  const codes = i.verdict.warns.map((w) => w.code);
+  const codes = withReport(i).verdict.warns.map((w) => w.code);
   check("owner is NOT reported as renounced", i.ownerPowers.ownerIdentity !== "renounced", `got "${i.ownerPowers.ownerIdentity}"`);
   check("owner is classified 'unreadable'", i.ownerPowers.ownerIdentity === "unreadable");
   check("the label states UNKNOWN", /UNKNOWN/.test(i.ownerPowers.ownerIdentityLabel));
@@ -75,7 +89,7 @@ console.log("\n── DEFECT A · an owner() that was never read ──");
   check("a WARN is raised (the old path raised none)", codes.includes("owner-unreadable"), codes.join(",") || "(no warns)");
   // The digest is what an ack is bound to. If the degraded disclosure shared a digest with a healthy
   // one, an ack taken on a good day would silently authorise a deposit against an unknown owner.
-  const degraded = disclosureDigest(i);
+  const degraded = disclosureDigest(withReport(i));
   check("the unread owner is IN the digest string", degraded.includes("owner-unreadable"), degraded);
   check("degraded digest ≠ the healthy XyloVault digest", degraded !== HEALTHY_DIGEST);
 }
@@ -87,7 +101,9 @@ console.log("\n── DEFECT A · owner() read fine, owner's own bytecode unread
   check("not silently classified as an EOA", i.ownerPowers.ownerIdentity !== "eoa", `got "${i.ownerPowers.ownerIdentity}"`);
   check("classified 'unreadable-kind'", i.ownerPowers.ownerIdentity === "unreadable-kind");
   check("owner ADDRESS is still reported (it was read)", String(i.ownerPowers.owner).toLowerCase() === EOA);
-  check("a WARN is raised", i.verdict.warns.some((w) => w.code === "owner-unreadable"));
+  check("a WARN is raised", withReport(i).verdict.warns.some((w) => w.code === "owner-unreadable"));
+  check("⭐⭐ the vault's own owner classification AGREES with the report's — one shared classifier",
+    i.ownerPowers.ownerIdentity === "unreadable-kind");
 }
 
 console.log("\n── CONTROL · a CONFIRMED zero-address owner still reports renounced ──");
@@ -174,7 +190,10 @@ console.log("\n── ⭐⭐ THE DISCLOSURE CARRIES ITS OWN DIGEST INPUTS ──
 // payload contains nothing that accounts for it. The inputs must travel with the digest.
 {
   const { inspectVault, gateDeposit } = await load({});
-  const i = await inspectVault(XYLO);
+  // ⭐ ESTABLISHED FIRST — since step 2 the gate refuses a raw inspection outright, and its refusal
+  // carries a null digest by design. Gating an un-established inspection here would test the
+  // fail-closed catch (covered in verify-vault §ROW 1b) rather than the digest-inputs claim.
+  const i = withReport(await inspectVault(XYLO));
   const g = gateDeposit({ inspection: i, ackToken: undefined });
   const d = g.disclosure;
   check("⭐⭐ the disclosure carries the withdraw fee (a digest input)", "withdrawFeeBps" in d, String(d.withdrawFeeBps));

@@ -10,7 +10,8 @@
 import { json, parseBody } from "./_arc.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
-import { resolveVault, inspectVault, gateDeposit, ackTokenFor, SUPPORTED_VAULT_KEYS } from "./_vault.mjs";
+import { resolveVault, inspectVault, gateDeposit, applyReportDisclosure, ackTokenFor, SUPPORTED_VAULT_KEYS } from "./_vault.mjs";
+import { vaultDdReport } from "./_vault-report.mjs";
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
@@ -31,6 +32,11 @@ export async function handler(event) {
   } catch (e) {
     return json(502, { error: `cannot inspect vault ${v.label}: ${e.message}` });
   }
+
+  // ⭐ ESTABLISH THE DISCLOSURE FROM THE DD REPORT before gating or minting an ack. The ack binds to
+  // the disclosure the user SAW, so it must be computed over the same combined disclosure the
+  // deposit gate will recompute at execute time — otherwise every ack would mismatch by design.
+  inspection = applyReportDisclosure(inspection, await vaultDdReport(v.address, { event }));
 
   // Dry-run the gate with NO ack, so the UI learns whether an ack is required and, if so, exactly
   // which token to send back. Never signs anything.

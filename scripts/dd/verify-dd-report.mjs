@@ -8,9 +8,10 @@
 //      reports while one quietly stops checking something.
 //   2. 🚨 HEALTH IS UNSKIPPABLE, AND THAT IS ENFORCED BY A THROW. Tested by CALLING assertSkipSet,
 //      not by grepping for the constant — [assert-on-rendered-output-not-source-regex].
-//   3. ⭐ THE WARN SUPERSESSION ANNOTATES AND DELETES NOTHING, and therefore does not move
-//      `disclosureDigest`. A moved digest invalidates acks; a DELETED warn silently removes an ack
-//      REQUIREMENT, which is worse. Both are asserted by calling the real functions.
+//   3. ⭐⭐ STEP 2 IS COMPLETE: the seven migrated warns are GONE from inspectVault and now come
+//      from the DD report. The load-bearing check is that `gateDeposit` REFUSES any inspection that
+//      never went through `applyReportDisclosure` — without it, deleting the warns would let a
+//      deposit proceed against a disclosure omitting every power the owner holds.
 //
 // Plus the measurement the design asked for: the REAL per-render RPC load, counted rather than
 // estimated, because "no cache until measured" is only a decision if somebody measures.
@@ -308,62 +309,130 @@ section("F ⭐ THE MEASURED RPC LOAD — counted, not estimated");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
-section("G ⭐⭐ THE WARN SUPERSESSION — annotated, RETAINED, and the digest does not move");
+section("G ⭐⭐ STEP 2 COMPLETE — the seven warns are GONE and the report supplies them");
 {
-  const { WARN_SUPERSESSION, disclosureDigest, ackTokenFor } = await import("../../netlify/functions/_vault.mjs");
+  const { REPORT_POWER_WARNS, REPORT_OWNER_WARNS, applyReportDisclosure, gateDeposit, disclosureDigest } =
+    await import("../../netlify/functions/_vault.mjs");
+  const fs = await import("node:fs");
+  const vault = fs.readFileSync("netlify/functions/_vault.mjs", "utf8");
 
-  const POWER = ["emergency-withdraw", "fees-settable", "upgradeable"];
-  const OWNER = ["owner-is-eoa", "owner-is-unidentified-contract", "owner-unreadable", "owner-not-exposed"];
+  // ⭐ THE DELETION CONDITION IS MET, SO THE MARKING IS GONE TOO. `WARN_SUPERSESSION` existed only to
+  // mark temporary coexistence; leaving it once the migration landed would be exactly the UNMARKED
+  // leftover it was created to prevent, one level up.
+  check("⭐⭐ the supersession table is gone — its deleteWhen condition was met",
+    !/WARN_SUPERSESSION/.test(vault));
+  check("⭐⭐ inspectVault no longer derives ANY of the seven migrated warns",
+    !/warns\.push\(\{ code: "(emergency-withdraw|fees-settable|upgradeable|owner-is-eoa|owner-is-unidentified-contract|owner-unreadable|owner-not-exposed)"/.test(vault));
+  check("⚠️ …while `performance-fee` still is (a fee VALUE the report never reads)",
+    /warns\.push\(\{ code: "performance-fee"/.test(vault));
 
-  check("⭐ the power-scan warns are marked superseded", POWER.every((c) => !!WARN_SUPERSESSION[c]));
-  check("⭐ the owner-identity warns are marked superseded", OWNER.every((c) => !!WARN_SUPERSESSION[c]));
-  check("⭐⭐ `performance-fee` is NOT marked — it derives from a fee VALUE the report never reads, " +
-        "so it has no replacement and must not be scheduled for deletion",
-    !("performance-fee" in WARN_SUPERSESSION));
-  check("⭐⭐ every marked warn carries a DELETION CONDITION at the code, not in a commit message",
-    Object.values(WARN_SUPERSESSION).every((s) => typeof s.deleteWhen === "string" && /gateDeposit reads/.test(s.deleteWhen)));
-  check("  …and names what supersedes it", Object.values(WARN_SUPERSESSION).every((s) => !!s.supersededBy));
-  check("⭐ the owner warns point at holder/holderKind",
-    OWNER.every((c) => /holder/i.test(WARN_SUPERSESSION[c].supersededBy)));
-  check("⭐ the power warns point at the report's power catalogue",
-    POWER.every((c) => /report\.powers/.test(WARN_SUPERSESSION[c].supersededBy)));
+  // ⭐ THE SAME CODES, from the report side. A migration must not silently rename what a user acks.
+  const codes = [...Object.values(REPORT_POWER_WARNS), ...Object.values(REPORT_OWNER_WARNS)].map((w) => w.code);
+  for (const c of ["emergency-withdraw", "fees-settable", "upgradeable",
+                   "owner-is-eoa", "owner-is-unidentified-contract", "owner-unreadable", "owner-not-exposed"])
+    check(`⭐ "${c}" is still produced, now from the report`, codes.includes(c));
 
-  // 🚨🚨 THE LOAD-BEARING ASSERTION. Annotation must not touch the digest. `disclosureDigest` reads
-  // `w.code` and nothing else — so adding fields leaves every outstanding ack valid. Proven by
-  // CALLING it on an annotated and an un-annotated inspection.
-  const insp = (warns) => ({
-    address: "0x240eb85458cd41361bd8c3773253a1d78054f747",
-    verdict: { level: "WARN", blocks: [], warns },
-    withdraw: { withdrawFeeBps: 25 },
-    ownerPowers: { settableFees: { currentBps: { deposit: 0 } } },
+  // ⚠️ MIGRATION, NOT WIDENING — asserted, because a wider gate is a real behaviour change that
+  // should be a decision rather than a side effect of moving where these come from.
+  check("⚠️ exactly THREE power groups map to a warn (denylist/setStrategy/… deliberately excluded)",
+    Object.keys(REPORT_POWER_WARNS).length === 3, Object.keys(REPORT_POWER_WARNS).join(","));
+  check("⚠️ …and multisig/timelock/renounced still raise nothing",
+    !["multisig", "timelock", "renounced"].some((k) => k in REPORT_OWNER_WARNS));
+
+  const insp = (over = {}) => ({
+    address: "0x240eb85458cd41361bd8c3773253a1d78054f747", chainId: 5042002,
+    verdict: { level: "OK", blocks: [], warns: [] },
+    withdraw: { withdrawFeeBps: 10 }, ownerPowers: { settableFees: { currentBps: { deposit: 0 } } },
+    ...over,
   });
-  const bare = insp([{ code: "owner-is-eoa", detail: "d" }, { code: "upgradeable", detail: "d" }]);
-  const annotated = insp([
-    { code: "owner-is-eoa", detail: "d", ...WARN_SUPERSESSION["owner-is-eoa"] },
-    { code: "upgradeable", detail: "d", ...WARN_SUPERSESSION["upgradeable"] },
-  ]);
-  check("🚨🚨 the digest is BYTE-IDENTICAL with and without the supersession annotation",
-    disclosureDigest(bare) === disclosureDigest(annotated), disclosureDigest(annotated));
-  check("🚨 …so every outstanding ack token still matches — no acknowledgement is invalidated",
-    ackTokenFor(bare) === ackTokenFor(annotated));
+  const rpt = (over = {}) => ({
+    subject: { address: "0x240eb85458cd41361bd8c3773253a1d78054f747", chainId: 5042002, blockNumber: 1 },
+    powersPresent: ["emergencyWithdraw", "feesSettable"], owner: { kind: "eoa" },
+    coverage: { notChecked: [] }, sources: { mode: "quorum", integrity: { providerDisagreement: false } },
+    ...over,
+  });
 
-  // ⭐ AND THE COUNTERFACTUAL, which is the whole reason coexistence was chosen over deletion:
-  // DELETING a superseded warn does move the digest — and, for a vault whose only warns were the
-  // migrated ones, drops the level from WARN to OK and removes the ACK REQUIREMENT entirely.
-  const deleted = insp([{ code: "owner-is-eoa", detail: "d" }]);
-  check("⭐⭐ deleting a superseded warn WOULD move the digest (this is what was avoided)",
-    disclosureDigest(bare) !== disclosureDigest(deleted));
-  const onlyMigrated = insp([{ code: "upgradeable", detail: "d" }]);
-  const nothingLeft = { ...onlyMigrated, verdict: { level: "OK", blocks: [], warns: [] } };
-  const { gateDeposit } = await import("../../netlify/functions/_vault.mjs");
-  check("🚨🚨 …and with the migrated warn RETAINED the gate still demands an acknowledgement",
-    gateDeposit({ inspection: onlyMigrated, ackToken: undefined }).ok === false);
-  check("🚨🚨 …whereas had it been DELETED the deposit would proceed with NO ack at all — " +
-        "the silent consent removal this ordering exists to prevent",
-    gateDeposit({ inspection: nothingLeft, ackToken: undefined }).ok === true);
+  // 🚨🚨 THE LOAD-BEARING ONE. A raw inspection must never reach an approved deposit.
+  const rawGate = gateDeposit({ inspection: insp(), ackToken: "f".repeat(64) });
+  check("🚨🚨 gateDeposit REFUSES an inspection that never went through applyReportDisclosure",
+    rawGate.ok === false && rawGate.disclosure.blocks.some((b) => b.code === "disclosure-not-established"));
+
+  const est = applyReportDisclosure(insp(), rpt());
+  check("⭐ an established inspection carries the report's powers as warns",
+    ["emergency-withdraw", "fees-settable", "owner-is-eoa"].every((c) => est.verdict.warns.some((w) => w.code === c)),
+    est.verdict.warns.map((w) => w.code).join(","));
+  check("⭐ …level rises to WARN, so an ack is required", est.verdict.level === "WARN");
+  check("⭐ …and each carries its provenance", est.verdict.warns.filter((w) => w.from === "dd-report").length >= 3);
+  check("⭐ …and the digest covers them, so the ack is bound to what was disclosed",
+    disclosureDigest(est).includes("emergency-withdraw") && disclosureDigest(est).includes("owner-is-eoa"));
+
+  // 🚨 EVERY WAY THE REPORT CAN FAIL TO ESTABLISH SOMETHING BLOCKS — none resolves to "no powers".
+  for (const [label, r, code] of [
+    ["a MISSING report", null, "dd-report-missing"],
+    ["a REFUSAL report", rpt({ refusal: { reason: "chain-unreachable" } }), "dd-report-indeterminate"],
+    ["a report about ANOTHER address", rpt({ subject: { address: "0x" + "9".repeat(40), chainId: 5042002 } }), "dd-report-subject-mismatch"],
+    ["a report for ANOTHER chain", rpt({ subject: { address: "0x240eb85458cd41361bd8c3773253a1d78054f747", chainId: 8453 } }), "dd-report-chain-mismatch"],
+  ]) {
+    const out = applyReportDisclosure(insp(), r);
+    check(`🚨 ${label} BLOCKs (${code})`,
+      out.verdict.level === "BLOCK" && out.verdict.blocks.some((b) => b.code === code),
+      out.verdict.blocks.map((b) => b.code).join(","));
+    check(`   …and the gate refuses it even WITH a valid-looking ack`,
+      gateDeposit({ inspection: out, ackToken: "f".repeat(64) }).ok === false);
+  }
+
+  // ⭐⭐ NOT-CHECKED IS TESTED BEFORE PRESENT — an unchecked group must not read as absent.
+  const partial = applyReportDisclosure(insp(), rpt({ powersPresent: [], coverage: { notChecked: [{ group: "upgradeable" }] } }));
+  check("⭐⭐ an UNCHECKED power warns rather than silently reading as absent",
+    partial.verdict.warns.some((w) => w.code === "owner-powers-unreadable" && /upgradeable/.test(w.detail)));
+  check("⭐ …and it is NOT reported as the plain `upgradeable` warn (present ≠ unestablished)",
+    !partial.verdict.warns.some((w) => w.code === "upgradeable"));
+
+  // ⭐ AN UNRECOGNISED OWNER KIND IS NOT A SILENT PASS.
+  const weird = applyReportDisclosure(insp(), rpt({ owner: { kind: "some-future-kind" } }));
+  check("⭐ an owner kind outside the known set is treated as UNKNOWN, not benign",
+    weird.verdict.warns.some((w) => w.code === "owner-unreadable"));
+  const quiet = applyReportDisclosure(insp(), rpt({ powersPresent: [], owner: { kind: "multisig" } }));
+  check("⭐ …while a multisig owner still raises nothing (unchanged behaviour)",
+    !quiet.verdict.warns.some((w) => w.code.startsWith("owner-")) && quiet.verdict.level === "OK");
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════════════════════
+section("G2 🚨🚨 THE DEPOSIT GATE RESPECTS THE HEALTH VERDICT TOO");
+{
+  // 🚨 THE DEFECT THIS PINS, FOUND WHILE BUILDING STEP 2. The first cut of `_vault-report.mjs` called
+  // analyze() directly and skipped health. A detector too broken to sell a report or draw a card
+  // would still have supplied the DEPOSIT gate's disclosure — and the stakes run the other way: a
+  // buyer loses the price of a report, a depositor loses the deposit.
+  const fs = await import("node:fs");
+  const src = fs.readFileSync("netlify/functions/_vault-report.mjs", "utf8");
+  check("🚨🚨 the vault's report transport consults healthDisclosure before analysing",
+    /healthDisclosure\(/.test(src));
+  check("🚨 …and refuses on anything other than serving === true (unknown refuses too)",
+    /health\.serving !== true/.test(src));
+  check("⭐ …returning null, which applyReportDisclosure turns into a BLOCK — one decision, one place",
+    /return null;/.test(src));
+
+  // ⭐ PROVEN BY CALLING, not only by reading: with no blobs bound, healthDisclosure cannot resolve,
+  // so the transport must refuse and the gate must block.
+  const { vaultDdReport } = await import("../../netlify/functions/_vault-report.mjs");
+  const { applyReportDisclosure, gateDeposit } = await import("../../netlify/functions/_vault.mjs");
+  const real = console.error; console.error = () => {};
+  const rpt = await vaultDdReport("0x240Eb85458CD41361bd8C3773253a1D78054f747");
+  console.error = real;
+  check("🚨🚨 an unresolvable health state yields NO report (never an unvouched one)", rpt === null);
+  const gated = applyReportDisclosure(
+    { address: "0x240eb85458cd41361bd8c3773253a1d78054f747", chainId: 5042002,
+      verdict: { level: "OK", blocks: [], warns: [] }, withdraw: {}, ownerPowers: {} }, rpt);
+  check("🚨🚨 …and the deposit is BLOCKED rather than proceeding on an undisclosed owner",
+    gateDeposit({ inspection: gated, ackToken: "f".repeat(64) }).ok === false);
+
+  // ⚠️ AND THE BINDING COVERS IT — otherwise a change reconnecting the money path to a condemned
+  // detector would produce an identical ddTree and inherit the old canary's blessing.
+  const stamp = fs.readFileSync("scripts/stamp-build.mjs", "utf8");
+  check("⭐⭐ _vault-report.mjs is inside the DD code-identity surface",
+    /"netlify\/functions\/_vault-report\.mjs"/.test(stamp));
+}
+
 section("H ⚠️ THE BLOCK LADDER IS UNTOUCHED");
 {
   const fs = await import("node:fs");
