@@ -162,6 +162,10 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
   moving) and `setFeeRecipient`. All three measured present on XyloVault 2026-08-16. Recorded as
   PENDING DECISION rows in `POWER_DISCLOSURE`, so they cannot be forgotten — but they are still
   undisclosed today, and the denylist widening did nothing about them.
+* ⚠️ **EVERY DD-SURFACE DEPLOY BLOCKS DEPOSITS FOR 0–10 MINUTES.** Measured 2026-08-16: 545s (9.1m)
+  on one deploy, ≤6m49s on another. It is a DISTRIBUTION set by where the publish lands in the `*/10`
+  canary cycle — mean ~5m, worst case a full period. Fail-closed and correct; a real per-deploy cost,
+  and larger than the first hand-taken sample suggested.
 * 🚨 **THE MONEY PATH'S COMPOSITE AVAILABILITY IS UNMEASURED.** Shape known (2026-08-16): the vault
   deposit blocks on **3 distinct services** — Netlify Blobs (pause + budget + dd-health, so ONE
   outage takes three), Arc RPC (multicall + a ~9-call quorum), Circle — **plus a CRON**. ⚠️ The
@@ -266,7 +270,26 @@ restated in `_vault-report.mjs` where the money path reads it. ⭐ **And ASSERTE
 the cron period from `netlify.toml` — the only place it exists, so no second source of truth — and
 fails if the margin is not exactly three ticks.
 
-`verify-dd-report` **171/0**. `test:all` exit 0, tsc + build clean. Not deployed.
+### ⭐⭐ AND THE UPGRADED CAPTURE PAID FOR ITSELF ON ITS FIRST RUN
+
+Deployed as `6a81f9f2139f476b3678c02e` (`ddTree` `0cff0b4b2b0c → de01523615e6`). The window opened,
+and the capture timed it to the close **automatically**:
+
+    ⏱  WINDOW DURATION: 545s (9.1m) — deposits were unavailable for this long.
+
+🚨 **NEARLY DOUBLE THE HAND-TAKEN FIGURE FROM THE DEPLOY BEFORE IT** (≤6m49s, estimated ~5 min). Both
+are correct; the earlier one was a lucky sample whose publish landed just before a tick. ⭐ **The
+honest statement is a DISTRIBUTION, not a value: every DD-surface deploy blocks deposits for 0 to
+~10 minutes**, set by where the publish falls in the `*/10` cycle — mean ~5, **worst case a full
+canary period.** A single by-hand upper bound could not have shown that, which is exactly why the
+number belonged in the instrument rather than in someone's terminal — and the instrument produced
+the correction on its first run.
+
+⚠️ **OPERATIONAL COST, PLAINLY: a DD-surface deploy costs up to TEN MINUTES of blocked deposits.**
+Fail-closed and correct, but real, now measured instead of assumed, and worth knowing before mainnet
+where the deposits are not testnet ones.
+
+`verify-dd-report` **173/0**. `test:all` exit 0, tsc + build clean.
 
 ## 2026-08-16 (deployed + measured) — ⚠️ THE FIRST REFUSAL WINDOW THAT BLOCKED DEPOSITS, AND A COUNT OF WHAT THE MONEY PATH NOW DEPENDS ON
 
@@ -284,7 +307,14 @@ That is correct and fail-closed, and this deploy is the first time it actually h
 | window opened | at or before **17:15:01Z** (capture's first probe already saw the banner) |
 | window closed | at or before **17:21:50Z** |
 | **observed upper bound** | **≤ 6m49s** |
-| mechanism | the next `*/10` canary tick, so the real duration is **~5 min** |
+| mechanism | the next `*/10` canary tick |
+
+🚨 **AND THE HAND-MEASUREMENT UNDERSTATED IT.** The next deploy, with the upgraded capture timing the
+close automatically, measured **545s = 9.1 MINUTES** — see the entry above. That hand-taken ≤6m49s
+was a lucky sample: the publish happened to land just before a tick. ⭐ **The real figure is a
+DISTRIBUTION, not a value** — 0 to ~10 minutes depending on where the publish falls in the `*/10`
+cycle, mean ~5, **worst case a full canary period.** Exactly what a by-hand upper bound taken once
+cannot tell you, and the reason the instrument had to learn to do it.
 
 ⚠️ **AND THE INSTRUMENT DOES NOT MEASURE THE NUMBER THAT NOW MATTERS.** `capture:window` records that
 a window was OBSERVED and exits the moment it sees the banner — it never watches for the close. For a
