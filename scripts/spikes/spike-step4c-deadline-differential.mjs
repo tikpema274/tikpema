@@ -52,6 +52,7 @@
 process.env.PERIOD_CEILING_USDC ||= "60";
 import { mock } from "node:test";
 import { toFunctionSelector, decodeAbiParameters } from "viem";
+import { requireKitKey } from "../_kit-key.mjs";
 
 const arg = (k, d) => { const a = process.argv.find((x) => x.startsWith(`--${k}=`)); return a ? a.split("=")[1] : d; };
 const AMOUNT = arg("amount", "1.00");
@@ -60,10 +61,11 @@ const ALLOW_APPROVE = process.argv.includes("--allow-approve");
 const WALLET = (process.env.WALLET_ADDRESS || "0x6fb28d6366e755e0e27307692282490c6682fc58").toLowerCase();
 const SWAP_ADAPTER = "0xbbd70b01a1cabc96d5b7b129ae1aaabdf50dd40b";
 
-if (!process.env.KIT_KEY || !process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) {
-  console.error("Need CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env) and KIT_KEY (prod env) — the calldata comes from a REAL quote.");
+if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) {
+  console.error("Need CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env) — the calldata comes from a REAL quote.");
   process.exit(2);
 }
+requireKitKey();   // ⭐ unconditional: the differential is built from a REAL quote
 
 // ── in-memory @netlify/blobs ──
 const stores = {};
@@ -122,8 +124,8 @@ globalThis.fetch = async (url, init) => {
 const { executeAction } = await import("../../netlify/functions/_actions.mjs");
 const { CONTRACTS, USDC_DECIMALS } = await import("../../netlify/functions/_arc.mjs");
 const { withRetry, isTransient } = await import("../../netlify/functions/_retry.mjs"); // SAME helper as agentSwap's hardened read
-const { rpcCall, assertChain } = await import("../dd/rpc.mjs");
-const { getChain } = await import("../dd/chains.mjs");
+const { rpcCall, assertChain } = await import("../../shared/dd/rpc.mjs");
+const { getChain } = await import("../../shared/dd/chains.mjs");
 
 const chain = getChain("arc-testnet");
 const rpc = (m, p) => rpcCall({ endpoint: chain.rpc, method: m, params: p }).then((r) => r.result); // dd's own retry

@@ -9,13 +9,13 @@
 // All reads via the independent dd/rpc stack (raw fetch, chain-id asserted, throttle-backoff). NO writes.
 //
 // RUN:
-//   node scripts/spike-find-swap-spender.mjs --tx 0x<realSwapTxHash>
+//   node scripts/spikes/spike-find-swap-spender.mjs --tx 0x<realSwapTxHash>
 //   # optional: --wallet 0x<agentSCA> if the out-leg from-address isn't auto-detected
 //   # optional: --window 8000  (blocks to scan back for the Approval; default 8000, ≤ Arc's 10k cap)
 
-import { rpcCall, assertChain } from "./dd/rpc.mjs";
-import { getChain } from "./dd/chains.mjs";
-import { CONTRACTS } from "../netlify/functions/_arc.mjs";
+import { rpcCall, assertChain } from "../../shared/dd/rpc.mjs";
+import { getChain } from "../../shared/dd/chains.mjs";
+import { CONTRACTS } from "../../netlify/functions/_arc.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const TX = arg("--tx");

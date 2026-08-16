@@ -31,6 +31,7 @@
 process.env.PERIOD_CEILING_USDC ||= "10"; // TEST ceiling (headroom for the 1-USDC ledger swap). Mechanism, not the deployed number.
 import { mock } from "node:test";
 import { readFileSync, readdirSync } from "node:fs";
+import { requireKitKey } from "../_kit-key.mjs";
 
 const CONFIRM = process.argv.includes("--confirm");
 const WALLET = (process.env.WALLET_ADDRESS || "0x6fb28d6366e755e0e27307692282490c6682fc58").toLowerCase();
@@ -128,11 +129,13 @@ if (!CONFIRM) {
 } else {
   // ═══ PART B — LEDGER POST-CONFIRM (ONE REAL 1-USDC SWAP; agentSwap real, stores in-memory) ═══
   console.log(`\n════ STEP 3 · PART B · day-ceiling ledger post-confirm · ⚠️ ~1 USDC REAL SWAP ════\n`);
-  if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET || !process.env.KIT_KEY) { console.error("PART B needs CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env) and KIT_KEY (prod env)."); process.exit(2); }
+  // ⭐ INSIDE the Part B branch: Part A is zero-money and must stay runnable with no credential.
+  if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) { console.error("PART B needs CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env)."); process.exit(2); }
+  requireKitKey();
 
   // independent on-chain witness (dd/rpc), same as step 2
-  const { rpcCall, assertChain } = await import("../dd/rpc.mjs");
-  const { getChain } = await import("../dd/chains.mjs");
+  const { rpcCall, assertChain } = await import("../../shared/dd/rpc.mjs");
+  const { getChain } = await import("../../shared/dd/chains.mjs");
   const { CONTRACTS, USDC_DECIMALS, ARC } = await import("../../netlify/functions/_arc.mjs");
   const chain = getChain("arc-testnet");
   const rpc = (m, p) => rpcCall({ endpoint: chain.rpc, method: m, params: p }).then((r) => r.result);

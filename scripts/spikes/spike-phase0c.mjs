@@ -17,16 +17,16 @@
 //
 // RUN:
 //   read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
-//     node --env-file=.env scripts/spike-phase0c.mjs
+//     node --env-file=.env scripts/spikes/spike-phase0c.mjs
 //   (Reuse a KNOWN-EMPTY wallet instead of provisioning: WALLET_ID=… WALLET_ADDRESS=0x… — but only
 //    if you have CONFIRMED it holds 0 USDC; the fresh-provision default guarantees that for you.)
 
 import { AppKit } from "@circle-fin/app-kit";
 import { createCircleWalletsAdapter } from "@circle-fin/adapter-circle-wallets";
-import { circle } from "../netlify/functions/_circle.mjs";
-import { ARC, CONTRACTS } from "../netlify/functions/_arc.mjs";
-import { rpcCall, assertChain } from "./dd/rpc.mjs";
-import { getChain } from "./dd/chains.mjs";
+import { circle } from "../../netlify/functions/_circle.mjs";
+import { ARC, CONTRACTS } from "../../netlify/functions/_arc.mjs";
+import { rpcCall, assertChain } from "../../shared/dd/rpc.mjs";
+import { getChain } from "../../shared/dd/chains.mjs";
 
 import { requireKitKey } from "../_kit-key.mjs";
 const KIT_KEY = requireKitKey();

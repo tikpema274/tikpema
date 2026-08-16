@@ -40,6 +40,7 @@
 
 process.env.PERIOD_CEILING_USDC ||= "60"; // headroom so the day-ceiling isn't what blocks; mechanism, not the deployed number
 import { mock } from "node:test";
+import { requireKitKey } from "../_kit-key.mjs";
 
 // Captured BEFORE mock.timers replaces the global Date, so we can still read wall-clock time while skewed.
 const realDateNow = Date.now;
@@ -49,7 +50,7 @@ const SWAP_ADAPTER = "0xbbd70b01a1cabc96d5b7b129ae1aaabdf50dd40b"; // _swap.mjs:
 const QUOTE_TTL_MS = 600_000;                 // measured in step-4 phase 0: deadline = now + 600s, ±0.2s
 const SKEW_MS = QUOTE_TTL_MS + 60_000;        // 660s forward — past the deadline, with margin
 
-if (!process.env.KIT_KEY) { console.error("Need KIT_KEY (prod env) — the guard runs on a REAL quote, so the quote call must succeed."); process.exit(2); }
+requireKitKey();   // ⭐ unconditional: the guard runs on a REAL quote, so the quote call must succeed
 
 // The skew shifts the clock 11 minutes forward. _budget.mjs keys its bucket by DATE, so a run started
 // within ~11 min of UTC midnight could read/write a different day bucket and make the Δ0 assertion

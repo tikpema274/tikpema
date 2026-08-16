@@ -34,6 +34,7 @@ import { circle } from "../../netlify/functions/_circle.mjs";
 import { CONTRACTS, ARC, USDC_DECIMALS } from "../../netlify/functions/_arc.mjs";
 import { rpcCall, assertChain } from "../../shared/dd/rpc.mjs";
 import { getChain } from "../../shared/dd/chains.mjs";
+import { requireKitKey } from "../_kit-key.mjs";
 
 const WALLET = (process.env.WALLET_ADDRESS || "").toLowerCase();
 const ADAPTER = "0xbbd70b01a1cabc96d5b7b129ae1aaabdf50dd40b";
@@ -76,7 +77,8 @@ function normEurc(amountOut) {
   return Number.isFinite(n) ? n : null;
 }
 
-if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET || !process.env.KIT_KEY) { console.error("Need CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env) and KIT_KEY (prod env)."); process.exit(2); }
+if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) { console.error("Need CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env)."); process.exit(2); }
+requireKitKey();   // ⭐ unconditional: even the dry run prices a real quote
 if (!/^0x[0-9a-fA-F]{40}$/.test(WALLET)) { console.error("Set WALLET_ADDRESS=0x… (the funded throwaway SCA)."); process.exit(2); }
 
 log(`\n════ RE-PROVE STEP 2 · on-chain money-prove · ${CONFIRM ? "⚠️ WILL MOVE ~2 USDC" : "DRY RUN (reads only)"} ════`);

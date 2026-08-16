@@ -45,6 +45,7 @@
 
 process.env.PERIOD_CEILING_USDC ||= "60";
 import { mock } from "node:test";
+import { requireKitKey } from "../_kit-key.mjs";
 
 const arg = (k, d) => { const a = process.argv.find((x) => x.startsWith(`--${k}=`)); return a ? a.split("=")[1] : d; };
 const CONFIRM = process.argv.includes("--confirm");
@@ -67,10 +68,13 @@ if (!CONFIRM) {
   console.log(`  precondition: allowance MUST be 0 (refuses otherwise; use --reset to zero it first).\n`);
   process.exit(0);
 }
-if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET || !process.env.KIT_KEY) {
-  console.error("Need CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env) and KIT_KEY (prod env).");
+// ⭐ POSITION PRESERVED: this sits BELOW the dry-run `process.exit(0)`, so a dry run still needs no
+// credential. Only the --confirm path requires one, which is the existing and correct gating.
+if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) {
+  console.error("Need CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env).");
   process.exit(2);
 }
+requireKitKey();
 
 // ── in-memory @netlify/blobs — the ONLY mock. No production budget/pause state is read or written. ──
 const stores = {};
@@ -101,8 +105,8 @@ const { executeAction } = await import("../../netlify/functions/_actions.mjs");
 const { circle, waitForTx } = await import("../../netlify/functions/_circle.mjs");
 const { swapCapUsdc, CONTRACTS, USDC_DECIMALS, ARC } = await import("../../netlify/functions/_arc.mjs");
 const { daySpend } = await import("../../netlify/functions/_budget.mjs");
-const { rpcCall, assertChain } = await import("../dd/rpc.mjs");
-const { getChain } = await import("../dd/chains.mjs");
+const { rpcCall, assertChain } = await import("../../shared/dd/rpc.mjs");
+const { getChain } = await import("../../shared/dd/chains.mjs");
 
 const chain = getChain("arc-testnet");
 const rpc = (m, p) => rpcCall({ endpoint: chain.rpc, method: m, params: p }).then((r) => r.result); // retrying

@@ -51,6 +51,7 @@
 
 process.env.PERIOD_CEILING_USDC ||= "60";
 import { mock } from "node:test";
+import { requireKitKey } from "../_kit-key.mjs";
 
 const arg = (k, d) => { const a = process.argv.find((x) => x.startsWith(`--${k}=`)); return a ? a.split("=")[1] : d; };
 const CONFIRM = process.argv.includes("--confirm");
@@ -73,10 +74,12 @@ if (!CONFIRM) {
   console.log(`\n  re-run with --confirm to execute.\n`);
   process.exit(0);
 }
-if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET || !process.env.KIT_KEY) {
-  console.error("Need CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env) and KIT_KEY (prod env).");
+// ⭐ Below the dry-run exit: only the --confirm real fill needs a credential.
+if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) {
+  console.error("Need CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env).");
   process.exit(2);
 }
+requireKitKey();
 
 // ── in-memory @netlify/blobs — NO production mandate/budget/pause state is read or written ──
 const stores = {};
@@ -163,8 +166,8 @@ const budgetSeen = await import("../../netlify/functions/_budget.mjs");
 const { daySpend } = budgetSeen;
 const { CONTRACTS, USDC_DECIMALS, ARC } = await import("../../netlify/functions/_arc.mjs");
 const { withRetry } = await import("../../netlify/functions/_retry.mjs");
-const { rpcCall, assertChain } = await import("../dd/rpc.mjs");
-const { getChain } = await import("../dd/chains.mjs");
+const { rpcCall, assertChain } = await import("../../shared/dd/rpc.mjs");
+const { getChain } = await import("../../shared/dd/chains.mjs");
 
 // instrumentation must be attached, or every "=== 0" assertion passes vacuously (step-5 Part A lesson)
 if (budgetSeen.recordAgentSpend === realBudget.recordAgentSpend) {

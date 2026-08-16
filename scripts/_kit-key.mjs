@@ -44,6 +44,22 @@ export const HOWTO = [
   `     from https://console.circle.com/api-keys — use a key you hold, not the deployed one.`,
 ];
 
+/**
+ * ⭐ NON-THROWING shape test, for the one legitimate case: a script that SKIPS a sub-case without a
+ * key rather than failing the whole run (spike-design2a's cases 1/2 are its primary claim and need
+ * no network at all).
+ *
+ * ⚠️ WHY A SKIP MUST BE SHAPE-AWARE, NOT PRESENCE-AWARE. `if (!process.env.KIT_KEY) skip()` skips
+ * only when the key is ABSENT. A prefix-stripped or "No value set" value is PRESENT, so the script
+ * takes the live branch and dies at a confusing 401 deep inside the SDK — while the skip counter
+ * that exists to stop "skipped" reading as "passed" never increments. The malformed case must land
+ * on the same branch as the missing case.
+ */
+export function isWellFormedKitKey(raw = process.env[KIT_KEY_VAR]) {
+  const key = (raw ?? "").trim();
+  return key.length > 0 && !/no value set/i.test(key) && VERBATIM.test(key);
+}
+
 function refuse(headline, detail) {
   console.error(`\n✖ ${headline}`);
   if (detail) console.error(`  ${detail}`);

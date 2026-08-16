@@ -52,13 +52,15 @@
 process.env.PERIOD_CEILING_USDC ||= "60";
 import { mock } from "node:test";
 import { readFileSync } from "node:fs";
+import { requireKitKey } from "../_kit-key.mjs";
 
 const WALLET = (process.env.WALLET_ADDRESS || "0x6fb28d6366e755e0e27307692282490c6682fc58").toLowerCase();
 const SWAP_ADAPTER = "0xbbd70b01a1cabc96d5b7b129ae1aaabdf50dd40b";
-if (!process.env.KIT_KEY || !process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) {
-  console.error("Need CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env) and KIT_KEY (prod env) — A2 runs the REAL agentSwap up to a faked submit.");
+if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) {
+  console.error("Need CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env) — A2 runs the REAL agentSwap up to a faked submit.");
   process.exit(2);
 }
+requireKitKey();   // ⭐ unconditional: A2 runs the REAL agentSwap up to a faked submit
 
 // ── in-memory @netlify/blobs, with per-key WRITE COUNTS (the patchMandate substitute) ──
 let stores = {};

@@ -34,6 +34,7 @@
 
 process.env.PERIOD_CEILING_USDC ||= "60";
 import { mock } from "node:test";
+import { requireKitKey } from "../_kit-key.mjs";
 
 const arg = (k, d) => { const a = process.argv.find((x) => x.startsWith(`--${k}=`)); return a ? a.split("=")[1] : d; };
 const CONFIRM = process.argv.includes("--confirm");
@@ -60,10 +61,12 @@ if (!CONFIRM) {
   console.log(`  re-run with --confirm, in your own terminal (~${Math.ceil((DELAY_SEC + 120) / 60)} min exceeds an agent tool ceiling).\n`);
   process.exit(0);
 }
-if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET || !process.env.KIT_KEY) {
-  console.error("Need CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env) and KIT_KEY (prod env).");
+// ⭐ Below the dry-run exit: only the --confirm real submit needs a credential.
+if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) {
+  console.error("Need CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env).");
   process.exit(2);
 }
+requireKitKey();
 if (DELAY_SEC <= QUOTE_TTL_SEC) {
   console.error(`✖ --delay-sec=${DELAY_SEC} does not exceed the ${QUOTE_TTL_SEC}s quote TTL — the quote would still be VALID and the swap would EXECUTE FOR REAL. Refusing.`);
   process.exit(2);
@@ -126,8 +129,8 @@ const { sweep } = await import("../../netlify/functions/budget-sweep.mjs");
 const { daySpend, listUnresolvedCharges } = await import("../../netlify/functions/_budget.mjs");
 const { withRetry } = await import("../../netlify/functions/_retry.mjs");
 const { CONTRACTS, USDC_DECIMALS, ARC } = await import("../../netlify/functions/_arc.mjs");
-const { rpcCall, assertChain } = await import("../dd/rpc.mjs");
-const { getChain } = await import("../dd/chains.mjs");
+const { rpcCall, assertChain } = await import("../../shared/dd/rpc.mjs");
+const { getChain } = await import("../../shared/dd/chains.mjs");
 
 const chain = getChain("arc-testnet");
 const rpc = (m, p) => rpcCall({ endpoint: chain.rpc, method: m, params: p }).then((r) => r.result);

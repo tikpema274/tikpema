@@ -14,20 +14,21 @@
 // were bypassed the max loss is 1 USDC of testnet USDC from a wallet you created for this.
 //
 // MODES:
-//   node scripts/spike-phase0e-approve.mjs --provision            # make a fresh SCA to fund (no money)
-//   WALLET_ADDRESS=0x… KIT_KEY=… node … spike-phase0e-approve.mjs # DRY RUN: shows the exact call + preflight
-//   WALLET_ADDRESS=0x… KIT_KEY=… node … spike-phase0e-approve.mjs --confirm   # sends the ONE approve, then rebuilds
+//   node scripts/spikes/spike-phase0e-approve.mjs --provision            # make a fresh SCA to fund (no money)
+//   WALLET_ADDRESS=0x… node … spike-phase0e-approve.mjs            # DRY RUN: exact call + preflight (no key needed)
+//   WALLET_ADDRESS=0x… node … spike-phase0e-approve.mjs --confirm   # sends the ONE approve, then rebuilds
 //
 // RUN with: read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
-//              WALLET_ADDRESS=0x… node --env-file=.env scripts/spike-phase0e-approve.mjs [--confirm]
+//              WALLET_ADDRESS=0x… node --env-file=.env scripts/spikes/spike-phase0e-approve.mjs [--confirm]
 
 import { createPublicClient, http, parseAbi, getAddress, formatUnits } from "viem";
 import { AppKit } from "@circle-fin/app-kit";
 import { createCircleWalletsAdapter } from "@circle-fin/adapter-circle-wallets";
-import { circle, waitForTx } from "../netlify/functions/_circle.mjs";
-import { ARC, CONTRACTS } from "../netlify/functions/_arc.mjs";
-import { rpcCall } from "./dd/rpc.mjs";
-import { getChain } from "./dd/chains.mjs";
+import { circle, waitForTx } from "../../netlify/functions/_circle.mjs";
+import { ARC, CONTRACTS } from "../../netlify/functions/_arc.mjs";
+import { rpcCall } from "../../shared/dd/rpc.mjs";
+import { getChain } from "../../shared/dd/chains.mjs";
+import { requireKitKey } from "../_kit-key.mjs";
 
 // ── the confirmed target + amount, hardcoded exactly (no inference at runtime) ──────────────────
 const SPENDER = "0xbbd70b01a1cabc96d5b7b129ae1aaabdf50dd40b"; // ground-truth swap adapter (fill 0x204d94f8…)
@@ -44,6 +45,17 @@ const info = (s) => log(`  ·  ${s}`);
 
 for (const k of ["CIRCLE_API_KEY", "CIRCLE_ENTITY_SECRET"]) if (!process.env[k]) { console.error(`Missing ${k} (.env)`); process.exit(2); }
 
+// ═══ 🚨 CHECKED HERE BECAUSE THE APPROVE IS SENT BEFORE THE KEY WAS EVER USED ═══════════════════
+// KIT_KEY was NEVER validated in this file. Its only use is the swap.execute rebuild near the end —
+// which runs AFTER the real `approve(adapter, 1 USDC)` has already been broadcast. So a missing or
+// prefix-stripped key meant: money moves, THEN the run dies on a credential that was knowable at
+// second zero. Checking it here moves the failure in front of the money.
+//
+// ⚠️ GATED ON CONFIRM, NOT UNCONDITIONAL. A bare run is a dry run that exits before both the approve
+// and the rebuild, so it legitimately needs no credential — hard-requiring one would break the
+// preflight this script is normally used for.
+if (CONFIRM) requireKitKey();
+
 const pc = createPublicClient({ chain: { id: ARC.chainId, name: "arc-testnet", nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 }, rpcUrls: { default: { http: [ARC.rpc] } } }, transport: http(ARC.rpc) });
 
 // Preflight reads go through dd/rpc's transient-retry backoff (the same rpcCall that read clean
@@ -59,7 +71,7 @@ if (PROVISION) {
   const ws = await client.createWalletSet({ name: `spike-0e ${new Date().toISOString()}` });
   const wallets = await client.createWallets({ blockchains: [ARC.blockchain], count: 1, walletSetId: ws.data?.walletSet?.id ?? "", accountType: "SCA" });
   const w = wallets.data?.wallets?.[0];
-  log(`\nProvisioned throwaway SCA:\n  ${w?.address}\n\nFund it with ~2 USDC from https://faucet.circle.com (Arc gas is USDC), then re-run:\n  WALLET_ADDRESS=${w?.address} KIT_KEY=… node --env-file=.env scripts/spike-phase0e-approve.mjs        # dry run\n  WALLET_ADDRESS=${w?.address} KIT_KEY=… node --env-file=.env scripts/spike-phase0e-approve.mjs --confirm  # send approve\n`);
+  log(`\nProvisioned throwaway SCA:\n  ${w?.address}\n\nFund it with ~2 USDC from https://faucet.circle.com (Arc gas is USDC), then re-run:\n  WALLET_ADDRESS=${w?.address} node --env-file=.env scripts/spikes/spike-phase0e-approve.mjs        # dry run (no key needed)\n  read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history\n  WALLET_ADDRESS=${w?.address} node --env-file=.env scripts/spikes/spike-phase0e-approve.mjs --confirm  # send approve\n`);
   process.exit(0);
 }
 if (!WALLET || !/^0x[0-9a-fA-F]{40}$/.test(WALLET)) { console.error("Set WALLET_ADDRESS=0x… (a FUNDED throwaway SCA). Run with --provision to make one."); process.exit(2); }

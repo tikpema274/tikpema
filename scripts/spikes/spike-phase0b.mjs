@@ -23,13 +23,13 @@
 //
 // RUN:
 //   read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
-//     WALLET_ADDRESS=0x… node --env-file=.env scripts/spike-phase0b.mjs
+//     WALLET_ADDRESS=0x… node --env-file=.env scripts/spikes/spike-phase0b.mjs
 //   (WALLET_ADDRESS optional — defaults to a throwaway; the quote doesn't care whose address.)
 
 import { createCircleWalletsAdapter } from "@circle-fin/adapter-circle-wallets";
-import { CONTRACTS } from "../netlify/functions/_arc.mjs";
-import { rpcCall, assertChain } from "./dd/rpc.mjs";
-import { getChain } from "./dd/chains.mjs";
+import { CONTRACTS } from "../../netlify/functions/_arc.mjs";
+import { rpcCall, assertChain } from "../../shared/dd/rpc.mjs";
+import { getChain } from "../../shared/dd/chains.mjs";
 
 import { requireKitKey } from "../_kit-key.mjs";
 const KIT_KEY = requireKitKey();

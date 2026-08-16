@@ -23,17 +23,18 @@
 //
 // RUN (KIT_KEY is supplied per-run and never stored; CIRCLE_* are in .env):
 //   read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
-//     node --env-file=.env scripts/spike-phase0.mjs
+//     node --env-file=.env scripts/spikes/spike-phase0.mjs
 //   # reuse an existing wallet instead of provisioning a fresh one:
-//   WALLET_ID=<uuid> WALLET_ADDRESS=0x… KIT_KEY=… node --env-file=.env scripts/spike-phase0.mjs
+//   WALLET_ID=<uuid> WALLET_ADDRESS=0x… node --env-file=.env scripts/spikes/spike-phase0.mjs
 
 import { AppKit } from "@circle-fin/app-kit";
 import { createCircleWalletsAdapter } from "@circle-fin/adapter-circle-wallets";
-import { circle } from "../netlify/functions/_circle.mjs";
-import { ARC, CONTRACTS } from "../netlify/functions/_arc.mjs";
-import { estimateSwapOnly } from "../netlify/functions/_swap.mjs";
-import { rpcCall, assertChain } from "./dd/rpc.mjs";
-import { getChain } from "./dd/chains.mjs";
+import { circle } from "../../netlify/functions/_circle.mjs";
+import { ARC, CONTRACTS } from "../../netlify/functions/_arc.mjs";
+import { estimateSwapOnly } from "../../netlify/functions/_swap.mjs";
+import { rpcCall, assertChain } from "../../shared/dd/rpc.mjs";
+import { getChain } from "../../shared/dd/chains.mjs";
+import { requireKitKey } from "../_kit-key.mjs";
 
 const SWAP_CHAIN = "Arc_Testnet"; // App Kit's chain identifier for Arc Testnet
 const AMOUNT_IN = "1"; // 1 USDC — priced/prepared only, never spent
@@ -45,7 +46,10 @@ const no = (s) => line(`  ⚠️  ${s}`);
 const info = (s) => line(`  ·  ${s}`);
 
 // ── guards ────────────────────────────────────────────────────────────────────────────────────
-for (const k of ["CIRCLE_API_KEY", "CIRCLE_ENTITY_SECRET", "KIT_KEY"]) {
+// ⭐ KIT_KEY was previously only presence-checked in this loop, then passed straight into AppKit
+// config at two call sites. Shape-check it up front instead.
+requireKitKey();
+for (const k of ["CIRCLE_API_KEY", "CIRCLE_ENTITY_SECRET"]) {
   if (!process.env[k]) {
     console.error(`Missing ${k}. CIRCLE_* are in .env; KIT_KEY is in the Netlify prod env — see header.`);
     process.exit(2);

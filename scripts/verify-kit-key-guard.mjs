@@ -87,6 +87,28 @@ check("🚨🚨 a REFUSED key is never printed — only its shape",
 check("⚠️ …while still reporting enough to act on (length + prefix presence, or the named trap)",
   /PREFIX-STRIPPED/.test(badLeak.out));
 
+// ── isWellFormedKitKey: the non-throwing predicate the SKIP path depends on ──────────────────────
+// 🚨 IT MUST AGREE WITH requireKitKey ON EVERY INPUT. If the predicate accepted something the guard
+// refuses, a skipping script would take its LIVE branch on a key the guard considers unusable — the
+// skip counter never increments, and "skipped" silently reads as "passed".
+const { isWellFormedKitKey } = await import("../scripts/_kit-key.mjs");
+const AGREE = [GOOD, "", "   ", "No value set for KIT_KEY", "abc123.id-x:s3cr3t",
+               "KIT_KEY:", "KIT_KEY:abc123", "not-a-key-at-all", "KIT_KEY:KIT_KEY:abc:def"];
+let agreed = 0;
+for (const v of AGREE) {
+  const predicate = isWellFormedKitKey(v);
+  const guard = run(v).code === 0;
+  if (predicate === guard) agreed++;
+  else console.log(`     ↳ DISAGREE on shape: predicate=${predicate} guard=${guard}`);
+}
+check("⭐⭐ isWellFormedKitKey agrees with requireKitKey on every input",
+  agreed === AGREE.length, `${agreed}/${AGREE.length}`);
+check("⚠️ …and it reads process.env by default (so a bare call needs no argument)",
+  typeof isWellFormedKitKey() === "boolean");
+check("⭐ the predicate never throws, even on undefined", (() => {
+  try { isWellFormedKitKey(undefined); isWellFormedKitKey(null); return true; } catch { return false; }
+})());
+
 // ── the guard reaches for nothing ────────────────────────────────────────────────────────────────
 // 🚨 STRIP COMMENTS BEFORE ASSERTING. The first version of this check matched the guard's own PROSE
 // — it documents the `netlify env:get` trap, so a raw source regex flagged the file for a string

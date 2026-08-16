@@ -35,6 +35,7 @@
 
 process.env.PERIOD_CEILING_USDC ||= "60";
 import { mock } from "node:test";
+import { isWellFormedKitKey } from "../_kit-key.mjs";
 
 const WALLET = (process.env.WALLET_ADDRESS || "0x6fb28d6366e755e0e27307692282490c6682fc58").toLowerCase();
 const SWAP_ADAPTER = "0xbbd70b01a1cabc96d5b7b129ae1aaabdf50dd40b";
@@ -149,8 +150,14 @@ check("⭐ THE GATE BRANCHES: DCA ≠ MANUAL for the same swap (a hardcoded cap 
 
 // ═══ CASE 3 — MANUAL EURC: the cap is PRICED into tokenIn units ═══
 console.log(`\n── CASE 3 · MANUAL (confirm:false) · EURC→USDC 1.00 (cap priced) ──`);
-if (!process.env.KIT_KEY) {
-  console.log(`   ⃠  SKIPPED — needs KIT_KEY (EURC pricing calls getTokenRates). Cases 1/2 need no network.`);
+// ⭐ SKIP RETAINED ON PURPOSE: cases 1/2 are this spike's PRIMARY claim (the control proving the
+// `!confirm` gate branches) and need no network at all. Turning a missing key into a hard exit
+// would make the script unusable for the thing it mainly proves.
+// ⚠️ But the condition is now SHAPE-aware, not presence-aware: a prefix-stripped or "No value set"
+// key is non-empty, so the old test sent it down the LIVE branch to die at a 401 — and `fails++`
+// below, which exists so a skipped claim never reads as a passed one, never ran.
+if (!isWellFormedKitKey()) {
+  console.log(`   ⃠  SKIPPED — needs a well-formed KIT_KEY (EURC pricing calls getTokenRates). Cases 1/2 need no network.`);
   fails++; // a skipped claim is not a passed claim
 } else {
   const eurPrice = await valueInUsdc({ token: "EURC", amount: 1 });      // USD per 1 EURC
