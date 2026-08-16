@@ -60,7 +60,11 @@ console.log("\n── ⭐⭐ THE ESCALATION MUST NOT BE REACHABLE FROM THE BILLI
 // 🚨 Charging for a disagreement makes a provider-integrity failure REVENUE-POSITIVE. That is the
 // flat-price argument ("a coverage-scaled price would pay us more for reporting more coverage — an
 // incentive to overstate") aimed at a different variable. The defence is structural, not vigilance.
-const src = readFileSync(new URL("../../netlify/functions/dd-analyze.mjs", import.meta.url), "utf8");
+// ⭐ THE ESCALATION AND THE PRODUCER MOVED TO _dd-rungs.mjs (2026-08-16) so the in-app report route
+// and the paid route share one implementation. The structural guarantee got STRONGER — see the
+// import-graph assertion at the end of this section — but it is now a claim about that file.
+const src = readFileSync(new URL("../../netlify/functions/_dd-rungs.mjs", import.meta.url), "utf8");
+const analyzeSrc = readFileSync(new URL("../../netlify/functions/dd-analyze.mjs", import.meta.url), "utf8");
 const sig = src.match(/export function escalateProviderIntegrity\(([^)]*)\)/)?.[1] ?? "";
 ok("⭐⭐ the escalation takes ONLY the report and a correlation id — no billing value is in scope",
   /^\s*report\s*,\s*correlationId\s*$/.test(sig), `signature: (${sig})`);
@@ -86,10 +90,18 @@ ok("⭐⭐ …and it cannot branch on a charge outcome — no billing identifier
 const callMatch = src.match(/^[ \t]+escalateProviderIntegrity\(report, correlationId\);$/m);
 const callAt = callMatch ? src.indexOf(callMatch[0]) : -1;
 ok("⭐⭐ the escalation is actually CALLED as a statement (deleting the call must fail this suite)", callAt > 0);
-ok("⭐ …and it is called BEFORE the report is handed to the paid flow, not after settlement",
-  callAt > 0 && callAt < src.indexOf("runPaidAnalysis("));
+// ⭐⭐ THE ORDERING CHECK BECAME AN IMPORT CHECK, AND THAT IS A STRICTLY STRONGER GUARANTEE.
+// It used to assert the call site sat above `runPaidAnalysis(` IN THE SAME FILE — a claim about
+// text order, which any edit could reorder. The producer now lives in a module that does not import
+// the billing machinery AT ALL, so it cannot branch on a settlement outcome even in principle: the
+// identifier is not in scope. Structural, not positional.
+ok("⭐⭐ …and the module holding it imports NO billing code — settlement is not in scope, at all",
+  !/from "\.\/_dd-x402\.mjs"/.test(src) && !/settle-gate/.test(src) && !/_x402-confirm/.test(src));
+ok("⭐ …while dd-analyze (which DOES bill) receives the producer as an opaque thunk",
+  /makeProduceReport\(\{ addr, chain, correlationId \}\)/.test(analyzeSrc) &&
+  /produceReport,/.test(analyzeSrc));
 ok("⭐ …and the reason is written AT THE CODE so nobody later simplifies them together",
-  /revenue-positive|incentive gradients off the money path/i.test(src));
+  /revenue-positive|incentive gradients off the money path|whether we got paid/i.test(src));
 ok("  the escalation never throws — an alerting failure must not destroy a paid-for report",
   /an alert that breaks the response is worse than a missed alert/.test(src));
 
@@ -110,7 +122,7 @@ ok("⭐ …and it says a single-endpoint build would have SIGNED AND SOLD the an
 ok("  a malformed report does not throw out of the alerter", errs.length === 1);
 
 console.log("\n── THE PAID PATH ACTUALLY READS THROUGH QUORUM ─────────────────────");
-ok("⭐⭐ dd-analyze builds a quorumClient over the shared endpoint set",
+ok("⭐⭐ the shared producer builds a quorumClient over the shared endpoint set",
   /quorumClient\(ARC_QUORUM_ENDPOINTS\.map/.test(src));
 ok("⭐ …and no longer analyses through a bare single-endpoint client",
   !/analyze\(addr,\s*\{\s*client:\s*chainClient\(chain\)\s*\}\)/.test(src));

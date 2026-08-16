@@ -128,6 +128,23 @@ const DD_SURFACE_FILES = [
   // "young". The measurement supports adding it; it does not guarantee the cost stays at zero.
   "shared/x402/settle-gate.mjs",        // decides whether a buyer is CHARGED
   "netlify/functions/_x402-confirm.mjs",// the money path dd-analyze settles through
+
+  // ═══ ⭐⭐ ADDED 2026-08-16 — THE SHARED LADDER AND THE SECOND ENTRY POINT ════════════════════
+  // 🚨 `_dd-rungs.mjs` CONTAINS THE HEALTH GATE ITSELF. Leaving it out would mean a change to the
+  // rung that decides whether an unverified detector may answer produced an identical ddTree — old
+  // canary evidence vouching for a rewritten gate, which is the precise fail-open this binding
+  // exists to close, aimed at the binding's own enforcement point.
+  // ⚠️ It also holds the REPORT PRODUCER (quorum, systemic-failure refusal, attestation), so it can
+  // change what every report means without any other listed file moving.
+  "netlify/functions/_dd-rungs.mjs",
+  // The second surface that produces a signed report. Same reasoning as dd-analyze.mjs above.
+  "netlify/functions/agent-dd-report.mjs",
+  // ⭐ The gate that REPLACES x402 on the in-app path. A fail-open here would let an anonymous
+  // caller obtain signed reports — the same exposure question DD_PUBLIC_ENABLED answers for the
+  // public route, so it belongs inside the same hash.
+  // ⚠️ Churn measured before adding, per the rule established above: 2 commits over the full
+  // history, last 2026-07-03. Adding it costs ~nothing and closes a real gap.
+  "netlify/functions/_auth.mjs",
   // ⭐ THE STRONGEST CASE, AND NOT ON FREQUENCY GROUNDS: this file COMPUTES ddCodeIdentity. A change
   // here can silently alter what the identity MEANS — its own header warns that a fallback would be
   // "unknown === unknown wearing a new name — the exact fail-open the version binding exists to

@@ -246,6 +246,16 @@
   from = "/api/agent-vault-inspect"
   to = "/.netlify/functions/agent-vault-inspect"
   status = 200
+
+# ⭐ The in-app DD report — the SAME artifact /api/dd-analyze sells over x402, session-authed
+# instead of paid. Read-only; signs an attestation, moves nothing. See agent-dd-report.mjs for
+# which ladder rungs it skips and why HEALTH is not one of them.
+# ⚠️ A route with no redirect 404s while the function deploys fine — the exact defect that left
+# /api/dca-* dead for 22 days while its notes claimed "FULLY VERIFIED … UI". gate:routes covers it.
+[[redirects]]
+  from = "/api/agent-dd-report"
+  to = "/.netlify/functions/agent-dd-report"
+  status = 200
 [[redirects]]
   from = "/api/agent-vault-deposit"
   to = "/.netlify/functions/agent-vault-deposit"

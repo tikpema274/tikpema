@@ -68,22 +68,26 @@ suite counted as passing and several "bridge green" reports were false. See
 
 ## WHERE THE POLICY THREAD IS
 
-`evaluatePolicy` (`shared/onchain-analyze/policy.mjs`) is built, tested 36/0, mutation-tested, live in
-the artifact — and **has no consumer yet**. Settled design, not yet built:
+✅ **`evaluatePolicy` HAS A CONSUMER** — `POST /api/agent-dd-report`, built 2026-08-16, **NOT YET
+DEPLOYED**. The shared ladder (`_dd-rungs.mjs`), the in-app route, and the warn supersession all
+landed; see the entry below for what each one is defending. `test:all` exits 0, tsc + build clean.
 
-* **The in-app report route** — same schema and code path a buyer gets, session-authed instead of
-  x402. Skip exposure, skip payment, **KEEP health** (the card gates deposits, a stronger reason to
-  respect it than a buyer has). ⭐ The rung ladder goes in ONE shared helper both entry points call.
-* **Quorum accepted**, ~8 RPC calls per render, **no cache first — measure real load**. Arc's public
-  RPC has throttled this repo before. Any cache later inherits the CDN lesson: `no-store` stops new
-  storage and cannot evict what is stored.
-* **The three-way warn split**: power warns → the report; owner-identity warns → the report;
-  `performance-fee` → stays in `inspection` (no report equivalent). ⚠️ ALL BLOCKs stay, especially
-  `not-a-contract` — it is what makes the three accidental safety mechanisms safe.
-* **Ack invalidation accepted**; there are **zero persisted acks** (no ack store), so the cost is
-  bounded by open browser tabs.
-* Then: policy storage at `agent-policy` / `o/<owner>`, and an override token binding the **policy
-  digest** (without it a later edit makes the receipt claim a rule that no longer means the same).
+Still ahead on this thread:
+
+* **The UI consumer.** The route exists and **nothing calls it** — no card, no fetch. This is the
+  mirror of the DCA bug and `gate:routes` structurally cannot see it (see OTHER OPEN ITEMS).
+* **Policy storage** at `agent-policy` / `o/<owner>`. Until it exists the policy is client-supplied,
+  so the verdict ships marked `authority: "display-only"` **in the payload** and must not gate
+  anything. A caller who chooses their own rules can choose rules that pass.
+* **The override token binding the policy digest** — without it a later edit makes the receipt claim
+  a rule that no longer means the same.
+* **Step 2 of the warn migration:** `gateDeposit` must READ `holder`/`holderKind` and the power
+  catalogue from the report. Only then may the superseded warns be deleted. The condition is written
+  at the code as `deleteWhen`, not here.
+
+⭐ **MEASURED, not estimated: 9 JSON-RPC requests per card render** across 2 endpoints (5 + 4), not
+the ~8 predicted. The asymmetry is `pin()`, which is deliberately NOT quorumed — one endpoint is
+pinned and the same block tag goes to every other. No cache, and the suite asserts there isn't one.
 
 ## OTHER OPEN ITEMS
 
@@ -92,15 +96,195 @@ the artifact — and **has no consumer yet**. Settled design, not yet built:
   `mint_unconfirmed`. Past the 7-day auto-retry bound by design; **resolves when the owner opens the
   Bridge panel**.
 * 🚧 **Hop 2 of the unified-balance exit has never run.** Matures ~2026-08-19.
-* 🚧 **The source-grep sweep** — *"the string appears" is not "the call happens."* Four instances now:
-  a dead `indexOf` (`-1 < anything`), a tautological `||`, an exported function with zero callers, and
-  the 409 disclosure with no consumer.
+* 🚧 **The source-grep sweep** — *"the string appears" is not "the call happens."* Five instances now:
+  a dead `indexOf` (`-1 < anything`), a tautological `||`, an exported function with zero callers,
+  the 409 disclosure with no consumer, and — 2026-08-16 — a "there is no cache" check that read the
+  producer's own JSDoc *arguing about* caching and went red. Comments must be stripped before any
+  claim about what the CODE does.
+* ⭐ **`gate:routes` AUDITS ONE DIRECTION ONLY — and both directions are now known to fail in prod.**
+  It checks **referenced → redirect**, which caught nothing on 2026-08-16: the new
+  `/api/agent-dd-report` redirect exists with **nothing calling it**, and the gate passed. The
+  reverse audit, **redirect → referenced**, is the same tool pointed the other way.
+  ⚠️ The two failures are mirrors of each other and BOTH have happened here: a **reference with no
+  route** left `/api/dca-*` dead for 22 days while its notes claimed "FULLY VERIFIED … UI", and a
+  **route with no reference** is what this session just shipped. One audit covering one of them is
+  **half a guard**. ⚠️ A dangling redirect is the cheaper failure — it 404s nobody — but it is also
+  the one that lets a route be believed shipped when no code path reaches it.
+* ⭐ **THE DISCOVERY PAGE IS UNREACHABLE DURING EVERY POST-DEPLOY REFUSAL WINDOW — and that is a
+  DEFECT, not a confirmation of the order.** Found on the 2026-08-16 draft: a **GET** to
+  `/api/dd-analyze` returned `service-unverified` JSON instead of the discovery page, because
+  **health (rung 0) precedes method (rung 1)**. The window is up to the `*/10` canary period after
+  every deploy — ⚠️ **precisely when a human is most likely to be looking, right after a change.**
+  They get a 503 about a detector instead of the page that tells them how to call the thing.
+  ⭐ **THE CODEBASE ALREADY CONTAINS THE PRINCIPLE, one rung above:** `retrieve` sits at −0.5 with
+  *"the health gate guards the PRODUCTION of new answers, not the delivery of old ones."* The
+  discovery page is not an answer about a subject either — **it is documentation**. Same reasoning,
+  same placement: the `wantsHtml` branch belongs ahead of HEALTH.
+  ⚠️ Scope: move ONLY the HTML/`howToCall` branch. The `service-unverified` refusal for a real POST
+  must stay exactly where it is — that one IS a claim about a subject.
+  A small move in a frozen array, with the justification already written in the file.
 * ⚠️ **Mutation hygiene:** five mutations this session reported green without applying. Every mutation
   must print whether it changed anything.
 
 ---
 
 ---
+
+## 2026-08-16 — ⭐⭐ `evaluatePolicy` HAS A CONSUMER, AND THE LADDER IT CLIMBS EXISTS ONCE
+
+`POST /api/agent-dd-report` — the in-app report route. Session-authed instead of x402, **the same
+artifact a buyer receives**, produced by the same code. `evaluatePolicy` was built, tested 36/0 and
+mutation-tested with nothing calling it; a policy evaluator with no consumer is a claim nobody has
+had to stand behind. **Built, not deployed** — prod still serves the old `dd-analyze`.
+
+### ⭐⭐ THE ONE LADDER, AND WHY THE SKIP LIST IS INVERTED
+
+`_dd-rungs.mjs` holds the rung order in a single frozen array. The load-bearing choice is that an
+entry point does **not list the rungs it runs — it names the ones it SKIPS**:
+
+* a rung ADDED to the ladder is climbed by **every** entry point, including ones written before it
+  existed. Had handlers listed what they run, a new rung would apply only to whichever handler its
+  author remembered to edit.
+* a skip is a **named, validated, deliberate** act. `assertSkipSet` **throws** on an unrecognised
+  name and on anything in `UNSKIPPABLE`. Tested by CALLING it — thirteen bad skip names, each
+  asserted to throw — not by grepping for the constant.
+
+🚨 **HEALTH IS UNSKIPPABLE BY CONSTRUCTION**, not by comment. The in-app path has a *stronger* reason
+to respect it than a buyer does: a buyer who gets a report from an unverified detector loses the
+price of a report; a user who deposits on one loses the deposit. Proven live in the suite — a
+session-authed caller with a non-passing health artifact still gets 503 `service-unverified`, and it
+is a REPORT with `checked: 0` and the word INDETERMINATE, never an error envelope.
+
+⭐ **THE PRODUCER IS SHARED TOO, AND THAT IS THE HALF THAT MATTERS.** A shared ladder feeding two
+different producers would still hand the card an object no buyer can reproduce and no attestation
+covers. `makeProduceReport` — quorum, the systemic-failure refusal, the integrity escalation, the
+attestation — is now one function. The suite asserts neither entry point calls `analyze()` itself,
+neither builds its own quorum client, and the in-app route returns the **FULL** report: **no "lite"
+variant**, because a projection is the first step toward two schemas and a card whose verdict is
+derived from fields the buyer's copy does not contain.
+
+⚠️ **AUTH SITS AHEAD OF THE LADDER, DELIBERATELY.** The ladder asks *can the SERVICE answer*; auth
+asks *may THIS CALLER ask*. Folding auth in would put a rung there that the public endpoint must
+skip — and **every skippable rung is one a future entry point can skip by accident**. The shared
+ladder has no auth concept at all and so cannot be misconfigured into having one.
+
+### ⭐ 9 REQUESTS PER RENDER, NOT ~8 — AND THE ASYMMETRY IS THE INTERESTING PART
+
+Counted against a counting transport, quorum fan-out included: **9 JSON-RPC requests per card
+render across 2 endpoints — 5 + 4, not 4½ + 4½.** `pin()` is deliberately NOT quorumed (two
+endpoints legitimately differ by a block or two; requiring agreement on the head would refuse
+constantly on CORRECT behaviour), so one endpoint is pinned and the same block tag goes to the rest.
+That single un-quorumed read is the whole difference between the estimate and the measurement.
+
+**No cache, and the suite asserts there isn't one** — "we decided not to cache" is otherwise
+unfalsifiable. A 40-request ceiling fails the suite if a change makes a render dramatically dearer,
+on a chain whose public RPC has already throttled this repo.
+
+### 🚨🚨 `inspection` — RETAIN AND MARK, BECAUSE DELETING FIRST INVERTS THE ORDER
+
+The plan was that power-scan and owner-identity warns MIGRATE to the report. **They have not been
+deleted, and the reason is that `inspection` is not a display vocabulary — it is the GATE's input.**
+
+`gateDeposit` consumes it server-side, `level` derives from `warns.length`, and the warn CODES are
+the substance of `disclosureDigest`. So deleting a superseded warn before `gateDeposit` reads the
+report does not "move" the disclosure anywhere: for a vault whose only warns were the migrated ones,
+`level` falls **WARN → OK and the deposit proceeds with NO acknowledgement at all**. A gate that
+quietly stops asking for consent is the worst available version of this change, and it is
+[absence-must-never-read-as-safe] with a deposit on the end of it.
+
+⭐ **SO THE MIGRATION HAS AN ORDER:** (1) the report carries the disclosure ✅ · (2) `gateDeposit`
+READS it ❌ · (3) only then delete. `WARN_SUPERSESSION` marks all seven migrating warns with
+`supersededBy` and **`deleteWhen`** — the deletion condition written **at the code**, never in a
+commit message. ⭐ Temporary, deliberate, MARKED coexistence is a different thing from permanent
+duplication; an **UNMARKED leftover** is what becomes drift.
+
+⚠️ **THE INSTRUCTION SAID OWNER-IDENTITY WARNS; THIS APPLIES IT TO THE POWER WARNS TOO**, because the
+failure shape is identical and the argument does not distinguish them. Consequence: **the digest does
+not move at all.** Annotation only adds fields and `disclosureDigest` reads `w.code`, so every
+outstanding ack stays valid — asserted byte-identical by calling it, with the counterfactual asserted
+beside it: deleting a warn DOES move the digest, and `gateDeposit` on the deleted version returns
+`ok: true` with no ack. Both directions proven, not argued.
+
+⚠️ **`performance-fee` is deliberately ABSENT from the table.** It derives from a fee VALUE the
+report never reads, so it has no replacement; listing it would schedule the deletion of a disclosure
+with nothing to take its place. The suite asserts its absence.
+
+⚠️ **THE BLOCK LADDER IS UNTOUCHED** — `not-a-contract`, `not-erc4626`, `empty-shell`,
+`withdraw-fee-too-high`, `proxy-status-unreadable`, `asset-mismatch`, each asserted still raised AND
+not scheduled for deletion. `not-a-contract` in particular is what makes the three accidental safety
+mechanisms on the vault path safe.
+
+### ⭐ THE REFACTOR BROKE NINE SOURCE-REGEX ASSERTIONS, AND ONE CAME BACK STRONGER
+
+Moving code out of `dd-analyze.mjs` (563 → 265 lines) reddened nine checks in `verify-build-binding`
+and `verify-quorum-billing` that grep its source — a live demonstration of
+[assert-on-rendered-output-not-source-regex]. Retargeted, and two got better:
+
+* **The escalation's "called BEFORE `runPaidAnalysis`" check was POSITIONAL** — a claim about text
+  order in one file, which any edit could reorder. It is now an **import** check: the module holding
+  the producer imports no billing code at all, so it cannot branch on a settlement outcome even in
+  principle — **the identifier is not in scope**. Structural beats positional.
+* **The two per-handler "uses codeIdentityForEvent" checks became one claim over every entry point:**
+  no handler derives an identity of its own. With a shared rung it can be stated once and enforced
+  over handlers written later.
+
+### PROVEN, NOT ASSUMED
+
+* ⭐ **`ddTree` ROTATES on a `_dd-rungs.mjs` edit** — verified by appending a line, re-stamping, and
+  diffing the hash, then removing it. 🚨 That file **contains the health gate itself**; had the row
+  been missed, a change to the rung deciding whether an unverified detector may answer would produce
+  an identical ddTree — old canary evidence vouching for a rewritten gate, the exact fail-open the
+  binding exists to close, aimed at the binding's own enforcement point.
+* `_auth.mjs` added to the DD surface — **churn measured first**, per the rule the last addition
+  established: 2 commits over the full history, last 2026-07-03.
+* `test:all` **exit 0** (read from `$?`, not grepped — the first attempt this session read `tail`'s
+  exit code, which is the same trap recorded twice already), tsc clean, `vite build` clean,
+  `gate:routes` 5/0.
+
+**New suite `scripts/dd/verify-dd-report.mjs` — 67/0**, wired into `test:dd`.
+
+### ⭐ PROVEN ON A DRAFT BEFORE PROD — `6a8182a3dcc807171c049095`
+
+`gate:draft` refused the first attempt and was RIGHT: on a draft the canary is unreachable by BOTH
+routes (scheduled functions 403 on invoke; cron fires only on the published deploy), so the health
+artifact can never be written and nothing gated on it can pass. Schedule commented out per its own
+instruction, deployed (**35m 34s**, 21m of it bundling), **restored immediately after**.
+⚠️ `netlify.toml` is OUTSIDE the hashed surface, so the tree hash is byte-identical with the schedule
+commented or not — `gate:watch`/`gate:draft` is the only thing that catches a forgotten restore.
+
+| check | result |
+|---|---|
+| `/api/agent-dd-report` reachable | **401 JSON** — not a 404, not the SPA HTML fallback |
+| `dd-analyze` after the 563→265 refactor | **402**, correct `payTo` `0xb4079673…`, price `60000` |
+| shared rung 3 / rung 4 | 400 `invalid-address` / 400 `unsupported-chain` |
+| canary run | `wrote:true`, 5 fixtures, **0 failures**, DD surface now **34 files** |
+
+⭐⭐ **AND THE DRAFT FOUND A DEFECT THE IN-PROCESS SUITE STRUCTURALLY COULD NOT** — a **GET** during
+the pre-canary window returned `service-unverified` instead of the discovery page, because health
+precedes method. See OTHER OPEN ITEMS: the discovery page is documentation, not an answer about a
+subject, and the file already argues for that placement one rung above. This is
+[binding-tested-across-what-it-binds] again — 67 green in-process checks all ran in one process where
+the health artifact was mocked, and none of them could see an ordering cost that only exists across
+a real deploy's refusal window.
+
+### ⚠️ WHAT THIS DOES NOT CLAIM
+
+* 🚨 **THE AUTHENTICATED HAPPY PATH IS UNPROVEN OVER HTTP.** Auth sits ahead of the ladder, so every
+  anonymous call is 401 — the draft proves the route executes and refuses, NOT that it renders a
+  report or that `evaluatePolicy` returns a verdict on a real artifact. No session token was minted:
+  [live-proof-fund-moving-user-runs]. **The owner must run one authenticated call.** The discriminator
+  to read back is `policy.reason` + `policy.coverage` — present-power, unreadable-power and
+  below-threshold are three different findings and the reason the evaluator has two buckets.
+* **NO UI CONSUMER.** The redirect exists and nothing fetches it. `gate:routes` passed anyway — it
+  audits one direction only. Added to OTHER OPEN ITEMS with the reason.
+* **The policy is client-supplied**, so the verdict is `authority: "display-only"` and gates nothing.
+* `runLadder`'s two "rung not skipped but no dep supplied" throws are unexercised — the handlers
+  always supply them, so the branch only fires on a future miswiring.
+
+Files: new `netlify/functions/_dd-rungs.mjs`, `netlify/functions/agent-dd-report.mjs`,
+`scripts/dd/verify-dd-report.mjs`; modified `dd-analyze.mjs` (climbs the shared ladder),
+`_vault.mjs` (`WARN_SUPERSESSION`), `netlify.toml` (redirect), `scripts/stamp-build.mjs` (three DD
+surface rows), `verify-build-binding.mjs`, `verify-quorum-billing.mjs`, `package.json`.
 
 ## 2026-08-15 (night, later) — ⭐⭐ THE SWEEP IS BUILT — AND ITS FIRST RUN PROVED MY OWN BASELINE WAS A FILTERED READ
 

@@ -425,6 +425,12 @@ export async function inspectVault(address) {
   if (performanceFeeBps !== null && performanceFeeBps > 0) warns.push({ code: "performance-fee", detail: `A ${(performanceFeeBps / 100).toFixed(2)}% performance fee is taken on harvested yield.` });
   if (upgradeable) warns.push({ code: "upgradeable", detail: ownerPowers.upgradeable.note });
 
+  // ⭐ ANNOTATE, NEVER REMOVE. See WARN_SUPERSESSION for the whole argument.
+  for (const w of warns) {
+    const s = WARN_SUPERSESSION[w.code];
+    if (s) { w.supersededBy = s.supersededBy; w.deleteWhen = s.deleteWhen; }
+  }
+
   const level = blocks.length ? "BLOCK" : warns.length ? "WARN" : "OK";
 
   return {
@@ -450,6 +456,83 @@ export async function inspectVault(address) {
     verdict: { level, blocks, warns },
   };
 }
+
+// ═══ ⭐⭐ WARN SUPERSESSION — MARKED COEXISTENCE, ON PURPOSE, WITH A DELETION CONDITION ═══════
+//
+// The DD report (shared/onchain-analyze) now covers most of what these warns say, and the in-app
+// card can render it. The obvious next move is to delete the duplicated warns from `inspection`.
+//
+// 🚨 DELETING THEM NOW WOULD SILENTLY REMOVE AN ACK REQUIREMENT, AND THAT IS THE WHOLE REASON THIS
+// TABLE EXISTS INSTEAD.
+//
+// `inspection` is NOT only a display vocabulary — it is the GATE's input. `gateDeposit` consumes it
+// server-side, `level` is derived from `warns.length`, and the warn CODES are the substance of
+// `disclosureDigest`. So dropping `owner-unreadable` from `warns` before `gateDeposit` reads
+// `holder`/`holderKind` from the report does not "move" the disclosure anywhere: for a vault whose
+// only warns were the migrated ones, `level` falls WARN → OK and the deposit proceeds with NO
+// acknowledgement at all. A gate that quietly stops asking for consent is the worst available
+// version of this change, and it is exactly [absence-must-never-read-as-safe] — an absence filling
+// a result slot and reading as safety.
+//
+// ⭐ SO THE MIGRATION HAS AN ORDER, AND DELETING FIRST INVERTS IT:
+//      1. the report carries the disclosure                      ← done
+//      2. `gateDeposit` READS the report for it                  ← NOT DONE
+//      3. only then, delete the superseded warns from here
+//
+// ⭐ AND THE DELETION CONDITION IS WRITTEN AT THE CODE, not in a commit message or a doc. Temporary,
+// deliberate, MARKED coexistence is a different thing from permanent duplication — an UNMARKED
+// leftover is precisely what becomes drift, and this repo already lists
+// [duplicate-source-of-truth-is-the-recurring-bug] as a recurring cost. `deleteWhen` is the marking.
+//
+// ⚠️ ANNOTATION ONLY — THE DIGEST MUST NOT MOVE. `disclosureDigest` reads `w.code` and nothing else,
+// so adding `supersededBy`/`deleteWhen` to a warn object leaves every digest byte-identical and
+// invalidates no outstanding acknowledgement. verify-vault asserts that by CALLING it, not by
+// trusting this sentence.
+//
+// ⚠️ THE THREE-WAY SPLIT, AND WHY `performance-fee` IS ABSENT FROM THIS TABLE:
+//   · power-scan warns  → the report's power catalogue covers them (a bytecode selector scan)
+//   · owner-identity warns → the report's `holder`/`holderKind` covers them
+//   · `performance-fee` → derives from a fee VALUE the report does not read at all. It is not
+//     superseded by anything, it is not migrating, and it STAYS. Listing it here would schedule the
+//     deletion of a disclosure with no replacement.
+//
+// ⚠️ THE BLOCK LADDER IS UNTOUCHED and must stay that way — `not-a-contract`, `not-erc4626`,
+// `empty-shell`, `withdraw-fee-too-high`, `proxy-status-unreadable`, `asset-mismatch`. Blocks are not
+// in the digest and are refused BEFORE any ack is consulted. `not-a-contract` in particular is what
+// makes the three accidental safety mechanisms on this path safe; removing power disclosure must not
+// disturb it.
+export const WARN_SUPERSESSION = Object.freeze({
+  // ── power-scan warns ──────────────────────────────────────────────────────────────────────
+  "emergency-withdraw": Object.freeze({
+    supersededBy: "report.powers[] group `emergencyWithdraw`",
+    deleteWhen: "gateDeposit reads the power catalogue from the DD report instead of inspection.verdict.warns",
+  }),
+  "fees-settable": Object.freeze({
+    supersededBy: "report.powers[] group `settableFees`",
+    deleteWhen: "gateDeposit reads the power catalogue from the DD report instead of inspection.verdict.warns",
+  }),
+  "upgradeable": Object.freeze({
+    supersededBy: "report.powers[] group `upgradeable`",
+    deleteWhen: "gateDeposit reads the power catalogue from the DD report instead of inspection.verdict.warns",
+  }),
+  // ── owner-identity warns ──────────────────────────────────────────────────────────────────
+  "owner-is-eoa": Object.freeze({
+    supersededBy: "report.holder / report.holderKind",
+    deleteWhen: "gateDeposit reads holder/holderKind from the DD report instead of inspection.verdict.warns",
+  }),
+  "owner-is-unidentified-contract": Object.freeze({
+    supersededBy: "report.holder / report.holderKind",
+    deleteWhen: "gateDeposit reads holder/holderKind from the DD report instead of inspection.verdict.warns",
+  }),
+  "owner-unreadable": Object.freeze({
+    supersededBy: "report.holder / report.holderKind (UNREADABLE tri-state)",
+    deleteWhen: "gateDeposit reads holder/holderKind from the DD report instead of inspection.verdict.warns",
+  }),
+  "owner-not-exposed": Object.freeze({
+    supersededBy: "report.holder / report.holderKind (no owner function)",
+    deleteWhen: "gateDeposit reads holder/holderKind from the DD report instead of inspection.verdict.warns",
+  }),
+});
 
 // ── ACK TOKEN (fail-closed) ────────────────────────────────────────────────────────────────
 // The ack is bound to the SPECIFIC disclosure the user saw. It is a deterministic digest over

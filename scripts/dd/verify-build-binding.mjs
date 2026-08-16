@@ -124,13 +124,26 @@ section("0 — THE DEPLOY-ID BINDING: one derivation, used by both sides");
     withStaleEnv.build === BUILD_A, withStaleEnv.build?.slice(0, 12));
   check("⭐⭐ no stamp -> UNBOUND, and the canary must refuse", buildIsBound(idFor(null)) === false);
 
-  // 🚨 STRUCTURAL: both handlers must call the SHARED derivation, never codeIdentity directly.
+  // 🚨 STRUCTURAL: every handler must reach the SHARED derivation, never codeIdentity directly.
+  //
+  // ⭐ THE HEALTH RUNG MOVED TO _dd-rungs.mjs (2026-08-16) and the guarantee got STRONGER, not
+  // weaker: there is now exactly ONE call site serving BOTH entry points, rather than one per
+  // handler that had to be kept in agreement. The assertion follows the code — and then checks the
+  // thing that actually matters, which is that neither handler derives an identity of its own.
   const canary = readFileSync("netlify/functions/dd-canary.mjs", "utf8").replace(/^\s*\/\/.*$/gm, "");
-  const analyze = readFileSync("netlify/functions/dd-analyze.mjs", "utf8").replace(/^\s*\/\/.*$/gm, "");
+  const rungs = readFileSync("netlify/functions/_dd-rungs.mjs", "utf8").replace(/^\s*\/\/.*$/gm, "");
   check("⭐⭐ dd-canary uses codeIdentityForEvent and NOT bare codeIdentity",
     /codeIdentityForEvent\(event,/.test(canary) && !/[^r]codeIdentity\(\{/.test(canary));
-  check("⭐⭐ dd-analyze uses codeIdentityForEvent and NOT bare codeIdentity",
-    /codeIdentityForEvent\(event,/.test(analyze) && !/[^r]codeIdentity\(\{/.test(analyze));
+  check("⭐⭐ the SHARED health rung uses codeIdentityForEvent and NOT bare codeIdentity",
+    /codeIdentityForEvent\(event,/.test(rungs) && !/[^r]codeIdentity\(\{/.test(rungs));
+  // ⭐⭐ AND NO ENTRY POINT MAY DERIVE ONE ITSELF. This is the claim the two per-handler checks were
+  // really making; with a shared rung it can be stated once and enforced over every entry point,
+  // including ones written later.
+  for (const f of ["netlify/functions/dd-analyze.mjs", "netlify/functions/agent-dd-report.mjs"]) {
+    const src = readFileSync(f, "utf8").replace(/^\s*\/\/.*$/gm, "");
+    check(`⭐⭐ ${f.split("/").pop()} derives NO identity of its own — it inherits the shared rung`,
+      !/codeIdentity\w*\(/.test(src) && !/resolveBuildId\(/.test(src) && !/x-nf-deploy-id/.test(src));
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -177,9 +190,10 @@ section("0b — no-record carries the DERIVED BUILD (the commonest refusal)");
              return r.serve === false && r.reason === HEALTH_REASON.VERSION_MISMATCH && !!r.evidence.recorded && !!r.evidence.running; })());
   check("  …unreadable still refuses", evaluateHealth({ record: null, readable: false, now: Date.now(), expect: RUN }).serve === false);
 
-  // ⭐ ONE derivation. dd-analyze must not obtain a build id any other way.
-  const az = readFileSync("netlify/functions/dd-analyze.mjs", "utf8").replace(/^\s*\/\/.*$/gm, "");
-  check("⭐⭐ dd-analyze derives the identity ONLY via codeIdentityForEvent",
+  // ⭐ ONE derivation, now in the shared rung that every entry point climbs. No handler may obtain
+  // a build id any other way — asserted over the handlers themselves a few sections above.
+  const az = readFileSync("netlify/functions/_dd-rungs.mjs", "utf8").replace(/^\s*\/\/.*$/gm, "");
+  check("⭐⭐ the shared health rung derives the identity ONLY via codeIdentityForEvent",
     /codeIdentityForEvent\(event,/.test(az) && !/resolveBuildId\(/.test(az) && !/x-nf-deploy-id/.test(az));
   check("  …and forwards runningBuild + recordedNote into the diagnostic",
     /ev\.runningBuild/.test(az) && /ev\.recordedNote/.test(az));

@@ -1,0 +1,451 @@
+// _dd-rungs.mjs — THE ONE LADDER. Every entry point that produces a DD report climbs it here.
+//
+// ═══ ⭐⭐ WHY THIS FILE EXISTS AT ALL ═════════════════════════════════════════════════════════
+// There are now TWO ways to obtain a report: a paying buyer over x402 (`dd-analyze`), and a
+// session-authed in-app card (`agent-dd-report`). They must return THE SAME ARTIFACT — same schema,
+// same quorum, same attestation — because the whole claim of the in-app panel is that the policy
+// evaluates something a buyer could independently verify. The moment the two paths compute their
+// own ladders, they drift, and the drift is INVISIBLE: both keep returning well-formed reports, and
+// nothing fails. One of them just quietly stops checking something.
+//
+// ⚠️ THIS REPO HAS ALREADY PAID FOR THAT EXACT SHAPE — [duplicate-source-of-truth-is-the-recurring-bug]:
+// "a claim copied into a second place always drifts". A validation ladder copied into a second
+// handler is that bug with a gate on the end of it.
+//
+// ═══ ⭐ THE ORDER IS THE PRODUCT, SO THE ORDER LIVES IN ONE ARRAY ══════════════════════════════
+// `LADDER` below is the single ordered definition. An entry point does not re-list the rungs it
+// wants; it names the ones it SKIPS. That inversion is deliberate and load-bearing:
+//
+//   · a rung ADDED here is automatically climbed by every entry point, including ones written
+//     before it existed. If entry points listed the rungs they run, a new rung would silently apply
+//     to whichever handler its author remembered to edit.
+//   · a skip is a NAMED, VALIDATED, DELIBERATE act. An unrecognised skip name THROWS rather than
+//     being ignored — a typo'd skip that is silently dropped would either re-enable a rung the
+//     author meant to skip (noisy, harmless) or, in the mirror case, read as a skip that never
+//     happened. Closed sets, never a convenient default. [absence-must-never-read-as-safe]
+//
+// ═══ 🚨 SOME RUNGS CANNOT BE SKIPPED BY ANYONE ════════════════════════════════════════════════
+// `UNSKIPPABLE` is enforced by a throw, not by a comment. HEALTH is on it. A future entry point
+// that finds the health gate inconvenient cannot quietly opt out of the last layer that stops an
+// unverified detector from answering questions about someone's money.
+
+import { randomUUID } from "node:crypto";
+import { json } from "./_arc.mjs";
+import { exposureState } from "./_dd-exposure.mjs";
+import { readHealth } from "./_dd-health.mjs";
+import { codeIdentityForEvent, evaluateHealth } from "../../shared/dd-canary/health.mjs";
+import { SUPPORTED_CHAINS } from "./_dd-descriptor.mjs";
+import { chainClient } from "../../shared/dd/client.mjs";
+import { quorumClient } from "../../shared/onchain-analyze/quorum.mjs";
+import { ARC_QUORUM_ENDPOINTS } from "../../shared/onchain-analyze/endpoints.mjs";
+import { analyze } from "../../shared/onchain-analyze/index.mjs";
+import { baseReport, assertReportValid, SCHEMA_VERSION } from "../../shared/onchain-analyze/schema.mjs";
+import { attachAttestation, unsignedAttestation } from "../../shared/onchain-analyze/attest.mjs";
+import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
+import { ddAttestationOptions } from "../../shared/dd/attest-circle.mjs";
+
+export const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+export const MAX_BODY_BYTES = 4096;
+
+/** The closed set of rung names. A skip naming anything outside this is a programmer error. */
+export const RUNG = Object.freeze({
+  EXPOSURE: "exposure",
+  RETRIEVE: "retrieve",
+  HEALTH: "health",
+  METHOD: "method",
+  BODY: "body",
+  ADDRESS: "address",
+  CHAIN: "chain",
+  PAYTO: "payTo",
+});
+
+/**
+ * ⭐⭐ THE ORDER. Changing this array changes both entry points at once, which is the entire point.
+ *
+ * Each position is a decision that was argued for once, in `dd-analyze`, and must not be re-argued
+ * per handler:
+ *   · EXPOSURE first  — cheapest possible check; deploying must not equal publishing.
+ *   · RETRIEVE second — behind exposure (no paid callers if never published), but AHEAD of health,
+ *     because an already-paid report was produced when the detector was known good and must not be
+ *     stranded by a later canary blip. The health gate guards PRODUCTION, not DELIVERY.
+ *   · HEALTH third    — before any validation, so an unverified service is uniformly UNAVAILABLE
+ *     rather than selectively degraded.
+ *   · then the request-shape rungs, cheapest first.
+ *   · PAYTO last of the gates — never quote a price payable to nowhere.
+ *
+ * ⚠️ PAYMENT IS NOT IN THIS ARRAY, and that is not an oversight. Payment is a BRANCH (challenge vs
+ * settle), not a gate that either refuses or falls through, and only one entry point has one. The
+ * ladder ends where the paths legitimately diverge; everything above it is shared by construction.
+ */
+export const LADDER = Object.freeze([
+  RUNG.EXPOSURE, RUNG.RETRIEVE, RUNG.HEALTH, RUNG.METHOD, RUNG.BODY, RUNG.ADDRESS, RUNG.CHAIN, RUNG.PAYTO,
+]);
+
+/**
+ * 🚨 RUNGS NO ENTRY POINT MAY SKIP — enforced by a throw in `assertSkipSet`.
+ *
+ * HEALTH is here because it is the last layer that keeps a detector which fails its own known-shape
+ * fixtures from answering questions about someone else's contracts. The in-app path has a STRONGER
+ * reason to respect it than a buyer does, not a weaker one: the card gates a deposit. A buyer who
+ * gets a bad report loses the price of a report; a user who deposits on one loses the deposit.
+ *
+ * The request-shape rungs are here because skipping them does not save work, it only moves the
+ * failure — an unvalidated address reaches `analyze()`, which throws on it BY DESIGN (it reserves
+ * exceptions for programmer error), and over the wire that throw is a 500 with a stack trace.
+ */
+export const UNSKIPPABLE = Object.freeze([RUNG.HEALTH, RUNG.METHOD, RUNG.BODY, RUNG.ADDRESS, RUNG.CHAIN]);
+
+/**
+ * A refusal that is a REPORT, not an error.
+ *
+ * Coverage is populated with EVERY power group in the shared catalogue, each marked not-checked with
+ * the real reason — so a refusal satisfies the same completeness invariant a successful report does.
+ * An empty coverage block would pass through assertReportValid as "coverage-incomplete", turning a
+ * clean refusal into a second, confusing one.
+ */
+export function refusalReport({ address = null, chainName = null, chainId = null, reason, detail, diagnostic = null }) {
+  const notChecked = Object.keys(POWER_SIGS).map((group) => ({
+    id: `power:${group}`,
+    kind: "power",
+    group,
+    reason: `request refused before any analysis ran (${reason}) — nothing was scanned`,
+  }));
+  return assertReportValid({
+    ...baseReport({ address, chainId, chainName, blockNumber: null }),
+    shape: { class: "unknown", family: "unknown", variant: null, scannedAddress: null, evidence: { why: reason } },
+    coverage: {
+      checked: [],
+      notChecked,
+      totals: { checked: 0, notChecked: notChecked.length },
+      summary:
+        "NOTHING was checked: the request was refused before analysis began. This is an INDETERMINATE result, not a clean bill.",
+    },
+    refusal: { reason, detail, ...(diagnostic ? { diagnostic } : {}) },
+    // Input-validation refusals are deliberately NOT signed. They are statements about a REQUEST,
+    // not about a subject on chain, and signing anonymous malformed input would turn this endpoint
+    // into an unmetered signing oracle over attacker-chosen bytes.
+    attestation: unsignedAttestation("input rejected before analysis — there is no on-chain claim to attest"),
+  });
+}
+
+/**
+ * ⭐ Validate the skip set. Throws on anything unrecognised or forbidden.
+ *
+ * ⚠️ THROWS RATHER THAN FILTERING. A silently-dropped skip name is a lie in both directions, and the
+ * caller is a programmer, so a throw is the correct register — the same reasoning `analyze()` uses
+ * for a malformed address. This runs at request time rather than module load only because handlers
+ * build their skip list inline; the tests call it directly so the throw is exercised by CALLING it,
+ * not by grepping for it. [assert-on-rendered-output-not-source-regex]
+ */
+export function assertSkipSet(skip) {
+  if (!Array.isArray(skip)) throw new Error(`runLadder(): \`skip\` must be an array, got ${typeof skip}`);
+  const known = new Set(Object.values(RUNG));
+  for (const s of skip) {
+    if (!known.has(s)) {
+      throw new Error(`runLadder(): unknown rung ${JSON.stringify(s)} in \`skip\` — known rungs: ${[...known].join(", ")}`);
+    }
+    if (UNSKIPPABLE.includes(s)) {
+      throw new Error(`runLadder(): rung ${JSON.stringify(s)} is UNSKIPPABLE and must not be bypassed by any entry point`);
+    }
+  }
+  return new Set(skip);
+}
+
+/**
+ * Climb the ladder.
+ *
+ * @param {object}   event                the Netlify event
+ * @param {string[]} skip                 rung names to skip — validated, never silently ignored
+ * @param {object}   deps                 per-rung dependencies (only needed for rungs not skipped)
+ * @param {function} deps.retrieve        (handle) => http response — required unless RETRIEVE skipped
+ * @param {function} deps.resolvePayTo    () => {ok, payTo, ...}    — required unless PAYTO skipped
+ * @param {function} deps.decorateMethodRefusal  optional: (refusal, event) => http response
+ * @returns {Promise<{done: object}|{ok: true, body, addr, chain, payTo}>}
+ *          `done` is a finished HTTP response (a refusal, or a retrieval). `ok` means keep going.
+ */
+export async function runLadder({ event, skip = [], deps = {} }) {
+  const skipped = assertSkipSet(skip);
+  const ran = [];
+  const ctx = { body: null, addr: null, chain: null, payTo: null };
+
+  for (const rung of LADDER) {
+    if (skipped.has(rung)) continue;
+    ran.push(rung);
+
+    // ── ⭐ RUNG -1: IS THIS SERVICE EVEN SUPPOSED TO ANSWER THE PUBLIC? ────────────────────────
+    // Deploying this function must NOT be the same act as publishing it. UNSET = DISABLED, and so is
+    // anything unrecognised. Deployed-but-inert is the default; serving is the deliberate act.
+    //
+    // ⚠️ THE IN-APP PATH SKIPS THIS DELIBERATELY, and the reason is that it is not the same question.
+    // `DD_PUBLIC_ENABLED` governs whether an ANONYMOUS caller may reach a signed attestation endpoint
+    // under agentId 851891. A session-authed owner reading their own vault card is already past a
+    // stronger gate. Gating the card on the public flag would mean shipping the service disabled
+    // (the safe default) also silently disables the deposit disclosure.
+    if (rung === RUNG.EXPOSURE) {
+      const exposure = exposureState();
+      if (!exposure.enabled) {
+        return { done: json(503, refusalReport({
+          reason: "service-not-enabled",
+          detail: `${exposure.detail} (${exposure.reason}). The service is deployed but not published. Set DD_PUBLIC_ENABLED to enable it deliberately.`,
+        })), ran };
+      }
+      continue;
+    }
+
+    // ── ⭐ RETRIEVE: redeem a handle for a report already paid for ─────────────────────────────
+    if (rung === RUNG.RETRIEVE) {
+      if (typeof deps.retrieve !== "function") {
+        throw new Error("runLadder(): rung `retrieve` is not skipped but no deps.retrieve was supplied");
+      }
+      const q = event.queryStringParameters || {};
+      const handle = q.handle || (event.headers || {})["x-payment-handle"];
+      if (handle) return { done: await deps.retrieve(handle), ran };
+      continue;
+    }
+
+    // ── ⭐ RUNG 0: IS THIS SERVICE KNOWN GOOD? ─────────────────────────────────────────────────
+    // Requires a POSITIVE, FRESH, VERSION-MATCHED pass. Absence, staleness, unreadability,
+    // malformation and version drift all refuse. "No news is good news" is structurally impossible
+    // here, which is the entire point: the last safety layer must not itself fail open.
+    if (rung === RUNG.HEALTH) {
+      // ⭐ SAME derivation as dd-canary (codeIdentityForEvent). The cron WRITES the artifact and
+      // this HTTP path READS it; if the two derived the id differently the keys would never match.
+      const identity = codeIdentityForEvent(event, { schemaVersion: SCHEMA_VERSION, powerSigs: POWER_SIGS });
+      const { record, readable } = await readHealth(identity);
+      const health = evaluateHealth({ record, readable, now: Date.now(), expect: identity });
+      if (!health.serve) {
+        const ev = health.evidence ?? {};
+        return { done: json(503, refusalReport({
+          reason: "service-unverified",
+          detail: `${health.detail} (${health.reason}). The service is REFUSING TO SERVE rather than answering from a detector that is not known good. This is not a degraded result — it is no result.`,
+          diagnostic: {
+            healthReason: health.reason,
+            ...(ev.mismatched ? { mismatchedFields: ev.mismatched } : {}),
+            ...(ev.running ? { running: ev.running } : {}),
+            ...(ev.runningBuild ? { runningBuild: ev.runningBuild } : {}),
+            ...(ev.recordedNote ? { recordedNote: ev.recordedNote } : {}),
+            ...(ev.recorded ? { recorded: ev.recorded } : {}),
+            ...(ev.buildSources ? { buildSources: ev.buildSources } : {}),
+            ...(ev.ageMs !== undefined ? { ageMs: ev.ageMs, ttlMs: ev.ttlMs } : {}),
+          },
+        })), ran };
+      }
+      continue;
+    }
+
+    // ── rung 1: method ─────────────────────────────────────────────────────────────────────────
+    // ⭐ THE DECISION IS SHARED; THE DECORATION IS AN EXPLICIT, NAMED DIFFERENCE. The public endpoint
+    // hangs a discovery page and a `howToCall` block off this refusal because a human who clicks the
+    // link deserves a route to a working call. An in-app route has no discovery problem — its only
+    // caller is our own fetch. Passing a decorator keeps the REFUSAL identical and makes the extra
+    // marketing surface a thing an entry point opts into, not a thing it re-implements.
+    if (rung === RUNG.METHOD) {
+      if (event.httpMethod !== "POST") {
+        const refusal = refusalReport({
+          reason: "unsupported-method",
+          detail: `this endpoint accepts POST; received ${event.httpMethod}`,
+        });
+        return {
+          done: typeof deps.decorateMethodRefusal === "function"
+            ? deps.decorateMethodRefusal(refusal, event)
+            : json(405, refusal),
+          ran,
+        };
+      }
+      continue;
+    }
+
+    // ── rung 2: body ───────────────────────────────────────────────────────────────────────────
+    if (rung === RUNG.BODY) {
+      const raw = event.body ?? "";
+      if (raw.length > MAX_BODY_BYTES) {
+        return { done: json(400, refusalReport({ reason: "malformed-request", detail: `request body exceeds ${MAX_BODY_BYTES} bytes` })), ran };
+      }
+      try {
+        ctx.body = raw ? JSON.parse(raw) : {};
+      } catch {
+        return { done: json(400, refusalReport({ reason: "malformed-request", detail: "request body is not valid JSON" })), ran };
+      }
+      if (ctx.body === null || typeof ctx.body !== "object" || Array.isArray(ctx.body)) {
+        return { done: json(400, refusalReport({ reason: "malformed-request", detail: "request body must be a JSON object" })), ran };
+      }
+      continue;
+    }
+
+    // ── rung 3: address ────────────────────────────────────────────────────────────────────────
+    // Checked BEFORE analyze() rather than relying on it: analyze() throws on a bad address by
+    // design, and that throw over the wire is a 500 with a stack instead of an answer.
+    if (rung === RUNG.ADDRESS) {
+      const { address } = ctx.body ?? {};
+      if (address === undefined || address === null || address === "") {
+        return { done: json(400, refusalReport({ reason: "invalid-address", detail: "`address` is required and was missing or empty" })), ran };
+      }
+      if (typeof address !== "string" || !ADDRESS_RE.test(address.trim())) {
+        return { done: json(400, refusalReport({ reason: "invalid-address", detail: "`address` must be a 0x-prefixed 20-byte hex string" })), ran };
+      }
+      ctx.addr = address.trim().toLowerCase();
+      continue;
+    }
+
+    // ── rung 4: chain ──────────────────────────────────────────────────────────────────────────
+    // ⭐ `chain` IS REQUIRED, AND ONLY ARC IS ACCEPTED. Cross-chain deterministic deployments
+    // COLLIDE: Permit2, Multicall3, the Safe 1.3.0 singleton and CreateX all have real bytecode at
+    // the same address on Arc (measured). Forcing the caller to NAME the chain makes every response
+    // either explicitly correct or explicitly refused — never silently about the wrong chain.
+    if (rung === RUNG.CHAIN) {
+      const { chain } = ctx.body ?? {};
+      if (chain === undefined || chain === null || chain === "") {
+        return { done: json(400, refusalReport({
+          address: ctx.addr,
+          reason: "chain-not-specified",
+          detail: `\`chain\` is required — an address alone does not identify a chain, and the same address holds different code on different chains. Supported: ${SUPPORTED_CHAINS.join(", ")}`,
+        })), ran };
+      }
+      if (typeof chain !== "string" || !SUPPORTED_CHAINS.includes(chain)) {
+        return { done: json(400, refusalReport({
+          address: ctx.addr,
+          chainName: typeof chain === "string" ? chain : null,
+          reason: "unsupported-chain",
+          detail: `this service analyzes ${SUPPORTED_CHAINS.join(", ")} only; refusing ${JSON.stringify(chain)}. Any other chain is unexercised and unverified here, and answering anyway would be a confident answer about something never tested.`,
+        })), ran };
+      }
+      ctx.chain = chain;
+      continue;
+    }
+
+    // ── rung 5: is there a revenue address to be paid? ─────────────────────────────────────────
+    // Fail-closed: an unset payTo refuses rather than silently downgrading a paid service to a free
+    // one. The in-app path skips it because it is not selling anything — there is no price to quote.
+    if (rung === RUNG.PAYTO) {
+      if (typeof deps.resolvePayTo !== "function") {
+        throw new Error("runLadder(): rung `payTo` is not skipped but no deps.resolvePayTo was supplied");
+      }
+      const resolution = deps.resolvePayTo();
+      if (!resolution.ok) {
+        return { done: json(503, refusalReport({
+          address: ctx.addr,
+          chainName: ctx.chain,
+          reason: "payment-misconfigured",
+          detail: `${resolution.detail} (${resolution.reason})`,
+        })), ran };
+      }
+      ctx.payTo = resolution.payTo;
+      continue;
+    }
+  }
+
+  return { ok: true, ...ctx, ran };
+}
+
+/**
+ * Did our INSTRUMENT fail, as opposed to the subject having little to find?
+ *
+ * ⭐⭐ THE BILLING BOUNDARY on the paid path — and it stays in the SHARED producer even though the
+ * in-app path never bills, because it is also the honesty boundary. A report where every read failed
+ * is not a thin answer, it is no answer, and a card that rendered it as "nothing found against your
+ * rules" would be the clean bill this whole subsystem exists to prevent.
+ *
+ * ⚠️ A DISAGREEMENT IS NOT AN INSTRUMENT FAILURE and is deliberately excluded. We did read; they
+ * conflicted. That is a finding about the providers.
+ */
+export function isSystemicReadFailure(report) {
+  const cov = report?.coverage;
+  if (!cov || !Array.isArray(cov.checked) || !Array.isArray(cov.notChecked)) return false;
+  if (cov.checked.length > 0) return false;              // something was established → an answer
+  if (cov.notChecked.length === 0) return false;         // nothing to judge
+  const INSTRUMENT = ["rpc-unreadable", "rpc-quorum-unmet"];
+  return cov.notChecked.every((n) => INSTRUMENT.includes(n.reason));
+}
+
+/**
+ * ⚠️ NEVER THROWS. An alerting failure must not destroy a report the buyer may have paid for.
+ *
+ * ⭐ Takes the REPORT AND NOTHING ELSE, and is called from inside the producer — BEFORE any caller
+ * decides anything about settlement. The charge decision is not in scope here and cannot be branched
+ * on, because it does not exist yet. ⚠️ DO NOT "simplify" this by passing it `charged`: the moment
+ * those meet, whether we shout about a bad provider becomes a function of whether we got paid.
+ */
+export function escalateProviderIntegrity(report, correlationId) {
+  try {
+    const integrity = report?.sources?.integrity;
+    if (!integrity?.providerDisagreement) return;
+    console.error(
+      `[dd ${correlationId}] 🚨 PROVIDER DISAGREEMENT — endpoints returned different values ` +
+        `for the same call at the same block. At least one source is serving something FALSE. ` +
+        `subject=${report?.subject?.address} chain=${report?.subject?.chainId} ` +
+        `block=${report?.subject?.blockNumber} splits=${integrity.splits.map((x) => x.id).join(",")} ` +
+        `endpoints=${(report?.sources?.endpoints || []).join(" | ")} — ⚠️ a single-endpoint build of ` +
+        `this service would have SIGNED AND SOLD this answer. Re-verify endpoint independence out of ` +
+        `band; a retry may return agreement and erase the evidence.`
+    );
+  } catch {
+    /* an alert that breaks the response is worse than a missed alert */
+  }
+}
+
+/**
+ * ⭐⭐ THE REPORT PRODUCER — SHARED, SO THE IN-APP CARD EVALUATES AN ARTIFACT A BUYER COULD VERIFY.
+ *
+ * This is the other half of "one ladder". A shared ladder that fed two different producers would
+ * still hand the policy a report the buyer never sees. Quorum, the systemic-failure refusal, the
+ * provider-integrity escalation and the attestation are all HERE, once.
+ *
+ * ⭐ QUORUM ON BOTH PATHS, AND NO CACHE. `ARC_QUORUM_ENDPOINTS` is read per render — deliberately
+ * un-memoised on the first cut so the real load is a measured number rather than an estimate. Arc's
+ * public RPC has throttled this repo before, so the load is worth knowing before it is worth hiding.
+ * ⚠️ Any cache added later inherits the CDN lesson recorded in [netlify-blobs-strong-consistency]:
+ * `no-store` stops new storage and CANNOT evict what is already stored.
+ *
+ * @returns {function(): Promise<object>} a thunk — NOT run here. The paid path hands it to
+ *          runThenSettle(), which guarantees it runs BEFORE anything touches money.
+ */
+export function makeProduceReport({ addr, chain, correlationId }) {
+  return async () => {
+    let report;
+    try {
+      report = await analyze(addr, {
+        client: quorumClient(ARC_QUORUM_ENDPOINTS.map((rpc) => chainClient(chain, { rpc }))),
+      });
+
+      // ⭐ Escalate FIRST, and from a scope that has no billing outcome in it.
+      escalateProviderIntegrity(report, correlationId);
+
+      // ⚠️ TOTAL INSTRUMENT FAILURE IS NOT A THIN ANSWER.
+      if (isSystemicReadFailure(report)) {
+        console.error(`[dd ${correlationId}] systemic read failure — every check unreadable; refusing rather than presenting an empty report as a result`);
+        return refusalReport({
+          address: addr,
+          chainName: report?.subject?.chainName ?? null,
+          chainId: report?.subject?.chainId ?? null,
+          reason: "chain-unreadable",
+          detail:
+            "no check could be completed: every read failed across the whole endpoint set, so this " +
+            "is our instrument failing rather than a thin subject. You are not charged.",
+        });
+      }
+    } catch (e) {
+      console.error(`[dd ${correlationId}] analyze threw:`, e);
+      return refusalReport({
+        address: addr,
+        chainName: chain,
+        reason: "internal-error",
+        detail: `the analysis could not run. This is INDETERMINATE, not a clean bill. Reference: ${correlationId}`,
+      });
+    }
+
+    // ── attestation: sign, but DEGRADE rather than fail ────────────────────────────────────────
+    // A signer outage must not destroy an otherwise-good report. `attestation.status` already models
+    // the unsigned case, which is exactly why it is a status field and not a promise.
+    try {
+      return await attachAttestation(report, ddAttestationOptions());
+    } catch (e) {
+      console.error(`[dd ${correlationId}] signing failed:`, e);
+      return {
+        ...report,
+        attestation: unsignedAttestation(`the report is complete but could not be signed on this run. Reference: ${correlationId}`),
+      };
+    }
+  };
+}
+
+export const newCorrelationId = () => randomUUID();
