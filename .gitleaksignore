@@ -24,3 +24,29 @@
 # reasoning, including the fact that these addresses hold sweepable Arc-testnet funds.
 scripts/dd/verify-attestation.mjs:generic-api-key:56
 scripts/dd/verify-attestation.mjs:generic-api-key:57
+
+# ═══ ⭐ THE SAME TWO ANVIL KEYS, AT THEIR HISTORICAL POSITION ════════════════════════════════════
+# 🚨 THE ENTRIES ABOVE ONLY SILENCE THE WORKING-TREE SCAN, AND THAT HID A DISAGREEMENT.
+# `gitleaks protect` (the pre-commit hook) scans the CURRENT file, where these keys sit at 56/57 —
+# so every commit reported "0 leaks" and everyone believed the repo was clean. `gitleaks detect`
+# scans HISTORY, where commit 375993fa still holds them at 38/39, because 59493b7 (2026-07-31)
+# added the explanatory comment block and pushed them down eighteen lines.
+#
+# ⭐⭐ TWO SCANS, TWO ANSWERS, AND ONLY ONE WAS EVER RUN. The allowlist drifted the moment the file
+# was edited, and nothing announced it: a line-numbered suppression silently stops matching while
+# the thing it suppressed is still there. Found only because a credential audit ran the history scan
+# for the first time.
+#
+# ⚠️ PINNED BY FULL FINGERPRINT (commit:file:rule:line), which CANNOT drift — that commit is
+# immutable, so this entry is correct forever. The line-only form above remains fragile by
+# construction and will need re-pinning the next time this file is edited.
+#
+# ⚠️ DELIBERATELY NOT FIXED WITH A PATH-WIDE RULE. A `.gitleaks.toml` allowlist on this file would
+# survive every future edit — and would also suppress a REAL key if one were ever added here. On a
+# secret scanner, precision beats convenience: two exact fingerprints can only ever hide the two
+# things they name.
+#
+# WHAT THEY ARE: the canonical Anvil/Hardhat default test keys, printed by `anvil` on every start
+# and published verbatim in the Foundry and Hardhat docs. Public by design. Nothing to rotate.
+375993fa948eef706ddb695e23d7a6f4f624f9f6:scripts/dd/verify-attestation.mjs:generic-api-key:38
+375993fa948eef706ddb695e23d7a6f4f624f9f6:scripts/dd/verify-attestation.mjs:generic-api-key:39
