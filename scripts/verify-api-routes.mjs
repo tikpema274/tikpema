@@ -25,6 +25,39 @@ import { join } from "node:path";
 // ⚠️ SCOPE, STATED: this proves a path RESOLVES to a function. It does not prove the function works,
 // nor that a deployed netlify.toml matches this one. Post-deploy smoke is what covers the second.
 
+// ═══ ⭐⭐ AND THE AUDIT RUNS BOTH WAYS, BECAUSE BOTH DIRECTIONS HAVE FAILED IN PRODUCTION ══════
+// This file was written for ONE direction — referenced → redirect — and that is HALF A GUARD:
+//
+//   · a REFERENCE WITH NO ROUTE  → the DCA bug: three paths 404'd for 22 days (above).
+//   · a ROUTE WITH NO REFERENCE  → 2026-08-16: `/api/agent-dd-report` was deployed with a redirect
+//     and nothing calling it, and this suite passed. The mirror image, and it passed BECAUSE the
+//     audit only looked one way.
+//
+// ⚠️ THE SECOND IS THE CHEAPER FAILURE — a dangling redirect 404s nobody — but it is the one that
+// lets a route be BELIEVED SHIPPED when no code path reaches it. That is the same shape as "live and
+// IDLE": a surface nobody calls is indistinguishable from one with nothing to do.
+//
+// ⭐ AN EXEMPTION MUST BE STATED, NOT ASSUMED. Several routes legitimately have no front-end caller
+// — the DD service is sold to strangers, some endpoints are operator-only. So the reverse check is
+// not "ignore unknowns"; it is an allowlist where EVERY entry carries a REASON, and anything not on
+// it fails. The reason string is the mechanism: you cannot silence a route without saying why, and a
+// wrong reason is reviewable in a way that a missing entry never was.
+//
+// ⚠️ AND THE ALLOWLIST ITSELF IS AUDITED — an entry for a route that no longer exists fails too,
+// otherwise it rots into permanent cover for a path nobody checks.
+const NO_FRONTEND_CALLER = new Map([
+  // ── sold to strangers: the whole point is that OUR app is not the caller ──
+  ["/api/dd-analyze", "PUBLIC x402 endpoint. Buyers are external agents; the SPA never calls it."],
+  ["/api/dd-openapi", "the machine-readable descriptor `howToCall.openApiUrl` points at, fetched by external clients."],
+  // ── operator / bootstrap, deliberately never wired to a button ──
+  ["/api/agent-init", "ONE-TIME bootstrap that mints a new agent wallet and ERC-8004 identity. Deliberately not reachable from the UI — a stray click would create a brand new agent."],
+  ["/api/agent-status", "read-only operator diagnostic (wallet + identity), curled by hand."],
+  ["/api/agent-parameters", "read-only cap/parameter dump for operators and smoke checks."],
+  ["/api/agent-ub-spend", "agent-facing spend endpoint, exercised by scripts/smoke-endpoints.mjs rather than by a panel."],
+  // ── 🚧 GENUINELY NOT WIRED YET — this is a TODO, not an exemption ──
+  ["/api/agent-dd-report", "🚧 BUILT 2026-08-16, NO UI CONSUMER YET. The in-app DD report route awaits its card. ⚠️ This entry is a placeholder for work in flight and MUST be deleted once the panel calls it — leaving it would hide the exact class this reverse audit exists to catch."],
+]);
+
 const SRC = "src";
 const TOML = readFileSync("netlify.toml", "utf8");
 
@@ -95,6 +128,42 @@ t("⭐ the paths found include template literals, not just quoted strings", () =
     "the known template-literal path is missing — the matcher no longer covers backticks");
 });
 
+console.log("\n── ⭐⭐ and the reverse: every redirect must have a caller, or a stated reason ──");
+
+t("⭐⭐ no declared /api redirect is unreachable from the front end without a stated reason", () => {
+  const orphans = routes
+    .filter((r) => !referenced.has(r.from) && !NO_FRONTEND_CALLER.has(r.from))
+    .map((r) => `${r.from} → ${r.to}   (no src/ caller, and no entry in NO_FRONTEND_CALLER)`);
+  assert.deepEqual(orphans, [],
+    "a route nobody calls is indistinguishable from one with nothing to do — add a caller, delete\n" +
+    "       the redirect, or record WHY it has none:\n       " + orphans.join("\n       "));
+});
+
+t("⭐ …and the exemption list cannot rot — every entry names a route that still exists", () => {
+  // ⚠️ Without this, an allowlist entry outlives its route and becomes permanent cover: the next
+  // path to reuse that name inherits an exemption nobody granted it.
+  const stale = [...NO_FRONTEND_CALLER.keys()].filter((p) => !declared.has(p));
+  assert.deepEqual(stale, [], "exempted routes that no longer exist:\n       " + stale.join("\n       "));
+});
+
+t("⭐ …and an exemption expires the moment the front end DOES call it", () => {
+  // ⭐ THE ENTRY IS THE CLAIM "nothing calls this". Once something does, the claim is false and the
+  // line must go — otherwise the list drifts into a set of assertions nobody re-reads.
+  const contradicted = [...NO_FRONTEND_CALLER.keys()].filter((p) => referenced.has(p));
+  assert.deepEqual(contradicted, [],
+    "these are exempted as having no front-end caller, but src/ calls them — delete the entry:\n       " +
+    contradicted.join("\n       "));
+});
+
+t("⭐ every exemption states a REASON, and not a token one", () => {
+  const thin = [...NO_FRONTEND_CALLER.entries()]
+    .filter(([, why]) => typeof why !== "string" || why.trim().length < 25)
+    .map(([p]) => p);
+  assert.deepEqual(thin, [], "exemptions without a real justification:\n       " + thin.join("\n       "));
+});
+
+console.log("\n── the specific regressions this suite is named for ─────────────");
+
 t("the DCA routes specifically — dead for 22 days, must stay declared", () => {
   for (const p of ["/api/dca-create", "/api/dca-cancel", "/api/dca-list"]) {
     assert.ok(declared.has(p), `${p} lost its redirect again`);
@@ -102,6 +171,17 @@ t("the DCA routes specifically — dead for 22 days, must stay declared", () => 
   }
 });
 
+t("⭐⭐ /api/agent-dd-report — the route with no caller that this reverse audit was built for", () => {
+  // 🚨 THE MIRROR OF THE DCA CASE, PINNED THE SAME WAY. It shipped 2026-08-16 with a redirect and no
+  // caller, and the one-directional suite passed. Whichever way it is resolved — a card that calls
+  // it, or the redirect removed — this assertion must be updated deliberately rather than drift.
+  assert.ok(declared.has("/api/agent-dd-report"), "the in-app DD report route lost its redirect");
+  assert.ok(referenced.has("/api/agent-dd-report") || NO_FRONTEND_CALLER.has("/api/agent-dd-report"),
+    "it is neither called nor exempted — decide which");
+});
+
 console.log(`\n  audited ${referenced.size} referenced paths against ${declared.size} redirects`);
+console.log(`  ${NO_FRONTEND_CALLER.size} routes exempted with a stated reason; ` +
+            `${routes.filter((r) => referenced.has(r.from)).length} have a front-end caller`);
 console.log(`${fail === 0 ? "✅" : "❌"} verify-api-routes: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

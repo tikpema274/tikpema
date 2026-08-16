@@ -101,7 +101,18 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
   the 409 disclosure with no consumer, and — 2026-08-16 — a "there is no cache" check that read the
   producer's own JSDoc *arguing about* caching and went red. Comments must be stripped before any
   claim about what the CODE does.
-* ⭐ **`gate:routes` AUDITS ONE DIRECTION ONLY — and both directions are now known to fail in prod.**
+* ✅ **DONE 2026-08-16 — `gate:routes` now audits BOTH directions.** 10/0. The reverse pass found
+  **7 dangling redirects**, not one: `dd-analyze` and `dd-openapi` (sold to strangers — the SPA is
+  correctly not the caller), `agent-init` / `agent-status` / `agent-parameters` / `agent-ub-spend`
+  (operator-only, deliberately never wired to a button), and `agent-dd-report` (🚧 genuinely not
+  wired). ⭐ An exemption must STATE A REASON — the list is audited too: an entry for a route that no
+  longer exists fails, an entry contradicted by an actual caller fails, and a reason under 25 chars
+  fails. ⚠️ The `agent-dd-report` entry is a **placeholder that must be deleted when the card lands**;
+  leaving it would hide the exact class the reverse audit exists to catch.
+  ⚠️ **It did NOT trigger the refusal-window capture** — `scripts/` is in neither `SURFACES` nor the
+  DD surface, so `tree` and `ddTree` were byte-identical before and after (verified by stamping, not
+  assumed). Nothing deployable changed.
+* ⭐ **~~`gate:routes` AUDITS ONE DIRECTION ONLY~~ — the record of why, kept.**
   It checks **referenced → redirect**, which caught nothing on 2026-08-16: the new
   `/api/agent-dd-report` redirect exists with **nothing calling it**, and the gate passed. The
   reverse audit, **redirect → referenced**, is the same tool pointed the other way.
