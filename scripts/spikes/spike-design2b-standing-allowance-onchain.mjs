@@ -38,7 +38,7 @@
 //
 // RUN:
 //   dry run:  node --experimental-test-module-mocks --env-file=.env scripts/spikes/spike-design2b-standing-allowance-onchain.mjs
-//   for real: KIT_KEY="$(netlify env:get KIT_KEY --context production)" \
+//   for real: read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
 //               node --experimental-test-module-mocks --env-file=.env \
 //                 scripts/spikes/spike-design2b-standing-allowance-onchain.mjs --confirm
 //   re-run:   … --reset --confirm     (zeroes the allowance first, then runs)

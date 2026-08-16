@@ -29,7 +29,7 @@
 // PRECONDITION: a wallet with allowance ≥1 USDC to 0xbbd70b01… (phase0e-approved) so tokenInputs stays
 //   allowance-based (PermitType.NONE) — isolates the extraction mechanism from the permit issue.
 //
-// RUN: KIT_KEY="$(netlify env:get KIT_KEY --context production)" \
+// RUN: read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
 //        WALLET_ADDRESS=0x<approved> node --env-file=.env scripts/spikes/spike-B1-direct-calldata.mjs
 //   NOTE: pass KIT_KEY VERBATIM (it already carries the "KIT_KEY:" prefix) — do NOT sed-strip it.
 
@@ -39,7 +39,8 @@ import { CONTRACTS, ARC } from "../../netlify/functions/_arc.mjs";
 import { rpcCall, assertChain } from "../../shared/dd/rpc.mjs";
 import { getChain } from "../../shared/dd/chains.mjs";
 
-const KIT_KEY = process.env.KIT_KEY;
+import { requireKitKey } from "./_kit-key.mjs";
+const KIT_KEY = requireKitKey();
 const WALLET = (process.env.WALLET_ADDRESS || "").toLowerCase();
 const ADAPTER = "0xbbd70b01a1cabc96d5b7b129ae1aaabdf50dd40b";
 const SWAP_URL = "https://api.circle.com/v1/stablecoinKits/swap";

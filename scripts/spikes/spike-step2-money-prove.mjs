@@ -23,7 +23,7 @@
 //
 // RUN:
 //   DRY RUN (reads balances/allowance, prints the plan — NOTHING moves):
-//     KIT_KEY="$(netlify env:get KIT_KEY --context production)" \
+//     read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
 //       WALLET_ADDRESS=0x6fb28d6366e755e0e27307692282490c6682fc58 \
 //       node --env-file=.env scripts/spikes/spike-step2-money-prove.mjs
 //   EXECUTE (moves ~2 USDC — run this fresh when you're ready):

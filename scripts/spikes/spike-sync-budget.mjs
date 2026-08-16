@@ -30,8 +30,8 @@
 //     unacceptable → move the manual approve OFF the sync path (a one-time "arm wallet" approve job, or
 //     pre-approve at wallet provisioning), leaving the sync swap = quote + getCallData + submit only.
 //
-// RUN (read-only; same env as spike-B1): KIT_KEY passed VERBATIM.
-//   KIT_KEY="$(netlify env:get KIT_KEY --context production)" \
+// RUN (read-only; same env as spike-B1): KIT_KEY passed VERBATIM, supplied per-run.
+//   read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
 //     WALLET_ADDRESS=0x6fb28d6366e755e0e27307692282490c6682fc58 \
 //     node --env-file=.env scripts/spikes/spike-sync-budget.mjs
 
@@ -41,7 +41,8 @@ import { publicClient } from "../../netlify/functions/_predict.mjs";
 import { circle } from "../../netlify/functions/_circle.mjs";
 import { valueInUsdc } from "../../netlify/functions/_swap.mjs";
 
-const KIT_KEY = process.env.KIT_KEY;
+import { requireKitKey } from "./_kit-key.mjs";
+const KIT_KEY = requireKitKey();
 const WALLET = (process.env.WALLET_ADDRESS || "").toLowerCase();
 const SWAP_ADAPTER = "0xbbd70b01a1cabc96d5b7b129ae1aaabdf50dd40b";
 const SWAP_URL = "https://api.circle.com/v1/stablecoinKits/swap";

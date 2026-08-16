@@ -28,7 +28,7 @@
 //
 // RUN:
 //   dry:  node --experimental-test-module-mocks --env-file=.env scripts/spikes/spike-step8d-forced-failure.mjs
-//   real: KIT_KEY="$(netlify env:get KIT_KEY --context production)" \
+//   real: read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
 //           node --experimental-test-module-mocks --env-file=.env \
 //             scripts/spikes/spike-step8d-forced-failure.mjs --confirm
 

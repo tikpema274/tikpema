@@ -22,7 +22,7 @@
 // failed patch would submit a real swap. Pure reconstruction's worst case is "couldn't reach it".
 //
 // RUN:
-//   KIT_KEY="$(netlify env:get KIT_KEY --context production | sed 's/^KIT_KEY://')" \
+//   read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
 //     WALLET_ADDRESS=0x… node --env-file=.env scripts/spike-phase0b.mjs
 //   (WALLET_ADDRESS optional — defaults to a throwaway; the quote doesn't care whose address.)
 
@@ -31,7 +31,8 @@ import { CONTRACTS } from "../netlify/functions/_arc.mjs";
 import { rpcCall, assertChain } from "./dd/rpc.mjs";
 import { getChain } from "./dd/chains.mjs";
 
-const KIT_KEY = process.env.KIT_KEY;
+import { requireKitKey } from "./_kit-key.mjs";
+const KIT_KEY = requireKitKey();
 const FROM = (process.env.WALLET_ADDRESS || "0x000000000000000000000000000000000000dEaD").toLowerCase();
 const AMOUNT_BASE = "1000000"; // 1 USDC (6 dp) — quoted only, never spent
 const isAddr = (v) => typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v);

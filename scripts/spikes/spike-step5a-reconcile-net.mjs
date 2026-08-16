@@ -46,7 +46,7 @@
 // actually REACHES SUBMIT. If it does not, the run EXITS — the rest would be meaningless.
 //
 // RUN (zero money):
-//   KIT_KEY="$(netlify env:get KIT_KEY --context production)" \
+//   read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
 //     node --experimental-test-module-mocks --env-file=.env scripts/spikes/spike-step5a-reconcile-net.mjs
 
 process.env.PERIOD_CEILING_USDC ||= "60";

@@ -16,7 +16,7 @@
 //   We call getCallData()/signTypedData/estimate freely (all read-only); we NEVER call execute().
 //
 // RUN:
-//   KIT_KEY="$(netlify env:get KIT_KEY --context production | sed 's/^KIT_KEY://')" \
+//   read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
 //     node --env-file=.env scripts/spike-phase0c.mjs
 //   (Reuse a KNOWN-EMPTY wallet instead of provisioning: WALLET_ID=… WALLET_ADDRESS=0x… — but only
 //    if you have CONFIRMED it holds 0 USDC; the fresh-provision default guarantees that for you.)
@@ -28,7 +28,8 @@ import { ARC, CONTRACTS } from "../netlify/functions/_arc.mjs";
 import { rpcCall, assertChain } from "./dd/rpc.mjs";
 import { getChain } from "./dd/chains.mjs";
 
-const KIT_KEY = process.env.KIT_KEY;
+import { requireKitKey } from "./_kit-key.mjs";
+const KIT_KEY = requireKitKey();
 const APPROVE_SELECTOR = "0x095ea7b3"; // approve(address,uint256)
 const isAddr = (v) => typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v);
 const isCallData = (v) => typeof v === "string" && /^0x[0-9a-fA-F]{8,}$/.test(v);

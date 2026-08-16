@@ -21,8 +21,8 @@
 // through the INDEPENDENT scripts/dd/rpc.mjs stack (raw fetch, chain-id asserted) — the auditor
 // must not depend on the audited.
 //
-// RUN (KIT_KEY lives in the Netlify prod env; CIRCLE_* are in .env):
-//   KIT_KEY="$(netlify env:get KIT_KEY --context production | sed 's/^KIT_KEY://')" \
+// RUN (KIT_KEY is supplied per-run and never stored; CIRCLE_* are in .env):
+//   read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
 //     node --env-file=.env scripts/spike-phase0.mjs
 //   # reuse an existing wallet instead of provisioning a fresh one:
 //   WALLET_ID=<uuid> WALLET_ADDRESS=0x… KIT_KEY=… node --env-file=.env scripts/spike-phase0.mjs

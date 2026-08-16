@@ -34,8 +34,8 @@
 //      a path broken anywhere upstream would also "pass" every reject assertion.
 //   4. No approve was attempted (the stub worked) and the allowance read actually happened.
 //
-// RUN (mock.module + mock.timers need the flag; KIT_KEY is not in .env):
-//   KIT_KEY="$(netlify env:get KIT_KEY --context production)" \
+// RUN (mock.module + mock.timers need the flag; KIT_KEY is supplied per-run):
+//   read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
 //     node --experimental-test-module-mocks --env-file=.env scripts/spikes/spike-step4a-deadline-guard.mjs
 
 process.env.PERIOD_CEILING_USDC ||= "60"; // headroom so the day-ceiling isn't what blocks; mechanism, not the deployed number

@@ -44,7 +44,7 @@
 // 630s wait, so a broken setup costs seconds, not eleven minutes.
 //
 // RUN (needs the standing allowance from Part B's surviving approve, so it stays gas-free):
-//   KIT_KEY="$(netlify env:get KIT_KEY --context production)" \
+//   read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
 //     node --experimental-test-module-mocks --env-file=.env \
 //       scripts/spikes/spike-step4c-deadline-differential.mjs
 //   optional: --amount=1.00   --wait-sec=NNN (default: until deadline +30s)   --allow-approve

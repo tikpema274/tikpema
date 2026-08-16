@@ -9,8 +9,8 @@
 //   • long TTL   → Part B is TWO runs: run 1 persists the quote, run 2 submits it already-stale.
 // It also tells us how much real headroom DEADLINE_SAFETY_MS (20s, _swap.mjs:21) actually leaves.
 //
-// RUN (KIT_KEY is not in .env — pull it from prod without echoing it):
-//   KIT_KEY="$(netlify env:get KIT_KEY --context production)" \
+// RUN (KIT_KEY is supplied per-run and must NOT be — supply it per-run, without echoing it):
+//   read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
 //     node --env-file=.env scripts/spikes/spike-step4-phase0-deadline-ttl.mjs
 //
 // SECRETS: the key is never printed. The signature is reported by LENGTH only, never by value.
@@ -21,7 +21,8 @@ const WALLET = (process.env.WALLET_ADDRESS || "0x6fb28d6366e755e0e27307692282490
 const SAMPLES = 3;   // repeat: is the TTL stable, or does it drift per quote?
 const GAP_MS = 3000; // spacing between samples
 
-const kitKey = process.env.KIT_KEY;
+import { requireKitKey } from "./_kit-key.mjs";
+const kitKey = requireKitKey();
 // The env:get traps (see caps-from-deployed-env-not-code-defaults): an UNSET var makes the CLI print
 // "No value set…" to STDOUT with exit 0, which a non-empty check happily accepts. Shape-check instead.
 if (!kitKey || /no value set/i.test(kitKey) || !kitKey.startsWith("KIT_KEY:")) {

@@ -18,7 +18,7 @@
 //   WALLET_ADDRESS=0x… KIT_KEY=… node … spike-phase0e-approve.mjs # DRY RUN: shows the exact call + preflight
 //   WALLET_ADDRESS=0x… KIT_KEY=… node … spike-phase0e-approve.mjs --confirm   # sends the ONE approve, then rebuilds
 //
-// RUN with:  KIT_KEY="$(netlify env:get KIT_KEY --context production | sed 's/^KIT_KEY://')" \
+// RUN with: read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
 //              WALLET_ADDRESS=0x… node --env-file=.env scripts/spike-phase0e-approve.mjs [--confirm]
 
 import { createPublicClient, http, parseAbi, getAddress, formatUnits } from "viem";

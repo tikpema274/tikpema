@@ -47,7 +47,7 @@
 // the chain via dd/rpc. Nothing is asserted from the --confirm flag or from the SDK's say-so.
 //
 // RUN — ⚠️ NOT through an agent's shell: the 630s sleep exceeds a 600s tool ceiling. Your terminal:
-//   KIT_KEY="$(netlify env:get KIT_KEY --context production)" \
+//   read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
 //     node --experimental-test-module-mocks --env-file=.env \
 //       scripts/spikes/spike-step4b-deadline-revert.mjs --confirm
 //   optional: --delay-sec=NNN (default 630)   --revoke (clean up the standing allowance afterwards)

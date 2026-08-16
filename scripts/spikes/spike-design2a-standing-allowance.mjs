@@ -30,7 +30,7 @@
 // of the USD cap. An independent rate source would be a different test.
 //
 // RUN (mock.module needs the flag; KIT_KEY only for case 3's EURC pricing — cases 1/2 need no network):
-//   KIT_KEY="$(netlify env:get KIT_KEY --context production)" \
+//   read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
 //     node --experimental-test-module-mocks --env-file=.env scripts/spikes/spike-design2a-standing-allowance.mjs
 
 process.env.PERIOD_CEILING_USDC ||= "60";

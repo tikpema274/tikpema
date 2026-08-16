@@ -24,7 +24,8 @@
 //
 // RUN (mock.module needs the flag):
 //   PART A (zero money):  node --experimental-test-module-mocks --env-file=.env scripts/spikes/spike-step3-guardrails.mjs
-//   PART B (~1 USDC):     KIT_KEY="$(netlify env:get KIT_KEY --context production)" WALLET_ADDRESS=0x6fb28d… \
+//   PART B (~1 USDC): read -rs KIT_KEY && export KIT_KEY   # paste at the prompt — never in argv or history
+//                     WALLET_ADDRESS=0x6fb28d… \
 //                           node --experimental-test-module-mocks --env-file=.env scripts/spikes/spike-step3-guardrails.mjs --confirm
 
 process.env.PERIOD_CEILING_USDC ||= "10"; // TEST ceiling (headroom for the 1-USDC ledger swap). Mechanism, not the deployed number.

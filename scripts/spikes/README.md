@@ -10,7 +10,30 @@ claims, per the money-path-proof discipline: a claim about money is only as good
 repeat. Dead ends are kept too (bottom section) — the trail is honest, not curated.
 
 All scripts read credentials from `process.env` (`CIRCLE_API_KEY`, `CIRCLE_ENTITY_SECRET`, `KIT_KEY`)
-— no secrets are embedded. Run with `--env-file=.env` and `KIT_KEY` from the Netlify prod env.
+— no secrets are embedded. `CIRCLE_*` come from `.env`; run with `--env-file=.env`.
+
+## 🚨 KIT_KEY IS SUPPLIED PER-RUN — NEVER SOURCED FROM NETLIFY PRODUCTION
+Until 2026-08-16 every header here told you to read the key back out of the **production Netlify env**.
+That made **18 one-shot evidence scripts standing consumers of a live production credential** — and
+because Netlify holds the only readable copy (no `.env` entry; Circle's console does not re-display a
+kit key), that dependency tree, not the `is_secret` flag, was the actual exposure.
+
+⭐ The evidence stays; the credential source changes. Supply the key for one run, from a key you hold:
+
+```sh
+read -rs KIT_KEY && export KIT_KEY     # paste at the prompt — nothing echoes
+node --env-file=.env scripts/spikes/<script>.mjs
+unset KIT_KEY
+```
+
+⚠️ **Not `KIT_KEY=… node script.mjs`** — that lands in shell history *and* in argv, and on Linux
+`/proc/<pid>/cmdline` is world-readable. ⚠️ **Not a file on disk either**: a named env file holding a
+prod key is just `.env`'s problem one level down, which is how the `SESSION_SECRET` divergence went
+unnoticed. Keys are issued free (no KYC) at <https://console.circle.com/api-keys>.
+
+`_kit-key.mjs` enforces this — it refuses a missing, `"No value set"`-contaminated, prefix-stripped,
+or malformed key, reports shape only (never the value), and reaches for nothing itself.
+Covered by `node scripts/spikes/verify-kit-key-guard.mjs` (31 checks).
 
 ## The proof trail
 
@@ -67,6 +90,32 @@ is 0**, because its first claim is unobservable on a pre-approved wallet.
   with a spy-attachment self-check and a never-reset total. The product code was never at fault.
 
 See the memory note `absence-must-never-read-as-safe` — an absence must never occupy a result slot.
+
+## Step-8 trail (budget reversal — phantom day-ceiling charges) — backs work that is LIVE
+
+⚠️ **These four were missing from this index until 2026-08-16** while the code they evidence was
+already shipped (`676768f`) and running. An evidence index that omits entries is the
+absence-reads-as-safe failure aimed at the index itself: a reader concludes these spikes are not
+provenance, and the live reversal path silently loses its recorded proof. Added here for that reason.
+
+Every one of these reverses budget, and **reversal is the only operation in `_budget.mjs` that can
+WIDEN a cap** — so every failure mode is fail-OPEN. That shapes the assertions: each refusal is
+asserted twice (return value *and* a ledger **re-read**), because a bug could report "refused" while
+having already decremented. All four run the step-5A instrumentation self-check first — an absence
+assertion is vacuous if the store under test isn't the one being written.
+
+| Part | Script | What it established | Moves money? |
+|---|---|---|---|
+| 8A | `spike-step8a-reversal-primitive.mjs` | `reverseAgentSpend` mock-proven against an injected in-memory store — every refusal asserted against a ledger re-read, not its own return value | no — zero network |
+| 8B | `spike-step8b-sweeper.mjs` | the budget **sweeper**: almost entirely absence assertions ("it did NOT reverse"), each against a `daySpend` re-read rather than the sweeper's own tally | no — zero network |
+| 8C | `spike-step8c-verifier-reversal.mjs` | the **verifier** pairing: receipt→`failed` + day-ceiling reversed from one observed revert. Two fail-opens pinned — a FAILED LOOKUP reverses nothing and raises `needsAttention`; the reversal lands on the **charge's** day, never the verifier's run-day. ⚠️ Scope stated honestly: this path does not roll back `spentAmount` (that field is DCA-only) | no — zero network |
+| 8D | `spike-step8d-forced-failure.mjs` | the **BACKSTOP** against a REAL Circle failure — the model-gap check: does an estimation-rejected swap actually report a state in `TERMINAL_FAILED`? If not, the backstop reverses nothing and the phantom stands. Raw `state`/`errorReason`/`txHash` are printed **before any assertion**, so the classification is the reader's to check | **YES** (`--confirm`, ~12 min) |
+
+⭐ Why the backstop and not the verifier carries this: the verifier reverses only on `reason:"reverted"`,
+which needs a broadcast tx whose receipt reads reverted — an estimation-rejected swap is **never
+broadcast**, so the verifier settles `unconfirmed` and never reaches its reversal branch. The one
+failure shape actually observed therefore lands on the backstop, which is why the backstop is the
+primary handler. See the memory note `budget-reversal-reconcile-design-brief`.
 
 ## Superseded / dead-ends (kept for the honest trail, NOT proof)
 | Script | Why it's here |
