@@ -102,8 +102,23 @@ table concludes those spikes are not provenance. Added, and `verify-spike-index.
 * ⚠️ **`test:all` DOES NOT close the gap below.** Every suite is in-process or mocked; none of them
   supplies a real Circle key, so a green run says nothing about whether a spike works under the new
   recipe. A full-suite pass is not evidence about the credential path.
-* ⚠️ **UNPROVEN:** no spike or smoke script has been RUN end-to-end under the new recipe. The guard's
-  refusal path is proven by 34 real subprocesses; the ACCEPT path with a genuine Circle key is not.
+* ✅ **PROD PROBE PROVEN LIVE 2026-08-17 — the rebuilt tooling works end-to-end against prod.**
+  `probe-ub-auth.mjs` 5/0 against `https://app.tikpema.xyz/api/agent-ub-spend`: the unauthenticated
+  CONTROL returned **401** (so the route is live and a 401 would have meant something), and the
+  authenticated over-cap request returned **`400 {"error":"exceeds per-spend limit of 50 USDC","cap":50}`**
+  — the token was **TRUSTED** and the cap refused the amount. **Zero money moved**, by construction:
+  the cap is enforced before any UB call.
+  ⭐ This closes the ACCEPT path for `_prod-session.mjs`, which until now had only its REFUSAL path
+  proven (18 subprocess cases). A guard whose accept path is untested can be uniformly-refusing and
+  look identical to a working one.
+  ⭐ It also re-confirms the divergence from the live values: the prod secret is 64 chars and is NOT
+  `.env`'s — had they matched, the guard would have refused before any request.
+  ⚠️ Recorded exception: the repo's standing rule is **never auto-mint a session token** — the user
+  directed this run explicitly, and it is zero-money by construction. The rule stands for
+  `fire-ub-spend.mjs`, which is untouched and remains the user's to run.
+* ⚠️ **STILL UNPROVEN (different credential):** no spike or smoke script has been RUN end-to-end under
+  the new KIT_KEY recipe. That guard's refusal path is proven by 34 real subprocesses; its ACCEPT path
+  with a genuine Circle kit key is not.
 * ⏭️ `is_secret` on `KIT_KEY` is now unblocked. Hold until a key you hold is confirmed working via
   `read -rs` — after flipping there is no way back to the deployed value.
 * ✅ **`SESSION_SECRET` divergence RESOLVED — accidental in origin, deliberate in retention.** A
