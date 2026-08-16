@@ -61,6 +61,41 @@ export const FUNCTION_NAME = "dd-watch";
 export const DEFAULT_STORE_NAME = "dd-watch";
 export const WEBHOOK_VAR = "DD_WATCH_WEBHOOK";
 
+// ═══ ⭐⭐ THE SECOND ROUTE — A DEAD CANARY IS NOW A MONEY-PATH EVENT ══════════════════════════════
+//
+// The channel separation was RIGHT when a dead canary meant only that DD stopped selling reports:
+// muting is per-channel, so a chatty availability alert sharing the money channel would train
+// someone to mute the kill-switch siren. That reasoning is unchanged and this does not undo it.
+//
+// 🚨 WHAT CHANGED IS THE CONSEQUENCE, NOT THE EVENT. Step 2 routed the vault deposit gate through the
+// DD report, so a stale or missing health artifact no longer just stops sales — **it blocks
+// deposits**. Same signal, second consequence class, and the alert about the more serious one was
+// arriving in the channel filed as least urgent.
+//
+// ⚠️ SO IT IS A SECOND ROUTE, NOT A MERGE. Mirroring every DD alert into the money channel would
+// recreate exactly the chattiness the separation exists to prevent — and the commonest DD alert of
+// all is the `no-record` window after every deploy, which is EXPECTED, self-clearing, and would
+// therefore page the money channel on every single deploy.
+//
+// ⭐ THE THRESHOLD IS THE GRACE, AND IT IS CHOSEN AGAINST THE REAL MARGIN. `GRACE_MS` is two canary
+// periods (20m) while the health TTL is 30m, so grace expiry is the moment roughly one tick of
+// margin remains before deposits actually block. Before grace: a routine window, DD channel only.
+// After grace: the budget is nearly spent, and that is a money-path fact.
+export const MONEY_WEBHOOK_VAR = "WATCH_ALERT_WEBHOOK";
+
+/**
+ * Does this judgement have a DEPOSIT consequence, not merely an availability one?
+ *
+ * ⚠️ TRUE ONLY PAST THE GRACE. A refusal inside the grace is the expected post-deploy window; saying
+ * "deposits are blocked" about it would be true for a few minutes and cry wolf on every deploy.
+ * ⭐ AND A RECOVERY IS NOT ESCALATED — the money channel is told when the risk STARTS, not when a
+ * thing it was never told about stops.
+ */
+export function blocksDeposits(judgement, graceMs = GRACE_MS) {
+  if (!judgement?.alert) return false;
+  return Number(judgement.refusingMs ?? 0) >= graceMs;
+}
+
 /** The two paths, and the canonical one a listing names. */
 export const DEFAULT_PATHS = Object.freeze({
   api: "https://app.tikpema.xyz/api/dd-analyze",

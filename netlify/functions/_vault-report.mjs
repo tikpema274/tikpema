@@ -33,6 +33,9 @@ import { chainClient } from "../../shared/dd/client.mjs";
 //
 // ⚠️ AN UNKNOWN HEALTH STATE REFUSES TOO. `serving === null` means we could not tell, and "could not
 // tell" is not "fine" — the same tri-state discipline the rest of this subsystem runs on.
+// ⚠️ THE MARGIN, STATED WHERE THE MONEY PATH READS IT: dedupe 5m < canary period 10m < TTL 30m, so
+// **two missed canary ticks are survivable and the third blocks deposits.** See DEFAULT_TTL_MS in
+// shared/dd-canary/health.mjs for why that is a money-path constant rather than an availability one.
 export async function vaultDdReport(address, { event = null } = {}) {
   try {
     const health = await healthDisclosure(event ?? { headers: {} });

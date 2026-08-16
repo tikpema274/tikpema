@@ -175,6 +175,25 @@ export function resolveBuildId({ build = null, env = process.env } = {}) {
 /** How long a PASS vouches for the service. Should be ~2x the canary period so one missed run is
  *  tolerated and two are not. Deliberately short: a stale record is a refusal, and a refusal is
  *  cheap compared with answering from a detector nobody has checked recently. */
+// ═══ 🚨🚨 THE DEPOSIT PATH'S ENTIRE MARGIN IS THIS NUMBER DIVIDED BY THE CRON PERIOD ═══════════
+//
+//        dedupe 5m   <   canary period 10m   <   TTL 30m
+//
+// ⭐ WHICH MEANS: **the vault deposit path survives TWO missed canary ticks. The THIRD blocks
+// deposits.** That is the whole budget.
+//
+// 🚨 SINCE STEP 2 (2026-08-16) THIS IS A MONEY-PATH CONSTANT, NOT A SERVICE-AVAILABILITY ONE.
+// `_vault-report.mjs` refuses to produce a report when health is not serving, `applyReportDisclosure`
+// BLOCKS without one, and `gateDeposit` refuses. So a stale health artifact does not merely stop DD
+// selling reports — it stops deposits.
+//
+// ⚠️ AND THE THING THAT HAS TO KEEP FIRING IS A CRON, WHICH HAS FAILED SILENTLY HERE TWICE:
+// Netlify has ACKed a `*-background` invocation without running it, and `netlify deploy --dir=dist`
+// does not register scheduled functions at all (both recorded in PROGRESS). Three ticks of margin
+// against a mechanism with that history is the number to have in mind before mainnet.
+//
+// ⚠️ SHORTENING THIS TTL, OR LENGTHENING THE CRON PERIOD, SPENDS THAT MARGIN DIRECTLY. Neither is a
+// tuning knob any more; both change how long the money path tolerates a dead cron.
 export const DEFAULT_TTL_MS = 30 * 60 * 1000;
 
 /**

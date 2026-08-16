@@ -10,8 +10,8 @@ import { buildStamp } from "../../shared/build-stamp.mjs";
 import {
   SCHEMA, MIN_RERUN_MS, TTL_MS, REMINDER_MS, GRACE_MS, CANARY_PERIOD_MS, CRON_MS,
   DEFAULT_PATHS, CANONICAL_PATH_KEY, PROBE_SUBJECT, PROBE_MARKER, PROBE_UA,
-  DEFAULT_STORE_NAME, WEBHOOK_VAR,
-  judge, alertHeadline, decideNotify, windowFrom, leverActive,
+  DEFAULT_STORE_NAME, WEBHOOK_VAR, MONEY_WEBHOOK_VAR,
+  judge, alertHeadline, decideNotify, windowFrom, leverActive, blocksDeposits,
 } from "../../shared/dd-watch/watch.mjs";
 
 // dd-watch — is the PUBLIC DD SERVICE answering, on BOTH of its paths?
@@ -235,6 +235,45 @@ export const handler = async (event) => {
         record.notify.error = String(err?.name ?? "Error");
       }
     }
+    // ── ⭐⭐ THE SECOND ROUTE: past the grace, this is a MONEY-PATH event ─────────────────────
+    // 🚨 A stale health artifact blocks the vault DEPOSIT since step 2, not just report sales. The
+    // DD channel above still gets everything; the money channel gets ONLY the deposit-blocking case,
+    // so the separation that keeps the kill-switch siren audible survives intact.
+    // ⚠️ NEVER THROWS AND NEVER GATES THE PRIMARY — it runs after the DD post has already been made
+    // and its outcome recorded. A second-channel failure must not cost the first message.
+    record.notify.money = { attempted: false, delivered: null, reason: null };
+    if (blocksDeposits(judgement)) {
+      const moneyHook = (env[MONEY_WEBHOOK_VAR] || "").trim();
+      record.notify.money.attempted = true;
+      if (!moneyHook) {
+        record.notify.money.delivered = false;
+        record.notify.money.reason = `no ${MONEY_WEBHOOK_VAR} configured — the deposit-blocking alert cannot reach the money channel`;
+      } else {
+        // ⭐ REFRAMED, NOT MIRRORED. The DD message describes availability; this one has to say what
+        // it MEANS where money moves, because the reader of this channel is not tracking DD at all.
+        const moneyLines = [
+          "🚨 DEPOSITS BLOCKED — the DD health artifact is not serving",
+          "> Vault deposits gate on the DD report since step 2, so while this refuses the deposit path REFUSES too. This is fail-closed and correct; it is not a data loss.",
+          `• refusing ${Math.round(judgement.refusingMs / 60000)}m (past the ${GRACE_MS / 60000}m grace; health TTL is ${TTL_MS / 60000}m)`,
+          `• reason: ${judgement.alertReason ?? "unknown"}`,
+          "• likeliest cause: the dd-canary cron has not fired. Margin is TWO missed ticks; the third blocks deposits.",
+          `• canonical: ${record.canonical}`,
+        ];
+        try {
+          const r2 = await fetch(moneyHook, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: moneyLines.join("\n") }),
+            signal: AbortSignal.timeout(15_000),
+          });
+          record.notify.money.delivered = r2.ok;
+          if (!r2.ok) record.notify.money.reason = `money webhook rejected the message (HTTP ${r2.status})`;
+        } catch (err) {
+          record.notify.money.delivered = false;
+          record.notify.money.reason = String(err?.name ?? "Error");
+        }
+      }
+    }
+
     // ⭐ lastNotifiedAt advances ONLY on confirmed delivery, so an undelivered alert is retried
     // rather than suppressed by a reminder window it never earned.
     if (record.notify.delivered) record.lastNotifiedAt = nowIso;

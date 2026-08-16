@@ -168,15 +168,80 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
   canary margin is exact: **2 consecutive missed ticks tolerated, the 3rd blocks deposits** (dedupe
   5m < period 10m < TTL 30m). Crons have failed here before. Not a change; a number to have before
   mainnet.
-* ⚠️ **`capture:window` does not measure DURATION.** It exits on first sight of the banner, so it
-  proves a window HAPPENED and cannot say how long deposits were unavailable — now the figure that
-  matters. The 2026-08-16 bound (≤ 6m49s, ~5 min) was obtained by hand.
+* ✅ **DONE 2026-08-16 — `capture:window` now waits for the close** and reports the duration as
+  "deposits were unavailable for this long"; a window that never closes exits 1.
 * ⚠️ **Mutation hygiene:** five mutations this session reported green without applying. Every mutation
   must print whether it changed anything.
 
 ---
 
 ---
+
+## 2026-08-16 (follow-ups) — ⭐⭐ THE DEAD-CANARY ALERT IS DUAL-ROUTED, AND THE CAPTURE NOW TIMES THE OUTAGE
+
+Two consequences of the dependency count, plus the margin written where someone will find it.
+
+### 1 ⚠️ SAME EVENT, SECOND CONSEQUENCE CLASS — SO A SECOND ROUTE, NOT A MERGE
+
+`dd-watch` would catch a dead canary (it polls both paths every 5m and alerts on stale/no-record),
+but it posts to `DD_WATCH_WEBHOOK` — the channel deliberately separated from the money path because
+**muting is per-channel** and a chatty availability alert sharing the money channel would train
+someone to mute the kill-switch siren.
+
+⭐ **That separation was right, and it still is.** What changed is not the event but its consequence:
+since step 2, a stale health artifact does not merely stop DD selling reports — **it blocks
+deposits**. The alert about the more serious outcome was arriving in the channel filed as least
+urgent.
+
+⚠️ **MIRRORING EVERYTHING WOULD RECREATE THE PROBLEM.** The commonest DD alert of all is the
+`no-record` window after every deploy — expected, self-clearing, and it would page the money channel
+on **every single deploy**. So `blocksDeposits()` gates the second route on the GRACE:
+
+* **inside the grace** (< 20m) → DD channel only. A routine post-deploy window.
+* **past the grace** (≥ 20m, TTL 30m) → also the money channel. ⭐ Grace expiry is roughly when one
+  tick of margin remains, so it is the moment the risk becomes real rather than theoretical.
+* a recovery is **never** escalated — the money channel is told when risk starts, not when something
+  it was never told about stops.
+
+⭐ **AND THE MESSAGE IS REFRAMED, NOT MIRRORED.** The DD text describes availability; the money text
+has to say what it MEANS where money moves, because that channel's reader is not tracking DD at all:
+*"DEPOSITS BLOCKED — vault deposits gate on the DD report since step 2 … likeliest cause: the
+dd-canary cron has not fired."* It runs AFTER the DD post and never throws, so a second-channel
+failure cannot cost the first message.
+
+### 2 ⭐ `capture:window` NOW WAITS FOR THE CLOSE
+
+It exited on first sight of the banner, so it could prove a window HAPPENED and never say how long it
+LASTED. Fine when the window only affected a documentation page; **not fine once the same window
+blocks deposits**, which is why today's `≤6m49s` had to be obtained by hand.
+
+It now polls until the banner clears and reports **`WINDOW DURATION: Ns — deposits were unavailable
+for this long`**, recorded in the ledger as `durationMs` / `openedAt` / `closedAt`.
+🚨 **A window that never closes is its OWN outcome and exits 1** — an unobserved recovery is an
+UNKNOWN, and reporting it as a pass with a blank duration would be absence-reads-as-safe aimed at the
+instrument that measures an outage.
+
+⚠️ **AND THE TEST HARNESS WAS MASKING A TIMEOUT AS EXIT 0.** `execFile` leaves `err.code` undefined
+when it kills on timeout, so `err?.code ?? 0` reported a HUNG capture as a clean pass — the same
+shape as the crashing suite that grepped green, this time inside the harness written to catch it.
+Timeouts now get their own sentinel.
+
+### 3 🚨 THE MARGIN, WRITTEN WHERE SOMEONE WILL FIND IT
+
+    dedupe 5m  <  canary period 10m  <  TTL 30m
+    ⇒ the deposit path survives TWO missed canary ticks. The THIRD blocks deposits.
+
+That is the whole budget, and the thing that must keep firing is a **cron that has failed silently
+here twice** — Netlify ACKing a `*-background` invocation without running it, and
+`netlify deploy --dir=dist` not registering schedules at all.
+
+Recorded at `DEFAULT_TTL_MS` in `shared/dd-canary/health.mjs` (with the note that shortening the TTL
+or lengthening the cron **spends that margin directly** — neither is a tuning knob any more), and
+restated in `_vault-report.mjs` where the money path reads it. ⭐ **And ASSERTED**: the suite reads
+the cron period from `netlify.toml` — the only place it exists, so no second source of truth — and
+fails if the margin is not exactly three ticks.
+
+`verify-dd-report` **171/0**. `test:all` exit 0, tsc + build clean. Not deployed.
 
 ## 2026-08-16 (deployed + measured) — ⚠️ THE FIRST REFUSAL WINDOW THAT BLOCKED DEPOSITS, AND A COUNT OF WHAT THE MONEY PATH NOW DEPENDS ON
 

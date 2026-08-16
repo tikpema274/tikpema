@@ -549,6 +549,45 @@ section("G2 🚨🚨 THE DEPOSIT GATE RESPECTS THE HEALTH VERDICT TOO");
     /"netlify\/functions\/_vault-report\.mjs"/.test(stamp));
 }
 
+section("G4 🚨🚨 THE DEPOSIT PATH'S CANARY MARGIN — asserted, not just documented");
+{
+  const { DEFAULT_TTL_MS, MIN_RERUN_MS } = await import("../../shared/dd-canary/health.mjs");
+  const fs = await import("node:fs");
+  // ⭐ THE CRON PERIOD IS READ FROM netlify.toml, the only place it exists — a literal here would be
+  // a second source of truth on the number that IS the margin.
+  const toml = fs.readFileSync("netlify.toml", "utf8");
+  const m = toml.match(/\[functions\."dd-canary"\][\s\S]{0,80}?schedule\s*=\s*"\*\/(\d+) /);
+  const periodMs = m ? Number(m[1]) * 60000 : null;
+  check("the canary period is readable from netlify.toml", periodMs !== null, `${periodMs / 60000}m`);
+  check("⚠️ the ordering invariant holds: dedupe < period < TTL",
+    MIN_RERUN_MS < periodMs && periodMs < DEFAULT_TTL_MS,
+    `${MIN_RERUN_MS / 60000}m < ${periodMs / 60000}m < ${DEFAULT_TTL_MS / 60000}m`);
+  // 🚨 THE BUDGET ITSELF. Pinned so shortening the TTL or lengthening the cron cannot silently spend
+  // it — since step 2 those are money-path knobs, not availability ones.
+  const ticks = Math.floor(DEFAULT_TTL_MS / periodMs);
+  check("🚨🚨 the deposit path survives exactly TWO missed canary ticks; the third blocks deposits",
+    ticks === 3, `${ticks} ticks of margin`);
+  check("⭐ …and the margin is written at the constant, not only in PROGRESS",
+    /survives TWO missed canary ticks/i.test(fs.readFileSync("shared/dd-canary/health.mjs", "utf8")));
+  check("⭐ …and restated where the money path reads it",
+    /two missed canary ticks are survivable/i.test(fs.readFileSync("netlify/functions/_vault-report.mjs", "utf8")));
+
+  // ⭐⭐ AND THE DEAD-CANARY ALERT IS DUAL-ROUTED — same event, second consequence class.
+  const { blocksDeposits, MONEY_WEBHOOK_VAR, GRACE_MS } = await import("../../shared/dd-watch/watch.mjs");
+  check("⭐ a refusal INSIDE the grace does NOT page the money channel (every deploy opens one)",
+    blocksDeposits({ alert: true, refusingMs: GRACE_MS - 1 }) === false);
+  check("🚨🚨 a refusal PAST the grace DOES — deposits are genuinely at risk by then",
+    blocksDeposits({ alert: true, refusingMs: GRACE_MS }) === true);
+  check("⭐ a non-alert never pages it", blocksDeposits({ alert: false, refusingMs: 99e9 }) === false);
+  check("⭐ the money channel is a DIFFERENT env var from the DD one",
+    MONEY_WEBHOOK_VAR === "WATCH_ALERT_WEBHOOK");
+  const watchSrc = fs.readFileSync("netlify/functions/dd-watch.mjs", "utf8");
+  check("⭐⭐ the money message is REFRAMED, not mirrored — it says deposits are blocked",
+    /DEPOSITS BLOCKED/.test(watchSrc) && /deposit path REFUSES/.test(watchSrc));
+  check("⚠️ …and it runs AFTER the DD post, so a second-channel failure costs nothing",
+    watchSrc.indexOf("blocksDeposits(judgement)") > watchSrc.indexOf("record.notify.delivered = res.ok"));
+}
+
 section("H ⚠️ THE BLOCK LADDER IS UNTOUCHED");
 {
   const fs = await import("node:fs");
@@ -598,23 +637,52 @@ Reason: <code>no-record</code>. This clears by itself, usually within minutes, w
     const s = http.createServer(handler);
     s.listen(0, "127.0.0.1", () => res({ s, url: `http://127.0.0.1:${s.address().port}` }));
   });
-  const run = (url) => new Promise((res) => {
+  const run = (url, extra = []) => new Promise((res) => {
     // ⭐ A FRESH CWD PER CASE, so each run writes its own ledger and cannot read a prior entry's
     // ddTree — otherwise case order would silently change the discriminator branch taken.
     const cwd = mkdtempSync(path.join(os.tmpdir(), "cap-"));
     execFile(process.execPath,
-      [path.resolve("scripts/dd/capture-refusal-window.mjs"), "--url", url, "--seconds", "6"],
-      { cwd, timeout: 45000 },
-      (err, stdout) => res({ code: err?.code ?? 0, out: stdout }));
+      [path.resolve("scripts/dd/capture-refusal-window.mjs"), "--url", url, "--seconds", "6", ...extra],
+      { cwd, timeout: 90000 },
+      // ⚠️ A KILLED PROCESS MUST NOT READ AS EXIT 0. `err.code` is undefined when execFile kills on
+      // timeout, so `err?.code ?? 0` reported a hung capture as a clean pass — the same shape as the
+      // crashing suite that grepped green, now inside the harness that checks for it. Timeouts get
+      // their own sentinel so a test can never mistake "never finished" for "succeeded".
+      (err, stdout) => res({
+        code: err ? (typeof err.code === "number" ? err.code : (err.killed ? "TIMEOUT" : 1)) : 0,
+        out: stdout,
+      }));
   });
 
-  // ✅ banner present → observed, exit 0
+  // ✅ banner present, then CLEARS → observed WITH a duration, exit 0.
+  // ⭐⭐ THE DURATION IS THE POINT SINCE STEP 2 — it is how long vault DEPOSITS were unavailable.
   {
-    const { s, url } = await serve((_q, r) => { r.writeHead(405, { "content-type": "text/html" }); r.end(PAGE(true)); });
-    const r = await run(url); s.close();
+    let hits = 0;
+    const { s, url } = await serve((_q, r) => {
+      hits++;
+      r.writeHead(405, { "content-type": "text/html" });
+      r.end(PAGE(hits <= 2));   // refusing for the first two probes, then recovered
+    });
+    const r = await run(url, ["--close-seconds", "60"]); s.close();
     check("✅ banner during a refusal → OBSERVED, exit 0", r.code === 0 && /WINDOW OBSERVED/.test(r.out), `exit ${r.code}`);
     check("  …and it names the variant it saw", /self-clearing/.test(r.out));
     check("  …and confirms the banner sits above the curl", /banner above curl : true/.test(r.out));
+    check("⭐⭐ …and it WAITS FOR THE CLOSE and reports a DURATION",
+      /WINDOW DURATION: \d+s/.test(r.out), (r.out.match(/WINDOW DURATION: [^\n]*/) || ["(absent)"])[0]);
+    check("⭐ …framed as how long deposits were unavailable, not as a page metric",
+      /deposits were unavailable/.test(r.out));
+  }
+
+  // 🚨 A WINDOW THAT NEVER CLOSES IS ITS OWN OUTCOME — not a success with a missing field.
+  // ⚠️ An unobserved recovery is an UNKNOWN, and reporting it as though the system self-healed is
+  // the absence-reads-as-safe shape aimed at the instrument that measures an outage.
+  {
+    const { s, url } = await serve((_q, r) => { r.writeHead(405, { "content-type": "text/html" }); r.end(PAGE(true)); });
+    const r = await run(url, ["--close-seconds", "20"]); s.close();
+    check("🚨🚨 a window that never closes → exit 1, NOT a pass with a blank duration",
+      r.code === 1 && /never_closed|NOT WITNESSED/i.test(r.out), `exit ${r.code}`);
+    check("⭐ …and it says explicitly this is not evidence of recovery",
+      /not evidence it recovered/.test(r.out));
   }
 
   // 🚨 the original defect returning: html asked for, json served
@@ -631,7 +699,7 @@ Reason: <code>no-record</code>. This clears by itself, usually within minutes, w
     const bad = `<!doctype html><html><body><pre>curl -sS -X POST x</pre>
 <div class="down">⚠️ This service is REFUSING right now. This clears by itself, usually within minutes.</div></body></html>`;
     const { s, url } = await serve((_q, r) => { r.writeHead(405, { "content-type": "text/html" }); r.end(bad); });
-    const r = await run(url); s.close();
+    const r = await run(url, ["--close-seconds", "20"]); s.close();
     check("⚠️ a banner placed BELOW the curl FAILS the capture, exit 1",
       r.code === 1 && /malformed/.test(r.out), `exit ${r.code}`);
   }
