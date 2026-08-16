@@ -33,11 +33,49 @@ validate a recovery file: you upload it for authentication, enter the new cipher
 takes effect immediately. **Verification may only be possible by performing the reset** — which is
 the planned-outage option, not the 15-minute one. Sent to Circle support; see below.
 
-### 🥈 B · `builds` scope
-Scopes are `builds,functions,post_processing,runtime`. **Verified the build does not read it** —
-`stamp-build.mjs` and `vite.config.ts` don't, and no `src/` file reads it as code. Any compromised
-build-time dependency can read the credential controlling every wallet.
-⭐ Marking it `--secret` fixes this *and* forces the narrower scope.
+### ✅ B(i) · DONE 2026-08-16 — `builds` scope dropped
+
+`CIRCLE_ENTITY_SECRET` scopes are now `functions, post_processing, runtime`. **`builds` removed.**
+A compromised build-time dependency can no longer read the credential that controls every wallet.
+
+⭐ **THE MECHANISM WAS PROVEN ON A THROWAWAY FIRST.** `netlify env:set KEY --scope …` with the value
+OMITTED is the only form that changes scopes without re-supplying the value — and whether omitting
+the value WIPES it was the open question, since the CLI documents `value` as defaulting to `""`. Two
+other approaches failed silently (`updateEnvVar` with a nested body = no-op; comma-separated
+`--scope` = ignored, the flag is variadic). ⚠️ Discovering that on the production credential could
+have destroyed it. `SCOPE_TEST_CANARY` was created, used to prove scopes change AND the value
+survives, then deleted.
+
+⭐ **VALUE PROVEN INTACT WITHOUT EVER BEING SEEN** — sha256 hashed before and after, identical
+(`c3ebf1f6f70701f5`). ⚠️ That hash also matches `.env`, which confirms Netlify currently holds the
+SAME value: a real second copy, and the reason B(ii) is on hold.
+
+⚠️ **UNVERIFIED AGAINST AN ACTUAL BUILD.** The change takes effect on the next deploy. Statically,
+nothing in the build reads it (`stamp-build.mjs`, `vite.config.ts`, no `src/` code read) — but the
+next deploy is the real test, and it would fail LOUDLY rather than silently if something did.
+
+### ⏸️ B(ii) · HELD — do NOT mark it `--secret` yet
+
+🚨 **MARKING IT SECRET CLOSES A LIVE RECOVERY PATH.** Today `netlify env:get CIRCLE_ENTITY_SECRET
+--context production` returns the value, so Netlify is effectively a second readable copy. `--secret`
+makes it write-only forever: still injected at runtime, never readable again.
+
+⚠️ **AND A IS UNRESOLVED** — the recovery file is unverified, the later download produced 0 bytes,
+and the Circle question is unanswered. Marking it secret now would remove one recovery path while the
+primary recovery artifact is of unknown validity: **two independent single points of failure
+collapsing into one.**
+
+⭐ **PRECONDITION FOR LIFTING THE HOLD:** the entity secret VALUE ITSELF confirmed stored offsite in a
+password manager — not merely the recovery file.
+✅ Pre-check already done: **no script does `env:get` on it** (every `env:get` reference in the repo
+is `KIT_KEY`, `PINATA_JWT`, or prose), so nothing breaks on that axis.
+⭐ `netlify env:set KEY --secret` (no value) converts in place, so the flip needs no value handling.
+
+### 🥈 B(iii) · the OTHER credentials still carry `builds`
+⚠️ `CIRCLE_API_KEY`, `SESSION_SECRET`, `KIT_KEY` and `ANTHROPIC_API_KEY` are ALL still
+`builds,functions,post_processing,runtime`. `CIRCLE_API_KEY` pairs with the entity secret and is the
+obvious next one; each needs its own "does the build read it" check before dropping, exactly as this
+one got. Not done — out of scope for this pass.
 
 ### 🥉 C · `context: all`
 Set in production, deploy-preview AND branch-deploy — every preview carries production wallet
