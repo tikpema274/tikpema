@@ -152,9 +152,44 @@ Deliberately not resolved late at night on a money path.
 existing var. Omitting `--context` was the working form — and whether that WIDENS a production-only
 var was tested on a `CTX_TEST_CANARY` first. It does not; production-only survived.
 
-### 🥈 B(iii) · still carrying `builds`
-⚠️ `KIT_KEY` and `ANTHROPIC_API_KEY` only. Each needs its own read-check before dropping, exactly as
-the three above got.
+### ✅ B(iii) · Done 2026-08-16 — `KIT_KEY` and `ANTHROPIC_API_KEY`
+Both dropped to `functions, runtime`; values proven unchanged by sha256 fingerprint before/after.
+
+**The read-check was done properly — build chain and postinstall, not just `env:get` references:**
+`postinstall` is `git config core.hooksPath` (reads no env at all); `prebuild` is `stamp-build.mjs`,
+which contains **zero** `process.env` reads; `build` is `vite build` against a `vite.config.ts` that
+sets only the react plugin — no `define`, no `envPrefix` override, so Vite's `VITE_` default means
+neither key could reach the client bundle even from `.env`. **Neither key appears anywhere in `src/`.**
+Every consumer is `netlify/functions/*` (runtime) or `scripts/*` (run by hand).
+
+`ANTHROPIC_API_KEY` is also **`is_secret` ✅**. Safe on both axes at once: regenerable from the
+Anthropic console, AND `.env` was proven a real backup by hash comparison against Netlify production
+first — the pre-flight that caught the genuine `SESSION_SECRET` divergence. Readback is now masked.
+
+**`KIT_KEY` holds at `is_secret: false` — decided, not deferred.** It IS regenerable
+(`console.circle.com/api-keys`, free, no KYC — Circle's kit-key docs), so the stated criterion was
+met. It was still declined because `is_secret` protects against *console access*, a far smaller
+population than the dependency below, and the exposure that actually mattered is closed either way.
+
+### 🚨 THE REAL KIT_KEY FINDING: 18 SPIKE SCRIPTS READ A LIVE PRODUCTION CREDENTIAL
+`is_secret` was the small question. The pre-flight grep found **20 files** invoking
+`netlify env:get KIT_KEY --context production` — 18 of them one-shot spikes in `scripts/spikes/`,
+plus `smoke-analystb.mjs` and `smoke-swap-estimate.mjs`. **Netlify is the ONLY copy**: no `.env`
+entry, and the Circle console does not re-display a kit key after creation.
+
+⭐ That is a bigger surface than `is_secret` addresses, and it is the item worth acting on:
+**retiring or re-scoping the 18 spikes removes the dependency and the exposure together.** Doing it
+in that order also makes `is_secret` free later — with only the 2 smoke scripts left, closing
+readback costs nothing. Revisit `is_secret` then, not before.
+
+⚠️ And note what flipping it *today* would have cost, since the ordering is the whole point: with no
+readable copy anywhere, recovering the key means a **reissue**, which invalidates the live value and
+breaks prod swap/bridge until Netlify is updated. A protection whose recovery path is a money-path
+outage is not a protection worth taking first.
+
+⚠️ Minor inconsistency recorded rather than smoothed over: these two (and `CIRCLE_API_KEY`) now sit
+at `functions, runtime`, while `CIRCLE_ENTITY_SECRET` and `SESSION_SECRET` retain `post_processing`.
+`functions, runtime` is the tighter shape; the other two were narrowed on the `builds` axis only.
 
 ### 🥉 C · `context: all`
 Set in production, deploy-preview AND branch-deploy — every preview carries production wallet
