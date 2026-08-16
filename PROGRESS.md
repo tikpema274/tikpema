@@ -162,12 +162,83 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
   moving) and `setFeeRecipient`. All three measured present on XyloVault 2026-08-16. Recorded as
   PENDING DECISION rows in `POWER_DISCLOSURE`, so they cannot be forgotten — but they are still
   undisclosed today, and the denylist widening did nothing about them.
+* 🚨 **THE MONEY PATH'S COMPOSITE AVAILABILITY IS UNMEASURED.** Shape known (2026-08-16): the vault
+  deposit blocks on **3 distinct services** — Netlify Blobs (pause + budget + dd-health, so ONE
+  outage takes three), Arc RPC (multicall + a ~9-call quorum), Circle — **plus a CRON**. ⚠️ The
+  canary margin is exact: **2 consecutive missed ticks tolerated, the 3rd blocks deposits** (dedupe
+  5m < period 10m < TTL 30m). Crons have failed here before. Not a change; a number to have before
+  mainnet.
+* ⚠️ **`capture:window` does not measure DURATION.** It exits on first sight of the banner, so it
+  proves a window HAPPENED and cannot say how long deposits were unavailable — now the figure that
+  matters. The 2026-08-16 bound (≤ 6m49s, ~5 min) was obtained by hand.
 * ⚠️ **Mutation hygiene:** five mutations this session reported green without applying. Every mutation
   must print whether it changed anything.
 
 ---
 
 ---
+
+## 2026-08-16 (deployed + measured) — ⚠️ THE FIRST REFUSAL WINDOW THAT BLOCKED DEPOSITS, AND A COUNT OF WHAT THE MONEY PATH NOW DEPENDS ON
+
+Policy storage is live: deploy `6a81e8d29a55fbbd35b882ca`, tree `56c7baad1e47`, `ddTree`
+`b32d3e590968 → 0cff0b4b2b0c`.
+
+### ⚠️ THE WINDOW BLOCKED DEPOSITS FOR THE FIRST TIME — MEASURED, ~5 MINUTES
+
+Step 2 routed the deposit gate through the DD report, so while health refuses, `vaultDdReport`
+returns null, `applyReportDisclosure` BLOCKS, and **the deposit is unavailable** — not just the card.
+That is correct and fail-closed, and this deploy is the first time it actually happened.
+
+| | |
+|---|---|
+| window opened | at or before **17:15:01Z** (capture's first probe already saw the banner) |
+| window closed | at or before **17:21:50Z** |
+| **observed upper bound** | **≤ 6m49s** |
+| mechanism | the next `*/10` canary tick, so the real duration is **~5 min** |
+
+⚠️ **AND THE INSTRUMENT DOES NOT MEASURE THE NUMBER THAT NOW MATTERS.** `capture:window` records that
+a window was OBSERVED and exits the moment it sees the banner — it never watches for the close. For a
+window that only affected a documentation page that was fine; now that the same window blocks
+deposits, **DURATION is the figure worth having and the capture cannot produce it.** The bound above
+was obtained by hand. Recorded rather than fixed: it is a change to the instrument, not to the system.
+
+### ⭐⭐ THE DEPOSIT PATH'S FAILURE DEPENDENCIES — COUNTED FROM THE IMPORT GRAPH
+
+Enumerated over the **36 modules reachable from `_actions.mjs`**, not from memory.
+
+🚨 **FIRST, A CORRECTION TO THE PREMISE: THE POLICY STORE IS NOT ON THE DEPOSIT PATH.** `readPolicy`
+appears **zero** times in `_actions.mjs`, `_vault.mjs` and `_vault-report.mjs` — it is read only by
+the CARD route (`agent-dd-report`). A policy-store outage breaks the card, not the deposit. The ack
+comes from `agent-vault-inspect`, which never touches it.
+
+| # | dependency | why it blocks | added |
+|---|---|---|---|
+| 1 | Netlify Blobs — `agent-pause` | `assertNotPaused` fail-closed | pre-existing |
+| 2 | Netlify Blobs — `data-budget` | `canSpendDay` | pre-existing |
+| 3 | Netlify Blobs — `dd-canary-health` | the health gate | **today (step 2)** |
+| 4 | Arc RPC — viem multicall, ONE public endpoint | `inspectVault` | pre-existing |
+| 5 | Arc RPC — quorum, 2 endpoints, ~9 calls | `analyze` via `vaultDdReport` | **today (step 2)** |
+| 6 | Circle API | the approve + deposit itself | pre-existing |
+| 7 | **the canary CRON firing** | health goes stale in 30 min | **today (step 2)** |
+
+⭐⭐ **THEY ARE NOT INDEPENDENT, AND THAT IS THE FINDING.** Three of the seven are the SAME service —
+**Netlify Blobs** — so one Blobs outage takes out pause, budget AND health together. Two more are the
+same Arc RPC. **Distinct external services on the deposit path: THREE** (Blobs, Arc RPC, Circle),
+plus one liveness dependency. A naive product of seven independent probabilities would badly
+overstate the availability.
+
+⭐ **SO TODAY DID NOT ADD NEW SERVICES — it added new CONSUMERS of services already on the path, and
+one thing that is not a service at all.**
+
+🚨 **THE NEWEST DEPENDENCY IS A CRON, AND CRONS HAVE FAILED HERE BEFORE.** The deposit path now
+depends on `dd-canary` firing. This file already records that Netlify intermittently ACKs a
+`*-background` invocation without running it, and that `netlify deploy --dir=dist` does not register
+scheduled functions at all. **The margin is exact:** dedupe 5m < period 10m < TTL 30m, so
+**the deposit path tolerates 2 consecutive missed canary ticks and the 3rd blocks deposits.**
+
+⚠️ **NOT A CHANGE — A NUMBER TO HAVE BEFORE MAINNET.** Each dependency is individually correct and
+fail-closed. The composite availability of the money path is still UNMEASURED; what is now known is
+its shape: 3 services, 1 cron, 30 minutes of canary margin.
 
 ## 2026-08-16 (policy storage) — ⭐⭐ RULES ARE SERVER-SOURCED NOW — AND STILL CANNOT GATE, BY A THROW
 
