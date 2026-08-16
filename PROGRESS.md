@@ -3,7 +3,8 @@
 # ✅ CREDENTIAL AUDIT CLOSED — and the real exposure was never the `is_secret` flag
 
 **2026-08-16.** Commits `9360413` (audit doc), `82df505` (spike guard), `d09af6e` (smoke scripts),
-`9bfa810` (repath + per-file guards). Nothing deployed — this touched no prod code path.
+`9bfa810` (repath + per-file guards), `9961496` (import resolution folded into the index guard).
+Nothing deployed — this touched no prod code path.
 
 ## The finding that reframed the whole task
 
@@ -87,7 +88,20 @@ table concludes those spikes are not provenance. Added, and `verify-spike-index.
 ## State
 
 * prod-Netlify `KIT_KEY` dependency: **20 → 0**.
-* New suites wired into `test:all` as `test:spikes`: 34/0 (guard) + 8/0 (index).
+* New suites wired into `test:all` as `test:spikes`: 34/0 (guard) + 11/0 (index).
+* ✅ **FULL `test:all` GREEN after all five commits — exit 0, 2088 assertions across 36 reporting
+  suites, 0 failed.** Checked for red beyond the tallies (`❌`, `FAILURES`, `npm error`, `Error:`,
+  tracebacks) across all 3,574 log lines: none. `gate:routes` still reports `/api/agent-dd-report`
+  correctly declared — the route this session's reverse audit was built for.
+  ⚠️ **Four entries produced NO tally line** (`test:vault`, `test:client`, `gate:routes`, `test:dd`)
+  — and a suite that reports nothing is indistinguishable from one that passed, which is this
+  session's own subject. Checked individually rather than assumed: vault `32 passed, 0 failed`,
+  client `8 passed, 0 failed`, routes `10 passed` (28 referenced paths vs 34 redirects, 6 exempted
+  with stated reasons), and `test:dd`'s tallies sit under `stamp` because that chain opens with
+  `npm run stamp`. All four genuinely ran.
+* ⚠️ **`test:all` DOES NOT close the gap below.** Every suite is in-process or mocked; none of them
+  supplies a real Circle key, so a green run says nothing about whether a spike works under the new
+  recipe. A full-suite pass is not evidence about the credential path.
 * ⚠️ **UNPROVEN:** no spike or smoke script has been RUN end-to-end under the new recipe. The guard's
   refusal path is proven by 34 real subprocesses; the ACCEPT path with a genuine Circle key is not.
 * ⏭️ `is_secret` on `KIT_KEY` is now unblocked. Hold until a key you hold is confirmed working via
