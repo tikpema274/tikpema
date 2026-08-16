@@ -26,7 +26,7 @@ function run(kitKey) {
   try {
     const out = execFileSync(process.execPath, [
       "--input-type=module", "-e",
-      `import {requireKitKey} from "./scripts/spikes/_kit-key.mjs"; ` +
+      `import {requireKitKey} from "./scripts/_kit-key.mjs"; ` +
       `const k = requireKitKey(); console.log("ACCEPTED:" + (k === process.env.KIT_KEY));`,
     ], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 20_000 });
     return { code: 0, out };
@@ -93,7 +93,7 @@ check("⚠️ …while still reporting enough to act on (length + prefix presenc
 // that is a warning ABOUT the thing, not a use OF it. That is the repo's own recorded blind-spot
 // class (assert-on-rendered-output-not-source-regex): the property here is about CODE, so the
 // comments have to go before the question is asked.
-const raw = await import("node:fs").then((fs) => fs.readFileSync("scripts/spikes/_kit-key.mjs", "utf8"));
+const raw = await import("node:fs").then((fs) => fs.readFileSync("scripts/_kit-key.mjs", "utf8"));
 const code = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 check("⚠️ the comment-stripper actually removed the prose (guards the guard's own test)",
   /netlify env:get/.test(raw) && !/netlify env:get/.test(code));

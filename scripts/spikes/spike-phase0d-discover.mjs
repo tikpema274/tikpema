@@ -20,7 +20,7 @@ import { ARC, CONTRACTS } from "../netlify/functions/_arc.mjs";
 import { rpcCall, assertChain } from "./dd/rpc.mjs";
 import { getChain } from "./dd/chains.mjs";
 
-import { requireKitKey } from "./_kit-key.mjs";
+import { requireKitKey } from "../_kit-key.mjs";
 const KIT_KEY = requireKitKey();
 const KNOWN = new Set([CONTRACTS.USDC.toLowerCase(), CONTRACTS.EURC.toLowerCase(), "0x0000000000000000000000000000000000000000"]);
 const isAddr = (v) => typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v);

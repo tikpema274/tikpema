@@ -43,7 +43,7 @@
     "test:ddcopy": "npx tsx scripts/verify-dd-card-copy.tsx",
     "test:policystore": "node scripts/dd/verify-policy-store.mjs",
     "calibrate:moneyalert": "node scripts/dd/calibrate-money-alert.mjs",
-    "test:spikes": "node scripts/spikes/verify-kit-key-guard.mjs && node scripts/spikes/verify-spike-index.mjs"
+    "test:spikes": "node scripts/verify-kit-key-guard.mjs && node scripts/spikes/verify-spike-index.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",

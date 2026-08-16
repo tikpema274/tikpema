@@ -31,7 +31,7 @@ import { CONTRACTS } from "../netlify/functions/_arc.mjs";
 import { rpcCall, assertChain } from "./dd/rpc.mjs";
 import { getChain } from "./dd/chains.mjs";
 
-import { requireKitKey } from "./_kit-key.mjs";
+import { requireKitKey } from "../_kit-key.mjs";
 const KIT_KEY = requireKitKey();
 const FROM = (process.env.WALLET_ADDRESS || "0x000000000000000000000000000000000000dEaD").toLowerCase();
 const AMOUNT_BASE = "1000000"; // 1 USDC (6 dp) — quoted only, never spent

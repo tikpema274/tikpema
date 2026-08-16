@@ -39,7 +39,7 @@ import { CONTRACTS, ARC } from "../../netlify/functions/_arc.mjs";
 import { rpcCall, assertChain } from "../../shared/dd/rpc.mjs";
 import { getChain } from "../../shared/dd/chains.mjs";
 
-import { requireKitKey } from "./_kit-key.mjs";
+import { requireKitKey } from "../_kit-key.mjs";
 const KIT_KEY = requireKitKey();
 const WALLET = (process.env.WALLET_ADDRESS || "").toLowerCase();
 const ADAPTER = "0xbbd70b01a1cabc96d5b7b129ae1aaabdf50dd40b";

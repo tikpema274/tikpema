@@ -17,7 +17,7 @@ const README = "scripts/spikes/README.md";
 const doc = readFileSync(README, "utf8");
 
 // Helpers/tests are infrastructure, not evidence — they are not expected to have an index row.
-const NOT_EVIDENCE = new Set(["_kit-key.mjs", "verify-kit-key-guard.mjs", "verify-spike-index.mjs"]);
+const NOT_EVIDENCE = new Set(["verify-spike-index.mjs"]);
 
 const files = readdirSync("scripts/spikes")
   .filter((f) => f.endsWith(".mjs") && !NOT_EVIDENCE.has(f));
@@ -53,6 +53,17 @@ check("⭐ …and it teaches the history-safe recipe instead",
 const offenders = files.filter((f) => /env:get KIT_KEY/.test(readFileSync(`scripts/spikes/${f}`, "utf8")));
 check("🚨🚨 no spike sources KIT_KEY from Netlify production", offenders.length === 0,
   offenders.length ? offenders.join(", ") : `${files.length} clean`);
+
+// ── the same rule binds the smoke scripts, which are live tooling rather than evidence ──────────
+// ⚠️ THEY ARE CHECKED HERE ON PURPOSE. They were the last two prod-Netlify consumers, and a guard
+// scoped only to scripts/spikes/ would report "clean" while the dependency it exists to prevent
+// lived one directory up — a filtered read presented as a measurement of absence.
+const SMOKE = ["scripts/smoke-analystb.mjs", "scripts/smoke-swap-estimate.mjs"];
+const smokeBad = SMOKE.filter((f) => /env:get KIT_KEY/.test(readFileSync(f, "utf8")));
+check("🚨🚨 no smoke script sources KIT_KEY from Netlify production", smokeBad.length === 0,
+  smokeBad.length ? smokeBad.join(", ") : `${SMOKE.length} clean`);
+check("⭐ …and both route their key through the shared guard",
+  SMOKE.every((f) => /requireKitKey\(\)/.test(readFileSync(f, "utf8"))));
 
 console.log(`\n${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}\n`);
 process.exit(fail === 0 ? 0 : 1);

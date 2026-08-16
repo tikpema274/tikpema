@@ -41,7 +41,7 @@ import { publicClient } from "../../netlify/functions/_predict.mjs";
 import { circle } from "../../netlify/functions/_circle.mjs";
 import { valueInUsdc } from "../../netlify/functions/_swap.mjs";
 
-import { requireKitKey } from "./_kit-key.mjs";
+import { requireKitKey } from "../_kit-key.mjs";
 const KIT_KEY = requireKitKey();
 const WALLET = (process.env.WALLET_ADDRESS || "").toLowerCase();
 const SWAP_ADAPTER = "0xbbd70b01a1cabc96d5b7b129ae1aaabdf50dd40b";

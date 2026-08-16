@@ -17,21 +17,25 @@
 // estimateSwap is FREE and READ-ONLY: no approve, no swap, no signature, no money. So the
 // real SDK can simply be called. Do that, and this class of bug cannot hide.
 //
-// Requires KIT_KEY (App Kit's swap router key). It lives in the Netlify prod env, so:
-//   KIT_KEY="$(netlify env:get KIT_KEY --context production | sed 's/^KIT_KEY://')" \
-//     node --env-file=.env scripts/smoke-swap-estimate.mjs
+// Requires KIT_KEY (App Kit's swap router key), supplied PER-RUN — never read back out of the
+// production Netlify env, and never as `KIT_KEY=… node …` (that lands in shell history AND argv):
+//   read -rs KIT_KEY && export KIT_KEY     # paste at the prompt — nothing echoes
+//   node --env-file=.env scripts/smoke-swap-estimate.mjs
+//   unset KIT_KEY
+// ⚠️ The old recipe here also piped the key through `sed 's/^KIT_KEY://'` — DISPROVEN (the B1 v2
+// 401): the key carries its own "KIT_KEY:" prefix and is sent verbatim as `Bearer ${apiKey}`.
 import { estimateSwapOnly, valueInUsdc, SWAP_TOKENS } from "../netlify/functions/_swap.mjs";
 import { validateProposal } from "../netlify/functions/_proposal.mjs";
+import { requireKitKey } from "./_kit-key.mjs";
 
 const WALLET = process.argv[2] || "0xbafec950627579cf786acf875e6e216995e995a3";
 
 let pass = 0, fail = 0;
 const check = (n, ok, d = "") => { console.log(`  ${ok ? "✅" : "❌"} ${n}${d ? ` — ${d}` : ""}`); ok ? pass++ : fail++; };
 
-if (!process.env.KIT_KEY) {
-  console.error("KIT_KEY missing. It is in the Netlify prod env — see the header for the command.");
-  process.exit(2);
-}
+// ⭐ Shape-checked, not just presence-checked: a prefix-stripped or "No value set"-contaminated key
+// is NON-EMPTY, so the old truthiness test accepted it and the run died later at a confusing 401.
+requireKitKey();
 
 console.log(`── REAL App Kit estimateSwap (zero money) · wallet ${WALLET.slice(0, 10)}… ──\n`);
 

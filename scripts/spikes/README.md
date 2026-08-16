@@ -31,9 +31,9 @@ unset KIT_KEY
 prod key is just `.env`'s problem one level down, which is how the `SESSION_SECRET` divergence went
 unnoticed. Keys are issued free (no KYC) at <https://console.circle.com/api-keys>.
 
-`_kit-key.mjs` enforces this — it refuses a missing, `"No value set"`-contaminated, prefix-stripped,
+`scripts/_kit-key.mjs` enforces this — it refuses a missing, `"No value set"`-contaminated, prefix-stripped,
 or malformed key, reports shape only (never the value), and reaches for nothing itself.
-Covered by `node scripts/spikes/verify-kit-key-guard.mjs` (31 checks).
+Covered by `node scripts/verify-kit-key-guard.mjs` (31 checks).
 
 ## The proof trail
 

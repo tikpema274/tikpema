@@ -2,10 +2,19 @@
 // router. Mocks cannot violate a contract they stand in for (two SDK bugs proved that today),
 // so B's independence claim is only worth anything if its real sources actually answer.
 //
-//   KIT_KEY="$(netlify env:get KIT_KEY --context production | head -1)" \
-//     node --env-file=.env scripts/smoke-analystb.mjs
+// KIT_KEY is supplied PER-RUN — never read back out of the production Netlify env, and never as
+// `KIT_KEY=… node …` (that lands in shell history AND argv):
+//   read -rs KIT_KEY && export KIT_KEY     # paste at the prompt — nothing echoes
+//   node --env-file=.env scripts/smoke-analystb.mjs
+//   unset KIT_KEY
 import { analystB } from "../netlify/functions/_analystb.mjs";
 import { compareAnalyses } from "../netlify/functions/_synthesis.mjs";
+import { requireKitKey } from "./_kit-key.mjs";
+
+// ⭐ CHECKED UP FRONT, which it never was before: this file hits the REAL swap router, so without a
+// well-formed key the two swap proposals below fail deep inside analystB — and the run still prints
+// verdicts for the bridge case, which reads like a partial success rather than a missing credential.
+requireKitKey();
 const W = "0xbafec950627579cf786acf875e6e216995e995a3";
 
 for (const p of [

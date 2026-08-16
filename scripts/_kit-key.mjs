@@ -64,7 +64,7 @@ export function requireKitKey() {
   const raw = process.env[KIT_KEY_VAR];
 
   if (!raw || !raw.trim()) {
-    refuse(`${KIT_KEY_VAR} is not set.`, `A spike must be given its credential explicitly.`);
+    refuse(`${KIT_KEY_VAR} is not set.`, `This script must be given its credential explicitly.`);
   }
   const key = raw.trim();
 
