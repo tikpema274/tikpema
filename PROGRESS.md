@@ -145,9 +145,9 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
   above — documentation is not an answer about a subject. HTML only; the JSON `howToCall` refusal
   stays behind health. See the entry below for the honesty problem the move created and how the
   banner solves it.
-* ⚠️ **`pausable` and `withdrawalDelay` are the last two undecided power groups.** Both ABSENT on the
-  live vault, so neither is a silent gap today — but that is a fact about our one allowlisted vault,
-  not a decision. Named in `POWER_DISCLOSURE` with `PENDING` and pinned by a suite assertion.
+* ✅ **DONE 2026-08-16 — the power catalogue is fully decided.** Seven warn, two silent with stated
+  reasons, ZERO pending. ⚠️ Remaining unmeasured: the **duration** of a withdrawal delay, and
+  `withdraw.lock/cooldown` (still `null` = UNKNOWN by design).
 * ✅ ~~**`setStrategy` IS PRESENT ON THE LIVE VAULT AND THE CARD IS SILENT ABOUT IT.**~~ `funds-movement`
   class — the same class as `emergencyWithdraw`, which does warn. Plus `transferOwnership` (makes the
   owner-identity disclosure perishable: the holder you acknowledged can be replaced without any warn
@@ -160,6 +160,63 @@ pinned and the same block tag goes to every other. No cache, and the suite asser
 ---
 
 ---
+
+## 2026-08-16 (catalogue complete) — ⭐⭐ `pausable` AND `withdrawalDelay` DECIDED — BOTH WARN, AND ONE OF MY OWN REASONS WAS FALSE
+
+Every one of the nine catalogue groups is now a DECISION. Nothing is PENDING.
+
+**Seven warn** · `emergencyWithdraw` `feesSettable` `upgradeable` `denylist` `setStrategy`
+**`pausable`** **`withdrawalDelay`**
+**Two are silent, each with a stated reason** · `transferOwnership` (handled in the digest instead)
+· `setFeeRecipient` (changes nothing a depositor stands to lose)
+
+### ⭐ BOTH ARE THE REST OF THE DENYLIST ARGUMENT
+
+`denylist` was admitted because it is *"not about what the owner can TAKE; it is about whether YOU can
+leave"*. A pause and a withdrawal queue reach the **same outcome — your funds stay put** — by
+different routes. Excluding them while admitting denylist was an ordering, not a distinction.
+
+⚠️ **AND SELECTOR PRESENCE CANNOT ESTABLISH THE BENIGN READING, which is what settles it.** We can see
+`pause()`; we CANNOT see whether the pause spares withdrawals. We can see `withdrawalDelay()`; we
+CANNOT see whether the wait is an hour or unbounded. **Staying silent would assert the comfortable
+half of an unknown** — the exact fail-open family this module exists to close. So the wording states
+what was found AND what could not be established: *"we can see the pause switch but NOT what it
+halts"*, *"nothing establishes an upper bound"*.
+
+⚠️ **UBIQUITY IS NOT A REASON TO HIDE A MATERIAL FACT.** A pause is near-universal good practice, so
+this warn will fire on most well-built vaults. That makes the disclosure often non-empty, which is
+honest. The `setFeeRecipient` test is MATERIALITY — does it change what a depositor stands to lose —
+and an exit that can be closed plainly does.
+
+### 🚨 AND MY EARLIER `why` FOR `withdrawalDelay` WAS SIMPLY FALSE
+
+I had written: *"delay is not denial, and the withdraw mechanics are already reported as plain
+fields."* ⚠️ **The second half is wrong.** `withdraw.lock/delay/cooldown` are hardcoded `null` —
+explicitly NOT CHECKED, for any vault, by design (defect C). So the "plain fields" I pointed at have
+never contained anything.
+
+⭐⭐ **AND IT INVERTED THE ACTUAL SITUATION.** The DD report DOES scan the group — including
+`initiateWithdrawal(address,uint256)`, a **two-step withdrawal queue** — which `_vault` structurally
+cannot see. Staying silent would have muted the ONLY instrument that can detect a queued exit, while
+pointing at a field guaranteed to stay empty. A one-line justification written without checking, on
+the money path, that survived two passes.
+
+⚠️ The allowlist header claim *"a vault with a withdrawal queue is not detected"* is corrected: a
+queue now WARNS; what remains unmeasured is the **duration**.
+
+### ⭐ TWO INSTRUMENTS ON ONE FACT — MADE A CROSS-CHECK, NOT A DRIFT RISK
+
+`pausable` is now observed twice: by `_vault`'s own scan (`withdraw.pausable`, DISPLAY ONLY, feeds no
+gate) and by the report (which drives the warn, the level and the digest). `verify-vault` §ROW 1c
+asserts they AGREE — a disagreement would be a real finding about one of the two scans, since they
+read the same selectors against the same address. ⚠️ Recorded honestly: on XyloVault both are FALSE,
+so today's agreement is **0-vs-0** and weak. It becomes load-bearing the moment a vault with a pause
+switch is allowlisted — which is exactly when a silent divergence would matter.
+
+⚠️ **NO LIVE EFFECT ON XyloVault** — it has neither power, so its warns and digest are unchanged.
+This pass is entirely forward-looking, and that is the honest description of it.
+
+`verify-dd-report` **155/0**, `verify-vault` **45/0**, `verify-vault-degraded` 32/0. `test:all` exit 0.
 
 ## 2026-08-16 (consistency + digest v2) — ⭐⭐ `setStrategy` DISCLOSES, AND THE HOLDER IS FINALLY IN THE DIGEST
 

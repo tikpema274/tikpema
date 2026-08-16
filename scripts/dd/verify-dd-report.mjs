@@ -365,8 +365,9 @@ section("G ⭐⭐ STEP 2 COMPLETE — the seven warns are GONE and the report su
   // and one silent, is an inconsistency rather than a threshold.
   check("⭐⭐ `setStrategy` now warns — same `funds-movement` class as emergencyWithdraw",
     POWER_DISCLOSURE.setStrategy.warn === true && REPORT_POWER_WARNS.setStrategy?.code === "set-strategy");
-  check("⭐ five groups warn now", Object.keys(REPORT_POWER_WARNS).length === 5,
-    Object.keys(REPORT_POWER_WARNS).join(","));
+  // ⚠️ NO RAW COUNT HERE — a pinned number goes red on correct change and teaches people to edit
+  // the test. The membership assertions above and the completeness assertion below are the claims.
+  check("⭐ setStrategy is in the warning set", "setStrategy" in REPORT_POWER_WARNS);
 
   // ⭐⭐ transferOwnership STAYS SILENT ON PURPOSE, and the reason is that a warn cannot fix its
   // problem — perishability is a DIGEST question. Pinned so nobody "completes the set" later.
@@ -378,12 +379,27 @@ section("G ⭐⭐ STEP 2 COMPLETE — the seven warns are GONE and the report su
     POWER_DISCLOSURE.setFeeRecipient.warn === false &&
     !/PENDING/.test(POWER_DISCLOSURE.setFeeRecipient.why) &&
     /feesSettable/.test(POWER_DISCLOSURE.setFeeRecipient.why));
-  // ⚠️ AND THE GENUINELY-UNDECIDED ONES STAY NAMED. Both are ABSENT on the live vault, so neither is
-  // a silent gap today — but "absent from the one vault we allowlist" is not a decision, and this
-  // assertion is what keeps them from quietly becoming one.
+  // ⭐⭐ THE EXIT-PATH SET IS COMPLETE. `denylist` was admitted because it is about whether YOU can
+  // leave rather than what the owner can take; `pausable` and `withdrawalDelay` are the rest of that
+  // same argument, reaching the same outcome by different routes.
+  check("⭐⭐ `pausable` warns — an exit that can be closed", POWER_DISCLOSURE.pausable.warn === true);
+  check("⭐⭐ `withdrawalDelay` warns — an exit that is not a single call", POWER_DISCLOSURE.withdrawalDelay.warn === true);
+  // ⚠️ THE WORDING MUST ADMIT THE HALF WE CANNOT ESTABLISH. Selector presence shows the mechanism,
+  // never its scope or its bound — and asserting the comfortable half of an unknown is the fail-open
+  // family this whole module exists to close.
+  check("⚠️ the pause warn says we cannot see WHAT it halts",
+    /NOT what it halts/.test(POWER_DISCLOSURE.pausable.detail));
+  check("⚠️ the delay warn says nothing establishes an upper bound",
+    /nothing establishes an upper bound/.test(POWER_DISCLOSURE.withdrawalDelay.detail));
+
+  // 🚨🚨 NOTHING IS PENDING ANY MORE — every catalogue group is a decision, not a deferral.
   const stillPending = Object.entries(POWER_DISCLOSURE).filter(([, d]) => /PENDING/.test(d.why ?? "")).map(([g]) => g);
-  check("⚠️ exactly `pausable` and `withdrawalDelay` remain undecided, and say so",
-    stillPending.sort().join(",") === "pausable,withdrawalDelay", stillPending.join(",") || "(none)");
+  check("🚨🚨 ZERO groups are left undecided — the whole catalogue is a decision",
+    stillPending.length === 0, stillPending.join(",") || "(none pending)");
+  check("⭐ seven warn, two are silent WITH a stated reason",
+    Object.keys(REPORT_POWER_WARNS).length === 7 &&
+    Object.entries(POWER_DISCLOSURE).filter(([, d]) => !d.warn).length === 2,
+    Object.keys(REPORT_POWER_WARNS).join(","));
   check("⚠️ …and multisig/timelock/renounced still raise nothing",
     !["multisig", "timelock", "renounced"].some((k) => k in REPORT_OWNER_WARNS));
 

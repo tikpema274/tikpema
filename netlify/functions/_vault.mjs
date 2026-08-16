@@ -49,9 +49,13 @@ import {
 // longer asserts anything it did not establish. What remains is COVERAGE — things the inspector
 // cannot see and now says so, which is honest but still limits what a second entry is safe to be:
 //
-//   1. NOT CHECKED AT ALL: withdrawal locks, delays and cooldowns (the fields are `null`, and the
-//      disclosure names the gap). A vault with a withdrawal queue is not detected — it is merely
-//      no longer described as instantly reversible.
+//   1. ⭐ PARTLY CLOSED 2026-08-16 — and the remaining half is narrower than this used to claim.
+//      This said "a vault with a WITHDRAWAL QUEUE is not detected". That is no longer true: the DD
+//      report scans the `withdrawalDelay` group (`withdrawalDelay()`, `updateWithdrawalDelay`,
+//      `initiateWithdrawal`), so a two-step exit now raises a WARN. ⚠️ What is STILL unmeasured is
+//      the DURATION — and the locks/cooldowns below. `withdraw.lock/delay/cooldown` remain `null`
+//      (UNKNOWN, never "absent"): we can now say a delay mechanism EXISTS, and still cannot say how
+//      long you wait. The warn wording says exactly that rather than implying a bound.
 //   2. ⭐ SCANNED SINCE STEP 2, BUT DELIBERATELY NOT DISCLOSED — and the distinction now matters.
 //      This used to read "DECLARED BUT NOT SCANNED: setStrategy / setFeeRecipient /
 //      transferOwnership". That is NO LONGER TRUE: the disclosure comes from the DD report, which
@@ -345,6 +349,13 @@ export async function inspectVault(address) {
     lock: null,
     delay: null,
     cooldown: null,
+    // ⚠️ THE SAME FACT IS NOW ESTABLISHED TWICE — here by this module's own bytecode scan, and in the
+    // VERDICT by the DD report (`pausable` warns since 2026-08-16). This field is DISPLAY ONLY and
+    // feeds no gate: the warn, the level and the digest all come from the report, so there is one
+    // source of truth for the DECISION even though two instruments observe the fact.
+    // ⭐ verify-dd-report asserts the two AGREE for the live vault, which turns the duplication into
+    // a cross-check rather than a drift risk. If they ever disagree, that is a real finding about one
+    // of the two scans — not a cosmetic mismatch.
     pausable,
     withdrawFeeBps,
     withdrawFeePct: withdrawFeeBps === null ? null : `${(withdrawFeeBps / 100).toFixed(2)}%`,
@@ -554,10 +565,26 @@ export const POWER_DISCLOSURE = Object.freeze({
   // depositor stands to lose — and this card's value depends on every line mattering.
   setFeeRecipient: { warn: false,
     why: "Redirects WHERE fees go, between owner and recipient. The depositor's exposure is the fee AMOUNT, already covered by feesSettable. A line that changes nothing for the depositor is noise on a card whose value depends on every line mattering." },
-  pausable: { warn: false,
-    why: "PENDING — `access-restriction`, absent on XyloVault. A pause stops everyone rather than singling a holder out, which is why the denylist went first." },
-  withdrawalDelay: { warn: false,
-    why: "PENDING — `access-restriction`, absent on XyloVault. Delay is not denial, and the withdraw mechanics are already reported as plain fields." },
+  // ⭐⭐ DECIDED 2026-08-16 — BOTH WARN, and both for the SAME reason: they are the exit path.
+  //
+  // `denylist` was admitted on the argument that it is "not about what the owner can TAKE; it is
+  // about whether YOU can leave". These two are the rest of that argument. A pause and a withdrawal
+  // queue reach the same outcome — your funds stay put — by different routes.
+  //
+  // ⚠️ AND SELECTOR PRESENCE CANNOT ESTABLISH THE BENIGN READING, which is what settles it. We can
+  // see `pause()`; we CANNOT see whether the pause spares withdrawals. We can see `withdrawalDelay()`;
+  // we CANNOT see whether the delay is an hour or unbounded. Staying silent would assert the
+  // comfortable half of an unknown — the exact fail-open family this whole module exists to close.
+  // The wording therefore says what was found AND what could not be established.
+  //
+  // ⚠️ UBIQUITY IS NOT A REASON TO HIDE A MATERIAL FACT. A pause is near-universal good practice, so
+  // this warn will fire on most well-built vaults. That makes the disclosure often non-empty, which
+  // is honest; it does not make the fact less true. The `setFeeRecipient` test is MATERIALITY — does
+  // it change what a depositor stands to lose — and an exit that can be closed plainly does.
+  pausable: { warn: true, code: "pausable",
+    detail: "The owner can pause this vault. We can see the pause switch but NOT what it halts — if it covers withdrawals, you cannot exit while it is on." },
+  withdrawalDelay: { warn: true, code: "withdrawal-delay",
+    detail: "Withdrawals are not a single call: this vault has a delay or two-step queue. We can see the mechanism but NOT how long the wait is, and nothing establishes an upper bound." },
 });
 
 /** 🚨 Catalogue and disclosure must account for each other, in BOTH directions. */

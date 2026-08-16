@@ -134,6 +134,26 @@ console.log("\n── ROW 1b · a raw inspection can never be gated on ──");
     weirdOwner.verdict.warns.some((w) => w.code === "owner-unreadable"));
 }
 
+// ── ⭐ ROW 1c — TWO INSTRUMENTS ON ONE FACT MUST AGREE ───────────────────────────────────────
+// `pausable` is now observed TWICE: by this module's own bytecode scan (`withdraw.pausable`, display
+// only) and by the DD report (which drives the WARN, the level and the digest). Two sources for one
+// fact is normally a drift risk; asserting they AGREE converts it into a cross-check.
+// ⚠️ A DISAGREEMENT WOULD BE A REAL FINDING about one of the two scans — they read the same selectors
+// against the same effective address — not a cosmetic mismatch, so this fails rather than warns.
+console.log("\n── ROW 1c · the two pausable scans corroborate ──");
+{
+  const reportSaysPausable = insp.verdict.warns.some((w) => w.code === "pausable");
+  const vaultSaysPausable = insp.withdraw?.pausable === true;
+  check("⭐⭐ the vault's own pausable scan agrees with the report's",
+    reportSaysPausable === vaultSaysPausable,
+    `report=${reportSaysPausable} vault=${vaultSaysPausable}`);
+  // ⚠️ Recorded honestly: on XyloVault both are FALSE, so this is a weak agreement today (0 vs 0).
+  // It becomes load-bearing the moment a vault with a pause switch is allowlisted, which is exactly
+  // when a silent divergence would matter.
+  check("  (recorded) XyloVault has no pause switch, so today's agreement is 0-vs-0",
+    vaultSaysPausable === false);
+}
+
 // ── ROW 2 — BLOCK FIRES ──────────────────────────────────────────────────────────────────────
 console.log("\n── ROW 2 · BLOCK fires (non-ERC-4626 + non-allowlisted) ──");
 const inspUsdcRaw = await inspectVault(USDC);
