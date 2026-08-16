@@ -72,10 +72,42 @@ is `KIT_KEY`, `PINATA_JWT`, or prose), so nothing breaks on that axis.
 ⭐ `netlify env:set KEY --secret` (no value) converts in place, so the flip needs no value handling.
 
 ### 🥈 B(iii) · the OTHER credentials still carry `builds`
-⚠️ `CIRCLE_API_KEY`, `SESSION_SECRET`, `KIT_KEY` and `ANTHROPIC_API_KEY` are ALL still
-`builds,functions,post_processing,runtime`. `CIRCLE_API_KEY` pairs with the entity secret and is the
-obvious next one; each needs its own "does the build read it" check before dropping, exactly as this
-one got. Not done — out of scope for this pass.
+### ✅ DONE 2026-08-16 — `CIRCLE_API_KEY`: builds dropped AND marked secret
+
+Now `functions,runtime`, `is_secret: True`. ⭐ Netlify **auto-dropped `post_processing`** on the
+secret flip — secret values may not be used there — narrowing it further than asked.
+
+⭐⭐ **THE `is_secret` ANSWER DIFFERS FROM THE ENTITY SECRET'S, AND THE ASYMMETRY IS STRUCTURAL —
+CONFIRMED FROM DOCS, NOT ASSUMED.** The entity secret has an entire *entity secret management* page
+covering registration, rotation, reset and a recovery file **because Circle never stores it**; losing
+it is unrecoverable. An API key is issued BY Circle, listed in the console under *API & Client Keys*,
+and replaceable via *Create a key*. **No recovery file exists for it because none is needed — that
+absence is itself the evidence.** So losing every local copy costs a regeneration, not the wallets,
+and the recovery-path argument that HOLDS `is_secret` on the entity secret does not apply here.
+
+**Read-check done properly, not by analogy** (an API key is far more plausibly a build-time need):
+- install hooks: `postinstall` is only `git config core.hooksPath` — reads nothing
+- build chain: `stamp-build.mjs` ✗, `vite.config.ts` ✗
+- ⭐ **client bundle**: no `VITE_`-prefixed Circle key, no `src/` read, and the **live production
+  bundle was grepped for the actual key — absent.** The worse failure (shipping it to browsers) is
+  ruled out by measurement, not by reasoning about vite's rules.
+- `env:get CIRCLE_API_KEY`: no occurrences anywhere, so nothing breaks on the read-back axis
+
+**Ordering was load-bearing.** Scope first (value hash verified identical before/after), THEN secret —
+because once `is_secret` is set the value can never be read back, so every value-verification had to
+happen while it was still readable. ⭐ Pre-flight also confirmed `.env` and Netlify held the SAME key
+(`ed2b07d32ae37822` both sides) — flipping while they disagreed would have locked in a mismatch that
+could never afterwards be diagnosed.
+
+⚠️ **`.env` IS NOW THE ONLY READABLE COPY.** Losing it means regenerating in the console — acceptable,
+and the deliberate trade.
+⚠️ **Latent until the next deploy.** Env changes take effect on redeploy; runtime is unverified.
+
+### 🥈 B(iii) · still carrying `builds`
+⚠️ `SESSION_SECRET`, `KIT_KEY`, `ANTHROPIC_API_KEY`. Each needs its own read-check before dropping,
+exactly as the two above got. ⚠️ `SESSION_SECRET` is the interesting one: it is NOT regenerable in the
+same sense — rotating it invalidates every live session, so its `is_secret` question needs its own
+answer rather than inheriting this one.
 
 ### 🥉 C · `context: all`
 Set in production, deploy-preview AND branch-deploy — every preview carries production wallet
