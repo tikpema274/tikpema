@@ -119,7 +119,9 @@ export async function handler(event) {
       quoteStepIndex: Number.isInteger(r.quoteStepIndex) ? r.quoteStepIndex : null,
       // ⭐ WAS THE JOIN PROTECTED? true = the quote is exempt from the age prune, so a missing quote
       // later is a real anomaly. false = the mark failed and this join breaks on schedule — expected.
-      // null = no quote (direct Bridge page). Projected because the DISTINCTION is the point: without
+      // null = either no quote (`quoteId` also null — the direct Bridge page) or a receipt predating
+      // this field (`quoteId` present); read the pair, not this alone. Projected because the
+      // DISTINCTION is the point: without
       // it, an outsider seeing a dead quoteId cannot tell a broken system from a working one.
       quotePromoted: typeof r.quotePromoted === "boolean" ? r.quotePromoted : null,
       // ⭐ THE PROVISIONAL PAIR. A submitted-but-unconfirmed bridge has no burnHash, so the

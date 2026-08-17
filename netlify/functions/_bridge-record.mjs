@@ -141,7 +141,11 @@ export async function recordBridge({ r, session, event, amountRequested, quoteId
     // ⭐ DID THE QUOTE GET PROTECTED FROM THE PRUNE? Written from the ACTUAL result of the mark, not
     // from the intent to make one. `true` = the quote is exempt from the 14-day age prune, so a later
     // missing quote is a real anomaly. `false` = the mark failed and this join WILL break on schedule
-    // — expected, explained, not a mystery. `null` = there was no quote (the direct Bridge page).
+    // — expected, explained, not a mystery. `null` means one of TWO things, disambiguated by
+    // `quoteId`: with `quoteId: null` there was no quote at all (the direct Bridge page); with a
+    // `quoteId` PRESENT it is a receipt written BEFORE this field existed (every receipt up to and
+    // including 2026-08-17). ⚠️ Those are not the same, and the pair must be read together — a
+    // three-state field whose null is overloaded is how a reader invents a fourth state.
     // 🚨 Without this field those three are indistinguishable once the quote is gone, and the reader
     // is left unable to tell a broken system from a working one.
     quotePromoted: typeof quotePromoted === "boolean" ? quotePromoted : null,
@@ -219,7 +223,11 @@ export async function recordPendingBridge({ e, session, amountRequested, quoteId
     // ⭐ DID THE QUOTE GET PROTECTED FROM THE PRUNE? Written from the ACTUAL result of the mark, not
     // from the intent to make one. `true` = the quote is exempt from the 14-day age prune, so a later
     // missing quote is a real anomaly. `false` = the mark failed and this join WILL break on schedule
-    // — expected, explained, not a mystery. `null` = there was no quote (the direct Bridge page).
+    // — expected, explained, not a mystery. `null` means one of TWO things, disambiguated by
+    // `quoteId`: with `quoteId: null` there was no quote at all (the direct Bridge page); with a
+    // `quoteId` PRESENT it is a receipt written BEFORE this field existed (every receipt up to and
+    // including 2026-08-17). ⚠️ Those are not the same, and the pair must be read together — a
+    // three-state field whose null is overloaded is how a reader invents a fourth state.
     // 🚨 Without this field those three are indistinguishable once the quote is gone, and the reader
     // is left unable to tell a broken system from a working one.
     quotePromoted: typeof quotePromoted === "boolean" ? quotePromoted : null,

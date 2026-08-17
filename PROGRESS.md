@@ -8,8 +8,14 @@
 |---|---|---|
 | `6a834ab31972b84d68cfb24b` (18:22Z) | **24m 49.3s** | tree `42b972359f42` / commit `929379501514` |
 | `6a8358cc4b38dd7bfb3a258c` (19:33Z) | **36m 03.2s** | tree `5fba3ade7c6e` / commit `6c849385e88a` |
+| `6a8369049eb4ec5ed66adfc6` (20:37Z) | **30m 12s** | tree `182eb7642a69` / commit `1ff8d7f36c26` |
 
-⚠️ **THE MEMORY NOTE SAYS "budget ~30 MIN (bundling grew 7.5→25 min)". THAT IS NOW OPTIMISTIC** — the
+⭐ **THREE MEASUREMENTS THE SAME DAY: 24m49s, 36m03s, 30m12s — AT THE SAME FUNCTION COUNT.** The
+spread is ~11 minutes and it is NOT monotonic, so bundling time is noisy rather than steadily growing.
+⚠️ Treat any single measurement as a FLOOR, never as an estimate: a run that finishes in 25 minutes
+says nothing about the next one.
+
+⚠️ **THE MEMORY NOTE SAYS "budget ~30 MIN (bundling grew 7.5→25 min)". THAT IS OPTIMISTIC** — the
 second deploy took 36 minutes to bundle ALONE, before uploading, and the whole `deploy:prod` chain ran
 roughly 19:53→19:42 wall-clock including `gate:*`, `build`, upload, `gate:deployed` and
 `capture:window`. Budget **~45 min**, and do not start one against a tool ceiling.
