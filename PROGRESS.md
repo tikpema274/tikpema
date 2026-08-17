@@ -65,6 +65,52 @@ verified reachable-red: removing the fields turns 5 red; changing `Number.isInte
 `ackAcceptedAt` carries the discrimination. The bug would have deleted the evidence that the gate is
 per-step, while leaving the acknowledged step looking perfect.
 
+## ✅ DEPLOYED + VERIFIED AT THE SURFACE 2026-08-17
+
+Deploy `6a834ab31972b84d68cfb24b`, published 18:22:10.923Z, tree `42b972359f42`, commit `929379501514`.
+
+⚠️ **`gate:deployed` REPORTED FROM ITS OWN FIVE CHECKS, NOT FROM AN EXIT CODE** — a reaped deploy
+sticks at state `new` with `error_message: null` and reads exactly like success, which is the class
+that cost five silent deploys:
+1. local build stamped ✓ · 2. **published deploy is `ready`** ✓ (not `new` — the check that matters)
+· 3. production serves this tree AND commit ✓ · 4. **control plane == data plane**, both naming
+`6a834ab3…` ✓ · 5. no orphaned deploys, 25 newer scanned ✓
+
+⭐⭐ **AND THEN THE LIVE GET, WHICH IS THE ONLY THING THAT PROVES THE POINT.** The suite (185/0) proves
+the projection *function*; only `GET /api/bridge-receipts` proves an OUTSIDER can reach the join:
+
+```
+1 USDC    band none         ackAcceptedAt null            quoteId q_msxi20om…  step 0
+0.1 USDC  band acknowledge  ackAcceptedAt 17:28:26.588Z   quoteId q_msxi20om…  step 1
+```
+
+`cache-status: fwd=bypass` / Edge `fwd=miss` — origin, not cache. Note `quoteStepIndex 0` survives on
+the 1.0 receipt **in production**, so the falsy-index handling is confirmed live and not only in a mock.
+
+`capture:window` observed NO window, correctly: `bridge-receipts.mjs` is not in the DD surface, so
+`ddTree` did not rotate and no refusal was expected. Recorded as not-a-pass, per its own rule.
+
+## 🚨 RETENTION: THE PROJECTION MAKES THE JOIN REACHABLE — RETENTION DECIDES WHETHER IT RESOLVES
+
+**Receipts are permanent (no prune exists). Quotes have a 14-day TTL** (`QUOTE_TTL_MS`, plus a 200/owner
+cap, pruned on the write path). So **every receipt outlives its quote by design**, and a receipt older
+than 14 days carries a `quoteId` that resolves to nothing — the same broken chain as the missing
+projection, by a different route.
+
+⭐ **OBSERVED, NOT PREDICTED.** Between two reads today the quote
+`…/2026-08-02T00:21:32.462Z-q_msb21x9q…` was evicted at **exactly 14 days old**, by the age prune,
+triggered by today's own writes. The mechanism is live and working as designed — the design is the
+issue, not a bug.
+
+⚠️ **Today's proof therefore has an expiry: ~2026-08-31.** After that the acknowledge receipt still
+says consent was accepted, and the record that says a token was ISSUED for that step index is gone.
+The evidentiary value of this run rests on TWO records agreeing; one of them is scheduled for deletion.
+
+⏭️ Not fixed here, and the options are not equal: extending the quote TTL trades storage for a longer
+join; copying `ackTokenIssued` onto the receipt at write time makes the receipt self-contained but
+creates the duplicate-source-of-truth shape this repo treats as its recurring bug; pruning receipts to
+match is the one option that destroys evidence and should not be chosen by default.
+
 ## Where this leaves the gate
 
 `ackAcceptedAt` set on **1 of 20** receipts — the right one. The remaining honest limit is the one
