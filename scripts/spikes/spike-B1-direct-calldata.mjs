@@ -54,7 +54,7 @@ const info = (s) => log(`  ·  ${s}`);
 const keys = (o) => (o && typeof o === "object" ? Object.keys(o).join(", ") : String(o));
 const shortHex = (v) => (typeof v === "string" && v.startsWith("0x") && v.length > 22 ? `${v.slice(0, 14)}…(${(v.length - 2) / 2}B)` : v);
 
-if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET || !KIT_KEY) { console.error("Need CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env) and KIT_KEY (prod env)."); process.exit(2); }
+if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) { console.error("Need CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env). KIT_KEY is supplied per-run — see scripts/_kit-key.mjs (never from the production Netlify env)."); process.exit(2); }
 if (!isAddr(WALLET)) { console.error("Set WALLET_ADDRESS=0x… — the phase0e-approved wallet (allowance ≥1 USDC to the adapter)."); process.exit(2); }
 // SDK contract (provider apiKeySchema, index.mjs:9749): the key is sent verbatim as `Bearer ${apiKey}`
 // and MUST already start with "KIT_KEY:". Catch a sed-stripped / mis-prefixed value here, not at a 401.

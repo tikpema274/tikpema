@@ -39,7 +39,7 @@ const no = (s) => log(`  ⚠️  ${s}`);
 const info = (s) => log(`  ·  ${s}`);
 
 if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET || !KIT_KEY) {
-  console.error("Need CIRCLE_API_KEY + CIRCLE_ENTITY_SECRET (.env) and KIT_KEY (Netlify prod env). See header.");
+  console.error("Need CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env). KIT_KEY is supplied per-run — see scripts/_kit-key.mjs (never from the production Netlify env).");
   process.exit(2);
 }
 

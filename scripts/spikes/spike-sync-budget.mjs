@@ -58,7 +58,7 @@ const ok = (s) => log(`  ✅ ${s}`);
 const no = (s) => log(`  ⚠️  ${s}`);
 const info = (s) => log(`  ·  ${s}`);
 
-if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET || !KIT_KEY) { console.error("Need CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env) and KIT_KEY (prod env)."); process.exit(2); }
+if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) { console.error("Need CIRCLE_API_KEY+CIRCLE_ENTITY_SECRET (.env). KIT_KEY is supplied per-run — see scripts/_kit-key.mjs (never from the production Netlify env)."); process.exit(2); }
 if (!/^0x[0-9a-fA-F]{40}$/.test(WALLET)) { console.error("Set WALLET_ADDRESS=0x… (the approved SCA with allowance to the adapter)."); process.exit(2); }
 if (!/^KIT_KEY:[a-zA-Z0-9._-]+:[a-zA-Z0-9._-]+$/.test(KIT_KEY)) { console.error(`KIT_KEY must be the verbatim KIT_KEY:<id>:<secret> (do not strip the prefix).`); process.exit(2); }
 
