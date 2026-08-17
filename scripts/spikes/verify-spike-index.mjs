@@ -66,6 +66,51 @@ check("🚨🚨 no smoke script sources KIT_KEY from Netlify production", smokeB
 check("⭐ …and both route their key through the shared guard",
   SMOKE.every((f) => /requireKitKey\(\)/.test(readFileSync(f, "utf8"))));
 
+// ═══ ⭐⭐ THE POSITIVE GUARD: ALL KEY ACQUISITION GOES THROUGH requireKitKey() ═════════════════════
+// The checks above assert a NEGATIVE — that `env:get KIT_KEY` does not appear. A negative guard can
+// always be evaded by rephrasing: prose that says "production" without the string, a variable holding
+// the command, a different CLI form. Enumerating every way prose could point at prod is unwinnable.
+//
+// ⭐ THE POSITIVE CANNOT BE EVADED. Either the import and the call are there or they are not. This is
+// the same lesson as "the string appears is not the call happens", pointed the other way — and it is
+// the check that would have caught the five runtime error messages `cf47676` fixed, which I found by
+// hand because they said "prod env" without containing `env:get`.
+//
+// ⚠️ ORDER IS PART OF THE PROPERTY, not a separate nicety. A file could import the guard, call it at
+// line 100, and read `process.env.KIT_KEY` at line 20 — acquiring unguarded and validating later.
+// That is the shape of the real phase0e defect (key used after a real approve had been broadcast), so
+// the first guard call must precede any raw env read.
+
+/** Source with comments removed — the property is about CODE, not prose. */
+const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+// 🚨 THE SUBJECT FILTER MUST MATCH THE GUARD CALL, NOT JUST THE `KIT_KEY` TOKEN — and getting this
+// wrong is how the whole check goes vacuously green. The first version tested `/KIT_KEY/`, but wiring
+// the guard DELETED the raw reads: a file whose only reference is `requireKitKey()` (camelCase, no
+// underscore) matched nothing. That silently narrowed 20 subjects to 9 and still reported green.
+// Caught by the `>= 18` self-check below, which is the only reason it was visible at all.
+const KEYED = [...files.map((f) => `scripts/spikes/${f}`), ...SMOKE]
+  .map((f) => [f, stripComments(readFileSync(f, "utf8"))])
+  .filter(([, code]) => /KIT_KEY|requireKitKey|isWellFormedKitKey/.test(code));
+
+const unguarded = KEYED.filter(([, code]) =>
+  !(/from\s+["'][^"']*_kit-key\.mjs["']/.test(code) &&
+    /\b(requireKitKey|isWellFormedKitKey)\s*\(/.test(code)));
+check("⭐⭐ every script that touches KIT_KEY imports AND calls the shared guard", unguarded.length === 0,
+  unguarded.length ? `UNGUARDED: ${unguarded.map(([f]) => f).join(", ")}` : `${KEYED.length} files`);
+
+const outOfOrder = KEYED.filter(([, code]) => {
+  const guard = code.search(/\b(requireKitKey|isWellFormedKitKey)\s*\(/);
+  const raw = code.search(/process\.env\.KIT_KEY|process\.env\[["']KIT_KEY["']\]/);
+  return raw !== -1 && (guard === -1 || raw < guard);
+});
+check("⚠️ …and no raw process.env.KIT_KEY read happens BEFORE the guard call", outOfOrder.length === 0,
+  outOfOrder.length ? `ACQUIRES UNGUARDED: ${outOfOrder.map(([f]) => f).join(", ")}` : "acquisition is guarded everywhere");
+
+// 🚨 SELF-CHECK: a positive guard that matches nothing is green for free.
+check("🚨 the positive guard actually has subjects (a zero-file scan would pass vacuously)",
+  KEYED.length >= 18, `${KEYED.length} files reference KIT_KEY in code`);
+
 // ═══ IMPORT RESOLUTION ═══════════════════════════════════════════════════════════════════════════
 // ⭐⭐ WHY THIS LIVES HERE: 12 of 22 spikes sat with unresolvable imports — dead on load — and nobody
 // noticed for weeks. `spike-phase0.mjs` was found broken *by accident* during the shared/dd move, not

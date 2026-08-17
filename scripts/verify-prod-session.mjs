@@ -105,6 +105,37 @@ check("⭐⭐ the guard never spawns, fetches, or shells out — it reads env an
 check("⭐⭐ mintProdToken imports the deployed _auth.mjs rather than reimplementing the signature",
   /_auth\.mjs/.test(code) && /issueSession/.test(code));
 
+// ═══ ⭐⭐ THE POSITIVE GUARD, SAME SHAPE AS THE KIT_KEY ONE ═══════════════════════════════════════
+// Assert that all secret acquisition GOES THROUGH the guard, rather than that some forbidden string
+// is absent. A negative can be rephrased around; a positive cannot — either the import and the call
+// are there or they are not. Added here so the newer tooling cannot drift the way the spikes did.
+//
+// ⚠️ AND ORDER COUNTS: a script could call the guard late while having already read the raw env, which
+// is acquisition-then-validation and defeats the point.
+const { readFileSync: rf } = await import("node:fs");
+const CONSUMERS = ["scripts/probe-ub-auth.mjs", "scripts/fire-ub-spend.mjs"];
+const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+const bad = CONSUMERS.filter((f) => {
+  const code = strip(rf(f, "utf8"));
+  return !(/from\s+["'][^"']*_prod-session\.mjs["']/.test(code) && /\brequireProdSessionSecret\s*\(/.test(code));
+});
+check("⭐⭐ every prod-probe script imports AND calls requireProdSessionSecret", bad.length === 0,
+  bad.length ? `UNGUARDED: ${bad.join(", ")}` : `${CONSUMERS.length} files`);
+
+const misordered = CONSUMERS.filter((f) => {
+  const code = strip(rf(f, "utf8"));
+  const g = code.search(/\brequireProdSessionSecret\s*\(/);
+  const raw = code.search(/process\.env\.SESSION_SECRET|process\.env\[["']SESSION_SECRET["']\]/);
+  return raw !== -1 && (g === -1 || raw < g);
+});
+check("⚠️ …and none reads process.env.SESSION_SECRET before the guard", misordered.length === 0,
+  misordered.length ? misordered.join(", ") : "acquisition is guarded everywhere");
+
+// 🚨 A positive guard over an empty set is green for free — the exact bug the KIT_KEY version shipped
+// with for one run (its subject filter matched 9 of 20 files because `requireKitKey` has no underscore).
+check("🚨 the positive guard has subjects", CONSUMERS.length === 2, `${CONSUMERS.length} consumers`);
+
 rmSync(dir, { recursive: true, force: true });
 console.log(`\n${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}\n`);
 process.exit(fail === 0 ? 0 : 1);
