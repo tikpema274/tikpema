@@ -9,11 +9,29 @@
 | `6a834ab31972b84d68cfb24b` (18:22Z) | **24m 49.3s** | tree `42b972359f42` / commit `929379501514` |
 | `6a8358cc4b38dd7bfb3a258c` (19:33Z) | **36m 03.2s** | tree `5fba3ade7c6e` / commit `6c849385e88a` |
 | `6a8369049eb4ec5ed66adfc6` (20:37Z) | **30m 12s** | tree `182eb7642a69` / commit `1ff8d7f36c26` |
+| `6a83813b2eb14fc4b3cae9a4` (22:36Z) | **44m 29.4s** | tree `09fee79b5241` / commit `2c0c49cc33f1` |
 
-⭐ **THREE MEASUREMENTS THE SAME DAY: 24m49s, 36m03s, 30m12s — AT THE SAME FUNCTION COUNT.** The
-spread is ~11 minutes and it is NOT monotonic, so bundling time is noisy rather than steadily growing.
-⚠️ Treat any single measurement as a FLOOR, never as an estimate: a run that finishes in 25 minutes
-says nothing about the next one.
+⭐ **FOUR MEASUREMENTS THE SAME DAY: 24m49s, 36m03s, 30m12s, 44m29s — AT THE SAME FUNCTION COUNT.**
+The spread is nearly **20 minutes** and it is NOT monotonic, so bundling time is noisy rather than
+steadily growing. ⚠️ Treat any single measurement as a FLOOR, never as an estimate: a run that
+finishes in 25 minutes says nothing about the next one. ~45 min is now the floor of a BAD run.
+
+## 🚨 THE DISCRIMINATOR FOR "SLOW" vs "STUCK" IS CPU, NOT ELAPSED TIME
+
+At 39 minutes the 22:36Z deploy had passed **every** prior run, so the "compare against a previous
+log" rule had run out — the only precedent said it should already have finished. Elapsed time could
+no longer tell a slow bundle from a hung one.
+
+⭐ **`ps -o time,pcpu` SETTLED IT IN 25 SECONDS.** node was at **156% CPU** with cumulative CPU time
+climbing `01:02:37 → 01:03:15` across one sample, and `esbuild` was live beside it at 36%. A hung
+process burns no CPU; a working one does. The bundle finished 5 minutes later at 44m29s.
+
+⚠️ **USE THIS BEFORE KILLING A DEPLOY.** Log silence plus a stopwatch cannot distinguish the two, and
+killing a healthy deploy mid-bundle is exactly how five deploys ended up stuck at state `new`:
+```sh
+pgrep -f 'deploy:prod|netlify|esbuild' | while read -r p; do ps -p "$p" -o pid,etime,time,pcpu --no-headers; done
+sleep 25   # then repeat — if TIME climbed, it is working
+```
 
 ⚠️ **THE MEMORY NOTE SAYS "budget ~30 MIN (bundling grew 7.5→25 min)". THAT IS OPTIMISTIC** — the
 second deploy took 36 minutes to bundle ALONE, before uploading, and the whole `deploy:prod` chain ran
