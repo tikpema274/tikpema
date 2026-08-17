@@ -144,8 +144,11 @@ table concludes those spikes are not provenance. Added, and `verify-spike-index.
   the untested thing is the one thing `is_secret` makes permanently untestable. Closing readback
   before Circle has ever accepted a self-issued key trades a small access reduction for the loss of
   the only way to find out.
-* ⏭️ `is_secret` on `KIT_KEY` is now unblocked. Hold until a key you hold is confirmed working via
-  `read -rs` — after flipping there is no way back to the deployed value.
+  ⚠️ This bullet previously read "`is_secret` is now unblocked — hold until a key is confirmed
+  working". **Superseded by the DECIDED entry above, and rewritten rather than deleted** because the
+  contradiction is the instructive part: the stale line survived the same commit that recorded the
+  decision, and was caught by grepping for the OTHER copy — the exact discipline being cited two
+  bullets up. A record that contradicts itself is worse than one that is merely incomplete.
 * ✅ **`SESSION_SECRET` divergence RESOLVED — accidental in origin, deliberate in retention.** A
   half-finished rotation is ruled out (no `env:set` in shell history — all 7 hits are `env:get` — no
   rotating commit, and `.env.example` introduced the var once at `7c6a51a` and never changed it).
