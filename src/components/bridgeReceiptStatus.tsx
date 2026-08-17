@@ -27,6 +27,8 @@
 // it belongs there — a second copy of the age cap in the client is the duplicate-source-of-truth
 // bug this receipt system keeps designing around.
 
+import { USDC_DP } from "../lib/formatUsdc";
+
 /** The receipt shape, as projected by /api/bridge-receipts. Deliberately loose: this component
  *  must render SOMETHING truthful for a receipt from an older deploy, not throw. */
 export type BridgeReceiptView = {
@@ -77,8 +79,22 @@ export const KNOWN_RECEIPT_STATES = [
  *
  * Returns null when there is no figure, so each call site can say something true instead.
  */
+// ═══ 🚨 6dp, NOT 4 — "exactly" MUST NOT NAME A ROUNDED NUMBER ═══════════════════════════════════
+// This rendered `toFixed(4)` while the row said "exactly … read from the destination chain". Today's
+// bridges delivered 0.046725 and 0.946726; the panel claimed "exactly 0.0467" and "exactly 0.9467".
+// ⚠️ The word is doing real work on the ONE surface whose whole claim is that the number was measured
+// on-chain — so a reader who follows the mint-tx link finds a figure that does not match the row that
+// sent them there. That is the "yet" class again: a single word claiming more than the render delivers.
+//
+// ⭐ THE PRECISION IS IMPORTED, NOT RETYPED. `USDC_DP` is the one definition of how many decimals USDC
+// has; a second literal here is exactly how this file drifted from `formatUsdc` in the first place.
+//
+// ⚠️ AND THE NULL CONTRACT IS DELIBERATELY KEPT — it is NOT `formatUsdc`. That helper returns
+// `NO_AMOUNT` ("—") for a missing figure, which is right for a column but WRONG here: three call sites
+// below branch on this returning null, and "—" is truthy, so swapping it in would render
+// "in flight — estimated — USDC to arrive". Same 6dp, different absence semantics, on purpose.
 const usdc = (v?: number | null): string | null =>
-  v == null || !Number.isFinite(Number(v)) ? null : Number(v).toFixed(4);
+  v == null || !Number.isFinite(Number(v)) ? null : Number(v).toFixed(USDC_DP);
 
 export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
   const measured = r.delivery === "measured" && r.amountDelivered != null;

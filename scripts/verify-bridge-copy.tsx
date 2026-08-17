@@ -167,12 +167,19 @@ section("6 — NUMBERS ARE FORMATTED, NOT DUMPED");
 // A raw float in a money row is its own kind of lie about precision.
 {
   const arrived = text({ state: "minted", delivery: "measured", amountDelivered: 0.946804123 });
-  check("⭐ a measured arrival is fixed to 4dp", /exactly 0\.9468 USDC/.test(arrived), arrived.slice(0, 70));
+  // 🚨 THIS ASSERTION PREVIOUSLY PINNED 4dp — it ENFORCED the defect rather than missing it. A row
+  // saying "exactly" while rendering a rounded number is the "yet" class: one word claiming more than
+  // the render delivers, on the one surface whose claim is that the figure was read from the chain.
+  // The input below has 9 decimals precisely so a 4dp render cannot pass by coincidence.
+  check("⭐⭐ a measured arrival renders 6dp — 'exactly' must not name a ROUNDED number",
+    /exactly 0\.946804 USDC/.test(arrived), arrived.slice(0, 70));
+  check("⭐ …and the 4dp form is GONE, not merely un-asserted",
+    !/exactly 0\.9468 USDC/.test(arrived));
   check("⭐⭐ …and says it was READ FROM THE CHAIN, which is what makes it 'exactly'",
     /read from the destination chain/i.test(arrived));
   check("⭐⭐ `minted` WITHOUT a measured amount refuses to present the estimate as an arrival",
     /no measured amount was recorded/i.test(text({ state: "minted" })));
-  check("  an in-flight row is explicitly an ESTIMATE", /estimated 0\.9400 USDC to arrive/i.test(text({ state: "burn_confirmed", netPredicted: 0.94 })));
+  check("  an in-flight row is explicitly an ESTIMATE", /estimated 0\.940000 USDC to arrive/i.test(text({ state: "burn_confirmed", netPredicted: 0.94 })));
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
@@ -262,13 +269,13 @@ section("9 — A MISSING AMOUNT MUST NOT BECOME A CONFIDENT NUMBER");
   check("⭐⭐ …and says the amount was not recorded", /estimated arrival amount was not recorded/i.test(nullAmt));
   check("⭐⭐ an ABSENT amount never renders NaN", !/NaN/.test(absent), absent.slice(0, 76));
   check("⭐ …and both still say the burn is confirmed", /burn is confirmed/i.test(nullAmt) && /burn is confirmed/i.test(absent));
-  check("⭐ a REAL amount is still shown, to 4dp", /estimated 0\.9400 USDC to arrive/.test(text({ state: "burn_confirmed", netPredicted: 0.94 })));
+  check("⭐ a REAL amount is still shown, to 6dp", /estimated 0\.940000 USDC to arrive/.test(text({ state: "burn_confirmed", netPredicted: 0.94 })));
 
   const unconfNull = text({ state: "mint_unconfirmed", netPredicted: null as any, mintRecovery: { cause: "never_appeared" } });
   check("⭐⭐ the unconfirmed row does not print a fake estimate either",
     !/0\.0000/.test(unconfNull) && /not recorded/i.test(unconfNull), unconfNull.slice(0, 90));
   check("  …and still shows a real one when present",
-    /0\.9400 USDC/.test(text({ state: "mint_unconfirmed", netPredicted: 0.94, mintRecovery: { cause: "never_appeared" } })));
+    /0\.940000 USDC/.test(text({ state: "mint_unconfirmed", netPredicted: 0.94, mintRecovery: { cause: "never_appeared" } })));
 
   check("⭐ NO rendered status anywhere contains NaN, for ANY known state and a null amount",
     [...KNOWN_RECEIPT_STATES].every((st) =>
