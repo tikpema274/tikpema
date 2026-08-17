@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { getStore } from "@netlify/blobs";
 
 // DIRECT-PATH BRIDGE RECEIPTS — the server's own record that money is in flight.
@@ -628,4 +629,22 @@ export function isPastDeadline(receipt, now = Date.now()) {
   const burnedAt = Date.parse(receipt?.burnedAt || "");
   if (!Number.isFinite(burnedAt)) return false; // unknown burn time ⇒ never auto-escalate
   return now - burnedAt >= MINT_DEADLINE_MS;
+}
+
+/**
+ * ⭐⭐ THE STORED FORM OF AN ACKNOWLEDGMENT — EVIDENCE WITHOUT CAPABILITY.
+ *
+ * A receipt is permanent, and a permanent record is the worst possible place for a bearer credential.
+ * Now that the token is keyed, storing it raw would hand every reader of a receipt the ability to
+ * satisfy the gate for that exact bridge shape. The hash keeps the property that matters — anyone
+ * holding the token, or the server able to recompute it, can prove THIS token was the one presented —
+ * while the record itself grants nothing.
+ *
+ * ⚠️ Returns null for a null token, so "no acknowledgment was required" stays distinguishable from
+ * "one was required and we have its fingerprint". A hash of "" would be a real-looking value for an
+ * event that never happened.
+ */
+export function ackTokenFingerprint(token) {
+  if (typeof token !== "string" || token.length === 0) return null;
+  return createHash("sha256").update(token).digest("hex");
 }

@@ -25,7 +25,7 @@
     "test:dca": "node scripts/verify-dca-ledger-failclosed.mjs && node scripts/verify-dca-tick-observability.mjs",
     "test:ub": "node scripts/verify-ub-auto-allocation.mjs && node scripts/verify-provisioning-status.mjs && node --experimental-test-module-mocks scripts/verify-ub-withdraw-guard.mjs && node --experimental-test-module-mocks scripts/verify-owner-wallet-provisioning.mjs",
     "test:research": "node scripts/verify-citation-derivation.mjs",
-    "test:bridge": "node --experimental-test-module-mocks scripts/verify-bridge-receipts.mjs && node scripts/verify-bridge-fee-band.mjs && node --experimental-test-module-mocks scripts/verify-agent-quote-record.mjs && npm run test:bridgecopy && npm run test:quoteretention",
+    "test:bridge": "node --experimental-test-module-mocks scripts/verify-bridge-receipts.mjs && node scripts/verify-bridge-fee-band.mjs && node --experimental-test-module-mocks scripts/verify-agent-quote-record.mjs && npm run test:bridgecopy && npm run test:quoteretention && npm run test:acktoken",
     "test:quote": "node --experimental-test-module-mocks scripts/verify-agent-quote-record.mjs",
     "test:disclosure": "npx tsx scripts/verify-disclosure-diff.mjs",
     "test:liveness": "node scripts/verify-deploy-liveness.mjs",
@@ -45,7 +45,8 @@
     "calibrate:moneyalert": "node scripts/dd/calibrate-money-alert.mjs",
     "test:spikes": "node scripts/verify-kit-key-guard.mjs && node scripts/spikes/verify-spike-index.mjs",
     "test:prodsession": "node scripts/verify-prod-session.mjs",
-    "test:quoteretention": "node --experimental-test-module-mocks scripts/verify-quote-retention.mjs"
+    "test:quoteretention": "node --experimental-test-module-mocks scripts/verify-quote-retention.mjs",
+    "test:acktoken": "node scripts/verify-ack-token-keyed.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",

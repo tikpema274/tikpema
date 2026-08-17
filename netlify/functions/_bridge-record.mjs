@@ -1,5 +1,5 @@
 import { internalToken } from "./_auth.mjs";
-import { writeReceiptNeverThrows, writePendingReceiptNeverThrows, SUBMITTED_STATE, PENDING_STAGES } from "./_bridge-receipts.mjs";
+import { writeReceiptNeverThrows, writePendingReceiptNeverThrows, SUBMITTED_STATE, PENDING_STAGES, ackTokenFingerprint } from "./_bridge-receipts.mjs";
 
 // RECORD A BRIDGE — the write-and-trigger pair, in ONE place, called from the HTTP
 // boundaries that own it.
@@ -126,7 +126,17 @@ export async function recordBridge({ r, session, event, amountRequested, quoteId
     ackBand: r.feeBand ?? null,
     ackRequired: r.ackRequired ?? false,
     ackAcceptedAt: r.acknowledged ? burnedAt : null,
-    ackToken: r.ackToken ?? null,
+    // ⭐⭐ THE FINGERPRINT, NOT THE TOKEN — EVIDENCE WITHOUT CAPABILITY.
+    // A receipt is permanent, and now that the token is HMAC-keyed it is a real bearer credential:
+    // storing it raw would let every reader of a receipt satisfy the acknowledge gate for that exact
+    // bridge shape, forever. The hash keeps what matters — anyone holding the token, or the server
+    // able to recompute it, can prove THIS token was the one presented — while the record grants
+    // nothing.
+    // ⚠️ THE ARGUMENT WAS ALREADY WRITTEN AT agent-act, WHICH REFUSES TO STORE THE TOKEN ON THE QUOTE
+    // ("a record is a poor place for a credential"). The receipt disagreed with the quote about the
+    // same value; this ends that disagreement on the side of the DURABLE record, where it matters more.
+    // ⚠️ null stays null: "no acknowledgment was required" must not become a real-looking hash of "".
+    ackTokenHash: ackTokenFingerprint(r.ackToken ?? null),
     // ⭐ THE JOIN TO WHAT WAS PROPOSED. Every other field here says what the bridge DID; these
     // two say which priced plan it came from, so `agent-quotes` and this receipt can be read
     // together. Without a shared identifier they are two records nobody can correlate, which
@@ -217,7 +227,17 @@ export async function recordPendingBridge({ e, session, amountRequested, quoteId
     ackBand: c.feeBand ?? null,
     ackRequired: c.ackRequired ?? false,
     ackAcceptedAt: c.acknowledged ? submittedAt : null,
-    ackToken: c.ackToken ?? null,
+    // ⭐⭐ THE FINGERPRINT, NOT THE TOKEN — EVIDENCE WITHOUT CAPABILITY.
+    // A receipt is permanent, and now that the token is HMAC-keyed it is a real bearer credential:
+    // storing it raw would let every reader of a receipt satisfy the acknowledge gate for that exact
+    // bridge shape, forever. The hash keeps what matters — anyone holding the token, or the server
+    // able to recompute it, can prove THIS token was the one presented — while the record grants
+    // nothing.
+    // ⚠️ THE ARGUMENT WAS ALREADY WRITTEN AT agent-act, WHICH REFUSES TO STORE THE TOKEN ON THE QUOTE
+    // ("a record is a poor place for a credential"). The receipt disagreed with the quote about the
+    // same value; this ends that disagreement on the side of the DURABLE record, where it matters more.
+    // ⚠️ null stays null: "no acknowledgment was required" must not become a real-looking hash of "".
+    ackTokenHash: ackTokenFingerprint(c.ackToken ?? null),
     quoteId: quoteId ?? null,
     quoteStepIndex: Number.isInteger(stepIndex) ? stepIndex : null,
     // ⭐ DID THE QUOTE GET PROTECTED FROM THE PRUNE? Written from the ACTUAL result of the mark, not

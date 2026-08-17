@@ -16,7 +16,7 @@
 // The fee is VOLATILE (destination gas priced in USDC): ~0.2 USDC to an L2,
 // ~1.5–14 USDC to Ethereum L1. Callers MUST refuse a bridge where fee ≥ amount.
 
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { encodeFunctionData, pad, getAddress } from "viem";
 import { circle, waitForTx } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
@@ -214,11 +214,45 @@ export function bridgeFeeBand({ amountUsdc, feeUsdc, netUsdc }) {
  * the binding weaker there.
  */
 export function bridgeAckToken({ owner, destinationKey, amountUsdc, band }) {
+  // ═══ 🚨 HMAC, NOT A BARE HASH — AND THIS IS WHAT THE TOKEN'S NAME ALWAYS CLAIMED ═══════════════
+  // Until v3 this was `sha256(<public string>)`. Every input — owner, destination, amount, band — is
+  // visible to the caller and three of them are on the receipt, so ANY caller could recompute the
+  // token for a plan it was already proposing. The gate's refusal therefore stopped a client that had
+  // not bothered, not one intending to bypass: an explicit-intent marker for a cooperating UI, not an
+  // authentication. Verified by recomputation 2026-08-17 — the stored token reproduced exactly from
+  // four public values.
+  //
+  // ⭐ WITH A SERVER KEY THE REFUSAL BECOMES REAL. A token can now only originate from a disclosure
+  // this server issued, so "the client held a token" is evidence rather than arithmetic — and only
+  // then is it worth storing a HASH of it on the receipt (see `ackTokenHash` in _bridge-record.mjs).
+  // Hashing a publicly-derivable value would have removed no capability and preserved no evidence;
+  // the two changes are one decision and land together.
+  //
+  // 🚨 FAIL-CLOSED, NEVER WEAK. A missing key must NOT degrade to an unkeyed digest — that would
+  // silently restore exactly the property being removed, and every caller would keep working. In
+  // practice this is unreachable on an authenticated path (`_auth.mjs` disables sessions without the
+  // same secret, so the request 401s first), which makes it a backstop rather than a live branch.
+  //
+  // ⚠️ IT RIDES ON `SESSION_SECRET` RATHER THAN A NEW VAR, DELIBERATELY. A new env var would be unset
+  // at first deploy, and the only safe behaviour then is refusing every acknowledge-band bridge — a
+  // self-inflicted outage on the money path. The cost is real and is recorded: rotating SESSION_SECRET
+  // now invalidates outstanding acknowledgments too, alongside sessions and `internalToken()`.
+  const secret = process.env.SESSION_SECRET;
+  if (!secret || String(secret).length < 16) {
+    throw new Error("SESSION_SECRET not set (>=16 chars) — a bridge acknowledgment cannot be minted or verified");
+  }
   const who = owner ? String(owner).toLowerCase() : "anon";
-  const digest = `bridge|${who}|${String(destinationKey)}|${Number(amountUsdc)}|band:${band}|v2`;
-  return createHash("sha256").update(digest).digest("hex");
+  // ⚠️ `v3` because keying changes every digest. An in-flight plan card holding a v2 token is refused
+  // at confirm and re-asks for acknowledgment — correct, and the reason acceptance is asked for at a
+  // point where it can still be given freely.
+  const digest = `bridge|${who}|${String(destinationKey)}|${Number(amountUsdc)}|band:${band}|v3`;
+  return createHmac("sha256", String(secret)).update(digest).digest("hex");
 }
 
+// ⭐ THE STORED FORM OF THIS TOKEN LIVES IN `_bridge-receipts.mjs` (`ackTokenFingerprint`), not here.
+// It is a property of the RECORD FORMAT — what a receipt may durably hold — rather than of minting,
+// and keeping it there stops `_bridge-record.mjs` from importing this whole module (viem, _circle,
+// _predict) for a two-line hash.
 // Build the bridgeWithPreapprovalAndHook calldata (byte-identical to App Kit's
 // custom-burn path).
 function bridgeCallData({ amountMinor, maxFee, recipient, cctpDomain }) {

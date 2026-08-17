@@ -18,6 +18,13 @@
 //
 // Zero network. Zero money. Pure functions plus source assertions on the gate.
 
+// 🚨 THE ACK TOKEN IS NOW HMAC-KEYED, so minting or verifying one REQUIRES a secret. Set here because
+// this suite exercises the real `bridgeAckToken`, and its absence is a THROW by design — a missing key
+// must never degrade to an unkeyed digest, which would silently restore the property v3 removed.
+// ⚠️ Unreachable in production (a request without SESSION_SECRET 401s at requireSession long before a
+// band is computed), so this is a test-harness need, not a hole.
+process.env.SESSION_SECRET ||= "test-session-secret-0123456789abcdef";
+
 import { readFileSync } from "node:fs";
 import { bridgeFeeBand, bridgeAckToken, FEE_BAND_WARN, FEE_BAND_ACKNOWLEDGE, FEE_BANDS, GATING_BANDS } from "../netlify/functions/_bridge.mjs";
 
