@@ -1,5 +1,37 @@
 ---
 
+# ⚠️ DEPLOY BUNDLING IS GROWING — 7.5 → 25 → 24m49s → 36m03s, and the recorded budget is now wrong
+
+**2026-08-17.** Two deploys today, both timed from their own logs:
+
+| deploy | functions bundling | published |
+|---|---|---|
+| `6a834ab31972b84d68cfb24b` (18:22Z) | **24m 49.3s** | tree `42b972359f42` / commit `929379501514` |
+| `6a8358cc4b38dd7bfb3a258c` (19:33Z) | **36m 03.2s** | tree `5fba3ade7c6e` / commit `6c849385e88a` |
+
+⚠️ **THE MEMORY NOTE SAYS "budget ~30 MIN (bundling grew 7.5→25 min)". THAT IS NOW OPTIMISTIC** — the
+second deploy took 36 minutes to bundle ALONE, before uploading, and the whole `deploy:prod` chain ran
+roughly 19:53→19:42 wall-clock including `gate:*`, `build`, upload, `gate:deployed` and
+`capture:window`. Budget **~45 min**, and do not start one against a tool ceiling.
+
+⭐ **THE OPERATIONAL LESSON, WHICH COST NOTHING TODAY BECAUSE IT WAS ANTICIPATED:** both deploys were
+launched with `nohup setsid … &` and polled from a separate command. The polling loop DID hit a
+10-minute tool ceiling mid-bundle — and the deploy survived it untouched, because it was never a child
+of that shell. ⚠️ Had it been run in the foreground it would have been killed at the ceiling **during
+bundling**, which is precisely how five deploys ended up stuck at state `new` on 2026-08-14, each
+reading exactly like a success.
+
+⚠️ **AND THE SILENCE IS NORMAL, WHICH IS THE TRAP.** Bundling emits NOTHING for its whole duration —
+29 minutes passed with the log frozen on the last function name. That is indistinguishable from a hang
+by inspection. The only way to tell them apart is the previous deploy's own log, which shows the same
+silence ending in `(Functions bundling completed in 24m 49.3s)`. **Compare against a prior run before
+concluding a deploy is stuck.**
+
+⭐ 108 functions bundled, 17 uploaded on the second deploy. The growth tracks function count, so this
+gets worse with each new endpoint — a `dd-*` or `agent-*` addition is also a deploy-time cost.
+
+---
+
 # ✅✅ THE ACKNOWLEDGE GATE IS PROVEN LIVE — `ackAcceptedAt` written for the first time, on the acknowledge step ONLY
 
 **2026-08-17.** Supersedes the "proof not attempted" entry below, which was written earlier the same
