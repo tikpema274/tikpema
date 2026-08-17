@@ -1,5 +1,114 @@
 ---
 
+# 🚧 ACK GATE — PROOF NOT ATTEMPTED 2026-08-17. Pre-run reads complete; the setup stands and is reusable.
+
+**Nothing spent, nothing pending, no phantom.** No plan was confirmed and nothing was pressed. An
+early "both receipts landed" was premature and was retracted before anything was recorded as proven.
+
+⭐⭐ **THE INSTRUMENTS WERE RIGHT, AND FOR THE RIGHT REASON** — which is the part worth keeping. They
+did not merely happen to say "no": each said no *because of the specific thing that had not happened*.
+`agent-quotes` held no quote dated today **because `agent-act` never priced a plan**; `bridge-receipts`
+held 26 keys unchanged **because nothing executed**. A reading that is right for the wrong reason is
+indistinguishable from luck.
+
+⭐ **AND THE DECISIVE READ PROVED IT WAS NOT A CACHED PHANTOM.** `GET /api/bridge-receipts` returned
+`cache-status: "Netlify Durable"; fwd=bypass, "Netlify Edge"; fwd=miss` — origin, not cache. That is
+the correct detector (**cache-status, not `Age`**); `age: 2` was irrelevant beside it. The 14 Aug
+phantom-quote failure mode is ruled out for this read, not assumed away.
+
+## The measurements, taken read-only
+
+* **Fee re-measured `2026-08-17T16:17:06.844Z`: `0.053274`** (flat across amount — the forwarder fee
+  dominates). Two IRIS GETs, no tx.
+  * step 1 — **1.0 USDC → 5.33%, band `none`**. Margin: the fee would have to exceed **0.1000** to
+    leave `none`, i.e. **88% headroom**. So an `ackAcceptedAt` on receipt 1 could NOT be explained by
+    step 1 drifting into the band — which is the confound the two-step design exists to exclude.
+  * step 2 — **0.1 USDC → 53.27%, band `acknowledge`**. Crossover is amount ≤ 0.2130; the usable
+    window is `0.0533 < amount ≤ 0.213`.
+  * ⚠️ **0.21 would have been the wrong pick** — 25.36%, only 0.36pp of margin, and the fee drifts
+    (0.053216 / 0.054364 / 0.053543 / 0.053274 across four readings). A small fee DROP would silently
+    demote it to `warn` and the gate would not fire. 0.1 is 2× the threshold.
+* **Baseline re-derived from the store: 26 receipts, `ackAcceptedAt` null on ALL 26**, `ackRequired`
+  false on all 26. Highest `feeRatio` ever recorded: **0.0536**, against a 0.25 threshold — nothing has
+  ever come close, which is why the field is untouched. Across 4 owners (18 / 5 / 2 / 1).
+* **Bands unchanged**: `FEE_BAND_WARN = 0.10`, `FEE_BAND_ACKNOWLEDGE = 0.25`, `GATING_BANDS = ["acknowledge"]`.
+* **`412e8d0` is live** — an ancestor of the **stamped** commit prod serves (`945a9f13`), which is the
+  check that matters rather than ancestry of HEAD. It touched `agent-execute-plan.mjs` too, so the plan
+  path gets the provisional record, not only `agent-bridge`.
+* ⚠️ **The ack path is NOT the `d64bb7f` surface — 13 commits have touched it since.** Most relevant:
+  `a7ca274` (agent-act keeps the plan it priced — what makes the quoteId join possible at all) and
+  `5c15ba8` (the semantics, plus the record that the 14 Aug proof also did not run).
+
+## 🚨 THE FINDING THAT CHANGES THE PLAN: the plan path has NEVER produced a receipt
+
+All 18 receipts for owner `0xfd801d…5767` carry **`quoteId: —`**. Not one has ever had a quote join.
+So the `quoteId` + `quoteStepIndex` join — the second record intended to catch a client wrongly
+applying one token to both step indices — **has never been exercised end to end.** Every existing
+receipt came from a surface where `quoteId` is null by design.
+
+⭐ **The surface discriminator is real, not a preference:** `agent-bridge` takes a single `ackToken`;
+`agent-execute-plan` takes `ackTokens: { [stepIndex]: token }` and refuses **pre-flight, before step 1**.
+The 14 Aug attempt on the single-action page structurally could not have exercised per-step consent.
+
+⭐⭐ **AND THE PROOF SPLITS INTO A FREE HALF AND A PAID HALF.** The disclosure is emitted at **propose**
+time by `agent-act` — band, ratio, and the minted `ackToken` all appear with **nothing executed**. So
+"the gate fires" is provable at zero cost; only the re-submit with the token spends anything, and only
+that writes `ackAcceptedAt`. Two different claims; decide them separately.
+
+## ⭐ Two keepers from the false alarm — both would mislead the next session
+
+1. 🚨 **`AGENT_WALLET_ADDRESS` from `.env` is NOT the spender on the plan path.** `_actions.mjs:95`:
+   *"EVERY money-moving branch below sources funds from `ctx.walletAddress` — the CALLER'S OWN agent
+   SCA, server-resolved from the verified session. No branch reads a wallet from env."* I measured
+   `.env`'s wallet, got `delta 0.000000`, and **nearly reported "nothing executed" from an uninvolved
+   address.** The right address is the caller's SCA — here `0x058957de…47f9e`.
+2. **`0xc54d…e621` is the DD attestation's verifying contract, not a bridge wallet.** That is why it was
+   never on the 15.635654 → 10.635654 trajectory, and why its balance is irrelevant to bridge questions.
+
+⚠️ **A BALANCE IS A NET, NOT A LEDGER.** The SCA read `12.628654` — *higher* than the 10.635654
+baseline. A single balance reading cannot distinguish "no spend" from "a spend plus a larger deposit",
+so it was treated as evidence against a simple −1.1 rather than as proof of no spend. The receipt read
+is what settled it.
+
+⚠️ **AND ONE INSTRUMENT BUG OF MY OWN, CAUGHT:** the first receipt scan wrote its key list with
+`'\n'.join()` — no trailing newline — so `wc -l` reported 25 and **`while read` silently skipped the
+26th key.** I nearly reported "0 of 26" on 25 reads. The missing receipt was recovered and read
+(`ackBand none`, `ackAcceptedAt null`). Same family as every other absence-reads-as-safe defect here,
+this time in the measuring tool.
+
+## Reusable setup for the next attempt
+
+* owner `0xfd801d…5767` · agent SCA `0x058957deff333c47c15c208a4425420af6947f9e`
+* target: two-step plan — **1.0** (band `none`) then **0.1** (band `acknowledge`); `ackAcceptedAt` must
+  appear on the **0.1 receipt only**
+* read order, deliberately: each receipt's own `feeUsdc`/`feeRatio`/`ackBand` **first**, then
+  `ackAcceptedAt`, then the `agent-quotes` join (`steps[i].bridge.ackTokenIssued`, a **boolean** — the
+  token itself is deliberately not stored)
+* re-measure the fee immediately before confirming; verify `cache-status` shows `fwd=bypass`/`miss`
+* `scripts/_prod-session.mjs` mints the read-only token for the receipts read
+
+## ⭐ STANDING RULE FOR PROGRESS ENTRIES: full for SCAs and contracts, TRUNCATED for owner identities
+
+Adopted 2026-08-17. **Contract addresses and provisioned SCAs go in full; owner / session identities
+are truncated** (`0xfd801d…5767`). This file is public git history — permanent, and expensive to
+retract, as this session's gitleaks work demonstrated at length.
+
+⚠️ **Truncation is not privacy — be honest about what it buys.** It prevents **linkage-by-search**,
+not linkage-by-investigation: anyone with the receipts store or an explorer can recover the full value,
+and a truncated address is still effectively identifying. What it stops is the cheap, automated case —
+someone grepping GitHub for an address string.
+
+⭐⭐ **AND THE FORWARD-LOOKING ARGUMENT IS THE STRONGER ONE.** A testnet identity often becomes a
+mainnet identity. A public link established now, against play money, **persists into the period when
+that same address holds real funds** — and by then the linkage is already indexed and no longer yours
+to withdraw. The asymmetry is the point: truncating costs a few characters of convenience today, while
+not truncating cannot be undone later.
+
+⭐ The distinction is deliberate, not blanket caution. A **provisioned SCA** is an account this system
+created for one purpose and can replace; an **owner address** is a wallet the human personally controls,
+plausibly across other chains. Those carry different consequences and get different treatment. The SCA
+`0x058957de…47f9e` above stays in full for exactly that reason.
+
 # ✅ CREDENTIAL AUDIT CLOSED — and the real exposure was never the `is_secret` flag
 
 **2026-08-16.** Commits `9360413` (audit doc), `82df505` (spike guard), `d09af6e` (smoke scripts),
