@@ -129,11 +129,40 @@ that is still a retention design question).
   "quoteId": "q_msxi20om_0d4cac7c226e6f49", "quoteStepIndex": 1, "state": "minted" }
 ```
 
-⚠️ **`ackToken` IS TRUNCATED HERE DELIBERATELY — it is the one credential-shaped value in the pair.**
-The full 64-hex is in the store; it is scoped to owner+destination+amount+band, so publishing it would
-hand anyone who can already authenticate as this owner a way to skip the consent step for exactly this
-bridge shape. Nothing about the proof depends on its value — only on `ackAcceptedAt` being non-null
-where `ackTokenIssued` is true, and null where it is false.
+⚠️ **`ackToken` IS TRUNCATED HERE — but NOT for the reason first recorded, and the correction matters
+more than the truncation.** I initially wrote that publishing it "would hand anyone who can already
+authenticate as this owner a way to skip the consent step." **That was WRONG.**
+
+🚨🚨 **THE ACK TOKEN IS NOT A SECRET. IT IS PLAIN SHA-256 OF A PUBLIC STRING — no HMAC, no server key:**
+```js
+// _bridge.mjs:216
+const digest = `bridge|${who}|${destinationKey}|${Number(amountUsdc)}|band:${band}|v2`;
+return createHash("sha256").update(digest).digest("hex");
+```
+**Verified by recomputation:** `sha256("bridge|0xfd801d…5767|base|0.1|band:acknowledge|v2")` reproduces
+the stored `e6b6d07d…938e` exactly — from four values **already on the receipt** (owner in the key,
+`destinationKey`, `amountRequested`, `ackBand`). Truncation is therefore harmless but buys nothing; it
+stays only because publishing a value nobody needs has no upside.
+
+⭐⭐ **WHAT THAT MEANS FOR WHAT THE GATE WITNESSES — this deepens `5c15ba8` rather than contradicting it.**
+`agent-execute-plan` refuses when `ackTokens[i] !== expected`. But `expected` is derivable by ANY caller
+from the plan it is already proposing. So **the refusal stops a client that did not bother, not one that
+intends to bypass.** The token is an *explicit-intent marker for a cooperating UI*, not a proof of
+consent — a protocol step, not an authentication.
+
+⚠️ **THAT IS DEFENSIBLE, AND SHOULD BE STATED AS THE DESIGN RATHER THAN DISCOVERED AS A GAP.** The caller
+IS the session-authenticated owner; a user scripting past their own disclosure is their own choice, and
+no server-side token can distinguish "the human read it" from "the client says so". What the mechanism
+genuinely buys is that an HONEST client cannot reach execution without having received the disclosure —
+because the token only arrives WITH it. That is real and worth having. It is not cryptographic consent,
+and the record should not let the name imply otherwise.
+
+⏭️ **CONSEQUENCE FOR THE "STORE A HASH, NOT THE TOKEN" PROPOSAL:** the argument is sound —
+evidence without capability is exactly what a durable record wants — but its premise does not hold here,
+because there is no capability to remove and no evidence to preserve. Hashing a value that any caller can
+recompute changes nothing on either axis. ⭐ The proposal becomes live the moment the token gains a
+secret (an HMAC over a server key), which is also the change that would make it mean what its name says.
+Those two are the same decision, and worth taking together rather than separately.
 
 🚨 **AND THAT SURFACED AN INCONSISTENCY WORTH ITS OWN LOOK.** `agent-act` deliberately does NOT store
 the token on the quote, with the reason written at the code: *"The token itself is NOT stored:
