@@ -90,6 +90,64 @@ the 1.0 receipt **in production**, so the falsy-index handling is confirmed live
 `capture:window` observed NO window, correctly: `bridge-receipts.mjs` is not in the DD surface, so
 `ddTree` did not rotate and no refusal was expected. Recorded as not-a-pass, per its own rule.
 
+## 📌 THE PROOF, CAPTURED VERBATIM — this section outlives the store
+
+⭐⭐ **CAPTURED ON PURPOSE, BECAUSE THE QUOTE IS SCHEDULED FOR DELETION (~2026-08-31).** Transcribed
+from both records after they were read, so the 14-day TTL below is **irrelevant to THIS proof**. That
+separates two things that were being conflated: the **evidentiary** need (capture once, permanent —
+solved here) and the **operational** need (what a USER can resolve, and for how long — the only part
+that is still a retention design question).
+
+**QUOTE** `agent-quotes` · `q/0xfd801d…5767/2026-08-17T17:20:26.614Z-q_msxi20om_0d4cac7c226e6f49`
+```json
+{ "quoteId": "q_msxi20om_0d4cac7c226e6f49", "quotedAt": "2026-08-17T17:20:26.614Z", "totalUsdc": 1.1,
+  "steps": [
+    { "i": 0, "amountUsdc": 1,
+      "bridge": { "destinationKey": "base", "destinationLabel": "Base (Sepolia)",
+                  "feeUsdc": 0.053276, "netUsdc": 0.946724,
+                  "feeRatio": 0.053276, "band": "none", "ackTokenIssued": false } },
+    { "i": 1, "amountUsdc": 0.1,
+      "bridge": { "destinationKey": "base", "destinationLabel": "Base (Sepolia)",
+                  "feeUsdc": 0.053276, "netUsdc": 0.046724,
+                  "feeRatio": 0.5327599999999999, "band": "acknowledge", "ackTokenIssued": true } } ] }
+```
+
+**RECEIPTS** `bridge-receipts` · `o/0xfd801d…5767/<burnHash>`
+```json
+{ "burnHash": "0xae6e428f7630bb01276936b50b4dc027bfaad76f8d77994d6148c89d19953635",
+  "burnedAt": "2026-08-17T17:28:19.962Z", "amountRequested": 1, "destinationKey": "base",
+  "feeUsdc": 0.053274, "netPredicted": 0.946726, "amountDelivered": 0.946726,
+  "feeRatio": 0.053274, "ackBand": "none", "ackRequired": false,
+  "ackAcceptedAt": null, "ackToken": null,
+  "quoteId": "q_msxi20om_0d4cac7c226e6f49", "quoteStepIndex": 0, "state": "minted" }
+
+{ "burnHash": "0x66351875e43ab96597c0787b85985070fec70880cb9a2ff81f23ca6da5135356",
+  "burnedAt": "2026-08-17T17:28:26.588Z", "amountRequested": 0.1, "destinationKey": "base",
+  "feeUsdc": 0.053275, "netPredicted": 0.046725, "amountDelivered": 0.046725,
+  "feeRatio": 0.53275, "ackBand": "acknowledge", "ackRequired": true,
+  "ackAcceptedAt": "2026-08-17T17:28:26.588Z", "ackToken": "e6b6d07d…938e",
+  "quoteId": "q_msxi20om_0d4cac7c226e6f49", "quoteStepIndex": 1, "state": "minted" }
+```
+
+⚠️ **`ackToken` IS TRUNCATED HERE DELIBERATELY — it is the one credential-shaped value in the pair.**
+The full 64-hex is in the store; it is scoped to owner+destination+amount+band, so publishing it would
+hand anyone who can already authenticate as this owner a way to skip the consent step for exactly this
+bridge shape. Nothing about the proof depends on its value — only on `ackAcceptedAt` being non-null
+where `ackTokenIssued` is true, and null where it is false.
+
+🚨 **AND THAT SURFACED AN INCONSISTENCY WORTH ITS OWN LOOK.** `agent-act` deliberately does NOT store
+the token on the quote, with the reason written at the code: *"The token itself is NOT stored:
+`ackTokenIssued` says whether the box appeared, which is the fact in question, and a record is a poor
+place for a credential."* **The RECEIPT stores it in full.** Same argument applies and was not applied.
+Not changed here — a receipt is durable evidence and dropping a field from it deserves its own
+decision — but the two records disagree about whether a credential belongs in a record.
+
+⭐ **What the capture shows on re-read, which the live numbers alone did not:** the quote priced step 1
+at `netUsdc 0.046724`; the receipt's own `netPredicted` was `0.046725` and `amountDelivered` was
+`0.046725`. So the +1 unit is the **execution-time re-price**, not a delivery surplus — the bridge
+delivered exactly what the receipt predicted, and the quote was one unit stale by then. Step 0 likewise:
+predicted 0.946726, delivered 0.946726, exact.
+
 ## 🚨 RETENTION: THE PROJECTION MAKES THE JOIN REACHABLE — RETENTION DECIDES WHETHER IT RESOLVES
 
 **Receipts are permanent (no prune exists). Quotes have a 14-day TTL** (`QUOTE_TTL_MS`, plus a 200/owner
@@ -106,10 +164,19 @@ issue, not a bug.
 says consent was accepted, and the record that says a token was ISSUED for that step index is gone.
 The evidentiary value of this run rests on TWO records agreeing; one of them is scheduled for deletion.
 
-⏭️ Not fixed here, and the options are not equal: extending the quote TTL trades storage for a longer
-join; copying `ackTokenIssued` onto the receipt at write time makes the receipt self-contained but
-creates the duplicate-source-of-truth shape this repo treats as its recurring bug; pruning receipts to
-match is the one option that destroys evidence and should not be chosen by default.
+⭐ **THE QUESTION IS NARROWED, AND IT IS NOW ONLY ABOUT FUTURE RECEIPTS.** Today's proof is captured
+above and no longer depends on the store. What retention still decides is purely operational: **what a
+USER can resolve from a receipt, and for how long.** Those are different needs and only the second is
+a design question.
+
+⏭️ Three options, and they are NOT equal:
+1. **Extend the quote TTL** — trades storage for a longer resolvable window. Simplest; changes one constant.
+2. **Copy `ackTokenIssued` (the boolean, never the token) onto the receipt at write time** — makes the
+   receipt self-contained, but creates the duplicate-source-of-truth shape this repo treats as its
+   recurring bug, and the two copies would then be able to disagree.
+3. 🚨 **Prune receipts to match — NEVER THE DEFAULT.** It is the only option that resolves the mismatch
+   by DESTROYING evidence. A dangling join loses the corroboration; this loses the claim itself.
+   Recorded explicitly so it is never reached for as the tidy symmetric answer.
 
 ## Where this leaves the gate
 
