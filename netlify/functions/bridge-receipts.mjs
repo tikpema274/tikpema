@@ -99,6 +99,24 @@ export async function handler(event) {
       ackBand: r.ackBand ?? null,
       ackRequired: r.ackRequired ?? false,
       ackAcceptedAt: r.ackAcceptedAt ?? null,
+      // ⭐⭐ THE JOIN TO THE PRICED PLAN — WITHOUT THESE, `ackAcceptedAt` IS UNAUDITABLE HERE.
+      // `recordBridge` has always persisted both; this projection omitted them, so the ONLY
+      // supported way to read a receipt showed consent as accepted with no way to reach the quote
+      // that authorised it. The quote is the independently-written second record — it says a token
+      // was ISSUED for one step index, this says consent was ACCEPTED for one — and agreement
+      // between two records written at different times by different code paths is the whole
+      // evidentiary value. A projection is a claim about what matters; omitting the join said the
+      // join did not.
+      //
+      // 🚨 THE OMISSION WAS INVISIBLE FROM OUTSIDE, WHICH IS WHY IT SURVIVED. `r.quoteId` is simply
+      // `undefined` here, so any reader defaulting it renders "null" — indistinguishable from a
+      // bridge that genuinely had no quote (the direct Bridge page, where null IS correct). On
+      // 2026-08-17 that produced a FALSE FINDING: the first plan-path receipts ever written were
+      // read through this endpoint and reported as carrying no quoteId, while the stored records
+      // held `q_msxi20om_0d4cac7c226e6f49` steps 0 and 1 the whole time. An absent field and a
+      // null field must not render alike when one of them is evidence.
+      quoteId: r.quoteId ?? null,
+      quoteStepIndex: Number.isInteger(r.quoteStepIndex) ? r.quoteStepIndex : null,
       // ⭐ THE PROVISIONAL PAIR. A submitted-but-unconfirmed bridge has no burnHash, so the
       // UI needs its own identity (`txId`) and its own clock (`submittedAt`) — otherwise a
       // pending row is keyless and undateable, and React renders several of them as one.

@@ -1,5 +1,78 @@
 ---
 
+# ✅✅ THE ACKNOWLEDGE GATE IS PROVEN LIVE — `ackAcceptedAt` written for the first time, on the acknowledge step ONLY
+
+**2026-08-17.** Supersedes the "proof not attempted" entry below, which was written earlier the same
+day. Ran on the PLAN CARD (`agent-execute-plan`), the surface 14 Aug never reached.
+
+## The result, from two independently-written records
+
+| | step 0 — 1.0 USDC | step 1 — 0.1 USDC |
+|---|---|---|
+| receipt `ackBand` | `none` | **`acknowledge`** |
+| receipt `feeRatio` | 0.053274 | **0.53275** |
+| receipt `ackRequired` | false | **true** |
+| **receipt `ackAcceptedAt`** | **null** | **2026-08-17T17:28:26.588Z** |
+| receipt `quoteId` / `quoteStepIndex` | `q_msxi20om…` / **0** | `q_msxi20om…` / **1** |
+| quote `band` / `ackTokenIssued` | `none` / **false** | `acknowledge` / **true** |
+
+⭐⭐ **THE TWO RECORDS AGREE AND WERE WRITTEN AT DIFFERENT TIMES BY DIFFERENT CODE PATHS.** The quote
+(propose time, before anything was ticked) says a token was ISSUED for exactly one step index; the
+receipt (execution time) says consent was ACCEPTED for exactly one. Joined on `quoteId` +
+`quoteStepIndex`. **This is the first time that join has ever carried data** — every prior receipt in
+the store predates the plan path.
+
+⭐ **THE CONFOUND IS EXCLUDED FROM THE RECORD, NOT FROM MY PREDICTION.** Step 0's band at EXECUTION is
+`none` with its own recorded `feeRatio 0.053274` — read before `ackAcceptedAt` was looked at, in that
+order deliberately. So the null on receipt 0 is genuine per-step discrimination, not step 0 having
+drifted into the band. Pre-run margin was 88%: the fee would have had to exceed 0.1000.
+
+⭐ **RIGHT SURFACE, CONFIRMED FROM LOGS RATHER THAN FROM THE SCREEN:**
+`[agent-plan] RUN quoteId=q_msxi20om_0d4cac7c226e6f49 steps=2`, then two settle triggers for
+`0xae6e428f7630…` and `0x66351875e43a…` — the same hashes the receipts carry. Duration 13,395 ms.
+
+On-chain (operator-verified): mint tx `0x91e2fd74…2625d`, block 45609712, Success — 0.046725 USDC to
+the SCA `0x058957de…47f9e`, 0.053275 to the fee recipient.
+
+## ⚠️ The fee moved WITHIN a single plan
+
+`0.053274` on step 0, `0.053275` on step 1 — three blocks apart, one minor unit. Quoted net 0.046724,
+delivered 0.046725; both steps delivered one to two units MORE than quoted. Harmless here, but it
+is the empirical case for why the acknowledge token is band-scoped rather than fee-scoped: a
+fee-exact token would have been invalidated between two steps of the same confirmed plan.
+
+## 🚨 A FALSE FINDING I REPORTED, AND THE FIX IT LED TO
+
+I first reported **"0 of 20 receipts carry a quoteId"** and called the join unexercised. **That was
+wrong.** I was reading `GET /api/bridge-receipts`, whose projection **never included `quoteId` or
+`quoteStepIndex`** — so `r.quoteId` was `undefined`, my reader defaulted it, and it printed as `null`.
+The stored records held `q_msxi20om_0d4cac7c226e6f49` steps 0 and 1 the entire time. I diagnosed a
+write-side defect that did not exist; the real gap was read-side, in the surface I was measuring with.
+
+⭐⭐ **WHY IT SURVIVED UNSEEN, AND WHY IT MATTERED:** an absent field and an explicit null render
+identically — and **null is CORRECT here** for the direct Bridge page, which has no quote. So the
+broken state was indistinguishable from a legitimate one from outside. Meanwhile the only supported
+way to audit a receipt showed consent as accepted with no way to reach the quote that authorised it.
+
+**Fixed:** both fields added to the projection, with 5 assertions in `verify-bridge-receipts.mjs`
+(180 → 185). ⚠️ Asserted as **key presence** (`"quoteId" in row`), not value — a value check passes
+while the field is missing, which is the exact confusion being prevented. Both negative controls
+verified reachable-red: removing the fields turns 5 red; changing `Number.isInteger(...)` to
+`|| null` turns exactly 1 red (`got null`).
+
+🚨 **AND THE FALSY-INDEX TRAP IS PINNED SEPARATELY.** `quoteStepIndex: 0` is falsy — a `?? null` or
+`|| null` would erase the FIRST step of every plan, which is precisely the step whose null
+`ackAcceptedAt` carries the discrimination. The bug would have deleted the evidence that the gate is
+per-step, while leaving the acknowledged step looking perfect.
+
+## Where this leaves the gate
+
+`ackAcceptedAt` set on **1 of 20** receipts — the right one. The remaining honest limit is the one
+`5c15ba8` recorded and this run does not change: the field is derived from the band at execution, and
+its meaning as CONSENT rests on two refusals in different modules making the line unreachable without
+a matching token. This run proves the field is written under the intended conditions; it does not
+convert the field into self-witnessing evidence.
+
 # 🚧 ACK GATE — PROOF NOT ATTEMPTED 2026-08-17. Pre-run reads complete; the setup stands and is reusable.
 
 **Nothing spent, nothing pending, no phantom.** No plan was confirmed and nothing was pressed. An

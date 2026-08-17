@@ -370,6 +370,43 @@ section("6 — OWNER SCOPE + ABSENCE MUST NOT READ AS SAFE");
   check("  …the endpoint carries `degraded` to the client", "degraded" in JSON.parse(res.body));
   const anon = await listHandler({ httpMethod: "GET", headers: {} });
   check("  …and refuses an unauthenticated caller", anon.statusCode === 401);
+
+  // ── 🚨 THE PROJECTION MUST CARRY THE CONSENT JOIN ────────────────────────────────────────────
+  // `recordBridge` has always persisted quoteId/quoteStepIndex, but this endpoint omitted them, so
+  // the only supported way to read a receipt showed `ackAcceptedAt` with NO WAY to reach the quote
+  // that authorised it. On 2026-08-17 that produced a false finding: the first plan-path receipts
+  // ever written were read here and reported as carrying no quoteId, while the stored records held
+  // one the whole time.
+  //
+  // ⚠️ ASSERTED AS KEY-PRESENCE, NOT VALUE. An omitted field reads as `undefined`, which a client
+  // renders identically to a legitimate null — and null IS correct for the direct Bridge page,
+  // which has no quote. A value-only check would pass while the field was missing, which is exactly
+  // the confusion this exists to prevent. `"quoteId" in row` is the property.
+  await seed({
+    quoteId: "q_mstest0000_0123456789abcdef", quoteStepIndex: 1,
+    ackBand: "acknowledge", ackRequired: true, ackAcceptedAt: "2026-08-17T00:00:00.000Z",
+  });
+  const jrow = JSON.parse((await listHandler({ httpMethod: "GET", headers: { authorization: "Bearer x" } })).body).receipts[0];
+  check("⭐⭐ the projection EXPOSES quoteId — an absent key renders as null and hides the join",
+    jrow != null && "quoteId" in jrow);
+  check("⭐⭐ …and quoteStepIndex, without which the join cannot address a STEP",
+    jrow != null && "quoteStepIndex" in jrow);
+  check("  …carrying the stored values rather than defaults",
+    jrow?.quoteId === "q_mstest0000_0123456789abcdef" && jrow?.quoteStepIndex === 1);
+
+  // ⚠️ STEP INDEX 0 IS FALSY — a `?? null` or `|| null` here would erase the FIRST step of every
+  // plan, which is precisely the step whose null ackAcceptedAt carries the discrimination.
+  await seed({ quoteId: "q_mstest0000_0123456789abcdef", quoteStepIndex: 0 });
+  const zrow = JSON.parse((await listHandler({ httpMethod: "GET", headers: { authorization: "Bearer x" } })).body).receipts[0];
+  check("🚨 step index 0 survives projection — a falsy index must not become null",
+    zrow?.quoteStepIndex === 0, `got ${JSON.stringify(zrow?.quoteStepIndex)}`);
+
+  // The direct Bridge page has no quote; null there is CORRECT and must stay distinguishable.
+  await seed({});
+  const nrow = JSON.parse((await listHandler({ httpMethod: "GET", headers: { authorization: "Bearer x" } })).body).receipts[0];
+  check("  …while a receipt with no quote projects an explicit null, not an absent key",
+    nrow != null && "quoteId" in nrow && nrow.quoteId === null && nrow.quoteStepIndex === null);
+
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
