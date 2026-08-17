@@ -116,9 +116,34 @@ table concludes those spikes are not provenance. Added, and `verify-spike-index.
   ⚠️ Recorded exception: the repo's standing rule is **never auto-mint a session token** — the user
   directed this run explicitly, and it is zero-money by construction. The rule stands for
   `fire-ub-spend.mjs`, which is untouched and remains the user's to run.
-* ⚠️ **STILL UNPROVEN (different credential):** no spike or smoke script has been RUN end-to-end under
-  the new KIT_KEY recipe. That guard's refusal path is proven by 34 real subprocesses; its ACCEPT path
-  with a genuine Circle kit key is not.
+* ✅ **KIT_KEY GUARD ACCEPT PATH PROVEN WITH A REAL KEY 2026-08-17 — pipeline half deliberately left
+  open.** A throwaway kit key was issued from `console.circle.com/api-keys`, supplied via
+  `read -rs` (73 chars), and `spike-sync-budget.mjs` run twice. `requireKitKey()` is at **L45**; both
+  runs printed messages from **L61** and **L62** — *downstream* of it — and the L63 verbatim-shape
+  check never fired. **So the guard accepted a genuine hand-issued key and execution continued.**
+  That is the accept path, proven against a real credential rather than the suite's fixtures.
+  ⚠️ **WHAT IT DOES NOT PROVE:** the run stopped at L62 (`WALLET_ADDRESS` unset — a gap in the runbook
+  I gave, not a defect) and never reached the Circle quote call at L84. **Circle's API was never asked
+  to accept the key.**
+  ⭐ Incidental confirmation: run 1 printed the *new* L61 message from `cf47676`, so that fix — five
+  runtime error messages that still said "get it from the prod env" — is confirmed live.
+  ⭐ Zero residue by design: the key was `unset` and then **REVOKED** in the Circle console, so the
+  proof created no lasting credential to manage. `unset` alone would not have — it clears the shell
+  while the credential stays valid, and the two were explicitly distinguished at the time.
+
+* ✅ **`is_secret` ON KIT_KEY — DECIDED: STAYS `false`. Not pending, not deferred.**
+  The reasoning was settled 2026-08-16 and nothing since has changed it: **the `builds`-scope drop was
+  the whole win.** `is_secret` protects only against Netlify console/CLI access — a far smaller
+  population than the 20-file readback tree that was the actual exposure, and that tree is now zero.
+  ⚠️ Recorded as DECIDED on purpose. Left as "pending" it would sit on the list forever as an item
+  nobody intends to close, which is how a list stops being read. Off the list, with a reason, and
+  revisitable if someone later has one.
+  🚨 **THE RESIDUAL, NAMED PRECISELY — this sentence is the reason, and it must survive the
+  conclusion:** *a self-issued kit key could behave differently at Circle's API than the deployed one,
+  and that is exactly what cannot be discovered after losing readback.* "Untested" understates it:
+  the untested thing is the one thing `is_secret` makes permanently untestable. Closing readback
+  before Circle has ever accepted a self-issued key trades a small access reduction for the loss of
+  the only way to find out.
 * ⏭️ `is_secret` on `KIT_KEY` is now unblocked. Hold until a key you hold is confirmed working via
   `read -rs` — after flipping there is no way back to the deployed value.
 * ✅ **`SESSION_SECRET` divergence RESOLVED — accidental in origin, deliberate in retention.** A

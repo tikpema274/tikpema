@@ -130,8 +130,19 @@ with the Netlify value by construction; `.env` is never deployed.
 
 ⚠️ **THAT INVERTED THE `is_secret` DECISION.** For `CIRCLE_API_KEY` the pre-flight proved `.env` was a
 faithful second copy, so making Netlify write-only left one readable copy. Here it is not, so marking
-it secret would leave **ZERO readable copies of the production session secret anywhere**. Held
-pending reconciliation.
+it secret would leave **ZERO readable copies of the production session secret anywhere**.
+
+⭐ **UPGRADED 2026-08-17 FROM "held pending reconciliation" TO DECIDED: STAYS `false`.** The
+reconciliation it was waiting on is done — the divergence is accidental in origin and deliberately
+retained (see the RESOLVED section below) — and resolving it surfaced a *second*, stronger reason that
+did not exist when the hold was first taken: **the readback is now load-bearing and tested.**
+`scripts/probe-ub-auth.mjs` mints a prod-trusted token from the value read out of the production
+context, and that path was **proven live on 2026-08-17** (401 control, then `400 exceeds per-spend
+limit of 50 USDC` — token trusted, nothing moved). Marking the var secret would delete the only
+authenticated prod-probe method, leaving a real browser login as the sole route.
+⚠️ So this hold is no longer a deferral awaiting information. It is a decision with a working
+dependency behind it — the same shape as `KIT_KEY`'s, and recorded the same way so neither sits on a
+list nobody intends to close.
 
 ⚠️ **AND THE ROTATION COST IS LARGER THAN "EVERYONE LOGS OUT".** `_auth.mjs` derives `internalToken()`
 from this same secret, so rotation ALSO invalidates the server-to-server token —
@@ -223,9 +234,33 @@ plus `smoke-analystb.mjs` and `smoke-swap-estimate.mjs`. **Netlify is the ONLY c
 entry, and the Circle console does not re-display a kit key after creation.
 
 ⭐ That is a bigger surface than `is_secret` addresses, and it is the item worth acting on:
-**retiring or re-scoping the 18 spikes removes the dependency and the exposure together.** Doing it
-in that order also makes `is_secret` free later — with only the 2 smoke scripts left, closing
-readback costs nothing. Revisit `is_secret` then, not before.
+**retiring or re-scoping the 18 spikes removes the dependency and the exposure together.**
+
+### ✅ DONE 2026-08-17 — the tree is zero, and `is_secret` is DECIDED (stays `false`)
+The dependency is gone: **20 → 0**. All 18 spike headers plus both smoke scripts now take the key
+per-run via `read -rs`, routed through `scripts/_kit-key.mjs`; `cf47676` additionally fixed five
+**runtime error messages** that still said "get it from the prod env" — worse than a header, because
+they fire at the moment someone is deciding where to obtain a key.
+
+⚠️ **The earlier line here — "closing readback costs nothing once the tree is zero" — was WRONG, and
+is corrected rather than quietly dropped.** A zero dependency tree removes the *breakage* cost; it
+does not remove the *epistemic* cost. So `is_secret` stays `false`, **decided, not pending**:
+
+* **The `builds`-scope drop was the whole win.** `is_secret` protects only against Netlify
+  console/CLI access — a far smaller population than the readback tree that was the real exposure.
+* 🚨 **THE RESIDUAL, NAMED PRECISELY — this is the reason, and it must outlive the conclusion:**
+  *a self-issued kit key could behave differently at Circle's API than the deployed one, and that is
+  exactly what cannot be discovered after losing readback.* "Untested" understates it: the untested
+  thing is the one thing `is_secret` makes permanently untestable.
+* **The accept path is half-proven.** 2026-08-17, a throwaway key (issued, used, then **revoked** —
+  zero residue) passed `requireKitKey()` in `spike-sync-budget.mjs`: execution continued past L45 to
+  the L61/L62 preconditions, shape check clean. But the run stopped before the Circle quote call at
+  L84, so **Circle has never accepted a self-issued key.** Trading readback away before it has is the
+  trade this decision declines.
+
+⭐ Recorded as DECIDED deliberately. As "pending" it would sit on the list forever as an item nobody
+intends to close, which is how a list stops being read. Off the list, with a reason, revisitable if
+someone later has one.
 
 ⚠️ And note what flipping it *today* would have cost, since the ordering is the whole point: with no
 readable copy anywhere, recovering the key means a **reissue**, which invalidates the live value and
