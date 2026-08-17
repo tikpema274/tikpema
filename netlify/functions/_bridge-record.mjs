@@ -81,7 +81,7 @@ async function triggerSettle({ event, owner, burnHash }) {
  * No-ops without a burnHash: the 202 TxPendingError path has no hash to key on, so there
  * is nothing to record and today's behaviour is preserved.
  */
-export async function recordBridge({ r, session, event, amountRequested, quoteId = null, stepIndex = null }) {
+export async function recordBridge({ r, session, event, amountRequested, quoteId = null, stepIndex = null, quotePromoted = null }) {
   if (!r?.burnHash) return { recorded: false, reason: "no_burn_hash" };
 
   const burnedAt = new Date().toISOString();
@@ -138,6 +138,13 @@ export async function recordBridge({ r, session, event, amountRequested, quoteId
     // DIAGNOSTIC: no gate anywhere reads `quoteId`.
     quoteId: quoteId ?? null,
     quoteStepIndex: Number.isInteger(stepIndex) ? stepIndex : null,
+    // ⭐ DID THE QUOTE GET PROTECTED FROM THE PRUNE? Written from the ACTUAL result of the mark, not
+    // from the intent to make one. `true` = the quote is exempt from the 14-day age prune, so a later
+    // missing quote is a real anomaly. `false` = the mark failed and this join WILL break on schedule
+    // — expected, explained, not a mystery. `null` = there was no quote (the direct Bridge page).
+    // 🚨 Without this field those three are indistinguishable once the quote is gone, and the reader
+    // is left unable to tell a broken system from a working one.
+    quotePromoted: typeof quotePromoted === "boolean" ? quotePromoted : null,
   });
 
   await triggerSettle({ event, owner: session.address, burnHash: r.burnHash });
@@ -168,7 +175,7 @@ export async function recordBridge({ r, session, event, amountRequested, quoteId
  * and nothing for IRIS to be asked about. Triggering here would have it chase a mint for a
  * burn that may never exist.
  */
-export async function recordPendingBridge({ e, session, amountRequested, quoteId = null, stepIndex = null }) {
+export async function recordPendingBridge({ e, session, amountRequested, quoteId = null, stepIndex = null, quotePromoted = null }) {
   const txId = e?.txId;
   if (!txId) return { recorded: false, reason: "no_tx_id" };
   const c = e?.consent || {};
@@ -209,6 +216,13 @@ export async function recordPendingBridge({ e, session, amountRequested, quoteId
     ackToken: c.ackToken ?? null,
     quoteId: quoteId ?? null,
     quoteStepIndex: Number.isInteger(stepIndex) ? stepIndex : null,
+    // ⭐ DID THE QUOTE GET PROTECTED FROM THE PRUNE? Written from the ACTUAL result of the mark, not
+    // from the intent to make one. `true` = the quote is exempt from the 14-day age prune, so a later
+    // missing quote is a real anomaly. `false` = the mark failed and this join WILL break on schedule
+    // — expected, explained, not a mystery. `null` = there was no quote (the direct Bridge page).
+    // 🚨 Without this field those three are indistinguishable once the quote is gone, and the reader
+    // is left unable to tell a broken system from a working one.
+    quotePromoted: typeof quotePromoted === "boolean" ? quotePromoted : null,
   });
 
   return { recorded: write.written === true, submittedAt, txId };

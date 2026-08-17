@@ -7,7 +7,7 @@ import { daySpend, budgetConfig } from "./_budget.mjs";
 import { recordBridge, recordPendingBridge } from "./_bridge-record.mjs";
 import { TxPendingError } from "./_circle.mjs";
 import { resolveDestination, bridgeFee, bridgeFeeBand, bridgeAckToken } from "./_bridge.mjs";
-import { safeQuoteId } from "./_quote-record.mjs";
+import { safeQuoteId, markQuoteUsed } from "./_quote-record.mjs";
 
 // POST /api/agent-execute-plan { plan: [ {type, ...}, ... ] }
 //
@@ -206,6 +206,26 @@ export async function handler(event) {
   let stoppedAt = null;
   let runningA = 0;                                // micro-USDC committed by THIS plan
 
+  // ═══ ⭐⭐ PROTECT THE QUOTE BEFORE THE FIRST STEP RUNS ═══════════════════════════════════════════
+  // Receipts are permanent; quotes expire at 14 days. So an EXECUTED plan's join dies on a timer
+  // unless the quote is marked — and the mark must happen BEFORE any receipt is written, so every
+  // receipt can carry whether it succeeded.
+  //
+  // ⚠️ MARKED AT COMMITMENT, NOT AT SUCCESS. The quote has been used the moment we pass the pre-flight
+  // and begin executing, regardless of whether a step later fails: a plan that burned and then blocked
+  // still has receipts pointing here. Marking on success would leave exactly the partial runs — the
+  // ones most worth investigating — with the join unprotected.
+  //
+  // 🚨 A FAILED MARK MUST NOT ABORT THE PLAN. This is bookkeeping; money movement does not get
+  // unwound by it, and refusing to bridge because a marker write failed would be a far worse trade.
+  // The failure is LOUD in the log (markQuoteUsed warns) and RECORDED on each receipt below, so a
+  // later reader can distinguish "the quote expired despite protection" — a real anomaly — from "the
+  // quote was never protected", which is explained. An absent quote makes those look identical.
+  const quotePromoted = quoteId ? await markQuoteUsed(session.address, quoteId) : null;
+  if (quoteId && !quotePromoted) {
+    console.warn(`[agent-plan] QUOTE NOT PROTECTED quoteId=${quoteId} — receipts will record quotePromoted=false`);
+  }
+
   for (let i = 0; i < plan.length; i++) {
     const step = plan[i];
     const vA = atomic(values[i]);
@@ -268,7 +288,7 @@ export async function handler(event) {
       // block comment in _bridge-record.mjs for why job-bridge-approve must stay excluded.
       // It cannot fail this step: the burn has already landed, and the plan must continue.
       if (r.kind === "bridge_usdc" && r.burnHash) {
-        await recordBridge({ r, session, event, amountRequested: step.amountUsdc, quoteId, stepIndex: i });
+        await recordBridge({ r, session, event, amountRequested: step.amountUsdc, quoteId, stepIndex: i, quotePromoted });
       }
       runningA += vA;                              // commit: decrement remaining daily budget
     } catch (e) {
@@ -278,7 +298,7 @@ export async function handler(event) {
       // was SUBMITTED — and the consent the user gave for it is recorded nowhere.
       // Keyed on the txId and joined to the quote, exactly like the confirmed path.
       if (e instanceof TxPendingError) {
-        await recordPendingBridge({ e, session, amountRequested: step.amountUsdc, quoteId, stepIndex: i });
+        await recordPendingBridge({ e, session, amountRequested: step.amountUsdc, quoteId, stepIndex: i, quotePromoted });
       }
       // A thrown error (incl. TxPendingError) stops the plan. Record and halt.
       results.push({ index: i, step, ok: false, error: e.message, pending: e.name === "TxPendingError" });

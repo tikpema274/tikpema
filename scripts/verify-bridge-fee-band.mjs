@@ -394,8 +394,15 @@ section("10 — THE PENDING PATH KEEPS THE CONSENT EVIDENCE (the 202 wrote NOTHI
     /feeBand: bandInfo\.band/.test(actions) && /acknowledged: bandInfo\.band === "acknowledge"/.test(actions));
 
   check("⭐⭐ the 202 path RECORDS before answering", /recordPendingBridge\(\{ e, session/.test(bridgeFn));
+  // ⚠️ ASSERTED BY PROPERTY, NOT BY ARGUMENT SPELLING. This previously pinned the exact argument list
+  // and went red the moment a legitimate field (`quotePromoted`) was added — text CHANGING, not
+  // meaning changing, which is the source-regex failure family that got bridgeReceiptStatus extracted
+  // into its own rendering test. What matters is that the plan path records the pending error with the
+  // session and carries the join, not the order or completeness of the object literal.
   check("⭐⭐ …and the PLAN path does too — the same gap existed there",
-    /recordPendingBridge\(\{ e, session, amountRequested: step\.amountUsdc, quoteId, stepIndex: i \}\)/.test(planFn));
+    /recordPendingBridge\(\{\s*e,\s*session/.test(planFn));
+  check("⭐ …carrying the quote join, so a pending receipt is joinable too",
+    /recordPendingBridge\(\{[^}]*quoteId[^}]*stepIndex/.test(planFn));
   check("⭐ …gated on TxPendingError, not on every throw (a 500 must not mint a receipt)",
     /e instanceof TxPendingError/.test(bridgeFn) && /e instanceof TxPendingError/.test(planFn));
 

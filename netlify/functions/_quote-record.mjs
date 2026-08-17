@@ -99,6 +99,53 @@ export function quoteKey(owner, quotedAt, quoteId) {
   return `q/${norm(owner)}/${quotedAt}-${quoteId}`;
 }
 
+/**
+ * ⭐⭐ THE USED-MARKER — RETENTION CONDITIONAL ON EXECUTION, NOT ON AGE.
+ *
+ * A quote that was EXECUTED is joined to a permanent receipt, so a finite TTL on it does not remove
+ * the broken chain — it only moves the cliff. A quote that was never confirmed is disposable. So the
+ * prune is made conditional on execution: marked quotes survive age, unmarked ones expire at 14 days
+ * as before, and the large majority are unmarked.
+ *
+ * 🚨 THE MARK IS A **KEY**, NOT A FIELD ON THE RECORD, AND THAT IS THE WHOLE DESIGN CONSTRAINT.
+ * `pruneOwnerQuotes` is deliberately key-name-only — see the note at `quoteKey` — so it can date the
+ * entire store from one `list()` without reading a single record. A `usedAt` FIELD would force a read
+ * per candidate inside a 1500 ms budget with a 25-delete cap, and the prune would start doing less
+ * work the more there was to do. A marker key costs ONE extra `list()` and keeps the property.
+ *
+ * ⚠️ Markers are never pruned. They are ~1 key per EXECUTED plan — bounded by real money movement,
+ * not by traffic — so the growth is the same order as the permanent receipts they protect.
+ */
+export function usedKey(owner, quoteId) {
+  return `u/${norm(owner)}/${quoteId}`;
+}
+
+/**
+ * Mark a quote as executed. Returns TRUE only if the mark is durable.
+ *
+ * 🚨 IT NEVER THROWS, AND IT MUST NOT — this runs on the execution path, and a bookkeeping write must
+ * never be able to block or unwind a money movement. But it MUST NOT fail silently either: an
+ * unmarked quote expires on schedule and the receipt is left pointing at a `quoteId` that vanishes in
+ * 14 days, which is the original broken chain arriving through the new mechanism.
+ *
+ * ⭐ SO THE FAILURE IS RETURNED, NOT SWALLOWED. The caller records the outcome on the receipt, which
+ * is what lets a later reader tell "the quote expired despite protection" (a real anomaly worth
+ * investigating) from "the quote was never protected" (explained, expected, not a mystery). Those are
+ * different problems and an absent quote makes them look identical.
+ */
+export async function markQuoteUsed(owner, quoteId) {
+  if (!owner || !QUOTE_ID_RE.test(String(quoteId ?? ""))) return false;
+  try {
+    await store().setJSON(usedKey(owner, quoteId), { quoteId, usedAt: new Date().toISOString() });
+    return true;
+  } catch (e) {
+    // Loud on purpose: this is the only moment the failure is cheap to notice.
+    console.warn(`[agent-quote] USED-MARK FAILED owner=${norm(owner)} quoteId=${quoteId} — ${e?.message} ` +
+                 `→ this quote will expire in ${QUOTE_TTL_MS / 86400000}d and its receipts' join will break`);
+    return false;
+  }
+}
+
 const ISO_LEN = 24; // "2026-08-01T12:34:56.789Z"
 /** 🚨 SHAPE-CHECKED BEFORE PARSING, and this is not pedantry. `Date.parse` is LENIENT:
  *  `Date.parse("NOT-A-DATE-0")` returns 946681200000 — a real timestamp in the year 2000.
@@ -144,15 +191,35 @@ export async function pruneOwnerQuotes(owner, now = Date.now()) {
     const { blobs } = await store().list({ prefix });
     const keys = (blobs || []).map((b) => b.key).sort(); // chronological for this layout
 
+    // ⭐⭐ THE PROTECTED SET — ONE EXTRA `list()`, STILL NO RECORD READS. This is exactly why the mark
+    // is a KEY: the whole executed-set arrives as key names, so the prune stays the key-name
+    // comparison its design depends on. A failure here is caught by the outer try and prunes nothing,
+    // which is the safe direction: keeping a quote too long costs storage, dropping one costs a join.
+    const used = new Set();
+    const { blobs: marks } = await store().list({ prefix: `u/${norm(owner)}/` });
+    for (const b of marks || []) used.add(String(b.key).slice(String(b.key).lastIndexOf("/") + 1));
+    // Key layout is `q/<owner>/<ISO>-<quoteId>`, and the quoteId itself contains no "-".
+    const isProtected = (k) => used.has(String(k).slice(String(k).lastIndexOf("-") + 1));
+
     const doomed = [];
     const keep = [];
     for (const k of keys) {
       const t = keyTime(k);
-      if (Number.isFinite(t) && now - t >= QUOTE_TTL_MS) { doomed.push(k); expired++; }
+      // ⚠️ AGE NO LONGER EVICTS AN EXECUTED QUOTE. Its receipt is permanent, so ANY finite TTL on it
+      // only moves the cliff — the join breaks later rather than never.
+      if (Number.isFinite(t) && now - t >= QUOTE_TTL_MS && !isProtected(k)) { doomed.push(k); expired++; }
       else keep.push(k);
     }
     if (keep.length > MAX_QUOTES_PER_OWNER) {
-      const extra = keep.slice(0, keep.length - MAX_QUOTES_PER_OWNER);
+      // ⭐ PROTECTED QUOTES ARE EVICTED **LAST**, NOT EXEMPT. Exempting them from the count cap as
+      // well would make the store unbounded; leaving them first in line to die would reintroduce the
+      // silent break the age rule just closed. So overflow eats UNPROTECTED oldest-first and only
+      // reaches a protected quote when an owner holds more than the cap in EXECUTED plans alone — at
+      // which point the cap is the real constraint, and the loss shows up in `overflow` rather than
+      // happening quietly.
+      const over = keep.length - MAX_QUOTES_PER_OWNER;
+      const extra = keep.filter((k) => !isProtected(k)).slice(0, over);
+      if (extra.length < over) extra.push(...keep.filter(isProtected).slice(0, over - extra.length));
       overflow = extra.length;
       doomed.push(...extra);
     }
