@@ -152,13 +152,22 @@ export async function handler(event) {
         "where you can reach it. That is a real limit and is stated rather than papered over.",
     },
 
+    // 🚨 THE PROJECTION IS PART OF THE DISCLOSURE, NOT PLUMBING. `errata_note` was written to
+    // stop an empty `known_errata: []` reading as "audited clean" — and was then dropped here,
+    // so it reached nobody. A caveat that exists only in the source is not a caveat: this file's
+    // own trust_ordering says "a disclosure only a source-code reader would see is not a
+    // disclosure", and the projection was quietly making that true of itself.
+    // ⚠️ Add a field to VERSIONS and it stays invisible until it is added HERE too.
     versions: VERSIONS.map((v) => ({
       version: v.version,
       cid: v.cid,
       sha256: v.sha256,
+      bytes: v.bytes,
       pinned: v.pinned,
       superseded_by: v.superseded_by,
       known_errata: v.known_errata,
+      // ⭐ Only present when the list is empty — that is the only case it guards against.
+      ...(v.known_errata.length ? {} : { errata_note: v.errata_note }),
     })),
 
     pinning_obligation:
