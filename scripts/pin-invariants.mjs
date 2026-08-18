@@ -87,6 +87,8 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 //   · bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4  — dd-service.json, agentId 851891.
 //     ⭐ TWO PAID REPORTS WERE PRODUCED UNDER THIS DOCUMENT. Load-bearing, not historical.
 //   · bafkreidoeond3akvswce3e425o5grfygsvrfyleqkwathio4ae6y6vujae  — unified.json, agentId 851823.
+//   · bafkreib6viz4fqa4oqrrgxfecwcttxyda6ilm5nmzr7yplznqeahqmomla  — dd-service v1.1.0, agentId 851891.
+//     Supersedes v1.0.0 above; v1.0.0 STAYS PINNED because two paid reports were produced under it.
 //
 // ⚠️ The frozen dd-service doc is KNOWN STALE on four capability claims (x402 metering, HTTP
 // interface, signed reports, canary — all "NOT built", all now built). Per its own
@@ -125,6 +127,24 @@ const TARGETS = {
     rel: "agent-metadata/dd-service.json",
     sha256: "d3734accb6390a361df2daf87b49c41d4a44d30bfc9285f47be3c3284dbb402f",
     expectedCid: "bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4",
+  },
+  // ═══ v1.1.0 — THE SUPERSEDING DOCUMENT (2026-08-18) ═══════════════════════════════════════════
+  // Corrects four claims v1.0.0 was frozen with and registered anyway, so tokenURI(851891) resolved
+  // to a document DENYING ITS OWN EXISTENCE. Correction is by SUPERSESSION, never by edit: v1.0.0's
+  // CID stays pinned forever (two paid reports were produced under it) and this is ADDED beside it.
+  //
+  // ⚠️ THE FILE IS STILL NAMED ".DRAFT.json" ON PURPOSE. It is the reviewed artifact; renaming it
+  // would change nothing about the bytes but would invite a re-save, and a re-save changes the CID.
+  // The name stops mattering the moment it is pinned — the CID is the address, not the filename.
+  //
+  // ⭐ THE sha256/expectedCid BELOW WERE COMPUTED FROM THESE EXACT BYTES BEFORE ANY PIN, so step 2
+  // and step 2b are a real gate rather than a restatement: if the file is touched again — a
+  // reformat, a trailing newline, a JSON.parse round-trip — both refuse before anything uploads.
+  "dd-service-v1.1.0": {
+    name: "dd-service.v1.1.0.json",
+    rel: "agent-metadata/dd-service.v1.1.0.DRAFT.json",
+    sha256: "3eaa33c2c01c7423135ca4158539df030790b675accc7f87af2d81007831cc58",
+    expectedCid: "bafkreib6viz4fqa4oqrrgxfecwcttxyda6ilm5nmzr7yplznqeahqmomla",
   },
 };
 

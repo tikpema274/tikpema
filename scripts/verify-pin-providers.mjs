@@ -47,6 +47,11 @@ const PINNED = [
     why: "TWO PAID REPORTS were produced under this document; their attestations resolve through it",
   },
   {
+    cid: "bafkreib6viz4fqa4oqrrgxfecwcttxyda6ilm5nmzr7yplznqeahqmomla",
+    what: "dd-service.json v1.1.0 — agentId 851891",
+    why: "supersedes v1.0.0; the document tokenURI(851891) points at once setAgentURI lands",
+  },
+  {
     cid: "bafkreidoeond3akvswce3e425o5grfygsvrfyleqkwathio4ae6y6vujae",
     what: "unified.json — agentId 851823",
     why: "the Tikpema Agent identity document; tokenURI(851823) points here",
@@ -191,6 +196,15 @@ for (const p of PINNED) {
   console.log(`   → ${peerCount} distinct peer(s) across ${opNames.length} operator(s): ${opNames.join(", ")}`);
   if (opNames.length >= MIN_OPERATORS) {
     console.log(`   ✅ ${opNames.length} independent operators — the pin survives losing any one.`);
+  } else if (opNames.length === 0) {
+    // 🚨 ZERO IS NOT "ONE, BUT SMALLER". An instrument ANSWERED and announced nobody: either these bytes
+    // were never pinned, or the pin has lapsed. Folding this into the single-operator branch printed
+    // "SINGLE OPERATOR (undefined)" — a wrong diagnosis of the most serious state this gate can observe.
+    failures++;
+    console.log(`   ❌ NOT ANNOUNCED BY ANYONE. The instruments answered and named zero providers.`);
+    console.log(`      Either this CID was never pinned, or the pin has LAPSED. If a report was sold`);
+    console.log(`      under it, that report is no longer checkable against the claims it was produced under.`);
+    console.log(`      (An unpinned CID reads this way too — expected for a version awaiting its pin.)`);
   } else {
     failures++;
     console.log(`   ❌ SINGLE OPERATOR (${opNames[0]}). ${peerCount} peer(s) here are transport redundancy,`);

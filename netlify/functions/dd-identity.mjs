@@ -47,12 +47,27 @@ const VERSIONS = [
     sha256: "d3734accb6390a361df2daf87b49c41d4a44d30bfc9285f47be3c3284dbb402f",
     bytes: 28628,
     pinned: "permanently — two paid reports were produced under this document",
-    superseded_by: null,
+    superseded_by: "1.1.0",
     known_errata: [
       "Says NO WALLET EXISTS / NOTHING IS REGISTERED / NO agentId EXISTS. It was registered 2026-07-26 as agentId 851891.",
       "Says reports are NOT signed or attested by any identity. ERC-1271 report attestation is live.",
       "Leaves open whether this service registers under the same wallet as agentId 851823. It did — owner " + OWNER + ".",
     ],
+  },
+  {
+    version: "1.1.0",
+    cid: "bafkreib6viz4fqa4oqrrgxfecwcttxyda6ilm5nmzr7yplznqeahqmomla",
+    sha256: "3eaa33c2c01c7423135ca4158539df030790b675accc7f87af2d81007831cc58",
+    bytes: 18756,
+    pinned: "permanently — every CID this identity has ever pointed at stays pinned, and the set only grows",
+    superseded_by: null,
+    known_errata: [],
+    // 🚨 AN EMPTY ARRAY IS AN ABSENCE, AND ABSENCE MUST NOT READ AS SAFETY. Rendered bare, `[]` invites
+    // "audited clean". It means nothing has been FOUND yet — which is a statement about how long this
+    // document has existed, not about its accuracy.
+    errata_note:
+      "None recorded as of this deploy. That means nothing has been FOUND yet, NOT that this document " +
+      "has been audited clean — v1.0.0 also carried none on the day it was frozen, and carries three now.",
   },
 ];
 
@@ -101,8 +116,23 @@ export async function handler(event) {
       ipfs_uri: "ipfs://" + current.cid,
       // ⚠️ SAID PLAINLY: this is what the route was DEPLOYED knowing, not a live chain read.
       caveat:
-        "This is the CID this endpoint was deployed with. It is NOT a live read of tokenURI. If the " +
-        "pointer has moved since this deploy, the chain is right and this is stale — read tokenURI yourself.",
+        "This is the CID this endpoint was deployed with. It is NOT a live read of tokenURI. It can " +
+        "disagree with the chain in EITHER direction, and the chain wins both times: if the pointer has " +
+        "already moved past this, this is STALE; if the pointer has not moved yet, this is AHEAD (see " +
+        "pointer_expectation). Read tokenURI(" + AGENT_ID + ") yourself — that is the only authority here.",
+
+      // ⭐ THE UPDATE ORDER IS DELIBERATE, AND A READER CAN LAND MID-SEQUENCE. Publishing a new version
+      // is two operator actions that cannot be atomic: deploying this route, and sending setAgentURI.
+      // Whichever goes first, there is a window where the two surfaces disagree — so the window is
+      // spent in the direction that misleads least, and is described here rather than left to be
+      // inferred by whoever happens to arrive during it.
+      pointer_expectation:
+        "This route is deployed BEFORE setAgentURI is sent, so during the changeover it runs AHEAD of the " +
+        "chain rather than behind it. If tokenURI(" + AGENT_ID + ") still returns an earlier CID than the " +
+        "one above, the move has not happened yet and THAT earlier document is still the authoritative one " +
+        "— its entry below, errata included, describes it correctly. The reverse order was rejected: it " +
+        "would hand a reader the NEW document off the chain while this endpoint still called it superseded, " +
+        "which is the contradiction this companion exists to prevent.",
     },
 
     // ⭐ THE AVAILABILITY PATH. Gateways first, because a verifier should prefer a source that is not us.

@@ -1,5 +1,142 @@
 ---
 
+# ✅ DD IDENTITY v1.1.0 — PINNED AND VERIFIED. THE CHAIN IS UNTOUCHED, AND STEP 4 IS THE OPERATOR'S.
+
+**2026-08-18.** Supersedes the handoff below on ITEM 3 and ITEM 4 — that entry was written before the
+route build and still calls `/api/dd-identity` non-existent. It exists, it is deployed, and the
+document it describes is pinned.
+
+## THE PIN-ORDER, WITH THE BOXES ACTUALLY TICKED
+
+```
+✅ 1. ship  /api/dd-identity                      deployed 6a840d8d4c9c5afe6086b2d4, 07:45Z
+✅ 2. verify it serves — as a stranger            HTTP 200 from outside
+✅ 3. pin   dd-service.v1.1.0.DRAFT.json          bafkreib6viz4fqa4oqrrgxfecwcttxyda6ilm5nmzr7yplznqeahqmomla
+✅ 3b. deploy the companion that KNOWS about v1.1.0   ← this commit
+⬜ 4. setAgentURI(851891, "ipfs://bafkreib6vi…")  selector 0x0af28bd3, OPERATOR-RUN
+⬜ 5. verify tokenURI resolves AND the companion reports the new CID
+```
+
+| | |
+|---|---|
+| CID | `bafkreib6viz4fqa4oqrrgxfecwcttxyda6ilm5nmzr7yplznqeahqmomla` |
+| sha256 | `3eaa33c2c01c7423135ca4158539df030790b675accc7f87af2d81007831cc58` |
+| bytes | 18,756 |
+| pinned root == raw CID == the CID predicted OFFLINE before any network call | ✅ |
+
+## 🚨 STEP 3b EXISTS BECAUSE STEP 3 LANDED BEFORE THE COMPANION KNEW ABOUT IT
+
+Between the pin and this commit, prod served a companion whose `versions[]` held **only 1.0.0** with
+`superseded_by: null`. Had `setAgentURI` gone first from there, `tokenURI(851891)` would have resolved
+to a document whose own named companion said that document did not exist — **structurally the same
+defect v1.1.0 was written to correct.** v1.0.0's companion was named and unreachable; a companion that
+is reachable and calls the current document nonexistent is not an improvement on it.
+
+⭐ The route's new `pointer_expectation` field states the order and the reason, so a reader who lands
+mid-changeover is told rather than left to infer: **this endpoint runs AHEAD of the chain, never
+behind it.** The reverse order would hand a reader the new document off the chain while the endpoint
+still called it superseded. Until step 4 lands, `tokenURI` returning `bafkreigton…o2af4` is CORRECT
+and v1.0.0 is still the authoritative document — errata and all.
+
+## 🚨🚨 PINNING v1.1.0 DOUBLED THE SINGLE-OPERATOR EXPOSURE. IT DID NOT ADDRESS IT.
+
+**ITEM 1 of the handoff below is not closed by this work — it is made larger by it.** Measured this
+session with `npm run gate:pins`:
+
+| CID | peers | operators |
+|---|---|---|
+| `bafkreigton…o2af4` — dd-service v1.0.0 | 2 | **pinata.cloud** |
+| `bafkreib6vi…momla` — dd-service v1.1.0 ⭐ NEW | 2 | **pinata.cloud** |
+| `bafkreidoeond3…` — unified 851823 | 2 | **pinata.cloud** |
+
+⭐ **THREE CIDs, ONE OPERATOR.** Every peer announcing every document this project has ever put on
+chain belongs to one account. A successful pin reads like progress and this one is progress on
+*supersession* — but on *survival* it is a third egg in the same basket. The gate exits 1, and that
+is the correct verdict, not a regression to be silenced.
+
+⚠️ **AND w3s.link SERVING THE BYTES IS RETRIEVAL, NOT CUSTODY.** Re-probed after the pin:
+
+| gateway | result |
+|---|---|
+| ipfs.io | 200 in 0.20s — **hash MATCH** |
+| dweb.link | 200 in 0.75s — **hash MATCH** |
+| w3s.link | 200 in 0.36s — **hash MATCH** |
+| cloudflare-ipfs.com | `000`, no connection at all (that gateway is retired) |
+| gateway.pinata.cloud | 404 after 35s |
+
+🚨 **THREE GATEWAYS SERVED CORRECT BYTES AND THAT IS STILL ONE OPERATOR.** A gateway is a *reader* of
+the network; it fetched from Pinata's peer like everyone else. Storacha serving the bytes through
+w3s.link does not mean Storacha *stores* them, and if the Pinata account lapses all three of those
+200s become 504s together. **Count operators in the routing answer, never gateways in a fetch table.**
+This is the same distinction `verify-pin-providers.mjs` already draws between transport redundancy and
+custody redundancy — it applies to gateways too, and the fetch table above is exactly the artifact that
+would let someone forget it.
+
+## ⭐ dweb.link WENT FROM "NOT RETRIEVED" TO MATCH, WITH NO INTERVENTION
+
+At pin time, ipfs.io served and re-hashed to a match while **dweb.link and cloudflare-ipfs.com did
+not** — the same 2-of-3 pattern measured on v1.0.0, whose bytes are months old. Re-probed later the
+same day, dweb.link served in 0.75s. So that pattern is **cold-fetch warming, not a v1.1.0 problem and
+not an aging problem** — it reproduced on a CID minutes old. cloudflare-ipfs.com is a different thing
+entirely: `000` is no connection, a retired gateway, not a missing pin.
+⚠️ **A FIRST FETCH FAILING IS THE NORMAL CASE, WHICH IS WHY THE COMPANION IS ALSO THE AVAILABILITY
+PATH.** A reviewer's first attempt may well 504. Do not read that as a lapsed pin.
+
+## ⭐ THE DOCUMENT'S BOLDEST NEW CLAIM WAS CHECKED FROM OUTSIDE BEFORE IT WAS FROZEN
+
+`code_provenance.repository_access` flipped from "⚠️ NOT public, a genuine gap in verifiability" to
+"✅ PUBLIC, and therefore a THIRD retrieval path". That is a claim an outsider can falsify, so it was
+verified as an outsider would: `HOME=/nonexistent`, no `GITHUB_TOKEN`, no `GH_TOKEN`, no netrc.
+
+```
+raw.githubusercontent.com/tikpema274/tikpema/6e437d5/agent-metadata/dd-service.json
+  → 200, 28,628 bytes, sha256 d3734accb6390a361df2daf87b49c41d4a44d30bfc9285f47be3c3284dbb402f
+```
+
+That hash is v1.0.0's recorded sha256 exactly. **The repository is a genuine third source, sharing no
+operator with Pinata or with app.tikpema.xyz** — which is why `availability_is_not_guaranteed` was
+rewritten in the same pass to name three sources rather than two, and still refuses to call three a
+guarantee.
+⚠️ The frozen bytes deliberately CANNOT name their own repository path: they are frozen before they
+are committed, so the commit carrying them does not exist yet. The companion publishes it — a fact
+that must change after freeze is precisely what the companion is for.
+
+## THE BYTES ARE FINAL AND WERE CONFIRMED FINAL
+
+On-disk `agent-metadata/dd-service.v1.1.0.DRAFT.json` is 18,756 bytes hashing to `3eaa33c2…` — the
+same hash recorded in `pin-invariants.mjs` and the same one the pinned CID commits to. **No post-pin
+edit has occurred.**
+⚠️ **THE FILE KEEPS THE `.DRAFT.json` NAME ON PURPOSE.** Renaming changes nothing about the bytes but
+invites a re-save, and a re-save changes the CID and makes the document's own central claim false. The
+filename stopped mattering the moment it was pinned: the CID is the address.
+
+## TWO GATE FIXES THAT CAME OUT OF THIS
+
+⭐ **`verify-pin-providers.mjs` printed `SINGLE OPERATOR (undefined)` when the answer was ZERO.** Zero
+providers is not "one, but smaller" — it is an instrument ANSWERING and naming nobody, which means
+never pinned or LAPSED, the most serious state the gate can observe. It was being folded into the
+one-operator branch and mis-diagnosed. Now its own branch, with the note that an unpinned CID reads
+this way too — expected for a version awaiting its pin.
+⭐ **The companion's `known_errata: []` got an `errata_note`.** A bare empty array invites "audited
+clean". It means nothing has been FOUND yet — a statement about how long the document has existed, not
+about its accuracy. v1.0.0 also carried none the day it was frozen and carries three now.
+⚠️ Two instruments disagreed on the fresh pin: `cid.contact` returned 2 peers while
+`delegated-ipfs.dev` returned **0**. Routing propagation lag, not a defect — but it is exactly the
+zero-answer the fixed branch now reports honestly instead of printing `undefined`.
+
+## STATE AT THIS COMMIT
+
+* `tokenURI(851891)` = `ipfs://bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4`, read from
+  **two independent RPCs** (`rpc.testnet.arc.network`, `arc-testnet.drpc.org`). The chain has NOT been
+  touched. ⚠️ `rpc.testnet.arc.com` does not resolve — the host is `.network`.
+* **Step 4 is the operator's to run**, and it is the only remaining action.
+* ⚠️ **EXPECTED AND NOT REGRESSIONS:** `gate:pins` exits 1 (three CIDs, one operator — see above) and
+  `capture:window` reports NO WINDOW. Neither is caused by this change.
+* ⭐ **THE REAL OPEN ITEM IS STILL ITEM 1: A SECOND PINNING OPERATOR.** It waits on nobody's
+  credential, and the document is 18,756 bytes. Every session that pins without adding one makes the
+  basket heavier rather than the eggs safer.
+
+
 # 🚨 HANDOFF — DD IDENTITY SUPERSESSION, WRITTEN AT 97% CONTEXT BEFORE A ROUTE BUILD
 
 **2026-08-18.** Written deliberately BEFORE building, because a route build plus a ~45 min deploy from
