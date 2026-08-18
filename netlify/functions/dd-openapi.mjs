@@ -9,6 +9,9 @@ import { discoveryPage } from "./_dd-discovery-page.mjs";
 // human can reach someone. It is deliberately a named constant rather than inlined, because the
 // value is a DECISION about what identity to expose — a personal address in a public spec is
 // scraped forever — and a decision should be visible in one place, not buried in a document.
+// ✅ CONFIRMED REACHABLE by the operator 2026-08-18 before first publication. ⚠️ An address in a
+// public spec that nobody reads is the same defect as an openApiUrl pointing at a dead route —
+// published-and-unreachable, which is what this whole file exists to avoid.
 const DD_CONTACT_EMAIL = "hello@tikpema.xyz";
 
 // dd-openapi — the machine-readable description of the DD service.
