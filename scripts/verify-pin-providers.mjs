@@ -35,6 +35,7 @@
 
 import { classifyOperators, verdictLines, MIN_NAMED_OPERATORS } from "./_operator-count.mjs";
 import { byPinOrder } from "./_pinned-set.mjs";
+import { parseProviders } from "./_cid.mjs";
 
 
 
@@ -86,13 +87,30 @@ async function queryOne(inst, cid) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(inst.url(cid), { signal: ctrl.signal, headers: { Accept: "application/json" } });
+    // ═══ 🚨 THE ACCEPT HEADER WAS PART OF THE MEASUREMENT — AND IT UNDER-REPORTED ══════════════
+    // Measured 2026-08-18 against BOTH instruments and BOTH CIDs: `Accept: application/json`
+    // returns a TRUNCATED provider set, `Accept: */*` returns the full one.
+    //
+    //   cid.contact        Accept: application/json   2 peers  pinata.cloud
+    //   cid.contact        Accept: */*                4 peers  filebase.io, pinata.cloud
+    //   delegated-ipfs.dev Accept: application/json   1 peer   pinata.cloud
+    //   delegated-ipfs.dev Accept: */*                2 peers  filebase.io, pinata.cloud
+    //
+    // 🚨 IT FAILED IN THE DIRECTION THAT LOOKS LIKE DILIGENCE: the gate reported SINGLE OPERATOR
+    // for a CID that genuinely had two, so a completed piece of work read as unfinished. Had the
+    // bias run the other way it would have declared a single-operator CID safe.
+    // ⭐ THE REQUEST SHAPING WAS PART OF THE HYPOTHESIS — the same family as "a filtered read is
+    // not a measurement of absence". `--function`, `grep`, `tail`, and an Accept header are all
+    // the same mistake wearing different clothes: the instrument was asked a narrower question
+    // than the one being answered, and its answer was read as the whole truth.
+    // ⚠️ So: `*/*`, and the response is parsed as EITHER a JSON envelope or NDJSON, because
+    // content negotiation may now return either and a parse failure must not read as zero peers.
+    const res = await fetch(inst.url(cid), { signal: ctrl.signal, headers: { Accept: "*/*" } });
     clearTimeout(t);
     if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` };
     const text = await res.text();
-    let d;
-    try { d = JSON.parse(text); } catch { return { ok: false, reason: "unparseable JSON" }; }
-    const peers = Array.isArray(d?.Providers) ? d.Providers : [];
+    const peers = parseProviders(text);
+    if (peers === null) return { ok: false, reason: "unparseable body" };
     return { ok: true, peers };
   } catch (e) {
     clearTimeout(t);

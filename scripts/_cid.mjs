@@ -31,3 +31,24 @@ export function bafkreiRawCid(sha256Buf) {
   if (!sha256Buf || sha256Buf.length !== 32) throw new Error("bafkreiRawCid(): needs a 32-byte sha256 digest");
   return "b" + base32NoPad(Buffer.concat([Buffer.from([0x01, 0x55, 0x12, 0x20]), sha256Buf]));
 }
+
+// ⚠️ Routing endpoints answer as either a {"Providers":[…]} envelope or NDJSON, and which one you
+// get depends on content negotiation. Returns null for an unparseable body — NEVER an empty array,
+// because "nothing announced" and "I could not read the answer" are different facts and collapsing
+// them is how an absence comes to read as a measurement.
+export function parseProviders(text) {
+  if (!text) return null;
+  try {
+    const d = JSON.parse(text);
+    if (Array.isArray(d?.Providers)) return d.Providers;
+    if (Array.isArray(d)) return d;
+  } catch { /* fall through to NDJSON */ }
+  const lines = text.trim().split("\n").filter(Boolean);
+  const out = [];
+  let parsedAny = false;
+  for (const l of lines) {
+    try { const o = JSON.parse(l); parsedAny = true; out.push(...(Array.isArray(o.Providers) ? o.Providers : [o])); }
+    catch { /* skip */ }
+  }
+  return parsedAny ? out : null;
+}

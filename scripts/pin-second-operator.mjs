@@ -54,7 +54,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { byPinOrder } from "./_pinned-set.mjs";
-import { bafkreiRawCid } from "./_cid.mjs";
+import { bafkreiRawCid, parseProviders } from "./_cid.mjs";
 import { classifyOperators } from "./_operator-count.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -226,18 +226,27 @@ async function measureOperators(cid) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), HTTP_TIMEOUT_MS);
     try {
-      const res = await fetch(inst.url(cid), { signal: ctrl.signal, headers: { Accept: "application/json" } });
+        // ═══ 🚨 THE ACCEPT HEADER WAS PART OF THE MEASUREMENT — AND IT UNDER-REPORTED ══════════════
+      // Measured 2026-08-18 against BOTH instruments and BOTH CIDs: `Accept: application/json`
+      // returns a TRUNCATED provider set, `Accept: */*` returns the full one.
+      //
+      //   cid.contact        Accept: application/json   2 peers  pinata.cloud
+      //   cid.contact        Accept: */*                4 peers  filebase.io, pinata.cloud
+      //   delegated-ipfs.dev Accept: application/json   1 peer   pinata.cloud
+      //   delegated-ipfs.dev Accept: */*                2 peers  filebase.io, pinata.cloud
+      //
+      // 🚨 IT FAILED IN THE DIRECTION THAT LOOKS LIKE DILIGENCE: the gate reported SINGLE OPERATOR
+      // for a CID that genuinely had two, so a completed piece of work read as unfinished. Had the
+      // bias run the other way it would have declared a single-operator CID safe.
+      // ⭐ THE REQUEST SHAPING WAS PART OF THE HYPOTHESIS — the same family as "a filtered read is
+      // not a measurement of absence". `--function`, `grep`, `tail`, and an Accept header are all
+      // the same mistake wearing different clothes: the instrument was asked a narrower question
+      // than the one being answered, and its answer was read as the whole truth.
+      // ⚠️ So: `*/*`, and the response is parsed as EITHER a JSON envelope or NDJSON, because
+      // content negotiation may now return either and a parse failure must not read as zero peers.
+      const res = await fetch(inst.url(cid), { signal: ctrl.signal, headers: { Accept: "*/*" } });
       if (!res.ok) { perInstrument.push(`${inst.name}: HTTP ${res.status}`); continue; }
-      const text = await res.text();
-      let providers = [];
-      try {
-        const d = JSON.parse(text);
-        providers = d.Providers || [];
-      } catch {
-        // NDJSON form
-        providers = text.split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } })
-          .filter(Boolean).flatMap((o) => o.Providers || [o]);
-      }
+      const providers = parseProviders(await res.text()) ?? [];
       answered = true;
       perInstrument.push(`${inst.name}: ${providers.length} peer(s)`);
       for (const peer of providers) {
