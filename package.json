@@ -48,7 +48,9 @@
     "test:quoteretention": "node --experimental-test-module-mocks scripts/verify-quote-retention.mjs",
     "test:acktoken": "node scripts/verify-ack-token-keyed.mjs",
     "gate:forgery": "node scripts/verify-ack-forgery.mjs",
-    "gate:pins": "node scripts/verify-pin-providers.mjs"
+    "gate:pins": "node scripts/verify-pin-providers.mjs",
+    "pin:second": "node scripts/pin-second-operator.mjs",
+    "gate:opcount": "node scripts/verify-operator-count.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
