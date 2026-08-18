@@ -49,6 +49,7 @@ const NO_FRONTEND_CALLER = new Map([
   // ── sold to strangers: the whole point is that OUR app is not the caller ──
   ["/api/dd-analyze", "PUBLIC x402 endpoint. Buyers are external agents; the SPA never calls it."],
   ["/api/dd-openapi", "the machine-readable descriptor `howToCall.openApiUrl` points at, fetched by external clients."],
+  ["/api/dd-identity", "the mutable companion the ERC-8004 identity document (agentId 851891) names as its correction AND availability path. Fetched by outside verifiers following tokenURI, never by the SPA — and v1.0.0's companion was unreachable precisely because nothing external could resolve it."],
   // ── operator / bootstrap, deliberately never wired to a button ──
   ["/api/agent-init", "ONE-TIME bootstrap that mints a new agent wallet and ERC-8004 identity. Deliberately not reachable from the UI — a stray click would create a brand new agent."],
   ["/api/agent-status", "read-only operator diagnostic (wallet + identity), curled by hand."],

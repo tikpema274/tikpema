@@ -39,6 +39,14 @@
   to = "/.netlify/functions/dd-openapi"
   status = 200
 
+# ⭐ The mutable companion named by the ERC-8004 identity document (agentId 851891). Public and
+# unauthenticated on purpose: it is the correction AND availability path for a frozen document, and
+# requiring a session to reach corrections would rebuild the unreachable-companion defect one layer down.
+[[redirects]]
+  from = "/api/dd-identity"
+  to = "/.netlify/functions/dd-identity"
+  status = 200
+
 [[redirects]]
   from = "/api/dd-analyze"
   to = "/.netlify/functions/dd-analyze"
