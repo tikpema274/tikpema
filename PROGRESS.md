@@ -1,5 +1,154 @@
 ---
 
+# ✅✅ ITEM 1 IS CLOSED — `gate:pins` EXITS 0. AND THE GATE ITSELF WAS UNDER-REPORTING.
+
+**2026-08-18.** Three CIDs, two independent operators each, agreed by both routing instruments.
+The DD identity supersession is complete on-chain, and the permanent obligation behind it now
+survives losing either operator.
+
+| CID | operators | peers |
+|---|---|---|
+| `bafkreigton…o2af4` — dd-service v1.0.0 | **filebase.io, pinata.cloud** | 4 |
+| `bafkreib6vi…momla` — dd-service v1.1.0 | **filebase.io, pinata.cloud** | 4 |
+| `bafkreidoeond3…` — unified 851823 | **filebase.io, pinata.cloud** | 4 |
+
+## 🚨🚨 THE GATE REPORTED RED WHILE THE WORK WAS GREEN — ITS OWN `Accept` HEADER TRUNCATED THE ANSWER
+
+T reported `gate:pins` green. It read RED here. **The disagreement was the finding.**
+
+`Accept: application/json` returns a TRUNCATED provider set from both routing instruments.
+Measured across both instruments and both CIDs:
+
+```
+cid.contact         Accept: application/json   2 peers  pinata.cloud
+cid.contact         Accept: */*                4 peers  filebase.io, pinata.cloud
+delegated-ipfs.dev  Accept: application/json   1 peer   pinata.cloud
+delegated-ipfs.dev  Accept: */*                2 peers  filebase.io, pinata.cloud
+```
+
+⭐⭐ **THE REQUEST SHAPING WAS PART OF THE HYPOTHESIS.** This is the same family as *a filtered read
+is not a measurement of absence* — `--function`, `grep`, `tail`, and an `Accept` header are one
+mistake in four costumes: **the instrument was asked a narrower question than the one being
+answered, and its answer was read as the whole truth.**
+
+🚨 **AND TWO INSTRUMENTS DID NOT SAVE IT.** The n=1 defence this repo already learned —
+*repeating one instrument is not corroboration* — assumes the instruments are asked the same
+question independently. Both were asked the NARROW question, so both agreed, and their agreement
+was worthless. ⭐ **Corroboration requires varying the QUESTION, not only the answerer.**
+
+⚠️ **IT FAILED IN THE DIRECTION THAT LOOKS LIKE DILIGENCE**, which is why it survived review:
+completed work read as unfinished. An under-reporting safety gate raises no alarm — nobody
+investigates a check that says "not yet". Had the bias run the other way it would have declared a
+single-operator CID safe and been caught in a day. **A gate being conservative is not evidence that
+it is correct**, and "fails safe" is not a substitute for "measures the right thing".
+
+⭐ **THE PROCESS LESSON: THE HUMAN'S CONTRADICTING REPORT WAS THE INSTRUMENT.** The cheap move was
+to assume T had misread their own terminal — two green rows above one red one is an easy misread,
+and my reading came from the gate itself. Taking the disagreement seriously instead is what
+surfaced a defect in the criterion everything else was being measured against.
+
+Fixed at `212696a`: `Accept: */*`, and `parseProviders()` handles either a `{"Providers":[…]}`
+envelope or NDJSON, returning **null — never `[]`** — for an unreadable body, so "could not read"
+cannot collapse into "nothing announced".
+
+## THE SECOND OPERATOR IS FILEBASE, ADDED BY pin-by-CID
+
+⭐ **pin-by-CID, NOT re-upload.** We hold the bytes, so re-uploading was the obvious move and the
+wrong one: the CID a provider ANNOUNCES depends on how it wraps an upload. Ours are CIDv1 raw
+(`bafkrei…`); a file-upload API announces a UnixFS dag-pb root (`bafybei…`). The bytes would have
+been stored, the routing instruments would still have shown ONE operator for the CID the chain
+points at, and **the work would have looked done while achieving nothing.** `POST /pins` names the
+exact CID, so there is no codec ambiguity.
+
+🚨 **STORACHA IS GONE — DO NOT PLAN AROUND IT.** `storacha.network` and `docs.storacha.network` both
+301 to `fil.one` (an S3 product with no IPFS pinning surface); `console.storacha.network` and
+`up.storacha.network` do not resolve at all. A third-party notice puts uploads ending 2026-04-15.
+Filebase became primary by elimination, not comparison.
+
+⭐ **AND THE PRIVATE-BUCKET QUESTION WAS ANSWERED BY MEASUREMENT, NOT BY DOCS.** Filebase tokens
+scope to ONE bucket, buckets have a visibility setting, and if a private bucket stored without
+announcing then every pin would succeed while the operator count never moved — the same end state
+as not doing the work, through a door the "does Filebase announce under a DNS name?" pre-check
+could not cover, since that measured someone else's bucket. Filebase says it publishes all provider
+records to the DHT and defines private/public only for the S3 access path, but **no source states
+that intersection outright**, so the script does not assume it: after the FIRST pin it polls for a
+new named operator and STOPS if none appears. The live pins settled it — `filebase.io` announces
+for this bucket.
+
+## ⭐ THE CRITERION WAS TIGHTENED BEFORE IT WAS USED — AND IT MATTERED
+
+`gate:pins` counted `operators.size >= 2`, and a peer announcing no DNS name is keyed
+`unknown:<peerId>`. So `{pinata.cloud, unknown:QmA}` went GREEN, and `{unknown:QmA, unknown:QmB}`
+went green with **nothing named at all**.
+
+🚨 Keeping unnamed peers separate is still right — folding them into a known operator would HIDE a
+genuine second custodian. Counting them AS one is the opposite error, and it only became dangerous
+when this gate was promoted to the SUCCESS CRITERION. ⭐ **A check that DESCRIBES can afford to be
+generous with unknowns; a check that DECIDES cannot, because the generous reading is exactly the
+false pass the work exists to eliminate.** Independence you cannot name is independence you cannot
+verify.
+
+Verdicts are now `OK` / `AMBER` / `SINGLE` / `NONE` / `UNRESOLVED`, and **AMBER states what the old
+rule would have said** — *"would have called this 2. It is 1"* — so the tightening documents itself
+where it fires rather than silently correcting a number.
+⭐ AMBER cannot occur against real data, so the rule was extracted to `_operator-count.mjs` and all
+five branches are driven by `verify-operator-count.mjs` with no network. **A branch whose first
+execution is the day it decides something is a branch nobody has tested.**
+
+## STEP 4 LANDED — tokenURI(851891) RESOLVES TO v1.1.0
+
+Operator-run `setAgentURI`: tx `0xe7babbf3…e099`, block **57624156**, status `0x1`,
+gasUsed **159,052**. Confirmed on two independent RPCs. `verify-supersession.mjs` → ✅ SUPERSEDED.
+
+⚠️ **THE PRE-FLIGHT COST ESTIMATE WAS WRONG BY ~3×.** `eth_estimateGas` said 53,578; the write used
+159,052. The estimate measured a direct call from the owner address, but the send went through the
+Circle SCA (`from 0x927e53dd…`). Same call, different path. **An estimate is only valid for the
+path it was taken on** — harmless here, but the COST line should name which path it measured.
+
+⭐ **THE RECORD SURVIVED THE MOVE, WHICH WAS THE PART WITH NO UNDO.** `mergePreservingProvenance`
+would NOT have protected it: its rule is "never downgrade a known value to null", and a
+supersession's incoming values are all non-null and different, so the merge never fires and a plain
+write replaces the registration txHash with the setAgentURI hash. `pointerHistory[]` is append-only
+and `registrationTxHash` is pinned separately.
+⭐ **AND THE SEED WAS CORRECT ONLY BY TIMING** until it was asserted: it read `prior.txHash` and
+LABELLED it "the original registration" without checking — true on the first supersession, false
+forever after. Now asserted against a constant, with 24 checks and 6 refusal cases proving it
+against the real record in memory, no chain, no writes.
+
+## ⭐ FOUR SELF-MEASURING MISTAKES IN ONE SESSION — A PATTERN WORTH NAMING
+
+1. `pgrep -f 'deploy:prod'` matched **its own command string**, so the deploy monitor could never
+   observe the deploy ending. Fixed with a `__DEPLOY_EXIT__` sentinel written by the wrapper.
+2. An endpoint probe **reused the previous iteration's response body**, so two dead hosts appeared
+   to return spec-compliant errors.
+3. The `Accept` header above.
+4. `verify-supersession`'s errata check **passed vacuously** before the deploy, because the v1.1.0
+   entry did not yet exist and the guard short-circuited on `!newEntry`.
+
+⭐ The common shape: **the measurement apparatus was inside the thing being measured**, and in every
+case the wrong answer looked exactly like a right one. Ask of any check: *what would this print if
+the thing I am checking for were absent — and could it print that for some other reason?*
+
+## THE DEPLOY RECORD — SIX MEASUREMENTS, AND "GROWING" IS NOT SUPPORTED
+
+`24m49 · 36m03 · 30m12 · 44m29 · 22m10 · 19m23` at constant function count. ⭐ **The two most recent
+runs are the two fastest.** The spread is ~25 min and non-monotonic: bundling time is NOISY, not
+growing. ⚠️ Treat any single run as a FLOOR — 19m23 says nothing about the next one.
+
+## STATE
+
+* `gate:pins` **exit 0** · `gate:opcount` **exit 0** · `verify-supersession` **exit 0** ·
+  `gate:deployed` / `gate:forgery` green on deploy `6a84436f4a395d50eac1a5bd`.
+* ⚠️ `capture:window` still reports NO WINDOW — correct: `dd-identity.mjs` sits outside
+  `DD_SURFACE_DIRS/FILES` by design, being a static informational endpoint with no engine, no
+  health gate and no money path.
+* ⚠️ **The must-stay-pinned obligation now spans TWO accounts.** Both must be kept alive, and the
+  set still only grows. A second operator halves the risk; it does not remove the obligation.
+* ⚠️ `pin-invariants.mjs` still documents `--env-file=.env`, which loads the PINATA_JWT placeholder
+  and therefore cannot work as written. Known, unfixed, and deliberately not bundled into the
+  pinning work.
+
+
 # ✅ DD IDENTITY v1.1.0 — PINNED AND VERIFIED. THE CHAIN IS UNTOUCHED, AND STEP 4 IS THE OPERATOR'S.
 
 **2026-08-18.** Supersedes the handoff below on ITEM 3 and ITEM 4 — that entry was written before the
