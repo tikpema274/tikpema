@@ -34,31 +34,18 @@
 //   node scripts/verify-pin-providers.mjs
 
 import { classifyOperators, verdictLines, MIN_NAMED_OPERATORS } from "./_operator-count.mjs";
+import { byPinOrder } from "./_pinned-set.mjs";
 
 
 
 // ═══ THE MUST-STAY-PINNED SET ═══════════════════════════════════════════════════════════════════
-// Mirrors the list in scripts/pin-invariants.mjs (which holds it as a comment, not as data, so it
-// cannot be imported). ⚠️ A SECOND COPY OF A LIST IS THE REPO'S RECURRING BUG, so this file does
-// not merely restate it — checkDrift() below re-derives the set from the live companion route's
-// rendered payload and FAILS if the two disagree. The copy is checked, not trusted.
-const PINNED = [
-  {
-    cid: "bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4",
-    what: "dd-service.json v1.0.0 — agentId 851891",
-    why: "TWO PAID REPORTS were produced under this document; their attestations resolve through it",
-  },
-  {
-    cid: "bafkreib6viz4fqa4oqrrgxfecwcttxyda6ilm5nmzr7yplznqeahqmomla",
-    what: "dd-service.json v1.1.0 — agentId 851891",
-    why: "supersedes v1.0.0; the document tokenURI(851891) points at once setAgentURI lands",
-  },
-  {
-    cid: "bafkreidoeond3akvswce3e425o5grfygsvrfyleqkwathio4ae6y6vujae",
-    what: "unified.json — agentId 851823",
-    why: "the Tikpema Agent identity document; tokenURI(851823) points here",
-  },
-];
+// ⭐ IMPORTED, NOT RESTATED — scripts/_pinned-set.mjs is the single definition. This file used to
+// hold its own copy beside a prose copy in pin-invariants.mjs; they had already begun to diverge in
+// what each recorded.
+// ⚠️ ONE COPY REMAINS ON PURPOSE: netlify/functions/dd-identity.mjs. checkDrift() below re-derives
+// the set from that live route's RENDERED payload and fails if the two disagree — a check between a
+// module and itself would prove nothing, so the companion stays an independent observation.
+const PINNED = byPinOrder();
 
 // A CID that does not exist. Its purpose is to prove the instruments can say NO — without it, an
 // endpoint quietly returning {"Providers":[]} for everything would be indistinguishable from a

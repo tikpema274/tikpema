@@ -36,6 +36,7 @@ import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { PINNED_SET } from "./_pinned-set.mjs";
 
 // Compute the CIDv1 raw-codec CID ("bafkrei...") for a set of bytes. This is the
 // deterministic content address of the file as a single raw block, and — because
@@ -83,12 +84,10 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 // **Budget for it, and never unpin to save quota.** The cheap-looking cleanup is the one that
 // silently breaks delivered products.
 //
-// MUST-STAY-PINNED (append on every supersession; never remove a row):
-//   · bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4  — dd-service.json, agentId 851891.
-//     ⭐ TWO PAID REPORTS WERE PRODUCED UNDER THIS DOCUMENT. Load-bearing, not historical.
-//   · bafkreidoeond3akvswce3e425o5grfygsvrfyleqkwathio4ae6y6vujae  — unified.json, agentId 851823.
-//   · bafkreib6viz4fqa4oqrrgxfecwcttxyda6ilm5nmzr7yplznqeahqmomla  — dd-service v1.1.0, agentId 851891.
-//     Supersedes v1.0.0 above; v1.0.0 STAYS PINNED because two paid reports were produced under it.
+// MUST-STAY-PINNED: the rows now live in scripts/_pinned-set.mjs, which this file IMPORTS.
+// ⚠️ They used to be restated here as prose AND held as data in verify-pin-providers.mjs. Listing
+// them again in this comment would recreate exactly the drift the extraction removed — a comment
+// copy is the worst kind, because nothing can check it. Append new documents THERE, in pinOrder.
 //
 // ⚠️ The frozen dd-service doc is KNOWN STALE on four capability claims (x402 metering, HTTP
 // interface, signed reports, canary — all "NOT built", all now built). Per its own
@@ -109,44 +108,14 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 // Each profile's sha256 and expectedCid MUST be derived from that document's own bytes.
 // They are hard gates, not labels: step 2 refuses on sha drift, step 2b refuses on CID
 // mismatch, both BEFORE anything is uploaded. A CID is never minted for unreviewed bytes.
-const TARGETS = {
-  // The Tikpema Agent identity. ALREADY PINNED and gateway-verified 2026-07-24; a re-run
-  // is expected to be a no-op that re-confirms retrievability.
-  unified: {
-    name: "unified.json",
-    rel: "agent-metadata/unified.json",
-    sha256: "6e239a3d815595844d939aebba68970695625c2c90558133a1dc013d8f568901",
-    expectedCid: "bafkreidoeond3akvswce3e425o5grfygsvrfyleqkwathio4ae6y6vujae",
-  },
-  // The DD service document, frozen 2026-07-26 (commit 634f3b4). NOT YET PINNED — this
-  // is what blocks Phase C: register-identity.mjs STEP 1 refuses while no gateway serves
-  // the CID, because registering a tokenURI pointing at unfetchable bytes is the one
-  // irreversible mistake in that flow.
-  "dd-service": {
-    name: "dd-service.json",
-    rel: "agent-metadata/dd-service.json",
-    sha256: "d3734accb6390a361df2daf87b49c41d4a44d30bfc9285f47be3c3284dbb402f",
-    expectedCid: "bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4",
-  },
-  // ═══ v1.1.0 — THE SUPERSEDING DOCUMENT (2026-08-18) ═══════════════════════════════════════════
-  // Corrects four claims v1.0.0 was frozen with and registered anyway, so tokenURI(851891) resolved
-  // to a document DENYING ITS OWN EXISTENCE. Correction is by SUPERSESSION, never by edit: v1.0.0's
-  // CID stays pinned forever (two paid reports were produced under it) and this is ADDED beside it.
-  //
-  // ⚠️ THE FILE IS STILL NAMED ".DRAFT.json" ON PURPOSE. It is the reviewed artifact; renaming it
-  // would change nothing about the bytes but would invite a re-save, and a re-save changes the CID.
-  // The name stops mattering the moment it is pinned — the CID is the address, not the filename.
-  //
-  // ⭐ THE sha256/expectedCid BELOW WERE COMPUTED FROM THESE EXACT BYTES BEFORE ANY PIN, so step 2
-  // and step 2b are a real gate rather than a restatement: if the file is touched again — a
-  // reformat, a trailing newline, a JSON.parse round-trip — both refuse before anything uploads.
-  "dd-service-v1.1.0": {
-    name: "dd-service.v1.1.0.json",
-    rel: "agent-metadata/dd-service.v1.1.0.DRAFT.json",
-    sha256: "3eaa33c2c01c7423135ca4158539df030790b675accc7f87af2d81007831cc58",
-    expectedCid: "bafkreib6viz4fqa4oqrrgxfecwcttxyda6ilm5nmzr7yplznqeahqmomla",
-  },
-};
+// ⭐ DERIVED FROM scripts/_pinned-set.mjs — this map used to be hand-maintained here while the same
+// three documents were ALSO listed as prose in the header comment above and as data in
+// verify-pin-providers.mjs. The keys below are unchanged, so every documented `--target` invocation
+// still works; only the source of the values moved.
+const TARGETS = Object.fromEntries(
+  PINNED_SET.map((d) => [d.key, { name: d.name, rel: d.rel, sha256: d.sha256, expectedCid: d.cid }])
+);
+
 
 // ⚠️ NO DEFAULT TARGET. Pinning is an outward-facing publish: the bytes become
 // retrievable by anyone. Letting the script pick which document to publish is not a
