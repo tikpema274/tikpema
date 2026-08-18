@@ -70,7 +70,54 @@ export const DD_EXTRA = Object.freeze({
  *  NOT a coverage-scaled price — that would put a tunable number on the money path and give us an
  *  incentive to report more coverage than we have. */
 export const DD_PRICE_ATOMIC = "60000";
-export const DD_PRICE_HUMAN = "$0.06 USDC";
+
+// ═══ ⭐ ONE NUMBER, THREE RENDERINGS, TWO FORMATTERS — AND THE DIFFERENCE IS LOAD-BEARING ═══════
+//
+//   DD_PRICE_ATOMIC             "60000"        the wire value; the only hand-written figure
+//   DD_PRICE_HUMAN              "$0.06 USDC"   for people and for search; trailing zeros TRIMMED
+//   x-payment-info price.amount "0.060000"     Circle's format; trailing zeros KEPT
+//
+// 🚨 A SINGLE FORMATTER WOULD CLOSE ONE DRIFT AND OPEN ANOTHER. Deriving everything with the human
+// formatter emits "0.06" into x-payment-info, which may fail Circle's parser; deriving everything
+// with the padded one puts "$0.060000 USDC" in front of buyers. The two rules are genuinely
+// different requirements, so they are two functions with the difference stated, not one function
+// with a flag — a boolean parameter at a call site is where this kind of distinction goes to die.
+//
+// ⚠️ USDC IS 6-DECIMAL. Both formatters assume that and assert their input is atomic digits, because
+// passing an already-formatted string ("0.06") would silently produce "0.000000" — a free service.
+
+const USDC_DECIMALS = 6;
+
+function splitAtomic(atomic) {
+  const a = String(atomic);
+  if (!/^\d+$/.test(a)) throw new Error(`price must be atomic digits, got "${a}" — an already-formatted value here would render as a different price`);
+  const padded = a.padStart(USDC_DECIMALS + 1, "0");
+  return { whole: padded.slice(0, -USDC_DECIMALS), frac: padded.slice(-USDC_DECIMALS) };
+}
+
+/** Circle's `x-payment-info` amount: fixed 6 decimals, trailing zeros KEPT. "60000" → "0.060000". */
+export function formatUsdcPadded(atomic) {
+  const { whole, frac } = splitAtomic(atomic);
+  return `${whole}.${frac}`;
+}
+
+/** Human/search rendering: trailing zeros TRIMMED, no decimal point when nothing remains.
+ *  "60000" → "0.06"   ·   "1000000" → "1"   ·   "1" → "0.000001" */
+export function formatUsdcTrimmed(atomic) {
+  const { whole, frac } = splitAtomic(atomic);
+  const t = frac.replace(/0+$/, "");
+  return t ? `${whole}.${t}` : whole;
+}
+
+export const DD_PRICE_DECIMAL = formatUsdcPadded(DD_PRICE_ATOMIC); // "0.060000" — x-payment-info
+export const DD_PRICE_HUMAN = `$${formatUsdcTrimmed(DD_PRICE_ATOMIC)} USDC`; // "$0.06 USDC"
+
+// 🚨 ASSERTED AT IMPORT. These two strings are published — one to buyers and search, one to a parser
+// we do not control — and a derivation that silently changed either would change the advertised
+// price of a live paid service. Cheap check, and it fails at load rather than in a listing.
+if (DD_PRICE_DECIMAL !== "0.060000" || DD_PRICE_HUMAN !== "$0.06 USDC") {
+  throw new Error(`_dd-x402: price derivation drifted — decimal="${DD_PRICE_DECIMAL}" human="${DD_PRICE_HUMAN}" from atomic="${DD_PRICE_ATOMIC}"`);
+}
 
 /** Gateway settlement is batched and delayed, so the authorization must stay valid far longer than
  *  the confirmation window. GatewayEvmScheme uses 7 days + buffer. */

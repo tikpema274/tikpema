@@ -50,7 +50,8 @@
     "gate:forgery": "node scripts/verify-ack-forgery.mjs",
     "gate:pins": "node scripts/verify-pin-providers.mjs",
     "pin:second": "node scripts/pin-second-operator.mjs",
-    "gate:opcount": "node scripts/verify-operator-count.mjs"
+    "gate:opcount": "node scripts/verify-operator-count.mjs",
+    "gate:price": "node scripts/verify-price-rendering.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
