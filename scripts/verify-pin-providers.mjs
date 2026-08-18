@@ -33,7 +33,9 @@
 //
 //   node scripts/verify-pin-providers.mjs
 
-const MIN_OPERATORS = 2;
+import { classifyOperators, verdictLines, MIN_NAMED_OPERATORS } from "./_operator-count.mjs";
+
+
 
 // ═══ THE MUST-STAY-PINNED SET ═══════════════════════════════════════════════════════════════════
 // Mirrors the list in scripts/pin-invariants.mjs (which holds it as a comment, not as data, so it
@@ -149,7 +151,7 @@ async function checkDrift() {
 }
 
 console.log("\n══ PIN PROVIDER REDUNDANCY ═════════════════════════════════════════════════════");
-console.log(`   requirement: at least ${MIN_OPERATORS} INDEPENDENT OPERATORS per must-stay-pinned CID`);
+console.log(`   requirement: at least ${MIN_NAMED_OPERATORS} INDEPENDENT *NAMED* OPERATORS per must-stay-pinned CID`);
 console.log(`   instruments: ${INSTRUMENTS.map((i) => i.name).join(", ")}\n`);
 
 // ── negative control ───────────────────────────────────────────────────────────────────────────
@@ -186,30 +188,18 @@ for (const p of PINNED) {
     }
   }
   if (!anyAnswered) {
-    console.log(`   ⚠️ UNRESOLVED — no instrument answered. This is NOT a measurement of zero providers,`);
-    console.log(`      and it is NOT a pass. Re-run; if it persists the routing APIs are down, not the pin.`);
+    for (const l of verdictLines(classifyOperators(operators, false))) console.log(l);
     unresolved++;
     continue;
   }
-  const opNames = [...operators.keys()].sort();
-  const peerCount = [...operators.values()].reduce((n, s) => n + s.size, 0);
-  console.log(`   → ${peerCount} distinct peer(s) across ${opNames.length} operator(s): ${opNames.join(", ")}`);
-  if (opNames.length >= MIN_OPERATORS) {
-    console.log(`   ✅ ${opNames.length} independent operators — the pin survives losing any one.`);
-  } else if (opNames.length === 0) {
-    // 🚨 ZERO IS NOT "ONE, BUT SMALLER". An instrument ANSWERED and announced nobody: either these bytes
-    // were never pinned, or the pin has lapsed. Folding this into the single-operator branch printed
-    // "SINGLE OPERATOR (undefined)" — a wrong diagnosis of the most serious state this gate can observe.
-    failures++;
-    console.log(`   ❌ NOT ANNOUNCED BY ANYONE. The instruments answered and named zero providers.`);
-    console.log(`      Either this CID was never pinned, or the pin has LAPSED. If a report was sold`);
-    console.log(`      under it, that report is no longer checkable against the claims it was produced under.`);
-    console.log(`      (An unpinned CID reads this way too — expected for a version awaiting its pin.)`);
-  } else {
-    failures++;
-    console.log(`   ❌ SINGLE OPERATOR (${opNames[0]}). ${peerCount} peer(s) here are transport redundancy,`);
-    console.log(`      not custody redundancy: one lapsed account removes all of them at once.`);
-  }
+  // ⭐ THE RULE AND ITS RENDERING BOTH LIVE IN ./_operator-count.mjs so every branch — including
+  // AMBER, which cannot occur against today's real data — is exercised by
+  // scripts/verify-operator-count.mjs without the routing APIs.
+  const c = classifyOperators(operators, anyAnswered);
+  console.log(`   → ${c.peerCount} distinct peer(s) across ${c.namedOps.length} NAMED operator(s)` +
+              `${c.unnamedPeers ? ` + ${c.unnamedPeers} unnamed peer(s)` : ""}: ${c.namedOps.join(", ") || "(none named)"}`);
+  for (const l of verdictLines(c)) console.log(l);
+  if (c.isFailure) failures++;
 }
 
 // ── drift ──────────────────────────────────────────────────────────────────────────────────────
