@@ -283,6 +283,20 @@
   to = "/.netlify/functions/agent-vault-shares"
   status = 200
 
+# ⭐ THE CANONICAL SPEC PATH. Discovery tooling looks for /openapi.json, not /api/*.
+# 🚨 THIS MUST SIT ABOVE THE SPA FALLBACK. Without it `/openapi.json` still returns 200 — serving
+# index.html — so the route "working" and the route not existing look identical to a status check.
+[[redirects]]
+  from = "/openapi.json"
+  to = "/.netlify/functions/dd-openapi"
+  status = 200
+
+# The same function, negotiated to HTML: human-readable docs at a real 200, for externalDocs.url.
+[[redirects]]
+  from = "/dd"
+  to = "/.netlify/functions/dd-openapi"
+  status = 200
+
 # SPA fallback
 [[redirects]]
   from = "/*"

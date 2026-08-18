@@ -20,8 +20,30 @@ export const SUPPORTED_CHAINS = Object.freeze(["arc-testnet"]);
  *  address we publish, and a reader who copies it inherits an implementation detail. */
 export const DD_RESOURCE_URL = "https://app.tikpema.xyz/api/dd-analyze";
 
-/** ⚠️ MUST RESOLVE. Asserted post-deploy, because a published URL nobody fetched is the DCA bug. */
-export const DD_OPENAPI_URL = "https://app.tikpema.xyz/api/dd-openapi";
+/** ⚠️ MUST RESOLVE. Asserted post-deploy, because a published URL nobody fetched is the DCA bug.
+ *
+ * ⭐ CANONICAL PATH IS `/openapi.json` — the location discovery tooling looks for. `/api/dd-openapi`
+ * still serves the same document and is NOT removed: it has been published, and a URL that has been
+ * published is a promise.
+ *
+ * 🚨 `/openapi.json` ALREADY RETURNED HTTP 200 BEFORE THIS ROUTE EXISTED — the SPA catch-all
+ * (`/*` → /index.html, 200) answers every unmatched path, so a nonexistent path and a working spec
+ * are INDISTINGUISHABLE BY STATUS CODE. Measured: `/definitely-not-a-real-path-9f3a.json` also
+ * returns 200 text/html. Any check that asks "does it 200?" passes on a route that does not exist
+ * and serves a web page to a parser expecting JSON. The gate therefore asserts CONTENT-TYPE and
+ * PARSEABILITY — see scripts/verify-api-routes.mjs. */
+export const DD_OPENAPI_URL = "https://app.tikpema.xyz/openapi.json";
+
+/** The same document, at the path it was originally published under. Kept working forever. */
+export const DD_OPENAPI_URL_LEGACY = "https://app.tikpema.xyz/api/dd-openapi";
+
+/** ⭐ HUMAN-READABLE DOCS, AT A REAL 200. `externalDocs.url` has to be something a person or an
+ *  agent can actually open. The obvious candidates both failed: the repository README does not
+ *  mention this service at all, and `GET /api/dd-analyze` renders the right page but under HTTP 405
+ *  (correct for the API — the method IS unsupported — and wrong for a documentation link an agent
+ *  may treat as a failure). So the discovery page is also served here, at 200, by the same function
+ *  that serves the spec. No new function, no new content: one page, two entry points. */
+export const DD_DOCS_URL = "https://app.tikpema.xyz/dd";
 
 /** A REAL contract on the supported chain (Arc testnet USDC), so a copied example returns a real
  *  report rather than a placeholder that 400s. */
