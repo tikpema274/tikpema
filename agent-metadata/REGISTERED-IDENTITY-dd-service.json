@@ -1,15 +1,52 @@
 {
   "agentId": "851891",
   "owner": "0xc54D47211997aCA90Ef4fCfBc742a3b511B4e621",
-  "tokenURI": "ipfs://bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4",
-  "cid": "bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4",
-  "sha256": "d3734accb6390a361df2daf87b49c41d4a44d30bfc9285f47be3c3284dbb402f",
-  "txHash": "0xd33cb296ba2dcc68c29e29cef055f9b959973b11eea3d0a97dadfa9437db20f1",
-  "circleTxId": "1d4ba798-adcb-50d1-85d4-9f0e1c961d5f",
+  "tokenURI": "ipfs://bafkreib6viz4fqa4oqrrgxfecwcttxyda6ilm5nmzr7yplznqeahqmomla",
+  "cid": "bafkreib6viz4fqa4oqrrgxfecwcttxyda6ilm5nmzr7yplznqeahqmomla",
+  "sha256": "3eaa33c2c01c7423135ca4158539df030790b675accc7f87af2d81007831cc58",
+  "txHash": "0xe7babbf3e35fcfd4e06083383dde96b3f913b6db9e14a15ba686eea044b8e099",
+  "circleTxId": "74013230-7a0b-528f-9a19-4bc96da2960a",
   "note": "REGISTERED by this run.",
   "target": "dd-service",
   "registry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
   "chainId": 5042002,
   "walletId": "2c93ca5d-be5c-5f51-883d-1a220647f7b1",
-  "writtenAt": "2026-07-26T16:38:58.253Z"
+  "writtenAt": "2026-08-18T12:09:02.419Z",
+  "registrationTxHash": "0xd33cb296ba2dcc68c29e29cef055f9b959973b11eea3d0a97dadfa9437db20f1",
+  "currentVersion": "1.1.0",
+  "pointerHistory": [
+    {
+      "version": "1.0.0",
+      "cid": "bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4",
+      "sha256": "d3734accb6390a361df2daf87b49c41d4a44d30bfc9285f47be3c3284dbb402f",
+      "tokenURI": "ipfs://bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4",
+      "txHash": "0xd33cb296ba2dcc68c29e29cef055f9b959973b11eea3d0a97dadfa9437db20f1",
+      "circleTxId": "1d4ba798-adcb-50d1-85d4-9f0e1c961d5f",
+      "at": "2026-07-26T16:38:58.253Z",
+      "how": "register(string) — the original registration",
+      "note": "⭐ STAYS PINNED FOREVER: paid reports were produced under this document and their attestations resolve through it."
+    },
+    {
+      "version": "1.1.0",
+      "cid": "bafkreib6viz4fqa4oqrrgxfecwcttxyda6ilm5nmzr7yplznqeahqmomla",
+      "sha256": "3eaa33c2c01c7423135ca4158539df030790b675accc7f87af2d81007831cc58",
+      "tokenURI": "ipfs://bafkreib6viz4fqa4oqrrgxfecwcttxyda6ilm5nmzr7yplznqeahqmomla",
+      "txHash": null,
+      "circleTxId": "74013230-7a0b-528f-9a19-4bc96da2960a",
+      "at": "2026-08-18T12:08:59.923Z",
+      "how": "setAgentURI(uint256,string) — supersession",
+      "note": "SUBMITTED — not yet confirmed. Resume with: node --env-file=.env scripts/set-agent-uri.mjs --target dd-service-v1.1.0 --resume 74013230-7a0b-528f-9a19-4bc96da2960a"
+    },
+    {
+      "version": "1.1.0",
+      "cid": "bafkreib6viz4fqa4oqrrgxfecwcttxyda6ilm5nmzr7yplznqeahqmomla",
+      "sha256": "3eaa33c2c01c7423135ca4158539df030790b675accc7f87af2d81007831cc58",
+      "tokenURI": "ipfs://bafkreib6viz4fqa4oqrrgxfecwcttxyda6ilm5nmzr7yplznqeahqmomla",
+      "txHash": "0xe7babbf3e35fcfd4e06083383dde96b3f913b6db9e14a15ba686eea044b8e099",
+      "circleTxId": "74013230-7a0b-528f-9a19-4bc96da2960a",
+      "at": "2026-08-18T12:09:02.418Z",
+      "how": "setAgentURI(uint256,string) — supersession",
+      "note": "CONFIRMED by this run."
+    }
+  ]
 }
