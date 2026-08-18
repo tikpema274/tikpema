@@ -1,5 +1,84 @@
 ---
 
+# 🚨 MULTI-NETWORK PAYMENT: THE SETTLE-GATE READS **ONE CHAIN'S** LEDGER — ANSWERED WITH ZERO SPEND
+
+**2026-08-18.** Circle's agent-readiness score came back **72/100**, gaps: multi-network, mpp, and
+the bare-POST 400. The multi-network question was the only one worth measuring, and it resolved
+structurally — **no draft deploy, no probe payment, nothing moved.**
+
+## THE MEASUREMENT
+
+`_x402-confirm.mjs:readGatewayBalance` calls `availableBalance(token, depositor)` on GatewayWallet,
+over an **Arc** RPC. Gateway ledgers are **PER CHAIN**:
+
+| chain | GatewayWallet | payTo `availableBalance` |
+|---|---|---|
+| **Arc testnet** | `0x0077777d7EBA4688BDeF3E311b846F25870A19B9` | **120000 atomic (0.12 USDC)** — two sold reports |
+| **Base Sepolia** | `0x0077777d…` — ⭐ SAME ADDRESS | 0 |
+| **Base mainnet** | `0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE` — DIFFERENT | 0 |
+
+🚨 **A PAYMENT MADE ON BASE WOULD CREDIT BASE'S LEDGER AND OUR GATE WOULD NEVER SEE IT.** The buyer
+pays, `confirmPayment` polls Arc, the balance never rises, the report never settles and is never
+served. Worse than a refusal: money leaves and nothing arrives.
+
+⭐⭐ **CIRCLE USES ONE GATEWAY ADDRESS ACROSS ALL TESTNETS AND ANOTHER ACROSS ALL MAINNETS**, so our
+hardcoded `GATEWAY_WALLET` is *already correct* for Base Sepolia. **THE ADDRESS IS NOT THE
+DISCRIMINATOR — THE RPC IS.** A reader who "verified the contract address matches" would conclude
+cross-chain works. It does not. The constant being right is exactly what makes this trap quiet.
+
+## ⭐ THE FIX IS SMALLER THAN EXPECTED — THE CONFIRM PATH IS ALREADY PARAMETERISED
+
+`readGatewayBalance({ rpcCall, payTo, token = USDC, gateway = GATEWAY_WALLET })` takes the RPC
+**injected** and token/gateway as arguments. Whoever wrote it made it chain-agnostic without needing
+to. So multi-network needs the CALLER to pass the paying chain's RPC + USDC — not a rewrite.
+
+⚠️ What is genuinely missing: the pending record must store WHICH CHAIN a payment arrived on, the
+baseline snapshot must be per-chain (an aggregate baseline across chains is meaningless), and
+`accepts[]` needs one entry per network. Real work, well-scoped, no redesign.
+
+## ⚠️ AND A CATEGORY ERROR TO AVOID: BASE **MAINNET** PAYS FOR AN **ARC TESTNET** SERVICE
+
+The buying wallet is funded on Base mainnet. This service analyses Arc **testnet** contracts. Taking
+REAL USDC for testnet analysis is not a pricing question, it is a mis-sold product — and `x-guidance`
+says "Arc testnet only — not a mainnet service" precisely so a buyer bounces first. Base **Sepolia**
+is the honest pair; Gateway is deployed on 15 chains including six testnets
+(ARB/BASE/ETH/OP/UNI-SEPOLIA + ARC-TESTNET), so the testnet pairing exists.
+
+## ⭐ WHY THIS COST NOTHING: THE STRUCTURAL QUESTION WAS SEPARABLE FROM THE PLUMBING
+
+The plan was a draft deploy plus a real sub-cent probe. Neither was needed. "Does a Base payment
+credit the balance we poll?" is answerable by reading TWO CONTRACTS — and the answer is no, because
+they are different ledgers. ⭐ **Ask what the cheapest instrument that could refute the claim is,
+BEFORE building the expensive one.** A spike that spends money to learn something two `eth_call`s
+already know is a spike that was designed before it was scoped.
+
+## ⚠️ A FALSE NEGATIVE I ALMOST RECORDED
+
+`sepolia.base.org` returned **0 bytes** for the Gateway contract on the first read — I was one line
+from recording "not deployed on Base Sepolia", which would have made the testnet pairing look
+impossible and killed the option. Re-read across three RPCs: **163 bytes on two of three**, the third
+erroring. The first read was transient.
+⭐ Same lesson as the `Accept` header earlier the same day, from the other direction: there, two
+instruments agreed and were both wrong; here, one instrument was wrong and a second settled it.
+**Neither "it agreed with itself" nor "it answered once" is corroboration.**
+
+## THE OTHER TWO GAPS — DECLINED, WITH REASONS
+
+* **bare-POST 400 → REFUSED.** `dd-analyze` validates input BEFORE the 402, deliberately: *"charging
+  for 'that is not a well-formed question' would quote a price for something we answer for free, and
+  would reward narrowing the supported chain set."* Moving 402 earlier would make every unsupported
+  chain a billable challenge instead of a free refusal. ⚠️ My first defence of this was WRONG on
+  mechanism — I said it prevented pay-then-400, but settlement runs after analysis so a bad body
+  never charges. The real reason is incentive alignment, and it is stronger.
+* **mpp → DECLINED.** One line to add, and a lie: it advertises a payment path this service would
+  then fail. Implementing it means a second settlement path holding every property the first one
+  does. A project, not a checkbox.
+
+⭐ **72/100 with two gaps chosen and one scoped beats 100/100 with `mpp` declared and validation
+billed.** The score does not test the property the product is built on — that acceptance is not
+payment — so optimising for it would trade the thing being sold for the thing being measured.
+
+
 # ✅✅ ITEM 1 IS CLOSED — `gate:pins` EXITS 0. AND THE GATE ITSELF WAS UNDER-REPORTING.
 
 **2026-08-18.** Three CIDs, two independent operators each, agreed by both routing instruments.
