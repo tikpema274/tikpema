@@ -37,6 +37,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { PINNED_SET } from "./_pinned-set.mjs";
+import { bafkreiRawCid } from "./_cid.mjs";
 
 // Compute the CIDv1 raw-codec CID ("bafkrei...") for a set of bytes. This is the
 // deterministic content address of the file as a single raw block, and — because
@@ -45,21 +46,6 @@ import { PINNED_SET } from "./_pinned-set.mjs";
 // in the repo (agent-init.mjs:32), distinct from the dag-pb "bafybei"/"Qm" root
 // that pinFileToIPFS returns. Derivation: multibase 'b' + base32(
 //   0x01 version | 0x55 raw codec | 0x12 sha256 | 0x20 len=32 | <32-byte digest> ).
-const B32 = "abcdefghijklmnopqrstuvwxyz234567";
-function base32NoPad(bytes) {
-  let bits = 0, val = 0, out = "";
-  for (const b of bytes) {
-    val = (val << 8) | b;
-    bits += 8;
-    while (bits >= 5) { out += B32[(val >>> (bits - 5)) & 31]; bits -= 5; }
-  }
-  if (bits > 0) out += B32[(val << (5 - bits)) & 31];
-  return out;
-}
-function bafkreiRawCid(sha256Buf) {
-  return "b" + base32NoPad(Buffer.concat([Buffer.from([0x01, 0x55, 0x12, 0x20]), sha256Buf]));
-}
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 
