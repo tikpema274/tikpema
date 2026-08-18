@@ -1,0 +1,85 @@
+{
+  "_notice": "DRAFT — v1.1.0, NOT YET PINNED AND NOT YET POINTED AT. These bytes become FINAL the moment they are pinned: the CID is a pure function of them, and this document asserts that tokenURI(851891) equals that CID, so ANY byte change (reformatting, a trailing newline, re-serialising through JSON.parse) makes its own central claim false. Corrections happen by SUPERSESSION — a new version with 'supersedes' set — never by editing these bytes. 🚨 DO NOT PIN THIS UNTIL https://app.tikpema.xyz/api/dd-identity IS LIVE AND SERVING: this document names that URL as its correction and availability path, and pinning a document that points at a 404 would reproduce the exact defect v1.0.0 had — a companion that is named but unreachable. Pin order is: (1) ship the route, (2) verify it serves, (3) pin these bytes, (4) setAgentURI to the new CID, (5) verify tokenURI resolves and the companion reports the new CID.",
+  "name": "Tikpema DD Service",
+  "description": "A read-only on-chain due-diligence service. Given a contract address on Arc, it returns what the bytecode and storage actually show about who can move or block funds — as facts and explicit unknowns, never as a verdict or a safety score.",
+  "version": "1.1.0",
+  "supersedes": {
+    "version": "1.0.0",
+    "cid": "bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4",
+    "sha256": "d3734accb6390a361df2daf87b49c41d4a44d30bfc9285f47be3c3284dbb402f",
+    "still_pinned": true,
+    "why_superseded": "⚠️ v1.0.0 WAS FROZEN BEFORE REGISTRATION AND THEN REGISTERED ANYWAY, so the document that tokenURI(851891) resolved to denied its own existence. Four claims in it are false as of this version, and each is corrected here rather than edited there: (1) '_notice' said NO WALLET EXISTS FOR THIS SERVICE, NOTHING IS REGISTERED, AND NO agentId EXISTS — it was registered 2026-07-26 as agentId 851891; (2) 'ownership_deferred_to_phase_B_C.status' repeated that; (3) '_notice' said reports are NOT signed or attested by any identity today — report attestation via ERC-1271 shipped and is live; (4) 'open_decision_for_phase_B' left open whether this service would register under the same wallet as agentId 851823 — the chain answered a month ago: it did, owner 0xc54D47211997aCA90Ef4fCfBc742a3b511B4e621.",
+    "v1_0_0_remains_authoritative_for": "Any report produced while tokenURI(851891) still resolved to bafkreigton…o2af4. Its CID stays pinned permanently (see mutability_posture.pinning_obligation) so those reports remain checkable against the claims that were live when they were produced. A superseded document is not a withdrawn one."
+  },
+  "identity": {
+    "agent_id": "851891",
+    "owner": "0xc54D47211997aCA90Ef4fCfBc742a3b511B4e621",
+    "registry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+    "chain_id": 5042002,
+    "registered_at": "2026-07-26T16:38:58.253Z",
+    "registration_tx": "0xd33cb296ba2dcc68c29e29cef055f9b959973b11eea3d0a97dadfa9437db20f1",
+    "the_discriminator": "⭐ tokenURI(851891) == THE CID OF THIS EXACT DOCUMENT. That condition alone is sufficient: the CID is a pure function of these bytes, so no other document can satisfy it. ⚠️ UNLIKE v1.0.0, THIS DOCUMENT CAN AND DOES NAME ITS OWNER, because the wallet now exists and the registration has happened — so a reader MAY use the two-condition test (ownerOf == the address above AND tokenURI == this CID). v1.0.0 explicitly disclaimed that test because naming an owner would have asserted something not yet true.",
+    "shared_operation_disclosed": "This service registers under the SAME wallet as agentId 851823 (the Tikpema Agent identity). That is simpler and honest about shared operation. ⚠️ IT DOES NOT CREATE INDEPENDENCE and must not be read as doing so — the operator is the same either way. A distinct wallet would have given cleaner subject separation on-chain and still no independence.",
+    "orphan_context": "103 orphan wallets and 2 orphan identities already exist under the operator's wallet, which is why a discriminator is needed at all: owner alone would not identify a canonical record."
+  },
+  "mutable_companion": {
+    "url": "https://app.tikpema.xyz/api/dd-identity",
+    "role": "⭐ TWO JOBS, AND THE SECOND IS THE ONE v1.0.0 HAD NO ANSWER FOR. (1) CORRECTIONS: it carries anything that must change after these bytes are frozen — the current CID, the live commit, known errata. (2) AVAILABILITY: it serves THE SAME BYTES as this CID. Public IPFS gateways are not uniformly reliable — measured 2026-08-18, a cold fetch of bafkreigton…o2af4 returned HTTP 504 from ipfs.io and dweb.link before succeeding, and all three tested gateways then served the correct bytes in under 3.2s once warm. A verifier whose gateway fails currently has nowhere to go. This URL is that somewhere.",
+    "integrity_is_not_delegated": "🚨 THE COMPANION IS A CONVENIENCE, NOT AN AUTHORITY. Bytes fetched from it are content-addressed like any other copy: hash them and compare to the CID in tokenURI(851891). If they disagree, the CID wins and the companion is wrong. Nothing here asks you to trust the URL — only to be able to reach A copy.",
+    "this_pointer_is_operator_controlled": "⚠️ THE COMPANION DISCLOSES ITS OWN MUTABILITY, on the same terms this document applies to tokenURI. app.tikpema.xyz is operated by Tikpema. Its DNS, its TLS, its contents and its availability are all under operator control and can be changed or withdrawn at any moment, with no on-chain record and no notice. THE CID CANNOT BE CHANGED. So the trust ordering is: these immutable bytes first, the on-chain pointer second (mutable, but its movement is an observable event), the companion last (mutable and its change is NOT observable). ⭐ A reader who takes the companion's word over the CID's has inverted the only ordering this document is built on — and this service's product is flagging exactly that class of trusted-mutable-surface in other people's contracts. It does not exempt itself.",
+    "availability_is_not_guaranteed": "If both the gateways and this URL are unreachable, the document is unreachable. Content addressing guarantees that any copy you DO obtain is the right one; it guarantees nothing about a copy existing where you can reach it. That is a real limit and is stated rather than papered over."
+  },
+  "service_type": "onchain-due-diligence/read-only",
+  "chain_id": 5042002,
+  "network": "Arc Testnet",
+  "code_provenance": {
+    "repository": "github.com/tikpema274/tikpema",
+    "repository_access": "⚠️ THE REPOSITORY IS NOT PUBLIC AT THE TIME OF WRITING, so an outsider CANNOT independently check that the commit named below contains what this document claims. That is a genuine gap in verifiability and is stated as one. What an outsider CAN check without the repository: the on-chain identity, the attestation signature against the owner, the served OpenAPI description, and every claim a live report makes about a contract they choose.",
+    "module": "shared/onchain-analyze/",
+    "commit_describing_this_document": "6e437d5",
+    "engine_schema_version": "onchain-analyze/0.2.0",
+    "note": "EVERY capability and limit claim in this document describes the code at commit 6e437d5 and nowhere else. The service is under active development: when its coverage changes, this document becomes STALE rather than merely imprecise, and the correct response is a superseding version (see mutability_posture), not an edit."
+  },
+  "capabilities_at_commit_6e437d5": {
+    "input": "One 0x-prefixed 20-byte address. EVM only. Arc Testnet (chain 5042002) only — see chain_scope.",
+    "output": "A structured report of FACTS and explicit UNKNOWNS about the contract's power surface, plus a coverage manifest saying what was checked and what was not.",
+    "power_groups_checked": 9,
+    "power_groups": ["emergencyWithdraw", "feesSettable", "setStrategy", "setFeeRecipient", "transferOwnership", "pausable", "upgradeable", "denylist", "withdrawalDelay"],
+    "attestation": "⭐ NEW SINCE v1.0.0, WHICH SAID REPORTS ARE NOT SIGNED. Reports are signed and verifiable via ERC-1271 against the SCA that owns agentId 851891. ⚠️ ERC-1271 answers 'is this signature valid NOW', not 'was it valid when issued' — validity is a live property of the owning contract, not a frozen fact, and a reader must treat it as such.",
+    "payment": "Paid access is x402 over EIP-3009 on Arc USDC. The service persists its analysis BEFORE settling payment, so a settlement timeout costs the caller nothing.",
+    "policy_evaluation": "A caller may supply power-group rules and a coverage threshold; the service reports whether the report satisfies them. ⚠️ THE VERDICT IS DISPLAY-ONLY AND GATES NOTHING at this commit — it is enforced as display-only by a throw, not by convention.",
+    "self_check": "A canary runs on a schedule and can stop the service serving if the DD surface stops behaving as pinned. It only ever writes PASS; absence of a PASS is the failure signal, so a dead canary cannot look healthy."
+  },
+  "coverage_limits": {
+    "preamble": "⚠️ THIS SECTION IS THE POINT, NOT A DISCLAIMER APPENDIX. A report is only as good as the boundary around it, and a reader who skips this will over-read every result.",
+    "selector_scanning_only": "The technique is selector-in-bytecode scanning: the Solidity dispatcher embeds every external function's 4-byte selector, so presence is strong evidence a function exists. ⚠️ PRESENCE IS NOT REACHABILITY. A selector may be present but permanently unreachable behind a guard, and this service does not simulate calls. The same standard and the same caveat are applied to this service's own registry below.",
+    "absence_is_never_safety": "A power group not found is reported as NOT FOUND, never as 'safe' and never as 'absent'. Unreadable state is reported as UNREADABLE — a distinct, non-passing outcome. No path emits a verdict, a score, or a reassurance.",
+    "proxies": "An EIP-1967 proxy is resolved to its implementation and the implementation is scanned. ⚠️ The proxy's admin can replace that implementation after the report is produced, which makes any report about a proxy a statement about a moment, not a property.",
+    "chain_scope": "Arc Testnet only (chain 5042002). No mainnet claim of any kind is made by this document.",
+    "not_an_audit": "This is not a security audit, not a formal verification, and not a recommendation. It reports what specific bytecode patterns show."
+  },
+  "operator_and_independence": {
+    "headline": "OPERATED BY TIKPEMA. THIS IS NOT AN INDEPENDENT AUDITOR. It is the same operator, the same wallet as agentId 851823, and the same person who wrote the engine deciding what the engine looks for.",
+    "conflict": "A service that both defines the check and reports the result has an unavoidable conflict. The mitigation is not a claim of neutrality — it is that every finding is reduced to a bytecode fact a reader can re-derive independently from the chain."
+  },
+  "reputation_subject": {
+    "headline": "REPORT ACCURACY AND HONEST BOUNDING — not 'verdict accuracy', because the service issues no verdicts.",
+    "falsifiable_claims": "Each report states which selectors were found, at which address, at which block. Every one of those is independently checkable against the chain by anyone, without this service and without the repository."
+  },
+  "mutability_posture": {
+    "decision": "REUSE THE ASYMMETRY: an immutable content-addressed document, a mutable on-chain pointer, and supersession by new version rather than edit. Same pattern as the Tikpema Agent identity document.",
+    "the_document_is_frozen_once_pinned": "After pinning the bytes are final. The CID is a pure function of the bytes, and the document asserts that tokenURI(agentId) equals its own CID — so ANY byte change makes its own central claim false. Reformatting, a trailing newline, or re-serialising through JSON.parse all count.",
+    "the_pointer_is_mutable_and_that_is_disclosed": "The identity owner can re-point tokenURI to a different CID at any time. ⭐ THE SYMMETRY IS DELIBERATE AND UNCOMFORTABLE: this service's product is flagging exactly this power class — code-replacement, ownership-transfer, re-pointable metadata — in other people's contracts. It has the same power over its own metadata, and the ERC-8004 IdentityRegistry it registers into (0x8004A818BFB912233c491871b3d84c89A494BD9e) is ITSELF an upgradeable EIP-1967 proxy whose admin could in principle change what tokenURI and ownerOf return. A reader is entitled to know the service does not exempt itself from its own findings. ⭐ AND THAT NOW EXTENDS TO THE COMPANION URL — see mutable_companion.this_pointer_is_operator_controlled, which holds app.tikpema.xyz to the same standard.",
+    "why_not_something_simpler": "A mutable document would let the operator silently restate what the service claimed to cover after a report was relied upon. The frozen-plus-supersede pattern makes a change of claims OBSERVABLE: an old CID keeps resolving to the old bytes, and the pointer moving is visible on-chain. The cost is that a stale document is stale rather than quietly corrected — which is the correct trade for an honesty artifact. ⚠️ v1.0.0 IS THE PROOF THAT THE COST IS REAL: it sat on-chain for a month asserting it was unregistered. The pattern worked exactly as designed — the falsehood was visible and fixable only by supersession — but a reader in that month got a document wrong about its own existence.",
+    "why_capability_claims_are_commit_scoped": "The service is under active development, so a frozen document enumerating capabilities would be false within weeks. Binding every capability and limit claim to commit 6e437d5 — in the KEY NAME, so it cannot be read without seeing the scope — means a superseded document is honestly OUT OF DATE about a specific known tree rather than WRONG about the present. Supersession, not edit, is the update path.",
+    "supersession_rules": "A new version sets 'supersedes' to the prior version and CID. Prior CIDs are NOT unpinned: a report relied upon under an older document must remain checkable against the claims that were live when it was produced.",
+    "pinning_obligation": "🚨 PERMANENT AND GROWING — THIS IS AN OPERATIONAL COMMITMENT, NOT A STYLE PREFERENCE. Every CID this identity has ever pointed at must stay pinned FOREVER. Currently that is TWO: bafkreigton…o2af4 (v1.0.0 — two paid reports were SOLD under it, so unpinning it retroactively destroys their verifiability) and the CID of this document (v1.1.0). Each future supersession adds another permanent pin, forever. ⚠️ WHOEVER MANAGES THE PINNING ACCOUNT MUST KNOW THIS: an unpin is not a cleanup, it is the retroactive destruction of evidence a customer paid for. Pin status must be verified periodically and by a credential that actually authenticates — an expired or placeholder token returns an error that reads like 'no pins found'.",
+    "mutable_companion": "See the top-level 'mutable_companion' object, which in v1.0.0 was a prose sentence naming 'a README in the public mirror' with NO RESOLVABLE ADDRESS ANYWHERE IN THE DOCUMENT. ⚠️ THAT WAS THE DEFECT: the companion existed in principle and was unreachable in practice, so a verifier following tokenURI had no path to corrections at all. It is now a URL, with its own mutability disclosed.",
+    "pointer_mutability_verified_on_chain": "The re-point power is CITED, not assumed. A selector scan of the deployed IdentityRegistry implementation (EIP-1967 impl 0x7274e874ca62410a93bd8bf61c69d8045e399c02, read 2026-07-26) finds: setAgentURI(uint256,string) 0x0af28bd3 PRESENT — the metadata pointer can be re-pointed; upgradeToAndCall(address,bytes) 0x4f1ef286 PRESENT — the registry itself is upgradeable; transferFrom(address,address,uint256) 0x23b872dd PRESENT — the identity token is transferable. ⚠️ VERIFICATION LEVEL: selector present in deployed bytecode, NOT a call simulation and NOT a proof of reachability — the same standard, and the same caveat, this service applies to third-party contracts.",
+    "caller_guarantee": "A caller verifies claims against a FIXED CID: the document's bytes are immutable and content-addressed, so the claims a report was produced under cannot be silently restated. A change of claims is a DETECTABLE ON-CHAIN EVENT — setAgentURI moving the pointer — rather than an invisible edit. Prior CIDs are not unpinned, so a report relied upon under an earlier document stays checkable against the claims that were live."
+  },
+  "never_returns_safe": {
+    "claim": "No analyze() path emits a verdict, a score, or a reassurance.",
+    "why_it_matters": "A safety claim is the one output a read-only bytecode scan cannot justify. Absence of a finding is absence of evidence, and this service reports it as exactly that."
+  }
+}

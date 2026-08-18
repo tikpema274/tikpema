@@ -1,5 +1,117 @@
 ---
 
+# 🚨 HANDOFF — DD IDENTITY SUPERSESSION, WRITTEN AT 97% CONTEXT BEFORE A ROUTE BUILD
+
+**2026-08-18.** Written deliberately BEFORE building, because a route build plus a ~45 min deploy from
+here is exactly how the last two sessions ended mid-flight. Nothing below is speculative: every
+number was measured this session.
+
+## ⭐⭐ ITEM 1 — A SECOND PINNING PROVIDER. DO THIS FIRST; IT NEEDS NO CREDENTIAL FROM ANYONE.
+
+**There is exactly ONE provider for `bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4`,
+and TWO PAID REPORTS WERE SOLD UNDER IT.** Measured via the IPFS delegated-routing API:
+
+| CID | providers | via |
+|---|---|---|
+| `bafkreigton…o2af4` — dd-service 851891 v1.0.0 | **1** | `bitswap-v3.pinata.cloud` |
+| `bafkreidoeond3akvswce3e425o5grfygsvrfyleqkwathio4ae6y6vujae` — unified 851823 | **1** | `bitswap-v3.pinata.cloud` |
+| a random nonexistent CID (negative control) | 0 | — |
+
+🚨 **CONFIRMATION IS NOT MITIGATION.** Verifying the pin tells you it is there TODAY. A second
+provider is what makes it SURVIVE — and unlike the confirmation below, it waits on nobody's
+credential. One provider for a permanent obligation is a single point of failure whose failure mode
+is retroactive: the reports stay signed, the signature stays valid, and the claims they were produced
+under become unfetchable.
+
+⭐ Candidates that need no coordination: web3.storage / Storacha, Filebase, a self-hosted IPFS node,
+or a second Pinata account. Any ONE of them halves the risk; the CID is 28,628 bytes.
+
+## ITEM 2 — CONFIRM THE v1.0.0 PIN (needs T's credential)
+
+Run and paste; never echoes the token:
+```sh
+read -rs PINATA_JWT && export PINATA_JWT
+curl -s -H "Authorization: Bearer $PINATA_JWT" \
+  "https://api.pinata.cloud/data/pinList?hashContains=bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4&status=pinned" \
+  | python3 -m json.tool | head -20
+unset PINATA_JWT
+```
+
+⚠️ **THE PINATA_JWT DIVERGENCE — SAME SHAPE AS SESSION_SECRET.** `.env` holds a **10-char, 1-segment
+placeholder**; a real Pinata JWT is 3 dot-separated segments, 300+ chars. The real credential is
+**NOT in `.env` and NOT in Netlify** (33 vars, none pinning-related) — it lives ONLY with the operator
+and is pasted per run. `.env` has been LABELLED locally (gitignored) to stop it reading as
+authoritative.
+🚨 **AND THE SCRIPT'S OWN DOCUMENTED COMMAND CANNOT WORK:** `pin-invariants.mjs` documents
+`--env-file=.env`, which loads the placeholder. Its shape check (needs 3 segments) catches it and
+refuses to run unauthenticated — correct — but the documented form never succeeds. Use
+`read -rs PINATA_JWT && export PINATA_JWT`.
+⚠️ **AN UNAUTHENTICATED PINATA QUERY RETURNS 401, WHICH READS LIKE "no pins found".** I reported
+"0 pinned records" from exactly that this session before catching it. Do not mistake a 401 for a
+lapsed pin.
+
+## ITEM 3 — THE v1.1.0 DRAFT
+
+**`agent-metadata/dd-service.v1.1.0.DRAFT.json`** — 16,916 bytes, valid JSON, 17 top-level keys.
+NOT pinned, NOT pointed at, no chain write has occurred.
+
+🚨 **WHY IT EXISTS: v1.0.0 WAS FROZEN BEFORE REGISTRATION AND REGISTERED ANYWAY**, so `tokenURI(851891)`
+resolves to a document DENYING ITS OWN EXISTENCE. Four false claims, each corrected by supersession
+(never by edit) and quoted inside `supersedes` so the correction is traceable:
+1. `_notice`: "NO WALLET EXISTS … NOTHING IS REGISTERED … NO agentId EXISTS" — registered 2026-07-26 as **851891**.
+2. `ownership_deferred_to_phase_B_C.status` repeated it.
+3. `_notice`: "Reports … are NOT signed or attested by any identity today" — ERC-1271 attestation is live.
+4. `open_decision_for_phase_B` (same wallet as 851823, or distinct?) — the chain answered a month ago: **same**, owner `0xc54D47211997aCA90Ef4fCfBc742a3b511B4e621`.
+
+**Preserved deliberately:** the commit-scoped key `capabilities_at_commit_6e437d5` (scope in the KEY
+NAME, which is what makes a superseded doc honestly out-of-date rather than wrong), the selector
+evidence for `setAgentURI` `0x0af28bd3` / `upgradeToAndCall` / `transferFrom`, and its
+"selector present, NOT a call simulation" caveat.
+
+**Added:** a top-level `mutable_companion` at `https://app.tikpema.xyz/api/dd-identity` carrying BOTH
+corrections AND availability, disclosing its own operator-controlled mutability on the same terms the
+document applies to `tokenURI`, and stating the trust ordering — immutable bytes → on-chain pointer
+(mutable, observable) → companion (mutable, NOT observable). Also a new
+`code_provenance.repository_access` admitting the repo is private so an outsider cannot verify the
+commit — an honest gap, newly admitted rather than newly true. **T should confirm they want that
+admission in a public document.**
+
+## 🚨 ITEM 4 — THE BLOCKING PIN-ORDER. DO NOT REORDER.
+
+```
+1. ship  https://app.tikpema.xyz/api/dd-identity      (route does NOT exist yet)
+2. verify it serves — as a stranger, from outside
+3. pin   dd-service.v1.1.0.DRAFT.json  → new CID
+4. setAgentURI(851891, "ipfs://<new CID>")             selector 0x0af28bd3, operator-run
+5. verify tokenURI(851891) resolves AND the companion reports the new CID
+```
+⚠️ **PINNING BEFORE THE ROUTE EXISTS REPRODUCES THE EXACT DEFECT BEING FIXED** — v1.0.0's companion
+was named ("a README in the public mirror") and unreachable: the whole document contained only TWO
+URLs, both RPC endpoints. A doc pointing at a 404 is the same failure with a nicer field name.
+⚠️ The bytes are final at step 3: the CID is a pure function of them, so any reformat, trailing
+newline, or `JSON.parse` round-trip after pinning makes the document's own central claim false.
+
+## ITEM 5 — TWO-REPO RESOLUTION (unchanged, restated so it is not re-derived)
+
+`origin` = `github.com/tikpema274/tikpema` — **backup only, pushing does NOT deploy.** The Netlify
+site's `build_settings.repo_url` points at a DIFFERENT repo (`Tikpema/tikpema-predict-test`), but git
+auto-build is not the real path: **prod ships via `npm run deploy:prod` (Netlify CLI)**. Never push to
+`tikpema-predict-test` to deploy — that was a wrong guess already rejected.
+
+## STATE AT HANDOFF
+
+* HEAD `6e437d5`, pushed, tree clean. Prod serving deploy `6a83813b2eb14fc4b3cae9a4`, all five
+  `gate:deployed` checks green.
+* ⏱ **Deploy budget ~45-60 min.** Four measurements today at constant function count: 24m49 / 36m03 /
+  30m12 / **44m29** — noisy, not monotonic. Launch detached (`nohup setsid`), and use **CPU, not
+  elapsed time**, to tell slow from stuck.
+* The outsider's pass (STEP 2 of T's request) has **NOT** been done: resolve tokenURI → fetch CID →
+  `GET /api/dd-analyze` as browser and as machine → `/api/dd-openapi` → verify attestation against the
+  on-chain owner → run the curl copied off the human page.
+* ⚠️ Gateways: a COLD fetch of the CID returned HTTP 504 from ipfs.io and dweb.link before succeeding;
+  once warm all three served correct bytes in <3.2s. A reviewer's FIRST fetch may fail — which is
+  precisely why the companion is also the availability path.
+
 # ⚠️ DEPLOY BUNDLING IS GROWING — 7.5 → 25 → 24m49s → 36m03s, and the recorded budget is now wrong
 
 **2026-08-17.** Two deploys today, both timed from their own logs:
