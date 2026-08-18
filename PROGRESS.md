@@ -144,9 +144,18 @@ growing. ⚠️ Treat any single run as a FLOOR — 19m23 says nothing about the
   health gate and no money path.
 * ⚠️ **The must-stay-pinned obligation now spans TWO accounts.** Both must be kept alive, and the
   set still only grows. A second operator halves the risk; it does not remove the obligation.
-* ⚠️ `pin-invariants.mjs` still documents `--env-file=.env`, which loads the PINATA_JWT placeholder
-  and therefore cannot work as written. Known, unfixed, and deliberately not bundled into the
-  pinning work.
+* ✅ `pin-invariants.mjs`'s `--env-file=.env` line is FIXED. It documented a command that could
+  never work: `.env` holds a **10-char, 1-segment placeholder** (verified, not assumed) while the
+  real token has no local copy, so that form loaded a fake credential on every run.
+  ⭐ **IT SURVIVED FOR MONTHS BECAUSE THE FAILURE LOOKED LIKE THE GATE WORKING** — the refusal talks
+  about the TOKEN, so each run read as "I pasted it wrong" rather than "the documented command is
+  wrong". A defect that presents as its own safety check is invisible until someone reads `.env`.
+  ⚠️ And the shape gate caught it BY LUCK: it was written for a different failure (capturing a
+  `netlify env:get` status message) and merely happens to require 3 dot-separated segments. A
+  placeholder that happened to be JWT-shaped would have reached a live 401.
+  ⭐ **THE PORTABLE RULE: a secret with NO LOCAL COPY must not have a documented invocation that
+  reads a local file.** Paste it per run. `pin-second-operator.mjs` was built that way from the
+  start, and its anti-placeholder gate enforces it mechanically rather than by convention.
 
 
 # ✅ DD IDENTITY v1.1.0 — PINNED AND VERIFIED. THE CHAIN IS UNTOUCHED, AND STEP 4 IS THE OPERATOR'S.

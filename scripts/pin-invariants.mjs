@@ -7,13 +7,26 @@
 // on-chain. It reads PINATA_JWT from the environment; if that is missing it exits
 // loudly rather than proceeding unauthenticated.
 //
-//   node --env-file=.env scripts/pin-invariants.mjs --target <name>
-//   export PINATA_JWT=… && node scripts/pin-invariants.mjs --target <name>
+//   read -rs -p "token> " PINATA_JWT && export PINATA_JWT && echo
+//   node scripts/pin-invariants.mjs --target <name>
+//   unset PINATA_JWT
 //
-// ⚠️ PINATA_JWT IS READ FROM process.env AND NOWHERE ELSE. There is no dotenv import,
-// and nothing here reads Netlify — setting it in the Netlify prod context does NOT help
-// a local pin. Use `--env-file=.env` (Node >=20.6 loads it into process.env; .env is
-// gitignored) or a shell export.
+// 🚨 THE `--env-file=.env` FORM THIS FILE USED TO DOCUMENT COULD NEVER WORK, AND WAS DOCUMENTED
+// FOR MONTHS. `.env` holds a 10-char, 1-segment PLACEHOLDER for PINATA_JWT — the real credential
+// has no local copy and lives only with the operator. So `--env-file=.env` loaded the placeholder
+// on every run, and the shape gate below correctly refused. The command as written could not
+// succeed even once.
+// ⭐ IT SURVIVED BECAUSE THE FAILURE LOOKED LIKE THE GATE WORKING. The refusal message is about the
+// TOKEN, so every run read as "I pasted it wrong" rather than "the documented command is wrong" —
+// a defect that presents as its own safety check is invisible until someone reads the .env.
+// ⚠️ AND THE SHAPE GATE CAUGHT IT BY LUCK, NOT BY DESIGN: it was written for a different failure
+// (capturing a `netlify env:get` status message) and happens to require 3 dot-separated segments.
+// A placeholder that happened to be JWT-shaped would have sailed through to a live 401.
+// ⭐ The rule this yields, applied in scripts/pin-second-operator.mjs from the start: A SECRET WITH
+// NO LOCAL COPY MUST NOT HAVE A DOCUMENTED INVOCATION THAT READS A LOCAL FILE. Paste it per run.
+//
+// ⚠️ PINATA_JWT IS READ FROM process.env AND NOWHERE ELSE. There is no dotenv import, and nothing
+// here reads Netlify — setting it in the Netlify prod context does NOT help a local pin.
 //
 // --target IS REQUIRED — see TARGETS below. Targets: `unified` (already pinned) and
 // `dd-service` (frozen 634f3b4, NOT yet pinned — the thing blocking Phase C). The three
@@ -113,8 +126,9 @@ if (!TARGET_NAME || !TARGETS[TARGET_NAME]) {
     `\nABORT: --target is REQUIRED and must name a known profile. There is deliberately no\n` +
       `default — pinning PUBLISHES the bytes, so the document must be named explicitly.\n\n` +
       `  known targets: ${Object.keys(TARGETS).join(", ")}\n` +
-      `  usage: node --env-file=.env scripts/pin-invariants.mjs --target <name>\n` +
-      `         (or: export PINATA_JWT=… && node scripts/pin-invariants.mjs --target <name>)\n`
+      `  usage: read -rs -p "token> " PINATA_JWT && export PINATA_JWT && echo\n` +
+      `         node scripts/pin-invariants.mjs --target <name>\n` +
+      `  ⚠️ NOT --env-file=.env — .env holds a PLACEHOLDER for PINATA_JWT, never the real token.\n`
   );
   process.exit(1);
 }
@@ -181,8 +195,11 @@ function die(msg) {
 const JWT = (process.env.PINATA_JWT || "").trim();
 if (!JWT) {
   die(
-    "PINATA_JWT is missing or empty. Refusing to run unauthenticated. " +
-      "Set it in this shell only and retry. NOTE: do NOT trust " +
+    "PINATA_JWT is missing or empty. Refusing to run unauthenticated.\n" +
+      '  read -rs -p "token> " PINATA_JWT && export PINATA_JWT && echo\n' +
+      "⚠️ NOT `--env-file=.env`: .env holds a PLACEHOLDER, so that form loads a fake token every " +
+      "time and can never succeed. The real credential has no local copy.\n" +
+      "NOTE: do NOT trust " +
       "`export PINATA_JWT=$(netlify env:get PINATA_JWT --context production)` blindly — " +
       "if the var is unset that command captures a 'No value set...' message, not a token."
   );
