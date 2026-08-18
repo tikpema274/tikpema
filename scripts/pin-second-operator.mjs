@@ -60,6 +60,25 @@ import { classifyOperators } from "./_operator-count.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 
+// ═══ TEST-ONLY ENDPOINT OVERRIDE — LOOPBACK ADDRESSES ONLY ══════════════════════════════════════
+// The mid-run-expiry path cannot be reached with a real token (you cannot make Filebase revoke one
+// on cue), and a branch whose first execution is the day it decides something is untested. So the
+// base URL may be redirected to a local mock.
+// 🚨 DELIBERATELY NARROW: only http://127.0.0.1:<port> is accepted. A general override would be a
+// way to redirect a PUBLISH to an arbitrary third party — the opposite of what this script is for.
+// Anything else is refused outright rather than ignored, because a silently-ignored override would
+// let a test believe it was testing something it was not.
+function resolveBase(defaultBase) {
+  const o = (process.env.PIN2_BASE_OVERRIDE || "").trim();
+  if (!o) return defaultBase;
+  if (!/^http:\/\/127\.0\.0\.1:\d+(\/.*)?$/.test(o)) {
+    console.error(`\n❌ REFUSING — PIN2_BASE_OVERRIDE must be a loopback http://127.0.0.1:<port> URL. Got: ${o}\n`);
+    process.exit(1);
+  }
+  console.log(`\n⚠️  TEST MODE — endpoint overridden to ${o} (loopback only). NOT a real publish.\n`);
+  return o;
+}
+
 // ═══════════════════════════════ PROVIDERS ═══════════════════════════════
 // Every provider here speaks the IPFS Pinning Service API (POST /pins, GET /pins/{requestid}).
 // ⚠️ NO DEFAULT — publishing to the wrong account is not a mistake a script may make for you.
@@ -116,6 +135,8 @@ if (!P) die(`unknown provider "${PROVIDER_NAME}". Known: ${Object.keys(PROVIDERS
 // made once in a console and invisible at every later run. Naming it makes the choice an assertion
 // the operator can read back, and lets the run refuse if the token disagrees.
 if (!BUCKET) die(`--bucket is required. The token is scoped to ONE bucket; name it so the choice is visible rather than inherited from whichever was default when the token was made.`);
+
+P.base = resolveBase(P.base);
 
 console.log(`\n╔══ SECOND PINNING OPERATOR — ${P.label}`);
 console.log(`║  bucket declared : ${BUCKET}`);
@@ -263,7 +284,13 @@ console.log("\n── GATE 2 — authenticated READ (proves the artifact before 
   if (!r.ok) die(`${P.label} returned HTTP ${r.status}: ${String(r.text).slice(0, 200)}`);
   const count = r.json?.count ?? (Array.isArray(r.json?.results) ? r.json.results.length : null);
   console.log(`  ✅ authenticated — HTTP 200, ${count === null ? "pin list readable" : `${count} existing pin(s) in this bucket`}`);
+  console.log(`  ⭐ this ALSO settles which artifact the endpoint wants: the console page advertises`);
+  console.log(`     rpc.filebase.io, but the credential just authenticated ${P.base} —`);
+  console.log(`     the spec-compliant pinning-service API this script uses.`);
 }
+// ⭐ WHEN AUTH WAS PROVEN. Used to distinguish a mid-run 401 (expiry/rotation) from a pin failure,
+// and to MEASURE the token's lifetime if it ever does expire — Filebase publishes none.
+const AUTH_OK_AT = Date.now();
 
 // ═══════════════ GATE 3 — which bucket did the token resolve to? ═══════════════
 //
@@ -346,7 +373,8 @@ async function pinOne(d) {
   console.log(`\n── PINNING ${d.key} — ${d.cid}`);
   const post = await api("POST", "/pins", { cid: d.cid, name: d.name });
   if (!post.ok) {
-    return { ok: false, why: `POST /pins → HTTP ${post.status} ${String(post.text).slice(0, 200)}` };
+    return { ok: false, authRejected: post.status === 401 || post.status === 403, status: post.status,
+             why: `POST /pins → HTTP ${post.status} ${String(post.text).slice(0, 200)}` };
   }
   const requestid = post.json?.requestid;
   let status = post.json?.status;
@@ -357,6 +385,12 @@ async function pinOne(d) {
   while (status !== "pinned" && status !== "failed" && Date.now() - started < PIN_DEADLINE_MS) {
     await sleep(PIN_POLL_MS);
     const g = await api("GET", `/pins/${requestid}`);
+    // ⚠️ A 401 HERE IS NOT A TRANSIENT POLL ERROR AND MUST NOT BE RETRIED INTO A TIMEOUT — retrying
+    // would convert a credential event into a bogus "still queued after 5 min" INDETERMINATE.
+    if (g.status === 401 || g.status === 403) {
+      return { ok: false, authRejected: true, status: g.status, requestid,
+               why: `token rejected while polling ${requestid}` };
+    }
     if (!g.ok) { console.log(`  ⚠️  poll HTTP ${g.status} — retrying`); continue; }
     status = g.json?.status;
     process.stdout.write(`\r  status ${status}  (${Math.round((Date.now() - started) / 1000)}s)   `);
@@ -394,9 +428,42 @@ async function awaitNewOperator(d) {
   return { ok: false };
 }
 
+// ═══ 🚨 A MID-RUN 401 IS AN EXPIRY, NOT A PIN FAILURE ═══════════════════════════════════════════
+// The token authenticated at GATE 2. If the SAME token is later rejected, the credential changed
+// underneath the run — expiry, rotation, or revocation — and that is a completely different event
+// from "the provider could not pin this CID". Reading one as the other would be the worst kind of
+// wrong: it would blame the pin, and the operator would go looking at bucket visibility or the CID
+// while the real cause was a credential that stopped working.
+//
+// ⚠️ THE CANARY MAKES THIS REACHABLE RATHER THAN THEORETICAL. It deliberately waits up to
+// ANNOUNCE_DEADLINE_MS after the first pin, so this run is LONG by design — a token with any TTL
+// short enough to matter would expire precisely in that window, between CID #1 and CID #2.
+// ⭐ Filebase publishes no lifetime, so if this ever fires it is also the MEASUREMENT: the elapsed
+// time since GATE 2 is printed, which is the number the documentation does not give.
+const pinnedSoFar = [];
+function authRejection(status, where) {
+  if (status !== 401 && status !== 403) return null;
+  const mins = ((Date.now() - AUTH_OK_AT) / 60000).toFixed(1);
+  return [
+    ``,
+    `🚨 TOKEN REJECTED MID-RUN (HTTP ${status}) during ${where}.`,
+    `   THIS IS NOT A PIN FAILURE. The same token authenticated ${mins} min ago at GATE 2, so the`,
+    `   credential changed underneath this run — expired, rotated, or revoked. Do NOT investigate`,
+    `   the bucket, the CID, or announcement: none of them are implicated.`,
+    `   ⭐ Filebase publishes no token lifetime. ${mins} min IS that measurement — record it.`,
+    `   ⚠️ ALREADY PINNED AND STILL PINNED (a pin outlives the token that created it):`,
+    ...(pinnedSoFar.length ? pinnedSoFar.map((c) => `      · ${c}`) : [`      (none)`]),
+    `   Resume with a fresh token, using --only for each CID not listed above.`,
+  ];
+}
+
 let pinned = 0;
 for (const [i, d] of DOCS.entries()) {
   const r = await pinOne(d);
+  if (!r.ok && r.authRejected) {
+    for (const l of authRejection(r.status, `pinning ${d.key}`)) console.log(l);
+    process.exit(2); // ⭐ DISTINCT EXIT CODE — a credential event is not a pin failure.
+  }
   if (!r.ok) {
     console.log(`\n❌ ${r.indeterminate ? "INDETERMINATE" : "FAILED"} on ${d.key}: ${r.why}`);
     console.log(`   Stopping. ${DOCS.length - i - 1} CID(s) NOT pinned — deliberately: the order is by`);
@@ -404,10 +471,22 @@ for (const [i, d] of DOCS.entries()) {
     process.exit(1);
   }
   pinned++;
+  pinnedSoFar.push(d.cid);
   console.log(`  ✅ pinned (${pinned}/${DOCS.length})`);
 
   if (i === 0) {
     const canary = await awaitNewOperator(d);
+    // ⭐ RE-CHECK THE TOKEN THE MOMENT THE LONG WAIT ENDS, BEFORE TOUCHING CID #2. Without this,
+    // an expiry during the canary window would first surface as a failed POST on the NEXT CID —
+    // still caught, but reported against a CID that was never the problem.
+    {
+      const re = await api("GET", "/pins?limit=1");
+      if (re.status === 401 || re.status === 403) {
+        for (const l of authRejection(re.status, `the ${Math.round(ANNOUNCE_DEADLINE_MS / 60000)}-min announcement canary wait`)) console.log(l);
+        process.exit(2);
+      }
+      if (re.ok) console.log(`   ✅ token still valid after the canary wait (${((Date.now() - AUTH_OK_AT) / 60000).toFixed(1)} min since GATE 2)`);
+    }
     if (!canary.ok) {
       console.log(`\n🚨 STOPPING — the pin succeeded but NO NEW NAMED OPERATOR appeared within ${ANNOUNCE_DEADLINE_MS / 60000} min.`);
       console.log(`   This is exactly the failure the canary exists for, and it is INDETERMINATE, not proven:`);
