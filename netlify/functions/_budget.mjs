@@ -482,6 +482,26 @@ export async function auditLog({ owner, date, jobId, store } = {}) {
   const keys = await s.list(prefix);
   const entries = await Promise.all(keys.map((k) => s.getJSON(k).catch(() => null)));
 
+  // ═══ 🚨 AN UNREADABLE ROW WAS DISAPPEARING FROM THE TRAIL WITHOUT TRACE ═════════════════════
+  // `.catch(() => null)` then `.filter(Boolean)` drops a row that will not read or parse. The page
+  // renders fine — it just renders a SHORTER list than the truth, and agentBreakdown derives the
+  // per-agent spend TOTALS from this same call, so a dropped row silently reduces someone's
+  // recorded spend. One such row was observed in ~114 on 2026-08-19.
+  //
+  // ⭐ SAME SHAPE AS THE LEDGER-WRITE SWALLOW, ONE LAYER LATER: the write could fail invisibly and
+  // the read could drop a row invisibly, so a spend could vanish at either end with the page
+  // looking normal both times. The count is KNOWABLE here and was simply discarded.
+  // ⚠️ Still skipped, never thrown — one corrupt row must not blank an entire audit trail, which
+  // would turn a data defect into an availability one. Skipped LOUDLY is the fix.
+  const unreadable = entries.filter((e) => e === null).length;
+  if (unreadable > 0) {
+    console.error(
+      "[budget][audit-row-unreadable] " +
+        JSON.stringify({ prefix, unreadable, total: keys.length,
+          note: "row(s) could not be read or parsed and are EXCLUDED from the trail and from every total derived from it (agentBreakdown). The displayed spend is lower than the recorded spend by those rows." })
+    );
+  }
+
   return entries
     .filter(Boolean)
     .filter((e) => (jobId ? e.jobId === jobId : true))
