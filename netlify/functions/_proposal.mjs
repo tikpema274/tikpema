@@ -59,42 +59,79 @@ function resolveToken(t) {
   return SWAP_TOKENS.find((tok) => tok.toUpperCase() === s) ?? null;
 }
 
+// ═══ 🚨 A NULL PROPOSAL IS CURRENTLY INDISTINGUISHABLE FROM "NONE WAS APPROPRIATE" ══════════════
+// Job #181056 asked "should i swap 5 usdc to eurc" — the exact shape that should yield a swap
+// proposal — and produced NONE. The brief then told the buyer to "confirm the swap fee on Arc
+// before proceeding", which was HONEST precisely because no server price existed. Nothing anywhere
+// recorded why.
+//
+// ⭐ AND THIS FILE ALREADY CARRIES THE PRECEDENT: reading `estimate.amountOut` instead of
+// `estimatedOutput.amount` once made EVERY swap proposal silently unpriceable. The guard behaved
+// correctly — cannot price it ⇒ cannot honestly propose it — and the absence looked exactly like
+// "no proposal was warranted". A defect that presents as its own safety check is invisible until
+// someone counts.
+//
+// ⚠️ SO EVERY NULL NOW SAYS WHY. Reasons are a CLOSED SET on a stable greppable prefix, so the rate
+// per reason is countable rather than arguable — the same instrumentation shape as
+// [research][citation-refusal]. It changes NO behaviour: every path still returns null.
+export const NO_PROPOSAL = Object.freeze({
+  NOT_AN_OBJECT: "raw-not-an-object",
+  NO_ACTION: "action-unrecognised",
+  BRIDGE_NO_DEST: "bridge-destination-unsupported",
+  BRIDGE_BAD_AMOUNT: "bridge-amount-invalid",
+  BRIDGE_OVER_CAP: "bridge-amount-over-cap",
+  BRIDGE_UNPRICEABLE: "bridge-fee-unpriceable",
+  BRIDGE_FEE_EXCEEDS: "bridge-fee-exceeds-amount",
+  SWAP_NO_WALLET: "swap-no-wallet-to-price-against",
+  SWAP_BAD_TOKENS: "swap-tokens-invalid-or-identical",
+  SWAP_BAD_AMOUNT: "swap-amount-invalid",
+  SWAP_NO_RATE: "swap-no-usdc-rate-to-bound-with",
+  SWAP_OVER_CAP: "swap-value-over-cap",
+  SWAP_UNPRICEABLE: "swap-estimate-threw",
+  SWAP_ZERO_OUTPUT: "swap-estimated-output-zero-or-nan",
+});
+
+function noProposal(reason, extra = {}) {
+  console.warn("[proposal][none] " + JSON.stringify({ reason, ...extra }));
+  return null;
+}
+
 // Validate a model-emitted proposal into a server-authored one, or return null.
 //
 // `ctx.walletAddress` is the CALLER'S OWN agent SCA (server-resolved from the session by
 // the job spine — never client-supplied). A swap proposal is priced against THAT wallet, so
 // the quote is the one that wallet would actually get. Per-user by construction.
 export async function validateProposal(raw, ctx = {}) {
-  if (!raw || typeof raw !== "object") return null;
+  if (!raw || typeof raw !== "object") return noProposal(NO_PROPOSAL.NOT_AN_OBJECT);
 
   const action = normalizeAction(raw.action);
-  if (!action) return null;
+  if (!action) return noProposal(NO_PROPOSAL.NO_ACTION, { got: raw?.action ?? null });
 
   if (action === "swap_tokens") return validateSwapProposal(raw, ctx);
 
   // ── Destination: a NAME from the model → a KEY from our own registry. If it does not
   //    resolve to one of the 8 supported chains, there is no proposal. ──
   const dest = resolveDestination(raw.destination);
-  if (!dest) return null;
+  if (!dest) return noProposal(NO_PROPOSAL.BRIDGE_NO_DEST, { got: raw?.destination ?? null });
 
   // ── Amount: must be a finite positive number within the deployed per-bridge cap.
   //    Note bridgeCapUsdc() throws on a misconfigured env (fail-closed) — we let that
   //    propagate rather than silently proposing under an unknown cap. ──
   const amountUsdc = Number(raw.amountUsdc ?? raw.amount);
-  if (!Number.isFinite(amountUsdc) || amountUsdc <= 0) return null;
+  if (!Number.isFinite(amountUsdc) || amountUsdc <= 0) return noProposal(NO_PROPOSAL.BRIDGE_BAD_AMOUNT, { amountUsdc });
   const cap = bridgeCapUsdc();
-  if (amountUsdc > cap) return null; // reject, never clamp to the cap
+  if (amountUsdc > cap) return noProposal(NO_PROPOSAL.BRIDGE_OVER_CAP, { amountUsdc, cap }); // reject, never clamp
 
   // ── Fee: the model's number is IGNORED. Price it ourselves, live. ──
   let fee;
   try {
     fee = await bridgeFee({ amountUsdc, cctpDomain: dest.cctpDomain });
   } catch {
-    return null; // cannot price it → cannot honestly propose it
+    return noProposal(NO_PROPOSAL.BRIDGE_UNPRICEABLE); // cannot price it → cannot honestly propose it
   }
   // Fee-floor: if the fee meets or exceeds the amount, nothing would arrive. Refuse to
   // propose an un-settleable bridge rather than let a user approve one.
-  if (fee.maxFee >= fee.amountMinor) return null;
+  if (fee.maxFee >= fee.amountMinor) return noProposal(NO_PROPOSAL.BRIDGE_FEE_EXCEEDS, { maxFee: String(fee.maxFee), amountMinor: String(fee.amountMinor) });
 
   // ┌──────────────────────────────────────────────────────────────────────────┐
   // │ VETTING GATE ATTACHES HERE (future).                                     │
@@ -141,17 +178,17 @@ async function validateSwapProposal(raw, ctx) {
   // The wallet the swap would run from — needed to price it, and the thing that makes this
   // per-user. No wallet ⇒ we cannot price it against the right account ⇒ no proposal.
   const walletAddress = ctx?.walletAddress;
-  if (!walletAddress) return null;
+  if (!walletAddress) return noProposal(NO_PROPOSAL.SWAP_NO_WALLET);
 
   // ── Tokens: NAMES from the model → symbols from OUR allowlist. ──
   const tokenIn = resolveToken(raw.tokenIn ?? raw.from);
   const tokenOut = resolveToken(raw.tokenOut ?? raw.to);
-  if (!tokenIn || !tokenOut) return null;
-  if (tokenIn === tokenOut) return null; // a swap to itself is not a proposal
+  if (!tokenIn || !tokenOut) return noProposal(NO_PROPOSAL.SWAP_BAD_TOKENS, { tokenIn: raw?.tokenIn ?? null, tokenOut: raw?.tokenOut ?? null });
+  if (tokenIn === tokenOut) return noProposal(NO_PROPOSAL.SWAP_BAD_TOKENS, { tokenIn, tokenOut, why: "identical" });
 
   // ── Amount: finite, positive. ──
   const amountIn = Number(raw.amountIn ?? raw.amount ?? raw.amountUsdc);
-  if (!Number.isFinite(amountIn) || amountIn <= 0) return null;
+  if (!Number.isFinite(amountIn) || amountIn <= 0) return noProposal(NO_PROPOSAL.SWAP_BAD_AMOUNT, { amountIn });
 
   // ── Cap, in USDC-equivalent. swapCapUsdc() throws on a garbled env (fail-closed); we let
   //    that propagate rather than silently proposing under an unknown cap. ──
@@ -159,18 +196,18 @@ async function validateSwapProposal(raw, ctx) {
   try {
     valueUsdc = await valueInUsdc({ token: tokenIn, amount: amountIn });
   } catch {
-    return null; // no rate → cannot bound it → cannot honestly propose it
+    return noProposal(NO_PROPOSAL.SWAP_NO_RATE, { tokenIn, amountIn }); // cannot bound it
   }
   const cap = swapCapUsdc();
-  if (valueUsdc > cap) return null; // reject, never clamp
+  if (valueUsdc > cap) return noProposal(NO_PROPOSAL.SWAP_OVER_CAP, { valueUsdc, cap }); // reject, never clamp
 
   // ── Rate: the model's number (if any) is IGNORED. Price it ourselves, live, against the
   //    user's own wallet — the swap analogue of re-pricing the bridge fee from IRIS. ──
   let estimate;
   try {
     estimate = await estimateSwapOnly({ walletAddress, tokenIn, tokenOut, amountIn });
-  } catch {
-    return null; // cannot price it → cannot honestly propose it
+  } catch (e) {
+    return noProposal(NO_PROPOSAL.SWAP_UNPRICEABLE, { tokenIn, tokenOut, amountIn, err: String(e?.message ?? e).slice(0, 120) });
   }
 
   // Floor: a swap that returns nothing is not worth approving. Mirrors the bridge's
@@ -183,7 +220,7 @@ async function validateSwapProposal(raw, ctx) {
   // refused as "unpriceable". The guard behaved correctly (cannot price it ⇒ cannot honestly
   // propose it); the price simply never arrived. Read the SDK, don't guess it.
   const amountOut = Number(estimate?.estimatedOutput?.amount ?? NaN);
-  if (!Number.isFinite(amountOut) || amountOut <= 0) return null;
+  if (!Number.isFinite(amountOut) || amountOut <= 0) return noProposal(NO_PROPOSAL.SWAP_ZERO_OUTPUT, { raw: JSON.stringify(estimate?.estimatedOutput ?? null).slice(0, 120) });
 
   return {
     action: "swap_tokens",     // the executor's step type — never the model's string
