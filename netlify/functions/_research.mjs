@@ -235,7 +235,33 @@ export const isDegraded = (code) => !AUGMENTED.has(code);
 /** A fresh outcome object. ⭐ Pre-set to UNWIRED — the state meaning "nothing has touched this yet".
  *  maybeBuyData moves it to UNCLASSIFIED the instant it is entered, so surviving as UNWIRED proves
  *  the purchase path never ran for this brief, which is a defect in wiring rather than a result. */
-export const newPurchaseOutcome = () => ({ code: PURCHASE_OUTCOME.UNWIRED, detail: null, at: null });
+export const newPurchaseOutcome = () => ({ code: PURCHASE_OUTCOME.UNWIRED, detail: null, at: null, paidPathReached: false });
+
+// ═══ 🚨 THE METRIC WAS HIDING THE THING IT EXISTS TO REVEAL ═════════════════════════════════════
+// "The buy side has never fired" is the finding this outcome set was built to make countable. But
+// the model routes most questions to a FREE source (CoinGecko / arXiv), and those branches return
+// BEFORE the x402 path exists — so they produce no `ceiling`, no `budget`, no code from the paid
+// path at all. Counting `ceiling` therefore undercounts: a market-routed job looks like a job where
+// nothing went wrong, because for the paid path nothing HAPPENED.
+//
+// ⭐ SO PAID-PATH-NOT-REACHED AND PAID-PATH-REACHED-AND-REFUSED ARE COUNTED SEPARATELY. They are
+// different facts: one says the agent never tried to buy, the other says it tried and was stopped.
+// Collapsing them makes "we have never bought anything" indistinguishable from "we rarely need to".
+// ⚠️ A METRIC THAT HIDES ITS OWN SUBJECT IS WORSE THAN NO METRIC — it converts an open question into
+// a settled-looking number.
+export const PAID_PATH = Object.freeze({
+  NOT_REACHED: "paid-path-not-reached",   // a free branch answered first, or nothing was attempted
+  REFUSED: "paid-path-reached-refused",   // the x402 path ran and was stopped (ceiling/budget/…)
+  SUCCEEDED: "paid-path-reached-purchased",
+  UNKNOWN: "paid-path-unknown",           // outcome never populated — see UNWIRED
+});
+
+export function paidPathState(outcome) {
+  const c = outcome?.code;
+  if (!c || c === PURCHASE_OUTCOME.UNWIRED) return PAID_PATH.UNKNOWN;
+  if (c === PURCHASE_OUTCOME.PURCHASED) return PAID_PATH.SUCCEEDED;
+  return outcome.paidPathReached ? PAID_PATH.REFUSED : PAID_PATH.NOT_REACHED;
+}
 
 /**
  * 🚨 ASSERT THE OUTCOME WAS POPULATED BY THE TIME THE BRIEF RENDERS — not merely that it COULD be.
@@ -264,7 +290,15 @@ export function disclosureLine(outcome) {
   const c = outcome?.code ?? PURCHASE_OUTCOME.UNCLASSIFIED;
   const why = outcome?.detail ? ` (${outcome.detail})` : "";
   if (c === PURCHASE_OUTCOME.PURCHASED) return `Paid data was purchased and used in this brief${why}.`;
-  if (c === PURCHASE_OUTCOME.FREE_SOURCE) return `A free data source was used alongside web sources${why}.`;
+  if (c === PURCHASE_OUTCOME.FREE_SOURCE) {
+    // ⭐⭐ BOTH SENTENCES. "A free data source was used" is true and reassuring, and a buyer cannot
+    // distinguish it from "we bought data". The material fact is the one about what did NOT happen:
+    // the paid path was never entered, so no purchase was attempted for this brief. Stating only
+    // the first sentence is the absence-reads-as-normality failure with a friendly face.
+    return `A free data source was used alongside web sources${why}. ` +
+      "No paid data purchase was attempted for this brief — the free source answered first, so the " +
+      "paid path was never reached.";
+  }
   if (c === PURCHASE_OUTCOME.UNCLASSIFIED) {
     return "⚠️ NO PAID DATA WAS PURCHASED FOR THIS BRIEF, AND THE REASON WAS NOT RECORDED. " +
       "It rests on web sources alone. This is a defect in our reporting, not a statement about the " +
@@ -331,6 +365,9 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     }
 
     // ON-CHAIN branch — build the RPC body for the chosen method, then run the EXISTING,
+    // ⭐ FROM HERE THE PAID PATH IS GENUINELY ENTERED. Every exit below is "tried and stopped",
+    // which the metric must not confuse with "never tried" — see PAID_PATH above.
+    if (outcome) outcome.paidPathReached = true;
     // UNCHANGED x402 pay path below (challenge → ceiling → gate → payX402 → recordSpend).
     // buildRpcBody validates the method/params (and refuses eth_getBalance until its
     // decimals are verified — so we never PAY for a balance we'd have to drop). null → drop
@@ -713,7 +750,14 @@ export async function research(
         // Kept BESIDE the brief, never merged into `sources` — see job-submit-background,
         // where `report` is canonicalized into the on-chain deliverable hash. Breadth is
         // shown to the reader under its own heading, never as citation.
-        decision.retrievedNotCited = notCited;
+        // ⭐ FLAG THE ENTRIES THE PROSE CITES. Index preservation made the disagreement LEGIBLE —
+        // a reader now finds [7][8] under the other heading — and legible-but-unexplained is worse
+        // than invisible: the buyer sees a contradiction with no account of it. The flag lets the
+        // reader be told WHY this entry looks odd, at the entry itself.
+        // ⚠️ It changes no classification. `sources` is still the model's own list (see #160637).
+        decision.retrievedNotCited = notCited.map((r) =>
+          markedIdx.has(r.n - 1) ? { ...r, citedInProse: true } : r
+        );
 
         // ⭐ THE DERIVATION'S INPUTS, RETURNED FOR MEASUREMENT — not for logic.
         // The empty-cited case now refunds, and nobody can say how often that SHOULD
@@ -753,13 +797,17 @@ export async function research(
           // reads. A disclosure only in the record is not a disclosure to the person who paid; one
           // only in the prose does not outlive the page. Same finding as errata_note, one path over:
           // a disclosure only a source-reader would see is not a disclosure.
-          dataPurchase: { ...assertOutcomeWired(purchaseOutcome, { jobId, question }), degraded: isDegraded(purchaseOutcome.code) },
+          dataPurchase: { ...assertOutcomeWired(purchaseOutcome, { jobId, question }),
+                          degraded: isDegraded(purchaseOutcome.code),
+                          paidPath: paidPathState(purchaseOutcome) },
           disclosure: disclosureLine(purchaseOutcome),
           citation,
         };
       }
       return { question, model, decision: null, raw: text, warning: "unparseable (exa path)", exaUsed: true,
-               dataPurchase: { ...assertOutcomeWired(purchaseOutcome, { jobId, question, path: "unparseable" }), degraded: isDegraded(purchaseOutcome.code) },
+               dataPurchase: { ...assertOutcomeWired(purchaseOutcome, { jobId, question, path: "unparseable" }),
+                               degraded: isDegraded(purchaseOutcome.code),
+                               paidPath: paidPathState(purchaseOutcome) },
                disclosure: disclosureLine(purchaseOutcome) };
     } catch (e) {
       console.warn(`[research] Exa retrieval failed (useExa path), refusing web-search fallback: ${e.message}`);

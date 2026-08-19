@@ -46,7 +46,8 @@ const brief = {
   retrievedNotCited: [
     { n: 2, title: "Kraken EUR/USD", url: "https://kraken.example" },
     { n: 5, title: "Wirex blog", url: "https://wirex.example" },
-    { n: 8, title: "usd-coin $0.999665 (as of 2026-08-19T12:50:30Z)", url: "https://coingecko.example" },
+    // ⭐ THE #181056 CASE: the prose cites [8] and the model did not list it.
+    { n: 8, title: "usd-coin $0.999665 (as of 2026-08-19T12:50:30Z)", url: "https://coingecko.example", citedInProse: true },
   ],
 };
 
@@ -98,6 +99,19 @@ section("a LEGACY brief with no `n` renders no number at all");
   const t2 = strip(renderToStaticMarkup(<Brief brief={legacy as any} />));
   check("no bracketed number is emitted", !/\[\d+\]/.test(t2), t2.slice(0, 60));
   check("the source still renders", t2.includes("old"));
+}
+
+section("the heading states what we MEASURED, and the odd entry is explained");
+{
+  // 🚨 "no claim above rests on them" is an inference about prose we cannot check, and #181056
+  // falsified it. The heading may only assert what isCited actually measures.
+  check("heading does NOT claim 'no claim rests on them'", !/no claim above rests on them/i.test(text));
+  check("heading states the MODEL'S OUTPUT instead", /not listed by the model as sources/i.test(text));
+  // ⭐ And the entry the prose cites carries its own explanation, so a visible contradiction is not
+  // left unexplained — findability without explanation is worse than the invisible version.
+  check("⭐ the prose-cited entry is annotated", /cited in the text but not listed by the model/i.test(text));
+  const once = (text.match(/cited in the text but not listed/gi) || []).length;
+  check("only the flagged entry is annotated, not every entry", once === 1, `${once} annotation(s)`);
 }
 
 console.log("\n════════════════════════════════════════════════════════════════════════");

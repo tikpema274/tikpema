@@ -242,9 +242,16 @@ export function Brief({ brief }: { brief: NonNullable<TrackedJob["brief"]> }) {
       )}
       {Array.isArray(brief.retrievedNotCited) && brief.retrievedNotCited.length > 0 && (
         <div style={{ marginTop: 6 }}>
-          <b style={{ color: "var(--muted)" }}>Retrieved, not used:</b>{" "}
+          {/* ═══ ⭐⭐ THE HEADING ASSERTS WHAT WE MEASURED, NOT WHAT WE INFERRED ══════════════════
+              "no claim above rests on them" is a claim about the PROSE — an inference we cannot
+              check, and one job #181056 falsified: the body cited [7][8] for a price while both sat
+              under this heading. `isCited` measures whether the MODEL LISTED a source, so that is
+              what the heading may say.
+              ⭐ Same rule as the DD policy ceiling: "nothing was found against your rules", never
+              "safe". State the measurement; never upgrade it to the conclusion a reader wants. */}
+          <b style={{ color: "var(--muted)" }}>Retrieved, and not listed by the model as sources:</b>{" "}
           <span className="qd" style={{ color: "var(--muted)" }}>
-            searched and read, but no claim above rests on them.
+            searched and read; the model did not name them in its own source list.
           </span>
           <ul style={{ margin: "4px 0 0", paddingLeft: 18, color: "var(--muted)" }}>
             {brief.retrievedNotCited.map((s: any, i: number) => {
@@ -257,6 +264,16 @@ export function Brief({ brief }: { brief: NonNullable<TrackedJob["brief"]> }) {
                   <a href={url} target="_blank" rel="noreferrer" style={{ color: "var(--muted)" }}>
                     {title}
                   </a>
+                  {/* ⭐ THE ANNOTATION COMPLETES THE HEADING RATHER THAN PATCHING IT. The heading says
+                      what the list IS; this says why THIS entry looks odd — the prose cites it and
+                      the model did not list it. Without it the reader meets a visible
+                      self-contradiction with no account of it, which is worse than the invisible
+                      version it replaced. */}
+                  {s?.citedInProse && (
+                    <span style={{ color: "var(--muted)", fontStyle: "italic" }}>
+                      {" "}— cited in the text but not listed by the model as a source.
+                    </span>
+                  )}
                 </li>
               );
             })}
