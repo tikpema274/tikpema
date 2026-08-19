@@ -527,6 +527,25 @@ export async function research(
         (r, i) => `[${i + 1}] ${r.title} (${r.url}, ${r.publishedDate})\n${r.text}`
       );
 
+      // ═══ ⭐ OUR OWN FEE TABLE, AS GROUNDING — SO THE MODEL CITES US, NOT ACROSS ═════════════════
+      // Job #181166 cited third-party bridge fees ($0.50–$1.50) and advised waiting, while our
+      // proposal priced the same bridge at 0.053873. The prompt forbade the model from stating a
+      // rate, so it borrowed one. Giving it ours is the fix; forbidding numbers was the cause.
+      //
+      // ⚠️ KEYWORD-TRIGGERED, NOT EXTRACTED. This asks only "is the question about bridging" — it
+      // never parses a destination or an amount. A false positive costs 8 IRIS reads and injects a
+      // correct table nobody cites; a false negative simply omits it. Neither can put a WRONG number
+      // in a paid brief, which is the property that made extraction too risky for swaps.
+      let feeTable = null;
+      if (/\bbridg|cross[- ]?chain|move .*(to|onto) (base|ethereum|arbitrum|optimism|avalanche|polygon|unichain|linea)/i.test(question)) {
+        try {
+          feeTable = await bridgeFeeTable();
+        } catch (e) {
+          // ⚠️ Degrade silently to "no table": a research brief must not fail because IRIS is slow.
+          console.warn(`[research] fee table unavailable (brief continues without it): ${e?.message ?? e}`);
+        }
+      }
+
       // ── Autonomous mid-research purchase (Phase 2a) ────────────────────────
       // Only when job context is present (jobId + jobPrice), so the budget gate
       // can compute the per-job allowance. maybeBuyData never throws: on decline,
@@ -559,7 +578,12 @@ export async function research(
       const purchasedEntries = purchasedFacts.map(
         (f, i) => `[${exaResults.length + i + 1}] Purchased data (${f.source})\n${f.claim}`
       );
-      const groundingBlock = [...exaEntries, ...purchasedEntries].join("\n\n");
+      // ⭐ THE TABLE IS ONE NUMBERED ENTRY, so the model can cite it like any other source and the
+      // partition assertions treat it uniformly. Appended last so existing indices do not shift.
+      const measuredEntries = feeTable
+        ? [`[${exaResults.length + purchasedFacts.length + 1}] ${feeTableGroundingText(feeTable)}`]
+        : [];
+      const groundingBlock = [...exaEntries, ...purchasedEntries, ...measuredEntries].join("\n\n");
 
       const exaUser =
         question +
@@ -614,8 +638,21 @@ export async function research(
         // ARE the information: they are exactly the entries in the other list, so the two become
         // complementary by construction and a reader can check one against the other.
         const retrieved = [
-          ...exaResults.map((r, i) => ({ n: i + 1, title: r.title, url: r.url })),
-          ...purchasedFacts.map((f, i) => ({ n: exaResults.length + i + 1, title: f.claim, url: f.source })),
+          ...exaResults.map((r, i) => ({ n: i + 1, kind: "retrieved", title: r.title, url: r.url })),
+          ...purchasedFacts.map((f, i) => ({ n: exaResults.length + i + 1, kind: "retrieved", title: f.claim, url: f.source })),
+          // ⭐ kind:"measured" — provenance is a property of the ENTRY, not of the list it lands in.
+          // It stays INSIDE the cited/notCited partition so every marker resolves and the invariants
+          // hold; only the LABEL differs. A separate third list would have broken the partition and
+          // left markers pointing outside it.
+          ...(feeTable
+            ? [{
+                n: exaResults.length + purchasedFacts.length + 1,
+                kind: "measured",
+                title: `Tikpema's own measured bridge fees, per destination (as of ${feeTable.at})`,
+                url: null,
+                measuredAt: feeTable.at,
+              }]
+            : []),
         ];
         // TWO DERIVATIONS IN STRICT PRECEDENCE — NOT a union. Order matters:
         //   (a) the model's own `sources` claim, matched by URL — PREFERRED;

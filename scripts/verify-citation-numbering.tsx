@@ -48,6 +48,8 @@ const brief = {
     { n: 5, title: "Wirex blog", url: "https://wirex.example" },
     // ⭐ THE #181056 CASE: the prose cites [8] and the model did not list it.
     { n: 8, title: "usd-coin $0.999665 (as of 2026-08-19T12:50:30Z)", url: "https://coingecko.example", citedInProse: true },
+    // ⭐ OUR OWN MEASUREMENT, in the same partition — no url, kind "measured", carrying its time.
+    { n: 9, kind: "measured", title: "Tikpema's own measured bridge fees, per destination", url: null, measuredAt: "2026-08-19T21:35:14.751Z" },
   ],
 };
 
@@ -107,6 +109,12 @@ section("the heading states what we MEASURED, and the odd entry is explained");
   // falsified it. The heading may only assert what isCited actually measures.
   check("heading does NOT claim 'no claim rests on them'", !/no claim above rests on them/i.test(text));
   check("heading states the MODEL'S OUTPUT instead", /not listed by the model as sources/i.test(text));
+  // ⭐ our own measurement is NOT a retrieval — the heading must not assert that provenance for it
+  check("heading no longer says 'Retrieved,'", !/Retrieved, and not listed/i.test(text));
+  check("⭐ a measured entry renders despite having no url", /measured bridge fees/i.test(text));
+  check("⭐ it is labelled as measured, with its timestamp", /measured by us, 2026-08-19 21:35:14Z/i.test(text));
+  check("a retrieved entry is NOT labelled measured",
+        !/Kraken[^—]*— measured by us/i.test(text));
   // ⭐ And the entry the prose cites carries its own explanation, so a visible contradiction is not
   // left unexplained — findability without explanation is worse than the invisible version.
   check("⭐ the prose-cited entry is annotated", /cited in the text but not listed by the model/i.test(text));

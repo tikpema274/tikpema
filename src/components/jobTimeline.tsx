@@ -229,13 +229,17 @@ export function Brief({ brief }: { brief: NonNullable<TrackedJob["brief"]> }) {
             {brief.sources.map((s: any, i: number) => {
               const url = typeof s === "string" ? s : s?.url;
               const title = typeof s === "string" ? s : s?.title || s?.url;
-              if (!url) return null;
+              if (!url && s?.kind !== "measured") return null;
               return (
                 <li key={i} style={{ listStyle: s?.n ? "none" : undefined, marginLeft: s?.n ? -18 : undefined }}>
                   <GroundingMark n={s?.n} />
                   <a href={url} target="_blank" rel="noreferrer">
                     {title}
                   </a>
+                  {s?.kind === "measured" && (
+                    <span style={{ color: "var(--muted)" }}> — measured by us{s?.measuredAt ? `, ${String(s.measuredAt).replace("T", " ").replace(/\.\d+Z$/, "Z")}` : ""}</span>
+                  )}
+
                 </li>
               );
             })}
@@ -251,21 +255,30 @@ export function Brief({ brief }: { brief: NonNullable<TrackedJob["brief"]> }) {
               what the heading may say.
               ⭐ Same rule as the DD policy ceiling: "nothing was found against your rules", never
               "safe". State the measurement; never upgrade it to the conclusion a reader wants. */}
-          <b style={{ color: "var(--muted)" }}>Retrieved, and not listed by the model as sources:</b>{" "}
+          {/* ⭐ "Retrieved," DROPPED. Our own fee table is a MEASUREMENT, not a retrieval, and it
+              sits in this partition like any other grounding entry so markers resolve. A heading
+              saying "Retrieved" would assert the wrong provenance for it. The heading's job is to
+              state what we measured about the MODEL'S output — which is unchanged — and provenance
+              belongs on the entry. Same rule that replaced "no claim rests on them". */}
+          <b style={{ color: "var(--muted)" }}>Not listed by the model as sources:</b>{" "}
           <span className="qd" style={{ color: "var(--muted)" }}>
-            searched and read; the model did not name them in its own source list.
+            available to it; the model did not name them in its own source list.
           </span>
           <ul style={{ margin: "4px 0 0", paddingLeft: 18, color: "var(--muted)" }}>
             {brief.retrievedNotCited.map((s: any, i: number) => {
               const url = typeof s === "string" ? s : s?.url;
               const title = typeof s === "string" ? s : s?.title || s?.url;
-              if (!url) return null;
+              if (!url && s?.kind !== "measured") return null;
               return (
                 <li key={i} style={{ listStyle: s?.n ? "none" : undefined, marginLeft: s?.n ? -18 : undefined }}>
                   <GroundingMark n={s?.n} />
                   <a href={url} target="_blank" rel="noreferrer" style={{ color: "var(--muted)" }}>
                     {title}
                   </a>
+                  {s?.kind === "measured" && (
+                    <span style={{ color: "var(--muted)" }}> — measured by us{s?.measuredAt ? `, ${String(s.measuredAt).replace("T", " ").replace(/\.\d+Z$/, "Z")}` : ""}</span>
+                  )}
+
                   {/* ⭐ THE ANNOTATION COMPLETES THE HEADING RATHER THAN PATCHING IT. The heading says
                       what the list IS; this says why THIS entry looks odd — the prose cites it and
                       the model did not list it. Without it the reader meets a visible
