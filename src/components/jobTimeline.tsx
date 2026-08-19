@@ -99,6 +99,9 @@ export type TrackedJob = {
   status: string;
   brief?: {
     answer?: string; reasoning?: string; sources?: any[]; confidence?: number;
+    // ⭐ WHAT THE BUYER IS TOLD ABOUT HOW THIS BRIEF WAS SOURCED. Optional because briefs
+    // written before 2026-08-19 have none; absent renders nothing, present always renders.
+    dataDisclosure?: string;
     // Retrieved but carrying no claim. SEPARATE from `sources` by design — merging them
     // is the defect this field exists to prevent. Optional: briefs written before the
     // derivation landed have no such field, and must still render.
@@ -168,6 +171,26 @@ function refundHeadline(refundClass?: string | null): string {
 export function Brief({ brief }: { brief: NonNullable<TrackedJob["brief"]> }) {
   return (
     <div style={{ marginTop: 8 }}>
+      {/* ═══ ⭐⭐ ABOVE THE ANSWER, NOT BELOW IT ══════════════════════════════════════════════
+          A caveat placed under the thing it qualifies is read after the reader has already
+          formed a view — the same reason the DD discovery page puts its warning above the curl
+          rather than at the foot of the page. This states how the brief was sourced BEFORE the
+          brief is read.
+          🚨 AND IT EXISTS BECAUSE THE FIELD WAS ALREADY IN THE SIGNED BYTES AND NO ONE COULD SEE
+          IT. dataDisclosure shipped inside the hashed report on 2026-08-19 with zero renderers —
+          the errata_note failure exactly: present in the data, dropped by the projection. The
+          hash covers transit tampering; it never covered rendering. */}
+      {brief.dataDisclosure && (
+        <div
+          style={{
+            marginBottom: 10, padding: "8px 10px", borderRadius: 8,
+            background: "var(--field)", border: "1px solid var(--line)",
+            color: "var(--paper-dim)", fontSize: "0.86rem",
+          }}
+        >
+          {brief.dataDisclosure}
+        </div>
+      )}
       {brief.answer && (
         <div>
           <b>Answer:</b> {brief.answer}

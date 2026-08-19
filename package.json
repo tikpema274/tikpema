@@ -54,7 +54,8 @@
     "gate:price": "node scripts/verify-price-rendering.mjs",
     "gate:spec": "node scripts/verify-spec-published.mjs",
     "gate:callshape": "node scripts/verify-call-shape.mjs",
-    "gate:recovery": "node scripts/verify-recovery-file.mjs"
+    "gate:recovery": "node scripts/verify-recovery-file.mjs",
+    "test:disclosurerender": "npx tsx scripts/verify-disclosure-render.tsx"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",

@@ -578,7 +578,11 @@ export async function handler(event) {
       deliverableHash,
       // The structured half — queryable, and it survives the brief being read once.
       dataPurchase: result.dataPurchase ?? null,
-      brief: decision,
+      // 🚨 THE FIELD MUST TRAVEL WITH THE BRIEF THE UI ACTUALLY RECEIVES. It is inside the hashed
+      // canonicalReport for integrity, but the UI renders `brief` (= decision), which never had it —
+      // which is exactly how it shipped invisible. Both, deliberately: the report for verification,
+      // the brief for the reader.
+      brief: { ...decision, dataDisclosure: report.dataDisclosure },
       ...(proposal ? { proposal } : {}),
       // The SECOND OPINION is persisted even when it KILLED the proposal — especially then.
       // "Your analysts disagreed, so nothing is proposed" is the most valuable thing this
