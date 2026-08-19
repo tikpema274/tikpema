@@ -64,7 +64,21 @@ const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a
  */
 export const DESTINATION_CHAINS = {
   ethereum:  { rpcs: ["https://ethereum-sepolia-rpc.publicnode.com", "https://1rpc.io/sepolia"],                          chainId: 11155111, usdc: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" },
-  base:      { rpcs: ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"],                             chainId: 84532,    usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e" },
+  // 🚨 SECOND ONE TO BITE, AND THE FAILING ENDPOINT WAS THE *PRIMARY*. `sepolia.base.org` — the
+  // official Base endpoint — degraded on three consecutive deploys (2026-08-19), each time HTTP 503
+  // with `-32011 no backend is available`, measured 0/5 while the publicnode secondary was 5/5. So
+  // "base 1/2 usable" was the FALLBACK carrying the chain alone, which is exactly the
+  // single-surviving-endpoint state that produced the twelve-day Polygon rpc_error above.
+  // ⭐ base is the most-used bridge destination in the receipts, so it is the worst chain to verify
+  // mints against without redundancy.
+  // ⚠️ REPLACEMENT VERIFIED AGAINST THE KNOWN-GOOD ENDPOINT, not merely pinged: same chainId
+  // (0x14a34), byte-identical USDC bytecode (sha 2842683d1ea26f4d, 3598 chars), block heights in
+  // sync (Δ0), and 12/12 stability. "A working RPC for the WRONG chain is worse than a dead one" —
+  // answering is not agreeing, so agreement is what was checked.
+  // ⚠️ Rejected candidates, measured the same way: drpc 3/5 (flaky), blockpi returned HTML,
+  // blastapi returned no chainId. sepolia.base.org is dropped rather than demoted — a persistently
+  // dead endpoint in the list re-creates the permanent-warning noise that makes real warnings ignorable.
+  base:      { rpcs: ["https://base-sepolia-rpc.publicnode.com", "https://base-sepolia.gateway.tenderly.co"], chainId: 84532,    usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e" },
   arbitrum:  { rpcs: ["https://sepolia-rollup.arbitrum.io/rpc", "https://arbitrum-sepolia-rpc.publicnode.com"],           chainId: 421614,   usdc: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d" },
   optimism:  { rpcs: ["https://sepolia.optimism.io", "https://optimism-sepolia-rpc.publicnode.com"],                      chainId: 11155420, usdc: "0x5fd84259d66Cd46123540766Be93DFE6D43130D7" },
   avalanche: { rpcs: ["https://api.avax-test.network/ext/bc/C/rpc", "https://avalanche-fuji-c-chain-rpc.publicnode.com"], chainId: 43113,    usdc: "0x5425890298aed601595a70AB815c96711a31Bc65" },
