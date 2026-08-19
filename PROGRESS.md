@@ -68,6 +68,41 @@ mismatch, raising the ceiling would convert a silent no-op into a silent overspe
 🚨 **Whether that seller is viable at all is a product question, not a config nudge**, and making it
 by editing an env var is how an agent starts paying 1.0 to fulfil a 0.40 job.
 
+## ⭐ PRE-REGISTERED EXPECTATION FOR THE NEXT JOB — WRITTEN BEFORE IT RUNS
+
+Deployed `6a858997c8bdc5178445c9d5` on 2026-08-19. **No job has run since**: `netlify logs --source
+functions --since 6h` returns "No logs found", so the disclosure path has executed ZERO times in
+production. Everything below is a prediction, not an observation.
+
+| what to read | where | **expected** |
+|---|---|---|
+| `dataPurchase.code` | the stored job record | **`ceiling`** |
+| `dataDisclosure` | inside the canonical (hashed) report | "⚠️ No paid data was purchased… advertised 1 USDC exceeds the absolute per-buy ceiling of 0.01 USDC" |
+| `[research][outcome-unwired]` | function logs | **silent** — both caller branches populate the outcome |
+
+🚨 **IF `code` IS ANYTHING OTHER THAN `ceiling`, THAT IS NOT GOOD NEWS UNTIL EXPLAINED.** The seller
+advertised 1.0 USDC against a 0.01 cap when measured; a different code means the seller, the
+`DATA_SELLER_URL`, or `DATA_PURCHASE_USDC` moved since. ⭐ Especially `purchased` — that would mean a
+real spend happened on a path measured as impossible, and the first question is what changed, not
+whether to celebrate.
+⚠️ And `unwired` firing would mean a third code path exists that neither of us wrote.
+
+⭐ **THE PREDICTION IS RECORDED FIRST ON PURPOSE.** A result read against a stated expectation is
+evidence; the same result read afterwards is a story. This session already produced two cases where
+a number arrived without provenance and was reasoned about as if measured.
+
+## ⚠️ RPC REDUNDANCY — BASE HAS NOW DEGRADED, RECOVERED, AND DEGRADED AGAIN
+
+Across three deploys on 2026-08-18/19: `base 1/2` → recovered `8 healthy` → `base 1/2` **and**
+`ethereum 1/2`. Transient 503s each time; `gate:rpc` warns rather than fails, which is correct.
+
+🚨 **BUT BASE IS THE MOST-USED BRIDGE DESTINATION IN THE RECEIPTS**, and single-endpoint mint
+verification there is precisely the shape that produced the twelve-day Polygon `rpc_error`: one
+surviving endpoint, a verification that cannot be corroborated, and a failure that reads as a chain
+problem rather than an instrument problem. ⚠️ **A line, not an action** — but if `base` degrades on a
+fourth consecutive deploy, that is a pattern rather than weather, and the second endpoint is worth
+replacing before it is needed.
+
 ## OPEN, RECORDED, NOT BUNDLED
 
 * ⚠️ **`budgetUsdc` is a JavaScript FLOAT on a money path.** `Math.round(x*100)/100` in the quote,
