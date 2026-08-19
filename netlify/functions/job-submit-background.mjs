@@ -245,10 +245,29 @@ const RESEARCH_RECORD_FIELDS = Object.freeze([
  * escalation-channel-nobody-watches failure, arrived at deliberately.
  */
 function alertRecordMissingFields({ jobId, where, missing }) {
-  const url = process.env.WATCH_ALERT_WEBHOOK;
+  // ═══ 🚨 DD_WATCH_WEBHOOK, *NOT* WATCH_ALERT_WEBHOOK — AND THE DIFFERENCE IS LOAD-BEARING ═══════
+  // This first shipped pointed at WATCH_ALERT_WEBHOOK, which is the MONEY-PATH channel. From
+  // verify-watch-promotion-gate.mjs, verbatim: "THE ARGUMENT IS NOT 'different urgency', IT IS THAT
+  // MUTING IS PER-CHANNEL… a DD availability alert that chatters during a deploy train is exactly
+  // what someone mutes — and muting it MUTES THE MONEY-PATH SIREN WITH IT."
+  //
+  // ⭐ AN UNRATE-LIMITED, PER-JOB ALERT ABOUT A MISSING METADATA FIELD IS PRECISELY THAT CHATTER.
+  // strong-read-watch's design rests on SILENCE BEING THE HEALTHY SIGNAL on that channel; adding a
+  // second sender makes silence mean "neither of two things fired". Metric blindness is a
+  // service-integrity concern, not a money emergency — the same class as the canary, so it belongs
+  // in the canary's channel.
+  // ⚠️ The original routing passed a check that the webhook was CONFIGURED and never asked what it
+  // was FOR. Presence is not purpose.
+  const url = process.env.DD_WATCH_WEBHOOK;
   if (!url) return; // no channel configured — the console warning already fired and still stands
+  // ⚠️ THE MESSAGE LABELS ITS OWN SCOPE. This channel is named for the DD service, and this alert
+  // is about the RESEARCH/job pipeline — a different product surface sharing a service-integrity
+  // channel. Saying so up front stops a reader assuming DD is degraded. ⭐ If research-path alerts
+  // ever multiply, that is when they earn their own channel; one rare alert does not justify a third
+  // webhook to keep alive, gate, and prove deliverable.
   const content =
-    `🚨 **RESEARCH RECORD MISSING A FIELD** — job \`${jobId}\` at \`${where}\`\n` +
+    `🚨 **[research pipeline]** RESEARCH RECORD MISSING A FIELD — job \`${jobId}\` at \`${where}\`\n` +
+    `_(not a DD-service alert — this channel is shared for service-integrity concerns)_\n` +
     `Missing: ${missing.join("; ")}\n` +
     `**Why this is escalated:** \`dataPurchase\` feeds the buy-side taxonomy. Absent, ` +
     `\`paidPathState()\` returns \`paid-path-unknown\` for every record and the metric that would ` +
