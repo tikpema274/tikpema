@@ -566,9 +566,19 @@ export async function research(
         // and every listed source now carries a claim (retrieved≠supporting closes too).
         // The list is DERIVED FROM THE WORK rather than passed through, so it cannot rot
         // into a static list that outlives what produced it.
+        // ⭐⭐ THE GROUNDING INDEX TRAVELS WITH THE ENTRY. `cited` and `notCited` are FILTERED
+        // SUBSETS, and a filter destroys position: an entry numbered [8] in the block the model read
+        // became the 5th survivor and was rendered [5], while the prose still said [8]. Two
+        // numbering schemes presented as one — the prose using grounding numbers, the list using
+        // subset positions. Job #181044 cited [8] against a list showing [1]–[4]; job #180679 was the
+        // same mechanism at [5]/[6] and was never diagnosed.
+        // ⚠️ 1-BASED, matching the block the model actually sees (exaEntries then purchasedEntries).
+        // Renumbering the display from 1 is what must never happen again — the gaps in [1],[3],[4],[8]
+        // ARE the information: they are exactly the entries in the other list, so the two become
+        // complementary by construction and a reader can check one against the other.
         const retrieved = [
-          ...exaResults.map((r) => ({ title: r.title, url: r.url })),
-          ...purchasedFacts.map((f) => ({ title: f.claim, url: f.source })),
+          ...exaResults.map((r, i) => ({ n: i + 1, title: r.title, url: r.url })),
+          ...purchasedFacts.map((f, i) => ({ n: exaResults.length + i + 1, title: f.claim, url: f.source })),
         ];
         // TWO DERIVATIONS IN STRICT PRECEDENCE — NOT a union. Order matters:
         //   (a) the model's own `sources` claim, matched by URL — PREFERRED;
@@ -635,6 +645,70 @@ export async function research(
         // NOTHING used to ship with a full source list; it now reaches the guard, which is
         // the point ("never submit a brief we can't stand behind"). ⚠️ That is a MONEY-PATH
         // behaviour change: such a brief now refunds instead of shipping.
+        // ═══ 🚨 THE TWO SIGNALS DISAGREE, AND THE DISAGREEMENT IS NOW VISIBLE ══════════════════
+        // Classification is UNCHANGED and deliberately so: a union of URL-match and marker was tried
+        // in #160637 and was wrong, because [n] marks a REFERENCE and dismissal is a reference — the
+        // more honestly an answer explained why a retrieval was irrelevant, the more certainly it got
+        // cited for it. So markers still do not promote.
+        // ⭐ BUT SILENTLY RESOLVING THE CONFLICT HID IT. When the model marks [8] inline, rests a
+        // claim on it, and omits it from its own `sources`, that is a real conflict between two
+        // signals — not a settled question. It is recorded rather than decided, so the rate is
+        // countable instead of arguable, and so a reader-facing treatment can be designed against
+        // evidence rather than against one job.
+        // ═══ ⚠️ THE PARTITION INVARIANT — DERIVABLE, SO CHECKED RATHER THAN TRUSTED ═════════════
+        // cited ∪ notCited must equal the whole grounding block: every number present in exactly one
+        // list, none in both, none missing from both. If it ever fails, the two lists stop being
+        // complementary and a reader checking one against the other is misled — which is the entire
+        // property the preserved indices exist to create.
+        // 🚨 A GAP IN BOTH IS THE DANGEROUS DIRECTION: an entry the model read, that appears nowhere,
+        // is invisible evidence — it influenced the answer and the reader cannot see that it existed.
+        {
+          const all = retrieved.map((r) => r.n).sort((a, b) => a - b);
+          const inCited = cited.map((r) => r.n);
+          const inNot = notCited.map((r) => r.n);
+          const union = [...inCited, ...inNot].sort((a, b) => a - b);
+          const both = inCited.filter((n) => inNot.includes(n));
+          const neither = all.filter((n) => !inCited.includes(n) && !inNot.includes(n));
+          if (both.length || neither.length || union.length !== all.length) {
+            console.error(
+              "[research][partition-broken] " +
+                JSON.stringify({ jobId: jobId ?? null, all, inCited, inNot, both, neither,
+                  note: "cited + notCited no longer partition the grounding block — the two lists are not complementary and a reader cannot check them against each other" })
+            );
+          }
+        }
+
+        // ⚠️ EVERY INLINE MARKER MUST RESOLVE TO A DISPLAYED ENTRY. A marker pointing at a number
+        // that appears in NEITHER list is a citation to nothing — the reader follows [n] and finds
+        // no such entry anywhere. Distinct from the marker-in-notCited case below, which resolves
+        // to a visible entry under the other heading.
+        {
+          const displayed = new Set([...cited, ...notCited].map((r) => r.n));
+          const dangling = [...markedIdx].map((i) => i + 1).filter((n) => !displayed.has(n)).sort((a, b) => a - b);
+          if (dangling.length) {
+            console.error(
+              "[research][marker-unresolvable] " +
+                JSON.stringify({ jobId: jobId ?? null, dangling, displayedCount: displayed.size,
+                  note: "the prose cites grounding numbers that appear in NEITHER list — the reader follows the marker and finds nothing. Usually a model citing beyond the block it was given." })
+            );
+          }
+        }
+
+        const markersInNotCited = notCited
+          .filter((r) => markedIdx.has(r.n - 1))
+          .map((r) => ({ n: r.n, url: r.url }));
+        if (markersInNotCited.length) {
+          console.warn(
+            "[research][marker-in-notcited] " +
+              JSON.stringify({
+                jobId: jobId ?? null,
+                citedSignal,
+                markers: markersInNotCited,
+                note: "the prose cites these grounding numbers, but the model did not list them in `sources` — they render under 'retrieved, not used'. Classification intentionally unchanged (#160637); recorded so the conflict is measurable.",
+              })
+          );
+        }
+
         decision.sources = cited;
         // Kept BESIDE the brief, never merged into `sources` — see job-submit-background,
         // where `report` is canonicalized into the on-chain deliverable hash. Breadth is

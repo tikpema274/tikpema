@@ -106,6 +106,9 @@ export type TrackedJob = {
     // is the defect this field exists to prevent. Optional: briefs written before the
     // derivation landed have no such field, and must still render.
     retrievedNotCited?: any[];
+    // ⭐ Entries carry `n` — their 1-based position in the GROUNDING BLOCK the model read, not
+    // their position in whichever list they landed in. Legacy briefs have no `n` and render
+    // unnumbered rather than wrongly numbered.
     // A's RAW proposal — kept even when the server refused to author one, because the
     // KILLED case needs to show what A actually argued for.
     proposal?: { reasoning?: string; [k: string]: any } | null;
@@ -166,6 +169,19 @@ function refundHeadline(refundClass?: string | null): string {
   return (refundClass && REFUND_HEADLINES[refundClass]) || "Refunded.";
 }
 
+// ⭐⭐ THE GROUNDING NUMBER, RENDERED. The prose cites [n] against the block the model read; both
+// lists are SUBSETS of that block, so numbering either from 1 creates a second coordinate system
+// and the marker in the text stops pointing at anything (#181044 cited [8] against a bulleted list
+// with no numbers at all; #180679 was the same at [5]/[6]).
+// ⭐ The gaps ARE the information: cited [1],[3],[4] and not-used [2],[5],[8] are complementary by
+// construction, so a reader can follow any marker into exactly one list and check the two against
+// each other.
+// ⚠️ Absent `n` renders NOTHING rather than a guessed position — a wrong number is worse than none.
+function GroundingMark({ n }: { n?: number }) {
+  if (typeof n !== "number" || !Number.isFinite(n)) return null;
+  return <span style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>[{n}] </span>;
+}
+
 // Render the research brief: answer, reasoning, and sources as clickable links.
 // Sources may be {title, url} objects or bare URL strings — handle both.
 export function Brief({ brief }: { brief: NonNullable<TrackedJob["brief"]> }) {
@@ -213,7 +229,8 @@ export function Brief({ brief }: { brief: NonNullable<TrackedJob["brief"]> }) {
               const title = typeof s === "string" ? s : s?.title || s?.url;
               if (!url) return null;
               return (
-                <li key={i}>
+                <li key={i} style={{ listStyle: s?.n ? "none" : undefined, marginLeft: s?.n ? -18 : undefined }}>
+                  <GroundingMark n={s?.n} />
                   <a href={url} target="_blank" rel="noreferrer">
                     {title}
                   </a>
@@ -235,7 +252,8 @@ export function Brief({ brief }: { brief: NonNullable<TrackedJob["brief"]> }) {
               const title = typeof s === "string" ? s : s?.title || s?.url;
               if (!url) return null;
               return (
-                <li key={i}>
+                <li key={i} style={{ listStyle: s?.n ? "none" : undefined, marginLeft: s?.n ? -18 : undefined }}>
+                  <GroundingMark n={s?.n} />
                   <a href={url} target="_blank" rel="noreferrer" style={{ color: "var(--muted)" }}>
                     {title}
                   </a>
