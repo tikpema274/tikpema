@@ -5,12 +5,12 @@
 // restores the null. See scripts/stamp-build.mjs for the full reasoning.
 
 export const RAW_BUILD_STAMP = {
-  "commit": "38ed9c3f7940e6dda375a249dbeb9a3c8a983c5e",
+  "commit": "96182ad0c1dc04b1e19ad6791ed8df9dd32edb04",
   "dirty": false,
   "dirtyCount": 0,
-  "tree": "fd5227621ef3480adc4dfc47dc1d2f4dbcd44ef2bfca9de6030a5e64c58109e4",
-  "ddTree": "5ce14d96eb6982f8af9fd4b49a2c4fed734fdd6649cb5cbf875d7f6bfac35af7",
+  "tree": "f902bc3ecfc37988b22318ac0445bb17dbd1808a971dc5c1db17b9b9fee849ec",
+  "ddTree": "4fecf8867a7ae5e28c55faabe8b814bf4effdaf69b47ab37f882f0bc16a79381",
   "ddFileCount": 36,
   "fileCount": 171,
-  "generatedAt": "2026-08-18T20:37:45.316Z"
+  "generatedAt": "2026-08-19T07:24:39.801Z"
 };
