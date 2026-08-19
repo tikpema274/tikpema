@@ -33,6 +33,8 @@ export type SwapProposal = {
   valueUsdc: number;
   cap: number;
   indicativeAmountOut: number;
+  /** ⭐ When estimateSwapOnly actually ran — see _proposal.mjs. Optional: older proposals lack it. */
+  pricedAt?: string;
   reasoning?: string;
 };
 export type Proposal = BridgeProposal | SwapProposal;
@@ -435,6 +437,17 @@ function SwapProposalBody({ proposal, ...rest }: ProposalCardProps & { proposal:
           current rate. This is an indicative price, not a quote: the rate is re-checked at
           execution, and the swap reverts rather than filling more than 1% worse. Both are
           stablecoins, so this is a currency conversion (USD↔EUR exposure) — not a trade.
+          {/* ⭐ WHEN IT WAS PRICED, NOT JUST WHAT IT PRICED AT. An indicative number with no
+              timestamp cannot be judged for freshness — the reader cannot tell a figure measured
+              seconds ago from one measured before a long approval pause. CoinGecko's price already
+              arrives as "usd-coin $0.999665 (as of …Z)"; our OWN measurement was the one without
+              provenance, which is the wrong way round. `pricedAt` is set by _proposal.mjs at the
+              moment estimateSwapOnly returns. Absent on older proposals → renders nothing. */}
+          {proposal.pricedAt && (
+            <> Priced against your wallet at{" "}
+              <span className="mono">{String(proposal.pricedAt).replace("T", " ").replace(/\.\d+Z$/, "Z")}</span>.
+            </>
+          )}
         </>
       }
     />

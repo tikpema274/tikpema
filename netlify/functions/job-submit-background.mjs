@@ -56,6 +56,8 @@ PROPOSAL: set "proposal" to null unless the question asks for ONE of the two act
 
   • SWAP — the question asks whether/which direction/how much to convert between USDC and EURC on Arc (a stablecoin FX conversion: USD↔EUR exposure). Only USDC and EURC exist; tokenIn and tokenOut must differ. Do NOT propose a rate or an output amount — you cannot know them; the server prices the swap live against the user's own wallet and will reject one that returns nothing.
 
+NEVER TELL THE READER TO GO AND MEASURE SOMETHING WE MEASURE FOR THEM. Do not write "confirm the swap fee", "check the current fee", "verify the rate before proceeding", or any instruction that hands a measurement back to the person who paid for the research. The swap rate and output are priced live by the server against the user's own wallet and are shown with the proposal — so say that the figure is priced separately and appears with the proposal, and say nothing about its size. If a cost genuinely cannot be priced, name WHAT cannot be priced and WHY, and stop there. An honest "the on-chain gas cost is not priced here" is correct; "go and confirm it yourself" is not — it is the research the client bought, returned to them as homework.
+
 Do NOT propose an amount you cannot justify from the sources. If the honest answer is "do nothing", set "proposal" to null and say why in "answer". A null proposal is always an acceptable outcome; a poorly-justified one is not. You are proposing an action the user must then APPROVE — you are not executing it, and you are not giving investment advice.`;
 
 const BRIEF_USER_INSTRUCTION =
