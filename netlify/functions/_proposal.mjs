@@ -75,6 +75,20 @@ function resolveToken(t) {
 // per reason is countable rather than arguable — the same instrumentation shape as
 // [research][citation-refusal]. It changes NO behaviour: every path still returns null.
 export const NO_PROPOSAL = Object.freeze({
+  // ═══ 🚨 THE TWO CODES THAT DO NOT COME FROM THIS FILE — AND THE COMMONEST ONE IS AMONG THEM ═════
+  // Job #181164: the model emitted a valid swap proposal, the record carried none, and NOTHING
+  // logged a reason. Cause: validateProposal is gated behind the second-opinion analyst
+  // (`if (synthesis?.proposalSurvives)`), so when Analyst B kills a proposal this file never runs.
+  // ⭐ A READER GREPPING [proposal][none] AND FINDING NOTHING WOULD CONCLUDE THE PATH IS HEALTHY —
+  // while the most common route to "no proposal" bypassed the counter entirely. Same shape as the
+  // ceiling-vs-free-source undercount: a metric counting one branch of a fork, on the branch that
+  // rarely fires. So the set covers BOTH branches and the prefix stays one.
+  KILLED_BY_SECOND_OPINION: "killed-by-second-opinion",
+  // ⚠️ And the no-attempt case, which was silent: the model returning proposal:null is a FACT, not
+  // an absence of one. Distinguishing "never proposed" from "proposed and refused" is the same
+  // distinction as paid-path-not-reached vs paid-path-reached-refused.
+  MODEL_PROPOSED_NOTHING: "model-proposed-nothing",
+
   NOT_AN_OBJECT: "raw-not-an-object",
   NO_ACTION: "action-unrecognised",
   BRIDGE_NO_DEST: "bridge-destination-unsupported",
@@ -95,6 +109,21 @@ function noProposal(reason, extra = {}) {
   console.warn("[proposal][none] " + JSON.stringify({ reason, ...extra }));
   return null;
 }
+
+/**
+ * ⭐ THE SAME EMITTER, FOR THE BRANCHES THAT LIVE OUTSIDE THIS FILE. Exported so job-submit can
+ * report a kill or a non-attempt on the SAME prefix and from the SAME closed set — one grep, one
+ * vocabulary. A second prefix elsewhere is how the fork became uncountable in the first place.
+ * Returns the outcome object so it can be persisted, not only logged: greppable is not queryable,
+ * and the buy-side lesson was that a log-only signal is one nobody aggregates.
+ */
+export function recordNoProposal(reason, extra = {}) {
+  console.warn("[proposal][none] " + JSON.stringify({ reason, ...extra }));
+  return { proposed: false, reason, ...extra, at: new Date().toISOString() };
+}
+
+/** The outcome when a proposal DID survive to the record — so the field is never merely absent. */
+export const proposalMade = (action) => ({ proposed: true, reason: null, action, at: new Date().toISOString() });
 
 // Validate a model-emitted proposal into a server-authored one, or return null.
 //

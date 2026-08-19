@@ -19,7 +19,7 @@ import { connectBlobs } from "./_blobs.mjs";
 import { keccak256, toBytes } from "viem";
 import { ARC, CONTRACTS, USDC_DECIMALS, parseBody, dateAnchor } from "./_arc.mjs";
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
-import { validateProposal } from "./_proposal.mjs";
+import { validateProposal, NO_PROPOSAL, recordNoProposal, proposalMade } from "./_proposal.mjs";
 import { analystB } from "./_analystb.mjs";
 import { compareAnalyses } from "./_synthesis.mjs";
 import { research } from "./_research.mjs";
@@ -220,6 +220,7 @@ export function warnIfBriefMissingDisclosure(brief, where, jobId) {
  */
 const RESEARCH_RECORD_FIELDS = Object.freeze([
   { path: "dataPurchase", why: "the buy-side taxonomy reads this; null blinds paidPathState()" },
+  { path: "proposalOutcome", why: "why there is no proposal; absent means the fork is uncountable again" },
 ]);
 
 /**
@@ -643,6 +644,10 @@ export async function handler(event) {
     }
 
     let proposal = null;
+    // ⭐ WHY THERE IS NO PROPOSAL IS NOW ALWAYS RECORDED — on one prefix, from one closed set.
+    // Job #181164 had a valid model proposal, no server proposal, and no reason anywhere, because
+    // the kill happens ABOVE validateProposal and only that function was instrumented.
+    let proposalOutcome = null;
     try {
       // walletAddress = the AUTHENTICATED user's OWN agent SCA (resolved by the job spine
       // from requireSession → ensureOwnerWallet, never client-supplied). A SWAP proposal is
@@ -652,13 +657,29 @@ export async function handler(event) {
       // The second analyst gates this: a proposal only reaches validateProposal if BOTH
       // analysts leave it standing. validateProposal remains the final chokepoint (it
       // re-derives tokens, cap and rate server-side) — B does not weaken it, it precedes it.
-      if (synthesis?.proposalSurvives) {
+      if (!decision.proposal) {
+        // ⚠️ The model proposing nothing is a FACT, not an absence of one — and it was silent.
+        proposalOutcome = recordNoProposal(NO_PROPOSAL.MODEL_PROPOSED_NOTHING, { jobId: String(jobId) });
+      } else if (synthesis?.proposalSurvives) {
         proposal = await validateProposal(decision.proposal, { walletAddress });
-      } else if (decision.proposal) {
-        console.log(`[analyst-b] proposal KILLED by the second opinion: ${synthesis?.agreement} — ${secondOpinion?.headline}`);
+        // validateProposal logs its OWN reason on the same prefix when it refuses; capture the
+        // shape either way so the record carries a verdict rather than an absence.
+        proposalOutcome = proposal
+          ? proposalMade(proposal.action)
+          : { proposed: false, reason: "server-refused-see-proposal-none-log", at: new Date().toISOString() };
+      } else {
+        // ⭐ B'S REASON, IN THE SET. `agreement` is B's verdict and `headline` is its stated why —
+        // both carried, so "how often does B kill proposals, and for what" is countable instead of
+        // being reconstructible only by reading prose in a different log line.
+        proposalOutcome = recordNoProposal(NO_PROPOSAL.KILLED_BY_SECOND_OPINION, {
+          jobId: String(jobId),
+          agreement: synthesis?.agreement ?? null,
+          headline: secondOpinion?.headline ?? null,
+        });
       }
     } catch (e) {
       console.warn(`[research] proposal validation failed (no proposal, brief unaffected): ${e.message}`);
+      proposalOutcome = proposalOutcome ?? { proposed: false, reason: "validation-threw", detail: String(e?.message ?? e).slice(0, 120), at: new Date().toISOString() };
     }
     if (decision.proposal && !proposal) {
       console.log(
@@ -721,6 +742,7 @@ export async function handler(event) {
       deliverableHash,
       // The structured half — queryable, and it survives the brief being read once.
       dataPurchase: result.dataPurchase ?? null,
+      proposalOutcome: proposalOutcome ?? null,
       // Carries dataDisclosure because `decision` was enriched above — one assignment, every site.
       brief: warnIfBriefMissingDisclosure(decision, "store-write", jobId),
       ...(proposal ? { proposal } : {}),
@@ -754,6 +776,7 @@ export async function handler(event) {
       canonicalReport,
       deliverableHash,
       dataPurchase: result.dataPurchase ?? null,
+      proposalOutcome: proposalOutcome ?? null,
       brief: warnIfBriefMissingDisclosure(decision, "store-write", jobId),
       ...(proposal ? { proposal } : {}),
       ...(secondOpinion ? { secondOpinion } : {}),
@@ -777,6 +800,7 @@ export async function handler(event) {
       canonicalReport, deliverableHash,
       brief: warnIfBriefMissingDisclosure(decision, "trigger-evaluate", jobId),
       dataPurchase: result.dataPurchase ?? null,
+      proposalOutcome: proposalOutcome ?? null,
     }, "trigger-evaluate", jobId));
   } catch (e) {
     // A still-pending submit tx is submitted-but-slow, not failed — record the
