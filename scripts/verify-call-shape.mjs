@@ -19,7 +19,7 @@
 
 import { DD_REQUEST_SCHEMA, DD_RESPONSE_SCHEMA, DD_RESOURCE_URL } from "../netlify/functions/_dd-descriptor.mjs";
 import { challenge402, ddPaymentRequirements, DD_PRICE_ATOMIC } from "../netlify/functions/_dd-x402.mjs";
-import { refusalReport } from "../netlify/functions/_dd-rungs.mjs";
+import { refusalReport, INPUT_REFUSAL_REASONS } from "../netlify/functions/_dd-rungs.mjs";
 import { openapiDocument } from "../netlify/functions/dd-openapi.mjs";
 import { baseReport } from "../shared/onchain-analyze/schema.mjs";
 
@@ -90,6 +90,25 @@ console.log("\n── the 400 refusal carries payment terms ──────�
   ok("⭐ still refuses cleanly when payTo is UNSET (fail-soft)", !!r.howToPay && r.howToPay.accepts === null);
   ok("…and does NOT fabricate a payTo", !JSON.stringify(r.howToPay).match(/0x[0-9a-fA-F]{40}/));
   ok("…and says why, rather than going silent", /not currently resolvable|could not be assembled/.test(r.howToPay.note));
+}
+
+// ═══ ⭐⭐ THE NARROWING — payment terms belong ONLY on refusals about the CALLER ════════════════
+console.log("\n── ⭐ 503s (about the SERVICE) must NOT carry payment terms ─────────");
+{
+  process.env.DD_PAYTO_ADDRESS = PAYTO;
+  // 🚨 Quoting a price on a service-side refusal invites an agent to sign an authorization for a
+  // call that will refuse again — during a refusal window, that is every call for ~8 minutes.
+  for (const reason of ["service-not-enabled", "service-unverified", "payment-misconfigured", "chain-unreadable", "internal-error"]) {
+    const r = refusalReport({ reason, detail: "x" });
+    ok(`503 "${reason}" carries NO howToPay`, r.howToPay === undefined);
+  }
+  // …and the caller-side ones still do. Enumerated, so the set cannot silently shrink either.
+  for (const reason of INPUT_REFUSAL_REASONS) {
+    const r = refusalReport({ reason, detail: "x" });
+    ok(`caller-side "${reason}" DOES carry howToPay`, !!r.howToPay);
+  }
+  ok("⭐ payment-misconfigured is excluded (quoting a price on it would self-contradict)",
+     refusalReport({ reason: "payment-misconfigured", detail: "x" }).howToPay === undefined);
 }
 
 console.log("\n════════════════════════════════════════════════════════════════════════");

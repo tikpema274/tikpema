@@ -157,6 +157,35 @@ export const UNSKIPPABLE = Object.freeze([RUNG.HEALTH, RUNG.METHOD, RUNG.BODY, R
  * refusal is the answer, the terms are a courtesy. Unresolvable payTo yields the price with the
  * address omitted and a reason, never a throw and never a fabricated address.
  */
+/**
+ * ⭐⭐ A CLOSED SET, AND THE DISTINCTION IS THE WHOLE POINT.
+ *
+ * A 400/405 is a statement about the CALLER — "your input is malformed, and here is what a good one
+ * costs" — so quoting a price is an INVITATION TO RETRY, which is exactly right.
+ *
+ * 🚨 A 503 IS A STATEMENT ABOUT THE SERVICE, which cannot be bought from right now. Attaching
+ * payment terms invites an agent to construct an authorization for a call that will refuse again —
+ * and during a refusal window that is EVERY call for ~8 minutes (measured: 492s). The agent would
+ * sign, retry, refuse, and repeat, against a service that told it the price while telling it no.
+ * `payment-misconfigured` is the sharpest case: quoting a payable challenge on a refusal whose
+ * reason IS that payment is unconfigured would be self-contradicting.
+ *
+ * ⭐ Same shape as the existing free-vs-charged rule in dd-analyze: one is about the QUESTION, the
+ * other is about OUR INSTRUMENT. We answer questions about the question for free and invite a
+ * retry; we never invoice for our own outage, nor imply one can be paid past.
+ *
+ * ⚠️ CLOSED, TESTED BY ENUMERATION, AND DEFAULT-OFF — a refusal reason added later does NOT inherit
+ * payment terms until somebody decides it should, which is the safe direction. Same discipline as
+ * SELF_CLEARING_HEALTH above.
+ */
+export const INPUT_REFUSAL_REASONS = Object.freeze([
+  "unsupported-method",   // 405 — wrong verb: the caller's phrasing
+  "malformed-request",    // 400 — body too large / not JSON / not an object
+  "invalid-address",      // 400 — missing or not a 20-byte hex address
+  "chain-not-specified",  // 400 — chain omitted
+  "unsupported-chain",    // 400 — a chain this service does not analyse
+]);
+
 function paymentTerms() {
   try {
     const r = resolvePayTo();
@@ -200,7 +229,8 @@ export function refusalReport({ address = null, chainName = null, chainId = null
     attestation: unsignedAttestation("input rejected before analysis — there is no on-chain claim to attest"),
     // ⭐ Sibling of the report, not part of it: a report is a statement about a SUBJECT, and payment
     // terms are not. It rides on the same response because that is the only thing the caller holds.
-    howToPay: paymentTerms(),
+    // ⚠️ ONLY on refusals about the CALLER — see INPUT_REFUSAL_REASONS.
+    ...(INPUT_REFUSAL_REASONS.includes(reason) ? { howToPay: paymentTerms() } : {}),
   });
 }
 
