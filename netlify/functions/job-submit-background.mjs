@@ -182,7 +182,7 @@ async function persistFailed(store, jobId, record) {
  * the thing the buyer bought, and refusing to store it would turn a reporting defect into a lost
  * job. Loud and greppable, on the same prefix convention as [research][citation-refusal].
  */
-export function assertBriefCarriesDisclosure(brief, where, jobId) {
+export function warnIfBriefMissingDisclosure(brief, where, jobId) {
   if (brief && typeof brief.dataDisclosure === "string" && brief.dataDisclosure.length > 0) return brief;
   console.error(
     "[research][brief-missing-disclosure] " +
@@ -207,13 +207,22 @@ export function assertBriefCarriesDisclosure(brief, where, jobId) {
  * to RESEARCH_RECORD_FIELDS, and every write site is checked for it from that moment — rather than
  * three call sites each needing to remember a fourth thing.
  *
- * ⚠️ WARNS, NEVER THROWS: a reporting gap must not destroy a paid deliverable.
+ * ═══ ⚠️ IT WARNS. IT DOES NOT ENFORCE — AND THE NAME NOW SAYS SO ═══════════════════════════════
+ * This was called `assertRecordCarriesResearchFields`, and "assert" reads as ENFORCED. It never
+ * threw. The two have very different consequences at 3am: a throw here would fail the WRITE, so a
+ * missing REPORTING field would stop a paid deliverable from settling — turning a reporting gap
+ * into a lost job. That trade is wrong, so it warns.
+ * ⭐ BUT WARNING BUYS NOTHING UNLESS SOMEONE READS IT. This is a DETECTION mechanism, not a
+ * PREVENTION one, and it has the weakness of everything that writes to a log nobody watches — the
+ * same gap as a cron whose only output is a log line. Treat a clean run as "nobody has looked",
+ * not as "it did not fire". The prefix is stable so the rate is greppable and can be pulled into
+ * the alert channel if it ever matters enough.
  */
 const RESEARCH_RECORD_FIELDS = Object.freeze([
   { path: "dataPurchase", why: "the buy-side taxonomy reads this; null blinds paidPathState()" },
 ]);
 
-export function assertRecordCarriesResearchFields(payload, where, jobId) {
+export function warnIfRecordMissingFields(payload, where, jobId) {
   const missing = RESEARCH_RECORD_FIELDS.filter(({ path }) => payload?.[path] === undefined);
   if (missing.length) {
     console.error(
@@ -647,14 +656,14 @@ export async function handler(event) {
 
     // 4. Persist the exact bytes BEFORE submitting, so the evaluator (C2) can
     // fetch the deliverable and re-hash it, and the user can read the brief.
-    await store.setJSON(jobId, assertRecordCarriesResearchFields({
+    await store.setJSON(jobId, warnIfRecordMissingFields({
       status: "submitting",
       canonicalReport,
       deliverableHash,
       // The structured half — queryable, and it survives the brief being read once.
       dataPurchase: result.dataPurchase ?? null,
       // Carries dataDisclosure because `decision` was enriched above — one assignment, every site.
-      brief: assertBriefCarriesDisclosure(decision, "store-write", jobId),
+      brief: warnIfBriefMissingDisclosure(decision, "store-write", jobId),
       ...(proposal ? { proposal } : {}),
       // The SECOND OPINION is persisted even when it KILLED the proposal — especially then.
       // "Your analysts disagreed, so nothing is proposed" is the most valuable thing this
@@ -681,12 +690,12 @@ export async function handler(event) {
     // NOTE: this write REPLACES the record (it does not spread the prior one), so the
     // proposal must be re-included or it would be silently dropped between step 4 and
     // here — a brief would settle with its proposal gone and no error anywhere.
-    await store.setJSON(jobId, assertRecordCarriesResearchFields({
+    await store.setJSON(jobId, warnIfRecordMissingFields({
       status: "submitted",
       canonicalReport,
       deliverableHash,
       dataPurchase: result.dataPurchase ?? null,
-      brief: assertBriefCarriesDisclosure(decision, "store-write", jobId),
+      brief: warnIfBriefMissingDisclosure(decision, "store-write", jobId),
       ...(proposal ? { proposal } : {}),
       ...(secondOpinion ? { secondOpinion } : {}),
       ...(synthesis ? { synthesis } : {}),
@@ -705,9 +714,9 @@ export async function handler(event) {
     // paidPathState() returns `paid-path-unknown` for everything — the metric built to reveal that
     // the buy side has never fired would report only that it cannot tell. A blind metric is worse
     // than none: it converts an open question into a settled-looking number.
-    await triggerEvaluate(assertRecordCarriesResearchFields({
+    await triggerEvaluate(warnIfRecordMissingFields({
       canonicalReport, deliverableHash,
-      brief: assertBriefCarriesDisclosure(decision, "trigger-evaluate", jobId),
+      brief: warnIfBriefMissingDisclosure(decision, "trigger-evaluate", jobId),
       dataPurchase: result.dataPurchase ?? null,
     }, "trigger-evaluate", jobId));
   } catch (e) {

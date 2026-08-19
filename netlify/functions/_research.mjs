@@ -268,7 +268,7 @@ export function paidPathState(outcome) {
  * An unclassified default only helps if something NOTICES it. Called on every path that returns a
  * brief; logs under a stable greppable prefix so the rate is countable rather than arguable.
  */
-export function assertOutcomeWired(outcome, ctx = {}) {
+export function warnIfOutcomeUnwired(outcome, ctx = {}) {
   if (outcome?.code !== PURCHASE_OUTCOME.UNWIRED) return outcome;
   console.error(
     "[research][outcome-unwired] " +
@@ -797,7 +797,7 @@ export async function research(
           // reads. A disclosure only in the record is not a disclosure to the person who paid; one
           // only in the prose does not outlive the page. Same finding as errata_note, one path over:
           // a disclosure only a source-reader would see is not a disclosure.
-          dataPurchase: { ...assertOutcomeWired(purchaseOutcome, { jobId, question }),
+          dataPurchase: { ...warnIfOutcomeUnwired(purchaseOutcome, { jobId, question }),
                           degraded: isDegraded(purchaseOutcome.code),
                           paidPath: paidPathState(purchaseOutcome) },
           disclosure: disclosureLine(purchaseOutcome),
@@ -805,7 +805,7 @@ export async function research(
         };
       }
       return { question, model, decision: null, raw: text, warning: "unparseable (exa path)", exaUsed: true,
-               dataPurchase: { ...assertOutcomeWired(purchaseOutcome, { jobId, question, path: "unparseable" }),
+               dataPurchase: { ...warnIfOutcomeUnwired(purchaseOutcome, { jobId, question, path: "unparseable" }),
                                degraded: isDegraded(purchaseOutcome.code),
                                paidPath: paidPathState(purchaseOutcome) },
                disclosure: disclosureLine(purchaseOutcome) };
