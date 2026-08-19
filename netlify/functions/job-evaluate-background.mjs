@@ -200,6 +200,10 @@ export async function handler(event) {
     canonicalReport: bodyReport,
     deliverableHash: bodyHash,
     brief: bodyBrief,
+    // ⭐ Threaded from job-submit for the same reason canonicalReport is: rebuilding the record from
+    // the body must not DROP fields the submit pass wrote. dataPurchase is a sibling of `brief`, and
+    // omitting it here is what made job #181056 settle with dataPurchase: null.
+    dataPurchase: bodyDataPurchase,
   } = parseBody(event);
   if (!jobId) {
     // Without a jobId there is nowhere to read from or write to — nothing to do.
@@ -217,7 +221,11 @@ export async function handler(event) {
   // brief/canonicalReport are never lost to a stale merge read.
   const threaded =
     bodyReport && bodyHash
-      ? { status: "submitted", canonicalReport: bodyReport, deliverableHash: bodyHash, brief: bodyBrief }
+      ? { status: "submitted", canonicalReport: bodyReport, deliverableHash: bodyHash, brief: bodyBrief,
+          // ⚠️ `?? undefined`, never `?? null`: undefined lets the merge below preserve whatever the
+          // submit pass already stored, while null would OVERWRITE it with an absence — which is the
+          // exact failure being fixed.
+          ...(bodyDataPurchase !== undefined ? { dataPurchase: bodyDataPurchase } : {}) }
       : null;
 
   // Merge eval results onto the existing record so we never lose the brief,

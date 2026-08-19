@@ -192,6 +192,40 @@ export function assertBriefCarriesDisclosure(brief, where, jobId) {
   return brief;
 }
 
+/**
+ * ⭐⭐ CHECK THE WHOLE PAYLOAD, NOT ONE FIELD — because the field-by-field version has now failed
+ * three times, each time on the sibling nobody was looking at.
+ *
+ *   #181044  `brief.dataDisclosure` enriched at ONE of THREE write sites → overwritten
+ *   #181056  `dataPurchase` written at ONE site, dropped by triggerEvaluate and by the evaluate
+ *            pass rebuilding the record from a payload that never carried it
+ *
+ * ⚠️ THE SECOND ONE HAD NO SYMPTOM. A missing disclosure is visible to a reader; a missing
+ * dataPurchase is visible to nobody — and it is the field the six-state buy-side taxonomy READS, so
+ * its absence silently blinds the metric built to reveal that the buy side has never fired.
+ * ⭐ So the list of fields lives HERE, once. Adding a research field to the record means adding it
+ * to RESEARCH_RECORD_FIELDS, and every write site is checked for it from that moment — rather than
+ * three call sites each needing to remember a fourth thing.
+ *
+ * ⚠️ WARNS, NEVER THROWS: a reporting gap must not destroy a paid deliverable.
+ */
+const RESEARCH_RECORD_FIELDS = Object.freeze([
+  { path: "dataPurchase", why: "the buy-side taxonomy reads this; null blinds paidPathState()" },
+]);
+
+export function assertRecordCarriesResearchFields(payload, where, jobId) {
+  const missing = RESEARCH_RECORD_FIELDS.filter(({ path }) => payload?.[path] === undefined);
+  if (missing.length) {
+    console.error(
+      "[research][record-missing-fields] " +
+        JSON.stringify({ jobId: String(jobId ?? "?"), where,
+          missing: missing.map((m) => `${m.path} — ${m.why}`),
+          note: "a record was persisted or forwarded without a research field. `undefined` means this site never supplied it; an explicit null is a real 'we had none' and passes." })
+    );
+  }
+  return payload;
+}
+
 export async function handler(event) {
   // Classic Lambda-signature functions don't get Blobs auto-wired, and
   // background functions in particular run without it, so getStore() would throw
@@ -613,7 +647,7 @@ export async function handler(event) {
 
     // 4. Persist the exact bytes BEFORE submitting, so the evaluator (C2) can
     // fetch the deliverable and re-hash it, and the user can read the brief.
-    await store.setJSON(jobId, {
+    await store.setJSON(jobId, assertRecordCarriesResearchFields({
       status: "submitting",
       canonicalReport,
       deliverableHash,
@@ -627,7 +661,7 @@ export async function handler(event) {
       // brick produces, and it must be visible, not merely logged.
       ...(secondOpinion ? { secondOpinion } : {}),
       ...(synthesis ? { synthesis } : {}),
-    });
+    }, "store-write-submitted", jobId));
 
     // 5. Submit on-chain as the provider (the user's OWN agent wallet, threaded
     // in from job-run) — submit() records the deliverable hash against the job.
@@ -647,23 +681,35 @@ export async function handler(event) {
     // NOTE: this write REPLACES the record (it does not spread the prior one), so the
     // proposal must be re-included or it would be silently dropped between step 4 and
     // here — a brief would settle with its proposal gone and no error anywhere.
-    await store.setJSON(jobId, {
+    await store.setJSON(jobId, assertRecordCarriesResearchFields({
       status: "submitted",
       canonicalReport,
       deliverableHash,
+      dataPurchase: result.dataPurchase ?? null,
       brief: assertBriefCarriesDisclosure(decision, "store-write", jobId),
       ...(proposal ? { proposal } : {}),
       ...(secondOpinion ? { secondOpinion } : {}),
       ...(synthesis ? { synthesis } : {}),
       txHash,
       tx: `${ARC.explorer}/tx/${txHash}`,
-    });
+    }, "store-write-final", jobId));
 
     // 7. Fire-and-forget: kick off evaluation so deliver→settle runs
     // automatically. Thread the deliverable data so the evaluator doesn't read
     // it back from Blobs (avoids the eventual-read race). The submit already
     // succeeded on-chain, so a trigger failure must only warn — never throw.
-    await triggerEvaluate({ canonicalReport, deliverableHash, brief: assertBriefCarriesDisclosure(decision, "trigger-evaluate", jobId) });
+    // ⭐ dataPurchase MUST travel too. It is a SIBLING of `brief`, not part of it, so enriching
+    // `decision` did not cover it — the evaluate pass rebuilds the record from what it is handed and
+    // drops anything absent. Job #181056 settled with dataPurchase: null for exactly this reason.
+    // 🚨 AND THE SIX-STATE BUY-SIDE TAXONOMY READS THIS FIELD. Null on every settled record means
+    // paidPathState() returns `paid-path-unknown` for everything — the metric built to reveal that
+    // the buy side has never fired would report only that it cannot tell. A blind metric is worse
+    // than none: it converts an open question into a settled-looking number.
+    await triggerEvaluate(assertRecordCarriesResearchFields({
+      canonicalReport, deliverableHash,
+      brief: assertBriefCarriesDisclosure(decision, "trigger-evaluate", jobId),
+      dataPurchase: result.dataPurchase ?? null,
+    }, "trigger-evaluate", jobId));
   } catch (e) {
     // A still-pending submit tx is submitted-but-slow, not failed — record the
     // id so the poller can distinguish "slow" from "reverted".
