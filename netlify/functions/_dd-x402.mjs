@@ -52,6 +52,9 @@ import { readGatewayBalance, confirmPayment, CONFIRM_REASON, RETRIEVE_TIMEOUT_MS
 // transcribed: a literal count in buyer-facing text is a second source of truth that rots silently
 // the day the catalogue changes, and this repo has been bitten by exactly that before.
 import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
+// ⭐ THE CALL SHAPE, IMPORTED. A hand-written copy here would be a second source of truth for the
+// thing agents call us with — see _dd-descriptor.mjs.
+import { DD_REQUEST_SCHEMA, DD_RESPONSE_SCHEMA, DD_OPENAPI_URL } from "./_dd-descriptor.mjs";
 
 export const PENDING_STORE = "dd-analyze-pending";
 
@@ -320,6 +323,27 @@ export function challenge402({ requirements, detail = null, preview = null }) {
       error: detail ? "Payment required" : "Payment required",
       ...(detail ? { reason: detail } : {}),
       accepts: [requirements],
+
+      // ═══ ⭐ HOW TO PHRASE THE CALL, IN THE CHALLENGE ITSELF ═══════════════════════════════════
+      // Until now the 402 said what you are buying and what it costs, but not how to ask for it —
+      // so an agent had to fetch /openapi.json before it could construct a valid request, and an
+      // agent that could not (no network budget, no HTML/JSON tooling, a sandbox with one allowed
+      // host) simply could not buy. The terms and the call shape now arrive together, in the
+      // response the agent already has in hand.
+      // ⚠️ THE SAME OBJECTS THE OPENAPI DOCUMENT PUBLISHES — imported, never restated. A stale copy
+      // here would teach an agent to build a request this endpoint then refuses, and the agent would
+      // have no way to tell which of the two descriptions was current.
+      howToCall: {
+        method: "POST",
+        contentType: "application/json",
+        request: DD_REQUEST_SCHEMA,
+        response: DD_RESPONSE_SCHEMA,
+        openApiUrl: DD_OPENAPI_URL,
+        note:
+          "Retry this exact request with an X-PAYMENT header carrying the authorization described " +
+          "in `accepts[0]`. The body shape does not change between the unpaid and paid call.",
+      },
+
       // ⭐ Present ONLY when a subject was named and a preview could be formed. Its absence is not a
       // silent "fine" — the coverage text below states the floor unconditionally.
       ...(preview ? { subjectPreview: preview } : {}),

@@ -34,7 +34,8 @@ import { json } from "./_arc.mjs";
 import { exposureState } from "./_dd-exposure.mjs";
 import { readHealth } from "./_dd-health.mjs";
 import { codeIdentityForEvent, evaluateHealth, HEALTH_REASON } from "../../shared/dd-canary/health.mjs";
-import { SUPPORTED_CHAINS, wantsHtml } from "./_dd-descriptor.mjs";
+import { SUPPORTED_CHAINS, wantsHtml, DD_RESOURCE_URL } from "./_dd-descriptor.mjs";
+import { resolvePayTo, ddPaymentRequirements, DD_PRICE_HUMAN } from "./_dd-x402.mjs";
 import { chainClient } from "../../shared/dd/client.mjs";
 import { quorumClient } from "../../shared/onchain-analyze/quorum.mjs";
 import { ARC_QUORUM_ENDPOINTS } from "../../shared/onchain-analyze/endpoints.mjs";
@@ -138,6 +139,43 @@ export const UNSKIPPABLE = Object.freeze([RUNG.HEALTH, RUNG.METHOD, RUNG.BODY, R
  * An empty coverage block would pass through assertReportValid as "coverage-incomplete", turning a
  * clean refusal into a second, confusing one.
  */
+/**
+ * ⭐ THE PAYMENT TERMS ON A REFUSAL — so a probe that sends a bad body still learns this is payable.
+ *
+ * Input validation runs BEFORE the 402 (deliberately: charging for "that is not a well-formed
+ * question" would quote a price for something answered free, and would reward narrowing the
+ * supported chain set). The consequence is that a discovery probe POSTing an empty body gets a 400
+ * and learns NOTHING about payability — measured with `circle services inspect -X POST`, which
+ * reported the endpoint "unavailable".
+ *
+ * ⚠️ THIS DOES NOT CHANGE THE STATUS CODE and is not expected to score: Circle's checker keys on
+ * HTTP 402. It is here for the reader — human or agent — who gets a 400 and would otherwise have no
+ * way to know a price exists at all.
+ *
+ * 🚨 FAIL-SOFT, ALWAYS. Input 400s fire before the PAYTO rung, so payTo may be unset or malformed
+ * at this point. A refusal must never fail because the payment terms could not be assembled — the
+ * refusal is the answer, the terms are a courtesy. Unresolvable payTo yields the price with the
+ * address omitted and a reason, never a throw and never a fabricated address.
+ */
+function paymentTerms() {
+  try {
+    const r = resolvePayTo();
+    if (!r.ok) {
+      return { price: DD_PRICE_HUMAN, resource: DD_RESOURCE_URL, accepts: null,
+               note: `this endpoint is paid, but the revenue address is not currently resolvable (${r.reason}), so no payable challenge can be quoted here. POST a VALID body to receive the full 402.` };
+    }
+    return {
+      price: DD_PRICE_HUMAN,
+      resource: DD_RESOURCE_URL,
+      accepts: [ddPaymentRequirements({ resource: DD_RESOURCE_URL, payTo: r.payTo })],
+      note: "this request was refused on its INPUT, before payment was ever required. Fix the body and POST again to receive the full 402 challenge.",
+    };
+  } catch {
+    return { price: DD_PRICE_HUMAN, resource: DD_RESOURCE_URL, accepts: null,
+             note: "this endpoint is paid; the challenge could not be assembled here. POST a valid body to receive the full 402." };
+  }
+}
+
 export function refusalReport({ address = null, chainName = null, chainId = null, reason, detail, diagnostic = null }) {
   const notChecked = Object.keys(POWER_SIGS).map((group) => ({
     id: `power:${group}`,
@@ -160,6 +198,9 @@ export function refusalReport({ address = null, chainName = null, chainId = null
     // not about a subject on chain, and signing anonymous malformed input would turn this endpoint
     // into an unmetered signing oracle over attacker-chosen bytes.
     attestation: unsignedAttestation("input rejected before analysis — there is no on-chain claim to attest"),
+    // ⭐ Sibling of the report, not part of it: a report is a statement about a SUBJECT, and payment
+    // terms are not. It rides on the same response because that is the only thing the caller holds.
+    howToPay: paymentTerms(),
   });
 }
 

@@ -2,6 +2,7 @@ import { json } from "./_arc.mjs";
 import { DD_PRICE_HUMAN, DD_PRICE_ATOMIC, DD_PRICE_DECIMAL } from "./_dd-x402.mjs";
 import {
   SUPPORTED_CHAINS, DD_RESOURCE_URL, DD_OPENAPI_URL, DD_OPENAPI_URL_LEGACY, DD_DOCS_URL,
+  DD_REQUEST_SCHEMA, DD_RESPONSE_SCHEMA,
 } from "./_dd-descriptor.mjs";
 import { discoveryPage } from "./_dd-discovery-page.mjs";
 
@@ -56,7 +57,17 @@ export async function handler(event) {
     };
   }
 
-  return json(200, {
+  return json(200, openapiDocument());
+}
+
+/**
+ * ⭐ THE DOCUMENT AS AN OBJECT, EXPORTED. Built separately from the handler so a gate can assert
+ * OBJECT IDENTITY against the shared schema constants — `=== DD_REQUEST_SCHEMA`, the one assertion
+ * a hand-written copy cannot pass. Through a JSON.stringify'd response body only deep equality
+ * survives, and deep equality is exactly what three copies satisfy on the day they are written.
+ */
+export function openapiDocument() {
+  return {
     openapi: "3.1.0",
     info: {
       title: "Tikpema DD — on-chain due diligence",
@@ -145,30 +156,16 @@ export async function handler(event) {
             required: true,
             content: {
               "application/json": {
-                schema: {
-                  type: "object",
-                  required: ["address", "chain"],
-                  properties: {
-                    address: {
-                      type: "string",
-                      pattern: "^0x[0-9a-fA-F]{40}$",
-                      description: "the subject: a 0x-prefixed 20-byte address",
-                    },
-                    chain: {
-                      type: "string",
-                      enum: [...SUPPORTED_CHAINS],
-                      description:
-                        "⚠️ REQUIRED. An address alone does not identify a chain — the same " +
-                        "address holds different code on different chains.",
-                    },
-                  },
-                },
+                // ⭐ IMPORTED, NOT RESTATED. The 402 challenge publishes this same object, so an
+                // agent that reads either one is reading the same definition.
+                schema: DD_REQUEST_SCHEMA,
                 example: { address: "0x3600000000000000000000000000000000000000", chain: SUPPORTED_CHAINS[0] },
               },
             },
           },
           responses: {
             200: {
+              content: { "application/json": { schema: DD_RESPONSE_SCHEMA } },
               description:
                 "The signed report. Carries `coverage` (checked / notChecked / totals / summary), " +
                 "`severityMeaning` (scope-not-rank: severity describes what a power CAN DO, it is " +
@@ -208,5 +205,5 @@ export async function handler(event) {
       attestation: "ERC-1271 against the on-chain owner of ERC-8004 agentId 851891",
       supportedChains: [...SUPPORTED_CHAINS],
     },
-  });
+  };
 }

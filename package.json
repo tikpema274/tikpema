@@ -52,7 +52,8 @@
     "pin:second": "node scripts/pin-second-operator.mjs",
     "gate:opcount": "node scripts/verify-operator-count.mjs",
     "gate:price": "node scripts/verify-price-rendering.mjs",
-    "gate:spec": "node scripts/verify-spec-published.mjs"
+    "gate:spec": "node scripts/verify-spec-published.mjs",
+    "gate:callshape": "node scripts/verify-call-shape.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
