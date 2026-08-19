@@ -92,6 +92,37 @@ happened *while the first was fresh in the same session*. ⭐ **Knowing the rule
 repeating it** — the failure was not ignorance, it was stopping at the first proof that looked
 sufficient.
 
+## ⭐⭐ TWO PORTABLE RULES OUT OF THE GUARD'S OWN BUG
+
+**1. AN ORDERING ASSERTION ON INDICES IS SATISFIED BY ABSENCE, UNLESS PRESENCE IS ASSERTED FIRST.**
+
+```js
+iD < iA                       // ⛔ passes when the item is MISSING: indexOf returns -1
+iD >= 0 && iA >= 0 && iD < iA // ✅ ordering only where both exist
+```
+
+`-1` is less than everything, so "X appears before Y" is trivially true whenever X does not appear
+at all. ⚠️ This is not a React or a testing quirk — it applies to any `indexOf`/`findIndex`/`search`
+comparison, in any language with a sentinel-index convention, and it fails in the reassuring
+direction: the layout check goes green precisely when the thing being laid out is gone.
+
+**2. A GUARD VALIDATED ONLY AGAINST THE FIXED CODE PROVES NOTHING. RUN IT AGAINST THE BROKEN ONE.**
+
+`8/8 on the fixed component` is a number with no information in it on its own — a guard that always
+passes scores 8/8 too. What makes it mean something is **`5/8` against the pre-fix component**: the
+guard fires on the defect it was written for, and stays silent otherwise.
+
+⭐ **AND IT IS WHAT CAUGHT THE FAIL-OPEN.** The ordering bug was invisible while testing the fixed
+version — it passed, as it does. It only appeared when the guard was pointed at the code that
+lacked the field, printing `disclosure@-1` beside a green tick. **Reading the guard would not have
+found it; running it against the broken version did.**
+
+⚠️ **THE STANDING PRACTICE, THEREFORE:** every new guard is run against the state it was written to
+catch, before it is trusted. Where the broken state no longer exists, reconstruct it —
+`git show HEAD:<file>`, a mutated copy, a fixture with the field removed. This session used the same
+technique three times: the AMBER branch in `verify-operator-count.mjs`, the drift branches in
+`_pinned-set.mjs`, and here.
+
 Fixed at `98eb788`, with a RENDERED guard (`npm run test:disclosurerender`) rather than a source
 grep — because "the string appears in a .tsx" passes the day it is written and forever after,
 including through a refactor that deletes the JSX and leaves the type.
