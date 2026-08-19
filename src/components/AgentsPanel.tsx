@@ -385,7 +385,7 @@ function AgentDetail({
 
 // Shared activity renderer — refusals are first-class, not hidden. "It tried, and the cap
 // stopped it" is precisely what an observability surface exists to show.
-function ActivityList({ entries, showAgent }: { entries: ActivityEntry[]; showAgent?: boolean }) {
+export function ActivityList({ entries, showAgent }: { entries: ActivityEntry[]; showAgent?: boolean }) {
   return (
     <div>
       {entries.map((e, i) => (
@@ -400,7 +400,17 @@ function ActivityList({ entries, showAgent }: { entries: ActivityEntry[]; showAg
           <div>
             <span style={{ color: e.allowed ? "var(--paper)" : "var(--danger, #e5484d)" }}>
               {e.allowed ? "" : "refused · "}
-              {e.source ?? "action"}
+              {/* ═══ ⭐ A MISSING SOURCE MUST NOT BORROW THE IDENTITY OF A REAL ONE ════════════════
+                  `?? "action"` rendered an entry with NO recorded source as the word "action" —
+                  a plausible, generic label that reads as a FACT. A user auditing their own money
+                  movements would take it as a recorded action of an unremarkable kind, when what
+                  actually happened is that we do not know what it was.
+                  ⭐ Same rule as unclassified-vs-unwired and NOT-YET-vs-SUPERSEDED: a value we did
+                  not handle must say so, not wear a handled value's name. Raw looks like a gap;
+                  a plausible label looks like a fact, and the second is worse.
+                  ⚠️ The audit row is still SHOWN — hiding it would be a worse absence. It is shown
+                  as what it is: an entry whose action type was never recorded. */}
+              {e.source ?? "⚠️ no action type recorded for this entry"}
             </span>
             {showAgent && <span className="sub"> by {e.agent}</span>}
             {!e.allowed && e.reason && (
