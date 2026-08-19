@@ -215,7 +215,15 @@ export const PURCHASE_OUTCOME = Object.freeze({
   SETTLE_UNCONFIRMED: "settle-unconfirmed",    // payment did not confirm; no money moved
   NO_USABLE_FACTS: "no-usable-facts",          // settled but the response yielded nothing
   ERROR: "error",                              // the purchase path threw
-  UNCLASSIFIED: "unclassified",                // 🚨 an exit nobody enumerated — see above
+  UNCLASSIFIED: "unclassified",                // 🚨 the path RAN and hit an exit nobody enumerated
+  // 🚨🚨 DIFFERENT FROM UNCLASSIFIED, AND THE DIFFERENCE IS THE POINT. `unclassified` is a fact
+  // about the PURCHASE — it was attempted and left by a door we never labelled. `unwired` is a fact
+  // about OUR CODE — the brief reached a buyer without the purchase path ever touching the outcome
+  // at all. Collapsing them would render a wiring defect to the buyer as though it were a category
+  // of purchase result, and they would reasonably read it as something about their job.
+  // ⭐ Same distinction as NOT-YET vs SUPERSEDED both exiting 0: two states, and only one of them
+  // is about the world.
+  UNWIRED: "unwired",
 });
 
 /** Every outcome in which the brief rests on Exa alone. ⚠️ Derived by EXCLUSION, so a code added to
@@ -224,8 +232,24 @@ export const PURCHASE_OUTCOME = Object.freeze({
 const AUGMENTED = new Set([PURCHASE_OUTCOME.PURCHASED, PURCHASE_OUTCOME.FREE_SOURCE]);
 export const isDegraded = (code) => !AUGMENTED.has(code);
 
-/** A fresh outcome object. Pre-set to unclassified so silence is impossible. */
-export const newPurchaseOutcome = () => ({ code: PURCHASE_OUTCOME.UNCLASSIFIED, detail: null, at: null });
+/** A fresh outcome object. ⭐ Pre-set to UNWIRED — the state meaning "nothing has touched this yet".
+ *  maybeBuyData moves it to UNCLASSIFIED the instant it is entered, so surviving as UNWIRED proves
+ *  the purchase path never ran for this brief, which is a defect in wiring rather than a result. */
+export const newPurchaseOutcome = () => ({ code: PURCHASE_OUTCOME.UNWIRED, detail: null, at: null });
+
+/**
+ * 🚨 ASSERT THE OUTCOME WAS POPULATED BY THE TIME THE BRIEF RENDERS — not merely that it COULD be.
+ * An unclassified default only helps if something NOTICES it. Called on every path that returns a
+ * brief; logs under a stable greppable prefix so the rate is countable rather than arguable.
+ */
+export function assertOutcomeWired(outcome, ctx = {}) {
+  if (outcome?.code !== PURCHASE_OUTCOME.UNWIRED) return outcome;
+  console.error(
+    "[research][outcome-unwired] " +
+      JSON.stringify({ ...ctx, note: "a brief reached rendering without the purchase path setting an outcome — WIRING DEFECT, not a purchase result" })
+  );
+  return outcome;
+}
 
 function mark(outcome, key, detail) {
   if (!outcome) return;                       // never let reporting break the money path
@@ -246,6 +270,12 @@ export function disclosureLine(outcome) {
       "It rests on web sources alone. This is a defect in our reporting, not a statement about the " +
       "research — treat the gap as unexplained rather than benign.";
   }
+  if (c === PURCHASE_OUTCOME.UNWIRED) {
+    return "⚠️ OUR REPORTING DID NOT RUN FOR THIS BRIEF. We cannot tell you whether paid data was " +
+      "purchased, because the code that records it was never reached. That is a fault in our " +
+      "software, not a property of your job — and it is stated rather than hidden precisely because " +
+      "an unexplained silence here would otherwise read as a normal result.";
+  }
   return `⚠️ No paid data was purchased for this brief, so it rests on web sources alone — ${why.slice(2, -1) || c}.`;
 }
 
@@ -254,6 +284,10 @@ export function disclosureLine(outcome) {
 // throws: every failure path logs and returns [] so research proceeds Exa-only.
 // `store` is the optional injectable budget store (undefined → Netlify Blobs).
 async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jobPrice, store, forceDecision, owner, outcome }) {
+  // ⭐ CLAIM THE OBJECT ON ENTRY. From here on it can only be UNCLASSIFIED or better — so UNWIRED
+  // surviving to the brief proves this function was never reached, which is a different bug from
+  // "this function left by an unlabelled door".
+  mark(outcome, "UNCLASSIFIED", "the purchase path ran but no exit classified itself");
   try {
     // 1. Decision + ROUTING. `forceDecision` is a TEST-ONLY seam; production runs the
     // genuine classifier. It returns { kind: "onchain"|"market"|"none", method, params,
@@ -645,13 +679,13 @@ export async function research(
           // reads. A disclosure only in the record is not a disclosure to the person who paid; one
           // only in the prose does not outlive the page. Same finding as errata_note, one path over:
           // a disclosure only a source-reader would see is not a disclosure.
-          dataPurchase: { ...purchaseOutcome, degraded: isDegraded(purchaseOutcome.code) },
+          dataPurchase: { ...assertOutcomeWired(purchaseOutcome, { jobId, question }), degraded: isDegraded(purchaseOutcome.code) },
           disclosure: disclosureLine(purchaseOutcome),
           citation,
         };
       }
       return { question, model, decision: null, raw: text, warning: "unparseable (exa path)", exaUsed: true,
-               dataPurchase: { ...purchaseOutcome, degraded: isDegraded(purchaseOutcome.code) },
+               dataPurchase: { ...assertOutcomeWired(purchaseOutcome, { jobId, question, path: "unparseable" }), degraded: isDegraded(purchaseOutcome.code) },
                disclosure: disclosureLine(purchaseOutcome) };
     } catch (e) {
       console.warn(`[research] Exa retrieval failed (useExa path), refusing web-search fallback: ${e.message}`);
