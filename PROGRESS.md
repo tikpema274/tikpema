@@ -1,5 +1,55 @@
 ---
 
+# ⚠️ THE RECOVERY FILE IS STILL SINGLE-COPY — AND `gate:recovery` GOING GREEN IS WHY THAT IS DANGEROUS
+
+**2026-08-19.** `npm run gate:recovery` passes. **That does not mean this item is done**, and the
+green run is precisely what would make a later reader think it is.
+
+## WHAT IS ACTUALLY TRUE
+
+* ✅ The real file is intact: `recovery_file_1781206891750.dat`, 144 chars, sha256 `3adb019b8055…`,
+  pinned and re-checkable offline.
+* ✅ The decoy is defused: a **0-byte `recovery_file.dat`** — the name anyone grabs in an emergency —
+  renamed to `*.EMPTY-DO-NOT-USE-2026-06-11`. Written 21:44, three minutes AFTER the real file at
+  21:41, almost certainly by Circle's own docs example whose `?? ""` writes an empty file silently.
+* 🚨 **THERE IS STILL EXACTLY ONE COPY**, on one disk, in one directory.
+
+## ⭐⭐ A CHECKER IS NOT A BACKUP, AND CONFLATING THEM IS THE WHOLE RISK HERE
+
+A validator on a single-copy file **detects loss; it does not survive it.** Worse, the disk that
+dies takes the checker with it — the instrument and the artifact share a failure domain, so the
+alert that would tell you it is gone dies at the same instant.
+
+⚠️ **AND A SCHEDULE WAS THE WRONG NEXT MOVE.** It would have produced a weekly green tick against a
+single point of failure — the most reassuring possible output for the least protected possible
+state. Held deliberately. ⭐ **A monitor over one copy measures how quickly you learn about a loss
+you cannot undo. A monitor over two copies measures DIVERGENCE, which is a thing you can act on.**
+The schedule earns its keep only after the second copy exists, and it also needs somewhere to send
+an alert or it is a log nobody reads.
+⚠️ It could never have run on Netlify regardless: the file lives at `~/Arc-tikpema/tikpema-dev/`,
+which no scheduled function can see. Local cron or a systemd timer, with a real notification path.
+
+## THE OPEN ACTION — OFFSITE COPY, AND IT CLOSES THE ITEM OUTRIGHT
+
+⭐ **Possession is confirmed sufficient**: the Circle SDK writes the API's base64 response verbatim,
+with **no password step and no encryption** (`registerEntitySecretCiphertext` → `writeFileSync`). So
+the file must be protected exactly like the Entity Secret itself — and a password manager entry is
+therefore both the right home and a complete fix, not a partial one.
+
+⚠️ Store it as a **file attachment or a verbatim text field**. It is base64: a manual retype or a
+line-wrapping paste corrupts it, and the corruption passes casual inspection because base64 still
+*looks* like base64. Verify any new copy with `RECOVERY_FILE=<path> npm run gate:recovery` — the
+sha256 pin is what proves a copy is the SAME file rather than merely a well-formed one.
+
+## WHAT REMAINS UNKNOWABLE LOCALLY, AND IS WITH CIRCLE
+
+`gate:recovery` checks FORM and IDENTITY, never CURRENCY or AUTHENTICITY — a file deprecated by an
+Entity Secret rotation passes every check perfectly, because deprecation is server-side and does not
+touch the bytes. The documentary case narrows that (no rotation recorded as of 2026-08-19; rotation
+is a deliberate act, not drift) but does not close it. **Only Circle's answer on whether the Console
+upload validates before committing would make acceptance testable without spending the reset.**
+
+
 # 🚨 MULTI-NETWORK PAYMENT: THE SETTLE-GATE READS **ONE CHAIN'S** LEDGER — ANSWERED WITH ZERO SPEND
 
 **2026-08-18.** Circle's agent-readiness score. The multi-network question was the only one worth
