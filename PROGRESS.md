@@ -1,5 +1,87 @@
 ---
 
+# 🚨🚨 THE AGENT-BUYS-FROM-AGENT STEP HAS NEVER FIRED IN PRODUCTION
+
+**2026-08-19.** The sell side is proven — the DD service takes real x402 payment, settles through
+Gateway, and withholds the artifact until the money lands. **The BUY side has not happened once.**
+Every research brief this product has ever sold was synthesised from Exa alone.
+
+## THE MEASUREMENT
+
+`_research.mjs:maybeBuyData` gates a purchase on an absolute per-buy ceiling and then on percentage
+budgets. Measured against the seller actually configured in production
+(`DATA_SELLER_URL = https://x402.quicknode.com/arc-testnet`), via an unpaid 402 probe:
+
+| | |
+|---|---|
+| seller's advertised price | **1.0 USDC per call** (`1000000` atomic) |
+| absolute per-buy ceiling | **0.01 USDC** (`DATA_PURCHASE_USDC` unset on prod → hardcoded default) |
+| ratio | **100× too expensive** |
+
+| job price | allowance (30%) | per-buy cap (50%) | can buy at 1.0? |
+|---|---|---|---|
+| 0.20 | 0.060 | 0.030 | **NO** |
+| 0.30 | 0.090 | 0.045 | **NO** |
+| 0.40 | 0.120 | 0.060 | **NO** |
+| 0.60 | 0.180 | 0.090 | **NO** |
+
+⭐ **NOT A BOTTOM-OF-BAND PROBLEM — A WHOLE-BAND ONE.** The ceiling bites before the percentage gate
+even runs, so no price anywhere in the band has ever cleared it. Lowering the band to [0.20, 0.40]
+neither caused this nor revealed it; it was already total.
+
+🚨 **AND A SECOND, INDEPENDENT BLOCKER: THE CHAIN IS WRONG.** QuickNode's challenge advertises
+`network: eip155:84532` (Base Sepolia) with Base Sepolia USDC. We pay on Arc testnet,
+`eip155:5042002`. Even at an affordable price the authorization could not be constructed against
+that challenge. ⚠️ Two independent blockers means fixing either one alone changes nothing — and it
+is why "just raise `DATA_PURCHASE_USDC`" is not a fix.
+
+⚠️ The in-repo stand-in (`x402-quote`, 1000 atomic = 0.001) fits under the ceiling comfortably. The
+ceiling was calibrated against the stand-in and never revisited when prod was pointed at QuickNode.
+**A default that was correct for a test seller became a silent kill-switch for a real one.**
+
+## ⭐⭐ THE STRATEGIC WEIGHT, STATED PLAINLY
+
+This is the **agent-buys-from-agent** step — the core of the two-sided thesis. An agent that can
+only SELL is half the claim; the thing that makes the marketplace real is an agent deciding, within
+a budget, to spend its owner's money on another agent's data. **That has never happened in
+production.** It is not a pricing detail and does not belong in a footnote to one.
+
+⚠️ **AND WE COULD NOT HAVE KNOWN FROM THE OUTSIDE.** Every job completed. Every brief cited sources.
+The pipeline showed Funding → Researching → Evaluating → Settled. The only observable difference
+between "bought data and used it" and "bought nothing and never could" was a `console.warn` in a
+function log nobody reads. ⭐ **The product looked identical in both worlds.**
+
+## WHAT WAS BUILT — DISCLOSURE, NOT A PRICE FIX
+
+`111fe4a`. A closed outcome set with **`unclassified` as the DEFAULT**, so an exit nobody enumerated
+is loud rather than silent — the ceiling case being exactly such an exit. Reported in BOTH halves:
+`dataPurchase` (structured record) and `dataDisclosure` (the sentence the buyer reads), the latter
+**inside the hashed canonical report**, on the same argument that puts DD's coverage manifest inside
+the signed payload: a statement that a brief rests on web sources alone is worth exactly as much as
+its inseparability from the brief.
+
+## ⛔ WHAT WAS DELIBERATELY *NOT* DONE
+
+**`DATA_PURCHASE_USDC` was NOT raised.** At 1.0 USDC against a 0.20–0.40 job the data costs **more
+than the job** — the agent would spend 2.5–5× the fee to answer it. Combined with the chain
+mismatch, raising the ceiling would convert a silent no-op into a silent overspend, which is worse.
+🚨 **Whether that seller is viable at all is a product question, not a config nudge**, and making it
+by editing an env var is how an agent starts paying 1.0 to fulfil a 0.40 job.
+
+## OPEN, RECORDED, NOT BUNDLED
+
+* ⚠️ **`budgetUsdc` is a JavaScript FLOAT on a money path.** `Math.round(x*100)/100` in the quote,
+  converted to atomic downstream in `_budget.mjs`. The exact inverse of the DD pattern, where atomic
+  is the source of truth and renderings derive from it. A correctness fix, not a pricing one.
+* ⚠️ **The ceiling default (0.01) is calibrated to a seller we no longer use.** Either re-point at a
+  seller priced for this market, or restate what the ceiling is for.
+* ⚠️ **A quote-time disclosure of fee-vs-stake is NOT buildable as asked.** On job #180679 the FX
+  gain (~0.70–0.78 USDC on 5 EURC) appeared in the RESEARCH OUTPUT — after the fee was quoted and
+  paid. Stating the proportion at quote time would require estimating the gain before researching
+  it. ⭐ That is a genuine design problem, not a copy change, and it is the honest reason the
+  bridge-band comparison does not port over directly.
+
+
 # ⚠️ THE RECOVERY FILE IS STILL SINGLE-COPY — AND `gate:recovery` GOING GREEN IS WHY THAT IS DANGEROUS
 
 **2026-08-19.** `npm run gate:recovery` passes. **That does not mean this item is done**, and the
