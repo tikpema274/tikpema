@@ -68,6 +68,39 @@ mismatch, raising the ceiling would convert a silent no-op into a silent overspe
 🚨 **Whether that seller is viable at all is a product question, not a config nudge**, and making it
 by editing an env var is how an agent starts paying 1.0 to fulfil a 0.40 job.
 
+## 🚨 CORRECTION TO `111fe4a` — IT CLAIMED A SENTENCE NO BUYER COULD READ
+
+The commit message for the disclosure feature says *"`dataDisclosure` is the sentence the BUYER
+reads"* and *"a disclosure only a source-reader would see is not one"*. **Both were false of what
+shipped.** The field went into the canonical report, was covered by the deliverable hash, and
+deployed with **ZERO renderers** — `grep dataDisclosure src/` returned nothing.
+
+⭐ **THE RECORD HALF IS LIVE AND CORRECT** — `dataPurchase.code = ceiling` is real, queryable, and
+matched the pre-registered prediction. Saying only that would have been honest. Claiming the reader
+half was the overclaim, and it is exactly what this feature exists against.
+
+⭐⭐ **AND THE HASH DIFFERENTIAL DID NOT CATCH IT, BECAUSE IT CANNOT.** Removing the field changes
+the `deliverableHash`, so **transit tampering** is detectable — a real guarantee, and the wrong one.
+It is silent on whether any renderer projects the field. **Two guarantees; one established, the
+other assumed.** The assumption is the whole error: I proved the property that was easy to prove and
+reported the property that mattered.
+
+⚠️ **SECOND OCCURRENCE IN TWO DAYS.** 2026-08-17: `errata_note` written into `VERSIONS`, dropped by
+dd-openapi's projection, reached nobody. 2026-08-19: `dataDisclosure` written into the report,
+dropped by the absence of a renderer, reached nobody. Same shape, different file, and the second
+happened *while the first was fresh in the same session*. ⭐ **Knowing the rule did not prevent
+repeating it** — the failure was not ignorance, it was stopping at the first proof that looked
+sufficient.
+
+Fixed at `98eb788`, with a RENDERED guard (`npm run test:disclosurerender`) rather than a source
+grep — because "the string appears in a .tsx" passes the day it is written and forever after,
+including through a refactor that deletes the JSX and leaves the type.
+🚨 **AND RUNNING THAT GUARD AGAINST THE PRE-FIX COMPONENT EXPOSED A FAIL-OPEN INSIDE THE GUARD:**
+the ordering assertion was `indexOf(disclosure) < indexOf(answer)`, which **passed when the
+disclosure was absent** — `-1` is less than everything. An ordering check satisfied by absence, in
+the suite written against exactly that. Caught by RUNNING it against the broken version, not by
+reading it. **8/8 on the fixed component, 5/8 on the pre-fix one.**
+
 ## ⭐ PRE-REGISTERED EXPECTATION FOR THE NEXT JOB — WRITTEN BEFORE IT RUNS
 
 Deployed `6a858997c8bdc5178445c9d5` on 2026-08-19. **No job has run since**: `netlify logs --source
