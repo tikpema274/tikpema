@@ -165,6 +165,33 @@ async function persistFailed(store, jobId, record) {
   await store.setJSON(jobId, record);
 }
 
+/**
+ * 🚨 ASSERT THE BRIEF THE READER GETS ACTUALLY CARRIES THE DISCLOSURE.
+ *
+ * Three times now a disclosure has been written into the data and lost before a reader saw it:
+ * errata_note dropped by dd-openapi's projection (2026-08-17), dataDisclosure shipped with no
+ * renderer (2026-08-19), and dataDisclosure enriched at ONE of THREE write sites while the other two
+ * overwrote it (job #181044). Each fix was correct and each was applied one layer too shallow.
+ *
+ * ⭐ SO THE CHECK IS AT THE WRITE, NOT AT THE AUTHOR. Every path that persists or forwards a brief
+ * calls this, so a write site added later cannot inherit the bug silently — it fires the first time
+ * it runs. Same rule as gating at the WRITE rather than at each call site, which is how the dry-run
+ * overwrite was closed.
+ *
+ * ⚠️ WARNS, NEVER THROWS. A missing disclosure must not destroy a paid deliverable — the brief is
+ * the thing the buyer bought, and refusing to store it would turn a reporting defect into a lost
+ * job. Loud and greppable, on the same prefix convention as [research][citation-refusal].
+ */
+export function assertBriefCarriesDisclosure(brief, where, jobId) {
+  if (brief && typeof brief.dataDisclosure === "string" && brief.dataDisclosure.length > 0) return brief;
+  console.error(
+    "[research][brief-missing-disclosure] " +
+      JSON.stringify({ jobId: String(jobId ?? "?"), where,
+        note: "a brief was persisted or forwarded WITHOUT dataDisclosure — the reader will see no sourcing statement. Enrichment happens once after hashing; this site did not receive it." })
+  );
+  return brief;
+}
+
 export async function handler(event) {
   // Classic Lambda-signature functions don't get Blobs auto-wired, and
   // background functions in particular run without it, so getStore() would throw
@@ -570,6 +597,20 @@ export async function handler(event) {
     const canonicalReport = canonicalize(report);
     const deliverableHash = keccak256(toBytes(canonicalReport));
 
+    // ═══ 🚨 ENRICH ONCE, AFTER HASHING — SO EVERY DOWNSTREAM USE IS CORRECT BY CONSTRUCTION ═════
+    // The first attempt at this spread `dataDisclosure` onto the brief at ONE of THREE write sites.
+    // The other two — a second store write and the payload threaded to job-evaluate-background —
+    // kept passing the bare `decision`, and the evaluate pass OVERWROTE the enriched record with the
+    // unenriched one. Net effect: the disclosure reached the store, then left it again, and job
+    // #181044 rendered without it.
+    // ⭐ PATCHING THE OTHER TWO WOULD HAVE FIXED THE INSTANCE AND LEFT THE CLASS: a fourth write site
+    // added later inherits the bug, silently, exactly as the third did. Assigning here — AFTER the
+    // hash is taken, so the deliverable is untouched — makes every present and future reference to
+    // `decision` carry the field without anyone having to remember.
+    // ⚠️ Deliberately after line 570/571: mutating before canonicalize() would change the hashed
+    // bytes, and the disclosure is already inside the report on its own account.
+    decision = { ...decision, dataDisclosure: report.dataDisclosure };
+
     // 4. Persist the exact bytes BEFORE submitting, so the evaluator (C2) can
     // fetch the deliverable and re-hash it, and the user can read the brief.
     await store.setJSON(jobId, {
@@ -578,11 +619,8 @@ export async function handler(event) {
       deliverableHash,
       // The structured half — queryable, and it survives the brief being read once.
       dataPurchase: result.dataPurchase ?? null,
-      // 🚨 THE FIELD MUST TRAVEL WITH THE BRIEF THE UI ACTUALLY RECEIVES. It is inside the hashed
-      // canonicalReport for integrity, but the UI renders `brief` (= decision), which never had it —
-      // which is exactly how it shipped invisible. Both, deliberately: the report for verification,
-      // the brief for the reader.
-      brief: { ...decision, dataDisclosure: report.dataDisclosure },
+      // Carries dataDisclosure because `decision` was enriched above — one assignment, every site.
+      brief: assertBriefCarriesDisclosure(decision, "store-write", jobId),
       ...(proposal ? { proposal } : {}),
       // The SECOND OPINION is persisted even when it KILLED the proposal — especially then.
       // "Your analysts disagreed, so nothing is proposed" is the most valuable thing this
@@ -613,7 +651,7 @@ export async function handler(event) {
       status: "submitted",
       canonicalReport,
       deliverableHash,
-      brief: decision,
+      brief: assertBriefCarriesDisclosure(decision, "store-write", jobId),
       ...(proposal ? { proposal } : {}),
       ...(secondOpinion ? { secondOpinion } : {}),
       ...(synthesis ? { synthesis } : {}),
@@ -625,7 +663,7 @@ export async function handler(event) {
     // automatically. Thread the deliverable data so the evaluator doesn't read
     // it back from Blobs (avoids the eventual-read race). The submit already
     // succeeded on-chain, so a trigger failure must only warn — never throw.
-    await triggerEvaluate({ canonicalReport, deliverableHash, brief: decision });
+    await triggerEvaluate({ canonicalReport, deliverableHash, brief: assertBriefCarriesDisclosure(decision, "trigger-evaluate", jobId) });
   } catch (e) {
     // A still-pending submit tx is submitted-but-slow, not failed — record the
     // id so the poller can distinguish "slow" from "reverted".
