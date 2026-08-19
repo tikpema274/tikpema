@@ -2,9 +2,20 @@
 
 # 🚨 MULTI-NETWORK PAYMENT: THE SETTLE-GATE READS **ONE CHAIN'S** LEDGER — ANSWERED WITH ZERO SPEND
 
-**2026-08-18.** Circle's agent-readiness score came back **72/100**, gaps: multi-network, mpp, and
-the bare-POST 400. The multi-network question was the only one worth measuring, and it resolved
-structurally — **no draft deploy, no probe payment, nothing moved.**
+**2026-08-18.** Circle's agent-readiness score. The multi-network question was the only one worth
+measuring, and it resolved structurally — **no draft deploy, no probe payment, nothing moved.**
+
+⚠️ **CORRECTED 2026-08-19: THE SCORE IS 95/100, NOT 72.** This entry was written against 72, a
+figure I recorded from a verbal report and never saw myself — the page is a browser tool I cannot
+read. It has been **95 since the spec deploy**, and the **ONLY scored gap is "Accept payment on 2+
+networks"**. The bare-POST 400 and mpp are **NOT costing points**: they were already priced in, so
+declining them costs nothing numerically. My "two gaps chosen" framing was arguing a trade-off that
+did not exist.
+⭐ **THE DECLINES WERE RIGHT AND THE ARITHMETIC AROUND THEM WAS WRONG** — which is the more useful
+half to record. A reason that stands on its own does not need a scoreboard to justify it, and
+dressing it in one made it look contingent on a number I had not verified. ⚠️ I also treated a
+number reported to me as measured, in a session that spent the whole day insisting on the
+difference. **Provenance applies to figures from humans too — mark them as reported until seen.**
 
 ## THE MEASUREMENT
 
@@ -74,9 +85,23 @@ instruments agreed and were both wrong; here, one instrument was wrong and a sec
   then fail. Implementing it means a second settlement path holding every property the first one
   does. A project, not a checkbox.
 
-⭐ **72/100 with two gaps chosen and one scoped beats 100/100 with `mpp` declared and validation
-billed.** The score does not test the property the product is built on — that acceptance is not
-payment — so optimising for it would trade the thing being sold for the thing being measured.
+⭐ **95/100, AND THE TWO DECLINED GAPS COST NOTHING.** The score does not test the property the
+product is built on — that acceptance is not payment — so optimising for it would trade the thing
+being sold for the thing being measured. That argument holds at any score; it just turned out not to
+be needed here, because the refusals were free.
+
+🚨 **AND THE LAST 5 POINTS MAY BE UNREACHABLE WITHOUT MIS-SELLING.** The one scored gap is payment
+on 2+ networks. The honest pairing for a service that analyses **Arc testnet** contracts is **Base
+Sepolia** — but a scorer probing mainnet payability would not count it, and accepting Base
+**mainnet** USDC would mean taking real money for testnet analysis. So the remaining 5 points are
+plausibly gated on becoming a mainnet service, not on writing code. ⚠️ Do not treat them as
+outstanding work: treat them as a decision about what this service IS.
+
+⭐ **BADGES ARE A SEPARATE AXIS FROM THE SCORE.** Nanopayments showing unticked costs NOTHING
+numerically — the score is already 95 with multi-network as its only gap. And the live 402 already
+passes Circle's own documented seller test (`extra.name === "GatewayWalletBatched"`, `scheme:
+"exact"`, above the $0.000001 minimum with **no maximum**). So it is a DISPLAY question, worth one
+line in a note to Circle and **no build work at all**.
 
 
 # ✅✅ ITEM 1 IS CLOSED — `gate:pins` EXITS 0. AND THE GATE ITSELF WAS UNDER-REPORTING.
