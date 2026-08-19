@@ -222,6 +222,44 @@ const RESEARCH_RECORD_FIELDS = Object.freeze([
   { path: "dataPurchase", why: "the buy-side taxonomy reads this; null blinds paidPathState()" },
 ]);
 
+/**
+ * ⭐ ESCALATE THIS ONE TO A HUMAN — it is the check that guards a metric, and a metric that goes
+ * blind is not self-announcing.
+ *
+ * The other two warnings degrade something a reader can see: a missing disclosure shows up as a
+ * brief with no sourcing line. This one degrades something NOBODY sees — dataPurchase feeds the
+ * six-state buy-side taxonomy, so its absence makes paidPathState() return `paid-path-unknown` for
+ * every record, and the measurement built to prove the buy side has never fired silently reports
+ * that it cannot tell. It would be discovered by hand-auditing a record, which is how it was found
+ * the first time.
+ *
+ * ⚠️ FIRE-AND-FORGET, AND IT CANNOT BREAK THE WRITE. No await on the caller's path, every failure
+ * swallowed: a Discord outage must never cost a paid deliverable. Same rule as the warning itself.
+ *
+ * ⚠️ IT WILL REPEAT PER JOB UNTIL FIXED, AND THE MESSAGE SAYS SO. There is deliberately no
+ * rate-limit: dedupe needs storage, storage on this path is a new failure mode, and a defect that
+ * blinds the buy-side metric SHOULD be loud. ⭐ But loud-and-repeating is exactly what gets a
+ * channel muted, so the message states the repetition and names the fix — a reader who understands
+ * why it is repeating is far less likely to mute it than one who does not.
+ * ⚠️ If it ever fires in volume, rate-limit it BEFORE muting the channel: a muted alert is the
+ * escalation-channel-nobody-watches failure, arrived at deliberately.
+ */
+function alertRecordMissingFields({ jobId, where, missing }) {
+  const url = process.env.WATCH_ALERT_WEBHOOK;
+  if (!url) return; // no channel configured — the console warning already fired and still stands
+  const content =
+    `🚨 **RESEARCH RECORD MISSING A FIELD** — job \`${jobId}\` at \`${where}\`\n` +
+    `Missing: ${missing.join("; ")}\n` +
+    `**Why this is escalated:** \`dataPurchase\` feeds the buy-side taxonomy. Absent, ` +
+    `\`paidPathState()\` returns \`paid-path-unknown\` for every record and the metric that would ` +
+    `show the buy side has never fired reports only that it cannot tell.\n` +
+    `⚠️ This repeats for every job until a deploy fixes it — it is not rate-limited, deliberately. ` +
+    `Grep \`[research][record-missing-fields]\` for the full set.`;
+  // No await, and errors swallowed — the deliverable must not depend on Discord being up.
+  fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }) })
+    .catch(() => {});
+}
+
 export function warnIfRecordMissingFields(payload, where, jobId) {
   const missing = RESEARCH_RECORD_FIELDS.filter(({ path }) => payload?.[path] === undefined);
   if (missing.length) {
@@ -231,6 +269,8 @@ export function warnIfRecordMissingFields(payload, where, jobId) {
           missing: missing.map((m) => `${m.path} — ${m.why}`),
           note: "a record was persisted or forwarded without a research field. `undefined` means this site never supplied it; an explicit null is a real 'we had none' and passes." })
     );
+    // ⭐ AND REACH A PERSON. The console line is detection; this is the part that makes someone look.
+    alertRecordMissingFields({ jobId: String(jobId ?? "?"), where, missing: missing.map((m) => m.path) });
   }
   return payload;
 }
