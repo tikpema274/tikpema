@@ -53,6 +53,22 @@ const PINNED_SHA256 = "3adb019b80550d5ac6d8b4152c9731b4372f03ccaec01221f4ceccddb
 const PINNED_BYTES = 144;
 const PINNED_DECODED_BYTES = 106;
 
+// ═══ ⭐ THE DOCUMENTARY CASE FOR CURRENCY — A CLAIM ABOUT OUR RECORDS, NOT A MEASUREMENT ════════
+// The check above is structurally blind to deprecation. This narrows that blind spot with the only
+// evidence available short of Circle: an audit of what we have written down.
+//
+//   · NO Entity Secret rotation or re-registration is recorded anywhere in PROGRESS.md.
+//   · Both wallet-creation events POSTDATE the file — per-user wallets 2026-07-03, the DD revenue
+//     wallet 2026-07-27, against a file downloaded 2026-06-11. ⭐ That is fine and not evidence
+//     against currency: the file recovers the SECRET, and wallets created under that secret are
+//     covered by it. Only a ROTATION or RESET deprecates a recovery file — not wallet creation.
+//   · A rotation is not something that happens by drift. It is a deliberate console or SDK action
+//     by a person, so an unrecorded one implies an unrecorded deliberate act.
+//
+// ⚠️ THIS AGES, AND IT DOES NOT SELF-UPDATE. It was true when audited and says nothing about
+// anything done since. Re-audit the date below rather than trusting its continued presence.
+const ROTATION_AUDIT_DATE = "2026-08-19";
+
 // ⚠️ Lives OUTSIDE this repo on purpose — a recovery file must never be committed. Override with
 // RECOVERY_FILE when the location moves.
 const DEFAULT_FILE = path.join(os.homedir(), "Arc-tikpema", "tikpema-dev", "recovery_file_1781206891750.dat");
@@ -132,6 +148,23 @@ console.log(`              happens server-side and does not touch these bytes.`)
 console.log(`    ⭐ "Well-formed" is not "valid". The only surface that proves acceptance is the`);
 console.log(`       reset flow itself, and running that to test it PERFORMS the reset.`);
 console.log(`════════════════════════════════════════════════════════════════════════`);
+
+// ═══ ⚠️ DELIBERATELY A SEPARATE BLOCK, AND DELIBERATELY NOT A ✅/❌ CHECK ══════════════════════
+// Everything above is a measurement of the FILE. This is a claim about OUR RECORDS. Rendering it as
+// a check would let a reader carry it home as "verified", and an audit of what we wrote down is not
+// verification of what Circle holds. Keeping the two visually and structurally apart is the same
+// discipline the rest of this script is built on — the moment they merge, the honesty is gone.
+console.log(`\nℹ️  THE DOCUMENTARY CASE FOR CURRENCY — a claim about OUR RECORDS, not a measurement`);
+console.log(`    As of ${ROTATION_AUDIT_DATE}: NO Entity Secret rotation or re-registration is recorded`);
+console.log(`    anywhere in PROGRESS.md. A rotation is a deliberate console/SDK action by a person,`);
+console.log(`    not something that drifts — so an unrecorded one implies an unrecorded deliberate act.`);
+console.log(`    Wallet creations (per-user 2026-07-03, revenue 2026-07-27) POSTDATE the file, which`);
+console.log(`    does NOT weaken it: the file recovers the SECRET, and wallets created under that`);
+console.log(`    secret are covered. Only rotation or reset deprecates a recovery file.`);
+console.log(`    ⚠️ This ages and does not self-update. It is silent about anything done since`);
+console.log(`       ${ROTATION_AUDIT_DATE}; re-audit rather than trusting its continued presence here.`);
+console.log(`    ⭐ So the blind spot above is NARROW AND REASONED, not wide open — but it is still a`);
+console.log(`       blind spot, and this paragraph is not a substitute for Circle confirming it.`);
 
 if (bad) { console.log(`\n❌ ${bad} check(s) failed.\n`); process.exit(1); }
 console.log(`\n✅ FORM AND IDENTITY INTACT — still the file we recorded. Currency remains unverified.\n`);
