@@ -1,5 +1,59 @@
 ---
 
+# ⭐⭐ ONE DECISION, NOT TWO: "WITH LIVE PRICING" vs "FEES MAY BE DISPROPORTIONATELY LARGE"
+
+**2026-08-19. Deferred three times now.** These are not two items. They are the same gap seen from
+each end, and doing neither leaves the overclaim standing.
+
+| | |
+|---|---|
+| **The card promises** (`PlanPanel.tsx:129`) | "…proposes a concrete plan — **with live pricing**." |
+| **The report delivers** (job #181044) | "fees **may be** disproportionately large" |
+
+🚨 **THE HEDGE IS ABOUT THE ONE NUMBER WE CAN MEASURE EXACTLY.** Not an FX rate from a third party,
+not a forecast — the cost of a swap we would execute ourselves, through a quote path this codebase
+already runs.
+
+## ⭐ AND THE "MEASURE IT" ENDING IS CHEAPER THAN IT LOOKED
+
+`netlify/functions/_swap.mjs:134` already exports it, and its own comment says so:
+
+```js
+// ⭐ estimateSwap is FREE … Priced against the USER'S OWN wallet (walletAddress),
+//    so the quote is the one that wallet would get.
+export async function estimateSwapOnly({ walletAddress, tokenIn, tokenOut, amountIn })
+```
+
+So the work is not "build a pricing path". It is calling one that exists, for free, against the
+wallet that would actually pay.
+
+⚠️ **THE REAL COST IS PARSING, NOT PRICING.** `estimateSwapOnly` needs `tokenIn`, `tokenOut` and
+`amountIn`; the research path receives free text ("convert 5 EURC"). Extracting a token pair and an
+amount reliably enough to put a NUMBER in a paid deliverable is the actual work — and a wrong number
+is worse than an honest hedge. ⭐ That is the argument for the copy ending being the safe default,
+not merely the lazy one.
+
+## THE TWO HONEST ENDINGS
+
+1. **Make the claim true.** The report quotes our own swap path and states the fee as a measured
+   figure with its own timestamp, the way CoinGecko's price already arrives
+   ("usd-coin $0.999665 as of 2026-08-19T12:50:30Z"). ⚠️ Requires reliable token/amount extraction,
+   and a REFUSAL when extraction is ambiguous rather than a guessed pair.
+2. **Stop claiming it.** The card drops "with live pricing" and says what the product actually does
+   — researches economics from cited sources and proposes a plan. **~1 hour**, no money-path change,
+   no new failure modes.
+
+⭐ **DOING NEITHER IS THE ONLY OPTION THAT IS WRONG**, and it is the one three deferrals have chosen
+by default. A card that promises live pricing next to a report that says "may be" is the
+advertised-vs-delivered gap this codebase refuses everywhere else — it is the same defect class as
+x402-quote's "real-time feed" label over canned values, which was fixed, and as DD's coverage
+manifest existing precisely so a thin report cannot read as a full one.
+
+⚠️ **AND IT IS NOT A COPY NIT.** The claim is on the card the buyer reads BEFORE paying, and the
+hedge is in the artifact they receive AFTER. That ordering is what makes it a mis-sale rather than a
+disappointment.
+
+
 # 🚨🚨 THE AGENT-BUYS-FROM-AGENT STEP HAS NEVER FIRED IN PRODUCTION
 
 **2026-08-19.** The sell side is proven — the DD service takes real x402 payment, settles through
