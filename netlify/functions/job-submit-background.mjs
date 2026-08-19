@@ -544,6 +544,17 @@ export async function handler(event) {
     // and anchored on-chain by submit(); adding a live-priced, server-derived field would
     // make the deliverable hash depend on IRIS at hash time. The proposal (and later the
     // receipt) live BESIDE it — two anchors, linked off-chain. See PROGRESS.
+    // ⭐⭐ THE DISCLOSURE GOES INSIDE THE HASHED BYTES, and that is the point. The DD report puts
+    // its coverage manifest inside the SIGNED payload "so it cannot be stripped"; the same argument
+    // applies here — a statement that this brief rests on web sources alone is worth exactly as
+    // much as its inseparability from the brief. Beside the report it could be dropped in transit,
+    // cached away, or quietly not rendered; inside it, the deliverable hash covers it.
+    //
+    // ⚠️ THIS IS NOT THE `proposal` CASE. The proposal was excluded because it is live-priced and
+    // server-derived AT HASH TIME, so the hash would depend on IRIS. This is neither: it is a fact
+    // about how THIS brief was produced, fixed before hashing and never recomputed.
+    // ⚠️ IT DOES CHANGE THE REPORT SHAPE for jobs from here on. Already-anchored deliverables are
+    // untouched; a reader comparing an old report to a new one will see the new field.
     const report = {
       question: result.question,
       model: result.model,
@@ -551,6 +562,9 @@ export async function handler(event) {
       reasoning: decision.reasoning,
       sources: decision.sources,
       confidence: decision.confidence,
+      // 🚨 Never conditional. An absent disclosure would be indistinguishable from a brief that had
+      // nothing to disclose, which is the exact failure this field exists to end.
+      dataDisclosure: result.disclosure ?? "⚠️ Data-purchase outcome not reported by the research path — treat the gap as unexplained.",
       generatedAt: new Date().toISOString(),
     };
     const canonicalReport = canonicalize(report);
@@ -562,6 +576,8 @@ export async function handler(event) {
       status: "submitting",
       canonicalReport,
       deliverableHash,
+      // The structured half — queryable, and it survives the brief being read once.
+      dataPurchase: result.dataPurchase ?? null,
       brief: decision,
       ...(proposal ? { proposal } : {}),
       // The SECOND OPINION is persisted even when it KILLED the proposal — especially then.

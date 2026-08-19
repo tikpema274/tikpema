@@ -46,6 +46,17 @@ import { parseBody, json, dateAnchor } from "./_arc.mjs";
 // is still DECLINED here, which is what keeps the vetting gate in _proposal.mjs legitimately
 // empty (there is nothing unvetted to refuse).
 
+// ═══ ⭐ THE BAND — ONE DEFINITION, AND THE PROMPT IS DERIVED FROM IT ═══════════════════════════
+// 🚨 The range used to exist TWICE: written into the prompt string AND hardcoded in the clamp. Two
+// copies of the same number, and the failure mode is silent — a prompt saying 0.20–0.60 against a
+// clamp of 0.20–0.40 wastes every model choice above the ceiling, producing quotes that are
+// systematically clamped without anything saying so. Interpolated now, so they cannot disagree.
+// ⚠️ Lowering MAX narrows the agent's own data allowance too: allowance = price × 0.30, per-buy cap
+// = allowance × 0.50. At 0.40 that is 0.12 / 0.06. See PROGRESS on why that currently buys nothing.
+const BUDGET_MIN_USDC = 0.20;
+const BUDGET_MAX_USDC = 0.40;
+const BUDGET_DEFAULT_USDC = 0.30; // used only when the model returns an unparseable number
+
 const SYSTEM_PROMPT = `You are pricing an ACTION-PLANNING task for an AI agent that can execute on-chain actions.
 
 The agent researches the real economics of an action, then proposes a concrete plan the USER approves before anything executes. It is allowed — expected — to make a recommendation. What it cannot do is answer an unbounded opinion question.
@@ -82,7 +93,7 @@ Then, for ACCEPTED tasks, assess research complexity: how much source-gathering 
 synthesis is needed to reason honestly about the action's economics.
 
 Return ONLY a JSON object, with no markdown, no fences, and no preamble:
-- if accepted: {"declined": false, "budgetUsdc": <number between 0.20 and 0.60>, "reasoning": "<one short sentence>"}
+- if accepted: {"declined": false, "budgetUsdc": <number between ${BUDGET_MIN_USDC.toFixed(2)} and ${BUDGET_MAX_USDC.toFixed(2)}>, "reasoning": "<one short sentence>"}
 - if declined: {"declined": true, "reason": "<one sentence: what's missing, plus one concrete example that would work>"}
 
 You may use up to 2 decimal places for budgetUsdc (e.g. 0.25, 0.40) — do not restrict yourself to whole numbers.`;
@@ -135,10 +146,10 @@ export async function handler(event) {
     });
   }
 
-  // Accepted: validate + clamp to the same contracted [0.20, 0.60] range as job-quote.
+  // Accepted: validate + clamp to the same contracted [${BUDGET_MIN_USDC}, ${BUDGET_MAX_USDC}] range as job-quote.
   let budgetUsdc = Number(quote.budgetUsdc);
-  if (!Number.isFinite(budgetUsdc)) budgetUsdc = 0.3;
-  budgetUsdc = Math.min(0.6, Math.max(0.2, budgetUsdc));
+  if (!Number.isFinite(budgetUsdc)) budgetUsdc = BUDGET_DEFAULT_USDC;
+  budgetUsdc = Math.min(BUDGET_MAX_USDC, Math.max(BUDGET_MIN_USDC, budgetUsdc));
   budgetUsdc = Math.round(budgetUsdc * 100) / 100;
 
   return json(200, { declined: false, budgetUsdc, reasoning: quote.reasoning || "action plan" });

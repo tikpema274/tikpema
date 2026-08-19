@@ -10,6 +10,17 @@
 
 import { parseBody, json, dateAnchor } from "./_arc.mjs";
 
+// ═══ ⭐ THE BAND — ONE DEFINITION, AND THE PROMPT IS DERIVED FROM IT ═══════════════════════════
+// 🚨 The range used to exist TWICE: written into the prompt string AND hardcoded in the clamp. Two
+// copies of the same number, and the failure mode is silent — a prompt saying 0.20–0.60 against a
+// clamp of 0.20–0.40 wastes every model choice above the ceiling, producing quotes that are
+// systematically clamped without anything saying so. Interpolated now, so they cannot disagree.
+// ⚠️ Lowering MAX narrows the agent's own data allowance too: allowance = price × 0.30, per-buy cap
+// = allowance × 0.50. At 0.40 that is 0.12 / 0.06. See PROGRESS on why that currently buys nothing.
+const BUDGET_MIN_USDC = 0.20;
+const BUDGET_MAX_USDC = 0.40;
+const BUDGET_DEFAULT_USDC = 0.30; // used only when the model returns an unparseable number
+
 const SYSTEM_PROMPT = `You are pricing a research task for an AI research agent.
 The agent does FACTUAL and ANALYTICAL research backed by real sources — NOT
 personal advice, recommendations, or subjective opinions.
@@ -29,7 +40,7 @@ Then assess research complexity for ACCEPTED questions: how many sources, how
 much synthesis, and how much effort it will take to answer well.
 
 Return ONLY a JSON object, with no markdown, no fences, and no preamble:
-- if accepted: {"declined": false, "budgetUsdc": <number between 0.20 and 0.60>, "reasoning": "<one short sentence>"}
+- if accepted: {"declined": false, "budgetUsdc": <number between ${BUDGET_MIN_USDC.toFixed(2)} and ${BUDGET_MAX_USDC.toFixed(2)}>, "reasoning": "<one short sentence>"}
 - if declined: {"declined": true, "reason": "<one sentence: this is an advice/opinion question, not factual research>"}
 
 You may use up to 2 decimal places for budgetUsdc (e.g. 0.25, 0.40) — do not restrict yourself to whole numbers.`;
@@ -82,7 +93,7 @@ export async function handler(event) {
   // Accepted: validate + clamp to the contracted [0.20, 0.60] range.
   let budgetUsdc = Number(quote.budgetUsdc);
   if (!Number.isFinite(budgetUsdc)) budgetUsdc = 0.30;
-  budgetUsdc = Math.min(0.6, Math.max(0.2, budgetUsdc));
+  budgetUsdc = Math.min(BUDGET_MAX_USDC, Math.max(BUDGET_MIN_USDC, budgetUsdc));
   // Round to 2 decimals so the on-chain base-unit conversion (x * 1e6) is clean.
   budgetUsdc = Math.round(budgetUsdc * 100) / 100;
 

@@ -182,11 +182,78 @@ async function filterRelevantPapers(apiKey, model, question, papers) {
   }
 }
 
+// ═══ ⭐⭐ THE DATA-PURCHASE OUTCOME — A CLOSED SET, WITH `unclassified` AS THE DEFAULT ═══════════
+//
+// 🚨 THE DEFECT THIS EXISTS FOR. maybeBuyData had FOURTEEN exits and ten of them were `return []`.
+// Every one degraded the brief to Exa-only, and every one did it SILENTLY: the buyer received a
+// thinner answer that read exactly like a well-funded one. Measured 2026-08-19 — the configured
+// seller advertises 1.0 USDC per call against an absolute per-buy ceiling of 0.01, so the purchase
+// path has NEVER succeeded in production at any price in the job band. Nobody noticed, because
+// nothing said anything.
+//
+// ⭐ SO THE DEFAULT IS `unclassified`, NOT `ok`. The caller creates the object pre-set to
+// unclassified; a code appears only where an exit explicitly marks one. An exit nobody enumerated —
+// which is exactly what the ceiling case was — therefore renders LOUDLY as unclassified rather than
+// falling through to silence. Absence must never read as normality; that is the whole lesson of
+// this week, and it applies to our own agent's answers as much as to a contract report.
+//
+// ⚠️ A MUTABLE OBJECT PASSED IN, NOT A CHANGED RETURN SHAPE. This is live money-path code that
+// signs EIP-3009 authorizations. Adding assignments cannot alter control flow; changing fourteen
+// return shapes could. The object is created per call by the caller, so nothing leaks between
+// invocations of a warm lambda.
+export const PURCHASE_OUTCOME = Object.freeze({
+  PURCHASED: "purchased",                      // paid data acquired and used
+  FREE_SOURCE: "free-source",                  // CoinGecko/arXiv answered; no purchase was needed
+  FREE_SOURCE_EMPTY: "free-source-empty",      // a free source was tried and returned nothing usable
+  NOT_ATTEMPTED: "not-attempted",              // the model judged no extra source necessary
+  METHOD_UNAVAILABLE: "method-unavailable",    // requested on-chain method invalid/unsupported
+  SELLER_UNREACHABLE: "seller-unreachable",    // no usable x402 challenge from the seller
+  PRICE_INVALID: "price-invalid",              // advertised price unparseable
+  CEILING: "ceiling",                          // price above the absolute per-buy ceiling
+  BUDGET: "budget",                            // per-job / per-day budget refused
+  PAUSED: "paused",                            // the Researcher is paused
+  SETTLE_UNCONFIRMED: "settle-unconfirmed",    // payment did not confirm; no money moved
+  NO_USABLE_FACTS: "no-usable-facts",          // settled but the response yielded nothing
+  ERROR: "error",                              // the purchase path threw
+  UNCLASSIFIED: "unclassified",                // 🚨 an exit nobody enumerated — see above
+});
+
+/** Every outcome in which the brief rests on Exa alone. ⚠️ Derived by EXCLUSION, so a code added to
+ *  the set above is degraded-by-default until someone deliberately says otherwise — the safe
+ *  direction, and the same rule as SELF_CLEARING_HEALTH in _dd-rungs.mjs. */
+const AUGMENTED = new Set([PURCHASE_OUTCOME.PURCHASED, PURCHASE_OUTCOME.FREE_SOURCE]);
+export const isDegraded = (code) => !AUGMENTED.has(code);
+
+/** A fresh outcome object. Pre-set to unclassified so silence is impossible. */
+export const newPurchaseOutcome = () => ({ code: PURCHASE_OUTCOME.UNCLASSIFIED, detail: null, at: null });
+
+function mark(outcome, key, detail) {
+  if (!outcome) return;                       // never let reporting break the money path
+  outcome.code = PURCHASE_OUTCOME[key] ?? PURCHASE_OUTCOME.UNCLASSIFIED;
+  outcome.detail = detail;
+  outcome.at = new Date().toISOString();
+}
+
+/** ⭐ THE SENTENCE THE BUYER READS. Written for someone who paid, not for a log reader — it names
+ *  what was NOT done and why, in the same breath as the answer. */
+export function disclosureLine(outcome) {
+  const c = outcome?.code ?? PURCHASE_OUTCOME.UNCLASSIFIED;
+  const why = outcome?.detail ? ` (${outcome.detail})` : "";
+  if (c === PURCHASE_OUTCOME.PURCHASED) return `Paid data was purchased and used in this brief${why}.`;
+  if (c === PURCHASE_OUTCOME.FREE_SOURCE) return `A free data source was used alongside web sources${why}.`;
+  if (c === PURCHASE_OUTCOME.UNCLASSIFIED) {
+    return "⚠️ NO PAID DATA WAS PURCHASED FOR THIS BRIEF, AND THE REASON WAS NOT RECORDED. " +
+      "It rests on web sources alone. This is a defect in our reporting, not a statement about the " +
+      "research — treat the gap as unexplained rather than benign.";
+  }
+  return `⚠️ No paid data was purchased for this brief, so it rests on web sources alone — ${why.slice(2, -1) || c}.`;
+}
+
 // Run the decision → gate → buy sequence and return the purchased facts (an
 // array of { claim, source }), or [] if we didn't buy for any reason. Never
 // throws: every failure path logs and returns [] so research proceeds Exa-only.
 // `store` is the optional injectable budget store (undefined → Netlify Blobs).
-async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jobPrice, store, forceDecision, owner }) {
+async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jobPrice, store, forceDecision, owner, outcome }) {
   try {
     // 1. Decision + ROUTING. `forceDecision` is a TEST-ONLY seam; production runs the
     // genuine classifier. It returns { kind: "onchain"|"market"|"none", method, params,
@@ -197,6 +264,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     const kind = decision?.kind ?? (decision?.buy ? "onchain-legacy" : "none");
     if (kind === "none") {
       console.log(`[research] data decision: NONE (skip) — ${justification}`);
+      mark(outcome, "NOT_ATTEMPTED", "the model judged no extra source was needed");
       return [];
     }
 
@@ -206,6 +274,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     if (kind === "market") {
       const facts = await fetchMarketData(decision.params);
       console.log(`[research] market data (CoinGecko, free): ${facts.length} fact(s) — ${justification}`);
+      mark(outcome, "FREE_SOURCE", `CoinGecko market data (free) — ${facts.length} fact(s)`);
       return facts;
     }
 
@@ -217,11 +286,13 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
       const papers = await searchArxiv({ query: decision.params?.query });
       if (!papers.length) {
         console.log(`[research] arXiv: no clean papers — Exa-only. ${justification}`);
+        mark(outcome, "FREE_SOURCE_EMPTY", "arXiv returned no clean papers");
         return [];
       }
       const kept = await filterRelevantPapers(apiKey, model, question, papers);
       const facts = arxivToFacts(kept);
       console.log(`[research] arXiv papers (free): ${papers.length} fetched → ${facts.length} kept (strict) — ${justification}`);
+      mark(outcome, "FREE_SOURCE", `arXiv (free) — ${facts.length} fact(s) kept`);
       return facts;
     }
 
@@ -237,6 +308,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
       requestBody = buildRpcBody(decision.method, decision.params);
       if (!requestBody) {
         console.warn(`[research] on-chain method unavailable/invalid (NO buy, no spend): ${decision.method}`);
+        mark(outcome, "METHOD_UNAVAILABLE", "the on-chain method requested is not available or invalid");
         return [];
       }
     }
@@ -251,6 +323,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     const chal = await fetchX402Requirements({ sellerUrl: process.env.DATA_SELLER_URL, requestBody });
     if (!chal.ok) {
       console.warn(`[research] x402 challenge fetch failed (NO buy): ${chal.body?.error ?? "unknown"}`);
+      mark(outcome, "SELLER_UNREACHABLE", "the data seller did not return a usable x402 challenge");
       return [];
     }
     // v1 sellers publish the price as maxAmountRequired; v2 (e.g. QuickNode) as
@@ -261,6 +334,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     const amountUsdc = Number(advAtomic) / 1e6;
     if (!Number.isFinite(amountUsdc) || amountUsdc <= 0) {
       console.warn(`[research] x402 advertised price invalid (NO buy): "${advAtomic}"`);
+      mark(outcome, "PRICE_INVALID", `the seller advertised an unusable price: "${advAtomic}"`);
       return [];
     }
     console.log(`[research] purchase decision: BUY (advertised $${amountUsdc}) — ${justification}`);
@@ -272,6 +346,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     if (amountUsdc > ceiling) {
       console.warn(`[research] advertised ${amountUsdc} exceeds absolute per-buy ceiling ${ceiling} USDC (NO buy)`);
       await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: `absolute ceiling: ${amountUsdc} > ${ceiling} USDC`, store });
+      mark(outcome, "CEILING", `advertised ${amountUsdc} USDC exceeds the absolute per-buy ceiling of ${ceiling} USDC`);
       return [];
     }
 
@@ -285,6 +360,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     if (paused) {
       console.log(`[research] PAUSED: ${paused}`);
       await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: paused, store });
+      mark(outcome, "PAUSED", `the Researcher is paused: ${paused}`);
       return [];
     }
 
@@ -292,6 +368,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     if (!gate.allowed) {
       console.log(`[research] budget BLOCKED: ${gate.reason}`);
       await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: gate.reason, store });
+      mark(outcome, "BUDGET", `the per-job budget refused it: ${gate.reason}`);
       return [];
     }
     console.log(`[research] budget ALLOWED — purchasing…`);
@@ -303,6 +380,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     // 6. If the settle did NOT confirm, no money moved → return [] without recording.
     if (!res?.body?.executed) {
       console.warn(`[research] purchase did NOT settle (no spend): status=${res?.status} executed=${res?.body?.executed}`);
+      mark(outcome, "SETTLE_UNCONFIRMED", "the purchase did not confirm — no money moved");
       return [];
     }
 
@@ -330,13 +408,16 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
         : decodeRpc(decision.method, res?.body?.sellerBody, requestBody.params, asOf);
     if (facts.length === 0) {
       console.warn(`[research] settled $${paidUsdc} (spend recorded) but no usable facts — check DATA_SELLER_FACTS_PATH`);
+      mark(outcome, "NO_USABLE_FACTS", `settled ${paidUsdc} USDC but the response yielded no usable facts`);
       return [];
     }
     console.log(`[research] purchased ${facts.length} facts for $${paidUsdc} — spend recorded`);
+    mark(outcome, "PURCHASED", `purchased ${facts.length} fact(s) for ${paidUsdc} USDC`);
     return facts;
   } catch (e) {
     // ANY error degrades to Exa-only. No spend is recorded on the throw path.
     console.warn(`[research] purchase loop error (degrading to Exa-only): ${e.message}`);
+    mark(outcome, "ERROR", `the purchase path threw: ${e?.message ?? e}`);
     return [];
   }
 }
@@ -379,9 +460,13 @@ export async function research(
       // Only when job context is present (jobId + jobPrice), so the budget gate
       // can compute the per-job allowance. maybeBuyData never throws: on decline,
       // block, or failure it returns [] and we synthesize from Exa alone.
+      // ⭐ Created here, per call — never module-level, or a warm lambda would leak one job's
+      // outcome into the next. Pre-set to `unclassified`, so an exit that marks nothing is loud.
+      const purchaseOutcome = newPurchaseOutcome();
       let purchasedFacts = [];
       if (jobId != null && jobPrice != null) {
         purchasedFacts = await maybeBuyData({
+          outcome: purchaseOutcome,
           apiKey,
           model,
           question,
@@ -392,6 +477,10 @@ export async function research(
           store: opts.budgetStore,
           forceDecision: opts.forceDecision, // test-only; undefined in production
         });
+      } else {
+        // ⚠️ NOT a silent skip: without job context there is no budget to gate against, so no
+        // purchase was ever possible. The buyer is told that, rather than shown a thinner brief.
+        mark(purchaseOutcome, "NOT_ATTEMPTED", "no job context, so no budget could be gated against");
       }
 
       // Merge: fold purchased {claim, source} facts into the grounding block,
@@ -551,10 +640,19 @@ export async function research(
         return {
           question, model, decision, exaUsed: true,
           purchasedFacts: purchasedFacts.length,
+          // ⭐ BOTH HALVES, DELIBERATELY. `dataPurchase` is the RECORD — structured, queryable, and
+          // it survives the brief being read once and thrown away. `disclosure` is what the BUYER
+          // reads. A disclosure only in the record is not a disclosure to the person who paid; one
+          // only in the prose does not outlive the page. Same finding as errata_note, one path over:
+          // a disclosure only a source-reader would see is not a disclosure.
+          dataPurchase: { ...purchaseOutcome, degraded: isDegraded(purchaseOutcome.code) },
+          disclosure: disclosureLine(purchaseOutcome),
           citation,
         };
       }
-      return { question, model, decision: null, raw: text, warning: "unparseable (exa path)", exaUsed: true };
+      return { question, model, decision: null, raw: text, warning: "unparseable (exa path)", exaUsed: true,
+               dataPurchase: { ...purchaseOutcome, degraded: isDegraded(purchaseOutcome.code) },
+               disclosure: disclosureLine(purchaseOutcome) };
     } catch (e) {
       console.warn(`[research] Exa retrieval failed (useExa path), refusing web-search fallback: ${e.message}`);
       return { question, model, decision: null, warning: "no verifiable sources found via retrieval", exaUsed: true };
