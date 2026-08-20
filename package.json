@@ -57,7 +57,8 @@
     "gate:recovery": "node scripts/verify-recovery-file.mjs",
     "test:disclosurerender": "npx tsx scripts/verify-disclosure-render.tsx",
     "test:citenum": "npx tsx scripts/verify-citation-numbering.tsx",
-    "test:activityfallback": "npx tsx scripts/verify-activity-fallback.tsx"
+    "test:activityfallback": "npx tsx scripts/verify-activity-fallback.tsx",
+    "test:refusalstates": "npx tsx scripts/verify-refusal-states.tsx"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",

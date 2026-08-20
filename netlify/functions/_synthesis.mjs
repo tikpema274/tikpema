@@ -52,6 +52,48 @@ export function compareAnalyses(proposalA, analysisB) {
   // fee eats the amount. A narrative — however confident — cannot conjure liquidity. This is
   // the whole reason B exists, and the reason its refusal must be able to kill the proposal.
   if (bSays === REFUSE) {
+    // ═══ ⭐⭐ A REFUSAL HAS THREE DIFFERENT CAUSES AND THEY ARE NOT THE SAME FACT ══════════════════
+    // All three used to return agreement:"hard_disagree" with the copy "Your two analysts disagree"
+    // and the reassurance "this is the safeguard working, not a failure". For an OUTAGE both are
+    // FALSE: nobody disagrees (A wants the trade, B says the venue is down), and something IS
+    // failing — just not us. Measured on five consecutive swap jobs, every one an outage wearing a
+    // disagreement's label.
+    //
+    // 🚨 THE CAUSE IS READ FROM B'S TYPED FIELD, NEVER MATCHED OUT OF ITS PROSE. Re-deriving state
+    // by searching the headline for "cannot execute" breaks the first time B rewords, and re-derives
+    // downstream what is known exactly at the throw site. See _analystb.mjs.
+    // ⚠️ An untagged refusal falls to `should-not-execute` — the pre-existing behaviour — rather
+    // than to a new state it was never classified into. A missing tag must not silently become an
+    // outage claim.
+    const cause = analysisB?.cause ?? "should-not-execute";
+
+    if (cause === "cannot-execute") {
+      return {
+        agreement: "cannot_execute",
+        proposalSurvives: false,
+        headline: "This action cannot be carried out right now — the venue is unavailable.",
+        // ⭐ DIFFERENT COPY, NOT JUST A DIFFERENT ENUM. Renaming the state and keeping the
+        // disagreement wording would have renamed the problem, not fixed it.
+        detail:
+          `Both of your analysts agree this is not something the agent can do at the moment. ` +
+          `${analysisB.headline} This is not a disagreement about whether the action is wise, and it ` +
+          `is not something you did — the venue that would carry it out is not currently accepting it. ` +
+          `It is usually temporary; nothing has been spent and nothing is stuck.`,
+      };
+    }
+
+    if (cause === "malformed-proposal") {
+      return {
+        agreement: "not_actionable",
+        proposalSurvives: false,
+        headline: "The proposed action was not well-formed, so there was nothing to price.",
+        detail:
+          `${analysisB.headline} No judgement was made about whether the action is a good idea — ` +
+          `there was not enough of a proposal to check.`,
+      };
+    }
+
+    // should-not-execute: the venue WORKS and B judges the economics bad. A REAL disagreement.
     return {
       agreement: "hard_disagree",
       proposalSurvives: false,

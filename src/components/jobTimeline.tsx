@@ -89,7 +89,9 @@ export type SecondOpinion = {
 // The reconciliation. ⚠️ Decided by PLAIN CODE, never a model — a synthesizer that adjudicates
 // would smooth over exactly the disagreement this exists to surface.
 export type Synthesis = {
-  agreement: "agree" | "caution" | "hard_disagree" | "unverified" | "no_action";
+  // ⭐ SIX STATES, EACH A DIFFERENT FACT. cannot_execute and not_actionable were previously
+  // collapsed into hard_disagree, which told the buyer their analysts disagreed when nobody did.
+  agreement: "agree" | "caution" | "hard_disagree" | "cannot_execute" | "not_actionable" | "unverified" | "no_action";
   proposalSurvives: boolean;
   headline: string;
   detail: string;
@@ -487,6 +489,11 @@ export function SecondOpinionCard({
   analystAReasoning?: string;
 }) {
   const killed = !synthesis.proposalSurvives && synthesis.agreement !== "no_action";
+  // ⭐ AN OUTAGE IS NOT A WITHHELD ACTION. "Your analysts disagreed" and "this is the safeguard
+  // working, not a failure" are both TRUE of a disagreement and both FALSE of a venue being down:
+  // nobody disagreed, and something IS failing — just not us and not the user.
+  const outage = synthesis.agreement === "cannot_execute";
+  const notActionable = synthesis.agreement === "not_actionable";
   const tension = synthesis.agreement === "caution";
 
   // A killed proposal is a WITHHELD ACTION, not an error — amber (attention), not red (alarm).
@@ -502,12 +509,35 @@ export function SecondOpinionCard({
       }}
     >
       <div style={{ color: "var(--muted)", fontSize: "0.72rem", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>
-        {killed ? "No action proposed · your analysts disagreed" : "Second opinion"}
+        {outage
+          ? "No action taken · this cannot be carried out right now"
+          : notActionable
+          ? "No action taken · there was nothing to price"
+          : killed
+          ? "No action proposed · your analysts disagreed"
+          : "Second opinion"}
       </div>
 
       <div style={{ fontSize: "1.05rem", color: "var(--paper)" }}>{synthesis.headline}</div>
 
-      {killed && (
+      {/* ⚠️ THE REASSURANCE IS PER-STATE. Telling a user "the safeguard is working" during an
+          outage is false comfort about a real failure — and telling them their analysts disagreed
+          when both agreed is simply untrue. */}
+      {outage && (
+        <div className="sub" style={{ margin: "8px 0 0" }}>
+          This is <b>not a disagreement</b> and <b>not something you did</b>. Both analysts agree the
+          action is sound in principle — the venue that would carry it out is not currently accepting
+          it. This is usually temporary. <b>Nothing has been spent and nothing is stuck</b>; you can
+          try again later.
+        </div>
+      )}
+      {notActionable && (
+        <div className="sub" style={{ margin: "8px 0 0" }}>
+          There was not enough of a proposal to check, so <b>no judgement was made</b> about whether
+          the action is a good idea.
+        </div>
+      )}
+      {killed && !outage && !notActionable && (
         <div className="sub" style={{ margin: "8px 0 0" }}>
           Your agent has <b>withheld the action</b>. Nothing will be proposed and nothing can be
           approved — this is the safeguard working, not a failure.

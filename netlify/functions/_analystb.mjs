@@ -139,10 +139,22 @@ async function analyseSwap({ walletAddress, tokenIn, tokenOut, amountIn }) {
   try {
     estimate = await estimateSwapOnly({ walletAddress, tokenIn, tokenOut, amountIn });
   } catch (e) {
-    // No route / no liquidity is a HARD refusal, whatever the narrative says. We hit exactly
-    // this live ("No route available") — a bullish story cannot conjure a route.
+    // ═══ ⭐⭐ CANNOT-EXECUTE IS NOT SHOULD-NOT-EXECUTE, AND THE CAUSE IS TYPED HERE ═══════════════
+    // Both previously returned verdict:"refuse", which the synthesiser mapped to
+    // agreement:"hard_disagree" — and the UI then told the buyer "your analysts disagreed" and
+    // "this is the safeguard working, not a failure". BOTH SENTENCES ARE FALSE FOR AN OUTAGE:
+    // nobody disagrees (A wants the trade, B says the venue is down), and something IS failing —
+    // just not us. Measured across five jobs, all reading identically:
+    //   "Stablecoin Service createSwap failed: Route or resource not found. No route available."
+    //
+    // 🚨 THE STATE IS SET FROM THE CAUGHT ERROR, NOT RE-DERIVED FROM B'S SENTENCE. Matching the
+    // prose for "cannot execute" would be the string-matching class this codebase keeps closing:
+    // it breaks the first time B phrases it differently, and it re-derives downstream something
+    // that is known exactly HERE. `cause` is a typed field that travels.
     return {
       verdict: "refuse",
+      cause: "cannot-execute",          // ⭐ the venue could not price or route it at all
+      causeDetail: String(e?.message ?? e).slice(0, 200),
       headline: `The swap cannot execute right now: ${e.message}. No rate, however attractive, matters if the trade cannot be routed.`,
       facts,
     };
@@ -150,8 +162,12 @@ async function analyseSwap({ walletAddress, tokenIn, tokenOut, amountIn }) {
 
   const amountOut = Number(estimate?.estimatedOutput?.amount ?? NaN);
   if (!Number.isFinite(amountOut) || amountOut <= 0) {
+    // ⚠️ Also cannot-execute: the router answered but gave nothing usable. Same class as the throw
+    // above — the venue could not price it — and NOT a judgement about whether the trade is wise.
     return {
       verdict: "refuse",
+      cause: "cannot-execute",
+      causeDetail: "the router returned no usable output amount",
       headline: "The swap router returned no usable output amount — the trade cannot be priced, so it must not be proposed.",
       facts,
     };
@@ -188,6 +204,8 @@ async function analyseSwap({ walletAddress, tokenIn, tokenOut, amountIn }) {
       if (roundTrip > 1 + ROUNDTRIP_TOLERANCE) {
         return {
           verdict: "refuse",
+        cause: "should-not-execute", // ⭐ the venue WORKS; B judges the economics bad — a real disagreement
+       
           headline:
             `The swap router is pricing the two directions inconsistently: a round trip would GAIN ${pct(roundTrip - 1)}%, ` +
             `which is impossible. Its quotes cannot be trusted right now, so I will not endorse trading on one.`,
@@ -206,6 +224,8 @@ async function analyseSwap({ walletAddress, tokenIn, tokenOut, amountIn }) {
   if (absSpread >= SPREAD_REFUSE) {
     return {
       verdict: "refuse",
+        cause: "should-not-execute", // ⭐ the venue WORKS; B judges the economics bad — a real disagreement
+       
       headline:
         spread > 0
           ? `The on-chain rate is ${pct(spread)}% WORSE than fair value — far outside what a stablecoin pair should cost. ` +
@@ -244,7 +264,7 @@ async function analyseBridge({ destination, amountUsdc }) {
   const facts = [];
   const dest = resolveDestination(destination);
   if (!dest) {
-    return { verdict: "refuse", headline: `"${destination}" is not a destination this agent can bridge to.`, facts };
+    return { verdict: "refuse", cause: "malformed-proposal", headline: `"${destination}" is not a destination this agent can bridge to.`, facts };
   }
   let fee;
   try {
@@ -260,7 +280,7 @@ async function analyseBridge({ destination, amountUsdc }) {
   facts.push(`The fee is ${pct(burn)}% of the amount — and it is taken OUT of what you send.`);
 
   if (net <= 0) {
-    return { verdict: "refuse", headline: `The fee (${feeUsdc.toFixed(4)}) meets or exceeds the amount — nothing would arrive.`, facts, feeUsdc, netUsdc: net };
+    return { verdict: "refuse", cause: "should-not-execute", headline: `The fee (${feeUsdc.toFixed(4)}) meets or exceeds the amount — nothing would arrive.`, facts, feeUsdc, netUsdc: net };
   }
   if (burn >= 0.10) {
     return {
@@ -288,7 +308,7 @@ export async function analystB({ proposal, walletAddress }) {
     const tokenOut = SWAP_TOKENS.find((t) => t.toUpperCase() === String(proposal.tokenOut).toUpperCase());
     const amountIn = Number(proposal.amountIn);
     if (!tokenIn || !tokenOut || tokenIn === tokenOut || !(amountIn > 0)) {
-      return { verdict: "refuse", headline: "The proposed swap is not well-formed, so there is nothing to price.", facts: [] };
+      return { verdict: "refuse", cause: "malformed-proposal", headline: "The proposed swap is not well-formed, so there is nothing to price.", facts: [] };
     }
     return { ...(await analyseSwap({ walletAddress, tokenIn, tokenOut, amountIn })), action: "swap_tokens" };
   }
@@ -296,11 +316,11 @@ export async function analystB({ proposal, walletAddress }) {
   if (action === "bridge" || action === "bridge_usdc") {
     const amountUsdc = Number(proposal.amountUsdc ?? proposal.amount);
     if (!(amountUsdc > 0)) {
-      return { verdict: "refuse", headline: "The proposed bridge has no valid amount, so there is nothing to price.", facts: [] };
+      return { verdict: "refuse", cause: "malformed-proposal", headline: "The proposed bridge has no valid amount, so there is nothing to price.", facts: [] };
     }
     return { ...(await analyseBridge({ destination: proposal.destination, amountUsdc })), action: "bridge_usdc" };
   }
 
   // No action proposed ⇒ nothing for B to check. That is not a disagreement.
-  return { verdict: "no_action", headline: "No action was proposed, so there was nothing for me to price.", facts: [] };
+  return { verdict: "no_action", cause: "no-action-proposed", headline: "No action was proposed, so there was nothing for me to price.", facts: [] };
 }
