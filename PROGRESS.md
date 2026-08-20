@@ -1,5 +1,68 @@
 ---
 
+# ⭐⭐ `test:dd`: THE GUARD'S WORDING DOES NOT SAY WHICH PROPERTY IT PROTECTS — THAT IS THE FINDING
+
+**2026-08-20.** Asked to decide by reading what the guard claims to protect. **It claims both, in the
+same paragraph**, which is why 30 hours of invisible red produced an argument rather than an answer.
+
+## THE WORDING, QUOTED — BOTH READINGS PRESENT
+
+| the guard says | which reading |
+|---|---|
+| *"it cannot branch on a **charge outcome**"* | ⭐ OUTCOME |
+| *"so it cannot branch on a **settlement outcome** even in principle: the identifier is not in scope"* | ⭐ OUTCOME |
+| *"the module holding it **imports NO billing code**"* | ⭐ COUPLING |
+| *"settlement is not in scope, **at all**"* | ⭐ COUPLING |
+
+⚠️ The outcome sentences describe the PROPERTY; the coupling sentences describe the MECHANISM that
+was chosen to enforce it — and they are written as if they were the same claim. A reader can defend
+either, honestly, from the text. **A guard whose protected property cannot be read off it can only
+be argued about, never applied.**
+
+## 🚨 AND THE SUITE ITSELF SPLITS ALONG EXACTLY THAT SEAM
+
+```
+✅ …and it cannot branch on a charge outcome — no billing identifier appears in its CODE
+❌ …and the module holding it imports NO billing code — settlement is not in scope, at all
+```
+
+⭐⭐ **THE PROPERTY-LEVEL CHECK PASSES. ONLY THE PROXY FOR IT FAILS.** That is as strong a signal as
+this kind of question ever produces: what the guard exists to protect is intact, and what has broken
+is the shortcut it used to prove it.
+
+## THE FACTS, MEASURED
+
+* `_dd-rungs.mjs:38` imports exactly three names — `resolvePayTo`, `ddPaymentRequirements`,
+  `DD_PRICE_HUMAN` — used at lines 191–203 to build a **402 challenge**: the terms advertised
+  *before* payment. None of the three can report whether a charge succeeded.
+* `_dd-x402.mjs` genuinely does hold settlement machinery — `makeSettler`, `runPaidAnalysis`,
+  `retrievePaid` — and imports `settle-gate.mjs` and `_x402-confirm.mjs`.
+* ⭐ **BUT ES IMPORTS ARE NAMED.** `makeSettler` and `settleDecision` are NOT in `_dd-rungs.mjs`'s
+  scope; three terms-building bindings are. The module-graph edge is a LOADING dependency, not a
+  scope one, and it gives the escalation nothing to branch on.
+* Red since `e8cb0b9`, 2026-08-19 09:12 — ~30 hours, invisible behind `test:probe`.
+
+## ⭐ THE CALL, AND IT IS A RECOMMENDATION NOT A DECISION
+
+On the merits the OUTCOME property is the one worth having: the risk being guarded is that a
+provider-integrity alert could be shaped or suppressed by whether we got paid. Nothing about
+building a 402 can do that — the terms are fixed before any money moves. A pure coupling rule would
+additionally forbid the rungs quoting their own price, which is not a safety property, and the
+alternative is to duplicate `DD_PRICE_HUMAN` into a second module — **the duplicate-source-of-truth
+bug, adopted to satisfy a guard rather than to protect anything.**
+
+**So: narrow the guard, do not change the code** — ban imports that carry a settlement OUTCOME
+(`_x402-confirm`, `settle-gate`, and the outcome-bearing names of `_dd-x402`), keep the existing
+body-level check that no billing identifier appears in the escalation's code, and 🚨 **state the
+protected property in ONE sentence at the top of the assertion**, so the next person can apply it
+instead of re-arguing it.
+
+⚠️ **IF THE COUPLING READING IS PREFERRED INSTEAD**, the code must move: split the terms-building
+helpers (`resolvePayTo`, `ddPaymentRequirements`, the price constants) into a module that imports no
+settlement path, and have both `_dd-rungs` and `_dd-x402` import THAT. More work, no duplication,
+and it makes the coupling rule true rather than merely asserted. ⭐ Either ending is defensible;
+**leaving the guard unable to say which is not.**
+
 # 🚨 THE ROLL-UP PAID FOR ITSELF ON ITS FIRST RUN — AND CORRECTED MY OWN FINDING
 
 **2026-08-20.** First full `test:all` under the new runner: **16 passed, 2 FAILED, 0 NOT RUN**, 1.8
