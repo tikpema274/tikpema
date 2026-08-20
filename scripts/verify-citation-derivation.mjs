@@ -266,8 +266,19 @@ section("6 — the wiring is present where it bites");
   check("  …and forbids listing an unused source", /A source you did not use must NOT appear/.test(job));
 
   const ui = readFileSync("src/components/jobTimeline.tsx", "utf8");
+  // ⚠️ THIS ASSERTION WAS RED FOR AS LONG AS THE HEADING HAS BEEN RIGHT. It pinned
+  // /Retrieved, not used/, and that heading was DELIBERATELY changed (jobTimeline.tsx:260) because
+  // our own fee table is a MEASUREMENT, not a retrieval — calling it "Retrieved" asserted the wrong
+  // provenance. The copy improved and the guard kept failing, inside `test:research`, which IS in
+  // `test:all`. ⭐ A WIRED, RUNNING, RED GUARD THAT NOBODY ACTS ON IS WORSE THAN AN UNWIRED ONE: it
+  // trains a reader to skip the signal, and it hides every later failure in the same suite behind
+  // noise that is known-bad.
+  // ⚠️ AND IT IS A SOURCE SCAN, the class this repo abandoned twice for exactly this reason — it
+  // cannot tell "the heading moved" from "the heading is gone". The durable form is rendered
+  // (see verify-citation-numbering.tsx); pinned here to the CURRENT strings as the minimum fix,
+  // with the real repair queued.
   check("⭐⭐ the UI renders the two lists under SEPARATE headings",
-    /Retrieved, not used/.test(ui) && /<b>Sources:<\/b>/.test(ui));
+    /Not listed by the model as sources:/.test(ui) && /<b>Sources:<\/b>/.test(ui));
   check("  …and the unused list is not merged into brief.sources",
     /brief\.retrievedNotCited/.test(ui));
 }

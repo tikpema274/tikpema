@@ -18,6 +18,7 @@ import { assertNotPaused } from "./_pause.mjs";
 import { payX402, fetchX402Requirements } from "./_x402.mjs";
 import { buildRpcBody, decodeRpc, fetchMarketData } from "./_cryptodata.mjs";
 import { searchArxiv, arxivToFacts } from "./_arxiv.mjs";
+import { swapRateTable, swapRateGroundingText } from "./_swap-rate-table.mjs";
 
 // Current Anthropic web search server tool (GA — no beta header).
 const WEB_SEARCH_TOOL = { type: "web_search_20260209", name: "web_search", max_uses: 3 };
@@ -546,6 +547,24 @@ export async function research(
         }
       }
 
+      // ═══ ⭐ AND OUR OWN USDC/EURC RATE, FOR THE SAME REASON ONE LAYER OVER ═══════════════════
+      // Job #181295 headlined SimpleSwap's 0.874 while citing our own injected prices whose
+      // quotient is 0.854369 — and called the two "consistent". ⚠️ Handing the model the two
+      // COMPONENT prices was already happening and was not enough; it needs the DIVISION as a fact.
+      //
+      // ⚠️ KEYWORD-TRIGGERED, NOT EXTRACTED — same rule as the fee table. This asks only "is the
+      // question about converting between these two tokens"; it never parses an amount or a
+      // direction. A false positive injects a correct rate nobody cites; a false negative omits it.
+      // Neither can put a WRONG number in a paid brief, which is the property that matters.
+      let rateTable = null;
+      if (/\bswap|convert|exchang|eurc|euro[- ]?coin/i.test(question)) {
+        try {
+          rateTable = await swapRateTable();
+        } catch (e) {
+          console.warn(`[research] swap rate table unavailable (brief continues without it): ${e?.message ?? e}`);
+        }
+      }
+
       // ── Autonomous mid-research purchase (Phase 2a) ────────────────────────
       // Only when job context is present (jobId + jobPrice), so the budget gate
       // can compute the per-job allowance. maybeBuyData never throws: on decline,
@@ -580,9 +599,11 @@ export async function research(
       );
       // ⭐ THE TABLE IS ONE NUMBERED ENTRY, so the model can cite it like any other source and the
       // partition assertions treat it uniformly. Appended last so existing indices do not shift.
-      const measuredEntries = feeTable
-        ? [`[${exaResults.length + purchasedFacts.length + 1}] ${feeTableGroundingText(feeTable)}`]
-        : [];
+      const measuredEntries = [];
+      if (feeTable)
+        measuredEntries.push(`[${exaResults.length + purchasedFacts.length + measuredEntries.length + 1}] ${feeTableGroundingText(feeTable)}`);
+      if (rateTable)
+        measuredEntries.push(`[${exaResults.length + purchasedFacts.length + measuredEntries.length + 1}] ${swapRateGroundingText(rateTable)}`);
       const groundingBlock = [...exaEntries, ...purchasedEntries, ...measuredEntries].join("\n\n");
 
       const exaUser =
@@ -644,6 +665,10 @@ export async function research(
           // It stays INSIDE the cited/notCited partition so every marker resolves and the invariants
           // hold; only the LABEL differs. A separate third list would have broken the partition and
           // left markers pointing outside it.
+          // ⚠️ THE ORDER AND COUNT HERE MUST MIRROR `measuredEntries` EXACTLY, or the partition
+          // breaks and every marker past the first measured entry resolves to the wrong row —
+          // the #181044 renumbering defect, re-created from the other side. Both lists append
+          // fee-table first, rate-table second, and both skip an absent table without shifting.
           ...(feeTable
             ? [{
                 n: exaResults.length + purchasedFacts.length + 1,
@@ -651,6 +676,15 @@ export async function research(
                 title: `Tikpema's own measured bridge fees, per destination (as of ${feeTable.at})`,
                 url: null,
                 measuredAt: feeTable.at,
+              }]
+            : []),
+          ...(rateTable
+            ? [{
+                n: exaResults.length + purchasedFacts.length + (feeTable ? 1 : 0) + 1,
+                kind: "measured",
+                title: `Tikpema's own measured USDC/EURC rate: ${rateTable.rate.toFixed(6)} EURC per USDC (as of ${rateTable.at})`,
+                url: null,
+                measuredAt: rateTable.at,
               }]
             : []),
         ];
