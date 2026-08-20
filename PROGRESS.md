@@ -1,5 +1,73 @@
 ---
 
+# ✅ THE CARD RENDERED — job #181295. And the next defect was sitting inside it.
+
+**2026-08-20.** `SecondOpinionCard` rendered on a real screen for the first time ever: exact header,
+both analysts, B's verdict verbatim. Every link in that chain is now measured — the state fires,
+the record carries it, the projection survives the merge, the bundle ships it, the screen shows it.
+
+# 🚨 THE BRIEF'S HEADLINE RATE IS REFUTED BY THE BRIEF'S OWN CITED PRICES
+
+Not primarily an A-vs-B disagreement. **A and B had the SAME data.**
+
+| | rate (EURC per USDC) |
+|---|---|
+| brief headline — SimpleSwap `[1]` | **0.874** |
+| **the brief's OWN cited prices** `[7][8]` — $0.999612 ÷ $1.17 | **0.854369** |
+| B, CoinGecko | **0.854369** ← *identical to six decimals* |
+| B, second instrument (App Kit / ECB) | 0.854728 — **0.04% apart** |
+
+⭐⭐ **B's FIGURE AND THE BRIEF'S OWN ARITHMETIC ARE THE SAME NUMBER.** So this is not two analysts
+reading different sources. A held the components of the correct rate, cited them, and still
+headlined a third-party quote — SimpleSwap's, which embeds their spread.
+
+🚨 **AND IT ASSERTS THE CONTRADICTION AWAY IN WORDS.** The brief reads: *"~0.874 EURC per USDC [1],
+**consistent with** EURC trading at ~$1.17 vs USDC at ~$1.00 [7][8]."* That consistency claim is
+**false by 2.30%**, and it is the sentence that stops a reader from checking.
+
+⚠️ **THE USER-FACING NUMBER IS THE WRONG ONE.** *"Swapping 4 USDC would yield approximately 3.50
+EURC"* — the brief's own cited prices give **3.417**. The figure a buyer reads first is the one
+refuted by the figure further down the same page.
+
+## ⭐ THE SHAPE — the bridge fee again, except we had already won
+
+Reaching outside for a number we compute better ourselves. ⚠️ **But worse than the bridge case in
+one specific way:** for bridges the better number lived in a fee table elsewhere. Here **OUR OWN
+MEASUREMENT WAS ALREADY IN THE BRIEF'S OWN CITATION LIST** — `[7]` and `[8]` are the CoinGecko
+grounding entries this pipeline injected (`usd-coin — price: $0.999612`, `euro-coin — price: $1.17`).
+The model was handed the right inputs, cited them, and used them only as decoration for a worse
+number.
+
+## ⚠️ AND THE PANEL IS TRUE AND INSUFFICIENT AT THE SAME TIME
+
+*"Both analysts agree the action is sound in principle"* — correct, and it is about DIRECTION.
+Meanwhile their numbers differ by 2.3% and nothing surfaces it. **A disagreement that exists in the
+data and is not shown** is the same family as everything else closed this week: the fact is in the
+record and never reaches the reader.
+
+## ✅ WHAT IS ALREADY HANDLED — checked before recording
+
+The dangling-citation half is NOT a new defect. `[7]`/`[8]` sit under `retrievedNotCited`, and
+`jobTimeline:253` already carries the fix and names this exact case from job #181056: *"'no claim
+above rests on them' is a claim about the PROSE — an inference we cannot check, and one job #181056
+falsified: the body cited [7][8] for a price while both sat under this heading."* The heading was
+narrowed to state what is measured. Nothing to do there.
+
+## THE FIX SHAPE (not built — needs a decision)
+
+⭐ The precedent already exists: `8c1d1e9` injects our own timestamped **fee** table as grounding so
+bridge briefs can price from our measurement. The same mechanism can inject a **computed rate** —
+`USDC/EURC from CoinGecko + ECB, as of <timestamp>` — as a first-class grounding fact, so the
+model's best available number is our number rather than a swap aggregator's landing page.
+
+⚠️ **AND A GUARD THAT DOES NOT DEPEND ON THE MODEL BEHAVING.** Injecting a better number does not
+stop a brief headlining a worse one. The checkable invariant is arithmetic, not prose: **when the
+brief states a rate AND the grounding carries the two component prices, the stated rate must agree
+with their quotient within a tolerance** — and a brief that cannot satisfy that must say the rate is
+indicative rather than assert consistency. ⭐ That is checkable on a RECORD, offline, with #181295
+as the fixture that fails it.
+
+
 # ⭐⭐ THE SHARPENED SWEEP — WHICH SUITES BUILD THEIR OWN INPUTS, AND WHICH OF THOSE MATTER
 
 **2026-08-20.** Target restated: not "which components lack a suite" but *which suites are true about
