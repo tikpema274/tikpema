@@ -208,9 +208,18 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
       </div>
 
       <div className="sub" style={{ marginTop: 6, fontSize: "0.8rem" }}>
-        A live cross-chain fee (taken from the amount) applies — you'll see the exact
-        fee and net arrival on the confirmation. Bridges over your per-bridge cap, or
-        too small to cover the fee, are refused before any funds move.
+        {/* ⚠️ THIS SENTENCE PROMISED MORE THAN THE CONFIRMATION DELIVERS. It said "you'll see the
+            exact fee and net arrival on the confirmation" — but the confirmation below deliberately
+            says ESTIMATED for the arrival, and its own comment explains why: netUsdc is arithmetic
+            (burned minus the quoted fee), not an observation of what landed. ⭐ "Exact" was true of
+            the FEE and false of the ARRIVAL, and attaching one adjective to both is what made the
+            page promise above what it hedges below — the advertised-vs-delivered gap this codebase
+            closes everywhere else. The exact delivered figure does exist; it just arrives later,
+            once the destination chain has been read. */}
+        A live cross-chain fee (taken from the amount) applies — the confirmation shows the
+        exact fee quoted at execution and an <b>estimated</b> arrival; the exact delivered
+        amount appears once we have read the destination chain. Bridges over your per-bridge
+        cap, or too small to cover the fee, are refused before any funds move.
       </div>
 
       {error && (

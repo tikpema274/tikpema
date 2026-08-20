@@ -25,7 +25,7 @@
     "test:dca": "node scripts/verify-dca-ledger-failclosed.mjs && node scripts/verify-dca-tick-observability.mjs && npx tsx scripts/verify-dca-consent-copy.tsx",
     "test:ub": "node scripts/verify-ub-auto-allocation.mjs && node scripts/verify-provisioning-status.mjs && node --experimental-test-module-mocks scripts/verify-ub-withdraw-guard.mjs && node --experimental-test-module-mocks scripts/verify-owner-wallet-provisioning.mjs && npx tsx --experimental-test-module-mocks scripts/verify-ub-exit-view.tsx",
     "test:research": "node scripts/verify-citation-derivation.mjs && node scripts/verify-rate-consistency.mjs",
-    "test:bridge": "node --experimental-test-module-mocks scripts/verify-bridge-receipts.mjs && node scripts/verify-bridge-fee-band.mjs && node --experimental-test-module-mocks scripts/verify-agent-quote-record.mjs && npm run test:bridgecopy && npm run test:quoteretention && npm run test:acktoken",
+    "test:bridge": "node --experimental-test-module-mocks scripts/verify-bridge-receipts.mjs && node scripts/verify-bridge-fee-band.mjs && node --experimental-test-module-mocks scripts/verify-agent-quote-record.mjs && npm run test:bridgecopy && npm run test:quoteretention && npm run test:acktoken && npx tsx scripts/verify-bridge-panel-copy.tsx",
     "test:quote": "node --experimental-test-module-mocks scripts/verify-agent-quote-record.mjs",
     "test:disclosure": "npx tsx scripts/verify-disclosure-diff.mjs",
     "test:liveness": "node scripts/verify-deploy-liveness.mjs",
