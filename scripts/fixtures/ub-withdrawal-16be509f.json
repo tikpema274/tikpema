@@ -1,0 +1,25 @@
+{
+  "_note": "The REAL ub-withdrawals record for 16be509f \u2014 the first exit ever completed end to end. \u26a0\ufe0f ONE deviation from the stored bytes: `owner`/`landedIn` are replaced with a synthetic address, because an owner identity in a committed fixture is a testnet identity that becomes a mainnet one. Every other field is verbatim, and none of the assertions depend on the address.",
+  "record": {
+    "schema": "ub-withdrawal/1",
+    "withdrawalId": "16be509f-b3fd-467e-8d2e-b68159b9ffe0",
+    "owner": "0x0000000000000000000000000000000000000abc",
+    "amountUsdc": "1",
+    "state": "completed",
+    "createdAt": "2026-08-12T20:49:09.601Z",
+    "updatedAt": "2026-08-20T01:01:02.926Z",
+    "initiateTxHash": "0x79d06776caeb5c33f90c33605b8bbe91e2c43cc775cdfb53cc0c2e57a3150899",
+    "completeTxHash": "0xc51ae011abf137664875f3732958ea8210382a549942d8abbc049b50e68bbca0",
+    "delayBlocks": "1209600",
+    "approxDelayDays": 7.1,
+    "maturesApprox": "2026-08-19T23:13:09.662Z",
+    "landedIn": "0x0000000000000000000000000000000000000abc",
+    "stillNeedsAgentWithdraw": true,
+    "lastError": null,
+    "overdueAlerted": false,
+    "lastAlertedAt": null,
+    "amountAtomic": "1000000",
+    "initiatedAt": "2026-08-12T20:49:12.599Z",
+    "completedAt": "2026-08-20T01:01:02.919Z"
+  }
+}

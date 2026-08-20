@@ -46,16 +46,41 @@ const STATE_LABEL: Record<string, string> = {
 
 const isOpen = (s?: string) => s === "initiating" || s === "waiting" || s === "completing";
 
+/**
+ * ⚠️⚠️ `initial` IS A TEST-ONLY SEAM, AND IT EXISTS FOR A MEASURED REASON.
+ *
+ * 🚨 THIS COMPONENT WAS UNREACHABLE BY EVERY GUARD IN THE REPO. `verify-unified-balance-copy`
+ * listed it among the children its whole-rendered-tree checks cover — and it contributed **ZERO
+ * CHARACTERS** to a 4,152-char render, because `loading` starts `true` and every claim-bearing
+ * branch sits behind a `useEffect` fetch that `renderToStaticMarkup` never runs. An absence check
+ * over a component that renders nothing PASSES, so the suite was green and blind at once.
+ *
+ * ⚠️ AND MOCKING `fetch` DOES NOT FIX IT. There is no DOM and no effect pass under SSR, so the
+ * request never happens however it is stubbed — the seam has to be the RESULT, not the transport.
+ *
+ * ⭐ Same shape as `_research.mjs`'s documented `forceDecision`: production passes nothing and
+ * behaviour is identical; a guard seeds the state the fetch would have produced. It is read ONCE,
+ * to initialise, so it cannot diverge from real behaviour mid-life.
+ * ⭐ The guard that uses it drives the REAL `ub-withdraw` GET handler to produce that payload, so
+ * what is rendered here is what the server actually emits — a binding can only be tested across
+ * what it binds.
+ */
+export type UbExitInitial = { data?: Payload | null; error?: string };
+
 export default function UbExitStatus({
   token,
   reloadKey = 0,
+  initial,
 }: {
   token: () => Promise<string>;
   reloadKey?: number;
+  initial?: UbExitInitial;
 }) {
-  const [data, setData] = useState<Payload | null>(null);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<Payload | null>(initial?.data ?? null);
+  const [error, setError] = useState(initial?.error ?? "");
+  // ⚠️ Seeded state means the first paint is NOT loading — otherwise the seam would render the
+  // spinner and prove nothing, which is exactly the failure it exists to end.
+  const [loading, setLoading] = useState(!(initial?.data || initial?.error));
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [startErr, setStartErr] = useState("");

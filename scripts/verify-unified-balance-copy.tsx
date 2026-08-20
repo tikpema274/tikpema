@@ -46,9 +46,13 @@
 // an absence check over a component that renders nothing PASSES. The same mocking that was applied
 // to `useGatewayBalance` (see the note below — SSR does not run effects) was never applied here,
 // and the header was written as though it had been.
-// ⚠️ FIX QUEUED, NOT DONE: mock the fetch and assert UbExitStatus's own claims in both directions.
-// Until then, treat every claim in that component as UNGUARDED and do not read this suite's green
-// as covering it.
+// ✅ CLOSED 2026-08-20 by `verify-ub-exit-view.tsx`, and NOT the way it was queued. "Mock the fetch"
+// cannot work: there is no DOM and no effect pass under SSR, so the request never happens however
+// it is stubbed — the seam had to be the RESULT, not the transport. That suite drives the REAL
+// `ub-withdraw` GET handler and paints the REAL component with what it returns.
+// ⚠️ THIS SUITE STILL DOES NOT COVER `UbExitStatus`. Its forbidden-phrase checks pass over an empty
+// contribution here, exactly as before; the coverage lives in the other file. Read this line as a
+// pointer, never as a claim about what runs below.
 //
 // ⚠️ PRESENT AND ABSENT ARE DIFFERENT CHECKS and only both together prove anything — a new phrase
 // appearing does not mean the old one left. Counts stay EXACT, never `> 0`: a duplicated phrase and
