@@ -1,5 +1,79 @@
 ---
 
+# 🚨🚨 `test:all` WAS RED FOR 21 HOURS — AND A `&&` CHAIN MEANT 11 OF 18 SUITES NEVER RAN
+
+**2026-08-20.** Asked how long, because anything else that went red in the same window was hidden
+behind it. The duration is the *smaller* half of the answer.
+
+## THE WINDOW — 20.9 hours, and it is NOT where I first looked
+
+⚠️ My first guess was "hours, since `8c1d1e9` last night". Wrong, and wrong in the direction that
+would have understated it. `8c1d1e9` (23:37) *reworded* the heading; the string the guard pins had
+already gone **seven and a half hours earlier**:
+
+| | |
+|---|---|
+| `1244aea` 2026-07-31 10:57 | adds `Retrieved, not used` to BOTH the component and the guard — green |
+| **`24ea2a1` 2026-08-19 16:05** | *"say what did NOT happen — heading, annotation…"* changes the heading in the component **and not in the guard** → 🚨 **RED** |
+| `8c1d1e9` 2026-08-19 23:37 | rewords again to `Not listed by the model as sources:` |
+| this session, ~13:00 | guard repinned → green |
+
+⭐ Under a day, so by the stated criterion this is the ordinary case rather than a different
+finding. ⚠️ But note **the red was introduced by a commit whose whole purpose was improving that
+heading** — the guard failed *because the copy got better*, which is the most demoralising possible
+form of a red suite and the one most likely to be waved past.
+
+## ⭐⭐ THE REAL WEIGHT: `&&` SHORT-CIRCUITS, SO ONE ASSERTION SILENCED ELEVEN SUITES
+
+`test:all` is a single `&&` chain, and `test:research` sits **7th of 18**:
+
+```
+ 1 probe · 2 watch · 3 vault · 4 dd · 5 dca · 6 ub · 7 research ← RED HERE
+ 8 bridge · 9 quote · 10 copy · 11 ddcopy · 12 disclosure · 13 client
+ 14 liveness · 15 sweep · 16 gate:routes · 17 spikes · 18 prodsession     ← 11 never ran
+```
+
+🚨 **FOR 21 HOURS, `npm run test:all` COULD NOT REACH ELEVEN SUITES**, and it exited non-zero for a
+reason that had nothing to do with any of them. ⭐⭐ Including `test:copy` at position 10 — which is
+where **this session put the plan-card guard AND the job-status-merge guard**. Every guard written
+today landed behind the block on the day it was written. They were verified only because each was
+run DIRECTLY; a `test:all` run would have proved nothing about them and looked like it had.
+
+⚠️ **AND THE MASKING IS SILENT IN THE WORST WAY**: a red aggregate reports ONE failure, so a reader
+sees a single known-bad line and a familiar red, not "eleven suites were skipped". The count of what
+was NOT run appears nowhere.
+
+## ⭐⭐ THE THIRD SPECIES, AND ITS REGISTRY ASSERTION
+
+Three ways a guard fails to guard, now all measured this session:
+
+| species | how it hides | the fix |
+|---|---|---|
+| **unguarded claim** | no suite names the surface | write one that RENDERS it |
+| **unwired suite** | exists, never invoked (4 of 9 render suites) | wire it into an aggregate |
+| 🚨 **red aggregate, tolerated** | visible and ignored — *and it masks everything downstream* | **a red aggregate must BLOCK something** |
+
+⭐ The third is the worst of the three, and it is worth being precise about why: an unwired guard is
+merely absent, and absence is honest. A tolerated red one is **actively corrosive** — it trains a
+reader to skip the signal, and while it is being skipped it is also hiding every suite behind it.
+The first two fail open quietly; this one recruits the reader into failing open.
+
+**So the registry gate now carries four assertions, not three:**
+
+1. every claim-bearing surface is named by a suite that **renders** it, contributing a **nonempty**
+   render (the `UbExitStatus` failure);
+2. every suite is **reachable from an aggregate** (the four orphaned render suites);
+3. every **pass-through** rebuild is fed by at least one **real recorded payload** (the synthesis gap);
+4. 🚨 **NO AGGREGATE MAY BE RED.** An unwired guard is invisible; a tolerated red one is visible and
+   ignored. The fix for the first is wiring — **the fix for this one is that a red aggregate has to
+   block something.**
+
+⚠️ **AND A FIFTH FALLS OUT OF THE MASKING**, which is a mechanical fix rather than a cultural one:
+`test:all` should not stop at the first failure. Running every suite and reporting a roll-up makes
+"11 skipped" impossible to mistake for "1 failed" — the same rule as the sweeper's bounded tick
+REPORTING its remainder instead of dropping it silently.
+
+
 # ✅ THE CARD RENDERED — job #181295. And the next defect was sitting inside it.
 
 **2026-08-20.** `SecondOpinionCard` rendered on a real screen for the first time ever: exact header,
