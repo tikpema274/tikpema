@@ -1,5 +1,112 @@
 ---
 
+# ⭐⭐ HOP 2 RAN. UNATTENDED. THE EXIT IS NOW PROVEN END TO END — ONCE.
+
+**2026-08-20.** The last unproven branch of the unified-balance exit closed itself while nobody was
+watching, which is the only way it could ever have been proven. `16be509f` is `completed`.
+
+| | |
+|---|---|
+| initiated | `2026-08-12T20:49:12Z`, block 56671240, tx `0x79d06776…` |
+| maturity | block 57880840 = **`2026-08-20T00:33:55Z`** |
+| completed | block 57884052 = **`2026-08-20T01:01:02Z`**, tx `0xc51ae011…` |
+| moved | **1.000000 USDC**, Gateway → the owner's SCA |
+| wall clock | **7 d 4 h 11 m** |
+
+## ⭐ FOUR INSTRUMENTS, FOUR DIFFERENT QUESTIONS — not one read repeated
+
+1. **Chain, two independent RPCs.** `withdrawingBalance` 0, `withdrawableBalance` 0,
+   `withdrawalBlock` **0** — the slot is cleared, so there is nothing pending AND nothing matured
+   sitting unswept. Those are the two distinct failures a single zero would have hidden.
+2. **`eth_getLogs`, anchored on the initiation tx.** Exactly ONE Gateway→SCA USDC transfer after
+   maturity: 1 USDC at block 57884052. ⚠️ The first attempt at this returned "0 transfers found"
+   with **every chunk erroring** (`range too large`, then `rate limit exceeded`) — a clean-looking
+   absence produced entirely by a broken instrument. The rewrite prints `chunks ok=27 failed=0` and
+   says in words that a non-zero `failed` makes absence meaningless. *A filtered read is not a
+   measurement of absence, and neither is a failed one.*
+3. **The payout transaction itself.** `to` is the ERC-4337 EntryPoint (correct for a Circle SCA,
+   not the Gateway); inner calldata `b61d27f6` execute → Gateway → **`0x51cff8d9` = `withdraw(address)`**
+   with USDC. Status 1. This is the PURPOSE check — a transfer alone would only have proved value moved.
+4. **Our own record.** `state:"completed"`, `completeTxHash` = **the same hash the chain search
+   found independently**, `completedAt` matching the block timestamp to the second.
+
+## ⭐⭐ THE TIMING IS THE ATTRIBUTION — this is what makes it the SWEEPER and not a human
+
+Maturity `00:33:55Z`. The sweeper is `*/30`. The `00:30` tick fell **3 m 55 s before** maturity and
+correctly returned `not-yet-matured`; the `01:00` tick completed it **62 seconds later**. Nobody
+lands within a minute of the top of the hour. ⭐ And the mechanism corroborates the clock:
+`ub-withdraw-sweep` is the ONLY caller of `ubCompleteWithdrawal` and the ONLY writer of
+`completeTxHash` — grep confirms no manual complete path exists to confuse it with, and the function
+is not HTTP-invokable. Heartbeat live at `08:00:43Z`, `open:0`.
+
+## ⚠️ TWO MEASUREMENTS ABOUT ESTIMATES, BOTH IN THE SAME DIRECTION
+
+* `maturesApprox` recorded `2026-08-19T23:13Z`. Real maturity: `2026-08-20T00:33:55Z` — **80 minutes
+  late.** The delay is in BLOCKS; block time drifted. Exactly the failure the "never a precise
+  deadline" rule was written against, and it happened on the very first run.
+* The round trip took **7 d 4 h** against a 7.1-day estimate. ⭐ "Treat the wait as the floor, not
+  the ceiling" is no longer a precaution — it is a measurement.
+
+## 🚨 IT IS *ONCE*, NOT TWICE — the store holds ONE record
+
+The whole `ub-withdrawals` store is one withdrawal plus the heartbeat. What changed is not the
+COUNT, it is what "done" MEANS: the page's "done once" sat directly after *"we finish it
+automatically — you do not have to come back"*, and **the automatic finish had never happened**. The
+sentence was reading as evidence for the one claim nothing supported. Now it isn't.
+
+⭐ Copy updated at all three rendered sites (`YourMoney` ×1, `UnifiedBalancePanel` ×2): *"done once,
+**end to end**: 1 USDC asked for on 2026-08-12 and returned automatically on 2026-08-20, with nobody
+watching — one real run, not a track record. It took 7 days and 4 hours, longer than the estimate."*
+⚠️ `one real run, not a track record` is KEPT verbatim — the evidence got stronger, not thicker.
+
+**Guard**: `verify-unified-balance-copy` 33/0, and the new `/end to end/` assertion scores **0/1 and
+0/2 against the pre-fix copy**. The 33 is only worth what that 0 proves.
+
+# ⭐⭐ "WITH LIVE PRICING" IS GONE — the fifth deferral did not happen
+
+`PlanPanel.tsx` promised *"a concrete plan — with live pricing"* on the card a buyer reads **before
+paying**, while the artifact delivered **after** hedged with *"fees may be disproportionately
+large"*. Ending 2 of the recorded decision, taken as recorded.
+
+## ⭐ WHY NOT SIMPLY DELETE THE PHRASE — the asymmetry is real and moves
+
+* **Bridge** — our own timestamped fee table is injected as grounding (`8c1d1e9`), so a bridge brief
+  CAN state a measured figure.
+* **Swap** — `createSwap` has returned `No route available` since ~2026-08-14, so a swap cannot be
+  priced at all.
+
+Promising pricing flatly is false for swaps; promising none understates bridges; **naming the
+drought rots the day it lifts.** ⭐ So the new claim is about CONDUCT, not coverage: *"Where a fee
+can be measured, it is quoted as a measured figure with its timestamp; where it cannot, the agent
+says so rather than inventing a number."* True on both sides of the outage.
+
+## 🚨 AND THE REAL FINDING: **NOTHING GUARDED THIS CARD AT ALL**
+
+No suite rendered `PlanPanel`, no suite mentioned it. That is why a false promise survived four
+deferrals — **an unguarded claim is one nobody is required to revisit.** The unified-balance copy has
+been wrong five times and has a guard; this card was wrong once, for longer, and had none.
+
+New `scripts/verify-plan-card-copy.tsx`, wired into `npm run test:copy`. Renders the component and
+asserts BOTH directions with exact counts. **10/0 on the fix; 4 failures against the pre-fix card —
+two present-checks and two absence-checks, so both halves of the guard are shown to discriminate.**
+⚠️ It also asserts the lead paragraph EXISTS, because an empty render passes every absence check.
+
+# STATE
+
+* Deferred no longer, but **NOT DEPLOYED** — prod `6a86a72be0a892f00ca72d44` still shows the old
+  copy on both cards. Bundling budget ~30 min; run `npm run gate:deployed` after.
+* `npm run build` clean; `test:copy` 33/0 + 10/0; `test:disclosure` 20/0.
+* ⏳ **OPEN — the one thing no gate can prove:** whether `cannot_execute` actually RENDERS on a real
+  swap job. `ce58631` is live (`364fab3`) but only a real job exercises the state. Requires a
+  passkey, so the user runs it: header must read *"No action taken · this cannot be carried out
+  right now"*, NOT *"your analysts disagreed"*.
+* ⚠️ Still queued from the previous handoff, untouched: **Analyst A failing has no state** — it
+  collapses to `no_action`, indistinguishable from A deliberately proposing nothing. Same defect
+  `ce58631` fixed, one analyst over.
+* ⭐ Hop 3 is still the user's: `stillNeedsAgentWithdraw: true`. Funds are in the SCA, NOT with the
+  user, and nothing renders "your money is back" from `state === completed` alone.
+
+
 # 🚨 HANDOFF — THE SWAP DROUGHT IS AN OUTAGE, AND EVERYTHING DOWNSTREAM WAS CALLING IT A DISAGREEMENT
 
 **2026-08-20, written at 98% context, before the deploy of `ce58631`.** Every number here was

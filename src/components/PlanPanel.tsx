@@ -124,9 +124,27 @@ export default function PlanPanel({ wallet }: { wallet: UnifiedWallet }) {
     <div className="plane">
       <div className="panel-eyebrow">Plan an action</div>
       <h2>Describe an action. Your agent proposes; you decide.</h2>
+      {/* ⭐⭐ "with live pricing" LIVED HERE FOR FOUR DEFERRALS AND WAS A MIS-SALE.
+          This is the card a buyer reads BEFORE paying; the hedge ("fees may be
+          disproportionately large", job #181044) is in the artifact they receive AFTER.
+          That ordering is what made it a mis-sale rather than a disappointment.
+
+          ⚠️ THE ASYMMETRY IS REAL AND MUST NOT BE FLATTENED IN EITHER DIRECTION:
+            · BRIDGE — our own timestamped fee table is injected as grounding (8c1d1e9),
+              so a bridge brief CAN state a measured figure.
+            · SWAP  — Circle's createSwap has returned "No route available" for USDC↔EURC
+              on Arc testnet since ~2026-08-14, so a swap cannot be priced AT ALL.
+          Promising pricing flatly is false for swaps; promising none understates bridges.
+
+          ⭐ SO THE CLAIM IS ABOUT CONDUCT, NOT COVERAGE — "measured where measurable,
+          honest where not, never invented". That survives the outage ending, which a
+          claim naming the swap drought would not. Copy with a shelf life is how the
+          unified-balance guard came to enforce a lie twice; do not repeat it here. */}
       <div className="sub">
         Describe an on-chain action in plain language. Your agent researches its real
-        economics from cited sources, then proposes a concrete plan — with live pricing.{" "}
+        economics from cited sources, then proposes a concrete plan. Where a fee can be
+        measured, it is quoted as a measured figure with its timestamp; where it cannot,
+        the agent says so rather than inventing a number.{" "}
         <b>Nothing moves until you approve it.</b> Today the agent can{" "}
         <b>bridge USDC off Arc</b> (Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon,
         Unichain, Linea) or <b>convert between USDC and EURC on Arc</b>.
