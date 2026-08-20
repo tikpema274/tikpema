@@ -47,12 +47,12 @@ export const COMPONENTS = {
   BridgePanel:          { suite: "verify-bridge-panel-copy.tsx" },
   Dashboard:            { suite: "verify-dashboard-copy.tsx" },
   ResearchPanel:        { suite: "verify-research-panel-copy.tsx" },
+  // ⚠️ NOT verify-activity-fallback — that renders ONE row subcomponent for a fallback label and
+  // asserts nothing about the page's claims. It is why this entry read as covered while being debt.
+  AgentsPanel:          { suite: "verify-agents-panel-copy.tsx" },
 
   // ── known debt, claim-bearing and unrendered ────────────────────────────────────────────────
   // ⚠️ Ordered by what a wrong claim would COST, not by how many claims each carries.
-  // ⚠️ AgentsPanel reads as covered and is NOT: verify-activity-fallback renders ONE row
-  // subcomponent to check a fallback label, and asserts nothing about the page's own claims.
-  AgentsPanel:     { uncovered: "verify-activity-fallback covers one row's fallback label, not the page's claims" },
 
   // ── no claim-bearing copy ──────────────────────────────────────────────────────────────────
   AddressDisplay: { noClaims: true }, ConnectPasskey: { noClaims: true },
@@ -62,7 +62,7 @@ export const COMPONENTS = {
 };
 
 /** 🚨 THE RATCHET. Lower it when debt is paid; raising it must be a deliberate, reviewed edit. */
-export const MAX_UNCOVERED = 1;
+export const MAX_UNCOVERED = 0;
 
 /**
  * ⚠️ THE RATCHET STOPS DEBT GROWING. NOTHING IN IT MAKES DEBT SHRINK — 8 will sit at 8 forever
