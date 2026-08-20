@@ -112,9 +112,18 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
       <div className="panel-eyebrow">Research</div>
       <h2>Ask your agent a factual question</h2>
       <div className="sub">
-        Ask anything with a factual, sourceable answer. You'll see the price
-        first — your agent researches and delivers a cited brief only if you
-        approve it.
+        {/* ⚠️ WHICH HALF IS GUARANTEED, AND WHICH IS AIMED AT. The APPROVAL gate is structural:
+            the commission button lives inside the `{quote && …}` block, so nothing can run before a
+            price is shown and accepted. ⭐ The CITATION is not enforced in the current posture —
+            job-submit-background refuses an uncited brief only when RESEARCH_CITATION_ENFORCE is
+            set to "enforce", and the default is deliberately permissive ("uncited briefs will
+            SHIP. This is fail-OPEN by design"). Unset on prod, measured 2026-08-20.
+            🚨 The old wording — "delivers a cited brief only if you approve it" — read as a
+            guarantee of BOTH. It is a guarantee of one. Say the guaranteed thing as a promise and
+            the other as what the agent does, which is what the record actually supports. */}
+        Ask anything with a factual, sourceable answer. You'll see the price first, and
+        <b> nothing runs until you approve it</b> — then your agent researches and cites
+        the sources it used.
       </div>
 
       <div className="row" style={{ marginTop: 12 }}>

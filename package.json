@@ -31,7 +31,7 @@
     "test:liveness": "node scripts/verify-deploy-liveness.mjs",
     "test:sweep": "node scripts/verify-deploy-loss-sweep.mjs",
     "sweep:deploys": "node scripts/deploy-loss-sweep.mjs",
-    "test:copy": "npx tsx --experimental-test-module-mocks scripts/verify-unified-balance-copy.tsx && npx tsx scripts/verify-plan-card-copy.tsx && npx tsx scripts/verify-job-status-merge.tsx && npx tsx scripts/verify-agent-panel-copy.tsx && npx tsx scripts/verify-nanopay-copy.tsx && npx tsx scripts/verify-dashboard-copy.tsx",
+    "test:copy": "npx tsx --experimental-test-module-mocks scripts/verify-unified-balance-copy.tsx && npx tsx scripts/verify-plan-card-copy.tsx && npx tsx scripts/verify-job-status-merge.tsx && npx tsx scripts/verify-agent-panel-copy.tsx && npx tsx scripts/verify-nanopay-copy.tsx && npx tsx scripts/verify-dashboard-copy.tsx && npx tsx scripts/verify-research-panel-copy.tsx",
     "test:bridgecopy": "npx tsx scripts/verify-bridge-copy.tsx",
     "hooks:install": "git config core.hooksPath .githooks && echo \"core.hooksPath -> .githooks\"",
     "postinstall": "git config core.hooksPath .githooks 2>/dev/null || true",
