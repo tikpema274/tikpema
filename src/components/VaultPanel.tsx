@@ -35,6 +35,17 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   // still never typed or sent — the server reads the balance and redeems exactly it.
   const [shares, setShares] = useState<{ raw: string; formatted: string; symbol: string; hasShares: boolean } | null>(null);
   const [sharesErr, setSharesErr] = useState("");
+  // ⭐⭐ HAS THE BALANCE BEEN LOOKED AT AT ALL? A THIRD STATE, and it exists because the fail-safe
+  // below was built for the wrong absence. `sharesErr` covers a read that FAILED. Nothing covered a
+  // read that NEVER HAPPENED — `refreshShares` returns early, setting no error, when the user is
+  // signed out or the agent wallet has not provisioned. With `shares` null and `sharesErr` empty,
+  // the render fell through to "Nothing to reclaim — you hold no shares in this vault".
+  // 🚨 THAT IS NOT A FLASH. For a signed-out or unprovisioned user it is the TERMINAL state: the
+  // page tells them they hold nothing, having never looked. On a money page that is the one lie
+  // that matters, and it is the same family as `initiating` vs `failed` and `UNWIRED` vs
+  // `NOT_ATTEMPTED` — "we could not look", "we did not look" and "there is nothing" are three
+  // different answers and only one of them is safe to render as reassurance.
+  const [sharesProbed, setSharesProbed] = useState(false);
   const [loadingShares, setLoadingShares] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
 
@@ -57,7 +68,9 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   // Load the live on-chain share balance. Fail-closed: on a read error we set `sharesErr` and clear
   // `shares` so the reclaim UI shows "can't read" (disabled), never a false "nothing to reclaim".
   async function refreshShares() {
-    if (!w.isAuthenticated || !w.agentWallet) return;
+    // ⚠️ Early return WITHOUT an error, deliberately — nothing is wrong, we simply cannot look yet.
+    // `sharesProbed` stays false so the render says that instead of inventing an empty balance.
+    if (!w.isAuthenticated || !w.agentWallet) { setSharesProbed(false); return; }
     setLoadingShares(true);
     setSharesErr("");
     try {
@@ -68,6 +81,9 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       setShares(null);
     } finally {
       setLoadingShares(false);
+      // ⭐ Probed means WE ASKED — true on success AND on failure. `sharesErr` distinguishes those
+      // two; this flag only separates them both from "never asked".
+      setSharesProbed(true);
     }
   }
 
@@ -389,6 +405,13 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
           <button className="linkbtn" disabled={loadingShares} onClick={refreshShares}>
             {loadingShares ? "…" : "Retry"}
           </button>
+        </div>
+      ) : !sharesProbed ? (
+        // 🚨 NEVER LOOKED ≠ NOTHING THERE. Terminal for a signed-out or unprovisioned user, so it
+        // must not borrow the empty state's words — see `sharesProbed` above.
+        <div className="status" style={{ opacity: 0.8 }}>
+          We haven't checked your vault balance yet — it loads once your agent wallet is ready. This
+          is <b>not</b> a statement that you hold no shares.
         </div>
       ) : shares?.hasShares ? (
         <div className="row">

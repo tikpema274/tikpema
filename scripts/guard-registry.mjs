@@ -40,10 +40,10 @@ export const COMPONENTS = {
   DdReportCard:         { suite: "verify-dd-card-copy.tsx" },
   bridgeReceiptStatus:  { suite: "verify-bridge-copy.tsx" },
   jobTimeline:          { suite: "verify-job-status-merge.tsx" },
+  VaultPanel:           { suite: "verify-vault-panel-copy.tsx" },
 
   // ── known debt, claim-bearing and unrendered ────────────────────────────────────────────────
   // ⚠️ Ordered by what a wrong claim would COST, not by how many claims each carries.
-  VaultPanel:      { uncovered: "'Always available, never blocked by a pause' — an absolute about escaping a vault, on the money path" },
   MyAgentPanel:    { uncovered: "797 lines, the largest surface: 'always spending only what's in that wallet', 'the burn is instant'" },
   NanopaymentPanel:{ uncovered: "describes the agent-buys-from-agent flow in present tense; it has never fired in production" },
   DcaPanel:        { uncovered: "the acknowledgement checkbox is a CONSENT RECORD — if it drifts, what the user agreed to drifts" },
@@ -62,7 +62,7 @@ export const COMPONENTS = {
 };
 
 /** 🚨 THE RATCHET. Lower it when debt is paid; raising it must be a deliberate, reviewed edit. */
-export const MAX_UNCOVERED = 8;
+export const MAX_UNCOVERED = 7;
 
 /**
  * ⚠️ THE RATCHET STOPS DEBT GROWING. NOTHING IN IT MAKES DEBT SHRINK — 8 will sit at 8 forever
