@@ -362,9 +362,10 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
               agent's own account can release these funds, and <b>Tikpema controls that
               account</b> — so the exit runs through us. <b>It is built now:</b> you ask, Arc's
               Gateway holds the funds for a delay of about seven days, and we finish it
-              automatically — <b>you do not have to come back</b>. <b>⚠️ This has now been done once</b>, with 1 USDC on
-              2026-08-12 — one real run, not a track record. Treat the wait as the floor,
-              not the ceiling.
+              automatically — <b>you do not have to come back</b>. <b>⚠️ This has now been done once, end
+              to end</b>: 1 USDC asked for on 2026-08-12 and returned automatically on 2026-08-20, with
+              nobody watching — one real run, not a track record. It took 7 days and 4 hours, longer
+              than the estimate, so treat the wait as the floor, not the ceiling.
             </div>
           )}
           {wdErr && (

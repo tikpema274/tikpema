@@ -109,7 +109,17 @@ for (const [label, re, eYM, eUB] of [
   ["⭐ the exit is stated as BUILT", /It is built now:/g, 1, 2],
   ["⭐⭐ the user is told they need NOT return (this is what makes it an exit)", /you do not have to come back/g, 1, 2],
   ["⭐⭐ …and that the evidence is THIN — one run, not a track record", /one real run, not a track record/g, 1, 2],
-  ["⭐ …and the wait is still a FLOOR, because hop 2 has never run", /floor/g, 1, 2],
+  // ⭐⭐ ADDED 2026-08-20, THE DAY HOP 2 FIRST RAN. Until then the page said the exit had been
+  // "done once" directly after "we finish it automatically" — and the automatic finish had NEVER
+  // happened. The sentence read as evidence for a claim nothing supported. What must now be
+  // stated is that the run COMPLETED, not merely that it started.
+  // ⚠️ "end to end" is the NARROWEST DURABLE form, deliberately: it survives the count going
+  // from one to ten, where a date or a tally would rot. Same rule that saved the line above.
+  ["⭐⭐ …and that the one run went ALL THE WAY — completed, not merely started", /end to end/g, 1, 2],
+  // ⚠️ The reason changed but the requirement did not. This used to hold because hop 2 was
+  // unproven; it now holds because the single MEASURED run took 7d4h against a 7.1-day estimate,
+  // and maturity itself arrived 80 minutes late. The floor is no longer precautionary.
+  ["⭐ …and the wait is still a FLOOR — the one measured run overran the estimate", /floor/g, 1, 2],
   ["the delay is DERIVED, never fixed", /about seven days/g, 2, 3],
 ] as [string, RegExp, number, number][]) {
   const a = n(ymParked, re), b = n(ubParked, re);

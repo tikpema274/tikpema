@@ -227,9 +227,11 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
           <b>Tikpema controls that account</b> — so the exit runs through us. <b>It is built
           now:</b> you ask, Arc's Gateway holds the funds for a delay of about seven days, and
           we finish it automatically — <b>you do not have to come back</b>. It lands in your
-          agent's balance, which you can then withdraw yourself. <b>⚠️ This has now been done once</b>, with 1 USDC on
-          2026-08-12 — one real run, not a track record. Treat the wait as the floor rather
-          than the ceiling, and deposit only what you intend the agent to spend.
+          agent's balance, which you can then withdraw yourself. <b>⚠️ This has now been done once, end
+          to end</b>: 1 USDC asked for on 2026-08-12 and returned automatically on 2026-08-20, with nobody
+          watching — one real run, not a track record. It took 7 days and 4 hours, longer than the
+          estimate, so treat the wait as the floor rather than the ceiling, and deposit only what you
+          intend the agent to spend.
         </div>
       </div>
 
@@ -410,15 +412,17 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
             the delegate is a GATEWAY-level grant for spends and gates nothing here — we
             drive the SCA as OWNER via contractExecution and never need it.
 
-            🚨 THE BOUNDARY MOVED — DO NOT "COMPLETE" THIS INTO A PROMISE. What is measured
-            is the ACCOUNT MODEL: nothing blocks us from calling withdraw(). What is NOT
-            tested is EXECUTION — initiateWithdrawal → ~7-day delay → withdraw has never been
-            run, and how a pending withdrawal interacts with a balance being spent is unknown.
-            "We could build it" is TRUE; "it works" is UNVERIFIED. A fourth false claim is now
-            the EASY one to make, and it is the most damaging yet: implying a working recovery
-            invites a user to deposit expecting an exit that has never once been exercised.
-            Say control, say the absent build, say untested. See PROGRESS.md, "MEASURED vs
-            INFERRED".
+            🚨 THE BOUNDARY MOVED AGAIN, THIS TIME OUTWARD — AND IT STILL IS NOT A PROMISE.
+            ⭐ EXECUTION IS NOW MEASURED, ONCE: initiateWithdrawal → delay → withdraw ran end to
+            end on withdrawal 16be509f — 1 USDC, initiated 2026-08-12T20:49Z, completed UNATTENDED
+            by the half-hourly sweeper at 2026-08-20T01:01:02Z (tx 0xc51ae011…), the first tick after a
+            maturity that itself landed 80 minutes later than the estimate. So "it works" is no
+            longer UNVERIFIED — it is VERIFIED ONCE, which is a different and much weaker claim
+            than "it works reliably", and the copy must keep saying so. Still untested: how a
+            pending withdrawal interacts with a balance being spent concurrently. The old danger
+            (implying a recovery never once exercised) is gone; the NEW one is treating a single
+            run as a track record. Say control, say one run, say floor-not-ceiling. See
+            PROGRESS.md, "MEASURED vs INFERRED".
             ⚠️ "about seven days" is DERIVED — see the note on the balance bullet above.
             Never state it as a fixed number. */}
         <div className="sub" style={{ margin: "0 0 10px" }}>
@@ -428,9 +432,10 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
           only that account can release these funds.{" "}
           <b>Tikpema controls that account</b> — so the exit runs through us. <b>It is built
           now:</b> you ask, Arc's Gateway holds the funds for a delay of about seven days, and
-          we finish it automatically — <b>you do not have to come back</b>. <b>⚠️ This has now been done once</b>, with
-          1 USDC on 2026-08-12 — one real run, not a track record, and treat the wait as a
-          floor. Deposit only what you intend the agent to spend.
+          we finish it automatically — <b>you do not have to come back</b>. <b>⚠️ This has now been done
+          once, end to end</b>: 1 USDC asked for on 2026-08-12 and returned automatically on 2026-08-20
+          — one real run, not a track record, and it took 7 days and 4 hours, longer than the estimate,
+          so treat the wait as a floor. Deposit only what you intend the agent to spend.
         </div>
         {/* The deposit needs a session AND a provisioned wallet — the server enforces both
             (401 / 202). Disable rather than let the user fire a request that can't work. */}
