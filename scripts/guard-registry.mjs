@@ -43,10 +43,10 @@ export const COMPONENTS = {
   VaultPanel:           { suite: "verify-vault-panel-copy.tsx" },
   MyAgentPanel:         { suite: "verify-agent-panel-copy.tsx" },
   DcaPanel:             { suite: "verify-dca-consent-copy.tsx" },
+  NanopaymentPanel:     { suite: "verify-nanopay-copy.tsx" },
 
   // ── known debt, claim-bearing and unrendered ────────────────────────────────────────────────
   // ⚠️ Ordered by what a wrong claim would COST, not by how many claims each carries.
-  NanopaymentPanel:{ uncovered: "describes the agent-buys-from-agent flow in present tense; it has never fired in production" },
   BridgePanel:     { uncovered: "'a live cross-chain fee … the exact fee and net arrival' — the live-pricing shape just removed from PlanPanel" },
   Dashboard:       { uncovered: "'stop any of them instantly', 'the one pocket you can't pull back alone'" },
   ResearchPanel:   { uncovered: "'delivers a cited brief only if you approve it'" },
@@ -62,7 +62,7 @@ export const COMPONENTS = {
 };
 
 /** 🚨 THE RATCHET. Lower it when debt is paid; raising it must be a deliberate, reviewed edit. */
-export const MAX_UNCOVERED = 5;
+export const MAX_UNCOVERED = 4;
 
 /**
  * ⚠️ THE RATCHET STOPS DEBT GROWING. NOTHING IN IT MAKES DEBT SHRINK — 8 will sit at 8 forever
