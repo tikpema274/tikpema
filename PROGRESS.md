@@ -1,5 +1,79 @@
 ---
 
+# 🚨🚨 THE SYNTHESIS PANEL HAS NEVER RENDERED — THE CLIENT POLL DROPS `synthesis`
+
+**2026-08-20, job #181281.** The third outcome was neither candidate anyone expected to win. It is
+**candidate 2, a projection gap** — and it is not a regression: **no commit has ever fed the card.**
+
+## THE RECORD IS PERFECT. `ce58631` WORKED, SERVER-SIDE, END TO END.
+
+```
+secondOpinion.cause      "cannot-execute"          ← typed at the catch site, as designed
+secondOpinion.causeDetail "…createSwap failed: Route or resource not found. No route available"
+synthesis.agreement      "cannot_execute"          ← the state FIRED
+synthesis.proposalSurvives false
+synthesis.headline       "This action cannot be carried out right now — the venue is unavailable."
+proposalOutcome.reason   "killed-by-second-opinion"
+brief.proposal.action    "swap"                    ← a proposal EXISTED
+```
+
+⭐ **`no_action` IS RULED OUT** — the swap was classified as an action, a proposal was authored, and
+the second opinion killed it with a typed cause. The feared collapse one analyst over did NOT fire.
+
+## ⭐ WHAT THE PROBE SHOWED — the card WORKS; it is simply never fed
+
+| | |
+|---|---|
+| **A.** `JobTimeline` fed #181281's real `synthesis` | ✅ renders *"this cannot be carried out right now"*, *"not a disagreement"*, *"not something you did"*, *"nothing is stuck"* |
+| **B.** the same job after each panel's poll merge | ❌ **nothing renders — in all three panels** |
+| **C.** the rendered text between Sources and settlement | `"…B2B Invoice Payments in Europe in 2026 View settlement ↗"` — **exactly the gap that was reported** |
+
+🚨 **THE SERVER PROJECTS IT CORRECTLY AND THE CLIENT THROWS IT AWAY.** `job-run-status.mjs:98-99`
+returns `secondOpinion` and `synthesis`, under a comment reading *"Projected even when the second
+opinion KILLED the proposal — especially then"*. Then `PlanPanel`, `ResearchPanel` and
+`PredictPanel` each rebuild `TrackedJob` field-by-field from the payload and **enumerate neither**.
+
+⚠️ **`git log -S"synthesis: data.synthesis"` RETURNS NOTHING, ACROSS ALL HISTORY.** The field has
+never been in any merge in any commit, so `SecondOpinionCard` — the entire killed-proposal
+disclosure — **has never rendered in production, not once**, in any of its six states. The
+`cannot_execute` work shipped on Tuesday into a component nothing could reach.
+
+⚠️ The five earlier swaps are therefore not explained by this code path; whatever was seen then, it
+was not this card. Worth pinning down, but it does not change the fix.
+
+## 🚨 THE SHAPE, AND IT IS THE THIRD TIME THIS EXACT ONE HAS BITTEN
+
+A field written and projected correctly, then **dropped by a hand-enumerated rebuild downstream**:
+
+1. `brief.dataDisclosure` — enriched at one site, missing at another
+2. `dataPurchase` (#181056, `14c23c8`) — written at ONE store write, dropped by `triggerEvaluate`
+   AND by the evaluate rebuild. Fixed with `RESEARCH_RECORD_FIELDS` + an assertion **on the
+   payload, not the field**, run at all three write sites.
+3. **`synthesis` / `secondOpinion` — this one, and it is CLIENT-side, which is why the server-side
+   fix from (2) did not cover it.**
+
+⭐⭐ **THE LESSON FROM (2) WAS LEARNED IN ONE PROCESS AND NOT THE OTHER.** `14c23c8` put the field
+list in one place *on the server*. The three client merges are the same defect wearing a different
+runtime, and no guard crosses that boundary — the same "a binding can only be tested ACROSS what it
+binds" rule this repo already has written down.
+
+## ⭐ AND THE BUYER-FACING CONSEQUENCE, STATED PLAINLY
+
+A buyer paid ~0.25 USDC and received a research brief with **no proposal and no account of why**.
+That is precisely the state the entire disclosure thread exists to make impossible: *"Without this
+the user sees nothing and concludes the agent failed — when in fact two independent analysts
+disagreed and the action was WITHHELD."* The comment is still there, above a branch that has never
+executed.
+
+## THE FIX (not yet applied)
+
+⚠️ Adding two field names to three merges would work and would leave the SHAPE intact — a fourth
+projected field would vanish the same way. ⭐ The shape fix mirrors `RESEARCH_RECORD_FIELDS`: ONE
+declared list of what a poll merge must carry, used by all three panels, plus a RENDERED guard that
+feeds a real killed-proposal payload through the merge and asserts the card appears — the check that
+would have failed on day one.
+
+
 # ⭐⭐ THE OBSERVABILITY ALREADY EXISTED — AND IT HAD ALREADY ANSWERED THE QUESTION
 
 **2026-08-20.** Instructed to confirm the taxonomy reaches before instrumenting. It does, and no new
