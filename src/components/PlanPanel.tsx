@@ -3,6 +3,7 @@ import type { useWallet } from "../wallet/useWallet";
 import { JobTimeline, isTerminal, receiptInFlight } from "./jobTimeline";
 import type { TrackedJob } from "./jobTimeline";
 import { approveProposal as approve } from "../lib/approveProposal";
+import { mergeJobStatus } from "../lib/mergeJobStatus";
 import { readJson } from "../lib/readJson";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
@@ -73,22 +74,11 @@ export default function PlanPanel({ wallet }: { wallet: UnifiedWallet }) {
         });
         const data = await r.json();
         if (!r.ok || !data.status || data.status === "not_found") return;
+        // ⭐ SPREAD-WITH-OMIT, never a hand-written field list. The include-list version of this
+        // merge silently dropped `synthesis`/`secondOpinion` in every commit that ever existed,
+        // so the killed-proposal card never rendered once. See src/lib/mergeJobStatus.ts.
         setTrackedJob((prev) =>
-          prev && prev.runId === runId
-            ? {
-                ...prev,
-                jobId: data.jobId ?? prev.jobId,
-                status: data.status,
-                brief: data.brief ?? prev.brief,
-                proposal: data.proposal ?? prev.proposal,
-                receipt: data.receipt ?? prev.receipt,
-                verdict: data.verdict ?? prev.verdict,
-                reason: data.reason ?? prev.reason,
-                settleTx: data.settleTx ?? prev.settleTx,
-                settleTxUrl: data.settleTxUrl ?? prev.settleTxUrl,
-                error: data.error ?? prev.error,
-              }
-            : prev
+          prev && prev.runId === runId ? mergeJobStatus(prev, data) : prev
         );
       } catch {
         /* transient — retry next tick */

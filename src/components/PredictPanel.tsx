@@ -3,6 +3,7 @@ import type { ModularWallet } from "../wallet/useModularWallet";
 import { JobTimeline, isTerminal } from "./jobTimeline";
 import type { TrackedJob } from "./jobTimeline";
 import { readJson } from "../lib/readJson";
+import { mergeJobStatus } from "../lib/mergeJobStatus";
 
 // PredictPanel — browse prediction markets, then pay the agent for sourced
 // research on the one you pick. No betting, no advice: selecting a market runs
@@ -101,19 +102,10 @@ export default function PredictPanel({ wallet }: { wallet: ModularWallet }) {
         // Nothing written yet (background fn still running) — keep the funded
         // state and keep polling rather than clobbering it with "not_found".
         if (!data.status || data.status === "not_found") return;
+        // ⭐ SPREAD-WITH-OMIT — see src/lib/mergeJobStatus.ts. This merge dropped even more than
+        // the other two: no `proposal`, no `receipt`, no `synthesis`.
         setTrackedJob((prev) =>
-          prev && prev.jobId === jobId
-            ? {
-                ...prev,
-                status: data.status,
-                brief: data.brief ?? prev.brief,
-                verdict: data.verdict ?? prev.verdict,
-                reason: data.reason ?? prev.reason,
-                settleTx: data.settleTx ?? prev.settleTx,
-                settleTxUrl: data.settleTxUrl ?? prev.settleTxUrl,
-                error: data.error ?? prev.error,
-              }
-            : prev
+          prev && prev.jobId === jobId ? mergeJobStatus(prev, data) : prev
         );
       } catch {
         // Transient network error — leave state alone and try again next tick.
