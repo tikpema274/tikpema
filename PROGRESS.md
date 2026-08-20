@@ -1,5 +1,82 @@
 ---
 
+# ⭐⭐ THE SHARPENED SWEEP — WHICH SUITES BUILD THEIR OWN INPUTS, AND WHICH OF THOSE MATTER
+
+**2026-08-20.** Target restated: not "which components lack a suite" but *which suites are true about
+the component and silent about the pipeline*. It is a shorter list than the copy sweep — and the
+first pass at it was **too broad**, which is itself the finding.
+
+## THE COUNT, AND WHY IT IS THE WRONG COUNT
+
+Of **54 suites** reachable from `test:all`: 26 take REAL input (fixture or live fetch), 10 drive a
+real producer module, **18 build their own inputs.**
+
+⚠️ **BUT "SELF-BUILT" IS NOT THE DEFECT.** `verify-format-usdc` and `verify-read-json` build their
+own inputs and should — there is no producer above them to be silent about. Counting self-fixturing
+alone would have flagged 18 suites and been right about roughly three.
+
+## ⭐⭐ THE REAL CRITERION — BOTH HALVES MUST HOLD
+
+1. a **PASS-THROUGH REBUILD** sits between the producer and the consumer, and
+2. the guard above it **constructs its own input**, so it cannot see the drop.
+
+`verify-refusal-states` had both: it renders `jobTimeline` from a job object it writes itself, while
+three hand-enumerated client merges sat upstream dropping `synthesis` on every commit ever made.
+
+## 🚨 AND A REBUILD IS NOT AUTOMATICALLY A DEFECT — THREE KINDS, ONLY ONE DANGEROUS
+
+A scan for hand-enumerated rebuilds of ≥4 fields found **28**. Sorting them by PURPOSE is what makes
+the list usable:
+
+| kind | include-list is | example |
+|---|---|---|
+| **exposure** — an endpoint choosing what leaves the server | ✅ **CORRECT** — spreading a record to a client leaks | `bridge-receipts.mjs:81` (13 fields), `agents.mjs:83` |
+| **hashed artifact** — a field set that must be fixed | ✅ **CORRECT** — a spread would make the hash depend on incidental fields | `job-submit-background.mjs:710`, and its comments already say so |
+| **pass-through** — moving already-vetted data along | 🚨 **WRONG** — it can only lose | the three client merges (fixed today), `dataPurchase` at `14c23c8` |
+
+⭐ **SO THE SWEEP'S OUTPUT IS NOT "28 SITES TO FIX".** Two of the three kinds are correct as written,
+and changing them would be actively harmful. The question to ask at each site is *"is this choosing
+what to expose, or just carrying data forward?"* — and only the second is a bug waiting.
+
+## ✅ THE NEAREST ANALOGUE DOES NOT REPRODUCE
+
+`verify-dd-card-copy` renders `DdReportCard` from a hand-built report — half the criterion. But the
+component does `setData(d)` with the WHOLE response and enumerates nothing, so there is no lossy
+transform above it. **A negative result, and the reason the criterion needs both halves.**
+
+## 🚨 THE SECOND FINDING, UNLOOKED FOR: FOUR RENDER SUITES ARE NOT IN `test:all`
+
+`test:refusalstates` exists as a script and **is not reachable from `test:all`** — so "green for two
+days" means green when someone ran it by hand. It is not alone, and the pattern is pointed:
+
+| render suite | in `test:all`? |
+|---|---|
+| `verify-refusal-states.tsx` | 🚨 **NO** |
+| `verify-disclosure-render.tsx` | 🚨 **NO** |
+| `verify-citation-numbering.tsx` | 🚨 **NO** |
+| `verify-activity-fallback.tsx` | 🚨 **NO** |
+| `verify-bridge-copy` · `verify-dd-card-copy` · `verify-unified-balance-copy` · `verify-plan-card-copy` · `verify-job-status-merge` | ✅ yes |
+
+⭐⭐ **FOUR OF NINE RENDER SUITES — THE ONES ASSERTING WHAT A USER ACTUALLY SEES — ARE THE ONES NOT
+WIRED IN.** A suite that is both self-fixtured AND unwired is not a guard; it is a snapshot of an
+opinion someone held once.
+
+⚠️ Six further gates are in NEITHER `test:all` NOR `deploy:prod`: `gate:pins`, `gate:opcount`,
+`gate:price`, `gate:callshape`, `gate:recovery`, `test:ddwatch`. (`gate:watch`, `gate:rpc`,
+`gate:deployed`, `gate:forgery`, `gate:spec` are correctly deploy-time only.)
+
+## THE REGISTRY GATE, RESHAPED BY ALL OF THIS
+
+It should now assert three things, not one:
+
+1. ⭐ every claim-bearing component is named by a suite **that renders it** (the copy sweep's ask),
+   and the suite contributes a **nonempty** render — the `UbExitStatus` failure;
+2. ⭐⭐ every suite is **reachable from `test:all` or `deploy:prod`**, because an unwired guard is
+   indistinguishable from no guard the moment nobody types its name;
+3. 🚨 every **pass-through** rebuild is fed by at least one suite whose input is a **real recorded
+   payload** — the only check that would have caught the synthesis gap on day one.
+
+
 # 🚨🚨 THE SYNTHESIS PANEL HAS NEVER RENDERED — THE CLIENT POLL DROPS `synthesis`
 
 **2026-08-20, job #181281.** The third outcome was neither candidate anyone expected to win. It is
