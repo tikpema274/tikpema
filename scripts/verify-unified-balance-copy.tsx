@@ -31,8 +31,24 @@
 //      whether a user ever SEES it. This asserts BOTH: present when funds are parked, absent when
 //      none are — and the absence is correct, not a bug, because there is nothing to disclose.
 //   3. The forbidden phrases are checked against the WHOLE RENDERED TREE, including child
-//      components (Pocket, UbExitStatus, AddressDisplay, SignInPrompt) whose files the old scan
-//      never opened. That closes "a NEW file carrying the falsehood" for anything these trees render.
+//      components (Pocket, AddressDisplay, SignInPrompt) whose files the old scan never opened.
+//      That closes "a NEW file carrying the falsehood" for anything these trees render.
+//
+// ═══ 🚨 MEASURED 2026-08-20 — THIS HEADER NAMED `UbExitStatus` AND THAT WAS FALSE ════════════
+// It is imported by UnifiedBalancePanel and IS in the tree, so "covered" looked obviously true.
+// It contributes **ZERO CHARACTERS** to the rendered markup: `loading` starts `true` and every
+// claim-bearing branch sits behind a `useEffect` fetch of `/api/ub-withdraw`, which SSR never
+// runs. Measured by probe — five distinct phrases, including "Nothing arrives in your own wallet
+// automatically" (the hop-3 caveat, the most load-bearing line in the component now that hop 2
+// works), ALL absent from a 4,152-char render.
+//
+// ⭐⭐ SO A GUARD DOCUMENTED COVERAGE IT DID NOT HAVE, and the failure is silent BY CONSTRUCTION:
+// an absence check over a component that renders nothing PASSES. The same mocking that was applied
+// to `useGatewayBalance` (see the note below — SSR does not run effects) was never applied here,
+// and the header was written as though it had been.
+// ⚠️ FIX QUEUED, NOT DONE: mock the fetch and assert UbExitStatus's own claims in both directions.
+// Until then, treat every claim in that component as UNGUARDED and do not read this suite's green
+// as covering it.
 //
 // ⚠️ PRESENT AND ABSENT ARE DIFFERENT CHECKS and only both together prove anything — a new phrase
 // appearing does not mean the old one left. Counts stay EXACT, never `> 0`: a duplicated phrase and

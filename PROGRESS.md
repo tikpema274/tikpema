@@ -1,5 +1,105 @@
 ---
 
+# ⭐⭐ THE UNGUARDED-CLAIM SWEEP — QUEUED, WITH FOUR FINDINGS ALREADY CONFIRMED
+
+**2026-08-20.** Prompted by the plan card: *"an unguarded claim is one nobody is required to
+revisit"* is predictive, not a post-mortem. Method: cross-reference every user-facing surface
+against the suites that assert its RENDERED output. ⚠️ Rendering is the bar — a suite that
+`readFileSync`s a component is a source scan, which this repo abandoned twice for cause.
+
+## 🚨 FINDING 1 — `NanopaymentPanel` DESCRIBES, IN PRESENT TENSE, SOMETHING THAT HAS NEVER RUN
+
+Worse than the plan card, and the same class. The plan card over-promised a hedge; **this page's
+entire content is a capability that has never once executed in production.**
+
+| the page says | the measurement |
+|---|---|
+| "It **signs** a tiny on-chain USDC payment" | the agent-buys-from-agent step has **never fired** |
+| "Only a confirmed settlement counts as a purchase" | no settlement has ever occurred |
+| "This **runs automatically** when you commission research" | it cannot run — two independent blockers |
+| "Each buy is capped at … **$0.01** max by default" | ⭐ **that ceiling IS blocker #1** — the seller charges 1.0 USDC, 100× over |
+
+⭐ **THE CARD NAMES THE VERY NUMBER THAT BLOCKS IT, PRESENTED AS A REASSURANCE.** Blocker #2 is
+unchanged too: `DATA_SELLER_URL` is still QuickNode, advertising `eip155:84532` (Base Sepolia)
+while we pay on Arc `eip155:5042002`. **Both re-confirmed from the deployed production env on
+2026-08-20**, one day after they were first measured — `DATA_PURCHASE_USDC` is still unset, so the
+0.01 hardcoded default is still live.
+
+🚨 **AND THE FILE ALREADY KNEW.** Its own header comment contradicts itself in nine lines: *"the
+autonomous mid-research purchase flow that **already runs** server-side"* … *"**When a LIVE version
+lands**, this is its spec."* Both cannot be true. The page shipped as a spec and reads as a feature.
+
+## ⭐⭐ FINDING 2 — A GUARD DOCUMENTED COVERAGE IT DOES NOT HAVE (`UbExitStatus`)
+
+`verify-unified-balance-copy`'s header listed `UbExitStatus` among the child components its
+whole-rendered-tree checks reach. **Measured: it contributes ZERO CHARACTERS to a 4,152-char
+render.** `loading` starts `true` and every claim-bearing branch sits behind a `useEffect` fetch of
+`/api/ub-withdraw` that SSR never runs. Five distinct phrases probed, all absent:
+
+* "We finish this automatically — you do not have to come back"
+* **"Nothing arrives in your own wallet automatically"** ⭐ the hop-3 caveat — *the most
+  load-bearing line in the product now that hop 2 works*, because `completed` means the SCA, not
+  the user
+* "cannot be cancelled once it begins"
+* "not a statement that you have nothing pending" (unreadable ≠ empty)
+* "Nothing on its way out right now"
+
+🚨 **THE FAILURE IS SILENT BY CONSTRUCTION: AN ABSENCE CHECK OVER A COMPONENT THAT RENDERS NOTHING
+PASSES.** The suite goes green while contributing nothing, and the header asserting otherwise made
+it *look* deliberate. The `useGatewayBalance` mock right below it exists for exactly this reason
+and was never extended to the fetch. ⭐ **The nastiest shape found: not an absent guard, but a
+present one that reports coverage it cannot deliver.** Header corrected today; the fix (mock the
+fetch, assert both directions) is QUEUED.
+
+⚠️ **AND IT IS THE THIRD COPY OF A GUARDED CLAIM.** "We finish it automatically — you do not have
+to come back" lives in three components. Two are asserted; the third — *the one that renders when
+a user actually has an exit running* — is not.
+
+## ⚠️ FINDING 3 — ABSOLUTES ON MONEY PATHS, NO RENDERED GUARD
+
+* **`VaultPanel`** — *"Always available, never blocked by a pause"* (the reclaim path — an absolute
+  about escaping a vault), *"Every owner power disclosed above is now held by a different party
+  than the one you acknowledged"*, *"⛔ This vault cannot be deposited into"*. Two `always/never`
+  absolutes and a consent-delta claim, none rendered by any suite.
+* **`DcaPanel`** — the acknowledgement checkbox: *"I understand Tikpema's server will move my
+  USDC/EURC automatically while I'm offline, signed by a key it controls…"* ⭐ **THIS IS A CONSENT
+  RECORD, NOT COPY.** If it drifts, what the user agreed to drifts, and there is no assertion
+  anywhere that it still says what it must. ⚠️ This surface has drift history: the panel 404'd for
+  22 days while its notes read "fully verified".
+* **`BridgePanel`** — *"A live cross-chain fee … you'll see the exact fee and net arrival"* is a
+  live-pricing-shaped claim of exactly the kind just removed from the plan card. Its only coverage
+  is `verify-bridge-fee-band`, which `readFileSync`s the component — **source scan, so unguarded by
+  this repo's own standard.**
+* **`Dashboard`** — *"stop any of them instantly"*, *"The one pocket you can't pull back alone"*.
+* **`MyAgentPanel`** (797 lines, the largest surface) — *"always spending only what's in that wallet
+  and within your per-action, per-bridge, and daily caps"*, *"the burn is instant"*.
+
+## ✅ FINDING 4 — TWO SURFACES ARE BETTER COVERED THAN ASSUMED
+
+* **DD's discovery page is well guarded**, in two suites: `verify-endpoint` (self-containment, and
+  that price/chain/URL match the 402 — plus that the hard terms survive a friendly rewrite:
+  "not a clean bill", "incentive to overstate") and `verify-dd-report` (the health banner in every
+  state, including that it sits ABOVE the curl). ⚠️ It is also **not a React component** — it is
+  server-rendered HTML in `_dd-discovery-page.mjs`, so a components-only sweep misses it entirely.
+  **User-facing copy is not confined to `src/`.**
+* **`DdReportCard`** has `verify-dd-card-copy`; **`bridgeReceiptStatus`** has `verify-bridge-copy`
+  (rendered, both directions).
+* ⚠️ **`AgentsPanel` reads as covered and is not** — `verify-activity-fallback` renders ONE row
+  subcomponent to check a fallback label. None of the page's claims are asserted.
+
+## ⭐⭐ THE STRUCTURAL FIX — make it a GATE, not a sweep anyone must remember to repeat
+
+This sweep found four real defects in an hour, and its own weakness is that it was run by hand,
+once. ⭐ Proposal: a **registry gate** — every component under `src/components` is listed with the
+suite that asserts its rendered claims, or explicitly marked `no-claims`. A new file, or a
+`no-claims` file that grows a promise, fails the gate. **That converts "nobody was required to
+revisit it" into "nobody can add one without saying who guards it."**
+
+⚠️ **AND IT MUST ASSERT THE GUARD ACTUALLY REACHES THE COMPONENT** — Finding 2 is precisely a
+registry entry that would have been filled in, truthfully-looking, and wrong. The cheap version:
+each registered suite must render a nonempty contribution from its component.
+
+
 # ⭐⭐ HOP 2 RAN. UNATTENDED. THE EXIT IS NOW PROVEN END TO END — ONCE.
 
 **2026-08-20.** The last unproven branch of the unified-balance exit closed itself while nobody was
