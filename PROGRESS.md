@@ -1,5 +1,69 @@
 ---
 
+# 🚨🚨 REFUTED: THE TWO "INDEPENDENT BLOCKERS" ON THE BUY SIDE DO NOT EXIST
+
+**2026-08-20.** Before writing the NanopaymentPanel copy, I re-probed the seller. **Both blockers
+recorded on 2026-08-19 are artifacts of reading `accepts[0]` on a 21-entry menu.** No code changed
+between the two measurements; the difference is entirely in how the challenge was read.
+
+## WHAT THE LIVE 402 ACTUALLY SAYS
+
+`POST https://x402.quicknode.com/arc-testnet` (unpaid, read-only) → **402, `accepts[]` with 21
+entries** across 9 networks. `accepts[0]` is Base Sepolia at `1000000` atomic. That single entry is
+where both recorded blockers came from.
+
+| recorded 2026-08-19 | measured 2026-08-20 |
+|---|---|
+| "seller's advertised price **1.0 USDC**" | that is `accepts[0]`. **Arc's entry is `100` atomic = 0.0001 USDC** |
+| "**100× too expensive**" against the 0.01 ceiling | **100× UNDER it.** The ceiling is not even close to binding |
+| "🚨 the chain is wrong — advertises `eip155:84532`" | **`eip155:5042002` IS advertised**, at index 16 of 21 |
+| "two independent blockers, so raising the ceiling is not a fix" | neither exists; there was nothing to raise |
+
+⭐ **AND OUR CODE WAS NEVER THE PROBLEM — IT ALREADY SELECTS CORRECTLY.** `_x402.mjs:237` finds
+`network === eip155:5042002 && extra.name === "GatewayWalletBatched"`, never falling back to
+`accepts[0]`. It matches **exactly one** entry: the Arc one, at 0.0001 USDC. The file even carries
+the warning in a comment written months earlier — *"Multi-chain sellers (e.g. QuickNode) advertise
+a MENU across many chains/tokens; `accepts[0]` may be a different chain."*
+
+🚨 **THE DIAGNOSIS READ POSITION 0 OF A MENU THE CODE KNEW WAS A MENU.** Same family as the
+`Accept`-header truncation and the failed-chunk log sweep: *the read shape was the hypothesis.* An
+array index is a filter. ⚠️ And it failed in the direction that looks like diligence — "two
+independent blockers" reads as thorough, closes the question, and tells the next person not to
+bother raising the ceiling.
+
+## ⚠️ SO WHY HAS THE BUY SIDE NEVER FIRED? THAT IS NOW OPEN AGAIN — AND EVERY GATE I CAN SEE IS CLEAR
+
+| gate | state |
+|---|---|
+| seller advertises our chain | ✅ `eip155:5042002`, Arc USDC `0x3600…` |
+| price vs the 0.01 hard ceiling | ✅ 0.0001 USDC — **100× of headroom** |
+| our selector matches it | ✅ exactly 1 entry of 21 |
+| `DATA_SELLER_BODY` (QuickNode is request-bound) | ✅ set: `eth_blockNumber` |
+| Researcher paused? | ✅ `RESEARCHER_PAUSED` unset |
+| signing path for `GatewayWalletBatched` | ✅ option (A) implemented AND proven closed-loop — delegate EOA is `from == signer` |
+| the payer's Gateway balance | ✅ **4.864500 USDC** — ~48,000 purchases at this price |
+
+🚨 **I CANNOT NAME A BLOCKER.** That is a finding, not a conclusion that it works — every check
+above is a PRECONDITION, and preconditions being met is not an execution. The step may fail
+somewhere only a live run reaches, or it may simply never have been ATTEMPTED since the config
+settled. ⭐ What is now clear is that "it cannot buy" is unsupported, and it was the reason nobody
+tried.
+
+⚠️ **AND WE STILL COULD NOT TELL FROM THE OUTSIDE** — the previously-recorded observability gap is
+untouched and is now the binding constraint: the only difference between "bought and used it" and
+"never even tried" is a `console.warn`. **That is the thing to fix before guessing again.**
+
+## ⛔ NANOPAYMENTPANEL COPY: NOT WRITTEN, DELIBERATELY
+
+The proposed honest version was *"Built, not yet possible — the seller we point at charges 100× our
+ceiling and settles on a different chain."* **Every factual clause in that sentence is now false.**
+Shipping it would have replaced an over-claim with a fresh false claim on the same card, which is
+the exact defect the card is being fixed for. ⭐ The over-claim ("this runs automatically") is still
+wrong and still needs replacing — but the replacement cannot name a mechanism nobody can currently
+demonstrate. The narrowest durable form is available regardless: *built server-side, and it has not
+bought anything in production yet.*
+
+
 # ⭐⭐ THE UNGUARDED-CLAIM SWEEP — QUEUED, WITH FOUR FINDINGS ALREADY CONFIRMED
 
 **2026-08-20.** Prompted by the plan card: *"an unguarded claim is one nobody is required to
