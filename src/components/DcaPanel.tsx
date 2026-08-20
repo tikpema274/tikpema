@@ -126,6 +126,22 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
           background: "var(--amber-soft)",
         }}
       >
+        {/* ═══ 🚨 THIS BLOCK IS A CONSENT RECORD, NOT COPY ═══════════════════════════════════
+            What it says is what the user agreed to. If it drifts, their authorization drifts with
+            it, and nobody finds out — this surface already ran 22 days with its notes reading
+            "fully verified" while the panel 404'd.
+
+            ⚠️ TWO CLAIMS WERE CORRECTED 2026-08-20, both measured against the server:
+            · "pause or cancel anytime" implied a PER-MANDATE pause. There is none: STATUS has only
+              active/cancelled/complete/expired/stopped-failed, and the panel offers one button,
+              Cancel. What exists is the AGENT-WIDE kill switch (`assertNotPaused`, checked
+              fail-closed at dca-tick.mjs:372) — a different thing, since it stops everything the
+              executor does, not just this schedule.
+            · "cancelling stops it immediately" was FALSE for a fill already in flight.
+              `dca-cancel` never looks at `pendingPeriod`, and the swap is already submitted
+              on-chain, so it lands regardless. The honest form says what cancelling CAN and
+              CANNOT reach.
+            ⭐ Guarded by verify-dca-consent-copy.tsx, which pins both against the code. */}
         <div style={{ fontWeight: 600, marginBottom: 8 }}>⚠ This is custodial. Read it before you authorize.</div>
         <div style={{ fontSize: 14, lineHeight: 1.6, color: "var(--paper)" }}>
           <b>Tikpema's server</b> will swap up to{" "}
@@ -133,8 +149,10 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
           <b>{cadenceLabel}</b> on your behalf <b>while you're offline</b>, until{" "}
           <b>{fmtDate(endAt)}</b> (or a total of <b>{formValid ? budgetNum : "—"} {tokenIn}</b>,
           whichever comes first). These swaps are <b>signed by a server-controlled key, not your
-          passkey</b>. You can <b>pause or cancel anytime</b>; <b>nothing swaps while paused</b>,
-          and cancelling stops it immediately. Every swap still obeys your per-swap cap and daily
+          passkey</b>. You can <b>cancel this schedule anytime</b>, and <b>stop your agent entirely</b> with
+          the kill switch — <b>nothing swaps while your agent is stopped</b>. ⚠️ Cancelling stops
+          every <b>future</b> swap; a swap already submitted will still land, because it is already
+          on-chain and nothing can recall it. Every swap still obeys your per-swap cap and daily
           ceiling.
         </div>
 
@@ -142,7 +160,8 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
           <input type="checkbox" checked={acked} onChange={(e) => setAcked(e.target.checked)} style={{ marginTop: 3 }} />
           <span style={{ fontSize: 13, lineHeight: 1.5 }}>
             I understand Tikpema's server will move my USDC/EURC automatically while I'm offline,
-            signed by a key it controls — and that I can pause or cancel this at any time.
+            signed by a key it controls; that I can cancel this at any time, which stops every
+            future swap but cannot recall one already submitted.
           </span>
         </label>
       </div>

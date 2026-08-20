@@ -42,11 +42,11 @@ export const COMPONENTS = {
   jobTimeline:          { suite: "verify-job-status-merge.tsx" },
   VaultPanel:           { suite: "verify-vault-panel-copy.tsx" },
   MyAgentPanel:         { suite: "verify-agent-panel-copy.tsx" },
+  DcaPanel:             { suite: "verify-dca-consent-copy.tsx" },
 
   // ── known debt, claim-bearing and unrendered ────────────────────────────────────────────────
   // ⚠️ Ordered by what a wrong claim would COST, not by how many claims each carries.
   NanopaymentPanel:{ uncovered: "describes the agent-buys-from-agent flow in present tense; it has never fired in production" },
-  DcaPanel:        { uncovered: "the acknowledgement checkbox is a CONSENT RECORD — if it drifts, what the user agreed to drifts" },
   BridgePanel:     { uncovered: "'a live cross-chain fee … the exact fee and net arrival' — the live-pricing shape just removed from PlanPanel" },
   Dashboard:       { uncovered: "'stop any of them instantly', 'the one pocket you can't pull back alone'" },
   ResearchPanel:   { uncovered: "'delivers a cited brief only if you approve it'" },
@@ -62,7 +62,7 @@ export const COMPONENTS = {
 };
 
 /** 🚨 THE RATCHET. Lower it when debt is paid; raising it must be a deliberate, reviewed edit. */
-export const MAX_UNCOVERED = 6;
+export const MAX_UNCOVERED = 5;
 
 /**
  * ⚠️ THE RATCHET STOPS DEBT GROWING. NOTHING IN IT MAKES DEBT SHRINK — 8 will sit at 8 forever
@@ -82,6 +82,18 @@ export const DEBT_HORIZON = { date: "2026-09-16", why: "mainnet — these are mo
  * Suites deliberately NOT reachable from `test:all` or `deploy:prod`, each with a reason.
  * ⭐ AN ALLOW-LIST, so a NEW unwired suite fails — the direction that costs a decision rather than
  * silently adding another invisible guard.
+ */
+/**
+ * 🚨 IF A SUITE EVER BLOCKS A DEPLOY SPURIOUSLY, QUARANTINE IT HERE WITH A REASON — DO NOT LOOSEN
+ * `test:all`. `deploy:prod` now runs the aggregate first, so a flaky suite can hold up a ship, and
+ * the pressure in that moment is to weaken the gate. That is how tolerated red gets reinvented one
+ * level up: an exemption listed here stays visible, attributable and reversible; a loosened
+ * assertion is invisible and permanent.
+ *
+ * ⚠️ AND THE LIKELIEST FIRST OFFENDERS ARE NOT THE TWO EXCLUDED BELOW. `test:liveness` and
+ * `test:prodsession` are ALREADY inside `test:all` and both touch the network — they, not
+ * `gate:pins`, are where the first spurious block will most likely come from. Naming them here so
+ * the first flake gets a quarantine entry rather than an argument about the gate.
  */
 export const UNWIRED_OK = {
   "gate:pins": "network-dependent (IPFS routing probes). ⚠️ A flaky network inside a BLOCKING aggregate manufactures tolerated red — species 3 — so it is run deliberately, not on every commit.",

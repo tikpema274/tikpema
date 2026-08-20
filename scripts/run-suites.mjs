@@ -24,6 +24,15 @@
 //
 // ⭐ SO THE ROLL-UP BELOW ALWAYS PRINTS THREE NUMBERS — passed, FAILED, and NOT RUN — even when the
 // last two are zero. A number that is only shown when it is bad teaches nobody where to look.
+//
+// ═══ ⭐ READING THE DURATION COLUMN: A RED SUITE IS ALSO A SHORT SUITE ════════════════════════
+// `test:dd` runs ~139s green. While it was failing on one assertion it ran in **21s** — it exited
+// at the failure and never reached the rest. ⚠️ SO A SUITE THAT SUDDENLY GOT MUCH FASTER IS A
+// SIGNAL, NOT GOOD NEWS: it may have started failing early, or begun skipping. Nothing else in
+// this output would tell you — the pass/fail column looks identical, and "the tests got quicker"
+// reads as an improvement.
+// ⭐ The inverse is the one that misleads hardest: after a fix, a suite getting SLOWER usually
+// means it started running. `test:dd` going 21s → 139s was the repair, not a regression.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
