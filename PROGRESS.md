@@ -1,5 +1,115 @@
 ---
 
+# 🚨 HANDOFF — THE SWAP DROUGHT IS AN OUTAGE, AND EVERYTHING DOWNSTREAM WAS CALLING IT A DISAGREEMENT
+
+**2026-08-20, written at 98% context, before the deploy of `ce58631`.** Every number here was
+measured this session; where something is inferred rather than confirmed it says so.
+
+## ⭐⭐ ITEM 1 — WHY NOTHING HAS SWAPPED SINCE ~14 AUGUST
+
+**Circle's `createSwap` returns `Route or resource not found. Details: No route available.`** for
+USDC↔EURC on Arc testnet. Identical text on **five consecutive swap jobs** (180679, 181044, 181056,
+181164, 181171), across both directions and 4–5 USDC.
+
+Analyst B is behaving **correctly**: it refuses to endorse a trade that cannot be routed. Nothing
+downstream is broken — `job-swap-approve` and `executeAction` are complete and correct, they are
+simply never reached, because a user can only approve a proposal that exists.
+
+⭐ **THE ADAPTER WAS VERIFIED, PRESENCE *AND* PURPOSE:**
+
+| | |
+|---|---|
+| proxy `0xbbd70b01…` | 813 bytes, byte-identical on two independent RPCs |
+| EIP-1967 implementation | `0xb4d0aa6c…`, 17,729 bytes |
+| distinguishing selectors | `owner()` ✅ `paused()` ✅ — a real contract with a real ABI |
+| `paused()` | **false**, agreed by both RPCs |
+| `owner()` | `0xfbc171f3…`, agreed by both RPCs |
+
+⚠️ **`eth_getCode` alone would have proved PRESENCE, NOT PURPOSE** — something else could be
+deployed at that address. The selector probe is what makes this evidence. ⭐ And the first probe
+found 0/6 selectors, which looked like "wrong shape" and was actually **a proxy** — the same misread
+made against the ERC-8004 registry earlier in the week. Check for EIP-1967 slots before concluding.
+
+**Our side did not change:** `_swap.mjs` last touched **2026-07-22**, well before the drought.
+`job-swap-approve.mjs` was touched 2026-08-13 — one day before, close enough to check — but all
+three commits are error-handling changes (503 provisioning, catch narrowing) and that file runs
+*after* a proposal exists, which is not where the refusal happens.
+
+🚨 **"THEIR SIDE" IS INFERRED, NOT CONFIRMED.** Every way it could be ours has been eliminated;
+there is no statement from Circle. Those are different claims. ⭐ If the drought persists, this
+rides along with the recovery-file ticket as a concrete question: *"USDC↔EURC on Arc testnet has
+returned `No route available` since ~14 August — is routing withdrawn, or is our call shape wrong?"*
+
+## ⭐⭐ ITEM 2 — `ce58631`: SIX REFUSAL STATES, CLASSIFIED FROM A TYPED CAUSE
+
+All refusals used to return `verdict:"refuse"` → `agreement:"hard_disagree"`, and the panel said
+**"No action proposed · your analysts disagreed"** and **"this is the safeguard working, not a
+failure."** Both are FALSE for an outage: nobody disagreed (A wanted the trade, B said the venue was
+down), and something IS failing — just not us and not the user. A buyer reads it and concludes the
+action was DEBATABLE when it was IMPOSSIBLE.
+
+**The shape to preserve:**
+
+* 🚨 **THE CAUSE IS TYPED AT THE CATCH SITE** in `_analystb.mjs`, where it is known exactly, and
+  travels as a field. It is NEVER re-derived by matching B's prose downstream — that breaks the
+  first time B rewords, and a test asserting on the same sentence would pass *while the classifier
+  read that sentence too*, both wrong together and mutually confirming.
+* Three causes among refusals: `cannot-execute` → `cannot_execute`, `should-not-execute` →
+  `hard_disagree`, `malformed-proposal` → `not_actionable`.
+* ⚠️ **AN UNTAGGED REFUSAL FALLS TO `hard_disagree` — THE PRE-EXISTING BEHAVIOUR — DELIBERATELY.**
+  A missing tag must never silently become an *outage claim*. Verified.
+* ⭐ **DIFFERENT COPY PER STATE, not just a different enum.** Renaming the state and keeping the
+  disagreement wording would have renamed the problem. `hard_disagree`'s words are unchanged, and
+  the guard asserts the outage copy does not leak into it either.
+
+`npm run test:refusalstates` — 14/14 on the fix, **6 failures against the pre-fix component**, which
+is what makes the 14 mean anything.
+
+## ⚠️ ITEM 3 — TWO QUEUED, NEITHER STARTED
+
+**(a) ANALYST A FAILING HAS NO STATE.** If A errors there is no proposal, so `no_action` fires —
+*"No action was proposed, so there was nothing for me to price."* That is **indistinguishable from A
+deliberately proposing nothing**. The same collapse `ce58631` just fixed, one analyst over, and
+untouched because it is a different code path. ⭐ B being unavailable already has its own state
+(`unverified`, with its own copy); A does not.
+
+**(b) THE CARD STILL PROMISES "a concrete plan — with live pricing".** Bridges now get our own
+timestamped fee table injected as grounding (`8c1d1e9`), so bridge briefs can price from our
+measurement. **Swaps cannot be priced at all while routing is down**, so for swaps the claim is
+currently unmet by circumstance rather than by design. ⚠️ Recorded earlier as ONE decision with two
+honest endings — quote our own path, or stop claiming it — and doing neither leaves the overclaim.
+
+## STATE AT HANDOFF
+
+* HEAD `ce58631`, tree clean, **pushed through `779392d`**; `ce58631` itself is unpushed and
+  undeployed at the time of writing.
+* Prod is `6a864182609c575ff408fb57`. ⚠️ `ce58631` is NOT in it.
+* ⭐ **Both spend-ledger silences are live-closed**: `[budget][ledger-write-failed]` (a lost write
+  WIDENS the day ceiling) and `[budget][audit-row-unreadable]` (a dropped row LOWERS displayed
+  totals). A spend could previously vanish at either end with the page looking normal.
+* `gate:rpc` 8 healthy. `base`'s dead primary (`sepolia.base.org`, 0/5, `-32011 no backend`) was
+  replaced with Tenderly and has held three deploys. ⚠️ `ethereum` degraded then recovered on its
+  own — watching it was right, expecting it to follow `base` was not.
+* ⏱ **Bundling: fourteen measurements, 19m23 – 44m29.** Still noisy, not growing. Treat any single
+  run as a FLOOR.
+* ⚠️ **`capture:window` will keep reporting NO WINDOW** — nothing in this batch touches
+  `DD_SURFACE_DIRS/FILES`, so `ddTree` does not rotate. Correct, not a regression.
+
+## ⭐ THE METHOD THAT FOUND ALL OF THIS, WORTH KEEPING
+
+**Run every new guard against the code it was written to catch.** `8/8` is a number with no
+information in it — a guard that always passes scores 8/8. `5/8` against the pre-fix version is what
+makes the 8 mean something. It caught a fail-open *inside a guard* twice this session: an ordering
+assertion satisfied by absence (`indexOf` returns −1, and −1 is less than everything), and a
+citation check that matched the prose it was checking against.
+
+🚨 **AND THE HARNESS KEEPS GETTING INSIDE THE MEASUREMENT — four times in one session:** a `pgrep`
+matching its own command string (twice, the second time defeating the `[d]` bracket trick because
+the same command line also contained the literal), a monitor exiting on a sentinel the wrapper
+itself echoed, and the citation guard above. ⭐ Ask of any check: *what would this print if the thing
+I am checking for were absent — and could it print that for another reason?*
+
+
 # ⭐⭐ ONE DECISION, NOT TWO: "WITH LIVE PRICING" vs "FEES MAY BE DISPROPORTIONATELY LARGE"
 
 **2026-08-19. Deferred three times now.** These are not two items. They are the same gap seen from
