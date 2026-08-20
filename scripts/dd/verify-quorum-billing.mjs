@@ -90,13 +90,41 @@ ok("⭐⭐ …and it cannot branch on a charge outcome — no billing identifier
 const callMatch = src.match(/^[ \t]+escalateProviderIntegrity\(report, correlationId\);$/m);
 const callAt = callMatch ? src.indexOf(callMatch[0]) : -1;
 ok("⭐⭐ the escalation is actually CALLED as a statement (deleting the call must fail this suite)", callAt > 0);
-// ⭐⭐ THE ORDERING CHECK BECAME AN IMPORT CHECK, AND THAT IS A STRICTLY STRONGER GUARANTEE.
-// It used to assert the call site sat above `runPaidAnalysis(` IN THE SAME FILE — a claim about
-// text order, which any edit could reorder. The producer now lives in a module that does not import
-// the billing machinery AT ALL, so it cannot branch on a settlement outcome even in principle: the
-// identifier is not in scope. Structural, not positional.
-ok("⭐⭐ …and the module holding it imports NO billing code — settlement is not in scope, at all",
-  !/from "\.\/_dd-x402\.mjs"/.test(src) && !/settle-gate/.test(src) && !/_x402-confirm/.test(src));
+// ═══ ⭐⭐ THE PROPERTY THIS PROTECTS, IN ONE SENTENCE ══════════════════════════════════════════
+// **THE PROVIDER-INTEGRITY ESCALATION MUST NOT BE ABLE TO BRANCH ON WHETHER WE GOT PAID.**
+//
+// ⭐ THAT SENTENCE IS THE POINT OF THIS BLOCK, AND ITS ABSENCE WAS A REAL DEFECT. This check used
+// to assert BOTH "cannot branch on a settlement outcome" (a PROPERTY) and "imports NO billing code
+// AT ALL" (a COUPLING RULE, which is one MECHANISM for that property) as though they were the same
+// claim. When `_dd-rungs.mjs` began importing three 402-BUILDING helpers on 2026-08-19, the text
+// supported both readings equally — so the failure could be argued about but not decided, and it
+// sat red for ~30 hours behind an earlier failure. ⚠️ A guard whose protected property cannot be
+// read off it can only be argued about, never applied. State the property; derive the mechanism.
+//
+// ⭐ WHAT SETTLED IT: the body-level check directly above PASSED the whole time. The property was
+// intact; only the shortcut used to prove it had broken.
+//
+// ═══ ⚠️ AND HERE AN ALLOW-LIST IS THE FAIL-SAFE DIRECTION — THE OPPOSITE OF `mergeJobStatus` ════
+// That merge takes a DENY-list, because its payload is already vetted and every unnamed field is
+// information LOST — an include-list there fails silent. This is the mirror image: an import is a
+// PRIVILEGE, and every unnamed one is capability GAINED. A deny-list of known-bad names would pass
+// the day `_dd-x402` grows a new settlement export. ⭐ THE RULE: enumerate what you must not LOSE
+// with a deny-list, and what you may not GAIN with an allow-list.
+//
+// So `_dd-x402.mjs` may be imported, but ONLY for terms fixed BEFORE any money moves. A fourth name
+// — however harmless it looks — fails this, on purpose, so a human decides.
+const TERMS_ONLY = ["resolvePayTo", "ddPaymentRequirements", "DD_PRICE_HUMAN"];
+const ddx402Import = src.match(/import\s*\{([^}]*)\}\s*from\s*"\.\/_dd-x402\.mjs"/);
+const ddx402Names = ddx402Import
+  ? ddx402Import[1].split(",").map((n) => n.trim().split(/\s+as\s+/)[0]).filter(Boolean)
+  : [];
+const smuggled = ddx402Names.filter((n) => !TERMS_ONLY.includes(n));
+// 🚨 THE OUTCOME MODULES STAY BANNED OUTRIGHT. `settle-gate` and `_x402-confirm` exist to report
+// whether a charge succeeded, so there is no name in either that the escalation may see.
+ok("⭐⭐ no SETTLEMENT-OUTCOME module is imported — nothing here can learn whether we were paid",
+  !/settle-gate/.test(src) && !/_x402-confirm/.test(src));
+ok("⭐⭐ …and anything taken from _dd-x402 is TERMS-ONLY, fixed before money moves (allow-list)",
+  smuggled.length === 0, smuggled.length ? `smuggled: ${smuggled.join(", ")}` : `${ddx402Names.length} name(s): ${ddx402Names.join(", ") || "none"}`);
 ok("⭐ …while dd-analyze (which DOES bill) receives the producer as an opaque thunk",
   /makeProduceReport\(\{ addr, chain, correlationId \}\)/.test(analyzeSrc) &&
   /produceReport,/.test(analyzeSrc));
