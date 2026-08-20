@@ -4,13 +4,4 @@
 // UNRESOLVED, never a stale SHA. `npm run build` regenerates this; `npm run stamp:clear`
 // restores the null. See scripts/stamp-build.mjs for the full reasoning.
 
-export const RAW_BUILD_STAMP = {
-  "commit": "759cdc4ee797b99e0a65941a9d50e4883d5aec41",
-  "dirty": false,
-  "dirtyCount": 0,
-  "tree": "539679416c29482777941be5048e8a76c5ae99f8e72eb5b4b13058901a19e78b",
-  "ddTree": "4fecf8867a7ae5e28c55faabe8b814bf4effdaf69b47ab37f882f0bc16a79381",
-  "ddFileCount": 36,
-  "fileCount": 173,
-  "generatedAt": "2026-08-20T10:45:41.291Z"
-};
+export const RAW_BUILD_STAMP = null;
