@@ -28,7 +28,7 @@ export default function NanopaymentPanel() {
   return (
     <div className="plane">
       <div className="panel-eyebrow">Nanopayments</div>
-      <h2>A fraction of a cent, paid automatically.</h2>
+      <h2>A fraction of a cent, paid automatically — when it is ever needed.</h2>
       <div className="sub">
         Mid-research, your agent sometimes needs a fresher fact than the open web
         can give. When it does, it can buy just that one data point — for a fraction

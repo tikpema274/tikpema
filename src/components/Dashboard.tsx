@@ -226,8 +226,12 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
           <button className="quick-card" onClick={() => go("nanopay")}>
             <div className="qt">Nanopayments →</div>
             <div className="qd">
-              See how your agent pays a fraction of a cent for fresh data
-              mid-research.
+              {/* ⚠️ SECOND COPY OF A CLAIM CORRECTED ON NanopaymentPanel. It said "your agent
+                  PAYS", present tense, for a step that has never fired in production — and it
+                  survived the page's own fix because nobody grepped for the other copy. Keep the
+                  two in step: this is the card, that is the page. */}
+              How your agent can pay a fraction of a cent for fresh data mid-research —
+              and why it has not needed to yet.
             </div>
           </button>
         </div>

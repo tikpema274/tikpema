@@ -45,10 +45,10 @@ export const COMPONENTS = {
   DcaPanel:             { suite: "verify-dca-consent-copy.tsx" },
   NanopaymentPanel:     { suite: "verify-nanopay-copy.tsx" },
   BridgePanel:          { suite: "verify-bridge-panel-copy.tsx" },
+  Dashboard:            { suite: "verify-dashboard-copy.tsx" },
 
   // ── known debt, claim-bearing and unrendered ────────────────────────────────────────────────
   // ⚠️ Ordered by what a wrong claim would COST, not by how many claims each carries.
-  Dashboard:       { uncovered: "'stop any of them instantly', 'the one pocket you can't pull back alone'" },
   ResearchPanel:   { uncovered: "'delivers a cited brief only if you approve it'" },
   // ⚠️ AgentsPanel reads as covered and is NOT: verify-activity-fallback renders ONE row
   // subcomponent to check a fallback label, and asserts nothing about the page's own claims.
@@ -62,7 +62,7 @@ export const COMPONENTS = {
 };
 
 /** 🚨 THE RATCHET. Lower it when debt is paid; raising it must be a deliberate, reviewed edit. */
-export const MAX_UNCOVERED = 3;
+export const MAX_UNCOVERED = 2;
 
 /**
  * ⚠️ THE RATCHET STOPS DEBT GROWING. NOTHING IN IT MAKES DEBT SHRINK — 8 will sit at 8 forever

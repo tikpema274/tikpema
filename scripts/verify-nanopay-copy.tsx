@@ -50,6 +50,21 @@ check("⚠️ non-empty render", rendered.length > 400, `${rendered.length} char
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
 section("1 — 🚨 NO PRESENT-TENSE CLAIM ABOUT A STEP THAT HAS NOT RUN");
+// ═══ ⭐⭐ A CLASS CHECK, BECAUSE THE ENUMERATED VERSION FAILED SILENTLY ══════════════════════
+// This section originally listed three remembered phrases and passed 13/0 — while the page's own
+// <h2> still read "A fraction of a cent, PAID AUTOMATICALLY", the most-read line on it, and the
+// Dashboard card still said "your agent PAYS a fraction of a cent". Both were present tense for a
+// step that has never fired, and both sailed through, because AN ABSENCE CHECK OVER AN ENUMERATED
+// LIST IS AN INCLUDE-LIST — and include-lists fail silent. That is the rule this repo wrote into
+// mergeJobStatus the same day, violated one file over.
+// ⭐ So the check is now a CLASS: any bare present-tense payment verb about the agent. A new
+// sentence nobody thought to name fails by default and must be worded deliberately.
+const PRESENT_TENSE_PAYMENT =
+  /\b(?:it|agent)\s+(?:pays|signs|buys|purchases|settles)\b|\bpaid automatically\.|\bruns automatically when\b/i;
+check("⭐⭐ no BARE present-tense payment verb survives anywhere on the page",
+  !PRESENT_TENSE_PAYMENT.test(rendered),
+  rendered.match(PRESENT_TENSE_PAYMENT)?.[0] ?? "");
+// ⚠️ The three originally-named phrases stay as REGRESSION pins — they are the ones that shipped.
 for (const [phrase, why] of [
   ["This runs automatically when you commission research", "asserted the flow happens on every job"],
   ["It signs a tiny on-chain USDC payment", "present tense for a signature never made in production"],
