@@ -1,5 +1,78 @@
 ---
 
+# ⭐⭐ THE OBSERVABILITY ALREADY EXISTED — AND IT HAD ALREADY ANSWERED THE QUESTION
+
+**2026-08-20.** Instructed to confirm the taxonomy reaches before instrumenting. It does, and no new
+instrument was needed: **five settled records already carry the answer, four of them written today.**
+
+```
+job 181247  09:21:52Z    job 181237  07:59:45Z    job 181236  07:47:36Z
+job 181235  07:38:34Z     job 181166  2026-08-19 21:17:57Z
+
+  code            "not-attempted"
+  detail          "the model judged no extra source was needed"
+  paidPathReached false
+  paidPath        "paid-path-not-reached"
+```
+
+⚠️ **`degraded: true` on every row is NOT a warning about the classification** — `isDegraded()` is
+derived by exclusion from `AUGMENTED = {PURCHASED, FREE_SOURCE}`, so it means only "this brief rests
+on Exa alone". Checked before reading the code, because a degraded flag next to a verdict is exactly
+the shape that turns a sound reading into a wrong one.
+
+## 🚨 SO THE BUY SIDE HAS NEVER FIRED FOR A REASON NOBODY HAD WRITTEN DOWN
+
+Not price. Not chain. Not the ceiling, the funding, or the signing scheme — **every one of those
+gates is clear, and the code never gets far enough to test any of them.** `decidePurchase` returns
+`kind: "none"`, and `maybeBuyData` returns at the FIRST branch.
+
+⭐ **AND ONLY ONE OF FOUR ROUTES IS EVEN PAID.** `decidePurchase` returns
+`onchain | market | papers | none`:
+
+| kind | path | reaches x402? |
+|---|---|---|
+| `none` | return immediately | ❌ — **this is what fires, every time** |
+| `market` | CoinGecko | ❌ free |
+| `papers` | arXiv | ❌ free |
+| `onchain` | QuickNode RPC proxy | ✅ **the only paid route** |
+
+🚨 **AND THE PAID ROUTE IS REACHABLE BY EXACTLY THREE METHODS** — `ALLOWED_ONCHAIN_METHODS` =
+`eth_blockNumber`, `eth_gasPrice`, `eth_getBalance`. A question must need one of those three Arc RPC
+calls to cost anything at all. **The paid surface is far narrower than "mid-research, your agent
+sometimes needs a fresher fact"** implies, and that narrowness — not a blocker — is why it has never
+fired.
+
+## ⭐ WHAT THIS DOES TO THE NANOPAYMENTPANEL COPY
+
+**Step 01 is TRUE AND IS EXACTLY WHAT HAPPENS**: *"Your agent checks whether the free web sources can
+give a live, as-of-now figure. If they already answer the question, it skips buying entirely."* That
+sentence describes the observed behaviour of all five jobs precisely.
+
+⚠️ The defect is narrower than "the page is false": steps 02–04 are written as things that occur,
+and *"This runs automatically when you commission research"* implies purchases happen. **The honest
+edit keeps step 01, marks 02–04 as the path taken only when a question needs one of three on-chain
+readings, and says plainly that no purchase has occurred yet.** ⭐ Note this is the third framing of
+this fix, and the first two were both wrong in the same way — they named a mechanism (a price, a
+chain) that had not been measured.
+
+## ⏳ THE ONE EXPERIMENT WORTH 0.25 USDC — AND IT IS NOT "RUN A JOB"
+
+Five jobs already agree; a sixth ordinary question is the SAME instrument asked the SAME question
+and corroborates nothing. ⭐ **Vary the QUESTION so it can only be answered by an Arc RPC call**,
+which is the sole route into the paid path:
+
+> **"What is the current block height on Arc Testnet?"**
+
+Three outcomes, all decisive, each written to `dataPurchase.code` automatically:
+
+* `not-attempted` again → **the classifier will not route even an unambiguously on-chain question**,
+  and the classifier is the constraint. The narrowest finding, and the most damning.
+* `paid-path-reached-refused` → it tried and was stopped, **and the code names the exact stop** —
+  the first time anything has reached the gate.
+* `paid-path-reached-purchased` → 🚨 **the buy side fires for the first time**, and the card gets to
+  say so.
+
+
 # 🚨🚨 REFUTED: THE TWO "INDEPENDENT BLOCKERS" ON THE BUY SIDE DO NOT EXIST
 
 **2026-08-20.** Before writing the NanopaymentPanel copy, I re-probed the seller. **Both blockers
