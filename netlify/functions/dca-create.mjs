@@ -3,7 +3,7 @@ import { connectBlobs } from "./_blobs.mjs";
 import { json } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
-import { MANDATE_STORE, mandateKey, validateAndBuildMandate } from "./_dca.mjs";
+import { MANDATE_STORE, mandateKey, validateAndBuildMandate, CREATE_GATED } from "./_dca.mjs";
 
 // POST /api/dca-create — create a DCA mandate. THE authorization moment: this is where a user,
 // present and passkey-authenticated, consents ONCE to autonomous custodial swaps that will
@@ -17,6 +17,21 @@ import { MANDATE_STORE, mandateKey, validateAndBuildMandate } from "./_dca.mjs";
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
   if (event.blobs) connectBlobs(event);
+
+  // ── 🚧 THE GATE — FIRST, before the session read, the wallet resolve, and any store write. ──
+  // Placed at the very top deliberately: a gate that sits lower still provisions a wallet and
+  // burns a Circle call for a request it was always going to refuse. See CREATE_GATED in
+  // _dca.mjs for the reason, the scope, and the UNBLOCK CONDITION.
+  // ⚠️ 403, not 404: the route exists and the user's existing mandates are still listable and
+  // cancellable. Pretending it is absent would contradict dca-list answering for the same feature.
+  if (CREATE_GATED) {
+    return json(403, {
+      error: "DCA is not accepting new schedules right now.",
+      gated: true,
+      whatHappened: "nothing. No mandate was created and no funds moved.",
+      existingMandates: "Any schedule you already have keeps running, and you can still cancel it.",
+    });
+  }
 
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });

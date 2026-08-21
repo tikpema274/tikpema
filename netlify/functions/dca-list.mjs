@@ -2,7 +2,7 @@ import { getStore } from "@netlify/blobs";
 import { connectBlobs } from "./_blobs.mjs";
 import { json } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
-import { MANDATE_STORE, ownerPrefix } from "./_dca.mjs";
+import { MANDATE_STORE, ownerPrefix, CREATE_GATED } from "./_dca.mjs";
 
 // GET /api/dca-list — the caller's OWN mandates, for the UI. Read-only. Owner-prefixed list,
 // keyed on the verified session, so a caller only ever sees their own. No cross-user read.
@@ -21,5 +21,8 @@ export async function handler(event) {
   }
   // Newest first — createdAt is epoch ms.
   mandates.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  return json(200, { mandates });
+  // ⭐ THE PANEL LEARNS THE GATE FROM HERE, never from its own copy of the flag. A duplicated
+  // constant is [[duplicate-source-of-truth-is-the-recurring-bug]]: the UI would keep offering a
+  // form the server refuses, or hide one it would accept, and only a user would find out.
+  return json(200, { mandates, createGated: CREATE_GATED });
 }

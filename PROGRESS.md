@@ -1,5 +1,102 @@
 ---
 
+# 🚧 DCA CREATE IS GATED — because "reachable but unlinked" is a state nobody chose
+
+**2026-08-21.** DCA was in a fourth state, and naming it correctly is the whole entry:
+**reachable but UNLINKED — route live, redirects live, cron live, and nothing anywhere pointing
+at it.** Not dormant (the earlier read), not linked (what the code claimed). Exposure was near
+zero *only because nobody navigates there*.
+
+## ⭐ THE MEASUREMENT THAT SETTLED IT — and it is not a convention, it is an omission
+
+| nav-less route | entry point |
+|---|---|
+| `#/swap` | `MyAgentPanel.tsx:376` quick-card |
+| `#/bridge` | `MyAgentPanel.tsx:362`, `Dashboard.tsx:166` |
+| `#/vault` | `Dashboard.tsx:175` |
+| `#/nanopay` | `Dashboard.tsx:226` |
+| **`#/dca`** | **none — nothing in `src/` targets it** |
+
+Every sibling follows the documented pattern (Dashboard card + nav-less hash route). DCA is the
+sole exception — **and its own code asserted twice that it wasn't**: `App.tsx:80` and
+`DcaPanel.tsx:24` both said *"reached from the swap area."*
+
+🚨 **BOTH COMMENTS WERE FALSE, AND THAT IS THE CLAIM-NOTHING-CHECKS SPECIES AGAIN** — a fact
+stated in prose that no test, type, or reader ever verifies. It is why *"is DCA wired?"* cost an
+hour instead of one grep, and it is the same shape as the consent guard that pinned a **sentence**
+instead of a **property** (`d65fcf1`). **Both comments are now corrected and say what is true.**
+
+## ⚠️ WHY THE STATE ITSELF WAS THE RISK, not the defects behind it
+
+Unlinked-but-live is **exactly the configuration that hid a 22-day outage in this same surface**
+([[dca-agentswap-refactor-state]]): nobody visits, so nobody notices anything about it — working or
+broken. ⭐ Safety by *habit* produces the same evidence as safety by *construction*, right up until
+one bookmark. **So the state was the thing to decide, not a thing to inherit.**
+
+## THE DECISION — GATE, and it is enforced at the server
+
+`CREATE_GATED` in `_dca.mjs`: a **constant, not an env var**, so flipping it costs a commit and a
+review. Same reasoning `budget-sweep.mjs` uses for staying inert (*"turning it on is a deliberate,
+reviewable act"*), and it dodges the [[caps-from-deployed-env-not-code-defaults]] trap where an
+unset var reads as "no value" at exit 0.
+
+* `dca-create` → **403 `{gated:true}`**, refusing **before** the wallet resolve and any store write.
+* ⭐ **403, NOT 404** — the route exists and `dca-list` still answers for the same feature.
+  Pretending absence would make two endpoints contradict each other.
+
+## 🚨 THE GATE'S SCOPE IS PINNED, because the risk is that a gate GROWS
+
+A gate is a money-safety control; the danger is not that it fails to block but that it creeps and
+blocks a **reclaim**. So the suite asserts the limits, not just the existence:
+
+* **`dca-cancel` is NEVER gated** — reclaim-class. *"pause/cap bind what the agent may SPEND, never
+  what the user may STOP or RECLAIM."* ⭐ A gate that blocked cancel would trap a user **inside** an
+  authorization they are trying to leave — strictly worse than the risk being gated against.
+* **`dca-list` is NEVER gated** — a user must see what is running in order to cancel it.
+* **The panel reads the gate from `dca-list`**, never a second copy of the flag
+  ([[duplicate-source-of-truth-is-the-recurring-bug]]).
+
+**Proven, not assumed:** create → 403 `gated:true`; cancel and list → 401 (they reach the auth
+check, so neither is gated).
+
+## ⭐⭐ AND IT NAMES ITS OWN HORIZON — a gate without one is a debt ratchet
+
+Written **at the constant**, not only here. **UN-GATE WHEN ALL THREE HOLD:**
+
+1. **Finding A fixed** — a submitted-but-unconfirmed spend is no longer read as "no money moved".
+2. **Finding B fixed** — `budget-sweep` running, or its role reassigned.
+3. **The consent sentence corrected in the same commit as (1)** — because fixing the ledger makes
+   the current exception text wrong.
+
+⚠️ Un-gating is also the moment to **re-link the route** — otherwise the fix lands and the feature
+returns to being invisible.
+
+## ⚠️ WHAT `dca-tick` DOES UNDER THE GATE — STATED, not inherited
+
+⭐ **It keeps filling an ACTIVE mandate.** Gating CREATE does not stop the tick honouring an
+existing authorization, and that must be a decision rather than a consequence of where the gate sits.
+An existing mandate is money the user already committed to under a consent block they acknowledged;
+refusing it would be the gate reaching past its purpose, and would strand a schedule they can still
+SEE but no longer have served. The honest way out is Cancel, which is theirs and never gated.
+
+⚠️ Zero ACTIVE mandates existed when the gate went in, so this changes nothing observable today.
+**Recorded precisely because it is invisible** — so "the tick still fills" is never later mistaken
+for an oversight.
+
+## ⭐ A GUARD CAUGHT MY OWN PROXY WHILE I WAS WRITING IT
+
+The new scope assertion started as `!/CREATE_GATED/.test(panelSrc)` — a substring over the whole
+file — and went red on a **comment pointing at the real constant**. The property (the panel holds no
+copy) was intact; only the proxy was wrong. 🚨 The tempting fix was to reword the comment —
+**degrading the code to satisfy a guard**, which is how a pointer to the source of truth gets
+deleted for resembling a duplicate of it. Narrowed the assertion instead: the panel may NAME the
+constant in prose, it may not IMPORT or DEFINE one. Same lesson as the `test:dd` finding, arrived at
+from the other direction — **I wrote the bad guard this time.**
+
+`test:dca` 26/0 (all new assertions negative-tested), `test:probe` 71/0, tsc + build clean.
+
+---
+
 # ⭐⭐⭐ SWEEP: WHERE ELSE IS AN UNCONFIRMED OUTCOME RESOLVED BY ASSUMPTION? — two live, one fail-OPEN
 
 **2026-08-21, same session.** The DCA fix was **PARKED** (below) and the question generalised

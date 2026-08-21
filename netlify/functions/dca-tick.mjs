@@ -111,6 +111,20 @@ export const ledgerFailurePatch = (failed) => ({
   ledgerUnrecorded: failed,
 });
 
+// ═══ 🚧 WHAT THIS TICK DOES WHILE CREATE IS GATED — A DECISION, NOT A SIDE EFFECT ════════════
+// dca-create is gated (CREATE_GATED, _dca.mjs). ⭐ THE TICK IS DELIBERATELY UNCHANGED: it KEEPS
+// FILLING any mandate that is already ACTIVE.
+//
+// The gate blocks NEW authorizations. An existing mandate is money the user already committed to,
+// under a consent block they read and acknowledged — refusing to honour it would be the gate
+// reaching past its purpose, and would strand a schedule the user can still SEE in the panel but
+// would silently no longer have served. The honest way to end a mandate is Cancel, which is theirs
+// and is never gated.
+//
+// ⚠️ RECORDED BECAUSE IT WOULD OTHERWISE BE INVISIBLE: zero ACTIVE mandates existed when the gate
+// went in (2026-08-21), so this rule changes nothing observable today. It is written for the case
+// where one does exist — and so that "the tick still fills" is never mistaken for an oversight in
+// where the gate happened to sit.
 export async function handler(event) {
   if (event?.blobs) connectBlobs(event);
   const startedAt = new Date().toISOString();

@@ -31,6 +31,51 @@ import { publicClient } from "./_predict.mjs";
 import { withRetry, isTransient } from "./_retry.mjs";
 import { budgetConfig, dcaDaySpend } from "./_budget.mjs";
 
+// ═══ 🚧 CREATE IS GATED — DCA ACCEPTS NO NEW AUTHORIZATIONS (decision 2026-08-21) ════════════
+//
+// ⭐ WHY A CONSTANT AND NOT AN ENV VAR. Flipping this must cost a commit and a review, not a
+// dashboard click — the same reasoning budget-sweep.mjs uses for staying inert ("turning it on is
+// a deliberate, reviewable act"). An env toggle would also inherit the trap recorded in
+// [[caps-from-deployed-env-not-code-defaults]]: an UNSET var reads as "no value" at exit 0, so the
+// gate could silently be off while everything reported fine.
+//
+// ⚠️ WHAT THIS FIXES IS A STATE NOBODY CHOSE. #/dca was REACHABLE BUT UNLINKED — route live,
+// redirects live, cron live, and nothing anywhere in src/ pointing at it (measured: every sibling
+// nav-less route has a Dashboard/MyAgent quick-card; dca alone had none, while App.tsx and
+// DcaPanel.tsx both CLAIMED it was "reached from the swap area"). Exposure was near zero only
+// because nobody navigates there. 🚨 THAT IS THE EXACT CONFIGURATION THAT HID A 22-DAY OUTAGE IN
+// THIS SAME SURFACE — nobody visits, so nobody notices anything about it, working or broken.
+// This makes "unreachable" ENFORCED rather than incidental.
+//
+// ── ⭐⭐ THE UNBLOCK CONDITION — WITHOUT ONE, A GATE BECOMES PERMANENT BY DRIFT ───────────────
+// This is a debt ratchet unless it names its own horizon, so: UN-GATE WHEN ALL THREE HOLD.
+//
+//   1. FINDING A is fixed — a submitted-but-unconfirmed spend is no longer treated as "no money
+//      moved". Today agent-send.mjs discards the pending txId entirely and dca-tick's
+//      SwapPendingConfirm branch ledgers nothing, so an unconfirmed fill is never counted and the
+//      day ceiling UNDERSTATES for every later swap — the user's own manual sends included.
+//   2. FINDING B is fixed — budget-sweep (its own header: "THE PRIMARY HANDLER, NOT A BACKSTOP")
+//      is running, or its role is reassigned. Measured 2026-08-21: 119 audit entries since
+//      2026-07-12, 21 of them unresolved submit-time charges, ZERO reversals ever.
+//   3. THE CONSENT SENTENCE MATCHES THE CODE — DcaPanel's cap/ceiling clause is corrected in the
+//      same commit as (1), because fixing the ledger makes the current exception text WRONG.
+//
+// ⚠️ Findings A and B are recorded in PROGRESS.md 2026-08-21; the parked ledger design is in
+// docs/dca-submit-time-budget-design.md. Un-gating is ALSO the moment to re-link the route.
+//
+// ── ⚠️ SCOPE — WHAT THIS GATE DELIBERATELY DOES NOT TOUCH ────────────────────────────────────
+// It blocks NEW authorizations ONLY.
+//   · dca-cancel  — NEVER gated. Cancel is reclaim-class: "pause/cap bind what the agent may
+//     SPEND, never what the user may STOP or RECLAIM" (dca-cancel.mjs). A gate that blocked cancel
+//     would trap a user inside an authorization they are trying to leave.
+//   · dca-list    — NEVER gated. A user must still see what is running in order to cancel it.
+//   · dca-tick    — ⭐ KEEPS FILLING an ACTIVE mandate. STATED AS A DECISION, not inherited from
+//     where the gate happens to sit: an existing mandate is money the user already committed to,
+//     and refusing to honour it would be the gate reaching past its purpose (and would strand a
+//     schedule the user can still see but no longer have served). Zero ACTIVE mandates exist as
+//     of 2026-08-21, so nothing is affected today — the rule is written for the case where one is.
+export const CREATE_GATED = true;
+
 export const MANDATE_STORE = "dca-mandates";
 export const FILLS_STORE = "dca-fills";       // idempotency claims + per-fill audit
 export const HEARTBEAT_STORE = "dca-heartbeat"; // unconditional proof-of-liveness

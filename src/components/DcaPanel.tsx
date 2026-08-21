@@ -21,7 +21,17 @@ const CADENCES: { label: string; ms: number }[] = [
 const fmtDate = (ms: number) =>
   new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 
-// DcaPanel — create and manage DCA mandates. Nav-less (#/dca), reached from the swap area.
+// DcaPanel — create and manage DCA mandates. Nav-less (#/dca).
+//
+// ⚠️ THIS COMMENT USED TO SAY "reached from the swap area." IT WAS FALSE, and had been for as long
+// as the route existed: nothing anywhere in src/ links to #/dca. Every sibling nav-less route has a
+// quick-card (swap → MyAgentPanel, bridge → MyAgentPanel + Dashboard, vault/nanopay → Dashboard);
+// this one had none, so the only way in was typing the hash. 🚨 A comment asserting an entry point
+// that does not exist is the claim-nothing-checks species — it sends the next reader hunting for a
+// link, and it is why "is DCA wired?" took an hour to answer instead of one grep.
+//
+// 🚧 CREATE IS NOW GATED (see CREATE_GATED in _dca.mjs for the reason and the UNBLOCK CONDITION).
+// The gate state is read from dca-list, never duplicated here. Cancel and list stay fully live.
 //
 // ⚠️ DISCLOSURE FIRST, AND IT IS NOT SOFTENED. A DCA mandate is the ONLY thing in Tikpema that
 // moves money with no human present. The plain custodial truth leads the page, BEFORE the
@@ -41,6 +51,11 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
   const [mandates, setMandates] = useState<any[] | null>(null);
+  // ⭐ Defaults FALSE so the ungated surface is what renders when the server has not answered —
+  // including under verify-dca-consent-copy.tsx, which must keep testing the consent copy that
+  // will be shown the moment the gate lifts. A guard that only tested the gated view would let the
+  // authorization text rot unwatched, which is exactly how this surface failed before.
+  const [createGated, setCreateGated] = useState(false);
 
   const perTickNum = Number(perTick);
   const budgetNum = Number(totalBudget);
@@ -57,6 +72,7 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       const token = await w.ensureSession();
       const r = await agentClient.dcaList(token);
       setMandates(r.mandates || []);
+      setCreateGated(r.createGated === true); // server is the only source of truth for the gate
     } catch (e: any) {
       // A list failure shouldn't wipe the form; surface quietly.
       setMandates([]);
@@ -112,6 +128,25 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
     <div className="plane">
       <div className="panel-eyebrow">Recurring swap · DCA</div>
       <h2>Swap on a schedule, while you're away.</h2>
+
+      {/* ── 🚧 THE GATE NOTICE. Says what is closed AND what still works, because a user with a
+          running schedule must never be left wondering whether they can still stop it. ────── */}
+      {createGated && (
+        <div
+          style={{
+            marginTop: 10,
+            border: "1px solid var(--warn)",
+            borderRadius: 10,
+            padding: "12px 16px",
+            fontSize: 14,
+            lineHeight: 1.6,
+          }}
+        >
+          <b>New schedules are paused.</b> We're not accepting new recurring swaps while we finish
+          work on how unconfirmed swaps are counted against your daily limit.{" "}
+          <b>Any schedule you already have keeps running, and you can still cancel it below.</b>
+        </div>
+      )}
 
       {/* ── THE CUSTODIAL DISCLOSURE BAND — LEADS THE PAGE, BEFORE THE FORM. ──────────────
           Not a tooltip, not below the fold, not softened. Reads back the user's live numbers.
@@ -221,7 +256,7 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         </label>
 
         <div>
-          <button className="emerald" disabled={creating || !formValid || !acked} onClick={create}>
+          <button className="emerald" disabled={creating || !formValid || !acked || createGated} onClick={create}>
             {creating ? "Creating…" : "Authorize recurring swap"}
           </button>
         </div>

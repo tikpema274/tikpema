@@ -77,9 +77,15 @@ export default function App() {
     case "swap":
       page = <SwapPanel wallet={wallet} />;
       break;
-    // DCA — recurring custodial swaps. Nav-less (#/dca), reached from the swap area, like
-    // #/bridge and #/vault. Leads with the custodial disclosure band; the scheduler
-    // (dca-tick) fills mandates autonomously, routed through the same capped executeAction.
+    // DCA — recurring custodial swaps. Nav-less (#/dca). Leads with the custodial disclosure
+    // band; the scheduler (dca-tick) fills mandates autonomously, through the same capped
+    // executeAction.
+    // ⚠️ THIS COMMENT USED TO SAY "reached from the swap area, like #/bridge and #/vault." FALSE —
+    // and doubly so, because those two ARE reached that way and this one never was. NOTHING in
+    // src/ links to #/dca; it is reachable only by typing the hash. That combination — live route,
+    // live redirects, live cron, no way in — is the state that hid a 22-day outage here.
+    // 🚧 New mandates are now GATED at the server (CREATE_GATED in _dca.mjs, which carries the
+    // unblock condition). Re-link this route in the same commit that un-gates it.
     case "dca":
       page = <DcaPanel wallet={wallet} />;
       break;

@@ -53,6 +53,8 @@ const tick = readFileSync("netlify/functions/dca-tick.mjs", "utf8");
 const cancel = readFileSync("netlify/functions/dca-cancel.mjs", "utf8");
 const panelSrc = readFileSync("src/components/DcaPanel.tsx", "utf8");
 const actions = readFileSync("netlify/functions/_actions.mjs", "utf8");
+const create = readFileSync("netlify/functions/dca-create.mjs", "utf8");
+const list = readFileSync("netlify/functions/dca-list.mjs", "utf8");
 
 console.log("╔══════════════════════════════════════════════════════════════════════╗");
 console.log("║  DCA CONSENT RECORD — pinned against the server it describes         ║");
@@ -160,6 +162,38 @@ check("⚠️ the known ordering gap is STILL PRESENT (flip this assertion when 
   gapPresent, gapPresent
     ? `ACTIVE-check@${activeAt} precedes reconcile@${reconcileAt} — an in-flight fill on a cancelled mandate is never ledgered`
     : "🎉 reconcile now runs first — update this suite and the note in DcaPanel");
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("5 — 🚧 THE CREATE GATE, AND THE LIMITS OF WHAT IT MAY TOUCH");
+// ⭐ A gate is a money-safety control, so its SCOPE is pinned the same way its existence is.
+// The risk is not that it fails to block — it is that it quietly grows and blocks a RECLAIM.
+check("🚧 create is gated at the server, not merely hidden in the UI",
+  /CREATE_GATED/.test(create) && /403/.test(create));
+check("⭐ …and it refuses BEFORE the wallet resolve and any store write",
+  create.indexOf("if (CREATE_GATED)") > 0 &&
+  create.indexOf("if (CREATE_GATED)") < create.indexOf("ensureOwnerWallet(session)"));
+check("🚨🚨 CANCEL IS NOT GATED — reclaim-class, and a gate must never trap a user inside an authorization",
+  !/CREATE_GATED/.test(cancel));
+check("⭐ …nor is LIST — a user must still see what is running in order to cancel it",
+  !/if \(CREATE_GATED\)/.test(list) && /createGated: CREATE_GATED/.test(list));
+// ⚠️ THIS ASSERTION WAS NARROWED THE MOMENT IT WAS WRITTEN, and the reason is worth keeping.
+// It began as `!/CREATE_GATED/.test(panelSrc)` — a substring over the WHOLE FILE — and went red on
+// a COMMENT that merely points the reader at the real constant. The property (the panel holds no
+// copy of the flag) was intact; only the proxy for it was wrong. 🚨 The tempting fix was to reword
+// the comment — degrading the code to satisfy a guard, which is how a pointer to the source of
+// truth gets deleted for looking like a duplicate of it. Same shape as the test:dd finding
+// (PROGRESS.md 2026-08-20): narrow the guard to the property, never edit the code to fit the proxy.
+// So: the panel may NAME the constant in prose; it may not IMPORT or DEFINE one.
+check("⭐⭐ the PANEL reads the gate from the server, never from its own copy of the flag",
+  /createGated/.test(panelSrc) &&
+  !/import[^;]*CREATE_GATED/.test(panelSrc) &&
+  !/(const|let|var)\s+CREATE_GATED/.test(panelSrc));
+// ⚠️ THE GATE MUST NAME ITS OWN HORIZON. A gate with no unblock condition becomes permanent by
+// drift — the debt-ratchet failure. This pins that the condition is written WHERE THE GATE IS.
+check("⭐⭐ …and the gate states an UNBLOCK CONDITION at the constant itself",
+  /UNBLOCK CONDITION/.test(dca) && /UN-GATE WHEN/.test(dca));
+check("⚠️ dca-tick's behaviour under the gate is STATED, not left as a side effect",
+  /KEEPS\s*\n?\/\/ FILLING|KEEPS FILLING/.test(tick));
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
