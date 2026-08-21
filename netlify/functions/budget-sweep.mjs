@@ -70,7 +70,15 @@ import { listUnresolvedCharges, reverseAgentSpend, markChargeResolved } from "./
 // would cost only extra getTransaction calls; it would not cost safety.
 // Deliberately NOT reused from _dca.mjs's MAX_PENDING_AGE_MS: DIFFERENT policy, and coupling them
 // would let a change to DCA's escalation silently move this money guard.
-// ═══ 🔭 OBSERVE-ONLY — REVERSAL IS DISARMED (decision 2026-08-21) ═════════════════════════════
+// ═══ 🔭 REVERSE-DISABLED — REVERSAL IS DISARMED (decision 2026-08-21) ═════════════════════════
+//
+// ⚠️ THIS MODE WAS CALLED "OBSERVE-ONLY" FOR ONE COMMIT, AND THAT NAME WAS A LIE ABOUT WHAT IT
+// DOES. It writes: a `resolution-<circleId>` audit marker for every charge it proves landed (21 of
+// them on the first real run), an `observed:<circleId>` key for anything it would have reversed,
+// and the heartbeat. A reader seeing "observe-only" would assume no mutation and be wrong three
+// ways. What is disarmed is the REVERSAL, not the writing — so the name says that and nothing more.
+// ⭐ The mislabelled-mode shape is the same one this session kept finding elsewhere; it is easier
+// to write than to notice, which is why the suite now pins the name against the behaviour.
 //
 // The sweeper now RUNS on a schedule, but it will not reverse. It resolves the charges it can prove
 // landed, and for any charge it WOULD have reversed it writes durable evidence and leaves the charge
@@ -83,7 +91,7 @@ import { listUnresolvedCharges, reverseAgentSpend, markChargeResolved } from "./
 // the machine on: we know exactly what it should do, and anything else is a bug we see immediately.
 //
 // 🚨 THE TRAP THIS MODE MUST AVOID, and the reason the disarmed branch does NOT mark-resolved:
-// marking retires a charge from the queue permanently. If observe-only marked the would-reverse
+// marking retires a charge from the queue permanently. If reverse-disabled marked the would-reverse
 // ones, arming later would find an EMPTY queue — the observation period would have silently
 // discarded exactly the cases it existed to catch. Disarmed, a would-reverse charge is LEFT.
 //
@@ -165,7 +173,7 @@ export async function sweep({ resolveAfterMs = RESOLVE_AFTER_MS, escalateAfterMs
   const beat = {
     tickAt: startedAt, open: 0, resolved: 0, reversed: 0, alreadyReversed: 0,
     leftPending: 0, leftUnreadable: 0, leftUnmodelled: 0, escalated: 0, errors: 0, details: [],
-    // 🔭 observe-only bookkeeping. `wouldReverseTotal` is CUMULATIVE, read from durable keys —
+    // 🔭 reverse-disabled bookkeeping. `wouldReverseTotal` is CUMULATIVE, read from durable keys —
     // it is the number the flip condition is decided on, and it survives every tick.
     reversalsArmed: REVERSALS_ARMED, wouldReverse: 0, wouldReverseTotal: 0,
   };

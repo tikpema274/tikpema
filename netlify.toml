@@ -367,7 +367,7 @@
 # 🚨 NO AUTH GUARD, DELIBERATELY. Netlify 403s HTTP invocation of a scheduled function, and
 # dd-watch shipped a guard keyed on httpMethod on 2026-08-11 that REFUSED ITS OWN CRON for five
 # runs — nothing written, no error anywhere. A sweeper must never be able to refuse itself.
-# ── 🔭 BUDGET SWEEP (OBSERVE-ONLY) ────────────────────────────────────────────────────────────
+# ── 🔭 BUDGET SWEEP (REVERSE-DISABLED) ────────────────────────────────────────────────────────────
 # Resolves submit-time day-ceiling charges against Circle. REVERSAL IS DISARMED
 # (REVERSALS_ARMED=false in budget-sweep.mjs) — it records what it WOULD reverse and leaves the
 # charge standing, so nothing reachable from this schedule can widen a cap.

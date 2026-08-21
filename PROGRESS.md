@@ -1,5 +1,114 @@
 ---
 
+# 🚨🚨 THE FIRST LIVE TICKS FIRED AND DID NOTHING — AND THE HEARTBEAT COULD NOT SAY SO
+
+**2026-08-21.** `budget-sweep-cron` deployed and fired on schedule. It also failed on every tick,
+**and the instrument built to detect that was structurally incapable of reporting it.**
+
+## THE EVIDENCE, AND THE ORDER IT ARRIVED IN
+
+| instrument | said | actually meant |
+|---|---|---|
+| heartbeat (`budget-sweep-heartbeat/last`) | still 2026-07-22, a month old | ⚠️ **NOT "it did not fire"** |
+| resolution markers in `data-budget` | zero | consistent with either |
+| deploy record `function_schedules` | ⭐ `budget-sweep-cron` **IS registered** | schedule is fine |
+| `dca-heartbeat` (control) | fresh, 3 s old | ⭐ crons ARE firing site-wide |
+| **`netlify logs --source functions`** | **two ticks, `errors:1` each** | ⭐⭐ **it fired and broke** |
+
+```
+19:00:54  {"armed":false,"open":0,"resolved":0,"wouldReverseTotal":null,"errors":1}
+19:30:35  {"armed":false,"open":0,"resolved":0,"wouldReverseTotal":null,"errors":1}
+```
+
+**CAUSE.** `budget-sweep.mjs` connects Blobs inside its **HTTP handler**; the cron wrapper called
+`sweep()` directly with no `event` and never connected. Every store call threw.
+
+⚠️ **NO IN-PROCESS SUITE COULD HAVE CAUGHT IT.** The suite mocks `@netlify/blobs` wholesale, so the
+context is trivially present on both sides of the boundary — [[binding-tested-across-what-it-binds]]
+exactly. The new assertion is therefore labelled a SOURCE check; the live log is the real proof.
+
+## ⭐⭐ AND THE DETECTION FAILURE IS THE MORE IMPORTANT HALF
+
+`writeHeartbeat()` swallows its own failure by design (*"observability only"*). So **when Blobs is
+what is broken, the one signal that would reveal it is the one that cannot be written.** The monitor
+went quiet at precisely the moment its subject broke — and quiet is indistinguishable from healthy.
+
+⭐ **ONE EARLIER DECISION IS WHY THIS WAS LEGIBLE AT ALL:** `wouldReverseTotal` reports **`null`,
+never `0`**, when uncountable. Both failed ticks show `null`. Had it defaulted to `0` the lines would
+have read as a healthy "nothing observed" and the failure would have looked like success.
+
+🚨 **A SECOND DEFECT THE LOG EXPOSED:** the cron logged `errors:1` at **INFO** and returned **200
+"swept"**. A totally failed sweep reporting success — the same family, one layer up. Now `errors > 0`
+or an unreadable count ⇒ `console.error(...[DEGRADED]...)` ⇒ **500**.
+
+## ⭐⭐⭐ NOT INVOKING MANUALLY IS WHAT PREVENTED A WRONG DIAGNOSIS
+
+The plan was: let the window close, and only then invoke by hand, because **a manual invoke proves
+the FUNCTION; only the cron proves the SCHEDULE.** Holding to that mattered more than expected — a
+manual invoke would have run with a working local Blobs context, **succeeded**, written a new-shape
+heartbeat and consumed the 21-charge validation set. The conclusion would have been *"function
+works, registration failed"* — **the exact opposite of the truth.**
+
+⚠️ The diagnostic would not merely have destroyed the baseline. It would have produced a confident,
+inverted answer, and nothing downstream would have contradicted it.
+
+# 🔭 THE MODE IS RENAMED: `observe-only` → `reverse-disabled`
+
+It **writes** — a `resolution-<circleId>` marker per proven-landed charge, an `observed:<circleId>`
+key per would-reverse, and the heartbeat. "Observe-only" told the next reader there was no mutation
+and was wrong three ways. **What is disarmed is the REVERSAL, not the writing.** The suite now pins
+the name against the behaviour, because a mislabelled mode is easier to write than to notice.
+
+# ⭐ DETECTION MOVED OFF THE STORE IT REPORTS ON
+
+A degraded sweep now pushes to **`DD_WATCH_WEBHOOK`** — the service-integrity channel, following
+`shoutLedgerFailure`'s precedent, and deliberately **not** the money siren (`gate:watch` asserts the
+separation). Awaited, not fire-and-forget: a scheduled function can be frozen at return.
+
+🚨 **NO FALLBACK.** `strong-read-watch` records what a "so it works without a new secret" fallback
+did last time: prod silently pushed money-path alerts into the in-app feedback channel with nobody
+deciding it. An unset variable here means nothing is pushed — **so the absence is logged loudly**
+(`[NO-ALERT-CHANNEL] … this failure reached NOBODY`). Absence must not read as safe, including the
+absence of the channel that reports absences.
+
+# ⭐⭐⭐ THE SYSTEMIC VERSION — ITS OWN ITEM, AND A PRE-MAINNET QUESTION
+
+**Scoped OUT of this deploy deliberately. The blind spot is not sweeper-specific.**
+
+Every Blobs-based monitor here shares the flaw. The deposit path's fail-closed dependencies —
+`agent-pause`, `data-budget`, `dd-canary-health` — all sit on Blobs, **and so does every heartbeat
+that would report them down.** A Blobs outage is exactly when those signals go quiet, and quiet is
+indistinguishable from healthy.
+
+⭐ **THE FIX PATTERN ALREADY EXISTS IN THIS REPO** and does not need inventing: `strong-read-watch`
+alerts to a WEBHOOK, whose whole rationale is *"the record is the audit trail, the push is the
+detection"*. The sweeper now does the same. **The open question is which of the others should.**
+
+⚠️ **WHY IT IS A PRE-MAINNET QUESTION, NOT A TIDY-UP:** on testnet a silent monitoring layer costs
+an investigation. On mainnet it costs the ability to know whether the safety layer is standing at
+the moment it matters — a monitoring layer that goes silent precisely when its subject breaks is
+worse than none, because it is *believed*.
+
+**NOT SCHEDULED, NOT DESIGNED, DELIBERATELY OPEN.** The inventory (which monitors, which stores,
+which alert path) is the first step and has not been done.
+
+**test:sweepdisarmed 43/0**, every new assertion negative-tested. The 21-charge validation set is
+**INTACT** — zero resolution markers written, nothing consumed by the failed ticks.
+
+## ⚠️ AND A HABIT OF MINE, RECORDED BECAUSE IT IS NOW THREE TIMES IN ONE SESSION
+
+Three assertions I wrote went red on **their own explanatory comments** or on a legitimate change:
+`!/CREATE_GATED/` matched a comment pointing at the constant; `!/\.catch\(\(\) => \{\}\)/` matched a
+comment quoting the old silent form; `!/fetch\(/` forbade a whole capability and broke when the
+DEGRADED alert was correctly added — then its replacement matched the **alert body text**.
+
+⭐ Each time the property was intact and only the proxy was wrong; each time the tempting fix was to
+edit the CODE to satisfy the guard. **A whole-file regex is a proxy for a property, and prose lives
+in that file too.** Strip comments, or assert on structure. Recorded as a habit rather than three
+incidents, because that is what it is.
+
+---
+
 # ⭐⭐ FINDINGS A + B FIXED — and the measurement reversed what B turned out to be
 
 **2026-08-21.** The DCA gate's unblock condition, worked. A was fail-OPEN and is closed. B was

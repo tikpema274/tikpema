@@ -61,7 +61,7 @@
     "test:refusalstates": "npx tsx scripts/verify-refusal-states.tsx",
     "gate:registry": "node scripts/verify-guard-registry.mjs",
     "test:pendingspend": "node --experimental-test-module-mocks scripts/verify-pending-spend-ledgered.mjs",
-    "test:sweepobserve": "node --experimental-test-module-mocks scripts/verify-sweep-observe-only.mjs"
+    "test:sweepdisarmed": "node --experimental-test-module-mocks scripts/verify-sweep-reverse-disabled.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -90,7 +90,7 @@
     "test:dd",
     "test:dca",
     "test:pendingspend",
-    "test:sweepobserve",
+    "test:sweepdisarmed",
     "test:ub",
     "test:research",
     "test:bridge",

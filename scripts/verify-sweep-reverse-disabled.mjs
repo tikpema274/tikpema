@@ -1,6 +1,6 @@
-// verify-sweep-observe-only.mjs — FINDING B: the sweeper RUNS, and it cannot widen a cap.
+// verify-sweep-reverse-disabled.mjs — FINDING B: the sweeper RUNS, and it cannot widen a cap.
 //
-//   node --experimental-test-module-mocks scripts/verify-sweep-observe-only.mjs   (npm run test:sweepobserve)
+//   node --experimental-test-module-mocks scripts/verify-sweep-reverse-disabled.mjs   (npm run test:sweepobserve)
 //
 // ═══ ZERO MONEY, ZERO NETWORK ═══ Blobs in-memory, circle().getTransaction scripted.
 //
@@ -9,7 +9,7 @@
 // CONSTRUCTION — no schedule anywhere. Measured 2026-08-21: 119 audit entries since 2026-07-12,
 // 21 unresolved submit-time charges, ZERO reversals ever performed. A read-only Circle probe then
 // showed all 21 resolve COMPLETE: 21/21 real spends, ZERO phantoms. So it is scheduled now in
-// OBSERVE-ONLY mode — it resolves what it can prove landed, records what it WOULD have reversed,
+// REVERSE-DISABLED mode — it resolves what it can prove landed, records what it WOULD have reversed,
 // and reverses nothing.
 //
 // ⭐⭐ THE ASSERTION THAT MATTERS MOST is section 2: a would-reverse charge must NOT be marked
@@ -99,7 +99,7 @@ section("2 — ⭐⭐ AND IT IS *NOT* RETIRED FROM THE QUEUE — the trap this m
   const open = await budget.listUnresolvedCharges({ olderThanMs: 0, at: NOW });
   check("🚨🚨 the would-reverse charge is STILL UNRESOLVED — arming later will find it",
     open.length === 1 && open[0].circleId === "cid-failed-1", `${open.length} open`);
-  // The failure this guards: if observe-only marked it resolved, the queue would be empty here and
+  // The failure this guards: if reverse-disabled marked it resolved, the queue would be empty here and
   // the whole observation window would have thrown away the cases it existed to collect.
   const hb = memStore("budget-sweep-heartbeat");
   const observed = await hb.list("observed:");
@@ -170,11 +170,93 @@ section("6 — 🚨 THE SCHEDULE POINTS AT THE CRON WRAPPER, NEVER AT THE GUARDE
   check("🚨🚨 budget-sweep itself is NOT — a cron carries no x-internal-token, so it would 401 " +
     "every tick while LOOKING DEAD", !/\[functions\."budget-sweep"\]/.test(toml));
   const cron = fs.readFileSync("netlify/functions/budget-sweep-cron.mjs", "utf8");
-  check("⭐ the wrapper calls sweep() by IMPORT — no HTTP hop, no auth surface, nothing to 401",
-    /import \{ sweep \}/.test(cron) && !/fetch\(/.test(cron));
+  // ⚠️ NARROWED. This was `!/fetch\(/` over the whole file — fine until the wrapper legitimately
+  // gained a fetch for the DEGRADED webhook alert, at which point a correct change turned it red.
+  // ⭐ The property is "it does not INVOKE THE SWEEP over HTTP", not "it never makes a request".
+  // A proxy that forbids a whole capability will eventually forbid a right answer.
+  // ⚠️ SIMPLIFIED after two failed attempts, both my own regex being cleverer than the property:
+  //   1. `!/fetch\(/` — forbade a whole capability, and went red when the DEGRADED webhook alert
+  //      was legitimately added.
+  //   2. `!/fetch\([^)]*budget-sweep/` — matched the ALERT BODY TEXT, which names the function.
+  // ⭐ The property is simply: it imports sweep, and no HTTP endpoint path appears in its code.
+  const cronCode2 = cron.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check("⭐ the wrapper calls sweep() by IMPORT — no HTTP hop to invoke it, nothing to 401",
+    /import \{ sweep \}/.test(cron) && !/\.netlify\/functions|["'\`]\/api\//.test(cronCode2));
   const sweepSrc = fs.readFileSync("netlify/functions/budget-sweep.mjs", "utf8");
   check("⭐ the guarded HTTP handler still requires internal auth — the wrapper did not weaken it",
     /requireInternal\(event\)/.test(sweepSrc));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("7 — 🚨 THE TWO DEFECTS THE FIRST LIVE DEPLOY FOUND (and no in-process suite could)");
+{
+  const cron = fs.readFileSync("netlify/functions/budget-sweep-cron.mjs", "utf8");
+
+  // ── (a) BLOBS CONTEXT ──────────────────────────────────────────────────────────────────────
+  // budget-sweep.mjs connects Blobs inside its HTTP handler. Calling sweep() directly bypasses it,
+  // so the first deploy's ticks (19:00:54 and 19:30:35, 2026-08-21) fired and did NOTHING —
+  // open:0, errors:1, every store call throwing.
+  // ⚠️ THIS SUITE MOCKS @netlify/blobs WHOLESALE, so the context is trivially present here and the
+  // BEHAVIOURAL half of this is untestable in-process. That is not a gap to paper over: it is
+  // [[binding-tested-across-what-it-binds]], and it is why the real proof is the live log line.
+  // The assertion below is therefore a SOURCE check, and labelled as one.
+  check("⭐⭐ (source) the cron connects Blobs before sweeping — its absence cost two live ticks",
+    /connectBlobs\(event\)/.test(cron) && /import \{ connectBlobs \}/.test(cron));
+  check("⭐ …and the handler actually takes an event to connect FROM",
+    /export async function handler\(event\)/.test(cron));
+
+  // ── (b) A FAILED SWEEP MUST NOT REPORT SUCCESS ─────────────────────────────────────────────
+  // The first version logged errors:1 at INFO and returned 200 "swept". A failure wearing a
+  // success's clothes — and the heartbeat could not correct it, because writeHeartbeat swallows
+  // its own failure, so when BLOBS is what is broken the one signal that would show it is the one
+  // that cannot be written.
+  check("🚨🚨 a sweep with errors does NOT return 200 — a failure must not wear a success's clothes",
+    /beat\.errors > 0/.test(cron) && /statusCode: 500/.test(cron));
+  check("⭐⭐ …and an UNREADABLE cumulative count counts as degraded too, not as 'none observed'",
+    /wouldReverseTotal === null/.test(cron));
+  check("⭐ …and the degraded line is console.ERROR, not INFO, so it is greppable as a failure",
+    /console\.error\("\[budget-sweep-cron\]\[DEGRADED\]/.test(cron));
+  check("⚠️ …and it warns explicitly against reading a quiet heartbeat as health",
+    /Do NOT read a quiet heartbeat as health/.test(cron));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("8 — 🚨🚨 DETECTION DOES NOT LIVE IN THE STORE IT REPORTS ON");
+{
+  const cron = fs.readFileSync("netlify/functions/budget-sweep-cron.mjs", "utf8");
+  check("⭐⭐ a degraded sweep pushes to a WEBHOOK — an alert path with no Blobs dependency",
+    /alertDegraded\(/.test(cron) && /DD_WATCH_WEBHOOK/.test(cron) && /await fetch\(url/.test(cron));
+  check("⭐ …and the alert is AWAITED — a scheduled function can be frozen at return",
+    /await alertDegraded\(/.test(cron));
+  // ⚠️ COMMENTS STRIPPED — third time this trap has bitten in one session. The comment explaining
+  // WHY not to use those channels names them, so a whole-file regex went red on its own warning.
+  // The property is about CODE. (Recorded rather than quietly fixed: it is clearly a habit.)
+  const cronCode = cron.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check("🚨🚨 NO FALLBACK CHANNEL in code — the strong-read-watch lesson: a convenience default " +
+    "silently re-pointed money alerts at the feedback channel",
+    !/WATCH_ALERT_WEBHOOK|DISCORD_FEEDBACK_WEBHOOK/.test(cronCode));
+  check("⭐⭐ an UNSET channel is logged loudly, not passed over — absence must not read as safe, " +
+    "including the absence of the channel that reports absences",
+    /NO-ALERT-CHANNEL/.test(cron) && /reached NOBODY/.test(cron));
+  check("⚠️ …and the alert text warns the heartbeat may be STALE rather than quiet",
+    /NOT evidence of health/.test(cron));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("9 — ⚠️ THE MODE'S NAME MATCHES WHAT IT ACTUALLY DOES");
+{
+  const src = fs.readFileSync("netlify/functions/budget-sweep.mjs", "utf8");
+  // It WRITES: resolution markers, observed: keys, the heartbeat. "observe-only" implied none of
+  // that. The name is pinned because a mislabelled mode is easier to write than to notice.
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check("⭐⭐ the mode does WRITE — markChargeResolved is reachable while disarmed",
+    /markChargeResolved/.test(code));
+  check("🚨 …so no CODE calls it observe-only", !/observe-only|OBSERVE-ONLY/.test(code));
+  check("⭐ …and the rename's reason is recorded where the flag is, not only in a commit message",
+    /THAT NAME WAS A LIE ABOUT WHAT IT/.test(src));
+  const toml = fs.readFileSync("netlify.toml", "utf8");
+  check("⭐ …and netlify.toml does not carry the old name either",
+    !/observe-only|OBSERVE-ONLY/.test(toml));
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
