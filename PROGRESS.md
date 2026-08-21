@@ -1,5 +1,130 @@
 ---
 
+# ⭐⭐⭐ SWEEP: WHERE ELSE IS AN UNCONFIRMED OUTCOME RESOLVED BY ASSUMPTION? — two live, one fail-OPEN
+
+**2026-08-21, same session.** The DCA fix was **PARKED** (below) and the question generalised
+instead: *"never a phantom fill" was a claim about the chain made by code whose defining condition
+was that it couldn't see the chain — where else does that shape live, on paths that are WIRED?*
+
+⭐ **The generalisation paid immediately.** The shape is not DCA's. It recurs, it is inconsistently
+handled, and one instance runs in the **fail-open** direction on a live user-facing route.
+
+## ⭐⭐ THE STRUCTURAL RESULT — the good pattern EXISTS and is applied INCONSISTENTLY
+
+Every fund-moving path here eventually hits `waitForTx` (`_circle.mjs:49`, `DEADLINE_MS = 60_000`).
+A timeout raises `TxPendingError`. **That throw says the deadline passed. It says NOTHING about the
+chain.** What each caller does with it is the whole finding:
+
+| | path | on `TxPendingError` | verdict |
+|---|---|---|---|
+| ✅ | `_swap.mjs:342` | → `SwapPendingConfirm` **carrying the circleId** → id-reconcile net | keeps the id |
+| ✅ | `job-evaluate-background.mjs:435` | persists `settleTxId` *"so the poller can distinguish slow from reverted"* | keeps the id |
+| 🚨 | `agent-send.mjs:161` | 202 `{pending, txId}` **to the client**, ledger skipped | **discards it** |
+| 🚨 | `_actions.mjs:370` (`transfer_usdc`) | throws past `ledger()`; caught at `agent-act.mjs:550` / `agent-execute-plan.mjs:300` | **discards it** |
+| ✅ | `agent-withdraw.mjs:161` | 202, no ledger — **correct**: a reclaim is not a spend, by design | n/a |
+
+🚨 **WHERE THE ID IS DISCARDED, THE ABSENCE OF A LEDGER ENTRY SILENTLY ASSERTS "NO MONEY MOVED."**
+That is `_dca.mjs:71`'s *"BUDGET INTACT — never a phantom fill"* wearing different clothes — and the
+chain refuted that claim 3 for 3 on 2026-07-18/19.
+
+# 🚨 FINDING A (FAIL-OPEN) — `agent-send` forgets the transaction it just submitted
+
+`/api/agent-send` is **wired** (`netlify.toml`). Sequence: submit → `waitForTx` → ledger. On timeout:
+
+* the tx **is submitted to Circle** and may confirm seconds later;
+* `recordAgentSpend` is **skipped**;
+* ⭐ **`agent-send.mjs` writes NOTHING to any store** — verified: its only Blobs reference is
+  `connectBlobs` for the budget module's own use. The `txId` goes to the **client** and is gone.
+
+So a pending-then-landed send is **never counted against the day ceiling**. **The cap is WIDENED —
+the fail-open direction**, the one thing `_budget.mjs` says it exists to prevent.
+
+⭐⭐ **AND IT IS STRICTLY WEAKER THAN THE RULE THAT WAS MEASURED FALSE.** DCA at least kept a
+`pendingPeriod` pointer and a fill claim carrying the `circleId`, so a reconcile *could* run and the
+2026-08-21 investigation *could* resolve it a month later. **`agent-send` keeps nothing at all** —
+there is no record to reconcile from, ever, by anyone.
+
+⚠️ **Not yet measured, and deliberately not claimed:** how often the 60s deadline is actually missed.
+Arc confirms in 2–3 s observed, so this is rare — but `circle-modular-wallet-unstaked-nonce-trap`
+documents txs sticking in SENT on Arc, which is exactly this condition. **Rare is not never, and
+"rare" is the reason nobody has noticed.**
+
+# 🚨 FINDING B (FAIL-CLOSED, but live) — the PRIMARY reversal handler is switched off
+
+`budget-sweep.mjs:54`, in its own words: **"⚠️ THIS SCANNER IS THE PRIMARY HANDLER, NOT A BACKSTOP."**
+Its reasoning is exact: `job-swap-receipt-background` reverses only on `reason:"reverted"`, which
+requires a **broadcast** tx whose receipt reads reverted. An **estimation-rejected** swap is never
+broadcast — no hash, no receipt — so the verifier settles it `unconfirmed` and **never reaches its
+reversal branch.** And estimation-reject is *"the failure shape actually observed under production
+conditions (step 4b)."*
+
+🚨 **AND `budget-sweep` IS INERT BY CONSTRUCTION** — no schedule in `netlify.toml`, none in-code
+(deliberately: *"the only thing keeping this function switched off"* must not be a vendor quirk), and
+its HTTP handler requires internal auth. Turning it on was left as a reviewable act pending an
+observed phantom rate (Path B).
+
+⭐ **MEASURED ON LIVE PROD, and it is consistent with the above:** the `data-budget` store holds
+**119 audit entries spanning 2026-07-12 → 2026-08-20** and **ZERO `reversal-*` / `resolution-*`
+markers.** **Nothing has ever been reversed or resolved in production.**
+
+⚠️ **DIRECTION MATTERS AND IT IS THE SAFE ONE.** A phantom charge that stands *over*-restricts the
+day ceiling and self-heals at UTC rollover. So the cost is **record accuracy plus up-to-one-day
+over-restriction — not money loss.** ⭐ Which is exactly why B is *recorded* and A is *the one to
+fix*: B is a switched-off safety net, A is an open door.
+
+## ✅ CHECKED AND CLEARED — the confirm ENGINES are sound; the weakness is one level up, at the RESOLVER
+
+* `_swap-confirm.mjs:180` — a read failure returns `rpc-error:…`, a **distinct** reason, so the
+  caller can tell *"couldn't look"* from *"did not land"*. Fail-closed, and explicitly reasoned.
+* Bridge confirm — IRIS-claims-minted-but-chain-disagrees → **`mint_unverified`**, loud, never
+  auto-retried, with the claim preserved as `irisClaimedMintTxHash` so a claim can never be read as
+  a fact.
+* `_ubwithdraw-record.mjs:242` — *"unknown age ⇒ assume fresh, the cautious side"* returns **`true`**,
+  which **blocks**. The assumption runs to the restrictive side and says so. Correct.
+* `agent-ub-spend.mjs:105` — ledgers an unconfirmed spend **on purpose**, because the source burn has
+  landed and the funds are already gone. Reasoned, and the right call.
+
+⭐ **THE PATTERN IN THE CLEARED SET:** every one of them *names the ambiguity and picks the
+restrictive side.* Every one in the failing set *does not notice there is an ambiguity.* The
+difference is not care taken at the moment of writing — it is whether the author saw that "I stopped
+waiting" and "it didn't happen" are two different sentences.
+
+# 🅿️ WHY THE DCA FIX WAS PARKED — and the one thing that must not be mis-read later
+
+The three-step plan (extend `reverseAgentSpend` → DCA decrement-at-submit → close the reversal gap)
+is **parked**. It would begin by modifying **the one function in `_budget.mjs` that can WIDEN a cap**,
+to remove latent risk from a path with **zero ACTIVE mandates**. Wrong trade today. Full analysis —
+including the atomicity section, which does not expire — is in
+**`docs/dca-submit-time-budget-design.md`**.
+
+⚠️ **THE PARK RESTS ON "IDLE", NOT ON "UNREACHABLE" — and the difference is a 22-day precedent.**
+The park was proposed on the basis that *"DCA isn't wired."* **It is wired**, verified:
+`netlify.toml:70/75/80` route `/api/dca-create|cancel|list`, `App.tsx:84` mounts `DcaPanel`, and
+`dca-tick` is scheduled `* * * * *`. Zero ACTIVE mandates makes it **idle**, and one user action
+un-idles it.
+
+⭐⭐ **THIS IS THE SECOND TIME THIS EXACT CONFLATION HAS HAPPENED TO THIS EXACT FEATURE.**
+[[dca-agentswap-refactor-state]] records that "live and IDLE was indistinguishable from dead" hid a
+22-day outage in the same surface. **An idle path and a dead path produce identical evidence**, and
+the only thing that separates them is checking the wiring — which costs one grep.
+
+# ⚠️ `_budget.mjs:652`'s PRECONDITION IS GENERAL — read and understood, NOT extended
+
+Its terms name no feature. It binds **ANY** path that ledgers at SUBMIT **AND** writes a paired
+sub-ledger. The trigger is a *shape*, not a subsystem.
+
+🚨 **`_budget.mjs` WAS NOT EDITED — deliberately.** The precondition needed **reading**, not amending.
+Narrowing it to name DCA would have shrunk a general rule to one instance and disarmed it for the
+next feature — done by the very session that had just proved it works, which is the worst possible
+moment to weaken it. It stays exactly as its author left it.
+
+⭐⭐ **AND NOTE WHAT ACTUALLY CAUGHT THE DEFECT.** Not a test, not a review, not a type. **A comment
+left at the site of the danger by someone who knew they would not be in the room.** The plan was
+"adopt step 8's existing pattern" — correct about the pattern — and it would have shipped a fail-open
+desync. The convention is the control. §5 of the design doc pays it forward.
+
+---
+
 # 🚨🚨 7 USDC MOVED AND THE MANDATES COUNTED 3 — AND "NEVER A PHANTOM FILL" WAS MEASURED FALSE 3 FOR 3
 
 **2026-08-21.** Re-established a finding recorded yesterday as theoretical: four CANCELLED DCA
