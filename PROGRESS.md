@@ -1,5 +1,227 @@
 ---
 
+# 🚨🚨 7 USDC MOVED AND THE MANDATES COUNTED 3 — AND "NEVER A PHANTOM FILL" WAS MEASURED FALSE 3 FOR 3
+
+**2026-08-21.** Re-established a finding recorded yesterday as theoretical: four CANCELLED DCA
+mandates carrying a non-null `pendingPeriod`. It is real, it is bigger than four mandates, and the
+brief I was given to re-establish it was **wrong in two places that mattered** — one of which
+inverted the safety direction of the whole thing.
+
+## THE STRUCTURAL DEFECT — the ACTIVE gate sits ABOVE the reconcile gate
+
+```
+dca-tick.mjs:337   if (m.status !== STATUS.ACTIVE) { beat.inactive++; continue; }   ← skips out
+dca-tick.mjs:341   if (m.pendingPeriod != null) { await reconcilePending(m, key); }  ← never reached
+```
+
+`dca-cancel.mjs:49` writes `{ ...m, status: CANCELLED }` — `pendingPeriod` is preserved untouched.
+So a mandate cancelled with a fill in flight is orphaned **permanently**: the fill lands, and no
+tick will ever reconcile it. ⭐ **NO SUITE ASSERTS AGAINST THIS.** The `CANCELLED` hits in
+`spike-step5a`/`5b` are Circle *transaction* states — a vocabulary collision, not coverage.
+
+⭐ `dca-cancel.mjs`'s own header says cancelling *"takes hold on the very next tick with no window
+to miss."* That is exactly right about STOPPING FUTURE SPEND and exactly wrong about the fill
+already in flight — the sentence never contemplates that the mandate is carrying one.
+
+## ⚠️ TWO CORRECTIONS TO THE BRIEF
+
+**1. There is no `spentUsdc` on a mandate.** The field is **`spentAmount`**; `spentUsdc` is the
+*day-ledger* field in `_budget.mjs`. The wrong name sends you to the wrong record.
+
+**2. "all with `spentUsdc: null`" is wrong on both count and value.** None are null. Three are `0`
+and one is **`2`** — and null ≠ 0 is precisely the distinction that decides this question.
+
+| mandate | status | pendingPeriod | `spentAmount` | cancelled |
+|---|---|---|---|---|
+| `4487fa0f` | cancelled | **495660** | 0 | 2026-07-18T12:01:59Z |
+| `45d8bcb5` | cancelled | **495660** | **2** | 2026-07-18T13:29:53Z |
+| `e42596e1` | cancelled | **495662** | 0 | 2026-07-18T15:06:50Z |
+| `4d8ef727` | cancelled | **495682** | 0 | 2026-07-19T10:45:31Z |
+
+## ⭐ THE DISCRIMINATOR, RE-DERIVED — and it is NOT `circleId`
+
+These claims are **log-scan era**, predating the id-reconcile refactor, so they carry no `circleId`
+at all. A summary that named one would have sent the next reader looking for a field that does not
+exist in these records. What they carry is the answer:
+
+```json
+{"mandateId":"4487fa0f…","period":495660,"status":"submitted",
+ "snapshotBlock":52435330,"eventTxHash":null,"submittedAt":"2026-07-18T12:01:29.933Z"}
+```
+
+* **`status:"submitted"` settles half the question by itself** — the claim is written AFTER the swap
+  is handed to Circle. "Nothing was ever submitted" is refuted for all four without touching a chain.
+* **`snapshotBlock` is the discriminator**: the Arc height captured immediately BEFORE submit, which
+  anchors an ERC-20 Transfer scan.
+
+🚨 **`spentAmount: 0` NEVER MEANT "NOTHING WAS SUBMITTED."** Per `_dca.mjs:76`, `spentAmount`
+advances ONLY on confirmation — so `0` + `submitted` is the dangerous branch itself, and **the
+mandate record cannot resolve its own ambiguity.** Only an instrument outside it can.
+
+## 🚨 MONEY MOVED — ALL FOUR, `status=0x1`, mined 4–5 s after submit
+
+| period | tx | mined | EURC in |
+|---|---|---|---|
+| 495660 (sibling A) | `0xdc59ebcf…c4f3f4` | 12:01:34 | 0.779093 |
+| 495660 (sibling B) | `0xeafd70d5…c19b9198` | 12:01:38 | 0.778952 |
+| 495662 | `0x8f7b6897…ac319960` | 14:11:44 | 0.795254 |
+| 495682 | `0x99d9c82e…cc29272e` | 10:14:41 | 0.908069 |
+
+## ⚠️ BUT THE SECOND-ORDER WARNING WAS FALSE FOR THIS DATA — AND TRUE FOR THE CODE TODAY
+
+The brief said: *"which also means the day-ceiling never counted it."* **It counted every one.**
+Each has an audit entry naming its exact mandate id, written within a second of mining:
+
+```
+1784376094506  1 USDC  swap_tokens  "DCA mandate 4487fa0f-…"  12:01:34.506Z
+1784376098348  1 USDC  swap_tokens  "DCA mandate 45d8bcb5-…"  12:01:38.348Z
+1784383904347  1 USDC  swap_tokens  "DCA mandate e42596e1-…"  14:11:44.347Z
+1784456081759  1 USDC  swap_tokens  "DCA mandate 4d8ef727-…"  10:14:41.759Z
+```
+
+`day:…:2026-07-18` = 9 (7 DCA + a 2 USDC bridge), `dca-day` = 7; 07-19 both = 3. Internally
+consistent. The era's own comment says why — `fb7adf9:dca-tick.mjs:388`: *"Record DCA's daily share
+now (mirrors executeAction's own hard-ceiling ledger, **which also records at submit**), but DO NOT
+touch spentAmount."*
+
+⭐ **DELIBERATE: two ledgers counted at SUBMIT, one waited for CONFIRM.** So the July error runs
+SAFE for the global ceiling (over-counted → cap narrowed) and UNSAFE for the per-mandate budget.
+
+🚨 **TODAY'S CODE INVERTED EXACTLY THIS.** `dca-tick.mjs:495`, the `SwapPendingConfirm` branch:
+*"NOTHING is ledgered here (nothing confirmed yet)."* All three ledgers now wait for reconcile, so a
+cancel-while-pending on current code loses **the day-ceiling too**. The warning describes the LIVE
+CODE correctly; it just does not describe the JULY RECORDS. Both halves need saying — a reader who
+keeps only one gets the safety direction backwards.
+
+## 🚨 THE REAL SIZE: 7 USDC, TWO DISTINCT DEFECTS
+
+Sum of every mandate's `spentAmount` = **3**. Fills the day-ledger recorded = **10**.
+
+An aggregate scan of blocks 52,420,000–52,600,000 for USDC leaving the wallet
+`0x058957deff333c47c15c208a4425420af6947f9e` to the swap adapter `0xbbd7…d40b` — **a different
+question from the per-claim scan, which is the point** — returns exactly **10 transfers of
+1.000000 USDC**, mapping 1:1 in time order:
+
+| blk | tx | maps to | how the system recorded it |
+|---|---|---|---|
+| 52422565 | `0x26cb3754…` | `45d8bcb5` 495658 | ✅ swapped, counted |
+| 52428559 | `0x19f136c1…` | `45d8bcb5` 495659 | ✅ swapped, counted |
+| 52435339 | `0xdc59ebcf…` | 495660 sibling | 🚨 abandoned pending |
+| 52435347 | `0xeafd70d5…` | 495660 sibling | 🚨 abandoned pending |
+| 52450592 | `0x8f7b6897…` | `e42596e1` 495662 | 🚨 abandoned pending |
+| 52457055 | `0xd252a2c3…` | `56e91b45` 495663 | ⚠️ failed-unconfirmed |
+| 52466718 | `0x204d94f8…` | `56e91b45` 495664 | ✅ swapped, counted |
+| 52584857 | `0x39399874…` | `4d8ef727` 495681 | ⚠️ failed-unconfirmed |
+| 52592126 | `0x99d9c82e…` | `4d8ef727` 495682 | 🚨 abandoned pending |
+| 52593122 | `0x17847b40…` | `f0ea6654` 495682 | ⚠️ failed-unconfirmed |
+
+⭐ **A CONTROL VALIDATES THE INSTRUMENT.** Row 7, `0x204d94f8…`, is the one tx the system itself
+recorded as confirmed (`56e91b45.lastFillTx`, *"confirmed by logscan (+0.820621 EURC)"*). The scan
+finds it — **and nine others.** So it is not vacuously true.
+
+**10 on chain = 10 audit entries** — nothing escaped the day-ledger. The mandates recorded 3. The
+**7 USDC gap is confirmed by two independent instruments**, chain and ledger, not inferred from one.
+
+* **4 USDC** — cancel-above-reconcile (the four above).
+* **3 USDC** — `failed-unconfirmed`, below.
+
+⚠️ This is an OVER-SPEND surface, not bookkeeping: `_dca.mjs:224` computes
+`remaining = totalBudgetAmount - spentAmount`. `45d8bcb5` had budget 3, spent 3, records **2** — had
+it stayed active it would have funded a **fourth** tick past its authorization. `4d8ef727` records
+**0** against **2** actually spent.
+
+# ⭐⭐⭐ "NEVER A PHANTOM FILL" IS A CLAIM ABOUT THE WORLD, MADE BY CODE THAT NEVER CHECKED THE WORLD
+
+`_dca.mjs:71` — `FAILED_UNCONFIRMED`: *"submitted but the witness never confirmed within grace —
+**BUDGET INTACT (no decrement). Never a phantom fill.**"*
+
+Blocks **52457055**, **52584857** and **52593122** all landed. **3 for 3.**
+
+⭐⭐⭐ **THIS IS ABSENCE-READS-AS-SAFE IN ITS PUREST FORM.** Every other member of that family
+(see the memory of the same name, now 6 confirmed) has an absence silently *filling a result slot*.
+Here the absence is promoted straight into a **factual assertion about the chain** — "never a
+phantom fill" — by a code path whose entire defining condition is **that it could not see the
+chain**. The one thing it knows is that it does not know, and it writes down a certainty.
+
+🚨 **AND IT IS NOT A BUG. IT IS A DESIGN CHOICE, MEASURED FALSE AT EVERY OPPORTUNITY IT EVER HAD.**
+There is no sampling here, no "mostly right": the rule was exercised three times in production and
+the chain contradicted it three times. A bug is a mistake in executing an intent; this executed its
+intent perfectly. The intent was wrong.
+
+⭐ `56e91b45` refutes it from *inside its own record*: it stores 495664 (`0x204d94f8…`) as its only
+fill at `spentAmount: 1`, while 495663 (`0xd252a2c3…`) landed ~9,600 blocks earlier and was written
+off as failed-unconfirmed. **One mandate, two real fills, one counted** — and nothing in the record
+looks wrong, which is why it survived a month.
+
+⚠️ Note what the comment was *protecting against* — a phantom fill, i.e. counting a spend that never
+happened. That risk is real. **But it chose the wrong default for it**, which is the next section.
+
+# ⭐⭐ THE FIX DIRECTION FOLLOWS FROM AN ASYMMETRY, NOT FROM A PREFERENCE
+
+For a **budget**, the two errors are not equal and opposite:
+
+| | effect on a budget |
+|---|---|
+| **OVER-count** (charge a spend that did not happen) | ⭐ **SAFE** — it NARROWS. Worst case the user is under-served: a fill is skipped, no money is lost, and a human can see and correct it. |
+| **UNDER-count** (miss a spend that did happen) | 🚨 **OVER-SPEND** — it WIDENS the remaining budget and funds a tick the user never authorized. Money moves, and nothing looks wrong. |
+
+⭐⭐ **THEREFORE A MANDATE BUDGET SHOULD DECREMENT ON SUBMIT AND BE CORRECTED ON CONFIRMED FAILURE
+— THE REVERSE OF TODAY.** Submit is the moment risk is created; that is when the budget should
+reflect it. A `FAILED`/`CANCELLED`/`DENIED` tx is a *positive on-chain observation* that no funds
+moved, and only such an observation should give budget back. **An unconfirmed fill returns nothing,
+because "I could not look" is not an observation.**
+
+⭐ **THIS IS NOT A NEW IDEA IN THIS CODEBASE — IT IS ALREADY THE MAJORITY PRACTICE.** The day-ceiling
+gets it right (`executeAction`'s ledger records at submit). The July-era code got it right for
+**two ledgers out of three**, and its own comment says so out loud. `spentAmount` is the lone
+holdout, and it is the one that guards the *user's authorized total*. ⚠️ **The correct direction was
+sitting in the same file, on the adjacent line, for a month.**
+
+⚠️ And the corrective machinery already exists: step 8's phantom-day-ceiling reversal
+(`676768f`) is exactly "decrement eagerly, reverse on proof of non-execution." The pattern is built,
+proven against real Circle, and simply was never applied to the mandate budget.
+
+## STATE — no live exposure, nothing changed
+
+All 7 mandates are terminal (6 cancelled, 1 expired); **zero ACTIVE**, so no money is at risk right
+now. This session was **reads only** — no code changed, nothing written to any store.
+
+⭐ One thing the record already gets right: `DcaPanel.tsx`'s consent block was corrected 2026-08-20
+to say an in-flight swap still lands. **The user's AUTHORIZATION is honest about the money.** What
+never caught up is the RECORD — a reminder that consent copy and ledger integrity are two different
+promises, and fixing one does not fix the other.
+
+**OPEN (deliberately, all three are calls to make):** (a) the live defect — worse than the July
+shape, since today all three ledgers wait; (b) the `failed-unconfirmed` budget-intact rule, per the
+asymmetry above; (c) the 7 USDC of historical records — reconcile, or document the discrepancy.
+
+# ⚠️ MY OWN CORRECTION: I PINNED A SLOW SCAN ON A REAL KNOWN HAZARD THAT WAS NOT OPERATING
+
+I reported mid-session that the aggregate scan was *"grinding against Arc's throttled public RPC"* —
+citing `dca-confirm-path-rpc-throttle`, a genuine, documented, previously-measured hazard in this
+exact code path.
+
+**It was my own bug.** I called `eth_getBlockByNumber(l.blockNumber, false)` instead of passing an
+array, so every timestamp lookup returned `-32700 parse error` and burned 8 retries with backoff.
+That was the entire delay. The `eth_getLogs` calls used correct params and succeeded, which is why
+the load-bearing result survived and only the timestamp column came back `?`.
+
+⭐⭐ **MISATTRIBUTING A BUG TO A REAL KNOWN HAZARD IS WORSE THAN A RANDOM WRONG GUESS, AND THE
+HAZARD'S REALITY IS EXACTLY WHAT MAKES IT CREDIBLE.** A random guess gets challenged. "It's the Arc
+throttle again" gets *nodded at* — it matches a documented pattern, it has a memory entry, it has
+prior measurements behind it. So it closes the investigation instead of opening one, and the actual
+defect (mine, two characters wide) ships. ⚠️ It also **corrupts the hazard's own record**: the next
+person reading "Arc throttle bit us again" now has one phantom data point inflating a real risk they
+will make real decisions against.
+
+🚨 **THE RULE: A KNOWN HAZARD IS A HYPOTHESIS, NOT AN EXPLANATION.** Matching a familiar shape is
+where the check starts. Here the discriminator was free and one line away — the error body said
+`parse error`, not a rate-limit code, and it was on `eth_getBlockByNumber` while `eth_getLogs` sailed
+through the same socket. ⭐ **The most credible wrong answer is the one that costs the most, because
+credibility is precisely what stops anyone from looking.**
+
+---
+
 # ⭐⭐ `test:dd`: THE GUARD'S WORDING DOES NOT SAY WHICH PROPERTY IT PROTECTS — THAT IS THE FINDING
 
 **2026-08-20.** Asked to decide by reading what the guard claims to protect. **It claims both, in the
