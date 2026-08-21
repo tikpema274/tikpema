@@ -141,7 +141,18 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
               `dca-cancel` never looks at `pendingPeriod`, and the swap is already submitted
               on-chain, so it lands regardless. The honest form says what cancelling CAN and
               CANNOT reach.
-            ⭐ Guarded by verify-dca-consent-copy.tsx, which pins both against the code. */}
+            ⚠️ A THIRD CLAIM WAS CORRECTED 2026-08-21, and this one was not a wording slip:
+            · "Every swap still obeys your per-swap cap and daily ceiling" read as a promise about
+              the COUNTERS. Both ARE enforced before a swap is submitted (_actions.mjs checks the
+              per-swap cap, then canSpendDay, and returns blocked BEFORE agentSwap runs) — so the
+              sentence was true of the swap it described. 🚨 WHAT IT HID IS THE FORWARD EFFECT: the
+              SwapPendingConfirm branch (dca-tick.mjs) ledgers NOTHING, so a fill that lands after
+              the 60s waitForTx deadline is never counted, and the daily ceiling then UNDERSTATES
+              for every later swap — the user's own manual sends and swaps included, not just DCA's.
+              An uncounted fill does not just under-report; it hands out headroom nobody authorized.
+            ⭐ Guarded by verify-dca-consent-copy.tsx, which pins all three against the code —
+              and section 1 now pins the ORDER in _actions.mjs and the emptiness of the pending
+              branch, not the presence of the sentence. */}
         <div style={{ fontWeight: 600, marginBottom: 8 }}>⚠ This is custodial. Read it before you authorize.</div>
         <div style={{ fontSize: 14, lineHeight: 1.6, color: "var(--paper)" }}>
           <b>Tikpema's server</b> will swap up to{" "}
@@ -152,8 +163,10 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
           passkey</b>. You can <b>cancel this schedule anytime</b>, and <b>stop your agent entirely</b> with
           the kill switch — <b>nothing swaps while your agent is stopped</b>. ⚠️ Cancelling stops
           every <b>future</b> swap; a swap already submitted will still land, because it is already
-          on-chain and nothing can recall it. Every swap still obeys your per-swap cap and daily
-          ceiling.
+          on-chain and nothing can recall it. Every swap is checked against your <b>per-swap cap</b>
+          and <b>daily ceiling</b> before it is submitted. ⚠️ But a swap that never confirms is{" "}
+          <b>never counted</b> toward your daily total, so later swaps — including your own — are
+          measured against a total that is too low.
         </div>
 
         <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 12, cursor: "pointer" }}>

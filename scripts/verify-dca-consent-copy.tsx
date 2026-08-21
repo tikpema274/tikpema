@@ -52,6 +52,7 @@ const dca = readFileSync("netlify/functions/_dca.mjs", "utf8");
 const tick = readFileSync("netlify/functions/dca-tick.mjs", "utf8");
 const cancel = readFileSync("netlify/functions/dca-cancel.mjs", "utf8");
 const panelSrc = readFileSync("src/components/DcaPanel.tsx", "utf8");
+const actions = readFileSync("netlify/functions/_actions.mjs", "utf8");
 
 console.log("╔══════════════════════════════════════════════════════════════════════╗");
 console.log("║  DCA CONSENT RECORD — pinned against the server it describes         ║");
@@ -68,8 +69,45 @@ check("⭐⭐ a SERVER-CONTROLLED KEY signs, not their passkey",
   /signed by a server-controlled key, not your passkey/.test(rendered));
 check("⭐⭐ …and it acts WHILE THEY ARE OFFLINE", /while you're offline/.test(rendered));
 check("⭐ …bounded by an amount, a cadence and an end date", /every/.test(rendered) && /whichever comes first/.test(rendered));
-check("⭐ …and still subject to the per-swap cap and daily ceiling",
-  /per-swap cap and daily\s*ceiling/.test(rendered));
+// ═══ ⭐⭐ THE CAP/CEILING CLAIM — PINNED TO THE PROPERTY, NOT TO THE SENTENCE ══════════════════
+// This assertion used to be `/per-swap cap and daily ceiling/.test(rendered)` — a PRESENCE check.
+// It passed for a sentence that was quietly half-true, and it would have kept passing forever,
+// because the only thing it could detect was the words going missing. 🚨 A guard that pins a
+// sentence certifies that nobody edited it; a guard that pins a PROPERTY certifies that it is
+// still TRUE. Those come apart exactly when it matters — see the 2026-08-21 correction below.
+//
+// The claim splits in two, and each half is checked against the module that makes it true:
+//   (a) ENFORCED BEFORE SUBMIT — both bounds run, and refuse, before any swap is sent.
+//   (b) NOT COUNTED IF IT NEVER CONFIRMS — so the ceiling understates from then on.
+// (b) is what the old sentence hid, and (b) is why the copy now names the exception.
+check("⭐ the copy PROMISES the check happens before submit",
+  /checked against your per-swap cap and daily ceiling before it is submitted/i.test(rendered));
+check("⭐⭐ …AND it names the exception, rather than implying the counters are always right",
+  /never confirms is never counted/i.test(rendered) && /too low/i.test(rendered));
+
+// (a) THE PROPERTY: in _actions.mjs the per-swap cap and the day ceiling both REFUSE before the
+// swap is submitted. Index order is the assertion — the same technique section 4 uses.
+const capAt = actions.indexOf("exceeds per-swap limit of");
+const dayAt = actions.indexOf("canSpendDay({");
+const swapAt = actions.indexOf("await agentSwap({");
+check("⭐⭐ PROPERTY (a): per-swap cap AND day ceiling are both enforced BEFORE agentSwap runs",
+  capAt > 0 && dayAt > 0 && swapAt > capAt && swapAt > dayAt,
+  `cap@${capAt} day@${dayAt} → swap@${swapAt}`);
+
+// (b) THE PROPERTY: the SwapPendingConfirm branch ledgers NOTHING, so an unconfirmed fill is not
+// counted anywhere. ⚠️ THIS ASSERTION IS DELIBERATELY NOT "the branch is empty of ledgers, and
+// that is fine" — it pins a KNOWN GAP so the copy above cannot silently become over-cautious
+// either. FLIP IT when the branch starts ledgering at submit (see
+// docs/dca-submit-time-budget-design.md), and correct the sentence in the same commit.
+const pendStart = tick.indexOf('threw?.name === "SwapPendingConfirm"');
+const pendEnd = tick.indexOf("if (!threw) {");
+const pendingBranch = pendStart > 0 && pendEnd > pendStart ? tick.slice(pendStart, pendEnd) : "";
+const pendingLedgers = /recordAgentSpend|recordDcaSpend|spentAmount:/.test(pendingBranch);
+check("⭐⭐ PROPERTY (b): an UNCONFIRMED fill is ledgered NOWHERE — so the copy must name it",
+  pendingBranch.length > 0 && !pendingLedgers,
+  pendingLedgers
+    ? "🎉 the pending branch now ledgers — UPDATE the sentence in DcaPanel and flip this check"
+    : `pending branch ${pendingBranch.length} chars, no ledger call`);
 // 🚨 The checkbox text is the record itself — it must restate the custodial fact, not just tick.
 check("🚨🚨 the CHECKBOX restates the custodial fact rather than saying only 'I agree'",
   /I understand Tikpema's server will move my USDC\/EURC automatically while I'm offline/.test(rendered) &&
