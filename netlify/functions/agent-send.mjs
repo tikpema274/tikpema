@@ -11,7 +11,7 @@ import { json, parseBody, ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc } from "./_
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
-import { canSpendDay, recordAgentSpend } from "./_budget.mjs";
+import { canSpendDay, recordAgentSpend, shoutLedgerFailure } from "./_budget.mjs";
 import { AGENT } from "./_agents.mjs";
 import { assertNotPaused } from "./_pause.mjs";
 import { publicClient } from "./_predict.mjs";
@@ -98,6 +98,33 @@ export async function handler(event) {
     /* balance read hiccup — let the transfer attempt surface any real failure */
   }
 
+  // ── THE LEDGER, IN BOTH OUTCOMES. See the pending branch below for why it is not one call. ──
+  // `confirmation`/`circleId` are recorded so the audit never asserts more than was observed, and so
+  // step 8 can resolve a charge later. A "confirmed" entry is unreversible BY CONSTRUCTION
+  // (reverseAgentSpend GUARD 1), which is the point of stating it rather than leaving it absent:
+  // ⚠️ an ABSENT confirmation used to mean "this caller does not know", and a reader could not tell
+  // that from "this caller never checked". Now it says which.
+  //
+  // 🚨 DECLARED ABOVE THE `try`, DELIBERATELY. `const` is block-scoped, so declaring it INSIDE the
+  // try makes it invisible to the catch — the pending branch would throw ReferenceError instead of
+  // ledgering, turning a 202 into a 500 AND still losing the spend: strictly worse than the bug
+  // being fixed, and invisible to any source-grep guard. (Written that way first; caught by
+  // verify-pending-spend-ledgered.mjs, not by re-reading it.)
+  const doLedger = (extra) =>
+    recordAgentSpend({
+      agent: AGENT.EXECUTOR,
+      owner: walletAddress,
+      amountUsdc: amount,
+      source: "agent-send",
+      justification: `user send to ${to}`,
+      ...extra,
+    }).catch((err) =>
+      // ⭐ SWALLOW, BUT SHOUT. This was `.catch(() => {})` — the silent form. The money has already
+      // moved by the time this runs, so throwing would report failure for a transfer that happened;
+      // the swallow is right and the SILENCE was the defect. Shared helper, never a second copy.
+      shoutLedgerFailure({ agent: AGENT.EXECUTOR, owner: walletAddress, amountUsdc: amount, source: "agent-send", err })
+    );
+
   try {
     const client = circle();
     const units = BigInt(Math.round(amount * 10 ** USDC_DECIMALS)).toString();
@@ -110,17 +137,24 @@ export async function handler(event) {
       fee: { type: "level", config: { feeLevel: "MEDIUM" } },
     });
     const txHash = await waitForTx(client, tx.data?.id);
-    // Ledger the send against today's ceiling (best-effort; the tx already landed).
-    await recordAgentSpend({
-      agent: AGENT.EXECUTOR,
-      owner: walletAddress,
-      amountUsdc: amount,
-      source: "agent-send",
-      justification: `user send to ${to}`,
-    }).catch(() => {});
+    await doLedger({ confirmation: "confirmed", circleId: tx.data?.id });
     return json(200, { txHash, tx: `${ARC.explorer}/tx/${txHash}`, from: walletAddress });
   } catch (e) {
+    // ── 🚨 A TIMEOUT IS NOT A REFUSAL (finding A, 2026-08-21) ──────────────────────────────────
+    // TxPendingError means WE STOPPED WAITING after 60s — the transfer IS submitted to Circle and
+    // may confirm seconds later. This branch used to hand `txId` to the CLIENT and ledger NOTHING,
+    // and agent-send writes to no store, so the id left the server and the spend was never counted:
+    // the day ceiling silently WIDENED by that amount, permanently. Fail-OPEN, on a wired route.
+    //
+    // ⭐ Ledger at SUBMIT with the authoritative id. `confirmation:"submitted"` + `circleId` is
+    // precisely what listUnresolvedCharges selects and reverseAgentSpend resolves, so if the
+    // transfer really did fail the charge is REVERSIBLE rather than lost. Over-counting narrows the
+    // cap (safe); under-counting widens it (over-spend). This takes the safe side AND keeps the
+    // evidence needed to correct it.
+    //
+    // ⚠️ NO PAIRED SUB-LEDGER here — checked against _budget.mjs's PRECONDITION, not assumed.
     if (e instanceof TxPendingError) {
+      await doLedger({ confirmation: "submitted", circleId: e.txId });
       return json(202, { pending: true, txId: e.txId, message: e.message });
     }
     return json(500, { error: e.message });

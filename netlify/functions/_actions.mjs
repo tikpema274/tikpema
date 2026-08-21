@@ -5,7 +5,7 @@ import { agentPay } from "./_pay.mjs";
 import { agentBridge, bridgeFee, resolveDestination, bridgeFeeBand, bridgeAckToken } from "./_bridge.mjs";
 import { resolveVault, inspectVault, gateDeposit, applyReportDisclosure, vaultDeposit, vaultWithdraw, readShareBalance } from "./_vault.mjs";
 import { vaultDdReport } from "./_vault-report.mjs";
-import { canSpendDay, recordAgentSpend } from "./_budget.mjs";
+import { canSpendDay, recordAgentSpend, shoutLedgerFailure } from "./_budget.mjs";
 import { AGENT } from "./_agents.mjs";
 import { assertNotPaused } from "./_pause.mjs";
 
@@ -95,51 +95,9 @@ export function validateStepShape(step) {
 // EVERY money-moving branch below sources funds from ctx.walletAddress — the CALLER'S OWN
 // agent SCA, server-resolved from the verified session. No branch reads a wallet from env.
 // ctx = { walletAddress, store? }. Returns { ok, kind, ... } or { ok:false, blocked }.
-/**
- * ═══ 🚨 A LOST LEDGER WRITE WIDENS THE DAY CEILING — AND IT WAS SWALLOWED IN SILENCE ═══════════
- *
- * `recordAgentSpend` writes TWO things in one call: the CAS day-counter the daily ceiling reads,
- * and the audit entry the Agents page renders. Its own comment says what a failure costs:
- *   "This is the counter the daily ceiling reads, so a lost update here does not just misreport —
- *    it WIDENS the cap."
- * And the call site was `recordAgentSpend({...}).catch(() => {})`. The function that documents its
- * failure as cap-widening was invoked with that failure discarded: money moves, the ceiling does not
- * advance, the audit row never appears, and "one daily ceiling, shared across every agent — when
- * it's reached, they all stop" quietly stops being true.
- *
- * ⭐ THE FIX IS NOT TO STOP SWALLOWING. Letting it throw would fail the action AFTER the money has
- * moved — the caller would report failure for a transfer that happened, which is strictly worse than
- * an unrecorded one. The swallow is correct; the SILENCE was the defect.
- *
- * ⭐⭐ SO: SWALLOW BUT SHOUT. Stable greppable prefix, and escalated to the same DD channel as
- * record-missing-fields, because this one is worse than a blind metric — it is a CAP that has
- * silently widened, on the money path, with the spend already executed.
- * ⚠️ Fire-and-forget and never awaited: an alerting failure must not compound a ledger failure.
- */
-function shoutLedgerFailure({ agent, owner, amountUsdc, source, err }) {
-  const detail = {
-    agent, source,
-    amountUsdc: Number(amountUsdc),
-    owner: String(owner ?? "").slice(0, 10) + "…",   // ⚠️ truncated: an owner address is an identity
-    err: String(err?.message ?? err).slice(0, 160),
-  };
-  console.error(
-    "[budget][ledger-write-failed] " +
-      JSON.stringify({ ...detail,
-        note: "the spend EXECUTED but was NOT ledgered — the day ceiling did not advance and the audit row is missing. The cap is now wider than configured by this amount until the next successful write." })
-  );
-  const url = process.env.DD_WATCH_WEBHOOK; // ⚠️ service-integrity channel, NOT the money siren
-  if (!url) return;
-  fetch(url, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content:
-      `🚨 **[budget]** LEDGER WRITE FAILED — the day ceiling did NOT advance\n` +
-      `agent \`${detail.agent}\` · source \`${detail.source}\` · amount \`${detail.amountUsdc}\` USDC\n` +
-      `The spend EXECUTED. The cap is wider than configured by this amount until the next successful ` +
-      `write, and the Agents-page audit row for it is missing.\n` +
-      `Error: \`${detail.err}\`` }),
-  }).catch(() => {});
-}
+// ⚠️ `shoutLedgerFailure` MOVED to _budget.mjs on 2026-08-21 and is imported above. It lived here,
+// private, while agent-send.mjs kept the silent `.catch(() => {})` this helper exists to replace —
+// a remedy only one call site could reach. It now sits beside the ledger it reports on.
 
 export async function executeAction(step, ctx) {
   const { walletAddress, store } = ctx;
@@ -366,8 +324,24 @@ export async function executeAction(step, ctx) {
       abiParameters: [String(step.to), units],
       fee: { type: "level", config: { feeLevel: "MEDIUM" } },
     });
-    const txHash = await waitForTx(client, tx.data?.id);
-    await ledger();
+    // ── 🚨 A TIMEOUT IS NOT A REFUSAL (finding A, 2026-08-21) ────────────────────────────────
+    // waitForTx throwing TxPendingError means WE STOPPED WAITING — the transfer IS submitted to
+    // Circle and may land seconds later. The old shape let that throw straight past `ledger()`,
+    // so a pending-then-landed transfer was NEVER counted and the day ceiling silently widened.
+    // Ledger it at SUBMIT with the authoritative id, then rethrow so the caller's 202 is unchanged.
+    // ⭐ `confirmation:"submitted"` + `circleId` is exactly what step 8 resolves against, so the
+    // charge is now RECOVERABLE instead of lost. No paired sub-ledger here — see _budget.mjs's
+    // PRECONDITION, which this path was checked against rather than assumed compatible with.
+    let txHash;
+    try {
+      txHash = await waitForTx(client, tx.data?.id);
+    } catch (e) {
+      if (e?.name === "TxPendingError") {
+        await ledger({ confirmation: "submitted", circleId: tx.data?.id });
+      }
+      throw e;
+    }
+    await ledger({ confirmation: "confirmed", circleId: tx.data?.id });
     return { ok: true, kind: "transfer_usdc", tx: `${ARC.explorer}/tx/${txHash}` };
   }
 

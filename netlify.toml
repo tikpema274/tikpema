@@ -367,6 +367,18 @@
 # 🚨 NO AUTH GUARD, DELIBERATELY. Netlify 403s HTTP invocation of a scheduled function, and
 # dd-watch shipped a guard keyed on httpMethod on 2026-08-11 that REFUSED ITS OWN CRON for five
 # runs — nothing written, no error anywhere. A sweeper must never be able to refuse itself.
+# ── 🔭 BUDGET SWEEP (OBSERVE-ONLY) ────────────────────────────────────────────────────────────
+# Resolves submit-time day-ceiling charges against Circle. REVERSAL IS DISARMED
+# (REVERSALS_ARMED=false in budget-sweep.mjs) — it records what it WOULD reverse and leaves the
+# charge standing, so nothing reachable from this schedule can widen a cap.
+# 🚨 THE SCHEDULE POINTS AT budget-sweep-CRON, NEVER AT budget-sweep ITSELF: that one is guarded by
+# requireInternal, a cron carries no x-internal-token, and it would 401 every tick while LOOKING
+# DEAD (no heartbeat either). The cron wrapper calls the pure sweep() export by import instead.
+# Every 30m — well inside the 24h escalation horizon, and RESOLVE_AFTER_MS (30m) bounds what it
+# will even look at, so a swap still settling is never queried.
+[functions."budget-sweep-cron"]
+  schedule = "*/30 * * * *"
+
 [functions."ub-withdraw-sweep"]
   schedule = "*/30 * * * *"
 

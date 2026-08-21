@@ -72,6 +72,12 @@ mock.module("../netlify/functions/_budget.mjs", {
     recordBlocked: async () => {},
     canSpend: async () => ({ allowed: true }),
     budgetConfig: () => ({ PERIOD_CEILING_USDC: 60 }),
+    // ⚠️ ENUMERATED MOCKS PIN THE MODULE'S EXPORT LIST AS A SIDE EFFECT. Adding
+    // `shoutLedgerFailure` to _budget.mjs broke this suite with a SyntaxError, because
+    // _actions.mjs imports it and this mock did not provide it. The spike suites spread
+    // `...realBudget` and were unaffected — that is the robust shape when you only mean
+    // to override one or two functions.
+    shoutLedgerFailure: () => {},
   },
 });
 

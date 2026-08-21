@@ -1,0 +1,244 @@
+// verify-pending-spend-ledgered.mjs — FINDING A: "WE STOPPED WAITING" IS NOT "NO MONEY MOVED".
+//
+//   node --experimental-test-module-mocks scripts/verify-pending-spend-ledgered.mjs   (npm run test:pendingspend)
+//
+// ═══ ZERO MONEY, ZERO NETWORK ═══ Blobs in-memory; circle(), waitForTx, the session, the wallet,
+// the pause switch and the balance read are all scripted. Nothing is submitted anywhere.
+//
+// ═══ 🚨 THE DEFECT THIS PINS ═════════════════════════════════════════════════════════════════
+// Every fund-moving path here ends at `waitForTx` (_circle.mjs, DEADLINE_MS = 60_000). A timeout
+// raises TxPendingError. **That throw says the deadline passed. It says NOTHING about the chain.**
+// agent-send.mjs used to hand `txId` to the CLIENT and ledger nothing — and it writes to no store,
+// so the id left the server and the spend was never counted. A pending-then-landed send silently
+// WIDENED the day ceiling, permanently, on a wired route. Same shape in `transfer_usdc`.
+//
+// It is the same claim `_dca.mjs:71` makes ("BUDGET INTACT — never a phantom fill"), which the
+// chain refuted 3 for 3 on 2026-07-18/19 — and STRICTLY WEAKER, because DCA at least kept a claim
+// with the circleId, so those fills could be resolved a month later. This kept nothing.
+//
+// ═══ ⭐ WHAT IS ASSERTED IS THE PROPERTY, NOT THE WORDING ═════════════════════════════════════
+// Not "the file contains recordAgentSpend". These drive the real handler and then RE-READ the
+// ledger: did the counter move, is the charge RESOLVABLE, and is a confirmed one untouchable.
+import { mock } from "node:test";
+import assert from "node:assert/strict";
+
+let pass = 0, fail = 0;
+const check = (label, cond, extra = "") => {
+  if (cond) { pass++; console.log(`  ✅ ${label}${extra ? ` — ${extra}` : ""}`); }
+  else { fail++; console.log(`  ❌ ${label}${extra ? ` — ${extra}` : ""}`); }
+};
+const section = (t) => console.log(`\n── ${t} ${"─".repeat(Math.max(0, 58 - t.length))}`);
+
+// ── in-memory blobs (one map per store name; cleared between cases) ───────────────────────────
+const maps = [];
+let etagSeq = 0;
+const memStore = (name) => {
+  const nm = typeof name === "string" ? name : name?.name ?? "default";
+  let m = maps.find((x) => x._n === nm);
+  if (!m) { m = new Map(); m._n = nm; maps.push(m); }
+  return {
+    async get(k, opts) { const e = m.get(k); if (e == null) return null; return opts?.type === "json" ? e.value : JSON.stringify(e.value); },
+    async getJSON(k) { return m.get(k)?.value ?? null; },
+    async setJSON(k, v, opts) {
+      const cur = m.get(k);
+      if (opts?.onlyIfNew && cur) return { modified: false };
+      if (opts?.onlyIfMatch && cur?.etag !== opts.onlyIfMatch) return { modified: false };
+      m.set(k, { value: v, etag: `e${++etagSeq}` }); return { modified: true };
+    },
+    async setIfNew(k, v) { if (m.has(k)) return false; m.set(k, { value: v, etag: `e${++etagSeq}` }); return true; },
+    // ⚠️ _budget's defaultStore() builds getWithEtag/setIfMatch FROM these two. Mocking the derived
+    // pair instead left the adapter calling an absent getWithMetadata → every read "UNREADABLE".
+    async getWithMetadata(k) { const e = m.get(k); return e ? { data: e.value, etag: e.etag } : null; },
+    async list(pfx) {
+      const p = typeof pfx === "string" ? pfx : pfx?.prefix ?? "";
+      const keys = [...m.keys()].filter((x) => x.startsWith(p));
+      return typeof pfx === "string" ? keys : { blobs: keys.map((key) => ({ key })) };
+    },
+  };
+};
+const resetStores = () => { for (const m of maps) m.clear(); };
+mock.module("@netlify/blobs", { namedExports: { connectLambda: () => {}, getStore: memStore } });
+
+// ── the handler's collaborators, scripted ────────────────────────────────────────────────────
+const OWNER = "0x6fb28d6366e755e0e27307692282490c6682fc58";
+const WALLET = "0x058957deff333c47c15c208a4425420af6947f9e";
+const TO = "0x" + "cd".repeat(20);
+const TX_ID = "circle-tx-id-0001";
+
+class TxPendingError extends Error {
+  constructor(txId) { super(`still pending after 60s`); this.name = "TxPendingError"; this.txId = txId; }
+}
+let waitBehaviour = "confirm";           // "confirm" | "pending"
+let ledgerShouldThrow = false;
+
+mock.module("../netlify/functions/_circle.mjs", { namedExports: {
+  TxPendingError,
+  circle: () => ({ createContractExecutionTransaction: async () => ({ data: { id: TX_ID } }) }),
+  waitForTx: async () => {
+    if (waitBehaviour === "pending") throw new TxPendingError(TX_ID);
+    return "0xdeadbeef";
+  },
+}});
+mock.module("../netlify/functions/_auth.mjs", { namedExports: {
+  requireSession: () => ({ address: OWNER }), requireInternal: () => true,
+}});
+mock.module("../netlify/functions/_agent-wallets.mjs", { namedExports: {
+  ensureOwnerWallet: async () => ({ walletAddress: WALLET, pending: false }),
+  isWalletUnresolvable: () => false,
+  WALLET_PROVISIONING_STATUS: 503, walletProvisioningRefusal: () => ({}),
+  WALLET_UNRESOLVABLE_STATUS: 503, walletUnresolvableRefusal: () => ({}),
+}});
+mock.module("../netlify/functions/_pause.mjs", { namedExports: { assertNotPaused: async () => null }});
+mock.module("../netlify/functions/_predict.mjs", { namedExports: {
+  publicClient: () => ({ readContract: async () => 999_000_000n }),   // plenty of balance
+}});
+
+const budget = await import("../netlify/functions/_budget.mjs");
+const { handler } = await import("../netlify/functions/agent-send.mjs");
+
+// A ledger that fails on demand, to exercise the swallow-but-shout path without patching the module.
+const realRecord = budget.recordAgentSpend;
+
+const send = async (amountUsdc = 5) =>
+  handler({ httpMethod: "POST", headers: {}, body: JSON.stringify({ to: TO, amountUsdc }) });
+
+const auditEntries = async () => {
+  const s = memStore("data-budget");
+  const keys = await s.list("audit:");
+  const out = [];
+  for (const k of keys) out.push(await s.getJSON(k));
+  return out;
+};
+
+console.log("╔══════════════════════════════════════════════════════════════════════╗");
+console.log("║  FINDING A — a pending spend is COUNTED and RECOVERABLE, not lost    ║");
+console.log("╚══════════════════════════════════════════════════════════════════════╝");
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("1 — 🚨 THE PENDING BRANCH: the spend is COUNTED");
+resetStores(); waitBehaviour = "pending";
+{
+  const res = await send(0.5);
+  check("the caller still gets 202 pending — the contract is unchanged", res.statusCode === 202, `got ${res.statusCode}`);
+  const body = JSON.parse(res.body);
+  check("  …and still carries the txId", body.txId === TX_ID);
+
+  const day = await budget.daySpend({ owner: WALLET });
+  check("🚨🚨 THE DAY CEILING ADVANCED — this is the whole defect, and it is closed", day === 0.5, `daySpend=${day}`);
+
+  const entries = await auditEntries();
+  check("⭐ an audit entry exists at all", entries.length === 1, `${entries.length} entries`);
+  check("⭐⭐ …marked confirmation:'submitted' — the audit asserts no more than was observed",
+    entries[0]?.confirmation === "submitted", `confirmation=${entries[0]?.confirmation}`);
+  check("⭐⭐ …and carries the AUTHORITATIVE circleId, without which it is unresolvable forever",
+    entries[0]?.circleId === TX_ID, `circleId=${entries[0]?.circleId}`);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("2 — ⭐⭐ AND IT IS RECOVERABLE — the property, not the field");
+{
+  const open = await budget.listUnresolvedCharges({ olderThanMs: 0 });
+  check("🚨🚨 step 8 CAN SEE the charge — it is reversible if the send really failed",
+    open.length === 1 && open[0].circleId === TX_ID, `${open.length} unresolved`);
+
+  // The control that makes the above non-vacuous: reverse it and watch the counter come back.
+  const rev = await budget.reverseAgentSpend({ entry: open[0], reason: "test: proven reversible" });
+  check("⭐ …and reverseAgentSpend actually accepts it", rev.reversed === true, JSON.stringify(rev.refused ?? ""));
+  const after = await budget.daySpend({ owner: WALLET });
+  check("⭐ …returning the headroom, so an over-count is CORRECTABLE rather than permanent", after === 0, `daySpend=${after}`);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("3 — ⭐ THE CONFIRMED BRANCH: counted, and UNREVERSIBLE by construction");
+resetStores(); waitBehaviour = "confirm";
+{
+  const res = await send(0.3);
+  check("a confirmed send returns 200", res.statusCode === 200, `got ${res.statusCode}`);
+  const day = await budget.daySpend({ owner: WALLET });
+  check("  …and is counted", day === 0.3, `daySpend=${day}`);
+
+  const entries = await auditEntries();
+  check("⭐⭐ it records confirmation:'confirmed' — an ABSENT value could not distinguish " +
+    "'this caller does not know' from 'this caller never checked'",
+    entries[0]?.confirmation === "confirmed", `confirmation=${entries[0]?.confirmation}`);
+
+  const open = await budget.listUnresolvedCharges({ olderThanMs: 0 });
+  check("🚨🚨 a CONFIRMED charge is invisible to the sweeper — a real spend can never be reversed",
+    open.length === 0, `${open.length} unresolved`);
+  const rev = await budget.reverseAgentSpend({ entry: entries[0], reason: "must be refused" });
+  check("⭐ …and reverseAgentSpend REFUSES it even if handed the entry directly (GUARD 1)",
+    rev.reversed === false && /confirmation/.test(rev.refused || ""), rev.refused);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("4 — ⚠️ THE PRECONDITION IN _budget.mjs IS CHECKED, NOT ASSUMED");
+{
+  const src = (await import("node:fs")).readFileSync("netlify/functions/agent-send.mjs", "utf8");
+  check("⭐⭐ agent-send writes NO paired sub-ledger — so submit-time charging here does NOT trip " +
+    "the atomic-pair precondition", !/recordDcaSpend/.test(src));
+  const actions = (await import("node:fs")).readFileSync("netlify/functions/_actions.mjs", "utf8");
+  // ⚠️ lastIndexOf, NOT indexOf. Both anchors appear TWICE: the first pair is the per-transaction
+  // CAP CHECK (~line 168), the second is the EXECUTION branch. Slicing on the first pair read the
+  // cap block, found no ledger call, and reported absence — a filtered read is not a measurement of
+  // absence, and the slice bounds were part of the hypothesis.
+  const txStart = actions.lastIndexOf('if (step.type === "transfer_usdc")');
+  const txEnd = actions.lastIndexOf('if (step.type === "bridge_usdc")');
+  const txBlock = actions.slice(txStart, txEnd);
+  check("⭐ the slice really is the EXECUTION branch, not the cap check — else the checks below are vacuous",
+    txStart < txEnd && /createContractExecutionTransaction/.test(txBlock) && /waitForTx/.test(txBlock),
+    `${txEnd - txStart} chars`);
+  check("⭐ transfer_usdc likewise writes no paired sub-ledger", !/recordDcaSpend/.test(txBlock));
+  check("⭐⭐ …and it ledgers on its OWN pending branch rather than throwing past the ledger",
+    /TxPendingError/.test(txBlock) && /confirmation: "submitted"/.test(txBlock));
+  const budgetSrc = (await import("node:fs")).readFileSync("netlify/functions/_budget.mjs", "utf8");
+  check("⚠️ the precondition still states the RULE generally, not narrowed to one caller",
+    /THE RULE ABOVE IS GENERAL/.test(budgetSrc) && /PAIRED SUB-LEDGER/.test(budgetSrc));
+  check("⭐ …and its list of submit-time chargers names agent-send, so the list is not stale",
+    /agent-send\.mjs on the TxPendingError branch/.test(budgetSrc));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("5 — 🚨 THE SCOPE TRAP THIS SUITE ACTUALLY CAUGHT");
+{
+  // The first version of the fix declared `doLedger` with `const` INSIDE the try and called it from
+  // the catch. Block scoping made the pending branch throw ReferenceError — a 500, and STILL no
+  // ledger: strictly worse than the bug being fixed, and invisible to any source-grep guard.
+  const src = (await import("node:fs")).readFileSync("netlify/functions/agent-send.mjs", "utf8");
+  const decl = src.indexOf("const doLedger");
+  const tryAt = src.indexOf("\n  try {\n    const client = circle();");
+  // ⚠️ THIS POSITIONAL CHECK IS A PROXY, AND A WEAK ONE — recorded rather than dressed up.
+  // Wrapping the helper in a bare `{ }` block defeats the scope while leaving the POSITION intact,
+  // so this assertion would still pass. Proven by mutation: the bare-block variant sails past this
+  // line and is caught only by the behavioural check below (ReferenceError: doLedger is not defined,
+  // exit 1). ⭐ The position is a readable hint; the DRIVEN HANDLER is the actual guard. Kept both,
+  // with the weaker one labelled — an unlabelled proxy is how a guard comes to certify nothing.
+  check("⭐ (proxy) the ledger helper is declared ABOVE the try — readable hint, not the guard",
+    decl > 0 && tryAt > decl, `doLedger@${decl} try@${tryAt}`);
+  resetStores(); waitBehaviour = "pending";
+  const res = await send(0.25);
+  check("⭐ …proven behaviourally: the pending path returns 202, not a ReferenceError 500",
+    res.statusCode === 202, `got ${res.statusCode}`);
+  check("  …and it ledgered on the way out", (await budget.daySpend({ owner: WALLET })) === 0.25);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("6 — ⭐ A LEDGER FAILURE IS SWALLOWED BUT SHOUTED, NEVER SILENT");
+{
+  const src = (await import("node:fs")).readFileSync("netlify/functions/agent-send.mjs", "utf8");
+  // ⚠️ COMMENTS STRIPPED — the first version of this check went red on the comment that QUOTES the
+  // old silent form. The property is about code, not prose (same trap as the CREATE_GATED check).
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check("🚨🚨 the silent `.catch(() => {})` is GONE from agent-send's CODE", !/\.catch\(\(\) => \{\}\)/.test(code));
+  check("⭐ …replaced by the SHARED shoutLedgerFailure, not a second copy of it",
+    /shoutLedgerFailure/.test(src) && !/function shoutLedgerFailure/.test(src));
+  const actions = (await import("node:fs")).readFileSync("netlify/functions/_actions.mjs", "utf8");
+  check("⭐⭐ _actions.mjs no longer DEFINES it — one definition, in _budget.mjs beside the ledger",
+    !/function shoutLedgerFailure/.test(actions) && /shoutLedgerFailure/.test(actions));
+  check("⭐ …and _budget.mjs exports it", /export function shoutLedgerFailure/.test(
+    (await import("node:fs")).readFileSync("netlify/functions/_budget.mjs", "utf8")));
+}
+
+console.log("\n╔══════════════════════════════════════════════════════════════════════");
+console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
+console.log("╚══════════════════════════════════════════════════════════════════════");
+process.exit(fail === 0 ? 0 : 1);

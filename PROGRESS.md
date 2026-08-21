@@ -1,5 +1,131 @@
 ---
 
+# ⭐⭐ FINDINGS A + B FIXED — and the measurement reversed what B turned out to be
+
+**2026-08-21.** The DCA gate's unblock condition, worked. A was fail-OPEN and is closed. B was
+**not what the earlier entry implied**, and a read-only measurement is what showed it.
+
+# 🚨 FINDING A — "we stopped waiting" was being read as "no money moved"
+
+Every fund-moving path ends at `waitForTx` (`_circle.mjs`, `DEADLINE_MS = 60_000`). A timeout raises
+`TxPendingError`. **That throw says the deadline passed. It says NOTHING about the chain.**
+
+`agent-send.mjs` handed `txId` to the CLIENT and ledgered nothing — and it writes to no store, so
+the id left the server and the spend was never counted. A pending-then-landed send **widened the day
+ceiling permanently**, on a wired route. Same shape in `_actions.mjs` `transfer_usdc`.
+
+⭐ It was the same claim `_dca.mjs:71` makes and the chain refuted 3/3 — and **strictly weaker**:
+DCA at least kept a claim with the circleId, which is the only reason those four fills could be
+resolved a month later. This kept nothing at all.
+
+**THE FIX, and why it was small.** Both paths now charge at SUBMIT with `confirmation:"submitted"`
++ the authoritative `circleId` — exactly what `listUnresolvedCharges` selects and
+`reverseAgentSpend` resolves, so a charge is now **RECOVERABLE** rather than lost. Over-counting
+narrows the cap (safe); under-counting widens it (over-spend). This takes the safe side AND keeps
+the evidence to correct it.
+
+⭐⭐ **NEITHER PATH WRITES A PAIRED SUB-LEDGER — CHECKED, NOT ASSUMED.** So this does NOT trip
+`_budget.mjs`'s atomic-pair PRECONDITION: it is precisely the case step 8 was built for, and needed
+no extension to the cap-widening primitive. **That is what separates A from the parked DCA work**,
+which pairs a submit-time charge with `recordDcaSpend` AND `spentAmount` — a triple, across two
+stores. The precondition's caller list is updated (fact), the rule left general (unchanged).
+
+**TWO MORE DEFECTS INSIDE A.**
+* `confirmation` is now recorded on the CONFIRMED branch too. An ABSENT value could not distinguish
+  *"this caller does not know"* from *"this caller never checked"*. A `confirmed` entry is
+  unreversible by construction (GUARD 1) — proven by handing the entry to `reverseAgentSpend` and
+  watching it refuse.
+* `agent-send:120` was `.catch(() => {})` — the silent swallow `_actions.mjs` had already fixed with
+  `shoutLedgerFailure`… **which was module-private, so only one call site could reach it.** ⭐ A
+  remedy only one caller can reach leaves the others looking fixed. Moved to `_budget.mjs` beside
+  the ledger it reports on; one definition.
+
+# ⭐⭐ FINDING B — MEASURED FIRST, AND THE MEASUREMENT CHANGED THE ANSWER
+
+The previous entry reported **21 unresolved submit-time charges, zero reversals ever**, and was
+careful to say *unresolved ≠ phantom*. A read-only `getTransaction` probe over all 21:
+
+| | |
+|---|---|
+| `COMPLETE` | **21** |
+| would be reversed on a first run | **0** — 0.000000 USDC |
+
+🚨 **21/21 ARE REAL SPENDS. THE PHANTOM RATE IS ZERO**, across 2026-07-23..2026-08-09. Nothing is
+over-charged; no cap is wrongly narrowed. **B is a record-accuracy gap, not standing money damage.**
+⭐ Had the earlier entry called those 21 "phantom charges", it would have been wrong 21 times out of
+21 — the caution was worth its cost, and the discriminator was one read-only query away the whole
+time.
+
+## THE DECISION: SCHEDULED, IN OBSERVE-ONLY MODE
+
+`REVERSALS_ARMED = false`. It resolves what it can prove landed, records what it WOULD have
+reversed, and reverses nothing. **Nothing reachable from the schedule can widen a cap.**
+
+⭐ **Running it NOW is safer than running it later**, precisely because of the measurement: the
+first runs are a *predictable no-op* (reverse 0, resolve 21), so anything else is a bug visible
+immediately against known-good data. Waiting means arming against a population nobody has measured.
+
+🚨 **THE TRAP THE MODE HAD TO BE DESIGNED AROUND.** A would-reverse charge must NOT be
+`markChargeResolved` while disarmed — marking retires it from the queue **permanently**, so arming
+later would find an EMPTY queue and the observation window would have silently discarded exactly the
+cases it existed to collect. Disarmed, the charge is LEFT standing (over-counted → cap narrowed →
+safe). Proven by mutation: adding the mark back turns that assertion red.
+
+**MECHANISM.** The schedule points at a new `budget-sweep-cron.mjs` calling `sweep()` **by import**.
+Scheduling `budget-sweep` itself would 401 every tick (a cron carries no `x-internal-token`) and
+write no heartbeat — **alive but looking dead**. The suite asserts `budget-sweep` is NOT scheduled.
+
+## ⭐⭐ THE FLIP CONDITION — BOTH HALVES, BESIDE THE FLAG, DECIDABLE FROM DATA
+
+Without one we would simply have acquired a **SECOND switched-off safety net** — the finding this
+whole thread started from.
+
+1. **ARM** when the observed rate on the **post-A population** is non-zero. That population is new:
+   before A, every submit-time charge came from a path that happened to succeed; A's pending
+   branches fire precisely when the outcome is *unknown*.
+2. **RETIRE** — delete the schedule and the function — if the count is still zero on **2026-11-19**
+   (90 days). ⭐ This half matters more than it looks: **a sweeper that observes nothing for three
+   months and stays scheduled is INDISTINGUISHABLE FROM A BROKEN ONE** — which is the exact state
+   `budget-sweep` was found in. "Still running" is not evidence of working.
+
+⚠️ **BOTH HALVES READ FROM DURABLE `observed:<circleId>` KEYS, NOT THE HEARTBEAT** — which is
+overwritten every tick, and [[observation-that-does-not-survive]] is precisely that failure. On
+2026-11-19 "has it ever observed anything?" is one blob read, never a recollection. An uncountable
+total reports **`null`, never `0`** — absence must not read as "none observed".
+
+# ⚠️ THREE THINGS I GOT WRONG ON THE WAY, KEPT BECAUSE THEY ARE THE LESSON
+
+**1. I WROTE A SCOPE BUG INTO THE FIX.** `const doLedger` declared inside the `try`, called from the
+`catch` — block-scoped, so the pending branch would throw `ReferenceError`: a 500 **and still no
+ledger**, strictly worse than the defect being fixed. The suite caught it; re-reading it did not.
+
+**2. `git checkout` DESTROYED THE UNCOMMITTED FIX — TWICE IN ONE SESSION.** Negative-testing by
+mutating a file and restoring with `git checkout --` reverts to **HEAD**, which does not contain
+uncommitted work. ⭐ THE RULE: back up with `cp` before mutating; restore from the copy.
+
+**3. ⭐⭐ MY OWN GUARD WAS A PROXY, AND I ONLY FOUND OUT BY MUTATING IT.** The "declared ABOVE the
+try" assertion is positional — wrapping the helper in a bare `{ }` block defeats the scope while
+leaving the position intact, and it sails straight past. What actually caught that variant was the
+BEHAVIOURAL check driving the real handler (`ReferenceError`, exit 1). The weak one is now LABELLED
+`(proxy)` rather than left looking authoritative: **an unlabelled proxy is how a guard comes to
+certify nothing** — the `test:dd` finding, arrived at from the other side, with me writing the bad
+guard this time.
+
+# ⚠️ TWO BREAKAGES FOUND, ONE MINE
+
+* **Mine:** adding an export to `_budget.mjs` broke `test:vault` with a SyntaxError. Three suites
+  **enumerate** `_budget`'s exports in their mocks, so ANY addition breaks them; the two spikes
+  spread `...realBudget` and were unaffected. ⭐ **An enumerated mock pins a module's export list as
+  a side effect.** Fixed all three; the spread is the robust shape when overriding one or two names.
+* **Pre-existing:** `verify-pause-enforcement.mjs` fails on `_bridge.mjs`/`bridgeAckToken` —
+  **identical at HEAD**, and referenced by **no npm script**. An unwired suite that rotted, exactly
+  the class `test:all`'s roll-up exists to prevent. Recorded, not fixed, so it is not rediscovered.
+
+**test:all 29/29, FAILED 0, NOT RUN 0** (both new suites green in-aggregate, every new assertion
+negative-tested). tsc + build clean. NOT YET DEPLOYED.
+
+---
+
 # 🚧 DCA CREATE IS GATED — because "reachable but unlinked" is a state nobody chose
 
 **2026-08-21.** DCA was in a fourth state, and naming it correctly is the whole entry:

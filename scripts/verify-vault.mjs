@@ -28,7 +28,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); // space the RPC-he
 let signed = false;
 mock.module("../netlify/functions/_pause.mjs", { namedExports: { assertNotPaused: async () => null } });
 mock.module("../netlify/functions/_budget.mjs", {
-  namedExports: { canSpendDay: async () => ({ allowed: true }), recordAgentSpend: async () => {} },
+  namedExports: {
+    canSpendDay: async () => ({ allowed: true }),
+    recordAgentSpend: async () => {},
+    // ⚠️ ENUMERATED MOCKS PIN THE MODULE'S EXPORT LIST AS A SIDE EFFECT. Adding
+    // `shoutLedgerFailure` to _budget.mjs broke this suite with a SyntaxError, because
+    // _actions.mjs imports it and this mock did not provide it. The spike suites spread
+    // `...realBudget` and were unaffected — that is the robust shape when you only mean
+    // to override one or two functions.
+    shoutLedgerFailure: () => {},
+  },
 });
 mock.module("../netlify/functions/_circle.mjs", {
   namedExports: {

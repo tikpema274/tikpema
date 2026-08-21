@@ -613,6 +613,49 @@ export async function recordAgentSpend({
   return { daySpentUsdc: dRec.spentUsdc };
 }
 
+/**
+ * ═══ 🚨 A LOST LEDGER WRITE WIDENS THE DAY CEILING — SWALLOW, BUT SHOUT ════════════════════════
+ *
+ * `recordAgentSpend` writes TWO things: the CAS day-counter the ceiling reads, and the audit entry.
+ * A lost write does not just misreport — it WIDENS the cap.
+ *
+ * ⭐ THE FIX IS NOT TO STOP SWALLOWING. Letting it throw would fail the action AFTER the money has
+ * moved — reporting failure for a transfer that happened, which is strictly worse than an
+ * unrecorded one. The swallow is correct; the SILENCE was the defect.
+ *
+ * ⚠️ MOVED HERE FROM _actions.mjs ON 2026-08-21, and the move IS the point: it lived beside ONE
+ * call site while `agent-send.mjs` kept the original `.catch(() => {})` — the silent form this
+ * helper exists to replace. A remedy that only one caller can reach leaves the others looking fixed.
+ * It belongs with the ledger it reports on, so every future ledger call site finds it by import
+ * rather than by remembering that _actions.mjs has a private copy.
+ *
+ * ⚠️ Fire-and-forget and never awaited: an alerting failure must not compound a ledger failure.
+ */
+export function shoutLedgerFailure({ agent, owner, amountUsdc, source, err }) {
+  const detail = {
+    agent, source,
+    amountUsdc: Number(amountUsdc),
+    owner: String(owner ?? "").slice(0, 10) + "…",   // ⚠️ truncated: an owner address is an identity
+    err: String(err?.message ?? err).slice(0, 160),
+  };
+  console.error(
+    "[budget][ledger-write-failed] " +
+      JSON.stringify({ ...detail,
+        note: "the spend EXECUTED but was NOT ledgered — the day ceiling did not advance and the audit row is missing. The cap is now wider than configured by this amount until the next successful write." })
+  );
+  const url = process.env.DD_WATCH_WEBHOOK; // ⚠️ service-integrity channel, NOT the money siren
+  if (!url) return;
+  fetch(url, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content:
+      `🚨 **[budget]** LEDGER WRITE FAILED — the day ceiling did NOT advance\n` +
+      `agent \`${detail.agent}\` · source \`${detail.source}\` · amount \`${detail.amountUsdc}\` USDC\n` +
+      `The spend EXECUTED. The cap is wider than configured by this amount until the next successful ` +
+      `write, and the Agents-page audit row for it is missing.\n` +
+      `Error: \`${detail.err}\`` }),
+  }).catch(() => {});
+}
+
 // ── REVERSE a submit-time day-ceiling charge that never confirmed (step 8) ─────────────────────
 //
 // 🚨 THIS IS THE ONLY FUNCTION IN THIS MODULE THAT CAN *WIDEN* A CAP. Everything else here
@@ -647,11 +690,25 @@ export async function recordAgentSpend({
 //   erasing it would hide a real event. The charge DID happen and it WAS reversed; both are true.
 //
 // ⚠️ PRECONDITION FOR WHOEVER ADDS A NEW SUBMIT-TIME LEDGER: this primitive reverses the DAY
-//   ledger ONLY, which is sound TODAY because the only submit-time charges are manual-path swaps,
-//   and those never write a paired sub-ledger (`recordDcaSpend` has exactly two call sites, both
-//   confirm-gated — traced 2026-07-22). IF YOU ADD A PATH THAT LEDGERS AT SUBMIT *AND* WRITES A
-//   PAIRED SUB-LEDGER, THIS FUNCTION MUST BE EXTENDED TO ATOMIC-PAIR SEMANTICS *BEFORE* THAT PATH
-//   SHIPS — a partial reversal desyncs the two counters, and the desync direction is fail-open.
+//   ledger ONLY. IF YOU ADD A PATH THAT LEDGERS AT SUBMIT *AND* WRITES A PAIRED SUB-LEDGER, THIS
+//   FUNCTION MUST BE EXTENDED TO ATOMIC-PAIR SEMANTICS *BEFORE* THAT PATH SHIPS — a partial
+//   reversal desyncs the two counters, and the desync direction is fail-open.
+//
+//   ⭐ THE RULE ABOVE IS GENERAL. It names no feature: the trigger is a SHAPE — an eager day-ceiling
+//   charge plus a second counter that must move with it — and any path with that shape inherits it.
+//   Do not narrow it to whichever caller prompted you to read it.
+//
+//   ⭐ WHY IT IS STILL SOUND — the list of submit-time chargers, re-traced 2026-08-21:
+//     · manual-path swaps (_actions.mjs `swap_tokens`, confirm:false)
+//     · `transfer_usdc` on the TxPendingError branch          ← added 2026-08-21 (finding A)
+//     · agent-send.mjs on the TxPendingError branch           ← added 2026-08-21 (finding A)
+//   NONE of the three writes a paired sub-ledger. `recordDcaSpend` — the only sub-ledger that
+//   exists — still has exactly two call sites (dca-tick.mjs), BOTH confirm-gated, so no submit-time
+//   charge is paired with one. Re-verify this list before adding a fourth.
+//
+//   🚨 THE KNOWN CASE THAT WOULD BREAK IT is DCA decrementing at submit: that would pair a
+//   submit-time day charge with `recordDcaSpend` AND `spentAmount` — a TRIPLE, across two stores.
+//   It is deliberately NOT built; see docs/dca-submit-time-budget-design.md (PARKED).
 export async function reverseAgentSpend({ entry, reason, store, at }) {
   const s = pickStore(store);
 

@@ -70,6 +70,52 @@ import { listUnresolvedCharges, reverseAgentSpend, markChargeResolved } from "./
 // would cost only extra getTransaction calls; it would not cost safety.
 // Deliberately NOT reused from _dca.mjs's MAX_PENDING_AGE_MS: DIFFERENT policy, and coupling them
 // would let a change to DCA's escalation silently move this money guard.
+// ═══ 🔭 OBSERVE-ONLY — REVERSAL IS DISARMED (decision 2026-08-21) ═════════════════════════════
+//
+// The sweeper now RUNS on a schedule, but it will not reverse. It resolves the charges it can prove
+// landed, and for any charge it WOULD have reversed it writes durable evidence and leaves the charge
+// standing. Nothing here can widen a cap while this is false.
+//
+// ⭐ WHY RUN IT AT ALL, THEN. Because the measurement that justified scheduling also showed there is
+// nothing yet to reverse: on 2026-08-21 every one of the 21 unresolved submit-time charges in
+// production resolved COMPLETE — 21/21 real spends, ZERO phantoms, across 2026-07-23..2026-08-09.
+// So the first runs are a predictable no-op, which makes this the safest possible moment to switch
+// the machine on: we know exactly what it should do, and anything else is a bug we see immediately.
+//
+// 🚨 THE TRAP THIS MODE MUST AVOID, and the reason the disarmed branch does NOT mark-resolved:
+// marking retires a charge from the queue permanently. If observe-only marked the would-reverse
+// ones, arming later would find an EMPTY queue — the observation period would have silently
+// discarded exactly the cases it existed to catch. Disarmed, a would-reverse charge is LEFT.
+//
+// ── ⭐⭐ THE FLIP CONDITION. BOTH HALVES. A MODE WITHOUT ONE BECOMES PERMANENT BY INERTIA ──────
+// Without this we would simply have acquired a SECOND switched-off safety net, which is the exact
+// finding that led here.
+//
+//   (1) ARM IT when the observed rate on the POST-FINDING-A population is NON-ZERO — i.e. the
+//       durable `observed:<circleId>` evidence below is not empty. Finding A (agent-send +
+//       transfer_usdc pending branches) created the first charges whose outcome is genuinely
+//       unknown at ledger time; before it, every submit-time charge came from a path that happened
+//       to succeed. A non-zero count means phantoms are real here, and reversal earns its risk.
+//
+//   (2) RETIRE IT — do not leave it running in a mode — if the count is STILL ZERO on
+//       **2026-11-19** (90 days of post-A observation). Retiring means deleting the schedule AND
+//       this function, and recording that the phantom class does not occur on this system.
+//       ⭐ This half matters more than it looks: a sweeper that observes nothing for three months
+//       and stays scheduled is INDISTINGUISHABLE FROM A BROKEN ONE — which is precisely the state
+//       budget-sweep was already in when it was found. "Still running" is not evidence of working.
+//
+// ⚠️ BOTH HALVES ARE DECIDABLE FROM DATA, NOT FROM MEMORY. The heartbeat reports
+// `wouldReverseTotal` from durable per-charge keys, so on 2026-11-19 the question "has it observed
+// anything?" is answered by reading one blob — never by someone's recollection. The per-tick
+// heartbeat alone could not answer it: it is overwritten every tick, and an observation that does
+// not survive is not a record ([[observation-that-does-not-survive]]).
+const REVERSALS_ARMED = false;
+
+// Durable evidence of a would-have-reversed charge. Deterministic key ⇒ one per charge, ever.
+// ⚠️ Kept in the HEARTBEAT store, not the audit log: this is an observation about a charge, not a
+// bookkeeping event on it, and the audit log's own reader treats every non-`kind` entry as a charge.
+const OBSERVED_PREFIX = "observed:";
+
 const RESOLVE_AFTER_MS = 30 * 60 * 1000; // 30m
 
 // ── ESCALATION — a separate, longer horizon, and it NEVER reverses. ────────────────────────────
@@ -119,6 +165,9 @@ export async function sweep({ resolveAfterMs = RESOLVE_AFTER_MS, escalateAfterMs
   const beat = {
     tickAt: startedAt, open: 0, resolved: 0, reversed: 0, alreadyReversed: 0,
     leftPending: 0, leftUnreadable: 0, leftUnmodelled: 0, escalated: 0, errors: 0, details: [],
+    // 🔭 observe-only bookkeeping. `wouldReverseTotal` is CUMULATIVE, read from durable keys —
+    // it is the number the flip condition is decided on, and it survives every tick.
+    reversalsArmed: REVERSALS_ARMED, wouldReverse: 0, wouldReverseTotal: 0,
   };
   const writeHeartbeat = async () => {
     try { await getStore(HEARTBEAT_STORE).setJSON("last", beat); } catch { /* observability only */ }
@@ -150,6 +199,25 @@ export async function sweep({ resolveAfterMs = RESOLVE_AFTER_MS, escalateAfterMs
 
         // ── THE MATRIX. Exactly one branch reverses. ──────────────────────────────────────────
         if (!lookErr && TERMINAL_FAILED.has(state)) {
+          // ── 🔭 DISARMED: OBSERVE, RECORD DURABLY, AND LEAVE THE CHARGE ─────────────────────
+          // No reversal, and deliberately NO markChargeResolved — marking would retire it from the
+          // queue, so arming later would find nothing. The charge stands (over-counted, which
+          // narrows the cap: the safe direction) and the evidence outlives this tick.
+          if (!REVERSALS_ARMED) {
+            const hb = getStore(HEARTBEAT_STORE);
+            try {
+              await hb.setJSON(`${OBSERVED_PREFIX}${id}`, {
+                circleId: id, state, owner: entry.owner, amountUsdc: entry.amountUsdc,
+                source: entry.source, chargedAt: entry.timestamp, observedAt: startedAt,
+                note: "WOULD HAVE BEEN REVERSED — reversal is disarmed (REVERSALS_ARMED=false). " +
+                      "The charge STANDS, which over-counts and narrows the cap. See the flip condition.",
+              }, { onlyIfNew: true });
+            } catch { /* evidence is best-effort; the charge is left standing either way */ }
+            beat.wouldReverse++;
+            beat.details.push({ id, outcome: state, action: "would-reverse (disarmed)", amountUsdc: entry.amountUsdc });
+            continue;
+          }
+
           // The ONLY reversal path. Reverse FIRST, mark SECOND (see the crash-safety note above).
           const r = await reverseAgentSpend({ entry, reason: `swap ${state} (circleId ${id})`, store: undefined, at: now });
           const alreadyDone = r.reversed === false && /already reversed/.test(r.refused || "");
@@ -205,6 +273,14 @@ export async function sweep({ resolveAfterMs = RESOLVE_AFTER_MS, escalateAfterMs
     beat.errors++;
     beat.details.push({ action: "sweep-failed", why: e.message });
   }
+
+  // ⭐ CUMULATIVE, from durable keys — the number the flip condition is decided on. Counted every
+  // tick so "has it ever observed anything?" is one blob read, not an archaeology exercise.
+  try {
+    const hb = getStore(HEARTBEAT_STORE);
+    const { blobs } = await hb.list({ prefix: OBSERVED_PREFIX });
+    beat.wouldReverseTotal = blobs.length;
+  } catch { beat.wouldReverseTotal = null; } // ⚠️ null = COULD NOT COUNT, never 0 = "none observed"
 
   await writeHeartbeat();
   return beat;

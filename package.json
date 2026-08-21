@@ -59,7 +59,9 @@
     "test:citenum": "npx tsx scripts/verify-citation-numbering.tsx",
     "test:activityfallback": "npx tsx scripts/verify-activity-fallback.tsx",
     "test:refusalstates": "npx tsx scripts/verify-refusal-states.tsx",
-    "gate:registry": "node scripts/verify-guard-registry.mjs"
+    "gate:registry": "node scripts/verify-guard-registry.mjs",
+    "test:pendingspend": "node --experimental-test-module-mocks scripts/verify-pending-spend-ledgered.mjs",
+    "test:sweepobserve": "node --experimental-test-module-mocks scripts/verify-sweep-observe-only.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -87,6 +89,8 @@
     "test:vault",
     "test:dd",
     "test:dca",
+    "test:pendingspend",
+    "test:sweepobserve",
     "test:ub",
     "test:research",
     "test:bridge",
