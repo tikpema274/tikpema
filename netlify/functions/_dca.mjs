@@ -48,7 +48,7 @@ import { budgetConfig, dcaDaySpend } from "./_budget.mjs";
 // This makes "unreachable" ENFORCED rather than incidental.
 //
 // ── ⭐⭐ THE UNBLOCK CONDITION — WITHOUT ONE, A GATE BECOMES PERMANENT BY DRIFT ───────────────
-// This is a debt ratchet unless it names its own horizon, so: UN-GATE WHEN ALL THREE HOLD.
+// This is a debt ratchet unless it names its own horizon, so: UN-GATE WHEN ALL FOUR HOLD.
 //
 //   1. FINDING A is fixed — a submitted-but-unconfirmed spend is no longer treated as "no money
 //      moved". Today agent-send.mjs discards the pending txId entirely and dca-tick's
@@ -59,9 +59,26 @@ import { budgetConfig, dcaDaySpend } from "./_budget.mjs";
 //      2026-07-12, 21 of them unresolved submit-time charges, ZERO reversals ever.
 //   3. THE CONSENT SENTENCE MATCHES THE CODE — DcaPanel's cap/ceiling clause is corrected in the
 //      same commit as (1), because fixing the ledger makes the current exception text WRONG.
+//   4. ⭐⭐ AN ENTRY POINT EXISTS. UN-GATING IS NOT COMPLETE WITHOUT ONE. #/dca has NEVER had a
+//      Dashboard or MyAgentPanel card — every nav-less sibling route has one. Flip this flag
+//      without adding a card and the result is unlinked-by-omission WITH THE DEFECTS FIXED: a
+//      surface nobody can reach, which is the exact state that hid the 22-day outage. The gate
+//      would read as lifted and the reachability would not have changed at all.
+//
+// ⚠️ (4) IS THE ONE MOST LIKELY TO BE FORGOTTEN, AND UNTIL NOW IT WAS NOT WRITTEN WHERE THE FLIP
+// HAPPENS. App.tsx and DcaPanel.tsx once FALSELY claimed the route was "reached from the swap
+// area"; both were corrected, and both now carry an explicit re-link reminder. ⭐ But those are
+// VIEW files, and this flag is flipped HERE — a reader can un-gate without ever opening either.
+// The reminder was one file away from the only line that matters, which is the same distance as
+// not existing. A condition that depends on the reader happening to open a different file is not
+// a condition. Hence (4), stated in the place the decision is actually made.
+//
+// ⚠️ (1) and (2) are DONE as of 2026-08-22 — findings A and B are fixed and budget-sweep drained
+// its 21-charge queue live (10, 10, 1 -> 0). So (3) and (4) are what actually remain, and (4) is
+// the one no code path will remind anyone about.
 //
 // ⚠️ Findings A and B are recorded in PROGRESS.md 2026-08-21; the parked ledger design is in
-// docs/dca-submit-time-budget-design.md. Un-gating is ALSO the moment to re-link the route.
+// docs/dca-submit-time-budget-design.md.
 //
 // ── ⚠️ SCOPE — WHAT THIS GATE DELIBERATELY DOES NOT TOUCH ────────────────────────────────────
 // It blocks NEW authorizations ONLY.

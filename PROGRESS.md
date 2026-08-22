@@ -390,15 +390,28 @@ check, so neither is gated).
 
 ## ⭐⭐ AND IT NAMES ITS OWN HORIZON — a gate without one is a debt ratchet
 
-Written **at the constant**, not only here. **UN-GATE WHEN ALL THREE HOLD:**
+Written **at the constant**, not only here. **UN-GATE WHEN ALL FOUR HOLD:**
 
 1. **Finding A fixed** — a submitted-but-unconfirmed spend is no longer read as "no money moved".
-2. **Finding B fixed** — `budget-sweep` running, or its role reassigned.
+   ✅ **DONE 2026-08-21.**
+2. **Finding B fixed** — `budget-sweep` running, or its role reassigned. ✅ **DONE — it drained its
+   21-charge queue live on 2026-08-22 (10, 10, 1 → 0).**
 3. **The consent sentence corrected in the same commit as (1)** — because fixing the ledger makes
    the current exception text wrong.
+4. ⭐⭐ **AN ENTRY POINT EXISTS.** `#/dca` has **never** had a Dashboard or MyAgentPanel card —
+   every nav-less sibling has one (swap → MyAgentPanel; bridge → both; vault/nanopay → Dashboard).
+   Un-gate without adding one and the result is **unlinked-by-omission with the defects fixed** —
+   the gate reads as lifted and reachability has not changed at all. That is the state that hid the
+   22-day outage.
 
-⚠️ Un-gating is also the moment to **re-link the route** — otherwise the fix lands and the feature
-returns to being invisible.
+⚠️ **(4) WAS PREVIOUSLY A TRAILING SENTENCE, WHICH IS HOW IT WOULD HAVE BEEN LOST.** It is now a
+numbered condition at the constant. ⭐ And it had to move *there*: `App.tsx` and `DcaPanel.tsx` both
+carry a re-link reminder, but those are VIEW files and the flag is flipped in `_dca.mjs` — a reader
+can un-gate without opening either. A reminder one file away from the line that matters is the same
+distance as no reminder.
+
+⭐ **(1) and (2) are now DONE, so (3) and (4) are the whole remaining blocker** — and (4) is the one
+no code path, suite, or type error will ever mention.
 
 ## ⚠️ WHAT `dca-tick` DOES UNDER THE GATE — STATED, not inherited
 
