@@ -91,6 +91,44 @@ const MAX_SUBMITS_PER_TICK = 3;
 //
 // This bounds the damage; it does NOT repair the counter. One fill stays uncounted and a human must
 // reconcile it — which is why the reason string carries the amount and the ids.
+// How many CONSECUTIVE transient defers on one mandate stop reading as bad luck and start reading
+// as "this mandate cannot fill". The tick runs every minute, so 3 is ~3 minutes of a fill being due
+// and unservable. Low on purpose: the cost of a false wedge alert is one message; the cost of a
+// missed one is a mandate that silently never fills while the heartbeat says errors:0.
+const WEDGE_AFTER_DEFERS = 3;
+
+// ⚠️ CHANNEL: DD_WATCH_WEBHOOK — the service-integrity channel, NOT the money siren
+// (WATCH_ALERT_WEBHOOK). A DCA mandate that cannot fill is a liveness failure, not a fund
+// movement, and gate:watch asserts the two stay separate.
+// 🚨 NO FALLBACK — DO NOT ADD ONE. An unset variable means nothing is pushed, which is why the
+// absence is LOGGED LOUDLY rather than passed over: absence must not read as safe, including the
+// absence of the channel that reports absences.
+// ⚠️ AWAITED, not fire-and-forget: a scheduled function can be frozen at return.
+// ⭐ AND IT DOES NOT TOUCH BLOBS. The wedge IS a Blobs failure, so a signal routed through Blobs
+// would be silenced by the very fault it reports — the lesson budget-sweep-cron already paid for.
+async function alertWedged(beat) {
+  const url = process.env.DD_WATCH_WEBHOOK;
+  if (!url) {
+    console.error("[dca-tick][NO-ALERT-CHANNEL] " + JSON.stringify({
+      wedged: beat.wedged,
+      note: "a mandate is wedged and DD_WATCH_WEBHOOK is unset — this reached NOBODY.",
+    }));
+    return;
+  }
+  try {
+    await fetch(url, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content:
+        `🚨 **[dca-tick]** WEDGED — ${beat.wedged} mandate(s) cannot fill\n` +
+        `deferred \`${beat.deferred}\` · scanned \`${beat.scanned}\` · submitted \`${beat.submitted}\` · errors \`${beat.errors}\`\n` +
+        `⚠️ \`errors=0\` is EXPECTED and does not mean healthy — a transient defer is not an error. ` +
+        `A fill is due and has been unservable for ${WEDGE_AFTER_DEFERS}+ consecutive ticks.` }),
+    });
+  } catch (err) {
+    console.error("[dca-tick][ALERT-FAILED] " + String(err?.message ?? err).slice(0, 160));
+  }
+}
+
 export async function runLedgerWrites(writes) {
   const failed = [];
   for (const [name, run] of writes) {
@@ -156,7 +194,7 @@ export async function handler(event) {
 
   // ── UNCONDITIONAL HEARTBEAT — written every invocation regardless of work (the job-sweep
   // blind-spot fix: a quiet cron must be distinguishable from a dead one by reading ONE blob).
-  const beat = { tickAt: startedAt, tokenExp, total: 0, inactive: 0, reconciledInactive: 0, unresolvable: 0, unreadable: 0, scanned: 0, submitted: 0, fired: 0, skipped: 0, failed: 0, stopped: 0, terminal: 0, notDue: 0, deferred: 0, errors: 0, details: [] };
+  const beat = { tickAt: startedAt, tokenExp, total: 0, inactive: 0, reconciledInactive: 0, unresolvable: 0, unreadable: 0, scanned: 0, wedged: 0, submitted: 0, fired: 0, skipped: 0, failed: 0, stopped: 0, terminal: 0, notDue: 0, deferred: 0, errors: 0, details: [] };
   const writeHeartbeat = async () => {
     try { await getStore(HEARTBEAT_STORE).setJSON("last", beat); } catch { /* observability only */ }
   };
@@ -187,7 +225,10 @@ export async function handler(event) {
   const patchMandate = async (m, key, outcome, { reason = null, tx = null, patch = {}, period = null } = {}) => {
     const entry = { period, outcome, reason, tx, at: startedAt };
     const recentOutcomes = [entry, ...(m.recentOutcomes || [])].slice(0, 5);
-    const next = { ...m, ...patch, recentOutcomes, lastOutcome: outcome, lastOutcomeAt: startedAt, lastReason: reason };
+    // ⭐ Reaching here means the tick got far enough to record a real outcome, so the deferral
+    // streak is over by construction. Reset it HERE rather than at each call site: a streak that
+    // only clears on some paths would drift upward and eventually cry wedge on a healthy mandate.
+    const next = { ...m, ...patch, recentOutcomes, lastOutcome: outcome, lastOutcomeAt: startedAt, lastReason: reason, consecutiveDeferrals: 0 };
     await mandates.setJSON(key, next);
     tally(outcome, tx, reason, m.id);
   };
@@ -732,7 +773,23 @@ export async function handler(event) {
         // mandate and the loop moves on, so one bad mandate can't starve the rest.
         if (isBlobsTransient(e)) {
           beat.deferred++;
-          beat.details.push({ id: m.id, outcome: "deferred-blobs-transient", reason: String(e?.message || e).slice(0, 80) });
+          // ── 🚨🚨 A DEFER IS TRANSIENT; A *STREAK* OF DEFERS IS A WEDGE, AND THEY LOOK IDENTICAL
+          //    AT THE TOP OF THE HEARTBEAT. Measured 2026-08-22: a stale memoised Blobs handle in
+          //    _budget.mjs made every tick defer forever while the beat still read `errors: 0`.
+          //    Nothing above `details` distinguished "one write lost a race" from "this mandate can
+          //    never fill again" — so the tick reported healthy for as long as it stayed broken.
+          //    ⭐ THE COUNT MUST BE DURABLE, because a wedge is BY DEFINITION cross-invocation and
+          //    in-memory state dies with the container. It lives on the mandate, which is a
+          //    DIFFERENT store from the one that is failing — deliberately, since a counter kept in
+          //    the broken store could never be written ([[detection must not live in the store it
+          //    reports on]]). Best-effort: if even that write fails, the beat still carries the
+          //    single-tick `deferred`.
+          const streak = Number(m.consecutiveDeferrals ?? 0) + 1;
+          try {
+            await mandates.setJSON(key, { ...m, consecutiveDeferrals: streak, lastDeferAt: startedAt });
+          } catch { /* the mandate store is failing too — the beat's `deferred` is what survives */ }
+          if (streak >= WEDGE_AFTER_DEFERS) beat.wedged++;
+          beat.details.push({ id: m.id, outcome: "deferred-blobs-transient", streak, reason: String(e?.message || e).slice(0, 80) });
         } else {
           beat.errors++;
           beat.details.push({ id: m.id, outcome: "error", reason: String(e?.message || e).slice(0, 80) });
@@ -765,12 +822,33 @@ export async function handler(event) {
   const shown = beat.details.slice(0, 5);
   const more = beat.details.length - shown.length;
   const why = shown.map((d) => `${String(d.id).slice(0, 8)}:${d.outcome}${d.reason ? `(${String(d.reason).slice(0, 60)})` : ""}`).join(" ");
-  console.log(
-    `[dca-tick] total=${beat.total} inactive=${beat.inactive} unreadable=${beat.unreadable} scanned=${beat.scanned} submitted=${beat.submitted} fired=${beat.fired} ` +
+  const line =
+    `total=${beat.total} inactive=${beat.inactive} unreadable=${beat.unreadable} scanned=${beat.scanned} submitted=${beat.submitted} fired=${beat.fired} ` +
     `skipped=${beat.skipped} failed=${beat.failed} stopped=${beat.stopped} terminal=${beat.terminal} ` +
-    `notDue=${beat.notDue} deferred=${beat.deferred} errors=${beat.errors} ms=${beat.tickElapsedMs}` +
+    `notDue=${beat.notDue} deferred=${beat.deferred} wedged=${beat.wedged} errors=${beat.errors} ms=${beat.tickElapsedMs}` +
     (why ? ` | ${why}` : "") + (more > 0 ? ` (+${more} more)` : "") +
-    (beat.note ? ` | note=${beat.note}` : "")
-  );
+    (beat.note ? ` | note=${beat.note}` : "");
+
+  // ── 🚨🚨 A WEDGED TICK MUST NOT PRINT AT INFO ALONGSIDE THE HEALTHY ONES ────────────────────
+  // This is the half that actually kept the 2026-08-22 wedge alive. `errors` stayed 0 — correctly,
+  // since a defer is not an error — so every wedged tick logged at INFO in the SAME shape as a
+  // healthy one, and the only tell was `deferred=1` buried mid-line among fourteen other counters.
+  // Same family as budget-sweep-cron logging `errors:1` at INFO and returning 200: a failure
+  // wearing a success's clothes. ⭐ So a wedge is console.ERROR and carries the verdict in words,
+  // not as a number the reader has to notice and interpret.
+  // ⚠️ DELIBERATELY NOT KEYED ON `errors`. Adding these deferrals to `errors` would have been the
+  // smaller edit and would have been WRONG: a single transient defer is normal and self-correcting,
+  // and inflating it into an error would make the one counter that means "something is broken"
+  // start crying wolf every time a token aged out mid-write. The wedge is the STREAK, so the streak
+  // is what is escalated.
+  if (beat.wedged > 0) {
+    console.error(`[dca-tick][WEDGED] ${line} | ${beat.wedged} mandate(s) have deferred ` +
+      `${WEDGE_AFTER_DEFERS}+ ticks in a row — a fill is DUE and cannot be serviced. ` +
+      `errors=0 is expected here and does NOT mean healthy: a defer is not an error, and that is ` +
+      `exactly why this needed its own signal.`);
+    await alertWedged(beat);
+  } else {
+    console.log(`[dca-tick] ${line}`);
+  }
   return { statusCode: 200, body: JSON.stringify({ scanned: beat.scanned, submitted: beat.submitted, fired: beat.fired, skipped: beat.skipped, failed: beat.failed, stopped: beat.stopped, deferred: beat.deferred }) };
 }

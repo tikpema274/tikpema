@@ -91,10 +91,39 @@ const isoTs = (at) => (at ? new Date(at) : new Date()).toISOString();
 // caller, and the spend never happens. Adding a read option adds no catch and swallows nothing.
 const READ_CONSISTENCY = "strong";
 
+// ═══ 🚨🚨 THE HANDLE IS REBUILT WHEN THE BLOBS CONTEXT CHANGES — MEASURED WEDGE, 2026-08-22 ═══
+//
+// This adapter used to be memoised UNCONDITIONALLY (`if (_defaultAdapter) return _defaultAdapter`),
+// which binds it to whatever Blobs token existed the FIRST time it was built. In a warm container
+// that token expires (~15 min TTL) and every subsequent budget read/write fails with
+// "Netlify Blobs has generated an internal error (Failed to decode token: Token exp…)" — forever,
+// because nothing ever rebuilds the handle.
+//
+// ⭐ OBSERVED ON PROD: a DCA fill at 17:12:06 succeeded and built the adapter. The next fill came
+// due at 18:00 and every tick from 18:00:44 onward DEFERRED on that error. The discriminator was
+// decisive and is worth keeping: in the SAME invocation, dca-tick's OWN stores worked (it calls
+// getStore inside the handler, so they are fresh) while every budget call failed — and the tick's
+// injected token was fresh, `tokenExp.remainingAtStartMs` ~899 000. Same Blobs, same live token,
+// one path working and one not. The only difference was this memo.
+//
+// 🚨 AND IT SILENTLY VOIDED A CORRECTNESS ARGUMENT MADE ELSEWHERE. dca-tick's transient-defer
+// handler says a deferral is safe because "the next tick redoes the identical, idempotent step
+// with a FRESH injected token". The next tick IS handed a fresh token — this module just never
+// used it. A retry that cannot possibly get a new credential is not a retry, so the defer loop
+// could never terminate. ⚠️ A cached handle can invalidate a guarantee written in another file.
+//
+// ⭐ THE KEY IS THE CONTEXT ITSELF, not a timer or a TTL guess. connectLambda builds the four-field
+// context and hands it to setEnvironmentContext, which OVERWRITES NETLIFY_BLOBS_CONTEXT wholesale
+// — so a new token means a new string, and a string compare is exact, cheap, and needs no
+// knowledge of the token's format or lifetime. Undefined (tests, local) compares equal to
+// undefined, so behaviour there is unchanged.
 let _defaultAdapter = null;
+let _defaultAdapterContext = null;
 function defaultStore() {
-  if (_defaultAdapter) return _defaultAdapter;
+  const ctx = process.env.NETLIFY_BLOBS_CONTEXT ?? null;
+  if (_defaultAdapter && _defaultAdapterContext === ctx) return _defaultAdapter;
   const s = getStore(BUDGET_STORE);
+  _defaultAdapterContext = ctx;
   _defaultAdapter = {
     async getJSON(key) {
       return (await s.get(key, { type: "json", consistency: READ_CONSISTENCY })) ?? null;
