@@ -457,10 +457,13 @@ check, so neither is gated).
 
 Written **at the constant**, not only here. **UN-GATE WHEN ALL FOUR HOLD:**
 
-1. **Finding A fixed** — a submitted-but-unconfirmed spend is no longer read as "no money moved".
-   ✅ **DONE 2026-08-21.**
-2. **Finding B fixed** — `budget-sweep` running, or its role reassigned. ✅ **DONE — it drained its
-   21-charge queue live on 2026-08-22 (10, 10, 1 → 0).**
+1. 🚨 **`dca-tick`'s `SwapPendingConfirm` branch ledgers the day ceiling AT SUBMIT.** ❌ **NOT MET.**
+   ⚠️ **NOT** "finding A shipped" — finding A covered `agent-send` and `transfer_usdc` only.
+   *(Reworded 2026-08-22 — see below.)*
+2. **`budget-sweep` resolves open submit-time charges on a schedule**, or its role is reassigned.
+   ✅ **MET 2026-08-22** — 23 live ticks drained the queue 10, 10, 1 → 0, errors 0 throughout.
+   ⚠️ Scope: the `data-budget` audit log only. It does not reach `dca-fills`, so it is **not**
+   evidence for (1).
 3. **The consent sentence corrected in the same commit as (1)** — because fixing the ledger makes
    the current exception text wrong.
 4. ⭐⭐ **AN ENTRY POINT EXISTS.** `#/dca` has **never** had a Dashboard or MyAgentPanel card —
@@ -475,7 +478,29 @@ carry a re-link reminder, but those are VIEW files and the flag is flipped in `_
 can un-gate without opening either. A reminder one file away from the line that matters is the same
 distance as no reminder.
 
-⭐ **(1) and (2) are now DONE, so (3) and (4) are the whole remaining blocker.**
+⭐ **(2) and (4) are MET. (1) is NOT, and (3) is blocked by it.**
+
+## ⭐⭐ WHY (1) WAS REWORDED — A TRUE SENTENCE THAT DID NOT SATISFY ITS OWN CONDITION
+
+It read **"FINDING A is fixed"**. And finding A *is* fixed — `459f3f3` shipped, its suite is green.
+So a reader checks the condition, **finds it true, ticks it off, and un-gates with the DCA path
+exactly as it was.**
+
+🚨 **THAT IS WORSE THAN A FALSE CONDITION.** A false one fails when checked. This one **passes**.
+It nearly did on 2026-08-22 — the two conditions already verified that session were both green, and
+that confidence is precisely what made the unverified ones feel safe.
+
+⭐ **THE RULE THIS ENCODES:** a condition must name the **property that must hold**, never the
+commit, finding or ticket expected to deliver it. A fix's scope and a condition's scope drift the
+moment either is written, and **only the property survives that.**
+
+⚠️ (2) carried the same shape — *"Finding B is fixed"* — and was reworded too. It happens to be
+satisfied, so nothing was riding on it. **The shape is the defect, not the outcome.**
+
+⭐ **AND (1) NOW SAYS HOW TO CHECK IT:** read the region of `dca-tick.mjs` between
+`threw?.name === "SwapPendingConfirm"` and `if (!threw) {`. `verify-dca-consent-copy.tsx` §1
+property (b) reads exactly that region. ⚠️ **Its green means the gap is present, not that the
+condition is met** — read the label, not the colour.
 
 ## ⭐⭐ AND (4) IS NOW A GUARD, NOT A REMINDER — `verify-dca-consent-copy.tsx` §6
 

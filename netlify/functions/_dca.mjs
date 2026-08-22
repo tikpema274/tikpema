@@ -50,30 +50,46 @@ import { budgetConfig, dcaDaySpend } from "./_budget.mjs";
 // ── ⭐⭐ THE UNBLOCK CONDITION — WITHOUT ONE, A GATE BECOMES PERMANENT BY DRIFT ───────────────
 // This is a debt ratchet unless it names its own horizon, so: UN-GATE WHEN ALL FOUR HOLD.
 //
-//   1. 🚨 FINDING A is fixed — a submitted-but-unconfirmed spend is no longer treated as "no money
-//      moved". ⚠️ HALF DONE, MEASURED 2026-08-22, AND THE REMAINING HALF IS THE DCA ONE.
-//      ✅ agent-send.mjs and _actions.mjs's transfer path now ledger at SUBMIT with the
-//         authoritative circleId (459f3f3), so a manual pending spend is counted AND recoverable
-//         by the step-8 sweeper.
-//      ❌ dca-tick's SwapPendingConfirm branch STILL ledgers nothing. 459f3f3 never touched
-//         dca-tick.mjs. The branch writes a claim to FILLS_STORE ("dca-fills") and sets
-//         pendingPeriod; the day-ceiling charge is written only later, by reconcilePending on
-//         COMPLETE (which pre-dates finding A — it came from ee82843).
-//      ⭐ SO THE UNDER-COUNT IS NOW TRANSIENT RATHER THAN PERMANENT — bounded by one dca-tick
-//         (`* * * * *`), longer if MAX_RECONCILES_PER_TICK defers it — instead of lasting forever.
-//         That is a real improvement and it is NOT the condition. The condition says the spend is
-//         counted; during that window it is not, and canSpendDay can hand out headroom nobody
-//         authorized.
-//      🚨 AND THE SWEEPER DOES NOT COVER IT. The pending claim lives in "dca-fills"; the sweeper
-//         scans "data-budget" audit: keys for confirmation:"submitted". DIFFERENT STORES — a
-//         pending DCA fill is invisible to step 8, so the recoverability half of finding A's fix
-//         does not extend here either. ⚠️ Do not read "the sweeper is running" as covering this.
-//      ⭐ The parked design for closing it is docs/dca-submit-time-budget-design.md, and
-//         verify-dca-consent-copy.tsx §1 property (b) pins the gap and carries the flip
-//         instruction, so this cannot be closed without the sentence in (3) being corrected.
-//   2. FINDING B is fixed — budget-sweep (its own header: "THE PRIMARY HANDLER, NOT A BACKSTOP")
-//      is running, or its role is reassigned. Measured 2026-08-21: 119 audit entries since
-//      2026-07-12, 21 of them unresolved submit-time charges, ZERO reversals ever.
+//   1. 🚨 dca-tick's SwapPendingConfirm branch LEDGERS THE DAY CEILING AT SUBMIT.
+//      ⚠️ NOT "finding A shipped" — finding A covered agent-send and transfer_usdc ONLY.
+//      ⭐⭐ THIS CONDITION WAS REWORDED 2026-08-22 BECAUSE ITS OLD FORM WAS A TRUE SENTENCE THAT
+//      DID NOT SATISFY IT. It read "FINDING A is fixed", and finding A IS fixed — 459f3f3 shipped
+//      and its suite is green. A reader checks the claim, finds it true, ticks it off, and
+//      un-gates with the DCA path exactly as it was. 🚨 THAT IS WORSE THAN A FALSE CONDITION: a
+//      false one fails when checked, and this one PASSES. It nearly did, on 2026-08-22.
+//      ⭐ THE RULE THIS ENCODES: a condition must name the PROPERTY that must hold, never the
+//      commit, finding or ticket expected to deliver it. A fix's scope and a condition's scope
+//      drift the moment either is written, and only the property survives that.
+//
+//      ── HOW TO CHECK IT (do not substitute a commit for this) ──────────────────────────────
+//      Read the branch itself: the region of dca-tick.mjs from `threw?.name ===
+//      "SwapPendingConfirm"` to `if (!threw) {`. TODAY it writes a claim to FILLS_STORE
+//      ("dca-fills") and sets pendingPeriod, and calls NO ledger. The day-ceiling charge is
+//      written only later by reconcilePending on COMPLETE — which pre-dates finding A entirely
+//      (ee82843), so it is not evidence of anything finding A did.
+//      ⭐ verify-dca-consent-copy.tsx §1 property (b) reads exactly that region and carries the
+//      flip instruction. It is the mechanical form of this condition; while it is GREEN, (1) is
+//      NOT met. ⚠️ Its green is the gap being present, not the condition being satisfied — read
+//      the label, not the colour.
+//
+//      ── WHY THE PARTIAL FIX IS NOT ENOUGH ──────────────────────────────────────────────────
+//      ⭐ The under-count is now TRANSIENT rather than permanent — bounded by one dca-tick
+//      (`* * * * *`), longer when MAX_RECONCILES_PER_TICK defers it. A real improvement, and NOT
+//      this condition: inside that window canSpendDay hands out headroom nobody authorized.
+//      🚨 AND THE STEP-8 SWEEPER DOES NOT COVER IT. The pending claim lives in "dca-fills"; the
+//      sweeper scans "data-budget" audit: keys for confirmation:"submitted". DIFFERENT STORES — a
+//      pending DCA fill is invisible to step 8. ⚠️ Do not read "the sweeper is running" as
+//      covering this; that is (2)'s property and it does not reach here.
+//      ⭐ Parked design for closing it: docs/dca-submit-time-budget-design.md. Closing it forces
+//      (3) in the same commit, by (3)'s own terms.
+//   2. budget-sweep RESOLVES OPEN SUBMIT-TIME CHARGES ON A SCHEDULE, or its role is reassigned.
+//      ⚠️ Reworded 2026-08-22 for the same reason as (1) — it used to lead "FINDING B is fixed",
+//      which is a claim about a commit rather than about the system. It happens to be SATISFIED,
+//      so nothing was riding on it; the shape is the defect, not the outcome.
+//      Measured 2026-08-21: 119 audit entries since 2026-07-12, 21 unresolved submit-time charges,
+//      ZERO reversals ever. ✅ MET 2026-08-22 — 23 consecutive live ticks drained the queue
+//      10, 10, 1 -> 0 with errors 0 throughout. ⚠️ Scope: the "data-budget" audit log ONLY. It
+//      does not reach dca-fills, so it is not evidence for (1).
 //   3. THE CONSENT SENTENCE MATCHES THE CODE — DcaPanel's cap/ceiling clause is corrected in the
 //      same commit as (1), because fixing the ledger makes the current exception text WRONG.
 //      ⚠️ NOT ACTIONABLE UNTIL (1)'s DCA HALF IS DONE, and deliberately left alone 2026-08-22.
@@ -109,8 +125,9 @@ import { budgetConfig, dcaDaySpend } from "./_budget.mjs";
 // a condition. Hence (4), stated in the place the decision is actually made.
 //
 // ── ⭐ STATE AS OF 2026-08-22 — (2) and (4) DONE, (1) HALF, (3) BLOCKED BY (1) ───────────────
-//   (1) ⚠️ HALF — the manual path is fixed; dca-tick's pending branch is NOT. See above.
-//   (2) ✅ DONE — budget-sweep drained its 21-charge queue live (10, 10, 1 -> 0), errors 0.
+//   (1) ❌ NOT MET — dca-tick's pending branch still ledgers nothing at submit. ⚠️ NOT "half
+//       done": the manual path being fixed is a DIFFERENT property, not a fraction of this one.
+//   (2) ✅ MET — budget-sweep drained its 21-charge queue live (10, 10, 1 -> 0), errors 0.
 //   (3) ⛔ BLOCKED BY (1) — correcting the sentence first would overstate safety.
 //   (4) ✅ DONE — Dashboard card added, enforced by verify-dca-consent-copy §6.
 // 🚨 SO THE GATE STAYS. (2) and (4) being done is NOT three-of-four with a rounding error: (1) is
