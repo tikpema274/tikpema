@@ -194,7 +194,8 @@ section("7 — 🚨 THE TWO DEFECTS THE FIRST LIVE DEPLOY FOUND (and no in-proce
 
   // ── (a) BLOBS CONTEXT ──────────────────────────────────────────────────────────────────────
   // budget-sweep.mjs connects Blobs inside its HTTP handler. Calling sweep() directly bypasses it,
-  // so the first deploy's ticks (19:00:54 and 19:30:35, 2026-08-21) fired and did NOTHING —
+  // so the first deploy's ticks — FIVE of them on 2026-08-21 (19:00:54, 19:30:35, 20:00:48,
+  // 20:30:31, 21:00:45 UTC), not the two recorded here originally — fired and did NOTHING:
   // open:0, errors:1, every store call throwing.
   // ⚠️ THIS SUITE MOCKS @netlify/blobs WHOLESALE, so the context is trivially present here and the
   // BEHAVIOURAL half of this is untestable in-process. That is not a gap to paper over: it is
@@ -210,6 +211,14 @@ section("7 — 🚨 THE TWO DEFECTS THE FIRST LIVE DEPLOY FOUND (and no in-proce
   // success's clothes — and the heartbeat could not correct it, because writeHeartbeat swallows
   // its own failure, so when BLOBS is what is broken the one signal that would show it is the one
   // that cannot be written.
+  // ⭐⭐ THESE FOUR ARE SOURCE CHECKS **ONLY BECAUSE THEY SIT NEXT TO (a)**, AND THAT WAS WRONG.
+  // The absent-Blobs-CONTEXT bug above is genuinely untestable in-process. The DEGRADED path is
+  // NOT: its trigger is A STORE THROWING, which a mock can do. Conflating the two left a testable
+  // alarm unexercised on the grounds that a different, untestable thing was nearby — so it had
+  // never fired, in prod or in a suite, and 11h of clean live ticks proved only that it stayed
+  // quiet. ⭐ THE BEHAVIOUR IS NOW DRIVEN IN scripts/verify-sweep-degraded.mjs (test:sweepdegraded,
+  // 35/0), which throws the store and asserts 500 + console.error + the awaited webhook, and is
+  // negative-tested against three mutations of the cron. These stay as cheap structural pins.
   check("🚨🚨 a sweep with errors does NOT return 200 — a failure must not wear a success's clothes",
     /beat\.errors > 0/.test(cron) && /statusCode: 500/.test(cron));
   check("⭐⭐ …and an UNREADABLE cumulative count counts as degraded too, not as 'none observed'",
@@ -224,6 +233,9 @@ section("7 — 🚨 THE TWO DEFECTS THE FIRST LIVE DEPLOY FOUND (and no in-proce
 section("8 — 🚨🚨 DETECTION DOES NOT LIVE IN THE STORE IT REPORTS ON");
 {
   const cron = fs.readFileSync("netlify/functions/budget-sweep-cron.mjs", "utf8");
+  // ⭐ Behaviourally driven in verify-sweep-degraded.mjs §3/§4/§6 — including that the alert is
+  // AWAITED (proven by un-awaiting it and watching the assertion go red), that an unset channel
+  // invents no fallback, and that a dead webhook does not mask the outage it was reporting.
   check("⭐⭐ a degraded sweep pushes to a WEBHOOK — an alert path with no Blobs dependency",
     /alertDegraded\(/.test(cron) && /DD_WATCH_WEBHOOK/.test(cron) && /await fetch\(url/.test(cron));
   check("⭐ …and the alert is AWAITED — a scheduled function can be frozen at return",

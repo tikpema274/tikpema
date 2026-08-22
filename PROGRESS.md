@@ -1,5 +1,90 @@
 ---
 
+# ⭐⭐ THE BUDGET-SWEEP QUEUE DRAINED — 10, 10, 1 → 0, EXACTLY AS PRE-REGISTERED
+
+**2026-08-22.** 23 consecutive ticks, no boundary missed, read from the **log** rather than the
+heartbeat — the heartbeat swallows its own failure by design, which is what nearly produced an
+inverted diagnosis the night before.
+
+```
+21:30:36  open 21 → resolved 10        22:00:48  open 11 → resolved 10
+22:30:29  open  1 → resolved  1        23:00:43  open  0    (then 19 more ticks at open:0)
+```
+
+`wouldReverse` **0** on every tick. `wouldReverseTotal` **0 — readable, not `null`** — on every
+tick. `errors` **0** on every tick. **No `[DEGRADED]` line at any level.**
+
+⭐ **THE FORECAST WAS TESTING THE CAP, NOT THE INTENT.** 10/10/1 is `MAX_RESOLVES_PER_TICK = 10`
+biting twice. The earlier forecast of *21 in one tick* was withdrawn **before** the ticks ran, and
+had it come true it would have indicated a **broken cap** — a prediction that fails loudly when the
+system is wrong is worth more than one that is merely correct.
+
+## ⭐ THE CHECKS THAT WERE NOT THE HEADLINE
+
+⚠️ **A FILTERED READ IS NOT A MEASUREMENT OF ABSENCE.** "No `[DEGRADED]`" was cross-checked with an
+**unfiltered** warn/error/fatal sweep across every function — 4 rows in 11h, all a `punycode`
+deprecation from `dca-tick`/`agent-execute-plan`, all **before** the first tick. `--function` was
+not allowed to be part of its own hypothesis.
+
+⭐⭐ **AND THE INSTRUMENT WAS CALIBRATED AGAINST A KNOWN BAD WINDOW.** The same query was pointed at
+the pre-fix hours and **displayed all five broken ticks**. An absence is only evidence if the
+instrument can render a presence.
+
+⭐ **`open: 0` IS RETIREMENT, NOT LOSS OF VISIBILITY** — the two are indistinguishable from the
+number alone. `listUnresolvedCharges` has a *lower* age bound only (`ageMs < olderThanMs` skips the
+too-young) and **no upper bound**, so a charge cannot age out of the selector; `list({prefix})` is
+the non-paginated form that resolves all pages, so nothing was truncated. And the arithmetic closes
+independently: 10 + 10 + 1 = **21**, with `leftPending:0` and `leftUnreadable:0` throughout.
+
+⚠️ **THE VALIDATION SET IS SPENT.** 21/21 COMPLETE, zero phantoms — consistent with the read-only
+pre-flight. A future would-reverse observation needs a **new** population; this one is retired.
+
+# ⭐⭐ AND THE ALARM ITSELF IS NOW CALIBRATED — `test:sweepdegraded` 35/0
+
+**11h of clean ticks proved the sweeper works. It proved NOTHING about the `[DEGRADED]` path**,
+which had never fired and was covered by **source regexes only**. An alarm that has only ever stayed
+silent is uncalibrated — the same argument `blobs-probe` makes about a probe that has only ever
+returned `ok`.
+
+## 🚨 THE DISTINCTION THAT WAS ABOUT TO BE COLLAPSED
+
+"No in-process suite could have caught last night's bug" was **true, and was becoming a reason to
+test nothing.** It conflates two different things:
+
+| | testable in-process? | why |
+|---|---|---|
+| the Blobs **context** being absent | ❌ **no** | suites mock `@netlify/blobs` wholesale, so the context is trivially present on both sides — [[binding-tested-across-what-it-binds]] |
+| the store **throwing** | ✅ **yes** | that is the DEGRADED path's actual trigger, and a mock can throw |
+
+⭐⭐ **The CAUSE was unreachable; the RESPONSE TO IT never was.** Leaving a testable alarm unexercised
+because a genuinely untestable thing sits beside it is how a whole defence goes unrun. Recorded as a
+reasoning failure, not a coverage gap — the coverage gap was the symptom.
+
+## WHAT THE SUITE DRIVES
+
+Store throws ⇒ the **exact prod beat** (`open:0 resolved:0 errors:1 wouldReverseTotal:null`) ⇒
+`console.error([DEGRADED])` + **500**, never the INFO line · the webhook POST **completes before the
+handler returns** · an unset channel logs `[NO-ALERT-CHANNEL]` and **invents no fallback** · a dead
+webhook logs `[ALERT-FAILED]` and **does not mask the outage it was reporting** · an unreadable
+count **alone** is degraded even with `errors:0`.
+
+⭐ **NEGATIVE-TESTED AGAINST THREE MUTATIONS OF THE CRON**, because a suite green on its first run
+has the same problem as the alarm it is testing:
+
+| mutation | result |
+|---|---|
+| gate disabled (`if (false)`) — the literal pre-fix defect | **24 red** |
+| `await alertDegraded` → `alertDegraded` | **8 red** — the ordering assertion is not vacuous |
+| gate on `errors` only, dropping `wouldReverseTotal === null` | **3 red** |
+
+The cron was restored byte-identical after each. ⚠️ One fix to the suite came out of this: the first
+mutation run **crashed** at the first failed section instead of reporting the rest — a short suite,
+exactly what `run-suites.mjs` warns is a signal rather than good news. `beatOf` now tolerates a
+missing line so a red run still says everything it knows.
+
+⚠️ **STILL NOT PROVEN, AND STATED AS AN ASSERTION SO IT CANNOT ROT:** the absent-context half remains
+untestable in-process. The live log is its only proof.
+
 # 🚨🚨 THE FIRST LIVE TICKS FIRED AND DID NOTHING — AND THE HEARTBEAT COULD NOT SAY SO
 
 **2026-08-21.** `budget-sweep-cron` deployed and fired on schedule. It also failed on every tick,
@@ -13,12 +98,21 @@
 | resolution markers in `data-budget` | zero | consistent with either |
 | deploy record `function_schedules` | ⭐ `budget-sweep-cron` **IS registered** | schedule is fine |
 | `dca-heartbeat` (control) | fresh, 3 s old | ⭐ crons ARE firing site-wide |
-| **`netlify logs --source functions`** | **two ticks, `errors:1` each** | ⭐⭐ **it fired and broke** |
+| **`netlify logs --source functions`** | **five ticks, `errors:1` each** | ⭐⭐ **it fired and broke** |
 
 ```
 19:00:54  {"armed":false,"open":0,"resolved":0,"wouldReverseTotal":null,"errors":1}
 19:30:35  {"armed":false,"open":0,"resolved":0,"wouldReverseTotal":null,"errors":1}
+20:00:48  {"armed":false,"open":0,"resolved":0,"wouldReverseTotal":null,"errors":1}
+20:30:31  {"armed":false,"open":0,"resolved":0,"wouldReverseTotal":null,"errors":1}
+21:00:45  {"armed":false,"open":0,"resolved":0,"wouldReverseTotal":null,"errors":1}
 ```
+
+⚠️ **CORRECTED 2026-08-22 — this said "two", and the commit said "four". It was FIVE.** Neither was
+a misreading: each count was taken while the schedule was **still ticking**, so the number was stale
+before the sentence finished. ⭐ A count of an ONGOING failure is only meaningful with its window
+stated — and the window is what both write-ups omitted. The fix landed 21:27:44 UTC, so 21:00:45 was
+the last dead tick.
 
 **CAUSE.** `budget-sweep.mjs` connects Blobs inside its **HTTP handler**; the cron wrapper called
 `sweep()` directly with no `event` and never connected. Every store call threw.

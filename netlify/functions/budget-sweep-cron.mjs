@@ -26,7 +26,9 @@ import { sweep } from "./budget-sweep.mjs";
 
 // ═══ 🚨🚨 DETECTION MUST NOT LIVE IN THE STORE IT IS REPORTING ON ═════════════════════════════
 //
-// The first live ticks (19:00:54 and 19:30:35, 2026-08-21) failed because Blobs was unreachable —
+// The first live ticks (2026-08-21: 19:00:54, 19:30:35, 20:00:48, 20:30:31, 21:00:45 UTC — FIVE,
+// not the two or four the first write-ups recorded; the count was fixed while ticks were still
+// firing) failed because Blobs was unreachable —
 // and the ONE signal that would have shown it, the heartbeat, is written INTO Blobs and swallows
 // its own failure. So the monitor went quiet at exactly the moment its subject broke, and quiet is
 // indistinguishable from healthy. A heartbeat cannot report the outage that prevents it.
@@ -76,13 +78,34 @@ export async function handler(event) {
   // ── 🚨 CONNECT BLOBS. THIS LINE'S ABSENCE COST THE FIRST TWO LIVE TICKS ────────────────────
   // budget-sweep.mjs connects Blobs inside its HTTP handler; calling `sweep()` directly bypasses
   // that, so the very first deploy ran with NO Blobs context and every store call threw. The ticks
-  // at 19:00:54 and 19:30:35 on 2026-08-21 both fired and both did nothing.
+  // FIVE ticks on 2026-08-21 — 19:00:54, 19:30:35, 20:00:48, 20:30:31, 21:00:45 UTC — each fired
+  // and each did nothing. ⚠️ The count is spelled out because two earlier records got it wrong
+  // ("two", then "four"): each was written while the schedule was still ticking, so the number was
+  // stale before the sentence was. A count taken during an ongoing failure needs its window stated.
+  //
+  // ⭐ FIXED AT 21:27:44 UTC. The 21:30:36 tick read open:21 and resolved 10 — see the drain below.
   //
   // ⚠️ AND NO IN-PROCESS SUITE COULD HAVE CAUGHT IT: the tests mock @netlify/blobs wholesale, so
   // the context is trivially present on both sides of the boundary. A binding can only be tested
   // ACROSS what it binds ([[binding-tested-across-what-it-binds]]) — this one is only observable
   // on a real deploy, which is why the guard below is a source assertion and the real proof is the
   // live log.
+  //
+  // ⭐⭐ THE DRAIN, MEASURED FROM THE LOG (not the heartbeat) 2026-08-22 08:45 UTC. 23 consecutive
+  // ticks, no boundary missed. The queue emptied in exactly the pre-registered shape:
+  //     21:30:36  open 21 → resolved 10        22:00:48  open 11 → resolved 10
+  //     22:30:29  open  1 → resolved  1        23:00:43  open  0
+  // …then 19 further ticks at open:0. wouldReverse 0 and wouldReverseTotal 0 (READABLE, not null)
+  // on every one; errors 0 on every one; no [DEGRADED] line at any level, cross-checked with an
+  // UNFILTERED warn/error/fatal sweep so the --function filter was not itself the hypothesis.
+  //
+  // ⭐ The cap is what the forecast tested: 10/10/1 confirms MAX_RESOLVES_PER_TICK bit twice. A
+  // clean 21-in-one-tick would have meant a BROKEN cap, which is why the earlier 21 forecast was
+  // withdrawn before the ticks ran rather than after.
+  //
+  // ⚠️ THE VALIDATION SET IS NOW SPENT. 21/21 resolved COMPLETE, zero phantoms — consistent with the
+  // read-only pre-flight. Any future would-reverse observation needs a NEW population; this one is
+  // retired and cannot be re-run.
   if (event?.blobs) connectBlobs(event);
 
   const beat = await sweep();
