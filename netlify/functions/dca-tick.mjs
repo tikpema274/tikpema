@@ -9,7 +9,7 @@ import { circle } from "./_circle.mjs";
 // NOTE: confirmSwapLanded (_swap-confirm log-scan / PATH 2) is NO LONGER imported here — the DCA reconcile
 // now confirms by authoritative Circle tx id (getTransaction). _swap-confirm.mjs stays for its OTHER
 // consumer, job-swap-receipt-background (the research→swap verifier). See reconcilePending below.
-import { recordDcaSpend, recordAgentSpend } from "./_budget.mjs";
+import { recordDcaSpend, recordAgentSpend, reverseChargeById } from "./_budget.mjs";
 import {
   MANDATE_STORE,
   FILLS_STORE,
@@ -156,7 +156,7 @@ export async function handler(event) {
 
   // ── UNCONDITIONAL HEARTBEAT — written every invocation regardless of work (the job-sweep
   // blind-spot fix: a quiet cron must be distinguishable from a dead one by reading ONE blob).
-  const beat = { tickAt: startedAt, tokenExp, total: 0, inactive: 0, unreadable: 0, scanned: 0, submitted: 0, fired: 0, skipped: 0, failed: 0, stopped: 0, terminal: 0, notDue: 0, deferred: 0, errors: 0, details: [] };
+  const beat = { tickAt: startedAt, tokenExp, total: 0, inactive: 0, reconciledInactive: 0, unreadable: 0, scanned: 0, submitted: 0, fired: 0, skipped: 0, failed: 0, stopped: 0, terminal: 0, notDue: 0, deferred: 0, errors: 0, details: [] };
   const writeHeartbeat = async () => {
     try { await getStore(HEARTBEAT_STORE).setJSON("last", beat); } catch { /* observability only */ }
   };
@@ -260,7 +260,14 @@ export async function handler(event) {
       // then the day ceiling — the one whose loss widens the global cap.
       const led = await runLedgerWrites([
         ["recordDcaSpend", () => recordDcaSpend({ owner: m.walletAddress, amountUsdc: fillValueUsdc, at: now })],
-        ["recordAgentSpend(day-ceiling)", () => recordAgentSpend({ agent: AGENT.EXECUTOR, owner: m.walletAddress, amountUsdc: fillValueUsdc, source: "swap_tokens", justification: `DCA mandate ${m.id}`, at: now, confirmation: "confirmed", circleId: claim.circleId })],
+        // ⭐⭐ `chargeId` — SINCE 2026-08-22 THIS IS USUALLY A NO-OP, AND THAT IS THE POINT. The
+        // submit branch already charged the day ceiling under this same id, so the membership test
+        // inside recordAgentSpend's CAS suppresses this one. It is still CALLED rather than
+        // skipped, because a fill can reach here WITHOUT a submit-time charge — the inline-confirm
+        // path never goes through that branch, and a submit-time charge can have failed. Calling
+        // unconditionally with an idempotency key covers both without the caller having to know
+        // which happened. ⚠️ `alreadyCharged` is a SUCCESS, not a ledger failure.
+        ["recordAgentSpend(day-ceiling)", () => recordAgentSpend({ agent: AGENT.EXECUTOR, owner: m.walletAddress, amountUsdc: fillValueUsdc, source: "swap_tokens", justification: `DCA mandate ${m.id}`, at: now, confirmation: "confirmed", circleId: claim.circleId, chargeId: claim.circleId })],
       ]);
       await patchMandate(m, key, led.ok ? OUTCOME.SWAPPED : OUTCOME.STOPPED_FAILED, {
         reason: led.ok
@@ -289,9 +296,38 @@ export async function handler(event) {
     // the mandate on the first occurrence, exactly like a slippage/genuine failure.
     if (state && RECONCILE_TERMINAL_FAIL.has(state)) {
       const reason = `swap ${state.toLowerCase()} (circleId ${claim.circleId})`;
+
+      // ── 🚨🚨 GIVE THE BUDGET BACK — THE OTHER HALF OF CHARGING AT SUBMIT (2026-08-22) ────────
+      // The submit branch charged the day ceiling for a swap that has now been WITNESSED to fail.
+      // Design §1.4: only a POSITIVE on-chain observation that no funds moved may return budget,
+      // and this is one — getTransaction({id}) returned a terminal failure state. "I could not
+      // look" never reaches here; that path leaves the charge standing.
+      //
+      // ⭐ THIS RUNNER IS WHY THE CHARGE IS SAFE TO MAKE. Design §2 warned that decrement-at-submit
+      // CREATES a reversal surface that did not exist before, and that a convergence guarantee is
+      // only as real as the runner that closes it. This is that runner, at the root. budget-sweep
+      // is the defence-in-depth behind it — but its reversals are DISARMED, so it would observe
+      // this and leave the charge standing. ⚠️ It must not be mistaken for the primary handler here.
+      //
+      // ⭐ reverseChargeById distinguishes a BENIGN miss (already reversed or resolved) from an
+      // ANOMALOUS one (no charge AND no marker). Anomalous is NOT treated as "nothing to do":
+      // it means the entry we expected is missing, and guessing an outcome for it is the
+      // absence-reads-as-safe family in the fail-open direction. It raises needsAttention instead.
+      const rev = await reverseChargeById({ circleId: claim.circleId, reason, at: now });
+
       await patchMandate(m, key, OUTCOME.STOPPED_FAILED, {
-        reason, period,
-        patch: { status: STATUS.STOPPED_FAILED, stoppedAt: startedAt, pendingPeriod: null, needsAttention: true },
+        reason: rev.anomalous
+          ? `${reason} — ⚠️ AND THE SUBMIT-TIME CHARGE COULD NOT BE FOUND to reverse (no charge and no marker for circleId ${claim.circleId}). The day ceiling may still carry an amount for a swap that failed. A human must check.`
+          : reason,
+        period,
+        // ⚠️ status is set ONLY from ACTIVE. Reconcile now runs above the ACTIVE gate, so this can
+        // reach a mandate the user already CANCELLED — and overwriting that with stopped-failed
+        // would rewrite their decision as our failure. The money still reconciles either way.
+        patch: {
+          ...(m.status === STATUS.ACTIVE ? { status: STATUS.STOPPED_FAILED, stoppedAt: startedAt } : {}),
+          pendingPeriod: null,
+          needsAttention: true,
+        },
       });
       await resolveClaim(m.id, period, OUTCOME.STOPPED_FAILED, { reason });
       return;
@@ -340,8 +376,25 @@ export async function handler(event) {
       // separate them, and `unreadable` keeps a failed GET from masquerading as either.
       beat.total++;
       if (!m) { beat.unreadable++; continue; }
-      if (m.status !== STATUS.ACTIVE) { beat.inactive++; continue; }
-      beat.scanned++;
+
+      // ── ⭐⭐ THE RECONCILE GATE SITS ABOVE THE ACTIVE GATE (design §2(a), 2026-08-22) ─────────
+      // 🚨 THIS ORDER IS REQUIRED BY THE SUBMIT-TIME CHARGE, NOT A TIDY-UP. Previously a mandate
+      // that went non-ACTIVE while a fill was in flight — the user cancels, or a ledger write
+      // stopped it — was skipped here forever, and its pendingPeriod was never reconciled. That
+      // cost nothing while nothing was charged at submit. Now a charge EXISTS for that fill, so
+      // skipping it would strand a day-ceiling charge PERMANENTLY, with no runner able to reverse
+      // it: dca-tick could not reach it, and budget-sweep's reversals are DISARMED. That is a
+      // permanent phantom charge — precisely the class step 8 was built to remove.
+      // ⭐ So: pendingPeriod is reconciled REGARDLESS of status. The money is settled either way;
+      // only the mandate's own lifecycle respects the status (see the patches in reconcilePending,
+      // which set `status` only when it is still ACTIVE).
+      const hasPending = m.pendingPeriod != null;
+      if (m.status !== STATUS.ACTIVE) {
+        if (!hasPending) { beat.inactive++; continue; }
+        beat.reconciledInactive++;   // counted separately: a fill settling on a mandate that is over
+      } else {
+        beat.scanned++;
+      }
 
       // ── PER-MANDATE BOUNDARY (see the catch at the end of this block). A Blobs write that expired
       // mid-tick DEFERS and retries next tick with a fresh token; any other error is isolated to this
@@ -352,7 +405,7 @@ export async function handler(event) {
       // ── RECONCILE FIRST — an in-flight fill is settled (or left pending) before anything else,
       // and uncapped, so it can never be starved by the submit budget. One action per mandate per
       // tick: a mandate with a fill in flight neither evaluates nor submits a new one. ──
-      if (m.pendingPeriod != null) {
+      if (hasPending) {
         await reconcilePending(m, key);
         continue;
       }
@@ -510,6 +563,9 @@ export async function handler(event) {
       // reconcile can advance all three ledgers on confirm), mark PENDING_CONFIRM, and let next tick's
       // ID-reconcile poll getTransaction({id}). NOTHING is ledgered here (nothing confirmed yet). ──
       if (threw?.name === "SwapPendingConfirm") {
+        // ── 1. JOURNAL COMMIT (design §1.2). The claim carrying the authoritative circleId is
+        //    written BEFORE the charge, so a crash between the two leaves a record naming exactly
+        //    what is owed. The reverse order would charge against an id nothing remembers.
         await fills.setJSON(claimKey, {
           mandateId: m.id,
           period,
@@ -518,9 +574,57 @@ export async function handler(event) {
           fillValueUsdc, // captured at submit → the reconcile ledgers exactly this on confirm (no re-price)
           submittedAt: startedAt,
         });
-        await patchMandate(m, key, OUTCOME.PENDING_CONFIRM, {
-          reason: `swap submitted — inline confirm slow, awaiting id-reconcile (circleId ${threw.circleId})`,
-          patch: { pendingPeriod: period },
+
+        // ── 2. ⭐⭐ CHARGE THE DAY CEILING AT SUBMIT — UNBLOCK CONDITION (1), 2026-08-22 ────────
+        // Until now this branch ledgered NOTHING. The fill was counted only when a later tick's
+        // reconcile saw COMPLETE, so between submit and reconcile the day ceiling UNDERSTATED and
+        // canSpendDay handed out headroom nobody authorized — to this owner's own manual sends and
+        // swaps, not just to DCA. The window was bounded (one tick) rather than absent, and a
+        // bounded fail-open is still a fail-open.
+        //
+        // 🚨 A TIMEOUT IS NOT A REFUSAL. agentSwap threw SwapPendingConfirm because WE STOPPED
+        // WAITING; the swap IS submitted and may land seconds later. Counting it now is the same
+        // rule finding A installed for agent-send and transfer_usdc — this branch was the one it
+        // did not reach.
+        //
+        // ⭐⭐ ONLY THE DAY CEILING MOVES HERE, AND THAT IS THE WHOLE SAFETY ARGUMENT.
+        // `recordDcaSpend` and the mandate's `spentAmount` stay confirm-gated. _budget.mjs's
+        // PRECONDITION forbids a submit-time charge PAIRED WITH A SUB-LEDGER, because
+        // reverseAgentSpend reverses the day ledger only and a partial reversal desyncs the pair
+        // in the fail-open direction. Nothing is paired here, so a day-only reversal is COMPLETE,
+        // not partial, and the precondition is satisfied rather than dodged. ⚠️ Moving either of
+        // the other two to submit time WOULD trip it — see docs/dca-submit-time-budget-design.md
+        // §0.2 (the TRIPLE), which stays parked and unbuilt.
+        //
+        // ⭐ `chargeId` makes this idempotent with the reconcile's own charge, structurally, inside
+        // one CAS — the reconcile passes the SAME id and becomes a no-op. Not a flag check: that
+        // would be check-then-write across two stores.
+        //
+        // ⭐ WHY spentAmount IS SAFE TO LEAVE: the tick takes ONE action per mandate per tick and a
+        // mandate carrying a pendingPeriod neither evaluates nor submits, so this mandate cannot
+        // fill again before reconcile. `spentAmount` cannot be over-consumed in the window.
+        // ⚠️ `dca-day:` is NOT equally protected — it is per-OWNER, so a SECOND active mandate of
+        // the same owner can fill while this one is pending and yieldsToUser will read an
+        // understated DCA half. Narrower than the day-ceiling gap this closes and in the same
+        // direction; recorded as a known residual rather than left for someone to discover.
+        const dayLed = await runLedgerWrites([
+          ["recordAgentSpend(day-ceiling, at submit)", () => recordAgentSpend({
+            agent: AGENT.EXECUTOR, owner: m.walletAddress, amountUsdc: fillValueUsdc,
+            source: "swap_tokens", justification: `DCA mandate ${m.id} (submitted)`,
+            at: now, confirmation: "submitted", circleId: threw.circleId, chargeId: threw.circleId,
+          })],
+        ]);
+
+        // ── 3. The mandate. ⚠️ A FAILED SUBMIT-TIME CHARGE STOPS THE MANDATE, exactly as a failed
+        //    confirm-time charge does: the money is in flight and the ceiling did not advance, so
+        //    every later fill would be measured against an understated counter. It stays PENDING
+        //    for reconcile (pendingPeriod is still set) — and reconcile now runs above the ACTIVE
+        //    gate, so stopping it here does not strand the in-flight fill.
+        await patchMandate(m, key, dayLed.ok ? OUTCOME.PENDING_CONFIRM : OUTCOME.STOPPED_FAILED, {
+          reason: dayLed.ok
+            ? `swap submitted — inline confirm slow, awaiting id-reconcile (circleId ${threw.circleId})`
+            : `SUBMITTED BUT NOT LEDGERED — ${fillValueUsdc} USDC is in flight (circleId ${threw.circleId}) and the day-ceiling write FAILED: ${dayLed.failed.join("; ")}. The mandate is STOPPED so no further fill is measured against an understated ceiling. The fill still reconciles.`,
+          patch: { pendingPeriod: period, ...(dayLed.ok ? {} : ledgerFailurePatch(dayLed.failed)) },
           period,
         });
         continue;

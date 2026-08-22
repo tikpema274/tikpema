@@ -587,20 +587,65 @@ export async function canSpendDay({ amountUsdc, store, at, owner }) {
 // ⚠️ NAMED `circleId`, not a generic `txId`, deliberately: it says WHICH RESOLVER applies. bridge_usdc
 // carries a chain burnHash, not a Circle id — a single overloaded field would let a sweeper call the
 // wrong resolver on it. Bridge adds its own field in its own pass.
+// `chargeId` (OPTIONAL) — makes THIS CHARGE IDEMPOTENT. ⭐ THE MIRROR OF `reversedIds`, and it is
+// deliberately the same shape: membership test and arithmetic inside ONE casUpdate mutate, so a
+// concurrent or repeated charge of the same id loses the CAS race, re-reads the winner, finds its
+// id already in `chargedIds`, and becomes a no-op. There is no window between "check" and "write"
+// for a double-charge, exactly as GUARD 2 achieves for the reversal direction.
+//
+// ⚠️ WHY IT WAS NEEDED (2026-08-22): DCA now charges the day ceiling AT SUBMIT, and the same fill
+// is charged again by dca-tick's reconcile when it confirms. Without idempotency that is a DOUBLE
+// CHARGE of every slow fill. ⭐ The alternative — the reconcile checking a flag before calling —
+// is check-then-write across two stores and races with itself; this cannot.
+//
+// ⚠️ OMITTING IT KEEPS THE OLD BEHAVIOUR EXACTLY. No chargeId => no membership test, no
+// `chargedIds` field written, byte-identical records for every existing caller. This is not a
+// migration and no record needs one: a day record with no `chargedIds` reads as an empty set.
+//
+// 🚨 A SUPPRESSED CHARGE MUST NOT APPEND AN AUDIT ENTRY EITHER. The counter and the trail have to
+// agree — a second audit row for a charge that was not applied would make agentBreakdown report
+// spending that never advanced the ceiling, and would hand the step-8 sweeper a second "open"
+// charge for one transaction, which it would then resolve or reverse independently.
 export async function recordAgentSpend({
   owner, amountUsdc, source, justification, store, at, agent = AGENT.EXECUTOR, confirmation, circleId,
+  chargeId,
 }) {
   const s = pickStore(store);
   const amt = round6(amountUsdc);
   const date = utcDate(at);
 
+  let applied = true;
+
   // COMPARE-AND-SET (see casUpdate). This is the counter the daily ceiling reads, so a lost
   // update here does not just misreport — it WIDENS the cap.
   const dRec = await casUpdate(s, dayKey(owner, date), (cur) => {
     const rec = cur ?? { date, owner: ownerKey(owner), spentUsdc: 0 };
-    return { ...rec, spentUsdc: round6((rec.spentUsdc ?? 0) + amt) };
+    // Defensive read — NOT a migration. Records written before this field existed have no
+    // `chargedIds` and must keep working untouched.
+    const charged = rec.chargedIds ?? [];
+    if (chargeId && charged.includes(chargeId)) {
+      applied = false;
+      return rec; // no-op: this id has already been charged
+    }
+    applied = true;
+    return {
+      ...rec,
+      spentUsdc: round6((rec.spentUsdc ?? 0) + amt),
+      ...(chargeId ? { chargedIds: [...charged, chargeId] } : {}),
+    };
   });
 
+  // ⭐ ALREADY CHARGED IS A SUCCESS, NOT A FAILURE. The caller asked for the charge to be in place;
+  // it is. Returning an error here would make dca-tick's reconcile treat a correctly-idempotent
+  // re-charge as a ledger failure and STOP the mandate.
+  if (!applied) return { daySpentUsdc: dRec.spentUsdc, applied: false, alreadyCharged: true };
+
+  // ⚠️ ORDER: counter FIRST, audit SECOND — and it stays that way. A crash between them leaves a
+  // charge that is COUNTED but carries no audit row, so no sweeper can reverse it: an over-count,
+  // which NARROWS the cap. Appending first would invert that into a row the sweeper can reverse
+  // for a charge that never landed — a credit for nothing, which WIDENS it. ⭐ Submit-time
+  // ledgering makes this window the norm path rather than a rarity (design §0.5), so the choice
+  // is now load-bearing: it is kept because the survivor is the safe direction, not by inheritance.
   await appendAudit(s, {
     owner, at, agent,
     amountUsdc: amt,
@@ -610,7 +655,7 @@ export async function recordAgentSpend({
     ...(confirmation ? { confirmation } : {}), // conditional: absent for callers that don't know
     ...(circleId ? { circleId } : {}), // conditional: absent => unresolvable, a reconcile must skip it
   });
-  return { daySpentUsdc: dRec.spentUsdc };
+  return { daySpentUsdc: dRec.spentUsdc, applied: true };
 }
 
 /**
@@ -698,17 +743,27 @@ export function shoutLedgerFailure({ agent, owner, amountUsdc, source, err }) {
 //   charge plus a second counter that must move with it — and any path with that shape inherits it.
 //   Do not narrow it to whichever caller prompted you to read it.
 //
-//   ⭐ WHY IT IS STILL SOUND — the list of submit-time chargers, re-traced 2026-08-21:
+//   ⭐ WHY IT IS STILL SOUND — the list of submit-time chargers, re-traced 2026-08-22:
 //     · manual-path swaps (_actions.mjs `swap_tokens`, confirm:false)
 //     · `transfer_usdc` on the TxPendingError branch          ← added 2026-08-21 (finding A)
 //     · agent-send.mjs on the TxPendingError branch           ← added 2026-08-21 (finding A)
-//   NONE of the three writes a paired sub-ledger. `recordDcaSpend` — the only sub-ledger that
-//   exists — still has exactly two call sites (dca-tick.mjs), BOTH confirm-gated, so no submit-time
-//   charge is paired with one. Re-verify this list before adding a fourth.
+//     · dca-tick's SwapPendingConfirm branch                  ← added 2026-08-22 (condition 1)
+//   NONE of the four writes a paired sub-ledger AT SUBMIT. `recordDcaSpend` — the only sub-ledger
+//   that exists — still has exactly two call sites (dca-tick.mjs), BOTH confirm-gated.
+//   Re-verify this list before adding a fifth.
 //
-//   🚨 THE KNOWN CASE THAT WOULD BREAK IT is DCA decrementing at submit: that would pair a
-//   submit-time day charge with `recordDcaSpend` AND `spentAmount` — a TRIPLE, across two stores.
-//   It is deliberately NOT built; see docs/dca-submit-time-budget-design.md (PARKED).
+//   ⭐⭐ THE FOURTH ENTRY IS THE CASE THIS NOTE NAMED AS THE ONE THAT WOULD BREAK IT, SO READ WHY
+//   IT DOES NOT. The hazard was never "DCA charges at submit" — it was a submit-time day charge
+//   PAIRED WITH A SUB-LEDGER, which would make this function's day-only reversal a partial one.
+//   ⭐ dca-tick charges ONLY the day ceiling at submit. `recordDcaSpend` and the mandate's
+//   `spentAmount` stay confirm-gated exactly as before, so nothing is paired with the submit-time
+//   charge and a day-only reversal remains COMPLETE rather than partial. The trigger is the
+//   PAIRING, not the timing — and the pairing was not created.
+//   ⚠️ SO THIS FUNCTION STILL DOES NOT NEED PAIR SEMANTICS, and was deliberately NOT extended.
+//   The moment `recordDcaSpend` or `spentAmount` moves to submit time, it DOES — that is the
+//   TRIPLE described in docs/dca-submit-time-budget-design.md §0.2, and that design stays parked
+//   and unbuilt. ⚠️ Do not read "DCA already charges at submit" as evidence that the rest is safe
+//   to move; the whole reason this one was safe is that the rest did not move with it.
 export async function reverseAgentSpend({ entry, reason, store, at }) {
   const s = pickStore(store);
 

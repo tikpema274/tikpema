@@ -238,6 +238,115 @@ section("6 — ⭐ A LEDGER FAILURE IS SWALLOWED BUT SHOUTED, NEVER SILENT");
     (await import("node:fs")).readFileSync("netlify/functions/_budget.mjs", "utf8")));
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("7 — ⭐⭐ IDEMPOTENT CHARGE (`chargeId`) — DRIVEN, NOT GREPPED");
+// ═══ WHY THIS EXISTS ═════════════════════════════════════════════════════════════════════════
+// 2026-08-22: dca-tick charges the day ceiling AT SUBMIT, and the reconcile charges the SAME fill
+// again when it confirms. Without idempotency every slow fill is DOUBLE-COUNTED — which restricts
+// rather than widens, but is still a wrong ceiling and would strand users below their real limit.
+// ⭐ The mechanism mirrors `reversedIds`: membership test and arithmetic inside ONE CAS mutate, so
+// there is no check-then-write window. These drive the real primitive and RE-READ the counter.
+{
+  const budget = await import("../netlify/functions/_budget.mjs");
+  const OWNER = "0x" + "5a".repeat(20);
+  const AT = Date.parse("2026-08-22T12:00:00.000Z");
+  const spend = (amountUsdc, opts = {}) => budget.recordAgentSpend({
+    owner: OWNER, amountUsdc, source: "swap_tokens", justification: "idempotency probe", at: AT, ...opts,
+  });
+
+  resetStores();
+  const first = await spend(1.5, { confirmation: "submitted", circleId: "cid-A", chargeId: "cid-A" });
+  const dayAfterFirst = await budget.daySpend({ owner: OWNER, at: AT });
+  check("⭐ the submit-time charge advances the day counter", dayAfterFirst === 1.5, `day=${dayAfterFirst}`);
+  check("⭐ …and reports it applied", first.applied === true);
+
+  const second = await spend(1.5, { confirmation: "confirmed", circleId: "cid-A", chargeId: "cid-A" });
+  const dayAfterSecond = await budget.daySpend({ owner: OWNER, at: AT });
+  check("⭐⭐ the RECONCILE's re-charge of the same id is a NO-OP — the fill is not double-counted",
+    dayAfterSecond === 1.5, `day=${dayAfterSecond} (would be 3 without idempotency)`);
+  check("⭐⭐ …and it reports alreadyCharged rather than an error — a correct no-op must not read as a ledger FAILURE",
+    second.applied === false && second.alreadyCharged === true);
+
+  // 🚨 The counter and the trail must agree. A second audit row for a suppressed charge would make
+  // agentBreakdown report spending the ceiling never saw, AND would hand the step-8 sweeper a
+  // second "open" charge for one transaction to resolve or reverse independently.
+  // ⚠️ COUNTED FROM THE RAW STORE, NOT FROM listUnresolvedCharges — and the difference is the whole
+  // assertion. The first version used the open-charges list, which filters to
+  // `confirmation === "submitted"`. The duplicate row this is hunting is written by the RECONCILE,
+  // i.e. `confirmation:"confirmed"`, so the filter excluded exactly the row under test and the
+  // check passed against a deliberately broken build. ⭐ Caught only because the mutation run
+  // produced 1 red instead of 2 — the filter WAS part of the hypothesis
+  // ([[filtered-read-is-not-absence]]).
+  const budgetMap = maps.find((x) => x._n === "data-budget");
+  const auditRowsA = [...(budgetMap?.entries() ?? [])]
+    .filter(([k]) => k.startsWith("audit:"))
+    .map(([, e]) => e.value)
+    .filter((v) => v?.circleId === "cid-A");
+  check("🚨🚨 …and NO second audit entry was appended — one transaction, one charge row",
+    auditRowsA.length === 1,
+    `${auditRowsA.length} audit row(s) for cid-A: ${auditRowsA.map((r) => r.confirmation).join(",")}`);
+
+  // A DIFFERENT id must still charge — idempotency must not become a global mute.
+  await spend(2, { confirmation: "submitted", circleId: "cid-B", chargeId: "cid-B" });
+  const dayAfterB = await budget.daySpend({ owner: OWNER, at: AT });
+  check("⭐ a DIFFERENT id still charges — the guard is per-transaction, not a global mute",
+    dayAfterB === 3.5, `day=${dayAfterB}`);
+
+  // ⚠️ OMITTING chargeId MUST KEEP THE OLD BEHAVIOUR. Every existing caller passes none.
+  resetStores();
+  await spend(1);
+  await spend(1);
+  const dayNoId = await budget.daySpend({ owner: OWNER, at: AT });
+  check("⚠️ WITHOUT a chargeId the old behaviour is EXACT — two calls, two charges",
+    dayNoId === 2, `day=${dayNoId}`);
+  // Read the raw day record straight out of the mocked store: the point is the SHAPE on disk,
+  // and daySpend() would only show the total, which is exactly what this assertion is not about.
+  const dayMap = maps.find((x) => x._n === "data-budget");
+  const dayRec = [...(dayMap?.values() ?? [])].map((e) => e.value)
+    .find((v) => v && typeof v.spentUsdc === "number" && v.owner);
+  check("⭐ …and no `chargedIds` field is written for them — not a migration, nothing to migrate",
+    dayRec !== undefined && dayRec.chargedIds === undefined,
+    dayRec ? `keys: ${Object.keys(dayRec).join(",")}` : "day record not found");
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("8 — 🚨 REVERSAL STILL WORKS ON AN IDEMPOTENT CHARGE, and does not re-open it");
+{
+  const budget = await import("../netlify/functions/_budget.mjs");
+  const OWNER = "0x" + "7c".repeat(20);
+  const AT = Date.parse("2026-08-22T12:00:00.000Z");
+  resetStores();
+  await budget.recordAgentSpend({
+    owner: OWNER, amountUsdc: 4, source: "swap_tokens", justification: "DCA mandate m1 (submitted)",
+    at: AT, confirmation: "submitted", circleId: "cid-R", chargeId: "cid-R",
+  });
+  check("the charge landed", (await budget.daySpend({ owner: OWNER, at: AT })) === 4);
+
+  // This is the exact call dca-tick's reconcile makes on a WITNESSED FAILED/CANCELLED/DENIED.
+  const rev = await budget.reverseChargeById({ circleId: "cid-R", reason: "swap failed", at: AT + 1000 });
+  const afterRev = await budget.daySpend({ owner: OWNER, at: AT });
+  check("⭐⭐ a witnessed failure gives the budget back — the runner the submit-charge requires",
+    rev.reversed === true && afterRev === 0, `reversed=${rev.reversed} day=${afterRev}`);
+  check("⭐ …and it is NOT reported anomalous — the charge was found", rev.anomalous !== true);
+
+  // 🚨 THE ONE THAT COULD GO FAIL-OPEN. After a reversal the id REMAINS in chargedIds, so a
+  // re-charge under the same id is still suppressed. That is correct — the charge happened once
+  // and was reversed once — but it must be PINNED, because the tempting "fix" if someone sees a
+  // suppressed re-charge is to clear chargedIds on reversal, which would permit a double-charge
+  // AND, paired with reversedIds, an unbounded charge/reverse cycle on one id.
+  await budget.recordAgentSpend({
+    owner: OWNER, amountUsdc: 4, source: "swap_tokens", justification: "re-charge attempt",
+    at: AT, confirmation: "submitted", circleId: "cid-R", chargeId: "cid-R",
+  });
+  const afterRecharge = await budget.daySpend({ owner: OWNER, at: AT });
+  check("🚨🚨 a REVERSED id cannot be re-charged under the same id — reversal does not clear chargedIds",
+    afterRecharge === 0, `day=${afterRecharge}`);
+
+  const revTwice = await budget.reverseChargeById({ circleId: "cid-R", reason: "again", at: AT + 2000 });
+  check("⭐ …and reversing twice does not credit twice",
+    revTwice.reversed !== true && (await budget.daySpend({ owner: OWNER, at: AT })) === 0);
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

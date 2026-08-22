@@ -1,5 +1,36 @@
 # DCA submit-time budget + atomic-pair reversal — DESIGN ONLY, **PARKED 2026-08-21**
 
+> ## ⭐⭐ PARTIALLY UNPARKED 2026-08-22 — READ THIS BEFORE THE PARK NOTICE BELOW
+>
+> **What shipped:** dca-tick's `SwapPendingConfirm` branch now charges **the day ceiling only** at
+> submit, idempotently (`chargeId`, the `reversedIds` mirror from §1.1), with the reversal runner
+> from §1.4 (`reverseChargeById` on a witnessed terminal failure) and §2(a) (reconcile above the
+> ACTIVE gate). Unblock condition (1) at `_dca.mjs`'s `CREATE_GATED` is met.
+>
+> **🚨 WHAT DID *NOT* SHIP, AND MUST NOT BE ASSUMED:** the **TRIPLE** (§0.2). `recordDcaSpend` and
+> the mandate's `spentAmount` remain **confirm-gated**, and `reverseAgentSpend` was **NOT** extended
+> to pair semantics. ⭐ That is the whole reason the change was safe: `_budget.mjs:652`'s
+> precondition is triggered by a submit-time day charge **PAIRED WITH A SUB-LEDGER** — the pairing,
+> not the timing. No pairing was created, so a day-only reversal stays COMPLETE rather than partial.
+> **The moment either of the other two counters moves to submit time, §0–§1 apply in full and
+> `reverseAgentSpend` must gain triple semantics FIRST.**
+>
+> **Known residual, stated rather than discovered later:** `dca-day:` is per-OWNER, so a second
+> ACTIVE mandate of the same owner can fill while this one is pending and `yieldsToUser` will read
+> a briefly understated DCA half. Narrower than the day-ceiling gap that was closed, same direction.
+> `spentAmount` is *not* exposed — the tick takes one action per mandate per tick, so a mandate with
+> a `pendingPeriod` cannot fill again before reconcile.
+>
+> ⚠️ **§0.5 was considered and deliberately NOT "fixed".** `recordAgentSpend` still does
+> `casUpdate(dayKey)` **then** `appendAudit`, and submit-time ledgering does make that window the
+> norm path as the section says. But the survivor of a crash between them is a charge that is
+> **counted and unreversible** — an over-count, which NARROWS the cap. Appending first would invert
+> it into a reversible row for a charge that never landed: a credit for nothing, which WIDENS it.
+> ⭐ The order is now load-bearing rather than inherited, and is documented at the call site.
+>
+> §3-C (collapse the triple to one authoritative record) remains the recorded end state.
+
+
 > 🅿️ **PARKED BEFORE ANY CODE WAS WRITTEN — and the reason is worth more than the design.**
 > The three-step plan below (extend `reverseAgentSpend` → flip DCA to decrement-at-submit → close
 > the reversal gap) would begin by modifying **the one function in `_budget.mjs` that can WIDEN a

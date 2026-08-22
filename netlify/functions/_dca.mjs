@@ -52,6 +52,13 @@ import { budgetConfig, dcaDaySpend } from "./_budget.mjs";
 //
 //   1. 🚨 dca-tick's SwapPendingConfirm branch LEDGERS THE DAY CEILING AT SUBMIT.
 //      ⚠️ NOT "finding A shipped" — finding A covered agent-send and transfer_usdc ONLY.
+//      ✅ MET 2026-08-22. The branch calls recordAgentSpend with confirmation:"submitted" +
+//      circleId + chargeId, and NOTHING else — recordDcaSpend and spentAmount stay confirm-gated,
+//      so no pair is created and reverseAgentSpend was not touched (see its PRECONDITION). A
+//      witnessed FAILED/CANCELLED/DENIED gives the amount back via reverseChargeById, and the
+//      reconcile gate moved above the ACTIVE gate so a cancelled-mid-fill mandate cannot strand
+//      that charge. Driven, not grepped: test:pendingspend §7/§8, negative-tested against two
+//      mutations of the primitive.
 //      ⭐⭐ THIS CONDITION WAS REWORDED 2026-08-22 BECAUSE ITS OLD FORM WAS A TRUE SENTENCE THAT
 //      DID NOT SATISFY IT. It read "FINDING A is fixed", and finding A IS fixed — 459f3f3 shipped
 //      and its suite is green. A reader checks the claim, finds it true, ticks it off, and
@@ -92,12 +99,12 @@ import { budgetConfig, dcaDaySpend } from "./_budget.mjs";
 //      does not reach dca-fills, so it is not evidence for (1).
 //   3. THE CONSENT SENTENCE MATCHES THE CODE — DcaPanel's cap/ceiling clause is corrected in the
 //      same commit as (1), because fixing the ledger makes the current exception text WRONG.
-//      ⚠️ NOT ACTIONABLE UNTIL (1)'s DCA HALF IS DONE, and deliberately left alone 2026-08-22.
-//      The sentence currently says an unconfirmed swap is "never counted … measured against a
-//      total that is too low". For the DCA path that is still SUBSTANTIALLY TRUE during the
-//      pending window, so rewriting it now would make the consent record describe a fix that has
-//      not shipped — overstating safety in the user's own authorization text, which is worse than
-//      the wording being pessimistic. ⭐ The honest sequence is (1) then (3), in that order.
+//      ✅ MET 2026-08-22, IN THE SAME COMMIT AS (1) — which is what this condition demanded, and
+//      the suite enforced it: verify-dca-consent-copy §1 property (b) was pinned to the OLD
+//      behaviour with a flip instruction, so closing (1) turned it red and the copy had to follow.
+//      ⭐ The obsolete warning was REMOVED, not merely joined by the new sentence — a consent
+//      record that still warns of an under-count that no longer happens describes a system the
+//      user is not using, and a presence check would have certified it forever.
 //   4. ⭐⭐ AN ENTRY POINT EXISTS. UN-GATING IS NOT COMPLETE WITHOUT ONE. #/dca has NEVER had a
 //      Dashboard or MyAgentPanel card — every nav-less sibling route has one. Flip this flag
 //      without adding a card and the result is unlinked-by-omission WITH THE DEFECTS FIXED: a
@@ -125,15 +132,20 @@ import { budgetConfig, dcaDaySpend } from "./_budget.mjs";
 // a condition. Hence (4), stated in the place the decision is actually made.
 //
 // ── ⭐ STATE AS OF 2026-08-22 — (2) and (4) DONE, (1) HALF, (3) BLOCKED BY (1) ───────────────
-//   (1) ❌ NOT MET — dca-tick's pending branch still ledgers nothing at submit. ⚠️ NOT "half
-//       done": the manual path being fixed is a DIFFERENT property, not a fraction of this one.
+//   (1) ✅ MET — the pending branch charges the day ceiling at submit, unpaired and idempotent.
 //   (2) ✅ MET — budget-sweep drained its 21-charge queue live (10, 10, 1 -> 0), errors 0.
-//   (3) ⛔ BLOCKED BY (1) — correcting the sentence first would overstate safety.
-//   (4) ✅ DONE — Dashboard card added, enforced by verify-dca-consent-copy §6.
-// 🚨 SO THE GATE STAYS. (2) and (4) being done is NOT three-of-four with a rounding error: (1) is
-// the finding this gate was raised for, and its DCA half — the only half that governs what this
-// flag admits — is exactly as it was. ⭐ Un-gating on "most of the conditions" is how a condition
-// becomes a formality; the whole point of writing four was that four is the bar.
+//   (3) ✅ MET — the consent sentence was corrected in (1)'s own commit, as required.
+//   (4) ✅ MET — Dashboard card added, enforced by verify-dca-consent-copy §6.
+//
+// ⭐⭐ ALL FOUR HOLD. THE FLAG IS STILL true, AND THAT IS DELIBERATE, NOT AN OVERSIGHT.
+// The conditions are the bar for whether un-gating is CORRECT. They are not a substitute for
+// proving the code that satisfies them. (1) shipped brand-new money-path logic — a submit-time
+// charge, an idempotency primitive on the day counter, and a reversal runner — none of which has
+// executed on a deploy. Un-gating in the same breath would make the FIRST REAL MANDATE the first
+// execution of all three. ⚠️ This project's rule is prove-on-a-draft-before-prod, and the reason
+// is on the record: safety fixes taken straight to prod took the Executor down for 21 minutes.
+// ⭐ So the remaining step is a proving step, and flipping this flag is the USER'S call — the
+// conditions being met is what makes that call available, not what makes it automatic.
 //
 // ⚠️ Findings A and B are recorded in PROGRESS.md 2026-08-21; the parked ledger design is in
 // docs/dca-submit-time-budget-design.md.

@@ -80,12 +80,20 @@ check("⭐ …bounded by an amount, a cadence and an end date", /every/.test(ren
 //
 // The claim splits in two, and each half is checked against the module that makes it true:
 //   (a) ENFORCED BEFORE SUBMIT — both bounds run, and refuse, before any swap is sent.
-//   (b) NOT COUNTED IF IT NEVER CONFIRMS — so the ceiling understates from then on.
-// (b) is what the old sentence hid, and (b) is why the copy now names the exception.
+//   (b) COUNTED AT SUBMIT, NOT AT CONFIRM — so a slow fill does not understate the ceiling.
+// ⭐⭐ (b) WAS INVERTED ON 2026-08-22, and this suite is what forced the copy to follow. It used to
+// pin the OPPOSITE property — "an unconfirmed fill is ledgered NOWHERE" — with a flip instruction
+// attached, and it went red the moment dca-tick started charging at submit. The consent sentence
+// was corrected in the SAME commit, which is what unblock condition (3) requires.
 check("⭐ the copy PROMISES the check happens before submit",
   /checked against your per-swap cap and daily ceiling before it is submitted/i.test(rendered));
-check("⭐⭐ …AND it names the exception, rather than implying the counters are always right",
-  /never confirms is never counted/i.test(rendered) && /too low/i.test(rendered));
+check("⭐⭐ …AND it says WHEN the swap is counted — at submit, not at confirm",
+  /counted against your daily total as soon as it is submitted/i.test(rendered));
+// 🚨 THE OLD EXCEPTION MUST BE GONE, NOT MERELY JOINED BY THE NEW SENTENCE. A consent record that
+// still warns of an under-count that no longer happens is not "extra caution" — it describes a
+// system the user is not using, and it would keep passing a presence check forever.
+check("🚨 …and the OBSOLETE under-count warning is REMOVED, not left standing beside the new one",
+  !/never confirms is never counted/i.test(rendered) && !/measured against a total that is too low/i.test(rendered));
 
 // (a) THE PROPERTY: in _actions.mjs the per-swap cap and the day ceiling both REFUSE before the
 // swap is submitted. Index order is the assertion — the same technique section 4 uses.
@@ -96,20 +104,34 @@ check("⭐⭐ PROPERTY (a): per-swap cap AND day ceiling are both enforced BEFOR
   capAt > 0 && dayAt > 0 && swapAt > capAt && swapAt > dayAt,
   `cap@${capAt} day@${dayAt} → swap@${swapAt}`);
 
-// (b) THE PROPERTY: the SwapPendingConfirm branch ledgers NOTHING, so an unconfirmed fill is not
-// counted anywhere. ⚠️ THIS ASSERTION IS DELIBERATELY NOT "the branch is empty of ledgers, and
-// that is fine" — it pins a KNOWN GAP so the copy above cannot silently become over-cautious
-// either. FLIP IT when the branch starts ledgering at submit (see
-// docs/dca-submit-time-budget-design.md), and correct the sentence in the same commit.
+// (b) THE PROPERTY: the SwapPendingConfirm branch charges the DAY CEILING at submit — and charges
+// NOTHING ELSE. Both halves are assertions, and the second is the money-safety one.
 const pendStart = tick.indexOf('threw?.name === "SwapPendingConfirm"');
 const pendEnd = tick.indexOf("if (!threw) {");
 const pendingBranch = pendStart > 0 && pendEnd > pendStart ? tick.slice(pendStart, pendEnd) : "";
-const pendingLedgers = /recordAgentSpend|recordDcaSpend|spentAmount:/.test(pendingBranch);
-check("⭐⭐ PROPERTY (b): an UNCONFIRMED fill is ledgered NOWHERE — so the copy must name it",
-  pendingBranch.length > 0 && !pendingLedgers,
-  pendingLedgers
-    ? "🎉 the pending branch now ledgers — UPDATE the sentence in DcaPanel and flip this check"
-    : `pending branch ${pendingBranch.length} chars, no ledger call`);
+// Strip comments: this branch DESCRIBES recordDcaSpend and spentAmount at length in order to say
+// they are deliberately absent, and a whole-region regex would match the explanation and read it
+// as the thing it warns against. The habit this repo keeps paying for — assert on code, not prose.
+const pendingCode = pendingBranch.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+check("⭐⭐ PROPERTY (b): the pending branch CHARGES THE DAY CEILING at submit",
+  /recordAgentSpend\(/.test(pendingCode) && /confirmation: "submitted"/.test(pendingCode),
+  pendingCode.includes("recordAgentSpend(") ? "charged at submit" : "🚨 NOT charged — the sentence in DcaPanel is now FALSE");
+check("⭐⭐ …and it is IDEMPOTENT, so the reconcile's own charge cannot double-count the fill",
+  /chargeId:/.test(pendingCode));
+// 🚨🚨 THE PRECONDITION, AS AN ASSERTION. _budget.mjs:652 forbids a submit-time day charge PAIRED
+// with a sub-ledger, because reverseAgentSpend reverses the day ledger ONLY and a partial reversal
+// desyncs the pair in the FAIL-OPEN direction. The pairing is the trigger, not the timing — so
+// what must be pinned is that NOTHING ELSE moves in this branch. If someone later adds
+// recordDcaSpend or spentAmount here, reverseAgentSpend must gain triple semantics FIRST
+// (docs/dca-submit-time-budget-design.md §0.2), and this assertion is what stops it shipping quietly.
+check("🚨🚨 …and NOTHING ELSE is charged at submit — an unpaired charge keeps a day-only reversal COMPLETE",
+  !/recordDcaSpend\(/.test(pendingCode) && !/spentAmount:/.test(pendingCode),
+  "recordDcaSpend / spentAmount must stay confirm-gated — see the _budget.mjs precondition");
+// ⭐ AND THE REVERSAL RUNNER EXISTS. Charging at submit CREATES a reversal surface (design §2);
+// a convergence guarantee is only as real as the runner that closes it. budget-sweep is NOT that
+// runner — its reversals are disarmed — so the root fix must be here.
+check("⭐⭐ …and a WITNESSED failure gives the budget back — the runner the submit-charge requires",
+  /reverseChargeById\(/.test(tick) && /RECONCILE_TERMINAL_FAIL\.has\(state\)/.test(tick));
 // 🚨 The checkbox text is the record itself — it must restate the custodial fact, not just tick.
 check("🚨🚨 the CHECKBOX restates the custodial fact rather than saying only 'I agree'",
   /I understand Tikpema's server will move my USDC\/EURC automatically while I'm offline/.test(rendered) &&
@@ -147,21 +169,32 @@ check("⭐ …and the checkbox carries that limit too, not just the prose above 
   /cannot recall one already submitted/.test(rendered));
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-section("4 — ⚠️ THE UNFIXED LEDGER GAP, RECORDED SO IT CANNOT BE FORGOTTEN");
-// 🚨 NOT A COPY PROBLEM, AND DELIBERATELY NOT PATCHED HERE — it is money-path logic.
-// dca-tick.mjs skips non-ACTIVE mandates at the top of the loop, BEFORE the reconcile:
-//     if (m.status !== STATUS.ACTIVE) { beat.inactive++; continue; }   ← line ~329
-//     if (m.pendingPeriod != null) { await reconcilePending(m, key); } ← line ~340
-// So a mandate cancelled while a fill is in flight is never reconciled: the swap lands on-chain
-// and is NEVER counted against the daily ceiling. ⭐ The fix is to reconcile BEFORE the status
-// check — but that advances ledgers for a cancelled mandate, so it is the user's call.
-const activeAt = tick.indexOf("if (m.status !== STATUS.ACTIVE)");
-const reconcileAt = tick.indexOf("if (m.pendingPeriod != null)");
-const gapPresent = activeAt > 0 && reconcileAt > activeAt;
-check("⚠️ the known ordering gap is STILL PRESENT (flip this assertion when it is fixed)",
-  gapPresent, gapPresent
-    ? `ACTIVE-check@${activeAt} precedes reconcile@${reconcileAt} — an in-flight fill on a cancelled mandate is never ledgered`
-    : "🎉 reconcile now runs first — update this suite and the note in DcaPanel");
+section("4 — ⭐⭐ THE ORDERING GAP IS CLOSED — reconcile runs above the ACTIVE gate");
+// ⚠️ THIS ASSERTION WAS INVERTED ON 2026-08-22 AND THE OLD FORM IS WORTH KEEPING IN VIEW. It used
+// to pin the gap as PRESENT, with a flip instruction, because a mandate cancelled mid-fill was
+// never reconciled: the swap landed and was never counted. That cost nothing but an under-count
+// while the submit branch charged nothing.
+// 🚨 CHARGING AT SUBMIT TURNED IT FROM AN UNDER-COUNT INTO A PERMANENT PHANTOM CHARGE — the fill
+// now carries a day-ceiling charge, and if the mandate goes non-ACTIVE before reconcile, NOTHING
+// can reverse it: dca-tick could not reach it and budget-sweep's reversals are disarmed. So this
+// stopped being "the user's call" and became a precondition of the change (design §2(a)).
+// ⭐ The property: a mandate carrying a pendingPeriod is reconciled REGARDLESS of status.
+const reconcileGateAt = tick.indexOf("if (hasPending) {");
+const activeGateAt = tick.indexOf("if (m.status !== STATUS.ACTIVE) {");
+const pendingReadAt = tick.indexOf("const hasPending = m.pendingPeriod != null;");
+check("⭐⭐ pendingPeriod is read BEFORE the status branch, so a non-ACTIVE mandate can still reconcile",
+  pendingReadAt > 0 && activeGateAt > pendingReadAt, `hasPending@${pendingReadAt} → status@${activeGateAt}`);
+check("⭐⭐ …and a non-ACTIVE mandate WITH a pending fill is not skipped",
+  /if \(!hasPending\) \{ beat\.inactive\+\+; continue; \}/.test(tick));
+check("⭐ …and it is COUNTED separately rather than folded into `inactive`",
+  /reconciledInactive\+\+/.test(tick) && /reconciledInactive: 0/.test(tick));
+check("⭐ …and the reconcile itself still runs before any evaluate/submit",
+  reconcileGateAt > 0 && reconcileGateAt < tick.indexOf("const decision = evaluate(m, now);"));
+// 🚨🚨 THE HALF THAT IS EASY TO GET WRONG. Reconcile can now reach a mandate the USER CANCELLED.
+// Overwriting that status with stopped-failed would rewrite their decision as our failure — and
+// `cancelled` is reclaim-class, the one status this codebase treats as the user's alone.
+check("🚨🚨 …and reconcile only sets `status` when the mandate is STILL ACTIVE — it never overwrites a user's cancel",
+  /m\.status === STATUS\.ACTIVE \? \{ status: STATUS\.STOPPED_FAILED/.test(tick));
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
 section("5 — 🚧 THE CREATE GATE, AND THE LIMITS OF WHAT IT MAY TOUCH");

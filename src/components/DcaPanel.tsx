@@ -181,13 +181,27 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
               the COUNTERS. Both ARE enforced before a swap is submitted (_actions.mjs checks the
               per-swap cap, then canSpendDay, and returns blocked BEFORE agentSwap runs) — so the
               sentence was true of the swap it described. 🚨 WHAT IT HID IS THE FORWARD EFFECT: the
-              SwapPendingConfirm branch (dca-tick.mjs) ledgers NOTHING, so a fill that lands after
-              the 60s waitForTx deadline is never counted, and the daily ceiling then UNDERSTATES
+              SwapPendingConfirm branch (dca-tick.mjs) ledgered NOTHING, so a fill that landed after
+              the 60s waitForTx deadline was never counted, and the daily ceiling then UNDERSTATED
               for every later swap — the user's own manual sends and swaps included, not just DCA's.
               An uncounted fill does not just under-report; it hands out headroom nobody authorized.
-            ⭐ Guarded by verify-dca-consent-copy.tsx, which pins all three against the code —
-              and section 1 now pins the ORDER in _actions.mjs and the emptiness of the pending
-              branch, not the presence of the sentence. */}
+            ⭐⭐ AND THAT EXCEPTION WAS REMOVED 2026-08-22, BECAUSE THE DEFECT IT DESCRIBED IS FIXED.
+              dca-tick's SwapPendingConfirm branch now charges the day ceiling AT SUBMIT
+              (idempotently, so the reconcile's own charge cannot double-count), and a witnessed
+              FAILED/CANCELLED/DENIED gives the amount back via reverseChargeById.
+              🚨 THE REMOVAL IS AS LOAD-BEARING AS THE ADDITION WAS. A consent record that still
+              warned of an under-count that no longer happens is not harmless over-caution — it
+              describes a system the user is not using, and "the words are still there" is exactly
+              what a presence check would have kept certifying. The sentence must track the code in
+              BOTH directions or it is not a record of anything.
+            ⚠️ WHAT IS DELIBERATELY *NOT* CLAIMED: only the DAY CEILING moves at submit.
+              recordDcaSpend (DCA's own half, via yieldsToUser) stays confirm-gated, so a second
+              mandate of the same owner can still fill against a briefly understated DCA half. The
+              copy says nothing about DCA's internal half-share, so it does not overstate — but do
+              not "improve" it into a general promise that everything is counted at submit.
+            ⭐ Guarded by verify-dca-consent-copy.tsx, which pins all of these against the code —
+              §1 pins the ORDER in _actions.mjs, that the pending branch charges the day ceiling
+              and NOTHING ELSE, and that the obsolete warning is GONE rather than merely joined. */}
         <div style={{ fontWeight: 600, marginBottom: 8 }}>⚠ This is custodial. Read it before you authorize.</div>
         <div style={{ fontSize: 14, lineHeight: 1.6, color: "var(--paper)" }}>
           <b>Tikpema's server</b> will swap up to{" "}
@@ -199,9 +213,10 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
           the kill switch — <b>nothing swaps while your agent is stopped</b>. ⚠️ Cancelling stops
           every <b>future</b> swap; a swap already submitted will still land, because it is already
           on-chain and nothing can recall it. Every swap is checked against your <b>per-swap cap</b>
-          and <b>daily ceiling</b> before it is submitted. ⚠️ But a swap that never confirms is{" "}
-          <b>never counted</b> toward your daily total, so later swaps — including your own — are
-          measured against a total that is too low.
+          and <b>daily ceiling</b> before it is submitted, and it is{" "}
+          <b>counted against your daily total as soon as it is submitted</b> — not when it
+          confirms — so a swap that is still settling can never quietly free up room for another
+          one. If we then see on-chain that it <b>failed</b>, the amount is given back.
         </div>
 
         <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 12, cursor: "pointer" }}>
