@@ -242,3 +242,60 @@ owner address (`0xfd801d…`) but the ledger is written under `m.walletAddress`,
 (`0x058957…`). ⚠️ Two addresses, one record, and the wrong one reads as "nothing was charged" —
 the fail-open-looking direction ([[plan-path-spender-is-caller-sca]]). The raw key listing is
 what settled it, because it makes no assumption about which owner to look under.
+
+---
+
+## 7. PRE-REGISTERED BEFORE THE WEDGE-FIX DEPLOY (2026-08-22, ~18:55Z)
+
+### Q1 — does the overdue fill 2 fire on the first healthy tick, or wait for the next boundary?
+
+**On the FIRST HEALTHY TICK.** From `_dca.mjs`'s `evaluate()`:
+
+```js
+const period = periodFor(mandate, nowMs);
+if (period === mandate.lastFilledPeriod) return { due: false, reason: "already filled this period" };
+return { due: true, period, remaining };
+```
+
+The gate is an **inequality**, not a boundary wait. `lastFilledPeriod` is **496505**; any period that
+is not 496505 is due. So whenever the first healthy tick runs — mid-period, seconds after the
+deploy, whenever — it fills immediately. There is no "wait for :00".
+
+⭐ **AND THE MISSED PERIODS ARE NOT MADE UP.** One fill per tick, no catch-up queue: the deploy
+takes ~45 min, so periods 496506 (and possibly 496507) pass unfilled and are simply skipped. The
+mandate still gets all **3** fills, because termination is gated on `remaining < perTickAmount` —
+the BUDGET, not the clock. The schedule slips; the total does not change.
+
+### Q2 — does the [WEDGED] alarm fire on the first post-deploy tick?
+
+**NO — and the premise that the streak is "~40 by now" is wrong.** Measured on prod just now:
+`consecutiveDeferrals` is **absent** on the mandate. The counter is written **only by the new
+code**, which is not deployed — so ~52 ticks have deferred and **none were counted durably.** The
+stored streak is 0, not 40. The counter ships *with* the fix; it does not pre-exist it.
+
+Two independent reasons the alarm stays silent, either sufficient:
+
+1. **The stored streak is 0**, so even a defer would read 1 — below `WEDGE_AFTER_DEFERS = 3`.
+2. `beat.wedged++` lives **inside** the `isBlobsTransient(e)` catch. A successful tick never
+   enters it, and `patchMandate` resets `consecutiveDeferrals: 0` on any real outcome. A high
+   stored streak is never *read into* an alarm — it is only read to compute the next streak.
+
+⭐⭐ **SO THE ALARM IS AN INVERTED SIGNAL HERE, AND THAT IS THE USEFUL PART: if `[WEDGED]` FIRES
+AFTER THIS DEPLOY, THE FIX FAILED.** The alarm requires a defer; a post-deploy defer means the
+handle is still stale. Silence is success; noise is the discriminator. It would take 3 consecutive
+ticks (~3 min) to appear, counting from zero.
+
+⚠️ A consequence worth naming rather than discovering: a wedge that **recovers** leaves no alert
+trail, because the streak is only read on a defer. `lastDeferAt` on the mandate is the only
+retrospective trace. Live detection is what this buys; forensics is not.
+
+### Q3 — fill 2 is judged on the SAME table as fill 1
+
+No new expectations. §1 Branch A, all seven values, deltas from the post-fill-1 baseline
+(day 0.05, dca-day 0.05, spentAmount 0.05, 1 audit row):
+day→0.10 · dca-day→0.10 · spentAmount→0.10 · audit rows→2 · `chargedIds` **ABSENT** ·
+`pendingPeriod` null · `lastOutcome` swapped.
+
+🚨 **`chargedIds` absent still means Branch A, and Branch A still means condition (1) UNEXERCISED.**
+A second clean fill is a second observation of the pre-existing path, not a second piece of
+evidence for the new one. Two of them are not more evidence than one.
