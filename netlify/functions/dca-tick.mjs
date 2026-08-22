@@ -156,7 +156,7 @@ export async function handler(event) {
 
   // ── UNCONDITIONAL HEARTBEAT — written every invocation regardless of work (the job-sweep
   // blind-spot fix: a quiet cron must be distinguishable from a dead one by reading ONE blob).
-  const beat = { tickAt: startedAt, tokenExp, total: 0, inactive: 0, reconciledInactive: 0, unreadable: 0, scanned: 0, submitted: 0, fired: 0, skipped: 0, failed: 0, stopped: 0, terminal: 0, notDue: 0, deferred: 0, errors: 0, details: [] };
+  const beat = { tickAt: startedAt, tokenExp, total: 0, inactive: 0, reconciledInactive: 0, unresolvable: 0, unreadable: 0, scanned: 0, submitted: 0, fired: 0, skipped: 0, failed: 0, stopped: 0, terminal: 0, notDue: 0, deferred: 0, errors: 0, details: [] };
   const writeHeartbeat = async () => {
     try { await getStore(HEARTBEAT_STORE).setJSON("last", beat); } catch { /* observability only */ }
   };
@@ -216,9 +216,31 @@ export async function handler(event) {
   const reconcilePending = async (m, key) => {
     const period = m.pendingPeriod;
     const claim = await fills.get(fillClaimKey(m.id, period), { type: "json" }).catch(() => null);
-    // Defensive: the pending claim vanished, is no longer 'submitted', or carries no circleId — drop the pointer.
+    // ── Defensive: the claim vanished, is no longer 'submitted', or carries NO circleId ──────
+    // ⚠️ THE circleId CASE IS NOT HYPOTHETICAL AND IT IS NOT AN ERROR. Measured on prod
+    // 2026-08-22: FOUR cancelled mandates carry a live pendingPeriod whose claims are the
+    // PRE-REFACTOR GENERATION — `snapshotBlock`/`eventTxHash` from 2026-07-18/19, written before
+    // claims carried a Circle id. _budget.mjs's generational-boundary rule governs them: an entry
+    // with no authoritative id is PERMANENTLY UNRESOLVABLE, and a reconcile must SKIP AND REPORT
+    // it — never guess an outcome, because guessing reverses or charges for a swap whose fate
+    // nobody observed. Dropping the pointer is the skip: it stops a mandate being re-examined
+    // forever with no possible progress. NO ledger write and no Circle call happen here.
+    //
+    // 🚨 IT USED TO DROP THE POINTER IN COMPLETE SILENCE — no tally, no beat counter, no reason on
+    // the mandate. That was tolerable while the branch was unreachable for non-ACTIVE mandates;
+    // moving the reconcile above the ACTIVE gate made it the FIRST thing that would happen to
+    // those four real records, and a silent mutation of production data is exactly the shape this
+    // codebase keeps paying for. An absence must not be resolved invisibly.
     if (!claim || claim.status !== "submitted" || !claim.circleId) {
-      await mandates.setJSON(key, { ...m, pendingPeriod: null });
+      const why = !claim ? "claim missing"
+        : claim.status !== "submitted" ? `claim already ${claim.status ?? "resolved"}`
+        : "claim carries NO circleId (pre-refactor generation) — permanently unresolvable, never guessed";
+      beat.unresolvable++;
+      await patchMandate(m, key, OUTCOME.PENDING_DROPPED, {
+        reason: `pending pointer dropped without ledgering: ${why}`,
+        period,
+        patch: { pendingPeriod: null },
+      });
       return;
     }
 
@@ -285,7 +307,16 @@ export async function handler(event) {
           consecutiveUnconfirmed: 0,
           // ⭐ ALWAYS patched, ledger success or not — leaving pendingPeriod set would re-reconcile
           // next tick and re-apply whichever write succeeded.
-          ...(led.ok ? { needsAttention: false } : ledgerFailurePatch(led.failed)),
+          // ⚠️ AND THE STATUS HALF IS STRIPPED FOR A NON-ACTIVE MANDATE, for the same reason as the
+          // terminal-fail branch below: since the reconcile moved above the ACTIVE gate this can
+          // reach a mandate the USER CANCELLED, and ledgerFailurePatch sets status:"stopped-failed"
+          // — rewriting their decision as our failure. `needsAttention` and `ledgerUnrecorded` are
+          // kept either way: the money problem must stay visible even when the status must not move.
+          ...(led.ok
+            ? { needsAttention: false }
+            : m.status === STATUS.ACTIVE
+              ? ledgerFailurePatch(led.failed)
+              : (({ status, stoppedAt, ...rest }) => rest)(ledgerFailurePatch(led.failed))),
         },
       });
       await resolveClaim(m.id, period, OUTCOME.SWAPPED, { reason: "confirmed by id-reconcile", tx: txHash });

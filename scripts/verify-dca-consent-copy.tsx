@@ -195,6 +195,15 @@ check("⭐ …and the reconcile itself still runs before any evaluate/submit",
 // `cancelled` is reclaim-class, the one status this codebase treats as the user's alone.
 check("🚨🚨 …and reconcile only sets `status` when the mandate is STILL ACTIVE — it never overwrites a user's cancel",
   /m\.status === STATUS\.ACTIVE \? \{ status: STATUS\.STOPPED_FAILED/.test(tick));
+// ⚠️ BOTH exits of the reconcile can now reach a cancelled mandate, and the COMPLETE branch's
+// LEDGER-FAILURE path was the one that still carried an unguarded ledgerFailurePatch — which sets
+// status:"stopped-failed". Pinned separately because it is a different line with the same defect,
+// and fixing one is exactly the kind of thing that reads as fixing both.
+check("🚨🚨 …and the COMPLETE branch's ledger-FAILURE patch strips `status` for a non-ACTIVE mandate too",
+  /m\.status === STATUS\.ACTIVE\s*\n?\s*\? ledgerFailurePatch\(led\.failed\)/.test(tick) &&
+  /\(\(\{ status, stoppedAt, \.\.\.rest \}\) => rest\)\(ledgerFailurePatch\(led\.failed\)\)/.test(tick));
+check("⭐ …and needsAttention survives that strip — the money problem stays visible",
+  /needsAttention: true/.test(tick) || /ledgerUnrecorded/.test(tick));
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
 section("5 — 🚧 THE CREATE GATE, AND THE LIMITS OF WHAT IT MAY TOUCH");

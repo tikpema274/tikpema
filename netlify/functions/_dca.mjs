@@ -192,7 +192,18 @@ export const STATUS = {
 // working?" is answerable and a failure never reads as a success (the withdraw-reporting rule).
 export const OUTCOME = {
   SWAPPED: "swapped",                 // filled AND witnessed on-chain, tx recorded
-  PENDING_CONFIRM: "pending-confirm", // submitted; awaiting the on-chain witness (budget NOT yet spent)
+  PENDING_CONFIRM: "pending-confirm", // submitted; awaiting the on-chain witness. ⚠️ SINCE 2026-08-22
+                                      // the DAY CEILING *is* charged at this point (the other two
+                                      // counters are not) — the old "budget NOT yet spent" gloss
+                                      // was the defect unblock condition (1) closed.
+  PENDING_DROPPED: "pending-dropped", // a pending pointer retired WITHOUT ledgering, because the
+                                      // claim is unresolvable (no circleId — pre-refactor
+                                      // generation) or already resolved. ⭐ NOT a failure and NOT
+                                      // a fill: it is the SKIP half of "skip and report" for an
+                                      // entry whose outcome nobody can observe. It exists so that
+                                      // skip stops being silent — four real records on prod hit
+                                      // this branch and would otherwise have been mutated with no
+                                      // trace ([[absence-must-never-read-as-safe]]).
   SKIPPED_PAUSED: "skipped-paused",   // kill switch — normal, retry next period
   SKIPPED_CEILING: "skipped-ceiling", // yielded headroom to the user — normal, retry
   SKIPPED_CAPPED: "skipped-capped",   // per-tick now exceeds the swap cap — needs attention
