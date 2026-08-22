@@ -402,7 +402,7 @@ Written **at the constant**, not only here. **UN-GATE WHEN ALL FOUR HOLD:**
    every nav-less sibling has one (swap → MyAgentPanel; bridge → both; vault/nanopay → Dashboard).
    Un-gate without adding one and the result is **unlinked-by-omission with the defects fixed** —
    the gate reads as lifted and reachability has not changed at all. That is the state that hid the
-   22-day outage.
+   22-day outage. ⭐ **NOW ENFORCED** — see the guard below; it is not a thing anyone has to remember.
 
 ⚠️ **(4) WAS PREVIOUSLY A TRAILING SENTENCE, WHICH IS HOW IT WOULD HAVE BEEN LOST.** It is now a
 numbered condition at the constant. ⭐ And it had to move *there*: `App.tsx` and `DcaPanel.tsx` both
@@ -410,8 +410,48 @@ carry a re-link reminder, but those are VIEW files and the flag is flipped in `_
 can un-gate without opening either. A reminder one file away from the line that matters is the same
 distance as no reminder.
 
-⭐ **(1) and (2) are now DONE, so (3) and (4) are the whole remaining blocker** — and (4) is the one
-no code path, suite, or type error will ever mention.
+⭐ **(1) and (2) are now DONE, so (3) and (4) are the whole remaining blocker.**
+
+## ⭐⭐ AND (4) IS NOW A GUARD, NOT A REMINDER — `verify-dca-consent-copy.tsx` §6
+
+**RENDERED AND DRIVEN, NOT GREPPED.** It renders the Dashboard, walks the tree for controls,
+**invokes each `onClick` against a stubbed `window`**, and reads the navigation targets the
+component actually produces (11 controls → 11 targets today; `/dca` is not among them). So a
+renamed card, reworded copy, or a restructured JSX tree cannot break it — **only genuinely losing
+the route can.**
+
+⚠️ **THAT CHOICE IS NOT STYLISTIC.** Source-scan proxies went red on legitimate changes **twice this
+week**: the citation guard when the copy improved, and the `CREATE_GATED` proxy on a comment
+pointing at the real constant. Each time the property was intact and only the proxy was wrong, and
+each time the tempting fix was to edit the CODE to satisfy the guard. A proxy for a property is not
+the property.
+
+⭐⭐ **IT IS INERT WHILE GATED — SO IT HAD TO BE CALIBRATED, NOT JUST WRITTEN.** A guard whose whole
+life is spent green is uncalibrated, which is exactly the objection raised against the sweeper's
+DEGRADED path earlier the same day. Four control arms run on **every** invocation rather than as a
+one-off manual mutation that decays the moment it is done:
+
+| arm | asserts |
+|---|---|
+| **A** | a stub navigating elsewhere ⇒ detector reports **MISSING** |
+| **B** | a stub navigating to `/dca` ⇒ detector reports **PRESENT** — it can return both answers |
+| **C** | the Dashboard yields controls at all — **0 would make every verdict vacuous** |
+| **D** | **the guard**: if un-gated, the real Dashboard must reach `/dca` |
+
+⭐ **ARM C is the one that stops an absence reading as safe inside the detector itself.** If a
+refactor made the walk find nothing, every "does not reach `/dca`" answer would stay technically
+correct and completely meaningless.
+
+⭐⭐ **PROVEN IN BOTH DIRECTIONS, because "it goes red" is only half a calibration:**
+
+| mutation | result |
+|---|---|
+| `CREATE_GATED = false`, no card | ❌ **RED** — and it prints the actual target list, so the reader sees what is missing |
+| `CREATE_GATED = false`, card added to Dashboard | ✅ **GREEN** — the condition is satisfiable, not merely strict |
+| real state (`true`, no card) | ✅ **INERT**, and reports *"#/dca reachable: NO — condition (4) NOT yet satisfied"* |
+
+Both files were restored byte-identical afterwards. ⚠️ **A guard that can only ever fail is as
+useless as one that can only ever pass** — the second row is what rules that out.
 
 ## ⚠️ WHAT `dca-tick` DOES UNDER THE GATE — STATED, not inherited
 

@@ -195,6 +195,109 @@ check("⭐⭐ …and the gate states an UNBLOCK CONDITION at the constant itself
 check("⚠️ dca-tick's behaviour under the gate is STATED, not left as a side effect",
   /KEEPS\s*\n?\/\/ FILLING|KEEPS FILLING/.test(tick));
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("6 — ⭐⭐ UNBLOCK CONDITION (4): UN-GATING WITHOUT AN ENTRY POINT");
+// ═══ WHAT THIS GUARDS ════════════════════════════════════════════════════════════════════════
+// #/dca has never had a Dashboard card. Every nav-less sibling has one. Flip CREATE_GATED to
+// false without adding one and the result is unlinked-by-omission WITH THE DEFECTS FIXED — the
+// gate reads as lifted and reachability has not changed at all. That is the state that hid a
+// 22-day outage in this same surface. Condition (4) at the constant says so; this makes it FAIL
+// THE BUILD instead of relying on someone remembering.
+//
+// ⭐⭐ RENDERED + DRIVEN, NOT GREPPED. It does not look for a card in the source. It renders the
+// Dashboard, walks the tree for controls, INVOKES each onClick against a stubbed window, and reads
+// the navigation targets the component actually produces. So it survives a renamed card, reworded
+// copy, a restructured JSX tree, or the card moving between sections — it only fails when the
+// route genuinely cannot be reached. ⚠️ This repo has been bitten TWICE THIS WEEK by source-scan
+// proxies going red on legitimate changes (the citation guard on improved copy; the CREATE_GATED
+// proxy on a comment naming the real constant). A proxy for a property is not the property.
+//
+// ⭐⭐ AND IT IS INERT BY DESIGN — it asserts nothing while CREATE_GATED is true. A guard whose
+// whole life is spent green is UNCALIBRATED, which is the objection this session raised against
+// the sweeper's DEGRADED path. So the calibration is carried INSIDE every invocation (blobs-probe's
+// pattern), never as a one-off manual mutation that decays the moment it is finished:
+//
+//   ARM A  a stub that navigates elsewhere      -> the detector MUST report MISSING
+//   ARM B  a stub that navigates to /dca        -> the detector MUST report PRESENT
+//   ARM C  the detector found controls at all   -> 0 controls would make "no /dca" trivially true
+//   ARM D  THE GUARD: if un-gated, the REAL Dashboard must reach /dca
+//
+// ⚠️ ARM C is the one that keeps an ABSENCE from reading as SAFE in the detector itself. If a
+// future refactor made the walk find nothing, every "does not reach /dca" answer would still be
+// technically correct and completely meaningless.
+{
+  const { CREATE_GATED } = await import("../netlify/functions/_dca.mjs");
+
+  type NavProbe = { targets: string[]; controls: number };
+  const driveNav = (Component: any, props: any): NavProbe => {
+    const targets: string[] = [];
+    const prev = (globalThis as any).window;
+    (globalThis as any).window = {
+      location: { set hash(v: string) { targets.push(String(v)); }, get hash() { return ""; } },
+    };
+    try {
+      const handlers: Function[] = [];
+      const walk = (n: any) => {
+        if (n == null || typeof n !== "object") return;
+        if (Array.isArray(n)) { n.forEach(walk); return; }
+        const pr = (n as any).props;
+        if (!pr) return;
+        if (typeof pr.onClick === "function") handlers.push(pr.onClick);
+        if (pr.children !== undefined) walk(pr.children);
+      };
+      walk(Component(props));
+      for (const h of handlers) {
+        try { h({ preventDefault() {}, stopPropagation() {} }); } catch { /* a control that needs
+          more than a click cannot be a plain hash link — it is simply not an entry point */ }
+      }
+      return { targets, controls: handlers.length };
+    } finally { (globalThis as any).window = prev; }
+  };
+  // Accepts "/dca" and "#/dca": `go()` writes the former, a hand-written href the latter. Anchored
+  // and word-bounded so a future "/dca-something" route cannot satisfy condition (4) by accident.
+  const reaches = (p: NavProbe, route: string) =>
+    p.targets.some((t) => new RegExp(`^#?/${route}(?:[/?#]|$)`).test(t));
+
+  const Dashboard = (await import("../src/components/Dashboard")).default;
+  const dash = driveNav(Dashboard as any, { wallet });
+
+  // ── ARM A / ARM B — the detector's negative and positive controls ────────────────────────
+  const StubElsewhere = () => React.createElement("button",
+    { onClick: () => { (globalThis as any).window.location.hash = "/vault"; } }, "Vault");
+  const StubToDca = () => React.createElement("button",
+    { onClick: () => { (globalThis as any).window.location.hash = "/dca"; } }, "DCA");
+
+  check("⭐ ARM A — the detector reports MISSING on a surface that links elsewhere",
+    !reaches(driveNav(StubElsewhere, {}), "dca"));
+  check("⭐ ARM B — …and PRESENT on one that links to /dca — it can return both answers",
+    reaches(driveNav(StubToDca, {}), "dca"));
+
+  // ── ARM C — the detector is actually looking at something ────────────────────────────────
+  check("⭐⭐ ARM C — the Dashboard yields controls to drive; 0 would make every verdict vacuous",
+    dash.controls > 0, `${dash.controls} controls → ${dash.targets.length} nav targets`);
+  check("⭐ …and it resolves KNOWN entry points, so the walk reaches the real card grid",
+    reaches(dash, "vault") && reaches(dash, "bridge") && reaches(dash, "agents"));
+
+  // ── ARM D — THE GUARD ITSELF ─────────────────────────────────────────────────────────────
+  const reachable = reaches(dash, "dca");
+  if (CREATE_GATED) {
+    check("⭐⭐ INERT while gated — the guard asserts nothing until someone un-gates",
+      true, `CREATE_GATED=true · #/dca reachable from Dashboard: ${reachable ? "YES" : "NO — condition (4) NOT yet satisfied"}`);
+  } else {
+    // 🚨 THE MOMENT THIS MATTERS. CREATE_GATED is false, so new mandates are being accepted — and
+    // if the Dashboard cannot reach #/dca, the feature is live and unreachable, which is precisely
+    // the unlinked-by-omission state condition (4) exists to prevent.
+    check("🚨🚨 UN-GATED — the Dashboard MUST reach #/dca, or the feature is live and unreachable",
+      reachable, `targets: ${JSON.stringify(dash.targets)}`);
+  }
+
+  // The condition and this guard are two statements of one rule, so they are pinned to each other
+  // ([[duplicate-source-of-truth-is-the-recurring-bug]]): the numbering already drifted once, when
+  // a fourth condition was added under a heading that still said THREE.
+  check("⭐ the constant states condition (4) — the guard and the condition cannot drift apart",
+    /UN-GATE WHEN ALL FOUR HOLD/.test(dca) && /AN ENTRY POINT EXISTS/.test(dca));
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

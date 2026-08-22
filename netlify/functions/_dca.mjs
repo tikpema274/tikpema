@@ -64,6 +64,14 @@ import { budgetConfig, dcaDaySpend } from "./_budget.mjs";
 //      without adding a card and the result is unlinked-by-omission WITH THE DEFECTS FIXED: a
 //      surface nobody can reach, which is the exact state that hid the 22-day outage. The gate
 //      would read as lifted and the reachability would not have changed at all.
+//      ⭐ ENFORCED, NOT REMEMBERED: verify-dca-consent-copy.tsx §6 renders the Dashboard, invokes
+//      its controls against a stubbed window, and reads the navigation targets they produce. It
+//      is INERT while this flag is true and FAILS THE BUILD the moment it is false without a card
+//      — so (4) cannot be satisfied by intention. ⚠️ THE DASHBOARD SPECIFICALLY: a MyAgentPanel
+//      card is welcome as well, but is NOT sufficient and will not clear the guard. The Dashboard
+//      is the landing surface, and it is where vault, nanopay and bridge all place theirs.
+//      ⭐ It asserts on RENDERED NAVIGATION, never on source text, so renaming the card, rewording
+//      its copy, or restructuring the JSX cannot break it — only genuinely losing the route can.
 //
 // ⚠️ (4) IS THE ONE MOST LIKELY TO BE FORGOTTEN, AND UNTIL NOW IT WAS NOT WRITTEN WHERE THE FLIP
 // HAPPENS. App.tsx and DcaPanel.tsx once FALSELY claimed the route was "reached from the swap
