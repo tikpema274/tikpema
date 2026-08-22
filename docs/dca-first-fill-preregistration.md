@@ -299,3 +299,60 @@ day→0.10 · dca-day→0.10 · spentAmount→0.10 · audit rows→2 · `charged
 🚨 **`chargedIds` absent still means Branch A, and Branch A still means condition (1) UNEXERCISED.**
 A second clean fill is a second observation of the pre-existing path, not a second piece of
 evidence for the new one. Two of them are not more evidence than one.
+
+---
+
+## 8. RESULT — fills 2 and 3, and the mandate's clean termination
+
+| | fill 1 | fill 2 | fill 3 |
+|---|---|---|---|
+| time | 17:12:06Z | 19:09:03Z | 20:00:48Z |
+| period | 496505 | **496507** | 496508 |
+| branch | A (confirmed inline) | A | A |
+| circleId | `904ee95c…` | `71974c14…` | `309cf1f8…` |
+| day | 0.05 | 0.10 | **0.15** |
+| dca-day | 0.05 | 0.10 | **0.15** |
+| spentAmount | 0.05 | 0.10 | **0.15** |
+| audit rows | 1 | 2 | **3** — all `confirmation:"confirmed"` |
+| `chargedIds` | absent | absent | **absent** |
+
+Every pre-registered value matched on all three fills. `data-budget` 216 → 217 → 218: exactly one
+new audit row per fill, counters updated in place. Deltas exactly 0.05, no rounding. No abort
+condition fired at any point; `errors 0` on every tick throughout.
+
+**Q1 confirmed twice.** Period **496506 was skipped entirely** (the wedge spanned it) and never
+made up, and fill 2 fired at **19:09 — mid-period, on the first healthy tick**, not at a boundary.
+Exactly what `evaluate()`'s inequality gate predicted.
+
+**§7's terminal prediction confirmed.** Fill 3 exhausted the budget, and on the next tick:
+`status` `active` → **`complete`**, `closedAt` `2026-08-22T20:02:04.678Z`, `lastReason`
+**"total budget spent"**, heartbeat `terminal=1`. Not at the next hourly boundary — ~76 s later,
+because `evaluate()` is re-run every tick. Steady state now `total=8 inactive=8 scanned=0`.
+
+⭐ **NO BUDGET BREACH.** Three fills, 0.15 of 0.15, and the mandate closed itself rather than
+being stopped. `remaining + 1e-9 < perTickAmount` is what ended it — the budget, not the clock.
+
+### ⭐⭐ THE CLAIM GUARD WAS SEEN DOING ITS JOB, UNDER A REAL STALE READ
+
+The 20:01:02 tick reported `already-recorded-this-period`. That outcome comes from step 6's claim
+guard — which means `evaluate()` had returned **due**, on a mandate that had already filled
+seconds earlier. It read a STALE mandate (Blobs reads are eventually consistent) showing
+`spentAmount 0.10` and `lastFilledPeriod 496507`, concluded a fill was owed, and was stopped by
+the fill claim written before the swap.
+
+🚨 **Without that guard this would have been a double-fill of a real mandate**, on the exact
+period it had just filled. The same eventual-consistency effect showed up twice more the same
+day: it produced the false idempotency pass on the draft, and it made the 20:03 tick re-apply the
+terminal transition (harmlessly — writing `complete` twice is idempotent). ⭐ Three sightings of
+one mechanism in one session, and the only one that could have cost money was caught by a guard
+written before anyone had seen it happen.
+
+### 🚨 AND CONDITION (1) IS STILL UNEXERCISED — THREE FOR THREE
+
+All three fills confirmed inline, so `executeAction`'s own post-confirm `ledger()` did the day
+charge every time and the submit-time branch **never ran**. `chargedIds` absent on all three is
+the proof, and it was named as the tell in §1 before any fill happened.
+
+⭐ Three clean fills are three observations of the pre-existing path. They are not evidence for
+the new one, and the mandate is now `complete` — so this validation set is spent without ever
+reaching Branch B, exactly as §5 said it might.
