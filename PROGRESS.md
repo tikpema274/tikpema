@@ -1,5 +1,111 @@
 ---
 
+# ⭐⭐⭐ A GUARD CAUGHT A REAL DOUBLE-SPEND ON ITS FIRST LIVE EXPOSURE
+
+**2026-08-22, 20:01:02Z.** The tick logged `already-recorded-this-period` against mandate
+`61c2cce9`. That outcome is reachable **only after `evaluate()` has returned DUE** — so the tick
+had decided a fill was owed, on a mandate that had filled **13 seconds earlier**.
+
+It had read a **stale** mandate: `spentAmount 0.10`, `lastFilledPeriod 496507` — the values from
+*before* fill 3. Netlify Blobs reads are eventually consistent. Everything downstream of that read
+was correct reasoning on wrong data, and it was heading for a second 0.05 USDC swap on the period
+that had just been filled.
+
+**What stopped it was the fill claim, written to a different store BEFORE the swap.** Step 6:
+
+```js
+// If a claim already exists and is NOT still "claimed" … another invocation already
+// acted on this period → skip (no double-spend, no double-submit).
+```
+
+⭐⭐⭐ **The guard was written before anyone had observed the failure it prevents.** Its comment
+argues from first principles about concurrent invocations; it had never fired in anger. On the
+first live mandate to run to completion, it earned itself.
+
+⚠️ **And the near-miss is invisible in the money.** Counters read 0.15 of 0.15, three audit rows,
+no breach — the successful outcome and the prevented-disaster outcome are **the same numbers**.
+The only trace is one outcome string in one heartbeat. A guard that works leaves no evidence that
+it was needed, which is exactly why the outcome had to be named and logged rather than skipped
+silently.
+
+---
+
+# ⭐⭐ THE THREE EVENTUAL-CONSISTENCY SIGHTINGS ARE **ONE** FINDING
+
+Three shapes in one day, one substrate. Recording them as one, because filed separately they read
+as three unrelated oddities and the pattern is the point.
+
+| # | where | shape | cost |
+|---|---|---|---|
+| 1 | draft idempotency test | re-armed pointer not yet visible → the tick **skipped**, and "counter unchanged" read as **idempotency working** | a **false PASS** — nearly reported a fix as proven |
+| 2 | prod, 20:01:02 | stale mandate → `evaluate()` returned DUE 13 s after a fill | **a real double-spend**, caught by the claim guard |
+| 3 | prod, 20:03 | stale mandate → terminal transition **re-applied** | none — writing `complete` twice is idempotent |
+
+⭐ **THE RULE, stated so it outlives the incidents:**
+
+> **Anything that reads a record and then acts on it must assume the read is stale. Write the
+> claim BEFORE the act, in a store the act does not depend on, and let the claim — not the read —
+> decide whether to proceed.**
+
+The three differ only in what sat downstream of the stale read: an assertion (harmless but
+misleading), **a spend** (costly), an idempotent write (free). ⚠️ You cannot tell which one you
+have by looking at the read. So the guard cannot be applied selectively to the "important" paths —
+sighting #1 looked harmless and was the one that nearly corrupted the record of the work.
+
+⭐ Corollary, from sighting #1: **a counter that did not move proves nothing until something
+proves the code executed.** The discriminator there was `recentOutcomes` — one entry means it never
+ran, two means it ran twice. Always hold a witness that the code *ran*, separate from the value it
+was supposed to change.
+
+---
+
+# 📋 UNBLOCK CONDITION (1) CLOSES AS: **suite-and-draft-proven, LIVE-UNEXERCISED**
+
+Not "proven". The distinction is the whole point of the pre-registration.
+
+**What IS proven:**
+* **Suite** — `test:pendingspend` §7/§8 drive the real primitive: charge, re-charge, reverse,
+  re-charge-after-reverse. Negative-tested against two mutations (removing the membership test →
+  5 red; letting a suppressed charge append → 2 red).
+* **Draft, on real infrastructure** — the reconcile path, the status guard, and **`chargedIds`
+  idempotency against real Netlify Blobs CAS**: two reconciles of one fill left the day ceiling at
+  0.05 and wrote **one** audit row, while `dca-day` and `spentAmount` doubled (pre-existing, and
+  documented at the call site).
+* **Prod** — the reconcile-above-ACTIVE-gate ran on four real stranded orphans and on a synthetic
+  one under the live schedule, moving **zero** money.
+
+**What is NOT proven:** the submit-time charge itself has **never executed in production**.
+
+Three fills, three Branch A. `chargedIds` **absent on all three** — the tell named in §1 of
+`docs/dca-first-fill-preregistration.md` *before* any fill happened. `executeAction`'s own
+post-confirm `ledger()` did the day charge every time; the new branch never ran.
+
+🚨 **Three clean fills are three observations of the PRE-EXISTING path.** They are not evidence for
+the new one, and counting them would be the exact failure the pre-registration was written to
+prevent: a true observation offered for a claim it does not support.
+
+## THE TRIGGER, NAMED
+
+> **Any future fill showing `lastOutcome: pending-confirm` is the real Branch B.** It gets the full
+> table from §1 — at submit *and* again after the next tick's reconcile:
+> at submit `day +P` **with `chargedIds:[circleId]`**, `dca-day` and `spentAmount` **unchanged**,
+> one row `confirmation:"submitted"`; after reconcile `day` **unchanged**, the other two `+P`,
+> **still one row**.
+
+Branch B needs an inline-confirm timeout (>60 s) and Arc confirms in 2–3 s, so it is uncommon
+rather than impossible — it happened four times in July. ⚠️ Inducing it was **considered and
+refused**: it requires a second tick invoker alongside the `* * * * *` scheduler, and the claim
+guard is documented as adequate for *"one cron invoker per minute"*. The induction would have
+manufactured sighting #2 deliberately — the very defect this session watched a guard prevent.
+
+## STATE AT CLOSE
+
+DCA is un-gated and live. One mandate ran a full lifecycle: create → 3 fills → **self-terminate**
+(`complete`, "total budget spent", 0.15 of 0.15). No budget breach; the budget ended it, not the
+clock. Prod steady at `total=8 inactive=8 scanned=0 deferred=0 wedged=0 errors=0`.
+
+The watch is retired: no processes, no crons, nothing scheduled, nothing left in the repo.
+
 # 🚨 THE DCA GATE STAYS — (4) IS DONE, (1) IS HALF, AND THE HALF THAT IS MISSING IS THE DCA ONE
 
 **2026-08-22.** Asked to add the Dashboard card and un-gate on all four conditions. **The card is
