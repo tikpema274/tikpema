@@ -161,7 +161,11 @@ import { budgetConfig, dcaDaySpend } from "./_budget.mjs";
 //     and refusing to honour it would be the gate reaching past its purpose (and would strand a
 //     schedule the user can still see but no longer have served). Zero ACTIVE mandates exist as
 //     of 2026-08-21, so nothing is affected today — the rule is written for the case where one is.
-export const CREATE_GATED = true;
+// ⭐ UN-GATED 2026-08-22, all four conditions MET (see above). The gate stood from 2026-08-21.
+// ⚠️ The unblock condition, the guard that enforces (4), and the scope note below all stay — this
+// flag flipping is not permission to delete the reasoning that produced it. Flip it BACK to true
+// if any of the four stops holding; the conditions are the standing bar, not a one-time hurdle.
+export const CREATE_GATED = false;
 
 export const MANDATE_STORE = "dca-mandates";
 export const FILLS_STORE = "dca-fills";       // idempotency claims + per-fill audit

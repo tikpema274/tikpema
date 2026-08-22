@@ -607,7 +607,11 @@ export async function handler(event) {
       // SwapPendingConfirm carrying the authoritative circleId. This is NOT a failure — a slow-but-real fill
       // must never be abandoned un-ledgered. Persist the claim with the circleId + the fill value (so the
       // reconcile can advance all three ledgers on confirm), mark PENDING_CONFIRM, and let next tick's
-      // ID-reconcile poll getTransaction({id}). NOTHING is ledgered here (nothing confirmed yet). ──
+      // ID-reconcile poll getTransaction({id}).
+      // ⚠️ THIS HEADER USED TO END "NOTHING is ledgered here (nothing confirmed yet)". THAT IS NO
+      // LONGER TRUE and it described the exact defect unblock condition (1) closed: the DAY CEILING
+      // is now charged HERE, at submit. dca-day and spentAmount are still confirm-gated, so "nothing
+      // confirmed yet" remains the right instinct for those two — but not for the ceiling. ──
       if (threw?.name === "SwapPendingConfirm") {
         // ── 1. JOURNAL COMMIT (design §1.2). The claim carrying the authoritative circleId is
         //    written BEFORE the charge, so a crash between the two leaves a record naming exactly
