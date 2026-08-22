@@ -280,6 +280,21 @@ export async function handler(event) {
       // in the fail-OPEN direction.
       // Both ledgers, failures CAPTURED not swallowed. Order preserved: the DCA sub-ledger first,
       // then the day ceiling — the one whose loss widens the global cap.
+      // ── ⚠️ MEASURED ON A DRAFT 2026-08-22 — THE THREE COUNTERS ARE NOT EQUALLY PROTECTED ──────
+      // A re-reconcile of the SAME fill (which happens when a tick crashes between these writes and
+      // the patch below, leaving pendingPeriod set) was driven twice against real Netlify Blobs:
+      //     day ceiling  0.05 -> 0.05   ⭐ SUPPRESSED by chargeId, and only ONE audit row was written
+      //     dca-day      0.05 -> 0.10   doubled
+      //     spentAmount  0.05 -> 0.10   doubled
+      // 🚨 SO DO NOT READ `chargeId` AS "THE RECONCILE IS IDEMPOTENT". Only the DAY CEILING is.
+      // The doubling of the other two PRE-DATES this change — the note below has always said a
+      // re-reconcile "re-applies whichever write succeeded" — and its direction is over-count,
+      // i.e. narrowing, which is the safe one. It is recorded here because adding idempotency to
+      // ONE of three counters makes the other two look protected by association, and the next
+      // reader would have no reason to check.
+      // ⭐ Closing it means giving recordDcaSpend and the mandate patch the same id-membership
+      // treatment — NOT moving them to submit time, which is the pairing the _budget.mjs
+      // precondition forbids without triple-semantics reversal first.
       const led = await runLedgerWrites([
         ["recordDcaSpend", () => recordDcaSpend({ owner: m.walletAddress, amountUsdc: fillValueUsdc, at: now })],
         // ⭐⭐ `chargeId` — SINCE 2026-08-22 THIS IS USUALLY A NO-OP, AND THAT IS THE POINT. The
