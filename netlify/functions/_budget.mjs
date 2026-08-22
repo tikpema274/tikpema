@@ -473,11 +473,55 @@ export async function recordSpend({
   return { jobSpentUsdc: jRec.spentUsdc, daySpentUsdc: dRec.spentUsdc, allowanceUsdc };
 }
 
-// ── Record a REFUSED purchase (no spend; audit only) ──────────────────────────
+// ── ⭐⭐ REFUSAL REASON CODES — the structured half of "it tried, and the cap stopped it" ──────
+//
+// `reason` is prose for a human. `code` is the same fact as DATA: stable, enumerable, and
+// aggregatable, so "how often does the day ceiling stop us?" is a filter rather than a grep over
+// English that changes whenever the copy improves.
+//
+// ⭐ ADOPTED FROM CIRCLE'S SUBSTRATE (evaluated 2026-08-22), which is stronger than what was here:
+// their DENIED is a first-class TERMINAL STATE carrying an `errorReason` enum, filterable
+// (`--state denied`) and webhook-notified. We already had the record and the UI; what we lacked was
+// the enum. ⚠️ We deliberately did NOT take their model wholesale — see
+// [[circle-agent-wallets-vs-tikpema]]: their spending policies are mainnet-only and their budget
+// reversal is undocumented. This is the one piece worth having, and it is adoptable on its own.
+//
+// ⚠️ ADDITIVE AND OPTIONAL. Entries written before this existed carry no `code`, and callers that
+// pass none still work — a missing code means "unclassified", never "no refusal".
+export const REFUSAL = {
+  NO_WALLET:        "REFUSED_NO_WALLET",        // no agent wallet resolved for the caller
+  PAUSED:           "REFUSED_PAUSED",           // the agent's kill switch is on
+  SHAPE:            "REFUSED_SHAPE",            // the step failed validation
+  PER_TX_CAP:       "REFUSED_PER_TX_CAP",       // over the per-transaction limit
+  PER_BRIDGE_CAP:   "REFUSED_PER_BRIDGE_CAP",   // over the per-bridge limit
+  PER_VAULT_CAP:    "REFUSED_PER_VAULT_CAP",    // over the per-vault-deposit limit
+  PER_SWAP_CAP:     "REFUSED_PER_SWAP_CAP",     // over the per-swap limit
+  DAY_CEILING:      "REFUSED_DAY_CEILING",      // over the rolling daily ceiling
+  JOB_ALLOWANCE:    "REFUSED_JOB_ALLOWANCE",    // over the per-job data allowance
+  ABSOLUTE_CEILING: "REFUSED_ABSOLUTE_CEILING", // over the absolute per-purchase ceiling
+  CANNOT_VALUE:     "REFUSED_CANNOT_VALUE",     // the step could not be priced — fail-closed
+  CANNOT_READ:      "REFUSED_CANNOT_READ",      // a balance or contract read failed — fail-closed
+  UNCONFIRMED:      "REFUSED_UNCONFIRMED",      // submitted but not witnessed; NOT a "did not happen"
+  DISCLOSURE:       "REFUSED_DISCLOSURE",       // a required disclosure gate was not satisfied
+  UNKNOWN_STEP:     "REFUSED_UNKNOWN_STEP",     // unrecognised step type
+};
+
+// ── Record a REFUSED action (no spend; audit only) ────────────────────────────
 // A refusal is as much a part of the record as a spend — "your agent tried to buy X and the
 // cap stopped it" is exactly what the Agents page should show.
+//
+// 🚨 IT WRITES NO COUNTER, AND THAT IS THE POINT. A refusal spent nothing, so nothing may advance:
+// `agentBreakdown` reads `allowed:false` into its `blocked` tally and never adds `amountUsdc` to
+// `spentUsdc`. `amountUsdc` is carried anyway because "tried to send 30, cap is 25" is the useful
+// half of the record — the number is EVIDENCE here, not a debit.
+//
+// ⚠️ AND THE STEP-8 SWEEPER MUST NEVER SEE IT AS AN OPEN CHARGE. `listUnresolvedCharges` selects on
+// `confirmation === "submitted"`; a refusal carries no `confirmation`, so it is filtered out. That
+// is load-bearing rather than incidental — pinned by an assertion in the suite, because a refusal
+// mistaken for an open charge would be handed to a reverser that could credit budget for a spend
+// that never happened.
 export async function recordBlocked({
-  jobId, amountUsdc, source, reason, store, at, owner, agent = AGENT.RESEARCHER,
+  jobId, amountUsdc, source, reason, code, store, at, owner, agent = AGENT.RESEARCHER,
 }) {
   const s = pickStore(store);
   await appendAudit(s, {
@@ -486,6 +530,7 @@ export async function recordBlocked({
     amountUsdc: round6(amountUsdc),
     source,
     reason,
+    ...(code ? { code } : {}), // conditional: absent => unclassified, never a fabricated code
     allowed: false,
   });
   return { logged: true };

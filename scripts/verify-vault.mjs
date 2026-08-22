@@ -27,8 +27,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); // space the RPC-he
 // the REAL public RPC (read-only) — untouched by these mocks.
 let signed = false;
 mock.module("../netlify/functions/_pause.mjs", { namedExports: { assertNotPaused: async () => null } });
+const realBudget = await import("../netlify/functions/_budget.mjs");
 mock.module("../netlify/functions/_budget.mjs", {
   namedExports: {
+    // ⭐⭐ SPREAD, NOT ENUMERATED — APPLIED 2026-08-22 AFTER THIS BROKE A SECOND TIME.
+    // The warning below was written when `shoutLedgerFailure` broke this suite, and it named the
+    // fix: spread the real module. The advice was recorded and NOT ACTED ON, so adding `REFUSAL`
+    // broke it again the same way. ⚠️ A hand-listed `namedExports` silently pins the real module's
+    // export list; the failure surfaces as a SyntaxError in an unrelated file
+    // ([[duplicate-source-of-truth-is-the-recurring-bug]]). Only the doubles are overridden below.
+    ...realBudget,
     canSpendDay: async () => ({ allowed: true }),
     recordAgentSpend: async () => {},
     // ⚠️ ENUMERATED MOCKS PIN THE MODULE'S EXPORT LIST AS A SIDE EFFECT. Adding

@@ -12,7 +12,7 @@
 // not just read.
 
 import { exaSearch } from "./_exa.mjs";
-import { canSpend, recordSpend, recordBlocked } from "./_budget.mjs";
+import { canSpend, recordSpend, recordBlocked, REFUSAL } from "./_budget.mjs";
 import { AGENT } from "./_agents.mjs";
 import { assertNotPaused } from "./_pause.mjs";
 import { payX402, fetchX402Requirements } from "./_x402.mjs";
@@ -417,7 +417,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     const ceiling = dataBuyCeilingUsdc();
     if (amountUsdc > ceiling) {
       console.warn(`[research] advertised ${amountUsdc} exceeds absolute per-buy ceiling ${ceiling} USDC (NO buy)`);
-      await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: `absolute ceiling: ${amountUsdc} > ${ceiling} USDC`, store });
+      await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: `absolute ceiling: ${amountUsdc} > ${ceiling} USDC`, code: REFUSAL.ABSOLUTE_CEILING, store });
       mark(outcome, "CEILING", `advertised ${amountUsdc} USDC exceeds the absolute per-buy ceiling of ${ceiling} USDC`);
       return [];
     }
@@ -431,7 +431,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     const paused = await assertNotPaused({ owner, agent: AGENT.RESEARCHER });
     if (paused) {
       console.log(`[research] PAUSED: ${paused}`);
-      await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: paused, store });
+      await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: paused, code: REFUSAL.PAUSED, store });
       mark(outcome, "PAUSED", `the Researcher is paused: ${paused}`);
       return [];
     }
@@ -439,7 +439,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     const gate = await canSpend({ jobId, jobPriceUsdc: jobPrice, amountUsdc, store, owner });
     if (!gate.allowed) {
       console.log(`[research] budget BLOCKED: ${gate.reason}`);
-      await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: gate.reason, store });
+      await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: gate.reason, code: gate.code ?? REFUSAL.JOB_ALLOWANCE, store });
       mark(outcome, "BUDGET", `the per-job budget refused it: ${gate.reason}`);
       return [];
     }

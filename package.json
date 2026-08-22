@@ -63,7 +63,8 @@
     "test:pendingspend": "node --experimental-test-module-mocks scripts/verify-pending-spend-ledgered.mjs",
     "test:sweepdisarmed": "node --experimental-test-module-mocks scripts/verify-sweep-reverse-disabled.mjs",
     "test:sweepdegraded": "node --experimental-test-module-mocks scripts/verify-sweep-degraded.mjs",
-    "test:wedge": "node --experimental-test-module-mocks scripts/verify-blobs-handle-wedge.mjs"
+    "test:wedge": "node --experimental-test-module-mocks scripts/verify-blobs-handle-wedge.mjs",
+    "test:refusals": "node --experimental-test-module-mocks scripts/verify-refusal-visibility.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -95,6 +96,7 @@
     "test:sweepdisarmed",
     "test:sweepdegraded",
     "test:wedge",
+    "test:refusals",
     "test:ub",
     "test:research",
     "test:bridge",

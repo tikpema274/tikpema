@@ -5,7 +5,7 @@ import { agentPay } from "./_pay.mjs";
 import { agentBridge, bridgeFee, resolveDestination, bridgeFeeBand, bridgeAckToken } from "./_bridge.mjs";
 import { resolveVault, inspectVault, gateDeposit, applyReportDisclosure, vaultDeposit, vaultWithdraw, readShareBalance } from "./_vault.mjs";
 import { vaultDdReport } from "./_vault-report.mjs";
-import { canSpendDay, recordAgentSpend, shoutLedgerFailure } from "./_budget.mjs";
+import { canSpendDay, recordAgentSpend, shoutLedgerFailure, recordBlocked, REFUSAL } from "./_budget.mjs";
 import { AGENT } from "./_agents.mjs";
 import { assertNotPaused } from "./_pause.mjs";
 
@@ -99,14 +99,63 @@ export function validateStepShape(step) {
 // private, while agent-send.mjs kept the silent `.catch(() => {})` this helper exists to replace —
 // a remedy only one call site could reach. It now sits beside the ledger it reports on.
 
+// The step's face amount, for the REFUSAL RECORD only — never a counter input. Best-effort by
+// design: a step refused BECAUSE it could not be valued has no trustworthy amount, and 0 is the
+// honest answer there rather than a guess.
+const amountOfStep = (step) => {
+  const n = Number(step?.amountUsdc ?? step?.amountIn ?? step?.payAmountUsdc);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+};
+
 export async function executeAction(step, ctx) {
   const { walletAddress, store } = ctx;
+  // ⚠️ THE ONE REFUSAL THAT IS NOT RECORDED, AND IT IS NOT AN OVERSIGHT. The audit trail is keyed
+  // BY OWNER, and this branch fires precisely because there is no owner to key it to. Recording it
+  // under a placeholder would put an unattributable row in someone's trail or invent a bucket
+  // nobody reads. There is also no user session to show it to — this is a caller-wiring bug, not a
+  // policy refusal. ⭐ Left as a plain return DELIBERATELY, and labelled, so the next reader does
+  // not "fix" the inconsistency by fabricating an owner. See REFUSAL.NO_WALLET, which exists for
+  // any future caller that DOES know the owner and can attribute it.
   if (!walletAddress) return { ok: false, blocked: "no agent wallet resolved for this caller" };
 
   // Which agent's kill switch governs this step. vault_* steps are the VAULT agent's; everything
   // else is the EXECUTOR's. So pausing the Vault agent stops vault deposits without touching the
   // Executor, and vice-versa (each agent honours its OWN switch — see _agents.mjs / _pause.mjs).
   const stepAgent = String(step?.type || "").startsWith("vault_") ? AGENT.VAULT : AGENT.EXECUTOR;
+
+  // ── ⭐⭐ EVERY REFUSAL BELOW IS RECORDED, NOT JUST RETURNED ───────────────────────────────────
+  // Until 2026-08-22 executeAction refused by returning `{ok:false, blocked}` and writing NOTHING.
+  // The refusal was enforced and then EVAPORATED: unless the caller happened to be watching the
+  // response, "your agent tried to move money and a cap stopped it" left no trace anywhere.
+  //
+  // 🚨 AND THE WHOLE OBSERVABILITY CHAIN WAS ALREADY BUILT AND DARK FOR THIS PATH. recordBlocked
+  // existed; agentBreakdown already tallied `blocked` and already excluded refusals from
+  // `spentUsdc`; agents.mjs already shipped `blockedToday` and an `activity` trail whose comment
+  // says "Includes REFUSALS"; AgentsPanel already rendered "N refused" and the reason line. The
+  // RESEARCHER produced those records. The EXECUTOR — the agent that moves the user's money —
+  // never did. ⚠️ So the executor's `blockedToday` could only ever read 0, which looks like
+  // "nothing was refused" and meant "nothing is measured".
+  //
+  // ⭐ ONE CHOKE POINT, NOT FOURTEEN CALL SITES. There are fourteen refusal returns in this
+  // function; recording at each would guarantee a missed one and drift
+  // ([[duplicate-source-of-truth-is-the-recurring-bug]]). Same rule as the dry-run fix: gate at
+  // the WRITE, not at each caller.
+  //
+  // 🚨 A FAILED RECORD MUST NEVER BECOME AN ALLOW. The refusal has already been decided; writing
+  // it down is observability. So the write is caught and swallowed, and the refusal is returned
+  // either way. The inverse — letting a logging failure propagate — would turn an audit-store
+  // hiccup into a money-moving action.
+  const refuse = async (code, blocked, extra = {}) => {
+    try {
+      await recordBlocked({
+        owner: walletAddress, agent: stepAgent, source: String(step?.type ?? "unknown"),
+        amountUsdc: Number(extra.amountUsdc ?? amountOfStep(step) ?? 0),
+        reason: blocked, code, store,
+      });
+    } catch { /* enforcement already happened; observability must not undo it */ }
+    const { amountUsdc, ...rest } = extra; // amountUsdc is for the RECORD, not the caller's shape
+    return { ok: false, blocked, ...rest };
+  };
   // A RECLAIM returns the user's funds — it must never be blocked by a pause. Same principle as
   // agent-withdraw: pause/cap bind what an agent may SPEND, never what the user may RECLAIM, so a
   // paused Vault agent cannot trap funds inside the vault. vault_withdraw redeems shares back to
@@ -122,11 +171,11 @@ export async function executeAction(step, ctx) {
   // Fail-closed: if the switch cannot be READ, _pause.mjs returns a reason and we refuse.
   if (!isReclaim) {
     const paused = await assertNotPaused({ owner: walletAddress, agent: stepAgent });
-    if (paused) return { ok: false, blocked: paused };
+    if (paused) return refuse(REFUSAL.PAUSED, paused);
   }
 
   const shapeErr = validateStepShape(step);
-  if (shapeErr) return { ok: false, blocked: shapeErr };
+  if (shapeErr) return refuse(REFUSAL.SHAPE, shapeErr);
 
   // ── RECLAIM: vault_withdraw returns funds to the SCA — no cap, no day-ceiling, no ledger-as-
   // spend (a reclaim is not a spend). Handled here, before all the spend machinery below. Shape
@@ -142,7 +191,7 @@ export async function executeAction(step, ctx) {
     } catch (e) {
       // FAIL CLOSED: a balance we could not read is NOT treated as zero and NOT redeemed. Nothing
       // signs. (readShareBalance throws only on read failure; a genuine zero returns 0n below.)
-      return { ok: false, blocked: `could not read your on-chain share balance — withdraw not attempted (${e.message})` };
+      return refuse(REFUSAL.CANNOT_READ, `could not read your on-chain share balance — withdraw not attempted (${e.message})`);
     }
     if (bal.raw <= 0n) {
       // Genuinely no shares → "nothing to reclaim". Not an error, not a redeem(0); a clean no-op the
@@ -157,7 +206,7 @@ export async function executeAction(step, ctx) {
     // delta). An unproven reclaim is an honest failure carrying its reason — never a fabricated
     // amount. The caller surfaces `blocked` to the user.
     if (!wd.confirmed) {
-      return { ok: false, blocked: wd.reason, unconfirmed: true, withdrawHash: wd.withdrawHash ?? null };
+      return refuse(REFUSAL.UNCONFIRMED, wd.reason, { unconfirmed: true, withdrawHash: wd.withdrawHash ?? null });
     }
     return { ok: true, kind: "vault_withdraw", vault: vw.key, reclaimed: true, ...wd };
   }
@@ -168,7 +217,7 @@ export async function executeAction(step, ctx) {
   if (step.type === "transfer_usdc") {
     const cap = sendCapUsdc();
     if (Number(step.amountUsdc) > cap) {
-      return { ok: false, blocked: `exceeds per-transaction limit of ${cap} USDC` };
+      return refuse(REFUSAL.PER_TX_CAP, `exceeds per-transaction limit of ${cap} USDC`);
     }
   }
 
@@ -178,7 +227,7 @@ export async function executeAction(step, ctx) {
   if (step.type === "bridge_usdc") {
     const bcap = bridgeCapUsdc();
     if (Number(step.amountUsdc) > bcap) {
-      return { ok: false, blocked: `exceeds per-bridge limit of ${bcap} USDC` };
+      return refuse(REFUSAL.PER_BRIDGE_CAP, `exceeds per-bridge limit of ${bcap} USDC`);
     }
   }
 
@@ -189,7 +238,7 @@ export async function executeAction(step, ctx) {
   if (step.type === "vault_deposit") {
     const vcap = vaultDepositCapUsdc();
     if (Number(step.amountUsdc) > vcap) {
-      return { ok: false, blocked: `exceeds per-vault-deposit limit of ${vcap} USDC` };
+      return refuse(REFUSAL.PER_VAULT_CAP, `exceeds per-vault-deposit limit of ${vcap} USDC`);
     }
   }
 
@@ -207,7 +256,7 @@ export async function executeAction(step, ctx) {
   try {
     dayValue = await valueOfStep(step);
   } catch (e) {
-    return { ok: false, blocked: `cannot value step: ${e.message}` };
+    return refuse(REFUSAL.CANNOT_VALUE, `cannot value step: ${e.message}`);
   }
 
   // Per-SWAP cap. Unlike send/bridge (checked above, before valuation), this MUST run here —
@@ -221,10 +270,11 @@ export async function executeAction(step, ctx) {
   if (step.type === "swap_tokens") {
     const scap = swapCapUsdc();
     if (dayValue > scap) {
-      return {
-        ok: false,
-        blocked: `exceeds per-swap limit of ${scap} USDC (${Number(step.amountIn)} ${String(step.tokenIn).toUpperCase()} ≈ ${dayValue.toFixed(2)} USDC)`,
-      };
+      return refuse(
+        REFUSAL.PER_SWAP_CAP,
+        `exceeds per-swap limit of ${scap} USDC (${Number(step.amountIn)} ${String(step.tokenIn).toUpperCase()} ≈ ${dayValue.toFixed(2)} USDC)`,
+        { amountUsdc: dayValue },
+      );
     }
   }
 
@@ -232,7 +282,7 @@ export async function executeAction(step, ctx) {
   // resolved), so one user's spend never blocks another's. The gate and the
   // ledger below MUST use the same owner (walletAddress) to read/write one bucket.
   const day = await canSpendDay({ amountUsdc: dayValue, store, owner: walletAddress });
-  if (!day.allowed) return { ok: false, blocked: day.reason };
+  if (!day.allowed) return refuse(REFUSAL.DAY_CEILING, day.reason, { amountUsdc: dayValue });
 
   // On any successful spend below, ledger it against today's ceiling + audit. Attributed to the
   // agent that acted (VAULT for a vault deposit, EXECUTOR otherwise) — not hardcoded, so the
@@ -356,7 +406,7 @@ export async function executeAction(step, ctx) {
     try {
       fee = await bridgeFee({ amountUsdc: amount, cctpDomain: dest.cctpDomain });
     } catch (e) {
-      return { ok: false, blocked: `cannot price bridge to ${dest.label}: ${e.message}` };
+      return refuse(REFUSAL.CANNOT_VALUE, `cannot price bridge to ${dest.label}: ${e.message}`);
     }
     if (fee.maxFee >= fee.amountMinor) {
       return {
@@ -469,7 +519,7 @@ export async function executeAction(step, ctx) {
     try {
       inspection = await inspectVault(v.address);
     } catch (e) {
-      return { ok: false, blocked: `cannot inspect vault ${v.label}: ${e.message}` };
+      return refuse(REFUSAL.CANNOT_READ, `cannot inspect vault ${v.label}: ${e.message}`);
     }
     // ⭐ THE DISCLOSURE IS ESTABLISHED FROM THE DD REPORT, at execute time, on a FRESH read — the
     // same discipline the re-inspection already followed. A report fetched when the user was
@@ -477,12 +527,12 @@ export async function executeAction(step, ctx) {
     // ⚠️ A null report BLOCKS inside applyReportDisclosure; that decision is not duplicated here.
     inspection = applyReportDisclosure(inspection, await vaultDdReport(v.address));
     const gate = gateDeposit({ inspection, ackToken: step.ackToken, expectedAssetAddress: v.assetAddress });
-    if (!gate.ok) return { ok: false, blocked: gate.blocked, disclosure: gate.disclosure };
+    if (!gate.ok) return refuse(REFUSAL.DISCLOSURE, gate.blocked, { disclosure: gate.disclosure });
 
     const dep = await vaultDeposit({ walletAddress, vault: v, amountUsdc: amount });
     await ledger();
     return { ok: true, kind: "vault_deposit", vault: v.key, ...dep, disclosure: gate.disclosure };
   }
 
-  return { ok: false, blocked: `unknown step type "${step.type}"` };
+  return refuse(REFUSAL.UNKNOWN_STEP, `unknown step type "${step.type}"`);
 }
