@@ -28,6 +28,7 @@ import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusa
 import { assertNotPaused } from "./_pause.mjs";
 import { AGENT } from "./_agents.mjs";
 import { publicClient } from "./_predict.mjs";
+import { makeRefuser, REFUSAL } from "./_budget.mjs";
 
 const BALANCE_OF_ABI = [
   {
@@ -45,6 +46,16 @@ export async function handler(event) {
 
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });
+
+  // ⭐ ONE REFUSER PER HANDLER, bound once. `resolveOwner` is LAZY: the audit trail is keyed by the
+  // AGENT WALLET, but the cap is checked BEFORE that wallet is resolved (deliberately — an over-cap
+  // request should get the cap message, not a wallet error). So the owner is resolved only if a
+  // refusal actually fires, and enforcement ORDER is unchanged.
+  const refuse = makeRefuser({
+    source: "job-run",
+    resolveOwner: () => ensureOwnerWallet(session).then((w) => w?.walletAddress ?? null).catch(() => null),
+  });
+
 
   const { question, budgetUsdc } = parseBody(event);
   if (!question || !String(question).trim()) {
@@ -101,7 +112,7 @@ export async function handler(event) {
   // Researcher must not be able to start one. Checked BEFORE the funds gate so a paused
   // agent gets the honest reason, not "insufficient funds". Fail-closed. ──
   const paused = await assertNotPaused({ owner: walletAddress, agent: AGENT.RESEARCHER });
-  if (paused) return json(409, { error: paused, paused: true });
+  if (paused) return json(409, { error: await refuse(REFUSAL.PAUSED, paused, budget), paused: true });
 
   if (have < budget) {
     return json(402, {

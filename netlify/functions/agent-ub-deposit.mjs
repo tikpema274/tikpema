@@ -6,6 +6,7 @@ import { json, parseBody, ubDepositMaxPerTxUsdc, CONTRACTS, USDC_DECIMALS } from
 import { requireSession, internalToken } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { publicClient } from "./_predict.mjs";
+import { makeRefuser, REFUSAL } from "./_budget.mjs";
 
 // POST /api/agent-ub-deposit { amountUsdc }  (auth)  →  202 { depositId }
 //
@@ -88,6 +89,16 @@ export async function handler(event) {
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });
 
+  // ⭐ ONE REFUSER PER HANDLER, bound once. `resolveOwner` is LAZY: the audit trail is keyed by the
+  // AGENT WALLET, but the cap is checked BEFORE that wallet is resolved (deliberately — an over-cap
+  // request should get the cap message, not a wallet error). So the owner is resolved only if a
+  // refusal actually fires, and enforcement ORDER is unchanged.
+  const refuse = makeRefuser({
+    source: "agent-ub-deposit",
+    resolveOwner: () => ensureOwnerWallet(session).then((w) => w?.walletAddress ?? null).catch(() => null),
+  });
+
+
   const { amountUsdc } = parseBody(event);
   const amount = Number(amountUsdc);
   if (!(amount > 0)) return json(400, { error: "amountUsdc must be > 0" });
@@ -95,7 +106,7 @@ export async function handler(event) {
   // ── THE CAP — before anything is provisioned or kicked off. Reject, never clamp. ──
   const cap = ubDepositMaxPerTxUsdc();
   if (amount > cap) {
-    return json(400, { error: `exceeds per-deposit limit of ${cap} USDC`, cap });
+    return json(400, { error: await refuse(REFUSAL.PER_TX_CAP, `exceeds per-deposit limit of ${cap} USDC`, amount), cap });
   }
 
   // The depositor: THIS session's own agent SCA. Provisioned on first touch.

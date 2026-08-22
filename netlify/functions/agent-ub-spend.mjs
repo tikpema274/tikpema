@@ -2,7 +2,7 @@ import { json, parseBody, ubSpendCapUsdc, ubSpendFloorUsdc } from "./_arc.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
-import { canSpendDay, recordAgentSpend } from "./_budget.mjs";
+import { canSpendDay, recordAgentSpend, makeRefuser, REFUSAL } from "./_budget.mjs";
 import { AGENT } from "./_agents.mjs";
 import { assertNotPaused } from "./_pause.mjs";
 import { ubSpend } from "./_ubspend.mjs";
@@ -37,6 +37,16 @@ export async function handler(event) {
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });
 
+  // ⭐ ONE REFUSER PER HANDLER, bound once. `resolveOwner` is LAZY: the audit trail is keyed by the
+  // AGENT WALLET, but the cap is checked BEFORE that wallet is resolved (deliberately — an over-cap
+  // request should get the cap message, not a wallet error). So the owner is resolved only if a
+  // refusal actually fires, and enforcement ORDER is unchanged.
+  const refuse = makeRefuser({
+    source: "agent-ub-spend",
+    resolveOwner: () => ensureOwnerWallet(session).then((w) => w?.walletAddress ?? null).catch(() => null),
+  });
+
+
   const { recipientAddress, amountUsdc, destinationChain = "Base_Sepolia" } = parseBody(event);
   if (!/^0x[0-9a-fA-F]{40}$/.test(recipientAddress || "")) {
     return json(400, { error: "valid 'recipientAddress' required" });
@@ -59,7 +69,7 @@ export async function handler(event) {
   }
   const cap = ubSpendCapUsdc();
   if (amount > cap) {
-    return json(400, { error: `exceeds per-spend limit of ${cap} USDC`, cap });
+    return json(400, { error: await refuse(REFUSAL.PER_TX_CAP, `exceeds per-spend limit of ${cap} USDC`, amount), cap });
   }
 
   // The spender: THIS session's own agent SCA — holds the unified balance being spent.
@@ -86,10 +96,10 @@ export async function handler(event) {
   // ITSELF — otherwise a paused Executor could still spend the unified balance from here.
   // Fail-closed: an unreadable switch refuses. ──
   const paused = await assertNotPaused({ owner, agent: AGENT.EXECUTOR });
-  if (paused) return json(409, { error: paused, paused: true });
+  if (paused) return json(409, { error: await refuse(REFUSAL.PAUSED, paused, amount), paused: true });
 
   const day = await canSpendDay({ amountUsdc: amount, owner });
-  if (!day.allowed) return json(400, { error: day.reason, blocked: true });
+  if (!day.allowed) return json(400, { error: await refuse(REFUSAL.DAY_CEILING, day.reason, amount), blocked: true });
 
   try {
     const r = await ubSpend({

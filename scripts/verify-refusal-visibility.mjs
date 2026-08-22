@@ -168,6 +168,97 @@ section("5 — ⭐ THE READER THE UI ACTUALLY USES");
     refusal?.allowed === false);
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("6 — 🚨🚨 THE DIRECT-ACTION HANDLERS — the paths the UI's BUTTONS take");
+// ═══ WHY THIS SECTION EXISTS — A PROOF THAT FAILED ═══════════════════════════════════════════
+// 2026-08-22: with §1–§5 at 19/0 and deployed, an over-cap Send was triggered on prod to prove the
+// producer→UI round trip. NOTHING was recorded. `data-budget` held 222 keys before and after.
+//
+// 🚨 THE SUITE DROVE executeAction; THE SEND BUTTON DOES NOT GO THROUGH executeAction.
+// agent-send enforces its own cap and returns json(400) directly — and so do agent-ub-deposit,
+// agent-ub-spend and job-run. Nine handlers hold their own enforcement; the four here have NO
+// executeAction backstop at all. Testing the function instead of the path the user presses is
+// [[binding-tested-across-what-it-binds]], and it cost a failed live proof.
+//
+// ⭐ SO THESE DRIVE THE HTTP HANDLERS. If a future refusal path is added to a handler and left
+// unrecorded, §1–§5 would still be green — only this section can catch it.
+{
+  const OWNER2 = "0x" + "9d".repeat(20);
+  let sessionOk = true;
+  mock.module("../netlify/functions/_auth.mjs", { namedExports: {
+    requireSession: () => (sessionOk ? { sub: "u1" } : null), requireInternal: () => true,
+    internalToken: () => "t", issueSession: () => "t",
+  }});
+  mock.module("../netlify/functions/_agent-wallets.mjs", { namedExports: {
+    ensureOwnerWallet: async () => ({ walletAddress: OWNER2, pending: false }),
+    WALLET_PROVISIONING_STATUS: 503, walletProvisioningRefusal: () => ({ error: "provisioning" }),
+    WALLET_UNRESOLVABLE_STATUS: 503, walletUnresolvableRefusal: () => ({ error: "unresolvable" }),
+    isWalletUnresolvable: () => false,
+  }});
+
+  const { handler: sendHandler } = await import("../netlify/functions/agent-send.mjs");
+  const rowsFor2 = () => [...(maps.find((m) => m._n === "data-budget") ?? new Map()).values()]
+    .map((e) => e.value).filter((v) => v && v.allowed === false);
+
+  maps.forEach((m) => m.clear());
+  const res = await sendHandler({
+    httpMethod: "POST", headers: {},
+    body: JSON.stringify({ to: "0x" + "44".repeat(20), amountUsdc: 9999 }),
+  });
+  const body = JSON.parse(res.body ?? "{}");
+
+  check("🚨 the over-cap SEND is refused — the exact request that proved nothing on prod",
+    res.statusCode === 400 && /exceeds per-transaction limit/.test(body.error ?? ""),
+    `${res.statusCode} ${body.error}`);
+
+  const rows = rowsFor2();
+  check("🚨🚨 …and it is now RECORDED. On 2026-08-22 this wrote NOTHING and the round trip failed",
+    rows.length === 1, `${rows.length} row(s)`);
+  check("⭐ coded PER_TX_CAP", rows[0]?.code === REFUSAL.PER_TX_CAP, `code=${rows[0]?.code}`);
+  check("⭐ …and sourced to the HANDLER, so the trail says which surface refused",
+    rows[0]?.source === "agent-send", `source=${rows[0]?.source}`);
+
+  // ⭐⭐ THE ATTRIBUTION THAT MAKES IT VISIBLE. agents.mjs aggregates under `wallet.walletAddress`.
+  // A row written under the SESSION identity instead would exist and never appear on the page —
+  // a bug indistinguishable from this one, so it is pinned rather than assumed.
+  check("⭐⭐ …keyed to the AGENT WALLET, the same key agents.mjs aggregates under",
+    rows[0]?.owner === OWNER2.toLowerCase(), `owner=${rows[0]?.owner}`);
+
+  const bd = await budget.agentBreakdown({ owner: OWNER2 });
+  const ex = bd.find((b) => b.agent === "executor") ?? {};
+  check("⭐⭐ …so blockedToday would render 1, not 0", ex.blocked === 1, `blocked=${ex.blocked}`);
+  check("🚨 …and spentUsdc stays 0 — a refused send spends nothing", (ex.spentUsdc ?? 0) === 0);
+
+  // ⚠️ THE ORDERING THAT WAS PRESERVED. The cap is checked BEFORE the wallet resolves, so an
+  // over-cap request gets the CAP message rather than a wallet error. The refuser resolves the
+  // owner lazily instead of forcing a reorder — pinned so a future "tidy-up" cannot silently
+  // change which refusal a user sees.
+  const capAt = (await import("node:fs")).readFileSync("netlify/functions/agent-send.mjs", "utf8");
+  check("⚠️ …and the cap is still checked BEFORE ensureOwnerWallet — order unchanged by the logging",
+    capAt.indexOf("const cap = sendCapUsdc()") < capAt.indexOf("await ensureOwnerWallet(session)"));
+
+  // ── 🚨🚨 makeRefuser's OWN swallow, driven. ──────────────────────────────────────────────────
+  // ⚠️ THIS ASSERTION EXISTS BECAUSE A MUTATION DID NOT FIRE. §4 proves executeAction's private
+  // refuse() swallows a failed write — but makeRefuser is a SECOND implementation of that rule, and
+  // making it re-throw left the suite fully green. A safety property held in two places needs
+  // testing in two places; one of them was decorative.
+  maps.forEach((m) => m.clear());
+  storeThrows = true;
+  let threw2 = null, res2 = null;
+  try {
+    res2 = await sendHandler({
+      httpMethod: "POST", headers: {},
+      body: JSON.stringify({ to: "0x" + "44".repeat(20), amountUsdc: 9999 }),
+    });
+  } catch (e) { threw2 = e; }
+  storeThrows = false;
+  check("🚨🚨 the SEND is still refused when the audit store is down — logging cannot undo enforcement",
+    threw2 === null && res2?.statusCode === 400,
+    threw2 ? `threw ${threw2.message}` : `status=${res2?.statusCode}`);
+  check("⭐ …and the caller still gets the cap message, not a logging error",
+    /exceeds per-transaction limit/.test(JSON.parse(res2?.body ?? "{}").error ?? ""));
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

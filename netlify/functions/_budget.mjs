@@ -536,6 +536,51 @@ export async function recordBlocked({
   return { logged: true };
 }
 
+// ── ⭐⭐ BIND A REFUSER TO A HANDLER — one definition, N handlers ─────────────────────────────
+//
+// executeAction got a private `refuse()` choke point on 2026-08-22. The DIRECT-ACTION handlers
+// (agent-send, agent-ub-deposit, agent-ub-spend, job-run) do NOT route through executeAction —
+// they enforce their own caps and returned a bare `json(400, …)`, recording nothing. So the paths
+// a user actually presses were exactly the ones with no refusal record, which is how a proof of
+// the round trip failed on 2026-08-22 despite a 19/0 suite: the suite drove executeAction, and the
+// Send button does not.
+//
+// ⭐ THE MESSAGE COMES *FROM* THE RECORDER, and that is the point. The refuser RETURNS the reason
+// string, so the idiom is:
+//     return json(400, { error: await refuse(REFUSAL.PER_TX_CAP, `exceeds …`), cap });
+// You cannot produce the error text without going through the write. Recording is no longer a
+// second step a caller can forget — it is on the only path to the value the caller needs.
+//
+// ⭐ `resolveOwner` IS LAZY, AND THAT IS WHY ENFORCEMENT ORDER DID NOT HAVE TO CHANGE. The audit
+// trail is keyed by the AGENT WALLET address (agents.mjs reads `wallet.walletAddress`), but several
+// handlers check the cap BEFORE resolving that wallet — deliberately, so an over-cap request gets
+// the cap message rather than a wallet error, and so an obviously-invalid amount costs no lookup.
+// Reordering to suit the logger would have changed which refusal a user sees. Instead the owner is
+// resolved ONLY when a refusal actually fires.
+//
+// ⚠️ AN UNATTRIBUTABLE REFUSAL IS LOGGED, NOT DROPPED. If the owner cannot be resolved there is no
+// per-user trail to write to — but silence would make it indistinguishable from no refusal at all.
+export function makeRefuser({ owner, resolveOwner, agent = AGENT.EXECUTOR, source, store }) {
+  return async (code, reason, amountUsdc = 0) => {
+    try {
+      const o = owner ?? (typeof resolveOwner === "function" ? await resolveOwner() : null);
+      if (o) {
+        await recordBlocked({ owner: o, agent, source, reason, code, amountUsdc, store });
+      } else {
+        console.warn("[budget][refusal-unattributed] " + JSON.stringify({
+          source, code,
+          note: "refused, but no owner could be resolved — enforced and NOT recorded to any trail",
+        }));
+      }
+    } catch (err) {
+      // 🚨 A FAILED RECORD MUST NEVER BECOME AN ALLOW. The refusal is already decided; this write
+      // is observability. Swallowed so an audit-store hiccup cannot turn into a permitted action.
+      console.warn("[budget][refusal-record-failed] " + String(err?.message ?? err).slice(0, 120));
+    }
+    return reason;
+  };
+}
+
 // ── Read the audit trail ─────────────────────────────────────────────────────
 //
 // Entries now live under their own keys, so a read is a prefix list + fetch. Scoped by OWNER:

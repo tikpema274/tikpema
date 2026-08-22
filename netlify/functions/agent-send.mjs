@@ -11,7 +11,7 @@ import { json, parseBody, ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc } from "./_
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
-import { canSpendDay, recordAgentSpend, shoutLedgerFailure } from "./_budget.mjs";
+import { canSpendDay, recordAgentSpend, shoutLedgerFailure, makeRefuser, REFUSAL } from "./_budget.mjs";
 import { AGENT } from "./_agents.mjs";
 import { assertNotPaused } from "./_pause.mjs";
 import { publicClient } from "./_predict.mjs";
@@ -33,6 +33,16 @@ export async function handler(event) {
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });
 
+  // ⭐ ONE REFUSER PER HANDLER, bound once. `resolveOwner` is LAZY: the audit trail is keyed by the
+  // AGENT WALLET, but the cap is checked BEFORE that wallet is resolved (deliberately — an over-cap
+  // request should get the cap message, not a wallet error). So the owner is resolved only if a
+  // refusal actually fires, and enforcement ORDER is unchanged.
+  const refuse = makeRefuser({
+    source: "agent-send",
+    resolveOwner: () => ensureOwnerWallet(session).then((w) => w?.walletAddress ?? null).catch(() => null),
+  });
+
+
   const { to, amountUsdc } = parseBody(event);
   if (!/^0x[0-9a-fA-F]{40}$/.test(to || "")) {
     return json(400, { error: "valid 'to' address required" });
@@ -44,7 +54,7 @@ export async function handler(event) {
   // over-cap send returns the cap message).
   const cap = sendCapUsdc();
   if (amount > cap) {
-    return json(400, { error: `exceeds per-transaction limit of ${cap} USDC`, cap });
+    return json(400, { error: await refuse(REFUSAL.PER_TX_CAP, `exceeds per-transaction limit of ${cap} USDC`, amount), cap });
   }
 
   // Resolve the caller's OWN wallet from the session (never client-supplied).
@@ -72,11 +82,11 @@ export async function handler(event) {
   // executeAction, so a pause enforced only there would leave this path wide open.
   // Fail-closed: an unreadable switch refuses. ──
   const paused = await assertNotPaused({ owner: walletAddress, agent: AGENT.EXECUTOR });
-  if (paused) return json(409, { error: paused, paused: true });
+  if (paused) return json(409, { error: await refuse(REFUSAL.PAUSED, paused, amount), paused: true });
 
   const day = await canSpendDay({ amountUsdc: amount, owner: walletAddress });
   if (!day.allowed) {
-    return json(429, { error: day.reason, dayCeiling: true });
+    return json(429, { error: await refuse(REFUSAL.DAY_CEILING, day.reason, amount), dayCeiling: true });
   }
 
   // Clean insufficient-funds error before attempting the transfer.
