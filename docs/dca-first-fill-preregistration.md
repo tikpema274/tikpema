@@ -196,3 +196,49 @@ next tick's reconcile. If it never occurs, that is reported as "never occurred",
 🚨 **AND CLEAN BRANCH A FILLS MUST NEVER BE TALLIED AS EVIDENCE FOR (1).** They exercise the
 pre-existing path. Counting them would be the precise failure this document was written to
 prevent: a true observation that does not support the claim it is offered for.
+
+---
+
+## 6. RESULT — the first fill, 2026-08-22T17:12:06Z
+
+**Mandate** `61c2cce9-d4af-43dc-9d65-b8ea045c27ef` — USDC→EURC, `perTickAmount` 0.05,
+`totalBudgetAmount` 0.15 (three fills), `cadenceMs` 3_600_000 (hourly).
+**Outcome: `swapped` — "confirmed inline"** ⇒ **BRANCH A.**
+
+| pre-registered (Branch A) | observed | |
+|---|---|---|
+| `day….spentUsdc` **+P** | **0.05** | ✅ |
+| `dca-day….spentUsdc` **+P** | **0.05** | ✅ |
+| `spentAmount` **+P** | **0.05** | ✅ |
+| audit rows **1**, `confirmation:"confirmed"`, `circleId` present | 1 row, `"confirmed"`, `904ee95c…` | ✅ |
+| `day….chargedIds` **ABSENT** | absent | ✅ |
+| `pendingPeriod` `null` | `null` | ✅ |
+| `lastOutcome` `swapped` | `swapped` | ✅ |
+
+**All seven matched exactly. P = 0.05 with no rounding**, as §0 predicted from
+`_swap.mjs:67 if (t === "USDC") return amt`. Tx `0xe0ca93c4…`, confirmed by `waitForTx` reaching
+COMPLETE (Circle's authoritative state, not an RPC log-scan). No abort condition triggered;
+`errors 0` on every tick. Exactly 3 keys were written to `data-budget` (213 → 216).
+
+⭐ The audit row is `confirmation:"confirmed"`, so the step-8 sweeper correctly cannot see it —
+`listUnresolvedCharges` selects only `"submitted"`. The designed behaviour, confirmed live.
+
+### 🚨 AND THIS DOES **NOT** PROVE CONDITION (1) — as pre-registered in §1
+
+Branch A is the **pre-existing** path: `executeAction`'s own post-confirm `ledger()` did the day
+charge, and the new submit-time branch never executed. The tell is in the table above and was
+named in advance: **`chargedIds` is absent.** That field is written only by the new charge. Its
+absence is exactly right for Branch A — and it is also the proof that the new code did not run.
+
+⭐ A green first fill was the LIKELY outcome and was called that way before it happened. Recording
+it as "un-gated and working" would be true of the feature and false of the claim it would be
+offered for. Condition (1)'s live branch remains **unexercised**, per §5.
+
+### One correction, for the record
+
+The first counter read reported `day` and `dca-day` as ABSENT and briefly looked like an abort
+condition. That was a wrong-address lookup, not a defect: the mandate is KEYED by the user's
+owner address (`0xfd801d…`) but the ledger is written under `m.walletAddress`, the agent SCA
+(`0x058957…`). ⚠️ Two addresses, one record, and the wrong one reads as "nothing was charged" —
+the fail-open-looking direction ([[plan-path-spender-is-caller-sca]]). The raw key listing is
+what settled it, because it makes no assumption about which owner to look under.
