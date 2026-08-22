@@ -135,3 +135,64 @@ Un-gating proves **Branch A** almost certainly, and **Branch B only if a fill ha
 Branch B cannot be forced without injecting a fault, so if the first fills are all fast, condition
 (1)'s own path stays unexercised in production and **must be reported that way** — not as
 "un-gated and working".
+
+---
+
+## 5. ⭐⭐ DECIDED 2026-08-22, BEFORE ANY FILL ACCUMULATED: WE DO **NOT** INDUCE BRANCH B
+
+The question was real: Arc confirms in 2–3 s against a 60 s deadline, so Branch B may be
+effectively unreachable in normal operation — which is precisely why the defect survived months.
+Ten clean Branch A fills would leave condition (1) unexercised. The repo has precedent for
+inducing (`dd-watch`'s alarm was proven by an INDUCED outage, not by waiting for a real one), and
+the mechanism is clean: `waitForTx(client, id, deadlineMs = DEADLINE_MS)` — the deadline is
+ALREADY an injectable parameter, so no money-path constant would be edited and no env override
+would be needed (the objection upheld for `DEADLINE_SAFETY_MS`).
+
+⭐ And the induction would not even be a simulation. Branch B is DEFINED by "we stopped waiting"
+— `TxPendingError` says the deadline passed and nothing about the chain. A shortened deadline
+produces a GENUINE timeout on a GENUINE swap. Nothing about the money would be faked.
+
+### 🚨 THE BLOCKER, AND IT IS DECISIVE
+
+Inducing requires a SECOND tick invoker (a draft invoked by hand) alongside prod's `* * * * *`
+scheduler. The claim guard cannot survive that:
+
+```
+// A "claimed" claim is a prior attempt that died before submit → RETRY.
+// … read-before-write is adequate for ONE CRON INVOKER PER MINUTE.
+```
+
+`status === "claimed"` means **retry, not skip**. Two concurrent invokers can both read `claimed`
+and both submit — **a real double-spend of real USDC.** ⭐⭐ So the induction would MANUFACTURE
+the exact class of defect this entire thread exists to prevent, in order to prove a fix for a
+smaller one. That trade is wrong at any price.
+
+Making it safe means removing `dca-tick`'s schedule from **production** for the induction window:
+two prod deploys (~45 min each), a period where DCA does not tick at all, and a restore whose
+omission is **invisible to every provenance check** — `netlify.toml` sits outside the build
+stamp's hashed surface, so a schedule-off production deploy and a schedule-on one carry an
+IDENTICAL tree hash ([[netlify-draft-deploy-traps]]). That is a worse failure than the one being
+proven against.
+
+### THEREFORE, THE STANDING CLAIM — stated plainly, not accumulated quietly
+
+> **Condition (1) is proven by suite (behavioural, mutation-tested against two mutations of the
+> primitive) and by the draft proof (the reconcile path, the status guard, and `chargedIds`
+> idempotency against REAL Netlify Blobs CAS). Its live submit-time branch is LEFT UNEXERCISED,
+> because it cannot be reached in production without inducing it, and inducing it safely costs
+> more risk than it retires.**
+
+⚠️ Specifically still unobserved in production, ever: `agentSwap` throwing `SwapPendingConfirm`
+**carrying a `circleId`**. The four July PENDING_CONFIRM records are the pre-refactor generation
+and carry none, so even the historical evidence is for a different code shape.
+
+### WHAT REPLACES THE INDUCTION
+
+Branch B occurred **four times in July**, so it is uncommon rather than impossible. The watch is
+therefore standing rather than one-shot: any fill reaching `lastOutcome: pending-confirm` is the
+real thing, and §1 Branch B's table is what it must be checked against — at submit AND after the
+next tick's reconcile. If it never occurs, that is reported as "never occurred", not as proven.
+
+🚨 **AND CLEAN BRANCH A FILLS MUST NEVER BE TALLIED AS EVIDENCE FOR (1).** They exercise the
+pre-existing path. Counting them would be the precise failure this document was written to
+prevent: a true observation that does not support the claim it is offered for.
