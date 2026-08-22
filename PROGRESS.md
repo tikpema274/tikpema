@@ -1,5 +1,70 @@
 ---
 
+# 🚨 THE DCA GATE STAYS — (4) IS DONE, (1) IS HALF, AND THE HALF THAT IS MISSING IS THE DCA ONE
+
+**2026-08-22.** Asked to add the Dashboard card and un-gate on all four conditions. **The card is
+added and condition (4) is satisfied. The gate is NOT lifted**, because condition (1) is not met —
+and the part that is missing is the only part this flag actually governs.
+
+## ⭐ WHAT THE CHECK FOUND
+
+`459f3f3` — finding A's fix — **never touched `dca-tick.mjs`.** It fixed `agent-send.mjs` and
+`_actions.mjs`'s transfer path, which now ledger at submit with the authoritative `circleId`.
+
+`dca-tick`'s `SwapPendingConfirm` branch is **unchanged**: it writes a claim to `dca-fills` and sets
+`pendingPeriod`, and ledgers **nothing** against the day ceiling. The charge is written later by
+`reconcilePending` on `COMPLETE` — which **pre-dates finding A** (`ee82843`), so it is not part of
+the fix at all.
+
+| path | pending spend counted at submit? | recoverable by the step-8 sweeper? |
+|---|---|---|
+| `agent-send` / `transfer_usdc` | ✅ yes — `confirmation:"submitted"` + `circleId` | ✅ yes |
+| **`dca-tick` fill** | ❌ **no** — counted only at reconcile | ❌ **no** |
+
+🚨 **AND THE SWEEPER DOES NOT COVER THE DCA CASE.** The pending claim lives in `dca-fills`;
+`listUnresolvedCharges` scans `data-budget` `audit:` keys. **Different stores.** A pending DCA fill
+is invisible to step 8 — so "the sweeper is running" must not be read as covering this.
+
+⭐ **THE UNDER-COUNT IS NOW TRANSIENT RATHER THAN PERMANENT** — bounded by one `dca-tick`
+(`* * * * *`), longer when `MAX_RECONCILES_PER_TICK` defers it. That is a genuine improvement over
+"never counted", **and it is not the condition.** During that window `canSpendDay` can hand out
+headroom nobody authorized.
+
+## ⚠️ WHY (3) WAS DELIBERATELY LEFT ALONE
+
+The consent sentence says an unconfirmed swap is *"never counted … measured against a total that is
+too low"*. Condition (3) says to correct it **in the same commit as (1)**. Since (1)'s DCA half has
+not shipped, that sentence is still substantially true for this path — **rewriting it now would make
+the user's own authorization text describe a fix that does not exist.** ⭐ Overstating safety in a
+consent record is worse than wording that is too pessimistic. The honest order is (1) then (3).
+
+⭐ The suite already anticipated this: `verify-dca-consent-copy.tsx` §1 property (b) pins the gap
+and carries its own flip instruction — *"🎉 the pending branch now ledgers — UPDATE the sentence in
+DcaPanel and flip this check"*. It is still green, which is the measurement, not an opinion.
+
+## ✅ WHAT DID SHIP — CONDITION (4)
+
+The card is in Dashboard's **"Move money out"** group, beside Send / Bridge / Vault, leading with
+the consequence like its siblings: *"❗ Runs while you're offline, signed by our key — not your
+passkey. Cancel anytime; a swap already sent still lands."* The guard now reports **"#/dca reachable
+from Dashboard: YES"** (12 controls → 12 nav targets).
+
+⭐ **LINKED WHILE STILL GATED, ON PURPOSE.** `DcaPanel` leads with the paused banner, and list and
+cancel are **never** gated — so this is the only way a holder of an existing mandate reaches Cancel
+without typing the hash. That is a reason to link it **now**, not at un-gate.
+
+## 🚨 THE THING WORTH KEEPING
+
+**(2) and (4) being done is not "three of four with a rounding error".** (1) is the finding this
+gate was raised for, and its DCA half — the only half that governs what this flag admits — is
+exactly as it was on 2026-08-21. ⭐ **Un-gating on "most of the conditions" is how a condition
+becomes a formality.** The whole point of writing four was that four is the bar.
+
+⚠️ And the near-miss is the instructive part: (2) and (4) were the two conditions I had personally
+verified this session, and both were green. It would have been easy to carry that confidence into
+(1) and (3) — which I had never checked — and flip the flag. **The conditions I had just proven are
+exactly the ones that made the unproven ones feel safe.**
+
 # ⭐⭐ THE BUDGET-SWEEP QUEUE DRAINED — 10, 10, 1 → 0, EXACTLY AS PRE-REGISTERED
 
 **2026-08-22.** 23 consecutive ticks, no boundary missed, read from the **log** rather than the

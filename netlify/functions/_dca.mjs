@@ -50,15 +50,38 @@ import { budgetConfig, dcaDaySpend } from "./_budget.mjs";
 // ── ⭐⭐ THE UNBLOCK CONDITION — WITHOUT ONE, A GATE BECOMES PERMANENT BY DRIFT ───────────────
 // This is a debt ratchet unless it names its own horizon, so: UN-GATE WHEN ALL FOUR HOLD.
 //
-//   1. FINDING A is fixed — a submitted-but-unconfirmed spend is no longer treated as "no money
-//      moved". Today agent-send.mjs discards the pending txId entirely and dca-tick's
-//      SwapPendingConfirm branch ledgers nothing, so an unconfirmed fill is never counted and the
-//      day ceiling UNDERSTATES for every later swap — the user's own manual sends included.
+//   1. 🚨 FINDING A is fixed — a submitted-but-unconfirmed spend is no longer treated as "no money
+//      moved". ⚠️ HALF DONE, MEASURED 2026-08-22, AND THE REMAINING HALF IS THE DCA ONE.
+//      ✅ agent-send.mjs and _actions.mjs's transfer path now ledger at SUBMIT with the
+//         authoritative circleId (459f3f3), so a manual pending spend is counted AND recoverable
+//         by the step-8 sweeper.
+//      ❌ dca-tick's SwapPendingConfirm branch STILL ledgers nothing. 459f3f3 never touched
+//         dca-tick.mjs. The branch writes a claim to FILLS_STORE ("dca-fills") and sets
+//         pendingPeriod; the day-ceiling charge is written only later, by reconcilePending on
+//         COMPLETE (which pre-dates finding A — it came from ee82843).
+//      ⭐ SO THE UNDER-COUNT IS NOW TRANSIENT RATHER THAN PERMANENT — bounded by one dca-tick
+//         (`* * * * *`), longer if MAX_RECONCILES_PER_TICK defers it — instead of lasting forever.
+//         That is a real improvement and it is NOT the condition. The condition says the spend is
+//         counted; during that window it is not, and canSpendDay can hand out headroom nobody
+//         authorized.
+//      🚨 AND THE SWEEPER DOES NOT COVER IT. The pending claim lives in "dca-fills"; the sweeper
+//         scans "data-budget" audit: keys for confirmation:"submitted". DIFFERENT STORES — a
+//         pending DCA fill is invisible to step 8, so the recoverability half of finding A's fix
+//         does not extend here either. ⚠️ Do not read "the sweeper is running" as covering this.
+//      ⭐ The parked design for closing it is docs/dca-submit-time-budget-design.md, and
+//         verify-dca-consent-copy.tsx §1 property (b) pins the gap and carries the flip
+//         instruction, so this cannot be closed without the sentence in (3) being corrected.
 //   2. FINDING B is fixed — budget-sweep (its own header: "THE PRIMARY HANDLER, NOT A BACKSTOP")
 //      is running, or its role is reassigned. Measured 2026-08-21: 119 audit entries since
 //      2026-07-12, 21 of them unresolved submit-time charges, ZERO reversals ever.
 //   3. THE CONSENT SENTENCE MATCHES THE CODE — DcaPanel's cap/ceiling clause is corrected in the
 //      same commit as (1), because fixing the ledger makes the current exception text WRONG.
+//      ⚠️ NOT ACTIONABLE UNTIL (1)'s DCA HALF IS DONE, and deliberately left alone 2026-08-22.
+//      The sentence currently says an unconfirmed swap is "never counted … measured against a
+//      total that is too low". For the DCA path that is still SUBSTANTIALLY TRUE during the
+//      pending window, so rewriting it now would make the consent record describe a fix that has
+//      not shipped — overstating safety in the user's own authorization text, which is worse than
+//      the wording being pessimistic. ⭐ The honest sequence is (1) then (3), in that order.
 //   4. ⭐⭐ AN ENTRY POINT EXISTS. UN-GATING IS NOT COMPLETE WITHOUT ONE. #/dca has NEVER had a
 //      Dashboard or MyAgentPanel card — every nav-less sibling route has one. Flip this flag
 //      without adding a card and the result is unlinked-by-omission WITH THE DEFECTS FIXED: a
@@ -72,6 +95,10 @@ import { budgetConfig, dcaDaySpend } from "./_budget.mjs";
 //      is the landing surface, and it is where vault, nanopay and bridge all place theirs.
 //      ⭐ It asserts on RENDERED NAVIGATION, never on source text, so renaming the card, rewording
 //      its copy, or restructuring the JSX cannot break it — only genuinely losing the route can.
+//      ✅ SATISFIED 2026-08-22 — the card is in Dashboard's "Move money out" group and the guard
+//      reports "#/dca reachable from Dashboard: YES". ⚠️ Linked WHILE STILL GATED, on purpose:
+//      list and cancel are never gated, so this is the only way a holder of an existing mandate
+//      reaches Cancel without typing the hash.
 //
 // ⚠️ (4) IS THE ONE MOST LIKELY TO BE FORGOTTEN, AND UNTIL NOW IT WAS NOT WRITTEN WHERE THE FLIP
 // HAPPENS. App.tsx and DcaPanel.tsx once FALSELY claimed the route was "reached from the swap
@@ -81,9 +108,15 @@ import { budgetConfig, dcaDaySpend } from "./_budget.mjs";
 // not existing. A condition that depends on the reader happening to open a different file is not
 // a condition. Hence (4), stated in the place the decision is actually made.
 //
-// ⚠️ (1) and (2) are DONE as of 2026-08-22 — findings A and B are fixed and budget-sweep drained
-// its 21-charge queue live (10, 10, 1 -> 0). So (3) and (4) are what actually remain, and (4) is
-// the one no code path will remind anyone about.
+// ── ⭐ STATE AS OF 2026-08-22 — (2) and (4) DONE, (1) HALF, (3) BLOCKED BY (1) ───────────────
+//   (1) ⚠️ HALF — the manual path is fixed; dca-tick's pending branch is NOT. See above.
+//   (2) ✅ DONE — budget-sweep drained its 21-charge queue live (10, 10, 1 -> 0), errors 0.
+//   (3) ⛔ BLOCKED BY (1) — correcting the sentence first would overstate safety.
+//   (4) ✅ DONE — Dashboard card added, enforced by verify-dca-consent-copy §6.
+// 🚨 SO THE GATE STAYS. (2) and (4) being done is NOT three-of-four with a rounding error: (1) is
+// the finding this gate was raised for, and its DCA half — the only half that governs what this
+// flag admits — is exactly as it was. ⭐ Un-gating on "most of the conditions" is how a condition
+// becomes a formality; the whole point of writing four was that four is the bar.
 //
 // ⚠️ Findings A and B are recorded in PROGRESS.md 2026-08-21; the parked ledger design is in
 // docs/dca-submit-time-budget-design.md.

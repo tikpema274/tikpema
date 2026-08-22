@@ -179,6 +179,27 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
               any time, minus a fee — but read the owner's powers first.
             </div>
           </button>
+          {/* Recurring swaps (#/dca, nav-less). ⭐⭐ THIS CARD IS UNBLOCK CONDITION (4) AT THE
+              CREATE_GATED CONSTANT: the route was reachable-but-unlinked for weeks, which is the
+              configuration that hid a 22-day outage in this same surface. verify-dca-consent-copy
+              §6 renders this Dashboard and drives its controls, so the entry point is enforced
+              rather than remembered — but it asserts the TARGET, never this label or copy.
+              ⚠️ It sits in "Move money out" and leads with the consequence, like its siblings.
+              This one's consequence is the strongest on the page and it is stated first: the
+              money moves WITH NOBODY PRESENT, signed by a key the server holds. Deliberately NOT
+              sold on convenience — the panel's amber consent band says the same thing at length,
+              and a card that undersold it would be the softer half of a split message.
+              ⚠️ Linked WHILE CREATE IS GATED, on purpose: DcaPanel leads with the paused banner,
+              and list/cancel are never gated. So this is the only way a holder of an existing
+              mandate can reach Cancel without typing the hash — which is a reason to link it
+              NOW, not at un-gate. */}
+          <button className="quick-card" onClick={() => go("dca")}>
+            <div className="qt">Recurring swaps →</div>
+            <div className="qd">
+              <span style={{ color: "var(--warn)" }}>❗ Runs while you're offline</span>, signed by
+              our key — not your passkey. Cancel anytime; a swap already sent still lands.
+            </div>
+          </button>
         </div>
       </div>
 
