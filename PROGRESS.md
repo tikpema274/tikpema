@@ -1,5 +1,112 @@
 ---
 
+# ✅ THE REFUSAL ROUND TRIP IS PROVEN — 12/12 PRE-REGISTERED VALUES, ON THE PATH THE BUTTON TAKES
+
+**2026-08-23.** The re-proof `4a6e675` was built for. An over-cap Send (999 USDC against a deployed
+cap of 10) was triggered on prod at **09:23:35.368Z**; `data-budget` went **223 → 224** and the row
+read back matched every pre-registered field:
+
+```json
+{"agent":"executor","amountUsdc":999,"source":"agent-send",
+ "reason":"exceeds per-transaction limit of 10 USDC","code":"REFUSED_PER_TX_CAP",
+ "allowed":false,"owner":"0x058957de…","date":"2026-08-23","timestamp":"2026-08-23T09:23:36.084Z"}
+```
+
+⭐ The two load-bearing NEGATIVES held: **`confirmation` is absent**, so `listUnresolvedCharges`
+cannot hand a refusal to a reverser; and **no `day:…:2026-08-23` key exists**, so a refusal advanced
+no counter. That second one is the true fail-open the suite pinned at 15 red — it does not happen
+live. Full record in `docs/refusal-reproof-preregistration.md`.
+
+⚠️ Rendered from the real row IN-PROCESS (`refused · agent-send / exceeds per-transaction limit of
+10 USDC / 999.00 USDC`, red). That proves the component maps the row, **not** that the deployed page
+fetched it — [[binding-tested-across-what-it-binds]]. The live page read is the remaining half.
+
+## 🚨 ATTEMPT 1 FAILED WITH NOTHING WRONG ON THE SERVER — AND THE UI SAID THE OPPOSITE
+
+The first press produced **zero invocations** of `agent-send`, `auth-challenge`, `auth-verify`,
+`agents` and `my-wallet` across 30 minutes of active use. The served bundle posts to
+`/api/agent-send`, the redirect is present, and an unauthenticated 401-probe returns proper JSON —
+the request never left the browser. The UI rendered:
+
+> **Send failed**
+
+which states that the server rejected the send. **There was no server response at all.** An hour of
+diagnosis ran against that sentence.
+
+### ⭐⭐ THE DEFECT: A FAILURE MESSAGE NARRATING A RESPONSE THAT NEVER CAME
+
+```
+useWallet.ts:348   throw new Error(data?.error || "Send failed")   // non-ok response, no error field
+SendPanel.tsx:35   setSendError(e?.message || "Send failed")       // the thrown value had NO message
+```
+
+⭐ **Two families, and only one is the defect — the distinction is the whole fix.** `data?.error ||`
+fires when a response *arrived and was not ok*: a fallback sentence there is a weaker claim, and
+those ~30 sites are LEFT ALONE. `e?.message ||` fires on a **thrown value** — a dead network, a
+cancelled passkey, a `TypeError` — where the request may never have left the browser. Those **18
+sites across 11 files** now call `describeError(e)`.
+
+⚠️ **`amountUsdc` was never the risk here; the SENTENCE was.** "Send failed" and "we cannot tell
+whether your send left the browser" are different facts, and a user deciding whether to press Send
+again — on the money path — needs the second.
+
+⭐ Same rule as the `?? "action"` fix in the activity trail, now applied to the error slot:
+**raw looks like a gap, a plausible label looks like a fact, and the second is worse.**
+
+⭐ **BEHAVIOURALLY INVISIBLE WHEN A MESSAGE EXISTS** — a real message passes through byte-identical.
+That property is what made an 18-site change safe without re-litigating 18 pieces of copy, and it is
+asserted in both directions: a "fix" that warned on everything would destroy every useful error in
+the app and is mutation-tested (M3, 4 red).
+
+**test:errorhonesty 20/0**, wired into `test:all`. Mutations: reinstate the literal defect at the
+Send call site → **1 red** (the call-site guard); make the helper invent a verdict → **12 red**;
+make it warn even when a message exists → **4 red**. All restored byte-identical.
+
+⚠️ The call-site guard **strips comments before matching**, because `describeError.ts` documents the
+defect by quoting it — the fourth time in this repo an assertion would have gone red on its own
+explanatory prose. It also asserts it scanned >20 files and that its pattern still matches the shape
+it hunts: a guard that scans nothing passes.
+
+# ⭐ A RESOLUTION MARKER WAS RENDERED AS A REFUSAL — THE VIEW NEVER GOT THE BRANCH THE TOTALS HAVE
+
+`agentBreakdown` skips `kind === "resolution"` **first**, with the reason stated at the call site:
+*"so it can never fall through to the allowed/blocked branches and be mis-counted as an action or a
+refusal."* That guarantee held on the server and **was never applied in the view**. A real
+production row exists — `resolution-620e455e…`, 2026-08-22, outcome COMPLETE — and the trail
+rendered it in red as:
+
+> **refused · ⚠️ no action type recorded for this entry**
+
+Two false claims in one row: nothing was refused (a landed charge was retired from the sweeper's
+queue), and the type *was* recorded — as `kind`, not `source`.
+
+🚨 **AND THE REVERSAL ROW WAS WORSE.** `kind:"reversal"` carries `allowed:true` **and the original
+charge's `source`**, so it rendered as an ordinary white spend — byte-identical to the charge it
+undoes. The trail showed two identical positive rows while the total had already netted one out.
+⭐ A wrong red row invites a question; a plausible duplicate does not.
+
+Both are now classified before `allowed` is read, muted rather than red-or-white, amounts shown as
+`no money moved` / `−N.NN`, and `justification` — declared on the type and rendered **nowhere** —
+finally reaches a reader. **test:activityfallback 24/0**; mutations: no branch → 8 red, everything
+bookkeeping → 4 red, positive reversal amount → 1 red.
+
+# ⚠️ TWO INSTRUMENTS UNDER-REPORTED IN ONE HOUR, AND BOTH LOOKED LIKE DILIGENCE
+
+1. ⭐ **`netlify logs` is a BACKFILL, not a tail.** A 7-minute run with `--since 2m` returned 5
+   lines, all backfill, in a window that had to contain ~7 `dca-tick` runs from a `* * * * *`
+   schedule. **Trigger first, then query with `--since`.** Look back; do not watch.
+2. ⭐⭐ **Its silence was worth nothing until calibrated against a known positive.** `agent-send`,
+   `agents`, `my-wallet` and `auth-verify` all showed zero — indistinguishable from a log source
+   blind to user traffic. An external `curl` of `blobs-probe` (GET-only, no writes) at 08:58:19Z
+   appeared at **08:58:20.287Z**. Only then was "zero invocations" a measurement rather than a gap.
+
+🚨 **AND THE PRE-REGISTRATION ITSELF HAD AN AMBIGUOUS ROW.** Row 1 predicted **400** — but
+`agent-send` returns *three* different 400s (`valid 'to' address required`, `amountUsdc must be > 0`,
+and the cap message), and only the third writes anything. In a table written specifically to prevent
+ambiguous readings, the first row could not discriminate. ⭐ **Pre-register the BODY, never the
+status, wherever paths share one** — a predicted value is worth only the branches it rules out.
+---
+
 # 🚨 DD WAS NEVER LISTED — AND THAT HAS BEEN ASSUMED SINCE 2026-08-19
 
 Found 2026-08-23 while sweeping the Circle x402 Agent Marketplace for a buy-side test. The service
