@@ -67,7 +67,8 @@
     "test:refusals": "node --experimental-test-module-mocks scripts/verify-refusal-visibility.mjs",
     "test:errorhonesty": "npx tsx scripts/verify-error-honesty.tsx",
     "test:vanillabytes": "node --experimental-test-module-mocks scripts/verify-vanilla-seller-bytes.mjs",
-    "test:vanillabyteslive": "node scripts/verify-vanilla-seller-bytes-live.mjs"
+    "test:vanillabyteslive": "node scripts/verify-vanilla-seller-bytes-live.mjs",
+    "test:vanillalimits": "node --experimental-test-module-mocks scripts/verify-vanilla-seller-limits.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -119,6 +120,7 @@
     "test:activityfallback",
     "test:errorhonesty",
     "test:vanillabytes",
+    "test:vanillalimits",
     "gate:opcount",
     "gate:price",
     "gate:callshape",

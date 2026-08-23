@@ -41,6 +41,9 @@
 // 402 → pay → 200 round trip, so settlement finishes inline.
 
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
+import { getStore } from "@netlify/blobs";
+import { connectBlobs } from "./_blobs.mjs";
+import { ARC } from "./_arc.mjs";
 
 // --- Arc Testnet / vanilla EIP-3009 constants (verified on-chain) ------------
 const NETWORK = "eip155:5042002"; // Arc Testnet, CAIP-2
@@ -156,7 +159,115 @@ const challenge402 = (requirements, error, reason) =>
     { "PAYMENT-REQUIRED": b64encode({ x402Version: 2, accepts: [requirements] }) }
   );
 
+// ═══ ⭐ GUARD A — CAN THE PAYER ACTUALLY PAY? (stateless, one eth_call) ══════════════════════
+//
+// 🚨 THE GAP THIS CLOSES. Every other pre-settle guard here exists to "reject early with a clear
+// message instead of burning gas on a guaranteed revert" — value, `to`, asset, network, the time
+// window. THE PAYER'S BALANCE WAS NEVER ONE OF THEM. So a crafted authorization from an empty
+// address passed every check and reached `createContractExecutionTransaction`.
+//
+// ⭐ MEASURED: that costs the seller NOTHING on-chain — Circle rejects at estimation and never
+// broadcasts (seller nonce unchanged, balance unchanged; see spike-vanilla-zero-balance-grief).
+// ⚠️ BUT IT IS NOT FREE. `_circle.mjs` is imported by 26 functions, all sharing one CIRCLE_API_KEY.
+// A public, unauthenticated endpoint that turns one HTTP request into one Circle API call is a way
+// to exhaust the quota that agent-send, dca-tick and the rest of the money path depend on. The
+// blast radius is the whole product, not this seller.
+//
+// So the cheapest fix is not to rate-limit the expensive call — it is to NOT MAKE IT. One
+// `balanceOf` read against a public RPC answers "can this ever settle?" before Circle is touched.
+//
+// ⚠️ FAIL-CLOSED, DELIBERATELY. An unreadable RPC means we do NOT know the payer can pay, and
+// "we could not check" must not spend a Circle call. [[absence-must-never-read-as-safe]]
+async function payerCanCover(from, atomic) {
+  try {
+    const r = await fetch(ARC.rpc, {
+      method: "POST", headers: { "content-type": "application/json" },
+      signal: AbortSignal.timeout(4000),
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call",
+        params: [{ to: ASSET, data: "0x70a08231000000000000000000000000" + from.slice(2) }, "latest"] }),
+    });
+    const j = await r.json();
+    if (j.error || typeof j.result !== "string") return { ok: false, reason: "balance unreadable" };
+    return BigInt(j.result) >= BigInt(atomic)
+      ? { ok: true }
+      : { ok: false, reason: `payer holds ${BigInt(j.result)} atomic, needs ${atomic}` };
+  } catch {
+    return { ok: false, reason: "balance unreadable" };
+  }
+}
+
+// ═══ ⭐ GUARD B — A GLOBAL CEILING ON SETTLES PER MINUTE ═════════════════════════════════════
+//
+// Guard A removes the CHEAP attack. This bounds the rest: a payer who really is funded can still
+// drive settles as fast as they can sign, and every one is a Circle call on the shared key.
+//
+// ⭐ GLOBAL, NOT PER-IP. Per-IP looks stricter and is not: the griefing probe generated a fresh
+// signer per attempt, and an attacker rotates source addresses as easily. What actually needs
+// bounding is TOTAL calls against the shared quota, so that is what is counted.
+//
+// ⭐ COMPARE-AND-SET, NOT read-then-write. Two concurrent settles that both read N and both write
+// N+1 leave the ceiling counting one — the exact under-count _budget.mjs documents for spends.
+// [[stale-read-then-act]]: the claim is written BEFORE the act, and the claim decides.
+//
+// ⚠️ FAIL-CLOSED when the store is unreadable, and the two states are kept APART. A missing key is
+// a successful read of "no settles this minute" and must proceed; an unreadable STORE is not, and
+// must not. Collapsing them is how a store outage becomes an open door.
+const RATE_STORE = "x402-seller-rate";
+const RATE_TRIES = 8;
+
+// ⚠️ A FUNCTION, NOT A CONST — and both reasons are already scars in this repo.
+//   1. A module-scope `Number(process.env…)` is frozen at COLD START. It cannot be changed without
+//      a redeploy, and it cannot be exercised by a suite that sets the variable after import —
+//      which is exactly how the first version of this cap tested green while counting to 6.
+//   2. 🚨 NaN SILENTLY DISABLES THE CEILING. `n >= NaN` is FALSE, so one malformed env var turns
+//      the limiter off while every other signal still looks healthy. [[nan-fail-open-cap-pattern]]
+// Same shape as `sendCapUsdc` in _arc.mjs: validate at the gate, and THROW rather than guess — a
+// misconfigured ceiling must stop the seller, not quietly uncap it.
+const settlesPerMin = () => {
+  const raw = process.env.VANILLA_SELLER_SETTLES_PER_MIN;
+  if (raw === undefined || raw === "") return 6; // conservative default
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
+    throw new Error(`VANILLA_SELLER_SETTLES_PER_MIN is misconfigured (${JSON.stringify(raw)}); refusing to settle`);
+  }
+  return n;
+};
+
+async function claimSettleSlot() {
+  let store;
+  try { store = getStore(RATE_STORE); } catch { return { ok: false, reason: "rate store unavailable" }; }
+  const bucket = `rate:${Math.floor(Date.now() / 60000)}`;
+  for (let i = 0; i < RATE_TRIES; i++) {
+    let cur = null, etag, readable = false;
+    try {
+      const res = await store.getWithMetadata(bucket, { type: "json", consistency: "strong" });
+      cur = res?.data ?? null; etag = res?.etag; readable = true;
+    } catch { readable = false; }
+    // 🚨 THE DISTINCTION THAT MATTERS: readable+absent ⇒ first settle of the minute (proceed).
+    // unreadable ⇒ we do not know (refuse). Never the same branch.
+    if (!readable) return { ok: false, reason: "rate store unreadable" };
+    const cap = settlesPerMin();
+    const n = Number(cur?.n ?? 0);
+    if (!Number.isFinite(n)) return { ok: false, reason: "rate counter unreadable as a number" };
+    if (n >= cap) return { ok: false, reason: `${n}/${cap} settles already this minute` };
+    try {
+      const res = etag
+        ? await store.setJSON(bucket, { n: n + 1 }, { onlyIfMatch: etag })
+        : await store.setJSON(bucket, { n: n + 1 }, { onlyIfNew: true });
+      if (res?.modified !== false) return { ok: true, n: n + 1 };
+    } catch { return { ok: false, reason: "rate store write failed" }; }
+    await new Promise((r) => setTimeout(r, 4 * (i + 1) + Math.floor(Math.random() * 8)));
+  }
+  // ⚠️ Contention that never settles is refused, not waved through.
+  return { ok: false, reason: "rate slot contention" };
+}
+
 export async function handler(event) {
+  // ⚠️ Blobs is connected from the HTTP event. This function is HTTP-ONLY (no scheduled entry),
+  // so there is no second caller that could arrive without one — the failure that took
+  // budget-sweep down for five ticks. Guarded anyway rather than assumed.
+  if (event?.blobs) connectBlobs(event);
+
   // The settling wallet MUST be the payee: receiveWithAuthorization requires
   // msg.sender == to, so payTo and the wallet we submit from are the same EOA.
   const payTo = process.env.VANILLA_SELLER_ADDRESS;
@@ -227,6 +338,20 @@ export async function handler(event) {
     return challenge402(requirements, "authorization not yet valid (validAfter in future)", String(auth.validAfter));
   if (Number(auth.validBefore) <= now)
     return challenge402(requirements, "authorization expired (validBefore in past)", String(auth.validBefore));
+
+  // ⭐ GUARD A then GUARD B, in that order and for a reason: A is one cheap RPC read that rejects
+  // the whole zero-balance class, so unfundable traffic never consumes a rate slot. Counting it
+  // first would let an attacker exhaust the minute's budget with authorizations that can never pay.
+  const cover = await payerCanCover(auth.from, PRICE_ATOMIC);
+  if (!cover.ok) return challenge402(requirements, "payer cannot cover the price", cover.reason);
+
+  let slot;
+  try { slot = await claimSettleSlot(); }
+  catch (e) { return jsonRes(503, { error: "seller misconfigured", reason: String(e?.message ?? e).slice(0, 120) }); }
+  if (!slot.ok) {
+    return jsonRes(429, { error: "too many settlements right now — retry shortly", reason: slot.reason },
+      { "Retry-After": "60" });
+  }
 
   // ── Settle on-chain: receiveWithAuthorization on USDC, from the seller EOA ──
   let sigHex;

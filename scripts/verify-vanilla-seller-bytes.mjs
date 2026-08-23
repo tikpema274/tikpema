@@ -57,6 +57,36 @@ mock.module("../netlify/functions/_circle.mjs", { namedExports: {
   waitForTx: async () => "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
   TxPendingError: class TxPendingError extends Error {},
 }});
+// ⚠️ THE HANDLER GAINED TWO PRE-SETTLE GUARDS AND THIS SUITE HAD TO LEARN ABOUT THEM.
+// `payerCanCover` does an eth_call, and `claimSettleSlot` does a Blobs CAS — neither existed when
+// this file was written, and with both unmocked every settle assertion here 402'd against the real
+// RPC. ⭐ That is the suite doing its job: it drives the HANDLER, so a new gate on the path to the
+// settle SHOULD break it until the fixture admits the gate exists. Both are stubbed to "healthy"
+// so this file keeps testing what it is about — the CALL SHAPE — while the guards themselves are
+// driven, including every refusal branch, in verify-vanilla-seller-limits.
+globalThis.fetch = async (url, init) => {
+  const body = JSON.parse(init?.body ?? "{}");
+  if (body.method === "eth_call") {
+    // a payer with plenty: the balance branch is NOT what this suite is testing
+    return { ok: true, json: async () => ({ result: "0x" + (10n ** 12n).toString(16).padStart(64, "0") }) };
+  }
+  return { ok: true, json: async () => ({ current: {}, current_units: {} }) };
+};
+const rateBucket = new Map();
+mock.module("@netlify/blobs", { namedExports: {
+  getStore: () => ({
+    async getWithMetadata(k) { const v = rateBucket.get(k); return v ? { data: v, etag: "e" + v.n } : undefined; },
+    async setJSON(k, v) { rateBucket.set(k, v); return { modified: true }; },
+  }),
+  connectLambda: () => {},
+}});
+mock.module("../netlify/functions/_blobs.mjs", { namedExports: {
+  connectBlobs: () => {}, strongReadAvailable: () => true, lastConnect: {}, UNCACHED_KEY: "x",
+}});
+// ⚠️ Generous, because this suite fires several settles and the DEFAULT ceiling is 6 — a limit
+// tripping mid-run would look like a call-shape failure and send the next reader hunting the wrong bug.
+process.env.VANILLA_SELLER_SETTLES_PER_MIN = "100";
+
 const { handler, normalizeSignature } = await import("../netlify/functions/x402-vanilla-seller.mjs");
 
 process.env.VANILLA_SELLER_ADDRESS = SELLER;
