@@ -60,7 +60,73 @@ console.log("\n── a refused row keeps its refusal marker either way ──�
   check("…and the missing type is still called out", /no action type recorded/i.test(t));
 }
 
+// ═══ 🚨 BOOKKEEPING ROWS — THE SWEEPER'S TWO SHAPES, RENDERED ═════════════════════════════════
+// `agentBreakdown` excludes both from the totals ON PURPOSE. The view did not, so the trail
+// rendered them as exactly the two things the totals refuse to call them. Fed the REAL production
+// shapes, not hand-flattered ones.
+
+console.log("\n── a RESOLUTION marker is bookkeeping, not a refusal ───────────────");
+{
+  // ⭐ The literal production row: data-budget, 2026-08-22, resolution-620e455e-…
+  const t = strip(renderToStaticMarkup(
+    <ActivityList entries={[{
+      agent: "executor", kind: "resolution", resolves: "620e455e-70fa-52bb-a6df-bca66827173a",
+      outcome: "COMPLETE", justification: "landed on-chain", amountUsdc: 0, allowed: false,
+      timestamp: "2026-08-22T21:13:20.996Z",
+    } as any]} />
+  ));
+  // 🚨 THE DEFECT, ASSERTED GONE. `allowed:false` made this render as a guard refusal.
+  check("🚨 it does NOT claim anything was refused", !/refused/i.test(t), t.slice(0, 80));
+  // 🚨 …AND THE SECOND FALSE CLAIM. It HAS a recorded type; it just is not a `source`.
+  check("🚨 it does NOT claim the action type went unrecorded", !/no action type recorded/i.test(t));
+  check("⭐ it says what it actually is", /charge retired/i.test(t));
+  check("the observed outcome is carried, not dropped", t.includes("COMPLETE"));
+  check("⭐ the justification reaches a reader at last", /landed on-chain/i.test(t));
+  // ⭐ 0.0000 USDC would assert a zero-value transfer happened. Nothing moved.
+  check("⭐ it asserts no transfer, rather than a zero one", /no money moved/i.test(t) && !/0\.0000/.test(t), t.slice(0, 90));
+}
+
+console.log("\n── a REVERSAL is not a second spend ────────────────────────────────");
+{
+  const html = renderToStaticMarkup(
+    <ActivityList entries={[{
+      agent: "executor", kind: "reversal", source: "agent-send", justification: "charge did not land",
+      amountUsdc: 5, allowed: true, timestamp: "2026-08-22T21:13:20.996Z",
+    } as any]} />
+  );
+  const t = strip(html);
+  // 🚨 THE DEFECT: allowed:true + the charge's own source rendered it identically to the charge.
+  check("🚨 it is NOT rendered as an ordinary spend", /reversed/i.test(t), t.slice(0, 80));
+  check("⭐ the amount reads as a CREDIT, not a second debit", t.includes("−5.00") && !/(?<!−)\b5\.00/.test(t), t.slice(0, 90));
+  check("it still names the action it undoes", t.includes("agent-send"));
+  check("its grounds are shown", /charge did not land/i.test(t));
+  // Colour, asserted on the MARKUP: neither the red of a refusal nor the plain white of a spend.
+  check("it is not painted as a refusal", !/e5484d/.test(html));
+  check("it is not painted as a spend", !/var\(--paper\)/.test(html));
+}
+
+console.log("\n── BOTH DIRECTIONS: an ordinary row is untouched by the branch ─────");
+{
+  const t = strip(renderToStaticMarkup(
+    <ActivityList entries={[{ agent: "executor", source: "agent-send", amountUsdc: 5, allowed: true, timestamp: "2026-08-22T21:13:20.996Z" } as any]} />
+  ));
+  // ⚠️ A fix that labelled EVERYTHING bookkeeping would pass every assertion above.
+  check("⚠️ a real spend is NOT called bookkeeping", !/bookkeeping/i.test(t), t.slice(0, 80));
+  check("…and its amount is still a debit", t.includes("5.00") && !t.includes("−5.00"));
+}
+
+console.log("\n── an UNRECOGNISED kind falls through, it does not vanish ──────────");
+{
+  const t = strip(renderToStaticMarkup(
+    <ActivityList entries={[{ agent: "executor", kind: "something-new", amountUsdc: 5, allowed: false, reason: "day ceiling", timestamp: "2026-08-22T21:13:20.996Z" } as any]} />
+  ));
+  // ⭐ A closed set, read the safe way: only the two known kinds are reclassified. A future kind
+  // is shown by the ordinary branches — which already state a gap rather than inventing a label.
+  check("⭐ an unknown kind is still SHOWN", t.includes("executor") || /day ceiling/i.test(t), t.slice(0, 80));
+  check("…and is not silently called bookkeeping", !/bookkeeping/i.test(t));
+}
+
 console.log("\n════════════════════════════════════════════════════════════════════════");
 console.log(`${fail ? "❌" : "✅"} ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
-console.log("⭐ A gap renders as a gap, and a real source renders as itself.\n");
+console.log("⭐ A gap renders as a gap, a real source as itself, and bookkeeping as neither a spend nor a refusal.\n");

@@ -46,6 +46,11 @@ type ActivityEntry = {
   allowed?: boolean;
   reason?: string;
   justification?: string;
+  // ⭐ BOOKKEEPING ROWS CARRY A `kind`, AND THE TRAIL MUST READ IT. The sweeper appends
+  // `resolution` (a charge retired from its queue) and `reversal` (a submit-time charge undone)
+  // into the SAME audit trail as real actions. They are not actions and not refusals.
+  kind?: string;
+  outcome?: string;       // resolution only — what the resolver actually observed
   timestamp?: string;
 };
 type Roster = {
@@ -383,12 +388,43 @@ function AgentDetail({
   );
 }
 
+// ═══ ⭐ THE LABEL A ROW MUST NOT BORROW ══════════════════════════════════════════════════════
+// Shared by every branch, so a bookkeeping row with no `source` warns exactly like an action row
+// with no `source` — one rule, not three copies that can drift apart.
+const NO_TYPE = "⚠️ no action type recorded for this entry";
+
 // Shared activity renderer — refusals are first-class, not hidden. "It tried, and the cap
 // stopped it" is precisely what an observability surface exists to show.
+//
+// ═══ 🚨 BOOKKEEPING IS CLASSIFIED FIRST, BEFORE allowed/blocked ══════════════════════════════
+// `agentBreakdown` (_budget.mjs) already branches on `kind` FIRST, with the reason stated at the
+// call site: "Skipped FIRST so it can never fall through to the allowed/blocked branches and be
+// mis-counted as an action or a refusal." That guarantee held on the SERVER and was never applied
+// in the VIEW, so the same two rows the totals deliberately excluded were rendered as the very
+// things the totals refused to call them:
+//
+//   · `kind:"resolution"` carries `allowed:false` and NO `source` — so it rendered RED, as
+//     "refused · ⚠️ no action type recorded for this entry". Two false claims in one row: a guard
+//     refused something (nothing was refused — a landed charge was retired from the sweeper's
+//     queue), and the type was never recorded (it WAS, as `kind`). ⚠️ A real production row of
+//     exactly this shape exists: 2026-08-22, `resolution-620e455e…`, outcome COMPLETE.
+//   · `kind:"reversal"` carries `allowed:true` AND the original charge's `source` — so it rendered
+//     as an ordinary white spend row, byte-identical to the charge it UNDOES. The trail showed two
+//     identical positive rows while the total counted one. ⭐ The worse of the two: a wrong red row
+//     invites a question, a plausible duplicate does not.
+//
+// ⭐ The producer, the totals and the UI are one chain, and a guarantee is only worth what its
+// LAST link renders. Same shape as the refusal work itself — the substrate was built and the
+// consumer never read it.
 export function ActivityList({ entries, showAgent }: { entries: ActivityEntry[]; showAgent?: boolean }) {
   return (
     <div>
-      {entries.map((e, i) => (
+      {entries.map((e, i) => {
+        // Classified FIRST — mirroring agentBreakdown. A `kind` we do not recognise is NOT
+        // silently treated as an action: it falls through to the ordinary branches, where an
+        // unknown source already renders as a stated gap rather than a plausible label.
+        const bookkeeping = e.kind === "resolution" || e.kind === "reversal";
+        return (
         <div
           key={i}
           className="row"
@@ -398,6 +434,15 @@ export function ActivityList({ entries, showAgent }: { entries: ActivityEntry[];
           }}
         >
           <div>
+            {/* ⭐ A bookkeeping row is muted, never red and never plain white: it is neither a
+                refusal nor a spend, and the two colours already carry those meanings. */}
+            {bookkeeping ? (
+              <span className="sub">
+                {e.kind === "resolution"
+                  ? `bookkeeping · charge retired${e.outcome ? ` (${e.outcome})` : ""}`
+                  : `bookkeeping · reversed · ${e.source ?? NO_TYPE}`}
+              </span>
+            ) : (
             <span style={{ color: e.allowed ? "var(--paper)" : "var(--danger, #e5484d)" }}>
               {e.allowed ? "" : "refused · "}
               {/* ═══ ⭐ A MISSING SOURCE MUST NOT BORROW THE IDENTITY OF A REAL ONE ════════════════
@@ -410,18 +455,34 @@ export function ActivityList({ entries, showAgent }: { entries: ActivityEntry[];
                   a plausible label looks like a fact, and the second is worse.
                   ⚠️ The audit row is still SHOWN — hiding it would be a worse absence. It is shown
                   as what it is: an entry whose action type was never recorded. */}
-              {e.source ?? "⚠️ no action type recorded for this entry"}
+              {e.source ?? NO_TYPE}
             </span>
-            {showAgent && <span className="sub"> by {e.agent}</span>}
-            {!e.allowed && e.reason && (
-              <div className="sub" style={{ margin: "2px 0 0" }}>{e.reason}</div>
             )}
+            {showAgent && <span className="sub"> by {e.agent}</span>}
+            {/* The reason line follows the row's own classification: a refusal explains itself with
+                `reason`, a bookkeeping row with `justification`. ⚠️ `justification` was declared on
+                this type and rendered NOWHERE — the sweeper's stated grounds ("landed on-chain")
+                reached the record and never reached a reader. */}
+            {bookkeeping
+              ? e.justification && <div className="sub" style={{ margin: "2px 0 0" }}>{e.justification}</div>
+              : !e.allowed && e.reason && <div className="sub" style={{ margin: "2px 0 0" }}>{e.reason}</div>}
           </div>
           <div className="sub">
-            <span className="mono">{money(e.amountUsdc)}</span> USDC · {time(e.timestamp)}
+            {/* ═══ 🚨 THE AMOUNT COLUMN IS WHERE THE REVERSAL LIED ═════════════════════════════
+                A reversal carries a POSITIVE amountUsdc by deliberate design — _budget.mjs keeps it
+                positive plus an explicit `kind` "so the record stays legible to a human", and
+                agentBreakdown SUBTRACTS it. Rendered raw, the trail therefore showed a second
+                +999.00 next to the charge it cancels while the total had already netted it out.
+                It is shown as the credit it is. ⭐ A resolution moves no money at all, so it shows
+                NO amount — rendering 0.0000 USDC would assert a zero-value transfer occurred. */}
+            {e.kind === "resolution"
+              ? <span className="mono">no money moved</span>
+              : <><span className="mono">{e.kind === "reversal" ? `−${money(e.amountUsdc)}` : money(e.amountUsdc)}</span> USDC</>}
+            {" · "}{time(e.timestamp)}
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
