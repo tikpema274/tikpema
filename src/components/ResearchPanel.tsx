@@ -5,6 +5,7 @@ import type { TrackedJob } from "./jobTimeline";
 import { approveProposal as approve } from "../lib/approveProposal";
 import { mergeJobStatus } from "../lib/mergeJobStatus";
 import { readJson } from "../lib/readJson";
+import { describeError } from "../lib/describeError";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -101,7 +102,7 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
       // The receipt also arrives via the poll (which keeps running past `completed`).
       if (receipt) setTrackedJob((prev) => (prev ? { ...prev, receipt } : prev));
     } catch (e: any) {
-      setApproveError(e.message || "Approve failed");
+      setApproveError(describeError(e));
     } finally {
       setApproving(false);
     }

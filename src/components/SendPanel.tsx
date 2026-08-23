@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
+import { describeError } from "../lib/describeError";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -32,7 +33,7 @@ export default function SendPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       await w.sendFromAgent(to as `0x${string}`, amountNum);
       setSendConfirm(`Sent ${amountNum} USDC to ${shortAddr(to)}`);
     } catch (e: any) {
-      setSendError(e?.message || "Send failed");
+      setSendError(describeError(e));
     } finally {
       setSending(false);
     }

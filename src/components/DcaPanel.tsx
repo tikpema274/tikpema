@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import { agentClient } from "../lib/agentClient";
 import { arcTestnet } from "../config/chain";
+import { describeError } from "../lib/describeError";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 type Token = "USDC" | "EURC";
@@ -108,7 +109,7 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       setAcked(false);
       await refresh();
     } catch (e: any) {
-      setError(e?.message || "Could not create the mandate");
+      setError(describeError(e));
     } finally {
       setCreating(false);
     }
@@ -120,7 +121,7 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       await agentClient.dcaCancel(id, token);
       await refresh();
     } catch (e: any) {
-      setError(e?.message || "Could not cancel");
+      setError(describeError(e));
     }
   }
 

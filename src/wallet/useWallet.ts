@@ -9,6 +9,7 @@ import {
 import type { ConnectorInfo, WalletKind } from "./types";
 import { errorWithPayload } from "../lib/httpError";
 import { readJson } from "../lib/readJson";
+import { describeError } from "../lib/describeError";
 
 type SessionIdentity = { address: string; method: WalletKind };
 type Session = { token: string; exp: number; identity: SessionIdentity };
@@ -102,7 +103,7 @@ export function useWallet() {
       setMmStatus("");
       return w;
     } catch (e: any) {
-      setMmStatus(`Error: ${e?.message || "MetaMask connection failed"}`);
+      setMmStatus(`Error: ${describeError(e)}`);
       throw e;
     } finally {
       setMmBusy(false);

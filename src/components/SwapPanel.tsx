@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
+import { describeError } from "../lib/describeError";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 type Token = "USDC" | "EURC";
@@ -52,7 +53,7 @@ export default function SwapPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       );
       setTx(r?.tx ?? null);
     } catch (e: any) {
-      setError(e?.message || "Swap failed");
+      setError(describeError(e));
     } finally {
       setSwapping(false);
     }

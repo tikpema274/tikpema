@@ -5,6 +5,7 @@ import { agentClient } from "../lib/agentClient";
 import { arcTestnet } from "../config/chain";
 import AddressDisplay from "./AddressDisplay";
 import SignInPrompt from "./SignInPrompt";
+import { describeError } from "../lib/describeError";
 
 const EXPLORER = arcTestnet.blockExplorers.default.url;
 
@@ -190,7 +191,7 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
       await w.refreshAgentWallet().catch(() => {});
       await w.refreshBalance?.().catch(() => {});
     } catch (e: any) {
-      setFundErr(e?.message || "Funding failed");
+      setFundErr(describeError(e));
     } finally {
       setFundBusy(false);
     }
@@ -213,7 +214,7 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
         w.refreshBalance().catch(() => {}),
       ]);
     } catch (e: any) {
-      setWdErr(e?.message || "Withdrawal failed");
+      setWdErr(describeError(e));
     } finally {
       setWdBusy(false);
     }

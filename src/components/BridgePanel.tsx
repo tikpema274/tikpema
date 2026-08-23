@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import { BridgeReceiptStatus } from "./bridgeReceiptStatus";
+import { describeError } from "../lib/describeError";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -106,7 +107,7 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
       loadReceipts();
       setTimeout(loadReceipts, 12000);
     } catch (e: any) {
-      setError(e?.message || "Bridge failed");
+      setError(describeError(e));
     } finally {
       setBridging(false);
     }

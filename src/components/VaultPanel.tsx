@@ -9,6 +9,7 @@ const VAULT_KEY = "xylo-usdc";
 
 import { diffDisclosure, bps, type DisclosureDelta } from "../lib/disclosureDiff";
 import DdReportCard from "./DdReportCard";
+import { describeError } from "../lib/describeError";
 
 const shortAddr = (a?: string | null) => (a && a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a || "—");
 
@@ -77,7 +78,7 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       const d = await w.vaultShareBalance(VAULT_KEY);
       setShares({ raw: d.shareBalanceRaw, formatted: d.shareBalanceFormatted, symbol: d.shareSymbol, hasShares: !!d.hasShares });
     } catch (e: any) {
-      setSharesErr(e?.message || "Could not read your balance");
+      setSharesErr(describeError(e));
       setShares(null);
     } finally {
       setLoadingShares(false);
@@ -103,7 +104,7 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       const data = await w.inspectVault(VAULT_KEY);
       setInsp(data);
     } catch (e: any) {
-      setMsg({ ok: false, text: e?.message || "Inspection failed" });
+      setMsg({ ok: false, text: describeError(e) });
     } finally {
       setInspecting(false);
     }
@@ -147,7 +148,7 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         setAcked(false);
         setInsp((prev: any) => (prev ? { ...prev, verdict: { ...prev.verdict, level: fresh.level, warns: fresh.warns, blocks: fresh.blocks } } : prev));
       }
-      setMsg({ ok: false, text: e?.message || "Deposit failed" });
+      setMsg({ ok: false, text: describeError(e) });
     } finally {
       setDepositing(false);
     }
@@ -175,7 +176,7 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       }
       refreshShares();
     } catch (e: any) {
-      setMsg({ ok: false, text: e?.message || "Withdraw failed" });
+      setMsg({ ok: false, text: describeError(e) });
     } finally {
       setWithdrawing(false);
     }

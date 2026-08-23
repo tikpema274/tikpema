@@ -5,6 +5,7 @@ import type { TrackedJob } from "./jobTimeline";
 import { approveProposal as approve } from "../lib/approveProposal";
 import { mergeJobStatus } from "../lib/mergeJobStatus";
 import { readJson } from "../lib/readJson";
+import { describeError } from "../lib/describeError";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -104,7 +105,7 @@ export default function PlanPanel({ wallet }: { wallet: UnifiedWallet }) {
       const { receipt } = await approve({ runId, proposal, token });
       if (receipt) setTrackedJob((prev) => (prev ? { ...prev, receipt } : prev));
     } catch (e: any) {
-      setApproveError(e.message || "Approve failed");
+      setApproveError(describeError(e));
     } finally {
       setApproving(false);
     }

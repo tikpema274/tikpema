@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import type { useWallet } from "../wallet/useWallet";
+import { describeError } from "../lib/describeError";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -308,7 +309,7 @@ export default function DdReportCard({
       // ⚠️ THE SERVER'S REASONS ARE SHOWN. "Rejected" alone is unactionable, and the rejections that
       // matter — an unknown group name, an unsatisfiable threshold — are exactly the fixable ones.
       const errs: string[] = e?.errors ?? [];
-      setSaveMsg({ ok: false, text: errs.length ? errs.join(" · ") : (e?.message || "Could not save") });
+      setSaveMsg({ ok: false, text: errs.length ? errs.join(" · ") : (describeError(e)) });
     } finally { setSaving(false); }
   }
 
@@ -333,7 +334,7 @@ export default function DdReportCard({
       const d = await w.ddReport(address, hasRules ? policy : undefined);
       setData(d);
     } catch (e: any) {
-      setErr(e?.message || "Could not load the report");
+      setErr(describeError(e));
       setData(null);
     } finally {
       setLoading(false);

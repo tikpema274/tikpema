@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { readJson } from "../lib/readJson";
 import { formatUsdc, formatBalance, NO_AMOUNT } from "../lib/formatUsdc";
+import { describeError } from "../lib/describeError";
 
 // UbExitStatus — the READ side of the unified-balance exit.
 //
@@ -100,7 +101,7 @@ export default function UbExitStatus({
     } catch (e: any) {
       // ⚠️ An error here means WE COULD NOT LOOK. It must never be rendered as "nothing pending".
       setData(null);
-      setError(e?.message || "Could not read your exit status");
+      setError(describeError(e));
     } finally {
       setLoading(false);
     }
@@ -151,7 +152,7 @@ export default function UbExitStatus({
       setAmount("");
       await load();
     } catch (e: any) {
-      setStartErr(e?.message || "Could not start the withdrawal");
+      setStartErr(describeError(e));
     } finally {
       setBusy(false);
     }
