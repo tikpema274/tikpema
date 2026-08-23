@@ -8,8 +8,16 @@
 // x402-quote.mjs, which uses Circle's Gateway-batched scheme (verifyingContract =
 // the GatewayWallet, settlement via BatchFacilitatorClient).
 //
+// ⚠️ THE TOKEN IS NOT PLAIN FiatTokenV2, AND AN EARLIER COMMENT HERE SAID IT WAS. Measured
+// 2026-08-23 against the deployed proxy (0x3600… -> impl 0xc6ad664a…): the `bytes`-signature
+// overloads (0x88b7ab63 / 0xcf092995) EXIST, and the contract BRANCHES on whether `from` is a
+// contract — an EOA `from` goes to ECRecover, a contract `from` never does and signature length
+// stops mattering. So a smart-account payer (any Circle Agent Wallet SCA) CAN settle here.
+// ⚠️ `version()` returns "2" and the revert strings still say "FiatTokenV2:", so neither of those
+// discriminates the version — both are traps this file previously fell into.
+//
 // Settlement uses receiveWithAuthorization (NOT transferWithAuthorization). Both
-// live on Arc USDC (a Circle FiatTokenV2 — verified on-chain), but
+// live on Arc USDC, but
 // receiveWithAuthorization enforces `msg.sender == to`, so ONLY the payee can
 // submit it. That means a mempool observer can't front-run/grief by relaying the
 // buyer's signed auth; the seller's own wallet is the only settler. The tradeoff:
@@ -102,17 +110,35 @@ async function paidData() {
   };
 }
 
-// Split a 65-byte ECDSA signature (0x + 130 hex) into the v,r,s the FiatTokenV2
-// receiveWithAuthorization(...,uint8 v,bytes32 r,bytes32 s) overload expects.
-function splitSignature(sig) {
-  if (typeof sig !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(sig)) {
-    throw new Error("signature is not a 65-byte hex string");
+// ═══ ⭐ NORMALISE A SIGNATURE OF ANY LENGTH — the v,r,s split is gone ════════════════════════
+//
+// 🚨 WHAT THE OLD GUARD DID. It required /^0x[0-9a-fA-F]{130}$/ — EXACTLY 65 bytes — and threw
+// otherwise. That is the ECDSA signature shape and nothing else, so it rejected every contract
+// (ERC-1271) signature BEFORE the settle call was even reached. Switching the overload without
+// this would have changed nothing: the payer would still be turned away one function earlier.
+//
+// ⭐ ARC USDC BRANCHES ON WHETHER `from` IS A CONTRACT — measured, not assumed. With an EOA `from`
+// it ECRecovers (a corrupted signature fails "ECRecover: invalid signature 'v' value"); with a
+// contract `from` it never reaches ECRecover and signature LENGTH stops mattering. The `bytes`
+// overload is therefore strictly more general: it accepts the same real 65-byte EOA signature the
+// v,r,s form does, verified against the token with a real key over the token's real domain.
+//
+// ⚠️ THE ONE PIECE OF THE OLD FUNCTION THAT MUST SURVIVE IS THE `v` NORMALISATION. The v,r,s path
+// bumped a 0/1 recovery id to 27/28 before submitting. The token does NOT do that for us — a raw
+// v=0 reverts with "ECRecover: invalid signature 'v' value". Dropping it would have silently broken
+// every buyer whose signer emits 0/1, which is a legal encoding. So a 65-byte signature is still
+// normalised in place; anything else is opaque and passes through untouched.
+export function normalizeSignature(sig) {
+  if (typeof sig !== "string" || !/^0x([0-9a-fA-F]{2})+$/.test(sig)) {
+    throw new Error("signature is not a non-empty 0x-prefixed hex string of whole bytes");
   }
-  const r = "0x" + sig.slice(2, 66);
-  const s = "0x" + sig.slice(66, 130);
-  let v = parseInt(sig.slice(130, 132), 16);
-  if (v < 27) v += 27; // normalize 0/1 → 27/28
-  return { v, r, s };
+  if (sig.length === 132) {
+    // 65 bytes: an ECDSA signature. Normalise 0/1 → 27/28, exactly as before.
+    let v = parseInt(sig.slice(130, 132), 16);
+    if (v < 27) v += 27;
+    return sig.slice(0, 130) + v.toString(16).padStart(2, "0");
+  }
+  return sig; // ERC-1271 / contract signature — opaque, forwarded verbatim
 }
 
 const jsonRes = (statusCode, body, extraHeaders = {}) => ({
@@ -203,9 +229,9 @@ export async function handler(event) {
     return challenge402(requirements, "authorization expired (validBefore in past)", String(auth.validBefore));
 
   // ── Settle on-chain: receiveWithAuthorization on USDC, from the seller EOA ──
-  let vrs;
+  let sigHex;
   try {
-    vrs = splitSignature(signature);
+    sigHex = normalizeSignature(signature);
   } catch (e) {
     return jsonRes(400, { error: `bad signature: ${e.message}` });
   }
@@ -215,8 +241,11 @@ export async function handler(event) {
     const tx = await client.createContractExecutionTransaction({
       walletId: sellerWalletId, // == payTo; makes msg.sender == to
       contractAddress: ASSET,
+      // ⭐ THE `bytes` OVERLOAD (0x88b7ab63), not the v,r,s one (0xef55bec6). Same acceptance for
+      // EOA payers — proven against the deployed token with a real signature — plus the contract
+      // branch an SCA needs. See normalizeSignature above for why the swap is not enough on its own.
       abiFunctionSignature:
-        "receiveWithAuthorization(address,address,uint256,uint256,uint256,bytes32,uint8,bytes32,bytes32)",
+        "receiveWithAuthorization(address,address,uint256,uint256,uint256,bytes32,bytes)",
       abiParameters: [
         auth.from,
         auth.to,
@@ -224,9 +253,7 @@ export async function handler(event) {
         String(auth.validAfter),
         String(auth.validBefore),
         auth.nonce,
-        vrs.v,
-        vrs.r,
-        vrs.s,
+        sigHex,
       ],
       fee: { type: "level", config: { feeLevel: "MEDIUM" } }, // Arc needs >= 20 Gwei; MEDIUM clears it
     });

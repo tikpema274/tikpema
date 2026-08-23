@@ -65,7 +65,8 @@
     "test:sweepdegraded": "node --experimental-test-module-mocks scripts/verify-sweep-degraded.mjs",
     "test:wedge": "node --experimental-test-module-mocks scripts/verify-blobs-handle-wedge.mjs",
     "test:refusals": "node --experimental-test-module-mocks scripts/verify-refusal-visibility.mjs",
-    "test:errorhonesty": "npx tsx scripts/verify-error-honesty.tsx"
+    "test:errorhonesty": "npx tsx scripts/verify-error-honesty.tsx",
+    "test:vanillabytes": "node --experimental-test-module-mocks scripts/verify-vanilla-seller-bytes.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -116,6 +117,7 @@
     "test:citenum",
     "test:activityfallback",
     "test:errorhonesty",
+    "test:vanillabytes",
     "gate:opcount",
     "gate:price",
     "gate:callshape",
