@@ -1,5 +1,89 @@
 ---
 
+# 🚨 DD WAS NEVER LISTED — AND THAT HAS BEEN ASSUMED SINCE 2026-08-19
+
+Found 2026-08-23 while sweeping the Circle x402 Agent Marketplace for a buy-side test. The service
+is built, deployed, canaried, x402-gated, ERC-1271-attested and priced. **It has never appeared in
+the marketplace catalogue.** Nothing could find it, so nothing could buy it — and every "no traffic"
+reading since the 19th has been measuring a service that was not discoverable.
+
+## THE CHECK — three ways, and only the third is decisive
+
+| instrument | result |
+|---|---|
+| `circle services search "tikpema"` | **0** |
+| `circle services search "due diligence"` | **0** |
+| ⭐⭐ **our DD payout wallet `0xb40796…` as a `payTo`, across all 843 listings** | **0** |
+| Arc-network listings, anywhere in the marketplace | **0** |
+
+⭐ **THE THIRD IS THE ONLY ONE THAT PROVES IT.** A name search proves nothing about a catalogue that
+fuzzy-matches — but a listing has to **pay someone**, so our payout address appearing zero times is
+structural. Search by the thing that must be true, not by the thing that is easy to type.
+
+## 🚨 AND THE TRAP THAT WOULD HAVE CONFIRMED THE WRONG ANSWER
+
+`circle services search arc` returns **100 hits**. Every one is a fuzzy text match on a name or
+description — 86 on Base, 21 on Polygon, none anywhere near the Arc chain. A reader checking
+"is Arc represented?" by searching `arc` gets a full page of results and concludes yes.
+⭐ Same family as [[filtered-read-is-not-absence]], inverted: not a filtered read reporting a false
+ABSENCE, but a fuzzy read reporting a false **PRESENCE**.
+
+## THE MARKET IT WOULD BE LISTED INTO — census, 2026-08-23
+
+843 unique services · 1,470 priced offers · 86 sellers · 24 hosts · 13 networks.
+**727 of 1,470 offers are Base mainnet. Zero are on Arc. Zero are on ANY testnet.**
+`extra.name` — not `scheme` — decides payability: 975 offers require `GatewayWalletBatched`
+(which an SCA paying via a delegate cannot settle, [[batched-x402-requires-from-equals-signer]]),
+465 are vanilla `USD Coin` EIP-3009, which our proven buyer already handles.
+
+⚠️ **The census's own method correction is part of the record:** `--limit` defaults to **50**, and the
+first pass read exactly 50 results as a complete count. That seller actually has **298** endpoints.
+Every figure above comes from explicit pagination to exhaustion (offsets 0…800, 853 rows → 843
+unique). Published: <https://claude.ai/code/artifact/6860b288-6986-44e6-a99c-f54f5f89c946>
+
+## LISTING PREREQUISITES — verified live before submitting
+
+All three stated eligibility criteria are met:
+
+| requirement | state |
+|---|---|
+| returns `402 Payment Required` when unpaid | ✅ `402`, `network eip155:5042002`, `amount 60000` (0.06 USDC) |
+| published OpenAPI spec | ✅ `https://app.tikpema.xyz/api/dd-openapi` → 200 |
+| confirmed payout wallet | ✅ `0xb407967319d56218c7e1c369125490e665a16ac4` |
+
+Intake form: <https://forms.gle/7YFzvdmMcn1JH5tF6> — endpoint URL, payout wallet, short description.
+Listings are **reviewed and approved manually**, with **sanctions screening on the payout wallet**,
+and are maintained afterwards by **continuous health checks**.
+
+## ⚠️ THE LISTING RISK WORTH PRE-EMPTING: A NAIVE PROBE GETS 400, NOT 402
+
+An empty body returns **400**. Wrong field names return **400**. Only the spec's exact shape
+(`address` + `chain:"arc-testnet"`) reaches **402**.
+
+⭐ That is DELIBERATE AND CORRECT — dd-analyze keeps input validation free on purpose, because
+charging for "that is not a well-formed question" would quote a price for something we answer for
+nothing. ⚠️ But a manual reviewer or an automated health check that probes without a valid body sees
+a service that does not 402. The description field should say so, and point at the OpenAPI example.
+
+## ⭐ THE SUBMISSION IS THE EXPERIMENT THE CENSUS COULD NOT RUN
+
+The docs do **not** forbid testnet: `get-listed` says nothing about networks, and `become-a-seller`
+references `gateway-api-testnet.circle.com`. Against that, **0 of 843 listings are testnet**.
+Absence is not prohibition — nobody may have tried.
+
+* **Accepted** ⇒ testnet listings are permitted and the field is simply empty.
+* **Rejected** ⇒ the mainnet-only pattern is a rule, which is a finding worth publishing as a
+  census addendum.
+
+⚠️ **AND LISTING IS NECESSARY, NOT SUFFICIENT.** If it is accepted and gets no traffic, that is
+still not a demand signal — it is a 0.06 USDC testnet service in an entirely mainnet market. The
+honest thing this listing can establish is **reachability**, not demand.
+
+⭐ The plausible unlock is a **Base** deployment — 727 of 1,470 offers live there. ⚠️ But note the
+asymmetry before scoping it: the 465 vanilla offers are what we could **buy from**; listing DD on
+Base makes us a **seller**, needing a Base deployment, a Base payout wallet and Gateway settlement.
+Both are real work. They are not the same project.
+
 # ⭐⭐⭐ A GUARD CAUGHT A REAL DOUBLE-SPEND ON ITS FIRST LIVE EXPOSURE
 
 **2026-08-22, 20:01:02Z.** The tick logged `already-recorded-this-period` against mandate
