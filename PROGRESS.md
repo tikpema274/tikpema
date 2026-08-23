@@ -1,5 +1,90 @@
 ---
 
+# 🚨 `updated_at` IS NOT A PROGRESS SIGNAL — AND I KILLED A HEALTHY DEPLOY BELIEVING IT WAS
+
+**2026-08-23.** A correction to claims made earlier the same day, and the reason a one-line env-var
+change cost more than two hours.
+
+## THE TWO FACTS, STATED FIRST BECAUSE THEY ARE THE REUSABLE PART
+
+1. ⭐⭐ **A Netlify deploy record's `updated_at` tracks when the RECORD was last touched, not whether
+   the upload is moving.** Netlify does not touch it during a long function upload. A record frozen
+   for minutes is completely normal mid-transfer.
+2. ⭐⭐ **`CDN requesting N files and M functions` is what predicts deploy duration** — it is the
+   count that must actually go over the wire, after the cache diff. Everything else in the CLI's
+   output is identical between a 32-minute deploy and a 70-minute one.
+
+| deploy | `CDN requesting` | wall clock |
+|---|---|---|
+| `6a8b0ecf` ✅ published | **18** functions | **31m45s** |
+| `6a8b4d8f` (killed by me) | **113** functions | 64 min, still uploading |
+| `6a8b5e7d` | **91** functions | 58+ min, still uploading |
+
+⭐ `113 → 91` IS THE PROOF THAT THE FIRST ONE WAS WORKING: the killed attempt had already uploaded
+**22 functions**, and that work persisted into the next attempt's cache diff. A wedged upload does
+not leave 22 functions behind.
+
+## 🚨 THE MISTAKE: A CONTROL THAT DID NOT CONTROL FOR ANYTHING
+
+The reasoning was *"both deploys today went created → published in ~32 minutes; this one is at 64 and
+still uploading, therefore wedged."* The 32-minute figure came from a deploy with **18** functions to
+upload. The one being judged had **113** — six times the work, measured against a yardstick that had
+never done that work.
+
+⚠️ **AND THE PRIOR MADE IT WORSE, NOT BETTER.** [[prod-deploy-via-netlify-cli]] records real reaped
+deploys and *"one died mid-UPLOAD, 12.5 minutes in"*. Having a documented failure mode that MATCHES
+the surface symptom is precisely what made a wrong diagnosis feel like a well-supported one. The
+record said "deploys wedge in upload here", the record was true, and it was not what was happening.
+
+⭐ The one check that was run — `updated_at != created_at`, "no, it has progressed" — was reported as
+evidence AGAINST the reaped-deploy signature and then overridden anyway, because a later poll showed
+the same value twice. The check was right; it was argued away.
+
+## ⭐⭐ THE INSTRUMENT THAT SETTLED IT MEASURED WORK, NOT STATUS
+
+```
+/proc/<pid>/io   wchar delta = 70,245,484 bytes over 30s  (~2.3 MB/s)
+                 read_bytes still climbing · 7 open sockets
+```
+
+A status field can be stale, cached, or simply not written. **Bytes on a socket cannot be any of
+those things.** When a status field and a work measurement disagree, the work measurement wins.
+
+## 🚨 AND THE WATCHDOG I BUILT ENCODED THE WRONG TEST
+
+Asked to ping on completion, a watcher was armed covering four terminal conditions — deliberately
+including the silent-death and wedge shapes, on the reasoning that "silence must never be the
+outcome". ⭐ That reasoning was right. **The wedge test itself was wrong**: it fired on
+`state == "uploading" && updated_at unchanged across two polls 60s apart` — a condition a healthy
+upload satisfies constantly. It fired at ~100 seconds of staleness and would have had a second
+healthy deploy killed.
+
+⚠️ **A guard built on a misunderstood field is worse than no guard**, because its alarm carries the
+authority of a deliberate check. It was NOT re-armed after the correction. If a ping is wanted, the
+test is *throughput going to zero AND the process exiting* — never a status field.
+
+## THIS IS THE SAME DAY'S PATTERN, NOW IN A GUARD OF MY OWN
+
+[[observation-that-does-not-survive]] and today's six-instrument entry are about instruments
+reporting falsely. This is the eighth, and the first one **authored and armed deliberately in
+response to the earlier seven**. ⭐ Knowing the failure family did not prevent building a fresh
+instance of it — because the mistake was never in the vigilance, it was in not asking what the field
+being watched actually measures.
+
+⚠️ **Also in this hour, for the record:** `pgrep -f "netlify deploy"` reported the process alive
+after it had been killed — the shell command line doing the grepping *contained the search string*,
+so it matched itself. Confirmed dead only by `ps -C node` returning nothing.
+
+## THE OPERATIONAL RULE
+
+> **Before calling a deploy wedged, read `CDN requesting` from its own log and compare against a
+> deploy that uploaded a SIMILAR COUNT. If that is unavailable, measure `/proc/<pid>/io`. Do not use
+> `updated_at`, and do not use another deploy's wall clock as a baseline.**
+
+⚠️ Kill only on evidence of no work: zero throughput over minutes, or the process gone. Killing costs
+the uploaded-so-far progress, which — as `113 → 91` shows — is real and cumulative.
+---
+
 # 🚨🚨 SIX INSTRUMENTS REPORTED SUCCESS OR ABSENCE WHILE THE SUBJECT HAD FAILED — ALL IN ONE DAY
 
 **2026-08-23.** Filed as ONE entry because filed separately they read as six unrelated slips, and the
