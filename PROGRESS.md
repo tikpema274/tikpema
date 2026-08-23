@@ -83,6 +83,62 @@ so it matched itself. Confirmed dead only by `ps -C node` returning nothing.
 
 ⚠️ Kill only on evidence of no work: zero throughput over minutes, or the process gone. Killing costs
 the uploaded-so-far progress, which — as `113 → 91` shows — is real and cumulative.
+
+# 🚨🚨 THE SEQUEL, AND THE SHARPEST LESSON OF THE DAY: **THE RULE WAS RIGHT, THE SUBJECT WAS WRONG**
+
+**Written after the above, which was committed an hour earlier and did not save me.**
+
+Having just written *"measure work, not status"*, the very next reading applied it — and reached the
+same false conclusion by a new route. `/proc/<pid>/io` showed **zero read AND zero write over 90
+seconds** while the CLI still said `Uploading 91 files`. Reported as *"genuinely stalled — this time
+I have evidence, not a status field."*
+
+🚨 **IT WAS THE WRONG PROCESS.** The measurement was taken on the **npm wrapper**, which performs no
+I/O, not the `netlify deploy` child actually moving bytes. The uploader was at that moment running
+at **2.5 MB/s across 6 sockets**, and it published on its own ~1 minute later.
+
+⭐ **HOW THE WRONG PID GOT SELECTED, because the mechanism is the transferable part:** the first
+(correct) sample used a PID read off `ps`. The second resolved it with
+`pgrep -f "netlify deploy --prod" | head -1` — and `head -1` returned the **parent**, whose command
+line also contains that string. A stricter-looking, more "automatic" lookup silently changed the
+subject.
+
+## ⭐⭐⭐ THE RULE THE WHOLE DAY WAS ACTUALLY ABOUT
+
+> **Verifying the intervention is not enough. Verify the SUBJECT.**
+> "Did the command run?" and "did it run against the thing doing the work?" are different questions,
+> and the second one has no error message. A measurement of the wrong process is not a weak
+> signal — it is a confident, well-formed reading of something irrelevant.
+
+⚠️ This is why the earlier six-instrument entry did not inoculate against anything. Every defence in
+it — cross-check with a different instrument, calibrate against a known positive, prefer checks that
+cannot be vacuous — **passes trivially when pointed at the wrong subject.** A zero-throughput reading
+on an idle wrapper survives all three.
+
+## ⭐ THE ONE GUARD THAT BEHAVED, AND WHY
+
+The corrected watchdog was pointed at a PID that had exited seconds earlier. It **refused to run**:
+
+```
+🚨 PID 358238 is not the uploader — refusing to watch
+```
+
+Its first act was to check its own subject (`/proc/<pid>/cmdline` must contain `netlify deploy
+--prod`) before watching anything. ⭐ That is the entire fix, and it is three lines: **a watcher must
+assert what it is watching before it reports on it.** Had it merely watched, it would have observed
+a nonexistent process quietly and reported nothing wrong — the failure family, one more time.
+
+## THE TALLY, STATED PLAINLY
+
+Ten in one day. Six in the earlier entry; then `pgrep -f` matching its own command line (#7); a
+watchdog encoding a misunderstood field (#8); a work-measurement on the wrong process (#9); and
+`pkill -f "npm run deploy:prod"` **killing the shell that ran it**, because the eval string contained
+the pattern (#10).
+
+⚠️ **Two healthy deploys were nearly killed; one actually was.** The cost was ~2 hours and a
+discarded upload. ⭐ Nothing here was a knowledge gap — the rules were known, written down, and in
+one case committed to git ninety minutes before being violated. The gap was that **every rule was
+about the reading, and none was about the referent.**
 ---
 
 # 🚨🚨 SIX INSTRUMENTS REPORTED SUCCESS OR ABSENCE WHILE THE SUBJECT HAD FAILED — ALL IN ONE DAY
