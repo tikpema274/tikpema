@@ -117,6 +117,28 @@ broadcast**, so the verifier settles `unconfirmed` and never reaches its reversa
 failure shape actually observed therefore lands on the backstop, which is why the backstop is the
 primary handler. See the memory note `budget-reversal-reconcile-design-brief`.
 
+## x402 vanilla trail (EIP-3009 direct settlement) — backs the `bytes`-overload switch
+
+`x402-vanilla-seller` settled through the ECDSA-only `receiveWithAuthorization(...,uint8,bytes32,bytes32)`
+overload, behind a guard requiring **exactly 65 bytes** — so no contract (ERC-1271) payer could settle,
+and the guard refused them one function *before* the overload mattered. Both were changed together;
+this spike is the evidence that the swap is safe for the EOAs already using it.
+
+| Step | Script | What it established | Moves money? |
+|---|---|---|---|
+| A | `spike-vanilla-bytes-encoding.mjs` | **PHASE A (free):** Circle's SDK does **no** ABI encoding — zero `abiFunctionSignature`, no coder, just axios; it encodes **server-side**, so there is no local calldata to inspect. `estimateContractExecutionFee` answered it as an A/B on one throwaway zero-balance key: a real signature dies on the empty balance (*past* signature validation), a corrupted one dies *at* it. ⭐ The stop condition was **identical** outcomes — a mis-encoded `bytes` makes signature validity invisible, so "both errored" is the signature of breakage, not of safety | no — estimate only |
+| B | `spike-vanilla-bytes-encoding.mjs --settle` | **the first vanilla settlement this project has done** — `0x398e7027…d067edb`, block 58,480,949. Delivered **exactly 10000 atomic**; payer delta exactly −10000; seller delta 6158 = 10000 − 3842 gas (pre-registered as delivered-**minus**-gas: USDC *is* the gas token on Arc and `receiveWithAuthorization` forces the payee to submit). ⚠️ **submit→mined 2.48 s — NOT the sub-second pre-registered**, reported as measured and run once. Still ~370× faster than Gateway's ~15.4 min flush, and *final* rather than `success:true` | **YES** (0.01 USDC) |
+
+### ⚠️ Two measurement defects this trail is also evidence of
+* **Delivered first read `10000000000000000`** — 1e12 too big. An Arc settlement emits the same movement
+  **twice**: the USDC ERC-20 `Transfer` at `0x3600…` in **6** decimals and the **native-token view** at
+  `0xffff…fe` in **18**. The filter matched topic + recipient and never pinned the contract address —
+  a measurement failure that read exactly like a settlement failure.
+* **The first run died on `ETIMEDOUT`** to Arc's throttled public RPC, in the free phase, before anything
+  was signed; verified on-chain that nothing moved before re-running. Reads now retry —
+  ⭐ **the Circle submit is deliberately NOT wrapped, because retrying a submission is how one payment
+  becomes two.**
+
 ## Superseded / dead-ends (kept for the honest trail, NOT proof)
 | Script | Why it's here |
 |---|---|
