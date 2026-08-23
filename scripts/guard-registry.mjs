@@ -135,6 +135,7 @@ export const UNWIRED_OK = {
   "gate:pins": "network-dependent (IPFS routing probes). ⚠️ A flaky network inside a BLOCKING aggregate manufactures tolerated red — species 3 — so it is run deliberately, not on every commit.",
   "test:ddwatch": "network-dependent (probes the live DD service). Same reasoning as gate:pins.",
   "gate:draft": "the deploy-preview variant of gate:watch; runs against a draft, not a checkout.",
+  "test:vanillabyteslive": "network-dependent (eth_calls Arc's PUBLIC RPC, recorded as throttled and observed ETIMEDOUT 2026-08-23 mid-run). Same call as gate:pins: a flaky network inside a BLOCKING aggregate manufactures tolerated red. Its in-process half, test:vanillabytes, IS in test:all and asserts this file exists and stays registered — so splitting it out cannot become dropping it.",
 };
 
 /**

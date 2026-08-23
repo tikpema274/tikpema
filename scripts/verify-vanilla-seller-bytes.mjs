@@ -133,37 +133,27 @@ await section("── 4. GARBAGE IS STILL REFUSED (the guard did not just get de
   check("⭐ and the handler answers 400 rather than settling", res.statusCode === 400, `got ${res.statusCode}`);
 });
 
-await section("── 5. 🔗 LIVE: the forwarded signature is accepted by the REAL token ", async () => {
-  const TYPEHASH = keccak256(toHex("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"));
-  const local = keccak256(encodeAbiParameters(parseAbiParameters("bytes32, bytes32, bytes32, uint256, address"),
-    [TYPEHASH, keccak256(toHex("USDC")), keccak256(toHex("2")), BigInt(CHAIN_ID), USDC]));
-  const ONCHAIN = await (await fetch(RPC, { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: USDC, data: "0x3644e515" }, "latest"] }) })).json();
-  // ⚠️ CALIBRATION FIRST: a signature over the wrong domain would fail for the wrong reason and
-  // this whole section would "prove" the opposite of what it claims.
-  check("⭐ our EIP-712 domain reproduces the token's real DOMAIN_SEPARATOR",
-    local.toLowerCase() === String(ONCHAIN.result).toLowerCase(), local.slice(0, 18) + "…");
-
-  const ABI = [{ name: "receiveWithAuthorization", type: "function", stateMutability: "nonpayable", outputs: [],
-    inputs: [{name:"from",type:"address"},{name:"to",type:"address"},{name:"value",type:"uint256"},
-      {name:"validAfter",type:"uint256"},{name:"validBefore",type:"uint256"},{name:"nonce",type:"bytes32"},
-      {name:"signature",type:"bytes"}] }];
-  const args = [auth.from, auth.to, BigInt(auth.value), BigInt(auth.validAfter), BigInt(auth.validBefore), auth.nonce];
-  const ethCall = async (sig) => {
-    const data = encodeFunctionData({ abi: ABI, functionName: "receiveWithAuthorization", args: [...args, sig] });
-    // ⚠️ from = the payee, because receiveWithAuthorization enforces msg.sender == to.
-    const r = await (await fetch(RPC, { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ from: SELLER, to: USDC, data }, "latest"] }) })).json();
-    return r.error ? (r.error.message || "").replace(/^execution reverted:?\s*/, "") : null;
-  };
-  const good = await ethCall(realSig);
-  const badSig = realSig.slice(0, -2) + (realSig.slice(-2) === "1b" ? "1c" : "1b");
-  const bad = await ethCall(badSig);
-  const rejected = (m) => m !== null && /invalid signature|ECRecover/i.test(m);
-  check("⭐⭐ the real EOA signature gets PAST signature validation on the bytes overload",
-    !rejected(good), good === null ? "no revert" : good);
-  // ⚠️ NEGATIVE CONTROL. Without this, an RPC that reverted on everything would pass the line above.
-  check("⚠️ …and a corrupted one is REJECTED, so the probe discriminates", rejected(bad), bad);
+// ═══ 🚨 THE LIVE HALF LIVES ELSEWHERE — AND THAT IS ASSERTED, NOT MENTIONED ═════════════════
+// Everything above is ONE PROCESS: it proves what this seller SENDS, and is structurally incapable
+// of proving the deployed token ACCEPTS it — both sides of that boundary are our own code
+// ([[binding-tested-across-what-it-binds]]). The crossing lives in verify-vanilla-seller-bytes-live,
+// split out of test:all because Arc's public RPC is throttled and a flaky network inside a BLOCKING
+// aggregate manufactures a tolerated red (same call as gate:pins / test:ddwatch).
+//
+// ⭐ A COMMENT SAYING "the live arm exists" ROTS THE DAY SOMEONE DELETES IT. So this suite fails if
+// that file is gone or unregistered. Splitting a check out must not be able to become dropping it.
+await section("── 6. THE LIVE COUNTERPART EXISTS AND IS REGISTERED ────────────────", async () => {
+  const { readFileSync, existsSync } = await import("node:fs");
+  const LIVE = "scripts/verify-vanilla-seller-bytes-live.mjs";
+  check("⭐ the live suite file is still on disk", () => existsSync(LIVE), LIVE);
+  const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+  check("⭐ …and is a runnable npm script", () => /verify-vanilla-seller-bytes-live/.test(pkg.scripts?.["test:vanillabyteslive"] ?? ""));
+  // ⚠️ Deliberately NOT in `suites`. Asserted so a well-meaning future edit that "fixes the orphan"
+  // by adding it back to test:all trips this line and has to read the reason first.
+  check("⚠️ …and deliberately NOT in test:all (a throttled RPC must not gate every commit)",
+    () => !(pkg.suites ?? []).includes("test:vanillabyteslive"));
+  check("⭐ …with its exemption reason recorded in the guard registry",
+    () => /test:vanillabyteslive/.test(readFileSync("scripts/guard-registry.mjs", "utf8")));
 });
 
 console.log("\n════════════════════════════════════════════════════════════════════════");
