@@ -1,5 +1,76 @@
 ---
 
+# 🚨🚨 SIX INSTRUMENTS REPORTED SUCCESS OR ABSENCE WHILE THE SUBJECT HAD FAILED — ALL IN ONE DAY
+
+**2026-08-23.** Filed as ONE entry because filed separately they read as six unrelated slips, and the
+pattern is the entire point. Every one produced **well-formed, plausible output**. None looked like
+an error. In every single case the detection came from an **independent cross-check** — never from
+looking harder at the instrument's own output, because there was nothing there to see.
+
+| # | instrument | said | actually | what caught it |
+|---|---|---|---|---|
+| 1 | `netlify logs --source functions --since 2m`, run 7 min as a "tail" | 5 lines, then silence | it is a **BACKFILL, not a tail** — the window it claimed to cover was never watched | a `* * * * *` cron missing from its own window: ~7 `dca-tick` runs should have been there |
+| 2 | `eth_getLogs` over a hand-computed block range | **zero logs** | the range was ~6,500 blocks low (my hex arithmetic); the transfers sat at 49,856,955 / 49,857,362 | a balance bisection had already located both change-points, and its deltas summed **exactly** to the balance |
+| 3 | a mutation removing an npm script entry | suite **25/0 green** ⇒ "the guard misses this" | **the mutation never applied** — the entry is last in `scripts`, so no trailing comma, and the pattern searched for one | grepping the file *after* mutating instead of trusting the green |
+| 4 | `npm run test:all \| tail` | shell **exit 0** | `run-suites` exited **1** with `FAILED 1`; the pipe returned `tail`'s status | eventually reading the roll-up TEXT, which contradicted the exit code |
+| 5 | bytecode scan for the EIP-1271 selector `1626ba7e` | **absent** ⇒ "no EIP-1271 support" | the token *does* branch for contract signers | a BEHAVIOURAL probe: a contract `from` never reaches ECRecover and signature length stops mattering |
+| 6 | "the Transfer to the seller" in a settlement receipt | delivered `10000000000000000` | delivered **10000**; that was the 18-decimal NATIVE view of the same movement | reconciliation arithmetic that refused to close |
+
+⚠️ **ONLY #1 WAS THE TOOL BEHAVING UNEXPECTEDLY. THE OTHER FIVE WERE ME MIS-WIELDING IT.** That
+distinction matters for the fix and is worthless as a defence: from the reader's side the two are
+identical. "The tool is fine" does not make the reading true.
+
+## ⭐⭐⭐ THE RULE, STATED SO IT OUTLIVES THE SIX
+
+> **Verify the INTERVENTION, not just the result.** A mutation that never applied, a window that
+> never covered, a pipe that never propagated, a filter that matched the wrong thing — every one of
+> them emits confident, well-formed output. The question is never only *"what did it say?"* but
+> *"did it actually do the thing whose absence of complaint I am about to trust?"*
+
+Three corollaries, each earned today:
+
+* ⭐ **An instrument's SILENCE is worth nothing until it is calibrated against a known positive.**
+  `agent-send`, `agents`, `my-wallet` and `auth-verify` all read **zero invocations** — which is
+  exactly what a log source blind to user traffic would say. Calibrating with an external `curl` of
+  `blobs-probe` (08:58:19Z → logged 08:58:20.287Z, one second) turned that silence into a real
+  measurement. ⭐⭐ **THIS IS THE ONE THAT WORKED**, and it is the only reason the conclusion
+  ("nothing reached the server") was trustworthy rather than a coin flip.
+* ⭐ **Cross-check with a DIFFERENT instrument, not a repeat of the same one.** #2 was caught by
+  arithmetic, #5 by behaviour, #6 by reconciliation. Re-running the failing instrument would have
+  reproduced every wrong answer perfectly. [[repeating-one-instrument-is-not-corroboration]]
+* ⭐ **Prefer a check that CANNOT be vacuous.** The balance bisection's deltas summing to the balance
+  is self-validating; a block-range scan is only as good as its range. Where a check can pass by
+  doing nothing, add a subject count — the error-honesty guard asserts it scanned >20 files, and the
+  live vanilla suite asserts a corrupted signature is still rejected, precisely so a dead RPC or an
+  empty scan cannot read as green.
+
+## 🚨 AND THE ONE THAT ACTUALLY COST SOMETHING
+
+#4 is the expensive one, and not because of the pipe. `main` carried a **red `test:spikes` across
+three commits** because I ran `test:all` green at the end of one step, wrote a new spike in the next,
+and committed without re-running. Then, checking, I piped the re-run through `tail` and read its `0`
+as success while `FAILED 1` sat in the output.
+
+⭐ **Two independent failures stacked into one wrong belief:** a stale green (the run predated the
+change) and a masked exit code (the fresh run's red was invisible). Either alone would have been
+caught by the other. ⚠️ The discipline is not "claim test:all only when you ran it" — the commit
+message correctly claimed nothing. It is **re-run the aggregate against the tree you are actually
+committing**, and read its exit status directly rather than through a pipe.
+
+## ⚠️ WHY THIS FAMILY KEEPS RECURRING HERE SPECIFICALLY
+
+This repo's existing notes — [[absence-must-never-read-as-safe]], [[filtered-read-is-not-absence]],
+[[observation-that-does-not-survive]] — are all about the CODE reporting falsely. Today every
+instance was in the **TOOLING around the code**: a CLI, a block range, a `sed` pattern, a shell pipe.
+⭐ The same failure mode moved one layer out, where there are no suites, no guards and no mutation
+tests — and where a green reading is trusted *more* precisely because it came from a tool rather
+than from something we wrote.
+
+⚠️ **Nothing here is fixed by a guard**, which is why it is written down as a habit instead. The only
+defence that worked all day was the cheap one: **before believing an instrument's silence, make it
+say something you already know is true.**
+---
+
 # ⭐⭐ THE FIRST VANILLA SETTLEMENT — AND A CONTRACT PAYER CAN NOW SETTLE AT ALL
 
 **2026-08-23.** `x402-vanilla-seller` settled real USDC on Arc through the EIP-3009 `bytes`
