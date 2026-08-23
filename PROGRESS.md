@@ -1,5 +1,131 @@
 ---
 
+# ⭐⭐ THE FIRST VANILLA SETTLEMENT — AND A CONTRACT PAYER CAN NOW SETTLE AT ALL
+
+**2026-08-23.** `x402-vanilla-seller` settled real USDC on Arc through the EIP-3009 `bytes`
+overload: **`0x398e7027…d067edb`, block 58,480,949, 0.010000 USDC delivered.** Every pre-registered
+value matched except latency, which is recorded as a finding rather than smoothed over.
+
+| | pre-registered | measured |
+|---|---|---|
+| delivered (USDC ERC-20 Transfer) | exactly `10000` atomic | ✅ **10000** |
+| seller balance delta | delivered **minus gas** | ✅ **6158** = 10000 − 3842 |
+| payer balance delta | exactly `−10000` | ✅ **−10000** |
+| submit → mined | *user:* sub-second · *mine:* not sub-second | ⚠️ **2.48 s** |
+
+## 🚨 THE BLOCKER WAS THE GUARD, NOT THE OVERLOAD
+
+Switching the settle call alone would have changed **nothing**. `splitSignature` required
+`/^0x[0-9a-fA-F]{130}$/` — **exactly 65 bytes** — and threw otherwise, so every contract (ERC-1271)
+signature was refused *one function before* the overload mattered. Both had to change.
+
+⭐ **AND ONE PIECE OF THE OLD FUNCTION HAD TO SURVIVE.** It bumped a `v` of 0/1 to 27/28 before
+submitting. **The token does not do that for us** — a raw `v=0` reverts `ECRecover: invalid
+signature 'v' value`. Dropping it would have silently broken every buyer whose signer emits the 0/1
+encoding, which is legal. 65-byte signatures are still normalised in place; longer ones are opaque
+and forwarded verbatim. Pinned by the mutation that removes it (3 red).
+
+**test:vanillabytes 24/0**, wired into `test:all` (33 → **34**, which is what proves it is not
+silently skipped). Mutations: 65-byte guard reinstated → 3 red · v,r,s overload reinstated → 2 red ·
+`v` normalisation removed → 3 red. File restored byte-identical after each.
+
+## ⚠️ THE MUTATION RUN FOUND A DEFECT IN THE SUITE ITSELF
+
+The first mutation produced **no output at all**: reinstating the 65-byte guard made
+`normalizeSignature` throw, the throw escaped, and three sections never ran. **A crash reports
+NOTHING where it should report red**, and a short transcript is exactly what `run-suites.mjs` warns
+is a signal rather than good news — the same shape the sweeper suite hit. `check` now accepts a
+thunk and turns a throw into one red line; each section runs in a wrapper. ⭐ A guard validated only
+against the fixed code proves nothing, and this one was not even *reporting* against the broken code.
+
+# ⭐ CIRCLE ENCODES DYNAMIC `bytes` CORRECTLY — SETTLED FREE, BEFORE ANY MONEY
+
+Every other contractExecution in this repo passes VALUE types. A dynamic `bytes` is offset-encoded,
+and nothing had exercised it; a mis-encode would surface at settle time holding a real buyer's
+signed authorization. ⭐ **The SDK does not encode at all** — zero occurrences of
+`abiFunctionSignature`, no ABI coder, just axios. Circle encodes SERVER-SIDE, so there is no local
+calldata to inspect and the question can only be put to their API.
+
+`estimateContractExecutionFee` (non-executing) answered it, as an A/B on one throwaway zero-balance key:
+
+| signature | result |
+|---|---|
+| real | `insufficient token when estimating fee` — **past** signature validation, died on the empty balance |
+| corrupted | `Estimate fee execution reverted` — died **at** signature validation |
+
+⭐ **THE STOP CONDITION WAS *IDENTICAL* OUTCOMES.** A mis-encoded `bytes` makes the signature's
+validity invisible to the contract, so both would fail the same way — "both errored" would have been
+the signature of breakage, not of safety. They differ, so the offset and length prefix arrived intact.
+
+## ⚠️ 2.48 s IS NOT SUB-SECOND, AND IS REPORTED AS MEASURED
+
+0.33 s to Circle accepting and returning an id, then 2.15 s of queue + broadcast + mining. Arc mines
+in ~0.54 s, so most of the remainder is Circle's pipeline, not the chain. ⭐ The comparison that
+matters still holds decisively: **2.48 s to money actually moved, against Gateway's measured ~15.4
+min flush — ~370× faster, and FINAL rather than merely `success:true`**
+([[gateway-settlement-measured]]). Run once; not retried until it looked fast.
+
+# 🚨 THE VANILLA SELLER'S BALANCE, ATTRIBUTED AT LAST — AND THE RECORD WAS WRONG
+
+`create-revenue-wallet.mjs:27` read *"0.308114 — a NON-ROUND balance, i.e. accumulated prior
+receipts."* **That inference is false.** The wallet's entire history is two inbound transfers and
+no outbound:
+
+```
+  +300000  funding, from an ERC-4337 smart account (via EntryPoint handleOps)
+  + 10000  ONE sale — from DELEGATE_ADDRESS, exactly PRICE_ATOMIC
+  −  1886  gas
+  ────────
+   308114
+```
+
+**One receipt, not "accumulated receipts" — and the non-roundness is GAS**, because USDC *is* the
+gas token on Arc and `receiveWithAuthorization` forces the payee to submit (`msg.sender == to`).
+
+⭐ **THE PRE-REGISTRATION HELD FOR REVENUE.** The only transfer that could be a purchase is exactly
+`PRICE_ATOMIC` and came from the delegate; the seller rejects any authorization whose value ≠ price,
+so the 0.30 cannot have been a sale. ⚠️ But one sender **is** unrecognised —
+`0x98a662d6…`, absent from the repo and every env var, sharing an implementation with our own
+`AGENT_WALLET_ADDRESS`. Same wallet *type* is not same *owner*; per-user SCAs never appear in
+`.env`. Treated as ours pending better evidence, and **not** as a demand signal either way — it
+bought nothing.
+
+## ⭐ HOW COMPLETENESS WAS ESTABLISHED, GIVEN A 10,000-BLOCK `eth_getLogs` CAP
+
+58.5 M blocks made a full scan impractical, so the balance was **bisected across archive reads**:
+two change-points in 37 calls, and **the deltas sum exactly to the balance**. That is an arithmetic
+completeness check rather than a trusted window — which mattered, because the first `eth_getLogs`
+call returned **zero logs** from bad hex arithmetic and the bisection immediately contradicted it.
+[[filtered-read-is-not-absence]]
+
+# ⚠️ TWO MEASUREMENT DEFECTS, BOTH FROM TRAPS ALREADY IN THE RECORD
+
+1. 🚨 **The settlement's delivered amount first read `10000000000000000`** — exactly 10¹² too big.
+   An Arc settlement emits the SAME movement twice: the USDC ERC-20 `Transfer` at `0x3600…` in **6**
+   decimals, and the **native-token view** at `0xffff…fe` in **18**. Both are genuine Transfers to
+   the seller. The filter matched topic + recipient and never pinned the CONTRACT ADDRESS.
+   ⭐ A measurement failure that read exactly like a settlement failure — [[arc-eth-getbalance-18-decimals]],
+   the same asset in two views. Fixed, and the reconciliation line now self-checks that
+   `delivered − gas == balance delta`, so a unit error cannot print as arithmetic again.
+2. ⚠️ **The first settlement attempt died mid-flight** on `ETIMEDOUT` to Arc's throttled public RPC —
+   in the FREE phase, before anything was signed. Verified on-chain that nothing moved and the
+   seller's tx count was still 1 before re-running. Reads now retry with backoff; ⭐ **the Circle
+   submit is deliberately NOT wrapped — retrying a submission is how one payment becomes two.**
+
+# 📌 OPEN, STATED RATHER THAN LEFT TO BE REDISCOVERED
+
+* **The seller is still INERT.** `VANILLA_SELLER_ADDRESS` / `VANILLA_SELLER_WALLET_ID` are unset in
+  **all four** Netlify contexts. Arming it is a separate decision and was not taken.
+* **`test:vanillabytes` §5 depends on the live Arc RPC.** This session produced a real ETIMEDOUT, so
+  it *will* occasionally fail for reasons unrelated to the code. An unreachable RPC currently reports
+  a loud diagnosable red rather than a skip — chosen because a skip reading as green is the failure
+  family this repo keeps re-learning. Whether it belongs in `test:all` is unruled.
+* **A third-party seller's settlement call shape is undiscoverable.** Our seller now accepts contract
+  payers, but as a BUYER we still cannot tell from an x402 challenge whether a seller submits the
+  `bytes` or the `v,r,s` overload — so an SCA-signed payment to a third party remains unverifiable
+  before signing.
+---
+
 # ✅ THE REFUSAL ROUND TRIP IS PROVEN — 12/12 PRE-REGISTERED VALUES, ON THE PATH THE BUTTON TAKES
 
 **2026-08-23.** The re-proof `4a6e675` was built for. An over-cap Send (999 USDC against a deployed
