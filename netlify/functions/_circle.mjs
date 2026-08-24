@@ -55,7 +55,37 @@ export async function waitForTx(client, id, deadlineMs = DEADLINE_MS) {
     const { data } = await client.getTransaction({ id });
     const state = data?.transaction?.state;
     if (state === "COMPLETE") return data.transaction.txHash;
-    if (state === "FAILED") throw new Error("Transaction failed on-chain");
+    // ═══ 🚨 "FAILED" COVERS TWO DIFFERENT THINGS, AND THIS USED TO ASSERT THE WRONG ONE ═══════
+    // The old message was the flat string "Transaction failed on-chain". Circle marks a transaction
+    // FAILED both when it was broadcast and REVERTED, and when Circle REFUSED IT AT ESTIMATION and
+    // it never touched the chain at all. Telling a user their transaction failed on-chain when no
+    // transaction ever reached the chain asserts something we did not observe — the same defect as
+    // the UI's "Send failed", and it surfaced six times in one burst against the vanilla seller.
+    //
+    // ⭐ THE DISCRIMINATOR WAS ALREADY KNOWN AND NEVER PROPAGATED HERE. spike-step4b, step4c and
+    // step5b all record it in those words: "NO HASH → never broadcast". A FAILED transaction with a
+    // txHash reverted; a FAILED transaction without one was rejected before broadcast. That
+    // distinction matters to a caller deciding whether to retry — a revert will revert again, a
+    // pre-broadcast rejection may not — and it decides whether gas was spent.
+    //
+    // ⚠️ ADDITIVE, NEVER A REPLACEMENT (the errorWithPayload precedent): every existing caller reads
+    // `e.message` and keeps working. The structured fields ride alongside so a caller CAN branch
+    // without parsing prose. 12+ money-path functions depend on this helper; nothing asserts on the
+    // old wording (checked before changing it).
+    if (state === "FAILED") {
+      const txHash = data?.transaction?.txHash ?? null;
+      const reason = data?.transaction?.errorReason ?? data?.transaction?.errorDetails ?? null;
+      const err = new Error(
+        txHash
+          ? `Transaction reverted on-chain${reason ? ` (${reason})` : ""} — tx ${txHash}`
+          : `Circle rejected the transaction before broadcast${reason ? ` (${reason})` : ""} — it never reached the chain`
+      );
+      err.circleId = id;
+      err.txHash = txHash;
+      err.broadcast = Boolean(txHash);   // ⭐ the fact, separate from the prose
+      err.errorReason = reason;
+      throw err;
+    }
     await new Promise((r) => setTimeout(r, POLL_MS));
   }
   throw new TxPendingError(id);

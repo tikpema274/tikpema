@@ -417,9 +417,17 @@ export async function handler(event) {
       `vanilla-seller settle failed status=${status ?? "?"}:`,
       JSON.stringify(detail) || e.message
     );
+    // ⚠️ THE HEADLINE MUST NOT CLAIM THE CHAIN SAW ANYTHING. `waitForTx` now reports whether the
+    // transaction was actually broadcast; when it was not, saying "on-chain" asserts an event that
+    // never happened. `e.broadcast === false` is the pre-broadcast rejection; `undefined` means the
+    // failure came from somewhere that cannot tell us, which is stated rather than guessed.
+    const headline =
+      e.broadcast === true ? "settlement reverted on-chain"
+      : e.broadcast === false ? "settlement rejected before broadcast — nothing reached the chain"
+      : "settlement failed (could not determine whether it reached the chain)";
     return challenge402(
       requirements,
-      "settlement failed on-chain",
+      headline,
       detail ? JSON.stringify(detail) : e.message
     );
   }
