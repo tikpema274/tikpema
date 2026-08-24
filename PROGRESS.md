@@ -1,5 +1,67 @@
 ---
 
+# 🚨 ARC HAS NO GATEWAY DOMAIN ON MAINNET — MEASURED 2026-08-24, WITH A POSITIVE CONTROL
+
+The mainnet-readiness blocker, checked against **Circle's live Gateway API** rather than
+documentation. Two endpoints, one of which exists purely to prove the first one can see what it is
+being asked about.
+
+| endpoint | result |
+|---|---|
+| `https://gateway-api.circle.com/v1/info` | **12 domains — ARC ABSENT** |
+| | Ethereum 0 · Avalanche 1 · Optimism 2 · Arbitrum 3 · Solana 5 · Base 6 · Polygon 7 · Unichain 10 · Sonic 13 · Worldchain 14 · Sei 16 · HyperEVM 19 |
+| `https://gateway-api-testnet.circle.com/v1/info` | 13 domains — ⭐ **ARC PRESENT, `domain=26`**, wallet `0x0077777d7EBA4688BDeF3E311b846F25870A19B9` |
+
+⭐⭐ **THE CALIBRATION IS WHAT MAKES THE ABSENCE MEAN ANYTHING.** Arc appears on testnet at
+`domain=26` with the exact wallet contract `_gateway.mjs` already uses — so the instrument
+demonstrably CAN see Arc, and its absence from the mainnet list is a measurement rather than an
+unreported field. [[filtered-read-is-not-absence]] applies to third-party APIs too: a list that
+omits what you are looking for is worthless until you have seen it include something.
+
+⚠️ The installed `use-gateway` skill still says *"plus Arc testnet"* — consistent, but it is
+DOCUMENTATION and documentation lags. The API is the authority and was read directly.
+
+## WHAT IT COSTS ON ARC MAINNET, CONCRETELY
+
+A Gateway `domain` is the identifier burn intents and mints are addressed to. Without one:
+
+* **Unified balance does not work** — `depositFor`, burn/mint, `getBalances` all route through a
+  domain that does not exist.
+* **DD's payment rail does not work AS BUILT** — `payX402` signs against `GATEWAY.WALLET` and
+  requires `extra.name === "GatewayWalletBatched"`. No Gateway, no batched scheme.
+
+⚠️ **AND IT COMPOUNDS THE CENSUS.** 0 of 1,470 marketplace offers are on Arc and 0 on any testnet,
+while Base has 727 offers AND Gateway `domain=6`. Arc mainnet would have neither the rail nor the
+demand; that is two independent reasons, not one restated.
+
+## ⭐ THE POSITION IS MUCH BETTER THAN IT WAS 24 HOURS AGO
+
+This is a DEPENDENCY, not a defect — nothing here can fix it. But the fallback is no longer
+theoretical: **the vanilla EIP-3009 rail was proven end to end on 2026-08-23** — the `bytes`
+overload, a real settlement (`0x398e7027…`, delivered exactly 10000 atomic, 2.48 s to FINAL), and
+both seller guards proven by measurement. ⭐ **That rail does not use Gateway at all.** So a launch
+on Arc mainnet without Gateway loses the unified balance and the batched scheme, and keeps a working
+payment path.
+
+Three shapes this can take by 16 Sep:
+
+1. **Circle ships Arc mainnet Gateway** — re-run the two curls above; nothing else to do.
+2. **It does not, and Arc mainnet ships anyway** — vanilla EIP-3009 carries payments; unified
+   balance is out.
+3. **Base instead** — Gateway works and the inventory is there, but it is a different deployment,
+   a different payout wallet, and selling on Base is a different project from buying from it.
+
+## ⭐ RE-CHECKING IS NOW MECHANICAL, WHICH IS THE POINT OF RECORDING IT
+
+```bash
+curl -s https://gateway-api.circle.com/v1/info | grep -io arc          # expect: nothing
+curl -s https://gateway-api-testnet.circle.com/v1/info | grep -io arc  # expect: ARC (the control)
+```
+
+⚠️ **Run BOTH.** The second is not decoration — if it ever stops returning ARC, the first line's
+silence has stopped meaning anything and the check must be re-derived rather than trusted.
+---
+
 # ✅ THE REFUSAL ROUND TRIP IS CLOSED — THE LAST HOP WAS THE ONLY ONE A HUMAN COULD PROVE
 
 **2026-08-24 09:06Z.** Rows 13–14 of `docs/refusal-reproof-preregistration.md` were the half left
