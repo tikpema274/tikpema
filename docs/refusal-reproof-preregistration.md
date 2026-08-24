@@ -189,3 +189,32 @@ server response that was never received. ⚠️ OPEN — not fixed by this work.
 2. Its silence is only worth anything once **calibrated against a known positive**. An external
    `curl` of `blobs-probe` at 08:58:19Z appeared at 08:58:20.287Z — one second. Without that, "zero
    invocations" and "an instrument blind to user traffic" are the same reading.
+
+
+---
+
+# ✅ ROW 13 CLOSED ON THE DEPLOYED PAGE — 2026-08-24 09:06Z
+
+A same-day trigger, and the owner confirmed **`1 refused`** rendered on the live Agents page.
+
+| # | pre-registered | observed |
+|---|---|---|
+| 3 | 234 → 235, one new key | ✅ `audit:0x058957de…:2026-08-24:1787562379278-zbizixe9` |
+| 5–10 | `allowed:false` · `REFUSED_PER_TX_CAP` · `agent-send` · cap message · `999` · `executor` | ✅ all six verbatim |
+| 11 | ⭐ `confirmation` ABSENT | ✅ |
+| 12 | ⭐ no `day:…:2026-08-24` | ✅ |
+| **13** | **Executor shows `1 refused`** | ✅ **CONFIRMED ON THE LIVE PAGE** |
+| **14** | the rendered trail row | ⚠️ **NOT CONFIRMED — still open** |
+
+⭐ Row 13 was the only hop no tooling here could reach: reading the deployed page needs the owner's
+session, so an in-process render proves the component maps the row and never that the page fetched
+it ([[binding-tested-across-what-it-binds]]).
+
+⚠️ **ROW 14 IS A DIFFERENT CODE PATH AND WAS NOT ANSWERED.** `1 refused` comes from
+`agentBreakdown`; the trail row comes from `auditLog`. It was asked and left unanswered, so it stays
+open. Recording it as closed would be the precise defect this pre-registration exists to prevent.
+
+🚨 **AND THE WINDOW IS ONE UTC DAY.** `agents.mjs:71-72` scopes both surfaces to today, so the
+2026-08-23 row — intact in `data-budget` throughout — became invisible on the page at 00:00Z. The
+first attempt to check row 13 looked like a failure and was not one. **Any re-verification needs a
+same-day trigger.**

@@ -1,5 +1,74 @@
 ---
 
+# ✅ THE REFUSAL ROUND TRIP IS CLOSED — THE LAST HOP WAS THE ONLY ONE A HUMAN COULD PROVE
+
+**2026-08-24 09:06Z.** Rows 13–14 of `docs/refusal-reproof-preregistration.md` were the half left
+open when the money-side rows closed on the 23rd. Row 13 is now **confirmed on the deployed page**.
+
+| hop | proven by |
+|---|---|
+| the button posts | `agent-send` invoked 09:06:18.546Z, 131 ms |
+| the executor refuses | HTTP 400 carrying the cap message |
+| **the recorder writes** | `data-budget` **234 → 235**, all 8 fields verbatim |
+| **the aggregator counts** | ⭐ **`1 refused` rendered on the live Agents page** |
+
+```json
+{"agent":"executor","amountUsdc":999,"source":"agent-send",
+ "reason":"exceeds per-transaction limit of 10 USDC","code":"REFUSED_PER_TX_CAP",
+ "allowed":false,"owner":"0x058957de…","date":"2026-08-24",
+ "timestamp":"2026-08-24T09:06:19.278Z"}
+```
+
+Both load-bearing NEGATIVES held again: **`confirmation` absent** (so `listUnresolvedCharges` can
+never hand a refusal to a reverser) and **no `day:` key for today** (a refusal advanced no counter).
+
+⭐ **WHY THE LAST HOP NEEDED A HUMAN.** Every earlier verification rendered the row IN-PROCESS, which
+proves the component maps it and cannot prove the deployed page FETCHED it — both sides of that
+boundary are our own code. [[binding-tested-across-what-it-binds]]. Reading the live page requires
+the owner's session, so no amount of tooling here could close it.
+
+## ⚠️ ROW 14 IS **NOT** CONFIRMED, AND IS RECORDED AS OPEN
+
+Row 13 (`1 refused`) comes from `agentBreakdown`. Row 14 — the TRAIL ROW — comes from `auditLog`,
+a **different code path**, and the one edited for the resolution-marker fix. It was asked about and
+not answered. It is therefore **not proven**, and saying otherwise would be exactly the defect this
+file exists to prevent: an observation recorded that nobody made.
+
+What row 14 still needs, verbatim from a same-day trigger:
+
+> **refused · agent-send** *by executor* / exceeds per-transaction limit of 10 USDC / `999.00 USDC`
+
+## 🚨 THE PROOF WINDOW IS ONE UTC DAY — AND THAT COST AN ATTEMPT
+
+`agents.mjs:71-72` scopes BOTH surfaces to today:
+
+```js
+agentBreakdown({ owner })                            // defaults to utcDate()
+auditLog({ owner, date: new Date()…slice(0,10) })    // today only
+```
+
+The 2026-08-23 refusal was intact in `data-budget` the whole time and **invisible on the page from
+00:00Z onward**. The first attempt to check it therefore looked like a failure and was not one.
+
+⭐ **THE RECORD SURVIVED; THE VIEW OF IT DID NOT.** That is
+[[observation-that-does-not-survive]] moved one layer out — the earlier lesson was about data being
+overwritten, this one is about data that persists perfectly while the only surface that displays it
+moves on. ⚠️ **"Is it recorded?" and "can it still be seen?" are different questions**, and closing
+the first while pointing at the second is how a verification gets scheduled into a window that has
+already shut. Any future re-verification needs a SAME-DAY trigger.
+
+## ⭐ THE INSTRUMENT LESSON, AGAIN, AND IT WORKED THIS TIME
+
+The first check reported **zero `agent-send` invocations in 30 minutes**; a minute later it reported
+**one**. Both were correct — the trigger landed at 09:06:18, between them. What made the second
+reading trustworthy rather than a coin flip was **recalibrating against a known positive instead of
+reusing yesterday's calibration**: an external `curl` of `blobs-probe` at 09:06:22Z appeared in the
+log at 09:06:23.392Z. ⚠️ A calibration is a fact about a moment, not a property of a tool.
+
+Blobs was also read twice, 20s apart, before "zero rows today" was believed — a single read of an
+eventually-consistent store is not a measurement of absence.
+---
+
 # 🚨 `updated_at` IS NOT A PROGRESS SIGNAL — AND I KILLED A HEALTHY DEPLOY BELIEVING IT WAS
 
 **2026-08-23.** A correction to claims made earlier the same day, and the reason a one-line env-var
