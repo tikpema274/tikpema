@@ -204,15 +204,23 @@ A same-day trigger, and the owner confirmed **`1 refused`** rendered on the live
 | 11 | ⭐ `confirmation` ABSENT | ✅ |
 | 12 | ⭐ no `day:…:2026-08-24` | ✅ |
 | **13** | **Executor shows `1 refused`** | ✅ **CONFIRMED ON THE LIVE PAGE** |
-| **14** | the rendered trail row | ⚠️ **NOT CONFIRMED — still open** |
+| **14** | the rendered trail row | ✅ **CONFIRMED — `refused · agent-send` in the trail** |
 
 ⭐ Row 13 was the only hop no tooling here could reach: reading the deployed page needs the owner's
 session, so an in-process render proves the component maps the row and never that the page fetched
 it ([[binding-tested-across-what-it-binds]]).
 
-⚠️ **ROW 14 IS A DIFFERENT CODE PATH AND WAS NOT ANSWERED.** `1 refused` comes from
-`agentBreakdown`; the trail row comes from `auditLog`. It was asked and left unanswered, so it stays
-open. Recording it as closed would be the precise defect this pre-registration exists to prevent.
+✅ **ROW 14 CLOSED TOO — AND IT IS A DIFFERENT CODE PATH.** `1 refused` comes from
+`agentBreakdown`; the trail row comes from `auditLog`, the function edited for the resolution-marker
+fix. The owner confirmed **`refused · agent-send`** in the trail, which proves three things at once:
+`auditLog` fetched the row, the component classified it as a REFUSAL rather than bookkeeping, and
+the source rendered. ⚠️ The sub-line and amount were not separately quoted back, so they rest on the
+in-process render — the classification, which is what the resolution-marker fix changed, is the part
+confirmed live.
+
+⭐ **EVERY ROW OF THIS PRE-REGISTRATION IS NOW DISCHARGED.** Written before the trigger, answered by
+measurement, and the two rows no tooling could reach were answered by the one person who could see
+them.
 
 🚨 **AND THE WINDOW IS ONE UTC DAY.** `agents.mjs:71-72` scopes both surfaces to today, so the
 2026-08-23 row — intact in `data-budget` throughout — became invisible on the page at 00:00Z. The

@@ -27,16 +27,24 @@ proves the component maps it and cannot prove the deployed page FETCHED it — b
 boundary are our own code. [[binding-tested-across-what-it-binds]]. Reading the live page requires
 the owner's session, so no amount of tooling here could close it.
 
-## ⚠️ ROW 14 IS **NOT** CONFIRMED, AND IS RECORDED AS OPEN
+## ✅ ROW 14 CLOSED TOO — A DIFFERENT CODE PATH, CONFIRMED SEPARATELY
 
 Row 13 (`1 refused`) comes from `agentBreakdown`. Row 14 — the TRAIL ROW — comes from `auditLog`,
-a **different code path**, and the one edited for the resolution-marker fix. It was asked about and
-not answered. It is therefore **not proven**, and saying otherwise would be exactly the defect this
-file exists to prevent: an observation recorded that nobody made.
+and the two were confirmed as separate observations rather than assumed together, because they are
+separate code paths and only one of them was touched by the resolution-marker fix.
 
-What row 14 still needs, verbatim from a same-day trigger:
+The owner confirmed **`refused · agent-send`** rendering in the trail. That single line proves three
+things at once: `auditLog` FETCHED the row, the component classified it as a **refusal and not as
+bookkeeping**, and the source rendered. ⭐ The classification is precisely what yesterday's fix
+changed — a `kind`-bearing row must render muted as `bookkeeping · …`, a real refusal must stay red
+as `refused · …`. Both branches are now confirmed on the deployed page rather than only in a suite.
 
-> **refused · agent-send** *by executor* / exceeds per-transaction limit of 10 USDC / `999.00 USDC`
+⚠️ The sub-line and the amount were not separately quoted back, so those rest on the in-process
+render. Stated rather than glossed: what was confirmed live is the FETCH and the CLASSIFICATION.
+
+⭐⭐ **EVERY ROW OF THE PRE-REGISTRATION IS NOW DISCHARGED** — written before the trigger, answered
+by measurement, and the two rows no tooling could reach answered by the only person who could see
+them.
 
 ## 🚨 THE PROOF WINDOW IS ONE UTC DAY — AND THAT COST AN ATTEMPT
 
