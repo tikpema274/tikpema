@@ -1,5 +1,38 @@
 ---
 
+# 📐 SCOPED-KEY SKETCH RECORDED — `docs/hyperliquid-scoped-key-design.md`
+
+**NOT BUILT, NOT SCHEDULED, NOT DECIDED.** The Hyperliquid work is scoped **read-only**. This is the
+shape IF trading is ever wanted, written down so it does not get re-derived and so the costs are
+visible before anyone starts.
+
+⭐ **THE ORGANISING PRINCIPLE, which is the transferable part:**
+
+> **Every boundary that matters must be enforced OUTSIDE the process that signs.**
+
+That is why today's caps are credible — Circle is a second system that also has to agree. A design
+whose only guarantees live in its own code is not the same product.
+
+Four boundaries, each external: a **separate Netlify site** (env vars are per-SITE, so the key is
+structurally absent from the 26 functions importing `_circle.mjs` and from the public unauthenticated
+seller) · a **Hyperliquid API wallet** that can trade but not withdraw (enforced by the exchange —
+⭐ **if that split were unavailable the answer is no**, not "build it more carefully") · **funding**
+as a cap enforced by arithmetic rather than a constant that can `NaN` itself open · and an
+**approval bound to a price that expires**, reusing the vault gate's 409-with-fresh-disclosure
+precedent.
+
+⚠️ **A CORRECTION MADE IN THE COURSE OF WRITING IT:** it had been claimed that "a leaked private key
+means the funds are gone". For a Hyperliquid API wallet that is **false** — it is revocable and
+replaceable. Revocation exists, which materially changes the risk picture. The earlier claim
+flattened a real distinction and is corrected in the doc.
+
+⭐ **AND THE REASON THE READ-ONLY SCOPING IS RIGHT, restated because it is the actual finding:**
+read-only lets the tool keep its uncertainty. "I cannot tell whether this is a basis trade or a
+directional short" is maximally useful in an analyzer and unusable in a trading loop, where it gets
+ignored or silently resolved into a position. **`INDETERMINATE ≠ FAIL` only survives where nothing
+is forced to act on it.**
+---
+
 # ⭐ A CIRCLE DEV-CONTROLLED WALLET SIGNS TYPED DATA ONLY FOR ITS OWN CHAIN — MEASURED 2026-08-24
 
 Established while thinking through whether a Hyperliquid analyzer could ever close a loop into
