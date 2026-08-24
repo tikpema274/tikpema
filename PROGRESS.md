@@ -1,5 +1,69 @@
 ---
 
+# ⭐ A CIRCLE DEV-CONTROLLED WALLET SIGNS TYPED DATA ONLY FOR ITS OWN CHAIN — MEASURED 2026-08-24
+
+Established while thinking through whether a Hyperliquid analyzer could ever close a loop into
+TRADING. It cannot, and the reason is not the one that was assumed twice.
+
+## 🚨 THE CLAIM THAT WAS WRONG, STATED FIRST
+
+The first answer was *"Hyperliquid isn't a chain you send USDC on — every existing money path
+(Circle dev-controlled wallets, EIP-3009, Gateway) is the wrong shape for it."* **That is false.**
+Placing a Hyperliquid order IS EIP-712 typed-data signing, and `_x402.mjs` already does exactly that
+via `client.signTypedData({ walletId, data })`. The mechanism was never foreign to this stack.
+
+## THE ACTUAL BOUNDARY — FOUR PROBES, ONE VARIABLE AT A TIME
+
+| probe | domain | result |
+|---|---|---|
+| **A** | Arc `5042002` + a **made-up struct type** | ✅ signed |
+| **D** | Arc `5042002` + **zero** `verifyingContract` | ✅ signed |
+| **B** | **Arbitrum `42161`** + made-up type | ❌ refused |
+| **C** | **`1337`** (Hyperliquid) + non-zero contract | ❌ refused |
+
+Refusal in both failing cases: `invalid transaction or rawTransaction in request.`
+
+⭐⭐ **IT IS THE `chainId`, AND NOTHING ELSE.** Circle signs an arbitrary struct type (A) and a zero
+`verifyingContract` (D) without complaint — so neither Hyperliquid's unusual action type nor its
+zero address is the obstacle. It refuses **any chainId that is not the chain the wallet lives on**.
+Arbitrum fails exactly as hard as Hyperliquid's 1337, which is what shows this is a general
+cross-chain rule rather than anything about Hyperliquid.
+
+## ⚠️ AND THE FIRST PROBE ALMOST REPORTED THE WRONG THING
+
+Attempt 1 failed with that same message and could have been written up as *"Circle refuses
+Hyperliquid payloads."* It was rescued by a **positive control** — the exact
+`TransferWithAuthorization` payload production signs every day — which came back signed and proved
+the call, the walletId and the credentials were all fine. Only then was the failure a fact about
+Circle rather than a fact about my request. ⭐ Same rule as everything else this week: a refusal is
+uninterpretable until something you know should succeed does.
+
+## ⭐ WHAT IT MEANS, AND WHY IT IS CLARIFYING RATHER THAN LIMITING
+
+A Hyperliquid-trading Tikpema **cannot reuse the delegate**. It would need an EOA able to sign for
+chainId 1337 — which means a **locally-held private key**, the one thing this architecture exists to
+avoid (`_x402.mjs`: *"Circle custodies the key, so there is no local private key"*).
+
+> **The custody model and Hyperliquid's account model do not intersect, and no plumbing closes that
+> gap without introducing the local key the design is built to exclude.**
+
+⚠️ Note this is BROADER than Hyperliquid. It applies to signing anything for any chain the wallet
+does not live on — a constraint worth knowing before designing any cross-chain signing feature.
+
+## THE DECISION IT SUPPORTS
+
+The analyzer was scoped to **read-only: analyse, present, let the user act**. That call was made
+before this measurement and is strengthened by it — a read-only analyzer needs **no wallet at all**
+(every Hyperliquid endpoint probed today was free and unauthenticated), so it is unblocked by
+custody, by the Arc/Gateway mainnet blocker, and by funding.
+
+⭐ And the deeper reason the scoping is right: **read-only lets the tool keep its uncertainty.**
+"I cannot tell whether this is a basis trade or a directional short" is a maximally useful answer in
+an analyzer and an unusable one in a trading loop, where it either gets ignored or silently resolved
+into a position. That is [[absence-must-never-read-as-safe]] pointed at inference:
+`INDETERMINATE ≠ FAIL` only survives where nothing is forced to act on it.
+---
+
 # 🚨 ARC HAS NO GATEWAY DOMAIN ON MAINNET — MEASURED 2026-08-24, WITH A POSITIVE CONTROL
 
 The mainnet-readiness blocker, checked against **Circle's live Gateway API** rather than
