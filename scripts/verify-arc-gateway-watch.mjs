@@ -16,7 +16,7 @@
 // reported the expected answer daily, for the right-looking reason, until 16 Sep.
 //
 // OFFLINE — `verdict()` is a pure function, so every branch is driven without a network.
-import { verdict, parseDomains } from "../netlify/functions/arc-gateway-watch.mjs";
+import { verdict, parseDomains, alertBody, handler } from "../netlify/functions/arc-gateway-watch.mjs";
 
 let pass = 0, fail = 0;
 const check = (l, c, x = "") => {
@@ -104,6 +104,98 @@ section("── 7. 🚨 AN UNREADABLE RESPONSE IS AN ERROR, NOT 'NO CHAINS' ─�
   }
   // ⚠️ Both directions: a real payload must still parse, or the guard would just break the watch.
   check("⭐ a populated response parses normally", () => parseDomains({ domains: MAINNET_TODAY }).length === 12);
+});
+
+const asection = async (t, fn) => { console.log(`\n${t}`); try { await fn(); }
+  catch (e) { fail++; console.log(`  ❌ 🚨 SECTION CRASHED — ${String(e?.message ?? e).slice(0, 80)}`); } };
+
+const okRes = (list) => ({ ok: true, status: 200, json: async () => ({ domains: list }) });
+const badRes = (status) => ({ ok: false, status, json: async () => ({}) });
+
+/**
+ * ⭐⭐ DRIVES THE REAL `handler()` — network and webhook stubbed, nothing else. The verdict tests
+ * above are pure-function tests and structurally CANNOT see the alerting rule, which is where the
+ * whole "silence is ambiguous" defect lived. [[binding-tested-across-what-it-binds]]
+ */
+async function runTick({ mainnet, testnet, testnetStatus = null, webhookOk = true, webhook = "https://example.invalid/hook" }) {
+  const realFetch = globalThis.fetch, realEnv = process.env.DD_WATCH_WEBHOOK;
+  const posted = [];
+  if (webhook === null) delete process.env.DD_WATCH_WEBHOOK;
+  else process.env.DD_WATCH_WEBHOOK = webhook;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.includes("gateway-api-testnet")) return testnetStatus ? badRes(testnetStatus) : okRes(testnet);
+    if (u.includes("gateway-api.circle.com")) return okRes(mainnet);
+    posted.push(JSON.parse(init.body).content);
+    return { ok: webhookOk, status: webhookOk ? 204 : 500 };
+  };
+  try {
+    const out = await handler();
+    return { out, body: JSON.parse(out.body), posted };
+  } finally {
+    globalThis.fetch = realFetch;
+    if (realEnv === undefined) delete process.env.DD_WATCH_WEBHOOK;
+    else process.env.DD_WATCH_WEBHOOK = realEnv;
+  }
+}
+
+await asection("── 8. ⭐⭐ EVERY TICK PUSHES — silence must mean 'DID NOT RUN' ──────", async () => {
+  // 🚨 Under the OLD rule this posted NOTHING on six days in seven, so a healthy tick and a dead
+  // cron were indistinguishable for up to a week on a DAILY schedule.
+  const { out, body, posted } = await runTick({ mainnet: MAINNET_TODAY, testnet: TESTNET_OK });
+  check("outcome is ARC_ABSENT — the healthy, expected case", body.outcome === "ARC_ABSENT", body.outcome);
+  check("⭐⭐ …and it STILL POSTS — the beat is the cron's own period", posted.length === 1, `${posted.length} post(s)`);
+  check("⭐ the verdict is still 'not news' — delivery and newsiness stay separate", body.alert === false);
+  check("the record says a beat happened", body.heartbeat === true && body.delivered === true);
+  check("⭐ the weekday rule is GONE, not merely widened", !("mondayLiveness" in body));
+  check("HTTP 200 on a healthy delivered beat", out.statusCode === 200, String(out.statusCode));
+  const c = posted[0];
+  // 🚨 ANCHOR ON THE ROW LABELS, NOT THE BARE WORD. A first version compared indexOf("control")
+  // against indexOf("subject") and was VACUOUS: "control" already appears earlier in the reason
+  // text ("control passed (Arc on testnet)"), so it matched the HEAD and the check passed even with
+  // the rows swapped. Found by mutation, not by reading. [[assert-on-rendered-output-not-source-regex]]
+  const iC = c.indexOf("control  testnet"), iS = c.indexOf("subject  mainnet");
+  check("⭐⭐ the CONTROL row is rendered BEFORE the subject row", iC !== -1 && iS !== -1 && iC < iS,
+    `control@${iC} subject@${iS}`);
+  check("…control reports 13 domains WITH Arc", /control.*13 domains.*ARC PRESENT/s.test(c));
+  check("…subject reports 12 domains WITHOUT Arc", /subject.*12 domains.*Arc absent/s.test(c));
+  check("⭐ the line says what its own absence would mean", /did not run/i.test(c));
+});
+
+await asection("── 9. 🚨 BREAK THE CONTROL — validated by FAILING, not only passing", async () => {
+  // The literal shape the cloud version hit. The control must outrank everything.
+  const { out, body, posted } = await runTick({ mainnet: MAINNET_TODAY, testnet: MAINNET_TODAY });
+  check("🚨 outcome is INCONCLUSIVE, NOT ARC_ABSENT", body.outcome === "INCONCLUSIVE", body.outcome);
+  check("⭐⭐ …and it is HEARD — a broken check is not a passing check", posted.length === 1);
+  check("…the post says the check did not run", /THE CHECK DID NOT RUN/.test(posted[0]));
+  check("🚨 HTTP 500 — red in the platform's own view", out.statusCode === 500, String(out.statusCode));
+  check("⭐ the control row shows Arc MISSING where it certainly should be", /control.*Arc absent/s.test(posted[0]));
+
+  // ⚠️ And the other way the control can fail: it does not answer at all.
+  const un = await runTick({ mainnet: MAINNET_TODAY, testnet: TESTNET_OK, testnetStatus: 403 });
+  check("🚨 an unreachable control is INCONCLUSIVE too", un.body.outcome === "INCONCLUSIVE", un.body.outcome);
+  check("…the underlying 403 is carried, not swallowed", /403/.test(un.body.reason));
+  check("⭐ both readings render as UNREAD rather than as zero domains", (un.posted[0].match(/UNREAD/g) || []).length === 2);
+  check("🚨 …and it never reports 'Arc absent' from a call that failed", !/Arc absent/.test(un.posted[0]));
+
+  // ⭐ Both directions: a failed control outranks even a POSITIVE finding, through the handler.
+  const both = await runTick({ mainnet: [...MAINNET_TODAY, d("ARC", 26)], testnet: MAINNET_TODAY });
+  check("⭐⭐ a broken instrument cannot manufacture good news, end to end", both.body.outcome === "INCONCLUSIVE", both.body.outcome);
+});
+
+await asection("── 10. ⚠️ AN UNDELIVERED BEAT IS RED — delivery is load-bearing ─────", async () => {
+  // If a running watch is not reliably heard, silence stops meaning "did not run" and the whole
+  // change is undone. So a channel that rejects must not return 200.
+  const rej = await runTick({ mainnet: MAINNET_TODAY, testnet: TESTNET_OK, webhookOk: false });
+  check("verdict is healthy ARC_ABSENT", rej.body.outcome === "ARC_ABSENT", rej.body.outcome);
+  check("🚨 …but the tick is 500 because the beat did not land", rej.out.statusCode === 500, String(rej.out.statusCode));
+  check("…and the record says so plainly", rej.body.delivered === false && /rejected/i.test(rej.body.notify.reason || ""));
+
+  // ⚠️ No channel configured at all — the monitor cannot alert, which is its own finding.
+  const none = await runTick({ mainnet: MAINNET_TODAY, testnet: TESTNET_OK, webhook: null });
+  check("🚨 an UNSET channel is 500, never a quiet 200", none.out.statusCode === 500, String(none.out.statusCode));
+  check("…and names the reason", /no webhook configured/i.test(none.body.notify.reason || ""), none.body.notify.reason);
+  check("⭐ nothing was posted, because there was nowhere to post", none.posted.length === 0);
 });
 
 console.log("\n════════════════════════════════════════════════════════════════════════");

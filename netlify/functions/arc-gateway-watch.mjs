@@ -22,15 +22,34 @@
 // warm container forever. A monitor whose own storage can break is a monitor that goes quiet
 // exactly when something is wrong.
 //
-// Instead the alerting rule needs no memory at all:
-//     ARC PRESENT            -> push. This is the event the watch exists for.
-//     CHECK COULD NOT RUN    -> push. A broken check is not a passing check.
-//     ARC ABSENT, control ok -> silent... EXCEPT on Mondays (see below).
+// ═══ 🚨 EVERY TICK PUSHES — REVISED 2026-08-25, AND THIS IS THE WHOLE POINT ════════════════════
+// The first version pushed only on ARC_PRESENT, on INCONCLUSIVE, and on MONDAYS. On the other six
+// days a healthy tick left nothing but a log line, so silence had THREE causes that could not be
+// told apart:
+//     (a) ran, nothing changed — the intended, healthy case
+//     (b) the cron never fired
+//     (c) the function threw before it could report
+// A weekly beat bounds that ambiguity at seven days on a schedule that runs DAILY, which is six
+// days of a dead watch reading exactly like a quiet one. That is the failure this file was written
+// to avoid, committed by the file itself.
 //
-// 🚨 AND THE MONDAY RULE EXISTS BECAUSE SILENCE IS AMBIGUOUS. "Running and finding nothing" and
-// "not running at all" look identical from outside — that is the failure that let five dead
-// budget-sweep ticks pass unnoticed. So once a week the watch says so out loud, which bounds how
-// long silence can mean nothing. Derived from the clock, not from stored state.
+// ⭐ SO THE RULE IS NOW: **the beat is the cron's own period.** Every tick posts, whatever the
+// verdict. `verdict().alert` still means "this is NEWS" and is unchanged — delivery and newsiness
+// are different questions, and conflating them is what produced the gap.
+//     ARC PRESENT   -> 🚨 the event the watch exists for
+//     INCONCLUSIVE  -> ⚠️ a broken check is not a passing check
+//     ARC ABSENT    -> ✅ the daily beat, carrying BOTH readings
+// **No line for more than ~24h now means the watch did not run.** That is a falsifiable claim; the
+// old design had none. Still derived from the clock, not from stored state.
+//
+// ⭐⭐ AND THE CHANNEL IS THE RECORD. Persisting each tick would mean Blobs — refused above. The
+// alert channel already stores what a tick saw, timestamped, OFF-HOST, one line per day, in a
+// place this function cannot break. Absence of a record is therefore distinguishable from absence
+// of change without the monitor owning any storage. [[observation-that-does-not-survive]]
+//
+// ⚠️ WHICH MAKES DELIVERY LEAD-BEARING, so an undelivered beat returns 500. Silence only means
+// "did not run" if a running watch is reliably heard; a channel that is quietly rejecting posts
+// would restore the exact ambiguity this change removes. [[absence-must-never-read-as-safe]]
 //
 // ═══ ⭐ THE POSITIVE CONTROL IS NOT DECORATION ═════════════════════════════════════════════════
 // "Arc is absent from the mainnet list" is worthless unless the same instrument demonstrably CAN
@@ -114,42 +133,74 @@ export function verdict({ mainnet, testnet, error }) {
   };
 }
 
+/** The Arc row from a domain list, or null. Shared by the verdict and the readings so a future
+ *  change to Arc-matching cannot make the alert body disagree with the outcome. */
+const findArc = (list) => list.find((x) => isArc(x.chain)) ?? null;
+
+/**
+ * ⭐ EXPORTED SO THE SUITE ASSERTS ON THE RENDERED LINE, not on a source regex — a copy guard that
+ * greps source has the blind spot it was built to close. [[assert-on-rendered-output-not-source-regex]]
+ *
+ * ⭐⭐ THE CONTROL IS PRINTED FIRST, ALWAYS. The control is what licenses the subject's silence: a
+ * reader shown "mainnet: Arc absent" first has already drawn the conclusion by the time they reach
+ * the calibration that decides whether it means anything.
+ */
+export function alertBody({ v, readings, at }) {
+  const row = (label, r) =>
+    `\`${label}\` ` +
+    (r
+      ? `${r.domains} domains — ${r.arc ? `**ARC PRESENT** (domain ${r.arc.domain})` : "Arc absent"}`
+      : "**UNREAD** — the call returned no usable list");
+  const lines = [
+    row("control  testnet", readings?.control),
+    row("subject  mainnet", readings?.subject),
+  ].join("\n");
+
+  const head =
+    v.outcome === "ARC_PRESENT"
+      ? `🚨 **[arc-gateway-watch]** ARC IS NOW ON CIRCLE'S MAINNET GATEWAY LIST\n` +
+        `${v.reason}\n` +
+        `⭐ The unified balance and the \`GatewayWalletBatched\` rail become possible on Arc mainnet.\n` +
+        `⚠️ \`netlify/functions/_gateway.mjs\` hardcodes \`API_BASE\` to the **testnet** endpoint and needs updating.`
+      : v.outcome === "INCONCLUSIVE"
+      ? `⚠️ **[arc-gateway-watch]** THE CHECK DID NOT RUN — this is not "unchanged"\n${v.reason}`
+      : `✅ **[arc-gateway-watch]** daily tick — ${v.reason}\n` +
+        `(Every tick posts. **No line for more than a day means the watch did not run** — that is the point.)`;
+
+  return `${head}\n${lines}\n_${at}_`;
+}
+
 export const handler = async () => {
   const startedAt = new Date().toISOString();
-  let v;
+  let v, readings = null;
   try {
     // ⭐ Both fetched. The control is not skipped when the main call succeeds — that is exactly when
     // an uncalibrated "absent" is most persuasive.
     const [mainnet, testnet] = await Promise.all([domains(MAINNET), domains(TESTNET)]);
+    // ⚠️ Recorded from the SAME lists the verdict is computed from, in the same tick — a second
+    // fetch could disagree with the verdict it is supposed to evidence.
+    readings = {
+      control: { endpoint: TESTNET, domains: testnet.length, arc: findArc(testnet) },
+      subject: { endpoint: MAINNET, domains: mainnet.length, arc: findArc(mainnet) },
+    };
     v = verdict({ mainnet, testnet });
   } catch (e) {
     v = verdict({ error: `endpoint unreachable or unreadable: ${String(e?.message ?? e).slice(0, 110)}` });
   }
 
-  // The weekly liveness push. Monday, so a quiet watch cannot be quiet for more than 7 days.
-  const monday = new Date().getUTCDay() === 1;
-  const shouldAlert = v.alert || (v.outcome === "ARC_ABSENT" && monday);
+  // ⭐⭐ NO CONDITION. Every tick posts — see the header. Awaited, because a scheduled function can
+  // be frozen at return.
+  const notify = { attempted: true, ...(await push(alertBody({ v, readings, at: startedAt }))) };
 
-  let notify = { attempted: false };
-  if (shouldAlert) {
-    const body =
-      v.outcome === "ARC_PRESENT"
-        ? `🚨 **[arc-gateway-watch]** ARC IS NOW ON CIRCLE'S MAINNET GATEWAY LIST\n` +
-          `${v.reason}\n` +
-          `⭐ The unified balance and the \`GatewayWalletBatched\` rail become possible on Arc mainnet.\n` +
-          `⚠️ \`netlify/functions/_gateway.mjs\` hardcodes \`API_BASE\` to the **testnet** endpoint and needs updating.`
-        : v.outcome === "INCONCLUSIVE"
-        ? `⚠️ **[arc-gateway-watch]** THE CHECK DID NOT RUN — this is not "unchanged"\n${v.reason}`
-        : `✅ **[arc-gateway-watch]** weekly liveness — ${v.reason}\n` +
-          `(Silent the rest of the week by design; this line exists so silence cannot mean "not running".)`;
-    notify = { attempted: true, ...(await push(body)) };
-  }
+  const record = { at: startedAt, outcome: v.outcome, reason: v.reason, alert: v.alert,
+                   heartbeat: true, delivered: notify.sent === true, readings,
+                   arc: v.arc ?? null, notify };
 
-  const record = { at: startedAt, outcome: v.outcome, reason: v.reason, alerted: shouldAlert, notify,
-                   arc: v.arc ?? null, mondayLiveness: monday };
-  // ⚠️ INCONCLUSIVE returns 500 so a failed check is red in the platform's own view, not just in a
-  // log line nobody reads. ARC_PRESENT is a success — the watch worked.
-  const code = v.outcome === "INCONCLUSIVE" ? 500 : 200;
+  // ⚠️ 500 when the CHECK could not run (INCONCLUSIVE) — unchanged — OR when the BEAT WAS NOT
+  // DELIVERED. The second is new: this design makes an undelivered beat indistinguishable from a
+  // dead cron, so a channel that is not working has to be red somewhere rather than silently
+  // returning the watch to the ambiguity it just escaped.
+  const code = v.outcome === "INCONCLUSIVE" || !record.delivered ? 500 : 200;
   (code === 500 ? console.error : console.log)("[arc-gateway-watch] " + JSON.stringify(record));
   return { statusCode: code, headers: { "Content-Type": "application/json" }, body: JSON.stringify(record) };
 };
