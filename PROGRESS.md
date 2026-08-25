@@ -1,5 +1,54 @@
 ---
 
+# ⚠️ `gate:watch` GUARDS 4 OF 9 SCHEDULED FUNCTIONS — RECORDED, NOT FIXED
+
+**2026-08-25.** Adding `arc-gateway-watch` to `GUARDED_SCHEDULES` (`cc93d9c`) meant reading the
+table, and the table is shorter than the schedule list. `netlify.toml` declares **nine** scheduled
+functions. `GUARDED_SCHEDULES` names **four**.
+
+## WHAT IS GUARDED, AND WHAT IS NOT
+
+| guarded by `gate:watch` | unguarded |
+|---|---|
+| `strong-read-watch` `*/15` | `job-sweep` `* * * * *` |
+| `dd-canary` `*/10` | `dca-tick` `* * * * *` |
+| `dd-watch` `*/5` | `bridge-mint-sweep` `*/10` |
+| `ub-withdraw-sweep` `*/30` | `budget-sweep-cron` `*/30` |
+| | `arc-gateway-watch` `5 7 * * *` — until `cc93d9c` DEPLOYS |
+
+⚠️ `arc-gateway-watch` is committed into the table but **not deployed**, so on the deployed surface
+it is still unguarded and the count is genuinely 4/9 today, 5/9 after the next promotion.
+
+## 🚨 THE CONSEQUENCE, STATED PLAINLY
+
+For an unguarded row, a schedule that is commented out during a draft proof and never restored —
+or retimed, or deleted — **fails nothing**. `gate:watch` does not look at it, and the build stamp
+cannot see it either: `netlify.toml` is outside the hashed surface, so the tree hash of a build with
+a missing schedule is byte-identical to one with it. Nothing in the pipeline would go red.
+
+## ⭐ AND TWO OF THEM MOVE MONEY — VERIFIED PER FILE, NOT ASSUMED
+
+* **`dca-tick`** imports `executeAction` and `swapCapUsdc`. It **executes swaps**. A lost schedule
+  stops mandates filling — silently, since a mandate that never ticks looks the same as one with
+  nothing due.
+* **`bridge-mint-sweep`** drives mint recovery for stranded bridge receipts. A lost schedule strands
+  them indefinitely. Same failure shape as `ub-withdraw-sweep` — which IS guarded, and whose row
+  calls this out as "the highest-consequence row in this table".
+* **`budget-sweep-cron`** is the third, and it is currently **inert**: `REVERSALS_ARMED = false`
+  (decision 2026-08-21), so it observes and records rather than reversing. ⚠️ That makes a vanished
+  schedule *harder* to notice, not easier — nothing would be missed while disarmed, and arming it
+  later would then quietly do nothing.
+* `job-sweep` recovers runs stranded at `"starting"`. Not a money path.
+
+## NOT FIXED, ON PURPOSE
+
+Recorded so the gap is a known quantity rather than a discovery. Adding four rows is cheap; deciding
+`draftMustBeCommented` correctly for each is not, and `dca-tick`/`job-sweep` at `* * * * *` may have
+proof workflows that legitimately comment them out. Do it deliberately, not as a side effect of an
+unrelated deploy.
+
+---
+
 # ⭐⭐⭐ THE x402 DEMAND QUESTION IS ANSWERED — people DO buy, and the shape is the finding
 
 **2026-08-25.** The question open since the census: *does anyone actually buy x402 services?* It was
