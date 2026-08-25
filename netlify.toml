@@ -376,6 +376,14 @@
 # DEAD (no heartbeat either). The cron wrapper calls the pure sweep() export by import instead.
 # Every 30m — well inside the 24h escalation horizon, and RESOLVE_AFTER_MS (30m) bounds what it
 # will even look at, so a swap still settling is never queried.
+# ⭐ Once a day. The thing being watched changes at most once, and only Circle can change it — a
+# tighter schedule would burn invocations to learn nothing. 07:05 UTC keeps it clear of the :00
+# stampede where every other cron here fires.
+# ⚠️ It is SILENT on the expected outcome (Arc still absent) except on Mondays, when it pushes a
+# liveness line — so a quiet week cannot be mistaken for a dead schedule.
+[functions."arc-gateway-watch"]
+  schedule = "5 7 * * *"
+
 [functions."budget-sweep-cron"]
   schedule = "*/30 * * * *"
 

@@ -72,6 +72,7 @@
     "test:txhonesty": "node scripts/verify-tx-failure-honesty.mjs",
     "test:hlretrieval": "node scripts/verify-hl-retrieval.mjs",
     "test:hldraft": "node scripts/verify-hl-draft.mjs",
+    "test:arcgatewaywatch": "node scripts/verify-arc-gateway-watch.mjs",
     "hl:shorts": "node scripts/hl/top-shorts.mjs",
     "hl:draft": "node scripts/hl/draft.mjs"
   },
@@ -129,6 +130,7 @@
     "test:txhonesty",
     "test:hlretrieval",
     "test:hldraft",
+    "test:arcgatewaywatch",
     "gate:opcount",
     "gate:price",
     "gate:callshape",
