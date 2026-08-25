@@ -95,6 +95,24 @@ export const GUARDED_SCHEDULES = [
   // ⚠️ It is NOT draftMustBeCommented — it is never HTTP-invoked during a proof, so commenting
   // it out buys nothing and only risks the forgotten restore above.
   { functionName: "ub-withdraw-sweep", expectedCron: "*/30 * * * *", draftMustBeCommented: false },
+  // ⭐ arc-gateway-watch — the DAILY watch for Arc appearing on Circle's MAINNET Gateway list.
+  //
+  // 🚨 THE ONE ROW WHOSE OWN ANTI-SILENCE RULE CANNOT COVER IT. That function is stateless by
+  // design and stays SILENT on the expected outcome (Arc absent), bounding how long silence can
+  // mean nothing with a Monday liveness push. But that bound is PRODUCED BY the scheduled run, so
+  // if the schedule goes missing the Monday push goes with it — the monitor's own defence against
+  // "running and finding nothing" looking like "not running at all" vanishes at exactly the moment
+  // it is needed. A mechanism cannot witness its own absence; only an outside check can, and this
+  // table is it.
+  //
+  // ⚠️ IT IS ALSO THE SLOWEST ROW TO NOTICE BY HAND. At "5 7 * * *" one lost schedule costs a full
+  // day per missed observation, against */5 to */30 for every other row here — and the thing being
+  // watched for is a one-time event dated ahead of 16 Sep.
+  //
+  // ⚠️ NOT draftMustBeCommented: nothing in a proof HTTP-invokes it, so forcing every draft to
+  // comment it out would buy nothing and only manufacture the forgotten restore this table exists
+  // to catch.
+  { functionName: "arc-gateway-watch", expectedCron: "5 7 * * *", draftMustBeCommented: false },
 ];
 
 /**
