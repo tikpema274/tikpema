@@ -71,7 +71,9 @@
     "test:vanillalimits": "node --experimental-test-module-mocks scripts/verify-vanilla-seller-limits.mjs",
     "test:txhonesty": "node scripts/verify-tx-failure-honesty.mjs",
     "test:hlretrieval": "node scripts/verify-hl-retrieval.mjs",
-    "hl:shorts": "node scripts/hl/top-shorts.mjs"
+    "test:hldraft": "node scripts/verify-hl-draft.mjs",
+    "hl:shorts": "node scripts/hl/top-shorts.mjs",
+    "hl:draft": "node scripts/hl/draft.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -126,6 +128,7 @@
     "test:vanillalimits",
     "test:txhonesty",
     "test:hlretrieval",
+    "test:hldraft",
     "gate:opcount",
     "gate:price",
     "gate:callshape",
