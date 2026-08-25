@@ -49,6 +49,7 @@
     "test:acktoken": "node scripts/verify-ack-token-keyed.mjs",
     "gate:forgery": "node scripts/verify-ack-forgery.mjs",
     "gate:pins": "node scripts/verify-pin-providers.mjs",
+    "test:pinnedbytes": "node scripts/verify-pinned-bytes.mjs",
     "pin:second": "node scripts/pin-second-operator.mjs",
     "gate:opcount": "node scripts/verify-operator-count.mjs",
     "gate:price": "node scripts/verify-price-rendering.mjs",
@@ -135,6 +136,7 @@
     "gate:price",
     "gate:callshape",
     "gate:recovery",
-    "gate:registry"
+    "gate:registry",
+    "test:pinnedbytes"
   ]
 }
