@@ -90,15 +90,36 @@ section("4 — EVERY SUITE IN THE REPO IS RUN, OR DECLARED UNWIRED WITH A REASON
 const allScripts = Object.entries(pkg.scripts)
   .filter(([k]) => /^(test|gate):/.test(k) && k !== "test:all")
   .filter(([, v]) => /scripts\//.test(v));
-const orphans = allScripts
-  .filter(([k, v]) => !UNWIRED_OK[k] &&
-    ![...v.matchAll(/scripts\/[A-Za-z0-9_/-]+\.(?:mjs|tsx|mts)/g)].every((m) => reachable.has(m[0])))
-  .map(([k]) => k);
+// ⭐ ONE predicate for "is this script actually run", derived once and reused by BOTH directions
+// below. Two copies would drift, and the copy that drifted would be the one that stopped guarding —
+// silently, because it would go on printing a ✅.
+const SCRIPT_FILE = /scripts\/[A-Za-z0-9_/-]+\.(?:mjs|tsx|mts)/g;
+const isReached = (cmd) => [...cmd.matchAll(SCRIPT_FILE)].every((m) => reachable.has(m[0]));
+const needsExemption = new Set(allScripts.filter(([, v]) => !isReached(v)).map(([k]) => k));
+
+const orphans = [...needsExemption].filter((k) => !UNWIRED_OK[k]);
 ok("⭐⭐ no suite is invisible — every script runs somewhere or says why not",
   orphans.length === 0, orphans.length ? `unwired and undeclared: ${orphans.join(", ")}` : `${allScripts.length} scripts, ${Object.keys(UNWIRED_OK).length} declared unwired`);
 // 🚨 A reason that is not written is a reason nobody can evaluate later.
 ok("  …and every declared exemption carries a reason",
   Object.values(UNWIRED_OK).every((r) => typeof r === "string" && r.length > 30));
+
+// ═══ ⭐⭐ THE OTHER DIRECTION — added 2026-08-25. §1 has checked it for components all along ═════
+// An exemption is only honest while the thing it exempts is genuinely unwired. `gate:draft` sat in
+// UNWIRED_OK declaring an exemption it did not need: it shares its SCRIPT FILE with gate:watch, and
+// reachability is tracked per-FILE, so it was never a candidate orphan and its key never fired.
+//
+// 🚨 INERT IS NOT HARMLESS. Repoint gate:draft at a file of its own and the stale key would have
+// exempted that new script from the orphan check WITH NOBODY DECIDING IT — a fail-open inherited by
+// whatever next takes the name. Same shape as §1's ghost check: a registry entry that guards
+// nothing still reads as coverage, which is the exact failure this file exists to end.
+const exemptGhosts = Object.keys(UNWIRED_OK).filter((k) => !pkg.scripts?.[k]);
+ok("⭐ every declared exemption names a script that exists", exemptGhosts.length === 0,
+  exemptGhosts.length ? `ghosts: ${exemptGhosts.join(", ")}` : `${Object.keys(UNWIRED_OK).length} exemptions`);
+const staleExempt = Object.keys(UNWIRED_OK).filter((k) => pkg.scripts?.[k] && !needsExemption.has(k));
+ok("⭐⭐ …and every one is ACTUALLY unwired — a stale exemption silently covers whatever next takes its name",
+  staleExempt.length === 0,
+  staleExempt.length ? `declared unwired but REACHABLE: ${staleExempt.join(", ")}` : "no stale exemptions");
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
 section("5 — 🚨 THE RATCHET: known debt may shrink, never grow");
