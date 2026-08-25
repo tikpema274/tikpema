@@ -1,0 +1,93 @@
+// seller-census.mjs — WHAT DO x402 SELLERS ACTUALLY RECEIVE? Seven days, on-chain, Base.
+//
+//   node scripts/x402-census/seller-census.mjs      # writes census-out.json in the CWD
+//
+// PREREQUISITE — the seller list, harvested from the marketplace's own listings:
+//   for q in crypto price search news weather prediction twitter academic sports data \
+//            ai image market social api research blockchain token wallet trading; do
+//     circle services search "$q" --output json; done > raw.json
+//   # then collect every distinct `accepts[].payTo` where network === "eip155:8453"
+//   # into sellers-base.json as a JSON array of addresses.
+//
+// ═══ ⭐ WHY THIS IS MEASURABLE AT ALL ═══════════════════════════════════════════════════════════
+// An x402 endpoint publishes a `payTo` address in its 402 challenge. Those addresses are public,
+// so what sellers RECEIVE can be measured without asking anyone and without buying anything.
+//
+// ═══ ⭐⭐ THE OPTIMISATION THAT MAKES A 7-DAY WINDOW FEASIBLE ═══════════════════════════════════
+// `eth_getLogs` accepts an ARRAY in a topic position (OR-matching). All 54 recipients therefore
+// collapse into ONE query per block-window: 54 addresses x 31 windows x 2 directions would be
+// ~3,300 requests; this is 62.
+// ⚠️ VERIFIED, NOT ASSUMED — verify-census.mjs re-queries individual addresses in one window and
+// compares against the batched tally. If array-matching behaved differently, every number here
+// would be wrong, and nothing in the output would look odd.
+//
+// ═══ 🚨 WHAT IS MEASURED, AND WHAT IT IS NOT ═══════════════════════════════════════════════════
+// · Matched on the TOKEN CONTRACT ADDRESS, not on the event topic alone.
+// · BOTH DIRECTIONS. A seller that earns and withdraws looks identical to a dead one if you only
+//   read balances; outbound is what rules that out.
+// · AN INBOUND TRANSFER IS NOT A PURCHASE. Funding, refunds and unrelated transfers are
+//   indistinguishable at this resolution. Every count is an UPPER BOUND on sales.
+// · COVERAGE IS TRACKED PER WINDOW. If a window fails the run is marked INCOMPLETE rather than
+//   reporting a partial count as a total.
+//
+// ⚠️ A WRITE-PROBE RUNS BEFORE ANY SCANNING. The first version of this script completed all 31
+// windows — ~5 minutes, 62 requests — and then threw on its final write line, discarding
+// everything. Expensive work must not be gated on an untested cheap step at the end.
+
+import { readFileSync, writeFileSync } from "node:fs";
+// ⭐ WRITE-PROBE FIRST. The previous run completed all 31 windows — ~5 minutes and 62 requests —
+// and then threw on the final write line (require() in an .mjs with top-level await), discarding
+// everything. The expensive work must not be gated on an untested cheap step at the end.
+writeFileSync("census-out.json", JSON.stringify({ status: "IN PROGRESS — not a result" }));
+const RPC="https://mainnet.base.org";
+const USDC="0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+const T0="0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+const rpc=async(m,p,t=6)=>{let e;for(let i=0;i<t;i++){try{
+ const r=await fetch(RPC,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:m,params:p})});
+ const j=await r.json(); if(j.error) throw new Error(JSON.stringify(j.error).slice(0,90)); return j.result;
+}catch(x){e=x; await sleep(1200*(i+1));}} throw e;};
+
+const sellers=JSON.parse(readFileSync("sellers-base.json","utf8"));
+const pad=(a)=>"0x"+"0".repeat(24)+a.slice(2).toLowerCase();
+const padded=sellers.map(pad);
+const byAddr=new Map(sellers.map(a=>[a.toLowerCase(),{in:0,inAmt:0n,out:0,outAmt:0n}]));
+
+const head=parseInt(await rpc("eth_blockNumber",[]),16);
+const STEP=9_999, DAYS=7, BLOCKS_PER_DAY=43_200;      // Base ~2s blocks
+const FROM=head-DAYS*BLOCKS_PER_DAY;
+let covered=0, incomplete=[], windows=0;
+
+// ⭐ ONE query per window for ALL 54 sellers: eth_getLogs accepts an ARRAY in a topic position (OR).
+// 54 addresses x 31 windows x 2 directions would be ~3,300 requests; this is 62.
+for(let b=FROM;b<=head;b+=STEP+1){
+  const to=Math.min(b+STEP,head);
+  let okBoth=true;
+  for(const dir of ["in","out"]){
+    const topics = dir==="in" ? [T0,null,padded] : [T0,padded,null];
+    try{
+      const logs=await rpc("eth_getLogs",[{fromBlock:"0x"+b.toString(16),toBlock:"0x"+to.toString(16),address:USDC,topics}]);
+      for(const l of logs){
+        const who=("0x"+l.topics[dir==="in"?2:1].slice(26)).toLowerCase();
+        const rec=byAddr.get(who); if(!rec) continue;
+        const v=BigInt(l.data);
+        if(dir==="in"){rec.in++; rec.inAmt+=v;} else {rec.out++; rec.outAmt+=v;}
+      }
+    }catch(e){ okBoth=false; incomplete.push({from:b,to,dir,err:String(e.message).slice(0,70)}); }
+    await sleep(220);
+  }
+  if(okBoth) covered+=(to-b+1);
+  windows++;
+  process.stderr.write(`\r  ${windows} windows, ${covered.toLocaleString()} blocks covered`);
+}
+process.stderr.write("\n");
+const startBlk=await rpc("eth_getBlockByNumber",["0x"+FROM.toString(16),false]);
+const endBlk=await rpc("eth_getBlockByNumber",["0x"+head.toString(16),false]);
+const out={ chain:"Base (eip155:8453)", asset:USDC, sellers:sellers.length,
+  fromBlock:FROM, toBlock:head, blocks:head-FROM+1, coveredBlocks:covered,
+  complete: incomplete.length===0, incompleteWindows: incomplete,
+  fromTime:new Date(parseInt(startBlk.timestamp,16)*1000).toISOString(),
+  toTime:new Date(parseInt(endBlk.timestamp,16)*1000).toISOString(),
+  rows:[...byAddr.entries()].map(([a,r])=>({address:a,inCount:r.in,inUsdc:Number(r.inAmt)/1e6,outCount:r.out,outUsdc:Number(r.outAmt)/1e6})) };
+writeFileSync("census-out.json",JSON.stringify(out,null,2));
+console.log("  written census-out.json");

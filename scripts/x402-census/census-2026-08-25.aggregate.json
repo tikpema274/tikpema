@@ -1,0 +1,42 @@
+{
+  "_note": "AGGREGATE ONLY. Per-address rows are deliberately NOT published: the distribution is the finding, and this repo is public. The script reproduces the full per-address data locally.",
+  "chain": "Base (eip155:8453)",
+  "asset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+  "fromBlock": 50129226,
+  "toBlock": 50431626,
+  "blocks": 302401,
+  "coveredBlocks": 302401,
+  "complete": true,
+  "fromTime": "2026-08-18T10:09:59.000Z",
+  "toTime": "2026-08-25T10:09:59.000Z",
+  "days": 7,
+  "sellers": 54,
+  "sellersWithInbound": 17,
+  "sellersWithZero": 37,
+  "sellersWithOutbound": 3,
+  "inboundTransfers": 44752,
+  "inboundUsdc": 1106.3974,
+  "meanPerTransferUsdc": 0.0247,
+  "outboundTransfers": 12,
+  "outboundUsdc": 91.01,
+  "medianInboundUsdcAll": 0,
+  "medianInboundCountAll": 0,
+  "medianInboundUsdcEarners": 10.741,
+  "medianInboundCountEarners": 214,
+  "concentrationPct": {
+    "top1": 42.8,
+    "top3": 80.5,
+    "top5": 92.1
+  },
+  "largestEarner": {
+    "inboundUsdc": 473.2422,
+    "inboundTransfers": 31018
+  },
+  "limits": [
+    "An inbound transfer is NOT a purchase. Funding, refunds and unrelated transfers are indistinguishable at this resolution; every count is an UPPER BOUND on sales.",
+    "54 payTo addresses harvested by keyword search — not the whole marketplace.",
+    "Base only. Listings on Ethereum, Polygon, Avalanche, Arbitrum, Optimism, Unichain and Solana were not measured.",
+    "One 7-day window. It says nothing about a trend.",
+    "It does not explain WHY some sellers earn and others do not."
+  ]
+}
