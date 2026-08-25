@@ -1,5 +1,66 @@
 ---
 
+# 📌 X API PRICING — READ FROM X'S OWN DOCS, 2026-08-25 (the tier model is gone)
+
+Checked because an X-posting step keeps coming up alongside the Hyperliquid analyzer. **Not built,
+not decided** — recorded so the numbers are not re-derived and so the sourcing caveat travels with
+them.
+
+## THE MODEL CHANGED: PAY-PER-USAGE, NO TIERS FOR NEW DEVELOPERS
+
+`docs.x.com/x-api/introduction` — *"The X API uses **pay-per-usage** pricing. No subscriptions—pay
+only for what you use."* Credits are purchased upfront and deducted. **No Free / Basic / Pro** is
+offered to new developers.
+
+## PER-UNIT PRICES — `docs.x.com/x-api/getting-started/pricing`
+
+| operation | price |
+|---|---|
+| **Post create** | **$0.015 per request** |
+| 🚨 **Post create WITH A URL** | **$0.200 per request** |
+| Post read | $0.005 per resource |
+| User read | $0.010 per resource |
+| Owned resource read | $0.001 per resource |
+
+Cap: **3 million post reads per monthly billing cycle**.
+
+⭐⭐ **THE PRICE THAT ACTUALLY SHAPES THE PRODUCT IS THE LINK SURCHARGE — 13×.** A post carrying a
+URL costs $0.200 against $0.015. An analyzer that posts *"top BTC shorts — full breakdown at
+<link>"* pays the link rate every single time.
+
+```
+1 post/day, no link      ~ $0.45 / month
+1 post/day, with link    ~ $6.00 / month
+6 posts/day, with link   ~ $36  / month
+```
+
+⭐ **COST IS THEREFORE NOT THE CONSTRAINT.** Which puts the real obstacles back where they were:
+a posting integration needs an **OAuth 2.0 user-context refresh token** — a long-lived credential
+this architecture currently has **no home for** (0 local keys, everything in Circle custody, and
+Netlify env vars are site-wide) — and X's **automation-labelling rules**, which are a product
+decision rather than an engineering one.
+
+## ⚠️ THE SOURCING CAVEAT, WHICH IS HALF THE POINT OF WRITING THIS DOWN
+
+The first search returned **nine** results and **every one was a company selling an X API
+alternative** (xautodm, postproxy, socialcrawl, xpoz, sorsa, netrows, blotato, zernio, elfsight).
+Nine agreeing sources with a shared commercial interest in making X look expensive is **not nine
+instruments** — it is one, possibly copying itself.
+[[repeating-one-instrument-is-not-corroboration]]
+
+⭐ Checking against X's own docs was worth it: the structure held, **one number did not**. The blog
+aggregate said the read cap was **2 million**; X's documentation says **3 million**. The primary
+source is used above.
+
+⛔ **STILL UNCONFIRMED, and flagged rather than repeated as fact:** that Basic ($200/mo) and Pro
+($5,000/mo) persist for EXISTING subscribers, and that free access survives for "public-utility
+apps" case-by-case. Those appear only in the third-party posts — on no X page reachable here.
+
+⚠️ And `developer.x.com/en/portal/products` returned **HTTP 402** to an unauthenticated fetch, which
+is a paywall/bot-block rather than the x402 protocol — worth noting so a future reader does not
+mistake it for a payable endpoint.
+---
+
 # ✅ `arc-x402-reference` v0.2.0 RELEASED — and the breaking change is now labelled where a reader looks
 
 **2026-08-25.** Closes the item recorded hours earlier as *"the removal is unlabelled, and the break
