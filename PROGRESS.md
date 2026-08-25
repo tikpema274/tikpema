@@ -1,5 +1,44 @@
 ---
 
+# 📉 ZERO SETTLEMENTS ON THE VANILLA SELLER — 58h26m AFTER THE DISCORD POST
+
+**2026-08-25 19:40 UTC.** Endpoint posted to Discord **2026-08-23 09:14 UTC**. Zero settlements
+since. ⭐ Elapsed is COMPUTED from the two timestamps, not remembered: 09:14 → 19:40 two days
+later = **58h26m**.
+
+| | pre-registered | measured |
+|---|---|---|
+| nonce | 2 | **2** |
+| USDC balance | 314272 atomic | **314272** |
+
+Seller `0x1a63e59d1419cf48e2bd48cb54db85f27818dc99`, Arc Testnet. Confirmed by BOTH quorum
+endpoints — `rpc.testnet.arc.network` @ block 58821156, `arc-testnet.drpc.org` @ 58821159.
+Balance read via `balanceOf` **pinned to the USDC contract** `0x3600…0000`, never the 18-decimal
+native view. [[arc-eth-getbalance-18-decimals]]
+
+**⭐ MONOTONIC ARGUMENT — no logs needed.** The seller settles its own sales, so:
+nonce unchanged ⇒ no transactions sent ⇒ no gas spent ⇒ balance could only RISE. Unchanged balance
+therefore proves zero inbound. A proof, not a sample: a log scan can miss a window or truncate;
+a paying caller would have had to move the nonce.
+
+## ⚠️ SCOPE
+
+* **Settlements, not attention.** This measures money that moved. It cannot see requests.
+* **Zero INVOCATIONS is a separate, earlier reading** — the unfiltered function-log check of
+  **2026-08-24**, not today. Two measurements on two days; not merged into one claim.
+* **A REACH result, not a product result.** One Discord message to one channel is the entire
+  outbound. ⛔ Nothing here says whether anyone wants it — zero calls after one message is a fact
+  about DISTRIBUTION.
+
+⚠️ **THE PRE-REGISTERED 72h THRESHOLD IS UNRESOLVED — IT RESOLVES 2026-08-26 09:14 UTC.**
+At the reading, 13h34m remained. 🚨 THREE REMEMBERED FIGURES WERE OFFERED FOR THIS ONE INTERVAL —
+"past 72h", "2d7h ≈ 55h", "~47h" — and all three were wrong; the computed value is 58h26m. That is
+the whole argument for deriving an elapsed time from two timestamps every time, and for recording
+the endpoints rather than the difference. The finding does not depend on the clock: zero settlements
+is the same result at 58h as at 72h. [[verify-dictated-reasons-before-recording]]
+
+---
+
 # ⚠️ `gate:watch` GUARDS 4 OF 9 SCHEDULED FUNCTIONS — RECORDED, NOT FIXED
 
 **2026-08-25.** Adding `arc-gateway-watch` to `GUARDED_SCHEDULES` (`cc93d9c`) meant reading the
