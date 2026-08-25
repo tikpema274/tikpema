@@ -48,3 +48,12 @@ agent-metadata/.nft-enumeration*.json
 # Money-path run records from scripts/fire-ub-spend.mjs — hold a live transferId/txHash.
 # Durable ON DISK by design (evidence must survive a timeout), but never committed.
 ub-spend-capture-*.json
+
+# x402 seller census: the PER-ADDRESS result file. Deliberately never committed —
+# this repo is public and the published write-up withholds addresses on purpose
+# (the distribution is the finding; who occupies which position in it is not).
+# The aggregate lives in scripts/x402-census/census-2026-08-25.aggregate.json and
+# seller-census.mjs reproduces the full per-address data locally in ~5 minutes.
+census-out.json
+scripts/x402-census/census-*.json
+!scripts/x402-census/census-*.aggregate.json
