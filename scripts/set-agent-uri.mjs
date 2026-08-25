@@ -113,7 +113,7 @@ const TARGETS = {
     cid: "bafkreib6viz4fqa4oqrrgxfecwcttxyda6ilm5nmzr7yplznqeahqmomla",
     sha256: "3eaa33c2c01c7423135ca4158539df030790b675accc7f87af2d81007831cc58",
     bytes: 18756,
-    localDoc: path.join(REPO_ROOT, "agent-metadata/dd-service.v1.1.0.DRAFT.json"),
+    localDoc: path.join(REPO_ROOT, "agent-metadata/dd-service.v1.1.0.REGISTERED.json"),
     // The pointer this run expects to REPLACE. Asserted, never assumed.
     expectedCurrentCid: "bafkreigtonfmznrzbi3b34w27b5utra5jjcngc74skc7i67dymue3o2af4",
     supersedesVersion: "1.0.0",

@@ -87,10 +87,21 @@ export const PINNED_SET = Object.freeze([
     cid: "bafkreib6viz4fqa4oqrrgxfecwcttxyda6ilm5nmzr7yplznqeahqmomla",
     sha256: "3eaa33c2c01c7423135ca4158539df030790b675accc7f87af2d81007831cc58",
     bytes: 18756,
-    // ⚠️ STILL NAMED .DRAFT.json ON PURPOSE. Renaming changes nothing about the bytes but invites
-    // a re-save, and a re-save changes the CID. The filename stopped mattering the moment it was
-    // pinned — the CID is the address.
-    rel: "agent-metadata/dd-service.v1.1.0.DRAFT.json",
+    // ⭐ RENAMED FROM .DRAFT.json — this is the REGISTERED document and the old name said otherwise.
+    // tokenURI(851891) resolves to these bytes' CID. ⚠️ The file's own `_notice` still opens
+    // "DRAFT — NOT YET PINNED AND NOT YET POINTED AT", which is FALSE and CANNOT be corrected:
+    // correcting it would change the bytes and therefore the CID. That stale sentence is precisely
+    // what the mutable companion exists to carry. A filename repeating "DRAFT" on top of it invited
+    // exactly the edit that would break the claim.
+    //
+    // ⚠️ THE PRIOR OBJECTION WAS CORRECT, AND IS NOW ANSWERED RATHER THAN OVERRULED. This entry
+    // used to read: "STILL NAMED .DRAFT.json ON PURPOSE. Renaming changes nothing about the bytes
+    // but invites a re-save, and a re-save changes the CID." True — so the fix was to make a
+    // re-save LOUD before renaming, not to argue about it. `test:pinnedbytes` re-hashes this file
+    // against the sha256 and byte length above and is in `suites`, so `test:all` runs it. The guard
+    // was added FIRST and proven red-on-mutation / green-on-restore; the rename came second.
+    // ⭐ A filename asks a human not to edit. The hash check catches them when they do.
+    rel: "agent-metadata/dd-service.v1.1.0.REGISTERED.json",
     name: "dd-service.v1.1.0.json",
     agentId: "851891",
     version: "1.1.0",
