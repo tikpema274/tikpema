@@ -1,5 +1,71 @@
 ---
 
+# ⭐⭐⭐ THE x402 DEMAND QUESTION IS ANSWERED — people DO buy, and the shape is the finding
+
+**2026-08-25.** The question open since the census: *does anyone actually buy x402 services?* It was
+never answerable from this side — DD was built, canaried, attested, priced and **never listed**, so
+every "no traffic" reading measured an invisible service. Seller **payout addresses are public**, so
+the question was answerable all along by looking at theirs instead of ours.
+
+## THE MEASUREMENT — 10 marketplace sellers, one pinned 5½-hour window on Base
+
+Base blocks `50418488..50428478`, USDC `0x833589fc…`, inbound `Transfer` pinned to the token
+contract, `payTo` addresses taken from live `circle services search` listings.
+
+```
+  2 of 10 sellers received ANY USDC        8 of 10 received nothing
+  156 inbound transfers                    4.4840 USDC total
+  avg per transfer                         $0.0287
+```
+
+Two sellers carried all of it: **128 transfers / 4.2940 USDC** (avg $0.0335), and 28 / 0.1900.
+
+## 🚨 THE SHAPE IS THE FINDING, NOT THE YES
+
+The busiest seller in the sample implies:
+
+```
+  4.29 USDC / 5.5h   ->   ~19 USDC/day   ->   ~$560/month
+  from ~560 calls/day at ~3.4 cents each, across ELEVEN endpoints
+```
+
+⭐ **The revenue model is high call VOLUME × micro price** — not a few good sales. And it is
+**heavily concentrated**: 80% of the sampled sellers earned nothing in the window. A single-endpoint
+service priced at DD's 0.06 USDC would need ~300 calls/day to clear ~$18/day, and the median seller
+here is at **zero**.
+
+⚠️ **THIS RETROSPECTIVELY REFRAMES THE DD LISTING QUESTION.** "Nobody bought a DD report" was
+untestable because it was unlisted — but even listed, the base rate says the likeliest outcome is
+joining the 80%. Listing establishes **reachability**, which the earlier entry already said; it does
+not establish demand for *that* service. This measurement makes the prior concrete rather than
+hopeful.
+
+## ⛔ WHAT IS **NOT** ESTABLISHED — stated so the number is not over-read
+
+* **An inbound transfer is NOT a purchase.** Funding, refunds and unrelated transfers are
+  indistinguishable at this resolution. **156 is an upper bound on sales, not a count of them.**
+* **One window, ten sellers, one chain.** The 843-service census WAS a census; this is a sample.
+* **Zero in 5½ hours is not zero ever.** Those eight may sell weekly, or may sweep to another
+  address — a swept balance and a dead service look identical from outside.
+* The two active addresses may not be x402 revenue at all; they are addresses that *appear as*
+  `payTo` in listings and *also* receive USDC.
+
+## WHAT IT MEANS FOR THE ANALYZER
+
+Three routes, and the measurement rules on which fits:
+
+1. **Sell it in the marketplace.** Rails exist, seller built twice. ⚠️ Joining the 80% is the base
+   case unless it gets VOLUME — i.e. something *agents call repeatedly*, not something humans read.
+2. **Sell the output, not the API** — a paid feed. Priced per READER, not per call. No x402, no Base
+   deployment, no marketplace.
+3. **Do not sell it** — let it make the drafts worth reading, and build standing rather than revenue.
+
+⭐ Given [[the agent drafts, the human posts]] decided the same day, **routes 2 and 3 fit the product
+that is actually being built**. Route 1 optimises for machine call volume; the analyzer was
+deliberately scoped as human-in-the-loop. Choosing route 1 would mean building a different product
+from the one just decided on.
+---
+
 # 📌 DECIDED: THE AGENT DRAFTS, THE HUMAN POSTS — no OAuth, no automation label, no X spend
 
 **2026-08-25.** If an X-posting step is ever added to the analyzer, it **produces a draft and hands
