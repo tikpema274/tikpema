@@ -1,5 +1,62 @@
 ---
 
+# ✅ `arc-x402-reference` v0.2.0 RELEASED — and the breaking change is now labelled where a reader looks
+
+**2026-08-25.** Closes the item recorded hours earlier as *"the removal is unlabelled, and the break
+is loud at import time"*. Two annotated tags on the PUBLIC repo
+(github.com/tikpema274/arc-x402-reference):
+
+```
+v0.1.0  ->  7961443   initial reference (2026-07-02), tagged RETROACTIVELY
+v0.2.0  ->  2ec0059   the overload correction (2026-08-25)
+```
+
+⭐ **THE VERSION WAS BUMPED IN THE COMMIT THAT IS TAGGED** (`0.1.0 → 0.2.0`), so `package.json` and
+the tag cannot disagree about which release this is — the same
+[[duplicate-source-of-truth-is-the-recurring-bug]] shape that keeps costing this project elsewhere.
+
+## ⭐ WHAT THE v0.2.0 ANNOTATION HAD TO SAY THAT THE COMMIT DID NOT
+
+The commit explained the removal at length and never used the word "breaking". The tag leads with it,
+plus the case a loud failure does not reach:
+
+> If you **imported** `splitSignature`, upgrading fails loudly —
+> `does not provide an export named 'splitSignature'`.
+> ⚠️ **If you COPIED it into your own code, nothing breaks and you still have the defect.**
+
+That reader gets no signal from an import error at all, and is the likeliest consumer of a
+reference repo. It also records why there is no deprecated alias: re-exporting the exact guard that
+refused contract payers leaves the defect one import away, and "deprecated" is precisely the name a
+copy-paste reader keeps.
+
+## 🚨 AND THE v0.1.0 TAG IS A WARNING, NOT A LABEL
+
+A retroactive tag reading only "initial release" would be **worse than no tag** — it makes a version
+containing a false claim look like a clean starting point to copy from. So it says outright that the
+release contains a claim that is false and code that acts on it, and points at v0.2.0.
+
+⭐⭐ **THE SENTENCE WORTH KEEPING, because it explains why nobody caught this from inside the repo:**
+
+> The README asserted EOA-only; the seller then settled via the v,r,s overload behind a 65-byte
+> guard, so it **did** refuse contract payers — **which is what made the claim look
+> self-confirming.**
+
+Documentation and code corroborated each other while both were wrong. Neither was checkable against
+the other; only the chain could settle it. ⚠️ That is a distinct failure from a stale comment — a
+stale comment disagrees with the code and can be spotted by reading. This one **agreed**.
+
+⚠️ The annotation also separates the wrong part from the sound part — the working round trip and the
+EIP-712 domain confirmed bit-for-bit against the live `DOMAIN_SEPARATOR` still stand, unchanged in
+v0.2.0 — so a reader does not conclude the whole thing was unreliable.
+
+## STILL TRUE OF THE RELEASE, AND SAID IN THE TAG
+
+⛔ No settlement with a real ERC-1271 signature has been completed against the reference: the token's
+branch is **measured**, the round trip is **not**. And the release is **unverified by execution
+against the chain** — `npm run proof` needs two funded Arc-testnet keys, so the new offline check
+(`npm test`, 20/0) is the whole of its automated coverage.
+---
+
 # ⚠️ BREAKING CHANGE SHIPPED PUBLICLY WITHOUT BEING LABELLED ONE — `splitSignature` is gone
 
 **2026-08-25, `arc-x402-reference` @ `3aefa21`** (the PUBLIC repo, github.com/tikpema274/arc-x402-reference
