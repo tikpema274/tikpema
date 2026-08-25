@@ -1,5 +1,53 @@
 ---
 
+# ⚠️ BREAKING CHANGE SHIPPED PUBLICLY WITHOUT BEING LABELLED ONE — `splitSignature` is gone
+
+**2026-08-25, `arc-x402-reference` @ `3aefa21`** (the PUBLIC repo, github.com/tikpema274/arc-x402-reference
+— not this one). The EOA-only correction replaced an **exported** function:
+
+```
+src/arc.js   - export function splitSignature(sig)   → { v, r, s },  65 bytes ONLY
+             + export function normalizeSignature(sig) → hex,        any whole-byte length
+```
+
+⭐ **THE REMOVAL IS CORRECT.** `splitSignature` was the guard doing the refusing: it threw on
+anything that was not exactly 65 bytes, so every contract (ERC-1271) signature was rejected
+**before** the settle call was reached. Switching the seller to the `bytes` overload without removing
+it would have changed nothing. The seller was one of the sellers that refuse contract payers, and
+this is the line that made it so.
+
+🚨 **BUT IT IS A BREAKING CHANGE TO A PUBLIC API AND THE COMMIT DID NOT SAY SO.** Anyone importing
+`splitSignature` from `src/arc.js` breaks on upgrade — and the failure is a clean
+`SyntaxError: does not provide an export named 'splitSignature'`, so it is loud rather than silent,
+which is the good case. The commit body explains the removal at length and never uses the word
+"breaking".
+
+⚠️ **WHY THAT MATTERS MORE FOR A REFERENCE REPO THAN A PRIVATE ONE.** This repo's own consumers are
+known and were updated in the same commit. A published reference is copied and imported by people
+who will never see the commit body — the thing they read is a release note or a tag, and there
+isn't one. ⭐ Same family as
+[[duplicate-source-of-truth-is-the-recurring-bug]] inverted: not a claim copied into a second place
+that drifts, but a claim that exists in only ONE place a reader will not look.
+
+## WHAT WOULD ACTUALLY CLOSE IT
+
+* a tag / release note naming the removed export, or
+* keeping `splitSignature` as a thin deprecated wrapper that still throws on non-65-byte input —
+  ⚠️ **rejected on the merits**: re-exporting the exact guard that refused contract payers would
+  leave the defect one import away, and a "deprecated" name is exactly what a copy-paste reader
+  keeps. Better broken loudly than quietly available.
+
+**NOT DONE.** Recorded rather than fixed, because cutting a release for this repo is a decision that
+has not been taken. The state as of now: the change is pushed, the removal is unlabelled, and the
+break is loud at import time.
+
+⭐ For the wider record: the same commit is the one that named its own untested edge — *"no
+settlement with a real ERC-1271 signature has been completed against this reference; the token's
+branch is measured, the round trip is not."* The lesson generalises past this repo: **a correction
+should state both what it now knows AND what it still does not** — and, this entry argues, what it
+just broke.
+---
+
 # 📐 SCOPED-KEY SKETCH RECORDED — `docs/hyperliquid-scoped-key-design.md`
 
 **NOT BUILT, NOT SCHEDULED, NOT DECIDED.** The Hyperliquid work is scoped **read-only**. This is the
