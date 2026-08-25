@@ -1,5 +1,53 @@
 ---
 
+# 📌 DECIDED: THE AGENT DRAFTS, THE HUMAN POSTS — no OAuth, no automation label, no X spend
+
+**2026-08-25.** If an X-posting step is ever added to the analyzer, it **produces a draft and hands
+it over**. It does not hold an X credential and does not post autonomously.
+
+## WHAT THE DECISION REMOVES
+
+| | |
+|---|---|
+| OAuth 2.0 refresh token | **none needed** — the credential problem does not arise |
+| X API spend | **$0** (vs $0.015/post, **$0.200 with a URL** — a 13× link surcharge) |
+| automated-account label | **not required** — a human is posting |
+| new deployment surface | **none** — no separate site, no second thing to deploy and monitor |
+| suspension risk | ~nil — volume without substance is what gets accounts killed, and there is no volume |
+
+## ⚠️ AND WHAT IT COSTS, RECORDED SO THE DECISION IS NOT HALF-WRITTEN
+
+**It does not scale past one person's attention, and it cannot run unattended.** If the goal were
+*presence* rather than *insight*, automation is the entire point and this does not deliver it. The
+decision is that the goal is insight. ⭐ That is a product choice, not a technical constraint — the
+technical side was solvable (a separate Netlify site holds the token where the 26 functions
+importing `_circle.mjs` cannot read it; scopes narrowed to `tweet.write` + `offline.access`; X's own
+scope text names revocation as the kill switch, *"until you revoke access"*).
+
+## ⭐⭐ THIS IS THE THIRD TIME THIS WEEK THE SAME SHAPE WAS CHOSEN — IT IS A STANCE, NOT THREE CALLS
+
+1. **Hyperliquid analyzer** → read-only. *Analyse, present, let the user act.*
+2. **Scoped-key trading design** → written down, **not built**. Every boundary that mattered would
+   have been one Circle/Hyperliquid enforced, not one we wrote.
+3. **X posting** → draft, do not send.
+
+> **The agent produces; the human acts.**
+
+⭐ The reason is the same each time, and it is not caution: **the agent's output is INFERENCE, and
+the action is IRREVERSIBLE.** A read-only analyzer can answer *"I cannot tell whether this is a
+basis trade or a directional short"* and that is maximally useful. The instant something must act on
+it, `INDETERMINATE` has to resolve — it gets ignored or silently turned into a position, or a post.
+[[absence-must-never-read-as-safe]] pointed at inference.
+
+⚠️ **The asymmetry that settles it for posting specifically:** a wrong trade costs money, which is
+bounded and recoverable. A wrong post costs credibility, which is neither.
+
+## STILL OPEN
+
+The analyzer itself is **not built** and not scheduled. This decision constrains its shape if it is;
+it does not commit to building it.
+---
+
 # 📌 X API PRICING — READ FROM X'S OWN DOCS, 2026-08-25 (the tier model is gone)
 
 Checked because an X-posting step keeps coming up alongside the Hyperliquid analyzer. **Not built,
