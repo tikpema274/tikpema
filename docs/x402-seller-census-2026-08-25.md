@@ -20,7 +20,8 @@ seven days of USDC transfers to and from each.
 
 ## Results
 
-**34% of listed sellers received anything at all.**
+**34% of listed sellers received anything at all** — but see *The zeros track the
+settlement rail* below before reading that as a measure of usage.
 
 | | |
 |---|---|
@@ -49,16 +50,49 @@ The two columns differ because the largest earner's payments are unusually small
 **473.24 USDC across 31,018 transfers** — roughly 4,400 payments a day at about 1.5 cents
 each, below the all-seller mean of 2.5 cents.
 
-**The zeros are real, not swept balances.** Only **6 of 80** addresses sent any USDC out
-during the week — 19 transfers, 91.15 USDC total. A seller earning and withdrawing looks
-identical to a dead one if you only measure balances, so outbound was measured too. It
-rules out the obvious alternative explanation for the 53 zeros.
+**The zeros are not withdrawals.** Only **6 of 80** addresses sent any USDC out during the
+week — 19 transfers, 91.15 USDC total. A seller earning and withdrawing looks identical to
+a dead one if you only measure balances, so outbound was measured too. ⚠️ That rules out
+*one* alternative explanation for the 53 zeros. It does not rule out the one below.
+
+## 🚨 The zeros track the settlement rail, not obviously the trade
+
+Splitting the same 80 addresses by which rail their listings declare:
+
+| rail declared | earned ≥1 | zero | total | earn rate |
+|---|---|---|---|---|
+| vanilla x402 only | 16 | 1 | 17 | **94%** |
+| both | 2 | 0 | 2 | 100% |
+| **Circle Gateway only** | 9 | **37** | 46 | **20%** |
+| neither declared | 0 | 15 | 15 | 0% |
+
+**70% of the zero-inbound addresses are Gateway-capable, against 41% of the earners.**
+Nearly every vanilla-only seller shows receipts; four fifths of Gateway-only sellers show
+none.
+
+This is what the undercount above predicts. Gateway settles *net positions in bulk*, so a
+seller doing steady business through it can show **zero inbound transfers to its `payTo`
+indefinitely** — the payments are real and the transfers are not there to be counted. The
+two readings are:
+
+1. Gateway sellers are trading, and this census structurally cannot see it.
+2. Gateway sellers genuinely sell less.
+
+**On-chain data cannot distinguish them**, and no amount of additional scanning will —
+the signal is absent by design, not by sampling. Only facilitator-side settlement counts
+could separate the two, because only facilitators hold the pre-batch record.
+
+⚠️ **So "53 of 80 received nothing" must not be read as "53 dead endpoints."** For the 37
+Gateway-only addresses among them, a zero is uninformative rather than negative. The honest
+population for any statement about *observed trade* is the 19 addresses that declare
+vanilla settlement — of which **18 (95%) show receipts**.
 
 ## What this does and does not show
 
 **It shows:** x402 endpoints do get paid, at high transaction volume and very low value
-per call. It also shows that being listed is not the same as being used — most listed
-sellers received nothing for a week, and that is not an artifact of withdrawals.
+per call. It shows that inbound flow is extremely concentrated on a handful of addresses.
+⚠️ It does **not** show that most listed sellers are unused — measuring outbound rules out
+*withdrawals* as the explanation for the zeros, but not *settlement rail*. See below.
 
 **It does not show:**
 
