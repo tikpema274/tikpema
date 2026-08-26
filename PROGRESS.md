@@ -1,5 +1,105 @@
 ---
 
+# 🚨 THREE DEFECTS ON THE x402 DISCOVERY PATH — AND A CORRECT OBSERVATION FILED UNDER THE WRONG VERDICT
+
+**2026-08-26.** Coinbase's Bazaar Validator POSTed to `https://app.tikpema.xyz/api/dd-analyze` and
+got **400, no `x402Version`** — clean URL, correct method, live prod. Its stated requirement is
+"return HTTP 402 to unauthenticated requests." Measured against prod; **three separate defects**,
+not one. Read-only: nothing was bought, signed or changed.
+
+| unauthenticated POST | HTTP | `x402Version` in body |
+|---|---:|---|
+| no body at all | **400** | no |
+| `{}` | **400** | no |
+| `{"address":"garbage"}` | **400** | no |
+| valid subject + chain | **402** ✅ | **no** |
+
+The paid path is fine — a caller that already knows the schema gets a correct challenge.
+
+## Defect 1 — a bare probe gets 400, not 402 (the discovery-blocking one)
+
+Input validation runs strictly BEFORE the challenge, structurally: `dd-analyze.mjs:187` returns
+`climbed.done` from `runLadder()` on any failure, and the 402 is rung 6 at `dd-analyze.mjs:219`.
+Refusal reasons are a closed set (`_dd-rungs.mjs:183–186`): `malformed-request`, `invalid-address`,
+`chain-not-specified`, `unsupported-chain`.
+
+🚨 **The x402 contract is that an unpaid request receives the challenge, and the challenge is HOW a
+caller learns the schema. Requiring the schema in order to get the challenge is circular.**
+
+## Defect 2 — `x402Version` is in a base64 HEADER, not the JSON body (INDEPENDENT)
+
+⚠️ Correcting a first reading of my own: it is not missing. `_dd-x402.mjs:320` emits a
+`PAYMENT-REQUIRED` response header carrying base64 `{x402Version: 1, accepts: […]}`, verified live.
+The **body** top-level keys are `error, accepts, howToCall, subjectPreview, whatYouAreBuying,
+settlement` — no `x402Version`.
+
+**This survives a fix to defect 1.** A body-reading validator would still report no `x402Version`
+even once bare probes return 402. Two defects, one symptom.
+
+## Defect 3 — the header says version 1; the index records resources as version 2
+
+`x402Version: 1` in the header, while every entry in Circle's discovery index carries
+`"x402Version": 2`. Recorded as observed; which is correct for this endpoint is not established here.
+
+## ⭐⭐ THE PART THAT MATTERS: A CORRECT OBSERVATION FILED UNDER AN INVERTED VERDICT
+
+`_dd-rungs.mjs:148` already said it, and it had already been MEASURED once:
+
+> *"a discovery probe POSTing an empty body gets a 400 and learns NOTHING about payability —
+> measured with `circle services inspect -X POST`, which reported the endpoint 'unavailable'."*
+
+And `:151` drew the conclusion:
+
+> *"⚠️ THIS DOES NOT CHANGE THE STATUS CODE and is not expected to score: Circle's checker keys on
+> HTTP 402."*
+
+🚨 **The reasoning is right and the conclusion inverts it. If the checker keys on 402, and we do not
+return 402, then we do not score — that is the reason it WILL fail, written down as the reason it
+would not matter.** The observation was accurate, the instrument was real, and the verdict attached
+to it was backwards. It then sat unrevisited while the listing question stayed open for weeks.
+
+⭐ The mitigation that DID ship works: the 400 body carries a `howToPay` block with price, `payTo`
+and full `accepts[]` (verified live). It was built to help a human reader who gets a 400 — and it
+deliberately left the status code alone, which is the only thing either validator keys on.
+
+⭐ The Bazaar Validator is therefore a SECOND INDEPENDENT INSTRUMENT confirming a recorded
+prediction — not a new discovery. [[repeating-one-instrument-is-not-corroboration]] cuts both ways:
+two different instruments agreeing is the corroboration that was missing the first time.
+
+## gate:spec proved the easy property — second instance today
+
+`verify-spec-published.mjs:137` posts `{"address":"0x3600…","chain":"arc-testnet"}` — **a valid
+subject** — and asserts `HTTP 402 on an unpaid POST` (`:143`). Green throughout.
+
+**It has only ever proven the 402 works for callers who already know the schema. The case discovery
+uses was never exercised.** Second instance today of a guard proving the easy property while the
+load-bearing one went unmeasured [[binding-tested-across-what-it-binds]].
+
+## Scoping a bare-probe 402 — and correcting the objection against it
+
+* **`subjectPreview` is not a blocker.** `challenge402({ requirements, detail = null, preview =
+  null })` (`_dd-x402.mjs:314`) — preview is ALREADY optional. A subjectless challenge is
+  representable today; nothing needs inventing.
+* ⭐ **THE RPC OBJECTION DOES NOT HOLD — a subjectless 402 is CHEAPER than the current one.** Today's
+  challenge does one `eth_getCode` for the preview. A probe has no address to read, so it would be
+  pure constant assembly, **zero RPC**. The main argument against emitting one is backwards.
+* **Downstream:** `settle-gate.mjs` throws on a malformed address, so the SETTLE path does assume a
+  subject — but settlement only runs after a payment header arrives with a body that climbs the full
+  ladder. A bare probe would 402 and stop. ⚠️ Separable on reading; **not proven by fault injection**.
+
+## ⚠️ STILL OPEN — not resolved here
+
+Whether emitting 402 on `{}` weakens the recorded incentive argument: *"charging for 'that is not a
+well-formed question' would quote a price for something answered free, and would reward narrowing
+the supported chain set."* A 402-on-empty / 400-on-malformed ladder might preserve it — but
+`{"address":"garbage"}` is malformed AND a probe, and which side it belongs on is a design decision
+nobody has made.
+
+⛔ **NOTHING BUILT.** This and the two catalogue fixes are all scoped and none is decided.
+
+---
+
+
 # 🔬 THE GHOST DETECTOR HOLDS ON A WIDER CORPUS — AND FOUND A FALSE ASSURANCE
 
 **2026-08-26.** The forwarder detector rested on 4 positives, all FiatTokenProxy — one family, not
