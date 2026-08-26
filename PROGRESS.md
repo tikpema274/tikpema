@@ -1,5 +1,70 @@
 ---
 
+# ❓ WHERE DO OUR ASSERTIONS LIVE? — a guard that only fires AFTER the deploy is a guard that ships the regression first
+
+**2026-08-26, recorded as an open question. Nothing investigated, nothing built.**
+
+Found while validating the `resource` fix (`4b734ed`), and **separate from that fix** — it is a
+question about the SHAPE of our test estate, not about the 402 body.
+
+## What happened
+
+The `resource` object was reverted locally to confirm the new assertions go red. `gate:spec` went
+red as intended. **`verify-subjectless-402.mjs` stayed GREEN** — 49/0 with the field missing. The
+in-process suite did not cover the property at all.
+
+⚠️ **`gate:spec` runs AFTER the deploy** — it is step 9 of `deploy:prod`, after `netlify deploy`.
+So on that evidence the guard existed, but it could only ever have caught a missing `resource`
+**once the regression was already live in production.** Adding the same assertion in-process closed
+it (6 red on revert, 55/0 restored), and both now check EQUALITY with `accepts[0].resource` rather
+than presence.
+
+## ⭐⭐ THE QUESTION, WHICH IS BIGGER THAN THE FIX
+
+> **How many other DD-surface properties are guarded ONLY post-deploy?**
+
+The surface is **19 `DD_SURFACE_FILES` + 4 `DD_SURFACE_DIRS`**. Every post-deploy gate —
+`gate:deployed`, `capture:window`, `gate:forgery`, `gate:spec` — necessarily runs against a
+*published* build. Anything asserted **only** there is a property we ship before we check.
+
+🚨 **This is not the same failure as an untested property, and it is harder to see: the guard
+EXISTS, it is green, and the estate looks covered.** What is missing is not coverage but
+*placement* — and placement does not show up in a pass count. It is the family that
+[[binding-tested-across-what-it-binds]] and [[filtered-read-is-not-absence]] both belong to: the
+instrument is real and the answer is true; what is wrong is *where* it was pointed.
+
+⭐ AND THE COST IS ASYMMETRIC AND ALREADY MEASURED. A DD-surface deploy costs a real
+deposit-refusal window — **313s and 156s measured today**. A property caught in-process costs
+seconds; the same property caught post-deploy costs a window plus a second window to fix it. The
+ordering is not a preference.
+
+⚠️ **NOT AN ARGUMENT FOR MOVING THE POST-DEPLOY GATES.** Some properties are only true of a
+deployed artifact and MUST be asserted there — `gate:deployed`'s served-tree comparison and
+`capture:window` are exactly that, and this morning's proof that a v1 buyer 402-loops came from
+probing prod, not from reading. The question is narrower: **which post-deploy assertions are about
+properties that were already decidable in-process, and are therefore in the wrong place?**
+
+## What would answer it
+
+Enumerate every assertion in `verify-deployed`, `verify-spec-published`, `verify-ack-forgery` and
+`capture-refusal-window`, and mark each: (a) genuinely requires a published artifact, or (b) is a
+property of the code and could run pre-deploy. Every (b) is a regression we would currently ship
+before catching. ⚠️ The count is the finding — a small number means the estate is well-placed and
+the `resource` case was a one-off; a large one means today's near-miss was the visible instance of
+a systematic habit.
+
+⛔ **NOT TONIGHT, AND NOT AS A CLEANUP.** Recorded so it is asked once, deliberately, rather than
+rediscovered the next time a revert-and-restore happens to expose it.
+
+## Deploy in flight
+
+`4b734ed` was deploying when this was written; its `DEPLOY_EXIT`, `gate:deployed` and the two
+pre-registered predictions (`observed-banner`; the 4 `gate:spec` resource assertions flipping
+red→green) are UNRECORDED here and must be checked before anything else is built on top.
+
+---
+
+
 # ✅ THE VALIDATOR THAT FOUND THE DEFECTS NOW PASSES THEM — a third instrument, and it knew nothing about us
 
 **2026-08-26, close of day.** Two fixes shipped (`acedafa`, `77c511d`) and both were confirmed by
