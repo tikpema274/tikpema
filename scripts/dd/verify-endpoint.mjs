@@ -165,12 +165,50 @@ for (const [what, addr] of [
 // ═══════════ GATE 2 — missing / empty param ═══════════
 section("GATE 2 — missing or empty parameters");
 {
+  // ═══ ⭐⭐ CHANGED 2026-08-26 — A MISSING ADDRESS IS NO LONGER A REFUSAL ══════════════════════
+  // It is a SUBJECTLESS DISCOVERY PROBE and earns the 402 challenge (see RUNG.ADDRESS). These two
+  // assertions used to require `invalid-address` and are rewritten, NOT deleted: the behaviour they
+  // pinned was the discovery defect itself.
+  //
+  // ⭐ AND THE PROBE NOW CLIMBS FURTHER, which this suite is the first thing to notice. With
+  // DD_PAYTO_ADDRESS unset — this suite's default — a subjectless request reaches the PAYTO rung and
+  // is refused THERE: 503 `payment-misconfigured`, a statement about OUR SERVICE rather than about
+  // the caller's input. That is correct and is asserted, so it can never silently become something
+  // else. Both payTo states are pinned; the load-bearing claim is that neither is `invalid-address`,
+  // because a probe is not a malformed request.
   let res = await call({ chain: "arc-testnet" });
-  check("address missing: HTTP 400 + invalid-address", res.status === 400 && res.body?.refusal?.reason === "invalid-address", res.body?.refusal?.reason);
-  assertReportShape("missing-address", res, { expectRefusal: true });
+  check("address missing: NOT `invalid-address` — a probe is not a bad request",
+    res.body?.refusal?.reason !== "invalid-address", res.body?.refusal?.reason);
+  // ⚠️ THE payTo-STATE CASES ARE IN-PROCESS ONLY. This file's header promises "the same table over
+  // the WIRE", and setting process.env cannot reach a remote server — asserting a payTo state over
+  // --url would assert something this process does not control, and would fail for a reason that has
+  // nothing to do with the code under test. The invariant above (NOT `invalid-address`) is the part
+  // that holds in BOTH modes, which is why it carries the load.
+  if (!TARGET_URL) {
+    check("address missing, payTo UNSET: 503 payment-misconfigured (about us, not the caller)",
+      res.status === 503 && res.body?.refusal?.reason === "payment-misconfigured",
+      `${res.status} ${res.body?.refusal?.reason}`);
+    assertReportShape("missing-address", res, { expectRefusal: true });
 
+    // …and with a resolvable payTo it is the 402 the discovery path actually needs.
+    process.env.DD_PAYTO_ADDRESS = "0xb407967319d56218c7e1c369125490e665a16ac4";
+    res = await call({ chain: "arc-testnet" });
+    check("address missing, payTo SET: HTTP 402 challenge — the discovery fix", res.status === 402, `got ${res.status}`);
+    check("…and the challenge carries accepts[]", Array.isArray(res.body?.accepts) && res.body.accepts.length > 0);
+    delete process.env.DD_PAYTO_ADDRESS;
+  } else {
+    // Over the wire the deployed payTo is whatever prod has — assert the OUTCOME the discovery path
+    // needs, without pretending to control the cause.
+    check("address missing (wire): HTTP 402 challenge — the discovery fix, live", res.status === 402, `got ${res.status}`);
+    check("…and the challenge carries accepts[]", Array.isArray(res.body?.accepts) && res.body.accepts.length > 0);
+  }
+
+  // ⭐ The ORIGINAL intent of this one survives verbatim: an empty address must never be DEFAULTED
+  // into some address. It is now a probe rather than a refusal, and either way no subject is invented.
   res = await call({ address: "", chain: "arc-testnet" });
-  check("address empty: refused, not defaulted", res.body?.refusal?.reason === "invalid-address");
+  check("address empty: not `invalid-address`, and above all NOT defaulted to an address",
+    res.body?.refusal?.reason !== "invalid-address" && !res.body?.subject?.address,
+    `${res.body?.refusal?.reason} subject=${JSON.stringify(res.body?.subject?.address ?? null)}`);
 
   res = await call({ address: VAULT });
   check("chain missing: refused (an address alone names no chain)", res.status === 400 && res.body?.refusal?.reason === "chain-not-specified", res.body?.refusal?.reason);

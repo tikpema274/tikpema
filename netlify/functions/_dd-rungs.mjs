@@ -181,7 +181,9 @@ export const UNSKIPPABLE = Object.freeze([RUNG.HEALTH, RUNG.METHOD, RUNG.BODY, R
 export const INPUT_REFUSAL_REASONS = Object.freeze([
   "unsupported-method",   // 405 — wrong verb: the caller's phrasing
   "malformed-request",    // 400 — body too large / not JSON / not an object
-  "invalid-address",      // 400 — missing or not a 20-byte hex address
+  // ⚠️ NARROWED 2026-08-26: this now means ONLY "named but malformed". A MISSING address is no
+  // longer a refusal at all — it is a subjectless probe and earns the 402 challenge (see RUNG.ADDRESS).
+  "invalid-address",      // 400 — named but not a 20-byte hex address (NOT "missing": that is a probe)
   "chain-not-specified",  // 400 — chain omitted
   "unsupported-chain",    // 400 — a chain this service does not analyse
 ]);
@@ -463,8 +465,27 @@ export async function runLadder({ event, skip = [], deps = {} }) {
     // design, and that throw over the wire is a 500 with a stack instead of an answer.
     if (rung === RUNG.ADDRESS) {
       const { address } = ctx.body ?? {};
+      // ═══ ⭐⭐ NO SUBJECT NAMED ≠ SUBJECT NAMED BADLY — the split this rung used to collapse ══════
+      // These two branches ALREADY existed and both returned `invalid-address`. Conflating them is
+      // what made the discovery defect look like a design tradeoff:
+      //
+      //   · NO SUBJECT ("you didn't ask")  → there is no question to answer for free, so quoting a
+      //     price is not "charging for a malformed question" — it is the protocol's own
+      //     quote-on-unpaid-request. Falls through to the 402. Requiring the schema in order to get
+      //     the challenge that TEACHES the schema is circular, and it is why a discovery probe
+      //     (`circle services inspect -X POST`, an empty body) reported this endpoint "unavailable".
+      //   · SUBJECT NAMED BADLY ("you asked badly") → we already know the answer, for free. Quoting
+      //     a price here WOULD be invoicing for a diagnosis. Stays 400.
+      //
+      // ⭐ THE INCENTIVE ARGUMENT IS FULLY PRESERVED, NOT TRADED AWAY. Every case where we already
+      // know the answer free stays 400, and `unsupported-chain` stays 400 — so narrowing the
+      // supported chain set still gains nothing. Nothing was given up to make discovery work.
+      // 🚨 `{"address":"garbage"}` IS A 400, DELIBERATELY. A discovery crawler never sends garbage;
+      // it sends nothing or `{}`. Garbage in a named field is a CLIENT BUG, and the honest answer to
+      // a client bug is a free diagnostic, not a price.
       if (address === undefined || address === null || address === "") {
-        return { done: json(400, refusalReport({ reason: "invalid-address", detail: "`address` is required and was missing or empty" })), ran };
+        ctx.subjectless = true;
+        continue;
       }
       if (typeof address !== "string" || !ADDRESS_RE.test(address.trim())) {
         return { done: json(400, refusalReport({ reason: "invalid-address", detail: "`address` must be a 0x-prefixed 20-byte hex string" })), ran };
@@ -479,6 +500,12 @@ export async function runLadder({ event, skip = [], deps = {} }) {
     // the same address on Arc (measured). Forcing the caller to NAME the chain makes every response
     // either explicitly correct or explicitly refused — never silently about the wrong chain.
     if (rung === RUNG.CHAIN) {
+      // ⭐ A subjectless probe has named no chain BECAUSE it has named nothing. Refusing it for
+      // `chain-not-specified` would re-close the door the ADDRESS rung just opened, one rung over.
+      // The rung still RUNS (it is UNSKIPPABLE and must remain so) — it simply has nothing to judge.
+      // The challenge itself advertises the supported network in `accepts[0].network`, so a probe
+      // still learns which chain this service serves.
+      if (ctx.subjectless) continue;
       const { chain } = ctx.body ?? {};
       if (chain === undefined || chain === null || chain === "") {
         return { done: json(400, refusalReport({

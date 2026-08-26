@@ -1,5 +1,104 @@
 ---
 
+# ✅ DEFECT 1 DECIDED AND BUILT — a probe that names NOTHING now gets the terms
+
+**2026-08-26.** A bare discovery probe got **400, not 402** — and the challenge is HOW a caller
+learns the schema, so requiring the schema to obtain it was circular. Decided, built, and every
+claim proven by injection. The decision:
+
+## ⭐⭐ THE OPEN QUESTION DISSOLVED — it was never a tradeoff
+
+The recorded blocker was: *"charging for 'that is not a well-formed question' would quote a price for
+something answered free, and would reward narrowing the supported chain set"* — with
+`{"address":"garbage"}` sitting on an undecided line between probe and bad request.
+
+🚨 **There was no line to draw, because `invalid-address` was TWO REASONS WEARING ONE NAME.**
+`_dd-rungs.mjs:184` said it out loud — *"missing **or** not a 20-byte hex address"* — and `:467`/`:470`
+already branched on exactly that split while returning the same code. Once separated:
+
+| | means | verdict |
+|---|---|---|
+| **no subject named** | "you didn't ask" — there is no question to answer free | **402** |
+| **subject named badly** | "you asked badly" — we know the answer, free | **400** |
+
+⭐ **The incentive argument is FULLY PRESERVED, not traded away.** Every case we answer free stays
+400; `unsupported-chain` stays 400, so narrowing the chain set still gains nothing. Nothing was
+given up to make discovery work. **`{"address":"garbage"}` is a 400** — a crawler never sends
+garbage, it sends nothing or `{}`; garbage in a named field is a CLIENT BUG, and the honest answer
+to a client bug is a free diagnostic, not a price.
+
+⭐ Same shape as this morning's index finding: **two distinct things sharing one name made a
+non-conflict read as a conflict.** Twice in one day.
+
+## 🚨 THE FIX REMOVED A STRUCTURAL FENCE — measured BEFORE it was touched
+
+Fault injection against prod BEFORE the change, prediction pre-registered, 5 cases: every
+subjectless request — **with or without a payment header** — died at an INPUT rung with 400 and
+never reached rung 6. Settle was unreachable **structurally**, because ADDRESS/CHAIN precede PAYTO
+and payment.
+
+🚨 **Opening the ADDRESS rung DESTROYS that fence.** So it is re-stated explicitly in `dd-analyze`,
+and asserted by injection — `verify-subjectless-402.mjs`, 49 assertions:
+
+* subjectless **+ payment** → `verify` count **0**, `settle` count **0**, against a facilitator
+  mocked to SUCCEED (a refusing mock would make the zeros true for the wrong reason).
+* → **400 TERMINAL, never 402.** ⭐ A 402 there would rebuild the exact infinite-retry loop closed
+  in `acedafa` one rung over: pay → challenged → pay → forever. It says what is wrong ONCE.
+* ⭐ **the counter is proven live**: a subject-ful paid call reaches `verify=1`. Without that
+  contrast every zero above is unfalsifiable [[absence-must-never-read-as-safe]].
+
+⚠️ One pre-registered sub-prediction was WRONG: no-body returns `invalid-address`, not
+`malformed-request` — `raw ? JSON.parse(raw) : {}` already normalises it. **That deleted a scope
+item**: the BODY rung needed no change at all.
+
+## ⭐ ZERO RPC — on CALL COUNT, never latency
+
+subjectless `rpc === 0`; subject-ful `rpc === 1`; asserted `0 < 1`. **The subjectless challenge is
+CHEAPER than the one already served.** The recorded objection that it would cost RPC was backwards.
+
+## ⭐⭐ gate:spec HAD ONLY EVER PROVEN THE EASY PROPERTY — validated against the BROKEN build
+
+`verify-spec-published.mjs` posts a VALID SUBJECT everywhere, so it proved the 402 works for callers
+who already know the schema — never the case discovery uses [[binding-tested-across-what-it-binds]].
+Two probe assertions added, and **validated against a genuinely broken deployment rather than a
+local revert**: run against live prod (still 400ing), **6 new checks RED, every pre-existing check
+GREEN**. It goes green only once this ships. The in-process suite was validated the same way — split
+reverted → **15 red**, restored → 49/0.
+
+## ⭐ THREE STALE ASSERTIONS PINNED THE OLD CONTRACT — rewritten, never deleted
+
+`verify-endpoint.mjs` and `verify-settle-gate.mjs` asserted `missing address → 400`. That WAS the
+defect, written down as a guarantee. Rewriting them surfaced something no one had noticed:
+
+🚨 **a subjectless probe now climbs FURTHER than it used to.** With `DD_PAYTO_ADDRESS` unset it
+reaches the PAYTO rung and is refused there — **503 `payment-misconfigured`**, correctly a statement
+about OUR SERVICE rather than the caller's input. Both payTo states are now pinned so neither can
+silently become the other, and the settle-gate row now exercises a **different refusal path** to the
+same composition guarantee — better coverage than before, not worse.
+
+⚠️ `verify-endpoint.mjs`'s header promises "the same table over the WIRE", and `process.env` cannot
+reach a remote server — so the payTo-state cases are gated to in-process, with the mode-independent
+invariant (NOT `invalid-address`) carrying the load in both.
+
+## Changed
+
+`_dd-rungs.mjs` (ADDRESS split, CHAIN pass-through, the narrowed reason comment) ·
+`dd-analyze.mjs` (subjectless branch) · `verify-spec-published.mjs` (discovery probes) ·
+`verify-endpoint.mjs`, `verify-settle-gate.mjs` (rewritten to the new contract) ·
+NEW `scripts/dd/verify-subjectless-402.mjs`, wired into `test:dd`.
+
+`UNSKIPPABLE` is untouched: ADDRESS and CHAIN still RUN, they simply have nothing to judge. The
+throw-guard is about bypassing a rung, not its outcome.
+
+## ⚠️ STILL OPEN
+
+Nothing here measures whether the Bazaar Validator now passes — separate instrument, separate claim,
+and this shipped without needing it. `_x402.mjs:209` still defaults to `1` when READING other
+sellers' challenges: buyer-side interpretation, not our declaration. Recorded, unexamined.
+
+---
+
+
 # 🚨 `x402Version: 1` MADE HONEST v1 BUYERS 402-LOOP FOREVER — a correctness defect, not a validator cosmetic
 
 **2026-08-26.** `dd-analyze` and `x402-quote` declared `x402Version: 1` while reading **only** the

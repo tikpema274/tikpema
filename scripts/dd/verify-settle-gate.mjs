@@ -259,15 +259,21 @@ section("ORDERING — settle is strictly downstream of the answer");
 // ═══════════ COMPOSITION — the endpoint's gates are UPSTREAM ═══════════
 section("COMPOSITION — a refused request never reaches the settle path");
 {
-  for (const [what, body] of [
-    ["malformed address", { address: "0xZZZZ", chain: "arc-testnet" }],
-    ["missing address", { chain: "arc-testnet" }],
-    ["non-Arc chain", { address: "0x240Eb85458CD41361bd8C3773253a1D78054f747", chain: "base" }],
+  // ⚠️ THE EXPECTED STATUS IS NAMED PER ROW, not assumed to be 400 for all three. Since 2026-08-26 a
+  // MISSING address is no longer refused at the ADDRESS rung — it is a subjectless probe that climbs
+  // to PAYTO and (with DD_PAYTO_ADDRESS unset here) is refused THERE, 503 `payment-misconfigured`.
+  // ⭐ That makes this row BETTER coverage than before, not worse: it now exercises a DIFFERENT
+  // refusal path reaching the same composition guarantee. Naming the status per row is what keeps a
+  // silent change of refusal path visible instead of letting `!== 200` absorb it.
+  for (const [what, body, expectStatus] of [
+    ["malformed address", { address: "0xZZZZ", chain: "arc-testnet" }, 400],
+    ["missing address (a probe — refused at PAYTO, not ADDRESS)", { chain: "arc-testnet" }, 503],
+    ["non-Arc chain", { address: "0x240Eb85458CD41361bd8C3773253a1D78054f747", chain: "base" }, 400],
   ]) {
     const res = await ddHandler({ httpMethod: "POST", body: JSON.stringify(body) });
     const rpt = JSON.parse(res.body);
     const d = settleDecision(rpt);
-    check(`${what}: endpoint refused (HTTP ${res.statusCode})`, res.statusCode === 400 && !!rpt.refusal, rpt.refusal?.reason);
+    check(`${what}: endpoint refused (HTTP ${res.statusCode})`, res.statusCode === expectStatus && !!rpt.refusal, rpt.refusal?.reason);
     check(`  …and the settle gate ALSO refuses it`, d.settle === false, d.reason);
   }
   check("⭐ two fail-closed layers compose: refusal is upstream of settlement, and neither alone is load-bearing", true);

@@ -185,7 +185,7 @@ export async function handler(event) {
       },
     });
     if (climbed.done) return climbed.done;
-    const { addr, chain, payTo } = climbed;
+    const { addr, chain, payTo, subjectless } = climbed;
 
     // ── the analysis, as a thunk ──────────────────────────────────────────────────────────────
     // NOT run here. It is handed to runThenSettle(), which guarantees it runs BEFORE anything
@@ -206,6 +206,34 @@ export async function handler(event) {
     const requirements = ddPaymentRequirements({ resource, payTo });
 
     const paymentHeader = headers["payment-signature"];
+
+    // ═══ ⭐⭐ THE SUBJECTLESS BRANCH — a probe gets the terms; nothing here can reach settle ══════
+    // MEASURED BEFORE THE CHANGE (fault injection against prod, 5 cases): every subjectless request
+    // — with or without a payment header — died at an INPUT rung with 400 and never reached this
+    // rung at all. That fence was structural: ADDRESS/CHAIN precede PAYTO and payment. Opening the
+    // ADDRESS rung REMOVES that structural fence, so the fence is re-stated HERE, explicitly.
+    if (subjectless) {
+      // 🚨 PAYMENT SUPPLIED BUT NOTHING NAMED → 400 TERMINAL, NEVER 402, NEVER settle.
+      // A 402 here would rebuild the exact infinite-retry loop closed in `acedafa` one rung over:
+      // the caller pays, is handed the challenge again, pays again, forever. A terminal 400 says
+      // what is wrong ONCE and lets the client stop. Nothing below this line runs, so `settle` is
+      // unreachable — asserted by injection in verify-subjectless-402.mjs, not by reading.
+      if (paymentHeader) {
+        return json(400, refusalReport({
+          reason: "invalid-address",
+          detail:
+            "a payment authorization was supplied but no `address` was named, so there is no subject " +
+            "to analyse and nothing was bought. YOUR AUTHORIZATION WAS NOT SPENT — no settlement was " +
+            "attempted. Name an `address` and a `chain` and POST again.",
+        }));
+      }
+      // ⭐ ZERO RPC, AND THAT IS THE POINT. The subject-ful challenge below spends one eth_getCode
+      // on the preview. A probe has no address to read, so this path is pure constant assembly —
+      // a subjectless 402 is CHEAPER than the challenge we already serve, not more expensive. The
+      // recorded objection that it would cost RPC was backwards. Asserted on CALL COUNT.
+      return challenge402({ requirements });
+    }
+
     if (!paymentHeader) {
       // ⭐ ONE eth_getCode, so the buyer learns which coverage case THEY are in before paying —
       // the thin outcome is fully determined by the subject, and we already know the subject here.

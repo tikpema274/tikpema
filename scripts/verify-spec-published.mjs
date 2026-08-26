@@ -147,6 +147,35 @@ console.log("\n── runtime: an unpaid call must challenge, not serve ──�
   ok("the challenge quotes the same atomic price as the spec", amounts.every((a) => String(a) === DD_PRICE_ATOMIC), amounts.join(", ") || "(none)");
 }
 
+// ═══ ⭐⭐ THE DISCOVERY CASE — the one this gate NEVER exercised ═══════════════════════════════
+// 🚨 Every assertion above posts a VALID SUBJECT, so this gate has only ever proven the 402 works
+// for callers who ALREADY KNOW THE SCHEMA. The case discovery actually uses — an empty body — went
+// unmeasured for weeks while the listing question stayed open, and it was returning 400.
+// That is [binding-tested-across-what-it-binds]: a guard proving the easy property while the
+// load-bearing one goes unwatched. Without this block the 402-for-probes fix could regress silently
+// and every check above would stay green.
+console.log("\n── runtime: a DISCOVERY PROBE must be challenged, not refused ────────");
+{
+  const probe = async (label, body) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), T);
+    let r = null;
+    try {
+      const init = { method: "POST", signal: ctrl.signal, headers: { "Content-Type": "application/json" } };
+      if (body !== null) init.body = body;
+      const res = await fetch(`${BASE}/api/dd-analyze`, init);
+      r = { status: res.status, body: await res.text() };
+    } catch (e) { r = { status: 0, body: e.message }; }
+    finally { clearTimeout(t); }
+    let pj = null; try { pj = JSON.parse(r.body); } catch { /* */ }
+    ok(`${label} → HTTP 402`, r.status === 402, `got ${r.status}`);
+    ok(`${label} → carries accepts[]`, Array.isArray(pj?.accepts) && pj.accepts.length > 0);
+    ok(`${label} → carries x402Version`, pj?.x402Version === 2, String(pj?.x402Version));
+  };
+  await probe("empty body `{}`", "{}");
+  await probe("no body at all", null);
+}
+
 console.log("\n════════════════════════════════════════════════════════════════════════");
 if (bad) { console.log(`❌ ${bad} check(s) failed.\n`); process.exit(1); }
 console.log(`✅ the spec is published, valid, priced from one constant, and the runtime agrees.\n`);
