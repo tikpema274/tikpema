@@ -1,5 +1,102 @@
 ---
 
+# 🔬 THE GHOST DETECTOR HOLDS ON A WIDER CORPUS — AND FOUND A FALSE ASSURANCE
+
+**2026-08-26.** The forwarder detector rested on 4 positives, all FiatTokenProxy — one family, not
+four confirmations. Widened to **160 contracts** sampled away from popularity. It generalises: the
+new hits span **five distinct mechanisms**, and one of them is a different KIND of defect.
+
+⚠️ **NOT QUORUM-BACKED, NOT ATTESTABLE.** Single public endpoint per chain, `sources.mode =
+single-rpc`. Nothing signed, sold, or written. Two fixes remain scoped and **neither is decided**.
+
+## Selection — reconstructible, and deliberately not popularity-ranked
+
+Every distinct log-emitting `address` in fixed block ranges, **DEDUPLICATED so a hot contract counts
+exactly once**, minus the 60 addresses of the earlier frequency-ranked corpus, filtered to addresses
+with code, taken in address order.
+
+* **Base** blocks **50,472,569–50,472,572** — 456 emitters → 80
+* **Arc testnet** blocks **58,916,315–58,916,398** — 259 emitters → 80
+* Split: **122 `plain-contract` residual, 38 caught by the catalogue**
+
+⚠️ Contract-CREATION sampling was tried first and abandoned on measurement: **0 direct creations
+(`to == null`) in 10 blocks on either chain.** Deployment is factory/CREATE2, invisible to a
+`to==null` scan — and factories are exactly where proxies live.
+
+## 1. Positive control — 20/38 (53%) of catalogue-caught proxies ghost
+
+The detector fires on contracts independently known to be proxies. ⭐ **It is not higher because of
+the PROBE SET, not the mechanism:** many of the 38 are small wallet/account proxies whose
+implementations expose none of the six probed selectors. Nothing to ask is not a failure to detect.
+
+## 2. 13 of 122 residuals ghosted — and NOT ONE IS A FALSE POSITIVE
+
+🚨 "13 of 122 flagged" reads like a false-positive rate to anyone skimming. It is not.
+**Every one of the 13 is a real delegating stub**, confirmed by mechanism below. The remaining
+109 produced zero ghosts.
+
+**Is that zero EARNED?** Partly, and the split is the honest answer. Of the 109 non-ghosting
+residuals, **71 (65%) natively implement at least one probe** — selector present in
+their own bytecode AND answering — so the detector had a real question to ask and correctly declined
+to flag them.
+
+| probe | implemented natively | |
+|---|---|---|
+| `name()` | 40/109 | 37% |
+| `totalSupply()` | 49/109 | 45% |
+| `owner()` | 27/109 | 25% |
+| `symbol()` | 35/109 | 32% |
+| `paused()` | 5/109 | 5% |
+| `implementation()` | 0/109 | **0%** |
+
+⚠️ **But 38 of 109 (35%) implement NONE of the six.** For those the zero is
+**uninformative, not earned** — the detector had nothing to ask. Any of them could be a delegating
+stub the probe set cannot see. ⭐ `implementation()` at 0% is the control working as intended: it is
+a proxy function, so no ordinary contract implements it.
+
+## 3. ⭐ TWELVE OF THE THIRTEEN ARE OUTSIDE THE FiatTokenProxy FAMILY — FOUR GAPS
+
+| n | mechanism | in `shapesNotTestedFor`? |
+|---:|---|---|
+| 9 | 44 B stub, prologue `3d3d3d3d363d3d37` — non-canonical minimal proxy | ✅ named |
+| 1 | **EIP-1967 beacon** proxy (82 B) | ✅ named |
+| 1 | non-canonical **EIP-1167 clone variant** (150 B) | ✅ named |
+| 1 | zeppelinos / FiatTokenProxy (the already-known family) | ❌ unnamed |
+
+**10 of the 13 returned `notChecked: 0`** — maximally confident manifests about bytecode
+that is not the contract's real code. These four are HONEST GAPS: `shapesNotTestedFor` names three
+of them, so the residual's disclosure is accurate even where the detection is absent.
+
+## 4. 🚨 THE DIAMOND IS A DIFFERENT DEFECT — A CHECK THAT CANNOT SUCCEED
+
+**`0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae`** (Base, 5,176 B) is an **EIP-2535 diamond**. All four
+loupe functions — `facets()`, `facetAddresses()`, `facetFunctionSelectors(address)`,
+`facetAddress(bytes4)` — **answer calls, and NONE are in its own bytecode.** It classified as
+`plain-contract`.
+
+⚠️ **This is not a gap. `eip2535-diamond` is in `shapesTestedFor`.** The loupe test is
+`DIAMOND_LOUPE_SIGS.every(s => hasSel(ownCode, s))` — it requires all four selectors in the proxy's
+OWN bytecode, but a diamond routes the loupe through FACETS by definition. **The check can never
+succeed on the shape it claims to test**, and the residual then tells the reader that shape WAS
+tested.
+
+⭐⭐ **An honest gap and a false assurance are different defects, and the fixes differ.** A gap wants
+a new detector. A false assurance wants the loupe test corrected — or the claim withdrawn from
+`shapesTestedFor`. Recording them in one table would hide that.
+
+## Negative control — the guard fails CLOSED
+
+Detector pointed at a dead endpoint (`127.0.0.1:9`): `eth_getCode` returns 0 bytes, so **every**
+selector is trivially "absent from bytecode" — the exact condition that would flag all 160 contracts
+as proxies. Result: **0 ghosts, all 6 reads `unreadable`**, against 5 ghosts on the live endpoint for
+the same addresses. `unreadable` can never become a ghost.
+
+⚠️ Validated on the working case alone this would have proven nothing — the same rule that caught an
+ordering assertion satisfied by absence, and a mutation that never applied.
+
+---
+
+
 # ✅ 72h THRESHOLD RESOLVED — ZERO SETTLEMENTS ON THE VANILLA SELLER
 
 **2026-08-26.** The pre-registered 72-hour threshold has resolved. **Zero settlements.**
