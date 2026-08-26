@@ -36,6 +36,7 @@ import { randomUUID } from "node:crypto";
 import { BatchFacilitatorClient } from "@circle-fin/x402-batching/server";
 import { readGatewayBalance, confirmPayment, CONFIRM_REASON, RETRIEVE_TIMEOUT_MS, RETRIEVE_TIMEOUT_PROVENANCE } from "./_x402-confirm.mjs";
 import { X402_VERSION } from "../../shared/x402/version.mjs";
+import { resourceObject } from "../../shared/x402/resource.mjs";
 
 const PENDING_STORE = "x402-quote-pending";
 const ARC_RPC = "https://rpc.testnet.arc.network";
@@ -184,6 +185,8 @@ export async function handler(event) {
       body: JSON.stringify({
         // Mirrors the header for body-reading clients; see shared/x402/version.mjs.
         x402Version: X402_VERSION,
+        // Derived from `requirements` — the URL the signature binds to. See shared/x402/resource.mjs.
+        resource: resourceObject(requirements),
         error: "Payment required",
         accepts: [requirements],
       }),
@@ -215,6 +218,7 @@ export async function handler(event) {
         },
         body: JSON.stringify({
           x402Version: X402_VERSION,
+          resource: resourceObject(requirements),
           error: "Payment verification failed",
           reason: verification?.invalidReason || "invalid",
           accepts: [requirements],
@@ -247,6 +251,7 @@ export async function handler(event) {
         },
         body: JSON.stringify({
           x402Version: X402_VERSION,
+          resource: resourceObject(requirements),
           error: "Payment settlement failed",
           reason: settlement?.errorReason || "settle failed",
           accepts: [requirements],

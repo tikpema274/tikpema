@@ -171,6 +171,17 @@ console.log("\n── runtime: a DISCOVERY PROBE must be challenged, not refused
     ok(`${label} → HTTP 402`, r.status === 402, `got ${r.status}`);
     ok(`${label} → carries accepts[]`, Array.isArray(pj?.accepts) && pj.accepts.length > 0);
     ok(`${label} → carries x402Version`, pj?.x402Version === 2, String(pj?.x402Version));
+    // ⭐ THE v2 TOP-LEVEL `resource` OBJECT. Spec-aligned and NOT Coinbase-specific — any index needs
+    // it to know what is being sold. ⚠️ Its `url` must equal the resource named in accepts[0],
+    // because that is what the payment signature binds to: a top-level URL that disagreed with the
+    // signable one would advertise a resource no authorization can match, and would surface only as
+    // an unexplained settlement rejection. Asserted as EQUALITY, not merely as presence.
+    ok(`${label} → carries a top-level resource object`,
+      pj?.resource && typeof pj.resource === "object" && typeof pj.resource.url === "string",
+      JSON.stringify(pj?.resource ?? null).slice(0, 90));
+    ok(`${label} → …and resource.url EQUALS accepts[0].resource (what the signature binds to)`,
+      pj?.resource?.url === pj?.accepts?.[0]?.resource,
+      `${pj?.resource?.url} vs ${pj?.accepts?.[0]?.resource}`);
   };
   await probe("empty body `{}`", "{}");
   await probe("no body at all", null);

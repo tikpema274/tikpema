@@ -148,6 +148,10 @@ const DD_SURFACE_FILES = [
   // commit — its whole history. A protocol version should change approximately never, but that is a
   // prediction, not the lifetime count that justified the entries above.
   "shared/x402/version.mjs",            // the transport version the challenge ADVERTISES
+  // ⭐ ADDED 2026-08-26 — same reasoning as version.mjs: it shapes what the 402 ADVERTISES, and the
+  // resource it names is what the payment signature binds to. A change here could publish a resource
+  // the authorization does not match, so it must rotate the health key. Caught by the same guard.
+  "shared/x402/resource.mjs",           // the resource the challenge names — and the signature binds
 
   // ═══ ⭐⭐ ADDED 2026-08-16 — THE SHARED LADDER AND THE SECOND ENTRY POINT ════════════════════
   // 🚨 `_dd-rungs.mjs` CONTAINS THE HEALTH GATE ITSELF. Leaving it out would mean a change to the

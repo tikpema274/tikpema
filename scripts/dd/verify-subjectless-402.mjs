@@ -165,6 +165,15 @@ for (const [label, body] of [
   check(`${label} → carries the PAYMENT-REQUIRED header`, Boolean(hdr));
   check(`${label} → body carries accepts[]`, Array.isArray(r.body?.accepts) && r.body.accepts.length > 0);
   check(`${label} → body carries x402Version 2`, r.body?.x402Version === 2, String(r.body?.x402Version));
+  // ⭐ ASSERTED IN-PROCESS TOO, NOT ONLY IN gate:spec. gate:spec runs AFTER a deploy, so on its own
+  // it would catch a missing `resource` only once the regression was already live. This is the same
+  // property checked before shipping. ⚠️ EQUALITY with accepts[0].resource, not mere presence: the
+  // top-level URL must be the one the payment signature binds to.
+  check(`${label} → carries a top-level resource object`,
+    r.body?.resource && typeof r.body.resource.url === "string", JSON.stringify(r.body?.resource ?? null).slice(0, 80));
+  check(`${label} → …and resource.url EQUALS accepts[0].resource`,
+    r.body?.resource?.url === r.body?.accepts?.[0]?.resource,
+    `${r.body?.resource?.url} vs ${r.body?.accepts?.[0]?.resource}`);
   check(`${label} → NO subjectPreview (nothing was named, so nothing is previewed)`,
     !Object.prototype.hasOwnProperty.call(r.body ?? {}, "subjectPreview"));
 }

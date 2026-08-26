@@ -48,6 +48,7 @@
 import { randomUUID } from "node:crypto";
 import { runThenSettle, settleDecision, SETTLE_REASON, noChargeResponse } from "../../shared/x402/settle-gate.mjs";
 import { X402_VERSION } from "../../shared/x402/version.mjs";
+import { resourceObject } from "../../shared/x402/resource.mjs";
 import { readGatewayBalance, confirmPayment, CONFIRM_REASON, RETRIEVE_TIMEOUT_MS, RETRIEVE_TIMEOUT_PROVENANCE } from "./_x402-confirm.mjs";
 // ⭐ The power catalogue is the SOURCE OF TRUTH for the floor stated in the 402. Imported, never
 // transcribed: a literal count in buyer-facing text is a second source of truth that rots silently
@@ -328,6 +329,11 @@ export function challenge402({ requirements, detail = null, preview = null }) {
       // the same reason the header does — publishing the version in two places from two literals
       // is how they drifted apart in the first place.
       x402Version: X402_VERSION,
+      // ⭐ THE v2 TOP-LEVEL `resource` — DERIVED from `requirements`, never from DD_RESOURCE_URL,
+      // because THAT is the URL the payment signature is bound to. See shared/x402/resource.mjs for
+      // why the two agreeing sources are not interchangeable. Any index needs this to know what is
+      // being sold; it is spec-aligned, not Coinbase-specific.
+      resource: resourceObject(requirements),
       error: detail ? "Payment required" : "Payment required",
       ...(detail ? { reason: detail } : {}),
       accepts: [requirements],
@@ -587,6 +593,7 @@ export async function runPaidAnalysis({ facilitator, rpcCall, store, payload, re
       },
       body: JSON.stringify({
         x402Version: X402_VERSION,
+        resource: resourceObject(requirements),
         error: "Payment settlement failed",
         reason: s?.settlement?.errorReason || "settle failed",
         detail: "The report was produced but the payment was rejected, so nothing is served. Your authorization was not spent.",
