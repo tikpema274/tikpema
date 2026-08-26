@@ -1,5 +1,91 @@
 ---
 
+# 🔌 A SECOND BASE ENDPOINT: THE ARC DISTINCTNESS PROTOCOL DOES NOT TRANSFER
+
+**2026-08-26.** Anything read through a single endpoint is `sources.mode = single-rpc` and **not
+attestable** — so a Base quorum needs a second endpoint whose backend is PROVEN distinct. Scoped by
+running Arc's own protocol against Base candidates. **Nothing built.**
+
+## The standard, from the frozen v1.0.0 identity document
+
+`operator_and_independence.three_distinct_limits.3_data_source_independence`:
+
+> *"The two endpoints in use were shown to be **DIFFERENT BACKENDS** by node-local values that must
+> differ between distinct nodes even when chain state is identical: `net_peerCount` 0x4 vs 0x2a,
+> `eth_gasPrice` 0x5d21dba00 vs 0x5e1046c80, `eth_maxPriorityFeePerGas`, `debug_traceBlockByNumber`
+> supported vs -32602, `txpool_status` -32604 vs -32601. **A third candidate
+> (arc-testnet.rpc.thirdweb.com) was REJECTED for returning byte-identical gas heuristics.**"*
+
+Five independent discriminators, and a documented rejection precedent.
+
+## 🚨 FOUR OF THE FIVE ARE UNUSABLE ON BASE
+
+| probe | usable? | measured |
+|---|---|---|
+| `eth_gasPrice` | ❌ | **`0x5b8d80` on ALL five candidates** |
+| `eth_maxPriorityFeePerGas` | ❌ | **`0xf4240` on ALL five** |
+| `net_peerCount` | ❌ | incumbent returns **403, persistently (3/3 tries)** |
+| `txpool_status` | ❌ | incumbent returns **400, persistently (3/3)** |
+| `web3_clientVersion` | ✅ | the only probe that both answers AND differs |
+
+**Two independent failure modes stacked.** OP-stack fee params are deterministic, so gas heuristics —
+the discriminator that REJECTED a candidate on Arc — are byte-identical across every Base provider.
+And `mainnet.base.org` BLOCKS the two strongest node-local probes, so they cannot be compared against
+it at all.
+
+⚠️ **Distinctness on Base rests on ONE probe. Arc had five.** That is a real difference in
+evidential strength, not a presentational one.
+
+⚠️ A first pass reported "meowrpc 5/5 probes differ" — **wrong**. All five of its probes were HTTP
+429; a probe that fails on one side and answers on the other "differs" without proving anything.
+Only *both-answered-and-values-differ* is evidence. Same tri-state discipline as the ghost detector.
+
+## What the one usable probe shows
+
+    mainnet.base.org   reth/v2.3.0-9384bc5/x86_64-unknown-linux-gnu/base/v1.1.1
+    publicnode         reth/v2.3.0-9384bc5/x86_64-unknown-linux-gnu/base/v1.2.0
+    drpc               Geth/v10.0.0/drpc
+    1rpc               Tenderly/1.0
+
+* **`drpc`, `1rpc`** — different software entirely (Geth, Tenderly vs reth). Strong evidence.
+  ⚠️ **Both self-describe as AGGREGATORS** — the exact caveat already recorded for Arc's dRPC: *"a
+  distinct backend is proven for those probes but NOT guaranteed per call."* An aggregator may route
+  back to the incumbent on any given request.
+* **`publicnode`** — same reth build (`9384bc5`) at a different `base/` node version (1.2.0 vs
+  1.1.1). Different INSTANCE, near-certainly different operator, same client lineage. Weaker on
+  software divergence, **stronger on routing: not an aggregator, so no per-call ambiguity.**
+* **`meowrpc` → REJECT.** Two comparable probes, both byte-identical, everything else `-32601`.
+  Precisely the thirdweb precedent.
+* **`llamarpc`, `blockpi` → EXCLUDED** at the `eth_chainId` guard.
+
+## What it would take — an evidence problem, not a code change
+
+1. `endpoints.mjs` needs `BASE_QUORUM_ENDPOINTS` beside `ARC_QUORUM_ENDPOINTS`; `quorumClient`
+   already handles N endpoints. Trivial.
+2. ⚠️ **`gate:rpc` has NO Base-mainnet row** — its `base` is chainId 84532, Base **Sepolia**. Adding
+   mainnet means the gate watching a chain it has never watched.
+3. ⚠️ `endpoints.mjs` is inside the stamped `SURFACES`, so changing who the service trusts changes
+   the artifact identity. By design, and the right cost.
+4. 🚨 **A proof this thin must be DISCLOSED as thin, which means a v1.2.0 SUPERSESSION**
+   (`setAgentURI`), not an edit. v1.0.0 names five probes with values; a Base section naming one plus
+   an aggregator caveat is a materially weaker claim and the document has to say so.
+
+## Recommendation, and the caveat that outranks it
+
+**`publicnode` over the aggregators.** For a quorum whose purpose is catching a PROVIDER serving
+something false, a known single operator beats an aggregator that may silently route back to the
+endpoint it is supposed to be checking.
+
+🚨 **BUT THIS IS NOT A PROOF AT ARC'S STANDARD AND MUST NOT BE CLAIMED AS ONE.** Arc's pair diverged
+on five independent node-local values. Base's best available pair diverges on one, in a version
+suffix. Presenting that as equivalent would be the same shape as the diamond loupe check found
+earlier today — a claim of coverage the mechanism cannot support.
+
+⛔ **NOTHING BUILT.** Sixth scoped-and-undecided item.
+
+---
+
+
 # 🚨 THREE DEFECTS ON THE x402 DISCOVERY PATH — AND A CORRECT OBSERVATION FILED UNDER THE WRONG VERDICT
 
 **2026-08-26.** Coinbase's Bazaar Validator POSTed to `https://app.tikpema.xyz/api/dd-analyze` and
