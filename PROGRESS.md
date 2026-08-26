@@ -1,5 +1,61 @@
 ---
 
+# ✅ 72h THRESHOLD RESOLVED — ZERO SETTLEMENTS ON THE VANILLA SELLER
+
+**2026-08-26.** The pre-registered 72-hour threshold has resolved. **Zero settlements.**
+
+| | pre-registered | measured at 72h |
+|---|---|---|
+| nonce | 2 | **2** |
+| USDC balance | 314272 atomic | **314272** |
+
+⭐ **ENDPOINTS RECORDED, NOT THE DIFFERENCE** — so the interval can be recomputed rather than
+remembered:
+
+    posted   2026-08-23 09:14:00 UTC
+    read     2026-08-26 09:17:27 UTC
+    elapsed  72.06h   (computed from the two above; threshold reached 3 min prior)
+
+Seller `0x1a63e59d1419cf48e2bd48cb54db85f27818dc99`, Arc Testnet. **Both quorum endpoints agree** —
+`rpc.testnet.arc.network` @ block 58,917,116 and `arc-testnet.drpc.org` @ 58,917,118. Balance read
+via `balanceOf` **pinned to the USDC contract** `0x3600…0000`, never `eth_getBalance`
+[[arc-eth-getbalance-18-decimals]]. Nothing moved from any address.
+
+**⭐ MONOTONIC ARGUMENT — the whole proof, no logs.** The seller settles its own sales, so nonce
+unchanged ⇒ no transactions sent ⇒ no gas spent ⇒ balance could only RISE. Unchanged balance
+therefore proves zero inbound. A proof, not a sample.
+
+## ⚠️ SCOPE
+
+* **Settlements, not attention.** It sees money that moved, not requests.
+* **A REACH result, not a product result.** One Discord post and one X reply is the ENTIRE outbound.
+* ⛔ **No conclusion about demand.** Zero settlements after two messages is a fact about
+  DISTRIBUTION.
+
+## ⭐⭐ AND THIS ZERO HAS **NO** BATCHING CAVEAT — DO NOT IMPORT THE CENSUS'S UNCERTAINTY
+
+The 2026-08-25 census found 66% of listed Base sellers with zero on-chain receipts. ⚠️ **What that
+figure means must be stated precisely:** 62% of listings settle through Circle Gateway, which nets
+in bulk, so on-chain transfers **undercount Gateway-settled sales by an UNMEASURED amount**. The 66%
+is therefore an **UPPER BOUND on genuinely idle sellers, not a measurement of it**. The census
+deliberately computes no magnitude — which is exactly why no share-of-market number appears in it.
+🚨 Saying the zeros "largely track the settlement rail" would assert a magnitude the data refuses.
+
+🚨 **NONE OF THAT APPLIES HERE.** Our seller settles **vanilla EIP-3009** — every sale IS an on-chain
+transfer to `payTo`, with nothing netted or batched. There is no invisible-settlement channel for it
+to be selling through. **This zero is exact, not an upper bound.** Importing the census's uncertainty
+would soften a reading that does not have it.
+
+## Supersedes, not replaces
+
+The **58h26m** entry below stands as written. It is the same question asked BEFORE the threshold
+resolved, and it records what the discipline looked like mid-flight — including the three
+contradictory remembered elapsed figures that produced the endpoints-not-the-difference rule now
+applied above. Both readings stay visible.
+
+---
+
+
 # 📏 MEASURED: `notChecked` DOES **NOT** GROW ON BASE — AND THAT REFUTES THE QUESTION
 
 **2026-08-26.** The cheapest gate on the whole Base question was supposed to be: *if DD analysed
@@ -106,6 +162,10 @@ improved both numbers, which is precisely why it was not done inside a measureme
 
 
 # 📉 ZERO SETTLEMENTS ON THE VANILLA SELLER — 58h26m AFTER THE DISCORD POST
+
+> ⬆️ **SUPERSEDED** by the 72h threshold reading above (2026-08-26). Retained deliberately: this
+> is the pre-resolution reading, and replacing it would erase what the threshold looked like before
+> it resolved.
 
 **2026-08-25 19:40 UTC.** Endpoint posted to Discord **2026-08-23 09:14 UTC**. Zero settlements
 since. ⭐ Elapsed is COMPUTED from the two timestamps, not remembered: 09:14 → 19:40 two days
