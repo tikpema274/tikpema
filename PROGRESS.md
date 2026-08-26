@@ -1,5 +1,114 @@
 ---
 
+# ✅ THE VALIDATOR THAT FOUND THE DEFECTS NOW PASSES THEM — a third instrument, and it knew nothing about us
+
+**2026-08-26, close of day.** Two fixes shipped (`acedafa`, `77c511d`) and both were confirmed by
+**Coinbase's Bazaar Validator**, re-run after the deploys. It is a **THIRD independent instrument**:
+it is not our suite, not our probe, and it had no knowledge of either deploy.
+
+⭐⭐ **THE SAME INSTRUMENT THAT FOUND THE DEFECTS THIS MORNING NOW PASSES THEM.** Six checks that
+were failing or skipped now pass: **402 on a bare probe · valid JSON · `x402Version` is 2 ·
+`accepts` · `scheme` · price.** Every one corresponds to something measured, decided and shipped
+today rather than guessed at.
+
+## 🚨 FOUR REMAINING FAILURES — AND THE SPLIT IS THE ENTIRE POINT
+
+A validator's failure list is not a work list. Sorting it is the work.
+
+### NOT DEFECTS — the chain, and a decision that stands
+
+`network eip155:5042002 unsupported` and `asset is not Base USDC`. **That is Arc.** These are not
+bugs; they are the validator correctly observing that we sell on a chain its index does not cover.
+The mis-sale decision stands and nothing here reopens it. 🚨 **Fixing a validator complaint that is
+really a business decision in disguise is how a scorecard starts steering the product** — the same
+error as picking a version number to make a checker go green, refused this morning for the same
+reason.
+
+⭐ **AND THE VALIDATOR NAMES `base-sepolia` AS ACCEPTABLE.** That is the honest pair for a testnet
+service: a REAL option, indexable, that takes **no real money** and claims nothing a testnet cannot
+back. It is the first concrete third path between "stay on Arc testnet, unindexable" and "commit to
+Base mainnet". Recorded, not chosen.
+
+### GENUINE — `resource` object missing from the 402 body
+
+**Spec-aligned and NOT Coinbase-specific.** The v2 `PaymentRequired` schema carries a top-level
+`resource: {url, description, mimeType}`; live Base sellers measured this morning (Alchemy, Messari,
+Allium) all emit it. **Any index needs it to know what is being sold.** Our per-entry
+`resource`/`description`/`mimeType` are the v1 placement — the same v1/v2 hybrid the version fix
+narrowed but did not finish. ⛔ **Scoped, not built.**
+
+### COINBASE-SPECIFIC — `extensions.bazaar` missing
+
+Zero value outside the Bazaar. **Only worth doing if Base is committed to**, and it must never be
+done *first*, because doing it first would be optimising for a scorecard on a chain we have not
+chosen. Strictly downstream of the Arc-vs-Base decision.
+
+## ⭐⭐ THE FACILITATOR FINDING — a FINDING, not a caveat
+
+The census refused to publish a share-of-total number and named facilitator-side counts as the thing
+that would settle it. A third party publishes exactly that shape:
+`x402.fuchss.app/v1/facilitators`, 32 facilitators, 30d and all-time, signed.
+
+🚨 **IT IS NOT FACILITATOR DATA.** Its own methodology: *"every USDC transfer whose **transaction
+sender** is a known facilitator settler address"* — chain observation filtered by SENDER, with the
+per-facilitator label supplied by an **address registry**. It is the census's own method from the
+other end, wearing a market-share label.
+
+**`circle` = 0. `gateway` = 0. `batch` = 0.** Across the entire document, 32 facilitators. The
+settlement path whose batching caused the census to refuse a number **is not in the denominator at
+all**. And rows aggregate across networks — `coinbase` reports one figure spanning Base+Solana — so
+**a Base-only denominator is not computable from it even in principle.**
+
+⭐⭐ **THEREFORE NOBODY IN THIS ECOSYSTEM CAN CURRENTLY COMPUTE A SHARE NUMBER, AND THE PUBLISHED
+ONES ARE TRANSFER COUNTS WEARING A MARKET-SHARE LABEL.** The census's refusal was not excessive
+caution; it is **more honest than the state of the art**. ⛔ 44,885 was not divided by anything.
+
+⚠️ Someone else's measurement, method unverified by us — a different epistemic status from the
+census, and that label travels with the number if it is ever cited.
+
+## ⭐ ON-CHAIN DUE DILIGENCE EXISTS AS A PAID CATEGORY — the first evidence about THEM, not us
+
+The Bazaar returned four indexed Base endpoints near DD. **All four declare `extra.name = "USD Coin"`
+— vanilla EIP-3009, NOT `GatewayWalletBatched` — so all are COMMENSURABLE with the census method**,
+with no Gateway-netting caveat. Checked before any number was read.
+
+⚠️ Only two are in DD's category; the tag-per-track pair is a MUSIC API that matched "analyze"
+lexically, and its two endpoints share ONE payTo — **3 distinct addresses, not 4**.
+
+Same census window verbatim (blocks 50,129,226→50,431,626), **302,401/302,401 blocks covered**,
+array-topic matching re-verified against individual queries.
+
+| seller | price | inbound | inbound USDC | outbound |
+|---|---:|---:|---:|---:|
+| craigmbrown DD scan | $1.00 | 128 | 14.5803 | 4 / 22.0000 |
+| 402.com.tr deep-dd | $0.75 | 131 | 5.6990 | 4 / 6.5778 |
+| tag-per-track (music) | $0.05/$0.10 | 0 | 0 | 0 |
+
+⭐ **TWO CEILINGS, AND THEY DISAGREE SHARPLY — the value one is far tighter.** At list price 14.58
+USDC buys **at most ~14** scans, not 128; 5.70 USDC buys **at most ~7** deep-dd calls, not 131. Mean
+inbound is **$0.114** and **$0.044** against list prices of $1.00 and $0.75. So most inbound
+transfers are **not sales at the advertised price**, and chain data cannot say which are.
+⛔ An inbound transfer is not a purchase. Both numbers are UPPER BOUNDS, and the true count is
+probably far below the transfer count.
+
+🚨 **NONE OF THE THREE IS IN CIRCLE'S INDEX** — absent from a 364-resource sample AND from targeted
+`due diligence`/`audit`/`music` queries; not one host appears. **The two directories are DISJOINT
+corpora**, so these are new sellers rather than a re-count — and "how big is the market" is a harder
+question than either directory alone suggests.
+
+⚠️ Nothing here is a conclusion about DD's prospects. What is established: the category has at least
+two live Base sellers priced **12×–17× above DD**, both with nonzero inbound AND outbound.
+
+## ⛔ NOTHING BUILT
+
+The **three catalogue items** — the two proxy-catalogue entries and now the `resource` object — stay
+**scoped and undecided**. `extensions.bazaar` is downstream of Arc-vs-Base and is not one of them.
+`_x402.mjs:209` still defaults to `1` when READING other sellers' challenges: buyer-side, recorded,
+unexamined.
+
+---
+
+
 # ✅ DEFECT 1 DECIDED AND BUILT — a probe that names NOTHING now gets the terms
 
 **2026-08-26.** A bare discovery probe got **400, not 402** — and the challenge is HOW a caller
