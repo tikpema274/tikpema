@@ -110,12 +110,48 @@ not fixed. 🚨 Two sellers wrong in opposite directions is also the evidence th
 `gate:spec` was checked first and does not constrain this: `verify-spec-published.mjs:145–147`
 asserts only status-402, non-empty `accepts[]`, and matching price — no top-level key check.
 
-## ⚠️ NOT PROVEN HERE
+## ✅ SHIPPED AND RE-PROBED — the cure is proven, and it is narrower than "fixed"
 
-The **fixed** endpoint has not yet been fault-injected — B/C above measured the *broken* prod build.
-The post-deploy re-probe is the confirmation, and until it runs this is a proven diagnosis with an
-unproven cure. Nothing here measures whether the Bazaar Validator now passes; that is a separate
-instrument and a separate claim. The bare-probe 400 (defect 1) is **untouched and still open**.
+Deployed `6a8f38253698753712abc96f`, tree `52dc18f51f74`, commit `acedafa`. `gate:deployed` VERIFIED
+(prod serves this tree), `gate:spec` green, `DEPLOY_EXIT=0`. Post-deploy re-probe, 4/4:
+
+| # | assertion | result |
+|---|---|---|
+| 1 | `PAYMENT-REQUIRED` header declares 2 | ✅ |
+| 2 | body carries top-level `x402Version` | ✅ |
+| 3 | header and body AGREE from one constant | ✅ 2 vs 2 |
+| 4 | **`X-PAYMENT` is STILL ignored** — B identical to control | ✅ |
+
+⭐⭐ **ASSERTION 4 IS THE HONEST ONE, AND IT ASSERTS THAT NOTHING CHANGED.** The fix corrects the
+**DECLARATION, NOT THE ACCEPT PATH.** `dd-analyze` still reads only `payment-signature`.
+
+🚨 **A v1-only client STILL CANNOT PAY. It is simply no longer LIED TO** — before, it read "1", sent
+`X-PAYMENT`, and looped forever believing it was doing the right thing; now it reads "2" and can
+fail fast. **The loop is closed by honesty, not by accepting v1.** "Fixed" must never be read as "v1
+clients now work". Who actually gains: v2-capable buyers who were being told the wrong number, and
+v1-only buyers who now get a signal to stop instead of an infinite retry. Had `X-PAYMENT` started
+working, that would have been an UNINTENDED behaviour change, not a success — which is why the
+assertion is written in that direction.
+
+## ⭐ THE REFUSAL WINDOW — predicted before the deploy, and it held
+
+Pre-registered: `observed-banner`, on the grounds that both touched paths are DD surface so `ddTree`
+must rotate. **OBSERVED — 313s (5.2m) of unavailable deposits**, `rotated: true`,
+`previousDdTree 2fb14a1c… → 1cba6c1d…`, 21 probes, banner above the curl. The ledger's five prior
+entries were all `no-window` **and all `ddTree`-unchanged**, so this is the first deploy in days
+where a window was genuinely expected — and a `no-window` here would have been the script's own
+SUSPICIOUS case (window closed before the first probe, or the health gate not gating), never a
+benign result.
+
+⚠️ `windowSeconds: 150` in the ledger is the probe BUDGET; `durationSeconds: 313` is the measurement.
+
+## ⚠️ STILL NOT PROVEN / STILL OPEN
+
+Nothing here measures whether the Bazaar Validator now passes — that is a separate instrument and a
+separate claim, and this fix was justified without it. The bare-probe 400 (defect 1) is **untouched
+and still open**, still blocked on the undecided 402-on-empty / 400-on-malformed question.
+⚠️ `_x402.mjs:209` still defaults a challenge with no version to `1` when READING other sellers'
+challenges — buyer-side interpretation, not our declaration. Unexamined, recorded.
 
 ---
 
