@@ -1,5 +1,110 @@
 ---
 
+# 📏 MEASURED: `notChecked` DOES **NOT** GROW ON BASE — AND THAT REFUTES THE QUESTION
+
+**2026-08-26.** The cheapest gate on the whole Base question was supposed to be: *if DD analysed
+Base mainnet contracts instead of Arc testnet ones, how much would `notChecked` grow?* Measured:
+**it does not grow. 9.5% on Base against 9.6% on Arc.** The gate does not fail —
+it turns out not to be a gate.
+
+⚠️ **READ PATH — NOT QUORUM-BACKED, NOT ATTESTABLE.** Single public endpoint per chain
+(`mainnet.base.org`, `rpc.testnet.arc.network`). Every report carried `sources.mode = single-rpc`
+and its own sentence: *"a wrong answer from this provider is reported as fact."* Nothing signed,
+nothing sold, nothing written on-chain. No second endpoint pair was built — that is separate work
+with its own distinctness proof.
+
+## Selection method — reconstructible, no hand-picking
+
+Every transaction `to` in a fixed 25-block range, ranked by how many transactions targeted it,
+filtered to addresses **with code**, top 30. Sampling what is actually being called is the closest
+available proxy for what a buyer would ask about.
+
+* Base blocks **50,471,363–50,471,387** — 591 distinct `to`
+* Arc testnet blocks **58,910,046–58,910,070** — 136 distinct `to`
+* 30 blocks back from head. 30+30 analysed, **zero threw**.
+
+## The two numbers
+
+| | Base | Arc testnet |
+|---|---:|---:|
+| contracts analysed | 30 | 30 |
+| power groups returned (9 each) | 270 | 270 |
+| **power groups in `notChecked`** | **0** | **0** |
+| coverage `checked` / `notChecked` | 373 / 39 | 358 / 38 |
+| **`notChecked` share** | **9.5%** | **9.6%** |
+
+## 🚨 WHY THE METRIC CANNOT ANSWER THE QUESTION
+
+`shape.mjs:10` is explicit: **`unknown` means "could not ask", NOT "did not recognise".** An
+unrecognised contract falls to `plain-contract`, the power scan runs against whatever bytecode sits
+at that address, and all nine groups resolve to a clean `present: true/false`. **Not one power group
+landed in `notChecked` on either chain.** A catalogue gap is *structurally incapable* of raising the
+number. The risk was never a manifest that grows — it is a manifest that stays confident and is
+wrong.
+
+## The failure taxonomy — the three buckets, not merged
+
+**1. Genuinely absent (DD working).** Base 259, Arc 253 of 270. These are `checked` with
+`present:false`. ⚠️ This bucket is *inflated* by bucket 2: an absence read off the wrong bytecode
+lands here indistinguishably.
+
+**2. Shape not in the catalogue — THE REAL NUMBER.**
+
+| | Base | Arc |
+|---|---:|---:|
+| `plain-contract` residual | 19 (63%) | 27 (90%) |
+| → true plain contract | 18 | 24 |
+| → **missed proxy** | **1 (3%)** | **3 (10%)** |
+
+⭐ **The gap is SMALLER on Base than on Arc.** Base had 11 standards-compliant EIP-1967
+proxies the catalogue recognises; Arc had 3.
+
+**3. Read failed — an artifact of this run, not a finding about Base.** Base 14
+(13 `check-error`, 1 `rpc-unreadable`), Arc 19 (19
+`check-error`). Comparable; `check-error` is mostly a reverting `owner()`, not throttling. The
+single endpoint held.
+
+## ⭐⭐ THE FINDING IS A LIVE ARC DEFECT, NOT A BASE RISK
+
+Every missed proxy on BOTH chains is the same pattern: the implementation is stored in the
+**zeppelinos slot `0x7050c9e0…`**, which the catalogue does not read. Circle's `FiatTokenProxy`.
+
+| contract | scanned | actual | coverage | `notChecked` |
+|---|---:|---:|---:|---:|
+| `0x833589fc…` | 1,852 B | 23,464 B | **8%** | **0** |
+| `0x36000000…` | 1,798 B | 23,659 B | **8%** | **0** |
+| `0x89b50855…` | 1,798 B | 23,464 B | **8%** | **0** |
+| `0xf0c4a4ce…` | 1,496 B | 18,190 B | **8%** | **0** |
+
+DD reads **~8% of the real bytecode**, reports eight of nine powers absent, and declares
+**`notChecked: 0`** — a maximally confident manifest about the wrong contract. The first row is the
+asset every x402 payment on Base settles in; the second is **Arc's own USDC**, the asset DD is
+priced in.
+
+🚨 So the catalogue gap the Base question was worried about **is already live on Arc, at
+10% versus Base's 3%.** The engine already
+suspected it — the `plain-contract` residual comment records finding exactly this on Arc USDC and
+says *"a shape nobody looks for produces no notChecked entry, so the absence of a warning came from
+the absence of a check"* — but it was never measured, and `shapesNotTestedFor` is disclosed in
+`shape.evidence`, **not in the coverage manifest a buyer reads**.
+
+## What this licenses, and what it does not
+
+**Does:** on this evidence catalogue coverage is **not** a reason to prefer Arc over Base. It argues
+mildly the other way.
+
+**Does NOT:** 30 contracts per chain, one 25-block window, single endpoint, not quorum-backed. It
+cannot support a claim about Base contracts generally. ⚠️ Only three non-standard patterns were
+probed (zeppelinos, EIP-1967 beacon, `implementation()`); any other custom proxy still reads as
+`plain-contract` and is **not counted**, so **3% and
+10% are LOWER BOUNDS**.
+
+⛔ **Nothing was tuned and no catalogue entry was added.** Adding the zeppelinos slot would have
+improved both numbers, which is precisely why it was not done inside a measurement.
+
+---
+
+
 # 📉 ZERO SETTLEMENTS ON THE VANILLA SELLER — 58h26m AFTER THE DISCORD POST
 
 **2026-08-25 19:40 UTC.** Endpoint posted to Discord **2026-08-23 09:14 UTC**. Zero settlements
