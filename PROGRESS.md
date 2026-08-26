@@ -90,6 +90,23 @@ NEW `scripts/dd/verify-subjectless-402.mjs`, wired into `test:dd`.
 `UNSKIPPABLE` is untouched: ADDRESS and CHAIN still RUN, they simply have nothing to judge. The
 throw-guard is about bypassing a rung, not its outcome.
 
+## ✅ SHIPPED — and BOTH pre-deploy predictions held
+
+Deploy `6a8f476dcd903c43b65afa8d`, tree `92aa1e9e26c7`, `DEPLOY_EXIT=0`, `gate:deployed` VERIFIED.
+
+⭐⭐ **THE SAME INSTRUMENT FLIPPED ON THE SAME ENDPOINT — the cleanest before/after available.**
+The 6 discovery assertions were verified RED against the build this replaced, and are now GREEN,
+with every pre-existing `gate:spec` check unmoved. A guard validated against a real broken
+deployment, not against a local revert.
+
+**Refusal window** — pre-registered `observed-banner`: **OBSERVED, 156s (2.6m)**, `rotated: true`.
+
+**Live contract on prod, 19/19:** probes (`{}`, no body, chain-only) → 402 with `accepts[]`,
+`x402Version: 2`, no `subjectPreview`; subjectless **+ payment** → **400 terminal, never 402**,
+stating the authorization was not spent; and all four free-answerable cases still 400 with their
+original reasons — `invalid-address`, `chain-not-specified`, `unsupported-chain`,
+`malformed-request`. **The incentive argument holds in production, not just in a suite.**
+
 ## ⚠️ STILL OPEN
 
 Nothing here measures whether the Bazaar Validator now passes — separate instrument, separate claim,
