@@ -56,11 +56,48 @@ a systematic habit.
 ⛔ **NOT TONIGHT, AND NOT AS A CLEANUP.** Recorded so it is asked once, deliberately, rather than
 rediscovered the next time a revert-and-restore happens to expose it.
 
-## Deploy in flight
+## ✅ `4b734ed` LANDED — recorded after the fact, as this entry demanded
 
-`4b734ed` was deploying when this was written; its `DEPLOY_EXIT`, `gate:deployed` and the two
-pre-registered predictions (`observed-banner`; the 4 `gate:spec` resource assertions flipping
-red→green) are UNRECORDED here and must be checked before anything else is built on top.
+Deploy **`6a8f560477c73ce2cd82dbf8`**, tree `6ee002e9b01f`, **`DEPLOY_EXIT=0`** (read from a shell
+variable, not through a pipe — a pipe reports `tail`'s status, which masked a real failure earlier
+today). Suite 40/40 inside the chain. `gate:deployed` **VERIFIED**. Stamp shows the deployed commit
+as `4b734ed`, `dirty: false`, `ddTree 1a077d64`, 38 DD-surface files.
+
+**Both pre-registered predictions HELD.**
+
+* `capture:window` → **`observed-banner`**, `rotated: true`, `ebeee429… → 1a077d64…`, 38 probes.
+* `gate:spec` → the **4 resource assertions flipped red→green**, every pre-existing check unmoved.
+  Both equality checks report `https://app.tikpema.xyz/api/dd-analyze` on BOTH sides: the advertised
+  resource and the signable one are the same string in production, which is the entire property the
+  derivation exists to guarantee.
+
+⭐ Third time today an instrument was verified RED against the real build being replaced and GREEN
+after. That form — validate the guard against the genuine broken deployment, never against a local
+revert alone — is the strongest evidence this session produced.
+
+⚠️ **A WRONG SUB-PREDICTION, RECORDED AS WRONG.** The outcome was predicted correctly, but I also
+said to expect the same duration band as today's 313s and 156s. **It was 577s (9.6m)** — nearly
+double the longest, and the longest window of the three. The OUTCOME was mine to predict; the
+DURATION is set by where the deploy lands in the canary cycle and never was. Today's three:
+**313s · 156s · 577s.**
+
+## 🚨 TWO PROVENANCE DEFECTS FOUND WHILE RECORDING THIS
+
+**1. The window ledger attributes this window to the WRONG COMMIT.** The row says
+`commit: 86e5fcd…`, but the deployed commit was **`4b734ed`**. `capture-refusal-window` takes the
+commit from the local build stamp, and the stamp was regenerated at 21:09:26 by a post-deploy gate —
+*after* the docs commit had moved local HEAD. Because this entry was committed while its own deploy
+was still in flight, the ledger now blames a docs-only commit for a window caused by a code change.
+⚠️ **The ledger is the durable record and it is wrong on this row.** Anyone later asking "which
+commit cost 9.6 minutes of deposits?" gets the wrong answer. Recorded, NOT rewritten — the honest
+fix is to make the script read the DEPLOYED commit rather than local HEAD, which is a change nobody
+has decided.
+
+**2. `86e5fcd` committed a NON-NULL build stamp.** `shared/build-stamp.generated.mjs` is tracked as
+`RAW_BUILD_STAMP = null` by convention and regenerated at build; a `git add -A` issued while the
+deploy was mid-build swept up the generated value. Restored to `null` here. ⭐ Both defects have the
+same root cause: **committing while a deploy is in flight**, which makes local HEAD and the deployed
+artifact disagree in ways the tooling silently records as fact.
 
 ---
 
