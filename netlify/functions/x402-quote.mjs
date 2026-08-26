@@ -35,6 +35,7 @@ import { connectBlobs } from "./_blobs.mjs";
 import { randomUUID } from "node:crypto";
 import { BatchFacilitatorClient } from "@circle-fin/x402-batching/server";
 import { readGatewayBalance, confirmPayment, CONFIRM_REASON, RETRIEVE_TIMEOUT_MS, RETRIEVE_TIMEOUT_PROVENANCE } from "./_x402-confirm.mjs";
+import { X402_VERSION } from "../../shared/x402/version.mjs";
 
 const PENDING_STORE = "x402-quote-pending";
 const ARC_RPC = "https://rpc.testnet.arc.network";
@@ -178,9 +179,11 @@ export async function handler(event) {
       statusCode: 402,
       headers: {
         "Content-Type": "application/json",
-        "PAYMENT-REQUIRED": b64encode({ x402Version: 1, accepts: [requirements] }),
+        "PAYMENT-REQUIRED": b64encode({ x402Version: X402_VERSION, accepts: [requirements] }),
       },
       body: JSON.stringify({
+        // Mirrors the header for body-reading clients; see shared/x402/version.mjs.
+        x402Version: X402_VERSION,
         error: "Payment required",
         accepts: [requirements],
       }),
@@ -208,9 +211,10 @@ export async function handler(event) {
         statusCode: 402,
         headers: {
           "Content-Type": "application/json",
-          "PAYMENT-REQUIRED": b64encode({ x402Version: 1, accepts: [requirements] }),
+          "PAYMENT-REQUIRED": b64encode({ x402Version: X402_VERSION, accepts: [requirements] }),
         },
         body: JSON.stringify({
+          x402Version: X402_VERSION,
           error: "Payment verification failed",
           reason: verification?.invalidReason || "invalid",
           accepts: [requirements],
@@ -239,9 +243,10 @@ export async function handler(event) {
         statusCode: 402,
         headers: {
           "Content-Type": "application/json",
-          "PAYMENT-REQUIRED": b64encode({ x402Version: 1, accepts: [requirements] }),
+          "PAYMENT-REQUIRED": b64encode({ x402Version: X402_VERSION, accepts: [requirements] }),
         },
         body: JSON.stringify({
+          x402Version: X402_VERSION,
           error: "Payment settlement failed",
           reason: settlement?.errorReason || "settle failed",
           accepts: [requirements],

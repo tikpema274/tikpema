@@ -47,6 +47,7 @@
 
 import { randomUUID } from "node:crypto";
 import { runThenSettle, settleDecision, SETTLE_REASON, noChargeResponse } from "../../shared/x402/settle-gate.mjs";
+import { X402_VERSION } from "../../shared/x402/version.mjs";
 import { readGatewayBalance, confirmPayment, CONFIRM_REASON, RETRIEVE_TIMEOUT_MS, RETRIEVE_TIMEOUT_PROVENANCE } from "./_x402-confirm.mjs";
 // ⭐ The power catalogue is the SOURCE OF TRUTH for the floor stated in the 402. Imported, never
 // transcribed: a literal count in buyer-facing text is a second source of truth that rots silently
@@ -317,9 +318,16 @@ export function challenge402({ requirements, detail = null, preview = null }) {
     statusCode: 402,
     headers: {
       "Content-Type": "application/json",
-      "PAYMENT-REQUIRED": b64encode({ x402Version: 1, accepts: [requirements] }),
+      "PAYMENT-REQUIRED": b64encode({ x402Version: X402_VERSION, accepts: [requirements] }),
     },
     body: JSON.stringify({
+      // ⭐ MIRRORED FROM THE HEADER, NOT A SECOND SOURCE OF TRUTH. Under v2 the body is explicitly
+      // "a server implementation concern" and the PAYMENT-REQUIRED header is the protocol surface,
+      // so this field is a COMPATIBILITY AFFORDANCE for body-reading clients (10 of 15 live Base
+      // sellers measured 2026-08-26 carry it), not a spec requirement. It reads X402_VERSION for
+      // the same reason the header does — publishing the version in two places from two literals
+      // is how they drifted apart in the first place.
+      x402Version: X402_VERSION,
       error: detail ? "Payment required" : "Payment required",
       ...(detail ? { reason: detail } : {}),
       accepts: [requirements],
@@ -575,9 +583,10 @@ export async function runPaidAnalysis({ facilitator, rpcCall, store, payload, re
       statusCode: 402,
       headers: {
         "Content-Type": "application/json",
-        "PAYMENT-REQUIRED": b64encode({ x402Version: 1, accepts: [requirements] }),
+        "PAYMENT-REQUIRED": b64encode({ x402Version: X402_VERSION, accepts: [requirements] }),
       },
       body: JSON.stringify({
+        x402Version: X402_VERSION,
         error: "Payment settlement failed",
         reason: s?.settlement?.errorReason || "settle failed",
         detail: "The report was produced but the payment was rejected, so nothing is served. Your authorization was not spent.",

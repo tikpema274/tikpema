@@ -1,5 +1,125 @@
 ---
 
+# 🚨 `x402Version: 1` MADE HONEST v1 BUYERS 402-LOOP FOREVER — a correctness defect, not a validator cosmetic
+
+**2026-08-26.** `dd-analyze` and `x402-quote` declared `x402Version: 1` while reading **only** the
+`payment-signature` header. A spec-compliant v1 client believes the declaration, sends `X-PAYMENT` —
+the header v1 mandates — and **the endpoint never looks at it.** It re-issues the same challenge,
+the client reads the same "version 1", retries the same way, and **can never pay us.** Nothing in
+the response says why.
+
+🚨 **That is the reason to ship. The Bazaar Validator's body-reading complaint is a symptom that
+happened to point at it; a paying buyer being structurally unable to pay is the defect.**
+
+## PROVEN AGAINST PROD BEFORE THE FIX — pre-registered, and the discriminator carried it
+
+Prediction registered before running: *the v1 header is ignored and the 402 is re-issued; if it
+settles, the accept path reads both headers and the loop claim is wrong.* Three probes, valid
+subject. ⛔ No money at risk: the signature was 65 zero bytes from a burn address, so no
+authorization existed to spend.
+
+| probe | header sent | result |
+|---|---|---|
+| **A** control | none | 402, body keys `[error, accepts, howToCall, subjectPreview, whatYouAreBuying, settlement]` |
+| **B** v1 | `X-PAYMENT` | 402 — **BYTE-IDENTICAL TO A.** Never read. |
+| **C** v2 | `PAYMENT-SIGNATURE` | 402 by a **different path**: decoded, reached the facilitator, Circle Gateway returned `paymentPayload.resource: Required, paymentPayload.accepted: Required` |
+
+⭐ **B-vs-C is the whole proof.** Identical-to-control shows `X-PAYMENT` is ignored; C shows
+`payment-signature` is the header actually honoured. Testing only B would have shown a 402 and
+proven nothing — a 402 is also what a *working* endpoint returns to an unpaid caller
+[[ask-for-the-discriminator]].
+
+⭐⭐ **AND C PRODUCED A THIRD INSTRUMENT NOBODY ASKED FOR.** Circle's own facilitator rejected the
+v1-shaped payload for missing the **v2** fields `resource` and `accepted`. The settlement backend we
+actually take money through **requires v2**. So: the spec, our accept path, and our facilitator all
+say 2 — three independent instruments [[repeating-one-instrument-is-not-corroboration]].
+
+## The number is FORCED BY THE TRANSPORT, never chosen to pass a validator
+
+Both specs pin it: v1 — *"Protocol version identifier (**must be 1**)"*; v2 — *"(**must be 2**)"*.
+So the only real question is which transport these endpoints implement, and they are v2 on every
+load-bearing axis: they emit `PAYMENT-REQUIRED` (a header v1 does not define), read
+`payment-signature` (`dd-analyze.mjs:208`, `x402-quote.mjs:165`), use CAIP-2 networks, and our own
+buyer sends the v2 envelope (`_x402.mjs:367`).
+
+## ⭐⭐ THE INDEX WAS NEVER DISAGREEING — IT NORMALISES, AND THE 1-vs-2 "CONFLICT" WAS VOID
+
+The recorded observation — *header says 1, Circle's index records 2* — was **filed as a conflict to
+resolve. There was no conflict.** The v2 spec §8.1/§8.2 defines **two different fields with the same
+name**: an envelope `x402Version` (the discovery response's own version) and a per-item
+`x402Version` ("protocol version supported by the resource"). The spec's own example shows an item
+at **1** inside an envelope at **2**.
+
+Measured: **364 distinct resources** across 12 `circle services search` queries — **every single
+per-item value is 2**, and all 828 `accepts[]` entries use the v2 field set. That looks like an
+overwhelming measurement. Then the discriminator:
+
+🚨 **Gloria AI (`api.itsgloria.ai`) serves a textbook v1 challenge live** — `"x402Version":1`,
+`maxAmountRequired`, `network:"base"`, **no `PAYMENT-REQUIRED` header** — and **Circle's index files
+it as `x402Version: 2` with a rewritten v2 `accepts` shape.**
+
+⭐ **The index normalises everything to 2. Its per-item version is a property of Circle's record
+format, not a measurement of any endpoint.** 364 uniform readings were 364 copies of one
+normalisation step [[filtered-read-is-not-absence]]. The observation was real and carried **zero**
+information about what we should emit — which is why the answer had to come from the accept path
+instead, and why it survives the index being silent.
+
+## What live sellers put in the body — convention, not compliance
+
+15 unpaid probes, 15 distinct providers, Base mainnet (read-only GETs, nothing bought or signed):
+
+* **10/15 carry `x402Version` in the body** (9 as `2`; Gloria as `1`) · 5/15 do not.
+* **14/15 send `PAYMENT-REQUIRED`** — the only one that doesn't is Gloria, the v1 seller.
+* Otto AI is our closest analogue: a custom body (`error`, `hint`, `price`, `docs`) with no
+  `accepts[]` that still carries `x402Version: 2`.
+
+⚠️ **Under v2 the body is explicitly "a server implementation concern" — the header is the protocol
+surface.** So the body field is a **compatibility affordance for body-reading clients**, not a spec
+requirement. Worth saying plainly, because it is the one part of this that *is* validator-driven.
+
+## ⭐ THE GUARD CAUGHT THE FIX — a new module dd-analyze RUNS sat outside the attestation hash
+
+First cut put `X402_VERSION` in a new `shared/x402/version.mjs` and stopped. `verify-dd-code-identity`
+failed: *"NOTHING dd-analyze runs is outside the code-identity hash except the documented SELF
+exclusion — shared/x402/version.mjs"*. A module dd-analyze **executes** that is outside `ddTree`
+means the canary's verdict would vouch for a signed report whose **published payment terms could
+change without rotating the health key** — the same fail-open the 2026-08-16 additions closed. Added
+to `DD_SURFACE_FILES`. ⚠️ Its churn is *unmeasurable*, not low: the file has one commit, its whole
+history. "Young", not "stable".
+
+## One constant, because five literals is how it drifted
+
+The number was a literal at five sites and **wrong at all of them**. It now lives once, in
+`shared/x402/version.mjs`, read by both the header and the body [[duplicate-source-of-truth-is-the-recurring-bug]].
+
+## ⛔ `x402-vanilla-seller.mjs` LEFT INCONSISTENT, DELIBERATELY
+
+It is wrong in the **opposite** direction — declares `2` while reading `x-payment` (`:282`) — and its
+buyer `_x402-vanilla.mjs:200` sends `X-PAYMENT` to match. **The pair is internally consistent on the
+wire and proven against real money.** Correcting either half alone breaks a settled path. Recorded,
+not fixed. 🚨 Two sellers wrong in opposite directions is also the evidence that the number was
+**copied, never derived**.
+
+## Changed
+
+`shared/x402/version.mjs` (new, the single constant) · `_dd-x402.mjs:320,:578` ·
+`x402-quote.mjs:181,:211,:242` — header `1`→`2` **and** `x402Version` added to the body, together
+(shipping the body field at `1` would publish a more legible wrong answer) ·
+`scripts/stamp-build.mjs` DD_SURFACE_FILES.
+
+`gate:spec` was checked first and does not constrain this: `verify-spec-published.mjs:145–147`
+asserts only status-402, non-empty `accepts[]`, and matching price — no top-level key check.
+
+## ⚠️ NOT PROVEN HERE
+
+The **fixed** endpoint has not yet been fault-injected — B/C above measured the *broken* prod build.
+The post-deploy re-probe is the confirmation, and until it runs this is a proven diagnosis with an
+unproven cure. Nothing here measures whether the Bazaar Validator now passes; that is a separate
+instrument and a separate claim. The bare-probe 400 (defect 1) is **untouched and still open**.
+
+---
+
+
 # 🔌 A SECOND BASE ENDPOINT: THE ARC DISTINCTNESS PROTOCOL DOES NOT TRANSFER
 
 **2026-08-26.** Anything read through a single endpoint is `sources.mode = single-rpc` and **not

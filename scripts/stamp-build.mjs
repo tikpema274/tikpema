@@ -129,6 +129,26 @@ const DD_SURFACE_FILES = [
   "shared/x402/settle-gate.mjs",        // decides whether a buyer is CHARGED
   "netlify/functions/_x402-confirm.mjs",// the money path dd-analyze settles through
 
+  // ═══ ⭐ ADDED 2026-08-26 — THE PROTOCOL VERSION THE CHALLENGE DECLARES ════════════════════════
+  // `shared/x402/version.mjs` holds the single X402_VERSION constant that the 402 challenge
+  // advertises, in BOTH the PAYMENT-REQUIRED header and the body. It is TERMS: it tells a buyer
+  // which transport to speak and therefore WHICH HEADER TO SEND. Declaring the wrong number is not
+  // cosmetic — at version 1 an honest v1 client sends X-PAYMENT, which dd-analyze.mjs:208 does not
+  // read, so it 402-loops and can never pay (fault-injected against prod 2026-08-26; the v1 probe
+  // came back byte-identical to the no-header control).
+  //
+  // ⭐ IT WAS CAUGHT BY THIS FILE'S OWN GUARD, NOT BY JUDGEMENT. The first version of the fix put
+  // version.mjs in shared/x402/ and stopped there; `verify-dd-code-identity.mjs` failed with
+  // "NOTHING dd-analyze runs is outside the code-identity hash except the documented SELF exclusion
+  // — shared/x402/version.mjs". A module dd-analyze EXECUTES that sits outside ddTree means the
+  // canary's verdict would vouch for a signed report whose published payment terms could change
+  // without rotating the health key. That is the same fail-open the 2026-08-16 additions closed.
+  //
+  // ⚠️ CHURN IS UNMEASURABLE HERE AND THE HONEST WORD IS "YOUNG", NOT "STABLE". This file has ONE
+  // commit — its whole history. A protocol version should change approximately never, but that is a
+  // prediction, not the lifetime count that justified the entries above.
+  "shared/x402/version.mjs",            // the transport version the challenge ADVERTISES
+
   // ═══ ⭐⭐ ADDED 2026-08-16 — THE SHARED LADDER AND THE SECOND ENTRY POINT ════════════════════
   // 🚨 `_dd-rungs.mjs` CONTAINS THE HEALTH GATE ITSELF. Leaving it out would mean a change to the
   // rung that decides whether an unverified detector may answer produced an identical ddTree — old
