@@ -1,5 +1,104 @@
 ---
 
+# 📊 CENSUS RE-RUN — OUR `payTo` IS STILL ABSENT FROM ALL 838 LISTINGS, AND ARC IS ABSENT WITH IT
+
+**2026-08-27.** DD now shows on our own Circle **sell page** with the Nanopayments badge lit. That is
+the **SELLER view**. The census measures the **BUYER view**: does our `payTo` appear in the discovery
+index a buyer actually searches? Re-run to answer that, and only that.
+
+**PRE-REGISTERED: still absent.** ✅ **HELD.**
+
+## The read, and why it is better than the one it replaces
+
+⭐ The 25 Aug census harvested sellers by sweeping **20 keywords** — a filtered read, and absence
+from it was never absence from the index. `circle services search ""` (empty query) returns the
+**unfiltered** index with a `pagination.total`. Paginated at `--limit 50`:
+
+* **`pagination.total` = 838** · 17 pages harvested · **838 items collected, 0 pages failed** —
+  coverage is complete, not sampled. 828 distinct `resource` values (10 duplicate rows).
+* **109 distinct `payTo` addresses**, 13 networks.
+
+## The answer
+
+> **ABSENT. 0 hits in 838 listings.**
+
+Checked two ways, because one field is one instrument:
+
+* **Structured** — every `accepts[].payTo` across all 838: **0 matches.**
+* **Raw substring** — the address anywhere in the whole serialised blob: **0.** Also `tikpema` 0,
+  `dd-analyze` 0.
+
+And a second *question*, not a second answerer — keyword searches: `tikpema` total **0**,
+`due diligence` total **0**, and 0 of our hits inside `diligence` (396), `dd` (61), `audit` (16),
+`trust` (119), `arc` (263).
+
+## ⭐⭐ THE MECHANISM, WHICH THE COUNT ALONE WOULD NOT HAVE GIVEN
+
+Our chain is **`eip155:5042002` (Arc)**. The index carries **13 networks and Arc is not one of them**:
+
+```
+722 eip155:8453 (Base)   285 solana   229 eip155:137   98 eip155:43114
+ 56 eip155:1 / 42161 / 10 / 130       31 eip155:196    12 eip155:146 / 480 / 1329 / 999
+```
+
+🚨 **Zero Arc listings exist in the entire index.** So this is not "our listing has not propagated
+yet" — a buyer-side Arc listing is not a thing the index currently represents at all. ⚠️ That is a
+different problem from the one we were watching for, and it is not fixed by re-listing.
+
+## Limits, stated
+
+⚠️ This measures **the index the `circle services` CLI reads**, at one moment, through the empty-query
+path. It does not prove our sell page is wrong — the seller view and the buyer index are simply two
+different records, which is the whole point of running the buyer-side check. Whether Arc is excluded
+deliberately, unsupported, or merely unpopulated is **NOT** established here. ⛔ NOTHING BUILT.
+
+⭐ The 19 August listing assumption was believed on exactly this class of evidence — our own surface
+showing a thing — and turned out false. Same class, checked instead of assumed, second time.
+
+
+---
+
+# 🚨 A FALSE DIVERGENCE ALARM — TWO LOG WINDOWS COMPARED BY EYE, THEN A GREP THAT CONFIRMED ITS OWN FRAMING
+
+**2026-08-27.** I reported `origin/main` at `21f401e` as **"not in this branch's history — divergence,
+not just being behind."** It was wrong. `21f401e` is a **direct ancestor of HEAD and the merge-base**;
+the push was a strict fast-forward, 0 origin-only commits. It cost a stop-work order and a
+read-only investigation, and a force-push on that belief would have been destructive.
+
+## The instrument produced the finding
+
+**1. Two log windows, compared by eye.** I printed `git log origin/main -3` and `git log HEAD -8`.
+The gap between them is **8 commits**, so the windows could not overlap *whatever* the topology was.
+Non-overlap was an artefact of the two window sizes, and I read it as a fact about history.
+
+⭐⭐ **THE RULE: for a claim about git history, use a REACHABILITY query, never two log windows
+compared by eye.** `git merge-base --is-ancestor 21f401e HEAD` answers it in **one call**, exactly,
+with an exit code — as does `git rev-list --left-right --count A...B`. Eyeballing two `log` outputs
+is not a cheap version of that check; it is a different question with a coincidental answer.
+
+**2. Then the confirming grep returned 0 — for the wrong reason.** Checking whether the content
+survived locally, I grepped `PROGRESS.md` for `"Arc's distinctness protocol does NOT transfer"` and
+`"publicnode over the aggregators"`. Both returned **0**, which read as *the changes are gone*. Both
+strings are **commit-message phrasing that is not in the file body**. The real check —
+`git diff 21f401e HEAD -- PROGRESS.md` (**483 insertions, 0 deletions**) and matching all 86 added
+lines individually (**0 missing**) — showed nothing had ever been removed.
+
+🚨 **Same family as the `pgrep` ERE pattern and the grep that matched its own warning line: the
+instrument's framing produced the finding.** In all three, the search term encoded an assumption and
+the result was read as evidence about the world. ⚠️ Note the second error *confirmed* the first —
+a wrong check agreeing with a wrong claim is the most expensive shape this takes.
+
+## What was actually true
+
+`git reflog show origin/main` settled it: the ref last moved at **14:34:48 by push** (`21f401e`).
+The evening's 8 commits (20:55 → 23:44) were **simply never pushed**. The "0 ahead / 0 behind"
+verification was true — for the afternoon. Nothing on the remote changed afterwards.
+
+⭐ Pushed after the reachability check, and verified by **re-fetch and `git ls-remote`** — asking the
+remote directly — rather than by the push output: `92f91c8`, `0  0`.
+
+
+
 # ❓ WHERE DO OUR ASSERTIONS LIVE? — a guard that only fires AFTER the deploy is a guard that ships the regression first
 
 **2026-08-26, recorded as an open question. Nothing investigated, nothing built.**
