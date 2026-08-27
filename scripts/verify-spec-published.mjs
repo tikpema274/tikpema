@@ -187,6 +187,61 @@ console.log("\n── runtime: a DISCOVERY PROBE must be challenged, not refused
   await probe("no body at all", null);
 }
 
+// ═══ ⭐⭐ THE OTHER TWO PAID ENDPOINTS — THE 200-VS-SPA TRAP, AGAIN ════════════════════════════
+// 🚨 x402-vanilla-seller and x402-quote were LIVE and settling real Arc testnet USDC for weeks
+// while `/api/*` had no redirect for either. Measured 2026-08-27:
+//
+//   POST /api/x402-vanilla-seller               → 200  text/html   (the SPA shell)
+//   POST /.netlify/functions/x402-vanilla-seller → 402  application/json
+//
+// ⭐ NOBODY NOTICED PRECISELY BECAUSE IT RETURNED 200. That is the same failure the negative
+// control at the top of this gate exists for, on a path that takes money — and a comment in
+// netlify.toml would not have caught it, because the previous state also had comments.
+//
+// ⚠️ THE LOAD-BEARING ASSERTION IS NOT THE STATUS, IT IS THAT THE BODY IS A CHALLENGE. A 402 is
+// hard to fake accidentally, but the failure mode here is 200-with-HTML, so both are checked:
+// content-type must be JSON, and accepts[] must be present and non-empty.
+console.log("\n── the other two paid endpoints: front door, not the SPA shell ──────");
+{
+  const unpaidPost = async (path) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), T);
+    try {
+      // Unpaid and unsigned: no X-PAYMENT, no PAYMENT-SIGNATURE. Cannot settle, by construction.
+      const res = await fetch(`${BASE}${path}`, {
+        method: "POST", signal: ctrl.signal,
+        headers: { "Content-Type": "application/json" }, body: "{}",
+      });
+      return { status: res.status, ctype: res.headers.get("content-type") || "", body: await res.text() };
+    } catch (e) { return { status: 0, ctype: "", body: e.message }; }
+    finally { clearTimeout(t); }
+  };
+
+  for (const [label, path] of [
+    ["/api/x402-vanilla-seller", "/api/x402-vanilla-seller"],
+    ["/api/x402-quote", "/api/x402-quote"],
+  ]) {
+    const r = await unpaidPost(path);
+    ok(`${label} → HTTP 402 on an unpaid POST`, r.status === 402, `got ${r.status}`);
+    // 🚨 THE TRAP: the SPA shell answers 200 text/html. Assert the type, not just the code.
+    ok(`${label} → Content-Type is application/json (NOT the SPA shell)`,
+      /application\/json/i.test(r.ctype), r.ctype || "(none)");
+    let j = null; try { j = JSON.parse(r.body); } catch { /* */ }
+    ok(`${label} → body carries a non-empty accepts[]`,
+      Array.isArray(j?.accepts) && j.accepts.length > 0,
+      j ? `accepts=${Array.isArray(j.accepts) ? j.accepts.length : "none"}` : `not JSON: ${r.body.slice(0, 40).replace(/\n/g, " ")}`);
+  }
+}
+
+// ═══ THE HUMAN INDEX ══════════════════════════════════════════════════════════════════════════
+// ⚠️ Same 200-vs-SPA trap: /built returning the app shell would look like a working page.
+console.log("\n── /built — the human index ────────────────────────────────────────");
+{
+  const r = await get("/built", { Accept: "text/html" });
+  ok("/built serves HTML at 200", r.status === 200 && /text\/html/i.test(r.ctype), `${r.status} ${r.ctype}`);
+  ok("…and it is the index page, not the app shell", /Built|due diligence|census/i.test(r.body) && !/<div id="root">\s*<\/div>/.test(r.body), r.body.slice(0, 40).replace(/\n/g, " "));
+}
+
 console.log("\n════════════════════════════════════════════════════════════════════════");
 if (bad) { console.log(`❌ ${bad} check(s) failed.\n`); process.exit(1); }
 console.log(`✅ the spec is published, valid, priced from one constant, and the runtime agrees.\n`);

@@ -84,6 +84,12 @@ export async function handler(event) {
       "It carries corrections that cannot go into frozen bytes, and serves as a fallback way to reach " +
       "those bytes when IPFS gateways do not.",
 
+    // ⭐ A HUMAN LANDING SPOT. This document is public and unauthenticated, so it is a place a
+    // person can arrive with no other context. It should not be a dead end.
+    // ⚠️ Placed AFTER what_this_is and BEFORE trust_ordering deliberately: it is a signpost, not a
+    // limit, and it must not push the trust ordering below the fold of a reader's attention.
+    see_also: "https://app.tikpema.xyz/built — what else exists here, with the actual state of each.",
+
     // 🚨 FIRST FIELD ON PURPOSE. A reader must meet the limits of this surface before its contents.
     trust_ordering: {
       "1_immutable": "The document bytes. Content-addressed: hash them, compare to the CID. Cannot change.",

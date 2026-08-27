@@ -50,6 +50,13 @@ const NO_FRONTEND_CALLER = new Map([
   ["/api/dd-analyze", "PUBLIC x402 endpoint. Buyers are external agents; the SPA never calls it."],
   ["/api/dd-openapi", "the machine-readable descriptor `howToCall.openApiUrl` points at, fetched by external clients."],
   ["/api/dd-identity", "the mutable companion the ERC-8004 identity document (agentId 851891) names as its correction AND availability path. Fetched by outside verifiers following tokenURI, never by the SPA — and v1.0.0's companion was unreachable precisely because nothing external could resolve it."],
+  // ⭐ These two are the REASON this reverse audit's sibling defect existed: both endpoints were
+  // LIVE and settling real Arc testnet USDC with NO /api redirect at all, and nothing noticed
+  // because a GET to the missing path returned 200 with the SPA shell. The redirects added
+  // 2026-08-27 give them a front door the /built page can name. The SPA is not and should not be
+  // their caller — like /api/dd-analyze, the buyers are external agents.
+  ["/api/x402-vanilla-seller", "PUBLIC x402 seller (vanilla EIP-3009, Arc testnet, 0.01 USDC). Buyers are external agents; the SPA never calls it. Front door added 2026-08-27 so /built can name a real URL — it had none, and the missing route was invisible because GET returned the SPA shell at 200."],
+  ["/api/x402-quote", "PUBLIC x402 seller (Gateway batched, Arc testnet, 0.001 USDC). Same as above: external buyers only, front door added 2026-08-27."],
   // ── operator / bootstrap, deliberately never wired to a button ──
   ["/api/agent-init", "ONE-TIME bootstrap that mints a new agent wallet and ERC-8004 identity. Deliberately not reachable from the UI — a stray click would create a brand new agent."],
   ["/api/agent-status", "read-only operator diagnostic (wallet + identity), curled by hand."],

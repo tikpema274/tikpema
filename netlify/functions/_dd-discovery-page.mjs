@@ -158,5 +158,12 @@ cannot independently audit before you buy. A flat price removes that incentive e
 <p>Same endpoint returns JSON to any client that does not ask for HTML.
 <a href="${esc(DD_OPENAPI_URL)}">OpenAPI description</a>.</p>
 
+<!-- ⭐ THE ENTRY POINT, NOT A DECORATION. /built is a live route; src/App.tsx:85 records what
+     happens to a live route nothing links to (#/dca: reachable only by typing the hash, for
+     22 days). This link and the Dashboard card ship WITH the page, not after it. -->
+<h2>Elsewhere</h2>
+<p>DD is one of several things built here. <a href="/built">What else exists</a> — each with what
+it actually is right now, which is not always much.</p>
+
 </main></body></html>`;
 }

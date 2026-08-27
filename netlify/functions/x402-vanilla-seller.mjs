@@ -283,6 +283,28 @@ export async function handler(event) {
 
   const proto = headers["x-forwarded-proto"] || "https";
   const host = headers["host"] || "";
+  // ═══ ⚠️ TWO CANONICAL `resource` VALUES, ON PURPOSE — NAMED FOLLOW-UP, NOT A BUG ═══════════
+  // `resource` is derived from `event.path`, and since the /api/* redirects landed this endpoint
+  // is reachable at TWO paths — /api/x402-vanilla-seller and /.netlify/functions/x402-vanilla-seller. It therefore
+  // advertises a DIFFERENT `resource` depending on which one the caller hit.
+  //
+  // ⭐ SETTLEMENT IS UNAFFECTED. Vanilla x402 binds the authorization to the USDC TOKEN domain (EIP-3009
+  //    `receiveWithAuthorization`: from/to/value/validity/nonce) —
+  //    so the resource URL is not part of what is signed. Each challenge is self-consistent with
+  //    the request that produced it, and a payer that follows the challenge it received settles.
+  //
+  // ⛔ WHAT IT DOES COST: an indexer would list this endpoint TWICE, as two resources, and any
+  //    census keyed on `resource` would double-count it.
+  //
+  // ⚠️ RECORDED HERE BECAUSE THE NEXT READER WILL FIND THE INCONSISTENCY AND NOT KNOW ITS ORIGIN.
+  // `resource` correctness has already been a defect in this repo once (4b734ed, publishing the v2
+  // top-level `resource` derived from what the signature binds to), so an unexplained mismatch
+  // here reads exactly like that bug returning. It is not. It is a known consequence of adding a
+  // front door to an endpoint that had none.
+  //
+  // THE FOLLOW-UP, IF IT IS EVER TAKEN: pin the canonical resource to the /api path regardless of
+  // which URL was hit. That is a CODE CHANGE TO A LIVE PAID ENDPOINT, which is why it was not
+  // bundled with the one-line redirect that created the situation.
   const resource = `${proto}://${host}${event.path || "/.netlify/functions/x402-vanilla-seller"}`;
   const requirements = paymentRequirements(resource, payTo);
 

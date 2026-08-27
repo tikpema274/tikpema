@@ -255,6 +255,19 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
               and why it has not needed to yet.
             </div>
           </button>
+          {/* ⭐ THE ONLY CARD THAT LEAVES THE APP. /built is a plain page outside the SPA, for a
+              human arriving from Discord or GitHub who should not have to load a wallet app to
+              read a list. An <a> and not go(), because it is not a hash route.
+              🚨 THIS LINK IS THE POINT OF THE PAGE. App.tsx:85 records #/dca sitting live and
+              unlinked for 22 days, reachable only by typing the hash. A page nobody can reach
+              from anywhere is the same defect with better copy. */}
+          <a className="quick-card" href="/built">
+            <div className="qt">What else is built →</div>
+            <div className="qd">
+              DD, two live x402 sellers, a seller census, a standalone Arc x402 reference — each
+              with what it actually is right now. Everything on it is Arc testnet or a document.
+            </div>
+          </a>
         </div>
       </div>
     </>

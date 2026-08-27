@@ -297,6 +297,43 @@
   to = "/.netlify/functions/dd-openapi"
   status = 200
 
+# ═══ FRONT DOORS FOR TWO LIVE PAID ENDPOINTS ═══════════════════════════════════════════════════
+# Both have been settling real Arc testnet USDC while reachable ONLY at /.netlify/functions/*.
+#
+# 🚨 THESE MUST SIT ABOVE THE SPA FALLBACK, and their absence was INVISIBLE for exactly that
+# reason: with no rule here, `/api/x402-vanilla-seller` returned **200 with index.html**. A status
+# check cannot tell that apart from a working endpoint — the same trap already documented on
+# /openapi.json above. Measured 2026-08-27, before this change:
+#
+#   POST /api/x402-vanilla-seller  → 200  text/html   (the SPA shell, no route)
+#   POST /.netlify/functions/x402-vanilla-seller → 402  application/json  (live, with terms)
+#
+# ⭐ gate:spec now asserts BOTH front doors answer 402 with a JSON body carrying accepts[], so a
+# regression to the SPA shell fails loudly instead of passing as a 200.
+#
+# ⚠️ KNOWN CONSEQUENCE, documented at both resource-derivation sites: each endpoint derives its
+# x402 `resource` from event.path, so it now advertises two canonical resource values depending on
+# which URL was hit. Settlement is unaffected (neither rail signs over the resource URL); an
+# indexer would list each endpoint twice. See the comment blocks in those two functions.
+[[redirects]]
+  from = "/api/x402-vanilla-seller"
+  to = "/.netlify/functions/x402-vanilla-seller"
+  status = 200
+
+[[redirects]]
+  from = "/api/x402-quote"
+  to = "/.netlify/functions/x402-quote"
+  status = 200
+
+# ⭐ THE HUMAN INDEX. Same shape as /dd: one function negotiating HTML at a real 200.
+# It exists because DD, the two x402 sellers, the census, arc-x402-reference and the Hyperliquid
+# scripts are not findable from this domain unless you already know the URL.
+# 🚨 ABOVE THE SPA FALLBACK for the same reason as everything else in this block.
+[[redirects]]
+  from = "/built"
+  to = "/.netlify/functions/built"
+  status = 200
+
 # SPA fallback
 [[redirects]]
   from = "/*"

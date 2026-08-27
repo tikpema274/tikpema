@@ -1,5 +1,9 @@
 # Tikpema — two-plane DeFi on Arc Testnet
 
+**What's built and what state it is in: [app.tikpema.xyz/built](https://app.tikpema.xyz/built)** —
+a plain page, one honest line per thing. Start there if you arrived from a link.
+The rest of this file is how to build and run it.
+
 Two wallet planes that share Arc underneath but split on **who acts**:
 
 | Plane | Actor | Wallet | Keys | Auth | Where it runs |
