@@ -1,5 +1,77 @@
 ---
 
+# 🚨 THREE GAPS IN THE CENSUS VERIFIER — AND ONE OF THEM PRINTS A PASS ON ZERO EVIDENCE
+
+**2026-08-27. Found while correcting `verify-census.mjs`'s stale comments, NOT while looking for
+defects.** ⛔ **NONE FIXED.** Recorded so they are decided once; fixing any is a behaviour change and
+had no business riding along in a documentation pass.
+
+## ⭐⭐ GAP 1 — `agree === probes.length` IS `0 === 0`
+
+`scripts/x402-census/verify-census.mjs` check B compares a batched topic-array query against
+per-address queries. When the chosen window returns **no logs**, `probes` is empty, `agree` stays 0,
+and the verdict is:
+
+```js
+if(!probes.length) console.log("⚠️ no logs in this window — cannot discriminate; pick another window");
+let agree=0;
+for(const a of probes){ … }                       // never runs
+console.log(`${agree}/${probes.length} agree — ${agree===probes.length ? "⭐ … sound" : "🚨 SUSPECT"}`);
+```
+
+> It prints **`0/0 agree — ⭐ the topic-array optimisation is sound`** — **one line after printing
+> "cannot discriminate."**
+
+🚨 **The warning is issued and then contradicted by the verdict**, and the verdict is the line a
+reader believes. This sits inside the instrument built to catch exactly this shape: the file's own
+opening comment says *"a fast wrong answer is the failure mode worth checking for."*
+
+## ⭐⭐⭐ THE PORTABLE RULE — the reason this is worth recording at all
+
+> **An equality check between two counts passes VACUOUSLY when both are zero.**
+> **Assert NON-EMPTINESS before asserting agreement. Every time, everywhere.**
+
+`found === expected`, `matched === total`, `agree === probes.length`, `passed === cases.length` — all
+of them are green on an empty input, and an empty input is the most common way an instrument breaks.
+The guard is one line (`if(!probes.length) → FAIL, not warn`), and its absence is invisible in a pass
+count. Same family as [[absence-must-never-read-as-safe]] and
+[[filtered-read-is-not-absence]]: the answer is true, and about nothing.
+
+## GAP 2 — no truncation guard, but NOT silent
+
+`batched.length` is never tested against a cap, unlike the `CAP=9_000` the scan gained in `f749b78`,
+and this window is **10,000 blocks — 2.5× the scan's 4,000**.
+
+⚠️ **The direction was traced, not assumed.** A truncated batched result under-counts an address
+whose *solo* query is not truncated, so check B trips **🚨 MISMATCH**. Truncation here surfaces
+**LOUDLY**. This is unguarded but it is **not** the scan's silent gap.
+
+## GAP 3 — check C skips silently
+
+`if(z)` simply does not run when the census reports no zero rows. Nothing is printed, so **a missing
+check is indistinguishable from a passing one.**
+
+## ⭐ 1 AND 2 COMPOSE INTO THE SILENT CASE
+
+Gap 2 is loud *while there are logs*. If a window comes back **empty**, gap 2 has nothing to be loud
+about and gap 1 fires instead — an unguarded query and a vacuous equality producing a **⭐ PASS**
+together. Neither alone is the silent failure; **the pair is.** Judging each gap on its own is how
+the composition gets missed.
+
+## 🚨 AND THE HEADER WAS ATTESTING THE WRONG CENSUS
+
+The recorded result — `A consistent · B 3/3 exact (1005/1005, 62/62, 61/61) · C 0 logs` — was
+measured **2026-08-25T10:14Z against the 54-ADDRESS run**, and had never been re-run against the
+80-address census the published document reports. Relabelled in `abd5ef5`; **not re-derived, not
+re-run.**
+
+⭐ **THE DATE COULD NOT DISAMBIGUATE — BOTH RUNS WERE 2026-08-25.** What settled it was the run's own
+output line, **`rows: 54`**. A timestamp is not provenance when two generations share a day; the
+discriminator has to be something the artifact carries about *itself*.
+
+
+---
+
 # 🚨 CORRECTION TO THE CENSUS ABOVE — THE `circle` CLI SENDS `siwx=false`, AND MY "WHOLE INDEX" WAS 838 OF 1003
 
 **2026-08-27, same day, read-only.** The entry below reports **838 listings / 13 networks / no
