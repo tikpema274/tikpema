@@ -178,7 +178,15 @@ export async function handler(event) {
                 "POST the call above WITHOUT payment: the 402 response carries `whatYouAreBuying` — the " +
                 "coverage floor, why the price does not scale with coverage, and `subjectPreview`, " +
                 "which tells you BEFORE paying whether your subject has contract code at all.",
-              paymentProtocol: "x402 (EIP-3009 on Arc); the 402 body's `accepts` carries the requirements.",
+              // ⚠️ CORRECTED 2026-08-27. This is the 405 body served to any GET caller, so it was
+              // the wrong rail handed to exactly the reader trying to learn how to call this.
+              // It said "EIP-3009 on Arc"; the live 402 declares extra.name "GatewayWalletBatched".
+              paymentProtocol:
+                "x402 over Circle Gateway (batched) on Arc — NOT a token-domain EIP-3009 transfer. " +
+                "Sign against the GatewayWallet contract in `accepts[0].extra.verifyingContract`; " +
+                "the price comes from a Circle Gateway balance you must have deposited beforehand; " +
+                "and ecrecover(sig) must equal `from`, so the payer is an EOA that both holds the " +
+                "balance and signs. The 402 body's `accepts` carries the requirements.",
             },
           });
         },

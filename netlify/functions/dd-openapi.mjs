@@ -74,7 +74,19 @@ export function openapiDocument() {
       version: "0.2.0",
       summary: "One signed due-diligence report about an address, with an honest coverage manifest.",
       description:
-        "Paid per call over x402 (EIP-3009 on Arc). POST without payment to receive the 402 " +
+        // ⚠️ CORRECTED 2026-08-27. This said "EIP-3009 on Arc", which the live 402 contradicts:
+        // it declares extra.name "GatewayWalletBatched". The old wording also omitted the deposit
+        // prerequisite entirely, so a buyer who fixed only the rail would still have been unable
+        // to pay. All three constraints are stated here because a description AHEAD of the
+        // implementation is worse than one behind it.
+        "Paid per call over x402, settled through CIRCLE GATEWAY (batched), not against the USDC " +
+        "token. Three consequences for a payer: the authorization is signed against the " +
+        "GatewayWallet contract named in `accepts[0].extra.verifyingContract`, so a plain " +
+        "token-domain EIP-3009 receiveWithAuthorization payer CANNOT pay this endpoint; the price " +
+        "is pulled from a Circle Gateway balance you must have DEPOSITED BEFOREHAND, not from your " +
+        "wallet's USDC; and the batched header requires ecrecover(sig) == from, so the payer must " +
+        "be an EOA that both holds that balance and signs — a smart account paying via a delegate " +
+        "cannot satisfy it. POST without payment to receive the 402 " +
         "challenge, which carries the full terms: what you are buying, the coverage floor, why the " +
         "price does not scale with coverage, and a subjectPreview telling you BEFORE you pay " +
         "whether the subject has contract code at all.\n\n" +
@@ -201,7 +213,15 @@ export function openapiDocument() {
       price: DD_PRICE_HUMAN,
       priceAtomicUsdc: DD_PRICE_ATOMIC,
       priceIsFlat: "deliberately does not scale with coverage — a coverage-scaled price would pay us more for CLAIMING more coverage",
-      paymentProtocol: "x402 (EIP-3009 on Arc)",
+      // ⚠️ CORRECTED 2026-08-27 — see info.description above. Named as the rail the live 402
+      // declares, with the prerequisite, because this field is read by machines that will not
+      // read the prose.
+      paymentProtocol:
+        "x402 over Circle Gateway (batched settlement) on Arc. The authorization is signed against " +
+        "the GatewayWallet contract in accepts[0].extra.verifyingContract, NOT the USDC token, and " +
+        "spends a Gateway balance the payer must have deposited beforehand. Requires " +
+        "ecrecover(sig) == from: an EOA that both holds the balance and signs. A plain token-domain " +
+        "EIP-3009 payer cannot pay this endpoint.",
       attestation: "ERC-1271 against the on-chain owner of ERC-8004 agentId 851891",
       supportedChains: [...SUPPORTED_CHAINS],
     },

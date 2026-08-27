@@ -134,6 +134,7 @@ export const DEBT_HORIZON = { date: "2026-09-16", why: "mainnet — these are mo
 export const UNWIRED_OK = {
   "gate:pins": "network-dependent (IPFS routing probes). ⚠️ A flaky network inside a BLOCKING aggregate manufactures tolerated red — species 3 — so it is run deliberately, not on every commit.",
   "test:ddwatch": "network-dependent (probes the live DD service). Same reasoning as gate:pins.",
+  "test:ddraillive": "network-dependent (reads the LIVE 402 and the LIVE copy surfaces). Same call as gate:pins. ⭐ Its in-process half, test:ddrail, IS in test:all and binds the copy to DD_EXTRA.name — but that half is structurally incapable of noticing the DEPLOYED endpoint changed rails, which is the half of the 2026-08-27 defect no offline check could have caught. Splitting it out must not become dropping it: run it after every deploy that touches DD copy or _dd-x402.mjs.",
   "test:vanillabyteslive": "network-dependent (eth_calls Arc's PUBLIC RPC, recorded as throttled and observed ETIMEDOUT 2026-08-23 mid-run). Same call as gate:pins: a flaky network inside a BLOCKING aggregate manufactures tolerated red. Its in-process half, test:vanillabytes, IS in test:all and asserts this file exists and stays registered — so splitting it out cannot become dropping it.",
 };
 

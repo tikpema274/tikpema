@@ -61,14 +61,63 @@ const VERSIONS = [
     bytes: 18756,
     pinned: "permanently — every CID this identity has ever pointed at stays pinned, and the set only grows",
     superseded_by: null,
-    known_errata: [],
+    // ⚠️ TWO ERRATA ADDED 2026-08-27. Both are corrections to FROZEN BYTES and neither can be
+    // fixed in the document — the CID is a pure function of those bytes and the document asserts
+    // tokenURI(851891) equals it, so an edit would make its own central claim false. Corrections
+    // happen HERE until a v1.2.0 supersession, which is a deliberate on-chain session, not a
+    // passenger on a page deploy. See V1_2_0_OWES below.
+    known_errata: [
+      "PAYMENT RAIL, and the prerequisite it omits. `interface.payment` says \"Paid access is x402 " +
+        "over EIP-3009 on Arc USDC.\" The live 402 declares `extra.name: \"GatewayWalletBatched\"` — " +
+        "settlement is through CIRCLE GATEWAY, not against the USDC token. Three things follow, and " +
+        "the frozen wording states none of them: (1) the authorization is signed against the " +
+        "GatewayWallet contract in `accepts[0].extra.verifyingContract`, so a plain token-domain " +
+        "EIP-3009 receiveWithAuthorization payer CANNOT pay this endpoint; (2) the price is pulled " +
+        "from a Circle Gateway balance the payer must have DEPOSITED BEFOREHAND — no deposit, no " +
+        "payment, and this omission alone would leave a buyer stuck even after fixing the rail; " +
+        "(3) the batched header requires ecrecover(sig) == from, so the payer must be an EOA that " +
+        "both holds the balance and signs — a smart account paying via a delegate cannot satisfy it. " +
+        "The human page, the OpenAPI document and the 405 body carried the same wrong rail and were " +
+        "corrected in code on 2026-08-27; only these bytes cannot be.",
+      "ITS OWN `_notice` IS STALE. The document opens \"DRAFT — v1.1.0, NOT YET PINNED AND NOT YET " +
+        "POINTED AT.\" It is pinned and it is pointed at: these bytes are the current document, and " +
+        "this endpoint serves their CID above. ⚠️ The notice is INSIDE the pinned bytes, so it " +
+        "cannot be corrected without changing the CID it warns about changing.",
+    ],
     // 🚨 AN EMPTY ARRAY IS AN ABSENCE, AND ABSENCE MUST NOT READ AS SAFETY. Rendered bare, `[]` invites
     // "audited clean". It means nothing has been FOUND yet — which is a statement about how long this
     // document has existed, not about its accuracy.
+    // ⚠️ RENDERED ONLY WHILE `known_errata` IS EMPTY (see the map below), which it no longer is.
+    // Kept correct for that case rather than deleted: if a future version ships with none, this is
+    // the text it gets, and it must not read as "audited clean" then either.
     errata_note:
       "None recorded as of this deploy. That means nothing has been FOUND yet, NOT that this document " +
-      "has been audited clean — v1.0.0 also carried none on the day it was frozen, and carries three now.",
+      "has been audited clean — v1.0.0 also carried none on the day it was frozen and carries three now, " +
+      "and v1.1.0 was frozen with none and carried two within a day.",
   },
+];
+
+// ═══ ⭐ WHAT A v1.2.0 SUPERSESSION OWES — recorded so the session has its input, not a rebuild ═══
+// An errata entry is a correct mechanism and a GROWING DEBT. v1.0.0 carries three; v1.1.0 now
+// carries two, both added the same day. Nobody should have to reconstruct this list by re-reading
+// two documents and a week of history when the supersession session finally happens.
+//
+// ⚠️ THIS IS AN INPUT LIST, NOT A PLAN. Writing v1.2.0 is an on-chain session with a fail-closed
+// ordering guard — this route must report v1.2.0 as current BEFORE setAgentURI moves the pointer,
+// or a reader gets the new document off the chain while this companion still calls it superseded.
+// That ordering is why it was not bundled with a page deploy while the wrong claim was live.
+const V1_2_0_OWES = [
+  "FOLD IN v1.1.0 ERRATUM 1 — state the payment rail as Circle Gateway batched settlement, and " +
+    "state all three payer constraints (GatewayWallet verifying contract, not USDC; a Gateway " +
+    "balance deposited beforehand; ecrecover(sig) == from, so an EOA that holds and signs).",
+  "FOLD IN v1.1.0 ERRATUM 2 — the `_notice` must describe the document's ACTUAL state at freeze. " +
+    "The v1.1.0 notice shipped saying 'NOT YET PINNED' and was pinned unchanged; a notice that " +
+    "describes the moment before freezing is wrong from the instant it freezes.",
+  "CARRY FORWARD v1.0.0's three errata, which v1.1.0 fixed in prose but which a reader arriving " +
+    "at v1.0.0's CID still needs this endpoint to serve.",
+  "DECIDE, do not assume: whether DD should offer a vanilla token-domain EIP-3009 entry ALONGSIDE " +
+    "Gateway. Today it does not, and the corrected copy says so. If that changes, the document " +
+    "must not be written ahead of it — that is the defect these errata exist to record.",
 ];
 
 export async function handler(event) {
@@ -175,6 +224,19 @@ export async function handler(event) {
       // ⭐ Only present when the list is empty — that is the only case it guards against.
       ...(v.known_errata.length ? {} : { errata_note: v.errata_note }),
     })),
+
+    // ⭐ THE DEBT, SERVED — not just recorded in source. An errata list is a correct mechanism and a
+    // growing one; a reader deciding how much to trust these documents should see that the backlog
+    // exists and what it contains, not discover it by counting errata across two versions.
+    supersession_owed: {
+      what: "What a v1.2.0 supersession must fold in. Recorded so that session has its input ready.",
+      why_not_yet:
+        "Superseding is an on-chain session with a fail-closed ordering guard: this route must report " +
+        "v1.2.0 as current BEFORE setAgentURI moves the pointer, or a reader gets the new document off " +
+        "the chain while this companion still calls it superseded. That is a deliberate session, not a " +
+        "passenger on a page deploy — and the corrections above are live in the meantime.",
+      items: V1_2_0_OWES,
+    },
 
     pinning_obligation:
       "Every CID this identity has ever pointed at stays pinned FOREVER. Unpinning is not cleanup — it " +

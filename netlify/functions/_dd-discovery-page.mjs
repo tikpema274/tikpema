@@ -133,11 +133,32 @@ ${healthBanner(health)}
 
 <h2>What you get</h2>
 <table>
-  <tr><td>Price</td><td><b>${esc(DD_PRICE_HUMAN)}</b> per report, paid over x402 (EIP-3009 on Arc)</td></tr>
+  <tr><td>Price</td><td><b>${esc(DD_PRICE_HUMAN)}</b> per report, paid over x402 &mdash; Circle Gateway batched settlement on Arc</td></tr>
   <tr><td>Artifact</td><td>one signed on-chain due-diligence report about the address and chain you name</td></tr>
   <tr><td>Attestation</td><td>ERC-1271, verifiable against the on-chain owner of ERC-8004 agentId 851891</td></tr>
   <tr><td>Chains</td><td><code>${esc(SUPPORTED_CHAINS.join(", "))}</code></td></tr>
 </table>
+
+<h2>How payment works &mdash; read this before you build a payer</h2>
+<div class="warn">
+<b>This endpoint settles over Circle Gateway, not against the USDC token.</b> Until 2026-08-27 this
+page and the OpenAPI both said &ldquo;EIP-3009 on Arc&rdquo;, which is not enough to build a working
+payer and omits a prerequisite entirely. What the <code>402</code> actually declares is
+<code>extra.name: &quot;GatewayWalletBatched&quot;</code>, and three things follow from it:
+<ul>
+<li><b>The signature is against the GatewayWallet contract, not the USDC token.</b> A plain
+token-domain EIP-3009 <code>receiveWithAuthorization</code> payer cannot pay this endpoint &mdash;
+wrong verifying contract. The address to sign against is in the challenge, as
+<code>accepts[0].extra.verifyingContract</code>.</li>
+<li><b>You must already hold a Circle Gateway balance.</b> The authorization pulls the price from a
+balance you deposited beforehand; it does not move USDC out of your wallet. <b>No deposit, no
+payment</b> &mdash; and this is the step the old copy left out, so a buyer who fixed only the rail
+would still be stuck.</li>
+<li><b>The payer must be an EOA that both holds the balance and signs.</b> The batched header
+requires <code>ecrecover(sig) == from</code>; there is no depositor/signer split, so a smart account
+paying through a delegate cannot satisfy it.</li>
+</ul>
+</div>
 
 <div class="warn">
 <b>⚠️ It is a coverage manifest, not a clean bill.</b> The report states exactly what was and was not
