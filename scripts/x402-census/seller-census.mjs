@@ -2,12 +2,36 @@
 //
 //   node scripts/x402-census/seller-census.mjs      # writes census-out.json in the CWD
 //
-// PREREQUISITE — the seller list, harvested from the marketplace's own listings:
-//   for q in crypto price search news weather prediction twitter academic sports data \
-//            ai image market social api research blockchain token wallet trading; do
-//     circle services search "$q" --output json; done > raw.json
-//   # then collect every distinct `accepts[].payTo` where network === "eip155:8453"
+// PREREQUISITE — the seller list. HARVEST THE INDEX DIRECTLY. DO NOT USE THE `circle` CLI:
+//
+//   const base = "https://api.circle.com/v2/x402/discovery/resources";
+//   let items = [], off = 0;
+//   for (;;) {                                        // paginate until a SHORT page
+//     const d   = await (await fetch(`${base}?limit=100&offset=${off}`)).json();
+//     const got = (d.data ?? d).items ?? [];
+//     items = items.concat(got); off += got.length;
+//     if (got.length < 100) break;
+//   }
+//   # then every distinct `accepts[].payTo` where network === "eip155:8453",
 //   # into sellers-base.json as a JSON array of addresses.
+//
+// ═══ 🚨 NO `siwx` PARAMETER — AND THAT IS THE WHOLE POINT OF DOING IT THIS WAY ═══════════════════
+// `circle services search` silently appends `siwx=false`. It is NOT in the CLI's `--help`; it is
+// visible only by reading the CLI's own `dist/index.js`. On 2026-08-27 that one undeclared
+// parameter hid **165 of 1,003 listings — including EVERY TESTNET ROW**.
+// ⚠️ A reproducer who "simplifies" this back to `circle services search` gets a DIFFERENT
+// DENOMINATOR and is given no signal that it changed. The counts still look plausible. Do not.
+//
+// ═══ ⭐ SELF-CHECK THAT PROVES THE HARVEST WAS UNFILTERED ════════════════════════════════════════
+// Count networks across every `accepts[]` entry before trusting the seller list. TESTNETS MUST
+// APPEAR — they are the rows `siwx=false` removes:
+//
+//     eip155:84532 (Base Sepolia)   396      <- must be present
+//     eip155:80002 (Polygon Amoy)   396      <- must be present
+//
+// If either is 0, THE HARVEST WAS FILTERED and the denominator is wrong — stop and fix the fetch
+// rather than reporting the count. The 2026-08-25 run behind the published census showed both at
+// 396, across 1,009 listings, yielding the 80 distinct Base `payTo` that document reports.
 //
 // ═══ ⭐ WHY THIS IS MEASURABLE AT ALL ═══════════════════════════════════════════════════════════
 // An x402 endpoint publishes a `payTo` address in its 402 challenge. Those addresses are public,
