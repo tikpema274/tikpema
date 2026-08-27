@@ -1,5 +1,62 @@
 ---
 
+# ✅ THE THIRD-PARTY 402 CHALLENGES CAPTURED — no drift, and the inverted gitignore proved itself
+
+**2026-08-27, fifth pass.** Re-probed both DD-comparable sellers plus all four prepaid credit
+tiers, **read-only: GET, no payment header, nothing signed, nothing paid.** Landed as
+`scripts/x402-census/challenges-2026-08-27.snapshot.json` with a reproducer,
+`probe-402-challenges.mjs`. ⛔ **No published claim was updated from this** — that is a separate
+decision.
+
+## ⚠️ FINDING: NOTHING HAD CHANGED — and that is a much weaker result than it looks
+
+Every compared field matched the first probe, and the deep-dd response body is **byte-identical**:
+
+| | amount | payTo | maxTimeout | extra |
+|---|---|---|---|---|
+| `402.com.tr/api/x402/deep-dd` | 750000 | `0x973a3185…6f12d6` | 300 | `{name:"USD Coin",version:"2"}` |
+| `api.craigmbrown.com/…/ops.due-diligence-scan` | 1000000 | `0x5E709929…BC4EB9` | 60 | same |
+| credit tiers ×4 | 250000 / 1000000 / 5000000 / 20000000 | all `0x973a3185…6f12d6` | 300 | same |
+
+🚨 **THE INTERVAL IS 3h33m, ON THE SAME DAY.** The "first probe" was this morning, not yesterday.
+**A no-drift result across one afternoon is NOT evidence these terms are stable** — it establishes
+only that they did not change within an afternoon. The artifact carries the interval in a
+`_baseline` block so the result cannot be cited without it.
+
+⭐ **Cache status was checked, because a CDN copy would manufacture a false "unchanged".** All six
+responses came back `x-vercel-cache: MISS` / `cf-cache-status: DYNAMIC` — **live origin responses.**
+An unchanged reading served from cache would have proven nothing about the seller, and would have
+looked exactly like this one.
+
+## ⭐ THE CREDIT TIERS ARE THE POINT — they existed nowhere but a transcript
+
+The Bazaar lists `buy-credits` at the **$5 tier only**. The endpoint quotes **four**: $0.25, $1,
+$5, $20 — all to the same `payTo`. That gap is the whole reason the transfer count is an upper
+bound on SETTLEMENTS rather than calls, and until now it was a claim with no evidence behind it
+anywhere in the repo.
+
+## Captured verbatim
+
+Per probe: HTTP status, **every response header**, the **raw body**, the **`PAYMENT-REQUIRED`
+header base64 AND its decoded form**, and the extracted terms with `extra.name` in its three
+observable states. Drift is compared **mechanically** against a baked-in baseline — eyeballing two
+JSON blobs is how a changed `payTo` goes unnoticed.
+
+⚠️ Labelled in the file as a **SNAPSHOT, NOT A FACT**: these are third-party responses at one
+instant, and a seller can reprice or delete at any time. Anything derived from it must carry
+`capturedAt`.
+
+## ⭐⭐ THE INVERTED GITIGNORE RULE PROVED ITSELF, UNPROMPTED
+
+`challenges-2026-08-27.snapshot.json` is a **new artifact in `scripts/x402-census/` that needed no
+gitignore edit to survive.** Under the previous rule it would have matched nothing and been fine by
+luck — but a file named `census-*.json` would have been swallowed, which is exactly how the
+per-address rows nearly went missing hours earlier. **The rule is now safe by default and was not
+consulted, remembered, or edited to make this work.** That is the difference between a control and
+an intention.
+
+---
+
 # ⭐⭐ TIER-1 INTERMEDIATES SAVED, THE GITIGNORE RULE INVERTED — and the rule was BROKEN AGAIN WHILE APPLYING IT
 
 **2026-08-27, fourth pass.** The inventory found the two directory harvests behind several
