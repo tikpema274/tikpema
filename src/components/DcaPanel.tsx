@@ -22,6 +22,63 @@ const CADENCES: { label: string; ms: number }[] = [
 const fmtDate = (ms: number) =>
   new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 
+// ⚠️ `endAt` is epoch ms; `closedAt`/`cancelledAt`/`stoppedAt` are ISO strings (dca-tick writes
+// `new Date().toISOString()`). One formatter for both, so a terminal date cannot silently render
+// as "Invalid Date" through the ms-only path.
+const fmtWhen = (v: number | string | null | undefined) => {
+  if (v == null) return null;
+  const d = new Date(typeof v === "number" ? v : String(v));
+  return Number.isNaN(d.getTime()) ? null : fmtDate(d.getTime());
+};
+
+// ⭐ WHEN DID IT ACTUALLY END? dca-cancel writes `cancelledAt`; dca-tick writes `closedAt` on a
+// terminal transition and `stoppedAt` on a failure stop. First one present wins.
+// ⚠️ Older records may carry none — then there is no ending date to show, and the row must say
+// nothing rather than fall back to `endAt`, which is the ceiling and NOT when it ended.
+const endedWhen = (m: any) => fmtWhen(m?.cancelledAt ?? m?.closedAt ?? m?.stoppedAt);
+
+// ═══ ⭐ ONE MANDATE'S DETAIL LINE — EXPORTED SO IT CAN BE RENDERED IN A TEST ═══════════════════
+// ⚠️ THE DEFECT THIS FIXES. `lastReason` has been written by dca-tick on every terminal transition
+// since the lifecycle existed ("reached end date" / "total budget spent") and was NEVER PROJECTED.
+// So the row showed a bare status beside `until <endAt>`, and a reader could not tell what ended a
+// mandate — budget, date, or cancellation — because the two facts contradicted each other on one
+// line: "complete" against a FUTURE end date, "cancelled" against a date six weeks past.
+//
+// ⭐ THE STORED RECORDS WERE RIGHT THE WHOLE TIME. `evaluate()` tests endAt BEFORE budget, and
+// `evaluate()` refuses first on a non-ACTIVE status — so a cancelled mandate is never re-evaluated
+// and never becomes "expired" when its date later passes. The lifecycle is untouched here; this is
+// a projection fix, and the record already carried both answers.
+//
+// 🚨 THIRD INSTANCE OF FIELD-WRITTEN-NEVER-RENDERED (errata_note, dataDisclosure, lastReason).
+// Guarded the same way dataDisclosure was: a RENDER assertion, not a source grep for the name.
+export function MandateDetail({ m }: { m: any }) {
+  const terminal = m.status !== "active";
+  const ended = endedWhen(m);
+  return (
+    <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+      <b>{m.perTickAmount} {m.tokenIn} → {m.tokenOut}</b> every{" "}
+      {CADENCES.find((c) => c.ms === m.cadenceMs)?.label ?? `${m.cadenceMs / HOUR_MS}h`}{" "}
+      · <span style={{ opacity: 0.8 }}>{m.spentAmount}/{m.totalBudgetAmount} {m.tokenIn} spent</span>
+      {/* ⭐ A TERMINAL MANDATE SHOWS WHEN IT ACTUALLY ENDED, NOT THE CEILING IT NEVER REACHED.
+          "until <endAt>" beside "complete" reads as a contradiction when the budget ran out first
+          and the date was never reached. Only an ACTIVE mandate is still running toward endAt. */}
+      {!terminal && <>{" · "}<span style={{ opacity: 0.8 }}>until {fmtDate(m.endAt)}</span></>}
+      {terminal && ended && <>{" · "}<span style={{ opacity: 0.8 }}>ended {ended}</span></>}
+      {/* ⚠️ No ending stamp on an older record → say nothing. Falling back to `endAt` here would
+          reprint the ceiling as if it were the ending, which is the defect being fixed. */}
+      <div style={{ opacity: 0.7, marginTop: 2 }}>
+        status: {m.status}
+        {/* ⭐ THE FIELD THAT WAS NEVER PROJECTED. dca-tick writes the sentence; show the sentence. */}
+        {m.lastReason && <> · {m.lastReason}</>}
+        {m.lastFillTx && (
+          <> · last fill <a href={`${EXPLORER}/tx/${m.lastFillTx}`} target="_blank" rel="noreferrer">↗</a></>
+        )}
+        {m.status === "active" && m.lastSkip && <> · last skip: {m.lastSkip}</>}
+      </div>
+    </div>
+  );
+}
+
 // DcaPanel — create and manage DCA mandates. Nav-less (#/dca).
 //
 // ⚠️ THIS COMMENT USED TO SAY "reached from the swap area." IT WAS FALSE, and had been for as long
@@ -286,19 +343,7 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         {mandates?.length === 0 && <div className="status" style={{ opacity: 0.7 }}>None yet.</div>}
         {mandates?.map((m) => (
           <div key={m.id} className="status" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
-            <div style={{ fontSize: 13, lineHeight: 1.5 }}>
-              <b>{m.perTickAmount} {m.tokenIn} → {m.tokenOut}</b> every{" "}
-              {CADENCES.find((c) => c.ms === m.cadenceMs)?.label ?? `${m.cadenceMs / HOUR_MS}h`}{" "}
-              · <span style={{ opacity: 0.8 }}>{m.spentAmount}/{m.totalBudgetAmount} {m.tokenIn} spent</span>
-              {" · "}<span style={{ opacity: 0.8 }}>until {fmtDate(m.endAt)}</span>
-              <div style={{ opacity: 0.7, marginTop: 2 }}>
-                status: {m.status}
-                {m.lastFillTx && (
-                  <> · last fill <a href={`${EXPLORER}/tx/${m.lastFillTx}`} target="_blank" rel="noreferrer">↗</a></>
-                )}
-                {m.status === "active" && m.lastSkip && <> · last skip: {m.lastSkip}</>}
-              </div>
-            </div>
+            <MandateDetail m={m} />
             {m.status === "active" && (
               <button onClick={() => cancel(m.id)}>Cancel</button>
             )}

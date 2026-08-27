@@ -1,5 +1,76 @@
 ---
 
+# 🚨 FIELD-WRITTEN-NEVER-RENDERED, THIRD INSTANCE — `lastReason`
+
+**2026-08-27.** The DCA panel showed *"complete"* against a **future** end date and *"cancelled"*
+against a date six weeks past, and a reader could not tell what ended a mandate. ⛔ **The stored
+records were correct the whole time. The renderer was the defect.**
+
+## ⭐⭐ THE SHAPE, NOW SEEN THREE TIMES
+
+| # | field | written by | projection that dropped it |
+|---|---|---|---|
+| 1 | `errata_note` | the VERSIONS table | dd-openapi's projection never served it |
+| 2 | `dataDisclosure` | the canonical report, covered by the deliverable hash | no renderer read it |
+| 3 | **`lastReason`** | **dca-tick, on every terminal transition since the lifecycle existed** | **the panel never projected it** |
+
+> **THE FIELD IS IN THE DATA AND THE PROJECTION DROPS IT.** In all three the guarantee that WAS
+> established (hash coverage, a durable write) is not the guarantee that was ASSUMED (a reader sees
+> it), and in all three the thing that catches it is a RENDER assertion, never a source grep for the
+> field name.
+
+## Why the records were right and the display was not
+
+`evaluate()` (`_dca.mjs:369`) tests `endAt` BEFORE budget, and refuses first on a non-ACTIVE status.
+So: `complete` = budget exhausted with the date never reached (0.15/0.15 fits exactly); and a
+CANCELLED mandate is **never re-evaluated**, so it never becomes `expired` when its date later
+passes. Both statuses were correct; the row printed `until <endAt>` beside them — **the ceiling,
+not the ending** — with no `closedAt`, no `cancelledAt` and no `lastReason`, all of which the record
+already carried.
+
+⭐ **`dca-tick` writes the sentence that answers the question** — `"reached end date"` /
+`"total budget spent"` at `dca-tick.mjs:504` — and it had never been shown to anyone.
+
+## ✅ Fixed — RENDERER ONLY, lifecycle untouched
+
+`MandateDetail` extracted and exported from `DcaPanel.tsx` so it can be rendered in a test. A
+terminal mandate now shows **when it actually ended** (`cancelledAt` ?? `closedAt` ?? `stoppedAt`)
+and **why** (`lastReason`); only an ACTIVE mandate shows `until <endAt>`, the ceiling it is still
+running toward. ⚠️ An older record with no ending stamp shows NOTHING rather than falling back to
+`endAt` — that fallback would reprint the ceiling as the ending, which is the defect itself.
+
+## ⭐ THE GUARD — three directions, and presence before ordering
+
+`scripts/verify-dca-reason-render.tsx` (`test:dcareason`, in `test:all`), built the way
+`dataDisclosure` was: **rendered, not grepped.**
+
+1. WITH a `lastReason` → that text is emitted
+2. WITHOUT one → nothing resembling it is emitted
+3. **A DIFFERENT reason → THAT one appears** ← the direction a hardcoded string fails, and the one
+   presence-only assertions cannot see
+
+🚨 **AND THE ORDERING ASSERTION REQUIRES PRESENCE FIRST.** `indexOf(a) < indexOf(b)` is satisfied by
+ABSENCE — `-1` is less than everything. That fail-open already bit the disclosure suite once; here
+it was **proven not to** by the mutant run below, which printed
+`reason@-1 (ABSENT — ordering cannot be satisfied by absence)` instead of a pass.
+
+## ✅ VALIDATED AGAINST THE BROKEN VERSION, AND THE MUTATION WAS VERIFIED FIRST
+
+The renderer was reverted to its pre-fix form, **the mutation was confirmed applied before any
+result was read** (`m.lastReason` occurrences → 0, `ended {ended}` → 0, unconditional `until` → 1),
+and only then was the suite run: **9 failed / 8 passed**. Its first failure line reproduces the
+reported symptom verbatim — `0.15/0.15 USDC spent · until Sep 21, 2026 status: complete`. Restored,
+restore verified byte-identical, **17/0**.
+
+⚠️ A guard that has never failed is a guard you are guessing about; checking that the mutation
+landed before trusting the red is the same rule one level down.
+
+## ⛔ NOT DEPLOYED
+
+Ships with whatever deploys next, not on its own window.
+
+---
+
 # 🕰️ TIER-3 CLAIMS LABELLED AS HISTORICAL READINGS — documentation only, nothing re-derived
 
 **2026-08-27, sixth pass.** The inventory's Tier-3 set is **fine as a record of what was observed
