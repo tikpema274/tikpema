@@ -1,5 +1,75 @@
 ---
 
+# 🚨 CORRECTION TO THE CENSUS ABOVE — THE `circle` CLI SENDS `siwx=false`, AND MY "WHOLE INDEX" WAS 838 OF 1003
+
+**2026-08-27, same day, read-only.** The entry below reports **838 listings / 13 networks / no
+testnets** and calls that the unfiltered index. **The VERDICT holds; those NUMBERS do not.**
+
+⭐⭐ **The entry warning that a keyword sweep is a filtered read was itself made through a filtered
+read.** `circle services search ""` is not the index — the CLI silently appends **`siwx=false`**.
+
+```
+GET /v2/x402/discovery/resources?limit=1                → total = 1003   ← the index
+                                ?limit=1&siwx=false     → total =  838   ← what the CLI showed me
+                                ?limit=1&siwx=true      → total =  165
+```
+
+838 + 165 = 1003, exactly. Not a flag I typed and not in `--help`; found only by reading the CLI's
+own `dist/index.js`, which sets `query`, `category`, `type`, `limit`, `offset` — **and `siwx`**.
+Third instance of "the filter is not always a flag you typed", after the `Accept` header and the
+`accepts[0]` index.
+
+## Re-run on the real index — the verdict SURVIVES
+
+Enumerated all **1003** items directly (21 pages, 0 failed; 993 distinct resources):
+
+* **`0xb407…6ac4` — 0 hits in 1003.** `tikpema` 0, `dd-analyze` 0. ✅ **STILL ABSENT.**
+* `eip155:5042002` (**Arc Testnet**, our chain) — **0 accepts rows in 1003.**
+
+## 🚨 AND THE TESTNET CLAIM WAS FLATLY WRONG
+
+The entry below says the index has no testnets. It has them; the CLI's `siwx=false` view hid them:
+
+```
+1164 eip155:8453   625 eip155:137   562 solana-mainnet   396 eip155:84532 (Base Sepolia)
+ 396 eip155:80002 (Amoy)   264 solana-devnet   98 43114   56 42161/10/130/1   31 196
+  12 146/1329/480/999                                    → 16 networks, not 13
+```
+
+**396 Base Sepolia and 396 Amoy — the same two numbers the earlier census reported.** By listing:
+`network=eip155:84532` → **132**, `network=eip155:80002` → **132**.
+
+## The network filter, with its control
+
+The API **does** accept `network=` (the CLI cannot express it). Honored, not ignored — an unknown
+*param name* returns the full 1003, while each network returns a distinct sub-total: Base 846,
+Polygon 361, Sei 12, Base Sepolia 132, Amoy 132, **Arc `eip155:5042002` → 0**.
+
+⚠️ **BUT THE EMPTY SET DOES NOT DISCRIMINATE.** `network=eip155:999999999` → **0** and
+`network=totally-not-a-network` → **0**. Arc's zero is in *the same bucket as a chain id that does
+not exist*. The filter cannot tell "supported, nothing listed" from "not recognised".
+
+## Documented networks
+
+`developers.circle.com/gateway/references/supported-blockchains` lists **Arc Testnet, domain 26,
+Nanopayments = Yes**. ⚠️ That is a **Nanopayments/Gateway** support table, **not** a statement about
+which networks the *discovery index* carries. No documented network list for the marketplace index
+was found.
+
+## ⭐ WHAT THE EVIDENCE RULES OUT, AND WHAT IT DOES NOT
+
+| Explanation | Verdict |
+| --- | --- |
+| **"The marketplace carries no testnets"** | ❌ **RULED OUT.** 396 Base Sepolia + 396 Amoy rows; 132 listings each; Solana devnet too. |
+| **"Arc is unsupported by the marketplace"** | ❓ **INCONCLUSIVE.** The filter returns 0 for Arc *and* for a nonexistent chain id, so 0 is not evidence either way. Arc Testnet *is* documented Nanopayments-supported — a different system from the index. |
+| **"Arc is deliberately excluded"** | ❓ **INCONCLUSIVE.** ⛔ Not investigated and not concluded. |
+
+⛔ NOTHING BUILT. The only thing established is that our `payTo` is absent from the real 1003-listing
+index, and that testnet-absence is **not** the reason.
+
+
+---
+
 # 📊 CENSUS RE-RUN — OUR `payTo` IS STILL ABSENT FROM ALL 838 LISTINGS, AND ARC IS ABSENT WITH IT
 
 **2026-08-27.** DD now shows on our own Circle **sell page** with the Nanopayments badge lit. That is
@@ -21,6 +91,10 @@ from it was never absence from the index. `circle services search ""` (empty que
 ## The answer
 
 > **ABSENT. 0 hits in 838 listings.**
+
+🚨 **SUPERSEDED ON THE NUMBERS — see the CORRECTION entry above.** 838 was the CLI's `siwx=false`
+view, not the index (1003). The verdict ABSENT holds on the full 1003; the network table and the
+"no testnets" claim below are WRONG.
 
 Checked two ways, because one field is one instrument:
 
