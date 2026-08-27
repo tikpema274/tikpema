@@ -1,5 +1,107 @@
 ---
 
+# ⭐⭐ THE CENSUS'S HEADLINE WAS A UNIT ERROR — Results CORRECTED, and the fix is ASYMMETRIC
+
+**2026-08-27, same day, second pass.** Ran the catalogue-till question across **all 80** census
+addresses to decide whether the effect changes the census's headlines or only annotates them.
+**It changes them, and only on one side.** ⛔ The correction is applied to the Results section as a
+VISIBLE, DATED note — see below for why silence was not an option.
+
+## ✅ THE SCAN REPRODUCES THE PUBLISHED CENSUS EXACTLY
+
+302,401/302,401 blocks, 0 incomplete, **80 addresses, 836 listings, 44,885 transfers, 1,107.60
+USDC** — the published figures to the transfer. That exact reproduction is what licenses restating
+the headlines rather than merely doubting them.
+
+## ⭐⭐⭐ THE ASYMMETRY IS THE FINDING — zeros translate to services, earners do not
+
+| | translates? | why |
+|---|---|---|
+| **zeros** | ✅ and gets STRONGER | a till that received nothing means EVERY endpoint behind it received nothing — no sharing argument needed |
+| **earners** | ❌ collapses | endpoints SHARE price tiers, so one transfer marks a whole tier possibly-live |
+
+**The demonstration, and it is brutal:** `0xf46394ad…04623c` (x402.quicknode.com) received
+**7 transfers totalling $0.007 from ONE sender** — and because all **132** of its listings quote
+the same three prices, that lights **all 132**. At listing level "received anything" spans
+**27 to 477 of 836 — a 17× range.**
+
+⛔ **BOTH BOUNDS STAY VISIBLE. The correction must not trade one overclaim for another.**
+"Lit" (401) is an UPPER bound from shared tiers. "Dark" (435) is NOT provable-dead — prepaid
+credits and Gateway batching back calls whose price never touches the chain.
+
+## What changed in the document
+
+1. 🚨 **`34% of listed sellers received anything at all` — CUT, not restated.** It was the opening
+   claim; "sellers" meant addresses and reads as services. **A 17× range presented as a headline
+   invites someone to quote its midpoint**, so a range was the wrong repair.
+2. **The endpoint-level pair stands there instead:** **435 of 836 (52%)** never saw any price they
+   quote arrive; **401 (48%)** saw at least one, labelled an upper bound.
+3. **The top-1 fact now sits NEXT TO the 44,885**, not in a footnote: **96.3% of that address's
+   31,018 transfers are on its $0.0060 tier, a price exactly ONE of the 836 listings quotes — so
+   66.6% of the whole census's transfer count is a single listing.**
+4. **The concentration table is LABELLED, not deleted** — address-level, and understating the
+   endpoint picture. ⭐ Also caught: its "about 1.5 cents each" mean is itself distorted — that
+   address's modal payment is **$0.0060**, and **one transfer of 285.82 USDC is 60.4% of its
+   entire weekly value**.
+5. **`the median listed seller earned nothing` stays**, relabelled as *address*-level.
+
+## ⚠️ MARKED AS A CORRECTION, ON PURPOSE
+
+The document is public and has been read in its published form. A dated `⚠️ THIS SECTION WAS
+CORRECTED ON 2026-08-27` block states what changed, what did not (no measurement did), and why the
+cut headline was cut. **A public document quietly changing its headline is the thing it would
+criticise** — the same treatment already given the superseded 54-address caveat.
+
+## ⭐ THE LIVE INDEX DRIFTED MID-SESSION, AND THE GUARD CAUGHT IT
+
+The landed script's drift check fired unprompted: **836 listings at the first harvest, 845 about
+two hours later** — 9 new listings, all dark. Address count (80) and transfer count (44,885) were
+stable. The document's listing figures deliberately use the **836** harvest so they share its own
+denominator, and the note says so, because a reader re-running later gets a different denominator
+and would otherwise read drift as an error.
+
+## 🚨 AND IT CAUGHT AN ERROR OF MINE, OF EXACTLY THE CLASS BEING CORRECTED
+
+Two, in fact, both found before the commit:
+
+- **Double-counted listings.** Summing endpoints per *(payTo, price tier)* gives **1,107**, not
+  836 — a listing with several `accepts` entries counted once per price. My first endpoint-level
+  pass reported 1,107 listings and a 63.8% dark rate from it. ⚠️ **The wrong number looked entirely
+  plausible and moved the headline in the same direction as the right one.** Recorded in the
+  script's header so it is not walked into again.
+- **Mixed denominators in one sentence.** My first draft of the correction listed the biggest
+  zero-receipt catalogues as "71, 47, 40 and 36 endpoints" — but the **47 was a *Bazaar* count for
+  an address with 1 Circle listing.** Corrected to Circle-only: **71, 40, 36, 21**. ⛔ Mixing two
+  directories' counts in one sentence is precisely the unit error this whole correction is about.
+
+## ⛔ FOUND, NOT FIXED — the rail table's denominator does not reconcile
+
+Recorded for a separate decision; **out of scope for this pass and NOT touched.**
+
+The doc's address-level rail table reconciles exactly on two rows — `Gateway only` 46/37/9 ✅ and
+`both` 2/0/2 ✅. But it splits the rest as **vanilla-only 17** + **neither declared 15**, and on
+today's harvest **all 80 addresses declare a rail**: 34 `USD Coin`, 46 `GatewayWalletBatched`,
+2 both. The 15 "neither declared" addresses now declare `USD Coin`, and all 15 are zeros.
+
+🚨 **This moves the document's strongest narrowing claim.** It reads: *"the honest population for
+any statement about observed trade is the 19 addresses that declare vanilla settlement — of which
+18 (95%) show receipts."* On today's harvest that denominator is **34, not 19** — the earner count
+18 is unchanged, so **18 of 34 = 53%, not 95%.**
+
+⛔ **I cannot tell whether the index changed or the original classifier treated a missing field as
+"neither"** — the per-address rows behind the published run were deliberately not published, so
+there is nothing to diff against. **Do not patch the 95% from this**; it needs the classifier
+decided first. Named here so it is decided once.
+
+## ✅ LANDED — `scripts/x402-census/catalogue-effect.mjs`
+
+Scan + report in one file (`--report` re-reads without rescanning). Same refusal discipline as
+`payto-catalogue.mjs`: write-probe first, `CAP` guard, **REFUSES rather than reporting a truncated
+count**, every equality gated on non-emptiness, Circle harvest testnet self-check, and the drift
+check that fired above. Proven end to end, exit 0, reproducing 44,885.
+
+---
+
 # ⭐⭐ ONE `payTo` SERVES 136 ENDPOINTS — THE CENSUS MEASURES A TILL, NOT A PRODUCT
 
 **2026-08-27.** Asked what the closest comparable to DD actually earns. The answer is that the

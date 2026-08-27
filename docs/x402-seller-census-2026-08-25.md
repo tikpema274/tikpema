@@ -20,25 +20,79 @@ seven days of USDC transfers to and from each.
 
 ## Results
 
-**34% of listed sellers received anything at all** — but see *The zeros track the
-settlement rail* below before reading that as a measure of usage.
+> ### ⚠️ THIS SECTION WAS CORRECTED ON 2026-08-27, AFTER PUBLICATION
+>
+> **No measurement changed.** The scan was re-run on 2026-08-27 over the identical window and
+> reproduces this document exactly: 80 addresses, 836 listings, **44,885** transfers, 1,107.60
+> USDC, 302,401 of 302,401 blocks covered.
+>
+> **What was wrong was the unit.** Every figure here counts `payTo` **addresses**, and **50 of
+> the 80 (63%) serve more than one endpoint** — 96% of the 836 Base listings sit behind a
+> multi-endpoint address, and the largest single address serves 132. An address-level rate was
+> therefore presented as, and would be read as, a rate about *services*.
+>
+> **One headline was CUT rather than restated:** *"34% of listed sellers received anything at
+> all."* Translated to listings that claim spans **27 to 477 of 836** — a 17× range. A range that
+> wide is not a headline, and publishing it as one invites quoting its midpoint, so it is gone.
+>
+> ⚠️ **The listing counts are a snapshot of a live index.** The re-scan that reproduced this
+> document's 836 listings was taken earlier on 2026-08-27; a re-harvest ~2 hours later returned
+> **845**, with all 9 new listings dark. Every listing-level figure below uses the **836** harvest,
+> so that it shares this document's own denominator — a reader re-running later will get a larger
+> denominator and slightly different percentages. The address count (80) and the transfer count
+> (44,885) were stable across both.
+>
+> This note is here rather than the edit being made silently. The document has been read in its
+> published form, and a public document quietly changing its headline is the thing this document
+> would criticise.
+
+**52% of listed endpoints never saw any price they quote arrive at their payout address.**
 
 | | |
 |---|---|
-| Sellers receiving ≥1 inbound transfer | **27 of 80** |
-| Sellers receiving nothing in 7 days | **53 of 80** |
-| Total inbound transfers | **44,885** |
+| Listings where **no** price they quote ever arrived | **435 of 836** (52.0%) |
+| Listings where at least one of their prices arrived | **401 of 836** (48.0%) — *upper bound, see below* |
+| Addresses receiving ≥1 inbound transfer | **27 of 80** |
+| Addresses receiving nothing in 7 days | **53 of 80** |
+| Total inbound transfers | **44,885** — *of which **66.6% sit on a single $0.0060 tier quoted by one listing**, see below* |
 | Total inbound value | **1,107.60 USDC** |
-| Mean per transfer | **$0.0247** |
+| Mean per transfer | **$0.0247** — *a catalogue-wide modal price, not a per-service average* |
 
-**The median listed seller earned nothing.**
+### ⭐ The asymmetry: the zeros translate to services, the earners do not
+
+This is the frame for everything below, not a caveat on it. The two halves of "27 earned / 53
+did not" behave completely differently when restated in endpoints.
+
+**Zeros translate, and get stronger.** A till that received nothing means *every* endpoint behind
+it received nothing. No assumption is needed for this to hold — it needs no sharing argument, no
+attribution of a transfer to a product. **359 of 836 listings sit behind an address that received
+nothing at all**, including whole catalogues of **71, 40, 36 and 21 endpoints**.
+
+**Earners do not translate.** Endpoints **share price tiers**, so a single transfer marks an
+entire tier as possibly-live. The clearest case in this data: `0xf46394ad…04623c`
+(x402.quicknode.com) received **7 transfers totalling $0.007 from one sender** — and because all
+132 of its listings quote the same three prices, that lights **all 132**. This is why the
+"received anything" figure is an upper bound with almost no content, and why it was cut.
+
+⛔ **Both bounds must stay visible, and the correction does not trade one overclaim for another:**
+
+- **"Lit" is an upper bound.** Shared tiers mean one transfer lights many listings. 401 is a
+  ceiling on live endpoints, not a count of them.
+- **"Dark" is not provable-dead.** Prepaid credits (one settlement backing many later calls) and
+  Circle Gateway batching both back calls whose own price never touches the chain. 435 is not a
+  count of dead endpoints.
+
+**The median listed *address* earned nothing.** ⚠️ Address-level; the median *listing* sits behind
+a multi-endpoint till and is not described by this table.
 
 | | across all 80 | among the 27 earners |
 |---|---|---|
 | Median inbound USDC | **0.00** | **0.44** |
 | Median transfer count | **0** | **20** |
 
-**Revenue is highly concentrated — on both bases.**
+**Revenue is highly concentrated — on both bases.** ⚠️ **These figures are address-level and
+UNDERSTATE the endpoint picture** — they are kept because they are correct as stated, not because
+they are the sharpest available form.
 
 | | share by transfer count | share by value |
 |---|---|---|
@@ -46,9 +100,15 @@ settlement rail* below before reading that as a measure of usage.
 | Top 3 sellers | **88.0%** | **80.5%** |
 | Top 10 sellers | **99.6%** | **98.3%** |
 
+⭐ **At endpoint level the top-1 row is far more concentrated than 69.1% suggests.** That address
+(22 endpoints, 5 tiers, 63 senders) took 31,018 transfers, and **96.3% of them sit on its $0.0060
+tier — a price exactly one of the 836 listings quotes. That single listing is 66.6% of all 44,885
+transfers in this census.**
+
 The two columns differ because the largest earner's payments are unusually small: it took
-**473.24 USDC across 31,018 transfers** — roughly 4,400 payments a day at about 1.5 cents
-each, below the all-seller mean of 2.5 cents.
+**473.24 USDC across 31,018 transfers** — roughly 4,400 payments a day at a mean of about 1.5
+cents. ⚠️ **That mean is itself distorted:** its modal payment is **$0.0060**, and a **single
+transfer of 285.82 USDC carries 60.4% of its entire weekly value.**
 
 **The zeros are not withdrawals.** Only **6 of 80** addresses sent any USDC out during the
 week — 19 transfers, 91.15 USDC total. A seller earning and withdrawing looks identical to
