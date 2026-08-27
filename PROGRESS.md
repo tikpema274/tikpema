@@ -1,5 +1,41 @@
 ---
 
+# 📋 POLICY — what gets committed when a harvest backs a claim
+
+**2026-08-27.** Decided after the 10.4 MB Bazaar harvest raised it. **This is a policy about the
+next N harvests, not about that file.** Option A (keep full rows) was taken, and the reasoning
+generalises into four rules.
+
+| | rule |
+|---|---|
+| ✅ | **A harvest that BACKS A PUBLISHED CLAIM keeps its full rows, committed.** Size is not the deciding factor. |
+| ⛔ | **A harvest run as a one-off check, with nothing published from it, is NOT committed.** The trigger is publication, not curiosity. |
+| ✅ | **Two harvests of the same index at different dates are BOTH kept.** The drift between them is itself evidence. |
+| ⛔ | **NEVER a hash-plus-re-harvest-script for a moving source.** |
+
+## Why the last two are the ones that cost something
+
+**Keep both dates.** A moving index has no single true state, so a second harvest does not supersede
+the first — it measures the distance travelled. **That is precisely what the `1,009`-vs-`1,003`
+confusion cost**: two readings of the same index, months apart, with only the later one surviving,
+so the difference read as an error rather than as drift. The Bazaar's `pagination.total` flipping
+14,740 ↔ 14,739 *within one harvest* is the same phenomenon at a smaller scale, and it is only
+visible because both values were recorded.
+
+**Never hash-plus-script for a moving source.** ⛔ **The source cannot be reconstituted, so the hash
+proves EXISTENCE and not CONTENT.** A re-harvest returns a different corpus and the hash can never
+match again — it attests that a file once existed, not what was in it. That is the withdrawn 95%
+rail claim wearing a checksum: a pointer to an intermediate nobody can reproduce. A hash is only
+evidence when the source is immutable, which is exactly what a live index is not.
+
+## What this does not cover
+
+On-chain scans. The chain does not move, so a transfer claim is re-derivable — **provided the
+address list survives**, which is the piece that was missing in every failure this week. An address
+list is an intermediate like any other and falls under rule 1.
+
+---
+
 # ✅ THE THIRD-PARTY 402 CHALLENGES CAPTURED — no drift, and the inverted gitignore proved itself
 
 **2026-08-27, fifth pass.** Re-probed both DD-comparable sellers plus all four prepaid credit
