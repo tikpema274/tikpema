@@ -1,5 +1,70 @@
 ---
 
+# ⛔ DECIDED: NO GENERAL PROJECTION CHECK — the fix would be the bug it prevents
+
+**2026-08-27, close of day.** The third field-written-never-rendered instance raised the obvious
+question: build one check that asserts every field a projection owes? **Decided against, and
+recorded here rather than left open**, because an open design question re-opens as a good idea
+every time the shape recurs.
+
+## ⭐⭐ THE THREE SHARE A SHAPE, NOT A MECHANISM
+
+| # | field | mechanism |
+|---|---|---|
+| 1 | `errata_note` | a **projection dropping a field** it carried |
+| 2 | `dataDisclosure` | a **renderer that never existed** for it |
+| 3 | `lastReason` | a **component reading one field and ignoring four siblings** (`closedAt`, `cancelledAt`, `stoppedAt`, `lastReason`) |
+
+Three different failures. A single check would have to catch all three, and the only way to write
+one is to DECLARE what each projection owes.
+
+## 🚨 AND THAT DECLARATION IS A SECOND SOURCE OF TRUTH
+
+A registry of "fields this projection must render" drifts from the code that writes those fields —
+a new field is added and the registry is not updated, and the check passes on a list that no longer
+describes the thing. **That is [[duplicate-source-of-truth-is-the-recurring-bug]] wearing a
+solution's clothes**, and this repo has paid for it twice THIS WEEK:
+
+- the census's `payTo` numbers vs. the withheld rows the claim was derived from;
+- the rail named in three copy surfaces vs. the `extra.name` the charging code actually declares —
+  which is why `test:ddrail` binds to `DD_EXTRA` and never to another copy surface.
+
+⛔ A guard whose passing depends on someone maintaining a list is not stronger than the habit it
+replaces. It is the same habit with an extra file to forget.
+
+## ⭐ THE RULE INSTEAD — a condition on the WRITE, not a registry
+
+> **A field that exists TO BE READ BY A HUMAN ships with its render assertion, in the same commit
+> that writes it.**
+
+Not a list to maintain. A condition on the act of adding the field: if the reason the field exists
+is that a person will read it, the commit that introduces it is incomplete without a test that
+renders it. The three existing suites are exactly this, written late —
+`verify-disclosure-render.tsx`, `verify-dca-reason-render.tsx`, and the errata now served by
+`dd-identity`.
+
+⚠️ **The rule does not apply to every field.** Internal state, idempotency keys, counters read only
+by other code — those are covered by the suites that already exercise them. The trigger is narrow
+and deliberate: **written FOR a reader**.
+
+## ⚠️ RECORDED HONESTLY: THIS IS A HABIT, NOT A MECHANISM
+
+**Habits have already failed three times in this file.** Nothing enforces this rule; it will be
+forgotten, and the fourth instance is probably already written somewhere.
+
+**The reason to take it anyway is not that it works better. It is that it fails differently.** A
+forgotten habit fails LOUDLY at the moment someone notices a reader cannot see something — which is
+how all three of these were found. A stale registry fails QUIETLY and green, and green is the
+outcome this repo has spent the week learning to distrust.
+
+⭐ Same trade as the `.gitignore` inversion earlier today, and the opposite conclusion — there,
+inverting the default made the mechanism safe without a list to maintain, so the mechanism won.
+Here no such inversion exists, so the habit wins by default rather than on merit. **If someone
+later finds the inversion — a way to make an unrendered human-facing field fail without declaring
+anything — it should replace this.**
+
+---
+
 # 🚨 FIELD-WRITTEN-NEVER-RENDERED, THIRD INSTANCE — `lastReason`
 
 **2026-08-27.** The DCA panel showed *"complete"* against a **future** end date and *"cancelled"*
