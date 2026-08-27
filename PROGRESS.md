@@ -1,5 +1,96 @@
 ---
 
+# ⭐⭐ TIER-1 INTERMEDIATES SAVED, THE GITIGNORE RULE INVERTED — and the rule was BROKEN AGAIN WHILE APPLYING IT
+
+**2026-08-27, fourth pass.** The inventory found the two directory harvests behind several
+published claims existed only in an ephemeral session scratchpad. Both are now committed. ⛔ The
+two third-party 402 challenges were **NOT** re-probed — that changes what the document can claim
+and is a separate decision.
+
+## 🚨 THE RULE WAS BROKEN AGAIN, IN THE PASS THAT WROTE IT — THIRD INSTANCE THIS WEEK
+
+Recorded first because it is the only part that is about us rather than about x402.
+
+**Today's pass added *"One address in the wider Bazaar serves 965 endpoints across 21 price
+tiers"* to the PUBLISHED census — resting on a Bazaar harvest that was not in the repo — during
+the very same pass that WITHDREW a claim for being exactly that.**
+
+Three instances, same week, same mechanism:
+
+| # | instance | caught by |
+|---|---|---|
+| 1 | the census published aggregates and withheld per-address rows → the rail claim's 95% became unfalsifiable and had to be withdrawn | a re-derivation attempt, days later |
+| 2 | `.gitignore` silently swallowed `census-2026-08-25.per-address.json` — the fix for #1 — hours after #1 was understood | reading `git status` before committing, by luck |
+| 3 | **a new unbacked claim added to the published document by the pass performing the withdrawal** | an explicit inventory, prompted |
+
+> ⭐⭐⭐ **KNOWING THE RULE DID NOT PREVENT REPEATING IT. Within one pass. While writing it down.**
+> A rule that must be remembered at the moment of writing is not a control; it is an intention.
+> **All three were caught by a mechanism or a check, never by recall.** #1 by re-derivation, #2 by
+> a status read, #3 by an inventory. That is the actual lesson, and it is why the fix below is a
+> gitignore inversion rather than a resolution to be more careful.
+
+⛔ The "965" line is **left standing and now backed** by the harvest committed here — it was never
+wrong, it was unsupported. It is not evidence the withdrawal was excessive.
+
+## ✅ THE MECHANISM FIXED — `.gitignore` INVERTED, not extended
+
+**Before:** ignore `scripts/x402-census/census-*.json`, with a negation carved out per artifact.
+**Unsafe by default** — a new file is swallowed unless someone remembers to allowlist it, and
+"someone remembers" is precisely what failed in instance #2.
+
+**Now:** only the three scripts' hardcoded scratch outputs are ignored by name. **Everything else
+written into that directory is tracked by default.** A future harvest or rows file needs no
+gitignore edit to survive.
+
+Proven, not assumed: a hypothetical `census-hypothetical-new-artifact.json` was created and
+`git check-ignore` confirmed **tracked**; `catalogue-effect-out.json` confirmed **still ignored**.
+
+## ✅ BOTH HARVESTS LANDED — source fields verbatim
+
+`scripts/x402-census/bazaar-2026-08-27.harvest.json` (35,307 rows) ·
+`scripts/x402-census/circle-index-2026-08-27.harvest.json` (3,808 rows, ALL networks — the
+per-address file covers only the 836 Base listings).
+
+Per row: `resource, payTo, network, amount, asset, scheme` — plus the field the rail withdrawal
+died on:
+
+> ⭐ **`extra.name` IS STORED IN ITS THREE OBSERVABLE STATES, NOT COLLAPSED:**
+> `name-present` / `extra-without-name` / `no-extra`.
+> **The distinction is real and load-bearing: 812 Circle rows and 7,290 Bazaar rows carry an
+> `extra` object with NO `name` key at all** — exactly the shape a classifier could file as
+> "neither declared". Had the 2026-08-25 harvest recorded this, the 95% claim would have been
+> answerable in one query instead of withdrawn.
+
+## ⭐ THE DRIFT IS RECORDED AS A RANGE, BECAUSE A MOVING INDEX HAS NO SINGLE TOTAL
+
+The Bazaar paginator watched `pagination.total` **flip between 14,740 and 14,739 eight times**
+across 148 pages. The file stores the per-page-range totals, not one number — storing one number
+is how the `1,009`-vs-`1,003` confusion started.
+
+⚠️ **Two provenance gaps recorded rather than hidden:**
+- the Bazaar page totals are **transcribed from the run's stderr**, not machine-captured — the
+  harvester did not record them, and must;
+- the Circle harvester **read no `total` at all** and stopped on a short page, so that file
+  **cannot say whether the index drifted during its own harvest.** Stated in the file.
+
+## ⚠️ WHAT THE PROJECTION CANNOT ANSWER — named in the files
+
+46 MB → 10.4 MB by dropping `extensions` (the bulk), `description`, `quality`, `lastUpdated`,
+per-item `x402Version`, `currency`, `recipient`, `maxTimeoutSeconds`, and every `extra` field
+except `name`. Each file carries `_droppedFields` and `_cannotAnswer`, which names concretely:
+
+- ⛔ **`extensions.bazaar` presence and builder codes are NOT re-derivable from these files.**
+- ⛔ **The "364 resources, every per-item `x402Version` is 2" claim is NOT re-derivable either** —
+  per-item version was dropped. That claim stays in the Tier-3 unrecoverable set.
+
+Rows are written **one per line**: a 10 MB single-line JSON is valid and useless as evidence —
+it cannot be diffed and grep returns the whole file.
+
+⚠️ **The Bazaar file is 10.4 MB.** Committed because the alternative is another unfalsifiable
+claim, but it is the largest artifact in this repo and worth a decision if more follow.
+
+---
+
 # ⛔ THE RAIL CLAIM IS UNRECOVERABLE AND WITHDRAWN — and the root cause is a rule about what to SAVE
 
 **2026-08-27, third pass.** The census's strongest narrowing claim — *"the honest population for

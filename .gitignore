@@ -63,9 +63,18 @@ ub-spend-capture-*.json
 # ⭐ THE RULE NOW: if a published document derives a claim from these rows, the rows ship with
 # it — including the classifier INPUT verbatim, not just a derived label. Add a negation here
 # for any such artifact rather than relying on someone remembering to force-add it.
+# ⭐⭐ RULE INVERTED 2026-08-27. It previously ignored `scripts/x402-census/census-*.json` by
+# default and carved out a negation PER ARTIFACT. That is unsafe by default: a new artifact is
+# swallowed silently unless someone remembers to allowlist it, and "someone remembers" is the
+# exact property that made the failure above possible. It very nearly repeated the same day —
+# census-2026-08-25.per-address.json did not stage, and was caught only by reading git status.
+# NOW: only the named scratch outputs are ignored. Anything else written into that directory is
+# TRACKED BY DEFAULT. A new harvest or rows file needs no gitignore edit to survive.
+# ⚠️ These three names are the scripts' hardcoded working files — they are run output, not
+# evidence, and each is rewritten in place on every run.
 census-out.json
 payto-catalogue-out.json
 catalogue-effect-out.json
-scripts/x402-census/census-*.json
-!scripts/x402-census/census-*.aggregate.json
-!scripts/x402-census/census-*.per-address.json
+scripts/x402-census/census-out.json
+scripts/x402-census/payto-catalogue-out.json
+scripts/x402-census/catalogue-effect-out.json
