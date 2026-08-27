@@ -1,5 +1,154 @@
 ---
 
+# ⭐⭐ ONE `payTo` SERVES 136 ENDPOINTS — THE CENSUS MEASURES A TILL, NOT A PRODUCT
+
+**2026-08-27.** Asked what the closest comparable to DD actually earns. The answer is that the
+question was mis-posed, and **so was one limit of my own published census**. Read-only throughout:
+two directory harvests, a per-transfer scan over the census window verbatim, and live 402 probes.
+Nothing was bought.
+
+## ⭐⭐⭐ THE FINDING — per-address inbound is a CATALOGUE total, and it generalises
+
+The tension recorded yesterday was that 5.70 USDC cannot buy 131 calls at $0.75. It resolves the
+moment the address is looked up rather than the endpoint:
+
+| `payTo` | endpoints served | price tiers | range |
+|---|---:|---:|---|
+| `0x973a3185…6f12d6` (402.com.tr) | **136** | 14 | $0.002 – $5.00 |
+| `0x5E709929…BC4EB9` (api.craigmbrown.com) | **36** | 13 | $0.01 – $5.00 |
+
+deep-dd is **2 of 136 endpoints** behind that address. The modal inbound amounts are **$0.02–$0.03**,
+which are that catalogue's own cheapest listed prices — so **the $0.044 mean is not a discount off
+$0.75, it is the catalogue's modal price for entirely different products.**
+
+🚨 **THIS IS A LIMIT ON THE PUBLISHED CENSUS, NOT A FACT ABOUT TWO SELLERS.** Measured today over
+the census's own address set:
+
+> **50 of the census's 80 Base `payTo` (63%) serve more than one endpoint.**
+> **96% of the 836 Base listings sit behind a multi-endpoint `payTo`.**
+> **The largest single address in that set serves 132 endpoints.**
+> (Bazaar side, for scale: 624 of 963 addresses, largest **965 endpoints across 21 price tiers**.)
+
+So every per-address row in `docs/x402-seller-census-2026-08-25.md` is a **catalogue total**, and
+dividing any of them by any one endpoint's list price is a category error. The census never claimed
+otherwise — but it never said so either, and the mean-per-transfer figure invites exactly that
+division. ⛔ **Anyone reading `payTo` inbound as "what this service earns" is reading a shop's till
+as one product's revenue.** Recorded in the census doc's limits and in the aggregate JSON.
+
+## ⭐⭐ THE BOUND POINTS BOTH WAYS, AND BOTH DIRECTIONS ARE REAL
+
+They do not cancel. They are two different errors available at once.
+
+| | direction | mechanism |
+|---|---|---|
+| ⬇ **overstates one endpoint** | inbound > that endpoint's revenue | one till pools many products; plus funding, refunds, unrelated transfers |
+| ⬆ **understates calls** | calls > inbound transfers | **prepaid credits** (402.com.tr quotes tiers at 250000/1000000/5000000/20000000 atomic, probed live) and Circle Gateway batching both back many calls with one settlement |
+
+⛔ **Transfer count is an upper bound on SETTLEMENTS, not on calls.** Value is an upper bound on one
+endpoint's revenue, not a measure of it. The census's "an inbound transfer is not a purchase" is
+still true and is now **not the only thing wrong with reading a transfer as a sale**.
+
+## Transfers at the DD endpoints' own list price: **2 each**
+
+- 402.com.tr: 2 × $0.75 — but $0.75 covers **two** endpoints (`b20-dossier`, `deep-dd`), so deep-dd
+  calls ∈ {0, 1, 2}. An amount narrows the candidates; it never identifies the endpoint.
+- craigmbrown: 2 × $1.00, and $1.00 maps to exactly one endpoint (`ops.due-diligence-scan`), so ≤ 2.
+
+⭐ **So the list price IS what buyers pay.** There are just almost no transfers at it. That is a
+different finding from "the price is not what buyers pay", which is what the mean suggested.
+
+## The senders — 3 and 9, and the money goes back out to the largest one
+
+| | senders | largest sender | settlement type |
+|---|---:|---|---|
+| 402.com.tr | **3** | 126/131 tx, **99.7% of value** | 131/131 EIP-3009 `transferWithAuthorization` |
+| craigmbrown | **9** | top 3 = 116/128, 98.4% of value | 80 EIP-3009, **45 plain `transfer()`**, 3 via other contracts |
+
+The 402.com.tr inbound is genuine x402 settlement, relayed by a rotating pool of ~20 EOAs — **the
+same facilitator fleet appears on both sellers**, which is what makes them commensurable. On the
+craigmbrown side 45 transfers are self-submitted plain `transfer()`: **not x402 settlements at all**,
+so "128 inbound" and "128 payments" were never the same number.
+
+**And both sellers' outbound goes to their own largest inbound sender, exceeding what it sent:**
+
+| seller | in, from that sender | out, to that same sender |
+|---|---:|---:|
+| 402.com.tr | 5.6810 | **6.5778** |
+| craigmbrown | 8.9600 | **22.0000** |
+
+## ⛔ "SWEEP" IS AN INFERENCE — recorded as one, and it must stay one
+
+What the chain shows, and it is a strong shape:
+
+- craigmbrown sender B: **35 transfers in 48 minutes**, tier multiplicities matching that
+  36-endpoint catalogue almost exactly. Sender C: **32 transfers in 7 minutes**, near-identical
+  profile from a second wallet. 402.com.tr sender A: 126 transfers against 136 endpoints.
+- The reach test — where else does each spend USDC all week? **Sender A: 126 transfers, 1 recipient,
+  nothing else in seven days. Sender C: 32 transfers, 1 recipient.** Sender B pays 8 addresses, only
+  one a listed `payTo`, the rest its own vanity-address siblings, including **37 USDC transfers to
+  itself** at endpoint prices in consecutive blocks.
+
+⛔ **What the chain CANNOT separate:** an operator self-test, a paid liveness/validator crawler, and
+a demo loop are all consistent with every number above. **This is not evidence of fake buyers** and
+must not harden into that claim. Transfers carry no intent, and I did not identify a single actor.
+What is established is narrower and enough: **the inbound to these two addresses is dominated by a
+very small number of counterparties that walk the whole catalogue, and the seller's outbound returns
+to the largest of them.**
+
+## ✅ CORRECTION — the two directories are NOT disjoint corpora
+
+Yesterday's entry recorded *"the two directories are DISJOINT corpora"* on the evidence that none of
+the three hosts appears in Circle's index. The first half re-confirms; the generalisation does not.
+
+- Re-confirmed on today's **unfiltered** Circle harvest (1,003 listings, testnet self-check
+  396/396 ✅): both hosts **still absent**.
+- 🚨 But **50 of Circle's 80 Base `payTo` (63%) also appear in the Bazaar's 963.** Across all
+  networks, 63 of 111 (57%).
+
+**Disjointness is a property of these three sellers, not of the indexes.** The corrected form: these
+are new sellers rather than a re-count, *and* the two directories substantially overlap, so "how big
+is the market" is not answered by adding them.
+
+## ✅ LANDED — `scripts/x402-census/payto-catalogue.mjs`
+
+Takes `payTo` addresses, harvests both directories, and reports what the inbound is **made of**:
+amount histogram matched against the seller's own published tiers, distinct senders, settlement type
+per transfer from the tx selector, and outbound destinations flagged when they are also inbound
+senders. Census self-check discipline, extended in two places:
+
+- 🚨 **It REFUSES to report rather than reporting a possibly-truncated count.** The census marks a
+  run INCOMPLETE and still prints its rows; here an incomplete scan writes `{status:"REFUSED"}` and
+  exits non-zero. **A partial count of a distribution is wrong, not weak** — the missing windows are
+  exactly where an unusual amount hides.
+- ⭐⭐ **Every equality is gated on non-emptiness first.** `assertNonEmpty()` refuses where
+  `verify-census.mjs` gap 1 prints `0/0 agree — ⭐ sound`. The topic-array re-verification refuses on
+  an empty verification window instead of accepting the vacuous pass.
+- Plus the inherited guards: write-probe first, `CAP` truncation guard, the direct index fetch with
+  the `siwx=false` testnet self-check, and the published window hardcoded as the published window.
+
+**Proven end to end**, against both addresses: 302,401/302,401 blocks, 0 incomplete, topic-array
+check ✅ match, exit 0, and it reproduces the census figures exactly — **131 / 5.6990 and
+128 / 14.5803**. That reproduction is what establishes the addresses were identified correctly, since
+both were re-derived today from the sellers' own live 402 challenges rather than carried over.
+
+⭐ **And both refusals proven BY INJECTION, not asserted** — a guard that has never fired is a guard
+you are guessing about:
+
+| injection | result |
+|---|---|
+| `CAP=1`, forcing a near-cap window | ⛔ `REFUSED … a truncated or failed window makes the distribution wrong, not merely partial`, `covered 1 / expected 4001`, **exit 2**, file written as `{"status":"REFUSED"}` |
+| an address with **zero** inbound | ⛔ `REFUSED — nothing to check … an equality over an empty set passes vacuously`, **exit 2**, no result written |
+
+Neither printed a count, and neither left a previous run's output in place to be mistaken for this
+one — the write-probe stub is overwritten by the REFUSED record, not by a number.
+
+## ⛔ NOTHING BUILT, AND NO CONCLUSION ABOUT DD
+
+This is about them. It says nothing about what DD would earn, and no "sales" number appears here.
+One 7-day window, Base only, USDC only. Individual counterparty addresses are truncated throughout.
+
+---
+
 # 🚨 THREE GAPS IN THE CENSUS VERIFIER — AND ONE OF THEM PRINTS A PASS ON ZERO EVIDENCE
 
 **2026-08-27. Found while correcting `verify-census.mjs`'s stale comments, NOT while looking for
@@ -439,9 +588,15 @@ transfers are **not sales at the advertised price**, and chain data cannot say w
 probably far below the transfer count.
 
 🚨 **NONE OF THE THREE IS IN CIRCLE'S INDEX** — absent from a 364-resource sample AND from targeted
-`due diligence`/`audit`/`music` queries; not one host appears. **The two directories are DISJOINT
-corpora**, so these are new sellers rather than a re-count — and "how big is the market" is a harder
+`due diligence`/`audit`/`music` queries; not one host appears. ~~**The two directories are DISJOINT
+corpora**~~, so these are new sellers rather than a re-count — and "how big is the market" is a harder
 question than either directory alone suggests.
+
+> ✅ **CORRECTED 2026-08-27 — the disjointness generalisation was WRONG.** The absence of these three
+> hosts re-confirms on an unfiltered 1,003-listing harvest, but **50 of Circle's 80 Base `payTo`
+> (63%) also appear in the Bazaar's 963** (57% across all networks). Disjointness is a property of
+> **these three sellers only**, not of the corpora. The "new sellers rather than a re-count" reading
+> survives; "the indexes do not overlap" does not. See the entry at the top of this file.
 
 ⚠️ Nothing here is a conclusion about DD's prospects. What is established: the category has at least
 two live Base sellers priced **12×–17× above DD**, both with nonzero inbound AND outbound.

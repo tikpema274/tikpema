@@ -34,6 +34,8 @@
   },
   "limits": [
     "An inbound transfer is NOT a purchase. Funding, refunds and unrelated transfers are indistinguishable at this resolution; every count is an UPPER BOUND on sales.",
+    "⭐ A payTo address is usually a CATALOGUE's till, not one product's: 50 of these 80 Base payTo (63%) serve more than one endpoint, 96% of the 836 Base listings sit behind a multi-endpoint address, and the largest serves 132. Every per-address figure is a catalogue total; dividing one by a single endpoint's list price is a category error. (Measured 2026-08-27.)",
+    "⛔ And the bound runs BOTH ways: prepaid credits and Gateway batching let one settlement back many calls, so the transfer count is an upper bound on SETTLEMENTS, not on calls. The two errors do not cancel.",
     "54 payTo addresses harvested by keyword search — not the whole marketplace.",
     "Base only. Listings on Ethereum, Polygon, Avalanche, Arbitrum, Optimism, Unichain and Solana were not measured.",
     "One 7-day window. It says nothing about a trend.",

@@ -99,6 +99,20 @@ per call. It shows that inbound flow is extremely concentrated on a handful of a
 - **That every inbound transfer is a purchase.** Funding, refunds and unrelated transfers
   are indistinguishable at this resolution. Every count here is an **upper bound** on
   sales, not a count of them.
+- **What any one endpoint earns.** ⭐ **A `payTo` address is usually a whole catalogue's
+  till, not one product's.** Measured 2026-08-27 against this census's own address set:
+  **50 of the 80 Base `payTo` (63%) serve more than one endpoint**, **96% of the 836 Base
+  listings sit behind a multi-endpoint address**, and the largest single address here
+  serves **132 endpoints**. One address in the wider Bazaar serves **965 endpoints across
+  21 price tiers**. So every per-address figure above is a **catalogue total**, and
+  dividing one by any single endpoint's list price is a category error — the mean per
+  transfer in particular is the modal price of a seller's *cheapest* products, not a
+  discount on its headline one.
+- **How many calls were made.** ⛔ **The bound runs the other way too, and both directions
+  are real.** Sellers sell **prepaid credits** — one settlement that backs many later
+  calls which never touch the chain — and Gateway batching does the same. Transfer count
+  is therefore an upper bound on **settlements**, not on calls. The two errors do not
+  cancel: inbound can overstate one endpoint's revenue and understate total calls at once.
 - **The share of x402 traffic this represents.** No such number appears in this document,
   deliberately. **629 of the 1,009 listings (62%) settle through Circle Gateway**, which
   aggregates authorizations and settles *net positions in bulk* rather than per payment.
