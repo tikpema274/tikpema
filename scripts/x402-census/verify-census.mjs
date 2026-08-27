@@ -3,8 +3,8 @@
 //   node scripts/x402-census/verify-census.mjs      # reads census-out.json from the CWD
 //
 // ═══ 🚨 THE THING MOST LIKELY TO INVALIDATE EVERYTHING ═════════════════════════════════════════
-// seller-census.mjs collapses 54 addresses into ONE eth_getLogs call per window using a topic
-// ARRAY. That is what makes a 7-day scan cost 62 requests instead of ~3,300 — and if array-matching
+// seller-census.mjs collapses 80 addresses into ONE eth_getLogs call per window using a topic
+// ARRAY. That is what makes a 7-day scan cost 152 requests instead of 12,160 — and if array-matching
 // matched differently than expected, every figure would be wrong AND NOTHING IN THE OUTPUT WOULD
 // LOOK ODD. A fast wrong answer is the failure mode worth checking for.
 //
@@ -12,11 +12,32 @@
 //   A. arithmetic — do the per-row figures sum to the reported totals?
 //   B. batched vs per-address — query one window both ways and compare counts. Equivalence must be
 //      MEASURED, not assumed.
-//   C. a reported ZERO, queried alone — "37 of 54 received nothing" is the strongest claim in the
+//   C. a reported ZERO, queried alone — "53 of 80 received nothing" is the strongest claim in the
 //      write-up, and a batched query silently under-matching an address is exactly how a false zero
 //      would appear.
 //
-// Result on the 2026-08-25 run: A consistent · B 3/3 exact (1005/1005, 62/62, 61/61) · C 0 logs.
+// ⚠️ THE RECORDED RESULT BELOW ATTESTS THE SUPERSEDED RUN, NOT THE PUBLISHED ONE. A consistent ·
+// B 3/3 exact (1005/1005, 62/62, 61/61) · C 0 logs — measured 2026-08-25T10:14Z against the
+// 54-ADDRESS census (its own output line read `rows: 54`). It has NOT been re-run against the
+// 80-address census that docs/x402-seller-census-2026-08-25.md publishes. Do not read it as
+// validating those figures.
+//
+// ═══ ⛔ KNOWN GAPS IN THIS VERIFIER — NAMED, NOT FIXED ══════════════════════════════════════════
+// Recorded so they are decided once rather than rediscovered. Fixing them is a BEHAVIOUR change
+// and does not belong in the documentation pass that wrote this block.
+//
+// 🚨 1. AN EMPTY WINDOW PRINTS A PASS. When the batched query returns no logs, `probes` is empty,
+//    `agree` is 0, and `agree===probes.length` is `0===0` — so check B prints
+//    "0/0 agree — ⭐ the topic-array optimisation is sound" on ZERO evidence, one line after it
+//    warned "cannot discriminate". The warning is printed and then contradicted by the verdict.
+//    This is the absence-reads-as-safety shape, in the instrument meant to catch it.
+// ⚠️ 2. NO TRUNCATION GUARD, unlike the scan's `CAP`. `batched.length` is never tested against a
+//    cap, and this window is 10,000 blocks — 2.5x the scan's 4,000. Truncation here would most
+//    likely surface LOUDLY (a capped batched count under-counts an address whose solo query does
+//    not, giving 🚨 MISMATCH), so this is NOT the silent gap the scan had — but it is unguarded,
+//    and it feeds gap 1 if a window ever comes back empty.
+// ⚠️ 3. CHECK C SKIPS SILENTLY when the census reports no zero rows: `if(z)` simply does not run
+//    and nothing is printed, so a missing check is indistinguishable from a passing one.
 
 import { readFileSync } from "node:fs";
 const RPC="https://mainnet.base.org";
