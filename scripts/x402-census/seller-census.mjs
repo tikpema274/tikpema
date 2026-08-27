@@ -38,9 +38,9 @@
 // so what sellers RECEIVE can be measured without asking anyone and without buying anything.
 //
 // ═══ ⭐⭐ THE OPTIMISATION THAT MAKES A 7-DAY WINDOW FEASIBLE ═══════════════════════════════════
-// `eth_getLogs` accepts an ARRAY in a topic position (OR-matching). All 54 recipients therefore
-// collapse into ONE query per block-window: 54 addresses x 31 windows x 2 directions would be
-// ~3,300 requests; this is 62.
+// `eth_getLogs` accepts an ARRAY in a topic position (OR-matching). All 80 recipients therefore
+// collapse into ONE query per block-window: 80 addresses x 76 windows x 2 directions would be
+// 12,160 requests; this is 152.
 // ⚠️ VERIFIED, NOT ASSUMED — verify-census.mjs re-queries individual addresses in one window and
 // compares against the batched tally. If array-matching behaved differently, every number here
 // would be wrong, and nothing in the output would look odd.
@@ -53,15 +53,18 @@
 //   indistinguishable at this resolution. Every count is an UPPER BOUND on sales.
 // · COVERAGE IS TRACKED PER WINDOW. If a window fails the run is marked INCOMPLETE rather than
 //   reporting a partial count as a total.
+// · 🚨 AND A NEAR-CAP RETURN COUNTS AS A FAILURE. A truncated `eth_getLogs` returns FEWER logs
+//   with NO error, so a silent cap looks exactly like a quiet week. `CAP` marks any window
+//   returning >= CAP logs INCOMPLETE. Without it, absence reads as safety.
 //
-// ⚠️ A WRITE-PROBE RUNS BEFORE ANY SCANNING. The first version of this script completed all 31
-// windows — ~5 minutes, 62 requests — and then threw on its final write line, discarding
-// everything. Expensive work must not be gated on an untested cheap step at the end.
+// ⚠️ A WRITE-PROBE RUNS BEFORE ANY SCANNING. An early version of this script completed EVERY
+// window — minutes of scanning — and then threw on its final write line, discarding everything.
+// Expensive work must not be gated on an untested cheap step at the end.
 
 import { readFileSync, writeFileSync } from "node:fs";
-// ⭐ WRITE-PROBE FIRST. The previous run completed all 31 windows — ~5 minutes and 62 requests —
-// and then threw on the final write line (require() in an .mjs with top-level await), discarding
-// everything. The expensive work must not be gated on an untested cheap step at the end.
+// ⭐ WRITE-PROBE FIRST. An early run completed every window — minutes of scanning — and then threw
+// on the final write line (require() in an .mjs with top-level await), discarding everything.
+// The expensive work must not be gated on an untested cheap step at the end.
 writeFileSync("census-out.json", JSON.stringify({ status: "IN PROGRESS — not a result" }));
 const RPC="https://mainnet.base.org";
 const USDC="0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
@@ -78,19 +81,25 @@ const padded=sellers.map(pad);
 const byAddr=new Map(sellers.map(a=>[a.toLowerCase(),{in:0,inAmt:0n,out:0,outAmt:0n}]));
 
 const head=parseInt(await rpc("eth_blockNumber",[]),16);
-const STEP=9_999, DAYS=7, BLOCKS_PER_DAY=43_200;      // Base ~2s blocks
+// ⭐ THESE ARE THE PARAMETERS OF THE PUBLISHED RUN, not defaults. 4,000-block windows over
+// 302,401 blocks give the 76 windows per direction that docs/x402-seller-census-2026-08-25.md
+// reports. ⚠️ An earlier committed value of 9_999 would have produced ~31 windows — a DIFFERENT
+// SCAN from the published one, silently, from the same file.
+const WINDOW=4_000, CAP=9_000, DAYS=7, BLOCKS_PER_DAY=43_200;   // Base ~2s blocks
 const FROM=head-DAYS*BLOCKS_PER_DAY;
 let covered=0, incomplete=[], windows=0;
 
-// ⭐ ONE query per window for ALL 54 sellers: eth_getLogs accepts an ARRAY in a topic position (OR).
-// 54 addresses x 31 windows x 2 directions would be ~3,300 requests; this is 62.
-for(let b=FROM;b<=head;b+=STEP+1){
-  const to=Math.min(b+STEP,head);
+// ⭐ ONE query per window for ALL sellers: eth_getLogs accepts an ARRAY in a topic position (OR).
+// 80 addresses x 76 windows x 2 directions would be 12,160 requests; this is 152.
+for(let b=FROM;b<=head;b=b+WINDOW){
+  const to=Math.min(b+WINDOW-1,head);
   let okBoth=true;
   for(const dir of ["in","out"]){
     const topics = dir==="in" ? [T0,null,padded] : [T0,padded,null];
     try{
       const logs=await rpc("eth_getLogs",[{fromBlock:"0x"+b.toString(16),toBlock:"0x"+to.toString(16),address:USDC,topics}]);
+      // 🚨 A truncated result carries no error — treat a near-cap return as unmeasured, not as data.
+      if(logs.length>=CAP){ okBoth=false; incomplete.push({from:b,to,dir,err:`possible truncation: ${logs.length} logs >= CAP ${CAP}`}); }
       for(const l of logs){
         const who=("0x"+l.topics[dir==="in"?2:1].slice(26)).toLowerCase();
         const rec=byAddr.get(who); if(!rec) continue;
