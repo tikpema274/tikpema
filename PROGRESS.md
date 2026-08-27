@@ -1,5 +1,104 @@
 ---
 
+# ⛔ THE RAIL CLAIM IS UNRECOVERABLE AND WITHDRAWN — and the root cause is a rule about what to SAVE
+
+**2026-08-27, third pass.** The census's strongest narrowing claim — *"the honest population for
+any statement about observed trade is the 19 addresses that declare vanilla settlement, of which
+**18 (95%) show receipts**"* — **cannot be reproduced from the artifacts published with it.**
+⛔ **No corrected value is asserted.** It is withdrawn.
+
+## ⭐⭐ WHY NO NUMBER — picking one would assert an unverifiable CAUSE
+
+The table splits 32 addresses as **vanilla-only 17 + neither declared 15**. On today's harvest
+**all 80 addresses declare a rail**: 34 `extra.name = "USD Coin"`, 46 `GatewayWalletBatched`, 2
+both. **No address has a missing `extra.name` at all**, so the "neither declared" row cannot be
+reconstructed even in principle. Those 15 are all zeros and all read as vanilla today.
+
+Two explanations fit everything observable:
+
+1. **the index changed** — those listings gained an `extra.name` after 2026-08-25; or
+2. **the original classifier** treated a missing or differently-shaped field as "neither declared".
+
+> 🚨 **Leaving 95% asserts (1) is false. Correcting to 53% asserts (1) is true.** Neither is
+> supported. The earner count **18 is not in doubt**; the DENOMINATOR is 19 or 34 depending on a
+> decision nothing can still recover.
+
+⭐ **Two of the four rows DO re-derive exactly** — `Circle Gateway only` 46/37/9 and `both` 2/0/2 —
+so the section's main argument (a Gateway zero is uninformative, not negative) survives intact. It
+is only the closing narrowing that is gone. **A partial reproduction is the useful outcome here:
+it says precisely which rows to distrust instead of condemning the whole table.**
+
+## ⭐⭐⭐ THE ROOT CAUSE — publishing a conclusion without the intermediate it rests on
+
+**THE AGGREGATE WAS PUBLISHED AND THE PER-ADDRESS ROWS WERE NOT.** The census made that choice on
+editorial grounds — *"the distribution is the finding; who occupies which position in it is not"* —
+and it was defensible as prose policy. But a claim **derived** from those rows then had **nothing
+left to diff against** the moment the live index moved. It did not become wrong. It became
+**unfalsifiable**, which is worse, because a wrong number can be corrected and this one cannot.
+
+> **THE RULE: if you publish a conclusion, publish the intermediate it was derived from — and
+> store the CLASSIFIER INPUT, not just the derived label.** A derived label ("neither declared") is
+> exactly what could not be checked. The raw field it came from (`extra.name`, absent or present)
+> is what would have settled it in one query.
+
+⚠️ This is a rule about **what to save**, not a fact about settlement rails. It generalises to
+every aggregate this repo publishes: the census's own headline figures were only restatable
+yesterday **because the scan reproduced 44,885 exactly** — that reproduction was luck of a stable
+transfer count, not a saved artifact.
+
+## ✅ FIXED FOR THIS RUN — `scripts/x402-census/census-2026-08-25.per-address.json`
+
+All **80 address rows** and all **836 listing rows**, carrying:
+
+- the **classifier input VERBATIM** — the raw `extra.name` values seen per address and per listing
+  (`extraNamesSeen`), never only a derived rail label
+- endpoints, price tiers, inbound/outbound counts and value, distinct senders, full amount
+  histogram, and the dark/lit listing split per address
+- provenance: the window and coverage, the harvest source with the **no-`siwx`** note, the testnet
+  self-check result, and an explicit **live-index warning** (836 Base listings at this harvest,
+  845 two hours later)
+
+Totals check out against the published census: **80 addresses, 836 listings, 44,885 transfers,
+1,107.5967 USDC.**
+
+⚠️ **This reverses the census's "individual addresses are not named" stance, deliberately and
+visibly** — amended at the foot of the document rather than dropped. Reproducibility of a published
+claim outranks the editorial preference, and every `payTo` involved is already public in Circle's
+own discovery index. The preference still governs the prose; it no longer governs the evidence.
+
+## 🚨 AND THE SAME FAILURE ALMOST REPEATED, IN `.gitignore`
+
+The rows file did not stage. **`.gitignore` line 58 — `scripts/x402-census/census-*.json` — was
+silently swallowing it**, with a comment stating the withholding was deliberate and a negation
+already carved out for the aggregate. **The mechanism that made the claim unrecoverable was encoded
+in the repo as policy.**
+
+⚠️ Caught only by reading `git status` before committing. One step later the document would have
+said *"the rows are published in census-2026-08-25.per-address.json"* while **no such file existed
+in the repo** — a conclusion pointing at an intermediate that isn't there, which is the identical
+failure one level up.
+
+That comment also contained a false assurance: *"seller-census.mjs reproduces the full per-address
+data locally in ~5 minutes."* **The SCAN reproduces; the INDEX HARVEST does not** — the index is
+live and moved 836 → 845 Base listings in two hours. The rewritten comment records the incident and
+the rule: **negate explicitly for any artifact a published document derives a claim from, rather
+than relying on someone remembering to force-add it.**
+
+## What the document now says
+
+- A dated `⛔ CORRECTED 2026-08-27` block heads the rail section, naming which two rows re-derive
+  and which two are unrecoverable.
+- The table is **left as published**, with its rows labelled ✅ re-derives / ⛔ unrecoverable —
+  not deleted, not silently altered.
+- The closing paragraph carries a `⛔ WITHDRAWN` block quoting the original claim in full and
+  saying why no value replaces it.
+- The foot-of-document stance is amended to point at the published rows.
+
+⛔ **NOTHING ELSE IN THE DOCUMENT WAS TOUCHED IN THIS PASS**, and no number anywhere was changed to
+a new value. The only edits are a withdrawal, four row labels, and a pointer to the evidence.
+
+---
+
 # ⭐⭐ THE CENSUS'S HEADLINE WAS A UNIT ERROR — Results CORRECTED, and the fix is ASYMMETRIC
 
 **2026-08-27, same day, second pass.** Ran the catalogue-till question across **all 80** census

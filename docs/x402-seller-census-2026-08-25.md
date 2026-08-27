@@ -117,14 +117,54 @@ a dead one if you only measure balances, so outbound was measured too. ⚠️ Th
 
 ## 🚨 The zeros track the settlement rail, not obviously the trade
 
-Splitting the same 80 addresses by which rail their listings declare:
+> ### ⛔ CORRECTED 2026-08-27 — THE TABLE'S BOTTOM TWO ROWS ARE **UNRECOVERABLE**, AND THE CLAIM THEY SUPPORT IS **WITHDRAWN**
+>
+> **This table cannot be reproduced from the artifacts that were published with it.**
+>
+> Two rows re-derive exactly on a fresh harvest — `Circle Gateway only` (46 / 37 zero / 9 earned)
+> and `both` (2 / 0 / 2). The other two do not. This table splits the remaining 32 addresses as
+> **vanilla-only 17** + **neither declared 15**, but on the 2026-08-27 harvest **every one of the
+> 80 addresses declares a rail**: 34 `extra.name = "USD Coin"`, 46 `GatewayWalletBatched`, 2 both.
+> **No address has a missing `extra.name`, so the "neither declared" row cannot be reconstructed
+> at all.** The 15 addresses in it are all zeros and today all read as vanilla.
+>
+> **Two explanations fit everything observable, and nothing distinguishes them:**
+> 1. the live index changed — those listings gained an `extra.name` after 2026-08-25; or
+> 2. the original classifier treated a missing or differently-shaped field as "neither declared".
+>
+> ⛔ **No value is asserted, because picking one would assert a cause.** Reading the closing claim
+> as **95%** asserts the index did not change; correcting it to **53%** asserts it did. Neither is
+> supported by anything we can still inspect.
+>
+> **Therefore the closing claim of this section — *"the honest population … is the 19 addresses
+> that declare vanilla settlement, of which 18 (95%) show receipts"* — is WITHDRAWN**, pending a
+> re-derivation that saves its per-address rows. The earner count (18) is not in doubt; the
+> **denominator** is 19 or 34 depending on a classifier decision that can no longer be recovered.
+>
+> #### ⭐ Root cause, and it is not about this table
+>
+> **The aggregate was published and the per-address rows were not.** A claim *derived* from those
+> rows became unfalsifiable the moment the index moved — there is nothing left to diff against.
+> Publishing a conclusion without the intermediate it rests on is how a finding becomes
+> unrecoverable. **That is a rule about what to save, not a fact about settlement rails.**
+>
+> **Fixed for this run:** `scripts/x402-census/census-2026-08-25.per-address.json` now carries all
+> 80 address rows and all 836 listing rows, with the **classifier input stored verbatim** — the raw
+> `extra.name` values seen per address and per listing, not just a derived rail label. A derived
+> label is precisely what could not be checked here. ⚠️ This reverses the "individual addresses are
+> not named" stance at the foot of this document, deliberately: reproducibility of a published
+> claim outranks that editorial preference, and every `payTo` involved is already public in
+> Circle's own discovery index.
+
+⚠️ The table below is **left as published** — see the correction above before reading it. Rows 1
+and 4 are the unrecoverable ones.
 
 | rail declared | earned ≥1 | zero | total | earn rate |
 |---|---|---|---|---|
-| vanilla x402 only | 16 | 1 | 17 | **94%** |
-| both | 2 | 0 | 2 | 100% |
-| **Circle Gateway only** | 9 | **37** | 46 | **20%** |
-| neither declared | 0 | 15 | 15 | 0% |
+| vanilla x402 only | 16 | 1 | 17 | **94%** — ⛔ unrecoverable |
+| both | 2 | 0 | 2 | 100% — ✅ re-derives |
+| **Circle Gateway only** | 9 | **37** | 46 | **20%** — ✅ re-derives |
+| neither declared | 0 | 15 | 15 | 0% — ⛔ unrecoverable, cannot be reconstructed |
 
 **70% of the zero-inbound addresses are Gateway-capable, against 41% of the earners.**
 Nearly every vanilla-only seller shows receipts; four fifths of Gateway-only sellers show
@@ -143,9 +183,15 @@ the signal is absent by design, not by sampling. Only facilitator-side settlemen
 could separate the two, because only facilitators hold the pre-batch record.
 
 ⚠️ **So "53 of 80 received nothing" must not be read as "53 dead endpoints."** For the 37
-Gateway-only addresses among them, a zero is uninformative rather than negative. The honest
-population for any statement about *observed trade* is the 19 addresses that declare
-vanilla settlement — of which **18 (95%) show receipts**.
+Gateway-only addresses among them, a zero is uninformative rather than negative — that part rests
+on the `Circle Gateway only` row, which re-derives exactly.
+
+> ⛔ **WITHDRAWN 2026-08-27.** This paragraph previously closed: *"The honest population for any
+> statement about observed trade is the 19 addresses that declare vanilla settlement — of which
+> 18 (95%) show receipts."* **That claim cannot be reproduced from the published artifacts.** Its
+> denominator is 19 or 34 depending on a classifier decision that was never saved, and no value is
+> substituted, because 95% and 53% each assert a different unverifiable cause. See the correction
+> at the head of this section. The narrowing idea may well be right; the number is not available.
 
 ## What this does and does not show
 
@@ -193,5 +239,11 @@ discovery index moved the total from 44,752 to 44,885 transfers — **+133, or +
 it. The additional 26 addresses contribute almost nothing, which is itself a finding about
 how concentrated this market is.
 
-Individual addresses are not named. The distribution is the finding; who occupies which
-position in it is not.
+Individual addresses are not named **in this document**. The distribution is the finding; who
+occupies which position in it is not.
+
+⚠️ **Amended 2026-08-27:** the per-address and per-listing rows ARE now published, in
+`scripts/x402-census/census-2026-08-25.per-address.json`. Withholding them is what made the
+withdrawn rail claim above unrecoverable — a conclusion published without the intermediate it
+rests on cannot be checked once the source moves. The editorial preference stands for the prose;
+it no longer applies to the evidence.

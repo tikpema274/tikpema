@@ -49,11 +49,23 @@ agent-metadata/.nft-enumeration*.json
 # Durable ON DISK by design (evidence must survive a timeout), but never committed.
 ub-spend-capture-*.json
 
-# x402 seller census: the PER-ADDRESS result file. Deliberately never committed —
-# this repo is public and the published write-up withholds addresses on purpose
-# (the distribution is the finding; who occupies which position in it is not).
-# The aggregate lives in scripts/x402-census/census-2026-08-25.aggregate.json and
-# seller-census.mjs reproduces the full per-address data locally in ~5 minutes.
+# x402 seller census: scratch scan output is ignored; PUBLISHED artifacts are not.
+#
+# ⛔ THIS RULE ONCE CAUSED A CLAIM TO BECOME UNRECOVERABLE. It withheld the per-address rows
+# on editorial grounds ("the distribution is the finding; who occupies which position in it
+# is not"), and the old comment here claimed seller-census.mjs "reproduces the full
+# per-address data locally in ~5 minutes". THE SCAN reproduces — the INDEX HARVEST does not:
+# the discovery index is live and its Base listing count moved 836 -> 845 within two hours on
+# 2026-08-27. So a claim derived from the rows (the rail table's "19 vanilla-declaring
+# addresses, 18 (95%) show receipts") could not be checked once the index moved, and had to
+# be WITHDRAWN rather than corrected. See docs/x402-seller-census-2026-08-25.md.
+#
+# ⭐ THE RULE NOW: if a published document derives a claim from these rows, the rows ship with
+# it — including the classifier INPUT verbatim, not just a derived label. Add a negation here
+# for any such artifact rather than relying on someone remembering to force-add it.
 census-out.json
+payto-catalogue-out.json
+catalogue-effect-out.json
 scripts/x402-census/census-*.json
 !scripts/x402-census/census-*.aggregate.json
+!scripts/x402-census/census-*.per-address.json
