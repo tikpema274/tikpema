@@ -1,5 +1,76 @@
 ---
 
+# 🕰️ TIER-3 CLAIMS LABELLED AS HISTORICAL READINGS — documentation only, nothing re-derived
+
+**2026-08-27, sixth pass.** The inventory's Tier-3 set is **fine as a record of what was observed
+when, and dangerous only if quoted present-tense.** ⛔ **Nothing was re-derived and no number was
+restated** — every claim is left exactly as written and carries a label.
+
+## ⭐⭐ WHY NOT RE-DERIVE — the test is whether a claim would be USED
+
+**Re-deriving to tidy the record produces today's numbers under yesterday's sentence, which is the
+`1,009`-vs-`1,003` confusion by another route.** None of these is load-bearing for anything being
+published or decided now, so measuring them again would create a new, differently-dated claim
+wearing an old one's words.
+
+## What was labelled — 9 insertions
+
+| claim | observed | source |
+|---|---|---|
+| facilitator scan (`x402.fuchss.app`) | 2026-08-26 | third-party published document |
+| Bazaar Validator runs (×2 entries) | 2026-08-26 | third-party validator vs a live deployment |
+| the `x402Version: 2` sweep | 2026-08-26 | Circle index via `circle services search` |
+| the 838-listing snapshot | 2026-08-27 | Circle's live index |
+| the 843-listing check | 2026-08-23 | Circle's live index |
+| the 636-listing directory reading | ⚠️ **date not recoverable** | Circle's live index |
+| third-party marketplace counts | ⚠️ **date not recoverable** | a non-Circle marketplace API |
+| `agents.circle.com` 474 resources | ⚠️ **date not recoverable** | live catalogue |
+
+Each label states: the observation date, that the source moves, and that **the supporting rows were
+not saved so it cannot be re-checked as published**.
+
+⛔ **Three entries are undated and the label SAYS SO** rather than pinning a date. Establishing one
+would mean re-deriving, which this pass does not do.
+
+⭐ **Two labels carry an exception, because the finding outlived its numbers.** The **Arc-absence**
+component and the **DD-was-never-listed** conclusion were both re-confirmed on 2026-08-27 against
+the unfiltered 1,003-listing harvest **with rows saved**. In each case the *conclusion* is
+checkable; the *denominator it was originally read from* is not. Those are different objects and
+the labels separate them.
+
+⚠️ One label records a compounding problem: the `x402Version` sweep is **doubly unrecoverable** —
+the CLI appended `siwx=false`, so the query is not reproducible either, and per-item `x402Version`
+was DROPPED from the 2026-08-27 harvest projection, so the saved rows cannot answer it. That drop
+is named in the harvest file's own `_cannotAnswer` block.
+
+## ⛔ BORDERLINE, RECORDED AND LEFT — the 465-vanilla / 975-Gateway split
+
+**Not re-run, and not requested.** The three-state `extra.name` finding (`name-present` /
+`extra-without-name` / `no-extra` — 812 Circle rows and 7,290 Bazaar rows carry an `extra` with no
+`name` key) means the original classification **may have flattened a real distinction**.
+
+> 🚨 **A re-run would therefore produce a DIFFERENTLY-DEFINED number, not a confirmation.**
+> **That is a NEW MEASUREMENT, not a re-check**, and it must be recorded as one if it is ever done.
+
+This is the same shape as the withdrawn rail claim, caught before rather than after.
+
+## ⭐ WHICH OF THESE WOULD FALL UNDER THE NEW POLICY IF MADE TODAY
+
+The only forward-looking value here. Under the policy recorded in the previous entry:
+
+- **WOULD BE COMMITTED WITH FULL ROWS** — each backs a published claim and reads a moving source:
+  the 838-, 843-, 636-listing snapshots; the `x402Version` sweep; the `agents.circle.com` reading;
+  the third-party marketplace counts.
+- **WOULD NOT BE COMMITTED** — nothing here, on a strict reading. Every one of them was written
+  into PROGRESS.md, which is publication. ⚠️ **The "one-off check, nothing published" exemption is
+  narrower in practice than it sounds: if it is worth writing down, it is published.**
+- **HASH-PLUS-SCRIPT WOULD HAVE BEEN WRONG FOR ALL OF THEM** — every source moves.
+- **UNCHANGED BY THE POLICY:** the validator runs. A validator result is *re-run*, never re-read;
+  there are no rows to keep, only an output to store, and none was. ⭐ That is a **gap the policy
+  does not cover** — worth deciding separately if a validator result is ever load-bearing again.
+
+---
+
 # 📋 POLICY — what gets committed when a harvest backs a claim
 
 **2026-08-27.** Decided after the 10.4 MB Bazaar harvest raised it. **This is a policy about the
@@ -608,6 +679,8 @@ discriminator has to be something the artifact carries about *itself*.
 
 # 🚨 CORRECTION TO THE CENSUS ABOVE — THE `circle` CLI SENDS `siwx=false`, AND MY "WHOLE INDEX" WAS 838 OF 1003
 
+> 🕰️ **HISTORICAL READING — not a current fact.** Observed **2026-08-27**. Source: **Circle's live discovery index**, which moves under us. **The supporting rows were not saved, so this cannot be re-checked as published.** Left exactly as written; do not quote present-tense. ⭐ EXCEPTION: the **Arc-absence** component of this entry WAS re-derived 2026-08-27 against the unfiltered 1,003-listing harvest **with rows saved** (`circle-index-2026-08-27.harvest.json`). That part is checkable; the 838-listing snapshot itself is not.
+
 **2026-08-27, same day, read-only.** The entry below reports **838 listings / 13 networks / no
 testnets** and calls that the unfiltered index. **The VERDICT holds; those NUMBERS do not.**
 
@@ -884,6 +957,8 @@ artifact disagree in ways the tooling silently records as fact.
 # ✅ THE VALIDATOR THAT FOUND THE DEFECTS NOW PASSES THEM — a third instrument, and it knew nothing about us
 
 **2026-08-26, close of day.** Two fixes shipped (`acedafa`, `77c511d`) and both were confirmed by
+> 🕰️ **HISTORICAL READING — not a current fact.** Observed **2026-08-26**. Source: **a third-party VALIDATOR run against a live deployment**, which moves under us. **The supporting rows were not saved, so this cannot be re-checked as published.** Left exactly as written; do not quote present-tense. ⛔ A validator result is re-run, never re-read: both the validator and the deployment have moved since. No stored output exists.
+
 **Coinbase's Bazaar Validator**, re-run after the deploys. It is a **THIRD independent instrument**:
 it is not our suite, not our probe, and it had no knowledge of either deploy.
 
@@ -928,6 +1003,8 @@ chosen. Strictly downstream of the Arc-vs-Base decision.
 
 The census refused to publish a share-of-total number and named facilitator-side counts as the thing
 that would settle it. A third party publishes exactly that shape:
+> 🕰️ **HISTORICAL READING — not a current fact.** Observed **2026-08-26**. Source: **a third-party published document (x402.fuchss.app)**, which moves under us. **The supporting rows were not saved, so this cannot be re-checked as published.** Left exactly as written; do not quote present-tense. ⚠️ Its own method was never verified by us either — that caveat is already recorded below and still applies.
+
 `x402.fuchss.app/v1/facilitators`, 32 facilitators, 30d and all-time, signed.
 
 🚨 **IT IS NOT FACILITATOR DATA.** Its own methodology: *"every USDC transfer whose **transaction
@@ -1162,6 +1239,8 @@ name**: an envelope `x402Version` (the discovery response's own version) and a p
 `x402Version` ("protocol version supported by the resource"). The spec's own example shows an item
 at **1** inside an envelope at **2**.
 
+> 🕰️ **HISTORICAL READING — not a current fact.** Observed **2026-08-26**. Source: **Circle's live discovery index, read via `circle services search`**, which moves under us. **The supporting rows were not saved, so this cannot be re-checked as published.** Left exactly as written; do not quote present-tense. ⛔ Doubly unrecoverable: the CLI silently appended `siwx=false`, so the *query* is not reproducible either. ⚠️ And per-item `x402Version` was DROPPED from the 2026-08-27 harvest projection, so that file cannot answer this one.
+
 Measured: **364 distinct resources** across 12 `circle services search` queries — **every single
 per-item value is 2**, and all 828 `accepts[]` entries use the v2 field set. That looks like an
 overwhelming measurement. Then the discriminator:
@@ -1355,6 +1434,8 @@ earlier today — a claim of coverage the mechanism cannot support.
 
 
 # 🚨 THREE DEFECTS ON THE x402 DISCOVERY PATH — AND A CORRECT OBSERVATION FILED UNDER THE WRONG VERDICT
+
+> 🕰️ **HISTORICAL READING — not a current fact.** Observed **2026-08-26**. Source: **a third-party VALIDATOR run against a live deployment**, which moves under us. **The supporting rows were not saved, so this cannot be re-checked as published.** Left exactly as written; do not quote present-tense. ⛔ Re-run, never re-read; no stored output exists.
 
 **2026-08-26.** Coinbase's Bazaar Validator POSTed to `https://app.tikpema.xyz/api/dd-analyze` and
 got **400, no `x402Version`** — clean URL, correct method, live prod. Its stated requirement is
@@ -2771,6 +2852,8 @@ Found 2026-08-23 while sweeping the Circle x402 Agent Marketplace for a buy-side
 is built, deployed, canaried, x402-gated, ERC-1271-attested and priced. **It has never appeared in
 the marketplace catalogue.** Nothing could find it, so nothing could buy it — and every "no traffic"
 reading since the 19th has been measuring a service that was not discoverable.
+
+> 🕰️ **HISTORICAL READING — not a current fact.** Observed **2026-08-23**. Source: **Circle's live discovery index**, which moves under us. **The supporting rows were not saved, so this cannot be re-checked as published.** Left exactly as written; do not quote present-tense. ⭐ The *conclusion* — that DD was not listed — was re-confirmed 2026-08-27 with rows saved. It is the **843-listing denominator** and the counts derived from it that are unrecoverable, not the finding.
 
 ## THE CHECK — three ways, and only the third is decisive
 
@@ -11443,6 +11526,8 @@ write method (`OPTIONS` on the discovery API → 404). Remaining candidates: an 
 partner process, or crawler ingestion (`lastUpdated` + a `stripe_payment_intent_id` in one row's
 `extra` hint at a pipeline). `circle feedback submit` exists as a channel but is outbound contact.
 
+> 🕰️ **HISTORICAL READING — not a current fact.** Observed **date NOT RECOVERABLE from the record — this entry is undated**. Source: **Circle's live discovery index**, which moves under us. **The supporting rows were not saved, so this cannot be re-checked as published.** Left exactly as written; do not quote present-tense. ⚠️ The date is stated as unknown rather than measured; establishing it would mean re-deriving, which this pass does not do. ⚠️ Note also `636 listings` against `Base 802` in the same breath — listings vs `accepts[]` entries, the unit confusion corrected in the census on 2026-08-27. **With no saved rows that cannot be adjudicated either.**
+
 **THE DIRECTORY, MEASURED IN FULL.** `GET https://api.circle.com/v2/x402/discovery/resources`
 — public, no auth, **636 listings** (all 7 pages fetched, 636 unique). **15 networks:**
 Base 802, Polygon 742, **Base Sepolia 396, Polygon Amoy 396**, Avalanche 141, Ethereum/Arbitrum/
@@ -12547,6 +12632,8 @@ parked is how a future revisit gets mis-triggered (and this file's own standard 
   2026-06-27 → 2026-07-16, most recent **today**. But **114 of the 126 landed on one day** (07-14, the
   day after a 101-listing bulk import), then 7, then 1. That is the shape of an operator testing its
   own marketplace, not organic demand. Both seller wallets currently hold 0.000000 USDC.
+> 🕰️ **HISTORICAL READING — not a current fact.** Observed **date NOT RECOVERABLE from the record — this entry is undated**. Source: **a THIRD-PARTY agent marketplace API (not Circle's)**, which moves under us. **The supporting rows were not saved, so this cannot be re-checked as published.** Left exactly as written; do not quote present-tense.
+
 - **Thinly populated, and the sellers do not own what they sell.** 118 listings (all `is_active`;
   the `/api/agent/discover` view caps at 50 and understates it) — but **107 of 118 from ONE wallet**,
   only **two distinct sellers total**, 101 created on a single day. `verified_at` set on **1 of 118**;
@@ -14060,6 +14147,8 @@ and settle on-chain — all proven end to end on testnet against our own stand-i
 This is the "AI Research Analyst that pays for its own inputs" North Star, proven safely.
 
 ## How we got here — the ecosystem investigation
+> 🕰️ **HISTORICAL READING — not a current fact.** Observed **date NOT RECOVERABLE from the record — this entry is undated**. Source: **agents.circle.com, a live catalogue**, which moves under us. **The supporting rows were not saved, so this cannot be re-checked as published.** Left exactly as written; do not quote present-tense.
+
 - Discovered the **Circle Agent Marketplace** (agents.circle.com) — 474 resources across
   20 providers, agents paying APIs in USDC via x402. Real external data sellers exist
   (Exa, Parallel, Tavily, Google Scholar, Messari, etc.).
