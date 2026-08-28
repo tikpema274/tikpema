@@ -22,10 +22,20 @@
 import { json, ARC } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
 import { priceAndGate } from "./_user-bridge.mjs";
+import { destinationOptions } from "./_bridge.mjs";
 import { recordUserPendingBridge } from "./_bridge-record.mjs";
 
 export async function handler(event) {
-  if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
+  // ⭐ GET → the destination list, DERIVED from BRIDGE_DESTINATIONS.
+  // 🚨 THIS EXISTS BECAUSE A HAND-TYPED DROPDOWN SHIPPED AND MIS-ROUTED A REAL BRIDGE.
+  // The panel had `base-sepolia`, which is not a key and not an alias; the loose matcher resolved
+  // it to ETHEREUM and 2 USDC burned toward the wrong chain. A UI list that is typed rather than
+  // served is a second source of truth for what chains exist — the recurring bug in this repo —
+  // and the drift is invisible because a wrong key still resolves.
+  if (event.httpMethod === "GET") {
+    return json(200, { destinations: destinationOptions() });
+  }
+  if (event.httpMethod !== "POST") return json(405, { error: "POST or GET" });
   if (event.blobs) (await import("./_blobs.mjs")).connectBlobs(event);
 
   const session = requireSession(event);

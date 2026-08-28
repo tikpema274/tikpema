@@ -30,7 +30,11 @@ type Burn = { bridgeContract: string; usdc: string; amountMinor: string; calldat
 
 export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const [amount, setAmount] = useState("1");
-  const [destination, setDestination] = useState("base-sepolia");
+  // ⭐ NO DEFAULT AND NO HARDCODED LIST. The previous version shipped `base-sepolia`, which is not
+  // a destination key — the server's loose matcher resolved it to ETHEREUM and a real bridge went
+  // to the wrong chain. The options are now SERVED, and nothing can be selected until they load.
+  const [destination, setDestination] = useState("");
+  const [destinations, setDestinations] = useState<{ key: string; label: string }[]>([]);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [burn, setBurn] = useState<Burn | null>(null);
   const [intentId, setIntentId] = useState<string | null>(null);
@@ -42,6 +46,20 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
   const [result, setResult] = useState<{ burnHash: string; netPredicted: number } | null>(null);
 
   const isMetaMask = w.activeKind === "metamask";
+
+  // Load the destination list from the server on mount. ⚠️ FAILS CLOSED: if it cannot load, the
+  // select stays empty and there is nothing to pick — better than offering a guess.
+  useEffect(() => {
+    if (!isMetaMask) return;
+    (async () => {
+      try {
+        const r = await agentClient.userBridgeDestinations(await w.ensureSession());
+        setDestinations(r.destinations ?? []);
+      } catch {
+        setDestinations([]);
+      }
+    })();
+  }, [isMetaMask]);
 
   // ── Step 1: server prices, bands and GATES. Nothing is signed here. ──
   async function start(withAck?: string) {
@@ -143,11 +161,13 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
         <span className="status" style={{ margin: 0 }}>Amount (USDC)</span>
         <input value={amount} onChange={(e) => setAmount(e.target.value)} disabled={busy} />
         <span className="status" style={{ margin: 0 }}>To</span>
-        <select value={destination} onChange={(e) => setDestination(e.target.value)} disabled={busy}>
-          <option value="base-sepolia">Base Sepolia</option>
-          <option value="avalanche-fuji">Avalanche Fuji</option>
+        <select value={destination} onChange={(e) => setDestination(e.target.value)} disabled={busy || !destinations.length}>
+          <option value="">{destinations.length ? "Choose a chain…" : "Loading chains…"}</option>
+          {destinations.map((d) => (
+            <option key={d.key} value={d.key}>{d.label}</option>
+          ))}
         </select>
-        <button onClick={() => start()} disabled={busy}>Get quote</button>
+        <button onClick={() => start()} disabled={busy || !destination}>Get quote</button>
       </div>
 
       {ackToken && (

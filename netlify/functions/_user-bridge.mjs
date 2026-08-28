@@ -29,7 +29,7 @@ import { getAddress, toFunctionSelector } from "viem";
 import { publicClient } from "./_predict.mjs";
 import {
   bridgeFee, bridgeFeeBand, bridgeAckToken, bridgeCallData,
-  resolveDestination, BRIDGE_CONTRACT, BRIDGE_ABI,
+  resolveDestinationStrict, BRIDGE_CONTRACT, BRIDGE_ABI,
 } from "./_bridge.mjs";
 import { CONTRACTS } from "./_arc.mjs";
 
@@ -45,7 +45,10 @@ import { CONTRACTS } from "./_arc.mjs";
  * A client-supplied maxFee would let the caller choose the band its own ack is checked against.
  */
 export async function priceAndGate({ session, amountUsdc, destination, recipient, ackToken }) {
-  const dest = resolveDestination(destination);
+  // ⭐ STRICT, NOT LOOSE. The caller passes a machine-chosen key from a dropdown, never prose —
+  // and the loose matcher resolved "base-sepolia" to ETHEREUM on a real bridge (2026-08-28).
+  // A key that is not exactly a key must FAIL here, not quietly become another chain.
+  const dest = resolveDestinationStrict(destination);
   if (!dest) return { ok: false, code: "unsupported_destination", destination };
 
   const amount = Number(amountUsdc);

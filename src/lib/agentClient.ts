@@ -93,5 +93,7 @@ export const agentClient = {
 
   // ── USER-SIGNED BRIDGE. Status-preserving: 409 carries the fee disclosure, 202 means retry.
   userBridgeStart: (body: unknown, token: string) => postRaw("/api/user-bridge-start", body, token),
+  // ⭐ The destination list is SERVED, never typed in the client — see user-bridge-start's GET.
+  userBridgeDestinations: (token: string) => get("/api/user-bridge-start", token),
   userBridgePromote: (body: unknown, token: string) => postRaw("/api/user-bridge-promote", body, token),
 };

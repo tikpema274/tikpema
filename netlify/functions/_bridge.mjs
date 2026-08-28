@@ -48,6 +48,37 @@ export const BRIDGE_DESTINATIONS = {
 };
 
 // Resolve a natural-language destination name to a supported destination, or null.
+/**
+ * ⭐⭐ STRICT resolution — EXACT key or EXACT alias, NO contains-match.
+ *
+ * 🚨 WHY THIS EXISTS, MEASURED 2026-08-28 ON A REAL BRIDGE. `resolveDestination` below has a loose
+ * contains-match so an AGENT's natural language ("bridge to ethereum sepolia network") still
+ * resolves. That is right for prose and WRONG for an identifier: the string "base-sepolia" — a
+ * plausible-looking key — fails exact matching, falls into the loose pass, and matches
+ * **ETHEREUM** first, because `ethereum` is iterated before `base` and "base-sepolia" contains
+ * "sepolia". A user picked one chain and 2 USDC burned toward another.
+ *
+ * ⛔ THE FAILURE MODE IS THE PROBLEM, NOT THE MISS. A wrong identifier that RESOLVES ANYWAY is
+ * worse than one that errors: nothing surfaces, the quote succeeds, the burn succeeds, and the
+ * mistake is only visible on the destination chain afterwards.
+ *
+ * ⚠️ The loose matcher is NOT removed — the agent path depends on it for free-text input. This is
+ * a second, stricter door for callers that pass a machine-chosen key.
+ */
+export function resolveDestinationStrict(name) {
+  const n = String(name || "").trim().toLowerCase();
+  if (!n) return null;
+  for (const [key, d] of Object.entries(BRIDGE_DESTINATIONS)) {
+    if (key === n || d.aliases.includes(n)) return { key, ...d };
+  }
+  return null;
+}
+
+/** The list a UI may offer — DERIVED, never typed. A hardcoded dropdown is the defect above. */
+export function destinationOptions() {
+  return Object.entries(BRIDGE_DESTINATIONS).map(([key, d]) => ({ key, label: d.label, cctpDomain: d.cctpDomain }));
+}
+
 export function resolveDestination(name) {
   const n = String(name || "").trim().toLowerCase();
   if (!n) return null;
