@@ -1,10 +1,5 @@
 # What x402 services disclose when a check fails
 
-> ⛔ **DRAFT — NOT PUBLISHED.** Not linked from `/built`, not posted anywhere.
-> Every quoted string has been verified byte-for-byte against the committed
-> artifacts in `evidence/competitor/`. It sits here until a decision is made
-> about where, or whether, it goes.
-
 An x402 endpoint takes payment and returns an answer. The interesting
 question isn't what it returns when everything works — it's what it returns
 when one of its inputs was unavailable, and whether the buyer can tell.
@@ -131,6 +126,25 @@ before you buy."
 I have not compared like with like: this is my service's *failure* path
 against theirs on *success*. Their degraded path remains unmeasured.
 
+## Evidence
+
+Every response quoted above is committed, verbatim, with the request that
+produced it:
+
+- **The paid `deep-dd` report** —
+  `evidence/competitor/deepdd-paid-report-2026-08-28.json`
+- **The three free-call responses** (`rug-score`, `exit-liquidity`,
+  `safe-to-send`) —
+  `evidence/competitor/deepdd-siblings-degraded-2026-08-28.json`
+- **The DD refusal and the 402 quote for the same token** —
+  `evidence/competitor/dd-same-subject-probes-2026-08-28.json`
+- **402.com.tr's own published surfaces** (`/.well-known/x402`,
+  `/openapi.json`, `/llms.txt`), which back the free-tier terms and the tier
+  lists — `evidence/competitor/402comtr-published-surfaces-2026-08-27.json`
+
+The seller surfaces are a snapshot of a live page and can be reworded at any
+time; that is why they are committed rather than linked.
+
 ## What this does and does not show
 
 **It shows:** paid x402 services in this category do disclose failed checks,
@@ -157,3 +171,7 @@ not a safe generalisation.
   measured my own service's answer to it either.
 
 That last one is the gap I'd point at next, and no purchase closes it.
+
+A companion piece, *What x402 sellers actually earn*, measures the same
+market from the payment side rather than the response side:
+`docs/x402-seller-census-2026-08-25.md`.

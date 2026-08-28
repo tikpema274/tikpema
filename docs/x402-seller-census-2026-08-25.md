@@ -239,6 +239,10 @@ discovery index moved the total from 44,752 to 44,885 transfers — **+133, or +
 it. The additional 26 addresses contribute almost nothing, which is itself a finding about
 how concentrated this market is.
 
+A companion piece, *What x402 services disclose when a check fails*, measures the same
+market from the response side rather than the payment side:
+`docs/x402-disclosure-on-failure.md`.
+
 Individual addresses are not named **in this document**. The distribution is the finding; who
 occupies which position in it is not.
 

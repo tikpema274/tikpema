@@ -68,6 +68,19 @@ const ENTRIES = [
     ],
   },
   {
+    title: "What x402 services disclose when a check fails",
+    state: "A finished measurement. Not a service.",
+    body: `What four paid endpoints return when one of their inputs was unavailable — whether a
+           failed check is named or silently dropped. One purchased report, three free calls, two
+           unpaid probes, every response committed verbatim. It finds the disclosure is uneven
+           within a single seller, and it does not resolve the case it set out to test.`,
+    links: [
+      ["the write-up", "https://github.com/tikpema274/tikpema/blob/main/docs/x402-disclosure-on-failure.md"],
+      ["the evidence", "https://github.com/tikpema274/tikpema/tree/main/evidence/competitor"],
+    ],
+    note: "Includes DD, which is built here — its section leads with what it cannot do.",
+  },
+  {
     title: "arc-x402-reference",
     state: "A library, not a service. v0.2.0.",
     body: `A standalone vanilla x402 (EIP-3009) buyer and seller for Arc testnet, extracted so it can
