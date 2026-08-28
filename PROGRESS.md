@@ -1,5 +1,72 @@
 ---
 
+# 🚨 A NUMBER I SUPPLIED CAME BACK TO ME AS A FACT THE FILE HAD ESTABLISHED
+
+**2026-08-28.** Caught while fact-checking a draft against the artifacts. **New shape, and the one
+this file is least equipped to catch, because the laundering happens inside the file itself.**
+
+## The path it took
+
+1. **I supplied it in an instruction** — *"it corrects a claim I have made four times"*. Not a
+   measurement. A recollection, offered in conversation.
+2. **It was written into PROGRESS as part of a correction** — *"FOUR ECOSYSTEM SCANS IN THIS FILE
+   REPORTED THIS CATEGORY EMPTY"* — in an entry whose whole subject was correcting an error, and
+   whose other numbers were all measured.
+3. **It came back as established** — cited into a **public draft** as *"as I did, four times, in
+   earlier notes"*, carrying the authority of the record rather than of the conversation.
+
+> ⭐⭐ **A FIGURE I AUTHORED, LAUNDERED THROUGH THE RECORD, CITED BACK TO ME AS THE FILE'S OWN
+> FINDING.** Nothing lied at any step. The number simply changed category — from something said to
+> something known — by being written down next to things that were measured.
+
+## ⭐⭐⭐ THE RULE
+
+> **A number that entered the record from a CONVERSATION, not from a MEASUREMENT, must be marked as
+> such AT THE POINT IT IS WRITTEN.** Otherwise the file cannot distinguish what it measured from
+> what it was told — **and that distinction is this file's entire value.**
+
+⚠️ The failure is invisible in the normal direction of scrutiny. Every verification habit here
+points **outward** — check the artifact, re-read the chain, don't trust a vendor's description,
+don't trust a cached balance. **None of them points at the file's own prose.** A claim sourced from
+the conversation looks exactly like a claim sourced from a scan once both are paragraphs in
+PROGRESS.
+
+## ⚠️ AND IT IS AMBIGUOUS, NOT MERELY UNVERIFIED
+
+An independent search of PROGRESS found **three** entries matching the category-is-empty shape —
+and the count depends entirely on **how a qualifying claim is defined**. Different reasonable
+definitions give different totals.
+
+⛔ **So the fix was NOT to substitute a corrected number.** "Three" would have repeated the original
+error with better arithmetic — asserting precision the evidence does not support. The draft now
+reads **"as I did, repeatedly, in earlier notes"**: accurate, unfalsifiable in neither direction,
+and honest about the fact that the exact count was never established.
+
+⭐ **A self-critical number gets no free pass.** "I was wrong four times" is more flattering to the
+writer than "I was wrong repeatedly" — it sounds precise, and precision reads as rigour. **An
+unverifiable number is unverifiable in the direction that flatters you too.**
+
+## ✅ Draft committed as a DRAFT
+
+`docs/x402-disclosure-on-failure-DRAFT.md` — **DRAFT in the filename and in a header line**, not
+linked from `/built`, not posted anywhere. Verified: 0 references to it in `built.mjs`.
+
+Every quoted string in it was checked byte-for-byte against `evidence/competitor/`. That pass
+found, and the draft now fixes: an em-dash substituted for a colon inside a quoted schema string;
+a paraphrase presented after *"the reason is published:"*; a dropped *"the on-chain owner of"* from
+the ERC-1271 claim; **"and refunds" asserting an event that never occurred** (`refundable` is a
+flag, the call was free, nothing was billed); "two endpoints that refuse" when only one refuses;
+two excerpts presented as complete quotes; and the test subject not disclosed as the author's own
+wallet.
+
+⚠️ **And three ad-hoc checks in that pass returned wrong verdicts** — one false green
+(`grep -c … || echo 0`) and two false negatives (flattening blockquotes without stripping `>`).
+Each was caught by implausibility, then the checker was fixed and **validated against known-absent
+and known-present controls before its output was trusted**. See the entry on checks whose failure
+mode is a pass.
+
+---
+
 # 🚨 A VERIFICATION PASS PRODUCED FALSE PASSES — six ✅ for a string in none of the files
 
 **2026-08-28.** While fact-checking a draft against the committed artifacts, the check that asked
