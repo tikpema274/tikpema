@@ -1,0 +1,265 @@
+{
+ "_what": "DD probed FREE about the SAME subject the paid deep-dd report covers (DEGEN, 0x4ed4E862…efed). Two unpaid POSTs, captured verbatim.",
+ "_why": "The $0.75 deep-dd purchase returned degraded:false with 5/5 sub-checks — it measured the HAPPY PATH only. These probes are the degraded path, and they cost nothing. Committed so the comparison rests on artifacts rather than on either vendor's description of itself.",
+ "_method": "Unpaid POST, no payment header, nothing signed, nothing charged. An unpaid POST cannot settle.",
+ "capturedAt": "2026-08-28",
+ "subject": {
+  "address": "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",
+  "token": "DEGEN",
+  "note": "a BASE mainnet token. DD analyzes arc-testnet ONLY, so this subject is outside its scope by construction — that is the finding, not a defect of the probe."
+ },
+ "_limit": "⚠️ This compares DD REFUSING against deep-dd SUCCEEDING. DD's own successful report was NOT purchased and is NOT shown here. Do not read it as a like-for-like output comparison.",
+ "probes": {
+  "chain=base — unsupported, the DEGRADED path": {
+   "httpStatus": 400,
+   "body": {
+    "schemaVersion": "onchain-analyze/0.2.0",
+    "severityMeaning": "scope-not-rank: describes what the power can reach. Non-ordinal. MUST NOT be summed, ranked, averaged or aggregated into a score.",
+    "subject": {
+     "address": "0x4ed4e862860bed51a9570b96d89af5e1b0efefed",
+     "chainId": null,
+     "chainName": "base",
+     "blockNumber": null
+    },
+    "shape": {
+     "class": "unknown",
+     "family": "unknown",
+     "variant": null,
+     "scannedAddress": null,
+     "evidence": {
+      "why": "unsupported-chain"
+     }
+    },
+    "powers": [],
+    "coverage": {
+     "checked": [],
+     "notChecked": [
+      {
+       "id": "power:emergencyWithdraw",
+       "kind": "power",
+       "group": "emergencyWithdraw",
+       "reason": "request refused before any analysis ran (unsupported-chain) — nothing was scanned"
+      },
+      {
+       "id": "power:feesSettable",
+       "kind": "power",
+       "group": "feesSettable",
+       "reason": "request refused before any analysis ran (unsupported-chain) — nothing was scanned"
+      },
+      {
+       "id": "power:setStrategy",
+       "kind": "power",
+       "group": "setStrategy",
+       "reason": "request refused before any analysis ran (unsupported-chain) — nothing was scanned"
+      },
+      {
+       "id": "power:setFeeRecipient",
+       "kind": "power",
+       "group": "setFeeRecipient",
+       "reason": "request refused before any analysis ran (unsupported-chain) — nothing was scanned"
+      },
+      {
+       "id": "power:transferOwnership",
+       "kind": "power",
+       "group": "transferOwnership",
+       "reason": "request refused before any analysis ran (unsupported-chain) — nothing was scanned"
+      },
+      {
+       "id": "power:pausable",
+       "kind": "power",
+       "group": "pausable",
+       "reason": "request refused before any analysis ran (unsupported-chain) — nothing was scanned"
+      },
+      {
+       "id": "power:upgradeable",
+       "kind": "power",
+       "group": "upgradeable",
+       "reason": "request refused before any analysis ran (unsupported-chain) — nothing was scanned"
+      },
+      {
+       "id": "power:denylist",
+       "kind": "power",
+       "group": "denylist",
+       "reason": "request refused before any analysis ran (unsupported-chain) — nothing was scanned"
+      },
+      {
+       "id": "power:withdrawalDelay",
+       "kind": "power",
+       "group": "withdrawalDelay",
+       "reason": "request refused before any analysis ran (unsupported-chain) — nothing was scanned"
+      }
+     ],
+     "totals": {
+      "checked": 0,
+      "notChecked": 9
+     },
+     "summary": "NOTHING was checked: the request was refused before analysis began. This is an INDETERMINATE result, not a clean bill."
+    },
+    "reads": [],
+    "refusal": {
+     "reason": "unsupported-chain",
+     "detail": "this service analyzes arc-testnet only; refusing \"base\". Any other chain is unexercised and unverified here, and answering anyway would be a confident answer about something never tested."
+    },
+    "attestation": {
+     "status": "unsigned",
+     "canon": "canon/1",
+     "detail": "input rejected before analysis — there is no on-chain claim to attest",
+     "validityMeaning": "ERC-1271 answers 'is this signature valid NOW', not 'was it valid when issued'. Validity is a live contract call against the owning smart account: if that account's owner key is ever rotated, previously issued attestations STOP verifying. A signature also proves 'true at block N', never 'true now' — freshness is the verifier's policy decision, not something a signature can supply."
+    },
+    "howToPay": {
+     "price": "$0.06 USDC",
+     "resource": "https://app.tikpema.xyz/api/dd-analyze",
+     "accepts": [
+      {
+       "scheme": "exact",
+       "network": "eip155:5042002",
+       "maxAmountRequired": "60000",
+       "amount": "60000",
+       "resource": "https://app.tikpema.xyz/api/dd-analyze",
+       "description": "DD on-chain due-diligence report (Arc Testnet) — $0.06 USDC per report",
+       "mimeType": "application/json",
+       "payTo": "0xb407967319d56218c7e1c369125490e665a16ac4",
+       "maxTimeoutSeconds": 604900,
+       "asset": "0x3600000000000000000000000000000000000000",
+       "extra": {
+        "name": "GatewayWalletBatched",
+        "version": "1",
+        "verifyingContract": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
+       }
+      }
+     ],
+     "note": "this request was refused on its INPUT, before payment was ever required. Fix the body and POST again to receive the full 402 challenge."
+    }
+   }
+  },
+  "chain=arc-testnet — the 402 quote for the same address": {
+   "httpStatus": 402,
+   "body": {
+    "x402Version": 2,
+    "resource": {
+     "url": "https://app.tikpema.xyz/api/dd-analyze",
+     "description": "DD on-chain due-diligence report (Arc Testnet) — $0.06 USDC per report",
+     "mimeType": "application/json"
+    },
+    "error": "Payment required",
+    "accepts": [
+     {
+      "scheme": "exact",
+      "network": "eip155:5042002",
+      "maxAmountRequired": "60000",
+      "amount": "60000",
+      "resource": "https://app.tikpema.xyz/api/dd-analyze",
+      "description": "DD on-chain due-diligence report (Arc Testnet) — $0.06 USDC per report",
+      "mimeType": "application/json",
+      "payTo": "0xb407967319d56218c7e1c369125490e665a16ac4",
+      "maxTimeoutSeconds": 604900,
+      "asset": "0x3600000000000000000000000000000000000000",
+      "extra": {
+       "name": "GatewayWalletBatched",
+       "version": "1",
+       "verifyingContract": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
+      }
+     }
+    ],
+    "howToCall": {
+     "method": "POST",
+     "contentType": "application/json",
+     "request": {
+      "type": "object",
+      "required": [
+       "address",
+       "chain"
+      ],
+      "properties": {
+       "address": {
+        "type": "string",
+        "pattern": "^0x[0-9a-fA-F]{40}$",
+        "description": "the subject: a 0x-prefixed 20-byte address"
+       },
+       "chain": {
+        "type": "string",
+        "enum": [
+         "arc-testnet"
+        ],
+        "description": "⚠️ REQUIRED. An address alone does not identify a chain — the same address holds different code on different chains."
+       }
+      },
+      "additionalProperties": false
+     },
+     "response": {
+      "type": "object",
+      "description": "The signed report. ⚠️ A COVERAGE MANIFEST, NOT A CLEAN BILL — `coverage.notChecked` is as load-bearing as `coverage.checked`, and absence of a finding is never absence of risk.",
+      "properties": {
+       "schemaVersion": {
+        "type": "string",
+        "description": "report schema version; changes when the shape changes"
+       },
+       "severityMeaning": {
+        "type": "object",
+        "description": "⭐ SCOPE, NOT RANK: severity describes what a power CAN DO. It is never a score and does not order risks."
+       },
+       "subject": {
+        "type": "object",
+        "description": "the address, chain and block the report is about"
+       },
+       "shape": {
+        "type": "object",
+        "description": "how the subject was classified (proxy, diamond, plain, unknown) and the evidence for it"
+       },
+       "powers": {
+        "type": "array",
+        "description": "each power group the catalogue knows about, and what was observed for it"
+       },
+       "coverage": {
+        "type": "object",
+        "description": "⭐ THE LOAD-BEARING FIELD. `checked` / `notChecked` / `totals` / `summary`, generated from what actually ran. Every group in the catalogue appears in exactly one list — a group that is neither run nor skipped makes the report INVALID rather than clean."
+       },
+       "reads": {
+        "type": "array",
+        "description": "the RPC reads performed, with endpoint and retry counts — the audit trail behind the manifest"
+       },
+       "refusal": {
+        "type": [
+         "object",
+         "null"
+        ],
+        "description": "non-null when the request was refused before or during analysis; the reason is stated, never implied by an empty result"
+       },
+       "attestation": {
+        "type": "object",
+        "description": "ERC-1271 signature verifiable against the on-chain owner of ERC-8004 agentId 851891, or {status:\"unsigned\"} — an unsigned report is NEVER charged for"
+       }
+      }
+     },
+     "openApiUrl": "https://app.tikpema.xyz/openapi.json",
+     "note": "Retry this exact request with an X-PAYMENT header carrying the authorization described in `accepts[0]`. The body shape does not change between the unpaid and paid call."
+    },
+    "subjectPreview": {
+     "address": "0x4ed4e862860bed51a9570b96d89af5e1b0efefed",
+     "basis": "predicted",
+     "observedAt": "quote-time",
+     "authority": "PREDICTED, not promised. This is derived from a single bytecode read taken when this quote was issued. The coverage manifest inside the delivered report is the MEASURED value and is the authority; if the address changes between this quote and the analysis, the manifest wins.",
+     "hasCode": false,
+     "expectedCoverage": "MINIMAL",
+     "detail": "This address has NO CONTRACT CODE. All 9 power groups in the catalogue are unobservable on it — there is no bytecode to find them in — so the report you receive will record nearly the whole catalogue as NOT CHECKED, with the reason for each. In a measured case this resolved to a single checked item out of the whole catalogue.",
+     "stillCharged": true,
+     "stillChargedWhy": "You are still charged the full price, and that is deliberate — see priceIsFlat. \"There is no contract code here, so none of these powers exist\" is an ANSWER about the subject, not a failure to answer. If you wanted a contract analysed, check the address before paying."
+    },
+    "whatYouAreBuying": {
+     "artifact": "one signed on-chain due-diligence report about the address and chain you named",
+     "price": "$0.06 USDC",
+     "attestation": "ERC-1271, verifiable against the on-chain owner of ERC-8004 agentId 851891",
+     "coverage": "an HONEST COVERAGE MANIFEST, not a clean bill. A report that could check little still settles and is still the product — it tells you exactly what was and was not checked, and that manifest is inside the signed payload so it cannot be stripped. ⚠️ THE FLOOR IS LOW, REAL, AND PREDICTABLE: for an address with NO CONTRACT CODE, all 9 power groups are unobservable and the report can come back with a single checked item out of the whole catalogue — at the same full price. That is not a degraded case; it is the deterministic answer for such an address, and subjectPreview above tells you in advance whether you are in it.",
+     "priceIsFlat": "The price does NOT scale with coverage, and that is deliberate. A coverage-scaled price would pay us more for reporting more coverage — an incentive to overstate what we actually checked, on the one number you cannot independently audit before you buy. A flat price removes that incentive entirely: we gain nothing from claiming a check we did not make, so the manifest can be believed. You are paying for a truthful account of what is knowable about this address — including, when it is the truth, \"almost nothing is knowable here, and here is exactly why\".",
+     "notCharged": "you are not charged if the engine could not produce an answer about the subject — an outage, an unreachable chain, or a refusal returns the report free and leaves your authorization unspent. ⭐ THE DISTINCTION THAT DECIDES WHETHER YOU PAY: \"there was NOTHING to check\" is an ANSWER and IS charged — an address with no contract code has no powers to find, and establishing that is a finding. \"We COULD NOT check\" is OUR instrument failing and is FREE. Thin coverage by itself is never a refund reason; a broken instrument always is."
+    },
+    "settlement": {
+     "model": "402 → pay → 202 + handle → retrieve → 200",
+     "why": "Circle Gateway settles in delayed batches, so facilitator acceptance is NOT payment. The artifact is withheld until payTo's Gateway balance actually reflects the money.",
+     "attribution": "AGGREGATE-ONLY. Confirmation reads availableBalance(USDC, payTo); it cannot distinguish concurrent equal-amount payments. This is a known testnet limitation, not a guarantee of per-payment attribution.",
+     "entitlementNeverExpires": true
+    }
+   }
+  }
+ }
+}

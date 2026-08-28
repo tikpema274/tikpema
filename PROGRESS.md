@@ -1,5 +1,81 @@
 ---
 
+# ⚖️ THE COMPARISON, ON ONE SUBJECT — and the free probe answered what the $0.75 could not
+
+**2026-08-28.** DD probed **free** about the same token the paid deep-dd report covers (DEGEN,
+`0x4ed4E862…efed`). Two unpaid POSTs, captured at
+`evidence/competitor/dd-same-subject-probes-2026-08-28.json`. ⛔ **Nothing paid, nothing signed** —
+an unpaid POST cannot settle.
+
+## 🚨 THE HEADLINE — NEITHER SERVICE CAN ANALYZE THE OTHER'S CHAIN
+
+deep-dd is **Base-only**. DD is **arc-testnet-only**. DEGEN is a Base mainnet token, so
+**DD has no answer for it at all.** ⚠️ **That is a real product limitation, not a framing
+difference: for this token deep-dd returns something and DD returns nothing.** Recorded first
+because every comparison below sits underneath it.
+
+## ⭐⭐ THE FREE PROBE ANSWERED THE QUESTION THE PURCHASE COULD NOT
+
+The $0.75 report came back `degraded: false`, 5/5 sub-checks returning — **the happy path only**,
+and the recorded limit said the real question was *"whether a failed sub-check is NAMED or SILENTLY
+OMITTED."*
+
+**Asking DD about an unsupported chain is that case, and it costs nothing.** `HTTP 400`, and the
+body is **a complete report**, not an error string:
+
+```
+refusal: { reason: "unsupported-chain",
+  detail: "this service analyzes arc-testnet only; refusing \"base\". Any other chain is
+   unexercised and unverified here, and answering anyway would be a confident answer
+   about something never tested." }
+coverage: { checked: 0, notChecked: 9 }
+```
+
+⭐ **All 9 power groups enumerated individually, each carrying its own reason** — `emergencyWithdraw`,
+`feesSettable`, `setStrategy`, `setFeeRecipient`, `transferOwnership`, `pausable`, `upgradeable`,
+`denylist`, `withdrawalDelay`, every one *"request refused before any analysis ran
+(unsupported-chain) — nothing was scanned."* **Nothing silently dropped, and the catalogue is
+accounted for at zero coverage.** `attestation.status` is correctly `unsigned`: *"input rejected
+before analysis — there is no on-chain claim to attest."*
+
+⚠️ **AND THE SYMMETRIC PROBE WAS NOT RUN.** deep-dd's degraded behaviour is still unmeasured — it
+would need a subject that breaks one of their feeds, which is not purchasable on demand. **So this
+is DD's failure path against deep-dd's success path, and that asymmetry is the honest shape of the
+evidence, not a result.**
+
+## Structural comparison
+
+| | **deep-dd** — $0.75, Base | **DD** — $0.06, Arc testnet |
+|---|---|---|
+| success output | verdict, safetyScore 58/100, 5 factors / 5 risks / 5 positives, prose assessments | powers found, per-power severity, coverage manifest |
+| **scoring** | **one 0–100 score** + CAUTION/GO | ⛔ **refuses to score** — `severityMeaning: "scope-not-rank… MUST NOT be summed, ranked, averaged or aggregated into a score"` |
+| coverage on success | `degraded` flag; 2 of 5 sub-checks carry scope notes | full manifest, `checked` vs `notChecked` with reasons, **inside the signed payload** |
+| **coverage on failure** | ⚠️ **UNMEASURED** | ⭐ **9/9 enumerated with reasons — verified above** |
+| attestation | none; `inputHash` self-asserted | ERC-1271 against agentId 851891 |
+| charging on refusal | flagship is baseline tier, no `refundable` | *"you are not charged if the engine could not produce an answer"* |
+| pre-purchase warning | free 8-field sample of a **past** run on a fixed example | `subjectPreview` for **your** subject, before you pay |
+
+## ⭐ THE SHARPEST DIFFERENCE IS PHILOSOPHICAL, NOT FEATURE-LEVEL
+
+**deep-dd compresses to a number; DD refuses to.** `safetyScore: 58` + `verdict: caution` against
+*"scope-not-rank… non-ordinal."* **These are opposite products.** A buyer who wants one comparable
+number gets it from deep-dd and is explicitly denied it by DD. ⛔ Neither is obviously right, and
+recording this as a DD advantage would be the mistake — a score is what most buyers ask for.
+
+## What DD warns before taking money, on the same address
+
+For `0x4ed4E862…efed` on Arc, the unpaid 402's `subjectPreview` says: *"This address has NO CONTRACT
+CODE. All 9 power groups are unobservable… the report will record nearly the whole catalogue as NOT
+CHECKED, with the reason for each… You are still charged the full price, and that is deliberate."*
+Plus the flat-price argument: *"a coverage-scaled price would pay us more for reporting more
+coverage — an incentive to overstate what we actually checked, on the one number you cannot
+independently audit before you buy."*
+
+⛔ **NO CONCLUSION ABOUT PROSPECTS.** Two limits stand: DD's own SUCCESSFUL report was never
+purchased and is not shown, and DD cannot answer for this token at all.
+
+---
+
 # ⭐⭐⭐ TWO INSTRUMENT FINDINGS, AND ONE OF THEM WOULD HAVE COST MONEY
 
 **2026-08-28.** Deployed the Base SCA, then bought one deep-dd report for **$0.75** — settled
