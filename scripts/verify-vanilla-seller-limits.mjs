@@ -34,8 +34,12 @@ const PRICE = "10000";
 
 // ── the Circle call is the thing being protected: count it, never make it ──
 let circleCalls = 0;
+// ⭐ `circleThrow`, when set, makes the settle call FAIL — the only way to reach the seller's catch
+// block. Every suite in this repo mocked circle() to SUCCEED, so the settle failure path (the one
+// that decides what a buyer is told about a rejected payment) had no behavioural coverage at all.
+let circleThrow = null;
 mock.module("../netlify/functions/_circle.mjs", { namedExports: {
-  circle: () => ({ createContractExecutionTransaction: async () => { circleCalls++; return { data: { id: "tx" } }; } }),
+  circle: () => ({ createContractExecutionTransaction: async () => { circleCalls++; if (circleThrow) throw circleThrow; return { data: { id: "tx" } }; } }),
   waitForTx: async () => "0x" + "ab".repeat(32),
   TxPendingError: class extends Error {},
 }});
@@ -65,6 +69,28 @@ mock.module("../netlify/functions/_blobs.mjs", { namedExports: {
   connectBlobs: () => {}, strongReadAvailable: () => true, lastConnect: {}, UNCACHED_KEY: "x",
 }});
 
+// ⭐ The REAL error constructors, not imitations: the raw AxiosError v9 throws, and the SDK's own
+// `fromAxiosError` that mints v10's typed error. The v10 copy is located wherever it lives — nested
+// under adapter-circle-wallets today, top-level once the bump lands — and its ABSENCE IS A FAILURE,
+// never a skip. [[absence-must-never-read-as-safe]]
+const { AxiosError } = await import("axios");
+let fromAxiosError = null;
+{
+  const { readdirSync, existsSync } = await import("node:fs");
+  const root = "node_modules/@circle-fin";
+  const cands = [];
+  if (existsSync(root)) for (const p of readdirSync(root)) {
+    cands.push(`../${root}/${p}/dist/developer-controlled-wallets.es.js`);
+    const n = `${root}/${p}/node_modules/@circle-fin/developer-controlled-wallets`;
+    if (existsSync(n)) cands.push(`../${n}/dist/developer-controlled-wallets.es.js`);
+  }
+  for (const rel of cands) {
+    const url = new URL(rel, import.meta.url);
+    if (!existsSync(url)) continue;
+    try { const m = await import(url.href); if (typeof m.fromAxiosError === "function") { fromAxiosError = m.fromAxiosError; break; } } catch {}
+  }
+}
+
 const { handler } = await import("../netlify/functions/x402-vanilla-seller.mjs");
 process.env.VANILLA_SELLER_ADDRESS = SELLER;
 process.env.VANILLA_SELLER_WALLET_ID = "wallet-id";
@@ -79,11 +105,14 @@ const post = (from = "0x000000000000000000000000000000000000bEEF") => handler({
     payload: { authorization: { from, to: SELLER, value: PRICE, validAfter: "0",
       validBefore: String(now() + 600), nonce: "0x" + (++nonceSeq).toString(16).padStart(64, "0") },
       signature: "0x" + "cd".repeat(65) } }) }, body: "{}", blobs: "ctx" });
-const reset = () => { circleCalls = 0; blobStore = new Map(); blobReadable = true; rpcThrows = false; };
+const reset = () => { circleCalls = 0; blobStore = new Map(); blobReadable = true; rpcThrows = false; circleThrow = null; };
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════╗");
 console.log("║  ARMED SELLER — one request must not equal one Circle API call      ║");
 console.log("╚══════════════════════════════════════════════════════════════════════╝");
+check("⭐ the v10 typed-error factory is present (needed by §7)", typeof fromAxiosError === "function",
+  typeof fromAxiosError === "function" ? "" : "SEARCHED node_modules/@circle-fin AND FOUND NONE");
+if (typeof fromAxiosError !== "function") { console.log("\n❌ cannot test the v10 shape without the SDK's own factory — refusing to report a pass."); process.exit(1); }
 
 await section("── 1. A PAYER WHO CANNOT COVER NEVER REACHES CIRCLE ────────────────", async () => {
   reset(); payerBalance = 0n;
@@ -148,6 +177,60 @@ await section("── 6. 🚨 A MISCONFIGURED CEILING MUST STOP THE SELLER, NOT 
   check("⭐ unset falls back to the default and still sells", (await post()).statusCode === 200);
   process.env.VANILLA_SELLER_SETTLES_PER_MIN = saved;
 });
+
+// ═══ 7. ⭐⭐ THE SETTLE FAILURE PATH — BOTH SDK ERROR SHAPES ═══════════════════════════════════
+// 🚨 THE GAP THIS CLOSES. Sections 1–6 all mock circle() to SUCCEED, so the seller's catch block
+// — which decides what a buyer is told when their payment is REJECTED — was never executed by any
+// suite. It is also unreachable from a draft deploy (VANILLA_SELLER_* are production-scoped, so
+// the handler 500s at its env guard 150 lines earlier) and from every read-only prod probe (they
+// all return before settle). This is the only place it can be exercised before the SDK bump.
+//
+// ⭐ WHY BOTH SHAPES. developer-controlled-wallets v9 throws a raw AxiosError with the reason at
+// `e.response.data`; v10 wraps 43 methods and throws a typed HttpResponseError that has NO
+// `.response` at all. The seller reads that reason to tell the buyer why settlement failed, so the
+// two majors must produce the SAME answer. The v10 error is built by the SDK's own
+// `fromAxiosError`, from the real 10.7.1 on disk — not a hand-rolled imitation.
+await section("── 7. ⭐⭐ A REJECTED SETTLEMENT READS THE SAME ON v9 AND v10 ───────", async () => {
+  const data = { code: 155201, message: "FiatTokenV2: authorization is used or canceled" };
+  const mkAxios = () => new AxiosError(
+    "Request failed with status code 400", "ERR_BAD_REQUEST",
+    { url: "/v1/w3s/developer/transactions/contractExecution", method: "post" }, {},
+    { status: 400, statusText: "", headers: {}, config: {}, data });
+
+  reset(); payerBalance = 10_000_000n; circleThrow = mkAxios();
+  const v9 = await post();
+  reset(); payerBalance = 10_000_000n; circleThrow = fromAxiosError(mkAxios());
+  const v10 = await post();
+
+  check("v9  raw AxiosError    → the seller answers 402", v9.statusCode === 402, `got ${v9.statusCode}`);
+  check("v10 typed HttpError   → the seller answers 402", v10.statusCode === 402, `got ${v10.statusCode}`);
+  // ⭐⭐ THE ASSERTION THE SHIM EXISTS FOR. Before it, v9 surfaced the structured body and v10
+  // surfaced only a bare message — the buyer silently lost Circle's error code on the newer major.
+  check("⭐⭐ both shapes produce a BYTE-IDENTICAL response body",
+    v9.body === v10.body, v9.body === v10.body ? "" : `\n     v9:  ${String(v9.body).slice(0, 200)}\n     v10: ${String(v10.body).slice(0, 200)}`);
+  for (const [label, r] of [["v9", v9], ["v10", v10]]) {
+    const b = JSON.parse(r.body);
+    check(`${label} keeps Circle's numeric code (155201) for the buyer`, /155201/.test(b.reason ?? ""), String(b.reason).slice(0, 120));
+    check(`${label} keeps the revert reason text`, /authorization is used or canceled/.test(b.reason ?? ""));
+    // ⚠️ The headline must not claim the chain saw something we did not observe.
+    check(`${label} does not assert an on-chain revert it never witnessed`,
+      !/reverted on-chain/.test(b.error ?? "") || /could not determine/.test(b.error ?? ""), String(b.error));
+    check(`${label} still re-issues the challenge so the buyer can retry correctly`, Array.isArray(b.accepts) && b.accepts.length === 1);
+  }
+
+  // A transport failure has no status and no body — the seller must still answer, and must not
+  // invent a reason it was never given.
+  reset(); payerBalance = 10_000_000n;
+  circleThrow = new AxiosError("connect ECONNREFUSED", "ECONNREFUSED", { url: "/x", method: "post" }, {}, undefined);
+  const t9 = await post();
+  reset(); payerBalance = 10_000_000n;
+  circleThrow = fromAxiosError(new AxiosError("connect ECONNREFUSED", "ECONNREFUSED", { url: "/x", method: "post" }, {}, undefined));
+  const t10 = await post();
+  check("⭐ a transport failure answers 402 on both shapes", t9.statusCode === 402 && t10.statusCode === 402, `${t9.statusCode}/${t10.statusCode}`);
+  check("⭐ …identically", t9.body === t10.body);
+  check("⭐ …and names the transport cause rather than inventing one", /ECONNREFUSED/.test(JSON.parse(t9.body).reason ?? ""), String(JSON.parse(t9.body).reason).slice(0, 100));
+});
+
 
 console.log("\n════════════════════════════════════════════════════════════════════════");
 console.log(`${fail ? "❌" : "✅"} ${pass} passed, ${fail} failed`);
