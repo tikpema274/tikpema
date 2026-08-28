@@ -1,5 +1,92 @@
 ---
 
+# 🚨 A payTo FROM DOCUMENTATION WOULD HAVE PRODUCED A CLEAN, COMPLETE, VERIFIED ZERO
+
+**2026-08-28.** CoinMarketCap sells crypto data over x402 — the first **established company** found
+doing this, against a census population of solo builders and demos. Artifact:
+`evidence/competitor/coinmarketcap-x402-2026-08-28.json`. ⛔ Nothing paid, nothing signed.
+
+## ⭐⭐⭐ THE ADDRESS CORRECTION IS THE FINDING
+
+| | |
+|---|---|
+| supplied | `0x271189c8…0908` — from the **base64 example in their MARKETING PAGE** |
+| live | `0x3C5f3a6c…3eeA` — from the **402 challenge itself**, identical on every endpoint probed |
+| the supplied one is | a **CONTRACT**, 13.93 USDC, **ZERO transfers in 7 days** (302,401/302,401 blocks, complete) |
+| the live one is | an **EOA**, 0.97 USDC |
+
+> ⛔ **A SCAN OF THE SUPPLIED ADDRESS RETURNS A CLEAN, COMPLETE, ARITHMETICALLY-VERIFIED ZERO —
+> AND READS AS "CMC EARNS NOTHING."** Full coverage. No truncation. Every guard green. **Nothing
+> about that result looks wrong**, and it would have been published as the headline of a piece
+> arguing the market is empty at the top.
+
+⭐ **THE RULE: A `payTo` COMES FROM THE LIVE 402, NEVER FROM DOCUMENTATION.** A marketing example
+is a value someone typed — stale, or different by design. It was checked here only because the
+challenge was probed before the scan was trusted, and the two disagreed.
+
+⚠️ Fifth instance this week of **a value taken rather than derived** — after a hand-written burn
+selector, a hand-written dropdown key, a scan loop that dropped failures silently, and a human's
+"bridge confirmed". This one arrived from a **vendor's own documentation**, which is the source
+that feels most authoritative and is not.
+
+## The Base numbers — real usage, trivial revenue
+
+**Window `2026-08-21T17:43:11Z → 2026-08-28T17:43:11Z`, 302,401/302,401 blocks covered, 0
+incomplete.**
+
+- **28 inbound / 0.280000 USDC · 0 outbound**
+- ⭐ **EVERY transfer is exactly `10000` atomic = $0.01 — their published list price.** One amount.
+  No dust, no funding, no outliers. **The cleanest sales signal in any scan this week.**
+- **16 distinct senders**, max 3 each — no dominant counterparty, no self-sweep shape
+- **Not a catalogue till**: absent from BOTH the 2026-08-27 Bazaar harvest (14,740 listings) and
+  Circle's index (1,003), and one price across all endpoints
+- ⛔ Census limit carried: an inbound transfer is not a purchase. **Upper bound.**
+
+## ⛔ BSC IS UNMEASURED, NOT ZERO
+
+**Six of the seven accepts are BNB Chain** — Base is the *smaller* rail. Seven days on BSC is
+**1,343,701 blocks** (block time **measured** at 0.45s, not assumed).
+
+| RPC | 7-day log depth |
+|---|---|
+| `bsc-rpc.publicnode.com` | ❌ *"Archive requests require a personal token"* past **~1.3 h** |
+| `bsc-dataseed.binance.org` / `defibit` | ❌ limit exceeded |
+| `1rpc.io/bnb` | ❌ `eth_getLogs` limited to a **50-block** range |
+| `blastapi` / `ankr` | ❌ rate-limited / requires auth |
+| `bsc.drpc.org` | ✅ **has** archive depth — then rate-limited us out on the second call |
+
+⭐⭐ **AND THE SCAN REFUSED.** The first attempt produced **40 bad windows, 0 blocks covered**, and
+the script wrote `{status:"REFUSED"}` rather than reporting the zero rows it had collected. **A
+partial distribution is WRONG, not weak** — and a reported "0 transfers" would have read as "CMC
+earns nothing on BSC", the *same* false absence the address correction above avoided. Two chances
+to publish a confident zero today; the discipline caught both.
+
+⚠️ Balances only (a **stock**, not a flow — they cannot yield a 7-day figure; decimals read
+on-chain, all 18): United Stables 5.72 · USDC 13.98 · WLFI 6.25 · USDT 26.24.
+
+## ⛔ THE CONCLUSION IS HELD OPEN
+
+**Base shows REAL USAGE at TRIVIAL REVENUE.** 28 clean list-price payments from 16 independent
+senders is **materially different in kind** from the census's 53-of-80 zeros — that is not nothing.
+But **$0.28/week is not meaningful revenue for CoinMarketCap** either.
+
+> ⚠️ **"Near zero at the top of the market too" is drawn from the SMALLER RAIL and is NOT YET
+> SUPPORTED.** Six of seven rails are BSC, and the balances there are larger than Base's flow.
+> Finishing it needs an archive-capable BSC endpoint with a key.
+
+## ⭐ Their 402 independently confirms the spec corrections we shipped
+
+Captured verbatim: **`x402Version: 2`**, a top-level **`resource` object**, and the
+**`PAYMENT-REQUIRED` header** — the three things this week's x402 work corrected DD to. An
+established company's live implementation agreeing with them is a second instrument on those
+decisions.
+
+⚠️ And one contrast worth noting: **`maxTimeoutSeconds: 30` on all seven accepts, against our
+604900.** Not necessarily wrong on our side — different settlement rails — but a four-order-of-
+magnitude gap is worth an explanation we do not currently have.
+
+---
+
 # ✅ THE MANUAL BRIDGE RAN END TO END — and the fee reconciles across six sources
 
 **2026-08-28.** First live run of the user-signed bridge, by the repo owner, on Arc testnet →

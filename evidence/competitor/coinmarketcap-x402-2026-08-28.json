@@ -1,0 +1,500 @@
+{
+ "_what": "CoinMarketCap's x402 endpoints: the live 402 challenge verbatim, plus a 7-day census-method scan of the payTo it actually declares.",
+ "_why": "The first ESTABLISHED company found selling over x402, as opposed to solo builders and demos. The census's '53 of 80 sellers received nothing' was always vulnerable to 'those were small builders'; this is the same measurement at the top of the market.",
+ "capturedAt": "2026-08-28",
+ "🚨 _addressCorrection": {
+  "supplied": "0x271189c860DB25bC43173B0335784aD68a680908",
+  "suppliedFrom": "the base64 example in CoinMarketCap's MARKETING PAGE (coinmarketcap.com/api/x402/)",
+  "live": "0x3C5f3a6cE224BB89D72f5EB4232ecC27F67B3eeA",
+  "liveFrom": "the 402 challenge itself, identical on every endpoint probed",
+  "supplied_is": "a CONTRACT holding 13.93 USDC with ZERO transfers in 7 days (302,401/302,401 blocks, complete)",
+  "live_is": "an EOA holding 0.97 USDC",
+  "⛔ why this is the headline": "A scan of the supplied address returns a clean, complete, arithmetically-verified ZERO — and reads as 'CMC earns nothing'. Nothing about that result looks wrong. THE RULE: a payTo comes from the LIVE 402, never from documentation. A marketing example is a value someone typed, and this one is stale or different by design."
+ },
+ "base": {
+  "address": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+  "chain": "Base mainnet (eip155:8453)",
+  "window": {
+   "fromTime": "2026-08-21T17:43:11.000Z",
+   "toTime": "2026-08-28T17:43:11.000Z",
+   "fromBlock": 50272422,
+   "toBlock": 50574822,
+   "blocks": 302401,
+   "coveredBlocks": 302401,
+   "complete": true
+  },
+  "inboundTransfers": 28,
+  "inboundUsdc": 0.28,
+  "outboundTransfers": 0,
+  "amountHistogram": {
+   "10000": 28
+  },
+  "⭐ histogramNote": "EVERY transfer is exactly 10000 atomic = $0.01, their published list price. One amount, no dust, no funding, no outliers — the cleanest sales signal seen in any scan this week.",
+  "distinctSenders": 16,
+  "senderCounts": {
+   "0x09ed4a81b688f50da7bafc56cfa71cb958caaa63": 3,
+   "0x79f896ff38691931fc2494610c106ad755e6f758": 1,
+   "0xc59e74ed6386b2a12d892fff2509a6965a0498dc": 3,
+   "0xae539098d5b7fac564469b1cf1ecc450966301e0": 1,
+   "0xf9168d255cc2ba50a9707e127f673e97d04701e3": 3,
+   "0x787b0fb7599d3a5bd4f106f32a545fb158d078c6": 1,
+   "0x2a079176ec3ac96cc094e9413f9d7bb54cd17bae": 2,
+   "0x40e20516611bc958cc1059cf923a0569b8538926": 3,
+   "0x6777e11fb0a7917b8110b7dab9188aa3f6d23986": 1,
+   "0x8ddc65fd25a58e84bbab1346884b817fb5717574": 1,
+   "0x4cf871998105338780a4c7d684cab797d77a57b1": 1,
+   "0x7a2cd715013f5df4e5ad27e1d046605bc0effa9c": 1,
+   "0xf7fc0cb470b6342b2515d59bdc4ea1faafebf276": 1,
+   "0x01456e681f654b4597651b5436275757f891ae88": 1,
+   "0x3382a101c7a079ec06f253ee0069cc7bb56e8e57": 2,
+   "0xfe620bd0db63dbf7ad3bac7eb5c1670527416a90": 3
+  },
+  "catalogueTill": "NO — this payTo appears in NEITHER the 2026-08-27 Bazaar harvest (14,740 listings) nor Circle's index (1,003). CMC is absent from both directories, and its own challenge quotes one price across all endpoints, so this total does not pool many products.",
+  "⛔ limit": "An inbound transfer is NOT a purchase. Funding, refunds and unrelated transfers are indistinguishable at this resolution. Every count is an UPPER BOUND on sales."
+ },
+ "⛔ bsc": {
+  "status": "UNMEASURED — NOT ZERO",
+  "why": "Six of the seven accepts are BNB Chain, so Base is the SMALLER rail. A 7-day BSC scan needs 1,343,701 blocks (measured block time 0.45s), and no free RPC serves that depth.",
+  "rpcSurvey": {
+   "bsc-rpc.publicnode.com": "archive token required beyond ~1.3h; 5,000-block cap",
+   "bsc-dataseed.binance.org / defibit": "limit exceeded",
+   "1rpc.io/bnb": "eth_getLogs limited to a 50-block range",
+   "bsc-mainnet.public.blastapi.io": "rate-limited",
+   "rpc.ankr.com/bsc": "requires authentication",
+   "bsc.drpc.org": "HAS archive depth — then rate-limited us out on the second call"
+  },
+  "⭐ theScanREFUSED": "The first attempt produced 40 bad windows and 0 blocks covered, and the script REFUSED to write a result rather than reporting the zero rows it had collected. A partial distribution is WRONG, not weak — and a reported '0 transfers' would have read as 'CMC earns nothing on BSC', the same false absence the address correction above avoids.",
+  "balancesOnly": {
+   "note": "A stock, not a flow — balances cannot yield a 7-day figure. Decimals read on-chain, all 18.",
+   "United Stables": 5.72,
+   "USDC (BSC)": 13.98,
+   "WLFI USD": 6.25,
+   "USDT (BSC)": 26.24
+  },
+  "toFinish": "an archive-capable BSC endpoint with a key, or a block-explorer API"
+ },
+ "⛔ conclusion": "HELD OPEN. Base shows REAL USAGE at TRIVIAL REVENUE: 28 clean list-price payments from 16 independent senders is materially different in kind from the census's 53-of-80 zeros, but $0.28/week is not meaningful revenue for CoinMarketCap. ⚠️ Six of seven rails are BSC and the balances there are larger, so 'near zero at the top of the market too' is drawn from the SMALLER rail and is NOT yet supported.",
+ "challenge": {
+  "_what": "The live 402, verbatim. Independent confirmation of the x402 v2 spec corrections shipped this week: x402Version 2, a top-level `resource` object, and the PAYMENT-REQUIRED header.",
+  "endpoint": "https://pro-api.coinmarketcap.com/x402/v3/cryptocurrency/quotes/latest?symbol=BTC",
+  "method": "GET, no payment header. Nothing paid, nothing signed.",
+  "httpStatus": 402,
+  "⭐ notable": {
+   "acceptsCount": 7,
+   "maxTimeoutSeconds": [
+    30
+   ],
+   "ourMaxTimeoutSeconds": 604900,
+   "rails": [
+    "eip155:56 United Stables via permit2-exact",
+    "eip155:56 United Stables via eip3009",
+    "eip155:8453 USD Coin via eip3009",
+    "eip155:56 USD Coin via permit2-exact",
+    "eip155:56 World Liberty Financial USD via permit2-exact",
+    "eip155:56 World Liberty Financial USD via eip3009",
+    "eip155:56 Tether USD via permit2-exact"
+   ],
+   "basePriceAtomic": "10000"
+  },
+  "paymentRequiredHeaderB64": "eyJ4NDAyVmVyc2lvbiI6MiwicmVzb3VyY2UiOnsidXJsIjoiaHR0cHM6Ly9wcm8tYXBpLmNvaW5tYXJrZXRjYXAuY29tL3g0MDIvdjMvY3J5cHRvY3VycmVuY3kvcXVvdGVzL2xhdGVzdCIsImRlc2NyaXB0aW9uIjoiR2V0IHRoZSBsYXRlc3QgbWFya2V0IHF1b3RlcyBmb3Igb25lIG9yIG1vcmUgY3J5cHRvY3VycmVuY2llcy4iLCJtaW1lVHlwZSI6ImFwcGxpY2F0aW9uL2pzb24ifSwiYWNjZXB0cyI6W3sic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiZWlwMTU1OjU2IiwiYXNzZXQiOiIweGNFMjQ0MzlGMkQ5QzZhMjI4OUY3NDExMjBGRTIwMjI0OEI2NjY2NjYiLCJwYXlUbyI6IjB4M0M1ZjNhNmNFMjI0QkI4OUQ3MmY1RUI0MjMyZWNDMjdGNjdCM2VlQSIsIm1heFRpbWVvdXRTZWNvbmRzIjozMCwiZXh0cmEiOnsibmFtZSI6IlVuaXRlZCBTdGFibGVzIiwidmVyc2lvbiI6IjEiLCJ4NDAyUGF5bWVudENvbmZpZ0lkIjoiNjllZjI0MmU1MDQ1NWRjY2UwMmYzMDYxIiwiYXNzZXRUcmFuc2Zlck1ldGhvZCI6InBlcm1pdDItZXhhY3QiLCJzaWduZXJBZGRyZXNzIjoiMHgzNEY3YTY2MTE2MDc4MENlMTM0NmU2RDdCOTZEMmJFMjQ0NTkwODk5Iiwic3BlbmRlckFkZHJlc3MiOiIweDMwMzhmN2FjM2I0RDFhM2ZlODg2QmRDQjVjRDAxZTlmNkJEZDg2MzMifSwiYW1vdW50IjoiMTAwMDAwMDAwMDAwMDAwMDAifSx7InNjaGVtZSI6ImV4YWN0IiwibmV0d29yayI6ImVpcDE1NTo1NiIsImFzc2V0IjoiMHhjRTI0NDM5RjJEOUM2YTIyODlGNzQxMTIwRkUyMDIyNDhCNjY2NjY2IiwicGF5VG8iOiIweDNDNWYzYTZjRTIyNEJCODlENzJmNUVCNDIzMmVjQzI3RjY3QjNlZUEiLCJtYXhUaW1lb3V0U2Vjb25kcyI6MzAsImV4dHJhIjp7Im5hbWUiOiJVbml0ZWQgU3RhYmxlcyIsInZlcnNpb24iOiIxIiwieDQwMlBheW1lbnRDb25maWdJZCI6IjY5ZWYyNDJlNTA0NTVkY2NlMDJmMmU3NyIsImFzc2V0VHJhbnNmZXJNZXRob2QiOiJlaXAzMDA5Iiwic2lnbmVyQWRkcmVzcyI6IjB4MzRGN2E2NjExNjA3ODBDZTEzNDZlNkQ3Qjk2RDJiRTI0NDU5MDg5OSJ9LCJhbW91bnQiOiIxMDAwMDAwMDAwMDAwMDAwMCJ9LHsic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiZWlwMTU1Ojg0NTMiLCJhc3NldCI6IjB4ODMzNTg5ZkNENmVEYjZFMDhmNGM3QzMyRDRmNzFiNTRiZEEwMjkxMyIsInBheVRvIjoiMHgzQzVmM2E2Y0UyMjRCQjg5RDcyZjVFQjQyMzJlY0MyN0Y2N0IzZWVBIiwibWF4VGltZW91dFNlY29uZHMiOjMwLCJleHRyYSI6eyJuYW1lIjoiVVNEIENvaW4iLCJ2ZXJzaW9uIjoiMiIsIng0MDJQYXltZW50Q29uZmlnSWQiOiI2OTlkYmFiNzlmMzJmZmRlNjUwMTA0YWEiLCJhc3NldFRyYW5zZmVyTWV0aG9kIjoiZWlwMzAwOSJ9LCJhbW91bnQiOiIxMDAwMCJ9LHsic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiZWlwMTU1OjU2IiwiYXNzZXQiOiIweDhBQzc2YTUxY2M5NTBkOTgyMkQ2OGI4M2ZFMUFkOTdCMzJDZDU4MGQiLCJwYXlUbyI6IjB4M0M1ZjNhNmNFMjI0QkI4OUQ3MmY1RUI0MjMyZWNDMjdGNjdCM2VlQSIsIm1heFRpbWVvdXRTZWNvbmRzIjozMCwiZXh0cmEiOnsibmFtZSI6IlVTRCBDb2luIiwidmVyc2lvbiI6IjEiLCJ4NDAyUGF5bWVudENvbmZpZ0lkIjoiNjllZjI0MmY1MDQ1NWRjY2UwMmY0NTMwIiwiYXNzZXRUcmFuc2Zlck1ldGhvZCI6InBlcm1pdDItZXhhY3QiLCJzaWduZXJBZGRyZXNzIjoiMHgzNEY3YTY2MTE2MDc4MENlMTM0NmU2RDdCOTZEMmJFMjQ0NTkwODk5Iiwic3BlbmRlckFkZHJlc3MiOiIweDMwMzhmN2FjM2I0RDFhM2ZlODg2QmRDQjVjRDAxZTlmNkJEZDg2MzMifSwiYW1vdW50IjoiMTAwMDAwMDAwMDAwMDAwMDAifSx7InNjaGVtZSI6ImV4YWN0IiwibmV0d29yayI6ImVpcDE1NTo1NiIsImFzc2V0IjoiMHg4ZDBEMDAwRWU0NDk0OEZDOThjOUI5OEE0RkE0OTIxNDc2ZjA4QjBkIiwicGF5VG8iOiIweDNDNWYzYTZjRTIyNEJCODlENzJmNUVCNDIzMmVjQzI3RjY3QjNlZUEiLCJtYXhUaW1lb3V0U2Vjb25kcyI6MzAsImV4dHJhIjp7Im5hbWUiOiJXb3JsZCBMaWJlcnR5IEZpbmFuY2lhbCBVU0QiLCJ2ZXJzaW9uIjoiMSIsIng0MDJQYXltZW50Q29uZmlnSWQiOiI2YTBjMDAxOWYzN2QwZTJmNmM5YTM2MTAiLCJhc3NldFRyYW5zZmVyTWV0aG9kIjoicGVybWl0Mi1leGFjdCIsInNpZ25lckFkZHJlc3MiOiIweDM0RjdhNjYxMTYwNzgwQ2UxMzQ2ZTZEN0I5NkQyYkUyNDQ1OTA4OTkiLCJzcGVuZGVyQWRkcmVzcyI6IjB4MzAzOGY3YWMzYjREMWEzZmU4ODZCZENCNWNEMDFlOWY2QkRkODYzMyJ9LCJhbW91bnQiOiIxMDAwMDAwMDAwMDAwMDAwMCJ9LHsic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiZWlwMTU1OjU2IiwiYXNzZXQiOiIweDhkMEQwMDBFZTQ0OTQ4RkM5OGM5Qjk4QTRGQTQ5MjE0NzZmMDhCMGQiLCJwYXlUbyI6IjB4M0M1ZjNhNmNFMjI0QkI4OUQ3MmY1RUI0MjMyZWNDMjdGNjdCM2VlQSIsIm1heFRpbWVvdXRTZWNvbmRzIjozMCwiZXh0cmEiOnsibmFtZSI6IldvcmxkIExpYmVydHkgRmluYW5jaWFsIFVTRCIsInZlcnNpb24iOiIxIiwieDQwMlBheW1lbnRDb25maWdJZCI6IjZhMGMwMDYyZjM3ZDBlMmY2YzlhMzYxMiIsImFzc2V0VHJhbnNmZXJNZXRob2QiOiJlaXAzMDA5Iiwic2lnbmVyQWRkcmVzcyI6IjB4MzRGN2E2NjExNjA3ODBDZTEzNDZlNkQ3Qjk2RDJiRTI0NDU5MDg5OSJ9LCJhbW91bnQiOiIxMDAwMDAwMDAwMDAwMDAwMCJ9LHsic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiZWlwMTU1OjU2IiwiYXNzZXQiOiIweDU1ZDM5ODMyNmY5OTA1OWZGNzc1NDg1MjQ2OTk5MDI3QjMxOTc5NTUiLCJwYXlUbyI6IjB4M0M1ZjNhNmNFMjI0QkI4OUQ3MmY1RUI0MjMyZWNDMjdGNjdCM2VlQSIsIm1heFRpbWVvdXRTZWNvbmRzIjozMCwiZXh0cmEiOnsibmFtZSI6IlRldGhlciBVU0QiLCJ2ZXJzaW9uIjoiMSIsIng0MDJQYXltZW50Q29uZmlnSWQiOiI2OWVmMjQyZjUwNDU1ZGNjZTAyZjNjMmYiLCJhc3NldFRyYW5zZmVyTWV0aG9kIjoicGVybWl0Mi1leGFjdCIsInNpZ25lckFkZHJlc3MiOiIweDM0RjdhNjYxMTYwNzgwQ2UxMzQ2ZTZEN0I5NkQyYkUyNDQ1OTA4OTkiLCJzcGVuZGVyQWRkcmVzcyI6IjB4MzAzOGY3YWMzYjREMWEzZmU4ODZCZENCNWNEMDFlOWY2QkRkODYzMyJ9LCJhbW91bnQiOiIxMDAwMDAwMDAwMDAwMDAwMCJ9XSwiZXJyb3IiOiJQYXltZW50IHJlcXVpcmVkIn0=",
+  "body": {
+   "x402Version": 2,
+   "resource": {
+    "url": "https://pro-api.coinmarketcap.com/x402/v3/cryptocurrency/quotes/latest",
+    "description": "Get the latest market quotes for one or more cryptocurrencies.",
+    "mimeType": "application/json"
+   },
+   "accepts": [
+    {
+     "scheme": "exact",
+     "network": "eip155:56",
+     "asset": "0xcE24439F2D9C6a2289F741120FE202248B666666",
+     "payTo": "0x3C5f3a6cE224BB89D72f5EB4232ecC27F67B3eeA",
+     "maxTimeoutSeconds": 30,
+     "extra": {
+      "name": "United Stables",
+      "version": "1",
+      "x402PaymentConfigId": "69ef242e50455dcce02f3061",
+      "assetTransferMethod": "permit2-exact",
+      "signerAddress": "0x34F7a661160780Ce1346e6D7B96D2bE244590899",
+      "spenderAddress": "0x3038f7ac3b4D1a3fe886BdCB5cD01e9f6BDd8633"
+     },
+     "amount": "10000000000000000"
+    },
+    {
+     "scheme": "exact",
+     "network": "eip155:56",
+     "asset": "0xcE24439F2D9C6a2289F741120FE202248B666666",
+     "payTo": "0x3C5f3a6cE224BB89D72f5EB4232ecC27F67B3eeA",
+     "maxTimeoutSeconds": 30,
+     "extra": {
+      "name": "United Stables",
+      "version": "1",
+      "x402PaymentConfigId": "69ef242e50455dcce02f2e77",
+      "assetTransferMethod": "eip3009",
+      "signerAddress": "0x34F7a661160780Ce1346e6D7B96D2bE244590899"
+     },
+     "amount": "10000000000000000"
+    },
+    {
+     "scheme": "exact",
+     "network": "eip155:8453",
+     "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+     "payTo": "0x3C5f3a6cE224BB89D72f5EB4232ecC27F67B3eeA",
+     "maxTimeoutSeconds": 30,
+     "extra": {
+      "name": "USD Coin",
+      "version": "2",
+      "x402PaymentConfigId": "699dbab79f32ffde650104aa",
+      "assetTransferMethod": "eip3009"
+     },
+     "amount": "10000"
+    },
+    {
+     "scheme": "exact",
+     "network": "eip155:56",
+     "asset": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+     "payTo": "0x3C5f3a6cE224BB89D72f5EB4232ecC27F67B3eeA",
+     "maxTimeoutSeconds": 30,
+     "extra": {
+      "name": "USD Coin",
+      "version": "1",
+      "x402PaymentConfigId": "69ef242f50455dcce02f4530",
+      "assetTransferMethod": "permit2-exact",
+      "signerAddress": "0x34F7a661160780Ce1346e6D7B96D2bE244590899",
+      "spenderAddress": "0x3038f7ac3b4D1a3fe886BdCB5cD01e9f6BDd8633"
+     },
+     "amount": "10000000000000000"
+    },
+    {
+     "scheme": "exact",
+     "network": "eip155:56",
+     "asset": "0x8d0D000Ee44948FC98c9B98A4FA4921476f08B0d",
+     "payTo": "0x3C5f3a6cE224BB89D72f5EB4232ecC27F67B3eeA",
+     "maxTimeoutSeconds": 30,
+     "extra": {
+      "name": "World Liberty Financial USD",
+      "version": "1",
+      "x402PaymentConfigId": "6a0c0019f37d0e2f6c9a3610",
+      "assetTransferMethod": "permit2-exact",
+      "signerAddress": "0x34F7a661160780Ce1346e6D7B96D2bE244590899",
+      "spenderAddress": "0x3038f7ac3b4D1a3fe886BdCB5cD01e9f6BDd8633"
+     },
+     "amount": "10000000000000000"
+    },
+    {
+     "scheme": "exact",
+     "network": "eip155:56",
+     "asset": "0x8d0D000Ee44948FC98c9B98A4FA4921476f08B0d",
+     "payTo": "0x3C5f3a6cE224BB89D72f5EB4232ecC27F67B3eeA",
+     "maxTimeoutSeconds": 30,
+     "extra": {
+      "name": "World Liberty Financial USD",
+      "version": "1",
+      "x402PaymentConfigId": "6a0c0062f37d0e2f6c9a3612",
+      "assetTransferMethod": "eip3009",
+      "signerAddress": "0x34F7a661160780Ce1346e6D7B96D2bE244590899"
+     },
+     "amount": "10000000000000000"
+    },
+    {
+     "scheme": "exact",
+     "network": "eip155:56",
+     "asset": "0x55d398326f99059fF775485246999027B3197955",
+     "payTo": "0x3C5f3a6cE224BB89D72f5EB4232ecC27F67B3eeA",
+     "maxTimeoutSeconds": 30,
+     "extra": {
+      "name": "Tether USD",
+      "version": "1",
+      "x402PaymentConfigId": "69ef242f50455dcce02f3c2f",
+      "assetTransferMethod": "permit2-exact",
+      "signerAddress": "0x34F7a661160780Ce1346e6D7B96D2bE244590899",
+      "spenderAddress": "0x3038f7ac3b4D1a3fe886BdCB5cD01e9f6BDd8633"
+     },
+     "amount": "10000000000000000"
+    }
+   ],
+   "error": "Payment required"
+  }
+ },
+ "_method": "Census method verbatim: pinned token contract, BOTH directions, 4,000-block windows, CAP truncation guard, coverage tracked per window, refuse rather than report a truncated count.",
+ "rawScans": {
+  "livePayToBase": {
+   "status": "COMPLETE",
+   "address": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+   "fromBlock": 50272422,
+   "toBlock": 50574822,
+   "blocks": 302401,
+   "coveredBlocks": 302401,
+   "windows": 76,
+   "fromTime": "2026-08-21T17:43:11.000Z",
+   "toTime": "2026-08-28T17:43:11.000Z",
+   "rows": [
+    {
+     "dir": "in",
+     "from": "0x09ed4a81b688f50da7bafc56cfa71cb958caaa63",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50292445,
+     "tx": "0x3c892d6debf4f4665597ed00aaf62013dc9405a6bca146157f8c92e37228551c",
+     "li": 205
+    },
+    {
+     "dir": "in",
+     "from": "0x09ed4a81b688f50da7bafc56cfa71cb958caaa63",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50292464,
+     "tx": "0x4494fb7c209b4b1a1a6affbc87fb81b1930db58e6f160dc46533c0cb8a6634de",
+     "li": 1019
+    },
+    {
+     "dir": "in",
+     "from": "0x09ed4a81b688f50da7bafc56cfa71cb958caaa63",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50293057,
+     "tx": "0x16d9ef24d0f2d0a5bd701065fb1d7a11c4a2d190dcd5dc277424fea71bd3d27b",
+     "li": 1330
+    },
+    {
+     "dir": "in",
+     "from": "0x79f896ff38691931fc2494610c106ad755e6f758",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50316028,
+     "tx": "0x87e8b2355529627864a2260cc09f1a4f21b0c4d4261fc1c1b04be0362732ce06",
+     "li": 35
+    },
+    {
+     "dir": "in",
+     "from": "0xc59e74ed6386b2a12d892fff2509a6965a0498dc",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50329453,
+     "tx": "0x7cee328cf2f314feaf185c77990cc821cc130fb7bb361272a1d1fcf1612d5018",
+     "li": 130
+    },
+    {
+     "dir": "in",
+     "from": "0xae539098d5b7fac564469b1cf1ecc450966301e0",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50355214,
+     "tx": "0x06171a5090ba538e57433d8aa2c594cf473924475a0af4b8d6885dba8b0375eb",
+     "li": 383
+    },
+    {
+     "dir": "in",
+     "from": "0xf9168d255cc2ba50a9707e127f673e97d04701e3",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50415539,
+     "tx": "0x22debd3851d2d79471f0831743059041f1387a0e33238dec3af713f5bf8100a8",
+     "li": 163
+    },
+    {
+     "dir": "in",
+     "from": "0xf9168d255cc2ba50a9707e127f673e97d04701e3",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50415567,
+     "tx": "0x566a6b2f3119bbb0d63cbb3f9397a6eadd61cca54c7af2500fa3fbd922076bf8",
+     "li": 182
+    },
+    {
+     "dir": "in",
+     "from": "0xf9168d255cc2ba50a9707e127f673e97d04701e3",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50415573,
+     "tx": "0x01bcc70e059324618c2c5de09ea7e9076c2f8c869ce3009a981a01bf12d99135",
+     "li": 326
+    },
+    {
+     "dir": "in",
+     "from": "0x787b0fb7599d3a5bd4f106f32a545fb158d078c6",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50418923,
+     "tx": "0x87efba8077c525635fbbd8e282c2b5733154ae638e5a01c6f0df3dc1720b7729",
+     "li": 667
+    },
+    {
+     "dir": "in",
+     "from": "0x2a079176ec3ac96cc094e9413f9d7bb54cd17bae",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50457438,
+     "tx": "0x92b0b32e51a6b297d211470e6135bda11ba793fef250ab6374eaa739eb24bac2",
+     "li": 292
+    },
+    {
+     "dir": "in",
+     "from": "0x2a079176ec3ac96cc094e9413f9d7bb54cd17bae",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50467957,
+     "tx": "0x4c0701f64d2ad1da7407c1e62c373337397b4f4d95f3ec4585544f46d2262e8c",
+     "li": 106
+    },
+    {
+     "dir": "in",
+     "from": "0x40e20516611bc958cc1059cf923a0569b8538926",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50509519,
+     "tx": "0xb54d9088ee10fbce69e03169fa2090d770edfe55f283e6b9f6b6962ecab23319",
+     "li": 321
+    },
+    {
+     "dir": "in",
+     "from": "0x40e20516611bc958cc1059cf923a0569b8538926",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50510074,
+     "tx": "0x43d88e36a26cfb12de9f28bfd881f8a781df6564a037eecb063dabf4ab2d5fdc",
+     "li": 268
+    },
+    {
+     "dir": "in",
+     "from": "0x40e20516611bc958cc1059cf923a0569b8538926",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50510112,
+     "tx": "0x77348682165bdeda5d8b47070c78eec3b640a930fa4252c06d049e382be19a62",
+     "li": 235
+    },
+    {
+     "dir": "in",
+     "from": "0x6777e11fb0a7917b8110b7dab9188aa3f6d23986",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50522257,
+     "tx": "0xba1db8fbfbe2c9bebb59231a1d6f0de78e22c8bd45a1fbba2e6bce86c04891da",
+     "li": 292
+    },
+    {
+     "dir": "in",
+     "from": "0x8ddc65fd25a58e84bbab1346884b817fb5717574",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50527456,
+     "tx": "0x00554ba1023e3e391877a660f7e609cc1bd93053b49cb032d89c14142fd0b7ec",
+     "li": 403
+    },
+    {
+     "dir": "in",
+     "from": "0x4cf871998105338780a4c7d684cab797d77a57b1",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50528423,
+     "tx": "0x25e2a8ccd2325b8e61a3ef10b3b74c1d3f4ae46fa5cc50012589f3ba4143b641",
+     "li": 620
+    },
+    {
+     "dir": "in",
+     "from": "0x7a2cd715013f5df4e5ad27e1d046605bc0effa9c",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50528807,
+     "tx": "0x431e2df663002735568f53828670f2d8554ccd34c6ebb8847f03657f851fe134",
+     "li": 184
+    },
+    {
+     "dir": "in",
+     "from": "0xf7fc0cb470b6342b2515d59bdc4ea1faafebf276",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50529225,
+     "tx": "0xdebd0d672150815410865de569b523da216edcbccc57d6f7b0c203d028ce625b",
+     "li": 565
+    },
+    {
+     "dir": "in",
+     "from": "0x01456e681f654b4597651b5436275757f891ae88",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50530509,
+     "tx": "0x7b8310aed27824702271483d9fb9623e9a6c78a350b523bc3fe4293f9eadf3a3",
+     "li": 1500
+    },
+    {
+     "dir": "in",
+     "from": "0x3382a101c7a079ec06f253ee0069cc7bb56e8e57",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50530754,
+     "tx": "0x26265ebb103a77fb8cc719c55271fb1921f5f2a1fb1dc241112f980d0e8d7532",
+     "li": 159
+    },
+    {
+     "dir": "in",
+     "from": "0x3382a101c7a079ec06f253ee0069cc7bb56e8e57",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50530771,
+     "tx": "0x38525dd52608b54781304a070d217af17bdc23aad572a800f4bee78651a94c40",
+     "li": 132
+    },
+    {
+     "dir": "in",
+     "from": "0xc59e74ed6386b2a12d892fff2509a6965a0498dc",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50550790,
+     "tx": "0xaae87a21e6c4bcd35fe589054ebabbfa891160edbf7cce56cbf339aa9f547281",
+     "li": 637
+    },
+    {
+     "dir": "in",
+     "from": "0xfe620bd0db63dbf7ad3bac7eb5c1670527416a90",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50562516,
+     "tx": "0xeaf2b60b2704605e0756bbedc2517af5040f8da5479ec8d605c99ec4d0ee648a",
+     "li": 561
+    },
+    {
+     "dir": "in",
+     "from": "0xfe620bd0db63dbf7ad3bac7eb5c1670527416a90",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50566542,
+     "tx": "0xb569ccd303c3cd9c67546c61b6ec66e52816ddc997879ac3ac857730e8c9af50",
+     "li": 370
+    },
+    {
+     "dir": "in",
+     "from": "0xfe620bd0db63dbf7ad3bac7eb5c1670527416a90",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50566556,
+     "tx": "0xb50b13e7b5986c6051eeb5bb850c42f27d275c076d598c494997a0a2ddff422f",
+     "li": 475
+    },
+    {
+     "dir": "in",
+     "from": "0xc59e74ed6386b2a12d892fff2509a6965a0498dc",
+     "to": "0x3c5f3a6ce224bb89d72f5eb4232ecc27f67b3eea",
+     "amt": "10000",
+     "blk": 50573466,
+     "tx": "0xc0e7008e1bea0a7be7bf1454b0ce882f3aacca6da9346e229fd5580f6cb13ccb",
+     "li": 438
+    }
+   ]
+  },
+  "suppliedPayToBase": {
+   "status": "COMPLETE",
+   "address": "0x271189c860db25bc43173b0335784ad68a680908",
+   "fromBlock": 50272374,
+   "toBlock": 50574774,
+   "blocks": 302401,
+   "coveredBlocks": 302401,
+   "windows": 76,
+   "fromTime": "2026-08-21T17:41:35.000Z",
+   "toTime": "2026-08-28T17:41:35.000Z",
+   "rows": []
+  }
+ }
+}
