@@ -1,5 +1,97 @@
 ---
 
+# ⭐⭐ A PROBE THAT CANNOT DISTINGUISH TWO STATES IS NOT EVIDENCE FOR EITHER
+
+**2026-08-28.** Attempting a $0.75 deep-dd purchase failed at the signing step and, in failing,
+falsified a claim this file recorded as fact yesterday. ⛔ **No funds moved** — the CLI said so
+explicitly: *"error occurred before payment submission."* The wallet still holds 2 USDC.
+
+## 🚨 THE FINDING — one probe, two questions, and the narrow answer was promoted to the wide one
+
+`eth_getCode` on `0xed96e509…05f0` (Base) returned `0x`, and that was reported here as
+**"EOA — the `ecrecover(sig) == from` requirement is satisfiable."**
+
+> **`eth_getCode` answers "is there code at this address NOW". It was read as "what KIND of account
+> is this." Two different questions.**
+
+`0x` is returned by **a true EOA** *and* by **an undeployed smart account** — a counterfactual
+address whose contract does not exist until its first transaction. Identical reading, opposite
+meaning. The probe discriminated nothing, and its narrow answer was promoted to a wide one.
+
+⚠️ **This is adjacent to [[absence-must-never-read-as-safe]] but it is NOT the same shape.** There,
+an absence fills a result slot and reads as safety. Here the reading was *present and correct* —
+there genuinely is no code — and the error was in what the reading was taken to MEAN. Absence read
+as safety vs. **a narrow fact read as a broad one**.
+
+## ⭐⭐⭐ THE PORTABLE RULE
+
+> **Before treating a probe as evidence FOR a state, name the other states that produce the SAME
+> reading. If any exists, the probe discriminates nothing and a second instrument is required.**
+
+Here the second instrument was the CLI, which failed with
+*"This wallet isn't deployed on-chain yet"* — **SCA language**, not EOA language. One line of output
+from a different instrument settled what an RPC call could not.
+
+⭐ **And the nonce flipped with it — same number, different fact.** `nonce = 0` was recorded as
+*"an EOA that has never spent."* It is almost certainly *"an account that has never been deployed."*
+**A corroborating reading inherits the misreading it corroborates**, which is why it added false
+confidence rather than catching anything.
+
+## ✅ SUPERSEDED — the claim in `3f959c2`, corrected in place and not silently
+
+**`3f959c2` recorded the account type as EOA. That is withdrawn.**
+
+| | recorded 2026-08-27 | corrected 2026-08-28 |
+|---|---|---|
+| account type | **EOA** (asserted) | **UNKNOWN, probably SCA** — the CLI calls it undeployed |
+| `ecrecover(sig) == from` | "satisfiable" | ⛔ **REOPENED.** A smart account cannot produce a plain ecrecover-able signature; USDC's FiatTokenV2_2 supports ERC-1271, which requires the contract to EXIST to answer `isValidSignature` — which is exactly why deployment gates signing |
+| `nonce = 0` | never spent | never deployed |
+
+⛔ **"Probably SCA" is not "SCA".** The CLI's wording is strong evidence and it is still one
+instrument's word; nothing on-chain confirms an account type that has left no on-chain trace.
+Recorded as unknown rather than swapped for a new certainty.
+
+## What the purchase attempt established (everything up to signing was correct)
+
+Session VALID (mainnet, 23d). `inspect`: **$0.75**, chains `eip155:8453` only, scheme `USD Coin` —
+**vanilla, one accepts entry**, so no Gateway routing question and no deposit needed; the wallet's
+2 USDC vanilla-on-Base is the matching rail. Method **GET**, params `address` + optional `size`.
+Paid with `--max-amount 0.75` so a silent reprice could not overcharge. It failed at signature
+creation, before submission.
+
+## 📋 READ-ONLY: what deployment would cost, and who pays gas on Base
+
+Established rather than assumed — ⚠️ **the recorded Gas Station finding is Arc-specific and does
+not transfer**, so it was not used here.
+
+- **Gas Station IS live on Base mainnet.** Paymaster `0x7ceA357B…0a25`, **verified on-chain**
+  (1,712 bytes of code). ⚠️ But its access model is *"Circle account **required**, policies set by
+  the developer, gas billed to a **credit card**, paid by the developer"* — that is the
+  developer-controlled model, and this is a **CLI agent wallet outside our console project**.
+- **⭐ Circle Paymaster is the path that fits, and it needs no ETH.** Permissionless, no Circle
+  account, any ERC-4337 wallet, **gas paid in USDC**, and the docs name this exact case:
+  *"you can pay for **a smart contract account deployment** using USDC set to the pre-deployed
+  account address with a signed permit… without ever needing to hold the blockchain native token."*
+  10% surcharge, which *"only applies to Arbitrum and **Base**"*.
+- **Cost is negligible.** Base gas price measured at **0.006 gwei**; a 150k–500k-gas deployment is
+  **≈ $0.003–$0.010** including the surcharge. ⚠️ ETH assumed at $3,000 for order of magnitude —
+  **not a quote**, and the gas figure is a range, not a measurement of this specific userOp.
+
+⛔ **SO 0 ETH IS PROBABLY NOT THE BLOCKER, AND THAT IS NOT THE SAME AS SAYING IT WORKS.** Whether
+the CLI routes agent-wallet deployment through Circle Paymaster, Gas Station, or expects a funded
+balance is **NOT ESTABLISHED** — the CLI's own hint (*"send any transaction, e.g. a zero-value
+transfer"*) implies it handles gas somehow, since that hint is useless to a wallet with no ETH, but
+an implication is not a mechanism. **Only deploying would settle it, and deploying is the thing not
+being done.**
+
+## ⛔ NOT DEPLOYED, NOTHING SENT
+
+Deployment is a separate decision and it **trades away the isolation property recorded yesterday**:
+that wallet is currently unusable by anything, which is why it is safe to leave outside the
+codebase. No transaction was sent, no wallet deployed, no report bought.
+
+---
+
 # 🚨 CORRECTION — THE HONESTY GAP IS **NOT** UNOCCUPIED. FOUR SCANS READ IT WRONG.
 
 **2026-08-28.** Read-only probe of every free surface on 402.com.tr, before any decision about
@@ -98,8 +190,9 @@ gets forgotten and later rediscovered. **Not a defect — a deliberate separatio
 |---|---|
 | address | `0xed96e509aacb8641a6f0a4734b557b582b6b05f0` |
 | chain | **Base MAINNET** (`eip155:8453`) — real funds, not testnet |
-| balance | **2 USDC** (`0x833589fc…2913`), **0 ETH**, nonce **0** (never sent a tx) |
+| balance | **2 USDC** (`0x833589fc…2913`), **0 ETH**, nonce **0** (~~never sent a tx~~ → **never DEPLOYED**, see below) |
 | type | Circle **CLI agent wallet**, created 2026-08-23T20:33:27Z |
+| account type | ⛔ **SUPERSEDED 2026-08-28 — this entry originally said EOA, asserted from `eth_getCode` returning `0x`. WITHDRAWN.** That probe cannot distinguish an EOA from an UNDEPLOYED SMART ACCOUNT; the CLI reports the wallet *"isn't deployed on-chain yet"*. Account type is **UNKNOWN, probably SCA**, and the `ecrecover(sig) == from` question this entry called satisfiable is **REOPENED**. See the entry at the top of this file. |
 | in the repo | **nothing references it.** Not in `agent-metadata/`, `.env.example`, `_arc.mjs` or `src/config/` — the repo contains no Base address at all |
 | on `/built` | **absent, correctly** — that page says "everything here is Arc testnet or a document", which stays true only because this wallet is outside the codebase |
 
