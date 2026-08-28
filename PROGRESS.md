@@ -1,5 +1,94 @@
 ---
 
+# 🚨 CORRECTION — THE HONESTY GAP IS **NOT** UNOCCUPIED. FOUR SCANS READ IT WRONG.
+
+**2026-08-28.** Read-only probe of every free surface on 402.com.tr, before any decision about
+buying a report. ⛔ **Nothing paid, nothing signed, and their free tier was NOT consumed.**
+
+## ⭐⭐⭐ THE HEADLINE, STATED PLAINLY RATHER THAN HEDGED
+
+**402.com.tr publishes a coverage-and-refusal contract.** Not a gesture at one — a specified,
+site-wide `decisionReceipt` block in `/.well-known/x402`:
+
+| field | what they publish |
+|---|---|
+| `confidence` | `{band: high\|medium\|low, basis}` — *"low when our core feed was unavailable, medium when secondary signals were missing, high when every input was consulted"* |
+| `refusal` | `{reason, missing}` — a structured non-decision |
+| `refundable` / `refundRule` | **a refusal is auto-refunded** on the credit path, returning `x-refunded: true` |
+| `policyVersion` | `endpoint@semver`, *"bumped when scoring/rules change so you can detect policy drift between calls"* |
+
+And on `/api/x402/safe-to-send`, **their prose states our own argument nearly verbatim**:
+
+> *"Every factor returns what it found and what it could not read — **a check that did not run never
+> reads as clean**, so GO means everything material was actually screened."*
+
+🚨 **FOUR ECOSYSTEM SCANS IN THIS FILE REPORTED THIS CATEGORY EMPTY. THAT READING WAS WRONG.** Not
+"narrower than thought" — wrong. The scans looked at directories, listing metadata and marketplace
+catalogues, none of which has a slot for a coverage contract; the contract was in the seller's own
+`.well-known`, which no scan fetched. ⚠️ **A category can only be called empty by an instrument
+that could have seen it occupied** — the same [[filtered-read-is-not-absence]] shape, applied to
+competitive reading rather than to a census.
+
+## THREE DISTINCTIONS SURVIVE — recorded AS DISTINCTIONS, NOT AS REASSURANCE
+
+**1. It excludes their flagship.** `decisionReceipt.tiers.full` names **11 services** — token-risk,
+rug-score, sellability, pre-trade-gate, b20-safety, sanctions, sanctions-name, email-verify,
+domain-check, counterparty-check, address-trust. **`deep-dd` is not among them.** It falls to
+`baseline` (*"every other paid service"*), which carries only `endpoint, inputHash, policyVersion`.
+Every coverage field is marked *"(verdict checks)"*. So on the **$0.75 AI flagship**: no documented
+confidence band, no structured refusal, no refund if a feed was down.
+
+**2. Prose convention vs payload guarantee.** DD's manifest is **inside the signed bytes and cannot
+be stripped**. Theirs is a documented convention about response fields; **nothing binds the response
+to the documentation**.
+
+**3. Nothing is attested.** No signature, no identity, no way to verify a receipt came from them.
+
+> ⚠️ **AND THE HONEST ASYMMETRY: (1) AND (2) COULD CLOSE WITH A CONFIG CHANGE.** Moving `deep-dd`
+> into the `full` tier is a list edit. Binding the payload to the documented fields is a schema and
+> a serializer. **Only (3) is structural** — it needs an identity, a signing key and an on-chain
+> verifier, which is work, not configuration. Any read of these three as a durable moat is wrong on
+> two of the three.
+
+## ⭐ `degraded` / `confidence` — FIELD-WRITTEN-NEVER-DOCUMENTED, POINTED AT THEM
+
+Their live free sample for deep-dd carries `degraded: false` and `confidence: "high"`.
+**`degraded` occurs ZERO times across `/openapi.json`, `/.well-known/x402`, `/llms.txt` and
+`/agents`.** The payload carries a coverage signal their own documentation never defines — the same
+family as `errata_note` / `dataDisclosure` / `lastReason`, seen from the outside.
+
+⚠️ **THE CAVEAT THAT CUTS AGAINST US:** this means their payload may carry **more** coverage signal
+than their docs admit, which would narrow distinction (1) further. **It is only checkable by buying
+a report.** Recorded as unknown rather than resolved in our favour.
+
+## What $0.75 buys, as published
+
+`openapi.json`'s 200 schema for deep-dd is literally **`{"type": "object"}`** — unconstrained, no
+field list, no example. The `.well-known` entry describes **inputs only**. The single output
+disclosure anywhere is the 402's `extensions.bazaar.info.output.example`: 8 fields (`address,
+verdict, safetyScore, risksCount, degraded, confidence, model, generatedAt`) — while the prose
+promises *factors, risks, positives, liquidity & holder assessments, tradeability, recommendation*,
+none of which appears in any schema. **No methodology page exists** (`/methodology` 404s); no source
+disclosure for holder concentration or liquidity depth.
+
+**Free tier:** 1 free call per service per day per IP (`?free=1` / `x-402-free: 1`) — **but deep-dd
+is `freeTier: false`**, so the flagship cannot be sampled free. ⛔ No free call was fired: it
+consumes a third party's daily quota and is an outward action, and the question was answerable from
+their docs.
+
+## ⚠️ METHOD NOTE — WHAT WAS UNREADABLE VS WHAT WAS ABSENT
+
+- `/` returns **414 KB with ZERO extractable text** — client-rendered. **Reported as UNREADABLE, not
+  as absent.** Nothing is concluded from it.
+- `/agents` is Next.js **server-rendered**, 1,745 words of real visible text — **so its silences
+  ARE real silences**, and the absence of coverage language there counts as evidence.
+- `/docs`, `/about`, `/methodology`, `/README.md`, `/.well-known/ai-plugin.json` genuinely **404**.
+
+⛔ **NO CONCLUSION ABOUT DD's PROSPECTS.** This entry is about what they publish and what could not
+be read. It is not a verdict on ours.
+
+---
+
 # 📌 A FUNDED MAINNET WALLET THAT NO FILE IN THIS REPO REFERENCES
 
 **2026-08-28.** Recorded because an unreferenced funded mainnet wallet is the kind of thing that
