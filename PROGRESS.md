@@ -1,5 +1,32 @@
 ---
 
+# 📌 A FUNDED MAINNET WALLET THAT NO FILE IN THIS REPO REFERENCES
+
+**2026-08-28.** Recorded because an unreferenced funded mainnet wallet is the kind of thing that
+gets forgotten and later rediscovered. **Not a defect — a deliberate separation, written down.**
+
+| | |
+|---|---|
+| address | `0xed96e509aacb8641a6f0a4734b557b582b6b05f0` |
+| chain | **Base MAINNET** (`eip155:8453`) — real funds, not testnet |
+| balance | **2 USDC** (`0x833589fc…2913`), **0 ETH**, nonce **0** (never sent a tx) |
+| type | Circle **CLI agent wallet**, created 2026-08-23T20:33:27Z |
+| in the repo | **nothing references it.** Not in `agent-metadata/`, `.env.example`, `_arc.mjs` or `src/config/` — the repo contains no Base address at all |
+| on `/built` | **absent, correctly** — that page says "everything here is Arc testnet or a document", which stays true only because this wallet is outside the codebase |
+
+⭐ **IT IS IN A DIFFERENT WALLET UNIVERSE FROM EVERYTHING THIS REPO SIGNS WITH**, and that is the
+substantive point rather than an administrative one. `circle wallet list --chain BASE` shows it under
+a **mainnet CLI session**; `--chain ARC-TESTNET` returns *"No testnet session"* and shows none of the
+repo's wallets. The serverless plane signs through the **dev-controlled** SDK (`CIRCLE_API_KEY` +
+entity secret, `signTypedData({walletId, blockchain})`); this one is reachable only through a
+**CLI session in the OS keychain**. See [[circle-agent-wallets-vs-tikpema]] — a CLI session cannot
+serve a serverless function, so **no deployed code path can spend this balance**, by construction.
+
+⚠️ Which is also why it stays off `/built` and out of the config: giving it a home in the codebase
+would mean giving the serverless plane a way to reach it. The isolation is the safety property.
+
+---
+
 # ⛔ DECIDED: NO GENERAL PROJECTION CHECK — the fix would be the bug it prevents
 
 **2026-08-27, close of day.** The third field-written-never-rendered instance raised the obvious
