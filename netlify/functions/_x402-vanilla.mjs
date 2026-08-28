@@ -33,6 +33,7 @@
 
 import { randomBytes } from "node:crypto";
 import { circle } from "./_circle.mjs";
+import { readCircleError, httpStatusForCircleFailure } from "./_circle-error.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS, maxSpendUsdc } from "./_arc.mjs";
 
 // Default seller — this repo's own vanilla seller endpoint. Callers override.
@@ -245,15 +246,28 @@ export async function payX402Vanilla({ sellerUrl, jobContext } = {}) {
       },
     };
   } catch (e) {
-    const status = e.response?.status;
-    const detail = e.response?.data ?? null;
+    // ⭐ ONE READER FOR BOTH SDK ERROR SHAPES — v9 raw AxiosError, v10 typed HttpResponseError
+    // (which has no `.response`). See netlify/functions/_circle-error.mjs.
+    const { status, code, body: detail, message } = readCircleError(e);
+    const { httpStatus, statusKnown, retrySafe } = httpStatusForCircleFailure(status);
     console.error(
-      `payX402Vanilla failed at step="${step}" status=${status ?? "?"}:`,
-      JSON.stringify(detail) || e.message
+      `payX402Vanilla failed at step="${step}" status=${statusKnown ? status : "UNKNOWN"} code=${code ?? "?"}:`,
+      JSON.stringify(detail) || message
     );
     return {
-      status: status && status < 500 ? 400 : 500,
-      body: { executed: false, step, error: e.message, circleStatus: status, circleError: detail },
+      status: httpStatus,
+      body: {
+        executed: false,
+        step,
+        error: message,
+        circleStatus: status,      // null means UNDETERMINED, never a guess
+        circleCode: code,
+        circleError: detail,
+        // ⭐⭐ an undetermined outcome is reported as undetermined — `retrySafe:null` is not `false`
+        // and must never be read as `true`.
+        statusKnown,
+        retrySafe,
+      },
     };
   }
 }

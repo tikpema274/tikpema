@@ -34,6 +34,7 @@
 
 import { BatchEvmScheme } from "@circle-fin/x402-batching/client";
 import { circle } from "./_circle.mjs";
+import { readCircleError, httpStatusForCircleFailure } from "./_circle-error.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS, maxSpendUsdc } from "./_arc.mjs";
 import { GATEWAY } from "./_gateway.mjs";
 // The seller's provisional retrieve window, IMPORTED rather than re-declared. A second copy would
@@ -589,21 +590,30 @@ export async function payX402({ sellerUrl, challenge, approvedUsdc, requireAppro
         },
       };
     }
-    // Circle SDK throws axios errors; the useful detail lives in e.response.data.
-    const status = e.response?.status;
-    const detail = e.response?.data ?? null;
+    // ⭐ ONE READER FOR BOTH SDK ERROR SHAPES. v9 throws a raw AxiosError (detail at
+    // `e.response.data`); v10 wraps 43 methods and throws a typed HttpResponseError that has NO
+    // `.response` at all. Reading it by hand here worked on v9 and would silently return
+    // `undefined`/`null` on v10 — see netlify/functions/_circle-error.mjs.
+    const { status, code, body: detail, message } = readCircleError(e);
+    const { httpStatus, statusKnown, retrySafe } = httpStatusForCircleFailure(status);
     console.error(
-      `payX402 failed at step="${step}" status=${status ?? "?"}:`,
-      JSON.stringify(detail) || e.message
+      `payX402 failed at step="${step}" status=${statusKnown ? status : "UNKNOWN"} code=${code ?? "?"}:`,
+      JSON.stringify(detail) || message
     );
     return {
-      status: status && status < 500 ? 400 : 500,
+      status: httpStatus,
       body: {
         executed: false,
         step,
-        error: e.message,
-        circleStatus: status,
+        error: message,
+        circleStatus: status,      // null means we could not determine it — never a guess
+        circleCode: code,
         circleError: detail,
+        // ⭐⭐ "could not determine the status" is a THIRD fact, not a 5xx. Saying `retrySafe:null`
+        // is what stops a buyer reading an unknown outcome as permission to retry an authorization
+        // that may be permanently bad — or that may already have settled.
+        statusKnown,
+        retrySafe,
       },
     };
   }

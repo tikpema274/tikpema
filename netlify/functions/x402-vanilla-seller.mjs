@@ -41,6 +41,7 @@
 // 402 → pay → 200 round trip, so settlement finishes inline.
 
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
+import { readCircleError, httpStatusForCircleFailure } from "./_circle-error.mjs";
 import { getStore } from "@netlify/blobs";
 import { connectBlobs } from "./_blobs.mjs";
 import { ARC } from "./_arc.mjs";
@@ -430,14 +431,17 @@ export async function handler(event) {
     if (e instanceof TxPendingError) {
       return jsonRes(202, { error: e.message, txId: e.txId, pending: true });
     }
-    // Circle SDK throws axios errors; the on-chain revert reason (e.g.
-    // "FiatTokenV2: authorization is used or canceled" on replay, or "invalid
-    // signature") lives in e.response.data. Surface it so the buyer sees why.
-    const status = e.response?.status;
-    const detail = e.response?.data ?? null;
+    // The on-chain revert reason (e.g. "FiatTokenV2: authorization is used or canceled" on replay,
+    // or "invalid signature") is what the buyer needs. ⭐ WHERE IT LIVES DEPENDS ON THE SDK MAJOR:
+    // v9 throws a raw AxiosError with it at `e.response.data`; v10 wraps 43 methods and throws a
+    // typed HttpResponseError with NO `.response` at all. One reader handles both — reading it by
+    // hand here would have gone silently empty on v10 and the buyer would be told nothing.
+    // See netlify/functions/_circle-error.mjs.
+    const { status, code, body: detail, message } = readCircleError(e);
+    const { statusKnown } = httpStatusForCircleFailure(status);
     console.error(
-      `vanilla-seller settle failed status=${status ?? "?"}:`,
-      JSON.stringify(detail) || e.message
+      `vanilla-seller settle failed status=${statusKnown ? status : "UNKNOWN"} code=${code ?? "?"}:`,
+      JSON.stringify(detail) || message
     );
     // ⚠️ THE HEADLINE MUST NOT CLAIM THE CHAIN SAW ANYTHING. `waitForTx` now reports whether the
     // transaction was actually broadcast; when it was not, saying "on-chain" asserts an event that
@@ -450,7 +454,11 @@ export async function handler(event) {
     return challenge402(
       requirements,
       headline,
-      detail ? JSON.stringify(detail) : e.message
+      // ⭐ `message` comes from the reader, which prefers Circle's own text ("authorization is used
+      // or canceled") over the transport's ("Request failed with status code 400"). On v10 the raw
+      // `e.message` IS Circle's text; on v9 it is the axios line, so reading it here keeps the two
+      // majors saying the same useful thing to the buyer.
+      detail ? JSON.stringify(detail) : message
     );
   }
 }
