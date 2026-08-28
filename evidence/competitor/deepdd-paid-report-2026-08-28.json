@@ -1,0 +1,351 @@
+{
+ "_what": "A PAID deep-dd report from 402.com.tr, bought 2026-08-28 for $0.75 USDC on Base mainnet. Verbatim CLI response.",
+ "_why": "Bought once and unrepeatable without paying again. Committed so the competitor comparison rests on evidence rather than on their published description.",
+ "_cost": {
+  "amount": "$0.75 USDC",
+  "chain": "Base mainnet (eip155:8453)",
+  "scheme": "vanilla x402 exact / USD Coin",
+  "payer": "0xed96e509aacb8641a6f0a4734b557b582b6b05f0 (Circle CLI agent wallet, SCA)",
+  "seller": "0x973a31858f4d2125f48c880542da11a2796f12d6",
+  "settlementTx": "0xc226679a577eeca83b3e2f366427ea26bbf346d60036911525e667eac373aa34",
+  "balanceBefore": "2.000000 USDC",
+  "balanceAfter": "1.250000 USDC (verified by on-chain balanceOf, NOT the CLI cache)"
+ },
+ "_subject": {
+  "address": "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",
+  "token": "DEGEN",
+  "size": "5000",
+  "why": "their OWN published example address, chosen so the paid report can be diffed against the free preview they publish for the same subject"
+ },
+ "_limit": "⚠️ degraded=false and confidence=high on this run: every sub-check returned data. This purchase therefore CANNOT show what a DEGRADED report discloses — the coverage-under-failure question is NOT answered by it.",
+ "response": {
+  "data": {
+   "response": {
+    "service": "deep-dd",
+    "builderCode": "bc_pa0gqlv1",
+    "data": {
+     "address": "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",
+     "verdict": "caution",
+     "safetyScore": 58,
+     "confidence": "high",
+     "tradeability": {
+      "canBuy": true,
+      "canSell": true,
+      "note": "No honeypot or transfer restrictions detected. Exit liquidity supports unwinding positions up to ~$25.7k with ~1% slippage. Ownership not renounced and LP not locked — monitor for potential rug risk."
+     },
+     "liquidityAssessment": "Moderate liquidity of $975k supports small to medium trades; a $5k position incurs ~1% buy/sell impact, but exit capacity is limited to ~$25.7k before slippage rises significantly.",
+     "holderAssessment": "Medium concentration risk: top holder controls 22.45%, top 10 hold 61.53%, spread across 1.18M addresses with 21 LP providers and 0% locked liquidity.",
+     "summary": "DEGEN is a legitimate ERC-20 token with no honeypot or tax mechanics, open-source code, and solid holder distribution. However, the owner has not renounced control and LP is unlocked, creating tail-risk for rug or flash-loan exploits. Liquidity is adequate for small positions but insufficient for institutional size.",
+     "factors": [
+      {
+       "name": "Contract Safety",
+       "status": "good",
+       "note": "No honeypot, no taxes (0% buy/sell), not pausable, not mintable, open-source, ownership cannot be reclaimed."
+      },
+      {
+       "name": "Ownership & Control",
+       "status": "warning",
+       "note": "Owner not renounced (0x704Ec5C...) and retains active privileges; creator balance is zero. Risk of future parameter changes or malicious action."
+      },
+      {
+       "name": "Liquidity & Exit",
+       "status": "neutral",
+       "note": "$975k total liquidity with 1% slippage on $5k trades. Max safe exit ~$25.7k; positions above that risk substantial impact and potential slippage spirals."
+      },
+      {
+       "name": "Holder Concentration",
+       "status": "warning",
+       "note": "Top holder at 22.45% (contract), top 10 at 61.53%. LP not locked (0% locked). Concentration and unlocked LP create flash-loan or coordinated-dump risk."
+      },
+      {
+       "name": "Sanctions",
+       "status": "good",
+       "note": "No OFAC match; token cleared for unrestricted trading."
+      }
+     ],
+     "risks": [
+      "Owner not renounced; retains ability to modify future parameters or execute privileged functions.",
+      "LP not locked; no time-lock on liquidity withdrawal; flash-loan or rapid-redemption rug is possible.",
+      "High holder concentration (top 10 = 61.53%) amplifies whale-dump and coordination risk.",
+      "Liquidity insufficient for large institutional positions (>$25.7k exit capacity); slippage and impact scale nonlinearly.",
+      "Token age, team doxxing, and narrative durability unknown; base-layer momentum is negative (-5.33% in 24h)."
+     ],
+     "positives": [
+      "Zero buy and sell taxes; no hidden mint or transfer mechanics.",
+      "1.18M unique holders indicates broad retail adoption and genuine distribution.",
+      "Open-source smart contract; no upgrade proxy or hidden owner.",
+      "OFAC-clean and exchange-listed (Uniswap); regulatory clarity.",
+      "Exit liquidity confirmed; small to medium positions can be unwound without honeypot trap."
+     ],
+     "recommendation": "CAUTION: Hold small experimental positions only (<$25k). Recheck ownership and LP lock status before scaling. Establish strict stop-loss; monitor holder whale behavior and price momentum closely. Not suitable for high-conviction institutional allocation until ownership is provably renounced.",
+     "data": {
+      "risk": {
+       "address": "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",
+       "isContract": true,
+       "token": {
+        "name": "Degen",
+        "symbol": "DEGEN",
+        "decimals": 18,
+        "totalSupply": "36250728964558229507935465349"
+       },
+       "ownership": {
+        "owner": "0x704Ec5C12Ca20a293C2C0B72B22619A4231f3c0d",
+        "renounced": false
+       },
+       "upgradeableProxy": false,
+       "security": {
+        "isHoneypot": false,
+        "buyTaxPct": 0,
+        "sellTaxPct": 0,
+        "isOpenSource": true,
+        "isMintable": false,
+        "transferPausable": false,
+        "canTakeBackOwnership": false,
+        "hiddenOwner": false,
+        "holderCount": 1182852,
+        "topHolderPct": 22.451191631515726,
+        "lpHolderCount": 21,
+        "top10HolderPct": 61.53,
+        "lockedLpPct": 0,
+        "creatorPct": 0,
+        "isInDex": true,
+        "isAntiWhale": false,
+        "antiWhaleModifiable": false,
+        "tradingCooldown": false,
+        "slippageModifiable": false,
+        "isTrueToken": null,
+        "isAirdropScam": null,
+        "creatorAddress": "0x3C12B77aE8B7DD1FEB63D1D6a2A819AcdA0a41d2",
+        "creatorBalance": "0"
+       },
+       "riskScore": 35,
+       "riskLevel": "medium",
+       "securityChecked": true,
+       "chainRead": true,
+       "degraded": false,
+       "flags": [
+        "owner_not_renounced",
+        "lp_not_locked"
+       ],
+       "sources": [
+        "base-rpc",
+        "goplus"
+       ],
+       "coverage": "RPC base + GoPlus security (honeypot, taxes, holders, holder concentration, LP lock, creator holdings, source, ownership controls).",
+       "receipt": {
+        "checked": "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",
+        "atBlock": "50558811",
+        "at": "2026-08-28T08:49:30.266Z",
+        "endpoint": "token-risk",
+        "inputHash": "sha256:080eb90a611124f07d385c48a33e4394",
+        "policyVersion": "token-risk@1.2.0",
+        "confidence": {
+         "band": "high",
+         "basis": "all declared inputs were consulted"
+        },
+        "refusal": null,
+        "refundable": false,
+        "refundRule": "A refusal (confidence=low: our core data feed was unavailable) is not billed on the credit path — the debit is auto-refunded and x-refunded:true is returned. Full-confidence verdicts are final.",
+        "decision": "HOLD",
+        "observedRisks": [
+         "owner_not_renounced",
+         "lp_not_locked"
+        ],
+        "notChecked": [
+         "offchain team/social signals",
+         "liquidity depth vs your trade size (use swap-route)",
+         "B20 policy powers (use b20-safety)"
+        ],
+        "wouldChangeCall": "Ownership renounce, or owner privileges proven inert; re-check before size.",
+        "recheckAfter": "2026-08-28T14:49:30.267Z"
+       },
+       "upgrade": {
+        "service": "ai-token-report",
+        "price": "$0.12",
+        "why": "AI-written verdict on this token: buy/avoid call, exit plan, risks explained. If you just paid this check, the full report is $0.05 (not $0.12) on this token for the next hour.",
+        "url": "https://402.com.tr/api/x402/ai-token-report?address=0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed"
+       },
+       "checkedAt": "2026-08-28T08:49:30.267Z"
+      },
+      "holders": {
+       "address": "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",
+       "holderCount": 1182852,
+       "topHolders": [
+        {
+         "address": "0x06a19654e0872ba71c2261ea691ecf8a0c677156",
+         "percent": 22.45,
+         "tag": null,
+         "isContract": true,
+         "isLocked": false
+        },
+        {
+         "address": "0x82d4cd9bf16017fd518511d8bbe6d0493af31a10",
+         "percent": 5.58,
+         "tag": null,
+         "isContract": false,
+         "isLocked": false
+        },
+        {
+         "address": "0x9773c9e7d048ae91a4fd9a48cd0b984e31fa418c",
+         "percent": 5.26,
+         "tag": null,
+         "isContract": false,
+         "isLocked": false
+        },
+        {
+         "address": "0x7d00d30269fc62ab5fab54418feedbdc71fdb25f",
+         "percent": 5.1,
+         "tag": null,
+         "isContract": true,
+         "isLocked": false
+        },
+        {
+         "address": "0xefef4558802bf373ce3307189c79a9cab0a4cb9c",
+         "percent": 4.93,
+         "tag": null,
+         "isContract": true,
+         "isLocked": false
+        },
+        {
+         "address": "0x4cc69ff3264e61d5d5e8f368331320c66dad2714",
+         "percent": 4.76,
+         "tag": null,
+         "isContract": false,
+         "isLocked": false
+        },
+        {
+         "address": "0x13454580bd3300075eb4b2470a107a5cf4e6af35",
+         "percent": 4.05,
+         "tag": null,
+         "isContract": false,
+         "isLocked": false
+        },
+        {
+         "address": "0x21bb2a7e0e26449e60e6fb994cd435b11bfe1a1a",
+         "percent": 3.87,
+         "tag": null,
+         "isContract": true,
+         "isLocked": false
+        },
+        {
+         "address": "0x17891b029eaead89a82bde0f398f87f5def4a1dd",
+         "percent": 3.3,
+         "tag": null,
+         "isContract": true,
+         "isLocked": false
+        },
+        {
+         "address": "0xbaed383ede0e5d9d72430661f3285daa77e9439f",
+         "percent": 2.23,
+         "tag": null,
+         "isContract": false,
+         "isLocked": false
+        }
+       ],
+       "top10Pct": 61.53,
+       "topHolderPct": 22.45,
+       "lpHolderCount": 21,
+       "lockedLpPct": 0,
+       "concentration": "medium",
+       "source": "GoPlus",
+       "checkedAt": "2026-08-28T08:49:30.090Z"
+      },
+      "price": {
+       "address": "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",
+       "priceUsd": "0.001031",
+       "priceChange24h": -5.33,
+       "liquidityUsd": 975241.86,
+       "volume24h": 28916.83,
+       "dexId": "uniswap",
+       "pairAddress": "0x0cA6485b7e9cF814A3Fd09d81672B07323535b64",
+       "baseToken": {
+        "name": "Degen",
+        "symbol": "DEGEN"
+       },
+       "checkedAt": "2026-08-28T08:49:29.830Z"
+      },
+      "sanctions": {
+       "address": "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",
+       "sanctioned": false,
+       "matchType": "none",
+       "source": "OFAC SDN — sanctioned digital currency addresses",
+       "listSize": 120,
+       "listFetchedAt": "2026-08-28T08:49:29.638Z",
+       "stale": false,
+       "receipt": {
+        "checked": "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",
+        "endpoint": "sanctions",
+        "decision": "GO",
+        "inputHash": "sha256:b5e17f6c6580bde954c9b19ca06f46aa",
+        "policyVersion": "sanctions@1.0.0",
+        "confidence": {
+         "band": "high",
+         "basis": "all declared inputs were consulted"
+        },
+        "refusal": null,
+        "refundable": false,
+        "refundRule": "A refusal (confidence=low: our core data feed was unavailable) is not billed on the credit path — the debit is auto-refunded and x-refunded:true is returned. Full-confidence verdicts are final."
+       },
+       "note": "No direct match on the OFAC list (direct-address match only; does not trace indirect exposure).",
+       "checkedAt": "2026-08-28T08:49:29.638Z"
+      },
+      "exitLiquidity": {
+       "address": "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",
+       "symbol": "DEGEN",
+       "tradeSizeUsd": 5000,
+       "priceUsd": 0.001031,
+       "liquidityUsd": 975242,
+       "dex": "uniswap",
+       "estBuyImpactPct": 1.01,
+       "estSellImpactPct": 1.01,
+       "canExit": true,
+       "maxSafeExitUsd": 25664,
+       "exitRisk": "low",
+       "note": "Estimate using constant-product (V2-style) math on total pool liquidity; concentrated-liquidity (V3) pools may differ. The point: whether a position of this size can be EXITED, not just entered. Not financial advice.",
+       "checkedAt": "2026-08-28T08:49:29.829Z"
+      }
+     },
+     "degraded": false,
+     "model": "claude-haiku-4-5",
+     "generatedAt": "2026-08-28T08:49:49.943Z",
+     "checkedAt": "2026-08-28T08:49:49.943Z",
+     "receipt": {
+      "endpoint": "deep-dd",
+      "inputHash": "sha256:0e015b17621b99f794b4958ce7621d12",
+      "policyVersion": "deep-dd@1.0.0"
+     }
+    },
+    "related": {
+     "note": "Other capabilities from this seller, callable the same way with the same payment method.",
+     "services": [
+      {
+       "id": "ai-token-report",
+       "price": "$0.12",
+       "what": "Claude-written due-diligence verdict for a Base token",
+       "endpoint": "https://402.com.tr/api/x402/ai-token-report"
+      },
+      {
+       "id": "ai-market-brief",
+       "price": "$0.05",
+       "what": "Claude-written situational brief of the Base token market",
+       "endpoint": "https://402.com.tr/api/x402/ai-market-brief"
+      },
+      {
+       "id": "file-slot",
+       "price": "$0.005",
+       "what": "Somewhere to put the file your agent just made",
+       "endpoint": "https://402.com.tr/api/x402/file-slot"
+      }
+     ]
+    }
+   },
+   "payment": {
+    "amount": "$0.75 USDC",
+    "chain": "Base",
+    "scheme": "USD Coin",
+    "seller": "0x973a31858f4d2125f48c880542da11a2796f12d6",
+    "receipt": "eyJzdWNjZXNzIjp0cnVlLCJwYXllciI6IjB4ZWQ5NmU1MDlhYWNiODY0MWE2ZjBhNDczNGI1NTdiNTgyYjZiMDVmMCIsInRyYW5zYWN0aW9uIjoiMHhjMjI2Njc5YTU3N2VlY2E4M2IzZTJmMzY2NDI3ZWEyNmJiZjM0NmQ2MDAzNjkxMTUyNWU2NjdlYWMzNzNhYTM0IiwibmV0d29yayI6ImVpcDE1NTo4NDUzIn0="
+   }
+  }
+ }
+}
