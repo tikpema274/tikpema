@@ -1,16 +1,67 @@
 ---
 
-# 💵 BOUGHT — one deep-dd report, $0.75 settled on Base mainnet. Two predictions wrong.
+# ⭐⭐⭐ TWO INSTRUMENT FINDINGS, AND ONE OF THEM WOULD HAVE COST MONEY
 
-**2026-08-28.** Deployment run as its own experiment first, then the purchase. Both reported
-below. The paid artifact is committed at
-`evidence/competitor/deepdd-paid-report-2026-08-28.json` — **bought once, unrepeatable without
-paying again.**
+**2026-08-28.** Deployed the Base SCA, then bought one deep-dd report for **$0.75** — settled
+`0xc226679a…aa34`, on-chain balance **2.000000 → 1.250000 USDC**. The paid artifact is at
+`evidence/competitor/deepdd-paid-report-2026-08-28.json`, **bought once and unrepeatable without
+paying again**. ⚠️ **Restructured, not duplicated:** an earlier version of this entry led with the
+competitor. The facts are unchanged; the ordering was wrong, because the two instrument findings
+below matter more than anything learned about a seller.
 
-## ⭐ EXPERIMENT 1 — DEPLOYMENT. PREDICTION 2 WAS WRONG, AND THAT IS THE FINDING
+## ⭐⭐⭐ 1 — THE PROBE THAT WOULD HAVE SETTLED IT WAS AVAILABLE, READ-ONLY, FOR FREE
 
-Pre-registered: (1) deploy succeeds without ETH; (2) **USDC moves** via Circle Paymaster;
-(3) `getCode` returns bytecode; (4) ⛔ no prediction on nonce.
+`circle wallet transfer --estimate` — **no broadcast, no cost** — returns:
+
+```
+"callGasLimit": "28374", "verificationGasLimit": "277820", "preVerificationGas": "97662"
+```
+
+**Those are ERC-4337 userOp fields. An EOA has no verification gas.** This one read, available at
+any point yesterday, **would alone have falsified the EOA claim before any action was taken.**
+
+> 🚨 **THE DIAGNOSIS: THE FAILURE WAS NOT LACKING A SECOND INSTRUMENT. IT WAS NOT LOOKING FOR ONE.**
+
+⭐⭐ **THIS CORRECTS YESTERDAY'S RULE, WHICH WAS RIGHT AND INCOMPLETE.** It said: *"before treating
+a probe as evidence FOR a state, name the other states that produce the same reading."* Naming them
+is only the first half — and having named them, I still reported the EOA claim, because naming a
+gap does not close it. The rule's complete form:
+
+> **Name the other states that produce the same reading — THEN GO FIND THE PROBE THAT SEPARATES
+> THEM.** A named-but-unresolved ambiguity is not a caveat you may report around; it is an open
+> question, and the search for the discriminating instrument is part of the work, not a follow-up.
+
+Here that instrument was one flag on a command already in use.
+
+## 🚨 2 — A STALE CACHED READ ON A MONEY PATH, AND IT IS WRONG IN THE EXPENSIVE DIRECTION
+
+After the purchase settled:
+
+| instrument | reading |
+|---|---|
+| `circle wallet balance --chain BASE` | **2 USDC** ← the pre-purchase figure |
+| on-chain `balanceOf` via `eth_call` | **1.250000 USDC** ← the truth |
+
+The wallet API served a **cached balance that had not moved**, while the chain showed $0.75 gone.
+
+> 🚨 **WHAT THAT BELIEF INVITES IS THE WHOLE PROBLEM. "The payment did not go through" has one
+> obvious next action: PAY AGAIN.** A stale read here is not merely wrong — it is wrong **in the
+> direction that costs money**, and the mistake it invites is a double-spend the payer initiates
+> voluntarily, believing it is a retry.
+
+> ⭐ **THE RULE: ON A MONEY PATH, SETTLEMENT IS CONFIRMED ON-CHAIN — NEVER FROM A WALLET API'S
+> CACHED BALANCE.** The chain is the only instrument that cannot be serving you a value from
+> before your own transaction.
+
+⚠️ Third sighting of [[stale-read-then-act]], and the first through a **vendor wallet API** rather
+than Blobs — so the family is not a Netlify quirk. The x402 receipt did report `success:true`, so
+two instruments existed and **the disagreement was silent**: nothing flagged the conflict, and a
+reader consulting only the balance would have seen a clean "unpaid".
+
+## 3 — PREDICTION 2 FALSIFIED: DEPLOYMENT COST NOTHING, BY A MECHANISM IN NO DOC I READ
+
+Pre-registered: deploy succeeds without ETH ✅; **USDC moves via Circle Paymaster ❌**; `getCode`
+returns bytecode ✅; ⛔ no prediction on nonce.
 
 | | before | after |
 |---|---|---|
@@ -19,92 +70,72 @@ Pre-registered: (1) deploy succeeds without ETH; (2) **USDC moves** via Circle P
 | USDC | 2.000000 | **2.000000 — unchanged** |
 | nonce | 0 | 1 |
 
-`tx 0x421a51b3…ae20f`, block 50,558,757, status `0x1`, gasUsed **286,308** @ 0.006 gwei.
+**Neither token moved. Zero USDC `Transfer` events in the transaction.** The addresses, recorded
+because none of them is in the documentation:
 
-🚨 **PREDICTION 2 FALSIFIED: NOTHING WAS CHARGED, IN EITHER TOKEN.** Zero USDC `Transfer` events
-in the transaction. Gas was paid by bundler `0x2891d2f9…bc4c` into EntryPoint `0x5ff137d4…2789`
-(ERC-4337 v0.6), sponsored by paymaster **`0xf6102306…e536`** — which is **neither** the documented
-Gas Station address (`0x7ceA357B…0a25`) **nor** the USDC-charging Circle Paymaster. ⭐ **CLI
-agent-wallet deployment is sponsored by a third paymaster the Circle docs I read never named.**
-The read-only investigation concluded "probably Circle Paymaster, ≈$0.003–$0.010 in USDC"; the
-mechanism was a third option not on the list, and it cost nothing.
+| role | address |
+|---|---|
+| deploy tx | `0x421a51b38ff1c463c8f2b2c83bf0b1afb69ef2ed0e840f8cd0a95a6e0e5ae20f` (block 50,558,757, gasUsed 286,308 @ 0.006 gwei) |
+| bundler / gas payer | **`0x2891d2f99bc447a591f06d896f5f72647aa1bc4c`** |
+| EntryPoint | **`0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789`** (ERC-4337 v0.6) |
+| paymaster | **`0xf61023061ed45fa9eac4d2670649ce1fd37ce536`** |
 
-⭐⭐ **AND THE ACCOUNT-TYPE QUESTION IS SETTLED BY TWO INSTRUMENTS, ONE OF THEM BEFORE ACTING.**
-`circle wallet transfer --estimate` returned `callGasLimit` / `verificationGasLimit` /
-`preVerificationGas` — **ERC-4337 userOp fields; an EOA has no verification gas.** That was
-available read-only, before deploying, and it alone would have falsified the EOA claim. Then
-`getCode` returned bytecode after. **It is an SCA.** ⚠️ The instrument that could have caught
-yesterday's error existed the whole time and went unused — the failure was not lack of a second
-instrument but not looking for one.
+⭐ That paymaster is **neither** the documented Gas Station (`0x7ceA357B…0a25`) **nor** the
+USDC-charging Circle Paymaster. The read-only investigation predicted *"probably Circle Paymaster,
+≈$0.003–$0.010 in USDC"*; **the real mechanism was a third option that appears in none of the
+documentation searched, and it was free.** ⚠️ A doc search that returns two plausible mechanisms is
+not a list of the mechanisms that exist.
 
-## 💵 EXPERIMENT 2 — THE PURCHASE
+⭐ Also settled: the SCA/ERC-1271 concern **did not materialise** — a deployed Circle SCA settled
+vanilla x402 against Base USDC with no bytes-overload problem. **One settlement, not a guarantee.**
 
-`$0.75 USDC`, vanilla `exact` on Base, capped `--max-amount 0.75`, one call, GET, their own example
-token (`0x4ed4E862…efed`, DEGEN) so the paid report is diffable against the free preview they
-publish for the same subject.
+## 4 — THE COMPETITOR FINDING — distinction (1) is WEAKENED
 
-**Settled: `0xc226679a…aa34`.** ⭐ **Balance verified ON-CHAIN, not from the CLI:** `balanceOf`
-went **2.000000 → 1.250000**. ⚠️ **`circle wallet balance` still reported "2" AFTER settlement** —
-a stale cached read that would have supported "the payment did not go through". The authoritative
-read is the chain ([[stale-read-then-act]], on a money path, again).
+$0.75 bought **18 top-level fields** against the 8-field free preview, plus a `data{}` block of
+five sub-checks carrying raw evidence (holder counts, top-holder %, LP lock, liquidity, price
+impact).
 
-⭐ **The SCA/ERC-1271 concern did not materialise.** A deployed Circle SCA settled vanilla x402
-against USDC on Base without the bytes-overload problem appearing. Recorded as an observation of
-ONE settlement, not as a general guarantee.
+**The receipt tier holds as documented:** deep-dd's top-level receipt carries only `endpoint,
+inputHash, policyVersion` — no `confidence`, no `refusal`, no `refundable`.
 
-## ⭐⭐ WHAT $0.75 ACTUALLY BOUGHT — and it narrows yesterday's distinction (1)
+🚨 **BUT COVERAGE REACHES THE BUYER ANYWAY, THROUGH NESTED SUB-CHECK RECEIPTS** — unpredicted, and
+it weakens distinction (1). `risk` and `sanctions` each embed a **full** receipt. The `sanctions`
+one carries `confidence: {band: "high", basis: "all declared inputs were consulted"}`,
+`refusal: null`, the complete `refundRule`, `listSize: 120`, `listFetchedAt`, a **`stale: false`**
+flag — and this scope limit, verbatim:
 
-**18 top-level fields**, far beyond the 8-field free preview: `verdict, safetyScore, confidence,
-tradeability{canBuy,canSell,note}, liquidityAssessment, holderAssessment, summary, factors[5],
-risks[5], positives[5], recommendation, degraded, model, generatedAt, checkedAt, receipt`, plus a
-`data{}` block with **five sub-checks** (risk, holders, price, sanctions, exitLiquidity) carrying
-raw evidence — holder counts, top-holder percentages, LP lock, liquidity, price impact.
+> *"No direct match on the OFAC list (**direct-address match only; does not trace indirect
+> exposure**)."*
 
-**The receipt-tier finding holds exactly as documented:** deep-dd's top-level receipt carries
-**only the baseline three** — `endpoint, inputHash, policyVersion`. **No `confidence`, no
-`refusal`, no `refundable`.**
+**That is a real coverage statement inside a paid payload.** Source attribution is partial:
+`holders` names GoPlus, `sanctions` names the OFAC SDN list; `risk`, `price` and `exitLiquidity`
+name none.
 
-🚨 **BUT THE FLAGSHIP INHERITS COVERAGE MACHINERY THROUGH ITS COMPONENTS, WHICH I DID NOT PREDICT
-AND WHICH NARROWS DISTINCTION (1).** Two of the five sub-checks embed a **nested FULL receipt**:
+| distinction | status |
+|---|---|
+| (1) excludes their flagship | ⚠️ **WEAKENED** — top-level receipt is baseline, but coverage reaches the buyer via nested sub-check receipts |
+| (2) prose convention vs payload guarantee | **HOLDS** — nothing binds the response to the docs; `degraded` is in the payload and in no published surface |
+| (3) nothing is attested | **HOLDS UNCHANGED** — no signature, no identity; `inputHash` is self-asserted |
 
-| sub-check | nested receipt | confidence | scope note |
-|---|---|---|---|
-| `risk` | **YES** | `high` | — |
-| `sanctions` | **YES** | `high`, basis *"all declared inputs were consulted"* | ⭐ *"direct-address match only; **does not trace indirect exposure**"* |
-| `exitLiquidity` | no | — | *"Estimate using constant-product (V2-style) math…"* |
-| `holders` / `price` | no | — | — |
+## ⛔ 5 — THE LIMIT, AS LOAD-BEARING AS THE FINDING ABOVE
 
-`sanctions` also carries `listSize: 120`, `listFetchedAt`, a **`stale: false`** flag, `refusal:
-null`, and the full `refundRule` text. **That is a genuine coverage-and-provenance disclosure, and
-it is inside the paid payload.** Source attribution is partial: `holders` names GoPlus, `sanctions`
-names the OFAC SDN list; `risk`, `price` and `exitLiquidity` name none.
+> 🚨 **`degraded: false`. ALL FIVE SUB-CHECKS RETURNED DATA. I BOUGHT A REPORT WHERE EVERYTHING
+> WORKED.**
+>
+> **This measures what a SUCCESSFUL report discloses and says NOTHING about a degraded one.**
+> Whether a failed sub-check is **named** or **silently omitted** is the actual question — it is
+> the entire coverage argument — and **this purchase does not touch it.**
+>
+> ⛔ **A LATER READER MUST NOT TAKE SECTION 4 AS THE ANSWER TO THAT QUESTION.** Section 4 is
+> evidence about the happy path only. Answering the real question needs a subject that breaks a
+> feed, which is not purchasable on demand.
 
-## ⚠️ WHAT THIS PURCHASE CANNOT ANSWER
+⭐ And `degraded` itself remains **documented nowhere** — 0 occurrences across their
+`openapi.json`, `.well-known/x402`, `llms.txt` and `/agents` — while appearing in both the free
+preview and the paid payload. Field-written-never-documented, now confirmed against a paid artifact.
 
-**`degraded: false`, `confidence: "high"`, all five sub-checks returned data.** I bought a report
-where **everything worked**. So it shows what a *successful* report discloses and says **nothing**
-about what a DEGRADED one does — whether a failed sub-check is named, or silently omitted, is
-**exactly the question that matters** and this purchase does not touch it. ⛔ Answering it needs a
-subject that breaks a feed, which is not purchasable on demand.
-
-⭐ And `degraded` remains **documented nowhere** — 0 occurrences across their openapi.json,
-.well-known, llms.txt and /agents — while appearing in both the free preview and the paid payload.
-Field-written-never-documented, confirmed on the paid artifact.
-
-## Where the three distinctions now stand
-
-1. **"It excludes their flagship"** — ⚠️ **WEAKENED, not withdrawn.** The top-level receipt is
-   baseline as documented, but the payload embeds full receipts from full-tier sub-checks, so real
-   coverage disclosure does reach a deep-dd buyer.
-2. **Prose convention vs payload guarantee** — **HOLDS.** Nothing binds the response to the docs,
-   and `degraded` appearing in the payload while absent from every published surface is that gap.
-3. **Nothing is attested** — **HOLDS UNCHANGED.** No signature, no identity. The `inputHash` is
-   self-asserted; there is no way to verify the receipt came from them.
-
-⛔ **NO CONCLUSION ABOUT DD's PROSPECTS**, and the isolation rule was kept: nothing about this
-wallet went into `.env`, config, or any file the serverless plane reads.
-
----
+⛔ **NO CONCLUSION ABOUT DD's PROSPECTS.** Isolation kept: nothing about this wallet went into
+`.env`, config, or any file the serverless plane reads. Remaining balance **1.25 USDC**.
 
 # ⭐⭐ A PROBE THAT CANNOT DISTINGUISH TWO STATES IS NOT EVIDENCE FOR EITHER
 
