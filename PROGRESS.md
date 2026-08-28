@@ -1,5 +1,98 @@
 ---
 
+# ⚖️ DOES deep-dd NAME A FAILED SUB-CHECK? THE TWO PROXIES POINT OPPOSITE WAYS.
+
+**2026-08-28.** Free probes of deep-dd's sibling endpoints, at
+`evidence/competitor/deepdd-siblings-degraded-2026-08-28.json`. ⛔ **Nothing paid, nothing signed
+— three calls on their own offered free tier** (`x-402-free: 1`, 1/service/day/IP).
+
+## ⭐⭐⭐ THE FINDING IS THE CONTRADICTION, NOT ONE SIDE OF IT
+
+deep-dd is `freeTier: false`, so **its own degraded behaviour cannot be bought for free**. Two
+siblings are available as proxies, and **each resembles deep-dd along a different axis, and they
+disagree**:
+
+| proxy | shares with deep-dd | on a failing subject |
+|---|---|---|
+| `exit-liquidity` | ⭐ **its TIER** (baseline) | ❌ **`{"error":"No liquidity pool found…"}`** — 58 bytes, HTTP 400, no receipt, no `degraded`, no refusal |
+| `safe-to-send` | ⭐ **its SHAPE** (an aggregator over sub-checks) | ✅ full receipt **and** a named skipped factor |
+
+> 🚨 **NEITHER LICENSES AN INFERENCE ABOUT deep-dd.** One says the tier discloses nothing; the
+> other says the shape discloses everything. Picking whichever flatters a reading — theirs or
+> ours — is the error available here, and it is available in **both** directions. **The honest
+> state is: unresolved.**
+
+## What each probe actually returned
+
+**`rug-score`** (full tier) — a **real** degraded response, naming the failed dependency:
+
+```
+degraded: true      level: "unknown"          ← refuses to emit a misleading score
+signals: ["security feed unavailable — honeypot/tax not checked"]
+inputs:  { top10HolderPct: null, lockedLpPct: null, liquidityUsd: null, sellTaxPct: null }
+refusal: { reason: "upstream_data_unavailable",
+           missing: ["goplus-security-feed (honeypot/taxes)"] }
+refundable: true
+```
+
+**`safe-to-send`** (aggregator) — names an unchecked factor instead of dropping it:
+
+```
+identity: { level: "skipped",
+            reason: "not applicable — Coinbase verification and Basenames
+                     attach to user accounts, not to contracts" }
+```
+
+That is `notChecked` with a reason, in their vocabulary.
+
+**`exit-liquidity`** — nothing at all. A bare error string.
+
+## ⭐ METHOD — THE SUBJECT WAS ENGINEERED TO FAIL, NOT HOPED TO
+
+Subject: **our own Circle CLI agent wallet**, `0xed96e509…05f0`, deployed hours earlier the same
+day. It **has code** (a deployed SCA) but is **definitively not an ERC-20**, so every token-shaped
+check *must* fail on it.
+
+> ⭐ **THAT IS WHY THE `rug-score` RESPONSE COUNTS AS A MEASUREMENT AND NOT A LUCKY SIGHTING.**
+> A degraded response observed by chance says the state exists; one produced by a subject chosen to
+> guarantee the failure says the disclosure fires *when it should*. Waiting for an outage would
+> have been the weaker instrument.
+
+⚠️ Incidental but worth recording: **`safe-to-send` read our own wallet correctly** — CONTRACT not
+wallet, `ageDays: 0` (accurate to the hour), upgradeable proxy, sanctions clear, all flagged
+`caution`. Their checks work.
+
+## 🚨 THE TIER-LIST ASYMMETRY — AND THE READING IT MUST NOT LICENSE
+
+| | |
+|---|---|
+| published tiers **UNDERSTATE** some baseline endpoints | `safe-to-send` is listed `baseline` yet returned the **full** receipt — `confidence.basis`, `refusal`, `refundable`, `refundRule` |
+| published tiers were **EXACTLY RIGHT** for deep-dd | the **paid artifact's** receipt carries only `endpoint, inputHash, policyVersion` — **measured, not inferred** |
+
+> ⛔ **SO "THE TIER LIST UNDERSTATES BASELINE" MUST NOT BE READ AS EVIDENCE THAT deep-dd CARRIES
+> MORE THAN IT DOES.** It understates *elsewhere*. For deep-dd it was accurate, and we know that
+> from the artifact rather than from the list. A generalisation that happens to be false precisely
+> at the endpoint in question is worse than no generalisation.
+
+## ⛔ DECIDED: NOT BUYING AGAIN
+
+A second $0.75 would resolve **one endpoint's degraded path** and nothing else. The question this
+spending was serving — **does the gap justify DD's differentiator** — is now answered as far as
+money can answer it:
+
+- their coverage machinery is **REAL** and reaches live responses, not just documentation;
+- it is **UNEVEN across endpoints**, and unpredictable from their published tiers;
+- it is **UNATTESTED** — no signature, no identity, `inputHash` self-asserted.
+
+**All three of those hold whichever way deep-dd's degraded path turns out.** ⭐ Buying again is
+**curiosity, not a decision input** — and this file has spent the week learning to tell those
+apart. Balance left at **1.25 USDC**.
+
+⛔ **NO CONCLUSION ABOUT DD's PROSPECTS.** And the isolation rule held throughout: nothing about
+that wallet is in `.env`, config, or any file the serverless plane reads.
+
+---
+
 # ⚖️ THE COMPARISON, ON ONE SUBJECT — and the free probe answered what the $0.75 could not
 
 **2026-08-28.** DD probed **free** about the same token the paid deep-dd report covers (DEGEN,

@@ -1,0 +1,135 @@
+{
+ "_what": "FREE probes of deep-dd's SIBLING endpoints, to measure how this seller discloses a FAILED sub-check. deep-dd itself is freeTier:false and could not be probed.",
+ "_method": {
+  "calls": "Their own offered free tier — `x-402-free: 1`, 1 call per service per day per IP. Nothing paid, nothing signed.",
+  "subject": "0xed96e509aacb8641a6f0a4734b557b582b6b05f0 — OUR OWN Circle CLI agent wallet, deployed hours earlier on 2026-08-28.",
+  "whySubject": "⭐ ENGINEERED TO FAIL, NOT HOPED TO. It HAS code (a deployed SCA) but is definitively NOT an ERC-20, so every token-shaped check MUST fail on it. That is why the degraded response below counts as a measurement rather than a lucky sighting."
+ },
+ "_finding": "MIXED, and the two proxies point OPPOSITE WAYS. exit-liquidity shares deep-dd's TIER (baseline) and disclosed NOTHING. safe-to-send shares deep-dd's SHAPE (an aggregator over sub-checks) and disclosed FULLY. Neither licenses an inference about deep-dd.",
+ "_limit": "⛔ deep-dd's own degraded behaviour remains UNMEASURED. It is freeTier:false; only a paid call on a failing subject would settle it.",
+ "capturedAt": "2026-08-28",
+ "probes": {
+  "rug-score — FULL tier, a REAL degraded response": {
+   "tier": "full",
+   "freeTier": true,
+   "body": {
+    "service": "rug-score",
+    "builderCode": "bc_pa0gqlv1",
+    "data": {
+     "address": "0xed96e509aacb8641a6f0a4734b557b582b6b05f0",
+     "rugScore": 0,
+     "level": "unknown",
+     "degraded": true,
+     "signals": [
+      "security feed unavailable — honeypot/tax not checked"
+     ],
+     "inputs": {
+      "top10HolderPct": null,
+      "lockedLpPct": null,
+      "liquidityUsd": null,
+      "sellTaxPct": null
+     },
+     "note": "PARTIAL: security provider (honeypot/taxes) was unavailable this call — score reflects holders/liquidity/RPC only and cannot certify low risk. Re-check shortly.",
+     "receipt": {
+      "checked": "0xed96e509aacb8641a6f0a4734b557b582b6b05f0",
+      "endpoint": "rug-score",
+      "decision": "REFUSE",
+      "inputHash": "sha256:4c5cc8aab3d364614d64ba8af9eb9f37",
+      "policyVersion": "rug-score@1.1.0",
+      "confidence": {
+       "band": "low",
+       "basis": "core data feed unavailable this call — verdict is a partial read"
+      },
+      "refusal": {
+       "reason": "upstream_data_unavailable",
+       "missing": [
+        "goplus-security-feed (honeypot/taxes)"
+       ]
+      },
+      "refundable": true,
+      "refundRule": "A refusal (confidence=low: our core data feed was unavailable) is not billed on the credit path — the debit is auto-refunded and x-refunded:true is returned. Full-confidence verdicts are final."
+     },
+     "upgrade": {
+      "service": "ai-token-report",
+      "price": "$0.12",
+      "why": "AI-written verdict on this token: buy/avoid call, exit plan, signals explained. If you just paid this check, the full report is $0.05 (not $0.12) on this token for the next hour.",
+      "url": "https://402.com.tr/api/x402/ai-token-report?address=0xed96e509aacb8641a6f0a4734b557b582b6b05f0"
+     },
+     "checkedAt": "2026-08-28T09:57:18.249Z"
+    },
+    "freeTier": true,
+    "freeRemaining": 0
+   }
+  },
+  "exit-liquidity — BASELINE tier (deep-dd's tier): bare error, no receipt": {
+   "tier": "baseline",
+   "freeTier": true,
+   "httpStatus": 400,
+   "body": {
+    "error": "No liquidity pool found for this token on Base"
+   }
+  },
+  "safe-to-send — BASELINE tier but an AGGREGATOR (deep-dd's shape): full receipt + named skipped factor": {
+   "tier": "baseline (documented) / full receipt OBSERVED",
+   "freeTier": true,
+   "body": {
+    "service": "safe-to-send",
+    "builderCode": "bc_pa0gqlv1",
+    "data": {
+     "checkedAt": "2026-08-28T09:58:18.448Z",
+     "address": "0xEd96e509aACB8641a6F0A4734b557B582b6B05f0",
+     "verdict": "REVIEW",
+     "factors": {
+      "sanctions": {
+       "level": "clear",
+       "reason": "Not on the OFAC SDN list",
+       "listStale": false
+      },
+      "identity": {
+       "level": "skipped",
+       "reason": "not applicable — Coinbase verification and Basenames attach to user accounts, not to contracts"
+      },
+      "accountType": {
+       "level": "caution",
+       "reason": "This is a CONTRACT, not a wallet. Sending to a contract that does not expect a plain transfer can lose the funds",
+       "type": "contract"
+      },
+      "age": {
+       "level": "caution",
+       "reason": "First seen on Base 0 day(s) ago — a fresh address is what a one-shot scam or a drainer hands you",
+       "ageDays": 0,
+       "firstSeen": "2026-08-28T08:47:41.000Z"
+      },
+      "upgradeable": {
+       "level": "caution",
+       "reason": "Upgradeable proxy — the logic behind this address can be replaced, though not by a single unprotected key",
+       "adminType": "none"
+      }
+     },
+     "checkedFactors": 4,
+     "skippedFactors": 1,
+     "degraded": false,
+     "guidance": "Review before sending. accountType: This is a CONTRACT, not a wallet. Sending to a contract that does not expect a plain transfer can lose the funds | age: First seen on Base 0 day(s) ago — a fresh address is what a one-shot scam or a drainer hands you | upgradeable: Upgradeable proxy — the logic behind this address can be replaced, though not by a single unprotected key",
+     "tookMs": 704,
+     "receipt": {
+      "checked": "0xEd96e509aACB8641a6F0A4734b557B582b6B05f0",
+      "endpoint": "safe-to-send",
+      "decision": "REVIEW",
+      "inputHash": "sha256:55cc89ed1483866816f3733681b8a03a",
+      "policyVersion": "safe-to-send@1.0.0",
+      "confidence": {
+       "band": "high",
+       "basis": "all declared inputs were consulted"
+      },
+      "refusal": null,
+      "refundable": false,
+      "refundRule": "A refusal (confidence=low: our core data feed was unavailable) is not billed on the credit path — the debit is auto-refunded and x-refunded:true is returned. Full-confidence verdicts are final."
+     },
+     "note": "Screens the address you are about to send, approve or sign to: OFAC sanctions, Coinbase/Basename identity, wallet vs contract, how long it has existed, and whether contract logic can be swapped after you send. Every factor reports what it found AND what it could not read; a check that did not run never reads as clean. Not financial advice."
+    },
+    "freeTier": true,
+    "freeRemaining": 0
+   }
+  }
+ }
+}
