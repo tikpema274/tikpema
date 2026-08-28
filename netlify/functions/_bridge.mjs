@@ -22,7 +22,7 @@ import { circle, waitForTx } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { publicClient } from "./_predict.mjs";
 
-const BRIDGE_CONTRACT = "0xC5567a5E3370d4DBfB0540025078e283e36A363d"; // BridgingKitContract (Arc testnet)
+export const BRIDGE_CONTRACT = "0xC5567a5E3370d4DBfB0540025078e283e36A363d"; // BridgingKitContract (Arc testnet)
 const IRIS = "https://iris-api-sandbox.circle.com"; // testnet IRIS
 const ARC_CCTP_DOMAIN = 26;
 const FAST_FINALITY = 1000; // FAST tier
@@ -63,7 +63,7 @@ export function resolveDestination(name) {
 
 export const SUPPORTED_DESTINATION_LABELS = Object.values(BRIDGE_DESTINATIONS).map((d) => d.label);
 
-const BRIDGE_ABI = [
+export const BRIDGE_ABI = [
   {
     type: "function",
     name: "bridgeWithPreapprovalAndHook",
@@ -255,7 +255,13 @@ export function bridgeAckToken({ owner, destinationKey, amountUsdc, band }) {
 // _predict) for a two-line hash.
 // Build the bridgeWithPreapprovalAndHook calldata (byte-identical to App Kit's
 // custom-burn path).
-function bridgeCallData({ amountMinor, maxFee, recipient, cctpDomain }) {
+// ⭐ EXPORTED 2026-08-28 for the USER-SIGNED bridge. A MetaMask burn must be byte-identical to
+// the agent's, and the only way to guarantee that is to build it here — once — rather than
+// reimplementing the tuple in the browser where it would drift silently.
+// 🚨 THE CLIENT NEVER SUPPLIES `maxFee`. It arrives from `bridgeFee()` on the same server request
+// that computes the band, because the band is DERIVED from maxFee: a client-chosen maxFee would
+// let the caller pick the band its own acknowledgment is checked against, making the gate theatre.
+export function bridgeCallData({ amountMinor, maxFee, recipient, cctpDomain }) {
   const bridgeParams = {
     amount: amountMinor,
     maxFee,

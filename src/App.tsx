@@ -8,6 +8,7 @@ import SendPanel from "./components/SendPanel";
 import SwapPanel from "./components/SwapPanel";
 import DcaPanel from "./components/DcaPanel";
 import BridgePanel from "./components/BridgePanel";
+import ManualBridgePanel from "./components/ManualBridgePanel";
 import VaultPanel from "./components/VaultPanel";
 import NanopaymentPanel from "./components/NanopaymentPanel";
 import UnifiedBalancePanel from "./components/UnifiedBalancePanel";
@@ -93,6 +94,13 @@ export default function App() {
     // #/swap — Bridge stays a sub-action of AI Agent, nav untouched.
     case "bridge":
       page = <BridgePanel wallet={wallet} />;
+      break;
+    // ⭐ THE MANUAL BRIDGE — user-signed, from the CONNECTED wallet. A sibling of #/bridge, not a
+    // replacement: the agent path stays exactly as it was. Nav-less like #/swap and #/bridge, and
+    // LINKED from BridgePanel — src/App.tsx:85 records what happens to a live route nothing links
+    // to (#/dca sat reachable only by typing the hash for 22 days).
+    case "bridge-manual":
+      page = <ManualBridgePanel wallet={wallet} />;
       break;
     // The Vault agent — inspect an allowlisted ERC-4626 vault, then deposit/withdraw. Nav-less
     // like #/swap and #/bridge: a sub-action reached from the Dashboard/AI Agent, so the 5-item

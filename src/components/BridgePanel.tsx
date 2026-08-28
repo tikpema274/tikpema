@@ -223,6 +223,16 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
         cap, or too small to cover the fee, are refused before any funds move.
       </div>
 
+      {/* ⭐ THE ENTRY POINT. A live route nothing links to is reachable only by typing the hash —
+          #/dca sat that way for 22 days. This link ships WITH the route, not after it. */}
+      <div className="status" style={{ opacity: 0.85 }}>
+        Prefer to sign it yourself?{" "}
+        <button className="linkbtn" onClick={() => (window.location.hash = "/bridge-manual")}>
+          Bridge from your connected wallet
+        </button>{" "}
+        — your own key, your own funds, and agent caps do not apply.
+      </div>
+
       {error && (
         <div className="status" style={{ color: "var(--warn)" }}>
           {error}

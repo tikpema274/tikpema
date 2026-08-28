@@ -20,6 +20,24 @@ async function post(path: string, body: unknown, token?: string) {
   return data;
 }
 
+/**
+ * ⭐ STATUS-PRESERVING POST. `post` above THROWS on !ok, which is right for calls where any
+ * non-200 is a failure — but the user-signed bridge has two non-200s that are NOT failures:
+ *   409 → an acknowledgment is required, and the disclosure to show is in the body;
+ *   202 → the burn is not visible on chain YET, retry (never "it failed").
+ * Collapsing those into a thrown Error would turn a satisfiable refusal and a retryable wait into
+ * the same dead end, which is the shape this codebase keeps correcting elsewhere.
+ */
+async function postRaw(path: string, body: unknown, token?: string) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body ?? {}),
+  });
+  const data = await readJson(res);
+  return { ok: res.ok, status: res.status, body: data };
+}
+
 async function get(path: string, token?: string) {
   const res = await fetch(path, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -72,4 +90,8 @@ export const agentClient = {
   dcaCreate: (mandate: unknown, token: string) => post("/api/dca-create", mandate, token),
   dcaCancel: (id: string, token: string) => post("/api/dca-cancel", { id }, token),
   dcaList: (token: string) => get("/api/dca-list", token),
+
+  // ── USER-SIGNED BRIDGE. Status-preserving: 409 carries the fee disclosure, 202 means retry.
+  userBridgeStart: (body: unknown, token: string) => postRaw("/api/user-bridge-start", body, token),
+  userBridgePromote: (body: unknown, token: string) => postRaw("/api/user-bridge-promote", body, token),
 };

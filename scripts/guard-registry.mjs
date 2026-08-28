@@ -47,6 +47,9 @@ export const COMPONENTS = {
   DcaPanel:             { suite: "verify-dca-consent-copy.tsx" },
   NanopaymentPanel:     { suite: "verify-nanopay-copy.tsx" },
   BridgePanel:          { suite: "verify-bridge-panel-copy.tsx" },
+  // ⛔ Carries a claim no other panel makes — that agent caps DO NOT apply — and it sits beside a
+  // panel where they do, so silence would read as capped. Its suite asserts that sentence renders.
+  ManualBridgePanel:    { suite: "verify-manual-bridge-copy.tsx" },
   Dashboard:            { suite: "verify-dashboard-copy.tsx" },
   ResearchPanel:        { suite: "verify-research-panel-copy.tsx" },
   // ⚠️ NOT verify-activity-fallback — that renders ONE row subcomponent for a fallback label and

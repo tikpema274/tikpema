@@ -632,6 +632,11 @@ export function useWallet() {
     refreshBalance: isMetaMask ? mmRefreshBalance : modular.refreshBalance,
     createJobAsUser: isMetaMask ? mmWallet!.createJobAsUser : modular.createJobAsUser,
     fundJobAsUser: isMetaMask ? mmWallet!.fundJobAsUser : modular.fundJobAsUser,
+    // ⭐ METAMASK ONLY, AND `undefined` ELSEWHERE ON PURPOSE. The manual bridge signs with the
+    // user's own key; the modular passkey wallet has no equivalent raw-calldata path, and a
+    // stub that threw would look like a capability the panel could offer. The panel checks
+    // `activeKind === "metamask"` and says so instead.
+    manualBridgeBurn: isMetaMask ? mmWallet!.manualBridgeBurn : undefined,
     // Hop A — login wallet → the user's own agent SCA. Same connector-switch as the rest.
     fundAgentWallet: isMetaMask ? mmWallet!.fundAgentWallet : modular.fundAgentWallet,
     connectRegister,

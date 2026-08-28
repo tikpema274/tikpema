@@ -1,5 +1,5 @@
 import { internalToken } from "./_auth.mjs";
-import { writeReceiptNeverThrows, writePendingReceiptNeverThrows, SUBMITTED_STATE, PENDING_STAGES, ackTokenFingerprint } from "./_bridge-receipts.mjs";
+import { writeReceiptNeverThrows, writePendingReceiptNeverThrows, SUBMITTED_STATE, PENDING_STAGES, ackTokenFingerprint, readPendingReceipt, retirePendingReceipt } from "./_bridge-receipts.mjs";
 
 // RECORD A BRIDGE — the write-and-trigger pair, in ONE place, called from the HTTP
 // boundaries that own it.
@@ -254,4 +254,123 @@ export async function recordPendingBridge({ e, session, amountRequested, quoteId
   });
 
   return { recorded: write.written === true, submittedAt, txId };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// ⭐⭐ THE USER-SIGNED PATH — ONE WRITER, A SECOND INPUT ADAPTER
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// `recordBridge` above takes a Circle-shaped `r`. The user-signed path produces a viem-shaped
+// result instead. The choice made here is deliberately NOT a second writer:
+//
+//   ⛔ TWO WRITERS WOULD DRIFT. Every field in a receipt — `delivery`, `ackTokenHash`, the
+//      predicted/measured split — is load-bearing for a reader who cannot see which path produced
+//      it. A second copy of that shape is [[duplicate-source-of-truth-is-the-recurring-bug]] on a
+//      permanent record.
+//   ⭐ SO THESE FUNCTIONS ADAPT INPUTS AND DELEGATE. `promoteUserBridge` builds the same `r` the
+//      agent path builds and calls `recordBridge` — the identical writer, the identical fields,
+//      the identical settle trigger.
+//
+// 🚨 AND THE CONSENT PROPERTY TRAVELS WITH IT. `ackAcceptedAt` is written from `r.acknowledged`,
+// which is evidence ONLY because a refusal made it unreachable without a matching token. For this
+// path that refusal is `priceAndGate()` in _user-bridge.mjs, and it must precede every call below.
+// scripts/verify-bridge-fee-band.mjs §9 pins that ordering for BOTH paths — a writer added outside
+// that assertion silently unpins the property the field depends on.
+
+/**
+ * The intent record, written BEFORE the user signs.
+ *
+ * ⚠️ NO burnHash, AND THAT IS NOT AN OMISSION — nothing has been submitted. It reuses the
+ * provisional `tx-` key layout, so it is excluded from mint recovery by name (a settler handed a
+ * receipt with no burn hash would chase a mint for a burn that may never exist).
+ *
+ * ⭐ WHAT IT IS FOR: if the user signs and never returns, this is the only record that the attempt
+ * happened, who owns it, what they consented to, and where the funds were going. Without it the
+ * burn is on chain and unattributable.
+ */
+export async function recordUserPendingBridge({ session, amountRequested, consent }) {
+  const submittedAt = new Date().toISOString();
+  // A client-independent id: the intent is OURS, not something the caller may name.
+  const intentId = `user-${Date.now().toString(36)}-${Math.abs(hashString(`${session.address}|${submittedAt}`)).toString(36)}`;
+  const c = consent || {};
+
+  const write = await writePendingReceiptNeverThrows({
+    schema: "bridge-receipt/1",
+    owner: session.address,
+    txId: intentId,
+    origin: "user-signed",           // ⭐ the discriminator a reader needs; agent receipts lack it
+    burnHash: null,
+    burnedAt: null,
+    submittedAt,
+    state: SUBMITTED_STATE,
+    pendingReason: "awaiting user signature",
+    pendingStage: "burn",            // there is no ambiguity here: the approve is a separate tx
+    destinationKey: c.destinationKey ?? null,
+    destinationLabel: c.destinationLabel ?? null,
+    recipient: c.recipient ?? null,
+    amountRequested: Number(amountRequested),
+    feeUsdc: c.feeUsdc ?? null,
+    netPredicted: c.netUsdc ?? null,
+    delivery: "predicted",
+    amountDelivered: null,
+    feeRatio: c.feeRatio ?? null,
+    ackBand: c.feeBand ?? null,
+    ackRequired: c.ackRequired ?? false,
+    ackAcceptedAt: c.acknowledged ? submittedAt : null,
+    ackTokenHash: ackTokenFingerprint(c.ackToken ?? null),
+  });
+  return { recorded: write.written === true, intentId, submittedAt };
+}
+
+/**
+ * Promote a signed intent into a real receipt.
+ *
+ * ⚠️ THE CALLER MUST HAVE VERIFIED THE BURN ON CHAIN FIRST (`verifyBurnOnArc`). This function does
+ * not re-verify: it is the WRITER, and putting the chain check here as well would split the
+ * security property across two modules. The endpoint refuses before reaching this line.
+ *
+ * ⭐ Write-then-retire, matching the existing rule: the durable receipt lands under the real burn
+ * hash FIRST and the provisional key is removed after. Delete-first risks losing the record.
+ */
+export async function promoteUserBridge({ session, intentId, burnHash, burnTx, event }) {
+  const pending = await readPendingReceipt(session.address, intentId);
+  if (!pending) return { ok: false, status: 404, reason: "intent_not_found" };
+  const lower = (a) => String(a || "").toLowerCase();
+  if (pending.owner && lower(pending.owner) !== lower(session.address))
+    return { ok: false, status: 403, reason: "intent_not_owned" };
+
+  // Rebuild the SAME `r` the agent path builds — so one writer sees one shape.
+  const r = {
+    burnHash,
+    tx: burnTx,
+    destination: { key: pending.destinationKey, label: pending.destinationLabel },
+    recipient: pending.recipient,
+    feeUsdc: pending.feeUsdc,
+    netUsdc: pending.netPredicted,
+    feeRatio: pending.feeRatio,
+    feeBand: pending.ackBand,
+    ackRequired: pending.ackRequired,
+    // ⭐ CARRIED FROM THE INTENT, NOT RECOMPUTED. The refusal that makes this meaningful ran in
+    // user-bridge-start before the intent was written; recomputing it here would assert consent
+    // from a request the user never saw a disclosure for.
+    acknowledged: pending.ackAcceptedAt != null,
+    // ⚠️ NO `ackToken` FIELD AT ALL, not even an explicit null — verify-ack-token-keyed.mjs
+    // asserts that this module contains no raw `ackToken:` anywhere, and it is right to: the
+    // property is "a raw token never reaches the durable record", and a null placeholder is a
+    // slot someone later fills. recordBridge reads `r.ackToken ?? null` into the FINGERPRINT, so
+    // omitting it yields exactly the same stored value with no field to misuse.
+    // ⭐ The intent record already holds the fingerprint; this promotion does not re-derive it.
+  };
+
+  const rec = await recordBridge({ r, session, event, amountRequested: pending.amountRequested });
+  if (!rec.recorded) return { ok: false, status: 500, reason: rec.reason ?? "receipt_write_failed" };
+
+  await retirePendingReceipt(session.address, intentId);
+  return { ok: true, state: "burn_confirmed", netPredicted: pending.netPredicted };
+}
+
+/** Small non-crypto id helper — used only to make an intent id unguessable-ish, never for auth. */
+function hashString(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; }
+  return h;
 }

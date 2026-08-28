@@ -25,7 +25,7 @@
 // band is computed), so this is a test-harness need, not a hole.
 process.env.SESSION_SECRET ||= "test-session-secret-0123456789abcdef";
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { bridgeFeeBand, bridgeAckToken, FEE_BAND_WARN, FEE_BAND_ACKNOWLEDGE, FEE_BANDS, GATING_BANDS } from "../netlify/functions/_bridge.mjs";
 
 let pass = 0, fail = 0;
@@ -377,6 +377,49 @@ section("9 — ackAcceptedAt IS EVIDENCE OF ACCEPTANCE ONLY TRANSITIVELY");
     /carried by a REFUSAL/.test(record));
   check("  …and names the two refusals it depends on, so neither is edited unaware",
     /_actions refuses on mismatch/.test(record) && /agent-execute-plan's pre-flight/.test(record));
+
+  // ══ ⭐⭐ THE SECOND WRITER — ADDED 2026-08-28 WITH THE USER-SIGNED BRIDGE ═══════════════════
+  // 🚨 THE WHOLE POINT OF THIS BLOCK. `ackAcceptedAt` is evidence only because a refusal makes it
+  // unreachable without a matching token. That argument is per-WRITER, not global: a second path
+  // reaching recordBridge without its own refusal keeps writing the field, it keeps reading as
+  // consent, and NOTHING above would fail — the agent orderings would all still hold.
+  // ⚠️ So every writer must be listed here. A path added outside this assertion silently unpins
+  // the property, which is exactly the failure the section was written to prevent.
+  const userGate = readFileSync(new URL("../netlify/functions/_user-bridge.mjs", import.meta.url), "utf8");
+  const userStart = readFileSync(new URL("../netlify/functions/user-bridge-start.mjs", import.meta.url), "utf8");
+
+  // Refusal 3 — the user path's own, in priceAndGate.
+  const uMismatchIdx = userGate.indexOf('bandInfo.band === "acknowledge" && ackToken !== expected');
+  const uAckIdx = userGate.indexOf('acknowledged: bandInfo.band === "acknowledge"');
+  check("⭐⭐ _user-bridge REFUSES on a token mismatch BEFORE it can report `acknowledged`",
+    uMismatchIdx > -1 && uAckIdx > -1 && uMismatchIdx < uAckIdx,
+    `mismatch@${uMismatchIdx} < acknowledged@${uAckIdx}`);
+  check("  …and that refusal RETURNS rather than falling through",
+    /ackToken !== expected\) \{[\s\S]{0,400}?return \{\s*\n\s*ok: false,/.test(userGate));
+
+  // ⭐ And the ORDERING at the endpoint: the gate must precede the write, not merely exist.
+  const gateCallIdx = userStart.indexOf("await priceAndGate(");
+  const refuseIdx = userStart.indexOf("if (!gate.ok)");
+  const writeIdx = userStart.indexOf("await recordUserPendingBridge(");
+  check("⭐⭐ user-bridge-start gates, REFUSES, and only then writes — in that order",
+    gateCallIdx > -1 && refuseIdx > -1 && writeIdx > -1 && gateCallIdx < refuseIdx && refuseIdx < writeIdx,
+    `gate@${gateCallIdx} < refuse@${refuseIdx} < write@${writeIdx}`);
+
+  // ⭐ The promoter must NOT recompute consent — it carries it from the gated intent. Recomputing
+  // would assert acceptance from a request that never showed the user a disclosure.
+  check("⭐ promoteUserBridge CARRIES `acknowledged` from the intent, never recomputes it",
+    /acknowledged: pending\.ackAcceptedAt != null/.test(record) &&
+    !/bridgeFeeBand|bridgeAckToken/.test(record));
+
+  // 🚨 THE COMPLETENESS CHECK — every caller of recordBridge is a known, gated writer.
+  const callers = ["agent-bridge.mjs", "agent-execute-plan.mjs", "_bridge-record.mjs"];
+  const fnDir = new URL("../netlify/functions/", import.meta.url);
+  const unlisted = readdirSync(fnDir)
+    .filter((f) => f.endsWith(".mjs") && !callers.includes(f))
+    .filter((f) => /\brecordBridge\(/.test(readFileSync(new URL(f, fnDir), "utf8")));
+  check("⭐⭐ NO UNLISTED caller of recordBridge — a new writer must be added to this section",
+    unlisted.length === 0,
+    unlisted.length ? `unlisted: ${unlisted.join(", ")}` : "3 known callers");
 }
 
 section("10 — THE PENDING PATH KEEPS THE CONSENT EVIDENCE (the 202 wrote NOTHING)");

@@ -105,8 +105,18 @@ section("4 — ⭐⭐ THE RECEIPT STORES A FINGERPRINT, NOT THE TOKEN");
     !/^\s*ackToken:/m.test(code), "comments stripped — the property is about code, not prose");
   check("⭐ …it stores ackTokenHash, via the fingerprint helper",
     /ackTokenHash:\s*ackTokenFingerprint\(/.test(code));
-  check("⭐ …on BOTH record builders — a pending receipt must not leak what a settled one hides",
-    (code.match(/ackTokenHash:\s*ackTokenFingerprint\(/g) || []).length === 2);
+  // ⭐⭐ COUNTED, NOT PINNED — CHANGED 2026-08-28 when a THIRD builder was added.
+  // This asserted `=== 2` because there were two record builders. A third correct one then FAILED
+  // it, and the tempting fix — bump the literal to 3 — is the wrong one: a hardcoded count says
+  // nothing about whether the NEXT builder fingerprints, and someone bumping it to silence a
+  // failure would let a builder that stores nothing sail through.
+  // 🚨 THE PROPERTY IS A RATIO, NOT A NUMBER: every receipt written from this module must carry a
+  // fingerprint. So count the WRITES and require as many fingerprints. A new builder that forgets
+  // one now fails for the right reason, and a new builder that has one passes without an edit here.
+  const writes = (code.match(/await\s+write(Pending)?ReceiptNeverThrows\(/g) || []).length;
+  const prints = (code.match(/ackTokenHash:\s*ackTokenFingerprint\(/g) || []).length;
+  check("⭐ EVERY record builder fingerprints — a pending receipt must not leak what a settled one hides",
+    writes > 0 && writes === prints, `${writes} receipt write(s), ${prints} fingerprint(s)`);
 }
 
 console.log(`\n${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}\n`);

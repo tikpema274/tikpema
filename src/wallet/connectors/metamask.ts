@@ -317,6 +317,57 @@ export async function connectMetaMask() {
   // single secure server endpoint /api/agent-send (auth + per-user wallet + cap +
   // day-ceiling). No client-side USDC-move path remains.
 
+  // ══ USER-SIGNED BRIDGE — approve (only if short) then the burn ═══════════════════════════════
+  // ⭐ THE CALLDATA IS NOT BUILT HERE. It arrives from the server, which priced the fee and
+  // computed the band from it: a client-assembled `maxFee` would let the caller choose the band
+  // its own acknowledgment is checked against, making the ack gate theatre.
+  //
+  // 🚨 NO RECEIPT IS WRITTEN BETWEEN THE TWO TRANSACTIONS, AND THE ORDER MATTERS.
+  // An approve that lands with a burn that does not leaves an ALLOWANCE sitting there — no money
+  // has moved. That is benign and self-healing: the next attempt re-reads the allowance and skips
+  // the approve. What would NOT be benign is recording the approve's hash as a burnHash, which
+  // the agent path names outright as "a fabricated money-movement record for a burn that was
+  // never submitted". The server refuses it independently — an approve goes to USDC, not the
+  // BridgingKit, and carries a different selector — but the client does not offer it either.
+  async function manualBridgeBurn({
+    bridgeContract, usdc, amountMinor, calldata, onStatus,
+  }: {
+    bridgeContract: string; usdc: string; amountMinor: bigint;
+    calldata: `0x${string}`; onStatus?: (s: string) => void;
+  }): Promise<`0x${string}`> {
+    const allowance = (await publicClient.readContract({
+      address: usdc as `0x${string}`,
+      abi: [{ type: "function", name: "allowance", stateMutability: "view",
+              inputs: [{ name: "o", type: "address" }, { name: "s", type: "address" }],
+              outputs: [{ type: "uint256" }] }],
+      functionName: "allowance",
+      args: [address as `0x${string}`, bridgeContract as `0x${string}`],
+    })) as bigint;
+
+    if (allowance < amountMinor) {
+      onStatus?.("Approve the bridge to move your USDC…");
+      const approveHash = await walletClient.writeContract({
+        address: usdc as `0x${string}`,
+        abi: [{ type: "function", name: "approve", stateMutability: "nonpayable",
+                inputs: [{ name: "s", type: "address" }, { name: "v", type: "uint256" }],
+                outputs: [{ type: "bool" }] }],
+        functionName: "approve",
+        args: [bridgeContract as `0x${string}`, amountMinor],
+      });
+      // Wait for the allowance to be real before spending against it. ⚠️ Nothing is recorded here.
+      await publicClient.waitForTransactionReceipt({ hash: approveHash });
+    }
+
+    onStatus?.("Sign the bridge…");
+    // Raw calldata — the server built the tuple so it is byte-identical to the agent's burn.
+    const burnHash = await walletClient.sendTransaction({
+      account: address as `0x${string}`,
+      to: bridgeContract as `0x${string}`,
+      data: calldata,
+    });
+    return burnHash;
+  }
+
   // Sign a plain message with the EOA (personal_sign). Used as the session auth
   // proof — the server verifies it off-chain via ecrecover. Moves no funds.
   async function signMessage(message: string) {
@@ -330,6 +381,7 @@ export async function connectMetaMask() {
     createJobAsUser,
     fundJobAsUser,
     fundAgentWallet,
+    manualBridgeBurn,
     signMessage,
     // EIP-1193 has no programmatic disconnect; the user manages this in the
     // extension. No-op to satisfy the wallet shape.

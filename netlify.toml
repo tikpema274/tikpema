@@ -297,6 +297,24 @@
   to = "/.netlify/functions/dd-openapi"
   status = 200
 
+# ═══ USER-SIGNED BRIDGE — the manual path, session-gated ═══════════════════════════════════════
+# ⛔ AGENT CAPS DO NOT APPLY on these two: the user signs with their own key and spends their own
+# funds, the same rule already settled for /api/agent-withdraw and /api/ub-withdraw. The ACK GATE
+# DOES apply and is enforced in user-bridge-start BEFORE anything is written or any calldata is
+# issued — see _user-bridge.mjs and verify-bridge-fee-band.mjs §9.
+# 🚨 THE OWNER IS ALWAYS THE VERIFIED SESSION, NEVER THE BODY, and user-bridge-promote verifies the
+# burn ON CHAIN (succeeded, sent BY the session address, to the BridgingKit, with the burn
+# selector) before any receipt is written — so a session holder cannot claim a stranger's burn.
+[[redirects]]
+  from = "/api/user-bridge-start"
+  to = "/.netlify/functions/user-bridge-start"
+  status = 200
+
+[[redirects]]
+  from = "/api/user-bridge-promote"
+  to = "/.netlify/functions/user-bridge-promote"
+  status = 200
+
 # ═══ FRONT DOORS FOR TWO LIVE PAID ENDPOINTS ═══════════════════════════════════════════════════
 # Both have been settling real Arc testnet USDC while reachable ONLY at /.netlify/functions/*.
 #
