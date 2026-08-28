@@ -1,5 +1,62 @@
 ---
 
+# 🚨 A VERIFICATION PASS PRODUCED FALSE PASSES — six ✅ for a string in none of the files
+
+**2026-08-28.** While fact-checking a draft against the committed artifacts, the check that asked
+*"is this quote backed by a committed file?"* **printed ✅ for all six files. The string appears in
+none of them.**
+
+## The mechanism
+
+```bash
+n=$(grep -c "free call per service per day" "$f" 2>/dev/null || echo 0)
+[ "$n" != "0" ] && echo "  ✅ $f  ($n hits)"
+```
+
+**`grep -c` prints `0` AND exits 1 when there are no matches.** The `|| echo 0` then fires *as
+well*, so `n` becomes the two-line string `"0\n0"` — which is not equal to `"0"`, so the guard
+passes. **The fallback written to make the check robust is what broke it**, and it broke it in the
+direction of passing.
+
+## ⭐⭐ THE FINDING: THIS WAS THE VERIFIER, NOT THE THING VERIFIED
+
+The whole pass existed to catch unsupported claims in a draft. **It was itself producing
+unsupported passes** — and a green from it was being read as "this quote is backed."
+
+⚠️ **It was caught by IMPLAUSIBILITY, not by any mechanism.** Six confirmations for a string I
+already doubted was too good; a single ✅ on a string I half-expected would have been believed.
+**That is not a detection method, and nothing here should be recorded as though it were.**
+
+## ⭐⭐⭐ THE RULE
+
+> **A check whose failure mode is a PASS must be validated against a KNOWN-ABSENT case before its
+> results are trusted.**
+
+This repo already applies exactly that discipline to committed suites — `test:ddrail` was run
+against the uncorrected copy and had to go **red** (15 failures) before its green meant anything;
+`test:dcareason` was validated against a reverted renderer with the mutation confirmed applied
+first. **The gap was that ad-hoc shell checks were exempt from a rule the suites all follow.**
+A one-off `grep` in a verification pass carries the same burden as a committed guard: **run it once
+where it must fail.**
+
+⚠️ **AND THE ONE-LINE VERSION OF THE BUG IS WORTH KEEPING:** `grep -c` on zero matches prints `0`
+*and* exits non-zero, so `$(grep -c … || echo 0)` yields `"0\n0"`. Any `-c`-plus-fallback shell
+idiom has this shape.
+
+## ✅ AND THE CLAIM IT WAS CHECKING WAS INDEED UNBACKED
+
+Corrected check: **zero committed files** contained the quoted free-tier terms. The seller's
+`/.well-known/x402`, `/openapi.json` and `/llms.txt` existed **only in the session scratchpad** —
+and they back several quoted strings in a piece about to be published, against **a live page that
+can be reworded at any time**. Now committed as
+`evidence/competitor/402comtr-published-surfaces-2026-08-27.json` (345 KB), under the harvest
+policy already recorded: *a harvest that backs a published claim keeps its full rows.*
+
+⚠️ Recorded with the harvest: the fetches **did not stamp themselves**, so `harvestedAt` is derived
+from file mtimes. A gap, named rather than hidden — the same one the earlier Bazaar harvest had.
+
+---
+
 # ⚖️ DOES deep-dd NAME A FAILED SUB-CHECK? THE TWO PROXIES POINT OPPOSITE WAYS.
 
 **2026-08-28.** Free probes of deep-dd's sibling endpoints, at
