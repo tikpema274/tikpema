@@ -19,6 +19,7 @@
 // stops passing the prop all pass a grep and fail the reader.
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
 import ManualBridgePanel from "../src/components/ManualBridgePanel";
 
 let pass = 0, fail = 0;
@@ -83,6 +84,32 @@ section("4 — the direction that catches a hardcode: a non-MetaMask wallet");
     !/Agent spending caps do not apply/i.test(text));
   check("⭐ …nor the stay-on-this-page warning, which qualifies a signature it cannot make",
     !/stay on this page until the burn confirms/i.test(text));
+}
+
+section("5 — 🚨 ONCE THE BURN EXISTS, SIGNING AGAIN MUST BE UNOFFERABLE");
+{
+  // 🚨 THE DEFECT THIS PINS. The first version left `burn`/`intentId` intact on every failure, so
+  // the "Sign and bridge" button returned after a promote failure — with the SAME calldata. One
+  // more click burns a SECOND time, and the motive is the worst kind: re-signing to fix a RECORD
+  // problem, spending more money to repair bookkeeping for money that already moved correctly.
+  // ⚠️ ASSERTED ON SOURCE, not render: the state is reached only after a real signature, which a
+  // static render cannot produce. Named as the weaker instrument it is.
+  const src = readFileSync(new URL("../src/components/ManualBridgePanel.tsx", import.meta.url), "utf8");
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+
+  check("⭐⭐ a submitted burn is tracked separately from success",
+    /const \[signedHash, setSignedHash\]/.test(code) && /setSignedHash\(hash\)/.test(code));
+  check("⭐⭐ …and on failure AFTER submission the sign control is REMOVED",
+    /if \(submitted\) \{ setBurn\(null\); setQuote\(null\); \}/.test(code),
+    "clearing `burn` is what unmounts the Sign button");
+  check("🚨 the ONLY control offered afterwards retries the RECORD, never the burn",
+    /onClick=\{retryPromote\}/.test(code) && !/signedHash[\s\S]{0,400}onClick=\{signAndBurn\}/.test(code));
+  check("⭐ …and retryPromote never calls manualBridgeBurn",
+    /async function retryPromote\(\)[\s\S]{0,900}?\n  \}/.test(code) &&
+    !/async function retryPromote\(\)[\s\S]{0,900}?manualBridgeBurn/.test(code),
+    "it re-reads a chain fact; it cannot spend");
+  check("⭐ the burn is signed exactly ONCE per handler — no loop wraps it",
+    (code.match(/manualBridgeBurn!\(/g) || []).length === 1);
 }
 
 console.log(`\n${"═".repeat(72)}`);

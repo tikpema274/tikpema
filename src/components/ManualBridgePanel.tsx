@@ -44,6 +44,9 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
   const [status, setStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ burnHash: string; netPredicted: number } | null>(null);
+  // ⭐ Set the instant the burn is signed and NEVER cleared on failure — it is the proof that money
+  // moved, and it is what makes re-signing unofferable.
+  const [signedHash, setSignedHash] = useState<string | null>(null);
 
   const isMetaMask = w.activeKind === "metamask";
 
@@ -86,9 +89,24 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
   }
 
   // ── Step 2: the user signs. approve (only if short) then the burn. ──
+  //
+  // ═══ 🚨 THE RE-ARM DEFECT THIS STRUCTURE EXISTS TO PREVENT ═══════════════════════════════════
+  // The first version caught every failure identically and left `burn`/`intentId` intact, so the
+  // "Sign and bridge" button came back — with the SAME calldata — after a promote failure. One
+  // more click would have burned a SECOND time. ⛔ AND THE MOTIVE WOULD HAVE BEEN THE WORST KIND:
+  // the user re-signs to fix a RECORD problem, spending more money to repair bookkeeping for money
+  // that already moved correctly.
+  //
+  // ⭐ SO THE HANDLER SPLITS ON ONE FACT: HAS THE BURN BEEN SUBMITTED YET?
+  //   before the hash exists → nothing moved; re-signing is safe and the button may return.
+  //   after the hash exists  → the money is GONE from this wallet. Re-signing can never be right,
+  //                            so the sign control is REMOVED and only a retry-the-RECORD control
+  //                            is offered. Retrying `promote` is idempotent; it re-reads a chain
+  //                            fact and cannot spend anything.
   async function signAndBurn() {
     if (!burn || !intentId) return;
     setError(null); setBusy(true);
+    let submitted: string | null = null;   // ⭐ the discriminator: null until the burn is signed
     try {
       // ⚠️ NO RECEIPT IS WRITTEN AFTER THE APPROVE. An approve grants an allowance — nothing
       // about the money has moved — and recording its hash as a burnHash would be a fabricated
@@ -100,6 +118,9 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
         amountMinor: BigInt(burn.amountMinor), calldata: burn.calldata as `0x${string}`,
         onStatus: setStatus,
       });
+      // 🚨 PAST THIS LINE THE MONEY HAS MOVED. Everything after is about the RECORD.
+      submitted = hash;
+      setSignedHash(hash);
 
       setStatus("Confirming on Arc…");
       // Retry while the node has not seen it yet — 202 means retryable, never "it failed".
@@ -110,6 +131,29 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
         await new Promise((r) => setTimeout(r, 3000));
       }
       throw new Error("the burn did not confirm in time — it may still land; check your bridges below");
+    } catch (e) {
+      setError(describeError(e));
+      setStatus("");
+      // ⛔ THE BURN IS ON CHAIN. Remove the sign control so it cannot be clicked again — a second
+      // signature would burn a second time. `signedHash` stays set, and the recovery block below
+      // offers a retry of the RECORD only.
+      if (submitted) { setBurn(null); setQuote(null); }
+    } finally { setBusy(false); }
+  }
+
+  // ⭐ RETRY THE RECORD, NEVER THE BURN. Idempotent: promote re-reads a chain fact the server
+  // verifies itself. It cannot spend, and it cannot double-anything.
+  async function retryPromote() {
+    if (!signedHash || !intentId) return;
+    setError(null); setBusy(true); setStatus("Confirming on Arc…");
+    try {
+      for (let i = 0; i < 20; i++) {
+        const p = await agentClient.userBridgePromote({ intentId, burnHash: signedHash }, await w.ensureSession());
+        if (p.ok) { setResult({ burnHash: signedHash, netPredicted: p.body.netPredicted }); setStatus(""); return; }
+        if (p.status !== 202) throw new Error(p.body?.error ?? "could not confirm the burn");
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+      throw new Error("still not visible on Arc — it may take longer; you can retry again");
     } catch (e) { setError(describeError(e)); setStatus(""); } finally { setBusy(false); }
   }
 
@@ -185,6 +229,19 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
           {" · "}<b>estimated</b> arrival {quote.netPredicted.toFixed(4)} USDC
           <div style={{ marginTop: 8 }}>
             <button onClick={signAndBurn} disabled={busy}>Sign and bridge</button>
+          </div>
+        </div>
+      )}
+
+      {/* ⛔ BURNED BUT NOT RECORDED. The money has moved; only the record is missing. The one
+          control offered is a retry of the RECORD — there is deliberately no way to sign again. */}
+      {signedHash && !result && (
+        <div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>
+          <b>Your burn is on-chain.</b> We have not been able to record it yet — your funds are not
+          at risk and the bridge will still complete.{" "}
+          <a href={`${EXPLORER}/tx/${signedHash}`} target="_blank" rel="noreferrer">view the burn ↗</a>
+          <div style={{ marginTop: 8 }}>
+            <button onClick={retryPromote} disabled={busy}>Retry recording it</button>
           </div>
         </div>
       )}

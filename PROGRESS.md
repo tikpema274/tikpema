@@ -1,5 +1,74 @@
 ---
 
+# 🚨 SIX INVESTIGATION STEPS INHERITED AN AMBIGUOUS WORD
+
+**2026-08-28.** The user reported **"bridge confirmed"**. It meant funding the agent wallet and
+withdrawing to MetaMask — **a different feature**. I read it as the manual bridge, and everything
+after inherited that: a search for burns, three found, a stranger's transactions attributed to the
+user, a re-burn timeline reconstructed from their timestamps, and a defect hypothesis built on it.
+
+⛔ **NOTHING LIED. The word covered two actions and only one was checked.**
+
+## ⭐⭐⭐ THE SHAPE, AND IT IS THE DAY'S FOURTH INSTANCE
+
+Today's errors were all **a value taken rather than derived**:
+
+| # | value | taken from | cost |
+|---|---|---|---|
+| 1 | burn selector `0x0d5a3c2e` | memory | caught pre-ship by computing it — the real one is `0x513e1175` |
+| 2 | dropdown keys `base-sepolia` | memory | **shipped**; resolves to ETHEREUM, not Base |
+| 3 | scan completeness | a loop that dropped failures silently | reported 3 burns where earlier passes found 8 |
+| 4 | **"bridge confirmed"** | **a human** | **six investigation steps about a stranger's transactions** |
+
+**The fourth is the same shape with a person as the source.** A report of an outcome is an input
+like any other, and it was the only one I did not check before building on it.
+
+## ⭐⭐⭐ THE RULE
+
+> **When a user reports an outcome, establish WHICH ACTION produced it before investigating the
+> outcome.**
+
+⭐ **AND THE INSTRUMENT WAS ONE COMMAND AWAY THE WHOLE TIME.** `netlify blobs:list bridge-receipts`
+answers it directly: **zero `tx-user-…` intents** in the store, so `recordUserPendingBridge` never
+ran, so nothing was ever signed on that path. I spent six steps scanning a **shared public
+contract** — where four unrelated senders were active in three hours — before reading the store
+that records what our own server actually did.
+
+⚠️ **The chain was the wrong instrument for a question about our software.** It answers "did a burn
+happen"; it cannot answer "did OUR path run". The receipt store answers the second directly.
+
+## What is VOID
+
+Everything derived from the three burns at `0xECAD1EEF…D4Ad`: that address appears in **none** of
+the 9 owner addresses in the receipt store. The "70s fits the promote-loop exhaustion"
+reconstruction was arithmetic over a stranger's timestamps. **Withdrawn in full.**
+
+⚠️ And the discriminator was available immediately: the shipped dropdown could only emit domains
+**0 and 1**; the observed burns were **10, 10, 13**. Zero overlap. One comparison at step one would
+have ended it.
+
+## What SURVIVES — found by reading code, not by the false trail
+
+- ⭐ **The routing bug.** `base-sepolia` is not a key; `resolveDestination`'s loose contains-match
+  resolves it to **Ethereum**. Real, and it shipped. Fixed by a strict resolver on the user path, a
+  server-served option list, and `test:bridgedest`.
+- ⭐ **The re-arm defect.** On any failure the handler left `burn`/`intentId` intact, so the sign
+  button returned with the same calldata — **a second click would burn again, to fix a RECORD
+  problem.** Fixed: once a burn hash exists the sign control is removed and only a
+  retry-the-record control is offered. Validated by injection.
+- **Zero intents.** Nothing was signed. No funds moved on this path.
+
+## ⛔ WHAT IS UNTESTED, STATED PLAINLY
+
+**THE MANUAL BRIDGE HAS NEVER BEEN RUN BY ANYONE.** `verifyBurnOnArc` passed its four conditions
+against real burns — which counts, and validated the derived selector against genuine transactions
+— but the full path (quote → gate → intent → sign → promote → delivery) has **no live run**.
+
+⚠️ A suite that passes and a path never executed are different things, and this file has spent the
+week learning not to confuse them.
+
+---
+
 # 🚨 A NUMBER I SUPPLIED CAME BACK TO ME AS A FACT THE FILE HAD ESTABLISHED
 
 **2026-08-28.** Caught while fact-checking a draft against the artifacts. **New shape, and the one
