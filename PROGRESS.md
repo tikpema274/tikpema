@@ -1,5 +1,89 @@
 ---
 
+# ✅ THE MANUAL BRIDGE RAN END TO END — and the fee reconciles across six sources
+
+**2026-08-28.** First live run of the user-signed bridge, by the repo owner, on Arc testnet →
+Base Sepolia. Every pre-registered prediction held.
+
+| # | predicted | outcome |
+|---|---|---|
+| 1 | intent exists before signing, `destinationKey: "base"` | ✅ absent before the click, present after, **retired** post-promotion. 36 → 37 keys: one durable receipt, zero `tx-` leftovers |
+| 2 | promotes to `burn_confirmed` | ✅ and past it — `state: "minted"` |
+| 3 | **no retry needed** | ✅ **exactly one** `user-bridge-promote` invocation, 563 ms |
+| 4 | four `verifyBurnOnArc` conditions on the owner's burn | ✅ all four, incl. the **derived** selector `0x513e1175` |
+| 5 | `delivery` → `measured` | ✅ `amountDelivered: 0.945809`, `mintVerifiedBy: ["iris","destination-rpc"]` |
+
+⭐ **Prediction 3 is the one worth keeping.** A needed retry was pre-registered as a *finding* —
+it would have meant `verifyBurnOnArc` races block visibility. One invocation, no retry.
+
+⭐ **The routing fix is confirmed end to end**: "Base (Sepolia)" → `destinationDomain: 6` → minted
+on chain **84532**. The defect that sent `base-sepolia` to Ethereum is gone.
+
+## ⭐⭐⭐ THE FEE RECONCILES ACROSS SIX INDEPENDENT SOURCES
+
+All six say **0.945809** net / **0.054191** fee:
+
+| source | where it comes from |
+|---|---|
+| burn calldata `amount − maxFee` | signed bytes on Arc |
+| receipt `feeUsdc` | server, at quote time |
+| receipt `netPredicted` | server, at quote time |
+| receipt `amountDelivered` | **read from Base Sepolia** by the settler |
+| USDC landed in the owner's wallet | the destination Transfer log |
+| the fee transfer to `0xc17d06b6…63A2` | the same mint tx |
+
+🚨 **AND THE REASON THEY AGREE IS THE PROPERTY, NOT A COINCIDENCE.** `netPredicted` and
+`amountDelivered` are equal **because the fee was FIXED IN THE CALLDATA** — `maxFee` is a signed
+parameter of the burn, so the quote is not an estimate that happened to come true, it is a
+commitment the chain then executed. ⛔ **Neither value was copied into the other**: one is written
+by the server at quote time, the other by the settler after an independent destination-chain read,
+and the design forbids `predicted → measured` advancing on anything but that read.
+
+⭐ **This is what the estimate/measured split exists for, and it has now been exercised on a
+user-signed burn** — where the fee is the thing a human eats if the band moves between quote and
+signature.
+
+## ⚠️ OPEN — THE ACK GATE HAS STILL NEVER FIRED FOR A USER-SIGNED BRIDGE
+
+`ackBand: "none"`, `ackRequired: false`, `ackAcceptedAt: null`. At **5.42%** the fee sat below the
+10% warn band and far below the 25% acknowledge band.
+
+> 🚨 **THE GATE CALLED "MORE NECESSARY HERE THAN ON THE AGENT PATH" IS THE ONE PART OF THIS PATH
+> STILL UNTESTED LIVE.** `priceAndGate`'s refusal, the disclosure round-trip, the token echo, and
+> `ackAcceptedAt` being written from a real acceptance — all proven by suite and by injection,
+> none by a live run.
+>
+> ⛔ **NOT A FOOTNOTE.** Exercising it needs a bridge small enough that the fee crosses 25% —
+> roughly ≤0.22 USDC on this route at current pricing. Recorded as an OPEN ITEM.
+
+## ⚠️ COPY DEFECT FOUND ON THE WAY — TWO STATES, ONE MESSAGE
+
+`ManualBridgePanel.tsx:164` renders, whenever `activeKind !== "metamask"`:
+
+> *"Connect MetaMask to bridge with your own key."*
+
+**A user who HAS connected MetaMask but has the passkey wallet active is told to connect the thing
+they already connected.** Two distinct states — *not connected* and *connected but not active* —
+collapsed into one message, and the instruction is wrong in the second. ⛔ **UNFIXED.** The fix is
+to branch on whether a MetaMask wallet exists, and say "switch to MetaMask" when it does.
+
+## The day's shape, honestly
+
+- ⭐ **The routing bug was real and was found by READING CODE** — `base-sepolia` is not a key, and
+  the loose contains-match resolved it to Ethereum. Nothing about the false trail found it.
+- 🚨 **The six-step investigation into three burns was chasing a STRANGER'S transactions.**
+  "Bridge confirmed" meant funding the agent wallet and withdrawing to MetaMask. Taken to mean the
+  manual bridge, it produced a chain search, an attribution, and a re-burn timeline built on
+  someone else's timestamps — all void.
+- ⭐ **The live run took three minutes** once the panel was reachable, and the receipt store
+  answered every question in two commands.
+
+⚠️ **The ratio is the lesson.** The investigation cost far more than the bug, and the cheap
+discriminator (the dropdown could only emit domains 0 and 1; the burns were 10, 10, 13) was
+available at step one.
+
+---
+
 # 🚨 SIX INVESTIGATION STEPS INHERITED AN AMBIGUOUS WORD
 
 **2026-08-28.** The user reported **"bridge confirmed"**. It meant funding the agent wallet and
