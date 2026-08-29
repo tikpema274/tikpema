@@ -75,7 +75,20 @@ section("2 — ⭐ THE TITLES CARRY THE DISTINCTION, not only the body copy");
   check("🚨 neither is titled the ambiguous 'Send USDC' any more",
     !/<h2>\s*Send USDC/i.test(renderToStaticMarkup(<SendPanel wallet={wallet("modular")} />)));
   // A live route nothing links to is reachable only by typing the hash — #/dca sat that way 22 days.
-  check("⭐ the agent panel LINKS to the manual one", /Send from your own wallet/i.test(agent));
+  const agentSrc = readFileSync(new URL("../src/components/SendPanel.tsx", import.meta.url), "utf8");
+  // ⚠️ RELABELLED AFTER MUTATION. This first check was called "the agent panel LINKS to the manual
+  // one" and it did NOT test that: breaking the button's label left it green, because the prose
+  // invitation above the button ("Want to send from your own wallet instead…") matches the same
+  // regex. It tests that the OTHER PATH IS MENTIONED — worth asserting, but not a link check — so
+  // it now says so, and the two checks below carry the link claim.
+  check("⭐ the agent panel MENTIONS the other path in prose",
+    /Want to send from your own wallet instead/i.test(agent));
+  check("⭐ …and offers it as a CONTROL with that label",
+    /Send from your own wallet\s*<\/button>/.test(agentSrc),
+    "prose alone is not a door");
+  check("⭐⭐ …and the link actually points at #/send-manual",
+    /window\.location\.hash = "\/send-manual"/.test(agentSrc),
+    "a live route nothing links to is reachable only by typing the hash");
   // ⭐ Also true in the pre-wallet state, which is the first thing a new user sees.
   const gated = strip(renderToStaticMarkup(<SendPanel wallet={wallet("modular", { agentWallet: null })} />));
   check("⭐ …and the pre-wallet state is titled the same way", /Send from your agent wallet/i.test(gated));
