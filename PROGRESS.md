@@ -1,5 +1,123 @@
 ---
 
+# 🚨 THE ACK GATE FIRED — AND ITS DISCLOSURE DISCLOSED NOTHING. Prediction 2 FAILS.
+
+**2026-08-29.** First live firing of the manual bridge's acknowledge gate, pre-registered at
+`docs/manual-bridge-ack-gate-preregistration.md` before the run. **No money moved** — the operator
+stopped at the disclosure, which is where the run was designed to stop and read.
+
+## THE RESULT AGAINST THE PRE-REGISTERED PREDICTIONS
+
+| # | predicted | outcome |
+|---|---|---|
+| 1 | `ackRequired: true`, band above `warn` | ✅ **held** — fired at **36.14%** on 0.15 USDC → Base (Sepolia) |
+| 2 | the disclosure renders the **exact fee** and **exact net** | ❌ **FAILED — it rendered neither** |
+| 3 | the panel refuses to submit until acknowledged | ✅ **held, and stronger** — it refuses to *quote* |
+| 4 | the token is server-minted and echoed | ⏸ **not reached** |
+| 5 | `ackAcceptedAt` written from a real acceptance | ⏸ **not reached** |
+
+⚠️ **4 and 5 REMAIN UNPROVEN AND MUST NOT BE RECORDED OTHERWISE.** The §9 property — that
+`ackAcceptedAt` is evidence of consent only transitively — still has **no live instance**. Gap 1 is
+NARROWED, not closed.
+
+⛔ **No falsifier fired.** In particular **falsifier 2 ("the gate is decorative") is NOT what this
+was**: the gate refuses correctly. It is the **disclosure** that was decorative.
+
+## WHAT SHIPPED, VERBATIM
+
+> *"Most of this amount would become fee. This is a acknowledge disclosure — the fee is a large
+> share of what you are sending, and what arrives will be much smaller."*
+
+**No fee. No ratio. No arrival amount. No amount sent.** A user would accept a qualitative claim and
+learn the figures afterwards.
+
+## ⛔ THE SERVER WAS NEVER AT FAULT — the panel DISCARDED the disclosure
+
+`priceAndGate` returns, *with the 409*:
+
+```js
+feeDisclosure: { ...bandInfo,   // feeRatio, band, feeUsdc, netUsdc
+                 destinationKey, destinationLabel, amountUsdc, ackToken }
+```
+
+The panel kept **two** fields and dropped the rest:
+
+```js
+setAckToken(r.body.feeDisclosure.ackToken);
+setAckBand(r.body.feeDisclosure.band);      // ← and nothing else
+```
+
+🚨 The server's own comment states the contract the panel broke: *"The disclosure is returned WITH
+the refusal so a cooperating UI can show the user what they are accepting."* **The UI was not
+cooperating.**
+
+## ⭐ ONE DEFECT, NOT TWO — the sequence was never actually inverted
+
+The run reported it as two problems, the second worse: missing figures, *and* consent arriving
+before the quote. **Mechanically it is one.** The numbers were **already in hand at the moment of
+consent** — they came with the 409. The panel refused to show what it had been handed. So rendering
+them puts every figure **above** the accept button, which is the order the design describes, and
+**one fix closes both**.
+
+⚠️ The lived experience was read correctly and is the more serious framing; only the *cause* was
+two things rather than one. Worth separating, because a protocol-ordering bug and a render bug have
+very different fixes and only one of them was real.
+
+## ⚠️ AND THE SENTENCE WAS ASSEMBLED FROM A MACHINE TOKEN
+
+`This is a {ackBand} disclosure` → **"This is a acknowledge disclosure"**: ungrammatical, and it
+leaks an internal enum to a reader who has no idea what a band is. ⭐ The replacement is **written**,
+not generated. A new band gets a sentence written for it, not interpolated into a template.
+
+## ⭐⭐ THE BIGGER FINDING — A STATE BEHIND A TRANSITION IS UNTESTED BY DEFAULT
+
+The ack box renders only after a live 409. `renderToStaticMarkup(<ManualBridgePanel/>)` never
+produces it, so **no suite asserted anything about it — zero coverage, not weak coverage.** A panel
+with a 24-assertion copy suite shipped a consent screen containing no numbers.
+
+🚨 **THIRD INSTANCE IN ONE SESSION, ALL THE SAME SHAPE:**
+
+| state | why it was invisible | found by |
+|---|---|---|
+| connected-but-not-active | the stub was `{ activeKind }` only and could not represent it | reading, before the fix |
+| the manual send's review step | `reviewing` starts false | **mutation** — an injected "I understand" left the suite GREEN |
+| the acknowledge disclosure | needs a live 409 | **a real user, live, mid-run** |
+
+⭐ **SO THE FIX IS STRUCTURAL, NOT A THIRD ONE-OFF.** Both transition-gated states are now exported
+**pure components** — `FeeDisclosureBox`, `SendReviewBox` — which suites **RENDER with real props**
+instead of regexing source for them. `verify-manual-bridge-copy` §6 renders the disclosure with real
+numbers; `verify-send-copy` §7 splits into **7a (rendered content)** and **7b (source, wiring only —
+which value the panel passes is a thing only source can show)**. Source regex is now used only where
+it is the honest instrument, and is labelled as such.
+
+⭐ §6 also guards the **general** property — *at least four distinct figures must appear* — rather
+than the one wording that happened to be wrong. A disclosure that discloses nothing is the defect;
+the specific sentence is not.
+
+## PROOF THE NEW CHECK WOULD HAVE CAUGHT IT
+
+Mutation-tested after committing (the ordering matters — see below):
+
+| mutation | result |
+|---|---|
+| restore the **exact shipped copy** | ❌ **7 failures**, including the enum leak and "saw *(no figures)*" |
+| keep the numbers but drop only the **net** | ❌ 2 failures — a partial disclosure is caught too |
+| truncate the address in the send review | ❌ 2 failures |
+
+⚠️ **Mutation-test AFTER committing.** Earlier in this session `git checkout --` on a mutated file
+silently reverted uncommitted work, and mutations on an untracked file did not revert at all and
+stacked. Recorded then, applied here.
+
+## STATUS
+
+- **Gap 1 is NARROWED, not closed.** Predictions 4 and 5 need a second run against the fixed panel.
+- ⭐ **The fix is committed and NOT deployed**, so the next run exercises the corrected disclosure
+  and proves 2, 4 and 5 **for a single fee** — rather than paying once to prove 4 and 5 while
+  knowingly leaving 2 broken, and again after the fix.
+- The manual SEND remains committed and undeployed behind this.
+
+---
+
 # ⛔ REFUTED — "nobody else does key sign-in → agent with a wallet at first login". The PRIMITIVE is the finding.
 
 **2026-08-29.** Read-only investigation, no build. The claim under test: *nobody else offers sign-in

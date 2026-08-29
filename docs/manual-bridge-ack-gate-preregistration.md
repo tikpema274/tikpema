@@ -134,3 +134,19 @@ and a live forgery attempt is a separate exercise that this one does not perform
    this is prediction 2, and it is the screen a user would otherwise never see.
 5. Press **"I understand — quote it anyway"**, then **Sign and bridge**.
 6. Afterwards, read the receipt's `ackBand`, `ackRequired`, `ackAcceptedAt`, `feeRatio`.
+
+---
+
+# RESULT — 2026-08-29: the gate FIRED; prediction 2 FAILED; 4 and 5 not reached
+
+Predictions 1 and 3 held (fired at 36.14%; refuses to quote until acknowledged). **Prediction 2
+failed: the disclosure rendered no fee, no ratio, no net and no amount** — the panel discarded the
+figures the server sent with the 409. No falsifier fired; falsifier 2 specifically did NOT occur,
+as the gate refuses correctly.
+
+⚠️ **Predictions 4 and 5 were not reached** — the operator stopped at the disclosure, as step 4
+instructs. **Gap 1 is NARROWED, not closed:** `ackAcceptedAt` still has no live instance. A second
+run against the fixed panel proves 2, 4 and 5 for a single fee.
+
+Full record, and the blind-spot class that hid it, in PROGRESS.md. Nothing above this line is
+amended.
