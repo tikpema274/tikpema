@@ -50,6 +50,11 @@ export const COMPONENTS = {
   // ⛔ Carries a claim no other panel makes — that agent caps DO NOT apply — and it sits beside a
   // panel where they do, so silence would read as capped. Its suite asserts that sentence renders.
   ManualBridgePanel:    { suite: "verify-manual-bridge-copy.tsx" },
+  // ⛔ The MIRROR of ManualBridgePanel's claim, and it only works as a pair: this panel says agent
+  // caps do NOT apply, and SendPanel (capped) now says they DO. Its suite asserts BOTH halves in
+  // one file, because a contrast cannot be checked one panel at a time — an absence stated against
+  // silence teaches the reader nothing.
+  ManualSendPanel:      { suite: "verify-send-copy.tsx" },
   Dashboard:            { suite: "verify-dashboard-copy.tsx" },
   ResearchPanel:        { suite: "verify-research-panel-copy.tsx" },
   // ⚠️ NOT verify-activity-fallback — that renders ONE row subcomponent for a fallback label and
@@ -62,7 +67,15 @@ export const COMPONENTS = {
   // ── no claim-bearing copy ──────────────────────────────────────────────────────────────────
   AddressDisplay: { noClaims: true }, ConnectPasskey: { noClaims: true },
   FeedbackPanel:  { noClaims: true }, PredictPanel:   { noClaims: true },
-  SendPanel:      { noClaims: true }, SignInPrompt:   { noClaims: true },
+  // ⚠️ WAS `noClaims: true`, AND THAT WENT STALE THE MOMENT IT GREW A CAP SENTENCE (2026-08-29).
+  // It now states "Agent spending limits apply here" — a claim about money, and the load-bearing
+  // half of a PAIR: ManualSendPanel says caps do NOT apply, and an absence stated against silence
+  // teaches nothing. Both halves live in one suite for that reason.
+  // 🚨 §2 DID NOT CATCH THIS. Its CLAIM vocabulary (never/always/only/guarantee/safe/…) does not
+  // contain "limits apply", "cap", "ceiling" or "enforced", so a money claim written in those words
+  // is invisible to it. The declaration was corrected by hand; the detector still cannot see it.
+  SendPanel:      { suite: "verify-send-copy.tsx" },
+  SignInPrompt:   { noClaims: true },
   SwapPanel:      { noClaims: true },
 };
 
@@ -138,6 +151,7 @@ export const UNWIRED_OK = {
   "gate:pins": "network-dependent (IPFS routing probes). ⚠️ A flaky network inside a BLOCKING aggregate manufactures tolerated red — species 3 — so it is run deliberately, not on every commit.",
   "test:ddwatch": "network-dependent (probes the live DD service). Same reasoning as gate:pins.",
   "test:ddraillive": "network-dependent (reads the LIVE 402 and the LIVE copy surfaces). Same call as gate:pins. ⭐ Its in-process half, test:ddrail, IS in test:all and binds the copy to DD_EXTRA.name — but that half is structurally incapable of noticing the DEPLOYED endpoint changed rails, which is the half of the 2026-08-27 defect no offline check could have caught. Splitting it out must not become dropping it: run it after every deploy that touches DD copy or _dd-x402.mjs.",
+  "gate:disclosure": "network-dependent (fetches the SERVED page and its JS bundle from production). Same call as gate:pins: a flaky network inside a BLOCKING aggregate manufactures tolerated red — species 3. ⭐ It is also not a standing regression check: it GATES A REAL SPEND, asserting a specific copy fix reached the served bundle before a fee is paid against it, so it is run deliberately at that moment. Its offline half — that the copy RENDERS the four figures — is verify-manual-bridge-copy §6, which IS in test:all, so splitting this out cannot become dropping it. Run it after any deploy touching ManualBridgePanel's disclosure.",
   "test:vanillabyteslive": "network-dependent (eth_calls Arc's PUBLIC RPC, recorded as throttled and observed ETIMEDOUT 2026-08-23 mid-run). Same call as gate:pins: a flaky network inside a BLOCKING aggregate manufactures tolerated red. Its in-process half, test:vanillabytes, IS in test:all and asserts this file exists and stays registered — so splitting it out cannot become dropping it.",
 };
 
