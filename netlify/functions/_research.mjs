@@ -461,12 +461,29 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     //    (settle succeeds but no usable facts) must NOT hide a real debit. Record the
     //    actual price paid.
     const paidUsdc = res.body.priceUsdc ?? amountUsdc;
+    // ⭐ THE JOIN, CARRIED ONTO THE SPEND RECORD. `settleReceipt` is the seller's decoded
+    // PAYMENT-RESPONSE — Circle's facilitator settlement object. Its `transaction` is a UUID, NOT a
+    // chain hash (Gateway settles on an internal ledger), so it is stored as `settlement.id` and
+    // never as `txHash`. See the block above recordSpend in _budget.mjs for the measurement.
+    // ⚠️ Built only from what is actually present: no field is invented, and if the seller returned
+    // no PAYMENT-RESPONSE the whole object is omitted rather than filled with nulls.
+    const sr = res.body.settleReceipt ?? null;
+    const settlement = sr?.transaction
+      ? {
+          id: String(sr.transaction),
+          kind: "circle-gateway-facilitator", // ⚠️ NOT a chain tx — no explorer resolves this
+          payer: res.body.payer ?? null,
+          payTo: res.body.payTo ?? null,
+          network: sr.network ?? null,
+        }
+      : null;
     await recordSpend({
       agent: AGENT.RESEARCHER,
       jobId,
       jobPriceUsdc: jobPrice,
       amountUsdc: paidUsdc,
       source: DATA_SELLER_SOURCE,
+      settlement,
       justification,
       store,
       owner,

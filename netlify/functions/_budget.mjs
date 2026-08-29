@@ -434,9 +434,34 @@ async function appendAudit(s, { owner, at, dedupeKey, ...entry }) {
 // `agent` = WHO spent (_agents.mjs). Defaults to RESEARCHER because every recordSpend caller
 // today is the research/data-purchase path — but pass it explicitly; the default exists so an
 // un-updated caller degrades to a plausible attribution rather than "unattributed".
+/**
+ * ═══ ⚠️ ON `settlement`, AND WHY THERE IS NO `txHash` FIELD HERE ════════════════════════════════
+ * The obvious ask is "record the tx hash on spend records". **There is no tx hash.** Circle Gateway
+ * settlement is an INTERNAL LEDGER TRANSFER, not an ERC-20 transfer — measured 2026-07-27 and again
+ * 2026-08-29, when a scan of every USDC Transfer to the seller across ~109 calibrated minutes
+ * spanning a real spend found ZERO, exactly as the internal-ledger model predicts. The correct
+ * on-chain read is `availableBalance(USDC, payTo)` on the GatewayWallet, which is a BALANCE, not an
+ * event, and therefore cannot be attributed to one payment.
+ *
+ * 🚨 SO A FIELD NAMED `txHash` WOULD BE A LIE IN THE SHAPE OF EVIDENCE. What the facilitator returns
+ * as `transaction` is a UUID — e.g. `d63f301a-b4a2-433a-b605-c5d8a4775441` — a Circle settlement
+ * identifier that no block explorer will resolve. Storing that under `txHash` would invite every
+ * future reader to paste it into arcscan, get nothing, and conclude the payment never happened.
+ * It is therefore recorded as `settlement.id` and labelled for what it is.
+ *
+ * ⭐ WHAT IT IS GOOD FOR, WHICH IS THE POINT: it is the JOIN. Before this, a spend line said an
+ * amount and a source and nothing that tied it to a payment, so "did this ledger entry correspond to
+ * real money moving" could only be answered by scanning the chain — which, per the above, does not
+ * answer it either. `settlement.id` joins the audit row to the seller's own pending record
+ * (`x402-quote-pending/<handle>`, which stores the same value as `settleTransaction`).
+ *
+ * ⚠️ ABSENT IS NOT "NO PAYMENT". Records written before this field existed carry no `settlement`,
+ * and a seller that returns no PAYMENT-RESPONSE also yields none. `null` here means UNRECORDED, and
+ * must never be read as "unpaid" — the spend counters are authoritative for that.
+ */
 export async function recordSpend({
   jobId, jobPriceUsdc, amountUsdc, source, justification, store, at, owner,
-  agent = AGENT.RESEARCHER,
+  agent = AGENT.RESEARCHER, settlement = null,
 }) {
   const s = pickStore(store);
   const amt = round6(amountUsdc);
@@ -468,6 +493,9 @@ export async function recordSpend({
     source,
     justification,
     allowed: true,
+    // ⭐ Only written when the caller actually has one. An explicit `null` would be a slot that
+    // reads as "we looked and there was nothing", which is a different claim from "not recorded".
+    ...(settlement ? { settlement } : {}),
   });
 
   return { jobSpentUsdc: jRec.spentUsdc, daySpentUsdc: dRec.spentUsdc, allowanceUsdc };

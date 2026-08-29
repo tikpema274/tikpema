@@ -74,7 +74,7 @@ mock.module("@netlify/blobs", {
   namedExports: { getStore: () => fakeStore, connectLambda: () => {}, getDeployStore: () => fakeStore },
 });
 
-const { canSpendDay, daySpend, recordDcaSpend, budgetConfig } =
+const { canSpendDay, daySpend, recordDcaSpend, budgetConfig, recordSpend } =
   await import("../netlify/functions/_budget.mjs");
 
 const OWNER = "0xbud0000000000000000000000000000000000001";
@@ -308,6 +308,56 @@ section("9 — no etag ⇒ onlyIfNew (the fail-closed guard)");
   check("⭐ WITH an etag -> the write is onlyIfMatch on that exact etag",
     writes.length > 0 && typeof writes[0].opts.onlyIfMatch === "string");
   check("  …so a lost update stays detectable", writes[0].opts.onlyIfNew === undefined);
+}
+
+// ═══════════ 10 — the SETTLEMENT JOIN on a spend record ═══════════
+// ═══ 🚨 WHY THIS IS NOT CALLED `txHash`, ASSERTED SO IT STAYS THAT WAY ═════════════════════════
+// A spend line used to name an amount and a source and nothing that tied it to a payment. The
+// obvious fix — "record the tx hash" — is NOT AVAILABLE: Circle Gateway settles on an INTERNAL
+// LEDGER, so no ERC-20 Transfer exists (measured twice; a scan of ~109 calibrated minutes around a
+// real spend found zero transfers to the payTo, exactly as that model predicts). What the
+// facilitator returns as `transaction` is a UUID no explorer resolves.
+// ⭐ So the value is stored as `settlement.id`, and this section fails if anyone renames it to
+// something that would send a reader to a block explorer to look for a hash that never existed.
+section("10 — the settlement join is recorded, and is NOT called a tx hash");
+{
+  seed({});
+  const SETTLEMENT = {
+    id: "d63f301a-b4a2-433a-b605-c5d8a4775441",
+    kind: "circle-gateway-facilitator",
+    payer: "0x6db396c1a37024fd3bee1f3dbf3020aa3b2bb380",
+    payTo: "0xc70112c7d5ebe38cd998679594a5d082c1860df6",
+    network: "eip155:5042002",
+  };
+  await recordSpend({ owner: OWNER, jobId: "job-1", jobPriceUsdc: 1, amountUsdc: 0.001,
+    source: "x402-quote (testnet stand-in)", justification: "because", settlement: SETTLEMENT });
+
+  const audits = [...origin.entries()].filter(([k]) => k.startsWith("audit:")).map(([, v]) => v.data ?? v);
+  check("an audit row was written", audits.length === 1, `rows=${audits.length}`);
+  const row = audits[0] ?? {};
+  check("⭐⭐ it carries the settlement id — the join to the seller's pending record",
+    row.settlement?.id === SETTLEMENT.id, JSON.stringify(row.settlement ?? null));
+  check("⭐ …and the payer, so the spending wallet is on the record",
+    row.settlement?.payer === SETTLEMENT.payer);
+  check("🚨 …and NOTHING is named txHash / transactionHash — no such thing exists on this path",
+    !("txHash" in row) && !("transactionHash" in row) && !("txHash" in (row.settlement ?? {})),
+    Object.keys(row).sort().join(","));
+  check("⭐ …and the id is labelled as a facilitator id, not a chain reference",
+    row.settlement?.kind === "circle-gateway-facilitator");
+}
+
+// ═══════════ 10b — ABSENT must be distinguishable from "we looked and found none" ═══════════
+// ⚠️ An explicit `settlement: null` would be a slot that reads as a checked-and-empty result. A
+// record written before this field existed, or by a seller that sent no PAYMENT-RESPONSE, must be
+// recognisable as UNRECORDED — a different claim from UNPAID. [[absence-must-never-read-as-safe]]
+section("10b — a spend with no settlement OMITS the key rather than nulling it");
+{
+  seed({});
+  await recordSpend({ owner: OWNER, jobId: "job-2", jobPriceUsdc: 1, amountUsdc: 0.001,
+    source: "x402-quote (testnet stand-in)", justification: "because" });
+  const row = [...origin.entries()].filter(([k]) => k.startsWith("audit:")).map(([, v]) => v.data ?? v)[0] ?? {};
+  check("⭐⭐ the key is ABSENT, not null", !("settlement" in row), JSON.stringify(Object.keys(row).sort()));
+  check("  …and the spend itself still recorded", row.amountUsdc === 0.001 && row.allowed === true);
 }
 
 console.log(`\n╔══════════════════════════════════════════════════════════════════════`);
