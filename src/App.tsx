@@ -9,6 +9,7 @@ import SwapPanel from "./components/SwapPanel";
 import DcaPanel from "./components/DcaPanel";
 import BridgePanel from "./components/BridgePanel";
 import ManualBridgePanel from "./components/ManualBridgePanel";
+import ManualSendPanel from "./components/ManualSendPanel";
 import VaultPanel from "./components/VaultPanel";
 import NanopaymentPanel from "./components/NanopaymentPanel";
 import UnifiedBalancePanel from "./components/UnifiedBalancePanel";
@@ -75,6 +76,13 @@ export default function App() {
     // Reached via the AI Agent "Quick actions" Swap card, not the nav (like
     // #/nanopay) — Swap stays a sub-action of AI Agent, so the 5-item nav (Send is
     // the only money tool promoted to nav) is untouched.
+    // ⭐ THE MANUAL SEND — user-signed, from the CONNECTED wallet. Sibling of #/send, not a
+    // replacement: the agent send stays exactly as it was, and is still the nav item. Nav-less like
+    // #/bridge-manual, and LINKED from SendPanel — a live route nothing links to is the state that
+    // hid a 22-day outage on #/dca (src/App.tsx records it).
+    case "send-manual":
+      page = <ManualSendPanel wallet={wallet} />;
+      break;
     case "swap":
       page = <SwapPanel wallet={wallet} />;
       break;

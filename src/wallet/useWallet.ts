@@ -637,6 +637,10 @@ export function useWallet() {
     // stub that threw would look like a capability the panel could offer. The panel checks
     // `activeKind === "metamask"` and says so instead.
     manualBridgeBurn: isMetaMask ? mmWallet!.manualBridgeBurn : undefined,
+    // ⭐ SAME `undefined`-ELSEWHERE RULE as manualBridgeBurn, for the same reason: the manual send
+    // signs with the user's own key, and a stub that threw would look like a capability the panel
+    // could offer. The panel checks `activeKind === "metamask"` and says so instead.
+    sendUsdcManual: isMetaMask ? mmWallet!.sendUsdcManual : undefined,
     // Hop A — login wallet → the user's own agent SCA. Same connector-switch as the rest.
     fundAgentWallet: isMetaMask ? mmWallet!.fundAgentWallet : modular.fundAgentWallet,
     connectRegister,

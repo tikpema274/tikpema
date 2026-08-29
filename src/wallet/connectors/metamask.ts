@@ -313,9 +313,79 @@ export async function connectMetaMask() {
     return { txHash: receipt.transactionHash };
   }
 
-  // NOTE: the client-side `sendUsdc` was removed — all user sends go through the
-  // single secure server endpoint /api/agent-send (auth + per-user wallet + cap +
-  // day-ceiling). No client-side USDC-move path remains.
+  // ── MANUAL SEND — the user's own key, a CALLER-SUPPLIED destination. ───────────
+  //
+  // ═══ ⭐⭐ WHAT ACTUALLY CHANGES FROM fundAgentWallet, AND WHAT IT DOES TO THE GUARDS ══════════
+  // Mechanically this is fundAgentWallet with the destination opened up. That one change inverts
+  // the property fundAgentWallet's SEAM comment states outright — "the destination is not
+  // arbitrary" — and it changes what the guards below MEAN, so they are re-justified here rather
+  // than copied across with their old labels:
+  //
+  //   · refuse the SHARED agent wallet — STILL SAFETY, unchanged. A user's own funds must never
+  //     be routed to the shared wallet, whoever supplied the address.
+  //   · refuse SELF — ⚠️ A MISTAKE-CATCH, NOT A SAFETY PROPERTY. On fundAgentWallet this guard
+  //     meant "funds would go nowhere"; here, sending to yourself is a no-op, not a danger.
+  //     It is kept because it catches a paste error, and it is described honestly because calling
+  //     it safety would inflate what it protects.
+  //   · the ALLOWLIST is gone entirely. There is no server-resolved destination behind this call.
+  //
+  // 🚨 SO THE ONE GENUINELY NEW RISK IS A MISTYPED ADDRESS: a same-chain transfer is irreversible
+  // and nothing server-side stands behind it. That is what the panel's confirm step is for, and
+  // the only thing it is for — MetaMask already shows destination and amount before signing, so
+  // ours earns its place by showing the address AS WE PARSED IT, catching a truncated or
+  // whitespace-damaged paste before it ever reaches the extension.
+  //
+  // ⭐ NO RECEIPT IS WRITTEN, AND THAT IS A DECISION, NOT AN OMISSION. The bridge writes one
+  // because delivery is on another chain, the delivered amount differs from the sent amount, and
+  // an estimate has to advance to measured. None of the three survives here: delivery IS this
+  // transaction, amount received == amount sent, and there is no estimate. A record would buy a
+  // history list and COST the bridge's write-after-sign window — accepted there because the record
+  // is load-bearing, unjustifiable here for a convenience with nothing recoverable inside it.
+  // `waitForTransactionReceipt` below already returns a confirmed on-chain receipt.
+  //
+  // ⭐ AND NO ACK GATE. The bridge's bands are ratios of a fee TAKEN FROM THE AMOUNT; no fee is
+  // deducted here, so there is no band. An ack TOKEN binds a server-computed number the client
+  // must not be able to choose, and there is no server-computed number in this path at all.
+  // See docs/manual-send-design-note.md — refused on the mechanism, not skipped by omission.
+  async function sendUsdcManual(to: string, amountUsdc: number) {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(String(to).trim())) {
+      throw new Error("Enter a valid 0x… address (42 characters).");
+    }
+    const dest = String(to).trim();
+    if (AGENT_WALLET_ADDRESS && dest.toLowerCase() === AGENT_WALLET_ADDRESS.toLowerCase()) {
+      throw new Error("Refusing to send to the shared agent wallet — that is not your wallet.");
+    }
+    if (dest.toLowerCase() === address.toLowerCase()) {
+      throw new Error("That's the wallet you're sending from — it would go nowhere.");
+    }
+    if (!(amountUsdc > 0)) throw new Error("Enter an amount greater than 0.");
+    await ensureBalance(amountUsdc);
+
+    const units = BigInt(Math.round(amountUsdc * 1e6));
+    const hash = await walletClient.writeContract({
+      address: CONTRACTS.USDC as `0x${string}`,
+      abi: TRANSFER_ABI,
+      functionName: "transfer",
+      args: [dest as `0x${string}`, units],
+      account: address,
+      chain: arcTestnet,
+    });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    await refreshBalance().catch(() => {});
+    return { txHash: receipt.transactionHash };
+  }
+
+  // ⚠️ CORRECTED 2026-08-29. This note used to end: "No client-side USDC-move path remains."
+  // 🚨 THAT SENTENCE WAS ALREADY FALSE WHEN `manualBridgeBurn` SHIPPED — 14 lines below it, in
+  // this same file, approving and burning the user's USDC from the browser. It was FOUND stale,
+  // not MADE stale by the manual send above: a reader who met it any time since the manual bridge
+  // landed was already misled about this file's actual shape.
+  //
+  // ⭐ WHAT REMAINS TRUE, stated narrowly so it survives: every send from the user's CIRCLE-CUSTODIED
+  // AGENT wallet goes through /api/agent-send (auth + per-user wallet + per-tx cap + day ceiling),
+  // and there is no client-side path to that wallet's funds. The user's OWN key is a different
+  // regime — the caps bound what the agent may move unattended, never what the user may move
+  // themselves — which is exactly why `sendUsdcManual` and `manualBridgeBurn` are allowed to exist.
 
   // ══ USER-SIGNED BRIDGE — approve (only if short) then the burn ═══════════════════════════════
   // ⭐ THE CALLDATA IS NOT BUILT HERE. It arrives from the server, which priced the fee and
@@ -381,6 +451,7 @@ export async function connectMetaMask() {
     createJobAsUser,
     fundJobAsUser,
     fundAgentWallet,
+    sendUsdcManual,
     manualBridgeBurn,
     signMessage,
     // EIP-1193 has no programmatic disconnect; the user manages this in the
