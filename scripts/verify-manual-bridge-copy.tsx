@@ -20,7 +20,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
-import ManualBridgePanel from "../src/components/ManualBridgePanel";
+import ManualBridgePanel, { FeeDisclosureBox } from "../src/components/ManualBridgePanel";
 
 let pass = 0, fail = 0;
 const check = (label: string, cond: boolean, detail = "") => {
@@ -145,6 +145,51 @@ section("5 — 🚨 ONCE THE BURN EXISTS, SIGNING AGAIN MUST BE UNOFFERABLE");
     "it re-reads a chain fact; it cannot spend");
   check("⭐ the burn is signed exactly ONCE per handler — no loop wraps it",
     (code.match(/manualBridgeBurn!\(/g) || []).length === 1);
+}
+
+// ═══ 🚨 THE STATE NO TEST EVER SAW, AND WHAT IT COST ═══════════════════════════════════════════
+// The acknowledge box renders only after a live 409, so `renderToStaticMarkup(<ManualBridgePanel/>)`
+// never produced it and NO suite asserted anything about it. It shipped saying:
+//
+//     "Most of this amount would become fee. This is a acknowledge disclosure — the fee is a large
+//      share of what you are sending, and what arrives will be much smaller."
+//
+// ⛔ NO FEE. NO RATIO. NO ARRIVAL AMOUNT. NO AMOUNT SENT. Found on the gate's FIRST live firing,
+// at 36.14% — the user was asked to accept a qualitative claim and would have learned the figures
+// only after consenting. The server had sent all four numbers in the 409 body; the panel dropped
+// them. See PROGRESS 2026-08-29.
+//
+// ⭐ THE FIX THAT MATTERS IS THIS SECTION, NOT THE COPY. The box is now an exported pure component
+// so it can be RENDERED with real numbers here. A source regex would have been the weaker
+// instrument; rendering the state is the actual test.
+section("6 — 🚨 THE ACKNOWLEDGE DISCLOSURE — every number, RENDERED");
+{
+  const d = {
+    amountUsdc: 0.15, feeUsdc: 0.054217, netUsdc: 0.095783, feeRatio: 0.3614333,
+    band: "acknowledge", destinationLabel: "Base (Sepolia)", ackToken: "tok",
+  };
+  const text = strip(renderToStaticMarkup(
+    <FeeDisclosureBox disclosure={d} busy={false} onAccept={() => {}} />
+  ));
+
+  check("⭐⭐ shows the AMOUNT being sent", /0\.150000/.test(text), text.slice(0, 110));
+  check("⭐⭐ shows the FEE in USDC", /0\.054217/.test(text));
+  check("⭐⭐ shows what would ARRIVE", /0\.095783/.test(text));
+  check("⭐⭐ shows the RATIO as a percentage", /36\.1\s*%/.test(text));
+  check("⭐ …and names the destination", /Base \(Sepolia\)/.test(text));
+  check("⭐ …and still offers the acceptance control", /I understand/i.test(text));
+
+  // ⚠️ THE ENUM IS A MACHINE TOKEN, NOT PROSE. "This is a acknowledge disclosure" was both
+  // ungrammatical and a leak of an internal band name to someone who has no idea what a band is.
+  check("🚨 does NOT leak the internal band name into the sentence",
+    !/\ba acknowledge\b/i.test(text) && !/acknowledge disclosure/i.test(text),
+    "the sentence is written, not assembled from the band");
+
+  // 🚨 A DISCLOSURE THAT DISCLOSES NOTHING IS THE DEFECT. Guard the general property, not just the
+  // one wording that was wrong: at least four distinct numbers must appear.
+  const numbers = new Set((text.match(/\d+\.\d+/g) || []));
+  check("⭐⭐ at least four distinct figures appear — the general property, not one wording",
+    numbers.size >= 4, `saw ${[...numbers].join(", ")}`);
 }
 
 console.log(`\n${"═".repeat(72)}`);

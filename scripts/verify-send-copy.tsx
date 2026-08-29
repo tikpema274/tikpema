@@ -24,7 +24,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import SendPanel from "../src/components/SendPanel";
-import ManualSendPanel from "../src/components/ManualSendPanel";
+import ManualSendPanel, { SendReviewBox } from "../src/components/ManualSendPanel";
 
 let pass = 0, fail = 0;
 const check = (label: string, cond: boolean, detail = "") => {
@@ -158,19 +158,39 @@ section("6 — 🚨 CONNECT vs SWITCH: the collapse this panel was built after")
 // ⭐ A negative assertion that cannot see the region it forbids is a check whose failure mode is a
 // pass. Asserted on SOURCE here instead, and labelled as source so nobody reads it as a render
 // claim — the same split ManualBridgePanel's suite makes for its post-signature state.
-section("7 — ⚠️ THE REVIEW STEP, asserted on SOURCE (a static render cannot reach it)");
+// ⭐ UPGRADED. This section used to be source-regex ONLY, because `reviewing` starts false and a
+// static render never emits the review step. That is the same blind spot that let the manual
+// bridge ship an acknowledge disclosure containing no numbers — a state behind a transition is
+// untested by default. The box is now an exported pure component, so the CONTENT is asserted by
+// RENDER and only the WIRING (which value the panel passes in) stays on source, where it belongs.
+section("7a — ⭐ THE REVIEW STEP, RENDERED");
+{
+  const text = strip(renderToStaticMarkup(
+    <SendReviewBox to="0x00000000000000000000000000000000000000ab" amountUsdc={0.25}
+      busy={false} onSign={() => {}} onBack={() => {}} />
+  ));
+  check("⭐⭐ shows the destination address IN FULL, untruncated",
+    /0x00000000000000000000000000000000000000ab/.test(text),
+    "an ellipsis would hide exactly the characters a truncated paste corrupts");
+  check("🚨 …and does NOT abbreviate it with an ellipsis", !/0x0000…|…ab\b/.test(text));
+  check("⭐ shows the amount", /0\.25 USDC/.test(text));
+  check("⭐ offers the sign control", /Sign and send/.test(text));
+  check("⭐ …and a way back", /Back/.test(text));
+  check("⭐⭐ NO acknowledge language — there is no band to acknowledge",
+    !/I understand/i.test(text) && !/acknowledge/i.test(text));
+}
+
+section("7b — ⚠️ THE REVIEW WIRING, asserted on SOURCE (a render cannot show which value was passed)");
 {
   const src = readFileSync(new URL("../src/components/ManualSendPanel.tsx", import.meta.url), "utf8");
   const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
 
-  check("⭐⭐ the review step renders the PARSED address, not the raw input box",
-    /\{parsedTo\}/.test(code) && /const parsedTo = to\.trim\(\)/.test(code),
-    "showing the raw value back would catch nothing — the parse IS the check");
+  check("⭐⭐ the panel passes the PARSED address to the box, not the raw input",
+    /to=\{parsedTo\}/.test(code) && /const parsedTo = to\.trim\(\)/.test(code),
+    "the box renders what it is given — WHICH value it is given is the property, and only source shows that");
   check("⭐ …and the signing call uses the parsed value too",
     /sendUsdcManual!\(parsedTo, amountNum\)/.test(code),
     "reviewing one value and sending another would be worse than no review at all");
-  check("⭐⭐ NO acknowledge language on the sign control — there is no band to acknowledge",
-    !/I understand/i.test(code) && !/acknowledge/i.test(code));
   check("⭐ the send is signed exactly ONCE per handler — no loop wraps it",
     (code.match(/sendUsdcManual!\(/g) || []).length === 1);
   check("⭐ …and an edit to either field drops the review, so it cannot go stale",

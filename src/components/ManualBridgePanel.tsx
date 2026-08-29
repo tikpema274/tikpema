@@ -28,6 +28,46 @@ type Quote = {
 };
 type Burn = { bridgeContract: string; usdc: string; amountMinor: string; calldata: string };
 
+// ⭐ THE SERVER'S 409 BODY, WHOLE. Every field here is computed server-side by `priceAndGate` and
+// arrives WITH the refusal. The panel used to keep `ackToken` and `band` and drop the rest.
+type Disclosure = {
+  feeUsdc: number; netUsdc: number; feeRatio: number; amountUsdc: number;
+  band: string; destinationLabel: string; ackToken: string;
+};
+
+// ═══ 🚨 THE DEFECT THIS COMPONENT EXISTS TO FIX, FOUND ON THE FIRST LIVE FIRING ════════════════
+// The gate fired correctly at 36.14% and then disclosed NOTHING: no fee, no ratio, no arrival
+// amount, no amount sent. The user was asked to accept "the fee is a large share of what you are
+// sending" and would have learned the figures only AFTER consenting.
+//
+// ⛔ THE SERVER WAS NEVER AT FAULT. `priceAndGate` returns feeUsdc, netUsdc, feeRatio and
+// amountUsdc in the 409 body — its own comment says the disclosure rides on the refusal "so a
+// cooperating UI can show the user what they are accepting". The panel simply discarded them. So
+// the numbers were ALREADY IN HAND at the moment of consent; the inverted feeling of consenting
+// first was this discard, not a protocol ordering problem, and one fix closes both.
+//
+// ⚠️ THE SENTENCE IS WRITTEN, NOT ASSEMBLED FROM THE BAND NAME. It used to interpolate `{ackBand}`
+// into "This is a {band} disclosure", which produced "This is a acknowledge disclosure" — broken
+// grammar AND an internal enum leaked to a user who has no idea what a band is. A machine token is
+// not prose. If a new band is added, this sentence is written for it, not generated.
+//
+// ⭐ EXPORTED AND PURE so a suite can RENDER it with real numbers. It used to be reachable only
+// after a live 409, which is why no test ever saw it — see verify-manual-bridge-copy §6.
+export function FeeDisclosureBox({
+  disclosure: d, busy, onAccept,
+}: { disclosure: Disclosure; busy: boolean; onAccept: () => void }) {
+  return (
+    <div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>
+      <b>Most of this amount would become fee.</b> You are sending{" "}
+      <b>{d.amountUsdc.toFixed(6)} USDC</b> to {d.destinationLabel}. The fee is{" "}
+      <b>{d.feeUsdc.toFixed(6)} USDC</b> — <b>{(d.feeRatio * 100).toFixed(1)}%</b> of what you are
+      sending — so only <b>{d.netUsdc.toFixed(6)} USDC</b> would arrive. A fee this large needs your
+      explicit acceptance, not just a warning.{" "}
+      <button onClick={onAccept} disabled={busy}>I understand — quote it anyway</button>
+    </div>
+  );
+}
+
 export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const [amount, setAmount] = useState("1");
   // ⭐ NO DEFAULT AND NO HARDCODED LIST. The previous version shipped `base-sepolia`, which is not
@@ -38,8 +78,9 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
   const [quote, setQuote] = useState<Quote | null>(null);
   const [burn, setBurn] = useState<Burn | null>(null);
   const [intentId, setIntentId] = useState<string | null>(null);
-  const [ackToken, setAckToken] = useState<string | null>(null);
-  const [ackBand, setAckBand] = useState<string | null>(null);
+  // ⭐ THE WHOLE DISCLOSURE, not two fields plucked out of it. Keeping the object is what makes
+  // every number available to the box below; the previous two-field state was the defect.
+  const [disclosure, setDisclosure] = useState<Disclosure | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -75,8 +116,7 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
       if (r.status === 409 && r.body?.feeDisclosure) {
         // ⚠️ SATISFIABLE, NOT TERMINAL — the same shape as the agent gate. The user is shown what
         // they are accepting and may acknowledge; the token came from the server's disclosure.
-        setAckToken(r.body.feeDisclosure.ackToken);
-        setAckBand(r.body.feeDisclosure.band);
+        setDisclosure(r.body.feeDisclosure as Disclosure);
         setQuote(null); setBurn(null);
         setStatus("");
         setError(null);
@@ -84,7 +124,7 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
       }
       if (!r.ok) throw new Error(r.body?.error ?? "could not price this bridge");
       setQuote(r.body.quote); setBurn(r.body.burn); setIntentId(r.body.intentId);
-      setAckToken(null); setAckBand(null); setStatus("");
+      setDisclosure(null); setStatus("");
     } catch (e) { setError(describeError(e)); } finally { setBusy(false); }
   }
 
@@ -224,12 +264,12 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
         <button onClick={() => start()} disabled={busy || !destination}>Get quote</button>
       </div>
 
-      {ackToken && (
-        <div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>
-          <b>Most of this amount would become fee.</b> This is a {ackBand} disclosure — the fee is a
-          large share of what you are sending, and what arrives will be much smaller.{" "}
-          <button onClick={() => start(ackToken)} disabled={busy}>I understand — quote it anyway</button>
-        </div>
+      {disclosure && (
+        <FeeDisclosureBox
+          disclosure={disclosure}
+          busy={busy}
+          onAccept={() => start(disclosure.ackToken)}
+        />
       )}
 
       {quote && !result && (

@@ -34,6 +34,30 @@ import { describeError } from "../lib/describeError";
 type UnifiedWallet = ReturnType<typeof useWallet>;
 const EXPLORER = arcTestnet.blockExplorers.default.url;
 
+// ⭐ EXPORTED AND PURE so a suite can RENDER it. It is reachable in the app only after the user
+// clicks Review, which `renderToStaticMarkup` never does — exactly the blind spot that let the
+// manual bridge ship a disclosure with no numbers in it. Rendering the state directly is strictly
+// stronger than regexing the source for it. [[a-state-behind-a-transition-is-untested-by-default]]
+//
+// ⚠️ IT SHOWS THE ADDRESS IN FULL AND UNTRUNCATED, deliberately. A shortened `0x1234…abcd` would
+// defeat the entire point of the step: the paste errors this catches (a truncated copy, a
+// whitespace-damaged tail) live precisely in the characters an ellipsis hides.
+export function SendReviewBox({
+  to, amountUsdc, busy, onSign, onBack,
+}: { to: string; amountUsdc: number; busy: boolean; onSign: () => void; onBack: () => void }) {
+  return (
+    <div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>
+      Sending <b>{amountUsdc} USDC</b> to <span className="mono">{to}</span>
+      <div style={{ marginTop: 8 }}>
+        <button className="emerald" onClick={onSign} disabled={busy}>
+          {busy ? "Confirm in MetaMask…" : "Sign and send"}
+        </button>{" "}
+        <button onClick={onBack} disabled={busy}>Back</button>
+      </div>
+    </div>
+  );
+}
+
 export default function ManualSendPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("0.1");
@@ -141,18 +165,10 @@ export default function ManualSendPanel({ wallet: w }: { wallet: UnifiedWallet }
             </div>
           )}
 
-          {/* ⭐ THE REVIEW STEP. Renders the PARSED address, in mono, not the raw input box. */}
+          {/* ⭐ THE REVIEW STEP, extracted so it can be RENDERED by a suite — see the component. */}
           {reviewing && (
-            <div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>
-              Sending <b>{amountNum} USDC</b> to{" "}
-              <span className="mono">{parsedTo}</span>
-              <div style={{ marginTop: 8 }}>
-                <button className="emerald" onClick={signAndSend} disabled={busy}>
-                  {busy ? "Confirm in MetaMask…" : "Sign and send"}
-                </button>{" "}
-                <button onClick={() => setReviewing(false)} disabled={busy}>Back</button>
-              </div>
-            </div>
+            <SendReviewBox to={parsedTo} amountUsdc={amountNum} busy={busy}
+              onSign={signAndSend} onBack={() => setReviewing(false)} />
           )}
         </>
       )}
