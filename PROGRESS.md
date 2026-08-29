@@ -1,5 +1,76 @@
 ---
 
+# ⭐ A GATEWAY PAYMENT *CAN* BE ATTRIBUTED ON CHAIN — bracket the balance, don't read it once
+
+**2026-08-30.** Closing a question I had twice answered with the wrong instrument, and once declared
+unanswerable. The Researcher's 0.0001 USDC spend at `10:59:27Z` on 2026-08-29 is now **located on
+chain**, both sides of it.
+
+## THE MEASUREMENT
+
+`availableBalance(USDC, account)` on the Arc GatewayWallet `0x0077777d7EBA4688BDeF3E311b846F25870A19B9`
+(selector `0x3ccb64ae`), called **at two block heights** that bracket the spend:
+
+| block | timestamp |
+|---|---|
+| 59428000 | **2026-08-29T10:54:22Z** — before |
+| 59434000 | **2026-08-29T11:48:08Z** — 54 min after, well past the ~15.4 min flush cycle |
+
+| account | before | after | Δ |
+|---|---|---|---|
+| **QuickNode payTo** `0xF46394adDdA95A3d5bCC1124605E3d15D204623C` | 0.1881 | **0.1882** | **+0.0001** |
+| **delegate payer** `0x6db396c1…` | 4.8643 | **4.8642** | **−0.0001** |
+
+**Double-entry, exact, correctly signed, inside a window containing the spend.** Both unchanged at
+`latest`. ⭐ The batch flushed.
+
+## ⭐⭐ THE INSTRUMENT, WHICH I HAD DECLARED IMPOSSIBLE
+
+I told the operator per-payment attribution could not be done — that Gateway's internal ledger yields
+*"a balance, not an event"*. **That was wrong, and the error is worth more than the result.**
+
+> A balance at ONE point cannot attribute a payment. A balance at **TWO** points *is* an event.
+
+`eth_call` takes a block tag and Arc's public RPC serves historical state, so the difference across a
+window is precisely the movement that was supposedly unobservable. Nothing new was needed — only
+asking the same question twice.
+
+## 🚨 THE FAILURE MODE: INFERRING IMPOSSIBILITY FROM MY OWN FAILED ATTEMPTS
+
+Three readings, in order:
+
+1. **Scanned Arc for an ERC-20 `Transfer` to the payTo.** Zero, across ~109 calibrated minutes. ⛔
+   Worthless — [[gateway-settlement-measured]] already records that settlement is an INTERNAL ledger
+   transfer emitting no Transfer, so that scan returns zero *whether or not it flushed*. The record
+   said so before I ran it.
+2. **Read `availableBalance` — of the WRONG payee.** `0xc70112c7…` is *our* stand-in seller; the
+   Researcher pays QuickNode. The 0.014 sitting there was `probe-settlement`'s own traffic. I
+   reported a settlement about a wallet with no connection to the payment.
+   [[establish-which-action-produced-the-outcome]]
+3. **Concluded the question was unanswerable.** ⛔ **From the failure of my instruments, not from the
+   nature of the question.**
+
+⭐ **THE RULE: two failed instruments are evidence about the instruments, not about the question.**
+"This cannot be measured" is a strong claim and needs its own argument — the same standard this
+record already applies to "nobody else does X". I gave it none.
+
+⚠️ And reading (2) was caused by a *label*: `source` was hardcoded to `"x402-quote (testnet
+stand-in)"`, naming our endpoint for a purchase made from QuickNode. Fixed in `0f5c484`; the label
+is now derived from the URL `payX402` actually paid.
+
+## ⚠️ THE HONEST LIMIT OF THIS ATTRIBUTION
+
+It shows **a** 0.0001 debit from our delegate and a matching credit to QuickNode inside that window.
+It does **not** fingerprint the specific call — two identical spends in one window would look the
+same. The ledger records one, and the delegate is our wallet, so attribution is solid — but it rests
+on **amount + direction + timing**, not on an identifier.
+
+⭐ Which is exactly the gap `settlement.id` closes going forward (`add2b32`): new spend records carry
+the facilitator id, so the next one needs no bracketing at all. **Bracketing is the retrospective
+tool for records written before that existed.**
+
+---
+
 # ✅ GAP 1 IS CLOSED — the manual bridge's ack gate is proven live, end to end
 
 **2026-08-29.** Burn `0x265be6d37783a926d7f19bb905e7d1cf57a4e24bd1d06f7636ab0dfd0e110850`,
