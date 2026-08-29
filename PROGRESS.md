@@ -85,11 +85,24 @@ with nothing sent. [[decode-session-token-before-theorizing]]
 
 ## THE RECORD
 
-- ⚠️ **The operator reports `17/0`.** ⭐ **MARKED AS CONVERSATION-SOURCED AND UNRECONCILED:** the
-  probe's SIGNED path emits **7** assertions (control + 6), so `17/0` did not come from this script
-  alone. The **verdict — SIGNED — is the substance and is independent of the count**; the count is
-  recorded as reported rather than silently adjusted to fit.
-  [[conversation-sourced-numbers-must-be-marked]]
+- **`✅ ALL GREEN   pass 7 / fail 0`** — the run's own last line, matching the probe's SIGNED path
+  exactly (control + predictions 4, 3, present, hex-shaped, ≥32 bytes, and 2), independently
+  counted from the call sites.
+- ⭐ **CORRECTED, AND WHY THE CORRECTION IS A DELETION.** This bullet first recorded a
+  conversation-sourced `17/0` marked UNRECONCILED, because the count did not match the script. It
+  turned out **no output anywhere ever contained a 17** — the number entered the conversation as an
+  instruction, not as an observation. So the marker was removed rather than left standing.
+  **An unresolved discrepancy left in the file is a standing claim that something WAS observed and
+  could not be explained.** When the observation never happened, keeping the note **manufactures a
+  mystery** and sends a later reader hunting for a run that does not exist — the exact opposite of
+  what an unreconciled marker is for. The marker exists to stop a number being laundered into fact;
+  it is not a place to park an input that was simply wrong.
+  ⚠️ The handling that produced it was right and is not being disowned: the number was neither
+  adjusted to fit nor silently dropped. **The resolution is that the INPUT was wrong, not the
+  count.** [[conversation-sourced-numbers-must-be-marked]]
+  ⚠️ **`20f0847`'s commit message still carries the `17/0` note** — it was pushed before the input
+  was corrected and history is not being rewritten. A reader of `git log` meets it there; this is
+  the correction it points to.
 - The probe lives at `scripts/dd/probe-v10-signmessage.mjs` because the first cut lived in a session
   scratchpad and is **gone** (`MODULE_NOT_FOUND`) — the same lesson `scripts/_prod-session.mjs`
   opens with.
