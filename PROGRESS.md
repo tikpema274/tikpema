@@ -1,5 +1,104 @@
 ---
 
+# ⭐⭐ SIGNED IN PRODUCTION — the v10 bump has its first production evidence, and the probe's own defect is the better finding
+
+**2026-08-29.** `scripts/dd/probe-v10-signmessage.mjs` (`79eb74d`) ran against prod and returned
+**SIGNED**. Pre-registered at `db668ba` (`docs/v10-bump-deploy-preregistration.md`, ADDENDUM 2)
+**before** running, so the predictions were fixed in advance and could not be fitted afterwards.
+The operator ran it; prod's `SESSION_SECRET` stays out of `.env` and no agent minted a session.
+
+`POST /api/agent-dd-report` → `makeProduceReport` → `ddAttestationOptions` → `makeCircleSigner` →
+`circle()` → `client.signMessage`. **Zero USDC, zero gas, no chain write, no store write.**
+
+This is the **first production evidence of any kind** for the `@circle-fin/developer-controlled-wallets`
+`^9 → ^10.6.0` (resolves `10.8.0`) bump. Everything before it was offline evidence plus a tree hash
+that moved because of a **comment** — the manifests sit outside `SURFACES`, so the deploy's actual
+substance contributed nothing to the hash, and `capture:window` correctly reported no-window.
+
+## ⚠️ THE CEILING, IN THE PROBE'S OWN WORDS — quoted, not paraphrased
+
+> **"the SDK constructs, encrypts and transports in production"** — NEVER **"the shim works in
+> production"**.
+
+That sentence is printed by the probe itself on every pass and is reproduced here **verbatim** so a
+later reader cannot upgrade it by restatement. Both this record and the pre-registration quote the
+same upstream source — the probe's verdict block — rather than each phrasing it independently.
+[[duplicate-source-of-truth-is-the-recurring-bug]]
+
+## THE FALSIFIER ACCOUNTING — two closed, one untouched, plus auth
+
+| pre-registered falsifier | outcome |
+|---|---|
+| **1 — a ciphertext / hex error** | **RULED OUT.** The deployed entity secret parsed and encrypted under v10's WebCrypto RSA-OAEP path. The pre-deploy shape check transferred to the **running code**, not merely to a function extracted from the dist. |
+| **2 — a transport error** | **RULED OUT.** The SDK's externalized `axios` resolved at call time under `npm ci`. This is the failure the build cannot catch — bundling succeeds whether or not a runtime import resolves — so it could only ever have been closed by a real call. [[lockfile-is-the-authoritative-install]] |
+| **3 — a typed-error shape reaching the caller wrong** | **UNTOUCHED — still open, exactly as pre-registered.** The installed dist wraps every signing call as `catch(n){throw isAxiosError(n) ? fromAxiosError(n) : n}`; the success path never enters that catch. The shim remains proven **offline only**. |
+
+⚠️ **Falsifier 3 is not "ruled out" and must never be written up as such.** It is the whole content
+of the ceiling above. A pass cannot reach it without either an invalid request or a money-moving one.
+
+**Auth was separately ruled out** and is not a falsifier: the 401 control fired first and returned
+401, so the route was alive and gating, and the authenticated call did not 401.
+
+## ⭐ PREDICTION 2 LANDS OUTRIGHT, NOT BY INFERENCE
+
+Measured in the **installed 10.8.0 dist**, not assumed: `signMessage` sends
+`{entitySecretCiphertext: await z(e)(), ...s}` — the ciphertext is generated **per call**. So a
+returned signature cannot exist unless the deployed secret was parsed and encrypted on that
+request. The claim is carried by the mechanism, not by a plausible chain of reasoning about it.
+
+## ⭐⭐ THE BETTER FINDING — A VERDICT MUST BE EARNED BY THE ASSERTIONS, NEVER SELECTED BY ITS INPUT
+
+Found **before shipping**, by validating the classifier against stubbed known cases rather than by
+reading it. A response carrying `attestation.status: "signed"` with a **null signature**:
+
+- failed **every** assertion,
+- printed **every** `ABSENT — signMessage may never have been reached; THIS PROVES NOTHING` warning,
+- exited **1**,
+- and still headlined **`VERDICT [SIGNED] — the first production evidence for v10`**.
+
+The branch was chosen by the **response**; the verdict was **decorative**. A reader who skims the
+verdict line — which is what a verdict line is for — reads a pass off a run that produced none.
+
+> ⭐ **THE RULE: a verdict must be EARNED BY THE ASSERTIONS, never selected by the input it is
+> describing.** Anything that names an outcome must be downstream of the checks, not parallel to them.
+
+**Sibling to the 401 misclassification, one layer up.** The first cut of this probe read
+`{"error":"Authentication required"}` and offered falsifier 3 as "possible — inspect", when
+`requireSession` refuses **ahead of the ladder** so `circle()` is never called and the shim is
+structurally incapable of being implicated. Same shape twice: **the label was attached to the input
+rather than derived from what the run established.** Below, a cause named for an observation that
+excludes it; above, a headline named for a branch whose assertions failed.
+[[cause-offered-for-an-observation-it-excludes]]
+
+⚠️ Both defects were in a check whose entire job is to refuse false confidence, and neither would
+have been caught by inspection — only by running the classifier against cases whose answers were
+known in advance. [[check-whose-failure-mode-is-a-pass]]
+
+## THE OTHER TRAP THE FIRST CUT SHIPPED — an expired token, sent
+
+The scratchpad cut minted a session with `exp 12:51:29Z` and dispatched it after `13:00`; the
+interactive paste ate the 30-minute lifetime (`_auth.mjs` `SESSION_TTL_SEC`), and `verifyToken`
+rejects on `exp < now`, so the server's honest 401 was **indistinguishable from a wrong secret**.
+Remaining lifetime is now printed at mint, re-checked immediately before dispatch (the control call
+consumes some), and a dead or thin-margin token is refused as **"token expired before dispatch"**
+with nothing sent. [[decode-session-token-before-theorizing]]
+
+## THE RECORD
+
+- ⚠️ **The operator reports `17/0`.** ⭐ **MARKED AS CONVERSATION-SOURCED AND UNRECONCILED:** the
+  probe's SIGNED path emits **7** assertions (control + 6), so `17/0` did not come from this script
+  alone. The **verdict — SIGNED — is the substance and is independent of the count**; the count is
+  recorded as reported rather than silently adjusted to fit.
+  [[conversation-sourced-numbers-must-be-marked]]
+- The probe lives at `scripts/dd/probe-v10-signmessage.mjs` because the first cut lived in a session
+  scratchpad and is **gone** (`MODULE_NOT_FOUND`) — the same lesson `scripts/_prod-session.mjs`
+  opens with.
+- ⛔ **No deploy.** The probe is a script; nothing served changed.
+
+**Commits.** `79eb74d` (the probe), this record. Pre-registration `db668ba` unamended.
+
+---
+
 # 🚨 A payTo FROM DOCUMENTATION WOULD HAVE PRODUCED A CLEAN, COMPLETE, VERIFIED ZERO
 
 **2026-08-28.** CoinMarketCap sells crypto data over x402 — the first **established company** found

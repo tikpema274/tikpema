@@ -259,3 +259,27 @@ either an invalid request or a money-moving one. So after a pass, the v10 error 
 proven **offline only** (against the real 10.8.0 `fromAxiosError`), and unproven in
 production. A pass must not be recorded as "the shim works in production" — only as "the SDK
 constructs, encrypts, and transports in production".
+
+---
+
+# RESULT — 2026-08-29: SIGNED. Falsifiers 1 and 2 closed; 3 untouched.
+
+The probe ran and returned **SIGNED**. Predictions 1–4 all landed. This is the first production
+evidence for the bump.
+
+- **Falsifier 1 (ciphertext / hex)** — ruled out. The deployed entity secret parsed and encrypted
+  under v10 in the running code, not only in a function extracted from the dist.
+- **Falsifier 2 (transport)** — ruled out. The externalized `axios` resolved at call time under
+  `npm ci`.
+- **Falsifier 3 (typed-error shape)** — **untouched, exactly as pre-registered above.** The success
+  path never enters the SDK's `isAxiosError → fromAxiosError` catch. Still proven offline only.
+
+⚠️ The ceiling stands as written in "WHAT A PASS STILL WOULD NOT PROVE", and is quoted here from
+the probe's own verdict block so it cannot be upgraded by restatement:
+
+> **"the SDK constructs, encrypts and transports in production"** — NEVER **"the shim works in
+> production"**.
+
+Runner: `scripts/dd/probe-v10-signmessage.mjs` (`79eb74d`) — the single upstream source for that
+wording. **Full record in PROGRESS.md**, including the two defects the probe's own validation found;
+this addendum is a pointer, not a second copy. Nothing above this line is amended.
