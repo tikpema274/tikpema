@@ -196,3 +196,66 @@ addendum's commit, not `806e2e2`.** `docs/` is outside
 `SURFACES = ["netlify/functions","shared","src"]`, so `tree` (`d22853c9…`), `ddTree`
 (`00154c85…`) and `fileCount` (186) are unaffected — re-measured after committing, not
 assumed. Every other row stands as written.
+
+---
+
+# ADDENDUM 2 — 2026-08-29, PRE-REGISTERED BEFORE RUNNING: the first production evidence for v10
+
+Written **before** the call is made. The deploy (`6a92b81e2536cb6e3dd0bb71`, tree `d22853c9…`)
+is live and has produced **zero** production evidence that the SDK bump works: no gate, suite
+or probe has ever invoked a Circle SDK method — `verify-circle-error-shape` records the
+measurement in its own header (instrumented `test:all`, ZERO client methods invoked).
+
+## THE CALL
+
+`POST /api/agent-dd-report` with a valid session. It reaches `makeProduceReport` →
+`_dd-rungs.mjs` → `ddAttestationOptions` → `makeCircleSigner`, which calls `circle()` and then
+`client.signMessage({walletId, message})`. The handler's own header: *"READ-ONLY. Signs an
+attestation over a chain observation; moves no money, writes no store."*
+
+**Cost: zero USDC, zero gas, no chain write, no store write.** One authenticated request.
+
+## WHO RUNS IT, AND WHY NOT ME
+
+Prod's `SESSION_SECRET` is **not** in `.env` and must not be. `scripts/_prod-session.mjs`
+refuses to mint without it and prints the operator instruction
+(`read -rs SESSION_SECRET && export SESSION_SECRET`). That interactive step is the design:
+an agent must not silently mint a production session. Matches
+[[live-proof-fund-moving-user-runs]]. The runner is prepared; the operator invokes it.
+
+## PRE-REGISTERED PREDICTIONS
+
+| # | predicted |
+|---|---|
+| 1 | the response carries a **signature**, not an error |
+| 2 | **v10's `hexToBytes` parses the deployed entity secret** — confirming the pre-deploy shape check (addendum 1) transferred to the running code, rather than only to a function extracted from the dist |
+| 3 | `attestation.status` indicates a signed attestation, not a refusal |
+| 4 | HTTP 200 |
+
+A pass on 1–4 is the **FIRST production evidence for v10**. Everything to date is offline
+evidence plus a tree hash that moved because of a comment.
+
+## 🚨 FALSIFIERS — each a finding
+
+1. **A ciphertext / hex error.** Either the deployed secret differs from the value I
+   shape-checked, or v10's WebCrypto RSA-OAEP path behaves differently from the `hexToBytes`
+   guard I read out of the dist. Both are findings; the second would mean the guard I tested
+   is not the whole story of how the secret is consumed.
+2. **A transport error.** The SDK's externalized `axios` did not resolve under `npm ci` — a
+   failure the build cannot catch, because bundling succeeds whether or not a runtime import
+   resolves at call time. This is the [[lockfile-is-the-authoritative-install]] shape again,
+   one layer down.
+3. **A typed-error shape reaching the caller wrong** (a Circle 4xx surfacing as a 500, or the
+   code/message lost). The shim is wrong in production despite `verify-circle-error-shape`
+   93/0 and `verify-vanilla-seller-limits` 34/0 — which would mean both suites test something
+   that is not what production runs.
+
+## ⚠️ WHAT A PASS STILL WOULD NOT PROVE
+
+**The typed-ERROR branch.** A successful `signMessage` exercises client construction, the
+entity-secret ciphertext path, and transport — the SUCCESS path only. The shim's error reader
+is reached solely when Circle actually rejects a call, which cannot be arranged here without
+either an invalid request or a money-moving one. So after a pass, the v10 error branch remains
+proven **offline only** (against the real 10.8.0 `fromAxiosError`), and unproven in
+production. A pass must not be recorded as "the shim works in production" — only as "the SDK
+constructs, encrypts, and transports in production".
