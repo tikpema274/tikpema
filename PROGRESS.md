@@ -1,5 +1,141 @@
 ---
 
+# ✅ GAP 1 IS CLOSED — the manual bridge's ack gate is proven live, end to end
+
+**2026-08-29.** Burn `0x265be6d37783a926d7f19bb905e7d1cf57a4e24bd1d06f7636ab0dfd0e110850`,
+0.15 USDC → Base (Sepolia), owner `0x74b7b561…`. Pre-registered at `65c3821` and amended at
+`abc11e9` **before** the run. The gate that had only ever been proven by suite and injection has now
+fired, disclosed, blocked, and recorded a real acceptance in production.
+
+## THE RESULT AGAINST THE AMENDED PREDICTIONS
+
+| # | predicted | outcome |
+|---|---|---|
+| 1 | `ackRequired`, band above `warn` | ✅ `ackBand: "acknowledge"`, `ackRequired: true`, ratio 36.14% |
+| 2 | all four figures, above the accept control, no band enum | ✅ **OBSERVED ON SCREEN** — see below |
+| 3 | refuses to submit until acknowledged | ✅ refuses to *quote* |
+| 4 | token server-minted, echoed unchanged, unforgeable | ✅ by two independent arguments |
+| 5 | `ackAcceptedAt` from a REAL acceptance | ✅ **FIRST LIVE INSTANCE** |
+
+## ⭐ PREDICTION 2 — OBSERVED BY THE OPERATOR, NOT INFERRED
+
+The previous run could not produce this: the disclosure rendered **before acknowledgement** showing
+**amount 0.150000 · fee 0.054213 · ratio 36.1% · arrives 0.095787** — every figure matching
+`bridge-ack-band-amount.mjs` exactly, in a written sentence, with no band enum and no grammar slip.
+
+⭐ **This is a human reading a screen, and it is the only instrument that could have caught the
+original defect.** `gate:disclosure` and `verify-manual-bridge-copy` §6 now assert the same property
+mechanically, but both were written *after* a person looked and said "there are no numbers here".
+
+## ⭐⭐ PREDICTION 5 — THE FIRST LIVE INSTANCE OF THE §9 PROPERTY
+
+```
+ackBand        "acknowledge"
+ackRequired    true
+ackAcceptedAt  2026-08-29T21:12:24.548Z   (== burnedAt)
+```
+
+`verify-bridge-fee-band.mjs` §9 says `ackAcceptedAt` is evidence of consent **only transitively** —
+it is derived from the BAND, never from the token, and means "the user accepted" solely because a
+refusal in `_user-bridge.mjs` makes the line unreachable without a matching token. Every check on it
+until tonight was an **ordering assertion read from source**. **It now has a live instance on the
+user-signed path**, which is the single thing this run existed to produce.
+
+## PREDICTION 4 — HELD, AND THE RECEIPT IS NOT WHERE THE EVIDENCE LIVES
+
+⚠️ **`ackTokenHash` on the receipt is `null`, and that is BY DESIGN — not a gap.** Checked before
+being reported as one: `promoteUserBridge` deliberately carries **no `ackToken` field at all, not
+even an explicit null**, and `verify-ack-token-keyed.mjs` asserts this module contains no raw
+`ackToken:` anywhere. The stated property is *"a raw token never reaches the durable record"*, and a
+null placeholder is *"a slot someone later fills"*. The fingerprint lived on the **intent** record,
+which is retired on promotion.
+
+So prediction 4 rests on two arguments, neither of which is the receipt:
+
+1. **The echo is proven by the refusal.** `priceAndGate` recomputes `expected = bridgeAckToken(...)`
+   server-side and refuses unless `ackToken === expected`. A quote was issued, so the panel's token
+   was **byte-equal** to the server-issued one. Nothing weaker would have passed.
+2. **The client could not have derived it — measured live on THIS deploy.** `gate:forgery`:
+   *"the server-issued token DIFFERS from the forgeable one — the key is live in prod —
+   served `7ce8d31e8186…` vs forged `91bc69c3619f…`"*, and the forged public-input token was
+   **REFUSED**.
+
+## ⚠️ TWO PIECES OF EVIDENCE, NOT ONE — recorded separately on purpose
+
+| | what it exercises | verdict |
+|---|---|---|
+| **this run** | the COOPERATING path — fire, disclose, block, accept, record | ✅ |
+| **`gate:forgery`** | the ADVERSARIAL path — a forged token is refused, 5/0, `executed=false` | ✅ |
+
+⛔ **Neither substitutes for the other, and merging them would overstate both.** This run never
+attempted a forgery; `gate:forgery` never acknowledged anything or moved a cent (`executed=false`,
+it spends nothing by construction). "The gate works" is the conjunction, and it is only available
+because both were run.
+
+## 🚨 THE NUMBER CONSENTED TO IS NOT, EXACTLY, THE NUMBER BOUND
+
+This was asked for explicitly, so it is answered exactly rather than approximately:
+
+| | fee | arrives |
+|---|---|---|
+| **disclosure the operator accepted** | 0.054213 | 0.095787 |
+| **signed calldata `maxFee` / receipt** | **0.054209** | **0.095791** |
+| **delivered, read from Base Sepolia** | — | **0.095791** |
+
+**The fee drifted by 0.000004 USDC (0.0074%) between the disclosure and the signature**, because the
+accepted retry **re-quotes live**. `ackBand` matches (`acknowledge` both times); the exact figure
+does not.
+
+⭐ **This is the documented design, not a defect** — `bridgeAckToken` binds the **BAND, not the
+number**, and its header says why: the fee moves constantly, so binding the number *"would
+invalidate every acknowledgment on the next tick and train people to click through a box that always
+complains."* ⚠️ But the operator's stated expectation — *"the number I consented to must be the
+number that was bound"* — is **not met**, and that is worth knowing precisely rather than being
+reassured about.
+
+⭐⭐ **What WAS signed was honoured exactly.** `maxFee 54209` in the signed calldata ==
+`feeUsdc 0.054209` on the receipt, and `netPredicted 0.095791` == `amountDelivered 0.095791` read
+from the destination chain. **Zero drift between signature and delivery** — the drift is entirely in
+the window between seeing a number and signing one.
+
+## THE BURN, ON CHAIN
+
+```
+from                  0x74b7b561…                                    ← the operator's own key
+to                    0xC5567a5E3370d4DBfB0540025078e283e36A363d     ← BRIDGE_CONTRACT ✅
+status                0x1 (success)          block 59498699
+selector              0x513e1175             ← the derived selector, unchanged
+amount                150000                 = 0.150000 USDC
+maxFee                 54209                 = 0.054209 USDC
+destinationDomain          6                 ← Base ✅
+minFinalityThreshold    1000                 ← FAST
+```
+
+**Delivery advanced `predicted` → `measured`**: `amountDelivered 0.095791`, `mintChainId 84532`,
+mint block 46134832, mint tx `0x6699ca4f…`, `mintVerifiedBy: ["iris", "destination-rpc"]` — two
+instruments, and the second is an independent read of the destination chain. No timing was
+predicted and none is claimed.
+
+## ⭐ AND THE DEPLOY GATE EARNED ITS PLACE, TWICE
+
+`gate:disclosure` ran **red before the deploy** (production was still serving `c725398`, this
+morning's build, stamped 10:44Z) and **green after** (`ea9c6e8`, stamped 20:37Z). A two-sided
+calibration on production itself — the same discipline the check was built with offline, repeated
+against the real artifact. ⚠️ Had the fee been spent on the earlier reading, it would have bought a
+second disclosure with no numbers in it.
+
+## ⛔ GAP 1 IS CLOSED
+
+**Closed 2026-08-29**, by burn `0x265be6d3…`. `PROGRESS.md`'s standing entry — *"THE ACK GATE HAS
+STILL NEVER FIRED FOR A USER-SIGNED BRIDGE"* — is now false and is superseded by this one.
+
+⚠️ **What remains open, stated so the closure is not read wider than it is:** one live firing is one
+instance, not a track record; the ack token binds the band and not the figure (above); and the
+manual SEND is still committed-and-deployed-but-unexercised — its ack-free design is argued and
+suite-asserted, never run with real money.
+
+---
+
 # 🚨 THE ACK GATE FIRED — AND ITS DISCLOSURE DISCLOSED NOTHING. Prediction 2 FAILS.
 
 **2026-08-29.** First live firing of the manual bridge's acknowledge gate, pre-registered at
@@ -507,7 +643,10 @@ and the design forbids `predicted → measured` advancing on anything but that r
 user-signed burn** — where the fee is the thing a human eats if the band moves between quote and
 signature.
 
-## ⚠️ OPEN — THE ACK GATE HAS STILL NEVER FIRED FOR A USER-SIGNED BRIDGE
+## ✅ CLOSED 2026-08-29 — was: "OPEN — THE ACK GATE HAS STILL NEVER FIRED FOR A USER-SIGNED BRIDGE"
+
+> ✅ **SUPERSEDED.** It fired on 2026-08-29, burn `0x265be6d3…` at 36.14%. Full record at the top of
+> this file. Everything below stood as written until then and is kept as the state at the time.
 
 `ackBand: "none"`, `ackRequired: false`, `ackAcceptedAt: null`. At **5.42%** the fee sat below the
 10% warn band and far below the 25% acknowledge band.

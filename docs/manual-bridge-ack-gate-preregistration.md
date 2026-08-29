@@ -208,3 +208,22 @@ stronger half:
 
 The operator spends nothing until `npm run gate:disclosure` passes against production. A fee spent
 against an unshipped fix would waste the run a second time.
+
+---
+
+# ✅ RESULT — 2026-08-29: ALL FIVE PREDICTIONS HELD. GAP 1 CLOSED.
+
+Burn `0x265be6d37783a926d7f19bb905e7d1cf57a4e24bd1d06f7636ab0dfd0e110850`, 0.15 USDC → Base
+(Sepolia). Predictions 1, 3 held as before; **2 held and was OBSERVED ON SCREEN** (amount 0.150000,
+fee 0.054213, ratio 36.1%, arrives 0.095787 — written sentence, no enum); **4 held** by the refusal
+argument plus `gate:forgery`'s live measurement that the served token differs from the forgeable
+one; **5 held — the first live instance** of §9's `ackAcceptedAt` property on the user-signed path
+(`2026-08-29T21:12:24.548Z`).
+
+⚠️ Two things the closure does not cover, both recorded in PROGRESS: the fee **drifted 0.000004
+USDC between the disclosure and the signature** (the token binds the BAND, by design, not the
+figure), and `ackTokenHash` is `null` on the receipt **by design** — the promote path carries no
+`ackToken` field at all, so the receipt was never the evidence for prediction 4.
+
+⛔ The forgery result is **separate evidence**, not part of this run: this exercised the cooperating
+path only. Nothing above this line is amended.
