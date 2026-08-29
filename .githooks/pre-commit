@@ -27,6 +27,58 @@ set -uo pipefail
 
 BOLD=$'\033[1m'; RED=$'\033[31m'; GRN=$'\033[32m'; YEL=$'\033[33m'; OFF=$'\033[0m'
 
+# ── 0. THE GENERATED BUILD STAMP MUST BE null IN ANY COMMIT ──────────────────────────────
+# ═══ 🚨 THE DEFECT THIS EXISTS TO STOP, WHICH HAPPENED TWICE IN ONE SESSION ══════════════
+# `shared/build-stamp.generated.mjs` is committed as `null` on purpose: a deploy that skipped
+# stamping must self-report UNRESOLVED rather than a stale SHA. `prebuild`, `npm run stamp`
+# and several suites REGENERATE it, so after almost any run the working tree holds a real
+# value — and `git add -A` sweeps it into the commit.
+#
+# ⭐ ON 2026-08-29 THAT HAPPENED, WAS DIAGNOSED, WAS FIXED, AND THEN HAPPENED AGAIN ONE
+# COMMIT LATER, in the same session, by the same reflex. The rule was written down in the
+# fixing commit's own message. Writing it down did not work, because `git add -A` is a habit
+# and a commit message is not read at commit time. THAT is why this is a hook and not a note:
+# a guard that refuses beats a rule to remember. It is the argument this repo already makes
+# everywhere else, applied to its own workflow.
+#
+# ⚠️ IT CHECKS THE STAGED CONTENT, NOT THE WORKING TREE. A stamped file on disk is NORMAL —
+# it is exactly the state between `npm run build` and `netlify deploy`, and blocking on that
+# would make the hook fire on every unrelated commit until people disabled it. Only what is
+# about to enter history is judged. (`verify-blobs-probe.mjs` §4 asserts the same property
+# from the other side, reading `git show HEAD:` — this stops it reaching HEAD at all.)
+#
+# ⭐ RUNS BEFORE THE gitleaks BINARY CHECK, DELIBERATELY. Placing it after would mean this
+# guard silently does not run on a machine without gitleaks installed — a guard with a hidden
+# dependency on an unrelated tool, which is the shape of an absent check that looks present.
+STAMP_PATH="shared/build-stamp.generated.mjs"
+if git diff --cached --name-only --diff-filter=ACMR | grep -qx "$STAMP_PATH"; then
+  if ! git show ":$STAMP_PATH" 2>/dev/null | grep -qE 'RAW_BUILD_STAMP[[:space:]]*=[[:space:]]*null'; then
+    STAGED_COMMIT=$(git show ":$STAMP_PATH" 2>/dev/null | grep -oE '"commit":[[:space:]]*"[0-9a-f]{7,40}"' | head -1)
+    cat >&2 <<EOF
+${RED}${BOLD}✖ pre-commit BLOCKED — a STAMPED build stamp is staged.${OFF}
+
+  ${STAMP_PATH}
+  staged value: ${STAGED_COMMIT:-<non-null>}
+
+That file must be committed as ${BOLD}null${OFF}. A stamped value in git means a deploy that
+skipped stamping reports a real-looking commit that is NOT what it is serving — a
+stale provenance claim that reads exactly like a true one.
+
+${BOLD}Fix:${OFF}
+
+  npm run stamp:clear && git add ${STAMP_PATH}
+
+Your working tree is then unstamped; \`npm run build\` re-stamps it, and the value is
+supposed to live only there and in the deployed artifact — never in history.
+
+(--no-verify bypasses this. If you are deliberately committing a stamp, say why in
+the commit message, because the next reader will assume it was an accident.)
+EOF
+    exit 1
+  fi
+  echo "${GRN}✔ build stamp: staged as null.${OFF}"
+fi
+
 # ── 1. THE BINARY MUST EXIST, OR WE BLOCK ────────────────────────────────────────────────
 # 🚨 A hook that no-ops when gitleaks is missing is ABSENT PRECISELY ON A NEW MACHINE — the
 # fresh clone with no tooling, which is the case this hook exists for. That is
