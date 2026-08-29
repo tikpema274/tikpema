@@ -17,6 +17,12 @@
 //     HTTP 429: v9(status=429 http=400 detail=present)  v10(status=undefined http=500 detail=null)
 //     HTTP 503: v9(status=503 http=500 detail=present)  v10(status=undefined http=500 detail=null)
 //
+// ⚠️ THAT MEASUREMENT IS A HISTORICAL RECORD, NOT A DESCRIPTION OF THE TREE. It was taken while
+// BOTH copies sat on disk — 9.6.0 resolved at top level, 10.7.1 nested under adapter-circle-wallets.
+// Neither is installed any more: since the `^10.6.0` bump the specifier resolves to a single
+// **10.8.0**. The divergence above is why this reader exists; do not read it as "these versions are
+// present". [[duplicate-source-of-truth-is-the-recurring-bug]]
+//
 // ⚠️ IT FAILS SILENTLY. Optional chaining plus `?? null` means nothing throws, no suite goes red,
 // and the buyer simply stops being told why their payment failed — while a 4xx ("your
 // authorization is bad, do not retry") is reported as a 5xx ("we broke, please retry").

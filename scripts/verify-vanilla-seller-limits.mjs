@@ -189,7 +189,14 @@ await section("── 6. 🚨 A MISCONFIGURED CEILING MUST STOP THE SELLER, NOT 
 // `e.response.data`; v10 wraps 43 methods and throws a typed HttpResponseError that has NO
 // `.response` at all. The seller reads that reason to tell the buyer why settlement failed, so the
 // two majors must produce the SAME answer. The v10 error is built by the SDK's own
-// `fromAxiosError`, from the real 10.7.1 on disk — not a hand-rolled imitation.
+// `fromAxiosError`, from the real SDK on disk — not a hand-rolled imitation.
+//
+// ⚠️ EVIDENCED ON 10.7.1, NOW RUNS AGAINST 10.8.0 — and those are different releases. Before the
+// bump the only v10 copy was 10.7.1, nested under adapter-circle-wallets; this suite reached into
+// it because the top-level resolution was still v9. Since the bump the specifier RESOLVES to
+// 10.8.0 and there is exactly one copy, so this now tests what production loads rather than a
+// copy that merely sat on disk. Both readings are green — this is a note, not a defect — but the
+// evidenced version and the resolved version must not be blurred into "the v10 copy".
 await section("── 7. ⭐⭐ A REJECTED SETTLEMENT READS THE SAME ON v9 AND v10 ───────", async () => {
   const data = { code: 155201, message: "FiatTokenV2: authorization is used or canceled" };
   const mkAxios = () => new AxiosError(

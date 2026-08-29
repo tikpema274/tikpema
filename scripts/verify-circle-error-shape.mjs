@@ -22,9 +22,15 @@
 // run, ZERO client methods were invoked. A signature- or error-shape change passes all 46. So this
 // asserts against error objects built by the SDK's OWN `fromAxiosError`, from the copy on disk.
 //
-// ⭐ AND IT SURVIVES THE BUMP. The v10 factory is located wherever it lives — nested under
-// adapter-circle-wallets today, top-level once the bump lands — and its ABSENCE IS A FAILURE,
-// never a skip. [[absence-must-never-read-as-safe]]
+// ⭐ AND IT SURVIVED THE BUMP. The v10 factory is located wherever it lives — and its ABSENCE IS
+// A FAILURE, never a skip. [[absence-must-never-read-as-safe]]
+//
+// ⚠️ THE EVIDENCED VERSION AND THE RESOLVED VERSION ARE DIFFERENT RELEASES. This suite's original
+// 93/0 was driven by **10.7.1**, the copy nested under adapter-circle-wallets, reached while the
+// top-level specifier still resolved to v9 — evidence about a copy on disk, not about what the
+// runtime loaded. Since the bump to `^10.6.0` the specifier resolves to **10.8.0**, there is
+// exactly ONE copy, and the search below can only find that one — so the v10 branch is now
+// PROVABLE rather than merely evidenced. Still 93/0 across both, so this is a note, not a problem.
 //
 // READ-ONLY. Zero money, zero network, zero chain, no credential.
 import { readdirSync, existsSync } from "node:fs";
