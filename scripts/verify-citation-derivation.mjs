@@ -431,6 +431,52 @@ section("9 — THE ENFORCEMENT FLAG: permissive default, stated as such, time-bo
     /noBrief \|\|/.test(sub), "no-brief is not part of the measurement window");
 }
 
+// ═══════════ 10 — THE SPEND RECORD NAMES THE SELLER THAT WAS PAID ═══════════
+// ═══ 🚨 THE DEFECT: A HARDCODED LABEL THAT NAMED THE WRONG SELLER ══════════════════════════════
+// `source` was the constant "x402-quote (testnet stand-in)" — OUR endpoint. The Researcher buys
+// from `DATA_SELLER_URL`, which in production is QuickNode. Every spend line claimed the money went
+// somewhere it did not, and a label is what a reader uses to go LOOK: on 2026-08-29 it sent an
+// investigation to our own endpoint, which produced a phantom 10× price discrepancy (0.0001 real vs
+// 0.001 ours) AND a settlement reading taken from the wrong payTo. Two wrong findings, one label.
+// ⭐ Asserted BEHAVIOURALLY where the function is callable, and on SOURCE only for the wiring a
+// call cannot reach — labelled as such.
+section("10 — the seller label is derived, not hardcoded");
+{
+  const research = await import("../netlify/functions/_research.mjs");
+  const prev = process.env.DATA_SELLER_URL;
+
+  process.env.DATA_SELLER_URL = "https://x402.quicknode.com/arc-testnet";
+  const cited = research.extractFacts({ dataset: { facts: ["a live figure"] } }, null)[0]?.source;
+  check("⭐⭐ a citation with no explicit source falls back to the CONFIGURED seller",
+    cited === "https://x402.quicknode.com/arc-testnet", JSON.stringify(cited));
+  check("🚨 …and NEVER to our own stand-in endpoint's label",
+    !/x402-quote \(testnet stand-in\)/.test(String(cited)),
+    "a citation naming the wrong origin is worse than one naming an unknown origin");
+
+  delete process.env.DATA_SELLER_URL;
+  const noSeller = research.extractFacts({ dataset: { facts: ["x"] } }, null)[0]?.source;
+  check("⭐ with nothing configured it says UNKNOWN rather than inventing an origin",
+    noSeller === "unknown-seller", JSON.stringify(noSeller));
+  if (prev === undefined) delete process.env.DATA_SELLER_URL; else process.env.DATA_SELLER_URL = prev;
+
+  // ⚠️ SOURCE, because reaching recordSpend needs a real purchase. Labelled as the weaker
+  // instrument rather than presented as a behavioural result.
+  const raw = readFileSync(new URL("../netlify/functions/_research.mjs", import.meta.url), "utf8");
+  // ⚠️ COMMENTS STRIPPED FIRST. The property is "no CODE names the old constant", not "the string
+  // never appears" — and the comment above the fix necessarily QUOTES the wrong label to explain
+  // it. Checking raw text made this section fail on its own documentation, which would have taught
+  // the next person to delete the explanation rather than keep the guard.
+  const src = raw.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+  check("⭐⭐ the spend record's source comes from the seller payX402 actually PAID",
+    /source: sellerLabel\(res\.body\.seller \?\? configuredSeller\(\)\)/.test(src),
+    "res.body.seller is the URL that was resolved and paid — config could have changed since");
+  check("🚨 the hardcoded constant is GONE from the module entirely",
+    !/DATA_SELLER_SOURCE/.test(src) && !/"x402-quote \(testnet stand-in\)"/.test(src),
+    "a surviving constant is a second label waiting to be used again");
+  check("⭐ blocked records name the CONFIGURED seller — nothing was purchased, so there is no paid one",
+    (src.match(/source: sellerLabel\(configuredSeller\(\)\)/g) || []).length >= 3);
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

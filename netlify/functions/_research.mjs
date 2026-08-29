@@ -66,7 +66,25 @@ export async function callAnthropic(apiKey, model, messages, systemPrompt, tools
 // grounding — a purchase problem must never fail the research job.
 
 // Where the recorded spend is attributed in the audit trail.
-const DATA_SELLER_SOURCE = "x402-quote (testnet stand-in)";
+// ═══ ⚠️ THE SPEND RECORD NAMES THE SELLER THAT WAS ACTUALLY PAID ════════════════════════════════
+// 🚨 THIS WAS A HARDCODED "x402-quote (testnet stand-in)" AND IT NAMED THE WRONG SELLER. That
+// string is OUR OWN endpoint; the Researcher buys from whatever `DATA_SELLER_URL` points at, which
+// in production is QuickNode (`x402.quicknode.com/arc-testnet`, 100 atomic = 0.0001 USDC, payTo
+// 0xF46394ad…). Every Researcher spend line therefore claimed the money went somewhere it did not.
+//
+// ⭐ IT IS NOT A COSMETIC LABEL — IT IS WHAT A READER USES TO GO LOOK. On 2026-08-29 that label sent
+// an investigation to our own endpoint: it compared the ledger's 0.0001 against OUR seller's 0.001
+// and reported a phantom 10× discrepancy, then read the Gateway balance of OUR payTo and reported
+// that a payment had settled — about a wallet with no connection to the payment. Two wrong findings,
+// one wrong label. [[establish-which-action-produced-the-outcome]]
+//
+// ⭐ DERIVED FROM THE URL ACTUALLY CALLED, never from config at record time: `payX402` returns the
+// seller it resolved and paid, so the record describes THAT rather than whatever the env says later.
+const sellerLabel = (url) => {
+  try { const u = new URL(String(url)); return `${u.host}${u.pathname.replace(/\/+$/, "")}`; }
+  catch { return String(url || "").trim() || "unknown-seller"; }
+};
+const configuredSeller = () => process.env.DATA_SELLER_URL || "";
 
 // Absolute per-buy hard ceiling (USDC). A seller's advertised price is refused if it
 // exceeds this, IN ADDITION TO the percentage caps in _budget.mjs — so an external
@@ -100,7 +118,10 @@ export function extractFacts(sellerBody, sellerUrl) {
   const path = (process.env.DATA_SELLER_FACTS_PATH || "dataset.facts").trim();
   const val = path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), sellerBody);
   if (val == null) return [];
-  const src = sellerUrl || DATA_SELLER_SOURCE;
+  // ⚠️ This becomes a CITATION source on a fact a user reads. It must never fall back to a label
+  // for an endpoint that was not called — a citation naming the wrong origin is worse than one
+  // naming an unknown origin.
+  const src = sellerUrl || configuredSeller() || "unknown-seller";
   if (Array.isArray(val)) {
     return val
       .map((f) =>
@@ -417,7 +438,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     const ceiling = dataBuyCeilingUsdc();
     if (amountUsdc > ceiling) {
       console.warn(`[research] advertised ${amountUsdc} exceeds absolute per-buy ceiling ${ceiling} USDC (NO buy)`);
-      await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: `absolute ceiling: ${amountUsdc} > ${ceiling} USDC`, code: REFUSAL.ABSOLUTE_CEILING, store });
+      await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: sellerLabel(configuredSeller()), reason: `absolute ceiling: ${amountUsdc} > ${ceiling} USDC`, code: REFUSAL.ABSOLUTE_CEILING, store });
       mark(outcome, "CEILING", `advertised ${amountUsdc} USDC exceeds the absolute per-buy ceiling of ${ceiling} USDC`);
       return [];
     }
@@ -431,7 +452,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     const paused = await assertNotPaused({ owner, agent: AGENT.RESEARCHER });
     if (paused) {
       console.log(`[research] PAUSED: ${paused}`);
-      await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: paused, code: REFUSAL.PAUSED, store });
+      await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: sellerLabel(configuredSeller()), reason: paused, code: REFUSAL.PAUSED, store });
       mark(outcome, "PAUSED", `the Researcher is paused: ${paused}`);
       return [];
     }
@@ -439,7 +460,7 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     const gate = await canSpend({ jobId, jobPriceUsdc: jobPrice, amountUsdc, store, owner });
     if (!gate.allowed) {
       console.log(`[research] budget BLOCKED: ${gate.reason}`);
-      await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: DATA_SELLER_SOURCE, reason: gate.reason, code: gate.code ?? REFUSAL.JOB_ALLOWANCE, store });
+      await recordBlocked({ agent: AGENT.RESEARCHER, owner, jobId, amountUsdc, source: sellerLabel(configuredSeller()), reason: gate.reason, code: gate.code ?? REFUSAL.JOB_ALLOWANCE, store });
       mark(outcome, "BUDGET", `the per-job budget refused it: ${gate.reason}`);
       return [];
     }
@@ -482,7 +503,8 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
       jobId,
       jobPriceUsdc: jobPrice,
       amountUsdc: paidUsdc,
-      source: DATA_SELLER_SOURCE,
+      // ⭐ `res.body.seller` is the URL payX402 resolved and paid — the authority for this field.
+      source: sellerLabel(res.body.seller ?? configuredSeller()),
       settlement,
       justification,
       store,
