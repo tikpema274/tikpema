@@ -139,3 +139,60 @@ path — the one that actually changed implementation, forge → WebCrypto — c
 A read is the weaker instrument here precisely because it asks a different question.
 
 I am **not** recommending this be run as part of the deploy; it is what it would take.
+
+---
+
+# ADDENDUM — 2026-08-29, BEFORE THE DEPLOY: falsifier 5 is CLOSED
+
+The prediction table above is untouched. This records a pre-deploy check, not an outcome.
+
+**Falsifier 5** (the deployed `CIRCLE_ENTITY_SECRET` had never been shape-checked; only the
+local `.env` copy had) was the one falsifier on the list that fails **quietly and late** — a
+prod secret with whitespace or an `0x` prefix breaks every signing and transaction call at
+once, *after* the deploy, under v10's stricter `hexToBytes`. It is now closed.
+
+**Result: PASSES.** Length 64 · even · strictly `[0-9a-fA-F]` · no `0x` prefix · no leading,
+trailing, or interior whitespace · no surrounding quotes · **and it passes v10's actual
+`hexToBytes`, returning 32 bytes.** The value was piped from `netlify env:get` straight into
+the analyser: never printed, never written to disk, never shown in part.
+
+Also established, and not knowable before: the deployed value is **identical** to the local
+`.env` copy, so the earlier local verification transfers to production. Reported as a boolean
+— no hashes.
+
+## The two things that made the check trustworthy
+
+**1. The guard was located by its ERROR STRING, not by its name.** `hexToBytes` is not
+exported; it is an internal, minified function whose identifier **differs between builds** —
+`$i` in 10.7.1, `Ni` in 10.8.0. A name-based lookup would have found nothing, and depending on
+how it was written could have reported a clean pass for a check that never ran
+[[check-whose-failure-mode-is-a-pass]]. Anchoring on the literal
+`"hexToBytes: input must have even length"` survives minification. The 291-byte function was
+then extracted from the installed dist and evaluated — the SHIPPED implementation, not a
+hand-written hex regex. A regex of mine and the SDK's guard are two different tests, and only
+one of them ships.
+
+**2. The instrument was calibrated against known-present AND known-absent first**
+[[probe-must-discriminate-between-states]] — before any secret was read, against a variable
+whose value is safe to display and against one that does not exist.
+
+## ⭐ THE CALIBRATION FINDING — a trap for any env check, not just this one
+
+> **`netlify env:get` prints `No value set in the <ctx> context for environment variable X`
+> to STDOUT at EXIT 0 for an absent variable.** Absence is returned as content, and the exit
+> code says success.
+
+Uncalibrated, an **unset** secret would have been measured as a 64-character non-hex string
+and reported as a loud FAILURE — the right verdict reached for entirely the wrong reason, with
+a remediation ("rotate/reformat the secret") that would not have touched the real problem
+(the variable is missing). The analyser therefore matches that sentinel explicitly and treats
+it as its own outcome. Generalises to every env-var check in this repo:
+[[caps-from-deployed-env-not-code-defaults]], [[absence-must-never-read-as-safe]].
+
+## ⚠️ ONE DEVIATION FROM THE TABLE, DECLARED IN ADVANCE
+
+Committing this addendum moves `HEAD`, so **prediction 9 (`commit`) will read as this
+addendum's commit, not `806e2e2`.** `docs/` is outside
+`SURFACES = ["netlify/functions","shared","src"]`, so `tree` (`d22853c9…`), `ddTree`
+(`00154c85…`) and `fileCount` (186) are unaffected — re-measured after committing, not
+assumed. Every other row stands as written.
