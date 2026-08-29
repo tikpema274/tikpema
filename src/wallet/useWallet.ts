@@ -646,6 +646,21 @@ export function useWallet() {
     logout,
     loginError,
     activeKind,
+    // ═══ ⭐⭐ PRESENCE, NOT ACTIVITY — and they are DIFFERENT QUESTIONS ═════════════════════════
+    // `activeKind` answers "which wallet executes right now". This answers "is a MetaMask wallet
+    // connected at all". A panel that can only see the first CANNOT TELL "not connected" from
+    // "connected but the passkey wallet is active", and the manual bridge shipped telling the
+    // second group to connect the thing they had already connected (PROGRESS.md:407).
+    //
+    // ⚠️ `connectors[].isAvailable` DOES NOT ANSWER THIS and must not be reached for instead: it
+    // means "the extension is installed", which is true for a user who has never connected. The
+    // fact needed is `mmWallet` existing, and until now it was held inside this hook and never
+    // exported — which is why that defect was not fixable in the panel.
+    //
+    // ⭐ EXPORTED FOR BOTH MANUAL PANELS, not just the one whose bug found it. A second panel
+    // deriving the same state its own way is the duplicate-source-of-truth shape this repo keeps
+    // paying for.
+    metamaskConnected: !!mmWallet,
     connectors,
     // Session auth surface for the panels.
     ensureSession,

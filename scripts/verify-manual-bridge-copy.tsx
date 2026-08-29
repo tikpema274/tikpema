@@ -30,7 +30,17 @@ const check = (label: string, cond: boolean, detail = "") => {
 const section = (t: string) => console.log(`\n── ${t} ${"─".repeat(Math.max(0, 58 - t.length))}`);
 const strip = (h: string) => h.replace(/<[^>]*>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
 
-const wallet = (kind: string | null) => ({ activeKind: kind, ensureSession: async () => "t", manualBridgeBurn: async () => "0x" }) as any;
+// ⭐ THE STUB CARRIES PRESENCE AND ACTIVITY SEPARATELY, because the panel's copy turns on the
+// DIFFERENCE between them. The previous stub was `{ activeKind }` only — it could not represent
+// "MetaMask is connected but the passkey wallet is active", so §4 rendered identically in the
+// defective and the fixed world and passed in both. A guard blind to the defect it covers.
+// [[binding-tested-across-what-it-binds]]
+const wallet = (kind: string | null, opts: { metamaskConnected?: boolean } = {}) => ({
+  activeKind: kind,
+  metamaskConnected: opts.metamaskConnected ?? false,
+  ensureSession: async () => "t",
+  manualBridgeBurn: async () => "0x",
+}) as any;
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════╗");
 console.log("║  MANUAL BRIDGE PANEL — RENDERED, not grepped                        ║");
@@ -73,16 +83,41 @@ section("3 — ⭐ the estimate vocabulary, reused verbatim from BridgePanel");
     !/exact(ly)?\s+\d|will arrive|guaranteed/i.test(text));
 }
 
-section("4 — the direction that catches a hardcode: a non-MetaMask wallet");
+section("4a — NOT CONNECTED: the instruction is CONNECT");
 {
-  const text = strip(renderToStaticMarkup(<ManualBridgePanel wallet={wallet("modular")} />));
+  const text = strip(renderToStaticMarkup(<ManualBridgePanel wallet={wallet("modular", { metamaskConnected: false })} />));
   check("offers nothing to sign when the connected wallet cannot",
     /Connect MetaMask/i.test(text) && !/Sign and bridge/i.test(text));
+  check("⭐ …and does NOT tell them to SWITCH to something they have not connected",
+    !/Switch to MetaMask/i.test(text));
   // 🚨 THE CAPS CLAIM MUST NOT LEAK INTO A STATE WHERE NO BRIDGE IS OFFERED — a standing
   // "caps do not apply" beside no control is a claim about a path the user cannot take.
   check("⭐ …and does NOT assert the caps claim in a state with no bridge control",
     !/Agent spending caps do not apply/i.test(text));
   check("⭐ …nor the stay-on-this-page warning, which qualifies a signature it cannot make",
+    !/stay on this page until the burn confirms/i.test(text));
+}
+
+// ═══ 🚨 THE STATE THE OLD STUB COULD NOT REACH — and the defect it hid ══════════════════════════
+// A user who HAS connected MetaMask but has the passkey wallet active was told to "Connect
+// MetaMask" — to connect the thing they already connected. Two distinct states, one message, and
+// the instruction is WRONG in the second. Recorded open at PROGRESS.md:407 on 2026-08-28.
+// ⭐ THIS SECTION WAS VALIDATED RED against the unfixed panel before the hook change landed — a
+// check whose failure mode is a pass is worth nothing until it has been seen to fail.
+// [[check-whose-failure-mode-is-a-pass]]
+section("4b — 🚨 CONNECTED BUT NOT ACTIVE: the instruction is SWITCH, not connect");
+{
+  const text = strip(renderToStaticMarkup(<ManualBridgePanel wallet={wallet("modular", { metamaskConnected: true })} />));
+  check("⭐⭐ tells the user to SWITCH to MetaMask", /Switch to MetaMask/i.test(text), text.slice(0, 100));
+  check("🚨 …and does NOT tell them to CONNECT what they have already connected",
+    !/Connect MetaMask/i.test(text));
+  check("⭐ …and says WHY — it is connected, another wallet is active",
+    /another wallet is active/i.test(text));
+  check("offers nothing to sign in this state either", !/Sign and bridge/i.test(text));
+  // 🚨 Same rule as 4a: a claim about money must not stand beside a control that is not offered.
+  check("⭐ …and does NOT assert the caps claim where there is no bridge control",
+    !/Agent spending caps do not apply/i.test(text));
+  check("⭐ …nor the stay-on-this-page warning",
     !/stay on this page until the burn confirms/i.test(text));
 }
 

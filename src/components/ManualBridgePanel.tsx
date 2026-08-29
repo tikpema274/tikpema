@@ -157,11 +157,21 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
     } catch (e) { setError(describeError(e)); setStatus(""); } finally { setBusy(false); }
   }
 
+  // ═══ 🚨 TWO STATES, TWO MESSAGES — they were one, and the one was WRONG for half of them ═════
+  // "Connect MetaMask" was shown to everyone who is not currently ON MetaMask, including users who
+  // HAVE connected it and are simply active on their passkey wallet. Telling them to connect what
+  // they already connected is an instruction that cannot succeed, and it reads as a broken app.
+  // ⭐ The discriminator is `metamaskConnected` (presence) vs `isMetaMask` (presence AND active) —
+  // see useWallet, which had to export the first before this branch was possible at all.
   if (!isMetaMask) {
     return (
       <div className="panel">
         <div className="panel-eyebrow">Bridge from your own wallet</div>
-        <div className="status">Connect MetaMask to bridge with your own key. The agent bridge is on the AI Agent page.</div>
+        <div className="status">
+          {w.metamaskConnected
+            ? "Switch to MetaMask to bridge with your own key — it is connected, but another wallet is active right now. The agent bridge is on the AI Agent page."
+            : "Connect MetaMask to bridge with your own key. The agent bridge is on the AI Agent page."}
+        </div>
       </div>
     );
   }
