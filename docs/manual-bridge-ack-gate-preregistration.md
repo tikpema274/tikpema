@@ -150,3 +150,61 @@ run against the fixed panel proves 2, 4 and 5 for a single fee.
 
 Full record, and the blind-spot class that hid it, in PROGRESS.md. Nothing above this line is
 amended.
+
+---
+
+# AMENDED PRE-REGISTRATION — written BEFORE the second run
+
+Predictions 2 and 4 are **restated in the operator's own words** below, because the first run showed
+the original phrasing was not specific enough to fail cleanly: "renders the exact fee and the exact
+net" was satisfied in spirit by a box that named neither, and only a human reading the screen caught
+it. Everything else from the original pre-registration stands unchanged; nothing above this line is
+amended.
+
+## PREDICTION 2 — restated
+
+> The disclosure shows **fee, net, ratio and amount — all four**, **above the accept control**, and
+> **NO band enum in the text**.
+
+Now asserted mechanically in two independent places, neither of which existed for the first run:
+- `verify-manual-bridge-copy.tsx` §6 **renders** `FeeDisclosureBox` with real numbers and requires
+  all four figures plus the absence of the enum. It also guards the general property — *at least
+  four distinct figures appear* — rather than one wording.
+- `npm run gate:disclosure` asserts the fixed copy is in the **served bundle** and the old copy is
+  gone, calibrated to FAIL against a pre-fix build.
+
+## PREDICTION 4 — restated
+
+> The ack token is **minted by the server and echoed back unchanged by the client** — the client
+> never computes, derives, or modifies it. **If the panel can produce a token the server would
+> accept without having been given one, the gate is bypassable.**
+
+⚠️ **This is a sharper claim than the original "server-minted and echoed", and it is only partly
+observable from a successful run.** A normal acceptance shows the client returning what it was
+given; it does not by itself show the client *could not* have produced one. What supports the
+stronger half:
+- `bridgeAckToken` is an **HMAC**, not a bare hash — its own header records that until v3 it was
+  `sha256(<public string>)`, recomputable by any caller from values it already held. The secret is
+  what makes the client unable to mint one.
+- The token binds **owner + destination + amount + band**, so it is not transferable between
+  wallets or amounts.
+- ⛔ **A live forgery attempt is NOT part of this run** and remains unproven live, exactly as the
+  original "what a pass will not prove" section states.
+
+## ⚠️ TWO CORRECTIONS TO THE RECORD
+
+1. **This document is `65c3821`, not `db668ba`.** `db668ba` is the v10 SDK probe pre-registration —
+   a different exercise entirely. The wrong commit was cited when restating the predictions, and is
+   corrected here so a later reader following the reference lands on the right pre-registration.
+2. **A message earlier in this exchange truncated at "4. the", and the truncation was denied when
+   first raised.** The denial was made in good faith and was wrong. Recorded because the *pattern*
+   matters more than the instance: the second time it was raised it was believed, and the missing
+   prediction was supplied rather than reconstructed from my own earlier wording. ⭐ **A guess at
+   what the operator meant, silently substituted, would have put words into a pre-registration —
+   the one document whose entire value is that its contents were fixed by the person who wrote
+   them, in advance.**
+
+## ⛔ THE GATE ON SPENDING
+
+The operator spends nothing until `npm run gate:disclosure` passes against production. A fee spent
+against an unshipped fix would waste the run a second time.
