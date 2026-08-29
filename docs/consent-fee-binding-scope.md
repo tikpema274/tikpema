@@ -5,6 +5,24 @@ live firing (`0x265be6d3…`), which measured the gap this document is about.
 
 ---
 
+> # 🚨 READ THIS BEFORE IMPLEMENTING ANYTHING BELOW
+>
+> `_quote-record.mjs` already **rejects a neighbouring design in writing**, and the two are separated
+> by exactly one property:
+>
+> | | the REJECTED design | this proposal |
+> |---|---|---|
+> | the re-price | **REPLACED** — the stored quote is used *instead of* re-pricing | **KEPT, unchanged** |
+> | the accepted number | **AUTHORIZES** the burn | **BOUNDS** it — a ceiling on consent |
+> | why it is safe | it is not — a stored client-facing value becomes load-bearing for consent | **authenticated by HMAC**, not trusted because stored |
+>
+> ⛔ **AN IMPLEMENTATION THAT DROPS THE RE-PRICE HAS WALKED INTO THE REJECTED DESIGN.**
+> The re-price is the only thing that knows the live fee, and this proposal *depends* on it: it
+> **compares** live against consented instead of **replacing** one with the other. Delete it and you
+> have rebuilt the thing `_quote-record.mjs` refused, with none of its reasoning re-examined.
+
+---
+
 ## 1. THE FINDING, AS MEASURED
 
 | | fee | arrives |
@@ -74,7 +92,7 @@ second change the manual path does not — making its recorded fields come from 
 
 ---
 
-## 3. 🚨 A NEIGHBOURING DESIGN IS ALREADY REJECTED IN WRITING — READ THIS FIRST
+## 3. THE REJECTED NEIGHBOUR, IN FULL (the headline above is the short form)
 
 `_quote-record.mjs` names this idea and refuses it:
 
