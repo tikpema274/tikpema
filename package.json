@@ -13,6 +13,7 @@
     "dev:vite": "vite",
     "gate:callshape": "node scripts/verify-call-shape.mjs",
     "gate:deployed": "node scripts/verify-deployed.mjs",
+    "gate:disclosure": "node scripts/verify-deployed-disclosure.mjs",
     "gate:deps": "node scripts/verify-runtime-deps.mjs",
     "gate:draft": "node scripts/verify-watch-promotion-gate.mjs --context deploy-preview",
     "gate:forgery": "node scripts/verify-ack-forgery.mjs",
