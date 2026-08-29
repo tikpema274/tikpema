@@ -1,5 +1,116 @@
 ---
 
+# ⛔ REFUTED — "nobody else does key sign-in → agent with a wallet at first login". The PRIMITIVE is the finding.
+
+**2026-08-29.** Read-only investigation, no build. The claim under test: *nobody else offers sign-in
+with a key you already have (passkey or MetaMask) where FIRST LOGIN gives you an agent with its own
+wallet, ready to use — no seed phrase, no manual wallet creation, no faucet step before the agent
+exists.* **It does not survive.** Tested as a claim, not assumed — this is the **fifth** time this
+week a category was called unoccupied, and the fifth time the reading was wrong.
+
+## ⭐⭐ 1. THE PRIMITIVE IS THE FINDING — not Bankr, not Griffain
+
+**Four vendors sell "sign in → agent has a wallet" as INFRASTRUCTURE:**
+
+| vendor | what it ships |
+|---|---|
+| [Coinbase Agentic Wallets](https://www.coinbase.com/developer-platform/discover/launches/agentic-wallets) | agent wallets as a CDP launch |
+| [Privy AI Agent Wallets](https://www.privy.io/ai) | a product line named for exactly this |
+| [Turnkey](https://docs.turnkey.com/products/embedded-wallets/features/agentic-wallets) | "End-User Delegated Agent Signing" |
+| [Cloudflare Wallets](https://blog.cloudflare.com/wallets/) | "the programmable wallet for the agentic Internet" |
+
+> ⭐⭐ **A COMBINATION FOUR VENDORS SHIP AS A BUILDING BLOCK WAS NEVER A DIFFERENTIATOR, AND ANY
+> PRODUCT CAN BUY IT.**
+
+**This is a stronger refutation than two competitors, and the difference is the point.** A competitor
+can be outbuilt — you ship faster, deeper, better. **A primitive cannot be outbuilt.** It is sold to
+everyone, including to whoever ships next week, and it gets cheaper and easier over time rather than
+harder. Naming a competitor invites a race; naming a primitive ends the argument. Anything resting on
+"they would have to build this" is refuted by a vendor invoice.
+
+## 2. THE PRODUCT-LEVEL FALSIFIERS, WITH THEIR LIMITS STATED
+
+Either one alone settles the claim; both are recorded with what they do **not** establish.
+
+- **[Bankr](https://docs.bankr.bot/faq/wallets/)** — the embedded wallet is **"Auto-created at
+  signup"** (Privy smart wallets, keys non-exportable by design). Agent works immediately: trade by
+  tweet or cast, natural-language commands executed on the spot. No seed phrase, no manual wallet
+  creation, no faucet step before the agent exists.
+  ⚠️ **LIMIT: sign-in is a SOCIAL ACCOUNT — X, Farcaster, Telegram, email — not a key you hold.**
+- **[Griffain](https://griffain.com/docs/wallets)** — *"When you sign in to Griffain, you
+  automatically get a wallet"* / *"Your Griffain account automatically comes with a wallet."* Agents
+  are the product.
+  ⚠️ **LIMIT 1: the sign-in method is UNREADABLE** — the docs never enumerate the options. This is
+  the single load-bearing unknown for the falsifier and it was NOT closed.
+  ⚠️ **LIMIT 2: three steps stand between first login and an agent acting** — *unlock your wallet →
+  deposit funds → buy energy*. That is a funding step before the agent works, so "ready to use" is
+  not satisfied here.
+
+## 3. ⚠️ WHAT SURVIVES IS AUTH METHOD ONLY — and it is the WEAK REMAINDER, not a narrowed win
+
+Two qualifiers in the original wording hold: Bankr's sign-in is social rather than a key, and
+Griffain gates the agent behind funding. So what is left of the claim is **passkey/MetaMask
+specifically as the authentication method** — and nothing about the agent-plus-wallet combination,
+which is the part that was supposed to be hard.
+
+> ⚠️ **RECORD IT AS THE WEAK REMAINDER.** Auth method is **the most easily copied part of the
+> claim**: Privy and Turnkey ship passkey sign-in as a config flag. A differentiator that a
+> competitor adopts by setting a boolean is not a differentiator; it is a default they have not
+> reached for yet.
+
+⛔ **Do not re-narrate this as "the claim was too broad, the narrow version stands."** The narrow
+version is about a login button. The broad version was about a capability, and the capability is
+commodity.
+
+## ⭐ THE METHOD — recorded because it is the correction to the repeated error
+
+The four earlier wrong "category is empty" readings all came from treating an absence of readings as
+a reading of absence. This run did not, and the specific refusals are the record:
+
+- **THE HARVESTS CANNOT ANSWER THIS, AND THE ANSWER THEY WOULD HAVE GIVEN WAS DECLINED.** Both
+  committed harvests **dropped `description` and `extensions`**, keeping only
+  `resource / payTo / network / amount / asset / scheme / extra.name` — they can classify only by URL
+  string. "Nothing in them is an agent platform" would have been a **filtered read wearing the
+  costume of a census**, and it was not made. For the record only: none of the seven named projects
+  appears among **1,609 distinct hostnames** (`watchtower-api.com` is a false match on "tower").
+  [[filtered-read-is-not-absence]]
+- **FOUR OF SEVEN PROJECTS WERE `NO URL FOUND`** — Arc Machina, BoArcpay, Arc Terminal, GigaWork.
+  No search hit resolves any of them. **I cannot confirm they exist under those names, let alone
+  that they lack the feature**, and nothing in this refutation rests on them.
+- **THREE SITES WERE UNREADABLE, AND ARE LOGGED AS UNREADABLE, NOT ABSENT:** `arclenz.xyz/ecosystem`
+  (app shell, zero project names), `arcindex.xyz` (app shell), `xylonet.xyz` (**HTTP 402**).
+  [[probe-must-discriminate-between-states]]
+- **THE REFUTATION RESTS ONLY ON THINGS ACTUALLY READ** — the four vendor pages, Bankr's docs and
+  Griffain's docs. Not one line of it depends on an unreadable site or a project I could not find.
+
+⭐ **THE DISCIPLINE, STATED: a claim is refuted by what you READ, never by what you failed to find.**
+The four wrong readings inverted that — they let a failed search stand in for a finished one. Here
+the failed searches are listed and excluded from the argument, which is why the conclusion holds
+despite four of seven targets being unlocatable.
+
+## ⚠️ ONE PREMISE CORRECTED
+
+**Six of the seven "projects already in the record" are not in the record.** Only XyloNet appears —
+`netlify/functions/_vault.mjs:86`, an ERC-4626 vault by ForgeLabs — with no onboarding data at all.
+Arc Machina, BoArcpay, FlowFi, Arc Terminal, GigaWork and Tower appear nowhere in the repo. Also
+read: [`arc.io/ecosystem`](https://www.arc.io/ecosystem) renders 99+ organisations but is Circle's
+**partner** directory (Aave, Chainlink, MetaMask, Kraken) — the wrong population, and none of the
+seven is in it. [FlowFi](https://flowfi-three.vercel.app/) reads partially: CTA is `"Connect
+Wallet"`, so you bring the key, the wallet is **not** provisioned, and there is no agent evidence.
+
+## WHAT THIS DOES NOT TOUCH
+
+The disclosure layer. PROGRESS's existing read — *"Everyone builds what an agent can do; almost
+nobody builds proof it cannot rob you. That gap is Tikpema's actual differentiator — not the agent,
+the disclosure layer"* — is **unaffected and is now the load-bearing one**, having lost the
+onboarding claim that sat beside it. ⚠️ That passage's own list is annotated in place: its
+"NONE documents a passkey wallet" clause is scoped `per that write-up` and is a filtered read of one
+hackathon summary, not a survey.
+
+⛔ **No build, no deploy.** Read-only investigation.
+
+---
+
 # ⭐⭐ SIGNED IN PRODUCTION — the v10 bump has its first production evidence, and the probe's own defect is the better finding
 
 **2026-08-29.** `scripts/dd/probe-v10-signmessage.mjs` (`79eb74d`) ran against prod and returned
@@ -13579,6 +13690,15 @@ escrow, treasury rebalance, prediction-market capital. **Per that write-up, NONE
 wallet, multi-agent spending caps/kill switches, an audit trail of agent spend, x402-paid research, or
 ERC-4626 owner-power inspection. Everyone builds what an agent *can do*; almost nobody builds proof it
 *cannot rob you*. That gap is Tikpema's actual differentiator — not the agent, the disclosure layer.
+
+> ⛔ **CORRECTED 2026-08-29 — the `passkey wallet` clause above no longer carries weight.** "NONE
+> documents a passkey wallet" is scoped **`per that write-up`**: it is a filtered read of ONE
+> hackathon summary, not a survey, and the onboarding combination it implies was differentiating has
+> since been **REFUTED** — Coinbase, Privy, Turnkey and Cloudflare all sell "sign in → agent has a
+> wallet" as a PRIMITIVE. See the 2026-08-29 entry at the top of this file. **The disclosure-layer
+> conclusion in this paragraph is unaffected and is now the load-bearing one**; the spending-cap,
+> kill-switch, audit-trail and owner-power items are untested by that refutation and stand as
+> written, still scoped to that write-up.
 
 ### ARCENT (`github.com/cutepawss/arcent`) — claim UNSUPPORTED. Not a competitor.
 Claims *"The first x402 implementation on Arc Network with Pay-on-Success Protection"* (Gemini
