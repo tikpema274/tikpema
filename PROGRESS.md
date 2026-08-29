@@ -62,6 +62,42 @@ which is the part that was supposed to be hard.
 version is about a login button. The broad version was about a capability, and the capability is
 commodity.
 
+## ✅ CLOSED FOR COMPLETENESS — Griffain signs in WITH A KEY. The narrow version is occupied too.
+
+The one unknown left open above is now read. **`griffain.com/sign-in` rendered real content** (not an
+app shell) and offers exactly two options:
+
+| method | exact label |
+|---|---|
+| email | `Send Verification Code` |
+| **key you already hold** | **`Sign In With Wallet`** |
+
+⚠️ **The specific wallet types are NOT stated on that page and are NOT inferred here.** No screenshot,
+no marketing page, no reasoning from what Privy typically offers — inferring it would be the exact
+shape the method section below corrects. What is established is only this: **key-based sign-in is
+offered.** That is enough, and nothing more is claimed.
+
+**PRE-REGISTERED BEFORE THE READ** (fixed by the operator in advance, so this cannot become a
+re-litigation):
+
+> - Griffain signs in with a key (passkey/wallet) → **even the narrow auth-method version is
+>   occupied. The claim is fully dead.**
+> - Griffain signs in with social/email only → the narrow version survives as a login button, which
+>   the record already marks as the weak remainder, **NOT as a differentiator regained.**
+
+**OUTCOME: the first branch.** Combined with what was already read — *"Your Griffain account
+automatically comes with a wallet"* — Griffain occupies key sign-in **and** an auto-provisioned
+wallet **and** agents. The only part of the original claim it does not meet is *ready to use*, since
+the agent is still gated behind unlock → deposit → buy energy.
+
+> ⛔ **THIS CHANGES NOTHING ABOUT THE REFUTATION, AND NEITHER OUTCOME COULD HAVE.** The four vendors
+> settle the category independently; the verdict never turned on Griffain. This read was run for
+> completeness only. **Neither branch reopens the broad claim** — it was dead from the primitive
+> before this page was fetched, and a login-button finding cannot resurrect a capability claim.
+
+⚠️ Section 3 above stands exactly as written, with one word weakened: the auth-method remainder is
+not merely *easily copied*, it is **already occupied**.
+
 ## ⭐ THE METHOD — recorded because it is the correction to the repeated error
 
 The four earlier wrong "category is empty" readings all came from treating an absence of readings as
