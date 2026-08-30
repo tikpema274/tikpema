@@ -223,6 +223,8 @@ that *"editing the signature-covered deadline would revert on SIGNATURE verifica
 contract additionally requires `msg.sender == fromAddress`, and whether an EOA satisfies whatever it
 does require, is **not established anywhere in this repo**.
 
+> # ✅ SETTLED 2026-08-30 — **YES, AN EOA CAN.** See the RESULTS section at the end of this document.
+
 ⭐ **Settle it exactly the way `spike-step4c` settled the deadline: a differential `eth_call`.** Build
 the calldata for an EOA, `eth_call` it from that EOA at the current head, and read the revert. No
 broadcast, no gas, no signature. A `DeadlineExpired()`-style named revert discriminates; a success
@@ -364,9 +366,17 @@ and the decoded floor **from the same quote object**, and have the **client deco
 of the calldata it is about to sign** and compare it to the number on screen. That makes the
 disclosure **self-verifying** rather than **attested** — a check the client can perform *for itself*,
 which the bridge's client could not be given.
-⚠️ **The cost is real and must be weighed, not waved through:** it puts the adapter's `swap.execute`
-tuple shape in the browser — a second source of truth for an ABI. **Flagged as a decision, not
-recommended by default.**
+⚠️ **The cost is real:** it puts the adapter's `swap.execute` tuple shape in the browser — a second
+source of truth for an ABI.
+
+> 🚨 **UPGRADED FROM "a decision" TO "REQUIRED", 2026-08-30, by a measurement.** Probe C in RESULTS
+> shows the adapter does **NOT** bind the payer to the quote's `fromAddress`: a payload bound to
+> address X, executed from address Y, **succeeds — pulling from Y and delivering to X.** So the
+> calldata alone decides **who receives**, while the signature decides **who pays**, and they need
+> not be the same person. ⛔ **MetaMask shows the user an opaque call to the adapter; the beneficiary
+> is not visible in it.** Client-side decoding of the beneficiary is therefore the ONLY thing standing
+> between the user and a payload that spends their funds into someone else's wallet — the exact job
+> the manual send's confirm step does by showing the address *as we parsed it*. **Not optional.**
 
 ## 4c. A DISCLOSURE GATE (blocking, no token) — ⭐ **YES, and this is the part that earns its place.**
 
@@ -446,7 +456,10 @@ hardcoded to `PermitType.NONE` because the SCA had no alternative. A permit path
 approve + swap into **one signature and one transaction**, and **the partial-completion window would
 not exist to manage.**
 
-⚠️ **UNPROVEN, and two separate things must be checked — do not conflate them:**
+> # ✅ SETTLED 2026-08-30 — **EIP-2612 `permit` IS SUPPORTED**, established by probing the token, not
+> by inferring from EIP-3009. See RESULTS.
+
+⚠️ **UNPROVEN when written, and two separate things had to be checked — never conflate them:**
 1. **Does Arc USDC support EIP-2612 `permit`?** ⭐ The repo has confirmed FiatTokenV2 supports
    **EIP-3009 `transferWithAuthorization`** on Arc (the vanilla x402 work). **That is a different
    function.** 2612 is adjacent, not implied. [[arc-usdc-supports-eip3009-vanilla-x402]]
@@ -467,11 +480,108 @@ baseline.
 - ~~**That a manual swap can run at all today.**~~ ✅ **SETTLED 2026-08-30** — the route is live in
   both directions (§0). ⚠️ But the design itself is still **unexercised**: routing being available is
   the precondition, not the proof. Everything below remains open.
-- **That an EOA can be `msg.sender` to the adapter** (§2). Named, with a free read-only instrument.
-- **That EIP-2612 permit works on Arc USDC** (§5). Named, with the adjacent-but-different finding it
-  must not be mistaken for.
+- ~~**That an EOA can be `msg.sender` to the adapter** (§2).~~ ✅ **SETTLED — yes**, and observed to
+  completion under state overrides, not merely inferred. See RESULTS.
+- ~~**That EIP-2612 permit works on Arc USDC** (§5).~~ ✅ **SETTLED — the selector is dispatched and
+  the contract names the standard in its own revert.** ⚠️ Still open: whether the ADAPTER accepts a
+  non-zero `permitType`. See RESULTS.
 - ~~**What Circle's default slippage actually is** (§1).~~ ✅ **MEASURED at 3.00%** — so the copy is
   an **overclaim**, not an accidentally-true one. ⚠️ Whether 3% is a fixed Circle default or a
   property of this route (`lifi`/`fly`) is **still open**, and it is why 3% must not go on screen.
   Recorded in `docs/swap-slippage-copy-overclaim.md`, not here.
 - **Any code.** Nothing was built, nothing was run, no quote was fetched, no credential was read.
+
+
+---
+
+# ✅ RESULTS — 2026-08-30: BOTH INSTRUMENTS RUN. Read-only, nothing signed, nothing spent.
+
+`eth_call` and quote fetches only. **No transaction was signed or submitted, no gas was paid, and the
+chain was not modified.** State overrides exist only inside a simulation.
+
+## ⭐ INSTRUMENT 1 — an EOA **CAN** be `msg.sender`. The manual swap is not dead.
+
+### Stage 1: the 2×2, to separate an identity rejection from a funds shortfall
+
+The confound was named before the probe: an unfunded EOA reverts for **funds** reasons, which is
+indistinguishable from an identity rejection unless the check ORDER is established. State at probe
+time: agent SCA holds **13 USDC** with a **22 USDC** standing allowance to the adapter — funded and
+approved, so it can reach the end.
+
+| | called from **SCA** (funded, approved) | called from **EOA** (0 allowance) |
+|---|---|---|
+| quote bound to **SCA** | **A → SUCCESS** *(control: reaches the end)* | **D →** revert `"ERC20: transfer amount exceeds allowance"` |
+| quote bound to **EOA** | **C → SUCCESS** | **B →** revert `"ERC20: transfer amount exceeds allowance"` |
+
+⭐ **B and D fail at the TOKEN, not at the adapter.** The EOA was never rejected on identity — it
+reached USDC's `transferFrom` and was stopped by the allowance, which is exactly what an `approve`
+supplies.
+
+### Stage 2: closing the residual — the EOA run to COMPLETION
+
+Stage 1 left one honest gap: B never got past the token pull, so a check living *after* it would be
+unexercised. Closed with `eth_call` state overrides, **calibrated both ways** so the override is
+proven to be what moved the outcome:
+
+| | overrides | result |
+|---|---|---|
+| **B0** | none | revert `"ERC20: transfer amount exceeds allowance"` |
+| **B1** | native balance only | revert `"ERC20: transfer amount exceeds allowance"` ← ⭐ *isolates the variable: balance alone does NOT flip it* |
+| **B2** | balance **+ allowance** | ✅ **SUCCESS** |
+
+> ⭐⭐ **VERDICT: an address with ZERO bytes of code, holding funds and an allowance, executes the
+> swap calldata to completion.** The sole blocker is the allowance. **A MetaMask EOA can do this.**
+
+⚠️ Two supporting facts established on the way, both reusable: **Arc USDC's `balanceOf` IS the native
+balance** (SCA: 13 native @18dp == 13 ERC-20 @6dp — the recorded two-views property, now confirmed
+from the token side), and **USDC's `allowance` mapping is at storage slot 10**, located empirically
+against a known value rather than assumed from a layout.
+
+### 🚨 AND A SECURITY FINDING FELL OUT OF PROBE C — it changes §4b
+
+**C succeeded.** A payload bound to one address, executed from another, **works** — pulling from
+`msg.sender` and delivering to the payload's `beneficiary`. **The adapter does not bind the payer to
+the quote's `fromAddress`.** So the calldata decides who RECEIVES and the signature decides who PAYS,
+and they need not be the same party. ⛔ **MetaMask cannot show this** — the user sees an opaque call
+to the adapter. §4b's client-side beneficiary decode is upgraded from *a decision* to **required**.
+
+## ⭐⭐ INSTRUMENT 2 — Arc USDC supports **EIP-2612 `permit`**. Established by probing, not inferred.
+
+The trap was that EIP-3009 is confirmed on Arc and EIP-2612 is a different standard. So `permit`
+itself was probed, with **three-way calibration** and every selector **computed**, never recalled.
+
+| probe (`eth_call`, invalid args) | USDC | EURC |
+|---|---|---|
+| **KNOWN-ABSENT control** (`tikpemaNoSuchFn__control`, `0x453ea8a0`) | revert **EMPTY** | revert **EMPTY** |
+| **KNOWN-PRESENT** `transferWithAuthorization` [3009] | `"FiatTokenV2: authorization is expired"` | same |
+| **CANDIDATE** `permit` [2612], expired deadline | **`"FiatTokenV2: permit is expired"`** | same |
+| **CANDIDATE** `permit` [2612], valid deadline, null sig | **`"EIP2612: invalid signature"`** | same |
+
+Corroborating views, both answering with well-formed data on both tokens: `nonces(address)` → `0`
+(a **2612** view — EIP-3009 uses `authorizationState`, not `nonces`), and `DOMAIN_SEPARATOR()` → a
+real, token-specific hash. `version()` is `"2"` on both.
+
+> ⭐ **VERDICT: `permit` is dispatched and executes its own body. The contract names the standard in
+> its own revert — `EIP2612`.** And the second message proves the path reaches **`ecrecover`** with a
+> valid deadline — precisely the mechanism that rejects an SCA's ERC-1271 signature and **accepts an
+> EOA's**. The §5 upside is real: the constraint that forced two transactions is an agent-wallet
+> constraint that does not apply to a MetaMask user.
+
+### ⚠️ ONE INSTRUMENT FAILED, AND IT MUST NOT BE CITED
+
+A bytecode selector scan reported **"not present" for EVERY selector — including `nonces`,
+`DOMAIN_SEPARATOR` and `authorizationState`, which demonstrably answer.** Arc's tokens are 1798 bytes
+with no literal dispatch table and no EIP-1967 slot, so the scan cannot see what is there. ⛔ **Its
+"no" for `permit` is not evidence of absence and must never be quoted as such.** The live-call
+instrument is the only one that worked, which is why the known-absent control was necessary: without
+it, "absent" would have had no known shape. [[refuted-by-what-you-read-not-what-you-failed-to-find]]
+
+## ⛔ WHAT REMAINS OPEN — the permit upside is NOT yet a green light
+
+- 🚨 **Whether the ADAPTER accepts a non-zero `permitType`.** Instrument 2 proves the *token* supports
+  `permit`. The one-transaction shape also needs `_swap.mjs`'s hardcoded
+  `tokenInputs[].permitType = 0` (`PermitType.NONE`) to have a working non-zero counterpart, with a
+  `permitCalldata` encoding the adapter understands. **That is a separate question about a different
+  contract and it was not probed.** ⚠️ Do not read instrument 2 as settling it.
+- **Whether a real MetaMask wallet signs it.** Every result here is `eth_call`. A simulation that
+  succeeds is not a signature that lands.
