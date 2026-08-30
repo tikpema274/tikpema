@@ -10,6 +10,7 @@ import DcaPanel from "./components/DcaPanel";
 import BridgePanel from "./components/BridgePanel";
 import ManualBridgePanel from "./components/ManualBridgePanel";
 import ManualSendPanel from "./components/ManualSendPanel";
+import ManualSwapPanel from "./components/ManualSwapPanel";
 import VaultPanel from "./components/VaultPanel";
 import NanopaymentPanel from "./components/NanopaymentPanel";
 import UnifiedBalancePanel from "./components/UnifiedBalancePanel";
@@ -82,6 +83,11 @@ export default function App() {
     // hid a 22-day outage on #/dca (src/App.tsx records it).
     case "send-manual":
       page = <ManualSendPanel wallet={wallet} />;
+      break;
+    // ⭐ LINKED FROM SwapPanel, never only reachable by typing the hash — a live route nothing
+    // links to is the state that hid #/dca for 22 days while reading as shipped.
+    case "swap-manual":
+      page = <ManualSwapPanel wallet={wallet} />;
       break;
     case "swap":
       page = <SwapPanel wallet={wallet} />;

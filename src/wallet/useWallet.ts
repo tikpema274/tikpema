@@ -637,6 +637,13 @@ export function useWallet() {
     // stub that threw would look like a capability the panel could offer. The panel checks
     // `activeKind === "metamask"` and says so instead.
     manualBridgeBurn: isMetaMask ? mmWallet!.manualBridgeBurn : undefined,
+    // ⭐ SAME `undefined`-ELSEWHERE RULE, for the same reason: the manual swap signs raw
+    // server-built calldata with the user's own key, which the passkey path has no equivalent for.
+    manualSwap: isMetaMask ? mmWallet!.manualSwap : undefined,
+    waitForSwapReceipt: isMetaMask ? mmWallet!.waitForSwapReceipt : undefined,
+    // ⭐ EURC on the MetaMask path. `usdcBalance` above has an agent-side twin; EURC did not exist
+    // here at all, so a panel that spends EURC could not show what the user holds.
+    refreshEurcBalance: isMetaMask ? mmWallet!.refreshEurcBalance : undefined,
     // ⭐ SAME `undefined`-ELSEWHERE RULE as manualBridgeBurn, for the same reason: the manual send
     // signs with the user's own key, and a stub that threw would look like a capability the panel
     // could offer. The panel checks `activeKind === "metamask"` and says so instead.

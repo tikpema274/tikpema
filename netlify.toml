@@ -310,6 +310,14 @@
   to = "/.netlify/functions/user-bridge-start"
   status = 200
 
+# The USER-SIGNED swap's only server call. Same posture as user-bridge-start: the owner comes from
+# the SESSION, agent caps deliberately do NOT apply (the user's own key, own funds), and nothing is
+# written — there is no receipt and therefore no promote twin.
+[[redirects]]
+  from = "/api/user-swap-start"
+  to = "/.netlify/functions/user-swap-start"
+  status = 200
+
 [[redirects]]
   from = "/api/user-bridge-promote"
   to = "/.netlify/functions/user-bridge-promote"

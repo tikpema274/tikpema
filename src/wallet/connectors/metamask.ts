@@ -184,6 +184,21 @@ export async function connectMetaMask() {
     })) as bigint;
   }
 
+  // ⭐ EURC — a SECOND, DISTINCT balance, never summed with USDC (different unit, and EURC != $1).
+  // The agent path gets this from /api/my-wallet; the MetaMask path had no EURC read at all, so a
+  // panel that swaps EURC could not render the side the user is spending from.
+  // ⚠️ NOT wired into `ensureBalance`: gas on Arc is USDC, so an EURC spend still needs USDC
+  // headroom. The two are checked separately and deliberately.
+  async function refreshEurcBalance(): Promise<string> {
+    const raw = (await publicClient.readContract({
+      address: CONTRACTS.EURC as `0x${string}`,
+      abi: BALANCE_OF_ABI,
+      functionName: "balanceOf",
+      args: [address],
+    })) as bigint;
+    return Number(formatUnits(raw, USDC_DECIMALS)).toFixed(2); // EURC is 6-dp on Arc, like USDC
+  }
+
   // Formatted balance string (e.g. "12.50"), matching the modular path.
   async function refreshBalance(): Promise<string> {
     const raw = await readBalanceRaw();
@@ -438,6 +453,77 @@ export async function connectMetaMask() {
     return burnHash;
   }
 
+  // ══ USER-SIGNED SWAP — exact-amount approve (only if short) then the swap ════════════════════
+  //
+  // ⭐ THE SAME SHAPE AS `manualBridgeBurn` ABOVE, DELIBERATELY. Allowance read → conditional
+  // approve → wait → send server-built calldata. That shape runs in production on two paths already
+  // (this file's bridge, and `agentSwap` server-side), which is exactly why it was chosen over the
+  // one-transaction permit route — see docs/manual-swap-build-scope.md Part 1.
+  //
+  // 🚨 EXACT-AMOUNT APPROVE, NEVER STANDING. `agentSwap` approves a STANDING allowance bounded by
+  // `swapCapUsdc()`; that bound does not exist here, because agent caps do not apply to a user
+  // spending their own funds. An unbounded-in-time allowance to the adapter — an UPGRADEABLE proxy
+  // with a live owner() — is not something to leave on a user's own wallet. Its rationale is also
+  // absent: Design-2's standing allowance exists to amortise an approve-wait against Netlify's 10s
+  // sync ceiling, and a browser has no such budget.
+  //
+  // 🚨 NOTHING IS RECORDED BETWEEN THE TWO TRANSACTIONS, and the order matters — identical to the
+  // bridge. An approve that lands with a swap that does not leaves an ALLOWANCE and no movement:
+  // benign, self-healing (the next attempt re-reads it and skips the approve), and never to be
+  // recorded as a swap. The two txs go to DIFFERENT contracts (USDC vs the adapter) and carry
+  // different selectors, so an approve hash can never be mistaken for a swap hash.
+  //
+  // ⛔ THE CALLDATA IS NOT BUILT HERE and its beneficiary is NOT taken on trust — the caller decodes
+  // it (decodeAndVerifySwap) and refuses to reach this function at all if the output would land
+  // anywhere but this wallet. See docs/swap-adapter-payer-beneficiary-unbound.md.
+  async function manualSwap({
+    adapter, tokenIn, amountMinor, calldata, onStatus,
+  }: {
+    adapter: string; tokenIn: string; amountMinor: bigint;
+    calldata: `0x${string}`; onStatus?: (s: string) => void;
+  }): Promise<{ swapHash: `0x${string}`; approveHash: `0x${string}` | null }> {
+    const allowance = (await publicClient.readContract({
+      address: tokenIn as `0x${string}`,
+      abi: [{ type: "function", name: "allowance", stateMutability: "view",
+              inputs: [{ name: "o", type: "address" }, { name: "s", type: "address" }],
+              outputs: [{ type: "uint256" }] }],
+      functionName: "allowance",
+      args: [address as `0x${string}`, adapter as `0x${string}`],
+    })) as bigint;
+
+    let approveHash: `0x${string}` | null = null;
+    if (allowance < amountMinor) {
+      onStatus?.("Approve the swap to move your tokens…");
+      approveHash = await walletClient.writeContract({
+        address: tokenIn as `0x${string}`,
+        abi: [{ type: "function", name: "approve", stateMutability: "nonpayable",
+                inputs: [{ name: "s", type: "address" }, { name: "v", type: "uint256" }],
+                outputs: [{ type: "bool" }] }],
+        functionName: "approve",
+        args: [adapter as `0x${string}`, amountMinor], // EXACT amount. Never max-uint, never a cap.
+      });
+      // The allowance must be REAL before spending against it. ⚠️ Nothing is recorded here.
+      await publicClient.waitForTransactionReceipt({ hash: approveHash });
+    }
+
+    onStatus?.("Sign the swap…");
+    const swapHash = await walletClient.sendTransaction({
+      account: address as `0x${string}`,
+      to: adapter as `0x${string}`,
+      data: calldata,
+    });
+    return { swapHash, approveHash };
+  }
+
+  // ⭐⭐ DELIBERATELY SEPARATE FROM `manualSwap`, NOT FOLDED INTO IT. If the receipt wait lived
+  // inside manualSwap, a wait that threw would take the SWAP HASH down with it — the caller would
+  // have money moved and no identifier for the transaction that moved it. Returning the hash first
+  // and waiting second means a failed wait costs a display, never the record of the spend.
+  // Same discipline as the manual bridge's split between signing and promoting.
+  async function waitForSwapReceipt(hash: `0x${string}`) {
+    return publicClient.waitForTransactionReceipt({ hash });
+  }
+
   // Sign a plain message with the EOA (personal_sign). Used as the session auth
   // proof — the server verifies it off-chain via ecrecover. Moves no funds.
   async function signMessage(message: string) {
@@ -453,6 +539,9 @@ export async function connectMetaMask() {
     fundAgentWallet,
     sendUsdcManual,
     manualBridgeBurn,
+    manualSwap,
+    waitForSwapReceipt,
+    refreshEurcBalance,
     signMessage,
     // EIP-1193 has no programmatic disconnect; the user manages this in the
     // extension. No-op to satisfy the wallet shape.

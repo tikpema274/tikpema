@@ -87,7 +87,9 @@
     "test:vault": "node --experimental-test-module-mocks scripts/verify-vault.mjs && node --experimental-test-module-mocks scripts/verify-vault-degraded.mjs && npx tsx scripts/verify-vault-panel-copy.tsx",
     "test:watch": "node --experimental-test-module-mocks scripts/verify-strong-read-watch.mjs && node scripts/verify-sweeper-heartbeat.mjs",
     "test:wedge": "node --experimental-test-module-mocks scripts/verify-blobs-handle-wedge.mjs",
-    "test:swapbeneficiary": "node scripts/verify-swap-beneficiary.mjs"
+    "test:swapbeneficiary": "node scripts/verify-swap-beneficiary.mjs",
+    "test:swapdecode": "npx tsx scripts/verify-swap-calldata-decode.ts",
+    "test:manualswapcopy": "npx tsx scripts/verify-manual-swap-copy.tsx"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -134,6 +136,8 @@
     "test:manualbridgecopy",
     "test:userbridge",
     "test:swapbeneficiary",
+    "test:swapdecode",
+    "test:manualswapcopy",
     "test:dcareason",
     "test:ddrail",
     "test:disclosure",

@@ -79,10 +79,16 @@ export default function SwapPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   return (
     <div className="plane">
       <div className="panel-eyebrow">Swap</div>
-      <h2>Swap USDC ↔ EURC</h2>
+      {/* ⭐ THE TITLE CARRIES THE DISTINCTION, not just body text. Two swap forms — one capped,
+          one not — is a materially higher confusion risk than bridge or send ever had. */}
+      <h2>Swap from your agent wallet</h2>
       <div className="sub">
-        Convert between USDC and EURC on Arc — from your wallet, gasless. Swaps run
-        within your per-transaction and daily safety caps.
+        Convert between USDC and EURC on Arc — from your agent wallet, gasless. Swaps run
+        within your per-transaction and daily safety caps.{" "}
+        <button className="linkbtn" onClick={() => (window.location.hash = "/swap-manual")}>
+          Swap from your own wallet instead
+        </button>{" "}
+        — signed with your own key, where those caps do not apply.
       </div>
 
       <div className="status" style={{ marginTop: 0, marginBottom: 18 }}>

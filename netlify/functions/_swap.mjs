@@ -213,6 +213,92 @@ export function assertSwapBeneficiary({ tokens, tokenInAddress, tokenOutAddress,
 // entry's beneficiary (where leftover/refunded input would go) is also a money destination. It is out
 // of scope for this assert, which was scoped to the output leg. Recorded so the gap is visible.
 
+// ══ ⭐ THE B1 EXTRACTION, LIFTED SO A USER-SIGNED PATH CAN REUSE IT ══════════════════════════════
+// `agentSwap` used to hold this inline. It is lifted VERBATIM — same quote call, same SDK-verbatim
+// transform, same deadline guard, same beneficiary assert, same hard adapter assert — so the
+// user-signed swap and the agent swap are byte-identical in how they build a swap. The alternative
+// (reimplementing the tuple for the browser path) is exactly the drift `bridgeCallData` was exported
+// to prevent: "a MetaMask burn must be byte-identical to the agent's, and the only way to guarantee
+// that is to build it here — once".
+//
+// ⛔ IT SIGNS NOTHING AND SUBMITS NOTHING. The viem adapter is constructed with a provider stub that
+// THROWS if called, and `getCallData` is pure encodeFunctionData. This returns bytes; who signs them
+// is the caller's business.
+//
+// ⚠️ `walletAddress` is the address the payload is built FOR. On the agent path that is the agent's
+// SCA; on the user path it is the caller's own EOA, resolved from the session — never from a body.
+export async function buildSwapCallData({ walletAddress, tokenIn, tokenOut, amountIn }) {
+  const tIn = String(tokenIn).toUpperCase();
+  const tOut = String(tokenOut).toUpperCase();
+  const tokenInAddress = CONTRACTS[tIn];
+  const tokenOutAddress = CONTRACTS[tOut];
+  if (!tokenInAddress || !tokenOutAddress) throw new Error(`unsupported swap ${tIn}->${tOut} (USDC/EURC only)`);
+  const kitKey = process.env.KIT_KEY;
+  if (!kitKey) throw new Error("Missing KIT_KEY (server env) — required for the swap quote");
+  const amountBase = toMinor(amountIn);
+
+  const res = await fetch(SWAP_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${kitKey}` },
+    body: JSON.stringify({ tokenInAddress, tokenOutAddress, tokenInChain: "Arc_Testnet", fromAddress: walletAddress, toAddress: walletAddress, amount: amountBase.toString() }),
+  });
+  if (!res.ok) throw new Error(`createSwap HTTP ${res.status}: ${(await res.text()).slice(0, 180)}`);
+  const body = await res.json();
+  const q = body?.data ?? body;
+  const T = q?.transaction;
+  const EP = T?.executionParams;
+  if (!EP || typeof T.signature !== "string") throw new Error("createSwap response missing executionParams/signature");
+
+  const deadlineMs = Number(EP.deadline) * 1000;
+  if (!Number.isFinite(deadlineMs) || deadlineMs <= Date.now() + DEADLINE_SAFETY_MS) {
+    throw new Error(`swap quote deadline too close (${EP.deadline}) — refusing to issue calldata`);
+  }
+  assertSwapBeneficiary({ tokens: EP.tokens, tokenInAddress, tokenOutAddress, walletAddress });
+
+  const executeParams = {
+    instructions: EP.instructions.map((i) => ({ target: i.target, data: i.data, value: BigInt(i.value), tokenIn: i.tokenIn, amountToApprove: BigInt(i.amountToApprove), tokenOut: i.tokenOut, minTokenOut: BigInt(i.minTokenOut) })),
+    tokens: EP.tokens.map((t) => ({ token: t.token, beneficiary: t.beneficiary })),
+    execId: BigInt(EP.execId),
+    deadline: BigInt(EP.deadline),
+    metadata: EP.metadata,
+  };
+  const tokenInputs = [{ permitType: 0, token: tokenInAddress, amount: amountBase, permitCalldata: "0x" }];
+
+  const swapAdapter = await createViemAdapterFromProvider({
+    provider: { request: async () => { throw new Error("read-only swap adapter: provider must never be called"); } },
+    getPublicClient: () => publicClient(),
+    capabilities: { addressContext: "developer-controlled" },
+  });
+  const prepared = await swapAdapter.prepareAction(
+    "swap.execute",
+    { executeParams, tokenInputs, signature: T.signature, inputAmount: amountBase, tokenInAddress },
+    { chain: resolveChainIdentifier("Arc_Testnet"), address: walletAddress }
+  );
+  const cd = typeof prepared?.getCallData === "function" ? prepared.getCallData() : null;
+  if (!cd || String(cd.to).toLowerCase() !== SWAP_ADAPTER) {
+    throw new Error(`B1 adapter assert failed — calldata.to=${cd?.to ?? "none"} != ${SWAP_ADAPTER}; refusing to issue calldata`);
+  }
+
+  // The OUTPUT LEG's floor, selected BY TOKEN. ⛔ Never instructions[0] — that is the FEE leg, whose
+  // minTokenOut is 0. The client re-derives this from the bytes independently; this copy is for the
+  // disclosure, and the two are compared by scripts/verify-swap-calldata-decode.ts.
+  const outLegs = EP.instructions.filter((i) => String(i.tokenOut).toLowerCase() === tokenOutAddress.toLowerCase());
+  const floors = [...new Set(outLegs.map((i) => String(i.minTokenOut)))];
+  if (floors.length !== 1) throw new Error(`cannot determine the guaranteed output (${floors.length} candidate floors) — refusing to issue calldata`);
+
+  return {
+    adapter: cd.to,
+    calldata: cd.data,
+    tokenInAddress,
+    tokenOutAddress,
+    amountMinor: amountBase.toString(),
+    minTokenOut: floors[0],
+    estimatedAmount: q?.estimatedAmount ?? null,
+    fees: q?.fees ?? null,
+    deadline: Number(EP.deadline),
+  };
+}
+
 // Inline-confirm timed out but the SWAP IS SUBMITTED — a distinct signal (NOT a failure) that carries
 // the authoritative circleId so a caller with an async net (dca-tick's id-reconcile) can poll
 // getTransaction({id}) to COMPLETE next tick. Thrown ONLY from the swap-confirm wait (confirm:true), never
