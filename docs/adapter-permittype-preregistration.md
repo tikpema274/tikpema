@@ -86,3 +86,55 @@ the *only* possible source of authorization.
   builds the token-input by hand. A working adapter would make the one-transaction shape *available*,
   not *wired*.
 - **It is one route, one pair, one moment**, on testnet.
+
+---
+
+# ✅ RESULT — 2026-08-30: **THE ADAPTER ACCEPTS `permitType = EIP2612`.**
+
+Read-only: a locally generated throwaway key plus `eth_call`. **Nothing was broadcast, nothing
+submitted, no gas.** Nothing above this line is amended.
+
+## The de-confounders held, in order — so the result is attributable
+
+| | | |
+|---|---|---|
+| **CALIBRATION A** — computed EIP-712 domain vs live `DOMAIN_SEPARATOR()` | `0x36119152…c8c6b0` vs `0x36119152…c8c6b0` | ✅ **MATCH** |
+| **CALIBRATION B** — `permit()` called DIRECTLY on the token with that signature | **SUCCESS** | ✅ signature, nonce (`0`), deadline and domain all valid **against the very function the adapter would call** |
+| `permitCalldata` length | **160 bytes** = 5 words | ✅ exactly the SDK layout |
+
+## The measurement, with both pre-registered controls
+
+| | result |
+|---|---|
+| **CONTROL** `permitType 0` + allowance override | ✅ **SUCCESS** *(as predicted)* |
+| **CONTROL** `permitType 0`, **no** allowance | ✅ revert `"ERC20: transfer amount exceeds allowance"` *(as predicted)* |
+| ⭐ **PROBE** `permitType 1` + valid permit, **NO allowance override** | ⭐⭐ **SUCCESS** |
+
+⭐ **The second control is what makes the probe mean something.** Same calldata, same caller, same
+overrides — remove only the permit and it fails for want of authorization. **So the permit is what
+authorized the pull**, not a leftover allowance and not the balance override.
+
+> ⭐⭐ **VERDICT, per the pre-registered table: the adapter accepts the permit shape and authorizes
+> through it. The one-transaction shape is REAL at the simulation level — approve + swap can collapse
+> into a single user action, DELETING the partial-completion window of `docs/manual-swap-scope.md` §5
+> rather than managing it.**
+
+## ⚠️ ONE OUTCOME FIRED FIRST, AND IT WAS MINE — recorded rather than quietly fixed
+
+The first run returned **"THREW BEFORE eth_call — adapter assert failed"** on **all three** cases,
+including the control that was already known to succeed. Per the pre-registered table that is
+*"my construction failed. **Not an adapter result**, and must not be reported as one."*
+
+**Cause: my own comparison bug.** I wrapped the adapter constant in `getAddress()` (checksummed) and
+compared it with `.toLowerCase()` against the checksummed form. **The target address was correct the
+whole time.** ⭐ The tell was that the *known-good control* failed too — a probe whose control breaks
+is reporting on the instrument, not the subject. Fixed, re-run, controls then behaved exactly as
+predicted. [[a-check-whose-failure-mode-is-a-pass]]
+
+## ⛔ WHAT THIS STILL DOES NOT PROVE — the boundary, unchanged
+
+- **`eth_call` is simulation.** The adapter accepts the **shape**. A real run needs MetaMask to sign
+  the `Permit` typed data, the nonce to still be current at broadcast, and the transaction to land.
+- **It is not wired.** `_swap.mjs` hardcodes `permitType: 0`; this built the token-input by hand. The
+  one-transaction shape is now **available**, not **built**.
+- **One route, one pair, one moment, on testnet**, with a key that holds nothing.
