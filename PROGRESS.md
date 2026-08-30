@@ -1,5 +1,91 @@
 ---
 
+# ⚠️ ARC EMITS TWO `Transfer` LOGS PER MOVEMENT — and the fix is narrower than it looks
+
+**2026-08-30.** A general property of Arc, recorded separately from the send that surfaced it
+(tx `0x637b3556…`). One transfer, one recipient, **two `Transfer` events**:
+
+| log | emitting address | raw value | that is |
+|---|---|---|---|
+| `[0]` | **`0xfffffffffffffffffffffffffffffffffffffffe`** | `1000000000000000000` | the **NATIVE 18-dp** view |
+| `[1]` | **`0x3600000000000000000000000000000000000000`** | `1000000` | the **ERC-20 6-dp** view |
+
+Same asset, same movement, two precisions — "gas on Arc IS USDC" surfacing in the event log.
+**One transfer happened; the recipient received 1 USDC.**
+[[arc-eth-getbalance-18-decimals]]
+
+## ⭐ THE MEASURED CORRECTION — the two logs come from DIFFERENT ADDRESSES
+
+The obvious rule to write down is *"pin the contract AND expect two logs per movement."* **The
+second half is wrong**, and it was checked rather than assumed: the native view is emitted by the
+`0xffff…fffe` pseudo-address, the ERC-20 view by the token contract. **Pin `l.address` to the token
+and you get exactly ONE log.** There is no need to de-duplicate, and code that tried to would be
+solving a problem it does not have.
+
+> ⭐ **THE RULE: pin the emitting address. Then one movement is one log.**
+> The hazard exists ONLY where the address is not pinned.
+
+## 🚨 WHERE THAT ACTUALLY BITES — receipt logs, not `eth_getLogs`
+
+This is the distinction that matters, and it is not obvious:
+
+- **`eth_getLogs({ address })` is SAFE.** The filter is applied by the node; only the pinned
+  contract's log comes back. Every census-style scan in this repo works this way.
+- **`receipt.logs` is NOT.** A transaction receipt carries **every** log the tx emitted, unfiltered
+  by definition. Any code reading raw receipt logs must filter by `l.address` **itself**, or it sees
+  both views.
+
+⚠️ **A summing tool that omits the address filter adds `1e18 + 1e6` and then formats the total as
+6-dp — a figure roughly 1e12× too large.** That is not a rounding artefact; it is a fabricated
+number that looks like a real balance.
+
+## ⭐⭐ THIS CONFIRMS THE 2026-08-28 DIAGNOSIS WAS COMPLETE, NOT A ONE-OFF
+
+`PROGRESS.md:15374` recorded the same 1e12 trap from the other direction — `eth_getBalance` on Arc
+returns 18-dp native while USDC's `balanceOf` is 6-dp, and `÷1e6` on the native value "would print a
+value 1e12× too large — a FALSE number." That entry diagnosed the log-side version as **a filter
+matching topic + recipient without pinning the contract.**
+
+**That diagnosis was right, and this is its mechanism.** Arc emitting both views is *why* an
+unpinned filter double-counts; failing to pin is *the defect*. Pinning is the complete fix — nothing
+further is required, which is exactly what the different-emitter measurement above establishes.
+⭐ Two independent sightings of one underlying property: a balance read (2026-08-28) and a log read
+(2026-08-30). It is a property of the chain, not a quirk of either caller.
+
+## ⚠️ MY OWN SCAN DID IT, MINUTES EARLIER
+
+Verifying the send, this session printed the native-view log as **"1000000000000 USDC"** — a
+nonsense figure, from dividing a raw `1e18` by `1e6`. It was reading `receipt.logs` (unfiltered) and
+formatting uniformly at 6-dp.
+
+⭐ It did **no harm there** because the question was *existence and direction*, not a total — and
+that is the honest boundary: **existence checks over unpinned logs are safe; sums are not.** The
+same scan's earlier `eth_getLogs` calls *did* pin `address: USDC`, which is why they were correct.
+The mistake appeared precisely where the code stopped filtering and started trusting the receipt.
+
+## THE AUDIT — what in this repo sums `Transfer` logs
+
+Grepped every file touching the `Transfer` topic or `getLogs`:
+
+| file | sums? | pins address? | on Arc? | verdict |
+|---|---|---|---|---|
+| `netlify/functions/_swap-confirm.mjs` | **YES** | **YES** — `if ((l.address\|\|"").toLowerCase() !== out) continue;` is the FIRST filter, over RAW RECEIPT LOGS | yes | ✅ **safe, and it is the one that had to be** |
+| `scripts/x402-census/payto-catalogue.mjs` | **YES** | yes | no — Base | ✅ safe (and Base has no dual view) |
+| `_receipt.mjs`, `_dca.mjs`, `_x402-confirm.mjs`, `probe-settlement.mjs`, `verify-bridge-receipts.mjs`, `seller-census.mjs` | no | — | mixed | ✅ existence checks / single-value reads |
+
+⭐ **The only Arc summer is `_swap-confirm.mjs`, it reads RAW RECEIPT LOGS — the exposed shape —
+and it pins the address correctly.** The money path is not affected. That guard is presumably the
+2026-08-28 fix standing in exactly the place this property would have bitten.
+
+⛔ **Nothing was fixed tonight, because nothing needed fixing.**
+
+⚠️ **THE AUDIT'S LIMIT, STATED:** it is a pattern grep for `sum +=`, `+= BigInt`, `total +=` and
+`reduce(`. A summation written some other way — accumulating into an array and totalling it
+elsewhere, or summing inside a helper — would not have matched. The finding is "no exposed summer
+was found", not "none exists".
+
+---
+
 # ⭐ A GATEWAY PAYMENT *CAN* BE ATTRIBUTED ON CHAIN — bracket the balance, don't read it once
 
 **2026-08-30.** Closing a question I had twice answered with the wrong instrument, and once declared
