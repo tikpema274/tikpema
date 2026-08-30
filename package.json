@@ -89,7 +89,8 @@
     "test:wedge": "node --experimental-test-module-mocks scripts/verify-blobs-handle-wedge.mjs",
     "test:swapbeneficiary": "node scripts/verify-swap-beneficiary.mjs",
     "test:swapdecode": "npx tsx scripts/verify-swap-calldata-decode.ts",
-    "test:manualswapcopy": "npx tsx scripts/verify-manual-swap-copy.tsx"
+    "test:manualswapcopy": "npx tsx scripts/verify-manual-swap-copy.tsx",
+    "gate:manualswap": "node scripts/verify-deployed-manual-swap.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
