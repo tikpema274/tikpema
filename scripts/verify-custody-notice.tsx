@@ -19,6 +19,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import CustodyNotice from "../src/components/CustodyNotice";
 import SelfSignedPanel from "../src/components/SelfSignedPanel";
+import WalletGuardNotice from "../src/components/WalletGuardNotice";
 
 let pass = 0, fail = 0;
 const check = (n: string, ok: boolean, d = "") => { console.log(`  ${ok ? "✅" : "❌"} ${n}${d ? ` — ${d}` : ""}`); ok ? pass++ : fail++; };
@@ -78,6 +79,46 @@ console.log("\n⭐⭐ 3 — THE DESIGN, DEMONSTRATED: a wording change breaks ON
   //     false failure the composed assertion removes.
   check("⛔ a HARDCODED regex would have gone red on a correct panel (the old design)",
     !/Agent spending caps do not apply here/i.test(panelLikeMutated));
+}
+
+// ═══ ⭐⭐ THE WALLET GUARD — NON-COLLAPSE IS THE ASSERTION ══════════════════════════════════════
+// 🚨 Asserting "each state contains an expected phrase" is NOT enough, and that is not a theory:
+// verify-manual-swap-copy DID assert a "connected but unable" case and PASSED, while the swap panel
+// collapsed the two states byte-identically — because it exercised activeKind==="metamask" with a
+// missing capability rather than the connected-but-not-active state that actually broke.
+// ⭐ So the load-bearing check here is that the renders DIFFER, tested pairwise.
+console.log("\n⭐⭐ 6 — THE WALLET GUARD: THREE STATES, AND NO TWO OF THEM COLLAPSE");
+{
+  const g = (metamaskConnected: boolean, active: boolean) => strip(renderToStaticMarkup(
+    <WalletGuardNotice metamaskConnected={metamaskConnected} active={active}
+      verb="swap" twinLabel="Swap" twinRoute="/swap" />));
+  const notConnected = g(false, false), connectedInactive = g(true, false), activeButUnable = g(true, true);
+
+  check("not connected → the instruction is CONNECT",
+    /Connect MetaMask/i.test(notConnected) && !/Switch to MetaMask/i.test(notConnected));
+  check("⭐⭐ connected but NOT active → the instruction is SWITCH", /Switch to MetaMask/i.test(connectedInactive));
+  check("🚨 …and NOT connect what they have already connected", !/Connect MetaMask/i.test(connectedInactive));
+  // ⚠️ WORD-BOUNDARY ANCHORED, and not cosmetically: /Connect MetaMask/i matches inside
+  // "REconnect MetaMask", so the naive form failed against a CORRECT component. Third
+  // substring-coincidence caught today (after gate:manualswap's control and the -11.64% magnitude
+  // check). \b is what makes "connect" and "reconnect" different words to the assertion.
+  check("⭐ connected AND active but unable → neither connect nor switch (both would be false)",
+    !/\bConnect MetaMask/i.test(activeButUnable) && !/\bSwitch to MetaMask/i.test(activeButUnable)
+      && /Reconnect MetaMask/i.test(activeButUnable));
+
+  // ⭐ THE ASSERTION THE OLD SUITE LACKED: pairwise distinctness, directly.
+  const pairs: [string, string, string][] = [
+    ["not-connected vs connected-inactive", notConnected, connectedInactive],
+    ["connected-inactive vs active-unable",  connectedInactive, activeButUnable],
+    ["not-connected vs active-unable",       notConnected, activeButUnable],
+  ];
+  for (const [label, a, b] of pairs) check(`⭐⭐ ${label} render DIFFERENTLY`, a !== b);
+
+  check("every state points at the agent twin, by link", [notConnected, connectedInactive, activeButUnable]
+    .every((t) => /The agent swap is on the Swap page/i.test(t)));
+  check("the verb and twin are props, not hardcoded",
+    /bridge with your own key/i.test(strip(renderToStaticMarkup(
+      <WalletGuardNotice metamaskConnected={false} active={false} verb="bridge" twinLabel="AI Agent" twinRoute="/agent" />))));
 }
 
 console.log("\n⭐ 4 — THE PAGE");

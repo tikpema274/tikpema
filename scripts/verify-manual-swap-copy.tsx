@@ -21,6 +21,7 @@ import ManualSwapPanel, { SwapReview } from "../src/components/ManualSwapPanel";
 import SwapPanel from "../src/components/SwapPanel";
 import type { DecodedSwap } from "../src/lib/decodeSwapCalldata";
 import { CONTRACTS } from "../src/config/contracts";
+import WalletGuardNotice from "../src/components/WalletGuardNotice";
 // ⭐⭐ THE CUSTODY SENTENCE IS NOT RESTATED HERE. It is rendered from CustodyNotice and the panel's
 // output is asserted to CONTAIN it, so the expected text is COMPOSED from the same source that
 // produces the real text. A hardcoded regex would go red when the sentence changed even though this
@@ -156,14 +157,27 @@ console.log("\n⛔ CAPS — stated, because silence beside a capped panel reads 
   check("it links back to the capped agent panel", /agent wallet/i.test(t));
 }
 
-console.log("\n⚠️ THE NON-METAMASK STATES DIFFER FROM EACH OTHER (the two-state collapse defect)");
+// 🚨 THIS BLOCK USED TO ASSERT THE WRONG PAIR, AND IT PASSED WHILE THE DEFECT SHIPPED.
+// It compared `activeKind:"modular"` against `activeKind:"metamask"` with a missing capability —
+// two states that DID differ — while the state that actually collapsed was
+// `metamaskConnected:true, activeKind:"modular"` versus `metamaskConnected:false`, which rendered
+// BYTE-IDENTICALLY. A guard that exercises a neighbouring pair proves nothing about the pair that
+// broke. ⭐ Non-collapse is now asserted PAIRWISE over all three states in verify-custody-notice §6,
+// and this suite asserts only the BINDING — that the panel renders the shared guard with the right
+// props — with the expected text COMPOSED from the component rather than restated.
+console.log("\n⚠️ THE PANEL DELEGATES ITS WALLET GUARD (states asserted in verify-custody-notice §6)");
 {
-  const notConnected = strip(renderToStaticMarkup(<ManualSwapPanel wallet={wallet("modular")} />));
-  const connectedNoCap = strip(renderToStaticMarkup(
-    <ManualSwapPanel wallet={wallet("metamask", { manualSwap: undefined })} />));
-  check("a non-MetaMask wallet is told it needs MetaMask", /needs MetaMask/i.test(notConnected));
-  check("⭐ a CONNECTED-but-unable wallet gets a DIFFERENT message", notConnected !== connectedNoCap);
-  check("…and that message says to reconnect", /reconnect metamask/i.test(connectedNoCap));
+  const g = (mmConnected: boolean, active: boolean) => strip(renderToStaticMarkup(
+    <WalletGuardNotice metamaskConnected={mmConnected} active={active}
+      verb="swap" twinLabel="Swap" twinRoute="/swap" />));
+  const notConnected = strip(renderToStaticMarkup(<ManualSwapPanel wallet={wallet("modular", { metamaskConnected: false })} />));
+  const connectedInactive = strip(renderToStaticMarkup(<ManualSwapPanel wallet={wallet("modular", { metamaskConnected: true })} />));
+  check("⭐ renders the shared guard in the not-connected state", notConnected.includes(g(false, false)));
+  check("⭐⭐ …and the CONNECTED-BUT-NOT-ACTIVE state — the pair that collapsed",
+    connectedInactive.includes(g(true, false)));
+  check("🚨 …and the two are NOT identical", notConnected !== connectedInactive);
+  check("⛔ the panel offers no signing control in either state",
+    !/Get quote/i.test(notConnected) && !/Get quote/i.test(connectedInactive));
 }
 
 // ⭐⭐ SwapPanel IS RENDERED HERE, NOT GREPPED — and it is declared against this suite in

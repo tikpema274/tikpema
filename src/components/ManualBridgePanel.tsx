@@ -14,6 +14,7 @@
 // the absence is stated rather than left to be inferred from a missing error.
 import { useEffect, useState } from "react";
 import CustodyNotice from "./CustodyNotice";
+import WalletGuardNotice from "./WalletGuardNotice";
 import type { useWallet } from "../wallet/useWallet";
 import { agentClient } from "../lib/agentClient";
 import { arcTestnet } from "../config/chain";
@@ -208,11 +209,9 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
     return (
       <div className="panel">
         <div className="panel-eyebrow">Bridge from your own wallet</div>
-        <div className="status">
-          {w.metamaskConnected
-            ? "Switch to MetaMask to bridge with your own key — it is connected, but another wallet is active right now. The agent bridge is on the AI Agent page."
-            : "Connect MetaMask to bridge with your own key. The agent bridge is on the AI Agent page."}
-        </div>
+        {/* ⭐ SHARED, not restated — see WalletGuardNotice. */}
+        <WalletGuardNotice metamaskConnected={!!w.metamaskConnected} active={w.activeKind === "metamask"}
+          verb="bridge" twinLabel="AI Agent" twinRoute="/agent" />
       </div>
     );
   }

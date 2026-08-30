@@ -32,6 +32,7 @@ import { arcTestnet } from "../config/chain";
 import { CONTRACTS } from "../config/contracts";
 import { describeError } from "../lib/describeError";
 import CustodyNotice from "./CustodyNotice";
+import WalletGuardNotice from "./WalletGuardNotice";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 const EXPLORER = arcTestnet.blockExplorers.default.url;
@@ -129,11 +130,10 @@ export default function ManualSendPanel({ wallet: w }: { wallet: UnifiedWallet }
       <div className="plane">
         <div className="panel-eyebrow">Send</div>
         <h2>Send from your own wallet</h2>
-        <div className="sub" style={{ marginBottom: 0 }}>
-          {w.metamaskConnected
-            ? "Switch to MetaMask to send with your own key — it is connected, but another wallet is active right now. The agent send is on the Send page."
-            : "Connect MetaMask to send with your own key. The agent send is on the Send page."}
-        </div>
+        {/* ⭐ SHARED, not restated. `metamaskConnected` is a REQUIRED prop, so a panel cannot
+            render this guard without the fact that tells the two states apart. */}
+        <WalletGuardNotice metamaskConnected={!!w.metamaskConnected} active={w.activeKind === "metamask"}
+          verb="send" twinLabel="Send" twinRoute="/send" />
       </div>
     );
   }

@@ -69,6 +69,12 @@ export const COMPONENTS = {
   // expected text COMPOSED from this component rather than restated. Change the sentence here and
   // exactly one suite needs editing — demonstrated in verify-custody-notice.tsx §3.
   CustodyNotice:        { suite: "verify-custody-notice.tsx" },
+  // ⭐ The two-state wallet guard, shared by all three self-signed panels. It exists because the
+  // swap panel shipped WITHOUT reading `metamaskConnected` and collapsed "connected but another
+  // wallet active" into "not connected" — advice to connect what the user already had. Its suite
+  // asserts NON-COLLAPSE pairwise, not merely that each state contains a phrase: the swap panel's
+  // own suite asserted a phrase, passed, and the defect shipped anyway.
+  WalletGuardNotice:    { suite: "verify-custody-notice.tsx" },
   // ⛔ Carries the contrast in its own words, because a reader arriving from the Dashboard card has
   // not necessarily seen a capped panel first — which is also why this page is NOT in the nav.
   SelfSignedPanel:      { suite: "verify-custody-notice.tsx" },

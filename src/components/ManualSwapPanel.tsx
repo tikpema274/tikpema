@@ -40,6 +40,7 @@ import type { useWallet } from "../wallet/useWallet";
 import { describeError } from "../lib/describeError";
 import { CONTRACTS } from "../config/contracts";
 import CustodyNotice from "./CustodyNotice";
+import WalletGuardNotice from "./WalletGuardNotice";
 import { decodeAndVerifySwap, SwapDecodeError, type DecodedSwap } from "../lib/decodeSwapCalldata";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
@@ -257,17 +258,13 @@ export default function ManualSwapPanel({ wallet: w }: { wallet: UnifiedWallet }
       <div className="plane">
         <div className="panel-eyebrow">Swap · your own wallet</div>
         <h2>Swap from your own wallet</h2>
-        <div className="sub" style={{ marginBottom: 0 }}>
-          {w.activeKind === "metamask"
-            ? "This wallet is connected but cannot sign a swap here. Reconnect MetaMask and try again."
-            : "This needs MetaMask — you sign the swap yourself with your own key. "}
-          {w.activeKind !== "metamask" && (
-            <>
-              To swap from your agent wallet instead, open{" "}
-              <button className="linkbtn" onClick={() => (window.location.hash = "/swap")}>Swap</button>.
-            </>
-          )}
-        </div>
+        {/* 🚨 THIS PANEL IS WHY THE COMPONENT EXISTS. It used to branch on `activeKind` alone and
+            NEVER read `metamaskConnected`, so "MetaMask connected but another wallet active"
+            rendered BYTE-IDENTICALLY to "MetaMask not connected" — telling the user to connect
+            what they had already connected. The hook exported the distinguishing fact precisely so
+            every panel would get it; this one did not use it. Now it cannot fail to. */}
+        <WalletGuardNotice metamaskConnected={!!w.metamaskConnected} active={w.activeKind === "metamask"}
+          verb="swap" twinLabel="Swap" twinRoute="/swap" />
       </div>
     );
   }
