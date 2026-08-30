@@ -136,6 +136,83 @@ export async function estimateSwapOnly({ walletAddress, tokenIn, tokenOut, amoun
   return kit.estimateSwap(swapParams);
 }
 
+// ══ ⭐⭐ THE BENEFICIARY ASSERT — "we asked Circle for X; prove X came back" ═══════════════════════
+//
+// 🚨 WHY A SECOND ASSERT IS NEEDED WHEN `cd.to` IS ALREADY CHECKED, AND WHY THE FIRST CANNOT COVER IT.
+// MEASURED on Arc testnet (docs/swap-adapter-payer-beneficiary-unbound.md): the AdapterContract does
+// NOT bind the payer to the beneficiary. A payload issued for address X executes successfully when
+// submitted by a DIFFERENT address Y — pulling tokenIn from Y and delivering tokenOut to X. Two roles,
+// decided by two different things:
+//     who PAYS     = msg.sender                       (whoever signs and submits)
+//     who RECEIVES = tokens[].beneficiary              (inside the Circle-signed payload)
+// ⭐ Circle's own SDK states the first half outright: "The contract derives the token owner from
+// msg.sender, so no `from` field is needed."
+//
+// ⛔ A PAYLOAD WITH A FOREIGN BENEFICIARY STILL TARGETS THE ADAPTER, so `cd.to === SWAP_ADAPTER` is
+// still TRUE and the existing guard passes it. The two failures are independent; only one was guarded.
+// This is a TRUST-BOUNDARY assert, not a fix for a live vulnerability — see the doc for why no caller
+// of ours can reach it today, and why it becomes load-bearing the moment a swap is USER-SIGNED.
+//
+// ⭐ SELECTED BY TOKEN, NEVER BY POSITION. `EP.tokens` carries one entry per leg and their order is
+// not ours to assume. The sibling array `EP.instructions` has ALREADY caused exactly this misread in
+// this investigation: `instructions[0]` is the FEE leg with `minTokenOut: 0`, and reading index 0
+// alone reported "this swap has no floor at all". An index is a filter.
+//
+// ⚠️ AMBIGUITY REFUSES — it never falls back to an index. No matching entry, disagreeing beneficiaries
+// among the matches, or a token that is simultaneously in and out: all throw. "Cannot tell" is not
+// permission to guess at a destination for money.
+export function assertSwapBeneficiary({ tokens, tokenInAddress, tokenOutAddress, walletAddress }) {
+  const norm = (a) => String(a ?? "").toLowerCase();
+  const out = norm(tokenOutAddress);
+  const want = norm(walletAddress);
+  if (!out || !want) throw new Error("beneficiary check: missing tokenOut or wallet address — refusing to submit");
+
+  // A same-token swap makes "the tokenOut entry" undecidable; it is also not a swap. Refuse first,
+  // so the ambiguity can never be resolved by picking one.
+  if (out === norm(tokenInAddress)) {
+    throw new Error(`beneficiary check: tokenIn and tokenOut are the same token (${out}) — the payload's output leg is ambiguous, refusing to submit`);
+  }
+
+  const list = Array.isArray(tokens) ? tokens : null;
+  if (!list || list.length === 0) throw new Error("beneficiary check: createSwap returned no `tokens` entries — refusing to submit");
+
+  const matches = list.filter((t) => norm(t?.token) === out);
+  if (matches.length === 0) {
+    throw new Error(
+      `beneficiary check: no \`tokens\` entry for tokenOut ${out} in the createSwap response ` +
+        `(saw ${list.map((t) => norm(t?.token)).join(", ") || "nothing"}) — refusing to submit`
+    );
+  }
+  const distinct = [...new Set(matches.map((t) => norm(t?.beneficiary)))];
+  if (distinct.length > 1) {
+    throw new Error(
+      `beneficiary check: ${matches.length} tokens entries for tokenOut ${out} name DIFFERENT beneficiaries ` +
+        `(${distinct.join(", ")}) — cannot tell which receives the output, refusing to submit`
+    );
+  }
+
+  const got = distinct[0];
+  if (!got || !/^0x[0-9a-f]{40}$/.test(got)) {
+    throw new Error(`beneficiary check: tokenOut beneficiary is missing or malformed (${JSON.stringify(got)}) — refusing to submit`);
+  }
+  if (got !== want) {
+    // ⭐ FAIL CLOSED, AND SAY WHY IN THESE WORDS: we ASKED for toAddress = walletAddress. If the echo
+    // disagrees, then either the request or the response is wrong, and neither is a state to spend
+    // from. We do not "prefer" one; we refuse both.
+    throw new Error(
+      `beneficiary check FAILED: we asked createSwap for toAddress ${want} but the returned payload ` +
+        `delivers tokenOut to ${got}. Either the request or the response is wrong, and neither is a ` +
+        `state to spend from — refusing to submit. (The adapter does not bind the payer to the ` +
+        `beneficiary, so this payload WOULD have spent our funds into that address.)`
+    );
+  }
+  return { beneficiary: got, matched: matches.length };
+}
+
+// ⚠️ NOT CHECKED HERE, AND THAT IS A DELIBERATE NON-DECISION RATHER THAN AN OVERSIGHT: the tokenIN
+// entry's beneficiary (where leftover/refunded input would go) is also a money destination. It is out
+// of scope for this assert, which was scoped to the output leg. Recorded so the gap is visible.
+
 // Inline-confirm timed out but the SWAP IS SUBMITTED — a distinct signal (NOT a failure) that carries
 // the authoritative circleId so a caller with an async net (dca-tick's id-reconcile) can poll
 // getTransaction({id}) to COMPLETE next tick. Thrown ONLY from the swap-confirm wait (confirm:true), never
@@ -280,6 +357,11 @@ export async function agentSwap({ walletAddress, tokenIn, tokenOut, amountIn, co
     throw new Error(`swap quote deadline too close (${EP.deadline}) — refusing to submit`);
   }
 
+  // ⭐ BENEFICIARY GUARD — validate the response against what we ASKED for, before any calldata is
+  // built and long before anything is submitted. See assertSwapBeneficiary above for why the
+  // `cd.to` assert below cannot cover this case.
+  assertSwapBeneficiary({ tokens: EP.tokens, tokenInAddress, tokenOutAddress, walletAddress });
+
   // SDK-VERBATIM transform of the response (swap-kit prepareEvmSwapAction:14128-14165). BigInt = its safeBigInt.
   const executeParams = {
     instructions: EP.instructions.map((i) => ({ target: i.target, data: i.data, value: BigInt(i.value), tokenIn: i.tokenIn, amountToApprove: BigInt(i.amountToApprove), tokenOut: i.tokenOut, minTokenOut: BigInt(i.minTokenOut) })),
@@ -306,6 +388,9 @@ export async function agentSwap({ walletAddress, tokenIn, tokenOut, amountIn, co
 
   // HARD ADAPTER ASSERT — this guard caught a real false positive (an inner DEX-leg target) during B1.
   // Abort on ANY mismatch; nothing has been submitted at this point.
+  // ⚠️ THIS CHECKS THE DESTINATION CONTRACT, NOT THE DESTINATION OF THE MONEY. A payload paying a
+  // stranger still targets the adapter and still passes here — that is assertSwapBeneficiary's job,
+  // run above. Neither assert is sufficient alone.
   if (!cd || String(cd.to).toLowerCase() !== SWAP_ADAPTER) {
     throw new Error(`B1 adapter assert failed — calldata.to=${cd?.to ?? "none"} != ${SWAP_ADAPTER}; refusing to submit`);
   }

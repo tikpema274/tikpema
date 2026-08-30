@@ -120,3 +120,77 @@ Nothing today can reach it: the agent path admits no recipient input, and no use
 It is recorded now because (a) the missing assert is cheap and fails closed, and (b) it becomes
 load-bearing the moment anything user-signed touches this adapter — at which point discovering it
 would be much more expensive.
+
+---
+
+# ✅ ASSERT ADDED — 2026-08-30. `agentSwap` only.
+
+`assertSwapBeneficiary()` in `netlify/functions/_swap.mjs`, called from `agentSwap` **before the
+calldata is built** and long before anything is submitted. Suite:
+`scripts/verify-swap-beneficiary.mjs`, registered as `test:swapbeneficiary` — **27/0, zero money,
+zero network.**
+
+## ⭐ SELECTED BY TOKEN, NEVER BY POSITION — and ambiguity refuses rather than indexes
+
+`EP.tokens` carries one entry per leg and their order is not ours to assume. The guard filters by
+`tokenOut` address and refuses outright when it cannot decide: no matching entry, matching entries
+that name **different** beneficiaries, a token that is simultaneously in and out, an absent or
+malformed address. **"Cannot tell" is not permission to guess at a destination for money.**
+
+⚠️ The sibling array had already produced exactly this misread earlier in the same investigation:
+`instructions[0]` is the **fee** leg with `minTokenOut: 0`, and reading index 0 alone reported that a
+swap had no floor at all. [[filtered-read-is-not-absence]]
+
+## ⭐⭐ VALIDATED RED AGAINST THE RIGHT THING — two pre-fix implementations, both re-created
+
+A guard is worth its line count only if it is red where the defect is. **Both pre-fix behaviours are
+rebuilt inside the suite and asserted GREEN on payloads where the real guard is RED** — without them
+every ✅ is free.
+
+| pre-fix behaviour | the payload it is GREEN on | the new assert |
+|---|---|---|
+| **the OLD guard** — `cd.to === SWAP_ADAPTER` | tokenOut pays a stranger, **`cd.to` is the CORRECT adapter** | **RED** |
+| **INDEX-0** — `tokens[0].beneficiary` | tokenIn leg correct, **tokenOUT leg pays a stranger** | **RED** |
+
+⛔ **A red produced by a wrong adapter address would have proved nothing** — the old assert already
+covers that case. The hostile payload therefore carries the *real* adapter address, deliberately.
+
+⭐ And the **mirror** is asserted too, because a guard that only ever refuses is not a guard:
+index-0 raises a **false alarm** when the tokenIn leg pays a stranger while the output leg is ours;
+by-token selection **passes**, correctly, since the output is what this protects. Order-independence
+is asserted in both directions.
+
+⭐ **Validated GREEN against reality as well as red against the defect:** run against two live
+`createSwap` responses (USDC→EURC and EURC→USDC), the assert passes both, matching exactly one entry.
+A guard that refused real payloads would have broken the live agent swap.
+
+## 3. FAIL CLOSED, AND THE MESSAGE SAYS WHY
+
+> *"we asked createSwap for toAddress `<wallet>` but the returned payload delivers tokenOut to
+> `<other>`. **Either the request or the response is wrong, and neither is a state to spend from** —
+> refusing to submit."*
+
+It does not prefer one side over the other and does not repair either. Asserted in the suite: the
+message names **both** addresses, states that we asked for the `toAddress`, and states that neither
+side is spendable.
+
+## ⚠️ WHAT THIS CLOSES — AND WHAT IT DOES NOT
+
+**Closes:** the trust boundary. `agentSwap` no longer takes Circle's echo of the money's destination
+on faith; it verifies the response against the request and refuses on disagreement.
+
+⛔ **DOES NOT close a live vulnerability, because there was not one.** Nothing our callers can do
+reaches it — the `swap_tokens` vocabulary has no recipient field and `walletAddress` is
+session-resolved. **This is a trust-boundary assert, not a fix.** Reporting it as a patched
+vulnerability would overstate both the risk before and the protection after.
+
+⭐ **It becomes load-bearing the moment a user-signed swap exists**, because then the user is
+`msg.sender` while the server supplies the payload — and MetaMask cannot show them the beneficiary.
+This assert protects the *server-built* payload; the manual path additionally needs the **client** to
+decode and display the beneficiary it is about to sign (`docs/manual-swap-scope.md` §4b).
+
+⛔ **Untouched, deliberately:** `permitType` stays `0`, and no manual-swap work was started.
+
+⚠️ **Still not checked, and recorded rather than silently skipped:** the **tokenIN** entry's
+beneficiary — where leftover or refunded input would go — is also a money destination. Out of scope
+for an assert scoped to the output leg; noted in the code so the gap stays visible.

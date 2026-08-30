@@ -86,7 +86,8 @@
     "test:vanillalimits": "node --experimental-test-module-mocks scripts/verify-vanilla-seller-limits.mjs",
     "test:vault": "node --experimental-test-module-mocks scripts/verify-vault.mjs && node --experimental-test-module-mocks scripts/verify-vault-degraded.mjs && npx tsx scripts/verify-vault-panel-copy.tsx",
     "test:watch": "node --experimental-test-module-mocks scripts/verify-strong-read-watch.mjs && node scripts/verify-sweeper-heartbeat.mjs",
-    "test:wedge": "node --experimental-test-module-mocks scripts/verify-blobs-handle-wedge.mjs"
+    "test:wedge": "node --experimental-test-module-mocks scripts/verify-blobs-handle-wedge.mjs",
+    "test:swapbeneficiary": "node scripts/verify-swap-beneficiary.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -132,6 +133,7 @@
     "test:bridgedest",
     "test:manualbridgecopy",
     "test:userbridge",
+    "test:swapbeneficiary",
     "test:dcareason",
     "test:ddrail",
     "test:disclosure",
