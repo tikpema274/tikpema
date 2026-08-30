@@ -428,8 +428,17 @@ function BridgeProposalBody({ proposal, ...rest }: ProposalCardProps & { proposa
 
 // SWAP — a stablecoin FX conversion (USDC↔EURC on Arc). Deliberately NOT framed as a trade
 // or a call on the market: the agent proposes a conversion, the user approves it. The rate is
-// INDICATIVE, exactly like the bridge's fee — it is re-estimated at execution and a 1%
-// slippage cap makes the swap revert rather than fill at a bad rate.
+// INDICATIVE, exactly like the bridge's fee — it is re-priced at execution, and the swap carries
+// an ON-CHAIN MINIMUM below which the adapter reverts rather than filling.
+//
+// ⛔ THIS USED TO SAY "a 1% slippage cap makes the swap revert", AND THAT WAS WRONG. Our
+// `slippageBps: 100` reaches only `estimateSwapOnly` — the free estimate. The EXECUTING path
+// (the B1 `createSwap` HTTP quote in _swap.mjs) sends no slippage parameter at all, so the
+// `minTokenOut` that actually binds is Circle's, not ours.
+// ⚠️ AND NO PERCENTAGE REPLACES IT. A figure was measured, but from four quotes at one moment on
+// one route — enough to prove the 1% claim false, not enough to assert a different constant.
+// Naming the new number would repeat the original defect with a fresher value.
+// See docs/swap-slippage-copy-overclaim.md.
 function SwapProposalBody({ proposal, ...rest }: ProposalCardProps & { proposal: SwapProposal }) {
   return (
     <ProposalShell

@@ -115,9 +115,17 @@ function buildSwapParams({ walletAddress, tokenIn, tokenOut, amountIn }) {
       // ERC-1271 signature — so the swap fails with "Transaction hash is required".
       // Forcing an onchain approve makes the SCA path work.
       allowanceStrategy: "approve",
-      // Explicit 1% slippage cap. USDC/EURC are stablecoins so the rate barely
-      // moves, but setting this makes the tolerance intentional rather than relying
-      // on an SDK default — the swap reverts rather than filling at a bad rate.
+      // ⛔ THIS SLIPPAGE BOUND APPLIES TO THE ESTIMATE ONLY — IT NEVER REACHES A REAL SWAP.
+      // `buildSwapParams` has exactly ONE caller: `estimateSwapOnly` below. The EXECUTING path is
+      // the B1 extraction in `agentSwap`, which POSTs to `createSwap` and sends NO slippage field,
+      // so the `minTokenOut` that actually binds a swap comes back from Circle and is not this.
+      //
+      // 🚨 THE ROOT OF A CLAIM THAT SPREAD. This comment used to end "— the swap reverts rather than
+      // filling at a bad rate", and two other comments inherited it (jobTimeline's SwapProposalBody,
+      // _proposal's indicativeAmountOut), where it became a statement about what protects the user.
+      // It was false in all three: the tolerance here is intentional for the QUOTE, and nothing more.
+      // ⚠️ The B1 refactor moved the executing path off `kit.swap()` and no comment followed.
+      // ⛔ No percentage is asserted in its place — see docs/swap-slippage-copy-overclaim.md.
       config: { kitKey, slippageBps: 100 },
     },
   };

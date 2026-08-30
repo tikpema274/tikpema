@@ -1,5 +1,31 @@
 # DEFECT — the "1% slippage cap" is told to users and is not what bounds the swap
 
+> # 🚨 CORRECTION — 2026-08-30, BEFORE ANY FIX WAS APPLIED
+>
+> **This document called the claim USER-FACING. IT IS NOT. It is a source comment.**
+>
+> Line 12 below says the sentence is *"rendered beside a swap proposal the user is about to
+> approve"*. ⛔ **False.** Both occurrences are `//` comments — one above `SwapProposalBody`, one on
+> `indicativeAmountOut` — and comments are stripped at build. **`"slippage"` appears ZERO times in
+> the shipped bundle, local and live.** Verified independently: correcting both comments produced a
+> **byte-identical** bundle (md5 `36b60d20…` before and after).
+>
+> ⚠️ **NO USER WAS EVER MISLED BY IT.** What was wrong is what the next maintainer would believe.
+> That is still worth fixing — a description ahead of the code misleads whoever reads it next — but
+> it is **not** a live overclaim on a money path, which is what this document claimed and what was
+> then reported and acted upon.
+>
+> ⭐ **THE FAILURE MODE IS THE ONE THIS REPO ALREADY NAMES:** a claim I made became a recorded fact
+> and was cited back as established. [[conversation-sourced-numbers-must-be-marked]]
+> **The measurement in §2 is unaffected and stands** — the 1% figure really is wrong, and 3.00% really
+> was measured. Only the *reach* of the claim was overstated.
+>
+> 🚨 **AND NOTE WHY NO SUITE COULD HAVE CAUGHT IT.** The copy guards assert on RENDERED OUTPUT, by
+> deliberate rule. A false claim living in a COMMENT is structurally invisible to them — not because
+> they are weak, but because a comment is not output. **The strongest copy discipline in this repo
+> has no reach here at all**, which is exactly why this one survived and why the fix is a habit
+> (correct the comment when the code moves), not a mechanism.
+
 **2026-08-30. Read-only. ⛔ NOT FIXED — deliberately.** Found while scoping the manual swap
 (`docs/manual-swap-scope.md`, `3ccde08`) and **separated from it on purpose**: this is a live
 user-facing claim on a money path, and it wants its own decision rather than a fix folded into a
@@ -9,8 +35,9 @@ feature scope.
 
 ## THE CLAIM, AS SHIPPED
 
-`src/components/jobTimeline.tsx:429-432` — rendered beside a swap proposal the user is about to
-approve:
+`src/components/jobTimeline.tsx:429-432` — ⛔ **a source COMMENT, not rendered copy** (see the
+correction above; this line originally said "rendered beside a swap proposal the user is about to
+approve", which was wrong):
 
 > *"The rate is INDICATIVE, exactly like the bridge's fee — it is re-estimated at execution and a
 > **1% slippage cap** makes the swap revert rather than fill at a bad rate."*
@@ -120,3 +147,35 @@ on-chain, and 3% on a stablecoin pair is loose rather than dangerous. What is da
 **record** — a user consented to a swap under a stated protection that is three times tighter than
 the one they got, and the same sentence sits in a server comment where the next maintainer will
 believe it.
+
+
+---
+
+# ✅ RESOLVED — 2026-08-30: **the claim is OUT.** Route-first, and no number replaces it.
+
+**Decision: remove it.** A description AHEAD of the code is worse than one behind it — the same rule
+applied to the DD rail and the research card. Removing the claim makes the comment accurate *today*;
+adding the slippage would make it accurate *later*, and it is wrong every minute in between.
+
+Both sites corrected, each now stating what is true and why the old sentence was not:
+
+| | now says |
+|---|---|
+| `jobTimeline.tsx` (`SwapProposalBody`) | the rate is indicative and re-priced at execution, and the swap carries **an on-chain minimum below which the adapter reverts** — without crediting it to us |
+| `_proposal.mjs` (`indicativeAmountOut`) | the same, and that the binding minimum is **Circle's**, not ours |
+
+⛔ **NO PERCENTAGE REPLACES IT — including 3%.** A figure was measured, but from four quotes at one
+moment on one route. That is enough to prove the 1% claim false; **it is not enough to assert a
+different constant**, and naming the new number would repeat the original defect with a fresher
+value.
+
+⛔ **The cheap test for putting slippage IN stays unrun, deliberately.** Whether the raw `createSwap`
+endpoint honours a slippage parameter belongs to a decision not being made now. If the field is ever
+sent, that is its own change with its own proof.
+
+## ⭐ VERIFIED: the fix changes nothing a user sees
+
+The bundle is **byte-identical** before and after (md5 `36b60d206bec34bd98e34f14703f7201`). That is
+both the confirmation that the claim was never rendered **and** the reason no deploy is required for
+user-facing correctness. ⚠️ The source change does move the build tree hash, so a later deploy will
+show a different tree — that is bookkeeping, not a shipped difference.

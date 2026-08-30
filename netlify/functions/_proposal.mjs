@@ -258,9 +258,12 @@ async function validateSwapProposal(raw, ctx) {
     amountIn,                  // bounded (in USDC-equivalent) by the deployed cap
     valueUsdc: Number(valueUsdc.toFixed(6)), // what the cap and the day-ceiling actually bound
     cap,
-    // INDICATIVE ONLY, exactly like the bridge's fee. The rate moves; agentSwap re-estimates
-    // at execution and the 1% slippage cap (_swap.mjs) makes the swap revert rather than fill
-    // at a bad rate. The number shown at approve time is a courtesy, never a commitment.
+    // INDICATIVE ONLY, exactly like the bridge's fee. The rate moves; agentSwap fetches its OWN
+    // quote at execution, and that quote carries an on-chain `minTokenOut` below which the adapter
+    // reverts. The number shown at approve time is a courtesy, never a commitment.
+    // ⛔ THIS USED TO CREDIT "the 1% slippage cap (_swap.mjs)" — WRONG. `slippageBps: 100` is passed
+    // only to `estimateSwapOnly`; the executing B1 path sends no slippage field, so the binding
+    // minimum is Circle's. ⚠️ No percentage replaces it — see the note at jobTimeline's SwapProposalBody.
     indicativeAmountOut: Number(amountOut.toFixed(6)),
     pricedAt: new Date().toISOString(),
     reasoning: String(raw.reasoning || "").slice(0, MAX_REASONING),
