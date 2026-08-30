@@ -73,6 +73,50 @@ console.log("\n⭐⭐ THE REVIEW STEP — rendered with real numbers (the state 
   check("a matching wallet is confirmed in words", /this is your wallet/i.test(t));
 }
 
+// ═══ ⭐⭐ BOTH DIRECTIONS OF THE MID-MARKET SENTENCE ════════════════════════════════════════════
+// 🚨 THIS SECTION EXISTS BECAUSE A DEFECT SHIPPED AND NO SUITE COULD SEE IT. Every fixture above is
+// POSITIVE (0.0312, 0.03, 0.14, 0.07), so the sentence was never rendered with a NEGATIVE implied
+// loss — the state where its wording failed. "below" was hardcoded while the number carried its own
+// sign, so a real −11.64% rendered as "is -11.64% below the mid-market value": an 11.64% GAIN
+// displayed as a loss. Observed live on the EURC→USDC run.
+// ⭐ The old assertion ("the implied loss is stated as a percentage") passed on the broken output —
+// which is why the fix is asserted as DIRECTION IN WORDS + MAGNITUDE ALWAYS POSITIVE, in both
+// directions, rather than as a single string. [[state-behind-a-transition-is-untested-by-default]]
+console.log("\n⭐⭐ THE MID-MARKET SENTENCE READS CORRECTLY IN BOTH DIRECTIONS");
+{
+  const at = (il: number, extra: any = {}) => strip(renderToStaticMarkup(
+    <SwapReview decoded={decoded(OWNER)} owner={OWNER} tokenIn="USDC" tokenOut="EURC"
+      amountIn={1} band="none" impliedLoss={il} secondsLeft={500} {...extra} />));
+
+  const pos = at(0.0422);
+  check("POSITIVE → says 'below'", /4\.22% below the mid-market value/i.test(pos));
+  check("⛔ …and never 'above'", !/above the mid-market/i.test(pos));
+
+  // ⭐ THE FIXTURE THAT DID NOT EXIST: the real value from the live EURC→USDC run.
+  const neg = at(-0.1164);
+  check("⭐⭐ NEGATIVE → says 'above' (this is the defect that shipped)", /11\.64% above the mid-market value/i.test(neg));
+  check("⛔ …and never 'below'", !/below the mid-market value/i.test(neg));
+  check("🚨 …and renders NO minus sign in the sentence", !/-\s*11\.64%/.test(neg));
+  // ⚠️ SENTENCE-SCOPED, NOT A BARE SUBSTRING. `/11\.64%/` also matches "-11.64%", so the naive form
+  // PASSED against the pre-fix copy while the two checks above went red — a weak assertion sitting
+  // among strong ones and looking like coverage. Extract the sentence and read the token it renders.
+  const magnitude = (t: string) => (t.match(/That guarantee is\s+(-?[\d.]+%)/) ?? [])[1];
+  check("⭐ the magnitude token itself carries NO sign, either way",
+    magnitude(neg) === "11.64%" && magnitude(pos) === "4.22%", `neg=${magnitude(neg)} pos=${magnitude(pos)}`);
+
+  // Boundary: exactly zero must not read as "above".
+  check("zero reads as 'below' (the boundary is not ambiguous)", /0\.00% below the mid-market value/i.test(at(0)));
+
+  // ⭐ The advisory is ADVISORY: it appears on the flag, and it never appears without it.
+  const flagged = at(-0.1164, { rateCheckUnreliable: true });
+  check("⭐ far-above + flag → says the CHECK is unreliable, not that the deal is good",
+    /could not price-check this swap/i.test(flagged) && !/bargain|good deal|in your favour/i.test(flagged));
+  check("⭐ …and points at what IS still enforced", /still enforced on-chain/i.test(flagged));
+  check("⛔ …and it is ABSENT without the flag", !/could not price-check/i.test(neg));
+  check("⛔ …and it is NOT a gate — no acknowledgement control appears with it",
+    !/I understand/i.test(flagged));
+}
+
 console.log("\n🚨 A FOREIGN BENEFICIARY IS VISIBLE ON SCREEN, not merely caught in code");
 {
   const t = strip(renderToStaticMarkup(

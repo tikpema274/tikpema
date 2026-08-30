@@ -16,6 +16,20 @@
 // opaque call to the adapter — the destination of the user's money appears NOWHERE in the signing
 // prompt. ⭐ We are the only surface that can show it.
 //
+// ═══ ⛔ THE FAR-ABOVE CASE IS AN ADVISORY, NOT A BAND — AND THAT IS A DECISION ═════════════════
+// A guarantee far ABOVE mid-market is anomalous, not favourable: on a stablecoin FX pair the floor
+// should sit slightly BELOW mid (a spread plus 3% slippage). Far above means the reference rate and
+// the pool disagree, so the CHECK has failed — and a check that is wrong in the favourable
+// direction today can be wrong in the unfavourable direction tomorrow, silently.
+// ⭐ BUT IT IS NOT GATED, for two reasons. (1) Blocking on "your deal looks too good" asks the user
+// to judge something they cannot: whether the rate source or the pool is wrong. (2) On this venue
+// the condition is currently COMMON (the pool does not round-trip — see
+// docs/swap-venue-price-disagreement.md), and a blocking box that always fires trains the exact
+// click-through the band design exists to prevent.
+// ⛔ AND IT IS NOT A FOURTH BAND VALUE. The band enum is the GATING vocabulary; adding a member
+// changes consent semantics, which the bridge's FEE_BANDS header warns about at length. This is a
+// separate, non-gating flag precisely so the gating vocabulary stays closed.
+//
 // So the panel DECODES the calldata it is about to hand to the wallet and displays the beneficiary
 // IN FULL, beside the user's own address, before any signature is offered. ⛔ Not from the JSON the
 // server sent alongside the bytes — the whole threat is that the two disagree — but from the bytes.
@@ -39,17 +53,18 @@ type Quote = {
   tokenInAddress: string; tokenOutAddress: string;
   amountMinor: string; minTokenOut: string;
   estimatedAmount: string | null; deadline: number;
-  band: "none" | "warn" | "acknowledge"; impliedLoss: number;
+  band: "none" | "warn" | "acknowledge"; impliedLoss: number; rateCheckUnreliable?: boolean;
   expectedBeneficiary: string;
 };
 
 // ⭐ EXPORTED AND PURE so a suite can RENDER it with real numbers. A state reachable only after a
 // live quote is a state no test ever sees — the recurring blind spot in this repo's copy guards.
 export function SwapReview({
-  decoded, owner, tokenIn, tokenOut, amountIn, band, impliedLoss, secondsLeft,
+  decoded, owner, tokenIn, tokenOut, amountIn, band, impliedLoss, secondsLeft, rateCheckUnreliable,
 }: {
   decoded: DecodedSwap; owner: string; tokenIn: Token; tokenOut: Token;
   amountIn: number; band: Quote["band"]; impliedLoss: number; secondsLeft: number;
+  rateCheckUnreliable?: boolean;
 }) {
   const matches = decoded.beneficiary.toLowerCase() === owner.toLowerCase();
   return (
@@ -64,10 +79,29 @@ export function SwapReview({
         You are <b>guaranteed at least</b>{" "}
         <b className="mono">{usdc(decoded.minTokenOut)} {tokenOut}</b> — the swap reverts below this.
       </div>
+      {/* ⭐ THE DIRECTION IS IN WORDS AND THE PERCENTAGE IS ALWAYS POSITIVE.
+          🚨 THIS SHIPPED WRONG. "below" used to be hardcoded while the number carried its own sign,
+          so a genuine −11.64% rendered as "is -11.64% below the mid-market value" — which reads as
+          an 11.64% LOSS when it was an 11.64% GAIN. Observed live on the EURC→USDC run, and read
+          exactly that way by the operator. ⛔ A reader must never have to parse a minus sign inside
+          a sentence that already states a direction. */}
       <div>
-        That guarantee is <b>{pct(impliedLoss)}</b> below the mid-market value of what you are
-        spending.
+        That guarantee is <b>{pct(Math.abs(impliedLoss))}</b>{" "}
+        {impliedLoss >= 0 ? "below" : "above"} the mid-market value of what you are spending.
       </div>
+      {/* ⭐⭐ AND WHEN IT IS FAR ABOVE, SAY THE CHECK IS UNRELIABLE — NOT THAT THE DEAL IS GOOD.
+          A floor well ABOVE mid-market is not good news; it is evidence that the two prices being
+          compared disagree, i.e. that this very check is not working. The user can act on "the
+          price check is unreliable" (wait, use less, or proceed knowing it is not protecting them);
+          they can do nothing with "you are getting a bargain".
+          ⛔ ADVISORY, NOT A GATE — see the header. */}
+      {rateCheckUnreliable && (
+        <div style={{ marginTop: 8, color: "var(--warn)" }}>
+          ⚠️ We could not price-check this swap: our reference rate and the pool disagree by more
+          than a normal spread, so the comparison above is not reliable in either direction. The
+          guaranteed minimum is still enforced on-chain and does not depend on it.
+        </div>
+      )}
       {/* ⭐⭐ THE ADDRESS, IN FULL, BOTH OF THEM — so a mismatch is VISIBLE, not merely caught.
           MetaMask cannot show this; it renders an opaque contract call. */}
       <div style={{ marginTop: 10 }}>
@@ -285,7 +319,8 @@ export default function ManualSwapPanel({ wallet: w }: { wallet: UnifiedWallet }
         <>
           <div style={{ marginTop: 14 }}>
             <SwapReview decoded={decoded} owner={w.address!} tokenIn={tokenIn} tokenOut={tokenOut}
-              amountIn={amountNum} band={quote.band} impliedLoss={quote.impliedLoss} secondsLeft={secondsLeft} />
+              amountIn={amountNum} band={quote.band} impliedLoss={quote.impliedLoss} secondsLeft={secondsLeft}
+              rateCheckUnreliable={quote.rateCheckUnreliable} />
           </div>
           {/* ⭐ The band gate blocks the button until the user accepts. There is no ack TOKEN: the
               floor and expiry are inside a Circle-signed payload the ADAPTER enforces, so the chain

@@ -41,6 +41,19 @@ import { buildSwapCallData, valueInUsdc, SWAP_TOKENS } from "./_swap.mjs";
 export const SWAP_BAND_WARN = 0.05;
 export const SWAP_BAND_ACKNOWLEDGE = 0.10;
 
+// ⭐⭐ THE MIRROR THRESHOLD — a guarantee this far ABOVE mid-market means the CHECK has failed.
+// ⛔ NOT A BAND, AND NOT GATED. It is an advisory flag; the band enum stays the gating vocabulary.
+//
+// WHY −5%, and why that number rather than "any negative": the floor sits 3.00% below the quote's
+// own estimate, so impliedLoss only goes negative once the pool is >3.1% better than the reference
+// rate — already more than a stablecoin-pair spread, but within reach of ordinary noise between two
+// price sources. At −5% the pool must be ~8.2% better than the reference, which is not a spread on
+// USDC/EURC; it is a stale feed or a mispriced pool. ⭐ It is also the exact MIRROR of SWAP_BAND_WARN,
+// so the two sides of the same comparison are treated with the same tolerance rather than one being
+// quietly stricter.
+// ⚠️ CALIBRATED TO A MEASUREMENT, AND THE MEASUREMENT IS DATED — see the WARN/ACKNOWLEDGE note above.
+export const SWAP_RATE_UNRELIABLE = -0.05;
+
 /**
  * Implied loss of the GUARANTEED outcome against the mid-rate: what the user is certain to receive,
  * valued in USD, versus what they are certain to spend.
@@ -61,7 +74,11 @@ export function swapLossBand({ amountInUsd, minOutUsd }) {
   if (!Number.isFinite(minOutUsd) || minOutUsd < 0) throw new Error("cannot band a swap without a readable guaranteed output value");
   const impliedLoss = 1 - minOutUsd / amountInUsd;
   const band = impliedLoss >= SWAP_BAND_ACKNOWLEDGE ? "acknowledge" : impliedLoss >= SWAP_BAND_WARN ? "warn" : "none";
-  return { impliedLoss, band, amountInUsd, minOutUsd };
+  // ⭐ A separate, NON-GATING signal. `band` answers "is this a bad deal?"; this answers "is the
+  // comparison itself trustworthy?" — a different question, and one the band cannot express because
+  // its scale only runs in the unfavourable direction.
+  const rateCheckUnreliable = impliedLoss <= SWAP_RATE_UNRELIABLE;
+  return { impliedLoss, band, rateCheckUnreliable, amountInUsd, minOutUsd };
 }
 
 export async function handler(event) {
@@ -112,6 +129,7 @@ export async function handler(event) {
     ...built,
     band: band.band,
     impliedLoss: band.impliedLoss,
+    rateCheckUnreliable: band.rateCheckUnreliable,
     // ⭐ Returned so the panel can show it, and independently RE-DERIVED by the client from the
     // calldata bytes (decodeAndVerifySwap). If the two ever disagree, the bytes win and the panel
     // refuses — which is the entire point of decoding rather than displaying.
