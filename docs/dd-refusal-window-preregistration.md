@@ -76,3 +76,56 @@ be tested across what it binds, and both sides are trivially identical inside on
 2. Read the ledger's new line: `outcome`, `ddTree`, banner variant, `reason`, duration.
 3. ⛔ If the outcome is `no-window` **with a changed ddTree**, that is falsifier 1 — say so and
    investigate; do not record it as the routine result it resembles.
+
+---
+
+# ✅ RESULT — 2026-08-30: **THE WINDOW WAS OBSERVED. ALL FIVE PREDICTIONS HELD.**
+
+Deploy `6a94a8003b8c71a37b64bf04`. **The first live observation of the DD refusal banner in this
+project's history.** Nothing above this line is amended.
+
+| # | predicted | observed |
+|---|---|---|
+| 1 | ddTree rotates to `ed972854…` | ✅ **`ed972854…` exactly**, from `00154c85…`, `rotated: true` |
+| 2 | ⭐⭐ a window is **OBSERVED** | ✅ `outcome: observed-banner`, 12 probes |
+| 3 | banner variant **self-clearing** | ✅ `variant: "self-clearing"` |
+| 4 | closes within the 1200s watch, duration recorded | ✅ **171s (2.9m)** — opened 22:27:48.920Z, closed 22:30:40.165Z |
+| 5 | a `reason` code is carried | ✅ `reason: "no-record"` |
+
+⭐ **Prediction 1 was a hash, not a direction** — computed locally with `npm run stamp` before the
+deploy and matched character for character by what the deploy stamped. The rotation was attributable
+in advance to a single file (`_dd-x402.mjs`) and it behaved exactly as attributed.
+
+## ⭐⭐ WHAT THIS CLOSES, AND IT IS THE POINT OF THE WHOLE CAPTURE
+
+`verify-dd-report.mjs` proves the banner renders in all three health states — 98/0 — **in one
+process, with health injected.** It structurally cannot see whether the discovery rung actually calls
+`healthDisclosure()` and threads the result into the served page. That is
+[[binding-tested-across-what-it-binds]]: both sides are trivially identical inside one process.
+
+> **Now measured across the process boundary: a real deploy rotated a real key, the real service
+> refused, and the real page carried the banner — `bannerAboveCurl: true`, above the fold, in HTML.**
+
+## ⛔ THE COST, MEASURED RATHER THAN ESTIMATED
+
+**171 seconds.** For 2 minutes 51 seconds the DD service refused and **vault deposits were
+unavailable**. Well inside the 10m canary period, and it closed by itself with no intervention — but
+it is now a number rather than a hope. Every future DD-surface change costs approximately this.
+
+⚠️ **One observation, not a distribution.** 171s is what one rotation cost at one moment; the canary
+period bounds it at 10m but does not make 171s typical.
+
+## THE FALSIFIER THAT DID NOT FIRE — and why it mattered that it could have
+
+Falsifier 1 was *"no window with a rotated ddTree"* — the same `no-window` line that printed
+correctly after every previous deploy this session, but which here would have meant **the health gate
+is not gating**. It did not fire. ⭐ The value of pre-registering it is that the familiar line had a
+second, opposite meaning ready in advance, so it could not have been read as routine.
+
+## ⛔ WHAT THIS STILL DOES NOT PROVE
+
+- **The other health states.** One state — key-missing after rotation — crossed the boundary. The
+  rest remain proven in-process only.
+- **That 171s generalises.** One rotation, one moment.
+- **Anything about the x402 changes.** The refusal was a side effect of touching the DD surface, not
+  a test of the `settlement` field, the derived constants, or the renamed description.
