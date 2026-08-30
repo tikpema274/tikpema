@@ -112,7 +112,7 @@ const { handler: listHandler } = await import("../netlify/functions/bridge-recei
 const { writeReceiptNeverThrows, isPastDeadline, listByOwner, readReceipt, receiptKey,
         pendingReceiptKey, isStranded, SUBMITTED_STATE } =
   await import("../netlify/functions/_bridge-receipts.mjs");
-const { recordPendingBridge } = await import("../netlify/functions/_bridge-record.mjs");
+const { recordPendingBridge, bridgeReceiptRatio } = await import("../netlify/functions/_bridge-record.mjs");
 
 const OWNER = "0xOWNER";
 const BURN = "0x" + "ab".repeat(32);
@@ -521,7 +521,10 @@ section("THE PROVISIONAL RECEIPT — behaviour, not source text");
     txId: TXID,
     consent: {
       destinationKey: "base", destinationLabel: "Base (Sepolia)", amountRequested: 0.1,
-      feeUsdc: 0.053216, netUsdc: 0.046784, feeBand: "acknowledge", feeRatio: 0.53216,
+      // ⭐ THE ERROR-PATH SHAPE, POST-2026-08-30. `_actions` attaches feeCharged: null here on
+      // purpose — agentBridge threw, so the SIGNED fee is genuinely unknown and must not be filled
+      // in from the gated one. `netUsdc` is null for the same reason: it pairs with feeCharged.
+      feeCharged: null, feeDisclosed: 0.053216, netUsdc: null, feeBand: "acknowledge",
       ackRequired: true, acknowledged: true, ackToken: "tok_abc",
     },
   });
@@ -531,7 +534,20 @@ section("THE PROVISIONAL RECEIPT — behaviour, not source text");
   const rec = await (await import("@netlify/blobs")).getStore("x").get(pendingReceiptKey(OWNER, TXID));
   check("⭐⭐ …under a txId key, not a hash key", !!rec, pendingReceiptKey(OWNER, TXID));
   check("⭐⭐ ackAcceptedAt IS WRITTEN — the whole point", typeof rec?.ackAcceptedAt === "string" && rec.ackAcceptedAt.length > 10, rec?.ackAcceptedAt);
-  check("⭐ …with the band and ratio that were accepted", rec?.ackBand === "acknowledge" && rec?.feeRatio === 0.53216);
+  check("⭐ …with the band that was accepted", rec?.ackBand === "acknowledge");
+  // ⚠️ WAS `rec.feeRatio === 0.53216`. The ratio is no longer STORED — it was a duplicate of
+  // feeDisclosed/amountRequested and the defect was that duplicate disagreeing with its source.
+  // What must be on the record is the fee the band was computed FROM, so the band stays explicable.
+  check("⭐⭐ …and the DISCLOSED fee it was computed from, so the band is explicable from the record",
+    rec?.feeDisclosed === 0.053216, `${rec?.feeDisclosed}`);
+  check("⭐⭐ …while feeCharged is explicitly NULL — the signing call threw, so it is unknown, not the gated fee",
+    rec !== null && "feeCharged" in rec && rec.feeCharged === null,
+    "this is the defect where a timed-out bridge reported a different fee than a completed one");
+  check("🚨 …and no feeRatio is stored to disagree with either",
+    rec !== null && !("feeRatio" in rec), Object.keys(rec ?? {}).filter((k) => /fee/i.test(k)).join(","));
+  check("⭐ …and the derived ratio reproduces the accepted band",
+    bridgeReceiptRatio(rec) !== null && Math.abs(bridgeReceiptRatio(rec) - 0.53216) < 1e-9,
+    `${bridgeReceiptRatio(rec)}`);
   check("⭐⭐ burnHash is explicitly NULL, never absent", rec !== null && "burnHash" in rec && rec.burnHash === null);
   check("⭐ state is the submitted one, distinguishable from burn_confirmed", rec?.state === SUBMITTED_STATE && rec.state !== "burn_confirmed");
   check("⭐ the Circle txId is retained as the recovery hook", rec?.txId === TXID);
