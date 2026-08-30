@@ -21,6 +21,13 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import ManualBridgePanel, { FeeDisclosureBox } from "../src/components/ManualBridgePanel";
+// ⭐⭐ THE CUSTODY SENTENCE IS NOT RESTATED HERE. It is rendered from CustodyNotice and the panel's
+// output is asserted to CONTAIN it, so the expected text is COMPOSED from the same source that
+// produces the real text. A hardcoded regex would go red when the sentence changed even though this
+// panel was still correct — and worse, it drifted: this suite family once carried TWO different
+// regexes for one sentence, the weaker of which matched either wording and detected neither.
+// The WORDING is asserted once, in verify-custody-notice.tsx, which also demonstrates this property.
+import CustodyNotice from "../src/components/CustodyNotice";
 
 let pass = 0, fail = 0;
 const check = (label: string, cond: boolean, detail = "") => {
@@ -49,11 +56,14 @@ console.log("╚═════════════════════�
 section("1 — ⛔ the caps sentence, the one the agent panel does not need");
 {
   const text = strip(renderToStaticMarkup(<ManualBridgePanel wallet={wallet("metamask")} />));
-  check("says agent spending caps DO NOT apply", /Agent spending caps do not apply here/i.test(text), text.slice(0, 90));
-  check("⭐ …and says WHY — they bound the agent, not the user's own funds",
-    /bound what the agent may move/i.test(text) && /not a limit on your own funds/i.test(text));
-  check("⭐ …and states the user signs with their own key",
-    /you sign this yourself, with your own key/i.test(text));
+  // ⭐ COMPOSED, not restated — see the header. The bridge burns USDC only.
+  check("renders the shared custody notice (caps do not apply)",
+    text.includes(strip(renderToStaticMarkup(<CustodyNotice token="USDC" />))));
+  // ⛔ TWO WORDING ASSERTIONS REMOVED HERE, not relaxed — "says WHY the caps exist" and "states the
+  // user signs with their own key". Both are properties of the SENTENCE, and both are now asserted
+  // once, in verify-custody-notice.tsx §1. Keeping them would rebuild the duplication the composed
+  // binding above exists to remove, and validation 1 proved it: with them present, a wording change
+  // turned THIS suite red while this panel was still perfectly correct.
 }
 
 section("2 — 🚨 THE TAB-CLOSE WINDOW, disclosed BEFORE signing");
@@ -92,8 +102,11 @@ section("4a — NOT CONNECTED: the instruction is CONNECT");
     !/Switch to MetaMask/i.test(text));
   // 🚨 THE CAPS CLAIM MUST NOT LEAK INTO A STATE WHERE NO BRIDGE IS OFFERED — a standing
   // "caps do not apply" beside no control is a claim about a path the user cannot take.
+  // ⭐ COMPOSED IN THE NEGATIVE TOO. A hardcoded regex here went RED under validation 1 when the
+  // shared sentence changed, even though this panel was still correct — the same false failure the
+  // positive assertion was composed to avoid. Non-inclusion of the RENDERED notice is the property.
   check("⭐ …and does NOT assert the caps claim in a state with no bridge control",
-    !/Agent spending caps do not apply/i.test(text));
+    !text.includes(strip(renderToStaticMarkup(<CustodyNotice token="USDC" />))));
   check("⭐ …nor the stay-on-this-page warning, which qualifies a signature it cannot make",
     !/stay on this page until the burn confirms/i.test(text));
 }
@@ -116,7 +129,7 @@ section("4b — 🚨 CONNECTED BUT NOT ACTIVE: the instruction is SWITCH, not co
   check("offers nothing to sign in this state either", !/Sign and bridge/i.test(text));
   // 🚨 Same rule as 4a: a claim about money must not stand beside a control that is not offered.
   check("⭐ …and does NOT assert the caps claim where there is no bridge control",
-    !/Agent spending caps do not apply/i.test(text));
+    !text.includes(strip(renderToStaticMarkup(<CustodyNotice token="USDC" />))));
   check("⭐ …nor the stay-on-this-page warning",
     !/stay on this page until the burn confirms/i.test(text));
 }

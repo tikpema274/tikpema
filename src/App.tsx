@@ -11,6 +11,7 @@ import BridgePanel from "./components/BridgePanel";
 import ManualBridgePanel from "./components/ManualBridgePanel";
 import ManualSendPanel from "./components/ManualSendPanel";
 import ManualSwapPanel from "./components/ManualSwapPanel";
+import SelfSignedPanel from "./components/SelfSignedPanel";
 import VaultPanel from "./components/VaultPanel";
 import NanopaymentPanel from "./components/NanopaymentPanel";
 import UnifiedBalancePanel from "./components/UnifiedBalancePanel";
@@ -86,6 +87,13 @@ export default function App() {
       break;
     // ⭐ LINKED FROM SwapPanel, never only reachable by typing the hash — a live route nothing
     // links to is the state that hid #/dca for 22 days while reading as shipped.
+    // ⭐ The three self-signed operations as ONE page. ⛔ DELIBERATELY NOT IN `NAV` — the page's
+    // only claim is contrastive ("caps do not apply"), and a nav entry would let a reader arrive
+    // having never seen the capped panel, where that sentence reads as reassurance rather than as
+    // the removal of a guard. Reached from a Dashboard card and from each agent panel's twin link.
+    case "self-signed":
+      page = <SelfSignedPanel wallet={wallet} />;
+      break;
     case "swap-manual":
       page = <ManualSwapPanel wallet={wallet} />;
       break;

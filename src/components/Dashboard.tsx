@@ -244,6 +244,17 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
               one says whether it can move your money.
             </div>
           </button>
+          {/* ⭐ THE PAGE'S OTHER WAY IN. The three self-signed operations are NOT in the nav, on purpose,
+              so this card and the agent panels' twin links are the entry points. The blurb carries the
+              CONTRAST, because a reader arriving here has not necessarily seen a capped panel first. */}
+          <button className="quick-card" onClick={() => go("self-signed")}>
+            <div className="qt">Sign it yourself →</div>
+            <div className="qd">
+              Send, bridge or swap from your own wallet, signed with your own key —
+              your agent's spending caps do not bound these.
+            </div>
+          </button>
+
           <button className="quick-card" onClick={() => go("nanopay")}>
             <div className="qt">Nanopayments →</div>
             <div className="qd">

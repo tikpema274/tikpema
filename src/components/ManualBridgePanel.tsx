@@ -13,6 +13,7 @@
 // agent-withdraw and ub-withdraw. ⚠️ Sitting beside a capped panel, SILENCE READS AS CAPPED, so
 // the absence is stated rather than left to be inferred from a missing error.
 import { useEffect, useState } from "react";
+import CustodyNotice from "./CustodyNotice";
 import type { useWallet } from "../wallet/useWallet";
 import { agentClient } from "../lib/agentClient";
 import { arcTestnet } from "../config/chain";
@@ -220,12 +221,9 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
     <div className="panel">
       <div className="panel-eyebrow">Bridge from your own wallet</div>
 
-      {/* ⛔ THE ONE LINE THE AGENT PANEL DOES NOT NEED. */}
-      <div className="status" style={{ borderLeft: "3px solid var(--accent)", paddingLeft: ".9rem" }}>
-        You sign this yourself, with your own key, spending your own USDC.{" "}
-        <b>Agent spending caps do not apply here</b> — they bound what the agent may move
-        unattended, and they are not a limit on your own funds.
-      </div>
+      {/* ⛔ THE ONE LINE THE AGENT PANEL DOES NOT NEED.
+          ⭐ SHARED, not restated — see CustodyNotice. The bridge burns USDC only. */}
+      <CustodyNotice token="USDC" />
 
       {/* 🚨 THE WINDOW THE AGENT PATH DOES NOT HAVE, DISCLOSED BEFORE SIGNING.
           The agent burns and writes its receipt in ONE server request — there is no moment where

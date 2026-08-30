@@ -222,3 +222,56 @@ here it will not.**
 - Anything about **permit** / `permitType`.
 - **Renaming the three panel titles** — contrastive copy inside the page, and it would cost three suites.
 - The **wallet-guard** unification — named above as its own step.
+
+---
+
+# ADDENDUM — should the SERVED-BUNDLE check target the shared notice too? (scoped, not built)
+
+**2026-08-30, after the unification landed locally.** The assertion split worked one layer in; this
+asks whether it should be repeated one layer out, at `gate:manualswap` / `gate:disclosure`.
+
+## MEASURED FIRST — what the unification did to the bundle
+
+| fragment | prod (before) | build (after) |
+|---|---|---|
+| `spending caps do not apply here` | **3** | **1** |
+| `Agent spending caps do not apply here` | 2 | 1 |
+| `this is your wallet` | **2** | **1** |
+| `this is your wallet and your money` | 1 | **0** — the divergent wording is gone from the artifact |
+
+⭐ **The deduplication is visible in the shipped JavaScript, not just in the source.** And one gate
+fragment got *sharper* by accident: `this is your wallet` had **two** sources (the review step, and
+the swap panel's old sub-copy) and now has one — the review step, which is what it was written to
+pin. A fragment satisfiable from two places does not pin either.
+
+## 🚨 THE TRICK THAT MADE THE SUITE SPLIT WORK **DOES NOT TRANSFER HERE**
+
+The panel suites stopped restating the sentence by **composing** it — rendering `CustodyNotice` and
+asserting inclusion. ⛔ **A bundle gate cannot do that.** It greps minified JavaScript; there is no
+component to render and no React at all. **The fragment must be a literal string**, so "compose it
+from the source of truth" has no analogue at this layer.
+
+**So the answer is NOT "do the same thing again". It is a different, weaker mitigation:**
+
+| | suite layer | bundle layer |
+|---|---|---|
+| how duplication is avoided | ⭐ **composition** — expected text rendered from the component | ⛔ impossible |
+| what remains | one wording suite + three composed bindings | **one gate owning the custody fragment**, and no other gate restating it |
+| how drift is caught | mechanically, by construction | only by the fragment being derived from a real build, and living in one file |
+
+## ⭐ RECOMMENDATION (for a later change, deliberately not this deploy)
+
+- **One gate owns the custody sentence.** Today `gate:manualswap` uses
+  `spending caps do not apply here` as a **CONTROL** — a string that must exist in both old and new
+  builds to prove the instrument can see the app. That is a legitimate second use and should stay;
+  what must not happen is `gate:disclosure`, `gate:manualswap` and a future send/bridge gate each
+  asserting the custody sentence as a *discriminator*. **Three bundle gates pinning one sentence is
+  the same duplication, minus the mechanism that fixed it.**
+- **When a custody-copy bundle check is wanted, add it once**, in its own small gate, and have the
+  others keep using the string only as a control.
+- ⚠️ **Keep deriving fragments from a real `dist`.** A fragment written from the `.tsx` has already
+  failed once in this repo (wrong leading case, present in neither bundle).
+
+⛔ **Not built in this deploy.** `gate:manualswap` was checked against the new build **before**
+deploying and is **12/0** — none of its fragments moved into the shared component, so a red would
+have meant a real defect, not a refactor artefact.

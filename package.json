@@ -90,7 +90,8 @@
     "test:swapbeneficiary": "node scripts/verify-swap-beneficiary.mjs",
     "test:swapdecode": "npx tsx scripts/verify-swap-calldata-decode.ts",
     "test:manualswapcopy": "npx tsx scripts/verify-manual-swap-copy.tsx",
-    "gate:manualswap": "node scripts/verify-deployed-manual-swap.mjs"
+    "gate:manualswap": "node scripts/verify-deployed-manual-swap.mjs",
+    "test:custodynotice": "npx tsx scripts/verify-custody-notice.tsx"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -139,6 +140,7 @@
     "test:swapbeneficiary",
     "test:swapdecode",
     "test:manualswapcopy",
+    "test:custodynotice",
     "test:dcareason",
     "test:ddrail",
     "test:disclosure",

@@ -25,6 +25,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import SendPanel from "../src/components/SendPanel";
 import ManualSendPanel, { SendReviewBox } from "../src/components/ManualSendPanel";
+// ⭐⭐ THE CUSTODY SENTENCE IS NOT RESTATED HERE. It is rendered from CustodyNotice and the panel's
+// output is asserted to CONTAIN it, so the expected text is COMPOSED from the same source that
+// produces the real text. A hardcoded regex would go red when the sentence changed even though this
+// panel was still correct — and worse, it drifted: this suite family once carried TWO different
+// regexes for one sentence, the weaker of which matched either wording and detected neither.
+// The WORDING is asserted once, in verify-custody-notice.tsx, which also demonstrates this property.
+import CustodyNotice from "../src/components/CustodyNotice";
 
 let pass = 0, fail = 0;
 const check = (label: string, cond: boolean, detail = "") => {
@@ -97,11 +104,14 @@ section("2 — ⭐ THE TITLES CARRY THE DISTINCTION, not only the body copy");
 section("3 — ⛔ THE MANUAL SEND STATES THAT CAPS DO NOT APPLY");
 {
   const text = strip(renderToStaticMarkup(<ManualSendPanel wallet={wallet("metamask")} />));
-  check("⛔ says agent spending caps DO NOT apply", /Agent spending caps do not apply here/i.test(text));
-  check("⭐ …and says WHY — they bound the agent, not the user's own funds",
-    /bound what the agent may move/i.test(text) && /not a limit on your own funds/i.test(text));
-  check("⭐ …and states the user signs with their own key",
-    /you sign this yourself, with your own key/i.test(text));
+  // ⭐ COMPOSED, not restated — see the header. ManualSendPanel spends USDC only.
+  check("⛔ renders the shared custody notice (caps do not apply)",
+    text.includes(strip(renderToStaticMarkup(<CustodyNotice token="USDC" />))));
+  // ⛔ TWO WORDING ASSERTIONS REMOVED HERE, not relaxed — "says WHY the caps exist" and "states the
+  // user signs with their own key". Both are properties of the SENTENCE, and both are now asserted
+  // once, in verify-custody-notice.tsx §1. Keeping them would rebuild the duplication the composed
+  // binding above exists to remove, and validation 1 proved it: with them present, a wording change
+  // turned THIS suite red while this panel was still perfectly correct.
 }
 
 section("4 — 🚨 THE ONE NEW RISK: an irreversible transfer with no allowlist");
@@ -145,8 +155,11 @@ section("6 — 🚨 CONNECT vs SWITCH: the collapse this panel was built after")
   // that is not offered. "Caps do not apply" next to no send form is a claim about a path the user
   // cannot take.
   for (const [label, text] of [["not connected", off], ["connected but not active", inactive]] as const) {
+  // ⭐ COMPOSED IN THE NEGATIVE TOO. A hardcoded regex here went RED under validation 1 when the
+  // shared sentence changed, even though this panel was still correct — the same false failure the
+  // positive assertion was composed to avoid. Non-inclusion of the RENDERED notice is the property.
     check(`⭐ …no caps claim in the "${label}" state, where nothing can be sent`,
-      !/Agent spending caps do not apply/i.test(text));
+      !text.includes(strip(renderToStaticMarkup(<CustodyNotice token="USDC" />))));
     check(`⭐ …and no send control offered in the "${label}" state`, !/Sign and send/i.test(text));
   }
 }

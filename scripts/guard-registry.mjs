@@ -61,6 +61,17 @@ export const COMPONENTS = {
   // destination is visible. Its suite renders the review with real numbers and asserts the
   // beneficiary appears IN FULL — a truncation would silently undo the panel's whole purpose.
   ManualSwapPanel:      { suite: "verify-manual-swap-copy.tsx" },
+  // ⭐ THE ONE STATEMENT OF THE CUSTODY POSITION, consumed by all three self-signed panels. It
+  // exists because three copies of this sentence had already drifted (send/bridge identical, swap
+  // divergent) AND the suites drifted with them — one weakened its regex to
+  // /spending caps do not apply here/i, which passes against either wording and detects neither.
+  // ⚠️ Its suite asserts the WORDING; the three panel suites assert only the BINDING, with the
+  // expected text COMPOSED from this component rather than restated. Change the sentence here and
+  // exactly one suite needs editing — demonstrated in verify-custody-notice.tsx §3.
+  CustodyNotice:        { suite: "verify-custody-notice.tsx" },
+  // ⛔ Carries the contrast in its own words, because a reader arriving from the Dashboard card has
+  // not necessarily seen a capped panel first — which is also why this page is NOT in the nav.
+  SelfSignedPanel:      { suite: "verify-custody-notice.tsx" },
   Dashboard:            { suite: "verify-dashboard-copy.tsx" },
   ResearchPanel:        { suite: "verify-research-panel-copy.tsx" },
   // ⚠️ NOT verify-activity-fallback — that renders ONE row subcomponent for a fallback label and

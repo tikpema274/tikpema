@@ -21,6 +21,13 @@ import ManualSwapPanel, { SwapReview } from "../src/components/ManualSwapPanel";
 import SwapPanel from "../src/components/SwapPanel";
 import type { DecodedSwap } from "../src/lib/decodeSwapCalldata";
 import { CONTRACTS } from "../src/config/contracts";
+// ⭐⭐ THE CUSTODY SENTENCE IS NOT RESTATED HERE. It is rendered from CustodyNotice and the panel's
+// output is asserted to CONTAIN it, so the expected text is COMPOSED from the same source that
+// produces the real text. A hardcoded regex would go red when the sentence changed even though this
+// panel was still correct — and worse, it drifted: this suite family once carried TWO different
+// regexes for one sentence, the weaker of which matched either wording and detected neither.
+// The WORDING is asserted once, in verify-custody-notice.tsx, which also demonstrates this property.
+import CustodyNotice from "../src/components/CustodyNotice";
 
 let pass = 0, fail = 0;
 const check = (name: string, ok: boolean, detail = "") => {
@@ -91,8 +98,15 @@ console.log("\n⚠️ THE BANDS SAY SOMETHING DIFFERENT FROM EACH OTHER, and nei
 console.log("\n⛔ CAPS — stated, because silence beside a capped panel reads as capped");
 {
   const t = strip(renderToStaticMarkup(<ManualSwapPanel wallet={wallet("metamask")} />));
-  check("the panel says agent caps DO NOT apply", /spending caps do not apply here/i.test(t));
-  check("it names whose money this is", /this is your wallet and your money/i.test(t));
+  // ⭐ COMPOSED, not restated. 🚨 THIS is the assertion that used to be the WEAK regex
+  // /spending caps do not apply here/i — weakened to accommodate this panel's divergent wording,
+  // so it passed against either and detected neither. ⚠️ NO token prop: a swap spends USDC OR EURC.
+  check("renders the shared custody notice (caps do not apply)",
+    t.includes(strip(renderToStaticMarkup(<CustodyNotice />))));
+  // ⛔ REMOVED, not relaxed: this asserted /this is your wallet and your money/ — a fragment of the
+  // DIVERGENT wording this panel used to carry on its own. That claim now lives in CustodyNotice
+  // ("not a limit on your own funds") and is asserted ONCE, in verify-custody-notice.tsx §1.
+  // Re-asserting it here would rebuild the duplication the composed binding above just removed.
   check("⭐ the TITLE distinguishes it from the agent panel", /Swap from your own wallet/i.test(t));
   check("it says the user pays the gas (the agent panel is gasless)", /you pay the gas/i.test(t));
   check("it links back to the capped agent panel", /agent wallet/i.test(t));
@@ -127,7 +141,13 @@ console.log("\n⭐⭐ THE AGENT PANEL — RENDERED, because it now carries a cap
   // ("…where those caps do not apply"). The distinction that matters is WHO the absence is claimed
   // about: this panel must never claim it about ITSELF. `here` is the word that does that work, and
   // it is the exact phrasing ManualSwapPanel uses for its own uncapped state.
-  check("⛔ …and it never claims the absence about ITSELF", !/caps do not apply here/i.test(t));
+  // ⭐ COMPOSED IN THE NEGATIVE TOO. A hardcoded regex here went RED under validation 1 when the
+  // shared sentence changed, even though this panel was still correct — the same false failure the
+  // positive assertion was composed to avoid. Non-inclusion of the RENDERED notice is the property.
+  // ⚠️ Composed, with a stated residual: this proves SwapPanel does not carry the CANONICAL notice,
+  // not that it could never phrase an absence some other way. That broader property is not
+  // mechanically checkable, and the hardcoded version did not check it either.
+  check("⛔ …and it never carries the custody notice ITSELF", !t.includes(strip(renderToStaticMarkup(<CustodyNotice />))));
   check("⭐ …while the twin's absence IS attributed to the twin", /those caps do not apply/i.test(t));
 }
 

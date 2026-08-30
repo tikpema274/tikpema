@@ -25,6 +25,7 @@ import { useEffect, useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import { describeError } from "../lib/describeError";
 import { CONTRACTS } from "../config/contracts";
+import CustodyNotice from "./CustodyNotice";
 import { decodeAndVerifySwap, SwapDecodeError, type DecodedSwap } from "../lib/decodeSwapCalldata";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
@@ -243,11 +244,17 @@ export default function ManualSwapPanel({ wallet: w }: { wallet: UnifiedWallet }
       <h2>Swap from your own wallet</h2>
       <div className="sub">
         Convert between USDC and EURC on Arc, signed with your own key. You pay the gas.{" "}
-        {/* ⛔ Stated, not implied — the capped agent panel is one route away. */}
-        <b>Your agent's spending caps do not apply here</b> — this is your wallet and your money.{" "}
-        To swap from your agent wallet under those caps, open{" "}
+        To swap from your agent wallet under its caps, open{" "}
         <button className="linkbtn" onClick={() => (window.location.hash = "/swap")}>Swap</button>.
       </div>
+
+      {/* ⭐ SHARED, not restated — this panel used to carry its OWN wording ("Your agent's spending
+          caps do not apply here — this is your wallet and your money"), which is how the drift
+          started and how the suite regex got weakened to accommodate it.
+          🚨 NO `token` PROP, DELIBERATELY: a swap spends USDC *or* EURC, and the shared sentence
+          used to say "your own USDC" unconditionally — false for an EURC→USDC swap. This panel is
+          the one that proves the generic wording is needed. */}
+      <CustodyNotice />
 
       <div className="status" style={{ marginTop: 0, marginBottom: 18 }}>
         Swapping from <span className="mono">{w.address}</span>

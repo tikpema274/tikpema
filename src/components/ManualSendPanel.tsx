@@ -31,6 +31,7 @@ import type { useWallet } from "../wallet/useWallet";
 import { arcTestnet } from "../config/chain";
 import { CONTRACTS } from "../config/contracts";
 import { describeError } from "../lib/describeError";
+import CustodyNotice from "./CustodyNotice";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 const EXPLORER = arcTestnet.blockExplorers.default.url;
@@ -144,12 +145,11 @@ export default function ManualSendPanel({ wallet: w }: { wallet: UnifiedWallet }
       <div className="sub">You sign this in MetaMask — it moves your own USDC, not the agent's.</div>
 
       {/* ⛔ THE LINE THE AGENT SEND PANEL DOES NOT NEED, and the counterpart to the one it now
-          carries. Stated only in this state, where the control is actually offered. */}
-      <div className="status" style={{ borderLeft: "3px solid var(--accent)", paddingLeft: ".9rem" }}>
-        You sign this yourself, with your own key, spending your own USDC.{" "}
-        <b>Agent spending caps do not apply here</b> — they bound what the agent may move
-        unattended, and they are not a limit on your own funds.
-      </div>
+          carries. Stated only in this state, where the control is actually offered — a standing
+          "caps do not apply" beside no control is a claim about a path the user cannot take.
+          ⭐ SHARED, not restated: one statement of the custody position for all three self-signed
+          panels. This send spends USDC only, so it names USDC. */}
+      <CustodyNotice token="USDC" />
 
       {/* 🚨 IRREVERSIBLE, AND NO ALLOWLIST BEHIND IT. The agent send resolves its wallet
           server-side; this destination is whatever was typed. Said before the address is entered,
