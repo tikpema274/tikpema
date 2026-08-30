@@ -174,6 +174,22 @@ section("7a — ⭐ THE REVIEW STEP, RENDERED");
     "an ellipsis would hide exactly the characters a truncated paste corrupts");
   check("🚨 …and does NOT abbreviate it with an ellipsis", !/0x0000…|…ab\b/.test(text));
   check("⭐ shows the amount", /0\.25 USDC/.test(text));
+
+  // ═══ 🚨 THE ASSET, AND THE CONTRADICTION THE USER WOULD OTHERWISE MEET ALONE ═══════════════════
+  // MEASURED on the first live run: MetaMask showed "1 Unknown", not "1 USDC". The token's own
+  // symbol() returns "USDC" and our calldata is the canonical transfer, so the cause is not ours —
+  // which means this box is the ONLY place a user can learn WHAT they are sending.
+  // ⭐ Naming it is necessary and NOT sufficient: "USDC" here against "Unknown" there is a
+  // contradiction with no way to resolve it. The token ADDRESS is the resolvable fact, so it must
+  // be present, and the discrepancy must be stated BEFORE the user meets it.
+  check("⭐⭐ names the ASSET — the only surface that does", /Token:\s*USDC/.test(text));
+  check("⭐⭐ …and gives the token ADDRESS, the one thing checkable against MetaMask",
+    /0x3600000000000000000000000000000000000000/.test(text));
+  check("⭐ …and names the chain", /Arc Testnet/.test(text));
+  check("🚨 …and warns that MetaMask will NOT name it, before the user meets the contradiction",
+    /MetaMask does not recognise this token/i.test(text) && /Unknown/.test(text));
+  check("⭐ …and says it is not a fault in the transfer, so the warning does not read as an error",
+    /not a problem with this transfer/i.test(text));
   check("⭐ offers the sign control", /Sign and send/.test(text));
   check("⭐ …and a way back", /Back/.test(text));
   check("⭐⭐ NO acknowledge language — there is no band to acknowledge",

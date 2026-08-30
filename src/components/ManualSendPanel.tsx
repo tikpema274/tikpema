@@ -29,6 +29,7 @@
 import { useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import { arcTestnet } from "../config/chain";
+import { CONTRACTS } from "../config/contracts";
 import { describeError } from "../lib/describeError";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
@@ -42,12 +43,40 @@ const EXPLORER = arcTestnet.blockExplorers.default.url;
 // ⚠️ IT SHOWS THE ADDRESS IN FULL AND UNTRUNCATED, deliberately. A shortened `0x1234…abcd` would
 // defeat the entire point of the step: the paste errors this catches (a truncated copy, a
 // whitespace-damaged tail) live precisely in the characters an ellipsis hides.
+//
+// ═══ 🚨 IT ALSO NAMES THE ASSET, AND IT IS THE ONLY PLACE THAT DOES ══════════════════════════════
+// MEASURED on the first live run (tx 0x637b3556…, 2026-08-30): MetaMask displayed **"1 Unknown"**,
+// not "1 USDC". Established, not assumed — the token returns `symbol() = "USDC"`, `decimals() = 6`
+// from 1798 bytes of real code, and our calldata is the canonical `0xa9059cbb` transfer, so there
+// is nothing in what we send that could change the name MetaMask prints.
+//
+// ⭐⭐ SO A USER CHECKING ONLY METAMASK CAN SEE HOW MUCH, BUT NOT WHAT. The design note argued this
+// step "is not a second safety net" over MetaMask's confirmation. For the ADDRESS that is right.
+// For the ASSET it is wrong: this is not a second net, it is the only one.
+//
+// 🚨 AND NAMING IT IS NOT ENOUGH ON ITS OWN. Saying "USDC" here while MetaMask says "Unknown" hands
+// the user a CONTRADICTION and no way to resolve it — and this repo's own rule is that a claim
+// contradicting what the user sees elsewhere is a defect, not a nicety. So the box states the
+// discrepancy BEFORE they meet it, and gives the token address, which is the one thing they can
+// actually check against MetaMask and the explorer.
+//
+// ⚠️ WORDED AS AN OBSERVATION, NOT A DIAGNOSIS. What was verified is that MetaMask does not name
+// this token and that the cause is not ours. WHY it does not — token lists rather than an on-chain
+// `symbol()` read — was NOT verified against MetaMask's source, so the copy does not assert it.
 export function SendReviewBox({
   to, amountUsdc, busy, onSign, onBack,
 }: { to: string; amountUsdc: number; busy: boolean; onSign: () => void; onBack: () => void }) {
   return (
     <div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>
       Sending <b>{amountUsdc} USDC</b> to <span className="mono">{to}</span>
+      <div style={{ marginTop: 6 }}>
+        Token: <b>USDC</b> on {arcTestnet.name} — <span className="mono">{CONTRACTS.USDC}</span>
+      </div>
+      <div style={{ marginTop: 6 }}>
+        ⚠️ <b>MetaMask does not recognise this token</b> and will show the amount without a name,
+        like <span className="mono">1 Unknown</span>. That is MetaMask, not a problem with this
+        transfer — the token address above is what you are sending, and you can check it there.
+      </div>
       <div style={{ marginTop: 8 }}>
         <button className="emerald" onClick={onSign} disabled={busy}>
           {busy ? "Confirm in MetaMask…" : "Sign and send"}
