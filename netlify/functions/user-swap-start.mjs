@@ -83,7 +83,21 @@ export function swapLossBand({ amountInUsd, minOutUsd }) {
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
-  if (event.blobs) (await import("./_blobs.mjs")).connectBlobs(event);
+  // ⛔ NO `connectBlobs(event)` HERE, AND THAT IS DELIBERATE — DO NOT ADD ONE BACK CASUALLY.
+  // This handler reads and writes NO store. Verified by tracing the transitive import graph: the
+  // eight modules reachable from here (_arc, _auth, _blobs, _circle, _predict, _retry, _swap and
+  // this file) contain no `getStore` call at all, and `_auth`'s session verification is pure HMAC
+  // with no Blobs reference of any kind.
+  //
+  // ⚠️ connectBlobs IS NOT A NO-OP IN GENERAL — it is a SIDE EFFECT, not a handle. It re-injects
+  // `uncachedEdgeURL` into NETLIFY_BLOBS_CONTEXT, which connectLambda drops and without which a
+  // `consistency:"strong"` read THROWS (see _blobs.mjs's incident header). It was inert *here* only
+  // because nothing in reach performs a Blobs read.
+  //
+  // 🚨 SO IF A STORE READ IS EVER ADDED TO THIS PATH, THE REPAIR MUST COME BACK WITH IT.
+  // _blobs.mjs states the rule: "any path that can reach [a strong read] must use connectBlobs."
+  // Removing the line makes the handler honest about what it touches; it does not make Blobs safe
+  // to use here without it.
 
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });
