@@ -150,3 +150,125 @@ how an experiment stops being one.
 - **That 0.018 USDC is the cost** — it is the estimated ceiling; gas is flat, so the fraction changes
   sharply with size.
 - **Anything on mainnet.**
+
+---
+
+# ✅ RESULT — 2026-08-30: **PREDICTION 5 HELD. THE PIN DID WORK.** And one real defect found.
+
+Swap `0x75c4d6a6afd86c837087d1378531c8994b9de4d9e47828a5ecd6504672699ae3`, block 59641706, success.
+1.000000 EURC → **1.356968 USDC** against a signed floor of **1.316260**. Nothing above this line is
+amended.
+
+## ⭐⭐ PREDICTION 5 — MEASURED ON THIS TRANSACTION, NOT PREDICTED FROM THE LAST ONE
+
+Two Transfer emitters logged the same delivery to the signer:
+
+| emitter | value |
+|---|---|
+| `0x3600…0000` — USDC ERC-20, 6 dp | `1356968` |
+| `0xffff…fffe` — native mirror, 18 dp | `1356968000000000000` |
+
+| read | result |
+|---|---|
+| ⭐ **PINNED to the USDC contract** *(what shipped)* | **1.356968 USDC** |
+| 🚨 **UNPINNED — topic + recipient only** | **1,356,968,000,001.356968 USDC** |
+| ratio | **1.000e+12**, exactly as pre-registered |
+
+> ⭐ **The pin excluded 1,356,968,000,000 USDC of native-mirror double count.** On the USDC→EURC run
+> the pinned and unpinned sums coincided, so the pin was correct but idle. **Here it did the work.**
+
+## The rest, verified
+
+| | |
+|---|---|
+| beneficiary, decoded from the **landed input** | `0x74b7…24E5` == `tx.from` ✅ |
+| output ≥ signed floor | 1.356968 ≥ 1.316260 ✅ |
+| approve exact-amount | Approval value **1.000000 EURC** == `amountIn` ✅ |
+| **EURC allowance after** | **0** ✅ falsifier 3 cleared |
+| gas paid | **0.016179 USDC** (swap 714,996 + approve 55,438) vs the **0.018318 upper bound** — under ✅ |
+| receipt written | none. 0 keys in four stores mention the tx; ⭐ the same query finds **14** keys naming this signer in `bridge-receipts`, so the absence is calibrated ✅ |
+
+## ⭐ THE FLOOR THAT MOVED — a re-quote, and the SIGNED floor is the one the final review showed
+
+Review showed **1.290776**; the result showed **1.316260**. **The landed calldata carries 1.316260**,
+so the signed floor is the later quote's — a re-quote before signing, consistent with the countdown
+and with quote-after-approve. ⛔ **No stale floor was signed.**
+
+---
+
+# 🚨 THE FINDING — AND IT INVERTS THE HYPOTHESIS. THE GATE IS FINE; THE SENTENCE IS WRONG.
+
+**The question asked: is the band computed from the same number the panel displays, or a different
+one?** Traced through the code:
+
+```
+user-swap-start.mjs:103   band = swapLossBand({ amountInUsd, minOutUsd })
+                  :113-114  returns  band: band.band,  impliedLoss: band.impliedLoss
+ManualSwapPanel   :288     <SwapReview band={quote.band} impliedLoss={quote.impliedLoss} …/>
+                  :293     GATES on   quote.band
+                  : 68     DISPLAYS   pct(impliedLoss)
+```
+
+⭐ **THE SAME NUMBER, from one call, returned in one object.** They cannot disagree. The gate is not
+reading a different quantity, and it has **not** been banding something that can never reach 5%.
+
+## ⭐⭐ THE VALUE WAS NEGATIVE, AND `none` WAS CORRECT
+
+Reproduced from the observed screen (floor 1.290776 on 1.000000 EURC in, showing −11.64%):
+
+```
+implied getTokenRates EURC price   = $1.15619
+swapLossBand({amountInUsd: 1.15619, minOutUsd: 1.290776})
+   impliedLoss = -11.64%    band = "none"
+   -0.1164 >= 0.10 ? false      -0.1164 >= 0.05 ? false
+```
+
+**The floor was worth MORE than the input at the mid-rate.** A negative implied loss is a *gain*, and
+`none` is the right answer. ⭐ **And the band is fully capable of firing:** +6% → `warn`, +12% →
+`acknowledge`, verified by calling it directly.
+
+## ⛔ SO THE DEFECT IS THE COPY, AND IT IS A REAL ONE
+
+```jsx
+That guarantee is <b>{pct(impliedLoss)}</b> below the mid-market value of what you are spending.
+```
+
+The word **"below" is hardcoded** while the number carries its own sign. At −11.64% the sentence
+renders *"is −11.64% below the mid-market value"* — which a careful reader parses as **an 11.64%
+loss**. It is an 11.64% **gain**. 🚨 **The operator read it exactly that way, and was right to.**
+
+⚠️ **A gate that correctly stays silent beside a sentence that reads as alarming is worse than
+either alone**: it teaches that the gate is broken, which is the opposite of the truth.
+
+### 🚨 WHY NO SUITE CAUGHT IT — every fixture was POSITIVE
+
+`verify-manual-swap-copy` renders `SwapReview` three times, with `impliedLoss` of **0.0312, 0.03,
+0.14 / 0.07**. ⛔ **A negative value was never rendered**, so the sentence was never seen in the state
+where its wording fails. The suite asserts *"the implied loss is stated as a percentage"* and that is
+true of `-11.64%` — the assertion passes on the broken output.
+[[state-behind-a-transition-is-untested-by-default]]
+
+## ⚠️ AND A SECOND-ORDER FINDING: THE TWO PRICE SOURCES DISAGREE WILDLY ON TESTNET
+
+Measured live, both directions, 1.000000 in:
+
+| | |
+|---|---|
+| pool, USDC→EURC | 0.808636 EURC → implies EURC = **$1.23665** |
+| pool, EURC→USDC | 1.266665 USDC → implies EURC = **$1.26666** |
+| `getTokenRates` (inferred from the run) | **$1.15619** |
+| ⭐ **round trip** | 1 USDC → **1.024271** USDC = **+2.43%** |
+
+🚨 **The pool does not round-trip** — it prices EURC differently in each direction, and a round trip
+"gains" 2.43%. So on this testnet the mid-rate check is not a meaningful *economic* check; it is
+structurally doing its job while the two sources it compares are far apart.
+⛔ **This does not excuse the copy defect** — it is why the negative case is reachable at all, and
+therefore why the wording was always going to be exercised eventually.
+
+## ⛔ NOT FIXED — as instructed. What a fix must decide
+
+- **The sentence must carry the sign in words**, not a signed number inside a fixed "below".
+- **Whether a large negative deserves its own disclosure.** A guarantee far ABOVE mid-market is not
+  automatically good news — it can mean the rate source is stale or the pool is mispriced, which is
+  exactly what the round-trip measurement shows. Silence may not be the right answer either.
+- **The suite must render a negative fixture**, or the next wording will have the same blind spot.
