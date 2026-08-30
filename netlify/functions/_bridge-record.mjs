@@ -69,7 +69,7 @@ async function triggerSettle({ event, owner, burnHash }) {
  * Write the receipt for a completed bridge and ask the settler to verify it.
  *
  * @param r        executeAction's bridge return ({ burnHash, tx, destination, feeUsdc,
- *                 netUsdc, recipient, feeBand, feeRatio, ackRequired, acknowledged,
+ *                 netUsdc, recipient, feeBand, feeCharged, feeDisclosed, ackRequired, acknowledged,
  *                 ackToken })
  * @param session  the verified session — `session.address` is the receipt's owner
  * @param event    the request, for the settle trigger's base URL
@@ -81,6 +81,49 @@ async function triggerSettle({ event, owner, burnHash }) {
  * No-ops without a burnHash: the 202 TxPendingError path has no hash to key on, so there
  * is nothing to record and today's behaviour is preserved.
  */
+// ═══ ⭐⭐ THE FEE PAIR — ONE PLACE, SO NO WRITER CAN MIX SOURCES ═══════════════════════════════
+// Every write path takes its fees through here. Three writers each mapping fields by hand is how
+// `feeUsdc` came from one quote and `feeRatio` from another in the first place.
+//
+//   feeCharged   — what was actually taken: the fee signed into the calldata. `null` when the
+//                  signing call threw and the value is genuinely unknown — never a stand-in.
+//   feeDisclosed — what the consent decision was made against: the fee the band gate evaluated.
+//
+// ⚠️ NOT "feeAcknowledged": at band `none` nothing is acknowledged, so that name would be false on
+// most receipts. "Disclosed" is true at every band.
+//
+// 🚨 NO `feeRatio` IS STORED. It is `feeDisclosed / amountRequested`, both already on the record.
+// Storing it duplicated a derivable value, and the defect was that duplicate disagreeing with its
+// source. Derived at read time by `bridgeReceiptRatio` below.
+//
+// ⭐ THE INVARIANT, ASSERTED BEFORE ANYTHING ENFORCES IT: you may be charged less than you were
+// shown, never more. Nothing enforces `feeCharged <= feeDisclosed` yet — consent-fee-binding is the
+// work that will. Checking it HERE means a violation is a loud finding today rather than a surprise
+// when that lands. ⛔ It does NOT refuse: a receipt must be written even when it is surprising, or
+// the money moves with no record at all. It shouts and stores the truth.
+function feePair(src, { burnHash } = {}) {
+  const charged = src?.feeCharged ?? null;
+  const disclosed = src?.feeDisclosed ?? null;
+  if (typeof charged === "number" && typeof disclosed === "number" && charged > disclosed) {
+    console.error(
+      `[bridge-receipt] 🚨 FEE INVARIANT VIOLATED — charged ${charged} > disclosed ${disclosed}` +
+      `${burnHash ? ` on ${burnHash}` : ""}. The user was charged MORE than they were shown.`
+    );
+  }
+  return { feeCharged: charged, feeDisclosed: disclosed };
+}
+
+/** The ratio the BAND was computed from, derived — never stored. Reads legacy records too.
+ *  ⭐ It derives from the DISCLOSED fee, not the charged one, so the record explains its own
+ *  `ackBand`: a ratio taken from the charged fee could not reproduce a band computed from the
+ *  disclosed one. ⚠️ `feeUsdc` is the pre-2026-08-30 field name; older receipts carry only it. */
+export function bridgeReceiptRatio(r) {
+  const amount = Number(r?.amountRequested);
+  const fee = r?.feeDisclosed ?? r?.feeUsdc ?? null;
+  if (!Number.isFinite(amount) || amount <= 0 || typeof fee !== "number") return null;
+  return fee / amount;
+}
+
 export async function recordBridge({ r, session, event, amountRequested, quoteId = null, stepIndex = null, quotePromoted = null }) {
   if (!r?.burnHash) return { recorded: false, reason: "no_burn_hash" };
 
@@ -96,8 +139,8 @@ export async function recordBridge({ r, session, event, amountRequested, quoteId
     destinationLabel: r.destination?.label,
     recipient: r.recipient,
     amountRequested: Number(amountRequested),
-    feeUsdc: r.feeUsdc,
-    netPredicted: r.netUsdc,
+    ...feePair(r, { burnHash: r.burnHash }),
+    netPredicted: r.netUsdc,   // pairs with feeCharged; null when the signed quote is unknown
     delivery: "predicted",
     amountDelivered: null,
     // ⭐ THE GATE LEAVES EVIDENCE. Without these the receipt cannot answer "was the user
@@ -122,7 +165,6 @@ export async function recordBridge({ r, session, event, amountRequested, quoteId
     // from one place and the value from another.
     // Pinned in verify-bridge-fee-band.mjs §9: the two refusals must PRECEDE the code that
     // can produce `acknowledged`, which is the property this field actually rests on.
-    feeRatio: r.feeRatio ?? null,
     ackBand: r.feeBand ?? null,
     ackRequired: r.ackRequired ?? false,
     ackAcceptedAt: r.acknowledged ? burnedAt : null,
@@ -219,11 +261,10 @@ export async function recordPendingBridge({ e, session, amountRequested, quoteId
     // _actions.mjs on why its absence causes an unbounded re-check.
     recipient: c.recipient ?? null,
     amountRequested: Number(amountRequested),
-    feeUsdc: c.feeUsdc ?? null,
+    ...feePair(c, { burnHash: c.burnHash }),
     netPredicted: c.netUsdc ?? null,
     delivery: "predicted",
     amountDelivered: null,
-    feeRatio: c.feeRatio ?? null,
     ackBand: c.feeBand ?? null,
     ackRequired: c.ackRequired ?? false,
     ackAcceptedAt: c.acknowledged ? submittedAt : null,
@@ -308,11 +349,10 @@ export async function recordUserPendingBridge({ session, amountRequested, consen
     destinationLabel: c.destinationLabel ?? null,
     recipient: c.recipient ?? null,
     amountRequested: Number(amountRequested),
-    feeUsdc: c.feeUsdc ?? null,
+    ...feePair(c, { burnHash: c.burnHash }),
     netPredicted: c.netUsdc ?? null,
     delivery: "predicted",
     amountDelivered: null,
-    feeRatio: c.feeRatio ?? null,
     ackBand: c.feeBand ?? null,
     ackRequired: c.ackRequired ?? false,
     ackAcceptedAt: c.acknowledged ? submittedAt : null,
@@ -344,9 +384,13 @@ export async function promoteUserBridge({ session, intentId, burnHash, burnTx, e
     tx: burnTx,
     destination: { key: pending.destinationKey, label: pending.destinationLabel },
     recipient: pending.recipient,
-    feeUsdc: pending.feeUsdc,
+    // ⭐ THE MANUAL PATH PRICES ONCE. `priceAndGate` returns the burn calldata built from the SAME
+    // quote it gated, so the charged and disclosed fees are the same number BY CONSTRUCTION — not
+    // by coincidence, and not something that can drift. Both are set from it explicitly rather than
+    // one being left to default, so a reader never has to infer which quote a blank meant.
+    feeCharged: pending.feeCharged ?? pending.feeUsdc,
+    feeDisclosed: pending.feeDisclosed ?? pending.feeUsdc,
     netUsdc: pending.netPredicted,
-    feeRatio: pending.feeRatio,
     feeBand: pending.ackBand,
     ackRequired: pending.ackRequired,
     // ⭐ CARRIED FROM THE INTENT, NOT RECOMPUTED. The refusal that makes this meaningful ran in

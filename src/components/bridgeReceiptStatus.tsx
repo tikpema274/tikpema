@@ -34,6 +34,13 @@ import { USDC_DP } from "../lib/formatUsdc";
 export type BridgeReceiptView = {
   state?: string;
   netPredicted?: number;
+  // ⭐ BOTH FEES, NAMED FOR WHAT THEY ARE. `feeCharged` is what was actually taken; `feeDisclosed`
+  // is what the consent decision was made against. They differ only when the fee moved between the
+  // gate and the signature — and a receipt that carries both is the only place that gap is VISIBLE
+  // rather than silently averaged away.
+  // ⚠️ `feeCharged` is null when the signing call threw and the value is genuinely unknown.
+  feeCharged?: number | null;
+  feeDisclosed?: number | null;
   amountDelivered?: number | null;
   delivery?: string;
   destinationKey?: string | null;
@@ -180,6 +187,27 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
           {usdc(r.netPredicted)
             ? <>in flight — <b>estimated</b> {usdc(r.netPredicted)} USDC to arrive</>
             : <>in flight — the Arc burn is confirmed; <b>the estimated arrival amount was not recorded</b></>}
+        </span>
+      )}
+      {/* ═══ ⭐⭐ THE FEE, AND THE GAP BETWEEN SHOWN AND CHARGED ═══════════════════════════════
+          Added 2026-08-30 with the two-fee record. Rendering it is not decoration: the record now
+          carries `feeDisclosed` and `feeCharged` precisely so the drift between them can be SEEN,
+          and a field written but never rendered is the third instance of that shape this week.
+          ⚠️ The two are usually identical, so the second clause fires rarely — which is exactly why
+          it must be here rather than left to whoever reads the raw record. */}
+      {(r.feeCharged != null || r.feeDisclosed != null) && (
+        <span className="sub" style={{ display: "block" }}>
+          {r.feeCharged != null
+            ? <>fee <b>{usdc(r.feeCharged)} USDC</b> charged</>
+            : <>fee <b>not recorded</b> — the signing call did not return, so what was charged is unknown</>}
+          {r.feeDisclosed != null && r.feeCharged != null && r.feeDisclosed !== r.feeCharged && (
+            <> · you were shown <b>{usdc(r.feeDisclosed)} USDC</b></>
+          )}
+          {r.feeDisclosed != null && r.feeCharged != null && r.feeCharged > r.feeDisclosed && (
+            <span style={{ color: "var(--warn)" }}>
+              {" "}⚠️ you were charged MORE than you were shown
+            </span>
+          )}
         </span>
       )}
       {r.state === "minted" && measured && (

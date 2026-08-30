@@ -70,9 +70,12 @@ export async function handler(event) {
       destinationKey: gate.dest.key,
       destinationLabel: gate.dest.label,
       recipient: gate.recipient,
-      feeUsdc: gate.fee.feeUsdc,
+      // ⭐ ONE QUOTE PRICED THIS. `priceAndGate` gates and builds the calldata from the SAME fee,
+      // so charged == disclosed by construction here. Both are written explicitly so a reader never
+      // has to infer which quote a missing field meant. No ratio is stored — it derives.
+      feeCharged: gate.fee.feeUsdc,
+      feeDisclosed: gate.fee.feeUsdc,
       netUsdc: gate.fee.netUsdc,
-      feeRatio: gate.band.feeRatio,
       feeBand: gate.band.band,
       ackRequired: gate.ackRequired,
       acknowledged: gate.acknowledged,

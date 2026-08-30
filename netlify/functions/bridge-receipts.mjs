@@ -2,6 +2,7 @@ import { connectBlobs } from "./_blobs.mjs";
 import { json } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
 import { listByOwner, isPastDeadline, isRecheckable, provisionalStatus, mintRecoveryStatus } from "./_bridge-receipts.mjs";
+import { bridgeReceiptRatio } from "./_bridge-record.mjs";
 
 // GET|POST /api/bridge-receipts   (auth required)
 //
@@ -85,8 +86,16 @@ export async function handler(event) {
       destinationKey: r.destinationKey,
       destinationLabel: r.destinationLabel,
       amountRequested: r.amountRequested,
-      feeUsdc: r.feeUsdc,
+      // ⭐ BOTH FEES, NAMED FOR WHAT THEY ARE. `feeUsdc` is the pre-2026-08-30 name, read as a
+      // fallback so older receipts still project — new records do not write it.
+      feeCharged: r.feeCharged ?? r.feeUsdc ?? null,
+      feeDisclosed: r.feeDisclosed ?? r.feeUsdc ?? null,
       netPredicted: r.netPredicted,
+      // ⭐ DERIVED, NEVER STORED — so it cannot disagree with the fee it comes from. The disclosed
+      // net is derived for the same reason, and covers the case where the signed quote is unknown
+      // (a throw mid-flight) so `netPredicted` is null.
+      netDisclosed: (Number.isFinite(Number(r.amountRequested)) && typeof (r.feeDisclosed ?? r.feeUsdc) === "number")
+        ? Number(r.amountRequested) - (r.feeDisclosed ?? r.feeUsdc) : null,
       delivery: r.delivery,
       amountDelivered: r.amountDelivered ?? null,
       mintTx: r.mintTx ?? null,
@@ -95,7 +104,7 @@ export async function handler(event) {
       irisClaimedMintTxHash: r.irisClaimedMintTxHash ?? null,
       verifyFailure: r.verifyFailure ?? null,
       // The disclosure that was shown and (if required) accepted.
-      feeRatio: r.feeRatio ?? null,
+      feeRatio: bridgeReceiptRatio(r),
       ackBand: r.ackBand ?? null,
       ackRequired: r.ackRequired ?? false,
       ackAcceptedAt: r.ackAcceptedAt ?? null,

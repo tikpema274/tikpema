@@ -471,10 +471,20 @@ export async function executeAction(step, ctx) {
         // downstream can re-derive it from the record's own keys.
         recipient: walletAddress,
         amountRequested: amount,
-        feeUsdc: fee.feeUsdc,
-        netUsdc: fee.netUsdc,
+        // 🚨 THE SECOND DEFECT, AND THE FIX IS A DIFFERENT FIELD, NOT A DIFFERENT VALUE.
+        // This path used to record the GATED fee under `feeUsdc` — the same field the SUCCESS path
+        // fills from the SIGNED quote — so the same bridge reported a different fee depending on
+        // whether the userOp happened to settle inside the deadline. A timing accident, presented
+        // as a property of the money.
+        // ⭐ `agentBridge` threw, so the signed fee is genuinely UNKNOWN here: it is `null`, not a
+        // stand-in. What we do know is what was disclosed, and that is recorded as such.
+        // ⚠️ `netUsdc` pairs with `feeCharged`, so it is null too. The disclosed net is
+        // `amountRequested - feeDisclosed` and is derived by the exposure — not stored, for the
+        // same reason the ratio is not.
+        feeCharged: null,
+        feeDisclosed: fee.feeUsdc,
+        netUsdc: null,
         feeBand: bandInfo.band,
-        feeRatio: bandInfo.feeRatio,
         ackRequired: bandInfo.band === "acknowledge",
         acknowledged: bandInfo.band === "acknowledge",
         ackToken: bandInfo.band === "acknowledge" ? expected : null,
@@ -491,8 +501,20 @@ export async function executeAction(step, ctx) {
       burnHash: r.burnHash,
       tx: r.burnTx,
       destination: r.destination,
-      feeUsdc: r.feeUsdc,
-      netUsdc: r.netUsdc,
+      // ═══ ⭐⭐ TWO FEES, NAMED FOR WHAT THEY ARE — NOT FOR WHICH QUOTE THEY CAME FROM ═══════
+      // `agentBridge` re-prices internally, so this path holds two quotes: the one the band gate
+      // evaluated, and the one actually signed. They are ~200 ms apart and the fee moves, so they
+      // can differ.
+      // 🚨 THIS USED TO EMIT `feeUsdc` FROM THE SIGNED QUOTE AND `feeRatio` FROM THE GATED ONE, so
+      // a receipt could carry a fee and a ratio that are not arithmetically related. Reproduced
+      // deterministically by injection in verify-receipt-fee-authority.mjs: feeUsdc 0.05 alongside
+      // feeRatio 0.6 while feeUsdc/amount was 0.5.
+      // ⭐ Each field now names what it IS, so no consumer needs to know a quote letter, and each
+      // PAIR comes from a single quote: (feeCharged, netUsdc) from the signed one, (feeDisclosed,
+      // feeBand) from the gated one.
+      feeCharged: r.feeUsdc,      // what was actually taken — the fee signed into the calldata
+      feeDisclosed: fee.feeUsdc,  // what the consent decision was made against
+      netUsdc: r.netUsdc,         // pairs with feeCharged
       recipient: r.recipient,
       // ⭐ EVIDENCE THAT THE GATE RAN, SERVER-SOURCED. The band is what WE priced and
       // classified; `acknowledged` is true only because the token the caller returned
@@ -500,7 +522,9 @@ export async function executeAction(step, ctx) {
       // nothing — this is the server recording what it itself enforced. Persisted on the
       // receipt so "who accepted losing 53%, and when" survives the session.
       feeBand: bandInfo.band,
-      feeRatio: bandInfo.feeRatio,
+      // ⭐ NO `feeRatio`. It is `feeDisclosed / amountRequested` — both on the record — so storing
+      // it was a duplicate source of truth, and THE DEFECT WAS THAT DUPLICATE DISAGREEING WITH ITS
+      // SOURCE. Derived at read time instead, which makes self-reconciliation structural.
       ackRequired: bandInfo.band === "acknowledge",
       acknowledged: bandInfo.band === "acknowledge",
       ackToken: bandInfo.band === "acknowledge" ? expected : null,

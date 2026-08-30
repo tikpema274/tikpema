@@ -282,6 +282,35 @@ section("9 — A MISSING AMOUNT MUST NOT BECOME A CONFIDENT NUMBER");
       !/NaN/.test(text({ state: st, netPredicted: null as any, amountDelivered: null, delivery: "measured" }))));
 }
 
+// ═══════════ ⭐⭐ THE TWO FEES ON A RECEIPT — RENDERED, or they are write-never-read ═══════════
+// The record carries `feeCharged` and `feeDisclosed` so the gap between what was SHOWN and what was
+// TAKEN is visible. A field written and never rendered is the shape this repo hit three times in one
+// week, so both are asserted on the rendered output, including the rare branches.
+section("FEES — both, and the drift between them");
+{
+  const base = { state: "minted", delivery: "measured", amountDelivered: 0.0958, destinationLabel: "Base (Sepolia)" };
+
+  const same = text({ ...base, feeCharged: 0.054209, feeDisclosed: 0.054209 });
+  check("⭐⭐ shows the fee that was CHARGED", /0\.054209 USDC charged/.test(same), same.slice(0, 90));
+  check("⭐ …and stays quiet about the disclosed fee when it is the same number",
+    !/you were shown/.test(same), "an always-on second figure would train people to ignore it");
+
+  const drift = text({ ...base, feeCharged: 0.05, feeDisclosed: 0.06 });
+  check("⭐⭐ …and SHOWS the disclosed fee when it differs — the drift is visible, not averaged away",
+    /0\.050000 USDC charged/.test(drift) && /you were shown/.test(drift) && /0\.060000/.test(drift));
+
+  // ⭐ THE INVARIANT, ON SCREEN. Nothing enforces charged <= disclosed yet; if a receipt ever
+  // violates it the user is told, rather than it living only in a server log.
+  const bad = text({ ...base, feeCharged: 0.07, feeDisclosed: 0.06 });
+  check("🚨 …and says so LOUDLY if charged exceeded disclosed",
+    /charged MORE than you were shown/i.test(bad));
+
+  // ⚠️ The error path records feeCharged: null deliberately — unknown, not a stand-in.
+  const unknown = text({ ...base, feeCharged: null, feeDisclosed: 0.06 });
+  check("⭐⭐ an UNKNOWN charged fee says so, rather than showing the disclosed one as if it were charged",
+    /not recorded/.test(unknown) && !/0\.060000 USDC charged/.test(unknown), unknown.slice(0, 100));
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

@@ -457,7 +457,15 @@ section("10 — THE PENDING PATH KEEPS THE CONSENT EVIDENCE (the 202 wrote NOTHI
     /e instanceof TxPendingError/.test(bridgeFn) && /e instanceof TxPendingError/.test(planFn));
 
   check("⭐⭐ the provisional receipt carries ackAcceptedAt", /ackAcceptedAt: c\.acknowledged \? submittedAt : null/.test(record));
-  check("⭐ …and the band/ratio alongside it", /ackBand: c\.feeBand/.test(record) && /feeRatio: c\.feeRatio/.test(record));
+  // ⚠️ UPDATED 2026-08-30. This asserted `feeRatio: c.feeRatio` — a STORED ratio, which is exactly
+  // the duplicate that could disagree with the fee beside it. The ratio is no longer stored; it
+  // derives from feeDisclosed/amountRequested. What must still travel with the band is the fee the
+  // band was computed FROM, so the record can explain its own band.
+  check("⭐ …and the band alongside it", /ackBand: c\.feeBand/.test(record));
+  check("⭐⭐ …with the fee pair, so every writer goes through one mapping",
+    /\.\.\.feePair\(c/.test(record));
+  check("🚨 …and NO ratio is stored anywhere in the record module",
+    !/feeRatio:\s*[a-z]/.test(record), "a stored ratio is a duplicate that can disagree with its source");
   check("⭐⭐ …keyed on the txId, because there is no hash yet",
     /pendingReceiptKey\(receipt\.owner, receipt\.txId\)/.test(receipts) && /`o\/\$\{norm\(owner\)\}\/tx-\$\{norm\(txId\)\}`/.test(receipts));
   check("⭐⭐ …and a provisional receipt may NEVER carry a burnHash (it would masquerade as confirmed)",
