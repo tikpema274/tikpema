@@ -46,10 +46,29 @@ let pass = 0, fail = 0;
 const check = (l, c, x = "") => { if (c) { pass++; console.log(`  ✅ ${l}${x ? ` — ${x}` : ""}`); } else { fail++; console.log(`  ❌ ${l}${x ? ` — ${x}` : ""}`); } };
 
 // Present in BOTH the old and new builds. If these are missing we are not looking at this app.
+//
+// ═══ 🚨 ONE OF THESE PASSES BY COINCIDENCE — READ THIS BEFORE EDITING CustodyNotice ═════════════
+// `spending caps do not apply here` was chosen as a control on 2026-08-30, when THREE panels each
+// carried that sentence inline. Later the same day they were unified into `CustodyNotice`, whose
+// wording is "Agent spending caps do not apply here" — which HAPPENS to contain the control as a
+// substring. ⭐ The control therefore still passes, but it passes for a reason NOBODY CHOSE: it now
+// depends on a shared component this gate does not otherwise mention, was never written to check,
+// and whose text is owned by a different suite entirely.
+//
+// ⛔ THE CONSEQUENCE, WHICH IS THE POINT OF THIS NOTE: EDIT CustodyNotice'S SENTENCE AND THIS GATE
+// GOES RED — reporting "cannot see the app's panel copy", i.e. aborting before it judges anything —
+// while the SWAP PANEL IT NAMES IS PERFECTLY FINE. A reader would chase a defect in the wrong file.
+// ⚠️ A control that can be satisfied from a source outside the thing it is controlling for is not
+// really a control; it is a coincidence that has not failed yet.
+//
+// ⭐ THE FIX IS NOT TO WEAKEN IT. Replace this entry with a fragment that belongs to the SWAP PANEL
+// and predates this change (the other two controls already do), or let the custody sentence be
+// owned by a gate of its own — scoped in docs/self-signed-page-scope.md, deliberately not built.
+// [[a-deploy-check-needs-a-build-it-should-fail-against]]
 const CONTROL = [
   "Swapping from",
   "Set up your wallet first",
-  "spending caps do not apply here",
+  "spending caps do not apply here", // 🚨 the coincidental one — see the block above
 ];
 // New-build only. Each confirmed ABSENT from production before the deploy.
 const MUST_BE_PRESENT = [
