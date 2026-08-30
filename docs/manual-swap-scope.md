@@ -23,6 +23,54 @@ closing paragraph, which is quoted and **tested** here rather than repeated.
 
 ---
 
+# ✅ RESULT — 2026-08-30: **THE DROUGHT HAS LIFTED.** Read-only, nothing spent.
+
+Checked before anything else, as the gating block demands. **Quote endpoint only — nothing signed,
+nothing submitted, no gas.** Four `createSwap` quotes, **both directions**, two amounts (one
+direction alone would be a filtered read).
+
+| pair | amountIn | HTTP | `executionParams` | TTL |
+|---|---|---|---|---|
+| USDC→EURC | 1.000000 | **200** | present, signature len 132 | 599.1s |
+| USDC→EURC | 5.000000 | **200** | present | 599.4s |
+| EURC→USDC | 1.000000 | **200** | present | 599.0s |
+| EURC→USDC | 5.000000 | **200** | present | 599.5s |
+
+⭐ **The probe was CALIBRATED to distinguish three outcomes**, because a malformed request's failure
+mode here is "it looks dead": a 200 with `executionParams`, the recorded `No route available` text,
+or **anything else — which is a probe fault, not a route verdict.** The body was verbatim from
+`_swap.mjs:262-266`. All four returned the first.
+
+⭐ **The 600s TTL is independently RE-CONFIRMED** — 599.0–599.5s on four fresh quotes, 10 days after
+`spike-step4-phase0` measured `now + 600s ±0.2s`. §3's expiry budget stands on two measurements
+taken ten days apart, not one.
+
+## ⚠️ TWO CORRECTIONS TO THIS DOCUMENT, FROM THE SAME PROBE
+
+**1. 🚨 `instructions[0].minTokenOut` IS 0 — AND MY FIRST READING OF THAT WAS WRONG.**
+The first probe printed index 0 only and reported no floor, which would have demolished §3's whole
+inversion. **`instructions[0]` is the FEE leg** (`amountToApprove == the provider fee`, `tokenOut` a
+zero address); **`instructions[1]` is the swap leg and carries a real floor** — 824771 on a 1 USDC
+input, 3875365 on 5 USDC. **§3 stands, and it now stands on observed numbers rather than on the
+shape of the payload.** A single-index read of an array is a filtered read.
+[[filtered-read-is-not-absence]]
+
+**2. ⭐ A SWAP HAS A FEE AS WELL AS A PRICE — so "a price, not a fee" was too clean.**
+`fees.provider` is **2.00 bps, flat and proportional** (200 minor on 1.000000 in; 1000 on 5.000000 —
+exact at both), taken as its own instruction leg, so the swap leg operates on `amountIn − fee`.
+**It is knowable before signing and `_swap.mjs:324` already captures it — nothing surfaces it.**
+⛔ **§3's list of what the panel owes is therefore incomplete: the fee belongs on it**, alongside the
+floor and the expiry. This does not change §4 — 2 bps is nowhere near a disclosure band — but a
+panel that shows a floor and silently omits a fee is the shape this repo keeps finding.
+
+## ⛔ WHAT THE MEASURED FLOOR REVEALED, RECORDED SEPARATELY
+
+`ceil(0.97 × estimatedAmount) == minTokenOut` exactly, in all four quotes: **the executing tolerance
+is 3.00%, not the 1% users are told about.** That is a live user-facing overclaim on a money path and
+it is **not part of this scope** — see **`docs/swap-slippage-copy-overclaim.md`**.
+
+---
+
 # 0. ⭐ THE FRAMING QUESTION, ANSWERED FIRST
 
 > *"is a manual swap a NEW PANEL, or a signer choice inside the existing SwapPanel?"*
@@ -416,12 +464,14 @@ baseline.
 
 # 6. WHAT THIS SCOPE DOES NOT ESTABLISH
 
-- **That a manual swap can run at all today.** §0's route drought is unresolved in the record and
-  was not re-checked here (it needs the prod `KIT_KEY`). ⛔ Everything above is a design that has not
-  been exercised, which is a materially different thing from a design that is ready.
+- ~~**That a manual swap can run at all today.**~~ ✅ **SETTLED 2026-08-30** — the route is live in
+  both directions (§0). ⚠️ But the design itself is still **unexercised**: routing being available is
+  the precondition, not the proof. Everything below remains open.
 - **That an EOA can be `msg.sender` to the adapter** (§2). Named, with a free read-only instrument.
 - **That EIP-2612 permit works on Arc USDC** (§5). Named, with the adjacent-but-different finding it
   must not be mistaken for.
-- **What Circle's default slippage actually is** (§1). What is established is only that **ours does
-  not reach the executing swap** — the stronger claim was deliberately not made.
+- ~~**What Circle's default slippage actually is** (§1).~~ ✅ **MEASURED at 3.00%** — so the copy is
+  an **overclaim**, not an accidentally-true one. ⚠️ Whether 3% is a fixed Circle default or a
+  property of this route (`lifi`/`fly`) is **still open**, and it is why 3% must not go on screen.
+  Recorded in `docs/swap-slippage-copy-overclaim.md`, not here.
 - **Any code.** Nothing was built, nothing was run, no quote was fetched, no credential was read.
