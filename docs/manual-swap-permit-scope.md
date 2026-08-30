@@ -84,7 +84,12 @@ memory, in a POST body, and in anything that logs request bodies. ⛔ Bounded by
 > Permit is still architecturally cleaner and still deletes a real class of failure. It is no longer
 > obviously worth doing next.
 
-## ⛔ RECOMMENDATION
+## ⛔ DECISION — TAKEN 2026-08-31: **HELD.** Not deferred by omission; held by decision.
+
+The recommendation below was put to the operator and agreed. **Permit is not being built**, and the
+three triggers are now the OPEN ITEM — the condition under which this reopens, rather than a vague
+"someday". ⭐ Recorded so a future reader meets a decision with a reopen condition, not an
+unfinished-looking scope they might restart from scratch.
 
 **Do not build it now.** Not because it is wrong — because the two things it was going to buy have
 both measured smaller than the argument assumed, and the one thing it costs is new.
