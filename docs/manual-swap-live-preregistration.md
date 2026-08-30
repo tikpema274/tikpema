@@ -146,3 +146,114 @@ say so and stop.
 - **The reverse direction.** EURC→USDC is a second run, newly possible once this one leaves EURC.
 - **That 0.0186 USDC is the cost at other sizes** — gas is flat, so the *fraction* changes sharply.
 - **Anything on mainnet.** Arc testnet, Circle's sandbox routing.
+
+---
+
+# ✅ RESULT — 2026-08-30: **ALL FIVE PREDICTIONS HELD. NO FALSIFIER FIRED.**
+
+Swap `0x2997749a8eedbc8376b85f3826c698a2978f00f7a587df08053152abdd906d1a`, block 59619631, status
+success. 1.000000 USDC → **0.929280 EURC** against a signed floor of **0.901402**. Deploy
+`6a943664e75f975fb8f03a89`. Nothing above this line is amended.
+
+## Observed ON SCREEN BEFORE SIGNING — by the operator, the half only they could check
+
+Beneficiary decoded from the calldata shown **in full beside their own address, character for
+character, both untruncated**; band **`none`**; **591s** on the clock (quote-after-approve worked);
+approve **exact-amount**.
+
+## Verified afterwards, on-chain and read-only
+
+| # | prediction | result |
+|---|---|---|
+| 1 | beneficiary in full, matching | ✅ decoded **from the signed transaction's own input**, not the quote: beneficiary == `tx.from` |
+| 2 | band `none` at an ordinary rate | ✅ appeared, and reconciles exactly (below) |
+| 3 | approve **exact-amount**, not standing | ✅ the `Approval` value was **1.000000 USDC** == `amountIn` |
+| 4 | `amountOut` from the tx's own logs, ≥ floor | ✅ **0.929280 ≥ 0.901402** |
+| 5 | pinned to the EURC contract | ✅ pinned — but see the honest limit below |
+
+⭐ **The decode was re-run against the transaction that actually landed**, so the loop closes: what
+the panel displayed and what was signed are the same bytes.
+
+### ⭐ FALSIFIER 3 — THE ALLOWANCE IS **0**
+
+`allowance(signer → 0xbbd70b01…)` reads **0** after the swap. The exact-amount approve was consumed
+exactly. **No standing allowance to an upgradeable proxy was left on the user's own wallet** — the
+property `agentSwap`'s cap-bounded design cannot offer here, and the reason manual approves are
+exact-amount.
+
+### GAS — the estimate was 27% HIGH, and that is worth recording
+
+| | estimated | **actually paid** |
+|---|---|---|
+| approve | 0.001181 | **0.001164** (55,438 gas) |
+| swap | 0.017253 | **0.012275** (584,507 gas) |
+| provider fee | 0.000200 | 0.000200 |
+| **total** | **0.018634** | ⭐ **0.013639 USDC** |
+
+⚠️ The swap estimate (821,588) over-predicted actual (584,507) by 40%. `eth_estimateGas` under state
+overrides is an upper bound, not a measurement — **the pre-registered figure was conservative in the
+right direction, but it should not be quoted as "the cost" for future runs.**
+
+### NO RECEIPT — established two ways, and the absence is CALIBRATED
+
+- **By code:** `user-swap-start.mjs` obtains no store handle and performs no write; `buildSwapCallData`
+  contains zero writers; the panel POSTs to exactly one endpoint.
+- **By listing:** **0** keys in `job-deliverables`, `bridge-receipts`, `agent-quotes` or `agent-spend`
+  mention the swap tx.
+- ⭐ **THE CONTROL THAT MAKES THAT ABSENCE MEAN SOMETHING:** the same query finds **14** keys
+  mentioning this signer in `bridge-receipts` — their earlier manual *bridges*. So the query can
+  match this address; a zero elsewhere is a real absence, not a broken grep.
+  [[absence-must-never-read-as-safe]]
+
+⚠️ Minor: `user-swap-start.mjs` still calls `connectBlobs(event)` though nothing uses a store. Inert,
+but it is a line implying a capability the handler does not use.
+
+## ⚠️ THE HONEST LIMIT ON PREDICTION 5 — the pin was NOT exercised by this direction
+
+🚨 **The Arc two-Transfer hazard IS present in this very transaction.** The native emitter
+`0xffff…fffe` produced **7** Transfer logs at 18-dp mirroring USDC's **7** at 6-dp — the same
+movements, twice, from different emitters.
+
+⭐ **But it could not affect this read, because the OUTPUT was EURC**, which is a plain ERC-20 with no
+native twin: 5 EURC logs, one emitter, exactly one of them to the signer. Pinned and unpinned sums
+therefore coincided (ratio 1.000).
+
+⛔ **So `amountOut` was read correctly, and the pin was not what made it correct.** The pin becomes
+load-bearing on **EURC → USDC**, where the output token *is* the native one and an unpinned sum would
+be ~1e12 wrong. **That direction is now possible** (this run left 0.929280 EURC) and is the test that
+would actually exercise the guard.
+
+## ⭐⭐ THE TWO PERCENTAGES ARE DIFFERENT MEASUREMENTS, AND THEY COMPOSE EXACTLY
+
+The disclosure said **−4.22%** while the measured slippage floor is **3.00%**. Both are correct and
+they are not the same quantity:
+
+| | what it measures | against what |
+|---|---|---|
+| **3.00%** | the **contract's revert threshold** — how far below the quote's own expected output the fill may land | the **quote's own** `estimatedAmount` |
+| **−4.22%** | the **guarantee valued in money** — the worst case the user is signing for | an **independent** rate source (`getTokenRates`), not the quote |
+
+```
+implied EURC rate behind −4.22%   = $1.06257
+quote execution vs that mid-rate  = 1.2577%
+1 − (1 − 3.0000%) × (1 − 1.2577%) = 4.2200%      ← the reported band, exactly
+```
+
+⭐ **This is the intended reading, and the composition is why the band is the more honest number.** A
+quote could be priced terribly and still show exactly 3.00% slippage, because 3.00% is a property of
+*Circle's tolerance*, not of the deal's quality. Only the independent rate can notice a bad rate at
+all. ⛔ Two numbers that "ought to agree" would mean one of them was redundant — the whole value of
+the band is that its rate source is **not** the quote's.
+
+⚠️ And note which one is the disclosure: **−4.22% is the WORST CASE, not the expected outcome.** The
+fill landed at the estimate, worth **−1.26%** at the same mid-rate. Disclosing the guarantee rather
+than the expectation is deliberate — the floor is the number being signed.
+
+## ⛔ WHAT THIS RUN DID NOT PROVE
+
+- **That the decode catches a hostile server.** This was the cooperating path. The hostile case
+  remains proven in simulation only (`test:swapdecode`, a real re-encoded payload).
+- **The pin on a native-token output** — see above. EURC→USDC is the outstanding test.
+- **Anything about permit.** `permitType` stays `0`.
+- **That 0.013639 USDC is the cost at other sizes.** Gas is flat; the fraction changes sharply.
+- **Anything on mainnet.**
