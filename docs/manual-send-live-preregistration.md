@@ -108,3 +108,117 @@ trip, and a guard that never refuses has not been shown to refuse.
 4. Press **Sign and send**, then **STOP AGAIN** and compare MetaMask's destination and amount
    against the review step before confirming. This is prediction 5 and falsifier 2.
 5. Confirm. Report the tx hash.
+
+---
+
+# ✅ RESULT — 2026-08-30: all five predictions held. Tx `0x637b3556…`
+
+⚠️ **THE RUN DEVIATED FROM THE PRE-REGISTERED INPUTS, AND THAT IS RECORDED FIRST.** The operator
+used their own values: **1 USDC → `0x12B36dD2043C723543B44eEBF0900764fb17A29c`**, not 0.0123 to the
+agent wallet. The predictions were therefore re-verified against the values actually used, not the
+ones written down. ⭐ Nothing is weakened by this — the predictions were about BEHAVIOUR, not about
+those particular numbers — but the "distinctive amount for later attribution" argument is void: 1
+USDC is not distinctive. Attribution here rests on the tx hash instead, which is stronger anyway.
+
+`0x637b355650a5d78a9672ffe0505f3ff7bd6bd09d46fbfbfbfa0e0a029ae20be6`, block **59568617**,
+2026-08-30T07:17:55Z, status `0x1`.
+
+## THE FIVE PREDICTIONS
+
+| # | predicted | outcome |
+|---|---|---|
+| 1 | review shows the address IN FULL, untruncated | ✅ **observed on screen** — 42 chars, monospace |
+| 2 | no ack gate, and none should appear | ✅ none appeared |
+| 3 | no receipt written | ✅ **all four stores unchanged** |
+| 4 | recipient receives EXACTLY the amount, no fee | ✅ **+1.000000 exactly** |
+| 5 | MetaMask shows the same destination and amount | ✅ same address, Arc Testnet, from app.tikpema.xyz |
+
+**Prediction 3, measured across the baseline:** `bridge-receipts` 55→55, `data-budget` 277→277,
+`agent-wallets` 57→57, `x402-quote-pending` 10→10. ⭐ Consistent with the structural claim that made
+the counts a test rather than the claim itself: `ManualSendPanel` makes no authenticated call, so
+nothing could have been written.
+
+**Prediction 4, measured across the exact block boundary** (59568616 → 59568617):
+
+| account | before | after | delta |
+|---|---|---|---|
+| login (sender) | 68.791284 | 67.790256 | **−1.001028** |
+| `0x12B36dD2…` (recipient) | 4425.151538 | **4426.151538** | **+1.000000** |
+| agent wallet | 6.000000 | 6.000000 | ±0 |
+
+⭐ **The sender's −1.001028 is 1 USDC plus 0.001028 gas; the recipient's +1.000000 is exact.** The
+copy's claim — *"the recipient receives exactly the amount sent"* — is true, and gas being paid
+separately is visible in the difference between the two deltas.
+
+Independently verified from the calldata: `to` = the USDC contract, selector **`0xa9059cbb`**
+(canonical `transfer(address,uint256)`), argument address == the reviewed destination, argument
+amount == `1000000`.
+
+---
+
+## 🚨 FINDING — MetaMask displayed "1 Unknown", not "1 USDC"
+
+**The cause is NOT our transaction shape, and that was established rather than assumed.**
+
+| checked | result |
+|---|---|
+| `symbol()` on the token | ✅ returns **"USDC"** |
+| `name()` | ✅ returns **"USDC"** |
+| `decimals()` | ✅ returns **6** |
+| contract code | 1798 bytes — a real contract, not an opaque precompile |
+| our calldata selector | **`0xa9059cbb`** — the canonical ERC-20 transfer |
+
+⭐ **The metadata is on chain and readable by one `eth_call`; our transaction is the standard shape.
+There is nothing in what we send that could change the name MetaMask prints.** A different calldata
+shape is not available — `transfer(address,uint256)` is the transfer.
+
+⚠️ **THE HONEST LIMIT:** this establishes the cause is not on our side. It does **not** establish
+what MetaMask does internally — that it relies on per-chain token lists or user-imported tokens
+rather than reading `symbol()` at confirmation time is the plausible explanation, and it was **not
+verified against their source.** Recorded as "not ours", not as "their bug".
+
+### ⭐⭐ THE PRODUCT CONSEQUENCE, WHICH IS THE REAL FINDING
+
+**A user checking only MetaMask cannot see WHAT they are sending — only how much.** That makes our
+review step the **only** surface naming the asset.
+
+🚨 This changes the review step's justification. `docs/manual-send-design-note.md` argued it earns
+its place by showing the address *as we parsed it*, and explicitly said it "is not a second safety
+net" over MetaMask's confirmation. **For token identity it is not a second net — it is the only
+one.** The design note's reasoning was right about the address and incomplete about the asset.
+
+⚠️ A user can make MetaMask show "USDC" by importing the token, but that is a per-user action we
+cannot perform for them and must not assume anyone has taken.
+
+---
+
+## ⚠️ FINDING — Arc emits TWO Transfer logs per transfer, and a log-summing tool will DOUBLE-COUNT
+
+This transaction's receipt carries **two** `Transfer` events for one movement, same sender, same
+recipient:
+
+```
+Transfer  1000000000000000000  (1e18 — the 18-dp NATIVE view)
+Transfer             1000000  (1e6  — the 6-dp ERC-20 view)
+```
+
+Same asset, two precisions — the "gas on Arc IS USDC" fact surfacing in the event log. **One
+transfer happened; the recipient received 1 USDC.**
+
+🚨 **ANY TOOL THAT SUMS `Transfer` LOGS ON ARC DOUBLE-COUNTS EVERY MOVEMENT**, and one that divides
+by 1e6 uniformly prints a nonsense figure for the native-view log — as this session's own scan did,
+rendering the first log as "1000000000000 USDC". It did no harm there (the question was existence,
+not totals) but it is a live hazard for any future Arc balance or revenue scan.
+[[arc-eth-getbalance-18-decimals]]
+
+---
+
+## ⛔ WHAT THIS RUN DID NOT TEST
+
+- **The review step as an INTERCEPT.** The address used was correct, so the step was exercised as a
+  DISPLAY only. Its actual job — a human noticing a corrupted paste — remains untested, and a pass
+  here is not evidence for it.
+- **refuse-self and refuse-shared.** Neither guard was tripped. A guard that has never refused has
+  not been shown to refuse.
+- **Any failure path at all**: no rejection in MetaMask, no insufficient balance, no invalid
+  address. One clean run is one clean run.
