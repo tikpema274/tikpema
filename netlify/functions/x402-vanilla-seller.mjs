@@ -44,11 +44,16 @@ import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { readCircleError, httpStatusForCircleFailure } from "./_circle-error.mjs";
 import { getStore } from "@netlify/blobs";
 import { connectBlobs } from "./_blobs.mjs";
-import { ARC } from "./_arc.mjs";
+import { ARC, CONTRACTS } from "./_arc.mjs";
 
 // --- Arc Testnet / vanilla EIP-3009 constants (verified on-chain) ------------
-const NETWORK = "eip155:5042002"; // Arc Testnet, CAIP-2
-const ASSET = "0x3600000000000000000000000000000000000000"; // USDC on Arc (FiatTokenV2)
+// ⭐ DERIVED — the THIRD copy of these two literals, found while fixing the other two. Fixing only
+// the copies you set out to fix is how the "1% slippage cap" claim survived in a fourth place.
+const NETWORK = `eip155:${ARC.chainId}`; // CAIP-2, from ARC.chainId
+const ASSET = CONTRACTS.USDC; // USDC on Arc (FiatTokenV2), from CONTRACTS
+if (NETWORK !== "eip155:5042002" || ASSET.toLowerCase() !== "0x3600000000000000000000000000000000000000") {
+  throw new Error(`x402-vanilla-seller: published chain/asset changed — network="${NETWORK}" asset="${ASSET}"`);
+}
 const BLOCKCHAIN = "ARC-TESTNET"; // Circle SDK chain id
 const PRICE_ATOMIC = "10000"; // $0.01 USDC (6-decimal atomic units)
 const MAX_TIMEOUT_SECONDS = 60; // authorization validity window we advertise
@@ -77,6 +82,15 @@ function paymentRequirements(resource, payTo) {
     amount: PRICE_ATOMIC, // x402 v2 field name (mirror for compatibility)
     resource,
     description: "Vanilla x402 EIP-3009 quote (Arc Testnet, direct on-chain settlement)",
+    // ⭐⭐ THE FIELD EARNS ITS PLACE HERE MORE THAN ANYWHERE: this seller settles DIFFERENTLY from
+    // the other two. x402-quote and _dd-x402 go through Circle Gateway (batched, therefore delayed);
+    // this one settles EIP-3009 against the TOKEN itself, atomically. A buyer reading two of our
+    // 402s could not previously tell them apart, and the difference is whether acceptance means
+    // payment.
+    // ⚠️ `receiveWithAuthorization`, NOT `transferWithAuthorization` — a different EIP-712
+    // primaryType, and the header of this file explains why the distinction is load-bearing for the
+    // buyer's signature. Naming the family without the function would be imprecise where it counts.
+    settlement: "eip3009-receiveWithAuthorization",
     mimeType: "application/json",
     payTo,
     maxTimeoutSeconds: MAX_TIMEOUT_SECONDS,

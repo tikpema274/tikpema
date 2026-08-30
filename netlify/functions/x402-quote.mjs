@@ -35,6 +35,7 @@ import { connectBlobs } from "./_blobs.mjs";
 import { randomUUID } from "node:crypto";
 import { BatchFacilitatorClient } from "@circle-fin/x402-batching/server";
 import { readGatewayBalance, confirmPayment, CONFIRM_REASON, RETRIEVE_TIMEOUT_MS, RETRIEVE_TIMEOUT_PROVENANCE } from "./_x402-confirm.mjs";
+import { ARC, CONTRACTS } from "./_arc.mjs";
 import { X402_VERSION } from "../../shared/x402/version.mjs";
 import { resourceObject } from "../../shared/x402/resource.mjs";
 
@@ -53,8 +54,12 @@ const rpcCall = async ({ method, params }) => {
 };
 
 // --- Arc Testnet / Gateway batching constants (do not change) ---------------
-const NETWORK = "eip155:5042002"; // Arc Testnet, CAIP-2
-const ASSET = "0x3600000000000000000000000000000000000000"; // USDC on Arc
+// ⭐ DERIVED, NOT RESTATED — see the same block in _dd-x402.mjs. Both are published to buyers.
+const NETWORK = `eip155:${ARC.chainId}`; // CAIP-2, from ARC.chainId
+const ASSET = CONTRACTS.USDC; // USDC on Arc, from CONTRACTS
+if (NETWORK !== "eip155:5042002" || ASSET.toLowerCase() !== "0x3600000000000000000000000000000000000000") {
+  throw new Error(`x402-quote: published chain/asset changed — network="${NETWORK}" asset="${ASSET}"`);
+}
 const VERIFYING_CONTRACT = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"; // Gateway Wallet
 const EXTRA = {
   name: "GatewayWalletBatched",
@@ -134,6 +139,8 @@ function paymentRequirements(resource) {
     amount: PRICE_ATOMIC,
     resource,
     description: "x402 quote (Arc Testnet, Gateway nanopayment)",
+    // ⭐ Published so a buyer need not infer it. See _dd-x402.mjs for why "batched" matters.
+    settlement: "circle-gateway-batched",
     mimeType: "application/json",
     payTo: process.env.SELLER_ADDRESS,
     maxTimeoutSeconds: MAX_TIMEOUT_SECONDS,

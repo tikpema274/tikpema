@@ -50,6 +50,7 @@ import { runThenSettle, settleDecision, SETTLE_REASON, noChargeResponse } from "
 import { X402_VERSION } from "../../shared/x402/version.mjs";
 import { resourceObject } from "../../shared/x402/resource.mjs";
 import { readGatewayBalance, confirmPayment, CONFIRM_REASON, RETRIEVE_TIMEOUT_MS, RETRIEVE_TIMEOUT_PROVENANCE } from "./_x402-confirm.mjs";
+import { ARC, CONTRACTS } from "./_arc.mjs";
 // ⭐ The power catalogue is the SOURCE OF TRUTH for the floor stated in the 402. Imported, never
 // transcribed: a literal count in buyer-facing text is a second source of truth that rots silently
 // the day the catalogue changes, and this repo has been bitten by exactly that before.
@@ -60,9 +61,22 @@ import { DD_REQUEST_SCHEMA, DD_RESPONSE_SCHEMA, DD_OPENAPI_URL } from "./_dd-des
 
 export const PENDING_STORE = "dd-analyze-pending";
 
-// --- Arc Testnet / Gateway batching constants (mirrored from x402-quote; do not change) ---------
-export const DD_NETWORK = "eip155:5042002"; // Arc Testnet, CAIP-2
-export const DD_ASSET = "0x3600000000000000000000000000000000000000"; // USDC on Arc
+// --- Arc Testnet / Gateway batching constants -----------------------------------------------
+// ⭐ DERIVED, NOT MIRRORED. This block used to carry the comment "mirrored from x402-quote; do not
+// change" beside two hand-typed literals — which is noticing a duplicate source of truth and
+// writing a warning instead of removing it. The chain id and the USDC address each had THREE
+// copies (here, x402-quote.mjs, and _arc.mjs), two of them PUBLISHED TO BUYERS in a 402 challenge,
+// with nothing forcing them to agree. Both now derive from the one place that owns them.
+export const DD_NETWORK = `eip155:${ARC.chainId}`; // CAIP-2, from ARC.chainId
+export const DD_ASSET = CONTRACTS.USDC; // USDC on Arc, from CONTRACTS
+
+// 🚨 ASSERTED AT IMPORT, same reasoning as the price guard below: these two strings are PUBLISHED
+// in a payment challenge, so a silent change would advertise a different chain or a different token
+// to a paying buyer. Deriving them makes drift impossible; asserting them makes an INTENDED change
+// deliberate rather than incidental.
+if (DD_NETWORK !== "eip155:5042002" || DD_ASSET.toLowerCase() !== "0x3600000000000000000000000000000000000000") {
+  throw new Error(`_dd-x402: published chain/asset changed — network="${DD_NETWORK}" asset="${DD_ASSET}"`);
+}
 export const DD_VERIFYING_CONTRACT = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"; // Gateway Wallet
 export const DD_EXTRA = Object.freeze({
   name: "GatewayWalletBatched",
@@ -185,7 +199,18 @@ export function ddPaymentRequirements({ resource, payTo }) {
     maxAmountRequired: DD_PRICE_ATOMIC,
     amount: DD_PRICE_ATOMIC,
     resource,
-    description: `DD on-chain due-diligence report (Arc Testnet) — ${DD_PRICE_HUMAN} per report`,
+    // ⭐ NAMED FOR THE OUTCOME, NOT THE MECHANISM. This used to read "DD on-chain due-diligence
+    // report" — "DD" is our INTERNAL name for the engine, and a buyer scanning a directory does not
+    // know what it means. They know whether they want a contract checked before their agent signs.
+    description: `Contract safety check before an agent signs — a signed on-chain due-diligence report on any Arc Testnet address, with an honest coverage manifest. ${DD_PRICE_HUMAN} per report`,
+    // ⭐⭐ WHICH MECHANISM SETTLES THIS, PUBLISHED. A buyer could previously only infer it. We run
+    // TWO genuinely different schemes across live sellers — this one and x402-quote settle through
+    // CIRCLE GATEWAY (GatewayWalletBatched), while x402-vanilla-seller settles EIP-3009 against the
+    // token itself — and nothing in the challenge said which you were getting.
+    // 🚨 "batched" IS THE LOAD-BEARING WORD: Gateway settlement is DELAYED, so facilitator
+    // acceptance is not payment. ⛔ No latency figure is published here on purpose — a measured
+    // range would go stale on the wire; the shape is durable, the number is not.
+    settlement: "circle-gateway-batched",
     mimeType: "application/json",
     payTo,
     maxTimeoutSeconds: MAX_TIMEOUT_SECONDS,
