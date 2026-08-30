@@ -18,6 +18,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import ManualSwapPanel, { SwapReview } from "../src/components/ManualSwapPanel";
+import SwapPanel from "../src/components/SwapPanel";
 import type { DecodedSwap } from "../src/lib/decodeSwapCalldata";
 import { CONTRACTS } from "../src/config/contracts";
 
@@ -107,7 +108,30 @@ console.log("\n⚠️ THE NON-METAMASK STATES DIFFER FROM EACH OTHER (the two-st
   check("…and that message says to reconnect", /reconnect metamask/i.test(connectedNoCap));
 }
 
-console.log("\n⭐ THE AGENT PANEL NOW NAMES ITS TWIN (a live route nothing links to is invisible)");
+// ⭐⭐ SwapPanel IS RENDERED HERE, NOT GREPPED — and it is declared against this suite in
+// guard-registry.mjs for that reason. It stopped being claim-free the moment it grew a cap sentence
+// and a link to its uncapped twin, which is the SAME staleness recorded above SendPanel in that
+// file. 🚨 §2 of gate:registry did NOT catch it: its CLAIM vocabulary has no "cap"/"limits apply",
+// so a money claim written in those words is invisible to the detector. Found by reading.
+// ⛔ The pair only works together — ManualSwapPanel says caps do NOT apply, SwapPanel says they DO.
+// An absence stated against silence teaches the reader nothing, so both halves live in one file.
+console.log("\n⭐⭐ THE AGENT PANEL — RENDERED, because it now carries a cap claim of its own");
+{
+  const t = strip(renderToStaticMarkup(<SwapPanel wallet={wallet("modular", {
+    agentWallet: { address: OWNER, balance: "12.00", eurcBalance: "5.00" }, swapFromAgent: async () => ({}),
+  })} />));
+  check("⭐ it STATES that caps DO apply (the other half of the pair)", /within your per-transaction and daily safety caps/i.test(t));
+  check("⭐ its title names WHICH wallet", /Swap from your agent wallet/i.test(t));
+  check("it offers the uncapped twin in words a user can act on", /Swap from your own wallet instead/i.test(t));
+  // ⚠️ NOT `!/do not apply/` — that phrase DOES appear here, correctly, describing the TWIN
+  // ("…where those caps do not apply"). The distinction that matters is WHO the absence is claimed
+  // about: this panel must never claim it about ITSELF. `here` is the word that does that work, and
+  // it is the exact phrasing ManualSwapPanel uses for its own uncapped state.
+  check("⛔ …and it never claims the absence about ITSELF", !/caps do not apply here/i.test(t));
+  check("⭐ …while the twin's absence IS attributed to the twin", /those caps do not apply/i.test(t));
+}
+
+console.log("\n⭐ ROUTE + REDIRECT (a live route nothing links to is invisible)");
 {
   const src = readFileSync(new URL("../src/components/SwapPanel.tsx", import.meta.url), "utf8");
   check("SwapPanel links to #/swap-manual", src.includes('"/swap-manual"'));

@@ -55,6 +55,12 @@ export const COMPONENTS = {
   // one file, because a contrast cannot be checked one panel at a time — an absence stated against
   // silence teaches the reader nothing.
   ManualSendPanel:      { suite: "verify-send-copy.tsx" },
+  // ⛔ The THIRD panel making the "agent caps do NOT apply" claim, and the only one that also shows
+  // the user WHERE THEIR MONEY GOES: the swap adapter does not bind payer to beneficiary (measured),
+  // and MetaMask renders an opaque adapter call, so this panel is the sole surface on which a wrong
+  // destination is visible. Its suite renders the review with real numbers and asserts the
+  // beneficiary appears IN FULL — a truncation would silently undo the panel's whole purpose.
+  ManualSwapPanel:      { suite: "verify-manual-swap-copy.tsx" },
   Dashboard:            { suite: "verify-dashboard-copy.tsx" },
   ResearchPanel:        { suite: "verify-research-panel-copy.tsx" },
   // ⚠️ NOT verify-activity-fallback — that renders ONE row subcomponent for a fallback label and
@@ -76,7 +82,15 @@ export const COMPONENTS = {
   // is invisible to it. The declaration was corrected by hand; the detector still cannot see it.
   SendPanel:      { suite: "verify-send-copy.tsx" },
   SignInPrompt:   { noClaims: true },
-  SwapPanel:      { noClaims: true },
+  // 🚨 WAS `noClaims: true`, AND IT WENT STALE THE MOMENT IT GREW A CAP SENTENCE (2026-08-30) —
+  // the SECOND time this exact staleness has happened, after SendPanel above. It now says swaps run
+  // "within your per-transaction and daily safety caps" and links to an UNCAPPED twin, so it is the
+  // load-bearing half of a pair with ManualSwapPanel.
+  // 🚨 §2 DID NOT CATCH IT EITHER, for the identical reason recorded above SendPanel: the CLAIM
+  // vocabulary contains no "cap", "limits apply", "ceiling" or "enforced". ⭐ TWO instances now, so
+  // this is a pattern rather than an accident — the detector cannot see money claims written in cap
+  // vocabulary, and every such declaration has been corrected BY HAND after the fact.
+  SwapPanel:      { suite: "verify-manual-swap-copy.tsx" },
 };
 
 /** 🚨 THE RATCHET. Lower it when debt is paid; raising it must be a deliberate, reviewed edit. */
@@ -152,6 +166,7 @@ export const UNWIRED_OK = {
   "test:ddwatch": "network-dependent (probes the live DD service). Same reasoning as gate:pins.",
   "test:ddraillive": "network-dependent (reads the LIVE 402 and the LIVE copy surfaces). Same call as gate:pins. ⭐ Its in-process half, test:ddrail, IS in test:all and binds the copy to DD_EXTRA.name — but that half is structurally incapable of noticing the DEPLOYED endpoint changed rails, which is the half of the 2026-08-27 defect no offline check could have caught. Splitting it out must not become dropping it: run it after every deploy that touches DD copy or _dd-x402.mjs.",
   "gate:disclosure": "network-dependent (fetches the SERVED page and its JS bundle from production). Same call as gate:pins: a flaky network inside a BLOCKING aggregate manufactures tolerated red — species 3. ⭐ It is also not a standing regression check: it GATES A REAL SPEND, asserting a specific copy fix reached the served bundle before a fee is paid against it, so it is run deliberately at that moment. Its offline half — that the copy RENDERS the four figures — is verify-manual-bridge-copy §6, which IS in test:all, so splitting this out cannot become dropping it. Run it after any deploy touching ManualBridgePanel's disclosure.",
+  "gate:manualswap": "network-dependent (fetches the SERVED page and its JS bundle from production). Identical species and identical reasoning to gate:disclosure: a flaky network inside a BLOCKING aggregate manufactures tolerated red. ⭐ And like it, this is not a standing regression check — it GATES A REAL SPEND, asserting the manual swap panel reached the served bundle before a fee is paid against it, so it is run deliberately at that moment. It is calibrated RED against pre-deploy production by construction. Its offline half — that the review RENDERS the beneficiary in full — is verify-manual-swap-copy, which IS in test:all, so splitting this out cannot become dropping it. Run it after any deploy touching ManualSwapPanel or SwapPanel.",
   "test:vanillabyteslive": "network-dependent (eth_calls Arc's PUBLIC RPC, recorded as throttled and observed ETIMEDOUT 2026-08-23 mid-run). Same call as gate:pins: a flaky network inside a BLOCKING aggregate manufactures tolerated red. Its in-process half, test:vanillabytes, IS in test:all and asserts this file exists and stays registered — so splitting it out cannot become dropping it.",
 };
 
