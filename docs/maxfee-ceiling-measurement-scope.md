@@ -87,3 +87,89 @@ two on-chain reads already contain.
 disclosure would be quoting a number larger than what is charged — **the exact consent-vs-bound
 problem again, in the opposite direction.** That is a reason to settle this before any multi-source
 bridging, not after.
+
+---
+
+# ✅ RESULT — 2026-08-30: `maxFee` IS A CEILING. Read-only, nothing spent.
+
+Settled by arithmetic on third-party burns, as scoped. **No code changed, no transaction sent.**
+
+## THE INSTRUMENT, CALIBRATED FIRST ON A BURN WHOSE ANSWER WAS ALREADY KNOWN
+
+CCTP v2's burn message body carries **both** numbers: `maxFee` (field 6) and `feeExecuted` (field 7).
+So `maxFee − feeExecuted` is readable from a single event — no cross-chain matching needed.
+
+⭐ Before trusting it on strangers' burns it was run against **my own** Arc burn `0x265be6d3…`, where
+the answer was already established independently: `maxFee 54209`, `feeExecuted 54209`, and the chain
+delivered `0.095791 = 0.15 − 0.054209`. The message agreed with the balance measurement exactly.
+
+Source: `MessageReceived` on `MessageTransmitterV2` (`0x81D40F21…`) — the DESTINATION-side event,
+because the source-side `MessageSent` is emitted before `feeExecuted` is known.
+
+## THE DISTRIBUTION — 333 messages decoded, 82 on non-zero-`minimumFee` routes
+
+Scanned ~6,000 blocks each on Base and Arbitrum mainnet, no RPC gaps.
+
+⛔ **15 excluded because `maxFee == 0`** — a 0−0 difference is uninformative and counting it as
+"charged in full" would have inflated that side of the answer. **67 informative burns remain:**
+
+| `maxFee − feeExecuted` | count |
+|---|---|
+| **> 0 — a true CEILING** | **55** |
+| == 0 — fully consumed | 12 |
+| **< 0 — would break the ceiling** | **0** |
+
+## ⭐⭐ THE ARITHMETIC SETTLES IT, AND THE 12 ZEROES ARE NOT COUNTER-EVIDENCE
+
+`feeExecuted` is pinned to the protocol rate; `maxFee` is whatever the sender chose:
+
+```
+Ethereum (minimumFee 1)    exec 1.000 bp   maxFee 1.100 bp   ratio 1.100
+Ethereum (minimumFee 1)    exec 1.000 bp   maxFee 2.000 bp   ratio 2.000
+Arbitrum (minimumFee 1.4)  exec 1.400 bp   maxFee 1.546 bp   ratio 1.112
+Arbitrum (minimumFee 1.4)  exec 1.400 bp   maxFee 1.400 bp   ratio 1.000
+```
+
+⭐ **`feeExecuted` lands on the route's `minimumFee` every time, whatever `maxFee` says.** Senders
+using a 1.1× buffer got 1.1× headroom; a sender using 2× got 2×; the 12 with zero headroom are
+senders who set `maxFee` **exactly at the rate** (ratio 1.000). **The zeroes are a property of those
+senders, not of CCTP.** Nothing in the sample charged more than the ceiling.
+
+> ⭐ **VERDICT: `maxFee` is a CEILING. CCTP charges its own rate and leaves the surplus.**
+
+## ⚠️ BUT THE ANSWER FOR *OUR* PATH IS DIFFERENT, AND THIS IS THE PART THAT MATTERS
+
+`maxFee` on Arc is `providerFee + forwarderFee`. Every Arc route reports `minimumFee 0`, so the
+**providerFee — the part this result is about — is ZERO**, and our `maxFee` is essentially **all
+forwarder fee**. On burn `0x265be6d3…` that forwarder portion was consumed **in full**
+(`feeExecuted == maxFee == 54209`).
+
+🚨 **So both readings are true and they are about different components:**
+
+| component | behaviour |
+|---|---|
+| CCTP **protocol** fee (proportional, `minimumFee`) | a **ceiling** — surplus not taken (55/67) |
+| Arc's **forwarder** fee (flat, dominates our `maxFee`) | taken **in full** (n=1, our own burn) |
+
+⛔ **The scope doc's question — "would signing an accepted `maxFee` consent to more than is charged?"
+— is therefore NOT resolved in our favour by this result.** On today's Arc routes the surplus this
+finding is about does not exist, because the proportional term is zero. The +10% buffer only becomes
+live if we ever bridge FROM a non-zero-`minimumFee` chain, which needs a code change.
+
+⭐ And when it does become live, it moves in the **favourable** direction: we would disclose ~1.1×
+what is charged, i.e. `feeCharged <= feeDisclosed` — the invariant added to the receipt this
+morning already holds under these semantics.
+
+## ⚠️ WHAT THIS DOES NOT ESTABLISH
+
+- **It reads strangers' transactions.** Defensible only because the question is *protocol
+  arithmetic* — `maxFee`, `amount` and `feeExecuted` are three public numbers in one event. ⛔ **No
+  conclusion is drawn, or drawable, about who those senders are or what they were doing**, and none
+  is recorded here. [[establish-which-action-produced-the-outcome]]
+- **It answers what CCTP does, not what would happen to us.** We cannot reach a non-zero route
+  without a code change, so this is about the protocol, not about our path.
+- **The forwarder row is n=1** — our own burn. "Taken in full" for the forwarder is one observation,
+  and the same argument that made a single Arc datum insufficient for the protocol question applies
+  to it. It is not settled; it is merely the only reading we have.
+- **Mainnet CCTP v2, Arc is testnet.** Identical protocol semantics is an assumption, not a
+  measurement.
