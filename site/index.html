@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Tikpema — Hire an AI research analyst on Arc</title>
-<meta name="description" content="Ask a factual or analytical question and get a sourced, cited research brief. Funds stay in escrow until the work is verified — released to the analyst, or refunded to you. Built on Arc with USDC, settled by passkey." />
+<title>Tikpema — an AI agent that moves USDC under caps you can read</title>
+<meta name="description" content="An AI agent that sends, swaps, bridges and researches with USDC on Arc — every action bounded by a per-transaction cap and one shared daily ceiling, and every refusal named. Plus three operations you sign yourself, where no cap applies." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
@@ -69,6 +69,27 @@
   .foot-links{display:flex;gap:22px;flex-wrap:wrap}
   .foot-links a:hover{color:var(--ink)}
   .testnet{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.08em;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:4px 9px}
+  .sect{margin:84px 0 0}
+  .sect h2{font-size:clamp(24px,3.4vw,32px);font-weight:600;letter-spacing:-.02em;margin-bottom:8px}
+  .sect .sub{color:var(--muted);margin-bottom:26px;max-width:66ch;line-height:1.6}
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:760px){.cards{grid-template-columns:1fr}}
+  .card{border:1px solid var(--line);border-radius:14px;padding:22px;background:var(--navy-2)}
+  .card h3{font-size:17px;font-weight:600;margin-bottom:6px}
+  .card p{color:var(--muted);font-size:14.5px;line-height:1.6}
+  .card .expect{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);color:#9fb4d6;font-size:13.5px;line-height:1.6}
+  .card .expect b{color:var(--ink);font-weight:600}
+  .num{font-family:'Space Mono',monospace;color:var(--emerald)}
+  .tbl{width:100%;border-collapse:collapse;font-size:14.5px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .tbl th,.tbl td{text-align:left;padding:12px 16px;border-bottom:1px solid var(--line)}
+  .tbl th{color:var(--muted);font-weight:500;font-size:13px;letter-spacing:.04em;text-transform:uppercase;background:var(--navy-2)}
+  .tbl tr:last-child td{border-bottom:none}
+  .tbl td:last-child{font-family:'Space Mono',monospace;color:var(--emerald);white-space:nowrap}
+  .note{margin-top:14px;color:var(--muted);font-size:13.5px;line-height:1.6;max-width:72ch}
+  .docs{display:flex;flex-direction:column;gap:10px}
+  .doc{border:1px solid var(--line);border-radius:11px;padding:16px 20px;background:var(--navy-2);display:flex;gap:16px;align-items:baseline;flex-wrap:wrap}
+  .doc .dt{font-weight:600;font-size:15px}
+  .doc .dd{color:var(--muted);font-size:14px;flex:1;min-width:220px;line-height:1.55}
   @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -89,79 +110,198 @@
       Tikpema
     </a>
     <div class="nav-links">
-      <a href="#how">How it works</a>
-      <a href="#built">Built on Arc</a>
+      <a href="#agent">What it does</a>
+      <a href="#sells">What it sells</a>
       <a class="nav-launch" href="https://app.tikpema.xyz">Launch App ↗</a>
     </div>
   </nav>
+
   <header class="hero">
-    <div class="eyebrow">AI research analyst, settled in USDC</div>
-    <h1>Hire an AI analyst to research any question — <span class="accent">sourced, verifiable, paid on delivery.</span></h1>
-    <p>Ask a factual or analytical question and get a cited research brief. Your funds stay in escrow until an evaluator confirms the work — released to the analyst, or refunded to you. Secured by your fingerprint, settled in USDC. No seed phrases, no gas.</p>
+    <div class="eyebrow">Arc Testnet · chain 5042002 · USDC is the gas</div>
+    <h1>An agent that moves money <span class="accent">under caps you can read</span></h1>
+    <p>
+      Tikpema runs an AI agent on a wallet of your own. It can send, swap, bridge, research and
+      schedule — each action bounded by a per-transaction cap and one shared daily ceiling, each
+      refusal named rather than silent. And three operations it cannot touch at all, because you
+      sign those yourself.
+    </p>
     <div class="cta-row">
-      <a class="btn-primary" href="https://app.tikpema.xyz">Hire the analyst <span class="arrow">→</span></a>
-      <a class="btn-ghost" href="#how">See how it works</a>
+      <a class="btn-primary" href="https://app.tikpema.xyz">Open the app <span class="arrow">→</span></a>
+      <a class="btn-ghost" href="#agent">What it actually does</a>
     </div>
     <div class="proof">
-      <div class="item"><span class="dot"></span> Cited sources, every time</div>
-      <div class="item"><span class="dot"></span> Escrow-backed, refundable</div>
-      <div class="item"><span class="dot"></span> Sign with a fingerprint, no seed phrase</div>
+      <div class="item"><span class="dot"></span> Sign in with a passkey</div>
+      <div class="item"><span class="dot"></span> Agent actions cost you no gas</div>
+      <div class="item"><span class="dot"></span> 13 named refusal reasons</div>
     </div>
   </header>
-  <section class="planes">
-    <div class="plane">
-      <div class="tag">Sourced &amp; verifiable</div>
-      <h3>Every answer is cited</h3>
-      <p>The analyst returns a real brief with reasoning and clickable sources — not a chat reply. The deliverable is committed on-chain, so the work can be checked.</p>
+
+  <section class="sect" id="agent">
+    <h2>What the agent does, and what bounds it</h2>
+    <div class="sub">
+      These run on a Circle wallet the app provisions for you. You sign in with a passkey; the server
+      signs the transaction; you pay no gas. Every one is capped, and the caps are enforced before
+      anything is signed — not reported afterwards.
     </div>
-    <div class="plane">
-      <div class="tag">Escrow-backed</div>
-      <h3>Pay for results, not promises</h3>
-      <p>Your USDC sits in on-chain escrow. An AI evaluator verifies the deliverable before it settles — the analyst is paid for good work, or you're refunded.</p>
+    <div class="cards">
+      <div class="card">
+        <h3>Send USDC</h3>
+        <p>To any address on Arc.</p>
+        <div class="expect"><b>Expect:</b> refused above <span class="num">10 USDC</span> per
+          transaction, and the error names the exact limit. Irreversible once it confirms — there is
+          no allowlist behind it.</div>
+      </div>
+      <div class="card">
+        <h3>Swap USDC ↔ EURC</h3>
+        <p>On Arc, through the agent wallet.</p>
+        <div class="expect"><b>Expect:</b> capped at <span class="num">25 USDC</span> of value — the
+          bound is on the USDC-equivalent, not the number you typed, because EURC is not a dollar.
+          The review states a floor you are guaranteed to receive.</div>
+      </div>
+      <div class="card">
+        <h3>Bridge to another chain</h3>
+        <p>USDC off Arc via CCTP.</p>
+        <div class="expect"><b>Expect:</b> capped at <span class="num">25 USDC</span>. A live fee is
+          taken from the amount. The fee is exact at execution; <b>the arrival is an estimate</b> —
+          the delivered figure appears only once the destination chain has been read.</div>
+      </div>
+      <div class="card">
+        <h3>Recurring swap (DCA)</h3>
+        <p>A schedule that runs while you are away.</p>
+        <div class="expect"><b>Expect:</b> every fill re-checks the per-swap cap and the daily
+          ceiling at execution time, not at setup. A schedule cannot outrun its limits.</div>
+      </div>
+      <div class="card">
+        <h3>Research a question</h3>
+        <p>A sourced brief, with its hash written on-chain.</p>
+        <div class="expect"><b>Expect:</b> pricing is free and runs first — <span class="num">0.20–0.40 USDC</span>
+          per job. Nothing is delivered or charged until you approve. An evaluator then judges two
+          things only: whether the brief answers the question, and whether its sources are relevant.
+          <b>Not depth, not correctness.</b> Sources are real — they are the pages actually
+          fetched — but a brief with no sources can still ship.</div>
+      </div>
+      <div class="card">
+        <h3>Plan an action</h3>
+        <p>Describe one; the agent proposes.</p>
+        <div class="expect"><b>Expect:</b> a proposal, not an execution. Nothing moves until you
+          approve it separately. The research fee buys the analysis, not the action.</div>
+      </div>
+      <div class="card">
+        <h3>Unified balance</h3>
+        <p>One USDC balance across chains, via Circle Gateway.</p>
+        <div class="expect"><b>Expect:</b> deposits and spends are capped like everything else, and
+          draw on the same daily ceiling.</div>
+      </div>
+      <div class="card">
+        <h3>Four agents, each stoppable</h3>
+        <p>Researcher, Second opinion, Executor, Vault.</p>
+        <div class="expect"><b>Expect:</b> two of them move funds and say so on the card. You can
+          pause any one, or all of them, instantly. <b>One daily ceiling is shared across every
+          agent</b> — a research purchase and a bridge draw on the same budget.</div>
+      </div>
+    </div>
+
+    <div class="sect" style="margin-top:42px">
+      <h2 style="font-size:20px">The numbers, as deployed</h2>
+      <table class="tbl">
+        <tr><th>Bound</th><th>Applies to</th><th>Limit</th></tr>
+        <tr><td>Per transaction</td><td>Send</td><td>10 USDC</td></tr>
+        <tr><td>Per bridge</td><td>Bridge</td><td>25 USDC</td></tr>
+        <tr><td>Per swap</td><td>Swap, DCA fills</td><td>25 USDC</td></tr>
+        <tr><td>Daily ceiling</td><td>Everything, shared</td><td>60 USDC</td></tr>
+      </table>
+      <div class="note">
+        Go over one and the action is refused before anything is signed, with a reason: over a
+        per-transaction cap, over the daily ceiling, the agent is paused, a disclosure was not
+        acknowledged, a value could not be read. Thirteen named reasons in total. A refusal is a
+        result, not an error.
+      </div>
     </div>
   </section>
-  <section class="how" id="how">
-    <h2>How it works</h2>
-    <p class="sub">Three steps, from question to settled brief.</p>
-    <div class="steps">
-      <div class="step"><div class="n">1</div><h4>Ask a question</h4><p>A factual or analytical question. The AI prices it — or declines if it's advice rather than research.</p></div>
-      <div class="step"><div class="n">2</div><h4>The analyst researches</h4><p>It reads the web, writes a sourced brief with its reasoning, and commits the deliverable on-chain.</p></div>
-      <div class="step"><div class="n">3</div><h4>Escrow settles</h4><p>An evaluator verifies the work. Paid on a good brief, refunded if it doesn't pass — gasless, in USDC.</p></div>
+
+  <section class="sect" id="self-signed">
+    <h2>Three things the agent cannot do</h2>
+    <div class="sub">
+      Send, bridge and swap also exist in a second form, signed by you in MetaMask. The agent has no
+      part in them — which is exactly why the caps above do not apply.
+    </div>
+    <div class="cards">
+      <div class="card">
+        <h3>You hold the key</h3>
+        <p>MetaMask signs; the server does not.</p>
+        <div class="expect"><b>Expect:</b> <b>no spending cap of any kind</b>, because caps bound
+          what the agent may move unattended and nothing here is unattended. <b>You pay the gas.</b>
+          You need MetaMask specifically — a passkey cannot sign these.</div>
+      </div>
+      <div class="card">
+        <h3>Read before you sign</h3>
+        <p>The review is built from the transaction, not the quote.</p>
+        <div class="expect"><b>Expect:</b> the beneficiary is decoded from the transaction bytes and
+          shown in full, and the page says plainly whether it is your wallet or not. If the
+          transaction cannot be read, it refuses to summarise it rather than guessing.</div>
+      </div>
     </div>
   </section>
-  <section class="built" id="built">
-    <div class="label">Built natively on Arc</div>
-    <div class="chips">
-      <div class="chip"><b>USDC</b> — native settlement</div>
-      <div class="chip"><b>Circle Modular Wallets</b> — gasless passkeys</div>
-      <div class="chip"><b>ERC-8183</b> — on-chain escrow &amp; jobs</div>
-      <div class="chip"><b>ERC-8004</b> — on-chain AI identity</div>
+
+  <section class="sect" id="sells">
+    <h2>What it sells</h2>
+    <div class="sub">
+      Three endpoints answer HTTP 402 and take payment in USDC on Arc, per call, with no account and
+      no API key. An agent can pay them directly.
+    </div>
+    <table class="tbl">
+      <tr><th>Endpoint</th><th>What you get</th><th>Price</th></tr>
+      <tr><td>Due diligence</td><td>An on-chain report on a contract: who can upgrade it, who can pause it, what that would cost you</td><td>0.06 USDC</td></tr>
+      <tr><td>Vanilla x402 seller</td><td>A reference paid endpoint, EIP-3009 settlement end to end</td><td>0.01 USDC</td></tr>
+      <tr><td>Quote</td><td>A priced answer to a research question</td><td>0.001 USDC</td></tr>
+    </table>
+    <div class="note">
+      Due diligence answers for <b>Arc Testnet only</b>. Base and Base Sepolia are recognised and
+      deliberately refused: the report says every Arc provider syncs from one permissioned validator
+      set, and that sentence is false elsewhere. A service should not answer for a chain whose
+      assumptions it does not hold. It has its own OpenAPI description and an on-chain identity.
     </div>
   </section>
+
+  <section class="sect" id="reading">
+    <h2>Things to read</h2>
+    <div class="sub">Documents, not services. Nothing here takes payment or moves money.</div>
+    <div class="docs">
+      <div class="doc">
+        <span class="dt">What x402 sellers actually earn</span>
+        <span class="dd">A seven-day census of every payout address in the Circle x402 marketplace —
+          80 sellers, 302,401 blocks of Base mainnet, all 1,009 listings paginated in full rather
+          than sampled. The only mainnet measurement here.</span>
+      </div>
+      <div class="doc">
+        <span class="dt">What is actually built</span>
+        <span class="dd">A running index of every live surface, with what each one is and what it
+          costs. <a style="color:var(--blue-bright)" href="https://app.tikpema.xyz/built">app.tikpema.xyz/built</a></span>
+      </div>
+      <div class="doc">
+        <span class="dt">arc-x402-reference</span>
+        <span class="dd">A standalone EIP-3009 buyer and seller for Arc, extracted so it can be read
+          without the rest of the codebase. A library, not a service. v0.2.0.</span>
+      </div>
+    </div>
+  </section>
+
   <section class="final">
-    <h2>Try it on Arc Testnet</h2>
-    <p>It's free, it's play-money, and it takes a fingerprint to start. Ask a real question, watch the analyst research and cite its sources, and see the escrow settle.</p>
-    <a class="btn-primary" href="https://app.tikpema.xyz">Hire the analyst <span class="arrow">→</span></a>
+    <h2>Everything here is on Arc Testnet</h2>
+    <p>
+      The USDC is play money, the caps are real, and the refusals are real. Sign in with a passkey,
+      ask the agent to move something, and watch it decline when you go over.
+    </p>
+    <a class="btn-primary" href="https://app.tikpema.xyz">Open the app <span class="arrow">→</span></a>
   </section>
+
   <footer>
-    <a class="brand" href="/">
-      <svg class="mark" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <defs>
-          <linearGradient id="bg2" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse"><stop stop-color="#11161f"/><stop offset="1" stop-color="#0a0e14"/></linearGradient>
-        </defs>
-        <rect width="512" height="512" rx="112" fill="url(#bg2)"/>
-        <rect x="146" y="150" width="220" height="34" rx="17" fill="#3d7eff"/>
-        <rect x="239" y="150" width="34" height="180" rx="17" fill="#3d7eff"/>
-        <polyline points="150,360 210,330 256,348 312,300 372,262" fill="none" stroke="#2dd4a0" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
-        <circle cx="150" cy="360" r="9" fill="#3d7eff"/><circle cx="256" cy="348" r="9" fill="#3d7eff"/><circle cx="372" cy="262" r="11" fill="#2dd4a0"/>
-      </svg>
-      Tikpema
-    </a>
+    <a class="brand" href="/">Tikpema</a>
     <div class="foot-links">
       <a href="https://app.tikpema.xyz">Launch App</a>
-      <a href="#how">How it works</a>
-      <a href="https://x.com/TikpemaGb" target="_blank" rel="noopener">X ↗</a>
-      <a href="mailto:tikpema274@gmail.com">Contact</a>
+      <a href="#agent">What it does</a>
+      <a href="#sells">What it sells</a>
+      <a href="https://x.com/TikpemaGb">X ↗</a>
     </div>
     <span class="testnet">ARC TESTNET · PLAY MONEY</span>
   </footer>
