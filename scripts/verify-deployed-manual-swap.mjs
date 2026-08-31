@@ -65,9 +65,44 @@ const check = (l, c, x = "") => { if (c) { pass++; console.log(`  ✅ ${l}${x ? 
 // and predates this change (the other two controls already do), or let the custody sentence be
 // owned by a gate of its own — scoped in docs/self-signed-page-scope.md, deliberately not built.
 // [[a-deploy-check-needs-a-build-it-should-fail-against]]
+//
+// ═══ ⭐⭐ AND A SECOND ONE COULD NEVER FAIL CORRECTLY AT ALL — FIXED 2026-08-31 ═══════════════════
+// `Set up your wallet first` sat in this list until 2026-08-31. Its owners are BridgePanel,
+// SendPanel, SwapPanel and VaultPanel — and NOT ManualSwapPanel, which guards with
+// WalletGuardNotice. So it was not merely ALSO satisfiable from outside its subject; it was
+// satisfiable ONLY from outside it. ⛔ Delete ManualSwapPanel.tsx and it still passed, at count 4,
+// in BOTH builds — licensing the vacuous-absence check below on the strength of three panels that
+// have nothing to do with swapping. The coincidental control above is a coincidence that has not
+// failed yet; this one never could.
+//
+// ⭐ REPLACED BY THE TAIL OF THE SAME SENTENCE, which is swap-only. Measured both ways:
+//     "Set up your wallet first"   4 owners, none the subject   · foSNyN_9 4 / served 4
+//     "come back here to swap"     1 owner, SwapPanel.tsx       · foSNyN_9 1 / served 1
+//   It goes to 0 if SwapPanel.tsx is deleted, so it can fail for the right reason.
+//
+// ⭐ DEMONSTRATED, NOT ASSERTED — three readings, 2026-08-31:
+//     served prod (D4ZeRpcr)        → exit 0, 12/0
+//     foSNyN_9 (panel not yet built)→ exit 1: control 3/3 PASSES, then 9 red. "NOT SERVING IT" —
+//                                     which is the truth. It does NOT abort, and must not.
+//     served prod minus SwapPanel's → exit 2: ABORTS. `come back here to swap` 0, while
+//     literals (synthetic)            `Set up your wallet first` is still 3 and would have passed.
+//   ⛔ That last row is the whole point: the string this replaced could not tell the two apart.
+//
+// ⚠️ AND DELIBERATELY NOT `Swapping from ` WITH THE TRAILING SPACE, which IS sole-owned by
+// ManualSwapPanel — one character is the whole difference between a two-owner fragment and a
+// one-owner one. It counts 0 in foSNyN_9, because that panel did not exist there: the same
+// character that makes it cleanly owned makes it NEW-BUILD-ONLY. In this block it would abort with
+// "cannot see the app's panel copy" against a build where the panel had simply not shipped — a
+// fresh instance of this file's own defect, in the act of fixing it.
+//
+// ⭐⭐ THE RULE, so the next one is prevented rather than described: CONTROLS WANT STABILITY,
+// DISCRIMINATORS WANT VOLATILITY — and a CLAIM sentence is by definition the string someone will
+// rewrite. That is why the third entry below was wrong the day it was written, before CustodyNotice
+// existed. Reach for a LABEL owned by the subject's own render path, never for a claim.
+// docs/self-signed-page-scope.md § addendum 2 · [[a-deploy-check-needs-a-build-it-should-fail-against]]
 const CONTROL = [
-  "Swapping from",
-  "Set up your wallet first",
+  "Swapping from",                   // SwapPanel + ManualSwapPanel — both the swap surface, both builds
+  "come back here to swap",          // ⭐ SwapPanel only, both builds — see the block above
   "spending caps do not apply here", // 🚨 the coincidental one — see the block above
 ];
 // New-build only. Each confirmed ABSENT from production before the deploy.
