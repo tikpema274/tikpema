@@ -1,4 +1,4 @@
-# www/netlify.toml — the MARKETING SITE's own config, deliberately separate from the app's.
+# site/netlify.toml — the MARKETING SITE's own config, deliberately separate from the app's.
 #
 # ═══ 🚨 WHY THIS FILE EXISTS AT ALL ════════════════════════════════════════════════════════════
 # The repo root carries a 494-line netlify.toml declaring `functions = "netlify/functions"` and
@@ -7,7 +7,7 @@
 # /api/user-swap-start and the rest on the marketing domain.
 #
 # ⭐ So this config declares a static publish and NOTHING else: no functions key, no redirects.
-# Run the deploy with `www/` as the working directory so this file is the one the CLI finds.
+# Run the deploy with `site/` as the working directory so this file is the one the CLI finds.
 #
 # ⚠️ THIS IS A CONTAINMENT ASSUMPTION, NOT A MEASURED FACT. The installed CLI has no `--config`
 # flag (checked: --dir, --functions, --site, --prod, --no-build exist; --config does not), so the
