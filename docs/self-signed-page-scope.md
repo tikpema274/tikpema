@@ -193,16 +193,28 @@ beside no control is a claim about a path the user cannot take."* That is a prop
 different guards**, not one sentence — three assertions for three behaviours is not duplication, and
 collapsing them would remove real coverage.
 
-## ⚠️ A SECOND SHARED SURFACE, NAMED RATHER THAN FOLDED IN
+## ~~⚠️ A SECOND SHARED SURFACE, NAMED RATHER THAN FOLDED IN~~ — ✅ **STRUCK 2026-08-31, CLOSED**
 
-The **two-state wallet guard** has drifted the same way: Send and Bridge share a shape (*"Switch to
-MetaMask… / Connect MetaMask…"*, each naming where the agent twin lives), while the swap panel's
-diverges. It is a candidate for the same treatment — but its copy genuinely differs per operation,
-because **the destination differs**, so it would be a component with `twinLabel`/`twinRoute` props
-rather than one string.
+~~The two-state wallet guard has drifted the same way: Send and Bridge share a shape, while the swap
+panel's diverges. It would be a component with `twinLabel`/`twinRoute` props rather than one string.
+Recommended as a SEPARATE step.~~
 
-⛔ **Recommended as a SEPARATE step, not folded into this one.** It is a different shape of change
-(behavioural branch vs. a claim), and bundling it would make one review cover two decisions.
+✅ **DONE, and it shipped with more than was asked.** `src/components/WalletGuardNotice.tsx` takes
+`metamaskConnected` (required), `active`, `verb`, `twinLabel`, `twinRoute` — the two props this
+section predicted, plus `verb` for the prose. All three panels consume it (`ManualSendPanel:135`,
+`ManualBridgePanel:213`, `ManualSwapPanel:266`) and **none carries its own guard prose**; the only
+other `Connect MetaMask` strings in `src/` are connector *buttons* (`Dashboard:89`,
+`ConnectPasskey:74`, labelled from `useWallet.ts:618`), a different species. Verified by render:
+
+```
+not connected     : Connect MetaMask to send with your own key. The agent send is …
+connected, other  : Switch to MetaMask to send with your own key — it is connected…   → distinct
+```
+
+⚠️ One nuance, not a gap: the third state (`metamaskConnected && active`) is reachable **only from
+the swap panel**, whose guard is `activeKind === "metamask" && !!w.manualSwap`. Send and bridge use
+the bare `activeKind` check, so `active` is always false inside their branch and that state cannot
+arise there. Correct, and worth knowing before anyone "fixes" it.
 
 ## ⭐ AND IT NEEDS REGISTRY ENTRIES — `gate:registry` will demand them
 
@@ -221,7 +233,7 @@ here it will not.**
 - The **`connectBlobs`** line in `user-swap-start.mjs`.
 - Anything about **permit** / `permitType`.
 - **Renaming the three panel titles** — contrastive copy inside the page, and it would cost three suites.
-- The **wallet-guard** unification — named above as its own step.
+- ~~The **wallet-guard** unification~~ — ✅ **built and closed 2026-08-31**; see the struck section above, and § addendum 2 §8c for what it did *not* reach.
 
 ---
 
@@ -654,6 +666,68 @@ listed the wallet-guard unification as its own step; that step is now built at t
 absent at this one. A clean unique discriminator is available: `"Switch to MetaMask"`, bundle count
 **1**.
 
+### 🚨 8c. `SelfSignedPanel`'s guard copy has COLLAPSED — the same defect, on the page
+
+The wallet-guard item above is **closed for the three panels and open for the page.**
+`SelfSignedPanel.tsx:36` branches on `activeKind === "metamask"` alone and **never reads
+`metamaskConnected`** (`grep -c` → **0**). Its guard copy is its own, at line 52. Rendered both ways:
+
+```
+MetaMask NOT connected    : Connect MetaMask to use these — each one is signed with your own key.
+MetaMask CONNECTED, other : Connect MetaMask to use these — each one is signed with your own key.
+
+🚨 BYTE-IDENTICAL — the two states have COLLAPSED on this page
+```
+
+⛔ That is precisely the defect `WalletGuardNotice` was written to make impossible, described in its
+own header as *"advice to connect what they had already connected"* — reproduced on a page written
+**the same day**, by a component that does not consume the guard.
+
+### ⭐⭐ 8d. THE SUITE ASSERTION IS THE REUSABLE FINDING — and it is the SECOND time this shape passed
+
+`verify-custody-notice.tsx` §4 is what let it through:
+
+```tsx
+const t  = strip(renderToStaticMarkup(<SelfSignedPanel wallet={w("metamask")} />));   // UNGUARDED
+const nc = strip(renderToStaticMarkup(<SelfSignedPanel wallet={w("modular")} />));    // guarded
+check("⚠️ a non-MetaMask wallet is told so, and differently", nc !== t && /Connect MetaMask/i.test(nc));
+```
+
+🚨 **It compares GUARDED against UNGUARDED and then matches a phrase.** Those two of course differ —
+one has a warning box and the other does not — so the inequality is satisfied by the guard existing
+at all. **It never renders the two GUARDED states against each other**, which is the only comparison
+that could see a collapse.
+
+⭐ **THE RULE: the assertion that catches a collapse is pairwise INEQUALITY between the states being
+distinguished.** A phrase match on one of them **cannot see a collapse at all** — both collapsed
+states contain the phrase, so it passes at exactly the moment the defect is present. Nor can an
+inequality against a *third*, differently-shaped state: it is satisfied by the wrong difference.
+
+⚠️ **AND THIS IS THE SECOND TIME THE SAME SUITE SHAPE PASSED ON THIS SAME DEFECT.**
+`WalletGuardNotice.tsx`'s own header records the first: *"The swap panel's own suite DID assert a
+'connected but unable' case and passed, because it exercised `activeKind === "metamask"` with a
+missing capability rather than the connected-but-not-active state that actually collapsed."*
+**The lesson is written in the file and is not in its assertions** — the suite that documents the
+non-collapse rule (and applies it pairwise for the component, §-guard) does not apply it to the page.
+
+### ⛔ DO NOT FIX EITHER YET — and "render the notice here" is probably wrong
+
+`WalletGuardNotice`'s `verb`/`twinLabel`/`twinRoute` are **per-operation** and this page covers
+three. The page needs the two-state distinction — i.e. to read `metamaskConnected` — which may mean a
+propless variant, a shared sub-clause, or something else. **That is a design call, not a wiring one.**
+
+### ⭐ THE PATTERN ACROSS 8a AND 8c — where the unification stopped
+
+| reached | stopped at |
+|---|---|
+| the three manual panels — `CustodyNotice` and `WalletGuardNotice`, both consumed by all three | **the page** (`SelfSignedPanel`: collapsed guard, §8c) |
+| | **the twin links** (`BridgePanel:233`'s fourth cap wording, §8a) |
+
+⚠️ **Both stopping points were written the SAME DAY as the unification.** The refactor unified what
+already existed and the new surfaces written beside it did not join — which is why "we unified it" is
+not a claim about the surfaces added in the same session. Check what was written *alongside* a
+unification, not only what preceded it.
+
 ---
 
 ## ⛔ 9. WHAT WAS LANDED, AND WHAT STAYS SCOPE
@@ -675,4 +749,4 @@ never could.
 **Stays scope, deliberately not built:**
 - ~~`gate:custody` (§6)~~ — **BUILT 2026-08-31**, `scripts/verify-deployed-custody.mjs`, calibrated four ways. The superset control it retires from `gate:manualswap` went with it.
 - The declared-owner meta-check (§7).
-- Both findings in §8.
+- Both findings in §8 — now four: 8a (the twin links' fourth cap wording), 8b (`WalletGuardNotice` has no bundle coverage), 8c (`SelfSignedPanel`'s collapsed guard), 8d (the suite assertion that cannot see a collapse).
