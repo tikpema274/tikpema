@@ -94,6 +94,8 @@
     "gate:custody": "node scripts/verify-deployed-custody.mjs",
     "test:buildskip": "node scripts/verify-build-skip-predicate.mjs",
     "test:siteclaims": "node scripts/verify-site-claims.mjs",
+    "gate:sitelive": "node scripts/verify-site-live.mjs",
+    "deploy:site": "node scripts/deploy-site.mjs",
     "test:custodynotice": "npx tsx scripts/verify-custody-notice.tsx"
   },
   "dependencies": {
