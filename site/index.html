@@ -85,6 +85,8 @@
   .tbl th{color:var(--muted);font-weight:500;font-size:13px;letter-spacing:.04em;text-transform:uppercase;background:var(--navy-2)}
   .tbl tr:last-child td{border-bottom:none}
   .tbl td:last-child{font-family:'Space Mono',monospace;color:var(--emerald);white-space:nowrap}
+  .mono2{font-family:'Space Mono',monospace;font-size:13px;color:var(--emerald)}
+  .mono3{font-family:'Space Mono',monospace;font-size:12.5px;color:var(--muted);word-break:break-all}
   .note{margin-top:14px;color:var(--muted);font-size:13.5px;line-height:1.6;max-width:72ch}
   .docs{display:flex;flex-direction:column;gap:10px}
   .doc{border:1px solid var(--line);border-radius:11px;padding:16px 20px;background:var(--navy-2);display:flex;gap:16px;align-items:baseline;flex-wrap:wrap}
@@ -147,22 +149,21 @@
       <div class="card">
         <h3>Send USDC</h3>
         <p>To any address on Arc.</p>
-        <div class="expect"><b>Expect:</b> refused above <span class="num">10 USDC</span> per
-          transaction, and the error names the exact limit. Irreversible once it confirms — there is
+        <div class="expect"><b>Expect:</b> refused above a per-transaction cap, and the error names the
+          exact limit. Irreversible once it confirms — there is
           no allowlist behind it.</div>
       </div>
       <div class="card">
         <h3>Swap USDC ↔ EURC</h3>
         <p>On Arc, through the agent wallet.</p>
-        <div class="expect"><b>Expect:</b> capped at <span class="num">25 USDC</span> of value — the
-          bound is on the USDC-equivalent, not the number you typed, because EURC is not a dollar.
+        <div class="expect"><b>Expect:</b> the cap is on the USDC-<i>equivalent</i>, not the number you
+          typed, because EURC is not a dollar.
           The review states a floor you are guaranteed to receive.</div>
       </div>
       <div class="card">
         <h3>Bridge to another chain</h3>
         <p>USDC off Arc via CCTP.</p>
-        <div class="expect"><b>Expect:</b> capped at <span class="num">25 USDC</span>. A live fee is
-          taken from the amount. The fee is exact at execution; <b>the arrival is an estimate</b> —
+        <div class="expect"><b>Expect:</b> capped, and a live fee is taken from the amount. The fee is exact at execution; <b>the arrival is an estimate</b> —
           the delivered figure appears only once the destination chain has been read.</div>
       </div>
       <div class="card">
@@ -202,19 +203,36 @@
     </div>
 
     <div class="sect" style="margin-top:42px">
-      <h2 style="font-size:20px">The numbers, as deployed</h2>
-      <table class="tbl">
-        <tr><th>Bound</th><th>Applies to</th><th>Limit</th></tr>
-        <tr><td>Per transaction</td><td>Send</td><td>10 USDC</td></tr>
-        <tr><td>Per bridge</td><td>Bridge</td><td>25 USDC</td></tr>
-        <tr><td>Per swap</td><td>Swap, DCA fills</td><td>25 USDC</td></tr>
-        <tr><td>Daily ceiling</td><td>Everything, shared</td><td>60 USDC</td></tr>
-      </table>
-      <div class="note">
-        Go over one and the action is refused before anything is signed, with a reason: over a
-        per-transaction cap, over the daily ceiling, the agent is paused, a disclosure was not
-        acknowledged, a value could not be read. Thirteen named reasons in total. A refusal is a
-        result, not an error.
+      <h2 style="font-size:20px">How it behaves when something is wrong</h2>
+      <div class="docs">
+        <div class="doc">
+          <span class="dt">A cap refuses before anything is signed</span>
+          <span class="dd">Every action is bounded by a per-transaction cap and one daily ceiling
+            shared across all of them. Going over is refused at the server, before a signature
+            exists — and the refusal names the exact limit it hit, at the moment it applies, rather
+            than sending you to a page to look it up.</span>
+        </div>
+        <div class="doc">
+          <span class="dt">Bridged amounts are read, not calculated</span>
+          <span class="dd">The cross-chain fee is quoted at execution and drifts, so what actually
+            arrives cannot be worked out in advance. The confirmation shows the fee exactly and the
+            arrival as an <b>estimate</b> — then advances to a <b>measured</b> figure only after the
+            destination chain has been read. The interface never infers it.</span>
+        </div>
+        <div class="doc">
+          <span class="dt">The swap floor is in the calldata, and price-checked</span>
+          <span class="dd">The minimum you receive is inside the transaction you sign and enforced
+            by the contract, not promised by the page. It is also valued against an independent
+            reference rate before you sign — and a floor sitting far <i>above</i> mid-market is
+            flagged as anomalous rather than favourable, because it means the two prices disagree.
+            If the check cannot be made, it says so instead of staying quiet.</span>
+        </div>
+        <div class="doc">
+          <span class="dt">Refusals appear beside the actions</span>
+          <span class="dd">The activity list shows what the agents spent <i>and</i> what a guard
+            stopped. "It tried, and the cap stopped it" is the part worth seeing, so it is not
+            filtered out.</span>
+        </div>
       </div>
     </div>
   </section>
@@ -259,7 +277,7 @@
       Due diligence answers for <b>Arc Testnet only</b>. Base and Base Sepolia are recognised and
       deliberately refused: the report says every Arc provider syncs from one permissioned validator
       set, and that sentence is false elsewhere. A service should not answer for a chain whose
-      assumptions it does not hold. It has its own OpenAPI description and an on-chain identity.
+      assumptions it does not hold. It has its own OpenAPI description, and an on-chain identity you can check without asking us: <code class="mono2">ownerOf(851891)</code> and <code class="mono2">tokenURI(851891)</code> on the ERC-8004 registry at <code class="mono3">0x8004A818BFB912233c491871b3d84c89A494BD9e</code> resolve to the service owner and to a content-addressed document whose hash you can verify yourself. Its own identity endpoint tells you to trust that endpoint <b>last</b> and read the chain instead — the service flags trusted-mutable surfaces in other people’s contracts, and does not exempt itself.
     </div>
   </section>
 
@@ -269,9 +287,10 @@
     <div class="docs">
       <div class="doc">
         <span class="dt">What x402 sellers actually earn</span>
-        <span class="dd">A seven-day census of every payout address in the Circle x402 marketplace —
-          80 sellers, 302,401 blocks of Base mainnet, all 1,009 listings paginated in full rather
-          than sampled. The only mainnet measurement here.</span>
+        <span class="dd">A census of what x402 sellers actually receive, read from the chain rather
+          than asked for. Every payout address in the marketplace index, every block in the window,
+          both directions — a full count, not a sample. The document states its window and its
+          numbers; they belong there, where they carry a date. The only mainnet measurement here.</span>
       </div>
       <div class="doc">
         <span class="dt">What is actually built</span>
