@@ -47,24 +47,27 @@ const check = (l, c, x = "") => { if (c) { pass++; console.log(`  ✅ ${l}${x ? 
 
 // Present in BOTH the old and new builds. If these are missing we are not looking at this app.
 //
-// ═══ 🚨 ONE OF THESE PASSES BY COINCIDENCE — READ THIS BEFORE EDITING CustodyNotice ═════════════
+// ═══ 🚨 ONE OF THESE PASSED BY COINCIDENCE — RETIRED 2026-08-31, AND THE MISDIRECTION WAS REAL ═══
 // `spending caps do not apply here` was chosen as a control on 2026-08-30, when THREE panels each
 // carried that sentence inline. Later the same day they were unified into `CustodyNotice`, whose
-// wording is "Agent spending caps do not apply here" — which HAPPENS to contain the control as a
-// substring. ⭐ The control therefore still passes, but it passes for a reason NOBODY CHOSE: it now
-// depends on a shared component this gate does not otherwise mention, was never written to check,
-// and whose text is owned by a different suite entirely.
+// wording HAPPENS to contain the control as a substring. ⭐ It went on passing — for a reason NOBODY
+// CHOSE: it depended on a shared component this gate never mentions, whose text a different suite
+// owns, and which this gate was never written to check.
 //
-// ⛔ THE CONSEQUENCE, WHICH IS THE POINT OF THIS NOTE: EDIT CustodyNotice'S SENTENCE AND THIS GATE
-// GOES RED — reporting "cannot see the app's panel copy", i.e. aborting before it judges anything —
-// while the SWAP PANEL IT NAMES IS PERFECTLY FINE. A reader would chase a defect in the wrong file.
-// ⚠️ A control that can be satisfied from a source outside the thing it is controlling for is not
-// really a control; it is a coincidence that has not failed yet.
+// ⛔ THE CONSEQUENCE WAS NOT HYPOTHETICAL — IT WAS REPRODUCED BEFORE REMOVING IT. Against the served
+// bundle with the custody literals stripped (i.e. "someone edited CustodyNotice"), this file exited
+// **2** with `⛔ ABORTING — the instrument is not reading this app's bundle`, while the SWAP PANEL IT
+// IS NAMED FOR WAS ENTIRELY INTACT in that artifact. A reader would have chased a defect in the
+// wrong file. With the entry removed the same artifact now returns **exit 0, 12/0** — correct, since
+// nothing about the manual swap panel changed.
+// ⚠️ A control satisfiable from a source outside the thing it controls for is not a control; it is a
+// coincidence that has not failed yet. This one had not failed yet. It would have.
 //
-// ⭐ THE FIX IS NOT TO WEAKEN IT. Replace this entry with a fragment that belongs to the SWAP PANEL
-// and predates this change (the other two controls already do), or let the custody sentence be
-// owned by a gate of its own — scoped in docs/self-signed-page-scope.md, deliberately not built.
-// [[a-deploy-check-needs-a-build-it-should-fail-against]]
+// ⭐ THE CUSTODY SENTENCE NOW HAS A GATE OF ITS OWN — `gate:custody`,
+// scripts/verify-deployed-custody.mjs — which owns it for all THREE renderers rather than for the
+// one this file happens to name. That was the condition for retiring it, and it is met.
+// docs/self-signed-page-scope.md § addendum 2 §6, §9.
+// [[a-deploy-check-needs-a-build-it-should-fail-against]] · [[control-needs-ownership-and-stability]]
 //
 // ═══ ⭐⭐ AND A SECOND ONE COULD NEVER FAIL CORRECTLY AT ALL — FIXED 2026-08-31 ═══════════════════
 // `Set up your wallet first` sat in this list until 2026-08-31. Its owners are BridgePanel,
@@ -101,9 +104,9 @@ const check = (l, c, x = "") => { if (c) { pass++; console.log(`  ✅ ${l}${x ? 
 // existed. Reach for a LABEL owned by the subject's own render path, never for a claim.
 // docs/self-signed-page-scope.md § addendum 2 · [[a-deploy-check-needs-a-build-it-should-fail-against]]
 const CONTROL = [
-  "Swapping from",                   // SwapPanel + ManualSwapPanel — both the swap surface, both builds
-  "come back here to swap",          // ⭐ SwapPanel only, both builds — see the block above
-  "spending caps do not apply here", // 🚨 the coincidental one — see the block above
+  // fragment              owners                                    foSNyN_9 / served
+  "Swapping from",      // SwapPanel + ManualSwapPanel, both swap        1 / 2
+  "come back here to swap", // ⭐ SwapPanel.tsx alone                    1 / 1
 ];
 // New-build only. Each confirmed ABSENT from production before the deploy.
 const MUST_BE_PRESENT = [
