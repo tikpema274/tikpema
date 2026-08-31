@@ -211,7 +211,9 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
         <div className="panel-eyebrow">Bridge from your own wallet</div>
         {/* ⭐ SHARED, not restated — see WalletGuardNotice. */}
         <WalletGuardNotice metamaskConnected={!!w.metamaskConnected} active={w.activeKind === "metamask"}
-          verb="bridge" twinLabel="AI Agent" twinRoute="/agent" />
+          verb="bridge" twinLabel="AI Agent" twinRoute="/agent"
+          onConnect={() => w.connectMetaMask().catch(() => {})} busy={w.busy}
+          replacesSession={!!w.address} />
       </div>
     );
   }

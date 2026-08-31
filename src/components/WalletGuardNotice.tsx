@@ -36,6 +36,25 @@ export type WalletGuardProps = {
   twinLabel: string;
   /** The hash route of that twin, e.g. "/send". */
   twinRoute: string;
+  /**
+   * ⭐⭐ REQUIRED, and for the same reason `metamaskConnected` is: a panel must not be able to
+   * render this guard without it. Naming a state the user cannot act on is the defect SignInPrompt's
+   * header records on #/unified — "a signed-out state must be a DOOR, not a wall… gave the user NO
+   * WAY TO DO IT." 🚨 And here there was no door anywhere in the app: ConnectPasskey gates its whole
+   * connect block on `!w.address` and the Dashboard card on `!w.agentWallet`, so a user signed in
+   * with a passkey — this guard's most likely reader — had nowhere to go. `setActiveKind` is never
+   * called outside the hook, so there is no wallet switcher either. Wire this to
+   * `w.connectMetaMask()`, which is the ONLY mechanism that makes MetaMask active.
+   */
+  onConnect: () => void;
+  /** Disables the action while a connect is in flight — `w.busy`. */
+  busy?: boolean;
+  /**
+   * ⚠️ Is there a session to lose? `connectMetaMask()` calls `clearSession()`, so it REPLACES the
+   * active wallet rather than adding one. That is worth saying to someone signed in and FALSE for
+   * someone who is not, so it is a prop rather than a constant — pass `!!w.address`.
+   */
+  replacesSession?: boolean;
 };
 
 /**
@@ -70,9 +89,24 @@ export function walletGuardState(
 }
 
 export default function WalletGuardNotice({
-  metamaskConnected, active, verb, twinLabel, twinRoute,
+  metamaskConnected, active, verb, twinLabel, twinRoute, onConnect, busy, replacesSession,
 }: WalletGuardProps): ReactNode {
   const state = walletGuardState({ metamaskConnected, active });
+
+  // ⭐ THE DOOR. One action for all three states, because there IS only one mechanism —
+  // `connectMetaMask()` sets the active wallet — but the label names what the reader is doing.
+  const action = (
+    <div style={{ marginTop: 8 }}>
+      <button className="emerald" disabled={busy} onClick={onConnect}>
+        {state === "connect" ? "Connect MetaMask" : state === "switch" ? "Switch to MetaMask" : "Reconnect MetaMask"}
+      </button>
+      {replacesSession && (
+        <div className="sub" style={{ margin: "6px 0 0" }}>
+          This switches your active wallet and will end your current session.
+        </div>
+      )}
+    </div>
+  );
   const twin = (
     <>
       {" "}The agent {verb} is on the{" "}
@@ -88,6 +122,7 @@ export default function WalletGuardNotice({
       <div className="sub" style={{ marginBottom: 0 }}>
         MetaMask is active, but this page cannot sign a {verb} right now. Reconnect MetaMask and try
         again.{twin}
+        {action}
       </div>
     );
   }
@@ -97,12 +132,14 @@ export default function WalletGuardNotice({
       <div className="sub" style={{ marginBottom: 0 }}>
         Switch to MetaMask to {verb} with your own key — it is connected, but another wallet is
         active right now.{twin}
+        {action}
       </div>
     );
   }
   return (
     <div className="sub" style={{ marginBottom: 0 }}>
       Connect MetaMask to {verb} with your own key.{twin}
+      {action}
     </div>
   );
 }

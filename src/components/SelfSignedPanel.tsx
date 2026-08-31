@@ -73,6 +73,22 @@ export default function SelfSignedPanel({ wallet: w }: { wallet: UnifiedWallet }
               versions work with any wallet.
             </>
           )}
+          {/* ⭐ THE DOOR, same rule as WalletGuardNotice: naming a state the reader cannot act on is
+              a wall. There is nowhere else in the app to do this while signed in — ConnectPasskey
+              gates its connect block on `!w.address` and the Dashboard card on `!w.agentWallet` —
+              so the action belongs here, next to the sentence that asks for it. */}
+          <div style={{ marginTop: 8 }}>
+            <button className="emerald" disabled={w.busy}
+              onClick={() => w.connectMetaMask().catch(() => {})}>
+              {walletGuardState({ metamaskConnected: !!w.metamaskConnected, active: isMetaMask }) === "switch"
+                ? "Switch to MetaMask" : "Connect MetaMask"}
+            </button>
+            {!!w.address && (
+              <div className="sub" style={{ margin: "6px 0 0" }}>
+                This switches your active wallet and will end your current session.
+              </div>
+            )}
+          </div>
         </div>
       )}
 

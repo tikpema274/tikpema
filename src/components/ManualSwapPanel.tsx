@@ -264,7 +264,9 @@ export default function ManualSwapPanel({ wallet: w }: { wallet: UnifiedWallet }
             what they had already connected. The hook exported the distinguishing fact precisely so
             every panel would get it; this one did not use it. Now it cannot fail to. */}
         <WalletGuardNotice metamaskConnected={!!w.metamaskConnected} active={w.activeKind === "metamask"}
-          verb="swap" twinLabel="Swap" twinRoute="/swap" />
+          verb="swap" twinLabel="Swap" twinRoute="/swap"
+          onConnect={() => w.connectMetaMask().catch(() => {})} busy={w.busy}
+          replacesSession={!!w.address} />
       </div>
     );
   }

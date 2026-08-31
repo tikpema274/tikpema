@@ -133,7 +133,9 @@ export default function ManualSendPanel({ wallet: w }: { wallet: UnifiedWallet }
         {/* ⭐ SHARED, not restated. `metamaskConnected` is a REQUIRED prop, so a panel cannot
             render this guard without the fact that tells the two states apart. */}
         <WalletGuardNotice metamaskConnected={!!w.metamaskConnected} active={w.activeKind === "metamask"}
-          verb="send" twinLabel="Send" twinRoute="/send" />
+          verb="send" twinLabel="Send" twinRoute="/send"
+          onConnect={() => w.connectMetaMask().catch(() => {})} busy={w.busy}
+          replacesSession={!!w.address} />
       </div>
     );
   }

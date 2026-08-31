@@ -91,7 +91,7 @@ console.log("\n⭐⭐ 6 — THE WALLET GUARD: THREE STATES, AND NO TWO OF THEM C
 {
   const g = (metamaskConnected: boolean, active: boolean) => strip(renderToStaticMarkup(
     <WalletGuardNotice metamaskConnected={metamaskConnected} active={active}
-      verb="swap" twinLabel="Swap" twinRoute="/swap" />));
+      verb="swap" twinLabel="Swap" twinRoute="/swap" onConnect={() => {}} />));
   const notConnected = g(false, false), connectedInactive = g(true, false), activeButUnable = g(true, true);
 
   check("not connected → the instruction is CONNECT",
@@ -114,11 +114,40 @@ console.log("\n⭐⭐ 6 — THE WALLET GUARD: THREE STATES, AND NO TWO OF THEM C
   ];
   for (const [label, a, b] of pairs) check(`⭐⭐ ${label} render DIFFERENTLY`, a !== b);
 
+  // ═══ ⭐⭐ A GUARD THAT NAMES A STATE MUST OFFER THE WAY OUT ═══════════════════════════════════
+  // 🚨 It did not. The guard said "Connect MetaMask to {verb} with your own key" and pointed only at
+  // the AGENT twin — and there is nowhere in the app to act on it: ConnectPasskey gates its whole
+  // connect block on `!w.address` (line 43) and the Dashboard card on `!w.agentWallet`, so a user
+  // signed in with a PASSKEY — the guard's most likely reader — is told to connect MetaMask by a
+  // page that offers no way to, on a site where no other page offers one either. There is no wallet
+  // switcher at all: `setActiveKind` is never called outside the hook.
+  // ⭐ SignInPrompt's header already records this exact bug on #/unified: "A signed-out state must
+  // be a DOOR, not a wall… gave the user NO WAY TO DO IT." Same rule, different guard.
+  const rawG = (mc: boolean, ac: boolean) => renderToStaticMarkup(
+    <WalletGuardNotice metamaskConnected={mc} active={ac} verb="swap" twinLabel="Swap" twinRoute="/swap"
+      onConnect={() => {}} busy={false} replacesSession={false} />);
+  for (const [label, mc, ac] of [["not-connected", false, false], ["connected-inactive", true, false],
+    ["active-but-unable", true, true]] as [string, boolean, boolean][])
+    check(`⭐⭐ ${label} offers the way OUT as an ACTION, not just a description`,
+      /<button[^>]*>\s*(Connect|Switch to|Reconnect) MetaMask\s*<\/button>/.test(rawG(mc, ac)));
+
+  // ⚠️ AND THE WARNING MUST BE TRUE IN EVERY CASE. `connectMetaMask()` calls `clearSession()`, so it
+  // REPLACES the active wallet rather than adding one — worth saying to someone who is signed in,
+  // and FALSE for someone who is not. It is a prop, not a constant. [[field-name-must-be-true-in-every-case]]
+  const withSession = strip(renderToStaticMarkup(
+    <WalletGuardNotice metamaskConnected={false} active={false} verb="swap" twinLabel="Swap" twinRoute="/swap"
+      onConnect={() => {}} busy={false} replacesSession={true} />));
+  const noSession = strip(renderToStaticMarkup(
+    <WalletGuardNotice metamaskConnected={false} active={false} verb="swap" twinLabel="Swap" twinRoute="/swap"
+      onConnect={() => {}} busy={false} replacesSession={false} />));
+  check("⭐ signed in → the guard says the connect will REPLACE the session", /end your current session/i.test(withSession));
+  check("⛔ …and signed out → it does not, because there is no session to end", !/end your current session/i.test(noSession));
+
   check("every state points at the agent twin, by link", [notConnected, connectedInactive, activeButUnable]
     .every((t) => /The agent swap is on the Swap page/i.test(t)));
   check("the verb and twin are props, not hardcoded",
     /bridge with your own key/i.test(strip(renderToStaticMarkup(
-      <WalletGuardNotice metamaskConnected={false} active={false} verb="bridge" twinLabel="AI Agent" twinRoute="/agent" />))));
+      <WalletGuardNotice metamaskConnected={false} active={false} verb="bridge" twinLabel="AI Agent" twinRoute="/agent" onConnect={() => {}} />))));
 }
 
 console.log("\n⭐ 4 — THE PAGE");
@@ -151,6 +180,10 @@ console.log("\n⭐ 4 — THE PAGE");
   check("🚨 connected but another wallet active → SWITCH, and never connect what they already have",
     /\bSwitch to MetaMask/i.test(connectedInactive) && !/\bConnect MetaMask/i.test(connectedInactive));
   check("⚠️ …and both still differ from the UNGUARDED render", notConnected !== t && connectedInactive !== t);
+  // ⭐ The page carries the SAME rule as the panel guard: a state it names, it must let you act on.
+  const rawPage = renderToStaticMarkup(<SelfSignedPanel wallet={w("modular", false)} />);
+  check("⭐⭐ the page offers the way OUT as an ACTION too",
+    /<button[^>]*>\s*(Connect|Switch to) MetaMask\s*<\/button>/.test(rawPage));
 }
 
 console.log("\n⛔ 5 — THE PAGE IS NOT IN THE NAV, AND THE ROUTE EXISTS ANYWAY");
