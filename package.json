@@ -91,6 +91,7 @@
     "test:swapdecode": "npx tsx scripts/verify-swap-calldata-decode.ts",
     "test:manualswapcopy": "npx tsx scripts/verify-manual-swap-copy.tsx",
     "gate:manualswap": "node scripts/verify-deployed-manual-swap.mjs",
+    "gate:custody": "node scripts/verify-deployed-custody.mjs",
     "test:custodynotice": "npx tsx scripts/verify-custody-notice.tsx"
   },
   "dependencies": {

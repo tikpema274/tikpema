@@ -476,15 +476,25 @@ not** — and that is a served-artifact question. `verify-custody-notice.tsx` ch
 Dashboard card by reading `App.tsx` and `Dashboard.tsx` **as source text**; a bundle gate checks the
 same facts **in the artifact**. Two instruments, not two reads of one.
 
-### Proposed contents — every count verified against the served bundle
+### Contents — ⭐ BUILT 2026-08-31 as `scripts/verify-deployed-custody.mjs` (`gate:custody`)
+
+**CONTROL** — the three HOST panels' own copy, each with both readings stated, neither inferred:
+
+| fragment | owners | CfsAYHNr (pre-unification) / served |
+|---|---|---|
+| `Check the address carefully.` | 1 — `ManualSendPanel.tsx` | 1 / 1 |
+| `Bridge from your own wallet` | 1 — `ManualBridgePanel.tsx` | 2 / 2 |
+| `Check this before you sign` | 1 — `ManualSwapPanel.tsx` | 1 / 1 |
+
+**Discriminators:**
 
 | role | fragment | count |
 |---|---|---|
-| CONTROL | `Operations you sign yourself` | 1 |
 | the custody claim is present | `Agent spending caps do not apply here` | 1 |
 | …and the reason, not just the absence | `not a limit on your own funds` | 1 |
 | the user-signs half | `You sign this yourself, with your own key, spending ` | 1 |
 | the page's own contrast | `its spending caps do not bound them` | 1 |
+| the page is named for the ACT | `Operations you sign yourself` | 1 |
 | ⭐ the entry point shipped | `caps do not bound these` | 1 |
 | ⛔ the divergent wording is gone | `this is your wallet and your money` | 0 |
 
@@ -497,10 +507,48 @@ same facts **in the artifact**. Two instruments, not two reads of one.
 | `your own funds` | **3** | `CustodyNotice` ×2 **+ `BridgePanel.tsx:233`** — satisfiable from the agent panel |
 | ` from your own wallet` | **11** | far too generic |
 
-⚠️ The CONTROL above is `Operations you sign yourself`, which is **new-build-only** — correct here,
-because `gate:custody` has no pre-fix build to bridge: it is written after the fact, and its control's
-job is only "am I looking at this app's self-signed page". A gate written *against* a change needs a
-control stable across it; a gate written *after* one does not. **State which kind it is in the file.**
+### 🚨 THE CONTROL PROPOSED IN THE FIRST DRAFT OF THIS SECTION WAS WRONG — TWICE OVER
+
+This section originally named **`Operations you sign yourself`** as the control, arguing that a gate
+written *after* a change needs no control stable across it. **Both halves fail, and applying
+[[control-needs-ownership-and-stability]] before writing the file is what caught it:**
+
+```
+owners: 1 [SelfSignedPanel.tsx]        CfsAYHNr 0 / served 1
+```
+
+- ⛔ **It fails STABILITY** — 0 in the pre-unification build. The "written after the fact" argument
+  does not rescue it, because the gate is still run against *candidate* builds going forward.
+- ⛔⛔ **And it is PART OF THE SUBJECT**, which is worse and is a requirement neither the rule nor
+  this addendum had stated: **a control drawn from the subject can never witness the subject's
+  absence.** The synthetic negative below strips the whole custody claim, `Operations you sign
+  yourself` included — so as a CONTROL it would have **aborted at exit 2**, reporting *"not reading
+  this app"* about an artifact that is this app with the claim deleted. **The gate would have been
+  silent in precisely its own failure case.**
+
+⭐ **The third requirement, now recorded:** a control must be **sole-owned within the enclosing
+surface, stable across both builds, and DISJOINT from the subject.** §1's phrasing — *"a subset of
+its subject"* — was loose: what makes `Set up your wallet first` bad is not that it sits outside
+`ManualSwapPanel`, but that it sits outside the **swap surface entirely** (Vault and Send panels
+prove nothing about swap). The control must enclose the subject and survive its removal.
+
+### ⭐⭐ AND THE CALIBRATION IS SYNTHETIC, BECAUSE NO HISTORICAL BUILD LACKS THE SUBJECT
+
+⛔ **This is not a unification gate**, and the measurement says so: `Agent spending caps do not apply
+here` counts **2** in the pre-unification build and **1** now. It is present in *both*, so it does
+not discriminate the unification — and every build back to `foSNyN_9` carries the claim in some
+form. The negative therefore had to be **constructed**: the served bundle with the custody literals
+removed, which is the real failure this gate exists to catch. Four readings:
+
+| artifact | exit | what it shows |
+|---|---|---|
+| served prod `D4ZeRpcr` | **0** | 10 / 0 |
+| `CfsAYHNr` 13:55, real prior build | **1** | control 3/3 passes and does **not** abort; the three custody-sentence checks **pass** — the proof it is not a unification gate; page, entry point and absence go red |
+| served **minus the custody claim** (synthetic) | **1** | ⭐⭐ **the discriminating row** — control passes, all six presence checks red, on an artifact where everything else is fine |
+| served **minus the three host panels** (synthetic) | **2** | ABORTS — the control can fail, so it is a control |
+
+⭐ **One assertion does have a real red build:** the absence, `this is your wallet and your money` —
+1 in `CfsAYHNr`, 0 now. Everything else rests on the constructed negative, and the file says so.
 
 ---
 
@@ -598,6 +646,6 @@ panels; the tail is swap-only. Stable across both builds, a label rather than a 
 never could.
 
 **Stays scope, deliberately not built:**
-- `gate:custody` (§6) — including retiring the superset control from `gate:manualswap`.
+- ~~`gate:custody` (§6)~~ — **BUILT 2026-08-31**, `scripts/verify-deployed-custody.mjs`, calibrated four ways. The superset control it retires from `gate:manualswap` went with it.
 - The declared-owner meta-check (§7).
 - Both findings in §8.
