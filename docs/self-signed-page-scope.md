@@ -663,8 +663,18 @@ Same three renderers as `CustodyNotice` (`ManualSendPanel:135`, `ManualBridgePan
 `ManualSwapPanel:266`), shipped in the same wave, covered at the suite layer by
 `verify-custody-notice.tsx`'s non-collapse pairs — and **named by neither bundle gate.** Addendum 1
 listed the wallet-guard unification as its own step; that step is now built at the suite layer and
-absent at this one. A clean unique discriminator is available: `"Switch to MetaMask"`, bundle count
-**1**.
+absent at this one. ~~A clean unique discriminator is available: `"Switch to MetaMask"`, bundle count
+**1**.~~
+
+🚨 **THE PROPOSED FRAGMENT WENT STALE, 2026-08-31 — and this is why a scoped fragment must be
+re-measured, never remembered.** `"Switch to MetaMask"` counted **1** when this item was written. It
+counts **4** in the deployed bundle: the guard's button label, `SelfSignedPanel`'s button label, and
+the prose in each. The guard gained a *door* — an action, not just a description — and the fragment
+chosen for its uniqueness stopped being unique **because the component it describes got better**.
+⛔ It can no longer serve as proposed. ⚠️ Note the shape: nothing about §8b was wrong when written and
+nothing invalidated it deliberately — the count moved under it. **A fragment recorded in a scope doc
+is a MEASUREMENT with a date, not a fact**, and the only safe use of one is to re-run the count at
+build time. [[a-deploy-check-needs-a-build-it-should-fail-against]]
 
 ### 🚨 8c. `SelfSignedPanel`'s guard copy has COLLAPSED — the same defect, on the page
 
