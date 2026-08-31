@@ -26,7 +26,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { AGENTS } from "../netlify/functions/_agents.mjs";
 
-const AgentsPanel = (await import("../src/components/AgentsPanel")).default;
+const _agentsMod = await import("../src/components/AgentsPanel");
+const AgentsPanel = _agentsMod.default;
+// ⭐ The two pure blocks the authed body is built from, exported so the absence checks below can be
+// CALIBRATED — an absence asserted against a render that could never contain the string is vacuous.
+const { AgentsBudgetLine, RosterCard } = _agentsMod as any;
 
 let pass = 0, fail = 0;
 const check = (label: string, cond: boolean, extra = "") => {
@@ -54,6 +58,43 @@ console.log("╚═════════════════════�
 
 section("0 — the panel renders at all");
 check("⚠️ non-empty render", rendered.length > 150, `${rendered.length} chars`);
+
+// ═══ 🚨 A PAGE THAT ASSERTS AGENT STATE TO SOMEONE WITH NO WALLET ══════════════════════════════
+// The gate was `const authed = w.isAuthenticated`, and `isAuthenticated` is derived from a
+// sessionStorage token ALONE (`!!session && session.exp*1000 > Date.now()`), independently of
+// whether any wallet is connected in the UI. So a visitor holding a live token with no connected
+// wallet — a reload straight onto #/agents — skipped the sign-in prompt and got the roster and the
+// shared daily-ceiling line: the page ASSERTING what your agents are doing and what they spent, to
+// someone the rest of the app shows as signed out. That is worse than a missing guard line.
+// ⭐ THE LOAD-BEARING ASSERTION IS THE POSITIVE ONE, and it is the one that goes red on the broken
+// page: the prompt must BE there. ⚠️ The absence checks below are honest but weak on their own —
+// renderToStaticMarkup runs no effects, so `data` is null and the roster could not appear anyway.
+// They are made non-vacuous by the calibration underneath, which proves the strings ARE detectable.
+// [[equality-passes-vacuously-on-empty]] · [[state-behind-a-transition-is-untested-by-default]]
+{
+  const tokenOnly: any = { ...wallet, address: undefined, isAuthenticated: true };
+  const out = renderToStaticMarkup(<AgentsPanel wallet={tokenOnly} />).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  check("⭐⭐ a token without a connected wallet is asked to connect one, not shown the roster",
+    /Sign in to see your agents/i.test(out));
+  check("⛔ …and the shared daily-ceiling line is NOT asserted to them", !/Spent today/i.test(out));
+  for (const name of ["Researcher", "Executor"])
+    check(`⛔ …nor the agent name "${name}"`, !new RegExp(name, "i").test(out));
+
+  // ⭐ CALIBRATION — the absence checks above must be able to FAIL. Render the two pure blocks the
+  // authed body is built from and confirm the very strings asserted absent are detectable here.
+  const budget = renderToStaticMarkup(
+    <AgentsBudgetLine budget={{ spentTodayUsdc: 1.5, ceilingUsdc: 25 }} allPaused={false} busy="" onToggleAll={() => {}} />,
+  ).replace(/<[^>]+>/g, " ");
+  check("⭐ calibration: 'Spent today' IS detectable when the block renders", /Spent today/i.test(budget));
+  const card = renderToStaticMarkup(
+    // ⚠️ The field is `label`, not `name` — the first fixture used `name` and the calibration went
+    // RED, which is exactly its job: it proved the assertion could not see what it claimed to.
+    <RosterCard agent={{ id: "researcher", label: "Researcher", description: "x", spends: "x",
+      movesFunds: true, paused: false, pausedByAll: false, spentTodayUsdc: 0, actionsToday: 0,
+      blockedToday: 0 } as any} busy={false} open={false} onToggle={() => {}} onExpand={() => {}} />,
+  ).replace(/<[^>]+>/g, " ");
+  check("⭐ calibration: an agent NAME IS detectable when a card renders", /Researcher/i.test(card));
+}
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
 section("1 — ⭐ THE FOUR PROMISES THE DASHBOARD SENDS USERS HERE FOR");

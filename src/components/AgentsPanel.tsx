@@ -100,7 +100,17 @@ export default function AgentsPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");            // the agent id currently toggling
   const [expanded, setExpanded] = useState<string | null>(null); // the agent whose detail is open
-  const authed = w.isAuthenticated;
+  // ═══ 🚨 A TOKEN IS NOT A SIGNED-IN USER ════════════════════════════════════════════════════
+  // This was `w.isAuthenticated` alone. That is derived from a sessionStorage token
+  // (`!!session && session.exp*1000 > Date.now()`) INDEPENDENTLY of whether a wallet is connected
+  // in the UI — so a reload straight onto #/agents with a live token skipped the prompt and showed
+  // the roster and the shared daily-ceiling line to someone the rest of the app renders as signed
+  // out. ⛔ A page asserting what your agents did and what they spent, to a visitor with no wallet,
+  // is worse than a page with no guard line at all.
+  // ⭐ `SignInPrompt` already tells the two remedies apart — no wallet → "Connect a wallet" routing
+  // to #/wallet; wallet but stale session → "Sign in" in place — so the fix is the GATE, not new
+  // copy. [[absence-must-never-read-as-safe]]
+  const authed = w.isAuthenticated && !!w.address;
 
   const load = useCallback(async () => {
     if (!authed) return;
@@ -201,30 +211,8 @@ export default function AgentsPanel({ wallet: w }: { wallet: UnifiedWallet }) {
 
       {authed && data && (
         <>
-          {/* ── The daily ceiling: ONE budget, shared by every agent. ── */}
-          <div
-            className="status"
-            style={{
-              marginTop: 14, padding: "12px 16px", background: "var(--field)",
-              border: "1px solid var(--line)", borderRadius: 12,
-            }}
-          >
-            <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
-              <div>
-                Spent today{" "}
-                <span className="mono" style={{ color: "var(--paper)" }}>
-                  {money(data.budget.spentTodayUsdc ?? 0)}
-                </span>{" "}
-                of <span className="mono">{data.budget.ceilingUsdc}</span> USDC
-              </div>
-              <button className="linkbtn" disabled={busy === "*"} onClick={() => toggle("*", !data.allPaused)}>
-                {busy === "*" ? "…" : data.allPaused ? "Resume all agents" : "Pause all agents"}
-              </button>
-            </div>
-            <div className="sub" style={{ margin: "6px 0 0" }}>
-              One daily ceiling, shared across every agent. When it's reached, they all stop.
-            </div>
-          </div>
+          <AgentsBudgetLine budget={data.budget} allPaused={data.allPaused} busy={busy}
+            onToggleAll={() => toggle("*", !data.allPaused)} />
 
           {/* ── THE ROSTER GRID. Add an agent to _agents.mjs, get a card. Wraps at 3. ── */}
           <div className="quick" style={{ marginTop: 14 }}>
@@ -274,7 +262,46 @@ export default function AgentsPanel({ wallet: w }: { wallet: UnifiedWallet }) {
 
 // ── A compact roster card. Priority order is deliberate and fixed:
 //    1. name · 2. movesFunds badge · 3. one line · 4. today's spend · 5. pause control
-function RosterCard({
+// ── The daily ceiling: ONE budget, shared by every agent. ──────────────────────────────────────
+// ⭐ EXPORTED AND PURE so the roster's absence from a signed-out render can be CALIBRATED: an
+// absence asserted against a render that could never contain the string is vacuous, and under
+// renderToStaticMarkup no effect runs, so `data` is null and this block could not appear anyway.
+// The suite renders THIS with a fixture to prove "Spent today" is detectable, which is what makes
+// the absence assertion mean something. [[equality-passes-vacuously-on-empty]]
+export function AgentsBudgetLine({
+  budget, allPaused, busy, onToggleAll,
+}: {
+  budget: { spentTodayUsdc?: number | null; ceilingUsdc: number | string };
+  allPaused: boolean; busy: string; onToggleAll: () => void;
+}) {
+  return (
+    <div
+      className="status"
+      style={{
+        marginTop: 14, padding: "12px 16px", background: "var(--field)",
+        border: "1px solid var(--line)", borderRadius: 12,
+      }}
+    >
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+        <div>
+          Spent today{" "}
+          <span className="mono" style={{ color: "var(--paper)" }}>
+            {money(budget.spentTodayUsdc ?? 0)}
+          </span>{" "}
+          of <span className="mono">{budget.ceilingUsdc}</span> USDC
+        </div>
+        <button className="linkbtn" disabled={busy === "*"} onClick={onToggleAll}>
+          {busy === "*" ? "…" : allPaused ? "Resume all agents" : "Pause all agents"}
+        </button>
+      </div>
+      <div className="sub" style={{ margin: "6px 0 0" }}>
+        One daily ceiling, shared across every agent. When it's reached, they all stop.
+      </div>
+    </div>
+  );
+}
+
+export function RosterCard({
   agent: a, busy, open, onToggle, onExpand,
 }: {
   agent: Agent; busy: boolean; open: boolean; onToggle: () => void; onExpand: () => void;
