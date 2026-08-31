@@ -90,6 +90,9 @@ check("⭐⭐ …and explicitly refuses the safe reading", /not.{0,10}a statemen
 // state cannot render before a real look. What matters is the property, so both are pinned as
 // themselves rather than forced into one shape.
 const noWallet = render({ agentWallet: null });
+// ⛔ Funding is not what unblocks this page — the gate is `!w.agentWallet`. See SendPanel's guard.
+check("⛔ the guard does NOT make FUNDING a precondition for returning", !/fund it/i.test(noWallet));
+check("⭐ …it names the wallet page, and the return", /open\s*Wallet/i.test(noWallet) && /come back to deposit/i.test(noWallet));
 check("🚨 an unprovisioned agent wallet never reaches the empty state either",
   !EMPTY_STATE.test(noWallet));
 check("⭐ …it short-circuits with an instruction instead of a balance claim",

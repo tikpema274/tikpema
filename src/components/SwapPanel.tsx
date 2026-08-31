@@ -66,11 +66,17 @@ export default function SwapPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         <div className="panel-eyebrow">Swap</div>
         <h2>Swap USDC ↔ EURC</h2>
         <div className="sub" style={{ marginBottom: 0 }}>
+          {/* ⛔ NOT "connect and fund it". The gate here is `!w.agentWallet` — the wallet EXISTING,
+              which follows from a session. Funding is not checked and does not unblock this page,
+              so naming it made a precondition out of something that is not one, and sent a user
+              with a connected empty wallet looking for a step they did not need. ⚠️ AGENT voice:
+              needs a wallet, points at Wallet. Not to be merged with the self-signed voice, which
+              needs MetaMask ACTIVE and points at the landing page. */}
           Set up your wallet first — open{" "}
           <button className="linkbtn" onClick={() => (window.location.hash = "/wallet")}>
             Wallet
           </button>{" "}
-          to connect and fund it, then come back here to swap.
+          to connect one, then come back here to swap.
         </div>
       </div>
     );

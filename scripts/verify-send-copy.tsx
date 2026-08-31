@@ -45,7 +45,12 @@ const strip = (h: string) => h.replace(/<[^>]*>/g, " ").replace(/&#x27;/g, "'").
 const wallet = (kind: string | null, opts: { metamaskConnected?: boolean; agentWallet?: any } = {}) => ({
   activeKind: kind,
   metamaskConnected: opts.metamaskConnected ?? false,
-  agentWallet: opts.agentWallet ?? { address: "0x1111111111111111111111111111111111111111", balance: "12.5" },
+  // 🚨 `??` CANNOT EXPRESS "NO AGENT WALLET": `null ?? {default}` yields the default, so
+  // `wallet("modular", { agentWallet: null })` rendered the CONNECTED panel and the variable named
+  // `gated` was not gated. The assertion below it — "the pre-wallet state is titled the same way" —
+  // had been green against the wrong render. `in` is what makes the absent state expressible.
+  // [[state-behind-a-transition-is-untested-by-default]]
+  agentWallet: "agentWallet" in opts ? opts.agentWallet : { address: "0x1111111111111111111111111111111111111111", balance: "12.5" },
   sendFromAgent: async () => {},
   sendUsdcManual: async () => ({ txHash: "0x" }),
   ensureSession: async () => "t",
@@ -98,6 +103,16 @@ section("2 — ⭐ THE TITLES CARRY THE DISTINCTION, not only the body copy");
     "a live route nothing links to is reachable only by typing the hash");
   // ⭐ Also true in the pre-wallet state, which is the first thing a new user sees.
   const gated = strip(renderToStaticMarkup(<SendPanel wallet={wallet("modular", { agentWallet: null })} />));
+  // ⭐⭐ THE GUARD NAMES WHAT UNBLOCKS THE PAGE — AND FUNDING IS NOT IT.
+  // The sentence said "open Wallet to connect and fund it, then come back here". The gate is
+  // `!w.agentWallet`: the wallet EXISTING, which appears once there is a session. Funding is not
+  // checked here and does not unblock anything, so "fund it, then come back" stated a precondition
+  // that is not one — a user with a connected empty wallet was told to go find a funding step
+  // before they could even see this page. ⚠️ Three voices, three sentences: this one is the AGENT
+  // voice (needs a wallet, points at Wallet) and must not be merged with the self-signed voice
+  // (needs MetaMask ACTIVE, points at the landing page). [[verify-facts-before-sharing-words]]
+  check("⛔ the guard does NOT make FUNDING a precondition for returning", !/fund it/i.test(gated));
+  check("⭐ …it names the wallet page, and the return", /open\s*Wallet/i.test(gated) && /come back here to send/i.test(gated));
   check("⭐ …and the pre-wallet state is titled the same way", /Send from your agent wallet/i.test(gated));
 }
 
