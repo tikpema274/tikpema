@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tikpema — Hire an AI research analyst on Arc</title>
+<meta name="description" content="Ask a factual or analytical question and get a sourced, cited research brief. Funds stay in escrow until the work is verified — released to the analyst, or refunded to you. Built on Arc with USDC, settled by passkey." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --navy:#0a0e14; --navy-2:#11161f; --blue:#3d7eff; --blue-bright:#5b94ff;
+    --emerald:#2dd4a0; --ink:#e6e9ef; --muted:#8b95a3; --line:rgba(255,255,255,.08);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--navy);color:var(--ink);font-family:'Outfit',system-ui,sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  a{color:inherit;text-decoration:none}
+  .wrap{position:relative;z-index:1;max-width:1080px;margin:0 auto;padding:0 24px}
+  nav{display:flex;align-items:center;justify-content:space-between;padding:26px 0;border-bottom:1px solid var(--line)}
+  .brand{display:flex;align-items:center;gap:12px;font-weight:600;font-size:20px;letter-spacing:-.02em}
+  .brand .mark{width:34px;height:34px;border-radius:9px;flex:none}
+  .nav-links{display:flex;align-items:center;gap:26px;font-size:14px;color:var(--muted)}
+  .nav-links a:hover{color:var(--ink)}
+  .nav-launch{font-size:14px;color:#fff;background:var(--blue);padding:9px 18px;border-radius:8px;font-weight:600}
+  .nav-launch:hover{background:var(--blue-bright)}
+  @media(max-width:640px){.nav-links a:not(.nav-launch){display:none}}
+  .hero{padding:88px 0 56px;text-align:center}
+  .eyebrow{display:inline-block;font-size:13px;font-weight:500;color:#9fb4d6;padding:6px 14px;border:1px solid #243047;border-radius:100px;background:rgba(61,126,255,.06);margin-bottom:30px}
+  .hero h1{font-size:clamp(36px,6vw,56px);line-height:1.1;font-weight:600;letter-spacing:-.025em;margin:0 auto 24px;max-width:18ch;color:#f3f6fb}
+  .hero h1 .accent{color:var(--blue-bright)}
+  .hero p{font-size:clamp(16px,2.2vw,19px);color:#97a1b0;max-width:56ch;margin:0 auto 38px;line-height:1.65}
+  .cta-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .btn-primary{display:inline-flex;align-items:center;gap:10px;font-size:16px;font-weight:600;color:#fff;background:var(--blue);padding:15px 28px;border-radius:9px;transition:background .15s ease}
+  .btn-primary:hover{background:var(--blue-bright)}
+  .btn-primary .arrow{transition:transform .15s ease}
+  .btn-primary:hover .arrow{transform:translateX(4px)}
+  .btn-ghost{display:inline-flex;align-items:center;gap:8px;font-size:16px;font-weight:500;color:#c9d2de;padding:15px 26px;border-radius:9px;border:1px solid #283342}
+  .btn-ghost:hover{border-color:rgba(61,126,255,.4);background:rgba(61,126,255,.04)}
+  .proof{display:flex;gap:26px;justify-content:center;flex-wrap:wrap;margin-top:48px}
+  .proof .item{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:14px}
+  .proof .dot{width:7px;height:7px;border-radius:50%;background:var(--emerald);flex:none}
+  .planes{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:64px 0 0}
+  @media(max-width:640px){.planes{grid-template-columns:1fr}}
+  .plane{border:1px solid var(--line);border-radius:16px;padding:28px;background:var(--navy-2)}
+  .plane .tag{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--blue-bright);font-weight:600;margin-bottom:12px}
+  .plane h3{font-size:20px;font-weight:600;margin-bottom:8px;letter-spacing:-.01em}
+  .plane p{color:var(--muted);font-size:15px;line-height:1.6}
+  .how{margin:84px 0 0}
+  .how h2{font-size:clamp(26px,4vw,36px);font-weight:600;letter-spacing:-.02em;text-align:center;margin-bottom:8px}
+  .how .sub{text-align:center;color:var(--muted);margin-bottom:44px}
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  @media(max-width:760px){.steps{grid-template-columns:1fr}}
+  .step{background:var(--navy);padding:28px 26px}
+  .step .n{font-size:13px;color:var(--blue-bright);width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;background:rgba(61,126,255,.12);font-weight:700;margin-bottom:16px}
+  .step h4{font-size:17px;font-weight:600;margin-bottom:6px}
+  .step p{color:var(--muted);font-size:14px;line-height:1.55}
+  .built{margin:84px 0 0;text-align:center}
+  .built .label{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-bottom:20px}
+  .chips{display:flex;flex-wrap:wrap;gap:12px;justify-content:center}
+  .chip{border:1px solid var(--line);border-radius:9px;padding:10px 18px;font-size:14px;color:var(--ink);background:var(--navy-2)}
+  .chip b{color:var(--blue-bright);font-weight:600}
+  .final{margin:84px 0 0;text-align:center;border:1px solid var(--line);border-radius:20px;padding:56px 28px;background:var(--navy-2)}
+  .final h2{font-size:clamp(26px,4.4vw,40px);font-weight:600;letter-spacing:-.02em;margin-bottom:14px;color:#f3f6fb}
+  .final p{color:var(--muted);max-width:50ch;margin:0 auto 30px;line-height:1.6}
+  footer{margin:70px 0 40px;padding-top:28px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:14px}
+  footer .brand{font-size:16px}
+  .foot-links{display:flex;gap:22px;flex-wrap:wrap}
+  .foot-links a:hover{color:var(--ink)}
+  .testnet{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.08em;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:4px 9px}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a class="brand" href="/">
+      <svg class="mark" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse"><stop stop-color="#11161f"/><stop offset="1" stop-color="#0a0e14"/></linearGradient>
+        </defs>
+        <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+        <rect x="146" y="150" width="220" height="34" rx="17" fill="#3d7eff"/>
+        <rect x="239" y="150" width="34" height="180" rx="17" fill="#3d7eff"/>
+        <polyline points="150,360 210,330 256,348 312,300 372,262" fill="none" stroke="#2dd4a0" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="150" cy="360" r="9" fill="#3d7eff"/><circle cx="256" cy="348" r="9" fill="#3d7eff"/><circle cx="372" cy="262" r="11" fill="#2dd4a0"/>
+      </svg>
+      Tikpema
+    </a>
+    <div class="nav-links">
+      <a href="#how">How it works</a>
+      <a href="#built">Built on Arc</a>
+      <a class="nav-launch" href="https://app.tikpema.xyz">Launch App ↗</a>
+    </div>
+  </nav>
+  <header class="hero">
+    <div class="eyebrow">AI research analyst, settled in USDC</div>
+    <h1>Hire an AI analyst to research any question — <span class="accent">sourced, verifiable, paid on delivery.</span></h1>
+    <p>Ask a factual or analytical question and get a cited research brief. Your funds stay in escrow until an evaluator confirms the work — released to the analyst, or refunded to you. Secured by your fingerprint, settled in USDC. No seed phrases, no gas.</p>
+    <div class="cta-row">
+      <a class="btn-primary" href="https://app.tikpema.xyz">Hire the analyst <span class="arrow">→</span></a>
+      <a class="btn-ghost" href="#how">See how it works</a>
+    </div>
+    <div class="proof">
+      <div class="item"><span class="dot"></span> Cited sources, every time</div>
+      <div class="item"><span class="dot"></span> Escrow-backed, refundable</div>
+      <div class="item"><span class="dot"></span> Sign with a fingerprint, no seed phrase</div>
+    </div>
+  </header>
+  <section class="planes">
+    <div class="plane">
+      <div class="tag">Sourced &amp; verifiable</div>
+      <h3>Every answer is cited</h3>
+      <p>The analyst returns a real brief with reasoning and clickable sources — not a chat reply. The deliverable is committed on-chain, so the work can be checked.</p>
+    </div>
+    <div class="plane">
+      <div class="tag">Escrow-backed</div>
+      <h3>Pay for results, not promises</h3>
+      <p>Your USDC sits in on-chain escrow. An AI evaluator verifies the deliverable before it settles — the analyst is paid for good work, or you're refunded.</p>
+    </div>
+  </section>
+  <section class="how" id="how">
+    <h2>How it works</h2>
+    <p class="sub">Three steps, from question to settled brief.</p>
+    <div class="steps">
+      <div class="step"><div class="n">1</div><h4>Ask a question</h4><p>A factual or analytical question. The AI prices it — or declines if it's advice rather than research.</p></div>
+      <div class="step"><div class="n">2</div><h4>The analyst researches</h4><p>It reads the web, writes a sourced brief with its reasoning, and commits the deliverable on-chain.</p></div>
+      <div class="step"><div class="n">3</div><h4>Escrow settles</h4><p>An evaluator verifies the work. Paid on a good brief, refunded if it doesn't pass — gasless, in USDC.</p></div>
+    </div>
+  </section>
+  <section class="built" id="built">
+    <div class="label">Built natively on Arc</div>
+    <div class="chips">
+      <div class="chip"><b>USDC</b> — native settlement</div>
+      <div class="chip"><b>Circle Modular Wallets</b> — gasless passkeys</div>
+      <div class="chip"><b>ERC-8183</b> — on-chain escrow &amp; jobs</div>
+      <div class="chip"><b>ERC-8004</b> — on-chain AI identity</div>
+    </div>
+  </section>
+  <section class="final">
+    <h2>Try it on Arc Testnet</h2>
+    <p>It's free, it's play-money, and it takes a fingerprint to start. Ask a real question, watch the analyst research and cite its sources, and see the escrow settle.</p>
+    <a class="btn-primary" href="https://app.tikpema.xyz">Hire the analyst <span class="arrow">→</span></a>
+  </section>
+  <footer>
+    <a class="brand" href="/">
+      <svg class="mark" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="bg2" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse"><stop stop-color="#11161f"/><stop offset="1" stop-color="#0a0e14"/></linearGradient>
+        </defs>
+        <rect width="512" height="512" rx="112" fill="url(#bg2)"/>
+        <rect x="146" y="150" width="220" height="34" rx="17" fill="#3d7eff"/>
+        <rect x="239" y="150" width="34" height="180" rx="17" fill="#3d7eff"/>
+        <polyline points="150,360 210,330 256,348 312,300 372,262" fill="none" stroke="#2dd4a0" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="150" cy="360" r="9" fill="#3d7eff"/><circle cx="256" cy="348" r="9" fill="#3d7eff"/><circle cx="372" cy="262" r="11" fill="#2dd4a0"/>
+      </svg>
+      Tikpema
+    </a>
+    <div class="foot-links">
+      <a href="https://app.tikpema.xyz">Launch App</a>
+      <a href="#how">How it works</a>
+      <a href="https://x.com/TikpemaGb" target="_blank" rel="noopener">X ↗</a>
+      <a href="mailto:tikpema274@gmail.com">Contact</a>
+    </div>
+    <span class="testnet">ARC TESTNET · PLAY MONEY</span>
+  </footer>
+</div>
+</body>
+</html>
