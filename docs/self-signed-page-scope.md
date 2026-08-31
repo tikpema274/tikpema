@@ -332,6 +332,12 @@ BridgePanel.tsx   SendPanel.tsx   SwapPanel.tsx   VaultPanel.tsx
 (line 266) and never had this sentence. So the control is not merely *also* satisfiable from outside
 its subject — it is satisfiable **only** from outside it.
 
+⚠️ **CORRECTED 2026-08-31, and the correction matters:** "outside its subject" is the wrong axis. A
+control *should* sit outside the subject — that is requirement 3 in §3 below, discovered while
+building `gate:custody`. What makes this fragment bad is that it sits outside the **swap surface
+entirely**: Vault and Send panels prove nothing about whether a swap panel is visible. ⭐ **The
+control must ENCLOSE the subject and survive its removal.**
+
 ⛔ **Delete `ManualSwapPanel.tsx` from the repo and this control still passes**, at count 4, in both
 the old build and the new one. It licenses every assertion below it — including the vacuous-absence
 check the whole file is built around — on the strength of three panels that have nothing to do with
@@ -365,9 +371,30 @@ it should not survive that arrival either — it is a claim, and claims are not 
 
 ## ⭐⭐ 3. THE RULE: **NEVER USE A CLAIM AS A CONTROL**
 
-The ownership test — *a control's sources must be a subset of its subject, never a superset and never
-disjoint* — describes both defects. It does not prevent the next one, because it is applied after a
-fragment has been chosen. This is the form that prevents it, and it is applied *while* choosing:
+⛔ **The framing this section first used — *"a control's sources must be a subset of its subject"* —
+was loose, and building `gate:custody` showed why.** A control drawn from the subject vanishes in the
+exact artifact the gate exists to judge. The correct statement is that a control must **enclose** the
+subject and **survive its removal**, which makes THREE independent properties, each found by a
+different failure:
+
+| property | the failure that found it | what went wrong |
+|---|---|---|
+| **ownership** — sole-owned within the **enclosing surface** | `Set up your wallet first` — 4 owners, none in the swap surface | passed with its subject deleted; **could never fail correctly** |
+| **stability** — non-zero in **both** builds | `Swapping from ` (trailing space) — 0 in `foSNyN_9` | would abort against a build where the panel had **not shipped yet** |
+| **⭐⭐ disjointness** — survives the subject's removal | `Operations you sign yourself` — part of `SelfSignedPanel` | stripped by the gate's own synthetic negative: **silent in precisely its own failure case** |
+
+⚠️ **AND THE SHAPE THAT MAKES THIS TRANSFERABLE: all three candidates looked right on the axis
+whoever chose them happened to check.** A control is **the one fragment nobody tests, because it is
+not supposed to fail** — discriminators get calibrated against a build they must fail on, the control
+is assumed. The properties also **pull against each other**: narrowing ownership means reaching for
+newer, more specific copy, which is exactly the copy most likely to be new-build-only and most likely
+to belong to the subject. **Satisfying one is weak evidence AGAINST the others.**
+
+Write all three readings beside a fragment before it enters a CONTROL list — `owners: N [files]`,
+`old N / new N`, and *does it survive stripping the subject?* — and require all three. Never promote
+on one. [[control-needs-ownership-and-stability]]
+
+⭐ **And upstream of all three, the form that prevents rather than describes:**
 
 > **A CONTROL and a DISCRIMINATOR want opposite properties.** A control must be **stable** —
 > unchanged across the two builds it tells apart, because its whole function is to be the fixed point
@@ -380,8 +407,8 @@ fragment has been chosen. This is the form that prevents it, and it is applied *
 anywhere and before `CustodyNotice` existed. It was a claim doing a control's job. The unification did
 not break it; the unification made an existing defect visible.
 
-**What to reach for instead:** a **label or structural string owned by the subject's own render
-path** — a heading, a field label, an instruction. Nobody has a reason to rewrite it, and if they do,
+**What to reach for instead:** a **label or structural string owned by the ENCLOSING SURFACE's own
+render path** — a heading, a field label, an instruction. Nobody has a reason to rewrite it, and if they do,
 the gate going red is correct rather than misdirected.
 
 ---
