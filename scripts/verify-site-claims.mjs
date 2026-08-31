@@ -9,6 +9,32 @@
 // the second is true. This file pins the MECHANICAL claims — numbers and names that have a single
 // source of truth in this repo — and it cannot see the rest.
 //
+// ═══ ⭐⭐ THREE WAYS THIS PAGE CAN GO WRONG. IT CATCHES TWO. ════════════════════════════════════
+// A reader should be able to tell WHICH, so the modes are named rather than implied:
+//
+//   1. ✅ THE PAGE DRIFTS from a fact that did not move — someone edits "0.06" to "0.09".
+//      Caught by the `on the page` half. Demonstrated: page 0.06→0.09 → red, exit 1.
+//
+//   2. ✅ THE CODE MOVES under a sentence that was true when written — DD_PRICE_ATOMIC changes
+//      and nobody touches the page. Caught by the `matches source` half. Demonstrated:
+//      60000→90000 → red, exit 1. ⭐ This is the OPPOSITE direction from (1), and it is why every
+//      row asserts BOTH halves separately. A check that only read the page would sit green
+//      through the entire second class; a check that only read the code would sit green through
+//      the first.
+//
+//   3. ⛔ A SENTENCE IS REWRITTEN to say something NEW and FALSE about a fact that did not move.
+//      NOT CAUGHT, and not catchable by this method — DEMONSTRATED, not assumed. Replacing the
+//      due-diligence row's description with "an audited, guaranteed-accurate report on any contract
+//      on ANY CHAIN, refunded if wrong" — four false claims — left every pinned literal intact and
+//      this file exited 0. 🚨 Note that "any chain" directly CONTRADICTS "Arc Testnet only", a
+//      claim this file does pin: it checks that the true sentence is PRESENT, never that a
+//      contradicting one is ABSENT. Both can sit on the page at once, green.
+//
+// ⭐ So the boundary is: this fires on a page change only where an assertion reads the page, and on
+// a code change only where one reads the code. It has nothing to say about a sentence that is new.
+// The third mode is the one that put "no gas" and "clickable sources" on the original page, and it
+// is found by re-auditing — docs/marketing-site-claim-audit.md — not by a gate.
+//
 // ⭐ ITS REAL VALUE IS NOT DETECTION, IT IS FRICTION. A marketing page drifts because someone edits
 // a sentence and nobody re-derives the claim underneath it. When a pinned value moves, this fails
 // LOUDLY and forces that re-derivation. It is a tripwire across a doorway, not a guard on the room.
@@ -86,9 +112,11 @@ check("🚨 …and names the two that NO suite pins", UNGUARDED.length === 2, UN
 console.log(`\n${"═".repeat(76)}`);
 console.log(`${fail === 0 ? "✅ THE PINNED VALUES AGREE WITH THEIR SOURCES" : "❌ A PINNED VALUE DRIFTED"}   pass ${pass} / fail ${fail}`);
 console.log(`⚠️  SCOPE: ${CLAIMS.length} mechanical claims pinned · ${UNCHECKABLE} architectural claims NOT checked.`);
-console.log(`   This is a TRIPWIRE, not a verifier. It fails when a number moves. It cannot see a`);
-console.log(`   sentence that stayed true-sounding while the code moved underneath it, and it cannot`);
-console.log(`   see implication at all — "escrowed on-chain" was true of every word and false in what`);
+console.log(`   This is a TRIPWIRE, not a verifier. It catches a pinned value drifting on the PAGE`);
+console.log(`   (mode 1) and a pinned value moving in the CODE (mode 2). It CANNOT see a sentence`);
+console.log(`   REWRITTEN to say something new and false about an unchanged fact —`);
+console.log(`   mode 3 in the header, demonstrated green with four false claims on the page. Nor can`);
+console.log(`   it see implication: "escrowed on-chain" was true of every word and false in what`);
 console.log(`   it implied. Re-audit against docs/marketing-site-claim-audit.md; do not rely on green.`);
 console.log(`${"═".repeat(76)}`);
 process.exit(fail === 0 ? 0 : 1);
