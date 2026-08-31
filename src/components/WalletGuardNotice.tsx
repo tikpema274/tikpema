@@ -43,9 +43,36 @@ export type WalletGuardProps = {
  * MetaMask IS active, but this page still cannot sign — which is neither "connect" nor "switch".
  * Telling a user to connect or switch in that state is advice they cannot act on.
  */
+export type WalletGuardState = "connect" | "switch" | "cannot-sign";
+
+/**
+ * ⭐⭐ THE DECISION, SHARED SEPARATELY FROM THE SENTENCE — and this split is the point.
+ *
+ * `SelfSignedPanel` needed the same three-way distinction and could not use this component: its
+ * copy is PLURAL and page-shaped ("use these", "the agent-run versions"), where `verb`/`twinLabel`/
+ * `twinRoute` describe ONE operation and the page covers three. So it branched on `activeKind`
+ * alone, never read `metamaskConnected`, and its two guarded renders came out BYTE-IDENTICAL — the
+ * exact defect this file's header says it exists to prevent, re-created on a surface written the
+ * same day.
+ *
+ * ⛔ Sharing the SENTENCE was not available; sharing the DECISION is. A caller cannot reach a state
+ * without passing the fact that distinguishes it, which is the same property `metamaskConnected`
+ * being a required prop gives the component. What each surface then SAYS is legitimately its own.
+ * ⚠️ Which is why the suite asserts PAIRWISE INEQUALITY on the page's renders and not a phrase: a
+ * shared decision function cannot by itself guarantee two distinct sentences come out.
+ */
+export function walletGuardState(
+  { metamaskConnected, active }: { metamaskConnected: boolean; active: boolean },
+): WalletGuardState {
+  if (metamaskConnected && active) return "cannot-sign";
+  if (metamaskConnected) return "switch";
+  return "connect";
+}
+
 export default function WalletGuardNotice({
   metamaskConnected, active, verb, twinLabel, twinRoute,
 }: WalletGuardProps): ReactNode {
+  const state = walletGuardState({ metamaskConnected, active });
   const twin = (
     <>
       {" "}The agent {verb} is on the{" "}
@@ -54,7 +81,7 @@ export default function WalletGuardNotice({
     </>
   );
 
-  if (metamaskConnected && active) {
+  if (state === "cannot-sign") {
     // ⚠️ Reached only when the panel's own capability check failed while MetaMask IS active.
     // Neither "connect" nor "switch" is true here, and saying either would be a false instruction.
     return (
@@ -64,7 +91,7 @@ export default function WalletGuardNotice({
       </div>
     );
   }
-  if (metamaskConnected) {
+  if (state === "switch") {
     // 🚨 THE STATE THAT COLLAPSED. They HAVE MetaMask — do not tell them to connect it.
     return (
       <div className="sub" style={{ marginBottom: 0 }}>

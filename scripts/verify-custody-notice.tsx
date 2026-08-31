@@ -123,7 +123,9 @@ console.log("\n⭐⭐ 6 — THE WALLET GUARD: THREE STATES, AND NO TWO OF THEM C
 
 console.log("\n⭐ 4 — THE PAGE");
 {
-  const w = (kind: string) => ({ activeKind: kind, address: "0x74b7b561fd71c68eb1da6b96a7a87033904b24e5" }) as any;
+  // ⭐ `metamaskConnected` is part of the stub because the state cannot be expressed without it.
+  const w = (kind: string, metamaskConnected = false) =>
+    ({ activeKind: kind, metamaskConnected, address: "0x74b7b561fd71c68eb1da6b96a7a87033904b24e5" }) as any;
   const t = strip(renderToStaticMarkup(<SelfSignedPanel wallet={w("metamask")} />));
   check("⭐ names itself for the ACT, not the wallet brand", /Operations you sign yourself/i.test(t) && !/MetaMask/i.test(t.slice(0, 200)));
   check("⭐ carries the CONTRAST in its own words (a Dashboard arrival has seen no capped panel)",
@@ -132,8 +134,23 @@ console.log("\n⭐ 4 — THE PAGE");
   check("⭐ links to ALL THREE operations", ["send-manual", "bridge-manual", "swap-manual"]
     .every((r) => readFileSync(new URL("../src/components/SelfSignedPanel.tsx", import.meta.url), "utf8").includes(r)));
   check("names each operation in the rendered list", /Send from your own wallet/i.test(t) && /Bridge from your own wallet/i.test(t) && /Swap from your own wallet/i.test(t));
-  const nc = strip(renderToStaticMarkup(<SelfSignedPanel wallet={w("modular")} />));
-  check("⚠️ a non-MetaMask wallet is told so, and differently", nc !== t && /Connect MetaMask/i.test(nc));
+  // ⭐⭐ PAIRWISE INEQUALITY BETWEEN THE TWO GUARDED STATES — the only assertion that can see a
+  // collapse. The shape this replaces compared GUARDED against UNGUARDED and then matched a phrase:
+  // those differ because one has a warning box AT ALL, so the inequality was satisfied by the guard
+  // EXISTING, never by it DISCRIMINATING — and a phrase match cannot see a collapse, because both
+  // collapsed states contain the phrase. It passed while the page was byte-identical across the two
+  // states. ⚠️ Second time this shape passed on this defect; the first is recorded in
+  // WalletGuardNotice.tsx's header. [[collapse-needs-pairwise-inequality]]
+  // 🚨 And note the STUB had to grow `metamaskConnected` before the state could even be expressed —
+  // the same reason the swap panel's suite could not reach it. [[state-behind-a-transition-is-untested-by-default]]
+  const notConnected      = strip(renderToStaticMarkup(<SelfSignedPanel wallet={w("modular", false)} />));
+  const connectedInactive = strip(renderToStaticMarkup(<SelfSignedPanel wallet={w("modular", true)} />));
+  check("⭐⭐ the two GUARDED states render DIFFERENTLY — the collapse check", notConnected !== connectedInactive);
+  check("not connected → the instruction is CONNECT",
+    /\bConnect MetaMask/i.test(notConnected) && !/\bSwitch to MetaMask/i.test(notConnected));
+  check("🚨 connected but another wallet active → SWITCH, and never connect what they already have",
+    /\bSwitch to MetaMask/i.test(connectedInactive) && !/\bConnect MetaMask/i.test(connectedInactive));
+  check("⚠️ …and both still differ from the UNGUARDED render", notConnected !== t && connectedInactive !== t);
 }
 
 console.log("\n⛔ 5 — THE PAGE IS NOT IN THE NAV, AND THE ROUTE EXISTS ANYWAY");

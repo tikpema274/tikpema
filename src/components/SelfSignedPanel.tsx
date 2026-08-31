@@ -22,6 +22,7 @@
 // 🚨 THE TWIN LINKS BOTH WAYS ARE LOad-BEARING AND MUST NOT BE TIDIED AWAY. Agent panel → its manual
 // twin is how a reader arrives having just seen the caps stated. This page → each operation is what
 // stops the page being the thing nothing links to.
+import { walletGuardState } from "./WalletGuardNotice";
 import type { useWallet } from "../wallet/useWallet";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
@@ -47,10 +48,31 @@ export default function SelfSignedPanel({ wallet: w }: { wallet: UnifiedWallet }
         open the matching page from the list below.
       </div>
 
+      {/* ═══ 🚨 THIS GUARD HAD COLLAPSED, ON THE PAGE, AFTER THE PANELS WERE FIXED ═══════════════
+          It branched on `activeKind` alone and never read `metamaskConnected`, so "MetaMask
+          connected but another wallet active" rendered BYTE-IDENTICALLY to "not connected" —
+          telling the user to connect what they already had. That is the same defect
+          WalletGuardNotice exists to prevent, on a surface written the same day as it.
+          ⭐ It cannot render this component: `verb`/`twinLabel`/`twinRoute` describe ONE operation
+          and this page covers three, and its copy is plural. So it shares the DECISION instead —
+          `walletGuardState` — and says the page-shaped thing for each state.
+          ⚠️ `active` is FALSE by construction here (this block renders only when `!isMetaMask`, and
+          `isMetaMask` has no capability term on this page), so the state is "connect" or "switch"
+          and never "cannot-sign". Adding a capability term to `isMetaMask` above would make the
+          third state reachable and would need a third branch here. */}
       {!isMetaMask && (
         <div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>
-          Connect MetaMask to use these — each one is signed with your own key. The agent-run versions
-          work with any wallet.
+          {walletGuardState({ metamaskConnected: !!w.metamaskConnected, active: isMetaMask }) === "switch" ? (
+            <>
+              Switch to MetaMask to use these — it is connected, but another wallet is active right
+              now. Each one is signed with your own key; the agent-run versions work with any wallet.
+            </>
+          ) : (
+            <>
+              Connect MetaMask to use these — each one is signed with your own key. The agent-run
+              versions work with any wallet.
+            </>
+          )}
         </div>
       )}
 
