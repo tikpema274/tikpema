@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import SignInPrompt from "./SignInPrompt";
 import type { useWallet } from "../wallet/useWallet";
 import { JobTimeline, isTerminal, receiptInFlight } from "./jobTimeline";
 import type { TrackedJob } from "./jobTimeline";
@@ -112,6 +113,15 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
     <div className="plane">
       <div className="panel-eyebrow">Research</div>
       <h2>Ask your agent a factual question</h2>
+      {/* ═══ ⭐ SIGNED OUT, THIS PAGE WAS A WALL ════════════════════════════════════════════════
+          Every action here calls `ensureSession()`, which throws "Connect a wallet first" when
+          `authContext()` is null — so the precondition is a CONNECTED WALLET. Not an agent wallet,
+          not funds. ⭐ That is the SAME fact #/agents and #/unified turn on, so this reuses the same
+          component rather than inventing a fourth sentence: identical facts, shared words. The test
+          that said not to share the custody sentence says to share this one. */}
+      {!wallet.address && (
+        <SignInPrompt wallet={wallet} message="Sign in to run research — it commissions a paid job from your agent wallet." />
+      )}
       <div className="sub">
         {/* ⚠️ WHICH HALF IS GUARANTEED, AND WHICH IS AIMED AT. The APPROVAL gate is structural:
             the commission button lives inside the `{quote && …}` block, so nothing can run before a
@@ -255,9 +265,13 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
             >
               Run research · {quote.budgetUsdc} USDC
             </button>
+            {/* ⛔ WAS "Continue with your passkey above first." — there is no passkey control
+                above, or anywhere on this page: it was the only occurrence of the word in the
+                file. A hint that names a control the page does not have is a wall wearing the
+                costume of a door. The prompt at the top of the panel is the real one. */}
             {!wallet.address && (
               <span className="sub" style={{ margin: 0 }}>
-                Continue with your passkey above first.
+                Sign in above to run this.
               </span>
             )}
           </div>

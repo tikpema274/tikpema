@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import SignInPrompt from "./SignInPrompt";
 import type { useWallet } from "../wallet/useWallet";
 import { JobTimeline, isTerminal, receiptInFlight } from "./jobTimeline";
 import type { TrackedJob } from "./jobTimeline";
@@ -115,6 +116,15 @@ export default function PlanPanel({ wallet }: { wallet: UnifiedWallet }) {
     <div className="plane">
       <div className="panel-eyebrow">Plan an action</div>
       <h2>Describe an action. Your agent proposes; you decide.</h2>
+      {/* ═══ ⭐ SIGNED OUT, THIS PAGE WAS A WALL ════════════════════════════════════════════════
+          Every action here calls `ensureSession()`, which throws "Connect a wallet first" when
+          `authContext()` is null — so the precondition is a CONNECTED WALLET. Not an agent wallet,
+          not funds. ⭐ That is the SAME fact #/agents and #/unified turn on, so this reuses the same
+          component rather than inventing a fourth sentence: identical facts, shared words. The test
+          that said not to share the custody sentence says to share this one. */}
+      {!wallet.address && (
+        <SignInPrompt wallet={wallet} message="Sign in to plan an action — pricing and proposals are tied to your wallet." />
+      )}
       {/* ⭐⭐ "with live pricing" LIVED HERE FOR FOUR DEFERRALS AND WAS A MIS-SALE.
           This is the card a buyer reads BEFORE paying; the hedge ("fees may be
           disproportionately large", job #181044) is in the artifact they receive AFTER.

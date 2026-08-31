@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import SignInPrompt from "./SignInPrompt";
 import type { useWallet } from "../wallet/useWallet";
 import { agentClient } from "../lib/agentClient";
 import { arcTestnet } from "../config/chain";
@@ -186,6 +187,15 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
     <div className="plane">
       <div className="panel-eyebrow">Recurring swap · DCA</div>
       <h2>Swap on a schedule, while you're away.</h2>
+      {/* ═══ ⭐ SIGNED OUT, THIS PAGE WAS A WALL ════════════════════════════════════════════════
+          Every action here calls `ensureSession()`, which throws "Connect a wallet first" when
+          `authContext()` is null — so the precondition is a CONNECTED WALLET. Not an agent wallet,
+          not funds. ⭐ That is the SAME fact #/agents and #/unified turn on, so this reuses the same
+          component rather than inventing a fourth sentence: identical facts, shared words. The test
+          that said not to share the custody sentence says to share this one. */}
+      {!w.address && (
+        <SignInPrompt wallet={w} message="Sign in to set up a recurring swap — a schedule runs against your agent wallet." />
+      )}
 
       {/* ── 🚧 THE GATE NOTICE. Says what is closed AND what still works, because a user with a
           running schedule must never be left wondering whether they can still stop it. ────── */}
@@ -329,7 +339,9 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         </label>
 
         <div>
-          <button className="emerald" disabled={creating || !formValid || !acked || createGated} onClick={create}>
+          <button className="emerald" /* ⛔ `!w.address` was absent, so this button was ENABLED signed out and failed on submit with
+              "Connect a wallet first" — an error naming a concept the page never mentioned. */
+            disabled={creating || !formValid || !acked || createGated || !w.address} onClick={create}>
             {creating ? "Creating…" : "Authorize recurring swap"}
           </button>
         </div>

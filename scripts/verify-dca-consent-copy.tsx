@@ -48,6 +48,19 @@ const rendered = renderToStaticMarkup(<DcaPanel wallet={wallet} />)
   .replace(/&amp;/g, "&").replace(/&#(\d+);/g, (_: string, d: string) => String.fromCharCode(Number(d)))
   .replace(/\s+/g, " ").trim();
 
+// ═══ 🚨 SIGNED OUT, THIS PAGE WAS A WALL ═══════════════════════════════════════════════════════
+// The precondition here is a CONNECTED WALLET: every action calls `ensureSession()`, which throws
+// "Connect a wallet first" when `authContext()` is null. Not an agent wallet, not funds — the same
+// fact #/agents and #/unified turn on, which is why this reuses the SAME component they do rather
+// than inventing a fourth sentence. ⭐ The facts are identical, so the words are shared; that is the
+// same test that said NOT to share the custody sentence or the twin-link cap clause.
+// [[verify-facts-before-sharing-words]]
+const signedOut = renderToStaticMarkup(<DcaPanel wallet={{ ...wallet, address: undefined }} />);
+check("⭐⭐ signed out → the way in is an ACTION, not a disabled button",
+  /<button[^>]*>\s*Connect a wallet\s*<\/button>/.test(signedOut));
+check("⭐ …and it names what THIS page needs",
+  /Sign in to set up a recurring swap/i.test(signedOut.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")));
+
 const dca = readFileSync("netlify/functions/_dca.mjs", "utf8");
 const tick = readFileSync("netlify/functions/dca-tick.mjs", "utf8");
 const cancel = readFileSync("netlify/functions/dca-cancel.mjs", "utf8");
