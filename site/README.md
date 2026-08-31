@@ -130,3 +130,128 @@ re-running `npm run stamp` returned `dirty: false` and the identical tree hash `
 
 An exclude entry would restate a fact the allow-list already guarantees, and would drift the moment
 `SURFACES` changed. [[duplicate-source-of-truth-is-the-recurring-bug]]
+
+---
+
+# RELINK RUNBOOK — ⛔ SCOPED, NOT EXECUTED (2026-08-31)
+
+## Two corrections to the brief, before anything else
+
+⚠️ **There are 5 manual deploys, not 137.** Re-queried at `per_page=100` and `per_page=500` — both
+return **5**, so it is not a pagination artifact. Site created 2026-06-12, last deploy 2026-06-26.
+(The app site returns 100+, all `deploy_source: "cli"` — that is probably where 137 comes from.)
+
+✅ **The file is already filed.** `site/index.html` was committed at `93601f7`, read directly from
+`/mnt/c/Users/salifu/Homepage/index.html` over WSL. **md5 `c50f1a52649be897f7d3d3824f9d2515`,
+11,682 bytes — identical to the desktop copy AND to what production serves.** Nothing needs handing
+over.
+
+## 1. What changes on the Netlify site `tikpema`
+
+| setting | now | after |
+|---|---|---|
+| `repo_url` / `provider` | *(none)* | `https://github.com/tikpema274/tikpema` · github |
+| production branch | — | `main` |
+| **base directory** | — | **`site`** |
+| **build command** | — | **none.** One static file; there is nothing to build |
+| **publish directory** | — | **`site`** (Netlify resolves publish relative to base; the UI accepts the repo-root-relative form and normalises it) |
+| `build_settings` | `{}` | populated |
+
+🚨 **The one setting that can do damage is `publish`.** Get it wrong and Netlify serves the **repo
+root** — which contains its own `index.html` (vite's 1,088-byte app shell, referencing
+`/assets/index-*.js` that do not exist there). The marketing page would be replaced by a broken app
+shell that still returns **200**. ⚠️ Verify the deploy summary's file list before trusting the URL —
+a 200 is not evidence here, which is the same lesson as the SPA catch-all.
+
+## 2. Is there a window where the site serves nothing? — **No, but the risk is not a gap**
+
+Netlify keeps the **currently published deploy live until a new one is published**, and linking a
+repo does not unpublish anything. A first build that **fails** leaves `6a3dcab6…` serving.
+
+⛔ **The real risk is a build that SUCCEEDS and publishes the wrong directory.** That is not a window
+of silence, it is a window of *confidently serving the wrong page* — and it is the failure mode this
+whole exercise is about.
+
+**Rollback is one API call and both methods exist** (`netlify api --list` confirms
+`restoreSiteDeploy` and `rollbackSiteDeploy`):
+
+```sh
+# pin this BEFORE linking — the known-good published deploy
+netlify api restoreSiteDeploy --data '{"site_id":"a892e744-9dfc-45df-8cd4-8cd1b0c480b4","deploy_id":"6a3dcab684a82ae844dd6639"}'
+```
+
+## 3. Does this give the app site a second build per push? — **No, and the reason is worth knowing**
+
+| | app site `tikpema-predict-test` | marketing site `tikpema` |
+|---|---|---|
+| linked repo | `https://github.com/Tikpema/tikpema-predict-test` | *(none, today)* |
+| ⭐ does that repo exist? | **HTTP 404** | — |
+| our git remote | `https://github.com/tikpema274/tikpema` — **a different repo** | same |
+| last 8 deploys | all `deploy_source: "cli"`, `build_id: null`, `commit_ref: null` | all `"drop"` |
+
+**A push to `tikpema274/tikpema` triggers zero Netlify builds today.** The app never builds on
+Netlify at all — `deploy:prod` builds locally and uploads `dist/` over the CLI. So linking the
+marketing site makes it the **only** git-triggered build, and it touches nothing the app's path uses:
+different site, different base directory, no build command, no functions.
+
+⚠️ **Unrelated hazard, found while checking and worth its own decision:** the app site holds a **stale
+link to a repo that 404s**, with `stop_builds: false`. Harmless while that repo does not exist —
+but if it is ever recreated or repointed, app builds would start firing from a source nobody is
+watching. Not in scope here; flagged.
+
+## 4. The ignore, and the stamp — **two different things, only one needs building**
+
+**(a) The app's build stamp — nothing to do.** `SURFACES` is an allow-list
+(`["netlify/functions","shared","src"]`), so `site/` is excluded by construction. ⭐ Proven by probe:
+appending a line to this README and re-running `npm run stamp` returned `dirty: false` and the
+identical tree `67c4c778e91e…`. ⛔ **Do not add a `SURFACES_EXCLUDE`** — it would restate what the
+allow-list guarantees and drift the moment `SURFACES` changed.
+
+**(b) Netlify build-skipping — this one is worth adding**, because with the repo linked, every push
+to `main` would otherwise rebuild the marketing site, most of them no-ops. In `site/netlify.toml`:
+
+```toml
+[build]
+  publish = "."
+  ignore  = "git diff --quiet HEAD^ HEAD -- ."
+```
+
+With `base = site`, `.` is this directory. `git diff --quiet` exits **0** when there is no change, and
+Netlify treats **exit 0 from `ignore` as "skip the build"** — so a push that does not touch `site/`
+does not deploy. ⚠️ Confirm that polarity on the first no-op push rather than assuming it: an
+inverted `ignore` fails by rebuilding every time, which is noisy but harmless, or by never building,
+which is silent and is not.
+
+## 5. ⭐ WHAT THE FIRST GIT DEPLOY MUST PROVE
+
+**Exactly one thing: the served bytes equal the filed file.**
+
+```sh
+curl -s https://tikpema.xyz | md5sum        # must be c50f1a52649be897f7d3d3824f9d2515
+md5sum site/index.html                      # c50f1a52649be897f7d3d3824f9d2515
+```
+
+⭐ This check is unusually strong here and it is worth saying why: **desktop == live == filed is
+already established**, all three at `c50f1a52…`. So the first git deploy has a known-correct target
+rather than a guess. **Any difference is a finding about the pipeline, not about the content** — it
+would mean Netlify's build path altered bytes that drag-and-drop did not.
+
+⚠️ And if the relinked site serves something different from what is live *now*, that is the finding
+the brief anticipated — but note it can no longer mean "the live page and the desktop file disagree",
+because they have been measured identical. It would mean the *pipeline* introduced the difference.
+
+## 6. ⭐⭐ THE CONTROL THAT ACTUALLY CLOSES THE DRAG-AND-DROP HOLE
+
+Linking git makes the repo the default publisher. It does **not** remove drag-and-drop — that path
+stays available and still wins by being last. Two controls, and they are not equivalent:
+
+- **Delete the desktop file.** Removes the *input*. Relies on discipline, and discipline is what
+  failed for 66 days.
+- ⭐ **`netlify api lockDeploy`.** Pins the published deploy so **no new deploy auto-publishes** —
+  git or drop — until it is deliberately unlocked. This converts a drop from *"silently wins"* into
+  *"cannot publish without a second, visible action."* ⚠️ It also gates the git deploys, so it is a
+  posture choice, not a free win: publishing becomes deliberate for everyone.
+
+⛔ **A detector is still needed either way**, because both controls are about preventing rather than
+noticing: an exact-hash check of `tikpema.xyz` against `site/index.html`, runnable in one line
+(§5). That is step three and is not built.
