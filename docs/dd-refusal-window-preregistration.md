@@ -129,3 +129,64 @@ second, opposite meaning ready in advance, so it could not have been read as rou
 - **That 171s generalises.** One rotation, one moment.
 - **Anything about the x402 changes.** The refusal was a side effect of touching the DD surface, not
   a test of the `settlement` field, the derived constants, or the renamed description.
+
+---
+
+# PRE-REGISTRATION 2 — the FIRST deploy since the window was witnessed
+
+**2026-08-31, written BEFORE the deploy of `b68852d`. Nothing below this line is amended afterwards.**
+
+Prereg 1 predicted a rotation and got one. **This one predicts the opposite**, and says so in advance
+so that "no window" cannot later be read as either a pass or a shrug.
+
+## WHAT THIS DEPLOY IS — 20 files, all UI
+
+Five commits of guard-line and copy work: 13 files under `src/components/`, 7 under `scripts/`.
+
+| list | contents | touched here? |
+|---|---|---|
+| `SURFACES` | `netlify/functions`, `shared`, `src` | ⭐ **yes** — 13 `src/components/` files |
+| `DD_SURFACE_DIRS` | `shared/onchain-analyze`, `shared/onchain-facts`, `shared/dd-canary`, `shared/dd` | ⛔ no |
+| `DD_SURFACE_FILES` | 9 named `netlify/functions/*.mjs` | ⛔ no |
+
+⚠️ **`scripts/` is in NEITHER list**, so the seven suite files move nothing at all. The tree delta is
+attributable **entirely** to the 13 component files — a cleaner attribution than prereg 1 had.
+
+| | |
+|---|---|
+| tree deployed now | `c04efc7afd0cff2911c1d3c505a9b7db8c3d6658c157b24daaf848cbbede8ca4` |
+| ⭐ tree expected after deploy | `67c4c778e91e4242dfc34868b335c93fd54540c531b789325a520b1a246f4626` |
+| ddTree deployed now (ledger, 22:27Z) | `ed972854dabd1a53e3544f32d2bc1a923876dcf43da71f9502340653eeaf7f00` |
+| ⭐ ddTree expected after deploy | **`ed972854…` — UNCHANGED** |
+
+Computed locally with `npm run stamp` at `2026-08-31T10:28:22Z`, so these are predictions of hashes,
+not of a direction.
+
+## PRE-REGISTERED PREDICTIONS
+
+| # | predicted |
+|---|---|
+| 1 | ddTree does **not** rotate; the ledger line records `rotated: false` |
+| 2 | ⭐ `capture:window` reports **no window** — and this is the **EXPECTED** branch, because nothing DD-surface changed. Not a pass, not a finding |
+| 3 | **No refusal at all.** Vault deposits stay available throughout — prereg 1's outage does not repeat |
+| 4 | `gate:deployed` binds the served tree to `67c4c778…` |
+| 5 | ⭐⭐ the three bundle gates stay green on prod at the **same fragment counts measured pre-deploy** — every gate fragment was verified against `dist/assets/index-CbxhbtI2.js` BEFORE deploying, and none moved |
+
+## 🚨 FALSIFIERS — and the interesting one is the INVERSE of last time's
+
+1. ⭐⭐ **A WINDOW OBSERVED with `rotated: false`.** Last time "no window" was the suspicious branch
+   because the key had rotated. Here the suspicious branch is its mirror: a refusal with **no**
+   rotation would mean the health key turns on something **outside** `ddTree`, i.e. the DD-surface
+   binding is incomplete and the stamp's list is missing a row. **This has never been seen.**
+2. **ddTree ≠ `ed972854…` after the deploy** → a DD-surface file changed that this page did not
+   account for. The prediction is a hash, so this is decidable, not a judgement.
+3. **`gate:deployed` tree ≠ `67c4c778…`** → the deploy built something other than `b68852d`.
+4. **Any bundle-gate fragment count differing between the local `dist` and prod** → the deploy served
+   an artifact that is not this build. The pre-deploy counts are the baseline, recorded above.
+
+## ⚠️ WHAT THIS DEPLOY CANNOT PROVE
+
+It carries no DD-surface change, so it says **nothing** about the banner, the canary, or the health
+gate. Prereg 1 remains the only live observation of the window. **One run is not a track record**, and
+a second "no window" adds nothing to it — which is exactly why prediction 2 is written down as
+expected rather than reported afterwards as reassurance.
