@@ -178,6 +178,37 @@ export const DEBT_HORIZON = { date: "2026-09-16", why: "mainnet — these are mo
  * `gate:pins`, are where the first spurious block will most likely come from. Naming them here so
  * the first flake gets a quarantine entry rather than an argument about the gate.
  */
+/**
+ * ═══ ⭐⭐ CLAIM-BEARING SURFACES THAT ARE NOT COMPONENTS — HAND-WRITTEN, DELIBERATELY ═════════════
+ *
+ * §2 scans `COMPONENTS`, i.e. `src/components/*.tsx`. It will NEVER look at a file outside that
+ * tree, so a green §2 says nothing whatever about the surfaces below. ⛔ Do not let its pass stand
+ * in for a declaration: §2's CLAIM vocabulary has not yet caught a single copy claim on its own,
+ * and it cannot catch one here because it never reads the file.
+ *
+ * ⚠️ AND THE GUARD NAMED IS A TRIPWIRE, NOT A VERIFIER. `verify-site-claims.mjs` pins 11 mechanical
+ * values (prices, ids, addresses, names) against their sources in this repo. It cannot see the 11
+ * ARCHITECTURAL claims on the same page, and two of those are pinned by no suite anywhere: that the
+ * swap floor is contract-enforced, and that the reference rate is independent of the pool it checks.
+ * The file's own header enumerates all of it. Read it before trusting a green.
+ */
+export const CLAIM_SURFACES = {
+  "site/index.html": {
+    guard: "verify-site-claims.mjs",
+    what: "the public marketing page at tikpema.xyz",
+    why:
+      "It sat outside the repo and outside every guard for 66 days and drifted onto four false " +
+      "claims — audited in docs/marketing-site-claim-audit.md. Being in the tree does not guard " +
+      "it; this entry names what does, and how little that is.",
+    mechanical: 11,
+    architectural: 11,
+    unguardedAnywhere: [
+      "the swap floor is enforced by the contract",
+      "the reference rate is independent of the pool being quoted",
+    ],
+  },
+};
+
 export const UNWIRED_OK = {
   "gate:pins": "network-dependent (IPFS routing probes). ⚠️ A flaky network inside a BLOCKING aggregate manufactures tolerated red — species 3 — so it is run deliberately, not on every commit.",
   "test:ddwatch": "network-dependent (probes the live DD service). Same reasoning as gate:pins.",

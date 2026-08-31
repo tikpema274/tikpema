@@ -20,7 +20,7 @@
 // ratcheted, not asserted away.
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { COMPONENTS, MAX_UNCOVERED, UNWIRED_OK, PASSTHROUGH, DEBT_HORIZON } from "./guard-registry.mjs";
+import { CLAIM_SURFACES, COMPONENTS, MAX_UNCOVERED, UNWIRED_OK, PASSTHROUGH, DEBT_HORIZON } from "./guard-registry.mjs";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 let pass = 0, fail = 0;
@@ -153,6 +153,18 @@ for (const p of PASSTHROUGH) {
   ok(`⭐ ${p.site} → ${p.suite}`, suiteOk && fixtureOk && usesIt,
     !suiteOk ? "suite missing" : !fixtureOk ? `fixture ${p.fixture} missing`
       : !usesIt ? `suite does not load ${p.fixture} — a fixture nobody reads proves nothing` : p.fixture);
+}
+
+section("7 — ⭐⭐ NON-COMPONENT CLAIM SURFACES ARE DECLARED, AND THEIR GUARDS EXIST");
+// §2 cannot reach these files at all — it scans src/components only. A hand-written declaration is
+// the ONLY thing standing between a claim-bearing page and no coverage, so the declaration itself
+// must not be allowed to rot: the surface must exist, and so must the guard it names.
+for (const [surface, e] of Object.entries(CLAIM_SURFACES)) {
+  ok(`⭐ ${surface} exists`, existsSync(surface));
+  ok(`⭐ …and its guard ${e.guard} exists`, existsSync(`scripts/${e.guard}`));
+  ok(`⚠️ …and it declares what the guard CANNOT see`,
+    Number(e.architectural) > 0 && Array.isArray(e.unguardedAnywhere),
+    `${e.mechanical} pinned / ${e.architectural} not · ${e.unguardedAnywhere.length} pinned by nothing`);
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
