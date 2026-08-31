@@ -64,7 +64,11 @@ try {
   lastTouch = execFileSync("git", ["log", "-1", "--format=%h %ad %s", "--date=short", "--", "site/index.html"], { encoding: "utf8" }).trim();
 } catch {}
 
-console.log(`\n❌ OUT OF SYNC.`);
+// ⭐ THE FINDING IS THE SENTENCE, NOT THE BYTES. At the moment this fires, "the live page is not
+// what is in the repo" is the whole result — WHICH bytes differ is noise, and a diff would bury the
+// one line a reader needs under 20,000 characters of markup. The two hashes are printed above as
+// evidence, not as a comparison to read.
+console.log(`\n❌ THE LIVE PAGE IS NOT WHAT IS IN THE REPO.`);
 console.log(`   site/index.html last changed in git: ${lastTouch}`);
 console.log(`\n   ⭐ WHICH DIRECTION — this is the part that matters:`);
 console.log(`   · If that commit is NEWER than the live deploy, the repo is AHEAD: a reviewed change`);

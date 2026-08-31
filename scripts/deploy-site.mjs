@@ -32,10 +32,33 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const SITE_ID = "a892e744-9dfc-45df-8cd4-8cd1b0c480b4"; // ⭐ the ID, never the name: the site was
-// renamed to `tikpema274111111111111111111111111111` on 2026-08-31 and a name-keyed command broke.
+// ═══ ⭐⭐ THE UUID, AND WHY IT IS NOT THE OBVIOUS-LOOKING NAME ══════════════════════════════════
+// RESOLVED BY A READ, not typed from the dashboard: listSitesForAccount filtered on
+// `custom_domain === "tikpema.xyz"`, 2026-08-31. That is the only property that means "the site
+// serving the marketing page"; everything else is a label.
+//
+// 🚨 THE NAME MOVED THREE TIMES IN ONE DAY while this id never did:
+//     "tikpema"  →  "tikpema274111111111111111111111111111"  →  "tikpema274"
+// A command reading `--site tikpema` broke silently in the middle of that. ⛔ And `tikpema274` is
+// ALSO the GitHub org name, so the name that looks most obviously right is the most ambiguous
+// string available. Name resolution is not identity: a wrong match publishes the marketing page to
+// a site nobody was looking at, and `--prod` on a site with no CI is instant.
+// ⚠️ If this constant ever needs changing, re-derive it from the DOMAIN, never from a name.
+const SITE_ID = "a892e744-9dfc-45df-8cd4-8cd1b0c480b4";
+const SITE_DOMAIN = "tikpema.xyz";
 const PROD = process.argv.includes("--prod");
 const sha = (b) => createHash("sha256").update(b).digest("hex");
+
+// ⛔ THE TTY CHECK IS FIRST, BEFORE ANY NETWORK CALL. It was originally beside the prompt, after
+// the draft — which meant a non-interactive `--prod` still uploaded a draft before refusing. The
+// refusal must cost nothing: a run that cannot possibly be confirmed should not touch Netlify at
+// all. [[verification-method-must-not-mutate]]
+if (PROD && !process.stdin.isTTY) {
+  console.error(`\n⛔ ABORT — --prod requires a terminal, and stdin is not one. Nothing was uploaded.`);
+  console.error(`   Refusing to publish unattended: an unattended --prod is precisely the failure`);
+  console.error(`   the confirmation exists to prevent, automated.\n`);
+  process.exit(2);
+}
 
 // ── stage OUTSIDE the repo: no parent netlify.toml, no netlify/functions ────────────────────────
 const stage = mkdtempSync(join(tmpdir(), "tikpema-site-"));
@@ -72,11 +95,36 @@ if (!PROD) {
   process.exit(0);
 }
 
-// ── 3. PROMOTE, then verify the SERVED bytes rather than trusting the CLI's success line ────────
+// ── 3. ⛔ THE CONFIRMATION. NOT OPTIONAL. ───────────────────────────────────────────────────────
+// `--prod` on a site with no CI publishes instantly and irreversibly — there is no build to fail,
+// no review, no staging. 137 manual deploys reached this domain with NOTHING between the gesture
+// and the publish, which is the whole reason for doing it in a script. So the script puts the three
+// facts a person needs on the screen — WHICH site, WHICH domain, WHICH bytes — and stops.
+//
+// ⚠️ A NON-TTY MUST ABORT, NOT PROCEED. Piping this into a script or a CI job would otherwise
+// publish with no human at all, which is the failure the prompt exists to prevent, automated.
+const { createInterface } = await import("node:readline/promises");
+console.log(`\n${"═".repeat(72)}`);
+console.log(`  ABOUT TO PUBLISH — this is live and immediate, with no CI in front of it.`);
+console.log(`    site id : ${SITE_ID}`);
+console.log(`    domain  : https://${SITE_DOMAIN}`);
+console.log(`    sha256  : ${localHash}`);
+console.log(`    bytes   : ${readFileSync("site/index.html").length}`);
+console.log(`    replaces: ${(await fetch(`https://${SITE_DOMAIN}/`).then(r=>r.arrayBuffer()).then(b=>sha(Buffer.from(b))).catch(()=>"unreadable"))}`);
+console.log(`${"═".repeat(72)}`);
+const rl = createInterface({ input: process.stdin, output: process.stdout });
+const answer = (await rl.question(`  Type the domain to confirm (${SITE_DOMAIN}): `)).trim();
+rl.close();
+if (answer !== SITE_DOMAIN) {
+  console.error(`\n⛔ ABORT — got ${JSON.stringify(answer)}. Nothing published.\n`);
+  process.exit(2);
+}
+
+// ── 4. PROMOTE, then verify the SERVED bytes rather than trusting the CLI's success line ────────
 console.log("\n  → production deploy…");
 nf(["deploy", "--prod", "--no-build", `--dir=${stage}`, `--site=${SITE_ID}`]);
 
-const served = await fetch("https://tikpema.xyz/", { headers: { "cache-control": "no-cache" } }).then((r) => r.arrayBuffer());
+const served = await fetch(`https://${SITE_DOMAIN}/`, { headers: { "cache-control": "no-cache" } }).then((r) => r.arrayBuffer());
 const servedHash = sha(Buffer.from(served));
 console.log(`\n  served sha256 : ${servedHash}`);
 console.log(`  local  sha256 : ${localHash}`);
@@ -84,4 +132,4 @@ if (servedHash !== localHash) {
   console.error(`\n❌ THE SERVED PAGE IS NOT THE FILE. A "deploy succeeded" line is not evidence of an effect.`);
   process.exit(1);
 }
-console.log(`\n✅ tikpema.xyz is serving site/index.html.\n`);
+console.log(`\n✅ ${SITE_DOMAIN} is serving site/index.html.\n`);
