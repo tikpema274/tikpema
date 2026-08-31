@@ -66,6 +66,18 @@ netlify deploy --dir=. --site=a892e744-9dfc-45df-8cd4-8cd1b0c480b4          # DR
 netlify deploy --prod --dir=. --site=a892e744-9dfc-45df-8cd4-8cd1b0c480b4   # only after reading it
 ```
 
+### 🚨 THE RELINK CANNOT BE DONE FROM THE CLI — established 2026-08-31
+
+The Netlify API exposes **`unlinkSiteRepo`** and **no `linkSiteRepo`**. `netlify link` is a different
+thing entirely: it writes `.netlify/state.json` to point the *local folder* at a site — it does not
+connect a Netlify site to a GitHub repo for CI. Connecting requires Netlify's GitHub OAuth/App grant
+plus a deploy key and webhook installed on the repo, which the UI does atomically and the CLI cannot.
+
+⚠️ **AND A HAZARD THAT FALLS OUT OF THAT FILE:** `.netlify/state.json` currently holds
+`siteId: 5464f1a6-eb85-4be9-83a3-8f28c4ace392` — **the APP site.** Any `netlify deploy` run from this
+repo *without* an explicit `--site` targets the app, not the marketing site. Every command in this
+README passes `--site` for exactly that reason; do not drop it.
+
 **(c) ⭐ RECOMMENDED — link the Netlify site to this repo**, publish dir `site/`, **no build command**.
 Then a push to `main` publishes, the tracked file is *definitionally* what ships, and a drag-and-drop
 becomes a **visible anomaly**: a `manual_deploy: true` deploy appearing among git-triggered ones,

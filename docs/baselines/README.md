@@ -56,3 +56,21 @@ It stops being a comparison against the desktop file and becomes the **pre-relin
 first git-sourced deploy must reproduce `c50f1a52…` exactly. Any difference after the relink is
 attributable to the **pipeline**, not to the content — which is a sharper question than the one this
 capture was originally taken to answer, and only answerable because the capture exists.
+
+## ⭐ THE ACCEPTANCE HASH — resolved 2026-08-31
+
+A target of `1a17f1477e8f4a5a67757d5028d3855a8a1bd45c8a8bfbd63498c56c3a5343a4` was proposed twice as
+the value the first repo deploy must reproduce. It matched **nothing**: not the live fetch, not
+`site/index.html`, not the desktop source, not any `.html` in the repo, and not any file in
+`C:\Users\salifu\Homepage\`. Confirmed by `certutil -hashfile … SHA256` on Windows, which returned
+**`89534fa5…`** — so WSL and Windows agree about the bytes, and the mismatch was not a mount artefact.
+
+**It came from an older draft of the page.** ⚠️ Which is itself worth recording: **another copy of
+this page exists outside git, with different bytes.** It is not the live one and not the desktop one,
+but it is a third copy, and untracked copies are what this whole exercise is about. If it still
+exists, it belongs either in `docs/baselines/` with a date or in the bin — not loose.
+
+⛔ **The acceptance criterion is `89534fa5a9911ad223e6e50d24348982cf8b0d24a677ba803da2698db929d501`**,
+supported by five independent reads. Had `1a17f147…` been adopted at face value, the first
+post-relink check would have gone **red against a correct deploy**, and sent us hunting a pipeline
+fault that does not exist. [[a-deploy-check-needs-a-build-it-should-fail-against]]
