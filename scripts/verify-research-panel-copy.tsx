@@ -59,6 +59,27 @@ check("⭐⭐ signed out → the way in is an ACTION, not a disabled button",
 check("⭐ …and it names what THIS page needs",
   /Sign in to run research/i.test(signedOut.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")));
 const panelSrc = readFileSync("src/components/ResearchPanel.tsx", "utf8");
+
+// ═══ 🚨 "NOTHING RUNS UNTIL YOU APPROVE" WAS FALSE — THE ASK IS A RUN ═══════════════════════════
+// Asking calls `job-quote`, which calls Anthropic (job-quote.mjs:72) to classify and price. A model
+// call therefore fires BEFORE approval. What approval actually gates is the research job, the
+// escrow funding, and the CHARGE.
+// ⚠️ SECOND CORRECTION TO THIS SENTENCE. The comment above it already records the first: the old
+// wording "delivers a cited brief only if you approve it" read as a guarantee of BOTH delivery and
+// citation, and was fixed to guarantee one. That fix repaired the citation half and left the
+// "nothing runs" half wrong — a correction that touched the sentence and did not re-audit it.
+// ⛔ AND THE PLAN PATH'S SENTENCE MUST NOT BE COPIED HERE. "Nothing moves until you approve it"
+// (PlanPanel:149) is TRUE, because on plan-quote no work happens before approval. On research the
+// BRIEF ALREADY EXISTS by then. Same words, opposite verdicts — a real difference in what the two
+// products do, not a copy inconsistency. [[verify-facts-before-sharing-words]]
+check("⛔ does NOT claim that nothing RUNS before approval — pricing calls a model",
+  !/nothing runs until you approve/i.test(rendered));
+check("⭐ states what is actually gated: DELIVERY and the CHARGE",
+  /nothing is delivered/i.test(rendered) && /nothing is charged/i.test(rendered));
+check("⭐ …and discloses that pricing itself runs something",
+  /pricing/i.test(rendered));
+check("⛔ …without borrowing the PLAN path's true-there/false-here phrasing",
+  !/nothing moves until you approve/i.test(rendered));
 const submit = readFileSync("netlify/functions/job-submit-background.mjs", "utf8");
 
 console.log("╔══════════════════════════════════════════════════════════════════════╗");
@@ -69,10 +90,19 @@ section("0 — the panel renders at all");
 check("⚠️ non-empty render", rendered.length > 150, `${rendered.length} chars`);
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-section("1 — ⭐⭐ THE GUARANTEED HALF: NOTHING RUNS BEFORE A PRICE IS ACCEPTED");
-check("⭐⭐ the page promises nothing runs until the user approves",
-  /nothing runs until you approve it/i.test(rendered));
-check("⭐ …and that the price comes first", /You'll see the price first/.test(rendered));
+section("1 — ⭐⭐ THE GUARANTEED HALF: NOTHING IS DELIVERED OR CHARGED BEFORE APPROVAL");
+// ═══ 🚨 THIS SECTION USED TO PIN THE FALSE CLAIM ═══════════════════════════════════════════════
+// It asserted `/nothing runs until you approve it/`, which is exactly the sentence that was wrong:
+// the ask calls job-quote, which calls Anthropic to classify and price, so a model call fires
+// BEFORE approval. ⛔ An assertion that pins a false claim is worse than no assertion — it makes
+// FIXING the defect turn the suite red, so the pressure runs toward keeping the falsehood. This
+// section went red when the copy was corrected, which is how it was found.
+// ⭐ The section title moved too: it named the wrong guarantee, so it would have re-seeded the same
+// claim for the next person editing this file. [[verify-facts-before-sharing-words]]
+check("⭐⭐ the page promises nothing is DELIVERED or CHARGED until approval",
+  /nothing is delivered and nothing is charged until you approve/i.test(rendered));
+check("⭐ …and is honest that PRICING itself runs, and is free",
+  /Pricing your question runs first and costs you nothing/i.test(rendered));
 check("⭐ …and the only pre-approval control is a PRICE request, not a commission",
   /Get a price/.test(rendered) && !/Research this|Commission/.test(rendered));
 // 🚨 THE PROOF IS BEHAVIOURAL, NOT POSITIONAL — and that is a deliberate second attempt.
@@ -111,8 +141,11 @@ check("⚠️ …and the default is still FAIL-OPEN, by its own words", permissi
   "uncited briefs will SHIP — this is fail-OPEN by design");
 check("🚨🚨 …so the copy must NOT promise a cited brief as a guaranteed deliverable",
   !/delivers a cited brief/i.test(rendered), rendered.match(/cited[^.]{0,40}/i)?.[0] ?? "");
+// ⚠️ `cites?` — the corrected sentence reads "does your agent research and cite the sources it
+// used", an infinitive after "does". The claim is unchanged; only the inflection moved, and pinning
+// one inflection would have forced the copy to be worse to keep a regex green.
 check("⭐⭐ …while still saying the agent DOES cite — the practice is real, only the guarantee is not",
-  /cites the sources it used/i.test(rendered));
+  /cites? the sources it used/i.test(rendered));
 // ⚠️ If the posture is ever flipped, this suite should be revisited rather than silently passing.
 if (permissiveDefault) {
   console.log("     ⚠️ POSTURE: citation enforcement is PERMISSIVE by default and UNSET on prod");

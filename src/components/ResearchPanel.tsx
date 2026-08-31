@@ -131,10 +131,20 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
             SHIP. This is fail-OPEN by design"). Unset on prod, measured 2026-08-20.
             🚨 The old wording — "delivers a cited brief only if you approve it" — read as a
             guarantee of BOTH. It is a guarantee of one. Say the guaranteed thing as a promise and
-            the other as what the agent does, which is what the record actually supports. */}
-        Ask anything with a factual, sourceable answer. You'll see the price first, and
-        <b> nothing runs until you approve it</b> — then your agent researches and cites
-        the sources it used.
+            the other as what the agent does, which is what the record actually supports.
+            🚨 AND "NOTHING RUNS UNTIL YOU APPROVE" WAS THE SECOND DEFECT IN THIS SAME SENTENCE.
+            The ask calls job-quote, which calls Anthropic (job-quote.mjs:72) to classify and price:
+            a model call fires BEFORE approval, so "nothing runs" was false. What approval gates is
+            DELIVERY and the CHARGE. ⚠️ The first correction — recorded directly above — repaired the
+            citation half of this sentence and left this half wrong, which is what a correction that
+            edits a claim without re-auditing it looks like.
+            ⛔ DO NOT COPY PlanPanel's "Nothing moves until you approve it" here. That sentence is
+            TRUE there, because on plan-quote no work happens before approval; on research the brief
+            already exists by then. Same words, opposite verdicts — a real difference in what the two
+            paths do. [[verify-facts-before-sharing-words]] */}
+        Ask anything with a factual, sourceable answer. Pricing your question runs first and
+        costs you nothing. <b>Nothing is delivered and nothing is charged until you approve</b> —
+        only then does your agent research and cite the sources it used.
       </div>
 
       <div className="row" style={{ marginTop: 12 }}>
