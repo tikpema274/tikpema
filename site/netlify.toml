@@ -16,3 +16,23 @@
 
 [build]
   publish = "."
+  # No `command`: one static file, nothing to build.
+  #
+  # ═══ ⭐ SKIP WHEN THIS DIRECTORY DID NOT CHANGE ═════════════════════════════════════════════
+  # With `base = site` on the Netlify side, `.` is this directory. Netlify's contract: the ignore
+  # command exiting 0 SKIPS the build, non-zero proceeds. `git diff --quiet` exits 0 when there is
+  # no difference, so an app-only push does not redeploy this page.
+  # ⭐ That preserves the property that makes this site's history readable: EVERY marketing deploy
+  # means a copy change. Identical-bytes rebuilds would destroy it.
+  #
+  # 🚨 NOT `HEAD^ HEAD` — that inspects only the LAST commit of a push. Demonstrated against real
+  # history in scripts/verify-build-skip-predicate.mjs §3: on the range 3c84c22..786767e the whole
+  # range correctly says BUILD while HEAD^..HEAD says SKIP, which would be a SILENT stale deploy.
+  # ⭐ And the failure direction is safe: on the first build CACHED_COMMIT_REF is unset, git errors,
+  # the exit code is non-zero, and the build PROCEEDS. It fails toward building, never toward
+  # silently skipping.
+  #
+  # ⚠️ UNCONFIRMED UNTIL A LIVE PUSH: that Netlify sets these two variable names in the ignore
+  # context, and that exit 0 means skip. The harness proves the PREDICATE, not that Netlify runs it
+  # — and a correct command Netlify never runs is indistinguishable from no command at all.
+  ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- ."

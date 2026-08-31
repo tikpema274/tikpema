@@ -92,6 +92,7 @@
     "test:manualswapcopy": "npx tsx scripts/verify-manual-swap-copy.tsx",
     "gate:manualswap": "node scripts/verify-deployed-manual-swap.mjs",
     "gate:custody": "node scripts/verify-deployed-custody.mjs",
+    "test:buildskip": "node scripts/verify-build-skip-predicate.mjs",
     "test:custodynotice": "npx tsx scripts/verify-custody-notice.tsx"
   },
   "dependencies": {
@@ -142,6 +143,7 @@
     "test:swapdecode",
     "test:manualswapcopy",
     "test:custodynotice",
+    "test:buildskip",
     "test:dcareason",
     "test:ddrail",
     "test:disclosure",

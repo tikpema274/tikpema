@@ -207,20 +207,55 @@ appending a line to this README and re-running `npm run stamp` returned `dirty: 
 identical tree `67c4c778e91e…`. ⛔ **Do not add a `SURFACES_EXCLUDE`** — it would restate what the
 allow-list guarantees and drift the moment `SURFACES` changed.
 
-**(b) Netlify build-skipping — this one is worth adding**, because with the repo linked, every push
-to `main` would otherwise rebuild the marketing site, most of them no-ops. In `site/netlify.toml`:
+**(b) Netlify build-skipping — added**, because with the repo linked every push to `main` would
+otherwise rebuild the marketing site, most of them producing identical bytes. That would destroy the
+property that makes this site's history readable: **every marketing deploy means a copy change.**
 
 ```toml
 [build]
   publish = "."
-  ignore  = "git diff --quiet HEAD^ HEAD -- ."
+  ignore  = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- ."
 ```
 
-With `base = site`, `.` is this directory. `git diff --quiet` exits **0** when there is no change, and
-Netlify treats **exit 0 from `ignore` as "skip the build"** — so a push that does not touch `site/`
-does not deploy. ⚠️ Confirm that polarity on the first no-op push rather than assuming it: an
-inverted `ignore` fails by rebuilding every time, which is noisy but harmless, or by never building,
-which is silent and is not.
+🚨 **NOT `HEAD^ HEAD`** — the form this runbook first proposed. It inspects only the **last commit of
+a push**, so a `site/` change in an earlier commit of the same push is skipped: a **silent stale
+deploy**, the exact failure the move exists to prevent. Demonstrated against real history in
+`scripts/verify-build-skip-predicate.mjs` §3 — on `3c84c22..786767e` the whole range says **BUILD**
+while `HEAD^..HEAD` says **SKIP**, and the two forms genuinely disagree.
+
+⭐ The failure direction is safe: on the first build `CACHED_COMMIT_REF` is unset, git errors, the
+exit code is non-zero, and the build **proceeds**. It fails toward building, never toward skipping.
+
+### ⚠️ WHAT `npm run test:buildskip` REACHES — and what it does not
+
+`scripts/verify-build-skip-predicate.mjs` is **12/0 offline, for zero build minutes**: it evaluates
+the predicate against commit ranges already in this repo's history, covering all three shapes
+(only-`site/`, only-app, both), and asserts each shape is genuinely present first so a missing one
+cannot pass vacuously.
+
+⛔ **It proves the PREDICATE DECIDES CORRECTLY. It does NOT prove NETLIFY HONOURS IT.** Those are
+different failures, and from inside the repo they are invisible:
+
+- Netlify may not run the command at all, may not set `CACHED_COMMIT_REF` / `COMMIT_REF` under those
+  names in the ignore context, or may read the exit code the other way round.
+- ⭐ **A correct command Netlify never runs is INDISTINGUISHABLE from no command at all** — both
+  build on every push, and neither reports an error.
+- The command executes in the **marketing site's build context on Netlify**, which nothing in this
+  repo can enter. A green here is a statement about a git command, not about a deploy pipeline.
+- ⛔ **There is no app-side ignore command**, so the harness's "app-side" column is testing the
+  predicate's other branch, not a second live pipeline. The app has never built on Netlify.
+
+⛔ **Do not record the build-skip as verified until a live push shows the pattern.** The next real
+change settles it at no extra cost:
+
+1. the **first** post-relink build must run (`CACHED_COMMIT_REF` is unset — it cannot skip)
+2. then one **app-only** push must produce **no new marketing deploy**:
+
+```sh
+netlify api listSiteDeploys --data '{"site_id":"a892e744-9dfc-45df-8cd4-8cd1b0c480b4","per_page":5}'
+```
+
+One build and one no-op — not three pushes.
 
 ## 5. ⭐ WHAT THE FIRST GIT DEPLOY MUST PROVE
 
