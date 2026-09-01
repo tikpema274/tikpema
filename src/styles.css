@@ -695,5 +695,5 @@ input.amount-input {
  * the modifier is the wrong lever and the finding is that size is not what carries rank here.
  * ManualBridgePanel has no h2 at all, which is why it could not test this. */
 .plane--form h2 {
-  font-size: 1.25rem;
+  font-size: 1.125rem;
 }
