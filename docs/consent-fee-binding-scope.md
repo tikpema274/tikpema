@@ -1,6 +1,6 @@
 # SCOPE — making "the number I consented to" the number that is signed
 
-**2026-08-29. Read-only scoping. Nothing built.** Written after the ack gate's first successful
+**2026-08-29. Read-only scoping. Nothing built.** ⛔ **SUPERSEDED 2026-09-01 — §4 was CONSIDERED AND NOT TAKEN; a sealed quote token shipped instead. See the STATUS section below before reading §4 as a plan.** Written after the ack gate's first successful
 live firing (`0x265be6d3…`), which measured the gap this document is about.
 
 ---
@@ -112,6 +112,46 @@ second change the manual path does not — making its recorded fields come from 
 ⛔ **The re-price must stay.** It is the only thing that knows the live fee, and this proposal
 *depends* on it — it compares live against consented rather than replacing one with the other. Any
 implementation that drops the re-price has walked into the rejected design.
+
+---
+
+## ⛔ STATUS — CONSIDERED AND NOT TAKEN (2026-09-01)
+
+**This document's §4 design was not built. A different one was, and this stays because a rejected
+design with its reasoning is worth more than silence.**
+
+**What shipped instead:** a *sealed quote token*. `sealBridgeQuote` HMACs
+`{owner, destination, amount, maxFee, amountMinor, iat}` with `SESSION_SECRET`; the client receives
+one opaque string, returns it verbatim, and never handles a fee field. `openBridgeQuote` verifies
+and refuses a quote for a different owner, destination or amount, or one older than
+`QUOTE_TTL_MS` (3 min). `agentBridge` signs the opened `maxFee` rather than re-pricing.
+Proven end-to-end by `verify-bridge-fee-binding.mjs`, which decodes the actual calldata.
+
+### Why §4 was not taken
+
+⭐ **`min(accepted, live)` lets favourable drift pass SILENTLY, and that is the wrong property.**
+The operator's own words on the 29 Aug manual bridge, where drift was `0.000004` *in their favour*:
+they still recorded it as a defect, because **"the number I consented to is not the number that was
+bound" is the property — not "I was not harmed".** A rule that only catches unfavourable drift is a
+**cap**, not a binding. This document argued the one-sided rule as strictly better; it is better at
+bounding loss and weaker at the thing binding exists to guarantee.
+
+⭐⭐ **And it invalidates every outstanding ack token (`v4` bump) — a real, immediate cost for a
+design that is weaker on its own headline property.** The sealed quote leaves `bridgeAckToken`
+untouched at `v3`; no outstanding acknowledgment is affected.
+
+⚠️ **§4's re-price-at-signing also keeps a second quote in the flow**, which is the exact structure
+that produced the B≠C gap this work removes. The sealed token has no second read at all.
+
+### What §4 got right and the shipped design kept
+
+- The insight that the number must be **authenticated, not trusted** — tampering fails an HMAC.
+  The sealed token applies it to the whole quote rather than to one field of the ack token.
+- The refusal-freshness bound (`accepted older than N → refuse`). That is `QUOTE_TTL_MS`.
+- ⛔ **The unsettled question in §4 remains unsettled and is unaffected by either choice:** whether
+  `maxFee` is a ceiling or charged in full on a route with non-zero `minimumFee`, where
+  `bridgeFee` adds a `+10%` buffer. That is about what CCTP does with the number, not about which
+  number is bound. **Settle it by measurement.** See [[cctp-maxfee-is-a-ceiling]].
 
 ---
 
