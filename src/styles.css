@@ -682,3 +682,18 @@ input.amount-input {
 @media (max-width: 520px) {
   input.amount-input { font-size: 1.75rem; }
 }
+
+/* ── .plane--form: a panel whose subject is an AMOUNT ────────────────────────────────────────────
+ * ⛔ NOT a change to `.plane h2`. That rule serves 24 headings across 18 components, so retuning it
+ * globally would restyle Dashboard, Vault, Research, Predict and the agent panels — the same leak
+ * `.status` would have caused (122 instances / 22 components). A modifier, applied to two panels.
+ *
+ * ⭐ WHY 1.25rem. The amount is 2.25rem; the heading was 1.5rem. Both are the largest things on the
+ * panel and they compete — the heading is a serif at weight 500 sitting ABOVE, which reads heavier
+ * than its size alone. Dropping it to 1.25rem takes the ratio from 1.5× to 1.8×.
+ * ⚠️ THIS IS THE PREDICTION UNDER TEST, not a settled fact: if the amount still merely competes,
+ * the modifier is the wrong lever and the finding is that size is not what carries rank here.
+ * ManualBridgePanel has no h2 at all, which is why it could not test this. */
+.plane--form h2 {
+  font-size: 1.25rem;
+}

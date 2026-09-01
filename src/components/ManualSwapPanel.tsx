@@ -272,7 +272,7 @@ export default function ManualSwapPanel({ wallet: w }: { wallet: UnifiedWallet }
   }
 
   return (
-    <div className="plane">
+    <div className="plane plane--form">
       <div className="panel-eyebrow">Swap · your own wallet</div>
       <h2>Swap from your own wallet</h2>
       <div className="sub">
@@ -287,7 +287,9 @@ export default function ManualSwapPanel({ wallet: w }: { wallet: UnifiedWallet }
           🚨 NO `token` PROP, DELIBERATELY: a swap spends USDC *or* EURC, and the shared sentence
           used to say "your own USDC" unconditionally — false for an EURC→USDC swap. This panel is
           the one that proves the generic wording is needed. */}
-      <CustodyNotice />
+      <div className="standing-note">
+        <CustodyNotice />
+      </div>
 
       <div className="status" style={{ marginTop: 0, marginBottom: 18 }}>
         Swapping from <span className="mono">{w.address}</span>
@@ -303,10 +305,12 @@ export default function ManualSwapPanel({ wallet: w }: { wallet: UnifiedWallet }
         <span className="status" style={{ margin: 0 }}>→ {tokenOut}</span>
       </div>
 
-      <div className="row" style={{ marginTop: 8 }}>
-        <input type="number" min="0" step="0.01" style={{ maxWidth: 120 }} value={amount}
+      <div className="amount-field">
+        <span className="amount-label">{tokenIn}</span>
+        <input className="amount-input" type="number" min="0" step="0.01" value={amount}
           onChange={(e) => { setAmount(e.target.value); reset(); }} disabled={!!signedHash} />
-        <span className="status" style={{ margin: 0 }}>{tokenIn}</span>
+      </div>
+      <div className="row">
         {!quote && !signedHash && (
           <button className="emerald" disabled={busy || !amountValid} onClick={getQuote}>
             {busy ? "Pricing…" : "Get quote"}

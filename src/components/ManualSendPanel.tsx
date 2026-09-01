@@ -141,7 +141,7 @@ export default function ManualSendPanel({ wallet: w }: { wallet: UnifiedWallet }
   }
 
   return (
-    <div className="plane">
+    <div className="plane plane--form">
       <div className="panel-eyebrow">Send</div>
       <h2>Send from your own wallet</h2>
       <div className="sub">You sign this in MetaMask — it moves your own USDC, not the agent's.</div>
@@ -151,12 +151,14 @@ export default function ManualSendPanel({ wallet: w }: { wallet: UnifiedWallet }
           "caps do not apply" beside no control is a claim about a path the user cannot take.
           ⭐ SHARED, not restated: one statement of the custody position for all three self-signed
           panels. This send spends USDC only, so it names USDC. */}
-      <CustodyNotice token="USDC" />
+      <div className="standing-note">
+        <CustodyNotice token="USDC" />
+      </div>
 
       {/* 🚨 IRREVERSIBLE, AND NO ALLOWLIST BEHIND IT. The agent send resolves its wallet
           server-side; this destination is whatever was typed. Said before the address is entered,
           not after. */}
-      <div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>
+      <div className="hazard-callout">
         <b>Check the address carefully.</b> This is a normal transfer on Arc — once it confirms it
         cannot be reversed, and there is no allowlist behind it. We show you the address exactly as
         we read it before you sign.
@@ -172,17 +174,19 @@ export default function ManualSendPanel({ wallet: w }: { wallet: UnifiedWallet }
               disabled={busy}
             />
           </div>
-          <div className="row" style={{ marginTop: 8 }}>
+          <div className="amount-field">
+            <span className="amount-label">USDC</span>
             <input
+              className="amount-input"
               type="number"
               min="0"
               step="0.01"
-              style={{ maxWidth: 120 }}
               value={amount}
               onChange={(e) => { setAmount(e.target.value); setReviewing(false); setError(null); }}
               disabled={busy}
             />
-            <span className="status" style={{ margin: 0 }}>USDC</span>
+          </div>
+          <div className="row">
             {!reviewing && (
               <button onClick={() => setReviewing(true)} disabled={busy || !toValid || !amountValid}>
                 Review
