@@ -68,10 +68,54 @@ function publishedDeploy() {
     return { ok: false, err: String(e?.message ?? e).split("\n")[0] };
   }
 }
-function gitDate() {
+// ═══ ⭐⭐ THE DIRECTION IS A CONTENT QUESTION, NOT A TIMESTAMP QUESTION ══════════════════════════
+// This used to compare `git log -1 --format=%aI -- site/index.html` against published_at. That is a
+// proxy, and it BREAKS in the single most ordinary workflow there is: edit the page, run the gate,
+// then deploy. An uncommitted edit changes the local BYTES while leaving the last-commit DATE
+// stale, so the file looks older than the deploy and the check printed
+//   🚨 DIRECTION: LIVE IS AHEAD ... someone drag-and-dropped
+// with nothing drag-and-dropped and the served bytes byte-identical to HEAD. ⛔ Firing the verdict
+// that means "the process was bypassed" on a routine edit is worse than staying silent: it is the
+// alarm nobody will believe the third time. MEASURED 2026-09-01, same command either side of one
+// commit and no publish in between: LIVE IS AHEAD → REPO IS AHEAD.
+//
+// ⭐ So ask the question directly. "Which way" is about PROVENANCE — were the served bytes ever in
+// this repo's history? — and that is answerable exactly, by hashing each historical version of the
+// file. Timestamps only ever approximated it. [[probe-must-discriminate-between-states]]
+// [[git-history-needs-a-reachability-query]] · [[establish-which-action-produced-the-outcome]]
+
+/** Is site/index.html modified relative to HEAD? What deploy-site.mjs publishes is the WORKING
+ *  TREE, so a dirty file means the bytes about to go live are in no commit and were reviewed by
+ *  nobody. That is a separate fact from the direction, and it is reported separately. */
+function worktreeDirty() {
   try {
-    return execFileSync("git", ["log", "-1", "--format=%aI", "--", "site/index.html"], { encoding: "utf8" }).trim();
-  } catch { return null; }
+    const out = execFileSync("git", ["status", "--porcelain", "--", "site/index.html"], { encoding: "utf8" });
+    return { ok: true, dirty: out.trim() !== "" };
+  } catch (e) { return { ok: false, err: String(e?.message ?? e).split("\n")[0] }; }
+}
+
+/** Find the commit whose site/index.html hashes to `hash`. null = these bytes were NEVER in git,
+ *  which is the drag-and-drop signature. ⛔ An unreadable history returns ok:false and must NOT
+ *  collapse into "never committed" — absence of a match and inability to look are different
+ *  answers, and only one of them is alarming. [[absence-must-never-read-as-safe]] */
+function servedProvenance(hash) {
+  try {
+    const shas = execFileSync("git", ["log", "--format=%H", "--", "site/index.html"], { encoding: "utf8" })
+      .trim().split("\n").filter(Boolean);
+    if (shas.length === 0) return { ok: false, err: "no commit in history touches site/index.html" };
+    for (const c of shas) {
+      let blob;
+      try {
+        blob = execFileSync("git", ["show", `${c}:site/index.html`],
+          { encoding: "buffer", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
+      } catch { continue; } // the file did not exist at that commit (e.g. it was deleted there)
+      if (sha(blob) === hash) {
+        const subj = execFileSync("git", ["log", "-1", "--format=%h %ad %s", "--date=short", c], { encoding: "utf8" }).trim();
+        return { ok: true, commit: subj, sha: c, scanned: shas.length };
+      }
+    }
+    return { ok: true, commit: null, sha: null, scanned: shas.length };
+  } catch (e) { return { ok: false, err: String(e?.message ?? e).split("\n")[0] }; }
 }
 
 const pub = publishedDeploy();
@@ -153,22 +197,38 @@ console.log(`   site/index.html last changed in git: ${lastTouch}`);
 // ⭐ RESOLVE THE DIRECTION HERE rather than printing two branches and asking the reader to pick.
 // The publish timestamp is a fact the platform holds; comparing it to the file's commit date
 // answers the question the prose used to leave open.
-const g = gitDate();
+const dirty = worktreeDirty();
+const prov = servedProvenance(servedHash);
 const pAt = pub.ok ? pub.deploy?.published_at ?? null : null;
-if (g && pAt) {
-  if (new Date(g) > new Date(pAt)) {
-    console.log(`\n   ⭐ DIRECTION: REPO IS AHEAD. site/index.html (${g}) is newer than the published`);
-    console.log(`      deploy (${pAt}). A reviewed change was never published.`);
-    console.log(`      Run  npm run deploy:site -- --prod`);
-  } else {
-    console.log(`\n   🚨 DIRECTION: LIVE IS AHEAD. The published deploy (${pAt}) is newer than`);
-    console.log(`      site/index.html (${g}) — someone drag-and-dropped. The repo is no longer the`);
-    console.log(`      source of truth and the path that caused the 66-day drift is back in use.`);
-    console.log(`      Capture the live bytes into docs/baselines/ BEFORE overwriting them.`);
-  }
+
+if (!prov.ok) {
+  // ⛔ Could not look. That is not evidence either way, and "repo ahead" is the benign branch —
+  // assuming it is exactly how a drag-and-drop goes unnoticed.
+  console.log(`\n   ⚠️ DIRECTION UNDETERMINED — could not read the file's history: ${prov.err}`);
+  console.log(`      Do not assume "repo ahead". Resolve the history before deploying over the live bytes.`);
+} else if (prov.commit) {
+  // The served bytes ARE a commit in this repo. Live is simply behind HEAD.
+  console.log(`\n   ⭐ DIRECTION: REPO IS AHEAD. The live bytes are this repo's own commit:`);
+  console.log(`      ${prov.commit}`);
+  console.log(`      published ${pAt ?? "?"}. A reviewed change was never published.`);
+  console.log(`      Run  npm run deploy:site -- --prod`);
 } else {
-  console.log(`\n   ⚠️ DIRECTION UNDETERMINED — git date=${g ?? "?"} published_at=${pAt ?? "?"}.`);
-  console.log(`      Do not assume "repo ahead": that is the benign branch, and assuming it is how a`);
-  console.log(`      drag-and-drop would go unnoticed.`);
+  // 🚨 The served bytes match NO version of this file that git has ever held.
+  console.log(`\n   🚨 DIRECTION: LIVE IS AHEAD. The served bytes match none of the ${prov.scanned} committed`);
+  console.log(`      version(s) of site/index.html — they were never in git. Someone drag-and-dropped.`);
+  console.log(`      The repo is no longer the source of truth and the path that caused the 66-day`);
+  console.log(`      drift is back in use.`);
+  console.log(`      Capture the live bytes into docs/baselines/ BEFORE overwriting them.`);
+}
+
+// ⭐ REPORTED SEPARATELY, BECAUSE IT IS A SEPARATE FACT. deploy-site.mjs publishes the WORKING
+// TREE, not HEAD — so a dirty file means the bytes about to go live are in no commit. This is the
+// state that used to be misread as a drag-and-drop; now it is named for what it is.
+if (dirty.ok && dirty.dirty) {
+  console.log(`\n   ⚠️ AND site/index.html HAS UNCOMMITTED CHANGES. deploy-site.mjs publishes the`);
+  console.log(`      working tree, so publishing now would put bytes on tikpema.xyz that are in no`);
+  console.log(`      commit and were reviewed by nobody. Commit first.`);
+} else if (!dirty.ok) {
+  console.log(`\n   ⚠️ could not determine whether site/index.html is dirty — ${dirty.err}`);
 }
 process.exit(1);
