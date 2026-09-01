@@ -32,20 +32,10 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// ═══ ⭐⭐ THE UUID, AND WHY IT IS NOT THE OBVIOUS-LOOKING NAME ══════════════════════════════════
-// RESOLVED BY A READ, not typed from the dashboard: listSitesForAccount filtered on
-// `custom_domain === "tikpema.xyz"`, 2026-08-31. That is the only property that means "the site
-// serving the marketing page"; everything else is a label.
-//
-// 🚨 THE NAME MOVED THREE TIMES IN ONE DAY while this id never did:
-//     "tikpema"  →  "tikpema274111111111111111111111111111"  →  "tikpema274"
-// A command reading `--site tikpema` broke silently in the middle of that. ⛔ And `tikpema274` is
-// ALSO the GitHub org name, so the name that looks most obviously right is the most ambiguous
-// string available. Name resolution is not identity: a wrong match publishes the marketing page to
-// a site nobody was looking at, and `--prod` on a site with no CI is instant.
-// ⚠️ If this constant ever needs changing, re-derive it from the DOMAIN, never from a name.
-const SITE_ID = "a892e744-9dfc-45df-8cd4-8cd1b0c480b4";
-const SITE_DOMAIN = "tikpema.xyz";
+// ⭐ SITE_ID / SITE_DOMAIN live in scripts/lib/marketing-site.mjs — ONE copy, with the provenance
+// of the UUID and why the NAME must never be used. verify-site-live.mjs imports the same constants,
+// so the deployer and the verifier can never disagree about which site they mean.
+import { SITE_ID, SITE_DOMAIN } from "./lib/marketing-site.mjs";
 const PROD = process.argv.includes("--prod");
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 
@@ -67,7 +57,15 @@ const localHash = sha(readFileSync("site/index.html"));
 console.log(`\n  staged   : ${stage}/index.html`);
 console.log(`  sha256   : ${localHash}`);
 
-const nf = (args) => execFileSync("npx", ["netlify", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+// ⛔ `cwd: stage` IS THE CONTAINMENT. Staging the page outside the repo does NOT prevent the
+// function bundle: `--dir` sets the PUBLISH directory, it does not move the CLI. Config discovery
+// follows the CURRENT WORKING DIRECTORY, so an invocation from the repo root finds netlify.toml,
+// reads `functions = "netlify/functions"`, and bundles all 86 regardless of --dir or --no-build.
+// 🚨 MEASURED 2026-09-01: three consecutive drafts hung because of this. The CLI wrote 86 zips of
+// ~22MB (agent-send, agent-execute-plan, agent-vault-withdraw, _pay, _swap …) into a 1.8GB tmpfs,
+// filled it, and blocked on ENOSPC ~13 min in. Same command with cwd=stage: 0 functions, live in
+// seconds. ⚠️ So the "staged outside the repo" note above was necessary but NOT sufficient.
+const nf = (args) => execFileSync("npx", ["netlify", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], cwd: stage });
 const api = (op, data) => JSON.parse(nf(["api", op, "--data", JSON.stringify(data)]));
 
 // ── 1. DRAFT ───────────────────────────────────────────────────────────────────────────────────
@@ -80,7 +78,21 @@ const draft = api("listSiteDeploys", { site_id: SITE_ID, per_page: 1 })[0];
 const fns = (draft.available_functions || []).length;
 console.log(`  draft    : ${draft.id}  state=${draft.state}  functions=${fns}`);
 
-// ── 2. THE GATE. An absence that decides a publish must be counted, not inferred. ───────────────
+// ── 2a. ⛔ STATE FIRST — THE COUNT IS MEANINGLESS ON A DEPLOY THAT NEVER PROCESSED. ────────────
+// `available_functions` is EMPTY on a deploy stuck at state=new, so `fns` reads 0 and the check
+// below prints "✅ 0 functions — containment holds". The containment PROOF and the containment
+// FAILURE are then the same event, which is why two hung drafts on 2026-08-31 and one on
+// 2026-09-01 all read as successes. Assert the deploy exists before asserting what it contains.
+// [[equality-passes-vacuously-on-empty]] · [[absence-must-never-read-as-safe]]
+if (draft.state !== "ready") {
+  console.error(`\n⛔ ABORT — draft ${draft.id} is state=${draft.state}, not "ready".`);
+  console.error(`   NOTHING is proven about containment: available_functions is empty on a deploy`);
+  console.error(`   that never processed, so the count below would read 0 and PASS.`);
+  console.error(`   A hang here is usually the function bundle filling TMPDIR — check df -h /tmp.`);
+  process.exit(2);
+}
+
+// ── 2b. THE GATE. An absence that decides a publish must be counted, not inferred. ──────────────
 if (fns !== 0) {
   console.error(`\n⛔ ABORT — the draft bundled ${fns} functions. Containment FAILED.`);
   console.error(`   Inspect: netlify api getDeploy --data '{"deploy_id":"${draft.id}"}'`);
@@ -121,8 +133,34 @@ if (answer !== SITE_DOMAIN) {
 }
 
 // ── 4. PROMOTE, then verify the SERVED bytes rather than trusting the CLI's success line ────────
-console.log("\n  → production deploy…");
+// ⛔ READ THE PUBLISHED POINTER FIRST. "It MOVED" is only checkable against what it was.
+const beforeId = api("getSite", { site_id: SITE_ID })?.published_deploy?.id ?? null;
+console.log(`\n  published before : ${beforeId ?? "(none)"}`);
+
+console.log("  → production deploy…");
 nf(["deploy", "--prod", "--no-build", `--dir=${stage}`, `--site=${SITE_ID}`]);
+
+// ── 4a. ⛔ DID IT PROMOTE, OR ONLY UPLOAD? Ask the PLATFORM, not the exit code. ─────────────────
+// A deploy command can succeed and leave `published_deploy` untouched — an upload is not a
+// promotion, and the CLI's success line cannot tell the two apart. So read the pointer back and
+// require that it MOVED to a ready deploy. [[success-message-is-not-evidence-of-effect]]
+const after = api("getSite", { site_id: SITE_ID })?.published_deploy ?? null;
+console.log(`  published after  : ${after?.id ?? "(none)"}  state=${after?.state ?? "-"}`);
+if (!after?.id) {
+  console.error(`\n❌ NOT PROMOTED — the site has NO published deploy after a --prod run.`);
+  process.exit(1);
+}
+if (after.id === beforeId) {
+  console.error(`\n❌ NOT PROMOTED — published_deploy is STILL ${beforeId}.`);
+  console.error(`   The upload succeeded and the live pointer did not move. That is a draft, not a`);
+  console.error(`   publish, however the command exited.`);
+  process.exit(1);
+}
+if (after.state !== "ready") {
+  console.error(`\n❌ published_deploy moved to ${after.id} but state=${after.state}, not "ready".`);
+  process.exit(1);
+}
+console.log(`  ✅ published_deploy MOVED ${beforeId ?? "(none)"} → ${after.id}`);
 
 const served = await fetch(`https://${SITE_DOMAIN}/`, { headers: { "cache-control": "no-cache" } }).then((r) => r.arrayBuffer());
 const servedHash = sha(Buffer.from(served));
