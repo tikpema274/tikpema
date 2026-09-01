@@ -44,7 +44,11 @@ export default function CustodyNotice({ token }: { token?: CustodyToken }): Reac
   // unconditionally is the defect this component was written to remove.
   const what = token ? `your own ${token}` : "your own funds";
   return (
-    <div className="status" style={{ borderLeft: "3px solid var(--accent)", paddingLeft: ".9rem" }}>
+    // ⭐ --warn, matching the six rails in the manual panels this renders inside — it carries the
+    // same claim they do. ⛔ NOT --accent: that token is defined nowhere, and an unresolvable var()
+    // makes the border-left shorthand invalid at computed-value time, so the rail rendered as
+    // border-style:none — an accent stripe that was never on screen. [[absence-must-never-read-as-safe]]
+    <div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>
       You sign this yourself, with your own key, spending {what}.{" "}
       <b>Agent spending caps do not apply here</b> — they bound what the agent may move
       unattended, and they are not a limit on your own funds.

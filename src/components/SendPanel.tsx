@@ -94,7 +94,12 @@ export default function SendPanel({ wallet: w }: { wallet: UnifiedWallet }) {
           nothing to contrast against. No number: the server owns it and names it on refusal. */}
       <div
         className="status"
-        style={{ borderLeft: "3px solid var(--accent)", paddingLeft: ".9rem" }}
+        // ⭐⭐ --success, DELIBERATELY NOT --warn. This rail is the contrast to the manual panels'
+        // "caps do not apply" — same shape, opposite claim — so sharing their colour would collapse
+        // the distinction this block exists to draw. Same axis as jobTimeline's
+        // `caution ? --amber : --emerald`. ⛔ Was --accent, which is defined nowhere: the shorthand
+        // went invalid at computed-value time and the rail rendered as border-style:none.
+        style={{ borderLeft: "3px solid var(--success)", paddingLeft: ".9rem" }}
       >
         <b>Agent spending limits apply here.</b> This sends from your agent wallet, so a
         per-transaction cap and a daily ceiling are enforced on the server — they bound what the
