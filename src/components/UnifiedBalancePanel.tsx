@@ -214,7 +214,7 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
             which is why the SDK's own prose says "7-day" in five places. Reading it as seconds
             gives 14 days, a tidy-looking wrong answer. If block time drifts, the wall clock
             drifts with it — so this must never harden into a promised number. */}
-        <div className="sub" style={{ margin: "6px 0 0", color: "var(--warn, #f0b866)" }}>
+        <div className="sub" style={{ margin: "6px 0 0", color: "var(--warn)" }}>
           <b>Your unified balance</b>
           {data && Number(data.total) > 0 && (
             <>
@@ -474,7 +474,7 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
           </div>
         )}
         {fundError && (
-          <div className="sub" style={{ margin: "8px 0 0", color: "var(--danger, #e5484d)" }}>
+          <div className="sub" style={{ margin: "8px 0 0", color: "var(--danger)" }}>
             {fundError}
           </div>
         )}

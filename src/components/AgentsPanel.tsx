@@ -202,7 +202,7 @@ export default function AgentsPanel({ wallet: w }: { wallet: UnifiedWallet }) {
           className="status"
           style={{
             marginTop: 14, padding: "12px 14px", borderRadius: 12,
-            background: "var(--field)", border: "1px solid var(--danger, #e5484d)",
+            background: "var(--field)", border: "1px solid var(--danger)",
           }}
         >
           ⚠ {data.halted}
@@ -252,7 +252,7 @@ export default function AgentsPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       )}
 
       {error && (
-        <div className="sub" style={{ margin: "12px 0 0", color: "var(--danger, #e5484d)" }}>
+        <div className="sub" style={{ margin: "12px 0 0", color: "var(--danger)" }}>
           {error}
         </div>
       )}
@@ -315,7 +315,7 @@ export function RosterCard({
       style={{
         display: "flex", flexDirection: "column", gap: 8,
         // A paused agent is visibly, unmistakably stopped.
-        borderColor: paused ? "var(--danger, #e5484d)" : undefined,
+        borderColor: paused ? "var(--danger)" : undefined,
         opacity: paused ? 0.75 : 1,
       }}
     >
@@ -350,7 +350,7 @@ export function RosterCard({
         <span className="mono">{money(a.spentTodayUsdc)}</span> USDC ·{" "}
         {a.actionsToday} action{a.actionsToday === 1 ? "" : "s"}
         {a.blockedToday > 0 && (
-          <> · <span style={{ color: "var(--danger, #e5484d)" }}>{a.blockedToday} refused</span></>
+          <> · <span style={{ color: "var(--danger)" }}>{a.blockedToday} refused</span></>
         )}
       </div>
 
@@ -470,7 +470,7 @@ export function ActivityList({ entries, showAgent }: { entries: ActivityEntry[];
                   : `bookkeeping · reversed · ${e.source ?? NO_TYPE}`}
               </span>
             ) : (
-            <span style={{ color: e.allowed ? "var(--paper)" : "var(--danger, #e5484d)" }}>
+            <span style={{ color: e.allowed ? "var(--paper)" : "var(--danger)" }}>
               {e.allowed ? "" : "refused · "}
               {/* ═══ ⭐ A MISSING SOURCE MUST NOT BORROW THE IDENTITY OF A REAL ONE ════════════════
                   `?? "action"` rendered an entry with NO recorded source as the word "action" —

@@ -279,7 +279,7 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
             <div className="qd">Empty — send USDC to the address above first.</div>
           )}
           {fundErr && (
-            <div className="qd" style={{ color: "var(--danger, #e5484d)" }}>{fundErr}</div>
+            <div className="qd" style={{ color: "var(--danger)" }}>{fundErr}</div>
           )}
           {fundTx && (
             <div className="qd">
@@ -370,7 +370,7 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
             </div>
           )}
           {wdErr && (
-            <div className="qd" style={{ color: "var(--danger, #e5484d)" }}>{wdErr}</div>
+            <div className="qd" style={{ color: "var(--danger)" }}>{wdErr}</div>
           )}
           {wdTx && (
             <div className="qd">

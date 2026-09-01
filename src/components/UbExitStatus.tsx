@@ -301,7 +301,7 @@ export default function UbExitStatus({
           </div>
 
           {startErr && (
-            <div className="qd" style={{ color: "var(--danger, #e5484d)", marginTop: 6 }}>{startErr}</div>
+            <div className="qd" style={{ color: "var(--danger)", marginTop: 6 }}>{startErr}</div>
           )}
           {started && (
             <div className="qd" style={{ marginTop: 6 }}>

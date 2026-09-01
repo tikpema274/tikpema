@@ -243,7 +243,7 @@ export default function PlanPanel({ wallet }: { wallet: UnifiedWallet }) {
       )}
 
       {error && (
-        <div className="status" style={{ marginTop: 12, color: "var(--danger, #e5484d)" }}>
+        <div className="status" style={{ marginTop: 12, color: "var(--danger)" }}>
           {error}
         </div>
       )}

@@ -396,7 +396,7 @@ function ProposalShell({
           </button>
         </div>
       )}
-      {error && <div className="sub" style={{ margin: "8px 0 0", color: "var(--danger, #e5484d)" }}>{error}</div>}
+      {error && <div className="sub" style={{ margin: "8px 0 0", color: "var(--danger)" }}>{error}</div>}
     </div>
   );
 }
@@ -623,7 +623,7 @@ export function SecondOpinionConfirmed({ secondOpinion }: { secondOpinion: Secon
     <div
       style={{
         marginTop: 10, padding: "10px 12px", borderRadius: 10,
-        borderLeft: `3px solid ${caution ? "var(--amber)" : "var(--emerald, #74c29c)"}`,
+        borderLeft: `3px solid ${caution ? "var(--amber)" : "var(--emerald)"}`,
         background: caution ? "var(--amber-soft)" : "transparent",
       }}
     >
@@ -677,7 +677,7 @@ export function ReceiptCard({ receipt }: { receipt: Receipt }) {
       className="status"
       style={{
         marginTop: 12, padding: "12px 14px", background: "var(--field)",
-        border: `1px solid ${alarm ? "var(--danger, #e5484d)" : "var(--line)"}`,
+        border: `1px solid ${alarm ? "var(--danger)" : "var(--line)"}`,
         borderRadius: 12,
       }}
     >

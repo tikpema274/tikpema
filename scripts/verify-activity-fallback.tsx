@@ -101,8 +101,29 @@ console.log("\n── a REVERSAL is not a second spend ────────�
   check("it still names the action it undoes", t.includes("agent-send"));
   check("its grounds are shown", /charge did not land/i.test(t));
   // Colour, asserted on the MARKUP: neither the red of a refusal nor the plain white of a spend.
-  check("it is not painted as a refusal", !/e5484d/.test(html));
+  // ⚠️ THE TOKEN, NOT THE LITERAL. This read /e5484d/ back when every call site spelled the hex
+  // inline as `var(--danger, #e5484d)`. The moment --danger became a real token in styles.css the
+  // literal left the markup entirely — and this assertion would have passed VACUOUSLY, green no
+  // matter how the row was painted, while reading exactly as it does now.
+  // [[equality-passes-vacuously-on-empty]] · [[check-whose-failure-mode-is-a-pass]]
+  check("it is not painted as a refusal", !/var\(--danger\)/.test(html));
   check("it is not painted as a spend", !/var\(--paper\)/.test(html));
+
+  // ⭐⭐ THE POSITIVE CONTROL THIS PAIR NEVER HAD. Both negatives can hold simply because the
+  // markup stopped containing either token — the failure mode of an absence check is a PASS. So
+  // render the row this one is supposed to DIFFER from, and require the marker to be genuinely
+  // detectable there. A negative is evidence only once the thing it denies is known to show up.
+  // [[collapse-needs-pairwise-inequality]] · [[absence-must-never-read-as-safe]]
+  const refusedHtml = renderToStaticMarkup(
+    <ActivityList entries={[{
+      agent: "executor", source: "agent-send", reason: "day ceiling",
+      amountUsdc: 5, allowed: false, timestamp: "2026-08-22T21:13:20.996Z",
+    } as any]} />
+  );
+  check("⭐ CONTROL: a REFUSAL *is* painted with --danger, so the negative above CAN fail",
+    /var\(--danger\)/.test(refusedHtml));
+  check("⭐⭐ …and the two rows therefore differ in paint, not merely in wording",
+    /var\(--danger\)/.test(refusedHtml) !== /var\(--danger\)/.test(html));
 }
 
 console.log("\n── BOTH DIRECTIONS: an ordinary row is untouched by the branch ─────");

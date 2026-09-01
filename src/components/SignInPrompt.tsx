@@ -66,7 +66,7 @@ export default function SignInPrompt({
         )}
       </div>
       {error && (
-        <div className="sub" style={{ margin: "8px 0 0", color: "var(--danger, #e5484d)" }}>
+        <div className="sub" style={{ margin: "8px 0 0", color: "var(--danger)" }}>
           {error}
         </div>
       )}

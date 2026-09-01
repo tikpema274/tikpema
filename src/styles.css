@@ -35,6 +35,14 @@
   --success: #74c29c;
   --warn: #e6a35a;
 
+  /* ⛔ IRREVERSIBLE HAZARD — "goes to someone else, gone". The one role amber does NOT carry:
+   * amber is this app's GENERAL accent (links, focus ring, selection, nav-active, buttons), so it
+   * cannot also mean danger. This is the third colour role, and until now it was the only one with
+   * no token: all 13 sites passed it inline as `var(--danger)`, which rendered correctly
+   * and made the hazard colour invisible to every audit that reads :root.
+   * [[absence-must-never-read-as-safe]] · [[duplicate-source-of-truth-is-the-recurring-bug]] */
+  --danger: #e5484d;
+
   --radius: 14px;
   --radius-lg: 18px;
   --maxw: 940px;
