@@ -207,7 +207,7 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
   // see useWallet, which had to export the first before this branch was possible at all.
   if (!isMetaMask) {
     return (
-      <div className="panel">
+      <div className="plane">
         <div className="panel-eyebrow">Bridge from your own wallet</div>
         {/* ⭐ SHARED, not restated — see WalletGuardNotice. */}
         <WalletGuardNotice metamaskConnected={!!w.metamaskConnected} active={w.activeKind === "metamask"}
@@ -219,7 +219,7 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
   }
 
   return (
-    <div className="panel">
+    <div className="plane">
       <div className="panel-eyebrow">Bridge from your own wallet</div>
 
       {/* 🚨 THE WINDOW THE AGENT PATH DOES NOT HAVE, DISCLOSED BEFORE SIGNING.
