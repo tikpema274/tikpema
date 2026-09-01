@@ -114,6 +114,18 @@ export default function ManualSendPanel({ wallet: w }: { wallet: UnifiedWallet }
       const r = await w.sendUsdcManual!(parsedTo, amountNum);
       setSentHash(r.txHash);
       setReviewing(false);
+      // ⭐⭐ CLEARED AT THE TRANSITION INTO SUCCESS, NOT WHEN THE FORM COMES BACK. The dangerous
+      // state is not what "Send another" resets — it is what survives BEHIND the success screen.
+      // `to` and `amount` used to sit here untouched, so any later change that revealed the form
+      // without clearing them — deleting the `{!sentHash && …}` guard, an unmount/remount, a
+      // refactor of the success block — would have produced a pre-filled one-click repeat of an
+      // IRREVERSIBLE transfer with no allowlist behind it. Clearing here means the values are gone
+      // the moment they stop being needed, and no future edit can un-hide something harmful.
+      // ⭐ THE RECIPIENT GOES TOO, not just the amount: an address someone pasted once is not
+      // evidence they mean to send there again, and this panel's own copy says the transfer cannot
+      // be reversed. [[absence-must-never-read-as-safe]]
+      setTo("");
+      setAmount("0.1");
     } catch (e) {
       setError(describeError(e));
     } finally {
@@ -214,6 +226,14 @@ export default function ManualSendPanel({ wallet: w }: { wallet: UnifiedWallet }
         <div className="status" style={{ color: "var(--emerald)" }}>
           Sent ✓ — confirmed on Arc.{" "}
           <a href={`${EXPLORER}/tx/${sentHash}`} target="_blank" rel="noreferrer">view the transfer ↗</a>
+          {/* ⭐ AN EXPLICIT CONTROL, not an auto-returning form. A completed send should not be
+              repeatable by a stray click on a pre-filled form; requiring one deliberate press to
+              get the form back is the whole point. It only clears `sentHash` — the FIELDS were
+              already cleared at the transition above, so this button reveals an empty form rather
+              than emptying a revealed one. */}
+          <div style={{ marginTop: 10 }}>
+            <button onClick={() => { setSentHash(null); setError(null); }}>Send another</button>
+          </div>
         </div>
       )}
     </div>

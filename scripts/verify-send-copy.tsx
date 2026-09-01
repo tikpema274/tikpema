@@ -243,6 +243,43 @@ section("7b — ⚠️ THE REVIEW WIRING, asserted on SOURCE (a render cannot sh
     "a review of an address the user has since changed is worse than none");
 }
 
+section("8 — 🚨 THE SUBMITTED VALUES DO NOT SURVIVE THE SEND");
+{
+  // 🚨 THE DEFECT THIS PINS. The success state used to hide the form via `{!sentHash && …}` while
+  // leaving `to` and `amount` untouched in state — the recipient address and the amount, sitting
+  // behind a screen, with NO path that cleared them and no path that brought the form back. The
+  // panel was a dead end (reload was the only exit), and worse, the dangerous values were one
+  // deleted guard away from a pre-filled one-click repeat of an IRREVERSIBLE transfer.
+  //
+  // ⭐⭐ ASSERTED ON THE TRANSITION, NOT THE RENDER. A render check can only see the state the
+  // component is in; it cannot see what is waiting behind it. The property that matters is that
+  // the clear happens when success is ENTERED, so no future edit can reveal a populated form.
+  // That lives in the handler, so it is asserted on source — deliberately, like §7b.
+  // [[absence-must-never-read-as-safe]] · [[state-behind-a-transition-is-untested-by-default]]
+  const code = readFileSync("src/components/ManualSendPanel.tsx", "utf8");
+  const handler = code.slice(code.indexOf("async function signAndSend"), code.indexOf("// ═══ 🚨 TWO STATES"));
+
+  check("⭐⭐ the RECIPIENT is cleared on success — an address pasted once is not consent to reuse it",
+    /setSentHash\(r\.txHash\)[\s\S]*setTo\(""\)/.test(handler),
+    "cleared in the handler, not on render");
+  check("⭐⭐ …and the AMOUNT too, in the same transition",
+    /setSentHash\(r\.txHash\)[\s\S]*setAmount\("0\.1"\)/.test(handler));
+  check("⭐ the form is reachable again — an explicit control, not a reload",
+    /Send another/.test(code) && /setSentHash\(null\)/.test(code));
+  // ⚠️ PRESENCE FIRST. Written as two bare negatives this passed GREEN against the pre-fix panel,
+  // which has no "Send another" at all — the patterns cannot match what does not exist, so the
+  // check asserted nothing. Same failure family as the ordering guard in verify-manual-bridge-copy:
+  // an absence check whose failure mode is a PASS. Validated red against the real pre-fix source.
+  // [[check-whose-failure-mode-is-a-pass]] · [[equality-passes-vacuously-on-empty]]
+  const hasControl = /Send another/.test(code) && /setSentHash\(null\)/.test(code);
+  check("🚨 …and that control does NOT re-populate the fields",
+    hasControl
+      && !/Send another[\s\S]{0,400}setTo\(parsedTo\)/.test(code)
+      && !/setSentHash\(null\)[\s\S]{0,200}setAmount\(amount\)/.test(code),
+    hasControl ? "it reveals an empty form rather than emptying a revealed one"
+               : "⛔ vacuous — there is no such control to test");
+}
+
 console.log(`\n${"═".repeat(72)}`);
 if (fail) { console.log(`❌ ${fail} failed, ${pass} passed.\n`); process.exit(1); }
 console.log(`✅ ALL GREEN   pass ${pass} / fail 0`);
