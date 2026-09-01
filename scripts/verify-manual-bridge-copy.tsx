@@ -81,25 +81,39 @@ section("2 — 🚨 THE TAB-CLOSE WINDOW, disclosed BEFORE signing");
   check("⭐ …and says the consequence concretely — it will not appear in your bridges",
     /will not appear in your bridges/i.test(text));
 
-  // ═══ ⭐⭐ ORDER, NOT JUST PRESENCE ══════════════════════════════════════════════════════════
-  // The hazard qualifies the ACT and must be met BEFORE the form; the custody notice is standing
-  // context, true whether or not the user acts, and sits after it. Nothing asserted that until
-  // now — the panel shipped with custody FIRST (custody@95, hazard@242) and every check here was
-  // green, because presence is order-blind.
+  // ═══ ⭐⭐ ORDER: CUSTODY → HAZARD → CONTROL ═══════════════════════════════════════════════
+  // Both notices are constraints on the action, so BOTH precede the control. Between them, money
+  // before record: custody says whose funds move and under what limits; the hazard says what is
+  // lost if the tab closes. ⛔ "Subordinate" is a WEIGHT (size, colour, density), not a position —
+  // treating it as a position is what put custody below the button for one commit.
   //
-  // 🚨 PRESENCE IS ASSERTED FIRST, AND SEPARATELY. `indexOf(a) < indexOf(b)` is SATISFIED BY
-  // ABSENCE: a missing hazard yields -1, and -1 is less than everything, so the bare ordering
-  // check would go green on a panel that had dropped the warning entirely — the failure mode is a
-  // PASS, on the one sentence a user most needs. Same trap named in verify-dca-reason-render.tsx.
+  // ⭐⭐ THIS ASSERTION CAUGHT THAT INDEPENDENTLY, which is the reason it exists: the panel was
+  // reordered and this went red on `hazard@242 < custody@95` before anyone re-read the rule.
+  // The invariant below is CHANGED BY DECISION, not relaxed to pass — it is strictly stronger than
+  // what it replaces, because it now also pins both notices ahead of the control.
+  //
+  // 🚨 PRESENCE IS ASSERTED FIRST, AND SEPARATELY, FOR ALL THREE. `indexOf(a) < indexOf(b)` is
+  // SATISFIED BY ABSENCE: a missing sentence yields -1, and -1 is less than everything, so a bare
+  // ordering chain goes GREEN on a panel that dropped the warning entirely — the failure mode is a
+  // PASS, on the sentences a user most needs. Validated red against exactly that case.
   // [[equality-passes-vacuously-on-empty]] · [[check-whose-failure-mode-is-a-pass]]
-  const iHazard = text.indexOf("stay on this page until the burn confirms");
   const iCustody = text.indexOf("Agent spending caps do not apply here");
-  const bothPresent = iHazard >= 0 && iCustody >= 0;
-  check("⭐⭐ BOTH are present — asserted before any claim about their order",
-    bothPresent, `hazard@${iHazard} custody@${iCustody}`);
-  check("⭐⭐ …and the HAZARD is met before the standing context",
-    bothPresent && iHazard < iCustody,
-    bothPresent ? `hazard@${iHazard} < custody@${iCustody}` : "⛔ vacuous — one of them is ABSENT");
+  const iHazard = text.indexOf("stay on this page until the burn confirms");
+  const iControl = text.indexOf("Get quote");
+  const allPresent = iCustody >= 0 && iHazard >= 0 && iControl >= 0;
+  check("⭐⭐ all three are present — asserted before any claim about their order",
+    allPresent, `custody@${iCustody} hazard@${iHazard} control@${iControl}`);
+  check("⭐⭐ …and CUSTODY is read first — whose money, before what is at risk",
+    allPresent && iCustody < iHazard,
+    allPresent ? `custody@${iCustody} < hazard@${iHazard}` : "⛔ vacuous — one of them is ABSENT");
+  // ⚠️ ASSERTS BOTH, BECAUSE IT SAYS BOTH. Written as `iHazard < iControl` alone this printed a
+  // green "BOTH constraints precede the control" against a panel whose custody notice sat AFTER
+  // the button — true only transitively, via the check above, and a lie as a standalone line. The
+  // suite was still red overall, which is exactly how a mislabelled green survives.
+  // [[verdict-earned-by-assertions]]
+  check("⭐⭐ …and BOTH constraints precede the control that acts on them",
+    allPresent && iCustody < iControl && iHazard < iControl,
+    allPresent ? `custody@${iCustody} hazard@${iHazard} < control@${iControl}` : "⛔ vacuous — one of them is ABSENT");
 }
 
 section("3 — ⭐ the estimate vocabulary, reused verbatim from BridgePanel");

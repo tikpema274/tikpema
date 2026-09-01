@@ -610,10 +610,10 @@ label.field > span {
  * they are separated on four axes, only one of which is colour:
  *
  *            .hazard-callout            .standing-note
- *   shape    bordered box, 4 sides      no border but a top hairline
+ *   shape    bordered box, 4 sides      no box, no rule at all
  *   size     0.9rem                     0.78rem
  *   weight   paper, tinted ground       muted, no ground
- *   density  14/16px padding            tight, and set below the form
+ *   density  14/16px padding            tight, no padding, no ground
  *
  * A reader can tell them apart with the colour removed, which is the test that matters.
  */
@@ -633,13 +633,13 @@ label.field > span {
   font-weight: 600;
 }
 
-/* ── Standing context: how the thing works. True whether or not you act, so it sits AFTER the
- *    form and carries no urgency. ⭐ Wraps CustodyNotice rather than restyling it — the notice is
- *    shared by three panels and this change is scoped to bridge. */
+/* ── The custody position: whose money moves, and under what limits. A constraint on the action,
+ *    so it sits ABOVE the control — but subordinate to the hazard, which it introduces.
+ *    ⭐ SUBORDINATE IS A WEIGHT, NOT A POSITION. Rank here is size, colour and density; putting it
+ *    below the button was a category error that the §5 ordering guard caught independently.
+ *    ⭐ Wraps CustodyNotice rather than restyling it — shared by three panels, scoped to bridge. */
 .standing-note {
-  margin-top: 22px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
+  margin: 4px 0 14px;
   font-size: 0.78rem;
   line-height: 1.5;
   color: var(--muted);

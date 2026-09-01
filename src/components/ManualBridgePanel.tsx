@@ -233,6 +233,19 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
           Saying only "stay on this page" would read as "or lose your funds", which is false and
           would frighten a user about the wrong thing. ⚠️ This is the kind of limit a user would
           otherwise discover instead of being told. */}
+      {/* ⭐⭐ CUSTODY FIRST — MONEY BEFORE RECORD. This sat BELOW the form for one commit, on a
+          "standing context" label that had quietly become a POSITION rather than a category. It is
+          a constraint on the action about to be taken, so it belongs above the control: custody is
+          about whose MONEY moves and under what limits; the hazard below is about the RECORD.
+          ⭐ SUBORDINATE ≠ BELOW. The quiet treatment is unchanged — it is smaller, muted and dense
+          against the hazard's bordered box. Rank is carried by weight, not by position.
+          ⛔ WRAPPED, NOT RESTYLED: CustodyNotice is shared by three panels and this is bridge only,
+          so the treatment lives on the wrapper. All 38 words stay, and the rendered TEXT is
+          unchanged — which is what every suite asserts on. */}
+      <div className="standing-note">
+        <CustodyNotice token="USDC" />
+      </div>
+
       {/* ⭐⭐ A HAZARD, NOT A NOTE — and it must not be a note in a different colour. As a `.status`
           with a --warn rail this was the same SHAPE as five other rails on this journey that are
           not hazards, so the colour did all the work and none of it read. `.hazard-callout` is a
@@ -271,15 +284,6 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
           ))}
         </select>
         <button onClick={() => start()} disabled={busy || !destination}>Get quote</button>
-      </div>
-
-      {/* ⭐ STANDING CONTEXT, BELOW THE FORM. How custody works is true whether or not the user
-          acts, so it is read after — unlike the hazard above, which qualifies the act itself.
-          ⛔ WRAPPED, NOT RESTYLED: CustodyNotice is shared by three panels and this change is
-          scoped to bridge, so the subordinate treatment lives on the wrapper. All 38 words stay
-          and the rendered TEXT is byte-identical, which is what every suite asserts on. */}
-      <div className="standing-note">
-        <CustodyNotice token="USDC" />
       </div>
 
       {disclosure && (
