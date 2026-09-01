@@ -16,7 +16,7 @@
 // The fee is VOLATILE (destination gas priced in USDC): ~0.2 USDC to an L2,
 // ~1.5–14 USDC to Ethereum L1. Callers MUST refuse a bridge where fee ≥ amount.
 
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { encodeFunctionData, pad, getAddress } from "viem";
 import { circle, waitForTx } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
@@ -292,6 +292,104 @@ export function bridgeAckToken({ owner, destinationKey, amountUsdc, band }) {
 // 🚨 THE CLIENT NEVER SUPPLIES `maxFee`. It arrives from `bridgeFee()` on the same server request
 // that computes the band, because the band is DERIVED from maxFee: a client-chosen maxFee would
 // let the caller pick the band its own acknowledgment is checked against, making the gate theatre.
+
+// ═══ ⚠️ TWO BRIDGE PATHS NOW SHOW A FEE BEFORE THE ACTION, AND THE GUARANTEES DIFFER ══════════
+//
+// A user meeting both reasonably assumes one promise. They are not the same promise, and the
+// difference is worth stating where someone changing either will read it:
+//
+//   #/bridge-manual (self-signed)  the figure is `maxFee` inside calldata the USER SIGNS. It is a
+//                                  CEILING enforced by the contract: the bridge cannot take more,
+//                                  and the user holds the transaction that says so.
+//
+//   #/bridge (agent)               the figure is a server-side quote, SEALED for QUOTE_TTL_MS and
+//                                  bound to the burn (see below). It is the fee that will be
+//                                  charged because this server will not re-read it — not because
+//                                  a contract the user signed forbids more.
+//
+// ⭐ Both are true statements and neither is weaker in practice; they are different KINDS of
+// binding — one is enforced by the chain, one by this code path plus a MAC. ⛔ So the two panels
+// must NOT share a fee sentence: reusing the manual wording here would assert a contract-enforced
+// ceiling that the agent path does not have. The copy in BridgePanel says "quoted just now and
+// held for this bridge, not re-read when it runs", which is exactly and only what is true.
+//
+// ═══ ⭐⭐ CONSENT-FEE BINDING — THE FIGURE SHOWN IS THE FIGURE SIGNED ═══════════════════════════
+//
+// Until this, `agentBridge` priced the bridge ITSELF, so a confirm step showing a fee would have
+// shown one quote while the calldata carried another — the two are ~200 ms apart on the existing
+// path and the fee moves roughly every 30 s (docs/agent-receipt-fee-authority-scope.md). Across a
+// HUMAN pause that gap is seconds, not milliseconds, so a naive confirm step would show a number
+// and burn a different one — worse than the silence it replaces.
+//
+// ⛔ AND THE FEE CANNOT SIMPLY BE POSTED BACK BY THE CLIENT. `maxFee` goes straight into signed
+// calldata; a user-supplied one would let a caller choose what the burn authorises. Today the ONLY
+// client value reaching the gate is `ackToken`, explicitly untrusted and recomputed server-side.
+//
+// ⭐ SO THE QUOTE TRAVELS SEALED. The server issues ONE opaque string; the client returns it
+// verbatim and never handles a fee field. Tampering breaks the HMAC and the bridge is refused, so
+// nothing user-controllable reaches the calldata — the figure inside is the server's own.
+//
+// ⚠️ HMAC RATHER THAN A BLOBS-STORED HANDLE, DELIBERATELY. A stored quote would be written then
+// read seconds later, and this project's Blobs reads are EVENTUALLY CONSISTENT — the read could
+// miss its own write and refuse a legitimate confirm. Sealing carries the value with the token and
+// has no read at all. [[stale-read-then-act]] · [[netlify-blobs-strong-consistency]]
+//
+// ⚠️ Rides on SESSION_SECRET for the same reason bridgeAckToken does: a new env var would be unset
+// at first deploy and the only safe behaviour then is refusing every bridge.
+export const QUOTE_TTL_MS = 180_000; // 3 min — long enough to read a figure, short enough to bound drift
+
+function quoteSecret() {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret || String(secret).length < 16) {
+    throw new Error("SESSION_SECRET not set (>=16 chars) — a bridge quote cannot be sealed or opened");
+  }
+  return String(secret);
+}
+const b64u = (buf) => Buffer.from(buf).toString("base64url");
+
+/** Seal a priced quote into ONE opaque string. The client stores and returns it; it never sees a
+ *  fee field it could alter, and every field the gate will trust is inside the MAC. */
+export function sealBridgeQuote({ owner, destinationKey, amountUsdc, fee, now = Date.now() }) {
+  const payload = {
+    o: owner ? String(owner).toLowerCase() : "anon",
+    d: String(destinationKey),
+    a: Number(amountUsdc),
+    // ⭐ BigInts as strings — they are the values that reach the calldata.
+    m: fee.maxFee.toString(),
+    n: fee.amountMinor.toString(),
+    f: Number(fee.feeUsdc),
+    t: Number(fee.netUsdc),
+    iat: now,
+  };
+  const body = b64u(JSON.stringify(payload));
+  const mac = createHmac("sha256", quoteSecret()).update(`bridgequote|${body}|v1`).digest("base64url");
+  return `${body}.${mac}`;
+}
+
+/** Open a sealed quote, or throw. ⛔ FAIL-CLOSED AT EVERY STEP — a malformed token, a bad MAC, an
+ *  expired quote or a mismatch against what the caller is now asking for all REFUSE. The mismatch
+ *  checks matter: without them a quote for 0.1 USDC could authorise a burn of 100. */
+export function openBridgeQuote(token, { owner, destinationKey, amountUsdc, now = Date.now() }) {
+  if (typeof token !== "string" || !token.includes(".")) throw new Error("bridge quote is missing or malformed");
+  const [body, mac] = token.split(".");
+  const expected = createHmac("sha256", quoteSecret()).update(`bridgequote|${body}|v1`).digest("base64url");
+  // ⚠️ Length-checked before timingSafeEqual, which THROWS on a length mismatch.
+  if (!mac || mac.length !== expected.length ||
+      !timingSafeEqual(Buffer.from(mac), Buffer.from(expected))) {
+    throw new Error("bridge quote failed verification — it was not issued by this server");
+  }
+  let p;
+  try { p = JSON.parse(Buffer.from(body, "base64url").toString("utf8")); }
+  catch { throw new Error("bridge quote is unreadable"); }
+  if (!Number.isFinite(p.iat) || now - p.iat > QUOTE_TTL_MS) throw new Error("bridge quote has expired — price it again");
+  if (now - p.iat < -5_000) throw new Error("bridge quote is not yet valid");
+  const who = owner ? String(owner).toLowerCase() : "anon";
+  if (p.o !== who) throw new Error("bridge quote belongs to another wallet");
+  if (p.d !== String(destinationKey)) throw new Error("bridge quote is for a different destination");
+  if (p.a !== Number(amountUsdc)) throw new Error("bridge quote is for a different amount");
+  return { maxFee: BigInt(p.m), amountMinor: BigInt(p.n), feeUsdc: p.f, netUsdc: p.t, issuedAt: p.iat };
+}
+
 export function bridgeCallData({ amountMinor, maxFee, recipient, cctpDomain }) {
   const bridgeParams = {
     amount: amountMinor,
@@ -312,12 +410,21 @@ export function bridgeCallData({ amountMinor, maxFee, recipient, cctpDomain }) {
 // Assumes the CALLER already enforced cap / fee-floor / day-ceiling (see
 // _actions.executeAction — the one secure path). `recipient` defaults to the
 // source wallet (bridge to self on the destination).
-export async function agentBridge({ walletAddress, destination, amountUsdc, recipient }) {
+export async function agentBridge({ walletAddress, destination, amountUsdc, recipient, fee: boundFee }) {
   const dest = resolveDestination(destination);
   if (!dest) throw new Error(`unsupported destination "${destination}"`);
   const to = getAddress(recipient || walletAddress);
 
-  const fee = await bridgeFee({ amountUsdc, cctpDomain: dest.cctpDomain });
+  // ═══ ⭐⭐ THE FEE IS ACCEPTED, NOT RE-READ, WHEN ONE IS BOUND ═══════════════════════════════════
+  // This used to call bridgeFee() unconditionally, which is why the fee the gate BANDED and the fee
+  // SIGNED into the calldata were two different quotes ~200 ms apart — the B≠C gap the receipt
+  // schema names with `feeDisclosed` / `feeCharged`. A confirm step that shows a figure has to bind
+  // it here or it is showing one number and burning another.
+  // ⛔ `boundFee` NEVER ORIGINATES WITH THE CLIENT. It comes from a sealed quote this server issued
+  // and re-opened (openBridgeQuote), so it is the server's own figure travelling by value.
+  // ⚠️ The un-bound path REMAINS, for callers with no confirm step to bind from — job-bridge-approve
+  // prices at approval and executes later, so re-reading is correct there.
+  const fee = boundFee ?? await bridgeFee({ amountUsdc, cctpDomain: dest.cctpDomain });
   const callData = bridgeCallData({ amountMinor: fee.amountMinor, maxFee: fee.maxFee, recipient: to, cctpDomain: dest.cctpDomain });
 
   const client = circle();

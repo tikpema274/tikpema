@@ -50,6 +50,9 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
   // card — disclose, require a tick, and enforce it SERVER-SIDE (the tick alone only
   // enables the button; _actions re-derives the expected token and compares).
   const [disclosure, setDisclosure] = useState<any>(null);
+  // ⭐ The sealed quote and the figures it carries. `quote` is what the user is shown BEFORE the
+  // burn; `quote.quoteToken` is opaque and returned verbatim so the fee shown is the fee signed.
+  const [quote, setQuote] = useState<any>(null);
   const [acked, setAcked] = useState(false);
 
   const loadReceipts = async () => {
@@ -81,7 +84,31 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
     // the ackToken binds to both, so a stale tick must never carry over to a new quote.
     setDisclosure(null);
     setAcked(false);
+    // ⭐⭐ AND THE SEALED QUOTE, FOR THE SAME REASON AND A SHARPER ONE. The quote binds owner,
+    // destination and amount, so the server would REFUSE a carried-over token — but the user would
+    // have seen a figure for the OLD amount sitting above the new one until it did. Clearing here
+    // means the panel never shows a price that does not belong to what is in the field.
+    setQuote(null);
   };
+
+  // ═══ ⭐⭐ TURN 1 — PRICE IT, SHOW IT, MOVE NOTHING ═════════════════════════════════════════════
+  // The ordinary case used to go straight to the burn: the fee was priced server-side and thrown
+  // away unless it was bad enough to refuse, so the only bridges that ever showed a figure first
+  // were the ones being blocked. Now every bridge is quoted first.
+  async function getQuote() {
+    if (!amountValid || !destination) return;
+    setError(""); setQuote(null); setDisclosure(null); setAcked(false); setRun(null);
+    setBridging(true);
+    try {
+      const res: any = await w.bridgeFromAgent(amountNum, destination, undefined, { quoteOnly: true });
+      if (res?.quoted) setQuote(res.quote);
+      else setError(res?.blocked || "Could not price this bridge.");
+    } catch (e: any) {
+      setError(describeError(e));
+    } finally {
+      setBridging(false);
+    }
+  }
 
   async function bridge() {
     if (!amountValid) return;
@@ -91,7 +118,7 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
     reset();
     setBridging(true);
     try {
-      const res = await w.bridgeFromAgent(amountNum, destination, ack);
+      const res = await w.bridgeFromAgent(amountNum, destination, ack, { quoteToken: quote?.quoteToken });
       // A high-fee refusal is satisfiable: show the disclosure and let the user accept it.
       if (res?.executed === false && res?.feeDisclosure) {
         setDisclosure(res.feeDisclosure);
@@ -101,6 +128,9 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
       }
       setDisclosure(null);
       setRun(res);
+      // ⭐ A SPENT QUOTE IS GONE. It is bound to this amount and destination and has just been
+      // consumed; leaving it would show a pre-burn price beside a completed burn.
+      setQuote(null);
       // Blobs is eventually consistent (~11s), so the receipt we just wrote may not be
       // visible yet. Refresh now AND after the window, rather than concluding absence
       // from one early miss.
@@ -205,13 +235,23 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
         </span>
         {/* Acceptance gates the button, exactly as the vault card gates its deposit. The
             server refuses independently — this is the affordance, not the enforcement. */}
-        <button
-          className="emerald"
-          disabled={bridging || !amountValid || (disclosure?.band === "acknowledge" && !acked)}
-          onClick={bridge}
-        >
-          {bridging ? "Bridging…" : `Bridge ${amountValid ? amountNum : 0} USDC → ${destLabel}`}
-        </button>
+        {/* ⭐⭐ TWO TURNS, AND THE FIRST ONE MOVES NOTHING. Price → show → confirm → burn. The
+            acknowledge gate is unchanged and still sits between: at ≥25% the button stays disabled
+            until the box below is ticked. Only the ordinary case has changed, and only by gaining
+            a figure it never had. */}
+        {!quote ? (
+          <button className="emerald" disabled={bridging || !amountValid || !destination} onClick={getQuote}>
+            {bridging ? "Pricing…" : "Get quote"}
+          </button>
+        ) : (
+          <button
+            className="emerald"
+            disabled={bridging || !amountValid || (disclosure?.band === "acknowledge" && !acked)}
+            onClick={bridge}
+          >
+            {bridging ? "Bridging…" : `Bridge ${amountValid ? amountNum : 0} USDC → ${destLabel}`}
+          </button>
+        )}
       </div>
 
       <div className="sub" style={{ marginTop: 6, fontSize: "0.8rem" }}>
@@ -228,6 +268,27 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
         amount appears once we have read the destination chain. Bridges over your per-bridge
         cap, or too small to cover the fee, are refused before any funds move.
       </div>
+
+      {/* ═══ ⭐⭐ THE QUOTE, SHOWN BEFORE THE BURN ═══════════════════════════════════════════════
+          🚨 THIS FIGURE IS THE ONE THAT WILL BE CHARGED, and the wording says exactly that and no
+          more. The manual bridge's `maxFee` is a CEILING signed into a transaction the user holds;
+          this one is a server-side quote sealed for a few minutes and bound to the burn. Same
+          number-before-the-button, DIFFERENT guarantee — so it must not borrow the manual panel's
+          sentence, which asserts a binding this path does not have.
+          ⚠️ 4dp MINIMUM: at 2dp a small bridge's fee and arrival collapse into the same displayed
+          number and the user cannot see that most of it went to fees. */}
+      {quote && !run && (
+        <div className="status" style={{ border: "1px solid var(--line-strong)", borderRadius: 12, padding: 12, marginTop: 10 }}>
+          <div>
+            Fee <b className="mono">{Number(quote.feeUsdc).toFixed(4)} USDC</b> ·
+            {" "}<b className="mono">{Number(quote.netUsdc).toFixed(4)} USDC</b> arrives on {quote.destination.label}.
+          </div>
+          <div className="sub" style={{ marginTop: 6, fontSize: "0.8rem" }}>
+            This is the fee that will be charged — quoted just now and held for this bridge, not
+            re-read when it runs. Price it again if you wait.
+          </div>
+        </div>
+      )}
 
       {/* ⭐ THE ENTRY POINT. A live route nothing links to is reachable only by typing the hash —
           #/dca sat that way for 22 days. This link ships WITH the route, not after it. */}

@@ -2,7 +2,7 @@ import { circle, waitForTx } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc, bridgeCapUsdc, swapCapUsdc, vaultDepositCapUsdc } from "./_arc.mjs";
 import { agentSwap, valueInUsdc, SWAP_TOKENS } from "./_swap.mjs";
 import { agentPay } from "./_pay.mjs";
-import { agentBridge, bridgeFee, resolveDestination, bridgeFeeBand, bridgeAckToken } from "./_bridge.mjs";
+import { agentBridge, bridgeFee, resolveDestination, bridgeFeeBand, bridgeAckToken, openBridgeQuote } from "./_bridge.mjs";
 import { resolveVault, inspectVault, gateDeposit, applyReportDisclosure, vaultDeposit, vaultWithdraw, readShareBalance } from "./_vault.mjs";
 import { vaultDdReport } from "./_vault-report.mjs";
 import { canSpendDay, recordAgentSpend, shoutLedgerFailure, recordBlocked, REFUSAL } from "./_budget.mjs";
@@ -402,11 +402,29 @@ export async function executeAction(step, ctx) {
     // If it meets/exceeds the amount, the recipient nets ≤ 0 and the bridge is
     // un-settleable — refuse BEFORE any funds move. This re-checks live at
     // execution time (the fee may have moved since the proposal).
-    let fee;
-    try {
-      fee = await bridgeFee({ amountUsdc: amount, cctpDomain: dest.cctpDomain });
-    } catch (e) {
-      return refuse(REFUSAL.CANNOT_VALUE, `cannot price bridge to ${dest.label}: ${e.message}`);
+    // ═══ ⭐⭐ A BOUND QUOTE IS OPENED, NOT RE-PRICED ═══════════════════════════════════════════
+    // When the caller confirmed against a figure, THAT figure bands, gates and gets signed.
+    // Re-reading here would reintroduce exactly the drift a confirm step exists to remove — the
+    // user accepts one number and burns another, across a human pause at a fee that moves ~30s.
+    // ⛔ The token is opened, never trusted as data: openBridgeQuote verifies the HMAC and refuses a
+    // quote for a different owner, destination or amount. A failure REFUSES; it never falls back to
+    // pricing, because a silent fallback turns "the figure you saw" into "some figure".
+    // ⚠️ NO TOKEN, NO BINDING — correct for callers with no confirm step (job-bridge-approve prices
+    // at approval and executes later). Those keep the live re-read they always had.
+    let fee, boundFee = null;
+    if (step.quoteToken) {
+      try {
+        boundFee = openBridgeQuote(step.quoteToken, { owner: ctx.session?.address, destinationKey: dest.key, amountUsdc: amount });
+      } catch (e) {
+        return { ok: false, blocked: `${e.message}`, quoteExpired: true };
+      }
+      fee = boundFee;
+    } else {
+      try {
+        fee = await bridgeFee({ amountUsdc: amount, cctpDomain: dest.cctpDomain });
+      } catch (e) {
+        return refuse(REFUSAL.CANNOT_VALUE, `cannot price bridge to ${dest.label}: ${e.message}`);
+      }
     }
     if (fee.maxFee >= fee.amountMinor) {
       return {
@@ -456,7 +474,10 @@ export async function executeAction(step, ctx) {
     // satisfy. The executor hands the facts outward; the boundary decides what to persist.
     let r;
     try {
-      r = await agentBridge({ walletAddress, destination: dest.key, amountUsdc: amount });
+      // ⭐ THE BOUND FEE REACHES THE CALLDATA. With a token, agentBridge signs THIS maxFee rather
+      // than pricing again — what makes "the figure shown is the figure charged" true rather than
+      // approximately true. Without one it prices as before.
+      r = await agentBridge({ walletAddress, destination: dest.key, amountUsdc: amount, fee: boundFee ?? undefined });
     } catch (e) {
       // Enrich and RETHROW — never swallow. The caller's error handling is unchanged;
       // it simply now has the disclosure attached if it wants to persist it.

@@ -96,7 +96,8 @@
     "test:siteclaims": "node scripts/verify-site-claims.mjs",
     "gate:sitelive": "node scripts/verify-site-live.mjs",
     "deploy:site": "node scripts/deploy-site.mjs",
-    "test:custodynotice": "npx tsx scripts/verify-custody-notice.tsx"
+    "test:custodynotice": "npx tsx scripts/verify-custody-notice.tsx",
+    "test:feebinding": "node --experimental-test-module-mocks scripts/verify-bridge-fee-binding.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -138,6 +139,7 @@
     "test:copy",
     "test:sendcopy",
     "test:feeauthority",
+    "test:feebinding",
     "test:ddcopy",
     "test:bridgedest",
     "test:manualbridgecopy",

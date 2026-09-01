@@ -127,8 +127,20 @@ section("4 — THE GATE IS SERVER-SIDE AND FAIL-CLOSED");
     /fee\.maxFee >= fee\.amountMinor/.test(actions));
 
   const bridgeFn = readFileSync(new URL("../netlify/functions/agent-bridge.mjs", import.meta.url), "utf8");
+  // ⚠️ ASSERTED BY INTENT, NOT BY THE EXACT DESTRUCTURE. This pinned the literal line
+  // `const { amountUsdc, destination, ackToken } = parseBody(event)` and went red when the request
+  // legitimately grew a `quoteToken` — a true property failing because the line it was written
+  // against got longer. The property is that client-supplied values ARRIVE here and are never
+  // trusted here; that is what these now assert.
   check("⭐ ackToken reaches the gate from the request but is never TRUSTED there",
-    /const \{ amountUsdc, destination, ackToken \} = parseBody\(event\)/.test(bridgeFn));
+    /parseBody\(event\)/.test(bridgeFn) && /\backToken\b/.test(bridgeFn)
+    && !/ackToken\s*===/.test(bridgeFn),
+    "arrives in the body, compared only inside _actions");
+  // ⭐⭐ THE SEALED QUOTE IS THE SECOND CLIENT VALUE, AND IT REACHES SIGNED CALLDATA. It must be
+  // opened by the server and never read as a number here — the panel returns it verbatim.
+  check("⭐⭐ quoteToken likewise arrives from the client and is never opened in the endpoint",
+    /\bquoteToken\b/.test(bridgeFn) && !/openBridgeQuote/.test(bridgeFn),
+    "the endpoint forwards it; _actions verifies the HMAC");
 }
 
 section("5 — 4dp MINIMUM: 2dp COLLAPSES FEE AND ARRIVAL INTO ONE NUMBER");

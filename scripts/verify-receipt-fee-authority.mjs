@@ -35,11 +35,21 @@
 // the band was computed from the disclosed fee, and a ratio taken from the charged one could not
 // reproduce it.
 //
-// ═══ ⭐ THE INVARIANT, ASSERTED BEFORE ANYTHING ENFORCES IT ════════════════════════════════════
-// `feeCharged <= feeDisclosed` — you may be charged less than you were shown, never more. Nothing
-// enforces this yet; consent-fee-binding is the work that will. Asserting it NOW means the receipt
-// is already the place it is checkable, so a violation is a finding today rather than a surprise
-// when binding lands. ⛔ This suite does not touch that design.
+// ═══ ⭐ THE INVARIANT, AND WHERE IT IS NOW ENFORCED ════════════════════════════════════════════
+// `feeCharged <= feeDisclosed` — you may be charged less than you were shown, never more.
+//
+// ⭐⭐ CONSENT-FEE BINDING HAS LANDED, and it enforces this on the BOUND path by making the two
+// fees the same quote — equal being the strongest form of "never more". See
+// verify-bridge-fee-binding.mjs, which decodes the actual calldata and proves the signed `maxFee`
+// is the figure the user was shown.
+//
+// ⚠️ THIS SUITE STILL COVERS THE UN-BOUND PATH, AND ITS ASSERTIONS BELOW REMAIN CORRECT THERE.
+// A confirm step was expected to turn "B ≠ C is real" and "neither is a copy of the other" red;
+// it did not, because the un-bound path was deliberately KEPT for callers that price at one moment
+// and execute at another (job-bridge-approve approves a proposal, then runs it). Two quotes are
+// still two quotes there, and the receipt still names which is which.
+// ⛔ So do not read a green here as evidence about the bound path — it is a different branch, and
+// it has its own suite. Neither covers the other.
 import { mock } from "node:test";
 
 // ⚠️ CONSTRUCTED, NOT WRITTEN AS A LITERAL. `bridgeAckToken` refuses a secret under 16 chars, so

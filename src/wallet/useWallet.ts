@@ -393,12 +393,16 @@ export function useWallet() {
   // NOT agent-execute-plan, NOT the bridge kit directly. Returns after the Arc burn
   // lands; the destination mint is async (~10–20 min) — poll with checkBridgeStatus.
   const bridgeFromAgent = useCallback(
-    async (amountUsdc: number, destination: string, ackToken?: string) => {
+    async (amountUsdc: number, destination: string, ackToken?: string,
+           opts?: { quoteOnly?: boolean; quoteToken?: string }) => {
       const token = await ensureSession();
       const r = await fetch("/api/agent-bridge", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ amountUsdc, destination, ackToken }),
+        // ⭐ `quoteToken` is passed through OPAQUELY — the client never reads or builds it. It is the
+        // server's own sealed figure, and returning it verbatim is what binds the fee the user was
+        // shown to the fee signed into the burn.
+        body: JSON.stringify({ amountUsdc, destination, ackToken, quoteOnly: opts?.quoteOnly, quoteToken: opts?.quoteToken }),
       });
       const data = await readJson(r);
       if (!r.ok) throw new Error(data?.error || "Bridge failed");

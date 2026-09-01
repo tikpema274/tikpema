@@ -2,7 +2,7 @@ import { TxPendingError } from "./_circle.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody } from "./_arc.mjs";
 import { executeAction } from "./_actions.mjs";
-import { resolveDestination } from "./_bridge.mjs";
+import { resolveDestination, bridgeFee, bridgeFeeBand, sealBridgeQuote, QUOTE_TTL_MS } from "./_bridge.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { recordBridge, recordPendingBridge } from "./_bridge-record.mjs";
@@ -28,7 +28,7 @@ export async function handler(event) {
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });
 
-  const { amountUsdc, destination, ackToken } = parseBody(event);
+  const { amountUsdc, destination, ackToken, quoteToken, quoteOnly } = parseBody(event);
   const amount = Number(amountUsdc);
   if (!(amount > 0)) return json(400, { error: "amountUsdc must be > 0" });
   const dest = resolveDestination(destination);
@@ -55,7 +55,42 @@ export async function handler(event) {
   // trusted: _actions recomputes the expected token from the destination, amount and band
   // it priced ITSELF, and compares. A forged or stale token fails the comparison — the
   // same fail-closed shape as the vault deposit gate.
-  const step = { type: "bridge_usdc", amountUsdc: amount, destination: dest.key, ackToken, reasoning: `bridge ${amount} USDC to ${dest.label}` };
+  // ═══ ⭐⭐ TURN 1: PRICE AND SEAL, EXECUTE NOTHING ══════════════════════════════════════════════
+  // The ordinary-band bridge used to be single-shot: press, and the burn happens. The fee was
+  // priced server-side on every one of those and then discarded unless the band forced a stop, so
+  // the ONLY bridges that ever showed a figure first were the ones bad enough to refuse.
+  // ⭐ The quote is SEALED, not returned as a number the client posts back — `maxFee` reaches signed
+  // calldata, and a caller-chosen one would let the caller choose what the burn authorises.
+  // ⛔ NOTHING MOVES HERE. No wallet call, no allowance, no burn — bridgeFee is two read-only GETs.
+  if (quoteOnly) {
+    let fee;
+    try { fee = await bridgeFee({ amountUsdc: amount, cctpDomain: dest.cctpDomain }); }
+    catch (e) { return json(200, { executed: false, quoted: false, blocked: `cannot price bridge to ${dest.label}: ${e.message}` }); }
+    if (fee.maxFee >= fee.amountMinor) {
+      return json(200, { executed: false, quoted: false, blocked: `amount too small — the bridge fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC right now (≥ your ${amount} USDC), so nothing would arrive` });
+    }
+    // ⚠️ The band is returned so the panel can escalate at 10%/25% EXACTLY as before. The
+    // thresholds are untouched; only the moment the figure appears has changed.
+    const band = bridgeFeeBand({ amountUsdc: amount, feeUsdc: fee.feeUsdc, netUsdc: fee.netUsdc });
+    return json(200, {
+      executed: false,
+      quoted: true,
+      quote: {
+        amountUsdc: amount,
+        destination: { key: dest.key, label: dest.label },
+        feeUsdc: Number(fee.feeUsdc.toFixed(6)),
+        netUsdc: Number(fee.netUsdc.toFixed(6)),
+        band: band.band,
+        feeRatio: band.feeRatio,
+        expiresInMs: QUOTE_TTL_MS,
+        // The opaque handle. The panel stores it and returns it verbatim; it never sees a fee field
+        // it could alter, and the figure the gate will trust lives inside the MAC.
+        quoteToken: sealBridgeQuote({ owner: session.address, destinationKey: dest.key, amountUsdc: amount, fee }),
+      },
+    });
+  }
+
+  const step = { type: "bridge_usdc", amountUsdc: amount, destination: dest.key, ackToken, quoteToken, reasoning: `bridge ${amount} USDC to ${dest.label}` };
 
   try {
     const r = await executeAction(step, { walletAddress, session });
