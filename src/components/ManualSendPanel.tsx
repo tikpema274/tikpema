@@ -96,6 +96,12 @@ export default function ManualSendPanel({ wallet: w }: { wallet: UnifiedWallet }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sentHash, setSentHash] = useState<string | null>(null);
+  // ⭐⭐ A SNAPSHOT, NOT A READ OF LIVE FORM STATE. The confirmation must survive the clearing that
+  // happens in the same transition, so it renders from here rather than from `to`/`amount`. ⛔ And
+  // it is INERT: nothing submits from it, so restoring the disclosure does not reintroduce the
+  // pre-filled-repeat hazard that clearing exists to prevent.
+  // [[clear-on-transition-needs-a-terminal-state-that-reads-nothing]]
+  const [sent, setSent] = useState<{ to: string; amount: number } | null>(null);
 
   const isMetaMask = w.activeKind === "metamask";
   // ⭐ Parsed HERE, and the review step renders THIS value rather than the raw input — that is the
@@ -114,6 +120,9 @@ export default function ManualSendPanel({ wallet: w }: { wallet: UnifiedWallet }
       const r = await w.sendUsdcManual!(parsedTo, amountNum);
       setSentHash(r.txHash);
       setReviewing(false);
+      // ⭐ CAPTURED BEFORE THE CLEAR, in the same transition — the order is the mechanism.
+      // `parsedTo`/`amountNum` are the values actually SUBMITTED, not the raw field contents.
+      setSent({ to: parsedTo, amount: amountNum });
       // ⭐⭐ CLEARED AT THE TRANSITION INTO SUCCESS, NOT WHEN THE FORM COMES BACK. The dangerous
       // state is not what "Send another" resets — it is what survives BEHIND the success screen.
       // `to` and `amount` used to sit here untouched, so any later change that revealed the form
@@ -224,7 +233,17 @@ export default function ManualSendPanel({ wallet: w }: { wallet: UnifiedWallet }
 
       {sentHash && (
         <div className="status" style={{ color: "var(--emerald)" }}>
-          Sent ✓ — confirmed on Arc.{" "}
+          {/* 🚨 WHAT WAS SENT, AND TO WHOM — the question this panel could not answer. The AGENT
+              panel names both; this one, the IRREVERSIBLE path with no allowlist behind it, said only
+              "Sent ✓" and sent the user to a block explorer to learn what the app already knew.
+              ⭐⭐ THE ADDRESS IS SHOWN IN FULL, and deliberately NOT truncated the way #/send truncates.
+              This panel promises one paragraph earlier that "We show you the address exactly as we read
+              it before you sign", and its review step is asserted untruncated for a stated reason — an
+              ellipsis hides exactly the characters a corrupted paste would change. A confirmation
+              reading 0x0c5E…2532 would contradict, inside one flow, the promise the panel just made. */}
+          Sent <b>{sent?.amount} USDC</b> to{" "}
+          <span className="mono" style={{ wordBreak: "break-all" }}>{sent?.to}</span>{" "}
+          ✓ — confirmed on Arc.{" "}
           <a href={`${EXPLORER}/tx/${sentHash}`} target="_blank" rel="noreferrer">view the transfer ↗</a>
           {/* ⭐ AN EXPLICIT CONTROL, not an auto-returning form. A completed send should not be
               repeatable by a stray click on a pre-filled form; requiring one deliberate press to
@@ -232,7 +251,7 @@ export default function ManualSendPanel({ wallet: w }: { wallet: UnifiedWallet }
               already cleared at the transition above, so this button reveals an empty form rather
               than emptying a revealed one. */}
           <div style={{ marginTop: 10 }}>
-            <button onClick={() => { setSentHash(null); setError(null); }}>Send another</button>
+            <button onClick={() => { setSentHash(null); setSent(null); setError(null); }}>Send another</button>
           </div>
         </div>
       )}

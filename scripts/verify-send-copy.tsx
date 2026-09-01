@@ -264,6 +264,31 @@ section("8 — 🚨 THE SUBMITTED VALUES DO NOT SURVIVE THE SEND");
     "cleared in the handler, not on render");
   check("⭐⭐ …and the AMOUNT too, in the same transition",
     /setSentHash\(r\.txHash\)[\s\S]*setAmount\("0\.1"\)/.test(handler));
+  // ═══ 🚨 WHAT WAS SENT, AND TO WHOM — BOTH DIRECTIONS ═══════════════════════════════════════
+  // The confirmation used to read "Sent ✓ — confirmed on Arc." and name NEITHER value, while the
+  // AGENT panel named both. The irreversible path — the one whose own copy says "check the address
+  // carefully" — gave the weaker confirmation, and the only way to answer "what did I just send"
+  // was to leave for a block explorer.
+  //
+  // ⭐⭐ IN FULL, NOT TRUNCATED. #/send abbreviates via shortAddr(); this panel must not, because it
+  // promises "We show you the address exactly as we read it before you sign" and its REVIEW step is
+  // asserted untruncated at §7a for a stated reason. Truncating here would contradict, inside one
+  // flow, a promise the same panel makes one paragraph earlier.
+  check("⭐⭐ the success state names the AMOUNT",
+    /Sent <b>\{sent\?\.amount\} USDC<\/b>/.test(code), "rendered from the snapshot, not live form state");
+  check("⭐⭐ …and the RECIPIENT, in full — no shortAddr, no ellipsis",
+    /\{sent\?\.to\}/.test(code) && !/shortAddr\(/.test(code),
+    "an ellipsis hides exactly the characters a corrupted paste would change");
+  check("⭐ …from a SNAPSHOT captured before the clear, so it survives the transition",
+    /setSent\(\{ to: parsedTo, amount: amountNum \}\)/.test(code)
+    && code.indexOf("setSent({ to: parsedTo") < code.indexOf('setTo("")'),
+    "captured, then cleared — the order is the mechanism");
+  // ⛔ THE OTHER DIRECTION. Naming the values is only safe because the snapshot is INERT — if the
+  // PRE-SEND state also carried them the panel would be back to a pre-filled repeat. Asserted as
+  // an absence with presence established first, so it cannot pass vacuously.
+  check("⛔ …and the snapshot is cleared by `Send another`, so the pre-send state names nothing",
+    /setSent\(null\)/.test(code) && /Send another/.test(code),
+    "the returning form must not carry the last recipient");
   check("⭐ the form is reachable again — an explicit control, not a reload",
     /Send another/.test(code) && /setSentHash\(null\)/.test(code));
   // ⚠️ PRESENCE FIRST. Written as two bare negatives this passed GREEN against the pre-fix panel,
