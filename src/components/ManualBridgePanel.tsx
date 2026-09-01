@@ -222,10 +222,6 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
     <div className="panel">
       <div className="panel-eyebrow">Bridge from your own wallet</div>
 
-      {/* ⛔ THE ONE LINE THE AGENT PANEL DOES NOT NEED.
-          ⭐ SHARED, not restated — see CustodyNotice. The bridge burns USDC only. */}
-      <CustodyNotice token="USDC" />
-
       {/* 🚨 THE WINDOW THE AGENT PATH DOES NOT HAVE, DISCLOSED BEFORE SIGNING.
           The agent burns and writes its receipt in ONE server request — there is no moment where
           money has moved and nothing records it. Here the burn is signed in the BROWSER and the
@@ -237,7 +233,14 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
           Saying only "stay on this page" would read as "or lose your funds", which is false and
           would frighten a user about the wrong thing. ⚠️ This is the kind of limit a user would
           otherwise discover instead of being told. */}
-      <div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>
+      {/* ⭐⭐ A HAZARD, NOT A NOTE — and it must not be a note in a different colour. As a `.status`
+          with a --warn rail this was the same SHAPE as five other rails on this journey that are
+          not hazards, so the colour did all the work and none of it read. `.hazard-callout` is a
+          bordered box: it differs in shape, size, weight and density, and stays distinguishable
+          with the colour removed. ⛔ ABOVE the form deliberately — this is met BEFORE typing.
+          Text is unchanged, and verify-deployed-disclosure.mjs uses this sentence as a build
+          CONTROL via bundle.includes(), so it must stay verbatim. */}
+      <div className="hazard-callout">
         After you sign, <b>stay on this page until the burn confirms.</b> If you leave, the bridge
         still completes on-chain and your funds are not at risk — but we lose the record of it, so
         it will not appear in your bridges and we cannot show you what arrived.
@@ -250,9 +253,16 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
         amount appears once we have read the destination chain.
       </div>
 
+      {/* ⭐ THE AMOUNT WAS THE SMALLEST ELEMENT ON A PAGE ABOUT MOVING MONEY — 0.95rem against a
+          1.5rem heading, and within 10% of the prose around it. It is now the largest thing here.
+          Label text is unchanged. */}
+      <div className="amount-field">
+        <span className="amount-label">Amount (USDC)</span>
+        <input className="amount-input" inputMode="decimal" value={amount}
+          onChange={(e) => setAmount(e.target.value)} disabled={busy} />
+      </div>
+
       <div className="row">
-        <span className="status" style={{ margin: 0 }}>Amount (USDC)</span>
-        <input value={amount} onChange={(e) => setAmount(e.target.value)} disabled={busy} />
         <span className="status" style={{ margin: 0 }}>To</span>
         <select value={destination} onChange={(e) => setDestination(e.target.value)} disabled={busy || !destinations.length}>
           <option value="">{destinations.length ? "Choose a chain…" : "Loading chains…"}</option>
@@ -261,6 +271,15 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
           ))}
         </select>
         <button onClick={() => start()} disabled={busy || !destination}>Get quote</button>
+      </div>
+
+      {/* ⭐ STANDING CONTEXT, BELOW THE FORM. How custody works is true whether or not the user
+          acts, so it is read after — unlike the hazard above, which qualifies the act itself.
+          ⛔ WRAPPED, NOT RESTYLED: CustodyNotice is shared by three panels and this change is
+          scoped to bridge, so the subordinate treatment lives on the wrapper. All 38 words stay
+          and the rendered TEXT is byte-identical, which is what every suite asserts on. */}
+      <div className="standing-note">
+        <CustodyNotice token="USDC" />
       </div>
 
       {disclosure && (

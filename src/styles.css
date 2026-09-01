@@ -593,3 +593,92 @@ label.field > span {
     grid-template-columns: 1fr;
   }
 }
+
+/* ═══ PANEL HIERARCHY — three weights for three KINDS of statement ═══════════════════════════════
+ *
+ * These panels were 325 rendered words at one visual weight: `.status` (0.86rem) held the custody
+ * notice, the hazard warnings, the balances and the errors alike, while the amount input sat at
+ * 0.95rem — 40% the size of the `h2`, and within 10% of the prose. Nothing was verbose; nothing
+ * had rank. [[tikpema-ui-conventions]]
+ *
+ * ⛔ DELIBERATELY NOT A CHANGE TO `.status`. That class has 122 instances across 22 components,
+ * so quieting it would quiet the whole app — including the agent panels, which are out of scope
+ * and whose confirmation is post-execution. New classes, applied per site.
+ *
+ * ⭐⭐ THE TWO NOTICE VARIANTS MUST NOT DIFFER BY COLOUR ALONE. They already differ by colour today
+ * and it does not read, because a `--warn` rail and a `--paper-dim` rail are the same SHAPE. So
+ * they are separated on four axes, only one of which is colour:
+ *
+ *            .hazard-callout            .standing-note
+ *   shape    bordered box, 4 sides      no border but a top hairline
+ *   size     0.9rem                     0.78rem
+ *   weight   paper, tinted ground       muted, no ground
+ *   density  14/16px padding            tight, and set below the form
+ *
+ * A reader can tell them apart with the colour removed, which is the test that matters.
+ */
+
+/* ── A hazard: something that could go wrong, read BEFORE acting ─────────────────────────────── */
+.hazard-callout {
+  border: 1px solid var(--warn);
+  background: rgba(230, 163, 90, 0.07);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin: 16px 0;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--paper);
+}
+.hazard-callout b {
+  font-weight: 600;
+}
+
+/* ── Standing context: how the thing works. True whether or not you act, so it sits AFTER the
+ *    form and carries no urgency. ⭐ Wraps CustodyNotice rather than restyling it — the notice is
+ *    shared by three panels and this change is scoped to bridge. */
+.standing-note {
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.standing-note .status {
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  margin: 0;
+}
+.standing-note b {
+  color: var(--paper-dim);
+  font-weight: 500;
+}
+
+/* ── The amount. On a page about moving money this was the smallest element; it is now the
+ *    largest. Space Mono because it is a figure, and this app already reads money in the ledger
+ *    voice. Inherits the base input border/background and the amber focus ring. */
+.amount-field {
+  margin: 18px 0 14px;
+}
+.amount-field .amount-label {
+  display: block;
+  font-family: "Space Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+input.amount-input {
+  font-family: "Space Mono", ui-monospace, monospace;
+  font-size: 2.25rem;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  padding: 12px 16px;
+  color: var(--paper);
+}
+@media (max-width: 520px) {
+  input.amount-input { font-size: 1.75rem; }
+}

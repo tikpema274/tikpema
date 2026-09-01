@@ -80,6 +80,26 @@ section("2 — 🚨 THE TAB-CLOSE WINDOW, disclosed BEFORE signing");
     "saying only 'stay on this page' would frighten the user about the wrong thing");
   check("⭐ …and says the consequence concretely — it will not appear in your bridges",
     /will not appear in your bridges/i.test(text));
+
+  // ═══ ⭐⭐ ORDER, NOT JUST PRESENCE ══════════════════════════════════════════════════════════
+  // The hazard qualifies the ACT and must be met BEFORE the form; the custody notice is standing
+  // context, true whether or not the user acts, and sits after it. Nothing asserted that until
+  // now — the panel shipped with custody FIRST (custody@95, hazard@242) and every check here was
+  // green, because presence is order-blind.
+  //
+  // 🚨 PRESENCE IS ASSERTED FIRST, AND SEPARATELY. `indexOf(a) < indexOf(b)` is SATISFIED BY
+  // ABSENCE: a missing hazard yields -1, and -1 is less than everything, so the bare ordering
+  // check would go green on a panel that had dropped the warning entirely — the failure mode is a
+  // PASS, on the one sentence a user most needs. Same trap named in verify-dca-reason-render.tsx.
+  // [[equality-passes-vacuously-on-empty]] · [[check-whose-failure-mode-is-a-pass]]
+  const iHazard = text.indexOf("stay on this page until the burn confirms");
+  const iCustody = text.indexOf("Agent spending caps do not apply here");
+  const bothPresent = iHazard >= 0 && iCustody >= 0;
+  check("⭐⭐ BOTH are present — asserted before any claim about their order",
+    bothPresent, `hazard@${iHazard} custody@${iCustody}`);
+  check("⭐⭐ …and the HAZARD is met before the standing context",
+    bothPresent && iHazard < iCustody,
+    bothPresent ? `hazard@${iHazard} < custody@${iCustody}` : "⛔ vacuous — one of them is ABSENT");
 }
 
 section("3 — ⭐ the estimate vocabulary, reused verbatim from BridgePanel");
