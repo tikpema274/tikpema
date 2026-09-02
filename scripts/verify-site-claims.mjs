@@ -77,6 +77,21 @@ const PAGE = readFileSync("site/index.html", "utf8");
 const src = (p) => readFileSync(p, "utf8");
 
 // ── ⭐ EVERY ROW IS page-value ↔ repo-source. A row that reads only the page proves nothing. ─────
+// ⭐ DERIVED FROM THE SOURCE, NOT IMPORTED. `_budget.mjs` pulls in @netlify/blobs, which cannot load
+// in this offline tripwire — so the vocabulary is counted from the text of the export block. The
+// block is delimited exactly, so a new reason added anywhere inside it moves this number.
+const REFUSAL_BLOCK = /export const REFUSAL = \{([\s\S]*?)\n\};/.exec(src("netlify/functions/_budget.mjs"));
+const REFUSAL_COUNT = REFUSAL_BLOCK
+  ? (REFUSAL_BLOCK[1].match(/^\s+[A-Z_]+:/gm) || []).length
+  : 0;
+// ⛔ A COUNT OF ZERO IS NOT A COUNT. If the block moves or the regex stops matching, this must fail
+// loudly rather than compare the page against 0 and call it agreement.
+// [[equality-passes-vacuously-on-empty]]
+if (!REFUSAL_COUNT) {
+  console.error("⛔ could not read the REFUSAL vocabulary from _budget.mjs — refusing to check a count against 0");
+  process.exit(1);
+}
+
 const CLAIMS = [
   ["chain id",              () => /5042002/.test(PAGE),                     () => /id:\s*5042002/.test(src("src/config/chain.ts"))],
   ["USDC is the gas",       () => /USDC is the gas/i.test(PAGE),            () => /nativeCurrency:\s*\{[^}]*symbol:\s*"USDC"/.test(src("src/config/chain.ts"))],
@@ -89,6 +104,18 @@ const CLAIMS = [
   ["DD is Arc-testnet only",() => /Arc Testnet only/i.test(PAGE),           () => /SUPPORTED_CHAINS\s*=\s*Object\.freeze\(\["arc-testnet"\]\)/.test(src("netlify/functions/_dd-descriptor.mjs"))],
   ["the four agent labels", () => ["Researcher","Second opinion","Executor","Vault"].every((n) => PAGE.includes(n)),
                             () => ["Researcher","Second opinion","Executor","Vault"].every((n) => src("netlify/functions/_agents.mjs").includes(`"${n}"`))],
+  // ═══ 🚨 THE COUNTED CLAIM — THE ONLY LITERALLY CHECKABLE NUMBER ON THE PAGE, AND IT WAS WRONG.
+  // The page said "13 named refusal reasons"; `REFUSAL` holds 15. A reader who doubts this page
+  // would check the one thing they CAN count, and it was two behind the code — for however long it
+  // took two reasons to be added, because nothing derived it.
+  // ⭐ BOTH HALVES, like every row here: the page must state a number, and that number must EQUAL
+  // Object.keys(REFUSAL).length. ⛔ Not "a number is present" — a presence check would sit green
+  // through the exact drift that happened. The count is DERIVED, never transcribed into this file.
+  ["refusal-reason count",  () => /\b(\d+) named refusal reasons\b/.test(PAGE),
+                            () => {
+                              const m = /\b(\d+) named refusal reasons\b/.exec(PAGE);
+                              return !!m && Number(m[1]) === REFUSAL_COUNT;
+                            }],
   ["3 self-signed routes",  () => /sign those yourself|cannot do/i.test(PAGE),
                             () => ["send-manual","bridge-manual","swap-manual"].every((r) => src("src/App.tsx").includes(`case "${r}"`))],
 ];

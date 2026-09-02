@@ -135,7 +135,7 @@
     <div class="proof">
       <div class="item"><span class="dot"></span> Sign in with a passkey</div>
       <div class="item"><span class="dot"></span> Agent actions cost you no gas</div>
-      <div class="item"><span class="dot"></span> 13 named refusal reasons</div>
+      <div class="item"><span class="dot"></span> 15 named refusal reasons</div>
     </div>
   </header>
 
@@ -215,9 +215,10 @@
         </div>
         <div class="doc">
           <span class="dt">Bridged amounts are read, not calculated</span>
-          <span class="dd">The cross-chain fee is quoted at execution and drifts, so what actually
-            arrives cannot be worked out in advance. The confirmation shows the fee exactly and the
-            arrival as an <b>estimate</b> — then advances to a <b>measured</b> figure only after the
+          <span class="dd">The fee you are shown is the fee that is charged: the quote is sealed to your
+            wallet, the destination and the amount, and the bridge is refused rather than re-priced if
+            it no longer matches. What <b>arrives</b> is a separate question — the confirmation shows
+            the arrival as an <b>estimate</b>, then advances to a <b>measured</b> figure only after the
             destination chain has been read. The interface never infers it.</span>
         </div>
         <div class="doc">
