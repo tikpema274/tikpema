@@ -770,15 +770,17 @@ input.amount-input {
   color: var(--muted);
   margin-bottom: 6px;
 }
-/* ⛔ A FACT, NOT A CONTROL. Arc is the only source; styling it as a disabled select would advertise
- *   a choice that does not exist, so it reads as a field without pretending to be one. */
-.field-static {
-  background: var(--field);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 11px 13px;
-  font-size: 0.95rem;
-  color: var(--paper-dim);
+/* ⭐ A DISABLED CONTROL, NOT STATIC TEXT. Arc is the only source either way; the question is how the
+ *   constraint reads. Greyed-and-unchangeable says "this is fixed" — static text says "this was
+ *   never a control", presenting a limit as a design choice and hiding that a limit exists.
+ *   ⚠️ Browsers grey a disabled select inconsistently, so the treatment is explicit rather than
+ *   inherited: dimmed text, a quieter border, and not-allowed on hover. */
+select:disabled {
+  color: var(--muted);
+  border-color: var(--line);
+  opacity: 1;              /* override UA dimming so the rule below is the only source of contrast */
+  cursor: not-allowed;
+  -webkit-text-fill-color: var(--muted);   /* Safari ignores `color` on a disabled select */
 }
 
 /* ⭐ The token inside the field. `position:absolute` over padding rather than a flex sibling, so the

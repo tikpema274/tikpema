@@ -205,13 +205,18 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
           The sequence is the point. This was inputs and act → then cost, so the user committed
           before the panel had told them anything. */}
 
-      {/* ⛔ FROM IS NOT A SELECT. Arc is the only source, and a disabled dropdown with one option
-          advertises a choice that does not exist. A labelled fact beside a labelled control. */}
+      {/* ⭐ FROM IS A DISABLED SELECT, NOT STATIC TEXT. Arc is the only source either way — the
+          question is how the constraint READS. A greyed control that cannot be changed says "this
+          is fixed"; a text field says "this was never a control", which presents a limit as a design
+          choice. The first is honest about the constraint; the second hides that there is one.
+          ⚠️ `disabled` also removes it from the tab order, so the keyboard path goes straight to the
+          destination — the only choice actually available here. */}
       <div className="field-pair">
         <div className="field">
-          <label>From</label>
-          <div className="field-static">Arc{" "}
-            <span className="mono">{w.agentWallet.balance ?? "…"} USDC</span></div>
+          <label htmlFor="br-from">From</label>
+          <select id="br-from" disabled value="arc">
+            <option value="arc">Arc · {w.agentWallet.balance ?? "…"} USDC</option>
+          </select>
         </div>
         <div className="field">
           {/* ⭐ THE LABEL MOVED ABOVE THE CONTROL. "destination" sat BELOW the select — the only
@@ -261,7 +266,11 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
           before the values is what makes the panel read as complete rather than sparse — the user
           knows what they will be told before they ask. Em-dashes where a value is not yet known;
           Settlement and Route are known from the destination alone. */}
-      <BridgeQuoteSummary quote={run ? null : quote} destinationLabel={destLabel} />
+      {/* ⛔ HIDDEN ONCE THE BURN LANDS, NOT BLANKED. Passing `null` here rendered the rows as
+          em-dashes directly above a confirmation carrying the real figures — two contradictory
+          answers to "what did this cost", stacked. The confirmation supersedes the summary, so the
+          summary goes rather than empties. [[absence-must-never-read-as-safe]] */}
+      {!run && <BridgeQuoteSummary quote={quote} destinationLabel={destLabel} />}
 
       {/* ⭐ ONE FULL-WIDTH BUTTON WHOSE LABEL CHANGES, not two. Two buttons would imply two
           independent actions; this is one sequence with a priced gate in the middle. Editing the

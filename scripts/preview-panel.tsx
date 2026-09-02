@@ -49,30 +49,35 @@ const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
     text-transform:uppercase;color:var(--muted);margin:34px 0 10px}
   .pv-note{color:var(--muted);font-size:12px;max-width:60ch;line-height:1.6;margin-bottom:8px}
 </style></head><body><div class="app">
-  <div class="pv-label">1 — the panel as it first renders (no quote yet)</div>
-  <div class="pv-note">Zone 1 state, the form, the unconditional hazard row, and zone 3 below.
-    This is what a user sees before pressing Get quote.</div>
+  <div class="pv-label">1 — empty: nothing entered yet</div>
+  <div class="pv-note">The panel as it first renders. FROM is a greyed, unchangeable select — the
+    constraint is visible as a constraint. Settlement and Route are already filled: both are
+    knowable before any quote, so the user learns what they will be told before asking.</div>
   ${renderToStaticMarkup(<BridgePanel wallet={wallet} />)}
 
-  <div class="pv-label">2 — summary: no destination chosen yet</div>
-  <div class="pv-note">All four rows present. Route is an em-dash because nothing has been chosen;
-    Settlement is known regardless.</div>
-  <div class="plane">${renderToStaticMarkup(<BridgeQuoteSummary quote={null} />)}</div>
-
-  <div class="pv-label">3 — summary: destination chosen, not yet quoted</div>
-  <div class="pv-note">Two real values, two em-dashes. The held-quote promise is correctly ABSENT —
-    it would be asserting a binding on a figure that does not exist.</div>
+  <div class="pv-label">2 — amount entered, not yet quoted</div>
+  <div class="pv-note">Fee and You receive are still em-dashes. The held-quote promise is correctly
+    ABSENT — it asserts a binding on a figure, and there is no figure yet.</div>
   <div class="plane">${renderToStaticMarkup(
     <BridgeQuoteSummary quote={null} destinationLabel="Base (Sepolia)" />)}</div>
 
-  <div class="pv-label">4 — summary: quoted (real figures from the live bridge)</div>
-  <div class="pv-note">All four filled, and the held-quote promise now appears beside its figure.</div>
+  <div class="pv-label">3 — quoted (real figures from the live bridge)</div>
+  <div class="pv-note">⭐ The state change is visible in the ROWS, not only the button label:
+    em-dashes became values. That is the argument for always-present rows.</div>
   <div class="plane">${renderToStaticMarkup(
     <BridgeQuoteSummary quote={quote} destinationLabel="Base (Sepolia)" />)}</div>
 
+  <div class="pv-label">4 — executing: the burn is in flight</div>
+  <div class="pv-note">The summary keeps its values while bridging — the user can still see what
+    they accepted. It is removed only once the confirmation supersedes it, rather than blanked to
+    em-dashes above a confirmation carrying the real numbers.</div>
+  <div class="plane">${renderToStaticMarkup(
+    <BridgeQuoteSummary quote={quote} destinationLabel="Base (Sepolia)" />)}
+    <button class="emerald btn-wide" disabled>Bridging…</button></div>
+
   <div class="pv-label">5 — the acknowledge band (≥25% to fees)</div>
-  <div class="pv-note">Unchanged by this pass — thresholds and wording are as they were. Shown so
-    the heaviest state on the panel can be judged beside the lightest.</div>
+  <div class="pv-note">Unchanged by this pass. Shown so the heaviest state can be judged beside the
+    lightest.</div>
   <div class="plane">${renderToStaticMarkup(<FeeDisclosureBox
     disclosure={{ band: "acknowledge", feeRatio: 0.532, feeUsdc: 0.0532, netUsdc: 0.0468,
       amountUsdc: 0.1, destinationLabel: "Base (Sepolia)", ackToken: "x" } as any}
