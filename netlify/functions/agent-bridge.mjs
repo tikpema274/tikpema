@@ -65,14 +65,18 @@ export async function handler(event) {
   if (quoteOnly) {
     let fee;
     try { fee = await bridgeFee({ amountUsdc: amount, cctpDomain: dest.cctpDomain }); }
-    catch (e) { return json(200, { executed: false, quoted: false, blocked: `cannot price bridge to ${dest.label}: ${e.message}` }); }
+    catch (e) { return json(200, { outcome: "quote_failed", executed: false, quoted: false, blocked: `cannot price bridge to ${dest.label}: ${e.message}` }); }
     if (fee.maxFee >= fee.amountMinor) {
-      return json(200, { executed: false, quoted: false, blocked: `amount too small — the bridge fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC right now (≥ your ${amount} USDC), so nothing would arrive` });
+      return json(200, { outcome: "quote_failed", executed: false, quoted: false, blocked: `amount too small — the bridge fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC right now (≥ your ${amount} USDC), so nothing would arrive` });
     }
     // ⚠️ The band is returned so the panel can escalate at 10%/25% EXACTLY as before. The
     // thresholds are untouched; only the moment the figure appears has changed.
     const band = bridgeFeeBand({ amountUsdc: amount, feeUsdc: fee.feeUsdc, netUsdc: fee.netUsdc });
     return json(200, {
+      // ⭐ AN EXPLICIT DISCRIMINATOR. `executed: false` already means four different things on this
+      // endpoint; the client switches on THIS and refuses anything it does not recognise, so a
+      // FIFTH shape fails loudly instead of falling through to "Bridge did not execute".
+      outcome: "quoted",
       executed: false,
       quoted: true,
       quote: {
@@ -96,7 +100,12 @@ export async function handler(event) {
     const r = await executeAction(step, { walletAddress, session });
     // A high-fee refusal carries its disclosure so the panel can render the band and
     // return the acknowledgment. The refusal is satisfiable, not terminal.
-    if (!r.ok) return json(200, { executed: false, blocked: r.blocked, feeDisclosure: r.feeDisclosure ?? null });
+    if (!r.ok) return json(200, {
+      // ⭐ needs_ack and blocked are DIFFERENT outcomes: one is satisfiable by acknowledging, the
+      // other is a refusal. They were one shape distinguished by whether feeDisclosure happened to
+      // carry a token — a property of the payload, not a statement of intent.
+      outcome: r.feeDisclosure?.ackToken ? "needs_ack" : "blocked",
+      executed: false, blocked: r.blocked, feeDisclosure: r.feeDisclosure ?? null });
 
     // The receipt write + settle trigger live in _bridge-record.mjs so the multi-step
     // plan path uses the SAME implementation rather than a second copy. It cannot fail
@@ -104,6 +113,7 @@ export async function handler(event) {
     await recordBridge({ r, session, event, amountRequested: amount });
 
     return json(200, {
+      outcome: "executed",
       executed: true,
       kind: "bridge_usdc",
       state: r.state,
@@ -125,7 +135,7 @@ export async function handler(event) {
       // write and for a stronger reason: we are already telling the caller "we don't know
       // yet", and a diagnostics failure must not turn that into an error.
       await recordPendingBridge({ e, session, amountRequested: amount });
-      return json(202, { executed: true, pending: true, txId: e.txId, error: e.message });
+      return json(202, { outcome: "pending", executed: true, pending: true, txId: e.txId, error: e.message });
     }
     return json(500, { error: e.message });
   }

@@ -8,6 +8,7 @@ import {
 } from "./connectors/metamask";
 import type { ConnectorInfo, WalletKind } from "./types";
 import { errorWithPayload } from "../lib/httpError";
+import { interpretBridgeResponse } from "./bridgeResponse";
 import { readJson } from "../lib/readJson";
 import { describeError } from "../lib/describeError";
 
@@ -378,7 +379,12 @@ export function useWallet() {
       // the STEP, not just the HTTP status, and surface the block as an error.
       const step0 = Array.isArray(data?.results) ? data.results[0] : null;
       if (!step0 || step0.ok !== true) {
-        throw new Error(step0?.blocked || step0?.error || "Swap did not execute");
+        throw new Error(step0?.blocked || step0?.error ||
+            // ⚠️ SAME SHAPE AS THE BRIDGE'"'"'S OLD FALLBACK, kept honest rather than inherited. The swap
+            // has no quote path, so it does not carry the bridge'"'"'s FOUR-meaning field — but a bare
+            // "did not execute" still asserts a specific non-event where the truth is that the
+            // response was not understood.
+            "The swap returned a result this app could not read; nothing was assumed about it.");
       }
       refreshAgentWallet().catch(() => {});
       return step0; // { ok, kind:"swap_tokens", swap, tx } — state lives at swap.state, NOT top level
@@ -413,8 +419,12 @@ export function useWallet() {
       // an ackToken, and the caller is meant to show the disclosure and retry WITH the
       // token. Throwing there would turn "confirm you accept this" into "it failed", and
       // the user would have no way to proceed. Returned, not thrown.
-      if (data?.executed === false && data?.feeDisclosure?.ackToken) return data;
-      if (data?.executed === false) throw new Error(data?.blocked || "Bridge did not execute");
+      // ⭐⭐ ONE SEAM, SWITCHING ON AN EXPLICIT OUTCOME — see bridgeResponse.ts. This was two `if`s
+      // against `executed: false`, a field carrying FOUR meanings, and a successful QUOTE fell
+      // through to the throw: "Get quote" reported "Bridge did not execute" for a request that had
+      // worked. A third `if` would have restored the same trap one meaning later.
+      const seen = interpretBridgeResponse(data);
+      if (seen.kind === "quoted" || seen.kind === "needs_ack") return seen.data;
       refreshAgentWallet().catch(() => {});
       return data; // { executed, state, burnHash, tx, destination, feeUsdc, netUsdc } | 202 { pending }
     },
