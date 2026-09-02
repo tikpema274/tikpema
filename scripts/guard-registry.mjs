@@ -214,6 +214,81 @@ export const CLAIM_SURFACES = {
   },
 };
 
+/**
+ * ⛔ FILE-LEVEL exemptions — keyed by PATH, for scripts that exist on disk with no npm entry.
+ * The npm-keyed UNWIRED_OK below cannot express these: it counts package.json entries, and a file
+ * with no entry is not in that set at all. That gap hid an uninvoked guard on 2026-09-02.
+ * ⭐ Every entry states WHY the file is not run, in enough words to be argued with later.
+ */
+export const FILE_UNWIRED_OK = {
+  // ── DIRECTORY RULES. A prefix carries the reason for everything under it. ⚠️ A new file dropped
+  // into one of these is exempt WITHOUT anyone deciding — accepted deliberately, because the
+  // alternative is sixty entries saying the same sentence, and noise is how a table stops being read.
+  "scripts/spikes/": "one-off investigations, kept as the RECORD of a measurement, not as guards. Each answered a question once and its answer lives in a memory or a commit message; re-running proves nothing about today's code and several move real money.",
+  "scripts/x402-census/": "a research census of third-party x402 sellers. Reads the public internet, produces a dataset, asserts nothing about this repo. Re-running changes the dataset, which is the point of a census and the opposite of a guard.",
+  "scripts/dd/probe-": "manual probes against the LIVE DD service, several of which SPEND. Not runnable unattended by policy, and not assertions about this tree.",
+};
+
+/**
+ * 🚨 UNTRIAGED ORPHANS — guard-shaped files (`verify-*`) that exist and are run by NOTHING.
+ * ⛔ THESE ARE NOT EXEMPT. Nobody has decided whether each is superseded, broken, or a real guard
+ * that was simply never wired — and an exemption states a reason, which is exactly what is missing.
+ * They are DECLARED DEBT: counted, printed on every run, and ratcheted by MAX_ORPHAN_GUARDS.
+ * ⭐ The distinction matters. An exemption says "this should not run". This list says "nobody knows",
+ * and the two must not be spelled the same way, or the second silently becomes the first.
+ */
+export const ORPHAN_GUARD_DEBT = [
+  "scripts/verify-approve-balance-gate.mjs", "scripts/verify-approve-writepath.mjs",
+  "scripts/verify-budget-consistency.mjs", "scripts/verify-evaluate-persist.mjs",
+  "scripts/verify-evaluator-rubric.mjs", "scripts/verify-ledger-concurrency.mjs",
+  "scripts/verify-pause-consistency.mjs", "scripts/verify-pause-enforcement.mjs",
+  "scripts/verify-per-user-threading.mjs", "scripts/verify-planflow-rubric.mjs",
+  "scripts/verify-pointer-history.mjs", "scripts/verify-receipt-adversarial.mjs",
+  "scripts/verify-receipt-read-retry.mjs", "scripts/verify-second-opinion.mjs",
+  "scripts/verify-selfheal.mjs", "scripts/verify-supersession.mjs",
+  "scripts/verify-swap-approve.mjs", "scripts/verify-swap-cap.mjs",
+  "scripts/verify-swap-proposal.mjs", "scripts/verify-swap-receipt.mjs",
+  "scripts/verify-sweep.mjs", "scripts/verify-ub-withdraw.mjs",
+  "scripts/verify-verifier-trigger.mjs",
+  "scripts/dd/verify-analyze-agrees-with-vault.mjs",
+];
+export const MAX_ORPHAN_GUARDS = 24;
+
+/** Operational one-offs and manual tools: they DO things, they do not assert things. */
+export const FILE_UNWIRED_TOOLS = {
+  "scripts/_cid.mjs": "IPFS CID helper, imported ad hoc by publishing steps that are themselves manual.",
+  "scripts/_pointer-history.mjs": "pointer-history helper for the identity docs; used by hand during a re-publish.",
+  "scripts/backtest-citation-derivation.mjs": "a backtest over recorded runs — produces a number for a human, asserts nothing.",
+  "scripts/bridge-ack-band-amount.mjs": "manual: computes a band for a live bridge the USER runs.",
+  "scripts/bridge-direct.mjs": "manual money-mover, run by hand for a direct bridge.",
+  "scripts/create-revenue-wallet.mjs": "ONE-OFF: created the DD revenue wallet. Re-running would create another.",
+  "scripts/dca-rehearsal-create.mjs": "manual rehearsal fixture creator for DCA.",
+  "scripts/dd/batch.mjs": "manual batch driver for DD analysis over a list of addresses.",
+  "scripts/dd/checks/code-exists.mjs": "a DD CHECK module — data for the engine, loaded by it, not a suite.",
+  "scripts/dd/checks/payto-vs-token.mjs": "a DD CHECK module — a rule the DD engine loads and applies, not a suite that runs. Its assertions live inside the engine's verdict, which IS exercised by the DD suites.",
+  "scripts/dd/checks/repo-address-audit.mjs": "a DD CHECK module — a rule the DD engine loads and applies, not a suite that runs. Its assertions live inside the engine's verdict, which IS exercised by the DD suites.",
+  "scripts/dd/demo-quorum-disagreement.mjs": "a demonstration for a human reader; deliberately shows disagreement.",
+  "scripts/dd/run.mjs": "the manual DD CLI entry point — a human names an address and reads a verdict. The engine it drives is covered by the DD suites; this is the driver, not the check.",
+  "scripts/fire-ub-spend.mjs": "manual: MOVES REAL FUNDS. Never unattended. [[live-proof-fund-moving-user-runs]]",
+  "scripts/freeze-dd-service.mjs": "ONE-OFF: froze the DD identity doc. Re-running is meaningless; the doc is frozen.",
+  "scripts/lib/marketing-site.mjs": "helper imported by the marketing-site scripts, which are themselves manual.",
+  "scripts/observe-per-user-cycle.mjs": "an OBSERVATION run — records what happened, asserts nothing.",
+  "scripts/observe-swap-cycle.mjs": "an OBSERVATION run — records a real swap cycle for a human to read, asserts nothing, and costs money to repeat.",
+  "scripts/pin-invariants.mjs": "regenerates pinned invariant bytes; run deliberately when a pin legitimately moves.",
+  "scripts/preview-panel.tsx": "renders a panel to stdout so a human can look at it.",
+  "scripts/probe-addDelegate-gas.mjs": "manual gas probe against the live chain.",
+  "scripts/probe-delegate-status.mjs": "a manual chain read of delegate status — answers a question for a human at a moment in time; it has no pass or fail.",
+  "scripts/probe-gas-at-grant.mjs": "manual gas probe against the live chain.",
+  "scripts/probe-register-agent.mjs": "manual: registers an identity on-chain. ONE-OFF by nature.",
+  "scripts/probe-ub-auth.mjs": "manual auth probe against the live UB endpoint.",
+  "scripts/probe-withdraw-path.mjs": "manual chain read of the withdraw path.",
+  "scripts/register-identity.mjs": "ONE-OFF: registered agentId 851823/851891. Re-running mints another identity.",
+  "scripts/set-agent-uri.mjs": "ONE-OFF: sets an on-chain agent URI. A write, not a check.",
+  "scripts/smoke-analystb.mjs": "manual smoke run of the analyst path; calls a live model.",
+  "scripts/smoke-swap-estimate.mjs": "manual smoke run against live swap estimation.",
+  "scripts/spike-bridge.mjs": "a spike that predates scripts/spikes/; same reasoning as that directory.",
+};
+
 export const UNWIRED_OK = {
   "gate:pins": "network-dependent (IPFS routing probes). ⚠️ A flaky network inside a BLOCKING aggregate manufactures tolerated red — species 3 — so it is run deliberately, not on every commit.",
   "test:ddwatch": "network-dependent (probes the live DD service). Same reasoning as gate:pins.",

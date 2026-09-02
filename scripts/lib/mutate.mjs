@@ -24,7 +24,7 @@
 // version to restore from; a checkout on one exits non-zero and leaves the mutation in place, where
 // every later run silently tests mutated code.
 
-import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdtempSync } from "node:fs";
+import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
@@ -33,6 +33,8 @@ const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(`--${n}`); return i === -1 ? d : argv[i + 1]; };
 const flag = (n) => argv.includes(`--${n}`);
 
+const create = arg("create");                    // create a NEW file (for "a new file appears" proofs)
+const content = arg("content", "// created by mutate.mjs\n");
 const file = arg("file");
 const find = arg("find");
 const replace = arg("replace", "");
@@ -40,6 +42,35 @@ const run = arg("run");
 const expectNames = arg("expect-names");        // the failure output must contain this
 const mustPass = flag("must-pass");             // default: the command must FAIL on the mutation
 const occurrences = Number(arg("occurrences", "1"));
+
+// ── CREATE MODE: prove a guard reacts to a file APPEARING, with the same applied-discipline. ──
+if (create) {
+  if (!run) { console.error("usage: mutate.mjs --create PATH --run CMD [--expect-names S]"); process.exit(64); }
+  if (existsSync(create)) {
+    console.error(`\n⛔ MUTATION NOT APPLIED — ${create} already exists; creating it would prove nothing.`);
+    process.exit(2);
+  }
+  writeFileSync(create, content);
+  if (!existsSync(create)) {
+    console.error(`\n⛔ MUTATION NOT APPLIED — ${create} was not created.`);
+    process.exit(2);
+  }
+  console.log(`✓ mutation landed — ${create} created`);
+  let c = 0, o = "";
+  try { o = execSync(run, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); }
+  catch (e) { c = e.status ?? 1; o = `${e.stdout || ""}${e.stderr || ""}`; }
+  finally {
+    rmSync(create, { force: true });
+    // ⭐ VERIFY THE REMOVAL. A left-behind file would make every later run test a different repo.
+    if (existsSync(create)) { console.error(`\n🚨 CLEANUP FAILED — ${create} still exists.`); process.exit(3); }
+  }
+  const namedC = !expectNames || o.includes(expectNames);
+  console.log(`  command exit ${c} (expected non-zero)`);
+  if (expectNames) console.log(`  names "${expectNames}": ${namedC ? "yes" : "NO"}`);
+  if (c !== 0 && namedC) { console.log(`✅ MUTATION PROVEN — the guard caught the new file, and it is removed.`); process.exit(0); }
+  console.error(`\n⛔ MUTATION NOT CAUGHT — the guard did not reject a file it has never seen.`);
+  process.exit(1);
+}
 
 if (!file || find === undefined || !run) {
   console.error("usage: mutate.mjs --file F --find S [--replace R] --run CMD [--expect-names S] [--must-pass]");

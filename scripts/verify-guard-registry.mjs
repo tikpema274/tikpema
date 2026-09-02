@@ -20,7 +20,8 @@
 // ratcheted, not asserted away.
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { CLAIM_SURFACES, COMPONENTS, MAX_UNCOVERED, UNWIRED_OK, PASSTHROUGH, DEBT_HORIZON } from "./guard-registry.mjs";
+import { CLAIM_SURFACES, COMPONENTS, MAX_UNCOVERED, UNWIRED_OK, FILE_UNWIRED_OK, FILE_UNWIRED_TOOLS,
+  ORPHAN_GUARD_DEBT, MAX_ORPHAN_GUARDS, PASSTHROUGH, DEBT_HORIZON } from "./guard-registry.mjs";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 let pass = 0, fail = 0;
@@ -96,6 +97,105 @@ const allScripts = Object.entries(pkg.scripts)
 const SCRIPT_FILE = /scripts\/[A-Za-z0-9_/-]+\.(?:mjs|tsx|mts)/g;
 const isReached = (cmd) => [...cmd.matchAll(SCRIPT_FILE)].every((m) => reachable.has(m[0]));
 const needsExemption = new Set(allScripts.filter(([, v]) => !isReached(v)).map(([k]) => k));
+
+// ═══ 🚨 THE DENOMINATOR: FILES ON DISK, NOT package.json ENTRIES ═══════════
+// ⛔ THIS SECTION USED TO ENUMERATE `pkg.scripts`. A guard FILE with no npm entry was therefore
+// invisible to the check whose stated job is "no suite is invisible" — and one shipped that way on
+// 2026-09-02 (scripts/lib/mutate.mjs, present and called by nothing). The verdict was green because
+// the thing it missed was not in the set it counted.
+//
+// ⭐⭐ A VERDICT WITHOUT ITS DENOMINATOR CANNOT BE AUDITED. "no orphans" over a set that excludes
+// the orphan is true and worthless. So this walks the directory, and PRINTS THE MAGNITUDES — found,
+// invoked, registered, exempt, orphaned — so a reader can see what was counted, not just the answer.
+const walkScripts = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
+  d.isDirectory() ? walkScripts(`${dir}/${d.name}`) : [`${dir}/${d.name}`]);
+const diskFiles = walkScripts("scripts").filter((f) => /\.(mjs|tsx|mts)$/.test(f));
+
+// ⭐ A helper is COVERED if something invoked imports it — reachability follows imports, or every
+// shared module would read as an orphan and the exemption table would fill with noise.
+const covered = new Set(reachable);
+const queue = [...reachable];
+while (queue.length) {
+  const f = queue.pop();
+  if (!existsSync(f)) continue;
+  // ⛔ COMMENTS STRIPPED FIRST. A path MENTIONED in prose is not a path INVOKED — and this file's
+  // own header names scripts/lib/mutate.mjs while not running it, which would mark it covered.
+  const src = readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  // ⭐ Reachability follows IMPORTS **and SPAWNS**. verify-mutation-harness runs the harness with
+  // execFileSync and a `new URL("./lib/mutate.mjs")` — an import-only walk called it an orphan while
+  // a suite was running it every time. "Covered" means something invoked it, by any mechanism.
+  for (const m of [
+    ...src.matchAll(/from\s+"(\.[^"]+)"/g),
+    ...src.matchAll(/import\(\s*"(\.[^"]+)"/g),
+    ...src.matchAll(/["'`](\.\.?\/[A-Za-z0-9_./-]+\.(?:mjs|tsx|mts))["'`]/g),
+  ]) {
+    const dir = f.slice(0, f.lastIndexOf("/"));
+    const parts = `${dir}/${m[1]}`.split("/");
+    const out = [];
+    for (const seg of parts) { if (seg === "." || seg === "") continue; if (seg === "..") out.pop(); else out.push(seg); }
+    const resolved = out.join("/");
+    if (!covered.has(resolved) && existsSync(resolved)) { covered.add(resolved); queue.push(resolved); }
+  }
+}
+// Named by SOME npm script (reachable or not) — those are section 4's existing subject.
+const npmNamed = new Set();
+for (const v of Object.values(pkg.scripts)) for (const m of String(v).matchAll(SCRIPT_FILE)) npmNamed.add(m[0]);
+
+const invokedFiles  = diskFiles.filter((f) => covered.has(f));
+const registeredOnly = diskFiles.filter((f) => !covered.has(f) && npmNamed.has(f));
+// ⭐ A prefix rule in FILE_UNWIRED_OK covers a whole directory; FILE_UNWIRED_TOOLS is per-file.
+const exemptReason = (f) =>
+  FILE_UNWIRED_TOOLS[f] ?? Object.entries(FILE_UNWIRED_OK).find(([k]) => f.startsWith(k))?.[1] ?? null;
+const debtSet = new Set(ORPHAN_GUARD_DEBT);
+const unaccounted   = diskFiles.filter((f) => !covered.has(f) && !npmNamed.has(f));
+const exemptFiles   = unaccounted.filter((f) => exemptReason(f));
+const declaredDebt  = unaccounted.filter((f) => !exemptReason(f) && debtSet.has(f));
+const orphanFiles   = unaccounted.filter((f) => !exemptReason(f) && !debtSet.has(f));
+
+console.log(`     files ${diskFiles.length}  ·  invoked ${invokedFiles.length}  ·  registered-not-invoked ${registeredOnly.length}  ·  exempt ${exemptFiles.length}  ·  declared debt ${declaredDebt.length}  ·  ORPHANED ${orphanFiles.length}`);
+// ⭐⭐ THE CLASSES MUST PARTITION THE SET EXACTLY. If they do not, a file is being counted twice or
+// not at all — and "not at all" is the failure this whole section exists to end.
+const partition = invokedFiles.length + registeredOnly.length + exemptFiles.length + declaredDebt.length + orphanFiles.length;
+ok("⭐⭐ the five classes account for EVERY file, exactly once", partition === diskFiles.length,
+  `${partition} classified of ${diskFiles.length} on disk`);
+ok("⭐⭐ every script FILE on disk is invoked, registered, or exempted with a reason",
+  orphanFiles.length === 0,
+  orphanFiles.length ? `present but called by nothing: ${orphanFiles.join(", ")}` : `${diskFiles.length} files, all accounted for`);
+// 🚨 The exemption table is checked the same way the npm one is: a ghost entry covers whatever next
+// takes its path, and a stale one covers a file that is now wired.
+// ⛔ A PREFIX RULE CANNOT BE existsSync'd — it names a directory shape, not a file. It earns its
+// keep a different way: at least one file must match it, or it is covering nothing and its next
+// match will be a file nobody decided about.
+const isPrefix = (k) => k.endsWith("/") || k.endsWith("-");
+const prefixDead = Object.keys(FILE_UNWIRED_OK).filter((k) => isPrefix(k) && !diskFiles.some((f) => f.startsWith(k)));
+ok("⭐ every PREFIX exemption still matches at least one file", prefixDead.length === 0,
+  prefixDead.join(", ") || `${Object.keys(FILE_UNWIRED_OK).filter(isPrefix).length} prefix rules`);
+const fileGhosts = [...Object.keys(FILE_UNWIRED_OK).filter((k) => !isPrefix(k)), ...Object.keys(FILE_UNWIRED_TOOLS)]
+  .filter((f) => !existsSync(f));
+ok("⭐ every per-file exemption names a file that exists", fileGhosts.length === 0,
+  fileGhosts.join(", ") || `${Object.keys(FILE_UNWIRED_TOOLS).length} per-file exemptions`);
+const fileStale = Object.keys(FILE_UNWIRED_TOOLS).filter((f) => existsSync(f) && (covered.has(f) || npmNamed.has(f)));
+ok("⭐⭐ …and every one is ACTUALLY uninvoked", fileStale.length === 0, fileStale.join(", ") || "no stale file exemptions");
+ok("  …and every file exemption carries a reason",
+  [...Object.values(FILE_UNWIRED_OK), ...Object.values(FILE_UNWIRED_TOOLS)]
+    .every((r) => typeof r === "string" && r.length > 30));
+
+// ═══ 🚨 THE ORPHANED-GUARD RATCHET — declared debt, not exemption ═══════════
+// ⛔ These are `verify-*` files that exist and run nowhere. An EXEMPTION says "this should not run";
+// this list says "NOBODY HAS DECIDED", and spelling the second like the first is how untriaged work
+// becomes permanent. Counted, printed every run, may shrink and never grow.
+ok(`🚨 orphaned guard files ≤ ${MAX_ORPHAN_GUARDS}`, declaredDebt.length <= MAX_ORPHAN_GUARDS,
+  `${declaredDebt.length} guard-shaped files run by nothing`);
+ok("  …and every declared-debt entry still exists — a ghost hides a file that was deleted, not fixed",
+  ORPHAN_GUARD_DEBT.every((f) => existsSync(f)),
+  ORPHAN_GUARD_DEBT.filter((f) => !existsSync(f)).join(", ") || "all present");
+ok("⭐⭐ …and every one is ACTUALLY uninvoked — a stale debt entry covers a file that IS now wired",
+  ORPHAN_GUARD_DEBT.every((f) => !covered.has(f) && !npmNamed.has(f)),
+  ORPHAN_GUARD_DEBT.filter((f) => covered.has(f) || npmNamed.has(f)).join(", ") || "none wired");
+console.log(`\n  ⚠️ KNOWN DEBT — ${declaredDebt.length} guard-shaped file(s) that NOTHING runs:`);
+for (const f of declaredDebt) console.log(`     · ${f}`);
+if (declaredDebt.length < MAX_ORPHAN_GUARDS)
+  console.log(`  ⭐ Below the ratchet — lower MAX_ORPHAN_GUARDS to ${declaredDebt.length} to lock the gain in.`);
 
 const orphans = [...needsExemption].filter((k) => !UNWIRED_OK[k]);
 ok("⭐⭐ no suite is invisible — every script runs somewhere or says why not",
