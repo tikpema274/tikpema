@@ -163,6 +163,14 @@ check("⭐⭐ …and 'there is no undo' sits inside the LEAVING section, not the
   const say = renderToStaticMarkup(<MyAgentPanel wallet={wallet() as any} />)
     .replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ");
 
+  // ═══ ⭐⭐ A DERIVED-SET MEMBERSHIP TEST NEEDS BOTH INCLUSIONS ═══════════════════════════════════
+  // Asserting GATED ⊆ clause is not enough: an item that LEAVES GATED enters neither set, so nothing
+  // objects. Mutation 3b passed at 25/0 for exactly this reason — the bridge gate was removed, the
+  // copy went on promising confirmation for it, and every assertion stayed green.
+  // ⭐ Assert clause ⊆ GATED too, and assert the derivation found members on BOTH SIDES before
+  // trusting either — an empty derivation is green and blind.
+  // [[collapse-needs-pairwise-inequality]] · [[equality-passes-vacuously-on-empty]]
+
   // 🚨 THE CLAUSE, NOT THE PAGE. A first draft asked whether the action's word appeared ANYWHERE and
   // whether "confirm first" appeared ANYWHERE — both true regardless of which side the word sat on.
   // Mutating swap from immediate to gated moved it in the DERIVATION and the check stayed green: the
