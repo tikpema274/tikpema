@@ -254,11 +254,6 @@ export const ORPHAN_GUARD_DEBT = [
                                             // red that means nothing, which is the same reason
                                             // gate:pins is exempt. Fix the interception first, then
                                             // wire it. Not a production regression.
-  "scripts/verify-receipt-adversarial.mjs", // CONTROL fails: every case returns receipt_not_found, so
-                                            // the four attack passes are VACUOUS. Root cause is in
-                                            // production — _receipt.mjs:141 returns on the first
-                                            // endpoint that ANSWERS, and a pruned mirror's `null` is
-                                            // an answer, so the two-mirror fallback is skipped.
   "scripts/verify-pointer-history.mjs",     // a ONE-SHOT pre-flight for a supersession that already
                                             // ran. Its 6 state assertions and 3 DID-NOT-REFUSE cases
                                             // share one cause: history.length !== 0 now, so the
@@ -268,13 +263,14 @@ export const ORPHAN_GUARD_DEBT = [
                                             // OUTAGE is no longer labelled a disagreement; the suite
                                             // asserts the pre-fix labelling. The fix is right.
 ];
-export const MAX_ORPHAN_GUARDS = 4;
+export const MAX_ORPHAN_GUARDS = 3;
 
 /** Operational one-offs and manual tools: they DO things, they do not assert things. */
 export const FILE_UNWIRED_TOOLS = {
   // ── ⛔ CANNOT RUN UNATTENDED — an EXEMPTION, not debt. Each needs an input this repo will not
   // put in a blocking aggregate: a secret, a live key, or a required CLI argument. They are runnable
   // by hand and correct; they are simply not suites.
+  "scripts/verify-receipt-adversarial.mjs": "NETWORK-DEPENDENT: it verifies real Base Sepolia transactions over live RPC mirrors, which is the point — its CONTROL is a real mint and cannot be faked offline. Exempt for the same reason as gate:pins: a flaky network inside a blocking aggregate manufactures a red that means nothing. ⭐ Run it by hand after any change to _receipt.mjs; on 2026-09-02 its failing control is what found the null-fallback defect, and it now passes 5/5 with each attack refused for its OWN reason.",
   "scripts/verify-per-user-threading.mjs": "requires DELEGATE_ADDRESS. An offline stub-proof of per-user threading that still needs the real delegate address to assert against; test:all must not depend on a deployed env var. [[caps-from-deployed-env-not-code-defaults]]",
   "scripts/verify-supersession.mjs": "requires --target (e.g. dd-service-v1.1.0). A parameterised STEP in a publication procedure, not a standing check: with no target there is nothing to verify, and it exits asking for one.",
   "scripts/verify-evaluator-rubric.mjs": "requires ANTHROPIC_API_KEY — it replays the hardened judge against a live model. Costs money per run and its verdict depends on a third party, which is the same reason gate:pins is exempt.",
