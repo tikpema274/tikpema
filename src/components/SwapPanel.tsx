@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import { describeError } from "../lib/describeError";
+import { displayAmount } from "../lib/formatAmount";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 type Token = "USDC" | "EURC";
@@ -101,9 +102,9 @@ export default function SwapPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         Swapping from{" "}
         <span className="mono">{shortAddr(w.agentWallet.address)}</span>
         {" · USDC "}
-        <span className="mono">{w.agentWallet.balance ?? "…"}</span>
+        <span className="mono">{displayAmount(w.agentWallet.balance)}</span>
         {" · EURC "}
-        <span className="mono">{w.agentWallet.eurcBalance ?? "…"}</span>
+        <span className="mono">{displayAmount(w.agentWallet.eurcBalance)}</span>
       </div>
 
       <div className="row">

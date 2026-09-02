@@ -42,6 +42,7 @@ import { CONTRACTS } from "../config/contracts";
 import CustodyNotice from "./CustodyNotice";
 import WalletGuardNotice from "./WalletGuardNotice";
 import { decodeAndVerifySwap, SwapDecodeError, type DecodedSwap } from "../lib/decodeSwapCalldata";
+import { displayAmount } from "../lib/formatAmount";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 type Token = "USDC" | "EURC";
@@ -293,7 +294,7 @@ export default function ManualSwapPanel({ wallet: w }: { wallet: UnifiedWallet }
 
       <div className="status" style={{ marginTop: 0, marginBottom: 18 }}>
         Swapping from <span className="mono">{w.address}</span>
-        {" · USDC "}<span className="mono">{w.usdcBalance ?? "…"}</span>
+        {" · USDC "}<span className="mono">{displayAmount(w.usdcBalance)}</span>
         {" · EURC "}<span className="mono">{eurc ?? "…"}</span>
       </div>
 

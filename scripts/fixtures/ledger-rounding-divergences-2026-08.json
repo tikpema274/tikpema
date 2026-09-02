@@ -1,0 +1,56 @@
+{
+  "_what": "REAL RECORDED PAYLOAD from the production `data-budget` Blobs store, read 2026-09-02.",
+  "_readAt": "2026-09-02",
+  "_store": "Netlify Blobs, site tikpema-predict-test, store `data-budget`",
+  "⛔_WITHDRAWN_CLAIM": "An earlier version of this fixture stated each row as a measured ledger-vs-chain divergence, with a headline +0.002941 USDC over-send on 2026-08-09. THAT COMPARISON WAS INVALID AND IS WITHDRAWN. For `swap_tokens` the ledger field `amountUsdc` is valueOfStep = valueInUsdc(tokenIn, amountIn) — the USDC-EQUIVALENT — while `.toFixed(2)` was applied to `step.amountIn`, in tokenIn units. Rounding the equivalent is rounding a different number than the one the defect rounded.",
+  "⛔_WHY_IT_CANNOT_BE_MEASURED": "No record in this store carries `amountIn`. The audit rows do not, and the 17 `job:` records do not. Nor does the 2026-08-09 row carry a txHash — it is `confirmation: \"submitted\"`, so it is not even established that it landed. The executed-vs-audited divergence for these swaps is therefore UNMEASURED, not zero and not small.",
+  "_whatTheseRowsDoShow": "That the money path routinely carried values with more than two decimal places. That is what makes the rounding boundary a live hazard rather than a theoretical one — but it is evidence about the INPUTS, not about what the chain received.",
+  "_measurableSet": "A ledger row is a valid comparison only where the recorded field IS the executed amount: `pay_for_service` (ledger = payAmountUsdc = the rounded argument) and ub-spend. The store holds 1 pay_for_service row, at 2dp, and no ub-spend rows. So the number of MEASURABLE historical divergences is ZERO.",
+  "rows": [
+    {
+      "storeKey": "audit:0x058957…:2026-08-07:1786094708680-c1mwu209",
+      "timestamp": "2026-08-07T09:25:08.680Z",
+      "source": "swap_tokens",
+      "ledgerAmountUsdc": 1.152112,
+      "ledgerFieldIs": "valueInUsdc(tokenIn, amountIn) — NOT the amount handed to the executor",
+      "executedAmountUsdc": null,
+      "executedAmountNote": "UNRECORDED — step.amountIn is not persisted anywhere in this store"
+    },
+    {
+      "storeKey": "audit:0x058957…:2026-08-09:1786270209417-2z1d1t06",
+      "timestamp": "2026-08-09T10:10:09.417Z",
+      "source": "swap_tokens",
+      "ledgerAmountUsdc": 2.307059,
+      "ledgerFieldIs": "valueInUsdc(tokenIn, amountIn) — NOT the amount handed to the executor",
+      "executedAmountUsdc": null,
+      "executedAmountNote": "UNRECORDED — step.amountIn is not persisted anywhere in this store"
+    },
+    {
+      "storeKey": "audit:0x60e766…:2026-08-07:1786093584164-zh151uqe",
+      "timestamp": "2026-08-07T09:06:24.164Z",
+      "source": "swap_tokens",
+      "ledgerAmountUsdc": 5.760861,
+      "ledgerFieldIs": "valueInUsdc(tokenIn, amountIn) — NOT the amount handed to the executor",
+      "executedAmountUsdc": null,
+      "executedAmountNote": "UNRECORDED — step.amountIn is not persisted anywhere in this store"
+    },
+    {
+      "storeKey": "audit:log",
+      "timestamp": "2026-07-04T18:54:49.897Z",
+      "source": "swap_tokens",
+      "ledgerAmountUsdc": 0.114,
+      "ledgerFieldIs": "valueInUsdc(tokenIn, amountIn) — NOT the amount handed to the executor",
+      "executedAmountUsdc": null,
+      "executedAmountNote": "UNRECORDED — step.amountIn is not persisted anywhere in this store"
+    },
+    {
+      "storeKey": "audit:log",
+      "timestamp": "2026-07-04T18:55:49.210Z",
+      "source": "swap_tokens",
+      "ledgerAmountUsdc": 0.114,
+      "ledgerFieldIs": "valueInUsdc(tokenIn, amountIn) — NOT the amount handed to the executor",
+      "executedAmountUsdc": null,
+      "executedAmountNote": "UNRECORDED — step.amountIn is not persisted anywhere in this store"
+    }
+  ]
+}

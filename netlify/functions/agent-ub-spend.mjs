@@ -1,3 +1,4 @@
+import { amountFloorViolation } from "./_amount-floor.mjs";
 import { json, parseBody, ubSpendCapUsdc, ubSpendFloorUsdc } from "./_arc.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
@@ -52,7 +53,12 @@ export async function handler(event) {
     return json(400, { error: "valid 'recipientAddress' required" });
   }
   const amount = Number(amountUsdc);
-  if (!(amount > 0)) return json(400, { error: "amountUsdc must be > 0" });
+  // ⛔ THE ZERO FLOOR, NOT `> 0`. This path has a BUSINESS floor below (ubSpendFloorUsdc, ~10 USDC
+  // for fee economics) — but that floor is configurable and `AGENT_UB_SPEND_FLOOR_USDC=0` is
+  // accepted, so it cannot be relied on to stop a sub-minor-unit amount. The two floors answer
+  // different questions: "is this worth doing" and "is this an amount at all".
+  const floorViolation = amountFloorViolation(amount, { field: "amountUsdc" });
+  if (floorViolation) return json(400, { error: floorViolation });
   if (!DESTINATIONS.has(destinationChain)) {
     return json(400, { error: "unsupported destinationChain (first proof: Base_Sepolia only)" });
   }
@@ -104,7 +110,9 @@ export async function handler(event) {
   try {
     const r = await ubSpend({
       recipientAddress,
-      amountUsdc: amount.toFixed(2),
+      // ⭐ Full precision — see _actions.mjs's swap boundary. toFixed ROUNDS UP, so the executed
+      // amount exceeded what the cap was checked against and what the ledger recorded.
+      amountUsdc: String(amount),
       destinationChain,
       sourceAccount: owner,
     });

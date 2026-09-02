@@ -1,3 +1,4 @@
+import { amountFloorViolation } from "./_amount-floor.mjs";
 import { circle, waitForTx } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc, bridgeCapUsdc, swapCapUsdc, vaultDepositCapUsdc } from "./_arc.mjs";
 import { agentSwap, valueInUsdc, SWAP_TOKENS } from "./_swap.mjs";
@@ -27,6 +28,19 @@ export async function valueOfStep(step) {
   if (type === "transfer_usdc") return Number(step.amountUsdc);
   if (type === "pay_for_service") return Number(step.payAmountUsdc);
   if (type === "swap_tokens") {
+    // ═══ 🚨🚨 WHAT THIS RETURNS IS *NOT* THE AMOUNT THE EXECUTOR RECEIVES ═══════
+    // It is a USDC-EQUIVALENT: `valueInUsdc(tokenIn, amountIn)`. The swap boundary hands the
+    // executor `step.amountIn`, in tokenIn UNITS. For a EURC input those are different numbers, and
+    // the ledger row written from this value records the equivalent, not the units.
+    //
+    // ⛔ THE FIELD NAME IS THE TRAP. It is stored as `amountUsdc`, sitting beside
+    // `source: "swap_tokens"`, where it reads exactly like the swap's amount. On 2026-09-02 five
+    // historical rows were compared against `toFixed(2)` of THIS value to measure what the rounding
+    // boundary had executed. Every delta was arithmetic on the wrong quantity, and all five were
+    // WITHDRAWN. The check that would have caught it was reading these four lines.
+    //
+    // ⛔ DO NOT COMPARE A LEDGER `amountUsdc` TO A TOKEN AMOUNT. They are only the same number when
+    // tokenIn is USDC, and nothing in the record says which token it was.
     return await valueInUsdc({ token: String(step.tokenIn).toUpperCase(), amount: Number(step.amountIn) });
   }
   // A bridge moves its full face amount OFF Arc (the fee is deducted from it on
@@ -42,17 +56,23 @@ export async function valueOfStep(step) {
   throw new Error(`unknown step type "${type}"`);
 }
 
+// ⛔ THE ZERO FLOOR IS APPLIED HERE, ONCE, FOR EVERY TYPE THAT CARRIES AN AMOUNT — not at each
+// executor. `Number(x) > 0` used to stand in for a floor and it is not one: 0.0000001 passes it and
+// converts to 0n minor units, so the chain executes a transfer of nothing and reports success.
+// See _amount-floor.mjs for why this is a DIFFERENT guard from the equality invariant.
 // Validate a step's SHAPE (not the cap). Returns null if ok, or a reason string.
 export function validateStepShape(step) {
   const type = step?.type;
   if (type === "transfer_usdc") {
     if (!/^0x[0-9a-fA-F]{40}$/.test(String(step.to || ""))) return "invalid recipient";
-    if (!(Number(step.amountUsdc) > 0)) return "amountUsdc must be > 0";
+    const f = amountFloorViolation(step.amountUsdc, { field: "amountUsdc" });
+    if (f) return f;
     return null;
   }
   if (type === "pay_for_service") {
     if (!/^0x[0-9a-fA-F]{40}$/.test(String(step.payTo || ""))) return "invalid payTo address";
-    if (!(Number(step.payAmountUsdc) > 0)) return "payAmountUsdc must be > 0";
+    const f = amountFloorViolation(step.payAmountUsdc, { field: "payAmountUsdc" });
+    if (f) return f;
     return null;
   }
   if (type === "swap_tokens") {
@@ -60,11 +80,13 @@ export function validateStepShape(step) {
     const tOut = String(step.tokenOut || "").toUpperCase();
     if (!VALID_TOKENS.includes(tIn) || !VALID_TOKENS.includes(tOut)) return "unsupported token (USDC/EURC only)";
     if (tIn === tOut) return "tokenIn and tokenOut must differ";
-    if (!(Number(step.amountIn) > 0)) return "amountIn must be > 0";
+    const f = amountFloorViolation(step.amountIn, { field: "amountIn" });
+    if (f) return f;
     return null;
   }
   if (type === "bridge_usdc") {
-    if (!(Number(step.amountUsdc) > 0)) return "amountUsdc must be > 0";
+    const f = amountFloorViolation(step.amountUsdc, { field: "amountUsdc" });
+    if (f) return f;
     if (!resolveDestination(step.destination)) return `unsupported destination "${step.destination}"`;
     return null;
   }
@@ -73,7 +95,8 @@ export function validateStepShape(step) {
   // separate check in executeAction, not part of shape validation.
   if (type === "vault_deposit") {
     if (!resolveVault(step.vault)) return `unsupported vault "${step.vault}" (not on the allowlist)`;
-    if (!(Number(step.amountUsdc) > 0)) return "amountUsdc must be > 0";
+    const f = amountFloorViolation(step.amountUsdc, { field: "amountUsdc" });
+    if (f) return f;
     return null;
   }
   if (type === "vault_withdraw") {
@@ -319,7 +342,25 @@ export async function executeAction(step, ctx) {
       walletAddress,
       tokenIn: SWAP_TOKENS.find((t) => t.toUpperCase() === tokenIn),
       tokenOut: SWAP_TOKENS.find((t) => t.toUpperCase() === tokenOut),
-      amountIn: Number(step.amountIn).toFixed(2),
+      // ═══ ⭐⭐ THE EXECUTOR GETS THE VALUE THE CAP CHECKED AND THE LEDGER RECORDED ═══════════
+      // This was `.toFixed(2)`, and toFixed ROUNDS: 1.237 executed as 1.24 — MORE than requested,
+      // more than the cap was checked against, more than the audit row recorded.
+      // ⛔ NOT ONLY A PRECISION DEFECT. `dayValue` (valueOfStep, full precision) is what the
+      // per-action cap and the day ceiling are tested on and what recordAgentSpend writes, so a
+      // rounded-up execution moves more than the cap was checked against — the ceiling permits more
+      // total movement than it was configured for, by up to 0.005 USDC per action.
+      // ⚠️ HOW OFTEN THAT HAPPENED IS UNMEASURED, and deliberately not guessed at here.
+      // 🚨 `dayValue` IS NOT WHAT THIS BOUNDARY SENDS. It is valueOfStep — for a swap, the
+      // USDC-EQUIVALENT of `amountIn` (see the note at valueOfStep, ~line 30). This line sends
+      // `step.amountIn` in tokenIn UNITS. Rounding the equivalent and rounding the units are
+      // arithmetic on two different numbers, and five historical deltas computed the first way were
+      // withdrawn on 2026-09-02.
+      // ⛔ `step.amountIn` is persisted NOWHERE, so no audit row can answer what was executed here.
+      // That gap is the finding, not the deltas. See verify-executor-amount-integrity's fixture.
+      // ⚠️ AND ROUNDING DOWN WAS AN ACCIDENTAL MARGIN. On a max-amount action the rounded value could
+      // sit under the balance; at full precision a max equals the balance exactly, so
+      // insufficient-funds failures on max sends after this change are EXPECTED, not a regression.
+      amountIn: String(step.amountIn),
       confirm: ctx.confirmSwap === true,
     });
     // ⚠️ AUDIT HONESTY — the record must not assert more than the chain has said.
@@ -355,7 +396,9 @@ export async function executeAction(step, ctx) {
     // at deposit time, and the Gateway itself rejects an unauthorized delegate.
     const pay = await agentPay({
       recipientAddress: String(step.payTo),
-      amountUsdc: Number(step.payAmountUsdc).toFixed(2),
+      // ⭐ Full precision — see the swap boundary above. toFixed ROUNDS UP, and the cap and ledger
+      // both use the unrounded value, so a rounded execution moved more than either saw.
+      amountUsdc: String(step.payAmountUsdc),
       sourceAccount: walletAddress,
     });
     await ledger();

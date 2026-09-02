@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import { describeError } from "../lib/describeError";
+import { displayAmount } from "../lib/formatAmount";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -113,7 +114,7 @@ export default function SendPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         Sending from{" "}
         <span className="mono">{shortAddr(w.agentWallet.address)}</span>
         {" · balance "}
-        <span className="mono">{w.agentWallet.balance ?? "…"}</span> USDC
+        <span className="mono">{displayAmount(w.agentWallet.balance)}</span> USDC
       </div>
 
       <div className="row">

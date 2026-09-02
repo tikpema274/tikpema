@@ -10,6 +10,7 @@ const VAULT_KEY = "xylo-usdc";
 import { diffDisclosure, bps, type DisclosureDelta } from "../lib/disclosureDiff";
 import DdReportCard from "./DdReportCard";
 import { describeError } from "../lib/describeError";
+import { displayAmount } from "../lib/formatAmount";
 
 const shortAddr = (a?: string | null) => (a && a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a || "—");
 
@@ -216,7 +217,7 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
 
       <div className="status" style={{ marginTop: 0, marginBottom: 16 }}>
         Agent wallet <span className="mono">{shortAddr(w.agentWallet.address)}</span>
-        {" · balance "}<span className="mono">{w.agentWallet.balance ?? "…"}</span> USDC
+        {" · balance "}<span className="mono">{displayAmount(w.agentWallet.balance)}</span> USDC
       </div>
 
       {/* ── STEP 1 · INSPECT ─────────────────────────────────────────────── */}

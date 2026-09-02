@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { agentClient } from "../lib/agentClient";
 import SignInPrompt from "./SignInPrompt";
 import type { useWallet } from "../wallet/useWallet";
+import { displayAmount } from "../lib/formatAmount";
 
 // MyAgentPanel — Brick C "My Agent" surface. Re-mounts the agent-action UI (from
 // the archived AgentPanel), restyled to the current design and pointed at the
@@ -245,7 +246,7 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         <div className="status" style={{ marginTop: 0, marginBottom: 4 }}>
           Your agent's wallet{" "}
           <span className="mono">{shortAddr(w.agentWallet.address)}</span> ·{" "}
-          <b>{w.agentWallet.balance ?? "…"} USDC</b>{" "}
+          <b>{displayAmount(w.agentWallet.balance)} USDC</b>{" "}
           <button className="linkbtn" onClick={() => go("dashboard")}>
             Fund or withdraw →
           </button>

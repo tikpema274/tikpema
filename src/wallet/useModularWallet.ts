@@ -271,7 +271,9 @@ export function useModularWallet() {
       functionName: "balanceOf",
       args: [account.address],
     })) as bigint;
-    const formatted = Number(formatUnits(raw, USDC_DECIMALS)).toFixed(2);
+    // ⭐ FULL PRECISION AT THE PRODUCER — see my-wallet.mjs for the rule. Rounding here would lose
+    // four digits of a 6-dp token before any consumer could decide it wanted them.
+    const formatted = formatUnits(raw, USDC_DECIMALS);
     setUsdcBalance(formatted);
     return formatted;
   }, [account]);

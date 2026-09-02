@@ -67,7 +67,18 @@ export async function handler(event) {
           functionName: "balanceOf",
           args: [wallet.walletAddress],
         });
-        return Number(formatUnits(raw, USDC_DECIMALS)).toFixed(2);
+          // ═══ ⭐⭐ A PRODUCER EMITS FULL PRECISION. ONLY A RENDER ROUNDS. ═════════════════════
+          // This returned .toFixed(2) on a 6-dp token, so every consumer of this response — eight
+          // display sites and one that does ARITHMETIC on it — received a value that had already
+          // lost four digits. A displayed 0.40 EURC is anywhere in [0.395, 0.405), and the only way
+          // to learn what an agent swap returned was to diff this number across a refresh.
+          // ⛔ THE ROUNDING CANNOT LIVE HERE. A producer that rounds makes the loss unrecoverable
+          // for every consumer at once, including consumer nine. Rounding at a render is a decision
+          // each surface can make and revisit; rounding at the source is one decision made
+          // invisibly for all of them.
+          // ⚠️ AND A VALUE USED IN ARITHMETIC IS NEVER READ FROM A ROUNDED ONE — BridgePanel's
+          // 25/50/75 buttons computed a send amount from this very string.
+          return formatUnits(raw, USDC_DECIMALS);
       } catch {
         return null; // client shows "…" for a null balance
       }

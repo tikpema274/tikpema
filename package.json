@@ -99,7 +99,10 @@
     "test:custodynotice": "npx tsx scripts/verify-custody-notice.tsx",
     "test:feebinding": "node --experimental-test-module-mocks scripts/verify-bridge-fee-binding.mjs",
     "test:bridgeseam": "npx tsx scripts/verify-bridge-response-seam.tsx",
-    "test:absenceclaims": "node scripts/verify-absence-claims.mjs"
+    "test:absenceclaims": "node scripts/verify-absence-claims.mjs",
+    "test:precision": "npx tsx scripts/verify-amount-precision.mjs",
+    "test:amountintegrity": "node scripts/verify-executor-amount-integrity.mjs",
+    "test:zerofloor": "node scripts/verify-amount-zero-floor.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -181,6 +184,9 @@
     "gate:deps",
     "gate:registry",
     "test:pinnedbytes",
-    "test:absenceclaims"
+    "test:absenceclaims",
+    "test:precision",
+    "test:amountintegrity",
+    "test:zerofloor"
   ]
 }

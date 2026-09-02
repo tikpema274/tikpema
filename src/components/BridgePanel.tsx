@@ -3,6 +3,7 @@ import type { useWallet } from "../wallet/useWallet";
 import { BridgeReceiptStatus } from "./bridgeReceiptStatus";
 import { BridgeQuoteSummary } from "./BridgeQuoteSummary";
 import { describeError } from "../lib/describeError";
+import { displayAmount } from "../lib/formatAmount";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -198,7 +199,7 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
         Bridging from{" "}
         <span className="mono">{shortAddr(w.agentWallet.address)}</span>
         {" · balance "}
-        <span className="mono">{w.agentWallet.balance ?? "…"}</span> USDC
+        <span className="mono">{displayAmount(w.agentWallet.balance)}</span> USDC
       </div>
 
       {/* ═══ ⭐⭐ ZONE 2 — INPUTS, THEN WHAT IT COSTS, THEN THE ACTION ══════════════════════════════
@@ -256,9 +257,16 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
           {[25, 50, 75].map((p) => (
             <button key={p} type="button" className="pct" disabled={bridging}
               onClick={() => {
+                // ⭐⭐ COMPUTED FROM THE UNROUNDED BALANCE, ROUNDED ONCE AT THE END. The producer used to
+                // emit .toFixed(2), so this multiplied an already-truncated number and truncated again —
+                // the error compounded rather than cancelled. MEASURED at a 0.409999 balance: 25% sent
+                // 0.10 instead of 0.102499 — 2.44% short, on the button a user presses to avoid doing
+                // the arithmetic themselves. With the producer emitting full precision this reads the
+                // real balance, and the single .toFixed(6) is the only rounding. 6dp because USDC and
+                // EURC are 6-dp on Arc: rounding a SEND amount to 2dp discards money the wallet holds.
                 const bal = Number(w.agentWallet?.balance);
                 if (!Number.isFinite(bal) || bal <= 0) return;
-                setAmount(((bal * p) / 100).toFixed(2));
+                setAmount(((bal * p) / 100).toFixed(6));
                 reset();
               }}>{p}%</button>
           ))}

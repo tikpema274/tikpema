@@ -196,13 +196,15 @@ export async function connectMetaMask() {
       functionName: "balanceOf",
       args: [address],
     })) as bigint;
-    return Number(formatUnits(raw, USDC_DECIMALS)).toFixed(2); // EURC is 6-dp on Arc, like USDC
+    // ⭐ FULL PRECISION AT THE PRODUCER — see my-wallet.mjs. EURC is 6-dp on Arc,
+    return formatUnits(raw, USDC_DECIMALS); // like USDC
   }
 
   // Formatted balance string (e.g. "12.50"), matching the modular path.
   async function refreshBalance(): Promise<string> {
     const raw = await readBalanceRaw();
-    return Number(formatUnits(raw, USDC_DECIMALS)).toFixed(2);
+    // ⭐ FULL PRECISION AT THE PRODUCER — see my-wallet.mjs.
+    return formatUnits(raw, USDC_DECIMALS);
   }
 
   // Pre-spend guard. Gas also comes out of USDC, so require the spend PLUS a

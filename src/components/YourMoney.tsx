@@ -6,6 +6,7 @@ import { arcTestnet } from "../config/chain";
 import AddressDisplay from "./AddressDisplay";
 import SignInPrompt from "./SignInPrompt";
 import { describeError } from "../lib/describeError";
+import { displayAmount } from "../lib/formatAmount";
 
 const EXPLORER = arcTestnet.blockExplorers.default.url;
 
@@ -244,7 +245,7 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
       <div className="quick" style={{ marginBottom: 4 }}>
         {/* 1. THE USER'S OWN WALLET (passkey MSCA) — w.address / w.usdcBalance.
                Fully theirs; no caveat to make. */}
-        <Pocket label="Your wallet" amount={w.usdcBalance ?? "…"} badge="You hold the key">
+        <Pocket label="Your wallet" amount={displayAmount(w.usdcBalance)} badge="You hold the key">
           <AddressDisplay address={w.address} />
           <div className="qd">Yours. Send USDC here from any wallet, exchange, or faucet.</div>
 
@@ -297,13 +298,13 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
                shown as a SEPARATE amount — never summed (EURC != $1). */}
         <Pocket
           label="Agent's wallet"
-          amount={w.agentWallet.balance ?? "…"}
+          amount={displayAmount(w.agentWallet.balance)}
           badge="Withdraw any time"
         >
           <AddressDisplay address={w.agentWallet.address} />
           <div className="qd">
             The working float.{" "}
-            <span className="mono">{w.agentWallet.eurcBalance ?? "…"}</span> EURC also held
+            <span className="mono">{displayAmount(w.agentWallet.eurcBalance)}</span> EURC also held
             here.
           </div>
 
