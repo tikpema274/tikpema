@@ -47,6 +47,11 @@ export const COMPONENTS = {
   DcaPanel:             { suite: "verify-dca-consent-copy.tsx" },
   NanopaymentPanel:     { suite: "verify-nanopay-copy.tsx" },
   BridgePanel:          { suite: "verify-bridge-panel-copy.tsx" },
+  // ⭐ Extracted FROM BridgePanel so the quoted state can be rendered — it appears only once a quote
+  // exists, and renderToStaticMarkup emits the initial state, so inside the panel it was invisible
+  // to this very suite. Its claims are asserted by the same suite, which now reads this file
+  // directly rather than slicing the panel. [[state-behind-a-transition-is-untested-by-default]]
+  BridgeQuoteSummary:   { suite: "verify-bridge-panel-copy.tsx" },
   // ⛔ Carries a claim no other panel makes — that agent caps DO NOT apply — and it sits beside a
   // panel where they do, so silence would read as capped. Its suite asserts that sentence renders.
   ManualBridgePanel:    { suite: "verify-manual-bridge-copy.tsx" },

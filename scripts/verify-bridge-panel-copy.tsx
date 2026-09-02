@@ -79,7 +79,11 @@ check("⭐⭐ the arrival is still called an ESTIMATE until the chain is read",
 // that matters — a bound-fee promise outside that block would be a promise with no fee.
 // [[state-behind-a-transition-is-untested-by-default]]
 {
-  const quoteBlock = src.slice(src.indexOf("{quote && !run && ("), src.indexOf("summary-hazard"));
+  // ⚠️ RE-POINTED WHEN THE BLOCK MOVED FILES. This sliced BridgePanel between `{quote && !run && (`
+  // and "summary-hazard"; the summary is now its own component so a suite (and a static preview)
+  // can render the quoted state directly. Reading the component file is both simpler and stricter —
+  // the slice could silently become empty, a file read cannot.
+  const quoteBlock = readFileSync(new URL("../src/components/BridgeQuoteSummary.tsx", import.meta.url), "utf8");
   check("⭐⭐ the fee is promised as BOUND, not as read-at-execution",
     /held for this bridge/i.test(quoteBlock) && /re-read when it runs/i.test(quoteBlock),
     "consent-fee binding: the figure shown is the figure signed");
