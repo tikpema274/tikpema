@@ -115,10 +115,14 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
           ⭐⭐ AND IT IS NOT ONE SENTENCE, BECAUSE IT WAS NOT ONE SITUATION. This row
           previously said "has not been confirmed YET" for the entire life of the
           record — forever, since nothing resolves a provisional receipt. "Yet" tells
-          the reader someone is still waiting. Nobody is: there is no sweeper, no
-          settler and no reconcile job for a `tx-` record. ⚠️ THAT MATTERS BECAUSE A
-          USER WHO BELIEVES A PROCESS IS WATCHING WILL NOT GO LOOK THEMSELVES — the
-          copy was quietly discouraging the only action that could resolve it.
+            the reader someone is still waiting. ⭐ WHEN THIS WAS WRITTEN nobody was: there was no
+            sweeper, no settler and no reconcile job for a `tx-` record, and the copy was quietly
+            discouraging the only action that could resolve it.
+            ⚠️ THAT IS NO LONGER THE SITUATION — bridge-mint-sweep.mjs:94 triggers a reconcile for
+            every non-terminal provisional, so something IS waiting now. The `settling` copy below
+            still avoids "yet" regardless: "yet" claims a specific someone is waiting on a specific
+            answer, which is a stronger claim than "a job will look again", and the weaker one is
+            all this row can honestly make.
           The band comes from the server (provisionalStatus), so the age cap has ONE
           definition and the panel cannot drift from the sweeper's census. */}
       {r.state === "burn_submitted" && r.provisional?.band === "settling" && (
@@ -127,11 +131,34 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
           observed leaving your wallet.
         </span>
       )}
+        {/* 🚨 THIS SAID "nothing is checking this automatically" AND THAT BECAME FALSE. It was
+            true when written — _bridge-receipts.mjs recorded that a `tx-` record had NO sweeper,
+            NO cron and NO reconcile job. `bridge-reconcile-background` was then BUILT and wired
+            into the ten-minute sweep (bridge-mint-sweep.mjs:94, cron in netlify.toml), which reconciles every NON-TERMINAL
+            provisional — `settling` AND `unwitnessed` — by asking Circle about the txId.
+            ⛔ A sentence that outlives the condition it describes is worse than a vague one: this
+            one sent a user to check by hand, confidently, for a receipt the system was already
+            resolving. [[duplicate-source-of-truth-is-the-recurring-bug]]
+            ⭐ THE ATTEMPT COUNT IS SHOWN RATHER THAN A SCHEDULE, mirroring the `unresolved` branch
+            below. "Every ten minutes" would couple copy to a cron expression and go stale the same
+            way; the count is a fact the record carries. Zero-vs-nonzero also preserves the
+            distinction that branch already draws — asked-and-unanswered is different from
+            never-asked, and the second is the more alarming one. */}
       {r.state === "burn_submitted" && r.provisional?.band === "unwitnessed" && (
         <span style={{ color: "var(--warn)" }}>
-          submitted, still unconfirmed — and <b>nothing is checking this
-          automatically</b>. Nothing has been observed leaving your wallet. If it
-          matters now, check the transaction with Circle rather than waiting.
+          submitted, still unconfirmed — nothing has been observed leaving your wallet.{" "}
+          {(r.reconcileAttempts ?? 0) > 0 ? (
+            <>
+              We have re-checked it with Circle <b>{r.reconcileAttempts}</b> times and not had a
+              confirmation yet, and we keep re-checking.
+            </>
+          ) : (
+            <>
+              We are <b>re-checking it with Circle automatically</b>.
+            </>
+          )}{" "}
+          Nothing is required of you. If it is still unconfirmed after 24 hours it becomes a
+          <b> needs review</b> row, and only then does it need you.
         </span>
       )}
       {/* ⭐ THE AGED-OUT ROW NOW REPORTS WHAT WAS TRIED. `reconcileAttempts > 0` means we

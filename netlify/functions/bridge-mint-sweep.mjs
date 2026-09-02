@@ -58,8 +58,12 @@ export const handler = async (event) => {
   // would mean the one condition worth escalating is the one condition that prints "clean" and
   // exits — which is how this sweeper's own log line would have become the thing hiding it.
   //
-  // ⚠️ THE SWEEP STILL OWNS NO WRITES. This is a count and a sentence, nothing more; the
-  // reconcile job that could act on it is unbuilt, and that is stated rather than implied.
+  // ⚠️ THE SWEEP STILL OWNS NO WRITES — that part remains true and is load-bearing.
+  // ⭐ BUT THE RECONCILE JOB IS BUILT. This said it was "unbuilt", 32 lines above the loop at :94
+  // that triggers it for every non-terminal provisional. The census below is a count; the ACTING is
+  // that loop, and both live in this file. ⛔ A comment denying the existence of something wired in
+  // the same file is the cheapest possible thing to get wrong and the hardest to notice, because
+  // nobody re-reads a comment while editing the code under it.
   if (provisional) {
     const { settling, unwitnessed, unresolved } = provisional;
     if (unresolved > 0) {

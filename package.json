@@ -98,7 +98,8 @@
     "deploy:site": "node scripts/deploy-site.mjs",
     "test:custodynotice": "npx tsx scripts/verify-custody-notice.tsx",
     "test:feebinding": "node --experimental-test-module-mocks scripts/verify-bridge-fee-binding.mjs",
-    "test:bridgeseam": "npx tsx scripts/verify-bridge-response-seam.tsx"
+    "test:bridgeseam": "npx tsx scripts/verify-bridge-response-seam.tsx",
+    "test:absenceclaims": "node scripts/verify-absence-claims.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -179,6 +180,7 @@
     "gate:recovery",
     "gate:deps",
     "gate:registry",
-    "test:pinnedbytes"
+    "test:pinnedbytes",
+    "test:absenceclaims"
   ]
 }

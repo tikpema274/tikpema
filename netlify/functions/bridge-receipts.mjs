@@ -36,8 +36,12 @@ export async function handler(event) {
   //
   // Awaiting the trigger (agent-bridge.mjs) fixes the common case; this covers the rest
   // — a trigger that was sent and lost, a settler that died mid-poll, a deploy that
-  // interrupted one. The client already calls this endpoint on mount, so recovery costs
+  // interrupted one. The client already calls this endpoint on mount, so THIS recovery costs
   // no cron and happens exactly when someone is looking.
+  // ⚠️ THAT WAS ONCE THE ONLY RECOVERY. It is not now: bridge-mint-sweep.mjs:94 runs on a schedule
+  // and reconciles provisionals without anyone looking. This path remains cron-free and remains
+  // useful — it catches a stranded burn the moment a user opens the panel, ahead of the next tick —
+  // but "recovery costs no cron" describes THIS endpoint, not the system.
   //
   // ⚠️ THIS ENDPOINT STILL WRITES NOTHING ITSELF. It asks the internal settler to run;
   // the settler owns every write and is idempotent and lease-guarded, so a duplicate
@@ -147,7 +151,10 @@ export async function handler(event) {
       reconcileAttempts: Number.isInteger(r.reconcileAttempts) ? r.reconcileAttempts : 0,
       lastReconciledAt: r.lastReconciledAt ?? null,
       // ⭐⭐ THE AGE CAP, DERIVED HERE AND NOT STORED. A provisional receipt has no automatic
-      // resolver — no sweeper, no settler, no reconcile job — so "not confirmed yet" was a claim
+      // resolver AT THE TIME THIS WAS WRITTEN — no sweeper, no settler, no reconcile job. ⭐ THAT
+      // CHANGED: bridge-reconcile-background is triggered for every non-terminal provisional by
+      // bridge-mint-sweep.mjs:94, so `settling` and `unwitnessed` ARE resolved automatically now.
+      // The band is still derived per read, for the reasons below. Back then "not confirmed yet" was a claim
       // that aged into a falsehood the moment nobody was waiting, which was immediately. The band
       // is computed per read against the CURRENT clock, so it is right without a migration and
       // stops being consulted the day a reconcile job backfills a real burn hash.

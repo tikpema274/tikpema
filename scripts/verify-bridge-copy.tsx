@@ -96,8 +96,13 @@ section("1 — EVERY STATE SAYS EXACTLY ONE THING");
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
 section("2 — THE WORD THAT WAS THE LIE: 'yet'");
-// ⭐⭐ "Yet" tells the reader someone is still waiting. For a provisional receipt nobody was —
-// there is no sweeper, settler or reconcile job for a `tx-` record until it is reconciled.
+// ⭐⭐ "Yet" tells the reader someone is still waiting on a specific answer. That is a stronger
+// claim than "a job will look again", and only the weaker one is true here — so the word stays out
+// of the `settling` copy regardless of what is running.
+// ⚠️ THIS ORIGINALLY SAID "there is no sweeper, settler or reconcile job", which was true when
+// written and is not now (bridge-mint-sweep.mjs:94). The assertion below never depended on that
+// clause — it tests for the absence of "yet" — but the comment would have taught the next reader a
+// false fact about the system while sitting above a passing check.
 {
   const settling = text({ state: "burn_submitted", provisional: { band: "settling" } });
   const unwit = text({ state: "burn_submitted", provisional: { band: "unwitnessed" } });
@@ -105,7 +110,52 @@ section("2 — THE WORD THAT WAS THE LIE: 'yet'");
 
   check("⭐ `settling` is the ONLY band allowed to say 'yet'", /has not been confirmed yet/.test(settling));
   check("⭐⭐ `unwitnessed` does NOT say 'yet'", !/\byet\b/.test(unwit), unwit.slice(0, 70));
-  check("⭐⭐ …and says plainly that nothing is checking", /nothing is checking this automatically/i.test(unwit));
+  // ═══ ⭐⭐ A CONTINGENCY BINDING, NOT A PINNED SENTENCE ══════════════════════════════════════
+  // 🚨 THE DEFECT THIS REPLACES. `:108` asserted the copy said "nothing is checking this
+  // automatically". That was TRUE when written and became FALSE when bridge-reconcile-background was
+  // built and wired in at bridge-mint-sweep.mjs:94 — and the guard could not notice, because a guard
+  // that pins a sentence holds it there. It kept a false claim green in production.
+  //
+  // ⭐ SO THE CLAIM IS DERIVED FROM THE PRODUCER, NOT ASSUMED. `provisionalStatus` is the function
+  // that decides the band, and `listAllStranded` pushes a provisional into `reconcilable` exactly
+  // when `p.provisional && !p.terminal`. This calls the REAL function with a receipt aged into the
+  // unwitnessed band and asks it the same question the sweep asks. If that answer ever changes, the
+  // copy requirement flips with it and this goes red on whichever side is now wrong.
+  //
+  // ⛔ DERIVE IT, DON'T LOOSEN THE CHECK. If this fails, the fix is to make the copy match the
+  // behaviour the producer actually has — not to widen the regex until both readings pass.
+  {
+    // ⚠️ Imported HERE rather than reusing the module-level `server` binding further down: this
+    // block runs first, and a check that silently depended on a later import would be an ordering
+    // trap rather than a binding.
+    const producer = await import("../netlify/functions/_bridge-receipts.mjs");
+    const AGED = {
+      state: "burn_submitted",
+      submittedAt: new Date(Date.now() - (producer.SUBMITTED_SETTLE_DEADLINE_MS + 60_000)).toISOString(),
+    };
+    const p = producer.provisionalStatus(AGED);
+    check("⭐ the fixture really is in the `unwitnessed` band — the binding rests on this",
+      p.band === "unwitnessed", `band=${p.band}`);
+
+    // The same predicate listAllStranded applies (_bridge-receipts.mjs:597-599).
+    const isReconciled = !!p.provisional && !p.terminal;
+
+    if (isReconciled) {
+      check("⭐⭐ unwitnessed IS reconciled ⇒ the copy must claim automatic re-checking",
+        /re-checking it with Circle automatically|we keep re-checking/i.test(unwit),
+        "derive it, don't loosen the check — make the copy match the producer");
+      check("⛔ …and must NOT say nothing is checking",
+        !/nothing is checking/i.test(unwit),
+        "derive it, don't loosen the check — this claim sent users to check by hand for receipts the sweep was already resolving");
+    } else {
+      check("⭐⭐ unwitnessed is NOT reconciled ⇒ the copy must say so plainly",
+        /nothing is checking/i.test(unwit),
+        "derive it, don't loosen the check — a user who thinks a process is watching will not go look");
+      check("⛔ …and must NOT claim automatic re-checking",
+        !/re-checking it with Circle automatically/i.test(unwit),
+        "derive it, don't loosen the check");
+    }
+  }
   check("⭐⭐ `unresolved` does NOT say 'yet'", !/\byet\b/.test(unres));
   check("⭐⭐ …and says it will NOT resolve on its own", /will not resolve on its own/i.test(unres));
   check("⭐ …and names the manual step", /reconcile this transaction against Circle/i.test(unres));

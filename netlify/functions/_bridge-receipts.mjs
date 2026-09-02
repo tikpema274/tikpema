@@ -242,6 +242,16 @@ export function pendingReceiptKey(owner, txId) {
 // the panel. NO sweeper, NO cron, NO settler, NO reconcile job. `burn_submitted` is in neither
 // TERMINAL_STATES nor RESOLVED_STATES, so no state machine could move it either.
 //
+// ⭐⭐ THAT WAS THE STATE ON 2026-08-14 AND IS NO LONGER TRUE. Kept as the audit it was, marked so
+// nobody reads it as current. `bridge-reconcile-background` now asks Circle what became of the txId
+// and is triggered for every NON-TERMINAL provisional by `bridge-mint-sweep.mjs:94` — so `settling`
+// AND `unwitnessed` are both reconciled automatically. `unresolved` (past the 24h cap) is still
+// counted, logged and left for a human, deliberately.
+// ⚠️ THE USER-FACING COPY OUTLIVED THIS COMMENT'S TRUTH BY LONGER THAN THE COMMENT DID: the panel
+// kept telling users "nothing is checking this automatically" in production after it was false, and
+// a suite was pinning that sentence in place. Fixed by binding the copy to `provisionalStatus`
+// CONTINGENTLY (verify-bridge-copy) rather than pinning either wording.
+//
 // ⭐ THE FEAR GOING IN WAS THE WRONG ONE. The worry was that it would inherit the unbounded
 // RETRY the 12-day Polygon record demonstrates. It could not — nothing retries it at all. What
 // it had instead is arguably worse, because it has no cost signal to notice: the record was
@@ -315,7 +325,12 @@ export function provisionalStatus(receipt, now = Date.now()) {
   if (ageMs >= SUBMITTED_SETTLE_DEADLINE_MS) {
     return {
       provisional: true, band: "unwitnessed", ageMs, terminal: false, needsHuman: false,
-      detail: "submitted, never observed on Arc, and nothing is checking automatically",
+        // ⚠️ CORRECTED. This said "nothing is checking automatically" — true when written,
+        // false once bridge-reconcile-background was wired in at bridge-mint-sweep.mjs:94,
+        // which triggers a reconcile for every non-terminal provisional (settling AND
+        // unwitnessed). ⛔ No interval here either: the schedule lives in netlify.toml,
+        // outside the build stamp, so a numeric claim would be unguardable.
+        detail: "submitted, never observed on Arc — being re-checked with Circle automatically",
     };
   }
   return {
@@ -518,8 +533,11 @@ export function isStranded(receipt, now = Date.now()) {
   // — handing it one would make it chase a mint for a burn that may never exist. It is
   // excluded BY NAME rather than by happening to miss two other conditions, because
   // safety that is inherited rather than stated is safety nobody knows they can break.
-  // ⚠️ Reconciling these against Circle is a SEPARATE, UNBUILT job (see PROGRESS): this
-  // record is the hook that makes it possible, not the recovery itself.
+  // ⭐ Reconciling these against Circle is a SEPARATE job — and it is now BUILT:
+  // `bridge-reconcile-background`, triggered from bridge-mint-sweep.mjs:94 for every non-terminal
+  // provisional. This record was the hook that made it possible; the recovery now exists.
+  // ⚠️ It is still SEPARATE, which is why these stay excluded from `stranded` — the exclusion is
+  // about which job owns them, not about whether any job does.
   // ⭐ EXCLUDED FROM RECOVERY IS NOT EXCLUDED FROM VISIBILITY — that conflation is what let a
   // `tx-` record age forever with nothing anywhere saying so. `provisionalStatus` puts a cap on
   // it and `listAllStranded` counts the bands in the same scan, so the sweeper reports what it
@@ -560,7 +578,8 @@ export async function listAllStranded({ limit = 50, now = Date.now() } = {}) {
     // back. So the count goes where a cron can see it, every tick, for every owner.
     //
     // ⚠️ COUNTED, NOT TRIGGERED. This function still hands the sweeper nothing to act on: the
-    // reconcile job that would ask Circle about a txId remains unbuilt, and inventing a trigger
+    // reconcile job that would ask Circle about a txId is BUILT and wired — see `reconcilable` below,
+    // consumed by bridge-mint-sweep.mjs:94. This note described its absence; inventing a trigger
     // for it here would have the settler chase a mint for a burn that may never exist.
     const provisional = { settling: 0, unwitnessed: 0, unresolved: 0 };
     // ⭐ THE RECONCILABLE ONES — records the reconcile job should ask Circle about this tick.
