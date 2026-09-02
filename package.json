@@ -119,7 +119,8 @@
     "test:selfheal": "node --experimental-test-module-mocks scripts/verify-selfheal.mjs",
     "test:verifiertrigger": "node --experimental-test-module-mocks scripts/verify-verifier-trigger.mjs",
     "test:evaluatepersist": "node scripts/verify-evaluate-persist.mjs",
-    "test:ddvaultagree": "node --experimental-test-module-mocks scripts/dd/verify-analyze-agrees-with-vault.mjs"
+    "test:ddvaultagree": "node --experimental-test-module-mocks scripts/dd/verify-analyze-agrees-with-vault.mjs",
+    "test:rpcabsence": "node scripts/verify-rpc-absence-corroboration.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -221,6 +222,7 @@
     "test:selfheal",
     "test:verifiertrigger",
     "test:evaluatepersist",
-    "test:ddvaultagree"
+    "test:ddvaultagree",
+    "test:rpcabsence"
   ]
 }

@@ -243,10 +243,17 @@ export const ORPHAN_GUARD_DEBT = [
   // the proof that the kill switch stops money, dead 33 days on a stale partial mock.
   //
   // These five remain, each for a DIFFERENT reason, none of them "nobody looked":
-  "scripts/verify-swap-receipt.mjs",        // load repaired, then RED: the suite mocks `publicClient`
-                                            // but _swap-confirm.mjs builds a DEDICATED client
-                                            // (f52936b, 2026-07-18), so the mock no longer intercepts
-                                            // the balance-delta path. Broken deeper, not a regression.
+  "scripts/verify-swap-receipt.mjs",        // ⛔ load repaired, then RED — and it MUST NOT be wired.
+                                            // The suite mocks `publicClient`, but _swap-confirm.mjs:35
+                                            // builds its OWN client (createPublicClient + arcChain,
+                                            // f52936b 2026-07-18), so the balance-delta path bypasses
+                                            // the mock entirely and REACHES A REAL RPC — Arc's public
+                                            // endpoint, which this repo has measured as throttled.
+                                            // 🚨 A suite that makes network calls does not belong in a
+                                            // blocking aggregate: a flaky network would manufacture a
+                                            // red that means nothing, which is the same reason
+                                            // gate:pins is exempt. Fix the interception first, then
+                                            // wire it. Not a production regression.
   "scripts/verify-receipt-adversarial.mjs", // CONTROL fails: every case returns receipt_not_found, so
                                             // the four attack passes are VACUOUS. Root cause is in
                                             // production — _receipt.mjs:141 returns on the first
@@ -287,6 +294,7 @@ export const FILE_UNWIRED_TOOLS = {
   "scripts/dd/run.mjs": "the manual DD CLI entry point — a human names an address and reads a verdict. The engine it drives is covered by the DD suites; this is the driver, not the check.",
   "scripts/fire-ub-spend.mjs": "manual: MOVES REAL FUNDS. Never unattended. [[live-proof-fund-moving-user-runs]]",
   "scripts/freeze-dd-service.mjs": "ONE-OFF: froze the DD identity doc. Re-running is meaningless; the doc is frozen.",
+  "scripts/lib/assert-transition.mjs": "a shared helper, imported by checks that need to assert a TRANSITION rather than a state. It holds the rule and two assertions; it is not itself a suite and has nothing to run.",
   "scripts/lib/marketing-site.mjs": "helper imported by the marketing-site scripts, which are themselves manual.",
   "scripts/observe-per-user-cycle.mjs": "an OBSERVATION run — records what happened, asserts nothing.",
   "scripts/observe-swap-cycle.mjs": "an OBSERVATION run — records a real swap cycle for a human to read, asserts nothing, and costs money to repeat.",

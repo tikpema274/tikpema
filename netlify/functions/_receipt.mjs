@@ -124,9 +124,10 @@ export function classifyRpcFailure(e) {
  * would hide exactly the misconfiguration the chainId pin exists to catch, and `gate:rpc` would be
  * the only thing left that could see it.
  */
-export async function rpcFallback(chain, method, params) {
+export async function rpcFallback(chain, method, params, { absenceNeedsCorroboration = false } = {}) {
   const endpoints = chain.rpcs;
   const failures = [];
+  const absent = [];   // endpoints that ANSWERED, and answered "there is nothing here"
   for (const url of endpoints) {
     try {
       // The chain guard runs against the endpoint that is about to answer, never once for the set:
@@ -138,11 +139,47 @@ export async function rpcFallback(chain, method, params) {
         e.saw = Number(BigInt(idHex));
         throw e;
       }
-      return { result: await rpc(url, method, params), rpc: url, attempts: failures.length + 1 };
+      const result = await rpc(url, method, params);
+      // ═══ 🚨 AN ABSENCE IS NOT AN ANSWER, IT IS THE LACK OF ONE ══════════════════
+      // This used to return whatever the first endpoint said, and `null` counted as saying
+      // something. So ONE endpoint that had pruned a transaction could conclude "not found" while a
+      // sibling still held the receipt — walking straight past the fallback added after the Polygon
+      // decommission, because that fallback only ever advanced on a THROWN error.
+      //
+      // ⛔ MEASURED 2026-09-02, both mirrors, one hash:
+      //     base-sepolia-rpc.publicnode.com   → result: null
+      //     base-sepolia.gateway.tenderly.co  → status: 0x1   (the receipt exists)
+      //   publicnode serves 2026-09-01/02 and returns null for 2026-07-31: a RETENTION WINDOW, not
+      //   an outage. Nothing here distinguished "pruned" from "never happened".
+      //
+      // ⭐ THE INVARIANT — an absence may not conclude while an endpoint has not been asked.
+      if (absenceNeedsCorroboration && (result === null || result === undefined)) {
+        absent.push(url);
+        continue;
+      }
+      return { result, rpc: url, attempts: failures.length + absent.length + 1, absentFrom: absent };
     } catch (e) {
       if (e?.chainMismatch) throw e; // configuration fault — see above
       failures.push({ rpc: url, ...classifyRpcFailure(e) });
     }
+  }
+  // ⭐⭐ THREE OUTCOMES, NEVER COLLAPSED INTO TWO:
+  //   found      — an endpoint returned data (returned above)
+  //   not-found  — at least one endpoint ANSWERED, and every answer was absent (here)
+  //   rpc_error  — nothing answered at all (the throw below)
+  // Collapsing the middle into `found` would fabricate a receipt; collapsing it into `rpc_error`
+  // would throw away the one outcome a caller can actually act on. Both directions are wrong.
+  if (absent.length > 0) {
+    return {
+      result: null,
+      rpc: absent[absent.length - 1],
+      attempts: failures.length + absent.length,
+      absentFrom: absent,
+      // ⚠️ NOT the same claim as "every endpoint agrees". If one FAILED we never heard from it —
+      // the caller is told which, rather than left to read silence as unanimity.
+      corroborated: failures.length === 0,
+      unheardFrom: failures.map((f) => f.rpc),
+    };
   }
   const err = new Error(
     `all ${endpoints.length} endpoint(s) failed: ` + failures.map((f) => `${f.rpc} [${f.failureKind}] ${f.detail}`).join(" | ")
@@ -189,7 +226,11 @@ export async function verifyMintOnChain({ destinationKey, mintTxHash, recipient 
   //    exists on some OTHER chain would sail through.
   let receipt, servedBy = null;
   try {
-    const got = await rpcFallback(chain, "eth_getTransactionReceipt", [mintTxHash]);
+    // ⛔ A RECEIPT LOOKUP IS EXACTLY THE CASE WHERE `null` MUST NOT CONCLUDE. One mirror having
+      // pruned the block is indistinguishable from the transaction never existing — and the second
+      // reading is the one that strands a user's completed bridge at "mint_unconfirmed".
+      const got = await rpcFallback(chain, "eth_getTransactionReceipt", [mintTxHash],
+        { absenceNeedsCorroboration: true });
     receipt = got.result;
     servedBy = got.rpc;
   } catch (e) {
