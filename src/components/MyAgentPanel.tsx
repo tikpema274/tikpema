@@ -279,10 +279,23 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
           exists. Everything that competed with it for the top of the page has either
           moved to the Dashboard (funding) or moved below it (shortcuts). */}
       <div className="panel-eyebrow" style={{ marginTop: 18 }}>Give it a task</div>
-      <div className="sub" style={{ marginBottom: 8 }}>
-        Describe any task in plain language, including multi-step plans — you'll confirm
-        anything that moves funds before it runs.
-      </div>
+        {/* 🚨 THIS CLAIMED UNIVERSAL CONFIRMATION AND WAS FALSE. "you'll confirm anything that moves
+            funds before it runs" sits on the box that posts to agent-act — where a BRIDGE returns
+            needsBridgeConfirm (agent-act.mjs:412) and a multi-step plan returns needsConfirm (:330),
+            but a SWAP (:488), a SERVICE PAYMENT (:516) and a SEND (:546) each return
+            `executed: true` on the FIRST call. Three of five money actions ran with none of the
+            confirmation the sentence promised.
+            ⛔ AND IT IS NOT SOFTENED INTO VAGUENESS. "Some actions are confirmed" would be true and
+            useless — a user must be able to tell WHICH run immediately, because that is the
+            difference between reading a quote and discovering a transfer.
+            ⭐ BOUND, NOT PINNED: verify-agent-panel-copy derives the gated set from agent-act
+            itself, so widening the gate FORCES this sentence to widen with it. Otherwise the same
+            defect returns inverted — a sentence understating a gate that exists. */}
+        <div className="sub" style={{ marginBottom: 8 }}>
+          Describe any task in plain language, including multi-step plans. A <b>bridge</b> or a{" "}
+          <b>multi-step plan</b> is priced and shown to you to confirm first. A single{" "}
+          <b>send</b>, <b>swap</b> or <b>service payment</b> runs straight away, within your caps.
+        </div>
 
       <div className="row" style={{ marginTop: 0 }}>
         <input

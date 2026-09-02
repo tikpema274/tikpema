@@ -111,6 +111,113 @@ check("⭐⭐ …and 'there is no undo' sits inside the LEAVING section, not the
   outAt > 0 && stayAt > outAt && undoAt > outAt && undoAt < stayAt,
   `out@${outAt} undo@${undoAt} stays@${stayAt}`);
 
+// ═══ ⭐⭐ THE CONFIRM CLAIM IS DERIVED FROM agent-act, NOT PINNED ═══════════════════════════════
+// 🚨 THE DEFECT. This box said "you'll confirm anything that moves funds before it runs". A BRIDGE
+// and a MULTI-STEP PLAN do return a confirm state; a SWAP, a SERVICE PAYMENT and a SEND each return
+// `executed: true` on the first call. Three of five money actions ran with none of the confirmation
+// the sentence promised, and nothing asserted the sentence at all.
+//
+// ⭐ SO THE SET IS READ OUT OF THE PRODUCER. Every money action in agent-act is built as
+// `const step = { type: "X" ...}`; the branch either answers with a needs*Confirm state or reaches a
+// `executed: true` return. This derives which is which and requires the copy to name exactly that
+// partition — both halves, so neither can drift alone.
+//
+// ⭐⭐ AND IT MUST SURVIVE THE GATE WIDENING. When swap and send gain a confirm step, `IMMEDIATE`
+// shrinks and this goes RED until the sentence stops calling them immediate. Without that, the same
+// defect returns inverted: a sentence understating a gate that exists, which is how a user ends up
+// confirming something they were told would just run.
+// ⛔ DERIVE IT, DON'T LOOSEN THE CHECK. [[verdict-earned-by-assertions]]
+{
+  const act = readFileSync(new URL("../netlify/functions/agent-act.mjs", import.meta.url), "utf8");
+  const GATED = new Set(), IMMEDIATE = new Set();
+  const re = /const step = \{\s*type:\s*"([a-z_]+)"/g;
+  let m;
+  while ((m = re.exec(act))) {
+    const kind = m[1];
+    // From this step to the next one, whichever terminal shape appears FIRST is this branch's answer.
+    const nextIdx = act.slice(m.index + 1).search(/const step = \{\s*type:/);
+    const region = act.slice(m.index, nextIdx === -1 ? act.length : m.index + 1 + nextIdx);
+    const gatedAt = region.search(/needs(Bridge|Swap|Send)?Confirm(ation)?:\s*true/);
+    const execAt = region.search(/executed:\s*true/);
+    if (gatedAt !== -1 && (execAt === -1 || gatedAt < execAt)) GATED.add(kind);
+    else if (execAt !== -1) IMMEDIATE.add(kind);
+  }
+  // ⭐ TWO GATED ACTIONS ARE NOT BUILT VIA `const step =`, so the loop above cannot see them — and
+  // an empty GATED set is exactly the vacuous pass the first assertion exists to catch. It did catch
+  // it, which is the only reason this is right.
+  //   · BRIDGE returns needsBridgeConfirm and the step is built later, in agent-bridge.mjs.
+  //   · A MULTI-STEP PLAN returns needsConfirm alongside `plan: steps`.
+  // ⚠️ The plan window is 400 chars, not 200: a comment sits between the two keys and a tighter
+  // window silently found nothing — the same "absence reads as safe" shape one layer down.
+  if (/needsBridgeConfirm:\s*true/.test(act)) GATED.add("bridge_usdc");
+  if (/needsConfirm:\s*true[\s\S]{0,400}plan:\s*steps/.test(act)) GATED.add("multi_step_plan");
+
+  check("⭐ the derivation found real actions on both sides — an empty set would pass vacuously",
+    GATED.size > 0 && IMMEDIATE.size > 0,
+    `gated=[${[...GATED].join(",")}] immediate=[${[...IMMEDIATE].join(",")}]`);
+
+  const NAMES = {
+    bridge_usdc: /\bbridge\b/i, multi_step_plan: /multi-step plan/i,
+    swap_tokens: /\bswap\b/i, transfer_usdc: /\bsend\b/i, pay_for_service: /service payment/i,
+  };
+  const say = renderToStaticMarkup(<MyAgentPanel wallet={wallet() as any} />)
+    .replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ");
+
+  // 🚨 THE CLAUSE, NOT THE PAGE. A first draft asked whether the action's word appeared ANYWHERE and
+  // whether "confirm first" appeared ANYWHERE — both true regardless of which side the word sat on.
+  // Mutating swap from immediate to gated moved it in the DERIVATION and the check stayed green: the
+  // sentence still said swap "runs straight away" and the assertion could not see it. A membership
+  // test has to test membership OF SOMETHING. [[collapse-needs-pairwise-inequality]]
+  // ⚠️ SCOPED TO THE SENTENCE, NOT THE PANEL. `say` is the whole render, so splitting it at
+  // "confirm first" made everything after that point the "immediate" half — including every other
+  // mention of bridging on the page. The check failed on bridge_usdc for a reason that had nothing
+  // to do with the claim under test. The clause pair only means anything inside the one sentence
+  // that draws the distinction.
+  const S0 = say.search(/Describe any task in plain language/i);
+  const S1 = say.search(/within your caps/i);
+  check("⭐ the confirm sentence is present and bounded — nothing to test without it",
+    S0 !== -1 && S1 !== -1 && S1 > S0, `start=${S0} end=${S1}`);
+  const say2 = S0 === -1 || S1 === -1 ? "" : say.slice(S0, S1 + 20);
+  const cut = say2.search(/confirm first/i);
+  check("⭐ the copy still has two distinct clauses to test membership against",
+    cut !== -1 && /runs straight away/i.test(say2.slice(cut)),
+    "without the split there is nothing to be a member of");
+  const gatedClause = cut === -1 ? "" : say2.slice(0, cut);
+  const immediateClause = cut === -1 ? "" : say2.slice(cut);
+
+  for (const k of GATED) {
+    if (!NAMES[k]) continue;
+    check(`⭐⭐ gated action "${k}" is named in the CONFIRM-FIRST clause`,
+      NAMES[k].test(gatedClause) && !NAMES[k].test(immediateClause),
+      "derive it, don't loosen the check");
+  }
+  for (const k of IMMEDIATE) {
+    if (!NAMES[k]) continue;
+    check(`⭐⭐ immediate action "${k}" is named in the RUNS-STRAIGHT-AWAY clause`,
+      NAMES[k].test(immediateClause) && !NAMES[k].test(gatedClause),
+      "derive it, don't loosen the check");
+  }
+  // ═══ 🚨 THE OTHER DIRECTION, WHICH THE FIRST DRAFT LACKED ═════════════════════════════════════
+  // The loops above assert GATED ⊆ clause. They do NOT assert clause ⊆ GATED — so removing the
+  // bridge gate entirely left bridge in NEITHER set (it is not built via `const step =` here), the
+  // copy went on promising confirmation for it, and the suite stayed green at 25/0. An action that
+  // stops gating must not keep being advertised as gated: that is the SAME defect inverted, and it
+  // is the one that makes a user wait for a prompt that never comes.
+  // ⭐ So every action NAMED in the confirm-first clause must be a member of GATED.
+  // [[collapse-needs-pairwise-inequality]]
+  for (const [kind, re] of Object.entries(NAMES)) {
+    if (!re.test(gatedClause)) continue;
+    check(`⛔ "${kind}" is promised as confirmed — so it must actually gate`,
+      GATED.has(kind),
+      "derive it, don't loosen the check — the copy claims a gate the producer does not have");
+  }
+
+  // ⛔ THE CLAIM THAT MUST NOT COME BACK while anything executes on the first call.
+  check("⛔ the universal-confirmation claim is absent while any action is immediate",
+    IMMEDIATE.size === 0 || !/confirm anything that moves funds/i.test(say),
+    "derive it, don't loosen the check — three of five actions ran with no confirmation");
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");
