@@ -60,6 +60,10 @@ type Roster = {
   halted: string | null;
   budget: { spentTodayUsdc: number | null; ceilingUsdc: number; remainingUsdc: number | null };
   activity: ActivityEntry[];
+  // ⭐ Optional: an older server that does not send it leaves the flag undefined, which renders as
+  // "nothing yet" exactly as before — a missing field must not itself become a false alarm.
+  activityUnreadable?: boolean;
+  breakdownUnreadable?: boolean;
 };
 
 const money = (n?: number | null) => (n === undefined || n === null ? "—" : n.toFixed(n < 1 ? 4 : 2));
@@ -243,7 +247,15 @@ export default function AgentsPanel({ wallet: w }: { wallet: UnifiedWallet }) {
             Everything your agents spent — and everything a guard refused. Refusals are shown
             too: "it tried, and the cap stopped it" is the part worth seeing.
           </div>
-          {data.activity.length === 0 ? (
+          {/* ⛔ "Nothing happened" and "we could not read what happened" are DIFFERENT CLAIMS and
+              rendered identically until 2026-09-02. The empty list is the same `[]` either way, so
+              the server now says which one it is (agents.mjs activityUnreadable). */}
+          {data.activityUnreadable ? (
+            <div className="sub" style={{ color: "var(--warn)" }}>
+              We could not read today's activity — this list is empty because the read failed, not
+              because nothing happened.
+            </div>
+          ) : data.activity.length === 0 ? (
             <div className="sub">Nothing yet today.</div>
           ) : (
             <ActivityList entries={data.activity} showAgent />
@@ -274,6 +286,14 @@ export function AgentsBudgetLine({
   budget: { spentTodayUsdc?: number | null; ceilingUsdc: number | string };
   allPaused: boolean; busy: string; onToggleAll: () => void;
 }) {
+  // ═══ 🚨 THREE STATES, AND `?? 0` COLLAPSED TWO OF THEM ═════════════════════
+  // This rendered `money(budget.spentTodayUsdc ?? 0)`. The server deliberately sends `null` when the
+  // day-spend read fails (agents.mjs) — and `?? 0` turned "we could not read your spending" into
+  // "you have spent nothing", on the panel whose button is Pause All Agents.
+  // ⛔ FAIL-OPEN IN THE REASSURING DIRECTION: an unknown figure shown as ample headroom.
+  // ⭐ A figure, a confirmed zero, and an unreadable figure are three different things to someone
+  // deciding whether to let an agent keep spending. Never `?? 0` a money field the server nulled.
+  const spendUnknown = budget.spentTodayUsdc === null || budget.spentTodayUsdc === undefined;
   return (
     <div
       className="status"
@@ -284,11 +304,21 @@ export function AgentsBudgetLine({
     >
       <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
         <div>
-          Spent today{" "}
-          <span className="mono" style={{ color: "var(--paper)" }}>
-            {money(budget.spentTodayUsdc ?? 0)}
-          </span>{" "}
-          of <span className="mono">{budget.ceilingUsdc}</span> USDC
+          {spendUnknown ? (
+            <>
+              Spent today <span className="mono" style={{ color: "var(--warn)" }}>unknown</span> — we
+              could not read it. The remaining headroom is <b>unknown, not ample</b>; pause the
+              agents if you need certainty before they spend again.
+            </>
+          ) : (
+            <>
+              Spent today{" "}
+              <span className="mono" style={{ color: "var(--paper)" }}>
+                {money(budget.spentTodayUsdc as number)}
+              </span>{" "}
+              of <span className="mono">{budget.ceilingUsdc}</span> USDC
+            </>
+          )}
         </div>
         <button className="linkbtn" disabled={busy === "*"} onClick={onToggleAll}>
           {busy === "*" ? "…" : allPaused ? "Resume all agents" : "Pause all agents"}

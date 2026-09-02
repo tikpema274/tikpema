@@ -116,8 +116,23 @@ const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Retry a single RPC read a few times before giving up — the public RPC occasionally rejects a
-// call under load. `fallback` is returned only after all attempts fail.
-async function withRetry(fn, fallback, tries = 3) {
+// call under load.
+//
+// ═══ 🚨 THERE IS NO `fallback` PARAMETER, AND THAT IS THE POINT ═══════════
+// It used to take one, and two of seven call sites passed a value that IS a valid reading:
+//   `"0x"` for getBytecode  → "this address holds no code" → reported as "not a deployed contract"
+//   `null` for a receipt    → "this tx is not mined"       → reported as "your shares are still in
+//                                                             the vault"
+// Three failed RPC calls became a confident statement about the chain, and about where a user's
+// funds are. ⛔ Fixing those two arguments would have left the NEXT call site free to pass `0`,
+// `""` or `false`. So the argument is gone: an exhausted retry now returns UNREADABLE — a Symbol
+// that is not falsy, equals nothing, is not a bigint, is not an array and throws on arithmetic.
+// A caller that ignores it gets a TypeError, not a plausible answer.
+//
+// ⭐ THE RULE: A RETRY THAT EXHAUSTS MUST RETURN SOMETHING THE CALLER CANNOT MISTAKE FOR A READING.
+// The five sites that already passed UNREADABLE / a Symbol are unchanged in behaviour; the two that
+// did not are now forced to say what they actually learned, which is nothing.
+async function withRetry(fn, tries = 3) {
   for (let i = 0; i < tries; i++) {
     try {
       return await fn();
@@ -125,7 +140,7 @@ async function withRetry(fn, fallback, tries = 3) {
       if (i < tries - 1) await sleep(150 * (i + 1));
     }
   }
-  return fallback;
+  return UNREADABLE;
 }
 
 // ── THE THIRD STATE — now shared/onchain-facts ───────────────────────────────────────────────
@@ -185,10 +200,8 @@ async function tryRead(pc, address, abi, functionName, args = []) {
 // the "amount received" delta equal the wallet's ENTIRE balance. A witness that guesses is not a
 // witness — if we cannot read it, we refuse rather than invent a number.
 async function readBalanceStrict(pc, token, owner) {
-  const SENTINEL = Symbol("unread");
   const v = await withRetry(
     () => pc.readContract({ address: token, abi: BAL_ABI, functionName: "balanceOf", args: [owner] }),
-    SENTINEL,
     6
   );
   if (typeof v !== "bigint") throw new Error("balance read failed");
@@ -207,7 +220,6 @@ async function readBalanceStrict(pc, token, owner) {
 async function multiRead(pc, calls) {
   const res = await withRetry(
     () => pc.multicall({ allowFailure: true, multicallAddress: MULTICALL3, contracts: calls }),
-    UNREADABLE,
     5 // this read carries the value fields; a total failure would misreport the vault, so try hard
   );
   if (!Array.isArray(res)) return calls.map(() => UNREADABLE);
@@ -237,7 +249,7 @@ async function classifyOwner(pc, owner) {
   // read, same UNREADABLE fallback; relocated out of the classifier so the classifier can be pure.
   let ownerCode;
   const realAddr = !unread(owner) && owner != null && !/^0x0+$/.test(String(owner));
-  if (realAddr) ownerCode = await withRetry(() => pc.getBytecode({ address: getAddress(owner) }), UNREADABLE);
+  if (realAddr) ownerCode = await withRetry(() => pc.getBytecode({ address: getAddress(owner) }));
   const { address, type } = classifyOwnerType(owner, ownerCode);
   return { address, type, label: OWNER_LABELS[type] };
 }
@@ -248,9 +260,17 @@ export async function inspectVault(address) {
   const addr = getAddress(address);
   const pc = publicClient();
 
-  const codeRaw = await withRetry(() => pc.getBytecode({ address: addr }), "0x");
-  const code = String(codeRaw || "0x").toLowerCase();
-  const isContract = code !== "0x" && code.length > 2;
+  // ⛔ THIS READ USED TO PASS `"0x"` AS ITS FALLBACK — the exact value that means "no code here".
+  // Three failed RPC calls therefore produced the BLOCK "No bytecode at this address — it is not a
+  // deployed contract": a confident, false statement about a third-party address, on the FIRST read
+  // of the inspection, in the file whose own header forbids collapsing UNREADABLE into absence.
+  const codeRaw = await withRetry(() => pc.getBytecode({ address: addr }));
+  const codeUnreadable = unread(codeRaw);
+  const code = codeUnreadable ? "0x" : String(codeRaw || "0x").toLowerCase();
+  // ⭐ THREE STATES, NOT TWO. `isContract` now means "we read the bytecode and there was some";
+  // `codeUnreadable` means "we could not ask". Everything derived from the bytecode — the ERC-4626
+  // selector scan below — is meaningless in the third state, so it must not be reported as a finding.
+  const isContract = !codeUnreadable && code !== "0x" && code.length > 2;
 
   // Conformance (bytecode selector scan).
   const missing = isContract ? ERC4626_REQUIRED.filter((s) => !hasSel(code, s)) : ERC4626_REQUIRED.slice();
@@ -330,7 +350,7 @@ export async function inspectVault(address) {
   // This is also NOT a tightening: a KNOWN proxy already BLOCKs here as `not-erc4626`, because
   // conformance scans the stub. An UNKNOWN proxy status must not be treated more favourably than a
   // confirmed one.
-  const implSlotRaw = await withRetry(() => pc.getStorageAt({ address: addr, slot: EIP1967_IMPL_SLOT }), UNREADABLE);
+  const implSlotRaw = await withRetry(() => pc.getStorageAt({ address: addr, slot: EIP1967_IMPL_SLOT }));
   // Closed outcome set: anything that is not a string we can test is UNREADABLE, never "empty".
   const proxySlotUnreadable = unread(implSlotRaw) || typeof implSlotRaw !== "string";
   const proxyImpl = !proxySlotUnreadable && !/^0x0*$/.test(implSlotRaw);
@@ -415,7 +435,21 @@ export async function inspectVault(address) {
   // ── VERDICT ──────────────────────────────────────────────────────────────────────────────
   const blocks = [];
   const warns = [];
-  if (!isContract) blocks.push({ code: "not-a-contract", detail: "No bytecode at this address — it is not a deployed contract." });
+  // 🚨 THE UNREADABLE CASE BLOCKS ON ITS OWN TERMS. It must not borrow "not-a-contract"'s sentence:
+  // that one asserts a fact about the chain, and an unread byte range establishes nothing about it.
+  // Both refuse the deposit — the difference is what the user is told, and whether they are led to
+  // believe a legitimate vault is fake.
+  if (codeUnreadable) {
+    blocks.push({
+      code: "bytecode-unreadable",
+      detail:
+        "Could not read this address's bytecode after several attempts, so whether it is a contract " +
+        "at all is UNKNOWN. Every check below reads that bytecode, so none of them ran. This is not " +
+        "a finding about the vault — it is the absence of one.",
+    });
+  } else if (!isContract) {
+    blocks.push({ code: "not-a-contract", detail: "No bytecode at this address — it is not a deployed contract." });
+  }
   if (isContract && !erc4626) blocks.push({ code: "not-erc4626", detail: `Missing ERC-4626 methods: ${missing.join(", ")}.` });
   if (isShell) blocks.push({ code: "empty-shell", detail: "totalAssets() is 0 — the vault holds nothing; a deposit would be the only funds in it." });
   if (withdrawFeeBps !== null && withdrawFeeBps > WITHDRAW_FEE_BLOCK_BPS)
@@ -933,8 +967,18 @@ export async function vaultWithdraw({ walletAddress, vault, shares }) {
 
   // The redeem must be MINED with status:success on-chain. (For an ERC-4337 SCA the OUTER tx can be
   // 'success' while the inner redeem reverted and moved nothing — WITNESS #2 below catches that.)
-  const receipt = await withRetry(() => pc.getTransactionReceipt({ hash: redHash }), null, 6);
-  if (!receipt || receipt.status !== "success") {
+  // ═══ 🚨 AN UNREADABLE RECEIPT IS NOT AN UNMINED ONE, AND IT MUST NOT SKIP WITNESS #2 ══════
+  // This read used to fall back to `null`, which is exactly what "this tx is not mined" looks like.
+  // Six failed reads therefore returned "your shares are still in the vault" — a positive claim
+  // about WHERE THE USER'S FUNDS ARE, made from an absence nobody observed. If the redeem had in
+  // fact succeeded, that sentence was false about the one thing the user cares about.
+  //
+  // ⭐ AND THE EARLY RETURN MADE IT UNFALSIFIABLE. WITNESS #2 — the USDC balance delta — can settle
+  // this without any receipt at all, and it sat below a `return` that fired first. An unreadable
+  // receipt now FALLS THROUGH to the witness that can answer, instead of guessing in its place.
+  const receipt = await withRetry(() => pc.getTransactionReceipt({ hash: redHash }), 6);
+  const receiptUnreadable = unread(receipt);
+  if (!receiptUnreadable && (!receipt || receipt.status !== "success")) {
     return { confirmed: false, withdrawHash: redHash, reason: "reclaim didn't confirm on-chain — your shares are still in the vault" };
   }
 
@@ -946,6 +990,19 @@ export async function vaultWithdraw({ walletAddress, vault, shares }) {
     return { confirmed: false, withdrawHash: redHash, reason: "reclaim submitted, but we couldn't read the amount returned — check your wallet balance before retrying" };
   }
   const deltaMinor = BigInt(usdcAfter) - BigInt(usdcBefore);
+  // ⛔ THE UNREADABLE-RECEIPT PATH RESOLVES HERE, ON THE BALANCE, NOT ON A GUESS.
+  // A positive delta means USDC arrived: the redeem happened, whatever the receipt read did. A
+  // non-positive delta with an unreadable receipt is genuinely undetermined — and it says so,
+  // WITHOUT claiming where the shares are, because nothing here establishes that.
+  if (receiptUnreadable && deltaMinor <= 0n) {
+    return {
+      confirmed: false,
+      withdrawHash: redHash,
+      reason:
+        "we could not read the transaction receipt, and no USDC has arrived yet — so we cannot tell " +
+        "whether this reclaim went through. Check your wallet before retrying; retrying could redeem twice.",
+    };
+  }
   if (deltaMinor <= 0n) {
     // Mined 'success' but no USDC arrived → the redeem did not actually return funds. Honest failure,
     // never a fabricated number.
@@ -979,10 +1036,8 @@ export async function readShareBalance({ walletAddress, vault }) {
   const vaultAddr = getAddress(vault.address);
   const pc = publicClient();
 
-  const SENTINEL = Symbol("unread");
   const raw = await withRetry(
     () => pc.readContract({ address: vaultAddr, abi: BAL_ABI, functionName: "balanceOf", args: [owner] }),
-    SENTINEL,
     5 // try hard: this read is the reclaim's amount, so a transient RPC hiccup must not become a throw prematurely
   );
   if (typeof raw !== "bigint") throw new Error("could not read your share balance on-chain");

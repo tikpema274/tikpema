@@ -65,11 +65,20 @@ export async function handler(event) {
 
   // ── READ: the roster ──
   const cfg = budgetConfig();
+  // ═══ 🚨 AN EMPTY READ AND A FAILED READ ARE DIFFERENT ANSWERS ══════════════
+  // `[]` from auditLog renders as "Nothing yet today." and `[]` from agentBreakdown renders as
+  // 0.00 spent per agent — both indistinguishable from a real quiet day. The page they feed carries
+  // the Pause button, so a reassuring absence is read as headroom.
+  // ⭐ `daySpend` already returns null on failure and the response preserves it; these two said
+  // nothing at all, so the client COULD NOT have distinguished them.
+  let activityUnreadable = false;
+  let breakdownUnreadable = false;
   const [states, spentToday, breakdown, recent] = await Promise.all([
     pauseStates({ owner }),
     daySpend({ owner }).catch(() => null),
-    agentBreakdown({ owner }).catch(() => []),
-    auditLog({ owner, date: new Date().toISOString().slice(0, 10) }).catch(() => []),
+    agentBreakdown({ owner }).catch(() => { breakdownUnreadable = true; return []; }),
+    auditLog({ owner, date: new Date().toISOString().slice(0, 10) })
+      .catch(() => { activityUnreadable = true; return []; }),
   ]);
 
   const byAgent = new Map(breakdown.map((b) => [b.agent, b]));
@@ -78,7 +87,11 @@ export async function handler(event) {
   // rows aren't proven yet). They remain full agents server-side — isAgent()/pause/audit all
   // still resolve them, and their endpoints stay live — so this ONLY affects what the page shows.
   const agents = AGENTS.filter((a) => !a.unlisted).map((a) => {
-    const stats = byAgent.get(a.id) ?? { spentUsdc: 0, actions: 0, blocked: 0 };
+    // ⛔ NULL, NOT ZERO, WHEN THE BREAKDOWN COULD NOT BE READ.
+    const stats = byAgent.get(a.id)
+      ?? (breakdownUnreadable
+        ? { spentUsdc: null, actions: null, blocked: null }
+        : { spentUsdc: 0, actions: 0, blocked: 0 });
     return {
       id: a.id,
       label: a.label,
@@ -107,6 +120,10 @@ export async function handler(event) {
     owner,
     agents,
     allPaused: states[ALL_AGENTS] === true,
+    // ⭐ THE THIRD STATE, CARRIED TO THE CLIENT. Without these the page cannot tell a quiet day from
+    // a failed read, and it was rendering the reassuring one.
+    activityUnreadable,
+    breakdownUnreadable,
     // An operator-level halt overrides every per-agent switch. Surfaced so the page can say
     // WHY nothing will run, rather than showing agents as "running" while they are halted.
     halted: globalHalt(),

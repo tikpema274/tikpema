@@ -137,27 +137,25 @@ console.log("\n── CONTROL · a slot that WAS read and is empty still says 'n
 
 console.log("\n── ⭐⭐ THE COINCIDENTAL SAFETY, PINNED · an unreadable VAULT bytecode ──");
 // 🚨 WHY THIS ASSERTION EXISTS. Every owner-power scan in _vault.mjs runs `hasAny(code, …)` over the
-// vault's own bytecode. If that read fails, `withRetry` falls back to the literal string "0x" — NOT
-// to the UNREADABLE sentinel — so the tri-state is destroyed BEFORE `hasAny` is ever called, and
-// "0x" scans legitimately as "no selectors found".
+// vault's own bytecode. That read USED TO fall back to the literal string "0x" — not to the
+// UNREADABLE sentinel — so the tri-state was destroyed before `hasAny` was ever called.
 //
-// ⚠️ ON ITS OWN THAT WOULD TELL A USER a contract we could not read has no emergency withdraw, no
-// settable fees and no pause — on the surface that GATES DEPOSITS. It does not, because the same
-// "0x" makes `isContract` false and raises the `not-a-contract` BLOCK, and gateDeposit refuses on
-// BLOCK before any disclosure is rendered.
+// ⭐⭐ THE SAFETY WAS REAL BUT COINCIDENTAL: "0x" made `isContract` false, raising `not-a-contract`,
+// and gateDeposit refuses on BLOCK before any disclosure renders. Two independent mechanisms
+// happened to agree, and only one was documented as the guard. Worse, the SENTENCE was false — "it
+// is not a deployed contract" is a claim about the chain that three failed RPC calls cannot support.
 //
-// ⭐⭐ SO THE SAFETY IS REAL BUT COINCIDENTAL: two independent mechanisms happen to agree, and only
-// one is documented as the guard. Contrast `proxy-status-unreadable`, which is the SAME instinct
-// done deliberately and explained at the code; the bytecode read arrives there by a different route.
+// ═══ ⭐ FIXED 2026-09-02 — THE COINCIDENCE IS NOW A DESIGN ═══════════════════
+// `withRetry` no longer takes a fallback; an exhausted read returns UNREADABLE. The bytecode read is
+// classified into THREE states and the unreadable one blocks under its own `bytecode-unreadable`,
+// whose copy says the checks below it did not run. `not-a-contract` is now reserved for a read that
+// SUCCEEDED and found no code.
 //
-// ⚠️ A PREDICTION MADE HERE WAS WRONG, AND THE MUTATION DISPROVED IT. This comment first claimed
-// that "fixing" the fallback to the UNREADABLE symbol would crash — `hasAny` calls
-// `code.includes(...)` and a Symbol has no `.includes`. It does not: line 241 wraps the value in
-// `String(codeRaw || "0x")`, and `String(symbol)` is LEGAL (only implicit coercion throws). The
-// result is the string "symbol(unreadable)", which scans as no selectors and blocks as
-// `not-erc4626` instead — still fail-closed, by a third route nobody designed either.
+// ⚠️ A PREDICTION MADE HERE WAS WRONG, AND THE MUTATION DISPROVED IT — kept because it is the
+// reasoning, not the outcome: the claim that an UNREADABLE symbol would crash `hasAny` was false,
+// because the value is wrapped in `String(...)` and `String(symbol)` is legal.
 // ⭐ Recorded rather than quietly edited: a guard whose rationale is measured beats one whose
-// rationale is plausible, and this file is where the next person will look for the reasoning.
+// rationale is plausible.
 //
 // This converts the coincidence into a guarantee: break either mechanism and it goes red.
 {
@@ -169,8 +167,17 @@ console.log("\n── ⭐⭐ THE COINCIDENTAL SAFETY, PINNED · an unreadable VA
     threw === null, threw ? `${threw.constructor.name}: ${String(threw.message).slice(0, 60)}` : "");
   if (i) {
     const blocks = i.verdict.blocks.map((b) => b.code);
-    check("⭐⭐ …it BLOCKS on not-a-contract — never a clean report",
-      i.verdict.level === "BLOCK" && blocks.includes("not-a-contract"), blocks.join(",") || "(no blocks)");
+    // ⭐⭐ THE PROPERTY, then the PRECISION. This used to assert `not-a-contract` — the block that
+    // happened to fire, not the one that should. All three clauses matter:
+    //   it BLOCKS                → the reassuring copy stays unreachable (what this file protects)
+    //   under the UNREADABLE code → the user is not told a vault we could not read is fake
+    //   and NOT under not-a-contract → the false claim is gone, which is what pins the fix
+    check("⭐⭐ …it BLOCKS — never a clean report",
+      i.verdict.level === "BLOCK", blocks.join(",") || "(no blocks)");
+    check("⭐⭐ …under `bytecode-unreadable`, the code that says the checks did NOT run",
+      blocks.includes("bytecode-unreadable"), blocks.join(","));
+    check("🚨 …and NEVER `not-a-contract` — that asserts a fact about the chain we did not read",
+      !blocks.includes("not-a-contract"), blocks.join(","));
     check("⭐⭐ …and the deposit gate REFUSES, so the reassuring copy is unreachable",
       gateDeposit({ inspection: i, ackToken: undefined }).ok === false);
     // ⚠️ The powers DO read as absent underneath — that is the coincidence. What makes it safe is

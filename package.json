@@ -120,7 +120,9 @@
     "test:verifiertrigger": "node --experimental-test-module-mocks scripts/verify-verifier-trigger.mjs",
     "test:evaluatepersist": "node scripts/verify-evaluate-persist.mjs",
     "test:ddvaultagree": "node --experimental-test-module-mocks scripts/dd/verify-analyze-agrees-with-vault.mjs",
-    "test:rpcabsence": "node scripts/verify-rpc-absence-corroboration.mjs"
+    "test:rpcabsence": "node scripts/verify-rpc-absence-corroboration.mjs",
+    "test:retryunreadable": "node scripts/verify-retry-unreadable.mjs",
+    "test:moneyabsence": "npx tsx scripts/verify-money-absence-render.tsx"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -223,6 +225,8 @@
     "test:verifiertrigger",
     "test:evaluatepersist",
     "test:ddvaultagree",
-    "test:rpcabsence"
+    "test:rpcabsence",
+    "test:retryunreadable",
+    "test:moneyabsence"
   ]
 }
