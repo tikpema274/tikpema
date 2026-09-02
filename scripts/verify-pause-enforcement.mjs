@@ -54,6 +54,18 @@ mock.module("../netlify/functions/_bridge.mjs", {
     agentBridge: tripwire("agentBridge"),
     bridgeFee: async () => ({ maxFee: 1n, amountMinor: 100n, feeUsdc: 0.01, netUsdc: 0.99 }),
     resolveDestination: () => ({ key: "base", label: "Base", cctpDomain: 6 }),
+    // ⛔ ADDED 2026-09-02, AND THE REASON MATTERS MORE THAN THE LINES.
+    // This stub provided three exports. On 2026-07-31 (d1a2ee1) `_actions.mjs` began importing
+    // `bridgeFeeBand` and `bridgeAckToken` too — and a partial mock that is missing an export does
+    // not fail an assertion, it fails MODULE INSTANTIATION. This suite stopped LOADING that day and
+    // stayed dead for 33 days without ever going red, because nothing ran it.
+    // 🚨 THE SUBJECT OF THIS SUITE IS THE KILL SWITCH. Thirty-three days with no proof that pause
+    // stops money.
+    // ⭐ These two are tripwires on purpose: neither should be REACHED once the pause refuses, so if
+    // the pause ever stops working they fail loudly instead of quietly returning something plausible.
+    bridgeFeeBand: () => ({ band: "none", pct: 0 }),
+    bridgeAckToken: tripwire("bridgeAckToken"),
+    openBridgeQuote: tripwire("openBridgeQuote"),
   },
 });
 mock.module("../netlify/functions/_pay.mjs", { namedExports: { agentPay: tripwire("agentPay") } });

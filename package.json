@@ -103,7 +103,23 @@
     "test:precision": "npx tsx scripts/verify-amount-precision.mjs",
     "test:amountintegrity": "node scripts/verify-executor-amount-integrity.mjs",
     "test:zerofloor": "node scripts/verify-amount-zero-floor.mjs",
-    "test:mutationharness": "node scripts/verify-mutation-harness.mjs"
+    "test:mutationharness": "node scripts/verify-mutation-harness.mjs",
+    "test:pauseenforce": "node --experimental-test-module-mocks scripts/verify-pause-enforcement.mjs",
+    "test:pauseconsist": "node --experimental-test-module-mocks scripts/verify-pause-consistency.mjs",
+    "test:swapcap": "node --experimental-test-module-mocks scripts/verify-swap-cap.mjs",
+    "test:budgetconsist": "node --experimental-test-module-mocks scripts/verify-budget-consistency.mjs",
+    "test:ledgerconc": "node scripts/verify-ledger-concurrency.mjs",
+    "test:ubwithdrawlogic": "node --experimental-test-module-mocks scripts/verify-ub-withdraw.mjs",
+    "test:sweeplogic": "node --experimental-test-module-mocks scripts/verify-sweep.mjs",
+    "test:approvebalance": "node --experimental-test-module-mocks scripts/verify-approve-balance-gate.mjs",
+    "test:approvewrite": "node --experimental-test-module-mocks scripts/verify-approve-writepath.mjs",
+    "test:swapapprove": "node --experimental-test-module-mocks scripts/verify-swap-approve.mjs",
+    "test:swapproposal": "node --experimental-test-module-mocks scripts/verify-swap-proposal.mjs",
+    "test:receiptretry": "node --experimental-test-module-mocks scripts/verify-receipt-read-retry.mjs",
+    "test:selfheal": "node --experimental-test-module-mocks scripts/verify-selfheal.mjs",
+    "test:verifiertrigger": "node --experimental-test-module-mocks scripts/verify-verifier-trigger.mjs",
+    "test:evaluatepersist": "node scripts/verify-evaluate-persist.mjs",
+    "test:ddvaultagree": "node --experimental-test-module-mocks scripts/dd/verify-analyze-agrees-with-vault.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -189,6 +205,22 @@
     "test:precision",
     "test:amountintegrity",
     "test:zerofloor",
-    "test:mutationharness"
+    "test:mutationharness",
+    "test:pauseenforce",
+    "test:pauseconsist",
+    "test:swapcap",
+    "test:budgetconsist",
+    "test:ledgerconc",
+    "test:ubwithdrawlogic",
+    "test:sweeplogic",
+    "test:approvebalance",
+    "test:approvewrite",
+    "test:swapapprove",
+    "test:swapproposal",
+    "test:receiptretry",
+    "test:selfheal",
+    "test:verifiertrigger",
+    "test:evaluatepersist",
+    "test:ddvaultagree"
   ]
 }

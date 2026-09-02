@@ -43,6 +43,12 @@ let txReceipt = null;           // null = "not mined yet" (the read throws, as v
 let balances = { USDC: 100, EURC: 0 };
 mock.module("../netlify/functions/_predict.mjs", {
   namedExports: {
+    // ⛔ ADDED 2026-09-02. `_swap-confirm.mjs` began importing `arcChain` on 2026-07-18 (f52936b);
+    // this stub did not provide it, so the suite stopped LOADING — 46 days dead, never once red,
+    // because a missing export fails at instantiation and there is no verdict to fail.
+    // ⭐ A plain object: nothing here calls a chain method, it is only passed to createPublicClient,
+    // which this stub also replaces. A tripwire would be wrong — being READ is not a violation.
+    arcChain: { id: 10143, name: "Arc Testnet (stub)" },
     publicClient: () => ({
       getTransactionReceipt: async () => {
         if (!txReceipt) throw new Error("not found");

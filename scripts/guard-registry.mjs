@@ -238,24 +238,40 @@ export const FILE_UNWIRED_OK = {
  * and the two must not be spelled the same way, or the second silently becomes the first.
  */
 export const ORPHAN_GUARD_DEBT = [
-  "scripts/verify-approve-balance-gate.mjs", "scripts/verify-approve-writepath.mjs",
-  "scripts/verify-budget-consistency.mjs", "scripts/verify-evaluate-persist.mjs",
-  "scripts/verify-evaluator-rubric.mjs", "scripts/verify-ledger-concurrency.mjs",
-  "scripts/verify-pause-consistency.mjs", "scripts/verify-pause-enforcement.mjs",
-  "scripts/verify-per-user-threading.mjs", "scripts/verify-planflow-rubric.mjs",
-  "scripts/verify-pointer-history.mjs", "scripts/verify-receipt-adversarial.mjs",
-  "scripts/verify-receipt-read-retry.mjs", "scripts/verify-second-opinion.mjs",
-  "scripts/verify-selfheal.mjs", "scripts/verify-supersession.mjs",
-  "scripts/verify-swap-approve.mjs", "scripts/verify-swap-cap.mjs",
-  "scripts/verify-swap-proposal.mjs", "scripts/verify-swap-receipt.mjs",
-  "scripts/verify-sweep.mjs", "scripts/verify-ub-withdraw.mjs",
-  "scripts/verify-verifier-trigger.mjs",
-  "scripts/dd/verify-analyze-agrees-with-vault.mjs",
+  // ⛔ 16 of the original 24 were WIRED on 2026-09-02 after being run: every one passed against
+  // current code. They were green all along and unwatchable — including verify-pause-enforcement,
+  // the proof that the kill switch stops money, dead 33 days on a stale partial mock.
+  //
+  // These five remain, each for a DIFFERENT reason, none of them "nobody looked":
+  "scripts/verify-swap-receipt.mjs",        // load repaired, then RED: the suite mocks `publicClient`
+                                            // but _swap-confirm.mjs builds a DEDICATED client
+                                            // (f52936b, 2026-07-18), so the mock no longer intercepts
+                                            // the balance-delta path. Broken deeper, not a regression.
+  "scripts/verify-receipt-adversarial.mjs", // CONTROL fails: every case returns receipt_not_found, so
+                                            // the four attack passes are VACUOUS. Root cause is in
+                                            // production — _receipt.mjs:141 returns on the first
+                                            // endpoint that ANSWERS, and a pruned mirror's `null` is
+                                            // an answer, so the two-mirror fallback is skipped.
+  "scripts/verify-pointer-history.mjs",     // a ONE-SHOT pre-flight for a supersession that already
+                                            // ran. Its 6 state assertions and 3 DID-NOT-REFUSE cases
+                                            // share one cause: history.length !== 0 now, so the
+                                            // seed-time validations are unreachable.
+  "scripts/verify-second-opinion.mjs",      // 30/2 — RED against a mechanism that legitimately
+                                            // changed. ce58631 (2026-08-20) split refusals so an
+                                            // OUTAGE is no longer labelled a disagreement; the suite
+                                            // asserts the pre-fix labelling. The fix is right.
 ];
-export const MAX_ORPHAN_GUARDS = 24;
+export const MAX_ORPHAN_GUARDS = 4;
 
 /** Operational one-offs and manual tools: they DO things, they do not assert things. */
 export const FILE_UNWIRED_TOOLS = {
+  // ── ⛔ CANNOT RUN UNATTENDED — an EXEMPTION, not debt. Each needs an input this repo will not
+  // put in a blocking aggregate: a secret, a live key, or a required CLI argument. They are runnable
+  // by hand and correct; they are simply not suites.
+  "scripts/verify-per-user-threading.mjs": "requires DELEGATE_ADDRESS. An offline stub-proof of per-user threading that still needs the real delegate address to assert against; test:all must not depend on a deployed env var. [[caps-from-deployed-env-not-code-defaults]]",
+  "scripts/verify-supersession.mjs": "requires --target (e.g. dd-service-v1.1.0). A parameterised STEP in a publication procedure, not a standing check: with no target there is nothing to verify, and it exits asking for one.",
+  "scripts/verify-evaluator-rubric.mjs": "requires ANTHROPIC_API_KEY — it replays the hardened judge against a live model. Costs money per run and its verdict depends on a third party, which is the same reason gate:pins is exempt.",
+  "scripts/verify-planflow-rubric.mjs": "requires ANTHROPIC_API_KEY — replays the plan-aware judge against a live model. Same reasoning as verify-evaluator-rubric.",
   "scripts/_cid.mjs": "IPFS CID helper, imported ad hoc by publishing steps that are themselves manual.",
   "scripts/_pointer-history.mjs": "pointer-history helper for the identity docs; used by hand during a re-publish.",
   "scripts/backtest-citation-derivation.mjs": "a backtest over recorded runs — produces a number for a human, asserts nothing.",
