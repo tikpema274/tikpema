@@ -12,6 +12,7 @@
 // signs with their own key and spends their own funds — the same reasoning already settled for
 // agent-withdraw and ub-withdraw. ⚠️ Sitting beside a capped panel, SILENCE READS AS CAPPED, so
 // the absence is stated rather than left to be inferred from a missing error.
+import { MINT_TIMING } from "../../shared/bridge-timing.mjs";
 import { useEffect, useState } from "react";
 import CustodyNotice from "./CustodyNotice";
 import WalletGuardNotice from "./WalletGuardNotice";
@@ -324,7 +325,7 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
       {result && (
         <div className="status" style={{ color: "var(--emerald)" }}>
           Bridge submitted ✓ — <b>estimated</b> {Number(result.netPredicted).toFixed(4)} USDC to
-          arrive in a few minutes (up to ~20 for some chains). The exact delivered amount appears
+          arrive — {MINT_TIMING}. The exact delivered amount appears
           in your bridges once we have read the destination chain.{" "}
           <a href={`${EXPLORER}/tx/${result.burnHash}`} target="_blank" rel="noreferrer">burn ↗</a>
         </div>

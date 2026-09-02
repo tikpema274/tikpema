@@ -1,3 +1,4 @@
+import { BRIDGE_TIMING, MINT_TIMING } from "../../shared/bridge-timing.mjs";
 import { useEffect, useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import { BridgeReceiptStatus } from "./bridgeReceiptStatus";
@@ -345,8 +346,7 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
               field, for any of the eight chains. Naming fast and slow chains would be inventing it.
               ⭐ And this wording is VERBATIM the manual panel's, so the two do not quote the same
               range differently. */}
-          <li>The Arc burn is instant; the destination mint follows in a few minutes (up to ~20 for
-            some chains).</li>
+          <li>{BRIDGE_TIMING}.</li>
           <li>The exact delivered amount appears once we have read the destination chain — until
             then the arrival is an estimate.</li>
         </ol>
@@ -391,7 +391,7 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
               The exact delivered figure appears below once the destination chain has been
               read. A "~" alone did not carry that distinction. */}
           Bridge submitted ✓ — <b>estimated</b> {Number(run.netUsdc).toFixed(4)} USDC to arrive on{" "}
-          {run.destination?.label ?? destLabel} in a few minutes (up to ~20 for some chains)
+          {run.destination?.label ?? destLabel} — {MINT_TIMING}
           {run.feeUsdc != null && (
             <>
               {" "}

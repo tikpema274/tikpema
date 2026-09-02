@@ -22,6 +22,7 @@
 // finality. ⭐ NEITHER WAS MEASURED FALSE, so neither is changed: a sweep that manufactures
 // findings to look thorough is worth less than one that reports what it can support.
 
+import { MINT_TIMING, MINT_DEADLINE_MINUTES } from "../shared/bridge-timing.mjs";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
@@ -87,8 +88,14 @@ check("⭐⭐ the summary rows are present BEFORE any quote",
 check("⭐⭐ …and the unknown values read as em-dashes, not as zero",
   /—/.test(rendered) && !/0\.0000 USDC/.test(rendered),
   "a zero fee would be a figure the panel does not have");
+// ⭐ REBOUND 2026-09-02 — this pinned the literal "a few minutes (up to ~20 for some chains)" as a
+// PROXY for "Settlement has a value". The literal moved (it was one of two contradictory ranges; see
+// shared/bridge-timing.mjs) and this failed on wording, not on the property.
+// ⛔ The property is unchanged and is now asserted against the SOURCE: Settlement renders whatever
+// the one constant says, so this can never again fail because someone reworded it — nor pass if the
+// row goes blank.
 check("⭐ …while Settlement and Route ARE known from the destination alone",
-  /a few minutes \(up to\s*~20 for some chains\)/.test(rendered) && /Arc to .* via CCTP/.test(rendered));
+  rendered.includes(MINT_TIMING) && /Arc to .* via CCTP/.test(rendered));
 // ⛔ THE BOUND-FEE PROMISE MUST NOT RENDER BESIDE AN EM-DASH. It asserts a binding on a figure, and
 // with no figure there is no binding — a promise about nothing is worse than silence.
 check("⛔ the held-quote promise is ABSENT before a quote exists",
@@ -152,8 +159,17 @@ check("⭐ 'gasless' is still claimed — true on Arc, where gas IS USDC and no 
     saysGasless && namesAFee,
     saysGasless ? "both present" : "⛔ vacuous — 'gasless' is absent");
 }
-check("⭐ the mint window is given as a RANGE with a slow case, not a single number",
-  /a few minutes \(up to\s*~20 for some chains\)/.test(rendered));
+// ═══ ⭐⭐ THE PROPERTY IS REAL; THE OLD WORDING WAS NOT THE PROPERTY ══════════
+// This required a RANGE WITH A SLOW CASE so the panel could never state one optimistic number. That
+// decision stands. What changed is where the slow case comes from: it was "up to ~20 for some
+// chains", a literal that CONTRADICTED the code's own MINT_DEADLINE_MS of 4 minutes — the receipt
+// system flags a mint overdue at 4, while the panel promised twenty.
+// ⭐ So the slow case is now DERIVED from that deadline, and this asserts both halves: a slow case
+// exists, and it is the deadline the system actually enforces. Stronger than the string it replaced.
+check("⭐ the mint window still names a SLOW CASE, not a single number",
+  /\d/.test(MINT_TIMING) && MINT_TIMING.includes(String(MINT_DEADLINE_MINUTES)), MINT_TIMING);
+check("⭐⭐ …and the panel renders that slow case, so copy and receipt bands cannot disagree",
+  rendered.includes(String(MINT_DEADLINE_MINUTES)) && rendered.includes(MINT_TIMING));
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);

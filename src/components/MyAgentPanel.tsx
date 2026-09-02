@@ -1,3 +1,4 @@
+import { BRIDGE_TIMING, MINT_TIMING } from "../../shared/bridge-timing.mjs";
 import { useEffect, useRef, useState } from "react";
 import { agentClient } from "../lib/agentClient";
 import SignInPrompt from "./SignInPrompt";
@@ -485,7 +486,7 @@ function AgentSummary({
           Cross-chain fee ~{Number(b.feeUsdc).toFixed(4)} USDC (taken from the amount) ·
           {" "}~{Number(b.netUsdc).toFixed(4)} USDC arrives on {b.destination.label}.
           <br />
-          Funds leave Arc — the burn is instant, the destination mint follows in ~1–2 min.
+          Funds leave Arc — {BRIDGE_TIMING}.
         </div>
 
         {/* ── THE FEE BAND, ON THE SURFACE USERS ACTUALLY REACH ─────────────────────────
@@ -598,7 +599,7 @@ function AgentSummary({
                 </span>
               ) : (
                 <span>
-                  <span className="spinner" /> Bridging… burn done, waiting for the {bridgeRun.destination.label} mint (~1–2 min).
+                  <span className="spinner" /> Bridging… burn done, waiting for the {bridgeRun.destination.label} mint ({MINT_TIMING})
                 </span>
               )}
             </div>

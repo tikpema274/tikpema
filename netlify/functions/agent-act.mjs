@@ -1,5 +1,6 @@
 import { TxPendingError } from "./_circle.mjs";
 import { connectBlobs } from "./_blobs.mjs";
+import { BRIDGE_TIMING } from "../../shared/bridge-timing.mjs";
 import { json, parseBody, dateAnchor, sendCapUsdc, bridgeCapUsdc, swapCapUsdc, maxSpendUsdc } from "./_arc.mjs";
 import { SWAP_TOKENS } from "./_swap.mjs";
 import { executeAction, valueOfStep } from "./_actions.mjs";
@@ -431,7 +432,7 @@ export async function handler(event) {
         message:
           `Bridge ${amount} USDC from Arc to ${dest.label}. The cross-chain fee is ~${fee.feeUsdc.toFixed(4)} USDC ` +
           `(taken from the amount), so ~${fee.netUsdc.toFixed(4)} USDC arrives on ${dest.label}. ` +
-          `The Arc burn is instant; the destination mint follows in ~1–2 min. Confirm to bridge.`,
+          `${BRIDGE_TIMING}. Confirm to bridge.`,
       });
     }
 

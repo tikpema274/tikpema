@@ -1,3 +1,4 @@
+import { MINT_TIMING } from "../../shared/bridge-timing.mjs";
 import type { ReactNode } from "react";
 
 // BridgeQuoteSummary — the four things a bridge will cost and do, shown BEFORE the action.
@@ -39,7 +40,7 @@ export function BridgeQuoteSummary(
         </div>
       )}
       <div className="summary-row"><span>Settlement</span>
-        <span>a few minutes (up to ~20 for some chains)</span></div>
+        <span>{MINT_TIMING}</span></div>
       <div className="summary-row"><span>Route</span>
         <span>{destinationLabel ? `Arc to ${destinationLabel} via CCTP` : em}</span></div>
       {/* ⭐⭐ PERMISSION, NOT EXPLANATION — and said BEFORE the press, which is exactly where the
