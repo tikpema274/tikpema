@@ -201,72 +201,81 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
         <span className="mono">{w.agentWallet.balance ?? "…"}</span> USDC
       </div>
 
-      <div className="row">
-        <select
-          value={destination}
-          onChange={(e) => {
-            setDestination(e.target.value);
-            reset();
-          }}
-        >
-          {DESTINATIONS.map((d) => (
-            <option key={d.key} value={d.key}>
-              {d.label}
-            </option>
+      {/* ═══ ⭐⭐ ZONE 2 — INPUTS, THEN WHAT IT COSTS, THEN THE ACTION ══════════════════════════════
+          The sequence is the point. This was inputs and act → then cost, so the user committed
+          before the panel had told them anything. */}
+
+      {/* ⛔ FROM IS NOT A SELECT. Arc is the only source, and a disabled dropdown with one option
+          advertises a choice that does not exist. A labelled fact beside a labelled control. */}
+      <div className="field-pair">
+        <div className="field">
+          <label>From</label>
+          <div className="field-static">Arc{" "}
+            <span className="mono">{w.agentWallet.balance ?? "…"} USDC</span></div>
+        </div>
+        <div className="field">
+          {/* ⭐ THE LABEL MOVED ABOVE THE CONTROL. "destination" sat BELOW the select — the only
+              label in the panel positioned that way, and below reads as naming something that
+              already happened rather than what is being chosen. */}
+          <label htmlFor="br-dest">To</label>
+          <select id="br-dest" value={destination}
+            onChange={(e) => { setDestination(e.target.value); reset(); }}>
+            {DESTINATIONS.map((d) => (<option key={d.key} value={d.key}>{d.label}</option>))}
+          </select>
+        </div>
+      </div>
+
+      {/* ⭐ THE TOKEN SITS INSIDE THE FIELD, not floating beside it. Static here because a bridge
+          moves USDC only — on swap this position needs a select, which is why the shape does not
+          generalise unchanged. */}
+      <div className="amount-field">
+        <label className="amount-label" htmlFor="br-amt">Amount</label>
+        <div className="amount-wrap">
+          <span className="amount-prefix">USDC</span>
+          <input id="br-amt" className="amount-input" type="number" min="0" step="0.01"
+            inputMode="decimal" value={amount}
+            onChange={(e) => { setAmount(e.target.value); reset(); }} />
+        </div>
+        {/* ⛔ NO "MAX", AND THE OMISSION IS DELIBERATE — two independent reasons. The per-bridge cap
+            lives server-side (bridgeCapUsdc() in _arc.mjs, read at _actions.mjs:228) and is never
+            sent to the client, so a MAX filling the balance would routinely produce a figure the
+            server refuses. And the fee comes OUT OF the amount, so "spend everything" does not mean
+            here what it means on a send. A fraction of a balance the client legitimately holds is
+            honest; a maximum it cannot compute is not.
+            ⚠️ verify-send-copy:75 pins the sibling principle — never print a cap number it cannot
+            know. This is the same rule applied to a control instead of a sentence. */}
+        <div className="pct-row">
+          {[25, 50, 75].map((p) => (
+            <button key={p} type="button" className="pct" disabled={bridging}
+              onClick={() => {
+                const bal = Number(w.agentWallet?.balance);
+                if (!Number.isFinite(bal) || bal <= 0) return;
+                setAmount(((bal * p) / 100).toFixed(2));
+                reset();
+              }}>{p}%</button>
           ))}
-        </select>
-        <span className="status" style={{ margin: 0 }}>
-          destination
-        </span>
+        </div>
       </div>
 
-      <div className="row" style={{ marginTop: 8 }}>
-        <input
-          type="number"
-          min="0"
-          step="0.01"
-          style={{ maxWidth: 120 }}
-          value={amount}
-          onChange={(e) => {
-            setAmount(e.target.value);
-            reset();
-          }}
-        />
-        <span className="status" style={{ margin: 0 }}>
-          USDC
-        </span>
-        {/* Acceptance gates the button, exactly as the vault card gates its deposit. The
-            server refuses independently — this is the affordance, not the enforcement. */}
-        {/* ⭐⭐ TWO TURNS, AND THE FIRST ONE MOVES NOTHING. Price → show → confirm → burn. The
-            acknowledge gate is unchanged and still sits between: at ≥25% the button stays disabled
-            until the box below is ticked. Only the ordinary case has changed, and only by gaining
-            a figure it never had. */}
-        {!quote ? (
-          <button className="emerald" disabled={bridging || !amountValid || !destination} onClick={getQuote}>
-            {bridging ? "Pricing…" : "Get quote"}
-          </button>
-        ) : (
-          <button
-            className="emerald"
-            disabled={bridging || !amountValid || (disclosure?.band === "acknowledge" && !acked)}
-            onClick={bridge}
-          >
-            {bridging ? "Bridging…" : `Bridge ${amountValid ? amountNum : 0} USDC → ${destLabel}`}
-          </button>
-        )}
-      </div>
+      {/* ⭐⭐ THE SUMMARY SITS BETWEEN THE INPUTS AND THE ACTION, always present. Showing the rows
+          before the values is what makes the panel read as complete rather than sparse — the user
+          knows what they will be told before they ask. Em-dashes where a value is not yet known;
+          Settlement and Route are known from the destination alone. */}
+      <BridgeQuoteSummary quote={run ? null : quote} destinationLabel={destLabel} />
 
-      {/* ═══ ⭐⭐ THE QUOTE, SHOWN BEFORE THE BURN ═══════════════════════════════════════════════
-          🚨 THIS FIGURE IS THE ONE THAT WILL BE CHARGED, and the wording says exactly that and no
-          more. The manual bridge's `maxFee` is a CEILING signed into a transaction the user holds;
-          this one is a server-side quote sealed for a few minutes and bound to the burn. Same
-          number-before-the-button, DIFFERENT guarantee — so it must not borrow the manual panel's
-          sentence, which asserts a binding this path does not have.
-          ⚠️ 4dp MINIMUM: at 2dp a small bridge's fee and arrival collapse into the same displayed
-          number and the user cannot see that most of it went to fees. */}
-      {quote && !run && (
-        <BridgeQuoteSummary quote={quote} />
-      )}
+      {/* ⭐ ONE FULL-WIDTH BUTTON WHOSE LABEL CHANGES, not two. Two buttons would imply two
+          independent actions; this is one sequence with a priced gate in the middle. Editing the
+          amount or destination calls reset(), clearing the quote and returning the label to
+          "Get quote" — so re-quoting needs no control of its own.
+          ⚠️ The acknowledge gate is untouched: at ≥25% the button stays disabled until the box
+          below is ticked. */}
+      <button className="emerald btn-wide"
+        disabled={bridging || !amountValid || !destination ||
+          (!!quote && disclosure?.band === "acknowledge" && !acked)}
+        onClick={quote ? bridge : getQuote}>
+        {bridging ? (quote ? "Bridging…" : "Pricing…")
+          : quote ? `Bridge ${amountValid ? amountNum : 0} USDC → ${destLabel}` : "Get quote"}
+      </button>
 
       {/* ⭐⭐ UNCONDITIONAL, AND THAT IS THE FIX. This first sat INSIDE the quote block, which
           renders only once a quote exists — so the refusal conditions were invisible until after

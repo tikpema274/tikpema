@@ -757,3 +757,58 @@ input.amount-input {
   line-height: 1.6;
   margin-bottom: 7px;
 }
+
+/* ── FROM / TO as a labelled pair, and an amount that owns its token ──────────────────────────── */
+.field-pair { display: flex; gap: 12px; margin: 4px 0 14px; flex-wrap: wrap; }
+.field { flex: 1 1 190px; min-width: 0; }
+.field > label {
+  display: block;
+  font-family: "Space Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+/* ⛔ A FACT, NOT A CONTROL. Arc is the only source; styling it as a disabled select would advertise
+ *   a choice that does not exist, so it reads as a field without pretending to be one. */
+.field-static {
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 11px 13px;
+  font-size: 0.95rem;
+  color: var(--paper-dim);
+}
+
+/* ⭐ The token inside the field. `position:absolute` over padding rather than a flex sibling, so the
+ *   prefix cannot be mistaken for a separate control and the input keeps its full focus ring. */
+.amount-wrap { position: relative; }
+.amount-prefix {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: "Space Mono", monospace;
+  font-size: 0.9rem;
+  color: var(--muted);
+  pointer-events: none;
+}
+.amount-wrap > input.amount-input { padding-left: 68px; }
+
+/* ⛔ 25/50/75 ONLY — no MAX. The per-bridge cap is server-side and the fee comes out of the amount,
+ *   so a client-computed maximum would be a number this panel cannot stand behind. */
+.pct-row { display: flex; gap: 8px; margin-top: 10px; }
+button.pct {
+  flex: 1;
+  font-family: "Space Mono", monospace;
+  font-size: 0.76rem;
+  padding: 7px 0;
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+}
+button.pct:hover:not(:disabled) { border-color: var(--amber-line); color: var(--paper); }
+
+/* ⭐ The action, after the summary, full width — the last thing on the way down. */
+button.btn-wide { display: block; width: 100%; margin-top: 14px; padding: 13px 0; font-size: 0.95rem; }

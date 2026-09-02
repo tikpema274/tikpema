@@ -20,6 +20,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync, writeFileSync } from "node:fs";
 import BridgePanel from "../src/components/BridgePanel";
 import { BridgeQuoteSummary } from "../src/components/BridgeQuoteSummary";
+import { FeeDisclosureBox } from "../src/components/ManualBridgePanel";
 
 const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 const fonts = readFileSync(new URL("../index.html", import.meta.url), "utf8")
@@ -53,10 +54,29 @@ const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
     This is what a user sees before pressing Get quote.</div>
   ${renderToStaticMarkup(<BridgePanel wallet={wallet} />)}
 
-  <div class="pv-label">2 — the summary block, with a quote (real figures)</div>
-  <div class="pv-note">Appears between the button and the hazard row once a quote exists.
-    Judge whether these read as VALUES rather than prose.</div>
-  <div class="plane">${renderToStaticMarkup(<BridgeQuoteSummary quote={quote} />)}</div>
+  <div class="pv-label">2 — summary: no destination chosen yet</div>
+  <div class="pv-note">All four rows present. Route is an em-dash because nothing has been chosen;
+    Settlement is known regardless.</div>
+  <div class="plane">${renderToStaticMarkup(<BridgeQuoteSummary quote={null} />)}</div>
+
+  <div class="pv-label">3 — summary: destination chosen, not yet quoted</div>
+  <div class="pv-note">Two real values, two em-dashes. The held-quote promise is correctly ABSENT —
+    it would be asserting a binding on a figure that does not exist.</div>
+  <div class="plane">${renderToStaticMarkup(
+    <BridgeQuoteSummary quote={null} destinationLabel="Base (Sepolia)" />)}</div>
+
+  <div class="pv-label">4 — summary: quoted (real figures from the live bridge)</div>
+  <div class="pv-note">All four filled, and the held-quote promise now appears beside its figure.</div>
+  <div class="plane">${renderToStaticMarkup(
+    <BridgeQuoteSummary quote={quote} destinationLabel="Base (Sepolia)" />)}</div>
+
+  <div class="pv-label">5 — the acknowledge band (≥25% to fees)</div>
+  <div class="pv-note">Unchanged by this pass — thresholds and wording are as they were. Shown so
+    the heaviest state on the panel can be judged beside the lightest.</div>
+  <div class="plane">${renderToStaticMarkup(<FeeDisclosureBox
+    disclosure={{ band: "acknowledge", feeRatio: 0.532, feeUsdc: 0.0532, netUsdc: 0.0468,
+      amountUsdc: 0.1, destinationLabel: "Base (Sepolia)", ackToken: "x" } as any}
+    busy={false} onAccept={() => {}} />)}</div>
 </div></body></html>`;
 
 writeFileSync("preview-bridge.html", html);

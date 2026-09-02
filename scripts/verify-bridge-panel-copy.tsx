@@ -27,6 +27,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 
 const BridgePanel = (await import("../src/components/BridgePanel")).default;
+const { BridgeQuoteSummary } = await import("../src/components/BridgeQuoteSummary");
 
 let pass = 0, fail = 0;
 const check = (label: string, cond: boolean, extra = "") => {
@@ -71,25 +72,40 @@ check("🚨🚨 the lead no longer promises an EXACT net arrival",
 // one paragraph, not one guarantee.
 check("⭐⭐ the arrival is still called an ESTIMATE until the chain is read",
   /the arrival is an estimate/i.test(rendered) || /estimated\s*arrival/i.test(rendered));
-// ⚠️ ASSERTED ON SOURCE, AND CORRECTLY SO. The held-quote sentence renders only once a quote
-// EXISTS — `renderToStaticMarkup` emits the initial state, where there is no quote and no figure to
-// promise anything about. Asserting it against `rendered` failed for the right reason: the claim is
-// conditional, and a page cannot promise a bound fee before one is bound.
-// ⭐ So this pins that the sentence exists AND sits inside the quote block, which is the property
-// that matters — a bound-fee promise outside that block would be a promise with no fee.
-// [[state-behind-a-transition-is-untested-by-default]]
+// ═══ ⭐⭐ NOW RENDER-BASED, BECAUSE THE BLOCK IS ALWAYS PRESENT ═══════════════════════════════
+// This was asserted on SOURCE, and correctly so at the time: the summary rendered only once a quote
+// existed, and `renderToStaticMarkup` emits the initial state — so there was nothing to assert
+// against. Making the block unconditional means the DEFAULT render now carries the rows, and a
+// render check is strictly stronger than a file read: it sees what a user sees.
+//
+// ⭐ THE PRE-QUOTE STATE IS ITS OWN CLAIM, and this pins both halves — the rows are there, and the
+// two that cannot be known yet say so with an em-dash rather than a zero. A "0.0000 USDC" fee would
+// be a number the panel does not have. [[absence-must-never-read-as-safe]]
+check("⭐⭐ the summary rows are present BEFORE any quote",
+  /Fee/.test(rendered) && /You receive/.test(rendered) &&
+  /Settlement/.test(rendered) && /Route/.test(rendered));
+check("⭐⭐ …and the unknown values read as em-dashes, not as zero",
+  /—/.test(rendered) && !/0\.0000 USDC/.test(rendered),
+  "a zero fee would be a figure the panel does not have");
+check("⭐ …while Settlement and Route ARE known from the destination alone",
+  /a few minutes \(up to\s*~20 for some chains\)/.test(rendered) && /Arc to .* via CCTP/.test(rendered));
+// ⛔ THE BOUND-FEE PROMISE MUST NOT RENDER BESIDE AN EM-DASH. It asserts a binding on a figure, and
+// with no figure there is no binding — a promise about nothing is worse than silence.
+check("⛔ the held-quote promise is ABSENT before a quote exists",
+  !/held for this bridge/i.test(rendered),
+  "it claims a binding on a figure that does not exist yet");
 {
-  // ⚠️ RE-POINTED WHEN THE BLOCK MOVED FILES. This sliced BridgePanel between `{quote && !run && (`
-  // and "summary-hazard"; the summary is now its own component so a suite (and a static preview)
-  // can render the quoted state directly. Reading the component file is both simpler and stricter —
-  // the slice could silently become empty, a file read cannot.
-  const quoteBlock = readFileSync(new URL("../src/components/BridgeQuoteSummary.tsx", import.meta.url), "utf8");
-  check("⭐⭐ the fee is promised as BOUND, not as read-at-execution",
-    /held for this bridge/i.test(quoteBlock) && /re-read when it runs/i.test(quoteBlock),
+  // ⭐ And PRESENT with one — rendered directly, which is what extracting the component bought.
+  // ⚠️ Same normalisation as `rendered` above — this suite has no shared `strip`, and a different
+  // one here would compare two differently-flattened strings.
+  const quoted = renderToStaticMarkup(
+    <BridgeQuoteSummary quote={{ feeUsdc: 0.054071, netUsdc: 0.945929 }} destinationLabel="Base (Sepolia)" />)
+    .replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&").replace(/&#(\d+);/g, (_: string, d: string) => String.fromCharCode(Number(d)))
+    .replace(/\s+/g, " ").trim();
+  check("⭐⭐ …and PRESENT once a quote exists, beside its figure",
+    /held for this bridge/i.test(quoted) && /0\.0541/.test(quoted) && /0\.9459/.test(quoted),
     "consent-fee binding: the figure shown is the figure signed");
-  check("⭐ …and the promise lives WITH the figure, not adrift of it",
-    quoteBlock.length > 0 && quoteBlock.includes("quote.feeUsdc"),
-    "the sentence and the number are in one block");
 }
 check("⛔ …and the superseded claim is GONE, not merely outranked by a newer one",
   !/quoted at execution/i.test(rendered),
