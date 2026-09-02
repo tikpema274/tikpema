@@ -697,3 +697,63 @@ input.amount-input {
 .plane--form h2 {
   font-size: 1.125rem;
 }
+
+/* ═══ THREE-ZONE PANEL — state, action, explanation ═════════════════════════════════════════════
+ * ⛔ SCOPED TO THE BRIDGE PANEL by usage, not by selector: these are new classes applied at one
+ * site, not a redefinition of `.status` (122 instances / 22 components) or `.sub`. One panel is
+ * built and judged before anything propagates. */
+
+/* ── The summary block: labelled rows under the form, replacing a bordered paragraph. ─────────── */
+.summary-block {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-top: 10px;
+  font-size: 0.86rem;
+}
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 5px 0;
+}
+.summary-row + .summary-row { border-top: 1px solid var(--line); }
+.summary-row > span:first-child { color: var(--muted); }
+
+/* ⭐ A note, not a row — it qualifies the rows above it rather than being one. Subordinate by
+ *   size and colour so the eye reads values first and the caveat second. */
+.summary-note {
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--muted);
+  padding: 8px 0 2px;
+}
+/* ⭐ The hazard keeps its own weight inside the block — a refusal condition is not a value and
+ *   must not read as one. Bordered off rather than tinted, so it survives a greyscale render. */
+.summary-hazard {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--warn);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--paper-dim);
+}
+
+/* ── Explanation: present, below the action, out of the way. ──────────────────────────────────── */
+.explain { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); }
+.explain-title {
+  font-family: "Space Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.explain ol { margin: 0; padding-left: 1.2rem; }
+.explain li {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.6;
+  margin-bottom: 7px;
+}

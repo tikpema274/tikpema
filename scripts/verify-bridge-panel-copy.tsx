@@ -64,10 +64,32 @@ section("1 — 🚨 THE PROMISE MAY NOT OUTRUN THE CONFIRMATION");
 check("🚨🚨 the lead no longer promises an EXACT net arrival",
   !/exact\s*fee and net arrival/i.test(rendered),
   rendered.match(/exact[^.]{0,50}/i)?.[0] ?? "");
-check("⭐⭐ …it calls the arrival an ESTIMATE, matching what the confirmation says",
-  /estimated\s*arrival/i.test(rendered));
-check("⭐ …and still promises the fee exactly, because that part IS exact",
-  /exact fee quoted at execution/i.test(rendered));
+// ⚠️ RE-POINTED, NOT RELAXED — the behaviour these described was SUPERSEDED by consent-fee
+// binding. The fee is no longer "quoted at execution": it is priced BEFORE the burn, sealed, and
+// signed unchanged. An assertion that a page still says so would now be pinning a false sentence.
+// ⭐ The CLAIMS survive in stronger form and are asserted here in their new wording; what died is
+// one paragraph, not one guarantee.
+check("⭐⭐ the arrival is still called an ESTIMATE until the chain is read",
+  /the arrival is an estimate/i.test(rendered) || /estimated\s*arrival/i.test(rendered));
+// ⚠️ ASSERTED ON SOURCE, AND CORRECTLY SO. The held-quote sentence renders only once a quote
+// EXISTS — `renderToStaticMarkup` emits the initial state, where there is no quote and no figure to
+// promise anything about. Asserting it against `rendered` failed for the right reason: the claim is
+// conditional, and a page cannot promise a bound fee before one is bound.
+// ⭐ So this pins that the sentence exists AND sits inside the quote block, which is the property
+// that matters — a bound-fee promise outside that block would be a promise with no fee.
+// [[state-behind-a-transition-is-untested-by-default]]
+{
+  const quoteBlock = src.slice(src.indexOf("{quote && !run && ("), src.indexOf("summary-hazard"));
+  check("⭐⭐ the fee is promised as BOUND, not as read-at-execution",
+    /held for this bridge/i.test(quoteBlock) && /re-read when it runs/i.test(quoteBlock),
+    "consent-fee binding: the figure shown is the figure signed");
+  check("⭐ …and the promise lives WITH the figure, not adrift of it",
+    quoteBlock.length > 0 && quoteBlock.includes("quote.feeUsdc"),
+    "the sentence and the number are in one block");
+}
+check("⛔ …and the superseded claim is GONE, not merely outranked by a newer one",
+  !/quoted at execution/i.test(rendered),
+  "a survivor would read as deliberate — see the three other sites this claim lived at");
 check("⭐⭐ …and says the exact delivered amount arrives LATER, from the destination chain",
   /exact delivered\s*amount appears once we have read the destination chain/i.test(rendered));
 
@@ -97,9 +119,19 @@ check("⭐ …and invites a retry rather than a conclusion", /Try again shortly/
 section("4 — ⚠️ CLAIMS LEFT STANDING, RECORDED SO THE NEXT READER KNOWS THEY WERE CONSIDERED");
 check("⭐ 'gasless' is still claimed — true on Arc, where gas IS USDC and no second token is needed",
   /gasless/.test(rendered));
-check("⭐ …and a fee sentence follows it, so the page never implies free",
-  rendered.indexOf("gasless") < rendered.indexOf("cross-chain fee"),
-  `gasless@${rendered.indexOf("gasless")} fee@${rendered.indexOf("cross-chain fee")}`);
+// ⚠️ RETIRED AND REPLACED. This pinned "gasless" preceding the phrase "cross-chain fee" — an
+// ordering between two sentences of ONE paragraph, and that paragraph is gone. Left as-is it failed
+// on indexOf(...) === -1: loud, correct, and about a structure that no longer exists.
+// ⭐ THE PROPERTY IT PROTECTED IS REAL AND IS KEPT: the page must never imply the bridge is free.
+// It is now asserted directly — a fee figure is present wherever "gasless" is claimed — rather than
+// through the proximity of two particular strings. 🚨 PRESENCE FIRST, so it cannot pass on absence.
+{
+  const saysGasless = /gasless/.test(rendered);
+  const namesAFee = /\bFee\b/.test(rendered) || /fee/i.test(rendered);
+  check("⭐ 'gasless' is never claimed without a fee named on the same page",
+    saysGasless && namesAFee,
+    saysGasless ? "both present" : "⛔ vacuous — 'gasless' is absent");
+}
 check("⭐ the mint window is given as a RANGE with a slow case, not a single number",
   /a few minutes \(up to\s*~20 for some chains\)/.test(rendered));
 

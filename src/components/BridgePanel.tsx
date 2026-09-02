@@ -186,11 +186,12 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
     <div className="plane">
       <div className="panel-eyebrow">Bridge</div>
       <h2>Bridge USDC cross-chain</h2>
-      <div className="sub">
-        Move USDC from Arc to another chain via CCTP — gasless, from your wallet. The
-        Arc burn is instant; the destination mint follows in a few minutes (up to
-        ~20 for some chains). Bridges run within your per-bridge and daily safety caps.
-      </div>
+      {/* ⭐ ZONE 1 — STATE. What the user HAS, and the one standing constraint on the action.
+          ⚠️ THE CAPS CLAIM STAYS UP HERE DELIBERATELY. verify-bridge-panel-copy:87 pins it as being
+          "in the lead as well"; moving it to zone 3 would satisfy the regex while falsifying what
+          the assertion means. The other two lead sentences describe HOW BRIDGING WORKS and are now
+          numbered steps in zone 3 — present, below the action, not in the way. */}
+      <div className="sub">Bridges run within your per-bridge and daily safety caps.</div>
 
       <div className="status" style={{ marginTop: 0, marginBottom: 18 }}>
         Bridging from{" "}
@@ -254,21 +255,6 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
         )}
       </div>
 
-      <div className="sub" style={{ marginTop: 6, fontSize: "0.8rem" }}>
-        {/* ⚠️ THIS SENTENCE PROMISED MORE THAN THE CONFIRMATION DELIVERS. It said "you'll see the
-            exact fee and net arrival on the confirmation" — but the confirmation below deliberately
-            says ESTIMATED for the arrival, and its own comment explains why: netUsdc is arithmetic
-            (burned minus the quoted fee), not an observation of what landed. ⭐ "Exact" was true of
-            the FEE and false of the ARRIVAL, and attaching one adjective to both is what made the
-            page promise above what it hedges below — the advertised-vs-delivered gap this codebase
-            closes everywhere else. The exact delivered figure does exist; it just arrives later,
-            once the destination chain has been read. */}
-        A live cross-chain fee (taken from the amount) applies — the confirmation shows the
-        exact fee quoted at execution and an <b>estimated</b> arrival; the exact delivered
-        amount appears once we have read the destination chain. Bridges over your per-bridge
-        cap, or too small to cover the fee, are refused before any funds move.
-      </div>
-
       {/* ═══ ⭐⭐ THE QUOTE, SHOWN BEFORE THE BURN ═══════════════════════════════════════════════
           🚨 THIS FIGURE IS THE ONE THAT WILL BE CHARGED, and the wording says exactly that and no
           more. The manual bridge's `maxFee` is a CEILING signed into a transaction the user holds;
@@ -278,17 +264,47 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
           ⚠️ 4dp MINIMUM: at 2dp a small bridge's fee and arrival collapse into the same displayed
           number and the user cannot see that most of it went to fees. */}
       {quote && !run && (
-        <div className="status" style={{ border: "1px solid var(--line-strong)", borderRadius: 12, padding: 12, marginTop: 10 }}>
-          <div>
-            Fee <b className="mono">{Number(quote.feeUsdc).toFixed(4)} USDC</b> ·
-            {" "}<b className="mono">{Number(quote.netUsdc).toFixed(4)} USDC</b> arrives on {quote.destination.label}.
-          </div>
-          <div className="sub" style={{ marginTop: 6, fontSize: "0.8rem" }}>
+        <div className="summary-block">
+          {/* ⭐ LABELLED ROWS, NOT PROSE. Facts a reader scans rather than parses. */}
+          <div className="summary-row"><span>Fee</span>
+            <b className="mono">{Number(quote.feeUsdc).toFixed(4)} USDC</b></div>
+          <div className="summary-row"><span>You receive</span>
+            <b className="mono">{Number(quote.netUsdc).toFixed(4)} USDC</b></div>
+          {/* ⭐⭐ THIS QUALIFIES THE TWO ROWS ABOVE, so it sits under them rather than becoming a
+              peer row. It is not a value — it is a statement ABOUT the value — and a `Binding: held`
+              row would be jargon while `Quote valid: 3 min` would say something true but different,
+              dropping the part that matters: this figure is the one that gets signed. */}
+          <div className="summary-note">
             This is the fee that will be charged — quoted just now and held for this bridge, not
             re-read when it runs. Price it again if you wait.
           </div>
+          <div className="summary-row"><span>Settlement</span>
+            <span>a few minutes (up to ~20 for some chains)</span></div>
+          <div className="summary-row"><span>Route</span>
+            <span>Arc to {quote.destination.label} via CCTP</span></div>
+          {/* ⭐⭐ PERMISSION, NOT EXPLANATION — and said BEFORE the press, which is exactly where the
+              manual panel says its OPPOSITE. That panel warns "stay on this page until the burn
+              confirms" because its burn is signed in the BROWSER and the receipt is written by a
+              SECOND request; close the tab between and the record is lost. Here the server burns and
+              writes the receipt in ONE request, so no such window exists (verify-user-bridge-
+              recovery.mjs §3). Two panels, opposite instructions, both correct — and a user who has
+              seen both needs the difference AT THE MOMENT, not below the fold. */}
+          <div className="summary-note">
+            You can leave this page once it starts — the bridge completes on its own.
+          </div>
         </div>
       )}
+
+      {/* ⭐⭐ UNCONDITIONAL, AND THAT IS THE FIX. This first sat INSIDE the quote block, which
+          renders only once a quote exists — so the refusal conditions were invisible until after
+          you had already been quoted, and absent entirely from the default render (caught by
+          verify-bridge-panel-copy:84 going red). A rule about WHY a quote might be refused has to
+          be readable BEFORE asking for one. Same shape as FeeDisclosureBox being conditional.
+          [[state-behind-a-transition-is-untested-by-default]] */}
+      <div className="summary-hazard">
+        Bridges over your per-bridge cap, or too small to cover the fee, are refused before any
+        funds move.
+      </div>
 
       {/* ⭐ THE ENTRY POINT. A live route nothing links to is reachable only by typing the hash —
           #/dca sat that way for 22 days. This link ships WITH the route, not after it. */}
@@ -305,6 +321,33 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
           {error}
         </div>
       )}
+
+      {/* ═══ ⭐⭐ ZONE 3 — EXPLANATION, BELOW THE ACTION ═══════════════════════════════════════════
+          🚨 THIS IS THE RESOLUTION OF THE CLUTTER PROBLEM, not a deletion of it. Every objection to
+          shortening this panel was "a user who skipped the marketing page needs this" — and that
+          dissolves once the explanation is on the SAME PAGE, below. Nothing is gone; it is simply
+          no longer between the reader and the action.
+          ⭐ Numbered because these are sequential facts about a process, and a numbered list is
+          scannable in a way a paragraph is not. */}
+      <div className="explain">
+        <div className="explain-title">How this works</div>
+        <ol>
+          <li>Move USDC from Arc to another chain via CCTP — gasless, from your wallet.</li>
+          {/* ⚠️ THE RANGE IS STATED WITHOUT NAMING CHANGES, because the data does not exist:
+              BRIDGE_DESTINATIONS carries label, cctpDomain, explorerTx and aliases — no timing
+              field, for any of the eight chains. Naming fast and slow chains would be inventing it.
+              ⭐ And this wording is VERBATIM the manual panel's, so the two do not quote the same
+              range differently. */}
+          <li>The Arc burn is instant; the destination mint follows in a few minutes (up to ~20 for
+            some chains).</li>
+          <li>The exact delivered amount appears once we have read the destination chain — until
+            then the arrival is an estimate.</li>
+          <li>Prefer to sign it yourself?{" "}
+            <button className="linkbtn" onClick={() => (window.location.hash = "/bridge-manual")}>
+              Bridge from your connected wallet
+            </button>{" "}— your own key, your own funds, and agent caps do not apply.</li>
+        </ol>
+      </div>
 
       {/* ── THE FEE BAND — disclosure, then explicit acceptance ─────────────────────────
           The fee-floor only refuses when NOTHING would arrive. Between that and "worth
@@ -340,8 +383,8 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
 
       {done && (
         <div className="status" style={{ color: "var(--emerald)" }}>
-          {/* ⭐ THIS IS AN ESTIMATE AND MUST SAY SO. netUsdc is arithmetic — the amount
-              burned minus the fee quoted at execution — not an observation of what landed.
+          {/* ⭐ THIS IS AN ESTIMATE AND MUST SAY SO. netUsdc is arithmetic — the amount burned
+              minus the fee that was BOUND for this bridge — not an observation of what landed.
               The exact delivered figure appears below once the destination chain has been
               read. A "~" alone did not carry that distinction. */}
           Bridge submitted ✓ — <b>estimated</b> {Number(run.netUsdc).toFixed(4)} USDC to arrive on{" "}
@@ -349,8 +392,13 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
           {run.feeUsdc != null && (
             <>
               {" "}
-              — a flat network fee of {Number(run.feeUsdc).toFixed(4)} USDC, quoted at execution,
-              is taken out of the amount
+              {/* ⚠️ "quoted at execution" WAS TRUE AND IS NOT. The fee is now priced BEFORE the
+                  burn, sealed, and signed unchanged — so the figure here is the one the user was
+                  shown and accepted, not one read at the moment of execution. The fee itself is
+                  unchanged and still comes out of the amount; only the claim about WHEN it was
+                  priced was superseded. [[clear-on-transition-needs-a-terminal-state-that-reads-nothing]] */}
+              — a flat network fee of {Number(run.feeUsdc).toFixed(4)} USDC, the figure you
+              accepted, is taken out of the amount
             </>
           )}
           .
