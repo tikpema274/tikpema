@@ -215,7 +215,10 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
         <div className="field">
           <label htmlFor="br-from">From</label>
           <select id="br-from" disabled value="arc">
-            <option value="arc">Arc · {w.agentWallet.balance ?? "…"} USDC</option>
+            {/* ⛔ THE CHAIN, NOT THE BALANCE. "Bridging from 0x…c21 · balance 340.00 USDC" sits two
+                lines above, so a balance here is the same number twice — and the field's job is to
+                name the SOURCE, which is a chain. */}
+            <option value="arc">Arc Testnet</option>
           </select>
         </div>
         <div className="field">
@@ -322,6 +325,11 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
           scannable in a way a paragraph is not. */}
       <div className="explain">
         <div className="explain-title">How this works</div>
+        {/* ⛔ THE SELF-SIGNED LINK IS NOT A STEP AND IS NOT LISTED HERE. It was the only numbered
+            item that was not part of the sequence — a navigation option among explanations of how
+            bridging works — and it duplicated the cross-link above, which is where someone deciding
+            between the two paths actually looks. Three steps is the whole sequence.
+            [[duplicate-source-of-truth-is-the-recurring-bug]] */}
         <ol>
           <li>Move USDC from Arc to another chain via CCTP — gasless, from your wallet.</li>
           {/* ⚠️ THE RANGE IS STATED WITHOUT NAMING CHANGES, because the data does not exist:
@@ -333,10 +341,6 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
             some chains).</li>
           <li>The exact delivered amount appears once we have read the destination chain — until
             then the arrival is an estimate.</li>
-          <li>Prefer to sign it yourself?{" "}
-            <button className="linkbtn" onClick={() => (window.location.hash = "/bridge-manual")}>
-              Bridge from your connected wallet
-            </button>{" "}— your own key, your own funds, and agent caps do not apply.</li>
         </ol>
       </div>
 
