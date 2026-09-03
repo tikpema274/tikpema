@@ -1,5 +1,120 @@
 ---
 
+# ⭐⭐ A WALLET'S TYPE IS NOT INFERABLE FROM ITS NAME OR ITS ROLE
+
+**2026-09-03.** `eth_getCode` is one call, it is free, and it decided the meaning of an entire spend.
+
+    AGENT_WALLET    0xc54d4721…b4e621   209 bytes   deployed SCA
+    DELEGATE        0x6db396c1…2bb380     0 bytes   EOA
+    VANILLA_SELLER  0x1a63e59d…18dc99     0 bytes   EOA  (confirmed — it originated transactions)
+    DD_REVENUE      0xb4079673…16ac4      0 bytes   AMBIGUOUS
+
+I chose `VANILLA_SELLER` for a money-moving spike and wrote *"it is a Circle SCA, so gas is
+sponsored"* — inherited from the name and the role, never read. It is an EOA, **ineligible for Gas
+Station by construction**, so the burn could not answer either question it existed to answer and paid
+0.011835 USDC of gas I had asserted would not exist.
+
+⚠️ **0 BYTES IS AMBIGUOUS — EOA *or* UNDEPLOYED SCA.** A Circle SCA is counterfactual until its first
+transaction deploys it. Only originating a transaction with `from == itself`, which only an EOA can
+do, settles it.
+
+⛔ **`dd-revenue-wallet`'s "(SCA, Arc)" IS NOW FLAGGED AS AN UNVERIFIED TYPE CLAIM.** The address reads
+0 bytes and has never transacted, so the note is neither confirmed nor refuted — and a type written in
+a note is not a reading. Flagged rather than trusted or deleted.
+
+⭐ The consequence is not cosmetic: wallet type decides gas sponsorship, submission shape (userOp vs
+plain transaction), and which failure modes exist at all.
+
+---
+
+# ⭐⭐ R1 AND R2 HOLD — the gasless SCA carries the quote tuple, and sponsorship extends to the new target
+
+**2026-09-03, run 2**, burn `0xd5d003c0…0f895` from the agent SCA.
+
+**R1 — SUBMISSION SHAPE.** The burn arrived as an **ERC-4337 userOp**:
+
+    from   0xf4b441ca…ba066   the bundler
+    to     0x5ff137d4…d2789   the EntryPoint      (== the UserOperationEvent emitter)
+    log 23 UserOperationEvent
+
+The **868-byte** `{signedQuote, refundAddress}` tuple went through
+`createContractExecutionTransaction` as `callData` and reached the chain unaltered.
+
+**R2 — SPONSORSHIP.** Balance `28040000 → 27986014`, delta **exactly 53986 = A + F**. **No gas
+component.** And the corroborating half, from a different place in the same receipt: log [24] shows
+the **EntryPoint paying the bundler `0.0316999`** — native-only, because gas is not a token movement.
+
+⭐ **THIS CLOSES THE OPEN ADOPTION QUESTION FROM RUN 1.** Gas Station sponsors the agent SCA against
+`TokenMessengerWithFees` — a target it had never been observed against, and one that could not be
+inferred from the two prior bridges, which targeted `BridgingKitContract`.
+⚠️ Two independent readings of one fact is why it is trustworthy; one would not have been.
+
+---
+
+# ⛔ F5 — DERIVING FALSIFIERS FROM ROWS PREVENTS CONTRADICTION, NEVER OVER-CLAIMING
+
+**2026-09-03.** PR-2 fixed PR-1's defect: every falsifier derived from a numbered row, carrying that
+row's number, so a falsifier contradicting a prediction cannot be written. **That worked.** F5
+faithfully negates R5.
+
+**The row was the problem.** R5 said:
+
+> *"Every movement in R3 and R4 also appears from `0xffff…fffe` at 18 dp, value ×10¹². The two
+> streams have **equal Transfer counts**."*
+
+First clause **TRUE**. Second clause **FALSE**, and it never followed from the first — it silently
+assumed the only native movements are twins of ERC-20 movements. On a sponsored userOp that is false
+by construction: the EntryPoint's gas refund to the bundler is native-only and has no ERC-20
+counterpart, so the streams read **7 and 8**.
+
+⭐⭐ **A DISTINCT DEFECT NEEDING ITS OWN REMEDY.** PR-1's was a falsifier contradicting a row.
+PR-2's is a row asserting more than it can support. Derivation discipline is orthogonal to
+over-claiming — it constrains the relationship *between* the two sections, not the strength of either.
+
+**PR-3's remedy:** every row states **one movement or one value** — never a count, a total, or a
+relationship between sets. A row asserting *"every X has a Y"* may not also assert *"and nothing else
+exists"*. If a row needs two clauses, it becomes two rows, so each is falsifiable alone.
+
+---
+
+# ⭐ THE RECONCILIATION MUST PIN EMITTER AND MOVEMENT — NEVER COMPARE STREAM COUNTS
+
+**2026-09-03.** The design note said pin the emitter, because Arc emits every movement twice and
+merging double-counts by ~1e12. Run 2 adds the sharper rule:
+
+**Counts differ legitimately.** ERC-20 7, native 8, on a correct, successful, sponsored transaction —
+and **sponsored is our normal case**, not an edge. A reconciliation checking "the two streams agree in
+count" would fail on every bridge the agent ever makes.
+
+⭐ So the check is per-movement: pin the **emitter** (`0x3600…0000`), and match on **`from`, `to` and
+`value`** together. The fee leg is *"an ERC-20 Transfer whose `from` is the wallet and whose value is
+the quote's `feeTotalAmount`"* — not *"the ERC-20 Transfer of that value"*, since there are two of
+those, and not a count of anything.
+
+---
+
+# ⚠️ PR-2 §3 ASKED FOR A READ THAT IS NOT EXECUTABLE
+
+**2026-09-03.** PR-2 instructed: read the Gas Station policy before the run, because *"checking it
+after the burn is a wasted opportunity, not a stronger proof"*. **It cannot be done.**
+
+    /v1/w3s/config/entity/gasStation/policies   404
+    /v1/w3s/gasStation/policies                 404
+    /v1/w3s/config/entity/policies              404
+    /v1/w3s/gasStation/policy                   404
+    /v1/w3s/config/entity                       200   <- same key, auth is fine
+
+Circle exposes policy management through the **developer console only**. So Network, Max Daily Spend,
+Max Transaction Spend, Max Operations per Day and Blocklist are unreportable from the API.
+
+⛔ **Recorded as a defect in my own document**, not worked around silently: PR-2 named a precondition
+it could not satisfy, which would have blocked the run if taken literally.
+⭐ The substitute that did the job: **AGENT_WALLET's last three transactions were bundler-originated**
+— sponsored — establishing it is not blocklisted, without spending. Daily-limit headroom remains
+unknowable read-only, which is exactly why R2 stayed a numbered row rather than an assumption.
+
+---
+
 # ⛔ THE PRE-REGISTRATION CONTRADICTED ITSELF — and only the receipt made the two clauses meet
 
 **2026-09-03, migration step 3.** Falsifier 6 read: *"More than one `0x3600…` Transfer of value `F`."*
