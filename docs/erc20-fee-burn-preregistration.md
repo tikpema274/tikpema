@@ -115,3 +115,77 @@ falsifier, not a repaired prediction.
 
 ⭐ And record the values **verbatim at both precisions**. A result recorded only as "the fee matched"
 is the conclusion without its input, which is unfalsifiable the moment retention expires.
+
+---
+---
+
+# RESULT — appended 2026-09-03, nothing above this line edited
+
+**The burn ran.** Wallet `VANILLA_SELLER 0x1a63e59d…18dc99` (not the agent wallet — a failed burn
+would have left a standing allowance to a UUPS proxy on the wallet agent paths use, contradicting the
+same-day decision that between-bridge permission stays zero).
+
+    quote issuedAt 1788450294 · expiry.mode TIMESTAMP · expiresAt 1788450414 · window 120s
+    feeTotalAmount 53971 minor · feeToken 0x3600…0000 (the ERC-20 path — zero prior observations)
+    approve  53972 minor -> TMWF   tx 0x9bb5ce118df94785e72670c1a70670658d4e27c504ff8237b70a9f2000d0f3a9
+    burn     amount 1 minor        tx 0xa47d22b806eb9facf4176994099a65f85744b6c9fadf3d1245784bb4ef651512
+    status 0x1 · block 60266103 · gasUsed 398642 · 22 logs · submitted with 117s left in the window
+
+## ⛔ FALSIFIER 6 FIRED — and the finding is the falsifier
+
+> *6. More than one `0x3600…` Transfer of value `F`. Ambiguity: the reconciliation could not tell
+> which leg is the payer's charge without pinning `from`.*
+
+**Observed: TWO.**
+
+    [1] 0x1a63e59d…18dc99 (payer) -> 0x8745d906… (TMWF)        53971
+    [5] 0x8745d906… (TMWF)        -> 0x08499fce… (FeeManager)  53971
+
+🚨 **AND THIS FALSIFIER CONTRADICTS THE PREDICTED TABLE IN THE SAME DOCUMENT.** Rows 1a and 3 of §1
+predict *both* of those legs explicitly. So falsifier 6, as written, is triggered by the behaviour
+§1 predicts — it is a **defect in the pre-registration**, not a finding about the contract.
+
+⛔ **RECORDED AND STOPPED HERE.** The protocol says: if a falsifier fires, the finding IS the
+falsifier — do not repair the prediction and do not proceed. Steps 5 and 6 were NOT run; the
+settlement timing and the finality threshold are unmeasured. Rewriting falsifier 6 now, after seeing
+the receipt, is exactly the edit a pre-registration exists to prevent. It needs a decision made
+knowingly, not a patch.
+
+⭐ What a corrected falsifier would have to say is *"more than one ERC-20 Transfer of value F **whose
+`from` is the payer**"* — but that is a NEW prediction and belongs in a NEW pre-registration.
+
+## THE OTHER FIVE — all held
+
+| # | falsifier | fired? | evidence |
+|---|---|---|---|
+| 1 | no `0x3600…` Transfer of value F | **no** | log [1], payer → TMWF, `53971` |
+| 2 | a single Transfer of A + F | **no** | no log of value `53972`; fee `53971` and amount `1` are separate |
+| 3 | fee appears only natively despite `feeToken` set | **no** | present in BOTH streams |
+| 4 | F in the log ≠ F in the submitted quote | **no** | `53971` == `53971` |
+| 5 | no native twin for the fee | **no** | native [0], `53971000000000000` |
+
+## THE TWO EMITTER STREAMS — reported separately, never merged
+
+**ERC-20 — emitter `0x3600…0000`, 6 dp — 7 Transfer logs**
+
+    [ 1] payer -> TMWF                53971    <- FEE
+    [ 5] TMWF  -> FeeManager          53971    <- FEE (second leg)
+    [ 9] FeeManager -> fee recipient   5397
+    [11] FeeManager -> fee recipient  48574
+    [13] payer -> TMWF                    1    <- AMOUNT
+    [16] TMWF  -> token minter            1
+    [19] token minter -> 0x0              1    <- burned
+
+**NATIVE — emitter `0xffff…fffe`, 18 dp — 7 Transfer logs**
+
+    [ 0] payer -> TMWF                53971000000000000    <- FEE
+    [ 4] TMWF  -> FeeManager          53971000000000000
+    [ 8] FeeManager -> fee recipient   5397000000000000
+    [10] FeeManager -> fee recipient  48574000000000000
+    [12] payer -> TMWF                    1000000000000    <- AMOUNT
+    [15] TMWF  -> token minter            1000000000000
+    [17] token minter -> 0x0              1000000000000
+
+⛔ **EVERY MOVEMENT APPEARS IN BOTH STREAMS, 7 and 7.** Merging them would double-count the fee to
+107942 minor and the amount to 2. The ~1e12 hazard is confirmed on real bytes, not inferred.
+⭐ The 10/90 split carried over from the native-path observation held exactly: `5397 + 48574 = 53971`.
