@@ -1,4 +1,5 @@
 import { internalToken } from "./_auth.mjs";
+import { usdcDecimalToMinorExact } from "./_fee-reconcile.mjs";
 import { writeReceiptNeverThrows, writePendingReceiptNeverThrows, SUBMITTED_STATE, PENDING_STAGES, ackTokenFingerprint, readPendingReceipt, retirePendingReceipt } from "./_bridge-receipts.mjs";
 
 // RECORD A BRIDGE — the write-and-trigger pair, in ONE place, called from the HTTP
@@ -150,6 +151,33 @@ function feePair(src, { burnHash } = {}) {
       `[bridge-receipt] 🚨 FEE INVARIANT VIOLATED — charged ${charged} > disclosed ${disclosed}` +
       `${burnHash ? ` on ${burnHash}` : ""}. The user was charged MORE than they were shown.`
     );
+  }
+  // 🚨🚨 THE TWO DISCLOSED FIGURES MUST BE THE SAME QUANTITY IN TWO UNITS — CHECKED AT THE WRITE.
+  //
+  // `feeDisclosed` (decimal, what the user saw) and `feeDisclosedMinor` (integer, what the post-burn
+  // reconciliation compares) come from ONE quote object. They cannot legitimately disagree.
+  //
+  // ⛔ THE INVERSION THIS CATCHES IS AHEAD OF US. Under CCTP upfront fees the burn's `maxFee` becomes
+  // EMPTY_MAX_FEE — zero, measured on-chain — and the real fee moves to the quote's
+  // `feeTotalAmount`. A migration that leaves this writer pointed at `maxFee` would store `"0"` here
+  // beside a real decimal, and EVERY bridge would reconcile MISMATCHED: a permanent alarm blaming
+  // Circle for our own field drift. ⭐ The reader turns that into `disclosed_incoherent`
+  // (an `unreadable`, not a `mismatched`); this shouts at the point the record is CREATED, which is
+  // the only place the writer can be identified.
+  // ⛔ IT DOES NOT REFUSE, for the same reason the charged>disclosed check does not: the money has
+  // already moved, and a receipt must be written even when it is surprising.
+  const minorStr = typeof src?.feeDisclosedMinor === "string" ? src.feeDisclosedMinor : null;
+  if (minorStr !== null && typeof disclosed === "number") {
+    const fromDecimal = usdcDecimalToMinorExact(disclosed);
+    if (fromDecimal !== null && fromDecimal !== BigInt(minorStr)) {
+      console.error(
+        `[bridge-receipt] 🚨 DISCLOSED FEE INCOHERENT — feeDisclosed ${disclosed} USDC is ` +
+        `${fromDecimal} minor, but feeDisclosedMinor says ${minorStr}` +
+        `${burnHash ? ` on ${burnHash}` : ""}. The two are one quantity in two units and a writer ` +
+        `has pointed them at different fields. The fee reconciliation will read this as ` +
+        `\`disclosed_incoherent\` rather than as an overcharge.`
+      );
+    }
   }
   return {
     feeCharged: charged,

@@ -31,7 +31,10 @@ const QUOTED = {
   outcome: "quoted", executed: false, quoted: true,
   quote: { amountUsdc: 1, destination: { key: "base", label: "Base (Sepolia)" },
     feeUsdc: 0.054147, netUsdc: 0.945853, band: "none", feeRatio: 0.054147,
-    expiresInMs: 180000,
+    // ⚠️ 120000, NOT 180000 — and the change is the point. This is now a DERIVED duration: the
+    // tighter of our seal's TTL and Circle's own quote window, computed server-side by
+    // `quoteWindowMs`. The old fixture carried our constant because the field did too.
+    expiresInMs: 120000,
     // ⚠️ CONSTRUCTED, NOT A LITERAL. A sealed quote is `base64url(payload).mac`, which is the exact
     // shape of a JWT — written out it trips the pre-commit scanner as `generic-api-key`, and it did
     // (blocking the commit that carried this file). ⭐ Building it removes the FINDING rather than

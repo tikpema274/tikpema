@@ -240,15 +240,66 @@ section("4 — THE CONVERSION IS COMPUTED, AND REFUSES RATHER THAN ROUNDS");
     minorToUsdcString(1n) === "0.000001" && minorToUsdcString(1000000n) === "1.000000");
 
   // ── which figure the record supplies ─────────────────────────────────────────────────────────
-  check("⭐⭐ the STORED integer wins over the decimal — no conversion on a new receipt",
-    disclosedFeeMinor({ feeDisclosedMinor: "53985", feeDisclosed: 0.05 }) === 53985n,
-    "if the decimal were preferred this would be 50000");
-  check("  …a legacy receipt converts exactly from its decimal", disclosedFeeMinor({ feeDisclosed: 0.053985 }) === 53985n);
-  check("  …the pre-2026-08-30 `feeUsdc` name still reads", disclosedFeeMinor({ feeUsdc: 0.053971 }) === 53971n);
-  check("⛔ a receipt with no fee at all yields null — which becomes `disclosed_unknown`, not zero",
-    disclosedFeeMinor({}) === null);
-  check("⛔ …and an inexact decimal yields null rather than a rounded comparison",
-    disclosedFeeMinor({ feeDisclosed: 0.00000012 }) === null);
+  const dfm = (r) => disclosedFeeMinor(r);
+  check("⭐⭐ the STORED integer is used — no conversion at all on a new receipt",
+    dfm({ feeDisclosedMinor: "53985", feeDisclosed: 0.053985 }).minor === 53985n);
+  check("  …a legacy receipt converts exactly from its decimal", dfm({ feeDisclosed: 0.053985 }).minor === 53985n);
+  check("  …the pre-2026-08-30 `feeUsdc` name still reads", dfm({ feeUsdc: 0.053971 }).minor === 53971n);
+  check("⛔ a receipt with no fee at all → `disclosed_unknown`, never zero",
+    dfm({}).minor === null && dfm({}).reason === "disclosed_unknown");
+  check("⛔ …and an inexact decimal → `disclosed_not_exact`, never a rounded comparison",
+    dfm({ feeDisclosed: 0.00000012 }).minor === null && dfm({ feeDisclosed: 0.00000012 }).reason === "disclosed_not_exact");
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("4b — 🚨🚨 THE feeDisclosedMinor BINDING — the inversion that is AHEAD of us");
+{
+  // ⛔ THE CONCRETE FAILURE. Under CCTP upfront fees the burn's `maxFee` becomes EMPTY_MAX_FEE —
+  // ZERO, measured on-chain in run 2's DepositForBurn (`data[5] = 0`) — and the real fee moves to
+  // the quote's `feeTotalAmount`. A migration that leaves the writer pointed at `maxFee` stores
+  // "0" beside a real decimal. Without a cross-check this reader compares an observed 53985
+  // against 0 and returns MISMATCHED for EVERY BRIDGE: a permanent alarm, correctly loud about
+  // entirely the wrong thing, blaming Circle for our own field drift.
+  const observed = observeFeeMovement(RUN2.logs, { payer: RUN2_PAYER });
+
+  // THE ADOPTION-INVERSION RECEIPT, written exactly as a maxFee-pointed writer would write it.
+  const inverted = { feeDisclosed: 0.053985, feeDisclosedMinor: "0" };
+  const d = disclosedFeeMinor(inverted);
+  check("🚨🚨 a receipt whose two disclosed figures disagree yields NO comparable value",
+    d.minor === null, String(d.minor));
+  check("⭐⭐ …and the reason is `disclosed_incoherent` — the record contradicts ITSELF",
+    d.reason === "disclosed_incoherent", d.reason);
+  // ⭐⭐ THE VERDICT IS THE WHOLE POINT: `unreadable`, NOT `mismatched`. A record that contradicts
+  // itself cannot support a claim that a user was charged something other than what they were shown.
+  const v = reconcileFee({ observed, disclosedMinor: d.minor });
+  check("⭐⭐ the verdict is UNREADABLE, never MISMATCHED — we do not know what the user was shown",
+    v.verdict === "unreadable", JSON.stringify(v));
+  // ⛔ THE CONTROL, and without it the assertion above is about nothing. The SAME observation and
+  // the SAME decimal, with a COHERENT integer, must reach a real verdict — so `unreadable` above is
+  // caused by the disagreement and not by the fixture being unreadable for some other reason.
+  const coherent = disclosedFeeMinor({ feeDisclosed: 0.053985, feeDisclosedMinor: "53985" });
+  check("⛔ CONTROL: the same figures, coherent, reconcile to MATCHED",
+    reconcileFee({ observed, disclosedMinor: coherent.minor }).verdict === "matched");
+
+  // ⚠️ AND THE CROSS-CHECK MUST NOT FIRE ON A LEGACY DECIMAL IT CANNOT CONVERT. An unconvertible
+  // decimal is not evidence the integer is wrong; treating it as such would turn a conversion limit
+  // into an accusation about a writer.
+  check("⚠️ an unconvertible decimal beside a stored integer TRUSTS the integer, and does not accuse",
+    disclosedFeeMinor({ feeDisclosed: 0.00000012, feeDisclosedMinor: "53985" }).minor === 53985n);
+
+  // ── THE BINDING, STATED ON THE PRODUCER ──────────────────────────────────────────────────────
+  // 🚨 The two figures must come from ONE object, and the writer must not be free to pick a second
+  // source. Asserted on source because the drift this catches is a future EDIT, not a runtime state.
+  const actions = readFileSync("netlify/functions/_actions.mjs", "utf8");
+  const pairs = [...actions.matchAll(/feeDisclosed: ([\w.]+),[\s\S]{0,900}?feeDisclosedMinor: String\(([\w.]+)\.maxFee\)/g)];
+  check("⭐⭐ every `feeDisclosed` is written beside a `feeDisclosedMinor` from the SAME object",
+    pairs.length === 2 && pairs.every(([, dec, min]) => dec.split(".")[0] === min),
+    pairs.map(([, dec, min]) => `${dec} ↔ ${min}.maxFee`).join(" · ") || "NO PAIRS FOUND — the scan is vacuous");
+  // ⭐ And the writer persists it rather than dropping it on the floor.
+  const rec = readFileSync("netlify/functions/_bridge-record.mjs", "utf8");
+  check("⭐ …and the receipt writer persists it, cross-checking the pair as it goes",
+    /feeDisclosedMinor: typeof src\?\.feeDisclosedMinor === "string"/.test(rec) &&
+    /DISCLOSED FEE INCOHERENT/.test(rec));
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════

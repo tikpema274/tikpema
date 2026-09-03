@@ -118,6 +118,7 @@ export const FEE_RECON_REASONS = Object.freeze([
   "payer_unknown",
   "disclosed_unknown",
   "disclosed_not_exact",
+  "disclosed_incoherent",
   "chain_unreadable",
   "burn_absent",
   "burn_reverted",
@@ -153,17 +154,53 @@ export function usdcDecimalToMinorExact(v) {
 /**
  * The DISCLOSED fee in minor units — the quantity the comparison is actually made in.
  *
+ * @returns {{minor: bigint|null, reason: string|null}} — `minor` null ⇒ `reason` says which
+ *          question could not be answered. ONE function, so the value and the explanation for its
+ *          absence cannot disagree.
+ *
  * ⭐⭐ PREFERS THE STORED INTEGER, WHICH IS WHY IT IS STORED. `feeDisclosedMinor` is written at burn
- * time straight from the quote's own BigInt (`fee.maxFee`), so on a new receipt there is NO
- * conversion to get wrong. The decimal path exists only for records written before that field, and
- * it refuses rather than rounds. ⚠️ `feeUsdc` is the pre-2026-08-30 field name.
+ * time straight from the quote's own BigInt, so on a new receipt there is NO conversion to get
+ * wrong. The decimal path exists only for records written before that field, and it refuses rather
+ * than rounds. ⚠️ `feeUsdc` is the pre-2026-08-30 field name.
+ *
+ * ═══ 🚨🚨 THE TWO STORED FIGURES ARE CROSS-CHECKED, AND THIS PREVENTS A SILENT INVERSION ═══════
+ *
+ * A receipt carries the disclosed fee TWICE — as a decimal (`feeDisclosed`, what the user saw) and
+ * as an integer (`feeDisclosedMinor`, what this compares). They are written from ONE quote object
+ * and are the same quantity in two units, so they cannot legitimately disagree.
+ *
+ * ⛔ THE FAILURE THIS EXISTS FOR IS CONCRETE AND IT IS AHEAD OF US, NOT BEHIND. `feeDisclosedMinor`
+ * is written from the fee object's minor-unit field. Under CCTP upfront fees the burn's `maxFee`
+ * becomes `EMPTY_MAX_FEE` — **zero**, measured on-chain in the run-2 `DepositForBurn` — and the real
+ * fee moves to the quote's `feeTotalAmount`. If the migration leaves the writer pointed at `maxFee`,
+ * every receipt would carry `feeDisclosedMinor: "0"` beside a `feeDisclosed` of ~0.054, this reader
+ * would compare an observed 53985 against 0, and EVERY BRIDGE WOULD RECONCILE AS **MISMATCHED** —
+ * a permanent alarm, correctly loud about the wrong thing, blaming Circle for our own field drift.
+ *
+ * ⭐⭐ SO A RECORD THAT CONTRADICTS ITSELF SUPPORTS NO VERDICT ABOUT AN OVERCHARGE. Disagreement
+ * yields `disclosed_incoherent` — an `unreadable`, not a `mismatched`. That is the honest answer:
+ * we do not know what the user was shown, so we cannot say they were shown something else.
+ * ⚠️ It is deliberately a DISTINCT reason from `disclosed_not_exact` (a decimal we could not convert
+ * exactly). One says the record is self-contradictory; the other says it is unrepresentable. Same
+ * verdict, different causes, and only the first means a writer is wrong.
  */
 export function disclosedFeeMinor(receipt) {
   const stored = receipt?.feeDisclosedMinor;
-  if (typeof stored === "string" && /^\d+$/.test(stored)) return BigInt(stored);
+  const hasStored = typeof stored === "string" && /^\d+$/.test(stored);
   const dec = receipt?.feeDisclosed ?? receipt?.feeUsdc ?? null;
-  if (dec == null) return null;
-  return usdcDecimalToMinorExact(Number(dec));
+  const fromDec = dec == null ? null : usdcDecimalToMinorExact(Number(dec));
+
+  if (hasStored) {
+    const minor = BigInt(stored);
+    // ⚠️ Only cross-check when the decimal is BOTH present and exactly representable. An
+    // unconvertible legacy decimal is not evidence the integer is wrong, and treating it as such
+    // would turn a conversion limit into an accusation about the writer.
+    if (fromDec !== null && fromDec !== minor) return { minor: null, reason: "disclosed_incoherent" };
+    return { minor, reason: null };
+  }
+  if (dec == null) return { minor: null, reason: "disclosed_unknown" };
+  if (fromDec === null) return { minor: null, reason: "disclosed_not_exact" };
+  return { minor: fromDec, reason: null };
 }
 
 /**

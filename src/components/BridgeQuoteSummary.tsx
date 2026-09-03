@@ -19,7 +19,8 @@ import type { ReactNode } from "react";
 // binding to assert. It appears with the quote and not before.
 // [[absence-must-never-read-as-safe]]
 export function BridgeQuoteSummary(
-  { quote, destinationLabel }: { quote: any | null; destinationLabel?: string },
+  { quote, destinationLabel, secondsLeft }:
+    { quote: any | null; destinationLabel?: string; secondsLeft?: number | null },
 ): ReactNode {
   const em = "—";
   return (
@@ -36,7 +37,22 @@ export function BridgeQuoteSummary(
       {quote && (
         <div className="summary-note">
           This is the fee that will be charged — quoted just now and held for this bridge, not
-          re-read when it runs. Price it again if you wait.
+          re-read when it runs.{" "}
+          {/* ═══ ⭐⭐ THE REMAINING TIME, WHEN THE SERVER SENT ONE ═════════════════════════════════
+              "Price it again if you wait" was untimed advice while the only deadline was our own
+              3-minute seal, whose expiry costs a re-quote and nothing else.
+              🚨 UNDER CCTP UPFRONT FEES IT STOPS BEING ADVICE. The quote carries its own ~120s
+              deadline and a burn submitted past it REVERTS on chain — after the approve has already
+              confirmed. So the sentence that used to say "you may want to" now has to say HOW LONG,
+              because a human confirm step can genuinely exhaust that window.
+              ⛔ AND THE UNTIMED SENTENCE STAYS FOR THE CASE WHERE WE DO NOT KNOW. A missing window
+              must not silently drop the warning — absence of a number is not absence of a deadline.
+              [[absence-must-never-read-as-safe]] */}
+          {typeof secondsLeft === "number"
+            ? (secondsLeft > 0
+                ? <>This price holds for <b>{secondsLeft}s</b> — after that it must be priced again.</>
+                : <><b>This price has expired.</b> Price it again before bridging.</>)
+            : <>Price it again if you wait.</>}
         </div>
       )}
       <div className="summary-row"><span>Settlement</span>

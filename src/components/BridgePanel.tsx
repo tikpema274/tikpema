@@ -57,6 +57,33 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
   // burn; `quote.quoteToken` is opaque and returned verbatim so the fee shown is the fee signed.
   const [quote, setQuote] = useState<any>(null);
   const [acked, setAcked] = useState(false);
+  // ═══ ⭐⭐ THE QUOTE COUNTDOWN — FROM A DURATION AND OUR OWN ELAPSED TIME ══════════════════════
+  //
+  // ⛔ NEVER `serverDeadline - Date.now()`. That subtracts a SERVER instant from the DEVICE clock,
+  // so every second of skew is a second of wrong countdown — and a fast device would show a live
+  // quote as expired, or an expired one as live. The server sends how LONG the quote is good for;
+  // the client measures how long IT has waited. No shared clock, nothing to disagree about.
+  //
+  // ⭐ WHY IT MATTERS MORE THAN IT USED TO. Under CCTP upfront fees the quote carries its own
+  // deadline and a burn submitted past it REVERTS on chain — after the approve has confirmed. The
+  // window is ~120s, which a human confirm step can genuinely exhaust. `expiresInMs` is the tighter
+  // of our seal's TTL and the quote's own window, computed server-side.
+  const [quotedAt, setQuotedAt] = useState<number | null>(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!quote || quotedAt == null) return;
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [quote, quotedAt]);
+  // ⚠️ `tick` is read so the interval actually re-renders this value; without it the countdown
+  // would be computed once and frozen — a stale number that looks live.
+  void tick;
+  const msLeft = quote && quotedAt != null && Number.isFinite(Number(quote.expiresInMs))
+    ? Number(quote.expiresInMs) - (Date.now() - quotedAt) : null;
+  const secondsLeft = msLeft == null ? null : Math.max(0, Math.ceil(msLeft / 1000));
+  // ⛔ `null` is NOT expired. A quote whose window the server did not send is one we cannot time,
+  // and treating "we don't know" as "it's dead" would block a bridge that would have worked.
+  const quoteExpired = !!quote && secondsLeft !== null && secondsLeft <= 0;
 
   const loadReceipts = async () => {
     try {
@@ -91,7 +118,10 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
     // destination and amount, so the server would REFUSE a carried-over token — but the user would
     // have seen a figure for the OLD amount sitting above the new one until it did. Clearing here
     // means the panel never shows a price that does not belong to what is in the field.
-    setQuote(null);
+    // ⚠️ AND ITS STAMP WITH IT. A cleared quote beside a live `quotedAt` would leave the countdown
+    // running against nothing — the clear must cover every piece of the quote's state, not the
+    // piece that happens to be rendered.
+    setQuote(null); setQuotedAt(null);
   };
 
   // ═══ ⭐⭐ TURN 1 — PRICE IT, SHOW IT, MOVE NOTHING ═════════════════════════════════════════════
@@ -100,11 +130,14 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
   // were the ones being blocked. Now every bridge is quoted first.
   async function getQuote() {
     if (!amountValid || !destination) return;
-    setError(""); setQuote(null); setDisclosure(null); setAcked(false); setRun(null);
+    setError(""); setQuote(null); setQuotedAt(null); setDisclosure(null); setAcked(false); setRun(null);
     setBridging(true);
     try {
       const res: any = await w.bridgeFromAgent(amountNum, destination, undefined, { quoteOnly: true });
-      if (res?.quoted) setQuote(res.quote);
+      // ⭐ THE STAMP IS TAKEN THE MOMENT THE ANSWER LANDS, on the CLIENT clock — the same clock
+      // the countdown reads from. Stamping from anything server-side would reintroduce the skew
+      // the duration exists to avoid.
+      if (res?.quoted) { setQuote(res.quote); setQuotedAt(Date.now()); }
       else setError(res?.blocked || "Could not price this bridge.");
     } catch (e: any) {
       setError(describeError(e));
@@ -133,7 +166,7 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
       setRun(res);
       // ⭐ A SPENT QUOTE IS GONE. It is bound to this amount and destination and has just been
       // consumed; leaving it would show a pre-burn price beside a completed burn.
-      setQuote(null);
+      setQuote(null); setQuotedAt(null);
       // Blobs is eventually consistent (~11s), so the receipt we just wrote may not be
       // visible yet. Refresh now AND after the window, rather than concluding absence
       // from one early miss.
@@ -282,19 +315,24 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
           em-dashes directly above a confirmation carrying the real figures — two contradictory
           answers to "what did this cost", stacked. The confirmation supersedes the summary, so the
           summary goes rather than empties. [[absence-must-never-read-as-safe]] */}
-      {!run && <BridgeQuoteSummary quote={quote} destinationLabel={destLabel} />}
+      {!run && <BridgeQuoteSummary quote={quote} destinationLabel={destLabel} secondsLeft={secondsLeft} />}
 
       {/* ⭐ ONE FULL-WIDTH BUTTON WHOSE LABEL CHANGES, not two. Two buttons would imply two
           independent actions; this is one sequence with a priced gate in the middle. Editing the
           amount or destination calls reset(), clearing the quote and returning the label to
           "Get quote" — so re-quoting needs no control of its own.
           ⚠️ The acknowledge gate is untouched: at ≥25% the button stays disabled until the box
-          below is ticked. */}
+          below is ticked.
+          ⛔ AN EXPIRED QUOTE DISABLES THE BURN, AND THE LABEL SAYS WHY. Under upfront fees a burn
+          submitted past the quote's deadline REVERTS on chain — after the approve has confirmed —
+          so letting the press through would cost gas and leave a standing allowance for nothing.
+          ⚠️ `quoteExpired` is false when the window is UNKNOWN: we do not block on ignorance. */}
       <button className="emerald btn-wide"
-        disabled={bridging || !amountValid || !destination ||
+        disabled={bridging || !amountValid || !destination || quoteExpired ||
           (!!quote && disclosure?.band === "acknowledge" && !acked)}
         onClick={quote ? bridge : getQuote}>
         {bridging ? (quote ? "Bridging…" : "Pricing…")
+          : quoteExpired ? "Quote expired — price it again"
           : quote ? `Bridge ${amountValid ? amountNum : 0} USDC → ${destLabel}` : "Get quote"}
       </button>
 

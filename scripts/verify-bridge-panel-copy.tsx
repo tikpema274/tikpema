@@ -113,6 +113,39 @@ check("⛔ the held-quote promise is ABSENT before a quote exists",
   check("⭐⭐ …and PRESENT once a quote exists, beside its figure",
     /held for this bridge/i.test(quoted) && /0\.0541/.test(quoted) && /0\.9459/.test(quoted),
     "consent-fee binding: the figure shown is the figure signed");
+
+  // ═══ ⭐⭐ HOW LONG THE PRICE HOLDS — RENDERED, NOT JUST COMPUTED ══════════════════════════════
+  // 🚨 `expiresInMs` was sent by the server for months and read by NOTHING. Invisible when right and
+  // invisible when wrong — and it was about to become wrong by a minute, because Circle's quote
+  // window is ~120s while our constant said 180000.
+  // ⛔ AND UNDER UPFRONT FEES THE SENTENCE STOPS BEING ADVICE. A burn past the quote's deadline
+  // REVERTS on chain, after the approve has confirmed — so "price it again if you wait" has to say
+  // HOW LONG. Rendered here rather than asserted on source, because only rendering can show it.
+  const strip = (n: any) => renderToStaticMarkup(n)
+    .replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&").replace(/&#(\d+);/g, (_: string, d: string) => String.fromCharCode(Number(d)))
+    .replace(/\s+/g, " ").trim();
+  const fee = { feeUsdc: 0.054071, netUsdc: 0.945929 };
+  const live = strip(<BridgeQuoteSummary quote={fee} destinationLabel="Base (Sepolia)" secondsLeft={97} />);
+  check("⭐⭐ a live quote RENDERS its remaining seconds",
+    /This price holds for 97s/.test(live) && !/Price it again if you wait/.test(live), live.slice(-150));
+
+  const dead = strip(<BridgeQuoteSummary quote={fee} destinationLabel="Base (Sepolia)" secondsLeft={0} />);
+  check("⭐⭐ an expired quote SAYS SO, rather than counting down to nothing",
+    /This price has expired/i.test(dead) && !/holds for/.test(dead), dead.slice(-140));
+
+  // ⛔ AND THE UNTIMED SENTENCE SURVIVES FOR THE CASE WHERE WE DO NOT KNOW. A missing window must
+  // not silently drop the warning — absence of a number is not absence of a deadline.
+  const untimed = strip(<BridgeQuoteSummary quote={fee} destinationLabel="Base (Sepolia)" />);
+  check("⛔ with NO window the warning is still there, just untimed",
+    /Price it again if you wait/.test(untimed) && !/holds for/.test(untimed) && !/has expired/i.test(untimed),
+    untimed.slice(-130));
+  // 🚨 EXACTLY ONE of the three sentences ever renders — two would contradict each other about
+  // whether the price is still good.
+  for (const [name, t] of [["live", live], ["expired", dead], ["untimed", untimed]] as const) {
+    const hits = [/holds for/, /has expired/i, /Price it again if you wait/].filter((re) => re.test(t)).length;
+    check(`🚨 the ${name} quote renders EXACTLY ONE validity sentence`, hits === 1, `${hits} matched`);
+  }
 }
 check("⛔ …and the superseded claim is GONE, not merely outranked by a newer one",
   !/quoted at execution/i.test(rendered),

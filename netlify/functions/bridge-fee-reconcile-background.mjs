@@ -70,14 +70,16 @@ export async function handler(event) {
   // ── THE TWO INPUTS WE OWN, CHECKED BEFORE SPENDING AN RPC CALL ────────────────────────────────
   // ⚠️ Both are OUR OWN record being incomplete, not the chain being unreadable. They get their own
   // reasons so a reader is never told "we could not read the chain" about a chain we never asked.
-  const disclosed = disclosedFeeMinor(receipt);
+  // ⭐ ONE CALL, AND THE REASON COMES BACK WITH THE VALUE. This used to re-derive "why was it null?"
+  // here from the receipt's own fields — a second copy of the decision, free to disagree with the
+  // one that actually produced the null.
+  const { minor: disclosed, reason: disclosedReason } = disclosedFeeMinor(receipt);
   if (!receipt.payer) {
     return await finish({ ...record, verdict: "unreadable", reason: "payer_unknown", detail: null,
       feeObservedMinor: null, feeDisclosedMinor: disclosed == null ? null : String(disclosed) });
   }
   if (disclosed == null) {
-    const why = (receipt.feeDisclosed ?? receipt.feeUsdc) == null ? "disclosed_unknown" : "disclosed_not_exact";
-    return await finish({ ...record, verdict: "unreadable", reason: why, detail: null,
+    return await finish({ ...record, verdict: "unreadable", reason: disclosedReason, detail: null,
       feeObservedMinor: null, feeDisclosedMinor: null });
   }
 

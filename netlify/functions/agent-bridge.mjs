@@ -3,7 +3,7 @@ import { TxPendingError } from "./_circle.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody } from "./_arc.mjs";
 import { executeAction } from "./_actions.mjs";
-import { resolveDestination, bridgeFee, bridgeFeeBand, sealBridgeQuote, QUOTE_TTL_MS } from "./_bridge.mjs";
+import { resolveDestination, bridgeFee, bridgeFeeBand, sealBridgeQuote, quoteWindowMs } from "./_bridge.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { recordBridge, recordPendingBridge } from "./_bridge-record.mjs";
@@ -88,7 +88,24 @@ export async function handler(event) {
         netUsdc: Number(fee.netUsdc.toFixed(6)),
         band: band.band,
         feeRatio: band.feeRatio,
-        expiresInMs: QUOTE_TTL_MS,
+        // ═══ ⭐⭐ A DURATION, DERIVED — NOT OUR CONSTANT, AND NOT AN INSTANT ════════════════════
+        //
+        // 🚨 THIS WAS `QUOTE_TTL_MS` AND NOTHING RENDERED IT. A server field written and never read
+        // is invisible when it is right and invisible when it is wrong — and it was about to become
+        // wrong: under CCTP upfront fees the quote's OWN window is ~120s while this constant says
+        // 180000, so the panel would have promised a minute that did not exist.
+        //
+        // ⭐ TWO BOUNDS, BOTH REAL, THE TIGHTER ONE SHOWN. Ours bounds the seal; Circle's bounds the
+        // burn (past it the burn REVERTS). `quoteWindowMs` takes the smaller — computed from the
+        // quote we just sealed, never typed.
+        //
+        // ⛔ AND IT IS A DURATION, NOT A DEADLINE. Sending an absolute instant would make the client
+        // subtract a SERVER epoch from ITS OWN clock, so every second of device skew becomes a
+        // second of wrong countdown — and a fast clock would show a live quote as expired, or worse,
+        // an expired one as live. A duration plus the client's own elapsed time has no shared clock
+        // to disagree about. (⚠️ ManualSwapPanel does compute `quote.deadline * 1000 - now` that
+        // way; this one deliberately does not, and that panel is untouched here.)
+        expiresInMs: quoteWindowMs(fee),
         // The opaque handle. The panel stores it and returns it verbatim; it never sees a fee field
         // it could alter, and the figure the gate will trust lives inside the MAC.
         quoteToken: sealBridgeQuote({ owner: session.address, destinationKey: dest.key, amountUsdc: amount, fee }),

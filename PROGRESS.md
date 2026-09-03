@@ -1,5 +1,195 @@
 ---
 
+# ⭐⭐ THE SEAL CARRIES THE QUOTE'S EXPIRY — mode AND value, inside the MAC, branched on
+
+**2026-09-03, migration step 2 of 4.** `_quote-expiry.mjs` (decode, cross-check, branch) plus the
+seal, the endpoint and the panel. `test:quoteexpiry` **72/0**, `test:feebinding` **25 → 38**,
+`test:bridgepanelcopy` **19 → 26**, `test:feerecon` **88 → 95**.
+
+## 🚨🚨 THERE ARE TWO DIFFERENT `0x01`s IN A SIGNED QUOTE
+
+    signedQuote = 0x 01 | 0000…0020 | 0000…00a0 | 00 000000…6a999aea | …
+                     ^^                            ^^
+                     version/type PREFIX           EXPIRY MODE — 0x00, TIMESTAMP
+
+**The blob's leading byte is a version/type prefix. The expiry mode is the high byte of the packed
+expiry word.** Both are present on both real quotes, and they DISAGREE: prefix `0x01`, mode `0x00`.
+
+⛔ **SO READING THE MODE OFF THE FRONT RETURNS `0x01` = BLOCK HEIGHT ON EVERY QUOTE WE HAVE EVER
+SEEN.** It is the obvious mistake — the byte is right there, and `0x01` is a real mode value, so the
+wrong reading produces a plausible answer rather than an error. And it fails OPEN (below). Written at
+the decode site, not in a report.
+
+## 🚨 THE TWO MIS-READINGS ARE NOT SYMMETRIC
+
+    a BLOCK HEIGHT read as a timestamp   60,000,000 epoch seconds = March 1971 -> REFUSES
+    a TIMESTAMP read as a block height   60,268,338 <= 1,788,451,562 -> VALID, for decades
+
+⛔ **The second one does not revert, does not error, and nothing looks wrong** — the user is simply
+bound to a stale price forever. That asymmetry is why the branch is **never a magnitude sniff**:
+"it's about 1.8 billion so it must be a timestamp" is the reasoning that breaks the day a block
+number grows or a second source chain is added. The tag is inside the MAC and the branch reads it.
+
+## THE DECODE FINDS THE WORD BY VALUE, NOT BY POSITION
+
+It sits at index 2 on both real quotes, and hardcoding 2 would be an ABI-layout assumption from two
+samples. Instead it searches for the word whose low 248 bits equal the deadline the API already
+named, and requires **exactly one match** — so the read is self-verifying: we are not trusting an
+index, we are confirming we found the word carrying the number the response declared.
+⛔ Two candidates is a REFUSAL, never a pick.
+
+## THREE OUTCOMES, THREE DISTINCT MESSAGES
+
+    TIMESTAMP     evaluate
+    BLOCK_HEIGHT  refuse — "we know what this is and this path cannot check it"
+    anything else refuse — "we do not know what this is"
+
+⭐ The middle one is a **named refusal, by decision, not a half-built block read.** Evaluating it
+needs a live Arc block-number read at validation time, on a chain with a single RPC endpoint and no
+fallback — so a read failure would have to refuse anyway. The message says what it would need. Two
+observed quotes, both TIMESTAMP; the arm exists because the contract enforces the other kind.
+
+## THE CROSS-CHECK RUNS AT ISSUE, WHERE A FAILURE IS CHEAP
+
+The JSON `mode` and the packed byte are two renderings of one field, and only the byte is what the
+contract reads. They are compared **when the quote is sealed** — a disagreement there costs a
+re-price; at validation it would cost a user who has already read a figure and pressed confirm.
+
+⚠️ **THE AVAILABILITY COST IS ACCEPTED, NOT DISCOVERED.** If Circle changes the blob layout this
+refuses to ISSUE — no quote, no bridge — until we update. Loud and fail-closed, chosen over
+branching on a mode we never verified. A decode we cannot perform is a refusal, never a fallback to
+"probably a timestamp".
+
+## ⭐⭐ THE QUOTE SOURCE IS A DISCRIMINATOR, NOT AN ABSENCE
+
+`qs: "circle" | "self"` inside the MAC. `circle` REQUIRES mode+expiresAt; `self` requires their
+ABSENCE; anything else refuses. ⛔ "External fields are missing, so use our TTL" would be
+absence-reading-as-safe on the surface where it costs most: a migration that dropped the expiry from
+the fee object would silently restore a 3-minute window over a 2-minute quote, with nothing failing.
+
+## TWO DEADLINES, BOTH ENFORCED, NEITHER REPLACING THE OTHER
+
+Not a numeric `min` — ours is a millisecond age from `iat`, theirs an absolute second-precision
+instant. Measured in the suite: at 150s a Circle-quoted seal is REFUSED while the identical
+self-issued seal still opens, so the refusal provably comes from the external deadline.
+
+⚠️ **UNITS.** `expiresAt` and `issuedAt` are SECONDS; our `iat` is MILLISECONDS. The conversion is
+computed at the comparison. The unsafe direction is demonstrated: a seconds clock fed into the
+millisecond parameter reports **> 1,000,000,000 seconds left** and never expires.
+
+## ⭐ THE DEADLINE IS RE-CHECKED AFTER THE APPROVE, BEFORE THE BURN
+
+`openBridgeQuote` judges before any transaction; between it and the burn sits an **approve** —
+a separate transaction, submitted and awaited. A burn past the deadline REVERTS *after* the
+allowance is set. So the opener hands out a `reCheckExpiry()` bound to the same sealed payload and
+the executor calls it immediately before the burn.
+⭐ **NO MARGIN LITERAL.** The alternative was a submission margin subtracted at the first check — a
+number derived from two observations, on a money path, free to drift as approve latency changes. A
+second check asks the question at the moment it is actually being asked.
+⚠️ **The standing allowance a refusal leaves behind is NAMED, not solved** — it belongs with whoever
+moves the approve target to `TokenMessengerWithFees`. Refusing is still right: a reverted burn would
+leave the same allowance AND cost gas.
+
+## THE WINDOW IS 120s, AND IT IS ON SCREEN
+
+🚨 **`expiresInMs` WAS `QUOTE_TTL_MS` AND NOTHING RENDERED IT** — invisible when right, invisible
+when wrong, and about to become wrong by a minute. It is now `quoteWindowMs(fee)`: the tighter of
+our TTL and the quote's own remaining window, **computed from the quote, never typed**. `120_000`
+appears nowhere in our source, asserted across three files.
+
+⭐ **A DURATION, NOT A DEADLINE.** Sending an instant would make the client subtract a SERVER epoch
+from ITS OWN clock, so every second of device skew becomes a second of wrong countdown — and a fast
+clock would show an expired quote as live. The client stamps `Date.now()` when the answer lands and
+counts down from the duration. ⚠️ `ManualSwapPanel` does compute `quote.deadline * 1000 - now`; the
+bridge deliberately does not, and that panel is untouched here.
+
+The note goes from untimed advice to *"This price holds for 97s"*, the button disables at expiry, and
+⛔ an UNKNOWN window keeps the untimed warning rather than dropping it — absence of a number is not
+absence of a deadline.
+
+---
+
+# ⛔⛔ OUR AMOUNT BINDING SURVIVES ADOPTION — and it becomes the ONLY one
+
+**2026-09-03.** `p.a !== Number(amountUsdc)` looks redundant once a signed quote is in play. It is
+not, and the evidence is in the quote itself:
+
+    items[0].args   [TMWF, "6", USDC, 0x00…, "cctp-forward"]   <- NO AMOUNT
+    items[0].amount 53985 == feeTotalAmount                    <- the FEE, not the burn
+
+Two instruments, both from the measurement phase: the **verified preimage** (`_buildRequests` —
+`forwardArgs` omits the amount, `preFinArgs` includes one, and PRE_FINALITY is N/A from Arc) and a
+**calibrated simulation** (500000 and 9000000 both simulated cleanly against a quote requested for
+2000000, while a wrong `destinationDomain` reverted — so the instrument could see a binding when one
+existed).
+
+⭐⭐ **SO CIRCLE'S SIGNATURE DOES NOT BIND THE AMOUNT.** Under upfront fees this line becomes the only
+thing between a held quote and a burn of a different size. Deleting it as "covered by the signature"
+would be exactly wrong — which is why the reason now sits AT the check with both instruments named,
+and the guard asserts the prose as well as the code.
+
+---
+
+# 🚨 THE feeDisclosedMinor INVERSION — caught before it could happen
+
+**2026-09-03, built FIRST because it was cheapest and prevents a silent failure.**
+
+Under upfront fees the burn's `maxFee` becomes `EMPTY_MAX_FEE` — **zero**, measured on-chain in run
+2's `DepositForBurn` — and the real fee moves to the quote's `feeTotalAmount`. Yesterday's
+reconciliation reads `feeDisclosedMinor`, which is written from the fee object's minor-unit field.
+
+⛔ **A MIGRATION THAT LEFT THE WRITER POINTED AT `maxFee` WOULD STORE `"0"` BESIDE A REAL DECIMAL,
+AND EVERY BRIDGE WOULD RECONCILE AS MISMATCHED** — a permanent alarm, correctly loud about entirely
+the wrong thing, blaming Circle for our own field drift.
+
+⭐⭐ **THE FIX IS A CROSS-CHECK, AND THE VERDICT IT PRODUCES IS THE POINT.** A receipt carries the
+disclosed fee twice — decimal and integer, one quantity in two units — so they cannot legitimately
+disagree. Disagreement now yields `disclosed_incoherent`: an **`unreadable`, never a `mismatched`**.
+A record that contradicts itself cannot support a claim that a user was charged something other than
+what they were shown.
+
+⚠️ Deliberately a DISTINCT reason from `disclosed_not_exact`. One says the record is
+self-contradictory; the other says it is unrepresentable. Same verdict, different causes, and only
+the first means a writer is wrong. The writer shouts too, at the point the record is created — the
+only place the offending writer can be identified.
+
+⭐ And the cross-check does NOT fire on a legacy decimal it cannot convert: an unconvertible decimal
+is not evidence the integer is wrong, and treating it as such would turn a conversion limit into an
+accusation. Both directions mutation-proved.
+
+---
+
+# THE GUARDS: one tripwire fired as designed, one control had to be rebuilt
+
+**2026-09-03.**
+
+⭐⭐ **`verify-bridge-fee-binding` §4's TRIPWIRE FIRED ON THE COMMIT THAT ADOPTED THE EXPIRY** —
+exactly what it was armed for. `expiresAt` and `signedQuote` were in its EXTERNAL list, and adding
+them to the seal demanded the expiry check read them. §4 now states the NEW design positively rather
+than deleting the old claim and leaving a gap: two deadlines both enforced, the mode carried and
+branched on, an unrecognised mode refusing, and the source discriminator.
+
+🚨 **AND ITS CONTROL BROKE FOR THE REASON ITS OWN COMMENT PREDICTED.** The control injected
+`signedQuote` into a synthetic module and asked "is any external field read?" — a question the REAL
+module now answers `true` for, so it was reading the real module's good behaviour as the synthetic
+one's. ⭐ It now MUTATES a copy (deleting the external-deadline call) instead of injecting a field
+the real module also has. A control must not share a subject with the thing it controls for.
+
+⛔ **§1's INSTRUMENT DISAPPEARS UNDER ADOPTION, AND IS ARMED RATHER THAN PRE-EMPTIVELY REWRITTEN.**
+It binds the shown fee to `maxFee` in the burn calldata; under upfront fees that is 0, and its
+falsifier (`!== FRESH.maxFee`) goes VACUOUS with both at zero — two assertions still printing ✅ while
+measuring nothing. ⚠️ Re-pointing it TODAY would assert a shape that does not exist yet: the calldata
+really does still carry the fee. So the section keeps its live assertion, gains a tripwire that fails
+the day `bridgeCallData` stops emitting `maxFee` and names what to re-point at, and gains the
+successor claim that CAN be made now — that the disclosed fee's two units agree on the very
+execution under test.
+
+**§2's expired fixture** gains the case the suite was structurally incapable of seeing: a token
+sealed **1 second ago** — comfortably inside our TTL — whose Circle quote has expired. It is refused
+anyway, so the refusal can only come from the external deadline. A fixture aged past our own TTL
+would have passed for the old reason and proved nothing about the new one.
+
+
 # ⭐⭐ THE FEE RECONCILIATION IS BUILT — a DETECTOR, pinned to emitter AND movement
 
 **2026-09-03, migration step 1 of 4.** The design was reported and approved; this is the build.

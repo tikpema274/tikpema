@@ -21,6 +21,7 @@ import { encodeFunctionData, pad, getAddress } from "viem";
 import { circle, waitForTx } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { publicClient } from "./_predict.mjs";
+import { normalizeQuoteExpiry, assertQuoteUnexpired } from "./_quote-expiry.mjs";
 
 export const BRIDGE_CONTRACT = "0xC5567a5E3370d4DBfB0540025078e283e36A363d"; // BridgingKitContract (Arc testnet)
 const IRIS = "https://iris-api-sandbox.circle.com"; // testnet IRIS
@@ -357,6 +358,30 @@ export function bridgeAckToken({ owner, destinationKey, amountUsdc, band }) {
 // at first deploy and the only safe behaviour then is refusing every bridge.
 export const QUOTE_TTL_MS = 180_000; // 3 min — long enough to read a figure, short enough to bound drift
 
+/**
+ * ⭐⭐ HOW LONG THIS QUOTE IS ACTUALLY GOOD FOR, IN MILLISECONDS — THE TIGHTER OF TWO REAL BOUNDS.
+ *
+ *   OURS    `QUOTE_TTL_MS` — how long we will honour our own seal.
+ *   THEIRS  the quote's `expiry` — after which the BURN REVERTS on chain.
+ *
+ * ⛔ NOT A MIN OVER TWO NUMBERS OF THE SAME KIND. Ours is an age budget in milliseconds; theirs is
+ * an absolute instant in SECONDS. Turning theirs into a remaining duration is a computation, done
+ * here, once — and 120_000 never appears in our source. Circle's window is documented as
+ * APPROXIMATE and is measured at 120s on both real quotes; a retyped vendor constant on a money
+ * path, free to drift with nobody watching, is exactly what this avoids.
+ *
+ * ⚠️ A block-height quote yields OUR bound only, and that is honest rather than convenient: this
+ * path cannot convert a block height into a duration without a live block read and a block-time
+ * assumption. `openBridgeQuote` refuses such a quote outright, so the figure never reaches a user.
+ */
+export function quoteWindowMs(fee, now = Date.now()) {
+  const q = fee?.quote;
+  if (!q || q?.expiry?.mode !== "TIMESTAMP") return QUOTE_TTL_MS;
+  const theirsMs = (Number(q.expiry.expiresAt) * 1000) - now;   // SECONDS -> ms, computed
+  if (!Number.isFinite(theirsMs)) return QUOTE_TTL_MS;
+  return Math.max(0, Math.min(QUOTE_TTL_MS, theirsMs));
+}
+
 function quoteSecret() {
   const secret = process.env.SESSION_SECRET;
   if (!secret || String(secret).length < 16) {
@@ -369,6 +394,19 @@ const b64u = (buf) => Buffer.from(buf).toString("base64url");
 /** Seal a priced quote into ONE opaque string. The client stores and returns it; it never sees a
  *  fee field it could alter, and every field the gate will trust is inside the MAC. */
 export function sealBridgeQuote({ owner, destinationKey, amountUsdc, fee, now = Date.now() }) {
+  // ═══ ⭐⭐ THE QUOTE SOURCE IS A DISCRIMINATOR, NOT AN ABSENCE ═════════════════════════════════
+  //
+  // Two pricing paths exist: our own live `bridgeFee()` read (self-issued, bounded only by
+  // QUOTE_TTL_MS) and Circle's signed upfront-fee quote (which carries its OWN deadline, after
+  // which the burn REVERTS).
+  //
+  // ⛔ "EXTERNAL EXPIRY FIELDS ARE MISSING, SO USE OUR TTL" WOULD BE ABSENCE READING AS SAFE — and
+  // on exactly the surface where it costs the most. A migration that dropped the expiry from the
+  // fee object would silently restore a 180-second window over a 120-second quote, with nothing
+  // failing and nothing to look at. So the SOURCE is named in the payload and the opener requires
+  // the fields that source implies. An unrecognised source refuses.
+  const externallyQuoted = !!fee?.quote;
+  const xp = externallyQuoted ? normalizeQuoteExpiry(fee.quote) : null;
   const payload = {
     o: owner ? String(owner).toLowerCase() : "anon",
     d: String(destinationKey),
@@ -378,7 +416,14 @@ export function sealBridgeQuote({ owner, destinationKey, amountUsdc, fee, now = 
     n: fee.amountMinor.toString(),
     f: Number(fee.feeUsdc),
     t: Number(fee.netUsdc),
+    // ⚠️ MILLISECONDS — Date.now(). The external `xe` beside it is SECONDS. The two are never
+    // compared to each other; see the units block in assertQuoteUnexpired.
     iat: now,
+    qs: externallyQuoted ? "circle" : "self",
+    // ⭐ mode AND expiresAt, both INSIDE the MAC, never the value alone. Storing a bare number would
+    // let a block height be compared against a clock — a category error that reads as an ordinary
+    // `>` in source. The mode is the field that makes the number mean anything.
+    ...(externallyQuoted ? { xm: xp.mode, xe: xp.expiresAtSec, sq: fee.quote.signedQuote } : {}),
   };
   const body = b64u(JSON.stringify(payload));
   const mac = createHmac("sha256", quoteSecret()).update(`bridgequote|${body}|v1`).digest("base64url");
@@ -449,13 +494,78 @@ export function openBridgeQuote(token, { owner, destinationKey, amountUsdc, now 
   let p;
   try { p = JSON.parse(Buffer.from(body, "base64url").toString("utf8")); }
   catch { throw new Error("bridge quote is unreadable"); }
+  // ── DEADLINE 1 — OURS, measured from our own issuance stamp. MILLISECONDS on both sides. ──────
   if (!Number.isFinite(p.iat) || now - p.iat > QUOTE_TTL_MS) throw new Error("bridge quote has expired — price it again");
   if (now - p.iat < -5_000) throw new Error("bridge quote is not yet valid");
+
+  // ── DEADLINE 2 — THE QUOTE'S OWN, when there is one ──────────────────────────────────────────
+  // ⭐⭐ TWO INDEPENDENT DEADLINES, BOTH ENFORCED, NEITHER REPLACING THE OTHER. They are not a
+  // numeric `min`: ours is a millisecond age from `iat`, theirs is an absolute second-precision
+  // instant, and on the upfront-fee path theirs (~120s) is the tighter one. Ours still bounds a
+  // quote whose external deadline is somehow far in the future.
+  // ⛔ THE SOURCE DECIDES WHICH FIELDS ARE REQUIRED — an absence never selects a branch.
+  const expiry = openQuoteExpiry(p, now);
+
   const who = owner ? String(owner).toLowerCase() : "anon";
   if (p.o !== who) throw new Error("bridge quote belongs to another wallet");
   if (p.d !== String(destinationKey)) throw new Error("bridge quote is for a different destination");
+  // ═══ ⛔⛔ THE AMOUNT BINDING IS OURS, AND UNDER UPFRONT FEES IT IS THE ONLY ONE ═══════════════
+  // MEASURED, two independent instruments, before adoption:
+  //   1. THE VERIFIED PREIMAGE. `_buildRequests` builds the signed args WITHOUT the amount on the
+  //      FORWARD path — `forwardArgs` omits it; only `preFinArgs` includes one, and PRE_FINALITY is
+  //      N/A from Arc. Visible in the response itself: run 2's `items[0].args` is
+  //      [TMWF, "6", USDC, 0x00…, "cctp-forward"] — no amount — and `items[0].amount` is the FEE.
+  //   2. A CALIBRATED SIMULATION. Against one quote requested for 2000000, burns of 500000 and
+  //      9000000 BOTH simulated cleanly, while a wrong destinationDomain reverted — so the
+  //      instrument could see a binding when one existed, and saw none here.
+  // ⭐⭐ SO CIRCLE'S SIGNATURE DOES NOT BIND THE AMOUNT, AND THIS LINE IS NOT REDUNDANT UNDER
+  // ADOPTION — it BECOMES the only thing between a held quote and a burn of a different size.
+  // Removing it as "the signed quote covers that" would be exactly wrong. Pinned by
+  // verify-bridge-fee-binding.
   if (p.a !== Number(amountUsdc)) throw new Error("bridge quote is for a different amount");
-  return { maxFee: BigInt(p.m), amountMinor: BigInt(p.n), feeUsdc: p.f, netUsdc: p.t, issuedAt: p.iat };
+  return {
+    maxFee: BigInt(p.m), amountMinor: BigInt(p.n), feeUsdc: p.f, netUsdc: p.t, issuedAt: p.iat,
+    // ⭐ CARRIED OUT so the caller can RE-CHECK immediately before the burn — see agentBridge. The
+    // opener runs before an approve transaction; the deadline that matters is the one at the burn.
+    quoteSource: p.qs === "circle" ? "circle" : "self",
+    expiry,
+    signedQuote: typeof p.sq === "string" ? p.sq : null,
+    // ⭐⭐ THE RE-CHECK, HANDED TO THE EXECUTOR. It asks the SAME question of the SAME sealed fields
+    // against a FRESH clock, immediately before the burn — see the block in agentBridge. A closure
+    // rather than a re-parse so there is one payload and one predicate; re-deriving the deadline
+    // from a second decode would be a second source of truth for the same instant.
+    // ⚠️ It judges the EXTERNAL deadline only. Our own TTL expiring mid-flight is not a revert
+    // risk — the chain does not know about it — so re-applying it here would refuse a bridge that
+    // would have succeeded.
+    reCheckExpiry: () => openQuoteExpiry(p, Date.now()),
+  };
+}
+
+/**
+ * Read the external deadline out of a sealed payload and judge it. Shared by `openBridgeQuote` and
+ * by the pre-burn re-check, so both ask the SAME question of the SAME fields.
+ *
+ * @returns {{mode:string, expiresAtSec:number, secondsLeft:number}|null} — null on the self-issued
+ *          path, where there is no external deadline and our TTL is the whole story.
+ */
+export function openQuoteExpiry(p, now = Date.now()) {
+  if (p?.qs === "self") {
+    // ⚠️ Asserted, not assumed. A self-issued seal carrying external fields is a writer that has
+    // half-migrated, and honouring our 3-minute TTL over a real 2-minute quote is the failure this
+    // discriminator exists to prevent.
+    if (p.xm != null || p.xe != null || p.sq != null) {
+      throw new Error("bridge quote is malformed — a self-issued quote carries an external expiry");
+    }
+    return null;
+  }
+  if (p?.qs !== "circle") {
+    throw new Error("bridge quote does not say where it came from — refusing rather than assuming");
+  }
+  if (p.xm == null || p.xe == null) {
+    throw new Error("bridge quote claims an external price with no expiry — refusing");
+  }
+  const { secondsLeft } = assertQuoteUnexpired({ mode: p.xm, expiresAtSec: p.xe, nowMs: now });
+  return { mode: p.xm, expiresAtSec: p.xe, secondsLeft };
 }
 
 export function bridgeCallData({ amountMinor, maxFee, recipient, cctpDomain }) {
@@ -526,6 +636,25 @@ export async function agentBridge({ walletAddress, destination, amountUsdc, reci
       throw e;
     }
   }
+
+  // ═══ ⭐⭐ RE-CHECK THE DEADLINE HERE — AFTER THE APPROVE, IMMEDIATELY BEFORE THE BURN ══════════
+  //
+  // `openBridgeQuote` judged the deadline BEFORE any transaction. Between there and here sits an
+  // approve: a separate transaction, submitted and awaited. On the upfront-fee path the quote's own
+  // window is ~120 seconds, and a burn submitted past it REVERTS — after the allowance has already
+  // been set.
+  //
+  // ⭐ SO THE DEADLINE THAT MATTERS IS THE ONE AT THE BURN, AND IT IS CHECKED AT THE BURN. The
+  // alternative was a submission margin subtracted at the first check — a literal, derived from two
+  // observations, on a money path, free to drift as approve latency changes. A second check needs
+  // no constant at all and asks the question at the moment it is actually being asked.
+  //
+  // ⚠️ WHAT HAPPENS TO THE ALLOWANCE WHEN THIS REFUSES IS **NOT SOLVED HERE**. A refusal after a
+  // successful approve leaves a standing allowance, and the approve TARGET is itself changing in
+  // the next step of this migration. Naming it so it is not discovered late: the allowance hygiene
+  // decision belongs with whoever moves the approve to TokenMessengerWithFees.
+  // ⛔ Refusing is still right: a reverted burn would leave the same allowance AND cost gas.
+  if (boundFee?.reCheckExpiry) boundFee.reCheckExpiry();
 
   // 2) The bridge call itself (Arc burn + forwarding hook).
   const brTx = await client.createContractExecutionTransaction({
