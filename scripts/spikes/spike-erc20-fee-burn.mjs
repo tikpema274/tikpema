@@ -43,13 +43,15 @@ import { ARC, CONTRACTS } from "../../netlify/functions/_arc.mjs";
 
 const OUT = "/tmp/claude-1000/-home-salifu-Arc-now2-tikpema/75e196a1-613c-429a-9a71-101d3beca133/scratchpad/burn";
 const TMWF = "0x8745D906D67C346E5eb1aEEED38Eb87F34DF0C0A";
-// ⭐ VANILLA_SELLER, NOT THE AGENT WALLET. The store analysis closes the CONTAMINATION question —
-// this writes no row — but not the RESIDUE one: a burn that fails after the approve leaves a
-// standing allowance to a UUPS PROXY, and the 2026-09-03 decision is that between-bridge permission
-// stays exactly ZERO. Leaving one on the wallet the agent paths use would contradict that decision.
-// This wallet is an x402 spike/demo receiver on no agent execution path, and 0.314272 covers 0.054
-// with room for one retry.
-const WALLET = process.env.VANILLA_SELLER_ADDRESS;
+// ⭐⭐ RUN 2 — THE AGENT SCA, and the reason for run 1's wallet no longer applies.
+// Run 1 used VANILLA_SELLER to keep a failed-burn allowance residue off the wallet agent paths use.
+// ⛔ But eth_getCode showed VANILLA_SELLER is an EOA (0 bytes) — so run 1 could not answer R1 (userOp
+// shape) or R2 (sponsorship) AT ALL, because an EOA is ineligible for Gas Station by construction.
+// A residue-free run that answers nothing is worse than a run with a stated, bounded residue.
+// AGENT_WALLET is 209 bytes — a DEPLOYED SCA — which is what R1 and R2 are about.
+// ⚠️ RESIDUE, ACCEPTED AND BOUNDED: if the burn fails after the approve, a standing allowance of
+// amount+fee (~0.054 USDC) to a UUPS proxy remains on this wallet. Report it; do not clean it up.
+const WALLET = process.env.AGENT_WALLET_ADDRESS;
 const AMOUNT = 1n;                     // one minor unit — smallest viable, and unambiguous vs the fee
 const DEST_DOMAIN = 6;                 // Base Sepolia
 // ═══ ⛔⛔ THIS SCRIPT DOES NOTHING UNLESS TOLD TO SPEND ═══════════════════════════════════════
@@ -80,7 +82,17 @@ const ABI = [{
   ],
 }];
 
-log(`\n═══ STEP 3 — ERC-20 fee burn · ${new Date().toISOString()} ═══`);
+// ── R2 BASELINE. Read HERE, before anything is submitted, so the delta is attributable.
+async function usdcBalance(addr) {
+  const r = await fetch(ARC.rpc, { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call",
+      params: [{ to: CONTRACTS.USDC, data: "0x70a08231" + addr.slice(2).toLowerCase().padStart(64, "0") }, "latest"] }) });
+  return BigInt((await r.json()).result);
+}
+log(`\n═══ RUN 2 — ERC-20 fee burn from the AGENT SCA · ${new Date().toISOString()} ═══`);
+const balBefore = await usdcBalance(WALLET);
+writeFileSync(`${OUT}/balance-before.txt`, balBefore.toString());
+log(`R2 baseline: balance ${balBefore} minor (${Number(balBefore) / 1e6} USDC) -> balance-before.txt`);
 log(`wallet ${WALLET}  ·  amount ${AMOUNT} minor  ·  dest domain ${DEST_DOMAIN}`);
 
 // ── 1. QUOTE, recorded VERBATIM before anything else ────────────────────────────────────────
@@ -133,4 +145,8 @@ log(`   circle id ${br.data?.id}  -> burn-circle-id.txt`);
 const burnHash = await waitForTx(client, br.data?.id);
 writeFileSync(`${OUT}/burn-hash.txt`, burnHash);      // written down before ANY read
 log(`   ⭐ BURN HASH ${burnHash}  -> burn-hash.txt`);
-log(`\n✅ submitted. Measure against the pre-registration next; nothing has been read yet.`);
+const balAfter = await usdcBalance(WALLET);
+writeFileSync(`${OUT}/balance-after.txt`, balAfter.toString());
+log(`\nR2: balance ${balAfter} minor · delta ${balAfter - balBefore} minor · A+F = ${AMOUNT + FEE}`);
+log(`    ${balBefore - balAfter === AMOUNT + FEE ? "R2 HOLDS — delta == A+F exactly, no gas component" : "⚠️ R2 CHECK: delta != A+F — F2 may have fired"}`);
+log(`\n✅ submitted. Measure against PR-2 next.`);

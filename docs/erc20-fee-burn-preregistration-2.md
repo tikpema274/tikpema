@@ -108,3 +108,89 @@ Append below a rule; never edit above it. For **each of R1–R7** state the obse
 of F1–F7** state fired or did not fire, with the evidence. Paste both log streams in full, separately,
 at both precisions. If a falsifier fires, **the finding is the falsifier** — record it and stop, and if
 the falsifier turns out to be defective say so plainly rather than repairing it in place.
+
+---
+---
+
+# RESULT — appended 2026-09-03, nothing above this line edited
+
+**Run 2, from the AGENT SCA `0xc54d4721…b4e621` (209 bytes — deployed).**
+
+    quote issuedAt 1788451442 · mode TIMESTAMP · expiresAt 1788451562 · window 120s
+    feeTotalAmount 53985 minor · feeToken 0x3600…0000
+    approve 0xce3744a82af2eb31cad12ed85c5da8384733509b012c5a2cce702295d0ae2f94
+    burn    0xd5d003c07323ae7d750250b515a7f449ce82d1a178de74a41be17a6092d0f895
+    status 0x1 · block 60268338 · 25 logs · submitted with 116s left in the window
+
+## ⛔ F5 FIRED — and this time the falsifier was faithful; the ROW was over-strong
+
+**R5 said:** *"Every movement in R3 and R4 also appears from `0xffff…fffe` at 18 dp, value ×10¹².
+The two streams have **equal Transfer counts**."*
+
+**Observed: ERC-20 stream 7 Transfers · NATIVE stream 8.**
+
+R5's **first clause is TRUE** — every R3/R4 movement has its native twin. R5's **second clause is
+FALSE**, and it never followed from the first. The extra native log is:
+
+    [24] emitter 0xffff…fffe · from 0x5ff137d4…d2789 · to 0xf4b441ca…ba066 · 31699899562500000 (0.0316999)
+         from == tx.to   (the EntryPoint)    ✓
+         to   == tx.from (the bundler)       ✓
+         → the EntryPoint REFUNDING THE BUNDLER FOR GAS. Native-only by nature: gas is not a token
+           movement, so it has no ERC-20 counterpart and never could.
+
+⭐ **THIS IS A DIFFERENT DEFECT FROM PR-1's.** PR-1's falsifier contradicted a predicted row. Here the
+derivation discipline worked exactly as designed — F5 faithfully negates R5 — and **the ROW itself
+carried an unsupported second clause**. "Equal counts" silently assumed the only native movements are
+twins of ERC-20 movements. On a sponsored userOp that is false by construction.
+
+⛔ **RECORDED AND STOPPED. F6 and F7 NOT JUDGED** — no `minFinalityThreshold` read, no settlement
+timing. Deriving falsifiers from rows prevents a falsifier from contradicting a prediction; it cannot
+prevent a prediction from being too strong. That is a **second, distinct lesson** and it belongs in a
+third document, decided knowingly — not patched into this one after the receipt.
+
+⭐ **AND THE FINDING IS USEFUL, NOT JUST A STOP.** A reconciliation must not compare stream COUNTS. It
+must pin the emitter AND the movement (`from`, `to`, `value`). The counts differ legitimately, and a
+count-based check would fail on every sponsored transaction.
+
+## R1–R4 — all held
+
+| row | prediction | observed | falsifier |
+|---|---|---|---|
+| **R1** | userOp: `from`=bundler, `to`=EntryPoint, `UserOperationEvent` present | `from` `0xf4b441ca…`, `to` `0x5ff137d4…d2789`, UOE at log [23] | **F1 did not fire** |
+| **R2** | balance falls by exactly `A + F`, no gas | `28040000 → 27986014`, delta **53986** == `1 + 53985` | **F2 did not fire** |
+| **R3** | ERC-20 `Transfer` wallet→TMWF of `F` == submitted quote's fee | log [2], `53985`, from the wallet | **F3 did not fire** |
+| **R4** | ERC-20 `Transfer` wallet→TMWF of `A`, distinct | log [14], `1`, from the wallet | **F4 did not fire** |
+
+⭐⭐ **R1 AND R2 ARE THE TWO THINGS RUN 1 COULD NOT ANSWER**, because its wallet was an EOA. Both hold:
+**the gasless developer-controlled SCA carries the quote tuple, and Gas Station sponsors it against
+`TokenMessengerWithFees` — a target it had never been observed against.** The open adoption question
+from run 1 is closed affirmatively.
+
+⭐ Two independent readings of the same sponsorship fact, which is why it is trustworthy: the wallet's
+balance delta contains no gas component (R2), and log [24] shows the EntryPoint paying the bundler
+`0.0316999` instead.
+
+## BOTH STREAMS IN FULL, SEPARATELY
+
+**ERC-20 `0x3600…0000`, 6 dp — 7 Transfers**
+
+    [ 2] wallet -> TMWF               53985   FEE   [from WALLET]
+    [ 6] TMWF   -> FeeManager         53985
+    [10] FeeManager -> fee recipient   5398
+    [12] FeeManager -> fee recipient  48587
+    [14] wallet -> TMWF                   1   AMOUNT [from WALLET]
+    [17] TMWF   -> token minter           1
+    [20] token minter -> 0x0              1
+
+**NATIVE `0xffff…fffe`, 18 dp — 8 Transfers**
+
+    [ 1] wallet -> TMWF               53985000000000000
+    [ 5] TMWF   -> FeeManager         53985000000000000
+    [ 9] FeeManager -> fee recipient   5398000000000000
+    [11] FeeManager -> fee recipient  48587000000000000
+    [13] wallet -> TMWF                   1000000000000
+    [16] TMWF   -> token minter           1000000000000
+    [18] token minter -> 0x0              1000000000000
+    [24] EntryPoint -> bundler        31699899562500000   <- GAS, no ERC-20 twin
+
+⭐ The 10/90 split held again on different figures: `5398 + 48587 = 53985`.
