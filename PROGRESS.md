@@ -1,5 +1,82 @@
 ---
 
+# ⭐⭐⭐ A GUARD CAN GO UNREACHABLE AND STILL LOOK ALIVE
+
+**2026-09-03.** `_analystb`'s bridge fee-floor was:
+
+    const net = Number(fee.netUsdc);
+    if (net <= 0) return { verdict: "refuse", cause: "should-not-execute", … };
+
+Correct while `netUsdc` meant `amount − fee`: a fee at or above the amount drove it to zero.
+
+⛔ **UPFRONT FEES MADE `netUsdc` EQUAL THE AMOUNT, SO `net <= 0` BECAME UNREACHABLE FOR ANY POSITIVE
+BRIDGE.** The refusal did not become wrong. It became **impossible** — a fee-floor sitting in the
+file, reading as a live economic guard, that could never fire again for any input.
+
+## 🚨 THE FAILURE MODE IS THE ONE WITH NO SYMPTOM
+
+A falsified CLAIM is at least visible: someone reads a sentence and it disagrees with what happened.
+**A dead GUARD produces nothing at all.** It is not in a failure log, no suite goes red, and its
+green run is indistinguishable from the run of a guard that simply had nothing to refuse. ⚠️ And it
+is worse than never having written it, because the file still says the case is handled.
+
+⭐⭐ **THE GENERAL SHAPE: AN INVERTED DEFINITION DOES NOT ONLY FALSIFY CLAIMS — IT CAN KILL CHECKS
+THAT READ THROUGH IT.** Every consumer of a redefined value has to be asked TWO questions, not one:
+*is what it now says still true*, and *can what it now tests still happen*. The second is the one
+that gets skipped, because the code looks untouched.
+
+## HOW IT WAS ACTUALLY FOUND, AND HOW IT SHOULD HAVE BEEN
+
+Found by reading the branch while fixing the SENTENCE beside it — luck, not method. ⛔ No mutation
+would have caught it either: mutating an unreachable branch changes nothing observable.
+
+⭐ **THE METHOD THAT WOULD: WHEN A DEFINITION CHANGES, ENUMERATE ITS READERS AND ASK WHICH ONES ARE
+PREDICATES.** A predicate over a redefined value is a candidate corpse. `netUsdc` had four readers
+that were comparisons; three compared it to a fee (still reachable), one compared it to zero.
+⚠️ Rewritten as `feeUsdc >= Number(amountUsdc)` — the same comparison the other three floors use, so
+the four now share a form and a redefinition cannot silently orphan one of them.
+
+---
+
+# ⭐⭐⭐ AN UNDER-COUNTING CEILING PRODUCES NO SYMPTOM — ASSERT THE QUANTITY
+
+**2026-09-03.** Reverting `valueOfStep`'s bridge branch to `Number(step.amountUsdc)` — the exact
+defect that would leave the day ceiling wider than configured by the fee on every bridge — left
+**every suite green**. The mutation came back `MUTATION NOT CAUGHT`.
+
+## ⛔ BECAUSE A CAP THAT IS TOO GENEROUS HAS NO FAILING CASE
+
+A cap that is too STRICT refuses something it should allow: a user complains, a suite reddens, there
+is a symptom. **A cap that is too generous lets everything through, and everything through is what
+success looks like.** Every individual bridge still succeeds. The ledger still writes. The panel
+still renders. The only observable is a number nobody compares to anything.
+
+⚠️ **AND IT IS A MONEY-SAFETY DEFECT, NOT A REPORTING ONE.** The ceiling exists to bound what leaves
+the user's control. Under-counting does not merely misreport the total — it RAISES the real limit, by
+the fee, on every bridge, silently and cumulatively.
+
+## ⭐⭐ THE RULE: ASSERT THE QUANTITY, NEVER WATCH FOR A FAILURE THAT CANNOT OCCUR
+
+The instinct is to test a cap by trying to exceed it. That works for the strict direction and is
+**structurally blind** to the generous one — the test passes either way, because a bridge under a
+too-wide cap behaves exactly like a bridge under a correct one.
+
+    ⛔ WRONG   drive a bridge and assert it was refused / allowed
+    ⭐ RIGHT   call the valuation and assert the NUMBER, then assert what the gate is given
+
+`test:feebinding` §1b now calls `valueOfStep` directly and asserts `amount + fee`; that the cap
+bounds `dayValue` and not `step.amountUsdc`; and the ordering `valueOfStep < cap < canSpendDay`.
+⛔ And that a MISSING fee THROWS rather than falling back to the amount — the fallback IS the
+under-count, so it must not be reachable by omission.
+
+## ⚠️ THE FAMILY THIS BELONGS TO
+
+Same shape as [[absence-must-never-read-as-safe]] and [[check-whose-failure-mode-is-a-pass]], one
+level up: not a check that silently passes, but a **bound that silently widens**. ⭐ The
+discriminating question for any limit: *what would I observe if this were too generous?* If the
+honest answer is "nothing", the limit needs its quantity asserted, not its behaviour exercised.
+
+
 # ⭐⭐⭐ THE APPROVE AND THE BURN RIDE IN ONE userOp — OPTION C, BUILT
 
 **2026-09-03, migration step 3 of 4.** The estimate confirmed the account accepts a self-targeted
