@@ -911,21 +911,63 @@ export function shoutLedgerFailure({ agent, owner, amountUsdc, source, err }) {
 //   TRIPLE described in docs/dca-submit-time-budget-design.md §0.2, and that design stays parked
 //   and unbuilt. ⚠️ Do not read "DCA already charges at submit" as evidence that the rest is safe
 //   to move; the whole reason this one was safe is that the rest did not move with it.
+// ═══ ⭐⭐ WHY THE REFUSAL IS A CODE AND NOT A SENTENCE ════════════════════════════════════════
+// `reverseAgentSpend` knows EXACTLY which state it is in at each return site. Two consumers need
+// one of those states back — ALREADY_REVERSED, which means "a previous attempt reversed the money
+// but died before writing the resolution marker", and which MUST still mark. They used to recover
+// it by matching the prose:
+//
+//     const alreadyDone = r.reversed === false && /already reversed/.test(r.refused || "");
+//
+// 🚨 THAT MADE A HUMAN-FACING SENTENCE LOAD-BEARING, IN A FILE THAT DOES NOT OWN IT. Rewording the
+// refusal below — a copy edit, the safest-looking change in this file — silently flipped
+// `alreadyDone` to false at both sites. `markChargeResolved` then never ran, the charge stayed in
+// the sweeper's queue forever, and BOTH copies went on returning a perfectly good boolean. Nothing
+// could go red: there is no assertion that a `false` was earned.
+//
+// ⭐ THE STATE IS KNOWN AT THE RETURN SITE, so it is RETURNED. `refused` stays, and stays prose —
+// it is for a human reading a heartbeat. `refusal` is the machine's field, and it is the only one
+// any consumer may branch on. [[absence-must-never-read-as-safe]] — a reword now changes nothing a
+// consumer reads, which is the entire point.
+//
+// ⭐ Same shape as the handled/unhandled discriminator in `reverseChargeById` below: a typed field
+// beside the sentence, never the sentence parsed back into a type.
+export const REVERSAL_REFUSAL = Object.freeze({
+  NOT_SUBMITTED:    "not-submitted",
+  NO_CIRCLE_ID:     "no-circle-id",
+  UNUSABLE_AMOUNT:  "unusable-amount",
+  ALREADY_REVERSED: "already-reversed",
+});
+
+/** One refusal shape, so a return site cannot emit prose WITHOUT its code. */
+const refuseReversal = (refusal, refused) => ({ reversed: false, refusal, refused });
+
+// ⭐⭐ ONE IMPLEMENTATION, BOTH CONSUMERS. `reverseChargeById` (below) and `budget-sweep.mjs` both
+// gate `markChargeResolved` on this. Two copies of one predicate is how the copy that drifts stops
+// guarding silently — and there were two copies, character-identical, for exactly that reason.
+// ⚠️ IT READS `refusal`, NEVER `refused`. A caller that hands this a hand-built object carrying
+// only the sentence gets `false`, and `verify-no-prose-state-recovery` asserts precisely that.
+export const wasAlreadyReversed = (r) =>
+  r?.reversed === false && r?.refusal === REVERSAL_REFUSAL.ALREADY_REVERSED;
+
 export async function reverseAgentSpend({ entry, reason, store, at }) {
   const s = pickStore(store);
 
   // GUARD 1 — the refusal. Anything not explicitly a submit-time charge is untouchable.
   if (!entry || entry.confirmation !== "submitted") {
-    return { reversed: false, refused: "not a submit-time charge (confirmation !== 'submitted')" };
+    return refuseReversal(REVERSAL_REFUSAL.NOT_SUBMITTED,
+      "not a submit-time charge (confirmation !== 'submitted')");
   }
   const id = entry.circleId;
   if (!id) {
     // No authoritative id => the outcome was never resolvable => we cannot know it failed.
-    return { reversed: false, refused: "no circleId — unresolvable entry, never guess an outcome" };
+    return refuseReversal(REVERSAL_REFUSAL.NO_CIRCLE_ID,
+      "no circleId — unresolvable entry, never guess an outcome");
   }
   const amt = round6(entry.amountUsdc);
   if (!Number.isFinite(amt) || amt <= 0) {
-    return { reversed: false, refused: `unusable amount ${JSON.stringify(entry.amountUsdc)}` };
+    return refuseReversal(REVERSAL_REFUSAL.UNUSABLE_AMOUNT,
+      `unusable amount ${JSON.stringify(entry.amountUsdc)}`);
   }
 
   const owner = entry.owner;
@@ -966,7 +1008,9 @@ export async function reverseAgentSpend({ entry, reason, store, at }) {
     };
   });
 
-  if (!applied) return { reversed: false, refused: "already reversed (id present in reversedIds)" };
+  // ⭐ THE STATE THAT TWO CONSUMERS ACT ON. The sentence is a diagnostic; `refusal` is the answer.
+  if (!applied) return refuseReversal(REVERSAL_REFUSAL.ALREADY_REVERSED,
+    "already reversed (id present in reversedIds)");
 
   // APPEND — a new immutable entry; the original charge is never mutated.
   await appendAudit(s, {
@@ -1053,7 +1097,8 @@ export async function reverseChargeById({ circleId, reason, store, at } = {}) {
   }
 
   const r = await reverseAgentSpend({ entry, reason, store, at });
-  const alreadyDone = r.reversed === false && /already reversed/.test(r.refused || "");
+  // ⭐ TYPED, not parsed. See REVERSAL_REFUSAL above for what the prose version cost.
+  const alreadyDone = wasAlreadyReversed(r);
   // Mark on success OR on "already reversed" — the latter means a previous attempt reversed but died
   // before marking; without this the charge would stay queued for the backstop forever.
   if (r.reversed || alreadyDone) {

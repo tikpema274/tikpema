@@ -123,7 +123,8 @@
     "test:rpcabsence": "node scripts/verify-rpc-absence-corroboration.mjs",
     "test:retryunreadable": "node scripts/verify-retry-unreadable.mjs",
     "test:moneyabsence": "npx tsx scripts/verify-money-absence-render.tsx",
-    "test:bridgetiming": "node scripts/verify-bridge-timing.mjs"
+    "test:bridgetiming": "node scripts/verify-bridge-timing.mjs",
+    "test:proserecovery": "node scripts/verify-no-prose-state-recovery.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -229,6 +230,7 @@
     "test:rpcabsence",
     "test:retryunreadable",
     "test:moneyabsence",
-    "test:bridgetiming"
+    "test:bridgetiming",
+    "test:proserecovery"
   ]
 }

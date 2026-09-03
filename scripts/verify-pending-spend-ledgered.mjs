@@ -166,8 +166,12 @@ resetStores(); waitBehaviour = "confirm";
   check("🚨🚨 a CONFIRMED charge is invisible to the sweeper — a real spend can never be reversed",
     open.length === 0, `${open.length} unresolved`);
   const rev = await budget.reverseAgentSpend({ entry: entries[0], reason: "must be refused" });
+  // ⚠️ ASSERTED ON THE CODE, NOT THE SENTENCE. This check used to read /confirmation/ off `refused`,
+  // which made a copy edit able to turn it red for no reason — the mirror image of the defect
+  // `verify-no-prose-state-recovery` exists to forbid. The prose is still printed as the detail.
   check("⭐ …and reverseAgentSpend REFUSES it even if handed the entry directly (GUARD 1)",
-    rev.reversed === false && /confirmation/.test(rev.refused || ""), rev.refused);
+    rev.reversed === false && rev.refusal === budget.REVERSAL_REFUSAL.NOT_SUBMITTED,
+    `refusal=${rev.refusal} refused=${rev.refused}`);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
@@ -345,6 +349,62 @@ section("8 — 🚨 REVERSAL STILL WORKS ON AN IDEMPOTENT CHARGE, and does not r
   const revTwice = await budget.reverseChargeById({ circleId: "cid-R", reason: "again", at: AT + 2000 });
   check("⭐ …and reversing twice does not credit twice",
     revTwice.reversed !== true && (await budget.daySpend({ owner: OWNER, at: AT })) === 0);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("9 — ⭐⭐ THE STATE TRAVELS AS A CODE, NOT AS A SENTENCE");
+// Two consumers gate `markChargeResolved` on ALREADY_REVERSED — `reverseChargeById` here and the
+// sweeper in budget-sweep.mjs. It means "a previous attempt reversed the money and died before
+// writing the marker", and it MUST still mark, or the charge stays queued for the backstop forever.
+// It used to be recovered with /already reversed/.test(r.refused) at BOTH sites: a reword of the
+// primitive's sentence silently made both false, and a false there is indistinguishable from a
+// correct one. These checks pin the code and, more importantly, pin that the PROSE IS INERT.
+{
+  const budget = await import("../netlify/functions/_budget.mjs");
+  const OWNER = "0x" + "9d".repeat(20);
+  // ⚠️ IN THE PAST, ON PURPOSE. `listUnresolvedCharges` filters on age, so a fixture stamped in the
+  // future is invisible to it and the whole section would go vacuously green on an empty list.
+  const AT = Date.parse("2026-08-22T09:00:00.000Z");
+  resetStores();
+  await budget.recordAgentSpend({
+    owner: OWNER, amountUsdc: 2.5, source: "swap_tokens", justification: "typed-refusal fixture",
+    at: AT, confirmation: "submitted", circleId: "cid-T",
+  });
+  const open = await budget.listUnresolvedCharges({ at: AT + 1000, olderThanMs: 0 });
+  check("the fixture charge is visible to the sweeper", open.length === 1, `${open.length} open`);
+
+  const first = await budget.reverseAgentSpend({ entry: open[0], reason: "first reversal", at: AT + 1000 });
+  check("the FIRST reversal succeeds", first.reversed === true, JSON.stringify(first));
+  check("⭐ …and a success carries NO refusal code — the field is not always-on",
+    first.refusal === undefined, `refusal=${first.refusal}`);
+  check("⭐ wasAlreadyReversed is FALSE on a real reversal — the pairwise inequality that stops " +
+    "the predicate collapsing to a constant",
+    budget.wasAlreadyReversed(first) === false, JSON.stringify(first));
+
+  // THE STATE THE CONSUMERS ACT ON.
+  const second = await budget.reverseAgentSpend({ entry: open[0], reason: "second attempt", at: AT + 2000 });
+  check("🚨 the SECOND reversal refuses", second.reversed === false, JSON.stringify(second));
+  check("🚨🚨 …with the TYPED code, which is what both consumers branch on. If this is red, " +
+    "reverseChargeById and budget-sweep.mjs both stop calling markChargeResolved and every " +
+    "already-reversed charge stays queued for the backstop forever",
+    second.refusal === budget.REVERSAL_REFUSAL.ALREADY_REVERSED, `refusal=${second.refusal}`);
+  check("⭐ …and the shared predicate agrees", budget.wasAlreadyReversed(second) === true);
+  check("⭐ the money is not credited twice", (await budget.daySpend({ owner: OWNER, at: AT })) === 0);
+
+  // ⛔ THE ASSERTIONS THAT MAKE THE FIX REAL RATHER THAN INCIDENTAL ─────────────────────────────
+  // A typed field that is merely PRESENT beside a prose match has fixed nothing. These two pin the
+  // direction of the dependency, and they are the pair that goes red if anyone reintroduces parsing.
+  check("⭐⭐ REWORDING the sentence changes NOTHING — the predicate ignores `refused` entirely",
+    budget.wasAlreadyReversed({ ...second, refused: "totally different wording, nothing matches" }) === true,
+    "the predicate still reads the prose");
+  check("⭐⭐ …and the SENTENCE ALONE is not enough — prose without the code is FALSE",
+    budget.wasAlreadyReversed({ reversed: false, refused: "already reversed (id present in reversedIds)" }) === false,
+    "a hand-built object with only the sentence satisfied the predicate");
+
+  check("⭐ the closed set is frozen", Object.isFrozen(budget.REVERSAL_REFUSAL));
+  check("⭐ …and every refusal code is distinct — a collapsed set compares equal to itself",
+    new Set(Object.values(budget.REVERSAL_REFUSAL)).size === Object.keys(budget.REVERSAL_REFUSAL).length,
+    JSON.stringify(budget.REVERSAL_REFUSAL));
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

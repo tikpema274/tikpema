@@ -3,7 +3,7 @@ import { connectBlobs } from "./_blobs.mjs";
 import { requireInternal } from "./_auth.mjs";
 import { circle } from "./_circle.mjs";
 import { withRetry } from "./_retry.mjs";
-import { listUnresolvedCharges, reverseAgentSpend, markChargeResolved } from "./_budget.mjs";
+import { listUnresolvedCharges, reverseAgentSpend, markChargeResolved, wasAlreadyReversed } from "./_budget.mjs";
 
 // budget-sweep.mjs — resolve SUBMIT-TIME day-ceiling charges that never confirmed, and reverse the
 // ones that terminally failed (step 8).
@@ -228,7 +228,10 @@ export async function sweep({ resolveAfterMs = RESOLVE_AFTER_MS, escalateAfterMs
 
           // The ONLY reversal path. Reverse FIRST, mark SECOND (see the crash-safety note above).
           const r = await reverseAgentSpend({ entry, reason: `swap ${state} (circleId ${id})`, store: undefined, at: now });
-          const alreadyDone = r.reversed === false && /already reversed/.test(r.refused || "");
+          // ⭐ ONE IMPLEMENTATION, IMPORTED. This was a second, character-identical copy of the
+          // predicate in _budget.mjs — and a copy of a predicate is a copy that can drift alone.
+          // It reads the TYPED `refusal`, so rewording the primitive's sentence changes nothing here.
+          const alreadyDone = wasAlreadyReversed(r);
           if (r.reversed) beat.reversed++;
           else if (alreadyDone) beat.alreadyReversed++;
 
