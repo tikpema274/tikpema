@@ -155,6 +155,12 @@ STOPPED on a fired falsifier rather than repairing the prediction in place.
 | 2 | `spike-erc20-fee-burn.mjs` (run 2, agent SCA) | **the gasless developer-controlled SCA carries the 868-byte quote tuple as a userOp, and Gas Station sponsors it against `TokenMessengerWithFees` — a target it had never been observed against.** Balance delta exactly `A + F` with no gas component, and the EntryPoint paying the bundler `0.0316999` separately. ⛔ F5 FIRED, and this time the falsifier was faithful and the ROW was over-strong: R5 asserted "the two streams have equal Transfer counts", a second clause that never followed from its first. ERC-20 7, native 8 — the extra one is the gas refund, native by nature. ⭐ The useful finding: **a reconciliation must never compare stream COUNTS**, it must pin emitter AND movement | **YES** (0.053986 USDC, agent SCA) |
 | 3 | *(a read — no script)* | **R6/R7/R8 measured off run 2's existing burn, spending nothing.** `minFinalityThreshold = 2000` (SLOW) and `maxFee = 0` in the emitted `DepositForBurn`; the Base Sepolia mint credited **exactly the full amount**, not `amount − fee` — the upfront-fee claim observed on a destination chain for the first time. Burn→mint **11 s**, ONE observation, and `MINT_TIMING` does not move on it | no — a read |
 
+## Can one userOp carry both the approve and the burn?
+
+| Step | Script | What it established | Moves money? |
+|---|---|---|---|
+| — | `spike-batch-userop-estimate.mjs` | **decides the allowance-window question for the upfront-fee migration.** A separate approve and burn leave an `amount + fee` allowance standing to a UUPS proxy whose `_authorizeUpgrade` has an EMPTY BODY behind a single EOA (owner `0x3b61abee…`, 0 bytes, nonce 237 — no timelock, no notice). Batching them removes the window: `executeBatch` loops `callWithReturnDataOrRevert`, so either both land or neither. ⭐ Three probes, and **P1 is a CONTROL that must pass** — without it a failing P2 cannot be told from a broken API call. ⭐⭐ **P2 batches TWO HARMLESS APPROVES and involves NO QUOTE**, deliberately: with the real burn in it, an expired quote would revert `QuoteExpired` and the failure would be about the quote rather than the batch. The error's SHAPE is the answer — an HTTP 4xx settles Circle's screening and leaves runtime validation UNANSWERED; an on-chain revert settles it the other way | no — `estimateContractExecutionFee` only; nothing signed, nothing broadcast, no allowance granted |
+
 ## Superseded / dead-ends (kept for the honest trail, NOT proof)
 | Script | Why it's here |
 |---|---|

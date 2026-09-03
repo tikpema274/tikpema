@@ -1,5 +1,120 @@
 ---
 
+# 🚨 TMWF's UPGRADE AUTHORITY IS AN EMPTY FUNCTION BEHIND A SINGLE EOA
+
+**2026-09-03, migration step 3 — check 1 of 2, free chain reads plus the verified source.**
+
+Enumerated every allowance-moving call site in `TokenMessengerWithFees` (impl `0x9dc13cc5…8f6f`,
+38 files, verified). PR-1 had read two; this is all of them.
+
+    _collectFees:487        safeTransferFrom(msg.sender -> TMWF, quotedFee)
+    _collectFeesAndBurn:310 safeTransferFrom(msg.sender -> TMWF, amount)
+
+Two `forceApprove` calls (311, 488) spend **TMWF's own** balance onward to `_TOKEN_MESSENGER` /
+`_FEE_MANAGER`, not ours. ⭐ **That is the complete set.** No `rescue`, `sweep`, `withdraw`,
+`recover`, `multicall` or generic `execute` exists on the contract. The only external functions are
+`initialize`, `renounceOwnership` (`pure`, disabled), two view getters, two `getFee` views, and four
+burn entry points — **none of which takes a `from` or `owner` parameter.** Every pull is from
+`msg.sender`. `_TOKEN_MESSENGER` and `_FEE_MANAGER` are `immutable`.
+
+⭐ **So at this implementation a standing allowance is spendable only on a call our own wallet
+originates.** A third party cannot reach it.
+
+## ⛔ AND THAT RESULT IS NOT WHAT DECIDES ANYTHING — ITS LIMIT IS
+
+    ERC-1967 admin slot   0x000…000          -> no ProxyAdmin; UUPS
+    _authorizeUpgrade     onlyOwner {}       -> EMPTY BODY. No delay, no condition.
+    owner()               0x3b61abee…3ef1    -> 0 bytes, nonce 237  =>  an EOA
+    pendingOwner()        0x000…000
+
+**Upgrade is immediate, single-key, no timelock, no notice.** A standing allowance is not exposed to
+the world; it is exposed to exactly one private key that can replace the implementation in one
+transaction with one that spends it differently.
+
+🚨 **`Ownable2Step` READS AS SAFETY AND IS NOT, HERE.** It makes ownership *transfer* two-step. It
+does nothing about upgrades — `_authorizeUpgrade` is `onlyOwner` and runs immediately. A reader who
+sees `Ownable2StepUpgradeable` in the inheritance list and infers a governance delay has inferred
+something the contract does not do.
+
+⚠️ **ARC TESTNET.** A mainnet deployment is a different contract with its own owner and governance,
+and none of this reading transfers to it. Re-run it there before trusting any of it on mainnet.
+
+⭐ This is why the allowance decision is **C if the batch estimate confirms it, A if not — never B.**
+"Leave it and record it" would leave `amount + fee` standing against that key indefinitely.
+
+---
+
+# ⭐⭐ THE SDK CLAIMS BATCHING IN PROSE AND CANNOT EXPRESS IT IN ITS TYPE
+
+**2026-09-03, migration step 3 — check 2 of 2.**
+
+`createContractExecutionTransaction`'s doc comment says:
+
+> *"Related transactions may be submitted as a batch transaction in a single call."*
+
+`CreateContractExecutionTransactionInput` has **one `contractAddress: string`**, one `callData`, and
+**no `calls` array, no `to[]`, no batch field of any kind.** The sentence describes something the
+typed surface cannot ask for.
+
+🚨 **THE NEXT READER WILL BELIEVE THE COMMENT.** It sits directly above the method we call on every
+bridge, and it answers — in the affirmative — exactly the question someone will arrive with. Nothing
+in the types contradicts it out loud; the absence of a parameter is not a denial, it is a silence.
+
+⭐ **AND THE CAPABILITY IS REAL AT A DIFFERENT LAYER, WHICH IS WHAT MAKES THIS CONFUSING RATHER THAN
+SIMPLY WRONG.** The account (`SingleOwnerMSCA`, impl `0xd206ac7f…9ec8`, verified) DOES expose
+`executeBatch((address,uint256,bytes)[])` — selector `0x34fcd5be`, present in the deployed
+bytecode, confirmed to match our own encoding. Its body loops `callWithReturnDataOrRevert`, so any
+sub-call reverting reverts the whole batch. And `_checkAccessRuleFromEPOrAcctItself` permits
+`msg.sender == address(this)`, so a self-call is allowed at the contract level.
+
+**So a batch is reachable — by pointing `contractAddress` at THE WALLET ITSELF**, which produces
+`execute(SCA, 0, executeBatch([...]))`. That is expressible through the existing typed surface, and
+it is not what the doc comment describes.
+
+⛔ **WHAT SOURCE CANNOT SETTLE, AND WHY A CALL IS NEEDED.** Two questions remain and neither is
+readable: **Q1** whether the self-call passes RUNTIME validation
+(`_processPreRuntimeHooksAndValidation` routes on per-wallet installed-plugin storage), and **Q2**
+whether Circle's API screening accepts a `contractAddress` equal to the wallet. Both settle in one
+`estimateContractExecutionFee` — no money, prod credentials — which is
+`scripts/spikes/spike-batch-userop-estimate.mjs`.
+
+---
+
+# 🚨 THE DAY CEILING IS WIDER THAN CONFIGURED BY THE FEE — a money-safety defect, not copy
+
+**2026-09-03.** Recorded as its own finding because it will not look like one.
+
+`valueOfStep` returns `Number(step.amountUsdc)` for a bridge. Under CCTP upfront fees the wallet
+parts with **`amount + fee`** — the fee is charged on the source, in addition to the amount, and the
+recipient receives the full amount (measured on Base Sepolia in PR-3). So every bridge would consume
+`amount` of the day ceiling while removing `amount + fee` from the user's control.
+
+⛔ **THE CEILING WOULD BE WIDER THAN CONFIGURED, BY THE FEE, ON EVERY BRIDGE.** That is the same
+class as a lost ledger write — a cap that silently admits more than it says — and it is exactly the
+failure `shoutLedgerFailure` exists to make loud. It is not a copy problem and must not be filed
+with the rendering work.
+
+## ⭐⭐ AND THE COMMENT IS THE REASON IT WOULD BE INVISIBLE
+
+    // A bridge moves its full face amount OFF Arc (the fee is deducted from it on
+    // the destination), so the full amount is what counts against the day-ceiling.
+
+The comment does not merely fail to warn — it **states the mechanism that makes the under-count
+correct**, and that mechanism is precisely what adoption inverts. A reader auditing the ceiling
+finds a reasoned justification and moves on. ⚠️ A wrong value with no comment invites a question; a
+wrong value with a *correct-sounding derivation* answers it in advance.
+
+## THE DECISION, AND THE READING THAT WAS REJECTED
+
+**TAKEN: the per-bridge cap and the day ceiling bound THE WALLET DEBIT — `amount + fee`.** The
+ceiling exists to bound what leaves the user's control, and under upfront fees the fee leaves it too.
+
+**REJECTED: bounding the amount bridged.** It reads naturally for something called a "per-bridge
+limit", and it is defensible — but it would let a volatile third-party fee widen the effective
+ceiling with nobody watching. ⭐ Both readings go in the code at `valueOfStep`, because both are
+defensible and the next editor must know which was taken rather than re-deriving it.
+
+
 # ⭐⭐ THE SEAL CARRIES THE QUOTE'S EXPIRY — mode AND value, inside the MAC, branched on
 
 **2026-09-03, migration step 2 of 4.** `_quote-expiry.mjs` (decode, cross-check, branch) plus the
