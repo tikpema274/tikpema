@@ -1,5 +1,230 @@
 ---
 
+# ⭐⭐ THREE GUARDS THAT WOULD HAVE STAYED GREEN — found by asking one counterfactual
+
+**2026-09-03.** Circle shipped CCTP upfront fees on 2026-09-02: the fee is quoted, signed,
+time-bound and collected on the SOURCE chain, so the recipient receives the FULL amount. We have not
+adopted it. Asking the bridge estate one question — *"which guards would go red if we did?"* — found
+**three that would not have noticed**, and each was pinned to something other than the thing it
+exists to protect.
+
+| guard | what it was actually pinned to |
+|---|---|
+| `verify-bridge-fee-band` | its OWN arithmetic — `netUsdc: 1.0 - FEE` passed in as a fixture |
+| `verify-receipt-fee-authority` | FLOW, not meaning — `r.netUsdc === QUOTE_C.netUsdc` |
+| `verify-bridge-fee-binding` | OUR TTL against OUR constant — an external expiry is invisible to it |
+
+## ⚠️ DERIVING FROM THE PRODUCER IS NOT ENOUGH ON ITS OWN
+
+The obvious repair for the first is to import the producer's function instead of re-typing its
+formula. That is necessary and insufficient: if the guard only imports it, a mechanics change moves
+**both sides together** and every band row still passes — one silent agreement traded for another.
+
+⭐ So `bridgeNetUsdc` is exported from `_bridge.mjs` and used at its one derivation site AND by the
+guard, and the INVARIANT is pinned separately: `net + fee === amount` at four amounts, `net` MOVES
+with the amount, and `net < amount` — the defining property upfront fees would invert. Mutation:
+`bridgeNetUsdc` returns the full amount → red, naming `net + fee === amount`.
+
+## ⛔ AND NO 120_000 LITERAL WAS ADDED
+
+The third guard's gap is real — Circle's quote expires in ~2 min on Arc, our seal in 3 — but the
+fix is not to copy their number. Three reasons, the third decisive: **(a)** we do not use their
+signed quote today, so nothing is currently broken; **(b)** their own table calls it APPROXIMATE, and
+a constant retyped from someone else's document is the defect we bound `MINT_TIMING` and the
+marketing refusal count away from this week; **(c)** their expiry may be a SOURCE BLOCK NUMBER, and a
+millisecond TTL cannot represent a block height — **no literal is even the right shape.**
+
+⭐ §4 instead asserts the expiry is self-issued TODAY (positively, not as an absence) and trips if a
+signed-quote/expiry field ever appears without the check reading it. ⚠️ Armed is not firing, so the
+same predicate runs against a SYNTHETIC adopted module — otherwise "no external field yet" would be
+the only reason the section is green. Both directions proven: unwired → red naming ADOPTION BLOCKER;
+wired → green.
+
+---
+
+# ⛔ A REFUSAL MUST REPORT THE QUANTITY THE TEST COMPARED — three instances, one rule
+
+**2026-09-03.**
+
+    if (Math.round(x * 1e6) <= 0) return { reason: `amount ${x} must be > 0` };
+
+The test compares MINOR UNITS. The sentence prints the DECIMAL the caller typed. For `0.0000001` it
+said *"amount 0.0000001 must be > 0"* — **about a value that visibly is.**
+
+⛔ A refusal the caller can disprove by reading it teaches them the service is broken, not that their
+amount was too small. For an autonomous caller it is worse than useless: the stated reason is visibly
+not the case, which invites a retry of the identical request.
+
+Three instances: `_budget.mjs` `canSpend` and `canSpendDay` (minor units vs decimal), and
+`_swap.mjs`'s approve gate — which compared a USDC cap converted into tokenIn BASE UNITS while
+printing the TOKEN amount beside a USDC cap. **Two quantities, neither of them an operand.**
+
+## ⭐ THE SWAP GATE'S FIX IS THE INTERESTING ONE — the message takes the OPERANDS
+
+The obvious repair, printing the amount's USDC value (`amountIn * unitUsd`), would be a second source
+of truth AND **a different arithmetic operation from the one the gate performed**: the gate DIVIDES
+(`ceil(capUsdc / unitUsd)`), and the multiplication is its inverse only up to the ceil. At the
+boundary the sentence and the comparison could disagree — the message describing a pass on a refusal.
+
+⭐ So `swapCapRefusal` takes `amountBase` and `capBase` — the two values the `if` just compared — and
+converts nothing. Dividing by 1e6 is a change of SCALE, not of currency. It also names the DIRECTION:
+the cap was converted into the token; the amount was not. That direction is load-bearing beyond the
+message, because `capBase` is also `approveBase`, the allowance actually written on chain.
+
+⭐⭐ The assertion that carries the weight feeds an **inconsistent triple** — a `capBase` that is NOT
+`ceil(capUsdc / unitUsd)` — and requires the message to print the OPERAND. A version that recomputed
+at the render prints its own number. Nothing weaker separates "renders the operand" from "re-derives
+it and happens to agree."
+
+## THE CENSUS
+
+`verify-refusal-quantity.mjs` implements the rule as a function — a message is self-contradictory
+when it asserts a bound AND prints a number satisfying the bound it says was violated — and prints
+its denominator: **files 147 · validation points 39 · on the helper 17 · self-testing 1 · exempt 21 ·
+OFFENDING 0.** Eight more sites adopted `_amount-floor.mjs`; for two of them (`agent-withdraw`,
+`agent-ub-deposit`) it was not a copy change at all — `!(amount > 0)` is FALSE for `0.0000001`, so
+they had no floor on their own path.
+
+---
+
+# 🚨 A NEW CONSUMER CLASS: claim-bearing copy we hand to a model
+
+**2026-09-03.** `_bridge-fee-table.mjs:69` renders, as grounding injected into a paid research brief:
+
+> *"It is taken out of the amount, so the recipient nets amount − fee."*
+
+The SAME claim `MyAgentPanel`, `BridgePanel`, `ManualBridgePanel` and `site/index.html` make — and
+**the one copy of it no copy guard can check at the point of use, because the point of use is
+generated prose.** Every render-assertion habit in this repo assumes a stable rendered output to
+assert against. A prompt has none.
+
+⚠️ **The claim is TRUE today.** This is the population recorded BEFORE the mechanics move, not a
+defect report.
+
+`verify-model-injected-claims.mjs` enumerates every authored string reaching a prompt and forces each
+to be classified: **12 strings · 4 CLAIM-bearing · 8 instruction-only · 0 undeclared ·
+1 fee-mechanics-dependent.**
+
+CLAIM-bearing (asserts something about US): `_bridge-fee-table.mjs:61` (the fee-mechanics sentence),
+`_swap-rate-table.mjs:80` (our measured USDC/EURC rate), `agent-act.mjs:30` (burn/mint mechanics —
+**states no fee claim**, which is why upfront fees would not falsify it), `plan-quote.mjs:60`
+(supported actions, "ONLY these two tokens exist on Arc").
+
+⭐ §2 asserts the sentence AT THE INPUT and that the CODE still behaves the way the sentence says
+(`net + fee === amount` via `bridgeNetUsdc`), so the words and the arithmetic cannot drift apart
+while each looks fine alone. ⛔ The header states the boundary out loud: this CAN enumerate and
+classify; it CANNOT check the model's output. Nothing can, short of grading prose.
+
+---
+
+# ⭐⭐ FLOW IS NOT MEANING
+
+**2026-09-03.** `check(r.netUsdc === QUOTE_C.netUsdc)` proved the receipt's figure came from the
+signed quote. It could not fail on a quote whose figure meant something else entirely, **because
+both sides of the comparison read the same fixture.**
+
+The mutation that separates them: set the injected quote's `netUsdc` to a number unrelated to
+`amount − fee`. The FLOW check stays green — the value still flows — and only the meaning check goes
+red. The meaning assertion is made against the INDEPENDENT pair (`AMOUNT` and `feeCharged`), never
+against the fixture that produced it, plus a check that the two are genuinely different so one can
+fail while the other passes.
+
+⚠️ Flow assertions are cheap and feel thorough — they thread a value end to end. A fixture compared
+against itself is a tautology wearing a pipeline.
+
+---
+
+# ⭐ ROUNDING HAS A DIRECTION WHEN THE NUMBER IS A REQUIREMENT
+
+**2026-09-03.** Drafting the (unshipped) upfront-fee disclosure surfaced a rendering rule nothing
+stated. `.toFixed()` rounds to NEAREST, which is right for a number you only read and wrong for one
+you must ACT on:
+
+    need 2.054121 USDC  ->  toFixed(4)  ->  "2.0541"   21 millionths short
+    need 2.054121 USDC  ->  toFixed(2)  ->  "2.05"     4 thousandths short
+
+A user who tops up to exactly what the screen asks for still fails.
+
+## ⛔ AND IT ALREADY COMPOSED INTO A SELF-CONTRADICTORY REFUSAL — two LIVE sites
+
+`useModularWallet.ts` and `metamask.ts` both rendered *"You have X, need Y"* with BOTH sides at 2dp
+on a 6-dp token. A real balance of `2.0512` against a need of `2.0549` renders as **"You have 2.05,
+need 2.05"** — a refusal whose own two numbers say it should have passed. Same family as the entry
+above: the printed quantity is not the compared one, and here ROUNDING is what makes them differ.
+
+⭐ `requiredAmount` rounds UP, `availableAmount` rounds DOWN — each away from the reader's favour, so
+a comparison can be pessimistic by a unit and can never read as sufficient when it is not. Both live
+sites now render at `USDC_DECIMALS` (6dp on a 6-dp token is not rounding at all) AND go through the
+helpers, so a surface that later wants fewer digits still cannot understate the need. `metamask.ts`
+KEEPS its tilde: `need` really is an estimate there (a gas-headroom buffer, not a quote), so hedging
+it is honest — rounding it down was not.
+
+⚠️ The scaling is SNAPPED before the ceil. `2.05 * 100` is `204.99999999999997`, and a naive ceil
+turns an exact 2.05 into 2.06 — the direction rule becoming a rounding bug of its own.
+
+⚠️ My first have/need fixture had the numbers REVERSED. The refusal fires when `need > have`, so
+`have 2.0549 / need 2.0512` describes a state that would never have thrown — and the new checker
+rejected my example, not the code.
+
+---
+
+# ⛔⛔ A SECTION AFTER `process.exit` PRINTS ITS FAILURES AND THE SUITE EXITS 0
+
+**2026-09-03.** I appended a new section to `verify-amount-precision.mjs` by inserting before the
+file's LAST `console.log`. That put it **after** `if (fail) { …; process.exit(1) }`.
+
+The section ran. It printed `❌` for failing checks. The suite exited **0**.
+
+🚨 **THE TELL WAS MISREAD TWICE.** Two mutation runs came back `MUTATION NOT CAUGHT` **with red
+checks visible on screen**. The natural reading is "the guard is weak"; the guard was fine and
+unreachable. Same family as [[a-later-command-is-not-proof-of-an-earlier-one]] — the visible output
+and the status came from different places.
+
+⭐ **How to not repeat it:** insert above the tally, and after adding a section confirm the summary's
+pass count GREW (14 → 23 here). A section whose checks cannot move the count is a comment that runs.
+And when a mutation says NOT CAUGHT while failures are on screen, suspect the harness plumbing before
+the assertion.
+
+---
+
+# CCTP UPFRONT FEES ON ARC — feasible, measured, and NOT adopted
+
+**2026-09-03.** Arc testnet IS a supported upfront-fee SOURCE (domain 26). **Fast Transfer is N/A
+from Arc**, so FORWARD is the only fee type available to us. `TokenMessengerWithFees` IS deployed at
+`0x8745D906D67C346E5eb1aEEED38Eb87F34DF0C0A`: an ERC-1967 proxy, byte-identical to Base Sepolia's,
+impl `0x9dc13cc5…` (9955 bytes), whose `tokenMessenger()` returns `0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA`
+— exactly Arc's documented `TokenMessengerV2`. Verified against a positive control (USDC, 1798 bytes)
+and a negative one (`0x…dEaD`, 0 bytes).
+
+⚠️ A first doc read said it was NOT available on Arc — a summariser conflating Arc with the Monad
+caveat. Re-fetched verbatim, the testnet table has an Arc row. **Three instruments now agree.**
+
+## ⭐ SAME FEE, DIFFERENT PLACE — which removes a question from the decision
+
+A live third-party app (`arc-ai-wallet.vercel.app`) renders our exact route as *bridge amount 2 USDC
+· forwarder fee 0.054129 · USDC needed on source 2.054129*, Approve and Burn both "Included".
+⚠️ Their figure is REPORTED, not fetched by us. Our own `bridgeFee({amountUsdc: 2, cctpDomain: 6})`
+returned **54121 minor units** the same day: `finalityThreshold 1000`, `minimumFee 0`,
+`forwardFee.high 54121` (low/med 53821 — so they read the same BAND we do), providerFee 0. **Eight
+minor units apart**, inside our own 137-unit spread for this route.
+
+🚨 So adoption changes **WHERE** the fee is charged, not **WHAT** it costs. "Is it more expensive" is
+not an open question and should not be re-asked.
+
+## THE BLAST RADIUS, AND WHAT IS LEFT
+
+**40 claim sites become false** if adopted: fee-taken-from-amount ×10, `netUsdc`-as-arrival ×11,
+"nothing would arrive" floor ×7, and the `netUsdc` data itself ×12. Two become understated.
+⭐ Arrival **timing** claims are unaffected — the amount estimates break and the timing estimates do
+not, and padding the list with timing would misdescribe the radius.
+
+Remaining unknowns are OURS, not Circle's: the approve TARGET moves to `TokenMessengerWithFees`; the
+allowance must cover **amount + fee** (`job-bridge-approve.mjs`'s "REQUIRED = amount, NO BUFFER"
+becomes wrong, and an exact-amount allowance would revert every burn); and the quote-expiry binding,
+the one blocker with no code written for it.
+
+---
+
 # ⚠️ ARC EMITS TWO `Transfer` LOGS PER MOVEMENT — and the fix is narrower than it looks
 
 **2026-08-30.** A general property of Arc, recorded separately from the send that surfaced it
