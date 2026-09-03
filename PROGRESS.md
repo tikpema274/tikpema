@@ -1,5 +1,89 @@
 ---
 
+# ⭐ THE QUOTE'S EXPIRY IS A TAGGED UNION, NOT A NUMBER
+
+**2026-09-03, migration step 0.** One FORWARD quote requested from the Quote API — Arc testnet (26)
+→ Base Sepolia (6), 2 USDC, `feeToken` Arc USDC. No approve, no burn, no funds moved. The full
+response is at `scripts/spikes/quote-arc-base-2026-09-03.json`.
+
+    {"expiry":{"mode":"TIMESTAMP","expiresAt":1788436574},"issuedAt":1788436454}
+    11:54:14Z -> 11:56:14Z   ·   window exactly 120 s
+
+⭐⭐ **`mode` IS A DISCRIMINATOR, AND IT IS THE WHOLE ANSWER TO THE BINDING QUESTION.** Expiry is not a
+bare number the caller must interpret — the response declares what kind of number it is. The docs
+say the other kind is a source-blockchain BLOCK NUMBER. So we never have to assume, and we must
+never infer.
+
+## WHAT THE SEAL HAS TO CARRY
+
+**`mode` AND `expiresAt`, both inside the MAC, and validation BRANCHES on `mode`.** An unrecognised
+mode REFUSES — it must never fall through to the branch we happen to have.
+
+⛔ **Storing the value alone would compare a BLOCK HEIGHT AGAINST A CLOCK.** That is a category
+error, not a larger-or-smaller one: it fails in whichever direction the chain happens to be at, and
+it would look like an ordinary comparison in the source.
+
+⚠️ **AND THE UNITS DIFFER.** `expiresAt` and `issuedAt` are **SECONDS**; our seal's `iat` is
+**MILLISECONDS**. Mixing them is 1000× — and in the unsafe direction, since a seconds value read as
+milliseconds sits far in the past and a milliseconds value read as seconds sits far in the future.
+
+⭐ On this route no block read is needed at validation time, because the mode is TIMESTAMP. That is
+ONE observation of ONE mode on ONE route, and the field exists because there are others. The rule is
+unchanged and now has its evidence: **the seal's expiry is DERIVED from the quote, never set to a
+number we hope is smaller.** Note also 120 s < our `QUOTE_TTL_MS` of 180 s, so adoption SHORTENS the
+binding window.
+
+---
+
+# ⛔ THE AMOUNT IS NOT BOUND — measured, and it contradicts the docs
+
+**2026-09-03.** `0x1e8480` (2000000) appears **neither in `items[0].args` nor anywhere in the
+545-byte `signedQuote`**. Checked, not assumed. What the quote binds, via `argsHash`
+`0x1374b271…` which is inside the signed blob:
+
+    contract           0x8745d906…  TokenMessengerWithFees
+    destinationDomain  6
+    feeToken/burnToken 0x3600…0000
+    destinationCaller  0x00…00      (bytes32 zero — any caller)
+    hookData           "cctp-forward"
+
+That is coherent for a FORWARD fee: it is a flat destination-gas charge and does not vary with the
+burn amount. ⚠️ **But Circle's own documentation says a quote "locks to specific transfer
+parameters — amount, destination domain…".** The response and the prose disagree.
+
+## ⛔ THE LIMIT, STATED RATHER THAN RESOLVED
+
+This is what the RESPONSE contains. The contract may bind the amount at settle time by a route the
+response does not expose — `depositForBurnWithFees` takes the amount as its own argument, and
+nothing here shows how it is checked against the quote. **Do not build on either reading without
+reading the contract.** ⭐ Recorded as an open question, because the tempting move is to conclude
+"the amount is unbound, so one quote serves many amounts" — which would be a replay surface if the
+contract binds it after all, and a wasted round trip if it does not.
+[[refuted-by-what-you-read-not-what-you-failed-to-find]]
+
+---
+
+# ADOPTION IS 0.000301 USDC CHEAPER, NOT MERELY RELOCATED
+
+**2026-09-03**, both figures taken in the same minute:
+
+    quote feeTotalAmount   53830        (low/med band)
+    our bridgeFee maxFee   54131        (we take forwardFee.high)
+    IRIS tier 1000 then    low 53828 · med 53828 · high 54128
+    difference             301 minor units = 0.000301 USDC, ours higher
+
+⭐ **The bands explain it and the explanation is the point.** Our `maxFee` is a CEILING on a price
+nobody has committed to, so it needs margin — we take `.high` deliberately. Circle's quote is a
+COMMITTED price they honour, so it needs none. Adoption therefore moves the fee off the amount AND
+trims it slightly. Together with the earlier existence proof (same tier, same band, eight minor
+units apart), **"is it more expensive" is closed twice over and should not be re-asked.**
+
+⭐ One more agreement, unplanned: the quote's `hookData` is
+`0x636374702d666f7277617264…` — **byte-identical to our own `FORWARD_HOOK` constant** in
+`_bridge.mjs`. Circle's quote and our existing calldata already name the same forwarding hook.
+
+---
+
 # ✅ DEPLOYED — 11 commits, and the count from conversation was wrong again
 
 **2026-09-03.** Production had been serving `0d8d212` since 2026-09-02. The gap was **eleven
