@@ -189,3 +189,36 @@ knowingly, not a patch.
 ⛔ **EVERY MOVEMENT APPEARS IN BOTH STREAMS, 7 and 7.** Merging them would double-count the fee to
 107942 minor and the amount to 2. The ~1e12 hazard is confirmed on real bytes, not inferred.
 ⭐ The 10/90 split carried over from the native-path observation held exactly: `5397 + 48574 = 53971`.
+
+---
+
+## ⚠️ CORRECTION, appended — GAS WAS NOT SPONSORED, AND I PREDICTED A BALANCE INSTEAD OF READING IT
+
+Commit `2f4ed4e`'s message states *"Post-run: balance 0.260300 (delta -0.053972)"*. **That figure was
+arithmetic, not a measurement** — `0.314272 − 0.053972` — written before the balance was read. The
+measured balance is **0.248465 USDC, delta −0.065807**. A commit message cannot be edited after
+pushing, so the correction lives here.
+
+⭐ **THE 0.011835 GAP IS GAS, AND IT ACCOUNTS EXACTLY:**
+
+    approve   gasUsed  55426  ·  effectiveGasPrice 30459500000  ->  0.001688 USDC
+    burn      gasUsed 398642  ·  effectiveGasPrice 25453000000  ->  0.010147 USDC
+    gas total ......... 0.011835
+    fee + amount ...... 0.053972
+    sum ............... 0.065807   == observed delta, residual 0.000000
+
+🚨 **`from` ON BOTH RECEIPTS IS THE WALLET ITSELF — GAS WAS PAID, NOT SPONSORED.** That is 22% on top
+of the fee, and it contradicts the premise this whole migration rests on ("our agents are gasless").
+
+⚠️ **BUT IT IS A FINDING ABOUT THIS WALLET, NOT ABOUT THE PATH.** `VANILLA_SELLER` is an x402
+spike wallet. `job-bridge-approve.mjs`'s own comment records the opposite for the agent wallet:
+*"gas is SPONSORED: two prior successful bridges each dropped the wallet by EXACTLY 10.000000
+(balanceOf delta, measured)"*. So **sponsorship is per-wallet**, and choosing a non-agent wallet to
+isolate the allowance residue introduced a gas cost the shipped path would not pay.
+
+⛔ **WHAT THIS DOES AND DOES NOT AFFECT.** The log-shape measurement is untouched — gas does not
+appear in the Transfer streams and the fee/amount values are unchanged. What it changes is the COST
+model for the migration: a bridge from an unsponsored wallet costs `amount + fee + gas`, and gas here
+was ~0.0118 USDC for the two-transaction flow. Whether the agent wallet stays sponsored when calling
+`TokenMessengerWithFees` — a NEW target — is **not** established by this run and must not be assumed
+from the two old bridges, which targeted `BridgingKitContract`.
