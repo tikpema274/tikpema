@@ -8,9 +8,9 @@
 // ═══ 🚨 THE THREE INSTANCES THAT SHARE THIS SHAPE ════════════════════════════════════════════
 //   _budget.mjs:338  canSpend      test `Math.round(x*1e6) <= 0`, message "amount 0.0000001 must
 //   _budget.mjs:702  canSpendDay   be > 0" — about a value that VISIBLY IS > 0.
-//   _swap.mjs:413    approve gate  test compares a USDC-equivalent in token base units, message
-//                                  prints the TOKEN amount against a USDC cap. Two quantities,
-//                                  neither of them the one that failed.
+//   _swap.mjs:413    approve gate  test compares `capBase < amountBase` in tokenIn base units, the
+//                                  message printed the TYPED amount against the USDC cap. Two
+//                                  quantities, neither of them an operand. NOW FIXED — section 4.
 //
 // ⛔ A REFUSAL THE CALLER CAN DISPROVE BY READING IT teaches them the service is broken, not that
 // their amount was too small. For an autonomous agent it is worse than useless: it invites a retry
@@ -197,21 +197,16 @@ const MAX_EXEMPT = 20;
 /**
  * ⛔ KNOWN INSTANCES OF THE CLASS THAT ARE **NOT FIXED**, declared so they cannot be forgotten.
  *
- * ⚠️ These sit OUTSIDE the census population on purpose: the scan counts comparisons against ZERO —
- * one coherent quantity class — and `_swap.mjs`'s approve gate compares a USDC cap converted into
- * token base units, which no floor regex would find. Widening the detector to every cap comparison
- * would triple the exemption table and bury the class.
- * ⭐ So they are named, their EXISTENCE is asserted, and they are counted separately. A record that
- * says "known and unfixed" is honest; silence would say "clean".
+ * ⚠️ Entries here sit OUTSIDE the census population on purpose: the scan counts comparisons against
+ * ZERO — one coherent quantity class — and a cap comparison between two derived quantities is not
+ * something a floor regex would find. Widening the detector to every cap comparison would triple the
+ * exemption table and bury the class.
+ * ⭐ EMPTY IS A RESULT, NOT AN OMISSION. `_swap.mjs`'s approve gate was the one entry; it is fixed
+ * and asserted in section 4, so it was REMOVED rather than left as a stale note. An empty list here
+ * is checked for emptiness explicitly, so "nothing declared" cannot be confused with "nothing
+ * looked at". [[unreconciled-marker-needs-a-real-observation]]
  */
-const KNOWN_UNCONVERTED = [
-  { file: "netlify/functions/_swap.mjs", match: "exceeds the per-swap cap",
-    what: "the approve gate: the test is `capBase < amountBase` in tokenIn BASE UNITS, the message " +
-          "prints the TOKEN amount beside a USDC cap. Two quantities, neither of them the one " +
-          "compared. Needs the token amount AND its USDC equivalent, which is a code change to the " +
-          "gate, not a copy change." },
-];
-
+const KNOWN_UNCONVERTED = [];
 const points = [];
 for (const f of files) {
   const src = readFileSync(f, "utf8");
@@ -257,8 +252,8 @@ console.log(
   `\n     files scanned ${files.length}  ·  validation points ${points.length}` +
   `  ·  on the helper ${byClass("helper").length}  ·  self-testing ${byClass("self").length}` +
   `  ·  exempt ${byClass("exempt").length}  ·  OFFENDING ${byClass("offending").length}`);
-console.log(`     known-unconverted (declared, outside this population): ${KNOWN_UNCONVERTED.length} — ` +
-  KNOWN_UNCONVERTED.map((k) => `${k.file} (${k.match})`).join(", "));
+console.log(`     known-unconverted (declared, outside this population): ${KNOWN_UNCONVERTED.length}` +
+  (KNOWN_UNCONVERTED.length ? ` — ${KNOWN_UNCONVERTED.map((k) => `${k.file} (${k.match})`).join(", ")}` : ""));
 if (process.argv.includes("--list")) {
   for (const p of points) console.log(`     ${p.klass.padEnd(9)} ${p.file}:${p.line}  ${p.text}`);
 }
@@ -280,8 +275,9 @@ section("1 — 🚨 EVERY validation point is on the helper, self-testing, or de
   ok(`⭐ the ratchet holds — ${EXEMPT.length} exemptions, ceiling ${MAX_EXEMPT}`,
     EXEMPT.length <= MAX_EXEMPT, `${EXEMPT.length} > ${MAX_EXEMPT}`);
   const missing = KNOWN_UNCONVERTED.filter((k) => !readFileSync(k.file, "utf8").includes(k.match));
-  ok(`⛔ the ${KNOWN_UNCONVERTED.length} KNOWN-UNCONVERTED instance(s) still exist where declared — ` +
-    "a record that has gone stale is worse than no record",
+  ok(KNOWN_UNCONVERTED.length === 0
+      ? "⭐ the KNOWN-UNCONVERTED list is EMPTY — every named instance of the class is fixed"
+      : `⛔ the ${KNOWN_UNCONVERTED.length} KNOWN-UNCONVERTED instance(s) still exist where declared`,
     missing.length === 0, missing.map((k) => `${k.file} :: ${k.match}`).join(" · "));
   ok("⭐ every exemption names the quantity it guards instead",
     EXEMPT.every((e) => /DIFFERENT|NO PROSE|NOT A GATE|NO FUNDS|COMPOSITE|TWO CONDITIONS|SAME QUANTITY/.test(e.why)),
@@ -364,6 +360,76 @@ section("3 — ⭐ NO GATE ON THE MONEY PATH CONTRADICTS ITSELF, across the whol
   ok(`⭐ ${checked} refusals were produced and read — a zero here would make the verdict vacuous`,
     checked >= 20, `${checked} refusals`);
   ok("⭐⭐ NONE of them asserts a bound its own printed value satisfies", worst === null, String(worst));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("4 — ⭐⭐ THE SWAP CAP GATE: both quantities, from the OPERANDS, with the direction named");
+{
+  const { swapCapRefusal } = await import("../netlify/functions/_swap.mjs");
+  // ⚠️ COMMENTS OUT FIRST. The block above the gate QUOTES the sentence it replaced, as a
+  //   tombstone — and a source scan that reads comments flags the tombstone and can never go green.
+  //   Second time this exact trap has bitten a guard in this session; the denial and the tombstone
+  //   are the same shape. [[assert-on-rendered-output-not-source-regex]]
+  const swapSrc = readFileSync("netlify/functions/_swap.mjs", "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/^\s*\/\/.*$/gm, "");
+
+  // The realistic case: 9.5 EURC against a 10 USDC cap, EURC above parity. 9.5 < 10 as bare
+  // numbers, which is exactly why the old sentence read as a broken gate.
+  const m = swapCapRefusal({ token: "EURC", amountBase: 9500000n, capBase: 9128884n, capUsdc: 10, unitUsd: 1.0955 });
+
+  ok("⛔ it is not self-contradictory", contradictoryClaim(m) === null, `${m} ⟶ ${contradictoryClaim(m)}`);
+  ok("⭐ BOTH quantities appear — the amount and the cap AS CONVERTED",
+    m.includes("9.5 EURC") && m.includes("9.128884 EURC"), m);
+  ok("⭐ …and the cap in its own currency, so the reader sees where 10 came from",
+    m.includes("10 USDC"), m);
+  ok("⭐⭐ it says WHICH failed, in the caller's own units",
+    /THE AMOUNT IS WHAT FAILED/.test(m) && /9\.5 EURC is more than the cap allows/.test(m), m);
+  ok("⭐⭐ …and that the CAP IS SET IN USDC, not in the token being spent",
+    /THE CAP IS SET IN USDC/.test(m) && /NOT IN EURC/.test(m), m);
+  ok("⭐⭐ …and names the conversion DIRECTION — the cap was converted, the amount was not",
+    /CAP was converted into EURC/.test(m) && /the amount was not converted/.test(m), m);
+  ok("⭐ the rate that produced the converted operand is shown",
+    /1 EURC = 1\.0955 USDC/.test(m), m);
+
+  // ═══ ⭐⭐⭐ THE VALUE COMES FROM THE COMPARISON, NOT FROM A SECOND CONVERSION ═══════════════
+  // Fed an INCONSISTENT triple — a capBase that is NOT ceil(capUsdc / unitUsd) — a message that
+  // recomputed the conversion at render would print its own number. One that renders the OPERAND
+  // prints the operand. Nothing else discriminates between the two implementations.
+  const inconsistent = swapCapRefusal({
+    token: "EURC", amountBase: 9500000n, capBase: 1234567n, capUsdc: 10, unitUsd: 1.0955,
+  });
+  ok("⭐⭐⭐ the converted cap is the OPERAND `capBase`, not a re-derivation of capUsdc/unitUsd",
+    inconsistent.includes("1.234567 EURC") && !inconsistent.includes("9.128884"), inconsistent);
+
+  // …and the same for the amount: `amountBase` is what the `if` compared; `amountIn` is what was
+  // typed. They differ whenever the caller types more precision than the token can hold.
+  const rounded = swapCapRefusal({
+    token: "EURC", amountBase: 9500000n, capBase: 9128884n, capUsdc: 10, unitUsd: 1.0955,
+  });
+  ok("⭐⭐ the amount is rendered from `amountBase` — the compared value, not the typed decimal",
+    rounded.includes("9.5 EURC"), rounded);
+
+  // ⛔ AND THE INVERSE CONVERSION IS NOT EMITTED. amountBase * unitUsd = 10.40725 would be a second
+  // source of truth for the same relationship, and a different operation from the gate's divide.
+  ok("⛔ the amount's USDC-equivalent is NOT printed — that would be the second derivation",
+    !m.includes("10.40725") && !m.includes("10.407"), m);
+
+  // The USDC case: no conversion happened, so no rate sentence may claim one.
+  const same = swapCapRefusal({ token: "USDC", amountBase: 12000000n, capBase: 10000000n, capUsdc: 10, unitUsd: 1 });
+  ok("⭐ a USDC swap gets NO conversion clause — nothing was converted, so nothing is explained",
+    !/converted/.test(same) && /directly comparable/.test(same), same);
+  ok("  …and still shows both quantities and which failed",
+    same.includes("12 USDC") && same.includes("10") && /THE AMOUNT IS WHAT FAILED/.test(same), same);
+
+  // ── the binding at the call site ────────────────────────────────────────────────────────────
+  ok("⭐⭐ the gate HANDS OVER its operands rather than the typed amount",
+    /swapCapRefusal\(\{\s*\n?\s*token: tIn, amountBase, capBase, capUsdc: swapCapUsdc\(\), unitUsd,/.test(swapSrc),
+    "the throw must pass amountBase and capBase");
+  ok("⛔ …and `amountIn` no longer appears in the cap refusal",
+    !/exceeds the per-swap cap \(\$\{swapCapUsdc\(\)\}/.test(swapSrc) &&
+    !/swap amount \(\$\{amountIn\}/.test(swapSrc),
+    "the old two-quantity sentence is still in the source");
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════

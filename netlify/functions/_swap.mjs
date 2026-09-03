@@ -339,6 +339,51 @@ export class SwapPendingConfirm extends Error {
 //     (carrying circleId → dca-tick's id-reconcile net); on FAILED/revert it throws a plain Error. Either
 //     throw reaches the caller BEFORE any ledger runs → no spentAmount / recordDcaSpend / recordAgentSpend
 //     advances on an unconfirmed swap.
+// ═══ ⛔ THE CAP REFUSAL, BUILT FROM THE OPERANDS THE COMPARISON HELD ═════════════════════════
+//
+// The gate below compares `capBase < amountBase` — both in tokenIn 6-dp MINOR UNITS. It used to
+// refuse with:
+//
+//     `swap amount (${amountIn} ${tIn}) exceeds the per-swap cap (${swapCapUsdc()} USDC)`
+//
+// ⛔ TWO QUANTITIES, AND NEITHER OF THEM THE ONE THAT FAILED. `amountIn` is the decimal the caller
+// typed, not `amountBase`; `swapCapUsdc()` is the cap in USDC, not `capBase`, the converted operand.
+// A user reading "9.5 EURC exceeds the cap (10 USDC)" sees 9.5 < 10 and concludes the gate is broken.
+//
+// ═══ 🚨 THE CONVERSION IS NOT RECOMPUTED HERE, AND THAT IS THE POINT ═════════════════════════
+// The obvious repair — print the amount's USDC value, `amountIn * unitUsd` — would be a SECOND
+// SOURCE OF TRUTH for the same relationship, and a different arithmetic operation from the one the
+// gate performed. The gate divides (`ceil(capUsdc / unitUsd)`); that multiplication is its inverse
+// only up to the ceil, so at the boundary the sentence and the comparison could disagree — the
+// message would report a pass on a refusal. [[duplicate-source-of-truth-is-the-recurring-bug]]
+//
+// ⭐ SO THIS TAKES THE OPERANDS AND CONVERTS NOTHING. `amountBase` and `capBase` ARE the two values
+// that were compared; dividing by 10**6 is a change of SCALE, not of currency. `capUsdc` and
+// `unitUsd` are printed as the inputs that produced `capBase`, so a reader can follow the
+// conversion the gate did without this function performing one.
+//
+// ⚠️ AND IT NAMES THE DIRECTION. The cap was converted INTO the token; the amount was not converted
+// at all. Saying "the comparison was 10.4 USDC-equivalent against 10" would describe a gate this is
+// not — and the direction matters, because `capBase` is also the allowance that gets approved.
+export function swapCapRefusal({ token, amountBase, capBase, capUsdc, unitUsd }) {
+  const dec = (v) => Number(v) / 10 ** USDC_DECIMALS;
+  const amount = dec(amountBase);
+  const capInToken = dec(capBase);
+  const head =
+    `swap amount ${amount} ${token} exceeds the per-swap cap — refusing to approve. ` +
+    `THE AMOUNT IS WHAT FAILED: ${amount} ${token} is more than the cap allows.`;
+  // USDC needs no pricing (valueInUsdc returns it unchanged), so there is no conversion to explain
+  // and a rate sentence would invent one.
+  if (token === "USDC") {
+    return `${head} The cap is ${capUsdc} USDC and this swap spends ${token}, so the two are ` +
+      `directly comparable: ${amount} against ${capInToken}.`;
+  }
+  return `${head} ⚠️ THE CAP IS SET IN USDC (${capUsdc} USDC), NOT IN ${token}, so the CAP was ` +
+    `converted into ${token} to make the comparison — the amount was not converted. At the rate ` +
+    `used to price this swap, 1 ${token} = ${unitUsd} USDC, which makes the cap ${capInToken} ` +
+    `${token}. The comparison was ${amount} ${token} against ${capInToken} ${token}.`;
+}
+
 export async function agentSwap({ walletAddress, tokenIn, tokenOut, amountIn, confirm = false }) {
   const tIn = String(tokenIn).toUpperCase();
   const tOut = String(tokenOut).toUpperCase();
@@ -409,9 +454,11 @@ export async function agentSwap({ walletAddress, tokenIn, tokenOut, amountIn, co
       if (capBase < amountBase) {
         // Unreachable via executeAction — its cap gate refuses an over-cap swap before agentSwap, and the
         // swap-cap trap proves agentSwap has exactly one caller. Defence in depth: refuse, never widen.
-        throw new Error(
-          `swap amount (${amountIn} ${tIn}) exceeds the per-swap cap (${swapCapUsdc()} USDC) — refusing to approve`
-        );
+        // ⭐ THE OPERANDS ARE HANDED OVER, not re-derived. `amountBase` and `capBase` are the two
+        //   values this `if` just compared; the message renders those, never `amountIn`.
+        throw new Error(swapCapRefusal({
+          token: tIn, amountBase, capBase, capUsdc: swapCapUsdc(), unitUsd,
+        }));
       }
       approveBase = capBase;
     }
