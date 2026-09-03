@@ -26,7 +26,7 @@
 process.env.SESSION_SECRET ||= "test-session-secret-0123456789abcdef";
 
 import { readFileSync, readdirSync } from "node:fs";
-import { bridgeFeeBand, bridgeAckToken, FEE_BAND_WARN, FEE_BAND_ACKNOWLEDGE, FEE_BANDS, GATING_BANDS } from "../netlify/functions/_bridge.mjs";
+import { bridgeFeeBand, bridgeAckToken, bridgeNetUsdc, FEE_BAND_WARN, FEE_BAND_ACKNOWLEDGE, FEE_BANDS, GATING_BANDS } from "../netlify/functions/_bridge.mjs";
 
 let pass = 0, fail = 0;
 const check = (label, cond, extra = "") => {
@@ -40,21 +40,51 @@ console.log("║  BRIDGE FEE BAND — disclosure, then consent                  
 console.log("╚══════════════════════════════════════════════════════════════════════╝");
 
 const FEE = 0.053196; // a real quote, burn 0x0175cf7b… 2026-07-31
+const FEE_MINOR = 53_196n;
+const minor = (usdc) => BigInt(Math.round(usdc * 1e6));
+
+// ═══ ⭐⭐ THE FIXTURE IS DERIVED FROM THE PRODUCER, NOT RE-COMPUTED HERE ══════════════════════
+// These rows used to pass `netUsdc: 1.0 - FEE` — the guard re-implementing `_bridge.mjs`'s own
+// formula. That tests ARITHMETIC, and arithmetic is not what `netUsdc` is: "what arrives" is a
+// claim about the FEE MECHANICS. Under Circle's upfront fees (fee charged on the source chain IN
+// ADDITION to the amount, recipient receives the full amount) `netUsdc` becomes `amount` — and this
+// suite would have stayed GREEN through that, because both sides of its comparison were its own.
+// ⭐ So the input now comes from `bridgeNetUsdc`, the same function `bridgeFee` uses.
+const net = (amountUsdc) => bridgeNetUsdc({ amountMinor: minor(amountUsdc), maxFee: FEE_MINOR });
+
+section("0 — ⭐⭐ WHAT `netUsdc` MEANS, asserted before anything is banded on it");
+{
+  // ⚠️ DERIVING FROM THE PRODUCER IS NOT ENOUGH ON ITS OWN. If the guard only imported the formula,
+  // a change to the mechanics would move BOTH sides together and every band check would still pass —
+  // trading one silent agreement for another. So the MEANING is pinned here, independently, as the
+  // invariant the mechanics assert: what arrives plus what is charged equals what was sent.
+  for (const amt of [1.0, 0.4, 0.1, 0.054]) {
+    check(`⭐⭐ net + fee === amount at ${amt} USDC — the fee comes OUT OF the amount`,
+      Math.abs(net(amt) + FEE - amt) < 1e-9, `net=${net(amt)} fee=${FEE} amount=${amt}`);
+  }
+  // ⭐ AND IT IS NOT A CONSTANT. A `net` that ignored its inputs would satisfy a single row.
+  check("⭐ net MOVES with the amount — the derivation is not a fixed number",
+    net(1.0) !== net(0.1) && net(1.0) > net(0.1), `${net(1.0)} vs ${net(0.1)}`);
+  check("⛔ …and it is STRICTLY LESS than the amount — the defining property that upfront fees " +
+    "would invert. If this goes red, `netUsdc` no longer means 'what arrives after the fee' and " +
+    "every surface rendering it as the arrival is wrong by exactly the fee.",
+    net(1.0) < 1.0 && net(0.1) < 0.1, `${net(1.0)}, ${net(0.1)}`);
+}
 
 section("1 — THE REAL ROWS THAT MOTIVATED THIS");
 {
-  const one = bridgeFeeBand({ amountUsdc: 1.0, feeUsdc: FEE, netUsdc: 1.0 - FEE });
+  const one = bridgeFeeBand({ amountUsdc: 1.0, feeUsdc: FEE, netUsdc: net(1.0) });
   check("1.0 USDC ⇒ no band (5.3%)", one.band === "none", `${(one.feeRatio * 100).toFixed(1)}%`);
 
-  const tenth = bridgeFeeBand({ amountUsdc: 0.1, feeUsdc: FEE, netUsdc: 0.1 - FEE });
+  const tenth = bridgeFeeBand({ amountUsdc: 0.1, feeUsdc: FEE, netUsdc: net(0.1) });
   check("⭐⭐ 0.1 USDC ⇒ ACKNOWLEDGE (53.2% lost, yet it clears the fee-floor)",
     tenth.band === "acknowledge", `${(tenth.feeRatio * 100).toFixed(1)}%`);
 
-  const edge = bridgeFeeBand({ amountUsdc: 0.054, feeUsdc: FEE, netUsdc: 0.054 - FEE });
+  const edge = bridgeFeeBand({ amountUsdc: 0.054, feeUsdc: FEE, netUsdc: net(0.054) });
   check("⭐⭐ 0.054 USDC ⇒ ACKNOWLEDGE (98.5% lost, still clears the floor)",
     edge.band === "acknowledge", `${(edge.feeRatio * 100).toFixed(1)}%`);
 
-  const mid = bridgeFeeBand({ amountUsdc: 0.4, feeUsdc: FEE, netUsdc: 0.4 - FEE });
+  const mid = bridgeFeeBand({ amountUsdc: 0.4, feeUsdc: FEE, netUsdc: net(0.4) });
   check("0.4 USDC ⇒ warn but not acknowledge (13.3%)", mid.band === "warn", `${(mid.feeRatio * 100).toFixed(1)}%`);
 }
 

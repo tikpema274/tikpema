@@ -134,6 +134,25 @@ async function irisJson(url) {
   return r.json();
 }
 
+// ═══ ⭐⭐ WHAT `netUsdc` MEANS — ONE DEFINITION, NOT A FORMULA REPEATED IN FIXTURES ═══════════
+//
+// TODAY the CCTP fee is taken OUT OF the burned amount, so what lands is `amount − fee`. That is a
+// CLAIM ABOUT THE FEE MECHANICS, not arithmetic, and it was written twice: here, and again inside
+// `verify-bridge-fee-band` as `netUsdc: 1.0 - FEE`. A guard that recomputes the producer's formula
+// tests its own arithmetic — it would keep passing while `netUsdc` came to mean something else.
+//
+// ⭐ SO THE MEANING LIVES HERE AND THE GUARD IMPORTS IT. The invariant `net + fee === amount` is
+// then assertable in ONE place, against ONE definition, and a change to the mechanics breaks it
+// loudly instead of quietly agreeing with itself. [[duplicate-source-of-truth-is-the-recurring-bug]]
+//
+// 🚨 CIRCLE'S UPFRONT FEES (2026-09-02) WOULD INVERT THIS. Under `depositForBurnWithFees` the fee is
+// collected on the SOURCE chain IN ADDITION to the amount and the recipient receives the full
+// amount — so `netUsdc` would become `amount`, and every surface deriving "what arrives" from this
+// would be wrong by exactly the fee. Not adopted; see the ADOPTION BLOCKER on `openBridgeQuote`.
+export function bridgeNetUsdc({ amountMinor, maxFee }) {
+  return toUsdc(BigInt(amountMinor) - BigInt(maxFee));
+}
+
 // Live bridge fee for an amount to a destination domain, computed exactly as the
 // SDK does: providerFee (CCTP fast-burn, ~0 on testnet) + forwarderFee (the
 // relayer's destination-gas charge). maxFee is in USDC minor units. Throws if the
@@ -156,7 +175,7 @@ export async function bridgeFee({ amountUsdc, cctpDomain }) {
     amountMinor,
     maxFee,
     feeUsdc: toUsdc(maxFee),
-    netUsdc: toUsdc(amountMinor - maxFee),
+    netUsdc: bridgeNetUsdc({ amountMinor, maxFee }),
     providerFeeUsdc: toUsdc(providerFee),
     forwarderFeeUsdc: toUsdc(forwarderFee),
   };
@@ -366,6 +385,27 @@ export function sealBridgeQuote({ owner, destinationKey, amountUsdc, fee, now = 
   return `${body}.${mac}`;
 }
 
+// ═══ ⛔ ADOPTION BLOCKER — CCTP UPFRONT FEES AND THIS EXPIRY CHECK ════════════════════════════
+//
+// Circle's upfront-fee flow (2026-09-02) issues its OWN signed quote with its OWN expiry, and a
+// burn submitted after that expiry REVERTS. Measured against the docs: Arc testnet's quote window is
+// "approximately 2 minutes"; `QUOTE_TTL_MS` here is 3 minutes. Our seal can therefore outlive
+// Circle's quote by up to a minute — and the revert would land AFTER the approve has confirmed.
+//
+// ⛔ THE FIX IS NOT TO HARDCODE 120_000. Three reasons, and the third is the one that settles it:
+//   a. We do not use Circle's signed quote today. This path burns through BridgingKitContract via
+//      `bridgeWithPreapprovalAndHook`, so that expiry governs nothing here. There is NO LIVE GAP.
+//   b. 120s is Circle's constant, and their own table calls it APPROXIMATE. Copying it in would be
+//      the defect we bound MINT_TIMING and the marketing refusal count away from this week: a
+//      number retyped from someone else's document, free to drift with nobody watching.
+//   c. Circle's expiry may be a SOURCE BLOCK NUMBER, not wall-clock — "A quote's expiry is either an
+//      exact wall-clock time or a source blockchain block number." A millisecond TTL cannot
+//      represent a block height at all, so no literal is even the right SHAPE.
+//
+// ⭐ THE RESOLUTION, STATED SO ADOPTION CANNOT QUIETLY SKIP IT: on adoption the seal's expiry must be
+// DERIVED FROM THE QUOTE'S OWN EXPIRY FIELD — carried inside the MAC and compared against whatever
+// unit Circle expresses it in — never set to a literal we hope is smaller. `verify-bridge-fee-binding`
+// §4 fails if a signed-quote or external-expiry field appears here without the check reading it.
 /** Open a sealed quote, or throw. ⛔ FAIL-CLOSED AT EVERY STEP — a malformed token, a bad MAC, an
  *  expired quote or a mismatch against what the caller is now asking for all REFUSE. The mismatch
  *  checks matter: without them a quote for 0.1 USDC could authorise a burn of 100. */

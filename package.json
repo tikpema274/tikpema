@@ -125,7 +125,8 @@
     "test:moneyabsence": "npx tsx scripts/verify-money-absence-render.tsx",
     "test:bridgetiming": "node scripts/verify-bridge-timing.mjs",
     "test:proserecovery": "node scripts/verify-no-prose-state-recovery.mjs",
-    "test:refusalquantity": "node --experimental-test-module-mocks scripts/verify-refusal-quantity.mjs"
+    "test:refusalquantity": "node --experimental-test-module-mocks scripts/verify-refusal-quantity.mjs",
+    "test:injectedclaims": "node scripts/verify-model-injected-claims.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -233,6 +234,7 @@
     "test:moneyabsence",
     "test:bridgetiming",
     "test:proserecovery",
-    "test:refusalquantity"
+    "test:refusalquantity",
+    "test:injectedclaims"
   ]
 }

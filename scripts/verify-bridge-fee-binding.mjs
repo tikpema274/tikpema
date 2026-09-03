@@ -179,6 +179,70 @@ section("3 — ⚠️ THE UN-BOUND PATH IS UNCHANGED, asserted on SOURCE and not
     "a silent fallback would defeat the whole binding");
 }
 
+section("4 — ⛔ THE EXPIRY IS SELF-ISSUED, AND ADOPTION CANNOT LAND WITHOUT WIRING THE QUOTE'S OWN");
+{
+  // ═══ 🚨 WHAT THIS SUITE COULD NOT SEE ════════════════════════════════════════════════════════
+  // Every expiry check here pins OUR seal against OUR `QUOTE_TTL_MS`. Both sides are ours, so the
+  // suite is structurally incapable of noticing an EXTERNAL expiry — and Circle's upfront-fee flow
+  // (2026-09-02) ships exactly that: a signed quote with its own window, after which the burn
+  // REVERTS. Arc testnet's window is documented as "approximately 2 minutes"; ours is 3.
+  //
+  // ⛔ THE FIX IS NOT A 120_000 LITERAL HERE OR IN _bridge.mjs. We do not use Circle's signed quote
+  // today, so nothing is currently broken; their number is documented as APPROXIMATE; and their
+  // expiry may be a SOURCE BLOCK NUMBER, which a millisecond TTL cannot represent at all. Copying
+  // it in would be the retyped-constant defect, on a money path, with nobody watching it drift.
+  //
+  // ⭐ SO THIS ASSERTS THE SHAPE INSTEAD: today the seal is self-issued, and the moment an external
+  // quote appears in the sealed payload, the expiry check MUST read it. The tripwire is what makes
+  // the blocker enforceable rather than a note somebody remembers.
+  const bridgeSrc = readFileSync(new URL("../netlify/functions/_bridge.mjs", import.meta.url), "utf8");
+  const code = bridgeSrc.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, "");
+
+  // (i) TODAY, POSITIVELY. Not "no external field is wired" — that is an absence. This states what
+  //     the expiry IS: a window measured from OUR issuance stamp.
+  check("⭐ the expiry is measured from our OWN issuance (`iat`) against QUOTE_TTL_MS",
+    /now - p\.iat > QUOTE_TTL_MS/.test(code) && /iat: now/.test(code),
+    "the self-issued window is the current design and must be stated, not assumed");
+  check("⭐ …and QUOTE_TTL_MS is OUR constant, defined here rather than imported from a vendor",
+    /^export const QUOTE_TTL_MS = /m.test(code));
+
+  // (ii) THE TRIPWIRE. If any external-quote or external-expiry field appears in this module, the
+  //      expiry check must READ it. Naming the fields is what makes the branch reachable — an
+  //      adopter adding `signedQuote` to the seal trips it on the same commit.
+  const EXTERNAL = ["signedQuote", "expiresAt", "expiresAtBlock", "quoteExpiry", "feeQuote"];
+  const present = EXTERNAL.filter((f) => new RegExp(`\\b${f}\\b`).test(code));
+  const expiryReadsExternal = present.some((f) =>
+    new RegExp(`(?:>|<|>=|<=|===|!==)[^;\\n]*\\b${f}\\b|\\b${f}\\b[^;\\n]*(?:>|<|>=|<=|===|!==)`).test(code));
+  check(
+    present.length === 0
+      ? "⭐ no external quote field is in the seal yet — the tripwire below is ARMED, not passing vacuously"
+      : `⛔ an external quote field is present (${present.join(", ")}) — the expiry check MUST read it`,
+    present.length === 0 || expiryReadsExternal,
+    "ADOPTION BLOCKER: Circle's signed quote carries its own expiry, possibly as a SOURCE BLOCK " +
+    "NUMBER. Derive the seal's expiry FROM that field — never from a literal we hope is smaller. " +
+    "See the ADOPTION BLOCKER block above openBridgeQuote in _bridge.mjs.");
+
+  // ⭐⭐ AND THE TRIPWIRE IS PROVEN LIVE, not merely armed. The same predicate is run against a
+  //    SYNTHETIC adopted module, so "no external field yet" can never be the reason it is green.
+  //    [[equality-passes-vacuously-on-empty]] [[a-deploy-check-needs-a-build-it-should-fail-against]]
+  // ⚠️ THE CONTROL ASKS ABOUT THE INJECTED FIELD, NOT "any external field". Written the loose way it
+  //    went red the moment a DIFFERENT external field was wired correctly — the control was reading
+  //    the real module's good behaviour as the synthetic module's. A control must be disjoint from
+  //    what it controls for. [[control-needs-ownership-and-stability]]
+  const INJECTED_FIELD = "signedQuote";
+  const adoptedBadly = code.replace(/iat: now,/, `iat: now, ${INJECTED_FIELD}: q.${INJECTED_FIELD},`);
+  const reads = (src, f) =>
+    new RegExp(`(?:>|<|>=|<=|===|!==)[^;\\n]*\\b${f}\\b|\\b${f}\\b[^;\\n]*(?:>|<|>=|<=|===|!==)`).test(src);
+  check("⭐⭐ the tripwire FIRES on a synthetic adoption that seals a signedQuote without reading it",
+    new RegExp(`\\b${INJECTED_FIELD}\\b`).test(adoptedBadly) && reads(adoptedBadly, INJECTED_FIELD) === false,
+    `injected=${INJECTED_FIELD} reads=${reads(adoptedBadly, INJECTED_FIELD)} — if this passes, the tripwire cannot fire at all`);
+
+  // ⚠️ NO 120_000 ANYWHERE. A vendor constant retyped into our source is the defect this whole
+  //    section exists to prevent, so its absence is asserted rather than trusted.
+  check("⛔ Circle's ~2-minute window is NOT hardcoded in our source",
+    !/120_000|120000/.test(code), "a vendor's approximate constant must never become our literal");
+}
+
 console.log(`\n${"═".repeat(72)}`);
 if (fail) { console.log(`❌ ${fail} failed, ${pass} passed.\n`); process.exit(1); }
 console.log(`✅ ALL GREEN   pass ${pass} / fail 0`);

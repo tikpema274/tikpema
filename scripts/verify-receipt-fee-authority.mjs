@@ -142,6 +142,23 @@ section("2 — ⭐⭐ BOTH FEES ARE NAMED, and say what they ARE");
     r.feeCharged !== r.feeDisclosed);
   check("⭐ `netPredicted` comes from the SAME quote as feeCharged — the pair is not mixed",
     r.netUsdc === QUOTE_C.netUsdc, `${r.netUsdc}`);
+  // ═══ ⭐⭐ FLOW IS NOT MEANING ══════════════════════════════════════════════════════════════
+  // The check above proves the value TRAVELLED from the signed quote to the receipt. It says
+  // nothing about what the value IS: an injected quote whose `netUsdc` bore no relation to
+  // amount − fee would satisfy it perfectly, because both sides read the same fixture.
+  // ⭐ `netPredicted` is the receipt's answer to "what will arrive", and today that means the
+  // amount minus the fee that was charged. Asserted against the INDEPENDENT pair (AMOUNT and
+  // `feeCharged`), never against the fixture that produced it.
+  // 🚨 Under Circle's upfront fees this becomes FALSE — the fee is charged on the source chain in
+  // addition to the amount and the recipient receives the full amount. This check is where that
+  // change must surface on the RECEIPT, which is the durable record a user reconciles against.
+  check("⭐⭐ …and it MEANS amount − feeCharged, checked against the pair and not against the fixture",
+    Math.abs(r.netUsdc - (AMOUNT - r.feeCharged)) < 1e-9,
+    `netPredicted=${r.netUsdc} amount=${AMOUNT} feeCharged=${r.feeCharged} ⇒ expected ${AMOUNT - r.feeCharged}`);
+  check("⛔ …and the two checks are NOT the same check — the fixture and the derivation are " +
+    "independent, so one can fail while the other passes",
+    QUOTE_C.netUsdc === AMOUNT - QUOTE_C.feeUsdc,
+    `fixture net ${QUOTE_C.netUsdc} vs derived ${AMOUNT - QUOTE_C.feeUsdc}`);
   check("⭐ the band comes from the SAME quote as feeDisclosed",
     r.feeBand === REAL_BRIDGE.bridgeFeeBand({ amountUsdc: AMOUNT, feeUsdc: QUOTE_B.feeUsdc, netUsdc: QUOTE_B.netUsdc }).band,
     `${r.feeBand}`);
