@@ -402,6 +402,34 @@ export function sealBridgeQuote({ owner, destinationKey, amountUsdc, fee, now = 
 //      exact wall-clock time or a source blockchain block number." A millisecond TTL cannot
 //      represent a block height at all, so no literal is even the right SHAPE.
 //
+// ═══ ⭐⭐ EXISTENCE PROOF, 2026-09-03 — ARC-AS-SOURCE UPFRONT FEES WORK ON OUR EXACT ROUTE ════
+// A third-party wallet (arc-ai-wallet.vercel.app) renders a live Arc → Base Sepolia bridge as:
+//     bridge amount 2 USDC · forwarder fee 0.054129 USDC · USDC needed on source 2.054129 USDC
+// with Approve and Burn both "Included" — the same two-transaction shape we already run.
+// ⚠️ THEIR FIGURE IS REPORTED, NOT FETCHED BY US. [[conversation-sourced-numbers-must-be-marked]]
+//
+// ⭐ IT IS THE SAME FEE, MEASURED AGAINST OUR OWN PRODUCER. `bridgeFee({amountUsdc: 2, cctpDomain: 6})`
+// returned 54121 minor units — 0.054121 USDC — on 2026-09-03: finalityThreshold 1000, minimumFee 0,
+// forwardFee.high 54121 (low/med are 53821, so they read the SAME band we do), providerFee 0. Their
+// 0.054129 is EIGHT MINOR UNITS away, inside our own measured spread for this route
+// (0.054071 / 0.054145 / 0.054147 / 0.054208). Same tier, same band, read moments apart.
+//
+// 🚨 SO ADOPTION CHANGES **WHERE** THE FEE IS CHARGED, NOT **WHAT** IT COSTS. The fee is flat with
+// respect to the amount (verified: identical at 1 and 2 USDC), and it is the same number either way
+// — today taken out of the 2, under upfront fees charged on top of it. "Is it more expensive" is
+// therefore NOT one of the open questions, and should not be re-asked.
+//
+// ⭐ WHICH NARROWS THE REMAINING UNKNOWNS TO OURS, NOT CIRCLE'S:
+//   1. the approve TARGET moves from BridgingKitContract to TokenMessengerWithFees
+//      (0x8745D906D67C346E5eb1aEEED38Eb87F34DF0C0A on Arc — proxy verified, impl 0x9dc13cc5…,
+//       tokenMessenger() → 0x8FE6B999…, Arc's own TokenMessengerV2)
+//   2. the allowance must cover amount + fee, not amount. `job-bridge-approve.mjs`'s
+//      "REQUIRED = amount, NO BUFFER" reasoning becomes wrong, and an exact-amount allowance
+//      would revert every burn.
+//   3. the quote-expiry binding below — the one blocker with no code written for it yet.
+// None of the three is a question about whether Circle supports us. They are all questions about
+// our own two transactions.
+//
 // ⭐ THE RESOLUTION, STATED SO ADOPTION CANNOT QUIETLY SKIP IT: on adoption the seal's expiry must be
 // DERIVED FROM THE QUOTE'S OWN EXPIRY FIELD — carried inside the MAC and compared against whatever
 // unit Circle expresses it in — never set to a literal we hope is smaller. `verify-bridge-fee-binding`
