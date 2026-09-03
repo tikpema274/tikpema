@@ -632,6 +632,10 @@ export async function executeAction(step, ctx) {
         // object `feeDisclosed` came from, not re-derived — a second source would be free to drift
         // from the figure the band gate actually evaluated.
         feeDisclosedMinor: String(fee.feeMinor),
+        // ⭐ The mechanic travels with the disclosure even on the throw path: a recovered receipt
+        // must be able to say where the fee was charged, and the consent object is the only thing
+        // that survives a TxPendingError.
+        feeMechanic: fee.mechanic ?? "unknown",
         netUsdc: null,
         feeBand: bandInfo.band,
         ackRequired: bandInfo.band === "acknowledge",
@@ -668,6 +672,10 @@ export async function executeAction(step, ctx) {
       // carrying the quote's BigInt means that comparison never converts a float, and never has to
       // decide what to do about a rounding it could not perform exactly.
       feeDisclosedMinor: String(fee.feeMinor),
+      // ⭐⭐ WHERE THE FEE WAS CHARGED, beside the figures it explains. `netUsdc` is meaningless
+      // without it — the same number means "what arrives" on one path and "the amount, with the fee
+      // on top" on the other.
+      feeMechanic: r.feeMechanic ?? fee.mechanic ?? "unknown",
       netUsdc: r.netUsdc,         // pairs with feeCharged
       recipient: r.recipient,
       // ⭐⭐ WHO PAID — AND IT IS NOT `owner`. The spender is the caller's SCA, not the session

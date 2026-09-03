@@ -1,5 +1,6 @@
 import { internalToken } from "./_auth.mjs";
 import { usdcDecimalToMinorExact } from "./_fee-reconcile.mjs";
+import { bridgeMechanicOf } from "../../shared/bridge-mechanic.mjs";
 import { writeReceiptNeverThrows, writePendingReceiptNeverThrows, SUBMITTED_STATE, PENDING_STAGES, ackTokenFingerprint, readPendingReceipt, retirePendingReceipt } from "./_bridge-receipts.mjs";
 
 // RECORD A BRIDGE — the write-and-trigger pair, in ONE place, called from the HTTP
@@ -191,6 +192,11 @@ function feePair(src, { burnHash } = {}) {
     // `disclosedFeeMinor` in _fee-reconcile.mjs, which converts EXACTLY or refuses — and a refusal
     // there is a visible `disclosed_not_exact` verdict rather than a quiet rounding in this writer.
     feeDisclosedMinor: typeof src?.feeDisclosedMinor === "string" ? src.feeDisclosedMinor : null,
+    // ⭐⭐ WHERE THE FEE WAS CHARGED — stored beside the fees, in the ONE place every writer passes
+    // through, so no path can record a figure without recording what it means.
+    // ⛔ `unknown` IS THE HONEST DEFAULT AND THE ONLY SAFE ONE. Defaulting to either mechanic would
+    // make a permanent record assert something it was never told, about money that already moved.
+    feeMechanic: bridgeMechanicOf(src?.feeMechanic),
   };
 }
 
@@ -227,6 +233,12 @@ export async function recordBridge({ r, session, event, amountRequested, quoteId
     // existed carries null, and the reconciliation refuses those with `payer_unknown` rather than
     // guessing the owner. Absence must not read as safe — including the absence of a payer.
     payer: r.payer ?? null,
+    // ⭐⭐ WHICH PATH WROTE THIS. The intent record has always carried it and the promotion DROPPED
+    // it — see promoteUserBridge — so every self-signed receipt in the store is indistinguishable
+    // from an agent one. It is persisted here, on the shared writer, so both paths keep it.
+    // ⚠️ `null` on an agent receipt is meaningful and correct: the discriminator is the PRESENCE of
+    // "user-signed", exactly as the intent record's own comment says.
+    origin: r.origin ?? null,
     amountRequested: Number(amountRequested),
     ...feePair(r, { burnHash: r.burnHash }),
     netPredicted: r.netUsdc,   // pairs with feeCharged; null when the signed quote is unknown
@@ -357,6 +369,7 @@ export async function recordPendingBridge({ e, session, amountRequested, quoteId
     // Carried on the provisional record too, so a bridge reconciled from a 202 gets the same fee
     // reading a confirmed one does. See the note on the confirmed writer above.
     payer: c.payer ?? null,
+    origin: c.origin ?? null,
     amountRequested: Number(amountRequested),
     ...feePair(c, { burnHash: c.burnHash }),
     netPredicted: c.netUsdc ?? null,
@@ -491,6 +504,18 @@ export async function promoteUserBridge({ session, intentId, burnHash, burnTx, e
     // promotion writes must be the ones the user was gated against, not a fresh quote taken now.
     feeDisclosedMinor: typeof pending.feeDisclosedMinor === "string" ? pending.feeDisclosedMinor : null,
     payer: pending.payer ?? null,
+    // ═══ 🚨 THE FIELD THIS REBUILD USED TO LOSE ═══════════════════════════════════════════════
+    // ⛔ AN INCLUDE-LIST REBUILD CAN ONLY LOSE, AND THIS ONE ALREADY HAD. The intent record writes
+    // `origin: "user-signed"` and called it "the discriminator a reader needs"; the rebuild below
+    // never read it, so every promoted self-signed receipt reached the durable store looking
+    // exactly like an agent one. Audited field by field on 2026-09-03: `origin` was the ONLY loss,
+    // but the shape guarantees there can be others the day a field is added to the intent and not
+    // to this list. ⚠️ verify-bridge-receipts asserts the two field sets against each other.
+    origin: pending.origin ?? null,
+    // ⭐ AND THE MECHANIC, DERIVED FROM THE PATH RATHER THAN GUESSED. A user-signed bridge burns
+    // through BridgingKitContract, where the fee is DEDUCTED — that is a fact about the contract
+    // this path calls, not an inference about the record.
+    feeMechanic: pending.feeMechanic ?? (pending.origin === "user-signed" ? "deducted" : "unknown"),
     netUsdc: pending.netPredicted,
     feeBand: pending.ackBand,
     ackRequired: pending.ackRequired,

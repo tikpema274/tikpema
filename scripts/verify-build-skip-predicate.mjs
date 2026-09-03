@@ -60,8 +60,19 @@ function decide(from, to, pathspec) {
 const SITE = ["site"];
 const NOT_SITE = [".", ":!site"];
 
-// ── Find real commits of each shape rather than hardcoding SHAs, which rot ──────────────────────
-const commits = git(["log", "--format=%H", "-60"]).split("\n").filter(Boolean);
+// ═══ ⚠️ THE SEARCH WINDOW, AND WHY IT REPORTS ITS OWN DEPTH ═══════════════════════════════════
+// This searched the last 60 commits for one commit of each shape. On 2026-09-03 it went RED — not
+// because the predicate broke, but because a busy session pushed the most recent site-only commit
+// to **position 61**. ⭐ The guard was right to refuse: it says "the rows below would be vacuous"
+// and aborts rather than passing on an empty sample.
+//
+// ⛔ BUT A SLIDING WINDOW MAKES GREENNESS A FUNCTION OF RECENT COMMIT HABITS, which is not a
+// property of the thing under test. Hardcoding SHAs is the other failure — they rot on a rebase.
+// ⭐ So the window is wide enough to hold the sample AND the guard REPORTS HOW DEEP IT HAD TO GO,
+// warning as it approaches the edge — the same early-warning shape as readWithRetry's NARROW
+// MARGIN. A guard that can drift into vacuity should say so BEFORE it does.
+const WINDOW = 400;
+const commits = git(["log", "--format=%H", `-${WINDOW}`]).split("\n").filter(Boolean);
 const shapeOf = (c) => {
   const files = git(["diff-tree", "--no-commit-id", "--name-only", "-r", c]).split("\n").filter(Boolean);
   const s = files.filter((f) => f.startsWith("site/")).length;
@@ -72,15 +83,24 @@ const shapeOf = (c) => {
   return "EMPTY";
 };
 const found = { "ONLY-site": null, "ONLY-other": null, BOTH: null };
-for (const c of commits) {
-  const sh = shapeOf(c);
-  if (sh in found && !found[sh]) found[sh] = c;
+const depth = { "ONLY-site": null, "ONLY-other": null, BOTH: null };
+for (let i = 0; i < commits.length; i++) {
+  const sh = shapeOf(commits[i]);
+  if (sh in found && !found[sh]) { found[sh] = commits[i]; depth[sh] = i + 1; }
   if (Object.values(found).every(Boolean)) break;
 }
 
 console.log("\n⭐ 1 — EVERY COMMIT SHAPE IS ACTUALLY PRESENT (an absent shape must not pass silently)");
 for (const [sh, c] of Object.entries(found)) {
-  check(`a real "${sh}" commit exists in the last 60`, !!c, c ? c.slice(0, 8) : "NOT FOUND — the rows below would be vacuous");
+  check(`a real "${sh}" commit exists within the last ${WINDOW}`, !!c,
+    c ? `${c.slice(0, 8)} at depth ${depth[sh]}/${WINDOW}` : `NOT FOUND in ${commits.length} commits — the rows below would be vacuous`);
+}
+// ⚠️ THE EARLY WARNING. Silence until the day it breaks is what made the 60-commit window a
+// surprise; this says the sample is receding while there is still room to act.
+const deepest = Math.max(...Object.values(depth).filter((d) => d != null));
+if (Number.isFinite(deepest) && deepest > WINDOW * 0.6) {
+  console.log(`  ⚠️ NARROW MARGIN — the deepest shape sits at ${deepest}/${WINDOW}. Widen WINDOW, or ` +
+    `accept that this guard will go vacuous once it passes ${WINDOW}.`);
 }
 if (!Object.values(found).every(Boolean)) {
   console.log("\n⛔ ABORTING — a shape is missing, so the table below would assert nothing.");

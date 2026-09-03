@@ -1,5 +1,117 @@
 ---
 
+# ⭐⭐ THE FEE MECHANIC IS THREADED — the producer decides, no surface writes its own sentence
+
+**2026-09-03, migration step 4 of 4.** `shared/bridge-mechanic.mjs` + the threading.
+`test:mechanicpairing` **45/0** (new). Eleven mutations, both directions.
+
+## THE PARTITION, MEASURED FIRST
+
+    103 raw line hits -> 40 claim-shaped -> 9 false positives/comments -> 31 real sites
+      AGENT-ONLY .......... 23
+      SELF-SIGNED ONLY .....  3   ⛔ CORRECT AS THEY STAND — must not be swept
+      BOTH .................  5   all in bridgeReceiptStatus.tsx
+
+⭐ Partitioning before touching a sentence is the whole reason this did not break the manual path.
+A sweep that rewrote every "would arrive" would have made `ManualBridgePanel` lie about a path that
+genuinely deducts.
+
+## 🚨 THE ORIGIN GAP, AND THE FIELD DIFF
+
+`promoteUserBridge` rebuilds `r` by include-list and never read `origin` — the field the intent
+record itself calls *"the discriminator a reader needs"*. So every promoted self-signed receipt
+reached the durable store **indistinguishable from an agent one**.
+
+⭐ **AUDITED FIELD BY FIELD, NOT EYEBALLED: `origin` WAS THE ONLY LOSS.** But an include-list rebuild
+**can only lose**, and this one already had — the shape guarantees there can be others the day a
+field is added to the intent and not to the list.
+
+⚠️ The exposure also never projected it, so even a record that HAD it could not reach a renderer.
+Both closed; `verify-bridge-mechanic-pairing` §6 pins the whole chain.
+
+## ⛔ 57 OF 57 DURABLE RECEIPTS LAND IN `unknown` — MEASURED
+
+Read from the live store: **66 keys — 57 durable receipts, 9 provisional `tx-user-` intents.** Every
+durable receipt predates the field, so all 57 are `unknown`.
+
+🚨 **AND THE GAP IS DEMONSTRABLE ON A NAMED RECEIPT.** Burn `0x265be6d3…` — recorded in memory as the
+manual bridge whose ack gate was proven live on 2026-08-29 — reads back with **`origin` ABSENT and
+`feeMechanic` ABSENT**. Nothing on that record distinguishes it from an agent bridge.
+⚠️ Whether it passed through `promoteUserBridge` is NOT established here; what is established is that
+the record carries no discriminator, which is the claim that matters.
+
+## ⭐⭐ THREE VALUES, AND `unknown` CLAIMS NEITHER
+
+    upfront   the fee is charged on top; the FULL amount arrives
+    deducted  the fee comes out of the amount; the recipient nets amount − fee
+    unknown   the record does not say which — and neither does the copy
+
+⛔ **DEFAULTING TO EITHER WOULD MAKE THE STORE ASSERT SOMETHING IT NEVER RECORDED, ABOUT MONEY THAT
+ALREADY MOVED.** `upfront` would tell a user the full amount arrived on a bridge that deducted the
+fee; `deducted` would understate every agent bridge by exactly the fee. Both wrong in the direction
+that matters, neither visible. The guard asserts `unknown`'s copy contains none of the phrases the
+other two use, and that it says WHY rather than merely omitting.
+
+## THE THREADING — the refundClass shape
+
+Originated at `bridgeFee` (`upfront`) and `bridgeFeeDeducted` (`deducted`) — **the functions that
+know which contract will be called**. Then: into the MAC (`fm`, sealed, so a client cannot choose the
+claim shown to its own user) → out of `openBridgeQuote` → `_actions`' return and its consent object →
+`recordBridge` → the exposure → the components. Copy lives in `shared/bridge-mechanic.mjs`, keyed by
+mechanic, and the component derives it ONCE at the top.
+
+⭐ **NO SIGNATURE CHANGES.** Every server site already holds the fee object; `BridgeQuoteSummary`
+already takes the whole quote; `bridgeReceiptStatus` already takes the whole receipt.
+
+## THE PAIRING GUARD — the vault-allowlist shape
+
+For each mechanic: its copy is rendered **and both other mechanics' copy is absent**. ⛔ A row
+rendering BOTH would satisfy a one-directional check while telling a user two contradictory things
+about where their money went. Plus the closed set both ways (every mechanic has copy, every copy key
+is a mechanic), that the three summaries are **pairwise distinct** (identical copy would pass every
+pairing check vacuously), and **the label agrees with the arithmetic** — `upfront: net === amount`,
+`deducted: net === amount − fee`, and the two must differ from each other or the mechanic labels
+nothing.
+
+⭐ **AND §5 GUARDS AGAINST A FUTURE FIX, NOT A BUG.** The three self-signed sites are asserted
+CORRECT: they still say "would arrive", still call the arrival an estimate, and have NOT acquired
+"full amount arrives" / "charged on top" / "left your wallet". Mutating `ManualBridgePanel` to the
+upfront wording reddens it — so a sweep cannot quietly convert honest copy.
+
+## ⚠️ TWO GUARDS WENT RED THAT WERE NOT ABOUT THIS CHANGE
+
+**`verify-bridge-copy`** pinned *"estimated 0.940000 USDC to arrive"* on a fixture with no mechanic.
+That wording is TRUE for the deducted path and FALSE for the upfront one, where the arrival is the
+amount requested and calling it an estimate understates what is known. ⭐ It now asserts PER
+MECHANIC — the only form that can be right for both — plus that `unknown` says "recorded as the
+arrival" and never " to arrive", because that phrase would assert the figure IS the arrival, which
+is exactly what the record cannot support.
+
+**`verify-build-skip-predicate`** searched the last **60** commits for one of each commit shape. A
+busy session pushed the most recent site-only commit to **position 61**. ⭐ The guard was RIGHT to
+refuse — it says "the rows below would be vacuous" and aborts rather than passing on an empty
+sample. ⛔ But a sliding window makes greenness a function of recent commit habits, which is not a
+property of the thing under test; hardcoded SHAs are the other failure, because they rot on a
+rebase. It now searches 400 and **reports the depth it needed** (`ONLY-site` at 61/400), warning
+past 60% — the readWithRetry NARROW MARGIN shape. **A guard that can drift into vacuity should say
+so before it does, not on the day it does.**
+
+## ⛔ AND A COPY BUG THE FIRST DRAFT SHIPPED
+
+The copy carried an `arrivalIsEstimate` boolean AND a label, and the renderer applied both —
+producing *"estimated N USDC estimated to arrive"* on the deducted path and a dangling *"N USDC
+recorded as"* on `unknown`. ⭐ Split into `arrivalPrefix` + `arrivalSuffix`, **two fields with one
+job each, which cannot compose into nonsense.** Caught by rendering, not by reading the source.
+
+## WHAT THE MECHANIC GATES, BESIDES THE SENTENCE
+
+The `· N USDC left your wallet` line renders **only** for `upfront`. On the deducted path the wallet
+parts with exactly the amount, so that line beside an arrival of `amount − fee` reads as a
+contradiction; on `unknown` we do not know which, so it says nothing. ⭐ And the word "estimated"
+follows the MECHANIC, not the state: on the upfront path the arrival is the amount requested, and
+calling it an estimate would understate what is known.
+
+
 # ⭐⭐⭐ A GUARD CAN GO UNREACHABLE AND STILL LOOK ALIVE
 
 **2026-09-03.** `_analystb`'s bridge fee-floor was:

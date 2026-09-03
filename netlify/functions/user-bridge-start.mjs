@@ -82,6 +82,11 @@ export async function handler(event) {
       // wallet that pays is the wallet that holds the session — unlike the agent path, where the
       // spender is a Circle SCA and the owner is someone else entirely.
       payer: session.address,
+      // ⭐ FROM THE PRODUCER, NOT TYPED HERE. `priceAndGate` uses `bridgeFeeDeducted`, which declares
+      // `mechanic: "deducted"` — this path burns through BridgingKitContract, where the fee comes
+      // out of the amount. Reading it off the fee object rather than writing the word means the
+      // claim cannot disagree with the pricing that produced it.
+      feeMechanic: gate.fee.mechanic ?? "unknown",
       netUsdc: gate.fee.netUsdc,
       feeBand: gate.band.band,
       ackRequired: gate.ackRequired,

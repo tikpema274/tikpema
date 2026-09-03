@@ -28,6 +28,7 @@
 // bug this receipt system keeps designing around.
 
 import { USDC_DP } from "../lib/formatUsdc";
+import { bridgeMechanicCopy, bridgeMechanicOf } from "../../shared/bridge-mechanic.mjs";
 
 /** The receipt shape, as projected by /api/bridge-receipts. Deliberately loose: this component
  *  must render SOMETHING truthful for a receipt from an older deploy, not throw. */
@@ -53,6 +54,13 @@ export type BridgeReceiptView = {
   } | null;
   amountDelivered?: number | null;
   debitDisclosed?: number | null;
+  // ⭐⭐ WHERE THE FEE WAS CHARGED. This row's list MIXES both paths — a promoted self-signed
+  // receipt is written by the same writer into the same owner prefix — so `netPredicted` is
+  // unreadable without it: the same number means "what arrives" on one path and "the amount, with
+  // the fee on top" on the other. ⛔ Absent/unrecognised normalises to `unknown`, whose copy claims
+  // NEITHER mechanic. See shared/bridge-mechanic.mjs.
+  feeMechanic?: string | null;
+  origin?: string | null;
   delivery?: string;
   destinationKey?: string | null;
   destinationLabel?: string | null;
@@ -115,6 +123,11 @@ const usdc = (v?: number | null): string | null =>
   v == null || !Number.isFinite(Number(v)) ? null : Number(v).toFixed(USDC_DP);
 
 export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
+  // ⭐ ONE DERIVATION, AT THE TOP. Every sentence below reads from `mech`; none composes its own
+  // wording. A surface that wrote its own could render a true sentence for the WRONG path and
+  // nothing about it would look wrong — which is exactly how the two vocabularies would drift.
+  const mech = bridgeMechanicOf(r.feeMechanic);
+  const copy = bridgeMechanicCopy(mech);
   const measured = r.delivery === "measured" && r.amountDelivered != null;
   const known = (KNOWN_RECEIPT_STATES as readonly string[]).includes(r.state ?? "");
   return (
@@ -229,9 +242,14 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
       {r.state === "burn_confirmed" && (
         <span>
           {usdc(r.netPredicted)
-            ? <>in flight — <b>estimated</b> {usdc(r.netPredicted)} USDC to arrive</>
-            : <>in flight — the Arc burn is confirmed; <b>the estimated arrival amount was not recorded</b></>}
-          {r.debitDisclosed != null && (
+            ? <>in flight — {copy.arrivalPrefix ? <><b>{copy.arrivalPrefix.trim()}</b>{" "}</> : null}
+                {usdc(r.netPredicted)} USDC {copy.arrivalSuffix}</>
+            : <>in flight — the Arc burn is confirmed; <b>the arrival amount was not recorded</b></>}
+          {/* ⭐ THE DEBIT LINE IS UPFRONT-ONLY, AND THAT IS THE POINT OF GATING IT. On the deducted
+              path the wallet parts with exactly the amount, so "N USDC left your wallet" beside an
+              arrival of N − fee would be two numbers that look like a contradiction. On `unknown`
+              we do not know which, so we say nothing rather than guess. */}
+          {mech === "upfront" && r.debitDisclosed != null && (
             <span className="sub"> · {usdc(r.debitDisclosed)} USDC left your wallet</span>
           )}
         </span>
@@ -256,6 +274,12 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
             </span>
           )}
         </span>
+      )}
+      {/* ⭐⭐ WHERE THE FEE WAS CHARGED — rendered from the mechanic, never composed here. ⛔ It is
+          shown for `unknown` too, and its copy claims NEITHER mechanic: a record that does not say
+          must not be made to say. Hiding it on `unknown` would let a reader assume the current one. */}
+      {(r.feeCharged != null || r.feeDisclosed != null) && (
+        <span className="sub" style={{ display: "block" }}>{copy.summary}</span>
       )}
       {/* ═══ ⭐⭐ WHAT THE CHAIN SAYS THE FEE WAS — THREE OUTCOMES, NEVER TWO ═════════════════════
           The line above reports what our own record says. THIS one reports what actually moved on
@@ -323,7 +347,7 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
           {(r.mintRecovery.verifyFailureCount ?? 0) > 0
             ? ` (${r.mintRecovery.verifyFailureCount} failed reads)`
             : ""}
-          , so we will not claim it as measured. Estimated{" "}
+          , so we will not claim it as measured. {copy.arrivalIsEstimate ? "Estimated" : "Expected"}{" "}
 {usdc(r.netPredicted) ? <>{usdc(r.netPredicted)} USDC. </> : <>not recorded. </>}
           <b>This most likely arrived</b> — the gap is in our verification, not the bridge.
           {r.mintRecovery.exhausted && <> We have stopped re-checking automatically.</>}
@@ -332,7 +356,7 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
       {r.state === "mint_unconfirmed" && r.mintRecovery?.cause !== "chain_unreadable" && (
         <span style={{ color: "var(--warn)" }}>
           not confirmed in time — the Arc burn is real and final; the destination mint is{" "}
-          <b>unproven</b> and has not been reported by Circle either. Estimated{" "}
+          <b>unproven</b> and has not been reported by Circle either. {copy.arrivalIsEstimate ? "Estimated" : "Expected"}{" "}
 {usdc(r.netPredicted) ? <>{usdc(r.netPredicted)} USDC. </> : <>not recorded. </>}
           {r.mintRecovery?.exhausted ? (
             <>

@@ -229,7 +229,21 @@ section("6 — NUMBERS ARE FORMATTED, NOT DUMPED");
     /read from the destination chain/i.test(arrived));
   check("⭐⭐ `minted` WITHOUT a measured amount refuses to present the estimate as an arrival",
     /no measured amount was recorded/i.test(text({ state: "minted" })));
-  check("  an in-flight row is explicitly an ESTIMATE", /estimated 0\.940000 USDC to arrive/i.test(text({ state: "burn_confirmed", netPredicted: 0.94 })));
+  // ═══ ⚠️ THIS ASSERTION PREDATES THE SECOND MECHANIC AND HAD TO NAME ONE ═══════════════════════
+  // It pinned "estimated 0.940000 USDC to arrive" on a fixture with no mechanic. That wording is
+  // true for the DEDUCTED path — where netPredicted really is arithmetic — and false for the
+  // UPFRONT path, where the arrival is the amount requested and calling it an estimate understates
+  // what is known. ⭐ So it now asserts per mechanic, which is the only form that can be right for
+  // both. [[a-field-name-must-be-true-in-every-case]], applied to a sentence.
+  const inflight = (m?: string) => text({ state: "burn_confirmed", netPredicted: 0.94, feeMechanic: m });
+  check("  a DEDUCTED in-flight row is explicitly an ESTIMATE",
+    /estimated 0\.940000 USDC to arrive/i.test(inflight("deducted")), inflight("deducted").slice(0, 90));
+  check("⭐⭐ an UPFRONT in-flight row is NOT called an estimate — the arrival is the amount requested",
+    /0\.940000 USDC to arrive/.test(inflight("upfront")) && !/estimated/i.test(inflight("upfront")),
+    inflight("upfront").slice(0, 90));
+  check("⛔ an UNKNOWN row claims neither — it does not say the figure IS the arrival",
+    /recorded as the arrival/.test(inflight()) && !/ to arrive/.test(inflight()),
+    inflight().slice(0, 110));
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
@@ -316,10 +330,14 @@ section("9 — A MISSING AMOUNT MUST NOT BECOME A CONFIDENT NUMBER");
   const nullAmt = text({ state: "burn_confirmed", netPredicted: null as any });
   const absent  = text({ state: "burn_confirmed" });
   check("⭐⭐ netPredicted:null NEVER renders 0.0000", !/0\.0000/.test(nullAmt), nullAmt.slice(0, 76));
-  check("⭐⭐ …and says the amount was not recorded", /estimated arrival amount was not recorded/i.test(nullAmt));
+  // ⚠️ "estimated arrival amount" -> "arrival amount": with two mechanics live, the figure is only
+  // an estimate on one of them, and a null figure is not an estimate of anything at all.
+  check("⭐⭐ …and says the amount was not recorded", /arrival amount was not recorded/i.test(nullAmt));
   check("⭐⭐ an ABSENT amount never renders NaN", !/NaN/.test(absent), absent.slice(0, 76));
   check("⭐ …and both still say the burn is confirmed", /burn is confirmed/i.test(nullAmt) && /burn is confirmed/i.test(absent));
-  check("⭐ a REAL amount is still shown, to 6dp", /estimated 0\.940000 USDC to arrive/.test(text({ state: "burn_confirmed", netPredicted: 0.94 })));
+  check("⭐ a REAL amount is still shown, to 6dp, on every mechanic",
+    ["upfront", "deducted", undefined].every((m) =>
+      /0\.940000 USDC/.test(text({ state: "burn_confirmed", netPredicted: 0.94, feeMechanic: m }))));
 
   const unconfNull = text({ state: "mint_unconfirmed", netPredicted: null as any, mintRecovery: { cause: "never_appeared" } });
   check("⭐⭐ the unconfirmed row does not print a fake estimate either",

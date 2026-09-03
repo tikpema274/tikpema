@@ -4,6 +4,7 @@ import { requireSession, internalToken } from "./_auth.mjs";
 import { listByOwner, isPastDeadline, isRecheckable, provisionalStatus, mintRecoveryStatus, readFeeVerdict } from "./_bridge-receipts.mjs";
 import { bridgeReceiptRatio } from "./_bridge-record.mjs";
 import { minorToUsdcString } from "./_fee-reconcile.mjs";
+import { bridgeMechanicOf } from "../../shared/bridge-mechanic.mjs";
 
 // GET|POST /api/bridge-receipts   (auth required)
 //
@@ -113,6 +114,18 @@ export async function handler(event) {
       feeCharged: r.feeCharged ?? r.feeUsdc ?? null,
       feeDisclosed: r.feeDisclosed ?? r.feeUsdc ?? null,
       netPredicted: r.netPredicted,
+      // ═══ ⭐⭐ WHERE THE FEE WAS CHARGED — WITHOUT THIS, `netPredicted` IS UNREADABLE ═════════════
+      // The same number means "what arrives" on the self-signed path and "the amount, with the fee
+      // charged on top" on the agent path. The receipt list mixes both — a promoted self-signed
+      // receipt is written by the SAME writer into the SAME owner prefix — so a row that does not
+      // carry its mechanic cannot render a true sentence about either.
+      // ⛔ `unknown` for every receipt written before this field existed, and its copy claims
+      // NEITHER mechanic. See shared/bridge-mechanic.mjs.
+      feeMechanic: bridgeMechanicOf(r.feeMechanic),
+      // ⭐ AND THE DISCRIMINATOR THE MECHANIC WAS DERIVABLE FROM, projected too — so a reader can
+      // tell an agent receipt from a self-signed one even on a record whose mechanic is unknown.
+      // ⚠️ `null` on an agent receipt is correct: presence of "user-signed" is the signal.
+      origin: r.origin ?? null,
       // ⭐ DERIVED, NEVER STORED — so it cannot disagree with the fee it comes from. The disclosed
       // net is derived for the same reason, and covers the case where the signed quote is unknown
       // (a throw mid-flight) so `netPredicted` is null.

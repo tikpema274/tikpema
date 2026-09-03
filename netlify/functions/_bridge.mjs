@@ -22,6 +22,7 @@ import { circle, waitForTx } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { publicClient } from "./_predict.mjs";
 import { normalizeQuoteExpiry, assertQuoteUnexpired } from "./_quote-expiry.mjs";
+import { bridgeMechanicOf } from "../../shared/bridge-mechanic.mjs";
 
 export const BRIDGE_CONTRACT = "0xC5567a5E3370d4DBfB0540025078e283e36A363d"; // BridgingKitContract (Arc testnet)
 const IRIS = "https://iris-api-sandbox.circle.com"; // testnet IRIS
@@ -194,6 +195,28 @@ async function irisJson(url) {
 // ⚠️ THE FEE DID NOT MOVE OR CHANGE SIZE — IT MOVED WHERE IT IS CHARGED. Measured against our own
 // producer on 2026-09-03: the same route quoted 54121 minor either way. "Is it more expensive" is
 // not one of the open questions; "what does the recipient get" is, and the answer is now: all of it.
+// ═══ ⭐⭐⭐ WHEN A DEFINITION CHANGES, ENUMERATE ITS READERS AND ASK WHICH ARE PREDICATES ════════
+//
+// 🚨 THIS FUNCTION'S INVERSION KILLED A GUARD, AND NOTHING REPORTED IT. `_analystb`'s bridge
+// fee-floor tested `net <= 0` — correct while `netUsdc` meant `amount − fee`, because a fee at or
+// above the amount drove it to zero. Once `netUsdc` became the amount, that condition was
+// **unreachable for any positive bridge**. The refusal did not become wrong; it became impossible,
+// while still sitting in the file reading as a live economic guard.
+//
+// ⛔ MUTATION CANNOT FIND THIS. Mutating an unreachable branch changes nothing observable — the
+// suite is green before and after, because the branch never ran either way. Neither does a failing
+// test, a log line, or a user report: a dead guard produces NOTHING, and its green run is
+// indistinguishable from the run of a guard that simply had nothing to refuse.
+//
+// ⭐⭐ SO THE METHOD IS EXPLICIT AND IT IS NOT "TEST HARDER". Changing what a value MEANS obliges
+// two questions of every reader, not one:
+//     1. is what it now SAYS still true?          ← the one everybody asks
+//     2. can what it now TESTS still happen?      ← the one that gets skipped, because the
+//                                                   reader's code looks untouched
+// Enumerate the readers; the PREDICATES over the redefined value are the candidate corpses. Here
+// four readers compared `netUsdc`: three compared it to a fee and stayed reachable, one compared it
+// to zero and died. ⚠️ It is now `feeUsdc >= amountUsdc`, the same form the other three floors use,
+// so the four share a shape and a future redefinition cannot silently orphan one of them.
 export function bridgeNetUsdc({ amountMinor }) {
   return toUsdc(BigInt(amountMinor));
 }
@@ -245,6 +268,8 @@ export async function bridgeFeeDeducted({ amountUsdc, cctpDomain }) {
     amountMinor, maxFee, feeUsdc: toUsdc(maxFee),
     netUsdc: bridgeNetDeducted({ amountMinor, maxFee }),
     providerFeeUsdc: toUsdc(providerFee), forwarderFeeUsdc: toUsdc(forwarderFee),
+    // ⭐ THE OTHER MECHANIC, FROM THE OTHER PRODUCER. Same rule: the pricing function declares it.
+    mechanic: "deducted",
   };
 }
 
@@ -313,6 +338,10 @@ export async function bridgeFee({ amountUsdc, cctpDomain }) {
     feeUsdc: toUsdc(feeMinor),
     netUsdc: bridgeNetUsdc({ amountMinor }),
     quote,
+    // ⭐⭐ THE MECHANIC IS ORIGINATED HERE, BY THE FUNCTION THAT KNOWS WHICH CONTRACT WILL BE CALLED.
+    // Not inferred downstream from a field's shape, not decided by a surface: the producer of the
+    // price is the only thing that knows where the fee will be charged, so it says so.
+    mechanic: "upfront",
   };
 }
 
@@ -569,6 +598,10 @@ export function sealBridgeQuote({ owner, destinationKey, amountUsdc, fee, now = 
     // compared to each other; see the units block in assertQuoteUnexpired.
     iat: now,
     qs: externallyQuoted ? "circle" : "self",
+    // ⭐⭐ THE MECHANIC TRAVELS INSIDE THE MAC. It decides which sentence a user is shown about
+    // where their fee went, so a client-alterable one would let a caller choose the claim. Sealed
+    // for the same reason the fee is.
+    fm: fee.mechanic ?? "unknown",
     // ⭐ mode AND expiresAt, both INSIDE the MAC, never the value alone. Storing a bare number would
     // let a block height be compared against a clock — a category error that reads as an ordinary
     // `>` in source. The mode is the field that makes the number mean anything.
@@ -676,6 +709,9 @@ export function openBridgeQuote(token, { owner, destinationKey, amountUsdc, now 
     // ⭐ THE SAME SHAPE `bridgeFee` RETURNS, so `agentBridge` cannot tell a re-opened quote from a
     // freshly fetched one — one code path, one set of field names, no branch on provenance.
     feeMinor: BigInt(p.m), amountMinor: BigInt(p.n), feeUsdc: p.f, netUsdc: p.t, issuedAt: p.iat,
+    // ⚠️ Normalised on the way out, so a seal from an older deploy (no `fm`) opens as `unknown`
+    // rather than as whichever mechanic happens to be first in the map.
+    mechanic: bridgeMechanicOf(p.fm),
     quote: p.sq ? { signedQuote: p.sq, expiry: { mode: p.xm, expiresAt: p.xe } } : null,
     // ⭐ CARRIED OUT so the caller can RE-CHECK immediately before the burn — see agentBridge. The
     // opener runs before an approve transaction; the deadline that matters is the one at the burn.
@@ -868,6 +904,10 @@ export async function agentBridge({ walletAddress, destination, amountUsdc, reci
     burnTx: `${ARC.explorer}/tx/${burnHash}`,
     feeUsdc: fee.feeUsdc,
     netUsdc: fee.netUsdc,
+    // ⭐ CARRIED OUT WITH THE FIGURES IT EXPLAINS. `netUsdc` alone is a number whose meaning depends
+    // entirely on this value; handing one onward without the other is what let a surface render the
+    // wrong path's sentence beside a right number.
+    feeMechanic: fee.mechanic ?? "unknown",
     destination: { key: dest.key, label: dest.label, cctpDomain: dest.cctpDomain },
     recipient: to,
   };
