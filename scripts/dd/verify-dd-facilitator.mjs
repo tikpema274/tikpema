@@ -16,6 +16,7 @@
 // here can move funds; that is a property of the module's shape (everything is injected), not of the
 // test being careful.
 
+import { readFileSync } from "node:fs";
 import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { attachAttestation, unsignedAttestation } from "../../shared/onchain-analyze/attest.mjs";
 import { POWER_SIGS, sel, EIP1967_IMPL_SLOT } from "../../shared/onchain-facts/index.mjs";
@@ -32,6 +33,10 @@ import {
   ABORT_REASON,
   DD_PRICE_ATOMIC,
   DD_VERIFYING_CONTRACT,
+  SETTLE_FATE,
+  FATE_FIELD,
+  classifySettleFate,
+  SETTLE_FAILURE_CLAIM,
 } from "../../netlify/functions/_dd-x402.mjs";
 
 // ⭐ A REAL BUILD ID, because "unknown" is exactly the bug this suite failed to catch. The build
@@ -380,6 +385,111 @@ section("9 — settle returns success:false → 402, nothing served");
   check("carries the facilitator's reason", b.reason === "insufficient-gateway-balance", b.reason);
   check("⭐ no report is served", b.report === undefined);
   check("re-challenges with the requirements", Array.isArray(b.accepts) && b.accepts[0].payTo === PAYTO);
+
+  // ═══ 🚨 THE CLAIM ABOUT THE CALLER'S MONEY ═══════════════════════════════════════════════════
+  // This branch used to say "Your authorization was not spent." — an unhedged absence claim about an
+  // external agent's money, derived from the facilitator's report of its own failure. A settlement
+  // can fail AFTER an authorization is consumed, the producer is a third party, and the buyer is an
+  // agent with no other source of truth. These assertions are on the RENDERED BODY, not the source.
+  // ⚠️ THE DENIAL CONTAINS THE PHRASE IT DENIES. A flat forbidden-phrase scan goes red on the
+  // CORRECT copy — "this is NOT a statement that you were not charged" contains "were not charged".
+  // So the denial clauses are removed FIRST and the assertion is made on what remains. Caught on the
+  // first run of this check, against the fixed copy.
+  const denialsStripped = JSON.stringify(b).replace(/NOT a statement that[^.\"]*/gi, "");
+  check("⛔ it does NOT claim the authorization was unspent",
+    !/was not spent|were not charged|remains unspent|nothing was spent/i.test(denialsStripped),
+    denialsStripped.slice(0, 300));
+  check("⭐⭐ …and it explicitly DENIES being such a statement, the way retrievePaid's " +
+    "unreadable-store branch does",
+    /NOT a statement that you were not charged/i.test(b.detail || ""), b.detail);
+  check("⭐ it names the fate as UNKNOWN in words, not only in a code",
+    /UNKNOWN/.test(b.detail || ""), b.detail);
+  check("⭐ the typed fate travels beside the prose",
+    b.authorizationFate === SETTLE_FATE.UNKNOWN, b.authorizationFate);
+
+  // ⭐ BILLING AND SERVICE ARE SEPARATE CLAIMS — the :324 rule. One field may say "not served"; a
+  // DIFFERENT one must carry the money claim, or an agent reads the refusal as a refund.
+  check("⭐ the service claim says the report is not served", /NOT served/.test(b.detail || ""), b.detail);
+  check("⭐⭐ …and the BILLING claim is a separate field that refuses to say zero",
+    typeof b.billing === "string" && /UNKNOWN/.test(b.billing) && /not the same as zero/i.test(b.billing),
+    b.billing);
+  check("⭐ it names the misreading an agent would act on — reusing vs re-signing the authorization",
+    /same authorization/i.test(b.billing || "") && /paying twice/i.test(b.billing || ""), b.billing);
+  check("⛔ it emits no number it cannot back — no amount, no probability, no ETA",
+    !/\b\d+(\.\d+)?\s*(USDC|%|min|minutes|seconds)\b/i.test(
+      `${b.detail} ${b.billing} ${b.whatToDo}`),
+    `${b.detail} ${b.billing} ${b.whatToDo}`);
+
+  // ⭐⭐ THE HEDGE MUST BE RESOLVABLE. Telling an agent "we cannot tell" and handing it no way to
+  // find out is half an answer — and the handle already existed, persisted BEFORE the broadcast.
+  check("⭐⭐ the handle SURVIVES a rejected settlement (it used to be dropped)",
+    typeof b.handle === "string" && b.handle.length > 10, String(b.handle));
+  check("  …and the frozen report is behind it", store.data.get(b.handle)?.report?.subject?.address === SUBJ);
+  check("  …and the record is marked rejected", store.data.get(b.handle)?.broadcast === "rejected");
+  check("  …and a retrieve URL is given for it",
+    typeof b.retrieve === "string" && b.retrieve.includes(b.handle), String(b.retrieve));
+  check("⭐ the entitlement is permanent — a late-landing payment is still redeemable",
+    /PERMANENT/.test(b.entitlement || ""), b.entitlement);
+  check("  …and whatToDo points at that handle rather than at a retry",
+    /Poll `retrieve`/.test(b.whatToDo || ""), b.whatToDo);
+}
+
+// ═══════════ 9b — ⭐⭐ THE CLAIM IS BOUND TO THE FIELD THAT WOULD LICENSE IT ═══════════
+section("9b — the copy is licensed by a field, and fails when the field starts distinguishing");
+{
+  // ── the classifier, over the shapes the real SDK can actually produce ────────────────────────
+  check("⭐ a bare rejection is UNKNOWN — the shape Circle returns today",
+    classifySettleFate({ success: false, errorReason: "insufficient-gateway-balance" }) === SETTLE_FATE.UNKNOWN);
+  check("⛔ a rejection carrying a transaction id is STILL UNKNOWN — `transaction` licenses nothing",
+    classifySettleFate({ success: false, transaction: "0xabc", network: "eip155:5042002" }) === SETTLE_FATE.UNKNOWN);
+  check("⛔ …and so is a null/absent settlement — an absence is not an answer",
+    classifySettleFate(null) === SETTLE_FATE.UNKNOWN && classifySettleFate(undefined) === SETTLE_FATE.UNKNOWN);
+  check("⛔ a TRUTHY NON-BOOLEAN does not become 'consumed' by coercion",
+    classifySettleFate({ success: false, [FATE_FIELD]: "yes" }) === SETTLE_FATE.UNKNOWN,
+    "a string in the fate field was coerced");
+  check("⭐ only a real boolean discriminates — false → NOT_CONSUMED",
+    classifySettleFate({ success: false, [FATE_FIELD]: false }) === SETTLE_FATE.NOT_CONSUMED);
+  check("⭐ …and true → CONSUMED. The pairwise inequality: the classifier is not a constant",
+    classifySettleFate({ success: false, [FATE_FIELD]: true }) === SETTLE_FATE.CONSUMED);
+
+  // ── the claim map is total, and only the licensed entries make a definite statement ──────────
+  const fates = Object.values(SETTLE_FATE);
+  check("every fate has a claim — a hole would render `undefined` as the answer",
+    fates.every((f) => SETTLE_FAILURE_CLAIM[f] && typeof SETTLE_FAILURE_CLAIM[f].detail === "string"),
+    fates.filter((f) => !SETTLE_FAILURE_CLAIM[f]).join(","));
+  check("⛔ ONLY the UNKNOWN claim is allowed to be uncertain, and ONLY the licensed ones definite",
+    /NOT a statement that you were not charged/.test(SETTLE_FAILURE_CLAIM[SETTLE_FATE.UNKNOWN].detail) &&
+    /nothing was spent/i.test(SETTLE_FAILURE_CLAIM[SETTLE_FATE.NOT_CONSUMED].detail) &&
+    /is spent/i.test(SETTLE_FAILURE_CLAIM[SETTLE_FATE.CONSUMED].detail));
+
+  // ═══ ⭐⭐⭐ THE BINDING ITSELF — READ FROM THE VENDOR'S OWN TYPE, NOT FROM OUR MEMORY OF IT ═══
+  // The hedged copy is only correct while Circle's SettleResponse genuinely cannot say what happened
+  // to the authorization. If a future version ships that field, the honest copy becomes an
+  // UNDERSTATEMENT and this must go red rather than sit green on a stale reading of the contract.
+  // ⚠️ AND AN UNREADABLE TYPE IS A FAILURE, NEVER A PASS: if the file moves, we have stopped
+  // checking, and "we stopped checking" must not look like "the field is still absent".
+  const TYPES = "node_modules/@circle-fin/x402-batching/dist/server/index.d.ts";
+  let vendor = null, vendorErr = null;
+  try { vendor = readFileSync(TYPES, "utf8"); } catch (e) { vendorErr = String(e?.message ?? e); }
+  check("⭐ the vendored SettleResponse type is READABLE — unreadable is a failure, not a pass",
+    typeof vendor === "string" && vendor.length > 0, `${TYPES} — ${vendorErr}`);
+
+  const iface = vendor ? /interface SettleResponse \{([\s\S]*?)\}/.exec(vendor)?.[1] ?? null : null;
+  check("⭐ …and the SettleResponse interface is actually found in it — a missed match would make " +
+    "every assertion below vacuous",
+    typeof iface === "string" && iface.includes("success"), String(iface).slice(0, 120));
+
+  if (iface) {
+    const fieldNames = [...iface.matchAll(/^\s*(\w+)\??:/gm)].map((m) => m[1]).sort();
+    check(`⭐ the fields are exactly what the copy assumes — [${fieldNames.join(", ")}]`,
+      fieldNames.join(",") === "errorReason,network,payer,success,transaction", fieldNames.join(","));
+    check("⭐⭐⭐ THE LICENCE: the vendor type carries NO field stating the authorization's fate. " +
+      "If this goes red, Circle now tells us — revisit SETTLE_FAILURE_CLAIM before shipping.",
+      !new RegExp(`\\b${FATE_FIELD}\\b`).test(iface) && !/\bconsumed\b|\bspent\b|\bnonceUsed\b/i.test(iface),
+      iface.trim().replace(/\s+/g, " "));
+    check("⛔ …and `errorReason` is still an OPTIONAL free-form string — not an enum we could branch on",
+      /errorReason\?:\s*string;/.test(iface), iface.trim().replace(/\s+/g, " "));
+  }
 }
 
 // ═══════════ 10 — RETRIEVE: the artifact is withheld until the chain agrees ═══════════

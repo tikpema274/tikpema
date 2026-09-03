@@ -462,6 +462,108 @@ export class SettleIndeterminate extends Error {
   }
 }
 
+// ═══ 🚨 WHAT A FAILED SETTLE DOES *NOT* TELL US ══════════════════════════════════════════════
+//
+// This branch used to answer a rejected settlement with: "Your authorization was not spent."
+// ⛔ THAT WAS AN UNHEDGED ABSENCE CLAIM ABOUT SOMEBODY ELSE'S MONEY, derived from the facilitator's
+// report of its own failure — a third party we do not own — and read by an autonomous agent with no
+// other source of truth. Three lines above it, this file's own step-3 comment already said the rule:
+// "From here on, 'we do not know' is a possible answer and must never be reported as 'you were not
+// charged.'" The copy contradicted the comment it sat under.
+//
+// ═══ ⭐ WHAT THE RESPONSE ACTUALLY CARRIES — READ FROM THE VENDOR'S OWN TYPE ══════════════════
+// @circle-fin/x402-batching, dist/server/index.d.ts:
+//
+//     interface SettleResponse {
+//       success: boolean;
+//       errorReason?: string;    // OPTIONAL, and a free-form string — no enum, no closed set
+//       payer?: string;
+//       transaction: string;
+//       network: string;
+//     }
+//
+// ⛔ NOT ONE OF THOSE FIELDS STATES WHETHER THE AUTHORIZATION WAS CONSUMED. `errorReason` is the
+// facilitator's prose about its own failure, and branching on it would be exactly the class
+// `verify-no-prose-state-recovery` forbids. `transaction` is declared required-but-unconstrained and
+// the client returns the parsed body VERBATIM whenever it contains a `success` key — HTTP status
+// discarded, no validation — so its presence or absence licenses nothing either.
+//
+// ⚠️ SO THE THREE STATES ARE NOT DISTINGUISHABLE HERE:
+//     never consumed  ·  consumed, then settlement failed  ·  we cannot tell
+// Only the third is honest, and it is what this branch now says. [[absence-must-never-read-as-safe]]
+// ⭐ The neighbouring cases are already right and are the model: SettleAborted's paths CAN say
+// "unspent" because WE aborted before broadcast, and retrievePaid's unreadable-store branch says
+// "this is NOT a statement that you did not pay".
+export const SETTLE_FATE = Object.freeze({
+  UNKNOWN:      "authorization-fate-unknown",
+  NOT_CONSUMED: "authorization-not-consumed",
+  CONSUMED:     "authorization-consumed",
+});
+
+/**
+ * ⭐⭐ THE FIELD THAT WOULD LICENSE A DEFINITE CLAIM — and it does not exist yet.
+ *
+ * Naming it makes the absence CHECKABLE instead of assumed: `verify-dd-facilitator` reads the
+ * vendored SettleResponse type and fails if this field ever appears, because the copy below would
+ * then be understating what we know. That is the binding — the sentence is licensed by a field, and
+ * it fails when the field starts distinguishing.
+ * ⚠️ A boolean is required, not merely a present key: a truthy string would otherwise be read as
+ * "consumed" by coercion, which is how an unknown becomes an answer.
+ */
+export const FATE_FIELD = "authorizationConsumed";
+
+/** @returns {string} a member of SETTLE_FATE — UNKNOWN unless the response POSITIVELY says otherwise. */
+export function classifySettleFate(settlement) {
+  const v = settlement?.[FATE_FIELD];
+  if (typeof v !== "boolean") return SETTLE_FATE.UNKNOWN;
+  return v ? SETTLE_FATE.CONSUMED : SETTLE_FATE.NOT_CONSUMED;
+}
+
+/**
+ * The claim, SELECTED BY the fate rather than written at the return site. A sentence a human types
+ * beside a branch is a sentence that outlives the branch's meaning; a map cannot be more specific
+ * than the classifier that indexes it.
+ * ⭐ BILLING AND SERVICE ARE SEPARATE FIELDS, as in the quote path's `stillCharged` / `detail` split:
+ * "we are not serving you" and "we do not know what your money did" are different claims and must
+ * not be readable as one.
+ */
+export const SETTLE_FAILURE_CLAIM = Object.freeze({
+  [SETTLE_FATE.UNKNOWN]: Object.freeze({
+    detail:
+      "The facilitator rejected this settlement, so the report is NOT served. ⚠️ This is NOT a " +
+      "statement that you were not charged. Circle's settle response carries no field saying whether " +
+      "your authorization was consumed, so 'never spent' and 'spent, then settlement failed' are " +
+      "indistinguishable to us here. Treat its fate as UNKNOWN.",
+    billing:
+      "UNKNOWN — which is not the same as zero. Re-using the SAME authorization is safe only if it " +
+      "was never consumed, and that is precisely what we cannot confirm; signing a NEW one risks " +
+      "paying twice if the first did land.",
+    whatToDo:
+      "A handle was persisted BEFORE the broadcast, so your entitlement survives our uncertainty. " +
+      "Poll `retrieve`: it serves the frozen report if and only if the chain shows the payment " +
+      "arrived, at no further cost. That is the only way to learn which case you are in.",
+  }),
+  // ── Unreachable today, and defined anyway: a map with a hole would fall back to `undefined`, and
+  //    an absent claim reads as no claim at all. If Circle ever ships FATE_FIELD, these are what the
+  //    caller gets — and the guard fails first, so nobody ships them unreviewed.
+  [SETTLE_FATE.NOT_CONSUMED]: Object.freeze({
+    detail:
+      "The facilitator rejected this settlement and reported that your authorization was NOT " +
+      "consumed, so the report is not served and nothing was spent.",
+    billing: "NOTHING WAS SPENT — stated by the facilitator, not inferred by us.",
+    whatToDo: "Retrying with the SAME authorization is safe until its validBefore.",
+  }),
+  [SETTLE_FATE.CONSUMED]: Object.freeze({
+    detail:
+      "The facilitator consumed your authorization and settlement still failed, so the report is " +
+      "not served AND your authorization is spent.",
+    billing: "SPENT — stated by the facilitator. Do not sign a replacement authorization.",
+    whatToDo:
+      "Poll `retrieve` with the handle below. If the payment reaches payTo the frozen report is " +
+      "yours at no further cost; if it never does, this is a support case, not a retry.",
+  }),
+});
+
 /**
  * Build the injected `settle` that shared/x402/settle-gate.mjs will call AT MOST ONCE, and only after
  * it has positively decided the report is chargeable.
@@ -610,6 +712,10 @@ export async function runPaidAnalysis({ facilitator, rpcCall, store, payload, re
 
   const s = outcome.settlement;
   if (!s?.ok) {
+    // ⭐ THE CLAIM IS SELECTED BY THE FATE, never written here. See SETTLE_FATE above for why the
+    //   only honest answer today is UNKNOWN.
+    const fate = classifySettleFate(s?.settlement);
+    const claim = SETTLE_FAILURE_CLAIM[fate];
     return {
       statusCode: 402,
       headers: {
@@ -620,8 +726,22 @@ export async function runPaidAnalysis({ facilitator, rpcCall, store, payload, re
         x402Version: X402_VERSION,
         resource: resourceObject(requirements),
         error: "Payment settlement failed",
+        // ⚠️ The facilitator's own prose, PASSED THROUGH as a diagnostic. Nothing branches on it —
+        // it is the vendor's sentence about the vendor's failure, and it is not evidence about the
+        // authorization. Kept because a human debugging this will want it.
         reason: s?.settlement?.errorReason || "settle failed",
-        detail: "The report was produced but the payment was rejected, so nothing is served. Your authorization was not spent.",
+        authorizationFate: fate,
+        detail: claim.detail,
+        billing: claim.billing,
+        whatToDo: claim.whatToDo,
+        // ⭐⭐ THE HANDLE WAS BEING DROPPED. `makeSettler` persists the record (and the frozen report)
+        // BEFORE broadcasting and keeps it on the rejected path as `broadcast:"rejected"` — but this
+        // response discarded it, so a caller whose authorization HAD been consumed was told the money
+        // was safe and given no way to redeem the report if it was not. Hedged copy with no way to
+        // resolve the hedge is half an answer to an agent.
+        handle: s?.handle ?? null,
+        retrieve: s?.handle ? `${resource}?handle=${s.handle}` : null,
+        entitlement: "PERMANENT — if the payment ever lands, this handle still serves the frozen report.",
         accepts: [requirements],
       }),
     };
