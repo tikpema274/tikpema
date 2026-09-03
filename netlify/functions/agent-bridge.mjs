@@ -1,3 +1,4 @@
+import { amountFloorViolation } from "./_amount-floor.mjs";
 import { TxPendingError } from "./_circle.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody } from "./_arc.mjs";
@@ -30,7 +31,8 @@ export async function handler(event) {
 
   const { amountUsdc, destination, ackToken, quoteToken, quoteOnly } = parseBody(event);
   const amount = Number(amountUsdc);
-  if (!(amount > 0)) return json(400, { error: "amountUsdc must be > 0" });
+  const floor = amountFloorViolation(amount, { field: "amountUsdc" });
+  if (floor) return json(400, { error: floor });
   const dest = resolveDestination(destination);
   if (!dest) return json(400, { error: `unsupported destination "${destination || ""}"` });
 

@@ -23,6 +23,7 @@
 // runtime. Callers inside a classic-Lambda handler must connectBlobs(event)
 // before the Netlify-backed default is used.
 
+import { amountFloorViolation, FLOOR_CONSEQUENCE } from "./_amount-floor.mjs";
 import { getStore } from "@netlify/blobs";
 import { connectBlobs } from "./_blobs.mjs";
 import { AGENT, normalizeAgent } from "./_agents.mjs";
@@ -335,7 +336,13 @@ export async function canSpend({ jobId, jobPriceUsdc, amountUsdc, store, at, own
   }
 
   const amtA = atomic(amountUsdc);
-  if (amtA <= 0) return { allowed: false, reason: `amount ${amountUsdc} must be > 0` };
+  // ⛔ THE MESSAGE MUST REPORT THE QUANTITY THE TEST COMPARED. This read
+  //    `if (amtA <= 0) reason: \`amount ${amountUsdc} must be > 0\`` — the test compares MINOR UNITS
+  //    (Math.round(x * 1e6)), the sentence prints the DECIMAL the caller typed, and for 0.0000001 it
+  //    told them "amount 0.0000001 must be > 0" about a value that visibly is. A refusal a caller can
+  //    disprove by reading it teaches them the service is broken, not that their amount was too small.
+  const floor = amountFloorViolation(amountUsdc, { field: "amount", consequence: FLOOR_CONSEQUENCE.BUDGET });
+  if (floor) return { allowed: false, reason: floor };
 
   const allowanceA = atomic(jobAllowance(jobPriceUsdc));
   const perPurchaseA = Math.floor(allowanceA * cfg.PER_PURCHASE_PCT);
@@ -699,7 +706,15 @@ export async function agentBreakdown({ owner, date, store } = {}) {
 export async function canSpendDay({ amountUsdc, store, at, owner }) {
   const cfg = budgetConfig();
   const amtA = atomic(amountUsdc);
-  if (amtA <= 0) return { allowed: false, reason: `amount ${amountUsdc} must be > 0` };
+  // ⭐ THE SAME DEFECT AS canSpend's, and this is the gate EVERY free-form agent action passes
+  //    through — agent-send, execute-plan, agent-act — so the contradictory sentence was the one an
+  //    autonomous caller was most likely to be handed. `atomic()` here is Math.round(x * 1e6), the
+  //    SAME comparison `minorUnitsOf` makes, so the helper judges the identical quantity.
+  //    ⚠️ The CONSEQUENCE differs and is passed as such: this is a gate, not an executor. Nothing is
+  //    signed here — what would happen is a zero recorded against the ceiling and an authorised
+  //    action that moves nothing.
+  const floor = amountFloorViolation(amountUsdc, { field: "amount", consequence: FLOOR_CONSEQUENCE.BUDGET });
+  if (floor) return { allowed: false, reason: floor };
   const dayA = atomic(await daySpend({ owner, at, store }));
   const ceilA = atomic(cfg.PERIOD_CEILING_USDC);
   if (dayA + amtA > ceilA) {

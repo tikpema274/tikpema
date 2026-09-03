@@ -1,3 +1,4 @@
+import { amountFloorViolation } from "./_amount-floor.mjs";
 import { getStore } from "@netlify/blobs";
 import { connectBlobs } from "./_blobs.mjs";
 import { formatUnits } from "viem";
@@ -113,7 +114,8 @@ export async function handler(event) {
   const dest = resolveDestination(proposal.destination);
   if (!dest) return json(409, { error: `proposal destination '${proposal.destination}' is no longer supported` });
   const amount = Number(proposal.amountUsdc);
-  if (!(amount > 0)) return json(409, { error: "proposal amount is not > 0" });
+  const floor = amountFloorViolation(amount, { field: "proposal amountUsdc" });
+  if (floor) return json(409, { error: floor });
   const cap = bridgeCapUsdc();
   if (amount > cap) return json(409, { error: `proposal exceeds current per-bridge limit of ${cap} USDC`, cap });
 

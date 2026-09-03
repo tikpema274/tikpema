@@ -32,11 +32,28 @@ export function minorUnitsOf(amount, decimals = USDC_DECIMALS) {
 }
 
 /**
+ * ⭐ THE CONSEQUENCE CLAUSE IS A SLOT, NOT A SECOND CLAIM. The floor test is identical everywhere —
+ * `Math.round(x * 10**d) === 0` — but what happens NEXT differs by caller: an executor signs a
+ * transfer of zero; a budget gate records zero against a ceiling and authorises an action that will
+ * move nothing. Both are true statements about the same failed comparison.
+ * ⚠️ This is a PARAMETER, not a fork of the message: the quantity, the floor and the value stay in
+ * one place, so they cannot drift apart. [[verify-facts-before-sharing-words]] — a prop is a slot,
+ * not a shared claim.
+ */
+export const FLOOR_CONSEQUENCE = Object.freeze({
+  EXECUTE: "it would execute as zero",
+  BUDGET: "it would be recorded as zero against the day ceiling, authorising an action that moves nothing",
+});
+
+/**
  * The named reason this amount cannot be executed, or null if it can.
  * ⭐ Returns a REASON, never a boolean — a caller that only learns "no" cannot tell the user why,
  * and "refuse loudly with a named reason" is the requirement, not "refuse".
  */
-export function amountFloorViolation(amount, { field = "amount", decimals = USDC_DECIMALS } = {}) {
+export function amountFloorViolation(
+  amount,
+  { field = "amount", decimals = USDC_DECIMALS, consequence = FLOOR_CONSEQUENCE.EXECUTE } = {},
+) {
   const n = Number(amount);
   // ⚠️ NaN FIRST. `NaN > 0` is false and `NaN < 0` is false — a NaN slips past any comparison-based
   // guard in both directions. Name it explicitly. [[nan-fail-open-cap-pattern]]
@@ -48,7 +65,7 @@ export function amountFloorViolation(amount, { field = "amount", decimals = USDC
     const smallest = 1 / 10 ** decimals;
     return n === 0
       ? `${field} must be greater than zero`
-      : `${field} of ${n} is below the smallest amount this token can move (${smallest}); it would execute as zero`;
+      : `${field} of ${n} is below the smallest amount this token can move (${smallest}); ${consequence}`;
   }
   return null;
 }

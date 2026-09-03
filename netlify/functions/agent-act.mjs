@@ -1,3 +1,4 @@
+import { amountFloorViolation } from "./_amount-floor.mjs";
 import { TxPendingError } from "./_circle.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { BRIDGE_TIMING } from "../../shared/bridge-timing.mjs";
@@ -382,8 +383,9 @@ export async function handler(event) {
           blocked: `unsupported destination "${decision.destination || ""}". Supported: ${SUPPORTED_DESTINATION_LABELS.join(", ")}`,
         });
       }
-      if (!(amount > 0)) {
-        return json(200, { executed: false, decision, blocked: "amountUsdc must be > 0" });
+      const bridgeFloor = amountFloorViolation(amount, { field: "amountUsdc" });
+      if (bridgeFloor) {
+        return json(200, { executed: false, decision, blocked: bridgeFloor });
       }
       const bcap = bridgeCapUsdc();
       if (amount > bcap) {
@@ -496,8 +498,9 @@ export async function handler(event) {
       if (!/^0x[0-9a-fA-F]{40}$/.test(payTo)) {
         return json(200, { executed: false, decision, blocked: "invalid payTo address" });
       }
-      if (!(payAmount > 0)) {
-        return json(200, { executed: false, decision, blocked: "payAmountUsdc must be > 0" });
+      const payFloor = amountFloorViolation(payAmount, { field: "payAmountUsdc" });
+      if (payFloor) {
+        return json(200, { executed: false, decision, blocked: payFloor });
       }
       // Same FAIL-OPEN bug as the swap cap above: this was
       // `Number(process.env.AGENT_MAX_SPEND_USDC || "1")`, so a garbled env value became NaN

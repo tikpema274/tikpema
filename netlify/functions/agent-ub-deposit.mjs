@@ -1,3 +1,4 @@
+import { amountFloorViolation } from "./_amount-floor.mjs";
 import { getStore } from "@netlify/blobs";
 import { connectBlobs } from "./_blobs.mjs";
 import { formatUnits } from "viem";
@@ -101,7 +102,8 @@ export async function handler(event) {
 
   const { amountUsdc } = parseBody(event);
   const amount = Number(amountUsdc);
-  if (!(amount > 0)) return json(400, { error: "amountUsdc must be > 0" });
+  const floor = amountFloorViolation(amount, { field: "amountUsdc" });
+  if (floor) return json(400, { error: floor });
 
   // ── THE CAP — before anything is provisioned or kicked off. Reject, never clamp. ──
   const cap = ubDepositMaxPerTxUsdc();

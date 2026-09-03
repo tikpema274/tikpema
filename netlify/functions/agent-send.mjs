@@ -5,6 +5,7 @@
 // client-supplied. The agent wallet is a Circle dev-controlled SCA, so only the
 // server can move it; this is the server-side "send" for the wallet the user
 // actually funds. Gasless (Gas Station sponsored).
+import { amountFloorViolation } from "./_amount-floor.mjs";
 import { formatUnits } from "viem";
 import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody, ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc } from "./_arc.mjs";
@@ -48,7 +49,8 @@ export async function handler(event) {
     return json(400, { error: "valid 'to' address required" });
   }
   const amount = Number(amountUsdc);
-  if (!(amount > 0)) return json(400, { error: "amountUsdc must be > 0" });
+  const floor = amountFloorViolation(amount, { field: "amountUsdc" });
+  if (floor) return json(400, { error: floor });
 
   // GUARDRAIL 1 — per-transaction send cap (hard limit; checked first so an
   // over-cap send returns the cap message).

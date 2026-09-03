@@ -5,6 +5,7 @@
 // key (never a free-form address). All the guardrails live in executeAction — the ONE secure
 // path: AGENT.VAULT pause, the fail-closed vault-deposit cap, the daily ceiling, and the on-chain
 // inspection GATE (BLOCK / WARN+ack) — so this handler is thin and cannot bypass any of them.
+import { amountFloorViolation } from "./_amount-floor.mjs";
 import { formatUnits } from "viem";
 import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
@@ -27,7 +28,8 @@ export async function handler(event) {
   const v = resolveVault(vault);
   if (!v) return json(400, { error: `unsupported vault "${vault}" (not on the allowlist)`, supported: SUPPORTED_VAULT_KEYS });
   const amount = Number(amountUsdc);
-  if (!(amount > 0)) return json(400, { error: "amountUsdc must be > 0" });
+  const floor = amountFloorViolation(amount, { field: "amountUsdc" });
+  if (floor) return json(400, { error: floor });
 
   let wallet;
   // ⭐ A THROW HERE IS A REFUSAL, NOT A CRASH. Unwrapped it surfaced as a bare 500 that said

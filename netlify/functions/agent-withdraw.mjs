@@ -55,6 +55,7 @@
 // so only the server can move it. So: deposited Gateway funds are SPENDABLE CROSS-CHAIN ONLY.
 // A capability the contract has and we never built is not a capability the user has. Do not
 // describe it as one, and do not let a user discover this by finding money missing.
+import { amountFloorViolation } from "./_amount-floor.mjs";
 import { formatUnits } from "viem";
 import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody, ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
@@ -90,7 +91,8 @@ export async function handler(event) {
 
   const { amountUsdc } = parseBody(event);
   const amount = Number(amountUsdc);
-  if (!(amount > 0)) return json(400, { error: "amountUsdc must be > 0" });
+  const floor = amountFloorViolation(amount, { field: "amountUsdc" });
+  if (floor) return json(400, { error: floor });
 
   // The SOURCE — the caller's own agent wallet, also server-resolved.
   let wallet;
