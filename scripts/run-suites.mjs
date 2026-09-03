@@ -34,6 +34,41 @@
 // ⭐ The inverse is the one that misleads hardest: after a fix, a suite getting SLOWER usually
 // means it started running. `test:dd` going 21s → 139s was the repair, not a regression.
 
+// ═══ ⛔⛔ A SECTION THAT CANNOT AFFECT THE EXIT CODE IS NOT A CHECK ════════════════════════════
+//
+// WHERE SUITES ARE WRITTEN, THIS IS THE FAILURE TO KNOW. A suite's verdict is its EXIT CODE. Its
+// output is a separate channel, and the two can disagree completely.
+//
+// 🚨 MEASURED 2026-09-03. A new section was appended to `verify-amount-precision.mjs` by inserting
+// before the file's LAST `console.log` — which put it AFTER `if (fail) { …; process.exit(1) }`. The
+// section ran. It printed `❌` for its failing checks. The suite exited **0**. Nine assertions, none
+// of which could ever have reddened a run.
+//
+// ⛔⛔ AND A GREEN BASELINE WOULD HAVE LOOKED IDENTICAL. Adding a section and seeing ✅ tells you
+// nothing: an unreachable section prints ✅ too. Nothing in a passing run distinguishes "these nine
+// checks passed" from "these nine checks cannot fail". ⭐ ONLY MUTATING FOUND IT — two mutation
+// runs came back `MUTATION NOT CAUGHT` **with red checks on screen**, which reads as "the guard is
+// weak" and is in fact "the guard is unreachable". The natural diagnosis is the wrong one.
+//
+// ⭐ SO A SUITE'S PASS COUNT IS NOT EVIDENCE ITS SECTIONS CAN FAIL. The count is a sum over whatever
+// ran before the verdict was taken; it says nothing about what sits after it. Same family as
+// [[a-partial-mock-fails-at-instantiation]] (blind 33 days, and green throughout) and
+// [[a-later-command-is-not-proof-of-an-earlier-one]] — visible output and exit status coming from
+// different places.
+//
+// HOW TO NOT REPEAT IT, in order of cost:
+//   1. INSERT ABOVE THE TALLY. "The end of the file" is not "the end of the checks".
+//   2. AFTER ADDING A SECTION, CONFIRM THE PASS COUNT GREW. 14 → 23 is the evidence the section is
+//      wired; ✅ on its own is not.
+//   3. MUTATE ONE OF ITS ASSERTIONS RED. That is the only thing that distinguishes a section which
+//      passed from one which cannot fail.
+//   4. `scripts/verify-assertion-reachability.mjs` scans the estate for this shape and prints its
+//      denominator, so the class does not depend on anyone remembering 1–3.
+//
+// ⚠️ AND WHEN A MUTATION SAYS NOT CAUGHT WHILE FAILURES ARE ON SCREEN, SUSPECT THE PLUMBING BEFORE
+// THE ASSERTION. The harness was reporting the exit code correctly; the exit code was reporting a
+// tally taken before the section existed.
+
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 

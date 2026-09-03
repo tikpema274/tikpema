@@ -40,25 +40,40 @@ export function displayAmount(
 }
 
 /**
- * ═══ ⭐⭐ ROUNDING HAS A DIRECTION WHEN THE NUMBER IS A REQUIREMENT ═══════════════════════════
+ * ═══ ⭐⭐ A FIGURE THE USER MUST ACT ON IS NOT A FIGURE THEY READ ═══════════════════════════════
  *
- * `displayAmount` rounds to NEAREST, which is right for a figure the reader only has to read. It is
- * wrong for a figure the reader has to ACT on. A requirement rendered below the real requirement is
- * an instruction that fails when followed:
+ * `displayAmount` rounds to NEAREST. That is right for a number the reader only has to READ, and
+ * wrong for one they have to ACT on, because nearest-rounding a REQUIREMENT understates it:
  *
- *     need 2.054121 USDC  ->  toFixed(2)  ->  "2.05"      top up to 2.05 and the call still fails
- *     need 2.054121 USDC  ->  toFixed(4)  ->  "2.0541"    21 millionths short, same outcome
+ *     MEASURED, 2026-09-03. An upfront-fee total of 2.054121 USDC renders at 4dp as "2.0541" —
+ *     TWENTY-ONE MILLIONTHS SHORT. A wallet holding exactly what the screen said fails the approve.
+ *     At 2dp it is "2.05", four thousandths short. The rounding is not the error; the DIRECTION is.
  *
- * ⛔ AND IT COMPOSES INTO A SELF-CONTRADICTORY REFUSAL. A balance of 2.0512 against a need of
- * 2.0549 renders at 2dp as "You have 2.05, need 2.05" — a refusal whose own numbers say it should
- * have passed. That is the same family `verify-refusal-quantity` guards: the printed quantity is not
- * the quantity the test compared, and here ROUNDING is what makes them differ.
+ * ⛔ AND IT ALREADY COMPOSED INTO A SELF-CONTRADICTORY REFUSAL, at two live sites. A balance of
+ * 2.0512 against a need of 2.0549, both rendered at 2dp on a 6-dp token, reads "You have 2.05, need
+ * 2.05" — a refusal whose own two numbers say it should have passed. `verify-refusal-quantity`
+ * guards that shape: the printed quantity is not the quantity the test compared, and here ROUNDING
+ * is what makes them differ.
  *
- * ⭐ SO THE TWO SIDES ROUND OPPOSITE WAYS, each away from the reader's favour:
+ * ⭐⭐ THE TWO SIDES HAVE OPPOSITE SAFE DIRECTIONS, SO ONE FORMATTER CANNOT SERVE BOTH:
+ *
  *     requiredAmount   rounds UP    — never ask for less than is actually needed
  *     availableAmount  rounds DOWN  — never claim more is on hand than actually is
- * A comparison rendered this way can be pessimistic by a rounding unit; it can never read as
- * sufficient when it is not.
+ *
+ * Each rounds away from the reader's favour. A comparison rendered this way can be pessimistic by a
+ * rounding unit; it can never read as sufficient when it is not. There is no single "correct
+ * precision" that fixes this — precision is a readability choice, direction is a safety one, and
+ * choosing only the first is how a 6-dp token ended up compared at 2dp.
+ *
+ * ═══ ⚠️ THE POPULATION — WHERE THIS APPLIES, WHICH IS WIDER THAN BALANCES ════════════════════════
+ * Anywhere a rendered number is an INSTRUCTION rather than a DESCRIPTION. The test is not "is it
+ * money" but "will the reader act on this figure and be judged against the real one?":
+ *   · a balance to top up to, a total a wallet must hold, an allowance to approve
+ *   · a minimum a form will accept, a cap a value must stay under (that one rounds DOWN — it is an
+ *     availability, not a requirement; the direction follows the COMPARISON, never the field name)
+ *   · a deadline or a countdown a caller will race
+ * ⭐ A figure that merely reports what happened — a fee already charged, an amount already sent — is
+ * a description and rounds to nearest. Ask which side of the comparison the reader stands on.
  *
  * ⚠️ THE SCALING IS SNAPPED BEFORE THE CEIL. `2.05 * 100` is 204.99999999999997 in binary floating
  * point, and a naive ceil would turn an exact 2.05 into 2.06 — inflating every figure that needed no
