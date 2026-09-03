@@ -1,5 +1,102 @@
 ---
 
+# ✅ DEPLOYED — 11 commits, and the count from conversation was wrong again
+
+**2026-09-03.** Production had been serving `0d8d212` since 2026-09-02. The gap was **eleven
+commits**, not the "six or seven" carried in conversation — and the deployed commit was read from
+`/.netlify/functions/blobs-probe` rather than recalled, which is the only reason the count is
+trustworthy. ⭐ Third time this session a conversation-sourced state claim has been wrong (the
+marketing site was already deployed; the app was already deployed; the gap was under-counted). The
+artifact adjudicates. [[conversation-sourced-numbers-must-be-marked]]
+
+    deploy   6a9942a3c70c6c792168af6e   published 2026-09-03T10:15:44Z
+    commit   36aab4bd5df076babf9db267c349f9ae2ba67493
+    tree     b3b88af9d15c8fff6987b62f91d7293a404b9bbf5ac2765ba83ea54f2b21420f   dirty false
+    ddTree   3b589768754ddc8bc78906fbcfbae49a956edb6206b4e3cb2219d7e549e83b46   (rotated)
+    bundle   index-CmqOfFUA.js -> index-D36_nTbs.js
+
+`gate:deployed` 5/5 exit 0. Bundle probes flipped in both directions with the control holding, and
+the served bundle was **byte-identical** to the local build the baseline was measured against.
+
+## ⭐ AND `gate:deployed` HANDLED A DIVERGENCE IT WAS BUILT FOR
+
+Re-run after two record-only commits, check 3 reported `HEAD a36319aa4473 ≠ stamped 36aab4bd5df0,
+but the TREES MATCH — later commits touched only non-deployed files`. That is the tree-vs-commit
+distinction working: **commit is what you meant to ship, tree is the identity.** `PROGRESS.md` and
+the ledger sit outside the stamped surface, so the hash is unchanged and nothing deployable is
+missing. A gate that failed here would have trained us to ignore it.
+
+---
+
+# ⛔ "MINIFIERS REWRITE EVERYTHING EXCEPT STRING LITERALS" IS TOO GENEROUS
+
+**2026-09-03.** Building the pre-deploy probe, I picked a literal from a source change that SPLIT a
+template across a `+`:
+
+    before:  `… You have ${x} USDC, need ${y}.`
+    after:   `… You have ${x} USDC, ` + `need ${y}.`
+
+**esbuild folded it straight back into one template.** ` USDC, need ` survived intact. Every prose
+candidate — six of them — was byte-identical in both bundles, and the flip I had predicted **did not
+exist**. This deploy changed no user-visible string at all.
+
+## ⭐ WHAT THE PROBE HAD TO BE INSTEAD
+
+The difference was in the CALL EXPRESSION, visible only by diffing the two artifacts:
+
+    OLD served:  (stake + gas), have ${g.toFixed(2)}
+    NEW local:   (stake + gas), have ${tE(g,pr)}
+
+| probe | served | after |
+|---|---|---|
+| CHANGED `(stake + gas), have ${tE(` | 0 | 1 |
+| OLD `have ${g.toFixed(2)}` | 1 | 0 |
+| CONTROL `Insufficient USDC: need ~` | 1 | 1 |
+
+⭐ **Download the served bundle, build the new one, DIFF them.** Anything justified only from source
+is a prediction. ⚠️ Minified identifiers are legitimate probes HERE only because
+`netlify deploy --dir=dist` uploads the local build verbatim — confirmed byte-identical afterwards.
+On a platform that rebuilds they would not be.
+
+⛔ And when a deploy changes no rendered text, SAY SO. Inventing a prose flip to satisfy the
+protocol would have been worse than reporting that the protocol's usual probe does not apply.
+
+---
+
+# ⛔⛔ AN OBSERVER THAT WRITES ONLY AT THE END LOSES EVERYTHING WHEN IT IS STOPPED
+
+**2026-09-03.** `capture:window` finally had a real window to witness — `00a9fe7` touched
+`_dd-x402.mjs`, so ddTree rotated and the service refused until the next canary tick.
+
+The first run **saw all of it**: banner at 10:19:01Z, `self-clearing`, reason `no-record`, then 553
+seconds of `still refusing`. It was killed mid-wait. **It recorded nothing** — capture appends its
+single ledger line only AFTER the verdict, so nine minutes of witnessing reached no artifact.
+
+A second run, started into a window already ten minutes old, timed only its own tail and wrote
+`durationSeconds: 77` — into a field documented as *how long vault deposits were unavailable*.
+
+## THE CORRECTION IS A BOUND, BECAUSE THE OPEN WAS NEVER WITNESSED
+
+    deploy published   10:15:44.161Z
+    first seen OPEN    10:19:01Z        <- first probe of the killed watcher
+    closed             10:30:28.989Z
+    AT LEAST 687s (11m27s)  ·  AT MOST 884s (14m44s)
+
+⭐ The open fell between publish and the first probe, so no point estimate exists and none was
+given. The three timestamps are stored verbatim so a reader re-derives the bound rather than
+inheriting my arithmetic. Marked `probes: 0`, `manual: true`, outcome
+`manual-correction-duration-understated`, with a `corrects` field naming the entry it qualifies.
+[[publish-the-intermediate-not-just-the-conclusion]]
+
+## ⚠️ SECOND CAPTURE FAILURE IN TWO DAYS, BY TWO DIFFERENT MECHANISMS
+
+2026-09-02 skipped the step entirely (hence the manual record at `b8ef98f`); this one ran, saw
+everything, and was stopped. **Both look identical in the ledger — silence.** ⭐ The first survival
+entry asks *"how long does this survive?"*; this one asks **"WHEN does it write?"** An observer that
+writes once, at the end, has an all-or-nothing failure mode whose loss is invisible.
+
+---
+
 # ⭐⭐ THREE GUARDS THAT WOULD HAVE STAYED GREEN — found by asking one counterfactual
 
 **2026-09-03.** Circle shipped CCTP upfront fees on 2026-09-02: the fee is quoted, signed,
