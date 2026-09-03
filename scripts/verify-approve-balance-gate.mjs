@@ -77,7 +77,17 @@ console.log("CASE 1: balance 6.30 < amount 10 → clean 402, NO burn (the #15534
   check("walletAddress present", body.walletAddress === OWNER);
   check("executeAction NEVER called (no burn submitted)", execCalls === 0, `calls=${execCalls}`);
   check("NO lock written (receipt absent on reject)", (await deliv.get("job-1")).receipt === undefined);
-  check("message names have+need", /Have 6\.30 USDC, need 10\.00/.test(body.error || ""), body.error);
+  // ⚠️ THIS PINNED `Have 6.30 … need 10.00` — the 2dp rendering — and went red on 2026-09-03 when
+  //    the directional-rounding fix landed. It went red CORRECTLY: it was pinned to a format that
+  //    was itself the defect. A balance of 9.999 against a need of 10 rendered "Have 10.00, need
+  //    10.00", a refusal whose own numbers say it should have passed.
+  // ⭐ RE-PINNED TO THE PROPERTY, NOT THE FORMAT: both figures appear, at the token's full 6-dp
+  //    precision, and the printed pair still reads as a genuine shortfall.
+  const shown = body.error || "";
+  check("message names have+need", /Have 6\.300000 USDC, need 10\.000000/.test(shown), shown);
+  const nums = [...shown.matchAll(/(\d+\.\d+)/g)].map((m) => Number(m[1]));
+  check("⭐⭐ …and the printed pair does NOT read as sufficient — have < need on the SHOWN figures",
+    nums.length >= 2 && nums[0] < nums[1], `${nums.join(" vs ")}`);
 }
 
 console.log("\nCASE 2: balance 25.00 >= amount 10 → proceeds to execution (funded, no regression)");
@@ -100,8 +110,17 @@ console.log("\nCASE 3: balance 10.00 == amount 10 → proceeds (>= inclusive; sp
 console.log("\nORDERING: read → reject-or-proceed → (only if funded) burn");
 {
   await seed(10); balanceMinor = usdc(9.999999); execCalls = 0; // one micro-USDC short
-  const { status } = parse(await call());
+  const { status, body } = parse(await call());
   check("9.999999 < 10 → 402, still no burn", status === 402 && execCalls === 0, `status=${status} calls=${execCalls}`);
+  // ═══ ⭐⭐ THIS CASE ALREADY DROVE THE DEFECT AND NEVER LOOKED AT IT ════════════════════════
+  // 9.999999 against 10 is EXACTLY the shortfall that rendered "Have 10.00 USDC, need 10.00." — a
+  // refusal whose own two numbers say it should have passed. The case existed, produced the string,
+  // and asserted only `status` and `execCalls`. ⛔ A suite that EXERCISES a defect without asserting
+  // on it is not neutral: it is evidence the path was covered.
+  const msg = body.error || "";
+  const seen = [...msg.matchAll(/(\d+\.\d+)/g)].map((m) => Number(m[1]));
+  check("⭐⭐ …and at ONE MICRO-USDC short the message still reads as a shortfall",
+    seen.length >= 2 && seen[0] < seen[1], msg);
 }
 
 console.log(`\n${fail === 0 ? "✅ ALL PASS" : "❌ FAILURE"} — ${pass} passed, ${fail} failed. Zero money.`);

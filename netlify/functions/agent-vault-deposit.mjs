@@ -5,6 +5,7 @@
 // key (never a free-form address). All the guardrails live in executeAction — the ONE secure
 // path: AGENT.VAULT pause, the fail-closed vault-deposit cap, the daily ceiling, and the on-chain
 // inspection GATE (BLOCK / WARN+ack) — so this handler is thin and cannot bypass any of them.
+import { requiredAmount, availableAmount } from "../../shared/amount-direction.mjs";
 import { amountFloorViolation } from "./_amount-floor.mjs";
 import { formatUnits } from "viem";
 import { connectBlobs } from "./_blobs.mjs";
@@ -49,7 +50,7 @@ export async function handler(event) {
   try {
     const raw = await publicClient().readContract({ address: CONTRACTS.USDC, abi: BAL_ABI, functionName: "balanceOf", args: [walletAddress] });
     const have = Number(formatUnits(raw, USDC_DECIMALS));
-    if (have < amount) return json(402, { error: `Insufficient funds. Have ${have.toFixed(2)} USDC, need ${amount.toFixed(2)}.`, have: Number(have.toFixed(2)) });
+    if (have < amount) return json(402, { error: `Insufficient funds. Have ${availableAmount(have, USDC_DECIMALS)} USDC, need ${requiredAmount(amount, USDC_DECIMALS)}.`, have, need: amount });
   } catch {
     /* balance read hiccup — let executeAction surface any real failure */
   }

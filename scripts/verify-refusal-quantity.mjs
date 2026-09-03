@@ -414,6 +414,64 @@ section("3b — ⛔ THE TWO have/need REFUSALS RENDER DIRECTIONALLY, not to near
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
+section("3c — 🚨 THE have/need CENSUS — the shape §3b fixed at TWO sites, counted everywhere");
+{
+  // ═══ ⛔⛔ A DETECTOR BLIND TO ITS OWN REPAIR GOES GREEN ON THE NEXT INSTANCE ═══════════════
+  // The first version of this scan read ONE LINE AT A TIME. It found 4 of 6 sites, and the two it
+  // missed were missed for a reason worth writing down: **the fix splits the string across a `+`**,
+  // so a one-line scan cannot see a sentence the repair itself made two lines long. The detector
+  // would have gone green on every future instance repaired the same way — and looked thorough.
+  // ⭐ Same family as esbuild FOLDING a concatenated template back into one (2026-09-03, the deploy
+  // probe): both are source-level assumptions about how text is laid out, and both were wrong — in
+  // opposite directions. A minifier joins what you split; a line scanner splits what you joined.
+  // ⭐ So the scan reads a WINDOW, and the anchor accepts EITHER half of the pair: `metamask.ts`
+  // says "need ~X … have Y", need first, and an anchor demanding `have` on the opening line missed
+  // it entirely. Two blind spots, both found by widening rather than by the assertions.
+  // ⚠️ WHY THIS SECTION EXISTS. §3b pins the two CLIENT sites by name. That is a guard against the
+  //   instances already fixed, and it is exactly the shape this file's header warns about: on
+  //   2026-09-03 the morning fix touched `useModularWallet` and `metamask` because that is where I
+  //   had looked, and FIVE server functions carried the identical defect. A named-site check could
+  //   never have found them. So the population is now scanned and its denominator printed.
+  const SURF = ["netlify/functions", "shared", "src"];
+  const files = SURF.flatMap(walk).filter((f) => /\.(mjs|ts|tsx)$/.test(f) && !/\.d\.mts$/.test(f));
+  // A user-facing string that puts a BALANCE and a REQUIREMENT in one sentence.
+  const PAIR = /[Hh]ave|holds/;
+  const NEED = /\bneed\b/;
+  const sites = [];
+  for (const f of files) {
+    const src = readFileSync(f, "utf8");
+    // ⚠️ A WINDOW, NOT A LINE. My first version matched one line at a time and found FOUR sites —
+    //    because the fix itself splits these strings across a `+`, and a one-line scan cannot see a
+    //    sentence that spans two. A detector blind to the shape its own repair produces would go
+    //    green on the next instance. [[a-check-whose-failure-mode-is-a-pass]]
+    const lines = src.split("\n").map((l) => l.replace(/^\s*\/\/.*$/, ""));
+    lines.forEach((line, i) => {
+      const win = lines.slice(i, i + 3).join(" ");
+      // ⭐ ANCHOR ON EITHER HALF. metamask.ts says "need ~X … have Y" — need FIRST — so an
+      //   anchor that demanded `have` on the opening line missed it entirely.
+      if (!/[`"']/.test(line) || !(PAIR.test(line) || NEED.test(line))) return;
+      if (!PAIR.test(win) || !NEED.test(win) || !/\$\{/.test(win)) return;
+      if (i > 0 && (PAIR.test(lines[i - 1]) || NEED.test(lines[i - 1])) &&
+          PAIR.test(lines.slice(i - 1, i + 2).join(" ")) && NEED.test(lines.slice(i - 1, i + 2).join(" "))) return; // one hit per sentence
+      sites.push({ file: f, line: i + 1, text: lines.slice(i, i + 2).join(" ").trim().slice(0, 110),
+                   nearest: /toFixed\(\s*[0-4]\s*\)/.test(win) });
+    });
+  }
+  const rounded = sites.filter((s) => s.nearest);
+  console.log(`     have/need sites ${sites.length}  ·  nearest-rounded ${rounded.length}  ·  directional ${sites.length - rounded.length}`);
+  if (process.argv.includes("--list")) for (const s of sites) console.log(`     ${s.nearest ? "NEAREST " : "ok      "} ${s.file}:${s.line}  ${s.text}`);
+
+  ok("⭐ the scan finds the population at all — a zero here would be the guard, not the estate",
+    sites.length >= 5, `${sites.length} sites`);
+  ok("⭐⭐ NO have/need refusal rounds its figures to NEAREST — a shortfall must never render as equal",
+    rounded.length === 0,
+    rounded.map((s) => `${s.file}:${s.line}  ${s.text}`).join("\n      "));
+  ok("⭐ …and the two the morning fix named are still in the population, not special-cased",
+    sites.some((s) => s.file.includes("useModularWallet")) && sites.some((s) => s.file.includes("metamask")),
+    sites.map((s) => s.file).join(", "));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
 section("4 — ⭐⭐ THE SWAP CAP GATE: both quantities, from the OPERANDS, with the direction named");
 {
   const { swapCapRefusal } = await import("../netlify/functions/_swap.mjs");

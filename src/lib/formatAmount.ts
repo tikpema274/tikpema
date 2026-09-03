@@ -80,31 +80,12 @@ export function displayAmount(
  * rounding at all. Fixing the representation error first is what keeps the direction rule from
  * becoming a rounding bug of its own.
  */
-const snap = (n: number, dp: number) => Number((n * 10 ** dp).toFixed(9));
-
-/** A figure the reader must MEET. Rounds UP, so the displayed number is never below the real one. */
-export function requiredAmount(
-  v: string | number | null | undefined,
-  dp = 2,
-  placeholder = "…",
-): string {
-  if (v === null || v === undefined || v === "") return placeholder;
-  const n = Number(v);
-  if (!Number.isFinite(n)) return placeholder;
-  return (Math.ceil(snap(n, dp)) / 10 ** dp).toFixed(dp);
-}
-
-/** A figure the reader HAS. Rounds DOWN, so it never overstates what is on hand. */
-export function availableAmount(
-  v: string | number | null | undefined,
-  dp = 2,
-  placeholder = "…",
-): string {
-  if (v === null || v === undefined || v === "") return placeholder;
-  const n = Number(v);
-  if (!Number.isFinite(n)) return placeholder;
-  return (Math.floor(snap(n, dp)) / 10 ** dp).toFixed(dp);
-}
+// ⭐⭐ THE IMPLEMENTATION MOVED TO shared/amount-direction.mjs AND IS RE-EXPORTED HERE.
+// The rule was written at this file and fixed the two CLIENT sites; the SERVER had four more of the
+// identical shape, and a netlify function cannot import from `src/`. One implementation, two
+// importers — the same reason `shared/bridge-timing.mjs` exists.
+// [[duplicate-source-of-truth-is-the-recurring-bug]]
+export { requiredAmount, availableAmount } from "../../shared/amount-direction.mjs";
 
 /** ⭐ The exact value, for arithmetic. Never rendered — its job is to be correct, not readable. */
 export function exactAmount(v: string | number | null | undefined): number | null {

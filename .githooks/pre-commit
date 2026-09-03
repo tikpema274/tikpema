@@ -79,6 +79,28 @@ EOF
   echo "${GRN}✔ build stamp: staged as null.${OFF}"
 fi
 
+# ═══ ⚠️ A NOTE ON WHAT THIS HOOK CANNOT CHECK, AND WHAT NEARLY SHIPPED BECAUSE OF IT ═════
+# `node --check` ANSWERS "IS THIS PARSEABLE", NEVER "DOES THIS RUN".
+#
+# 🚨 MEASURED 2026-09-03. `dca-tick.mjs` was edited to use `USDC_DECIMALS`, which the file did
+# not import. `node --check` passed it — the syntax is valid; an undefined identifier is a
+# RUNTIME ReferenceError, and the parser has no opinion about it. Five other edited modules
+# passed the same check for the same empty reason. It was caught by a STRAY GREP that happened
+# to print "NOT in scope", not by the check that was supposed to catch it.
+#
+# ⛔ A MONEY-PATH FUNCTION THAT THROWS ReferenceError ON ITS REFUSAL BRANCH IS WORSE THAN ONE
+# THAT REFUSES BADLY: the branch that fires when a user is short of funds would 500 instead.
+# And the defect is invisible until that branch runs, which is exactly the branch nobody
+# exercises by hand.
+#
+# ⭐ THE CHECK THAT ANSWERS THE RIGHT QUESTION IS AN IMPORT:
+#     node -e "import('./netlify/functions/X.mjs').then(()=>…).catch(e=>…)"
+# It resolves every import and evaluates module scope, so an out-of-scope identifier surfaces.
+# ⚠️ NOT WIRED INTO THIS HOOK, deliberately: importing a netlify function executes its module
+# scope, and several build a Blobs handle or read env at load. A pre-commit hook must not have
+# side effects. So this is a HABIT with its reason written down, and the honest statement is
+# that nothing automated catches it — the same shape as the `--no-verify` limit above.
+
 # ── 1. THE BINARY MUST EXIST, OR WE BLOCK ────────────────────────────────────────────────
 # 🚨 A hook that no-ops when gitleaks is missing is ABSENT PRECISELY ON A NEW MACHINE — the
 # fresh clone with no tooling, which is the case this hook exists for. That is

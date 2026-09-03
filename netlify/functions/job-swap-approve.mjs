@@ -1,3 +1,4 @@
+import { requiredAmount, availableAmount } from "../../shared/amount-direction.mjs";
 import { getStore } from "@netlify/blobs";
 import { connectBlobs } from "./_blobs.mjs";
 import { formatUnits } from "viem";
@@ -144,9 +145,12 @@ export async function handler(event) {
     const [inBal, outBal] = await Promise.all([readBalance(tokenIn, walletAddress), readBalance(tokenOut, walletAddress)]);
     if (inBal < amountIn) {
       return json(402, {
-        error: `Insufficient funds to swap. Have ${inBal.toFixed(2)} ${tokenIn}, need ${amountIn.toFixed(2)}.`,
-        need: Number(amountIn.toFixed(2)),
-        have: Number(inBal.toFixed(2)),
+        // ⚠️ USDC_DECIMALS is correct for BOTH tokens here: USDC and EURC are each 6-dp on Arc
+        //    (_swap.mjs:350). It is the TOKEN's precision, not USDC's, that this argument means.
+        error: `Insufficient funds to swap. Have ${availableAmount(inBal, USDC_DECIMALS)} ${tokenIn}, ` +
+          `need ${requiredAmount(amountIn, USDC_DECIMALS)}.`,
+        need: amountIn,
+        have: inBal,
         token: tokenIn,
         walletAddress,
       });

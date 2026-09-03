@@ -1,9 +1,10 @@
+import { requiredAmount, availableAmount } from "../../shared/amount-direction.mjs";
 import { getStore } from "@netlify/blobs";
 import { connectBlobs } from "./_blobs.mjs";
 import { executeAction } from "./_actions.mjs";
 import { assertNotPaused } from "./_pause.mjs";
 import { AGENT } from "./_agents.mjs";
-import { swapCapUsdc } from "./_arc.mjs";
+import { swapCapUsdc, USDC_DECIMALS } from "./_arc.mjs";
 import { valueInUsdc } from "./_swap.mjs";
 import { circle } from "./_circle.mjs";
 // NOTE: confirmSwapLanded (_swap-confirm log-scan / PATH 2) is NO LONGER imported here — the DCA reconcile
@@ -567,7 +568,12 @@ export async function handler(event) {
       }
       if (inBal < m.perTickAmount) {
         await record(m, key, period, OUTCOME.SKIPPED_FUNDS, {
-          reason: `have ${inBal.toFixed(2)} ${m.tokenIn}, need ${m.perTickAmount}`,
+          // ⚠️ DIRECTIONAL, not nearest. The gate compares `inBal < m.perTickAmount` at full
+          //    precision; rendering both at 2dp made a real shortfall read as "have 10.00,
+          //    need 10" — a skip reason its own numbers contradict. USDC/EURC are both 6-dp
+          //    on Arc, so USDC_DECIMALS is the token's precision here, not a USDC assumption.
+          reason: `have ${availableAmount(inBal, USDC_DECIMALS)} ${m.tokenIn}, ` +
+            `need ${requiredAmount(m.perTickAmount, USDC_DECIMALS)}`,
           patch: { needsAttention: true },
         });
         continue;

@@ -1,3 +1,4 @@
+import { requiredAmount, availableAmount } from "../../shared/amount-direction.mjs";
 import { amountFloorViolation } from "./_amount-floor.mjs";
 import { getStore } from "@netlify/blobs";
 import { connectBlobs } from "./_blobs.mjs";
@@ -157,9 +158,10 @@ export async function handler(event) {
     if (have < amount) {
       // 402, mirroring job-run.mjs:80-87 { need, have, walletAddress }. No lock taken, no burn.
       return json(402, {
-        error: `Insufficient funds to bridge. Have ${have.toFixed(2)} USDC, need ${amount.toFixed(2)}.`,
-        need: Number(amount.toFixed(2)),
-        have: Number(have.toFixed(2)),
+        error: `Insufficient funds to bridge. Have ${availableAmount(have, USDC_DECIMALS)} USDC, ` +
+          `need ${requiredAmount(amount, USDC_DECIMALS)}.`,
+        need: amount,
+        have,
         walletAddress,
       });
     }

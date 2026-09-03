@@ -5,6 +5,7 @@
 // client-supplied. The agent wallet is a Circle dev-controlled SCA, so only the
 // server can move it; this is the server-side "send" for the wallet the user
 // actually funds. Gasless (Gas Station sponsored).
+import { requiredAmount, availableAmount } from "../../shared/amount-direction.mjs";
 import { amountFloorViolation } from "./_amount-floor.mjs";
 import { formatUnits } from "viem";
 import { connectBlobs } from "./_blobs.mjs";
@@ -102,8 +103,9 @@ export async function handler(event) {
     const have = Number(formatUnits(raw, USDC_DECIMALS));
     if (have < amount) {
       return json(402, {
-        error: `Insufficient funds. Have ${have.toFixed(2)} USDC, need ${amount.toFixed(2)}.`,
-        have: Number(have.toFixed(2)),
+        error: `Insufficient funds. Have ${availableAmount(have, USDC_DECIMALS)} USDC, ` +
+          `need ${requiredAmount(amount, USDC_DECIMALS)}.`,
+        have, need: amount,
       });
     }
   } catch {

@@ -55,6 +55,7 @@
 // so only the server can move it. So: deposited Gateway funds are SPENDABLE CROSS-CHAIN ONLY.
 // A capability the contract has and we never built is not a capability the user has. Do not
 // describe it as one, and do not let a user discover this by finding money missing.
+import { requiredAmount, availableAmount } from "../../shared/amount-direction.mjs";
 import { amountFloorViolation } from "./_amount-floor.mjs";
 import { formatUnits } from "viem";
 import { connectBlobs } from "./_blobs.mjs";
@@ -131,9 +132,9 @@ export async function handler(event) {
     if (have < amount) {
       return json(402, {
         error:
-          `Insufficient withdrawable balance. Your agent wallet holds ${have.toFixed(2)} USDC in plain USDC, ` +
-          `need ${amount.toFixed(2)}. Funds in the Gateway unified balance are not withdrawable here.`,
-        have: Number(have.toFixed(2)),
+          `Insufficient withdrawable balance. Your agent wallet holds ${availableAmount(have, USDC_DECIMALS)} USDC in plain USDC, ` +
+          `need ${requiredAmount(amount, USDC_DECIMALS)}. Funds in the Gateway unified balance are not withdrawable here.`,
+        have, need: amount,
       });
     }
   } catch {
