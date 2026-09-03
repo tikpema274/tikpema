@@ -28,6 +28,21 @@
 import { mock } from "node:test";
 import { decodeFunctionData } from "viem";
 import { readFileSync } from "node:fs";
+
+// The three ABIs this suite decodes with. ⚠️ Declared here rather than imported so a change to the
+// production encoding is CAUGHT by a decode failure instead of silently agreeing with itself.
+const BATCH_ABI = [{ name: "executeBatch", type: "function", stateMutability: "payable", outputs: [{ type: "bytes[]" }],
+  inputs: [{ name: "calls", type: "tuple[]", components: [
+    { name: "target", type: "address" }, { name: "value", type: "uint256" }, { name: "data", type: "bytes" }] }] }];
+const APPROVE_ABI = [{ name: "approve", type: "function", stateMutability: "nonpayable", outputs: [{ type: "bool" }],
+  inputs: [{ name: "spender", type: "address" }, { name: "value", type: "uint256" }] }];
+const BURN_ABI = [{ name: "depositForBurnWithFees", type: "function", stateMutability: "payable", outputs: [],
+  inputs: [
+    { name: "amount", type: "uint256" }, { name: "destinationDomain", type: "uint32" },
+    { name: "mintRecipient", type: "bytes32" }, { name: "burnToken", type: "address" },
+    { name: "destinationCaller", type: "bytes32" },
+    { name: "claim", type: "tuple", components: [
+      { name: "signedQuote", type: "bytes" }, { name: "refundAddress", type: "address" }] }] }];
 import { usdcDecimalToMinorExact } from "../netlify/functions/_fee-reconcile.mjs";
 
 process.env.SESSION_SECRET ||= ["bridge", "binding", "suite", "not", "a", "credential"].join("-");
@@ -41,8 +56,20 @@ const OWNER = "0x" + "11".repeat(20);
 const AMOUNT = 1.0;
 
 // ⭐ THE SEALED QUOTE'S FEE, and a DIFFERENT live fee. Any re-read yields FRESH, not SEALED.
-const SEALED_MAXFEE = 54147n;                 // 0.054147 USDC — the figure the user is shown
-const FRESH  = { amountMinor: 1_000_000n, maxFee: 99_999n, feeUsdc: 0.099999, netUsdc: 0.900001 };
+// ⭐ THE SIGNED BYTES ARE BUILT, NOT TYPED. `normalizeQuoteExpiry` locates the packed expiry word
+// by VALUE and cross-checks its high byte against the declared mode, so a hand-written blob is
+// simply refused — as a first draft of this fixture was. Encoding it here means the fixture agrees
+// with the decoder by construction rather than by luck.
+const mkSignedQuote = (deadlineSec, modeByte = 0x00, filler = "ab") =>
+  "0x01"
+  + "00".repeat(31) + "20"                                     // an ordinary offset word
+  + modeByte.toString(16).padStart(2, "0")
+  + BigInt(deadlineSec).toString(16).padStart(62, "0")         // mode<<248 | deadline
+  + filler.repeat(32);                                          // a trailing payload word
+// ⚠️ `feeMinor`, not `maxFee` — the burn's own maxFee is EMPTY_MAX_FEE (zero) under upfront fees.
+const SEALED_FEE_MINOR = 54147n;              // 0.054147 USDC — the figure the user is shown
+const FRESH  = { amountMinor: 1_000_000n, feeMinor: 99_999n, feeUsdc: 0.099999, netUsdc: 1,
+  quote: { signedQuote: mkSignedQuote(4102444800, 0x00, "cd"), expiry: { mode: "TIMESTAMP", expiresAt: 4102444800 } } };
 
 // ⚠️ ORDER IS LOAD-BEARING. `_bridge.mjs` imports `circle` and `publicClient` at module scope, so
 // those must be mocked BEFORE it is imported — importing it first binds the real ones and
@@ -94,84 +121,145 @@ console.log("╚═════════════════════�
 const EXPIRED_CIRCLE_QUOTE = JSON.parse(
   readFileSync(new URL("./spikes/erc20-fee-burn-run2-quote-2026-09-03.json", import.meta.url), "utf8"));
 
+// ⭐ A LIVE-WINDOWED QUOTE carrying the SEALED fee. Its signed bytes are synthetic — nothing here
+// submits them — but its `feeTotalAmount` and `expiry` are the fields the binding actually reads,
+// and its deadline is far enough out that this suite never fails on the clock.
+const FAR_DEADLINE = 4102444800;                                // 2100-01-01, well past any clock here
+const SEALED_QUOTE = {
+  signedQuote: mkSignedQuote(FAR_DEADLINE),
+  issuedAt: FAR_DEADLINE - 120,
+  expiry: { mode: "TIMESTAMP", expiresAt: FAR_DEADLINE },
+  feeTotalAmount: "54147",
+  feeToken: "0x3600000000000000000000000000000000000000",
+};
+
 const sealed = REAL_BRIDGE.sealBridgeQuote({
   owner: OWNER, destinationKey: "base", amountUsdc: AMOUNT,
-  fee: { amountMinor: 1_000_000n, maxFee: SEALED_MAXFEE, feeUsdc: 0.054147, netUsdc: 0.945853 },
+  fee: { amountMinor: 1_000_000n, feeMinor: SEALED_FEE_MINOR, feeUsdc: 0.054147, netUsdc: 1,
+         quote: SEALED_QUOTE },
 });
 
-section("1 — ⭐⭐ THE END-TO-END CLAIM: shown fee === maxFee in the burn");
+section("1 — ⭐⭐ THE END-TO-END CLAIM: the shown fee is the fee the CHAIN will enforce");
 {
+  // ═══ 🚨 THE TRIPWIRE ARMED HERE ON 2026-09-03 FIRED ON THE UPFRONT-FEE COMMIT ═════════════════
+  //
+  // This section used to decode `maxFee` out of the burn calldata and assert it equalled the sealed
+  // figure. `depositForBurnWithFees` has no `maxFee` — `_depositForBurn` hardcodes `EMPTY_MAX_FEE`,
+  // measured as **0** in run 2's real `DepositForBurn` event. So:
+  //   · "the maxFee in the calldata is the SEALED figure"  had nothing left to read
+  //   · its falsifier `!== FRESH.maxFee`                   would have compared 0 to 0 — VACUOUS
+  //
+  // ⛔ BOTH CAME OUT IN THE SAME COMMIT THAT BROKE THEM. Leaving a vacuous assertion in place is
+  // worse than deleting it: it keeps printing ✅ for a property nothing checks, and the pass count
+  // conceals that the section stopped measuring anything.
+  //
+  // ⭐⭐ AND THE CLAIM IS STRONGER NOW, NOT WEAKER. It used to rest on OUR threading — we signed the
+  // figure we showed. It now rests on the chain: `_collectFees` ends in
+  // `assert(feeAmount == quotedFee)`, so a burn whose collected fee differs from the submitted
+  // quote's REVERTS. What this section checks is that the quote we submit is the quote we showed.
   bridgeFeeCalls = 0; capturedCallData = null;
   const r = await executeAction(
     { type: "bridge_usdc", amountUsdc: AMOUNT, destination: "base", quoteToken: sealed, reasoning: "t" },
     { walletAddress: OWNER, session: { address: OWNER } });
 
   check("⭐ the bridge executed", r?.ok === true, JSON.stringify(r?.blocked ?? r?.ok));
-  check("⭐⭐ calldata was captured from the real bridgeCallData", !!capturedCallData);
+  check("⭐⭐ calldata was captured from the real batch builder", !!capturedCallData);
 
+  // ── THE SUBMITTED QUOTE IS THE SEALED ONE ────────────────────────────────────────────────────
   const decoded = capturedCallData
-    ? decodeFunctionData({ abi: REAL_BRIDGE.BRIDGE_ABI, data: capturedCallData })
-    : null;
-  const onChainMaxFee = decoded?.args?.[0]?.maxFee;
+    ? decodeFunctionData({ abi: BATCH_ABI, data: capturedCallData }) : null;
+  const calls = decoded?.args?.[0] ?? [];
+  const burnCall = calls[1];
+  const burn = burnCall ? decodeFunctionData({ abi: BURN_ABI, data: burnCall.data }) : null;
+  check("⭐⭐⭐ the SIGNED QUOTE in the burn is the SEALED one, not a re-read one",
+    burn?.args?.[5]?.signedQuote === SEALED_QUOTE.signedQuote,
+    `submitted ${String(burn?.args?.[5]?.signedQuote).slice(0, 14)}… sealed ${SEALED_QUOTE.signedQuote.slice(0, 14)}…`);
+  // 🚨 THE FALSIFIER, AND IT IS NOT VACUOUS: the two blobs differ, so a re-reading build would
+  // submit FRESH's bytes and this would fail.
+  check("🚨 …and it is NOT the live re-read quote, which a re-pricing build would submit",
+    burn?.args?.[5]?.signedQuote !== FRESH.quote.signedQuote &&
+    SEALED_QUOTE.signedQuote !== FRESH.quote.signedQuote,
+    "the two fixtures' signed bytes differ, so this comparison can fail");
 
-  check("⭐⭐⭐ the maxFee IN THE CALLDATA is the SEALED figure, not a re-read one",
-    onChainMaxFee === SEALED_MAXFEE,
-    `calldata maxFee=${onChainMaxFee} sealed=${SEALED_MAXFEE} fresh=${FRESH.maxFee}`);
-  // 🚨 THE FALSIFIER, STATED AS ITS OWN ASSERTION. If this equalled FRESH.maxFee the binding is
-  // not happening and the check above would be passing for the wrong reason on some other build.
-  check("🚨 …and it is NOT the live re-read fee, which is what a re-reading build would sign",
-    onChainMaxFee !== FRESH.maxFee, `fresh would have been ${FRESH.maxFee}`);
+  // ── AND THE APPROVE IN THE SAME BATCH IS BOUND TO THAT SAME QUOTE'S FEE ───────────────────────
+  // ⭐ This is the binding the calldata `maxFee` used to carry: the figure shown decides how much
+  // the wallet actually authorises, and it comes from the sealed quote rather than a fresh read.
+  const ap = calls[0] ? decodeFunctionData({ abi: APPROVE_ABI, data: calls[0].data }) : null;
+  check("⭐⭐ the APPROVE authorises amount + the SEALED fee — the shown figure decides the debit",
+    ap?.args?.[1] === 1_000_000n + SEALED_FEE_MINOR,
+    `${ap?.args?.[1]} vs ${1_000_000n + SEALED_FEE_MINOR} (fresh would be ${1_000_000n + FRESH.feeMinor})`);
+  check("🚨 …and NOT the re-read fee", ap?.args?.[1] !== 1_000_000n + FRESH.feeMinor);
 
   check("⭐⭐ bridgeFee was NEVER called on the bound path — nothing re-priced",
     bridgeFeeCalls === 0, `bridgeFee calls=${bridgeFeeCalls}`);
-  check("⭐ feeCharged and feeDisclosed are now the SAME quote, because there is only one",
+  check("⭐ feeCharged and feeDisclosed are the SAME quote, because there is only one",
     r.feeCharged === r.feeDisclosed && r.feeCharged === 0.054147,
     `charged=${r.feeCharged} disclosed=${r.feeDisclosed}`);
-  // ⭐ The invariant verify-receipt-fee-authority asserts before anything enforced it. Binding is
-  // what enforces it: equal is the strongest form of "never more".
-  check("⭐⭐ feeCharged <= feeDisclosed — the invariant, now STRUCTURAL rather than hoped for",
+  check("⭐⭐ feeCharged <= feeDisclosed — the invariant, STRUCTURAL rather than hoped for",
     r.feeCharged <= r.feeDisclosed);
 
-  // ═══ ⛔⛔ THIS INSTRUMENT DISAPPEARS UNDER UPFRONT FEES — ARMED, NOT YET FIRED ════════════════
-  //
-  // Everything above binds the shown fee to `maxFee` IN THE BURN CALLDATA. Under CCTP upfront fees
-  // `_depositForBurn` hardcodes `BurnMessageV2Lib.EMPTY_MAX_FEE` — and run 2's real `DepositForBurn`
-  // confirmed it on chain: `maxFee = 0`. So there will be NOTHING in the burn calldata to bind to,
-  // and the falsifier above (`!== FRESH.maxFee`) goes VACUOUS with both figures at zero: two
-  // assertions that keep printing ✅ while measuring nothing.
-  //
-  // ⭐ SO THE TRIPWIRE IS ARMED HERE RATHER THAN THE SECTION BEING PRE-EMPTIVELY REWRITTEN. Today
-  // the calldata really does carry the fee, and asserting a future shape would be asserting
-  // something untrue. The day `bridgeCallData` stops emitting `maxFee`, this fails and says what to
-  // re-point at.
-  const cdSrc = readFileSync(new URL("../netlify/functions/_bridge.mjs", import.meta.url), "utf8");
-  const buildsMaxFee = /export function bridgeCallData\(\{[\s\S]{0,400}?maxFee,/.test(cdSrc);
-  check(
-    buildsMaxFee
-      ? "⭐ the burn calldata still carries `maxFee` — this section's instrument is still real"
-      : "⛔ THE CALLDATA NO LONGER CARRIES `maxFee` — re-point this section",
-    buildsMaxFee,
-    "Under upfront fees maxFee is EMPTY_MAX_FEE (0, measured on chain). Bind instead to the " +
-    "SUBMITTED QUOTE's feeTotalAmount, and to the post-burn verdict from bridge-fee-reconcile " +
-    "(_fee-reconcile.mjs), which reads what actually moved. Do NOT leave the maxFee assertions in " +
-    "place comparing 0 to 0.");
+  // ⭐⭐ THE SUCCESSOR TO THE OLD TRIPWIRE — the reconciliation's input, on this very execution.
+  check("⭐⭐ the disclosed fee's two units agree on this execution — the reconciliation's input",
+    usdcDecimalToMinorExact(r.feeDisclosed) === SEALED_FEE_MINOR,
+    `feeDisclosed ${r.feeDisclosed} -> ${usdcDecimalToMinorExact(r.feeDisclosed)} minor, sealed ${SEALED_FEE_MINOR}`);
 
-  // ⭐⭐ AND THE SUCCESSOR CLAIM, ASSERTED TODAY BECAUSE IT ALREADY CAN BE. The post-burn
-  // reconciliation compares against `feeDisclosedMinor`, so that field must be the same quantity as
-  // the decimal beside it — the fee that will actually move. This is the binding that stops the
-  // migration inverting the detector into a permanent false alarm.
-  check("⭐⭐ the disclosed fee's two units agree on this very execution — the reconciliation's input",
-    usdcDecimalToMinorExact(r.feeDisclosed) === BigInt(String(SEALED_MAXFEE)),
-    `feeDisclosed ${r.feeDisclosed} -> ${usdcDecimalToMinorExact(r.feeDisclosed)} minor, sealed ${SEALED_MAXFEE}`);
+  // ⛔ AND THE OLD INSTRUMENT MUST NOT COME BACK. If `maxFee` ever reappears in the burn calldata,
+  // something has re-adopted the deducted mechanic on the agent path and every net figure inverts
+  // again. This is the reverse tripwire of the one that fired.
+  const cdSrc = readFileSync(new URL("../netlify/functions/_bridge.mjs", import.meta.url), "utf8");
+  check("⛔ the agent path's burn calldata carries NO maxFee — the deducted mechanic has not returned",
+    /export function bridgeCallData\(\{ amountMinor, recipient, cctpDomain, signedQuote, refundAddress \}\)/.test(cdSrc));
+}
+
+section("1b — 🚨 THE CEILING BOUNDS THE WALLET DEBIT, NOT THE AMOUNT");
+{
+  // ═══ ⛔ A MONEY-SAFETY DEFECT, NOT A COPY ONE — AND IT HAD NO GUARD ═══════════════════════════
+  // `valueOfStep` returned `amountUsdc` alone for a bridge. Under upfront fees the wallet parts with
+  // `amount + fee`, so counting only the amount leaves THE DAY CEILING WIDER THAN CONFIGURED, BY THE
+  // FEE, ON EVERY BRIDGE — the same class as a lost ledger write.
+  // 🚨 IT WAS FOUND BY MUTATION, NOT BY A FAILING TEST: reverting the value to `amountUsdc` left
+  // every suite green. An under-counting ceiling admits MORE than it says and nothing goes red,
+  // because every individual bridge still succeeds.
+  const { valueOfStep } = await import("../netlify/functions/_actions.mjs");
+  const step = { type: "bridge_usdc", amountUsdc: 10, destination: "base" };
+  const resolvedFee = { amountMinor: 10_000_000n, feeMinor: 54_129n, feeUsdc: 0.054129, netUsdc: 10 };
+
+  const valued = await valueOfStep(step, { bridgeFee: resolvedFee });
+  check("⭐⭐ a bridge is valued at amount + fee", Math.abs(valued - 10.054129) < 1e-9, `${valued}`);
+  check("🚨 …and STRICTLY MORE than the amount — the under-count is what this catches",
+    valued > 10, `${valued} > 10`);
+
+  // ⛔ FAIL CLOSED WITHOUT A FEE. Falling back to the amount IS the under-count, so it must not be
+  // reachable by omission — a caller that forgets to resolve the fee must break loudly, not quietly
+  // widen the ceiling.
+  let threw = null;
+  try { await valueOfStep(step); } catch (e) { threw = e; }
+  check("⛔ valuing a bridge with NO fee THROWS — it never falls back to the amount",
+    threw !== null && /without its fee/.test(threw.message), threw?.message ?? "did not throw");
+
+  // ⭐ AND THE CAP IS APPLIED TO THE VALUED QUANTITY, AFTER VALUATION — the swap cap's own history.
+  const code = readFileSync(new URL("../netlify/functions/_actions.mjs", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+  const valIdx = code.indexOf("dayValue = await valueOfStep(step, resolved)");
+  const capIdx = code.indexOf("const bcap = bridgeCapUsdc()");
+  const dayIdx = code.indexOf("const day = await canSpendDay(");
+  check("⭐⭐ the bridge cap runs AFTER valuation and BEFORE the day ceiling",
+    valIdx > 0 && capIdx > valIdx && dayIdx > capIdx,
+    `valueOfStep@${valIdx} < cap@${capIdx} < canSpendDay@${dayIdx}`);
+  check("🚨 …and it bounds `dayValue`, not `step.amountUsdc`",
+    /if \(dayValue > bcap\)/.test(code) && !/Number\(step\.amountUsdc\) > bcap/.test(code));
+  // ⚠️ And the ledger charges the same quantity the gate bounded.
+  check("⚠️ the day ceiling is asked about the SAME value the cap bounded",
+    /canSpendDay\(\{ amountUsdc: dayValue/.test(code));
 }
 
 section("2 — ⛔ THE SEAL IS FAIL-CLOSED, AND A TAMPERED FEE CANNOT REACH CALLDATA");
 {
   const cases = [
     ["a forged token", "notatoken.notamac"],
-    ["a token for a DIFFERENT amount", REAL_BRIDGE.sealBridgeQuote({ owner: OWNER, destinationKey: "base", amountUsdc: 999, fee: { amountMinor: 1n, maxFee: 1n, feeUsdc: 1, netUsdc: 1 } })],
-    ["a token for a DIFFERENT owner", REAL_BRIDGE.sealBridgeQuote({ owner: "0x" + "22".repeat(20), destinationKey: "base", amountUsdc: AMOUNT, fee: { amountMinor: 1_000_000n, maxFee: SEALED_MAXFEE, feeUsdc: 0.054147, netUsdc: 0.945853 } })],
-    ["a token past OUR OWN TTL", REAL_BRIDGE.sealBridgeQuote({ owner: OWNER, destinationKey: "base", amountUsdc: AMOUNT, fee: { amountMinor: 1_000_000n, maxFee: SEALED_MAXFEE, feeUsdc: 0.054147, netUsdc: 0.945853 }, now: Date.now() - REAL_BRIDGE.QUOTE_TTL_MS - 1000 })],
+    ["a token for a DIFFERENT amount", REAL_BRIDGE.sealBridgeQuote({ owner: OWNER, destinationKey: "base", amountUsdc: 999, fee: { amountMinor: 1n, feeMinor: 1n, feeUsdc: 1, netUsdc: 1 } })],
+    ["a token for a DIFFERENT owner", REAL_BRIDGE.sealBridgeQuote({ owner: "0x" + "22".repeat(20), destinationKey: "base", amountUsdc: AMOUNT, fee: { amountMinor: 1_000_000n, feeMinor: SEALED_FEE_MINOR, feeUsdc: 0.054147, netUsdc: 1, quote: SEALED_QUOTE } })],
+    ["a token past OUR OWN TTL", REAL_BRIDGE.sealBridgeQuote({ owner: OWNER, destinationKey: "base", amountUsdc: AMOUNT, fee: { amountMinor: 1_000_000n, feeMinor: SEALED_FEE_MINOR, feeUsdc: 0.054147, netUsdc: 1, quote: SEALED_QUOTE }, now: Date.now() - REAL_BRIDGE.QUOTE_TTL_MS - 1000 })],
     // ═══ ⭐⭐ AND THE ONE THIS SUITE COULD NOT SEE BEFORE — THE QUOTE'S OWN DEADLINE ═════════════
     // Every expiry case here used to be OURS against OUR constant, both sides ours, so the suite
     // was structurally incapable of noticing an external window. Circle's upfront-fee quote carries
@@ -182,7 +270,7 @@ section("2 — ⛔ THE SEAL IS FAIL-CLOSED, AND A TAMPERED FEE CANNOT REACH CALL
     // have passed for the old reason and proved nothing about the new one.
     ["a token whose CIRCLE QUOTE expired, while ours has not", REAL_BRIDGE.sealBridgeQuote({
       owner: OWNER, destinationKey: "base", amountUsdc: AMOUNT,
-      fee: { amountMinor: 1_000_000n, maxFee: SEALED_MAXFEE, feeUsdc: 0.054147, netUsdc: 0.945853,
+      fee: { amountMinor: 1_000_000n, feeMinor: SEALED_FEE_MINOR, feeUsdc: 0.054147, netUsdc: 1,
              quote: EXPIRED_CIRCLE_QUOTE },
       now: Date.now() - 1000 })],
   ];
@@ -219,9 +307,28 @@ section("3 — ⚠️ THE UN-BOUND PATH IS UNCHANGED, asserted on SOURCE and not
   const bridgeSrc  = readFileSync(new URL("../netlify/functions/_bridge.mjs", import.meta.url), "utf8");
   const actionsSrc = readFileSync(new URL("../netlify/functions/_actions.mjs", import.meta.url), "utf8");
 
-  check("⭐ agentBridge still prices live when NOTHING is bound",
-    /const fee = boundFee \?\? await bridgeFee\(/.test(bridgeSrc),
-    "job-bridge-approve prices at approval and executes later — re-reading is correct there");
+  // ═══ 🚨 THE UN-BOUND PATH NO LONGER PRICES INSIDE agentBridge, AND THAT IS THE FIX ════════════
+  // It used to read `boundFee ?? await bridgeFee(...)`, so a caller that passed no fee got a fresh
+  // quote SILENTLY — a SECOND quote, seconds after the one that priced the cap and the ceiling, and
+  // it is the second one whose `signedQuote` the chain would have enforced. The gates would have
+  // bounded one quote and the contract another.
+  // ⭐ THE FEE IS NOW RESOLVED ONCE BY THE EXECUTOR and threaded in; a missing one REFUSES.
+  // ⛔ THE NEGATIVE HALF READS STRIPPED SOURCE, AND THE FIRST DRAFT DID NOT — so it failed on the
+  // COMMENT that explains the removal, which quotes the old expression verbatim. A negative source
+  // assertion must look at code; prose about code is not code.
+  const bridgeCode = bridgeSrc.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+  check("⭐⭐ agentBridge does NOT price — a missing fee is a refusal, not a fresh quote",
+    /const fee = boundFee;/.test(bridgeCode) &&
+    /refusing to burn without one/.test(bridgeCode) &&
+    !/boundFee \?\? await bridgeFee\(/.test(bridgeCode));
+  check("⭐ …and the executor resolves it exactly once, for BOTH branches",
+    /resolved\.bridgeFee = boundFee;/.test(actionsSrc) &&
+    /resolved\.bridgeFee = await bridgeFee\(/.test(actionsSrc));
+  // ⚠️ AND job-bridge-approve IS NO LONGER UN-BOUND. It seals in-request, so its balance gate and
+  // its burn price from one quote. What it loses is disclosure at PROPOSAL time, not binding.
+  const approveSrc = readFileSync(new URL("../netlify/functions/job-bridge-approve.mjs", import.meta.url), "utf8");
+  check("⭐⭐ job-bridge-approve seals in-request — its gate and its burn share one quote",
+    /sealBridgeQuote\(/.test(approveSrc) && /quoteToken,/.test(approveSrc));
   check("⭐⭐ …and the bound branch does NOT price — it opens the seal",
     /if \(step\.quoteToken\)/.test(actionsSrc) && /openBridgeQuote\(step\.quoteToken/.test(actionsSrc));
   // ⛔ THE FALLBACK THAT MUST NOT EXIST. If opening a token could fall through to pricing, "the
@@ -309,12 +416,15 @@ section("4 — ⛔ THE EXPIRY IS THE QUOTE'S OWN, BRANCHED ON ITS MODE");
   // `createContractExecutionTransaction` carrying `callData`; the approve is the one carrying an
   // `abiFunctionSignature`. Checking only "after the approve" would pass on a re-check placed after
   // the burn too, which would prove nothing at all.
-  const approveIdx = code.indexOf('abiFunctionSignature: "approve(address,uint256)"');
-  const recheckIdx = code.indexOf("boundFee?.reCheckExpiry");
-  const burnIdx = code.indexOf("contractAddress: BRIDGE_CONTRACT");
-  check("⭐⭐ the deadline is re-checked AFTER the approve and BEFORE the burn",
-    approveIdx > 0 && burnIdx > 0 && recheckIdx > approveIdx && recheckIdx < burnIdx,
-    `approve@${approveIdx} < recheck@${recheckIdx} < burn@${burnIdx}`);
+  // ⚠️ THERE IS NO SEPARATE APPROVE TO SIT AFTER ANY MORE. The approve and the burn ride in one
+  // userOp, so the ordering that mattered — and the standing-allowance window it guarded — are both
+  // gone. The re-check keeps a correct position (before the only submit) and it is still pinned;
+  // dropping the assertion because its old wording stopped applying would leave it unpinned.
+  const recheckIdx = code.indexOf("fee?.reCheckExpiry");
+  const submitIdx = code.indexOf("const brTx = await client.createContractExecutionTransaction");
+  check("⭐⭐ the deadline is re-checked BEFORE the only submit",
+    recheckIdx > 0 && submitIdx > 0 && recheckIdx < submitIdx,
+    `recheck@${recheckIdx} < submit@${submitIdx}`);
   check("⛔ …and no submission-margin literal was introduced instead of a second check",
     !/SUBMIT_MARGIN|submissionMargin|MARGIN_MS/.test(code));
 }

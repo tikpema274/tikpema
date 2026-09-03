@@ -227,7 +227,8 @@ section("6 — 🚨🚨 THE ASYMMETRY, DEMONSTRATED — why the branch is never 
 section("7 — THE SEAL: a source discriminator, two deadlines, and OUR amount binding");
 {
   const OWNER = "0xc54d47211997aca90ef4fcfbc742a3b511b4e621";
-  const selfFee = { maxFee: 54121n, amountMinor: 2_000_000n, feeUsdc: 0.054121, netUsdc: 1.945879 };
+  // ⚠️ `feeMinor`, not `maxFee` — the burn's own maxFee is EMPTY_MAX_FEE (0) under upfront fees.
+  const selfFee = { feeMinor: 54121n, amountMinor: 2_000_000n, feeUsdc: 0.054121, netUsdc: 2 };
   const NOW = RUN2.issuedAt * 1000; // ms, at issue
 
   // ── the self-issued path is unchanged ────────────────────────────────────────────────────────
@@ -302,7 +303,8 @@ section("7 — THE SEAL: a source discriminator, two deadlines, and OUR amount b
 section("8 — THE WINDOW SHOWN IS DERIVED, AND 120_000 IS NEVER TYPED");
 {
   const NOW = RUN2.issuedAt * 1000;
-  const selfFee = { maxFee: 54121n, amountMinor: 2_000_000n, feeUsdc: 0.054121, netUsdc: 1.945879 };
+  // ⚠️ `feeMinor`, not `maxFee` — the burn's own maxFee is EMPTY_MAX_FEE (0) under upfront fees.
+  const selfFee = { feeMinor: 54121n, amountMinor: 2_000_000n, feeUsdc: 0.054121, netUsdc: 2 };
   check("⭐ with no external quote the window is OUR TTL", quoteWindowMs(selfFee, NOW) === QUOTE_TTL_MS);
   // ⭐⭐ THE TIGHTER OF TWO REAL BOUNDS — computed from the quote, never typed.
   check("⭐⭐ with a Circle quote the window is THEIRS, because theirs is tighter",
@@ -339,42 +341,43 @@ section("8 — THE WINDOW SHOWN IS DERIVED, AND 120_000 IS NEVER TYPED");
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-section("9 — THE DEADLINE IS RE-CHECKED AFTER THE APPROVE, BEFORE THE BURN");
+section("9 — THE DEADLINE IS RE-CHECKED IMMEDIATELY BEFORE THE SUBMIT");
 {
   const src = readFileSync("netlify/functions/_bridge.mjs", "utf8");
-  // ⭐ ORDER IS THE PROPERTY. A re-check that ran before the approve would be the first check again.
-  const approveIdx = src.indexOf('abiFunctionSignature: "approve(address,uint256)"');
-  const recheckIdx = src.indexOf("boundFee?.reCheckExpiry");
-  const burnIdx = src.indexOf("// 2) The bridge call itself");
-  check("⭐⭐ the re-check sits AFTER the approve and BEFORE the burn",
-    approveIdx > 0 && recheckIdx > approveIdx && burnIdx > recheckIdx,
-    `approve@${approveIdx} < recheck@${recheckIdx} < burn@${burnIdx}`);
+  // ═══ 🚨 THIS SECTION USED TO ASSERT "AFTER THE APPROVE, BEFORE THE BURN" ══════════════════════
+  // There is no longer a separate approve to sit after. The approve and the burn ride in ONE
+  // userOp, so the ordering that mattered — and the standing-allowance window it guarded — are both
+  // gone. ⛔ THE CHECK IS REWRITTEN RATHER THAN DELETED: the re-check still has a correct position
+  // (immediately before the only submit), and dropping the assertion because its old wording stopped
+  // applying would leave the new position unpinned.
+  const recheckIdx = src.indexOf("fee?.reCheckExpiry");
+  const submitIdx = src.indexOf("const brTx = await client.createContractExecutionTransaction");
+  check("⭐⭐ the re-check runs BEFORE the only submit",
+    recheckIdx > 0 && submitIdx > 0 && recheckIdx < submitIdx,
+    `recheck@${recheckIdx} < submit@${submitIdx}`);
   check("⭐ the opener hands out a re-check bound to the SAME sealed payload",
     /reCheckExpiry: \(\) => openQuoteExpiry\(p, Date\.now\(\)\)/.test(src));
-  // ⛔ NO MARGIN LITERAL. A submission margin would be a number derived from two observations,
-  // on a money path, free to drift as approve latency changes.
+  // ⛔ NO MARGIN LITERAL, still.
   check("⛔ no submission-margin literal was introduced instead",
     !/SUBMIT_MARGIN|submissionMargin|MARGIN_MS/.test(src));
-  // ⚠️ The allowance question is NAMED, not silently left.
-  // ⚠️ COMMENT MARKERS STRIPPED BEFORE MATCHING, not just whitespace collapsed. These phrases live
-  // in wrapped `//` blocks, so a re-wrap drops a `//` into the middle of the sentence and the regex
-  // stops matching text that is still there — the false-alarm shape the copy guards record.
-  const prose = (f) => readFileSync(f, "utf8").replace(/^\s*(\/\/|\*)\s?/gm, " ").replace(/\s+/g, " ");
-  check("⚠️ the standing-allowance question is named as the next step's, not quietly skipped",
-    /allowance hygiene decision belongs with whoever moves the approve/.test(prose("netlify/functions/_bridge.mjs")));
 
-  // ⭐ AND IT ACTUALLY REFUSES. Behavioural, not a source read: an opened quote whose window has
-  // passed by the time the re-check runs must throw.
+  // ⭐⭐ AND THE REASON THE OLD WINDOW IS GONE IS ASSERTED, not merely implied by the code shape.
+  const prose = src.replace(/^\s*(\/\/|\*)\s?/gm, " ").replace(/\s+/g, " ");
+  check("⭐⭐ the re-check says WHY it now costs nothing when it fires",
+    /the window it used to guard is now gone/i.test(prose));
+
+  // ⭐ AND IT ACTUALLY REFUSES — behavioural, not a source read.
   const OWNER = "0xc54d47211997aca90ef4fcfbc742a3b511b4e621";
   const NOW = RUN2.issuedAt * 1000;
-  const fee = { maxFee: 54121n, amountMinor: 2_000_000n, feeUsdc: 0.054121, netUsdc: 1.945879, quote: RUN2 };
+  const fee = { feeMinor: 54121n, amountMinor: 2_000_000n, feeUsdc: 0.054121, netUsdc: 2, quote: RUN2 };
   const tok = sealBridgeQuote({ owner: OWNER, destinationKey: "base", amountUsdc: 2, fee, now: NOW });
   const bound = openBridgeQuote(tok, { owner: OWNER, destinationKey: "base", amountUsdc: 2, now: NOW + 1000 });
   check("⭐ the opened quote carries a callable re-check", typeof bound.reCheckExpiry === "function");
-  // The real quote's deadline is long past in wall-clock terms, so a re-check against Date.now()
-  // refuses — which is the behaviour a slow approve would produce on a live quote.
   check("⭐⭐ …and re-checking it against the CURRENT clock REFUSES, where the first check passed",
     threw(() => bound.reCheckExpiry())?.code === "expired");
+  // ⭐ The re-opened quote carries the signed bytes, so the burn needs no second quote.
+  check("⭐⭐ …and it carries the SIGNED QUOTE, so the burn never re-requests one",
+    bound.quote?.signedQuote === RUN2.signedQuote && bound.feeMinor === 54121n);
 }
 
 console.log(`\n${fail ? "❌ FAILURES" : "✅ ALL GREEN"}   pass ${pass} / fail ${fail}\n`);

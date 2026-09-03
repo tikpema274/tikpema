@@ -12,6 +12,9 @@
 //   • TxPendingError yields burn_pending (no burnHash) — honest incompleteness
 //   • ownership / status / proposal / cap preconditions all refuse before any execution
 import { mock } from "node:test";
+// ⚠️ job-bridge-approve now SEALS the quote it fetched, so the seal secret must exist. Set here
+// rather than mocked, because the sealing is real code under test — only the network is faked.
+process.env.SESSION_SECRET ||= ["bridge","approve","suite","not","a","credential"].join("-");
 
 // ⭐⭐ SPREAD THE REAL MODULE, OVERRIDE ONLY WHAT THIS SUITE NEEDS. An explicit namedExports
 // list breaks every time _agent-wallets gains an export — it has now done so TWICE
@@ -83,7 +86,24 @@ mock.module("../netlify/functions/_actions.mjs", {
 // What this file still proves (and is worth keeping): the APPROVE TRUST BOUNDARY — that every
 // client-supplied field is ignored in favour of the server-authored proposal, that the lock is
 // in place before executeAction runs, and that canonicalReport is never mutated.
-globalThis.fetch = async () => ({ ok: true, json: async () => ({}) });
+// ═══ ⚠️ THE ENDPOINT NOW FETCHES A QUOTE, SO A BARE {} IS NOT AN ANSWER ═══════════════════════
+// The balance gate requires `amount + fee` from the SAME quote whose signedQuote is submitted, so
+// job-bridge-approve fetches and seals one in-request. An empty JSON body made `bridgeFee` throw on
+// its own validation and the endpoint returned 409 — a refusal for a reason this suite is not about.
+const FAR_DEADLINE = 4102444800;
+globalThis.fetch = async (url) => {
+  if (String(url).includes("/v2/quote/burn/")) {
+    return { ok: true, status: 200, json: async () => ({
+      signedQuote: "0x01" + "00".repeat(31) + "20" + "00"
+        + BigInt(FAR_DEADLINE).toString(16).padStart(62, "0") + "ab".repeat(32),
+      issuedAt: FAR_DEADLINE - 120,
+      expiry: { mode: "TIMESTAMP", expiresAt: FAR_DEADLINE },
+      feeTotalAmount: "54129",
+      feeToken: "0x3600000000000000000000000000000000000000",
+    }) };
+  }
+  return { ok: true, json: async () => ({}) };
+};
 
 const { handler } = await import("../netlify/functions/job-bridge-approve.mjs");
 

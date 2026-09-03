@@ -236,13 +236,15 @@ export async function handler(event) {
             priceUnavailable: true,
           });
         }
-        // Fee-floor at PLAN time — refuse to propose a bridge where nothing would arrive,
+        // Fee-floor at PLAN time — refuse to propose a bridge that costs more to move than it
+        // moves. ⚠️ It used to say "where nothing would arrive"; under upfront fees the recipient
+        // receives the FULL amount, so that mechanism is no longer what this refuses.
         // rather than letting the user confirm and be refused at execution.
-        if (fee.maxFee >= fee.amountMinor) {
+        if (fee.feeMinor >= fee.amountMinor) {
           return json(200, {
             executed: false,
             decision,
-            blocked: `step ${i + 1}: amount too small — the fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC (≥ your ${amt} USDC), so nothing would arrive`,
+            blocked: `step ${i + 1}: the fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC — as much as or more than the ${amt} USDC being moved. The full ${amt} would arrive, but it would cost ~${(amt + fee.feeUsdc).toFixed(4)} USDC to move it`,
           });
         }
         const band = bridgeFeeBand({ amountUsdc: amt, feeUsdc: fee.feeUsdc, netUsdc: fee.netUsdc });
@@ -398,11 +400,11 @@ export async function handler(event) {
       } catch (e) {
         return json(200, { executed: false, decision, blocked: `cannot price bridge to ${dest.label}: ${e.message}` });
       }
-      if (fee.maxFee >= fee.amountMinor) {
+      if (fee.feeMinor >= fee.amountMinor) {
         return json(200, {
           executed: false,
           decision,
-          blocked: `amount too small — the bridge fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC right now, so ${amount} USDC wouldn't cover it (nothing would arrive)`,
+          blocked: `the bridge fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC right now — as much as or more than the ${amount} USDC you are moving. The full ${amount} would arrive, but you would pay ~${(amount + fee.feeUsdc).toFixed(4)} USDC to move it`,
         });
       }
       // The band, computed by the SAME helper the execution gate uses. The quote carries

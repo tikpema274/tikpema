@@ -14,6 +14,9 @@
 // To make CASE 3 as strong as a stub allows, the stubbed fetch is not a no-op: it invokes
 // the REAL verifier handler in-process, so we observe the trigger actually reaching it.
 import { mock } from "node:test";
+// ⚠️ job-bridge-approve now SEALS the quote it fetched, so the seal secret must exist. Set here
+// rather than mocked, because the sealing is real code under test — only the network is faked.
+process.env.SESSION_SECRET ||= ["bridge","approve","suite","not","a","credential"].join("-");
 
 // ⭐⭐ SPREAD THE REAL MODULE, OVERRIDE ONLY WHAT THIS SUITE NEEDS. An explicit namedExports
 // list breaks every time _agent-wallets gains an export — it has now done so TWICE
@@ -70,11 +73,32 @@ globalThis.fetch = async (url, init) => {
 };
 
 // Verifier's own network reads: IRIS says minted; chain verification passes.
+// ═══ 🚨 SPREAD THE REAL MODULE, THEN OVERRIDE — A PARTIAL MOCK FAILS AT INSTANTIATION ══════════
+// This listed three exports by hand. `job-bridge-approve.mjs` then grew imports of `bridgeFee`,
+// `sealBridgeQuote` and `bridgeDebitMinor`, and the suite died with
+// `does not provide an export named 'bridgeDebitMinor'` — BEFORE any assertion ran, so it did not
+// go red on a claim, it stopped loading.
+// ⛔ ADDING THE THREE MISSING NAMES WOULD FIX TODAY AND BREAK ON THE NEXT EXPORT. Spreading the real
+// module means only the behaviour actually being faked is faked, and a new export arrives working.
+// ⚠️ Importing `_bridge.mjs` is safe here: it imports `circle`/`publicClient` at module scope but
+// does not CALL them, so no credential is needed to load it.
+const REAL_BRIDGE = await import("../netlify/functions/_bridge.mjs");
 mock.module("../netlify/functions/_bridge.mjs", {
   namedExports: {
+    ...REAL_BRIDGE,
     BRIDGE_DESTINATIONS: { base: { label: "Base (Sepolia)", cctpDomain: 6, explorerTx: "https://sepolia.basescan.org/tx/" } },
     bridgeMintStatus: async () => ({ state: "minted", mintTxHash: "0x" + "7f".repeat(32), mintTx: "https://sepolia.basescan.org/tx/0x7f" }),
     resolveDestination: (n) => (String(n).toLowerCase() === "base" ? { key: "base", label: "Base (Sepolia)", cctpDomain: 6 } : null),
+    // ⭐ The quote fetch is faked, not the sealing: job-bridge-approve seals in-request now, and the
+    // seal is real code under test rather than a network dependency.
+    bridgeFee: async ({ amountUsdc }) => ({
+      amountMinor: BigInt(Math.round(amountUsdc * 1e6)), feeMinor: 54_129n,
+      feeUsdc: 0.054129, netUsdc: amountUsdc,
+      quote: { signedQuote: "0x01" + "00".repeat(31) + "20" + "00"
+        + BigInt(4102444800).toString(16).padStart(62, "0") + "ab".repeat(32),
+        issuedAt: 4102444680, expiry: { mode: "TIMESTAMP", expiresAt: 4102444800 },
+        feeTotalAmount: "54129", feeToken: "0x3600000000000000000000000000000000000000" },
+    }),
   },
 });
 mock.module("../netlify/functions/_receipt.mjs", {

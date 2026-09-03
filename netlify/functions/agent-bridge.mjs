@@ -68,8 +68,15 @@ export async function handler(event) {
     let fee;
     try { fee = await bridgeFee({ amountUsdc: amount, cctpDomain: dest.cctpDomain }); }
     catch (e) { return json(200, { outcome: "quote_failed", executed: false, quoted: false, blocked: `cannot price bridge to ${dest.label}: ${e.message}` }); }
-    if (fee.maxFee >= fee.amountMinor) {
-      return json(200, { outcome: "quote_failed", executed: false, quoted: false, blocked: `amount too small — the bridge fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC right now (≥ your ${amount} USDC), so nothing would arrive` });
+    // ⚠️ SAME THRESHOLD, DIFFERENT CLAIM — see the fee-floor in _actions.mjs. Under upfront fees the
+    // recipient receives the FULL amount, so a fee above the amount no longer means "nothing would
+    // arrive"; it means the move costs more than it moves. The wording must not keep asserting a
+    // mechanism that stopped being true.
+    if (fee.feeMinor >= fee.amountMinor) {
+      return json(200, { outcome: "quote_failed", executed: false, quoted: false, blocked:
+        `the fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC — as much as or more than the ` +
+        `${amount} USDC you are moving. The full ${amount} would still arrive, but you would pay ` +
+        `~${(amount + fee.feeUsdc).toFixed(4)} USDC to move it.` });
     }
     // ⚠️ The band is returned so the panel can escalate at 10%/25% EXACTLY as before. The
     // thresholds are untouched; only the moment the figure appears has changed.

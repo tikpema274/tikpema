@@ -52,6 +52,7 @@ export type BridgeReceiptView = {
     feeReconciledUsdc?: number | null;
   } | null;
   amountDelivered?: number | null;
+  debitDisclosed?: number | null;
   delivery?: string;
   destinationKey?: string | null;
   destinationLabel?: string | null;
@@ -219,11 +220,20 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
           determined. Nothing has been observed leaving your wallet.
         </span>
       )}
+      {/* ⭐⭐ "ESTIMATED N TO ARRIVE" WAS AN ESTIMATE BECAUSE THE FEE CAME OUT OF THE AMOUNT.
+          Under upfront fees the fee is charged on the source and the recipient receives the FULL
+          amount, so the arrival is no longer an arithmetic guess — it is the amount that was
+          requested. ⚠️ The word "estimated" stays for the older, deducted receipts, whose
+          `netPredicted` genuinely was amount − fee; it is the RECORD that says which mechanic
+          applied, not this component, so both must render truthfully from the same field. */}
       {r.state === "burn_confirmed" && (
         <span>
           {usdc(r.netPredicted)
             ? <>in flight — <b>estimated</b> {usdc(r.netPredicted)} USDC to arrive</>
             : <>in flight — the Arc burn is confirmed; <b>the estimated arrival amount was not recorded</b></>}
+          {r.debitDisclosed != null && (
+            <span className="sub"> · {usdc(r.debitDisclosed)} USDC left your wallet</span>
+          )}
         </span>
       )}
       {/* ═══ ⭐⭐ THE FEE, AND THE GAP BETWEEN SHOWN AND CHARGED ═══════════════════════════════

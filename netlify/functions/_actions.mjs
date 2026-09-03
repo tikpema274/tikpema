@@ -23,7 +23,7 @@ const VALID_TOKENS = SWAP_TOKENS.map((t) => t.toUpperCase());
 
 // USD value of a step, for cap math. Transfer/pay are face USDC; a swap is the
 // USD value of its input token (EURC != $1, so value, not units).
-export async function valueOfStep(step) {
+export async function valueOfStep(step, resolved = {}) {
   const type = step?.type;
   if (type === "transfer_usdc") return Number(step.amountUsdc);
   if (type === "pay_for_service") return Number(step.payAmountUsdc);
@@ -43,9 +43,41 @@ export async function valueOfStep(step) {
     // tokenIn is USDC, and nothing in the record says which token it was.
     return await valueInUsdc({ token: String(step.tokenIn).toUpperCase(), amount: Number(step.amountIn) });
   }
-  // A bridge moves its full face amount OFF Arc (the fee is deducted from it on
-  // the destination), so the full amount is what counts against the day-ceiling.
-  if (type === "bridge_usdc") return Number(step.amountUsdc);
+  // ═══ ⭐⭐ A BRIDGE COSTS THE WALLET `amount + fee` — AND THAT IS A DECISION, NOT ARITHMETIC ═════
+  //
+  // 🚨 THIS RETURNED `amountUsdc` ALONE, AND ITS OLD COMMENT IS WHY THAT WOULD HAVE STAYED
+  // INVISIBLE. It read: "A bridge moves its full face amount OFF Arc (the fee is deducted from it
+  // on the destination), so the full amount is what counts against the day-ceiling." That is a
+  // reasoned derivation, and it was correct — under the mechanic adoption INVERTS. ⛔ A wrong value
+  // with no comment invites a question; a wrong value with a correct-sounding derivation answers it
+  // in advance, and an auditor reading the ceiling would have moved on.
+  //
+  // ⛔ THE DEFECT IT WOULD HAVE PRODUCED IS MONEY-SAFETY, NOT COPY. Under upfront fees the wallet
+  // parts with `amount + fee`. Counting only the amount leaves THE DAY CEILING WIDER THAN
+  // CONFIGURED, BY THE FEE, ON EVERY BRIDGE — the same class as a lost ledger write.
+  //
+  // ── TAKEN: the cap and the ceiling bound THE WALLET DEBIT. ────────────────────────────────────
+  // The ceiling exists to bound what leaves the user's control, and under upfront fees the fee
+  // leaves it too. So the value is `amount + fee`.
+  //
+  // ── REJECTED: bounding the AMOUNT BRIDGED. ───────────────────────────────────────────────────
+  // It reads naturally for something called a "per-bridge limit", and it is defensible — a user
+  // asking "how much may I bridge at once" is asking about the amount. ⚠️ But it would let a
+  // volatile third-party fee widen the effective ceiling with nobody watching, which is the
+  // property a ceiling exists to deny. Both readings are written here because both are defensible
+  // and the next editor must know which was taken rather than re-deriving it.
+  //
+  // ⛔ FAIL CLOSED WITHOUT A FEE. The fee is resolved ONCE by the caller (from the sealed quote, or
+  // by quoting) and threaded in — never re-fetched here, which would be a second quote and a second
+  // figure. If it is absent we THROW rather than fall back to the amount: falling back is exactly
+  // the under-count above, and it must never be reachable by omission.
+  if (type === "bridge_usdc") {
+    const feeUsdc = Number(resolved?.bridgeFee?.feeUsdc);
+    if (!Number.isFinite(feeUsdc)) {
+      throw new Error("cannot value a bridge without its fee — the day ceiling bounds amount + fee");
+    }
+    return Number(step.amountUsdc) + feeUsdc;
+  }
   // A vault deposit commits its full face amount into the vault — counts in full against the
   // day-ceiling, like transfer/bridge.
   if (type === "vault_deposit") return Number(step.amountUsdc);
@@ -244,16 +276,6 @@ export async function executeAction(step, ctx) {
     }
   }
 
-  // Per-BRIDGE cap — cross-chain is the highest-stakes action (funds leave Arc),
-  // so it has its own bound, checked first (like the send cap) so an over-cap
-  // bridge returns the cap message rather than the day-ceiling one.
-  if (step.type === "bridge_usdc") {
-    const bcap = bridgeCapUsdc();
-    if (Number(step.amountUsdc) > bcap) {
-      return refuse(REFUSAL.PER_BRIDGE_CAP, `exceeds per-bridge limit of ${bcap} USDC`);
-    }
-  }
-
   // Per-VAULT-DEPOSIT cap — checked first (like send/bridge) so an over-cap deposit returns the
   // cap message rather than the day-ceiling one. amountUsdc is face USDC. vaultDepositCapUsdc()
   // is fail-closed: a garbled env THROWS here (nothing signs) — the same discipline as the other
@@ -274,12 +296,66 @@ export async function executeAction(step, ctx) {
   // A caller with NO session (the internal/autonomous path) still supplies its own
   // ctx.walletAddress, so there is no unowned spend either way.
 
+  // ═══ ⭐⭐ A BRIDGE IS PRICED BEFORE IT IS BOUNDED, BECAUSE ITS COST INCLUDES A FEE ═════════════
+  //
+  // The cap and the ceiling bound `amount + fee` (see valueOfStep), so the fee has to be known
+  // before either can be applied. It is resolved ONCE here and threaded into everything below —
+  // the valuation, the band, the calldata — so every figure comes from ONE quote.
+  //
+  // ⛔ THE TOKEN IS OPENED, NEVER TRUSTED AS DATA. `openBridgeQuote` verifies the HMAC and refuses a
+  // quote for a different owner, destination or amount, and it is PURE — no I/O — so opening it
+  // here costs nothing and cannot be a second read. A failure REFUSES; it never falls back to
+  // pricing, because a silent fallback turns "the figure you saw" into "some figure".
+  // ⚠️ NO TOKEN MEANS A FRESH QUOTE, AT EXECUTION. That is correct for a caller with no confirm
+  // step to bind from, and it is why the un-bound path cannot disclose a fee in advance.
+  const resolved = {};
+  let boundFee = null;
+  if (step.type === "bridge_usdc") {
+    const dest0 = resolveDestination(step.destination);
+    if (!dest0) return refuse(REFUSAL.SHAPE, `unsupported destination "${step.destination || ""}"`);
+    if (step.quoteToken) {
+      try {
+        boundFee = openBridgeQuote(step.quoteToken, {
+          owner: ctx.session?.address, destinationKey: dest0.key, amountUsdc: Number(step.amountUsdc) });
+      } catch (e) {
+        return { ok: false, blocked: `${e.message}`, quoteExpired: true };
+      }
+      resolved.bridgeFee = boundFee;
+    } else {
+      try {
+        resolved.bridgeFee = await bridgeFee({ amountUsdc: Number(step.amountUsdc), cctpDomain: dest0.cctpDomain });
+      } catch (e) {
+        return refuse(REFUSAL.CANNOT_VALUE, `cannot price bridge to ${dest0.label}: ${e.message}`);
+      }
+    }
+  }
+
   // Budget spine: per-day ceiling backstop (shared with research purchases).
   let dayValue;
   try {
-    dayValue = await valueOfStep(step);
+    dayValue = await valueOfStep(step, resolved);
   } catch (e) {
     return refuse(REFUSAL.CANNOT_VALUE, `cannot value step: ${e.message}`);
+  }
+
+  // ═══ Per-BRIDGE cap — AFTER valuation, for the same reason the SWAP cap is ════════════════════
+  // ⭐ It used to sit above, bounding `step.amountUsdc` directly. Under upfront fees that is not
+  // what the bridge costs: the fee is charged ON TOP, so bounding the raw amount would let a
+  // volatile third-party fee push the real debit past the cap while the check still passed.
+  // ⚠️ This is EXACTLY the swap cap's history — `amountIn` in EURC is not a USDC bound — and the
+  // remedy is the same: bound the valued quantity, not the typed one. It still runs BEFORE
+  // canSpendDay, so an over-cap bridge returns the CAP message rather than the day-ceiling one.
+  if (step.type === "bridge_usdc") {
+    const bcap = bridgeCapUsdc();
+    if (dayValue > bcap) {
+      return refuse(
+        REFUSAL.PER_BRIDGE_CAP,
+        `exceeds per-bridge limit of ${bcap} USDC — ${Number(step.amountUsdc)} USDC plus a ` +
+        `${Number(resolved.bridgeFee.feeUsdc).toFixed(6)} USDC fee is ${dayValue.toFixed(6)} USDC ` +
+        `leaving your wallet`,
+        { amountUsdc: dayValue },
+      );
+    }
   }
 
   // Per-SWAP cap. Unlike send/bridge (checked above, before valuation), this MUST run here —
@@ -441,43 +517,35 @@ export async function executeAction(step, ctx) {
   if (step.type === "bridge_usdc") {
     const dest = resolveDestination(step.destination);
     const amount = Number(step.amountUsdc);
-    // FEE-FLOOR refusal: the (volatile) forwarder fee is taken OUT of the amount.
-    // If it meets/exceeds the amount, the recipient nets ≤ 0 and the bridge is
-    // un-settleable — refuse BEFORE any funds move. This re-checks live at
-    // execution time (the fee may have moved since the proposal).
-    // ═══ ⭐⭐ A BOUND QUOTE IS OPENED, NOT RE-PRICED ═══════════════════════════════════════════
-    // When the caller confirmed against a figure, THAT figure bands, gates and gets signed.
-    // Re-reading here would reintroduce exactly the drift a confirm step exists to remove — the
-    // user accepts one number and burns another, across a human pause at a fee that moves ~30s.
-    // ⛔ The token is opened, never trusted as data: openBridgeQuote verifies the HMAC and refuses a
-    // quote for a different owner, destination or amount. A failure REFUSES; it never falls back to
-    // pricing, because a silent fallback turns "the figure you saw" into "some figure".
-    // ⚠️ NO TOKEN, NO BINDING — correct for callers with no confirm step (job-bridge-approve prices
-    // at approval and executes later). Those keep the live re-read they always had.
-    let fee, boundFee = null;
-    if (step.quoteToken) {
-      try {
-        boundFee = openBridgeQuote(step.quoteToken, { owner: ctx.session?.address, destinationKey: dest.key, amountUsdc: amount });
-      } catch (e) {
-        return { ok: false, blocked: `${e.message}`, quoteExpired: true };
-      }
-      fee = boundFee;
-    } else {
-      try {
-        fee = await bridgeFee({ amountUsdc: amount, cctpDomain: dest.cctpDomain });
-      } catch (e) {
-        return refuse(REFUSAL.CANNOT_VALUE, `cannot price bridge to ${dest.label}: ${e.message}`);
-      }
-    }
-    if (fee.maxFee >= fee.amountMinor) {
+    // ⭐ THE FEE WAS RESOLVED ONCE, ABOVE, AND IS REUSED HERE. It priced the cap and the ceiling and
+    // it prices the band and the burn — one quote, one figure, no second read. Re-resolving here
+    // would reintroduce exactly the drift the sealed quote exists to remove, one layer deeper.
+    const fee = resolved.bridgeFee;
+
+    // ═══ ⭐⭐ THE FEE-FLOOR — AND ITS OLD REASON IS NOW FALSE ═══════════════════════════════════
+    //
+    // 🚨 IT USED TO SAY "so nothing would arrive", AND UNDER UPFRONT FEES THAT IS WRONG. The fee is
+    // charged on the SOURCE, in addition to the amount, and the recipient receives the FULL amount
+    // — measured on Base Sepolia in PR-3, where a burn of 1 minor unit credited exactly 1. A bridge
+    // whose fee exceeds its amount now DELIVERS FINE; it is simply a terrible trade.
+    //
+    // ⭐ SO THE REFUSAL SURVIVES AND ITS REASON CHANGES. It is no longer "this cannot settle" — it
+    // is "this costs more to move than it moves". Same threshold, different claim, and the message
+    // must not keep asserting a mechanism that stopped being true.
+    // ⛔ A refusal that names a false mechanism is worse than none: it teaches the reader something
+    // wrong about where their money went, on the surface where they are deciding.
+    if (fee.feeMinor >= fee.amountMinor) {
       return {
         ok: false,
-        blocked: `amount too small — the bridge fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC right now (≥ your ${amount} USDC), so nothing would arrive`,
+        blocked:
+          `the fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC — as much as or more than the ` +
+          `${amount} USDC you are moving. The full ${amount} would still arrive, but you would pay ` +
+          `~${(amount + fee.feeUsdc).toFixed(4)} USDC to move it.`,
       };
     }
 
     // ── THE BAND GATE — disclosure alone is not consent ──────────────────────────────
-    // The floor above only fires when NOTHING would arrive. Between "covers the fee" and
+    // The floor above only fires when the fee is as large as the amount. Between that and
     // "worth doing" sits a gap where a bridge succeeds while most of the money becomes
     // fee (0.1 USDC → 53% gone, and it clears the floor). At/above the acknowledge band
     // we REFUSE until the caller returns the exact ackToken for the disclosure they saw —
@@ -493,7 +561,8 @@ export async function executeAction(step, ctx) {
           ok: false,
           blocked:
             `this bridge would lose ${pct}% to fees — the fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC ` +
-            `of your ${amount} USDC, so only ~${fee.netUsdc.toFixed(4)} would arrive. Confirm you accept that before it runs.`,
+            `on top of the ${amount} USDC you are moving — the full ${amount} arrives, and ` +
+            `~${(amount + fee.feeUsdc).toFixed(4)} USDC leaves your wallet. Confirm you accept that before it runs.`,
           // Threaded so the UI renders the disclosure and can return the ack — it never
           // re-derives the band from the two numbers.
           feeDisclosure: { ...bandInfo, destinationKey: dest.key, amountUsdc: amount, ackToken: expected },
@@ -517,10 +586,16 @@ export async function executeAction(step, ctx) {
     // satisfy. The executor hands the facts outward; the boundary decides what to persist.
     let r;
     try {
-      // ⭐ THE BOUND FEE REACHES THE CALLDATA. With a token, agentBridge signs THIS maxFee rather
-      // than pricing again — what makes "the figure shown is the figure charged" true rather than
-      // approximately true. Without one it prices as before.
-      r = await agentBridge({ walletAddress, destination: dest.key, amountUsdc: amount, fee: boundFee ?? undefined });
+      // ⭐ THE RESOLVED FEE REACHES THE CALLDATA — the same object the cap, the ceiling and the band
+      // were computed from. Its `signedQuote` is what the contract enforces the fee against, so
+      // "the figure shown is the figure charged" is now true by the chain's own assert, not only by
+      // our threading. ⚠️ `boundFee` is passed so agentBridge can re-check the quote's deadline.
+      // ⛔ THE RESOLVED FEE IS PASSED ALWAYS, BOUND OR NOT. It used to pass `boundFee ?? undefined`,
+      // which let agentBridge fetch its OWN quote on the un-bound path — a SECOND quote, seconds
+      // after the one that priced the cap and the ceiling, and it is the second one whose
+      // `signedQuote` would have been submitted. The gates would have bounded one quote and the
+      // chain enforced another.
+      r = await agentBridge({ walletAddress, destination: dest.key, amountUsdc: amount, fee });
     } catch (e) {
       // Enrich and RETHROW — never swallow. The caller's error handling is unchanged;
       // it simply now has the disclosure attached if it wants to persist it.
@@ -556,7 +631,7 @@ export async function executeAction(step, ctx) {
         // a float back into minor units to compare it against a chain log. It is taken from the
         // object `feeDisclosed` came from, not re-derived — a second source would be free to drift
         // from the figure the band gate actually evaluated.
-        feeDisclosedMinor: String(fee.maxFee),
+        feeDisclosedMinor: String(fee.feeMinor),
         netUsdc: null,
         feeBand: bandInfo.band,
         ackRequired: bandInfo.band === "acknowledge",
@@ -592,7 +667,7 @@ export async function executeAction(step, ctx) {
       // The post-burn fee reconciliation compares against a chain log, which is in minor units;
       // carrying the quote's BigInt means that comparison never converts a float, and never has to
       // decide what to do about a rounding it could not perform exactly.
-      feeDisclosedMinor: String(fee.maxFee),
+      feeDisclosedMinor: String(fee.feeMinor),
       netUsdc: r.netUsdc,         // pairs with feeCharged
       recipient: r.recipient,
       // ⭐⭐ WHO PAID — AND IT IS NOT `owner`. The spender is the caller's SCA, not the session

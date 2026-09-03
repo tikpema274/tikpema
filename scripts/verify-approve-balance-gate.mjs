@@ -47,7 +47,32 @@ mock.module("../netlify/functions/_actions.mjs", {
     },
   },
 });
-globalThis.fetch = async () => ({ status: 202, ok: true }); // verifier trigger, swallowed
+// ═══ ⭐⭐ THE GATE NOW QUOTES, SO THE MOCK MUST ANSWER A QUOTE ═════════════════════════════════
+// The balance gate requires `amount + fee` from the SAME quote whose `signedQuote` is submitted, so
+// this endpoint fetches and seals one in-request. A bare 202 for every fetch made `bridgeFee` throw
+// ("res.json is not a function") and the gate returned 409 — a refusal for the wrong reason, which
+// looked exactly like the 402 not firing.
+// ⚠️ THE FEE IS A FIXTURE AND IT IS DELIBERATELY LARGE ENOUGH TO MATTER: 0.054129 on a 10 USDC
+// bridge moves the requirement to 10.054129, which is the whole point of the change. A fee of 0
+// would let every assertion below pass under the OLD rule too.
+// ⚠️ The endpoint now SEALS the quote it fetched, so the seal secret must exist. Set before the
+// module is imported — `quoteSecret()` reads it at call time, but nothing here should depend on that.
+process.env.SESSION_SECRET ||= ["approve", "balance", "gate", "suite", "not", "a", "credential"].join("-");
+const QUOTE_FEE_MINOR = 54_129n;
+const FAR_DEADLINE = 4102444800;
+const SIGNED_QUOTE = "0x01" + "00".repeat(31) + "20"
+  + "00" + BigInt(FAR_DEADLINE).toString(16).padStart(62, "0") + "ab".repeat(32);
+globalThis.fetch = async (url) => {
+  if (String(url).includes("/v2/quote/burn/")) {
+    return { ok: true, status: 200, json: async () => ({
+      signedQuote: SIGNED_QUOTE, issuedAt: FAR_DEADLINE - 120,
+      expiry: { mode: "TIMESTAMP", expiresAt: FAR_DEADLINE },
+      feeTotalAmount: QUOTE_FEE_MINOR.toString(),
+      feeToken: "0x3600000000000000000000000000000000000000",
+    }) };
+  }
+  return { status: 202, ok: true }; // verifier trigger, swallowed
+};
 
 const { handler } = await import("../netlify/functions/job-bridge-approve.mjs");
 
@@ -72,7 +97,16 @@ console.log("CASE 1: balance 6.30 < amount 10 → clean 402, NO burn (the #15534
   await seed(10); balanceMinor = usdc(6.30); execCalls = 0;
   const { status, body } = parse(await call());
   check("HTTP 402", status === 402, `got ${status}`);
-  check("need == 10", body.need === 10);
+  // ⭐⭐ THE REQUIREMENT IS amount + fee NOW, AND THAT IS THE CHANGE THIS CASE EXISTS TO PIN.
+  // 🚨 The comment it replaced said "REQUIRED = amount, NO BUFFER — the fee comes out of the MINTED
+  // side, not the wallet". That was a correct derivation of the mechanic upfront fees INVERT: the
+  // fee is charged on the SOURCE, so the wallet parts with both and a gate requiring only the
+  // amount would pass a wallet that cannot pay — putting back the INSUFFICIENT_TOKEN revert this
+  // gate exists to prevent.
+  check("⭐⭐ need == amount + fee, not amount", body.need === 10 + Number(QUOTE_FEE_MINOR) / 1e6,
+    `${body.need} (fee ${Number(QUOTE_FEE_MINOR) / 1e6})`);
+  check("🚨 …and it is STRICTLY MORE than the amount — the old rule would have said 10",
+    body.need > 10, `${body.need} > 10`);
   check("have == 6.3", body.have === 6.3);
   check("walletAddress present", body.walletAddress === OWNER);
   check("executeAction NEVER called (no burn submitted)", execCalls === 0, `calls=${execCalls}`);
@@ -84,7 +118,11 @@ console.log("CASE 1: balance 6.30 < amount 10 → clean 402, NO burn (the #15534
   // ⭐ RE-PINNED TO THE PROPERTY, NOT THE FORMAT: both figures appear, at the token's full 6-dp
   //    precision, and the printed pair still reads as a genuine shortfall.
   const shown = body.error || "";
-  check("message names have+need", /Have 6\.300000 USDC, need 10\.000000/.test(shown), shown);
+  check("message names have+need", /Have 6\.300000 USDC, need 10\.054129/.test(shown), shown);
+  // ⭐ AND IT NAMES THE FEE SEPARATELY. "need 10.054129" against a 10 USDC bridge reads as an error
+  // unless the fee is visible beside it — the reader must be able to see where the extra came from.
+  check("⭐⭐ …and the message breaks the requirement into amount + fee",
+    /10 to bridge plus a 0\.054129 USDC fee/.test(shown), shown);
   const nums = [...shown.matchAll(/(\d+\.\d+)/g)].map((m) => Number(m[1]));
   check("⭐⭐ …and the printed pair does NOT read as sufficient — have < need on the SHOWN figures",
     nums.length >= 2 && nums[0] < nums[1], `${nums.join(" vs ")}`);
@@ -99,11 +137,27 @@ console.log("\nCASE 2: balance 25.00 >= amount 10 → proceeds to execution (fun
   check("receipt burn_confirmed", (await deliv.get("job-1")).receipt.state === "burn_confirmed");
 }
 
-console.log("\nCASE 3: balance 10.00 == amount 10 → proceeds (>= inclusive; sponsored gas)");
+// ═══ ⭐⭐ THE BOUNDARY MOVED WITH THE REQUIREMENT, AND BOTH SIDES OF IT ARE PINNED ═══════════════
+// This used to seed exactly the AMOUNT and expect a pass. Under upfront fees the wallet must cover
+// `amount + fee`, so a balance of exactly the amount is now a SHORTFALL — and asserting only the
+// new pass case would leave the old boundary untested in the direction that matters.
+console.log("\nCASE 3a: balance 10.00 == amount but < amount + fee → 402 (the boundary that MOVED)");
 {
   await seed(10); balanceMinor = usdc(10); execCalls = 0;
   const { status, body } = parse(await call());
-  check("HTTP 200 executed:true (boundary is inclusive)", status === 200 && body.executed === true, `got ${status}`);
+  check("🚨 exactly the AMOUNT is no longer enough — the fee is charged on top",
+    status === 402, `got ${status}`);
+  check("  …and nothing was submitted", execCalls === 0, `calls=${execCalls}`);
+  check("⭐ …and the shortfall is only the fee, which the message must make visible",
+    /need 10\.054129/.test(body.error || "") && /plus a 0\.054129 USDC fee/.test(body.error || ""),
+    body.error);
+}
+
+console.log("\nCASE 3b: balance 10.054129 == amount + fee → proceeds (>= inclusive; sponsored gas)");
+{
+  await seed(10); balanceMinor = usdc(10) + QUOTE_FEE_MINOR; execCalls = 0;
+  const { status, body } = parse(await call());
+  check("HTTP 200 executed:true (boundary is inclusive at amount + fee)", status === 200 && body.executed === true, `got ${status}`);
   check("executeAction called at exact-balance", execCalls === 1, `calls=${execCalls}`);
 }
 

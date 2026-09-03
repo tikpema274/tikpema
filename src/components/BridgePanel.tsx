@@ -391,7 +391,7 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
       </div>
 
       {/* ── THE FEE BAND — disclosure, then explicit acceptance ─────────────────────────
-          The fee-floor only refuses when NOTHING would arrive. Between that and "worth
+          The fee-floor only refuses when the fee is as large as the amount. Between that and "worth
           doing" is a gap where the bridge succeeds and most of the money becomes fee:
           0.1 USDC to Base loses ~53%, and it clears the floor. A warning someone scrolls
           past is not consent, so at/above the acknowledge band the action stays DISABLED
@@ -433,13 +433,16 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
           {run.feeUsdc != null && (
             <>
               {" "}
-              {/* ⚠️ "quoted at execution" WAS TRUE AND IS NOT. The fee is now priced BEFORE the
-                  burn, sealed, and signed unchanged — so the figure here is the one the user was
-                  shown and accepted, not one read at the moment of execution. The fee itself is
-                  unchanged and still comes out of the amount; only the claim about WHEN it was
-                  priced was superseded. [[clear-on-transition-needs-a-terminal-state-that-reads-nothing]] */}
+              {/* ⚠️ THIS SENTENCE HAS BEEN WRONG TWICE, IN DIFFERENT HALVES, AND BOTH ARE FIXED HERE.
+                  First "quoted at execution" — the fee is priced BEFORE the burn, sealed, and signed
+                  unchanged, so the figure is the one the user accepted.
+                  🚨 Then "is taken out of the amount", which upfront fees INVERTED: the fee is
+                  charged on the SOURCE, in addition to the amount, and the recipient receives the
+                  FULL amount — measured on Base Sepolia, where a burn of 1 minor unit credited
+                  exactly 1. Saying it comes out of the amount understates what left the wallet by
+                  exactly the fee, on the confirmation screen. */}
               — a flat network fee of {Number(run.feeUsdc).toFixed(4)} USDC, the figure you
-              accepted, is taken out of the amount
+              accepted, charged on top: the full amount arrives
             </>
           )}
           .

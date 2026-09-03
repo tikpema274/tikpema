@@ -291,10 +291,16 @@ section("4b — 🚨🚨 THE feeDisclosedMinor BINDING — the inversion that is
   // 🚨 The two figures must come from ONE object, and the writer must not be free to pick a second
   // source. Asserted on source because the drift this catches is a future EDIT, not a runtime state.
   const actions = readFileSync("netlify/functions/_actions.mjs", "utf8");
-  const pairs = [...actions.matchAll(/feeDisclosed: ([\w.]+),[\s\S]{0,900}?feeDisclosedMinor: String\(([\w.]+)\.maxFee\)/g)];
+  // ⚠️ THE FIELD IT READS IS `feeMinor` NOW, NOT `maxFee` — and the rename is the point. Under
+  // upfront fees the burn's own `maxFee` is EMPTY_MAX_FEE (zero), so a fee object field named for it
+  // would be false; the quote's `feeTotalAmount` is the real charge. ⛔ THIS GUARD IS EXACTLY WHAT
+  // WOULD HAVE CAUGHT A HALF-DONE RENAME: if `feeDisclosed` and `feeDisclosedMinor` ever come from
+  // different objects, the receipt carries two figures for one quantity and the reconciliation
+  // reads `disclosed_incoherent` instead of a verdict.
+  const pairs = [...actions.matchAll(/feeDisclosed: ([\w.]+),[\s\S]{0,900}?feeDisclosedMinor: String\(([\w.]+)\.feeMinor\)/g)];
   check("⭐⭐ every `feeDisclosed` is written beside a `feeDisclosedMinor` from the SAME object",
     pairs.length === 2 && pairs.every(([, dec, min]) => dec.split(".")[0] === min),
-    pairs.map(([, dec, min]) => `${dec} ↔ ${min}.maxFee`).join(" · ") || "NO PAIRS FOUND — the scan is vacuous");
+    pairs.map(([, dec, min]) => `${dec} ↔ ${min}.feeMinor`).join(" · ") || "NO PAIRS FOUND — the scan is vacuous");
   // ⭐ And the writer persists it rather than dropping it on the floor.
   const rec = readFileSync("netlify/functions/_bridge-record.mjs", "utf8");
   check("⭐ …and the receipt writer persists it, cross-checking the pair as it goes",

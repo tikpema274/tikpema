@@ -126,6 +126,41 @@ const ALLOWANCE_ABI = [
   { type: "function", name: "allowance", stateMutability: "view", inputs: [{ name: "o", type: "address" }, { name: "s", type: "address" }], outputs: [{ type: "uint256" }] },
 ];
 
+/**
+ * TokenMessengerWithFees on Arc testnet — the upfront-fee entry point, and the new approve target.
+ * ⚠️ Also pinned in _fee-reconcile.mjs, which reads the fee back out of the burn's logs. The two
+ * are the same address for the same reason and are asserted equal by verify-fee-reconcile.
+ */
+export const TMWF = "0x8745D906D67C346E5eb1aEEED38Eb87F34DF0C0A";
+
+const TMWF_ABI = [{
+  name: "depositForBurnWithFees", type: "function", stateMutability: "payable", outputs: [],
+  inputs: [
+    { name: "amount", type: "uint256" }, { name: "destinationDomain", type: "uint32" },
+    { name: "mintRecipient", type: "bytes32" }, { name: "burnToken", type: "address" },
+    { name: "destinationCaller", type: "bytes32" },
+    { name: "claim", type: "tuple", components: [
+      { name: "signedQuote", type: "bytes" }, { name: "refundAddress", type: "address" }] },
+  ],
+}];
+
+const APPROVE_ABI = [{
+  name: "approve", type: "function", stateMutability: "nonpayable", outputs: [{ type: "bool" }],
+  inputs: [{ name: "spender", type: "address" }, { name: "value", type: "uint256" }],
+}];
+
+/**
+ * ⭐ The account's own batch entry point — `SingleOwnerMSCA`, selector `0x34fcd5be`, confirmed
+ * present in the deployed implementation's bytecode (impl `0xd206ac7f…9ec8`) and confirmed to match
+ * this encoding. `_checkAccessRuleFromEPOrAcctItself` permits `msg.sender == address(this)`, which
+ * is what makes the self-call below legal.
+ */
+const BATCH_ABI = [{
+  name: "executeBatch", type: "function", stateMutability: "payable", outputs: [{ type: "bytes[]" }],
+  inputs: [{ name: "calls", type: "tuple[]", components: [
+    { name: "target", type: "address" }, { name: "value", type: "uint256" }, { name: "data", type: "bytes" }] }],
+}];
+
 const toMinor = (usdc) => BigInt(Math.round(Number(usdc) * 10 ** USDC_DECIMALS));
 const toUsdc = (minor) => Number(minor) / 10 ** USDC_DECIMALS;
 
@@ -146,19 +181,53 @@ async function irisJson(url) {
 // then assertable in ONE place, against ONE definition, and a change to the mechanics breaks it
 // loudly instead of quietly agreeing with itself. [[duplicate-source-of-truth-is-the-recurring-bug]]
 //
-// 🚨 CIRCLE'S UPFRONT FEES (2026-09-02) WOULD INVERT THIS. Under `depositForBurnWithFees` the fee is
-// collected on the SOURCE chain IN ADDITION to the amount and the recipient receives the full
-// amount — so `netUsdc` would become `amount`, and every surface deriving "what arrives" from this
-// would be wrong by exactly the fee. Not adopted; see the ADOPTION BLOCKER on `openBridgeQuote`.
-export function bridgeNetUsdc({ amountMinor, maxFee }) {
+// ⭐⭐ ADOPTED 2026-09-03, AND THE INVERSION THIS COMMENT PREDICTED HAS HAPPENED. Under
+// `depositForBurnWithFees` the fee is collected on the SOURCE chain IN ADDITION to the amount, and
+// the recipient receives the FULL amount — observed on Base Sepolia in PR-3, where a burn of 1
+// minor unit credited exactly 1, not 1 − fee.
+//
+// ⛔ SO `netUsdc` IS NOW THE AMOUNT, AND THE FEE IS NOT SUBTRACTED ANYWHERE. Every surface that
+// derived "what arrives" from the old formula was wrong by exactly the fee the day this landed,
+// which is why the definition lives here alone and `verify-bridge-fee-band` imports it: that guard
+// asserted `net + fee === amount` precisely so this change could not be made quietly.
+//
+// ⚠️ THE FEE DID NOT MOVE OR CHANGE SIZE — IT MOVED WHERE IT IS CHARGED. Measured against our own
+// producer on 2026-09-03: the same route quoted 54121 minor either way. "Is it more expensive" is
+// not one of the open questions; "what does the recipient get" is, and the answer is now: all of it.
+export function bridgeNetUsdc({ amountMinor }) {
+  return toUsdc(BigInt(amountMinor));
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// ⛔ THE SELF-SIGNED PATH STAYS ON THE OLD MECHANICS — A DECISION, NOT AN OMISSION
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// The agent path moved to `depositForBurnWithFees`, where the approve and the burn ride in ONE
+// userOp so no allowance can ever stand alone. **A browser EOA cannot do that.** It signs one
+// transaction at a time, so migrating the self-signed path would mean a separate approve followed
+// by a separate burn — reintroducing, on the one path we cannot batch, exactly the standing
+// allowance to a single-key-upgradeable proxy that batching was chosen to eliminate.
+//
+// ⭐ SO IT KEEPS `bridgeWithPreapprovalAndHook`, where the fee is DEDUCTED FROM the amount, and it
+// keeps the pricing that mechanic needs. ⚠️ TWO FEE MECHANICS ARE THEREFORE LIVE AT ONCE, and that
+// is the thing to know before reading any "what arrives" figure: on the agent path the recipient
+// gets the FULL amount; on the self-signed path they get amount − fee. The two functions are named
+// for their mechanics rather than their callers so no surface can pick the wrong one by habit.
+//
+// 🚨 NOT A DUPLICATE OF `bridgeFee`. They price two different contracts with two different fee
+// models. Collapsing them into one function with a flag would be the real duplicate — one body
+// answering two questions, with the caller's flag deciding which answer is true.
+
+/** What the recipient nets when the fee is DEDUCTED from the burn (self-signed path only). */
+export function bridgeNetDeducted({ amountMinor, maxFee }) {
   return toUsdc(BigInt(amountMinor) - BigInt(maxFee));
 }
 
-// Live bridge fee for an amount to a destination domain, computed exactly as the
-// SDK does: providerFee (CCTP fast-burn, ~0 on testnet) + forwarderFee (the
-// relayer's destination-gas charge). maxFee is in USDC minor units. Throws if the
-// destination has no forwarding tier (route not bridgeable right now).
-export async function bridgeFee({ amountUsdc, cctpDomain }) {
+/**
+ * The self-signed path's price: providerFee (CCTP fast-burn) + forwarderFee, computed as the SDK
+ * does. `maxFee` here is a REAL calldata parameter — it is signed into
+ * `bridgeWithPreapprovalAndHook` — so unlike the agent path the name is true.
+ */
+export async function bridgeFeeDeducted({ amountUsdc, cctpDomain }) {
   const amountMinor = toMinor(amountUsdc);
   const [burn, fwd] = await Promise.all([
     irisJson(`${IRIS}/v2/burn/USDC/fees/${ARC_CCTP_DOMAIN}/${cctpDomain}`),
@@ -173,13 +242,91 @@ export async function bridgeFee({ amountUsdc, cctpDomain }) {
   const forwarderFee = BigInt(fwdTier.forwardFee.high);
   const maxFee = providerFee + forwarderFee;
   return {
-    amountMinor,
-    maxFee,
-    feeUsdc: toUsdc(maxFee),
-    netUsdc: bridgeNetUsdc({ amountMinor, maxFee }),
-    providerFeeUsdc: toUsdc(providerFee),
-    forwarderFeeUsdc: toUsdc(forwarderFee),
+    amountMinor, maxFee, feeUsdc: toUsdc(maxFee),
+    netUsdc: bridgeNetDeducted({ amountMinor, maxFee }),
+    providerFeeUsdc: toUsdc(providerFee), forwarderFeeUsdc: toUsdc(forwarderFee),
   };
+}
+
+/** The self-signed path's calldata — unchanged, against BridgingKitContract. */
+export function bridgeCallDataDeducted({ amountMinor, maxFee, recipient, cctpDomain }) {
+  const bridgeParams = {
+    amount: amountMinor, maxFee, fee: 0n,
+    mintRecipient: pad(getAddress(recipient), { size: 32 }),
+    destinationCaller: ZERO_HASH,
+    burnToken: CONTRACTS.USDC,
+    feeRecipient: BRIDGE_CONTRACT,
+    destinationDomain: cctpDomain,
+    minFinalityThreshold: FAST_FINALITY,
+  };
+  return encodeFunctionData({ abi: BRIDGE_ABI, functionName: "bridgeWithPreapprovalAndHook", args: [bridgeParams, FORWARD_HOOK] });
+}
+
+/**
+ * ═══ ⭐⭐ THE PRICE COMES FROM CIRCLE'S SIGNED QUOTE, NOT FROM THE IRIS FEE TIERS ═══════════════
+ *
+ * Under CCTP upfront fees the fee is not something we compute — it is quoted, signed, and enforced
+ * on chain. `depositForBurnWithFees` will not accept a fee we derived ourselves; it takes the
+ * signed quote and `assert`s that what the FeeManager collects equals what the quote said.
+ *
+ * ⛔ SO THE OLD ARITHMETIC IS GONE, NOT REFACTORED. It read two IRIS tier tables, picked the FAST
+ * tier, scaled `minimumFee` into a base fee and added a 10% buffer to match the SDK. Every line of
+ * that was OUR reconstruction of someone else's pricing, and none of it is authoritative any more.
+ * Keeping it as a cross-check would be a second source of truth for a number the chain enforces.
+ *
+ * ⭐ `feeMinor`, NOT `maxFee`. The old name came from the CCTP burn parameter it was signed into —
+ * and under upfront fees that parameter is `EMPTY_MAX_FEE`, hardcoded to ZERO and measured as zero
+ * on chain in run 2's `DepositForBurn`. A field called `maxFee` holding the real fee, beside a
+ * calldata `maxFee` of 0, is a name that is false wherever it is read.
+ *
+ * ⚠️ `minFinalityThreshold` IS NO LONGER OURS TO CHOOSE. `_inferParamsFromQuote` derives it from
+ * the quote — 2000 (SLOW) for a FORWARD-only quote — so `FAST_FINALITY` leaves the call entirely.
+ * ⛔ MINT_TIMING DOES NOT MOVE ON THIS. The single SLOW settlement we have measured was 11s, which
+ * is consistent with the existing copy; one observation is not a distribution and must not edit it.
+ *
+ * @returns {{amountMinor, feeMinor, feeUsdc, netUsdc, quote}} — `quote` is the verbatim response,
+ *          carrying `signedQuote`, `expiry` and `feeTotalAmount`. It travels with the fee so every
+ *          downstream figure comes from ONE quote and nothing re-reads.
+ */
+export async function bridgeFee({ amountUsdc, cctpDomain }) {
+  const amountMinor = toMinor(amountUsdc);
+  const res = await fetch(`${IRIS}/v2/quote/burn/usdc/${ARC_CCTP_DOMAIN}/${cctpDomain}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ amount: amountMinor.toString(), feeToken: CONTRACTS.USDC, requests: [{ type: "FORWARD" }] }),
+  });
+  if (!res.ok) throw new Error(`quote ${res.status} — destination is not available for forwarded bridging right now`);
+  const quote = await res.json();
+  // ⛔ THE FEE TOKEN IS CHECKED, NOT ASSUMED. We ask for the ERC-20 path because a gasless SCA
+  // cannot attach `msg.value`; a quote that came back priced in something else would produce a burn
+  // whose fee we cannot pay, and the failure would surface as an opaque revert after the approve.
+  if (String(quote?.feeToken ?? "").toLowerCase() !== CONTRACTS.USDC.toLowerCase()) {
+    throw new Error(`quote came back with feeToken ${quote?.feeToken} — expected Arc USDC`);
+  }
+  if (typeof quote?.signedQuote !== "string" || !/^\d+$/.test(String(quote?.feeTotalAmount ?? ""))) {
+    throw new Error("quote is missing a signedQuote or a feeTotalAmount");
+  }
+  const feeMinor = BigInt(quote.feeTotalAmount);
+  return {
+    amountMinor,
+    feeMinor,
+    feeUsdc: toUsdc(feeMinor),
+    netUsdc: bridgeNetUsdc({ amountMinor }),
+    quote,
+  };
+}
+
+/**
+ * ⭐⭐ WHAT THE WALLET ACTUALLY PARTS WITH — amount AND fee, in MINOR UNITS.
+ *
+ * ⛔ EXACT BY CONSTRUCTION, SO THERE IS NOTHING TO ROUND. Both operands are BigInt minor units from
+ * the SAME quote, and their sum is exact. The directional rule ("a required figure rounds UP")
+ * therefore applies only to what is RENDERED — see requiredAmount/availableAmount at the surfaces.
+ * ⚠️ A float version of this would need a rounding decision, and the safe direction (up) would then
+ * have to be argued at every call site. Not converting is strictly better than converting carefully.
+ */
+export function bridgeDebitMinor(fee) {
+  return BigInt(fee.amountMinor) + BigInt(fee.feeMinor);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════
@@ -412,7 +559,9 @@ export function sealBridgeQuote({ owner, destinationKey, amountUsdc, fee, now = 
     d: String(destinationKey),
     a: Number(amountUsdc),
     // ⭐ BigInts as strings — they are the values that reach the calldata.
-    m: fee.maxFee.toString(),
+    // ⚠️ `m` now holds the QUOTE'S fee (`feeMinor`), not a `maxFee`. The burn's own maxFee is
+    // EMPTY_MAX_FEE — zero — so a field named for it would be false wherever it is read.
+    m: fee.feeMinor.toString(),
     n: fee.amountMinor.toString(),
     f: Number(fee.feeUsdc),
     t: Number(fee.netUsdc),
@@ -524,12 +673,14 @@ export function openBridgeQuote(token, { owner, destinationKey, amountUsdc, now 
   // verify-bridge-fee-binding.
   if (p.a !== Number(amountUsdc)) throw new Error("bridge quote is for a different amount");
   return {
-    maxFee: BigInt(p.m), amountMinor: BigInt(p.n), feeUsdc: p.f, netUsdc: p.t, issuedAt: p.iat,
+    // ⭐ THE SAME SHAPE `bridgeFee` RETURNS, so `agentBridge` cannot tell a re-opened quote from a
+    // freshly fetched one — one code path, one set of field names, no branch on provenance.
+    feeMinor: BigInt(p.m), amountMinor: BigInt(p.n), feeUsdc: p.f, netUsdc: p.t, issuedAt: p.iat,
+    quote: p.sq ? { signedQuote: p.sq, expiry: { mode: p.xm, expiresAt: p.xe } } : null,
     // ⭐ CARRIED OUT so the caller can RE-CHECK immediately before the burn — see agentBridge. The
     // opener runs before an approve transaction; the deadline that matters is the one at the burn.
     quoteSource: p.qs === "circle" ? "circle" : "self",
     expiry,
-    signedQuote: typeof p.sq === "string" ? p.sq : null,
     // ⭐⭐ THE RE-CHECK, HANDED TO THE EXECUTOR. It asks the SAME question of the SAME sealed fields
     // against a FRESH clock, immediately before the burn — see the block in agentBridge. A closure
     // rather than a re-parse so there is one payload and one predicate; re-deriving the deadline
@@ -568,19 +719,70 @@ export function openQuoteExpiry(p, now = Date.now()) {
   return { mode: p.xm, expiresAtSec: p.xe, secondsLeft };
 }
 
-export function bridgeCallData({ amountMinor, maxFee, recipient, cctpDomain }) {
-  const bridgeParams = {
-    amount: amountMinor,
-    maxFee,
-    fee: 0n, // protocolFee
-    mintRecipient: pad(getAddress(recipient), { size: 32 }),
-    destinationCaller: ZERO_HASH, // any caller (the relayer) may claim
-    burnToken: CONTRACTS.USDC,
-    feeRecipient: BRIDGE_CONTRACT, // default (no custom fee)
-    destinationDomain: cctpDomain,
-    minFinalityThreshold: FAST_FINALITY,
-  };
-  return encodeFunctionData({ abi: BRIDGE_ABI, functionName: "bridgeWithPreapprovalAndHook", args: [bridgeParams, FORWARD_HOOK] });
+/**
+ * The burn call, in the shape the spike proved on real bytes (runs 1 and 2).
+ *
+ * ⭐ THE FORWARDING HOOK IS NOT AN ARGUMENT ANY MORE. It is requested in the QUOTE
+ * (`requests: [{type:"FORWARD"}]`) and travels inside `signedQuote`; the contract reads it from
+ * there. `FORWARD_HOOK` as a calldata constant is gone with the old entry point.
+ *
+ * ⚠️ NO `maxFee`, NO `minFinalityThreshold`. `_depositForBurn` hardcodes `EMPTY_MAX_FEE` and
+ * `_inferParamsFromQuote` derives the threshold from the quote — both measured on chain in run 2
+ * (`maxFee = 0`, `minFinalityThreshold = 2000`). Passing either would be inventing a parameter the
+ * function does not have.
+ */
+export function bridgeCallData({ amountMinor, recipient, cctpDomain, signedQuote, refundAddress }) {
+  return encodeFunctionData({
+    abi: TMWF_ABI,
+    functionName: "depositForBurnWithFees",
+    args: [
+      BigInt(amountMinor),
+      cctpDomain,
+      pad(getAddress(recipient), { size: 32 }),
+      CONTRACTS.USDC,
+      ZERO_HASH,                       // any caller (the relayer) may claim
+      { signedQuote, refundAddress: getAddress(refundAddress) },
+    ],
+  });
+}
+
+/**
+ * ═══ ⭐⭐⭐ THE APPROVE AND THE BURN, IN ONE userOp — AND THE ATOMICITY IS THE SAFETY PROPERTY ═══
+ *
+ * `executeBatch` loops `callWithReturnDataOrRevert`, so if the burn reverts the approve reverts
+ * with it. **Either both land or neither does, and no allowance ever stands alone.**
+ *
+ * ⛔ THAT IS THE WHOLE REASON THIS FUNCTION EXISTS. Sent as two sequential transactions, a burn that
+ * fails after a successful approve — a quote that expired in between, a revert, a timeout — leaves
+ * an `amount + fee` allowance standing to `TokenMessengerWithFees`, a UUPS proxy whose
+ * `_authorizeUpgrade` has an EMPTY BODY behind a single EOA (owner `0x3b61abee…`, nonce 237): no
+ * timelock, no notice. Splitting this back into two transactions silently reintroduces that window.
+ * 🚨 `verify-bridge-batch-atomicity.mjs` fails if the approve and the burn are ever submitted
+ * separately. It is not a style check — it is the guard on the reason this option was chosen.
+ *
+ * ⚠️ AND THE BATCH SHAPE IS VALIDATION-PROVEN, NOT SETTLEMENT-PROVEN. `estimateContractExecutionFee`
+ * showed the account accepts a self-targeted `executeBatch` and that Circle accepts a
+ * `contractAddress` equal to the wallet. It simulates; it does not settle. **No batched burn has
+ * ever landed on chain.** The first one is a pre-registered, unproven path — see
+ * `docs/batched-burn-preregistration.md` — and must be run as one, not assumed from the estimate.
+ */
+export function bridgeBatchCallData({ walletAddress, fee, recipient, cctpDomain }) {
+  const debit = bridgeDebitMinor(fee);
+  const approveData = encodeFunctionData({
+    abi: APPROVE_ABI, functionName: "approve", args: [getAddress(TMWF), debit],
+  });
+  const burnData = bridgeCallData({
+    amountMinor: fee.amountMinor, recipient, cctpDomain,
+    signedQuote: fee.quote.signedQuote, refundAddress: walletAddress,
+  });
+  return encodeFunctionData({
+    abi: BATCH_ABI,
+    functionName: "executeBatch",
+    args: [[
+      { target: getAddress(CONTRACTS.USDC), value: 0n, data: approveData },
+      { target: getAddress(TMWF), value: 0n, data: burnData },
+    ]],
+  });
 }
 
 // EXECUTOR — burn on Arc from the agent SCA. Returns after the Arc-side burn
@@ -594,79 +796,65 @@ export async function agentBridge({ walletAddress, destination, amountUsdc, reci
   const to = getAddress(recipient || walletAddress);
 
   // ═══ ⭐⭐ THE FEE IS ACCEPTED, NOT RE-READ, WHEN ONE IS BOUND ═══════════════════════════════════
-  // This used to call bridgeFee() unconditionally, which is why the fee the gate BANDED and the fee
-  // SIGNED into the calldata were two different quotes ~200 ms apart — the B≠C gap the receipt
-  // schema names with `feeDisclosed` / `feeCharged`. A confirm step that shows a figure has to bind
-  // it here or it is showing one number and burning another.
-  // ⛔ `boundFee` NEVER ORIGINATES WITH THE CLIENT. It comes from a sealed quote this server issued
-  // and re-opened (openBridgeQuote), so it is the server's own figure travelling by value.
-  // ⚠️ The un-bound path REMAINS, for callers with no confirm step to bind from — job-bridge-approve
-  // prices at approval and executes later, so re-reading is correct there.
-  const fee = boundFee ?? await bridgeFee({ amountUsdc, cctpDomain: dest.cctpDomain });
-  const callData = bridgeCallData({ amountMinor: fee.amountMinor, maxFee: fee.maxFee, recipient: to, cctpDomain: dest.cctpDomain });
+  // A confirm step that shows a figure has to bind it here or it is showing one number and burning
+  // another. ⛔ `boundFee` NEVER ORIGINATES WITH THE CLIENT — it comes from a sealed quote this
+  // server issued and re-opened, so it is the server's own figure travelling by value.
+  // ⚠️ The un-bound path re-quotes HERE, at execution. It cannot hold a quote across an approval
+  // because a quote's window is ~120s; what it loses is not the binding but the DISCLOSURE, which
+  // is why job-bridge-approve now seals in-request rather than executing un-bound.
+  // ⛔ NO FALLBACK PRICING. This used to read `boundFee ?? await bridgeFee(...)`, so a caller that
+  // forgot to pass a fee got a fresh quote silently — and under upfront fees that quote's
+  // `signedQuote` is what the CHAIN enforces the fee against, while the caller's gates had bounded a
+  // different one. A missing fee is now a refusal: the executor resolves it once and threads it.
+  const fee = boundFee;
+  if (!fee?.quote?.signedQuote) {
+    throw new Error("bridge fee carries no signed quote — refusing to burn without one");
+  }
+
+  // ═══ ⭐⭐⭐ RE-CHECK THE DEADLINE IMMEDIATELY BEFORE THE SUBMIT ══════════════════════════════════
+  // The opener judged the deadline before anything happened. This asks again, against a fresh
+  // clock, at the last moment we can still refuse for free.
+  // ⭐ AND THE WINDOW IT USED TO GUARD IS NOW GONE. When the approve was a separate transaction, a
+  // refusal here left a standing allowance; batching removed that, so this check now costs nothing
+  // when it fires. It stays because a burn past the deadline still REVERTS, and a revert costs gas
+  // and produces a failed receipt for a bridge that was never going to work.
+  if (fee?.reCheckExpiry) fee.reCheckExpiry();
 
   const client = circle();
 
-  // 1) Ensure allowance ≥ amount (on-chain approve — SCA-safe, no permit).
-  const allowance = await publicClient().readContract({
-    address: CONTRACTS.USDC,
-    abi: ALLOWANCE_ABI,
-    functionName: "allowance",
-    args: [getAddress(walletAddress), BRIDGE_CONTRACT],
-  });
-  if (allowance < fee.amountMinor) {
-    const apTx = await client.createContractExecutionTransaction({
-      walletAddress,
-      blockchain: ARC.blockchain,
-      contractAddress: CONTRACTS.USDC,
-      abiFunctionSignature: "approve(address,uint256)",
-      abiParameters: [BRIDGE_CONTRACT, fee.amountMinor.toString()],
-      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
-    });
-    // 🚨 TAG WHICH AWAIT STALLED. TxPendingError carries only a transaction id, and there are TWO
-    // awaits in this function — so downstream, `txId` alone cannot say whether it names an
-    // ALLOWANCE or a BURN. A reconcile job that assumed "burn" would read this transaction's
-    // txHash and write it as a burnHash: a fabricated money-movement record for a burn that was
-    // never submitted. ⭐ Nothing about the money moves here — an approve grants an allowance —
-    // so the honest downstream outcome for this one is "no burn exists and none is coming".
-    try {
-      await waitForTx(client, apTx.data?.id);
-    } catch (e) {
-      if (e?.name === "TxPendingError") e.stage = "approve";
-      throw e;
-    }
-  }
-
-  // ═══ ⭐⭐ RE-CHECK THE DEADLINE HERE — AFTER THE APPROVE, IMMEDIATELY BEFORE THE BURN ══════════
+  // ═══ ⭐⭐⭐ ONE userOp: approve + burn, ATOMIC ════════════════════════════════════════════════
   //
-  // `openBridgeQuote` judged the deadline BEFORE any transaction. Between there and here sits an
-  // approve: a separate transaction, submitted and awaited. On the upfront-fee path the quote's own
-  // window is ~120 seconds, and a burn submitted past it REVERTS — after the allowance has already
-  // been set.
+  // ⛔ THERE IS NO SEPARATE APPROVE TRANSACTION, AND THAT IS THE SAFETY PROPERTY — not a tidiness
+  // one. `executeBatch` loops `callWithReturnDataOrRevert`, so a reverting burn reverts the approve
+  // with it: **either both land or neither does, and no allowance ever stands alone.** Sent as two
+  // sequential transactions, any failure between them leaves `amount + fee` approved to
+  // `TokenMessengerWithFees` — a UUPS proxy whose `_authorizeUpgrade` has an EMPTY BODY behind a
+  // single EOA, no timelock, no notice. `verify-bridge-batch-atomicity.mjs` fails if these are ever
+  // split again.
   //
-  // ⭐ SO THE DEADLINE THAT MATTERS IS THE ONE AT THE BURN, AND IT IS CHECKED AT THE BURN. The
-  // alternative was a submission margin subtracted at the first check — a literal, derived from two
-  // observations, on a money path, free to drift as approve latency changes. A second check needs
-  // no constant at all and asks the question at the moment it is actually being asked.
+  // ⚠️ NO ALLOWANCE READ. The old path read `allowance()` to decide whether to approve; here the
+  // approve is unconditional and inside the batch. Reading first would be a round trip whose answer
+  // could not change what we submit — and an approve to the exact debit is consumed exactly by the
+  // burn, so a successful bridge leaves zero. (Measured: both real burn wallets read 0 to TMWF.)
   //
-  // ⚠️ WHAT HAPPENS TO THE ALLOWANCE WHEN THIS REFUSES IS **NOT SOLVED HERE**. A refusal after a
-  // successful approve leaves a standing allowance, and the approve TARGET is itself changing in
-  // the next step of this migration. Naming it so it is not discovered late: the allowance hygiene
-  // decision belongs with whoever moves the approve to TokenMessengerWithFees.
-  // ⛔ Refusing is still right: a reverted burn would leave the same allowance AND cost gas.
-  if (boundFee?.reCheckExpiry) boundFee.reCheckExpiry();
-
-  // 2) The bridge call itself (Arc burn + forwarding hook).
+  // ⛔ VALIDATION-PROVEN, NOT SETTLEMENT-PROVEN. `estimateContractExecutionFee` showed the account
+  // accepts a self-targeted `executeBatch` and that Circle accepts a `contractAddress` equal to the
+  // wallet. AN ESTIMATE SIMULATES; IT DOES NOT SETTLE. No batched burn has landed on chain. The
+  // first one is pre-registered (`docs/batched-burn-preregistration.md`) and must be run as the
+  // unproven path it is.
+  const callData = bridgeBatchCallData({ walletAddress, fee, recipient: to, cctpDomain: dest.cctpDomain });
   const brTx = await client.createContractExecutionTransaction({
     walletAddress,
     blockchain: ARC.blockchain,
-    contractAddress: BRIDGE_CONTRACT,
+    // ⭐ THE WALLET CALLS ITSELF. Circle wraps this as execute(SCA, 0, executeBatch([...])), and
+    // `_checkAccessRuleFromEPOrAcctItself` permits `msg.sender == address(this)`.
+    contractAddress: getAddress(walletAddress),
     callData,
     fee: { type: "level", config: { feeLevel: "MEDIUM" } },
   });
-  // The burn's own await — tagged for the same reason as the approve above. This is the ONLY
-  // stage whose eventual txHash is a real burn hash, which is exactly why it must be named
-  // rather than inferred from being "the one that usually times out".
+  // ⭐ ONE await, so there is no longer any ambiguity about WHICH one stalled. The stage tag stays
+  // because provisional records written by older deploys still carry it and the reconcile job
+  // refuses an untagged one — and because "burn" is now the only truthful value.
   let burnHash;
   try {
     burnHash = await waitForTx(client, brTx.data?.id);

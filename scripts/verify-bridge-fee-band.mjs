@@ -26,7 +26,7 @@
 process.env.SESSION_SECRET ||= "test-session-secret-0123456789abcdef";
 
 import { readFileSync, readdirSync } from "node:fs";
-import { bridgeFeeBand, bridgeAckToken, bridgeNetUsdc, FEE_BAND_WARN, FEE_BAND_ACKNOWLEDGE, FEE_BANDS, GATING_BANDS } from "../netlify/functions/_bridge.mjs";
+import { bridgeFeeBand, bridgeAckToken, bridgeNetUsdc, bridgeDebitMinor, FEE_BAND_WARN, FEE_BAND_ACKNOWLEDGE, FEE_BANDS, GATING_BANDS } from "../netlify/functions/_bridge.mjs";
 
 let pass = 0, fail = 0;
 const check = (label, cond, extra = "") => {
@@ -50,25 +50,43 @@ const minor = (usdc) => BigInt(Math.round(usdc * 1e6));
 // ADDITION to the amount, recipient receives the full amount) `netUsdc` becomes `amount` — and this
 // suite would have stayed GREEN through that, because both sides of its comparison were its own.
 // ⭐ So the input now comes from `bridgeNetUsdc`, the same function `bridgeFee` uses.
-const net = (amountUsdc) => bridgeNetUsdc({ amountMinor: minor(amountUsdc), maxFee: FEE_MINOR });
+const net = (amountUsdc) => bridgeNetUsdc({ amountMinor: minor(amountUsdc) });
 
 section("0 — ⭐⭐ WHAT `netUsdc` MEANS, asserted before anything is banded on it");
 {
-  // ⚠️ DERIVING FROM THE PRODUCER IS NOT ENOUGH ON ITS OWN. If the guard only imported the formula,
-  // a change to the mechanics would move BOTH sides together and every band check would still pass —
-  // trading one silent agreement for another. So the MEANING is pinned here, independently, as the
-  // invariant the mechanics assert: what arrives plus what is charged equals what was sent.
+  // ═══ 🚨🚨 THIS SECTION WENT RED ON THE UPFRONT-FEE COMMIT, WHICH IS WHY IT WAS BUILT ═══════════
+  //
+  // It used to assert `net + fee === amount` — "the fee comes OUT OF the amount" — and its own
+  // comment named the change that would invert it: "Under Circle's upfront fees (fee charged on the
+  // source chain IN ADDITION to the amount, recipient receives the full amount) `netUsdc` becomes
+  // `amount`". ⭐ THAT IS EXACTLY WHAT HAPPENED, AND THE GUARD CAUGHT IT. The old assertions are
+  // rewritten rather than relaxed: the meaning is still pinned independently of the producer, it is
+  // simply pinned to the mechanic that is now true.
+  //
+  // ⛔ THE POINT WAS NEVER THE FORMULA. A guard that recomputed `amount − fee` would have tested its
+  // own arithmetic and stayed green through the inversion. It is pinned to the MEANING — and the
+  // meaning changed, so the pin moved with a commit, deliberately, rather than drifting silently.
   for (const amt of [1.0, 0.4, 0.1, 0.054]) {
-    check(`⭐⭐ net + fee === amount at ${amt} USDC — the fee comes OUT OF the amount`,
-      Math.abs(net(amt) + FEE - amt) < 1e-9, `net=${net(amt)} fee=${FEE} amount=${amt}`);
+    check(`⭐⭐ net === amount at ${amt} USDC — the recipient receives the FULL amount`,
+      Math.abs(net(amt) - amt) < 1e-9, `net=${net(amt)} fee=${FEE} amount=${amt}`);
   }
   // ⭐ AND IT IS NOT A CONSTANT. A `net` that ignored its inputs would satisfy a single row.
   check("⭐ net MOVES with the amount — the derivation is not a fixed number",
     net(1.0) !== net(0.1) && net(1.0) > net(0.1), `${net(1.0)} vs ${net(0.1)}`);
-  check("⛔ …and it is STRICTLY LESS than the amount — the defining property that upfront fees " +
-    "would invert. If this goes red, `netUsdc` no longer means 'what arrives after the fee' and " +
-    "every surface rendering it as the arrival is wrong by exactly the fee.",
-    net(1.0) < 1.0 && net(0.1) < 0.1, `${net(1.0)}, ${net(0.1)}`);
+  // ⛔⛔ THE NEW DEFINING PROPERTY, AND ITS OWN TRIPWIRE. `net` must NEVER be less than the amount
+  // again: that would mean something re-introduced a deduction, and every surface rendering `net`
+  // as the arrival would be understating it by exactly the fee.
+  check("⛔⛔ net is NEVER less than the amount — a deduction reappearing is the failure to catch now",
+    [1.0, 0.4, 0.1, 0.054].every((a) => net(a) >= a - 1e-9),
+    "if this goes red, a fee is being subtracted somewhere and the arrival figure is too small");
+  // ⭐⭐ AND WHAT THE WALLET PAYS IS THE FIGURE THAT NOW CARRIES THE FEE. Without asserting it, the
+  // fee would vanish from every derived quantity: the amount arrives, the amount was requested, and
+  // nothing would relate the fee to either.
+  for (const amt of [1.0, 0.1]) {
+    check(`⭐⭐ the wallet debit is amount + fee at ${amt} USDC — where the fee now shows up`,
+      Math.abs(Number(bridgeDebitMinor({ amountMinor: minor(amt), feeMinor: BigInt(FEE_MINOR) })) / 1e6
+        - (amt + FEE)) < 1e-9);
+  }
 }
 
 section("1 — THE REAL ROWS THAT MOTIVATED THIS");
@@ -153,8 +171,17 @@ section("4 — THE GATE IS SERVER-SIDE AND FAIL-CLOSED");
     /owner: ctx\.session\?\.address/.test(actions) && !/owner: step\./.test(actions));
   check("  …and the refusal carries the disclosure so the UI need not re-derive it",
     /feeDisclosure: \{ \.\.\.bandInfo/.test(actions));
-  check("  …the fee-floor refusal is still separate and unchanged",
-    /fee\.maxFee >= fee\.amountMinor/.test(actions));
+  // ⚠️ THE FLOOR IS STILL A SEPARATE REFUSAL AND ITS THRESHOLD IS UNCHANGED — only the FIELD it
+  // reads was renamed (`maxFee` → `feeMinor`, because the burn's own maxFee is now zero) and only
+  // its REASON changed: under upfront fees the recipient receives the full amount, so a fee at or
+  // above the amount no longer means "nothing would arrive".
+  check("  …the fee-floor refusal is still separate, and still a different gate from the band",
+    /fee\.feeMinor >= fee\.amountMinor/.test(actions));
+  // ⛔ AND THE FALSE MECHANISM IS GONE FROM THE USER-FACING TEXT. A refusal that names a mechanism
+  // which stopped being true teaches the reader something wrong on the screen where they decide.
+  check("⛔ …and no refusal still claims 'nothing would arrive'",
+    !/nothing would arrive`/.test(actions),
+    "the recipient now receives the FULL amount — the fee is charged on top");
 
   const bridgeFn = readFileSync(new URL("../netlify/functions/agent-bridge.mjs", import.meta.url), "utf8");
   // ⚠️ ASSERTED BY INTENT, NOT BY THE EXACT DESTRUCTURE. This pinned the literal line

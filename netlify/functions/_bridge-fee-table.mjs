@@ -65,7 +65,19 @@ export function feeTableGroundingText(table) {
   return (
     `Tikpema's OWN measured bridge fee, per destination, fetched live from Circle IRIS ` +
     `(as of ${table.at}):\n${lines}\n` +
+    // ═══ 🚨🚨 THE ONE PLACE A FEE-MECHANICS CLAIM REACHES A MODEL AS FACT ═══════════════════════
+    // This sentence is handed to a model as grounding, and downstream it becomes generated prose no
+    // guard can read. So it is the ONE place the mechanic can be stated, and the one place it must
+    // be corrected when the mechanic changes.
+    // ⛔ IT SAID "It is taken out of the amount, so the recipient nets amount − fee." That was true
+    // and upfront fees INVERTED it: the fee is charged on the SOURCE, in addition to the amount, and
+    // the recipient receives the FULL amount — measured on Base Sepolia, where a burn of 1 minor
+    // unit credited exactly 1. Left unchanged, the model would have been handed a false fact and
+    // repeated it in its own words, where nothing could catch it.
+    // ⚠️ `verify-model-injected-claims` asserts BOTH this sentence and that `bridgeNetUsdc` agrees
+    // with it, precisely so the words and the arithmetic cannot drift apart.
     `This fee is FLAT with respect to the amount bridged — it is a destination-gas charge, not a ` +
-    `percentage. It is taken out of the amount, so the recipient nets amount − fee.`
+    `percentage. It is charged IN ADDITION to the amount on the source chain, so the recipient ` +
+    `receives the full amount and the sender's wallet pays amount + fee.`
   );
 }

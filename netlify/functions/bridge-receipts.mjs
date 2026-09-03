@@ -116,8 +116,17 @@ export async function handler(event) {
       // ⭐ DERIVED, NEVER STORED — so it cannot disagree with the fee it comes from. The disclosed
       // net is derived for the same reason, and covers the case where the signed quote is unknown
       // (a throw mid-flight) so `netPredicted` is null.
-      netDisclosed: (Number.isFinite(Number(r.amountRequested)) && typeof (r.feeDisclosed ?? r.feeUsdc) === "number")
-        ? Number(r.amountRequested) - (r.feeDisclosed ?? r.feeUsdc) : null,
+      // ⭐⭐ THE NET IS THE AMOUNT NOW. Under upfront fees the fee is charged on the SOURCE and the
+      // recipient receives the FULL amount, so subtracting the fee here would understate nothing and
+      // overstate everything: it would report an arrival smaller than the one the chain produces.
+      // ⚠️ Kept as a DERIVED field rather than deleted, because older receipts still carry the
+      // deducted mechanic and a reader comparing two receipts needs the same field on both.
+      netDisclosed: Number.isFinite(Number(r.amountRequested)) ? Number(r.amountRequested) : null,
+      // ⭐ AND WHAT LEFT THE WALLET, WHICH IS THE FIGURE THE OLD `netDisclosed` USED TO CARRY THE
+      // WEIGHT OF. Without it the fee disappears from the outcome entirely: the amount arrives, the
+      // amount was requested, and nothing on the receipt says the wallet paid more.
+      debitDisclosed: (Number.isFinite(Number(r.amountRequested)) && typeof (r.feeDisclosed ?? r.feeUsdc) === "number")
+        ? Number(r.amountRequested) + (r.feeDisclosed ?? r.feeUsdc) : null,
       delivery: r.delivery,
       amountDelivered: r.amountDelivered ?? null,
       mintTx: r.mintTx ?? null,

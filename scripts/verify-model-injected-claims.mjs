@@ -164,19 +164,28 @@ section("2 — 🚨 THE FEE-MECHANICS SENTENCE, asserted at the INPUT because th
 
   // ⛔ THE CLAIM ITSELF. This is the assertion that goes red the day the mechanics change — the only
   //    place this sentence can be caught, because downstream it becomes somebody's paraphrase.
-  ok("🚨🚨 the FEE-MECHANICS CLAIM is present and says the fee comes OUT OF the amount. " +
+  ok("🚨🚨 the FEE-MECHANICS CLAIM is present and says the fee is charged IN ADDITION. " +
     "If this goes red, the model is being handed a false fact and no other guard will see it: " +
     "the output is generated prose.",
-    /taken out of the amount/.test(rendered) && /nets amount − fee/.test(rendered), rendered);
+    /charged IN ADDITION to the amount/.test(rendered) && /receives the full amount/.test(rendered) &&
+    /pays amount \+ fee/.test(rendered), rendered);
+  // ⛔ AND THE SUPERSEDED CLAIM MUST BE GONE, not merely outranked by a newer sentence beside it.
+  // Two mechanics in one grounding block is worse than the wrong one alone: the model would pick.
+  ok("⛔ …and the OLD, now-false mechanic is absent — not left standing next to the new one",
+    !/taken out of the amount/.test(rendered) && !/nets amount − fee/.test(rendered), rendered);
 
   // ⭐ AND IT AGREES WITH THE PRODUCER. The sentence is a claim about `bridgeNetUsdc`; asserting the
   //   words alone would let the words and the arithmetic drift apart, which is the whole defect.
   const { bridgeNetUsdc } = await import("../netlify/functions/_bridge.mjs");
-  const net = bridgeNetUsdc({ amountMinor: 1_000_000n, maxFee: 53_196n });
-  ok("⭐⭐ …and the CODE still behaves the way the sentence says — net + fee === amount",
-    Math.abs(net + 0.053196 - 1.0) < 1e-9, `net=${net}`);
+  const net = bridgeNetUsdc({ amountMinor: 1_000_000n });
+  ok("⭐⭐ …and the CODE still behaves the way the sentence says — net === amount",
+    Math.abs(net - 1.0) < 1e-9, `net=${net}`);
+  // ⛔ THE DRIFT GUARD, POINTED THE OTHER WAY NOW. It used to require `net < amount`; that was the
+  // defining property of the deducted mechanic and it is the property upfront fees removed. The
+  // check that matters today is the reverse: a `net` BELOW the amount would mean a deduction has
+  // reappeared in the code while the grounding sentence still tells the model it has not.
   ok("⛔ …so the words and the arithmetic cannot drift apart silently",
-    net < 1.0, `net=${net} is not strictly less than the amount`);
+    net >= 1.0, `net=${net} is less than the amount — a deduction has returned`);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════

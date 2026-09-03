@@ -6,7 +6,7 @@ import { formatUnits } from "viem";
 import { TxPendingError } from "./_circle.mjs";
 import { json, parseBody, bridgeCapUsdc, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { executeAction } from "./_actions.mjs";
-import { resolveDestination } from "./_bridge.mjs";
+import { resolveDestination, bridgeFee, sealBridgeQuote, bridgeDebitMinor } from "./_bridge.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { publicClient } from "./_predict.mjs";
@@ -134,6 +134,28 @@ export async function handler(event) {
   if (owner.pending) return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   const walletAddress = owner.walletAddress;
 
+  // ═══ ⭐⭐ ONE QUOTE, IN-REQUEST — AND THAT IS WHY THIS PATH IS NO LONGER "UN-BOUND" ════════════
+  //
+  // The balance gate below must require `amount + fee`, and the constraint is that the fee must be
+  // the one whose `signedQuote` is actually submitted — never a second read. So the quote is
+  // fetched HERE, sealed, and handed to executeAction as a `quoteToken`. The gate and the burn then
+  // price from the same object by construction.
+  //
+  // ⭐ APPROVAL AND EXECUTION ARE THE SAME HTTP REQUEST HERE, which is what makes this possible:
+  // the quote's ~120s window is not crossed by a human pause. What the analyst showed at PROPOSAL
+  // time is `indicativeFeeUsdc`, possibly hours old, and it stays indicative — ⚠️ and under upfront
+  // fees an understating indicative figure now means the user needs MORE BALANCE than the proposal
+  // implied, not merely that less arrives. That gap is disclosure, not binding, and it is named
+  // rather than closed here.
+  let fee;
+  try {
+    fee = await bridgeFee({ amountUsdc: amount, cctpDomain: dest.cctpDomain });
+  } catch (e) {
+    return json(409, { error: `cannot price bridge to ${dest.label} right now: ${e.message}` });
+  }
+  const quoteToken = sealBridgeQuote({
+    owner: session.address, destinationKey: dest.key, amountUsdc: amount, fee });
+
   // ── PRE-FLIGHT BALANCE GATE — runs BEFORE the lock and BEFORE any burn is submitted. ──
   // job #155341 approved a 10 USDC bridge against a 6.30 wallet; the burn reverted on-chain
   // with INSUFFICIENT_TOKEN ("transfer amount exceeds balance"), surfacing as a raw 500
@@ -141,12 +163,23 @@ export async function handler(event) {
   // rejection: read → reject-or-proceed → (only if funded) submit the burn. Nothing signs
   // on the reject path.
   //
-  // REQUIRED = amount, NO BUFFER. The fee (~0.20) comes out of the MINTED side, not the
-  // wallet — the wallet burns the full amount. And gas is SPONSORED: two prior successful
-  // bridges each dropped the wallet by EXACTLY 10.000000 (balanceOf delta, measured).
-  // ⚠️ ASSUMES Circle gas-sponsorship — proven, but it is PLATFORM behavior. If
-  // INSUFFICIENT_TOKEN ever resurfaces on an amount the wallet appears to cover, sponsorship
-  // may have changed; revisit whether a gas buffer is now needed.
+  // ═══ 🚨 REQUIRED = amount + fee. THE OLD COMMENT HERE WAS THE REASON THAT WOULD HAVE HELD ══════
+  // It read: "REQUIRED = amount, NO BUFFER. The fee (~0.20) comes out of the MINTED side, not the
+  // wallet — the wallet burns the full amount." That was a correct derivation of the mechanic
+  // adoption INVERTS. Under `depositForBurnWithFees` the fee is charged on the SOURCE, in addition
+  // to the amount, so the wallet parts with both — and a gate requiring only the amount would pass
+  // a wallet that cannot pay, putting back exactly the INSUFFICIENT_TOKEN revert this gate exists
+  // to prevent, on a path where a revert now also wastes a quote.
+  //
+  // ⭐⭐ COMPARED IN MINOR UNITS, SO THERE IS NOTHING TO ROUND. `balanceOf` returns a BigInt and the
+  // debit is a BigInt sum from one quote; the directional rule ("a required figure rounds UP")
+  // applies only to what is RENDERED, which is why requiredAmount/availableAmount still wrap the
+  // figures in the message and not the comparison. A float comparison would need a rounding
+  // decision on the money path; not converting is strictly better than converting carefully.
+  //
+  // ⚠️ GAS IS STILL SPONSORED and still not buffered for — measured again in run 2, where the
+  // wallet's balance delta was exactly `amount + fee` with no gas component. If INSUFFICIENT_TOKEN
+  // resurfaces on a wallet that appears to cover the debit, sponsorship may have changed.
   //
   // Mirrors agent-send.mjs:66-81, including its swallow: a transient read hiccup must NOT
   // block a funded user — executeAction's own INSUFFICIENT_TOKEN stays the final backstop.
@@ -154,13 +187,18 @@ export async function handler(event) {
     const raw = await publicClient().readContract({
       address: CONTRACTS.USDC, abi: BALANCE_OF_ABI, functionName: "balanceOf", args: [walletAddress],
     });
-    const have = Number(formatUnits(raw, USDC_DECIMALS));
-    if (have < amount) {
+    const needMinor = bridgeDebitMinor(fee);
+    if (BigInt(raw) < needMinor) {
+      const have = Number(formatUnits(raw, USDC_DECIMALS));
+      const need = Number(formatUnits(needMinor, USDC_DECIMALS));
       // 402, mirroring job-run.mjs:80-87 { need, have, walletAddress }. No lock taken, no burn.
+      // ⭐ The message names BOTH parts, because "need 10.054129" against a 10 USDC bridge reads as
+      // an error unless the fee is visible beside it.
       return json(402, {
         error: `Insufficient funds to bridge. Have ${availableAmount(have, USDC_DECIMALS)} USDC, ` +
-          `need ${requiredAmount(amount, USDC_DECIMALS)}.`,
-        need: amount,
+          `need ${requiredAmount(need, USDC_DECIMALS)} — ${amount} to bridge plus a ` +
+          `${requiredAmount(fee.feeUsdc, USDC_DECIMALS)} USDC fee.`,
+        need,
         have,
         walletAddress,
       });
@@ -179,7 +217,9 @@ export async function handler(event) {
     // executeAction re-prices the fee live and re-applies the fee-floor
     // (_actions.mjs:177-190), and enforces the per-bridge cap (:89-94) + day-ceiling.
     const r = await executeAction(
-      { type: "bridge_usdc", amountUsdc: amount, destination: dest.key, reasoning: proposal.reasoning || "approved bridge proposal" },
+      // ⭐ THE SEALED QUOTE TRAVELS INTO THE EXECUTOR, so the fee the balance gate required is the
+      // fee the cap and ceiling bound and the fee whose signedQuote the chain enforces.
+      { type: "bridge_usdc", amountUsdc: amount, destination: dest.key, quoteToken, reasoning: proposal.reasoning || "approved bridge proposal" },
       { walletAddress, session }
     );
 

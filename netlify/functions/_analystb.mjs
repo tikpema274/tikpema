@@ -276,11 +276,18 @@ async function analyseBridge({ destination, amountUsdc }) {
   const feeUsdc = Number(fee.feeUsdc);
   const net = Number(fee.netUsdc);
   const burn = feeUsdc / Number(amountUsdc);
-  facts.push(`Live bridge fee to ${dest.label}: ${feeUsdc.toFixed(4)} USDC on ${amountUsdc} ⇒ ~${net.toFixed(4)} arrives.`);
-  facts.push(`The fee is ${pct(burn)}% of the amount — and it is taken OUT of what you send.`);
+  facts.push(`Live bridge fee to ${dest.label}: ${feeUsdc.toFixed(4)} USDC on ${amountUsdc} ⇒ the full ${net.toFixed(4)} arrives and the fee is charged on top.`);
+  facts.push(`The fee is ${pct(burn)}% of the amount — and it is charged IN ADDITION to what you send, so ~${(Number(amountUsdc) + feeUsdc).toFixed(4)} USDC leaves your wallet.`);
 
-  if (net <= 0) {
-    return { verdict: "refuse", cause: "should-not-execute", headline: `The fee (${feeUsdc.toFixed(4)}) meets or exceeds the amount — nothing would arrive.`, facts, feeUsdc, netUsdc: net };
+  // 🚨 THE CONDITION MOVED FROM `net <= 0` TO A FEE/AMOUNT COMPARISON, AND IT HAD TO.
+  // `netUsdc` is now the FULL amount, so `net <= 0` is unreachable for any positive bridge — the
+  // refusal would have gone silently DEAD while still reading as a live fee-floor. ⛔ An inverted
+  // definition does not only make a claim false; it can make a GUARD unreachable, and an
+  // unreachable refusal looks identical to one that never had to fire.
+  if (feeUsdc >= Number(amountUsdc)) {
+    // ⚠️ Under upfront fees the recipient receives the FULL amount; a fee at or above the amount
+    // means the move costs more than it moves, not that nothing lands.
+    return { verdict: "refuse", cause: "should-not-execute", headline: `The fee (${feeUsdc.toFixed(4)}) meets or exceeds the amount being moved — it would cost more to move than it moves.`, facts, feeUsdc, netUsdc: net };
   }
   if (burn >= 0.10) {
     return {

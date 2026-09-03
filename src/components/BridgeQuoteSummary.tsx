@@ -28,8 +28,16 @@ export function BridgeQuoteSummary(
       {/* ⭐ LABELLED ROWS, NOT PROSE. Facts a reader scans rather than parses. */}
       <div className="summary-row"><span>Fee</span>
         <b className="mono">{quote ? `${Number(quote.feeUsdc).toFixed(4)} USDC` : em}</b></div>
+      {/* ⭐⭐ THE FEE IS CHARGED ON TOP, SO THE RECIPIENT GETS THE FULL AMOUNT — and the row that
+          matters flipped with it. "You receive" used to be amount − fee; under upfront fees it is
+          the amount, and the figure a user actually needs to plan around is what LEAVES THE WALLET.
+          ⛔ Showing only "you receive" now would be true and useless: it would equal the number they
+          typed, and the fee would appear nowhere in the outcome. */}
       <div className="summary-row"><span>You receive</span>
         <b className="mono">{quote ? `${Number(quote.netUsdc).toFixed(4)} USDC` : em}</b></div>
+      <div className="summary-row"><span>Leaves your wallet</span>
+        <b className="mono">{quote && Number.isFinite(Number(quote.feeUsdc)) && Number.isFinite(Number(quote.amountUsdc))
+          ? `${(Number(quote.amountUsdc) + Number(quote.feeUsdc)).toFixed(4)} USDC` : em}</b></div>
       {/* ⭐⭐ THIS QUALIFIES THE TWO ROWS ABOVE, so it sits under them rather than becoming a peer
           row. It is not a value — it is a statement ABOUT the value — and a `Binding: held` row
           would be jargon while `Quote valid: 3 min` would say something true but different,

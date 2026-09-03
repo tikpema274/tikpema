@@ -158,9 +158,11 @@ export async function validateProposal(raw, ctx = {}) {
   } catch {
     return noProposal(NO_PROPOSAL.BRIDGE_UNPRICEABLE); // cannot price it → cannot honestly propose it
   }
-  // Fee-floor: if the fee meets or exceeds the amount, nothing would arrive. Refuse to
+  // Fee-floor: if the fee meets or exceeds the amount, moving the money costs more than the
+  // money. ⚠️ NOT "nothing would arrive" any more — under upfront fees the recipient receives the
+  // FULL amount and the fee is charged on top. Same threshold, different reason. Refuse to
   // propose an un-settleable bridge rather than let a user approve one.
-  if (fee.maxFee >= fee.amountMinor) return noProposal(NO_PROPOSAL.BRIDGE_FEE_EXCEEDS, { maxFee: String(fee.maxFee), amountMinor: String(fee.amountMinor) });
+  if (fee.feeMinor >= fee.amountMinor) return noProposal(NO_PROPOSAL.BRIDGE_FEE_EXCEEDS, { feeMinor: String(fee.feeMinor), amountMinor: String(fee.amountMinor) });
 
   // ┌──────────────────────────────────────────────────────────────────────────┐
   // │ VETTING GATE ATTACHES HERE (future).                                     │

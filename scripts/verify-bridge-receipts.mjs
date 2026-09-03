@@ -814,8 +814,24 @@ section("12 — THE RECONCILE JOB: the system does what it was telling the user 
   // ── THE UPSTREAM TAG AND THE WIRING ────────────────────────────────────────────────────────
   const fs = await import("node:fs");
   const bridgeSrc = fs.readFileSync("netlify/functions/_bridge.mjs", "utf8");
-  check("⭐⭐ BOTH waitForTx calls tag the stage — the approve one is the whole point",
-    /e\.stage = "approve"/.test(bridgeSrc) && /e\.stage = "burn"/.test(bridgeSrc));
+  // ═══ 🚨 THERE IS ONLY ONE waitForTx ON THE AGENT PATH NOW, AND THAT IS THE FIX, NOT A GAP ═════
+  // This asserted BOTH tags because `agentBridge` awaited twice — an approve and a burn — and a
+  // `txId` alone could not say which had stalled. The two are now ONE userOp (`executeBatch`), so
+  // there is a single await and "burn" is the only truthful stage.
+  // ⛔ THE TAG STILL MATTERS AND IS STILL ASSERTED. Provisional records written by earlier deploys
+  // carry `approve`, and `bridge-reconcile-background` REFUSES an untagged record rather than
+  // guessing — so the stage vocabulary must stay intact even though this path can no longer
+  // produce the second value. ⚠️ Deleting the assertion because one branch went away would unpin
+  // the tag that the reconcile job's refusal depends on.
+  check("⭐⭐ the single agent-path await still tags its stage — the reconcile job refuses an untagged record",
+    /e\.stage = "burn"/.test(bridgeSrc));
+  check("⭐ …and the SELF-SIGNED path's stage vocabulary is unchanged, so old records still reconcile",
+    PENDING_STAGES.includes("approve") && PENDING_STAGES.includes("burn"));
+  // 🚨 AND THE REASON THE APPROVE STAGE CANNOT ARISE HERE ANY MORE IS ASSERTED, so a future split
+  // does not quietly resurrect an untagged await.
+  check("🚨 …because the agent path submits exactly one transaction",
+    (bridgeSrc.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ")
+      .match(/createContractExecutionTransaction\(/g) || []).length === 1);
   const sweepSrc2 = fs.readFileSync("netlify/functions/bridge-mint-sweep.mjs", "utf8");
   check("⭐⭐ the sweep triggers reconcile BEFORE the clean early-return — a provisional record is never 'stranded'",
     sweepSrc2.indexOf("bridge-reconcile-background") < sweepSrc2.indexOf("[bridge-sweep] clean"));

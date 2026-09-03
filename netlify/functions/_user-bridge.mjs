@@ -28,7 +28,7 @@
 import { getAddress, toFunctionSelector } from "viem";
 import { publicClient } from "./_predict.mjs";
 import {
-  bridgeFee, bridgeFeeBand, bridgeAckToken, bridgeCallData,
+  bridgeFeeDeducted, bridgeFeeBand, bridgeAckToken, bridgeCallDataDeducted,
   resolveDestinationStrict, BRIDGE_CONTRACT, BRIDGE_ABI,
 } from "./_bridge.mjs";
 import { CONTRACTS } from "./_arc.mjs";
@@ -59,7 +59,7 @@ export async function priceAndGate({ session, amountUsdc, destination, recipient
   catch { return { ok: false, code: "bad_recipient", recipient }; }
 
   // Live pricing — the same call the agent path makes, so both paths quote from one source.
-  const fee = await bridgeFee({ amountUsdc: amount, cctpDomain: dest.cctpDomain });
+  const fee = await bridgeFeeDeducted({ amountUsdc: amount, cctpDomain: dest.cctpDomain });
   const bandInfo = bridgeFeeBand({ amountUsdc: amount, feeUsdc: fee.feeUsdc, netUsdc: fee.netUsdc });
   const expected = bridgeAckToken({
     owner: session.address, destinationKey: dest.key, amountUsdc: amount, band: bandInfo.band,
@@ -101,7 +101,7 @@ export async function priceAndGate({ session, amountUsdc, destination, recipient
       bridgeContract: BRIDGE_CONTRACT,
       usdc: CONTRACTS.USDC,
       amountMinor: fee.amountMinor.toString(),
-      calldata: bridgeCallData({
+      calldata: bridgeCallDataDeducted({
         amountMinor: fee.amountMinor, maxFee: fee.maxFee, recipient: to, cctpDomain: dest.cctpDomain,
       }),
     },

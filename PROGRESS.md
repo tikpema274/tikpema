@@ -1,5 +1,190 @@
 ---
 
+# ⭐⭐⭐ THE APPROVE AND THE BURN RIDE IN ONE userOp — OPTION C, BUILT
+
+**2026-09-03, migration step 3 of 4.** The estimate confirmed the account accepts a self-targeted
+`executeBatch` and that Circle accepts a `contractAddress` equal to the wallet, so C was selected
+over A. `test:batchatomicity` **25/0** (new), `test:feebinding` 38 → **48**, `test:approvebalance`
+15 → **20**, `test:bridge` **191/0**, `test:quoteexpiry` **73/0**.
+
+## ⛔ (a) COULD NOT LAND ALONE, AND THE BURN CALL MOVED WITH IT
+
+Approving `TokenMessengerWithFees` while the burn still called `bridgeWithPreapprovalAndHook` would
+have left the burn with no allowance and reverted every bridge. So `bridgeCallData` became
+`depositForBurnWithFees`, in the shape the spike proved on real bytes.
+
+Two things left the call with it: the **forwarding hook** (requested in the QUOTE now, carried inside
+`signedQuote`) and **`minFinalityThreshold`** (`_inferParamsFromQuote` derives 2000 from the quote).
+⛔ `MINT_TIMING` does not move on the single 11s SLOW observation.
+
+## THE ATOMICITY IS THE SAFETY PROPERTY, SO IT HAS ITS OWN GUARD
+
+`executeBatch` loops `callWithReturnDataOrRevert`: a reverting burn reverts the approve with it.
+**Either both land or neither does, and no allowance ever stands alone.**
+
+🚨 **SPLITTING THEM BACK INTO TWO TRANSACTIONS SILENTLY REINTRODUCES THE WINDOW** — silently, because
+both versions bridge correctly on the happy path and the difference only appears on a failure nobody
+is watching. `verify-bridge-batch-atomicity.mjs` asserts exactly one
+`createContractExecutionTransaction` call site and no standalone approve; the split mutation is
+caught by three of its assertions.
+
+⚠️ **AND THE BATCH IS VALIDATION-PROVEN, NOT SETTLEMENT-PROVEN.** An estimate simulates; it does not
+settle. **No batched burn has landed on chain.** `docs/batched-burn-preregistration.md` pre-registers
+the first one, with `allowance(SCA, TMWF) == 0` afterwards as the row the whole option rests on —
+and §3 says plainly that a SUCCESSFUL batch does not prove atomicity, because atomicity is a claim
+about the failure path this run does not exercise.
+
+## ⭐ `maxFee` BECAME `feeMinor`, AND THE RENAME WAS NOT COSMETIC
+
+The old name came from the CCTP burn parameter it was signed into — now `EMPTY_MAX_FEE`, hardcoded
+zero, measured as zero on chain. A field called `maxFee` holding the real fee, beside a calldata
+`maxFee` of 0, is a name that is false wherever it is read.
+
+## THE TWO GATES, IN MINOR UNITS
+
+`bridgeDebitMinor(fee)` = `amountMinor + feeMinor`, both BigInt, both from the same quote. ⛔ Exact by
+construction, so there is nothing to round — the directional rule applies only to what is RENDERED,
+which is why `requiredAmount`/`availableAmount` still wrap the figures in the 402's message and not
+the comparison. A float version would need a rounding decision on the money path at every call site.
+
+⭐ **THE ALLOWANCE READ IS GONE.** The approve is unconditional and inside the batch, so a prior read
+could not change what is submitted.
+
+## ⭐ ONE QUOTE, END TO END — AND THE PATH THAT ALMOST FETCHED TWO
+
+`agentBridge` read `boundFee ?? await bridgeFee(...)`, so the un-bound path got a **fresh** quote
+inside the executor — a second quote, seconds after the one that priced the cap and the ceiling, and
+it is the second one whose `signedQuote` the chain would have enforced. **The gates would have
+bounded one quote and the contract another.** The fee is now resolved ONCE by `executeAction` and
+threaded; a missing one REFUSES rather than re-pricing.
+
+⚠️ **AND `job-bridge-approve` IS NO LONGER THE UN-BOUND PATH.** Its balance gate must require
+`amount + fee` from the submitted quote, so it fetches and seals in-request — approval and execution
+are the same HTTP request, so the ~120s window is never crossed by a human pause. What it loses is
+disclosure at PROPOSAL time: `indicativeFeeUsdc` may be hours old, and under upfront fees an
+understating indicative figure now means the user needs MORE BALANCE than the proposal implied, not
+merely that less arrives. Named, not closed.
+
+## ⛔ THE SELF-SIGNED PATH STAYS ON THE OLD MECHANICS — A DECISION
+
+A browser EOA signs one transaction at a time, so migrating it would mean a separate approve then a
+separate burn: reintroducing, on the one path that CANNOT batch, exactly the window batching was
+chosen to eliminate. It keeps `bridgeWithPreapprovalAndHook` and gains `bridgeFeeDeducted` /
+`bridgeNetDeducted` / `bridgeCallDataDeducted`, named for their MECHANIC rather than their caller so
+no surface picks the wrong one by habit.
+
+⚠️ **TWO FEE MECHANICS ARE THEREFORE LIVE AT ONCE.** On the agent path the recipient gets the FULL
+amount; on the self-signed path they get amount − fee. That is the thing to know before reading any
+"what arrives" figure anywhere in this codebase.
+🚨 NOT a duplicate: they price two different contracts with two different models. Collapsing them
+behind a flag would be the real duplicate — one body answering two questions, with the caller
+deciding which answer is true.
+
+---
+
+# 🚨 THE DAY CEILING WAS WIDER THAN CONFIGURED BY THE FEE — and only a mutation found it
+
+**2026-09-03. Its own entry, because it will not look like a defect.**
+
+`valueOfStep` returned `Number(step.amountUsdc)` for a bridge. Under upfront fees the wallet parts
+with `amount + fee`, so every bridge consumed `amount` of the day ceiling while removing
+`amount + fee` from the user's control. ⛔ **A cap that silently admits more than it says — the same
+class as a lost ledger write, and money-safety rather than copy.**
+
+## ⭐⭐ ITS OLD COMMENT IS WHY IT WOULD HAVE STAYED INVISIBLE
+
+    // A bridge moves its full face amount OFF Arc (the fee is deducted from it on
+    // the destination), so the full amount is what counts against the day-ceiling.
+
+It does not merely fail to warn — it **states the mechanism that makes the under-count correct**, and
+that mechanism is exactly what adoption inverts. An auditor reading the ceiling finds a reasoned
+derivation and moves on. ⚠️ A wrong value with no comment invites a question; a wrong value with a
+correct-sounding derivation answers it in advance.
+
+## AND IT HAD NO GUARD — THE MUTATION CAME BACK "NOT CAUGHT"
+
+Reverting the value to `amountUsdc` left **every suite green**. An under-counting ceiling admits more
+than it says and nothing goes red, because every individual bridge still succeeds. ⭐ `test:feebinding`
+§1b now values a bridge directly and asserts `amount + fee`, that the cap bounds `dayValue` rather
+than `step.amountUsdc`, and the ordering `valueOfStep < cap < canSpendDay`.
+
+⛔ **AND A MISSING FEE THROWS RATHER THAN FALLING BACK TO THE AMOUNT.** The fallback IS the
+under-count; it must not be reachable by omission.
+
+## THE DECISION, AND THE READING THAT WAS REJECTED — both written at the code
+
+**TAKEN:** the cap and the ceiling bound **the wallet debit**. The ceiling exists to bound what
+leaves the user's control, and under upfront fees the fee leaves it too.
+**REJECTED:** bounding the amount bridged. It reads naturally for a "per-bridge limit" and is
+defensible — but it would let a volatile third-party fee widen the effective ceiling with nobody
+watching, which is the property a ceiling exists to deny.
+
+⭐ The per-bridge cap moved to AFTER valuation, which is **exactly the swap cap's history**: bounding
+`amountIn` in EURC was not a USDC bound, and the remedy was the same — bound the valued quantity,
+not the typed one.
+
+---
+
+# THE GUARDS: two fired as built, one instrument disappeared, one partial mock died at load
+
+**2026-09-03.**
+
+⭐⭐ **`verify-bridge-fee-band` WENT RED ON `net + fee === amount`** — the assertion whose own comment
+named the change that would invert it. It caught the inversion it was written for. Rewritten to pin
+the mechanic that is now true, plus a **reverse tripwire**: `net` must NEVER be less than the amount
+again, because that would mean a deduction reappeared while every surface renders `net` as the
+arrival.
+
+⛔ **`verify-bridge-fee-binding` §1's INSTRUMENT DISAPPEARED, AND ITS TWO `maxFee` ASSERTIONS CAME
+OUT IN THE SAME COMMIT.** With `maxFee` gone from the calldata, "the maxFee in the calldata is the
+sealed figure" had nothing to read and its falsifier `!== FRESH.maxFee` would have compared 0 to 0.
+Leaving a vacuous assertion is worse than deleting it: it keeps printing ✅ for a property nothing
+checks. ⭐ Re-pointed at the SUBMITTED QUOTE's signed bytes and at the approve's authorised amount —
+a claim that is now stronger, because `_collectFees`'s `assert` makes the chain enforce it.
+
+🚨 **A PARTIAL MOCK DIED AT INSTANTIATION, NOT AT AN ASSERTION.** `verify-verifier-trigger` listed
+three `_bridge.mjs` exports by hand; three new imports appeared and it failed with
+`does not provide an export named 'bridgeDebitMinor'` **before any check ran**. ⛔ Adding the three
+names would fix today and break on the next export — it now spreads the real module and overrides
+only what it fakes.
+
+⚠️ **AND A NEGATIVE SOURCE CHECK MATCHED ITS OWN EXPLANATORY COMMENT.** An assertion that
+`boundFee ?? await bridgeFee(` is ABSENT failed against a comment quoting the removed expression
+verbatim. Negative source assertions must read stripped source: prose about code is not code.
+
+---
+
+# THE CLAIMS THIS COMMIT MADE FALSE, AND WHERE THEY WERE
+
+**2026-09-03.** Item 4 is the full sweep; these are the ones item 3's own code inverted, fixed here
+because leaving them would have been shipping a known-false claim on a money surface.
+
+    bridgeNetUsdc                     amount − fee  ->  amount          (the definition)
+    netDisclosed (exposure)           amount − fee  ->  amount, + a new debitDisclosed
+    BridgeQuoteSummary                "You receive" joined by "Leaves your wallet"
+    BridgePanel confirmation          "is taken out of the amount" -> "charged on top"
+    bridgeReceiptStatus               gains "N USDC left your wallet"
+    the fee-floor (4 sites)           "so nothing would arrive" -> "costs more than it moves"
+    the acknowledge disclosure        "only ~M would arrive"    -> the full amount arrives
+    _analystb facts (2)               "⇒ ~N arrives" / "taken OUT of what you send"
+    job-bridge-approve balance gate   "REQUIRED = amount, NO BUFFER"
+    valueOfStep                       "the fee is deducted from it on the destination"
+    _bridge-fee-table grounding       the sentence handed to a MODEL as fact
+
+🚨 **THE LAST ONE IS THE ONE WITH NO OTHER GUARD.** `feeTableGroundingText` is injected into a model
+prompt and comes back as generated prose no check can read. It is the ONE place the mechanic can be
+stated and the one place it must be corrected — `verify-model-injected-claims` asserts both the
+sentence and that `bridgeNetUsdc` agrees with it, so the words and the arithmetic cannot drift.
+⛔ And it asserts the OLD sentence is ABSENT, not merely outranked: two mechanics in one grounding
+block is worse than the wrong one alone, because the model would pick.
+
+⭐⭐ **AND ONE REFUSAL WOULD HAVE GONE SILENTLY DEAD.** `_analystb`'s fee-floor tested `net <= 0`.
+With `net` now equal to the amount that is unreachable for any positive bridge — the refusal would
+have kept reading as a live fee-floor while never firing again. **An inverted definition does not
+only make a claim false; it can make a GUARD unreachable, and an unreachable refusal looks identical
+to one that never had to fire.** Now compared as `feeUsdc >= amountUsdc`, like the others.
+
+
 # ⚠️ THE ESTIMATE ENDPOINT DOES NOT TAKE THE CREATE ENDPOINT'S INPUT — a 400, and Q1 is still open
 
 **2026-09-03.** The batch probe's CONTROL failed with `HTTP 400 "API parameter invalid"`. The control
