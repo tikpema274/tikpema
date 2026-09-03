@@ -1,0 +1,76 @@
+
+═══ PR-4 · THE FIRST BATCHED BURN · 2026-09-03T21:39:07.238Z ═══
+wallet 0xc54d47211997aca90ef4fcfbc742a3b511b4e621 · base (domain 6) · amount 0.000001 USDC
+
+0. BASELINE (read, not derived)
+   balance   27986014 minor (27.986014 USDC)  -> balance-before.txt
+   allowance 0 minor to TMWF                 -> allowance-before.txt
+
+1. QUOTE
+   recorded VERBATIM -> quote.json (before anything below reads a field of it)
+   issuedAt 1788471547 · expiry.mode TIMESTAMP · expiresAt 1788471667
+   window 120s · 119s remaining
+   feeTotalAmount 54041 minor (0.054041 USDC) · feeToken 0x3600000000000000000000000000000000000000
+   mechanic upfront · debit 54042 minor (0.054042 USDC)
+
+2. SEALED AND RE-OPENED — fee 54041 · mechanic upfront · 119s left in the quote's own window
+
+3. SUBMIT — one userOp: executeBatch([approve(TMWF, A+F), depositForBurnWithFees(A, …)])
+   burnHash 0x4b703a7e2ee30221bcad28bf6b29a415e0eabf66447189f3a94d240e6353c4ff  -> burn-hash.txt (written BEFORE any read)
+   netUsdc 0.000001 · feeUsdc 0.054041 · feeMechanic upfront
+
+4. RECEIPT · status 0x1 · block 0x3983788 · 26 logs
+   from 0xf4b441cab8748b8e981ee2e498f8ce5c2f1ba066  to 0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789
+
+   ERC-20 0x3600000000000000000000000000000000000000 — 6 dp — 7 Transfers
+     [34] 0xc54d47211997aca90ef4fcfbc742a3b511b4e621 -> 0x8745d906d67c346e5eb1aeeed38eb87f34df0c0a  54041
+     [38] 0x8745d906d67c346e5eb1aeeed38eb87f34df0c0a -> 0x08499fce2344645c72de277a16734741e507a5d8  54041
+     [42] 0x08499fce2344645c72de277a16734741e507a5d8 -> 0xb499efcdb5aa8fbdc9dc4fa0f27cdc3847680320  5404
+     [44] 0x08499fce2344645c72de277a16734741e507a5d8 -> 0xb499efcdb5aa8fbdc9dc4fa0f27cdc3847680320  48637
+     [46] 0xc54d47211997aca90ef4fcfbc742a3b511b4e621 -> 0x8745d906d67c346e5eb1aeeed38eb87f34df0c0a  1
+     [49] 0x8745d906d67c346e5eb1aeeed38eb87f34df0c0a -> 0xb43db544e2c27092c107639ad201b3defabcf192  1
+     [52] 0xb43db544e2c27092c107639ad201b3defabcf192 -> 0x0000000000000000000000000000000000000000  1
+
+   ERC-20 Approvals — 4
+     [32] 0xc54d47211997aca90ef4fcfbc742a3b511b4e621 -> 0x8745d906d67c346e5eb1aeeed38eb87f34df0c0a  54042
+     [35] 0x8745d906d67c346e5eb1aeeed38eb87f34df0c0a -> 0x08499fce2344645c72de277a16734741e507a5d8  54041
+     [39] 0x08499fce2344645c72de277a16734741e507a5d8 -> 0xf992efcb5fa2ed7cb48310d9dd8cb4ce5fb7ddc9  54041
+     [47] 0x8745d906d67c346e5eb1aeeed38eb87f34df0c0a -> 0x8fe6b999dc680ccfdd5bf7eb0974218be2542daa  1
+
+   NATIVE 0xffff…fffe — 18 dp — 8 Transfers
+     [33] 0xc54d47211997aca90ef4fcfbc742a3b511b4e621 -> 0x8745d906d67c346e5eb1aeeed38eb87f34df0c0a  54041000000000000
+     [37] 0x8745d906d67c346e5eb1aeeed38eb87f34df0c0a -> 0x08499fce2344645c72de277a16734741e507a5d8  54041000000000000
+     [41] 0x08499fce2344645c72de277a16734741e507a5d8 -> 0xb499efcdb5aa8fbdc9dc4fa0f27cdc3847680320  5404000000000000
+     [43] 0x08499fce2344645c72de277a16734741e507a5d8 -> 0xb499efcdb5aa8fbdc9dc4fa0f27cdc3847680320  48637000000000000
+     [45] 0xc54d47211997aca90ef4fcfbc742a3b511b4e621 -> 0x8745d906d67c346e5eb1aeeed38eb87f34df0c0a  1000000000000
+     [48] 0x8745d906d67c346e5eb1aeeed38eb87f34df0c0a -> 0xb43db544e2c27092c107639ad201b3defabcf192  1000000000000
+     [50] 0xb43db544e2c27092c107639ad201b3defabcf192 -> 0x0000000000000000000000000000000000000000  1000000000000
+     [56] 0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789 -> 0xf4b441cab8748b8e981ee2e498f8ce5c2f1ba066  32648089811148462
+
+5. B1–B7 — each judged against its own numbered row
+   ✅ B1 — ONE transaction
+        one submit, one hash: 0x4b703a7e2ee30221bcad28bf6b29a415e0eabf66447189f3a94d240e6353c4ff
+   ✅ B2 — Approval(SCA → TMWF, A+F = 54042)
+        log [32] value 54042 (expected 54042)
+   ✅ B3 — fee leg == the submitted quote's feeTotalAmount (54041)
+        log [34] value 54041
+   ✅ B4 — amount leg == 1, distinct from the fee leg
+        log [46] value 1
+   ✅ B5 — allowance(SCA, TMWF) == 0 afterwards
+        before 0 · after 0  (both READ)
+   ✅ B6 — balance delta == A + F (54042) and no more
+        before 27986014 · after 27931972 · delta 54042 (expected 54042; a gas component would exceed it)
+
+   B7 — the destination mint. NOT judged here: it is asynchronous.
+        Read it with the burn hash above; PR-4's F7 carries NO deadline, so if it has not
+        landed the honest record is NOT-YET-OBSERVED, re-read later. Waiting is not failure.
+
+══════════════════════════════════════════════════════════════════════════════
+✅ B1–B6 HOLD. B7 is unjudged and asynchronous.
+
+⛔ AND WHATEVER THIS RUN SHOWED, ATOMICITY REMAINS UNPROVEN. PR-4 §3: a SUCCESSFUL batch
+   exercises only the success path. "Either both land or neither does" is a claim about the
+   FAILURE path, and it needs its own induced run — an expired quote or a deliberate
+   shortfall — to say anything at all. Still open.
+
+Artifacts in scripts/spikes/pr4-batched-burn/ — quote.json, receipt.json, burn-hash.txt, balance-*.txt, allowance-*.txt

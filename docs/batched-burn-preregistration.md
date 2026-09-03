@@ -135,3 +135,126 @@ is the shape that produced the run-1 correction.
 
 ⚠️ If a falsifier fires, **the finding is the falsifier** — record it and stop. If the defect turns
 out to be in a row rather than in the world, say which clause and why, and do not repair it in place.
+
+---
+---
+
+# RESULT — appended 2026-09-03, nothing above this line edited
+
+**The first batched burn ran**, from the agent SCA `0xc54d4721…b4e621` through the PRODUCTION path
+(`bridgeFee` → `sealBridgeQuote` → `openBridgeQuote` → `agentBridge`) — unlike runs 1 and 2, which
+hand-encoded their calldata and therefore proved the contract rather than our code.
+
+    quote issuedAt 1788471547 · mode TIMESTAMP · expiresAt 1788471667 · window 120s
+    feeTotalAmount 54041 minor · feeToken 0x3600…0000 · items[0].args carry NO amount
+    burn 0x4b703a7e2ee30221bcad28bf6b29a415e0eabf66447189f3a94d240e6353c4ff
+    status 0x1 · block 60307336 · 26 logs · 2026-09-03T21:39:09Z
+    from 0xf4b441ca… (bundler)   to 0x5ff137d4…d2789 (EntryPoint)
+
+## ALL SIX JUDGED ROWS HOLD — no falsifier fired
+
+| row | prediction | observed | falsifier |
+|---|---|---|---|
+| **B1** | ONE Arc transaction | one submit, one hash | **G1 did not fire** |
+| **B2** | `Approval(SCA → TMWF, A+F)` | log [32], **54042** = 1 + 54041 | **G2 did not fire** |
+| **B3** | fee leg == submitted quote's `feeTotalAmount` | log [34], **54041** | **G3 did not fire** |
+| **B4** | amount leg == `A`, distinct | log [46], **1** | **G4 did not fire** |
+| **B5** | `allowance(SCA, TMWF) == 0` afterwards | before **0** · after **0**, both READ | **G5 did not fire** |
+| **B6** | balance delta == `A + F` | **27986014 → 27931972**, delta **54042** | **G6 did not fire** |
+
+⭐⭐ **B5 IS THE ROW THE WHOLE OPTION RESTS ON, AND IT HELD.** A successful batch consumed exactly
+what it approved: `Approval` of 54042 at log 32, two pulls of 54041 and 1, allowance back to zero.
+⚠️ Both endpoints are READINGS. Run 1's post-balance was arithmetic written before the balance was
+read and was wrong by the gas it omitted; this delta is `before − after` from two real reads.
+
+⭐ **B6 ALSO RE-CONFIRMS SPONSORSHIP ON A NEW TARGET.** The delta is exactly `A + F` with no gas
+component, and the EntryPoint paid the bundler `32648089811148462` separately (native log [56]).
+The batch is a self-call to the wallet — a target Gas Station had never been observed against.
+
+## BOTH STREAMS IN FULL, SEPARATELY — counts never compared
+
+**ERC-20 `0x3600…0000`, 6 dp — 7 Transfers**
+
+    [34] SCA        -> TMWF          54041   FEE
+    [38] TMWF       -> FeeManager    54041
+    [42] FeeManager -> recipient      5404
+    [44] FeeManager -> recipient     48637
+    [46] SCA        -> TMWF              1   AMOUNT
+    [49] TMWF       -> token minter      1
+    [52] minter     -> 0x0               1   burned
+
+**ERC-20 Approvals — 4**
+
+    [32] SCA        -> TMWF          54042   ⭐ OURS, from inside the batch
+    [35] TMWF       -> FeeManager    54041
+    [39] FeeManager -> 0xf992efcb…   54041
+    [47] TMWF       -> TokenMessengerV2   1
+
+**NATIVE `0xffff…fffe`, 18 dp — 8 Transfers** (the eighth is the EntryPoint's gas refund to the
+bundler, `32648089811148462` — native by nature, no ERC-20 twin)
+
+⛔ **7 vs 8 AGAIN, AS IN RUN 2.** Nothing here compares stream counts. The 10/90 split held a third
+time on new figures: `5404 + 48637 = 54041`.
+
+## ⭐ THE FEE RECONCILIATION — MATCHED, and by the FeeManager leg
+
+⚠️ **NO VERDICT WAS WRITTEN TO THE STORE.** The spike calls `agentBridge` directly, not
+`recordBridge`, so the trigger never fired and no `fee/<owner>/<burnHash>` record exists. The
+production READER was run against the real receipt instead:
+
+    observeFeeMovement -> { read: true, feeMinor: "54041", feeLogIndex: 34, amountLegsMinor: ["1"] }
+    reconcileFee       -> verdict "matched" · observed 54041 · disclosed 54041
+
+🚨🚨 **AND THE topic0 COLLISION THE DESIGN PREDICTED IS PRESENT ON THESE BYTES.**
+
+    [35] 0x8c5be1e5…  TMWF -> FeeManager  54041   APPROVAL
+    [38] 0xddf252ad…  TMWF -> FeeManager  54041   TRANSFER
+
+Same emitter, same two indexed addresses, same value. **Only topic0 separates them.** With the pin
+the forward leg is unique (`[38]`); without it there are **two candidates and the reader refuses**
+(`fee_forward_legs=2`). The pin was argued from an ABI shape and is now confirmed on real bytes.
+
+⚠️ **AND AN HONEST LIMIT ON THIS RECEIPT.** The fee was located by matching the forward leg's value,
+which selected log 34 — but a *positional* reader ("the first payer→TMWF leg") would have selected
+34 too. **Position and the forward leg agree here**, so this receipt does not discriminate between
+them. That discrimination lives in the mutation suite, not in this run.
+
+## B7 — the mint landed, and it landed WHOLE
+
+    Base Sepolia · USDC 0x036CbD53…CF7e · block 46351636 · 2026-09-03T21:39:20Z
+    tx   0x84e859fd1d42ce4160465b95b323de2e50a563b184b871cbb0eb96112102d6d1
+    from 0x0000…0000 (a MINT)   to 0xc54d4721…b4e621   value 1
+    mint tx `to` = 0xe737e5ce…e275 (MessageTransmitterV2)
+
+**G7 did not fire.** ⭐ **CORROBORATED ACROSS BOTH MIRRORS INDEPENDENTLY** — publicnode and tenderly
+each returned exactly one mint to the recipient, same block, same value, same hash. A single mirror's
+answer would not have been enough for an absence, and is not treated as enough for a presence either.
+
+⚠️ **B7 CARRIES TWO CLAUSES, AND PR-3'S DISCIPLINE SAYS IT SHOULD NOT.** §"THE DISCIPLINE FROM PR-3
+APPLIES" states that every row asserts one movement or one value; B7 asserts a movement **and** a
+value ("a `Transfer` whose `to` is the SCA, of value exactly `A`"). PR-3 split those deliberately as
+R7 and R8, because "it never arrived" and "it arrived at the wrong value" have different causes.
+⭐ **Both clauses hold, so nothing was lost — but the discipline was stated in this document and not
+followed by it.** Recorded as a defect in the pre-registration, not repaired.
+
+## SETTLEMENT — MEASURED, one observation
+
+    burn  Arc  block 60307336  21:39:09Z
+    mint  Base block 46351636  21:39:20Z
+    BURN -> MINT: 11 seconds
+
+⭐ Identical to run 2's SLOW figure, to the second. ⛔ **TWO observations are still not a
+distribution, and `MINT_TIMING` does not move.** Its copy — "usually under a minute; we stop calling
+it routine after 4 minutes" — remains consistent with both and is not edited on them.
+
+## ⛔⛔ WHAT THIS RUN DID NOT ESTABLISH — read before treating it as closure
+
+**ATOMICITY IS STILL UNPROVEN.** §3 said so before the run and the run changes nothing about it: a
+SUCCESSFUL batch exercises only the success path. *"Either both land or neither does"* is a claim
+about the **failure** path — and every row above describes a burn that worked. B5's zero allowance is
+consistent with atomicity and equally consistent with a non-atomic batch whose second call happened
+to succeed. **Only an INDUCED failure discriminates them**: an expired quote, or a deliberate
+shortfall, submitted as a batch, with the allowance read afterwards. That run is not written.
+
+⚠️ **AND THE CLEAN RESULT IS EXACTLY WHEN THAT IS EASIEST TO FORGET.** Six rows green and a mint in
+eleven seconds reads as "the design is proven"; what is proven is the design's happy path.
