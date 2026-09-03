@@ -1,5 +1,102 @@
 ---
 
+# ⭐ THE AMOUNT IS NOT BOUND for a FORWARD quote — two instruments, not a failed search
+
+**2026-09-03, migration step 1.** Step 0 noted that `0x1e8480` did not appear in the quote response
+and recorded it as an OPEN question, because *not finding it* is not the same as *it is not there*.
+This settles it, and the method is the point.
+
+## POSITIVE READ — the exact preimage, from verified source
+
+The implementation at `0x9dc13cc5…` is **verified source**, not a decompile:
+`src/contracts/TokenMessengerWithFees.sol`, Circle Internet Group, Apache-2.0, solc `v0.8.24`, 38
+files. The contract hashes `keccak256(abi.encode(quoteArgs))`, and `_buildRequests` builds that array
+explicitly:
+
+    forwardArgs = [address(this), destinationDomain, burnToken, destinationCaller, hookData]
+    preFinArgs  = [address(this), destinationDomain, burnToken, amount]
+
+⭐ **FORWARD omits the amount; PRE_FINALITY includes it — in the same function.** That neighbouring
+case is what makes the read positive rather than an absence: the reader demonstrably CAN see an
+amount in a preimage when one is present. And `depositForBurnWithFees` passes `amount` straight into
+`BurnParams` via `_buildBurnParams`, with no comparison against the quote; the quote influences only
+`minFinalityThreshold` and `hookData`.
+
+## SIMULATION — calibrated, with counter-probes
+
+    CALIBRATION  no state overrides, matching amount   REVERT "transfer amount exceeds allowance"
+    CONTROL      matching amount 2000000               OK
+                 amount 500000                         OK
+                 amount 9000000 (4.5x)                 OK
+    COUNTER      destinationDomain 0 instead of 6      REVERT
+    COUNTER      destinationCaller non-zero            REVERT
+
+⭐⭐ **The three OKs mean nothing on their own.** A call that always succeeded would look identical.
+They count because the calibration shows a clean pass is not the default state, and because fields
+that ARE in the preimage revert under the same overrides, inside the same live 118-second window.
+
+## SCOPE, AND WHAT WOULD CHANGE IT
+
+FORWARD only. `PRE_FINALITY` is amount-bound by this same code and is **N/A from Arc**, so on our
+route the only available fee type is the one that omits the amount. ⚠️ **That inverts if Arc ever
+gains Fast Transfer** — the conclusion is about our route today, not about the contract in general.
+
+⛔ **OPEN, and left unnamed rather than guessed:** the counter-probe revert selector `0x583e7c79` is
+not among the 42 errors declared across the 38 verified sources, so it originates downstream — most
+likely `TokenMessengerV2` or a separate fee manager. The probes reverted; I did not establish why.
+
+---
+
+# WHAT AN UNBOUND AMOUNT MEANS FOR OUR SEAL
+
+**2026-09-03.** The instinct on hearing "the quote is signed and time-bound" is that our own seal
+becomes redundant. It is the opposite.
+
+⭐⭐ **THE QUOTE BINDS THE SHAPE OF THE TRANSFER, NEVER ITS SIZE** — contract, destination domain,
+burn token, destination caller, hook data. So under adoption, **our amount binding is not made
+redundant; it becomes the ONLY thing between a held quote and a burn of a different size.** A signed
+quote we hold can be submitted for any amount inside its window.
+
+That is a property to design around, not a defect to report to Circle: a flat destination-gas fee
+does not vary with the amount, so there is nothing for the quote to price against.
+
+    seal expiry   DERIVED from the quote's `expiry` — carrying `mode`, branching on it
+    seal amount   STAYS OURS — openBridgeQuote already binds owner/destination/amount
+
+## ⭐ AND THE FAILURE MODE INVERTS
+
+    today       a stale quote outliving our 180s window
+    adopted     our 180s seal outliving the quote's ~120s
+
+The hazard we built `QUOTE_TTL_MS` to bound moves to the other side of the comparison. Today our
+window is the shorter one and the risk is the price drifting under a seal we still honour; after
+adoption theirs is shorter and the risk is a seal we honour after the quote it rests on has expired
+— which reverts on-chain, after the approve has already confirmed.
+
+---
+
+# THE CONTRACT CONFIRMED THE DISCRIMINATOR INDEPENDENTLY
+
+**2026-09-03.** Simulating a deliberately expired quote returned a named error:
+
+    QuoteExpired(0, 1788436574, 1788437066)
+                 ^ mode           ^ deadline    ^ block.timestamp
+
+⭐ **The mode is the FIRST argument** — the contract reports which kind of deadline it just judged.
+Three sources now agree on the tagged union, and one of them is on-chain:
+
+    API response      "expiry": {"mode": "TIMESTAMP", "expiresAt": 1788436574}
+    packed word       0x00000000…6a99605e            high byte 0x00
+    contract revert   QuoteExpired(0, …)             mode argument 0
+
+The verified source states the encoding outright: one packed `uint256`, high byte selects the mode —
+`0x00` timestamp (valid while `block.timestamp <= deadline`), **`0x01` BLOCK HEIGHT** (valid while
+`block.number <= deadline`), `UnsupportedExpiryMode` for anything else. ⭐ So the block mode is not a
+documentation hypothetical: it is named, encoded, and enforced. Every layer offered the kind
+alongside the value, and the only way to get it wrong was to take the number and drop the tag.
+
+---
+
 # ⭐ THE QUOTE'S EXPIRY IS A TAGGED UNION, NOT A NUMBER
 
 **2026-09-03, migration step 0.** One FORWARD quote requested from the Quote API — Arc testnet (26)
