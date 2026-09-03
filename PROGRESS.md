@@ -1,5 +1,50 @@
 ---
 
+# ⭐⭐⭐ THE `unknown` COPY READ SENSIBLY IN A FIXTURE AND BADLY IN A LIST
+
+**2026-09-03, after PR-4.** The mechanic sentence was rendered unconditionally. In the pairing suite
+that looked careful — three fixtures, three distinct sentences, both directions asserted.
+
+⛔ **RENDERED AGAINST THE REAL CORPUS IT IS WALL-TO-WALL BOILERPLATE.** 57 stored receipts carry no
+mechanic, so 57 consecutive rows each carried the same 40 words:
+
+    fee 0.054204 USDC charged  This receipt predates the fee-mechanic record, so it does not say
+    whether the fee was charged on top of the amount or taken out of it. …
+    fee 0.053275 USDC charged  This receipt predates the fee-mechanic record, so it does not say …
+    fee 0.053204 USDC charged  This receipt predates the fee-mechanic record, so it does not say …
+
+🚨 **A CAVEAT REPEATED ON EVERY ROW IS ONE NOBODY READS** — and it buried the single row that said
+something different. The disclaimer existed to make an absence visible, and at scale it did the
+opposite: it made the ONE informative row invisible.
+
+## ⛔ AND ON THOSE ROWS IT WAS NOT MERELY NOISY — IT WAS IRRELEVANT
+
+Every sampled receipt is `minted` with `delivery: "measured"` and an `amountDelivered` **read from
+the destination chain**. The mechanic explains how a DERIVED figure was reached. It says nothing
+about a measured one. ⭐ The disclaimer was explaining an ambiguity the chain read had already
+resolved — a caveat about arithmetic, printed beside an observation.
+
+## THE RULE, AND IT IS PRINCIPLED RATHER THAN COSMETIC
+
+**EXPLAIN A DERIVATION, NEVER A MEASUREMENT.** The sentence renders where a figure depends on the
+mechanic — an in-flight `netPredicted`, an unconfirmed estimate — and stays silent where the number
+is an observation. ⚠️ Silence about the mechanic is not silence about the money: the measured row
+still reports "arrived — exactly 0.945900 USDC, read from the destination chain", and the guard
+asserts that dropping the sentence did not drop the reading it sat beside.
+
+## ⭐⭐ ONLY THE LIST COULD HAVE SHOWN THIS
+
+The pairing suite was green before and after. Every fixture-level property it asserts — the copy is
+distinct per mechanic, each renders its own and neither other, the label matches the arithmetic —
+was true the whole time and is still true. **The defect was not in any row. It was in fifty-seven
+of them together**, and no assertion over one row can see it.
+
+⚠️ This is the same family as rendering a component instead of grepping its source, one level up:
+there, the artifact was the rendered row rather than the file; here, the artifact is the rendered
+LIST rather than the row. ⭐ The discriminating question: *what does this look like on the corpus
+that actually exists, not on the example I wrote?*
+
+
 # ⭐⭐ THE FEE MECHANIC IS THREADED — the producer decides, no surface writes its own sentence
 
 **2026-09-03, migration step 4 of 4.** `shared/bridge-mechanic.mjs` + the threading.

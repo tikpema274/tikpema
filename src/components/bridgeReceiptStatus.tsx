@@ -275,10 +275,22 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
           )}
         </span>
       )}
-      {/* ⭐⭐ WHERE THE FEE WAS CHARGED — rendered from the mechanic, never composed here. ⛔ It is
-          shown for `unknown` too, and its copy claims NEITHER mechanic: a record that does not say
-          must not be made to say. Hiding it on `unknown` would let a reader assume the current one. */}
-      {(r.feeCharged != null || r.feeDisclosed != null) && (
+      {/* ═══ ⭐⭐ EXPLAIN A DERIVATION, NEVER A MEASUREMENT ═══════════════════════════════════════
+          Rendered from the mechanic, never composed here — and shown for `unknown` too, whose copy
+          claims NEITHER mechanic, because a record that does not say must not be made to say.
+
+          🚨 BUT NOT ON EVERY ROW, AND THAT WAS FOUND BY LOOKING AT THE LIST RATHER THAN A FIXTURE.
+          Rendered unconditionally it put a 40-word disclaimer on all 57 existing receipts, verbatim
+          and identical — wall-to-wall boilerplate that buries the one row saying something
+          different. A caveat repeated on every row is one nobody reads, which defeats the reason
+          for showing it.
+          ⛔ AND ON THOSE ROWS IT WAS ALSO IRRELEVANT. Every sampled receipt is `minted` with
+          `delivery: "measured"` and an `amountDelivered` READ FROM THE DESTINATION CHAIN. The
+          mechanic explains how a DERIVED figure was reached; it says nothing about a measured one.
+          The disclaimer was explaining an ambiguity the chain read had already resolved.
+          ⭐ SO IT RENDERS WHERE A FIGURE DEPENDS ON IT — an in-flight `netPredicted`, an unconfirmed
+          estimate — and stays silent where the number is an observation. */}
+      {(r.feeCharged != null || r.feeDisclosed != null) && !measured && (
         <span className="sub" style={{ display: "block" }}>{copy.summary}</span>
       )}
       {/* ═══ ⭐⭐ WHAT THE CHAIN SAYS THE FEE WAS — THREE OUTCOMES, NEVER TWO ═════════════════════

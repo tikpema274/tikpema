@@ -140,6 +140,32 @@ section("3 — 🚨 THE PAIRING, RENDERED: each mechanic's copy present AND the 
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
+section("3b — ⭐⭐ EXPLAIN A DERIVATION, NEVER A MEASUREMENT");
+{
+  // 🚨 FOUND BY LOOKING AT THE REAL LIST, NOT AT A FIXTURE. Rendered unconditionally, the mechanic
+  // sentence put a 40-word disclaimer on all 57 existing receipts — verbatim, identical, burying the
+  // one row that said something different. A caveat repeated on every row is one nobody reads.
+  // ⛔ AND IT WAS IRRELEVANT THERE. Every sampled receipt is `minted` with `delivery: "measured"`
+  // and an `amountDelivered` READ FROM THE CHAIN; the mechanic explains how a DERIVED figure was
+  // reached and says nothing about a measured one. It was explaining an ambiguity the chain read
+  // had already resolved.
+  const withFees = { amountRequested: 1, feeCharged: 0.054, feeDisclosed: 0.054, destinationLabel: "Base (Sepolia)" };
+  for (const m of BRIDGE_MECHANICS) {
+    const derived = strip(BridgeReceiptStatus({ r: { ...withFees, state: "burn_confirmed", netPredicted: 1, feeMechanic: m } }));
+    const measured = strip(BridgeReceiptStatus({ r: { ...withFees, state: "minted", delivery: "measured", amountDelivered: 0.9459, feeMechanic: m } }));
+    check(`⭐ \`${m}\`: the sentence renders where the figure is DERIVED`,
+      derived.includes(BRIDGE_MECHANIC_COPY[m].summary));
+    check(`⛔ \`${m}\`: …and is SILENT where the arrival was MEASURED`,
+      !measured.includes(BRIDGE_MECHANIC_COPY[m].summary), measured.slice(0, 100));
+  }
+  // ⚠️ AND THE MEASURED ROW STILL SAYS WHAT IT KNOWS — silence about the mechanic is not silence
+  // about the money. Dropping the sentence must not drop the reading it was sitting beside.
+  const meas = strip(BridgeReceiptStatus({ r: { ...withFees, state: "minted", delivery: "measured", amountDelivered: 0.9459 } }));
+  check("⚠️ …and the measured row still reports the amount READ FROM THE CHAIN",
+    /exactly 0\.945900 USDC/.test(meas) && /read from the destination chain/.test(meas), meas.slice(0, 120));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
 section("4 — ⛔ NO SURFACE WRITES ITS OWN SENTENCE");
 {
   // 🚨 The whole design fails if a component composes its own wording: it could render a TRUE
