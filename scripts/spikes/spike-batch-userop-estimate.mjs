@@ -81,11 +81,39 @@ const BURN_ABI = [{
 const client = circle();
 const line = (s = "") => console.log(s);
 
-/** One estimate. Returns { ok, gas } or { ok:false, kind, detail } — never throws. */
+/**
+ * One estimate. Returns { ok, gas } or { ok:false, status, detail } — never throws.
+ *
+ * ═══ 🚨 THE `source` WRAPPER — WHY THIS DIFFERS FROM THE CALL _bridge.mjs MAKES ════════════════
+ * The FIRST version of this probe copied the shape of `createContractExecutionTransaction`, which
+ * _bridge.mjs submits on every bridge, and got HTTP 400 "API parameter invalid" on the CONTROL.
+ * The two SDK methods do not take the same input, and the runtime is where that is visible:
+ *
+ *   create:    ({idempotencyKey, fee, xRequestId, ...rest}) =>
+ *                 createDeveloperTransactionContractExecution({
+ *                   entitySecretCiphertext: <injected>, idempotencyKey: <injected>,
+ *                   ...fee.config, ...rest })          // walletAddress + blockchain go FLAT
+ *
+ *   estimate:  ({source, xRequestId, ...rest}) =>
+ *                 createTransactionEstimateFee({ ...source, ...rest })
+ *
+ * ⭐ SO THE WALLET IS ADDRESSED THROUGH `source`, NOT FLAT — `{ blockchain, sourceAddress }` or
+ * `{ walletId }`. A flat `walletAddress` is simply not a field this endpoint has, which is exactly
+ * the 400 it returned. ⚠️ AND THE CREATE PATH DOES NOT NEED IT because it addresses the wallet
+ * flat AND has the SDK inject an `entitySecretCiphertext` and an `idempotencyKey` it signs with;
+ * the estimate signs nothing, so it carries neither — it is read-only by construction.
+ *
+ * ⛔ INFERRING THIS INPUT FROM THE CREATE METHOD IS THE MISTAKE, and it is a natural one: they sit
+ * beside each other, take the same `contractAddress` + `callData`, and differ only in how the
+ * wallet is named. The `.d.ts` says `source` plainly; the working in-repo example
+ * (spike-vanilla-bytes-encoding) passes a flat `walletId`, which ALSO works because the SDK spreads
+ * `...rest` into the body — so neither reference on its own shows the rule.
+ */
 async function estimate(label, contractAddress, callData) {
   try {
     const r = await client.estimateContractExecutionFee({
-      walletAddress: WALLET, blockchain: ARC.blockchain, contractAddress, callData,
+      source: { blockchain: ARC.blockchain, sourceAddress: getAddress(WALLET) },
+      contractAddress, callData,
     });
     const g = r?.data?.medium?.gasLimit ?? r?.data?.high?.gasLimit ?? "?";
     line(`  ✅ ${label} — ACCEPTED, gasLimit ${g}`);
@@ -93,11 +121,25 @@ async function estimate(label, contractAddress, callData) {
   } catch (e) {
     // ⭐⭐ THE ERROR'S SHAPE IS THE ANSWER, NOT JUST ITS PRESENCE. See the verdict block below:
     // an API-level rejection and an on-chain simulation revert settle DIFFERENT questions.
+    // 🚨 AND THE MESSAGE ALONE IS THE LEAST INFORMATIVE PART. Circle's 400s carry FIELD-LEVEL
+    // detail in the response body — "API parameter invalid" names nothing, while the body names
+    // which parameter. The first run of this probe printed only the message and cost a round trip.
     const status = e?.response?.status ?? e?.status ?? null;
-    const body = e?.response?.data ? JSON.stringify(e.response.data) : (e?.message ?? String(e));
     line(`  ❌ ${label} — REFUSED${status ? ` (HTTP ${status})` : ""}`);
-    line(`     ${String(body).slice(0, 400)}`);
-    return { ok: false, status, detail: String(body) };
+    const dump = (label2, v) => { if (v !== undefined && v !== null) line(`     ${label2}: ${
+      typeof v === "string" ? v : JSON.stringify(v, null, 2).split("\n").join("\n     ")}`); };
+    dump("message", e?.message);
+    dump("code", e?.code);
+    dump("response.data", e?.response?.data);
+    dump("errors", e?.errors);
+    // ⚠️ EVERYTHING ELSE THE OBJECT CARRIES, including non-enumerable own props, because the
+    // useful field is whichever one we did not think to name.
+    try {
+      const own = JSON.parse(JSON.stringify(e, Object.getOwnPropertyNames(e)));
+      delete own.stack;
+      dump("full error object", own);
+    } catch { /* an unserialisable error must not hide the fields above */ }
+    return { ok: false, status, detail: JSON.stringify(e?.response?.data ?? e?.message ?? String(e)) };
   }
 }
 
@@ -112,7 +154,13 @@ const approveData = encodeFunctionData({
 const p1 = await estimate("plain approve", CONTRACTS.USDC, approveData);
 if (!p1.ok) {
   line(`\n⛔ INCONCLUSIVE — the control failed, so nothing below is attributable to batching.`);
-  line(`   Fix credentials / wallet / network first. This is NOT evidence against option C.\n`);
+  line(`   ⛔⛔ Q1 (runtime validation on the self-call) and Q2 (Circle's screening of a`);
+  line(`   self-targeted contractAddress) are BOTH STILL UNANSWERED. A request the API rejected`);
+  line(`   never reached validation and never reached the chain. This run is NOT evidence against`);
+  line(`   option C and must not be recorded as any.`);
+  line(`   ⚠️ The FIRST failure of this control was the probe's own request shape — a flat`);
+  line(`   walletAddress where the estimate endpoint wants \`source\`. If it fails again, diff the`);
+  line(`   request against the SDK RUNTIME (bc vs Tc), not against the create method's types.\n`);
   process.exit(2);
 }
 

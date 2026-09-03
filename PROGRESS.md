@@ -1,5 +1,52 @@
 ---
 
+# ⚠️ THE ESTIMATE ENDPOINT DOES NOT TAKE THE CREATE ENDPOINT'S INPUT — a 400, and Q1 is still open
+
+**2026-09-03.** The batch probe's CONTROL failed with `HTTP 400 "API parameter invalid"`. The control
+is a plain approve — the exact shape `_bridge.mjs` submits on every bridge — so the failure was the
+probe's own request, not the wallet, the credentials or the network.
+
+## THE DIFFERENCE, READ FROM THE SDK RUNTIME RATHER THAN INFERRED
+
+    create:    ({idempotencyKey, fee, xRequestId, ...rest}) =>
+                  createDeveloperTransactionContractExecution({
+                    entitySecretCiphertext: <injected>, idempotencyKey: <injected>,
+                    ...fee.config, ...rest })            // walletAddress + blockchain go FLAT
+
+    estimate:  ({source, xRequestId, ...rest}) =>
+                  createTransactionEstimateFee({ ...source, ...rest })
+
+⭐ **THE WALLET IS ADDRESSED THROUGH `source`, NOT FLAT** — `{ blockchain, sourceAddress }` or
+`{ walletId }`. A flat `walletAddress` is not a field the estimate endpoint has, which is precisely
+the 400. ⚠️ And the create path does not need `source` because it addresses the wallet flat AND has
+the SDK inject an `entitySecretCiphertext` and an `idempotencyKey`; the estimate **signs nothing**,
+so it carries neither — read-only by construction.
+
+## ⛔ WHY INFERRING IT FROM THE CREATE METHOD IS THE NATURAL MISTAKE
+
+The two methods sit beside each other, take the same `contractAddress` + `callData`, and differ only
+in how the wallet is named. ⚠️ **AND NEITHER AVAILABLE REFERENCE SHOWS THE RULE ON ITS OWN:** the
+`.d.ts` states `source` plainly, while the working in-repo example
+(`spike-vanilla-bytes-encoding.mjs`) passes a **flat `walletId`** — which also works, because the SDK
+spreads `...rest` into the body. So the type and the working example disagree about the shape, both
+are right, and only the runtime says why.
+
+⭐ Two remedies, both landed: the probe now sends `source`, and its error handler prints the **full
+response body** rather than the message. Circle's 400 message — "API parameter invalid" — names no
+field; the body does, and printing only the message cost a round trip.
+
+## ⛔⛔ AND THE RESULT THIS RUN DID *NOT* PRODUCE
+
+**Q1 (does runtime validation accept the self-call to `executeBatch`?) and Q2 (does Circle's
+screening accept a self-targeted `contractAddress`?) are BOTH STILL UNANSWERED.** A request the API
+rejected at the parameter layer never reached validation and never reached the chain.
+
+🚨 **This run is not evidence against option C, and must never be remembered as any.** The control
+existing is the only reason that is knowable — without it, a failing batch probe and a malformed
+request produce the identical red. The INCONCLUSIVE exit now says so in the output, so the
+distinction does not depend on anyone recalling it.
+
+
 # 🚨 TMWF's UPGRADE AUTHORITY IS AN EMPTY FUNCTION BEHIND A SINGLE EOA
 
 **2026-09-03, migration step 3 — check 1 of 2, free chain reads plus the verified source.**
