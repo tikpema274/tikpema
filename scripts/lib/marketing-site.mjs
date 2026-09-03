@@ -19,3 +19,21 @@
 // therefore the WRONG helper for anything about the marketing page.
 export const SITE_ID = "a892e744-9dfc-45df-8cd4-8cd1b0c480b4";
 export const SITE_DOMAIN = "tikpema.xyz";
+
+// ═══ ⭐ MEASURED 2026-09-03 — `tikpema274` IS BOTH A TEAM SLUG AND A SITE NAME ══════════════════
+// The note above says the name is ambiguous. This is the concrete shape of it, and the failure it
+// produces reads like DELETION rather than like ambiguity:
+//
+//   site  tikpema274  a892e744-9dfc-45df-8cd4-8cd1b0c480b4  custom_domain tikpema.xyz
+//                     ↳ lives in the **salifuimorosandow** team
+//   team  tikpema274  6a2d60a96569da5544221758
+//                     ↳ contains ONE site, `readytodeploy`, never published
+//
+// 🚨 SO `listSitesForAccount --data '{"account_slug":"tikpema274"}'` RETURNS THE MARKETING SITE'S
+// NAMESAKE TEAM AND NOT THE MARKETING SITE. It answers with one unpublished site, exit 0, no error
+// — indistinguishable from "the site is gone". The scoping looks obviously correct precisely
+// because the slug matches the site name.
+// ⭐ Use `listSitesForAccount` on **salifuimorosandow**, or filter any listing on
+// `custom_domain === SITE_DOMAIN`, which is the derivation this file already mandates.
+// [[probe-must-discriminate-between-states]] — an empty listing here means "wrong team" OR
+// "deleted", and nothing in the response tells you which.
