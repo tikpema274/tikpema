@@ -1,5 +1,175 @@
 ---
 
+# ⛔ THE FEE BINDING'S INSTRUMENT DISAPPEARS UNDER ADOPTION — a design item, not a guard update
+
+**2026-09-03, migration step 2.** `_depositForBurn` hardcodes `BurnMessageV2Lib.EMPTY_MAX_FEE` (`= 0`)
+when it calls TokenMessengerV2 — the fee was already collected upfront, so **there is no `maxFee` in
+the burn calldata to decode.**
+
+`verify-bridge-fee-binding`'s central claim — *"the figure shown is the figure signed, decoded from
+the calldata"* — loses its subject. The bound figure moves into the opaque `signedQuote`.
+
+## THE REPLACEMENT CLAIM IS SMALLER, AND SAYING SO IS THE POINT
+
+Decoding is available: `abi.decode(signedQuote[1:], (Quote))` after the version byte, then
+`items[i].amount` for the item whose `quoteType` is `"FORWARD"`. That yields:
+
+> *the `feeTotalAmount` we DISPLAYED is the one inside the `signedQuote` we SUBMITTED.*
+
+⛔ **But that is not the claim the current guard makes.** Today's decode reads the value **THE CHAIN
+ENFORCES** — `maxFee` in the calldata IS the ceiling the protocol applies, so decoding it is reading
+the enforced number. The adoption decode reads a value we then **TRUST THE CONTRACT TO HONOUR**: our
+blob says 53830, and the enforcement lives in Circle's signature and their collection code, not in
+anything we can read from what we sent.
+
+⭐ **THE GAP CLOSES WITH A POST-BURN RECONCILIATION** against the actual fee transfer — the ERC-20
+movement of `feeToken` from the wallet, observed on-chain after the burn — not by renaming the guard
+to match the weaker claim. ⚠️ Note Arc emits TWO Transfer logs per movement (native 18-dp and ERC-20
+6-dp, different emitters), so that reconciliation has to pin the emitter.
+
+🚨 **THIS NEEDS DESIGN BEFORE ADOPTION, NOT AFTER.** The fee binding is the proof this entire bridge
+thread was built to earn — the consent-fee work, the seal, `feeDisclosed`/`feeCharged`, the ack band.
+Adopting first and reconstructing the proof afterwards would mean shipping a money path whose central
+guarantee is temporarily unproven, which is the one trade this codebase has consistently refused.
+
+---
+
+# ⚠️ `minFinalityThreshold` SILENTLY MOVES FAST → SLOW, AND IT IS UNMEASURED
+
+**2026-09-03.** `_inferParamsFromQuote`:
+
+    minFinalityThreshold = quotedForPreFinality ? FAST_FINALITY_THRESHOLD : SLOW_FINALITY_THRESHOLD;
+                                                  // 1000                    2000
+
+A **FORWARD-only quote is the only kind available from Arc** (PRE_FINALITY is N/A there), so adoption
+yields **2000 — SLOW** — where we send `FAST_FINALITY = 1000` explicitly today. Nothing warns; the
+parameter is inferred from the quote's item types, not passed.
+
+⭐ It is probably harmless: Arc's Fast Transfer is N/A *because* standard attestation is already fast
+there, and measured Arc→Base settlements were 21 / 25 / 29 s against a 4-minute `MINT_DEADLINE_MS`.
+
+⛔ **BUT "PROBABLY HARMLESS" IS AN INFERENCE, AND `MINT_TIMING` IS NOW A BOUND CONSTANT WITH SEVEN
+DERIVED SURFACES.** A settlement-time change would make seven user-facing statements wrong at once,
+and the receipt bands would flag mints overdue that are merely slower. **This requires its own
+measured burn at threshold 2000 before adoption** — one observation, on our route, recorded.
+
+---
+
+# ✅ DECIDED: NO OVER-APPROVAL — and two corrections to how the approve works
+
+**2026-09-03.** The question was whether to approve once for more than needed, to avoid re-approving
+as the required allowance moves with every quote. **Decided: no.**
+
+* **The benefit is small**, because the approve already fires on almost every bridge (below).
+* **`TokenMessengerWithFees` is a UUPS proxy** — its verified sources include `UUPSUpgradeable`, and
+  the address we probed is ERC-1967 with an implementation slot. A standing allowance is a permission
+  to *whatever the implementation becomes*, not to the code we read.
+* Today's between-bridge permission is **exactly zero**, and it stays that way.
+
+## ⚠️ CORRECTION 1 — TWO SITES, TWO QUANTITIES
+
+`job-bridge-approve.mjs:143`'s "REQUIRED = amount, NO BUFFER" governs a **BALANCE** pre-flight — how
+much USDC the wallet must HOLD. The **ALLOWANCE** decision is `_bridge.mjs:507`. Both become wrong
+under adoption, for the same reason and in different places: the wallet must HOLD amount + fee, and
+must APPROVE amount + fee to a different spender. Reading the comment as the allowance rule would
+fix one and leave the other.
+
+## ⚠️ CORRECTION 2 — THE APPROVE IS NOT SKIPPED TODAY
+
+`approve(BRIDGE_CONTRACT, amountMinor)` grants EXACTLY the amount; the burn's `transferFrom` consumes
+exactly that; the allowance returns to **0**. So the next bridge always re-approves. The documented
+"skipped when a standing allowance covers it" case only fires on a LEFTOVER from a burn that failed
+after its approve. ⭐ **Adoption therefore adds ≈ zero approves — it changes the AMOUNT, not the
+FREQUENCY** — which is most of why over-approval buys so little.
+
+Both figures must come from the SAME quote whose `signedQuote` is submitted, or the allowance and the
+charge have two sources. And the allowance is a REQUIREMENT: it rounds UP.
+
+---
+
+# ⛔ SIX SITES, NOT ONE — and the census answer was WIDEN
+
+**2026-09-03.** `job-bridge-approve.mjs` was reported as a lone survivor of the morning's directional-
+rounding fix. It was not: **six server functions carried the identical shape**, where the gate
+compares full precision and the message renders 2dp.
+
+    agent-send:105 · agent-vault-deposit:52 · agent-withdraw:134
+    job-bridge-approve:160 · job-swap-approve:147 · dca-tick:570
+
+`dca-tick:570` was found by the census, not by me. The JSON `have`/`need` fields were rounded too —
+`need: Number(amount.toFixed(2))` — which is a REQUIREMENT rounded DOWN in the machine-readable
+payload an agent acts on. Those are now exact.
+
+⭐ **THE HELPERS MOVED TO `shared/amount-direction.mjs`**, with `src/lib/formatAmount.ts` re-exporting
+them. A netlify function cannot import from `src/`, and copying two helpers across would have been the
+duplicate-source defect *inside the module whose whole subject is a number being right in one place
+and wrong in another*. Same reasoning as `shared/bridge-timing.mjs`.
+
+## ⭐⭐ AND A GUARD HAD BEEN DRIVING THE DEFECT ALL ALONG
+
+`test:all` came back **85/1** on the first run, and the failure was CORRECT:
+`verify-approve-balance-gate:80` pinned `/Have 6\.30 USDC, need 10\.00/` — the 2dp rendering that
+**was** the defect. Re-pinned to the PROPERTY (both figures at 6-dp, and the printed pair reading as
+a genuine shortfall) rather than the format.
+
+⛔ **Its ORDERING case seeds `9.999999` against `10`** — exactly the shortfall that rendered
+*"Have 10.00 USDC, need 10.00."* It asserted `status` and `execCalls` and never looked at the
+message. **A suite that EXERCISES a defect without asserting on it is not neutral: it is evidence the
+path was covered.** The census found the source line; this guard had the rendered output in hand on
+every run since it was written. That case now asserts the message too — 14 → 16 checks.
+
+⚠️ **WHY THE MORNING FIX MISSED THEM.** It touched the two CLIENT sites because that is where I had
+looked, and §3b pinned those two BY NAME. A named-site check is a guard against the instances already
+fixed. The census (§3c) now prints its denominator — **9 sites · 0 nearest-rounded · 9 directional** —
+so the next instance is counted rather than remembered.
+
+---
+
+# ⛔⛔ A DETECTOR BLIND TO ITS OWN REPAIR GOES GREEN ON THE NEXT INSTANCE
+
+**2026-09-03.** The first version of the have/need census scanned **one line at a time**. It found
+**4 of 6** sites — and the two it missed were missed for a reason that matters more than the count:
+
+**the fix splits the string across a `+`**, so a one-line scan cannot see a sentence that the repair
+itself made two lines long.
+
+⛔ Every site repaired the correct way would have become invisible to the check meant to police it.
+It would have gone green forever, and looked thorough doing it.
+
+⭐ **SAME FAMILY AS esbuild FOLDING A CONCATENATED TEMPLATE**, found the same day on the deploy probe:
+both are source-level assumptions about how text is laid out, and both were wrong **in opposite
+directions**. A minifier joins what you split; a line scanner splits what you joined. Neither
+assumption survives contact with a real artifact.
+
+The scan reads a WINDOW now, and its anchor accepts EITHER half of the pair — `metamask.ts` says
+"need ~X … have Y", need first, and an anchor demanding `have` on the opening line missed it
+entirely. ⚠️ **Two blind spots, and both were found by widening the scan, not by its assertions.**
+
+---
+
+# ⚠️ `node --check` PASSES AN UNDEFINED IDENTIFIER
+
+**2026-09-03.** `dca-tick.mjs` was edited to use `USDC_DECIMALS`, which the file did not import.
+`node --check` **passed**. The syntax is valid; an undefined identifier is a runtime
+`ReferenceError`, and the parser has no opinion about it. Five other edited modules passed the same
+check for the same empty reason.
+
+⛔ **It was caught by a stray grep** that happened to print "NOT in scope" — not by the check that was
+supposed to catch it. Without that line the commit would have shipped a money-path function whose
+refusal branch throws instead of refusing: the branch that fires when a user is SHORT OF FUNDS would
+500. And that branch is precisely the one nobody exercises by hand.
+
+⭐ **The check that answers the right question is an IMPORT** —
+`node -e "import('./netlify/functions/X.mjs')"` resolves every specifier and evaluates module scope,
+so an out-of-scope identifier surfaces. Every edited module is verified that way now.
+
+⚠️ **NOT WIRED INTO THE PRE-COMMIT HOOK, DELIBERATELY:** importing a netlify function executes its
+module scope, and several build a Blobs handle or read env at load — a hook must not have side
+effects. So this is a HABIT with its reason written at `.githooks/pre-commit`, and the honest
+statement is that **nothing automated catches it**, the same shape as that hook's `--no-verify` limit.
+
+---
+
 # ⭐ THE AMOUNT IS NOT BOUND for a FORWARD quote — two instruments, not a failed search
 
 **2026-09-03, migration step 1.** Step 0 noted that `0x1e8480` did not appear in the quote response
