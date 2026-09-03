@@ -1,5 +1,103 @@
 ---
 
+# ⭐ THE RECONCILIATION'S CLAIM IS SMALLER THAN SKETCHED — and the smaller one is correct
+
+**2026-09-03, migration step 2.** I proposed a post-burn reconciliation against the actual fee
+transfer to replace the calldata decode. Reading `_collectFees` shrank the claim, and the shrinking
+is the finding rather than a compromise:
+
+    uint256 feeAmount = _FEE_MANAGER.collectFeesWithQuote{value: msg.value}(…);
+    assert(feeAmount == quotedFee);
+
+⭐⭐ **QUOTED-VS-COLLECTED IS ENFORCED ON-CHAIN.** A transaction in which they differ **reverts**. So
+the reconciliation does not check Circle at all — that job is already done, by an assert, atomically.
+
+**What is left for us is DISPLAYED vs SUBMITTED:** that the `feeTotalAmount` we showed a user is the
+one inside the quote we sent. Our-side drift only — the same class the sealed quote already guards at
+issue time, checked again after the fact against what actually moved.
+
+⚠️ Recording this as the correct claim, not a weakened one. The instinct on losing the calldata decode
+was to find something equally strong; the honest outcome is that most of that strength was already
+provided by the contract, and the part that was ours is narrower than the sentence I first wrote.
+
+## SEPARABILITY — MEASURED, not inferred
+
+**41 real `depositForBurnWithFees` calls found on Arc testnet; six receipts pulled.** The fee is its
+own `Transfer` with its own value and a distinguishable recipient chain — **not** a balance delta:
+
+    payer -> TokenMessengerWithFees -> FeeManager 0x08499fce… -> 0xf992efcb… -> 10/90 split
+    e.g. tx 0xff3afc0f…  burn 0.250000  ·  fee 0.152458 = 0.015245 + 0.137212
+
+Source agrees: `_collectFees` moves the fee in a **dedicated `safeTransferFrom` before the amount is
+touched**, so the two are separate calls with different values even where both land on the same
+address.
+
+---
+
+# ⚠️ ZERO OF 41 OBSERVED BURNS USED THE ERC-20 FEE PATH — the one we need
+
+**2026-09-03.** All six sampled receipts paid the fee **natively** (`msg.value`). The fee legs appear
+only in the `0xffff…fffe` 18-dp stream; the ERC-20 emitter `0x3600…0000` carries **only the burn
+amount**.
+
+⛔ **AND THE ERC-20 PATH IS OURS**, because a gasless Circle SCA cannot attach `msg.value`. So the
+predicted `Transfer(payer → TMWF, quotedFee)` from `0x3600…` comes from **VERIFIED SOURCE, not from an
+observation**. It is a prediction, and it is labelled as one.
+
+**Second unmeasured item in this migration**, alongside `minFinalityThreshold` FAST → SLOW. Both
+resolve on the first real burn, which is why that burn is now PRE-REGISTERED
+(`docs/erc20-fee-burn-preregistration.md`) with its expected logs, emitters, precisions and six
+falsifiers written down BEFORE it runs.
+
+## ⛔ AND ARC'S DUAL EMISSION LANDS SQUARELY HERE
+
+Every movement appears **twice** — native 18-dp from `0xffff…fffe` and ERC-20 6-dp from the token —
+from **different emitters**. Visible in the receipt above: the burn amount is logged at both
+precisions, and the fee (native path) only at one.
+
+🚨 **A reconciliation summing `receipt.logs` without pinning the emitter double-counts by ~1e12.**
+That is the single most likely implementation error in this design, it was already recorded as a
+general Arc property, and this is the first place it becomes a money-path hazard rather than a note.
+
+---
+
+# THE POST-BURN RECONCILIATION IS A DETECTOR, NOT A GATE
+
+**2026-09-03.** Stated explicitly because the design question follows from it: **the burn has already
+happened when this runs.** It cannot prevent a wrong charge. It can only make one visible — so the
+question is not "does it pass" but **what happens when it disagrees, and who sees that.**
+
+## THREE OUTCOMES, NEVER TWO
+
+    MATCHED          the fee that transferred equals the quoted fee we displayed
+    MISMATCHED       it does not — a real finding
+    COULD-NOT-READ   the transfer log was unreadable or absent
+
+⛔ **COULD-NOT-READ IS NOT MATCHED**, and it is not hypothetical: `_receipt.mjs` has the null-fallback
+history that made *"an exhausted read is not a reading"* a rule here, and public-RPC retention makes
+an older burn unreadable **by design**. At re-verification time it is the COMMON case, not the edge.
+It is stored as a first-class value, never coerced, and never rendered as a tick.
+
+## THE DISAGREEMENT PATH
+
+* **Receipt** — a typed `feeReconciled` outcome plus `feeObserved` (the value read from the log),
+  beside the existing `feeDisclosed` / `feeCharged` pair this extends.
+* **Alert** — on MISMATCHED only. The figure a user consented to is not the figure that moved, which
+  is what the ledger-failure shout exists for.
+* **What the user is told** — on MISMATCHED the receipt names **both figures and which was charged**,
+  in the caller's terms. Not "reconciliation failed". A verdict without its numbers cannot be acted on.
+
+## ⭐ RUN ONCE, PROMPTLY, STORE THE VERDICT
+
+Retention makes COULD-NOT-READ dominate over time, so **re-deriving on every receipt view would decay
+a real MATCHED into an unknown as the burn ages** — the record getting worse while appearing to be
+checked each time. Store the verdict AND the raw reading, so a later reader inherits the answer and
+the evidence rather than the obligation to re-fetch.
+⚠️ A reconciliation nobody reads is the observation-that-does-not-survive failure again — the third
+mechanism of that family, and the reason this paragraph is a design constraint and not a preference.
+
+---
+
 # ⛔ THE FEE BINDING'S INSTRUMENT DISAPPEARS UNDER ADOPTION — a design item, not a guard update
 
 **2026-09-03, migration step 2.** `_depositForBurn` hardcodes `BurnMessageV2Lib.EMPTY_MAX_FEE` (`= 0`)
