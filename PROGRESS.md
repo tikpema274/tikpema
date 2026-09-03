@@ -1,5 +1,182 @@
 ---
 
+# ⛔ THE PRE-REGISTRATION CONTRADICTED ITSELF — and only the receipt made the two clauses meet
+
+**2026-09-03, migration step 3.** Falsifier 6 read: *"More than one `0x3600…` Transfer of value `F`."*
+§1's own prediction table, in the same document, predicts **both** such legs — row 1a (`P → TMWF, F`)
+and row 3 (`TMWF → FeeManager, F`).
+
+**The document declared falsifying the behaviour it predicted.** The receipt showed two, exactly as
+§1 said it would, and the run stopped on a falsifier that could never have failed to fire.
+
+⭐ Recorded as a defect in the pre-registration, **not a finding about Circle**. And the protocol was
+followed anyway: recorded and stopped, steps 5 and 6 not run. Rewriting the falsifier after seeing
+the receipt is the precise edit a pre-registration exists to prevent — even when, as here, the edit
+would obviously be correct.
+
+## ⭐ THE FIX FOR NEXT TIME — DERIVE FALSIFIERS FROM THE TABLE
+
+The two sections were written **side by side, in prose, by the same hand in one pass**. Nothing forced
+them to agree, and reading them in sequence did not surface the conflict — the table says "expect two"
+and the falsifier says "two is failure", and those sentences are eleven lines apart.
+
+**A falsifier must be derived FROM a predicted row, not authored alongside it.** Each falsifier states
+the negation of a specific row, so a falsifier contradicting a prediction cannot be written: it would
+have to negate the row it came from. The second pre-registration is built that way — every falsifier
+carries the row number it inverts.
+
+⚠️ Same family as a detector blind to its own repair, one layer up: two artefacts that must agree,
+with nothing making them agree.
+
+---
+
+# ⭐ WHAT THE STEP-3 BURN DID ESTABLISH
+
+**2026-09-03.** Burn `0xa47d22b8…651512`, status `0x1`, block 60266103, 22 logs, 0.053972 USDC of
+fee+amount. Setting aside the fired falsifier and the wallet-type retraction, four things are now
+observed on real bytes rather than predicted:
+
+* **`callData` carries the quote tuple.** 868 bytes encoding `{signedQuote, refundAddress}` submitted
+  through `createContractExecutionTransaction` and passed to the chain unaltered. Real bytes, not an
+  analogy to the existing `bridgeWithPreapprovalAndHook` call. ⚠️ From an EOA — see the retraction.
+* **The ERC-20 fee path emits as predicted.** `Transfer(payer → TMWF, 53971)` from `0x3600…0000`,
+  distinct from the amount leg. This closes the ZERO-OBSERVATION gap the pre-registration existed for:
+  all 41 prior burns used the native path.
+* **The ~1e12 dual-emission double-count is confirmed, not inferred.** 7 Transfer logs in the ERC-20
+  stream and 7 in the native, every movement in both. Merging would report the fee as 107942 and the
+  amount as 2.
+* **The 10/90 split held exactly** — `5397 + 48574 = 53971` — carried over from a native-path
+  observation and explicitly labelled at the time as something the run would measure, not assert.
+
+⭐ And the displayed-vs-submitted check, the one the whole reconciliation exists to make:
+**`53971 == 53971`**, the fee log's value against the submitted quote's `feeTotalAmount`.
+⚠️ Observed ONCE, on one route, at one amount. One observation is not a distribution.
+
+---
+
+# 🚨 GAS WAS NOT SPONSORED — 22% on top of the fee, and an OPEN ADOPTION QUESTION
+
+**2026-09-03.** The wallet paid **0.011835 USDC** in gas across the two transactions:
+
+    approve   gasUsed  55426 × 30459500000  =  0.001688
+    burn      gasUsed 398642 × 25453000000  =  0.010147
+    fee + amount .................. 0.053972
+    total ......................... 0.065807   == the measured balance delta, residual 0.000000
+
+`from` on both receipts is the wallet itself. **22% on top of the fee**, against a migration premise
+that our agents are gasless.
+
+## ⛔ ATTRIBUTED TO THIS WALLET, NOT THE PATH — AND THE ATTRIBUTION IS NOW EXACT
+
+The immediate cause is that `VANILLA_SELLER` is an **EOA**, which Gas Station cannot sponsor by
+construction. Not a policy gap and nothing to do with the target contract.
+
+`job-bridge-approve.mjs` records the opposite for the agent wallet: *"gas is SPONSORED: two prior
+successful bridges each dropped the wallet by EXACTLY 10.000000 (balanceOf delta, measured)."*
+
+⛔ **BUT THOSE TWO BRIDGES TARGETED `BridgingKitContract`. `TokenMessengerWithFees` IS A NEW TARGET,
+AND SPONSORSHIP AGAINST IT MUST NOT BE INFERRED FROM THEM.** Recorded as an OPEN ADOPTION QUESTION.
+⭐ The read-only evidence points strongly toward coverage — Circle's documented policy attributes have
+no contract dimension at all — and the residual is per-account configuration (blocklist, daily limit),
+readable from the Gas Station API without spending. It should be read before the resumed run, not
+discovered by it.
+
+---
+
+# ⚠️ I WROTE A DELTA I COMPUTED AND PRESENTED IT AS ONE I READ
+
+**2026-09-03.** Commit `2f4ed4e`'s message states *"Post-run: balance 0.260300 (delta −0.053972)"*.
+That was `0.314272 − 0.053972` — **arithmetic, produced before the balance was read**. The measured
+value is **0.248465, delta −0.065807**.
+
+The gap is gas and closes to **zero residual**, so the correction also produced the finding above —
+but that is luck about the direction of the error, not a defence of it.
+
+⛔ **AN ARITHMETIC WEARING A MEASUREMENT'S CLOTHES.** Same class as the withdrawn have/need fixture
+earlier the same day: a value that was *derived* presented in the position where a *reading* belongs,
+in a record other people will trust. A pushed commit message cannot be edited, so the correction had
+to be appended elsewhere and cross-referenced — which is the cost of the mistake, and the reason to
+read first even when the arithmetic is obvious.
+
+⭐ THE RULE THIS KEEPS PRODUCING: mark every number MEASURED or DERIVED at the point of writing. The
+delta was one subtraction away from correct and still wrong, because gas was not in my model — and a
+measurement would have carried the gas whether or not I had thought of it. **That is what reading is
+for: it includes what you forgot.**
+
+---
+
+# 🚨 THE WALLET WAS AN EOA, NOT AN SCA — so the run did not test the path I said it did
+
+**2026-09-03.** I chose `VANILLA_SELLER` for the step-3 burn and wrote *"it is a Circle SCA, so gas is
+sponsored"*. **I never checked.** `eth_getCode` settles it:
+
+    VANILLA_SELLER  0x1a63e59d…18dc99      0 bytes    <- EOA
+    AGENT_WALLET    0xc54d4721…b4e621    209 bytes    <- deployed SCA
+    control USDC    0x3600…0000         1798 bytes
+    control unused  0x…dEaD                0 bytes
+
+⚠️ Zero bytes alone means *EOA or undeployed SCA* — but this wallet originated two transactions with
+`from` equal to itself, which an undeployed account cannot do. It is an EOA.
+
+## ⛔ WHAT THIS RETRACTS
+
+I reported *"the SCA carried the quote tuple — that open question is closed affirmatively."*
+**That is false.** An **EOA** carried it. The burn was a **plain transaction** (`from` = the wallet,
+`to` = TMWF), not a bundled ERC-4337 userOp, which would have shown `from` = bundler, `to` =
+EntryPoint. The SCA feasibility question is exactly as open as it was before the burn.
+
+⭐ What the run DID establish about submission: `createContractExecutionTransaction` accepts 868 bytes
+of `callData` encoding `{signedQuote, refundAddress}` and Circle submits it unaltered. The encoding
+is not the risk. The SCA path adds the bundler, the EntryPoint and the 1098 async-hash race — none of
+which this transaction went near.
+
+## ⭐ AND IT EXPLAINS THE GAS, CATEGORICALLY
+
+Circle's docs: *"On EVM chains, the Programmable Wallet must be an ERC-4337-compliant smart contract
+account… `accountType: SCA`."* **An EOA is ineligible for Gas Station by construction.** The 0.011835
+USDC was not a policy gap, a target restriction, or a daily-limit exhaustion. It was the only possible
+outcome for that wallet, and I could have known before spending.
+
+---
+
+# ⭐ CAN THE SPONSORSHIP QUESTION BE SETTLED WITHOUT A BURN? — mostly, and the gap is named
+
+**2026-09-03, read-only.** Circle's documented Gas Station **policy attributes** are:
+
+    Network · Maximum Daily Spend · Maximum Transaction Spend ·
+    Maximum Operations per Day · Blocklist (wallets excluded)
+
+⭐⭐ **THERE IS NO CONTRACT ALLOWLIST AND NO SELECTOR SCOPING IN THE DOCUMENTED ATTRIBUTES.** The only
+wallet-level scoping is a BLOCKLIST — exclusion, not inclusion. On testnet Circle auto-provisions a
+default policy; **Arc Testnet's sponsored token is USDC with a daily limit of 50.**
+
+Two prior in-house readings agree and one dissents:
+
+* `gasstation-sponsors-any-target-deployed-msca` — proven 2026-07-13 with a **control-vs-test probe,
+  one wallet, one session, only the target differing**. Gas Station is not gated on the target.
+* `_delegate.mjs:36-39` — the paymaster `0x7ceA357B…0a25` decoded from real EntryPoint
+  `UserOperationEvent`s: per-user SCA userOps on Arc **are** sponsored.
+* ⚠️ `_delegate.mjs:40` dissents — *"Gas Station policies can be contract-scoped, and we have not
+  proven GatewayWallet is in"*. That caution is **not supported by the documented attribute list**,
+  and it was written as a precaution rather than from an observation.
+
+## THE ANSWER, WITH ITS LIMIT
+
+**`TokenMessengerWithFees` would be covered under the existing policy** — the policy has no dimension
+on which a new target could fall outside it, and a same-wallet control-vs-test probe already showed
+target-independence on Arc.
+
+⛔ **BUT THE POLICY OBJECT ITSELF WAS NOT READ.** Everything above is the documented *shape* of a
+policy plus prior observations; I did not fetch this account's actual policy, so I cannot rule out a
+blocklist entry or an exhausted daily limit. **The residual question is per-account configuration, not
+per-contract scoping** — and that distinction is the useful part, because it means a burn is not the
+instrument. The cheaper settlement is to read the policy via the Gas Station API or dashboard.
+
+⭐ So: **not settleable to certainty from public docs alone, but the remaining uncertainty is one API
+read away and does not require spending.**
+
+---
+
 # ⭐ THE RECONCILIATION'S CLAIM IS SMALLER THAN SKETCHED — and the smaller one is correct
 
 **2026-09-03, migration step 2.** I proposed a post-burn reconciliation against the actual fee
