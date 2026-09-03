@@ -1,5 +1,227 @@
 ---
 
+# ⭐⭐ THE FEE RECONCILIATION IS BUILT — a DETECTOR, pinned to emitter AND movement
+
+**2026-09-03, migration step 1 of 4.** The design was reported and approved; this is the build.
+`_fee-reconcile.mjs` (pure reader + verdict) and `bridge-fee-reconcile-background.mjs` (the internal
+boundary). `test:feerecon` **88/0**, `test:bridgecopy` **86 → 99**, `test:spikes` **14 → 16**.
+
+## THE CLAIM, AND IT IS SMALLER THAN IT LOOKS
+
+`_collectFees` ends in `assert(feeAmount == quotedFee)` — quoted-vs-collected is enforced on-chain
+and a mismatch REVERTS. So this checks **displayed vs submitted**: that the `feeDisclosed` a user
+consented to is the figure that moved. Our-side drift only.
+
+## ⭐⭐ `(emitter, from, to)` DOES NOT DISCRIMINATE THE FEE FROM THE AMOUNT
+
+Both legs are `payer → TMWF` from the same emitter — run 2's logs 51 and 63. The fee is identified
+by the leg that carries it **onward**: only the fee moves `TMWF → FeeManager`. The amount goes
+`TMWF → minter → 0x0`.
+
+⭐ **DELIBERATELY NOT POSITIONAL.** "The fee is the first of the two" is true in source order and in
+both real receipts, and it is still an ordering assumption. The FeeManager leg is a fact about where
+the money went, which is the thing being reconciled. A positional mutation (`charges.slice(0,1)`) is
+one of the fifteen proven caught.
+
+    run 1 (EOA, plain tx)   fee 53971   amount leg 1   erc20 7 / native 7
+    run 2 (SCA, userOp)     fee 53985   amount leg 1   erc20 7 / native 8
+
+Both read by ONE code path — no branch on wallet type or submission shape. The values reproduce
+PR-1's and PR-2's RESULT sections, which were written before this module existed.
+
+## ⛔ NOTHING COUNTS ANYTHING
+
+The 7-vs-8 asymmetry is F5's finding — the EntryPoint's gas refund to the bundler, native by nature
+and incapable of having an ERC-20 twin. The suite asserts the fixture **contains** that asymmetry, so
+a count-based reader would fail on it. The rule from run 2 is now structural, not a note.
+
+## THREE OUTCOMES, AND A FOURTH READER STATE
+
+    matched · mismatched · unreadable        + no record at all = "never ran"
+
+The reconciler ALWAYS writes a record, so absence means the reconciler never ran — a distinct state
+from `unreadable` ("it ran and could not tell"), rendered distinctly, and never as a tick. Nine
+reasons in a closed set, both directions asserted: no reason emitted that is undeclared, no reason
+declared that is unreachable.
+
+⭐ `not_upfront_fee_path` IS THE EXPECTED VERDICT UNTIL STEP 3 LANDS. Today's bridges burn through
+`BridgingKitContract` and never touch TMWF, so there is no fee leg and there never was one. It gets
+its own reason and its own sentence — "this bridge did not use the upfront-fee path" — because that
+is not the same finding as "we tried to read the fee and failed", and only the second is a problem.
+⚠️ The detector therefore ships LIVE rather than dormant, exercised from day one on real receipts.
+
+## WHERE IT LIVES, AND WHY NOT ON THE RECEIPT
+
+Its own key, `fee/<owner>/<burnHash>`, **write-once**, joined at read time.
+
+🚨 **NOT UNDER `o/<owner>/`.** `listByOwner` prefix-lists that namespace and returns every blob whose
+`owner` cross-check passes — a verdict there would come back AS A RECEIPT, one with no `state`, which
+is this panel's documented render-nothing failure. The suite demonstrates rather than asserts it: the
+same record under the receipt prefix DOES come back as a stateless row (the control), and under
+`fee/` it does not.
+
+⭐ **WRITE-ONCE BECAUSE RETENTION ONLY MAKES THE ANSWER WORSE.** The first reading is the best one
+this system will ever have; re-deriving on each view would decay a real `matched` into `unreadable`
+as the burn ages — the record getting worse while appearing checked each time.
+
+## TWO NEW SERVER-SOURCED FIELDS
+
+* **`payer`** — NOT `owner`. The spender is the caller's SCA; the owner is the session address, and
+  nothing downstream can derive one from the other. 🚨 On a userOp `tx.from` is the **BUNDLER**, and
+  using it scopes the read to a wallet that moved no USDC — a silent zero-candidate read, not an
+  obvious error. Pinned in the suite. Null on legacy records → `payer_unknown`, refused, never guessed.
+* **`feeDisclosedMinor`** — the quote's own integer, from the SAME object `feeDisclosed` comes from.
+  The comparison is in minor units because a log value is, so on a new receipt there is **no
+  conversion at all**. Legacy records convert exactly from the decimal or REFUSE (`disclosed_not_exact`)
+  — never round. "Compute conversions, never type them" is best satisfied by not converting.
+
+## SCOPE, STATED SO IT CANNOT BE ASSUMED
+
+⛔ **`job-bridge-approve` IS OUT**, the same deliberate exclusion the receipt writer already documents:
+it owns its own receipt system in its own store. Its bridges carry NO fee verdict, and that is a
+decision, not an oversight — written where the next editor looks, and pinned by the suite.
+
+## FIFTEEN MUTATIONS, EACH VERIFIED APPLIED
+
+Through `scripts/lib/mutate.mjs`, which refuses to report a verdict for an edit that did not land.
+Emitter pin · topic0 pin · positional fee pick · ambiguity-resolves-to-first · unreadable-becomes-
+matched · conversion-rounds · write-once-becomes-write-always · key-moves-under-`o/` · corroboration
+reverts · Arc read asks for corroboration · alert widens to `unreadable` · payer defaults to owner ·
+three on the rendered output.
+
+---
+
+# 🚨 THE SETTLER WRITES BACK A t0 SNAPSHOT — ANY CONCURRENT WRITE IS ERASED
+
+**2026-09-03. A latent bug, independent of fees, found while designing around it — and routing
+around it does NOT retire it.**
+
+`bridge-mint-settle-background` reads the receipt once, at the top:
+
+    let receipt = found;
+    receipt = { ...receipt, settlingSince: … };   // t0
+    const finish = async (patch) => {
+      const next = { ...receipt, ...patch, … };   // STILL the t0 snapshot
+      await saveReceipt(next);
+    };
+
+Between those two points it polls IRIS and the destination chain for **up to four minutes**.
+`saveReceipt` writes the whole object. So **anything any other writer puts on that receipt inside the
+poll window is silently overwritten** when the settler finishes.
+
+⛔ **AND `mint_unconfirmed` RE-CHECKS REOPEN THE WINDOW HOURS LATER**, on a receipt that has been
+sitting durably in the meantime. The re-check is a deliberate feature — "we stopped waiting" and "it
+did not arrive" are different claims — and it is exactly what makes the clobber window unbounded in
+time rather than four minutes long.
+
+⚠️ **NOTHING IS BROKEN TODAY**, because the settler is currently the only writer to a confirmed
+receipt. That is the whole hazard: the defect is invisible until a second writer exists, and the
+second writer's field simply goes missing with no error anywhere.
+
+⭐ **THE FEE VERDICT ROUTES AROUND IT** by living under its own key — see the entry above. That is a
+choice about the verdict's lifecycle (write-once versus re-entrant), and it happens to dodge this.
+**It fixes nothing.** The next person to add a field to a bridge receipt from outside the settler
+will hit this, and will spend a while wondering why their write disappeared.
+
+THE FIX, WHEN SOMEONE TAKES IT: re-read the receipt inside `finish` and merge the patch onto the
+CURRENT record rather than the t0 one. ⚠️ Not free — the lease exists precisely because two settlers
+can run, and a merge changes what "last write wins" means for the fields the settler itself owns.
+
+---
+
+# ⭐ THE ~1e12 DUAL-EMISSION HAZARD IS A FALSE ALARM, NOT A FALSE PASS
+
+**2026-09-03. Correcting yesterday's note**, which called it "the single most likely implementation
+error in this design" without saying which way it fails. Measured, on run 2's real logs: reading the
+18-dp native stream as if it were the 6-dp ERC-20 one yields **MISMATCHED at `53985000000000000`**
+against a disclosed `53985`. It is three orders of magnitude out and it shouts. Still a defect —
+just one that cannot hide, which changes how much of the design has to be spent defending against it.
+
+---
+
+# ⭐ THE TOPIC0 PIN LOOKS REDUNDANT AND IS LOAD-BEARING
+
+**2026-09-03.** `Approval(address indexed owner, address indexed spender, uint256 value)` has the
+SAME arity and the SAME two indexed addresses as `Transfer`. Run 2's log 52 is
+`Approval(TMWF → FeeManager, 53985)` — identical emitter, identical from, identical to, identical
+value to the fee `Transfer` at log 55. Dropping the topic0 pin makes the discriminating forward leg
+**ambiguous (2 matches)** rather than wrong, so the reader refuses rather than misreads — but a
+reader that pinned only addresses and a value would have had two indistinguishable candidates and no
+way to know it. Pinning "the event" is not implied by pinning "the emitter and the parties".
+
+---
+
+# ⭐⭐ ON ARC, AN ABSENCE IS ALWAYS UNREADABLE — NEVER A FINDING
+
+**2026-09-03.** `ARC.rpc` is a **single endpoint**. `rpcFallback`'s `absenceNeedsCorroboration`
+invariant — "an absence may not conclude while an endpoint has not been asked" — cannot be satisfied
+when there is nobody else to ask, so a `null` receipt on Arc is indistinguishable from a pruned or
+lagging node. Public-RPC retention makes that the COMMON case for an older burn.
+
+🚨 **AND THE HELPER USED TO CLAIM CORROBORATION IT COULD NOT HAVE.** Its flag was
+`corroborated: failures.length === 0` — trivially true when the only endpoint answers absent. A
+single-endpoint absence declared itself **corroborated by nobody**. Now `failures.length === 0 &&
+absent.length >= 2`.
+
+⚠️ **NO CALLER WAS EVER MISLED**, because every chain in `DESTINATION_CHAINS` has two endpoints and
+nothing in production reads the flag yet. The first caller to point the helper at Arc would have
+been. Both directions are pinned: a one-endpoint absence is not corroborated, and a two-endpoint one
+still is — so the fix narrowed nothing real.
+
+⭐ **THE RULE IS WRITTEN AT THE CALL SITE, NOT ONLY IN THE HELPER.** The helper exists, it looks like
+it solves exactly this, and someone will reach for it before reading its body. The suite asserts both
+that the Arc read does not pass the flag AND that the reason is written at that line.
+
+---
+
+# ⭐⭐ THREE OF MY OWN NEW GUARDS WERE HOLES, AND ONLY MUTATION FOUND THEM
+
+**2026-09-03.** All three were written in the same session, all three printed ✅, and all three would
+have shipped as coverage. They are different mistakes with one shape: **the assertion was satisfied by
+something other than the thing under test.**
+
+**1 — A CHECK WHOSE FAILURE MODE WAS A PASS.** "Every declared reason is reachable from the code"
+searched a source string that INCLUDED the declaration array itself. Every declared reason is quoted
+in its own declaration, so it could not fail for any input. Fixed by excising the declaration before
+scanning — and the excision is now itself asserted, because a strip that silently stops stripping
+restores the vacuity.
+
+**2 — AN ALERT GUARD THAT READ THE SUBSTRING, NOT THE CONDITION.** It asserted that
+`rec.verdict === "mismatched"` APPEARS and that there is one call site. Widening the real guard to
+`=== "mismatched" || === "unreadable"` satisfies both — the substring is still there, the call site is
+still one — and the suite stayed green **while the alarm had been rewired to fire on the common
+verdict**. Fixed by parsing the actual condition and requiring that no other verdict appears in it.
+
+**3 — TWO RENDER ASSERTIONS SATISFIED BY A DIFFERENT LINE.** `/0\.053985 USDC/.test(wholeRow)` was
+true because the fee line ABOVE the reconciliation sentence renders the same number. Deleting the
+figure from the sentence under test left the suite green. Fixed by scoping every figure assertion to
+the text after its own verdict marker.
+
+⭐⭐ **THE COMMON LESSON: A GUARD OVER A ROW MUST SAY WHICH LINE.** Two of the three failed because the
+haystack was bigger than the claim. ⚠️ And note the ordering — the guards were written first, ran
+green, and were only then mutated. Nothing in the green run distinguished them from sound ones.
+
+---
+
+# ⭐ A SCANNER THAT READS COMMENTS AS CODE — `test:spikes` was red on prose
+
+**2026-09-03.** Found as a pre-existing red at the session's baseline, not caused by this work.
+`verify-spike-index.mjs`'s import-resolution pass scanned RAW SOURCE, so **prose about an import
+counted as one**: `spike-erc20-fee-burn.mjs` documents a near-miss with the sentence
+«`node -e "import('./…')"` — `import()` EXECUTES A MODULE», and the scanner tried to resolve the
+literal path `./…`. The suite went red for a file whose every real import resolves.
+
+⚠️ **THE COST OF A FALSE ALARM IS NOT NOISE, IT IS LOOSENING.** A guard that cries wolf gets its
+pattern widened each time — the history the bridge copy guard records four times over — and the
+widening is what eventually lets a real break through.
+
+⭐ Fixed by reusing the `stripComments` helper **already in that file** rather than adding a second
+one, and the self-check now proves BOTH halves: a commented-out broken import is ignored, AND a real
+broken import beside a commented one still fires. A strip proven only in the ignoring direction is a
+hole with a comment on it. The genuinely-missing index row for that spike was added too — three rows
+covering runs 1, 2 and 3 of the upfront-fee measurement.
+
+
 # ⭐⭐ A WALLET'S TYPE IS NOT INFERABLE FROM ITS NAME OR ITS ROLE
 
 **2026-09-03.** `eth_getCode` is one call, it is free, and it decided the meaning of an entire spend.

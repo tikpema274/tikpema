@@ -233,6 +233,64 @@ export function pendingReceiptKey(owner, txId) {
   return `o/${norm(owner)}/tx-${norm(txId)}`;
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// ⭐⭐ THE FEE VERDICT LIVES OUTSIDE `o/<owner>/`, AND THE PREFIX IS THE WHOLE REASON
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// 🚨 IT MUST NOT SHARE THE RECEIPT PREFIX. `listByOwner` prefix-lists `o/<owner>/` and returns
+// EVERY blob under it whose `owner` cross-check passes. A fee record carries an `owner`, so under
+// that prefix it would come back AS A RECEIPT — one with no `state` — and this panel's documented
+// worst failure is exactly that: an unrecognised record rendering a row with an amount and a
+// destination and nothing about the money. A different top-level prefix makes that impossible by
+// construction rather than by a filter someone must remember to keep.
+//
+// ══ ⛔ AND WHY IT IS A SEPARATE RECORD AT ALL, RATHER THAN A FIELD ON THE RECEIPT ══════════════
+// `bridge-mint-settle-background` reads the receipt at t0, polls for up to FOUR MINUTES, and then
+// writes `{...receipt, ...patch}` from that t0 SNAPSHOT. Any write by anyone else inside that
+// window is erased — and a `mint_unconfirmed` re-check reopens the window hours later. A fee
+// verdict written promptly onto the receipt would be silently clobbered by the settler finishing.
+// ⚠️ THAT IS A LATENT BUG IN ITS OWN RIGHT, INDEPENDENT OF FEES, and routing around it here does
+// NOT retire it — see the PROGRESS entry of 2026-09-03 that records it as its own finding.
+//
+// ⭐ THE SECOND REASON IS LIFECYCLE. The settler is re-entrant by design; this verdict is
+// WRITE-ONCE. Retention makes an older burn unreadable by design, so re-deriving on every read
+// would decay a real `matched` into `unreadable` as the burn ages — the record getting worse while
+// appearing to be checked each time. Two different lifecycles want two different owners.
+export function feeVerdictKey(owner, burnHash) {
+  return `fee/${norm(owner)}/${norm(burnHash)}`;
+}
+
+/** Read a stored fee verdict. Null on miss OR store error — the caller renders "not reconciled",
+ *  which is a DIFFERENT reader state from `unreadable` and must not be conflated with it. */
+export async function readFeeVerdict(owner, burnHash) {
+  try {
+    return await store().get(feeVerdictKey(owner, burnHash), { type: "json" });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ⭐ WRITE-ONCE. A second run must not overwrite a verdict earned while the burn was still
+ * readable: retention only ever makes the answer worse, so the FIRST reading is the best one this
+ * system will ever have. Refusing here is what makes "run once, promptly, store the verdict" a
+ * property of the store rather than a hope about the caller.
+ *
+ * Never throws: a diagnostics write must not fail a background job that has already done its work.
+ */
+export async function writeFeeVerdictOnce(record) {
+  try {
+    if (!record?.owner || !record?.burnHash) return { written: false, reason: "missing_key_fields" };
+    const key = feeVerdictKey(record.owner, record.burnHash);
+    const existing = await store().get(key, { type: "json" });
+    if (existing) return { written: false, reason: "already_written", existing };
+    await store().setJSON(key, record);
+    return { written: true };
+  } catch (e) {
+    console.error(`[bridge-fee-reconcile] WRITE FAILED (swallowed) burnHash=${record?.burnHash} — ${e?.message}`);
+    return { written: false, reason: "write_error", detail: e?.message };
+  }
+}
+
 // ══════════════════════════════════════════════════════════════════════════════════
 // ⭐⭐ THE AGE CAP — because the record above was WRITE-ONLY AND IMMORTAL
 // ══════════════════════════════════════════════════════════════════════════════════

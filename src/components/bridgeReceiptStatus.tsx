@@ -41,6 +41,16 @@ export type BridgeReceiptView = {
   // ⚠️ `feeCharged` is null when the signing call threw and the value is genuinely unknown.
   feeCharged?: number | null;
   feeDisclosed?: number | null;
+  // ⭐⭐ THE POST-BURN FEE RECONCILIATION — a DETECTOR's verdict, computed server-side and stored
+  // once. `undefined`/`null` means the reconciler never ran, which is a DIFFERENT reader state from
+  // `unreadable` ("it ran and could not tell") and must never render as a tick.
+  feeReconciliation?: {
+    verdict?: string;
+    reason?: string | null;
+    detail?: string | null;
+    feeObservedUsdc?: number | null;
+    feeReconciledUsdc?: number | null;
+  } | null;
   amountDelivered?: number | null;
   delivery?: string;
   destinationKey?: string | null;
@@ -235,6 +245,42 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
               {" "}⚠️ you were charged MORE than you were shown
             </span>
           )}
+        </span>
+      )}
+      {/* ═══ ⭐⭐ WHAT THE CHAIN SAYS THE FEE WAS — THREE OUTCOMES, NEVER TWO ═════════════════════
+          The line above reports what our own record says. THIS one reports what actually moved on
+          Arc, read back from the burn's logs after the fact.
+
+          ⛔ `unreadable` IS RENDERED, NOT HIDDEN. It is the COMMON verdict — public-RPC retention
+          makes an older burn unreadable by design, and every bridge predating the upfront-fee path
+          reconciles `not_upfront_fee_path` — so hiding it would let "we could not check" look
+          exactly like "we checked and it was fine". That is the absence-reads-as-safe failure on
+          the one surface where it costs money.
+
+          ⚠️ AND THE ABSENT CASE IS DELIBERATELY SILENT. No `feeReconciliation` at all means the
+          reconciler never ran; there is nothing truthful to say beyond what the fee line above
+          already says, and inventing a fourth sentence for it would imply a check took place. */}
+      {r.feeReconciliation?.verdict === "matched" && (
+        <span className="sub" style={{ display: "block", color: "var(--emerald)" }}>
+          ✓ fee confirmed on chain — <b>{usdc(r.feeReconciliation.feeObservedUsdc)} USDC</b> moved,
+          the figure you were shown
+        </span>
+      )}
+      {r.feeReconciliation?.verdict === "mismatched" && (
+        <span className="sub" style={{ display: "block", color: "var(--warn)" }}>
+          ⚠️ <b>fee mismatch</b> — you were charged{" "}
+          <b>{usdc(r.feeReconciliation.feeObservedUsdc)} USDC</b> on chain, and were shown{" "}
+          <b>{usdc(r.feeReconciliation.feeReconciledUsdc)} USDC</b>. The burn is final; this is a
+          detector, not a gate.
+        </span>
+      )}
+      {r.feeReconciliation?.verdict === "unreadable" && (
+        <span className="sub" style={{ display: "block" }}>
+          fee not reconciled against the chain
+          {r.feeReconciliation.reason === "not_upfront_fee_path"
+            ? <> — this bridge did not use the upfront-fee path, so there is no separate fee transfer to read</>
+            : <> — we could not read it{r.feeReconciliation.reason ? <> (<span className="mono">{r.feeReconciliation.reason}</span>)</> : null}</>}
+          . <b>This is not evidence of a wrong charge</b>, and it is not evidence of a right one.
         </span>
       )}
       {r.state === "minted" && measured && (

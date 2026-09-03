@@ -75,6 +75,13 @@ export async function handler(event) {
       // has to infer which quote a missing field meant. No ratio is stored — it derives.
       feeCharged: gate.fee.feeUsdc,
       feeDisclosed: gate.fee.feeUsdc,
+      // ⭐ THE SAME QUOTE'S INTEGER, for the post-burn fee reconciliation — see _fee-reconcile.mjs.
+      feeDisclosedMinor: String(gate.fee.maxFee),
+      // ⭐⭐ THE PAYER IS THE SESSION ADDRESS ON THIS PATH, AND THAT IS ENFORCED, NOT ASSUMED.
+      // `verifyBurnOnArc` refuses a promotion whose `tx.from` is not the session owner, so the
+      // wallet that pays is the wallet that holds the session — unlike the agent path, where the
+      // spender is a Circle SCA and the owner is someone else entirely.
+      payer: session.address,
       netUsdc: gate.fee.netUsdc,
       feeBand: gate.band.band,
       ackRequired: gate.ackRequired,

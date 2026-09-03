@@ -534,6 +534,11 @@ export async function executeAction(step, ctx) {
         // wallet address, and that wallet is the AGENT'S SCA — not the session owner — so nothing
         // downstream can re-derive it from the record's own keys.
         recipient: walletAddress,
+        // ⚠️ THE SAME ADDRESS, A DIFFERENT CLAIM, AND THEY ARE ONLY EQUAL BY DEFAULT. `recipient`
+        // is where the money is going; `payer` is which wallet it left. agentBridge happens to
+        // default the recipient to the spender today — collapsing them into one field would make
+        // the fee reading silently wrong the day a bridge sends somewhere else.
+        payer: walletAddress,
         amountRequested: amount,
         // 🚨 THE SECOND DEFECT, AND THE FIX IS A DIFFERENT FIELD, NOT A DIFFERENT VALUE.
         // This path used to record the GATED fee under `feeUsdc` — the same field the SUCCESS path
@@ -547,6 +552,11 @@ export async function executeAction(step, ctx) {
         // same reason the ratio is not.
         feeCharged: null,
         feeDisclosed: fee.feeUsdc,
+        // ⭐ THE SAME QUOTE'S OWN INTEGER, so the post-burn fee reconciliation never has to convert
+        // a float back into minor units to compare it against a chain log. It is taken from the
+        // object `feeDisclosed` came from, not re-derived — a second source would be free to drift
+        // from the figure the band gate actually evaluated.
+        feeDisclosedMinor: String(fee.maxFee),
         netUsdc: null,
         feeBand: bandInfo.band,
         ackRequired: bandInfo.band === "acknowledge",
@@ -578,8 +588,19 @@ export async function executeAction(step, ctx) {
       // feeBand) from the gated one.
       feeCharged: r.feeUsdc,      // what was actually taken — the fee signed into the calldata
       feeDisclosed: fee.feeUsdc,  // what the consent decision was made against
+      // ⭐ THE DISCLOSED FIGURE'S OWN INTEGER, from the SAME quote object as `feeDisclosed` above.
+      // The post-burn fee reconciliation compares against a chain log, which is in minor units;
+      // carrying the quote's BigInt means that comparison never converts a float, and never has to
+      // decide what to do about a rounding it could not perform exactly.
+      feeDisclosedMinor: String(fee.maxFee),
       netUsdc: r.netUsdc,         // pairs with feeCharged
       recipient: r.recipient,
+      // ⭐⭐ WHO PAID — AND IT IS NOT `owner`. The spender is the caller's SCA, not the session
+      // address, and nothing downstream can re-derive it from the record's own keys. Without it a
+      // post-burn reading of the fee cannot scope the logs to the payer, and a bundler batching
+      // several userOps into one transaction would put another wallet's movements in the same
+      // receipt. Captured HERE because this is the only scope that knows it.
+      payer: walletAddress,
       // ⭐ EVIDENCE THAT THE GATE RAN, SERVER-SOURCED. The band is what WE priced and
       // classified; `acknowledged` is true only because the token the caller returned
       // matched the one we recomputed here. A client-asserted "I accepted" would be worth

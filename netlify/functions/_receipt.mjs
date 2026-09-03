@@ -177,7 +177,16 @@ export async function rpcFallback(chain, method, params, { absenceNeedsCorrobora
       absentFrom: absent,
       // ⚠️ NOT the same claim as "every endpoint agrees". If one FAILED we never heard from it —
       // the caller is told which, rather than left to read silence as unanimity.
-      corroborated: failures.length === 0,
+      //
+      // 🚨 AND IT REQUIRES TWO ANSWERS, NOT MERELY ZERO FAILURES. This was `failures.length === 0`,
+      // which is trivially true on a SINGLE-ENDPOINT chain: the one endpoint answers "absent",
+      // nothing fails, and the result declares itself CORROBORATED BY NOBODY. Every chain in
+      // DESTINATION_CHAINS has two endpoints so no caller here was ever misled — but `ARC.rpc` is
+      // one endpoint, and the first caller to point this helper at Arc would have been handed a
+      // corroboration that cannot exist. Corroboration means someone else was asked and agreed;
+      // with one endpoint there is nobody else to ask, so the honest answer is `false`.
+      // ⚠️ Unchanged for every two-endpoint case: both absent → true, one absent one failed → false.
+      corroborated: failures.length === 0 && absent.length >= 2,
       unheardFrom: failures.map((f) => f.rpc),
     };
   }

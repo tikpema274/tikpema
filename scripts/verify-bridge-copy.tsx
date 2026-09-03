@@ -361,6 +361,73 @@ section("FEES — both, and the drift between them");
     /not recorded/.test(unknown) && !/0\.060000 USDC charged/.test(unknown), unknown.slice(0, 100));
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+// ⭐⭐ THE FEE RECONCILIATION — THREE VERDICTS ON SCREEN, AND A FOURTH READER STATE THAT IS SILENT
+//
+// The section above renders what OUR RECORD says the fee was. This renders what the CHAIN says.
+// It ships with its render assertion because a field written and never rendered is the shape this
+// repo hit three times in one week — and a detector nobody can read detects nothing.
+section("FEE RECONCILIATION — matched, mismatched, unreadable, and absent");
+{
+  const base = { state: "minted", delivery: "measured", amountDelivered: 0.0958,
+    destinationLabel: "Base (Sepolia)", feeCharged: 0.053985, feeDisclosed: 0.053985 };
+
+  // ⛔⛔ EVERY FIGURE ASSERTION BELOW IS SCOPED TO THE VERDICT SENTENCE, AND THE FIRST DRAFT WAS
+  // NOT — which mutation-proving caught. The `fee … charged · you were shown …` line ABOVE renders
+  // the very same numbers, so `/0\.053985 USDC/.test(wholeRow)` was satisfied whether or not the
+  // reconciliation sentence contained anything at all. Deleting the figure from the sentence under
+  // test left the suite green. ⭐ An assertion on the whole row cannot tell WHICH line said it.
+  const after = (t: string, marker: string) => t.split(marker)[1] ?? "";
+
+  const matched = text({ ...base, feeReconciliation: { verdict: "matched", feeObservedUsdc: 0.053985 } });
+  check("⭐⭐ MATCHED names the figure that actually moved on chain — IN ITS OWN SENTENCE",
+    /fee confirmed on chain/.test(matched) && /0\.053985 USDC/.test(after(matched, "fee confirmed on chain")),
+    matched.slice(-110));
+  // ⭐ GOOD NEWS MUST NOT WEAR WARNING GRAMMAR — the same rule section 5 enforces for arrivals.
+  check("  …and does not warn about a fee that was correct", !/⚠️/.test(after(matched, "fee confirmed")));
+
+  // 🚨 BOTH FIGURES, ALWAYS. A verdict without its numbers cannot be acted on — "reconciliation
+  // failed" tells a user nothing they can check, argue with, or take to anyone.
+  const mism = text({ ...base, feeDisclosed: 0.0539,
+    feeReconciliation: { verdict: "mismatched", feeObservedUsdc: 0.053985, feeReconciledUsdc: 0.0539 } });
+  const mismSentence = after(mism, "fee mismatch");
+  check("🚨 MISMATCHED names BOTH figures — charged AND shown — within the mismatch sentence itself",
+    /fee mismatch/i.test(mism) && /0\.053985 USDC/.test(mismSentence) && /0\.053900 USDC/.test(mismSentence),
+    mismSentence.slice(0, 170));
+  check("⭐ …and says the burn is FINAL, so nobody reads a detector as a refund",
+    /burn is final/i.test(mism) && /detector, not a gate/i.test(mism));
+
+  // ⛔ THE ONE THAT MUST NOT BE HIDDEN. `unreadable` will be the COMMON verdict, and hiding it would
+  // let "we could not check" look exactly like "we checked and it was fine".
+  const unread = text({ ...base, feeReconciliation: { verdict: "unreadable", reason: "burn_absent" } });
+  check("⛔ UNREADABLE is RENDERED, not hidden", /not reconciled/.test(unread), unread.slice(-170));
+  check("🚨 …and claims NOTHING in either direction", /not evidence of a wrong charge/i.test(unread) &&
+    !/confirmed on chain/.test(unread) && !/fee mismatch/i.test(unread));
+  check("⭐ …and names the reason, so the row is actionable rather than merely gloomy",
+    /burn_absent/.test(unread));
+
+  // ⭐ THE EXPECTED VERDICT UNTIL THE MIGRATION LANDS — it must read as ordinary, not as a fault.
+  const legacy = text({ ...base, feeReconciliation: { verdict: "unreadable", reason: "not_upfront_fee_path" } });
+  check("⭐⭐ a pre-migration bridge explains itself rather than looking broken",
+    /did not use the upfront-fee path/.test(legacy) && !/could not read it/.test(legacy), legacy.slice(-190));
+
+  // ⚠️ THE FOURTH READER STATE. No verdict at all means the reconciler never ran — which is NOT
+  // `unreadable` ("it ran and could not tell"). It is deliberately silent: there is nothing
+  // truthful to add, and a fourth sentence would imply a check that never happened.
+  const absent = text(base);
+  check("⚠️ an ABSENT reconciliation says nothing — it must not read as a tick",
+    !/fee confirmed on chain/.test(absent) && !/not reconciled/.test(absent) && !/fee mismatch/i.test(absent));
+  check("  …and the fee line itself still renders, so the row is never blank",
+    /0\.053985 USDC charged/.test(absent));
+
+  // 🚨 EXACTLY ONE VERDICT SENTENCE EVER RENDERS. Two would be a contradiction on the one surface
+  // where a user decides whether they were overcharged.
+  for (const [name, t] of [["matched", matched], ["mismatched", mism], ["unreadable", unread]] as const) {
+    const hits = [/fee confirmed on chain/, /fee mismatch/i, /not reconciled/].filter((re) => re.test(t)).length;
+    check(`🚨 ${name} renders EXACTLY ONE verdict sentence`, hits === 1, `${hits} matched`);
+  }
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

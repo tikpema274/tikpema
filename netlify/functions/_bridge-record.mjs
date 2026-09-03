@@ -66,6 +66,47 @@ async function triggerSettle({ event, owner, burnHash }) {
 }
 
 /**
+ * Kick the post-burn FEE RECONCILIATION. Same awaited-202 shape as `triggerSettle` and for the
+ * same measured reason: an un-awaited fetch from a handler that then returns may never be sent.
+ *
+ * ⭐ A SEPARATE TRIGGER, NOT A STAGE OF THE SETTLER. The settler polls the DESTINATION for up to
+ * four minutes and may exit early (lease held, already resolved); the fee reading is one source-
+ * chain receipt fetch that should not wait behind that, or be skipped when the settler returns
+ * early. And the settler writes back a t0 snapshot of the receipt at the end of its poll, which is
+ * why the verdict lives under its own key rather than on the record.
+ *
+ * ⚠️ SWALLOWED, LIKE THE SETTLE TRIGGER. This is a DETECTOR: the burn already happened and the
+ * money already moved. A failed trigger must never fail a bridge that succeeded — and an
+ * unreconciled receipt is exactly what every receipt looked like before today.
+ *
+ * ═══ ⛔ `job-bridge-approve` IS OUT OF SCOPE, AND IT IS THE SAME EXCLUSION AS THE ONE ABOVE ═════
+ * The plan path has its own receipt system in its own store, with its own verifier and its own
+ * four states. Reconciling its bridges from here would need a second reader over a second record
+ * shape — a duplicate of this whole mechanism, drifting independently, which is precisely the
+ * reasoning that keeps the receipt write itself at this boundary rather than in the executor.
+ * ⚠️ SO ITS BRIDGES CARRY NO FEE VERDICT AT ALL, AND THAT IS A DECISION, NOT AN OVERSIGHT.
+ * Extending the reconciliation to that path is a separate piece of work; whoever does it should
+ * add the trigger where THAT system writes its receipt, not here.
+ */
+async function triggerFeeReconcile({ event, owner, burnHash }) {
+  try {
+    const base =
+      process.env.DEPLOY_URL ||
+      `${event?.headers?.["x-forwarded-proto"] || "https"}://${event?.headers?.host}`;
+    const res = await fetch(`${base}/.netlify/functions/bridge-fee-reconcile-background`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-internal-token": internalToken() },
+      body: JSON.stringify({ owner, burnHash }),
+    });
+    console.log(`[bridge-receipt] fee-reconcile trigger sent burnHash=${burnHash} status=${res.status}`);
+    return true;
+  } catch (e) {
+    console.warn(`[bridge-receipt] fee-reconcile trigger FAILED (swallowed) burnHash=${burnHash}: ${e?.message}`);
+    return false;
+  }
+}
+
+/**
  * Write the receipt for a completed bridge and ask the settler to verify it.
  *
  * @param r        executeAction's bridge return ({ burnHash, tx, destination, feeUsdc,
@@ -110,7 +151,19 @@ function feePair(src, { burnHash } = {}) {
       `${burnHash ? ` on ${burnHash}` : ""}. The user was charged MORE than they were shown.`
     );
   }
-  return { feeCharged: charged, feeDisclosed: disclosed };
+  return {
+    feeCharged: charged,
+    feeDisclosed: disclosed,
+    // ⭐⭐ THE DISCLOSED FIGURE IN MINOR UNITS — THE QUANTITY THE POST-BURN COMPARISON IS MADE IN.
+    // A chain log's value is an integer of minor units; `feeDisclosed` is a decimal Number. Storing
+    // the quote's OWN integer means the reconciliation never converts, so there is no rounding to
+    // get right and no float to be off by one in. [[compute conversions, never type them]] is best
+    // satisfied by not converting at all.
+    // ⚠️ NULL, NEVER A CONVERSION MADE HERE. A record that predates this field is handled by
+    // `disclosedFeeMinor` in _fee-reconcile.mjs, which converts EXACTLY or refuses — and a refusal
+    // there is a visible `disclosed_not_exact` verdict rather than a quiet rounding in this writer.
+    feeDisclosedMinor: typeof src?.feeDisclosedMinor === "string" ? src.feeDisclosedMinor : null,
+  };
 }
 
 /** The ratio the BAND was computed from, derived — never stored. Reads legacy records too.
@@ -138,6 +191,14 @@ export async function recordBridge({ r, session, event, amountRequested, quoteId
     destinationKey: r.destination?.key,
     destinationLabel: r.destination?.label,
     recipient: r.recipient,
+    // ⭐⭐ WHICH WALLET PAID. NOT `owner` — the spender is the caller's SCA and the owner is the
+    // session address, and nothing here can derive one from the other. The post-burn fee reading
+    // scopes the Arc logs to this address, because a bundler may batch several userOps into one
+    // transaction and the receipt would then carry another wallet's movements too.
+    // ⚠️ NULL IS A REAL STATE AND MUST NOT READ AS SAFE: every receipt written before this field
+    // existed carries null, and the reconciliation refuses those with `payer_unknown` rather than
+    // guessing the owner. Absence must not read as safe — including the absence of a payer.
+    payer: r.payer ?? null,
     amountRequested: Number(amountRequested),
     ...feePair(r, { burnHash: r.burnHash }),
     netPredicted: r.netUsdc,   // pairs with feeCharged; null when the signed quote is unknown
@@ -204,6 +265,11 @@ export async function recordBridge({ r, session, event, amountRequested, quoteId
   });
 
   await triggerSettle({ event, owner: session.address, burnHash: r.burnHash });
+  // ⭐ RUN ONCE, PROMPTLY. Retention only ever makes the burn harder to read, so the reading taken
+  // now is the best one this system will ever have — and the verdict is stored rather than
+  // re-derived, because re-deriving on every view would decay a real `matched` into `unreadable`
+  // as the burn ages, the record getting worse while appearing to be checked each time.
+  await triggerFeeReconcile({ event, owner: session.address, burnHash: r.burnHash });
   return { recorded: write.written === true, burnedAt };
 }
 
@@ -260,6 +326,9 @@ export async function recordPendingBridge({ e, session, amountRequested, quoteId
     // Carried so a recovered receipt can be verified on the destination chain — see the note in
     // _actions.mjs on why its absence causes an unbounded re-check.
     recipient: c.recipient ?? null,
+    // Carried on the provisional record too, so a bridge reconciled from a 202 gets the same fee
+    // reading a confirmed one does. See the note on the confirmed writer above.
+    payer: c.payer ?? null,
     amountRequested: Number(amountRequested),
     ...feePair(c, { burnHash: c.burnHash }),
     netPredicted: c.netUsdc ?? null,
@@ -390,6 +459,10 @@ export async function promoteUserBridge({ session, intentId, burnHash, burnTx, e
     // one being left to default, so a reader never has to infer which quote a blank meant.
     feeCharged: pending.feeCharged ?? pending.feeUsdc,
     feeDisclosed: pending.feeDisclosed ?? pending.feeUsdc,
+    // ⭐ CARRIED FROM THE INTENT, NOT RE-PRICED. Same rule as the fee pair beside it: the figures a
+    // promotion writes must be the ones the user was gated against, not a fresh quote taken now.
+    feeDisclosedMinor: typeof pending.feeDisclosedMinor === "string" ? pending.feeDisclosedMinor : null,
+    payer: pending.payer ?? null,
     netUsdc: pending.netPredicted,
     feeBand: pending.ackBand,
     ackRequired: pending.ackRequired,

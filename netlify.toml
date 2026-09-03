@@ -184,6 +184,10 @@
 # 🚨 DELIBERATELY ABSENT: any route for bridge-mint-settle-background. It MUTATES
 # receipt state and is internal-only (requireInternal). Netlify exposes every function
 # at /.netlify/functions/* regardless, so the guard is in the code, not in this file.
+# 🚨 SAME FOR bridge-fee-reconcile-background — it writes the post-burn fee verdict under
+# its own `fee/` key and is internal-only for the same reason. Adding a public route to
+# either would let anyone ask us to re-read a receipt we own; the write itself is
+# write-once, so the worst case is wasted work, but there is no reason to offer it.
 [[redirects]]
   from = "/api/bridge-receipts"
   to = "/.netlify/functions/bridge-receipts"

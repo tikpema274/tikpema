@@ -143,6 +143,18 @@ this spike is the evidence that the swap is safe for the EOAs already using it.
   ⭐ **the Circle submit is deliberately NOT wrapped, because retrying a submission is how one payment
   becomes two.**
 
+## CCTP upfront fees — the first ERC-20-`feeToken` burns on Arc
+
+Pre-registered before they ran: `docs/erc20-fee-burn-preregistration{,-2,-3}.md`. The predictions
+were committed first so they could not be edited to match the outcome, and two of the three runs
+STOPPED on a fired falsifier rather than repairing the prediction in place.
+
+| Step | Script | What it established | Moves money? |
+|---|---|---|---|
+| 1 | `spike-erc20-fee-burn.mjs` | **the first ERC-20-`feeToken` burn on Arc — zero of 41 observed `depositForBurnWithFees` calls had used this path.** The fee moves as its OWN `Transfer` (`payer → TokenMessengerWithFees`, then `→ FeeManager 0x08499fce…`, then a 10/90 split), separable from the amount and equal to the submitted quote's `feeTotalAmount`. ⛔ Falsifier 6 FIRED and the finding was the falsifier: it forbade two ERC-20 `Transfer`s of value `F` while the same document's own §1 table PREDICTED both — a defect in the pre-registration, recorded and stopped rather than patched. ⚠️ A second correction: the commit message's post-run balance was ARITHMETIC, not a reading; the measured delta was 0.065807, and the 0.011835 gap is gas — `from` on both receipts is the wallet, so **this** wallet was not sponsored | **YES** (0.053972 USDC, from `VANILLA_SELLER` — deliberately not the agent wallet, so a failed burn could not leave a standing allowance on a path agents use) |
+| 2 | `spike-erc20-fee-burn.mjs` (run 2, agent SCA) | **the gasless developer-controlled SCA carries the 868-byte quote tuple as a userOp, and Gas Station sponsors it against `TokenMessengerWithFees` — a target it had never been observed against.** Balance delta exactly `A + F` with no gas component, and the EntryPoint paying the bundler `0.0316999` separately. ⛔ F5 FIRED, and this time the falsifier was faithful and the ROW was over-strong: R5 asserted "the two streams have equal Transfer counts", a second clause that never followed from its first. ERC-20 7, native 8 — the extra one is the gas refund, native by nature. ⭐ The useful finding: **a reconciliation must never compare stream COUNTS**, it must pin emitter AND movement | **YES** (0.053986 USDC, agent SCA) |
+| 3 | *(a read — no script)* | **R6/R7/R8 measured off run 2's existing burn, spending nothing.** `minFinalityThreshold = 2000` (SLOW) and `maxFee = 0` in the emitted `DepositForBurn`; the Base Sepolia mint credited **exactly the full amount**, not `amount − fee` — the upfront-fee claim observed on a destination chain for the first time. Burn→mint **11 s**, ONE observation, and `MINT_TIMING` does not move on it | no — a read |
+
 ## Superseded / dead-ends (kept for the honest trail, NOT proof)
 | Script | Why it's here |
 |---|---|

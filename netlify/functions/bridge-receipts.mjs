@@ -1,8 +1,9 @@
 import { connectBlobs } from "./_blobs.mjs";
 import { json } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
-import { listByOwner, isPastDeadline, isRecheckable, provisionalStatus, mintRecoveryStatus } from "./_bridge-receipts.mjs";
+import { listByOwner, isPastDeadline, isRecheckable, provisionalStatus, mintRecoveryStatus, readFeeVerdict } from "./_bridge-receipts.mjs";
 import { bridgeReceiptRatio } from "./_bridge-record.mjs";
+import { minorToUsdcString } from "./_fee-reconcile.mjs";
 
 // GET|POST /api/bridge-receipts   (auth required)
 //
@@ -27,6 +28,23 @@ export async function handler(event) {
   if (!session) return json(401, { error: "Authentication required" });
 
   const { receipts, degraded } = await listByOwner(session.address);
+
+  // ── THE FEE VERDICT, JOINED AT READ TIME ─────────────────────────────────────────
+  // ⭐ A JOIN, NOT A DUPLICATE. The verdict lives under its own `fee/` prefix — outside `o/<owner>/`
+  // so `listByOwner` cannot return it as a receipt (it would have no `state`, which is this panel's
+  // documented render-nothing failure). Nothing here is a second copy of anything on the receipt.
+  //
+  // ⚠️ ABSENT IS ITS OWN READER STATE, NOT A TICK AND NOT `unreadable`. The reconciler ALWAYS writes
+  // a record, so no verdict means it never ran — a pre-migration receipt, or a trigger that was
+  // lost. Collapsing that into "we could not read the chain" would claim a check that never
+  // happened. Four reader states, three verdicts.
+  const feeVerdicts = new Map(
+    await Promise.all(
+      receipts
+        .filter((r) => r?.burnHash)
+        .map(async (r) => [r.burnHash, await readFeeVerdict(session.address, r.burnHash)])
+    )
+  );
 
   // ── SELF-HEALING: RE-TRIGGER A STRANDED SETTLE ───────────────────────────────────
   // A single fire-and-forget trigger is one lost request away from a receipt that sits
@@ -174,6 +192,25 @@ export async function handler(event) {
           ? { cause: m.cause, exhausted: m.exhausted, ageMs: m.ageMs, verifyFailureCount: m.verifyFailureCount,
               irisClaimedMintTxHash: m.irisClaimedMintTxHash, detail: m.detail }
           : null;
+      })(),
+      // ⭐⭐ DID THE FEE THAT MOVED MATCH THE FEE WE SHOWED? A DETECTOR'S ANSWER, not a gate's.
+      // ⚠️ The DECIMAL strings are derived here so the client never converts minor units itself —
+      // a second conversion is a second thing that can be wrong about the same number. The minor
+      // figures travel too, because they are what was actually compared, and a verdict whose input
+      // is gone is unfalsifiable. `null` means the reconciler never ran; see the join above.
+      feeReconciliation: (() => {
+        const v = feeVerdicts.get(r.burnHash);
+        if (!v) return null;
+        return {
+          verdict: v.verdict,
+          reason: v.reason ?? null,
+          detail: v.detail ?? null,
+          reconciledAt: v.reconciledAt ?? null,
+          feeObservedMinor: v.feeObservedMinor ?? null,
+          feeDisclosedMinor: v.feeDisclosedMinor ?? null,
+          feeObservedUsdc: v.feeObservedMinor != null ? Number(minorToUsdcString(v.feeObservedMinor)) : null,
+          feeReconciledUsdc: v.feeDisclosedMinor != null ? Number(minorToUsdcString(v.feeDisclosedMinor)) : null,
+        };
       })(),
     })),
     degraded,

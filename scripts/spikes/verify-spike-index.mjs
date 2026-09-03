@@ -122,13 +122,34 @@ check("🚨 the positive guard actually has subjects (a zero-file scan would pas
 // Import specifiers are resolved against the filesystem and NOTHING IS RUN — a spike must never be
 // executed to find out whether it still works.
 
-/** Broken relative/bare specifiers in `src`, as if it lived at `file`. Pure — no execution. */
+/**
+ * Broken relative/bare specifiers in `src`, as if it lived at `file`. Pure — no execution.
+ *
+ * ═══ 🚨 COMMENTS ARE STRIPPED FIRST, AND THE OMISSION COST A RED ═══════════════════════════════
+ * This scanned raw source, so PROSE ABOUT an import counted as one. `spike-erc20-fee-burn.mjs`
+ * documents a near-miss with the sentence «`node -e "import('./…')"` — `import()` EXECUTES A
+ * MODULE», and the scanner dutifully tried to resolve the literal path `./…`. The suite went red
+ * for a file whose every real import resolves.
+ *
+ * ⭐ THE COST OF A FALSE ALARM IS NOT NOISE, IT IS LOOSENING. A guard that cries wolf gets its
+ * pattern widened each time it fails — the exact history the bridge copy guard records four times
+ * over — and the widening is what eventually lets a real break through. Stripping comments narrows
+ * what the scanner reads WITHOUT narrowing what it can catch, which is the only safe direction.
+ *
+ * ⚠️ AND THE SELF-CHECK BELOW NOW PROVES BOTH HALVES: that a real broken import is still detected
+ * (it was, and must stay so — the strip must not become a way to hide one), and that a commented
+ * one is not. A strip proven only in the ignoring direction is a hole with a comment on it.
+ */
 function brokenImports(src, file) {
+  // ⭐ THE SAME `stripComments` THE KIT_KEY GUARD ABOVE ALREADY USES, not a second copy of the
+  // regexes. Two comment-strippers in one file would be free to disagree about what a comment is,
+  // and the two checks would then be reading different files.
+  const bare = stripComments(src);
   const specs = [...new Set([
-    ...src.matchAll(/^\s*import\s+(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/gm),
+    ...bare.matchAll(/^\s*import\s+(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/gm),
     // ⚠️ Dynamic imports count: step3 pulls shared/dd via `await import(...)` inside its Part B
     // branch, so a static-only scan would have declared that file clean while it was broken.
-    ...src.matchAll(/\bimport\(\s*["']([^"']+)["']\s*\)/g),
+    ...bare.matchAll(/\bimport\(\s*["']([^"']+)["']\s*\)/g),
   ].map((m) => m[1]))];
 
   const out = [];
@@ -159,6 +180,23 @@ check("🚨 the scanner DETECTS broken imports (static + dynamic) before we trus
 const good = brokenImports('import { requireKitKey } from "../_kit-key.mjs";\nimport { readFileSync } from "node:fs";', PROBE);
 check("⚠️ …and does not cry wolf on a resolvable relative import or a node: builtin",
   good.length === 0, good.join(", "));
+
+// ── 🚨 THE COMMENT STRIP, PROVEN IN BOTH DIRECTIONS ─────────────────────────────────────────────
+// One direction alone is a hole. "It ignores comments" proven without "it still catches code" is
+// indistinguishable from a scanner that ignores everything — and that is the version that ships
+// green forever. Both probes run, on the same instrument, before the real scan below is trusted.
+const commented = brokenImports(
+  '// node -e "import(\'./…\')" — prose ABOUT an import, not an import\n' +
+  '/* import { x } from "./also-not-real.mjs"; */\n' +
+  'import { readFileSync } from "node:fs";',
+  PROBE);
+check("🚨 a broken import mentioned only in a COMMENT is not reported — prose is not code",
+  commented.length === 0, commented.join(", ") || "0 false alarms");
+const mixed = brokenImports(
+  '// import { a } from "./commented-away.mjs";\nimport { b } from "./genuinely-missing.mjs";',
+  PROBE);
+check("🚨🚨 …and the strip did NOT blind it — a real broken import beside a commented one still fires",
+  mixed.length === 1 && mixed[0] === "./genuinely-missing.mjs", mixed.join(", ") || "detected nothing");
 
 // ── the real scan ────────────────────────────────────────────────────────────────────────────────
 // Smoke scripts included for the same reason the credential rule covers them: a guard scoped to
