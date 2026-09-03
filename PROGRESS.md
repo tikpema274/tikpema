@@ -166,6 +166,21 @@ turns an exact 2.05 into 2.06 — the direction rule becoming a rounding bug of 
 `have 2.0549 / need 2.0512` describes a state that would never have thrown — and the new checker
 rejected my example, not the code.
 
+## ⚠️ THE POPULATION, WRITTEN AT `formatAmount.ts` — it is wider than balances (`c663617`)
+
+The rule now lives where the next amount is rendered, and it names its own reach. The test is **not
+"is it money"** but **"will the reader act on this figure and be judged against the real one?"**
+
+* **INSTRUCTIONS** — a total a wallet must hold, an allowance to approve, a minimum a form accepts,
+  a deadline a caller races. These round toward the requirement.
+* **A CAP a value must stay under rounds DOWN**, not up — ⭐ the direction follows the COMPARISON,
+  never the field name, which is the part that will be got wrong.
+* **DESCRIPTIONS** — a fee already charged, an amount already sent — round to nearest. They report
+  what happened; nobody acts on them.
+
+⭐ And there is no "correct precision" that fixes this. Precision is a readability choice, direction
+is a safety one, and choosing only the first is how a 6-dp token ended up compared at 2dp.
+
 ---
 
 # ⛔⛔ A SECTION AFTER `process.exit` PRINTS ITS FAILURES AND THE SUITE EXITS 0
@@ -184,6 +199,48 @@ and the status came from different places.
 pass count GREW (14 → 23 here). A section whose checks cannot move the count is a comment that runs.
 And when a mutation says NOT CAUGHT while failures are on screen, suspect the harness plumbing before
 the assertion.
+
+## ⭐⭐ AND THEN THE CLASS WAS SCANNED — `c663617`, the same day
+
+One instance is an anecdote. `verify-assertion-reachability.mjs` (suite 86) turns it into a
+measurement. The rule is positional and mechanical: **after the LAST `process.exit(` in a top-level
+script the process falls off the end and returns 0 regardless**, so any assertion past it cannot
+change the verdict — whether that exit was conditional or not.
+
+    files with assertions 161 · assertion sites 4270
+    IN test:all: 120 files · 3734 sites · reachable 3734 · UNREACHABLE 0
+    NOT in test:all (spikes/tools): 42 files · 7 carry assertions after their last exit
+
+⭐ **NO WIRED GUARD HAS AN INERT ASSERTION**, and every one of the 120 suites `test:all` runs also
+TAKES a verdict — none falls off the end returning 0 by default. `verify-amount-precision` was the
+only instance and it is fixed.
+
+⚠️ **SEVEN SPIKES CARRY 19 ASSERTIONS THAT CANNOT FAIL THEIR PROCESS**, oldest stranded since
+2026-07-20 — **45 days**, longer than the 33-day blind mock.
+
+| file | stranded | since |
+|---|---|---|
+| `spike-phase0.mjs` / `phase0b` / `phase0c` / `phase0e-approve` | 4 / 3 / 1 / 2 | 2026-07-20 |
+| `spike-B1-direct-calldata.mjs` · `spike-sync-budget.mjs` | 3 · 1 | 2026-07-22 |
+| `spike-vanilla-rate-ceiling-live.mjs` | 5 | 2026-08-24 |
+
+⛔ **SAME SHAPE, DIFFERENT KIND — and the difference is stated rather than used as an excuse.** Those
+exits are CONDITIONAL precondition guards, so the later assertions do run; they simply cannot exit
+non-zero because nothing exits after them. And `test:spikes` runs only `verify-kit-key-guard` and
+`verify-spike-index`, so **none of the seven is a gate** — their `check()` calls print findings a
+human reads. The 33-day mock was a WIRED GUARD SILENTLY BLIND. NOT CHANGED: adding terminal exits
+would alter what a spike does on a partial run. They are counted and printed on every run rather
+than filtered out, so the decision stays visible. [[filtered-read-is-not-absence]]
+
+⭐⭐ **THE CONTROL.** "0 unreachable" and a broken scanner are indistinguishable, so section 0
+rebuilds the exact defect synthetically — the tally moved above the last section — and requires the
+detector to find it WHILE NOT flagging the real file it was built from.
+⚠️ Limits in the header: textual position is a proxy for execution order, exact only for TOP-LEVEL
+code (which is how every suite here is written). It cannot see an assertion that runs but is never
+counted, or one inside a callback that never fires. Those are real and it does not claim them.
+
+Mutations both directions: strand an assertion after a wired verdict → red, naming ZERO STRANDED;
+remove a suite's `process.exit` → red, naming "every suite actually TAKES a verdict".
 
 ---
 
