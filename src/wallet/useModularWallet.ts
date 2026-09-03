@@ -1,3 +1,4 @@
+import { availableAmount, requiredAmount } from "../lib/formatAmount";
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
   toPasskeyTransport,
@@ -656,7 +657,13 @@ export function useModularWallet() {
       const units = BigInt(Math.round(amountUsdc * 1e6));
       if (units > raw) {
         throw new Error(
-          `Insufficient funds. You have ${Number(formatUnits(raw, USDC_DECIMALS)).toFixed(2)} USDC, need ${amountUsdc.toFixed(2)}.`
+          // ⛔ 2dp COMPOSED INTO A SELF-CONTRADICTORY REFUSAL. A real balance of 2.0549 against a
+          //   need of 2.0512 rendered as "You have 2.05, need 2.05" — a refusal whose own numbers
+          //   say it should have passed, on a 6-dp token where the difference is the whole point.
+          //   ⭐ Full precision here, and the DIRECTIONAL helpers rather than toFixed, so a surface
+          //   that later wants fewer digits still cannot understate the need or overstate the balance.
+          `Insufficient funds. You have ${availableAmount(formatUnits(raw, USDC_DECIMALS), USDC_DECIMALS)} USDC, ` +
+          `need ${requiredAmount(amountUsdc, USDC_DECIMALS)}.`
         );
       }
 

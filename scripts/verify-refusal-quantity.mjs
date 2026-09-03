@@ -67,6 +67,19 @@ const BOUND_CLAIMS = [
  */
 function contradictoryClaim(msg) {
   if (typeof msg !== "string" || !msg) return null;
+  // ═══ ⭐⭐ THE HAVE/NEED SHAPE — a refusal whose own two numbers say it should have passed ═══════
+  // "You have 2.05 USDC, need 2.05" is what `have 2.0549 / need 2.0512` renders as at 2dp on a 6-dp
+  // token. Nothing in the SENTENCE is wrong; the ROUNDING made the printed quantities differ from
+  // the compared ones, which is this file's rule stated in a second way. Rendering a requirement
+  // DOWN and a balance UP is what closes it — see requiredAmount/availableAmount in formatAmount.ts.
+  const have = /\bhave\s+~?\s*(-?\d+(?:\.\d+)?)/i.exec(msg);
+  const need = /\bneed(?:s|ed)?\s+~?\s*(-?\d+(?:\.\d+)?)/i.exec(msg);
+  if (have && need) {
+    const h = Number(have[1]), n = Number(need[1]);
+    if (Number.isFinite(h) && Number.isFinite(n) && h >= n) {
+      return `prints "have ${h}" and "need ${n}" — the numbers say the refusal should not have fired`;
+    }
+  }
   const subject = msg
     .replace(/\([^)]*\)/g, " ")                       // parenthesised floors: "(0.000001)"
     .replace(/\b(?:limit|cap|ceiling|smallest|maximum|minimum)\b[^,;.]*/gi, " ") // named bounds
@@ -104,6 +117,21 @@ section("0 — ⭐⭐ THE CHECKER ITSELF, on known-good and known-bad copy");
   ok("⭐ a cap refusal that prints two numbers is not a contradiction",
     contradictoryClaim("amount 5 exceeds per-transaction limit of 2 USDC") === null,
     String(contradictoryClaim("amount 5 exceeds per-transaction limit of 2 USDC")));
+
+  // ── the have/need shape, both directions ────────────────────────────────────────────────────
+  ok("⛔ the ROUNDED insufficient-funds refusal is caught — 'have 2.05, need 2.05'",
+    !!contradictoryClaim("Insufficient funds. You have 2.05 USDC, need 2.05."),
+    contradictoryClaim("Insufficient funds. You have 2.05 USDC, need 2.05.") || "NOT CAUGHT");
+  ok("⛔ …and the strictly-greater case, which is worse",
+    !!contradictoryClaim("Insufficient USDC: need ~2.05 (stake + gas), have 2.09"));
+  // ⚠️ THE REFUSAL FIRES WHEN need > have, SO `have` IS THE LOWER NUMBER. My first fixture here had
+  //   them the other way round and the checker rejected it — correctly: that pair describes a state
+  //   that would never have thrown. The checker caught the example, not the code.
+  ok("⭐ the FULL-PRECISION version passes — the refusal is now legible as a refusal",
+    contradictoryClaim("Insufficient funds. You have 2.051200 USDC, need 2.054900.") === null,
+    String(contradictoryClaim("Insufficient funds. You have 2.051200 USDC, need 2.054900.")));
+  ok("⭐ …and so does a genuine shortfall at 2dp, which must NOT be flagged",
+    contradictoryClaim("You have 1.00 USDC, need 2.05") === null);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
@@ -360,6 +388,29 @@ section("3 — ⭐ NO GATE ON THE MONEY PATH CONTRADICTS ITSELF, across the whol
   ok(`⭐ ${checked} refusals were produced and read — a zero here would make the verdict vacuous`,
     checked >= 20, `${checked} refusals`);
   ok("⭐⭐ NONE of them asserts a bound its own printed value satisfies", worst === null, String(worst));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("3b — ⛔ THE TWO have/need REFUSALS RENDER DIRECTIONALLY, not to nearest");
+{
+  // ⚠️ SOURCE, comment-stripped: these live in .ts and this suite is plain node. The BEHAVIOUR of the
+  //   helpers is asserted in verify-amount-precision, which runs under tsx and imports them; what is
+  //   checked here is that these two call sites actually reach them.
+  const strip = (f) => readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, "");
+  const SITES = [
+    ["src/wallet/useModularWallet.ts", "Insufficient funds"],
+    ["src/wallet/connectors/metamask.ts", "Insufficient USDC"],
+  ];
+  for (const [file, marker] of SITES) {
+    const src = strip(file);
+    ok(`⭐ ${file} still carries its insufficient-funds refusal`, src.includes(marker));
+    ok(`⭐⭐ …and renders the NEED with requiredAmount (rounds up) and the BALANCE with ` +
+      `availableAmount (rounds down)`,
+      /requiredAmount\(/.test(src) && /availableAmount\(/.test(src), file);
+    ok(`⛔ …and no longer rounds either side to NEAREST with toFixed(2)`,
+      !/toFixed\(2\)/.test(src.slice(Math.max(0, src.indexOf(marker) - 400), src.indexOf(marker) + 400)),
+      "a nearest-rounded pair is what produced 'have 2.05, need 2.05'");
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════

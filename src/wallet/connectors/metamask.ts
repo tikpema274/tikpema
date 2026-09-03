@@ -8,6 +8,7 @@
 // EOAs use linear native nonces, handled by viem. We deliberately do NOT carry
 // over any 2D-nonce / nonce-key-0 logic from the modular path (that exists only
 // to tame the bundler's per-userOp mempool slots and is meaningless for an EOA).
+import { availableAmount, requiredAmount } from "../../lib/formatAmount";
 import {
   createPublicClient,
   createWalletClient,
@@ -214,8 +215,13 @@ export async function connectMetaMask() {
     const have = Number(formatUnits(raw, USDC_DECIMALS));
     const need = amountUsdc + GAS_HEADROOM_USDC;
     if (have < need) {
+      // ⚠️ THE TILDE STAYS AND THE ROUNDING CHANGES. `need` really is an estimate — GAS_HEADROOM_USDC
+      //   is a buffer, not a quote — so hedging it is honest. Rounding it DOWN is not: a user who
+      //   tops up to exactly what this line asks for still fails. Up for the need, down for the
+      //   balance; the sentence can be pessimistic, never falsely reassuring.
       throw new Error(
-        `Insufficient USDC: need ~${need.toFixed(2)} (stake + gas), have ${have.toFixed(2)}`
+        `Insufficient USDC: need ~${requiredAmount(need, USDC_DECIMALS)} (stake + gas), ` +
+        `have ${availableAmount(have, USDC_DECIMALS)}`
       );
     }
   }

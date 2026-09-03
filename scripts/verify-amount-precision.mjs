@@ -14,7 +14,7 @@
 // enforced by nobody, which is how it would come back at producer four.
 
 import { readFileSync } from "node:fs";
-import { displayAmount, exactAmount } from "../src/lib/formatAmount.ts";
+import { displayAmount, exactAmount, requiredAmount, availableAmount } from "../src/lib/formatAmount.ts";
 
 let pass = 0, fail = 0;
 const check = (l, c, x = "") => { if (c) { pass++; console.log(`  ✅ ${l}${x ? ` — ${x}` : ""}`); }
@@ -88,7 +88,54 @@ section("3 — ⭐⭐ ARITHMETIC IS NEVER DONE ON A ROUNDED VALUE");
     Math.abs(bad - good) / good > 0.02, `25% of ${truth}: rounded path ${bad}, true ${good} — ${((Math.abs(bad-good)/good)*100).toFixed(2)}% short`);
 }
 
+section("⭐⭐ ROUNDING HAS A DIRECTION WHEN THE NUMBER IS A REQUIREMENT");
+{
+  // The upfront-fee total that provoked this: 2 USDC + a 0.054121 forwarder fee.
+  const TOTAL = 2.054121;
+  check("⛔ nearest-rounding a REQUIREMENT understates it — 4dp is 21 millionths short",
+    Number(displayAmount(TOTAL, 4)) < TOTAL, `${displayAmount(TOTAL, 4)} < ${TOTAL}`);
+  check("⛔ …and 2dp is worse", Number(displayAmount(TOTAL, 2)) < TOTAL, `${displayAmount(TOTAL, 2)}`);
+
+  // ⭐ THE PROPERTY, over a range rather than one lucky value.
+  const VALUES = [2.054121, 0.054121, 1.999999, 0.000001, 123.456789, 2.05, 0, 7];
+  let reqBelow = null, availAbove = null;
+  for (const v of VALUES) for (const dp of [2, 4, 6]) {
+    if (Number(requiredAmount(v, dp)) < v && reqBelow === null) reqBelow = `${v}@${dp} -> ${requiredAmount(v, dp)}`;
+    if (Number(availableAmount(v, dp)) > v && availAbove === null) availAbove = `${v}@${dp} -> ${availableAmount(v, dp)}`;
+  }
+  check(`⭐⭐ requiredAmount is NEVER below the real figure (${VALUES.length} values x 3 precisions)`,
+    reqBelow === null, String(reqBelow));
+  check("⭐⭐ availableAmount is NEVER above it", availAbove === null, String(availAbove));
+
+  // ⚠️ AND IT MUST NOT INFLATE A FIGURE THAT NEEDED NO ROUNDING. `2.05 * 100` is 204.99999999999997
+  // in floating point; a naive ceil turns an exact 2.05 into 2.06 and the direction rule becomes a
+  // rounding bug of its own.
+  check("⛔ an EXACT figure is unchanged in both directions — the ceil does not inflate 2.05 to 2.06",
+    requiredAmount(2.05, 2) === "2.05" && availableAmount(2.05, 2) === "2.05",
+    `${requiredAmount(2.05, 2)} / ${availableAmount(2.05, 2)}`);
+  check("  …and at 6dp on a 6-dp token there is no rounding at all",
+    requiredAmount(TOTAL, 6) === "2.054121" && availableAmount(TOTAL, 6) === "2.054121");
+
+  // ⭐ THE PAIRWISE PROPERTY — the one the refusal actually depends on. A genuine shortfall must
+  //   never render as sufficient; the reverse (reading short when it is not) is the safe direction.
+  const shortfalls = [[2.0512, 2.0549], [0.999999, 1.0], [1.994, 2.0]];
+  let readsSufficient = null;
+  for (const [have, need] of shortfalls) for (const dp of [2, 4, 6]) {
+    if (Number(availableAmount(have, dp)) >= Number(requiredAmount(need, dp)) && readsSufficient === null) {
+      readsSufficient = `have ${have} need ${need} @${dp} -> ${availableAmount(have, dp)} / ${requiredAmount(need, dp)}`;
+    }
+  }
+  check("⭐⭐ a real shortfall NEVER renders as have >= need — the self-contradictory refusal is closed",
+    readsSufficient === null, String(readsSufficient));
+  check("⛔ …and the nearest-rounded pair DOES produce it, so the fix is doing the work",
+    Number(displayAmount(2.0512, 2)) >= Number(displayAmount(2.0549, 2)),
+    `${displayAmount(2.0512, 2)} vs ${displayAmount(2.0549, 2)}`);
+
+  check("⭐ the absence placeholder survives both", requiredAmount(null) === "…" && availableAmount(undefined) === "…");
+}
+
 console.log(`\n${"═".repeat(72)}`);
 if (fail) { console.log(`❌ ${fail} failed, ${pass} passed.\n`); process.exit(1); }
 console.log(`✅ ALL GREEN   pass ${pass} / fail 0`);
+
 console.log(`⭐ Producers emit full precision; only renders round; arithmetic reads the exact value.\n`);

@@ -39,6 +39,58 @@ export function displayAmount(
   return n.toFixed(dp);
 }
 
+/**
+ * ═══ ⭐⭐ ROUNDING HAS A DIRECTION WHEN THE NUMBER IS A REQUIREMENT ═══════════════════════════
+ *
+ * `displayAmount` rounds to NEAREST, which is right for a figure the reader only has to read. It is
+ * wrong for a figure the reader has to ACT on. A requirement rendered below the real requirement is
+ * an instruction that fails when followed:
+ *
+ *     need 2.054121 USDC  ->  toFixed(2)  ->  "2.05"      top up to 2.05 and the call still fails
+ *     need 2.054121 USDC  ->  toFixed(4)  ->  "2.0541"    21 millionths short, same outcome
+ *
+ * ⛔ AND IT COMPOSES INTO A SELF-CONTRADICTORY REFUSAL. A balance of 2.0512 against a need of
+ * 2.0549 renders at 2dp as "You have 2.05, need 2.05" — a refusal whose own numbers say it should
+ * have passed. That is the same family `verify-refusal-quantity` guards: the printed quantity is not
+ * the quantity the test compared, and here ROUNDING is what makes them differ.
+ *
+ * ⭐ SO THE TWO SIDES ROUND OPPOSITE WAYS, each away from the reader's favour:
+ *     requiredAmount   rounds UP    — never ask for less than is actually needed
+ *     availableAmount  rounds DOWN  — never claim more is on hand than actually is
+ * A comparison rendered this way can be pessimistic by a rounding unit; it can never read as
+ * sufficient when it is not.
+ *
+ * ⚠️ THE SCALING IS SNAPPED BEFORE THE CEIL. `2.05 * 100` is 204.99999999999997 in binary floating
+ * point, and a naive ceil would turn an exact 2.05 into 2.06 — inflating every figure that needed no
+ * rounding at all. Fixing the representation error first is what keeps the direction rule from
+ * becoming a rounding bug of its own.
+ */
+const snap = (n: number, dp: number) => Number((n * 10 ** dp).toFixed(9));
+
+/** A figure the reader must MEET. Rounds UP, so the displayed number is never below the real one. */
+export function requiredAmount(
+  v: string | number | null | undefined,
+  dp = 2,
+  placeholder = "…",
+): string {
+  if (v === null || v === undefined || v === "") return placeholder;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return placeholder;
+  return (Math.ceil(snap(n, dp)) / 10 ** dp).toFixed(dp);
+}
+
+/** A figure the reader HAS. Rounds DOWN, so it never overstates what is on hand. */
+export function availableAmount(
+  v: string | number | null | undefined,
+  dp = 2,
+  placeholder = "…",
+): string {
+  if (v === null || v === undefined || v === "") return placeholder;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return placeholder;
+  return (Math.floor(snap(n, dp)) / 10 ** dp).toFixed(dp);
+}
+
 /** ⭐ The exact value, for arithmetic. Never rendered — its job is to be correct, not readable. */
 export function exactAmount(v: string | number | null | undefined): number | null {
   if (v === null || v === undefined || v === "") return null;
