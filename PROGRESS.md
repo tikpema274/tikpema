@@ -1,5 +1,111 @@
 ---
 
+# ⭐ THE COLLAPSE AND dd-vouched-build ARE DEPLOYED — and the probe I was handed was vacuous
+
+**2026-09-04.** Deploy `6a9aaff1ea2344b988d14105`, published 12:16:14Z.
+
+    before   c8e84ad · tree 9b371f60… · deploy 6a9a6c3c37947013eee03080 · index-C0HGc8dk.js
+    after    435f489 · tree c71b8ed0… · deploy 6a9aaff1ea2344b988d14105 · index-D2fTWq86.js
+
+**12 commits**, `c8e84ad` a strict ancestor, 0 behind. Three carry code — `8106f0a`
+(`dd-vouched-build`), `2f81fb7` (the batch comment and its guard), `435f489` (the receipts collapse);
+the other nine are records and pre-registrations. `dirty` **false**, 209 files, stamped 11:48:05.935Z.
+`test:all` **92/0/0 of 92**, unpiped. Bundling 28m13s. `gate:deployed` green on all five, 25 newer
+deploys scanned for orphans. Served bytes **byte-identical** to the artifact the probes were derived
+from — 884,800 bytes, sha256 `c9867436aaedd017…`, and the filename is a content hash.
+
+## ⛔⛔ THE PROBE I WAS GIVEN MEASURED 0 IN **BOTH** BUNDLES
+
+The specified literal was `"earlier bridges — each arrived"`. It is not in the old build and **it is
+not in the new one either.**
+
+    old=0  new=0   "earlier bridges — each arrived"
+    old=0  new=1   "each amount was read from the destination chain"     ← clause prose, contiguous
+    old=0  new=1   "Show all"
+
+⭐⭐ **THE REASON IS THE DESIGN.** `collapseSummaryLine` composes the sentence at runtime —
+`${count} earlier ${plural} — ${claims.join(", and ")}.` — from the clause prose, precisely so the
+line cannot drift from the predicate. **The property that makes the line trustworthy is the same
+property that makes it un-greppable.** A literal read off the source looks exactly right and is never
+emitted.
+
+⚠️ **THE FOURTH INSTANCE OF THIS CLASS (T'S COUNT, RECORDED AS THEIRS), AND THE FIRST WHERE THE
+DESIGN IS WHAT MADE IT VACUOUS.** The earlier ones were compilation artefacts — JSX splitting a
+sentence across `<b>`, esbuild folding a concatenation. This one is not an artefact of the toolchain
+at all: a deliberate architectural decision made the string non-existent, and no amount of care
+reading the source would have revealed it. Only running `grep -o -F` against the built bytes did.
+⭐ Which is why "derive the probes from a real build diff" is a rule and not a preference: it is the
+one check that does not care WHY the string is absent.
+
+## ⭐ AND A BUNDLE PROBE CANNOT SEE A SERVER ROUTE — P3
+
+Half this deploy is `/api/dd-vouched-build`, a Netlify function. No bundle probe can observe it, and
+🚨 **a MISSING route returns the SPA shell at HTTP 200** — a success code and a full page, which is
+the exact shape this repo has been bitten by before (`/api/x402-quote` and `/api/x402-vanilla-seller`
+served real money with no redirect, invisible for the same reason).
+
+    before   content-type: text/html    <!doctype html><html lang="en">…    ← the missing-route signature
+    after    content-type: application/json    {"endpoint":"dd-vouched-build/1",…
+
+⭐ The discriminator is the **content type plus the endpoint identifier**, not the status code —
+because the status code is 200 either way.
+
+## ⚠️ WHAT P1 AND P2 DO NOT SHOW, STATED SO THE GREEN TICKS ARE NOT OVER-READ
+
+**They prove the strings SHIP. They do not prove anything collapsed.** The predicate runs
+**client-side, per viewer, against that viewer's own receipts** — a curl fetches bundle bytes and
+never evaluates it. Nothing in this deploy verification shows that 14 rows hid, that the needs-review
+row survived, or that the line rendered with the right count.
+
+⭐ **THE RENDER IS SETTLED BY `test:collapse`'s 54 BEHAVIOURAL ASSERTIONS — including the 17-row
+corpus case asserting 3 shown / 14 hidden — AND BY A HUMAN LOOKING AT THE PANEL. NOT BY curl.**
+A deploy probe answers "did the code ship"; it never answers "does the code do the thing".
+
+## capture:window — RAN AND WROTE
+
+    ddTree 3b589768754d   previous 3b589768754d
+    ⚠️ NO WINDOW OBSERVED — and this is NOT a pass.   recorded -> dd-refusal-window-log.jsonl
+
+`rotated:false`, `outcome:"no-window"`, `probes:1`, at 12:18:47.885Z under commit `435f489`. The
+expected branch: no DD-surface bytes changed, so no health key rotated and no refusal was due.
+
+# ⭐⭐ ddTree HAS A PRODUCTION READ — the inference recorded this morning is CLOSED
+
+**2026-09-04, same deploy.** The entry below (`07ee84d`) recorded ddTree as **the one identity field
+with no production read** — bound transitively through the tree hash, one inference deep, while
+commit, dirty, tree, fileCount and deploy id all had direct reads. `8106f0a` built the endpoint;
+this deploy makes it answer.
+
+    GET /api/dd-vouched-build
+      outcome        "vouched"
+      vouched.build  3b589768754d…   source "health-record:identity.build"
+      stamp.ddTree   3b589768754d…   source "build-stamp:ddTree"
+      comparison     "agree"
+      verdict "pass" · producedAt 2026-09-04T12:10:11.120Z · ageMs 526482 · ttlMs 1800000
+
+⚠️ **READ IT THE WAY THE PAYLOAD ITSELF SAYS TO.** The agreement is **weak evidence**: the record is
+fetched by a key containing the running ddTree, so a record that is found will normally name it. What
+closed today is **not** "the two values agree" — it is that **a direct read exists at all**, and that
+it answers three questions the stamp cannot: *did a canary vouch, when, and with what verdict.*
+
+## ⭐ AND THE RECORD'S deployId CORROBORATES THE DD-CLEAN CLAIM, INDEPENDENTLY
+
+    vouched.deployId  6a9a6c3c37947013eee03080   ← the PREVIOUS deploy, not this one
+
+The health record vouching for the running DD code was written **before this deploy shipped**. That
+is correct and it is checkable evidence for a claim made twice today and both times by arithmetic:
+`shared/dd-vouch/` sits outside `DD_SURFACE_DIRS`, so the collapse and the endpoint ship **DD-clean**,
+ddTree does not rotate, and the canary's existing vouch still covers the code now running.
+⭐ Three instruments now agree on that: the local stamp, `capture:window`'s `rotated:false`, and a
+record written by a different process at a different time, naming a different deploy.
+
+⛔ **WHAT IS STILL NOT PROVEN BY THIS.** The endpoint's `none` and `unreadable` branches have never
+been exercised in production — `none` needs a DD-surface rotation, `unreadable` needs a store failure
+or an unstamped build. Both are covered by `test:vouchedbuild`'s 93 in-process assertions and by
+neither production reading. [[state-behind-a-transition-is-untested-by-default]]
+
+---
+
 # ⭐⭐⭐ A ROW CAN PROTECT ITSELF FROM A VACUOUS PASS — and one did
 
 **2026-09-04, from PR-6.** R3 was an ABSENCE row: *the broadcast transaction contains no `Approval`
