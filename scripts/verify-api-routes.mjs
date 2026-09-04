@@ -50,6 +50,7 @@ const NO_FRONTEND_CALLER = new Map([
   ["/api/dd-analyze", "PUBLIC x402 endpoint. Buyers are external agents; the SPA never calls it."],
   ["/api/dd-openapi", "the machine-readable descriptor `howToCall.openApiUrl` points at, fetched by external clients."],
   ["/api/dd-identity", "the mutable companion the ERC-8004 identity document (agentId 851891) names as its correction AND availability path. Fetched by outside verifiers following tokenURI, never by the SPA — and v1.0.0's companion was unreachable precisely because nothing external could resolve it."],
+  ["/api/dd-vouched-build", "operator/verifier read of what the DD canary vouched for. External by design — it is the ONLY production read of ddTree, and an identity field readable only by its operator is the trusted-mutable-surface shape this service sells findings about. The SPA never calls it: it answers a provenance question about the deploy, not a question any panel asks."],
   // ⭐ These two are the REASON this reverse audit's sibling defect existed: both endpoints were
   // LIVE and settling real Arc testnet USDC with NO /api redirect at all, and nothing noticed
   // because a GET to the missing path returned 200 with the SPA shell. The redirects added

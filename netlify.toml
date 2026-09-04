@@ -52,6 +52,17 @@
   to = "/.netlify/functions/dd-analyze"
   status = 200
 
+# ⭐⭐ THE ONLY PRODUCTION READ OF ddTree. Public and unauthenticated for the same reason
+# /api/dd-identity is: this service's product is flagging trusted-mutable-surfaces in other people's
+# contracts, and an identity field readable only by its operator is that shape. It discloses nothing
+# new — the refusal it reports on is already visible to anyone who GETs /api/dd-analyze during a
+# window — it makes that fact CHECKABLE. Read-only, one strong Blobs read, no writes, no fixture
+# sweep, and deliberately NOT bolted onto blobs-probe, which sits on the money path.
+[[redirects]]
+  from = "/api/dd-vouched-build"
+  to = "/.netlify/functions/dd-vouched-build"
+  status = 200
+
 # Unified Balance EXIT — the user reclaiming their own Gateway balance.
 # GET = their exit state + open withdrawals. POST = start the ~7 day delay.
 # ⭐ A RECLAIM, NOT A SPEND — same reasoning as agent-withdraw below, one layer up: those
