@@ -140,15 +140,31 @@ section("4 — THE REASON IS WRITTEN WHERE THE EDIT WOULD BE MADE");
   // ⭐ A guard that fails without saying why gets deleted by whoever it blocks. The argument has to
   // sit at the code, not only in this file.
   const prose = SRC.replace(/^\s*(\/\/|\*)\s?/gm, " ").replace(/\s+/g, " ");
-  check("⭐⭐ the atomicity is named as the SAFETY property at agentBridge",
-    /either both land or neither does, and no allowance ever stands alone/i.test(prose));
+  // ═══ 🚨 THIS SECTION USED TO PIN AN OVERCLAIM AND A CLAIM THAT HAD GONE FALSE ════════════════
+  // It required the prose to say "either both land or neither does, and no allowance ever stands
+  // alone" — the atomicity claim — and to say "No batched burn has landed on chain".
+  //   · The first is UNTESTED (PR-6: Circle refuses deterministic reverts pre-broadcast, so the
+  //     revert never happens; only a simulation-to-inclusion race reaches the chain).
+  //   · The second became FALSE the moment PR-4 landed, and falser again at PR-5.
+  // ⭐⭐ A GUARD THAT PINS A CLAIM KEEPS IT TRUE OR KEEPS IT FROZEN — and this one froze a sentence
+  // the runs had already overtaken, while reading green. So it now pins the DISTINCTION rather than
+  // the wording: what is established, and that the untested part is MARKED untested.
+  check("⭐⭐ the safety property is still named at the code",
+    /THERE IS NO SEPARATE APPROVE TRANSACTION, AND THAT IS THE SAFETY PROPERTY/i.test(prose));
+  check("⛔⛔ …and rollback-on-revert is MARKED NOT TESTED, not asserted",
+    /NOT TESTED/.test(prose) && /NOT TESTED IS NOT UNTRUE/i.test(prose));
+  check("⭐ …with the structural reason: simulation refuses deterministic reverts pre-broadcast",
+    /simulates[\s\S]{0,80}before broadcasting/i.test(prose) &&
+    /BETWEEN simulation and inclusion/i.test(prose));
+  check("⭐⭐ …and what IS established is stated: the race class and the split design's refusal-after-approve",
+    /THE RACE CLASS/i.test(prose) && /REFUSAL-AFTER-APPROVE/i.test(prose));
   check("🚨 …with the upgrade authority that makes a standing allowance matter",
     /EMPTY BODY behind a single EOA/i.test(prose) && /no timelock, no notice/i.test(prose));
-  check("⛔ …and the honest limit: validation-proven, not settlement-proven",
-    /VALIDATION-PROVEN, NOT SETTLEMENT-PROVEN/i.test(prose) &&
-    /No batched burn has landed on chain/i.test(prose));
-  check("⭐ …pointing at the pre-registration for the first real one",
-    /batched-burn-preregistration/.test(prose));
+  check("⭐ …and the success path is marked as unable to settle atomicity",
+    /consistent with atomicity/i.test(prose) && /happened to succeed/i.test(prose));
+  check("⭐ …pointing at the pre-registrations, including the induced-failure one",
+    /batched-burn-preregistration/.test(prose) &&
+    /induced-failure-atomicity-preregistration/.test(prose));
   check("⭐ this guard is named at the code it guards, so a splitter finds it before the reviewer does",
     /verify-bridge-batch-atomicity/.test(prose));
 }

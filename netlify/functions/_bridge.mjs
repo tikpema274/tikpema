@@ -783,24 +783,43 @@ export function bridgeCallData({ amountMinor, recipient, cctpDomain, signedQuote
 }
 
 /**
- * ═══ ⭐⭐⭐ THE APPROVE AND THE BURN, IN ONE userOp — AND THE ATOMICITY IS THE SAFETY PROPERTY ═══
+ * ═══ ⭐⭐⭐ THE APPROVE AND THE BURN, IN ONE userOp — WHAT THAT IS ESTABLISHED TO BUY ═══════════
  *
- * `executeBatch` loops `callWithReturnDataOrRevert`, so if the burn reverts the approve reverts
- * with it. **Either both land or neither does, and no allowance ever stands alone.**
+ * `executeBatch` loops `callWithReturnDataOrRevert`, so a reverting burn SHOULD revert the approve
+ * with it — no allowance left standing alone.
  *
- * ⛔ THAT IS THE WHOLE REASON THIS FUNCTION EXISTS. Sent as two sequential transactions, a burn that
- * fails after a successful approve — a quote that expired in between, a revert, a timeout — leaves
- * an `amount + fee` allowance standing to `TokenMessengerWithFees`, a UUPS proxy whose
- * `_authorizeUpgrade` has an EMPTY BODY behind a single EOA (owner `0x3b61abee…`, nonce 237): no
- * timelock, no notice. Splitting this back into two transactions silently reintroduces that window.
+ * ⛔ THAT CLAIM IS **NOT TESTED**, AND THE REASON IS STRUCTURAL, NOT NEGLECT. Circle SIMULATES
+ * against current state before broadcasting, so any revert cause visible there is refused
+ * pre-broadcast and never reaches the chain. For `executeBatch` to roll back a mid-execution revert,
+ * a revert has to HAPPEN — which needs a cause arising BETWEEN simulation and inclusion. That is a
+ * race, biasable but not schedulable, and every DETERMINISTIC induction requires editing this file.
+ * ⚠️ NOT TESTED IS NOT UNTRUE. Do not delete the claim and do not lean on it; see
+ * `docs/induced-failure-atomicity-preregistration.md` (PR-6) for the attempt and why it could not
+ * reach the broadcast fork.
+ *
+ * ⭐⭐ WHAT **IS** ESTABLISHED — and it is narrower than the sentence above, and still decisive:
+ *
+ *   (a) THE RACE CLASS. A cause arising between simulation and inclusion — chiefly `QuoteExpired`,
+ *       where our gates check at SUBMIT time and the chain checks at INCLUSION time, a gap nothing
+ *       can close. Deterministic reverts are pre-empted by simulation; these are not.
+ *   (b) ⭐ THE SPLIT DESIGN'S REFUSAL-AFTER-APPROVE — DEMONSTRATED, not argued. PR-6 submitted a
+ *       bridge Circle refused pre-broadcast (`INSUFFICIENT_TOKEN`, no txHash). Simulation happens at
+ *       BURN-SUBMIT time, when a two-transaction design's approve is ALREADY ON CHAIN — so that same
+ *       refusal would have left `amount + fee` standing. Batched, it cost nothing: allowance read 0.
+ *
+ * ⛔ SO SPLITTING THIS BACK INTO TWO TRANSACTIONS REINTRODUCES A WINDOW THAT HAS BEEN OBSERVED, not
+ * merely one that is feared. The allowance would stand to `TokenMessengerWithFees`, a UUPS proxy
+ * whose `_authorizeUpgrade` has an EMPTY BODY behind a single EOA (owner `0x3b61abee…`, nonce 237):
+ * no timelock, no notice.
  * 🚨 `verify-bridge-batch-atomicity.mjs` fails if the approve and the burn are ever submitted
  * separately. It is not a style check — it is the guard on the reason this option was chosen.
  *
- * ⚠️ AND THE BATCH SHAPE IS VALIDATION-PROVEN, NOT SETTLEMENT-PROVEN. `estimateContractExecutionFee`
- * showed the account accepts a self-targeted `executeBatch` and that Circle accepts a
- * `contractAddress` equal to the wallet. It simulates; it does not settle. **No batched burn has
- * ever landed on chain.** The first one is a pre-registered, unproven path — see
- * `docs/batched-burn-preregistration.md` — and must be run as one, not assumed from the estimate.
+ * ⭐ SETTLEMENT-PROVEN ON THE SUCCESS PATH. Two batched burns have landed on chain: PR-4's spike
+ * (`docs/batched-burn-preregistration.md`) and PR-5's production run through the UI
+ * (`docs/production-upfront-bridge-preregistration.md`), both leaving `allowance == 0`. ⚠️ A
+ * successful batch consuming exactly what it approved is CONSISTENT with atomicity and equally
+ * consistent with a non-atomic batch whose second call happened to succeed. The success path cannot
+ * settle it; only the failure path can.
  */
 export function bridgeBatchCallData({ walletAddress, fee, recipient, cctpDomain }) {
   const debit = bridgeDebitMinor(fee);
@@ -858,26 +877,25 @@ export async function agentBridge({ walletAddress, destination, amountUsdc, reci
 
   const client = circle();
 
-  // ═══ ⭐⭐⭐ ONE userOp: approve + burn, ATOMIC ════════════════════════════════════════════════
+  // ═══ ⭐⭐⭐ ONE userOp: approve + burn ════════════════════════════════════════════════════════
   //
   // ⛔ THERE IS NO SEPARATE APPROVE TRANSACTION, AND THAT IS THE SAFETY PROPERTY — not a tidiness
-  // one. `executeBatch` loops `callWithReturnDataOrRevert`, so a reverting burn reverts the approve
-  // with it: **either both land or neither does, and no allowance ever stands alone.** Sent as two
-  // sequential transactions, any failure between them leaves `amount + fee` approved to
-  // `TokenMessengerWithFees` — a UUPS proxy whose `_authorizeUpgrade` has an EMPTY BODY behind a
-  // single EOA, no timelock, no notice. `verify-bridge-batch-atomicity.mjs` fails if these are ever
-  // split again.
+  // one. See the block above `bridgeBatchCallData` for what is ESTABLISHED and what is NOT TESTED;
+  // the one-line version: rollback-on-revert is UNTESTED (Circle refuses deterministic reverts
+  // pre-broadcast, so the revert never happens — PR-6), while the window a SPLIT design reopens has
+  // been OBSERVED — PR-6's `INSUFFICIENT_TOKEN` refusal arrived at burn-submit time, which in a
+  // two-transaction design is after the approve has already landed. Batched, it cost nothing.
+  // `verify-bridge-batch-atomicity.mjs` fails if these are ever split again.
   //
   // ⚠️ NO ALLOWANCE READ. The old path read `allowance()` to decide whether to approve; here the
   // approve is unconditional and inside the batch. Reading first would be a round trip whose answer
   // could not change what we submit — and an approve to the exact debit is consumed exactly by the
   // burn, so a successful bridge leaves zero. (Measured: both real burn wallets read 0 to TMWF.)
   //
-  // ⛔ VALIDATION-PROVEN, NOT SETTLEMENT-PROVEN. `estimateContractExecutionFee` showed the account
-  // accepts a self-targeted `executeBatch` and that Circle accepts a `contractAddress` equal to the
-  // wallet. AN ESTIMATE SIMULATES; IT DOES NOT SETTLE. No batched burn has landed on chain. The
-  // first one is pre-registered (`docs/batched-burn-preregistration.md`) and must be run as the
-  // unproven path it is.
+  // ⭐ SETTLEMENT-PROVEN ON THE SUCCESS PATH, AND NO LONGER ONLY VALIDATION-PROVEN. Two batched
+  // burns have landed: PR-4's spike and PR-5's production run through this exact path, both leaving
+  // `allowance == 0`. ⚠️ That is consistent with atomicity AND with a non-atomic batch whose second
+  // call happened to succeed — the success path cannot tell them apart. See PR-6.
   const callData = bridgeBatchCallData({ walletAddress, fee, recipient: to, cctpDomain: dest.cctpDomain });
   const brTx = await client.createContractExecutionTransaction({
     walletAddress,

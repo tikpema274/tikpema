@@ -1,5 +1,88 @@
 ---
 
+# ⭐⭐⭐ A ROW CAN PROTECT ITSELF FROM A VACUOUS PASS — and one did
+
+**2026-09-04, from PR-6.** R3 was an ABSENCE row: *the broadcast transaction contains no `Approval`
+from the SCA to TMWF.* It was written with a control attached — **the same receipt must still carry
+its EntryPoint logs, or the reader is broken and R3 is UNEVALUABLE rather than confirmed.**
+
+The run went the rejection way. Circle refused pre-broadcast, so **there is no transaction** — and
+therefore no receipt to carry the `Approval`, and no receipt to carry the control either.
+
+⭐⭐ **THE ABSENCE WAS TRIVIALLY TRUE AND MEANT NOTHING.** There was no transaction in which an
+`Approval` could have appeared. Without the control, R3 would have been scored **CONFIRMED**, on a
+run where nothing was submitted, and eight green rows would have carried a ninth that had measured
+nothing at all. **The control did its job by REFUSING**, and the row scored UNEVALUABLE.
+
+## ⭐ THE RULE, AND IT IS WRITABLE IN ADVANCE
+
+**AN ABSENCE ROW MUST NAME THE PRESENCE THAT WOULD HAVE TO BE POSSIBLE FOR ITS ABSENCE TO MEAN
+ANYTHING** — and must score UNEVALUABLE, not CONFIRMED, when that presence is unreachable.
+
+⚠️ This is [[collapse-needs-pairwise-inequality]] and [[absence-must-never-read-as-safe]] moved one
+step earlier: not "check a control at read time", but **write the control into the row, before the
+run, so the row cannot be scored without it.** The morning's version of this lesson came from
+noticing a missing sentence needed a rendering sibling; by the afternoon it was a clause in a
+pre-registration, and it fired on the first document that carried it.
+
+⭐ It also cost nothing. The control was one sentence appended to a row that was being written
+anyway, and it converted a would-be false pass into an honest non-result.
+
+# ⭐⭐ ATOMICITY IS NOT DETERMINISTICALLY TESTABLE FROM THIS PATH — a finding, not a gap
+
+**Circle SIMULATES against current state before broadcasting.** Therefore **any revert cause visible
+in current state is refused pre-broadcast, by construction.** PR-6 induced a balance shortfall; the
+simulation saw it and the answer was `INSUFFICIENT_TOKEN`, *"it never reached the chain"*.
+
+⛔ **SO FOR A BATCH TO ROLL BACK A REVERT, A REVERT HAS TO HAPPEN — and it cannot happen for any
+reason we can state deterministically.** The cause must arise **BETWEEN simulation and inclusion**:
+
+* a **state race** — balance or allowance changed by another spender after simulation, or
+* ⭐⭐ a **time race** — `QuoteExpired`. The deadline is `block.timestamp`-based; **our gates check at
+  SUBMIT time and the chain checks at INCLUSION time, and nothing can close that gap.** It is
+  structurally open, and `agentBridge`'s own re-check comment already named it: the check stays
+  *"because a burn past the deadline still REVERTS."*
+
+⚠️ **THAT IS A RACE, NOT AN INDUCTION.** Biasable — submit as late in the quote window as the panel
+allows — but **not schedulable**. The target is single-digit seconds, from PR-5's measured 3864 ms
+submit-to-mine. Most attempts will simply be refused, which costs nothing.
+
+⭐ **EVERY DETERMINISTIC INDUCTION REQUIRES EDITING THE CODE UNDER TEST**, and a run against modified
+code proves nothing about the deployed code. Both candidates PR-6 considered failed here: the expired
+quote is refused by two of our own gates, and the shortfall-by-approve needs `bridgeDebitMinor`
+edited, because the approve amount is derived rather than passed.
+
+## ⛔ AND THE CONSEQUENCE FOR THE COMMENT AT THE CODE
+
+`_bridge.mjs` asserted *"either both land or neither does, and no allowance ever stands alone"* — and
+`verify-bridge-batch-atomicity.mjs` **pinned that sentence**, so the guard was keeping an untested
+claim frozen in place while reading green. 🚨 The same section also pinned *"No batched burn has
+landed on chain"*, which **went false the moment PR-4 landed** and falser at PR-5.
+
+⭐⭐ **A GUARD THAT PINS A CLAIM EITHER KEEPS IT TRUE OR KEEPS IT FROZEN.** This one froze two
+sentences the runs had already overtaken. Rewritten to pin the DISTINCTION instead — what is
+established, and that the untested part is MARKED untested — with the claim kept and labelled
+**NOT TESTED**, never deleted: *not tested is not untrue*, and a future reader needs to know which.
+Mutation-proven both ways: removing the NOT-TESTED marking reddens it, and so does dropping the
+statement of what IS established.
+
+## ⭐ WHAT IS ESTABLISHED, NARROWER AND STILL DECISIVE
+
+    (a) the RACE CLASS — a cause arising between simulation and inclusion, chiefly QuoteExpired
+    (b) the SPLIT DESIGN'S REFUSAL-AFTER-APPROVE — demonstrated by PR-6, not argued
+
+⭐⭐ **(b) IS THE ONE THE FAILED TEST PRODUCED FOR FREE.** Simulation happens at *burn-submit* time,
+when a two-transaction design's approve is **already on chain**. PR-6's refusal, in a split design,
+would have left `amount + fee` standing to a UUPS proxy with an empty `_authorizeUpgrade`. Batched,
+it cost nothing — `allowance` read `0`. **The run that could not test atomicity demonstrated the
+scenario batching exists to prevent.**
+
+⚠️ Recorded as a DERIVATION from two observed facts (Circle refused the burn pre-broadcast; `approve`
+checks no balance so it would have landed), not as an observation. And ⛔ it is **not** evidence of
+atomicity: absorbing a pre-broadcast refusal says nothing about rolling back a mid-execution revert.
+
+---
+
 # ⭐⭐⭐ THE UPFRONT-FEE MIGRATION IS PROVEN END TO END IN PRODUCTION — PR-1 → PR-5, one arc
 
 **2026-09-04. Closed for now.** Five pre-registrations, each committed BEFORE its run so no
