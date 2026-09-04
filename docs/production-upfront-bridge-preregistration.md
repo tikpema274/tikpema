@@ -380,3 +380,70 @@ trigger, so it still carries no fee verdict. R3–R6 say nothing about it.
 ⚠️ **AND THE CLEAN RESULT IS EXACTLY WHEN THAT IS EASIEST TO FORGET** — eleven rows green, a mint in
 eight seconds, and the money path's first end-to-end write. What is proven is the happy path of the
 write path. The failure path has still never been run.
+
+---
+
+# ADDENDUM — R11 OBSERVED, 2026-09-04. TWELVE OF TWELVE.
+
+**R11 was recorded above as NOT OBSERVED. It has now been observed, and it HOLDS.** The row above is
+left exactly as written: it was honest when written, and an unfinished observation that later
+completes is closed by appending, never by editing the entry that said it was unfinished.
+
+| row | prediction | first report | on reload |
+|---|---|---|---|
+| **R11** | silent where the number is an observation | ⚠️ NOT OBSERVED | ✅ **HOLDS — F11 did not fire** |
+
+## ⭐⭐ BOTH BRANCHES WERE OBSERVED, ON ONE SCREEN — which is why this is worth more than R11
+
+    measured row   1.0000 -> Base (Sepolia)      "arrived — exactly 1.000000 USDC"
+                   mechanic sentence  ABSENT
+    predicted row  1.0000 -> Unichain (Sepolia)  (provisional, delivery "predicted")
+                   mechanic sentence  PRESENT — the `unknown` copy
+
+⭐ **A LONE ABSENCE PROVES NOTHING.** A missing sentence on a measured row is equally consistent with
+the rule working and with the renderer being broken, and no assertion over that one row separates
+them. The `unknown` copy still rendering on the Unichain row, in the same list, on the same render,
+is the CONTROL — it shows the sentence can still appear, so its absence next to it is a decision and
+not a failure. [[collapse-needs-pairwise-inequality]]
+
+⚠️ And the discriminator is the receipt's own `delivery` field, exactly as F10/F11 were conditioned:
+the Base row is `measured`, the Unichain row is `predicted`. `c8e84ad`'s rule — **explain a
+derivation, never a measurement** — is now confirmed on the live corpus in both directions, having
+been provable in only one of them four hours earlier.
+
+## THE ARTIFACT — the panel's final state, verbatim, three claims from three instruments
+
+    fee 0.054018 USDC charged
+    ✓ fee confirmed on chain — 0.054018 USDC moved, the figure you were shown
+    ✓ arrived — exactly 1.000000 USDC, read from the destination chain
+
+⭐ **THREE DIFFERENT INSTRUMENTS, NOT ONE INSTRUMENT READ THREE TIMES:**
+
+    1  the SEALED QUOTE      what we promised and signed into the calldata   (feeDisclosed 54018)
+    2  ARC'S OWN LOGS        what actually moved at the source, located by
+                             the TMWF -> FeeManager forward leg              (feeLogIndex 30)
+    3  BASE SEPOLIA'S STATE  what landed at the destination, two mirrors     (mint 1000000)
+
+⚠️ **AND THEY DO NOT ALL CONFIRM THE SAME NUMBER — say what each one covers.** Instruments 1 and 2
+corroborate the **fee** (`0.054018`, promise vs source movement). Instrument 3 measures the
+**arrival** (`1.000000`) and says nothing about the fee. ⛔ Three ticks on one row is not triple
+confirmation of one figure; it is two claims, one of them independently corroborated.
+[[verify-facts-before-sharing-words]]
+
+⭐ That distinction is the whole reason this row reads well: nothing on it is derived from anything
+else on it. The fee line does not compute the arrival, and the arrival is not inferred from the
+mechanic — it was read off another chain.
+
+## ⛔ WHAT REMAINS OPEN — unchanged by this addendum
+
+* **ATOMICITY.** Still success-path only. Twelve green rows describe a burn that worked; *"either
+  both land or neither does"* is a claim about the **failure** path, and only an INDUCED failure —
+  an expired quote, or a deliberate shortfall — discriminates it. That run is still not written.
+* **THE SELF-SIGNED PATH.** Untouched. The Unichain row used above as a CONTROL is a self-signed
+  provisional, and it serves here only as evidence that a sentence can render — nothing about that
+  path's behaviour is established, and it carries the `unknown` mechanic precisely because it
+  predates the record.
+* **THE PLAN PATH.** `job-bridge-approve` still has its own receipt store, calls neither trigger, and
+  carries no fee verdict at all.
+
+⚠️ Twelve of twelve is the happy path of the write path, completely. It is not the write path.
