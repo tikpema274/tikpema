@@ -29,6 +29,7 @@
 
 import { USDC_DP } from "../lib/formatUsdc";
 import { bridgeMechanicCopy, bridgeMechanicOf } from "../../shared/bridge-mechanic.mjs";
+import { circleCanBeAsked } from "../../shared/circle-tx-id.mjs";
 
 /** The receipt shape, as projected by /api/bridge-receipts. Deliberately loose: this component
  *  must render SOMETHING truthful for a receipt from an older deploy, not throw. */
@@ -67,6 +68,9 @@ export type BridgeReceiptView = {
   verifyFailure?: { reason?: string } | null;
   submitFailureDetail?: string | null;
   reconcileAttempts?: number;
+  /** ⭐ The provisional identity. Read ONLY through `circleCanBeAsked` — its SHAPE is what
+   *  decides whether Circle can be asked about this record at all. */
+  txId?: string | null;
   provisional?: { band?: string } | null;
   mintRecovery?: { cause?: string; exhausted?: boolean; verifyFailureCount?: number } | null;
 };
@@ -127,6 +131,10 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
   // wording. A surface that wrote its own could render a true sentence for the WRONG path and
   // nothing about it would look wrong — which is exactly how the two vocabularies would drift.
   const mech = bridgeMechanicOf(r.feeMechanic);
+  // ⭐⭐ THE SAME PREDICATE THE SWEEP SELECTS ON. A row we refuse to send to Circle must
+  //    never also say "we keep re-checking with Circle" — one function, so the sentence
+  //    and the selection cannot disagree. See shared/circle-tx-id.mjs.
+  const askable = circleCanBeAsked(r);
   const copy = bridgeMechanicCopy(mech);
   const measured = r.delivery === "measured" && r.amountDelivered != null;
   const known = (KNOWN_RECEIPT_STATES as readonly string[]).includes(r.state ?? "");
@@ -168,13 +176,19 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
             way; the count is a fact the record carries. Zero-vs-nonzero also preserves the
             distinction that branch already draws — asked-and-unanswered is different from
             never-asked, and the second is the more alarming one. */}
-      {r.state === "burn_submitted" && r.provisional?.band === "unwitnessed" && (
+      {/* ⛔ TWO SITUATIONS, NOT ONE — AND THE OLD COPY WAS TRUE OF ONLY THE FIRST.
+          "not had a confirmation YET, and we keep re-checking" says a confirmation is PENDING.
+          For a record whose txId Circle never issued it is UNREACHABLE, not pending: every check
+          400s at URL parsing before any lookup. Measured 14d8b8a — ~146 identical failures per
+          record. ⭐ The branch reads `askable`, the SAME predicate that decides whether the sweep
+          selects it, so the row cannot promise work the sweep has stopped doing. */}
+      {r.state === "burn_submitted" && r.provisional?.band === "unwitnessed" && askable && (
         <span style={{ color: "var(--warn)" }}>
           submitted, still unconfirmed — nothing has been observed leaving your wallet.{" "}
           {(r.reconcileAttempts ?? 0) > 0 ? (
             <>
-              We have re-checked it with Circle <b>{r.reconcileAttempts}</b> times and not had a
-              confirmation yet, and we keep re-checking.
+              The check has run <b>{r.reconcileAttempts}</b> times without a confirmation, and it
+              keeps running.
             </>
           ) : (
             <>
@@ -183,6 +197,21 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
           )}{" "}
           Nothing is required of you. If it is still unconfirmed after 24 hours it becomes a
           <b> needs review</b> row, and only then does it need you.
+        </span>
+      )}
+      {r.state === "burn_submitted" && r.provisional?.band === "unwitnessed" && !askable && (
+        <span style={{ color: "var(--warn)" }}>
+          submitted, still unconfirmed — nothing has been observed leaving your wallet.{" "}
+          <b>Circle has no record of this one and never did</b> — its id was not issued by Circle,
+          so asking Circle cannot confirm it, however many times we ask.{" "}
+          {(r.reconcileAttempts ?? 0) > 0 && (
+            <>
+              The check ran <b>{r.reconcileAttempts}</b> times before this was recognised; none of
+              those could have succeeded.{" "}
+            </>
+          )}
+          ⚠️ So this will <b>not</b> resolve on its own. Nothing has left your wallet, and nothing
+          is required of you unless you believe you did sign it — see the review note after 24 hours.
         </span>
       )}
       {/* ⭐ THE AGED-OUT ROW NOW REPORTS WHAT WAS TRIED. `reconcileAttempts > 0` means we
@@ -194,7 +223,12 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
           ⚠ <b>needs review</b> — submitted over 24h ago and never confirmed.{" "}
           {(r.reconcileAttempts ?? 0) > 0 ? (
             <>
-              We asked Circle {r.reconcileAttempts} times and never got a confirmation.
+              {/* ⚠️ "times we asked Circle" WAS WIDER THAN WHAT THE COUNTER COUNTS. `bumpAttempt`
+                  also fires on `refused_unknown_stage`, which returns BEFORE any Circle call — so
+                  the field is "times the check ran without finishing". The sentence is narrowed to
+                  what the number actually is rather than the number changed to fit the sentence:
+                  the stored values already exist, and they are true under this reading. */}
+              The check ran {r.reconcileAttempts} times and never got a confirmation.
             </>
           ) : (
             <>
@@ -209,8 +243,24 @@ export function BridgeReceiptStatus({ r }: { r: BridgeReceiptView }) {
               ⭐⭐ IT IS LOAD-BEARING: "reconcile by hand" is an instruction, but only this says that
               WAITING IS FUTILE. Without it a user can still reasonably decide to sit and wait for a
               record that nothing will ever resolve. Caught on the FIRST run of the rendering test. */}
-          This will <b>not</b> resolve on its own: reconcile this transaction against
-          Circle's record by hand. Nothing has been observed leaving your wallet.
+          {askable ? (
+            <>
+              This will <b>not</b> resolve on its own: reconcile this transaction against
+              Circle's record by hand. Nothing has been observed leaving your wallet.
+            </>
+          ) : (
+            /* 🚨 THE OLD SENTENCE INSTRUCTED WORK THAT CANNOT SUCCEED, AT THE MOST CONSEQUENTIAL
+               MOMENT. "Reconcile this against Circle's record" sends someone to a system that has
+               no record and never had one — the id was not issued by Circle. Recorded 14d8b8a.
+               ⭐ What CAN be checked is named instead, and it is a real place with a real answer. */
+            <>
+              This will <b>not</b> resolve on its own — and <b>not</b> against Circle:
+              its id was not issued by Circle, so there is no record there to reconcile against.
+              What can be checked is your own wallet's history on Arc: if a burn was ever signed it
+              is there, and if it is not, nothing was sent. Nothing has been observed leaving your
+              wallet.
+            </>
+          )}
         </span>
       )}
       {/* ⭐⭐ THE OUTCOME THE RECONCILE JOB CAN NOW PROVE: Circle says the submission is

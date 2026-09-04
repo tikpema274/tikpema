@@ -46,6 +46,15 @@ const section = (t: string) => console.log(`\n── ${t} ${"─".repeat(Math.ma
 /** Render a receipt and return the TEXT a browser would paint — tags stripped, entities decoded,
  *  whitespace collapsed. ⭐ Collapsing is the whole point: it is exactly what defeated the regexes,
  *  because JSX line-wrapping is invisible to a reader and fatal to a pattern. */
+// ⭐⭐ A CIRCLE txId, BECAUSE THAT IS WHAT MAKES THESE FIXTURES AGENT PROVISIONALS.
+// These rows model the records the sweep DOES reconcile. Until 2026-09-04 they omitted `txId`
+// entirely and still asserted the "we are re-checking with Circle" copy — an under-specified
+// fixture that happened to pass because nothing branched on the id. `shared/circle-tx-id.mjs` now
+// decides both the SELECTION and the SENTENCE from the id's shape, so a fixture with no id is a
+// record Circle cannot be asked about, and the copy correctly says so.
+// ⛔ THE FIX IS THE FIXTURE, NOT THE PREDICATE — this file's own failure message says it:
+// "derive it, don't loosen the check".
+const CIRCLE_TX_ID = "0199a1b2-3c4d-7e8f-a012-3456789abcde";
 const text = (r: BridgeReceiptView) =>
   renderToStaticMarkup(<BridgeReceiptStatus r={r} />)
     .replace(/<[^>]+>/g, "")
@@ -104,9 +113,9 @@ section("2 — THE WORD THAT WAS THE LIE: 'yet'");
 // clause — it tests for the absence of "yet" — but the comment would have taught the next reader a
 // false fact about the system while sitting above a passing check.
 {
-  const settling = text({ state: "burn_submitted", provisional: { band: "settling" } });
-  const unwit = text({ state: "burn_submitted", provisional: { band: "unwitnessed" } });
-  const unres = text({ state: "burn_submitted", provisional: { band: "unresolved" }, reconcileAttempts: 7 });
+  const settling = text({ state: "burn_submitted", provisional: { band: "settling" }, txId: CIRCLE_TX_ID });
+  const unwit = text({ state: "burn_submitted", provisional: { band: "unwitnessed" }, txId: CIRCLE_TX_ID });
+  const unres = text({ state: "burn_submitted", provisional: { band: "unresolved" }, reconcileAttempts: 7, txId: CIRCLE_TX_ID });
 
   check("⭐ `settling` is the ONLY band allowed to say 'yet'", /has not been confirmed yet/.test(settling));
   check("⭐⭐ `unwitnessed` does NOT say 'yet'", !/\byet\b/.test(unwit), unwit.slice(0, 70));
@@ -142,7 +151,7 @@ section("2 — THE WORD THAT WAS THE LIE: 'yet'");
 
     if (isReconciled) {
       check("⭐⭐ unwitnessed IS reconciled ⇒ the copy must claim automatic re-checking",
-        /re-checking it with Circle automatically|we keep re-checking/i.test(unwit),
+        /re-checking it with Circle automatically|the check has run .* and it\s*keeps running|keeps running/i.test(unwit),
         "derive it, don't loosen the check — make the copy match the producer");
       check("⛔ …and must NOT say nothing is checking",
         !/nothing is checking/i.test(unwit),
@@ -168,9 +177,13 @@ section("3 — EVIDENCE vs SILENCE: 'we asked N times' ≠ 'nobody ever checked'
 // ⭐⭐ Different problems, different urgency — and this is TEXT BUILT FROM A VARIABLE, which is
 // precisely what a source regex cannot verify.
 {
-  const asked = text({ state: "burn_submitted", provisional: { band: "unresolved" }, reconcileAttempts: 42 });
-  const never = text({ state: "burn_submitted", provisional: { band: "unresolved" }, reconcileAttempts: 0 });
-  check("⭐⭐ the ATTEMPT COUNT is interpolated into the sentence", /We asked Circle 42 times/.test(asked), asked.slice(0, 80));
+  const asked = text({ state: "burn_submitted", provisional: { band: "unresolved" }, reconcileAttempts: 42, txId: CIRCLE_TX_ID });
+  const never = text({ state: "burn_submitted", provisional: { band: "unresolved" }, reconcileAttempts: 0, txId: CIRCLE_TX_ID });
+  // ⚠️ "We asked Circle N times" WAS NARROWED to "The check ran N times" on 2026-09-04: `bumpAttempt`
+  // also fires on `refused_unknown_stage`, which returns BEFORE any Circle call, so the old sentence
+  // was wider than the field. ⭐ THE ASSERTION'S PURPOSE IS UNCHANGED — that the COUNT is
+  // interpolated from a variable, which no source regex can check — only the verb moved.
+  check("⭐⭐ the ATTEMPT COUNT is interpolated into the sentence", /The check ran 42 times/.test(asked), asked.slice(0, 80));
   check("⭐⭐ zero attempts says NOTHING EVER CHECKED IT — not 'we asked 0 times'",
     /nothing ever checked it automatically/i.test(never) && !/asked Circle 0 times/i.test(never));
   check("  …and the two rows are genuinely different text", asked !== never);

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { circleCanBeAsked } from "../../shared/circle-tx-id.mjs";
 import { getStore } from "@netlify/blobs";
 
 // DIRECT-PATH BRIDGE RECEIPTS — the server's own record that money is in flight.
@@ -668,7 +669,22 @@ export async function listAllStranded({ limit = 50, now = Date.now() } = {}) {
         const p = provisionalStatus(r, now);
         if (p.provisional) {
           provisional[p.band]++;
-          if (!p.terminal) reconcilable.push(r);
+          // ═══ ⛔⛔ THE FILTER GOES HERE, AT THE SELECTION — NOT IN THE JOB ═══════════════════
+          // `bridge-reconcile-background` asks Circle about `txId`. A record whose txId Circle
+          // never issued cannot be answered: it 400s at URL parsing, every time, forever.
+          // Measured 14d8b8a — ~146 identical "Fail to parse id as UUID in url" per abandoned
+          // intent across nine records, bounded only by the 24h cap.
+          //
+          // 🚨 A GUARD INSIDE THE JOB WOULD BE IN THE WRONG PLACE. The job refusing a record it
+          // should never have received still costs the round trip, still writes an attempt, and
+          // — the part that matters — THE SWEEP WOULD STILL COUNT IT AS `reconciled`, so the
+          // census would report work that could not happen as work done.
+          //
+          // ⭐ THE PREDICATE IS THE ID'S SHAPE, NOT THE RECORD'S `origin`. See shared/circle-tx-id.mjs:
+          // origin says who MADE the record, not whether the lookup can succeed, and it is dropped
+          // in transit on the very path this excludes. The same function decides what the PANEL may
+          // claim, so the selection and the sentence cannot disagree.
+          if (!p.terminal && circleCanBeAsked(r)) reconcilable.push(r);
         }
       } catch {
         /* one unreadable blob must not sink the sweep */
