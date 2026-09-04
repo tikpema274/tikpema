@@ -1,5 +1,147 @@
 ---
 
+# ⭐ THE UPFRONT-FEE MIGRATION IS DEPLOYED — and one probe proves it was SCOPED, not swept
+
+**2026-09-04.** Deploy `6a9a6c3c37947013eee03080`, published 07:27:35.483Z. ⛔ **NOT A COPY DEPLOY.**
+The agent bridge moves to CCTP upfront fees — approve and burn batched into ONE userOp against
+`TokenMessengerWithFees`, the fee charged on Arc **in addition to** the amount, the recipient
+receiving the FULL amount. The self-signed path deliberately KEEPS the deducted mechanic, so two fee
+mechanics are live at once and the copy is threaded by `feeMechanic`.
+
+## THE GAP, READ FROM PRODUCTION RATHER THAN FROM THIS FILE
+
+    before   36aab4b · tree b3b88af9… · deploy 6a9942a3c70c6c792168af6e · index-D36_nTbs.js
+    after    c8e84ad · tree 9b371f60… · deploy 6a9a6c3c37947013eee03080 · index-C0HGc8dk.js
+
+**24 commits**, and `36aab4b` is a STRICT ANCESTOR of HEAD — established by `merge-base
+--is-ancestor` together with `rev-list --count HEAD..36aab4b == 0`, not by comparing two `log`
+windows by eye. [git-history-needs-a-reachability-query]
+
+The money-path payload is `f760077` (option C — the batched userOp), `12434fb` (the post-burn fee
+reconciliation), `99885ee` (the seal carrying the quote's expiry), and `4d7b0a3` + `c8e84ad` (the
+threaded mechanic copy). The other 19 are records, spikes and one six-site render fix.
+
+## THE DEPLOYED IDENTITY — every field below has a DIRECT production read except one
+
+    deploy id   6a9a6c3c37947013eee03080     read: control plane AND x-nf-deploy-id, agreeing
+    commit      c8e84adc60ea…                read: blobs-probe
+    tree        9b371f601c9b…                read: blobs-probe
+    dirty       false  (206 files)           read: blobs-probe
+    ddTree      3b589768754d…  (38 files)    ⚠️ NO PRODUCTION READ — see the next entry
+    bundle      index-C0HGc8dk.js  883053 bytes  sha256 5e39cf50e156a9a4…
+
+`gate:deployed` green on all five checks, both sides of the tree: the local build is stamped, the
+published deploy reached `ready`, production serves THIS tree AND this commit, the two instruments
+name the same deploy id, and no orphaned production deploys among the 25 newer records.
+
+Pre-deploy: `test:all` **90 passed / 0 FAILED / 0 NOT RUN of 90** in 7.5 min, exit 0, unpiped, on a
+clean tree at `c8e84ad`. `gate:watch` OK. `gate:rpc` 7 healthy, 1 transient — warned, not failed, and
+a transient is not proof the endpoint is fine. Functions bundling ran **22m48s**, the whole build
+28m28s, exit 0.
+
+## ⭐ THE PROBES CAME FROM A BUILD DIFF, AND THE DIFFED ARTIFACT *IS* THE SERVED ONE
+
+Not from source regex. JSX compiles across `<b>` into separate string literals and esbuild folds
+concatenated templates, so a probe derived from source can be a string the build never emits.
+[assert-on-rendered-output-not-source-regex] Each literal was confirmed contiguous by `grep -o -F`
+against real built bytes before it was used.
+
+⭐ **AND THE BINDING IS A READING, NOT AN ASSUMPTION.** The served bundle's sha256 equals the local
+build's — `5e39cf50e156a9a4…`, 883053 bytes on both sides — and the filename is a content hash. The
+CLI ran its own `npm run build` from `netlify.toml` and landed on the same asset, so the artifact the
+probes were derived from is the artifact production serves.
+
+    probe                                                            before  after
+    P1  "the figure you accepted, is taken out of the amount"          1  ->  0   DEDUCTED, agent
+    P2  "the figure you accepted, charged on top: the full amount…"    0  ->  1   UPFRONT, agent
+    P3  "predates the fee-mechanic record"                             0  ->  1   UNKNOWN copy
+    P4  "You can leave this page — the bridge completes on its own."   1  ->  1   CONTROL
+    P5  "The cross-chain fee is taken "                                1  ->  1   DEDUCTED, self-signed
+
+## ⭐⭐ P5 IS WHAT MAKES THIS A MEASUREMENT OF THE SWITCH RATHER THAN OF A CHANGED STRING
+
+P1→P2 alone cannot tell a **scoped mechanic switch** from a **copy sweep**: both produce exactly that
+flip on the agent screen. The discriminating row is the one that must NOT move. P5 is the
+self-signed path's deducted sentence, and it is still there — so the deducted vocabulary survived on
+the path that keeps the deducted mechanic, which is the claim the design actually makes.
+
+⚠️ A probe set made only of flips measures that bytes changed. It takes a row predicted to HOLD, in
+the same family as the rows predicted to flip, before it measures WHICH change happened.
+
+## capture:window RAN — and its no-window is the expected one, not a silence
+
+    ddTree 3b589768754d   previous 3b589768754d
+    ⚠️ NO WINDOW OBSERVED — and this is NOT a pass.   recorded -> dd-refusal-window-log.jsonl
+
+One line appended: `rotated:false`, `outcome:"no-window"`, `probes:1`, at 07:30:14.079Z. ⭐ The
+script carries its own discriminator: no window is EXPECTED when ddTree is unchanged and SUSPICIOUS
+when it rotated. ddTree did not move, so no health key rotated and no refusal was due. Two of the
+last three deploys skipped or lost this step; this one ran and wrote.
+
+## ⛔ HONEST LIMITS
+
+* **P3 measures BYTES, NOT RENDER.** `c8e84ad` gates the `unknown` sentence to derivations only. A
+  curl cannot see a gate — the string is in the bundle either way. What the probe establishes is that
+  the threaded mechanic module ships; that it renders only beside a derived figure is covered by
+  `test:mechanicpairing`, and by nothing here.
+* **THE BANNER REMAINS PROVEN ONLY IN-PROCESS.** No DD-surface bytes changed, so the refusal window
+  the capture exists to witness did not open.
+* **NO BRIDGE WAS RUN.** The first production bridge on the new mechanic is a money-path test, is
+  pre-registered, and is T's to run. Nothing here observes the mechanic MOVING money — it observes
+  that the code and the copy that would are what production serves.
+
+# ⭐⭐ ddTree HAS NO PRODUCTION READ — every claim about it is one inference deep
+
+**2026-09-04, found while reporting the deploy above.** Four of the five identity fields can be read
+straight off production. `ddTree` cannot, and that asymmetry had never been written down.
+
+    blobs-probe .build      resolved · commit · dirty · tree · fileCount · generatedAt · detail
+                            ⛔ no ddTree
+    /api/dd-identity        identity, trust ordering, CID — no ddTree, no buildId
+    /built                  no ddTree, no buildId, no 64-hex value at all
+    /api/dd-analyze         405 — a declared refusal, by design
+
+⚠️ **AND `capture:window`'s COMPARISON IS LOCAL-ON-BOTH-SIDES.** It compares the LOCAL stamp's
+ddTree against the PREVIOUS LEDGER ENTRY. Both operands live on the deploying machine. That is a real
+comparison and it is worth having — it is what makes `rotated:false` meaningful — but it is not a
+reading of production, and it would report `rotated:false` identically if production were serving
+something else entirely.
+
+## SO THE CHAIN IS: READ THE TREE, THEN DERIVE
+
+Production serves tree `9b371f60…` — that IS read, by `gate:deployed` check 3. `ddTree` is a field of
+the stamp generated from that same tree, so the deployed ddTree *must* equal the local one. ⭐ That
+"must" is a derivation. Every other identity field is an observation. **The record should not print
+them in one column as though they were the same kind of thing.**
+[conversation-sourced-numbers-must-be-marked]
+
+⚠️ **AND IT IS THE FIELD WHERE THE INFERENCE IS MOST LOAD-BEARING.** ddTree is the DD health
+artifact's IDENTITY — it decides whether the canary's verdict binds to the code that actually
+answered. A field that governs a refusal is a poor candidate for the one field nobody can read.
+
+## ⛔ WHAT IT WOULD TAKE — a DECISION, not a fix
+
+* **(a) Add `ddTree` to `blobs-probe`'s `build` projection.** One field; the probe already reads the
+  stamp, so nothing new is computed. ⚠️ But `blobs-probe` is a safety probe on the money path, and
+  every field added there is a field a reader comes to depend on.
+* **(b) A public read of what the CANARY actually vouched for** — the buildId on the health artifact,
+  not the stamp. ⭐⭐ **THIS ANSWERS A STRICTLY BIGGER QUESTION THAN (a).** (a) says what the deployed
+  stamp CLAIMS; (b) says what the health artifact was WRITTEN AGAINST. Those two can differ, and the
+  difference is precisely the fail-open the version binding exists to close.
+* **(c) Leave it, and mark the inference at every appearance** — which is what the entry above now
+  does.
+
+⭐ **THE DISCRIMINATOR BETWEEN (a) AND (b).** (a) reads the SAME stamp from a second place, so it
+corroborates nothing — it is repeating one instrument and calling the second reading agreement.
+[repeating-one-instrument-is-not-corroboration] (b) is a different instrument answering a different
+question. **If ddTree is worth exposing at all, (b) is the one that buys something**, and (a) mostly
+buys the feeling of having closed this.
+
+⛔ Not done here, deliberately. Exposing a field on the money path's safety probe is a change to the
+money path, and it is not made while reporting a deploy.
+
+---
+
 # ⭐⭐⭐ THE `unknown` COPY READ SENSIBLY IN A FIXTURE AND BADLY IN A LIST
 
 **2026-09-03, after PR-4.** The mechanic sentence was rendered unconditionally. In the pairing suite
