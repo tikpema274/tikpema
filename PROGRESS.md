@@ -1,5 +1,114 @@
 ---
 
+# ⛔ THE RECONCILER ASKS CIRCLE ABOUT A TXID CIRCLE NEVER HAD
+
+**2026-09-04, found read-only from a panel row, before the PR-5 production bridge. NOT FIXED —
+recorded deliberately, so that run has one change in flight and not two.**
+
+A stranded row in the bridge panel said *"We have re-checked it with Circle **99** times"*. The count
+was the thing that drew the eye, and the count is not the defect.
+
+## THE SELECTION HAS NO ORIGIN FILTER
+
+    _bridge-receipts.mjs:671   if (!p.terminal) reconcilable.push(r);     ← every provisional
+    bridge-mint-sweep.mjs:98   POST bridge-reconcile-background {owner, txId}
+    bridge-reconcile-background.mjs:123   circle().getTransaction({ id: txId })
+
+⛔ **A `user-signed` RECORD'S txId IS LOCALLY MINTED.** `user-mtlru386-qxx7xy` is not a Circle
+transaction id and can never become one: the self-signed path is signed by the **browser EOA** and
+lands on Arc directly, so **Circle has no record of it, has never had one, and never will**. Circle
+rejects the id at URL parsing, before any lookup:
+
+    lastReconcileOutcome: "circle_error: Fail to parse id as UUID in url."
+
+**IDENTICALLY, ON ALL NINE PROVISIONAL RECORDS IN THE STORE.** Nine out of nine, one message.
+
+⭐⭐ **THIS IS A CATEGORY ERROR, NOT A TRANSIENT ONE**, and the code reads as though it were
+transient. The `catch` it lands in is labelled *"AN UNREACHABLE CIRCLE IS NOT AN ANSWER"* and treats
+the failure as "we could not ask" — which is right for a network fault and wrong here. **We asked,
+and we asked the wrong system.** A retry fixes the first and cannot touch the second.
+[[cause-offered-for-an-observation-it-excludes]]
+
+## ⭐ THE COUNT WAS THE SYMPTOM, AND THE RETRY IS BOUNDED
+
+`SUBMITTED_AGE_CAP_MS` (24h) makes a provisional `unresolved`/`terminal` at read time; the sweep
+then stops selecting it and the reconciler returns `past_cap` **before** bumping. Bound ≈
+24h ÷ 10-min sweep ≈ 144.
+
+⭐ **AND THE CAP DEMONSTRABLY FIRES — MEASURED, NOT INFERRED.** The other eight are all past it and
+every one FROZE just under 24 hours after submission:
+
+    mtdhmeh8  Polygon    n=145  frozen 2026-08-29T21:50Z  (~23.95h after submit)
+    mte8sdj8  Linea      n=146  frozen 2026-08-30T10:30Z
+    mteqqxlk  Arbitrum   n=146  frozen 2026-08-30T18:50Z
+    mteqrye6  Base       n=146  frozen 2026-08-30T18:50Z
+    mteqwuok  Base       n=146  frozen 2026-08-30T18:50Z
+    mtetl8yk  Base       n=146  frozen 2026-08-30T20:10Z
+    mtexvqzt  Arbitrum   n=147  frozen 2026-08-30T22:10Z
+    mtiphw04  Base       n=146  frozen 2026-09-02T13:30Z  (~23.97h after submit)
+
+⛔ **SO THE FINDING IS NOT AN UNBOUNDED RETRY.** It is **~146 GUARANTEED-FUTILE CALLS PER ABANDONED
+INTENT**, nine times over. The bound is working exactly as designed and bounds the wrong thing: it
+limits how long we spend asking, not whether the question can be answered.
+
+⭐ The live one is real ticking, not an inflated counter — arithmetic, from its own two timestamps:
+`submittedAt 2026-09-03T17:00:41.030Z` → `lastReconciledAt 2026-09-04T09:40:13.501Z` is 999.5
+minutes; ÷ 100 attempts = **9.995 min/attempt**, the sweep cadence exactly. Every increment is one
+invocation that made one real, rejected HTTP call.
+
+## THE COPY IS THE SECOND HALF, AND IT IS THE SAME WORD ONE BRANCH OVER
+
+> We have re-checked it with Circle **100** times and not had a confirmation **yet**, and we keep
+> re-checking.
+
+Both clauses are **literally true and materially misleading**: 100 calls were made and none
+confirmed, and the job will keep calling. What the sentence implies — that a confirmation is
+PENDING — is false. **It is unreachable.**
+
+🚨 **THIS FILE HAS ALREADY LITIGATED THIS EXACT WORD.** The `settling` branch of
+`bridgeReceiptStatus.tsx` carries the finding in its own comment: *"'yet' claims a specific someone
+is waiting on a specific answer, which is a stronger claim than 'a job will look again', and the
+weaker one is all this row can honestly make."* The fix was applied there. **The `unwitnessed`
+branch, ~20 lines below, kept "yet".** Same word, same file, one branch over — a repair that stopped
+at the branch where it was found. [[duplicate-source-of-truth-is-the-recurring-bug]]
+
+⚠️ And "we keep re-checking" was written as a CORRECTION to an earlier sentence that said nothing was
+checking — true when written, made false by wiring the reconcile job in. That correction was right
+about the mechanism and inherited its silence about whether the mechanism can work.
+
+## TWO SMALLER ONES — recorded so they are not rediscovered
+
+* **`bumpAttempt` FIRES BEFORE ANY CIRCLE CALL.** At `bridge-reconcile-background.mjs:116` the
+  `refused_unknown_stage` branch bumps and returns without reaching line 123. ⚠️ So the field's NAME
+  and the panel's sentence are both WIDER THAN WHAT IT COUNTS: the counter is "times the reconcile
+  job ran and did not finish", and the copy reports it as "times we asked Circle". Not the branch
+  firing here — these records carry `pendingStage: "burn"`, which is valid — but a record stuck on
+  unknown-stage would have the panel state a number of Circle calls that were never made.
+* **THE INTENT RECORDS NO REASON THE SIGNATURE NEVER RETURNED.** `pendingReason` is the constant
+  `"awaiting user signature"` on all nine. **Declined, tab closed, and signature failed are
+  indistinguishable** — three different situations with three different responses, collapsed into one
+  string. The receipt cannot tell an abandoned intent from a broken one.
+
+## ⚠️ SCOPE — THE UPFRONT MECHANIC IS UNTOUCHED BY THIS
+
+All nine are `origin: "user-signed"` — the **DEDUCTED** path, through `BridgingKitContract`, which a
+browser EOA signs one transaction at a time. Confirmed by arithmetic on the record itself:
+`netPredicted 0.948652 = 1 − 0.051348`, the deducted formula. None of them has a `burnHash`, so
+nothing was observed leaving any wallet.
+
+⭐ **NOTHING HERE BEARS ON PR-5.** That run exercises the agent path, the upfront mechanic and
+`recordBridge` — a different origin, a different contract, a different fee mechanic and a different
+writer. ⚠️ Nor does it bear on the agent path's OWN provisional records, which carry a real Circle
+UUID and for which this reconciler is correct: the defect is the missing discriminator between the
+two origins, not the job.
+
+⛔ **NOT FIXED, ON PURPOSE.** The production upfront bridge is about to run and a second change in
+flight would make any failure ambiguous between them. Whoever fixes this: the filter belongs at the
+SELECTION (`reconcilable`), not at the job — a job that refuses a record it should never have been
+handed is a guard in the wrong place, and the sweep would go on counting it as reconciled.
+
+---
+
 # ⭐⭐ ddTree HAS A PRODUCTION READ — and the LIMIT on it is the point of this entry
 
 **2026-09-04, `8106f0a`, follow-on to the two entries below.** `/api/dd-vouched-build` reports which
