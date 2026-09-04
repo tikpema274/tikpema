@@ -1,5 +1,125 @@
 ---
 
+# THE ORIGIN FILTER IS DEPLOYED — and the server half was verified by a FROZEN COUNTER
+
+**2026-09-04.** Deploy `6a9ac2d4b55848b50732e462`, published 13:36:40.272Z.
+
+    before   435f489 · tree c71b8ed0… · deploy 6a9aaff1ea2344b988d14105 · index-D2fTWq86.js
+    after    a07c493 · tree 0f569bbf… · deploy 6a9ac2d4b55848b50732e462 · index-CjUxH__b.js
+
+2 commits, one carrying code. `dirty` **false**, 211 files, stamped 13:08:42.272Z. `test:all`
+**93/0/0 of 93** unpiped on this tree. `gate:watch` OK, `gate:rpc` 8 healthy (no transients).
+Bundling 28m06s. `gate:deployed` green on all five, 25 newer deploys scanned. Served bytes
+byte-identical to the diffed artifact — 886,229, sha256 `59a0bac0cb348638…`.
+`capture:window` RAN: `rotated:false`, `outcome no-window`, `probes 1`, 13:39:07.514Z.
+
+## SIX PROBES, BOTH DIRECTIONS — and P6 is the one that makes it a measurement
+
+    P1  "confirmation yet, and we keep re-checking"          1 -> 0   the misleading "yet", removed
+    P2  "We asked Circle "                                   1 -> 0   the counter claim, narrowed
+    P3  "Circle has no record of this one and never did"     0 -> 1   truthful unwitnessed
+    P4  "your own wallet's history on Arc"                   0 -> 1   truthful needs-review
+    P5  "You can leave this page — …"                        1 -> 1   CONTROL
+    P6  "reconcile this transaction against"                 1 -> 1   ⭐ THE SCOPING PROOF
+
+⭐⭐ **THE FLIPS ALONE SHOW BYTES CHANGED. P6 SHOWS THE CHANGE WAS CONDITIONAL** — the *askable*
+branch still names Circle, because for a record Circle actually has, "reconcile against Circle's
+record" is still the right instruction. A blanket removal of the misleading copy produces P1–P4
+identically and flips P6. Same role P5 played on the fee-mechanic deploy: the row predicted to HOLD
+is what separates a scoped change from a sweep.
+
+## ddTree READ BACK FROM PRODUCTION
+
+    /api/dd-vouched-build -> outcome "vouched" · vouched.build 3b589768754d…
+                             stamp.ddTree 3b589768754d… · comparison "agree"
+
+`shared/circle-tx-id.mjs` sits outside `DD_SURFACE_DIRS`, so this ships **DD-clean** — and that is
+now a READING rather than the arithmetic it was this morning.
+
+⚠️ **ONE CORRECTION TO THE FRAMING, BECAUSE IT WOULD OTHERWISE BE RECORDED WRONG.** This is not the
+first deploy verified by direct read: `6a9aaff1` SHIPPED the endpoint and was read immediately after,
+so it verified itself the moment it landed. **This is the first ORDINARY deploy — the first where the
+read existed before the deploy began.** A capability that verifies its own arrival is a weaker claim
+than one already standing, and the two should not be recorded as the same thing.
+
+# ⭐⭐⭐ THE FROZEN COUNTER — and it means something only because the subject was chosen FIRST
+
+The selection change lives in `_bridge-receipts.mjs` and **no bundle probe can see it.** The evidence
+is behavioural, and it was set up before the deploy:
+
+    ticking every ~10 min for 20 hours   (100 attempts at 09:40 -> 120 at 13:00, exactly 10 min/tick)
+    13:06:02Z   attempts 120   last 13:00:40.975Z    ← baseline captured BEFORE deploying
+    13:36:40Z   deploy published
+    13:55:40Z   attempts 123   last 13:30:25.914Z
+    13:59:55Z   attempts 123   last 13:30:25.914Z    ← FROZEN, two reads
+
+The last attempt **predates the deploy**. Three sweep ticks (13:40, 13:50, ~14:00) passed without
+touching a record that had not missed one in twenty hours.
+
+## ⭐⭐ THE SUBJECT WAS CHOSEN FOR WHAT IT COULD RULE OUT
+
+The Unichain record was **~3 hours from its 24h cap and still in the `unwitnessed` band** — still
+selectable by the old code, right up to the moment it stopped. So the freeze is attributable to the
+new predicate and to nothing else.
+
+⛔ **ANY OF THE OTHER EIGHT WOULD HAVE PRODUCED THE SAME FREEZE AND PROVED NOTHING.** They are all
+past the cap, where `provisionalStatus` already returns `terminal` and the sweep already skipped them.
+A frozen counter there is consistent with the fix working AND with the fix doing nothing — the two
+causes are indistinguishable, and the observation would have been worthless while looking identical.
+
+⭐ **THE GENERAL FORM: A VERIFICATION BASELINE MUST BE CHOSEN FOR WHAT IT CAN RULE OUT, NOT FOR BEING
+CONVENIENT.** The eight easy records were the obvious subjects — more of them, longer histories,
+bigger counts. The one that could discriminate was the single record still inside the window, and it
+had to be picked before the deploy, because after 17:00:41Z it joins the others and the causes merge.
+[[probe-must-discriminate-between-states]] [[control-needs-ownership-and-stability]]
+
+⛔ **BOUNDED: THREE TICKS IS THREE TICKS.** A strong signal, not a long baseline. The cap fires at
+**17:00:41Z**, after which this record can no longer discriminate anything, and no further evidence
+of this kind is available from the existing nine. A fresh one would require a new abandoned intent.
+
+# ⭐⭐ `origin` IS THE WRONG DISCRIMINATOR — three counts, and the second is decisive
+
+The rule is **not** "exclude user-signed". It is: a record may be reconciled against Circle only if
+its txId is an id **Circle issued**.
+
+    1. IT LABELS WHO MADE THE RECORD, not whether the lookup can succeed. A future path that also
+       mints its own id is admitted unless somebody remembers to add it to a list.
+    2. ⛔ IT IS DROPPED IN TRANSIT. `promoteUserBridge` loses it — which is exactly why every
+       self-signed DURABLE receipt in the store is indistinguishable from an agent one.
+    3. `origin !== "user-signed"` IS A BLACKLIST, and a blacklist admits anything new by default.
+
+⭐⭐ **(2) IS DECISIVE ON ITS OWN: A DISCRIMINATOR THAT CAN VANISH BETWEEN WRITER AND READER IS NOT
+ONE.** (1) and (3) are arguments about future maintenance; (2) is a defect already present in the
+store today, and no amount of care adding origins to a list repairs a field that is not there.
+
+⭐ **THE UUID SHAPE IS THE REMOTE SYSTEM'S OWN PRECONDITION, APPLIED LOCALLY AND FREE.** Circle's
+error names it — *"Fail to parse id as UUID in url"*, thrown before any lookup. So the test is not a
+heuristic about provenance; it is the same check the far side performs, moved to where it costs
+nothing. And it is a WHITELIST: only a well-formed UUID is sent, so every scheme invented later is
+excluded without anyone editing the file.
+
+# ⭐⭐ `Circle&#x27;` — a THIRD reason a source string is absent from output
+
+Two assertions in `verify-origin-filter` failed on their first run. Both contained a raw apostrophe
+— `/Circle's record by hand/` — and rendered markup escapes it to `Circle&#x27;s`. **A regex with a
+raw `'` cannot match rendered output, ever.**
+
+⭐ That is now the THIRD distinct mechanism by which a string read off the source is not in the
+artifact:
+
+    1. JSX TAG-SPLITTING     a sentence spanning <b> compiles to separate string literals
+    2. RUNTIME COMPOSITION   collapseSummaryLine joins clause prose — the line is never a literal
+    3. HTML ESCAPING         apostrophes, quotes and & become entities in rendered markup
+
+⛔⛔ **THE RULE DOES NOT CARE WHY: DERIVE PROBES AND ASSERTIONS FROM BUILT BYTES.** Three different
+causes, three different layers — compiler, application code, renderer — and one check that catches
+all three without knowing which applied. Enumerating the mechanisms is how you get caught by the
+fourth; reading the output is how you do not.
+⚠️ And note where it bit: not in a deploy probe, but inside a suite whose own header argues for
+rendering over grepping. Knowing the rule is not the same as applying it to the line you are writing.
+
+---
+
 # ⭐ THE COLLAPSE AND dd-vouched-build ARE DEPLOYED — and the probe I was handed was vacuous
 
 **2026-09-04.** Deploy `6a9aaff1ea2344b988d14105`, published 12:16:14Z.
