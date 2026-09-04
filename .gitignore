@@ -79,3 +79,4 @@ scripts/x402-census/census-out.json
 scripts/x402-census/payto-catalogue-out.json
 scripts/x402-census/catalogue-effect-out.json
 preview-bridge.html
+preview-unified.html

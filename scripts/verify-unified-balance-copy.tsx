@@ -153,7 +153,10 @@ for (const [label, re, eYM, eUB] of [
   // unproven; it now holds because the single MEASURED run took 7d4h against a 7.1-day estimate,
   // and maturity itself arrived 80 minutes late. The floor is no longer precautionary.
   ["⭐ …and the wait is still a FLOOR — the one measured run overran the estimate", /floor/g, 1, 1],
-  ["the delay is DERIVED, never fixed", /about seven days/g, 2, 2],
+  // ⚠️ UB 2 -> 1: the deposit card's copy of "about seven days" was cut (it renders 3× in the
+  // How-this-works card and 2× in the withdraw block). The property is that the phrase stays
+  // APPROXIMATE PROSE — never a hardened number — and one occurrence satisfies it exactly as two did.
+  ["the delay is DERIVED, never fixed", /about seven days/g, 2, 1],
 ] as [string, RegExp, number, number][]) {
   const a = n(ymParked, re), b = n(ubParked, re);
   check(`⭐ ${label}`, a === eYM && b === eUB, `YourMoney ${a}/${eYM}, UnifiedBalancePanel ${b}/${eUB}`);
@@ -214,13 +217,41 @@ section("3 — ⭐⭐ THE BEFORE-DEPOSIT DISCLOSURE — the sentence read before
   const i = ubParked.indexOf("Move USDC from your agent");
   check("the deposit card renders at all", i >= 0);
   const card = ubParked.slice(i, i + 900);
-  check("⭐⭐ the deposit card names the WAIT in its lead sentence, before any mechanism",
-    /Money goes in instantly and takes about seven days to come back out/.test(card));
-  check("  …and it precedes the explanation of WHY (cost first, mechanism second)",
-    card.indexOf("about seven days") < card.indexOf("belongs to"));
-  check("⭐ the card still says the exit is automatic", /you do not have to come back/.test(card));
-  check("⭐ …and still says how little has been proven — one run, not a track record",
-    /one real run, not a track record/.test(card));
+  // 🚨 THIS PINNED THE SENTENCE, NOT THE PROPERTY — the fourth guard-freeze of this kind.
+  // It required the exact string "Money goes in instantly and takes about seven days to come back
+  // out". Splitting that into two sentences ("Money goes in instantly." / "Getting it out takes
+  // about seven days.") preserves every property it exists to defend and still turned it red.
+  // ⭐ It now asserts the TWO FACTS and their ORDER, which is what "names the WAIT in its lead,
+  // before any mechanism" actually means. Wording is free to improve; the ordering is not.
+  // ═══ 🚨 CHANGED 2026-09-05, AND NOT BECAUSE THE GUARD WAS WRONG ══════════════════════════
+  // These pinned "the deposit card names the WAIT in its lead". The seven-day claim has been
+  // REMOVED from this card by decision: it renders 3× in the How-this-works card, 2× in the
+  // withdraw block directly beneath, and once in the ladder — measured before cutting.
+  // ⛔ WHAT MUST STILL HOLD IS THE ASYMMETRY. The lead's job was never the number as such; it was
+  // to stop the card reading as a free, symmetric action. So the assertion now requires BOTH
+  // halves — instant IN, through-us OUT — which is what makes it a disclosure rather than an
+  // invitation, and is the property 06d3a94 actually restored.
+  const lead = card.slice(0, 260);
+  check("⭐⭐ the deposit card states the ASYMMETRY in its lead — instant in, through us out",
+    /Money goes in instantly/.test(lead) && /runs through us/.test(lead), lead.slice(0, 120));
+  check("  …and the cheap half never stands alone",
+    card.indexOf("Money goes in instantly") < card.indexOf("runs through us"));
+  // ⚠️⚠️ THIS ONE CAUGHT ME THIS MORNING AND IT WAS RIGHT THEN. Stripping "It is built now" and
+  // "you do not have to come back" left the deposit card saying only the ALARMING half. Both were
+  // restored. They have now been removed AGAIN, deliberately: the withdraw block sits directly
+  // below and says "We finish this automatically — you do not have to come back", so the
+  // reassurance is one section away and needs no press.
+  // ⛔ THE COST IS REAL AND IS RECORDED RATHER THAN ARGUED AWAY: at the moment of pressing Deposit
+  // the card states the constraint without the thing that makes it bearable. If that reads badly
+  // in use, this is the assertion to restore, and the eight words to put back.
+  check("⭐ the reassurance is reachable without a press — from the withdraw block below",
+    /you do not have to come back/.test(ubParked));
+  // ⚠️ THE EVIDENCE MOVED OUT OF THE DEPOSIT CARD with the seven-day claim it supports — it now
+  // sits behind the affordance in "How this works". This asserted it inside a 900-char window from
+  // the deposit lead, and the evidence now falls 934 chars in: red for a WINDOW, not for a missing
+  // claim. Asserted against the whole page instead, where the property actually lives.
+  check("⭐ …and the page still says how little has been proven — one run, not a track record",
+    /one real run, not a track record/.test(ubParked));
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
@@ -291,24 +322,41 @@ section("6 — ⭐ THE JUNE SHAPE: header → balance → action → explanation
 // nothing about whether a reader meets it before or after the thing it explains.
 {
   const iBal  = ubParked.indexOf("Your unified balance · across chains");
-  const iLad  = ubParked.indexOf("committed to your agent's float");
   const iDep  = ubParked.indexOf("Move USDC from your agent");
+  const iWdH  = ubParked.indexOf("Withdraw from Unified Balance to your agent wallet");
   const iHow  = ubParked.indexOf("How this works");
-  check("all four zones render", [iBal, iLad, iDep, iHow].every((i) => i >= 0),
-    `balance ${iBal} · ladder ${iLad} · deposit ${iDep} · how ${iHow}`);
-  check("⭐⭐ the BALANCE leads — the number before the prose about it", iBal < iLad);
-  // ⛔ The ladder is "stated before we ask for a deposit rather than after… Do not soften this to
-  // make the deposit easier." So deposit sits as close to the balance as that disclosure allows,
-  // NOT directly beneath it.
-  check("⛔ the reversibility ladder still PRECEDES the deposit ask", iLad < iDep);
+  check("all four zones render", [iBal, iDep, iWdH, iHow].every((i) => i >= 0),
+    `balance ${iBal} · deposit ${iDep} · withdraw ${iWdH} · how ${iHow}`);
+  check("⭐⭐ the BALANCE leads — the number before any action", iBal < iDep);
+  // ⛔ THE LADDER IS GONE, and its assertions with it. It ranked three pockets; YourMoney ranks the
+  // same three, on the page where all three live. Removing it here was a de-duplication, not a
+  // softening — the distinction its own comment ("Do not soften this to make the deposit easier")
+  // demanded, and the reason the custody sentence STAYED at the deposit button.
+  check("⛔⛔ the withdraw section is LABELLED, and says where the money lands", iWdH >= 0);
   check("⭐⭐ the explanation card is LAST — after the action it explains", iDep < iHow);
+  // ⛔⛔ FUNDING BEFORE WITHDRAWAL. The exit used to render inside the balance card, which put
+  // WITHDRAW above DEPOSIT — backwards on a page whose first job is funding.
+  //
+  // 🚨 THE FIRST DRAFT OF THIS ASSERTION PASSED VACUOUSLY. It looked for "Getting money out" and
+  // guarded with `iWd < 0 || …` — and "Getting money out" is behind UbExitStatus's LOADED state,
+  // which SSR never reaches, so the escape hatch fired on every run. An assertion that cannot
+  // fail is not an assertion. [[a-check-whose-failure-mode-is-a-pass]]
+  // ⭐ It now anchors on "Checking your exit…", which is what the component ACTUALLY emits under
+  // renderToStaticMarkup — verified by rendering it, not by reading the source for a likely
+  // string — and the presence of that anchor is asserted BEFORE its position is compared.
+  const iWd = ubParked.indexOf("Checking your exit");
+  check("⭐ the exit block actually renders (or the order check below is vacuous)", iWd >= 0, `@${iWd}`);
+  check("⛔⛔ the DEPOSIT comes before the WITHDRAWAL", iWd >= 0 && iDep < iWd,
+    `deposit ${iDep} · withdraw ${iWd}`);
 
   // ⭐ Each depth exactly once, in its own zone.
   check("⭐⭐ the MECHANISM lives in the explanation card, not in the deposit card",
     iHow < ubParked.indexOf("Arc's Gateway holds the funds for a delay"));
-  check("⛔ …and the deposit card keeps the claims that qualify the CUSTODY sentence",
-    /It is built now:/.test(ubParked.slice(iDep, iDep + 900)) &&
-    /you do not have to come back/.test(ubParked.slice(iDep, iDep + 900)));
+  // ⚠️ NARROWED with the same decision: the qualifiers moved out of the deposit card. What must
+  // still be true is that CUSTODY ITSELF is at the press — that is the claim with no other home.
+  check("⛔⛔ custody is stated at the press, and it is the ONLY place it appears",
+    /Tikpema controls that account/.test(ubParked.slice(iDep, iDep + 900)) &&
+    (ubParked.match(/Tikpema controls that account/g) || []).length === 1);
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

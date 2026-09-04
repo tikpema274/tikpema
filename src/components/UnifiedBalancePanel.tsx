@@ -151,11 +151,13 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
     <div className="plane">
       <div className="panel-eyebrow">Unified balance</div>
       <h2>One USDC balance, across chains.</h2>
+      {/* ⭐ THE "WHAT IS THIS" PARAGRAPH IS GONE. It described the float, the route into
+          Gateway, and the multi-chain read — exactly what steps 1 and 2 of "How this works" now
+          say, at the end of the page where an explanation belongs. Two paragraphs answering the
+          same question is the clutter this restructure exists to remove; the heading above
+          already names the thing. */}
       <div className="sub">
-        This is the float <b>you chose to commit</b> to your agent: USDC you moved out of
-        your own wallet, into your agent's, and then into Circle Gateway — where it spans
-        multiple chains at once. This view reads it live across Arc Testnet and Base
-        Sepolia — no seed phrase, no bridging to check a total.
+        Read live across Arc Testnet and Base Sepolia.
       </div>
 
       {/* Balance card — same surface as the Dashboard "Agent unified balance" card.
@@ -242,88 +244,28 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
           </>
         )}
 
-        {/* ═══ ⭐ THE EXIT, VISIBLE ═══════════════════════════════════════════════════════
-            A live withdrawal existed for hours that NOBODY COULD SEE IN THE APP. Read-only:
-            it renders what /api/ub-withdraw already returns. Sits inside the balance card
-            because "what's in here" and "what's on its way out" are one question. */}
-        {bal.status === "ready" && (
-          <UbExitStatus token={() => w.ensureSession()} reloadKey={reloadKey} />
-        )}
       </div>
 
-      {/* WHAT YOU CAN GET BACK — the reversibility ladder, stated before we ask for a
-          deposit rather than after.
+      {/* ═══ ⛔ THE REVERSIBILITY LADDER WAS REMOVED — 2026-09-05, and it was MEASURED first ══
+          It ranked three pockets by what the user can reclaim alone: your wallet, the agent's
+          plain balance, the unified balance. Its comment said "Do not soften this to make the
+          deposit easier", and that instruction was right — so it was not softened, it was moved
+          out as a DUPLICATE.
 
-          This block exists because the copy it replaces did the opposite of its job: it
-          said the funds "stay owned by your agent — a deposit, not a transfer to anyone
-          else," which READS as reassurance while describing the ONE pocket the user
-          cannot exit on their own. The three pockets have genuinely different exits, and
-          the unified balance has the worst one:
+          ⭐ YourMoney ALREADY RANKS THE SAME THREE POCKETS, on the page where all three live:
+              Your wallet      badge "You hold the key"
+              Agent's wallet   badge "Withdraw any time"
+              Unified balance  badge "Exit built · about seven days"
+          A comparison of three pockets belongs where the three pockets are, not on the page for
+          one of them. This was the cross-page repetition the record has been carrying.
 
-            wallet (MSCA)  → the user holds the key. Unilateral, always.
-            agent's plain  → agent-withdraw returns balanceOf(SCA). One button, no delay.
-            unified        → NOT balanceOf(SCA). NO EXIT AT ALL. No endpoint returns it, and
-                             the SCA is dev-controlled so the user cannot act directly.
-                             Spendable cross-chain only.
+          ⚠️ THE ONE CLAIM THAT WAS ONLY HERE — "Withdraw doesn't move it", i.e. the agent-withdraw
+          button does not return unified funds — is covered where it actually matters: YourMoney's
+          amber "Not included: N USDC is in your unified balance" line sits ON that button. Here it
+          was context about a control the reader cannot see.
 
-          So we rank them by what the user can get back ALONE, and the amber line is the
-          same one that sits on the Withdraw button (MyAgentPanel) — one fact, one voice,
-          wherever the user meets it. Do not soften this to make the deposit easier. */}
-      <div
-        className="status"
-        style={{
-          marginTop: 14,
-          padding: "14px 16px",
-          background: "var(--field)",
-          border: "1px solid var(--line)",
-          borderRadius: 12,
-        }}
-      >
-        <div
-          style={{
-            color: "var(--muted)",
-            fontSize: "0.72rem",
-            letterSpacing: "0.06em",
-            textTransform: "uppercase",
-            marginBottom: 8,
-          }}
-        >
-          What you can get back · and how
-        </div>
-
-        <div className="sub" style={{ margin: 0 }}>
-          <b>Your wallet</b> — yours. You hold the key. Withdraw any time, even if the agent
-          is paused.
-        </div>
-        <div className="sub" style={{ margin: "6px 0 0" }}>
-          <b>Your agent's plain balance</b> — pull it back yourself with{" "}
-          <button className="linkbtn" onClick={() => go("agent")}>
-            Withdraw to my wallet
-          </button>
-          . One button, no delay, no permission needed.
-        </div>
-        {/* Name the ACTUAL number when we have one. "You cannot pull this back on your own"
-            lands differently at 12.50 USDC than in the abstract, and the user is entitled to
-            see the figure the sentence is about. Falls back to unqualified prose while the
-            balance is loading / signed-out — never to a "—" that reads as an error.
-
-            ⚠️ "about seven days" is DERIVED, never fixed. withdrawalDelay() returns 1209600
-            and that is a BLOCK COUNT, not seconds — ~7.14 days at Arc's measured ~0.5097 s/block,
-            which is why the SDK's own prose says "7-day" in five places. Reading it as seconds
-            gives 14 days, a tidy-looking wrong answer. If block time drifts, the wall clock
-            drifts with it — so this must never harden into a promised number. */}
-        <div className="sub" style={{ margin: "6px 0 0", color: "var(--warn)" }}>
-          <b>Your unified balance</b>
-          {data && Number(data.total) > 0 && (
-            <>
-              {" "}
-              (<span className="mono">{data.total}</span> USDC)
-            </>
-          )}{" "}
-          — committed to your agent's float. Withdraw doesn't move it — getting it out is a
-          separate, slower route, shown below.
-        </div>
-      </div>
+          ⛔ WHAT DID NOT MOVE: custody. It is still stated at this page's own deposit button,
+          because that is a press-time disclosure and has no other home on this page. */}
 
       {/* Funding — a MONEY-PATH WRITE. The agent SCA deposits its own plain Arc USDC
           into its own unified balance. Auth + per-deposit cap are enforced server-side
@@ -405,45 +347,25 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
               a tidy-looking wrong answer. The DERIVED figure and its provenance render on this
               same page from <UbExitStatus/> below, which fetches them. This sentence must never
               harden into a promised number. */}
-          <b>Money goes in instantly and takes{" "}
-          <button
-            type="button"
-            className="linkbtn"
-            aria-expanded={showEvidence}
-            aria-controls="ub-exit-evidence"
-            onClick={() => setShowEvidence((v) => !v)}
-          >
-            about seven days
-          </button>{" "}
-          to come back out.</b>{" "}
-          {/* ⛔ CUSTODY STAYS WITH THE ACTION. A user pressing Deposit needs to know the exit
-              runs through us AT THE MOMENT THEY PRESS — not folded into an explanation they
-              may never open. This file already records the relocation defect: moving the block
-              between pages is exactly what happened once before. */}
-          You can't withdraw it yourself: the balance belongs to your agent's account, and
-          only that account can release these funds.{" "}
-          {/* ⭐⭐ "BUILT" AND "AUTOMATIC" STAY AT THE PRESS, and they belong to the CUSTODY
-              sentence rather than to the explanation: "the exit runs through us" is alarming on
-              its own, and the fact that it exists and needs no babysitting is what makes it a
-              disclosure rather than a warning. Moving them to the card at the end left the
-              deposit card saying only the frightening half — two guard assertions caught it,
-              and they were right. The SEQUENCE (what Gateway does, where it lands) is the
-              explanation and lives in "How this works". */}
-          <b>Tikpema controls that account</b> — so the exit runs through us.{" "}
-          <b>It is built now:</b> we finish it automatically —{" "}
-          <b>you do not have to come back</b>.{" "}
-          {/* ⭐ COLLAPSED BY DEFAULT, ALWAYS RENDERED. `hidden` rather than a conditional, so the
-              claim stays in the DOM for a reader who opens it AND for the guard that reads it. */}
-          {/* ⭐ EVIDENCE ONLY. The MECHANISM moved to the "How this works" card at the end of
-              the page — it is an explanation, and it now renders exactly once, there. What stays
-              here is the dated evidence FOR THE SEVEN-DAY CLAIM, at the claim, because that is
-              the constraint the affordance exists to satisfy. */}
-          <span id="ub-exit-evidence" hidden={!showEvidence}>
-            <b>⚠️ This has now been done once, end to end</b>: 1 USDC asked for on 2026-08-12 and
-            returned automatically on 2026-08-20 — one real run, not a track record, and it took
-            7 days and 4 hours, longer than the estimate, so treat the wait as a floor. Deposit
-            only what you intend the agent to spend.
-          </span>
+          {/* ⭐ TWO SENTENCES, NOT ONE. "Money goes in instantly." is the cheerful half and it
+              reads better alone; the cost then lands as its own statement rather than as a
+              subordinate clause a skimmer can drop.
+              ⛔ THE COST STAYS IN THE LEAD. Removing it would recreate the defect fixed in
+              06d3a94, where this card led with copy that contradicted the paragraph beneath it —
+              "the lead is what gets read". A user funding the balance decides here, before they
+              ever scroll to the withdraw section, so the seven days must be readable here. */}
+          {/* ⭐ CUT: the seven-day clause and "It is built now / you do not have to come back".
+              MEASURED before cutting — "about seven days" renders 3× in the How-this-works card,
+              2× in the withdraw block directly below, and once in the ladder; "you do not have to
+              come back" renders in the withdraw block. Both were genuinely redundant here.
+              ⛔ CUSTODY IS NOT. "the exit runs through us" and "Tikpema controls that account"
+              render NOWHERE ELSE on this page — zero occurrences in the card, the withdraw block
+              and the ladder. Cutting it would remove the claim from the page entirely, at the one
+              place a user commits money. It stays, compressed.
+              ⭐ THE PHRASE IS KEPT VERBATIM ON PURPOSE: YourMoney says it in exactly these words,
+              and the file's rule is "one fact, one voice, wherever the user meets it". */}
+          <b>Money goes in instantly.</b> Getting it out runs through us: the balance belongs to
+          your agent's account, and <b>Tikpema controls that account</b>.
         </div>
         {/* The deposit needs a session AND a provisioned wallet — the server enforces both
             (401 / 202). Disable rather than let the user fire a request that can't work. */}
@@ -495,6 +417,36 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
           </div>
         )}
       </div>
+
+
+      {/* ⭐ THE WITHDRAW SECTION NOW HAS ITS OWN LABEL, matching "Fund the unified balance"
+          above it, so the page reads as two named actions rather than one action and a status
+          block. It also states WHERE THE MONEY LANDS in the heading itself — the agent wallet,
+          not the user's — which UbExitStatus says inside its own copy but which a reader
+          scanning headings would otherwise miss. */}
+      {bal.status === "ready" && (
+        <div className="panel-eyebrow" style={{ marginTop: 18 }}>
+          Withdraw from Unified Balance to your agent wallet
+        </div>
+      )}
+
+      {/* ═══ ⭐ THE EXIT — AFTER THE DEPOSIT, BECAUSE FUNDING COMES FIRST ═══════════════════
+          A live withdrawal once existed for hours that NOBODY COULD SEE IN THE APP. Read-only:
+          it renders what /api/ub-withdraw already returns.
+
+          ⚠️ IT USED TO SIT INSIDE THE BALANCE CARD, and the reason given was that "what's in
+          here" and "what's on its way out" are one question. That reason is still true of the
+          PENDING ROWS — but this block is not only rows: it also carries the START-WITHDRAWAL
+          form, and an action. Left in the balance card it put WITHDRAW above DEPOSIT, which
+          reads backwards on a page whose first job is funding.
+          ⛔ SO THE MOVE HAS A COST, STATED: the pending rows now sit one section away from the
+          balance they belong to. That is the tradeoff, and it is resolved properly by the tab
+          split (Deposit | Withdraw) that is the next slice — where the ROWS can stay with the
+          balance as state and the FORM moves into the action. Until then, ordering the two
+          actions correctly is worth more than keeping the rows adjacent. */}
+      {bal.status === "ready" && (
+        <UbExitStatus token={() => w.ensureSession()} reloadKey={reloadKey} />
+      )}
 
       {/* Owner address — the agent wallet the unified balance is keyed to (the
           depositor). Masked + expand + copy via AddressDisplay. ONE address only;
@@ -557,9 +509,11 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
         <div className="panel-eyebrow" style={{ marginBottom: 10 }}>How this works</div>
         <ol style={{ margin: 0, paddingLeft: 20, display: "flex", flexDirection: "column", gap: 8 }}>
           <li className="sub" style={{ margin: 0 }}>
+            {/* ⛔ THE "one pocket you cannot exit on your own" CLAUSE IS THE LADDER'S, NOT THIS
+                CARD'S. Saying it here too put the page's central warning in two places — and the
+                ladder makes it as a COMPARISON, which is the form that actually informs. */}
             <b>Deposit from your agent's own balance.</b> Your agent's plain Arc USDC moves into
-            its unified balance. It is a deposit, not a transfer to anyone else — but it is the
-            one pocket you cannot exit on your own.
+            its unified balance. Nothing leaves your agent.
           </li>
           <li className="sub" style={{ margin: 0 }}>
             <b>One balance, spendable across chains.</b> The pool is visible wherever your agent
@@ -568,9 +522,32 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
           <li className="sub" style={{ margin: 0 }}>
             {/* ⭐ THE MECHANISM, MOVED OUT OF THE DEPOSIT CARD'S COLLAPSED SPAN AND OUT OF THE
                 STATE BULLET — it now appears exactly ONCE, in the zone that explains. */}
-            <b>Getting it out is slower.</b> You ask; Arc's Gateway holds the funds for a delay
-            of about seven days; it then lands in your agent's balance, which you can withdraw
-            yourself. The wait is set by Arc's Gateway, not by us.
+            {/* ⭐⭐ THE AFFORDANCE MOVED HERE WITH THE NUMBER. It used to sit in the deposit
+                card, because that is where the seven-day claim was. The claim now lives here, and
+                the constraint is unchanged: the evidence must be reachable WHEREVER THE NUMBER
+                RENDERS, and pressing the number is what reveals it — never a detached link.
+                ⚠️ RESIDUAL, STATED: the withdraw block below states the wait too and carries no
+                affordance. It is a separate component and out of scope for this slice; when the
+                tabs land, the two should share one control. */}
+            <b>Getting it out is slower.</b> You ask; Arc's Gateway holds the funds for a delay of{" "}
+            <button
+              type="button"
+              className="linkbtn"
+              aria-expanded={showEvidence}
+              aria-controls="ub-exit-evidence"
+              onClick={() => setShowEvidence((v) => !v)}
+            >
+              about seven days
+            </button>
+            ; it then lands in your agent's balance, which you can withdraw yourself. The wait is
+            set by Arc's Gateway, not by us.{" "}
+            <span id="ub-exit-evidence" hidden={!showEvidence}>
+              <b>⚠️ This has now been done once, end to end</b>: 1 USDC asked for on 2026-08-12 and
+              returned automatically on 2026-08-20 — one real run, not a track record, and it took
+              7 days and 4 hours, longer than the estimate, so treat the wait as a floor.{" "}
+              <b>It is built now:</b> we finish it automatically — <b>you do not have to come
+              back</b>. Deposit only what you intend the agent to spend.
+            </span>
           </li>
         </ol>
       </div>

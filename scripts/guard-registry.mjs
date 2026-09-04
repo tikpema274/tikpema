@@ -296,6 +296,7 @@ export const FILE_UNWIRED_TOOLS = {
   "scripts/observe-swap-cycle.mjs": "an OBSERVATION run — records a real swap cycle for a human to read, asserts nothing, and costs money to repeat.",
   "scripts/pin-invariants.mjs": "regenerates pinned invariant bytes; run deliberately when a pin legitimately moves.",
   "scripts/preview-panel.tsx": "renders a panel to stdout so a human can look at it.",
+  "scripts/preview-unified.tsx": "renders #/unified to a standalone HTML file a human opens in a browser — including the withdraw block via its `initial` seam, which SSR cannot otherwise reach. It asserts nothing; the properties it shows are guarded by verify-unified-balance-copy.",
   "scripts/probe-addDelegate-gas.mjs": "manual gas probe against the live chain.",
   "scripts/probe-delegate-status.mjs": "a manual chain read of delegate status — answers a question for a human at a moment in time; it has no pass or fail.",
   "scripts/probe-gas-at-grant.mjs": "manual gas probe against the live chain.",
