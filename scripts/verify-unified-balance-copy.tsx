@@ -124,23 +124,36 @@ section("1 — the disclosure is PRESENT at all three body sites, AS RENDERED");
 // unified balance" card); YourMoney carries ONE (the amber line by Withdraw).
 // ⚠️ These counts are now what a BROWSER SHOWS, not what the file contains. A site that exists in
 // source but is unreachable — behind a condition nobody satisfies — used to pass and now fails.
+// ═══ 🚨 THE EXPECTED COUNTS WERE 2 FOR UnifiedBalancePanel, AND THAT PINNED THE DUPLICATION ═══
+// Until 2026-09-04 this table required TWO rendered copies of the custody/mechanism/evidence block
+// on that page — one in the balance bullet, one in the deposit card. That is not a property anyone
+// chose; it is the count that happened to exist when the table was written, frozen into a
+// requirement. When the page was deduplicated into state / action / collapsed-explanation, eight
+// assertions went red reading `1/2` — red for the WRONG REASON, and the ordering and card
+// assertions (the ones that pin actual properties) all stayed green throughout.
+//
+// ⭐⭐ A GUARD THAT PINS A CLAIM KEEPS IT TRUE OR KEEPS IT FROZEN. This one froze a LAYOUT. Third
+// instance in this repo on one day, after verify-bridge-batch-atomicity pinned an atomicity
+// overclaim and a "no batched burn has landed" line that two runs had already falsified.
+// ⚠️ THE COUNTS STAY EXACT rather than becoming `>= 1`: exactness is this file's stated discipline,
+// and an exact 1 also catches a future RE-duplication, which `>= 1` would wave through.
 for (const [label, re, eYM, eUB] of [
-  ["control is stated", /Tikpema controls that account/g, 1, 2],
-  ["⭐ the exit is stated as BUILT", /It is built now:/g, 1, 2],
-  ["⭐⭐ the user is told they need NOT return (this is what makes it an exit)", /you do not have to come back/g, 1, 2],
-  ["⭐⭐ …and that the evidence is THIN — one run, not a track record", /one real run, not a track record/g, 1, 2],
+  ["control is stated", /Tikpema controls that account/g, 1, 1],
+  ["⭐ the exit is stated as BUILT", /It is built now:/g, 1, 1],
+  ["⭐⭐ the user is told they need NOT return (this is what makes it an exit)", /you do not have to come back/g, 1, 1],
+  ["⭐⭐ …and that the evidence is THIN — one run, not a track record", /one real run, not a track record/g, 1, 1],
   // ⭐⭐ ADDED 2026-08-20, THE DAY HOP 2 FIRST RAN. Until then the page said the exit had been
   // "done once" directly after "we finish it automatically" — and the automatic finish had NEVER
   // happened. The sentence read as evidence for a claim nothing supported. What must now be
   // stated is that the run COMPLETED, not merely that it started.
   // ⚠️ "end to end" is the NARROWEST DURABLE form, deliberately: it survives the count going
   // from one to ten, where a date or a tally would rot. Same rule that saved the line above.
-  ["⭐⭐ …and that the one run went ALL THE WAY — completed, not merely started", /end to end/g, 1, 2],
+  ["⭐⭐ …and that the one run went ALL THE WAY — completed, not merely started", /end to end/g, 1, 1],
   // ⚠️ The reason changed but the requirement did not. This used to hold because hop 2 was
   // unproven; it now holds because the single MEASURED run took 7d4h against a 7.1-day estimate,
   // and maturity itself arrived 80 minutes late. The floor is no longer precautionary.
-  ["⭐ …and the wait is still a FLOOR — the one measured run overran the estimate", /floor/g, 1, 2],
-  ["the delay is DERIVED, never fixed", /about seven days/g, 2, 3],
+  ["⭐ …and the wait is still a FLOOR — the one measured run overran the estimate", /floor/g, 1, 1],
+  ["the delay is DERIVED, never fixed", /about seven days/g, 2, 2],
 ] as [string, RegExp, number, number][]) {
   const a = n(ymParked, re), b = n(ubParked, re);
   check(`⭐ ${label}`, a === eYM && b === eUB, `YourMoney ${a}/${eYM}, UnifiedBalancePanel ${b}/${eUB}`);
@@ -228,7 +241,47 @@ section("4 — ⭐⭐ THE DISCLOSURE IS CONDITIONAL, AND THE CONDITION IS CORREC
   // UnifiedBalancePanel's disclosure is NOT balance-gated — it is the page you read BEFORE
   // depositing, so it must speak whether or not anything is parked yet.
   check("⭐⭐ the BEFORE-DEPOSIT disclosure is NOT balance-gated — it must be read before there is a balance",
-    n(ubEmpty, /one real run, not a track record/g) === 2 && n(ubOut, /one real run, not a track record/g) === 2);
+    n(ubEmpty, /one real run, not a track record/g) === 1 && n(ubOut, /one real run, not a track record/g) === 1);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("5 — ⛔ THE ZONES: custody sits with the ACTION, evidence hangs off the NUMBER");
+// ⭐ ADDED 2026-09-04 with the state / action / explanation split. Neither property was pinned
+// before, so the dedupe could have satisfied every existing assertion while quietly moving the
+// custody sentence into a collapsed block nobody opens.
+{
+  const mk = markup(UnifiedBalancePanel);
+  const i = ubParked.indexOf("Move USDC from your agent");
+  const card = ubParked.slice(i, i + 900);
+
+  // ── (a) CUSTODY STAYS WITH THE ACTION ──────────────────────────────────────────────────────
+  // ⛔ A user pressing Deposit must be told the exit runs through us AT THE MOMENT THEY PRESS.
+  // This file already records the relocation defect once; the guard is what stops a third time.
+  check("⛔⛔ the custody sentence is INSIDE the deposit card, not in an explanation elsewhere",
+    /Tikpema controls that account/.test(card));
+  check("  …and it is NOT inside the collapsed evidence region",
+    !/Tikpema controls that account/.test(
+      (mk.match(/id="ub-exit-evidence"[^>]*>([\s\S]*?)<\/span>/) || ["", ""])[1]));
+
+  // ── (b) THE EVIDENCE HANGS OFF THE NUMBER ──────────────────────────────────────────────────
+  // ⭐ "about seven days" IS the control. A detached "Learn more" would satisfy a presence check
+  // and fail the constraint, so the BINDING is asserted, not the presence.
+  const btn = (mk.match(/<button[^>]*aria-controls="([^"]+)"[^>]*>\s*about seven days\s*<\/button>/) || [])[1];
+  check("⭐⭐ the affordance IS the seven-day claim — a button whose label is the number",
+    !!btn, btn ? `aria-controls=${btn}` : "no button labelled 'about seven days'");
+  check("⭐⭐ …and it CONTROLS the evidence region — the binding, not merely a nearby link",
+    !!btn && new RegExp(`id="${btn}"`).test(mk));
+  const region = (mk.match(/id="ub-exit-evidence"[^>]*>([\s\S]*?)<\/span>/) || ["", ""])[1];
+  check("⭐ …and the evidence actually lives in that region",
+    /one real run, not a track record/.test(region) && /2026-08-12/.test(region));
+
+  // ── COLLAPSED, NEVER OMITTED ───────────────────────────────────────────────────────────────
+  // ⚠️ `hidden` keeps the node in the DOM. A conditional that omits it would hide the claim from
+  // the reader who opens it AND from every guard that reads rendered output.
+  check("⭐ the region is COLLAPSED BY DEFAULT (hidden), not omitted",
+    /id="ub-exit-evidence"[^>]*hidden/.test(mk) || /hidden[^>]*id="ub-exit-evidence"/.test(mk));
+  check("  …and its text is still in the rendered output despite being hidden",
+    /one real run, not a track record/.test(ubParked));
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

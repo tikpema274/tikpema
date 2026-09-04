@@ -37,6 +37,11 @@ const go = (id: string) => {
 // user can reclaim ALONE, and warns AT the deposit control, not below it. Reversibility is
 // the fact a user needs before committing money — never let reassurance crowd it out.
 export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWallet }) {
+  // ⭐ THE EVIDENCE DISCLOSURE. Collapsed by DEFAULT, never OMITTED — the node always
+  //    renders and is toggled with `hidden`, so a copy guard that reads rendered output
+  //    still sees it. A conditional that omits it would hide the claim from the guard
+  //    as well as the reader, which is how a load-bearing sentence disappears unnoticed.
+  const [showEvidence, setShowEvidence] = useState(false);
   // Funding form state.
   const [amount, setAmount] = useState("");
   const [funding, setFunding] = useState(false);
@@ -223,15 +228,7 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
             </>
           )}{" "}
           — committed to your agent's float. Withdraw doesn't move it — getting it out is a
-          separate, slower route, shown below. Only your agent's own account can release these funds, and{" "}
-          <b>Tikpema controls that account</b> — so the exit runs through us. <b>It is built
-          now:</b> you ask, Arc's Gateway holds the funds for a delay of about seven days, and
-          we finish it automatically — <b>you do not have to come back</b>. It lands in your
-          agent's balance, which you can then withdraw yourself. <b>⚠️ This has now been done once, end
-          to end</b>: 1 USDC asked for on 2026-08-12 and returned automatically on 2026-08-20, with nobody
-          watching — one real run, not a track record. It took 7 days and 4 hours, longer than the
-          estimate, so treat the wait as the floor rather than the ceiling, and deposit only what you
-          intend the agent to spend.
+          separate, slower route, shown below.
         </div>
       </div>
 
@@ -427,15 +424,44 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
             Never state it as a fixed number. */}
         <div className="sub" style={{ margin: "0 0 10px" }}>
           Move USDC from your agent's plain balance into its unified balance.{" "}
-          <b>Money goes in instantly and takes about seven days to come back out.</b>{" "}
+          {/* ⭐⭐ THE COST LEADS, and "about seven days" IS THE AFFORDANCE — pressing the
+              seven-day claim is what reveals the evidence for it. NOT a "Learn more" beside
+              it: a detached link can be missed by a reader who has already read the number,
+              and the constraint is that the evidence stays reachable wherever the number
+              renders.
+              ⚠️ THE PHRASE STAYS APPROXIMATE PROSE. `withdrawalDelay()` returns a BLOCK COUNT
+              (1,209,600 ≈ 7.14 days at ~0.5097 s/block); reading it as seconds gives 14 days,
+              a tidy-looking wrong answer. The DERIVED figure and its provenance render on this
+              same page from <UbExitStatus/> below, which fetches them. This sentence must never
+              harden into a promised number. */}
+          <b>Money goes in instantly and takes{" "}
+          <button
+            type="button"
+            className="linkbtn"
+            aria-expanded={showEvidence}
+            aria-controls="ub-exit-evidence"
+            onClick={() => setShowEvidence((v) => !v)}
+          >
+            about seven days
+          </button>{" "}
+          to come back out.</b>{" "}
+          {/* ⛔ CUSTODY STAYS WITH THE ACTION. A user pressing Deposit needs to know the exit
+              runs through us AT THE MOMENT THEY PRESS — not folded into an explanation they
+              may never open. This file already records the relocation defect: moving the block
+              between pages is exactly what happened once before. */}
           You can't withdraw it yourself: the balance belongs to your agent's account, and
           only that account can release these funds.{" "}
-          <b>Tikpema controls that account</b> — so the exit runs through us. <b>It is built
-          now:</b> you ask, Arc's Gateway holds the funds for a delay of about seven days, and
-          we finish it automatically — <b>you do not have to come back</b>. <b>⚠️ This has now been done
-          once, end to end</b>: 1 USDC asked for on 2026-08-12 and returned automatically on 2026-08-20
-          — one real run, not a track record, and it took 7 days and 4 hours, longer than the estimate,
-          so treat the wait as a floor. Deposit only what you intend the agent to spend.
+          <b>Tikpema controls that account</b> — so the exit runs through us.{" "}
+          {/* ⭐ COLLAPSED BY DEFAULT, ALWAYS RENDERED. `hidden` rather than a conditional, so the
+              claim stays in the DOM for a reader who opens it AND for the guard that reads it. */}
+          <span id="ub-exit-evidence" hidden={!showEvidence}>
+            <b>It is built now:</b> you ask, Arc's Gateway holds the funds for a delay of about
+            seven days, and we finish it automatically — <b>you do not have to come back</b>.{" "}
+            <b>⚠️ This has now been done once, end to end</b>: 1 USDC asked for on 2026-08-12 and
+            returned automatically on 2026-08-20 — one real run, not a track record, and it took
+            7 days and 4 hours, longer than the estimate, so treat the wait as a floor. Deposit
+            only what you intend the agent to spend.
+          </span>
         </div>
         {/* The deposit needs a session AND a provisioned wallet — the server enforces both
             (401 / 202). Disable rather than let the user fire a request that can't work. */}
