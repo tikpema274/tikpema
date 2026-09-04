@@ -1,5 +1,120 @@
 ---
 
+# THE UNIFIED-BALANCE DEDUPE IS DEPLOYED — measured by a COUNT probe, not a presence probe
+
+**2026-09-04.** Deploy `6a9b2704146dc3f453f5606c`, published 20:39:20.773Z.
+
+    before   c110660 · tree e8dfe7fd… ← (prev deploy 6a9ac2d4…, index-CjUxH__b.js)
+    after    cce3d6e · tree e8dfe7fd… · deploy 6a9b2704146dc3f453f5606c · index-B_nHVmae.js
+
+`dirty` **false**, 211 files. `test:all` **93/0/0 of 93** unpiped. `gate:watch` OK, `gate:rpc` 7
+healthy + 1 transient (warned, not failed). Bundling **23m18s**. `gate:deployed` green on all five,
+25 newer deploys scanned. Served bytes **byte-identical** to the diffed artifact — 885,660, sha256
+`3873113cbf8fc776…`. `capture:window` RAN: `rotated:false`, `no-window`, `probes 1`, 20:46:29.794Z.
+ddTree read back from production via `/api/dd-vouched-build`: **`vouched` · `agree`**.
+
+## ⭐⭐ P1 IS A COUNT PROBE, AND A PRESENCE PROBE COULD NOT HAVE MEASURED THIS
+
+    P1  "Tikpema controls that account"       3 -> 2    ⭐ THE DEDUPE
+    P2  "ub-exit-evidence"                    0 -> 2    the affordance (id + aria-controls)
+    P3  "Money goes in instantly and takes"   1 -> 1    CONTROL — the pinned lead SURVIVED
+    P4  "committed to your agent's float"     1 -> 1    CONTROL — untouched state copy
+
+⛔ **A DEDUPE IS A CHANGE IN MULTIPLICITY, NOT IN PRESENCE.** Every string involved is present before
+AND after, so `PRESENT/ABSENT` — the shape every earlier deploy probe used — would have reported
+"unchanged" for the one thing this deploy did. The probe had to count.
+
+⭐ **AND IT LANDS AT 2 RATHER THAN 0, WHICH IS THE SCOPING PROOF.** The residual 2 is
+`UnifiedBalancePanel`'s remaining one plus `YourMoney`'s untouched one. A dedupe that had over-reached
+into the other file would read 1; a no-op would read 3. **Only the scoped change reads 2.** Same role
+P5 played on the fee-mechanic deploy and P6 on the origin-filter deploy: the row whose predicted
+value is neither extreme is the row that discriminates.
+
+# 🚨 THIRD GUARD-FREEZE OF THE DAY — and this one has the sharpest diagnosis
+
+`verify-unified-balance-copy` required **`eUB = 2`** for four claims and **`=== 2`** for the
+balance-gating check. Deduplicating turned eight assertions red, all reading `1/2`.
+
+⛔ **THE COUNT WAS NEVER A CHOSEN PROPERTY.** Nobody decided the page should say this twice. It is
+what existed on the day the table was written, promoted to a requirement by being written down.
+
+## ⭐⭐ HOW THAT WAS ESTABLISHED — the reusable part
+
+**Every assertion pinning an actual property stayed GREEN through the change:**
+
+    ✅ "the deposit card names the WAIT in its lead sentence, before any mechanism"
+    ✅ "…and it precedes the explanation of WHY (cost first, mechanism second)"
+    ✅ "the card still says the exit is automatic"
+    ✅ "…and still says how little has been proven — one run, not a track record"
+    ❌ …only the COUNTS went red
+
+⭐ **THE SUITE DISCRIMINATED ITS OWN REAL ASSERTIONS FROM ITS INCIDENTAL ONES**, and it did so
+without anyone having labelled which were which. That green/red split IS the diagnosis: a property
+assertion survives a change that preserves the property; an incidental one cannot tell the change
+from a regression. ⚠️ **THE TEST IS AVAILABLE BEFORE THE ARGUMENT** — "is this red for the right
+reason?" is answerable by looking at what stayed green beside it.
+
+⭐ **COUNTS KEPT EXACT, NOT RELAXED TO `>= 1`.** Exactness is that file's own stated discipline
+("present AND absent, exact counts"), and an exact `1` catches a future RE-duplication that `>= 1`
+would wave through. The fix was to correct the number, not to weaken the check.
+
+## ⛔ THREE IN ONE DAY, AND THEY ARE ONE FAMILY
+
+    1. verify-bridge-batch-atomicity  froze an ATOMICITY OVERCLAIM as a required sentence
+    2. …the same section              froze "No batched burn has landed on chain" — falsified by
+                                      PR-4 and again by PR-5, green throughout
+    3. verify-unified-balance-copy    froze a LAYOUT: two rendered copies as a requirement
+
+**A guard that pins a claim keeps it true or keeps it FROZEN.** Three variants in one day — an
+overclaim, a stale fact, and an incidental count — and all three read green while wrong.
+[[duplicate-source-of-truth-is-the-recurring-bug]]
+
+# SECTION 5 — neither constraint was pinned by ANYTHING before
+
+The dedupe could have satisfied **every existing assertion** while moving the custody sentence into a
+collapsed block nobody opens. Nothing checked where it sat, and nothing checked that the evidence was
+reachable from the number. Four mutations, all caught:
+
+    custody moved out of the action zone           -> caught
+    aria-controls repointed away from the region   -> caught
+    the number replaced by a "Learn more" label    -> caught
+    evidence always-visible instead of collapsed   -> caught
+
+## ⭐⭐ THE THIRD ONE DEFENDS THE DESIGN IDEA, NOT THE MARKUP
+
+Swapping the button's label from `about seven days` to `Learn more` leaves the markup structurally
+identical — same button, same `aria-controls`, same region, same text in the DOM. **Every structural
+assertion still passes.** What it destroys is the idea: **the affordance must BE the seven-day claim,
+so the evidence is one press from every site that states the number.** A detached link is missable by
+exactly the reader who has already read the number and has no reason to look further.
+
+⭐ So the assertion pins the LABEL to the claim, not merely the existence of a control — the rare case
+where the wording IS the property rather than a description of one.
+
+# THE SLICE BOUNDARY — recorded so the rest is not assumed done
+
+`YourMoney` and `UbExitStatus` are **untouched**, deliberately: their claims are load-bearing at a
+button, and `YourMoney` carries a recorded relocation defect ("if this disclosure is ever separated
+from the button, the trap is back").
+
+⚠️ **MEASURED, AND IT CORRECTS THE FIGURE I WAS GIVEN.** The custody sentence now renders at **TWO
+sites on TWO pages, down from THREE sites on two pages** — not "three pages, from four sites".
+Counted by rendering, and by a source scan that tolerates JSX line-wrap:
+
+    src/components/UnifiedBalancePanel.tsx   1 rendered site   (was 2)
+    src/components/YourMoney.tsx             1 rendered site   (unchanged)
+
+🚨 **AND A PLAIN `grep` FINDS ONLY ONE OF THEM.** In `YourMoney` the phrase wraps across a newline
+inside the JSX, so a single-line pattern misses it entirely — the fourth distinct mechanism by which
+a source-read string is absent from what a reader sees, after tag-splitting, runtime composition and
+HTML escaping. ⭐ The bundle count (3 → 2) and the render-based guard both see it; only the grep does
+not. **Same rule, fourth cause: read the output.**
+
+⛔ **THE CROSS-PAGE REPETITION STAYS RECORDED, NOT FIXED.** Two pages still state custody
+independently, and that is the next slice.
+
+---
+
 # ⭐ `balanceOf` TRUNCATION CANNOT PRODUCE A WRONG REFUSAL HERE — and the reason is STRUCTURAL, not designed
 
 **2026-09-04, read-only.** Arc published wallet-integration guidance naming a hazard on our own
