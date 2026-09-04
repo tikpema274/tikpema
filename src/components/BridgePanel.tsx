@@ -2,6 +2,7 @@ import { BRIDGE_TIMING, MINT_TIMING } from "../../shared/bridge-timing.mjs";
 import { useEffect, useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import { BridgeReceiptStatus } from "./bridgeReceiptStatus";
+import { partitionReceipts, collapseSummaryLine } from "../lib/bridgeReceiptCollapse";
 import { BridgeQuoteSummary } from "./BridgeQuoteSummary";
 import { describeError } from "../lib/describeError";
 import { displayAmount } from "../lib/formatAmount";
@@ -48,6 +49,9 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
   // ask "what do I have in flight?" without holding the burnHash in memory.
   const [receipts, setReceipts] = useState<any[]>([]);
   const [receiptsDegraded, setReceiptsDegraded] = useState(false);
+  // ⭐ Expansion is a VIEW preference and nothing else — it never changes which rows are
+  //    collapsible. `partitionReceipts` decides that from the receipts alone.
+  const [showAllReceipts, setShowAllReceipts] = useState(false);
   // High-fee band: the server REFUSES until the disclosure is acknowledged, and hands back
   // the exact token for the disclosure it showed. Same grammar as the vault owner-power
   // card — disclose, require a tick, and enforce it SERVER-SIDE (the tick alone only
@@ -511,7 +515,12 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
               nothing is in flight. Try again shortly.
             </div>
           )}
-          {receipts.map((r) => {
+          {/* ⛔ THE SPLIT IS A WHITELIST, COMPUTED IN ONE PLACE. Only a row that positively
+              matches every clause of the collapse predicate may hide; anything else — an
+              unrecognised state, an undateable row, a needs-review band, a mismatched fee
+              verdict — renders. `degraded` forces everything visible, because a set we are not
+              sure we saw in full must not be summarised. */}
+          {(showAllReceipts ? receipts : partitionReceipts(receipts, { degraded: receiptsDegraded }).shown).map((r) => {
             return (
               // A provisional receipt has no burnHash — key on whichever identity it has,
               // or React collapses every pending row into one.
@@ -545,6 +554,33 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
               </div>
             );
           })}
+          {/* ═══ ⭐⭐ THE SUMMARY LINE IS THE PREDICATE RENDERED AS PROSE ══════════════════════
+              Composed by `collapseSummaryLine` from the same clause list the predicate is built
+              from, so it cannot describe a set it does not cover. ⚠️ It says NOTHING about fees on
+              purpose: absent and `unreadable` verdicts are both collapsible, so a fee claim would
+              describe a check that, for most hidden rows, never ran.
+              ⛔ It is never the only place a row is mentioned — a needs-review row cannot be in
+              the hidden set, because it fails the whitelist. */}
+          {(() => {
+            const hidden = partitionReceipts(receipts, { degraded: receiptsDegraded }).hidden;
+            if (hidden.length === 0) return null;
+            return (
+              <div className="status" style={{ marginTop: 8, color: "var(--muted)" }}>
+                {showAllReceipts ? (
+                  <button className="linkbtn" onClick={() => setShowAllReceipts(false)}>
+                    Show fewer
+                  </button>
+                ) : (
+                  <>
+                    {collapseSummaryLine(hidden.length)}{" "}
+                    <button className="linkbtn" onClick={() => setShowAllReceipts(true)}>
+                      Show all
+                    </button>
+                  </>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
