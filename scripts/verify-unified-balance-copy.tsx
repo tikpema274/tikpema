@@ -284,6 +284,33 @@ section("5 — ⛔ THE ZONES: custody sits with the ACTION, evidence hangs off t
     /one real run, not a track record/.test(ubParked));
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("6 — ⭐ THE JUNE SHAPE: header → balance → action → explanation, in that ORDER");
+// ⭐ Restored from the June single-file design, which already had the shape this page had drifted
+// away from. Order is asserted by INDEX in the rendered text, because "the card exists" says
+// nothing about whether a reader meets it before or after the thing it explains.
+{
+  const iBal  = ubParked.indexOf("Your unified balance · across chains");
+  const iLad  = ubParked.indexOf("committed to your agent's float");
+  const iDep  = ubParked.indexOf("Move USDC from your agent");
+  const iHow  = ubParked.indexOf("How this works");
+  check("all four zones render", [iBal, iLad, iDep, iHow].every((i) => i >= 0),
+    `balance ${iBal} · ladder ${iLad} · deposit ${iDep} · how ${iHow}`);
+  check("⭐⭐ the BALANCE leads — the number before the prose about it", iBal < iLad);
+  // ⛔ The ladder is "stated before we ask for a deposit rather than after… Do not soften this to
+  // make the deposit easier." So deposit sits as close to the balance as that disclosure allows,
+  // NOT directly beneath it.
+  check("⛔ the reversibility ladder still PRECEDES the deposit ask", iLad < iDep);
+  check("⭐⭐ the explanation card is LAST — after the action it explains", iDep < iHow);
+
+  // ⭐ Each depth exactly once, in its own zone.
+  check("⭐⭐ the MECHANISM lives in the explanation card, not in the deposit card",
+    iHow < ubParked.indexOf("Arc's Gateway holds the funds for a delay"));
+  check("⛔ …and the deposit card keeps the claims that qualify the CUSTODY sentence",
+    /It is built now:/.test(ubParked.slice(iDep, iDep + 900)) &&
+    /you do not have to come back/.test(ubParked.slice(iDep, iDep + 900)));
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

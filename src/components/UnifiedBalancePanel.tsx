@@ -158,80 +158,6 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
         Sepolia — no seed phrase, no bridging to check a total.
       </div>
 
-      {/* WHAT YOU CAN GET BACK — the reversibility ladder, stated before we ask for a
-          deposit rather than after.
-
-          This block exists because the copy it replaces did the opposite of its job: it
-          said the funds "stay owned by your agent — a deposit, not a transfer to anyone
-          else," which READS as reassurance while describing the ONE pocket the user
-          cannot exit on their own. The three pockets have genuinely different exits, and
-          the unified balance has the worst one:
-
-            wallet (MSCA)  → the user holds the key. Unilateral, always.
-            agent's plain  → agent-withdraw returns balanceOf(SCA). One button, no delay.
-            unified        → NOT balanceOf(SCA). NO EXIT AT ALL. No endpoint returns it, and
-                             the SCA is dev-controlled so the user cannot act directly.
-                             Spendable cross-chain only.
-
-          So we rank them by what the user can get back ALONE, and the amber line is the
-          same one that sits on the Withdraw button (MyAgentPanel) — one fact, one voice,
-          wherever the user meets it. Do not soften this to make the deposit easier. */}
-      <div
-        className="status"
-        style={{
-          marginTop: 14,
-          padding: "14px 16px",
-          background: "var(--field)",
-          border: "1px solid var(--line)",
-          borderRadius: 12,
-        }}
-      >
-        <div
-          style={{
-            color: "var(--muted)",
-            fontSize: "0.72rem",
-            letterSpacing: "0.06em",
-            textTransform: "uppercase",
-            marginBottom: 8,
-          }}
-        >
-          What you can get back · and how
-        </div>
-
-        <div className="sub" style={{ margin: 0 }}>
-          <b>Your wallet</b> — yours. You hold the key. Withdraw any time, even if the agent
-          is paused.
-        </div>
-        <div className="sub" style={{ margin: "6px 0 0" }}>
-          <b>Your agent's plain balance</b> — pull it back yourself with{" "}
-          <button className="linkbtn" onClick={() => go("agent")}>
-            Withdraw to my wallet
-          </button>
-          . One button, no delay, no permission needed.
-        </div>
-        {/* Name the ACTUAL number when we have one. "You cannot pull this back on your own"
-            lands differently at 12.50 USDC than in the abstract, and the user is entitled to
-            see the figure the sentence is about. Falls back to unqualified prose while the
-            balance is loading / signed-out — never to a "—" that reads as an error.
-
-            ⚠️ "about seven days" is DERIVED, never fixed. withdrawalDelay() returns 1209600
-            and that is a BLOCK COUNT, not seconds — ~7.14 days at Arc's measured ~0.5097 s/block,
-            which is why the SDK's own prose says "7-day" in five places. Reading it as seconds
-            gives 14 days, a tidy-looking wrong answer. If block time drifts, the wall clock
-            drifts with it — so this must never harden into a promised number. */}
-        <div className="sub" style={{ margin: "6px 0 0", color: "var(--warn)" }}>
-          <b>Your unified balance</b>
-          {data && Number(data.total) > 0 && (
-            <>
-              {" "}
-              (<span className="mono">{data.total}</span> USDC)
-            </>
-          )}{" "}
-          — committed to your agent's float. Withdraw doesn't move it — getting it out is a
-          separate, slower route, shown below.
-        </div>
-      </div>
-
       {/* Balance card — same surface as the Dashboard "Agent unified balance" card.
           Degrades gracefully to an "unavailable" line if the read fails. */}
       <div
@@ -325,34 +251,79 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
         )}
       </div>
 
-      {/* Owner address — the agent wallet the unified balance is keyed to (the
-          depositor). Masked + expand + copy via AddressDisplay. ONE address only;
-          the delegate signer is server-side and never surfaced. */}
-      {data?.depositor && (
+      {/* WHAT YOU CAN GET BACK — the reversibility ladder, stated before we ask for a
+          deposit rather than after.
+
+          This block exists because the copy it replaces did the opposite of its job: it
+          said the funds "stay owned by your agent — a deposit, not a transfer to anyone
+          else," which READS as reassurance while describing the ONE pocket the user
+          cannot exit on their own. The three pockets have genuinely different exits, and
+          the unified balance has the worst one:
+
+            wallet (MSCA)  → the user holds the key. Unilateral, always.
+            agent's plain  → agent-withdraw returns balanceOf(SCA). One button, no delay.
+            unified        → NOT balanceOf(SCA). NO EXIT AT ALL. No endpoint returns it, and
+                             the SCA is dev-controlled so the user cannot act directly.
+                             Spendable cross-chain only.
+
+          So we rank them by what the user can get back ALONE, and the amber line is the
+          same one that sits on the Withdraw button (MyAgentPanel) — one fact, one voice,
+          wherever the user meets it. Do not soften this to make the deposit easier. */}
+      <div
+        className="status"
+        style={{
+          marginTop: 14,
+          padding: "14px 16px",
+          background: "var(--field)",
+          border: "1px solid var(--line)",
+          borderRadius: 12,
+        }}
+      >
         <div
-          className="status"
           style={{
-            marginTop: 12,
-            padding: "12px 16px",
-            background: "var(--field)",
-            border: "1px solid var(--line)",
-            borderRadius: 12,
+            color: "var(--muted)",
+            fontSize: "0.72rem",
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            marginBottom: 8,
           }}
         >
-          <div
-            style={{
-              color: "var(--muted)",
-              fontSize: "0.72rem",
-              letterSpacing: "0.06em",
-              textTransform: "uppercase",
-              marginBottom: 6,
-            }}
-          >
-            Agent wallet · unified balance owner
-          </div>
-          <AddressDisplay address={data.depositor} />
+          What you can get back · and how
         </div>
-      )}
+
+        <div className="sub" style={{ margin: 0 }}>
+          <b>Your wallet</b> — yours. You hold the key. Withdraw any time, even if the agent
+          is paused.
+        </div>
+        <div className="sub" style={{ margin: "6px 0 0" }}>
+          <b>Your agent's plain balance</b> — pull it back yourself with{" "}
+          <button className="linkbtn" onClick={() => go("agent")}>
+            Withdraw to my wallet
+          </button>
+          . One button, no delay, no permission needed.
+        </div>
+        {/* Name the ACTUAL number when we have one. "You cannot pull this back on your own"
+            lands differently at 12.50 USDC than in the abstract, and the user is entitled to
+            see the figure the sentence is about. Falls back to unqualified prose while the
+            balance is loading / signed-out — never to a "—" that reads as an error.
+
+            ⚠️ "about seven days" is DERIVED, never fixed. withdrawalDelay() returns 1209600
+            and that is a BLOCK COUNT, not seconds — ~7.14 days at Arc's measured ~0.5097 s/block,
+            which is why the SDK's own prose says "7-day" in five places. Reading it as seconds
+            gives 14 days, a tidy-looking wrong answer. If block time drifts, the wall clock
+            drifts with it — so this must never harden into a promised number. */}
+        <div className="sub" style={{ margin: "6px 0 0", color: "var(--warn)" }}>
+          <b>Your unified balance</b>
+          {data && Number(data.total) > 0 && (
+            <>
+              {" "}
+              (<span className="mono">{data.total}</span> USDC)
+            </>
+          )}{" "}
+          — committed to your agent's float. Withdraw doesn't move it — getting it out is a
+          separate, slower route, shown below.
+        </div>
+      </div>
 
       {/* Funding — a MONEY-PATH WRITE. The agent SCA deposits its own plain Arc USDC
           into its own unified balance. Auth + per-deposit cap are enforced server-side
@@ -451,12 +422,23 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
               between pages is exactly what happened once before. */}
           You can't withdraw it yourself: the balance belongs to your agent's account, and
           only that account can release these funds.{" "}
+          {/* ⭐⭐ "BUILT" AND "AUTOMATIC" STAY AT THE PRESS, and they belong to the CUSTODY
+              sentence rather than to the explanation: "the exit runs through us" is alarming on
+              its own, and the fact that it exists and needs no babysitting is what makes it a
+              disclosure rather than a warning. Moving them to the card at the end left the
+              deposit card saying only the frightening half — two guard assertions caught it,
+              and they were right. The SEQUENCE (what Gateway does, where it lands) is the
+              explanation and lives in "How this works". */}
           <b>Tikpema controls that account</b> — so the exit runs through us.{" "}
+          <b>It is built now:</b> we finish it automatically —{" "}
+          <b>you do not have to come back</b>.{" "}
           {/* ⭐ COLLAPSED BY DEFAULT, ALWAYS RENDERED. `hidden` rather than a conditional, so the
               claim stays in the DOM for a reader who opens it AND for the guard that reads it. */}
+          {/* ⭐ EVIDENCE ONLY. The MECHANISM moved to the "How this works" card at the end of
+              the page — it is an explanation, and it now renders exactly once, there. What stays
+              here is the dated evidence FOR THE SEVEN-DAY CLAIM, at the claim, because that is
+              the constraint the affordance exists to satisfy. */}
           <span id="ub-exit-evidence" hidden={!showEvidence}>
-            <b>It is built now:</b> you ask, Arc's Gateway holds the funds for a delay of about
-            seven days, and we finish it automatically — <b>you do not have to come back</b>.{" "}
             <b>⚠️ This has now been done once, end to end</b>: 1 USDC asked for on 2026-08-12 and
             returned automatically on 2026-08-20 — one real run, not a track record, and it took
             7 days and 4 hours, longer than the estimate, so treat the wait as a floor. Deposit
@@ -512,6 +494,85 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
             </a>
           </div>
         )}
+      </div>
+
+      {/* Owner address — the agent wallet the unified balance is keyed to (the
+          depositor). Masked + expand + copy via AddressDisplay. ONE address only;
+          the delegate signer is server-side and never surfaced. */}
+      {data?.depositor && (
+        <div
+          className="status"
+          style={{
+            marginTop: 12,
+            padding: "12px 16px",
+            background: "var(--field)",
+            border: "1px solid var(--line)",
+            borderRadius: 12,
+          }}
+        >
+          <div
+            style={{
+              color: "var(--muted)",
+              fontSize: "0.72rem",
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              marginBottom: 6,
+            }}
+          >
+            Agent wallet · unified balance owner
+          </div>
+          <AddressDisplay address={data.depositor} />
+        </div>
+      )}
+
+      {/* ═══ ⭐⭐ HOW THIS WORKS — THE EXPLANATION ZONE, AT THE END ══════════════════════════
+          Restored from the June single-file design (TestArc/tikpema-deploy), which already had
+          the shape this page had drifted away from: header -> balance -> action -> explanation,
+          with the explanation as its OWN numbered card rather than dissolved into the state
+          bullet and the deposit card. That dissolution is what made the page feel cluttered:
+          the same three depths rendered in every place any one of them was needed.
+
+          ⚠️ THE JUNE CARD'S CONTENT COULD NOT BE REUSED, ONLY ITS SHAPE. It said "Circle CCTP
+          routes it to your unified pool in ~20 seconds" and "Spend without bridging" — true of
+          the June premise, false of what ships now: a pool whose exit takes about seven days and
+          runs through us. The page did not get heavier from bad writing; it accumulated three
+          true things the original structure had no slot for.
+
+          ⛔ WHAT IS NOT HERE, AND DELIBERATELY:
+            · CUSTODY stays at the deposit button. A user pressing Deposit needs it AT THE PRESS,
+              not in a card they may never scroll to. verify-unified-balance-copy §5 pins it there.
+            · The DATED EVIDENCE stays behind the "about seven days" affordance, at the number it
+              is evidence for. Moving it here would put it one scroll away from the claim, which
+              is the constraint the affordance exists to satisfy. */}
+      <div
+        className="status"
+        style={{
+          marginTop: 16,
+          padding: "14px 16px",
+          background: "var(--field)",
+          border: "1px solid var(--line)",
+          borderRadius: 12,
+        }}
+      >
+        <div className="panel-eyebrow" style={{ marginBottom: 10 }}>How this works</div>
+        <ol style={{ margin: 0, paddingLeft: 20, display: "flex", flexDirection: "column", gap: 8 }}>
+          <li className="sub" style={{ margin: 0 }}>
+            <b>Deposit from your agent's own balance.</b> Your agent's plain Arc USDC moves into
+            its unified balance. It is a deposit, not a transfer to anyone else — but it is the
+            one pocket you cannot exit on your own.
+          </li>
+          <li className="sub" style={{ margin: 0 }}>
+            <b>One balance, spendable across chains.</b> The pool is visible wherever your agent
+            spends, so it does not matter which chain the funds came from.
+          </li>
+          <li className="sub" style={{ margin: 0 }}>
+            {/* ⭐ THE MECHANISM, MOVED OUT OF THE DEPOSIT CARD'S COLLAPSED SPAN AND OUT OF THE
+                STATE BULLET — it now appears exactly ONCE, in the zone that explains. */}
+            <b>Getting it out is slower.</b> You ask; Arc's Gateway holds the funds for a delay
+            of about seven days; it then lands in your agent's balance, which you can withdraw
+            yourself. The wait is set by Arc's Gateway, not by us.
+          </li>
+        </ol>
       </div>
 
       <div className="row" style={{ marginTop: 16 }}>
