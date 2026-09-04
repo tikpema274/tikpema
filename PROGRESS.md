@@ -1,5 +1,114 @@
 ---
 
+# ⭐⭐⭐ THE UPFRONT-FEE MIGRATION IS PROVEN END TO END IN PRODUCTION — PR-1 → PR-5, one arc
+
+**2026-09-04. Closed for now.** Five pre-registrations, each committed BEFORE its run so no
+prediction could be edited to match its outcome. Read as one arc rather than eleven fragments, the
+question narrowed at every step: *does the contract emit what we think* → *can our wallet do it* →
+*does the money arrive* → *can approve and burn ride together* → **does OUR CODE do all of that when
+a person clicks a button.**
+
+    PR-1  the ERC-20 fee path emits as predicted.
+          Five falsifiers held; the SIXTH FIRED — and it was a CONTRADICTION INSIDE THE
+          PRE-REGISTRATION, not a finding about the contract. Falsifier 6 forbade behaviour PR-1's
+          own §1 table predicted.
+    PR-2  the gasless SCA carries the tuple, and sponsorship holds on a real userOp.
+          F5 FIRED, and this time the falsifier was faithful — the ROW was over-strong.
+          ⭐ Deriving a falsifier from its row prevents CONTRADICTION. It does not prevent
+          OVER-CLAIMING, because both then carry the same excess.
+    PR-3  the full amount arrives on the destination chain. A measurement, not a burn — every row a
+          READ against a burn run 2 had already made, spending nothing.
+    PR-4  the first BATCHED burn: approve and burn in one userOp. B1–B6 hold; the allowance is 0
+          afterwards. ⛔ ATOMICITY NOT SETTLED, and the document said so before the run.
+    PR-5  the PRODUCTION UI path. TWELVE OF TWELVE.
+
+## ⭐⭐ WHAT PR-5 ADDED THAT NO EARLIER RUN COULD — the write path
+
+PR-1 through PR-4 called `agentBridge` **directly from spike scripts**. They proved the contract and
+our understanding of it. What they structurally could not touch is everything downstream of the burn:
+
+    recordBridge → triggerFeeReconcile / triggerSettle → background functions → the store → the panel
+
+Three of those four WRITE, and none had ever run on this mechanic. PR-4's own RESULT recorded the
+absence: *"the spike calls `agentBridge` directly, not `recordBridge`, so the trigger never fired and
+no `fee/<owner>/<burnHash>` record exists."*
+
+⭐⭐ **AND THE PROOF THAT IT FIRED IS *WHICH FUNCTION SPOKE*, NOT THAT A VERDICT EXISTS.** A verdict
+written by a hand-invocation is byte-identical to one written by the trigger. The trigger strings
+live only in `_bridge-record.mjs`, and both were emitted by **`agent-bridge`** — the handler that
+calls `recordBridge`. A hand invocation POSTs the background function directly and leaves no line
+there at all. [[establish-which-action-produced-the-outcome]]
+⭐ Corroborated independently: the verdict written was **the only `fee/` key in the entire store**, in
+a write-once store — so no earlier hand invocation had ever written one.
+
+The row that separates the two mechanics came out on the upfront side: **exactly 1.000000 delivered**
+where deducted would have delivered 0.945982, wallet paid 1.054018, allowance 0 afterwards.
+
+## ⛔⛔ WHAT IS *NOT* PROVEN — read this beside the twelve green rows
+
+**1. ATOMICITY. Still unproven, and the cleanest result is when that is easiest to forget.**
+Every row of every run above describes a **successful** burn. *"Either both land or neither does"* is
+a claim about the **failure** path. ⭐ A zero allowance afterwards is consistent with atomicity **AND
+equally consistent with a non-atomic batch whose second call happened to succeed** — the two are
+indistinguishable on a success. **Only an INDUCED failure discriminates them**: an expired quote, or
+a deliberate shortfall, submitted as a batch, with the allowance read afterwards. **That run is not
+written.**
+
+**2. THE SELF-SIGNED PATH.** Deducted, on `BridgingKitContract`, and NOT waiting to be migrated: a
+browser EOA signs one transaction at a time, so moving it would reintroduce the standing-allowance
+window batching was chosen to eliminate. Two mechanics are live at once by design.
+
+**3. THE PLAN PATH.** `job-bridge-approve` has its own receipt store, calls **neither** trigger, and
+therefore carries **no fee verdict at all**. A recorded decision, not an oversight — and nothing in
+PR-5 says anything about it.
+
+**4. THE ORIGIN-FILTER DEFECT (`14d8b8a`) — RECORDED AND DELIBERATELY UNFIXED.** The reconciler asks
+Circle about locally-minted `user-…` txIds it can never resolve; ~146 guaranteed-futile calls per
+abandoned intent, bounded by the 24h cap. Left in place so the production bridge had one change in
+flight and not two. **It is still there.**
+
+## ⭐⭐⭐ THE METHOD FINDING THAT OUTLIVES THE MIGRATION — A LONE ABSENCE PROVES NOTHING
+
+R11 predicted the mechanic sentence would be **absent** from a measured row. It was. ⛔ **AND THAT
+ALONE ESTABLISHES NOTHING**: a missing sentence is equally consistent with the rule working and with
+the renderer being broken, and no assertion over that one row separates the two.
+
+⭐ **WHAT MADE IT A DECISION RATHER THAN A FAILURE WAS THE ROW BESIDE IT.** The Unichain row, in the
+same list and the same render, still carried its `unknown` sentence — a CONTROL proving the sentence
+CAN appear. **Both branches on one screen, not one.** The discriminator was each receipt's own
+`delivery` field, exactly as the falsifiers had been conditioned.
+
+⚠️ **THE GENERAL FORM:** an absence is evidence only next to a presence produced by the same
+mechanism. A test that only ever observes the silent branch cannot distinguish silence from death.
+[[collapse-needs-pairwise-inequality]] [[absence-must-never-read-as-safe]]
+
+## ⭐⭐ AND ONE ABOUT THE PRE-REGISTRATIONS THEMSELVES — ALL FIVE WERE BROKEN BY THEIR OWN DEFECTS
+
+Not one was falsified by the world. Every failure came from inside the document or the instrument:
+
+    PR-1  falsifier 6 contradicted PR-1's own §1 table
+    PR-2  F5 was faithful; the ROW was over-strong
+    PR-3  a hand hex-conversion produced a confident RETRACTION OF A CORRECT RESULT
+    PR-4  B7 carried two clauses, breaking the one-claim-per-row rule PR-4 itself states
+    PR-5  §THE SUBJECT named the agent SCA carried over from PR-4's spike; the UI path's payer is
+          the CALLER's SCA
+
+⭐ **THAT IS THE MECHANISM WORKING, NOT FAILING.** A pre-registration's job is to be falsifiable
+before the answer is known, and what it caught most often was the author. ⚠️ Each was recorded and
+**not repaired in place** — a document edited to match its outcome proves nothing.
+
+🚨 **AND PR-3'S INSTRUMENT FAILED AGAIN TODAY, THE SAME WAY.** Reading PR-5's mint block, I
+hand-converted `46373859` to hex, got a different block, and read its timestamp — the identical error
+PR-3 recorded, where it produced a confident retraction of a correct result. ⭐ It was caught here
+only because **the RPC echoes the block number back and it did not match what was asked for**. The
+durable lesson is not "be careful with hex": it is that a query which returns its own key can be
+checked against the key, and one that does not, cannot. Convert with a tool, and compare the echo.
+
+⚠️ **Closed FOR NOW means the happy path of the write path is complete.** It does not mean the write
+path is. The failure path has still never been run.
+
+---
+
 # ⛔ THE RECONCILER ASKS CIRCLE ABOUT A TXID CIRCLE NEVER HAD
 
 **2026-09-04, found read-only from a panel row, before the PR-5 production bridge. NOT FIXED —
