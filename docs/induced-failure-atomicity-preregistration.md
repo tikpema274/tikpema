@@ -225,3 +225,134 @@ the text, and a paraphrase cannot falsify it.
 ⚠️ Record whether a `txHash` existed **before** interpreting anything, because it decides §4's fork.
 ⚠️ If a falsifier fires, **the finding is the falsifier** — record it and stop. If the defect turns
 out to be in a row rather than in the world, say which clause and why, and do not repair it in place.
+
+---
+---
+
+# RESULT — appended 2026-09-04, nothing above this line edited
+
+## ⛔⛔ ATOMICITY IS **NOT TESTED**. THE FORK WENT THE NO-BROADCAST WAY.
+
+    "Circle rejected the transaction before broadcast (INSUFFICIENT_TOKEN)
+     — it never reached the chain"
+
+Circle simulated the batch, saw the shortfall, and refused. **No transaction was broadcast, so the
+question was never put.** §4 committed this fork in advance precisely so a rejection could not be
+read as a result, and it is recorded as **NOT TESTED — neither a pass nor a falsification.**
+
+    amount 12.80 against balance 12.81 · "Leaves your wallet 12.8540"
+    agent-bridge invocation 2026-09-04T10:36:15.929Z, duration 2059.78 ms
+    NO trigger log lines — recordBridge was never reached
+
+## THE EIGHT EVALUABLE ROWS ALL HOLD. R3 IS UNEVALUABLE.
+
+| row | prediction | observed | falsifier |
+|---|---|---|---|
+| **R1** | balance unchanged | `12809812` → `12809812`, **two readings** | **F1 did not fire** |
+| **R2** | allowance is 0 | `0` — ⚠️ **for a different reason, see below** | **F2 did not fire** |
+| **R3** | no `Approval` in the transaction | ⛔ **UNEVALUABLE** — no transaction exists | F3 not applicable |
+| **R4** | no durable receipt | 58 `o/…/0x…` keys before and after; set difference **empty** | **F4 did not fire** |
+| **R5** | no provisional receipt | 9 `tx-` keys, the same nine user-signed ones | **F5 did not fire** |
+| **R6** | no fee verdict | still exactly **one** `fee/` key — PR-5's | **F6 did not fire** |
+| **R7** | day ledger not charged | `spentUsdc 1.054018`, ONE audit row, at 10:00:00.038Z | **F7 did not fire** |
+| **R8** | the panel shows an error | error rendered, no success row, no in-flight row | **F8 did not fire** |
+| **R9** | the message names the right branch | verbatim below — **it does** | **F9 did not fire** |
+
+## ⚠️⚠️ R2 HOLDS FOR A REASON THAT IS NOT ATOMICITY — AND READING IT AS ATOMICITY WOULD BE THE ERROR THIS DOCUMENT EXISTS TO PREVENT
+
+The allowance is `0`. **That is not evidence the batch rolled back.** Nothing was ever submitted, so
+no approve was ever attempted, so there was nothing to roll back. The zero is the **pre-existing
+state** — it was `0` before PR-5, PR-5 consumed exactly what it approved and left it `0`, and this
+attempt did not touch it.
+
+⛔ **R2 PASSING HERE AND R2 PASSING ON A BROADCAST REVERT ARE THE SAME OBSERVATION WITH COMPLETELY
+DIFFERENT MEANINGS.** Only the second is about atomicity. The row is scored as holding because it
+was predicted and observed; the CONCLUSION it was written to support is not available.
+
+## ⛔ R3 IS UNEVALUABLE, AND AN ABSENCE WITH NO POSSIBLE PRESENCE IS NOT A PASS
+
+R3 predicted no `Approval` from the SCA to TMWF, and required a control: *the same receipt must still
+carry its EntryPoint logs, or the reader is broken and R3 is unevaluable rather than confirmed.*
+
+**There is no receipt.** No transaction was broadcast, so the control cannot exist — and neither can
+the presence R3's absence was supposed to be measured against. ⭐ **THE ABSENCE IS TRIVIAL: there is
+no transaction in which an `Approval` could have appeared.** Scoring that as CONFIRMED would be
+exactly the defect recorded hours earlier — *a lone absence proves nothing* — applied to a row that
+had been written with a control specifically to avoid it. **The control did its job by refusing.**
+
+## ⭐⭐ R9 — THE COPY EXISTS, IS PRECISE, AND NAMES THE RIGHT BRANCH
+
+> **Circle rejected the transaction before broadcast (INSUFFICIENT_TOKEN) — it never reached the chain**
+
+⭐ **THIS IS `err.broadcast` SURFACING IN THE USER'S TERMS, ON A PATH NOBODY HAD EVER SEEN.**
+`waitForTx` sets `broadcast` from the presence of a `txHash` and selects between two messages; the
+transaction had **no** hash, and the message says so — *"it never reached the chain"* — rather than
+the on-chain-revert wording. It also carries Circle's own reason, `INSUFFICIENT_TOKEN`, unparaphrased.
+
+⚠️ **THE PREDICTION HERE WAS PESSIMISTIC AND IT WAS WRONG.** §2 said *"nobody has ever seen this path
+in the UI; the copy for it may be unwritten, generic, or wrong."* It was none of those. The
+distinction was built into `_circle.mjs` against a defect measured on the vanilla seller — *"telling a
+user their transaction failed on-chain when no transaction ever reached the chain asserts something we
+did not observe"* — and it travelled all the way to the screen, unaltered, on first contact.
+⭐ A repair made in one place for one incident held on a surface it was never tested against.
+
+## OBSERVED BUT NOT PREDICTED — the panel reset
+
+The quote rows returned to dashes and the button returned to **"Get quote"**. No row predicted this.
+It is correct behaviour — the quote is dead and re-quoting is the only way forward — but it is
+recorded as an **observation, not a passing row**: a claim nobody registered cannot be scored.
+
+## 🚨🚨 WHAT WOULD REACH THE BROADCAST FORK — AND THE HONEST ANSWER IS "NOTHING DETERMINISTIC"
+
+**Circle simulates against CURRENT state before broadcasting.** Therefore **any revert cause visible
+in current state is refused pre-broadcast, by construction.** A shortfall it can see is always
+refused. To broadcast a reverting userOp, the cause must arise **between simulation and inclusion**:
+
+* **(i) A STATE RACE** — the balance or allowance changes after simulation. Needs a second spender
+  racing Circle's pipeline. No code edit, but not schedulable, and it needs a second mover.
+* **⭐⭐ (ii) A TIME RACE — `QuoteExpired`.** The deadline is `block.timestamp`-based. **Our gates
+  check at SUBMIT time; the chain checks at INCLUSION time, and nothing can close that gap** — it is
+  structurally open. A quote submitted with a few seconds left passes `assertQuoteUnexpired`, passes
+  `reCheckExpiry`, passes simulation, and reverts on inclusion. PR-5's whole submit→mine was
+  **3864 ms**, so the target window is single-digit seconds.
+  ⭐ **THE CODE ANTICIPATED EXACTLY THIS RACE:** `agentBridge`'s re-check comment keeps the check
+  *"because a burn past the deadline still REVERTS."* Not a new idea — a named one, never observed.
+
+⛔ **SO: ONE INDUCTION SURVIVES SIMULATION WITHOUT EDITING CODE UNDER TEST, AND IT IS A RACE, NOT AN
+INDUCTION.** It cannot be scheduled — only biased toward, by submitting as late in the quote window as
+the panel allows, accepting that most attempts will simply be refused. **Every DETERMINISTIC induction
+requires editing the code under test.**
+
+⭐ **THAT IS A FINDING, NOT A GAP: atomicity is not deterministically testable from this path.**
+
+## ⭐⭐⭐ AND THE RUN THAT FAILED TO TEST ATOMICITY DEMONSTRATED THE REASON FOR IT
+
+⚠️ **A DERIVATION FROM TWO OBSERVED FACTS, MARKED AS SUCH — not an observation.** Observed: (1)
+Circle refused **the burn** pre-broadcast with `INSUFFICIENT_TOKEN`; (2) `approve` checks no balance,
+so an approve of `12854018` would have succeeded. It follows that under the **two-transaction**
+design this same refusal would have arrived **after** a successful approve — leaving `12854018`
+standing to `TokenMessengerWithFees`, a UUPS proxy whose `_authorizeUpgrade` has an empty body behind
+a single EOA.
+
+⭐⭐ **SO PRE-BROADCAST SIMULATION DOES NOT WEAKEN THE CASE FOR BATCHING — IT SHARPENS IT.** Simulation
+happens at *burn-submit* time, when a split design's approve is **already on chain**. A refusal that
+costs nothing in the batched design costs a standing allowance in the split one. **The exact scenario
+the batch was chosen to prevent is the scenario that occurred today**, and the batched design absorbed
+it into `allowance = 0`.
+
+⚠️ **WHAT DOES CHANGE IS THE ARGUMENT'S SHAPE.** `agentBridge`'s comment lists the window as *"a quote
+that expired in between, a revert, a timeout"*. Deterministic **reverts** now mostly never reach the
+chain, so the batch's live value is against the **race** class — expiry-in-flight and timeout — plus
+the split design's own refusal-after-approve. Narrower than the comment implies, and still real.
+⛔ **NOT RECORDED AS PROOF OF ATOMICITY.** The batch absorbing a pre-broadcast refusal says nothing
+about whether `executeBatch` rolls back a mid-execution revert. That remains untested.
+
+## WHAT THIS RUN STILL DOES NOT SETTLE
+
+* **ATOMICITY.** Untested, for the reason above, and now known to be untestable deterministically
+  from this path without editing the code under test.
+* **THE EXPIRED-QUOTE REVERT.** Still reasoned about, never observed — and now identified as the
+  ONLY non-code-editing route to the broadcast fork.
+* **THE SELF-SIGNED PATH.** ⚠️ And note it does **not** get Circle's simulation: a browser EOA signs
+  and broadcasts directly. Nothing here transfers to it.
+* **THE PLAN PATH.** Own store, neither trigger, no fee verdict.
