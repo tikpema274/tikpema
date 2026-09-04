@@ -1,5 +1,136 @@
 ---
 
+# ⛔ ARC IS ABSENT FROM THE AGENT MARKETPLACE CATALOG — and that is narrower than "unsupported"
+
+**2026-09-04, read-only. Nothing submitted.** Circle's Agent Marketplace has a listing route, and the
+Discovery API is public — `GET https://api.circle.com/v2/x402/discovery/resources`, no key, no account.
+The whole catalog was paged and every `accepts[].network` aggregated.
+
+**1,246 listings · 16 distinct networks · verbatim, with counts of `accepts[]` entries:**
+
+    1326  eip155:8453                               Base
+     825  solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp   Solana mainnet
+     637  eip155:137                                Polygon
+     396  eip155:84532                              Base Sepolia
+     396  eip155:80002                              Polygon Amoy
+     264  solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1   Solana devnet
+     108  eip155:43114     69  eip155:42161     66  eip155:1
+      66  eip155:10        66  eip155:130      31  eip155:196
+      12  eip155:146       12  eip155:480      12  eip155:1329     12  eip155:999
+
+**Neither `eip155:5042002` (Arc testnet, `_arc.mjs:4`) nor any Arc mainnet id appears.**
+
+## ⭐⭐ THE CONTROL IS WHY THIS IS RECORDED NARROWLY
+
+    eip155:5042002     HTTP 200  total=0      Arc testnet
+    arc / arc-testnet / arc-sepolia   HTTP 200  total=0
+    eip155:999999999   HTTP 200  total=0      ⭐ A CHAIN THAT DOES NOT EXIST
+    eip155:8453        HTTP 200  total=1008   ⭐ the filter demonstrably works
+    base-sepolia       HTTP 200  total=132    …and accepts legacy aliases
+
+⛔ **A NONSENSE CHAIN RETURNS IDENTICALLY TO ARC.** The filter cannot discriminate *unsupported* from
+*supported but empty*, so **what was measured is absence from the catalog, not unsupportedness** —
+and the record says the first, not the second. Same boundary the earlier directory census drew, and
+it still holds on a larger corpus. [[probe-must-discriminate-between-states]]
+[[refuted-by-what-you-read-not-what-you-failed-to-find]]
+
+## ⭐ AND THE RAIL IS A DIFFERENT CLAIM FROM THE CATALOG
+
+> *"Gateway supports nanopayments on all blockchains except Solana."*
+
+    | Blockchain         | Domain | Mainnet | Testnet      |
+    | Arc (testnet only) | 26     | —       | `arcTestnet` |
+
+**The rail carries Arc testnet. The catalog never has.** ⚠️ And the em-dash is its own fact: there is
+no Arc **mainnet** on this rail at all, so "list on Arc mainnet later" is not currently a route.
+
+⚠️ *Instrument note for whoever automates this:* the endpoint answers `curl` and returns **403** to a
+bare `urllib` user-agent. The 403 is the client, not the catalog.
+
+# 🚨 THE HEALTH CHECK IS UNDOCUMENTED, AND THE SHAPE IS UNFAVOURABLE FOR THIS SERVICE
+
+Across all four marketplace pages the health check is **three sentences**, and there is no fourth:
+
+> *"Endpoints are continuously health-checked, and unreachable ones are auto-excluded."*
+> *"It is then continuously health-checked, so it stays listed only while it is reachable."*
+> *"…continuously health-checked, so your agent finds services…"*
+
+**No method, no path, no frequency, no threshold, and no definition of "reachable."**
+`become-a-seller.md` is 152 lines and contains **zero** occurrences of *health*, *reachable*,
+*monitor*, *uptime* or *exclude*.
+
+## ⛔ 405 IS BOTH OUR REFUSAL AND OUR HEALTHY ANSWER
+
+`/api/dd-analyze` returns **405 during a refusal window** — when ddTree has rotated and no canary has
+vouched. It also returns **405 to any GET when perfectly healthy**, because the OpenAPI GET is a
+**declared 405-only refusal**. 🚨 **So if the checker's notion of reachable is an HTTP-200 probe, this
+service may read unreachable PERMANENTLY, not merely during a rotation** — the mechanism that makes
+it honest would be the mechanism that delists it.
+
+⛔ **UNVERIFIED, AND UNVERIFIABLE FROM OUTSIDE.** Nothing published says what is probed. This is
+recorded as a shape and a risk, not as a finding about behaviour.
+
+## ⛔⛔ AND A DELISTING WOULD BE UNOBSERVABLE
+
+A real listing's complete field shape, read from the API:
+
+    resource · type · x402Version · lastUpdated · accepts[] · metadata.{provider,path,method,
+    description,mimeType,input,output,siwx,supportsVanillax402,supportsCircleGateway}
+
+**No health field. No status. No exclusion reason.** A dropped service is simply *absent*. So we could
+not detect our own removal except by noticing it missing, and could never learn why — an absence with
+no signal attached, on a surface we do not control. [[absence-must-never-read-as-safe]]
+
+# ⚠️ THE 95/100 IS T'S REPORT OF A TOOL, NOT A MEASUREMENT — provenance corrected
+
+The figure is **not from this catalog and was never measured here.** There is no score tool in the
+marketplace docs, in `agents.circle.com/llms.txt`, in the skills index, or in the OpenAPI spec (whose
+only paths are `/v1/` and `/v2/x402/discovery/resources`). It does not appear in the memory directory
+at all.
+
+It comes from `PROGRESS.md` (2026-08-18), from a **different instrument** — Circle's
+**agent-readiness browser scorer** — and that entry already carries its own correction:
+
+> *"CORRECTED 2026-08-19: THE SCORE IS 95/100, NOT 72. This entry was written against 72, a figure I
+> recorded from a verbal report and never saw myself — the page is a browser tool I cannot read."*
+
+⭐ **RECORDED AS WHAT IT IS: T'S VERBAL REPORT OF A BROWSER TOOL CLAUDE CODE CANNOT READ**, corrected
+once already, and not re-runnable here for the same reason it was not runnable then.
+[[conversation-sourced-numbers-must-be-marked]] Its one scored gap remains **"accept payment on 2+
+networks"** — which is the same axis as the Arc absence above, reached from the other direction.
+
+# GET LISTED — what it actually requires, as of 2026-09-04
+
+    PREREQUISITES   402 Payment Required when unpaid, serves when paid
+                    a PUBLISHED OpenAPI spec
+                    a CONFIRMED payout wallet address
+    SUBMISSION      a Google Form — forms.gle/7YFzvdmMcn1JH5tF6
+                    fields: endpoint URL · payout wallet address · short description
+    REVIEW          manual. "The team screens and approves your submission. Your seller payout
+                    wallet is sanctions-screened as part of review."
+                    "A self-serve, automated submission flow is coming."
+    AFTER           continuously health-checked; "it stays listed only while it is reachable"
+
+## ⭐ TESTNET IS NOT THE BLOCKER — MEASURED, NOT ASSUMED
+
+The docs never state whether testnet services are eligible. The catalog answers it: **Base Sepolia
+396, Polygon Amoy 396, Solana devnet 264** `accepts[]` entries, all live. **Testnet services are
+demonstrably listed.**
+
+⛔ **SO THE BLOCKER IS ARC SPECIFICALLY, NOT TESTNET-NESS.**
+
+## ⛔ TWO OPEN DECISIONS, RECORDED AS OPEN AND NOT ANSWERED HERE
+
+* whether to pair with **Base Sepolia** to become listable — noting the tension already recorded on
+  2026-08-19: the honest pairing for an Arc-testnet analyser is Base Sepolia, while accepting Base
+  **mainnet** would mean taking real money for testnet analysis.
+* whether to **ask Circle about the health check before listing**, given that a declared refusal and
+  an outage may be indistinguishable to it and a delisting carries no signal.
+
+**Both are T's. Nothing was submitted, and no form was filled.**
+
+---
+
 # THE ORIGIN FILTER IS DEPLOYED — and the server half was verified by a FROZEN COUNTER
 
 **2026-09-04.** Deploy `6a9ac2d4b55848b50732e462`, published 13:36:40.272Z.
