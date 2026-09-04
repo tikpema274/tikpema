@@ -1,5 +1,119 @@
 ---
 
+# ⭐⭐ ddTree HAS A PRODUCTION READ — and the LIMIT on it is the point of this entry
+
+**2026-09-04, `8106f0a`, follow-on to the two entries below.** `/api/dd-vouched-build` reports which
+build the DD **canary** vouched for, when, and with what verdict. ⛔ The endpoint is the smaller half
+of this. What is worth keeping is why the obvious version of it would have been worthless, and what
+the built version still cannot claim.
+
+## (a) VS (b) — READING ONE INSTRUMENT TWICE IS NOT CORROBORATION
+
+The entry below closed with two options and a discriminator. They were not equally good:
+
+* **(a)** project `ddTree` onto `blobs-probe`. One field, nothing new computed — and it reads the
+  SAME baked-in `build-stamp.generated.mjs` from a second place. ⛔ **A SECOND READING OF ONE
+  INSTRUMENT IS NOT A SECOND INSTRUMENT.** It returns agreement with itself, and the agreement would
+  have been reported as though something had been checked.
+* **(b)** report what the CANARY vouched for — a value written by a different process, at a
+  different time, into a different store, and readable only by asking that store.
+
+⭐ **THE DISCRIMINATOR WAS NOT COST, IT WAS WHETHER A SECOND INSTRUMENT EXISTS.** (a) is cheaper in
+every way and buys nothing; that combination is exactly what makes it tempting.
+[[repeating-one-instrument-is-not-corroboration]]
+
+The rule that keeps the built thing on the (b) side is one line: the answer is
+`record.identity.build` — the string the canary WROTE — and it is never substituted with the running
+ddTree. Both values ship with a `source` beside them, because a reader holding the JSON is who has
+to know which instrument answered.
+
+## ⭐⭐ THE LIMIT, AND IT IS THE POINT OF THIS ENTRY
+
+**AGREEMENT IS LARGELY A PROPERTY OF THE LOOKUP.** The record is fetched by
+`healthKey(identity)`, and that key CONTAINS the running ddTree. So a record that is found will
+normally name that same build — not because two instruments concur, but because that is the slot
+that was opened.
+
+🚨 **ANYONE READING THAT EQUALITY AS CORROBORATION HAS READ IT WRONG**, and the failure would be
+invisible: two hashes matching on a screen looks like confirmation whatever produced them. So the
+response says so in its own payload, in the `agree` branch, rather than leaving the caveat in a
+source comment nobody fetches.
+
+⭐ **WHAT THE ENDPOINT ACTUALLY ADDS IS NOT THE ddTree VALUE AT ALL:**
+
+    whether a canary vouched for the running code AT ALL · WHEN it did · with WHAT verdict
+
+None of those three is derivable from the build stamp, and none of them was readable from production
+before. That is the strictly bigger question (b) was chosen for. ⚠️ **DISAGREEMENT IS THE STRONG
+SIGNAL; AGREEMENT IS WEAK** — which is the inverse of how a matching pair of hashes reads.
+
+## ⛔ `vouched` IS NOT A HEALTH TICK
+
+A FAILING record names a build. A STALE record names a build. Both return `outcome: "vouched"`,
+because the question is *what did the canary vouch for*, not *is the service healthy*.
+
+⚠️ The serve/refuse conclusion stays `evaluateHealth`'s and is **deliberately not re-derived here**.
+A second implementation of that verdict would be a duplicate source of truth about a gate that
+blocks deposits, and the two copies would drift.
+[[duplicate-source-of-truth-is-the-recurring-bug]] The raw `verdict` and `ageMs` are reported so a
+reader can see the inputs; the decision is not, and the payload says which it is withholding.
+
+## ⚠️ `build-unbound` MEANS NEVER ASKED — AND THAT IS NOT `none`
+
+`unreadable` has three causes and only ONE of them is the store failing:
+
+    store-error       asked, no answer
+    build-unbound     ⭐ NEVER ASKED — with no ddTree there is no key to look up
+    record-malformed  a record IS present, and names no build
+
+⛔ **REPORTING `build-unbound` AS `none` WOULD ASSERT A FACT ABOUT A READ THAT NEVER HAPPENED.**
+`none` means *we looked and the store holds nothing* — a claim about the store's contents. With an
+unbound build the store is never touched, so that claim has no basis at all. The two states are one
+word apart and describe opposite epistemic positions: *we know it is empty* versus *we could not
+ask*. Same family as every other entry here — an absence filling the result slot and reading as a
+finding. [[absence-must-never-read-as-safe]] [[probe-must-discriminate-between-states]]
+
+## ⛔ THE SURFACE DECISION, AND THE COST THAT MADE IT
+
+`shared/dd-canary/` is a `DD_SURFACE_DIR`, so a file placed there is hashed into `ddTree`, and every
+edit to it ROTATES THE HEALTH KEY. Rotation is not cosmetic: between the rotation and the next canary
+tick the DD service refuses, and **since step 2 that refusal BLOCKS VAULT DEPOSITS** —
+`_vault-report.mjs` will not produce a report without a serving health verdict, and `gateDeposit`
+refuses without one.
+
+⭐ **SO AN OBSERVER MUST NOT BE BOUND TO THE IDENTITY OF THE THING IT OBSERVES.** This module reads a
+record and reports it; neither `dd-analyze` nor `dd-canary` imports it, and no change to it can alter
+what the canary detects, what it vouches for, or whether a buyer is charged. Putting it in the
+surface would buy zero safety and spend a real deposit outage on every future edit to an
+observability endpoint — the same "stamp-dirty but DD-clean" cost that moved this binding off the
+deploy id in the first place, pointed the other way.
+
+It lives in `shared/dd-vouch/`. ⭐ **MEASURED, NOT ASSERTED:** the commit moves `tree`
+`9b371f60…` → `e1e17a1a…` (206 → 208 files) and leaves `ddTree` at `3b589768…` (38 files). **It ships
+DD-clean.** ⚠️ And the decision is a GUARD, not a comment: `verify-vouched-build.mjs` §0 fails if the
+module ever lands inside the surface, with a control proving its `covered()` helper can return true.
+Moving it back is allowed — but only deliberately, with the deposit cost in view.
+
+## PROVEN
+
+`test:vouchedbuild` 93/0; `test:all` **91/0/0 of 91**, unpiped, the new suite reachable at 22/91.
+SEVEN mutations through `scripts/lib/mutate.mjs`, each confirmed APPLIED before its verdict was read:
+answer from the stamp (1), report `differ` as `agree` (2), collapse `none`↔`unreadable` in BOTH
+directions (3, 4), conflate `build-unbound` with `store-error` (5), drop the 409 that makes a
+disagreement visible without parsing JSON (6), and put the module into `DD_SURFACE_DIRS` (7).
+
+⚠️ **A DEFECT IN THE SUITE'S OWN FIRST DRAFT, RECORDED RATHER THAN QUIETLY FIXED.** §9's seal checks
+grepped raw source and FAILED on the handler's own "INVARIANT TO KEEP" comment — **a grep cannot tell
+a prohibition from a call.** It now strips comments first, and ⭐ the stripper carries its own
+control, because an over-eager stripper returning `""` would make every negative assertion
+(`!/writeHealth/`, `!/runFixtures/`) pass VACUOUSLY. [[equality-passes-vacuously-on-empty]]
+
+⛔ NOT DEPLOYED — this ships with whatever goes next, so the endpoint does not answer on production
+yet. Nothing above is a production reading of the endpoint itself; it is a reading of the code and
+the surface hash.
+
+---
+
 # ⭐ THE UPFRONT-FEE MIGRATION IS DEPLOYED — and one probe proves it was SCOPED, not swept
 
 **2026-09-04.** Deploy `6a9a6c3c37947013eee03080`, published 07:27:35.483Z. ⛔ **NOT A COPY DEPLOY.**
