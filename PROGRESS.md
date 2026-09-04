@@ -1,5 +1,149 @@
 ---
 
+# ⭐ `balanceOf` TRUNCATION CANNOT PRODUCE A WRONG REFUSAL HERE — and the reason is STRUCTURAL, not designed
+
+**2026-09-04, read-only.** Arc published wallet-integration guidance naming a hazard on our own
+instrument:
+
+> *"`balanceOf()` returns 0 for amounts smaller than 1×10⁻⁶ USDC (the 6-decimal minimum). The native
+> balance can hold amounts smaller than that threshold (dust). Dust is still spendable as gas. A
+> `balanceOf()` of 0 does not mean the address has no USDC."*
+
+⛔ That is **absence-reads-as-safe, named by the vendor, on the read every money gate uses.** It does
+not bite, and the reason is worth recording because nobody chose it:
+
+    job-run.mjs:117           if (have < budget)
+    agent-send.mjs:104        if (have < amount)
+    agent-withdraw.mjs:132    if (have < amount)
+    agent-ub-deposit.mjs:141  if (balance < units)
+    job-bridge-approve:191    if (BigInt(raw) < needMinor)
+    job-swap-approve.mjs:146  if (inBal < amountIn)
+
+⭐⭐ **ALL SIX COMPARE AGAINST A REQUESTED AMOUNT. NOT ONE COMPARES AGAINST ZERO.** Every `need` is at
+least one minor unit, so a wallet holding only sub-1e-6 dust genuinely cannot satisfy any of them —
+the refusal is correct, and the figure it quotes is correct at the precision it claims.
+
+⚠️ **THAT IS LUCK WITH A REASON, NOT A DESIGN.** The gates are amount-shaped because they were written
+to answer "can this specific spend happen", not "is this wallet empty". Had any one of them been
+written as `=== 0n` — the natural way to express "no funds" — it would be wrong today, on this chain,
+by exactly the amount Arc describes. **The property to preserve is the SHAPE**: a gate answers a
+comparison, never an emptiness claim.
+
+⚠️ **ONE OBSERVED INCONSISTENCY, NOT A DEFECT:** five of the six compare BigInt minor units;
+`job-swap-approve` compares JS floats via `Number(formatUnits(raw, 6))`. Irrelevant to the truncation
+question, and noted only because `job-bridge-approve` carries a comment insisting on minor units
+precisely so there is nothing to round.
+
+## ⚠️ ONE EXPOSURE, AND IT IS A PROMPT RATHER THAN A REFUSAL
+
+    ConnectPasskey.tsx:215   agentBal <= 0 && loginBal <= 0   →  the "get test USDC" prompt
+
+Under Arc's rule this **can fire on a wallet that holds dust**, so the literal reading ("both pockets
+are empty") can be false. It gates advice, not a decision, and the advice stays right for anyone who
+cannot transact.
+⭐ Its own comment already records this class being fixed once: the prompt *"used to key on the agent
+wallet alone, which shouted 'your wallet is empty' at someone who had money in their login wallet."*
+**The same shape, one truncation deeper.**
+
+## ⛔ AND NOTHING CROSS-CHECKS THE NATIVE VIEW
+
+`eth_getBalance` is read **nowhere in the money path.** It appears only in `_cryptodata.mjs` (the
+research RPC allowlist, gated behind `DECIMALS_VERIFIED`), `_research.mjs`, and untracked spikes.
+**No gate ever compares the two views**, so nothing in the system could currently detect a wallet
+whose ERC-20 view reads zero while its native balance does not.
+
+# 🚨 THE RUNTIME BLOCKLIST REVERT — a live gap, found by READING and not by failing
+
+Arc names **two** enforcement points, and we handle exactly one:
+
+> *"Blocked senders are rejected **before** the transaction enters the mempool. Transfers that involve
+> a blocked address during execution **revert at runtime, using gas without changing state.** Handle
+> both cases in your UI."*
+
+    PRE-MEMPOOL   → already honest. Lands in waitForTx's FAILED-with-no-txHash branch:
+                    "Circle rejected the transaction before broadcast (…) — it never reached the
+                    chain". The PR-6 shape, proven on production today.
+    RUNTIME       → mines, spends gas, rolls back state. waitForTx reports
+                    "Transaction reverted on-chain — tx 0x…" and NAMES NO CAUSE OF ITS OWN.
+
+⚠️ **PRECISION ON THAT LAST CLAIM:** the message template appends Circle's `errorReason` when one is
+present, so a cause *may* pass through. **Whether Circle surfaces a blocklist reason there is
+UNMEASURED** — no such revert has ever been observed on this system. Recorded as unknown, not as
+absent.
+
+⛔ **AND THERE IS NO PRE-FLIGHT CHECK AT ALL.** Zero occurrences of `isBlacklisted` / `isBlocklisted`
+/ blocklist-checking across `netlify/functions/`, `src/` and `shared/`. (`onchain-facts/index.mjs:62`
+lists denylist SELECTORS — that is the DD engine auditing *other people's* contracts, the opposite
+direction.) Arc explicitly recommends checking the destination before submitting.
+
+## ⭐ WHAT WE DO NOT DO WRONG, RECORDED SO THE GAP IS NOT OVERSTATED
+
+The 402s say *"Insufficient funds. Have X, need Y."* — **a statement about the balance, with no
+promise about the transfer.** No gate copy claims that passing it means the transfer will succeed.
+⚠️ But nothing says it *isn't* a guarantee either, and Arc states plainly that a sufficient balance
+does not guarantee success. The copy is not false; it is silent on a thing the chain is not silent
+about.
+
+⛔ **NOT FIXED TONIGHT. The blocklist pre-flight is a decision, not a patch** — it adds an RPC read to
+every send, on a money path, for a failure never yet observed here.
+
+# ⭐⭐ THE EMITTER RULE, CORROBORATED BY AN INDEPENDENT INSTRUMENT
+
+Arc's published rule: system emitter `0xffff…fffe` at **18 dp**, ERC-20 `0x3600…0000` at **6 dp**,
+*"Match on the emitter address so you do not count the same movement twice."*
+
+`_fee-reconcile.mjs` pins **emitter AND topic0 AND `topics.length === 3`**, and refuses to compare
+stream counts at all.
+
+⭐⭐ **WE MEASURED THIS BEFORE IT WAS PUBLISHED.** PR-2 and PR-4 recorded *"7 vs 8, and the counts
+legitimately differ on a sponsored userOp"* from real receipts, and the reader's pin was argued from
+an ABI shape and then confirmed on real bytes. **The published rule and the measured one agree.**
+That is corroboration across two genuinely different instruments — our own chain reads and the
+vendor's specification — which is worth more than either alone.
+[[repeating-one-instrument-is-not-corroboration]]
+
+## ⚠️ AND THE LIMIT NOW HAS A NAME
+
+> *"Plain native sends emit no log at the ERC-20 contract address."*
+
+Our reader filters the **ERC-20** emitter, so it is **structurally blind to a fee moved by a plain
+native send.** It would return `not_upfront_fee_path` — a refusal, not a wrong figure. ⭐ Fail-closed,
+and now a documented property rather than an accident of which emitter we happened to pick.
+
+# THE SIGNATURE-OUTCOME GAP SHRINKS LESS THAN HOPED
+
+All nine stranded intents carry `burnHash: null` and `pendingReason: "awaiting user signature"` —
+consistent with **nothing ever submitted**, which is precisely the region Arc cannot see.
+
+    declined in the wallet     ⛔ Arc exposes NOTHING — never reached the chain
+    tab closed before signing  ⛔ Arc exposes NOTHING — same
+    signed then DROPPED        ⚠️ only as an ABSENCE: "dropped transactions produce no onchain record"
+    signed then pre-mempool    ✅ readable, with a reason
+    signed then runtime revert ✅ readable receipt, status 0x0
+
+⭐ **SO THE OPEN WORK IS THE SAME SIZE FOR THE TWO STATES THAT MATTER.** Declined and tab-closed
+still need a **client report**; there is no chain-side substitute and Arc does not provide one. What
+Arc adds is the other half: **if a burn was signed, its outcome is readable** — so a client report
+*plus* an Arc lookup would fully partition the space, where today neither exists.
+
+## Zero5 — NOT APPLICABLE, with the bound stated
+
+Before the Zero5 hard fork, testnet emitted `NativeCoin*` events from `0x1800…0000` instead of the
+standard `Transfer`; Arc says this *"only affects indexers that backfill pre-activation testnet
+history."*
+
+⛔ **We are not such an indexer.** Every read is `eth_getTransactionReceipt` on a burn hash we
+produced ourselves — **no `getLogs`, no fromBlock/toBlock range anywhere in the repo.** The boundary
+cannot bite.
+
+⚠️ **HONEST BOUND: I did not establish Zero5's activation date** — Arc points to the `arc-node`
+CHANGELOG for it, and I did not read it. That is sufficient for this conclusion (we never backfill,
+so the date is irrelevant) and insufficient for any future log-range indexing. ⭐ **And that
+constraint is recorded NOWHERE IN CODE** — nothing would stop someone adding a `getLogs` sweep across
+the fork boundary and silently reading a stream that stops at activation.
+
+---
+
 # ⛔ ARC IS ABSENT FROM THE AGENT MARKETPLACE CATALOG — and that is narrower than "unsupported"
 
 **2026-09-04, read-only. Nothing submitted.** Circle's Agent Marketplace has a listing route, and the
