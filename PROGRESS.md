@@ -1,5 +1,115 @@
 ---
 
+# 🚨 A PREDICTED AMBIGUITY THAT WAS NEVER AMBIGUOUS — and the server string that had already drifted
+
+**2026-09-05.** No deploy. `test:all` **93/0/0 of 93** unpiped on clean `HEAD` (`d7e10f8`), exit 0,
+6.5 min. Two code changes, uncommitted, in `_bridge-receipts.mjs` and `verify-origin-filter.tsx`.
+
+## ⭐⭐ THE FALSIFIED PREDICTION — recorded before it is lost, because it is the finding
+
+The 2026-09-04 session close predicted that the Unichain stranded intent's frozen
+`reconcileAttempts` would, once its 24h cap crossed at `17:00:41Z`, be explained **equally well by
+the cap OR by the origin filter** — *"after 17:00:41Z the two causes are indistinguishable."*
+
+⛔ **FALSE.** The counter had already stopped **3h24m before the cap could act:**
+
+    last reconcile attempt          2026-09-04T13:30:25.914Z
+    origin filter deploy 6a9ac2d4   2026-09-04T13:36:40.272Z   ← 6m14s AFTER the last attempt
+    cap would have crossed at       2026-09-04T17:00:41.030Z   ← 3h24m after the deploy
+
+The first tick after `6a9ac2d4` published did not ask. At that moment the record was still
+`unwitnessed`, still non-terminal, still inside its cap and still eligible. **A confound that
+arrives after the event cannot explain the event.** Attribution is clean: the filter, not the cap.
+
+### ⭐ CORROBORATED TWO WAYS, THE SECOND NEEDING NO TIMING ARGUMENT AT ALL
+
+**1. THE SIBLING TABLE.** Eight comparable records each ran to ~146 attempts and stopped at their
+OWN 24h mark — the cap doing exactly its job. The Unichain one stopped at **123, cut short at
+20h30m**. ⭐ **The gap IS the filter**, and it is visible only by comparing ACROSS records.
+
+    mtdhmeh8 polygon  145 @23h58m   mte8sdj8 linea    146 @23h57m
+    mteqqxlk arbitrum 146 @23h54m   mteqrye6 base     146 @23h54m
+    mteqwuok base     146 @23h50m   mtetl8yk base     146 @23h55m
+    mtexvqzt arbitrum 147 @23h55m   mtiphw04 base     146 @23h59m
+    mtlru386 unichain 123 @20h30m   ← THE OUTLIER
+
+**2. ⭐⭐ THE TENTH RECORD — the case only ONE cause can explain.** `user-mtnczg9o-hkt3xc`, created
+AFTER the filter shipped: non-terminal, well inside its cap, `reconcileAttempts` **null**.
+**THE CAP CANNOT EXPLAIN ZERO.** It was in the store the whole time and settles the question with
+no timestamps at all. ⛔ The record predicted ambiguity instead of going to look for the falsifier.
+[[predicted-ambiguity-is-not-measured-ambiguity]] · [[refuted-by-what-you-read-not-what-you-failed-to-find]]
+
+### ⭐ "NOTHING FIRED" — the cap's promise is kept by a DERIVATION, not an event
+
+`mtlru386` now reads `unresolved · terminal · needsHuman` with the hand-reconcile sentence, so the
+copy's promise IS kept. ⚠️ But nothing fired: the band is a pure function of `submittedAt` vs `now`
+evaluated at READ TIME. **The record on disk is byte-for-byte what it was yesterday afternoon.**
+When asking whether a promise was kept, establish first whether the mechanism is an EVENT or a
+DERIVATION — hunting for a trace the design never writes reads as "it did not happen".
+
+### ⭐ THE METHOD NOTE — read the STORE, never the endpoint
+
+Read via `netlify blobs:get` directly. ⛔ **NOT through `bridge-receipts`** — that handler runs
+`listAllStranded`, which selects `reconcilable` and posts to the reconcile job, so reading through
+it would have **incremented the very counter under measurement**. ⚠️ It is a GET, and a read-only
+panel feed: **"POST executes, GET observes" is the wrong heuristic.** The test is unchanged — does
+the probe's success path run the target's logic? [[verification-method-must-not-mutate]]
+
+# 🚨 THE SERVER STRING WAS FALSE IN PRODUCTION, IN BOTH BANDS
+
+`provisionalStatus`'s `detail` was UNCONDITIONAL and the origin filter never narrowed it. Both
+strings were false, measured against live records:
+
+    user-mtnczg9o-hkt3xc  unwitnessed, 15.41h, attempts null, unaskable
+                          → "being re-checked with Circle automatically"        FALSE
+    user-mtlru386-qxx7xy  unresolved, 42.08h, unaskable
+                          → "reconcile the txId against Circle by hand"         CANNOT SUCCEED
+
+⚠️ **THE SECOND ONE NAMES AN INSTRUCTION THAT CANNOT SUCCEED** — it sends a human to the one place
+guaranteed to have no answer. §4 of `verify-origin-filter` already proved the PANEL removed exactly
+that instruction for unaskable rows; only the server still said it. ⛔ **Both bands fixed, not one:
+shipping a fix for one false string while leaving its twin false beside it is worse than the
+extension.**
+
+## ⭐⭐ WHY IT ROTTED — a render guard CANNOT see a producer string the renderer does not use
+
+**No user ever read either sentence.** The panel branches on `askable`
+(`bridgeReceiptStatus.tsx:185/202`) and is guarded by §3 and §4. ⭐ **That is precisely what let them
+rot: a SECOND COPY of a claim, in the place nobody was looking, going stale while the watched copy
+stayed true.** This widens the boundary already recorded at 2026-08-30 — it is not only comments
+that render guards cannot reach, it is **live code returning a value over HTTP**.
+[[duplicate-source-of-truth-is-the-recurring-bug]] · [[assert-on-rendered-output-not-source-regex]]
+
+⭐ **SO THE NEW SECTION ASSERTS THE PRODUCER, THEN ASSERTS THE TWO AGREE.** The property is not
+"each is right", it is **"there is one claim"** — only a cross-assertion catches them drifting apart
+again, and it is derived from each side independently. [[binding-tested-across-what-it-binds]]
+⚠️ It carries its own non-vacuity (both fixtures really are in the band) and **pairwise inequality**
+(the two details must be DIFFERENT strings) — "A says X" plus "B does not say X" both pass on one
+collapsed string. [[collapse-needs-pairwise-inequality]]
+
+`verify-origin-filter` **44 → 62/0.** Four mutations proven, both directions:
+
+    M1  revert unwitnessed to unconditional auto-recheck   CAUGHT  7 red
+    M2  revert unresolved to unconditional reconcile       CAUGHT  4 red
+    M3  collapse to the UNASKABLE string for everyone      CAUGHT  9 red
+    M4  swap the predicate for `origin`                    CAUGHT  8 red
+
+⭐ **M4 went red on TWO independent instruments** — §6's source grep for `origin !== "user-signed"`
+AND the new behavioural assertions — which is the blacklist the filter exists to avoid.
+
+## ⚠️ AN ORDERING ERROR OF MINE, AND WHAT IT COSTS TO GET RIGHT
+
+I launched `test:all`, then edited two files it reads. **That run straddled two trees and could
+report neither**, so it was killed and discarded. ⭐ **`test:all` IS the tree it ran against** — the
+run must bracket the edits, never contain them. Same trap forced the ordering here: `PROGRESS.md` is
+read by `verify-absence-claims` and five other suites, so **this entry had to be written BEFORE the
+final run, not after it.**
+
+⚠️ `shared/build-stamp.generated.mjs` is dirtied by every `test:all` (test:dd runs `npm run stamp`).
+The committed stamp is null by design — revert it before any commit.
+
+---
+
 # THE AI AGENT PAGE — and a claim-by-claim inventory that WAS BLIND to the doubling
 
 **2026-09-05.** Deploy `6a9bec55244effb61ddf6693`, published 10:44:48.203Z. `1b20af6` · tree

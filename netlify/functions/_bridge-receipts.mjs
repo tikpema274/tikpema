@@ -350,10 +350,12 @@ export const PROVISIONAL_BANDS = Object.freeze(["settling", "unwitnessed", "unre
  *
  * · `settling`    — inside the settle deadline. Circle may still land this; the only band where
  *                   "not confirmed yet" is an honest thing to say.
- * · `unwitnessed` — past the deadline, under the cap. Submitted, never observed, and ⚠️ NOTHING
- *                   IS CHECKING — the same "we stopped waiting" that `mint_unconfirmed` means,
- *                   except here nothing was ever waiting in the first place. Said plainly,
- *                   because a user who thinks a process is watching will not go look themselves.
+ * · `unwitnessed` — past the deadline, under the cap. Submitted, never observed. ⛔ WHETHER
+ *                   ANYTHING IS CHECKING DEPENDS ON THE ID, so the detail branches on
+ *                   `circleCanBeAsked` — see the branch below. The band itself does not: a record
+ *                   is `unwitnessed` on its age alone, which is why the sweeper's census and the
+ *                   panel can share one definition of the band while saying different things
+ *                   about what is being done for it.
  * · `unresolved`  — past the cap. TERMINAL. Needs a human against Circle's record of the txId.
  *
  * ⚠️ AN UNDATEABLE RECORD IS `unresolved`, NOT `settling` — and this deliberately diverges from
@@ -376,20 +378,49 @@ export function provisionalStatus(receipt, now = Date.now()) {
   }
   const ageMs = Math.max(0, now - submittedAt);
   if (ageMs >= SUBMITTED_AGE_CAP_MS) {
+    // ⛔ THE SAME DRIFT, ONE BAND OVER — and this one names an instruction that CANNOT SUCCEED.
+    // "reconcile the txId against Circle by hand" is the right thing to tell a human holding an id
+    // Circle issued. For a locally-minted id there is no record at Circle to reconcile against, so
+    // the instruction sends a person to the one place guaranteed to have no answer. MEASURED
+    // 2026-09-05 on `user-mtlru386-qxx7xy`: terminal, unaskable, and carrying exactly this string.
+    // ⭐ The panel already draws this distinction (bridgeReceiptStatus.tsx, the `unresolved`/
+    // `!askable` branch, guarded by verify-origin-filter §4) — this is the server side catching up.
     return {
       provisional: true, band: "unresolved", ageMs, terminal: true, needsHuman: true,
-      detail: "submitted over 24h ago and never confirmed — reconcile the txId against Circle by hand",
+      detail: circleCanBeAsked(receipt)
+        ? "submitted over 24h ago and never confirmed — reconcile the txId against Circle by hand"
+        : "submitted over 24h ago and never confirmed — and its id is not one Circle issued, so " +
+          "there is no record at Circle to reconcile against; check the wallet's own history on Arc",
     };
   }
   if (ageMs >= SUBMITTED_SETTLE_DEADLINE_MS) {
+    // ═══ ⛔⛔ ONE CLAIM, ONE OWNER — AND THIS STRING HAD ALREADY DRIFTED ═══════════════════════
+    // ⚠️ CORRECTED ONCE ALREADY. It said "nothing is checking automatically" — true when written,
+    // false once bridge-reconcile-background was wired in at bridge-mint-sweep.mjs:94, which
+    // triggers a reconcile for every non-terminal provisional (settling AND unwitnessed).
+    //
+    // 🚨 THEN IT DRIFTED AGAIN, IN THE OTHER DIRECTION, AND WAS FALSE IN PRODUCTION. The origin
+    // filter (shared/circle-tx-id.mjs) narrowed the selection to records whose txId CIRCLE ISSUED,
+    // and this string was not narrowed with it — so it claimed automatic re-checking for records
+    // the sweep had stopped selecting. MEASURED 2026-09-05 on `user-mtnczg9o-hkt3xc`: unwitnessed,
+    // 15h old, `reconcileAttempts` null, unaskable — and this string said it was being re-checked.
+    //
+    // ⭐ THE PANEL WAS ALREADY RIGHT (bridgeReceiptStatus.tsx:185/202 branch on the same predicate),
+    // so no user read the false sentence. That is exactly what made it survive: a SECOND COPY of a
+    // claim, in the place nobody was looking, going stale while the copy that is watched stayed
+    // true. [[duplicate-source-of-truth-is-the-recurring-bug]]
+    //
+    // ⭐⭐ SO IT READS THE PREDICATE THAT OWNS THE CLAIM — the same `circleCanBeAsked` the selection
+    // at listAllStranded uses. The server string and the sweep now cannot disagree about whether
+    // anything is being done, for the same reason the panel and the sweep already could not.
+    // ⛔ No interval here either: the schedule lives in netlify.toml, outside the build stamp, so
+    // a numeric claim would be unguardable.
     return {
       provisional: true, band: "unwitnessed", ageMs, terminal: false, needsHuman: false,
-        // ⚠️ CORRECTED. This said "nothing is checking automatically" — true when written,
-        // false once bridge-reconcile-background was wired in at bridge-mint-sweep.mjs:94,
-        // which triggers a reconcile for every non-terminal provisional (settling AND
-        // unwitnessed). ⛔ No interval here either: the schedule lives in netlify.toml,
-        // outside the build stamp, so a numeric claim would be unguardable.
-        detail: "submitted, never observed on Arc — being re-checked with Circle automatically",
+      detail: circleCanBeAsked(receipt)
+        ? "submitted, never observed on Arc — being re-checked with Circle automatically"
+        : "submitted, never observed on Arc — and its id is not one Circle issued, so it cannot " +
+          "be re-checked automatically and will not resolve on its own",
     };
   }
   return {
