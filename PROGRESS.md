@@ -1,5 +1,88 @@
 ---
 
+# THE TABS SLICE IS DONE — and the probe measures the DECISION, not just the feature
+
+**2026-09-05.** Deploy `6a9bd1bd56bb080c6dd9b593`, published 08:48:29.558Z. `46c3d39` · tree
+`3e14f2bd…` · dirty false · 211 files · `index-C6Vv7slB.js`, served bytes byte-identical to the
+diffed artifact (885,868, sha256 `c23b12577659e693…`). `test:all` **93/0/0 of 93** unpiped.
+`gate:deployed` 5/5, 25 newer scanned. Bundling 24m01s. `capture:window` RAN: `rotated:false`,
+`no-window`, 08:55:05.464Z. ddTree read from production: **`vouched` · `agree`**.
+
+The last piece of the June shape: **`[ Deposit | Withdraw ]`**, Deposit selected by default.
+
+    P1  "Withdraw from Unified Balance to your agent wallet"  1 -> 0   the labelled section it replaces
+    P2  "aria-pressed"                                        0 -> 1   the tab strip
+    P3  '"withdraw","Withdraw"'                               0 -> 1   the Withdraw tab
+    P4  'section:"status"'                                    0 -> 1   ⭐⭐ THE DECISION
+    P5  "Tikpema controls that account"                       2 -> 2   control
+    P6  "Getting money out"                                   1 -> 1   control
+    P7  "one real run, not a track record"                    2 -> 2   control
+
+⭐⭐ **P4 IS THE ONE WORTH HAVING.** P2 and P3 prove *tabs shipped*. Only `section:"status"` proves
+the **status half is the hoisted one** — that pending withdrawals render ABOVE the strip rather than
+inside it. A build with the tabs and the exit block inside them satisfies P1–P3 and P5–P7 and fails
+only here. ⚠️ It survives minification because it is an object property, which is why it works as a
+probe at all; a JSX attribute would not have.
+
+## ⛔ THE DECISION, AND WHY IT WAS T'S TO MAKE
+
+Putting the whole exit block behind a Withdraw tab would hide a live withdrawal until someone clicks
+— **the exact defect `UbExitStatus` exists for** (*"a live withdrawal existed for hours that NOBODY
+COULD SEE IN THE APP"*), with a click added. T chose: rows stay visible above the tabs.
+
+⭐ **THAT IS WHY THE COMPONENT GREW A PROP RATHER THAN BEING MOVED.** `section: "all" | "status" |
+"action"`, defaulting to **`"all"`** — so every existing caller and `verify-ub-exit-view` are
+UNCHANGED (16/0, untouched). ⚠️ A new prop that altered behaviour by default would be a silent
+rewrite of a guarded money surface.
+
+⚠️ **TWO INSTANCES MEAN TWO FETCHES OF THE SAME GET, ACCEPTED RATHER THAN HIDDEN.** The halves render
+DISJOINTLY, so they cannot show contradictory versions of one fact; if one fetch fails the reader
+gets two true statements — *"here is what is pending"* and *"we could not check whether you can start
+another"* — never a disagreement about the same number. ⛔ `initial` was NOT used to share one fetch:
+it is documented as a TEST-ONLY seam, and spending it on production plumbing would make that comment
+false.
+
+⛔ **TWO TABS, NOT THREE.** June had Deposit | Withdraw | **Spend**; there is no spend-from-pool here,
+and a Spend tab would advertise a capability that does not exist.
+
+# 🚨 THREE ASSERTIONS OF MINE COULD NOT FAIL — and the worst one guarded the decision itself
+
+**1. THE ONE PROTECTING T'S CHOICE.** It anchored on `"Checking your exit…"` — which is an **EARLY
+RETURN in `UbExitStatus`, firing BEFORE the `section` gating**. Under SSR both halves therefore render
+the identical placeholder, and swapping `section="status"` → `section="action"` was **NOT CAUGHT**.
+⛔ It proved *an* instance sat above the tabs; it never proved it was the STATUS one — which is the
+entire property.
+⭐ Split into a **behavioural** proof (seeded render: `status` shows the rows and no form, `action`
+shows the form and no rows) plus a **positional source** check for the wiring — source *deliberately*,
+because the two halves are indistinguishable in SSR output and pretending otherwise is what produced
+the false pass.
+
+**2.** `/hidden/` matched the evidence span, so *"hidden, not omitted"* passed regardless. Bound to
+the actual tab expression.
+
+**3. A FIXTURE FAULT THAT LOOKED EXACTLY LIKE A MISSING FEATURE.** `markup()` re-renders with whatever
+`gateway` was last set to, and earlier sections leave it empty. The tab strip is gated on
+`bal.status === "ready"`, so the markup had no tabs at all and every check read `-1`. ⚠️ Read as "the
+tabs did not render"; it was the fixture, not the component.
+
+⭐⭐ **ALL THREE WERE FOUND BY READING OUTPUT — an index, a count, a `-1` — NEVER BY REASONING ABOUT
+THE CHANGE.** That is now the fourth, fifth and sixth in two days, every one written while applying
+this exact discipline to other people's code. [[a-check-whose-failure-mode-is-a-pass]]
+
+Four mutations proven: the exit block behind the tab · the `section` prop stops splitting · the
+Withdraw tab dropped · the deposit card omitted instead of hidden.
+
+## ⭐ WHAT THE PAGE IS NOW
+
+    header → balance → pending rows (always) → [ Deposit | Withdraw ] → owner → How this works
+
+⛔ **STILL OPEN, UNCHANGED BY THIS SLICE:** the blocklist pre-flight · Arc's absence from the
+marketplace catalog · atomicity (untestable deterministically from this path) · the
+signature-outcome reason (needs a client report) · the two-site custody repetition, which is now a
+design question rather than duplication.
+
+---
+
 # SESSION CLOSE 2026-09-04 — what is OPEN, so tomorrow does not start by rediscovering it
 
 Everything below is committed, pushed and (where stated) deployed. **Production serves `c0583b1`
