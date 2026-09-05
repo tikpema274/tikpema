@@ -1,5 +1,145 @@
 ---
 
+# THE UNIFIED BALANCE PAGE IS REBUILT AND DEPLOYED — 410 words to 178
+
+**2026-09-04.** Deploy `6a9b5453656a32a818ab82e2`, published 23:56:09.189Z. Two commits: `d9cc3bb`
+(the shape) and `c0583b1` (the cuts).
+
+    before   cce3d6e · tree e8dfe7fd… · index-B_nHVmae.js
+    after    c0583b1 · tree a9758bf4… · deploy 6a9b5453656a32a818ab82e2 · index-CO8XmgKK.js
+
+`dirty` false, 211 files. `test:all` **93/0/0 of 93** unpiped. `gate:watch` OK, `gate:rpc` 8 healthy.
+Bundling 26m46s. `gate:deployed` green on all five, 25 newer scanned. Served bytes byte-identical to
+the diffed artifact — 885,222, sha256 `6761ef82ed84075b…`. `capture:window` RAN: `rotated:false`,
+`no-window`, 23:59:50.776Z. ddTree read from production: **`vouched` · `agree`**.
+
+**MEASURED, not estimated: 178 words as first seen** (253 with the disclosure open), from ~410.
+
+    P1  "What you can get back"                 1 -> 0   the ladder, removed
+    P2  "One button, no delay"                  1 -> 0   ladder content
+    P3  "Withdraw from Unified Balance…"        0 -> 1   the withdraw heading
+    P4  "Getting it out runs through us"        0 -> 1   the new fund lead
+    P5  "Deposit from your agent's own balance" 0 -> 1   card step 1
+    P6  "Tikpema controls that account"         2 -> 2   ⭐⭐ CONTROL
+    P7  "one real run, not a track record"      2 -> 2   ⭐⭐ CONTROL
+
+⭐⭐ **P6 AND P7 HOLDING AT 2 PROVE TWO THINGS AT ONCE** — that custody and the dated evidence
+survived a session of cutting, AND that `YourMoney`'s copies were never touched. A page-emptying
+mistake reads 1. Over-reaching into the other file reads 1. **Only the intended change reads 2.**
+
+⚠️ **AND ONE PROBE HAD TO BE CORRECTED AT BASELINE.** `"How this works"` already read **1** in
+production — not staleness: **`BridgePanel` has the same numbered-steps card.** Swapped for a string
+unique to the new card. A probe that is already present measures nothing, and only running the
+baseline showed it.
+
+# ⭐⭐⭐ THE SHAPE WAS NOT MINE, AND I PROPOSED IT AS IF IT WERE
+
+T pointed at `TestArc/tikpema-deploy/index.html` — a single-file app from **13 June**, three months
+old, predating the Vite build. Its Unified Balance page already had:
+
+    header → balance card → action tabs → Pool Activity → "How Unified Balance works"
+
+**state → action → explanation, with the explanation as its own numbered card at the end.** Hours
+earlier I had proposed exactly that structure and attributed it to `BridgePanel`.
+
+⛔ **I SHOULD HAVE LOOKED AT THE EXISTING ARTIFACT BEFORE PROPOSING A STRUCTURE.** The React page had
+DRIFTED from a shape that already existed; I described restoring it as designing it.
+
+⭐⭐ **AND THE TWIST THAT MAKES IT A METHOD FINDING RATHER THAN AN APOLOGY:** `BridgePanel` *does*
+carry the same card — `explain-title "How this works"` over an `<ol>`. So the pattern existed in TWO
+places, June's file and the live Bridge page, and the Unified page was the outlier. **The structure
+was twice-attested and I treated it as novel.** ⚠️ Discovered only because a deploy probe came back
+`1` when I predicted `0`.
+
+⚠️ **WHAT COULD NOT BE REUSED WAS THE CONTENT.** June promised *"~20 seconds"* and *"Spend without
+bridging"* — true of its premise, false of what ships now. ⭐ **The page did not get cluttered by bad
+writing. It accumulated three true things the original structure had no slot for**: custody
+(measured 2026-07-31), the exit shipping, and the single 7d 4h run of 2026-08-20.
+
+# ⭐⭐⭐ EVERY CUT WAS MEASURED BEFORE IT WAS MADE — and that is what separated three identical-looking claims
+
+Asked to remove three sentences as unnecessary, they looked equally cuttable. Counting them across
+the page did not:
+
+    "about seven days"              card 3 · withdraw block 2 · ladder 1   → genuinely redundant
+    "you do not have to come back"  withdraw block 1                       → genuinely redundant
+    "the exit runs through us" /
+    "Tikpema controls that account" ZERO ELSEWHERE                         → ⛔ the only copy
+
+⛔ **CUTTING THE THIRD WOULD HAVE REMOVED THE CLAIM FROM THE PAGE ENTIRELY**, at the one place a user
+commits money. It stayed, compressed to one clause. ⭐ **THE RULE: before removing a sentence as
+redundant, COUNT IT. "Redundant" is a claim about the rest of the page, and it is checkable in one
+command.** Judged by eye, all three read like padding.
+
+⭐ The same method retired the reversibility ladder — and retired it for a better reason than
+verbosity. `YourMoney` already ranks the same three pockets, on the page where all three live:
+`"You hold the key"` / `"Withdraw any time"` / `"Exit built · about seven days"`. **A comparison of
+three pockets belongs where the pockets are.** ⚠️ Its comment said *"Do not soften this to make the
+deposit easier"* — so it was not softened, it was removed as a DUPLICATE, and the distinction is the
+whole justification. Its one unique claim is covered where it matters: `YourMoney`'s amber
+*"Not included"* line sits ON the Withdraw button.
+
+## ⚠️ A CONSEQUENCE RECORDED RATHER THAN ARGUED AWAY
+
+The deposit card now states the constraint — *"getting it out runs through us"* — **without the eight
+words that made it bearable**. A guard caught exactly this at 09:00 and I wrote then that the guard
+was right. It is defensible now only because the withdraw block sits DIRECTLY BELOW and says *"We
+finish this automatically — you do not have to come back"*, one section away, no press needed. ⭐ The
+guard records which eight words to restore if it reads badly in use.
+
+# 🚨 THE PREVIEW WAS THE INSTRUMENT, AND IT LIED BY OMISSION
+
+`UbExitStatus` loads in a `useEffect`, and `renderToStaticMarkup` runs no effects — so in every
+preview the entire withdraw section rendered as the two words **"Checking your exit…"**.
+
+⛔ **T READ THAT AS A BARE SECTION AND ASKED FOR A HEADING, A LINE AND A BUTTON — ALL THREE OF WHICH
+ALREADY EXISTED**: `"Getting money out"`, the available amount, the pre-press disclosure, and a
+`Start withdrawal` button. **A restructure of working copy was one step away, caused entirely by an
+instrument that could not render half of what it was being used to judge.**
+
+⭐ The component has an `initial` prop for exactly this, added for `verify-ub-exit-view` and already
+documented as a test-only seam. The preview now uses it and renders the withdraw block for real.
+⚠️ **THE GENERAL FORM: A PREVIEW THAT CANNOT REACH A STATE MUST SAY SO WHERE IT WOULD HAVE SHOWN IT.**
+Silence in a preview reads as absence in the product. [[state-behind-a-transition-is-untested-by-default]]
+
+# ⚠️ GUARD CHURN, CLASSIFIED — and two of them were RIGHT
+
+Guards went red repeatedly this session, and each time the question was the same: *is this red for
+the right reason?* The tally is the useful part, because the answer was not always "no":
+
+    PINNED WORDING       the lead's exact sentence; the custody phrase's capital letter    → re-expressed
+    PINNED A COUNT       eUB = 2, which froze the DUPLICATION as a requirement             → corrected to 1
+    PINNED A WINDOW      a 900-char slice; the evidence moved to 934                       → re-scoped
+    OBSOLETE BY DECISION the deleted ladder's own assertions                               → replaced
+    ⭐⭐ RIGHT, TWICE      stripping "It is built now" / "you do not have to come back"
+                         left the deposit card saying only the ALARMING half               → CODE changed
+
+⭐ **THE DISCRIMINATOR THAT WORKED EVERY TIME: look at what stayed GREEN beside it.** When only counts
+and windows went red while every property assertion held, the guard was frozen. When the property
+assertions themselves went red, the code was wrong. The suite sorts its own real assertions from its
+incidental ones, without anyone having labelled them.
+
+## 🚨 AND I WROTE TWO ASSERTIONS THAT COULD NOT FAIL
+
+* **A VACUOUS ORDER CHECK.** `iWd < 0 || iDep < iWd` — the escape hatch fired on every run, because
+  the anchor string lives behind a state SSR never reaches. It reported `withdraw -1` and a green
+  tick. ⭐ Caught only because the diagnostic PRINTED the index. Re-anchored on what the component
+  actually emits, with the anchor's existence asserted BEFORE its position is compared.
+* **A MUTATION THAT PROVED NOTHING.** Deleting `"Getting it out takes"` left `"about seven days"` in
+  place — it is the button's own label — so the guard passed on garbled copy. Re-mutated at what
+  actually carries the cost.
+
+⚠️ Both were mine, both were written while applying this exact discipline to someone else's code, and
+both were found by reading output rather than by reasoning about the change.
+[[a-check-whose-failure-mode-is-a-pass]] [[equality-passes-vacuously-on-empty]]
+
+⛔ **STILL OPEN, RECORDED NOT DONE:** the Deposit | Withdraw tabs of the June design. `UbExitStatus`
+is untouched, there is no spend-from-pool to put behind a third tab, and the pending rows currently
+sit a section away from the balance — resolved properly only when the rows stay as state and the form
+moves into the action.
+
+---
+
 # THE UNIFIED-BALANCE DEDUPE IS DEPLOYED — measured by a COUNT probe, not a presence probe
 
 **2026-09-04.** Deploy `6a9b2704146dc3f453f5606c`, published 20:39:20.773Z.
