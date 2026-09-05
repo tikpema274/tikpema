@@ -1,5 +1,106 @@
 ---
 
+# THE AI AGENT PAGE — and a claim-by-claim inventory that WAS BLIND to the doubling
+
+**2026-09-05.** Deploy `6a9bec55244effb61ddf6693`, published 10:44:48.203Z. `1b20af6` · tree
+`be8a017a…` · dirty false · 211 files · `index-Ch1VDbJD.js`, served bytes byte-identical to the
+diffed artifact (886,705, sha256 `301e8e63d91dd8cb…`). `test:all` **93/0/0 of 93** unpiped.
+`gate:deployed` 5/5, 25 newer scanned. Bundling 26m53s. `capture:window` RAN: `rotated:false`,
+10:48:52.444Z. ddTree read from production: **`vouched` · `agree`**.
+
+    P1  "always spending only what…"                 1 -> 0   the doubled lead
+    P2  "only the denomination changes"              1 -> 0   the Swap intro
+    P3  "Both of these send USDC somewhere you don"  2 -> 1   ⭐⭐ THE SCOPING PROOF
+    P4  "Where the money goes"                       0 -> 1   the one-row heading
+    P5  "Three caps bound every action"              0 -> 1   the explanation card
+    P6  "there is no undo"                           2 -> 2   control
+    P7  "runs straight away"                         1 -> 1   control — press-time sentence stays
+
+⭐⭐ **P3 LANDS AT 1, NOT 0.** The agent page's copy is gone and the DASHBOARD'S IS UNTOUCHED. An
+over-reach reads 0; a no-op reads 2. Only the scoped change reads 1 — and it makes the divergence
+recorded below **measurable** rather than a claim in a comment.
+
+# 🚨🚨 A CLAIM-BY-CLAIM INVENTORY REPORTED "NO DUPLICATION" ON A PAGE THAT WAS VISIBLY DOUBLED
+
+I scoped this page the way the Unified Balance page was scoped: inventory by claim, count each one
+across the page, cut only what is redundant. Every claim came back **once**:
+
+    "safety caps" 1 · "within your caps" 1 · "priced and shown to you to confirm" 1
+    "runs straight away" 1 · "there is no undo" 1 · "Bridging back costs a fee" 1
+
+⛔ **I REPORTED "THERE IS NO INTERNAL DUPLICATION TO REMOVE." T READ THE PAGE AND SAW IT IMMEDIATELY.**
+
+    lead:      "…in plain language — always spending only what's in that wallet and
+                within your per-action, per-bridge, and cumulative daily safety caps."
+    task box:  "Describe any task in plain language… runs straight away, within your caps."
+
+    "plain language"  2×        "caps"  2×        in two ADJACENT paragraphs
+
+## ⭐⭐ WHY THE INVENTORY COULD NOT SEE IT, AND THE RULE THAT FOLLOWS
+
+**I grepped for LONG EXACT PHRASES.** No two sentences on the page were identical, so every count was
+1 and the method reported clean. But **a reader does not notice repeated SENTENCES — they notice a
+repeated IDEA**, and the same idea said twice in different words is invisible to phrase matching.
+
+⭐ **THE RULE: A DUPLICATION CHECK MUST MATCH AT THE GRAIN A READER PERCEIVES, WHICH IS SHORTER THAN
+A SENTENCE.** `plain language` and `caps` are the units that repeat; `"always spending only what's in
+that wallet"` is the unit I searched for. The finer grain is also the cheaper one — it needed no
+inventory at all, just a word count over the rendered text.
+
+⚠️ **AND THE GUARD NOW ASSERTS A COUNT, NOT A PRESENCE.** A presence check is structurally incapable
+of seeing a repetition — it returns true whether a phrase appears once or five times. This is the
+same lesson as the receipts-collapse deploy, where only a COUNT probe could measure a dedupe, arrived
+at from the opposite direction: there I needed a count to see a removal, here to see a surplus.
+[[collapse-needs-pairwise-inequality]]
+
+# ⭐ WHAT SHIPPED
+
+    lead        one line: "Your agent acts on-chain from its own wallet."
+    state       the agent wallet, address · balance · Fund or withdraw →
+    action      the task box, UNCHANGED
+    shortcuts   Send | Bridge | Swap — THREE CARDS IN ONE ROW
+    explanation "How this works" — the caps enumeration, moved down
+
+⛔ **THE TASK BOX'S CONFIRM/IMMEDIATE SENTENCE DID NOT MOVE, AND MUST NOT.** It is a PRESS-TIME
+disclosure and it is BOUND: `verify-agent-panel-copy` derives the gated set from `agent-act` itself,
+so widening the gate forces the sentence to widen. It once claimed universal confirmation and was
+false for three of five money actions. **Putting it in a card a reader may never open is that defect
+in a tidier layout** — now asserted to stay above the explanation.
+
+## ⭐⭐ UNGROUPING THE SHORTCUTS MADE THE GUARD STRONGER, NOT WEAKER
+
+The two blocks — "Move money out" over Send+Bridge, "Stays with you" over Swap — each carried an
+intro sentence that **doubled the cards beneath it**: *"Both of these send USDC somewhere you don't
+control"* above a card already saying *"Goes to someone else"*.
+
+⭐ **THE CATEGORY NOW TRAVELS WITH THE CARD.** That is this codebase's own rule applied to layout —
+*"if this disclosure is ever separated from the button, the trap is back"* — and **a section heading
+IS a disclosure separated from the button, by two cards' distance.**
+
+The old assertion compared three string indices to prove `there is no undo` sat between two headings.
+The new one **reads each card out of the markup and requires its tag to match its own consequence**,
+so a warning cannot drift under the wrong card without the tag drifting with it. Proven by
+mislabelling Send as "Stays with you" — caught. ⚠️ It also carries its own non-vacuity check: the
+card split must find exactly three, or every per-card assertion would pass over an empty set.
+
+## ⚠️ A COST RECORDED, NOT WAVED AWAY
+
+**This diverges from the Dashboard**, which still groups (`Dashboard.tsx:154`), and the grouping's
+stated reason was that *"a user who learns the rule on one page must not have to re-learn it on
+another."* The ❗/🔒 grammar and the per-card wording are UNCHANGED, so the rule is the same; only
+its container moved. ⭐ P3 measures the gap: 1 occurrence means exactly one page still carries the
+old form. If the Dashboard follows, they realign and P3 goes to 0.
+
+⚠️ Two guards went red and both pinned WORDING rather than the claim — the sentence that was doing
+the doubling, and the two intro sentences. Re-expressed as the claims: the agent spends FROM ITS OWN
+WALLET **and** can move ONLY what is in it, neither half droppable.
+
+`verify-agent-panel-copy` 28 → **40/0**. Five mutations proven: restore the doubling · move the
+press-time sentence into the card · delete the card · mislabel Send as "Stays with you" · drop the
+Swap tag.
+
+---
+
 # THE TABS SLICE IS DONE — and the probe measures the DECISION, not just the feature
 
 **2026-09-05.** Deploy `6a9bd1bd56bb080c6dd9b593`, published 08:48:29.558Z. `46c3d39` · tree
