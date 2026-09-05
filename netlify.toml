@@ -507,3 +507,19 @@
 # other. scripts/verify-strong-read-watch.mjs asserts this ordering against THIS FILE.
 [functions."strong-read-watch"]
   schedule = "*/15 * * * *"
+
+# ══ plan-path-watch — CAN AN AGENT BRIDGE PLAN STILL REACH A PRICED DECISION? ═══════════════════
+# The 2026-09-03 plan-path outage ran ~38 hours because the ONLY check touching that path
+# (gate:forgery) runs inside deploy:prod — it can report a break but has no earlier observation and
+# cannot date it. This runs BETWEEN deploys, which is the whole point.
+#
+# ⚠️ */30 dates the class to within 30 MINUTES and no finer. That is the honest resolution of this
+# instrument; it is not continuous monitoring.
+#
+# ⚠️ LOAD-BEARING ORDERING: MIN_RERUN_MS (12m) < 30m < TTL_MS (90m). Shorten the cron below the
+# rerun window and the scheduled run dedupes itself into silence; lengthen it past the TTL and every
+# record is stale on arrival. Deliberately NOT strong-read-watch's 7/15/45 or dd-canary's 5/10/30,
+# so nobody assumes one monitor covers another.
+# scripts/verify-plan-path-watch.mjs asserts this ordering against THIS FILE.
+[functions."plan-path-watch"]
+  schedule = "*/30 * * * *"

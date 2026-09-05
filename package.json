@@ -135,7 +135,8 @@
     "test:proserecovery": "node scripts/verify-no-prose-state-recovery.mjs",
     "test:refusalquantity": "node --experimental-test-module-mocks scripts/verify-refusal-quantity.mjs",
     "test:injectedclaims": "node scripts/verify-model-injected-claims.mjs",
-    "test:reachability": "node scripts/verify-assertion-reachability.mjs"
+    "test:reachability": "node scripts/verify-assertion-reachability.mjs",
+    "test:planwatch": "node scripts/verify-plan-path-watch.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -252,6 +253,7 @@
     "test:proserecovery",
     "test:refusalquantity",
     "test:injectedclaims",
-    "test:reachability"
+    "test:reachability",
+    "test:planwatch"
   ]
 }
