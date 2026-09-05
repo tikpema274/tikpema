@@ -1,5 +1,95 @@
 ---
 
+# ⭐ THE PLAN PATH IS WATCHED FROM OUTSIDE A DEPLOY — registered, RUN, and healthy
+
+**2026-09-05.** Deploy `6a9c5899c45d1aae6872dfbd`, published 18:28:21.216Z. `4958e16` · tree
+`8c469f45703c` · **dirty false** · stamped 17:59:54.951Z. `test:all` **94/0/0 of 94** unpiped (93 →
+94: the new suite). `gate:deployed` **5/5**. `capture:window` RAN. `gate:forgery` 5/0. `gate:spec`
+green. Whole chain `NPM_EXIT=0`.
+
+`plan-path-watch` — every 30 minutes, independent of deploys. The 38-hour outage was invisible
+because the ONLY check touching that path (`gate:forgery`) runs inside `deploy:prod`: it can report
+a break but has no earlier observation and cannot date one.
+
+# ⛔⛔ DID THE SCHEDULE REGISTER? OBSERVED, NOT INFERRED — AND WITH A BEFORE
+
+**A registration that does not take leaves a monitor looking healthy while never running.** That is
+the worst state available here and it is indistinguishable from a quiet system, so it needed a
+positive reading rather than an absence of complaint.
+
+⛔ **THREE INSTRUMENTS WERE REJECTED BEFORE ONE WAS FOUND:**
+
+    netlify.toml           the INPUT, not the observation — it is what we asked for
+    netlify functions:list "Based on local functions folder" — reads the repo, not the deploy
+    an HTTP call           Netlify 403s scheduled functions; a direct invoke tests nothing
+
+⭐ **THE INSTRUMENT IS `function_schedules` ON THE DEPLOY OBJECT** (`getSiteDeploy`) — Netlify's own
+report of what it registered.
+
+    BEFORE  deploy 6a9c49da   9 schedules   plan-path-watch present: FALSE
+    AFTER   deploy 6a9c5899  10 schedules   plan-path-watch  */30 * * * *   ⭐ NEW
+                             cron matches the value the CODE declares: True
+    CONTROL all 9 pre-existing schedules present and unchanged — none drifted
+
+⭐⭐ **THE `FALSE` BEFORE IS WHAT MAKES THE `TRUE` AFTER MEAN ANYTHING.** Reading the name as present
+afterwards proves only that it is there NOW, never that this deploy put it there — the same shape as
+every stale-artifact reading in this record. And the control on the other nine says the deploy added
+one thing and disturbed nothing.
+
+# ⛔ REGISTRATION IS NOT EXECUTION — so the run was confirmed separately
+
+    18:28:21Z  deploy published
+    18:29:43Z  store EMPTY — expected, the first */30 boundary had NOT passed. NOT the alarm.
+    18:30:00Z  first boundary
+    18:31:08Z  record appeared            (the alarm deadline was 19:05Z, 35 min out)
+
+⭐ **THE ABSENCE HAD TO BE DATED BEFORE IT COULD BE READ.** An empty store at 18:29 and an empty
+store at 19:05 are the same bytes and opposite findings. Stating the deadline first is what stops
+"nothing there yet" from quietly becoming the null hypothesis.
+
+⚠️ **AND `phase` IS THE THIRD READING NOBODY EXPECTS.** The handler writes an `attempt` record BEFORE
+probing and overwrites it with `complete`. So there are three states, not two: no record (never
+ran) · an `attempt` that persisted (started, did not come back) · `complete` (a real verdict). The
+middle one is the one that reads as success if you only check that a key exists. This run:
+**`phase: complete`**.
+
+# ⭐ THE FIRST VERDICT OF THE PLAN PATH FROM OUTSIDE A DEPLOY
+
+    outcome     healthy
+    reason      disclosed — "the plan reached a priced decision (cap)"
+    producedAt  2026-09-05T18:30:23.969Z
+    disclosure  { kind: cap, valuedUsdc: 200.05, capUsdc: 25, feeImpliedUsdc: 0.05 }
+    spend       { state: clean, stepsRun: 0, completed: false,
+                  receiptsBefore: 22, receiptsAfter: 22, corroborated: true }
+    prevOutcome null — first observation; a first HEALTHY is deliberately silent
+    failure keys 0
+
+⭐⭐ **`valuedUsdc: 200.05` IS THE FEE, VISIBLE IN THE VALUATION.** 200 requested, valued at 200.05 —
+a figure derivable ONLY if the bridge fee was resolved. So the healthy verdict rests on positive
+evidence of the exact mechanism `f760077` broke, not on the absence of an error.
+
+⭐ **THE NON-SPEND IS MEASURED, NOT ASSUMED.** The probe asked production to bridge 200 USDC and
+production refused it at the 25 USDC cap: `stepsRun 0`, `completed false`, receipts `22 → 22`,
+corroborated. Every run re-proves this; any of the three moving is `reason: spent`.
+
+# ⚠️ WHAT THIS DOES NOT BUY
+
+**It dates a failure to WITHIN 30 MINUTES and no finer** — a break at 12:01 is indistinguishable
+from one at 12:29. ⭐ What it buys over a deploy-time gate is not precision but **INDEPENDENCE FROM
+DEPLOYS**, which is the property the 38-hour outage exploited. Stated in the module, in
+`netlify.toml` beside the interval, and asserted by the suite so it cannot quietly be described as
+continuous monitoring later.
+
+## STILL OPEN, UNCHANGED
+
+* 🚨 **`executed: true` IS A HARDCODED LITERAL** (`agent-execute-plan.mjs`). A plan that ran NOTHING
+  still reports it. This monitor routes around the field; the field is still misleading to every
+  other reader. [[field-name-must-be-true-in-every-case]]
+* The blocklist pre-flight · Arc's absence from the marketplace catalog · atomicity · the
+  signature-outcome reason · cross-page custody repetition · the ten stranded intents.
+
+---
+
 # 🚨 A 38-HOUR OUTAGE BEHIND TWO BLINDFOLDS — and the guard moves to the CALLER SET
 
 **2026-09-05.** Deploy `6a9c49daa3271027da041712`, published 17:22:18.128Z. `b48907c` · tree
