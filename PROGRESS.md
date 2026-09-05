@@ -1,5 +1,150 @@
 ---
 
+# 🚨 A 38-HOUR OUTAGE BEHIND TWO BLINDFOLDS — and the guard moves to the CALLER SET
+
+**2026-09-05.** Deploy `6a9c49daa3271027da041712`, published 17:22:18.128Z. `b48907c` · tree
+`8c0dcf2e1167` · **dirty false** · stamped 16:57:01.518Z. `test:all` **93/0/0 of 93** unpiped.
+`gate:deployed` **5/5**. `capture:window` RAN. `gate:forgery` **1/4 → 5/0**. `gate:spec` green.
+
+Every agent plan containing a bridge step had been dead in production since **2026-09-03 22:35**
+(`f760077`) — about **38 hours**. The fee service was never down. The callers never passed the fee.
+
+    valueOfStep(step)                → THROWS "cannot value a bridge without its fee"
+    valueOfStep(step,{bridgeFee:f})  → 0.113918   (0.06 + a live 0.053918)
+
+# ⛔ BLINDFOLD 1 — WHEN A CALLEE GAINS A REQUIRED ARGUMENT, THE GUARD BELONGS ON THE CALLER SET
+
+`f760077` made the fee REQUIRED to value a bridge (amount + fee, because under upfront fees the fee
+leaves the user's control too). It updated its OWN call site in `_actions.mjs` and left
+`agent-execute-plan.mjs:96` and `agent-act.mjs:173` on the old contract.
+
+⭐⭐ **`verify-bridge-fee-binding` WAS PRESENT FOR ALL OF IT AND PROVED THE WRONG HALF.** It asserted
+the callee's fail-closed throw was correct — *"a caller that forgets to resolve the fee must break
+loudly, not quietly widen the ceiling"* — and it was right. Then it verified threading by
+**string-matching ONE file**. Two callers forgot. It broke loudly, in production, where nobody was
+looking. **A binding can only be tested ACROSS what it binds.**
+[[binding-tested-across-what-it-binds]] · [[duplicate-source-of-truth-is-the-recurring-bug]]
+
+⛔ **THE NEW CHECK IS DERIVED, NOT ENUMERATED.** It reads `netlify/functions/` from disk (125 files),
+finds every `valueOfStep(` call with a brace-aware arity parser, and requires the second argument at
+**all** of them. A fourth caller fails it without anyone remembering this file exists. Carries
+non-vacuity (≥3 sites, or a rename empties the corpus and reports the codebase clean) and a check
+that at least one site threads a REAL fee — an all-`{}` corpus would otherwise read as compliant.
+
+# 🚨 BLINDFOLD 2 — THE SUITE THAT EXERCISED THE EXACT BROKEN SHAPE MOCKED THE FUNCTION AWAY
+
+`verify-agent-quote-record:264` builds `action:"plan"` with **two `bridge_usdc` steps** — precisely
+the shape that was dead — and replaced `valueOfStep` with `async (s) => Number(s.amountUsdc ?? …)`,
+which **returns a number and never throws**. The mock substituted the behaviour under test, so the
+suite stayed green across the entire window.
+
+⭐ **THE RULE: NEVER MOCK THE FUNCTION WHOSE CONTRACT IS THE THING UNDER TEST.** `executeAction`
+stays injected — this suite is about what gets RECORDED, not about moving money, and that is a
+boundary. `valueOfStep` was the SUBJECT. [[flow-is-not-meaning]] · [[a-partial-mock-fails-at-instantiation]]
+
+⛔ **BOTH STATES RECORDED, because a suite that only passes after the fix proves nothing:**
+
+    un-mocked vs the OLD handlers   ❌ FAILURES pass 26 / fail 4, exit 1
+                                       blocked: "cannot value plan: cannot value a bridge
+                                                 without its fee — the day ceiling bounds amount + fee"
+    un-mocked vs the FIXED handlers  ✅ ALL GREEN pass 78 / fail 0
+
+⚠️ Its first red was a `TypeError` on `rec.steps[0]` — exit 1, so not fail-open, but a stack trace
+instead of a reason. It now halts and NAMES the block. A red state must report its own cause.
+
+# ⭐ BLINDFOLD 3 — THE FAILURE SHIPPED AS A 200
+
+    BEFORE  A 0.06 → HTTP 200  executed=false  UNVALUABLE=true   disclosure=null
+            B 30   → HTTP 200  executed=false  UNVALUABLE=true   disclosure=null
+
+**Any liveness check keyed on the status code passes straight through this outage.** So the probe
+asserts on RESPONSE SEMANTICS — `UNVALUABLE` false and a disclosure object present — never on 200.
+
+    AFTER   A 0.06 → UNVALUABLE=false  band=acknowledge  fee 0.053947  ratio 89.9%  ackToken issued
+            B 30   → UNVALUABLE=false  "step ~30.05 exceeds per-bridge limit of 25 USDC"
+
+⭐⭐ **`~30.05`, NOT `~30`. The cap now bounds amount + fee** — the migration's own semantics, live,
+and the second instrument: B deliberately exercises the NON-ack path, so the proof does not rest on
+the acknowledge short-circuit. ⛔ Both probes are non-executing BY CONSTRUCTION, verified against the
+live fee BEFORE sending: 0.06 sits at 89.9% (band `acknowledge`, stops at consent); 30 exceeds the
+25 USDC cap, and that check runs BEFORE `executeAction`. Proven after, not assumed:
+`stepsRun 0 of 1 · stoppedAt 0 · completed false`, and the owner's receipt count **19 → 19**.
+
+⭐ **WHY 38 HOURS PASSED.** The paths people use were healthy: the direct agent bridge
+(`agent-bridge.mjs`) and the single `bridge_usdc` action both reach `executeAction`, which threads
+the fee correctly. Three bridges completed during the window. **The dead path was the one nobody
+exercised** — and `gate:forgery`, the only thing that touches it, runs ONLY at deploy time, so it
+could report the symptom but never date it.
+
+# ⭐ BLINDFOLD 4 — EVERY CALL, NOT EVERY CALL THAT "COULD BE A BRIDGE"
+
+Classifying which sites can see a `bridge_usdc` step **is the enumeration this check exists to
+avoid, one level up**, and it fails open on whichever site somebody classifies wrong. Requiring the
+argument EVERYWHERE needs no judgement: a site with genuinely no fee writes `{}` and says so — so an
+**omission and a decision stop looking identical**, which is the ambiguity that let f760077 ship.
+
+    M1 strip the arg at agent-execute-plan   CAUGHT — "MISSING at agent-execute-plan.mjs:139"
+    M2 strip the arg at agent-act:215        CAUGHT — "MISSING at agent-act.mjs:207"
+    M3 strip the explicit {}                 CAUGHT — "MISSING at agent-act.mjs:487"
+    M4 duplicate the execution anchor        CAUGHT
+    M5 move consent AFTER execution          CAUGHT
+
+# ⭐ AN ANCHOR THAT IS NOT UNIQUE IS NOT AN ANCHOR
+
+`test:all` came back **92/1** on the first fixed tree, red on a SAFETY assertion — *"the plan
+pre-flight refuses BEFORE the execution loop"*. It reads like consent moved after money moves. **It
+had not:** `needsAck@14267 < executeAction@17989`. The hoist introduced a SECOND
+`for (let i = 0; i < plan.length; i++)` above the execution loop, and the guard anchored on that
+header, so `indexOf` took mine at 8587.
+
+⭐ **FAILING SAFE WAS RIGHT; THE ANCHOR WAS WRONG.** Re-anchored on `await executeAction(` — the
+thing that must not precede consent — **with its uniqueness asserted**, so a future duplicate fails
+loudly instead of silently re-anchoring. Valuation loop renamed to `vi`. Fifth instance in this
+codebase of a guard pinned to something that moved. [[guard-green-through-semantic-change]]
+
+# ⚠️ ORDERING, AND ONE SEMANTIC DECISION
+
+Nothing in the pre-flight depended on the valuation, so the step-count guard, destination resolve
+and `bridgeFee` fetch hoisted ABOVE it. **ONE FETCH, TWO READERS** — the ack loop reads the same
+`fees[i]`, so the figure the ceiling counted IS the figure the user is asked to acknowledge. Two fee
+lookups in one handler is what the upfront-fee migration spent days removing. ⭐ The consent decision
+did NOT move. Step-count, bad destination and pricing-unreachable now refuse BEFORE "cannot value
+plan" — all three are more specific reasons.
+
+⚠️ **`totalUsdc` KEPT FEE-EXCLUSIVE, DELIBERATELY.** Fee-inclusive valuation changed it 1.1 → 1.1+2×fee
+and `test:quote` caught it. It is recorded BESIDE `totalFeeUsdc` and shown as *"a N-step plan
+totaling ~X USDC"*: absorbing the fee would DOUBLE-COUNT for any reader adding the two fields and
+would silently change that sentence. Subtracted from the same resolved fee, so there is still ONE
+valuation formula. Caps read the fee-inclusive `values[i]` — which also corrects `agent-act`
+comparing amount-only against the per-bridge cap while the executor compared amount + fee.
+
+# 🚨 OPEN — FOUND WHILE PROVING THE PROBE SAFE
+
+**`executed: true` IS A HARDCODED LITERAL** (`agent-execute-plan.mjs:362`). A plan that ran NOTHING —
+`stepsRun 0 of 1`, `stoppedAt 0`, `completed false` — still answers `executed: true`. The field name
+is false in exactly the case a reader most needs it to be true, and a monitor keyed on it would read
+a total refusal as a successful run. Not fixed here; recorded.
+[[field-name-must-be-true-in-every-case]]
+
+**WHAT WOULD CATCH THIS CLASS BETWEEN DEPLOYS.** `gate:forgery` runs only in `deploy:prod`, so it
+has no earlier observation to compare against and cannot date what it finds. A cron probe posting a
+bridge-containing plan and asserting it reaches a DISCLOSURE — never a status code — would date this
+class to within its interval. ⛔ The static caller-set check is cheaper and would have failed the
+moment `f760077` was written.
+
+## capture:window and ddTree
+
+    capture:window RAN → "NO WINDOW OBSERVED — and this is NOT a pass"
+                         ddTree 3b589768754d == previous; recorded → dd-refusal-window-log.jsonl
+    ddTree COMPARED    before: vouched · pass · agree · 3b589768… · produced 16:40:09.243Z
+                       after : vouched · pass · agree · 3b589768… · produced 17:20:11.209Z
+                       moved: False
+
+⭐ Correct and expected: this commit touches `netlify/functions/` and `scripts/`, not `scripts/dd/`,
+so no health key rotated and no refusal was due.
+
+---
+
 # THE SERVER STRING IS FIXED AND LIVE — proven by a 708-FIELD DIFF THAT MOVED 6
 
 **2026-09-05.** Deploy `6a9c0aa98773787d3b1bbd42`, published 12:52:16.919Z. `88d0f41` · tree
