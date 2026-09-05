@@ -27,7 +27,7 @@
 
 import { mock } from "node:test";
 import { decodeFunctionData } from "viem";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 // The three ABIs this suite decodes with. ⚠️ Declared here rather than imported so a change to the
 // production encoding is CAUGHT by a decode failure instead of silently agreeing with itself.
@@ -246,6 +246,86 @@ section("1b — 🚨 THE CEILING BOUNDS THE WALLET DEBIT, NOT THE AMOUNT");
   check("⭐⭐ the bridge cap runs AFTER valuation and BEFORE the day ceiling",
     valIdx > 0 && capIdx > valIdx && dayIdx > capIdx,
     `valueOfStep@${valIdx} < cap@${capIdx} < canSpendDay@${dayIdx}`);
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // ⛔⛔ THE CALLER SET — DERIVED, NEVER ENUMERATED
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // 🚨 THE DEFECT THIS EXISTS FOR, AND THIS FILE WAS PRESENT FOR IT. f760077 made the bridge fee
+  // REQUIRED and this suite proved two things about it: that the callee throws without one, and
+  // that `_actions.mjs` threads it. Both were true. Meanwhile `agent-execute-plan.mjs:96` and
+  // `agent-act.mjs:173` still called `valueOfStep(step)` with one argument, so EVERY plan
+  // containing a bridge step was blocked in production from 2026-09-03 22:35 to 2026-09-05 —
+  // roughly 38 hours — and nothing went red.
+  //
+  // ⭐⭐ WHY THE OLD CHECK COULD NOT SEE IT: it string-matched ONE file. A binding between a callee
+  // and its callers can only be tested ACROSS THE CALLER SET; pinning one caller proves that caller.
+  // [[binding-tested-across-what-it-binds]] · [[duplicate-source-of-truth-is-the-recurring-bug]]
+  //
+  // ⛔ AND IT IS DERIVED, SO A FOURTH CALLER FAILS WITHOUT ANYONE REMEMBERING THIS FILE. The corpus
+  // is every handler on disk, discovered by reading the directory — not a list. A new file calling
+  // valueOfStep is in the corpus the moment it is written.
+  //
+  // ⭐ WHY "EVERY CALL", NOT "EVERY CALL THAT COULD BE A BRIDGE". Classifying which sites can see a
+  // `bridge_usdc` step means deciding, per site, what flows into it — which is the enumeration this
+  // check exists to avoid, one level up, and it fails open on the site somebody classifies wrong.
+  // Requiring the argument EVERYWHERE is strictly stronger and needs no judgement: a site that
+  // genuinely has no fee writes `{}` and says so. An omission and a decision then look different.
+  {
+    const FN_DIR = new URL("../netlify/functions/", import.meta.url);
+    const files = readdirSync(FN_DIR).filter((f) => f.endsWith(".mjs"));
+    const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+
+    /** Split a call's argument text at TOP-LEVEL commas only — `{ bridgeFee: fees[i] }` is one arg. */
+    const arity = (src, openIdx) => {
+      let depth = 0, args = 1, inStr = null;
+      for (let i = openIdx; i < src.length; i++) {
+        const c = src[i], prev = src[i - 1];
+        if (inStr) { if (c === inStr && prev !== "\\") inStr = null; continue; }
+        if (c === '"' || c === "'" || c === "`") { inStr = c; continue; }
+        if ("([{".includes(c)) depth++;
+        else if (")]}".includes(c)) { depth--; if (depth === 0) return args; }
+        else if (c === "," && depth === 1) args++;
+      }
+      return args;
+    };
+
+    const sites = [];
+    for (const f of files) {
+      const raw = readFileSync(new URL(f, FN_DIR), "utf8");
+      const code = strip(raw);
+      const re = /valueOfStep\s*\(/g;
+      let m;
+      while ((m = re.exec(code))) {
+        // Skip the declaration itself.
+        const before = code.slice(Math.max(0, m.index - 40), m.index);
+        if (/function\s+$/.test(before) || /export\s+async\s+function\s+$/.test(before)) continue;
+        const open = code.indexOf("(", m.index);
+        const line = code.slice(0, m.index).split("\n").length;
+        sites.push({ file: f, line, args: arity(code, open) });
+      }
+    }
+
+    // ⛔ NON-VACUITY FIRST. If the scan finds nothing — a rename, a moved directory, a broken regex —
+    // every assertion below passes over an empty set and reports the codebase clean.
+    // [[equality-passes-vacuously-on-empty]]
+    check("⛔ non-vacuity — the scan actually found valueOfStep call sites", sites.length >= 3,
+      `${sites.length} call site(s) across ${files.length} handler file(s)`);
+
+    const bare = sites.filter((s) => s.args < 2);
+    check("⭐⭐ EVERY valueOfStep call site passes the resolved second argument",
+      bare.length === 0,
+      bare.length
+        ? `MISSING at ${bare.map((s) => `${s.file}:${s.line}`).join(", ")} — a bridge step reaching ` +
+          `this site throws "cannot value a bridge without its fee" and blocks the whole plan`
+        : sites.map((s) => `${s.file}:${s.line}`).join(", "));
+
+    // ⭐ AND THE MECHANISM MUST ACTUALLY BE USED SOMEWHERE. If every site satisfied the rule with a
+    // bare `{}`, the corpus would be "compliant" and no bridge would ever be valued correctly.
+    const threading = sites.filter((s) => s.args >= 2).length;
+    check("⭐ …and at least one site threads a real resolved fee, not only `{}`",
+      /valueOfStep\([^)]*\{\s*bridgeFee/.test(files.map((f) => strip(readFileSync(new URL(f, FN_DIR), "utf8"))).join("\n")),
+      `${threading} site(s) pass a second argument`);
+  }
+
   check("🚨 …and it bounds `dayValue`, not `step.amountUsdc`",
     /if \(dayValue > bcap\)/.test(code) && !/Number\(step\.amountUsdc\) > bcap/.test(code));
   // ⚠️ And the ledger charges the same quantity the gate bounded.

@@ -166,13 +166,62 @@ export async function handler(event) {
       // A bridge step is bounded by the per-BRIDGE cap; everything else by the
       // per-transaction (send) cap. Same per-step caps the executor enforces.
       const capFor = (s) => (s?.type === "bridge_usdc" ? bcap : cap);
+      // ══ THE BRIDGE FEE IS RESOLVED BEFORE VALUATION, BECAUSE VALUATION NEEDS IT ═══════════
+      //
+      // 🚨 SAME DEFECT AS agent-execute-plan, same commit. f760077 made the fee REQUIRED to value
+      // a bridge step and threaded it only at its own call site in _actions.mjs; this one kept
+      // calling `valueOfStep(s)`, so every plan containing a bridge was blocked here — the agent
+      // could not even PROPOSE one — from 2026-09-03 22:35 until 2026-09-05.
+      //
+      // ⛔ ONE FETCH, TWO READERS. These fees are reused by the disclosure loop below, which no
+      // longer prices anything itself. ⭐ AND IT CORRECTS A SECOND DISAGREEMENT: `over` compares
+      // each value against the per-bridge cap, and it was comparing the AMOUNT while the executor
+      // compares amount + fee (_actions.mjs `if (dayValue > bcap)`). A plan could pass here and be
+      // refused there. Now both bound the same quantity.
+      const bridgeIdxEarly = steps.map((s, i) => (s?.type === "bridge_usdc" ? i : -1)).filter((i) => i >= 0);
+      if (bridgeIdxEarly.length > MAX_PRICED_BRIDGE_STEPS) {
+        return json(200, {
+          executed: false,
+          decision,
+          blocked:
+            `this plan has ${bridgeIdxEarly.length} bridge steps; ${MAX_PRICED_BRIDGE_STEPS} is the most that can be priced ` +
+            `and disclosed in one plan. Split it into smaller plans.`,
+        });
+      }
+      const dests = {};
+      const fees = {};
+      for (const i of bridgeIdxEarly) {
+        const dest = resolveDestination(steps[i].destination);
+        if (!dest) {
+          return json(200, { executed: false, decision, blocked: `step ${i + 1}: unsupported destination "${steps[i].destination}"` });
+        }
+        dests[i] = dest;
+        try {
+          fees[i] = await bridgeFee({ amountUsdc: Number(steps[i].amountUsdc), cctpDomain: dest.cctpDomain });
+        } catch (e) {
+          return json(200, {
+            executed: false,
+            decision,
+            blocked: `step ${i + 1}: cannot reach the bridge pricing service right now (${e.message}) — this is not a limit on your amount; try again shortly`,
+            priceUnavailable: true,
+          });
+        }
+      }
+
       const values = [];
       let totalUsdc = 0;
       try {
-        for (const s of steps) {
-          const v = await valueOfStep(s);
+        for (let i = 0; i < steps.length; i++) {
+          const v = await valueOfStep(steps[i], { bridgeFee: fees[i] });
           values.push(v);
-          totalUsdc += v;
+          // ⛔⛔ `values[i]` IS FEE-INCLUSIVE, `totalUsdc` IS NOT — and the split is deliberate.
+          // The CAPS and the day ceiling bound what LEAVES the wallet, so they read `values[i]`
+          // (amount + fee), matching _actions.mjs exactly. But `totalUsdc` is recorded BESIDE
+          // `totalFeeUsdc` and is shown to the user as "a N-step plan totaling ~X USDC" — so if it
+          // absorbed the fee, any reader adding the two fields would DOUBLE-COUNT it, and the
+          // sentence would silently start meaning something new. The fee is subtracted from the same
+          // resolved `fees[i]` that produced the value, so there is still ONE valuation formula.
+          totalUsdc += v - Number(fees[i]?.feeUsdc ?? 0);
         }
       } catch (e) {
         return json(200, { executed: false, decision, blocked: `cannot value plan: ${e.message}` });
@@ -200,42 +249,18 @@ export async function handler(event) {
       // handler that has already called the model. A plan with many bridges would spend
       // its budget here and time out mid-quote, which reads to the user as a failure of
       // the plan rather than of the pricing. Refusing loudly is better than a timeout.
-      const bridgeIdx = steps.map((s, i) => (s?.type === "bridge_usdc" ? i : -1)).filter((i) => i >= 0);
-      if (bridgeIdx.length > MAX_PRICED_BRIDGE_STEPS) {
-        return json(200, {
-          executed: false,
-          decision,
-          blocked:
-            `this plan has ${bridgeIdx.length} bridge steps; ${MAX_PRICED_BRIDGE_STEPS} is the most that can be priced ` +
-            `and disclosed in one plan. Split it into smaller plans.`,
-        });
-      }
+      // ⭐ NO PRICING HERE — `dests` and `fees` were resolved above, before valuation, and are
+      // reused, so the fee the caps counted is the fee the user is shown. The step-count guard,
+      // the destination check and the pricing-reachability refusal all ran up there.
+      const bridgeIdx = bridgeIdxEarly;
 
       const stepDisclosures = {};
       let totalFeeUsdc = 0;
       for (const i of bridgeIdx) {
         const s = steps[i];
         const amt = Number(s.amountUsdc);
-        const dest = resolveDestination(s.destination);
-        if (!dest) {
-          return json(200, { executed: false, decision, blocked: `step ${i + 1}: unsupported destination "${s.destination}"` });
-        }
-        let fee;
-        try {
-          fee = await bridgeFee({ amountUsdc: amt, cctpDomain: dest.cctpDomain });
-        } catch (e) {
-          // ⚠️ SEPARATE FROM A BAND REFUSAL. "We could not reach the pricing service" and
-          // "this bridge costs too much" are different facts, and collapsing them tells
-          // the user to reconsider an amount when the real problem is upstream and
-          // transient. Retrying is the right response to this one; changing the amount is
-          // the right response to the other.
-          return json(200, {
-            executed: false,
-            decision,
-            blocked: `step ${i + 1}: cannot reach the bridge pricing service right now (${e.message}) — this is not a limit on your amount; try again shortly`,
-            priceUnavailable: true,
-          });
-        }
+        const dest = dests[i];
+        const fee = fees[i];
         // Fee-floor at PLAN time — refuse to propose a bridge that costs more to move than it
         // moves. ⚠️ It used to say "where nothing would arrive"; under upfront fees the recipient
         // receives the FULL amount, so that mechanism is no longer what this refuses.
@@ -475,7 +500,11 @@ export async function handler(event) {
       // unit-capping would under-count. Fail-safe: if we cannot value it, we block.
       let usdValue;
       try {
-        usdValue = await valueOfStep(step);
+        // ⛔ EXPLICIT `{}` — NOT AN OMISSION. This site values a `swap_tokens` step, which needs no
+        // bridge fee. It is written out because verify-bridge-fee-binding requires EVERY call site
+        // to pass a second argument: a caller that simply forgets is indistinguishable from one
+        // that knows, and that ambiguity is what let f760077's two missed call sites ship.
+        usdValue = await valueOfStep(step, {});
       } catch (e) {
         return json(200, { executed: false, decision, blocked: `cannot value ${tokenIn}: ${e.message}` });
       }

@@ -434,7 +434,17 @@ section("9 — ackAcceptedAt IS EVIDENCE OF ACCEPTANCE ONLY TRANSITIVELY");
 
   // Refusal 2 — the plan pre-flight, which is what makes the refusal cost nothing.
   const needsAckIdx = plan.indexOf("needsAck: true");
-  const execLoopIdx = plan.indexOf("for (let i = 0; i < plan.length; i++)");
+  // ⛔ ANCHORED ON THE EXECUTION ITSELF, NOT ON A LOOP HEADER. This used to anchor on
+  // `for (let i = 0; i < plan.length; i++)`. On 2026-09-05 the bridge-fee hoist introduced a
+  // SECOND loop with that identical header above it, `indexOf` took the first match, and the check
+  // went red while the property it defends was intact (needsAck@14267 < executeAction@17989).
+  // ⭐ Failing safe was right; the ANCHOR was wrong. `await executeAction(` is the thing that must
+  // not precede consent, so it is what the property should be measured against — and its
+  // uniqueness is asserted, because an anchor that appears twice is not an anchor.
+  const execHits = (plan.match(/await executeAction\(/g) || []).length;
+  check("⛔ the execution anchor is UNIQUE — two matches would make the index below meaningless",
+    execHits === 1, `${execHits} occurrence(s) of "await executeAction("`);
+  const execLoopIdx = plan.indexOf("await executeAction(");
   check("⭐⭐ the plan pre-flight refuses BEFORE the execution loop — no step has moved funds",
     needsAckIdx > -1 && execLoopIdx > -1 && needsAckIdx < execLoopIdx,
     `needsAck@${needsAckIdx} < execute@${execLoopIdx}`);

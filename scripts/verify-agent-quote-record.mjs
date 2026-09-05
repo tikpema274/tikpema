@@ -258,10 +258,22 @@ mock.module("../netlify/functions/_auth.mjs", {
 mock.module("../netlify/functions/_agent-wallets.mjs", {
   namedExports: { ...REAL_WALLETS,  ensureOwnerWallet: async () => ({ walletAddress: AGENT_WALLET }) },
 });
+// ⛔⛔ `valueOfStep` IS THE REAL ONE. It used to be replaced by
+//   `async (s) => Number(s.amountUsdc ?? ...)`, which returns the amount and NEVER THROWS.
+// 🚨 THAT MOCK HID A 38-HOUR PRODUCTION OUTAGE. This suite's brain returns `action:"plan"` with two
+// `bridge_usdc` steps — the exact shape that was broken — and f760077 made the real `valueOfStep`
+// throw for a bridge step with no fee. agent-act called it with one argument, so every such plan was
+// blocked in prod from 2026-09-03 22:35 to 2026-09-05. The mock returned a number regardless, so the
+// suite stayed green across the entire window.
+// ⭐ THE RULE: never mock the function whose CONTRACT is the thing under test. `executeAction` is
+// injected because this suite is about what gets RECORDED, not about moving money — that is a
+// boundary. `valueOfStep` was the subject, and substituting it made the subject unobservable.
+// [[flow-is-not-meaning]] · [[a-partial-mock-fails-at-instantiation]]
+const REAL_ACTIONS = await import("../netlify/functions/_actions.mjs");
 mock.module("../netlify/functions/_actions.mjs", {
   namedExports: {
     executeAction: async () => ({ ok: false, blocked: "not reached in this suite" }),
-    valueOfStep: async (s) => Number(s.amountUsdc ?? s.amountIn ?? s.payAmountUsdc ?? 0),
+    valueOfStep: REAL_ACTIONS.valueOfStep,
   },
 });
 
@@ -297,6 +309,21 @@ globalThis.fetch = async () => ({
   const keys = [...mem.keys()].filter((k) => k.startsWith(`q/${OWNER.toLowerCase()}/`));
   check("⭐⭐ a quote record LANDED — the gap this whole change exists to close", keys.length === 1);
   const rec = keys.length === 1 ? JSON.parse(mem.get(keys[0])) : {};
+
+  // ⛔ FAIL LEGIBLY, NOT WITH A TypeError. Every assertion below reads into `rec.steps[...]`. If the
+  // proposal was refused, `rec` is `{}` and the suite dies on `rec.steps[0]` — exit 1, so not
+  // fail-open, but the roll-up never prints and the READER is shown a stack trace instead of the
+  // reason. That is exactly what happened when this suite's `valueOfStep` mock was removed and run
+  // against the unfixed handlers: 14 red assertions and then a crash. A red state has to name its
+  // own cause, or the next person re-derives it.
+  if (!rec.steps) {
+    check("⛔ the proposal must have produced a record — everything below reads it", false,
+      `blocked: ${JSON.stringify(body.blocked ?? body.error ?? "(no record and no reason given)")}`);
+    console.log(`\n╔══════════════════════════════════════════════════════════════════════`);
+    console.log(`║  ❌ FAILURES   pass ${pass} / fail ${fail}  — halted: no quote record to assert on`);
+    console.log(`╚══════════════════════════════════════════════════════════════════════`);
+    process.exit(1);
+  }
 
   check("the record's id is the one the client was given", rec.quoteId === body.quoteId);
   check("schema is versioned", rec.schema === "agent-quote/1");
@@ -418,8 +445,25 @@ section("7 — ⭐⭐ IT AUTHORIZES NOTHING, AND CANNOT LEARN TO");
 
   // The re-price must still be the thing that decides. If someone swaps it for a store read,
   // this fails.
-  check("⭐⭐ the executor still RE-PRICES every bridge step before executing any",
-    /bridgeFee\(\{ amountUsdc: amt/.test(plan) && /PRE-FLIGHT: RE-PRICE EVERY BRIDGE STEP/.test(plan));
+  // ⭐ POSITIONAL, NOT A HEADING MATCH. The property is that a LIVE price is fetched and that it
+  // happens before anything executes — not that a particular comment or argument spelling survives.
+  // The first draft pinned `bridgeFee({ amountUsdc: amt` and a heading; both moved when the fee was
+  // hoisted above valuation (the fix for the 38-hour plan outage) while the property held
+  // throughout. A guard that goes red on a refactor which PRESERVES its property is pinning the
+  // wrong thing. [[guard-green-through-semantic-change]]
+  {
+    const priceIdx = plan.indexOf("await bridgeFee({");
+    const valueIdx = plan.indexOf("await valueOfStep(");
+    const execIdx = plan.indexOf("await executeAction(");
+    check("⭐⭐ the executor still RE-PRICES every bridge step with a LIVE fee",
+      priceIdx > 0 && /PRE-FLIGHT: RE-PRICE EVERY BRIDGE STEP/.test(plan), `bridgeFee@${priceIdx}`);
+    check("⭐⭐ …and it prices BEFORE it values, and values BEFORE it executes",
+      priceIdx > 0 && valueIdx > priceIdx && execIdx > valueIdx,
+      `price@${priceIdx} < value@${valueIdx} < exec@${execIdx}`);
+    check("⛔ …and the fee is not re-fetched a second time in the same handler — one source",
+      (plan.match(/await bridgeFee\(\{/g) || []).length === 1,
+      `${(plan.match(/await bridgeFee\(\{/g) || []).length} bridgeFee call(s)`);
+  }
   check("⭐⭐ …and consent is still the RECOMPUTED ackToken, not a stored value",
     /bridgeAckToken\(\{ owner: session\.address/.test(plan) && /bandInfo\.band === "acknowledge"/.test(actions));
   check("⭐ quoteId is never compared or branched on in the gate path",

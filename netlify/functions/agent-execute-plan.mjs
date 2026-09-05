@@ -89,13 +89,74 @@ export async function handler(event) {
   const atomic = (usdc) => Math.round(Number(usdc) * 1e6); // micro-USDC (no float drift)
   const usd2 = (usdc) => (Math.round(Number(usdc) * 100) / 100).toFixed(2);
 
+  // ══ PRE-FLIGHT: RE-PRICE EVERY BRIDGE STEP BEFORE EXECUTING ANY OF THEM ═══════════════════════
+  // ══ …AND BEFORE VALUING THEM, BECAUSE VALUATION NEEDS THE FEE ═════════════════════════════════
+  //
+  // 🚨 THE DEFECT THIS CLOSES. `valueOfStep` gained a REQUIRED fee for bridge steps in f760077
+  // (a bridge is valued at amount + fee, because under upfront fees the fee leaves the user's
+  // control too). That commit threaded the fee at its OWN call site in _actions.mjs and left this
+  // one calling `valueOfStep(step)` with one argument — so `resolved.bridgeFee` was undefined,
+  // valuation threw, and EVERY plan containing a bridge step was blocked from 2026-09-03 22:35
+  // until it was found on 2026-09-05. Nothing noticed because a single bridge does not come
+  // through here, and no guard crossed from the callee to this caller.
+  //
+  // ⛔ ONE FETCH, TWO READERS — NOT A SECOND SOURCE. These same `fees[i]` are handed to the
+  // acknowledge pre-flight below; that loop no longer prices anything itself. Two fee lookups in
+  // one handler is precisely what the upfront-fee migration spent days removing: they can disagree,
+  // and then the figure the ceiling used is not the figure the user acknowledged.
+  //
+  // ⚠️ THE ORDER MOVED AND THAT IS DELIBERATE. Step-count, destination and pricing-reachability now
+  // refuse BEFORE "cannot value plan". All three are more specific than a valuation failure, so a
+  // caller learns the real reason; the band/acknowledge decision did NOT move and still sits below,
+  // so consent is still asked for last and only for a plan that has cleared everything cheaper.
+  const MAX_PREFLIGHT_BRIDGE_STEPS = 4;
+  const bridgeIdx = plan.map((s, i) => (s?.type === "bridge_usdc" ? i : -1)).filter((i) => i >= 0);
+  if (bridgeIdx.length > MAX_PREFLIGHT_BRIDGE_STEPS) {
+    return json(200, { executed: false, blocked: `too many bridge steps (${bridgeIdx.length}); ${MAX_PREFLIGHT_BRIDGE_STEPS} is the most one plan may contain` });
+  }
+
+  const dests = {};
+  const fees = {};
+  for (const i of bridgeIdx) {
+    const s = plan[i];
+    const dest = resolveDestination(s.destination);
+    if (!dest) return json(200, { executed: false, blocked: `step ${i + 1}: unsupported destination "${s.destination}"` });
+    dests[i] = dest;
+    try {
+      fees[i] = await bridgeFee({ amountUsdc: Number(s.amountUsdc), cctpDomain: dest.cctpDomain });
+    } catch (e) {
+      // ⚠️ DISTINCT FROM A BAND REFUSAL. Unreachable pricing is transient and upstream;
+      // telling the user to reconsider their amount would be wrong advice. Nothing has
+      // executed at this point, so retrying is safe and is the right response.
+      return json(200, {
+        executed: false,
+        blocked: `step ${i + 1}: cannot reach the bridge pricing service right now (${e.message}) — nothing was executed; try again shortly`,
+        priceUnavailable: true,
+      });
+    }
+  }
+
   let totalUsdc = 0;
   const values = [];
   try {
-    for (const step of plan) {
-      const v = await valueOfStep(step);
+    // ⚠️ `vi`, NOT `i`. The execution loop below is `for (let i = 0; i < plan.length; i++)` and a
+    // guard anchors on that exact header to prove consent is refused BEFORE execution. Reusing the
+    // header here gave `indexOf` two matches and it silently took this one — the guard went red on
+    // correct code. An anchor that is not unique is not an anchor.
+    for (let vi = 0; vi < plan.length; vi++) {
+      // ⭐ `fees[vi]` is undefined for every non-bridge step, and valueOfStep ignores `resolved`
+      // for those — so this is the same call for all step types, with the fee present exactly
+      // where the valuation requires one.
+      const v = await valueOfStep(plan[vi], { bridgeFee: fees[vi] });
       values.push(v);
-      totalUsdc += v;
+      // ⛔⛔ `values[i]` IS FEE-INCLUSIVE, `totalUsdc` IS NOT — and the split is deliberate.
+      // The CAPS and the day ceiling bound what LEAVES the wallet, so they read `values[i]`
+      // (amount + fee), matching _actions.mjs exactly. But `totalUsdc` is recorded BESIDE
+      // `totalFeeUsdc` and is shown to the user as "a N-step plan totaling ~X USDC" — so if it
+      // absorbed the fee, any reader adding the two fields would DOUBLE-COUNT it, and the
+      // sentence would silently start meaning something new. The fee is subtracted from the same
+      // resolved `fees[i]` that produced the value, so there is still ONE valuation formula.
+      totalUsdc += v - Number(fees[vi]?.feeUsdc ?? 0);
     }
   } catch (e) {
     return json(200, { executed: false, blocked: `cannot value plan: ${e.message}` });
@@ -119,7 +180,9 @@ export async function handler(event) {
   // same owner (walletAddress), so the baseline and the writes stay consistent.
   const baselineA = atomic(await daySpend({ owner: walletAddress }));
 
-  // ══ PRE-FLIGHT: RE-PRICE EVERY BRIDGE STEP BEFORE EXECUTING ANY OF THEM ═══════════
+  // ══ PRE-FLIGHT, PART 2: THE ACKNOWLEDGE DECISION ═════════════════════════════════
+  // ⭐ The re-pricing that feeds this happens ABOVE, before valuation — same handler, same
+  // request, one live IRIS round trip per bridge step, read here rather than repeated.
   //
   // 🚨 THIS IS NOT REDUNDANT WITH THE MONOTONIC ACK RULE. It serves TWO purposes, and
   // removing it because the rule "already handles band changes" reintroduces both:
@@ -142,32 +205,15 @@ export async function handler(event) {
   // must still execute the plan. agent-act refuses to quote more bridge steps than this,
   // so a plan reaching here is already within budget; the guard is repeated because this
   // endpoint accepts a plan array directly and must not trust that it came from a quote.
-  const MAX_PREFLIGHT_BRIDGE_STEPS = 4;
-  const bridgeIdx = plan.map((s, i) => (s?.type === "bridge_usdc" ? i : -1)).filter((i) => i >= 0);
-  if (bridgeIdx.length > MAX_PREFLIGHT_BRIDGE_STEPS) {
-    return json(200, { executed: false, blocked: `too many bridge steps (${bridgeIdx.length}); ${MAX_PREFLIGHT_BRIDGE_STEPS} is the most one plan may contain` });
-  }
-
+  // ⭐ NO PRICING HERE. `dests` and `fees` were resolved above, before valuation, and are reused —
+  // so the fee the day-ceiling counted is the SAME figure the user is asked to acknowledge. The
+  // step-count guard, the destination check and the pricing-reachability refusal all ran up there.
   const ackFor = {};
   for (const i of bridgeIdx) {
     const s = plan[i];
     const amt = Number(s.amountUsdc);
-    const dest = resolveDestination(s.destination);
-    if (!dest) return json(200, { executed: false, blocked: `step ${i + 1}: unsupported destination "${s.destination}"` });
-
-    let fee;
-    try {
-      fee = await bridgeFee({ amountUsdc: amt, cctpDomain: dest.cctpDomain });
-    } catch (e) {
-      // ⚠️ DISTINCT FROM A BAND REFUSAL. Unreachable pricing is transient and upstream;
-      // telling the user to reconsider their amount would be wrong advice. Nothing has
-      // executed at this point, so retrying is safe and is the right response.
-      return json(200, {
-        executed: false,
-        blocked: `step ${i + 1}: cannot reach the bridge pricing service right now (${e.message}) — nothing was executed; try again shortly`,
-        priceUnavailable: true,
-      });
-    }
+    const dest = dests[i];
+    const fee = fees[i];
 
     const band = bridgeFeeBand({ amountUsdc: amt, feeUsdc: fee.feeUsdc, netUsdc: fee.netUsdc });
     if (band.band === "acknowledge") {
