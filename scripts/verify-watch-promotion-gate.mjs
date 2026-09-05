@@ -49,6 +49,12 @@ import { EXPECTED_CRON, FUNCTION_NAME, DEFAULT_TARGET_URL, DEFAULT_STORE_NAME, c
 // monitor uses — a transcribed copy here would drift and the gate would pass a redirected watcher.
 import { DEFAULT_PATHS as DD_DEFAULT_PATHS, DEFAULT_STORE_NAME as DD_DEFAULT_STORE_NAME }
   from "../shared/dd-watch/watch.mjs";
+// ⭐ Same reasoning for the plan-path watcher: compare against ITS constants, never a copy.
+import {
+  DEFAULT_TARGET_URL as PLAN_DEFAULT_TARGET_URL,
+  DEFAULT_STORE_NAME as PLAN_DEFAULT_STORE_NAME,
+  DEFAULT_PROBE_OWNER as PLAN_DEFAULT_PROBE_OWNER,
+} from "../shared/plan-path-watch/watch.mjs";
 
 /**
  * EVERY schedule a draft proof is known to comment out. The gate refuses production until ALL of
@@ -580,6 +586,21 @@ async function main() {
     ["DD_WATCH_URL_API", DD_DEFAULT_PATHS.api],
     ["DD_WATCH_URL_FN", DD_DEFAULT_PATHS.functions],
     ["DD_WATCH_STORE", DD_DEFAULT_STORE_NAME],
+    // ═══ 🚨 ADDED LATE, AND THAT IS ITSELF THE LESSON ═════════════════════════════════════════
+    // The comment above says these rows must exist BEFORE the first calibration run, "or the one
+    // window during which nothing is watching the watcher is the calibration itself". On
+    // 2026-09-05 plan-path-watch was calibrated by pointing PLAN_WATCH_URL at a deliberately wrong
+    // target — and these three rows did not exist yet. The window the comment names was entered
+    // exactly as described, by someone who had just read it. Rows added; the sequencing rule is
+    // restated here because reading it once was demonstrably not enough.
+    //
+    // ⚠️ PLAN_WATCH_OWNER IS GATED TOO, and it is the one with a money-shaped failure. Redirecting
+    // the probe to an unmapped owner would make `ensureOwnerWallet` MINT a real Circle wallet on a
+    // */30 schedule; redirecting it to a real user's address would run an authenticated probe as
+    // them every half hour. Neither is a monitoring concern — both are irreversible acts.
+    ["PLAN_WATCH_URL", PLAN_DEFAULT_TARGET_URL],
+    ["PLAN_WATCH_STORE", PLAN_DEFAULT_STORE_NAME],
+    ["PLAN_WATCH_OWNER", PLAN_DEFAULT_PROBE_OWNER],
   ].map(([name, expected]) => {
     const r = readVar(name, context, { raw: true });
     return { name, ...checkEnvOverride(name, r.value, expected) };

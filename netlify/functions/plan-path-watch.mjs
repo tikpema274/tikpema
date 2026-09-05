@@ -4,7 +4,8 @@ import { issueSession } from "./_auth.mjs";
 import {
   OUTCOME, REASON, MIN_RERUN_MS, REMINDER_MS, PROBE_AMOUNT_USDC, PROBE_DESTINATION,
   DEFAULT_TARGET_URL, DEFAULT_STORE_NAME, DEFAULT_PROBE_OWNER, FUNCTION_NAME,
-  judgePlanProbe, shouldSkipRerun, decideNotify, notifyMessage, buildRecord, isCannotVerify,
+  judgePlanProbe, shouldSkipRerun, decideNotify, notifyMessage, buildRecord, buildSkipRecord,
+  judgeCadence, isCannotVerify,
 } from "../../shared/plan-path-watch/watch.mjs";
 
 // plan-path-watch — CAN AN AGENT BRIDGE PLAN STILL REACH A PRICED DECISION ON PROD?
@@ -72,7 +73,16 @@ export async function handler(event) {
   const prev = await store.get(LATEST_KEY, { type: "json" }).catch(() => null);
   const skip = shouldSkipRerun({ record: prev, now: Date.now() });
   if (skip.skip) {
-    console.log(`[plan-watch] SKIP ${skip.reason} ageMs=${skip.ageMs}`);
+    // ⛔ A SKIP IS WRITTEN, NOT RETURNED SILENTLY. This used to return before touching the store, so
+    // a monitor deduping EVERY run left a record identical to a healthy one — the exact state a
+    // MIN_RERUN_MS above the cron period produces, and it was invisible to any single read. The
+    // write updates bookkeeping ONLY; the last real verdict is left alone, because a skip observed
+    // nothing and must not manufacture an observation.
+    // ⚠️ One write per invocation — the same cost a completed run already pays, and a skip makes no
+    // HTTP request, so this is strictly cheaper than probing. Not a storm.
+    await store.setJSON(LATEST_KEY, buildSkipRecord({ prev, now: Date.now(), reason: skip.reason }))
+      .catch((e) => console.warn(`[plan-watch] skip write failed — ${e?.message}`));
+    console.log(`[plan-watch] SKIP ${skip.reason} ageMs=${skip.ageMs} — recorded, not silent`);
     return { statusCode: 200, body: JSON.stringify({ skipped: true, reason: skip.reason }) };
   }
 
@@ -83,7 +93,8 @@ export async function handler(event) {
   // a real refusal window to exactly that, twice. The attempt record is overwritten by the
   // complete one below; if it survives, it IS the finding.
   await store.setJSON(LATEST_KEY, {
-    schema: "plan-path-watch/1", producedAt: startedAt, phase: "attempt",
+    ...prev,
+    schema: "plan-path-watch/1", producedAt: startedAt, lastInvokedAt: startedAt, phase: "attempt",
     outcome: null, reason: null, target: TARGET,
     prevOutcome: prev?.outcome ?? null, lastNotifiedAt: prev?.lastNotifiedAt ?? null,
     detail: "probe started; no answer yet. If this record persists, the run did not come back.",
@@ -128,6 +139,9 @@ export async function handler(event) {
   const judgement = judgePlanProbe(res, { receiptsBefore, receiptsAfter });
   const producedAt = nowIso();
   const record = buildRecord({ judgement, target: TARGET, producedAt, prev });
+  // ⭐ Logged so the FUNCTION LOG carries the same one-read cadence answer the store does.
+  const cadence = judgeCadence({ record: prev, now: Date.now() });
+  console.log(`[plan-watch] cadence-before-this-run=${cadence.cadence} runCount=${record.runCount} skipCount=${record.skipCount}`);
 
   console.log(
     `[plan-watch] ${judgement.outcome.toUpperCase()} reason=${judgement.reason} ` +

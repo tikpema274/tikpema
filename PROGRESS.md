@@ -1,5 +1,129 @@
 ---
 
+# ⭐ THE MONITOR CAN NOW ANSWER "DID IT KEEP RUNNING?" FROM ONE READ — and my premise was wrong
+
+**2026-09-05, evening. NOT DEPLOYED — ships with the next deploy.** `test:all` **94/0/0 of 94**
+unpiped, exit 0. `verify-plan-path-watch` **64 → 86/0**.
+
+## ⭐ FOUR TICKS OBSERVED LIVE, AND THE INSTRUMENT THAT SAW THEM IS GONE
+
+    18:30:23.969Z  complete · healthy/disclosed · clean · prevOutcome null
+    19:00:37.782Z  complete · healthy           · clean · prevOutcome healthy    +30m14s
+    19:30:22.999Z  complete · healthy           · clean · prevOutcome healthy    +29m45s
+    20:00:37.660Z  complete · healthy/disclosed · clean · prevOutcome healthy    +30m15s
+
+**Distinctness was the property**, not presence — four identical `producedAt` values would have been
+a dedupe failure and would read identically to a healthy store on a single read. ⭐ The
+`prevOutcome` chain `null → healthy → healthy → healthy` proves each run READS THE PREVIOUS RECORD
+BACK, which is the input to `decideNotify`: stuck at `null`, every run would look like a first
+observation and the `regressed` branch would be unreachable.
+
+⚠️ **PROVENANCE LIMIT, STATED.** Ticks 1 and 4 were read in full (`stepsRun 0`, `receiptsBefore 22`,
+`receiptsAfter 22`, `corroborated true`). **Ticks 2 and 3 have `outcome`, `phase` and `spend.state`
+but NOT their receipt counts** — the poller captured those four fields only. `clean` is reachable
+only with `stepsRun === 0` and no spend signal, so the state is meaningful; the two counts were not
+observed and are not claimed.
+
+## 🚨 THE GAP: THE MONITOR COULD NOT ANSWER THIS FROM ITS OWN STORE
+
+Healthy runs overwrote `latest`; only failures got immutable `failure:<ts>` keys. **One key, no
+history.** The four ticks were known ONLY because someone was polling live — an instrument that does
+not survive the session. [[observation-that-does-not-survive]] in the thing built to observe.
+
+⭐ **THE FIX: ONE KEY, BOUNDED HISTORY, AND A TWO-FIELD DISCRIMINATOR.**
+
+    lastInvokedAt     moves on EVERY invocation, including a dedupe that probes nothing
+    producedAt        moves only when a probe actually completed
+    recentProducedAt  the last 8 completed probes — ~4 hours at this cadence, BOUNDED
+    runCount/skipCount  monotonic; a reset to 0 is itself a signal
+
+A fresh `lastInvokedAt` beside a stale `producedAt` means *invoked but not probing* — visible in one
+read, no second key, no history of its own. ⛔ **AND A SKIP IS NOW WRITTEN, NOT RETURNED SILENTLY** —
+updating bookkeeping ONLY, leaving `producedAt` and the verdict untouched, because a skip observed
+nothing and must not manufacture an observation. ⚠️ One write per invocation — what a completed run
+already cost, and a skip makes no HTTP request, so it is strictly cheaper. Not a storm.
+
+# ⛔⛔ THE PREMISE WAS WRONG, AND WRITING THE GUARD IS WHAT EXPOSED IT
+
+I claimed — here, and to T — that `MIN_RERUN_MS` above the cron period would **FREEZE** the monitor:
+first tick probes, every later one dedupes, `producedAt` never moves, a healthy record sits there
+forever. ⛔ **THAT DOES NOT HAPPEN.** A skip leaves `producedAt` alone, so its age keeps growing,
+passes the window, and the next tick probes.
+
+    replayed at MIN_RERUN 45m against a 30m cron, 6 ticks
+    → runCount 3, skipCount 3 — EXACTLY ALTERNATING
+
+**The real failure is HALF-RATE PROBING.** ⭐ Which is worse in one respect: a frozen monitor
+eventually trips the TTL and reads stale. A half-rate one never does — it stays alive, every field
+looks correct, and it simply watches less often than anybody believes. **Only the INTERVALS show
+it**: 60m against a 30m cron. So the verdict set gained `DEGRADED`, and the guard now tests the
+failure the code HAS rather than the one I imagined.
+
+⭐⭐ **THE SUITE FAILED ON ITS FIRST RUN AND THAT IS HOW I FOUND OUT** — `runCount=3` where I had
+asserted 1. A guard written against an imagined failure mode is worth less than one written against
+the measured one, and only running it tells you which you have.
+
+    ✅ shipped MIN_RERUN (12m)      → RUNNING, intervals 30m,30m,30m,30m,30m, 6 probes 0 skips
+    ✅ MIN_RERUN 45m                → DEGRADED, intervals 60m,60m — detected from the RECORD ALONE
+    ✅ …while outcome still says `healthy` and producedAt is FRESH — every other field lies
+    ✅ nothing invoking it          → NOT_INVOKED (a different file to check; never collapsed in)
+    ✅ empty store                  → NO_RECORD, never "running"
+    ✅ bounded at 8 after 40 ticks, newest kept
+
+⭐ **TWO INDEPENDENT INSTRUMENTS ON THE SAME MUTATION.** Raising the real `MIN_RERUN_MS` to 45m goes
+red on §7's arithmetic (`45m < 30m` fails) AND on §9's store replay at the SHIPPED constant
+(`→ degraded`). One reads the numbers, the other reads what a record would look like.
+[[repeating-one-instrument-is-not-corroboration]]
+
+# 🚨 `netlify env:set` DOES NOT REACH AN ALREADY-DEPLOYED FUNCTION
+
+The alert-path calibration was attempted by pointing `PLAN_WATCH_URL` at a deliberately wrong
+target. **It never landed.** Tick 4 came back carrying `target:
+https://app.tikpema.xyz/api/agent-execute-plan` — the CORRECT url. The CLI said so at the time
+(*"Changes will require a redeploy to take effect on any deployed versions"*) and the tick confirmed
+it. Production was never redirected; the lever is unset and `gate:watch` is clean.
+
+⭐⭐ **IT ONLY AVOIDED READING AS A SUCCESS BECAUSE THE RECORD CARRIES `target`.** Without that field
+the reading would have been "healthy tick, no alert" — indistinguishable from *the alert path is
+broken*, from *the calibration worked and was restored*, and from *the override never applied*.
+**A field that distinguishes a failed override from a working one is worth more than the override.**
+
+⭐ A real property fell out of the failure: the `PLAN_WATCH_*` overrides **cannot silently redirect a
+running monitor** — they need a deploy. So `gate:watch`'s new rows are scoped correctly: they block a
+DEPLOY from carrying a stale override, which is the only way one can take effect.
+
+## ⛔ AND THE OVERRIDE ROWS WERE ADDED LATE — the window the code warned about
+
+`verify-watch-promotion-gate.mjs` already said: *"THESE ROWS EXIST BEFORE THE FIRST CALIBRATION RUN,
+DELIBERATELY. Adding them afterwards would leave the one window — the calibration itself — during
+which nothing is watching the watcher."* **I shipped three redirect-capable overrides with no rows
+and then set one.** Rows now added for `PLAN_WATCH_URL` / `_STORE` / `_OWNER`; the gate went ❌ while
+the override was set and ✅ after unsetting, so the lever was its own mutation proof.
+⚠️ **`PLAN_WATCH_OWNER` is the money-shaped one:** a redirected owner would make `ensureOwnerWallet`
+MINT A REAL CIRCLE WALLET every 30 minutes. Reading the warning carefully enough to quote it did not
+stop me doing what it describes.
+
+# ⛔ STILL UNPROVEN: THE WEBHOOK PATH
+
+Four healthy readings, `lastNotifiedAt: null` throughout. `decideNotify` correctly returns
+`steady-ok` and nothing touches `WATCH_ALERT_WEBHOOK`. **A healthy monitor is structurally incapable
+of exercising its own alert**, so waiting does not improve this.
+
+    PROVEN     registered · runs on cadence · reads its own state back · judges correctly ·
+               cannot spend · and now reports its own cadence from one read
+    NOT PROVEN that it can TELL YOU
+
+Inducing it costs, and the cost is the reason it is not done:
+* **a deploy carrying the override** — real end-to-end proof, but TWO ~30m cycles with the plan path
+  **watched by nothing in between**, deliberately entering the exact state `gate:watch` exists to
+  prevent;
+* **a local POST** — minutes, production stays watched, but it puts a REAL-LOOKING ALERT in the live
+  money-path channel.
+
+⚠️ Also still open: `executed: true` is a hardcoded literal; a plan that ran NOTHING reports it.
+
+---
+
 # ⭐ THE PLAN PATH IS WATCHED FROM OUTSIDE A DEPLOY — registered, RUN, and healthy
 
 **2026-09-05.** Deploy `6a9c5899c45d1aae6872dfbd`, published 18:28:21.216Z. `4958e16` · tree

@@ -15,7 +15,8 @@ import {
   OUTCOME, REASON, MIN_RERUN_MS, TTL_MS, REMINDER_MS, CRON_MS, EXPECTED_CRON, FUNCTION_NAME,
   PROBE_AMOUNT_USDC, DEFAULT_TARGET_URL, DEFAULT_PROBE_OWNER,
   judgePlanProbe, decideNotify, shouldSkipRerun, evaluateRecord, notifyMessage, buildRecord,
-  firstDisclosure, assertNoSpend, isCannotVerify,
+  firstDisclosure, assertNoSpend, isCannotVerify, buildSkipRecord, judgeCadence, CADENCE,
+  TICK_HISTORY, intervalsOf,
 } from "../shared/plan-path-watch/watch.mjs";
 
 let pass = 0, fail = 0;
@@ -237,6 +238,110 @@ section("8 ⭐ THE DISCLOSURE IS POSITIVE EVIDENCE, not an absence of failure");
     judgePlanProbe(res({ body: json({ executed: false, blocked: "something else entirely" }) }), SPEND).reason === REASON.REFUSED_OTHER);
   ok("⭐ the probe owner is the one gate:forgery already uses — no new wallet is provisioned",
     DEFAULT_PROBE_OWNER === "0xfd801d082479e69f93bf79ccbf5f9dfe3c615767" && /ensureOwnerWallet/.test(HANDLER));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("9 ⭐⭐ CAN THE STORE SAY WHETHER IT KEPT RUNNING? — one read, no live polling");
+// ═══ 🚨 THE GAP THIS CLOSES ══════════════════════════════════════════════════════════════════
+// Until 2026-09-05 healthy runs only overwrote `latest` and just ONE key existed, so the store
+// could not answer "did it keep running?". The dedupe failure — MIN_RERUN_MS above the cron period,
+// every run after the first returning {skipped:true} — freezes `producedAt` while leaving a
+// perfectly healthy record behind. Four real ticks were confirmed that day ONLY by polling live,
+// and that instrument does not survive the session. [[observation-that-does-not-survive]]
+{
+  const T0 = Date.parse("2026-09-05T18:30:00.000Z");
+  const CRON = 30 * 60 * 1000;
+  const judged = judgePlanProbe(res({ body: json(CAP_BODY) }), SPEND);
+
+  /** Replay the handler's OWN decision — the real `shouldSkipRerun` and the real builders — at a
+   *  given rerun window. Nothing is simulated except the clock. */
+  const replay = (minRerunMs, ticks = 6) => {
+    let rec = null;
+    for (let i = 0; i < ticks; i++) {
+      const now = T0 + i * CRON;
+      const sk = shouldSkipRerun({ record: rec, now, minRerunMs });
+      rec = sk.skip
+        ? buildSkipRecord({ prev: rec, now, reason: sk.reason })
+        : buildRecord({ judgement: judged, target: "t", producedAt: new Date(now).toISOString(), prev: rec });
+    }
+    return { rec, now: T0 + (ticks - 1) * CRON };
+  };
+
+  // ── HEALTHY CADENCE ───────────────────────────────────────────────────────────────────────
+  const good = replay(12 * 60 * 1000);
+  ok("⭐ with MIN_RERUN below the cron, every tick probes", good.rec.runCount === 6, `runCount=${good.rec.runCount}`);
+  ok("⭐ …and none of them skipped", good.rec.skipCount === 0);
+  ok("⭐⭐ a single read says RUNNING",
+    judgeCadence({ record: good.rec, now: good.now, cronMs: CRON }).cadence === CADENCE.RUNNING);
+  ok("⭐ …and the history shows the CADENCE, not just a claim about it",
+    intervalsOf(good.rec.recentProducedAt).every((g) => g === CRON),
+    intervalsOf(good.rec.recentProducedAt).map((g) => `${g / 60000}m`).join(","));
+
+  // ── ⛔⛔ THE MUTATION: MIN_RERUN ABOVE THE CRON PERIOD ─────────────────────────────────────
+  // 🚨 THE PREMISE THAT WAS WRONG, KEPT BECAUSE THE CORRECTION IS THE POINT. This was written
+  // expecting a FREEZE — first tick probes, every later one dedupes forever. It does not happen: a
+  // skip leaves `producedAt` alone, so its age keeps growing past the window and the next tick
+  // probes. The real failure is HALF-RATE probing. The suite failed on the first run with
+  // runCount=3/skipCount=3 out of 6 ticks — exactly alternating — which is how the premise was
+  // corrected. ⭐ A guard written against an imagined failure mode is worth less than one written
+  // against the measured one, and only running it tells you which you have.
+  const bad = replay(45 * 60 * 1000);
+  ok("🚨 MIN_RERUN above the cron does NOT freeze — it ALTERNATES probe/skip",
+    bad.rec.runCount === 3 && bad.rec.skipCount === 3, `runCount=${bad.rec.runCount} skipCount=${bad.rec.skipCount}`);
+  ok("⛔ …so every later invocation is still recorded, as a SKIP rather than as silence",
+    bad.rec.skipCount > 0);
+  ok("⭐⭐⭐ A SINGLE READ DETECTS IT — cadence is DEGRADED",
+    judgeCadence({ record: bad.rec, now: bad.now, cronMs: CRON }).cadence === CADENCE.DEGRADED,
+    judgeCadence({ record: bad.rec, now: bad.now, cronMs: CRON }).cadence);
+  ok("⭐⭐ …and the INTERVALS are what show it — 60m against a 30m cron",
+    intervalsOf(bad.rec.recentProducedAt).every((g) => g === 2 * CRON),
+    intervalsOf(bad.rec.recentProducedAt).map((g) => `${g / 60000}m`).join(","));
+  ok("⛔ …while the verdict field still says `healthy` and `producedAt` is FRESH — every other field lies",
+    bad.rec.outcome === OUTCOME.HEALTHY &&
+    judgeCadence({ record: bad.rec, now: bad.now, cronMs: CRON }).producedAge <= CRON * 2);
+  ok("⭐ …the message names the cause rather than leaving it to be re-derived",
+    /MIN_RERUN_MS against the cron period/i.test(judgeCadence({ record: bad.rec, now: bad.now, cronMs: CRON }).detail));
+  // ⭐⭐ PAIRWISE INEQUALITY — "good is running" and "bad is degraded" both pass on a constant.
+  ok("⭐⭐ the two cadences DIFFER — the judge is not returning a constant",
+    judgeCadence({ record: good.rec, now: good.now, cronMs: CRON }).cadence !==
+    judgeCadence({ record: bad.rec, now: bad.now, cronMs: CRON }).cadence);
+
+  // ⭐⭐ AND THE LOOP IS CLOSED: replay at the REAL constant, not an injected one. §7 checks the
+  // arithmetic (MIN_RERUN < CRON < TTL); this checks the CONSEQUENCE through the store. Raising
+  // MIN_RERUN_MS above the cron now goes red on BOTH paths, and the two are independent — one reads
+  // the numbers, the other reads what a record would actually look like.
+  // [[repeating-one-instrument-is-not-corroboration]]
+  const live = replay(MIN_RERUN_MS);
+  ok("⭐⭐ replayed at the SHIPPED MIN_RERUN_MS, the cadence is RUNNING — not degraded",
+    judgeCadence({ record: live.rec, now: live.now, cronMs: CRON }).cadence === CADENCE.RUNNING,
+    `MIN_RERUN_MS=${MIN_RERUN_MS / 60000}m vs cron ${CRON / 60000}m → ${judgeCadence({ record: live.rec, now: live.now, cronMs: CRON }).cadence}`);
+  ok("⭐ …and every shipped-constant tick actually probed", live.rec.runCount === 6 && live.rec.skipCount === 0);
+
+  // ── A DROPPED SCHEDULE IS A DIFFERENT FAULT AND MUST NOT COLLAPSE INTO THE ABOVE ──────────
+  ok("⛔ nothing invoking it at all → NOT_INVOKED, not FROZEN_SKIPPING (different file to check)",
+    judgeCadence({ record: good.rec, now: good.now + 5 * CRON, cronMs: CRON }).cadence === CADENCE.NOT_INVOKED);
+  ok("⛔ an empty store → NO_RECORD, never 'running'",
+    judgeCadence({ record: null, now: Date.now(), cronMs: CRON }).cadence === CADENCE.NO_RECORD);
+
+  // ── THE BOUND ─────────────────────────────────────────────────────────────────────────────
+  const long = replay(12 * 60 * 1000, 40);
+  ok(`⭐ the history is BOUNDED at ${TICK_HISTORY} — it cannot grow without limit`,
+    long.rec.recentProducedAt.length === TICK_HISTORY, `${long.rec.recentProducedAt.length} entries after 40 ticks`);
+  ok("⭐ …and it is the NEWEST that are kept", long.rec.recentProducedAt[0] === new Date(T0 + 39 * CRON).toISOString());
+  ok("⛔ ONE key, not one per tick — a healthy run writes no more than it already did",
+    /setJSON\(LATEST_KEY/.test(HANDLER) && !/setJSON\(`tick:/.test(HANDLER));
+
+  // ── A SKIP MUST NOT MANUFACTURE AN OBSERVATION ────────────────────────────────────────────
+  const beforeSkip = buildRecord({ judgement: judged, target: "t", producedAt: new Date(T0).toISOString(), prev: null });
+  const afterSkip = buildSkipRecord({ prev: beforeSkip, now: T0 + 60_000 });
+  ok("⛔⛔ a skip leaves `producedAt` UNTOUCHED — it observed nothing",
+    afterSkip.producedAt === beforeSkip.producedAt);
+  ok("⛔ …and leaves the verdict untouched too", afterSkip.outcome === beforeSkip.outcome && afterSkip.runCount === beforeSkip.runCount);
+  ok("⭐ …but MOVES lastInvokedAt, which is the whole discriminator",
+    afterSkip.lastInvokedAt !== beforeSkip.lastInvokedAt);
+  ok("⭐ the handler WRITES on the skip path rather than returning silently",
+    /buildSkipRecord\(/.test(HANDLER) &&
+    HANDLER.indexOf("buildSkipRecord(") < HANDLER.indexOf("skipped: true"));
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

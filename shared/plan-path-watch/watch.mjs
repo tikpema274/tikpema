@@ -106,6 +106,19 @@ export const EXPECTED_CRON = "*/30 * * * *";
 export const CRON_MS = Number(EXPECTED_CRON.match(/^\*\/(\d+) \* \* \* \*$/)[1]) * 60 * 1000;
 export const FUNCTION_NAME = "plan-path-watch";
 
+/** ═══ ⭐⭐ HOW MANY COMPLETED PROBES `latest` REMEMBERS. THE BOUND IS THE POINT. ═══════════════
+ *  8 entries at a 30-minute cadence is ~4 hours of history, in ONE key, overwritten in place —
+ *  no new keys per run, so a healthy run costs exactly the write it already made.
+ *
+ *  🚨 WHY THIS EXISTS. Until 2026-09-05 this monitor could not answer "did it keep running?" from
+ *  its own store. Healthy runs overwrite `latest` and only FAILURES got immutable `failure:<ts>`
+ *  keys, so the store held ONE key and no history. The dedupe failure — MIN_RERUN_MS set above the
+ *  cron period, every run after the first returning `{skipped:true}` — freezes `producedAt` while
+ *  leaving a perfectly healthy record in place. On a single read that is INDISTINGUISHABLE from a
+ *  running monitor. It was ruled out that day only because someone was polling live, and that
+ *  instrument does not survive the session. [[observation-that-does-not-survive]] */
+export const TICK_HISTORY = 8;
+
 /** ⛔ THE PROBE AMOUNT IS ABOVE THE PER-BRIDGE CAP, AND THAT IS THE SAFETY MECHANISM.
  *
  * The cap check runs in the execution loop BEFORE `executeAction`, so a step valued over it is
@@ -362,11 +375,24 @@ export function notifyMessage({ kind, judgement, target, record }) {
   return lines.join("\n").slice(0, 1900);
 }
 
-/** The durable record. `attempt` is written BEFORE the probe — see the handler. */
+/**
+ * The durable record. `attempt` is written BEFORE the probe — see the handler.
+ *
+ * ⭐⭐ THE SINGLE-READ DISCRIMINATOR IS `lastInvokedAt` vs `producedAt`.
+ *   `lastInvokedAt` moves on EVERY invocation, including one that dedupes and probes nothing.
+ *   `producedAt`    moves only when a probe actually completed.
+ * A monitor that is being invoked but never probing therefore shows a fresh `lastInvokedAt` beside
+ * a stale `producedAt` — visible in one read, with no history and no second key needed. The rolling
+ * `recentProducedAt` then shows the CADENCE, so a reader can see the interval rather than infer it.
+ */
 export function buildRecord({ judgement, target, producedAt, deployId = null, prev = null }) {
+  const history = [producedAt, ...(Array.isArray(prev?.recentProducedAt) ? prev.recentProducedAt : [])]
+    .filter((t) => typeof t === "string")
+    .slice(0, TICK_HISTORY);
   return {
     schema: "plan-path-watch/1",
     producedAt,
+    lastInvokedAt: producedAt,
     phase: "complete",
     outcome: judgement.outcome,
     reason: judgement.reason,
@@ -377,5 +403,105 @@ export function buildRecord({ judgement, target, producedAt, deployId = null, pr
     deployId,
     prevOutcome: prev?.outcome ?? null,
     lastNotifiedAt: prev?.lastNotifiedAt ?? null,
+    // ⭐ COUNTS, CARRIED FORWARD. Monotonic, so a reset to 0 is itself a signal (a new store, or a
+    // record that was rebuilt rather than updated).
+    runCount: (Number.isFinite(prev?.runCount) ? prev.runCount : 0) + 1,
+    skipCount: Number.isFinite(prev?.skipCount) ? prev.skipCount : 0,
+    lastSkipAt: prev?.lastSkipAt ?? null,
+    recentProducedAt: history,
   };
+}
+
+/**
+ * ⛔ A SKIPPED RUN MUST BE VISIBLE AS A SKIP, NOT AS SILENCE.
+ *
+ * The dedupe path used to `return` before writing anything, so a monitor skipping every run left a
+ * store identical to one that had simply not been invoked yet — and identical to a healthy one, if
+ * you only read `outcome`. Now it writes the SAME key, updating only the bookkeeping and leaving
+ * the verdict fields exactly as they were: the last real verdict is not overwritten by a
+ * non-observation.
+ *
+ * ⚠️ NOT A WRITE STORM. One write per invocation, which is what a completed run already costs, and
+ * invocations are bounded by the cron. A skip is strictly cheaper than a probe — it makes no HTTP
+ * request — so this can only ever reduce work per invocation.
+ */
+export function buildSkipRecord({ prev, now, reason = "recent-run" }) {
+  const at = new Date(now).toISOString();
+  return {
+    ...prev,
+    lastInvokedAt: at,
+    lastSkipAt: at,
+    skipReason: reason,
+    skipCount: (Number.isFinite(prev?.skipCount) ? prev.skipCount : 0) + 1,
+    // ⛔ `producedAt`, `outcome` and the history are DELIBERATELY untouched. A skip observed
+    // nothing; writing a verdict here would manufacture an observation that never happened.
+  };
+}
+
+/** The cadence verdicts. Closed, like every other verdict set here. */
+export const CADENCE = Object.freeze({
+  RUNNING: "running",
+  DEGRADED: "degraded",               // probing, but materially slower than the cron asks
+  FROZEN_SKIPPING: "frozen-skipping", // being invoked, never probing — THE DEDUPE FAILURE
+  NOT_INVOKED: "not-invoked",         // the schedule itself stopped firing
+  NO_RECORD: "no-record",
+});
+
+/**
+ * ⭐⭐ IS THIS MONITOR ACTUALLY RUNNING? Answerable from ONE read of `latest`.
+ *
+ * ⛔ THE TWO FAILURES IT SEPARATES, which look the same from `outcome` alone:
+ *   FROZEN_SKIPPING — invocations are arriving and being deduped. `outcome` still says healthy,
+ *                     `producedAt` is stale, `lastInvokedAt` is fresh. This is what a MIN_RERUN_MS
+ *                     set above the cron period produces, and it is the state this whole record
+ *                     shape exists to make visible.
+ *   NOT_INVOKED     — nothing is arriving at all: the schedule was dropped, or the deploy lost it.
+ * Collapsing them would send someone to the wrong file.
+ *
+ * @param {{record:object|null, now:number, cronMs?:number}} args
+ */
+export function judgeCadence({ record, now, cronMs = CRON_MS }) {
+  if (!isObj(record)) return { cadence: CADENCE.NO_RECORD, detail: "the store holds no record — this monitor has never completed a run" };
+  // Two missed cron periods is the tolerance, matching the TTL's reasoning.
+  const limit = cronMs * 2;
+  const produced = Date.parse(record.producedAt);
+  const invoked = Date.parse(record.lastInvokedAt ?? record.producedAt);
+  const producedAge = Number.isFinite(produced) ? now - produced : Infinity;
+  const invokedAge = Number.isFinite(invoked) ? now - invoked : Infinity;
+
+  const intervals = intervalsOf(record.recentProducedAt);
+  if (producedAge <= limit) {
+    // ═══ ⭐⭐ RATE DEGRADATION — THE FAILURE THIS ACTUALLY HAS ═══════════════════════════════
+    // ⛔ THE PREMISE THIS REPLACES WAS WRONG, and writing the guard is what exposed it. The concern
+    // was that MIN_RERUN_MS above the cron period would FREEZE the monitor: every run after the
+    // first dedupes, `producedAt` never moves, the store keeps a healthy record forever. That is
+    // NOT what happens. A skip does not touch `producedAt`, so its age keeps growing and the next
+    // tick is past the window and probes. The real effect is HALF-RATE probing — the monitor stays
+    // alive and lies about its resolution instead of dying visibly.
+    //
+    // ⭐ Which is worse in one respect: a frozen monitor eventually trips the TTL and reads stale.
+    // A half-rate one never does. It simply watches less often than anybody believes, and every
+    // single field looks correct. Only the INTERVALS show it.
+    const median = intervals.length ? [...intervals].sort((a, b) => a - b)[Math.floor(intervals.length / 2)] : null;
+    if (median !== null && intervals.length >= 2 && median > cronMs * 1.5) {
+      return { cadence: CADENCE.DEGRADED, producedAge, invokedAge, intervals, median,
+               detail: `⚠️ PROBING AT THE WRONG RATE — observed interval ~${Math.round(median / 60000)}m against a ${Math.round(cronMs / 60000)}m cron, with ${record.skipCount ?? 0} skip(s). The monitor is alive and watching LESS OFTEN than its schedule implies. Check MIN_RERUN_MS against the cron period.` };
+    }
+    return { cadence: CADENCE.RUNNING, producedAge, invokedAge, intervals,
+             detail: `last probe ${Math.round(producedAge / 60000)}m ago; ${record.runCount ?? "?"} completed run(s)` };
+  }
+  if (invokedAge <= limit) {
+    return { cadence: CADENCE.FROZEN_SKIPPING, producedAge, invokedAge,
+             detail: `🚨 INVOKED BUT NOT PROBING — last invocation ${Math.round(invokedAge / 60000)}m ago but the last completed probe was ${Math.round(producedAge / 60000)}m ago, with ${record.skipCount ?? 0} skip(s). The record still says "${record.outcome}" and that verdict is STALE. Check MIN_RERUN_MS against the cron period.` };
+  }
+  return { cadence: CADENCE.NOT_INVOKED, producedAge, invokedAge,
+           detail: `nothing has invoked this monitor for ${Math.round(invokedAge / 60000)}m — check the schedule is still registered on the deploy` };
+}
+
+/** Gaps between consecutive remembered probes, newest first, in ms. Lets a reader SEE the cadence
+ *  rather than trust a claim about it. */
+export function intervalsOf(list) {
+  if (!Array.isArray(list)) return [];
+  const t = list.map((x) => Date.parse(x)).filter(Number.isFinite);
+  return t.slice(0, -1).map((v, i) => v - t[i + 1]);
 }
