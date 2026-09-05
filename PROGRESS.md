@@ -1,5 +1,105 @@
 ---
 
+# THE SERVER STRING IS FIXED AND LIVE — proven by a 708-FIELD DIFF THAT MOVED 6
+
+**2026-09-05.** Deploy `6a9c0aa98773787d3b1bbd42`, published 12:52:16.919Z. `88d0f41` · tree
+`73b6c7fc43a9` · **dirty false** · stamped 12:27:25.191Z · Bundling 21m00s. `test:all` **93/0/0 of
+93** unpiped. `gate:deployed` **5/5**, 25 newer scanned. `gate:spec` green. `capture:window` RAN.
+
+## ⭐⭐ THE PROBE IS THE API, NOT THE BUNDLE — and the CONTROL is a whole-response diff
+
+⛔ **A BUNDLE PROBE WOULD HAVE MEASURED NOTHING.** These strings live in `_bridge-receipts.mjs` and
+reach users through the receipts API; they are never in `index-*.js`. So the probe was the
+authenticated API response for three known-unaskable records, baselined BEFORE and read AFTER.
+
+    BEFORE  mtnczg9o unwitnessed att=0   "being re-checked with Circle automatically"
+            mtlru386 unresolved  att=123 "reconcile the txId against Circle by hand"
+            mtiphw04 unresolved  att=146 "reconcile the txId against Circle by hand"
+
+    AFTER   mtnczg9o  "…its id is not one Circle issued, so it cannot be re-checked
+                        automatically and will not resolve on its own"
+            mtlru386  "…there is no record at Circle to reconcile against; check the
+            mtiphw04    wallet's own history on Arc"
+
+⭐ **THREE RECORDS FLIPPED, NOT TWO.** `user-mtiphw04-g0xlwy` carried the same false instruction and
+was missed when the defect was first stated — found by reading the store rather than by reasoning.
+
+### ⭐⭐ 708 LEAF FIELDS COMPARED. 6 CHANGED. THAT IS THE CONTROL.
+
+Three `detail` strings and their three `ageMs` (derived from `now`, obliged to move). **Every other
+field on all 19 records — `band`, `terminal`, `reconcileAttempts`, `lastReconciledAt`, `state`, fees
+— byte-identical.** ⭐ A flip set alone proves bytes changed; the diff proves WHICH change happened
+and that nothing else rode along with it.
+
+⛔ **AND THE CONTROL YOU WANT DOES NOT EXIST — SAID PLAINLY RATHER THAN SUBSTITUTED.** There is **no
+askable provisional record anywhere in the store**: all ten `tx-` keys are `tx-user-…` and
+`isCircleTransactionId` demands a UUID. The 16 durable records are `minted`, which returns
+`provisional: null` — a null-to-null comparison is not a control, it is
+[[equality-passes-vacuously-on-empty]] wearing a control's name. **So the askable branch is
+UNEXERCISED in production and proven only in-suite.** The diff is a SCOPING control, not a BRANCH
+control, and the difference is worth more than the reassurance.
+
+### ⭐ THE READ THAT COULD HAVE DESTROYED ITS OWN MEASUREMENT
+
+Reading `detail` requires the receipts API, and the endpoint self-heals. ⚠️ **The exact mechanism
+matters and the obvious worry was WRONG:** it does not run the reconcile sweep — `reconcileAttempts`
+is bumped only by `bridge-reconcile-background` off the cron. What it CAN do is POST a settle for
+`!settlingSince && ((burn_confirmed && pastDeadline) || isRecheckable)`. That predicate was evaluated
+against all 19 records with the real functions **before calling**: **0 candidates**, so the trigger
+loop body never executes. ⭐ Then PROVEN rather than argued — the store read `123 / null / 146`
+before the calls and `123 / null / 146` after all four. [[verification-method-must-not-mutate]]
+
+⭐ **THE CLOSING CHECK.** All three records are still frozen and all three `txId`s are still not
+Circle UUIDs — so the new sentences are TRUE OF THE RECORDS, not merely different from the old ones.
+
+## 🚨 THE FIRST DEPLOY WAS REFUSED, AND THE REFUSAL WAS NEARLY INVISIBLE
+
+`gate:watch` failed: **`tree — dirty: netlify/functions/_bridge-receipts.mjs`** — a dirty deploy
+ships code in no commit, so the deploy-id ↔ commit binding is false and there is no rollback target.
+Correct refusal; the chain stopped BEFORE `build`, nothing was published, prod stayed on `6a9bec55`.
+
+⛔⛔ **THE BACKGROUND-TASK NOTIFICATION SAID "completed (exit code 0)". THE DEPLOY EXITED 1.** The
+0 belonged to the `echo "EXIT=$?"` appended after `npm run deploy:prod`, not to npm.
+⭐ **A COMPOUND COMMAND'S REPORTED EXIT CODE IS THE LAST COMMAND'S** — the same lesson this repo
+already holds about a piped `tail`, arriving through a task notification instead of a pipe, and
+caught only by reading each stage's own output. [[a-later-command-is-not-proof-of-an-earlier-one]]
+
+## ⚠️ capture:window RAN AND WITNESSED NOTHING — which it refuses to call a pass
+
+    ddTree 3b589768754d   previous 3b589768754d   → NO WINDOW OBSERVED, "and this is NOT a pass"
+    recorded → dd-refusal-window-log.jsonl
+
+⭐ **EXPECTED AND CORRECT.** This change touches `netlify/functions/`, not `scripts/dd/`, so ddTree
+did not move, no health key rotated, and no refusal was due. ddTree read from production and
+**compared, not predicted**: `vouched` · `pass` · `agree`, build `3b589768…`, producedAt
+12:00:41.655Z — unchanged either side, as a non-DD change requires.
+
+# 🚨 OPEN, FOUND BY THIS DEPLOY: AGENT BRIDGES CANNOT BE VALUED ON PROD
+
+`gate:forgery` failed **1/4** — and it failed VACUOUSLY BY DESIGN, which is the gate working:
+
+    HTTP 200  executed=false  needsAck=false   band=—
+    ❌ the band was `acknowledge` — otherwise the token is never compared and this is vacuous
+
+The cause is upstream of the gate. `POST /api/agent-execute-plan` answers:
+
+    blocked: "cannot value plan: cannot value a bridge without its fee —
+              the day ceiling bounds amount + fee"
+
+`_actions.mjs:77`. The fee is absent, so valuation **fails closed** rather than under-counting the
+ceiling — the safe direction, and exactly what that guard was written for. But it means **no agent
+bridge plan can currently be valued or executed in production.** ⚠️ Persistent, not transient:
+three attempts, identical.
+
+⛔ **NOT ATTRIBUTABLE TO THIS DEPLOY.** `agent-execute-plan.mjs` imports neither
+`_bridge-receipts.mjs` nor `provisionalStatus` (grep: no hits); this diff changes 53 lines, all
+inside `provisionalStatus`'s return branches; `_actions.mjs` is untouched and last moved at `4d7b0a3`.
+⚠️ **"Not caused by me" is not "was already broken" — I cannot prove it predates 12:52Z**, because
+`gate:forgery` runs only at deploy time. It needs its own look: whoever picks it up should start at
+the bridge fee quote resolution, not at the ack gate.
+
+---
+
 # 🚨 A PREDICTED AMBIGUITY THAT WAS NEVER AMBIGUOUS — and the server string that had already drifted
 
 **2026-09-05.** No deploy. `test:all` **93/0/0 of 93** unpiped on clean `HEAD` (`d7e10f8`), exit 0,
