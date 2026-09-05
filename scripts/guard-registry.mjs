@@ -297,6 +297,7 @@ export const FILE_UNWIRED_TOOLS = {
   "scripts/pin-invariants.mjs": "regenerates pinned invariant bytes; run deliberately when a pin legitimately moves.",
   "scripts/preview-panel.tsx": "renders a panel to stdout so a human can look at it.",
   "scripts/preview-unified.tsx": "renders #/unified to a standalone HTML file a human opens in a browser — including the withdraw block via its `initial` seam, which SSR cannot otherwise reach. It asserts nothing; the properties it shows are guarded by verify-unified-balance-copy.",
+  "scripts/preview-agent.tsx": "renders #/agent to a standalone HTML file a human opens in a browser, in both the funded and empty states. It asserts nothing; the properties it shows are guarded by verify-agent-panel-copy.",
   "scripts/probe-addDelegate-gas.mjs": "manual gas probe against the live chain.",
   "scripts/probe-delegate-status.mjs": "a manual chain read of delegate status — answers a question for a human at a moment in time; it has no pass or fail.",
   "scripts/probe-gas-at-grant.mjs": "manual gas probe against the live chain.",

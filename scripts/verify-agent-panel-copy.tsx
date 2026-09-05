@@ -43,6 +43,9 @@ const render = (over: any = {}) =>
     .replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"')
     .replace(/&amp;/g, "&").replace(/&#(\d+);/g, (_: string, d: string) => String.fromCharCode(Number(d)))
     .replace(/\s+/g, " ").trim();
+/** Raw markup — for claims about STRUCTURE (which card a warning sits on) rather than body text. */
+const renderMarkup = (over: any = {}) =>
+  renderToStaticMarkup(<MyAgentPanel wallet={wallet(over) as any} />);
 const bal = (b: any) => render({ agentWallet: { address: "0x" + "ab".repeat(20), balance: b } });
 
 console.log("╔══════════════════════════════════════════════════════════════════════╗");
@@ -56,8 +59,16 @@ check("⚠️ non-empty render (every absence check below is vacuous otherwise)"
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
 section("1 — ⭐⭐ THE BOUND ON THE AGENT'S AUTHORITY, AND ITS THREE NAMED LIMITS");
+// 🚨 THIS PINNED THE SENTENCE, NOT THE CLAIM. It required the exact string "always spending only
+// what's in that wallet", which lived in a LEAD PARAGRAPH that was doubling the task box below it
+// ("plain language" 2×, "caps" 2×, measured on the render). The claim now lives in the page's
+// "How this works" card, unchanged in meaning and stated twice over — once as what the agent does,
+// once as what it cannot exceed.
+// ⭐ Re-expressed as the CLAIM so wording can improve. What may NOT weaken is the pairing: the
+// agent spends FROM ITS OWN WALLET, and it can move ONLY what is in that wallet. Either half alone
+// is a weaker promise than the original made.
 check("⭐⭐ the agent is stated to spend only from its OWN wallet",
-  /always spending only what's in that wallet/.test(funded));
+  /from its own wallet/.test(funded) && /only move what is in the wallet/.test(funded));
 for (const [label, re] of [
   ["per-action", /per-action/], ["per-bridge", /per-bridge/], ["cumulative daily", /cumulative daily/],
 ] as [string, RegExp][]) {
@@ -93,23 +104,42 @@ section("3 — ⭐⭐ REVERSIBLE AND IRREVERSIBLE MUST NOT SWAP PLACES");
 // The page's second job. Both categories are asserted AND the boundary between them, because a
 // warning that drifts under the wrong card is worse than a missing one: it reassures about the
 // dangerous action while alarming about the safe one.
-check("⭐ the leaving category is named", /Move money out/.test(funded) && /This leaves you/.test(funded));
+// 🚨 THESE PINNED THE TWO INTRO SENTENCES, AND THOSE INTROS DOUBLED THE CARDS BENEATH THEM:
+// "Both of these send USDC somewhere you don't control" sat above a card already saying "Goes to
+// someone else", and "Nothing leaves your agent's wallet — only the denomination changes" above one
+// already saying "Stays on Arc, stays yours. Exchange between USDC and EURC". Removed as doubling.
+// ⭐⭐ THE CATEGORY NOW TRAVELS WITH EACH CARD, which lets the boundary be asserted PER CARD rather
+// than by position — a strictly stronger check. The old form compared three indices in one string;
+// this one reads each card and requires its tag to match its consequence, so a warning cannot drift
+// under the wrong card without the tag drifting with it.
+check("⭐ the leaving category is named", /Move money out/.test(funded));
 check("⭐ the staying category is named", /Stays with you/.test(funded));
 check("⭐⭐ SEND is marked irreversible, in those words",
   /Goes to someone else\. Gone — there is no undo/.test(funded));
 check("⭐ BRIDGE says it leaves Arc AND that coming back costs",
   /Leaves Arc for another chain/.test(funded) && /Bridging back costs a fee/.test(funded));
-check("⭐ SWAP says it stays, and only the denomination changes",
-  /Stays on Arc, stays yours/.test(funded) &&
-  /Nothing leaves your agent's wallet — only the denomination changes/.test(funded));
+check("⭐ SWAP says it stays, and what changes is the denomination",
+  /Stays on Arc, stays yours/.test(funded) && /Exchange between USDC and EURC/.test(funded));
 // 🚨 THE BOUNDARY ITSELF: the irreversibility warning must sit ABOVE the staying section, i.e. with
 // the actions it describes. Position, not mere presence.
-const outAt = funded.indexOf("Move money out");
-const stayAt = funded.indexOf("Stays with you");
-const undoAt = funded.indexOf("there is no undo");
-check("⭐⭐ …and 'there is no undo' sits inside the LEAVING section, not the staying one",
-  outAt > 0 && stayAt > outAt && undoAt > outAt && undoAt < stayAt,
-  `out@${outAt} undo@${undoAt} stays@${stayAt}`);
+// ⛔⛔ THE BOUNDARY, PER CARD. Each shortcut must carry the tag that matches its own consequence,
+// so an irreversible action can never sit under a reassuring label. Read from the MARKUP and split
+// on the card boundary, because "somewhere on the page" is exactly what this must not settle for.
+{
+  const mkup = renderMarkup();
+  const cards = mkup.split('class="quick-card"').slice(1);
+  check("⭐ the derivation found all three shortcut cards — an empty set would pass vacuously",
+    cards.length === 3, `${cards.length} cards`);
+  const cardFor = (name: string) => cards.find((c) => c.includes(name)) ?? "";
+  for (const [name, tag] of [["Send →", "Move money out"], ["Bridge →", "Move money out"],
+                             ["Swap →", "Stays with you"]] as [string, string][]) {
+    check(`⭐⭐ ${name.replace(" →", "")} is tagged "${tag}" on its own card`,
+      cardFor(name).includes(tag), cardFor(name) ? "card found" : "CARD NOT FOUND");
+  }
+  check("⭐⭐ 'there is no undo' sits on a card tagged 'Move money out', never 'Stays with you'",
+    cardFor("there is no undo").includes("Move money out") &&
+    !cardFor("there is no undo").includes("Stays with you"));
+}
 
 // ═══ ⭐⭐ THE CONFIRM CLAIM IS DERIVED FROM agent-act, NOT PINNED ═══════════════════════════════
 // 🚨 THE DEFECT. This box said "you'll confirm anything that moves funds before it runs". A BRIDGE
@@ -224,6 +254,44 @@ check("⭐⭐ …and 'there is no undo' sits inside the LEAVING section, not the
   check("⛔ the universal-confirmation claim is absent while any action is immediate",
     IMMEDIATE.size === 0 || !/confirm anything that moves funds/i.test(say),
     "derive it, don't loosen the check — three of five actions ran with no confirmation");
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("6 — ⭐ STATE → ACTION → EXPLANATION, and the lead does not double the task box");
+// ⭐ ADDED 2026-09-05. The lead paragraph used to restate the task box 40 words above it. Counted
+// on the RENDER rather than judged by eye: "plain language" 2×, "caps" 2×, in adjacent paragraphs.
+{
+  const n = (re: RegExp) => (funded.match(re) || []).length;
+
+  // ⛔⛔ THE DOUBLING, ASSERTED AS A COUNT. Presence checks cannot see a repetition; only a count
+  // can, which is the whole reason this defect survived a claim-by-claim inventory that grepped
+  // for long exact phrases and reported "no internal duplication".
+  check("⛔⛔ 'plain language' is said ONCE — it belongs to the task box",
+    n(/plain language/g) === 1, `${n(/plain language/g)}×`);
+  check("⛔⛔ 'caps' at the press is said ONCE outside the explanation card",
+    funded.slice(0, funded.indexOf("How this works")).match(/caps/g)?.length === 1,
+    `${funded.slice(0, funded.indexOf("How this works")).match(/caps/g)?.length}× before the card`);
+
+  // ── the zones, by index ──────────────────────────────────────────────────────────────────
+  const iWallet = funded.indexOf("Your agent's wallet");
+  const iTask   = funded.indexOf("Give it a task");
+  const iOut    = funded.indexOf("Move money out");
+  const iHow    = funded.indexOf("How this works");
+  check("the zones render", [iWallet, iTask, iOut, iHow].every((i) => i >= 0),
+    `wallet ${iWallet} · task ${iTask} · shortcuts ${iOut} · how ${iHow}`);
+  check("⭐ STATE leads — the wallet before the task box", iWallet < iTask);
+  check("⭐ …and the shortcuts follow the task box", iTask < iOut);
+  check("⭐⭐ the explanation card is LAST — after everything it explains", iOut < iHow);
+
+  // ⛔ THE PRESS-TIME DISCLOSURE MUST NOT DRIFT INTO THE CARD. It is bound to agent-act elsewhere
+  // in this file; here we assert only that it stays ABOVE the explanation, where the press is.
+  check("⛔⛔ the confirm/immediate sentence stays at the PRESS, not in the card",
+    funded.indexOf("runs straight away") >= 0 && funded.indexOf("runs straight away") < iHow);
+  // ⭐ And the three named limits survive the move — the binding above tests the whole render, so
+  //   without this nothing would notice them landing in a card that was later deleted.
+  check("⭐ the three caps are named inside the explanation card",
+    /per-action/.test(funded.slice(iHow)) && /per-bridge/.test(funded.slice(iHow)) &&
+    /cumulative daily/.test(funded.slice(iHow)));
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

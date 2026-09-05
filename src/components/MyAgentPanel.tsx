@@ -227,10 +227,18 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
     <div className="plane">
       <div className="panel-eyebrow">Your agent</div>
       <h2>Give your agent a task</h2>
+      {/* ⭐ THE LEAD WAS DOUBLING THE TASK BOX 40 WORDS BELOW IT. Measured on the RENDER, not
+          by eye: "plain language" appeared 2×, "caps" 2×, in two adjacent paragraphs. The task
+          box owns both — it says how to write the task and which actions run without confirming,
+          AT the press — so what was left here was the same two ideas said first and vaguer.
+          ⛔ THE CAPS ENUMERATION IS NOT DELETED, IT IS MOVED: per-action / per-bridge /
+          cumulative daily now live in "How this works" at the end of the page, which is where an
+          explanation belongs and where Bridge and Unified already keep theirs.
+          ⚠️ verify-agent-panel-copy binds those three names to real enforcement points
+          (AGENT_MAX_SPEND_USDC, AGENT_BRIDGE_CAP_USDC, PERIOD_CEILING_USDC) and asserts against
+          the WHOLE render, so the binding survives the move — checked before moving it. */}
       <div className="sub">
-        Your agent acts on-chain from its own wallet, in plain language — always
-        spending only what's in that wallet and within your per-action, per-bridge,
-        and cumulative daily safety caps.
+        Your agent acts on-chain from its own wallet.
       </div>
 
       {/* ── THE FLOAT, IN ONE LINE ────────────────────────────────────────────────────
@@ -362,13 +370,29 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
           clicking: does the money leave you or not? Same grouping, same wording, same
           ❗/amber grammar as the Dashboard — because a user who learns the rule on one
           page must not have to re-learn it on another. */}
-      <div className="panel-eyebrow" style={{ marginTop: 26 }}>Move money out</div>
-      <div className="sub" style={{ marginBottom: 8 }}>
-        <b>This leaves you.</b> Both of these send USDC somewhere you don't control.
-      </div>
-      <div className="quick" style={{ marginTop: 4 }}>
+      {/* ── SHORTCUTS: THREE CARDS, ONE ROW, EACH CARRYING ITS OWN CONSEQUENCE ──────────
+          They were two blocks — "Move money out" over Send+Bridge, "Stays with you" over Swap —
+          each with an intro sentence. ⛔ THOSE INTROS DOUBLED THE CARDS BENEATH THEM: "Both of
+          these send USDC somewhere you don't control" above a card already saying "Goes to
+          someone else", and "Nothing leaves your agent's wallet" above one already saying "Stays
+          on Arc, stays yours". The heading said it, then the card said it again.
+
+          ⭐⭐ THE CATEGORY NOW TRAVELS WITH THE CARD instead of being implied by which block the
+          reader is standing in. That is this codebase's own rule applied to layout: a disclosure
+          separated from the button is one a reader can miss — "if this disclosure is ever
+          separated from the button, the trap is back". A section heading IS a disclosure
+          separated from the button, by two cards' worth of distance.
+
+          ⚠️ AND IT DIVERGES FROM THE DASHBOARD, WHICH STILL GROUPS (Dashboard.tsx:154). The
+          grouping's stated reason was that "a user who learns the rule on one page must not have
+          to re-learn it on another" — so this is a real cost, recorded not waved away. The ❗/🔒
+          grammar and the exact per-card wording are UNCHANGED, so the rule a user learns is the
+          same one; only its container moved. If the Dashboard follows, they realign. */}
+      <div className="panel-eyebrow" style={{ marginTop: 26 }}>Where the money goes</div>
+      <div className="quick" style={{ marginTop: 8 }}>
         <button className="quick-card" onClick={() => go("send")}>
           <div className="qt">Send →</div>
+          <div className="qd" style={{ color: "var(--warn)", fontWeight: 600 }}>Move money out</div>
           <div className="qd">
             <span style={{ color: "var(--warn)" }}>❗ Goes to someone else.</span> Gone —
             there is no undo.
@@ -376,24 +400,56 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         </button>
         <button className="quick-card" onClick={() => go("bridge")}>
           <div className="qt">Bridge →</div>
+          <div className="qd" style={{ color: "var(--warn)", fontWeight: 600 }}>Move money out</div>
           <div className="qd">
             <span style={{ color: "var(--warn)" }}>❗ Leaves Arc</span> for another chain.
             Bridging back costs a fee.
           </div>
         </button>
-      </div>
-
-      <div className="panel-eyebrow" style={{ marginTop: 20 }}>Stays with you</div>
-      <div className="sub" style={{ marginBottom: 8 }}>
-        Nothing leaves your agent's wallet — only the denomination changes.
-      </div>
-      <div className="quick" style={{ marginTop: 4 }}>
         <button className="quick-card" onClick={() => go("swap")}>
           <div className="qt">Swap →</div>
+          <div className="qd" style={{ fontWeight: 600 }}>Stays with you</div>
           <div className="qd">
             🔒 Stays on Arc, stays yours. Exchange between USDC and EURC.
           </div>
         </button>
+      </div>
+
+      {/* ═══ ⭐⭐ HOW THIS WORKS — THE EXPLANATION ZONE, AT THE END ══════════════════════════
+          Same placement as BridgePanel and UnifiedBalancePanel: state, then action, then the
+          explanation last. What moved here is the CAPS ENUMERATION that used to open the page.
+
+          ⛔ WHAT DID NOT MOVE, AND MUST NOT: the task box's sentence about which actions confirm
+          and which run straight away. That is a PRESS-TIME disclosure and it is BOUND — the guard
+          derives the gated set from agent-act itself, so widening the gate forces the sentence to
+          widen. It once claimed universal confirmation and was false for three of five money
+          actions; putting it in a card a reader may never open would be the same defect wearing
+          a tidier layout. */}
+      <div
+        className="status"
+        style={{
+          marginTop: 24, padding: "14px 16px", background: "var(--field)",
+          border: "1px solid var(--line)", borderRadius: 12,
+        }}
+      >
+        <div className="panel-eyebrow" style={{ marginBottom: 10 }}>How this works</div>
+        <ol style={{ margin: 0, paddingLeft: 20, display: "flex", flexDirection: "column", gap: 8 }}>
+          <li className="sub" style={{ margin: 0 }}>
+            <b>It spends from its own wallet, never yours.</b> The agent can only move what is in
+            the wallet shown above — funding it is a separate step you take on the Dashboard.
+          </li>
+          <li className="sub" style={{ margin: 0 }}>
+            {/* ⭐ THE THREE NAMED LIMITS, EACH BOUND TO AN ENFORCEMENT POINT BY THE GUARD. Naming
+                limits in prose is a promise; the binding is what stops it going quietly false. */}
+            <b>Three caps bound every action.</b> A <b>per-action</b> cap, a <b>per-bridge</b> cap,
+            and a <b>cumulative daily</b> ceiling. A misconfigured cap refuses rather than
+            switching itself off.
+          </li>
+          <li className="sub" style={{ margin: 0 }}>
+            <b>Some actions ask first, some do not.</b> Which is which is stated on the task box
+            above, at the point you press — not here.
+          </li>
+        </ol>
       </div>
     </div>
   );
