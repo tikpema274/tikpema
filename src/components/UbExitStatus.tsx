@@ -68,14 +68,39 @@ const isOpen = (s?: string) => s === "initiating" || s === "waiting" || s === "c
  */
 export type UbExitInitial = { data?: Payload | null; error?: string };
 
+/**
+ * ⭐⭐ `section` — WHICH HALF TO RENDER, ADDED 2026-09-05 FOR THE Deposit | Withdraw TABS.
+ *
+ * The tabs carry the two ACTIONS. Pending withdrawals must NOT go behind an unselected tab: this
+ * component exists because "a live withdrawal existed for hours that NOBODY COULD SEE IN THE APP",
+ * and hiding the rows one click away recreates exactly that. So the STATUS half renders above the
+ * tabs, always, and only the ACTION half sits inside the Withdraw tab.
+ *
+ *   "all"     both halves — the default, so every existing caller and verify-ub-exit-view are
+ *             UNCHANGED. A new prop that alters existing behaviour by default would be a silent
+ *             rewrite of a guarded money surface.
+ *   "status"  heading, balance, pending rows, the automatic-finish line.
+ *   "action"  the pre-press disclosure, the amount field, Start withdrawal.
+ *
+ * ⚠️ TWO INSTANCES MEAN TWO FETCHES OF THE SAME GET, and that is accepted rather than hidden. They
+ * render DISJOINT halves, so they cannot show contradictory versions of one fact. If one fetch
+ * fails the reader gets two true statements — "here is what is pending" and "we could not check
+ * whether you can start another" — never a disagreement about the same number.
+ * ⛔ `initial` WAS NOT USED TO SHARE ONE FETCH: it is documented above as a TEST-ONLY seam, and
+ * spending it on production plumbing would make that comment false.
+ */
+export type UbExitSection = "all" | "status" | "action";
+
 export default function UbExitStatus({
   token,
   reloadKey = 0,
   initial,
+  section = "all",
 }: {
   token: () => Promise<string>;
   reloadKey?: number;
   initial?: UbExitInitial;
+  section?: UbExitSection;
 }) {
   const [data, setData] = useState<Payload | null>(initial?.data ?? null);
   const [error, setError] = useState(initial?.error ?? "");
@@ -178,6 +203,10 @@ export default function UbExitStatus({
 
   return (
     <div style={{ marginTop: 12 }}>
+      {/* ── STATUS: what is in here and what is on its way out. Rendered ABOVE the tabs so a
+             pending withdrawal is never one click from invisible. ── */}
+      {section !== "action" && (
+        <>
       <div
         style={{
           color: "var(--muted)", fontSize: "0.72rem", letterSpacing: "0.06em",
@@ -253,6 +282,12 @@ export default function UbExitStatus({
         We finish this automatically — <b>you do not have to come back</b>.
       </div>
 
+        </>
+      )}
+
+      {/* ── ACTION: the form the Withdraw tab carries. ── */}
+      {section !== "status" && (
+        <>
       {/* ═══ PART 2 — THE ACTION ════════════════════════════════════════════════════════════
           ⭐ THE DISCLOSURE TRAVELS WITH THE BUTTON, following YourMoney.tsx's standard:
           "If this disclosure is ever separated from the button, the trap is back." The ~7 days
@@ -319,6 +354,8 @@ export default function UbExitStatus({
         <div className="qd" style={{ color: "var(--muted)", marginTop: 10 }}>
           You can start another once this one finishes — one at a time.
         </div>
+      )}
+        </>
       )}
     </div>
   );

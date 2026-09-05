@@ -42,6 +42,9 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
   //    still sees it. A conditional that omits it would hide the claim from the guard
   //    as well as the reader, which is how a load-bearing sentence disappears unnoticed.
   const [showEvidence, setShowEvidence] = useState(false);
+  // ⭐ Which ACTION is showing. The tabs carry the two forms ONLY — the pending-withdrawal
+  //    rows render above them and are never behind a tab. See the note at the tab strip.
+  const [tab, setTab] = useState<"deposit" | "withdraw">("deposit");
   // Funding form state.
   const [amount, setAmount] = useState("");
   const [funding, setFunding] = useState(false);
@@ -267,6 +270,60 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
           ⛔ WHAT DID NOT MOVE: custody. It is still stated at this page's own deposit button,
           because that is a press-time disclosure and has no other home on this page. */}
 
+
+
+      {/* ⭐ THE WITHDRAW SECTION NOW HAS ITS OWN LABEL, matching "Fund the unified balance"
+          above it, so the page reads as two named actions rather than one action and a status
+          block. It also states WHERE THE MONEY LANDS in the heading itself — the agent wallet,
+          not the user's — which UbExitStatus says inside its own copy but which a reader
+          scanning headings would otherwise miss. */}
+      {/* ═══ ⛔ THE STATUS HALF SITS ABOVE THE TABS, ALWAYS ═══════════════════════════════
+          A live withdrawal must never be one click from invisible — this component exists because
+          one "existed for hours that NOBODY COULD SEE IN THE APP", and putting the rows behind an
+          unselected tab would recreate exactly that. Only the FORM goes in the tab. */}
+      {bal.status === "ready" && (
+        <UbExitStatus token={() => w.ensureSession()} reloadKey={reloadKey} section="status" />
+      )}
+
+      {/* ═══ ⭐⭐ THE TWO ACTIONS, AS TABS — the last piece of the June shape ═══════════════════
+          June's page had [ Deposit | Withdraw | Spend ]. There is no spend-from-pool in this app,
+          so there are TWO tabs: a third would advertise a capability that does not exist.
+
+          ⛔ THE TABS CARRY ONLY THE FORMS. The pending-withdrawal rows render ABOVE this strip and
+          are never behind an unselected tab — see the STATUS block above. That is the whole reason
+          UbExitStatus grew a `section` prop rather than being moved wholesale into a tab.
+
+          ⚠️ DEPOSIT IS THE DEFAULT because funding is the page's first job, and because a user with
+          nothing deposited has nothing to withdraw. A pending withdrawal is still visible to them
+          without touching the tabs. */}
+      {bal.status === "ready" && (
+        <div className="row" style={{ gap: 0, marginTop: 18, borderBottom: "1px solid var(--line)" }}>
+          {([["deposit", "Deposit"], ["withdraw", "Withdraw"]] as const).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className="linkbtn"
+              aria-pressed={tab === id}
+              onClick={() => setTab(id)}
+              style={{
+                padding: "10px 16px",
+                fontWeight: tab === id ? 700 : 500,
+                color: tab === id ? "var(--paper)" : "var(--muted)",
+                borderBottom: tab === id ? "2px solid var(--amber)" : "2px solid transparent",
+                borderRadius: 0,
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ⛔ RENDERED, NOT MOUNTED-ON-DEMAND for the deposit side: the fund card carries the CUSTODY
+          disclosure, and `hidden` keeps it in the DOM so a copy guard reading rendered output still
+          sees it. The withdraw form is a different case — it is conditional in UbExitStatus itself
+          on there being something to withdraw, so it is mounted only when its tab is chosen. */}
+      <div hidden={bal.status === "ready" && tab !== "deposit"}>
       {/* Funding — a MONEY-PATH WRITE. The agent SCA deposits its own plain Arc USDC
           into its own unified balance. Auth + per-deposit cap are enforced server-side
           before any transaction; this form is a thin caller. */}
@@ -417,35 +474,10 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
           </div>
         )}
       </div>
+      </div>
 
-
-      {/* ⭐ THE WITHDRAW SECTION NOW HAS ITS OWN LABEL, matching "Fund the unified balance"
-          above it, so the page reads as two named actions rather than one action and a status
-          block. It also states WHERE THE MONEY LANDS in the heading itself — the agent wallet,
-          not the user's — which UbExitStatus says inside its own copy but which a reader
-          scanning headings would otherwise miss. */}
-      {bal.status === "ready" && (
-        <div className="panel-eyebrow" style={{ marginTop: 18 }}>
-          Withdraw from Unified Balance to your agent wallet
-        </div>
-      )}
-
-      {/* ═══ ⭐ THE EXIT — AFTER THE DEPOSIT, BECAUSE FUNDING COMES FIRST ═══════════════════
-          A live withdrawal once existed for hours that NOBODY COULD SEE IN THE APP. Read-only:
-          it renders what /api/ub-withdraw already returns.
-
-          ⚠️ IT USED TO SIT INSIDE THE BALANCE CARD, and the reason given was that "what's in
-          here" and "what's on its way out" are one question. That reason is still true of the
-          PENDING ROWS — but this block is not only rows: it also carries the START-WITHDRAWAL
-          form, and an action. Left in the balance card it put WITHDRAW above DEPOSIT, which
-          reads backwards on a page whose first job is funding.
-          ⛔ SO THE MOVE HAS A COST, STATED: the pending rows now sit one section away from the
-          balance they belong to. That is the tradeoff, and it is resolved properly by the tab
-          split (Deposit | Withdraw) that is the next slice — where the ROWS can stay with the
-          balance as state and the FORM moves into the action. Until then, ordering the two
-          actions correctly is worth more than keeping the rows adjacent. */}
-      {bal.status === "ready" && (
-        <UbExitStatus token={() => w.ensureSession()} reloadKey={reloadKey} />
+      {bal.status === "ready" && tab === "withdraw" && (
+        <UbExitStatus token={() => w.ensureSession()} reloadKey={reloadKey} section="action" />
       )}
 
       {/* Owner address — the agent wallet the unified balance is keyed to (the

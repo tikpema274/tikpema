@@ -71,6 +71,7 @@ mock.module("../src/lib/useGatewayBalance", {
 });
 
 import React from "react";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 
 let pass = 0, fail = 0;
@@ -82,6 +83,7 @@ const section = (t: string) => console.log(`\n── ${t} ${"─".repeat(Math.ma
 
 const UnifiedBalancePanel = (await import("../src/components/UnifiedBalancePanel")).default;
 const YourMoney = (await import("../src/components/YourMoney")).default;
+const UbExitStatus = (await import("../src/components/UbExitStatus")).default;
 
 const wallet: any = {
   agentWallet: { address: "0x" + "ab".repeat(20), balance: "12.3456" },
@@ -321,18 +323,62 @@ section("6 — ⭐ THE JUNE SHAPE: header → balance → action → explanation
 // away from. Order is asserted by INDEX in the rendered text, because "the card exists" says
 // nothing about whether a reader meets it before or after the thing it explains.
 {
+  // ⚠️ `markup()` RE-RENDERS WITH WHATEVER `gateway` WAS LAST SET TO, and earlier sections change
+  // it to empty/signed-out. The tab strip is gated on `bal.status === "ready"`, so without this
+  // reset the markup has no tabs and every check below reads -1 — a fixture fault that looks
+  // exactly like a missing feature. Reset to the parked state `ubParked` was captured under.
+  gateway = { status: "ready", total: "7.5000", perChain: [], depositor: "0x" + "ab".repeat(20) };
+  const mk    = markup(UnifiedBalancePanel);
   const iBal  = ubParked.indexOf("Your unified balance · across chains");
   const iDep  = ubParked.indexOf("Move USDC from your agent");
-  const iWdH  = ubParked.indexOf("Withdraw from Unified Balance to your agent wallet");
   const iHow  = ubParked.indexOf("How this works");
-  check("all four zones render", [iBal, iDep, iWdH, iHow].every((i) => i >= 0),
-    `balance ${iBal} · deposit ${iDep} · withdraw ${iWdH} · how ${iHow}`);
+  check("the zones render", [iBal, iDep, iHow].every((i) => i >= 0),
+    `balance ${iBal} · deposit ${iDep} · how ${iHow}`);
   check("⭐⭐ the BALANCE leads — the number before any action", iBal < iDep);
-  // ⛔ THE LADDER IS GONE, and its assertions with it. It ranked three pockets; YourMoney ranks the
-  // same three, on the page where all three live. Removing it here was a de-duplication, not a
-  // softening — the distinction its own comment ("Do not soften this to make the deposit easier")
-  // demanded, and the reason the custody sentence STAYED at the deposit button.
-  check("⛔⛔ the withdraw section is LABELLED, and says where the money lands", iWdH >= 0);
+
+  // ═══ ⛔⛔ THE TABS, AND THE ONE PROPERTY THAT MATTERS MOST ══════════════════════════════════
+  // The labelled "Withdraw from Unified Balance…" heading is GONE — replaced by a tab strip, which
+  // is the last piece of the June shape. Those assertions were obsolete by decision, not wrong.
+  const iStatus = mk.indexOf("Checking your exit");
+  const iTabs   = mk.indexOf("aria-pressed");
+  check("⭐ the tab strip renders, with Deposit selected by default",
+    /aria-pressed="true"[^>]*>\s*Deposit|Deposit[\s\S]{0,40}aria-pressed="true"/.test(mk) ||
+    (iTabs >= 0 && mk.slice(iTabs, iTabs + 400).includes("Deposit")));
+  check("⭐ both tabs exist", />\s*Deposit\s*</.test(mk) && />\s*Withdraw\s*</.test(mk));
+  // ⛔⛔ THE DEFECT THIS SLICE EXISTS TO AVOID. A pending withdrawal behind an unselected tab is
+  // "a live withdrawal NOBODY COULD SEE IN THE APP" with a click added. The STATUS half must render
+  // ABOVE the tab strip, never inside it. Asserted by position in MARKUP, so moving it in fails.
+  // 🚨 MY FIRST VERSION OF THIS COULD NOT FAIL. It anchored on "Checking your exit…", which is an
+  // EARLY RETURN in UbExitStatus that fires before the `section` gating — so under SSR both halves
+  // render the identical placeholder and swapping section="status" to section="action" was NOT
+  // CAUGHT. It measured that *an* instance sits above the tabs, never that it is the STATUS one.
+  // ⭐ Split into a BEHAVIOURAL proof that the prop works, and a POSITIONAL one that the panel
+  // wires it the right way round.
+  check("⭐ an exit instance renders above the tab strip", iStatus >= 0 && iTabs >= 0 && iStatus < iTabs,
+    `instance ${iStatus} · tabs ${iTabs}`);
+  {
+    const seeded = { data: { owner: "0x" + "ab".repeat(20),
+      balance: { readable: true, availableUsdc: "7.5000", withdrawableUsdc: "0" },
+      withdrawals: [], disclosure: { approxDelayDays: 7.1 } } } as any;
+    const txt = (el: any) => renderToStaticMarkup(el).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    const st = txt(<UbExitStatus token={async () => "t"} initial={seeded} section="status" />);
+    const ac = txt(<UbExitStatus token={async () => "t"} initial={seeded} section="action" />);
+    check("⭐⭐ section=\"status\" shows the rows and NOT the form",
+      /Getting money out/.test(st) && !/Start withdrawal/.test(st));
+    check("⭐⭐ section=\"action\" shows the form and NOT the rows",
+      /Start withdrawal/.test(ac) && !/Getting money out/.test(ac));
+  }
+  // ⛔⛔ AND THE PANEL MUST WIRE THE ABOVE-TABS INSTANCE TO THE STATUS HALF. Source, deliberately:
+  // the halves are indistinguishable in SSR output because of the early return above.
+  const panelSrc = readFileSync("src/components/UnifiedBalancePanel.tsx", "utf8");
+  const iSrcStatus = panelSrc.indexOf('section="status"');
+  const iSrcTabs   = panelSrc.indexOf("aria-pressed");
+  check("⛔⛔ pending withdrawals are the STATUS half, wired ABOVE the tabs",
+    iSrcStatus >= 0 && iSrcTabs >= 0 && iSrcStatus < iSrcTabs, `status@${iSrcStatus} tabs@${iSrcTabs}`);
+  // ⭐ `hidden`, not omitted — so the custody disclosure survives for any guard reading output.
+  // ⚠️ /hidden/ alone matched the evidence span and could not fail; bound to the tab expression.
+  check("⭐ the deposit card is HIDDEN when unselected, not omitted",
+    /hidden=\{bal\.status === "ready" && tab !== "deposit"\}/.test(panelSrc));
   check("⭐⭐ the explanation card is LAST — after the action it explains", iDep < iHow);
   // ⛔⛔ FUNDING BEFORE WITHDRAWAL. The exit used to render inside the balance card, which put
   // WITHDRAW above DEPOSIT — backwards on a page whose first job is funding.
@@ -344,10 +390,9 @@ section("6 — ⭐ THE JUNE SHAPE: header → balance → action → explanation
   // ⭐ It now anchors on "Checking your exit…", which is what the component ACTUALLY emits under
   // renderToStaticMarkup — verified by rendering it, not by reading the source for a likely
   // string — and the presence of that anchor is asserted BEFORE its position is compared.
-  const iWd = ubParked.indexOf("Checking your exit");
-  check("⭐ the exit block actually renders (or the order check below is vacuous)", iWd >= 0, `@${iWd}`);
-  check("⛔⛔ the DEPOSIT comes before the WITHDRAWAL", iWd >= 0 && iDep < iWd,
-    `deposit ${iDep} · withdraw ${iWd}`);
+  // ⛔ SUPERSEDED BY THE TABS. "Deposit before withdrawal" was about two stacked SECTIONS; the two
+  // actions are now tabs (Deposit selected by default) and the exit STATUS half deliberately sits
+  // ABOVE both. Order between them is asserted above, in markup, against the tab strip.
 
   // ⭐ Each depth exactly once, in its own zone.
   check("⭐⭐ the MECHANISM lives in the explanation card, not in the deposit card",
