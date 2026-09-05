@@ -1,5 +1,67 @@
 ---
 
+# SESSION CLOSE 2026-09-04 — what is OPEN, so tomorrow does not start by rediscovering it
+
+Everything below is committed, pushed and (where stated) deployed. **Production serves `c0583b1`
+under deploy `6a9b5453656a32a818ab82e2`; the record is at `d98d20e`. Nothing is in flight.**
+
+## ⛔ THE NEXT SLICE, AND ITS ONE UNANSWERED DECISION
+
+**Deposit | Withdraw tabs** — the last piece of the June shape. Scoped, not started.
+
+    UbExitStatus splits CLEANLY at line 256: PART 1 (status: heading, balance, pending rows)
+    above it, PART 2 (the action: pre-press disclosure, amount, Start withdrawal) below.
+
+⛔ **THE FORK, WHICH MUST BE DECIDED BEFORE ANY CODE:** pending withdrawals are visible today. If the
+whole exit block moves behind a Withdraw tab, a live withdrawal is **hidden until someone clicks** —
+which is precisely the defect that block exists for: *"a live withdrawal existed for hours that
+NOBODY COULD SEE IN THE APP."*
+
+    A  rows above the tabs, forms inside     needs a `section` prop; costs a 2nd fetch or a hoist
+    B  whole block inside the Withdraw tab   simplest, and reintroduces the recorded defect
+    C  no tabs — keep today's two labelled sections   nothing hidden, no component touched
+
+⚠️ **A's REAL COST, STATED:** two instances of `UbExitStatus` means two fetches of the same GET. The
+halves render disjointly so they cannot visibly contradict each other — but if ONE fetch fails, one
+half shows an error and the other does not. That is the thing to solve, not to discover later.
+⛔ **AND THERE IS NO THIRD TAB.** June had Deposit | Withdraw | **Spend**; there is no
+spend-from-pool in this app, and a Spend tab would advertise a capability that does not exist.
+
+## OPEN, RECORDED, DELIBERATELY NOT DONE
+
+* **THE BLOCKLIST PRE-FLIGHT.** Arc names two enforcement points and we handle one: a RUNTIME revert
+  mines, spends gas, rolls back state, and `waitForTx` names no cause of its own (it does pass
+  through Circle's `errorReason` when present — whether that carries a blocklist reason is
+  UNMEASURED). Zero `isBlacklisted` checks anywhere. ⚠️ It adds an RPC read to every send, on a money
+  path, for a failure never observed here — which is why it is a decision, not a patch.
+* **ARC IS ABSENT FROM THE AGENT MARKETPLACE CATALOG** (1,246 listings, 16 networks, measured). Two
+  decisions, both T's: whether to pair with Base Sepolia to become listable, and whether to ask
+  Circle about the health check first — a declared 405 refusal may be indistinguishable from an
+  outage to a reachability checker, and a delisting carries no signal.
+* **ATOMICITY.** Not deterministically testable from this path: Circle simulates against current
+  state, so every revert cause we can state is refused pre-broadcast. Only a simulation-to-inclusion
+  race reaches the chain, and that run is not written.
+* **THE SIGNATURE-OUTCOME REASON.** Declined / tab-closed / failed remain indistinguishable, and Arc
+  exposes nothing for the first two — they need a CLIENT report. Its own piece of work.
+* **CROSS-PAGE CUSTODY REPETITION.** Down to two sites on two pages (`UnifiedBalancePanel`,
+  `YourMoney`). Both are press-time disclosures, so this is now a genuine design question rather
+  than duplication to delete.
+* **THE NINE STRANDED INTENTS.** The origin filter is deployed and the sweep no longer selects them;
+  the Unichain record was due to cross its 24h cap at 17:00:41Z today. ⚠️ NOT RE-READ since —
+  expected, unverified.
+
+## ⭐ WHAT SHIPPED TODAY, IN ORDER
+
+    6a9a6c3c  the upfront-fee migration                    PR-5 followed: 12 of 12 rows
+    6a9aaff1  the receipts collapse + dd-vouched-build
+    6a9ac2d4  the origin filter — verified by a FROZEN COUNTER
+    6a9b2704  the unified-balance dedupe
+    6a9b5453  the Unified Balance page rebuilt — 410 words to 178
+
+Five production deploys, `test:all` green on every one, `capture:window` ran on every one.
+
+---
+
 # THE UNIFIED BALANCE PAGE IS REBUILT AND DEPLOYED — 410 words to 178
 
 **2026-09-04.** Deploy `6a9b5453656a32a818ab82e2`, published 23:56:09.189Z. Two commits: `d9cc3bb`
