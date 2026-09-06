@@ -1,5 +1,117 @@
 ---
 
+# ⭐ THE DEPLOY PUBLISHED AND THE SESSION DIED — and those are not the same failure
+
+**2026-09-06.** Deploy `6a9d58bc65209f967af34c64`, published 12:47:28.416Z. `03f5886768da` · tree
+`272e8a2662af` · **dirty false** · stamped 12:12:47.111Z · 213 files, DD surface 38.
+`gate:deployed` **5/5** (re-run 15:19Z, next session) · `capture:window` **RAN** 12:47:57.562Z, +29s
+after publish. Bundle `index-BCEUywav.js` → **`index-DLkp7_CN.js`**; CSS `index-DveZbNRp.css`
+unchanged. `test:all` **95/0/0 of 95** and `verify-bridge-mechanic-pairing` **98/0** — ⚠️ both carried
+from `03f5886`'s commit message, measured PRE-deploy by the session that died, **not re-measured
+here.** [[conversation-sourced-numbers-must-be-marked]]
+
+The ceiling qualifier reaches the deducted panel.
+
+## ⛔ A KILLED TASK READS AS "NOTHING HAPPENED", AND THAT READING WAS WRONG
+
+The session was killed with a deploy in flight. What survived into the next session was the shape of
+a failure: a truncated task, two dirty files, no deploy record. **Every one of those is also what a
+successful deploy looks like when nobody writes it down.** The artifacts settled it in one read —
+the site was serving `03f5886` and had been for two and a half hours.
+
+⭐ **THE DISCRIMINATOR IS THE SERVED ARTIFACT, AND NOTHING ELSE IS.** Not the task's exit, not the
+absence of a record, not the dirty tree. `gate:deployed` compares a local stamp to what production
+answers; check 4 makes the control plane and the data plane name the same deploy id independently.
+A deploy that publishes and then loses its narrator is a **complete deploy with a missing record**,
+and the two are distinguishable in one HTTP call. [[a-scope-report-is-not-a-deploy-report]] ·
+[[absence-must-never-read-as-safe]]
+
+⚠️ **WHAT ACTUALLY DIED WAS THE RECORD.** `capture:window` had already run — 29 seconds after
+publish, inside the window, exit 0 — and its line sat uncommitted in the ledger. The mechanical
+post-deploy steps completed. The writing-down did not.
+
+## ⭐⭐ PRE-REGISTRATION IS THE ONE THING A DEAD SESSION CANNOT GIVE BACK
+
+`9c477a9` committed its probe predictions BEFORE the deploy, and that is what made its six-row table
+evidence rather than description. **`03f5886` committed none.** The session ended before it could.
+
+⛔ **SO THE PROBES BELOW ARE POST-HOC, AND NO LATER CARE REPAIRS THAT.** They are diff-derived and
+controlled, which is worth something; they are not the stronger class. A prediction is a claim about
+a measurement you have not taken yet, and once the measurement exists the claim is unavailable
+forever. **Every other artifact of a lost session can be reconstructed. This one cannot** — which
+makes pre-registration the thing to write down FIRST, not last, since it is the only step whose value
+is destroyed by the delay rather than merely deferred. [[publish-the-intermediate-not-just-the-conclusion]]
+
+## THE PROBES — LITERALS FROM A SERVED-TO-SERVED BUNDLE DIFF, MEASURED POST-HOC
+
+⭐ **BOTH SIDES ARE REAL PRODUCTION ARTIFACTS**, not a local build: the currently-served bundle
+against the one deploy `6a9d49b31af6e17fe14f5914` (11:39:14.555Z) was still serving. 887,879 →
+888,194 bytes, +315. `sha256 c0371c8c834a` → `e133a3c12edd`.
+
+Set-diffing their string literals surfaced the change WITHOUT consulting source — the producer keys
+and the render site both fell out of the diff:
+
+    + feeIsCeiling:!0,feeCeilingNote:"That figure is a maximum, …    deducted
+    + feeIsCeiling:!1,feeCeilingNote:""                              upfront
+    + feeIsCeiling:null,feeCeilingNote:""                            unknown
+    + e&&o.feeCeilingNote&&c.jsx("div",{className:"summary-note",children:o.feeCeilingNote})
+
+    LITERAL                                                      PREV  SERVED  EXPECTED
+    "That figure is a maximum, signed into the transaction —      0      1        0→1   ✅ FLIP
+     the fee actually taken is set when the burn runs and
+     can be lower."
+    "That figure is a maximum, signed into the transaction"       0      1        0→1   ✅ FLIP
+    "will be charged"                                             1      1        1→1   ✅ CTRL
+    feeCeilingNote            (identifier, not copy)              0      4        new   ✅
+
+⭐ **THE CONTROL IS THE POINT.** `"will be charged"` holds at exactly 1 across both bundles: the
+upfront sentence — contract-enforced and correct, the copy the scoped fix would have wrongly
+softened — was not disturbed by a change that added a qualifier to the other path. Without it the
+flips would show only that the bundle moved. [[control-needs-ownership-and-stability]]
+
+⭐ And the qualifier appears **exactly once**, on the `deducted` key alone. `upfront` and `unknown`
+both carry `""`. The tripwire's claim — false anywhere else — is true of the shipped bytes.
+
+⚠️ **THE STANDING LIMIT, RESTATED BECAUSE IT HAS NOT CHANGED.** A bundle literal proves a string
+SHIPPED, never that anything renders it. The render expression ships too, which is more than a bare
+string and still not a mount. **And literal counting cannot see a new CONSUMER of a string already
+present** — the `"You receive"` 1 → 1 negative one deploy back. This probe works only because both
+the identifier and its sentence are new text; had the change been a fourth caller of existing copy,
+this table would have read as a no-op.
+
+## ddTree — COMPARED AGAINST PRODUCTION, NOT DERIVED
+
+    stamp.ddTree      3b589768754d…   baked in, resolved, 38 files
+    vouched.build     3b589768754d…   read out of the stored health record
+    verdict           pass            producedAt 15:20:10.963Z, 30.8s old
+    deployId          6a9d58bc6520…   names the running deploy
+
+⚠️ **AND THE ENDPOINT FLAGS ITS OWN AGREEMENT AS WEAK**: the record is looked up by a key containing
+the running ddTree, so a record that is FOUND will normally name it — agreement is largely a property
+of the lookup, not a corroboration. The load-bearing fields are `outcome`, `verdict` and
+`producedAt`, none of which the build stamp can answer. ⭐ An instrument that states what its own
+result cannot prove is doing the job. [[repeating-one-instrument-is-not-corroboration]]
+
+⭐ **THIS IS ALSO THE DISCRIMINATOR FOR `capture:window`'s "no-window".** ddTree did not rotate —
+`03f5886` touched `shared/bridge-mechanic.mjs` and `BridgeQuoteSummary.tsx`, neither on the 38-file
+DD surface — so no new health key was minted and **no refusal window was owed.** "No window" here is
+the expected reading, not a silent absence. Without the recorded hash on both sides of the ledger
+line those two are indistinguishable.
+
+⛔ **AND IT WAS NOT RE-RUN.** The window is unrepeatable by construction and closes on its own within
+one canary period; a run 2h33m later cannot witness anything, and would append a second `no-window`
+line for this commit that a later reader would take for the post-deploy capture. **The way to honour
+an unrepeatable observation is to commit the one you have, not to manufacture a second.**
+
+## WHAT THIS DEPLOY DOES NOT SETTLE
+
+**Zero on-chain fee observations exist for the deducted path.** All four fee verdicts we hold are
+`upfront`, all `matched`, surplus 0 — which proves the contract's assert works and says nothing about
+ceilings. The copy is written to survive that gap: it states the RELATIONSHIP and claims no
+likelihood. The gap itself is unchanged by shipping the sentence.
+
+---
+
 # 🚨 A MEASUREMENT THAT OUTLIVED THE MECHANIC IT MEASURED — repeated across four artifacts
 
 **2026-09-06. CORRECTION.** Four artifacts assert that *"This is the fee that will be charged"*
