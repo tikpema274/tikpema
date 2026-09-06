@@ -2,8 +2,38 @@
 
 # ⭐ ONE QUOTE TABLE, TWO INDEPENDENT AXES — and three discriminators that were not ones
 
-**2026-09-06.** `f97ff57` · `test:all` **95/0/0 of 95** · `verify-bridge-mechanic-pairing` **65 → 90/0**.
+**2026-09-06.** Deploy `6a9d49b31af6e17fe14f5914`, published 11:39:14.555Z. `9c477a930d3b` · tree
+`bb5bfac2fad5` · **dirty false** · stamped 11:08:36.973Z. `test:all` **95/0/0 of 95** ·
+`verify-bridge-mechanic-pairing` **65 → 90/0** · `gate:deployed` **5/5** · `gate:forgery` 5/0 ·
+`gate:spec` green · `capture:window` RAN (no window; ddTree `3b589768754d` unchanged either side).
+Code at `f97ff57`. Bundle `index-DHTjzzX5.js` → `index-BCEUywav.js`.
+
 The self-signed panel's one-line summary becomes the three-row table the agent panel uses.
+
+## ⭐ THE PROBES, PREDICTED BEFORE THE DEPLOY AND MEASURED AFTER — ALL SIX AS WRITTEN
+
+    LITERAL                                      BEFORE  SERVED  PREDICTED
+    "Stay on this page until the burn confirms"       0       1       1   ✅ FLIP
+    "exact for this quote"                            1       0       0   ✅ FLIP
+    "The fee is "                                     4       5       5   ✅ FLIP
+    "You can leave this page once it starts"          1       1       1   ✅ CTRL
+    "so the recipient receives amount"                1       1       1   ✅ CTRL
+    "summary-row"                                     5       5       5   ✅ CTRL
+
+⭐⭐ **THE PREDICTIONS WERE COMMITTED BEFORE THE MEASUREMENT** (`9c477a9`, recorded pre-deploy), which
+is what separates a probe set from a description written after the fact. A table assembled
+afterwards can only say the bundle changed.
+
+⭐ **THE SCOPING CONTROL EARNS THE FLIPS.** `"You can leave this page once it starts"` held at 1 while
+the deducted note went 0 → 1: the change reached the self-signed path WITHOUT disturbing the upfront
+one. Three flips and no control would show only that the bundle moved.
+⭐ And `"exact for this quote"` 1 → **0** proves the old one-line summary was REPLACED, not
+supplemented — a shipped-alongside bug reads 1 → 1.
+
+⚠️ **THE RECORDED NEGATIVE HELD: `"You receive"` 1 → 1**, despite the self-signed panel gaining that
+row. The string was already in the bundle for the agent panel, so **literal counting cannot see a new
+CONSUMER of a shared component — only new TEXT.** Had the probe been that label, this deploy would
+have read as a no-op.
 
     upfront   fee 0.054000 · receive 1.000000 · leaves 1.054000
     deducted  fee 0.054300 · receive 0.945700 · leaves 1.000000
