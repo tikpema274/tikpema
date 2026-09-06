@@ -1,5 +1,151 @@
 ---
 
+# ⭐ ONE QUOTE TABLE, TWO INDEPENDENT AXES — and three discriminators that were not ones
+
+**2026-09-06.** `f97ff57` · `test:all` **95/0/0 of 95** · `verify-bridge-mechanic-pairing` **65 → 90/0**.
+The self-signed panel's one-line summary becomes the three-row table the agent panel uses.
+
+    upfront   fee 0.054000 · receive 1.000000 · leaves 1.054000
+    deducted  fee 0.054300 · receive 0.945700 · leaves 1.000000
+
+⭐ **THE SAME THREE LABELS SERVE BOTH MECHANICS; ONLY THE ARITHMETIC MOVES.** The mechanic is visible
+in WHICH NUMBER MOVES — a reader checks that by subtraction rather than by trusting prose. The
+sentence stays alongside: the table shows the arithmetic, the sentence names the rule. Both.
+
+## ⭐⭐ THE DEPLOY PROBES, DERIVED FROM A REAL BUILD DIFF — because the line is composed at RUNTIME
+
+⛔ **SOURCE-DERIVED LITERALS ARE NOT BUNDLE LITERALS HERE.** `The fee is {mech.feePlacement}.`
+composes at runtime; the string *"The fee is taken out of the amount"* **never exists in the
+bundle** as one literal. It nonetheless COUNTS 1 in both the live and built bundles — because it is a
+substring of the producer's `summary` field, which ships whether or not any surface renders it.
+⭐ **A literal in a bundle proves the STRING SHIPPED, never that anything RENDERS it.** Probing on it
+would have "passed" identically before and after the change.
+
+    FLIPS (must move)                                   live → built
+      "Stay on this page until the burn confirms"          0 → 1   the deducted note reaching the
+                                                                  SHARED component — the signer axis
+      "exact for this quote"                               1 → 0   the OLD one-line summary, removed
+      "The fee is "                                        4 → 5   the new sentence's JSX text node
+
+    CONTROLS (must NOT move)
+      "You can leave this page once it starts"             1 → 1   ⭐ THE SCOPING CONTROL: the upfront
+                                                                  note is untouched by a change that
+                                                                  rewrote the deducted one
+      "so the recipient receives amount"                   1 → 1   producer copy, unchanged
+      "summary-row"                                        5 → 5   table structure, unchanged
+
+⚠️ **AND A NEGATIVE WORTH KEEPING:** `"You receive"` reads **1 → 1**, even though the self-signed
+panel gains that row. It does not flip *because the component is shared* — the string was already in
+the bundle for the agent panel. **A shared component means bundle-literal counting cannot see a new
+CONSUMER**, only new TEXT. That is why the probe is the genuinely-new sentence and not the label a
+reader would reach for first.
+
+# ⛔ THE BLOCKER WAS NOT THE ARITHMETIC — IT WAS AN UNCONDITIONAL INSTRUCTION
+
+`BridgeQuoteSummary` ended with *"You can leave this page once it starts"*, unconditional. **FALSE on
+the self-signed path**: the burn is signed in the tab and a SECOND request writes the receipt, so
+closing it loses the record while the money still moves. The component's own comment already said
+the two panels give OPPOSITE instructions and both are correct — reusing it as-is would have painted
+a harmful sentence above a money button.
+
+⭐⭐ **SO A SECOND AXIS, NAMED FOR WHAT IT DERIVES FROM.** `BRIDGE_SIGNER` = `server | browser |
+unknown`. "Leavable" is the CONSEQUENCE; the FACT is who signs the burn and therefore where the
+receipt is written. ⭐ The name makes the third value obvious: **`delegate`** — a session key signing
+server-side on the user's behalf would be browser-INITIATED but server-RECORDED, i.e.
+upfront-adjacent AND leavable. Keying leave/stay on `mechanic` would have made that path
+unrepresentable and moved the coupling into the TYPE SYSTEM, where it is harder to see and no less
+wrong. ⛔ `unknown` instructs nothing: "you may leave" when we do not know is the one direction that
+loses a record.
+
+⛔ **INDEPENDENCE IS PINNED, NOT ASSUMED:** `upfront+browser` and `deducted+server` must render
+coherently, and flipping either axis alone must change the render.
+
+# ⭐ A DISCRIMINATOR THAT WAS NOT ONE — RIGHT ONLY BY COINCIDENCE
+
+The first draft chose the "You receive" figure by FIELD PRESENCE:
+
+    const receive = has(quote.netUsdc) ? quote.netUsdc : quote.netPredicted;
+
+It works in production — but only because the two producers happen to use different field names, so
+naming CORRELATES with mechanic. Hand it a quote carrying both and it returns the **upfront** figure
+for a **deducted** bridge: "You receive 1.000000" on a bridge that delivers 0.945700, under the
+right label, with nothing about it looking wrong.
+
+⭐⭐ **THIS IS THE SAME SHAPE AS `origin` PROXYING FOR "CAN CIRCLE BE ASKED"** — a field that answers
+the question correctly today because of an accident of how records happen to be made, and silently
+stops answering it when a new path appears. [[a-vendor-field-carries-its-own-discriminator]]
+**The MECHANIC now selects the branch; the producer's own figure wins within it** — re-deriving a
+number the producer already computed is the second-arithmetic-site defect `formatAmount.ts` warns
+about, and `bridgeNetUsdc(amount) === amount` makes the upfront preference equivalent, not different.
+
+# ⚠️ THE TRIPWIRE COUNTS PANELS, NOT SOURCE SITES
+
+*"This is the fee that will be charged"* must be enabled on exactly ONE panel, and the guard counts.
+⛔ A comment saying *do not copy this* does not prevent copying it.
+
+⭐⭐ **AND THE UNIT OF COUNTING CHANGED WHEN THE COMPONENT BECAME SHARED.** "One site in source" and
+"one panel showing it" stopped being the same statement the moment `BridgeQuoteSummary` served two
+panels. **Counting source sites would have gone red on the REFACTOR rather than on the COPY** —
+firing for the safe change and staying silent for the dangerous one. That is why the note is a gated
+prop rather than unconditional markup: the gate is what makes the panel countable.
+
+# 🚨 FOURTH INSTANCE: A COMMENT ABSORBED A MUTATION MEANT FOR CODE
+
+Mutation M4 — propagate the note to the second panel — reported **NOT CAUGHT**. The tripwire was
+fine. `heldFeeNote={false}` appears in the COMMENT above the JSX explaining why it is false, and the
+replace took that first occurrence. **The code was never mutated.**
+
+⛔⛔ **A MUTATION THAT DOES NOT APPLY IS INDISTINGUISHABLE FROM A GUARD THAT DOES NOT FIRE.** Both
+present as a green suite under a mutation. Only printing what the filter actually matched separated
+them — reasoning about the mutation would not have, because the reasoning was correct about a change
+that had not happened. ⭐ Fourth in this family: `pkill` matching its own shell, a partial mock
+failing at instantiation in BOTH arms, a suite matching its own header comment, and now this.
+**Assert the mutated text is the text you meant**, not merely that the string was present.
+[[a-partial-mock-fails-at-instantiation]] · [[assert-on-rendered-output-not-source-regex]]
+
+⚠️ Two more of mine, both caught by suites rather than review: a slice-replace **deleted the
+"You receive" row** and the follow-up restore silently matched nothing (I had not asserted on it);
+and a guard of mine misfired on the phrase "You receive" appearing in a COMMENT — the denial/
+self-inclusion trap, twice in one sitting.
+
+# ⚠️ ITEM 4 — THE HONEST WORDING, READY BUT NOT APPLIED
+
+*"This is the fee that will be charged — quoted just now and held for this bridge, not re-read when
+it runs."* ⛔ **OVERSTATES on both paths.** `maxFee` is a CEILING: measured, **55 of 67 third-party
+burns left surplus and 0 exceeded it**; `feeExecuted` tracks `minimumFee`. The executed fee can be
+lower than the quoted one.
+
+    READY, NOT APPLIED —
+      "This is the MOST that will be charged — quoted just now and bound to this bridge, not
+       re-read when it runs. The executed fee may be lower."
+
+⭐ It keeps the two properties the current sentence gets right (bound at quote time, not re-read) and
+fixes the one it gets wrong (exact → a maximum). Pre-existing; deliberately not changed in the same
+commit as the refactor, and the tripwire above is what stops it spreading meanwhile.
+
+# ⭐⭐ THE STALE-FIGURE PAIR — ONE FAMILY, TWO MECHANISMS
+
+Written together because the SYMPTOM is identical and the DIAGNOSIS is not: a bridge the user just
+authorised reverts on chain, after gas.
+
+    upfront    a stale QUOTE expires — the vendor signedQuote carries its own ~120s deadline, and a
+               burn submitted past it reverts, AFTER the approve has already confirmed.
+               remedy: re-quote. warning: TIMED — "this price holds for Ns".
+
+    deducted   a stale maxFee CEILING is baked into the calldata at quote time. If the real fee
+               RISES above it, the burn reverts on chain.
+               remedy: re-quote. warning: UNTIMED — "price it again if you wait", which is correct:
+               there is no deadline to quote, only drift.
+
+⛔ **NEITHER IS REFUSED UP FRONT.** Both cost gas and both surface as an on-chain revert, so a reader
+who meets one will reach for the other's explanation unless the pair is written down together.
+⚠️ And the untimed sentence is NOT a weaker version of the timed one — item 5, read not guessed: the
+two paths call DIFFERENT IRIS endpoints (`/v2/quote/burn/...` returns a signedQuote WITH an expiry;
+`/v2/burn/USDC/fees/...` returns fee tiers from which `maxFee` is computed locally). There is no
+deadline on the deducted path to plumb.
+
+---
+
 # ⭐ A HASH ACROSS A LIVE SYSTEM ANSWERS "DID ANYTHING CHANGE", NEVER "DID I CHANGE IT"
 
 **2026-09-06.** The plan-path monitor's alert path was exercised by a deliberate drill. No deploy,
