@@ -1,5 +1,90 @@
 ---
 
+# ⭐⭐ THE REFUSAL WINDOW, WITNESSED — and every pre-registered field held
+
+**2026-09-06.** Deploy `6a9dcec7dd6590144af79f16`, published 21:01:08.961Z. `9920851982df` · tree
+`c45cb52c5598` · **dirty false** · stamped 20:36:25.142Z. `test:all` **97/0/0 of 97** in 7.2 min ·
+`gate:watch` ✓ · `gate:rpc` ✓ (7 healthy, 1 transient) · `gate:deployed` **5/5** · `capture:window`
+**observed-banner** · `gate:forgery` ✓ · `gate:spec` ✓ — one `&&` chain, exit 0, so every stage
+exited 0. ⚠️ Bundle **unchanged** at `index-DLkp7_CN.js`: this deploy moved `netlify/functions` and
+`shared`, not `src`, and an identical client bundle is the correct result rather than a stale one.
+
+## ⭐⭐ THE INSTRUMENT REACHED ITS INFORMATIVE BRANCH FOR THE FIRST TIME
+
+Every prior entry in `dd-refusal-window-log.jsonl` was `no-window` — correct each time, and
+uninformative each time, because no DD bytes had changed. This deploy rotated the key, so the window
+was actually owed. **Predictions committed in `b3a426b` BEFORE the deploy; measured after:**
+
+    FIELD              PREDICTED            MEASURED
+    rotated            true (a first)       true                                    ✅
+    outcome            observed-banner      observed-banner                         ✅
+    exit               0                    0                                       ✅
+    witnessed          non-null             self-clearing / no-record               ✅
+    openedAt/closedAt  both set             21:01:28.145Z → 21:10:19.790Z           ✅
+    probes             > 1                  35                                      ✅
+    durationSeconds    ≤ ~600               532  (8m51s)                            ✅
+
+⭐ **THE `probes > 1` PREDICTION WAS THE ONE THAT TESTED THE REASONING**, not just the outcome: it
+followed from the early-break requiring `previous.ddTree === ddTree`, which rotation makes false. 35
+probes is that inference confirmed. The falsifier `no-window-despite-rotation` did not appear, so the
+branch procedure committed alongside it went unused — which is the good outcome for a branch
+procedure, not a wasted one.
+
+⚠️ **AND ONE FIGURE I QUOTED WAS STALE.** I predicted the rotation would land on `1772672eb252`; it
+landed on **`1d179a64bfbe`**. The ROTATION was predicted correctly and `previousDdTree` matched
+exactly — but `_dd-x402.mjs` and `_dd-descriptor.mjs` were edited for the two-axis copy fix *after*
+I took that reading, so the specific hash had moved on. ⭐ A measured value carried forward across
+your own later commits is stale by the same mechanism as any other copy.
+[[conversation-sourced-numbers-must-be-marked]]
+
+## THE COST, MEASURED RATHER THAN ESTIMATED
+
+**8 minutes 51 seconds of DD refusal — vault deposits unavailable — and it self-cleared.** Inside the
+10-minute canary period, nowhere near the 20-minute page-worthy threshold. That is the price accepted
+when the comment edits were batched, now a number instead of a prediction. ⭐ The batching rule paid:
+one window covered `version.mjs`, `_dd-x402.mjs`, `_dd-descriptor.mjs` and the retry-budget fix.
+
+# ⭐⭐ THE BACKFILL COMPLETED — 28 RECEIPTS, NONE ATTRIBUTED TO AN INTENT
+
+    28 undocumented burns discovered    275.790964 USDC    5 owners
+    28 receipts written                 0 with an intentId
+    15 settled to `minted` with MEASURED amounts before this deploy
+    13 written after it, settling
+
+Every receipt built from Arc **logs alone** — several for burns whose transaction bodies and receipts
+the RPC will no longer serve — and every one settled through the **deployed** sweeper and settler with
+no hand-invocation at any point.
+
+## ⭐ THE FIX PROVED ITSELF THROUGH THE DEPLOYED PATH, NOT THROUGH ME
+
+The Polygon receipt that had sat at `burn_confirmed` through 3+ ticks settled at **21:10:12**, the
+first tick after publish:
+
+    minted · delivery measured · amountDelivered 0.948001
+    mintVerifiedBy ["iris","destination-rpc"] · mintTx 0x16325d3a…
+
+`0.948001` is exactly `netPredicted` AND exactly the on-chain Amoy balance measured during the
+diagnosis. Same receipt, same sweeper, same settler — **the only thing that changed was the anchor.**
+⛔ It was deliberately never hand-invoked: a hand-settle would have proven the settler works, which was
+never in doubt, while destroying the one live instance of the state under diagnosis.
+
+## ⭐ THE ORDERING EARNED ITS KEEP, AND SO DID THE DIFF
+
+Smallest-owner-first put the one failure on our own wallet, where a wrong outcome cost us and not a
+stranger. Had all 27 gone at once, thirteen would have been born abandoned in four other people's
+histories with no path to resolution and no signal that anything was wrong.
+
+⭐ And the diff self-verified across **four separate runs** without special-casing: 61 → 62 → 76
+recorded burnHashes, 28 → 27 → 25 → 13 → 0 undocumented. Each write was excluded from the next scan
+by the same predicate that found it. [[equality-passes-vacuously-on-empty]]
+
+⚠️ `gate:rpc` was **re-read immediately before the final 13** rather than inherited from the pipeline,
+which had passed with 1 transient. It came back 8 healthy, ethereum 2/2 — and 6 of those 13 land on
+Ethereum Sepolia. The gate's own words are why: a transient "is NOT proof the endpoint is fine — it is
+proof we could not tell today."
+
+---
+
 # ⭐⭐ A REOPEN TRIGGER MUST NAME THE CAPABILITY, NOT A SHARED NOUN
 
 **2026-09-06.** `payX402Vanilla`'s reopen trigger was **"Base enters the roadmap"**, recorded hours
