@@ -10,7 +10,7 @@ import {
   destinationForDomain, DISCOVER_OUTCOME, MAX_LOG_WINDOW, isSettleable,
 } from "../netlify/functions/_bridge-discover.mjs";
 import { BRIDGE_CONTRACT } from "../netlify/functions/_bridge.mjs";
-import { isPastDeadline, isStranded } from "../netlify/functions/_bridge-receipts.mjs";
+import { isPastDeadline, isStranded, isAutoRetryExhausted, MINT_AUTO_RETRY_MAX_AGE_MS } from "../netlify/functions/_bridge-receipts.mjs";
 
 let pass = 0, fail = 0;
 const check = (l, ok, d = "") => { if (ok) { pass++; console.log(`  ✅ ${l}`); } else { fail++; console.log(`  ❌ ${l}${d ? `  — ${d}` : ""}`); } };
@@ -133,6 +133,48 @@ check("   …and the real isStranded would NEVER pick it up (the silent-forever 
   isStranded(noTs, Date.parse("2026-09-06T00:00:00Z")) === false);
 check("   …which is why it must be refused rather than written",
   isSettleable(noTs) === false && noTs.burnedAt === null);
+
+console.log("\n── 7. ⭐⭐ THE RETRY BUDGET MEASURES FROM DISCOVERY, FOR DISCOVERED ONLY ─");
+// The budget stops ENDLESS RETRIES; it is not a statement about the age of the money. A backfilled
+// receipt is born older than 7 days and has had ZERO attempts, so anchoring on the burn abandons it
+// on arrival — measured on a real receipt that sat through 3+ ticks with the money verifiably
+// delivered. The exemption is narrow, bounded, fails closed, and is the ONE place origin is read.
+const DAY = 86400000, NOW = Date.parse("2026-09-06T20:00:00Z");
+const old9d = "2026-08-28T21:52:47.000Z";      // ~9 days before NOW
+const fresh  = "2026-09-06T19:29:07.000Z";     // minutes before NOW
+
+check("🚨 an ORDINARY receipt older than 7d is STILL abandoned — the rule is not relaxed",
+  isAutoRetryExhausted({ burnedAt: old9d }, NOW) === true);
+check("   …and one with a null origin too (agent receipts carry none)",
+  isAutoRetryExhausted({ burnedAt: old9d, origin: null, discoveredAt: fresh }, NOW) === true);
+check("   …and `user-signed` gets no exemption either",
+  isAutoRetryExhausted({ burnedAt: old9d, origin: "user-signed", discoveredAt: fresh }, NOW) === true);
+check("🚨 a CHAIN-DISCOVERED receipt with an old burn and a FRESH discovery is NOT abandoned",
+  isAutoRetryExhausted({ burnedAt: old9d, origin: "chain-discovered", discoveredAt: fresh }, NOW) === false);
+check("   …so the real isStranded selects it, which is what hands it to the settler",
+  isStranded({ state: "burn_confirmed", burnedAt: old9d, origin: "chain-discovered", discoveredAt: fresh }, NOW) === true);
+
+// ⛔ THE BOUND MUST SURVIVE, or the exemption is a hole rather than a correction.
+check("⛔ a CHAIN-DISCOVERED receipt whose DISCOVERY is older than 7d IS abandoned",
+  isAutoRetryExhausted({ burnedAt: old9d, origin: "chain-discovered",
+    discoveredAt: new Date(NOW - 8 * DAY).toISOString() }, NOW) === true);
+check("   …the bound is re-anchored, not removed",
+  isAutoRetryExhausted({ burnedAt: old9d, origin: "chain-discovered",
+    discoveredAt: new Date(NOW - MINT_AUTO_RETRY_MAX_AGE_MS - 1000).toISOString() }, NOW) === true
+  && isAutoRetryExhausted({ burnedAt: old9d, origin: "chain-discovered",
+    discoveredAt: new Date(NOW - MINT_AUTO_RETRY_MAX_AGE_MS + 60000).toISOString() }, NOW) === false);
+
+// ⭐ FAILS CLOSED — a discovered receipt with no usable discoveredAt falls back to the STRICTER
+// original behaviour, never to "never exhausted".
+check("⭐ chain-discovered with NO discoveredAt falls back to burnedAt (stricter), not to exempt",
+  isAutoRetryExhausted({ burnedAt: old9d, origin: "chain-discovered" }, NOW) === true);
+check("   …and with a junk discoveredAt too",
+  isAutoRetryExhausted({ burnedAt: old9d, origin: "chain-discovered", discoveredAt: "not-a-date" }, NOW) === true);
+check("🚨 a receipt with NO dates at all is still abandoned (undateable ⇒ exhausted)",
+  isAutoRetryExhausted({ origin: "chain-discovered" }, NOW) === true);
+// The receipt this module actually writes carries what the exemption needs.
+check("⭐ the receipt discoveredReceipt() writes carries origin AND discoveredAt",
+  base.origin === "chain-discovered" && Number.isFinite(Date.parse(base.discoveredAt)));
 
 console.log(`\n${"═".repeat(72)}`);
 console.log(`${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed`);

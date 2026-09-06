@@ -85,9 +85,36 @@ export const MINT_AUTO_RETRY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
  * the read path and is reported as abandoned, so nothing is lost by declining to spin on it.
  */
 export function isAutoRetryExhausted(receipt, now = Date.now()) {
-  const burnedAt = Date.parse(receipt?.burnedAt || "");
-  if (!Number.isFinite(burnedAt)) return true;
-  return now - burnedAt >= MINT_AUTO_RETRY_MAX_AGE_MS;
+  // ═══ ⭐⭐ THE BUDGET IS ABOUT ATTEMPTS, SO IT MEASURES FROM WHEN ATTEMPTS COULD START ═════════
+  // MEASURED 2026-09-06, on a real stuck receipt. The budget exists because ONE record was retried
+  // ~1,730 times and kept `stranded` permanently >= 1 — a concern about ENDLESS RETRIES, not about
+  // the age of the money. It assumes a receipt starts life fresh and AGES into the bucket.
+  //
+  // 🚨 A CHAIN-DISCOVERED RECEIPT STARTS LIFE OLD. Backfilled from logs, its burn may be nine days
+  // in the past while the record is five minutes old and has had ZERO attempts. Measured from the
+  // burn it is abandoned ON ARRIVAL: never selected, never POSTed to the settler, never one try.
+  // That is not the budget doing its job — it is the budget answering a question it was not asked.
+  // A real instance sat at burn_confirmed through 3+ ticks with IRIS COMPLETE, both destination
+  // RPCs serving the mint receipt, and the money verifiably delivered.
+  //
+  // ⛔ THE EXEMPTION IS NARROW BY CONSTRUCTION AND MUST STAY THAT WAY:
+  //   · only `origin === "chain-discovered"` — ordinary receipts keep the 7-day rule from the burn,
+  //     and that rule is load-bearing (see the block above; do NOT relax it generally);
+  //   · the BOUND STILL EXISTS, just re-anchored — a discovered receipt whose DISCOVERY is itself
+  //     older than 7 days abandons exactly like any other. An exemption without a bound is a hole;
+  //   · and it FAILS CLOSED — a chain-discovered receipt with no usable `discoveredAt` falls back
+  //     to `burnedAt`, i.e. to the stricter original behaviour, never to "never exhausted".
+  //
+  // ⛔⛔ THIS IS THE ONE PLACE `origin` IS READ AS A DISCRIMINATOR, AND IT IS AN EXCEPTION, NOT AN
+  // OPENING. The standing rule — origin labels PROVENANCE and nothing branches on it — still holds
+  // everywhere else, and `verify-bridge-discover` §3 still runs the whole discovery pipeline under
+  // all three origin values asserting byte-identical output. If a second branch on origin ever
+  // appears, that is a design change to argue for, not a precedent this line already set.
+  const anchor = receipt?.origin === "chain-discovered" && Number.isFinite(Date.parse(receipt?.discoveredAt || ""))
+    ? Date.parse(receipt.discoveredAt)
+    : Date.parse(receipt?.burnedAt || "");
+  if (!Number.isFinite(anchor)) return true;
+  return now - anchor >= MINT_AUTO_RETRY_MAX_AGE_MS;
 }
 
 /**
