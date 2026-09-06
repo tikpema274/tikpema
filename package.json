@@ -136,7 +136,8 @@
     "test:refusalquantity": "node --experimental-test-module-mocks scripts/verify-refusal-quantity.mjs",
     "test:injectedclaims": "node scripts/verify-model-injected-claims.mjs",
     "test:reachability": "node scripts/verify-assertion-reachability.mjs",
-    "test:planwatch": "node scripts/verify-plan-path-watch.mjs"
+    "test:planwatch": "node scripts/verify-plan-path-watch.mjs",
+    "test:plancontract": "node --experimental-test-module-mocks scripts/verify-plan-execution-contract.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -254,6 +255,7 @@
     "test:refusalquantity",
     "test:injectedclaims",
     "test:reachability",
-    "test:planwatch"
+    "test:planwatch",
+    "test:plancontract"
   ]
 }

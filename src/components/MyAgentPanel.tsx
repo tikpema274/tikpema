@@ -817,11 +817,20 @@ function AgentSummary({
         )}
         {planRun?.blocked && <div style={{ marginTop: 6 }}>Plan blocked — {planRun.blocked}.</div>}
         {planRun?.error && <div style={{ marginTop: 6, color: "var(--warn)" }}>Error — {planRun.error}.</div>}
-        {planRun?.executed && (
+        {/* ⭐ GATED ON `results`, NOT ON `executed`. This used to read `planRun?.executed`, which was
+            a hardcoded `true` — so the branch fired for a plan that ran NOTHING and told the reader
+            "Stopped at step 1 — remaining steps not run", implying step 1 had been attempted and
+            the rest skipped. Nothing had run at all. `executed` is now true only when a step
+            actually ran, so gating on it here would hide the outcome of a total refusal entirely;
+            the presence of `results` is what means "the plan was attempted, here is what happened".
+            ⚠️ The REASON renders above, from the top-level `blocked` the response now carries. */}
+        {planRun?.results && (
           <div style={{ marginTop: 6 }}>
             {planRun.completed
               ? "All steps executed."
-              : `Stopped at step ${(planRun.stoppedAt ?? 0) + 1} — remaining steps not run.`}
+              : planRun.stepsRun === 0
+                ? `Nothing ran — stopped at step ${(planRun.stoppedAt ?? 0) + 1}.`
+                : `Ran ${planRun.stepsRun} of ${planRun.stepsTotal} — stopped at step ${(planRun.stoppedAt ?? 0) + 1}.`}
           </div>
         )}
       </div>

@@ -358,15 +358,32 @@ export async function handler(event) {
   // receipt; every other step type has no receipt to carry it, so a plan that stopped before
   // its first bridge leaves only the log line above. That is a real remaining gap, stated
   // rather than papered over — "the plan ran" is not itself persisted anywhere.
+  const stepsRun = results.filter((r) => r.ok).length;
   return json(200, {
-    executed: true,
+    // ═══ ⛔⛔ TRUE IN EVERY CASE — IT WAS A HARDCODED `true` ═══════════════════════════════════
+    // This literal meant "the executor phase was entered", which is not what the word says. A plan
+    // refused at the FIRST step answered `executed: true` having moved nothing — measured live
+    // 2026-09-05: `executed:true, stepsRun:0, stoppedAt:0, completed:false`, receipts unchanged.
+    // ⭐ The name was false in exactly the case a reader most needs it true, and a monitor keyed on
+    // it would have reported a healthy run during a total refusal. plan-path-watch had to route
+    // around the field entirely; this is the field catching up to its own name.
+    // ⚠️ NOT A RENAME. Renaming would break every client for a field whose MEANING was the bug —
+    // the honest fix is to make the existing name true. [[field-name-must-be-true-in-every-case]]
+    executed: stepsRun > 0,
     completed: allOk,
     quoteId,
     totalUsdc,
     ceiling,
     stoppedAt,          // null if all ran; else the index that stopped the plan
-    stepsRun: results.filter((r) => r.ok).length,
+    stepsRun,
     stepsTotal: plan.length,
+    // ⭐⭐ THE STOPPING REASON, HOISTED — AND THIS WAS A USER-FACING HOLE. It lived only in
+    // `results[stoppedAt].blocked`, and the panel renders a TOP-LEVEL `blocked` which this response
+    // never carried. So a plan refused at the per-bridge cap told the user "Stopped at step 1" and
+    // NEVER SAID WHY, while the reason sat in the payload unread.
+    // ⚠️ Null when every step ran, so its presence means "something stopped this" rather than
+    // needing a reader to compare it against `completed`.
+    blocked: stoppedAt === null ? null : (results[stoppedAt]?.blocked ?? results[stoppedAt]?.error ?? null),
     results,
   });
 }

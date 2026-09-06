@@ -32,7 +32,8 @@ const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm
 const res = (over = {}) => ({ status: 200, contentType: "application/json", body: "{}", networkError: null, timedOut: false, ...over });
 const json = (o) => JSON.stringify(o);
 /** The real production shape of a cap refusal, verbatim from the live probe on 2026-09-05. */
-const CAP_BODY = { executed: true, completed: false, stoppedAt: 0, stepsRun: 0, stepsTotal: 1, totalUsdc: 200,
+const CAP_BODY = { executed: false, completed: false, stoppedAt: 0, stepsRun: 0, stepsTotal: 1, totalUsdc: 200,
+  blocked: `step ~${(PROBE_AMOUNT_USDC + 0.053947).toFixed(2)} exceeds per-bridge limit of 25 USDC`,
   results: [{ index: 0, ok: false, blocked: `step ~${(PROBE_AMOUNT_USDC + 0.053947).toFixed(2)} exceeds per-bridge limit of 25 USDC` }] };
 /** The real outage shape, verbatim. */
 const OUTAGE_BODY = { executed: false, blocked: "cannot value plan: cannot value a bridge without its fee — the day ceiling bounds amount + fee" };
@@ -54,9 +55,16 @@ section("1 ⛔⛔ IT CANNOT KEY ON `executed` — the field that lies");
   // 🚨 THE WHOLE POINT. The live cap refusal answers executed:true having run nothing; the live
   // outage answers executed:false. A probe keyed on `executed` would therefore call the REFUSAL
   // healthy and the OUTAGE unhealthy — inverted on the case that matters.
-  ok("⭐ the healthy fixture really does carry executed:true (or this section is vacuous)",
-    CAP_BODY.executed === true);
-  ok("⭐ …and the outage fixture carries executed:false", OUTAGE_BODY.executed === false);
+  // ⭐⭐ THE ARGUMENT GOT STRONGER WHEN THE FIELD WAS FIXED. `executed` was a hardcoded `true`; it
+  // now means `stepsRun > 0`. So ALL THREE non-executing shapes report `executed: false` — the cap
+  // refusal (healthy), the acknowledge refusal (healthy) and the valuation outage (broken). One
+  // value now spans two healthy states AND the broken one, so the field partitions nothing at all.
+  // ⚠️ Before the fix the cap and outage happened to DIFFER on it, and a probe keyed on `executed`
+  // would have looked correct against that pair. It no longer even has that accident to hide behind.
+  ok("⭐ the healthy cap fixture reports executed:false — nothing ran", CAP_BODY.executed === false);
+  ok("⭐ …the outage fixture also reports executed:false", OUTAGE_BODY.executed === false);
+  ok("⭐⭐ …so `executed` is IDENTICAL across a healthy and a broken shape",
+    CAP_BODY.executed === OUTAGE_BODY.executed);
 
   const healthy = judgePlanProbe(res({ body: json(CAP_BODY) }), SPEND);
   const outage = judgePlanProbe(res({ body: json(OUTAGE_BODY) }), SPEND);
@@ -74,9 +82,10 @@ section("1 ⛔⛔ IT CANNOT KEY ON `executed` — the field that lies");
   const ack = judgePlanProbe(res({ body: json(ACK_BODY) }), SPEND);
   ok("⭐⭐ the ACK refusal is HEALTHY — a priced decision was reached",
     ack.outcome === OUTCOME.HEALTHY, `${ack.outcome}/${ack.reason}`);
-  ok("⭐⭐⭐ …and it shares `executed:false` with the OUTAGE — one value, two opposite verdicts",
-    ACK_BODY.executed === false && OUTAGE_BODY.executed === false &&
-    ack.outcome === OUTCOME.HEALTHY && outage.outcome === OUTCOME.BLOCKED);
+  ok("⭐⭐⭐ …and ALL THREE shapes share `executed:false` while splitting healthy/healthy/broken",
+    ACK_BODY.executed === false && OUTAGE_BODY.executed === false && CAP_BODY.executed === false &&
+    ack.outcome === OUTCOME.HEALTHY && outage.outcome === OUTCOME.BLOCKED &&
+    judgePlanProbe(res({ body: json(CAP_BODY) }), SPEND).outcome === OUTCOME.HEALTHY);
   ok("⭐ the ACK path is legitimately `unverified` — it returns BEFORE the executor is entered",
     ack.spend.state === "unverified");
 
