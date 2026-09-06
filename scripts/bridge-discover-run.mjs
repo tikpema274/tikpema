@@ -57,43 +57,53 @@ const to = BigInt(arg("--to", head.toString()));
 const windows = blockWindows(from, to);
 console.log(`scanning blocks ${from}..${to} in ${windows.length} window(s) of ≤9,999\n`);
 
-let served = 0, transfersFound = 0;
+// ⭐⭐ RESUME UNTIL COMPLETE. A single pass on a throttled endpoint is a PARTIAL scan, and a partial
+// scan may never report "none" — so the census re-runs ONLY the windows that failed, until every
+// window in the range has been served or the passes are exhausted. Anything short of that stays
+// UNREADABLE, which is the whole point of the per-tick rule.
+let transfersFound = 0;
 const candidates = [];
-for (const [i, w] of windows.entries()) {
-  try {
-    const t = await withBackoff(() => c.getLogs({ address: CONTRACTS.USDC, event: TRANSFER,
-      args: { from: ownerList, to: BRIDGE_CONTRACT }, fromBlock: w.fromBlock, toBlock: w.toBlock }));
-    // ⭐ the DepositForBurn read is only paid for when a Transfer actually matched
-    let d = [];
-    if (t.length) {
-      transfersFound += t.length;
-      // ⭐ NARROWED ON THE INDEXED TOPICS. Unfiltered, this returns every DepositForBurn on Arc in
-      // the window and the RPC answers "Request exceeds defined limit" — which correctly made the
-      // whole tick UNREADABLE, but scanned nothing.
-      // ⭐⭐ AND THE FILTER IS `depositor`, THE VERY FIELD THE OWNER BINDING MAY NOT USE. It is
-      // useless for attribution BECAUSE it is always the Kit, which is exactly what makes it a
-      // perfect filter. Same fact, opposite conclusions — see joinBurns.
-      d = await withBackoff(() => c.getLogs({ address: TOKEN_MESSENGER_V2, event: DFB,
-        args: { burnToken: CONTRACTS.USDC, depositor: BRIDGE_CONTRACT },
-        fromBlock: w.fromBlock, toBlock: w.toBlock }));
-    }
-    served++;
-    candidates.push(...joinBurns({
-      transfers: t.map((l) => ({ transactionHash: l.transactionHash, from: l.args.from, to: l.args.to,
-        value: l.args.value.toString(), blockNumber: l.blockNumber })),
-      deposits: d.map((l) => ({ transactionHash: l.transactionHash, depositor: l.args.depositor,
-        amount: l.args.amount.toString(), maxFee: l.args.maxFee.toString(),
-        destinationDomain: l.args.destinationDomain, mintRecipient: "0x" + l.args.mintRecipient.slice(26) })),
-    }));
-  } catch (e) {
-    console.log(`  window ${i + 1}/${windows.length} (${w.fromBlock}..${w.toBlock}) ❌ ${String(e.shortMessage || e.message).slice(0, 60)}`);
+const served = new Set();
+let pending = windows.map((w, i) => ({ ...w, i }));
+const MAX_PASSES = Number(arg("--passes", "8"));
+
+for (let pass = 1; pass <= MAX_PASSES && pending.length; pass++) {
+  const failed = [];
+  console.log(`pass ${pass}: ${pending.length} window(s) to scan`);
+  for (const w of pending) {
+    try {
+      const t = await withBackoff(() => c.getLogs({ address: CONTRACTS.USDC, event: TRANSFER,
+        args: { from: ownerList, to: BRIDGE_CONTRACT }, fromBlock: w.fromBlock, toBlock: w.toBlock }));
+      let d = [];
+      if (t.length) {
+        transfersFound += t.length;
+        // ⭐ NARROWED ON INDEXED TOPICS — and the filter is `depositor`, the very field the owner
+        // binding may not use. Useless for attribution BECAUSE it is always the Kit, which is
+        // exactly what makes it a perfect filter. See joinBurns.
+        d = await withBackoff(() => c.getLogs({ address: TOKEN_MESSENGER_V2, event: DFB,
+          args: { burnToken: CONTRACTS.USDC, depositor: BRIDGE_CONTRACT },
+          fromBlock: w.fromBlock, toBlock: w.toBlock }));
+      }
+      served.add(w.i);
+      candidates.push(...joinBurns({
+        transfers: t.map((l) => ({ transactionHash: l.transactionHash, from: l.args.from, to: l.args.to,
+          value: l.args.value.toString(), blockNumber: l.blockNumber })),
+        deposits: d.map((l) => ({ transactionHash: l.transactionHash, depositor: l.args.depositor,
+          amount: l.args.amount.toString(), maxFee: l.args.maxFee.toString(),
+          destinationDomain: l.args.destinationDomain, mintRecipient: "0x" + l.args.mintRecipient.slice(26) })),
+      }));
+    } catch { failed.push(w); }
+    await new Promise((r) => setTimeout(r, 150));
   }
-  if ((i + 1) % 25 === 0) process.stdout.write(`  …${i + 1}/${windows.length} windows, ${candidates.length} candidates\n`);
-  await new Promise((r) => setTimeout(r, 150));
+  console.log(`  pass ${pass}: ${pending.length - failed.length} served, ${failed.length} failed`);
+  pending = failed;
+  if (pending.length) await new Promise((r) => setTimeout(r, 4000));
 }
+if (pending.length) console.log(`\n⚠️ ${pending.length} window(s) NEVER served: ` +
+  pending.map((w) => `${w.fromBlock}..${w.toBlock}`).join(", "));
 
 const undocumented = diffUndocumented(candidates, recorded);
-const v = sweepVerdict({ windowsAttempted: windows.length, windowsServed: served, discovered: undocumented });
+const v = sweepVerdict({ windowsAttempted: windows.length, windowsServed: served.size, discovered: undocumented });
 
 console.log(`\n${"═".repeat(76)}`);
 console.log(`OUTCOME  ${v.outcome.toUpperCase()}   advanceCursor=${v.advanceCursor}`);

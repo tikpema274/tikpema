@@ -7,9 +7,10 @@
 
 import {
   blockWindows, joinBurns, diffUndocumented, discoveredReceipt, sweepVerdict,
-  destinationForDomain, DISCOVER_OUTCOME, MAX_LOG_WINDOW,
+  destinationForDomain, DISCOVER_OUTCOME, MAX_LOG_WINDOW, isSettleable,
 } from "../netlify/functions/_bridge-discover.mjs";
 import { BRIDGE_CONTRACT } from "../netlify/functions/_bridge.mjs";
+import { isPastDeadline, isStranded } from "../netlify/functions/_bridge-receipts.mjs";
 
 let pass = 0, fail = 0;
 const check = (l, ok, d = "") => { if (ok) { pass++; console.log(`  ✅ ${l}`); } else { fail++; console.log(`  ❌ ${l}${d ? `  — ${d}` : ""}`); } };
@@ -113,6 +114,25 @@ check("windows are contiguous and cover the range",
   && w.every((x, i) => i === 0 || x.fromBlock === w[i - 1].toBlock + 1n));
 check("a single-block range yields one window", blockWindows(5n, 5n).length === 1);
 check("an inverted range yields none", blockWindows(10n, 5n).length === 0);
+
+console.log("\n── 6. 🚨 THE RECEIPT MUST BE REACHABLE BY THE SETTLER ─────────────────");
+// ⭐⭐ ASSERTED ACROSS THE MODULE BOUNDARY, against the REAL predicates. A guard that only checked
+// "burnedAt is a string" would have passed on `null` — the exact defect this section exists for:
+// isPastDeadline returns FALSE for an unparseable burnedAt, so a null-burnedAt receipt is never
+// stranded, never settled, and renders "in flight" forever. [[binding-tested-across-what-it-binds]]
+const withTs = discoveredReceipt({ ...cand, blockTimestamp: "2026-08-28T21:52:47.000Z" });
+check("burnedAt is set from the block timestamp", withTs.burnedAt === "2026-08-28T21:52:47.000Z");
+check("🚨 …and the REAL isPastDeadline says the burn is past its mint deadline",
+  isPastDeadline(withTs, Date.parse("2026-09-06T00:00:00Z")) === true);
+check("🚨 …and the REAL isStranded picks it up, so the settler is handed it",
+  isStranded(withTs, Date.parse("2026-09-06T00:00:00Z")) === true);
+check("it is settleable", isSettleable(withTs) === true);
+const noTs = discoveredReceipt({ ...cand });
+check("⭐ MUTATION — a receipt with NO block timestamp is NOT settleable", isSettleable(noTs) === false);
+check("   …and the real isStranded would NEVER pick it up (the silent-forever row)",
+  isStranded(noTs, Date.parse("2026-09-06T00:00:00Z")) === false);
+check("   …which is why it must be refused rather than written",
+  isSettleable(noTs) === false && noTs.burnedAt === null);
 
 console.log(`\n${"═".repeat(72)}`);
 console.log(`${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed`);

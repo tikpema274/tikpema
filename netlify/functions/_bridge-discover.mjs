@@ -140,7 +140,16 @@ export function discoveredReceipt(c, { discoveredAt = new Date().toISOString() }
     owner: c.owner,
     burnHash: c.burnHash,
     burnTx: c.burnHash,
-    burnedAt: null,                 // ⚠️ the log gives a block, not a wall clock we verified
+    // ═══ 🚨 burnedAt IS LOAD-BEARING, NOT DECORATION — CAUGHT BEFORE THE FIRST WRITE ═══════════
+    // This was `null`, on the reasoning that a log gives a block and not a wall clock. That was
+    // over-cautious AND WRONG IN THE DANGEROUS DIRECTION: `isPastDeadline` returns FALSE for an
+    // unparseable burnedAt ("unknown burn time ⇒ never auto-escalate"), and `isStranded` routes
+    // burn_confirmed straight through it. A receipt with a null burnedAt is therefore NEVER swept —
+    // it sits at burn_confirmed, rendering "in flight", FOREVER, for money that landed days ago.
+    // ⭐ The block timestamp IS a verified chain fact and is readable for old blocks (measured: the
+    // 9-day-old burn's header returns 2026-08-28T21:52:47Z, matching the explorer to the second).
+    // Setting it makes the receipt MORE truthful, not less. [[binding-tested-across-what-it-binds]]
+    burnedAt: c.blockTimestamp ?? null,
     blockNumber: c.blockNumber != null ? String(c.blockNumber) : null,
     submittedAt: null,              // ⛔ we did not see it submitted. Null is the honest answer.
     state: "burn_confirmed",
@@ -198,6 +207,17 @@ export function sweepVerdict({ windowsAttempted = 0, windowsServed = 0, discover
       ? `${discovered.length} undocumented burn(s) across ${windowsServed} window(s).`
       : `no undocumented burns across ${windowsServed} window(s), all served.`,
   };
+}
+
+/**
+ * ⛔ REFUSE TO WRITE A RECEIPT THAT CAN NEVER BE SETTLED. A discovered receipt whose `burnedAt` does
+ * not parse is unreachable by `isStranded` — the settler will never be handed it — so writing one
+ * would create a permanently-pending row about money that already moved. That is strictly worse
+ * than the gap it was meant to close.
+ * ⭐ An unreadable block timestamp is an `unreadable` outcome, NOT a receipt.
+ */
+export function isSettleable(receipt) {
+  return Number.isFinite(Date.parse(receipt?.burnedAt || ""));
 }
 
 export const DISCOVER_CONSTANTS = Object.freeze({ USDC: CONTRACTS.USDC, KIT: BRIDGE_CONTRACT, TOKEN_MESSENGER_V2 });
