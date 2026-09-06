@@ -63,7 +63,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { encodeFunctionData, pad, getAddress, createPublicClient, http, formatUnits } from "viem";
-import { BRIDGE_DESTINATIONS } from "../netlify/functions/_bridge.mjs";
+import { BRIDGE_DESTINATIONS, resolveDestinationStrict } from "../netlify/functions/_bridge.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -78,7 +78,41 @@ const ARC = {
 // ⭐ DERIVED, NOT A LITERAL. `0` was written here by hand, and 0 is also what an absence coerces
 // to — so a hand-typed 0 and a missing value were indistinguishable at the point of use. It now
 // reads the same registry the quote path and the receipt renderer read.
-const SEPOLIA = { cctpDomain: BRIDGE_DESTINATIONS.ethereum.cctpDomain };
+// ═══ ⛔⛔ THE DESTINATION IS RESOLVED, NEVER DEFAULTED ═════════════════════════════════════════
+// The hand-typed `{ cctpDomain: 0 }` is gone, and a CLI flag must not smuggle it back. A default
+// destination is the domain-0 fail-open wearing a flag: an absent or misspelled name would quietly
+// send money to whichever chain the default names, and the receipt would state that chain as fact.
+// ⭐ So there is NO fallback. Missing refuses (9), unrecognised refuses (10), and the two say
+// different things because they are different mistakes — one is "you forgot", the other is "that is
+// not a place". [[absence-must-never-read-as-safe]]
+//
+// ⭐ AND IT RESOLVES THROUGH `resolveDestinationStrict`, the same producer the quote path uses —
+// exact key or exact alias, no contains-match. A second resolver here would be a second answer to
+// "where is this money going".
+function resolveDest(raw) {
+  if (raw == null || String(raw).trim() === "") {
+    console.log(
+      `\n⛔ REFUSING — no destination given.\n` +
+      `   This tool does not have a default destination, deliberately: defaulting would send real\n` +
+      `   money to a chain nobody named, and the receipt would record that chain as fact.\n` +
+      `   Pass --dest <name> or SPIKE_DEST=<name>.\n` +
+      `   Known: ${Object.keys(BRIDGE_DESTINATIONS).join(", ")}`);
+    process.exit(9);
+  }
+  const d = resolveDestinationStrict(raw);
+  if (!d) {
+    console.log(
+      `\n⛔ REFUSING — "${raw}" is not a destination this deployment knows.\n` +
+      `   It was NOT interpreted loosely and NOT replaced with a default: a misspelled chain that\n` +
+      `   silently resolves to another one is how money lands somewhere nobody chose.\n` +
+      `   Known: ${Object.keys(BRIDGE_DESTINATIONS).join(", ")}`);
+    process.exit(10);
+  }
+  return d;
+}
+const DEST = resolveDest(
+  (process.argv.includes("--dest") ? process.argv[process.argv.indexOf("--dest") + 1] : null)
+  ?? process.env.SPIKE_DEST ?? null);
 const BRIDGE = "0xC5567a5E3370d4DBfB0540025078e283e36A363d"; // BridgingKitContract (Arc testnet)
 const IRIS = "https://iris-api-sandbox.circle.com"; // testnet IRIS
 const FAST_FINALITY = 1000; // FAST tier
@@ -142,8 +176,8 @@ async function irisJson(url) {
 
 // maxFee = providerFee (CCTP fast-burn) + forwarderFee, computed exactly as the SDK does.
 async function computeMaxFee(amountMinor) {
-  const burn = await irisJson(`${IRIS}/v2/burn/USDC/fees/${ARC.cctpDomain}/${SEPOLIA.cctpDomain}`);
-  const fwd = await irisJson(`${IRIS}/v2/burn/USDC/fees/${ARC.cctpDomain}/${SEPOLIA.cctpDomain}?forward=true`);
+  const burn = await irisJson(`${IRIS}/v2/burn/USDC/fees/${ARC.cctpDomain}/${DEST.cctpDomain}`);
+  const fwd = await irisJson(`${IRIS}/v2/burn/USDC/fees/${ARC.cctpDomain}/${DEST.cctpDomain}?forward=true`);
   const burnTier = burn.find((t) => t.finalityThreshold === FAST_FINALITY);
   const fwdTier = fwd.find((t) => t.finalityThreshold === FAST_FINALITY);
   if (!burnTier || !fwdTier) throw new Error("no FAST fee tier from IRIS");
@@ -193,7 +227,7 @@ async function main() {
     destinationCaller: ZERO_HASH, // any caller may claim (relayer)
     burnToken: ARC.usdc,
     feeRecipient: BRIDGE, // default (no custom fee)
-    destinationDomain: SEPOLIA.cctpDomain,
+    destinationDomain: DEST.cctpDomain,
     minFinalityThreshold: FAST_FINALITY,
   };
   const callData = encodeFunctionData({ abi: BRIDGE_ABI, functionName: "bridgeWithPreapprovalAndHook", args: [bridgeParams, FORWARD_HOOK] });
@@ -309,7 +343,7 @@ async function main() {
     const blk = await pub.getBlock({ blockNumber: (await pub.getTransactionReceipt({ hash: burnHash })).blockNumber });
     const r = discoveredReceipt({
       burnHash, owner: from.toLowerCase(), amountMinor: amountMinor.toString(),
-      maxFeeMinor: maxFee.toString(), destinationDomain: SEPOLIA.cctpDomain,
+      maxFeeMinor: maxFee.toString(), destinationDomain: DEST.cctpDomain,
       mintRecipient: to.toLowerCase(), blockNumber: (await pub.getTransactionReceipt({ hash: burnHash })).blockNumber,
       blockTimestamp: new Date(Number(blk.timestamp) * 1000).toISOString(),
     }, { origin: RECEIPT_ORIGIN.TOOL_SIGNED });
@@ -340,7 +374,7 @@ async function main() {
     const state = m?.forwardState || m?.status;
     if (i % 3 === 0) console.log(`  …forwardState=${m?.forwardState ?? "?"} status=${m?.status ?? "?"}`);
     if (m?.forwardTxHash && (m?.forwardState === "CONFIRMED" || m?.status === "complete")) {
-      console.log("  ✅ Sepolia mint tx:", `https://sepolia.etherscan.io/tx/${m.forwardTxHash}`);
+      console.log(`  ✅ ${DEST.label} mint tx:`, `${DEST.explorerTx}${m.forwardTxHash}`);
       console.log("\nDONE — end-to-end bridge complete.");
       return;
     }

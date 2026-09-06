@@ -190,8 +190,45 @@ for (const absent of [null, "", false, undefined, NaN, "abc", 1.5, {}]) {
 }
 check("⭐ and the unknown label SAYS it is unknown rather than naming a chain",
   /unknown CCTP domain/.test(destinationForDomain(null).label));
-check("⭐ the script DERIVES its domain from the registry, not a hand-typed 0",
-  /BRIDGE_DESTINATIONS\.ethereum\.cctpDomain/.test(bsrc) && !/const SEPOLIA = \{ cctpDomain: 0 \}/.test(bsrc));
+check("⭐ the script no longer hand-types a DESTINATION domain at all",
+  !/const SEPOLIA = \{ cctpDomain: 0 \}/.test(bsrc) && !/SEPOLIA/.test(bsrc));
+
+console.log("\n── 8. ⛔ THE DESTINATION IS RESOLVED, NEVER DEFAULTED ──────────────────");
+// ⭐ A default destination would be the domain-0 fail-open wearing a CLI flag: an absent or
+// misspelled name would send real money to whichever chain the default names, and the receipt would
+// record that chain as fact. So there is no fallback — and the two mistakes refuse differently,
+// because "you forgot" and "that is not a place" are different mistakes.
+const runDest = (args) => spawnSync(process.execPath, ["scripts/bridge-direct.mjs", ...args], { encoding: "utf8" });
+const missing = runDest(["--dry-run"]);
+const unknown = runDest(["--dry-run", "--dest", "nowhere"]);
+check("🚨 a MISSING destination refuses with exit 9", missing.status === 9, `saw ${missing.status}`);
+check("🚨 an UNRECOGNISED destination refuses with exit 10", unknown.status === 10, `saw ${unknown.status}`);
+check("⭐ the two are DISTINGUISHABLE by exit code", missing.status !== unknown.status);
+check("⭐ …and by message — 'no destination given' vs 'not a destination this deployment knows'",
+  /no destination given/.test(missing.stdout) && /is not a destination this deployment knows/.test(unknown.stdout));
+check("🚨 neither falls back to a chain — no destination is named as chosen",
+  !/Ethereum \(Sepolia\) selected|defaulting to/i.test(missing.stdout + unknown.stdout));
+check("   …and the missing case SAYS there is deliberately no default",
+  /does not have a default destination, deliberately/.test(missing.stdout));
+check("   …and the unknown case says it was not interpreted loosely",
+  /NOT interpreted loosely/.test(unknown.stdout));
+check("both list the known destinations so the fix is obvious",
+  /Known: /.test(missing.stdout) && /Known: /.test(unknown.stdout));
+const dsrc = readFileSync("scripts/bridge-direct.mjs", "utf8");
+check("⭐ it resolves through resolveDestinationStrict — the quote path's own producer",
+  /resolveDestinationStrict/.test(dsrc));
+// ⚠️ ARC'S OWN SOURCE DOMAIN (26) IS A LEGITIMATE LITERAL and must stay — this script always burns
+// FROM Arc, so that is not a choice a caller makes. The defect was only ever a hand-typed
+// DESTINATION. An assertion banning every literal would be wrong AND would go red on correct code,
+// which is how a guard trains people to edit the guard.
+const codeOnly = dsrc.split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
+const domainLits = [...codeOnly.matchAll(/cctpDomain:\s*(\d+)/g)].map((m) => Number(m[1]));
+check("🚨 the ONLY hand-typed cctpDomain is Arc's own source domain",
+  domainLits.length === 1 && domainLits[0] === 26, JSON.stringify(domainLits));
+check("   …and every fee/receipt use reads DEST, not a const",
+  !/SEPOLIA/.test(dsrc) && /DEST\.cctpDomain/.test(dsrc));
+check("a VALID destination resolves and proceeds past the gate",
+  runDest(["--dry-run", "--dest", "base"]).status !== 9 && runDest(["--dry-run", "--dest", "base"]).status !== 10);
 
 console.log(`\n${"═".repeat(72)}`);
 console.log(`${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed`);
