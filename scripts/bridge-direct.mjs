@@ -26,6 +26,34 @@
 // Requires in .env: CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, AGENT_WALLET_ADDRESS
 // Optional: SPIKE_FROM (source SCA), SPIKE_TO (Sepolia recipient; default = source)
 
+
+// ═══ ⛔⛔ THE GUARD IS THIS MODULE'S FIRST EXECUTABLE STATEMENT ════════════════════════════════
+// Per the PR-4 runner: `node -e "import('./…')"` EXECUTES a module, and on an earlier spike only a
+// missing --env-file stopped a real approve — luck, not a safeguard. This file previously gated at
+// line 124, AFTER fees were fetched from IRIS and calldata was built. Loading it did network work before anything asked whether it should.
+//
+// ⚠️ AND "FIRST STATEMENT" IS NOT THE WHOLE GUARANTEE, BECAUSE ESM IMPORTS HOIST. Every `import`
+// below runs BEFORE this line regardless of where it sits in the text, so placing the guard at the
+// top buys nothing on its own — the real property is that the imported graph performs no network
+// work at load. That is not assumed: `verify-script-inert` instruments fetch AND node:http/https to
+// THROW, imports this module bare, and asserts ZERO calls. If a dependency ever starts dialling at
+// import time, that suite goes red rather than this comment quietly becoming false.
+//
+// ⛔ EXIT CODE 4, NEVER 0. A no-op that exits 0 reads as a completed run to any caller, script
+// or CI step that checks only success — which is exactly how a "dry run" becomes indistinguishable
+// from a bridge that moved money. The code is DISTINCT from the generic failure exit 1 so a refusal
+// is not confused with a crash.
+const SEND = process.argv.includes("--send") || process.argv.includes("--execute");
+if (!SEND) {
+  console.log(
+    "\n⛔ INERT — nothing was sent and NO NETWORK CALL WAS MADE.\n" +
+    "   bridge-direct MOVES REAL USDC and, when it does, writes a real receipt (origin: tool-signed).\n" +
+    "   This run wrote nothing, read nothing, and moved nothing.\n" +
+    "   Re-run with --send to actually fire it.\n"
+  );
+  process.exit(4);
+}
+
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -172,9 +200,16 @@ async function main() {
   if (bal < amountMinor) console.log(`\n⚠  Insufficient balance: have ${formatUnits(bal, 6)}, need ${amountHuman}.`);
 
   if (!execute) {
-    console.log("\nDry run only. Re-run with --execute to fire the bridge.");
+    console.log("\nDry run only. Re-run with --send to fire the bridge.");
     return;
   }
+
+  // ⛔ WOULD A BURN FROM THIS SOURCE BE INVISIBLE? Asked BEFORE the money checks, because a burn
+  // nobody can ever find is a worse outcome than one that fails for lack of balance.
+  const { checkSpikeSource } = await import("../shared/spike-source-guard.mjs");
+  const vis = checkSpikeSource({ from, acknowledged: process.argv.includes("--accept-invisible") });
+  if (!vis.ok) { console.log(`\n⛔ REFUSING TO SEND — ${vis.detail}`); process.exit(5); }
+  if (vis.detail) console.log(`\n${vis.detail}`);
   if (feeExceedsAmount) { console.log("\nRefusing to --execute: fee ≥ amount."); return; }
   if (bal < amountMinor) { console.log("\nRefusing to --execute: insufficient balance."); return; }
 
@@ -210,6 +245,41 @@ async function main() {
   });
   const burnHash = await waitForTx(client, brTx.data?.id);
   console.log("  ✅ Arc burn tx:", `${ARC.explorer}/tx/${burnHash}`);
+
+  // ═══ ⭐⭐ THE RECEIPT — SAME WRITER, SAME FOUR GATES, NO SECOND PATH ════════════════════════════
+  // This tool moves real USDC on the production path, so its burns belong in the record like any
+  // other. It reuses `discoveredReceipt` and the discovery module's gates rather than growing a
+  // second receipt writer — a parallel path is how two records of the same thing start disagreeing.
+  // ⭐ origin is `tool-signed`, NOT `chain-discovered`: nothing discovered this: the process that
+  // signed the burn witnessed it. See RECEIPT_ORIGIN for why the distinction is load-bearing.
+  // ⚠️ A FAILED WRITE IS REPORTED LOUDLY AND NEVER SWALLOWED — the money has already moved, so the
+  // only honest outcome is to say exactly which burn has no record and how to recover it.
+  try {
+    const { discoveredReceipt, isSettleable, RECEIPT_ORIGIN } = await import("../netlify/functions/_bridge-discover.mjs");
+    const { receiptKey, isStranded } = await import("../netlify/functions/_bridge-receipts.mjs");
+    const { getStore } = await import("@netlify/blobs");
+    const blk = await pub.getBlock({ blockNumber: (await pub.getTransactionReceipt({ hash: burnHash })).blockNumber });
+    const r = discoveredReceipt({
+      burnHash, owner: from.toLowerCase(), amountMinor: amountMinor.toString(),
+      maxFeeMinor: maxFee.toString(), destinationDomain: SEPOLIA.cctpDomain,
+      mintRecipient: to.toLowerCase(), blockNumber: (await pub.getTransactionReceipt({ hash: burnHash })).blockNumber,
+      blockTimestamp: new Date(Number(blk.timestamp) * 1000).toISOString(),
+    }, { origin: RECEIPT_ORIGIN.TOOL_SIGNED });
+    const store = getStore({ name: "bridge-receipts", siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_BLOBS_TOKEN });
+    const key = receiptKey(r.owner, r.burnHash);
+    // THE FOUR GATES, unchanged from the backfill path.
+    if (!isSettleable(r)) throw new Error("receipt is not settleable (no usable burnedAt)");
+    if (!isStranded(r) && r.state !== "burn_confirmed") throw new Error("receipt would not be reachable by the settler");
+    if (await store.get(key, { type: "json" }).catch(() => null)) throw new Error("a receipt already exists at this key");
+    if ("intentId" in r || "txId" in r) throw new Error("receipt claims an intent");
+    await store.setJSON(key, r);
+    console.log(`  ✅ receipt written  ${key}  (origin ${r.origin})`);
+  } catch (e) {
+    console.error(`\n🚨 THE BURN LANDED BUT NO RECEIPT WAS WRITTEN — ${e?.message || e}`);
+    console.error(`   burnHash ${burnHash}  owner ${from}`);
+    console.error(`   The money moved and this record is missing. Recover it with:`);
+    console.error(`     node scripts/bridge-discover-run.mjs   (it will find this burn from chain)`);
+  }
 
   // 3) Poll IRIS for the forwarder mint on Sepolia (relayer completes it).
   console.log("\nWaiting for Circle's Orbit relayer to mint on Sepolia (polling IRIS)…");

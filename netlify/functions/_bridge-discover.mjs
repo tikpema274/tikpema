@@ -132,7 +132,27 @@ const toUsdc = (minor) => (minor == null ? null : Number(minor) / 1e6);
  *
  * ⛔ NO `intentId`, NO `txId` OF A PARKED RECORD. See the header.
  */
-export function discoveredReceipt(c, { discoveredAt = new Date().toISOString() } = {}) {
+export const RECEIPT_ORIGIN = Object.freeze({
+  /** Found on chain afterwards by the sweeper. Nobody watched it happen. */
+  DISCOVERED: "chain-discovered",
+  /** Written by the tool that MADE the burn, at the moment it made it. */
+  TOOL_SIGNED: "tool-signed",
+});
+
+/**
+ * ⭐⭐ WHY `tool-signed` AND NOT `chain-discovered` — the label must be true, not merely convenient.
+ * A receipt written by `bridge-direct.mjs` was NOT discovered: nothing searched for it, and its
+ * existence owes nothing to the sweeper. It was WITNESSED AT SOURCE by the process that signed the
+ * burn. Reusing "chain-discovered" would be the cheapest possible lie — it would read, to anyone
+ * auditing provenance later, as evidence that discovery works on a case discovery never saw.
+ *
+ * ⚠️ AND THE TWO VALUES DIFFER IN MORE THAN WORDING. `isAutoRetryExhausted` re-anchors its budget on
+ * `discoveredAt` for `chain-discovered` ONLY, because such a receipt is born older than its burn.
+ * A `tool-signed` receipt is born SECONDS after its burn, so it needs no exemption and correctly
+ * gets none — the ordinary 7-day rule from `burnedAt` is right for it. Sharing the label would have
+ * silently handed it an exemption it does not need, which is how a narrow rule becomes a broad one.
+ */
+export function discoveredReceipt(c, { discoveredAt = new Date().toISOString(), origin = RECEIPT_ORIGIN.DISCOVERED } = {}) {
   const dest = destinationForDomain(c.destinationDomain);
   const fee = toUsdc(c.maxFeeMinor);
   return {
@@ -155,7 +175,7 @@ export function discoveredReceipt(c, { discoveredAt = new Date().toISOString() }
     state: "burn_confirmed",
     // ⭐ PROVENANCE ONLY — NOTHING BRANCHES ON IT. See verify-bridge-discover §3, which runs the
     // whole pipeline under all three origin values and asserts byte-identical output.
-    origin: "chain-discovered",
+    origin,
     destinationKey: dest.key,
     destinationLabel: dest.label,
     recipient: c.mintRecipient ?? null,
@@ -219,5 +239,9 @@ export function sweepVerdict({ windowsAttempted = 0, windowsServed = 0, discover
 export function isSettleable(receipt) {
   return Number.isFinite(Date.parse(receipt?.burnedAt || ""));
 }
+
+/** ⭐ THE SCAN SET IS store-derived ∪ operator-derived — re-exported so the runner has one import
+ *  surface and `shared/operator-wallets.mjs` stays the single definition of who the operator is. */
+export { scanOwnerSet, operatorWalletReport, OPERATOR_WALLET_VARS } from "../../shared/operator-wallets.mjs";
 
 export const DISCOVER_CONSTANTS = Object.freeze({ USDC: CONTRACTS.USDC, KIT: BRIDGE_CONTRACT, TOKEN_MESSENGER_V2 });

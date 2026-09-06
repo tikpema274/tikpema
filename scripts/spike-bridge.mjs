@@ -34,6 +34,34 @@
 //   SPIKE_FROM=0x...   (source SCA that holds the USDC; default AGENT_WALLET_ADDRESS)
 //   SPIKE_TO=0x...     (Sepolia recipient; default = same address, i.e. bridge to self)
 
+
+// ═══ ⛔⛔ THE GUARD IS THIS MODULE'S FIRST EXECUTABLE STATEMENT ════════════════════════════════
+// Per the PR-4 runner: `node -e "import('./…')"` EXECUTES a module, and on an earlier spike only a
+// missing --env-file stopped a real approve — luck, not a safeguard. This file previously gated at
+// line 74, AFTER the App Kit client and adapter were constructed. Loading it did network work before anything asked whether it should.
+//
+// ⚠️ AND "FIRST STATEMENT" IS NOT THE WHOLE GUARANTEE, BECAUSE ESM IMPORTS HOIST. Every `import`
+// below runs BEFORE this line regardless of where it sits in the text, so placing the guard at the
+// top buys nothing on its own — the real property is that the imported graph performs no network
+// work at load. That is not assumed: `verify-script-inert` instruments fetch AND node:http/https to
+// THROW, imports this module bare, and asserts ZERO calls. If a dependency ever starts dialling at
+// import time, that suite goes red rather than this comment quietly becoming false.
+//
+// ⛔ EXIT CODE 3, NEVER 0. A no-op that exits 0 reads as a completed run to any caller, script
+// or CI step that checks only success — which is exactly how a "dry run" becomes indistinguishable
+// from a bridge that moved money. The code is DISTINCT from the generic failure exit 1 so a refusal
+// is not confused with a crash.
+const SEND = process.argv.includes("--send") || process.argv.includes("--execute");
+if (!SEND) {
+  console.log(
+    "\n⛔ INERT — nothing was sent and NO NETWORK CALL WAS MADE.\n" +
+    "   spike-bridge is a FEASIBILITY PROBE. It writes NO receipt, by design — its output is not a user's bridge.\n" +
+    "   This run wrote nothing, read nothing, and moved nothing.\n" +
+    "   Re-run with --send to actually fire it.\n"
+  );
+  process.exit(3);
+}
+
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
