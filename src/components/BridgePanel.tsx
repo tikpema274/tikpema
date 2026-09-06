@@ -319,7 +319,10 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
           em-dashes directly above a confirmation carrying the real figures — two contradictory
           answers to "what did this cost", stacked. The confirmation supersedes the summary, so the
           summary goes rather than empties. [[absence-must-never-read-as-safe]] */}
-      {!run && <BridgeQuoteSummary quote={quote} destinationLabel={destLabel} secondsLeft={secondsLeft} />}
+      {!run && <BridgeQuoteSummary quote={quote} destinationLabel={destLabel} secondsLeft={secondsLeft}
+          /* ⭐ BOTH AXES STATED, neither inferred. `upfront` from the producer that priced it;
+             `server` because this path burns and writes the receipt in ONE request. */
+          mechanic={quote?.mechanic ?? "upfront"} signer="server" heldFeeNote />}
 
       {/* ⭐ ONE FULL-WIDTH BUTTON WHOSE LABEL CHANGES, not two. Two buttons would imply two
           independent actions; this is one sequence with a priced gate in the middle. Editing the

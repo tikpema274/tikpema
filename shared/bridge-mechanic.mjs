@@ -101,3 +101,69 @@ export const BRIDGE_MECHANIC_COPY = Object.freeze({
 export function bridgeMechanicCopy(v) {
   return BRIDGE_MECHANIC_COPY[bridgeMechanicOf(v)];
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// ⭐⭐ A SECOND AXIS: WHO SIGNS THE BURN — AND IT IS NOT THE MECHANIC
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+//
+// ⛔ THESE TWO KEYS CORRELATE TODAY AND ARE NOT THE SAME PROPERTY:
+//
+//     upfront  = server-burned  = leavable      (the agent path)
+//     deducted = browser-signed = must stay     (the self-signed path)
+//
+// ⚠️ THE CORRELATION IS AN ACCIDENT OF WHICH TWO PATHS EXIST, NOT A RULE. A future path can be one
+// and not the other — a `delegate` signer (a session key signing server-side on the user's behalf)
+// would be browser-INITIATED but server-RECORDED: upfront-adjacent AND leavable. Keying the
+// leave/stay sentence on `mechanic` would have made that path unrepresentable, and the coupling
+// would then live in the type instead of in a comment, which is harder to see and no less wrong.
+//
+// ⭐ NAMED FOR WHAT IT DERIVES FROM, NOT FOR ITS EFFECT. "leavable" is the CONSEQUENCE; the FACT is
+// who signs the burn and, following from that, whether the receipt write happens in the same
+// request. Naming the consequence would have hidden the reason and made the third value invisible.
+//
+// ⭐ WHY THE CONSEQUENCE MATTERS: on the browser path the burn is signed in the tab and a SECOND
+// request writes the receipt. Close the tab between them and the money still moves — the record
+// does not. So the two panels give OPPOSITE instructions at the same moment, and both are correct.
+
+/** Who signs the burn. ⭐ `unknown` claims neither instruction, for the same reason the mechanic's
+ *  `unknown` claims neither placement: a record that does not say must not be made to say. */
+export const BRIDGE_SIGNERS = Object.freeze(["server", "browser", "unknown"]);
+
+export function bridgeSignerOf(v) {
+  return BRIDGE_SIGNERS.includes(v) && v !== "unknown" ? v : "unknown";
+}
+
+/**
+ * ⛔ THE LEAVE/STAY INSTRUCTION IS A CLAIM ABOUT CUSTODY OF THE RECORD, so it lives with the fact
+ * that determines it rather than being written twice with opposite values.
+ */
+export const BRIDGE_SIGNER_COPY = Object.freeze({
+  server: Object.freeze({
+    /** Where the key is. */
+    signedBy: "signed by the server on your behalf",
+    /** Whether the tab may be closed once it starts, and why. */
+    pageInstruction: "You can leave this page once it starts — the bridge completes on its own.",
+    mustStay: false,
+  }),
+  browser: Object.freeze({
+    signedBy: "signed in this browser with your own key",
+    // ⚠️ THE MONEY IS NOT AT RISK — THE RECORD IS. Saying "your funds are at risk" would be false
+    // and would frighten someone into staying for the wrong reason; saying nothing loses the
+    // receipt. The sentence names exactly what is lost.
+    pageInstruction: "Stay on this page until the burn confirms. If you leave, the bridge still completes on-chain and your funds are not at risk — but we lose the record of it.",
+    mustStay: true,
+  }),
+  unknown: Object.freeze({
+    signedBy: "the record does not say who signed this",
+    // ⛔ NO INSTRUCTION AT ALL. Telling someone they may leave when we do not know is the one
+    // direction that loses a record; telling them to stay when they need not is a smaller harm but
+    // still a claim we cannot support. So it instructs nothing and says why.
+    pageInstruction: "",
+    mustStay: null,
+  }),
+});
+
+/** One accessor, so no surface indexes the map directly. */
+export function bridgeSignerCopy(v) {
+  return BRIDGE_SIGNER_COPY[bridgeSignerOf(v)];
+}

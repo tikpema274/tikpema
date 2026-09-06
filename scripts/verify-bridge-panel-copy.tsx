@@ -111,7 +111,10 @@ check("⛔ the held-quote promise is ABSENT before a quote exists",
     .replace(/&amp;/g, "&").replace(/&#(\d+);/g, (_: string, d: string) => String.fromCharCode(Number(d)))
     .replace(/\s+/g, " ").trim();
   check("⭐⭐ …and PRESENT once a quote exists, beside its figure",
-    /held for this bridge/i.test(quoted) && /0\.0541/.test(quoted) && /0\.9459/.test(quoted),
+    // ⚠️ 6dp, not 4. Every figure in this table moved to displayAmount(…, 6) when it became shared;
+    // the property is unchanged — the figure SHOWN is the figure SIGNED — and it is now shown to the
+    // precision USDC actually carries, so this pins more than it did before, not less.
+    /held for this bridge/i.test(quoted) && /0\.054071/.test(quoted) && /0\.945929/.test(quoted),
     "consent-fee binding: the figure shown is the figure signed");
 
   // ═══ ⭐⭐ HOW LONG THE PRICE HOLDS — RENDERED, NOT JUST COMPUTED ══════════════════════════════

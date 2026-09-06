@@ -15,3 +15,16 @@ export interface BridgeMechanicCopy {
 export declare const BRIDGE_MECHANIC_COPY: Readonly<Record<BridgeMechanic, BridgeMechanicCopy>>;
 export declare function bridgeMechanicOf(v: unknown): BridgeMechanic;
 export declare function bridgeMechanicCopy(v: unknown): BridgeMechanicCopy;
+
+// ── the SECOND axis: who signs the burn. Independent of the mechanic; see the .mjs header. ──────
+// ⚠️ `mustStay: boolean | null` — null on `unknown`, because "we do not know" is not "you may go".
+export declare const BRIDGE_SIGNERS: readonly ["server", "browser", "unknown"];
+export type BridgeSigner = "server" | "browser" | "unknown";
+export interface BridgeSignerCopy {
+  readonly signedBy: string;
+  readonly pageInstruction: string;
+  readonly mustStay: boolean | null;
+}
+export declare const BRIDGE_SIGNER_COPY: Readonly<Record<BridgeSigner, BridgeSignerCopy>>;
+export declare function bridgeSignerOf(v: unknown): BridgeSigner;
+export declare function bridgeSignerCopy(v: unknown): BridgeSignerCopy;

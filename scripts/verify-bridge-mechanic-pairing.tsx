@@ -24,7 +24,10 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   BRIDGE_MECHANICS, BRIDGE_MECHANIC_COPY, bridgeMechanicOf, bridgeMechanicCopy,
+  BRIDGE_SIGNERS, BRIDGE_SIGNER_COPY, bridgeSignerOf, bridgeSignerCopy,
 } from "../shared/bridge-mechanic.mjs";
+import React from "react";
+const { BridgeQuoteSummary } = await import("../src/components/BridgeQuoteSummary");
 import { bridgeNetUsdc, bridgeNetDeducted } from "../netlify/functions/_bridge.mjs";
 const { BridgeReceiptStatus } = await import("../src/components/bridgeReceiptStatus");
 
@@ -247,9 +250,11 @@ section("5 — ⛔ THE 4 SELF-SIGNED-ONLY SITES ARE CORRECT AND MUST NOT BE SWEP
 
     // ⭐ AND THE PANEL ACTUALLY READS THE PRODUCER — a rendered check on composed strings proves
     // the copy composes; this proves the SURFACE is wired to it rather than to its own literal.
-    check("⭐⭐ the panel renders the producer's copy, keyed by the quote's mechanic",
-      /bridgeMechanicCopy\(quote\.mechanic\)/.test(manual) &&
-      /mech\.feePlacement/.test(manual) && /mech\.arrivalPrefix/.test(manual));
+    // ⚠️ RE-POINTED. These pinned the one-line summary's INLINE implementation; that line is now the
+    // shared three-row table, so the property moved rather than disappearing. The panel's job is to
+    // THREAD the mechanic; the rendering is asserted on output in §8.
+    check("⭐⭐ the panel threads the quote's mechanic into the shared table",
+      /<BridgeQuoteSummary/.test(manual) && /mechanic=\{quote\.mechanic\}/.test(manual));
     check("⛔ …and writes NO mechanic sentence of its own",
       !/taken out of the amount/.test(mcode.replace(/A live cross-chain fee \(taken from the amount\)/g, " ")),
       "the only literal left is the pre-quote note, which is separately guarded above");
@@ -257,10 +262,10 @@ section("5 — ⛔ THE 4 SELF-SIGNED-ONLY SITES ARE CORRECT AND MUST NOT BE SWEP
       /mechanic: bridgeMechanicOf\(gate\.fee\.mechanic\)/.test(
         readFileSync("netlify/functions/user-bridge-start.mjs", "utf8")));
 
-    // ⭐ 6dp, via the shared helper. Every other amount surface moved; this was the last on 4dp.
-    check("⭐ the summary routes every figure through displayAmount at 6dp",
-      (manual.match(/displayAmount\(quote\.\w+, 6\)/g) || []).length === 3,
-      `${(manual.match(/displayAmount\(quote\.\w+, 6\)/g) || []).length} of 3`);
+    // ⭐ 6dp now lives in the shared component and is asserted on RENDERED OUTPUT in §8, which is
+    // stronger than counting call sites — it survives the figures moving between components.
+    check("⭐ the panel declares its SIGNER, so it cannot inherit the wrong page instruction",
+      /signer="browser"/.test(manual));
     check("⛔ …and no 4dp toFixed survives in this panel's quote line",
       !/quote\.\w+\.toFixed\(4\)/.test(manual));
   }
@@ -296,6 +301,111 @@ section("6 — THE ORIGIN GAP IS CLOSED, END TO END");
   check("⛔ nothing defaults to a mechanic it was not told",
     !/feeMechanic.*\?\?\s*"upfront"/.test(rec + exp) && !/feeMechanic.*\?\?\s*"deducted"/.test(rec + exp),
     "a permanent record must not assert a mechanic it never recorded");
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("7 — ⭐⭐ TWO AXES, INDEPENDENTLY KEYED");
+{
+  // ⛔ THE COUPLING THIS PREVENTS. `upfront` correlates with server-signed and `deducted` with
+  // browser-signed TODAY — an accident of which two paths exist, not a rule. Keying the leave/stay
+  // instruction on `mechanic` would make a `delegate` path (browser-INITIATED, server-RECORDED:
+  // upfront-adjacent AND leavable) unrepresentable, and the coupling would then live in the type
+  // system, where it is harder to see and no less wrong.
+  check("⭐ three signers, and `unknown` is one of them",
+    JSON.stringify(BRIDGE_SIGNERS) === JSON.stringify(["server", "browser", "unknown"]));
+  check("⭐⭐ every signer has copy", BRIDGE_SIGNERS.every((x) => !!BRIDGE_SIGNER_COPY[x]));
+  check("⛔ an unrecognised signer normalises to `unknown`, never a guess",
+    bridgeSignerOf("delegate") === "unknown" && bridgeSignerOf(undefined) === "unknown");
+  check("⛔⛔ `unknown` instructs NOTHING — 'you may leave' when we do not know is the one direction that loses a record",
+    bridgeSignerCopy("unknown").pageInstruction === "" && bridgeSignerCopy("unknown").mustStay === null);
+  check("⭐⭐ the two instructions are OPPOSITE and both non-empty — or the keying buys nothing",
+    bridgeSignerCopy("server").mustStay === false && bridgeSignerCopy("browser").mustStay === true &&
+    bridgeSignerCopy("server").pageInstruction !== bridgeSignerCopy("browser").pageInstruction);
+
+  // ═══ ⭐⭐⭐ THE INDEPENDENCE FIXTURES — combinations that do not exist today MUST still render ═══
+  // If `upfront + browser` or `deducted + server` were unreachable, the axes would be coupled in the
+  // TYPES rather than in the code — the same defect wearing a different hat.
+  const q = { amountUsdc: 1, feeUsdc: 0.0543, netUsdc: 1, netPredicted: 0.9457 };
+  const render = (mechanic, signer) => strip(
+    React.createElement(BridgeQuoteSummary, { quote: q, destinationLabel: "Base (Sepolia)", mechanic, signer, heldFeeNote: false }));
+  const combos = [
+    ["upfront", "server"], ["deducted", "browser"],
+    ["upfront", "browser"],
+    ["deducted", "server"],
+  ];
+  for (const [m, sg] of combos) {
+    const out = render(m, sg);
+    check(`⭐ ${m} + ${sg} renders coherently — the axes are not coupled`,
+      out.length > 0 && /Fee/.test(out) && /You receive/.test(out) && /Leaves your wallet/.test(out));
+    check(`   …with the ${m} placement and the ${sg} instruction, independently`,
+      out.includes(bridgeMechanicCopy(m).feePlacement) &&
+      (bridgeSignerCopy(sg).pageInstruction === "" || out.includes(bridgeSignerCopy(sg).pageInstruction)));
+  }
+  check("⭐⭐ flipping the SIGNER alone changes the render",
+    render("upfront", "server") !== render("upfront", "browser"));
+  check("⭐⭐ flipping the MECHANIC alone changes the render",
+    render("upfront", "server") !== render("deducted", "server"));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("8 — ⭐⭐ THE ARITHMETIC IS THE MECHANIC, UNDER THE SAME THREE LABELS");
+{
+  const q = { amountUsdc: 1, feeUsdc: 0.0543, netUsdc: 1, netPredicted: 0.9457 };
+  const rows = (mechanic) => strip(
+    React.createElement(BridgeQuoteSummary, { quote: q, destinationLabel: "Base", mechanic, signer: "server", heldFeeNote: false }));
+  const up = rows("upfront"), ded = rows("deducted");
+  // ⭐ THE DEFECT THE SHARED TABLE MAKES POSSIBLE: right labels, wrong arithmetic. Nothing about
+  // "You receive 1.000000" LOOKS wrong on a deducted quote — it is the number the user typed.
+  check("⭐⭐ upfront: receive = the amount, leaves = amount + fee",
+    /You receive 1\.000000 USDC/.test(up) && /Leaves your wallet 1\.054300 USDC/.test(up), up.slice(0, 120));
+  check("⭐⭐ deducted: receive = amount − fee, leaves = THE AMOUNT",
+    /You receive 0\.945700 USDC/.test(ded) && /Leaves your wallet 1\.000000 USDC/.test(ded), ded.slice(0, 120));
+  check("⛔⛔ the two differ on BOTH figures — a table that moved neither would pass a one-sided check",
+    !/You receive 1\.000000/.test(ded) && !/Leaves your wallet 1\.054300/.test(ded));
+  check("⭐ 6dp everywhere — no 4dp figure survives in either render",
+    !/\d\.\d{4} USDC/.test(up.replace(/\d\.\d{6} USDC/g, " ")) &&
+    !/\d\.\d{4} USDC/.test(ded.replace(/\d\.\d{6} USDC/g, " ")));
+  check("⭐ the mechanic SENTENCE sits alongside the table — both, not either",
+    up.includes(bridgeMechanicCopy("upfront").feePlacement) &&
+    ded.includes(bridgeMechanicCopy("deducted").feePlacement));
+  check("⛔ …and neither render carries the OTHER mechanic's placement",
+    !up.includes(bridgeMechanicCopy("deducted").feePlacement) &&
+    !ded.includes(bridgeMechanicCopy("upfront").feePlacement));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("9 — ⚠️ TRIPWIRE: THE 'will be charged' SENTENCE LIVES ON EXACTLY ONE PANEL");
+{
+  // ═══ 🚨 WHY A TRIPWIRE AND NOT A COMMENT ══════════════════════════════════════════════════
+  // "This is the fee that will be charged" OVERSTATES on both paths: `maxFee` is a CEILING and the
+  // executed fee can be lower — measured, 55 of 67 third-party burns left surplus, 0 exceeded it.
+  // PRE-EXISTING and deliberately NOT fixed here. ⛔ A comment saying "do not copy this" does not
+  // prevent copying it. This counts.
+  //
+  // ⭐⭐ AND IT COUNTS PANELS, NOT SOURCE SITES. `BridgeQuoteSummary` is SHARED, so "one site in
+  // source" and "one panel showing it" stopped being the same statement the moment it was reused —
+  // which is exactly why the note is a gated prop rather than unconditional markup.
+  const q = { amountUsdc: 1, feeUsdc: 0.0543, netUsdc: 1, netPredicted: 0.9457 };
+  const withNote = (heldFeeNote) => strip(
+    React.createElement(BridgeQuoteSummary, { quote: q, destinationLabel: "Base", mechanic: "upfront", signer: "server", heldFeeNote }));
+  check("⭐ non-vacuity — the sentence really is rendered when the note is on",
+    /fee that will be charged/.test(withNote(true)));
+  check("⛔⛔ …and is ABSENT when it is off — the gate is real, not decorative",
+    !/fee that will be charged/.test(withNote(false)));
+
+  const panels = ["BridgePanel", "ManualBridgePanel"];
+  const on = panels.filter((f) => {
+    const src = readFileSync(`src/components/${f}.tsx`, "utf8")
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, " ").replace(/^\s*\/\/.*$/gm, " ");
+    if (!/<BridgeQuoteSummary/.test(src)) return false;
+    const tag = src.slice(src.indexOf("<BridgeQuoteSummary"));
+    const props = tag.slice(0, tag.indexOf("/>"));
+    return !/heldFeeNote=\{false\}/.test(props);
+  });
+  check("🚨 the 'will be charged' sentence is enabled on EXACTLY ONE panel",
+    on.length === 1, on.join(", ") || "none");
+  check("⭐ …and it is the agent panel — the self-signed one must not inherit an overstated claim",
+    on[0] === "BridgePanel");
 }
 
 console.log(`\n${fail ? "❌ FAILURES" : "✅ ALL GREEN"}   pass ${pass} / fail ${fail}\n`);
