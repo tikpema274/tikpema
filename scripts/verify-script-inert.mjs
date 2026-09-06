@@ -8,6 +8,7 @@
 //   4. a tool-written receipt says `tool-signed`, not `chain-discovered`, and gets no exemption
 
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +16,7 @@ import { OPERATOR_WALLET_VARS, operatorWallets, operatorWalletReport, scanOwnerS
 import { checkSpikeSource, SPIKE_SOURCE_REASON } from "../shared/spike-source-guard.mjs";
 import { discoveredReceipt, RECEIPT_ORIGIN } from "../netlify/functions/_bridge-discover.mjs";
 import { isAutoRetryExhausted } from "../netlify/functions/_bridge-receipts.mjs";
+import { blobsCredentials, assertStoreReachable } from "../shared/blobs-cli.mjs";
 
 let pass = 0, fail = 0;
 const check = (l, ok, d = "") => { if (ok) { pass++; console.log(`  ✅ ${l}`); } else { fail++; console.log(`  ❌ ${l}${d ? `  — ${d}` : ""}`); } };
@@ -122,6 +124,37 @@ check("   …while chain-discovered still does",
 check("⭐ and a FRESH tool-signed burn is not exhausted anyway (burnedAt governs, correctly)",
   isAutoRetryExhausted({ origin: "tool-signed", burnedAt: new Date().toISOString() }) === false);
 check("no tool receipt claims an intent", !("intentId" in tool) && !("txId" in tool));
+
+console.log("\n── 5. ⛔ IT REFUSES TO BURN IF IT CANNOT RECORD — BEFORE THE MONEY ─────");
+// MEASURED 2026-09-07 before any money moved: NETLIFY_SITE_ID / NETLIFY_BLOBS_TOKEN are in NEITHER
+// .env NOR .env.example, so the first version would have burned real USDC and only THEN discovered
+// it could not write the receipt. A post-burn failure is unrecoverable in the way that matters.
+const noCreds = await assertStoreReachable(() => { throw new Error("should not be constructed"); },
+  { env: {}, root: "/nonexistent" });
+check("🚨 with no credentials the store is NOT reachable", noCreds.ok === false);
+check("   …and it never even constructs a store handle", !/should not be constructed/.test(noCreds.detail || ""));
+check("   …and the refusal says HOW to fix it", /netlify link|NETLIFY_SITE_ID/.test(noCreds.detail));
+const creds = blobsCredentials({ env: {}, root: process.cwd() });
+check("⭐ credentials resolve from the CLI's own config, not from a bare env read",
+  creds.notes.some((n) => /state\.json|CLI config/.test(n)));
+check("   …and env WINS when set, so CI can inject it",
+  blobsCredentials({ env: { NETLIFY_SITE_ID: "x", NETLIFY_BLOBS_TOKEN: "y" } }).notes.every((n) => /from env/.test(n)));
+
+// ⚠️ AN ORDER ASSERTION, AND IT IS A SOURCE CHECK — stated plainly rather than dressed up. Driving
+// the real ordering would require a --send run, i.e. real money, which is precisely what this guard
+// exists to make safe. So it asserts the one thing source CAN show: the store probe and its exit
+// precede the first Circle execute call. [[assert-on-rendered-output-not-source-regex]] — this is
+// the exception that rule warns about, and the limitation is that it cannot see reachability.
+const src = readFileSync("scripts/bridge-direct.mjs", "utf8");
+const iProbe = src.indexOf("assertStoreReachable");
+const iExit = src.indexOf("process.exit(6)");
+const iCircle = src.indexOf('await import("../netlify/functions/_circle.mjs")');
+check("the store probe exists in bridge-direct", iProbe > 0);
+check("🚨 …and it runs BEFORE the first Circle execute call", iProbe > 0 && iCircle > 0 && iProbe < iCircle);
+check("🚨 …and its refusal exits 6, before any money call", iExit > iProbe && iExit < iCircle);
+check("⭐ exit 6 is distinct from 3, 4, 1 and 0", ![0, 1, 3, 4].includes(6));
+check("the write reuses the ALREADY-PROVEN handle, not a second bare-env resolution",
+  /reach\.store/.test(src) && !/siteID: process\.env\.NETLIFY_SITE_ID/.test(src));
 
 console.log(`\n${"═".repeat(72)}`);
 console.log(`${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed`);

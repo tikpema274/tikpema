@@ -210,6 +210,20 @@ async function main() {
   const vis = checkSpikeSource({ from, acknowledged: process.argv.includes("--accept-invisible") });
   if (!vis.ok) { console.log(`\n⛔ REFUSING TO SEND — ${vis.detail}`); process.exit(5); }
   if (vis.detail) console.log(`\n${vis.detail}`);
+
+  // ⭐⭐ PROVE THE RECORD CAN BE WRITTEN **BEFORE** THE MONEY MOVES. A post-burn write failure is
+  // unrecoverable in the only way that matters — the burn already happened and the record is gone.
+  // Checked here, the answer is simply "do not send". ⚠️ It READS; it never writes a probe row.
+  const { assertStoreReachable } = await import("../shared/blobs-cli.mjs");
+  const { getStore: _gs } = await import("@netlify/blobs");
+  const reach = await assertStoreReachable(_gs, {});
+  if (!reach.ok) {
+    console.log(`\n⛔ REFUSING TO SEND — ${reach.detail}\n` +
+      `   This tool writes a receipt for every burn it makes. If it cannot write one, it does not\n` +
+      `   burn: money that moves without a record is the defect this guard exists to prevent.`);
+    process.exit(6);
+  }
+  console.log(`\n✅ receipt store reachable (${reach.detail}) — a receipt can be written for this burn.`);
   if (feeExceedsAmount) { console.log("\nRefusing to --execute: fee ≥ amount."); return; }
   if (bal < amountMinor) { console.log("\nRefusing to --execute: insufficient balance."); return; }
 
@@ -257,7 +271,7 @@ async function main() {
   try {
     const { discoveredReceipt, isSettleable, RECEIPT_ORIGIN } = await import("../netlify/functions/_bridge-discover.mjs");
     const { receiptKey, isStranded } = await import("../netlify/functions/_bridge-receipts.mjs");
-    const { getStore } = await import("@netlify/blobs");
+
     const blk = await pub.getBlock({ blockNumber: (await pub.getTransactionReceipt({ hash: burnHash })).blockNumber });
     const r = discoveredReceipt({
       burnHash, owner: from.toLowerCase(), amountMinor: amountMinor.toString(),
@@ -265,7 +279,7 @@ async function main() {
       mintRecipient: to.toLowerCase(), blockNumber: (await pub.getTransactionReceipt({ hash: burnHash })).blockNumber,
       blockTimestamp: new Date(Number(blk.timestamp) * 1000).toISOString(),
     }, { origin: RECEIPT_ORIGIN.TOOL_SIGNED });
-    const store = getStore({ name: "bridge-receipts", siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_BLOBS_TOKEN });
+    const store = reach.store;   // ⭐ the SAME handle already proven readable above
     const key = receiptKey(r.owner, r.burnHash);
     // THE FOUR GATES, unchanged from the backfill path.
     if (!isSettleable(r)) throw new Error("receipt is not settleable (no usable burnedAt)");
