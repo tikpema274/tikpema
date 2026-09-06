@@ -2,8 +2,48 @@
 
 # ⭐ THE MONITOR CAN NOW ANSWER "DID IT KEEP RUNNING?" FROM ONE READ — and my premise was wrong
 
-**2026-09-05, evening. NOT DEPLOYED — ships with the next deploy.** `test:all` **94/0/0 of 94**
-unpiped, exit 0. `verify-plan-path-watch` **64 → 86/0**.
+**2026-09-05, evening.** `test:all` **94/0/0 of 94** unpiped, exit 0. `verify-plan-path-watch`
+**64 → 86/0**.
+
+> ⚠️ **CORRECTION, 2026-09-06.** This entry was written saying *"NOT DEPLOYED — ships with the next
+> deploy."* **That was true when written and is now false.** It shipped the same evening as deploy
+> **`6a9c9511e6e7a0dab036e614`**, published 2026-09-05T22:45:05.381Z — `a967516` · tree
+> `0b7ac564a465` · dirty false · `gate:deployed` 5/5 · `capture:window` RAN (no window; ddTree
+> `3b589768754d` unchanged) · `gate:forgery` 5/0 · `gate:spec` green.
+> ⛔ The line is corrected here rather than deleted: a dated log that quietly rewrites what it said
+> is worth less than one that shows what changed. See the verification below.
+
+## ⭐⭐ VERIFIED IN PRODUCTION 2026-09-06 07:11Z — EIGHT HOURS, FROM A SINGLE READ
+
+The first post-deploy tick (23:00:37.864Z) carried `lastInvokedAt`, `runCount: 1` and a
+one-entry `recentProducedAt` — all three ABSENT on every record before 22:45, which is what
+separates *the new code is live* from *a tick happened*. `prevOutcome` still chained correctly
+across the format change, which was the part that could plausibly have broken: the new builder
+reads a record written by the old handler.
+
+Eight hours later, unattended:
+
+    runCount 17 · skipCount 0 · phase complete · healthy/disclosed · spend clean · receipts 22 → 22
+    recentProducedAt  8 entries, 03:30 → 07:00
+    intervals         30.3m, 29.7m, 30.3m, 29.8m, 30.2m, 29.7m, 30.2m
+
+⭐ **THIS IS THE THING THAT DID NOT EXIST THE DAY BEFORE.** The same question — *did it keep
+running?* — took live polling to answer on 2026-09-05, and that evidence died with the session. It
+now takes one GET, with no instrument left running. ⭐ And `DEGRADED` is genuinely ARMED: it needs
+≥2 intervals and has 7, clustered at 30m against a 30m cron. Had `MIN_RERUN_MS` been above the
+cron these would read ~60m while every other field still said `healthy`.
+
+⚠️ **`runCount` RESTARTED AT 1, AND THAT IS THE MIGRATION, NOT A RESET.** The prior record was
+written by the old handler and had no counters to carry forward. The module notes a reset to 0 as a
+signal; this is adjacent to it and was predicted before the tick landed rather than explained after.
+
+⚠️ **A READING I NEARLY GOT WRONG.** The first poll after the deploy returned a record with
+`lastInvokedAt: None` — from **22:30:23Z, fifteen minutes BEFORE the deploy published**. A tick had
+fired while the deploy was bundling, and it looked new to a poller keyed on *"different from the
+last value I saw."* ⭐ **THE COMPARISON MUST BE AGAINST THE EVENT, NOT AGAINST MY OWN LAST
+OBSERVATION** — re-keyed on `producedAt > publishedAt`. Same shape as `target` catching the failed
+override: the useful discriminator was a timestamp comparable to something external, not a cached
+value.
 
 ## ⭐ FOUR TICKS OBSERVED LIVE, AND THE INSTRUMENT THAT SAW THEM IS GONE
 
