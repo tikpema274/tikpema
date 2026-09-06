@@ -1,5 +1,5 @@
 // DIRECT-CONTRACT BRIDGE — the SCA-native path that sidesteps App Kit's broken
-// orchestration. Arc Testnet -> Ethereum Sepolia, FROM the agent SCA.
+// orchestration. Arc Testnet -> ANY supported destination (--dest), FROM the agent SCA.
 //
 // WHY this exists: `kit.bridge()` aborts on the Circle-SCA async-submission race
 // (code 1098 "Transaction hash is required" on the approve step → FATAL → never
@@ -12,7 +12,7 @@
 // The bridge call itself is byte-identical to what App Kit would send:
 //   1. approve  USDC -> BridgingKitContract   (only if allowance < amount)
 //   2. bridgeWithPreapprovalAndHook(BridgeParams, hookData)  on 0xC5567...
-// with forwarding hookData so Circle's Orbit relayer mints on Sepolia (no
+// with forwarding hookData so Circle's Orbit relayer mints on the destination (no
 // destination signature). Fees (maxFee) are fetched live from Circle's IRIS API
 // exactly as the SDK computes them.
 //
@@ -24,7 +24,7 @@
 //   SPIKE_AMOUNT=15 node scripts/bridge-direct.mjs --execute   # fire the real bridge
 //
 // Requires in .env: CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, AGENT_WALLET_ADDRESS
-// Optional: SPIKE_FROM (source SCA), SPIKE_TO (Sepolia recipient; default = source)
+// Optional: SPIKE_FROM (source SCA), SPIKE_TO (destination recipient; default = source)
 
 
 // ═══ ⛔⛔ THE GUARD IS THIS MODULE'S FIRST EXECUTABLE STATEMENT ════════════════════════════════
@@ -67,7 +67,7 @@ import { BRIDGE_DESTINATIONS, resolveDestinationStrict } from "../netlify/functi
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-// --- config (mirrors the Arc/Sepolia chain defs inside @circle-fin/app-kit) ---
+// --- config (Arc source chain; destinations come from BRIDGE_DESTINATIONS via --dest) ---
 const ARC = {
   blockchain: "ARC-TESTNET",
   rpc: "https://rpc.testnet.arc.network",
@@ -207,9 +207,13 @@ async function main() {
 
   const pub = createPublicClient({ transport: http(ARC.rpc) });
 
-  console.log("DIRECT bridge: Arc -> Ethereum Sepolia from the agent SCA");
+  // ⛔ DERIVED FROM DEST. This said "Arc -> Ethereum Sepolia" on a run whose destinationDomain
+  // was 6, whose fee was Base's and whose mint link was basescan. Display-only — the money went
+  // to the right chain — but a burner whose banner names the wrong chain is how someone confirms
+  // a burn they did not intend. The parameter reached the calldata and the fee and stopped here.
+  console.log(`DIRECT bridge: Arc -> ${DEST.label} from the agent SCA`);
   console.log("  from (Arc SCA):      ", from);
-  console.log("  to   (Sepolia recip):", to);
+  console.log(`  to   (${DEST.label} recip):`, to);
   console.log(`  amount:               ${amountHuman} USDC`);
   console.log("  BridgingKitContract:  ", BRIDGE);
   console.log("  method:               bridgeWithPreapprovalAndHook (via Circle createContractExecutionTransaction)\n");
@@ -284,7 +288,8 @@ async function main() {
       `   on the deducted path the fee comes OUT of the amount, leaving nothing to deliver.\n` +
       `   Nothing was attempted and no money moved.\n` +
       `   Fix it by raising the amount above the fee (SPIKE_AMOUNT=<n>), or by choosing a cheaper\n` +
-      `   destination — Ethereum carries a forwarder fee two orders of magnitude above the L2s.`);
+      `   destination. ⚠️ GENERAL, not about this run: Ethereum's forwarder fee runs ~37x the L2s\n` +
+      `   (measured 2026-09-07: ethereum 2.027142 vs optimism 0.051092), so it is the usual cause.`);
     process.exit(7);
   }
   if (bal < amountMinor) {
@@ -363,8 +368,8 @@ async function main() {
     console.error(`     node scripts/bridge-discover-run.mjs   (it will find this burn from chain)`);
   }
 
-  // 3) Poll IRIS for the forwarder mint on Sepolia (relayer completes it).
-  console.log("\nWaiting for Circle's Orbit relayer to mint on Sepolia (polling IRIS)…");
+  // 3) Poll IRIS for the forwarder mint on the destination (relayer completes it).
+  console.log(`\nWaiting for Circle's Orbit relayer to mint on ${DEST.label} (polling IRIS)…`);
   const msgUrl = `${IRIS}/v2/messages/${ARC.cctpDomain}?transactionHash=${burnHash}`;
   for (let i = 0; i < 60; i++) {
     await new Promise((r) => setTimeout(r, 5000));

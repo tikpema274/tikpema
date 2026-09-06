@@ -201,7 +201,15 @@ export function discoveredReceipt(c, { discoveredAt = new Date().toISOString(), 
     feeDisclosedMinor: c.maxFeeMinor ?? null,
     feeIsCeiling: true,
     feeCeilingNote: bridgeMechanicCopy("deducted").feeCeilingNote,
-    netPredicted: fee != null && toUsdc(c.amountMinor) != null ? toUsdc(c.amountMinor) - fee : null,
+    // ⚠️ SUBTRACTED IN MINOR UNITS, NOT IN DECIMALS. `0.1 - 0.054312` in float gives
+    // 0.045688000000000006 — which is what the first tool-signed receipt actually stored. Both
+    // operands are exact integers of minor units, so the subtraction is exact there and only the
+    // final divide introduces a representable value. A money figure carrying float noise is not
+    // wrong by any amount that matters, and it is still the wrong thing to persist: it reads as
+    // sloppiness in exactly the field a user checks against their wallet.
+    netPredicted: c.amountMinor != null && c.maxFeeMinor != null
+      ? Number(BigInt(c.amountMinor) - BigInt(c.maxFeeMinor)) / 1e6
+      : null,
     delivery: "predicted",
     amountDelivered: null,
     payer: c.owner,

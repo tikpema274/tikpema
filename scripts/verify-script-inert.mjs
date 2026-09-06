@@ -230,6 +230,45 @@ check("   …and every fee/receipt use reads DEST, not a const",
 check("a VALID destination resolves and proceeds past the gate",
   runDest(["--dry-run", "--dest", "base"]).status !== 9 && runDest(["--dry-run", "--dest", "base"]).status !== 10);
 
+console.log("\n── 9. 🚨 THE BANNER NAMES THE CHAIN THE MONEY IS GOING TO ──────────────");
+// MEASURED on a real send: the header said "Arc -> Ethereum Sepolia" and "(Sepolia recip)" on a run
+// whose destinationDomain was 6, whose fee was Base's, and whose mint link was basescan. The
+// parameter reached the calldata and the fee lookup and STOPPED AT THE DISPLAY.
+// ⚠️ Display-only, and the money went to the right chain — but a burner whose banner names the wrong
+// chain is how someone confirms a burn they did not intend.
+const banner = (dest) => spawnSync(process.execPath,
+  ["scripts/bridge-direct.mjs", "--dry-run", "--dest", dest], { encoding: "utf8" }).stdout || "";
+const bBase = banner("base"), bPoly = banner("polygon");
+check("the banner names Base when --dest base", /Arc -> Base \(Sepolia\)/.test(bBase));
+check("🚨 …and CHANGES to Polygon when --dest polygon", /Arc -> Polygon \(Amoy\)/.test(bPoly));
+check("⭐ the two banners DIFFER — the mutation the defect would survive",
+  bBase.split("\n")[0] !== bPoly.split("\n")[0] || bBase !== bPoly);
+check("🚨 a Base run never says Sepolia-the-Ethereum-testnet in its banner",
+  !/Arc -> Ethereum Sepolia/.test(bBase) && !/\(Sepolia recip\)/.test(bBase));
+check("the recipient label derives too", /\(Base \(Sepolia\) recip\)/.test(bBase) && /\(Polygon \(Amoy\) recip\)/.test(bPoly));
+// ⭐ THE CLASS, NOT THE TWO INSTANCES. Any chain name in code (not comments) must come from DEST.
+const codeLines = readFileSync("scripts/bridge-direct.mjs", "utf8").split("\n")
+  .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*"));
+const stray = codeLines.filter((l) =>
+  /(sepolia|ethereum|etherscan|basescan|amoy|fuji)/i.test(l) && !/DEST\./.test(l) && !/GENERAL, not about this run/.test(l)
+  && !/measured 2026-09-07/.test(l));
+check("🚨 NO code line names a chain except through DEST", stray.length === 0, JSON.stringify(stray.slice(0, 2)));
+
+console.log("\n── 10. ⭐ MONEY FIGURES CARRY NO FLOAT NOISE ───────────────────────────");
+// The first tool-signed receipt stored netPredicted 0.045688000000000006 — 0.1 minus 0.054312 in
+// float. Not wrong by any amount that matters, and still the wrong thing to persist.
+const money = discoveredReceipt({ burnHash: "0x" + "bb".repeat(32), owner: "0x" + "11".repeat(20),
+  amountMinor: "100000", maxFeeMinor: "54312", destinationDomain: 6, mintRecipient: "0x" + "11".repeat(20),
+  blockNumber: 1n, blockTimestamp: new Date().toISOString() });
+check("netPredicted is exact", money.netPredicted === 0.045688, String(money.netPredicted));
+check("🚨 …and its decimal string has no float tail", String(money.netPredicted).length <= 8, String(money.netPredicted));
+check("   …across several awkward pairs", [["100000","54312"],["1000000","54234"],["2000000","54131"]]
+  .every(([a, f]) => {
+    const r = discoveredReceipt({ ...money, amountMinor: a, maxFeeMinor: f });
+    const dec = String(r.netPredicted).split(".")[1] ?? "";
+    return dec.length <= 6;   // USDC is 6-decimal: more digits than that IS float noise
+  }));
+
 console.log(`\n${"═".repeat(72)}`);
 console.log(`${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
