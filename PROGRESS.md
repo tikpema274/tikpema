@@ -1,5 +1,118 @@
 ---
 
+# ⭐ A HASH ACROSS A LIVE SYSTEM ANSWERS "DID ANYTHING CHANGE", NEVER "DID I CHANGE IT"
+
+**2026-09-06.** The plan-path monitor's alert path was exercised by a deliberate drill. No deploy,
+no code change, nothing written to any store.
+
+## ⛔⛔ THE HASH SAID THE RECORD CHANGED. IT HAD — BY SOMETHING ELSE.
+
+The drill's whole safety claim was *nothing is written*, and the check for it was a sha256 of
+`latest` before and after. **The hashes differed.**
+
+    pre-drill   c3fd32e99be7586917d4e814f2e7f03698e0912585fba0b82779237c57586078
+    post-drill  5b9c337418e32f24c8912b73586b4830705fe8aff32a02cb96af5fab7b6c3468
+    IDENTICAL: False
+
+⛔ **NOT THE DRILL. The 09:00Z scheduled tick fired between the two reads.** A hash over a LIVE
+system compares two moments, and everything that happens in between lands in the answer — the
+instrument cannot attribute, only detect. ⭐ **Reporting that hash as the finding would have been a
+false alarm about my own drill**, and the alarm would have been about the one property the drill was
+designed to guarantee.
+
+**ONLY A FIELD-LEVEL DIFF SEPARATES THE CAUSES:**
+
+    CHANGED    lastInvokedAt · producedAt · recentProducedAt · runCount 20 → 21
+               ⭐ every one a field a SCHEDULED PROBE advances
+
+    UNCHANGED  outcome healthy · reason disclosed · lastNotifiedAt null
+               prevOutcome healthy · skipCount 0
+               ⭐ every one a field a DRILL WRITE would have moved
+
+⭐ **THE RULE: WHEN THE SUBJECT IS LIVE, DECIDE IN ADVANCE WHICH FIELDS YOUR ACTION WOULD TOUCH AND
+DIFF THOSE.** A digest is the right instrument for a frozen artifact and the wrong one for a system
+with its own clock. The correct question was never "is the record identical" — it was "did the
+fields I could have written move", and those two questions have different answers here.
+[[establish-which-action-produced-the-outcome]] · [[a-vendor-field-carries-its-own-discriminator]]
+
+# ⭐ THE NEGATIVE IS THE HALF WORTH HAVING
+
+    A  healthy → blocked   regressed            notify=true   → POST #1  HTTP 204 No Content
+    B  blocked → blocked   still-failing-quiet  notify=false  → SILENT ⭐
+    C  blocked → healthy   recovered            notify=true   → POST #2  HTTP 204 No Content
+
+    ⭐ POST COUNT: 2 — asserted on the COUNT, not on A and C firing
+
+⛔ **B IS THE ASSERTION THAT MATTERS.** An alert that fires is half a monitor; one that fires ONCE
+PER TRANSITION is the whole one. A real outage lasting hours must not page every 30 minutes — and
+counting the POSTs is what would have caught a third, stray one. "A and C fired" is satisfied by a
+path that also fires on B.
+
+# ⭐ THE CLAIM AT ITS TRUE SIZE
+
+⛔ **NOT "the alert path works".** Recorded as:
+
+    PROVEN      decideNotify · notifyMessage · the webhook endpoint · and that
+                WATCH_ALERT_WEBHOOK is PRESENT AND CORRECT in the production context
+                (fingerprint ad363d805419, value withheld)
+
+    NOT PROVEN  the DEPLOYED FUNCTION'S OWN POST — its `process.env` read, its `fetch`, its
+                `r.ok → lastNotifiedAt` write. Only a real transition or a deployed override
+                reaches that, and neither has happened.
+
+⭐ **AND THE CONSTRUCTION THAT MAKES THE FIRST HALF TRUSTWORTHY: `WEBHOOK_SOURCES` WAS PARSED OUT OF
+THE HANDLER, NOT RETYPED.** The harness reads the array from `plan-path-watch.mjs` and mirrors the
+handler's own `.map(v => process.env[v]).find(u => (u||"").trim())`. A hand-supplied URL would have
+proved only that `notifyMessage` composes; deriving the source list means the drill cannot drift
+from what the function actually reads. ⚠️ The VALUE still came from `netlify env:get --context
+production` — the same variable, read over the API rather than injected into the function's runtime.
+That difference IS the gap above, and it is why the two halves are recorded separately rather than
+one standing in for the other.
+
+# THE DRILL WROTE NOTHING, AND THAT WAS BY CONSTRUCTION
+
+`decideNotify` and `notifyMessage` are PURE — **0 impure operations each**, verified before sending,
+so the entire notify decision runs in memory and the only impure step is the POST itself. No scratch
+store was needed and none was used.
+
+    store keys after the drill : `latest` only — no fabricated failure:<ts>
+    lastNotifiedAt in the store: still null
+    the null → 09:00:56.472Z → 09:00:56.875Z movement was the IN-MEMORY chain, as stated beforehand
+
+⚠️ A fabricated BLOCKED record would have been an observation nobody made, indistinguishable to the
+next reader from a real outage. Not writing it is stronger than restoring it correctly.
+
+## THE ALERTS WERE MARKED IN THE MESSAGE BODY, NOT IN A LOG
+
+    🧪🧪 **DRILL — NOT A REAL ALERT** 🧪🧪
+    Manually induced 2026-09-06 to prove this monitor's alert path works.
+    **The plan path is HEALTHY. Nothing is wrong. No action required.**
+    ──────────────────────────────────────────
+    <the real notifyMessage output, verbatim>
+
+⛔ The banner sits ABOVE the siren, on the first line a human reads. `notifyMessage` takes no drill
+parameter and adding one would have meant changing production code for a test, so the marker lives
+in the harness's POST wrapper — the production path is untouched and the real message is proven
+verbatim beneath. **An untagged test alert in a money-path channel teaches the reader to discount
+that channel, which is the harm the drill exists to avoid.**
+
+## ⭐ THE HARNESS IS DELIBERATELY UNCOMMITTED — A DECISION, NOT AN OMISSION
+
+It lives in the session scratchpad and is not in the repo. **A script that posts to a live
+money-path channel should not sit in the tree inviting an accidental run** — the same reasoning that
+puts calibration levers behind `gate:watch`. Reconstructing it is a few minutes; a stray execution
+is a false alarm to a real channel, and the asymmetry is the whole argument.
+
+# THE 09:00Z TICK — EXACTLY AS PRE-REGISTERED
+
+    producedAt 2026-09-06T09:00:39.429Z · healthy/disclosed · runCount 21 · skipCount 0
+    lastNotifiedAt null · spend clean · receipts 22 → 22
+    intervals 30.2, 29.8, 30.2, 29.8, 30.3, 29.7, 30.3m
+
+The monitor is unaffected by the drill and still probing on cadence.
+
+---
+
 # 🚨 THE MUTATION THAT SURVIVED — two fixtures that agree on both definitions cannot tell them apart
 
 **2026-09-06.** Deploy `6a9d1876108dd48b87bebb3a`, published 08:01:42.009Z. `5a4626f` · tree
