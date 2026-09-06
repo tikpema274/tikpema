@@ -1,5 +1,124 @@
 ---
 
+# ⭐⭐ A REOPEN TRIGGER MUST NAME THE CAPABILITY, NOT A SHARED NOUN
+
+**2026-09-06.** `payX402Vanilla`'s reopen trigger was **"Base enters the roadmap"**, recorded hours
+earlier in this same session. ⛔ **It was wrong, and taking it together with the DD-on-Base question
+is what exposed it.**
+
+Making DD payable on Base Sepolia is a **SELLER** capability, and it is better served by the
+**batched** rail. `payX402Vanilla` is a **BUYER**. Two different projects both said "Base", and the
+shared noun made one look like a precondition for the other — a reader hitting that trigger would
+reasonably conclude that wiring the buyer gates DD-on-Base. **It does not, and never did.**
+
+⭐⭐ **THE GENERAL FORM.** Chains, vendors, protocols and dates are all nouns two unrelated projects
+can share. A capability is what only THIS component provides. A trigger on a shared noun **fires
+early, fires on someone else's decision, and silently implies a dependency that does not exist** —
+the third being the expensive one, because it survives as a false belief long after the trigger is
+forgotten. ⭐ The question that produces the right trigger is *"what would we be unable to do
+without this file?"* — never *"what project is it near?"*
+
+    OLD   "Base (or any mainnet with vanilla offers) enters the roadmap"
+    NEW   "we want to BUY from vanilla EIP-3009 sellers"
+
+⚠️ **AND NEITHER DECISION COULD HAVE BEEN TAKEN ALONE.** Held separately, both looked settled: the
+buyer was parked with a plausible trigger, and DD-on-Base was an open sizing question. The defect
+lived in the *relationship*, which is invisible from inside either one.
+
+## ⭐ WHY DD-ON-BASE WOULD USE THE BATCHED RAIL — MEASURED, SO NOBODY RE-LITIGATES IT
+
+I had claimed the vanilla rail was "materially more portable across chains" and implied it was the
+cheaper door to Base. ⛔ **The confirmation claim was right; the conclusion was wrong.**
+
+    THE BATCHED FACILITATOR IS ALREADY MULTI-NETWORK
+      @circle-fin/x402-batching ships exactly two CAIP-2 ids: eip155:5042002 and eip155:84532
+      its own server example:  networks: ['eip155:5042002','eip155:84532'] // Arc + Base Sepolia
+      BatchFacilitatorClient.verify/settle take the requirements PER CALL — network is a parameter
+      Gateway /v1/info: 13 testnet domains; Base Sepolia = 6, ARC = 26, same Gateway Wallet address
+
+    GAS
+      batched   seller pays NONE — Gateway settles
+      vanilla   🚨 seller settles its own tx, and BASE SEPOLIA GAS IS ETH, NOT USDC
+                a new funding pipeline and a new failure mode: seller dry -> paid buyer unserved
+                ⭐ invisible on Arc, where gas IS the asset we earn — the cost only appears off-Arc
+
+⇒ **For SELLING DD on Base, batched is cheaper.** The portability advantage is real but narrower
+than I implied, and the gas dependency offsets it.
+
+⭐ **VANILLA'S REAL ADVANTAGE, RECORDED SEPARATELY BECAUSE IT IS NOT ABOUT COST: EXACT PER-PAYMENT
+CONFIRMATION.** `authorizationState(payer, nonce)` is present and returning on Base Sepolia USDC
+(measured: `name` "USDC", `version` "2", `DOMAIN_SEPARATOR` readable). The batched rail **cannot**
+have this — that read REVERTS on `GatewayWalletBatched`, which is exactly why DD confirmation is an
+aggregate balance heuristic, why two concurrent equal-amount payments cross-confirm, and why `payTo`
+must receive nothing else. **Vanilla dissolves all three.** If we ever want per-payment attribution
+instead of a dedicated-wallet workaround, that is the argument for the rail — not portability.
+
+# ⛔ THE TWO-AXIS COPY DEFECT — FIXED WHILE IT WAS STILL HARMLESS
+
+The 402 said *"a signed on-chain due-diligence report on **any Arc Testnet address**"*. That names
+the **SUBJECT** axis. The **SETTLEMENT** axis lived only in `accepts[0].network`. They are
+independent and they coincide today, so **the sentence was ACCIDENTALLY unambiguous, not
+deliberately so** — and a buyer paying on Base would reasonably expect Base analysis.
+
+⭐ **FIXED NOW ON THE STRENGTH OF ITS OWN ARGUMENT.** While the axes coincide the change is
+SEMANTICALLY CONSERVATIVE — everything the new sentence adds is true today, so it can be reviewed
+against live output with nothing riding on it. Ship the same edit after they diverge and it travels
+alongside a live misleading claim. ⚠️ It is **not** byte-identical and cannot be: naming the second
+axis is the whole point, so the string necessarily changes. What is preserved is the CLAIM —
+strictly more specific, never less true. (I wrote "byte-identical" in the first draft of the comment
+and corrected it; a false statement in a comment about honesty is its own small joke.)
+
+    BEFORE  …a signed on-chain due-diligence report on any Arc Testnet address, with an honest
+            coverage manifest. $0.06 USDC per report
+    AFTER   …a signed on-chain due-diligence report, with an honest coverage manifest. Analyses
+            Arc Testnet only; payment accepted on Arc Testnet. $0.06 USDC per report
+
+⛔ **BOTH CLAUSES DERIVE; NEITHER IS WRITTEN.** Subject from `SUPPORTED_CHAINS` (the same array the
+validator and the OpenAPI enum read), settlement from `DD_SETTLEMENT_NETWORKS` (the array `accepts[]`
+is built from). Hand-writing *"payment accepted on Arc Testnet or Base Sepolia"* would be a second
+copy of what `accepts[]` already says, drifting silently the day a network is added — **the
+line-number-citation defect wearing prose**, one entry down this same file.
+[[duplicate-source-of-truth-is-the-recurring-bug]]
+
+## 🚨 TWO AXES, TWO KEY SPACES — AND THE FIRST DRAFT FELL THROUGH
+
+The settlement axis is keyed by CAIP-2 (`eip155:5042002`); the subject axis by the API slug
+(`arc-testnet`). The first draft used ONE label map for both, so the subject lookup missed and the
+fallback published **"Analyses arc-testnet only"** — a raw API slug, to buyers. Caught by reading the
+rendered output rather than the code that produced it. ⭐ Two maps now, each **fail-closed at
+import**: an unlabelled network or chain throws rather than reaching a buyer as a raw identifier.
+[[assert-on-rendered-output-not-source-regex]] · [[absence-must-never-read-as-safe]]
+
+## THE GUARD — `test:twoaxis`, 22/0, AND MUTATION-PROVEN IN BOTH DIRECTIONS
+
+⭐ **IT DOES NOT ASSERT TODAY'S STRING.** A guard pinned to the exact sentence would pass forever
+while the sentence silently stopped describing reality. It asserts the sentence is a **FUNCTION of
+the two arrays**.
+
+    ADD a network      -> the sentence MUST change and MUST name it     catches a hardcoded string
+    REMOVE a network   -> the sentence MUST stop naming it              catches an APPEND-ONLY sentence
+
+⚠️ **The second direction is the one that is easy to skip and it is not redundant.** A description
+built by concatenating every network ever seen would pass the ADD test and still misdescribe what is
+on offer. [[collapse-needs-pairwise-inequality]]
+
+And the invariant is asserted **at the emission point**, not only in the test: `assertAcceptsDescribed`
+throws if any entry's description does not equal the sentence derived from the networks in the array
+it travels in. So adding an entry to `accepts[]` without regenerating the sentence **throws instead
+of shipping a challenge that misdescribes itself**. ⭐ Section 5 also proves the check reads the
+SENTENCE and not the array length — two entries carrying the correct two-network sentence are
+ACCEPTED — so it cannot pass vacuously. [[equality-passes-vacuously-on-empty]]
+
+⭐ **RED STATE RECORDED:** restoring the hardcoded description takes the suite to **19 passed, 3
+failed, exit 1**. Restored, **22/0**. A guard never seen red is a guard that has proven nothing.
+[[never-mock-the-function-under-test]]
+
+⚠️ `_dd-x402.mjs` and `_dd-descriptor.mjs` are both on the DD surface, so this rotates `ddTree`
+again — **no additional cost**, since `version.mjs` already rotated it and the refusal window is
+priced per DEPLOY, not per change. Which is the batching rule one entry down, being used.
+
+---
+
 # ⭐⭐ A COMMENT DOCUMENTING A CROSS-FILE DEPENDENCY IS ITSELF A CROSS-FILE DEPENDENCY
 
 **2026-09-06.** The `payX402Vanilla` parking block is 64 lines at the TOP of `_x402-vanilla.mjs`.

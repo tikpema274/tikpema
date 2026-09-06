@@ -57,7 +57,7 @@ import { ARC, CONTRACTS } from "./_arc.mjs";
 import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
 // ⭐ THE CALL SHAPE, IMPORTED. A hand-written copy here would be a second source of truth for the
 // thing agents call us with — see _dd-descriptor.mjs.
-import { DD_REQUEST_SCHEMA, DD_RESPONSE_SCHEMA, DD_OPENAPI_URL } from "./_dd-descriptor.mjs";
+import { DD_REQUEST_SCHEMA, DD_RESPONSE_SCHEMA, DD_OPENAPI_URL, SUPPORTED_CHAINS } from "./_dd-descriptor.mjs";
 
 export const PENDING_STORE = "dd-analyze-pending";
 
@@ -77,6 +77,90 @@ export const DD_ASSET = CONTRACTS.USDC; // USDC on Arc, from CONTRACTS
 if (DD_NETWORK !== "eip155:5042002" || DD_ASSET.toLowerCase() !== "0x3600000000000000000000000000000000000000") {
   throw new Error(`_dd-x402: published chain/asset changed — network="${DD_NETWORK}" asset="${DD_ASSET}"`);
 }
+// ═══ ⛔⛔ TWO AXES, AND THE SENTENCE MUST NAME BOTH ═══════════════════════════════════════════
+// SETTLEMENT CHAIN (what you pay on) and SUBJECT CHAIN (what we analyse) are INDEPENDENT. Today
+// they coincide — both Arc Testnet — and that is exactly why the old sentence was safe: "a report
+// on any Arc Testnet address" named the subject only, and no buyer could be misled while there was
+// nothing else to be misled about.
+//
+// 🚨 IT WAS ACCIDENTALLY UNAMBIGUOUS, NOT DELIBERATELY SO. The moment a second settlement network
+// is published, a buyer paying on Base has every reason to expect Base ANALYSIS, and the only thing
+// contradicting them is an enum in the OpenAPI. Same class as the fee mechanic: a true statement
+// about a world where two things coincided, carried into a world where they do not.
+//
+// ⭐ FIXED NOW, WHILE THE AXES STILL COINCIDE, because that is the only moment the change is
+// SEMANTICALLY CONSERVATIVE: everything the new sentence adds is true today, so it can be reviewed
+// against live output with nothing riding on it. ⚠️ IT IS NOT BYTE-IDENTICAL AND CANNOT BE — naming
+// the second axis is the entire point, so the string necessarily changes. What is preserved is the
+// CLAIM: strictly more specific, never less true. Ship the same edit after the axes diverge and it
+// travels alongside a live misleading claim instead.
+//
+// ⛔ BOTH CLAUSES ARE DERIVED, NEITHER IS WRITTEN. Hand-writing "payment accepted on Arc Testnet or
+// Base Sepolia" would be a second copy of what `accepts[]` already says, drifting silently the day
+// a network is added — the line-number-citation defect wearing prose.
+// [[duplicate-source-of-truth-is-the-recurring-bug]]
+
+/** Human labels for the CAIP-2 ids we publish as SETTLEMENT networks. ⚠️ FAIL-CLOSED: a network
+ *  with no label throws at import rather than reaching a buyer as a raw `eip155:` string. */
+const NETWORK_LABELS = Object.freeze({
+  "eip155:5042002": "Arc Testnet",
+  "eip155:84532": "Base Sepolia",
+});
+
+/** ⚠️ SEPARATE MAP, AND DELIBERATELY SO. The SUBJECT axis is keyed by the API slug a caller sends in
+ *  `body.chain` ("arc-testnet"), NOT by CAIP-2. One shared map silently falls through to the raw
+ *  slug — which it did on the first draft of this change, printing "Analyses arc-testnet only" to
+ *  buyers. Two axes, two key spaces, two maps. */
+const SUBJECT_LABELS = Object.freeze({
+  "arc-testnet": "Arc Testnet",
+});
+
+/** ⭐ THE ONE ARRAY. `accepts[]` is built from this and so is the sentence describing it, so a
+ *  network cannot enter one without entering the other. Adding an entry here is the whole change. */
+export const DD_SETTLEMENT_NETWORKS = Object.freeze([DD_NETWORK]);
+
+for (const n of DD_SETTLEMENT_NETWORKS) {
+  if (!NETWORK_LABELS[n]) throw new Error(`_dd-x402: settlement network ${n} has no human label`);
+}
+for (const c of SUPPORTED_CHAINS) {
+  if (!SUBJECT_LABELS[c]) throw new Error(`_dd-x402: subject chain ${c} has no human label`);
+}
+
+const oxford = (xs) =>
+  xs.length <= 1 ? (xs[0] ?? "") : xs.length === 2 ? `${xs[0]} or ${xs[1]}`
+    : `${xs.slice(0, -1).join(", ")}, or ${xs[xs.length - 1]}`;
+
+/** What we ANALYSE — derived from the same array the validator and the OpenAPI enum read. */
+export const subjectClause = (chains = SUPPORTED_CHAINS) =>
+  `Analyses ${oxford(chains.map((c) => SUBJECT_LABELS[c] ?? c))} only`;
+
+/** What we are PAID ON — derived from the networks actually published in accepts[]. */
+export const settlementClause = (networks = DD_SETTLEMENT_NETWORKS) =>
+  `payment accepted on ${oxford(networks.map((n) => NETWORK_LABELS[n] ?? n))}`;
+
+/** The published description. ⭐ A PURE FUNCTION OF THE TWO ARRAYS — that is what makes the
+ *  coupling testable in both directions rather than merely intended. */
+export const ddDescription = (networks = DD_SETTLEMENT_NETWORKS, chains = SUPPORTED_CHAINS) =>
+  `Contract safety check before an agent signs — a signed on-chain due-diligence report, with an ` +
+  `honest coverage manifest. ${subjectClause(chains)}; ${settlementClause(networks)}. ` +
+  `${DD_PRICE_HUMAN} per report`;
+
+/** 🚨 THE INVARIANT, ASSERTED WHERE THE CHALLENGE IS EMITTED. Every entry's description must name
+ *  exactly the networks in the array it travels in. Adding an entry to `accepts[]` without
+ *  regenerating the sentence THROWS instead of shipping a challenge that misdescribes itself. */
+export function assertAcceptsDescribed(accepts) {
+  const networks = accepts.map((a) => a?.network);
+  const expected = ddDescription(networks);
+  for (const a of accepts) {
+    if (a?.description !== expected) {
+      throw new Error(
+        `_dd-x402: accepts[] describes ${JSON.stringify(networks)} but an entry's description does ` +
+        `not match the sentence derived from them. Rebuild descriptions from ddDescription().`);
+    }
+  }
+  return accepts;
+}
+
 export const DD_VERIFYING_CONTRACT = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"; // Gateway Wallet
 export const DD_EXTRA = Object.freeze({
   name: "GatewayWalletBatched",
@@ -202,7 +286,10 @@ export function ddPaymentRequirements({ resource, payTo }) {
     // ⭐ NAMED FOR THE OUTCOME, NOT THE MECHANISM. This used to read "DD on-chain due-diligence
     // report" — "DD" is our INTERNAL name for the engine, and a buyer scanning a directory does not
     // know what it means. They know whether they want a contract checked before their agent signs.
-    description: `Contract safety check before an agent signs — a signed on-chain due-diligence report on any Arc Testnet address, with an honest coverage manifest. ${DD_PRICE_HUMAN} per report`,
+    // ⭐ DERIVED, NEVER WRITTEN — see the two-axis block above. Naming the subject chain in prose
+    // while the settlement chain lived only in `network` is what made this sentence a latent
+    // misleading claim the moment the two stopped coinciding.
+    description: ddDescription(),
     // ⭐⭐ WHICH MECHANISM SETTLES THIS, PUBLISHED. A buyer could previously only infer it. We run
     // TWO genuinely different schemes across live sellers — this one and x402-quote settle through
     // CIRCLE GATEWAY (GatewayWalletBatched), while x402-vanilla-seller settles EIP-3009 against the
@@ -340,11 +427,14 @@ export function subjectPreview({ address = null, code } = {}) {
  */
 export function challenge402({ requirements, detail = null, preview = null }) {
   const powerGroups = Object.keys(POWER_SIGS).length;
+  // ⭐ ONE ARRAY, ASSERTED ONCE, USED IN BOTH THE HEADER AND THE BODY. Two `[requirements]`
+  // literals were also two chances for the header and body to disagree.
+  const accepts = assertAcceptsDescribed([requirements]);
   return {
     statusCode: 402,
     headers: {
       "Content-Type": "application/json",
-      "PAYMENT-REQUIRED": b64encode({ x402Version: X402_VERSION, accepts: [requirements] }),
+      "PAYMENT-REQUIRED": b64encode({ x402Version: X402_VERSION, accepts }),
     },
     body: JSON.stringify({
       // ⭐ MIRRORED FROM THE HEADER, NOT A SECOND SOURCE OF TRUTH. Under v2 the body is explicitly
@@ -361,7 +451,7 @@ export function challenge402({ requirements, detail = null, preview = null }) {
       resource: resourceObject(requirements),
       error: detail ? "Payment required" : "Payment required",
       ...(detail ? { reason: detail } : {}),
-      accepts: [requirements],
+      accepts,
 
       // ═══ ⭐ HOW TO PHRASE THE CALL, IN THE CHALLENGE ITSELF ═══════════════════════════════════
       // Until now the 402 said what you are buying and what it costs, but not how to ask for it —
@@ -715,12 +805,15 @@ export async function runPaidAnalysis({ facilitator, rpcCall, store, payload, re
     // ⭐ THE CLAIM IS SELECTED BY THE FATE, never written here. See SETTLE_FATE above for why the
     //   only honest answer today is UNKNOWN.
     const fate = classifySettleFate(s?.settlement);
+    // ⭐ SAME INVARIANT AS challenge402 — this path publishes a challenge too, so it owes the same
+    // guarantee that the sentence names the networks it is offering.
+    const accepts = assertAcceptsDescribed([requirements]);
     const claim = SETTLE_FAILURE_CLAIM[fate];
     return {
       statusCode: 402,
       headers: {
         "Content-Type": "application/json",
-        "PAYMENT-REQUIRED": b64encode({ x402Version: X402_VERSION, accepts: [requirements] }),
+        "PAYMENT-REQUIRED": b64encode({ x402Version: X402_VERSION, accepts }),
       },
       body: JSON.stringify({
         x402Version: X402_VERSION,
@@ -742,7 +835,7 @@ export async function runPaidAnalysis({ facilitator, rpcCall, store, payload, re
         handle: s?.handle ?? null,
         retrieve: s?.handle ? `${resource}?handle=${s.handle}` : null,
         entitlement: "PERMANENT — if the payment ever lands, this handle still serves the frozen report.",
-        accepts: [requirements],
+        accepts,
       }),
     };
   }

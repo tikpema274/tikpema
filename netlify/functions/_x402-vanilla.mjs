@@ -62,8 +62,53 @@
 // is ever on the roadmap, this file gets there first — which is why it is parked rather than
 // deleted, and why the parking has a trigger instead of a date.
 //
-// ⛔ REOPEN CONDITION: Base (or any mainnet with vanilla offers) enters the roadmap. Until then this
-// file is deliberately unreachable, and "unreachable" is not a defect to be fixed by wiring it up.
+// ═══ ⛔ REOPEN TRIGGER: "WE WANT TO BUY FROM VANILLA x402 SELLERS" ════════════════════════════
+// NOT "Base enters the roadmap". That was the trigger until 2026-09-06 and it was WRONG — it named
+// a chain, and a chain is a coincidence between projects rather than a condition on this one.
+//
+// 🚨 IT WOULD HAVE FIRED ON A SELLER DECISION THIS FILE HAS NOTHING TO DO WITH. Making DD payable
+// on Base Sepolia is a SELLER capability, and it is better served by the BATCHED rail (see below).
+// This file is a BUYER. Two different projects both said "Base", and the shared noun made one look
+// like a precondition for the other: a reader hitting the old trigger would reasonably conclude
+// that wiring this buyer gates DD-on-Base. It does not, and never did.
+//
+// ⭐⭐ THE GENERAL FORM, WHICH IS THE REUSABLE PART: A REOPEN TRIGGER MUST NAME THE CAPABILITY, NOT
+// A SHARED NOUN. Chains, vendors, protocols and dates are all nouns two unrelated projects can
+// share; a capability is what only THIS component provides. A trigger on a shared noun fires early,
+// fires on someone else's decision, and — worst — silently implies a dependency that does not
+// exist. Ask "what would we be unable to do without this file?" and trigger on THAT.
+//
+// So: reopen when we want to BUY from vanilla EIP-3009 sellers — the 465 catalogued offers this
+// buyer already handles and `payX402` structurally cannot reach. That is independent of whether we
+// ever SELL on Base, on Arc, or anywhere else. Until then this file is deliberately unreachable,
+// and "unreachable" is not a defect to be fixed by wiring it up.
+//
+// ═══ ⭐ WHY DD-ON-BASE WOULD USE THE BATCHED RAIL, MEASURED 2026-09-06 — DO NOT RE-LITIGATE ════
+// The question "is the vanilla rail cheaper for selling DD on Base Sepolia?" was asked and answered
+// against instruments, not intuition:
+//
+//   · THE BATCHED FACILITATOR IS ALREADY MULTI-NETWORK. `@circle-fin/x402-batching` ships exactly
+//     two CAIP-2 ids — eip155:5042002 and eip155:84532 — and its own server example reads
+//     `networks: ['eip155:5042002', 'eip155:84532'] // Arc Testnet + Base Sepolia`.
+//     `BatchFacilitatorClient.verify/settle` take the requirements per call, so the network is a
+//     parameter, not a rebuild. Gateway API /v1/info lists Base Sepolia as domain 6 with the same
+//     Gateway Wallet address as Arc.
+//   · ON THE BATCHED RAIL THE SELLER PAYS NO GAS — Gateway settles.
+//   · 🚨 ON THE VANILLA RAIL THE SELLER SETTLES ITS OWN TX, AND BASE SEPOLIA GAS IS ETH, NOT USDC.
+//     That is a new funding pipeline and a new failure mode: seller runs dry, paid buyer unserved.
+//     On Arc this cost is invisible because gas IS the asset we earn.
+//
+// ⇒ For SELLING DD on Base, batched is cheaper. The vanilla rail's portability advantage is real
+// but narrower than it first looked, and it is offset by that gas dependency.
+//
+// ⭐ AND VANILLA'S REAL ADVANTAGE, RECORDED SEPARATELY BECAUSE IT IS NOT ABOUT COST: EXACT
+// PER-PAYMENT CONFIRMATION. `authorizationState(payer, nonce)` is present and returning on Base
+// Sepolia USDC (measured: name "USDC", version "2", domain separator readable). The batched rail
+// cannot have this — that read REVERTS on GatewayWalletBatched, which is why DD confirmation is an
+// AGGREGATE balance heuristic today, why two concurrent equal-amount payments cross-confirm, and
+// why `payTo` must be a wallet that receives nothing else. Vanilla dissolves all three. If we ever
+// want per-payment attribution rather than a dedicated-wallet workaround, THAT is the argument for
+// this rail — not portability, and not cost.
 //
 // Mirrors _x402.mjs (the Gateway-batched buyer), but for the VANILLA EIP-3009
 // scheme: the payment authorization is signed against the USDC TOKEN itself
