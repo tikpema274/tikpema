@@ -1,5 +1,127 @@
 ---
 
+# 🚨 THE MUTATION THAT SURVIVED — two fixtures that agree on both definitions cannot tell them apart
+
+**2026-09-06.** Deploy `6a9d1876108dd48b87bebb3a`, published 08:01:42.009Z. `5a4626f` · tree
+`9aadb700e098` · **dirty false** · stamped 07:38:32.316Z. `test:all` **95/0/0 of 95** (94 → 95: the
+new contract suite). `gate:deployed` **5/5** · `gate:forgery` **5/0** · `gate:spec` green ·
+`capture:window` RAN.
+
+`agent-execute-plan` answered a HARDCODED `executed: true`, meaning *"the executor phase was
+entered"*. Measured live: a plan refused at the per-bridge cap returned `executed:true, stepsRun:0,
+stoppedAt:0, completed:false` and moved nothing. Now `executed: stepsRun > 0`.
+
+## ⛔⛔ THE MUTATION THAT WAS NOT CAUGHT, AND IT WAS THE DANGEROUS DIRECTION
+
+Four mutations were run against the new contract suite. Three were caught. **`executed: allOk`
+passed.**
+
+    M1 revert to the hardcoded literal        CAUGHT
+    M2 executed: allOk                        ❌ NOT CAUGHT   ← the first draft
+    M3 drop the hoisted stopping reason       CAUGHT
+    M4 re-gate the panel on `executed`        CAUGHT
+
+⭐⭐ **WHY THE FIXTURES COULD NOT SEE IT. In a ONE-STEP plan, `stepsRun > 0` and `allOk` COINCIDE** —
+nothing ran ⇒ neither is true, everything ran ⇒ both are. My two fixtures were a refused one-step
+plan and a successful one-step plan, so **both fixtures agreed on both candidate definitions**.
+Neither could discriminate between them, and the suite was green on a definition it had never
+tested.
+
+🚨 **AND `allOk` IS WORSE THAN THE LITERAL IT WOULD HAVE REPLACED.** Under it, a plan that bridged
+step 1 and was refused at step 2 answers **`executed: false` FOR A PLAN THAT MOVED MONEY** — the
+original bug inverted. The hardcoded `true` over-reported; this under-reports, on the money path,
+in the case a reader most needs the truth.
+
+⭐ **THE RULE: TWO FIXTURES THAT AGREE ON BOTH CANDIDATE DEFINITIONS CANNOT TELL THEM APART. THE
+DISCRIMINATING CASE MUST BE CONSTRUCTED DELIBERATELY.** Here that is a PARTIAL run — a two-step plan
+`[1, 200]`, step 1 succeeding and step 2 refused at the cap, where `stepsRun > 0` is true and
+`allOk` is false. ⛔ **It was found ONLY because the mutation survived.** Reasoning about the two
+definitions had not separated them; running the mutation did.
+[[collapse-needs-pairwise-inequality]] · [[verdict-earned-by-assertions]]
+
+`verify-plan-execution-contract` **19/0**, driving the REAL handler in both directions. M2 now fails
+on `executed=false` where money moved.
+
+# ⭐⭐ THE USER-FACING HALF — found by reading the CONSUMERS, not the field
+
+The stopping reason lived ONLY in `results[stoppedAt].blocked`, while `MyAgentPanel` renders a
+**TOP-LEVEL `blocked`** that this response never carried. So a plan refused at the cap told the user:
+
+    "Stopped at step 1 — remaining steps not run."
+
+…and **never said why**, with `"step ~200.05 exceeds per-bridge limit of 25 USDC"` sitting unread in
+the payload. It also implied step 1 had been ATTEMPTED and the rest skipped; nothing had run at all.
+
+⛔ **AND THE TRAP: GATING THE PANEL ON THE FIXED `executed` WOULD HAVE HIDDEN A TOTAL REFUSAL
+ENTIRELY.** The block was `{planRun?.executed && …}`, which worked only because the field was
+always true. Making the field honest without touching the panel would have made the UI STRICTLY
+WORSE — a refused plan would render nothing. **Fixing a field means fixing what reads it.** The
+block is now gated on `results` (the plan was attempted, here is what happened), the reason is
+hoisted, and a run where nothing happened says *"Nothing ran"*.
+
+⚠️ **NOT A RENAME.** Renaming breaks every client for a field whose MEANING was the bug. The honest
+fix is to make the existing name true. [[field-name-must-be-true-in-every-case]]
+
+# ⚠️ THE DEPLOY WAS KILLED AFTER IT PUBLISHED
+
+The deploy process was killed by the system (out of memory) **mid-`gate:deployed`** — but
+`Deploy is live!` and `Deploy complete` were already in the log. **Production was running the new
+code with NONE of its post-deploy verification**, and the task notification said only `killed`.
+
+⭐⭐ **THE GENERAL FORM, WORTH MORE THAN THE INCIDENT: A DEPLOY THAT PUBLISHES AND THEN DIES IS NOT
+A FAILED DEPLOY.** "Killed" reads as *nothing happened*, and that is the wrong default — it is a
+worse state than a clean failure, because a clean failure leaves production untouched while this
+leaves it changed and unchecked. **Check what shipped before concluding nothing did.**
+[[a-later-command-is-not-proof-of-an-earlier-one]]
+
+Everything was re-run by hand: `gate:deployed` 5/5 (serves tree `9aadb700e098`, commit
+`5a4626f93258`, control plane == data plane, 25 newer scanned) · `gate:forgery` 5/0 (band
+`acknowledge`, 90.0%, `executed=false`) · `gate:spec` green · `capture:window` RAN (no window;
+ddTree `3b589768754d` unchanged) · ddTree COMPARED, `moved: False` · schedule still **10** with
+`plan-path-watch */30`.
+
+# ⭐ BOTH FLIPS FROM ONE CHANGE, SAME PROBE
+
+    BEFORE   executed true    · stepsRun 0 of 1 · top-level blocked UNDEFINED
+    AFTER    executed false   · stepsRun 0 of 1 · top-level blocked "step ~200.05 exceeds
+                                                  per-bridge limit of 25 USDC"
+                               · and it EQUALS results[0].blocked — one claim, not a second copy
+
+⭐ **TWO INDEPENDENT FLIPS**, the field and the hoist, so a partial deploy would have shown one
+without the other. The probe is the same non-executing shape throughout: 200 USDC over the 25 cap,
+refused before `executeAction`.
+
+# ⭐ THE MONITOR, CONFIRMED AGAINST THE NEW RESPONSE SHAPE
+
+This deploy changed the response `plan-path-watch` reads, so its verdict was CHECKED rather than
+assumed. First tick after publication, **08:30:25.751Z**:
+
+    healthy / disclosed · {kind: cap, valuedUsdc: 200.05} · spend clean · receipts 22 → 22
+    runCount 20 · skipCount 0 · intervals 29.8, 30.2, 29.8, 30.3, 29.7, 30.3, 29.8m
+
+The verdict and disclosure are BYTE-IDENTICAL to the pre-deploy tick, though `executed` flipped
+underneath it — the judge keys on the cap disclosure and ignores that field, and it held.
+
+⭐⭐ **THE COUNTERS SURVIVED A REDEPLOY** — 19 → 20 across a container replacement at 08:01. The
+state lives in Blobs, not memory, and that had only ever been observed WITHIN one deployed version.
+
+⭐ **AN INTERACTION RULED OUT BY OBSERVATION RATHER THAN REASONED PAST.** The newly-populated
+top-level `blocked` is exactly what `judgePlanProbe`'s fallback reads (`body.blocked ??
+body.results?.[0].blocked`) if disclosure extraction ever fails. The ordering in the code is
+correct — `firstDisclosure` runs first — but a change intended for a HUMAN READER now also feeds the
+MONITOR'S REASONING, which is the kind of coupling that is cheap to observe and easy to argue past.
+Had the ordering been wrong this tick would have read `blocked/refused-other`. It did not.
+
+# ⛔ STILL OPEN: THE WEBHOOK PATH HAS NEVER FIRED
+
+Twenty healthy readings, `lastNotifiedAt: null` throughout. **A healthy monitor is structurally
+incapable of exercising its own alert**, so waiting does not improve this. Inducing it needs either
+a deploy carrying a wrong-target override — two ~30m cycles with the plan path **watched by nothing
+in between** — or a local POST that puts a REAL-LOOKING ALERT in the live money-path channel.
+Neither is done; both need a decision, not a default.
+
+---
+
 # ⭐ THE MONITOR CAN NOW ANSWER "DID IT KEEP RUNNING?" FROM ONE READ — and my premise was wrong
 
 **2026-09-05, evening.** `test:all` **94/0/0 of 94** unpiped, exit 0. `verify-plan-path-watch`
