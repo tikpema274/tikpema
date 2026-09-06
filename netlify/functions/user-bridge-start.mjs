@@ -23,6 +23,9 @@ import { json, ARC } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
 import { priceAndGate } from "./_user-bridge.mjs";
 import { destinationOptions } from "./_bridge.mjs";
+// ⭐ Normalised through the producer's own accessor, so an unrecognised value becomes `unknown`
+// rather than a guess — the surface then renders copy that claims NEITHER mechanic.
+import { bridgeMechanicOf } from "../../shared/bridge-mechanic.mjs";
 import { recordUserPendingBridge } from "./_bridge-record.mjs";
 
 export async function handler(event) {
@@ -104,6 +107,12 @@ export async function handler(event) {
       netPredicted: gate.fee.netUsdc,
       feeRatio: gate.band.feeRatio,
       feeBand: gate.band.band,
+      // ⛔⛔ THE MECHANIC TRAVELS WITH THE QUOTE. Without it the panel had to KNOW it was the
+      // deducted path and write its own sentence — the exact thing shared/bridge-mechanic.mjs
+      // exists to forbid ("no surface writes its own sentence; the producer decides the mechanic").
+      // `bridgeFeeDeducted` already declares it; it simply was not plumbed through, so the one
+      // surface that needed it was left to infer subtraction from three numbers.
+      mechanic: bridgeMechanicOf(gate.fee.mechanic),
       destinationKey: gate.dest.key,
       destinationLabel: gate.dest.label,
       recipient: gate.recipient,

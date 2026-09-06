@@ -182,7 +182,7 @@ section("4 — ⛔ NO SURFACE WRITES ITS OWN SENTENCE");
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-section("5 — ⛔ THE 3 SELF-SIGNED-ONLY SITES ARE CORRECT AND MUST NOT BE SWEPT");
+section("5 — ⛔ THE 4 SELF-SIGNED-ONLY SITES ARE CORRECT AND MUST NOT BE SWEPT");
 {
   // ═══ 🚨 THIS IS A GUARD AGAINST A FUTURE FIX, NOT AGAINST A BUG ════════════════════════════
   // `ManualBridgePanel` says "only N USDC would arrive" and "estimated arrival" — TRUE, because
@@ -199,6 +199,71 @@ section("5 — ⛔ THE 3 SELF-SIGNED-ONLY SITES ARE CORRECT AND MUST NOT BE SWEP
     !/full amount arrives/.test(mcode) && !/charged on top/.test(mcode) &&
     !/left your wallet/.test(mcode),
     "a sweep converting this would make it lie about a path that deducts");
+
+  // ═══ ⭐⭐ THE FOURTH SITE: THE QUOTE SUMMARY LINE, RENDERED ═══════════════════════════════
+  // 🚨 IT WAS THE ONE SELF-SIGNED SITE THAT STATED NO MECHANIC AT ALL. It read
+  //     "1.0000 USDC → Base · fee 0.0543 · estimated arrival 0.9457"
+  // — three numbers from which the reader was left to INFER subtraction. ⛔ The same three numbers
+  // are consistent with EITHER mechanic, and the sibling agent path charges the fee ON TOP and says
+  // so explicitly. A surface that states nothing is not neutral when its neighbour states the
+  // opposite; it inherits the neighbour's meaning by default.
+  //
+  // ⭐ ASSERTED ON RENDERED OUTPUT, not on the source, and in BOTH DIRECTIONS — the deducted
+  // sentence present AND the upfront one absent. [[assert-on-rendered-output-not-source-regex]]
+  {
+    const line = (mechanic: string | undefined) => {
+      const c = bridgeMechanicCopy(mechanic);
+      // The composition the panel performs, from the producer's fields only.
+      return `fee 0.054300 USDC, ${c.feePlacement} — exact for this quote · ` +
+             `${c.arrivalPrefix}0.945700 USDC ${c.arrivalSuffix}`;
+    };
+    const ded = line("deducted");
+    const up = line("upfront");
+    check("⭐⭐ the DEDUCTED summary says the fee is taken OUT OF the amount",
+      /taken out of the amount/.test(ded), ded);
+    check("⛔⛔ …and does NOT carry the upfront claim",
+      !/on top of the amount/.test(ded) && !/full amount arrives/.test(ded));
+    check("⭐⭐ the UPFRONT wording is genuinely different — or the check above is vacuous",
+      /on top of the amount/.test(up) && ded !== up);
+    check("⭐ the deducted line marks the ARRIVAL as the estimate, not the fee",
+      /estimated 0\.945700 USDC to arrive/.test(ded) && /exact for this quote/.test(ded));
+    check("⛔ …and `estimated` does not sit before the FEE figure",
+      !/estimated 0\.054300/.test(ded));
+    // ⚠️ A stale quote carrying no mechanic must claim NEITHER, rather than defaulting.
+    // 🚨 THE FIRST DRAFT OF THIS CHECK WAS WRONG, AND IN THE RECORDED WAY. It scanned for the
+    // absence of "on top of the amount" — and the `unknown` copy DENIES that phrase by naming it
+    // ("does not say whether ON TOP OF THE AMOUNT or out of it"). A flat forbidden-phrase scan
+    // fails honest denial copy; the guard went red on text that was correct.
+    // ⭐ So the property is asserted POSITIVELY (the disclaimer is present) plus PAIRWISE (all
+    // three lines differ), which needs no forbidden-phrase scan at all.
+    // [[assert-on-rendered-output-not-source-regex]]
+    const unk = line(undefined);
+    check("⛔ a quote with NO mechanic says the record does not say — it does not default",
+      /does not say whether/.test(unk), unk.slice(0, 90));
+    check("⛔ …and it makes neither BARE claim",
+      !/taken out of the amount/.test(unk) && !/charged on top of the amount/.test(unk));
+    check("⭐⭐ all three lines are pairwise DISTINCT — one text satisfying three checks would be vacuous",
+      new Set([ded, up, unk]).size === 3);
+
+    // ⭐ AND THE PANEL ACTUALLY READS THE PRODUCER — a rendered check on composed strings proves
+    // the copy composes; this proves the SURFACE is wired to it rather than to its own literal.
+    check("⭐⭐ the panel renders the producer's copy, keyed by the quote's mechanic",
+      /bridgeMechanicCopy\(quote\.mechanic\)/.test(manual) &&
+      /mech\.feePlacement/.test(manual) && /mech\.arrivalPrefix/.test(manual));
+    check("⛔ …and writes NO mechanic sentence of its own",
+      !/taken out of the amount/.test(mcode.replace(/A live cross-chain fee \(taken from the amount\)/g, " ")),
+      "the only literal left is the pre-quote note, which is separately guarded above");
+    check("⭐⭐ the producer PLUMBS the mechanic into the quote — without it the surface must guess",
+      /mechanic: bridgeMechanicOf\(gate\.fee\.mechanic\)/.test(
+        readFileSync("netlify/functions/user-bridge-start.mjs", "utf8")));
+
+    // ⭐ 6dp, via the shared helper. Every other amount surface moved; this was the last on 4dp.
+    check("⭐ the summary routes every figure through displayAmount at 6dp",
+      (manual.match(/displayAmount\(quote\.\w+, 6\)/g) || []).length === 3,
+      `${(manual.match(/displayAmount\(quote\.\w+, 6\)/g) || []).length} of 3`);
+    check("⛔ …and no 4dp toFixed survives in this panel's quote line",
+      !/quote\.\w+\.toFixed\(4\)/.test(manual));
+  }
 
   // ⭐ AND ITS PRODUCER STILL DECLARES THE DEDUCTED MECHANIC — the pairing, one layer down.
   const bridge = readFileSync("netlify/functions/_bridge.mjs", "utf8");

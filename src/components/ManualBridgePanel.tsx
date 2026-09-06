@@ -20,6 +20,10 @@ import type { useWallet } from "../wallet/useWallet";
 import { agentClient } from "../lib/agentClient";
 import { arcTestnet } from "../config/chain";
 import { describeError } from "../lib/describeError";
+import { displayAmount } from "../lib/formatAmount";
+// ⛔ The sentence about WHERE the fee is charged is not written here. It is read from the producer,
+// keyed by the mechanic the quote carries. [[duplicate-source-of-truth-is-the-recurring-bug]]
+import { bridgeMechanicCopy } from "../../shared/bridge-mechanic.mjs";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 const EXPLORER = arcTestnet.blockExplorers.default.url;
@@ -27,6 +31,8 @@ const EXPLORER = arcTestnet.blockExplorers.default.url;
 type Quote = {
   amountUsdc: number; feeUsdc: number; netPredicted: number;
   feeRatio: number; feeBand: "none" | "warn" | "acknowledge";
+  /** ⭐ From the producer. Absent on a stale quote ⇒ `unknown` copy, which claims neither. */
+  mechanic?: string;
   destinationKey: string; destinationLabel: string; recipient: string;
 };
 type Burn = { bridgeContract: string; usdc: string; amountMinor: string; calldata: string };
@@ -295,16 +301,33 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
         />
       )}
 
-      {quote && !result && (
+      {quote && !result && (() => {
+        const mech = bridgeMechanicCopy(quote.mechanic);
+        return (
         <div className="status">
-          <b>{quote.amountUsdc.toFixed(4)} USDC</b> → {quote.destinationLabel}
-          {" · "}fee <b>{quote.feeUsdc.toFixed(4)}</b>
-          {" · "}<b>estimated</b> arrival {quote.netPredicted.toFixed(4)} USDC
+          {/* ═══ ⭐⭐ THE MECHANIC IS STATED, NOT LEFT TO ARITHMETIC ══════════════════════════════
+              This line used to read "1.0000 USDC → Base · fee 0.0543 · estimated arrival 0.9457",
+              which never says the fee is TAKEN FROM the amount — it left the reader to infer
+              subtraction from three numbers. ⛔ On an app whose SIBLING path charges the fee ON TOP
+              and says so explicitly, that inference must not be left to the reader: the same three
+              numbers are consistent with either mechanic, and only one of them is true here.
+              ⭐ The sentence is the producer's, keyed by the mechanic the quote now carries — this
+              surface is structurally unable to state the other one.
+              ⚠️ AND WHICH FIGURE IS AN ESTIMATE IS NOW EXPLICIT. "estimated" used to sit at the
+              head of the tail and read as qualifying the pair. The FEE is exact for this quote —
+              held, and the figure that gets signed — while only the ARRIVAL is arithmetic that the
+              destination-chain read later promotes. */}
+          <b>{displayAmount(quote.amountUsdc, 6)} USDC</b> → {quote.destinationLabel}
+          {" · "}fee <b>{displayAmount(quote.feeUsdc, 6)} USDC</b>, {mech.feePlacement}
+          {" — exact for this quote"}
+          {" · "}{mech.arrivalPrefix}<b>{displayAmount(quote.netPredicted, 6)} USDC</b>{" "}
+          {mech.arrivalSuffix}
           <div style={{ marginTop: 8 }}>
             <button onClick={signAndBurn} disabled={busy}>Sign and bridge</button>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ⛔ BURNED BUT NOT RECORDED. The money has moved; only the record is missing. The one
           control offered is a retry of the RECORD — there is deliberately no way to sign again. */}
