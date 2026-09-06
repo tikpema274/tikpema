@@ -43,13 +43,18 @@
 // or CI step that checks only success — which is exactly how a "dry run" becomes indistinguishable
 // from a bridge that moved money. The code is DISTINCT from the generic failure exit 1 so a refusal
 // is not confused with a crash.
+// ⭐ THREE STATES, THREE OUTCOMES — they were two, and one of them was a lie.
+//   bare        inert. No network, exit 4.
+//   --dry-run   fees + calldata, reads only, moves nothing, exit 0.
+//   --send      the real burn.
 const SEND = process.argv.includes("--send") || process.argv.includes("--execute");
-if (!SEND) {
+const DRY = process.argv.includes("--dry-run");
+if (!SEND && !DRY) {
   console.log(
     "\n⛔ INERT — nothing was sent and NO NETWORK CALL WAS MADE.\n" +
     "   bridge-direct MOVES REAL USDC and, when it does, writes a real receipt (origin: tool-signed).\n" +
     "   This run wrote nothing, read nothing, and moved nothing.\n" +
-    "   Re-run with --send to actually fire it.\n"
+    "   --dry-run for fees and calldata (reads only). --send to actually fire it.\n"
   );
   process.exit(4);
 }
@@ -58,6 +63,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { encodeFunctionData, pad, getAddress, createPublicClient, http, formatUnits } from "viem";
+import { BRIDGE_DESTINATIONS } from "../netlify/functions/_bridge.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -69,7 +75,10 @@ const ARC = {
   cctpDomain: 26,
   usdc: "0x3600000000000000000000000000000000000000",
 };
-const SEPOLIA = { cctpDomain: 0 };
+// ⭐ DERIVED, NOT A LITERAL. `0` was written here by hand, and 0 is also what an absence coerces
+// to — so a hand-typed 0 and a missing value were indistinguishable at the point of use. It now
+// reads the same registry the quote path and the receipt renderer read.
+const SEPOLIA = { cctpDomain: BRIDGE_DESTINATIONS.ethereum.cctpDomain };
 const BRIDGE = "0xC5567a5E3370d4DBfB0540025078e283e36A363d"; // BridgingKitContract (Arc testnet)
 const IRIS = "https://iris-api-sandbox.circle.com"; // testnet IRIS
 const FAST_FINALITY = 1000; // FAST tier
@@ -149,7 +158,12 @@ async function computeMaxFee(amountMinor) {
 
 async function main() {
   loadEnv();
-  const execute = process.argv.includes("--execute");
+  // 🚨 THIS READ `process.argv.includes("--execute")` WHILE THE GUARD ABOVE ACCEPTED `--send`, SO
+  // `--send` PASSED THE GUARD AND LEFT `execute` FALSE. The run fell to the dry-run branch, which
+  // then printed "Re-run with --send" — an instruction whose only effect is the identical run. A
+  // refusal that tells you to do exactly what you just did is worse than a silent one: it costs a
+  // person their own trust in the tool before it costs them anything else. One flag, one meaning.
+  const execute = SEND;
   const amountHuman = process.env.SPIKE_AMOUNT || "1";
   const amountMinor = BigInt(Math.round(Number(amountHuman) * 10 ** USDC_DECIMALS));
 
@@ -200,8 +214,9 @@ async function main() {
   if (bal < amountMinor) console.log(`\n⚠  Insufficient balance: have ${formatUnits(bal, 6)}, need ${amountHuman}.`);
 
   if (!execute) {
-    console.log("\nDry run only. Re-run with --send to fire the bridge.");
-    return;
+    console.log("\n— DRY RUN — fees and calldata above. Nothing was sent, nothing was written.");
+    console.log("  Re-run with --send to fire the bridge.");
+    return;   // exit 0: a dry run that did what it said IS a success.
   }
 
   // ⛔ WOULD A BURN FROM THIS SOURCE BE INVISIBLE? Asked BEFORE the money checks, because a burn
@@ -224,8 +239,27 @@ async function main() {
     process.exit(6);
   }
   console.log(`\n✅ receipt store reachable (${reach.detail}) — a receipt can be written for this burn.`);
-  if (feeExceedsAmount) { console.log("\nRefusing to --execute: fee ≥ amount."); return; }
-  if (bal < amountMinor) { console.log("\nRefusing to --execute: insufficient balance."); return; }
+  // ⛔ A REFUSAL IS NOT A DRY RUN, AND THEY MUST NOT EXIT ALIKE. Both of these used to `return`,
+  // i.e. exit 0 — indistinguishable to any caller from a completed dry run, and reached only after
+  // the dry-run branch had already printed a false instruction. Each now reports ITSELF and carries
+  // its own code, so "why did nothing happen" is answerable from the exit status alone.
+  if (feeExceedsAmount) {
+    console.log(
+      `\n⛔ REFUSING TO SEND — the fee EXCEEDS the amount on this route.\n` +
+      `   maxFee ${formatUnits(maxFee, 6)} USDC ≥ amount ${amountHuman} USDC, so the burn cannot settle:\n` +
+      `   on the deducted path the fee comes OUT of the amount, leaving nothing to deliver.\n` +
+      `   Nothing was attempted and no money moved.\n` +
+      `   Fix it by raising the amount above the fee (SPIKE_AMOUNT=<n>), or by choosing a cheaper\n` +
+      `   destination — Ethereum carries a forwarder fee two orders of magnitude above the L2s.`);
+    process.exit(7);
+  }
+  if (bal < amountMinor) {
+    console.log(
+      `\n⛔ REFUSING TO SEND — insufficient balance.\n` +
+      `   ${from} holds ${formatUnits(bal, 6)} USDC and this burn needs ${amountHuman}.\n` +
+      `   Nothing was attempted and no money moved. Fund the wallet or lower SPIKE_AMOUNT.`);
+    process.exit(8);
+  }
 
   // --- EXECUTE via Circle dev-controlled client (reliable async submit + poll) ---
   const { circle, waitForTx } = await import("../netlify/functions/_circle.mjs");

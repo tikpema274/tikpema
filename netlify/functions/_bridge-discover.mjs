@@ -72,6 +72,21 @@ export function blockWindows(fromBlock, toBlock, cap = MAX_LOG_WINDOW) {
 /** Destination from the CCTP domain — DERIVED from the one registry the quote path reads, never a
  *  second table. An unknown domain is named as unknown rather than dropped or guessed. */
 export function destinationForDomain(domain) {
+  // ═══ 🚨 DOMAIN 0 IS ETHEREUM, AND 0 IS ALSO WHAT AN ABSENCE COERCES TO ════════════════════════
+  // MEASURED 2026-09-07: `Number(null)`, `Number("")` and `Number(false)` are all 0, so the old
+  // `Number(domain)` returned **Ethereum (Sepolia)** for a MISSING destination. A receipt would have
+  // told a user their money went to Ethereum when nothing knew where it went — and Ethereum is the
+  // most expensive route, so the fee shown alongside would have been wrong too.
+  // ⭐ `undefined` gave NaN and correctly fell through to unknown, which made the defect worse, not
+  // better: two absences behaved differently, so testing one proved nothing about the other.
+  // ⛔ SO THE TYPE IS CHECKED BEFORE THE VALUE. Only an integer, or a string of digits, is a domain.
+  // Everything else is UNKNOWN — never the chain that happens to sit at zero.
+  // [[absence-must-never-read-as-safe]] · [[nan-fail-open-cap-pattern]]
+  const isInt = typeof domain === "number" && Number.isInteger(domain);
+  const isDigits = typeof domain === "string" && /^\d+$/.test(domain.trim());
+  if (!isInt && !isDigits) {
+    return { key: null, label: `unknown CCTP domain (${JSON.stringify(domain) ?? "undefined"})` };
+  }
   const d = Number(domain);
   for (const [key, v] of Object.entries(BRIDGE_DESTINATIONS)) {
     if (v.cctpDomain === d) return { key, label: v.label };

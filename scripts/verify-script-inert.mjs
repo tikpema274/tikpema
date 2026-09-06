@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OPERATOR_WALLET_VARS, operatorWallets, operatorWalletReport, scanOwnerSet } from "../shared/operator-wallets.mjs";
 import { checkSpikeSource, SPIKE_SOURCE_REASON } from "../shared/spike-source-guard.mjs";
-import { discoveredReceipt, RECEIPT_ORIGIN } from "../netlify/functions/_bridge-discover.mjs";
+import { discoveredReceipt, RECEIPT_ORIGIN, destinationForDomain } from "../netlify/functions/_bridge-discover.mjs";
 import { isAutoRetryExhausted } from "../netlify/functions/_bridge-receipts.mjs";
 import { blobsCredentials, assertStoreReachable } from "../shared/blobs-cli.mjs";
 
@@ -155,6 +155,43 @@ check("🚨 …and its refusal exits 6, before any money call", iExit > iProbe &
 check("⭐ exit 6 is distinct from 3, 4, 1 and 0", ![0, 1, 3, 4].includes(6));
 check("the write reuses the ALREADY-PROVEN handle, not a second bare-env resolution",
   /reach\.store/.test(src) && !/siteID: process\.env\.NETLIFY_SITE_ID/.test(src));
+
+console.log("\n── 6. 🚨 A REFUSAL IS NOT A DRY RUN, AND THEY MUST NOT EXIT ALIKE ──────");
+// MEASURED on a real run: `--send` was passed, `execute` read only `--execute`, so the run fell to
+// the dry-run branch and printed "Re-run with --send" — an instruction whose only effect is the
+// identical run. A refusal that tells you to do exactly what you just did is a closed loop.
+const bsrc = readFileSync("scripts/bridge-direct.mjs", "utf8");
+check("🚨 `execute` follows the SAME flag the guard accepts", /const execute = SEND;/.test(bsrc));
+check("   …so `--send` can never pass the guard and leave execute false",
+  !/const execute = process\.argv\.includes\("--execute"\)/.test(bsrc));
+check("⭐ the dry-run message no longer tells a --send caller to re-run with --send",
+  !/Dry run only\. Re-run with --send/.test(bsrc));
+// Each pre-burn refusal carries its OWN exit code — none of them 0.
+for (const [what, code] of [["fee ≥ amount", 7], ["insufficient balance", 8],
+                            ["invisible source", 5], ["store unreachable", 6], ["inert", 4]]) {
+  check(`   ${what} exits ${code}`, new RegExp(`process\\.exit\\(${code}\\)`).test(bsrc));
+}
+const exitCodes = [...bsrc.matchAll(/process\.exit\((\d+)\)/g)].map((m) => Number(m[1]));
+check("🚨 NO pre-burn refusal exits 0 — a refusal must not read as a completed run", !exitCodes.includes(0));
+check("⭐ every refusal code is DISTINCT — 'why did nothing happen' is answerable from status alone",
+  new Set(exitCodes).size === exitCodes.length, JSON.stringify(exitCodes));
+check("the fee refusal states the MECHANIC, not just the comparison",
+  /fee comes OUT of the amount/.test(bsrc));
+check("   …and names both remedies: a bigger amount OR a cheaper destination",
+  /SPIKE_AMOUNT=<n>/.test(bsrc) && /cheaper\n?.*destination|cheaper/.test(bsrc));
+
+console.log("\n── 7. 🚨 DOMAIN 0 IS ETHEREUM — AND 0 IS WHAT AN ABSENCE COERCES TO ────");
+check("a real domain still resolves", destinationForDomain(0).key === "ethereum" && destinationForDomain(6).key === "base");
+check("   …and a digit string too", destinationForDomain("0").key === "ethereum");
+// ⛔ THE FAIL-OPEN: every one of these used to return Ethereum (Sepolia).
+for (const absent of [null, "", false, undefined, NaN, "abc", 1.5, {}]) {
+  check(`🚨 ${JSON.stringify(absent) ?? "undefined"} is UNKNOWN, never Ethereum`,
+    destinationForDomain(absent).key === null);
+}
+check("⭐ and the unknown label SAYS it is unknown rather than naming a chain",
+  /unknown CCTP domain/.test(destinationForDomain(null).label));
+check("⭐ the script DERIVES its domain from the registry, not a hand-typed 0",
+  /BRIDGE_DESTINATIONS\.ethereum\.cctpDomain/.test(bsrc) && !/const SEPOLIA = \{ cctpDomain: 0 \}/.test(bsrc));
 
 console.log(`\n${"═".repeat(72)}`);
 console.log(`${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed`);
