@@ -1,5 +1,70 @@
 // _x402-vanilla.mjs — the importable VANILLA x402 BUYER core.
 //
+// ═══ ⛔⛔ PARKED, NOT DEAD — DECIDED 2026-09-06. DO NOT DELETE THIS FILE. ═══════════════════════
+// Nothing imports payX402Vanilla at runtime. That is a DECISION with a stated reason and a stated
+// reopen condition, not an oversight, and it was taken after checking each deletion argument
+// individually. If you arrived here because a dead-code sweep flagged it, read this block first —
+// the record in PROGRESS.md is not what you are reading when you open this module, which is
+// precisely why the reasoning lives HERE.
+//
+// 🚨 THE COST OF DELETING IT IS NOT THE LOSS OF DEAD CODE. `shared/x402/version.mjs:43-48`
+// justifies a LIVE PRODUCTION INCONSISTENCY by naming this file: x402-vanilla-seller declares
+// version 2 while reading `x-payment`, and the comment's whole argument is that "its buyer
+// this buyer sends X-PAYMENT to match. The pair is internally consistent on the wire and
+// proven against real money. Correcting either half alone breaks a settled path." ⛔ DELETE THIS
+// BUYER AND THAT JUSTIFICATION EVAPORATES. The seller's inconsistency then reads as an unexplained
+// defect on a path that settles real money, and the next editor is free to "tidy" it — which is the
+// documented way to break a settled path. A deliberate defect is only safe while the reason it is
+// deliberate is still legible.
+//
+// ⭐ IT IS NOT SUPERSEDED BY payX402, AND THE GUARDS PROVE IT STRUCTURALLY. _x402.mjs:239 filters
+// accepts[] for `extra.name === "GatewayWalletBatched"`; :287 blocks "not a Gateway-batched option";
+// :289 blocks "unexpected verifyingContract (not the Gateway Wallet)" — all BEFORE signing. This
+// file mirrors that refusal with its own "unexpected EIP-712 domain" block. The two buyers refuse each
+// other's markets by design: one signs against the GatewayWallet and spends a pre-deposited Gateway
+// balance, the other signs against the USDC token domain and spends the token balance. The 2026-08-23
+// census splits 1,470 offers as 975 GatewayWalletBatched / 465 vanilla `USD Coin` EIP-3009 —
+// payX402 can reach NONE of the 465. Two rails, disjoint by construction. [[batched-x402-requires-from-equals-signer]]
+//
+// ⭐ IT IS THE ONLY CIRCLE-CUSTODIED-KEY VANILLA BUYER. No local private key anywhere in the path:
+// Circle signTypedData returns a plain ECDSA signature that ecrecovers to `from`. Demonstrated
+// end to end exactly ONCE, in the birth commit 1fc484f (2026-07-02) — settle tx
+// 0xb7fa389638f2d64a94f2aef82456cc7a463ea68489328742664dfc9a03c551d8, status 1, selector 0xef55bec6,
+// buyer 0.100000 -> 0.090000 USDC, AuthorizationUsed emitted, replay reverts. One demonstration is
+// the entire evidence base for that capability; deleting the file retires it.
+//
+// ⭐ IT IS THE SUBJECT OF verify-circle-error-shape.mjs §9, chosen deliberately: its try{} opens at
+// the challenge fetch, so a thrown `fetch` reaches the shared Circle error reader's catch with no
+// seller fixture, no module mocks and no credential. §8 covers the same ground by SOURCE REGEX,
+// which this repo's own rule calls blind by construction — §9 exists to backstop exactly that.
+// Delete this file and the backstop goes, leaving the grep it was built to cover.
+// [[assert-on-rendered-output-not-source-regex]]
+//
+// ⚠️ ONE ARGUMENT FOR KEEPING IT THAT DOES **NOT** HOLD, RECORDED SO IT IS NOT RE-DERIVED: "delete
+// it and the live seller goes untested" is FALSE. verify-vanilla-seller-bytes.mjs and
+// verify-vanilla-seller-bytes-live.mjs hand-roll their signing with a LOCAL viem account and never
+// import this module. They exercise the seller perfectly well without it. What they do not exercise
+// is a buyer holding no local key — that is the gap above, and it is a narrower claim than the one
+// this bullet corrects.
+//
+// ═══ ⭐⭐ THE REFRAME, WHICH IS THE REAL FINDING: WIRE-VS-DELETE WAS THE WRONG AXIS ═════════════
+// An HTTP wrapper is ~27 lines (x402-pay.mjs is the template), the spend cap is already enforced
+// here by the maxSpendUsdc() / AGENT_MAX_SPEND_USDC guard, and DELEGATE_ADDRESS is already set in
+// production because the live payX402
+// reads it. So wiring was never blocked on cost — and doing it would still accomplish nothing,
+// because ALL 465 VANILLA OFFERS ARE MAINNET AND ZERO ARE ON ARC. An Arc wrapper can only pay our
+// own seller: a self-loop that re-proves the rail and reaches no market.
+//
+// ⭐ THE LIVE QUESTION IS WHETHER THIS FILE IS THE CHEAPEST DOOR ONTO BASE, and the asymmetry is
+// the whole point. BUYING from the 465 offers that already exist needs a funded EOA and a
+// chain-id/domain generalization. SELLING there needs a Base deployment, a Base payout wallet,
+// Gateway settlement and a listing. Those are not the same project (PROGRESS 2026-08-23). If Base
+// is ever on the roadmap, this file gets there first — which is why it is parked rather than
+// deleted, and why the parking has a trigger instead of a date.
+//
+// ⛔ REOPEN CONDITION: Base (or any mainnet with vanilla offers) enters the roadmap. Until then this
+// file is deliberately unreachable, and "unreachable" is not a defect to be fixed by wiring it up.
+//
 // Mirrors _x402.mjs (the Gateway-batched buyer), but for the VANILLA EIP-3009
 // scheme: the payment authorization is signed against the USDC TOKEN itself
 // (verifyingContract = 0x3600…0000), not the GatewayWallet, and the seller

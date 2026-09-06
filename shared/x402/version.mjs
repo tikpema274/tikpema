@@ -42,9 +42,15 @@
 //
 // ═══ ⚠️ WHY x402-vanilla-seller.mjs DOES NOT IMPORT THIS ════════════════════════════════════════
 // It is inconsistent in the OPPOSITE direction — declares 2 while reading `x-payment`
-// (x402-vanilla-seller.mjs:282) — and its buyer _x402-vanilla.mjs:200 sends X-PAYMENT to match.
-// The pair is internally consistent on the wire and proven against real money. Correcting either
-// half alone breaks a settled path, so it is LEFT INCONSISTENT AND RECORDED, not "fixed".
+// (its `x-payment` read) — and its buyer `_x402-vanilla.mjs` sends X-PAYMENT to match, in the
+// header it assembles for the paid retry. The pair is internally consistent on the wire and proven
+// against real money. Correcting either half alone breaks a settled path, so it is LEFT INCONSISTENT
+// AND RECORDED, not "fixed".
+// ⚠️ THE LINE NUMBERS THAT USED TO BE HERE ARE GONE ON PURPOSE. This comment cited
+// `_x402-vanilla.mjs:200`, and on 2026-09-06 a comment block added to the TOP of that file shifted
+// it to :265 — silently, because nothing checks a line number written into prose. A pointer into
+// another file is a duplicate source of truth and drifts on edits that are not even about it; the
+// symbol survives what the number does not. [[duplicate-source-of-truth-is-the-recurring-bug]]
 // 🚨 Do not "tidy" it by importing this constant. That would change the number without changing
 // the header, which is precisely the defect this file exists to describe.
 export const X402_VERSION = 2;

@@ -1,5 +1,175 @@
 ---
 
+# ⭐⭐ A COMMENT DOCUMENTING A CROSS-FILE DEPENDENCY IS ITSELF A CROSS-FILE DEPENDENCY
+
+**2026-09-06.** The `payX402Vanilla` parking block is 64 lines at the TOP of `_x402-vanilla.mjs`.
+`shared/x402/version.mjs` cited `_x402-vanilla.mjs:200` for the X-PAYMENT header. **The insert
+shifted it to :265 — in the same edit whose entire purpose was keeping that dependency legible.**
+
+⛔ **A LINE NUMBER IN PROSE IS A COPY OF A FACT THAT LIVES SOMEWHERE ELSE.** It drifts on edits that
+are **not about it** — mine was a comment, in a different file, adding no behaviour — and **nothing
+checks a number written in prose.** No compiler, no test, no gate. The reference rots silently and
+the next reader follows it to whatever now occupies that line.
+[[duplicate-source-of-truth-is-the-recurring-bug]]
+
+⭐ **THE FIX IS TO ANCHOR ON SYMBOLS.** Both sides now name the thing rather than its coordinates:
+*"its buyer `_x402-vanilla.mjs` sends X-PAYMENT to match, in the header it assembles for the paid
+retry."* A symbol survives insertions above it; a number does not.
+
+⭐⭐ **AND THE ASYMMETRY, WHICH IS THE PART THAT IS EASY TO GET BACKWARDS.** PROGRESS's own copy at
+the 2026-08-27 entry still reads `:200` and **stays that way.**
+
+    LIVE CODE        a citation is an INSTRUCTION to the next reader — it must be true NOW,
+                     so it gets repaired, and better, de-numbered so it cannot rot again.
+    HISTORICAL RECORD a citation is an OBSERVATION — it was true when written, and silently
+                     correcting it destroys the thing that makes it a record.
+
+**Same stale number, opposite correct treatments.** A blanket "fix all stale references" sweep gets
+one of these two wrong every time, and it is usually the record that loses.
+
+# 🚨 THE DD SURFACE MAKES COMMENTS LOAD-BEARING — ON 38 FILES
+
+⛔ **`ddTree` IS A CONTENT HASH. IT DOES NOT KNOW WHAT A COMMENT IS.** The citation repair above
+touched `shared/x402/version.mjs`, which has been on the DD surface since 2026-08-26. Measured:
+
+    ddTree   3b589768754ddc8b…  ->  1772672eb252c24e…     ROTATED
+    files    38  ->  38            none added; content changed
+    cause    shared/x402/version.mjs alone — _x402-vanilla.mjs is NOT on the DD surface
+
+**A comment-only edit, changing no behaviour, rotates the health key exactly as a logic change
+does.** The canary then holds no artifact for the new key and DD refuses until its next scheduled
+run: a guaranteed, self-healing outage of up to one canary period — **during which VAULT DEPOSITS
+ARE UNAVAILABLE.**
+
+⭐ **NOBODY WOULD INFER THAT FROM "IT IS JUST A COMMENT",** so it is now written at
+`scripts/stamp-build.mjs`, immediately above `DD_SURFACE_FILES`, where someone editing the surface
+will read it — not left to be discovered at deploy time. ⭐ Confirmed by measurement that the
+stamp-build.mjs edit itself rotated nothing: ddTree held at `1772672e`, because `scripts/` is not on
+the surface. The constraint was checked, not assumed.
+
+⛔ **THE RULE: DO NOT SHIP A COMMENT-ONLY EDIT TO A DD-SURFACE FILE ON ITS OWN.** The window is
+priced **per DEPLOY, not per change**, so folding it into the next substantive deploy pays the same
+one window for both. Batching is free; shipping alone is not.
+
+# ⭐ PRE-REGISTRATION — WHAT THE NEXT `capture:window` SHOULD OBSERVE, WRITTEN BEFORE IT RUNS
+
+**Committed BEFORE the deploy, deliberately** — the entry two sections down records that
+pre-registration is the one artifact a dead session cannot give back, and this is the first chance
+since to actually spend that lesson rather than restate it.
+
+⭐⭐ **THE INSTRUMENT HAS NEVER RECORDED ITS INFORMATIVE BRANCH.** Every entry in
+`dd-refusal-window-log.jsonl` to date is `no-window` — correct each time, and uninformative each
+time, because no DD bytes had changed. **This deploy rotates the key, so the window is actually
+owed.** That makes the next run the rare moment the script was written for.
+
+    FIELD              PREDICTED                     WHY / WHAT FALSIFIES IT
+    previousDdTree     3b589768754d…                 the value this entry rotates away from
+    ddTree             1772672eb252…                 measured above, not predicted
+    rotated            true                          FIRST true in the ledger's history
+    outcome            "observed-banner"             the ✅ branch; the banner renders in prod
+    exit               0
+    witnessed          non-null                      a probe that actually saw class="down"
+    openedAt           set                           and closedAt set once it clears
+    probes             > 1                           ⭐ NOT 1. The early-break requires
+                                                     previous.ddTree === ddTree, now FALSE, so the
+                                                     run probes the full 150s instead of exiting.
+    durationSeconds    ≤ ~600                        one canary period; the script watches to 1200
+
+⛔ **THE FALSIFIER IS NAMED IN THE SCRIPT'S OWN VOCABULARY: `no-window-despite-rotation`.** It is a
+distinct outcome string precisely so this case cannot read as routine. If it appears, either the
+window closed before the first probe **or the health gate is not gating** — and those two are worth
+separating immediately, because the second is a fail-open on the thing standing between a broken
+detector and somebody's deposit.
+
+⚠️ Other real outcomes it could write, so the prediction is falsifiable against the actual
+vocabulary rather than an invented one: `observed-banner-malformed`, `observed-banner-never-closed`
+(exit 1), `regression-not-html` (exit 1), `could-not-measure` (exit 2).
+
+---
+
+# ⭐ payX402Vanilla — PARKED, WITH A REASON AND A TRIGGER. And wire-vs-delete was the wrong axis.
+
+**2026-09-06. DECISION: keep, parked. Do not wire, do not delete.** The open decision carried since
+2026-08-28 — *"a complete money-moving x402 buyer with no HTTP wrapper and no runtime importer; wire
+it up or remove it"* — is closed. Recorded **at the file**, not only here.
+
+## ⛔ THE DELETION CASE IS DEAD, IN ITS STRONGEST FORM
+
+`shared/x402/version.mjs` justifies a **LIVE PRODUCTION INCONSISTENCY** by naming this buyer: the
+vanilla seller declares version 2 while reading `x-payment`, and the argument for leaving it that way
+is that *"its buyer sends X-PAYMENT to match. The pair is internally consistent on the wire and
+proven against real money. Correcting either half alone breaks a settled path."*
+
+⛔ **DELETING THE BUYER DOES NOT REMOVE DEAD CODE. IT STRIPS THE JUSTIFICATION FROM A DELIBERATE
+DEFECT ON A PATH THAT SETTLES REAL MONEY** — leaving the seller's inconsistency reading as an
+unexplained bug, and the next editor free to "tidy" it. ⭐ **A deliberate defect is only safe while
+the reason it is deliberate is still legible.** The dangerous deletion is not the one that removes a
+behaviour; it is the one that removes an EXPLANATION some other file is relying on.
+
+Three more, each checked individually rather than asserted:
+
+- **NOT superseded.** `_x402.mjs` filters `accepts[]` for `extra.name === "GatewayWalletBatched"` and
+  blocks on *"not a Gateway-batched option"* and *"unexpected verifyingContract"* — **before
+  signing.** The vanilla buyer mirrors the refusal with its own *"unexpected EIP-712 domain"* block.
+  The two buyers **refuse each other's markets by design**: one signs against the GatewayWallet and
+  spends a pre-deposited Gateway balance, the other against the USDC token domain and spends the
+  token balance. The census splits 1,470 offers **975 batched / 465 vanilla** — `payX402` can reach
+  **none** of the 465. [[batched-x402-requires-from-equals-signer]]
+- **The only Circle-custodied-key vanilla buyer.** No local private key: Circle `signTypedData` →
+  plain ECDSA recovering to `from`. Demonstrated end to end **exactly once**, in `1fc484f` — settle
+  tx `0xb7fa3896…`, status 1, selector `0xef55bec6`, buyer 0.100000 → 0.090000, replay reverts. One
+  demonstration is the whole evidence base for that capability.
+- **The subject of `verify-circle-error-shape` §9**, chosen because its `try{}` opens at the
+  challenge fetch — a thrown `fetch` reaches the shared Circle error reader with no seller fixture,
+  no mocks, no credential. §8 covers the same ground by SOURCE REGEX. Deleting the buyer leaves the
+  grep §9 was built to backstop. [[assert-on-rendered-output-not-source-regex]]
+
+## ⚠️ AND ONE ARGUMENT FOR KEEPING IT THAT DOES NOT HOLD — RECORDED SO IT IS NOT RE-DERIVED
+
+**"Delete it and the live seller goes untested" is FALSE.** `verify-vanilla-seller-bytes.mjs` and
+`…-bytes-live.mjs` hand-roll their signing with a **local viem account** and never import the buyer.
+They exercise the seller perfectly well without it. What they do not exercise is a buyer holding no
+local key — a strictly narrower claim, and the one that survives. ⭐ **A correct verdict reached
+through a false supporting argument is still a liability**: the argument gets re-used somewhere the
+verdict does not follow. Kill the bad argument explicitly, in the same place as the good ones.
+
+## ⭐⭐ THE REFRAME — THE AXIS WAS WRONG, WHICH IS THE ACTUAL FINDING
+
+Wiring was **never blocked on cost**: the wrapper is ~27 lines (`x402-pay.mjs` is the template), the
+spend cap is already enforced in the buyer, and `DELEGATE_ADDRESS` is already set in production
+because the live `payX402` reads it. ⛔ **And doing it would still accomplish nothing — all 465
+vanilla offers are MAINNET, zero are on Arc.** An Arc wrapper can only pay our own seller: a
+**self-loop that re-proves the rail and reaches no market.**
+
+⭐ **THE LIVE QUESTION IS WHETHER THIS FILE IS THE CHEAPEST DOOR ONTO BASE**, and the asymmetry is
+the point:
+
+    BUYING from the 465 offers that already exist   a funded EOA + a chain-id/domain generalization
+    SELLING there                                   a Base deployment, a Base payout wallet,
+                                                    Gateway settlement, and a listing
+
+**If Base is ever on the roadmap, this file gets there first.** That is why it is parked rather than
+deleted, and why the parking carries a **TRIGGER, NOT A DATE**: reopen when Base — or any mainnet
+with vanilla offers — enters the roadmap. ⭐ A component parked against a condition survives; one
+parked against "later" gets swept.
+
+## 🚨 WRITING THE NOTE BROKE THE CITATION THE NOTE EXISTS TO PROTECT
+
+The parking block is 64 lines at the TOP of `_x402-vanilla.mjs`. `version.mjs` cited
+`_x402-vanilla.mjs:200` for the X-PAYMENT header — **the insert shifted it to :265**, silently,
+in the same edit whose entire purpose was keeping that dependency legible.
+
+⭐⭐ **A COMMENT THAT DOCUMENTS A CROSS-FILE DEPENDENCY IS ITSELF A CROSS-FILE DEPENDENCY.** The
+line number is a copy of a fact that lives somewhere else, so it drifts on edits that are **not even
+about it** — and nothing checks a number written into prose. Both citations are now anchored on
+SYMBOLS instead (`the X-PAYMENT header it assembles for the paid retry`), which survive what the
+number does not. [[duplicate-source-of-truth-is-the-recurring-bug]]
+
+⚠️ PROGRESS's own copy at the 2026-08-27 entry still reads `:200`. **Left as-is deliberately** — it
+was true when written, and a historical record that gets silently corrected stops being one.
+
+---
+
 # ⭐ THE DEPLOY PUBLISHED AND THE SESSION DIED — and those are not the same failure
 
 **2026-09-06.** Deploy `6a9d58bc65209f967af34c64`, published 12:47:28.416Z. `03f5886768da` · tree

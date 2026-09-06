@@ -98,6 +98,22 @@ const SELF = "shared/build-stamp.generated.mjs";
 //
 // ⚠️ The rule two paragraphs down already said this: "ADD A ROW HERE WHENEVER THE CANARY GAINS AN
 // IMPORT." The import arrived through dd-analyze rather than dd-canary, and the row was never added.
+// ═══ 🚨 ON THESE FILES, A COMMENT IS LOAD-BEARING. MEASURED 2026-09-06. ═══════════════════════
+// `ddTree` is a CONTENT hash over the DD surface. It does not know what a comment is. So a
+// COMMENT-ONLY edit to any file below rotates the health key exactly as a logic change does, the
+// canary then holds no artifact for the new key, and DD REFUSES until its next scheduled run —
+// a guaranteed, self-healing outage of up to one canary period during which VAULT DEPOSITS ARE
+// UNAVAILABLE (see scripts/dd/capture-refusal-window.mjs for why that window is the cost, not a
+// curiosity).
+//
+// ⭐ NOBODY WOULD INFER THAT FROM "IT IS JUST A COMMENT", WHICH IS WHY IT IS WRITTEN HERE rather
+// than left to be discovered at deploy time. Measured instance: a comment-only edit to
+// `shared/x402/version.mjs` — repairing a stale line-number citation, changing no behaviour —
+// moved ddTree 3b589768754d… -> 1772672eb252…, 38 files, none added.
+//
+// ⛔ THE RULE THAT FOLLOWS: do not ship a comment-only edit to a file below on its own. FOLD IT
+// INTO THE NEXT SUBSTANTIVE DEPLOY, which pays the same one window for both. The window is priced
+// per DEPLOY, not per change, so batching is free and shipping alone is not.
 const DD_SURFACE_DIRS = ["shared/onchain-analyze", "shared/onchain-facts", "shared/dd-canary", "shared/dd"];
 const DD_SURFACE_FILES = [
   "netlify/functions/dd-analyze.mjs",
