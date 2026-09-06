@@ -69,6 +69,14 @@ export const BRIDGE_MECHANIC_COPY = Object.freeze({
     arrivalSuffix: "to arrive",
     /** Whether the arrival figure is arithmetic. Read ONLY by the unconfirmed-mint wording. */
     arrivalIsEstimate: false,
+    // ⛔⛔ FALSE HERE, AND CONTRACT-ENFORCED. `depositForBurnWithFees` takes the vendor SIGNED QUOTE
+    // and ASSERTS that what the FeeManager collects equals what the quote said; `maxFee` is not used
+    // on this path at all (`EMPTY_MAX_FEE`, hardcoded zero, measured as zero on chain). So the fee
+    // shown IS the fee charged, and a "may be lower" qualifier here would be a FALSE hedge.
+    // 🚨 A 2026-09-06 correction: the 55/67 ceiling measurement was true of a mechanic THIS PATH NO
+    // LONGER USES, and was nearly applied here on that basis.
+    feeIsCeiling: false,
+    feeCeilingNote: "",
   }),
   deducted: Object.freeze({
     feePlacement: "taken out of the amount",
@@ -80,6 +88,17 @@ export const BRIDGE_MECHANIC_COPY = Object.freeze({
     arrivalPrefix: "estimated ",
     arrivalSuffix: "to arrive",
     arrivalIsEstimate: true,
+    // ⭐⭐ TRUE HERE. `feeUsdc` is `toUsdc(maxFee)`, and `maxFee` is signed into the calldata as a
+    // real CCTP parameter — a bound the burn will not exceed, not a prediction of what it costs.
+    // It is built to sit ABOVE the expected charge: a +10% buffer on the provider fee and the
+    // forwarder's HIGH estimate. The fee actually taken is determined when the burn runs.
+    //
+    // ⛔ IT STATES THE RELATIONSHIP, NOT A LIKELIHOOD. "Usually lower" would assert a distribution
+    // nobody has measured on THIS path: every on-chain fee verdict we hold is `upfront` (4 of 4,
+    // all `matched`), and the 55/67-burns-left-surplus figure was THIRD-PARTY. A maximum and the
+    // moment the real figure is set are both derivable from the code; a frequency is not.
+    feeIsCeiling: true,
+    feeCeilingNote: "That figure is a maximum, signed into the transaction — the fee actually taken is set when the burn runs and can be lower.",
   }),
   unknown: Object.freeze({
     // ⛔ CLAIMS NEITHER. It does not say the full amount arrives and it does not say a fee was
@@ -93,6 +112,10 @@ export const BRIDGE_MECHANIC_COPY = Object.freeze({
     arrivalPrefix: "",
     arrivalSuffix: "recorded as the arrival — this record does not say how the fee was charged",
     arrivalIsEstimate: true,
+    // ⛔ CLAIMS NEITHER. A record that does not say which mechanic applies cannot say whether its
+    // fee figure was a maximum or an exact charge.
+    feeIsCeiling: null,
+    feeCeilingNote: "",
   }),
 });
 

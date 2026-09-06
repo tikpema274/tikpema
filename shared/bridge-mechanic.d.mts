@@ -11,6 +11,8 @@ export interface BridgeMechanicCopy {
   readonly arrivalPrefix: string;
   readonly arrivalSuffix: string;
   readonly arrivalIsEstimate: boolean;
+  readonly feeIsCeiling: boolean | null;
+  readonly feeCeilingNote: string;
 }
 export declare const BRIDGE_MECHANIC_COPY: Readonly<Record<BridgeMechanic, BridgeMechanicCopy>>;
 export declare function bridgeMechanicOf(v: unknown): BridgeMechanic;
@@ -28,3 +30,6 @@ export interface BridgeSignerCopy {
 export declare const BRIDGE_SIGNER_COPY: Readonly<Record<BridgeSigner, BridgeSignerCopy>>;
 export declare function bridgeSignerOf(v: unknown): BridgeSigner;
 export declare function bridgeSignerCopy(v: unknown): BridgeSignerCopy;
+
+// ⚠️ `feeIsCeiling: boolean | null` — null on `unknown`: a record that does not say which mechanic
+// applies cannot say whether its fee figure was a maximum or an exact charge.

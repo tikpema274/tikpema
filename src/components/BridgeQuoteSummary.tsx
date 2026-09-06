@@ -85,6 +85,17 @@ export function BridgeQuoteSummary(
         <b className="mono">{quote && has(receive) ? `${displayAmount(receive, dp)} USDC` : em}</b></div>
       <div className="summary-row"><span>Leaves your wallet</span>
         <b className="mono">{quote && has(leaves) ? `${displayAmount(leaves, dp)} USDC` : em}</b></div>
+      {/* ⛔⛔ THE CEILING QUALIFIER — THE MIRROR OF THE 'will be charged' NOTE, ON THE OTHER PATH.
+          On `deducted` the Fee row shows `toUsdc(maxFee)`, a bound signed into the calldata, so the
+          figure is a MAXIMUM and the real charge is set when the burn runs. On `upfront` the
+          contract asserts collected == quoted, so there is nothing to qualify and this is empty.
+          ⭐ Keyed at the producer, never written here — and it states the RELATIONSHIP rather than
+          hedging: "may be lower" alone would be weaker than saying what the number IS.
+          ⚠️ It deliberately claims no LIKELIHOOD: every on-chain fee verdict we hold is upfront
+          (4 of 4), so no surplus distribution has ever been measured on this path. */}
+      {quote && mech.feeCeilingNote && (
+        <div className="summary-note">{mech.feeCeilingNote}</div>
+      )}
       {/* ⭐ THE SENTENCE ALONGSIDE THE TABLE — the table shows the arithmetic, this names the rule.
           Both, not either: a reader who scans the numbers gets the mechanic, and a reader who reads
           the prose gets it too, without either having to derive it from the other. */}

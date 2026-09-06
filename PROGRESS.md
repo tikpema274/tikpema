@@ -1,5 +1,69 @@
 ---
 
+# 🚨 A MEASUREMENT THAT OUTLIVED THE MECHANIC IT MEASURED — repeated across four artifacts
+
+**2026-09-06. CORRECTION.** Four artifacts assert that *"This is the fee that will be charged"*
+**OVERSTATES ON BOTH PATHS** — the 2026-09-06 entries above and the commit messages of `f97ff57` and
+`9c477a9`. ⛔ **THAT IS FALSE.** It overstates on the DEDUCTED path only, and that is the one path
+where the sentence is not rendered.
+
+    upfront   the vendor SIGNED QUOTE carries the fee. `depositForBurnWithFees` "takes the signed
+              quote and ASSERTS that what the FeeManager collects EQUALS what the quote said"
+              (_bridge.mjs:294). ⭐ `maxFee` IS NOT USED AT ALL — the parameter is `EMPTY_MAX_FEE`,
+              hardcoded to ZERO and measured as zero on chain in run 2's `DepositForBurn` (:303).
+              ⇒ THE SENTENCE IS EXACT AND CONTRACT-ENFORCED. It does not overstate.
+
+    deducted  `feeUsdc = toUsdc(maxFee)`, and `maxFee` IS signed into the calldata as a real CCTP
+              parameter by `bridgeCallDataDeducted`. The executed fee is set at burn time and is
+              bounded by it. ⇒ A CEILING. But this panel renders `heldFeeNote={false}`.
+
+## ⭐⭐ THE MECHANISM, WHICH IS THE REUSABLE PART
+
+**THE 55/67 CEILING MEASUREMENT WAS TRUE — ABOUT A MECHANIC THE UPFRONT PATH NO LONGER USES.** The
+upfront-fee migration removed `maxFee` from that path entirely. I carried the measurement forward,
+applied it to a path that had changed underneath it, and **repeated it across four artifacts without
+re-reading the producer.** A measured fact does not expire, but the thing it was measured ON can be
+replaced — and nothing about the fact itself says so.
+
+⭐ **THE CHECK THAT CATCHES THIS IS RE-READING THE PRODUCER, NOT RE-CHECKING THE MEASUREMENT.** The
+measurement would have survived any amount of scrutiny; it was right. Only `_bridge.mjs` says the
+path it described is gone. [[verify-facts-before-sharing-words]] ·
+[[conversation-sourced-numbers-must-be-marked]]
+
+⛔ **AND IT WAS APPROVED. T scoped the fix on my false premise, and the scoped change would have
+REPLACED CONTRACT-ENFORCED CORRECT COPY WITH A FALSE HEDGE** — telling a user the executed fee "may
+be lower" on a path where the contract asserts it cannot be. The only thing that stopped it was
+re-reading the producer before editing. **Approval does not launder a premise; the person who
+supplied the premise still owns it.**
+
+# 🚨 AND THE FIRST MEASUREMENT I REACHED FOR PROVED NOTHING
+
+Asked for the surplus distribution on OUR deducted burns, I tabulated `feeDisclosed` vs `feeCharged`
+across 70 receipts. **All 19 with fee figures matched exactly, surplus 0.** ⛔ Worthless:
+`_bridge-record.mjs:131` — *"`feeCharged` — what was actually taken: **the fee signed into the
+calldata**"*, and `:143` — *"Nothing enforces `feeCharged <= feeDisclosed` yet"*. **Both fields are
+the same quoted number.** The table proved the value TRAVELLED. [[flow-is-not-meaning]]
+
+⭐ **THE INDEPENDENT INSTRUMENT IS THE ON-CHAIN FEE VERDICT** (`reconcileFee`, `feeObservedMinor`
+read from the chain). Four exist:
+
+    verdict   observed   disclosed   surplus     mechanic
+    matched      54025       54025         0     upfront
+    matched      54018       54018         0     upfront
+    matched      53980       53980         0     upfront
+    matched      53911       53911         0     upfront
+
+⛔⛔ **ALL FOUR ARE UPFRONT — SO WE HAVE ZERO ON-CHAIN FEE OBSERVATIONS FOR THE DEDUCTED PATH.** And
+the four prove only that the contract's assert works, which is what it is for; they are not evidence
+about ceilings at all. ⚠️ **The 55/67 figure was THIRD-PARTY burns and does not describe ours.** The
+one `deducted`-tagged receipt we hold is `burn_submitted` and never confirmed.
+
+⭐ **SO THE COPY MUST NOT CLAIM A LIKELIHOOD.** "Usually lower" would be a distribution we have never
+measured on this path. It states the RELATIONSHIP — a maximum, and when the real figure is set —
+which is derivable from the code and needs no distribution.
+
+---
+
 # ⭐ ONE QUOTE TABLE, TWO INDEPENDENT AXES — and three discriminators that were not ones
 
 **2026-09-06.** Deploy `6a9d49b31af6e17fe14f5914`, published 11:39:14.555Z. `9c477a930d3b` · tree

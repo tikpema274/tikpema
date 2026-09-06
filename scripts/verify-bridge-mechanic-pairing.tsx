@@ -374,6 +374,43 @@ section("8 — ⭐⭐ THE ARITHMETIC IS THE MECHANIC, UNDER THE SAME THREE LABEL
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
+section("8b — ⛔⛔ THE CEILING QUALIFIER: DEDUCTED ONLY, AND IT STATES THE RELATIONSHIP");
+{
+  // 🚨 THE MIRROR OF THE 'will be charged' NOTE. That sentence is EXACT on upfront (the contract
+  // asserts collected == quoted; `maxFee` is EMPTY_MAX_FEE = 0 there). The CEILING is the deducted
+  // path's property — `feeUsdc = toUsdc(maxFee)`, signed into the calldata as a real bound.
+  // ⛔ A 2026-09-06 correction: the reverse was asserted across four artifacts on a measurement that
+  // outlived the mechanic it measured. This pins the direction so it cannot be inverted again.
+  const q = { amountUsdc: 1, feeUsdc: 0.0543, netUsdc: 1, netPredicted: 0.9457 };
+  const r = (mechanic) => strip(React.createElement(BridgeQuoteSummary,
+    { quote: q, destinationLabel: "Base", mechanic, signer: "server", heldFeeNote: false }));
+  const up = r("upfront"), ded = r("deducted"), unk = r("nonsense");
+
+  check("⭐ the producer marks the DEDUCTED fee as a ceiling and the UPFRONT one as not",
+    bridgeMechanicCopy("deducted").feeIsCeiling === true &&
+    bridgeMechanicCopy("upfront").feeIsCeiling === false);
+  check("⛔ …and `unknown` claims NEITHER — it cannot say what its own figure was",
+    bridgeMechanicCopy("unknown").feeIsCeiling === null &&
+    bridgeMechanicCopy("unknown").feeCeilingNote === "");
+  check("⭐⭐ the DEDUCTED render carries the ceiling qualifier",
+    ded.includes(bridgeMechanicCopy("deducted").feeCeilingNote));
+  check("⛔⛔ the UPFRONT render does NOT — a hedge there would be FALSE, the contract asserts equality",
+    !/is a maximum/.test(up) && !/can be lower/.test(up), up.slice(0, 90));
+  check("⛔ …and neither does an unrecognised mechanic", !/is a maximum/.test(unk));
+  // ⭐ IT STATES THE RELATIONSHIP, NOT A HEDGE. "may be lower" alone is weaker than naming what the
+  // number IS and when the real one is set.
+  check("⭐⭐ the qualifier says it is a MAXIMUM and names when the real fee is set",
+    /maximum/i.test(ded) && /when the burn runs/i.test(ded));
+  // ⚠️ SCOPED TO THE QUALIFIER, NOT THE WHOLE RENDER. The first draft scanned `ded` for "usually"
+  // and matched the SETTLEMENT row — `MINT_TIMING` is "usually under a minute" — so the guard went
+  // red on a sentence it was not about. Third forbidden-phrase-scan mis-scope this session: assert
+  // against the string you mean, never against everything that happens to be beside it.
+  const ceilingCopy = bridgeMechanicCopy("deducted").feeCeilingNote;
+  check("⛔ …and claims NO likelihood — no distribution has been measured on this path",
+    !/usually|typically|most of the time|often|rarely/i.test(ceilingCopy), ceilingCopy);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
 section("9 — ⚠️ TRIPWIRE: THE 'will be charged' SENTENCE LIVES ON EXACTLY ONE PANEL");
 {
   // ═══ 🚨 WHY A TRIPWIRE AND NOT A COMMENT ══════════════════════════════════════════════════
@@ -406,6 +443,23 @@ section("9 — ⚠️ TRIPWIRE: THE 'will be charged' SENTENCE LIVES ON EXACTLY 
     on.length === 1, on.join(", ") || "none");
   check("⭐ …and it is the agent panel — the self-signed one must not inherit an overstated claim",
     on[0] === "BridgePanel");
+
+  // ═══ ⭐⭐ THE SAME TREATMENT FOR THE CEILING QUALIFIER, IN THE OTHER DIRECTION ═══════════════
+  // The 'will be charged' note must be on ONE panel because it OVERSTATES anywhere else. The
+  // ceiling qualifier must be on ONE panel because it is FALSE anywhere else — the upfront contract
+  // asserts collected == quoted. Same shape, opposite reason, so both are counted.
+  const ceilingPanels = ["BridgePanel", "ManualBridgePanel"].filter((f) => {
+    const src = readFileSync(`src/components/${f}.tsx`, "utf8")
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, " ").replace(/^\s*\/\/.*$/gm, " ");
+    if (!/<BridgeQuoteSummary/.test(src)) return false;
+    const tag = src.slice(src.indexOf("<BridgeQuoteSummary"));
+    const props = tag.slice(0, tag.indexOf("/>"));
+    // The qualifier follows the MECHANIC, so the panel that threads a deducted quote gets it.
+    return /mechanic=\{quote\.mechanic\}/.test(props);
+  });
+  check("🚨 the ceiling qualifier reaches EXACTLY ONE panel — the deducted one",
+    ceilingPanels.length === 1 && ceilingPanels[0] === "ManualBridgePanel",
+    ceilingPanels.join(", ") || "none");
 }
 
 console.log(`\n${fail ? "❌ FAILURES" : "✅ ALL GREEN"}   pass ${pass} / fail ${fail}\n`);
