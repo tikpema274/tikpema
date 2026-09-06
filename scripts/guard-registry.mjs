@@ -280,6 +280,7 @@ export const FILE_UNWIRED_TOOLS = {
   "scripts/backtest-citation-derivation.mjs": "a backtest over recorded runs — produces a number for a human, asserts nothing.",
   "scripts/bridge-ack-band-amount.mjs": "manual: computes a band for a live bridge the USER runs.",
   "scripts/bridge-direct.mjs": "manual money-mover, run by hand for a direct bridge.",
+  "scripts/bridge-discover-run.mjs": "manual DISCOVERY-ONLY runner for the chain-derived bridge sweeper — reads chain + store, writes nothing. Its LOGIC is in netlify/functions/_bridge-discover.mjs and is asserted by test:discover; this file is the hand-run driver that points it at a block range.",
   "scripts/create-revenue-wallet.mjs": "ONE-OFF: created the DD revenue wallet. Re-running would create another.",
   "scripts/dca-rehearsal-create.mjs": "manual rehearsal fixture creator for DCA.",
   "scripts/dd/batch.mjs": "manual batch driver for DD analysis over a list of addresses.",

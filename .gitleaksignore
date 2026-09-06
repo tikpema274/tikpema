@@ -50,3 +50,19 @@ scripts/dd/verify-attestation.mjs:generic-api-key:57
 # and published verbatim in the Foundry and Hardhat docs. Public by design. Nothing to rotate.
 375993fa948eef706ddb695e23d7a6f4f624f9f6:scripts/dd/verify-attestation.mjs:generic-api-key:38
 375993fa948eef706ddb695e23d7a6f4f624f9f6:scripts/dd/verify-attestation.mjs:generic-api-key:39
+
+# ── 2026-09-06 — TokenMessengerV2's PUBLIC CONTRACT ADDRESS on Arc, flagged on ENTROPY ────────────
+# `generic-api-key` matched `0x8fe6b999dc680ccfdd5bf7eb0974218be2542daa` because 40 hex characters
+# score 3.9 entropy. It is a deployed contract address on Arc Testnet — public by construction,
+# verified on testnet.arcscan.app, and READ FROM CHAIN in this session via TMWF.tokenMessenger()
+# rather than copied from anywhere. There is no credential and nothing to rotate.
+#
+# ⚠️ The repo's other address constants (FEE_MANAGER, TMWF, BRIDGE_CONTRACT) are the same KIND of
+# value and pass only because their hex happens to score lower. That is luck, not a rule — the next
+# public address whose digits look random enough will trip this too, and the answer will again be a
+# fingerprint with a reason, never a path-wide allowlist that would also hide a real key.
+#
+# ⚠️ LINE-ONLY FORM, and fragile by construction as the header above says: this is a pre-commit
+# (`gitleaks protect --staged`) finding, so no commit hash exists to pin it to yet. It will need
+# re-pinning if the constant moves.
+netlify/functions/_bridge-discover.mjs:generic-api-key:46

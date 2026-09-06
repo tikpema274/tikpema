@@ -138,7 +138,8 @@
     "test:reachability": "node scripts/verify-assertion-reachability.mjs",
     "test:planwatch": "node scripts/verify-plan-path-watch.mjs",
     "test:plancontract": "node --experimental-test-module-mocks scripts/verify-plan-execution-contract.mjs",
-    "test:twoaxis": "node scripts/verify-dd-two-axis-copy.mjs"
+    "test:twoaxis": "node scripts/verify-dd-two-axis-copy.mjs",
+    "test:discover": "node scripts/verify-bridge-discover.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -258,6 +259,7 @@
     "test:reachability",
     "test:planwatch",
     "test:plancontract",
-    "test:twoaxis"
+    "test:twoaxis",
+    "test:discover"
   ]
 }
