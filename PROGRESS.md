@@ -81,6 +81,44 @@ window closed before the first probe **or the health gate is not gating** — an
 separating immediately, because the second is a fail-open on the thing standing between a broken
 detector and somebody's deposit.
 
+⭐⭐ **SO DECIDE THE BRANCH NOW, NOT AT DEPLOY TIME.** The two causes need different next steps and
+one of them stops everything — nobody wants to be reasoning about that while deposits are down.
+**ONE QUESTION SETTLES IT: did a valid health record for the NEW key (`1772672e`) exist when the
+probe ran?** `/api/dd-vouched-build` is the only instrument that answers it, and it is the FIRST
+thing to read — before re-running anything, which would destroy the state you are asking about.
+
+    EVIDENCE                                      READING                    NEXT STEP
+    outcome "vouched", vouched.build 1772672e,    ✅ BENIGN TIMING — the      Record it and move on. Note
+    producedAt BETWEEN publish and first probe    canary beat the probe;     the ledger's first rotated:
+    (a ~29s gap)                                  the window was real and    true STILL did not witness,
+                                                  shorter than the cadence   and shorten the first probe.
+
+    outcome "vouched" but producedAt BEFORE       🚨 FAIL-OPEN — a PRE-       ⛔ STOP. Money path. The key
+    the publish                                   rotation record is being   derivation is not binding,
+                                                  honoured for a POST-       which is the fail-open the
+                                                  rotation key               surface list exists to close.
+
+    no record for the running key, yet DD         🚨 FAIL-OPEN — the gate     ⛔ STOP. Money path. This is
+    SERVED without the banner                     is not gating              the defect the banner was
+                                                                             built to make visible.
+
+    the probe's HTML names the OLD deploy or      ⚠️ THIRD STATE — a CDN-     Re-probe with cache-control:
+    bundle hash                                   CACHED page, not a gate    no-cache before concluding
+                                                  finding at all             anything. Not a gate finding.
+
+⚠️ **THAT THIRD ROW IS NOT HYPOTHETICAL AND IT IS THE ONE I NEARLY LEFT OUT.** The probe sends
+`headers: { Accept: "text/html" }` and **no cache-control at all**, so a cached pre-rotation page
+produces `no-window-despite-rotation` while the gate is working perfectly.
+⭐ Name every state that yields the same reading BEFORE trusting the reading — two of these three
+rows are "nothing is wrong" and one stops the money path. [[probe-must-discriminate-between-states]] ·
+[[ask-which-bundle-before-investigating-a-rendered-defect]]
+
+⭐ **AND CHECK THE TIMING ARITHMETIC RATHER THAN ASSUMING IT.** Publish → first probe is ~29s and the
+canary period is 10m, so a canary landing inside that gap is roughly a 1-in-20 event: **plausible,
+which is exactly why it must be READ off `producedAt` and not inferred from the outcome string.**
+A benign explanation that happens to be available is not evidence that it is the true one.
+[[cause-offered-for-an-observation-it-excludes]]
+
 ⚠️ Other real outcomes it could write, so the prediction is falsifiable against the actual
 vocabulary rather than an invented one: `observed-banner-malformed`, `observed-banner-never-closed`
 (exit 1), `regression-not-html` (exit 1), `could-not-measure` (exit 2).
