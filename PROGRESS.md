@@ -1,5 +1,101 @@
 ---
 
+# ⛔ VAULT SUGGESTIONS — THE FRAMING DECISION. Read-only scoping, NOTHING BUILT.
+
+**2026-09-07.** Scope explored: the agent analyses a vault the user proposes and SUGGESTS. The
+suggestion carries its coverage — *"I'd deposit — I could not read X, so I cannot tell you whether
+the owner can drain it"* — rather than a blanket "at your own risk", which transfers responsibility
+without transferring information. ⛔ **No code written. This entry exists so the constraints are not
+re-derived.**
+
+## 1. 🚨 THE REPORT IS CLASSIFIED BUT DELIBERATELY NOT RANKED — AND THE SCHEMA ENFORCES IT
+
+`POWER_SCOPE` types each of the 9 groups into one of 5 `SCOPE_CLASSES`, with `SCOPE_REACH` giving
+each a plain meaning. But there is **no ordering, by design**, and it is stated inside the SIGNED
+payload:
+
+```
+SEVERITY_MEANING = "scope-not-rank: describes what the power can reach. Non-ordinal.
+                    MUST NOT be summed, ranked, averaged or aggregated into a score."
+SCOPE_CLASSES    = […]   // "Alphabetical — the order carries no meaning."
+```
+
+`assertReportValid` REFUSES a numeric severity (*"severity is a scope class, never a score"*), and
+`policy.mjs` restates it: *"A policy that computed a risk total would violate the machine-readable
+terms of the artifact it reads."*
+
+⭐⭐ **SO A SUGGESTION CANNOT GET ITS ORDERING FROM THE REPORT.** "This finding matters more than
+that one" is precisely what the artifact declines to say; inventing it would present OUR ranking as
+the report's finding, against terms the buyer can read.
+
+⭐ **THE ORDERING MUST BE THE USER'S, AND IT ALREADY EXISTS.** `policy.mjs` holds per-group
+`refuse`/`allow` rules written in advance — pure, no I/O, already applied at the deposit gate. That
+converts "this matters more" from our opinion into their stated rule.
+
+## 2. THE REFUSAL THRESHOLD — mechanism EXISTS, default does NOT
+
+`POLICY_REASON.COVERAGE_BELOW_THRESHOLD` and `policy.coverageThreshold` are implemented (integer
+0–9, validated against the group total, yielding `coverage: {checked, total, threshold, meets}`).
+⚠️ It is **user-supplied with no derived default** — the mechanism is built, the number is not.
+
+⛔ **A FRACTION IS THE WRONG SHAPE.** "6 of 9" weighs `setFeeRecipient` — deliberately
+`warn: false`, *"changes nothing for the depositor"* — the same as `emergencyWithdraw`.
+
+⭐ **DERIVE IT FROM THE DISCLOSURE TABLE THAT ALREADY EXISTS:** a suggestion is honest only when
+**every `warn: true` group is in `checked`** — the 7 the product already says a depositor's exposure
+depends on. Not hand-picked: `assertDisclosureComplete()` throws at import if a group lacks a
+decision, so a new power group raises the bar automatically.
+
+Plus three gates taken from refusals that already exist, not from new judgement:
+`shape.family !== "unknown"` · `proxySlotUnreadable === false` · `redemption.state !== "unknown"`
+(you cannot recommend entering a position whose exit you could not read).
+
+⭐ **AND THE REFUSAL IS USEFUL BECAUSE THE MANIFEST ALREADY CARRIES ITS OWN REMEDY.** Each
+`notChecked` entry has a `reason` from a closed set, so the refusal names what would change the
+answer: `rpc-quorum-unmet` → retry; `not-applicable` on a diamond → facet traversal is unimplemented
+and no retry helps; EOA → there is no bytecode to read. **Will waiting help** is the same
+distinction `SELF_CLEARING_HEALTH` already models.
+
+## 3. VOCABULARY — and TWO OF THE FOUR ARE FINDINGS, NOT JUDGEMENTS
+
+| verdict | kind |
+|---|---|
+| **cannot-assess** | ⭐ definite FINDING — a coverage fact, with the reason each check did not land |
+| **fails-your-rules** | ⭐ definite FINDING — `policy.mjs` produces it deterministically, keeping `failures[]` and `unreadableFailures[]` in SEPARATE buckets so "is upgradeable" never reads as "we could not tell whether it is" |
+| **no-rule-broken** | bounded statement — *"nothing you asked me to refuse was found, and here is what was not checked"* |
+| ⛔ **deposit-less** | **EXCLUDED.** Sizing needs magnitude-of-harm ranking, which `SEVERITY_MEANING` forbids. There is nothing in the artifact to derive "40% as bad" from |
+
+⚠️ **AND THE EXAMPLE SENTENCE OVERSTATES OUR INSTRUMENT.** *"I could not read the source"* — the
+report never reads source, only BYTECODE. The true form names the check: *"I could not establish
+whether an emergency-withdraw exists, because [reason]."*
+
+## 4. ⛔ THE CATALOG DOES NOT DISCLAIM — IT REFUSES AND STATES COVERAGE
+
+Swept `netlify/`, `src/`, `shared/`: **no** "at your own risk", no "as-is", no warranty or liability
+language, no "not financial advice" footer. What exists instead:
+
+- `plan-quote.mjs:86` — *"not investment advice the agent gives — **decline it**"*; declines
+  *"is now a good time…"* as *"opinion with nothing to price, nothing to refuse, nothing to approve"*
+- `job-submit-background.mjs:61` — *"you are not giving investment advice"*
+- `dd-openapi.mjs:93` + the 402's `whatYouAreBuying` — *"A COVERAGE MANIFEST, NOT A CLEAN BILL"*,
+  shown BEFORE payment
+- `agent-parameters.mjs:373` — *"Do NOT read them as guarantees"*
+
+⭐⭐ **FOUR PRECEDENTS, ONE PATTERN: narrow the claim and refuse out-of-scope questions; never append
+a waiver.** A blanket disclaimer would be the first instance of a shape this codebase has avoided
+four times. **DECISION: no liability disclaimer.** If counsel ever requires one it sits BESIDE the
+coverage line and is phrased as SCOPE — *"reports on-chain facts only; does not audit source or
+predict behaviour"* — a true statement about the instrument, not a transfer of responsibility.
+
+## 🚨 THE LIVE CONSTRAINT ON WHETHER THIS IS IN SCOPE AT ALL
+
+`plan-quote` already DECLINES *"what should I invest in?"*. A vault suggestion sits near that line
+and stays on the right side of it only if framed as **"does this vault satisfy the rules you
+wrote?"** — a finding — never **"should you deposit?"** — an opinion. ⭐ That framing is also why
+`policy.mjs` exists, so the safe version of this feature is largely a SURFACE over machinery already
+built, not new judgement.
+
+
 # ⭐⭐ THE VAULT EXIT — MEASURED, CROSS-CHECKED, AND FOUR STATES INSTEAD OF A THRESHOLD
 
 **2026-09-07.** Read-only investigation turned into a fix. Nothing deployed.
