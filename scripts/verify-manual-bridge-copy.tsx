@@ -19,6 +19,7 @@
 // stops passing the prop all pass a grep and fail the reader.
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { bridgeSignerCopy } from "../shared/bridge-mechanic.mjs";
 import { readFileSync } from "node:fs";
 import ManualBridgePanel, { FeeDisclosureBox } from "../src/components/ManualBridgePanel";
 // ⭐⭐ THE CUSTODY SENTENCE IS NOT RESTATED HERE. It is rendered from CustodyNotice and the panel's
@@ -97,6 +98,27 @@ section("2 — 🚨 THE TAB-CLOSE WINDOW, disclosed BEFORE signing");
   // would tell the user the record is lost AND that it is recovered.
   check("⛔ the superseded claim is REMOVED",
     !/we lose the record/i.test(text) && !/will not appear in your bridges/i.test(text));
+
+  // ═══ 🚨 THE TWO PRODUCERS MUST NOT CONTRADICT ════════════════════════════════════════════════
+  // MEASURED 2026-09-07: the callout was softened to "delayed rather than lost" while the SIGNER
+  // NOTE beside the action still said "we lose the record of it" — two answers to one question, on
+  // one screen, shipped for a deploy.
+  // ⛔ THE CHECK ABOVE COULD NOT SEE IT, and that is the reusable part: it asserts on a panel
+  // rendered with NO quote, so BridgeQuoteSummary never mounts and the signer note is simply absent
+  // from `text`. The assertion was TRUE and the claim was LIVE. A state behind a transition is
+  // untested by default — so this reads the copy module DIRECTLY rather than hoping a render
+  // reaches it. [[state-behind-a-transition-is-untested-by-default]]
+  const signer = bridgeSignerCopy("browser").pageInstruction;
+  check("🚨 the SIGNER note does not claim the record is lost",
+    // ⚠️ BAN THE AFFIRMATIVE CLAIM, NOT THE WORD. A first draft used !/lost\./ and reddened on the
+    // CORRECT sentence, which ends "delayed, not lost." — a negative that matches its own fix is a
+    // guard that would have been edited away rather than satisfied.
+    !/we lose the record/i.test(signer) && !/record is lost/i.test(signer), signer.slice(0, 70));
+  check("⭐ …and says the same thing the callout says — delayed, not lost",
+    /delayed, not lost/i.test(signer));
+  check("⭐ …and still tells the user to stay, in the same words the build CONTROL pins",
+    /stay on this page until the burn confirms/i.test(signer));
+  check("⭐ …and still says the funds are safe", /funds are not at risk/i.test(signer));
 
   // ═══ ⭐⭐ ORDER: CUSTODY → HAZARD → CONTROL ═══════════════════════════════════════════════
   // Both notices are constraints on the action, so BOTH precede the control. Between them, money

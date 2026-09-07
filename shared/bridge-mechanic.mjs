@@ -170,10 +170,23 @@ export const BRIDGE_SIGNER_COPY = Object.freeze({
   }),
   browser: Object.freeze({
     signedBy: "signed in this browser with your own key",
-    // ⚠️ THE MONEY IS NOT AT RISK — THE RECORD IS. Saying "your funds are at risk" would be false
-    // and would frighten someone into staying for the wrong reason; saying nothing loses the
-    // receipt. The sentence names exactly what is lost.
-    pageInstruction: "Stay on this page until the burn confirms. If you leave, the bridge still completes on-chain and your funds are not at risk — but we lose the record of it.",
+    // ⚠️ THE MONEY IS NOT AT RISK — THE RECORD IS DELAYED. Saying "your funds are at risk" would be
+    // false and would frighten someone into staying for the wrong reason; saying nothing loses the
+    // receipt. The sentence names exactly what is at stake and no more.
+    //
+    // ⛔⛔ THIS IS THE SECOND PRODUCER OF THAT CLAIM, AND IT WAS MISSED 2026-09-07. The hazard
+    // callout in ManualBridgePanel was softened to "delayed rather than lost" once the discovery
+    // sweeper was scheduled and observed running — and THIS sentence, which renders beside the
+    // ACTION, still said "we lose the record of it". For one deploy the panel contradicted itself
+    // on the same screen: delayed above, lost at the button.
+    // ⭐ IT SURVIVED A BUNDLE PROBE THAT PREDICTED ITS REMOVAL. The literal count went 1 -> 1 and I
+    // read that as a stale artefact before finding the real cause: two producers, one changed.
+    // ⚠️ AND THE COPY SUITE COULD NOT SEE IT — it renders the panel with NO quote, so
+    // BridgeQuoteSummary never mounts and this sentence is absent from the rendered text it asserts
+    // on. The assertion was true and the claim was still live.
+    // ⭐ SHORTER THAN THE CALLOUT ON PURPOSE: this sits at the action, where the reason and the
+    // duplicate-entry consequence would be noise. The callout above carries those.
+    pageInstruction: "Stay on this page until the burn confirms. If you leave, the bridge still completes on-chain and your funds are not at risk — the record is delayed, not lost.",
     mustStay: true,
   }),
   unknown: Object.freeze({
