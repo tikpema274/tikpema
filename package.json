@@ -140,7 +140,8 @@
     "test:plancontract": "node --experimental-test-module-mocks scripts/verify-plan-execution-contract.mjs",
     "test:twoaxis": "node scripts/verify-dd-two-axis-copy.mjs",
     "test:discover": "node scripts/verify-bridge-discover.mjs",
-    "test:scriptinert": "node scripts/verify-script-inert.mjs"
+    "test:scriptinert": "node scripts/verify-script-inert.mjs",
+    "test:discovercursor": "node scripts/verify-discover-cursor.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -262,6 +263,7 @@
     "test:plancontract",
     "test:twoaxis",
     "test:discover",
-    "test:scriptinert"
+    "test:scriptinert",
+    "test:discovercursor"
   ]
 }

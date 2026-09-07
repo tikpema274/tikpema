@@ -429,6 +429,18 @@
 [functions."bridge-mint-sweep"]
   schedule = "*/10 * * * *"
 
+# ⭐⭐ CHAIN-DERIVED BRIDGE DISCOVERY — the recovery the self-signed path had no cron for.
+# The burn hash lives in the browser between signing and promote; if the tab closes the server never
+# learns it, and the SETTLER cannot help because a receipt with no burnHash has nothing to settle.
+# Until this schedule existed, recovery depended on a human running a script.
+# ⛔ THE PANEL'S HAZARD NOTE IS ONLY AS TRUE AS THIS LINE. "we lose the record of it" is accurate
+# while nothing sweeps; softening that sentence before this cron runs would describe a recovery that
+# does not happen. Schedule first, then the copy — never the other way round.
+# ⚠️ A CURSOR MAKES THIS CHEAP: at 0.514s blocks a 10-minute tick is ~1,167 blocks, a fraction of one
+# 10,000-block window. Without it every tick would rescan 1.5M blocks and be throttled by design.
+[functions."bridge-discover-sweep"]
+  schedule = "*/10 * * * *"
+
 # UB withdrawal sweeper — drives HOP 2 of the exit: the withdraw() call that lands a matured
 # Gateway balance back in the user's agent SCA.
 #
