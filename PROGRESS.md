@@ -1,5 +1,80 @@
 ---
 
+# ⭐⭐ TWO METHOD FINDINGS FROM ONE COPY CHANGE — both about the INSTRUMENT, not the sentence
+
+**2026-09-07.** Deploy `6a9e87b60c6f5a44ab0b3891` then `5c6efa6`. The hazard note was softened once
+`bridge-discover-sweep` was scheduled AND observed running (6 clean ticks, 08:10-09:00). The copy is
+the small part of what happened; the instrument failed twice and both failures are reusable.
+
+## ⭐⭐ ONE CLAIM, TWO PRODUCERS — AND THE GUARD COULD NOT SEE IT
+
+`ManualBridgePanel`'s callout and `BRIDGE_SIGNER_COPY.browser.pageInstruction` **both** asserted that
+leaving loses the record. I softened the callout. The signer note — which renders beside the ACTION —
+still said *"we lose the record of it"*. **For one deploy the panel contradicted itself on the same
+screen: delayed above the fold, lost at the button.**
+
+⛔ **THE COPY SUITE ASSERTED `!/we lose the record/` AND PASSED.** It renders
+`<ManualBridgePanel/>` with **no quote**, so `BridgeQuoteSummary` never mounts and the sentence is
+absent from the text under assertion. **The assertion was TRUE and the claim was LIVE.**
+
+⭐ **THE RULE: A NEGATIVE ASSERTION OVER A PARTIAL RENDER CANNOT DISTINGUISH "THE CLAIM IS GONE" FROM
+"THIS STATE DOES NOT RENDER IT."** Absence in a state that never shows the string reads exactly like
+absence of the claim — and unlike a missing positive assertion, a passing negative *feels* like
+proof. [[state-behind-a-transition-is-untested-by-default]] in its most dangerous form.
+
+⭐ **THE FIX IS TWO CHANGES, NOT ONE.** Read the producer module DIRECTLY rather than hoping a render
+reaches it; and assert **AGREEMENT BETWEEN PRODUCERS** rather than a property of one. "The signer
+note says what the callout says" catches what either check alone misses.
+
+⭐ **AND IT IS THE EXACT INVERSE OF THE `"You receive"` LESSON.** That one: literal counting cannot
+see a new CONSUMER of a string already present. This one: **a count that FAILS TO MOVE can mean a
+second PRODUCER rather than a failed deploy.** My first instinct on `1 → 1` was "stale bundle". It
+was two producers, one changed. ⚠️ Same probe, same reading, opposite cause — which is why the
+reading alone never settles it.
+
+⚠️ **AND ONE OF THE NEW ASSERTIONS REDDENED ON THE CORRECT SENTENCE.** I banned `/lost\./`; the right
+copy ends *"delayed, not lost."* **A negative that matches its own fix is a guard that gets edited
+away rather than satisfied.** Ban the AFFIRMATIVE claim (`/record is lost/`), never the word.
+
+## ⭐ A PRE-REGISTRATION IS ONLY WORTH SOMETHING IF EVERY CELL IS MEASURED
+
+The re-run flip table predicted `"funds are not at risk"` at **1 → 1**. It measured **3**, the probe
+exited non-zero, and announced a missed prediction.
+
+⛔ **THE CONTROL HAD NOT MOVED. THE BASELINE WAS FABRICATED.** It was **3 in every bundle checked**,
+before and after. Four cells came from a real probe; that one I wrote **from assumption** because it
+felt obvious.
+
+    LITERAL                                   BEFORE  AFTER  VERDICT
+    the record is delayed, not lost              0      1    ✅ FLIP
+    delayed rather than lost                     1      1    ✅ HOLD
+    we lose the record of it                     1      0    ✅ FLIP  ← the retest that mattered
+    stay on this page until the burn confirms    1      1    ✅ CONTROL
+    funds are not at risk                        3      3    ✅ CONTROL (I had written 1)
+
+⭐ **A GUESSED CELL FAILS EXACTLY LIKE A REAL FINDING**, so it costs the investigation it was meant to
+save — and it corrodes the table's authority, which is all a pre-registration has.
+⛔ **AND IT LANDED ON A CONTROL, THE WORST CELL FOR IT.** The control is what EARNS the flips: it is
+the evidence the instrument was pointed at the right artefact. A control that "fails" for a
+fabricated reason teaches the reader to dismiss the next control failure too.
+⭐ The tell: **if a before-value came from reading a file rather than running the probe, it is not
+part of the pre-registration — it is a guess wearing the same formatting.**
+[[conversation-sourced-numbers-must-be-marked]]
+
+## WHAT THE COPY NOW SAYS, AND WHAT IT REFUSES TO SAY
+
+    callout      …funds are not at risk. The record is delayed rather than lost: we recorded this
+                 bridge when you priced it, so a sweep finds the burn on-chain within about ten
+                 minutes. It comes back as a separate entry, and the one you started here stays
+                 marked unfinished.
+    signer note  …funds are not at risk — the record is delayed, not lost.
+
+⛔ It does not say "we will always recover it": six clean ticks are six ticks. ⛔ It does not carry the
+invisible-wallet boundary, because a reader of this panel has quoted through the app by definition —
+that caveat lives where the people who can be in that case will meet it.
+
+---
+
 # ⭐⭐ THE REFUSAL WINDOW, WITNESSED — and every pre-registered field held
 
 **2026-09-06.** Deploy `6a9dcec7dd6590144af79f16`, published 21:01:08.961Z. `9920851982df` · tree
