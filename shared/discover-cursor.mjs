@@ -4,8 +4,18 @@
 // The hand-run scan covers 1.5M blocks in 151 windows and takes minutes, because Arc caps
 // eth_getLogs at 10,000 blocks and throttles ("Request exceeds defined limit" — MEASURED as a
 // throttle: the failing windows MOVE between runs). Rescanning that every 10 minutes would be
-// absurd and would guarantee throttling. With a cursor a tick scans only what is new: at 0.514s
-// blocks a 10-minute interval is ~1,167 blocks — a fraction of ONE window.
+// absurd and would guarantee throttling. With a cursor a tick scans only what is new — a fraction
+// of ONE window.
+//
+// ⚠️ ARC'S BLOCK RATE VARIES — DO NOT DERIVE ANYTHING FROM A SINGLE FIGURE. Measured 2026-09-07
+// over four spans ending at block 60,879,952, plus a live 90s wall-clock sample:
+//     last 1,000 blocks   0.757 s/block        last 100,000     0.536 s/block
+//     last 10,000 blocks  0.650 s/block        last 1,000,000   0.533 s/block
+//     live (120 blocks in 90s)                 0.752 s/block
+// So a 10-minute tick is roughly 790-1,130 blocks depending on when you ask. ⭐ NOTHING HERE
+// DEPENDS ON THE NUMBER: the per-tick window count is a constant, not a derivation, and even the
+// slowest observed rate leaves a tick far inside ONE 10,000-block window. The figure is here to
+// explain why a cursor makes this cheap, not to be computed with.
 //
 // ═══ ⛔⛔ AN UNREADABLE TICK MUST NOT ADVANCE THE CURSOR ═══════════════════════════════════════
 // This is not a new rule and it is not reinvented here: `sweepVerdict` already decides it, and this
@@ -19,7 +29,10 @@
 
 /** Arc's eth_getLogs cap. Windows are inclusive, so 10,000 blocks is `from + 9999`. */
 export const WINDOW = 10000n;
-/** Per tick. ~4.3h of Arc at 0.514s/block — enough to catch up after an outage without a long run. */
+/** Per tick. 30,000 blocks ≈ 4-6h of Arc at the rates measured above — enough to catch up after an
+ *  outage without a long run. ⚠️ A CONSTANT, deliberately, not a figure derived from block time:
+ *  deriving it would make tick cost move with chain speed, which is the one thing a bounded tick
+ *  exists to prevent. */
 export const MAX_WINDOWS_PER_TICK = 3;
 /** ⛔ A COLD START DOES NOT CLAIM HISTORY. With no cursor there is no honest way to say how far back
  *  we have looked, so it scans ONE window and says so. Backfilling history is a deliberate, bounded

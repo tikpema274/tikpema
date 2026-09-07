@@ -436,8 +436,10 @@
 # ⛔ THE PANEL'S HAZARD NOTE IS ONLY AS TRUE AS THIS LINE. "we lose the record of it" is accurate
 # while nothing sweeps; softening that sentence before this cron runs would describe a recovery that
 # does not happen. Schedule first, then the copy — never the other way round.
-# ⚠️ A CURSOR MAKES THIS CHEAP: at 0.514s blocks a 10-minute tick is ~1,167 blocks, a fraction of one
+# ⚠️ A CURSOR MAKES THIS CHEAP: a 10-minute tick is roughly 790-1,130 blocks — a fraction of one
 # 10,000-block window. Without it every tick would rescan 1.5M blocks and be throttled by design.
+# ⚠️ A RANGE, NOT A CONSTANT: Arc's block rate varies (measured 2026-09-07 — 0.533 s/block over the
+# last 1M blocks, 0.757 over the last 1,000). Nothing depends on the figure; see discover-cursor.mjs.
 [functions."bridge-discover-sweep"]
   schedule = "*/10 * * * *"
 
