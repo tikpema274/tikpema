@@ -267,12 +267,29 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
         it will not appear in your bridges and we cannot show you what arrived.
       </div>
 
-      {/* ⭐ REUSED VERBATIM from BridgePanel — the estimate/measured distinction. */}
-      <div className="status">
-        A live cross-chain fee (taken from the amount) applies — the confirmation shows the
-        exact fee quoted at execution and an <b>estimated</b> arrival; the exact delivered
-        amount appears once we have read the destination chain.
-      </div>
+      {/* ⭐ FROM/TO SIDE BY SIDE, matching the agent panel — and FROM is a DISABLED SELECT, not
+          static text, for the reason recorded there: a greyed control that cannot be changed says
+          "this is fixed", while a text field says "this was never a control", presenting a limit as
+          a design choice. `disabled` also drops it from the tab order, so the keyboard path goes
+          straight to the only decision actually available.
+          ⛔ The destination list is still the SERVER'S, loaded on mount and failing closed — the
+          agent panel's static DESTINATIONS is not borrowed with the layout. A hardcoded dropdown
+          here is the exact defect that once resolved "base-sepolia" to ETHEREUM on a real bridge. */}
+      <div className="field-pair">
+        <div className="field">
+          <label htmlFor="mb-from">From</label>
+          <select id="mb-from" disabled value="arc">
+            <option value="arc">Arc Testnet</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="mb-dest">To</label>
+          <select id="mb-dest" value={destination} disabled={busy || !destinations.length}
+            onChange={(e) => setDestination(e.target.value)}>
+            <option value="">{destinations.length ? "Choose a chain…" : "Loading chains…"}</option>
+            {destinations.map((d) => (<option key={d.key} value={d.key}>{d.label}</option>))}
+          </select>
+        </div>
 
       {/* ⭐ THE AMOUNT WAS THE SMALLEST ELEMENT ON A PAGE ABOUT MOVING MONEY — 0.95rem against a
           1.5rem heading, and within 10% of the prose around it. It is now the largest thing here.
@@ -283,15 +300,6 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
           onChange={(e) => setAmount(e.target.value)} disabled={busy} />
       </div>
 
-      <div className="row">
-        <span className="status" style={{ margin: 0 }}>To</span>
-        <select value={destination} onChange={(e) => setDestination(e.target.value)} disabled={busy || !destinations.length}>
-          <option value="">{destinations.length ? "Choose a chain…" : "Loading chains…"}</option>
-          {destinations.map((d) => (
-            <option key={d.key} value={d.key}>{d.label}</option>
-          ))}
-        </select>
-        <button onClick={() => start()} disabled={busy || !destination}>Get quote</button>
       </div>
 
       {disclosure && (
@@ -323,11 +331,37 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
             signer="browser"
             heldFeeNote={false}
           />
-          <div style={{ marginTop: 8 }}>
-            <button onClick={signAndBurn} disabled={busy}>Sign and bridge</button>
-          </div>
         </div>
       )}
+
+      {/* ⭐⭐ ONE FULL-WIDTH BUTTON, AND THE LABEL CARRIES THE STATE — matching the agent panel.
+          It was TWO buttons in two blocks: "Get quote" inside the form row and "Sign and bridge"
+          inside the quote block, so the action moved down the page as state changed and the user
+          had to find it again. One control in one place, whose text says what pressing it will do.
+          ⛔ THE SIGNING STEP STAYS NAMED. "Bridge N USDC → Base" would be the agent panel's wording,
+          and here it would hide the one fact that distinguishes this path: YOU sign it, in this tab.
+          The label says "Sign and bridge" for that reason, not for symmetry with the sibling. */}
+      {!result && (
+        <button className="emerald btn-wide" disabled={busy || !destination || !amount}
+          onClick={quote ? signAndBurn : () => start()}>
+          {busy ? (quote ? "Waiting for your signature…" : "Pricing…")
+            : quote ? `Sign and bridge ${amount} USDC → ${quote.destinationLabel}`
+            : "Get quote"}
+        </button>
+      )}
+
+      {/* ⭐ MOVED BELOW THE ACTION. The three-row summary now shows the deduction by WHICH NUMBER
+          MOVES, so this prose no longer has to establish that a fee exists — it carries only the
+          part a table cannot: that the arrival is an ESTIMATE until the destination chain is read.
+          ⛔ Text unchanged, and its position is the change. Above the form it competed with the
+          hazard note for the reader's one pre-typing glance; the hazard is the thing that must be
+          met first, and two callouts in that slot meant neither was.
+          ⚠️ NOT merged into the summary: it is about a FUTURE reading, not about this quote. */}
+      <div className="status">
+        A live cross-chain fee (taken from the amount) applies — the confirmation shows the
+        exact fee quoted at execution and an <b>estimated</b> arrival; the exact delivered
+        amount appears once we have read the destination chain.
+      </div>
 
       {/* ⛔ BURNED BUT NOT RECORDED. The money has moved; only the record is missing. The one
           control offered is a retry of the RECORD — there is deliberately no way to sign again. */}

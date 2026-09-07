@@ -88,13 +88,32 @@ section("4 — the panel offers ONLY served options (no hardcoded list)");
     fs.readFileSync("src/components/ManualBridgePanel.tsx", "utf8"));
   const code = panel.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
   // 🚨 A hardcoded <option value="..."> is exactly what shipped and mis-routed.
-  const hardcoded = [...code.matchAll(/<option\s+value="([^"]+)"/g)].map((m) => m[1]).filter(Boolean);
-  check("🚨 NO hardcoded destination values in the panel",
+  //
+  // ⚠️ SCOPED TO THE DESTINATION SELECT, 2026-09-07 — and the reason matters more than the change.
+  // This used to scan the WHOLE FILE for any `<option value=`, which was right while the panel had
+  // exactly one select. A FROM/TO pair adds a DISABLED source select whose single option is "arc",
+  // and a file-wide ban reddened on it. ⛔ That option is not a destination: it cannot be chosen, it
+  // cannot be submitted, and `destination` state never sees it. The defect this section exists for
+  // — a hardcoded list of DESTINATIONS shadowing the served one, which routed a real bridge to the
+  // wrong chain — is untouched by it.
+  // ⭐ So the assertion is scoped to the destination control rather than relaxed: a hardcoded option
+  // INSIDE that select still fails, which is the property the section is named for. A guard pinned
+  // to "no <option> anywhere" was pinned to syntax; this one is pinned to the thing.
+  const destSelect = (code.match(/<select[^>]*id="mb-dest"[\s\S]*?<\/select>/) || [""])[0];
+  check("the destination select was located (the scope this section depends on)", destSelect.length > 0);
+  const hardcoded = [...destSelect.matchAll(/<option\s+value="([^"]+)"/g)].map((m) => m[1]).filter(Boolean);
+  check("🚨 NO hardcoded destination values in the destination select",
     hardcoded.length === 0,
     hardcoded.length ? `found: ${hardcoded.join(", ")}` : "options come from the server");
-  check("⭐ …and it renders the SERVED list", /destinations\.map\(/.test(code));
+  check("⭐ …and it renders the SERVED list", /destinations\.map\(/.test(destSelect));
+  // ⚠️ THE PROPERTY, NOT THE EXPRESSION. This pinned the literal `disabled={busy || !destination}`,
+  // which lived on the SELECT. The action is now one state-carrying button and the requirement moved
+  // there — stronger, since it also demands an amount. Pinning the old string would have failed on a
+  // panel that enforces MORE than it did. Assert that the control which SUBMITS refuses without a
+  // destination. [[guard-green-through-semantic-change]]
+  const action = (code.match(/<button[^>]*className="emerald btn-wide"[\s\S]*?>/) || [""])[0];
   check("⭐ …and cannot quote until one is chosen — no default to submit blindly",
-    /disabled=\{busy \|\| !destination\}/.test(code));
+    /!destination/.test(action), action ? "action found, no !destination guard" : "no action button found");
 }
 
 console.log(`\n${"═".repeat(72)}`);
