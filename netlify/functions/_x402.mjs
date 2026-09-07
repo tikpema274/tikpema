@@ -78,7 +78,39 @@ function bodyInit(requestBody) {
 // signTypedData({ domain, types, primaryType, message }) with viem-shaped data
 // (no EIP712Domain entry; bigint values). Circle's API wants a JSON string with
 // EIP712Domain in types and JSON-serializable values, so we adapt here.
-function circleSigner({ client, address, walletId, walletAddress, blockchain }) {
+// ═══ 🚨 THERE IS NO `walletId` ARM, DELIBERATELY — IT WAS A MONEY-PATH FAIL-OPEN ═══════════════
+// This took `walletId` and preferred it: `walletId ? { walletId, data } : { walletAddress, … }`,
+// under a comment reading "Prefer walletId (set by agent-init)". The one call site passed a literal
+// `null`, so the arm was DEAD — but the comment is an instruction to wire in
+// `process.env.AGENT_WALLET_ID`, and ⛔ THAT VARIABLE IS SET IN PRODUCTION: to
+// `2c93ca5d-…-1a220647f7b1`, the DD attestation identity, whose account is the SCA `0xc54d47…`.
+// `from` on this path is the delegate EOA `0x6db396c1…`. Taking that arm would therefore
+// authenticate to Circle and SIGN AS A DIFFERENT WALLET than the one the payment is drawn from —
+// silently, with nothing local to notice. The batched scheme requires `ecrecover(sig) == from`, and
+// an SCA signs ERC-1271, which does not ecrecover at all, so it fails at the FACILITATOR: a working
+// buy path would start returning vendor rejections with no local signal pointing at the cause.
+//
+// ⭐ THE FIX IS REMOVING THE PARAMETER, NOT DOCUMENTING IT. A dead branch plus a comment inviting
+// someone to feed it is a defect waiting for a maintainer; with no parameter there is nothing to
+// set. The wallet is resolved BY ADDRESS so it is provably the same account as `from`.
+// [[batched-x402-requires-from-equals-signer]] [[wallet-type-is-not-inferable-from-name]]
+export function circleSigner({ client, address, walletAddress, blockchain }) {
+  // Fail at CONSTRUCTION, before any challenge is fetched or price gated — a signer that cannot
+  // prove which account it signs as must never reach the point of producing a signature.
+  if (!walletAddress || !blockchain)
+    throw new Error(
+      `circleSigner requires walletAddress AND blockchain (got walletAddress=${walletAddress ?? "undefined"}, ` +
+      `blockchain=${blockchain ?? "undefined"}). The signing wallet is resolved by ADDRESS so that it is ` +
+      `provably the same account as \`from\`; there is no id-based fallback to guess with.`
+    );
+  // ⭐ THE INVARIANT THE REMOVED BRANCH COULD BREAK, NOW ASSERTED. `address` is what this signer
+  // ADVERTISES to the scheme (and becomes `from`); `walletAddress` is who Circle actually signs as.
+  // The whole point of the batched scheme is that these are the same account.
+  if (String(address).toLowerCase() !== String(walletAddress).toLowerCase())
+    throw new Error(
+      `circleSigner would sign as the WRONG WALLET: advertised address ${address} != signing wallet ` +
+      `${walletAddress}. The batched scheme requires ecrecover(sig) == from, so these must be one account.`
+    );
   return {
     address,
     async signTypedData({ domain, types, primaryType, message }) {
@@ -101,12 +133,8 @@ function circleSigner({ client, address, walletId, walletAddress, blockchain }) 
         typeof v === "bigint" ? v.toString() : v
       );
 
-      // Prefer walletId (set by agent-init) — avoids the walletAddress+blockchain
-      // pairing the SDK requires. Fall back to address+blockchain otherwise.
-      const input = walletId
-        ? { walletId, data }
-        : { walletAddress, blockchain, data };
-      const res = await client.signTypedData(input);
+      // Resolved by address+blockchain — the ONLY form here. See the block above the function.
+      const res = await client.signTypedData({ walletAddress, blockchain, data });
       const signature = res?.data?.signature;
       if (!signature) throw new Error("Circle signTypedData returned no signature");
       return signature;
@@ -331,7 +359,6 @@ export async function payX402({ sellerUrl, challenge, approvedUsdc, requireAppro
     const signer = circleSigner({
       client,
       address: payer,             // from = payer EOA → sources the payer's OWN Gateway balance
-      walletId: null,             // resolve the EOA wallet by address + blockchain
       walletAddress: payer,       // Circle signs with the SAME payer EOA → ecrecover(sig) == from
       blockchain: ARC.blockchain,
     });
