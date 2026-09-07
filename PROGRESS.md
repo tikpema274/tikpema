@@ -1,5 +1,115 @@
 ---
 
+# ⛔ TikpemaPrediction — PARKED, and two dictated premises corrected first
+
+**2026-09-07. Read-only: nothing called, nothing transferred, nothing deployed.**
+`TikpemaPrediction` at `0xF38492403ce3f1C94ef6322B78c9024D26ED87E1`, Arc testnet (5042002).
+Holds **263.145500 USDC**. ⭐ The sum of all market pools is **263.145500 — exactly the balance**,
+so every cent is staked principal and there is no separate pot.
+
+## ⭐ DECIDED: PARKED. Testnet tokens, read-only in the app, not worth spending on.
+
+That decision stands unchanged. What follows corrects the REASONS, because a parked record exists so
+nobody re-derives it — and two of the reasons as dictated are false.
+[[verify-dictated-reasons-before-recording]]
+
+## 🚨 CORRECTION 1 — THE ROLES ARE NOT IMMUTABLE. THREE `onlyOwner` SETTERS EXIST.
+
+Dictated: *"set immutably in the constructor — the bytecode has NO transferOwnership, no role
+setters, no upgrade path."* **Measured false, three independent ways.**
+
+Source — `~/tikpema/tikpema-contracts/src/TikpemaPrediction.sol` (the Solidity IS on disk, in a
+sibling repo; it is only absent from THIS one):
+
+```
+77:  address public owner;      78:  address public oracle;      79:  address public treasury;
+429: function setOracle(address _oracle)   external onlyOwner
+434: function setTreasury(address _treasury) external onlyOwner
+436: function transferOwnership(address a)   external onlyOwner
+```
+
+Plain mutable storage — no `immutable`, no `constant`. Corroborated without the source:
+
+- **Dispatch table** (PUSH4…EQ…JUMPI walk, 28 entry points): `0xf2fde38b` `transferOwnership`,
+  `0x7adbf973` `setOracle`, `0xf0f44260` `setTreasury` all present.
+- **`eth_call` from the key**: all three return `0x` (success). From any other address: `not owner`.
+- **Storage**: slot 1 = owner, slot 2 = oracle, slot 3 = treasury — proved by overriding each and
+  watching exactly one getter move. **Three slots, settable independently and in any order.**
+
+⛔ **SO "CAN NEVER BE MADE SAFE IN PLACE" IS FALSE.** The three roles can be split TODAY with three
+`onlyOwner` transactions and no redeployment. ⚠️ Ordering matters: rotate **oracle and treasury
+first, owner last** — owner is the only role that can reassign the others — and `transferOwnership`
+is ONE-STEP (no `acceptOwnership`, no `pendingOwner`), so a wrong address is permanent.
+
+⭐ This does not reverse the park. It changes the reopen path from "must redeploy" to "could be
+rotated cheaply, and we are choosing not to bother on testnet."
+
+## 🚨 CORRECTION 2 — TEN UNRESOLVED MARKETS, NOT SEVEN
+
+`nextMarketId()` = **10**; decoding all ten: **0 resolved, 0 cancelled, 10 OPEN.** Six are already
+PAST `resolutionTime` (#2 #3 #6 #7 #8 #9, **160.28 USDC**), by 2-3 months. `claimPayout` reverts
+`not resolved`, so those stakes are stuck until some oracle acts. Nothing expires — there is no
+deadline a handover could disrupt.
+
+## ⚠️ CORRECTION 3 — `resolveMarket` DOES validate; what it cannot check is the ANSWER
+
+Dictated as *"writes an arbitrary winner with no validation."* It carries three `require`s:
+`msg.sender == oracle`, not-already-resolved, and `block.timestamp >= m.resolutionTime`.
+
+⭐ **The real exposure is narrower and still decisive:** the `yesWon` BOOLEAN is unconstrained by any
+data source, so the oracle picks the winner freely. **And the key holds stakes on BOTH SIDES of three
+markets it also created and is sole oracle for** — #7 (5/5), #8 (3/7), #9 (5/5) = 30.000000 USDC
+across pools totalling 102.28. Whichever way it resolves, it collects, and it sets the direction.
+That is the finding worth keeping, and it survives all three corrections.
+
+**Role powers, measured:** owner → `setOracle`, `setTreasury`, `transferOwnership`, `setPaused`,
+`cancelMarket`. oracle → `resolveMarket`. treasury → one fee-withdrawal function (`0xa1af5b9a`),
+**bounded**: forcing its accumulator (slot 6, currently **0**) to 1,000,000 made it revert
+`ERC20: transfer amount exceeds balance`, proving it cannot reach principal. `closeMarket` is
+permissionless. `transfer`/`transferFrom` appear in the bytecode but are NOT dispatch entry points —
+they are outbound calls to USDC.
+
+## ⛔ REOPEN CONDITION — a NEW deployment, and the reason is the KEY, not immutability
+
+If prediction markets are ever wanted for real: **new deployment**, with owner, oracle and treasury
+as **three separate addresses**, from a Circle developer-controlled wallet rather than a raw key.
+⚠️ Note the corrected reason — not "this one cannot be fixed" (it can), but that a contract whose
+every role was ever held by a plaintext EOA key should not be the one carrying real money.
+
+Deploy path when that day comes:
+```
+circleContractSdk.deployContract({ walletId, abiJson, bytecode, constructorParameters })
+```
+It takes arbitrary compiled Solidity. ⭐ And a Circle wallet can genuinely ACT in these roles, not
+merely hold them — proved by overriding the oracle slot to our SCA `0xc54d4721…` and simulating:
+`resolveMarket` **succeeds from the SCA** and reverts `not oracle` from the old key (both halves, so
+the override is not a vacuous pass). A PUSH-aware opcode walk found **`ORIGIN` × 0, `EXTCODESIZE` × 0**
+— no `tx.origin` check and no EOA-only guard, the two things that would have turned a role transfer
+into a lock-up. [[probe-must-discriminate-between-states]]
+
+## ⚠️ NOT PARKED — THE DEPLOYER KEY
+
+`PRIVATE_KEY` sits in plaintext in **two** sibling repos:
+`~/tikpema/tikpema-contracts/.env` and `~/arc-contracts/.env`. Both are git repos.
+
+| | tikpema-contracts | arc-contracts |
+|---|---|---|
+| `.env` tracked | no | no |
+| ever committed (`log --all`) | no | no |
+| remote configured | **none** | **none** |
+| `.env` git-ignored | 🚨 **NO — no `env` entry in `.gitignore`** | ✅ yes |
+
+**Never committed, never pushed — so this is a habit, not an incident.** `tikpema-contracts` has
+zero commits on `master`, which is the only reason the gap has not bitten: one `git add -A` there
+captures the key, and a first push publishes it. ⭐ The two notes files in THIS repo that name the
+deployer (`MULTIMARKET_NOTES.md`, `PREDICT_FINDINGS.md`) are tracked but carry **only the address** —
+zero 64-hex or `PRIVATE_KEY` hits. Nothing key-shaped is in a pushed repo.
+
+⛔ The cheap fix is the `.gitignore` line in `tikpema-contracts`, and it should not wait for the
+prediction-market decision — it is unrelated to whether this contract is ever revived.
+Related: [[spike-scripts-read-live-prod-credential]].
+
+
 # ⭐ ONE CARD SHAPE, TWO CLAIMS — and the badge that pays for the resemblance
 
 **2026-09-07.** `#/self-signed` rendered three bare links under a paragraph. It now uses the same
