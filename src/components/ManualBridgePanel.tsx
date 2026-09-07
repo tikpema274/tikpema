@@ -259,12 +259,31 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
           not hazards, so the colour did all the work and none of it read. `.hazard-callout` is a
           bordered box: it differs in shape, size, weight and density, and stays distinguishable
           with the colour removed. ⛔ ABOVE the form deliberately — this is met BEFORE typing.
-          Text is unchanged, and verify-deployed-disclosure.mjs uses this sentence as a build
-          CONTROL via bundle.includes(), so it must stay verbatim. */}
+          ⚠️ verify-deployed-disclosure.mjs uses "stay on this page until the burn confirms" as a
+          build CONTROL via bundle.includes(). That CLAUSE stays verbatim; the rest of the sentence
+          changed 2026-09-07 and the control is unaffected by design, not by luck.
+
+          ═══ ⭐⭐ REWORDED ONLY AFTER THE SWEEPER WAS SCHEDULED **AND** OBSERVED RUNNING ═══════
+          It used to end "we lose the record of it, so it will not appear in your bridges and we
+          cannot show you what arrived" — accurate for as long as nothing swept. bridge-discover-sweep
+          now runs every 10 minutes: 6 consecutive clean ticks measured 08:10-09:00 on 2026-09-07,
+          793-842 blocks each, lag 25-140 blocks. Softening this before that existed would have
+          described a recovery that did not happen.
+          ⛔ "STAY" SURVIVES, because leaving still costs something. Turning it into "you can leave"
+          would be the opposite overstatement — the exact failure BRIDGE_SIGNER exists to prevent.
+          ⭐ AND IT NAMES THE CONSEQUENCE THAT IS PERMANENT: the recovered burn arrives as a SECOND
+          row and the intent you started stays marked unfinished. MEASURED in the live store — one
+          bridge, two rows 11 seconds apart (tx-user-mtdhmeh8… burn_submitted, 0x0938de7c… minted).
+          ⚠️ That duplicate is NOT a bug awaiting a fix: retiring the parked intent would require
+          deciding the discovered burn BELONGS to it, which is the probable-not-certain attribution
+          this design refuses — refused even on a pair whose fee matched to six decimals. The
+          duplicate is the price of never writing a wrong provenance, and the copy discloses it
+          rather than pretending it away. */}
       <div className="hazard-callout">
         After you sign, <b>stay on this page until the burn confirms.</b> If you leave, the bridge
-        still completes on-chain and your funds are not at risk — but we lose the record of it, so
-        it will not appear in your bridges and we cannot show you what arrived.
+        still completes on-chain and your funds are not at risk — we now recover the record from the
+        chain within about ten minutes, but it arrives as a separate entry and the one you started
+        here stays marked unfinished.
       </div>
 
       {/* ⭐ FROM/TO SIDE BY SIDE, matching the agent panel — and FROM is a DISABLED SELECT, not

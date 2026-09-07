@@ -73,13 +73,23 @@ section("2 — 🚨 THE TAB-CLOSE WINDOW, disclosed BEFORE signing");
   // window is NOT recovered; a gap asserted only in a suite is a gap the user discovers instead.
   check("⭐⭐ tells the user to stay on the page until the burn confirms",
     /stay on this page until the burn confirms/i.test(text), text.slice(0, 80));
-  // ⭐ BOTH HALVES, and the second is what keeps it honest. "Stay or lose the record" is true;
-  // "stay" alone reads as "or lose your funds", which is false.
-  check("⭐⭐ …and says the FUNDS are not at risk — only the RECORD is lost",
-    /funds are not at risk/i.test(text) && /we lose the record/i.test(text),
+  // ⭐ BOTH HALVES, and the second keeps it honest: "stay" alone reads as "or lose your funds".
+  check("⭐⭐ …and says the FUNDS are not at risk",
+    /funds are not at risk/i.test(text),
     "saying only 'stay on this page' would frighten the user about the wrong thing");
-  check("⭐ …and says the consequence concretely — it will not appear in your bridges",
-    /will not appear in your bridges/i.test(text));
+  // ⚠️ UPDATED 2026-09-07. This pinned "we lose the record" and "will not appear in your bridges",
+  // which became FALSE the moment bridge-discover-sweep was scheduled AND observed running (6 clean
+  // ticks, 08:10-09:00). The PROPERTY is unchanged — the sentence must state the cost of leaving
+  // concretely, not merely issue an instruction. Only the true cost moved.
+  check("⭐⭐ …and states that the record IS recovered, with a time",
+    /recover the record from the chain/i.test(text) && /ten minutes/i.test(text));
+  check("🚨 …and names the consequence that is PERMANENT — a separate entry, the original unfinished",
+    /separate entry/i.test(text) && /stays marked unfinished/i.test(text),
+    "recovery is not free: the parked intent is never retired, because retiring it would need attribution");
+  // ⛔ THE SUPERSEDED CLAIM MUST BE GONE, not merely joined by a new one — a panel carrying both
+  // would tell the user the record is lost AND that it is recovered.
+  check("⛔ the superseded claim is REMOVED",
+    !/we lose the record/i.test(text) && !/will not appear in your bridges/i.test(text));
 
   // ═══ ⭐⭐ ORDER: CUSTODY → HAZARD → CONTROL ═══════════════════════════════════════════════
   // Both notices are constraints on the action, so BOTH precede the control. Between them, money
