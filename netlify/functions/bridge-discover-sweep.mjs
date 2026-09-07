@@ -30,6 +30,22 @@ import { nextScanRange, nextCursor, CURSOR_KEY, MAX_WINDOWS_PER_TICK } from "../
 // a wasted read, never a duplicate. Delegating would add a hop and a second failure surface for no
 // property gained. ⚠️ Stated because a reader who knows the sibling will expect the other shape.
 //
+// ═══ ⚠️⚠️ WHAT SIX CLEAN TICKS DO **NOT** PROVE — READ BEFORE TRUSTING THIS ══════════════════
+// MEASURED 2026-09-07, 08:10-09:00: six consecutive ticks, 793-842 blocks each, lag 25-140 blocks,
+// no stall and no held cursor. That proves the schedule FIRES and the cursor advances CONTIGUOUSLY.
+//
+// ⛔ IT PROVES NOTHING ABOUT THE PER-TICK HOLD. Every one of those ticks was complete, so the
+// UNREADABLE branch never ran. It is mutation-proven (advancing on an unreadable tick fails 4
+// assertions) and it was exercised by hand during backfill — 55 of 151 windows failed and the
+// verdict correctly refused to advance — but it has NEVER FIRED ON THE CRON.
+//
+// 🚨 AND THE CONDITION MAY BE RARE ENOUGH TO BE FIRST SEEN IN AN INCIDENT. A steady-state tick reads
+// ~800 blocks in ONE window; the throttling that produced "Request exceeds defined limit" appeared
+// under a 151-window backfill. The cheap path may simply never provoke it — which means the first
+// real hold could arrive during whatever outage makes windows fail, i.e. exactly when nobody wants
+// to be discovering whether the rule works. ⭐ Six green ticks must not be read as covering this;
+// they are a different claim about a different branch. [[absence-must-never-read-as-safe]]
+//
 // ═══ ⛔ THE PER-TICK RULE, WIRED NOT REINVENTED ═══════════════════════════════════════════════
 // `sweepVerdict` decides `advanceCursor`; this function obeys it. One failed window makes the tick
 // UNREADABLE, nothing is written to the cursor, and the range is rescanned next tick. Findings from

@@ -271,6 +271,20 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
           described a recovery that did not happen.
           ⛔ "STAY" SURVIVES, because leaving still costs something. Turning it into "you can leave"
           would be the opposite overstatement — the exact failure BRIDGE_SIGNER exists to prevent.
+          ⭐ "THE RECORD IS DELAYED RATHER THAN LOST" IS THE WHOLE CLAIM, and it is bounded three ways
+          on purpose. It does NOT say "we will always recover it": six clean ticks are six ticks, and
+          the sweeper has never yet met a window it could not read. It gives the REASON rather than
+          asking for trust — "we recorded this bridge when you priced it" is user-facing for
+          `user-bridge-start` writing the provisional record BEFORE the burn exists, which is exactly
+          what makes the owner enumerable to a store-driven sweep. And it keeps STAY as the preferred
+          path on its own merits: faster, and the only place the result is shown.
+          ⛔ THE BOUNDARY IS REAL AND IS DELIBERATELY NOT IN THIS SENTENCE. A burn from a wallet that
+          never quoted through the app is invisible to discovery — permanently, since enumeration is
+          store ∪ operator wallets. But a reader of THIS panel has quoted through the app by
+          definition, so the caveat describes a case they cannot be in. Copy that answers questions
+          the reader does not have is how the sentence they DO need gets skipped. It is recorded in
+          _bridge-discover.mjs's scope block and in shared/spike-source-guard.mjs, where the people
+          who can actually be in that case will meet it.
           ⭐ AND IT NAMES THE CONSEQUENCE THAT IS PERMANENT: the recovered burn arrives as a SECOND
           row and the intent you started stays marked unfinished. MEASURED in the live store — one
           bridge, two rows 11 seconds apart (tx-user-mtdhmeh8… burn_submitted, 0x0938de7c… minted).
@@ -280,10 +294,11 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
           duplicate is the price of never writing a wrong provenance, and the copy discloses it
           rather than pretending it away. */}
       <div className="hazard-callout">
-        After you sign, <b>stay on this page until the burn confirms.</b> If you leave, the bridge
-        still completes on-chain and your funds are not at risk — we now recover the record from the
-        chain within about ten minutes, but it arrives as a separate entry and the one you started
-        here stays marked unfinished.
+        After you sign, <b>stay on this page until the burn confirms</b> — it is faster, and it is
+        where you see what arrived. If you leave, the bridge still completes on-chain and your funds
+        are not at risk. The record is delayed rather than lost: we recorded this bridge when you
+        priced it, so a sweep finds the burn on-chain within about ten minutes. It comes back as a
+        separate entry, and the one you started here stays marked unfinished.
       </div>
 
       {/* ⭐ FROM/TO SIDE BY SIDE, matching the agent panel — and FROM is a DISABLED SELECT, not

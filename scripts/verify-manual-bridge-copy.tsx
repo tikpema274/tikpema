@@ -81,8 +81,15 @@ section("2 — 🚨 THE TAB-CLOSE WINDOW, disclosed BEFORE signing");
   // which became FALSE the moment bridge-discover-sweep was scheduled AND observed running (6 clean
   // ticks, 08:10-09:00). The PROPERTY is unchanged — the sentence must state the cost of leaving
   // concretely, not merely issue an instruction. Only the true cost moved.
-  check("⭐⭐ …and states that the record IS recovered, with a time",
-    /recover the record from the chain/i.test(text) && /ten minutes/i.test(text));
+  check("⭐⭐ …and states the record is DELAYED, not lost, with a time",
+    /delayed rather than lost/i.test(text) && /ten minutes/i.test(text));
+  check("⭐ …and gives the REASON it can be recovered, not just the promise",
+    /recorded this bridge when you priced it/i.test(text),
+    "the provisional record precedes the burn — that is WHY the owner is enumerable");
+  check("⭐ …and keeps STAY as the preferred path on its merits", /it is faster/i.test(text));
+  // ⛔ NO OVERCLAIM. Six clean ticks are six ticks.
+  check("🚨 …and never promises recovery is guaranteed",
+    !/always recover/i.test(text) && !/guaranteed/i.test(text) && !/never lost/i.test(text));
   check("🚨 …and names the consequence that is PERMANENT — a separate entry, the original unfinished",
     /separate entry/i.test(text) && /stays marked unfinished/i.test(text),
     "recovery is not free: the parked intent is never retired, because retiring it would need attribution");
