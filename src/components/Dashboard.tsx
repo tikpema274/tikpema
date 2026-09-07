@@ -1,3 +1,4 @@
+import ConsequenceCard from "./ConsequenceCard";
 import type { useWallet } from "../wallet/useWallet";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
@@ -140,13 +141,10 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
           {/* The ONE reversible-looking move that ISN'T fully reversible. It sits in this
               group because the money is still yours — but the amber warning is what stops
               it from reading like a free transfer between pockets. */}
-          <button className="quick-card" onClick={() => go("unified")}>
-            <div className="qt">Deposit to unified balance →</div>
-            <div className="qd">
+          <ConsequenceCard title="Deposit to unified balance" onClick={() => go("unified")}>
               <span style={{ color: "var(--warn)" }}>⚠ Committed</span> — releasing it is
               delayed and goes through us. The one pocket you can't pull back alone.
-            </div>
-          </button>
+            </ConsequenceCard>
         </div>
       </div>
 
@@ -156,29 +154,20 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
           <b>This leaves you.</b> Both of these send USDC somewhere you don't control.
         </div>
         <div className="quick">
-          <button className="quick-card" onClick={() => go("send")}>
-            <div className="qt">Send →</div>
-            <div className="qd">
+          <ConsequenceCard title="Send" onClick={() => go("send")}>
               <span style={{ color: "var(--warn)" }}>❗ Goes to someone else.</span> Gone —
               there is no undo.
-            </div>
-          </button>
-          <button className="quick-card" onClick={() => go("bridge")}>
-            <div className="qt">Bridge →</div>
-            <div className="qd">
+            </ConsequenceCard>
+          <ConsequenceCard title="Bridge" onClick={() => go("bridge")}>
               <span style={{ color: "var(--warn)" }}>❗ Leaves Arc</span> for another chain.
               Bridging back costs a fee.
-            </div>
-          </button>
+            </ConsequenceCard>
           {/* The Vault agent (#/vault, nav-less). A deposit IS reversible (withdraw), but into a
               third-party contract — the card leads with that, not with the yield. */}
-          <button className="quick-card" onClick={() => go("vault")}>
-            <div className="qt">Vault →</div>
-            <div className="qd">
+          <ConsequenceCard title="Vault" onClick={() => go("vault")}>
               <span style={{ color: "var(--warn)" }}>❗ Into a third-party vault.</span> Withdraw
               any time, minus a fee — but read the owner's powers first.
-            </div>
-          </button>
+            </ConsequenceCard>
           {/* Recurring swaps (#/dca, nav-less). ⭐⭐ THIS CARD IS UNBLOCK CONDITION (4) AT THE
               CREATE_GATED CONSTANT: the route was reachable-but-unlinked for weeks, which is the
               configuration that hid a 22-day outage in this same surface. verify-dca-consent-copy
@@ -193,42 +182,30 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
               and list/cancel are never gated. So this is the only way a holder of an existing
               mandate can reach Cancel without typing the hash — which is a reason to link it
               NOW, not at un-gate. */}
-          <button className="quick-card" onClick={() => go("dca")}>
-            <div className="qt">Recurring swaps →</div>
-            <div className="qd">
+          <ConsequenceCard title="Recurring swaps" onClick={() => go("dca")}>
               <span style={{ color: "var(--warn)" }}>❗ Runs while you're offline</span>, signed by
               our key — not your passkey. Cancel anytime; a swap already sent still lands.
-            </div>
-          </button>
+            </ConsequenceCard>
         </div>
       </div>
 
       <div className="plane">
         <div className="panel-eyebrow">Ask your agent</div>
         <div className="quick">
-          <button className="quick-card" onClick={() => go("agent")}>
-            <div className="qt">AI Agent →</div>
-            <div className="qd">
+          <ConsequenceCard title="AI Agent" onClick={() => go("agent")}>
               Give your agent a task in plain language — research, send, swap,
               bridge, or a multi-step plan.
-            </div>
-          </button>
-          <button className="quick-card" onClick={() => go("research")}>
-            <div className="qt">Research →</div>
-            <div className="qd">
+            </ConsequenceCard>
+          <ConsequenceCard title="Research" onClick={() => go("research")}>
               Commission a cited research brief, settled on-chain in USDC.
-            </div>
-          </button>
+            </ConsequenceCard>
           {/* The proposal loop's entry. Nav-less #/plan — distinct from Research, whose
               guardrail correctly declines "should I…" questions. Framing leads with the
               user deciding, because the agent proposes and only the user approves. */}
-          <button className="quick-card" onClick={() => go("plan")}>
-            <div className="qt">Plan an action →</div>
-            <div className="qd">
+          <ConsequenceCard title="Plan an action" onClick={() => go("plan")}>
               Describe an on-chain action; your agent researches it and proposes a plan
               you approve.
-            </div>
-          </button>
+            </ConsequenceCard>
 
           {/* The AGENTS ROSTER (#/agents, nav-less). Leads with the trust distinction, because
               that is the thing worth knowing — but states NO COUNT.
@@ -237,35 +214,26 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
               and it was false in the reassuring direction. The roster's own headline counts its
               cards, but this card never fetches the roster — it has nothing to count, so it
               must not imply a number. The roster page itself does the counting. */}
-          <button className="quick-card" onClick={() => go("agents")}>
-            <div className="qt">Your agents →</div>
-            <div className="qd">
+          <ConsequenceCard title="Your agents" onClick={() => go("agents")}>
               See who acts for you, what each one spent, and stop any of them instantly. Each
               one says whether it can move your money.
-            </div>
-          </button>
+            </ConsequenceCard>
           {/* ⭐ THE PAGE'S OTHER WAY IN. The three self-signed operations are NOT in the nav, on purpose,
               so this card and the agent panels' twin links are the entry points. The blurb carries the
               CONTRAST, because a reader arriving here has not necessarily seen a capped panel first. */}
-          <button className="quick-card" onClick={() => go("self-signed")}>
-            <div className="qt">Sign it yourself →</div>
-            <div className="qd">
+          <ConsequenceCard title="Sign it yourself" onClick={() => go("self-signed")}>
               Send, bridge or swap from your own wallet, signed with your own key —
               your agent's spending caps do not bound these.
-            </div>
-          </button>
+            </ConsequenceCard>
 
-          <button className="quick-card" onClick={() => go("nanopay")}>
-            <div className="qt">Nanopayments →</div>
-            <div className="qd">
+          <ConsequenceCard title="Nanopayments" onClick={() => go("nanopay")}>
               {/* ⚠️ SECOND COPY OF A CLAIM CORRECTED ON NanopaymentPanel. It said "your agent
                   PAYS", present tense, for a step that has never fired in production — and it
                   survived the page's own fix because nobody grepped for the other copy. Keep the
                   two in step: this is the card, that is the page. */}
               How your agent can pay a fraction of a cent for fresh data mid-research —
               and why it has not needed to yet.
-            </div>
-          </button>
+            </ConsequenceCard>
           {/* ⭐ THE ONLY CARD THAT LEAVES THE APP. /built is a plain page outside the SPA, for a
               human arriving from Discord or GitHub who should not have to load a wallet app to
               read a list. An <a> and not go(), because it is not a hash route.

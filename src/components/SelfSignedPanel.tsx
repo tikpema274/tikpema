@@ -23,14 +23,28 @@
 // twin is how a reader arrives having just seen the caps stated. This page → each operation is what
 // stops the page being the thing nothing links to.
 import { walletGuardState } from "./WalletGuardNotice";
+import ConsequenceCard, { type CardSigner } from "./ConsequenceCard";
 import type { useWallet } from "../wallet/useWallet";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
+// ═══ ⭐⭐ THE BADGE IS DERIVED FROM THE PAGE, WRITTEN ONCE ══════════════════════════════════════
+// Every operation on this page is self-signed — that is what the page IS — so the signing model is
+// a property of the page, not of each card. Typing "you sign" three times would be three chances
+// to type it differently, which is the drift this whole commit exists to remove; and the badge TEXT
+// lives in ConsequenceCard, so it appears exactly once in the codebase.
+// ⛔ NOT PER-CARD DATA IN `OPS`. Putting a signer on each row would make it look like a per-card
+// choice, and a future fourth row could then silently be added without one. It is one constant
+// applied to all, so a new row cannot forget it.
+const SIGNER: CardSigner = "self";
+
+// ⚠️ COPY UNCHANGED IN THIS COMMIT — titles and blurbs are exactly what the bare-link list carried.
+// The dashboard's cards describe the OPERATION; these describe the operation and WHO SIGNS, which
+// is why the two sets of copy are deliberately NOT merged behind the shared shape.
 const OPS = [
-  { route: "send-manual",   title: "Send",   blurb: "Move USDC to any address on Arc.", twin: "Send" },
-  { route: "bridge-manual", title: "Bridge", blurb: "Move USDC to another chain via CCTP.", twin: "Bridge" },
-  { route: "swap-manual",   title: "Swap",   blurb: "Convert between USDC and EURC on Arc.", twin: "Swap" },
+  { route: "send-manual",   title: "Send from your own wallet",   blurb: "Move USDC to any address on Arc.", twin: "Send" },
+  { route: "bridge-manual", title: "Bridge from your own wallet", blurb: "Move USDC to another chain via CCTP.", twin: "Bridge" },
+  { route: "swap-manual",   title: "Swap from your own wallet",   blurb: "Convert between USDC and EURC on Arc.", twin: "Swap" },
 ];
 
 export default function SelfSignedPanel({ wallet: w }: { wallet: UnifiedWallet }) {
@@ -92,15 +106,21 @@ export default function SelfSignedPanel({ wallet: w }: { wallet: UnifiedWallet }
         </div>
       )}
 
-      <div className="row" style={{ flexDirection: "column", alignItems: "stretch", gap: 10, marginTop: 16 }}>
+      {/* ⭐ THE SAME THREE-CARD ROW THE DASHBOARD USES, THROUGH THE SAME COMPONENT — which is the
+          point: a reader who learned the card grammar there reads this one without re-learning it.
+          ⛔ AND THAT IS EXACTLY WHY THE BADGE IS NOT OPTIONAL DECORATION. A card that LOOKS like a
+          dashboard card while behaving differently — nobody can run it but you, and no agent cap
+          bounds it — is the failure mode the shared shape introduces. The badge is what pays for
+          the resemblance. The page intro states the same fact at length; this is the half that
+          cannot be scrolled past, because it sits on the control itself.
+          [[custody-position-stated-six-times]] counts this claim's sites: it is stated once per
+          page here, not once per card, and the badge is a pointer to it rather than a sixth copy. */}
+      <div className="quick" style={{ marginTop: 16 }}>
         {OPS.map((o) => (
-          <div key={o.route} className="status" style={{ margin: 0, display: "block" }}>
-            <button className="linkbtn" style={{ fontWeight: 600 }}
-              onClick={() => (window.location.hash = "/" + o.route)}>
-              {o.title} from your own wallet
-            </button>
-            <div style={{ opacity: 0.8 }}>{o.blurb}</div>
-          </div>
+          <ConsequenceCard key={o.route} title={o.title} signer={SIGNER}
+            onClick={() => (window.location.hash = "/" + o.route)}>
+            {o.blurb}
+          </ConsequenceCard>
         ))}
       </div>
     </div>

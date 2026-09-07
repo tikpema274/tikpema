@@ -560,6 +560,22 @@ label.field > span {
   font-size: 0.95rem;
   margin-bottom: 5px;
 }
+/* ⭐ The signing badge. Sits in the heading row so it cannot be scrolled past — it is the ONE
+   fact that separates a self-signed card from a dashboard card with the same shape. Amber, the
+   app's only accent, matching the --warn rails the manual panels use for the same claim. */
+.quick-card .qbadge {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border: 1px solid var(--amber-line);
+  border-radius: 999px;
+  color: var(--warn);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+  vertical-align: middle;
+  white-space: nowrap;
+}
 .quick-card .qd {
   color: var(--muted);
   font-size: 0.82rem;

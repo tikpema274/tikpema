@@ -83,6 +83,13 @@ export const COMPONENTS = {
   // ⛔ Carries the contrast in its own words, because a reader arriving from the Dashboard card has
   // not necessarily seen a capped panel first — which is also why this page is NOT in the nav.
   SelfSignedPanel:      { suite: "verify-custody-notice.tsx" },
+  // ⭐ The ONE card shape, shared by the Dashboard and #/self-signed. It carries a CLAIM, not just
+  // layout: the `signer` badge is the only visible thing separating a self-signed card from a
+  // dashboard card with identical markup — nobody but the user can run the operation behind it and
+  // no agent cap bounds it. ⚠️ Its suite asserts an INEQUALITY (badge on all three self-signed
+  // cards, none on the dashboard) with a non-emptiness floor under both counts, because each half
+  // alone is satisfied by a page that renders nothing.
+  ConsequenceCard:      { suite: "verify-consequence-card.tsx" },
   Dashboard:            { suite: "verify-dashboard-copy.tsx" },
   ResearchPanel:        { suite: "verify-research-panel-copy.tsx" },
   // ⚠️ NOT verify-activity-fallback — that renders ONE row subcomponent for a fallback label and

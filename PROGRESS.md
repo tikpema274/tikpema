@@ -1,5 +1,97 @@
 ---
 
+# ⭐ ONE CARD SHAPE, TWO CLAIMS — and the badge that pays for the resemblance
+
+**2026-09-07.** `#/self-signed` rendered three bare links under a paragraph. It now uses the same
+three-card row as the Dashboard, through a new `ConsequenceCard` — extracted from the Dashboard's
+inline markup rather than written twice.
+
+## 🚨 THE SHAPE WAS ALREADY FORKED BEFORE THIS TASK, AND SO WERE ITS GUARDS
+
+`Dashboard.tsx:162` and `MyAgentPanel.tsx:397` carried **byte-identical** consequence copy, written
+out by hand in both places, pinned by two independent suites — `verify-dashboard-copy.tsx:86` and
+`verify-agent-panel-copy.tsx:118` — each asserting the same regex against its own render. **Neither
+could see the other drift.** Adding a third hand-written row would have made it three owners.
+
+⭐ **THE EXTRACTION IS PROVED BY THE EXISTING GUARDS, NOT BY A NEW ONE.** Both copy suites assert on
+RENDERED output, including `indexOf` ORDERING between the money categories. Converting 11 Dashboard
+cards to the component left `verify-dashboard-copy` at **17/0** and `verify-custody-notice` at
+**41/0** — unchanged output is the fidelity proof. A shape extraction that altered a byte would have
+reddened them.
+
+⚠️ **ONE CARD IS DELIBERATELY NOT CONVERTED.** "What else is built" is an `<a href="/built">` — real
+navigation, not a hash route. `ConsequenceCard` renders a `<button>`, so forcing it through would
+break the link. The guard pins the EXCLUSION BY ELEMENT (`<a className="quick-card" href=`) rather
+than a card count, which would drift.
+
+## ⛔ THE COPY IS NOT MERGED — and that was the point of the constraint
+
+The Dashboard's cards describe the **operation** ("Goes to someone else"). The self-signed cards
+describe the operation **and who signs it**. Two different claims. `ConsequenceCard` owns the
+STRUCTURE only; both pages keep their own words, and §6 of the new suite asserts the self-signed
+page does NOT carry the Dashboard's consequence strings.
+
+## ⭐⭐ THE BADGE — DERIVED FROM THE PAGE, WRITTEN ONCE
+
+`signer` is a two-value frozen axis on the component; `CARD_SIGNER_BADGE.self` is the only place the
+words *"you sign"* exist. `SelfSignedPanel` declares `const SIGNER: CardSigner = "self"` **once** and
+applies it in the map — not per row in `OPS`, so a future fourth row cannot silently omit it.
+
+⭐ **`agent: null` IS WRITTEN AS A VALUE**, not expressed by a missing key. A signing model that
+earns no badge says so explicitly. [[absence-must-never-read-as-safe]]
+
+⛔ **BRIDGE_SIGNER WAS CHECKED FIRST AND DOES NOT FIT**, for reasons worth keeping: it describes a
+PAST BURN in a receipt (hence its `unknown`, which a route can never be in); its copy fields are
+bridge-burn tab-safety instructions that would attach a bridge hazard to Send and Swap; and reusing
+it would make card layout change when bridge RECEIPT semantics change. A shared noun is not a shared
+capability. [[reopen-trigger-names-capability-not-noun]]
+
+## THE GUARD — `test:consequencecard`, 29/0, MUTATION-PROVEN IN BOTH DIRECTIONS
+
+| mutation | result |
+|---|---|
+| a self-signed card WITHOUT the badge (Swap) | **27/2** — caught by the count AND by the per-card check |
+| a DASHBOARD card WITH the badge (Send) | **27/2** — caught by the zero-count AND by the text leak |
+
+⭐ **IT ASSERTS AN INEQUALITY, NOT A PRESENCE.** "Badges render on #/self-signed" is satisfied by a
+component that stamps everything; "the dashboard has none" is satisfied by a dashboard that renders
+nothing. §1 puts a **non-emptiness floor** under both counts first, so neither can pass vacuously.
+[[equality-passes-vacuously-on-empty]] [[collapse-needs-pairwise-inequality]]
+
+## ⚠️ TWO OF MY OWN ASSERTIONS WERE WRONG, AND BOTH ARE THE FAMILIAR SHAPES
+
+1. **Matched cards by ROUTE.** `onClick` is a closure and never reaches static markup, so the probe
+   found nothing and reported it as a MISSING BADGE — a wrong instrument reading as a real defect.
+   Now matched by title. [[probe-must-discriminate-between-states]]
+2. **Matched the badge STRING in each page's source** — and went red on *this suite's own comment*
+   explaining why the string must not be typed. A guard failing on its own documentation teaches the
+   next reader to delete the explanation. Now structural: no page may emit `qbadge` markup.
+
+## ⏸️ DEFERRED, SCOPED — THE INTRO'S DOUBLE NEGATIVE
+
+`SelfSignedPanel.tsx:60` still reads *"Your agent cannot run them on your behalf — which is also why
+**its spending caps do not bound them**"* — two negatives stacked, plus *bound* as the least plain
+verb in the sentence. **NOT APPLIED IN THIS COMMIT.** The plainer version, ready:
+
+> These move money from the wallet you connected, and nothing moves until you sign it in your
+> wallet. **You sign each one yourself, so your agent's spending caps don't apply here** — those
+> caps limit what the agent may move unattended, not what you move yourself.
+
+⭐ One negative is **irreducible** — the fact IS an absence. The fix removes the SECOND one and
+swaps *bound* for *apply*, which also converges on `CustodyNotice`'s canonical verb.
+⛔ **IT IS A TWO-FILE CHANGE:** `verify-custody-notice.tsx:161` pins the literal
+`spending caps do not bound them`, so the guard must be updated in the same commit or it reddens for
+the right reason.
+
+## ⛔ WHAT WAS DECIDED AGAINST
+
+Self-signed variants are **not** added to the Dashboard row. `SelfSignedPanel.tsx:13-19` records why
+the page is nav-less: the caps claim is CONTRASTIVE, and a reader must arrive having seen a capped
+panel or the sentence reads as reassurance rather than as the removal of a guard. Three self-signed
+cards beside the agent cards reproduces exactly that, by a different mechanism. Six cards where
+three exist today is a separate decision.
+
+
 # ⭐⭐ TWO METHOD FINDINGS FROM ONE COPY CHANGE — both about the INSTRUMENT, not the sentence
 
 **2026-09-07.** Deploy `6a9e87b60c6f5a44ab0b3891` then `5c6efa6`. The hazard note was softened once
