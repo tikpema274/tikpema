@@ -1,5 +1,109 @@
 ---
 
+# ⭐⭐ THE VAULT EXIT — MEASURED, CROSS-CHECKED, AND FOUR STATES INSTEAD OF A THRESHOLD
+
+**2026-09-07.** Read-only investigation turned into a fix. Nothing deployed.
+
+## 🚨 FOUR DICTATED PREMISES DID NOT SURVIVE MEASUREMENT
+
+Recorded because the corrections are the finding, and three of them would have shipped a defect:
+
+| claimed | measured |
+|---|---|
+| `erc4626: true` hardcoded at `_dd-rungs.mjs:378` | `erc4626` appears NOWHERE in that file; it is DERIVED at `_vault.mjs:277` from a 12-selector scan |
+| `maxRedeem` read and discarded, rung fires at `== 0` | **zero hits repo-wide** — never read, no rung, not even in `ERC4626_REQUIRED` |
+| `useVault.ts` computes Max from balanceOf | **no such file**, and **no Max control anywhere** — withdraw is all-or-nothing by design |
+| `assetsOutUsdc`/`sharePrice` pre-fee, receipt asserts a false amount | **zero hits**; the receipt is a MEASURED post-fee balance delta (`verifiedBy: "usdc-balance-delta"`) and already refuses to print a computed figure |
+| exit fee 0.5%, six freely-withdrawable claims | **0.10%**, and **four** vault claims of which **two** were unbound |
+
+⭐ The receipt was already correct. The real defect was one hand-multiplied percentage and a
+measurement that did not exist.
+
+## ⭐⭐ THE GAP IS PROPORTIONAL — WHICH IS WHAT LICENSES A PERCENTAGE IN COPY
+
+`previewRedeem` vs `convertToAssets` on XyloVault, seven sizes across seven orders of magnitude:
+
+```
+     100000 → gap        100   0.100000%      1000000000 → gap    1000001   0.100000%
+    1000000 → gap       1000   0.100000%   4171169938061 → gap 4171177693   0.100000%
+   10000000 → gap      10000   0.100000%
+  100000000 → gap     100000   0.100000%
+```
+
+A FLAT fee holds the gap constant and moves the percentage; here the percentage is constant and the
+gap scales. **So "0.10%" is a claim about a FUNCTION, not about the one amount someone sampled** —
+and quoting a rate would have been unfounded without this.
+
+⚠️ And it agrees with the DECLARED rate: `withdrawFee()` = 10 bps. Two instruments, one fact.
+
+## THE SENTENCE IS LICENSED BY AGREEMENT, NOT BY EITHER INSTRUMENT
+
+`exitSentence()` is one producer, every figure derived, and `test:vaultexit` asserts the two agree
+rather than trusting either. ⛔ `MAX_FEE` is READ, never the literal 20 — a declared rate the owner
+can raise **200×** is a different claim from a fixed fee, and a hardcoded ceiling would be a finding
+about one vault written as a property of vaults. It degrades to UNKNOWN in all four directions and
+never to reassurance. [[repeating-one-instrument-is-not-corroboration]]
+
+## FOUR REDEMPTION STATES, AND THE PARTIAL ONE CARRIES ITS AMOUNT
+
+`maxRedeem(holder)` + `previewRedeem` + `convertToAssets` now run — `maxRedeem`/`balanceOf` appended
+to the EXISTING multicall, the conversions in a second batched call because the probe must be scaled
+by `decimals`, which only becomes known in the first.
+
+`full · partial(with the figure) · blocked · unknown` — ⛔ a threshold at `== 0` made a vault
+permitting 1% of a position indistinguishable from one permitting 100%, and `unknown` must never
+render as `blocked`: both read as "you cannot withdraw", but one is a fact and the other is its
+absence. ⭐ Where the user would see a figure and receive less, the difference is NAMED — the held
+amount sits beside the redeemable one, with *"the rest stays yours… not a change in your balance."*
+
+⚠️ `inspectVault(address, { owner })` — owner is OPTIONAL, and its absence yields `unknown` WITH A
+REASON. Required would have obliged every call site at once; `agent-vault-inspect` resolves the
+holder NON-FATALLY so a wallet hiccup cannot start failing a read that worked before.
+[[guard-belongs-on-the-caller-set]]
+
+## THE TWO UNBOUND CLAIMS, BOUND
+
+- `Dashboard.tsx` — *"Withdraw any time, minus a fee"* → **"Exit terms … are measured and shown
+  before you deposit."** ⭐ The new sentence stays TRUE for a vault that cannot be exited at all,
+  which is exactly the case the old one got wrong. It promises the MEASUREMENT, not the outcome.
+- `_agents.mjs` — *"Withdraw is always available."* → separates **our** guarantee (pause and caps
+  never block a reclaim) from the **vault's** terms (whether it can be redeemed now, and the fee).
+  The old sentence let "available" quietly stand in for "free" as well.
+
+## `test:vaultexit` — 29/0, SIX MUTATIONS, ALL CAUGHT
+
+| mutation | result |
+|---|---|
+| hardcode the 20% ceiling | 27/2 |
+| collapse `unknown` into `blocked` | 27/2 |
+| drop the amount from `partial` | 27/2 |
+| restore the hand-multiplied retention | 27/2 |
+| `Withdraw any time` back on the Dashboard | 27/2 |
+| `Withdraw is always available` back on the roster | 26/3 |
+
+🚨 **AND THE FIFTH READ AS NOT CAUGHT UNTIL I CHECKED THE MUTATION ITSELF.** `Exit terms` occurs
+TWICE — in the JSX and in the comment explaining it — and `replace(..., 1)` hit the comment, which
+the guard strips before testing. **The mutation was broken, not the guard.** The natural diagnosis
+was the wrong one, exactly as `run-suites.mjs` records. ⭐ The fix is an anchor asserted UNIQUE
+before mutating; re-run against the JSX it failed 27/2.
+
+## ⏸️ RECORDED, NOT APPLIED — THERE IS NO AUTONOMOUS EXIT
+
+Measured: `vaultWithdraw` has ONE caller, reached only from an auth-required HTTP endpoint. All 11
+scheduled functions checked by name — zero reach it (the only two `vault` mentions are comments).
+**Nothing monitors a vault after deposit.** The honest sentence, unapplied:
+
+> **Nothing watches this vault after you deposit.** We inspect it before you commit and show you
+> what we found, but no monitor re-checks it, and no agent will exit your position for you. If the
+> vault's terms change, you will not be told — you would need to look. Your agent proposes; you
+> decide, including the decision to leave.
+
+⭐ Consistent with the existing design rather than a gap in it: `_actions.mjs:216` exempts reclaim
+from the pause so *"a paused Vault agent cannot trap funds inside the vault"* — pause bounds what
+the agent may SPEND, never what the user may reclaim. An autonomous exit would be the first
+agent-initiated movement OUT of a vault, on the opposite side of that line.
+
+
 # ⛔ TikpemaPrediction — PARKED, and two dictated premises corrected first
 
 **2026-09-07. Read-only: nothing called, nothing transferred, nothing deployed.**

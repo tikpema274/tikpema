@@ -183,6 +183,14 @@ const uintFn = (name) => [{ type: "function", name, stateMutability: "view", inp
 const addrFn = (name) => [{ type: "function", name, stateMutability: "view", inputs: [], outputs: [{ type: "address" }] }];
 const strFn = (name) => [{ type: "function", name, stateMutability: "view", inputs: [], outputs: [{ type: "string" }] }];
 const u8Fn = (name) => [{ type: "function", name, stateMutability: "view", inputs: [], outputs: [{ type: "uint8" }] }];
+// ── Redemption reads. These take ARGUMENTS, unlike the ten above. ────────────────────────────
+// ⭐ THE TWO ASSET-CONVERSIONS ARE NOT INTERCHANGEABLE, and EIP-4626 says so explicitly:
+// `convertToAssets` MUST NOT account for fees or slippage — it is the IDEAL value of a share.
+// `previewRedeem` MUST return what the caller actually receives, net of the vault's exit fee.
+// So a VALUATION uses convertToAssets and a PROMISE uses previewRedeem, and swapping them
+// mis-states the position by exactly the fee. [[flow-is-not-meaning]]
+const uintFnOf = (name, argType) => [{ type: "function", name, stateMutability: "view",
+  inputs: [{ name: "x", type: argType }], outputs: [{ type: "uint256" }] }];
 const BAL_ABI = [{ type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ name: "a", type: "address" }], outputs: [{ type: "uint256" }] }];
 const ALLOWANCE_ABI = [{ type: "function", name: "allowance", stateMutability: "view", inputs: [{ name: "o", type: "address" }, { name: "s", type: "address" }], outputs: [{ type: "uint256" }] }];
 
@@ -254,11 +262,55 @@ async function classifyOwner(pc, owner) {
   return { address, type, label: OWNER_LABELS[type] };
 }
 
+/**
+ * ⭐⭐ THE EXIT-COST SENTENCE — ONE PRODUCER, EVERY FIGURE DERIVED.
+ *
+ * ⛔ IT STATES WHAT WE HAVE, AND WHAT WE HAVE IS TWO INSTRUMENTS THAT AGREE. `withdrawFee()`
+ * DECLARES a rate; the gap between `convertToAssets` and `previewRedeem` MEASURES what the vault
+ * would actually pay out. Quoting only the declared rate would assert a number nothing checked;
+ * quoting only the measured gap would understate what we know. The sentence names both, and
+ * `verify-vault-exit-copy` asserts they AGREE — so this stays a cross-check rather than two numbers
+ * that happen to coincide. [[repeating-one-instrument-is-not-corroboration]]
+ *
+ * ⛔ NO LITERAL PERCENTAGES. `maxFeeBps` is read from the vault's own MAX_FEE, never the number 20:
+ * a declared rate the owner can raise 200x is a different claim from a fixed fee, and the multiple
+ * is the sharper half of it. A hardcoded ceiling would be a claim about one vault written as a
+ * property of vaults. [[field-name-must-be-true-in-every-case]]
+ *
+ * ⚠️ DEGRADES TO UNKNOWN, NEVER TO REASSURANCE. Any figure we could not establish drops its clause
+ * rather than defaulting; with nothing established the sentence says the exit cost is unknown.
+ */
+export function exitSentence({ declaredBps, measuredBps, maxFeeBps, performanceFeeBps = null } = {}) {
+  const pct = (bps) => `${(bps / 100).toFixed(2)}%`;
+  const shown = measuredBps ?? declaredBps;
+  if (shown === null || shown === undefined) {
+    return "⚠️ This vault's exit cost could NOT be read — how much a withdraw returns is UNKNOWN, not zero.";
+  }
+  // The provenance clause names which instruments actually produced the figure.
+  const both = measuredBps !== null && measuredBps !== undefined && declaredBps !== null && declaredBps !== undefined;
+  const provenance = both
+    ? ` — a fee the vault declares (withdrawFee = ${declaredBps} bps) and which we confirmed against its own previewRedeem`
+    : measuredBps !== null && measuredBps !== undefined
+      ? " — measured from the vault's own previewRedeem; it declares no readable rate we could cross-check"
+      : " — the rate the vault declares; we could NOT confirm it against a preview";
+  const ceiling = maxFeeBps === null || maxFeeBps === undefined
+    ? " ⚠️ Whether the owner can raise this fee could not be read."
+    : ` ⚠️ The owner can raise it to ${pct(maxFeeBps)} (MAX_FEE).`;
+  const perf = performanceFeeBps ? ` A separate ${pct(performanceFeeBps)} performance fee applies to yield.` : "";
+  return `A withdraw returns about ${pct(shown)} less than your shares' value${provenance}.${ceiling}${perf}`;
+}
+
 // ── INSPECT ────────────────────────────────────────────────────────────────────────────────
 // Reads the chain read-only and returns a DISCLOSURE object. Never signs, never writes.
-export async function inspectVault(address) {
+export async function inspectVault(address, { owner = null } = {}) {
   const addr = getAddress(address);
   const pc = publicClient();
+  // ⭐ OPTIONAL, AND THE OPTIONALITY IS THE POINT. `maxRedeem(owner)` is per-holder, so the
+  // redemption block needs an address this function never used to take. Making it REQUIRED would
+  // oblige every existing call site at once — the shape that cost 38h in
+  // [[guard-belongs-on-the-caller-set]] — so it is optional, and its absence produces the
+  // `unknown` redemption state WITH A REASON rather than a missing field or a reassuring default.
+  const ownerAddr = owner ? getAddress(owner) : null;
 
   // ⛔ THIS READ USED TO PASS `"0x"` AS ITS FALLBACK — the exact value that means "no code here".
   // Three failed RPC calls therefore produced the BLOCK "No bytecode at this address — it is not a
@@ -289,6 +341,15 @@ export async function inspectVault(address) {
     { address: addr, abi: uintFn("performanceFee"), functionName: "performanceFee" },
     { address: addr, abi: uintFn("MAX_FEE"), functionName: "MAX_FEE" },
     { address: addr, abi: addrFn("owner"), functionName: "owner" },
+    // ⚠️ APPENDED, NOT INSERTED. The ten reads above are destructured POSITIONALLY below
+    // (`values.slice(0, 10)`) and `values[10]` is owner(); anything added mid-list would silently
+    // shift every field. New reads go on the END and are read by index from there.
+    // ⭐ maxRedeem is per-HOLDER, so with no owner we do not ask — and `unknown` is the honest
+    // state, never a zero that would render as "blocked".
+    ...(ownerAddr ? [
+      { address: addr, abi: uintFnOf("maxRedeem", "address"), functionName: "maxRedeem", args: [ownerAddr] },
+      { address: addr, abi: BAL_ABI, functionName: "balanceOf", args: [ownerAddr] },
+    ] : []),
   ];
   let values = await multiRead(pc, VALUE_CALLS);
   // A null result for a method whose SELECTOR IS PRESENT in the bytecode is a transient RPC
@@ -357,6 +418,103 @@ export async function inspectVault(address) {
   const upgradeable = upgradeSel || proxyImpl;
   const ownerIdentity = await classifyOwner(pc, ownerRaw);
 
+  // ═══ ⭐⭐ REDEMPTION — FOUR STATES, AND "COULD NOT READ" IS NOT "BLOCKED" ══════════════════════
+  //
+  // 🚨 WHY A THRESHOLD IS NOT ENOUGH. Firing only at `maxRedeem === 0` makes a vault permitting 1%
+  // of a position indistinguishable from one permitting 100% — the figure never reaches the user,
+  // and "you can get out" is the single fact a depositor most needs. So the AMOUNT is carried, not
+  // just the verdict. [[required-figure-rounds-up]] in spirit: a number the user acts on must be
+  // the number, not a band.
+  //
+  // ⛔ FOUR STATES, AND THE FOURTH IS THE ONE THAT KEEPS THIS HONEST:
+  //   full     — maxRedeem >= your whole share balance
+  //   partial  — 0 < maxRedeem < balance, WITH the redeemable amount in assets
+  //   blocked  — maxRedeem is a CONFIRMED zero
+  //   unknown  — no owner supplied, or the read did not land
+  // ⚠️ `unknown` MUST NOT COLLAPSE INTO `blocked`. Both would render as "you cannot withdraw", but
+  // one is a fact about the vault and the other is the absence of one — the exact render defect
+  // found on this panel's conformance line. [[absence-must-never-read-as-safe]]
+  const maxRedeemRaw = ownerAddr ? values[11] : undefined;
+  const shareBalRaw  = ownerAddr ? values[12] : undefined;
+  const maxRedeemUnread = ownerAddr ? (unread(maxRedeemRaw) || typeof maxRedeemRaw !== "bigint") : false;
+  const shareBalUnread  = ownerAddr ? (unread(shareBalRaw)  || typeof shareBalRaw  !== "bigint") : false;
+
+  let redeemState, redeemableShares = null;
+  if (!ownerAddr) {
+    redeemState = "unknown";
+  } else if (maxRedeemUnread || shareBalUnread) {
+    redeemState = "unknown";
+  } else {
+    redeemableShares = maxRedeemRaw < shareBalRaw ? maxRedeemRaw : shareBalRaw;
+    redeemState = shareBalRaw === 0n ? "full"          // nothing held: nothing is being withheld
+      : maxRedeemRaw === 0n ? "blocked"
+      : maxRedeemRaw >= shareBalRaw ? "full" : "partial";
+  }
+
+  // ── The conversions. A SECOND multicall, and deliberately so: `previewRedeem`/`convertToAssets`
+  // must be probed in the SHARE token's own units, and `decimals` only becomes known in the first
+  // call. Probing 1e6 blind would be a rounding artefact on an 18-dp vault. One extra batched call
+  // is the honest price of scaling the probe correctly.
+  // ⭐ THE PROBE IS WHAT MAKES THE FEE A CROSS-CHECK. `withdrawFee()` DECLARES a rate; the gap
+  // between convertToAssets and previewRedeem MEASURES what the vault would actually pay. Two
+  // instruments, one fact — and the guard asserts they AGREE rather than trusting either.
+  // [[repeating-one-instrument-is-not-corroboration]]
+  const probeUnit = decimals === null ? null : 10n ** BigInt(Number(decimals));
+  const CONV_CALLS = [
+    ...(probeUnit ? [
+      { address: addr, abi: uintFnOf("convertToAssets", "uint256"), functionName: "convertToAssets", args: [probeUnit] },
+      { address: addr, abi: uintFnOf("previewRedeem", "uint256"), functionName: "previewRedeem", args: [probeUnit] },
+    ] : []),
+    ...(redeemableShares && redeemableShares > 0n ? [
+      { address: addr, abi: uintFnOf("previewRedeem", "uint256"), functionName: "previewRedeem", args: [redeemableShares] },
+    ] : []),
+    ...(typeof shareBalRaw === "bigint" && shareBalRaw > 0n ? [
+      { address: addr, abi: uintFnOf("convertToAssets", "uint256"), functionName: "convertToAssets", args: [shareBalRaw] },
+    ] : []),
+  ];
+  const conv = CONV_CALLS.length ? await multiRead(pc, CONV_CALLS) : [];
+  let ci = 0;
+  const probeIdeal = probeUnit ? conv[ci++] : undefined;
+  const probeNet   = probeUnit ? conv[ci++] : undefined;
+  const redeemableAssetsRaw = (redeemableShares && redeemableShares > 0n) ? conv[ci++] : undefined;
+  const positionAssetsRaw   = (typeof shareBalRaw === "bigint" && shareBalRaw > 0n) ? conv[ci++] : undefined;
+
+  const asBig = (v) => (typeof v === "bigint" ? v : null);
+  const toUnits = (v, d) => (v === null || d === null ? null : Number(v) / 10 ** Number(d));
+
+  // ⭐ THE EXIT COST, MEASURED — the gap the vault itself would apply, not `(10000 - bps)/100`.
+  // A hand-multiplied fee is a SECOND derivation of a number the vault computes for us; it happens
+  // to be right for a flat proportional fee and is wrong for a floor, a tier or slippage.
+  const pi = asBig(probeIdeal), pn = asBig(probeNet);
+  const measuredExitBps = pi && pn && pi > 0n ? Number(((pi - pn) * 10000n * 1000n) / pi) / 1000 : null;
+  // ⚠️ AGREEMENT, NOT EITHER ALONE. `null` when we could not compute one of them — never `true`.
+  const feeAgrees = measuredExitBps === null || withdrawFeeBps === null
+    ? null
+    : Math.abs(measuredExitBps - withdrawFeeBps) <= 1; // 1bp tolerance for integer rounding
+
+  const redemption = {
+    state: redeemState, // full | partial | blocked | unknown
+    // ⛔ THE AMOUNT IS THE POINT OF THE PARTIAL STATE. Null in every other state, and null is
+    // UNKNOWN — a consumer must not render it as zero.
+    redeemableShares: redeemableShares === null ? null : redeemableShares.toString(),
+    redeemableAssets: toUnits(asBig(redeemableAssetsRaw), decimals),
+    positionShares: typeof shareBalRaw === "bigint" ? shareBalRaw.toString() : null,
+    positionAssets: toUnits(asBig(positionAssetsRaw), decimals),
+    // What the two instruments each say about the exit cost, and whether they agree.
+    exit: {
+      declaredBps: withdrawFeeBps,
+      measuredBps: measuredExitBps,
+      agrees: feeAgrees,
+      maxFeeBps,
+      probedAt: probeUnit ? probeUnit.toString() : null,
+    },
+    why: !ownerAddr
+      ? "no holder address was supplied, so this vault's per-holder redemption limit was not read — UNKNOWN, not unlimited"
+      : (maxRedeemUnread || shareBalUnread)
+        ? "the redemption limit could not be read — whether you can withdraw right now is UNKNOWN, not blocked"
+        : null,
+  };
+
   // Withdraw mechanics. No lock/delay/cooldown selector is a WARN or BLOCK on its own; the fee is
   // reported plainly, and a CURRENT fee over the ceiling is a BLOCK.
   const withdraw = {
@@ -379,13 +537,18 @@ export async function inspectVault(address) {
     pausable,
     withdrawFeeBps,
     withdrawFeePct: withdrawFeeBps === null ? null : `${(withdrawFeeBps / 100).toFixed(2)}%`,
-    roundTripRetainedPct: withdrawFeeBps === null ? null : `${((10000 - withdrawFeeBps) / 100).toFixed(2)}%`,
+    // ⭐ MEASURED, NOT MULTIPLIED. This was `(10000 - withdrawFeeBps)/100` — a second derivation of
+    // a number the vault computes for us, correct only for a flat proportional fee. It is now the
+    // gap the vault's own previewRedeem reports, and falls back to null (UNKNOWN) rather than to
+    // the arithmetic, because a computed figure wearing a measured field's name is worse than an
+    // absent one. [[flow-is-not-meaning]]
+    roundTripRetainedPct: measuredExitBps === null ? null : `${((10000 - measuredExitBps) / 100).toFixed(2)}%`,
     // Reports ONLY what was measured (the fee), and names what was not (lock/delay/cooldown).
     // It must not say "no lock/delay" or "NOT a one-way trap" — neither was established.
     reversibility:
       withdrawFeeBps === null
         ? "unknown"
-        : `A withdraw retains ~${((10000 - withdrawFeeBps) / 100).toFixed(2)}% (a ${(withdrawFeeBps / 100).toFixed(2)}% exit fee). ⚠️ Withdrawal locks, delays and cooldowns are NOT CHECKED by this inspector — whether an exit is immediate is UNKNOWN, not confirmed absent. Exit terms can also be changed by the owner (see owner powers).`,
+        : `${exitSentence({ declaredBps: withdrawFeeBps, measuredBps: measuredExitBps, maxFeeBps, performanceFeeBps })} ⚠️ Withdrawal locks, delays and cooldowns are NOT CHECKED by this inspector — whether an exit is immediate is UNKNOWN, not confirmed absent. Exit terms can also be changed by the owner (see owner powers).`,
   };
 
   const ownerPowers = {
@@ -482,6 +645,7 @@ export async function inspectVault(address) {
     address: addr,
     chainId: ARC.chainId,
     conformance: { isContract, erc4626, missingMethods: missing },
+    redemption,
     asset: {
       address: assetAddr ? getAddress(assetAddr) : null,
       symbol: assetAddr && getAddress(assetAddr) === getAddress(CONTRACTS.USDC) ? "USDC" : null,

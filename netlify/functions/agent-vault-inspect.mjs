@@ -12,6 +12,7 @@ import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
 import { resolveVault, inspectVault, gateDeposit, applyReportDisclosure, ackTokenFor, SUPPORTED_VAULT_KEYS } from "./_vault.mjs";
 import { vaultDdReport } from "./_vault-report.mjs";
+import { tryOwnerWallet } from "./_agent-wallets.mjs";
 
 export async function handler(event) {
   if (event.httpMethod !== "POST") return json(405, { error: "POST only" });
@@ -26,9 +27,19 @@ export async function handler(event) {
     return json(400, { error: `unsupported vault "${vault}" (not on the allowlist)`, supported: SUPPORTED_VAULT_KEYS });
   }
 
+  // ⭐ THE HOLDER, RESOLVED NON-FATALLY. `maxRedeem` is per-holder, so the redemption block needs
+  // this address — but inspection is a READ that worked before this existed, and a wallet hiccup
+  // must not start failing it. A failure here yields `owner: null`, which produces the `unknown`
+  // redemption state WITH ITS REASON rather than a missing field or a reassuring default.
+  // ⛔ Deliberately NOT the refusal treatment agent-vault-shares gives it: there, the wallet IS the
+  // subject; here it is one input among many.
+  // ⭐ `tryOwnerWallet`, NOT `ensureOwnerWallet` — the best-effort contract is NAMED rather than
+  // hidden in a bare catch, and the caller-set guard keeps covering every site that must refuse.
+  const holder = await tryOwnerWallet(session);
+
   let inspection;
   try {
-    inspection = await inspectVault(v.address);
+    inspection = await inspectVault(v.address, { owner: holder });
   } catch (e) {
     return json(502, { error: `cannot inspect vault ${v.label}: ${e.message}` });
   }

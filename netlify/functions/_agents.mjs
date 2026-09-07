@@ -103,9 +103,17 @@ export const AGENTS = [
       "drain, upgradeability)? Then, only on your approval and only for a vault on its allowlist, " +
       "it deposits your USDC and can withdraw it back. It reads a third-party contract, so it " +
       "shows you the vault's terms — including the uncomfortable ones — before you agree to them.",
-    // Deposits are capped per-transaction and per-day; a withdraw is a reclaim (always available,
-    // never blocked by a pause). The card leads with the move, then the guardrail.
-    spends: "Deposits your USDC into an allowlisted vault — capped per deposit and per day. Withdraw is always available. It shows the vault's owner powers before you approve.",
+    // Deposits are capped per-transaction and per-day. A withdraw is a reclaim, so OUR pause and
+    // caps never block it — those bound what the agent may SPEND, not what the user may reclaim.
+    // 🚨 BUT THIS SAID "Withdraw is always available" FULL STOP, which is a claim about the VAULT
+    // and was never ours to make. Our pause not blocking a reclaim says nothing about whether the
+    // vault will honour it: ERC-4626 permits a queue, a cooldown or a lock, and `maxRedeem` may
+    // return 0. Measured on XyloVault, a withdraw also returns ~0.10% LESS than share value, so
+    // "available" was quietly standing in for "free" as well.
+    // ⭐ The sentence now separates the two: what WE guarantee (we never block a reclaim) from what
+    // the VAULT decides (whether it can be redeemed now, and at what cost) — which is measured and
+    // shown per vault rather than asserted here. [[one-claim-two-producers]]
+    spends: "Deposits your USDC into an allowlisted vault — capped per deposit and per day. Our pause and caps never block a reclaim, but whether the vault itself allows a withdrawal right now, and the fee it takes on exit, are the vault's terms — measured and shown before you approve, along with its owner powers.",
   },
 ];
 

@@ -312,6 +312,34 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
             <li>
               Funded: {inspection.funded?.isShell ? "EMPTY SHELL ✗" : `~${Number(inspection.funded?.totalAssetsUsdc ?? 0).toLocaleString()} USDC held`}
             </li>
+            {/* ⭐⭐ REDEMPTION — FOUR STATES, AND THE PARTIAL CASE CARRIES ITS AMOUNT.
+                ⛔ "Redeemable in part" without the figure is the same threshold discard this
+                replaced: a vault permitting 1% and one permitting 100% would read identically.
+                ⛔ AND `unknown` NEVER RENDERS AS BLOCKED. Both would read as "you cannot withdraw",
+                but one is a fact about the vault and the other is the absence of one.
+                ⭐ Wherever the user sees a figure and would later receive less, the difference is
+                NAMED rather than absorbed — the held amount is stated beside the redeemable one. */}
+            <li>
+              Redeemable now:{" "}
+              {inspection.redemption?.state === "full" ? (
+                <>in full ✓</>
+              ) : inspection.redemption?.state === "partial" ? (
+                <span style={{ color: "var(--warn)" }}>
+                  ⚠ in part — {inspection.redemption?.redeemableAssets ?? "?"} USDC of{" "}
+                  {inspection.redemption?.positionAssets ?? "?"} USDC held. The rest stays yours and
+                  stays in the vault; this is the vault's limit, not a change in your balance.
+                </span>
+              ) : inspection.redemption?.state === "blocked" ? (
+                <span style={{ color: "var(--warn)" }}>
+                  ⚠ BLOCKED — this vault currently allows no withdrawals. Your position is still
+                  yours and still recorded.
+                </span>
+              ) : (
+                <span style={{ color: "var(--warn)" }}>
+                  ⚠ could not read — whether you can withdraw right now is UNKNOWN, not blocked.
+                </span>
+              )}
+            </li>
             <li>
               {/* "no lock/delay" was hardcoded HERE, independently of the inspector — the claim the
                   user actually read came from this line, not from inspection.withdraw. The inspector

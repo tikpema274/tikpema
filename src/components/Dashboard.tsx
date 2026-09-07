@@ -162,11 +162,20 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
               <span style={{ color: "var(--warn)" }}>❗ Leaves Arc</span> for another chain.
               Bridging back costs a fee.
             </ConsequenceCard>
-          {/* The Vault agent (#/vault, nav-less). A deposit IS reversible (withdraw), but into a
-              third-party contract — the card leads with that, not with the yield. */}
+          {/* The Vault agent (#/vault, nav-less). Leads with the third-party risk, not the yield.
+              🚨 THIS CARD SAID "Withdraw any time, minus a fee" AND NOTHING MADE THAT TRUE. It was
+              a finding about XyloVault written as a property of vaults, on a surface that never
+              inspects one — read BEFORE the disclosure, and inherited silently by any vault added
+              later. ERC-4626 does not mandate instant redemption: a vault may queue, cooldown or
+              lock, and maxRedeem may legitimately return 0.
+              ⭐ SO IT NOW PROMISES THE MEASUREMENT, NOT THE OUTCOME. "Exit terms are measured and
+              shown" stays true for a vault that cannot be exited at all, which is exactly the case
+              the old sentence got wrong. The figures live on the panel, which reads the chain.
+              [[human-facing-field-ships-with-its-render-assertion]] */}
           <ConsequenceCard title="Vault" onClick={() => go("vault")}>
-              <span style={{ color: "var(--warn)" }}>❗ Into a third-party vault.</span> Withdraw
-              any time, minus a fee — but read the owner's powers first.
+              <span style={{ color: "var(--warn)" }}>❗ Into a third-party vault.</span> Exit terms
+              — the fee, and whether you can withdraw at all right now — are measured and shown, and
+              so are the owner's powers: read the owner's powers first.
             </ConsequenceCard>
           {/* Recurring swaps (#/dca, nav-less). ⭐⭐ THIS CARD IS UNBLOCK CONDITION (4) AT THE
               CREATE_GATED CONSTANT: the route was reachable-but-unlinked for weeks, which is the

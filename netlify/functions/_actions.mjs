@@ -709,7 +709,8 @@ export async function executeAction(step, ctx) {
     // gate refuses. Allowlisting only got us here; it did NOT silence this. ──
     let inspection;
     try {
-      inspection = await inspectVault(v.address);
+      // ⭐ walletAddress is already in scope here, so the redemption block is measured for free.
+      inspection = await inspectVault(v.address, { owner: walletAddress });
     } catch (e) {
       return refuse(REFUSAL.CANNOT_READ, `cannot inspect vault ${v.label}: ${e.message}`);
     }

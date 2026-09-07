@@ -118,6 +118,31 @@ export async function getOwnerWallet(identity) {
 
 // Return the identity's own wallet, provisioning one on first call. Idempotent:
 // a second call (same identity) returns the same wallet, never a new mapping.
+/**
+ * ⭐⭐ BEST-EFFORT HOLDER LOOKUP — A DIFFERENT CONTRACT, WITH ITS OWN NAME.
+ *
+ * `ensureOwnerWallet` THROWS, and every direct caller must convert that throw into a retryable
+ * refusal — asserted by verify-provisioning-status, because on those endpoints the wallet IS the
+ * subject and a bare 500 says nothing about whether a retry is safe.
+ *
+ * ⛔ THIS CALL SITE WANTS THE OPPOSITE, AND HIDING THAT IN A BARE `catch {}` WOULD BE THE DODGE.
+ * `inspectVault` needs a holder address to read `maxRedeem(holder)` — ONE optional input among
+ * many. The vault's terms do not depend on it, and a wallet hiccup must not start failing a read
+ * that worked before the redemption block existed. Absence yields the `unknown` redemption state
+ * WITH A STATED REASON, which is the honest answer rather than a refusal or a reassuring default.
+ *
+ * ⭐ SO THE INTENT IS NAMED RATHER THAN SWALLOWED. A reader sees "try" and knows null is expected;
+ * the caller-set guard keeps covering every site that needs the refusal.
+ * [[guard-belongs-on-the-caller-set]] [[absence-must-never-read-as-safe]]
+ */
+export async function tryOwnerWallet(identity) {
+  try {
+    return (await ensureOwnerWallet(identity))?.walletAddress ?? null;
+  } catch {
+    return null; // deliberate: the caller renders UNKNOWN, never a default
+  }
+}
+
 export async function ensureOwnerWallet(identity) {
   const store = getStore(STORE);
   const key = ownerKey(identity);
