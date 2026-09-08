@@ -4,7 +4,9 @@ import { connectBlobs } from "./_blobs.mjs";
 import { BRIDGE_TIMING } from "../../shared/bridge-timing.mjs";
 import { json, parseBody, dateAnchor, sendCapUsdc, bridgeCapUsdc, swapCapUsdc, maxSpendUsdc } from "./_arc.mjs";
 import { SWAP_TOKENS } from "./_swap.mjs";
-import { executeAction, valueOfStep } from "./_actions.mjs";
+import { executeAction, valueOfStep, STEP_TYPES } from "./_actions.mjs";
+import { walletTokenBalances } from "./_balances.mjs";
+import { SUPPORTED_VAULT_KEYS, resolveVault } from "./_vault.mjs";
 import { resolveDestination, bridgeFee, SUPPORTED_DESTINATION_LABELS, bridgeFeeBand, bridgeAckToken } from "./_bridge.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
@@ -31,7 +33,7 @@ const SYSTEM_PROMPT = `You are Tikpema's autonomous on-chain agent on Arc Testne
 You control your own developer-controlled smart-account wallet and may act with its funds only.
 Given a task, respond with ONLY a JSON object, no prose, no markdown fences:
 {
-  "action": "transfer_usdc" | "swap_tokens" | "pay_for_service" | "bridge_usdc" | "plan" | "needs_confirmation" | "none",
+  "action": "transfer_usdc" | "swap_tokens" | "pay_for_service" | "bridge_usdc" | "vault_withdraw" | "show_balance" | "plan" | "needs_confirmation" | "none",
   "to": "0x... (required if action is transfer_usdc)",
   "amountUsdc": number (required if action is transfer_usdc),
   "tokenIn": "USDC | EURC (required if action is swap_tokens)",
@@ -39,8 +41,9 @@ Given a task, respond with ONLY a JSON object, no prose, no markdown fences:
   "amountIn": number (required if action is swap_tokens),
   "payTo": "0x... (required if action is pay_for_service)",
   "payAmountUsdc": number (required if action is pay_for_service),
+  "vault": "vault key (required if action is vault_withdraw) — the only supported key is "xylo-usdc"",
   "destination": "chain name (required if action is bridge_usdc) — e.g. Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon",
-  "steps": [ { "type": "transfer_usdc"|"swap_tokens"|"pay_for_service"|"bridge_usdc", ...that action's fields } ] (required if action is plan; 2+ ordered steps),
+  "steps": [ { "type": "transfer_usdc"|"swap_tokens"|"pay_for_service"|"bridge_usdc"|"vault_withdraw", ...that action's fields } ] (required if action is plan; 2+ ordered steps),
   "unmetCondition": "string (required if action is needs_confirmation) — the part of the task you cannot fulfill",
   "reasoning": "one sentence"
 }
@@ -50,7 +53,9 @@ If a task asks for a transfer but attaches a condition you cannot fulfil — a s
 For a swap (e.g. "swap 5 USDC to EURC", "convert 2 EURC into USDC"), choose action "swap_tokens" with tokenIn, tokenOut, and amountIn. Only these tokens are supported: USDC, EURC. tokenIn and tokenOut must differ.
 A plain "send/pay X USDC to 0x..." is a transfer_usdc (your regular balance). Choose "pay_for_service" ONLY when the task explicitly says to pay FROM the Gateway / unified balance, or to pay FOR a service, with payTo and payAmountUsdc. When unsure between the two, prefer transfer_usdc.
 For a cross-chain move (e.g. "bridge 20 USDC to Ethereum", "send 5 USDC to Base", "move 10 USDC over to Arbitrum"), choose action "bridge_usdc" with amountUsdc and destination (the chain name). This burns USDC on Arc and mints it on the destination chain. Supported destinations: Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon, Unichain, Linea. A bridge is DIFFERENT from transfer_usdc: transfer stays on Arc to a 0x address; bridge crosses to another chain. Only choose bridge_usdc when the task names another chain to move funds TO.
-If a task asks for MULTIPLE actions in sequence (e.g. "swap 2 USDC to EURC then pay 1 USDC to 0x...", "send A then swap B", "swap 2 to EURC then bridge 3 to Base"), choose action "plan" with an ordered "steps" array, each step being one transfer_usdc/swap_tokens/pay_for_service/bridge_usdc with that action's own fields (a bridge_usdc step needs amountUsdc + destination). Use plan ONLY for genuinely multi-action tasks; a single action stays its own action. A multi-step task is NOT a needs_confirmation — needs_confirmation is only for scheduling/conditional/timing you cannot fulfil.`;
+For a question about how much money there is (e.g. "what is my balance", "how much USDC do I have", "show me my balance", "am I funded"), choose action "show_balance". This READS ONLY — it moves nothing, costs nothing, and needs no confirmation. Choose it whenever the task is a question about holdings rather than an instruction to move funds.
+For taking money back OUT of a vault (e.g. "withdraw from the vault", "get my money out of xylo", "exit the vault", "redeem my vault shares"), choose action "vault_withdraw" with "vault". The only supported vault key is "xylo-usdc". This reclaims the WHOLE position — there is no partial amount, so do not invent one and do not put an amount in the task's step. Putting money INTO a vault is not something you can do; if asked to deposit into a vault, choose "none" and say the deposit has to be made by the user on the Vault page.
+If a task asks for MULTIPLE actions in sequence (e.g. "swap 2 USDC to EURC then pay 1 USDC to 0x...", "send A then swap B", "swap 2 to EURC then bridge 3 to Base"), choose action "plan" with an ordered "steps" array, each step being one transfer_usdc/swap_tokens/pay_for_service/bridge_usdc/vault_withdraw with that action's own fields (a bridge_usdc step needs amountUsdc + destination; a vault_withdraw step needs only vault). Use plan ONLY for genuinely multi-action tasks; a single action stays its own action. A multi-step task is NOT a needs_confirmation — needs_confirmation is only for scheduling/conditional/timing you cannot fulfil.`;
 
 /** Which brain priced this. ONE definition: `decide` calls it and the quote record names it.
  *  Reading the env var again at the record site would be a second copy of the same claim, and
@@ -143,6 +148,51 @@ export async function handler(event) {
       });
     }
 
+    // ═══ ⭐⭐ A READ, ANSWERED HERE — IT NEVER REACHES THE EXECUTOR ═════════════════════════════
+    // `show_balance` moves nothing, so it takes NONE of the money-path machinery: no pause check,
+    // no per-action cap, no day-ceiling, no ledger row, no executeAction. That is a deliberate
+    // routing decision and not an oversight.
+    //
+    // ⛔ WHY NOT PUT IT THROUGH executeAction ANYWAY, "for consistency". Every guard in there
+    // exists because its subject moves money — the pause exists to stop spending, the ceiling to
+    // bound spending, the ledger to record spending. A read inheriting them would pay their whole
+    // cost and buy nothing, and worse, it would make the executor's vocabulary stop meaning "the
+    // things that can move funds". That meaning is load-bearing: agent-parameters discloses the
+    // executor's vocabulary to users as the answer to "what can this agent do to my money".
+    // ⭐ So it is answered before the dispatch, and `STEP_TYPES` stays a list of money actions.
+    //
+    // ⚠️ IT NAMES THE POCKET IT READ, AND THE ONES IT DID NOT. This app has three pockets and the
+    // agent spends from ONE of them. A sentence saying "your balance is X" would be false for a
+    // user holding funds in their unified balance or a vault — the exact shape of claim that made
+    // "freely withdrawable" wrong on six surfaces. It says WHOSE wallet, and points at the page
+    // that answers for all three. [[a-field-name-must-be-true-in-every-case]]
+    if (decision.action === "show_balance") {
+      const bal = await walletTokenBalances({ walletAddress });
+      // ⛔ null IS NOT ZERO, AND THE SENTENCE MUST NOT LAUNDER IT. An unread balance reported as
+      // "0 USDC" tells a funded user they have nothing — the same fail-open the vault panel shipped
+      // and the reason walletTokenBalances returns null at all. [[absence-must-never-read-as-safe]]
+      const unreadable = bal.usdc === null && bal.eurc === null;
+      const part = (v, sym) => (v === null ? `${sym}: could not be read just now` : `${v} ${sym}`);
+      return json(200, {
+        executed: false,
+        decision,
+        balance: {
+          address: walletAddress,
+          usdc: bal.usdc,
+          eurc: bal.eurc,
+          // The claim's own scope, carried as data so the render cannot widen it by accident.
+          pocket: "agent wallet",
+          readable: !unreadable,
+        },
+        message: unreadable
+          ? `I could not read your agent wallet's balance just now — this is a network problem, not ` +
+            `an empty wallet. Nothing has changed. Try again shortly.`
+          : `Your agent wallet holds ${part(bal.usdc, "USDC")} and ${part(bal.eurc, "EURC")}. ` +
+            `That is the only pocket I can spend from — your unified balance and any vault position ` +
+            `are separate, and the Dashboard shows all three.`,
+      });
+    }
+
     // Multi-step: propose a plan for confirmation (does NOT execute here).
     // The client holds the returned plan and POSTs it to agent-execute-plan
     // after the user confirms. The executor is the SINGLE authoritative
@@ -155,7 +205,13 @@ export async function handler(event) {
       if (steps.length < 2) {
         return json(200, { executed: false, decision, blocked: "a plan needs 2+ steps" });
       }
-      const KINDS = new Set(["transfer_usdc", "swap_tokens", "pay_for_service", "bridge_usdc"]);
+      // ⭐ DERIVED FROM THE EXECUTOR, NOT RE-TYPED. This set used to be a hand-written four while
+      // the executor knew six, so a plan step the executor would happily run was rejected here as
+      // an "unknown step type" — the proposer and the runner disagreeing about the vocabulary.
+      // ⛔ vault_deposit is EXCLUDED ON PURPOSE, and the exclusion is a decision, not an omission:
+      // a deposit needs an ackToken bound to the disclosure the USER saw, and there is no way for a
+      // model to produce one. Unlocking it here would ship a step that refuses 100% of the time.
+      const KINDS = new Set(STEP_TYPES.filter((t) => t !== "vault_deposit"));
       for (const s of steps) {
         if (!KINDS.has(s?.type)) {
           return json(200, { executed: false, decision, blocked: `unknown step type "${s?.type}"` });
@@ -379,7 +435,7 @@ export async function handler(event) {
     // Backstop: even if the brain chose transfer_usdc, refuse if the raw task
     // contains a scheduling/conditional cue the agent cannot honor. The model is
     // the first classifier; this is the code not trusting a silent drop.
-    if (decision.action === "transfer_usdc" || decision.action === "swap_tokens" || decision.action === "bridge_usdc") {
+    if (decision.action === "transfer_usdc" || decision.action === "swap_tokens" || decision.action === "bridge_usdc" || decision.action === "vault_withdraw") {
       const schedulePattern =
         /\b((at|by)\s+(\d{1,2}([:.]\d{1,2})?\s*(am|pm)?|noon|midnight|midday|morning|afternoon|evening|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|tonight|tomorrow|later|in \d+\s*(min|minute|hour|hr|day)|every|when|after|before|schedule|recurring|daily|weekly)\b/i;
       if (schedulePattern.test(task)) {
@@ -550,6 +606,66 @@ export async function handler(event) {
       if (!r.ok) return json(200, { executed: false, decision, blocked: r.blocked });
       return json(200, { executed: true, decision, pay: r.pay });
     }
+    // ═══ ⭐⭐ A RECLAIM, NOT A SPEND — AND THAT IS WHY IT HAS NO CAP AND NO ACK ═════════════════
+    // vault_withdraw redeems the caller's WHOLE on-chain share position back to their own SCA. The
+    // executor treats it as a reclaim throughout: it skips the pause (a paused agent must never
+    // trap a user's funds inside a vault), takes no per-action cap, and counts zero against the day
+    // ceiling. None of that is relaxed here — those bounds exist to limit SPENDING, and returning a
+    // user's own money is the one move they must not be able to prevent.
+    //
+    // ⛔ THIS SHIPPED IN THE EXECUTOR AND WAS UNREACHABLE. _actions.mjs has handled the type since
+    // the vault work landed, but no vocabulary named it: agent-act offered four actions, the
+    // proposal path two, and the executor six. A capability nothing can ask for is not a capability.
+    //
+    // ⚠️ NO AMOUNT CROSSES THE WIRE. The redeemed quantity is read from the chain at execution time
+    // (balanceOf on the vault, server-side) — deliberately, so a model cannot mis-scale a share
+    // count, and so a returning user whose shares came from a prior session reclaims correctly.
+    // A failed read REFUSES rather than redeeming zero. [[absence-must-never-read-as-safe]]
+    if (decision.action === "vault_withdraw") {
+      const v = resolveVault(decision.vault);
+      if (!v) {
+        return json(200, {
+          executed: false,
+          decision,
+          blocked: `unsupported vault "${decision.vault || ""}". Supported: ${SUPPORTED_VAULT_KEYS.join(", ")}`,
+        });
+      }
+      // ⭐ BUILT AS `const step` DELIBERATELY, NOT INLINED. verify-agent-panel-copy DERIVES which
+      // actions gate and which run immediately by scanning for exactly this shape, then forces the
+      // task box's sentence to match. An inlined object is invisible to that derivation, so the new
+      // action would run straight away while the bound copy said nothing about it — an action
+      // outside the disclosure it exists to keep honest. [[guard-belongs-on-the-caller-set]]
+      const step = { type: "vault_withdraw", vault: v.key };
+      const r = await executeAction(step, actx);
+      if (!r.ok) return json(200, { executed: false, decision, blocked: r.blocked });
+      // ⭐ A CLEAN EMPTY POSITION IS NOT A FAILURE, AND NOT A WITHDRAWAL EITHER. The executor
+      // returns ok with reclaimed:false when the on-chain share balance is genuinely zero. Calling
+      // that "executed" would tell the user funds moved when nothing did.
+      if (!r.reclaimed) {
+        return json(200, {
+          executed: false,
+          decision,
+          vaultWithdraw: r,
+          message: `You hold no shares in ${v.label}, so there was nothing to reclaim. Nothing moved.`,
+        });
+      }
+      // ⭐ THE AMOUNT AND THE ✓ COME FROM THE SAME WITNESS. `usdcReceived` is a MEASURED USDC
+      // balance delta across the redeem (verifiedBy: "usdc-balance-delta"), not a preview and not
+      // the share count — the executor only sets confirmed:true on that path. Reporting a figure
+      // from anywhere else would pair one source's confidence with another source's number, which
+      // is the bridge-arrival defect exactly. ⚠️ `withdrawTx` is the field's real name; `tx` does
+      // not exist on this shape and reading it would have rendered a permanently absent link.
+      return json(200, {
+        executed: true,
+        decision,
+        vaultWithdraw: r,
+        tx: r.withdrawTx ?? null,
+        message:
+          `Reclaimed ${Number(r.usdcReceived).toFixed(6)} USDC from ${v.label} back into your agent ` +
+          `wallet — measured as the actual balance change on-chain, not an estimate.`,
+      });
+    }
+
     if (decision.action !== "transfer_usdc") {
       return json(200, { executed: false, decision });
     }

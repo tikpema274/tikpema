@@ -274,6 +274,16 @@ mock.module("../netlify/functions/_actions.mjs", {
   namedExports: {
     executeAction: async () => ({ ok: false, blocked: "not reached in this suite" }),
     valueOfStep: REAL_ACTIONS.valueOfStep,
+    // ⭐⭐ A PARTIAL MOCK FAILS AT INSTANTIATION, NOT AT AN ASSERTION. When agent-act began
+    // importing STEP_TYPES, this mock stopped providing it and the whole suite died with
+    // "does not provide an export named 'STEP_TYPES'" — before a single check ran. It never went
+    // red on a claim; it stopped loading. ⚠️ Which is why the roll-up is the thing to read: a
+    // suite that cannot load looks nothing like a suite that failed.
+    // ⛔ AND IT IS THE REAL ONE, NOT A COPY. Re-typing the list here would make this file a second
+    // source for the executor's vocabulary — the exact defect verify-agent-vocabulary exists to
+    // stop — so the mock passes the genuine export straight through, exactly as valueOfStep does.
+    // [[a-partial-mock-fails-at-instantiation]] · [[never-mock-the-function-under-test]]
+    STEP_TYPES: REAL_ACTIONS.STEP_TYPES,
   },
 });
 

@@ -19,6 +19,30 @@ import { assertNotPaused } from "./_pause.mjs";
 // USD value of ALL steps and checks the TOTAL against the cap before executing
 // any of them. valueOfStep() is the shared valuation used for both.
 
+// ═══ ⭐⭐ THE EXECUTOR'S VOCABULARY, AS DATA — BECAUSE PROSE ABOUT IT WENT STALE ══════════════
+// agent-parameters told users, in a capability disclosure, that this file "knows transfer_usdc /
+// pay_for_service / swap_tokens / bridge_usdc and throws `unknown step type` on anything else".
+// That enumeration was written when it was true and stayed on the page after the vault pair landed:
+// SIX types, described as four, on the surface whose whole job is to say what the agent may do.
+//
+// ⛔ THE FIX IS NOT TO EDIT THE FOUR INTO A SIX. That is a second copy of a list, and a second copy
+// drifts on exactly the change that matters — the next type added. Readers derive from here.
+// [[duplicate-source-of-truth-is-the-recurring-bug]]
+//
+// ⚠️ A CONSTANT LIST IS ITSELF A SECOND COPY OF THE if-CHAIN BELOW unless something proves they
+// agree. verify-agent-vocabulary drives validateStepShape with every member of this list and
+// asserts none of them answers "unknown step type", and that a type NOT in the list does — so the
+// list is provably total over the chain rather than merely sitting next to it.
+// [[binding-tested-across-what-it-binds]]
+export const STEP_TYPES = Object.freeze([
+  "transfer_usdc",
+  "pay_for_service",
+  "swap_tokens",
+  "bridge_usdc",
+  "vault_deposit",
+  "vault_withdraw",
+]);
+
 const VALID_TOKENS = SWAP_TOKENS.map((t) => t.toUpperCase());
 
 // USD value of a step, for cap math. Transfer/pay are face USDC; a swap is the

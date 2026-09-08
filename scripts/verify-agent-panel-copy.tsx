@@ -189,6 +189,12 @@ check("⭐ SWAP says it stays, and what changes is the denomination",
   const NAMES = {
     bridge_usdc: /\bbridge\b/i, multi_step_plan: /multi-step plan/i,
     swap_tokens: /\bswap\b/i, transfer_usdc: /\bsend\b/i, pay_for_service: /service payment/i,
+    // ⭐ ADDED WITH THE ACTION, NOT AFTER IT. The loops below skip any derived kind with no NAMES
+    // entry (`if (!NAMES[k]) continue`), so a new immediate money action that nobody adds here is
+    // silently exempt from the copy binding — the guard would stay green while the sentence stopped
+    // covering something that runs straight away. That skip is why this line is part of shipping
+    // vault_withdraw, not a follow-up. [[guard-green-through-semantic-change]]
+    vault_withdraw: /vault reclaim/i,
   };
   const say = renderToStaticMarkup(<MyAgentPanel wallet={wallet() as any} />)
     .replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ");

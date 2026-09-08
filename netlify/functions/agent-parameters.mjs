@@ -11,6 +11,7 @@ import {
 } from "./_arc.mjs";
 import { AGENT, AGENTS } from "./_agents.mjs";
 import { budgetConfig } from "./_budget.mjs";
+import { STEP_TYPES } from "./_actions.mjs";
 
 // GET /api/agent-parameters/<agent>  (no auth, read-only, no writes, nothing on-chain)
 //
@@ -226,10 +227,20 @@ function parametersFor(id) {
             "This bounds the blast radius of an extra zero. That is all it does.",
           irreversible: true,
           canFundsBeReturnedToTheUser: "NO — no implemented path returns them. Spendable cross-chain only.",
+          // ═══ ⭐⭐ THE LIST IS DERIVED, BECAUSE THE HAND-WRITTEN ONE WENT STALE ═══════════════
+          // This sentence named four types — transfer_usdc / pay_for_service / swap_tokens /
+          // bridge_usdc — and stayed on the page after the vault pair landed, so a user reading
+          // the app's own capability disclosure was told the executor knew four things when it
+          // knew six. ⚠️ THE CLAIM AROUND IT WAS NEVER WRONG: ub_deposit is genuinely not in the
+          // vocabulary, and still is not. It was the EVIDENCE that decayed, which is the harder
+          // failure to notice — a true conclusion resting on a list nobody re-checked.
+          // ⛔ Editing the four into a six would just reset the same clock. STEP_TYPES is the
+          // executor's own list, and verify-agent-vocabulary proves it total over
+          // validateStepShape. [[duplicate-source-of-truth-is-the-recurring-bug]]
           notAnAgentCap:
             "NO AGENT PATH CAN REACH THE DEPOSIT ENDPOINT. `ub_deposit` is not in the executor's " +
-            "action vocabulary at all — _actions.mjs knows transfer_usdc / pay_for_service / " +
-            "swap_tokens / bridge_usdc and throws `unknown step type` on anything else. No proposal " +
+            `action vocabulary at all — _actions.mjs knows ${STEP_TYPES.join(" / ")} and throws ` +
+            "`unknown step type` on anything else. No proposal " +
             "can propose it, no plan can contain it, agent-act cannot decide it. The sole caller is " +
             "the Fund button on the Unified Balance page, on a user clicking it with an amount they " +
             "typed. It bounds the user's own typo, never the agent's spending.",

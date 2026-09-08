@@ -49,6 +49,11 @@ const describeStep = (s: any): string => {
     return `Send ${s.amountUsdc} USDC to ${shortAddr(String(s.to))}`;
   if (s?.type === "bridge_usdc")
     return `Bridge ${s.amountUsdc} USDC to ${s.destination}`;
+  // ⚠️ NO AMOUNT, ON PURPOSE. A reclaim redeems the WHOLE position, read from the chain at
+  // execution time — there is no amount on the wire to show, and inventing one here (from a
+  // stale panel figure, say) would describe a step by a number it does not carry.
+  if (s?.type === "vault_withdraw")
+    return `Reclaim your whole position from the vault`;
   return JSON.stringify(s);
 };
 
@@ -304,7 +309,8 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         <div className="sub" style={{ marginBottom: 8 }}>
           Describe any task in plain language, including multi-step plans. A <b>bridge</b> or a{" "}
           <b>multi-step plan</b> is priced and shown to you to confirm first. A single{" "}
-          <b>send</b>, <b>swap</b> or <b>service payment</b> runs straight away, within your caps.
+          <b>send</b>, <b>swap</b>, <b>service payment</b> or <b>vault reclaim</b> runs straight
+          away, within your caps. Asking it for your <b>balance</b> only reads — it moves nothing.
         </div>
 
       <div className="row" style={{ marginTop: 0 }}>
@@ -465,7 +471,7 @@ function TxLink({ url }: { url: string }) {
 
 // Presentation of an agent-act result. Handles: needs_confirmation, plan (with
 // confirm→execute), executed transfer/swap/pay, blocked, and no-op.
-function AgentSummary({
+export function AgentSummary({
   data,
   planRun,
   planBusy,
@@ -519,6 +525,47 @@ function AgentSummary({
     };
     const arrival = arrivalFor(bridgeRun?.burnHash);
   const d = data.decision || {};
+
+  // ═══ ⭐⭐ A READ, RENDERED AS A READ ═══════════════════════════════════════════════════════
+  // A balance answer is the one result on this page that moves nothing, and it is styled to say
+  // so — no ✓, no transaction link, no "executed". Those marks mean "money moved" everywhere else
+  // on this surface and borrowing them for a read would teach the wrong thing about the ones that
+  // do. [[a-field-name-must-be-true-in-every-case]]
+  if (data.balance) {
+    const b = data.balance;
+    return (
+      <div className="status" style={{ margin: 0 }}>
+        {/* ⛔ THE UNREADABLE CASE IS NOT AN EMPTY WALLET, AND MUST NOT LOOK LIKE ONE. The server
+            sends readable:false when BOTH reads failed; rendering "0 USDC" there would tell a
+            funded user their money is gone. Same rule the panel's own "… USDC" follows.
+            [[absence-must-never-read-as-safe]] */}
+        {!b.readable ? (
+          <div style={{ color: "var(--warn)" }}>{data.message}</div>
+        ) : (
+          <>
+            <div style={{ marginBottom: 4 }}>
+              {/* ⚠️ FULL PRECISION, NOT toFixed(2). These are 6-dp tokens and the producer keeps
+                  every digit deliberately; a swap of 0.0004 EURC is invisible at two places. */}
+              Your agent wallet holds{" "}
+              <b>{b.usdc === null ? "an amount we could not read" : `${b.usdc} USDC`}</b> and{" "}
+              <b>{b.eurc === null ? "an amount we could not read" : `${b.eurc} EURC`}</b>.
+            </div>
+            {/* ⭐ NAMES THE POCKETS IT DID NOT READ. The agent spends from one of three, so an
+                unqualified "your balance" would be false for anyone holding funds in their unified
+                balance or a vault — the shape that made "freely withdrawable" wrong six times. */}
+            <div style={{ opacity: 0.8 }}>
+              That is the only pocket it can spend from. Your unified balance and any vault position
+              are separate —{" "}
+              <button className="linkbtn" onClick={() => go("dashboard")}>
+                the Dashboard
+              </button>{" "}
+              shows all three.
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
 
   if (data.needsConfirmation) {
     return <div className="status" style={{ margin: 0 }}>{data.message}</div>;
@@ -833,6 +880,31 @@ function AgentSummary({
                 : `Ran ${planRun.stepsRun} of ${planRun.stepsTotal} — stopped at step ${(planRun.stoppedAt ?? 0) + 1}.`}
           </div>
         )}
+      </div>
+    );
+  }
+
+  // ═══ ⭐ A RECLAIM REPORTS A MEASURED DELTA, OR IT REPORTS NOTHING ════════════════════════════
+  // Handled BEFORE the generic `data.executed` branch, which renders "Sent X USDC to <address>" —
+  // wording that would be flatly wrong for a reclaim into the user's own wallet.
+  if (data.vaultWithdraw) {
+    const vw = data.vaultWithdraw;
+    // ⛔ "NOTHING TO RECLAIM" IS NOT A FAILURE AND NOT A WITHDRAWAL. The server returns ok with
+    // reclaimed:false for a genuinely empty position, and it arrives here as executed:false with a
+    // message — never as a ✗, which would read as an error the user should retry.
+    if (!vw.reclaimed) {
+      return <div className="status" style={{ margin: 0 }}>{data.message}</div>;
+    }
+    return (
+      <div className="status" style={{ margin: 0 }}>
+        {/* ⭐ THE FIGURE IS THE ON-CHAIN BALANCE DELTA (verifiedBy: "usdc-balance-delta"), the same
+            witness that licensed the ✓. The two never come from different sources here — pairing
+            one source's confidence with another's number is the exact bridge-arrival defect. */}
+        <div>
+          ✓ Reclaimed <b>{Number(vw.usdcReceived).toFixed(6)} USDC</b> from the vault into your
+          agent wallet — measured on-chain, not estimated.
+        </div>
+        {vw.withdrawTx && <div style={{ marginTop: 4 }}><TxLink url={vw.withdrawTx} /></div>}
       </div>
     );
   }

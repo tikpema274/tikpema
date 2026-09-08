@@ -25,8 +25,16 @@ const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
 // ⭐ THE PRODUCERS, NAMED. Adding a fourth balance reader without adding it here is the gap this
 // list makes visible — an include-list is wrong for a CLASS, but right for a short, known set whose
 // membership is a deliberate architectural fact.
+// ⚠️ THE FIRST ENTRY MOVED, AND THE GUARD CAUGHT THE MOVE. `my-wallet.mjs` held the only read of
+// the agent wallet's balance until the agent gained a `show_balance` answer that needed the same
+// fact. Rather than write a second read beside a second rounding decision — two producers of one
+// number, printed on the same screen — the read was extracted to `_balances.mjs` and my-wallet
+// became a READER of it. ⭐ This list went red on that change, which is the list working: it is
+// pinned to where the rounding decision actually lives, not to a filename.
+// ⛔ my-wallet is deliberately NOT still listed. Keeping it would assert a read it no longer
+// performs, and an assertion that cannot fail on the thing it names is worse than absent.
 const PRODUCERS = [
-  ["netlify/functions/my-wallet.mjs", /formatUnits\(raw, USDC_DECIMALS\)/],
+  ["netlify/functions/_balances.mjs", /formatUnits\(raw, USDC_DECIMALS\)/],
   ["src/wallet/useModularWallet.ts", /formatUnits\(raw, USDC_DECIMALS\)/],
   ["src/wallet/connectors/metamask.ts", /formatUnits\(raw, USDC_DECIMALS\)/],
 ];
@@ -52,6 +60,27 @@ for (const [f, marker] of PRODUCERS) {
   });
   check(`⛔ …and does NOT round it at the source`, !rounds,
     rounds ? "a producer that rounds loses the digits for every consumer at once" : "emits full precision");
+}
+
+// ═══ ⭐⭐ ONE PRODUCER, AND THE READER MUST STAY A READER ═════════════════════════════════════
+// Moving the read out of my-wallet is only worth anything while my-wallet does not grow a second
+// one. Two reads of the same balance drift — that is the whole reason the extraction happened —
+// and the drift would be invisible: the panel's number and the agent's sentence appear on the same
+// screen, at the same moment, sourced separately. ⛔ So the reader is pinned as a READER: it must
+// import the producer and must NOT read a balance itself. [[one-claim-two-producers]]
+{
+  const mw = read("netlify/functions/my-wallet.mjs");
+  check("⭐⭐ my-wallet imports the shared producer",
+    /import \{ walletTokenBalances \} from "\.\/_balances\.mjs"/.test(mw));
+  check("⛔⛔ …and performs NO balance read of its own — a second producer is the defect",
+    !/formatUnits\(raw/.test(mw) && !/functionName: "balanceOf"/.test(mw),
+    "two reads of one number, rendered side by side, drift silently");
+  // ⚠️ AND THE AGENT'S ANSWER DRAWS ON THE SAME ONE. Without this the extraction could be honoured
+  // by my-wallet and quietly bypassed by the surface it was done for.
+  const aa = read("netlify/functions/agent-act.mjs");
+  check("⭐ …and agent-act's show_balance answer reads through it too",
+    /import \{ walletTokenBalances \} from "\.\/_balances\.mjs"/.test(aa) &&
+      /walletTokenBalances\(\{ walletAddress \}\)/.test(aa));
 }
 
 section("2 — ⭐ THE RENDER HELPER PRESERVES THE DISTINCTION IT IS GIVEN");

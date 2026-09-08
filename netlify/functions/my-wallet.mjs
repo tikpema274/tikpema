@@ -5,22 +5,11 @@
 // server-verified session identity; the client cannot ask for anyone else's
 // wallet. Sub-brick 2a: this wallet is provisioned + shown but NOT yet used by
 // the job lifecycle (jobs still run on the shared env wallet — that's 2b).
-import { formatUnits } from "viem";
 import { connectBlobs } from "./_blobs.mjs";
-import { json, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
+import { json } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
-import { publicClient } from "./_predict.mjs";
-
-const BALANCE_OF_ABI = [
-  {
-    type: "function",
-    name: "balanceOf",
-    stateMutability: "view",
-    inputs: [{ name: "account", type: "address" }],
-    outputs: [{ name: "", type: "uint256" }],
-  },
-];
+import { walletTokenBalances } from "./_balances.mjs";
 
 export async function handler(event) {
   if (event.httpMethod !== "POST" && event.httpMethod !== "GET") {
@@ -56,37 +45,19 @@ export async function handler(event) {
       });
     }
 
-    // Best-effort balance reads; a transient RPC hiccup on either token shouldn't
-    // fail the call. USDC and EURC are both 6-decimal ERC-20s on Arc. They are
-    // returned as TWO distinct amounts (EURC != $1, so no summed total here).
-    async function readBalance(token) {
-      try {
-        const raw = await publicClient().readContract({
-          address: token,
-          abi: BALANCE_OF_ABI,
-          functionName: "balanceOf",
-          args: [wallet.walletAddress],
-        });
-          // ═══ ⭐⭐ A PRODUCER EMITS FULL PRECISION. ONLY A RENDER ROUNDS. ═════════════════════
-          // This returned .toFixed(2) on a 6-dp token, so every consumer of this response — eight
-          // display sites and one that does ARITHMETIC on it — received a value that had already
-          // lost four digits. A displayed 0.40 EURC is anywhere in [0.395, 0.405), and the only way
-          // to learn what an agent swap returned was to diff this number across a refresh.
-          // ⛔ THE ROUNDING CANNOT LIVE HERE. A producer that rounds makes the loss unrecoverable
-          // for every consumer at once, including consumer nine. Rounding at a render is a decision
-          // each surface can make and revisit; rounding at the source is one decision made
-          // invisibly for all of them.
-          // ⚠️ AND A VALUE USED IN ARITHMETIC IS NEVER READ FROM A ROUNDED ONE — BridgePanel's
-          // 25/50/75 buttons computed a send amount from this very string.
-          return formatUnits(raw, USDC_DECIMALS);
-      } catch {
-        return null; // client shows "…" for a null balance
-      }
-    }
-    const [balance, eurcBalance] = await Promise.all([
-      readBalance(CONTRACTS.USDC),
-      readBalance(CONTRACTS.EURC),
-    ]);
+    // ═══ ⭐⭐ THE READ MOVED OUT, AND THAT IS THE POINT ══════════════════════════════════════
+    // This function used to hold the only copy of "what does the agent wallet hold". The agent's
+    // own `show_balance` answer needs exactly the same fact, and a second read written beside a
+    // second .toFixed would eventually print a different number from the one this panel shows,
+    // on the same screen. `walletTokenBalances` is now the single producer and this is a reader.
+    //
+    // ⛔ THE null CONTRACT IS UNCHANGED and load-bearing: a balance that could not be read stays
+    // null so the client shows "…", never a fabricated 0. The producer keeps full 6-dp precision
+    // for the same reason it was pushed down there — rounding at a producer is a loss no reader
+    // can undo. [[duplicate-source-of-truth-is-the-recurring-bug]]
+    const { usdc: balance, eurc: eurcBalance } = await walletTokenBalances({
+      walletAddress: wallet.walletAddress,
+    });
 
     // Expose only what the client needs. walletId (the Circle signer handle)
     // stays server-side. `balance` remains the USDC amount (back-compat);
