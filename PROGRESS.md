@@ -1,14 +1,46 @@
 ---
 
-# ⛔ THE MAINNET MOVE IS BLOCKED ON CIRCLE — and a Gateway-less Arc mainnet is still a real product
+# ⛔ THERE IS NO ARC MAINNET. The move is a WAIT, not a decision.
 
-**2026-09-08. Read-only. NOTHING BUILT.** Triggered by an on-ramp question; the on-ramp turned out
-to be moot and this is the gating fact behind it.
+**2026-09-08. Read-only. NOTHING BUILT.** Triggered by an on-ramp question; the on-ramp is moot and
+this is the gating fact behind it.
+
+## 🚨🚨 CORRECTION, SAME DAY — I STOPPED AT THE FIRST BLOCKER AND IT WAS THE WRONG ONE
+
+The first version of this entry was headed *"blocked on Circle shipping an Arc Gateway domain"* and
+described choosing between feature sets on a Gateway-less mainnet. **That framing is wrong in the
+direction that matters: it reads as though mainnet is a decision available now.**
+
+**Arc has no public mainnet.** From Arc's own deployment-phases table:
+
+| phase | status |
+|---|---|
+| Devnet | Internal |
+| Private Testnet | Complete |
+| **Public Testnet** | **Live** — chain ID `5042002` |
+| **Private Mainnet** | ⛔ **Upcoming** — ~20 permissioned validators, *limited access* |
+| **Public Mainnet** | ⛔ **Upcoming** |
+
+And the contract-addresses page says it outright: *"All addresses on this page are for Arc Testnet.
+**Mainnet addresses are not yet available.**"*
+
+⭐ **THE MISSING GATEWAY DOMAIN IS A SYMPTOM, NOT THE CAUSE.** There is no domain because there is no
+mainnet. I found the first blocker, measured it carefully, and never asked whether the thing
+underneath it existed — a correct measurement of the wrong layer.
+[[refuted-by-what-you-read-not-what-you-failed-to-find]]
+
+⚠️ **The feature analysis below is still CORRECT and still useful** — it says what would work on a
+Gateway-less Arc — but it describes a network that has not launched. Read it as preparation, never
+as an available option. ⛔ Private Mainnet is *limited access*, so even the first mainnet may not be
+one we can deploy to.
+
+## THE DOWNSTREAM FACT (still true, still worth having)
 
 ## 🚨 ARC HAS NO GATEWAY DOMAIN ON MAINNET — RE-MEASURED, NOT INHERITED
 
 `arc-gateway-watch.mjs` recorded this 2026-08-24. **Re-measured live 2026-09-08** against
-`gateway-api.circle.com/v1/info`: **12 domains, Arc absent.**
+`gateway-api.circle.com/v1/info`: **12 domains, Arc absent.** ⚠️ Consistent with there being no
+mainnet at all — which is exactly why this reading ALONE could not say what was blocking.
 
 ```
 Ethereum · Base · Avalanche · Arbitrum · Optimism · Polygon
@@ -16,9 +48,11 @@ Unichain · Sonic · Worldchain · Sei · HyperEVM · Solana
 ```
 
 ⛔ Without a domain, burn intents and mints have nothing to address. **This is a DEPENDENCY, not a
-defect — nothing in this repo can fix it.** ⭐ The right instrument already exists and already runs:
-`arc-gateway-watch` polls `*/15` and pushes to Discord the moment Arc appears. **The mainnet date is
-Circle's to set.** The plan is "wait for the watcher, then move", never "port and discover".
+defect — nothing in this repo can fix it.** ⭐ `arc-gateway-watch` polls `*/15` and pushes the moment Arc
+appears, and it stays useful — but note WHICH signal it watches: **Gateway domain presence is
+DOWNSTREAM of mainnet launch.** The upstream signal is Arc's deployment-phases table moving
+Private/Public Mainnet from *Upcoming* to *Live*. A downstream watcher fires late — or misleadingly,
+if a domain ships at private-mainnet time we cannot access.
 
 ## ⭐⭐ THE DEPENDENCY SET IS FIVE FILES, NOT NINE
 
@@ -94,7 +128,10 @@ gate** — which blocks correctly but has never refused a deposit that mattered.
 USDC comes from the Circle faucet, which `ConnectPasskey` step 02 already does. Wiring MoonPay or
 Transak here would mean taking a card payment and delivering worthless tokens.
 
-⚠️ On mainnet, the open question is whether ANY on-ramp settles directly to Arc. If none does, "fund
+⛔ **NO ON-RAMP CAN SETTLE DIRECTLY TO ARC TODAY — THERE IS NOTHING TO SETTLE TO.** Not a provider
+gap, not a partnership gap: the chain does not exist in production. Providers add chains that have
+users, so expect lag even after Public Mainnet lands.
+⚠️ At that point, the open question is whether ANY on-ramp settles directly to Arc. If none does, "fund
 without leaving the app" becomes *on-ramp to Base → CCTP bridge to Arc* — two providers, two fee
 layers and a multi-minute wait behind one button. ⭐ The second half already exists and is proven.
 And KYC would land on us: the moment the app initiates identity verification we are in a compliance
