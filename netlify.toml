@@ -476,6 +476,16 @@
 [functions."arc-gateway-watch"]
   schedule = "5 7 * * *"
 
+# arc-phase-watch — the UPSTREAM signal. arc-gateway-watch asks "does Arc have a Gateway domain?"
+# and that reading was accurate but could not say WHAT was blocking: Arc has no domain because it
+# has no mainnet. Gateway presence is DOWNSTREAM of launch, so a watcher on it fires late — or
+# misleadingly, if a domain appears at private-mainnet time we cannot access.
+# ⭐ BOTH ARE KEPT: this says "can we deploy at all", the Gateway one says "will unified balance and
+# x402 work when we do". ⚠️ Offset 15 min from it so a docs outage and an API outage stay separable.
+# ⚠️ Silent on the expected outcome except Mondays — a quiet week must not read as a dead schedule.
+[functions."arc-phase-watch"]
+  schedule = "20 7 * * *"
+
 [functions."budget-sweep-cron"]
   schedule = "*/30 * * * *"
 
