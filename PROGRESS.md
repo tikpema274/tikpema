@@ -1,5 +1,93 @@
 ---
 
+# ⛔ ARC TRANSACTION MEMOS — DECLINED IN FULL. All three phases, and the gate closed the last one.
+
+**2026-09-08.** Arc shipped transaction memos on testnet (2026-09-07): structured context attached
+to any contract call via a predeployed `Memo` contract, emitted as `BeforeMemo`/`Memo` events,
+queryable by `memoId`, no modification to the target contract. Scoped read-only. **NOTHING BUILT,
+and now nothing to build.**
+
+## ⭐⭐ THE GATE — AND IT FAILED FOR A STRONGER REASON THAN PREDICTED
+
+Phase 3 (x402 purchases carry a `jobId` memo) was the recommended one, gated on a single question:
+is the x402 settle a DIRECT EOA call from the delegate, or routed through a facilitator?
+
+**Neither. The delegate EOA never broadcasts a transaction at all.**
+
+`_x402.mjs` only ever calls `signTypedData` — it produces an EIP-3009 authorization and sends it as
+a `payment-signature` HTTP header to the SELLER, which settles through Circle Gateway. The module's
+own comments name the actor: *"the seller persists a handle BEFORE it broadcasts"*. There is no
+`sendTransaction`, no `createContractExecutionTransaction`, no broadcast on this path.
+
+⛔ **So the one-hop `CallFrom` limit never even applies. `Memo.memo(...)` requires the EOA to be the
+direct transaction SENDER, and on this path we are not the sender in ANY hop — we are a signer whose
+authorization a third party broadcasts. You cannot wrap a transaction you do not send.**
+
+⭐ That is a cleaner refutation than the predicted one, and worth keeping precisely because the
+predicted one was weaker: "routed through a facilitator" would have implied a hop-count problem that
+a different call shape might fix. This is a role problem. [[probe-must-discriminate-between-states]]
+
+## ⛔ PHASES 1+2 (bridge burn carries its intentId) — DECLINED
+
+Two PERMANENT money-path costs, for an attribution field that is **correctly absent today**:
+
+1. **Every bridge revert wrapped in `MemoFailed(bytes)`.** *"If the child call reverts, the outer
+   transaction reverts… the child return data is wrapped in `MemoFailed(bytes)`."* `_user-bridge.mjs`
+   decodes revert reasons on the money path; all of it would need an unwrap layer, forever.
+2. **Static execution is REJECTED** — *"Memo execution changes state by incrementing the memo index,
+   so static execution is rejected."* Pre-flight `eth_call` must therefore simulate the **INNER**
+   call, which makes **the thing we simulate no longer the thing we send**. That is a gap on a money
+   path, permanently, in exchange for a link.
+
+⭐ **AND THE COVERAGE SHAPE SETTLES IT INDEPENDENTLY OF THE COSTS:**
+- the **agent path can NEVER** carry memos (see the reopen condition below — structural, not a gap)
+- the **28 backfilled receipts** have none and never will
+- coverage would **begin at adoption**, on self-signed burns only
+
+**"A receipt does not need an intent" stands.** The discovery sweeper already writes a COMPLETE
+receipt from chain data; a memo would only let it link to an intent, never let it write a receipt it
+otherwise could not. Paying two permanent costs to attribute a subset of future burns is the wrong
+trade. [[flow-is-not-meaning]]
+
+## 🚨 THE REOPEN CONDITION IS **PERMANENT** — AND THE FIRST VERSION OF IT WAS WRONG
+
+⛔ **THERE IS NO REOPEN CONDITION.** Do not record one as *"when Circle MSCAs can emit memos"* —
+that framing was drafted and **caught before it reached the file**, and it is wrong in the direction
+that matters: it implies a testnet gap that a Circle or Arc release would close.
+
+**The exclusion is the one-hop `CallFrom` limit, and it is STRUCTURAL.** `Memo` routes the inner
+call through the `CallFrom` precompile, which preserves the ORIGINAL EOA as `msg.sender` for exactly
+one hop. An ERC-4337 account's transaction originates from a bundler/entry point, so the `msg.sender`
+reaching `Memo` is the wallet contract — and *"the call reverts because sender spoofing isn't
+allowed"*. That is not a missing feature; it is the security property the precompile exists to
+enforce. **No SCA-support event would change it.**
+
+⚠️ Recorded as a correction rather than silently fixed, so the weaker version cannot come back:
+a reopen trigger naming a VENDOR or a RELEASE would fire on someone else's announcement and imply a
+dependency that does not exist. [[reopen-trigger-names-capability-not-noun]]
+
+## ⭐ TWO FACTS WORTH NOT RE-DERIVING
+
+1. **`Memo` is predeployed at `0x5294E9927c3306DcBaDb03fe70b92e01cCede505` on Arc Testnet —
+   VERIFIED, not quoted.** `eth_getCode` returns **1,228 bytes**. Selector
+   `memo(address,bytes,bytes32,bytes)` = `0xc3b2c4f8`; event topics
+   `Memo` = `0xeb15ee72…a5e4`, `BeforeMemo` = `0xb252e055…1501`.
+   ⚠️ Docs give the RPC as `https://rpc.testnet.arc.io`; we use `https://rpc.testnet.arc.network`.
+
+2. **A memo would CORROBORATE the Transfer-leg owner derivation, never replace it.**
+   `Memo.sender` is indexed and authoritative for the DIRECT caller — but our burn is
+   `EOA → Memo → BridgingKit (0xC5567a5E…) → CCTP`, and `CallFrom` preserves the sender for ONE hop.
+   The Kit calls CCTP itself, so **`DepositForBurn.depositor` stays the Kit either way.**
+   `joinBurns` binding owner from the Transfer leg remains the authority; a memo would be a second
+   independent instrument for a fact we already derive correctly.
+   [[repeating-one-instrument-is-not-corroboration]]
+
+⚠️ ELIGIBILITY IS A RUNTIME PROPERTY, if this is ever revisited: "self-signed" means MetaMask today,
+but a Safe or any 4337 account can connect via WalletConnect and the memo call REVERTS. The
+discriminator is one read — `eth_getCode(connected) !== "0x"` — and it must fail toward the
+UNWRAPPED call. [[wallet-type-is-not-inferable-from-name]]
+
+
 # ⛔ VAULT SUGGESTIONS — THE FRAMING DECISION. Read-only scoping, NOTHING BUILT.
 
 **2026-09-07.** Scope explored: the agent analyses a vault the user proposes and SUGGESTS. The
