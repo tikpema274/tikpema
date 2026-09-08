@@ -1,4 +1,6 @@
-import { json, parseBody, sendCapUsdc, bridgeCapUsdc } from "./_arc.mjs";
+import { json, parseBody, sendCapUsdc, bridgeCapUsdc, vaultDepositCapUsdc } from "./_arc.mjs";
+import { resolveVault } from "./_vault.mjs";
+import { depositDisclosure } from "./_vault-disclosure.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { executeAction, valueOfStep } from "./_actions.mjs";
 import { requireSession } from "./_auth.mjs";
@@ -167,7 +169,23 @@ export async function handler(event) {
   const bcap = bridgeCapUsdc();                    // per-bridge cap (its own bound)
   // A bridge step is bounded by the per-BRIDGE cap; everything else by the send
   // cap. Same per-step caps agent-act's proposal and executeAction enforce.
-  const capForA = (step) => atomic(step?.type === "bridge_usdc" ? bcap : cap);
+  const vcap = vaultDepositCapUsdc();               // per-vault-deposit cap (its own bound)
+  // 🚨 SAME FIX AS agent-act's capFor, AND IT HAS TO BE THE SAME FIX. This mapped every non-bridge
+  // step to the SEND cap, so a vault step was bounded here by one number and by
+  // vaultDepositCapUsdc() inside executeAction. A pre-flight that bounds a different quantity than
+  // the executor is not a pre-flight — it either refuses what would have run, or passes what will
+  // be refused MID-RUN once earlier steps have already moved money.
+  // ⚠️ Both call sites are changed together on purpose: fixing one and proving it is exactly how
+  // the two came to disagree. [[guard-belongs-on-the-caller-set]]
+  // ⭐ ONE SELECTION, TWO VIEWS. `capUsdcFor` picks the bound; `capForA` is the same bound in
+  // micro-USDC for the comparison, and the refusal message reads `capUsdcFor` for display. Two
+  // independent selections — one for the check, one for the sentence — is how a refusal comes to
+  // name a cap it did not apply.
+  const capUsdcFor = (step) =>
+    step?.type === "bridge_usdc" ? bcap : step?.type === "vault_deposit" ? vcap : cap;
+  const capForA = (step) => atomic(capUsdcFor(step));
+  const capLabelForA = (step) =>
+    step?.type === "bridge_usdc" ? "bridge" : step?.type === "vault_deposit" ? "vault-deposit" : "transaction";
   const ceiling = budgetConfig().PERIOD_CEILING_USDC; // cumulative daily bound
   const ceilingA = atomic(ceiling);
 
@@ -247,6 +265,61 @@ export async function handler(event) {
     }
   }
 
+  // ═══ ⭐⭐ THE SAME PRE-FLIGHT, FOR VAULT STEPS — AND ON A FRESH READ ═════════════════════════
+  // A vault deposit is gated on an ackToken bound to the disclosure the user SAW. That token is a
+  // hash of the vault's CURRENT disclosure, so re-inspecting here is not belt-and-braces: it is
+  // the only thing that can tell "they accepted these terms" from "they accepted terms that have
+  // since changed". [[stale-read-then-act]]
+  //
+  // ⛔ REFUSED BEFORE STEP 1, LIKE THE BRIDGE LOOP ABOVE. A vault step refused mid-run is refused
+  // after earlier steps have already moved money, and the acceptance it is asking for can no
+  // longer be declined freely — the user would be choosing between accepting terms they did not
+  // want and abandoning a half-executed plan.
+  //
+  // ⚠️ IT DOES NOT TRUST THE PROPOSAL. This endpoint accepts a plan array directly, so it recomputes
+  // the disclosure itself rather than reading anything agent-act sent. Nothing client-supplied
+  // decides whether an ack was required.
+  const vaultIdxA = plan.map((s, i) => (s?.type === "vault_deposit" ? i : -1)).filter((i) => i >= 0);
+  for (const i of vaultIdxA) {
+    const vv = resolveVault(plan[i].vault);
+    if (!vv) {
+      return json(200, { executed: false, blocked: `step ${i + 1}: unsupported vault "${plan[i].vault}". Nothing was executed.` });
+    }
+    let vdisc;
+    try {
+      vdisc = await depositDisclosure({ vault: vv, owner: walletAddress, event });
+    } catch (e) {
+      // ⛔ FAIL CLOSED. An unreadable vault is not an acceptable one.
+      return json(200, {
+        executed: false,
+        blocked: `step ${i + 1}: could not read that vault's terms, so the acknowledgement could not be checked (${e.message}). Nothing was executed.`,
+      });
+    }
+    if (!vdisc.depositable) {
+      const why = vdisc.gate.blocks.map((b) => b.detail).join(" ");
+      return json(200, {
+        executed: false,
+        blocked: `step ${i + 1}: that vault failed a safety check — no acknowledgement can override it. Nothing was executed. ${why}`.trim(),
+      });
+    }
+    if (vdisc.ackRequired) {
+      if ((ackTokens || {})[i] !== vdisc.ackToken) {
+        // Either never acknowledged, or the vault's disclosure MOVED since the quote. Either way
+        // the whole plan stops and the FRESH disclosure travels back, so the panel can render the
+        // "your acknowledgement no longer applies" recovery rather than a bare refusal.
+        return json(200, {
+          executed: false,
+          blocked:
+            `step ${i + 1} deposits into ${vdisc.vault.label}, whose owner holds powers over your deposit. ` +
+            `That has to be acknowledged before the plan runs. Nothing was executed.`,
+          needsAck: true,
+          vaultDisclosures: { [i]: vdisc },
+        });
+      }
+      ackFor[i] = vdisc.ackToken;
+    }
+  }
+
   // ── Execute in order; STOP at the first cap/ceiling breach or failure ──────
   const results = [];
   let stoppedAt = null;
@@ -276,11 +349,15 @@ export async function handler(event) {
     const step = plan[i];
     const vA = atomic(values[i]);
 
-    // (1) PER-ACTION cap — each step by its own type (bridge → per-bridge cap,
-    //     else send cap). Stop here, never skip-and-continue.
-    const isBridge = step?.type === "bridge_usdc";
+    // (1) PER-ACTION cap — each step by its own type (bridge → per-bridge cap, vault deposit →
+    //     per-vault-deposit cap, else send cap). Stop here, never skip-and-continue.
+    // ⛔ THE MESSAGE READS THE SAME HELPER THE CHECK DID. It used to re-derive the bound inline as
+    // `isBridge ? bcap : cap` — a SECOND copy of the selection, sitting one line from the first,
+    // and one that would go on naming the send cap for a vault step after capForA stopped doing so.
+    // A refusal must report the quantity the test actually compared.
+    // [[refusal-reports-compared-quantity]] · [[duplicate-source-of-truth-is-the-recurring-bug]]
     if (vA > capForA(step)) {
-      results.push({ index: i, step, ok: false, blocked: `step ~${usd2(values[i])} exceeds per-${isBridge ? "bridge" : "transaction"} limit of ${isBridge ? bcap : cap} USDC` });
+      results.push({ index: i, step, ok: false, blocked: `step ~${usd2(values[i])} exceeds per-${capLabelForA(step)} limit of ${capUsdcFor(step)} USDC` });
       stoppedAt = i;
       break;
     }

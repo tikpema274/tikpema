@@ -6,6 +6,7 @@ import type { useWallet } from "../wallet/useWallet";
 import { displayAmount } from "../lib/formatAmount";
 import VaultDisclosure, { type VaultDelta } from "./VaultDisclosure";
 import { diffDisclosure } from "../lib/disclosureDiff";
+import { stepsNeedingAck, planAckTokensFor } from "../../shared/plan-acks.mjs";
 
 // MyAgentPanel — Brick C "My Agent" surface. Re-mounts the agent-action UI (from
 // the archived AgentPanel), restyled to the current design and pointed at the
@@ -56,6 +57,8 @@ const describeStep = (s: any): string => {
   // stale panel figure, say) would describe a step by a number it does not carry.
   if (s?.type === "vault_withdraw")
     return `Reclaim your whole position from the vault`;
+  if (s?.type === "vault_deposit")
+    return `Deposit ${s.amountUsdc} USDC into the vault`;
   return JSON.stringify(s);
 };
 
@@ -853,19 +856,20 @@ export function AgentSummary({
     const runResults = planRun?.results;
     // Server-priced, per step index. Absent for a plan with no bridge steps.
     const planDisclosures: Record<string, any> = data.stepDisclosures || {};
+    // ⭐ TWO KINDS OF PER-STEP CONSENT, KEPT IN SEPARATE MAPS AND UNIONED HERE. A bridge step is
+    // gated on a FEE BAND; a vault step is gated on the vault's DISCLOSURE. They share nothing but
+    // the step index, so folding them into one map would mean a vault entry silently failing a
+    // `band === "acknowledge"` test and dropping out of the gate — an absence reading as "no ack
+    // needed". [[vendor-field-carries-its-own-discriminator]]
+    // ⚠️ Server-refusal disclosures arrive under the same key, so a plan refused for a stale vault
+    // ack renders its fresh disclosure here too.
+    const planVaults: Record<string, any> = data.vaultDisclosures || planRun?.vaultDisclosures || {};
     // Every step that REQUIRES acceptance must have it before the plan can run. The server
-    // re-prices and refuses independently — this only decides whether the button is live.
-    const needAck = Object.entries(planDisclosures)
-      .filter(([, d]: [string, any]) => d?.band === "acknowledge")
-      .map(([k]) => Number(k));
+    // re-prices, re-inspects and refuses independently — this only decides whether the button is live.
+    const needAck = stepsNeedingAck({ planDisclosures, planVaults });
     const allPlanAcksGiven = needAck.every((i) => planAcked[i]);
     // Only tokens for steps the user actually accepted are sent.
-    const planAckTokens: Record<number, string> = {};
-    for (const i of needAck) {
-      if (planAcked[i] && planDisclosures[String(i)]?.ackToken) {
-        planAckTokens[i] = planDisclosures[String(i)].ackToken;
-      }
-    }
+    const planAckTokens = planAckTokensFor({ planDisclosures, planVaults }, planAcked);
     return (
       <div className="status" style={{ margin: 0 }}>
         <div style={{ marginBottom: 6 }}>
@@ -986,6 +990,30 @@ export function AgentSummary({
                   this plan anyway.
                 </span>
               </label>
+            </div>
+          );
+        })}
+
+        {/* ═══ ⭐⭐ PER-STEP VAULT DISCLOSURE — THE SAME COMPONENT, ONCE PER STEP ═══════════════
+            A plan can hold a bridge in the acknowledge band AND a vault deposit with owner-power
+            warnings; they are different disclosures with different acceptances, so each is
+            rendered and ticked on its own. ⛔ The warnings are NOT restated here — VaultDisclosure
+            is mounted, so a vault step inside a plan and the Vault page cannot disagree about what
+            the owner can do. `ackId` distinguishes several mounts on one page. */}
+        {Object.entries(planVaults).map(([k, vd]: [string, any]) => {
+          const i = Number(k);
+          return (
+            <div key={`vault-${k}`} style={{ marginBottom: 10 }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                Step {i + 1} — depositing into {vd.vault?.label}
+              </div>
+              <VaultDisclosure
+                inspection={vd.inspection}
+                ackRequired={!!vd.ackRequired}
+                acked={!!planAcked[i]}
+                onAckChange={(v) => onPlanAckChange({ ...planAcked, [i]: v })}
+                ackId={`plan-vault-${i}`}
+              />
             </div>
           );
         })}

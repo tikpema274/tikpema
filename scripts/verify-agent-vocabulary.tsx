@@ -33,6 +33,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { STEP_TYPES, validateStepShape } from "../netlify/functions/_actions.mjs";
 import { gateDeposit } from "../netlify/functions/_vault.mjs";
+import { stepsNeedingAck } from "../shared/plan-acks.mjs";
 
 const { AgentSummary } = (await import("../src/components/MyAgentPanel")) as any;
 
@@ -46,6 +47,7 @@ const section = (t: string) => console.log(`\n── ${t} ${"─".repeat(Math.ma
 const act = readFileSync(new URL("../netlify/functions/agent-act.mjs", import.meta.url), "utf8");
 const params = readFileSync(new URL("../netlify/functions/agent-parameters.mjs", import.meta.url), "utf8");
 const actions = readFileSync(new URL("../netlify/functions/_actions.mjs", import.meta.url), "utf8");
+const plan = readFileSync(new URL("../netlify/functions/agent-execute-plan.mjs", import.meta.url), "utf8");
 
 console.log("╔══════════════════════════════════════════════════════════════════════╗");
 console.log("║  AGENT VOCABULARY — one list, derived everywhere, proved total       ║");
@@ -119,17 +121,17 @@ section("3 — ⛔ THE PLAN'S KINDS SET IS DERIVED, NOT RE-TYPED");
     "a literal here is a second copy that drifts on the next type added");
   check("🚨 …and no hardcoded four-type literal survives anywhere in agent-act",
     !/new Set\(\[\s*"transfer_usdc"/.test(act));
-  // ⛔ vault_deposit remains out of PLANS specifically, and that is a scope decision rather than a
-  // capability one: a plan collects every step's consent in ONE press, so a vault step inside a
-  // plan needs its disclosure rendered per-step and its ack re-verified per-step in
-  // agent-execute-plan. Until that exists, a plan must not contain one — it would be refused
-  // mid-run, after earlier steps had already moved money.
-  check("⭐ the plan exclusion is explicit and named in code",
-    /STEP_TYPES\.filter\(\(t\) => t !== "vault_deposit"\)/.test(act),
-    "a plan collects consent in one press; per-step vault acks are not threaded yet");
-  check("⛔ …and a single-action deposit IS reachable, so the exclusion is about plans only",
-    /decision\.action === "vault_deposit"/.test(act),
-    "excluding it everywhere would be the old defect, not a scope decision");
+  // ⭐⭐ THE EXCLUSION IS GONE, AND ITS REPLACEMENT IS THE THING THAT EARNED IT. vault_deposit was
+  // kept out of plans while per-step consent was not threaded — a step refused mid-run is refused
+  // after earlier steps have already moved money. Now every executor type is proposable, and the
+  // assertion moves to what makes that safe.
+  check("⭐⭐ the plan vocabulary is the FULL executor vocabulary",
+    /const KINDS = new Set\(STEP_TYPES\);/.test(act),
+    "no hand-maintained subset to drift");
+  check("⛔ …and no filtered subset survives", !/STEP_TYPES\.filter/.test(act));
+  check("🚨 a vault step in a plan gets its OWN disclosure, in its own map",
+    /const vaultDisclosures = \{\};/.test(act) && /vaultDisclosures\[i\] = vdisc;/.test(act),
+    "folding it into the bridge-shaped stepDisclosures would drop the gate silently");
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
@@ -413,6 +415,82 @@ section("8 — 🚨 THE ORDERED SEQUENCE IS THE SAFETY PROPERTY, SO IT IS ASSERT
   const ok = gateDeposit({ inspection: { verdict: { level: "OK", warns: [], blocks: [] }, disclosure: { source: "report" }, asset: { address: null } } });
   check("⭐ …and a report-sourced disclosure is NOT refused for that reason",
     ok.ok === true, `${ok.ok} ${ok.blocked ?? ""}`);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("9 — 🚨 ONE ACTION, ONE BOUND, ON EVERY PATH THAT BOUNDS IT");
+{
+  // 🚨 THE DEFECT, FOUND BEFORE IT COULD SHIP. Both plan paths mapped every non-bridge step to the
+  // SEND cap, while executeAction bounds a deposit by vaultDepositCapUsdc(). Two paths, one action,
+  // two numbers.
+  // ⭐ MEASURED ON PRODUCTION 2026-09-08: AGENT_SEND_CAP_USDC=10, AGENT_VAULT_DEPOSIT_CAP_USDC
+  // unset ⇒ 25. So today the pre-flight was the STRICTER side and the symptom is a wrong refusal
+  // naming a limit that does not govern the action. ⚠️ THE DIRECTION IS AN ENV ACCIDENT: raise the
+  // send cap above 25 and it inverts into the dangerous one — pass here, refuse MID-RUN, after
+  // earlier steps have moved money. The disagreement is the defect; neither direction is safe.
+  // [[refusal-reports-compared-quantity]]
+  check("⭐⭐ agent-act bounds a vault step by the VAULT cap",
+    /s\?\.type === "vault_deposit" \? vcap/.test(act), "not the send cap");
+  check("⭐⭐ agent-execute-plan bounds it by the same cap",
+    /step\?\.type === "vault_deposit" \? vcap/.test(plan), "both call sites, or they disagree again");
+  check("🚨 …and BOTH read it from the one fail-closed helper",
+    /vaultDepositCapUsdc\(\)/.test(act) && /vaultDepositCapUsdc\(\)/.test(plan) &&
+      /vaultDepositCapUsdc\(\)/.test(actions),
+    "three enforcement points, one source — a literal at any of them is the drift");
+  // ⛔ AND THE REFUSAL NAMES THE CAP IT APPLIED. A message quoting a bound the check did not use
+  // sends the user to change the wrong setting.
+  check("⭐ agent-act's refusal names the governing cap, derived",
+    /capLabelFor\(steps\[over\]\)/.test(act) && !/isBridge \? "bridge" : "transaction"/.test(act));
+  check("⭐⭐ the plan executor's refusal reads the SAME helper the check read",
+    /per-\$\{capLabelForA\(step\)\} limit of \$\{capUsdcFor\(step\)\}/.test(plan),
+    "it re-derived `isBridge ? bcap : cap` one line from the check — a second selection");
+  check("🚨 …and that second inline selection is gone",
+    !/limit of \$\{isBridge \? bcap : cap\}/.test(plan));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("10 — ⛔ A VAULT STEP IN A PLAN IS RE-VERIFIED BEFORE STEP 1, ON A FRESH READ");
+{
+  const vi = plan.indexOf("const vaultIdxA");
+  const ei = plan.indexOf("// ── Execute in order");
+  check("⛔ the vault pre-flight exists", vi !== -1);
+  check("🚨🚨 …and runs BEFORE the execution loop — a mid-run refusal comes after money moved",
+    vi !== -1 && ei !== -1 && vi < ei, `preflight@${vi} loop@${ei}`);
+  const body = vi === -1 ? "" : plan.slice(vi, ei === -1 ? plan.length : ei);
+  check("⭐⭐ it RE-COMPUTES the disclosure rather than trusting the proposal",
+    /depositDisclosure\(\{ vault: vv, owner: walletAddress/.test(body),
+    "the endpoint accepts a plan array directly; nothing client-supplied may decide the gate");
+  check("⭐ …and compares the ack against the FRESHLY computed token",
+    /\(ackTokens \|\| \{\}\)\[i\] !== vdisc\.ackToken/.test(body),
+    "a token matching a stale disclosure is consent to terms that changed");
+  check("⛔ a missing or stale ack refuses the WHOLE plan, executing nothing",
+    /executed: false/.test(body) && /Nothing was executed/.test(body));
+  check("⭐ …and returns the FRESH disclosure so the recovery can render",
+    /vaultDisclosures: \{ \[i\]: vdisc \}/.test(body));
+  check("⛔ a BLOCKed vault stops the plan and says no ack can override",
+    /no acknowledgement can override it/.test(body));
+  check("⛔ an unreadable vault stops the plan — it does not proceed on an unread disclosure",
+    /could not read that vault's terms/.test(body));
+
+  // ── The panel: two consent kinds, unioned, never merged ──
+  const panel = readFileSync(new URL("../src/components/MyAgentPanel.tsx", import.meta.url), "utf8");
+  // ═══ ⚠️ THIS ASSERTION MADE THE SAME MISTAKE IT WAS WRITTEN TO CATCH ════════════════════════
+  // It grepped the PANEL for `band === "acknowledge"`, which is an implementation detail of where
+  // the union happens — and the union then moved into shared/plan-acks.mjs, so it went red on a
+  // change that improved the very property it guards. A check pinned to a location fails on moves
+  // and passes on breakage. ⭐ So it CALLS the rule instead, and separately requires the panel to
+  // delegate to it — behaviour plus wiring, neither of which a move can break.
+  // [[assert-on-rendered-output-not-source-regex]]
+  check("⭐⭐ the ack union counts VAULT steps, not only fee-banded bridge steps",
+    JSON.stringify(stepsNeedingAck({ planVaults: { 3: { ackRequired: true } } })) === "[3]",
+    "a vault entry has no `band`; folding the maps would drop it from the gate silently");
+  check("⛔ …and a vault step that needs NO ack is not counted",
+    stepsNeedingAck({ planVaults: { 3: { ackRequired: false } } }).length === 0);
+  check("⭐ …and the panel delegates to that rule rather than re-implementing the union",
+    /stepsNeedingAck\(\{ planDisclosures, planVaults \}\)/.test(panel),
+    "an inlined union would pass the two checks above and still drop vault steps");
+  check("⭐ …and mounts VaultDisclosure per vault step rather than restating the warnings",
+    /ackId=\{`plan-vault-\$\{i\}`\}/.test(panel));
 }
 
 console.log(`\n${fail === 0 ? "✅ ALL PASS" : "❌ FAILURE"} — ${pass} passed, ${fail} failed. Zero money, zero network.`);

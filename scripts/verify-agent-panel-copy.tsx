@@ -187,7 +187,24 @@ check("⭐ SWAP says it stays, and what changes is the denomination",
   // ⭐ A vault deposit is PROPOSED, never executed in agent-act, so like the bridge it builds
   // no `const step =` here — the step is built by /api/agent-vault-deposit on confirm.
   if (/needsVaultConfirm:\s*true/.test(act)) GATED.add("vault_deposit");
-  if (/needsConfirm:\s*true[\s\S]{0,400}plan:\s*steps/.test(act)) GATED.add("multi_step_plan");
+  // ═══ 🚨 A CHARACTER WINDOW IS THE WRONG BOUNDARY, AND IT HAS NOW BITTEN TWICE ═══════════════
+  // This was `needsConfirm: true[\s\S]{0,400}plan: steps`. The comment beside it already recorded
+  // one near-miss — a 200-char window "silently found nothing" because a comment sat between the
+  // keys. Adding `vaultDisclosures` to the same return pushed them past 400 and it happened again.
+  // ⭐ THE SECOND TIME IT WENT RED RATHER THAN SILENT, and only because the reverse-inclusion check
+  // exists: the copy still promised a gate for multi_step_plan, and clause ⊆ GATED objected. The
+  // window itself never stopped being blind.
+  // ⛔ SO THE BOUNDARY IS NOW A SCOPE, NOT A COUNT: the two keys must appear in the SAME return.
+  // A return statement cannot drift apart the way a character budget can.
+  {
+    const at = act.search(/needsConfirm:\s*true/);
+    if (at !== -1) {
+      const rest = act.slice(at);
+      const nextReturn = rest.slice(1).search(/\n\s*return json\(/);
+      const block = nextReturn === -1 ? rest : rest.slice(0, nextReturn + 1);
+      if (/plan:\s*steps/.test(block)) GATED.add("multi_step_plan");
+    }
+  }
 
   check("⭐ the derivation found real actions on both sides — an empty set would pass vacuously",
     GATED.size > 0 && IMMEDIATE.size > 0,

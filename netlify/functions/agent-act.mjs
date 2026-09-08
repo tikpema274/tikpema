@@ -214,7 +214,11 @@ export async function handler(event) {
       // ⛔ vault_deposit is EXCLUDED ON PURPOSE, and the exclusion is a decision, not an omission:
       // a deposit needs an ackToken bound to the disclosure the USER saw, and there is no way for a
       // model to produce one. Unlocking it here would ship a step that refuses 100% of the time.
-      const KINDS = new Set(STEP_TYPES.filter((t) => t !== "vault_deposit"));
+      // ⭐ EVERY executor type is now proposable in a plan, including vault_deposit — its
+      // per-step disclosure is computed below and its ack re-verified by agent-execute-plan before
+      // step 1 runs. It was excluded while that threading did not exist, because a step refused
+      // MID-RUN is refused after earlier steps have already moved money.
+      const KINDS = new Set(STEP_TYPES);
       for (const s of steps) {
         if (!KINDS.has(s?.type)) {
           return json(200, { executed: false, decision, blocked: `unknown step type "${s?.type}"` });
@@ -222,9 +226,27 @@ export async function handler(event) {
       }
       const cap = sendCapUsdc();
       const bcap = bridgeCapUsdc();
-      // A bridge step is bounded by the per-BRIDGE cap; everything else by the
-      // per-transaction (send) cap. Same per-step caps the executor enforces.
-      const capFor = (s) => (s?.type === "bridge_usdc" ? bcap : cap);
+      const vcap = vaultDepositCapUsdc();
+      // ═══ 🚨 ONE ACTION MUST BE BOUNDED BY ONE QUANTITY, ON EVERY PATH THAT BOUNDS IT ══════════
+      // This read `s.type === "bridge_usdc" ? bcap : cap`, so a VAULT step fell to the SEND cap
+      // while executeAction bounds a deposit by vaultDepositCapUsdc(). Two paths, one action, two
+      // different numbers — the same defect the bridge comment above records ("A plan could pass
+      // here and be refused there"), which was fixed for bridges and left latent for vaults.
+      //
+      // ⭐ MEASURED ON PRODUCTION 2026-09-08, not inferred from defaults: AGENT_SEND_CAP_USDC=10,
+      // AGENT_VAULT_DEPOSIT_CAP_USDC unset ⇒ 25. So TODAY the pre-flight is the STRICTER side and
+      // the visible symptom is a wrong refusal naming a limit that does not govern the action —
+      // "exceeds per-transaction limit of 10 USDC" for something bounded at 25.
+      // ⚠️ THE DIRECTION IS AN ENV ACCIDENT, NOT A PROPERTY. Raise the send cap above 25 and it
+      // inverts into the dangerous one: the plan passes here and is refused MID-RUN, after earlier
+      // steps have already moved money. The disagreement is the defect; neither direction is safe
+      // to keep. [[refusal-reports-compared-quantity]] · [[duplicate-source-of-truth-is-the-recurring-bug]]
+      const capFor = (s) =>
+        s?.type === "bridge_usdc" ? bcap : s?.type === "vault_deposit" ? vcap : cap;
+      // ⭐ AND THE MESSAGE NAMES THE CAP THAT ACTUALLY GOVERNS. A refusal quoting the wrong bound
+      // sends the user to change the wrong setting.
+      const capLabelFor = (s) =>
+        s?.type === "bridge_usdc" ? "bridge" : s?.type === "vault_deposit" ? "vault-deposit" : "transaction";
       // ══ THE BRIDGE FEE IS RESOLVED BEFORE VALUATION, BECAUSE VALUATION NEEDS IT ═══════════
       //
       // 🚨 SAME DEFECT AS agent-execute-plan, same commit. f760077 made the fee REQUIRED to value
@@ -287,11 +309,10 @@ export async function handler(event) {
       }
       const over = values.findIndex((v, idx) => v > capFor(steps[idx]));
       if (over >= 0) {
-        const isBridge = steps[over]?.type === "bridge_usdc";
         return json(200, {
           executed: false,
           decision,
-          blocked: `step ${over + 1} (~${values[over].toFixed(2)}) exceeds per-${isBridge ? "bridge" : "transaction"} limit of ${capFor(steps[over])} USDC`,
+          blocked: `step ${over + 1} (~${values[over].toFixed(2)}) exceeds per-${capLabelFor(steps[over])} limit of ${capFor(steps[over])} USDC`,
         });
       }
       const ceiling = budgetConfig().PERIOD_CEILING_USDC;
@@ -312,6 +333,56 @@ export async function handler(event) {
       // reused, so the fee the caps counted is the fee the user is shown. The step-count guard,
       // the destination check and the pricing-reachability refusal all ran up there.
       const bridgeIdx = bridgeIdxEarly;
+
+      // ═══ ⭐⭐ PER-STEP VAULT DISCLOSURE — A SEPARATE MAP, DELIBERATELY ════════════════════════
+      // ⛔ NOT folded into `stepDisclosures`. That map is bridge-shaped — feeUsdc, netUsdc, band,
+      // feeRatio — and three consumers read it (this panel, the plan-refusal path, the quote
+      // record) with no discriminator between kinds. Adding a second shape to it would make every
+      // one of them read fields that may not be there, and the failure would be silent: a vault
+      // entry has no `band`, so a `band === "acknowledge"` test simply returns false and the step
+      // stops being gated. A parallel map cannot do that to anything.
+      // [[vendor-field-carries-its-own-discriminator]] · [[a-check-whose-failure-mode-is-a-pass]]
+      //
+      // ⚠️ BOUNDED LIKE THE BRIDGE LOOP. Each vault step costs a live on-chain inspection plus a DD
+      // report inside the same ~10s handler. The same limit applies for the same reason.
+      const vaultIdx = steps.map((s, i) => (s?.type === "vault_deposit" ? i : -1)).filter((i) => i >= 0);
+      if (vaultIdx.length > MAX_PRICED_BRIDGE_STEPS) {
+        return json(200, {
+          executed: false,
+          decision,
+          blocked:
+            `this plan has ${vaultIdx.length} vault deposits; ${MAX_PRICED_BRIDGE_STEPS} is the most that can be ` +
+            `inspected and disclosed in one plan. Split it into smaller plans.`,
+        });
+      }
+      const vaultDisclosures = {};
+      for (const i of vaultIdx) {
+        const vv = resolveVault(steps[i].vault);
+        if (!vv) {
+          return json(200, { executed: false, decision, blocked: `step ${i + 1}: unsupported vault "${steps[i].vault}"` });
+        }
+        let vdisc;
+        try {
+          vdisc = await depositDisclosure({ vault: vv, owner: walletAddress, event });
+        } catch (e) {
+          // ⛔ AN UNREADABLE VAULT REFUSES THE WHOLE PLAN, BEFORE ANY STEP RUNS. Proposing a plan
+          // whose deposit terms could not be read would ask for consent to something unread.
+          return json(200, {
+            executed: false,
+            decision,
+            blocked: `step ${i + 1}: could not read that vault's terms right now, so there is nothing to accept (${e.message}). Nothing was executed.`,
+          });
+        }
+        if (!vdisc.depositable) {
+          const why = vdisc.gate.blocks.map((b) => b.detail).join(" ");
+          return json(200, {
+            executed: false,
+            decision,
+            blocked: `step ${i + 1}: that vault failed a safety check, so the plan is refused — no acknowledgement can override it. ${why}`.trim(),
+          });
+        }
+        vaultDisclosures[i] = vdisc;
+      }
 
       const stepDisclosures = {};
       let totalFeeUsdc = 0;
@@ -416,6 +487,9 @@ export async function handler(event) {
       return json(200, {
         executed: false,
         needsConfirm: true,
+        // Parallel to stepDisclosures — see the comment where it is built. Keyed by the same
+        // step index so one `planAcked` map covers both kinds.
+        vaultDisclosures,
         decision,
         // Echoed so the client can hand it back on confirm. It authorizes NOTHING — the
         // executor re-prices and recomputes every gate regardless of what comes with it.

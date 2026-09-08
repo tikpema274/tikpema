@@ -26,6 +26,7 @@
 process.env.SESSION_SECRET ||= "test-session-secret-0123456789abcdef";
 
 import { readFileSync, readdirSync } from "node:fs";
+import { stepsNeedingAck, planAckTokensFor } from "../shared/plan-acks.mjs";
 import { bridgeFeeBand, bridgeAckToken, bridgeNetUsdc, bridgeDebitMinor, FEE_BAND_WARN, FEE_BAND_ACKNOWLEDGE, FEE_BANDS, GATING_BANDS } from "../netlify/functions/_bridge.mjs";
 
 let pass = 0, fail = 0;
@@ -367,8 +368,40 @@ section("8 — CONSENT ON THE PLAN PATH: refuse at plan stage, never mid-flight"
   check("⭐⭐ acceptance is PER STEP, not one blanket tick", /planAcked\[i\]/.test(panel) && /Record<number, boolean>/.test(panel));
   check("⭐ the confirm button is gated until every required step is accepted",
     /disabled=\{planBusy \|\| !allPlanAcksGiven\}/.test(panel));
-  check("⭐ only tokens for steps actually accepted are sent",
-    /if \(planAcked\[i\\] && planDisclosures/.test(panel) || /planAcked\[i\] && planDisclosures/.test(panel));
+  // ═══ ⭐⭐ THE RULE IS NOW CALLED, NOT GREPPED ════════════════════════════════════════════════
+  // 🚨 THIS ASSERTION PINNED AN EXPRESSION SHAPE — `planAcked[i] && planDisclosures` — and shapes
+  // are not properties. It went RED when the identical rule was rewritten as a guard clause, and
+  // it would have stayed GREEN on a rewrite that kept the shape and broke the rule. A regex over
+  // source cannot tell those two apart, which is the whole reason it is the wrong instrument.
+  // ⭐ So the rule was lifted into a pure function and is EXERCISED here: two steps requiring an
+  // ack, one ticked, and the assertion is that exactly one token travels.
+  // [[assert-on-rendered-output-not-source-regex]] · [[flow-is-not-meaning]]
+  {
+    const maps = {
+      planDisclosures: { 0: { band: "acknowledge", ackToken: "bridge-tok" }, 2: { band: "warn", ackToken: null } },
+      planVaults: { 1: { ackRequired: true, ackToken: "vault-tok" } },
+    };
+    const need = stepsNeedingAck(maps).sort((a, b) => a - b);
+    check("⭐ both kinds of consent are counted, and a warn band is NOT one of them",
+      JSON.stringify(need) === "[0,1]", JSON.stringify(need));
+    const none = planAckTokensFor(maps, {});
+    check("⛔⛔ NOTHING is sent when nothing was ticked",
+      Object.keys(none).length === 0, JSON.stringify(none));
+    const one = planAckTokensFor(maps, { 0: true });
+    check("⭐ only tokens for steps actually accepted are sent",
+      JSON.stringify(one) === '{"0":"bridge-tok"}', JSON.stringify(one));
+    const both = planAckTokensFor(maps, { 0: true, 1: true });
+    check("⭐⭐ …and a VAULT step's token comes from its own map, not the bridge one",
+      both[1] === "vault-tok" && both[0] === "bridge-tok", JSON.stringify(both));
+    // ⛔ Ticking a step that needs no acknowledgement must not manufacture one.
+    const spurious = planAckTokensFor(maps, { 2: true });
+    check("⛔ a tick on a step needing NO ack sends nothing",
+      Object.keys(spurious).length === 0, JSON.stringify(spurious));
+    // And the component must actually USE the shared rule, or the checks above test dead code.
+    check("⭐ …and the panel calls the shared rule rather than re-implementing it",
+      /planAckTokensFor\(\{ planDisclosures, planVaults \}, planAcked\)/.test(panel),
+      "an inlined second copy would pass every behavioural check above and ship the old bug");
+  }
   check("  …and the client can carry them",
     /ackTokens\?: Record<number, string>/.test(client) && /\{ plan, ackTokens[,\s}]/.test(client));
   check("⭐ the panel renders the warn band too, not only the hard gate", /d\.band === "warn"/.test(panel));
