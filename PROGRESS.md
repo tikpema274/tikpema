@@ -1,5 +1,62 @@
 ---
 
+# ⭐ DEMAND VALIDATION FROM OUTSIDE — and it names the easy half
+
+**2026-09-08.** DHH, publicly: *"Who's doing the first agentic bank? I want to give my machine an
+agent account, an allowance, and permission to just take care of stuff."* Answered with *"Check out
+Circle Agent Stack."* Recorded as a strategic read; **nothing built, nothing changed.**
+
+## 1. HE IS DESCRIBING WHAT IS ALREADY SHIPPED HERE
+
+| his words | what exists |
+|---|---|
+| an agent account | per-user agent SCA, provisioned on first session |
+| an allowance | per-transaction cap + daily ceiling, CAS day-counter, NaN-fail-closed |
+| permission to just take care of stuff | `dca-tick` on `* * * * *`, executing within caps unattended, with a pause that reads `consistency: "strong"` so a stale "not paused" cannot defeat it |
+
+Not an analogy — that is the architecture, shipped and guarded.
+
+## 2. THE REPLY IS CORRECT AND SLIGHTLY BESIDE THE POINT
+
+[[circle-agent-stack-strategic-read]] settled this in July: **the plumbing was never ours to win.**
+Wallets, CCTP and unified balance are Circle SDKs underneath; the hand-built parts are workarounds
+for the App Kit 1098 SCA async-hash race, not Not-Invented-Here. Anyone can hand an agent a wallet
+and a limit, and Circle will do it better than we would.
+
+## 3. ⭐⭐ WHAT THE TWEET DOES NOT ASK FOR IS THE ENTIRE CONTENT OF THIS SESSION
+
+He asks for an allowance and permission. He does not ask *how do I know what it did*, *how do I stop
+it*, *what happens when it is wrong* — or the one that ran through everything today: **how do I get
+out.**
+
+Against that, what actually consumed the day:
+
+- **four redemption states**, because "can I exit?" is not a threshold and `unknown` must never
+  render as `blocked`
+- **a "not a deposit address" caution**, because a correct label beside a copy button is an invitation
+- **an entry gate that simulates the SELL before buying**, because a stop-loss cannot exit a position
+  that will not route — measured: LAMBO's exit route vanished inside two minutes
+- **a coverage manifest that refuses a clean bill**, because a clean bill is the one output nobody
+  double-checks
+
+⛔ **None of that is in the tweet, and all of it is what makes the tweet's ask survivable.** An agent
+with an allowance and no exit story is a way to lose money slowly with excellent UX.
+
+## THE READ
+
+⭐ Demand validation from someone with reach, for **the half we are not differentiated on** — which
+is useful, because it means the category is arriving and the July conclusion holds: *the trust layer
+is the product, and Circle structurally cannot ship the tool that tells you what its own owners can
+do to you.*
+
+⚠️ **But be careful with the word BANK.** Deposits, custody, regulation — none of which this does or
+should claim. And the honest position today is sharper: we are on **testnet**, Arc has **no
+mainnet** (see the entry above), and every guard here currently protects money that is not real.
+
+**The right thesis, demonstrated on a chain that has not launched.** Not a bad place to be — just
+not a place to answer that tweet from yet.
+
+
 # ⛔ THERE IS NO ARC MAINNET. The move is a WAIT, not a decision.
 
 **2026-09-08. Read-only. NOTHING BUILT.** Triggered by an on-ramp question; the on-ramp is moot and
