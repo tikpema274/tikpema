@@ -17,6 +17,7 @@ import NanopaymentPanel from "./components/NanopaymentPanel";
 import UnifiedBalancePanel from "./components/UnifiedBalancePanel";
 import PlanPanel from "./components/PlanPanel";
 import Dashboard from "./components/Dashboard";
+import ReceivePanel from "./components/ReceivePanel";
 import { useWallet } from "./wallet/useWallet";
 
 // Multi-page console. ONE useWallet() instance lives at the shell and is passed
@@ -58,6 +59,12 @@ export default function App() {
 
   let page: JSX.Element;
   switch (route) {
+    // ⭐ Receive. NOT in NAV — reached from the Wallet page and from the Dashboard, the two places
+    // a user is already thinking about their own money. The 5-item nav is reserved for working
+    // tools, and this is a one-fact screen. [[tikpema-ui-conventions]]
+    case "receive":
+      page = <ReceivePanel wallet={wallet} />;
+      break;
     case "wallet":
       page = <ConnectPasskey wallet={wallet} />;
       break;

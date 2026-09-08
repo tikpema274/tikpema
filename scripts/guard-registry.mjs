@@ -90,6 +90,14 @@ export const COMPONENTS = {
   // cards, none on the dashboard) with a non-emptiness floor under both counts, because each half
   // alone is satisfied by a page that renders nothing.
   ConsequenceCard:      { suite: "verify-consequence-card.tsx" },
+  // ⭐ The receive surface. It carries TWO claims that can lose money if wrong: WHICH POCKET the
+  // address belongs to (the agent float and the unified balance must never be offered — one is the
+  // agent's spending money, the other is not an address at all), and that the address is USDC-on-Arc
+  // ONLY, since an Arc address is indistinguishable from an Ethereum one and a cross-chain send is
+  // unrecoverable. ⚠️ Its suite also pins the address as FULL rather than masked — a masked address
+  // cannot be verified by the person about to send to it — and pins the Dashboard card's POSITION,
+  // because it was first placed under a heading reading "This leaves you."
+  ReceivePanel:         { suite: "verify-receive-and-paylink.tsx" },
   Dashboard:            { suite: "verify-dashboard-copy.tsx" },
   ResearchPanel:        { suite: "verify-research-panel-copy.tsx" },
   // ⚠️ NOT verify-activity-fallback — that renders ONE row subcomponent for a fallback label and

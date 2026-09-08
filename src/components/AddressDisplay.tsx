@@ -8,8 +8,15 @@ function mask(addr: string): string {
   return addr.length > 12 ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr;
 }
 
-export default function AddressDisplay({ address }: { address: string }) {
-  const [expanded, setExpanded] = useState(false);
+// ⭐ `defaultExpanded` — OPT-IN, DEFAULT FALSE, so every existing call site is untouched.
+// Masking is right where an address is INCIDENTAL CONTEXT (the Wallet page's pockets, the
+// unified-balance owner): it keeps a long hex string from dominating a screen about something
+// else. It is WRONG where the address IS THE CONTENT — a receive screen exists to hand someone an
+// address, and a masked one cannot be READ ALOUD, compared against what a sender typed, or checked
+// against the QR beside it. ⚠️ That last one is a safety property, not a convenience: verifying the
+// address is the defence against substitution, and masking removes the thing being verified.
+export default function AddressDisplay({ address, defaultExpanded = false }: { address: string; defaultExpanded?: boolean }) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [copied, setCopied] = useState(false);
 
   // Clear the transient "Copied" state; cleaned up on unmount / re-copy.

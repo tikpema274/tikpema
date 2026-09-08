@@ -9,6 +9,35 @@ type UnifiedWallet = ReturnType<typeof useWallet>;
 const shortAddr = (a: string) =>
   a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
 
+// ═══ ⭐⭐ PAYMENT LINKS — #/send?to=0x…&amount=5 — AND THE INPUT IS UNTRUSTED ═══════════════════
+// A payment link is a URL someone else wrote and sent you. Everything in it is ATTACKER-SUPPLIED,
+// so it PREFILLS a form the user then reads and submits; it never pre-authorises anything.
+//
+// ⛔ THE ONE SECURITY PROPERTY: the recipient stays VISIBLE AND EDITABLE. A link that silently set
+// a hidden destination would let a stranger choose where your money goes while the screen showed
+// something else — the failure the self-signed confirmation work exists to prevent
+// ([[manual-send-confirmation-names-nothing]]). The form is the disclosure; the link only fills it.
+//
+// ⚠️ A MALFORMED PARAM IS DROPPED, NEVER COERCED. `to` must match the address shape or it does not
+// land in the field at all — half-parsing an address into an input the user then submits is worse
+// than ignoring it. Same for a non-positive or unparseable amount, which falls back to the default
+// rather than to 0 or NaN. [[nan-fail-open-cap-pattern]]
+// ⚠️ Read ONCE at mount, not on every render: re-reading would fight the user's own edits.
+const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
+export function paymentLinkParams(hash: string): { to?: string; amount?: string; note?: string } {
+  const q = String(hash).split("?")[1];
+  if (!q) return {};
+  const p = new URLSearchParams(q);
+  const out: { to?: string; amount?: string; note?: string } = {};
+  const to = (p.get("to") || "").trim();
+  if (ADDR_RE.test(to)) out.to = to;
+  const amt = Number((p.get("amount") || "").trim());
+  if (Number.isFinite(amt) && amt > 0) out.amount = String(amt);
+  const note = (p.get("note") || "").trim();
+  if (note) out.note = note.slice(0, 120);
+  return out;
+}
+
 // ═══ ⭐⭐ THIS PANEL IS CAPPED, AND UNTIL NOW IT NEVER SAID SO ═══════════════════════════════════
 // It sends from the user's AGENT wallet through /api/agent-send, which enforces a per-transaction
 // cap and a day ceiling. The panel's only description was "From your wallet to any address —
@@ -35,8 +64,12 @@ const shortAddr = (a: string) =>
 // /api/agent-send call it hits are UNCHANGED. Critical: it is gated on
 // w.agentWallet exactly as before — Send never appears before a wallet exists.
 export default function SendPanel({ wallet: w }: { wallet: UnifiedWallet }) {
-  const [to, setTo] = useState("");
-  const [amount, setAmount] = useState("0.1");
+  // ⭐ Lazy initialiser, so the link is read exactly once — on mount — and never re-applied over
+  // an edit the user has since made.
+  const [linked] = useState(() =>
+    paymentLinkParams(typeof window === "undefined" ? "" : window.location.hash));
+  const [to, setTo] = useState(linked.to ?? "");
+  const [amount, setAmount] = useState(linked.amount ?? "0.1");
   const [sendConfirm, setSendConfirm] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
@@ -90,6 +123,19 @@ export default function SendPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       <div className="panel-eyebrow">Send</div>
       <h2>Send from your agent wallet</h2>
       <div className="sub">From your agent wallet to any address — gasless on Arc.</div>
+
+      {/* ⛔ A PREFILLED FORM MUST SAY IT WAS PREFILLED. The fields below came from a link someone
+          else wrote, and a reader who assumes they typed them is exactly the reader a payment link
+          can rob. Naming the source is what turns attacker-supplied input into a disclosure the
+          user can check. ⚠️ The recipient stays visible AND editable — the link fills the form, it
+          never pre-authorises a destination. */}
+      {linked.to && (
+        <div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>
+          <b>Filled in from a payment link.</b> Check the recipient and amount below before you
+          send — anyone can create a link, and these values came from whoever sent you this one.
+          {linked.note ? <> Their note: “{linked.note}”.</> : null}
+        </div>
+      )}
 
       {/* ⭐⭐ THE PRESENCE, STATED. Without this the manual panel's "caps do not apply here" has
           nothing to contrast against. No number: the server owns it and names it on refusal. */}

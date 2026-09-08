@@ -145,6 +145,16 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
               <span style={{ color: "var(--warn)" }}>⚠ Committed</span> — releasing it is
               delayed and goes through us. The one pocket you can't pull back alone.
             </ConsequenceCard>
+          {/* ⭐ RECEIVE — IN THIS GROUP, NOT "Move money out". Money arriving is not money leaving,
+              and this block's own sub says "Nothing leaves you", which is exactly true of receiving.
+              🚨 I first placed this beside Vault, inside "Move money out" — under a heading reading
+              "This leaves you." Presence is not enough: POSITION decides which claim a card sits
+              under, and verify-dashboard-copy asserts that grouping with indexOf for this reason.
+              [[a-category-label-became-a-position]] */}
+          <ConsequenceCard title="Receive" onClick={() => go("receive")}>
+              Your address and a QR to scan. <span style={{ color: "var(--warn)" }}>USDC on Arc
+              only</span> — from another chain it will not arrive.
+            </ConsequenceCard>
         </div>
       </div>
 
