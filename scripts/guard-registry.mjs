@@ -43,6 +43,11 @@ export const COMPONENTS = {
   bridgeReceiptStatus:  { suite: "verify-bridge-copy.tsx" },
   jobTimeline:          { suite: "verify-job-status-merge.tsx" },
   VaultPanel:           { suite: "verify-vault-panel-copy.tsx" },
+  // ⭐ The consent surface extracted OUT of VaultPanel so the agent's deposit confirm and every
+  // vault step in a plan render the same words and the same tick. It has its own suite because
+  // deleting the acknowledgement control left the vault suite GREEN — the highest-stakes gate in
+  // the app had no render assertion at all.
+  VaultDisclosure:      { suite: "verify-vault-disclosure.tsx" },
   MyAgentPanel:         { suite: "verify-agent-panel-copy.tsx" },
   DcaPanel:             { suite: "verify-dca-consent-copy.tsx" },
   NanopaymentPanel:     { suite: "verify-nanopay-copy.tsx" },
