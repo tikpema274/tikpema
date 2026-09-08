@@ -1,5 +1,66 @@
 ---
 
+# ⭐⭐ PWA SCOPED — MANIFEST YES, SERVICE WORKER NO. And the reason is that a SW would make our gate lie.
+
+**2026-09-08. Read-only scoping. NOTHING BUILT.** Goal: make Tikpema installable — home-screen icon,
+standalone window — as the low-friction alternative to an app store.
+
+**Starting point:** Vite + React SPA, `dist/` with one hashed bundle, `theme-color` already set in
+`index.html`. ⚠️ **No manifest, no service worker, and no icons at all** — `public/` holds a single
+test fixture, and there is no favicon, logo or PNG anywhere in the repo.
+
+## 🚨 THE FINDING — A SERVICE WORKER IS INVISIBLE TO `gate:deployed`
+
+`scripts/verify-deployed.mjs:199` probes the site with `cache-control: no-cache` **from Node**. A
+service worker runs **client-side only**, so it can never appear in that probe. The gate would keep
+reporting ✅ *"production serves THIS tree"* — TRUTHFULLY, about the server — while an installed
+user was being served a bundle from weeks ago.
+
+⛔ **AND THE HARM IS EXACTLY WHAT WE SHIPPED YESTERDAY.** On 2026-09-07 we removed *"Withdraw any
+time, minus a fee"* because it was measurably false, and verified the corrected copy in the served
+asset (`index-DzGs_ebC.js`). Every web user got it on the next load. Under a cache-first service
+worker, an installed user keeps reading the false claim indefinitely and **no part of the deploy
+pipeline can see them**.
+
+⭐ Same shape as the copy suite that asserted a claim was gone while it was live: a guard that cannot
+see the failure it appears to cover, because the instrument and the subject sit on opposite sides of
+a boundary. [[binding-tested-across-what-it-binds]]
+
+## THE DECISION
+
+| | |
+|---|---|
+| ✅ **manifest only** | `manifest.webmanifest` alone installs on Android AND iOS — icon, standalone window, splash. **Zero** effect on deploy verification. |
+| ⛔ **no service worker** | Buys only offline, and this app can do nothing useful offline: every screen reads a balance, an inspection or a report. A caching layer on a money app whose safety story depends on everyone running current code. |
+| ⛔ **no app store** | Same problem one step worse — a store binary is a version you cannot roll forward, and review latency does not fit a several-deploys-a-day cadence. |
+
+## PHASE 1 — INSTALLABLE, NO SERVICE WORKER (~half a day, mostly design)
+
+`public/manifest.webmanifest` (name, short_name, `start_url:"/"`, `display:"standalone"`,
+`theme_color:"#0F141A"` — already chosen, background_color) · `<link rel="manifest">` +
+`apple-touch-icon` in `index.html` · verify install on Android/iOS.
+
+⚠️ **THE LONG POLE IS ICONS, AND IT IS A DESIGN TASK.** 192 / 512 / 512-maskable must be created
+from nothing — the repo contains no logo asset of any kind.
+
+## ⛔ PHASE 2 — ONLY IF OFFLINE IS EVER A STATED REQUIREMENT
+
+`vite-plugin-pwa`, `registerType:"autoUpdate"`, **network-first for navigation** (Vite's hashed
+filenames make asset precaching safe by construction), plus an update prompt so a user on an old
+bundle is TOLD rather than silently left there.
+
+⛔ **AND A NEW GUARD IS PART OF PHASE 2, NOT AN EXTRA.** Something must assert the SW does not serve
+stale HTML, because `gate:deployed` structurally cannot. Shipping the cache without the guard adds a
+failure mode the pipeline is blind to.
+
+⭐ **Portable rule:** before adding any client-side cache, CDN rule or offline layer, ask which
+existing guard would have to change to still be true. `gate:deployed` answers *"what does the server
+send"*, never *"what does the user run"* — and those coincide only while nothing caches between them.
+
+⚠️ Does NOT solve the friend-send question: a recipient still signs in once to have an address.
+Installing only makes that step feel nicer.
+
+
 # ⛔ ARC TRANSACTION MEMOS — DECLINED IN FULL. All three phases, and the gate closed the last one.
 
 **2026-09-08.** Arc shipped transaction memos on testnet (2026-09-07): structured context attached
