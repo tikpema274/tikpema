@@ -131,6 +131,24 @@ section("6 — ⛔⛔ THE LINK PREFILLS; IT NEVER PRE-AUTHORISES");
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
+section("6b — ⭐ THE WAY OUT TO SEND — NAVIGATION, NEVER AN ACTION");
+{
+  const html = renderToStaticMarkup(<ReceivePanel wallet={wallet()} />);
+  check("a Send control exists on the receive page", /Send instead/.test(text(html)));
+  check("⭐ it targets the SEND route", /\/send/.test(readFileSync("src/components/ReceivePanel.tsx", "utf8")));
+  check("⛔⛔ it does NOT move money — no send call on this page",
+    !/agent-send|\bsend\(\)/.test(readFileSync("src/components/ReceivePanel.tsx", "utf8")),
+    "a receive screen must not be able to spend");
+  // ⚠️ It must not out-shout the address, which is the page's whole content.
+  check("⭐ it is NOT the primary emerald action",
+    !/className="emerald"[^>]*>\s*Send instead/.test(html) && !/emerald/.test(html),
+    "a primary button here would read as 'the thing to do on this screen'");
+  // ⛔ Absent when there is nothing to receive to — a nav control on a dead-end state.
+  check("⛔ it is absent in the signed-out state, like everything else on this page",
+    !/Send instead/.test(text(renderToStaticMarkup(<ReceivePanel wallet={wallet(null)} />))));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
 section("7 — ⛔ THE ENTRY POINT SITS UNDER THE RIGHT CLAIM");
 {
   // 🚨 THE DEFECT THIS PINS. The Receive card was first placed beside Vault, inside the "Move money

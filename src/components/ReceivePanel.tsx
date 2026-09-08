@@ -112,6 +112,23 @@ export default function ReceivePanel({ wallet: w }: { wallet: UnifiedWallet }) {
             cannot be recovered. Check the sender is on Arc before they send.
           </div>
 
+          {/* ⭐ THE OTHER DIRECTION. Receive and send are the two halves of the same errand, and a
+              reader who has just shown someone their address is often the next person to pay one.
+              ⚠️ SECONDARY, AND BOTTOM-RIGHT, ON PURPOSE: this page's job is the address above it,
+              so the outbound control must not compete with it. `linkbtn`-weight rather than
+              `emerald` — a primary button here would read as "the thing to do on this screen",
+              which is the opposite of true.
+              ⛔ IT NAVIGATES, IT DOES NOT SEND. Nothing on a receive screen may move money. */}
+          <div className="row" style={{ justifyContent: "flex-end", marginTop: 18 }}>
+            <button
+              className="btn"
+              onClick={() => (window.location.hash = "/send")}
+              title="Go to the Send page"
+            >
+              Send instead →
+            </button>
+          </div>
+
           {/* ⭐ NAMES THE OTHER POCKETS RATHER THAN PRETENDING THERE IS ONE. A user who has read the
               Wallet page knows there are three; silence here would read as "this is the only one". */}
           <div className="sub" style={{ marginTop: 12 }}>
