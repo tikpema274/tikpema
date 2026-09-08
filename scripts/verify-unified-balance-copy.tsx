@@ -404,6 +404,35 @@ section("6 — ⭐ THE JUNE SHAPE: header → balance → action → explanation
     (ubParked.match(/Tikpema controls that account/g) || []).length === 1);
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+// ⛔ 🚨 THE OWNER ADDRESS IS NOT A DEPOSIT ADDRESS, AND IT HAS A COPY BUTTON
+//
+// USDC does not enter the unified balance by transfer — it enters through a `depositFor` contract
+// call. A plain transfer to this address lands in the agent's SPENDING FLOAT, silently: no error,
+// no bounce, and nothing afterwards that says the sender meant something else.
+// ⭐ THE LABEL WAS ALREADY ACCURATE ("Agent wallet · unified balance owner") AND THAT WAS NOT
+// ENOUGH. A correct identity beside a copy affordance is an invitation; only the CONSEQUENCE says
+// where not to paste it. Asserted on the RENDER, and positionally — the caution must sit AFTER the
+// address, where a reader who has just copied it still meets it.
+{
+  gateway = { status: "ready", total: "7.5000", perChain: [], depositor: "0x" + "ab".repeat(20) };
+  const mk = markup(UnifiedBalancePanel);
+  const iAddr = mk.indexOf("Agent wallet · unified balance owner");
+  const iWarn = mk.indexOf("Not a deposit address");
+  check("the owner address block renders at all", iAddr >= 0, `iAddr ${iAddr}`);
+  check("🚨 …and it carries the NOT-A-DEPOSIT-ADDRESS caution", iWarn >= 0, `iWarn ${iWarn}`);
+  check("⛔ …positioned AFTER the address, not above it", iAddr >= 0 && iWarn > iAddr,
+    `addr ${iAddr} warn ${iWarn}`);
+  // ⚠️ TEXT, NOT MARKUP, for the body-copy claims: renderToStaticMarkup escapes the apostrophe in
+  // "agent's" to &#x27;, so a raw-markup regex fails on correct copy. `render()` decodes entities
+  // and collapses whitespace — the two claims below are about what a reader SEES, so they use it.
+  const tx = render(UnifiedBalancePanel);
+  check("⭐ …and it names WHERE the money would actually go, not just that it is wrong",
+    /lands in your agent's wallet/.test(tx),
+    "a caution that says 'wrong' without saying 'where' leaves the user unable to act on it");
+  check("⭐ …and points at the action that DOES work", /Use the Deposit action above/.test(tx));
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

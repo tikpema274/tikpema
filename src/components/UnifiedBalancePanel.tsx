@@ -482,7 +482,22 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
 
       {/* Owner address — the agent wallet the unified balance is keyed to (the
           depositor). Masked + expand + copy via AddressDisplay. ONE address only;
-          the delegate signer is server-side and never surfaced. */}
+          the delegate signer is server-side and never surfaced.
+
+          ═══ 🚨 THIS ADDRESS HAS A COPY BUTTON AND IS NOT A DEPOSIT ADDRESS ══════════════════
+          The label was accurate — "Agent wallet · unified balance owner" — and named no
+          CONSEQUENCE. USDC does not enter the unified balance by transfer: it enters through a
+          `depositFor` contract call (agent-ub-deposit.mjs → ubDeposit). A plain transfer to this
+          address lands in the agent's SPENDING FLOAT, which has different rules, and it does so
+          SILENTLY — there is no error, no bounce, and no way to tell afterwards that the sender
+          meant something else.
+          ⛔ AN ACCURATE LABEL BESIDE A COPY BUTTON IS AN INVITATION. The affordance says "take
+          this and paste it somewhere"; only the caution says where not to. Same family as the
+          Dashboard grouping rebuilt because "the author of this app clicked Bridge when they
+          meant Deposit to unified balance" — a correct label is not a correct outcome.
+          ⚠️ Fixed BEFORE any receive/QR surface exists, deliberately: a receive feature teaches
+          users that copying an address is how you fund a pocket, which turns this from a latent
+          trap into a taught one. */}
       {data?.depositor && (
         <div
           className="status"
@@ -506,6 +521,16 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
             Agent wallet · unified balance owner
           </div>
           <AddressDisplay address={data.depositor} />
+          {/* ⛔ THE CONSEQUENCE, NOT JUST THE IDENTITY. Sits BELOW the address, where a reader who
+              has just copied it still meets it. --warn, matching every other rail that carries a
+              claim about where money goes. */}
+          <div
+            className="qd"
+            style={{ marginTop: 8, color: "var(--warn)" }}
+          >
+            ⚠️ Not a deposit address. Sending USDC here does <b>not</b> add to your unified
+            balance — it lands in your agent's wallet instead. Use the Deposit action above.
+          </div>
         </div>
       )}
 
