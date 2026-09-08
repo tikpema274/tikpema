@@ -1,5 +1,106 @@
 ---
 
+# ⛔ THE MAINNET MOVE IS BLOCKED ON CIRCLE — and a Gateway-less Arc mainnet is still a real product
+
+**2026-09-08. Read-only. NOTHING BUILT.** Triggered by an on-ramp question; the on-ramp turned out
+to be moot and this is the gating fact behind it.
+
+## 🚨 ARC HAS NO GATEWAY DOMAIN ON MAINNET — RE-MEASURED, NOT INHERITED
+
+`arc-gateway-watch.mjs` recorded this 2026-08-24. **Re-measured live 2026-09-08** against
+`gateway-api.circle.com/v1/info`: **12 domains, Arc absent.**
+
+```
+Ethereum · Base · Avalanche · Arbitrum · Optimism · Polygon
+Unichain · Sonic · Worldchain · Sei · HyperEVM · Solana
+```
+
+⛔ Without a domain, burn intents and mints have nothing to address. **This is a DEPENDENCY, not a
+defect — nothing in this repo can fix it.** ⭐ The right instrument already exists and already runs:
+`arc-gateway-watch` polls `*/15` and pushes to Discord the moment Arc appears. **The mainnet date is
+Circle's to set.** The plan is "wait for the watcher, then move", never "port and discover".
+
+## ⭐⭐ THE DEPENDENCY SET IS FIVE FILES, NOT NINE
+
+A grep for `GATEWAY` matches nine files. **Three are comment-only** and one is a string label — a
+count that would have overstated the blast radius by nearly half:
+
+- `_arc.mjs` — discusses Gateway in prose, **zero `GATEWAY.` uses**. Everything importing `_arc.mjs`
+  is therefore NOT Gateway-dependent, which is most of the codebase.
+- `agent-withdraw.mjs` — comment only: *"the only Gateway write"* is elsewhere.
+- `x402-quote.mjs` — one label string, `settlement: "circle-gateway-batched"`.
+
+⚠️ Recorded because the naive grep count is the number a planner would use.
+
+## ✅ GATEWAY-INDEPENDENT — WORKS ON A GATEWAY-LESS MAINNET
+
+| feature | why |
+|---|---|
+| Send (agent + self-signed) | plain USDC transfer |
+| Swap (agent + self-signed) | on-chain approve + swap, guaranteed minimum enforced on-chain |
+| **Bridge** (agent + self-signed) | ⭐ **CCTP, not Gateway** — `bridgeWithPreapprovalAndHook` on the BridgingKit |
+| Receive / payment links | address + QR + URL parsing; touches no rail at all |
+| Vault deposit/withdraw | ERC-4626 direct to the vault contract |
+| Agent withdraw | comment-only Gateway mention |
+| Research / DD reports | RPC reads + attestation |
+| Prediction market | direct contract calls |
+
+## ⛔ GATEWAY-DEPENDENT — DEAD ON MAINNET TODAY
+
+| feature | dependency |
+|---|---|
+| Unified balance — deposit | `_ubdeposit.mjs` → `deposit(address,uint256)` on `GATEWAY.WALLET` |
+| Unified balance — withdraw | `_ubwithdraw.mjs` → `initiateWithdrawal`, `availableBalance`, `withdrawalDelay` |
+| Gateway balance view | `gateway-balance.mjs` → `GATEWAY.API_BASE/v1/balances`, keyed by `ARC_DOMAIN 26` |
+| x402 data purchases | `_x402.mjs` signs against `GATEWAY.WALLET`, requires `GatewayWalletBatched` |
+| Delegate ops | `_delegate.mjs` → `GATEWAY.WALLET` |
+
+## ⭐ TWO CONSEQUENCES WORTH DECIDING ON, NOT DISCOVERING
+
+**The three-pocket model becomes two.** That is a simplification otherwise paid for — and it removes
+the pocket that caused the most confusion: the one whose "address" is not an address and needed a
+*not a deposit address* caution shipped this morning.
+
+🚨 **But the agent loses its data purchases.** `payX402` has no rail, so the Researcher cannot buy
+facts. Research still works — free sources answered 53 of 56 recorded jobs — but the nanopayment
+story, the x402 seller and the DD service's own paid endpoint all go quiet on mainnet.
+
+## WHAT THE MIGRATION ITSELF TOUCHES (smaller than the blocker suggests)
+
+107 files mention testnet; the DEPLOYED surface is narrow:
+`rpc.testnet.arc.network` ×5 · `arc-testnet` (Circle blockchain id) ×5 · `testnet.arcscan.app` ×2 ·
+`arc-testnet.drpc.org` · `gateway-api-testnet.circle.com` · `testnet.snowtrace.io`
+plus `ARC.chainId 5042002` and **every address in `CONTRACTS`** — USDC, EURC, the three ERC-8004
+registries, `TIKPEMA_PREDICTION`, `AGENTIC_COMMERCE`.
+
+⚠️ **Three things that are DECISIONS, not edits:**
+1. **The vault allowlist.** XyloVault is a testnet dress rehearsal by an unaudited third party. A
+   mainnet vault is a fresh trust decision — which is what the DD engine exists to make.
+2. **The ERC-8004 identities.** `agentId 851891`, the frozen unified CID, the DD attestation binding
+   — all testnet. Mainnet means re-registering and a new key binding.
+3. **`DATA_SELLER_URL`** points at QuickNode `arc-testnet`. Moot while Gateway is absent anyway.
+
+## ⛔ AND THE THING THAT CHANGES CHARACTER
+
+**Every guard in this repo currently protects TESTNET money.** 103 suites, the deploy gate, the
+canary, the caps — real engineering, none of it yet tested against a mistake that costs someone's
+rent. Before real funds, re-examine what was calibrated when the downside was a faucet refill: the
+**daily ceiling and per-transaction caps**, the **agent's unattended spend**, and the **vault deposit
+gate** — which blocks correctly but has never refused a deposit that mattered.
+
+## ⏸️ THE ON-RAMP QUESTION THAT STARTED THIS
+
+⛔ **You cannot on-ramp to a testnet.** An on-ramp takes real money and delivers real tokens; testnet
+USDC comes from the Circle faucet, which `ConnectPasskey` step 02 already does. Wiring MoonPay or
+Transak here would mean taking a card payment and delivering worthless tokens.
+
+⚠️ On mainnet, the open question is whether ANY on-ramp settles directly to Arc. If none does, "fund
+without leaving the app" becomes *on-ramp to Base → CCTP bridge to Arc* — two providers, two fee
+layers and a multi-minute wait behind one button. ⭐ The second half already exists and is proven.
+And KYC would land on us: the moment the app initiates identity verification we are in a compliance
+conversation that passkeys and agent wallets currently avoid entirely.
+
+
 # ⭐⭐ PWA SCOPED — MANIFEST YES, SERVICE WORKER NO. And the reason is that a SW would make our gate lie.
 
 **2026-09-08. Read-only scoping. NOTHING BUILT.** Goal: make Tikpema installable — home-screen icon,
