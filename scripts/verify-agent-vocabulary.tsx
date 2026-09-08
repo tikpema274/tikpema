@@ -32,6 +32,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { STEP_TYPES, validateStepShape } from "../netlify/functions/_actions.mjs";
+import { gateDeposit } from "../netlify/functions/_vault.mjs";
 
 const { AgentSummary } = (await import("../src/components/MyAgentPanel")) as any;
 
@@ -93,22 +94,18 @@ section("2 — ⭐⭐ THE MODEL'S VOCABULARY COVERS WHAT THE EXECUTOR CAN REACH"
   const offered = new Set([...unionLine.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]));
   check("⭐ the union parsed into real members", offered.size >= 6, `[${[...offered].join(",")}]`);
 
-  // ⛔ vault_deposit is the ONE deliberate exclusion, and it is asserted as such rather than
-  // simply being absent. A deposit needs an ackToken bound to the disclosure the USER saw
-  // (_actions.mjs gateDeposit); a model cannot mint one, so offering it would ship an action that
-  // refuses 100% of the time. Absence with no assertion reads as an oversight — this says it is a
-  // decision, and goes red if someone "helpfully" adds it without the consent flow.
-  const REACHABLE = STEP_TYPES.filter((t: string) => t !== "vault_deposit");
-  for (const t of REACHABLE) {
+  // ⭐⭐ EVERY executor type is now nameable — including vault_deposit, which was excluded until
+  // the consent round trip existed. ⚠️ THE EXCLUSION WAS NEVER ABOUT THE WORD: the executor gates
+  // a deposit on an ackToken bound to the disclosure the USER saw, so offering the action without
+  // a way to obtain one shipped a capability that refused 100% of the time. What changed is the
+  // flow, not the gate.
+  for (const t of STEP_TYPES) {
     check(`⭐⭐ executor type "${t}" is offered to the model`, offered.has(t),
       "built but unnameable is the defect this closes");
   }
-  check("⛔ vault_deposit is NOT offered — it would refuse every time without an ackToken",
-    !offered.has("vault_deposit"),
-    "the gate is correct; the vocabulary must not advertise past it");
-  check("🚨 …and the executor still gates deposits on an ackToken, which is WHY it is excluded",
+  check("🚨 the executor STILL gates deposits on an ackToken — the flow was added, not the gate removed",
     /gateDeposit\(\{[\s\S]{0,120}ackToken:\s*step\.ackToken/.test(actions),
-    "if this gate ever goes, the exclusion above needs re-deciding, not silently keeping");
+    "if this gate ever goes, the whole propose-then-confirm round trip needs re-deciding");
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
@@ -122,8 +119,17 @@ section("3 — ⛔ THE PLAN'S KINDS SET IS DERIVED, NOT RE-TYPED");
     "a literal here is a second copy that drifts on the next type added");
   check("🚨 …and no hardcoded four-type literal survives anywhere in agent-act",
     !/new Set\(\[\s*"transfer_usdc"/.test(act));
-  check("⭐ the one exclusion is explicit and named in code",
-    /STEP_TYPES\.filter\(\(t\) => t !== "vault_deposit"\)/.test(act));
+  // ⛔ vault_deposit remains out of PLANS specifically, and that is a scope decision rather than a
+  // capability one: a plan collects every step's consent in ONE press, so a vault step inside a
+  // plan needs its disclosure rendered per-step and its ack re-verified per-step in
+  // agent-execute-plan. Until that exists, a plan must not contain one — it would be refused
+  // mid-run, after earlier steps had already moved money.
+  check("⭐ the plan exclusion is explicit and named in code",
+    /STEP_TYPES\.filter\(\(t\) => t !== "vault_deposit"\)/.test(act),
+    "a plan collects consent in one press; per-step vault acks are not threaded yet");
+  check("⛔ …and a single-action deposit IS reachable, so the exclusion is about plans only",
+    /decision\.action === "vault_deposit"/.test(act),
+    "excluding it everywhere would be the old defect, not a scope decision");
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
@@ -266,6 +272,147 @@ section("6 — ⭐⭐ THE RESULTS RENDER, AND A READ NEVER WEARS A SPEND'S MARKS
   const blocked = show({ executed: false, decision: { action: "transfer_usdc" }, blocked: "exceeds per-transaction limit of 5 USDC" });
   check("🚨 a BLOCKED result still renders its reason",
     /held off/i.test(blocked) && /exceeds per-transaction limit/.test(blocked));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("7 — ⭐⭐ A DEPOSIT IS PROPOSED, NEVER EXECUTED BY THE MODEL'S WORD ALONE");
+{
+  // ⛔ THE ROUTING CLAIM, TESTED AS ROUTING. agent-act must NOT sign a deposit: it inspects,
+  // discloses, and hands back a quote. The execute half is /api/agent-vault-deposit, on a user
+  // press, carrying the token for the disclosure they actually read.
+  const bi = act.indexOf('if (decision.action === "vault_deposit")');
+  const wi = act.indexOf('if (decision.action === "vault_withdraw")');
+  check("⛔ the deposit branch exists — nothing to test otherwise", bi !== -1);
+  const body = bi === -1 ? "" : act.slice(bi, wi === -1 ? act.length : wi);
+  check("⭐⭐ the deposit branch NEVER calls executeAction — it proposes",
+    bi !== -1 && !/executeAction/.test(body),
+    "a model's word is not consent to hand funds to a third-party contract");
+  check("⭐ …and returns needsVaultConfirm with the server's disclosure",
+    /needsVaultConfirm:\s*true/.test(body) && /vaultDisclosure: d/.test(body));
+  check("⭐ …and the disclosure comes from the SHARED producer, not a second inline sequence",
+    /depositDisclosure\(\{ vault: v, owner: walletAddress/.test(body) &&
+      /import \{ depositDisclosure \} from "\.\/_vault-disclosure\.mjs"/.test(act),
+    "inspect → applyReportDisclosure → gate is an ORDERED sequence; re-typing it drops step 2");
+  // 🚨 A BLOCK IS TERMINAL. Offering a confirm button for a vault that failed a safety check
+  // would present an acknowledgement that cannot work — the gate refuses regardless.
+  check("🚨 a BLOCKed vault gets no confirm offered at all",
+    /if \(!d\.depositable\)/.test(body) && /no acknowledgement can override it/.test(body));
+  // ⛔ An unreadable vault must refuse, never propose. [[absence-must-never-read-as-safe]]
+  check("⛔ an unreadable vault REFUSES rather than proposing terms it could not read",
+    /could not read this vault's terms right now/.test(body) && /Nothing has been deposited/.test(body));
+
+  // ── The panel side: the SAME component, and the button gated on the SERVER's verdict ──
+  const panel = readFileSync(new URL("../src/components/MyAgentPanel.tsx", import.meta.url), "utf8");
+  check("⭐⭐ the confirm card MOUNTS VaultDisclosure rather than restating the warnings",
+    /<VaultDisclosure/.test(panel),
+    "a second copy of this text is the defect the extraction exists to prevent");
+  check("⛔ …and the panel writes none of the disclosure copy itself",
+    !/vault owner's powers over my deposit/.test(panel) && !/What the vault owner can do/.test(panel),
+    "if this copy appears here too, there are two producers again");
+
+  const stub = {
+    planRun: null, planBusy: false, planMints: {}, planAcked: {},
+    onPlanAckChange: () => {}, bridgeReceipts: [], onConfirm: () => {},
+    bridgeRun: null, bridgeBusy: false, bridgeAcked: false, walletReady: true,
+    onAckChange: () => {}, mint: null, onConfirmBridge: () => {},
+    vaultAcked: false, onVaultAckChange: () => {}, vaultDelta: null,
+    vaultRun: null, vaultBusy: false, onConfirmVault: () => {},
+  };
+  const INSP = {
+    verdict: { level: "WARN", warns: [{ code: "owner-can-withdraw", detail: "The owner can withdraw the underlying USDC." }], blocks: [] },
+    conformance: { erc4626: true }, asset: { isUsdc: true }, funded: { isShell: false, totalAssetsUsdc: 4171 },
+    redemption: { state: "full" }, withdraw: { withdrawFeePct: "0.10%", roundTripRetainedPct: "99.90%" },
+    ownerPowers: { ownerIdentityLabel: "an externally-owned account", owner: "0x" + "ab".repeat(20) },
+  };
+  const proposal = (over: any = {}) => ({
+    executed: false, decision: { action: "vault_deposit" }, needsVaultConfirm: true,
+    vaultDeposit: { amountUsdc: 5, vault: { key: "xylo-usdc", label: "XyloNet USDC Vault (xyUSDC)", shareSymbol: "xyUSDC" }, cap: 25 },
+    vaultDisclosure: { vault: { key: "xylo-usdc", label: "XyloNet USDC Vault (xyUSDC)", shareSymbol: "xyUSDC" },
+      inspection: INSP, gate: { level: "WARN", blocks: [], warns: [] }, depositable: true,
+      ackRequired: true, ackToken: "a".repeat(64) },
+    message: "Deposit 5 USDC into XyloNet USDC Vault (xyUSDC). This vault's owner holds powers over your deposit — read them below and accept before it runs.",
+    ...over,
+  });
+  const rawOf = (props: any) => renderToStaticMarkup(<AgentSummary data={proposal()} {...stub} {...props} />);
+  const textOf = (props: any) =>
+    rawOf(props).replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"')
+      .replace(/&amp;/g, "&").replace(/&#(\d+);/g, (_: string, d: string) => String.fromCharCode(Number(d)))
+      .replace(/\s+/g, " ").trim();
+
+  const unticked = rawOf({});
+  const ticked = rawOf({ vaultAcked: true });
+  check("⭐ the proposal names the amount and the vault",
+    /Deposit 5 USDC/.test(textOf({})) && /XyloNet USDC Vault/.test(textOf({})));
+  check("⭐⭐ the owner powers render — from the mounted component, not from this panel",
+    /The owner can withdraw the underlying USDC/.test(textOf({})),
+    "the disclosure travels; the panel does not restate it");
+  // ⛔⛔ THE GATE, BOTH DIRECTIONS. An enabled button before the tick is the whole defect.
+  check("⛔⛔ the confirm button is DISABLED until the acknowledgement is ticked",
+    /disabled=""/.test(unticked));
+  check("⭐⭐ …and ENABLED once it is — otherwise the gate is a dead end, not a gate",
+    !/disabled=""/.test(ticked));
+  check("⭐ …and the disabled state SAYS WHY",
+    /Tick the acknowledgment above/.test(textOf({})),
+    "a dead control with no reason is one the user cannot act on");
+  // A vault needing no ack must not be gated on a tick that is never offered.
+  const okVault = renderToStaticMarkup(
+    <AgentSummary
+      data={proposal({ vaultDisclosure: { vault: { key: "xylo-usdc", label: "V", shareSymbol: "s" }, inspection: { ...INSP, verdict: { level: "OK", warns: [], blocks: [] } }, gate: { level: "OK", blocks: [], warns: [] }, depositable: true, ackRequired: false, ackToken: null } })}
+      {...stub} />);
+  check("⭐⭐ a vault needing NO acknowledgement is confirmable immediately",
+    !/disabled=""/.test(okVault) && !/Tick the acknowledgment/.test(okVault),
+    "gating on a tick that is never offered would make an OK vault undepositable");
+  check("⭐ …and the two vaults render DIFFERENTLY — otherwise neither check discriminates",
+    okVault !== unticked);
+
+  // ⛔ The completed state reports the SHARES MINTED, not the amount requested — different numbers
+  // whenever a deposit fee or a non-1:1 share price applies.
+  const doneR = textOf({ vaultRun: { ok: true, sharesReceivedRaw: "4998877", tx: "https://x/tx/0x1" } });
+  check("⭐⭐ a completed deposit reports the SHARES the vault minted, not the amount requested",
+    /4998877/.test(doneR) && /received/.test(doneR),
+    "they differ under a deposit fee; the request is not the result");
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("8 — 🚨 THE ORDERED SEQUENCE IS THE SAFETY PROPERTY, SO IT IS ASSERTED");
+{
+  // 🚨 WRITTEN BECAUSE A MUTATION ESCAPED. Deleting `applyReportDisclosure` from the shared
+  // producer — dropping step 2 of the three ordered steps the module exists to name — left this
+  // suite GREEN. The module's header claims the order cannot be forgotten; nothing checked it.
+  // ⚠️ It is not a money hole: gateDeposit refuses an inspection that never went through step 2,
+  // so the omission FAILS CLOSED. But "it fails closed somewhere else" is not the same as "the
+  // claim is true", and a guard whose subject is an ordering must test the ordering.
+  // [[binding-tested-across-what-it-binds]] · [[guard-green-through-semantic-change]]
+  const vd = readFileSync(new URL("../netlify/functions/_vault-disclosure.mjs", import.meta.url), "utf8");
+  const code = vd.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+  const iInspect = code.indexOf("await inspectVault(");
+  const iReport = code.indexOf("applyReportDisclosure(");
+  const iGate = code.indexOf("gateDeposit({");
+  check("⛔ all three steps are present — an absent step cannot be out of order",
+    iInspect !== -1 && iReport !== -1 && iGate !== -1,
+    `inspect@${iInspect} report@${iReport} gate@${iGate}`);
+  check("🚨🚨 …and they run in the ONE order that makes the disclosure complete",
+    iInspect !== -1 && iReport > iInspect && iGate > iReport,
+    "inspect → applyReportDisclosure → gate; step 2 is what carries the owner powers");
+
+  // ⭐ AND THE FAIL-CLOSED CATCH IS PROVEN BY CALLING IT, not by trusting the comment that
+  // describes it. This is what bounds the damage if the order is ever broken again.
+  const rawInspection = {
+    verdict: { level: "OK", warns: [], blocks: [] },
+    disclosure: { source: "inspection" }, // i.e. applyReportDisclosure was NOT applied
+    asset: { address: null },
+  };
+  const g = gateDeposit({ inspection: rawInspection });
+  check("⭐⭐ a deposit gated on a RAW inspection is refused — the omission fails closed",
+    g.ok === false && /due-diligence report/.test(String(g.blocked)),
+    String(g.blocked).slice(0, 80));
+  check("⛔ …and the refusal is a BLOCK, so no acknowledgement could override it",
+    g.disclosure?.level === "BLOCK");
+  // Pairwise: a report-sourced inspection must NOT be refused for this reason, or the check above
+  // passes for the wrong cause and would fire on every deposit.
+  const ok = gateDeposit({ inspection: { verdict: { level: "OK", warns: [], blocks: [] }, disclosure: { source: "report" }, asset: { address: null } } });
+  check("⭐ …and a report-sourced disclosure is NOT refused for that reason",
+    ok.ok === true, `${ok.ok} ${ok.blocked ?? ""}`);
 }
 
 console.log(`\n${fail === 0 ? "✅ ALL PASS" : "❌ FAILURE"} — ${pass} passed, ${fail} failed. Zero money, zero network.`);

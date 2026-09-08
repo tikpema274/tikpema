@@ -7,6 +7,8 @@ import { SWAP_TOKENS } from "./_swap.mjs";
 import { executeAction, valueOfStep, STEP_TYPES } from "./_actions.mjs";
 import { walletTokenBalances } from "./_balances.mjs";
 import { SUPPORTED_VAULT_KEYS, resolveVault } from "./_vault.mjs";
+import { depositDisclosure } from "./_vault-disclosure.mjs";
+import { vaultDepositCapUsdc } from "./_arc.mjs";
 import { resolveDestination, bridgeFee, SUPPORTED_DESTINATION_LABELS, bridgeFeeBand, bridgeAckToken } from "./_bridge.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
@@ -33,7 +35,7 @@ const SYSTEM_PROMPT = `You are Tikpema's autonomous on-chain agent on Arc Testne
 You control your own developer-controlled smart-account wallet and may act with its funds only.
 Given a task, respond with ONLY a JSON object, no prose, no markdown fences:
 {
-  "action": "transfer_usdc" | "swap_tokens" | "pay_for_service" | "bridge_usdc" | "vault_withdraw" | "show_balance" | "plan" | "needs_confirmation" | "none",
+  "action": "transfer_usdc" | "swap_tokens" | "pay_for_service" | "bridge_usdc" | "vault_deposit" | "vault_withdraw" | "show_balance" | "plan" | "needs_confirmation" | "none",
   "to": "0x... (required if action is transfer_usdc)",
   "amountUsdc": number (required if action is transfer_usdc),
   "tokenIn": "USDC | EURC (required if action is swap_tokens)",
@@ -41,7 +43,7 @@ Given a task, respond with ONLY a JSON object, no prose, no markdown fences:
   "amountIn": number (required if action is swap_tokens),
   "payTo": "0x... (required if action is pay_for_service)",
   "payAmountUsdc": number (required if action is pay_for_service),
-  "vault": "vault key (required if action is vault_withdraw) — the only supported key is "xylo-usdc"",
+  "vault": "vault key (required if action is vault_deposit or vault_withdraw) — the only supported key is "xylo-usdc"",
   "destination": "chain name (required if action is bridge_usdc) — e.g. Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon",
   "steps": [ { "type": "transfer_usdc"|"swap_tokens"|"pay_for_service"|"bridge_usdc"|"vault_withdraw", ...that action's fields } ] (required if action is plan; 2+ ordered steps),
   "unmetCondition": "string (required if action is needs_confirmation) — the part of the task you cannot fulfill",
@@ -54,7 +56,8 @@ For a swap (e.g. "swap 5 USDC to EURC", "convert 2 EURC into USDC"), choose acti
 A plain "send/pay X USDC to 0x..." is a transfer_usdc (your regular balance). Choose "pay_for_service" ONLY when the task explicitly says to pay FROM the Gateway / unified balance, or to pay FOR a service, with payTo and payAmountUsdc. When unsure between the two, prefer transfer_usdc.
 For a cross-chain move (e.g. "bridge 20 USDC to Ethereum", "send 5 USDC to Base", "move 10 USDC over to Arbitrum"), choose action "bridge_usdc" with amountUsdc and destination (the chain name). This burns USDC on Arc and mints it on the destination chain. Supported destinations: Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon, Unichain, Linea. A bridge is DIFFERENT from transfer_usdc: transfer stays on Arc to a 0x address; bridge crosses to another chain. Only choose bridge_usdc when the task names another chain to move funds TO.
 For a question about how much money there is (e.g. "what is my balance", "how much USDC do I have", "show me my balance", "am I funded"), choose action "show_balance". This READS ONLY — it moves nothing, costs nothing, and needs no confirmation. Choose it whenever the task is a question about holdings rather than an instruction to move funds.
-For taking money back OUT of a vault (e.g. "withdraw from the vault", "get my money out of xylo", "exit the vault", "redeem my vault shares"), choose action "vault_withdraw" with "vault". The only supported vault key is "xylo-usdc". This reclaims the WHOLE position — there is no partial amount, so do not invent one and do not put an amount in the task's step. Putting money INTO a vault is not something you can do; if asked to deposit into a vault, choose "none" and say the deposit has to be made by the user on the Vault page.
+For putting money INTO a vault (e.g. "deposit 5 USDC into the vault", "put 2 into xylo", "invest 10 in the vault"), choose action "vault_deposit" with "vault" and "amountUsdc". You do NOT execute this: it is always shown to the user with the vault's full disclosure to confirm first, because a deposit commits funds to a third-party contract whose owner holds powers over them.
+For taking money back OUT of a vault (e.g. "withdraw from the vault", "get my money out of xylo", "exit the vault", "redeem my vault shares"), choose action "vault_withdraw" with "vault". The only supported vault key is "xylo-usdc". This reclaims the WHOLE position — there is no partial amount, so do not invent one and do not put an amount in the task's step. 
 If a task asks for MULTIPLE actions in sequence (e.g. "swap 2 USDC to EURC then pay 1 USDC to 0x...", "send A then swap B", "swap 2 to EURC then bridge 3 to Base"), choose action "plan" with an ordered "steps" array, each step being one transfer_usdc/swap_tokens/pay_for_service/bridge_usdc/vault_withdraw with that action's own fields (a bridge_usdc step needs amountUsdc + destination; a vault_withdraw step needs only vault). Use plan ONLY for genuinely multi-action tasks; a single action stays its own action. A multi-step task is NOT a needs_confirmation — needs_confirmation is only for scheduling/conditional/timing you cannot fulfil.`;
 
 /** Which brain priced this. ONE definition: `decide` calls it and the quote record names it.
@@ -606,6 +609,80 @@ export async function handler(event) {
       if (!r.ok) return json(200, { executed: false, decision, blocked: r.blocked });
       return json(200, { executed: true, decision, pay: r.pay });
     }
+    // ═══ ⭐⭐ A DEPOSIT IS ALWAYS PROPOSED, NEVER EXECUTED HERE ═══════════════════════════════
+    // Unlike a send or a swap, this returns a QUOTE the user must confirm — the same shape as a
+    // bridge, and for a stronger reason. A deposit hands funds to a third-party, unaudited contract
+    // whose owner can raise the exit fee and, on this vault today, withdraw the underlying. That is
+    // not a fact a model may accept on someone's behalf.
+    //
+    // ⛔ AND THE CONSENT IS NOT A BUTTON. When the vault raises a WARN the executor requires an
+    // ackToken bound to the disclosure the USER SAW (_vault.mjs gateDeposit), so this returns the
+    // disclosure AND the token, the panel renders the real VaultDisclosure component, and the
+    // token only travels back if the tick was ticked. This is why the action could not simply be
+    // added to the vocabulary: without this round trip it would refuse 100% of the time.
+    //
+    // ⚠️ THE DISCLOSURE HERE IS FOR READING, NOT FOR AUTHORIZING. executeAction re-inspects and
+    // re-gates on a FRESH read at execution time; if the vault changed in between, the token stops
+    // matching and the deposit refuses with the new disclosure — which the panel renders as the
+    // "your acknowledgement no longer applies" recovery. [[stale-read-then-act]]
+    if (decision.action === "vault_deposit") {
+      const v = resolveVault(decision.vault);
+      if (!v) {
+        return json(200, {
+          executed: false, decision,
+          blocked: `unsupported vault "${decision.vault || ""}". Supported: ${SUPPORTED_VAULT_KEYS.join(", ")}`,
+        });
+      }
+      const amount = Number(decision.amountUsdc);
+      const floor = amountFloorViolation(amount, { field: "amountUsdc" });
+      if (floor) return json(200, { executed: false, decision, blocked: floor });
+      // The per-deposit cap, checked here for a clean early message. ⛔ NOT a substitute for the
+      // executor's own check — that one is authoritative and runs again on confirm. vaultDepositCapUsdc
+      // is fail-closed: a garbled env THROWS rather than silently uncapping.
+      const vcap = vaultDepositCapUsdc();
+      if (amount > vcap) {
+        return json(200, { executed: false, decision, blocked: `exceeds per-vault-deposit limit of ${vcap} USDC` });
+      }
+
+      let d;
+      try {
+        d = await depositDisclosure({ vault: v, owner: walletAddress, event });
+      } catch (e) {
+        // ⛔ AN UNREADABLE VAULT IS NOT A SAFE VAULT. Refuse rather than propose a deposit whose
+        // terms we could not read — the same fail-closed shape the gate itself uses.
+        return json(200, {
+          executed: false, decision,
+          blocked: `could not read this vault's terms right now, so there is nothing to show you and nothing to accept (${e.message}). Nothing has been deposited.`,
+        });
+      }
+
+      // A BLOCK is terminal — no acknowledgement overrides it, so there is no confirm to offer.
+      if (!d.depositable) {
+        const why = d.gate.blocks.map((b) => b.detail).join(" ");
+        return json(200, {
+          executed: false, decision,
+          vaultDisclosure: d,
+          blocked: `this vault failed a safety check, so a deposit is refused outright — no acknowledgement can override it. ${why}`.trim(),
+        });
+      }
+
+      return json(200, {
+        executed: false,
+        decision,
+        needsVaultConfirm: true,
+        vaultDeposit: { amountUsdc: amount, vault: d.vault, cap: vcap },
+        // The whole disclosure, threaded so the panel mounts the SAME component the Vault page
+        // does. Nothing here is re-derived client-side — not the level, not whether an ack is
+        // needed, not the token. [[one-claim-two-producers]]
+        vaultDisclosure: d,
+        message:
+          `Deposit ${amount} USDC into ${d.vault.label}. ` +
+          (d.ackRequired
+            ? `This vault's owner holds powers over your deposit — read them below and accept before it runs.`
+            : `Read the vault's terms below, then confirm.`),
+      });
+    }
+
     // ═══ ⭐⭐ A RECLAIM, NOT A SPEND — AND THAT IS WHY IT HAS NO CAP AND NO ACK ═════════════════
     // vault_withdraw redeems the caller's WHOLE on-chain share position back to their own SCA. The
     // executor treats it as a reclaim throughout: it skips the pause (a paused agent must never

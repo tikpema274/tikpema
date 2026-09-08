@@ -167,7 +167,11 @@ check("⭐ SWAP says it stays, and what changes is the denomination",
     // From this step to the next one, whichever terminal shape appears FIRST is this branch's answer.
     const nextIdx = act.slice(m.index + 1).search(/const step = \{\s*type:/);
     const region = act.slice(m.index, nextIdx === -1 ? act.length : m.index + 1 + nextIdx);
-    const gatedAt = region.search(/needs(Bridge|Swap|Send)?Confirm(ation)?:\s*true/);
+    // ⚠️ WIDENED FROM AN EXPLICIT ALTERNATION. It listed Bridge|Swap|Send, so `needsVaultConfirm`
+    // matched nothing and a newly GATED action fell into NEITHER set — invisible to a derivation
+    // whose whole job is to notice. An enumeration of prefixes is a list that goes stale exactly
+    // when a gate is added. [[guard-green-through-semantic-change]]
+    const gatedAt = region.search(/needs[A-Za-z]*Confirm(ation)?:\s*true/);
     const execAt = region.search(/executed:\s*true/);
     if (gatedAt !== -1 && (execAt === -1 || gatedAt < execAt)) GATED.add(kind);
     else if (execAt !== -1) IMMEDIATE.add(kind);
@@ -180,6 +184,9 @@ check("⭐ SWAP says it stays, and what changes is the denomination",
   // ⚠️ The plan window is 400 chars, not 200: a comment sits between the two keys and a tighter
   // window silently found nothing — the same "absence reads as safe" shape one layer down.
   if (/needsBridgeConfirm:\s*true/.test(act)) GATED.add("bridge_usdc");
+  // ⭐ A vault deposit is PROPOSED, never executed in agent-act, so like the bridge it builds
+  // no `const step =` here — the step is built by /api/agent-vault-deposit on confirm.
+  if (/needsVaultConfirm:\s*true/.test(act)) GATED.add("vault_deposit");
   if (/needsConfirm:\s*true[\s\S]{0,400}plan:\s*steps/.test(act)) GATED.add("multi_step_plan");
 
   check("⭐ the derivation found real actions on both sides — an empty set would pass vacuously",
@@ -195,6 +202,7 @@ check("⭐ SWAP says it stays, and what changes is the denomination",
     // covering something that runs straight away. That skip is why this line is part of shipping
     // vault_withdraw, not a follow-up. [[guard-green-through-semantic-change]]
     vault_withdraw: /vault reclaim/i,
+    vault_deposit: /vault deposit/i,
   };
   const say = renderToStaticMarkup(<MyAgentPanel wallet={wallet() as any} />)
     .replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ");

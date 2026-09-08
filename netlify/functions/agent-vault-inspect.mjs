@@ -10,8 +10,8 @@
 import { json, parseBody } from "./_arc.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
-import { resolveVault, inspectVault, gateDeposit, applyReportDisclosure, ackTokenFor, SUPPORTED_VAULT_KEYS } from "./_vault.mjs";
-import { vaultDdReport } from "./_vault-report.mjs";
+import { resolveVault, SUPPORTED_VAULT_KEYS } from "./_vault.mjs";
+import { depositDisclosure } from "./_vault-disclosure.mjs";
 import { tryOwnerWallet } from "./_agent-wallets.mjs";
 
 export async function handler(event) {
@@ -37,31 +37,14 @@ export async function handler(event) {
   // hidden in a bare catch, and the caller-set guard keeps covering every site that must refuse.
   const holder = await tryOwnerWallet(session);
 
-  let inspection;
+  // ⭐ THE THREE ORDERED STEPS MOVED TO _vault-disclosure.mjs, because the agent's deposit
+  // proposal needs the IDENTICAL answer and re-typing an ordered sequence is how the second site
+  // ends up skipping step 2 (applyReportDisclosure). See that module's header.
+  let d;
   try {
-    inspection = await inspectVault(v.address, { owner: holder });
+    d = await depositDisclosure({ vault: v, owner: holder, event });
   } catch (e) {
     return json(502, { error: `cannot inspect vault ${v.label}: ${e.message}` });
   }
-
-  // ⭐ ESTABLISH THE DISCLOSURE FROM THE DD REPORT before gating or minting an ack. The ack binds to
-  // the disclosure the user SAW, so it must be computed over the same combined disclosure the
-  // deposit gate will recompute at execute time — otherwise every ack would mismatch by design.
-  inspection = applyReportDisclosure(inspection, await vaultDdReport(v.address, { event }));
-
-  // Dry-run the gate with NO ack, so the UI learns whether an ack is required and, if so, exactly
-  // which token to send back. Never signs anything.
-  const gate = gateDeposit({ inspection, ackToken: undefined, expectedAssetAddress: v.assetAddress });
-  const ackRequired = inspection.verdict.level === "WARN" && !gate.disclosure.blocks.length;
-
-  return json(200, {
-    vault: { key: v.key, address: v.address, label: v.label, asset: v.asset, shareSymbol: v.shareSymbol },
-    inspection,
-    gate: { level: gate.disclosure.level, blocks: gate.disclosure.blocks, warns: gate.disclosure.warns },
-    // If the level is BLOCK, deposits are refused outright — no ack can unblock them.
-    depositable: gate.disclosure.level !== "BLOCK",
-    ackRequired,
-    // The token the deposit endpoint expects when ackRequired. Deterministic, not secret.
-    ackToken: inspection.verdict.level === "WARN" ? ackTokenFor(inspection) : null,
-  });
+  return json(200, d);
 }

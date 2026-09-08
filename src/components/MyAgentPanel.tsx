@@ -4,6 +4,8 @@ import { agentClient } from "../lib/agentClient";
 import SignInPrompt from "./SignInPrompt";
 import type { useWallet } from "../wallet/useWallet";
 import { displayAmount } from "../lib/formatAmount";
+import VaultDisclosure, { type VaultDelta } from "./VaultDisclosure";
+import { diffDisclosure } from "../lib/disclosureDiff";
 
 // MyAgentPanel — Brick C "My Agent" surface. Re-mounts the agent-action UI (from
 // the archived AgentPanel), restyled to the current design and pointed at the
@@ -78,6 +80,13 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   // would be consent to whichever disclosure happened to render last.
   const [planAcked, setPlanAcked] = useState<Record<number, boolean>>({});
   const [mint, setMint] = useState<any>(null); // { state: 'pending'|'minted'|'failed', mintTx? }
+  // ── VAULT DEPOSIT (propose → acknowledge → execute). Mirrors the bridge's shape, and the
+  // acknowledgement is the vault's DISCLOSURE ack, not a fee band. `vaultDelta` carries the
+  // "what changed since you accepted" recovery when the server refuses a token it issued.
+  const [vaultAcked, setVaultAcked] = useState(false);
+  const [vaultBusy, setVaultBusy] = useState(false);
+  const [vaultRun, setVaultRun] = useState<any>(null);
+  const [vaultDelta, setVaultDelta] = useState<VaultDelta>(null);
 
   // ⭐ THE SINGLE SOURCE OF TRUTH FOR DELIVERY. Chain-verified receipts, owner-scoped
   // server-side. Every "did it arrive / how much arrived" question on this page answers
@@ -199,6 +208,48 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   }
 
   // Confirm a bridge: fire the Arc burn, then poll IRIS for the destination mint.
+  // ═══ ⭐⭐ THE CONFIRM — AND A REFUSAL HERE IS INFORMATION, NOT AN ERROR ═════════════════════
+  // The server re-inspects and re-gates on a FRESH read. If the vault moved between the proposal
+  // and this press, the token we hold stops matching and it returns 409 WITH the new disclosure —
+  // which is precisely what makes the "your acknowledgement no longer applies" recovery possible.
+  // ⛔ Discarding that body would leave the user staring at a bare refusal beside a tick they had
+  // already ticked, with nothing indicating the ground had moved. VaultPanel learned this the hard
+  // way; the same handling ships here because it is the same component rendering it.
+  // ⚠️ AND THE TICK IS CLEARED ONLY ALONGSIDE A DELTA. Clearing it on its own would demand a
+  // re-tick with nothing new to read — a formality, which is trained click-through.
+  async function confirmVaultDeposit(vaultKey: string, amountUsdc: number, ackToken?: string) {
+    setVaultBusy(true);
+    try {
+      const token = await w.ensureSession();
+      const res = await agentClient.vaultDeposit(vaultKey, amountUsdc, token, ackToken);
+      if (res.ok) {
+        setVaultRun({ ok: true, ...res.body });
+        setVaultDelta(null);
+        w.refreshAgentWallet().catch(() => {});
+        return;
+      }
+      const fresh = res.body?.disclosure ?? null;
+      if (fresh) {
+        // The accepted side is assembled from the disclosure the user was actually shown. The
+        // third argument is TRUE because the server REFUSED a token it issued — that refusal is
+        // the authoritative "something moved"; the client holds only a hash and cannot compare.
+        const shown = result?.vaultDisclosure?.inspection;
+        const acceptedSide = shown?.verdict
+          ? { level: shown.verdict.level, warns: shown.verdict.warns, blocks: shown.verdict.blocks,
+              withdrawFeeBps: shown?.withdraw?.withdrawFeeBps ?? null,
+              depositFeeBps: shown?.ownerPowers?.settableFees?.currentBps?.deposit ?? null }
+          : null;
+        setVaultDelta({ d: diffDisclosure(acceptedSide, fresh, true), level: fresh.level ?? null });
+        setVaultAcked(false);
+      }
+      setVaultRun({ ok: false, blocked: res.body?.error || "the deposit was refused" });
+    } catch (e: any) {
+      setVaultRun({ ok: false, error: e?.message || String(e) });
+    } finally {
+      setVaultBusy(false);
+    }
+  }
+
   async function confirmBridge(amountUsdc: number, destinationKey: string, ackToken?: string) {
     setBridgeBusy(true);
     setMint(null);
@@ -307,8 +358,9 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
             itself, so widening the gate FORCES this sentence to widen with it. Otherwise the same
             defect returns inverted — a sentence understating a gate that exists. */}
         <div className="sub" style={{ marginBottom: 8 }}>
-          Describe any task in plain language, including multi-step plans. A <b>bridge</b> or a{" "}
-          <b>multi-step plan</b> is priced and shown to you to confirm first. A single{" "}
+          Describe any task in plain language, including multi-step plans. A <b>bridge</b>, a{" "}
+          <b>vault deposit</b>, or a <b>multi-step plan</b> is priced and shown to you to confirm
+          first. A single{" "}
           <b>send</b>, <b>swap</b>, <b>service payment</b> or <b>vault reclaim</b> runs straight
           away, within your caps. Asking it for your <b>balance</b> only reads — it moves nothing.
         </div>
@@ -361,6 +413,12 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
             onAckChange={setBridgeAcked}
             mint={mint}
             onConfirmBridge={confirmBridge}
+            vaultAcked={vaultAcked}
+            onVaultAckChange={setVaultAcked}
+            vaultDelta={vaultDelta}
+            vaultRun={vaultRun}
+            vaultBusy={vaultBusy}
+            onConfirmVault={confirmVaultDeposit}
           />
         </div>
       )}
@@ -487,6 +545,12 @@ export function AgentSummary({
   onAckChange,
   mint,
   onConfirmBridge,
+  vaultAcked,
+  onVaultAckChange,
+  vaultDelta,
+  vaultRun,
+  vaultBusy,
+  onConfirmVault,
 }: {
   data: any;
   planRun: any;
@@ -503,6 +567,12 @@ export function AgentSummary({
   onAckChange: (v: boolean) => void;
   mint: any;
   onConfirmBridge: (amountUsdc: number, destinationKey: string, ackToken?: string) => void;
+  vaultAcked: boolean;
+  onVaultAckChange: (v: boolean) => void;
+  vaultDelta: VaultDelta;
+  vaultRun: any;
+  vaultBusy: boolean;
+  onConfirmVault: (vaultKey: string, amountUsdc: number, ackToken?: string) => void;
 }) {
     // ⭐ ONE ANSWER TO "DID IT ARRIVE, AND HOW MUCH". Resolves a burnHash against the
     // chain-verified receipts and returns BOTH the claim and the number together, so no
@@ -569,6 +639,73 @@ export function AgentSummary({
 
   if (data.needsConfirmation) {
     return <div className="status" style={{ margin: 0 }}>{data.message}</div>;
+  }
+
+  // ═══ ⭐⭐ VAULT DEPOSIT PROPOSAL — THE SAME DISCLOSURE THE VAULT PAGE SHOWS ═══════════════════
+  // The agent proposed; the user reads and accepts. ⛔ The warnings and the tick are NOT written
+  // here: VaultDisclosure is mounted, so this surface cannot disagree with the Vault page about
+  // what the owner can do to a deposit, and cannot quietly omit the disclosure-changed recovery.
+  // [[one-claim-two-producers]]
+  if (data.needsVaultConfirm && data.vaultDisclosure) {
+    const vd = data.vaultDisclosure;
+    const dep = data.vaultDeposit;
+    const done = vaultRun?.ok;
+    // ⛔ THE BUTTON IS GATED ON THE SERVER'S `ackRequired`, NEVER ON A LOCAL GUESS. And the server
+    // refuses independently — this only decides whether the control is live, exactly as the
+    // bridge's band gate does.
+    const ready = !vd.ackRequired || vaultAcked;
+    return (
+      <div className="status" style={{ margin: 0 }}>
+        <div style={{ marginBottom: 6 }}>
+          <b>Deposit {dep?.amountUsdc} USDC → {vd.vault?.label}</b>
+        </div>
+        <div style={{ opacity: 0.85 }}>{data.message}</div>
+
+        <VaultDisclosure
+          inspection={vd.inspection}
+          delta={vaultDelta}
+          ackRequired={!!vd.ackRequired}
+          acked={vaultAcked}
+          onAckChange={onVaultAckChange}
+          ackId="agent-vault-deposit"
+        />
+
+        {!done && (
+          <div className="row" style={{ marginTop: 12 }}>
+            <button
+              className="emerald"
+              disabled={vaultBusy || !ready}
+              onClick={() => onConfirmVault(vd.vault.key, dep.amountUsdc, vd.ackRequired ? vd.ackToken : undefined)}
+            >
+              {vaultBusy ? "Depositing…" : `Confirm & deposit ${dep?.amountUsdc} USDC`}
+            </button>
+          </div>
+        )}
+        {/* ⭐ SAYS WHY THE BUTTON IS DEAD. A disabled control with no reason is the thing a user
+            cannot act on — the same rule WalletGuardNotice follows. */}
+        {!done && vd.ackRequired && !vaultAcked && (
+          <div className="status" style={{ opacity: 0.8 }}>Tick the acknowledgment above to enable the deposit.</div>
+        )}
+        {vaultRun?.blocked && (
+          <div className="status" style={{ marginTop: 6, color: "var(--warn)" }}>Held off — {vaultRun.blocked}.</div>
+        )}
+        {vaultRun?.error && (
+          <div className="status" style={{ marginTop: 6, color: "var(--warn)" }}>Error — {vaultRun.error}.</div>
+        )}
+        {done && (
+          <div className="status" style={{ marginTop: 6 }}>
+            {/* ⚠️ THE FIGURE IS THE SHARES THE VAULT ACTUALLY MINTED, from the server's receipt —
+                not the amount requested. They are different numbers whenever a deposit fee or a
+                non-1:1 share price applies, and reporting the request as the result would state a
+                position the user does not hold. */}
+            ✓ Deposited {dep?.amountUsdc} USDC — received{" "}
+            <b>{vaultRun.sharesReceivedRaw ?? "?"}</b>{" "}
+            {vd.vault?.shareSymbol ?? "shares"}.
+            {vaultRun.tx && <span style={{ marginLeft: 8 }}><TxLink url={vaultRun.tx} /></span>}
+          </div>
+        )}
+      </div>
+    );
   }
 
   // Bridge proposal → confirm → Arc burn → (async) destination mint.

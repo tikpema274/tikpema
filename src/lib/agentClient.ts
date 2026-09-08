@@ -73,6 +73,16 @@ export const agentClient = {
   bridge: (amountUsdc: number, destination: string, token: string, ackToken?: string) =>
     post("/api/agent-bridge", { amountUsdc, destination, ackToken }, token),
 
+  // Execute a confirmed vault deposit (turn 2 of the agent's propose->confirm).
+  // ⭐ THE SAME ENDPOINT THE VAULT PAGE USES — deliberately. A second deposit route would be a
+  // second place the cap, the pause, the daily ceiling and the inspection gate could drift, and
+  // executeAction is the ONE secure path all of them live on.
+  // ackToken carries the user's acceptance of the vault's disclosure. Optional: required only when
+  // agent-act's quote returned ackRequired. Without it the server REFUSES and returns the fresh
+  // disclosure, which is what the "your acknowledgement no longer applies" recovery renders.
+  vaultDeposit: (vault: string, amountUsdc: number, token: string, ackToken?: string) =>
+    postRaw("/api/agent-vault-deposit", { vault, amountUsdc, ackToken }, token),
+
   // Stage-2 poll: has Circle's relayer minted on the destination yet?
   bridgeStatus: (burnHash: string, destinationKey: string, token: string) =>
     post("/api/agent-bridge-status", { burnHash, destinationKey }, token),
