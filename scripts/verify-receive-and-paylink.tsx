@@ -26,6 +26,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import ReceivePanel from "../src/components/ReceivePanel";
 import { paymentLinkParams } from "../src/components/SendPanel";
+import { paymentLink } from "../src/components/ReceivePanel";
 
 let pass = 0, fail = 0;
 const check = (l: string, c: boolean, x = "") => {
@@ -140,12 +141,64 @@ section("6b — ⭐ THE WAY OUT TO SEND — NAVIGATION, NEVER AN ACTION");
     !/agent-send|\bsend\(\)/.test(readFileSync("src/components/ReceivePanel.tsx", "utf8")),
     "a receive screen must not be able to spend");
   // ⚠️ It must not out-shout the address, which is the page's whole content.
+  // ⚠️ THIS ASSERTION WAS NARROWED, AND THE NARROWING IS THE HONEST DIRECTION. It was
+  // `!/emerald/.test(html)` — "no primary action anywhere on the page" — which was a PROXY that
+  // held only while the page had none. Adding the share control (correctly primary within its own
+  // block: on that block, sharing IS the thing to do) failed it. The property §6b is about is that
+  // THE SEND-INSTEAD CONTROL is not primary, and asserting THAT ELEMENT is stronger than relying on
+  // page-wide absence — it survives the page gaining other actions, and it names the subject.
+  const sendBtn = (html.match(/<button[^>]*>Send instead[^<]*<\/button>/) || [""])[0];
+  check("the Send-instead control is found as an element", sendBtn.length > 0, sendBtn);
   check("⭐ it is NOT the primary emerald action",
-    !/className="emerald"[^>]*>\s*Send instead/.test(html) && !/emerald/.test(html),
-    "a primary button here would read as 'the thing to do on this screen'");
+    sendBtn.length > 0 && !/emerald/.test(sendBtn) && /class="btn"/.test(sendBtn),
+    `a primary button here would read as 'the thing to do on this screen' — ${sendBtn}`);
   // ⛔ Absent when there is nothing to receive to — a nav control on a dead-end state.
   check("⛔ it is absent in the signed-out state, like everything else on this page",
     !/Send instead/.test(text(renderToStaticMarkup(<ReceivePanel wallet={wallet(null)} />))));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("6c — ⭐⭐ THE SHARED LINK IS THE SHIPPED PARSER'S INPUT — ROUND-TRIP, NOT A SECOND FORMAT");
+{
+  const O = "https://app.tikpema.xyz";
+  // ⭐⭐ THE PROPERTY THAT MATTERS: what the RECEIVE page mints is exactly what the SEND page reads.
+  // Asserting the string shape would let the two drift while both "look right"; feeding the output
+  // of one into the other is the only check that catches a divergence. [[flow-is-not-meaning]]
+  const rt = (amount?: string) => paymentLinkParams("#" + paymentLink(O, USER, amount).split("#")[1]);
+  check("⭐⭐ ROUND-TRIP: a minted link parses back to the same address",
+    rt("5").to === USER, JSON.stringify(rt("5")));
+  check("⭐⭐ …and to the same amount", rt("5").amount === "5");
+  check("⭐ an omitted amount round-trips as no amount", rt(undefined).amount === undefined);
+  check("⛔ a blank amount emits NO amount param, rather than a malformed one the parser drops",
+    !/amount=/.test(paymentLink(O, USER, "")), paymentLink(O, USER, ""));
+  for (const bad of ["0", "-5", "abc"]) {
+    check(`⛔ a ${JSON.stringify(bad)} amount is not emitted`, !/amount=/.test(paymentLink(O, USER, bad)),
+      paymentLink(O, USER, bad));
+  }
+  check("⭐ the link targets /send, the route the parser lives on", /#\/send\?to=/.test(paymentLink(O, USER)));
+  check("⛔ it carries the USER's address, never the agent float",
+    paymentLink(O, USER).includes(USER) && !paymentLink(O, USER).includes(AGENT));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("6d — ⛔ SHARING HANDS OFF; IT NEVER SENDS, AND IT DEGRADES");
+{
+  const src = readFileSync("src/components/ReceivePanel.tsx", "utf8");
+  const html = renderToStaticMarkup(<ReceivePanel wallet={wallet()} />);
+  check("⭐ the share control renders", /Share payment link/.test(text(html)));
+  check("⭐ the link itself is VISIBLE, not hidden behind the button", html.includes("#/send?to=" + USER),
+    "on a desktop with no share sheet the copy fallback IS the feature, and a visible link can be checked");
+  check("⛔⛔ navigator.share is FEATURE-DETECTED, never assumed",
+    /typeof \(navigator as any\)\.share === "function"/.test(src),
+    "a Share button that silently does nothing is a control the user cannot act on");
+  check("⭐⭐ …and there is a copy FALLBACK, so the button always does something",
+    /clipboard\.writeText\(link\)/.test(src));
+  check("⭐ a dismissed share sheet falls through to copy rather than failing",
+    /catch \{[\s\S]{0,120}fall through to copy/.test(src));
+  check("⛔ the app does NOT send mail or SMS itself — no provider, no stored contact",
+    !/twilio|sendgrid|mailto:|sms:/i.test(src),
+    "sending on the user's behalf means storing contacts and becoming a sending party");
+  check("⛔ sharing moves no money", !/agent-send/.test(src));
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════

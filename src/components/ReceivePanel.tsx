@@ -1,3 +1,4 @@
+import { useState } from "react";
 import qrcode from "qrcode-generator";
 import AddressDisplay from "./AddressDisplay";
 import type { useWallet } from "../wallet/useWallet";
@@ -59,8 +60,55 @@ function QrSvg({ text, size = 176 }: { text: string; size?: number }) {
   );
 }
 
+/**
+ * ⭐⭐ THE LINK IS THE SHIPPED PARSER'S INPUT, NOT A NEW FORMAT. `#/send?to=…&amount=…` is already
+ * read, validated and guarded by `paymentLinkParams` in SendPanel — a malformed address is dropped,
+ * a non-positive amount falls back, and the payer's screen says the values came from a link. Minting
+ * a second URL shape here would be a duplicate source of truth for the thing strangers click.
+ * [[duplicate-source-of-truth-is-the-recurring-bug]]
+ * ⚠️ The amount is OPTIONAL and omitted when unset — an `amount=` with nothing after it is a
+ * malformed param the parser would (correctly) drop, so we do not emit one.
+ */
+export function paymentLink(origin: string, address: string, amount?: string): string {
+  const amt = Number(amount);
+  const q = Number.isFinite(amt) && amt > 0 ? `&amount=${amt}` : "";
+  return `${origin}/#/send?to=${address}${q}`;
+}
+
 export default function ReceivePanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const address = w.address;
+  const [requestAmount, setRequestAmount] = useState("");
+  const [shareNote, setShareNote] = useState("");
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const link = address ? paymentLink(origin, address, requestAmount) : "";
+
+  // ⛔ FEATURE-DETECTED, NEVER ASSUMED. `navigator.share` is absent on most DESKTOP browsers, and a
+  // Share button that silently does nothing is worse than no button — it is a control the user
+  // cannot act on, the same rule WalletGuardNotice follows. Copy is the fallback, and BOTH branches
+  // are asserted, because a fallback that only exists on the happy path is the failure this repo
+  // keeps finding. [[absence-must-never-read-as-safe]]
+  async function shareLink() {
+    const canShare = typeof navigator !== "undefined" && typeof (navigator as any).share === "function";
+    if (canShare) {
+      try {
+        await (navigator as any).share({
+          title: "Pay me in USDC",
+          text: requestAmount ? `Please send me ${requestAmount} USDC on Arc.` : "Here is my USDC address on Arc.",
+          url: link,
+        });
+        return;
+      } catch {
+        /* the user dismissed the sheet, or the platform refused — fall through to copy */
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(link);
+      setShareNote("Link copied — paste it into a message or email.");
+      setTimeout(() => setShareNote(""), 2400);
+    } catch {
+      setShareNote("Could not copy automatically — select the link above and copy it.");
+    }
+  }
 
   return (
     <div className="plane">
@@ -110,6 +158,44 @@ export default function ReceivePanel({ wallet: w }: { wallet: UnifiedWallet }) {
             <b>USDC on Arc only.</b> This address looks like an Ethereum address and is not one.
             USDC sent from another chain — Ethereum, Base, Polygon — will not arrive here and
             cannot be recovered. Check the sender is on Arc before they send.
+          </div>
+
+          {/* ═══ ⭐⭐ REQUEST AN AMOUNT, AND SHARE IT ═══════════════════════════════════════════
+              The address above works on its own; this is the same address with an amount attached,
+              as a link the payer's own send form reads. ⛔ It is OPTIONAL — leaving it blank shares
+              a plain "here is my address", which is the common case and must not require a decision.
+              ⚠️ SHARING HANDS OFF, IT DOES NOT SEND. The message goes from the user's own number or
+              address through their own app; we never see the recipient, store a contact, or become
+              a sending party — which is a privacy property AND the reason this needs no backend. */}
+          <div className="status" style={{ marginTop: 16, padding: "12px 16px", background: "var(--field)",
+                                          border: "1px solid var(--line)", borderRadius: 12 }}>
+            <div style={{ color: "var(--muted)", fontSize: "0.72rem", letterSpacing: "0.06em",
+                          textTransform: "uppercase", marginBottom: 8 }}>
+              Ask for a specific amount (optional)
+            </div>
+            <div className="row" style={{ gap: 8, alignItems: "center" }}>
+              <input
+                type="number"
+                min="0"
+                step="0.000001"
+                placeholder="amount in USDC"
+                value={requestAmount}
+                onChange={(e) => setRequestAmount(e.target.value)}
+                style={{ maxWidth: 180 }}
+              />
+              <button className="emerald" onClick={shareLink}>
+                Share payment link
+              </button>
+            </div>
+            {/* ⭐ THE LINK IS SHOWN, NOT HIDDEN BEHIND THE BUTTON. On a desktop browser with no
+                share sheet, the copy fallback is the whole feature — and a user who can SEE the
+                link can also check it points at their own address before sending it to anyone. */}
+            <div className="qd mono" style={{ marginTop: 8, wordBreak: "break-all", opacity: 0.85 }}>
+              {link}
+            </div>
+            {shareNote && (
+              <div className="qd" style={{ marginTop: 6, color: "var(--warn)" }}>{shareNote}</div>
+            )}
           </div>
 
           {/* ⭐ THE OTHER DIRECTION. Receive and send are the two halves of the same errand, and a
