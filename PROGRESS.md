@@ -1,5 +1,174 @@
 ---
 
+# 🚨 THE NANOPAYMENT PAGE SAID THE PAID BUY HAD NEVER RUN. IT HAD, FOR 20 DAYS — AND BOTH GUARDS REQUIRED THE FALSEHOOD.
+
+**2026-09-09.** Shipped `9bf0e6e`, live as deploy `6aa1779972dbb39721c91a2c`.
+
+`NanopaymentPanel` read *"In practice this is rare, and so far it has not happened: free sources
+have answered every research job to date."* The buy side first fired **2026-08-20T11:37Z**.
+
+**MEASURED from `job-deliverables` 2026-09-09 — 334 keys, re-read, not inherited:**
+
+| `dataPurchase.code` | n |
+|---|---|
+| `not-attempted` | 40 |
+| `free-source` | 14 |
+| **`purchased`** | **3** |
+| every other code | 0 |
+
+All three paid QuickNode via `DATA_SELLER_URL` at 0.0001 USDC — 100× UNDER the 0.01 ceiling.
+
+## 1. 🚨 FIVE PRODUCERS, NOT ONE
+
+Fixing the reported sentence alone would have shipped a page contradicting itself: the lead, step
+01 (*"and so far they always have"*), step 03 (*"It WOULD sign … has not yet run for a real job"*),
+the closing line (*"IF a question EVER needs it"*), and **`Dashboard.tsx`'s card** (*"and why it has
+not needed to yet"*). Second time one claim on two surfaces has drifted; the card's own comment
+already said *"keep the two in step"* and it still did not reach the card.
+
+## 2. ⭐⭐⭐ THE GUARDS ASSERTED THE FALSE SENTENCE **MUST BE PRESENT**
+
+`verify-nanopay-copy.tsx:81/85` and `verify-dashboard-copy.tsx:62` pinned *"so far it has not
+happened"*, *"free sources have answered every research job to date"* and *"has not needed to yet"*
+as REQUIRED. **Both suites were green for the whole 20 days, across the exact event they existed to
+describe — and the first thing that would have turned them red was the correction.**
+
+⛔ A presence check on a sentence **about the world** is only as durable as the fact. So §2 now bans
+never-claims as a **CLASS**, not a list, and pins the MECHANISM — which was true before the first
+purchase and after it.
+
+⚠️ **THE INVERSE TRAP, IN THE SAME FIX.** §1 banned *any* present-tense payment verb — correct when
+nothing had fired, and now a lock **forcing the page to keep understating**. It bans **frequency**
+over-claims instead, because 3-in-57 makes *"on every job"* the over-claim still available. Two of
+three regression pins were removed: their stated reason, *"a signature never made in production"*,
+had measurably expired. ⭐ **A guard whose justification has expired is not a safety net.**
+
+## 3. ⛔ WRONG IN THE UNDERSTATING DIRECTION, WHICH IS WHY IT SURVIVED
+
+An under-claim reads as caution and caution reads as correct. The same page had been wrong the
+OTHER way earlier and that was caught fast.
+
+🚨 **AND THE COMMENT PREDICTED THE ROT, THEN COMMITTED IT.** The header argued that *"we have never
+bought anything"* would rot the moment a purchase landed and that the copy must state the mechanism
+**not a tally** — then wrote a tally two lines below (*"across six recorded jobs it has never been
+chosen"*). **A rule stated in a comment does not constrain the prose under it.** No count appears in
+the new copy in EITHER direction; *"three times"* would rot the same way pointing the other way.
+
+## 4. PROOF
+
+Mutation-tested BOTH directions, **4/4 caught**: lead reverted (11/1), card reverted (16/2),
+*"on every research job"* added (10/2), rare framing deleted (11/1).
+`test:all` **106/106 FAILED 0 NOT RUN 0** · `tsc` clean · `gate:registry` 25/0 · full chain exit 0.
+
+⭐ **VERIFIED ON THE WIRE, NOT ONLY BY THE GATE.** Bundle `index-Dx2KjacG.js` →
+**`index-BglD0-pN.js`**, served bytes **byte-identical** to the local build (SHA-256 `55b7de85…`,
+920,908 B). All five old sentences ABSENT from those bytes and all five new ones PRESENT — checked
+both directions, because an absence check alone passes if the component simply vanished.
+⭐ The CSS hash **did not** move (`index-CeKkgzb1.css`) — the control working: copy changed, styles
+did not.
+
+⚠️ `capture:window` — **NO WINDOW OBSERVED, and that is not a pass.** `ddTree` did not rotate: this
+change is `src/`-side and the DD surface is `netlify/functions`. Nothing witnessed.
+
+## 5. ✅ THE MARKETING SITE DOES NOT REPEAT IT — AND THE "NO GUARD" NOTE IS STALE
+
+`site/index.html` is now IN the repo and **`test:siteclaims` is in `package.json`'s `suites`**, so
+it ran inside this very `test:all`. `gate:sitelive`: live page byte-identical to the repo file
+(SHA-256 `d3ebbfe4…`, 21,121 B, deploy `6a98999e…`).
+
+⚠️ **MY FIRST INSTRUMENT SAID THE OPPOSITE.** `grep siteclaims scripts/run-suites.mjs` → 0 hits,
+which reads exactly like "unwired". **The suite list lives in `package.json` under `suites`, not in
+the runner.** Grep the manifest, never the reader.
+
+The page carries no wording of the claim: its Research card discusses the JOB fee (*"0.20–0.40 USDC
+per job"*), a different quantity. A class search for `never|not yet|has not|so far|to date|no
+purchase` returns one hit — *"The interface never infers it"*, about bridge arrival. Unrelated.
+
+🚨 **BUT `gate:sitelive` IS NOT IN `suites`.** Nothing routinely checks tikpema.xyz still serves the
+repo's page; it is in sync today only because it was run by hand. ⚠️ Nine `test:*` scripts sit
+outside `suites` — four `*live` ones plausibly deliberate, but `test:bridgecopy`, `test:acktoken`,
+`test:policystore`, `test:quoteretention` look like the unwired-guard pattern. Not audited.
+
+
+---
+
+# ⭐⭐ THE AGENT'S VAULT VOCABULARY — SHIPPED, PROMOTED, AND PROVEN WITH REAL MONEY
+
+**2026-09-08 / 09-09.** Four commits `909e4da` → `1712578` → `e60871e` → `90dad7b`, promoted as
+deploy `6aa121e6c9a0376c7f1f1834` (tree `45eef4e6333b`).
+
+Four places described what the agent may do to money and they disagreed — the executor knew SIX
+step types, the prompt offered FOUR, the plan path allowed FOUR, and `agent-parameters` told users
+FOUR, in prose. **The vault pair was built, tested and unreachable, because nothing could name it.**
+`STEP_TYPES` is now exported from the executor and the plan's `KINDS` and the capability disclosure
+both READ it.
+
+- **`vault_withdraw` needed nothing** — the executor already treats it as a RECLAIM: skips the pause
+  (a paused agent must not trap a user's funds), no per-action cap, zero against the day ceiling.
+- **`show_balance` is answered BEFORE dispatch** and never reaches `executeAction`, so `STEP_TYPES`
+  keeps meaning "the things that can touch your funds". It names its pocket.
+- **`vault_deposit` is PROPOSE-ONLY** — `agent-act` inspects, discloses and returns a token; the
+  confirm posts to the EXISTING `/api/agent-vault-deposit`, so cap + pause + daily ceiling +
+  inspection gate stay on ONE path rather than gaining a second route to drift on.
+- **In plans the refusal comes BEFORE step 1**, never mid-plan: a vault step refused halfway asks
+  for an acceptance the user can no longer decline freely.
+
+## 🚨 THE CAP MISMATCH — AND THE DIRECTION WAS AN ENV ACCIDENT
+
+Both plan paths bounded every non-bridge step by `sendCapUsdc()` while `executeAction` bounds a
+deposit by `vaultDepositCapUsdc()`. **MEASURED on production:** `AGENT_SEND_CAP_USDC=10`,
+`AGENT_VAULT_DEPOSIT_CAP_USDC` unset ⇒ default **25**. So the pre-flight was the STRICTER side and
+the symptom was only a wrong refusal.
+
+⚠️ **Raise the send cap above 25 and it inverts** — passes pre-flight, refuses mid-run, after money
+moved. ⛔ **Which side is "safe" was never a property of the code.** Fixed to one selection, two
+views; and fixing it surfaced a SECOND copy one line away, in the refusal message.
+
+## ✅ PROVEN LIVE WITH REAL MONEY — user-run, 2026-09-09
+
+Owner `0x3d7d4c52…`, XyloVault `0x240Eb85458CD41361bd8C3773253a1D78054f747`, **two full round
+trips**: deposit 1 USDC 13:45:10Z (`0xf9e8c263…`) → withdraw 13:45:26Z (`0x97cf9213…`); deposit
+1 USDC 13:48:20Z (`0xa3caa7bb…`) → withdraw 13:49:24Z (`0x32858bfe…`).
+
+⭐ **ORDERING IS PHANTOM-FREE:** the chain event PRECEDES its ledger entry by ~2 s (13:45:10 chain
+vs 13:45:12.795 ledger) — confirm-then-ledger, the DCA pattern, not the manual-swap pattern that
+needed step 8.
+⭐ **SHARES ≠ AMOUNT, MEASURED:** 1.000000 USDC minted **999998** shares and redeemed **0.999**
+USDC. Exactly why the completed state reports shares minted, not the amount requested.
+
+⚠️ **A FALSE ALARM WORTH RECORDING:** `balanceOf(owner)` reads **0**, which looks like a phantom
+charge. It is not — both positions were exited. **Zero shares means "never deposited" OR "deposited
+and exited"**, and the balance alone cannot separate them; the Deposit/Withdraw events can.
+
+## ⚠️ AN OPEN DECISION THIS SURFACED: A ROUND TRIP BURNS CEILING THAT NEVER LEAVES
+
+`AGENT_MAX_SPEND_USDC=10`. The two round trips ledgered **`spentUsdc: 2`** — 20% of the day ceiling
+— for a **net cost of 0.002 USDC**. That is the DESIGN (deposit is a spend; `vault_withdraw` is a
+reclaim crediting nothing back), but the composition was never stated: **five round trips exhaust a
+10 USDC ceiling while spending half a cent.**
+
+⛔ **THE UNDECIDED QUESTION: does the ceiling mean "money at risk today" or "money gone today"?**
+They agree everywhere else and **diverge here for the first time**, because the vault is the first
+action where funds come back. Not a bug — a decision nobody has made.
+
+## OTHER FINDINGS
+
+- **Three guards were wrong the same way** — each pinned WHERE code lives or WHAT SHAPE it has,
+  not what it does; all three went red on a CORRECT refactor. One (`verify-agent-vocabulary`) broke
+  on the improvement to the very property it guards.
+- ⭐ `vaultDisclosures` is kept a **SEPARATE map** from the bridge-shaped `stepDisclosures`: a vault
+  entry folded in has no `band`, so `band === "acknowledge"` is false and the step **silently stops
+  being gated** — a check whose failure mode is a pass.
+- **`gate:draft` blocked the draft, correctly**: `[functions."dd-canary"]` scheduled means unreachable
+  on a draft (403 on invoke, cron only on the published deploy). ⛔ **`netlify.toml` is outside the
+  hashed surface, so NOTHING downstream can catch a forgotten restore** — draft and prod trees were
+  both `45eef4e6…` across that edit.
+- **Cron proven firing after promotion**, both halves separately: `function_schedules` on the deploy
+  object shows 12 registered (11 → 12, the one addition being `arc-phase-watch`, disturbing nothing);
+  `dd-canary` advanced 13:10:12Z → 13:20:14Z. `arc-gateway-watch` / `arc-phase-watch` fire in the
+  07:00 hour, which preceded the 09:42:59Z publish — absence there is EXPECTED, not an alarm.
+
+
 # ⭐ DEMAND VALIDATION FROM OUTSIDE — and it names the easy half
 
 **2026-09-08.** DHH, publicly: *"Who's doing the first agentic bank? I want to give my machine an
