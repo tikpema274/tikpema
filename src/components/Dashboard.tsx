@@ -246,12 +246,13 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
             </ConsequenceCard>
 
           <ConsequenceCard title="Nanopayments" onClick={() => go("nanopay")}>
-              {/* ⚠️ SECOND COPY OF A CLAIM CORRECTED ON NanopaymentPanel. It said "your agent
-                  PAYS", present tense, for a step that has never fired in production — and it
-                  survived the page's own fix because nobody grepped for the other copy. Keep the
-                  two in step: this is the card, that is the page. */}
+              {/* ⚠️ SECOND PRODUCER OF A CLAIM THAT LIVES ON NanopaymentPanel. It has now been
+                  wrong in BOTH directions: first "your agent PAYS" for a step that had never
+                  fired, then "has not needed to yet" for 20 days after it did. Neither survived
+                  its own page's fix, because a fix to one producer does not reach the other.
+                  Keep the two in step: this is the card, that is the page. */}
               How your agent can pay a fraction of a cent for fresh data mid-research —
-              and why it has not needed to yet.
+              and why it rarely needs to.
             </ConsequenceCard>
           {/* ⭐ THE ONLY CARD THAT LEAVES THE APP. /built is a plain page outside the SPA, for a
               human arriving from Discord or GitHub who should not have to load a wallet app to

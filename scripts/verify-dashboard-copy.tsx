@@ -54,12 +54,19 @@ check("⚠️ non-empty render", rendered.length > 800, `${rendered.length} char
 section("1 — 🚨 NO SECOND COPY OF A CLAIM CORRECTED ELSEWHERE");
 // ⭐ THE SAME CLASS PATTERN `verify-nanopay-copy` uses, applied here on purpose: the two surfaces
 // carry one claim between them, so they must be checked the same way or the copy drifts again.
-const PRESENT_TENSE_PAYMENT =
-  /\b(?:it|agent)\s+(?:pays|signs|buys|purchases|settles)\b|\bpaid automatically\.|\bruns automatically when\b/i;
-check("🚨🚨 the Nanopayments card makes no bare present-tense payment claim",
-  !PRESENT_TENSE_PAYMENT.test(rendered), rendered.match(PRESENT_TENSE_PAYMENT)?.[0] ?? "");
-check("⭐ …and it says the capability exists WITHOUT claiming it has been used",
-  /can pay a fraction of a cent/.test(rendered) && /has not needed to yet/.test(rendered));
+// 🚨 2026-09-09 — INVERTED, IN STEP WITH `verify-nanopay-copy`. The card said "and why it has not
+// needed to yet" and this suite REQUIRED that sentence — while the buy side had fired three times
+// since 2026-08-20. ⛔ Both surfaces were wrong, both guards were green, and the guards were green
+// BECAUSE they pinned each other's wording rather than the fact underneath.
+const OVERCLAIMS_FREQUENCY =
+  /\b(?:on every (?:research )?job|every time you|always (?:pays|buys|purchases)|runs on every)\b/i;
+check("🚨🚨 the Nanopayments card makes no FREQUENCY over-claim",
+  !OVERCLAIMS_FREQUENCY.test(rendered), rendered.match(OVERCLAIMS_FREQUENCY)?.[0] ?? "");
+const NEVER_CLAIM = /\bhas not needed to yet\b|\b(?:has not|hasn't|never)\s+(?:yet\s+)?(?:happened|run|been needed|been used)\b/i;
+check("⭐⭐ …and no NEVER-claim survives on the card either",
+  !NEVER_CLAIM.test(rendered), rendered.match(NEVER_CLAIM)?.[0] ?? "");
+check("⭐ …while still framing the paid buy as RARE, which is what is true",
+  /can pay a fraction of a cent/.test(rendered) && /rarely needs to/.test(rendered));
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
 section("2 — ⭐⭐ 'INSTANTLY' IS BOUND TO THE READ THAT MAKES IT TRUE");

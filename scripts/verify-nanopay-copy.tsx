@@ -2,10 +2,10 @@
 //
 //   npx tsx scripts/verify-nanopay-copy.tsx        (also: npm run test:copy)
 //
-// ═══ 🚨 WHY THIS EXISTS ══════════════════════════════════════════════════════════════════════
-// `NanopaymentPanel` described the agent-buys-from-agent flow in PRESENT TENSE — "It signs a tiny
-// on-chain USDC payment", "Only a confirmed settlement counts as a purchase", "This runs
-// automatically when you commission research" — for a step that has never fired in production.
+// ═══ 🚨 WHY THIS EXISTS — AND IT HAS NOW BEEN WRONG IN BOTH DIRECTIONS ══════════════════════
+// FIRST: `NanopaymentPanel` described the agent-buys-from-agent flow in PRESENT TENSE for a step
+// that had never fired. SECOND, and worse: after the step DID fire (2026-08-20), the page went on
+// saying "so far it has not happened" for 20 days — and THIS SUITE REQUIRED that sentence.
 // ⚠️ Its own header contradicted itself in nine lines: "already runs server-side" above "when a
 // LIVE version lands, this is its spec". Both were quotable in good faith, which is how it survived.
 //
@@ -49,7 +49,7 @@ section("0 — the page renders at all");
 check("⚠️ non-empty render", rendered.length > 400, `${rendered.length} chars`);
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-section("1 — 🚨 NO PRESENT-TENSE CLAIM ABOUT A STEP THAT HAS NOT RUN");
+section("1 — 🚨 NO OVER-CLAIM ABOUT HOW OFTEN THE PAID STEP RUNS");
 // ═══ ⭐⭐ A CLASS CHECK, BECAUSE THE ENUMERATED VERSION FAILED SILENTLY ══════════════════════
 // This section originally listed three remembered phrases and passed 13/0 — while the page's own
 // <h2> still read "A fraction of a cent, PAID AUTOMATICALLY", the most-read line on it, and the
@@ -59,30 +59,41 @@ section("1 — 🚨 NO PRESENT-TENSE CLAIM ABOUT A STEP THAT HAS NOT RUN");
 // mergeJobStatus the same day, violated one file over.
 // ⭐ So the check is now a CLASS: any bare present-tense payment verb about the agent. A new
 // sentence nobody thought to name fails by default and must be worded deliberately.
-const PRESENT_TENSE_PAYMENT =
-  /\b(?:it|agent)\s+(?:pays|signs|buys|purchases|settles)\b|\bpaid automatically\.|\bruns automatically when\b/i;
-check("⭐⭐ no BARE present-tense payment verb survives anywhere on the page",
-  !PRESENT_TENSE_PAYMENT.test(rendered),
-  rendered.match(PRESENT_TENSE_PAYMENT)?.[0] ?? "");
-// ⚠️ The three originally-named phrases stay as REGRESSION pins — they are the ones that shipped.
-for (const [phrase, why] of [
-  ["This runs automatically when you commission research", "asserted the flow happens on every job"],
-  ["It signs a tiny on-chain USDC payment", "present tense for a signature never made in production"],
-  ["Only a confirmed settlement counts as a purchase", "a rule about settlements that have not occurred"],
-] as [string, string][]) {
-  check(`🚨 "${phrase}" is gone — ${why}`, !rendered.includes(phrase));
-}
+// 🚨 2026-09-09 — THIS CHECK GUARDED THE WRONG DIRECTION, AND HAD TO BE INVERTED.
+// It forbade any present-tense payment verb, because at the time the paid step had never fired.
+// The step HAS fired (measured below), so "it signs a tiny on-chain USDC payment" is now simply
+// TRUE, and a check banning it would force the page to keep understating. ⛔ Two of the three
+// regression pins below were removed for the same reason — a pin whose justification has expired
+// is not a safety net, it is a lock holding the page at a stale claim.
+// ⭐ WHAT REMAINS DANGEROUS IS FREQUENCY, NOT EXISTENCE: 3 purchases across 57 classified jobs.
+// So the class check now bans "this happens on every job", which is the over-claim still available.
+const OVERCLAIMS_FREQUENCY =
+  /\b(?:on every (?:research )?job|every time you|always (?:pays|buys|purchases)|runs on every|with each (?:research )?job)\b/i;
+check("⭐⭐ no FREQUENCY over-claim survives anywhere on the page",
+  !OVERCLAIMS_FREQUENCY.test(rendered),
+  rendered.match(OVERCLAIMS_FREQUENCY)?.[0] ?? "");
+// ⚠️ The one surviving pin: still false, and for the original reason. It does NOT run on every job.
+check('🚨 "This runs automatically when you commission research" is gone — asserted the flow happens on every job',
+  !rendered.includes("This runs automatically when you commission research"));
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-section("2 — ⭐⭐ THE HONEST STATE IS SAID, NOT IMPLIED BY OMISSION");
+section("2 — ⭐⭐ NO NEVER-CLAIM SURVIVES, AND THE RARE FRAMING IS SAID OUT LOUD");
 // 🚨 Deleting the over-claim without replacing it would leave a page that still reads as a live
 // feature. The absence checks above are only safe because these presence checks stand beside them.
-check("⭐⭐ the page says the paid step has NOT yet happened",
-  /so far it has not happened/i.test(rendered));
-check("⭐ …and that free sources answered every job to date",
-  /free sources have answered every research job to date/i.test(rendered));
-check("⭐ …and step 3 marks itself as not yet run for a real job",
-  /This step has not yet run for a real job/.test(rendered));
+// 🚨🚨 THESE THREE ASSERTED THE FALSEHOOD AS A REQUIREMENT. They pinned "so far it has not
+// happened", "free sources have answered every research job to date" and "This step has not yet
+// run for a real job" as MUST-BE-PRESENT — so the suite stayed green for 20 days across the exact
+// event it existed to describe, and would have gone RED on the correction. ⭐ A presence check on
+// a sentence about the world is only as durable as the fact; pin the MECHANISM, and ban the
+// class of claim that can rot.
+const NEVER_CLAIM =
+  /\b(?:has not|hasn't|have not|haven't|never)\s+(?:yet\s+)?(?:happened|run|been needed|been chosen|bought|purchased|paid)\b|\bnot yet run for a real job\b|\bso far (?:it|they)\b|\bhas not needed to yet\b/i;
+check("⭐⭐ no NEVER-claim about the paid step survives, as a CLASS not a list",
+  !NEVER_CLAIM.test(rendered), rendered.match(NEVER_CLAIM)?.[0] ?? "");
+check("⭐ …and the page still says the paid buy is RARE, which is what is true",
+  /In practice this is rare/i.test(rendered));
+check("⭐⭐ …and the taxonomy backing that has a `purchased` outcome in the engine",
+  /PURCHASED:\s*"purchased"/.test(research), "_research.mjs classifies a real paid outcome");
 check("⭐⭐ …while still saying it is BUILT — 'not yet used' is not 'not built'",
   /wired and funded/.test(rendered));
 check("⭐ …and that a purchase that does not happen costs the user nothing",
