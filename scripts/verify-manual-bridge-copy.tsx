@@ -278,6 +278,54 @@ section("6 — 🚨 THE ACKNOWLEDGE DISCLOSURE — every number, RENDERED");
     numbers.size >= 4, `saw ${[...numbers].join(", ")}`);
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("7 — 🚨 THE SUBMITTED VALUES DO NOT SURVIVE THE BRIDGE, AND THE BANNER DOES NOT OUTLIVE IT");
+// ⭐ ASSERTED ON SOURCE, like verify-send-copy §8, and for the same reason: a render cannot see
+// what is WAITING BEHIND the state it is in. renderToStaticMarkup gives the initial state only, so
+// "does a populated form sit behind the success screen" is structurally invisible to it.
+// [[state-behind-a-transition-is-untested-by-default]]
+{
+  const src = readFileSync(new URL("../src/components/ManualBridgePanel.tsx", import.meta.url), "utf8");
+
+  // ⭐ PRESENCE FIRST. Two bare negatives below cannot distinguish "the rule holds" from
+  // "finishBridge does not exist" — an absence check over a missing symbol passes vacuously.
+  const hasFinish = /function finishBridge\s*\(/.test(src);
+  check("⭐⭐ a single success producer `finishBridge` exists", hasFinish);
+
+  const finish = src.match(/function finishBridge[\s\S]*?\n  \}/)?.[0] ?? "";
+  check("🚨 …and it CLEARS the submitted amount at the transition into success",
+    /setAmount\(""\)/.test(finish));
+  check("⭐ …and it is the ONLY place `setResult` is called with a burn hash",
+    (src.match(/setResult\(\{/g) || []).length === 1,
+    `${(src.match(/setResult\(\{/g) || []).length} site(s)`);
+
+  // 🚨 THE STALE BANNER. A second bridge must not price against the previous one's success.
+  const start = src.match(/async function start\([\s\S]*?\n  \}/)?.[0] ?? "";
+  check("⭐⭐ `start()` exists and clears the previous terminal state", /setResult\(null\)/.test(start));
+  // ⛔ Clearing `result` alone would SURFACE the old recovery control, since it renders on
+  // `signedHash && !result`. Both must go, or the fix is worse than the defect.
+  check("🚨 …and clears `signedHash` too, or the OLD retry control appears during the new bridge",
+    /setSignedHash\(null\)/.test(start));
+  check("⭐ …and `intentId`, so a promote cannot target the previous bridge",
+    /setIntentId\(null\)/.test(start));
+
+  // ⚠️ THE PRECONDITION THAT MAKES CLEARING SAFE, PINNED SO A REDESIGN CANNOT SILENTLY BREAK IT:
+  // the terminal state must read NONE of the cleared values, or clearing blanks the confirmation.
+  const successBlock = src.match(/\{result && \([\s\S]*?\)\}/)?.[0] ?? "";
+  // ⚠️ THE `extra` IS DERIVED, NOT A CONSTANT. A fixed "reads result.* only" string would keep
+  // printing itself on the very failure that disproves it — a label that names the wrong thing.
+  const leaked = ["amount", "destination"].filter((v) => new RegExp(`\\b${v}\\b`).test(successBlock));
+  check("⭐⭐ the success block reads NEITHER `amount` NOR `destination` — the precondition",
+    successBlock.length > 0 && leaked.length === 0,
+    successBlock.length === 0 ? "success block NOT FOUND"
+      : leaked.length ? `LEAKS: ${leaked.join(", ")}` : "reads result.* only");
+
+  // ⚠️ A DECISION, PINNED AS ONE: destination is an enumerated server-supplied choice, not free
+  // text, so it is deliberately RETAINED. If that ever changes it should change on purpose.
+  check("⚠️ `destination` is deliberately NOT cleared — an enumerated choice, not a typed address",
+    !/setDestination\(""\)/.test(finish));
+}
+
 console.log(`\n${"═".repeat(72)}`);
 if (fail) { console.log(`❌ ${fail} failed, ${pass} passed.\n`); process.exit(1); }
 console.log(`✅ ALL GREEN   pass ${pass} / fail 0`);

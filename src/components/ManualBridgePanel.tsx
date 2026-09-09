@@ -117,6 +117,13 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
 
   // ── Step 1: server prices, bands and GATES. Nothing is signed here. ──
   async function start(withAck?: string) {
+    // 🚨 A NEW BRIDGE MUST NOT INHERIT THE LAST ONE'S TERMINAL STATE. `result` was never cleared
+    // here, so a second bridge priced and ran with the PREVIOUS bridge's green "Bridge submitted ✓"
+    // and its burn link still on screen — the figures on display belonged to a different transfer.
+    // ⛔ `signedHash` and `intentId` go with it, and not clearing them would be worse than the bug
+    // being fixed: the recovery block renders on `signedHash && !result`, so clearing `result`
+    // alone would surface the OLD bridge's "retry the record" control during the new one.
+    setResult(null); setSignedHash(null); setIntentId(null);
     setError(null); setBusy(true); setStatus("Pricing…");
     try {
       const r = await agentClient.userBridgeStart(
@@ -136,6 +143,29 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
       setQuote(r.body.quote); setBurn(r.body.burn); setIntentId(r.body.intentId);
       setDisclosure(null); setStatus("");
     } catch (e) { setError(describeError(e)); } finally { setBusy(false); }
+  }
+
+  // ⭐⭐ ONE PRODUCER FOR THE SUCCESS TRANSITION. Both paths that can succeed — the promote loop in
+  // signAndBurn and retryPromote — end here, so the "clear the live form" rule cannot be applied at
+  // one site and forgotten at the other. [[duplicate-source-of-truth-is-the-recurring-bug]]
+  //
+  // 🚨 WHY THE FORM IS CLEARED AT THE TRANSITION, NOT WHEN IT IS NEXT USED. This panel's form is
+  // under no `{result}` guard — it stays LIVE beside the success banner. Retaining the submitted
+  // amount there is a pre-filled one-click repeat of an irreversible transfer. Clearing at the
+  // transition means there is never a moment when a populated form sits behind a success screen.
+  //
+  // ⭐ SAFE HERE BECAUSE THE TERMINAL STATE READS NONE OF IT — checked, not assumed: the success
+  // block renders `result.netPredicted` and `result.burnHash` only, and the fee disclosure renders
+  // the SERVER's `d.amountUsdc` / `d.destinationLabel`, not this form state. So no snapshot is
+  // needed. On a confirmation that echoed the amount, this same move would blank the disclosure.
+  //
+  // ⚠️ `destination` is deliberately KEPT. It is a choice from a server-supplied list, not free
+  // text — the same distinction ManualSendPanel drew when it cleared a 42-character recipient but
+  // not a token choice among four. Re-picking a chain is not the hazard; re-sending an amount is.
+  function finishBridge(burnHash: string, netPredicted: number) {
+    setResult({ burnHash, netPredicted });
+    setAmount("");
+    setStatus("");
   }
 
   // ── Step 2: the user signs. approve (only if short) then the burn. ──
@@ -176,7 +206,7 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
       // Retry while the node has not seen it yet — 202 means retryable, never "it failed".
       for (let i = 0; i < 20; i++) {
         const p = await agentClient.userBridgePromote({ intentId, burnHash: hash }, await w.ensureSession());
-        if (p.ok) { setResult({ burnHash: hash, netPredicted: p.body.netPredicted }); setStatus(""); return; }
+        if (p.ok) { finishBridge(hash, p.body.netPredicted); return; }
         if (p.status !== 202) throw new Error(p.body?.error ?? "could not confirm the burn");
         await new Promise((r) => setTimeout(r, 3000));
       }
@@ -199,7 +229,7 @@ export default function ManualBridgePanel({ wallet: w }: { wallet: UnifiedWallet
     try {
       for (let i = 0; i < 20; i++) {
         const p = await agentClient.userBridgePromote({ intentId, burnHash: signedHash }, await w.ensureSession());
-        if (p.ok) { setResult({ burnHash: signedHash, netPredicted: p.body.netPredicted }); setStatus(""); return; }
+        if (p.ok) { finishBridge(signedHash, p.body.netPredicted); return; }
         if (p.status !== 202) throw new Error(p.body?.error ?? "could not confirm the burn");
         await new Promise((r) => setTimeout(r, 3000));
       }
