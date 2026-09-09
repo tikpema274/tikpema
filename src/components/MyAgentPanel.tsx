@@ -370,6 +370,7 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
 
       <div className="row" style={{ marginTop: 0 }}>
         <input
+          id="agent-task-input"
           placeholder="e.g. swap 1 USDC to EURC then bridge 3 to Base · send 0.1 to 0x… then 0.1 to 0x…"
           value={task}
           onChange={(e) => setTask(e.target.value)}
@@ -456,7 +457,7 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
           grammar and the exact per-card wording are UNCHANGED, so the rule a user learns is the
           same one; only its container moved. If the Dashboard follows, they realign. */}
       <div className="panel-eyebrow" style={{ marginTop: 26 }}>Where the money goes</div>
-      <div className="quick" style={{ marginTop: 8 }}>
+      <div className="quick quick-sm" style={{ marginTop: 8 }}>
         <button className="quick-card" onClick={() => go("send")}>
           <div className="qt">Send →</div>
           <div className="qd" style={{ color: "var(--warn)", fontWeight: 600 }}>Move money out</div>
@@ -478,6 +479,48 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
           <div className="qd" style={{ fontWeight: 600 }}>Stays with you</div>
           <div className="qd">
             🔒 Stays on Arc, stays yours. Exchange between USDC and EURC.
+          </div>
+        </button>
+        {/* ⚠️ DEPOSIT AND WITHDRAW SHARE ONE DESTINATION — #/vault does both. That is deliberate,
+            not an oversight: they are TWO CARDS because they are two consequences, and a reader
+            deciding whether to click needs the difference stated before the click, not after it.
+            ⛔ Do not "fix" this by inventing a second route; VaultPanel owns both actions. */}
+        <button className="quick-card" onClick={() => go("vault")}>
+          <div className="qt">Deposit →</div>
+          <div className="qd" style={{ color: "var(--warn)", fontWeight: 600 }}>Move money out</div>
+          <div className="qd">
+            {/* ⭐ WORDING ALIGNED WITH Dashboard.tsx's Vault card ON PURPOSE. One claim, two
+                surfaces — the last time those drifted apart the panel contradicted itself for a
+                whole deploy. Owner powers lead, because that is what a vault can do to you. */}
+            <span style={{ color: "var(--warn)" }}>❗ Into a third-party vault.</span> Its owner
+            powers and exit terms are measured and shown before you commit.
+          </div>
+        </button>
+        <button className="quick-card" onClick={() => go("vault")}>
+          <div className="qt">Withdraw →</div>
+          <div className="qd" style={{ fontWeight: 600 }}>Comes back to you</div>
+          <div className="qd">
+            🔒 Reclaims your whole position to your agent wallet. Never capped, never paused.
+          </div>
+        </button>
+        {/* ⭐⭐ BALANCE IS NOT A DESTINATION, AND THE CARD MUST NOT PRETEND IT IS. The other five
+            navigate — their titles carry a "→". This one asks the AGENT, using the `show_balance`
+            action, so it has NO arrow and says "Ask the agent". A card that looks identical to its
+            neighbours but behaves differently is the same defect class as a neutral Bridge button:
+            the appearance promises one thing and the click does another. */}
+        <button
+          className="quick-card"
+          onClick={() => {
+            setTask("what is my balance?");
+            const el = document.getElementById("agent-task-input");
+            el?.scrollIntoView({ behavior: "smooth", block: "center" });
+            (el as HTMLInputElement | null)?.focus();
+          }}
+        >
+          <div className="qt">Balance</div>
+          <div className="qd" style={{ fontWeight: 600 }}>Nothing moves</div>
+          <div className="qd">
+            Ask the agent what your wallets hold. A read — no transaction, no fee.
           </div>
         </button>
       </div>

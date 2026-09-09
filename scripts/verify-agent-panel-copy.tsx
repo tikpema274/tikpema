@@ -128,17 +128,48 @@ check("⭐ SWAP says it stays, and what changes is the denomination",
 {
   const mkup = renderMarkup();
   const cards = mkup.split('class="quick-card"').slice(1);
-  check("⭐ the derivation found all three shortcut cards — an empty set would pass vacuously",
-    cards.length === 3, `${cards.length} cards`);
+  // ⭐ THE SET IS ENUMERATED, NOT COUNTED. `cards.length === 6` alone would pass for six WRONG
+  // cards; requiring each named card AND the count means a new shortcut has to be declared here
+  // rather than silently widening the row. Same rule as the confirm partition below: derive or
+  // enumerate, never loosen. [[verdict-earned-by-assertions]]
+  const SHORTCUTS = [
+    ["Send →", "Move money out"], ["Bridge →", "Move money out"], ["Swap →", "Stays with you"],
+    ["Deposit →", "Move money out"], ["Withdraw →", "Comes back to you"], ["Balance", "Nothing moves"],
+  ] as [string, string][];
+  check("⭐ the derivation found every shortcut card — an empty set would pass vacuously",
+    cards.length === SHORTCUTS.length, `${cards.length} cards, expected ${SHORTCUTS.length}`);
   const cardFor = (name: string) => cards.find((c) => c.includes(name)) ?? "";
-  for (const [name, tag] of [["Send →", "Move money out"], ["Bridge →", "Move money out"],
-                             ["Swap →", "Stays with you"]] as [string, string][]) {
+  for (const [name, tag] of SHORTCUTS) {
     check(`⭐⭐ ${name.replace(" →", "")} is tagged "${tag}" on its own card`,
       cardFor(name).includes(tag), cardFor(name) ? "card found" : "CARD NOT FOUND");
   }
   check("⭐⭐ 'there is no undo' sits on a card tagged 'Move money out', never 'Stays with you'",
     cardFor("there is no undo").includes("Move money out") &&
     !cardFor("there is no undo").includes("Stays with you"));
+
+  // 🚨 A VAULT DEPOSIT LEAVES YOUR CONTROL, so it must never sit under a reassuring tag — the
+  // same boundary Send and Bridge are held to. Its third-party warning is the load-bearing part.
+  check("⭐⭐ DEPOSIT carries the third-party warning, on a 'Move money out' card",
+    cardFor("Deposit →").includes("Into a third-party vault") &&
+    cardFor("Deposit →").includes("Move money out") &&
+    !cardFor("Deposit →").includes("Stays with you"));
+  // ⭐ And WITHDRAW is the inverse: a reclaim. If it ever gets tagged "Move money out" the row
+  // stops distinguishing the two directions, which is the whole point of splitting them.
+  check("⭐ WITHDRAW is a reclaim, never tagged as money leaving",
+    cardFor("Withdraw →").includes("Comes back to you") &&
+    !cardFor("Withdraw →").includes("Move money out"));
+
+  // ⭐⭐ BALANCE DOES NOT NAVIGATE — it asks the agent. Every other card's title carries "→".
+  // A card that looks identical to its neighbours but behaves differently is the neutral-button
+  // defect this whole section exists to prevent, so the absence of the arrow is asserted.
+  const bal = cardFor("Nothing moves");
+  // ⚠️ THE `extra` IS DERIVED. A fixed "no arrow" string would print itself on the very failure
+  // that disproves it — a label naming the wrong thing. [[ledger-source-field-made-debits-separable]]
+  check("⭐⭐ BALANCE claims no navigation — no arrow, unlike the five that do navigate",
+    bal !== "" && !bal.includes("→"),
+    bal === "" ? "CARD NOT FOUND" : bal.includes("→") ? "HAS AN ARROW — it claims to navigate" : "no arrow");
+  check("⭐ …and it says it only reads",
+    /A read/.test(bal) && /no transaction/.test(bal));
 }
 
 // ═══ ⭐⭐ THE CONFIRM CLAIM IS DERIVED FROM agent-act, NOT PINNED ═══════════════════════════════

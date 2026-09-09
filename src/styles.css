@@ -582,6 +582,27 @@ label.field > span {
   line-height: 1.45;
 }
 
+/* ⭐ COMPACT SHORTCUTS — six cards, not three. The block doubled when balance/deposit/withdraw
+   joined send/swap/bridge, and at full weight it dominated the page above the task box that is
+   the actual point of the surface. ⛔ ONLY THE WEIGHT CHANGES: the ❗/🔒 grammar, the category
+   line and the per-card consequence wording are untouched, because a user who learns the rule on
+   the Dashboard must read the same rule here. Smaller, not quieter. */
+.quick.quick-sm {
+  gap: 10px;
+}
+.quick.quick-sm .quick-card {
+  padding: 11px 12px;
+  border-radius: 10px;
+}
+.quick.quick-sm .quick-card .qt {
+  font-size: 0.88rem;
+  margin-bottom: 3px;
+}
+.quick.quick-sm .quick-card .qd {
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
 @media (max-width: 760px) {
   .console {
     grid-template-columns: 1fr;
