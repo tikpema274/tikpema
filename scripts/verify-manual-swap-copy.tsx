@@ -221,5 +221,43 @@ console.log("\n⭐ ROUTE + REDIRECT (a live route nothing links to is invisible)
     /from = "\/api\/user-swap-start"\s*\n\s*to = "[^"]+"\s*\n\s*status = 200/.test(toml));
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+// 🚨 THE SUBMITTED AMOUNT DOES NOT SURVIVE THE SWAP, AND THE PANEL IS NOT A DEAD END
+// ⭐ ON SOURCE, like verify-send-copy §8 and verify-manual-bridge-copy §7: renderToStaticMarkup
+// emits the initial state only, so what WAITS BEHIND a terminal state is invisible to a render.
+{
+  const mspSrc = readFileSync(new URL("../src/components/ManualSwapPanel.tsx", import.meta.url), "utf8");
+
+  // ⭐ PRESENCE BEFORE NEGATIVES — a bare negative cannot tell "the rule holds" from "the symbol
+  // does not exist". [[check-whose-failure-mode-is-a-pass]]
+  check("⭐⭐ a display-only `done` snapshot exists", /const \[done, setDone\]/.test(mspSrc));
+  check("🚨 …captured AT the transition, beside setSignedHash", /setDone\(\{[\s\S]{0,80}?minTokenOut[\s\S]{0,120}?setSignedHash\(/.test(mspSrc));
+  check("🚨 …and the submitted amount is cleared there too", /setSignedHash\(res\.swapHash\);[\s\S]{0,400}?setAmount\(""\)/.test(mspSrc));
+
+  // ⛔ THE PRECONDITION FAILED HERE, WHICH IS WHY THIS IS A SNAPSHOT AND NOT A CLEAR. The
+  // confirmation quoted `decoded?.minTokenOut ?? 0n`, and `reset()` nulls `decoded` — so clearing
+  // would not have blanked the guaranteed minimum, it would have claimed ZERO.
+  const conf = mspSrc.match(/\{signedHash && \([\s\S]*?\n      \)\}/)?.[0] ?? "";
+  check("⭐⭐ the confirmation renders the guaranteed minimum from the SNAPSHOT, not live state",
+    conf.length > 0 && /done\.minTokenOut/.test(conf));
+  check("🚨 …and never from `decoded`, which `reset()` nulls",
+    conf.length > 0 && !/decoded\?\.minTokenOut/.test(conf),
+    conf.length === 0 ? "confirmation block NOT FOUND" : /decoded\?\.minTokenOut/.test(conf) ? "still reads decoded" : "reads done.minTokenOut");
+  check("⛔ the `?? 0n` fallback is gone — it would assert a guaranteed minimum of ZERO",
+    !/minTokenOut \?\? 0n/.test(mspSrc));
+
+  // 🚨 THE DEAD END. `disabled={!!signedHash}` was never cleared, so one swap disabled the panel
+  // until a reload. Both directions are pinned: the way back exists, AND it clears signedHash.
+  check("⭐⭐ a `Swap again` control exists — the panel is not a one-shot", /Swap again/.test(mspSrc));
+  const again = mspSrc.match(/setSignedHash\(null\);[\s\S]{0,220}/)?.[0] ?? "";
+  check("🚨 …and it clears `signedHash`, which is what re-enables the form", again.length > 0);
+  check("⭐ …and clears the snapshot with it, so no stale disclosure survives", /setDone\(null\)/.test(mspSrc));
+
+  // ⚠️ `tokenIn` is deliberately KEPT — an enumerated choice among two, not a typed value; the
+  // same distinction ManualSendPanel and ManualBridgePanel drew. A DECISION, pinned as one.
+  check("⚠️ `tokenIn` is deliberately NOT cleared — a choice among two, not a typed value",
+    !/setTokenIn\("USDC"\);[\s\S]{0,80}setSignedHash\(null\)/.test(mspSrc));
+}
+
 console.log(`\n${fail === 0 ? "✅ ALL PASS" : "❌ FAILURE"} — ${pass} passed, ${fail} failed. Zero money, zero network.`);
 process.exit(fail === 0 ? 0 : 1);

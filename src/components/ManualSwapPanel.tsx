@@ -150,6 +150,13 @@ export default function ManualSwapPanel({ wallet: w }: { wallet: UnifiedWallet }
   // moved, and it is what makes re-signing unofferable. Same rule as the manual bridge.
   const [signedHash, setSignedHash] = useState<string | null>(null);
   const [result, setResult] = useState<{ received: number | null } | null>(null);
+  // ⭐⭐ A DISPLAY-ONLY SNAPSHOT, NOT LIVE FORM STATE. The confirmation quotes the guaranteed
+  // minimum, which lived on `decoded` — and `decoded` is exactly what `reset()` nulls. Clearing the
+  // form at the transition would therefore have rewritten the disclosure the user is reading, and
+  // the old `?? 0n` fallback meant it would not even blank: it would claim a guaranteed minimum of
+  // ZERO. ⛔ Nothing submits from this; it is inert by construction.
+  // [[clear-on-transition-needs-a-terminal-state-that-reads-nothing]]
+  const [done, setDone] = useState<{ minTokenOut: bigint; tokenOut: Token } | null>(null);
 
   const amountNum = Number(amount);
   const amountValid = Number.isFinite(amountNum) && amountNum > 0;
@@ -220,7 +227,14 @@ export default function ManualSwapPanel({ wallet: w }: { wallet: UnifiedWallet }
         onStatus: setStatusMsg,
       });
       submitted = res.swapHash;
+      // 🚨 SNAPSHOT BEFORE CLEARING, both at the transition into the terminal state. `decoded` is
+      // non-null here — the handler returns early otherwise — so the disclosure is captured intact.
+      setDone({ minTokenOut: decoded.minTokenOut, tokenOut });
       setSignedHash(res.swapHash);
+      // ⛔ The submitted amount must not survive behind the success screen. The form is DISABLED
+      // rather than hidden, and a disabled form is one `signedHash` reset away from being live and
+      // pre-filled with the last swap. [[self-signed-panels-retain-submitted-values]]
+      setAmount("");
       setStatusMsg("Waiting for the swap to confirm…");
 
       // ⛔ NO RECEIPT IS WRITTEN — delivery IS this transaction. Its own logs carry what arrived,
@@ -353,14 +367,25 @@ export default function ManualSwapPanel({ wallet: w }: { wallet: UnifiedWallet }
           {result && (
             <div>
               {result.received != null
-                ? <>Received <b className="mono">{result.received.toFixed(6)} {tokenOut}</b> — against a guaranteed
-                    minimum of <span className="mono">{usdc(decoded?.minTokenOut ?? 0n)}</span>, read from the
-                    transaction's own logs.</>
+                ? <>Received <b className="mono">{result.received.toFixed(6)} {done?.tokenOut ?? tokenOut}</b>
+                    {done && <> — against a guaranteed minimum of <span className="mono">{usdc(done.minTokenOut)}</span></>},
+                    read from the transaction's own logs.</>
                 : <>Confirmed on-chain, but the received amount could not be read from the logs. Your balance above
                     is the authority.</>}
             </div>
           )}
           <div className="mono" style={{ wordBreak: "break-all", opacity: 0.75 }}>{signedHash}</div>
+          {/* ⭐ WITHOUT THIS THE PANEL IS A DEAD END. `disabled={!!signedHash}` was never cleared,
+              so after one swap the form stayed permanently disabled and a reload was the only way
+              back. This clears the terminal state ONLY — the amount was already cleared at the
+              transition, so it reveals an empty form rather than emptying a revealed one. */}
+          {result && (
+            <button className="emerald" style={{ marginTop: 10 }} onClick={() => {
+              setSignedHash(null); setResult(null); setDone(null);
+              setQuote(null); setDecoded(null); setAcknowledged(false);
+              setError(null); setStatusMsg("");
+            }}>Swap again</button>
+          )}
         </div>
       )}
 
