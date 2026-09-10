@@ -33,10 +33,29 @@ const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
 // pinned to where the rounding decision actually lives, not to a filename.
 // ⛔ my-wallet is deliberately NOT still listed. Keeping it would assert a read it no longer
 // performs, and an assertion that cannot fail on the thing it names is worse than absent.
+// ⚠️ THE MARKER ACCEPTS EITHER SCALE, AND THAT IS DELIBERATE — corrected 2026-09-10.
+// It pinned `formatUnits(raw, USDC_DECIMALS)` literally. When the USDC reads moved to the NATIVE
+// 18-dp view, useModularWallet.ts went red — a correct fix breaking a check pinned to a MECHANISM.
+//
+// ⛔⛔ AND THE OTHER TWO PASSED FOR THE WRONG REASON, WHICH IS WORSE THAN THE FAILURE. `_balances.mjs`
+// and `metamask.ts` each hold a EURC read that is legitimately 6-dp, so the old marker still matched
+// — pointing at a different token while reporting that the USDC producer had been checked. One file
+// failed honestly; two silently changed subject.
+//
+// ⭐ THIS SECTION'S QUESTION IS "DOES THIS PRODUCER ROUND", not "which view of USDC is canonical".
+// That second question is §4's, where it is asserted per-file and per-token. Widening the marker
+// here restores the separation instead of encoding the same fact in two places at two scales.
+// ⚠️ HONEST BOUNDARY, found by mutating this check rather than by reading it. The marker proves a
+// formatted raw balance exists SOMEWHERE in the file — not that a particular producer still makes
+// one. Deleting `refreshBalance`'s formatUnits leaves it green, because useModularWallet.ts also
+// formats a raw inside its insufficient-funds message. That mutation is artificial and it is NOT
+// worth a file-position check to close; it IS worth writing down, so nobody reads this as proof
+// that a named producer survives. The round check below is the part that carries weight.
+const BALANCE_MARKER = /formatUnits\(raw, USDC_(?:NATIVE_)?DECIMALS\)/;
 const PRODUCERS = [
-  ["netlify/functions/_balances.mjs", /formatUnits\(raw, USDC_DECIMALS\)/],
-  ["src/wallet/useModularWallet.ts", /formatUnits\(raw, USDC_DECIMALS\)/],
-  ["src/wallet/connectors/metamask.ts", /formatUnits\(raw, USDC_DECIMALS\)/],
+  ["netlify/functions/_balances.mjs", BALANCE_MARKER],
+  ["src/wallet/useModularWallet.ts", BALANCE_MARKER],
+  ["src/wallet/connectors/metamask.ts", BALANCE_MARKER],
 ];
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════╗");

@@ -10,6 +10,7 @@ import {
 import {
   createPublicClient,
   formatUnits,
+  parseUnits,
   encodeFunctionData,
   parseEventLogs,
 } from "viem";
@@ -19,7 +20,7 @@ import {
 } from "viem/account-abstraction";
 import { sign as signWebauthn } from "webauthn-p256";
 import { arcTestnet } from "../config/chain";
-import { CONTRACTS, USDC_DECIMALS } from "../config/contracts";
+import { CONTRACTS, USDC_DECIMALS, USDC_NATIVE_DECIMALS } from "../config/contracts";
 
 // -- Client-plane config. CLIENT_KEY is browser-safe (domain restricted). --
 const clientKey = import.meta.env.VITE_CLIENT_KEY as string;
@@ -266,15 +267,13 @@ export function useModularWallet() {
   // Read the connected smart account's USDC balance and format it (e.g. "12.50").
   const refreshBalance = useCallback(async () => {
     if (!account) return;
-    const raw = (await publicClient.readContract({
-      address: CONTRACTS.USDC as `0x${string}`,
-      abi: BALANCE_OF_ABI,
-      functionName: "balanceOf",
-      args: [account.address],
-    })) as bigint;
+    // ⭐⭐ NATIVE, NOT balanceOf. On Arc USDC is the native gas token and the 6-dp ERC-20 view of it
+    // is LOSSY — anything under 1e-6 is invisible there, so balanceOf 0 does not prove empty.
+    // Circle's Arc guidance makes the native balance canonical for a display.
+    const raw = await publicClient.getBalance({ address: account.address });
     // ⭐ FULL PRECISION AT THE PRODUCER — see my-wallet.mjs for the rule. Rounding here would lose
-    // four digits of a 6-dp token before any consumer could decide it wanted them.
-    const formatted = formatUnits(raw, USDC_DECIMALS);
+    // digits before any consumer could decide it wanted them. ⚠️ 18 now, matching the read.
+    const formatted = formatUnits(raw, USDC_NATIVE_DECIMALS);
     setUsdcBalance(formatted);
     return formatted;
   }, [account]);
@@ -420,7 +419,10 @@ export function useModularWallet() {
           chain: arcTestnet,
           transport: modularTransport,
         });
-        const units = BigInt(Math.round(amountUsdc * 1e6));
+        // ⚠️ TOKEN scale (6), NOT native — the INVERSE of the balance read below. These units feed
+        // an ERC-20 `approve`; scaling them natively would authorise 10^12 times the amount.
+        // ⭐ parseUnits, not float maths on money: exact, from the string.
+        const units = parseUnits(String(amountUsdc), USDC_DECIMALS);
 
         // 1. Approve the prediction contract to pull the stake. Wait for confirm.
         setStatus("Approving stake…");
@@ -559,7 +561,10 @@ export function useModularWallet() {
           chain: arcTestnet,
           transport: modularTransport,
         });
-        const units = BigInt(Math.round(amountUsdc * 1e6));
+        // ⚠️ TOKEN scale (6), NOT native — the INVERSE of the balance read below. These units feed
+        // an ERC-20 `approve`; scaling them natively would authorise 10^12 times the amount.
+        // ⭐ parseUnits, not float maths on money: exact, from the string.
+        const units = parseUnits(String(amountUsdc), USDC_DECIMALS);
 
         // 1. Approve AgenticCommerce to pull the budget. Wait for confirm.
         setStatus("Approving escrow…");
@@ -648,13 +653,17 @@ export function useModularWallet() {
 
       // Balance guard, read LIVE from the chain — not the cached display, which can be
       // stale. Same shape as the bridge/deposit gate: reject before anything signs.
-      const raw = (await publicClient.readContract({
-        address: CONTRACTS.USDC as `0x${string}`,
-        abi: BALANCE_OF_ABI,
-        functionName: "balanceOf",
-        args: [account.address],
-      })) as bigint;
-      const units = BigInt(Math.round(amountUsdc * 1e6));
+      // ⭐⭐ NATIVE, and BOTH SIDES OF THE COMPARISON MOVED TOGETHER — this is the dangerous one.
+      // `units > raw` compares an amount against a balance. Move the balance to 18 decimals and
+      // leave `units` at 1e6 and every comparison is 10^12 out in the SAFE-LOOKING direction:
+      // `units` is always smaller, so the guard passes EVERY spend, including one the wallet cannot
+      // cover. A pre-sign balance check that never refuses is worse than none, because the code
+      // above it reads as protected. Circle's Arc guidance: never compare raw values across
+      // interfaces without conversion.
+      const raw = await publicClient.getBalance({ address: account.address });
+      // ⭐ parseUnits, not `Math.round(amountUsdc * 1e6)`. The old form did float arithmetic on a
+      // money amount before flooring it; parseUnits works from the string and is exact.
+      const units = parseUnits(String(amountUsdc), USDC_NATIVE_DECIMALS);
       if (units > raw) {
         throw new Error(
           // ⛔ 2dp COMPOSED INTO A SELF-CONTRADICTORY REFUSAL. A real balance of 2.0549 against a
@@ -662,7 +671,7 @@ export function useModularWallet() {
           //   say it should have passed, on a 6-dp token where the difference is the whole point.
           //   ⭐ Full precision here, and the DIRECTIONAL helpers rather than toFixed, so a surface
           //   that later wants fewer digits still cannot understate the need or overstate the balance.
-          `Insufficient funds. You have ${availableAmount(formatUnits(raw, USDC_DECIMALS), USDC_DECIMALS)} USDC, ` +
+          `Insufficient funds. You have ${availableAmount(formatUnits(raw, USDC_NATIVE_DECIMALS), USDC_DECIMALS)} USDC, ` +
           `need ${requiredAmount(amountUsdc, USDC_DECIMALS)}.`
         );
       }

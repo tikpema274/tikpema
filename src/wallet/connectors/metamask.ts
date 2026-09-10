@@ -18,7 +18,7 @@ import {
   parseEventLogs,
 } from "viem";
 import { arcTestnet, ARC_CHAIN_HEX } from "../../config/chain";
-import { CONTRACTS, USDC_DECIMALS } from "../../config/contracts";
+import { CONTRACTS, USDC_DECIMALS, USDC_NATIVE_DECIMALS } from "../../config/contracts";
 
 // The agent wallet — provider + evaluator for user-created ERC-8183 jobs. Read
 // from the browser-exposed env var (VITE_-prefixed so Vite bundles it).
@@ -175,15 +175,20 @@ export async function connectMetaMask() {
     transport: custom(provider),
   });
 
-  // Raw on-chain USDC balance (base units).
+  // ═══ ⭐⭐ THE NATIVE BALANCE, AT 18 DECIMALS — NOT balanceOf ═══════════════════════════════════
+  // On Arc USDC is the native gas token, and the 6-dp ERC-20 view of it is LOSSY: anything under
+  // 1e-6 USDC is invisible to balanceOf, so a balanceOf of 0 does not prove the balance is zero.
+  // Circle's Arc guidance makes the native balance canonical for a wallet display. The server side
+  // moved first (netlify/functions/_balances.mjs); this is the client half.
+  //
+  // 🚨 EVERY CONSUMER OF THIS VALUE MOVED WITH IT, and that is the whole risk of this change: the
+  // scales differ by 10^12, so a caller left on USDC_DECIMALS does not read slightly wrong, it
+  // reads a TRILLION times wrong. Both callers below are at USDC_NATIVE_DECIMALS. EURC is
+  // untouched — it is an ordinary ERC-20 with no native view, and balanceOf is exact for it.
   async function readBalanceRaw(): Promise<bigint> {
-    return (await publicClient.readContract({
-      address: CONTRACTS.USDC as `0x${string}`,
-      abi: BALANCE_OF_ABI,
-      functionName: "balanceOf",
-      args: [address],
-    })) as bigint;
+    return await publicClient.getBalance({ address: address as `0x${string}` });
   }
+
 
   // ⭐ EURC — a SECOND, DISTINCT balance, never summed with USDC (different unit, and EURC != $1).
   // The agent path gets this from /api/my-wallet; the MetaMask path had no EURC read at all, so a
@@ -204,15 +209,18 @@ export async function connectMetaMask() {
   // Formatted balance string (e.g. "12.50"), matching the modular path.
   async function refreshBalance(): Promise<string> {
     const raw = await readBalanceRaw();
-    // ⭐ FULL PRECISION AT THE PRODUCER — see my-wallet.mjs.
-    return formatUnits(raw, USDC_DECIMALS);
+    // ⭐ FULL PRECISION AT THE PRODUCER — see my-wallet.mjs. ⚠️ 18, because readBalanceRaw is NATIVE.
+    return formatUnits(raw, USDC_NATIVE_DECIMALS);
   }
 
   // Pre-spend guard. Gas also comes out of USDC, so require the spend PLUS a
   // small headroom buffer. Throws an explicit, user-readable error otherwise.
   async function ensureBalance(amountUsdc: number): Promise<void> {
     const raw = await readBalanceRaw();
-    const have = Number(formatUnits(raw, USDC_DECIMALS));
+    // ⛔ 18, NOT 6. At USDC_DECIMALS this reads 10^12 times too LARGE, and `have < need` becomes
+    // false for every balance — a pre-spend guard that passes everything. The failure direction is
+    // OPEN, which is why both this and refreshBalance moved in the same edit as the read.
+    const have = Number(formatUnits(raw, USDC_NATIVE_DECIMALS));
     const need = amountUsdc + GAS_HEADROOM_USDC;
     if (have < need) {
       // ⚠️ THE TILDE STAYS AND THE ROUNDING CHANGES. `need` really is an estimate — GAS_HEADROOM_USDC
