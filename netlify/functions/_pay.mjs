@@ -1,6 +1,9 @@
 import { AppKit } from "@circle-fin/app-kit";
 import { createCircleWalletsAdapter } from "@circle-fin/adapter-circle-wallets";
 
+/** Where a committed-but-unminted spend leaves its attestation. Read by hand; nothing sweeps it yet. */
+export const PAY_STRAND_STORE = "pay-strands";
+
 // PAY PLANE. The agent pays USDC from its Gateway (Unified Balance) to any
 // recipient on Arc Testnet. Same-chain Arc->Arc, NO forwarder.
 //
@@ -14,9 +17,24 @@ import { createCircleWalletsAdapter } from "@circle-fin/adapter-circle-wallets";
 // contract signature, so the Researcher's EIP-3009 data buys are unaffected by this upgrade.
 // `_delegate.mjs` still owns the authorization machinery. What changed is one plane, not the model.
 //
-// ⚠️ The shape previously proven on-chain (0.1 USDC delivered, tx 0xbf56e6be...7133501) was the
-// DELEGATE shape. This path's on-chain proof is therefore OWED AGAIN, and it is a money
-// instruction: the ERC-1271 spend has never been accepted by Gateway here.
+// ✅ ERC-1271 IS ACCEPTED — PROVEN 2026-09-10, and this is the claim the upgrade existed to earn.
+// A live `pay_for_service` produced a valid burn intent: Gateway ATTESTED it and Circle's ledger
+// committed 0.1035 USDC. An attestation only exists if the signature validated, so the SCA signing
+// for itself works. Under 1.8.1 this died at `invalid_signature` with nothing committed.
+//
+// ⛔⛔ AND THE SAME RUN EXPOSED A LIMIT THIS HEADER USED TO HIDE. It said tx 0xbf56e6be…7133501 was
+// "the exact shape proven on-chain" WITHOUT recording that its recipient must be a wallet WE
+// CONTROL. It must. `to` passes a destination `adapter` and NO forwarder, so App Kit submits
+// `gatewayMint` itself, through that adapter, FROM `to.address` — the recipient. Circle holds no
+// wallet for a third party and answers "Requested resource not found". The mint never runs and the
+// burn stays committed. That omission is what made a third-party test look reasonable.
+//
+// ⚠️ AND THE OBVIOUS FIX IS NOT AVAILABLE HERE. `_ubspend.mjs` avoids this with `useForwarder:true`
+// and no destination adapter — the relayer mints, so any recipient works. The forwarder carries a
+// FLAT ~0.2055 USDC fee and a 10 USDC floor: on a 0.1 payment the fee is twice the payment and the
+// floor forbids it outright. That is WHY this path has no forwarder. The honest statement is a
+// CONSTRAINT, not a bug: small same-chain Gateway pays require a recipient we control; arbitrary
+// recipients need a forwarder and a much larger amount.
 //
 // The Circle Wallets adapter submits async; App Kit's waitForTransaction throws
 // (code 1098 / "transaction hash required", sometimes surfaced as a 5001 mint
@@ -98,7 +116,11 @@ export async function agentPay({ recipientAddress, amountUsdc, sourceAccount }) 
     return { state: "completed", recipientAddress, amountUsdc: amount, result };
   } catch (e) {
     const msg = e?.message || "";
-    const causeStr = JSON.stringify(e?.cause || {});
+    // ⚠️ `JSON.stringify` THROWS ON A BigInt, and viem/SDK errors carry them freely. This line used
+    // to be a bare stringify: a spend error whose cause held one BigInt would have thrown a
+    // TypeError FROM THE CATCH BLOCK, replacing the real failure with a serialisation error and
+    // losing the 1098 classification below. Never seen in the wild; one BigInt away from it.
+    const causeStr = safeJson(e?.cause) ?? "";
     const isAsyncWaiterQuirk =
       e?.code === 1098 ||
       /transaction hash is required/i.test(msg) ||
@@ -107,6 +129,90 @@ export async function agentPay({ recipientAddress, amountUsdc, sourceAccount }) 
       // Spend submitted; the mint lands shortly. Not a failure.
       return { state: "submitted", pending: true, recipientAddress, amountUsdc: amount };
     }
+    // 🚨 THE BURN MAY ALREADY BE COMMITTED. Record the recovery material BEFORE rethrowing.
+    await recordStrandNeverThrows({ owner, recipientAddress, amountUsdc: amount, error: e, causeStr, msg });
     throw e;
+  }
+}
+
+/** JSON that cannot throw — BigInts, cycles and getters all degrade instead of raising.
+ *  ⭐ EXPORTED FOR ITS TEST. A pure function guarding a catch block is worth driving directly:
+ *  asserting it by regex would pin the SHAPE and never exercise the BigInt that motivated it. */
+export function safeJson(v) {
+  if (v === undefined || v === null) return null;
+  const seen = new WeakSet();
+  try {
+    return JSON.stringify(v, (_k, val) => {
+      if (typeof val === "bigint") return `${val}n`;
+      if (typeof val === "function") return "[function]";
+      if (typeof val === "object" && val !== null) {
+        if (seen.has(val)) return "[circular]";
+        seen.add(val);
+      }
+      return val;
+    });
+  } catch {
+    return null;
+  }
+}
+
+// ═══ 🚨 A COMMITTED BURN WITH A FAILED MINT MUST NOT LOSE ITS OWN RECOVERY MATERIAL ═══════════
+//
+// MEASURED 2026-09-10, and this function exists because of it. A `pay_for_service` to a THIRD-PARTY
+// recipient produced a valid ERC-1271 burn intent — Gateway attested it and Circle's ledger
+// committed 0.1035 USDC (0.1 + fee) — and then the MINT leg failed, because this path passes a
+// destination `adapter` and no forwarder, so App Kit submits `gatewayMint` FROM `to.address`. That
+// is the recipient, and Circle holds no wallet for a third party: "Requested resource not found".
+//
+// ⛔ THE OLD CATCH RETHREW AND KEPT NOTHING. The error's own text said what was being discarded —
+// *"Use the attestation and signature in `error.cause.trace` to reattempt via `config.retry`"* —
+// and that attestation is the ONLY thing that can complete or recover a burn Circle has already
+// committed. It existed in one browser error message and nowhere else.
+//
+// ⭐ THE ATTESTATION IS NOT A CREDENTIAL. It authorises a mint TO A NAMED RECIPIENT for a fixed
+// amount; holding it does not let anyone redirect the funds. Storing it is safe.
+//
+// ⛔⛔ AND IT IS NOT A FUNDS-RECOVERY MECHANISM — I built it believing it was, and the measurement
+// says otherwise. MEASURED 2026-09-10, the SAME incident, watched to completion:
+//
+//   Circle's ledger (/v1/balances) 1.5100 -> 1.4065 -> 1.5100      reserved, then RELEASED
+//   on-chain availableBalance()    1.510000 THROUGHOUT              never moved at all
+//
+// A committed-but-unminted burn intent EXPIRES AND RELEASES BACK. The whole episode lived in
+// Circle's off-chain ledger; nothing was ever burned on Arc, and no funds were at risk in either
+// direction. ⚠️ So the urgent-sounding framing this comment first carried was WRONG.
+//
+// ⭐ WHAT THE RECORD ACTUALLY BUYS, stated at its real size: the user still WANTED to pay. The
+// attestation lets that payment be COMPLETED — submitted by a wallet we do control — instead of
+// re-signing and re-committing a second reservation. It is a completion aid and a diagnostic, not
+// a rescue. ⚠️ Do not let a future reader infer money is at stake from the fact that we save this.
+//
+// ⚠️ NEVER THROWS, and AWAITED — the same two rules as writeReceiptNeverThrows, for the same two
+// reasons: the money may already be gone by the time we are called, so a Blobs hiccup must not
+// replace a real failure with a different one; and a Netlify function can freeze the instant the
+// handler returns, so an un-awaited write may simply never happen.
+//
+// ⚠️ SCOPE: _ubspend.mjs has the SAME exposure and does NOT have this yet. It uses a forwarder, so
+// its mint is relayer-submitted and this exact failure cannot occur — but a committed burn failing
+// for any other reason would discard the same material there.
+async function recordStrandNeverThrows({ owner, recipientAddress, amountUsdc, error, causeStr, msg }) {
+  try {
+    const { getStore } = await import("@netlify/blobs");
+    const at = new Date().toISOString();
+    await getStore(PAY_STRAND_STORE).setJSON(`strand:${String(owner).toLowerCase()}:${at}`, {
+      at,
+      owner,
+      recipientAddress,
+      amountUsdc,
+      code: error?.code ?? null,
+      message: msg,
+      // The recovery material. `cause.trace` is where the attestation and signature live.
+      cause: causeStr,
+      name: error?.name ?? null,
+    });
+    console.warn(`[pay-strand] recorded a failed spend for ${owner} -> ${recipientAddress} (${amountUsdc} USDC)`);
+  } catch (writeErr) {
+    // Swallowed ON PURPOSE — see the block comment. The original error is what the caller needs.
+    console.error(`[pay-strand] RECORD FAILED (swallowed) owner=${owner} — ${writeErr?.message}`);
   }
 }

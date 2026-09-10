@@ -22,6 +22,7 @@
 
 import { readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
+import { safeJson } from "../netlify/functions/_pay.mjs";
 
 let pass = 0, fail = 0;
 const check = (label, cond, extra = "") => {
@@ -61,6 +62,42 @@ for (const f of SITES) {
   check(`  ⛔ …and never names a spend wallet from env`,
     !/(address|sourceAccount):\s*process\.env/.test(code));
 }
+// ═══ 🚨 A COMMITTED BURN MUST NOT LOSE ITS OWN RECOVERY MATERIAL — added 2026-09-10 ═══════════
+// MEASURED that day: a live pay_for_service produced a VALID ERC-1271 burn intent, Gateway attested
+// it, Circle's ledger committed 0.1035 USDC — and the MINT failed, because this path passes a
+// destination adapter and no forwarder so App Kit submits gatewayMint FROM the recipient, which
+// Circle does not hold a wallet for. The old catch rethrew and kept NOTHING, while the error itself
+// said what was being discarded: "Use the attestation and signature in error.cause.trace to
+// reattempt". That attestation is the only thing that can complete or recover a committed burn.
+section("3 — the failure path KEEPS what a recovery would need");
+{
+  const pay = strip(readFileSync("netlify/functions/_pay.mjs", "utf8"));
+  check("⭐⭐ a non-quirk failure RECORDS before it rethrows",
+    /recordStrandNeverThrows\(/.test(pay) && pay.indexOf("recordStrandNeverThrows(") < pay.lastIndexOf("throw e"),
+    "order is the mechanism: a rethrow first would lose the attestation");
+  check("⭐ …and it carries the CAUSE, where the attestation lives",
+    /cause:\s*causeStr/.test(pay));
+  check("⛔ …and the recorder cannot turn a spend failure into a different one",
+    /catch \(writeErr\)/.test(pay) && /swallowed/i.test(pay),
+    "the money may already be committed — a Blobs hiccup must not replace the real error");
+  check("⭐ the record is AWAITED — a Netlify function can freeze the moment it returns",
+    /await recordStrandNeverThrows\(/.test(pay));
+}
+
+// ═══ ⚠️ AND THE CATCH BLOCK'S OWN SERIALISER MUST NOT THROW ═══════════════════════════════════
+// `causeStr` was a bare JSON.stringify. JSON.stringify THROWS on a BigInt, and viem/SDK errors
+// carry them freely — so one BigInt in a cause would have thrown a TypeError FROM INSIDE THE CATCH,
+// replacing the real failure and losing the 1098 classification that depends on causeStr.
+// ⭐ Driven as a FUNCTION, not asserted by regex: a shape check would never exercise the BigInt.
+{
+  check("⭐⭐ safeJson survives a BigInt", safeJson({ a: 1n }) === '{"a":"1n"}', String(safeJson({ a: 1n })));
+  const cyc = {}; cyc.self = cyc;
+  check("⭐ …and a circular reference", safeJson(cyc) === '{"self":"[circular]"}', String(safeJson(cyc)));
+  check("⭐ …and returns null rather than throwing on nothing", safeJson(undefined) === null && safeJson(null) === null);
+  check("⛔ …while still serialising an ordinary cause faithfully",
+    safeJson({ trace: "0xdeadbeef", code: 5001 }) === '{"trace":"0xdeadbeef","code":5001}');
+}
+
 // The count is asserted so a NEW spend site cannot be added with allocations and go unnoticed.
 {
   const all = ["netlify/functions", "shared", "scripts", "src"];
