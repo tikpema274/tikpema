@@ -83,14 +83,24 @@ export function MandateDetail({ m }: { m: any }) {
 // DcaPanel — create and manage DCA mandates. Nav-less (#/dca).
 //
 // ⚠️ THIS COMMENT USED TO SAY "reached from the swap area." IT WAS FALSE, and had been for as long
-// as the route existed: nothing anywhere in src/ links to #/dca. Every sibling nav-less route has a
-// quick-card (swap → MyAgentPanel, bridge → MyAgentPanel + Dashboard, vault/nanopay → Dashboard);
-// this one had none, so the only way in was typing the hash. 🚨 A comment asserting an entry point
-// that does not exist is the claim-nothing-checks species — it sends the next reader hunting for a
-// link, and it is why "is DCA wired?" took an hour to answer instead of one grep.
+// as the route existed — for 22 days nothing in src/ linked here and the only way in was typing the
+// hash. 🚨 A comment asserting an entry point that does not exist is the claim-nothing-checks
+// species: it sends the next reader hunting for a link, and it is why "is DCA wired?" took an hour
+// to answer instead of one grep.
 //
-// 🚧 CREATE IS NOW GATED (see CREATE_GATED in _dca.mjs for the reason and the UNBLOCK CONDITION).
-// The gate state is read from dca-list, never duplicated here. Cancel and list stay fully live.
+// ✅ IT IS WIRED NOW: Dashboard.tsx's "Recurring swaps" ConsequenceCard, in the "Move money out"
+// fold. ⛔⛔ AND THIS PARAGRAPH THEN SAT CLAIMING THE OPPOSITE — "nothing anywhere in src/ links to
+// #/dca" — after the card shipped. Verified and corrected 2026-09-10. That is the SAME species
+// inverted: the first version asserted an entry point that did not exist, this one denied one that
+// did, and both cost a reader the same hour. ⭐ A note about wiring is only true until someone
+// wires it; if it matters, it belongs in a guard, not a header.
+//
+// ✅ CREATE IS UN-GATED — `CREATE_GATED = false` in _dca.mjs since 2026-08-22, all four conditions
+// met. ⚠️ This line said "🚧 CREATE IS NOW GATED" until 2026-09-10, weeks after the flag flipped.
+// The CODE was never wrong — the gate state is read from dca-list and never duplicated here, which
+// is exactly why the stale prose was invisible: nothing depended on it, so nothing contradicted it.
+// ⭐ The four conditions are the STANDING BAR, not a cleared hurdle: _dca.mjs:164 says to flip the
+// flag back if any stops holding. Cancel and list stay fully live either way.
 //
 // ⚠️ DISCLOSURE FIRST, AND IT IS NOT SOFTENED. A DCA mandate is the ONLY thing in Tikpema that
 // moves money with no human present. The plain custodial truth leads the page, BEFORE the

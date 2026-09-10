@@ -168,6 +168,31 @@ section("6 — ⭐⭐ THE FOLD MUST NOT SWALLOW THE CONSEQUENCE");
   check("⛔⛔ the card bodies are present even though the sections default SHUT",
     /there is no undo/.test(rendered) && /Into a third-party vault/.test(rendered),
     "conditional rendering here would silently gut §3");
+  // ═══ 🚨 THE COUNT IS A SECOND COPY OF A FACT THE CONTENT ALREADY HOLDS ═══════════════════════
+  // Each fold states how many items are behind it. That number is HAND-WRITTEN and the items are
+  // right there — two sources for one fact, which in this repo has never not drifted.
+  // ⛔ IT DRIFTED IMMEDIATELY. "Ask your agent" shipped declaring 6 with SEVEN inside, and went to
+  // production that way: the "What else is built →" link is a `quick-card` in the same grid and is
+  // indistinguishable from a ConsequenceCard to a reader. Shut, the summary stated a false number —
+  // on the one line a reader sees before deciding whether to open the section.
+  // ⭐ Derived from the SOURCE and compared, so adding a card without bumping the count is red, not
+  // a quiet lie. That is the case that matters: the next card added here is #/dca's.
+  {
+    const src = readFileSync(new URL("../src/components/Dashboard.tsx", import.meta.url), "utf8");
+    const folds = src.split("<FoldSection").slice(1);
+    check("⭐ every fold is found in source — the check has something to be about", folds.length === 3,
+      `${folds.length} FoldSection blocks`);
+    for (const f of folds) {
+      const id = /id="([^"]+)"/.exec(f)?.[1] ?? "?";
+      const declared = Number(/count=\{(\d+)\}/.exec(f)?.[1] ?? NaN);
+      const body = f.split("</FoldSection>")[0];
+      const actual = (body.match(/<ConsequenceCard\b/g) ?? []).length
+                   + (body.match(/className="quick-card"/g) ?? []).length;
+      check(`⭐⭐ fold "${id}" states the number of items it actually contains`,
+        declared === actual, `declares ${declared}, contains ${actual}`);
+    }
+  }
+
   check("⭐ …and the fold is genuinely shut by default — the page is short on arrival",
     !/<details[^>]*\sopen\b/.test(markup),
     "if this flips to open, the shorter page was lost and nobody would see a red");

@@ -271,7 +271,11 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
         id="agent"
         eyebrow="Ask your agent"
         consequence="Tasks, research and plans — within your caps."
-        count={6}
+        // ⚠️ SEVEN, not six: the "What else is built →" link is a `quick-card` in the same grid and
+        // is indistinguishable from a ConsequenceCard to a reader. Shipped as 6 on 2026-09-10 and
+        // live for one deploy — a hand-written number duplicating a fact the content already holds.
+        // verify-dashboard-copy §6 now derives the real count and refuses a mismatch.
+        count={7}
       >
         <div className="quick">
           <ConsequenceCard title="AI Agent" onClick={() => go("agent")}>
