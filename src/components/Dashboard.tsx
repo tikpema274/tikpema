@@ -1,3 +1,4 @@
+import { useState } from "react";
 import ConsequenceCard from "./ConsequenceCard";
 import type { useWallet } from "../wallet/useWallet";
 
@@ -25,6 +26,56 @@ const go = (id: string) => {
 // wrong one — moving money OUT when they meant to move it between their own pockets.
 // The consequence therefore lives IN THE LABEL, read BEFORE the click. Deliberately NO
 // confirmation dialogs: those train people to click through.
+// ── ⭐⭐ THE COLLAPSIBLE SECTION — AND WHY THE CONSEQUENCE STAYS OUTSIDE THE FOLD ──────────────
+// Each money/agent group folds so the page is a short list of what the agent can do rather than a
+// wall of twelve cards. Two properties of this are load-bearing and must survive any edit:
+//
+//   1. ⛔ THE CONSEQUENCE LINE LIVES IN THE <summary>, NEVER IN THE BODY. "This leaves you." and
+//      "Nothing leaves you." ARE the safety mechanism on this page — the header above records that
+//      a flat grid gave Bridge and Deposit equal weight and the author of this app clicked the
+//      wrong one. Folding that sentence away would hide the exact thing the grouping exists to put
+//      in front of the click. Collapsed, the label is now read BEFORE a card is even visible.
+//
+//   2. ⭐⭐ <details> KEEPS THE BODY IN THE DOM. Conditional rendering ({open && …}) would remove
+//      the cards when shut — and verify-dashboard-copy §3 asserts BOUNDARIES BY DOCUMENT ORDER
+//      ("there is no undo" must come after "This leaves you"), so a shut section would break a
+//      guard about copy the user can still reach in one click. Native <details> also gives
+//      keyboard and screen-reader behaviour for free. [[state-behind-a-transition-is-untested-by-default]]
+//
+// ⚠️ Open state is a per-viewer convenience in localStorage, wrapped in try/catch: a private window
+// or blocked site data must degrade to the default, never throw on render.
+function FoldSection({
+  id, eyebrow, consequence, count, children,
+}: {
+  id: string; eyebrow: string; consequence: React.ReactNode; count: number; children: React.ReactNode;
+}) {
+  const KEY = `tikpema.fold.${id}`;
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem(KEY) === "open"; } catch { return false; }
+  });
+  return (
+    <details
+      className="plane fold"
+      open={open}
+      onToggle={(e) => {
+        const next = (e.currentTarget as HTMLDetailsElement).open;
+        setOpen(next);
+        try { localStorage.setItem(KEY, next ? "open" : "shut"); } catch { /* private window */ }
+      }}
+    >
+      <summary className="fold-head">
+        <span className="fold-chev" aria-hidden="true">›</span>
+        <span className="fold-head-text">
+          <span className="panel-eyebrow">{eyebrow}</span>
+          <span className="sub">{consequence}</span>
+        </span>
+        <span className="fold-count">{count}</span>
+      </summary>
+      {children}
+    </details>
+  );
+}
+
 export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
   return (
     <>
@@ -128,10 +179,17 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
 
           Deposit KEEPS its card, because #/unified is a genuinely different page with its
           own explanation, its own cap, and its own commitment warning. */}
-      <div className="plane">
-        <div className="panel-eyebrow">Move money between your accounts</div>
-        <div className="sub">
-          Nothing leaves you. Fund and withdraw live beside the balances they move, on your{" "}
+      <FoldSection
+        id="internal"
+        eyebrow="Move money between your accounts"
+        consequence="Nothing leaves you."
+        count={2}
+      >
+        {/* ⚠️ The Wallet-page pointer is SUPPLEMENTARY and sits in the body, not the summary —
+            partly because it is detail rather than consequence, and partly because a <button>
+            inside <summary> would toggle the fold on its way to navigating. */}
+        <div className="sub fold-note">
+          Fund and withdraw live beside the balances they move, on your{" "}
           <button className="linkbtn" onClick={() => go("wallet")}>
             Wallet page
           </button>
@@ -156,13 +214,14 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
               only</span> — from another chain it will not arrive.
             </ConsequenceCard>
         </div>
-      </div>
+      </FoldSection>
 
-      <div className="plane">
-        <div className="panel-eyebrow">Move money out</div>
-        <div className="sub">
-          <b>This leaves you.</b> Both of these send USDC somewhere you don't control.
-        </div>
+      <FoldSection
+        id="outward"
+        eyebrow="Move money out"
+        consequence={<><b>This leaves you.</b> These send USDC somewhere you don't control.</>}
+        count={4}
+      >
         <div className="quick">
           <ConsequenceCard title="Send" onClick={() => go("send")}>
               <span style={{ color: "var(--warn)" }}>❗ Goes to someone else.</span> Gone —
@@ -206,10 +265,14 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
               our key — not your passkey. Cancel anytime; a swap already sent still lands.
             </ConsequenceCard>
         </div>
-      </div>
+      </FoldSection>
 
-      <div className="plane">
-        <div className="panel-eyebrow">Ask your agent</div>
+      <FoldSection
+        id="agent"
+        eyebrow="Ask your agent"
+        consequence="Tasks, research and plans — within your caps."
+        count={6}
+      >
         <div className="quick">
           <ConsequenceCard title="AI Agent" onClick={() => go("agent")}>
               Give your agent a task in plain language — research, send, swap,
@@ -268,7 +331,7 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
             </div>
           </a>
         </div>
-      </div>
+      </FoldSection>
     </>
   );
 }

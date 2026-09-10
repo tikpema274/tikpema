@@ -851,3 +851,63 @@ button.pct:hover:not(:disabled) { border-color: var(--amber-line); color: var(--
 
 /* ⭐ The action, after the summary, full width — the last thing on the way down. */
 button.btn-wide { display: block; width: 100%; margin-top: 14px; padding: 13px 0; font-size: 0.95rem; }
+
+/* ── Collapsible dashboard sections ──────────────────────────────────────────────────────────
+   ⭐ The <summary> is the ALWAYS-VISIBLE half and carries the consequence line ("This leaves
+   you."), which is the safety copy this page is built around — see Dashboard.tsx. Style it so
+   that line stays as legible shut as it is open; if it ever reads as a de-emphasised header,
+   the fold has quietly demoted the one sentence that must be read before a click.
+   ⚠️ Padding moves from .plane to the summary and the body, so a shut section is a compact row
+   rather than a bordered box with dead space under it. */
+.fold {
+  padding: 0;
+}
+.fold > summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 22px 28px;
+  cursor: pointer;
+  list-style: none;                 /* Firefox */
+  border-radius: var(--radius-lg);
+}
+.fold > summary::-webkit-details-marker { display: none; }   /* Safari/Chrome */
+.fold > summary:hover { background: var(--surface-2); }
+.fold > summary:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
+}
+.fold-chev {
+  font-family: "Space Mono", monospace;
+  color: var(--amber);
+  line-height: 1.1;
+  transform: rotate(0deg);
+  transition: transform 0.18s ease;
+  flex: none;
+}
+.fold[open] > summary .fold-chev { transform: rotate(90deg); }
+.fold-head-text { flex: 1 1 auto; min-width: 0; }
+.fold-head-text .panel-eyebrow { display: block; margin-bottom: 6px; }
+/* ⚠️ NOT dimmed and NOT shrunk: this is the consequence, not a subtitle. */
+.fold-head-text .sub { display: block; margin: 0; }
+.fold-count {
+  font-family: "Space Mono", monospace;
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 9px;
+  flex: none;
+}
+/* The body. Indented to the same gutter as the summary text. */
+.fold > .quick,
+.fold > .fold-note { padding: 0 28px; }
+.fold > .fold-note { margin: 0 0 14px; }
+.fold > *:last-child { margin-bottom: 0; padding-bottom: 26px; }
+
+@media (max-width: 640px) {
+  .fold > summary { padding: 18px 18px; gap: 10px; }
+  .fold > .quick,
+  .fold > .fold-note { padding: 0 18px; }
+  .fold > *:last-child { padding-bottom: 20px; }
+}

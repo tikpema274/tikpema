@@ -36,6 +36,30 @@ const wallet: any = {
   address: "0x" + "cd".repeat(20), usdcBalance: "12.3456", busy: false, isAuthenticated: true,
   ensureSession: async () => "t", refreshAgentWallet: async () => {}, refreshBalance: async () => {},
 };
+// ⭐ TWO HANDLES ON ONE RENDER, AND THEY ANSWER DIFFERENT QUESTIONS.
+// `rendered` is TEXT ONLY — every tag stripped — because almost every check here is about what a
+// reader SEES, and asserting against markup is how a copy guard ends up green about a string that
+// never reaches the screen.
+// ⚠️ `markup` exists for the few checks that are genuinely STRUCTURAL (is this a <details>? is that
+// sentence inside the <summary>?). Running those against `rendered` does not fail — it passes
+// VACUOUSLY, because a tag regex can never match text with no tags in it. Measured here: the
+// "shut by default" check went green against `rendered` before this split.
+// ═══ 🚨 WITHOUT THIS STUB, "SHUT BY DEFAULT" IS UNTESTABLE — MEASURED ═══════════════════════
+// FoldSection reads its initial open state from localStorage inside a try/catch. Node has no
+// localStorage, so the initializer THROWS and the catch returns false — meaning EVERY possible
+// default renders shut, and a check on the markup passes no matter what the code intends.
+// ⛔ MEASURED 2026-09-10: mutating the default to OPEN left this suite 24/0 GREEN. The assertion
+// was pinned to the catch branch, not to the default it names — a check whose failure mode is a
+// pass. The stub makes the real branch run, so the default becomes something a test can see.
+// ⚠️ An EMPTY store is the honest fixture: it is what a first-time visitor has.
+const foldStore = new Map<string, string>();
+(globalThis as any).localStorage = {
+  getItem: (k: string) => foldStore.get(k) ?? null,
+  setItem: (k: string, v: string) => { foldStore.set(k, v); },
+  removeItem: (k: string) => { foldStore.delete(k); },
+};
+
+const markup = renderToStaticMarkup(<Dashboard wallet={wallet} />);
 const rendered = renderToStaticMarkup(<Dashboard wallet={wallet} />)
   .replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"')
   .replace(/&amp;/g, "&").replace(/&#(\d+);/g, (_: string, d: string) => String.fromCharCode(Number(d)))
@@ -116,6 +140,38 @@ check("⭐ the lead names per-transaction and daily caps",
   /per-transaction and daily spending caps/.test(rendered));
 check("⭐⭐ …and both have a real enforcement point, which fails CLOSED when misconfigured",
   /AGENT_MAX_SPEND_USDC/.test(arc) && /refusing to spend/.test(arc));
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("6 — ⭐⭐ THE FOLD MUST NOT SWALLOW THE CONSEQUENCE");
+// The money/agent groups collapse so the page is a short list rather than twelve cards. That is a
+// layout choice with a SAFETY EDGE: "This leaves you." and "Nothing leaves you." are the whole
+// reason the grouping exists (§3), and folding them away would hide the one sentence this page is
+// built to put in front of a click. So they must live in the ALWAYS-VISIBLE <summary>, never in
+// the collapsible body — and presence alone cannot tell the difference, which is why this section
+// asks WHERE, exactly as §3 does for ordering.
+{
+  const summaries = [...markup.matchAll(/<summary\b[^>]*>([\s\S]*?)<\/summary>/g)].map((m) => m[1]);
+  const inASummary = (phrase: string) => summaries.some((b) => b.includes(phrase));
+
+  check("⭐ the groups render as native <details>, not a JS-only widget",
+    (markup.match(/<details\b/g) ?? []).length === 3,
+    `${(markup.match(/<details\b/g) ?? []).length} folds — native gives keyboard and SR behaviour free`);
+  check("⭐ …each with a summary to click", summaries.length === 3, `${summaries.length} summaries`);
+
+  check("⭐⭐ 'Nothing leaves you' is in the ALWAYS-VISIBLE summary", inASummary("Nothing leaves you"));
+  check("⭐⭐ 'This leaves you' is in the ALWAYS-VISIBLE summary", inASummary("This leaves you"),
+    "shut, this is the only thing standing between the reader and a card that moves money out");
+
+  // ⛔⛔ THE CARDS MUST STAY IN THE DOM WHEN SHUT. Conditional rendering would remove them, and §3
+  // decides the money boundaries BY DOCUMENT ORDER — a shut section would break a guard about copy
+  // the reader can still reach in one click. <details> hides visually and keeps the markup.
+  check("⛔⛔ the card bodies are present even though the sections default SHUT",
+    /there is no undo/.test(rendered) && /Into a third-party vault/.test(rendered),
+    "conditional rendering here would silently gut §3");
+  check("⭐ …and the fold is genuinely shut by default — the page is short on arrival",
+    !/<details[^>]*\sopen\b/.test(markup),
+    "if this flips to open, the shorter page was lost and nobody would see a red");
+}
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
