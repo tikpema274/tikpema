@@ -344,6 +344,90 @@ export const UNWIRED_OK = {
 };
 
 /**
+ * ⭐⭐ THE SAME EXEMPTIONS, AS SOMETHING A CHECK CAN READ.
+ *
+ * Every UNWIRED_OK reason above ends in a run-trigger written in prose — "run it after any deploy
+ * touching ManualSwapPanel", "run it when the upfront-fee migration lands, and periodically after".
+ * Those sentences were addressed to whoever remembered to read them, and nothing could tell whether
+ * one had ever been honoured. This map is the machine-readable half, and `gate:registry` asserts
+ * the two maps carry EXACTLY the same keys — so a new exemption cannot be declared without one, and
+ * a removed exemption cannot leave a trigger behind to cover whatever next takes its name.
+ *
+ * ⚠️ KEY PARITY IS THE BINDING, and it is the only thing keeping two maps about one subject from
+ * drifting the way every duplicated claim in this repo eventually has. The PROSE stays the place a
+ * human learns why; this stays the place a check learns when.
+ *
+ * ═══ THE TWO MECHANISMS, AND WHY A GUARD MAY DECLARE EITHER ═════════════════════════════════
+ *   · onDeployTouching — the guard watches OUR files, so one of our changes is what invalidates it.
+ *     ⚠️ Evaluated against DEPLOYS, never commits: each of these asserts something about the SERVED
+ *     artifact, so a local edit can neither raise nor discharge it.
+ *   · everyDays — the guard watches something we do not own (a live third-party contract, IPFS
+ *     gateways, the deployed token). NOTHING IN THIS REPO MOVES when their answer changes, so no
+ *     path trigger can ever fire and a clock is the only instrument left.
+ *
+ * A trigger declaring neither would go permanently clean after a single run — an exemption wearing
+ * a check's clothes — so at least one is required.
+ */
+export const UNWIRED_TRIGGERS = {
+  // Third-party IPFS gateways. No commit of ours changes whether a CID still resolves.
+  "gate:pins": { everyDays: 30, subject: "third-party IPFS routing" },
+
+  // The 2026-08-27 defect was DEPLOYED copy naming a rail the deployed 402 no longer charged.
+  "test:ddraillive": {
+    onDeployTouching: [
+      "netlify/functions/_dd-x402.mjs",
+      "netlify/functions/_dd-discovery-page.mjs",
+      "netlify/functions/dd-openapi.mjs",
+    ],
+    subject: "the live 402 challenge vs the deployed copy surfaces",
+  },
+
+  "gate:disclosure": {
+    onDeployTouching: ["src/components/ManualBridgePanel.tsx"],
+    subject: "the served bundle's bridge fee disclosure — it GATES A REAL SPEND",
+  },
+
+  "gate:manualswap": {
+    onDeployTouching: ["src/components/ManualSwapPanel.tsx", "src/components/SwapPanel.tsx"],
+    subject: "the served bundle's swap review — it GATES A REAL SPEND",
+  },
+
+  // Its own declaration names five surfaces; all five are listed, because a trigger that lists
+  // four of the five it claims to cover is worse than one that lists none.
+  "gate:custody": {
+    onDeployTouching: [
+      "src/components/CustodyNotice.tsx",
+      "src/components/SelfSignedPanel.tsx",
+      "src/components/ManualSendPanel.tsx",
+      "src/components/ManualSwapPanel.tsx",
+      "src/components/ManualBridgePanel.tsx",
+      "src/components/Dashboard.tsx",
+    ],
+    subject: "the custody sentence in the served bundle",
+  },
+
+  // ⭐ BOTH mechanisms, and the second is the load-bearing one: the marketing deploy is MANUAL, so
+  // the repo can sit ahead of the live page — or someone can drag-and-drop and put the live page
+  // ahead of the repo — with no commit either way. The 66-day drift was invisible for exactly that
+  // reason, so a path trigger alone would reproduce the blindness.
+  "gate:sitelive": { onDeployTouching: ["site/"], everyDays: 14, subject: "the live marketing page vs the repo" },
+
+  // An immutable of a contract we do not own. A migration would move it with no commit of ours.
+  "test:feemanagerlive": {
+    onDeployTouching: ["netlify/functions/_fee-reconcile.mjs"],
+    everyDays: 30,
+    subject: "the live FeeManager/TMWF addresses behind our pinned literals",
+  },
+
+  // The deployed Arc USDC token. Its acceptance of our bytes overload is not ours to change.
+  "test:vanillabyteslive": {
+    onDeployTouching: ["netlify/functions/x402-vanilla-seller.mjs"],
+    everyDays: 45,
+    subject: "whether the deployed token still accepts what the seller sends",
+  },
+};
+
+/**
  * PASS-THROUGH rebuilds — code that carries already-vetted data forward. ⚠️ NOT exposure builders
  * (an endpoint choosing what leaves the server) and NOT hashed artifacts (a fixed field set): for
  * those an include-list is CORRECT. Only pass-throughs can silently LOSE a field, which is how

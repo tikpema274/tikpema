@@ -20,8 +20,9 @@
 // ratcheted, not asserted away.
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { CLAIM_SURFACES, COMPONENTS, MAX_UNCOVERED, UNWIRED_OK, FILE_UNWIRED_OK, FILE_UNWIRED_TOOLS,
+import { CLAIM_SURFACES, COMPONENTS, MAX_UNCOVERED, UNWIRED_OK, UNWIRED_TRIGGERS, FILE_UNWIRED_OK, FILE_UNWIRED_TOOLS,
   ORPHAN_GUARD_DEBT, MAX_ORPHAN_GUARDS, PASSTHROUGH, DEBT_HORIZON } from "./guard-registry.mjs";
+import { triggerIsActionable } from "./lib/guard-staleness.mjs";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 let pass = 0, fail = 0;
@@ -220,6 +221,43 @@ const staleExempt = Object.keys(UNWIRED_OK).filter((k) => pkg.scripts?.[k] && !n
 ok("⭐⭐ …and every one is ACTUALLY unwired — a stale exemption silently covers whatever next takes its name",
   staleExempt.length === 0,
   staleExempt.length ? `declared unwired but REACHABLE: ${staleExempt.join(", ")}` : "no stale exemptions");
+
+// ═══ ⭐⭐ AND EVERY EXEMPTION DECLARES A TRIGGER A CHECK CAN READ — added 2026-09-10 ═══════════
+// The reasons above each END in a run-trigger, in prose: "run it after any deploy touching
+// ManualSwapPanel", "run it when the upfront-fee migration lands, and periodically after". Those
+// were addressed to whoever remembered to read them, and NOTHING could tell whether one had ever
+// been honoured — the checks above prove a guard is DECLARED, never that it was RUN.
+//
+// 🚨 THE COST OF LEAVING THAT TO PROSE IS MEASURED, NOT HYPOTHETICAL. `test:ddwatch` sat here for
+// two months declared "network-dependent (probes the live DD service)" — a sentence that was simply
+// untrue of the file: no fetch, 98 assertions, 0.4s, fully offline. Every check in this section
+// passed the whole time, because every one of them asks whether a reason EXISTS, and none can ask
+// whether it is TRUE. A registry makes omissions impossible and false justifications invisible.
+//
+// ⭐ SO WHAT IS ENFORCED HERE IS THE DECLARATION, WHICH IS MACHINE-CHECKABLE; whether a human ran
+// the live thing is REPORTED by `npm run guards:owed`, deliberately not gated. Wiring that into
+// this suite would turn "a live check is owed" into "the build is broken", and a guard is owed at
+// the moment a deploy lands — exactly when nothing can be done about it yet.
+section("6b — EVERY UNWIRED EXEMPTION CARRIES A MACHINE-READABLE TRIGGER");
+const trigMissing = Object.keys(UNWIRED_OK).filter((k) => !UNWIRED_TRIGGERS[k]);
+const trigGhosts  = Object.keys(UNWIRED_TRIGGERS).filter((k) => !UNWIRED_OK[k]);
+ok("⭐⭐ UNWIRED_OK and UNWIRED_TRIGGERS carry EXACTLY the same keys", trigMissing.length === 0 && trigGhosts.length === 0,
+  trigMissing.length || trigGhosts.length
+    ? `no trigger: ${trigMissing.join(", ") || "—"} · trigger with no exemption: ${trigGhosts.join(", ") || "—"}`
+    : `${Object.keys(UNWIRED_TRIGGERS).length} paired`);
+// ⛔ Key parity is the ONLY thing keeping two maps about one subject from drifting the way every
+// duplicated claim in this repo eventually has. A ghost trigger is the same fail-open as a ghost
+// exemption: it would cover whatever next takes the name, with nobody deciding it.
+const notActionable = Object.keys(UNWIRED_TRIGGERS).filter((k) => !triggerIsActionable(UNWIRED_TRIGGERS[k]));
+ok("⭐⭐ every trigger declares a mechanism — a path set, a clock, or both", notActionable.length === 0,
+  notActionable.length ? `declares neither, so it can never fire: ${notActionable.join(", ")}` : "all actionable");
+// 🚨 A PATH THAT DOES NOT EXIST IS A TRIGGER THAT CAN NEVER FIRE. Renaming a component would
+// silently retire the guard that covers it — the guard stays declared, stays exempt, and stays
+// permanently clean. Same shape as this file's ghost checks, one level down.
+const deadPaths = Object.entries(UNWIRED_TRIGGERS).flatMap(([k, t]) =>
+  (t.onDeployTouching ?? []).filter((pth) => !existsSync(pth)).map((pth) => `${k} -> ${pth}`));
+ok("⭐⭐ every path a trigger names EXISTS on disk", deadPaths.length === 0,
+  deadPaths.length ? `dead trigger paths: ${deadPaths.join(", ")}` : "all resolve");
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
 section("5 — 🚨 THE RATCHET: known debt may shrink, never grow");
