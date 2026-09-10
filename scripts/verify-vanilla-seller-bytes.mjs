@@ -168,7 +168,7 @@ await section("── 4. GARBAGE IS STILL REFUSED (the guard did not just get de
 // of proving the deployed token ACCEPTS it — both sides of that boundary are our own code
 // ([[binding-tested-across-what-it-binds]]). The crossing lives in verify-vanilla-seller-bytes-live,
 // split out of test:all because Arc's public RPC is throttled and a flaky network inside a BLOCKING
-// aggregate manufactures a tolerated red (same call as gate:pins / test:ddwatch).
+// aggregate manufactures a tolerated red (same call as gate:pins / gate:disclosure).
 //
 // ⭐ A COMMENT SAYING "the live arm exists" ROTS THE DAY SOMEONE DELETES IT. So this suite fails if
 // that file is gone or unregistered. Splitting a check out must not be able to become dropping it.

@@ -7,7 +7,9 @@
 // ETIMEDOUT on 2026-08-23 mid-way through a money-path script. A flaky network inside a BLOCKING
 // aggregate manufactures a tolerated red — species 3, the worst outcome the guard registry exists to
 // end — so this runs deliberately rather than on every commit. Same reasoning as `gate:pins` and
-// `test:ddwatch`, and it is declared in UNWIRED_OK with that reason.
+// `gate:disclosure`, and it is declared in UNWIRED_OK with that reason. (This line used to cite
+// `test:ddwatch` too. It was wrong — that suite is injection-based and offline, and moved INTO
+// test:all on 2026-09-10.)
 //
 // 🚨 SPLITTING IT OUT IS NOT THE SAME AS DROPPING IT, AND THE DIFFERENCE HAS TO BE VISIBLE.
 // `test:vanillabytes` (in test:all) proves what we SEND: the bytes overload, seven parameters, the

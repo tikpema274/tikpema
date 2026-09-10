@@ -181,6 +181,7 @@
     "test:watch",
     "test:vault",
     "test:dd",
+    "test:ddwatch",
     "test:dca",
     "test:pendingspend",
     "test:sweepdisarmed",

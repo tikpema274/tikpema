@@ -11,6 +11,22 @@
 // ⚠️ SUITE-PROVEN IS NOT PROVEN. The alert and recovered branches never fire while DD is healthy —
 // the same first-success-branch problem that left a probe assertion unexecuted for the whole life of
 // the service. Both directions must ALSO be calibrated live against the real channel.
+//
+// ═══ 🚨 THIS FILE SAT OUTSIDE `test:all` FOR A REASON THAT WAS NOT TRUE ══════════════════════════
+// Until 2026-09-10 it was declared in UNWIRED_OK as *"network-dependent (probes the live DD
+// service)"*. **It is not.** There is no fetch here: the `https://app.tikpema.xyz/...` strings are
+// LITERALS inside constructed fixtures fed to pure functions, and the only disk reads are two
+// in-repo source files. 98 assertions, 0.46 s, deterministic. It is now IN `test:all`.
+//
+// ⭐⭐ HOW THE FALSE REASON SURVIVED, because the mechanism matters more than the entry:
+// the line above — "must ALSO be calibrated live" — is TRUE, and is an argument for EXTRA live
+// work. Somewhere it was compressed into "network-dependent", which is an argument for LESS
+// automated work. The two read alike in a one-line declaration and mean opposite things.
+//
+// ⛔ AND `gate:registry` STRUCTURALLY CANNOT CATCH THIS. It asserts that an unwired guard IS
+// DECLARED; it cannot assert the declared REASON IS TRUE, because a reason is prose. An exemption
+// registry makes omissions impossible and false justifications invisible — so the reasons need
+// reading against the file periodically, which is not something the suite can do for you.
 
 import { readFileSync } from "node:fs";
 import {
