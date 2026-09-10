@@ -25,7 +25,7 @@
 // absence read as an empty wallet. [[absence-must-never-read-as-safe]]
 
 import { formatUnits } from "viem";
-import { CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
+import { CONTRACTS, USDC_DECIMALS, USDC_NATIVE_DECIMALS } from "./_arc.mjs";
 import { publicClient } from "./_predict.mjs";
 
 const BALANCE_OF_ABI = [
@@ -38,8 +38,43 @@ const BALANCE_OF_ABI = [
   },
 ];
 
-/** One token's balance for one holder, at full precision. `null` on ANY read failure. */
-async function readOne(token, holder) {
+// ═══ 🚨 USDC IS READ NATIVELY. EURC IS READ AS AN ERC-20. THE ASYMMETRY IS THE POINT. ══════════
+//
+// It looks like an inconsistency somebody forgot to tidy, so: DO NOT MAKE THESE MATCH. On Arc USDC
+// is the NATIVE gas token and the 6-dp `balanceOf` view of it is LOSSY — everything below 1e-6 USDC
+// is invisible there. EURC is an ordinary ERC-20 with no native view at all; `balanceOf` is the only
+// way to read it and is exact.
+//
+// ⛔ THE DEFECT THIS FIXES, and why it is not cosmetic. This file's own doctrine three paragraphs up
+// is that "zero is a CLAIM ('you hold nothing') and an RPC hiccup is not entitled to make it" — and
+// it guarded the RPC-failure path to a false zero while leaving the TRUNCATION path wide open.
+//
+// ⚠️ HONEST SCOPE, AND I GOT THIS WRONG FIRST: the draft of this comment asserted that gas leaves
+// residue below the 6-dp floor so wallets "reliably" hold invisible dust. That was a PREDICTION and
+// the measurement refutes it — MEASURED 2026-09-10 on both live wallets
+// (agent SCA `0x058957de…6947f9e`, `0xc54d…e621`): the two views AGREE EXACTLY,
+// native/1e12 == balanceOf, dust = 0.
+// So this removes a LATENT falsehood, not one currently being told. It is still the right read:
+// Circle's Arc guidance makes the native balance canonical for a wallet display, and the 6-dp view
+// is lossy BY CONSTRUCTION whether or not anything is losing digits through it today.
+//
+// ⚠️ THE TWO VIEWS ARE ONE BALANCE — never summed, never shown as two rows. See _arc.mjs.
+// ⚠️ AND THE PRECISION CHANGED: `usdc` is now an 18-dp decimal string, not 6-dp. Renders must round
+// (`formatUsdc` already does, and agent-act's sentence now does). A consumer that pins 6 digits is
+// asserting the lossy view, which is the thing being removed.
+
+/** The NATIVE USDC balance — the canonical view. 18-dp string, `null` on ANY read failure. */
+async function readNativeUsdc(holder) {
+  try {
+    const raw = await publicClient().getBalance({ address: holder });
+    return formatUnits(raw, USDC_NATIVE_DECIMALS);
+  } catch {
+    return null;
+  }
+}
+
+/** One ERC-20's balance for one holder, at full precision. `null` on ANY read failure. */
+async function readErc20(token, holder) {
   try {
     const raw = await publicClient().readContract({
       address: token,
@@ -66,8 +101,8 @@ async function readOne(token, holder) {
 export async function walletTokenBalances({ walletAddress }) {
   if (!walletAddress) throw new Error("walletTokenBalances requires a walletAddress");
   const [usdc, eurc] = await Promise.all([
-    readOne(CONTRACTS.USDC, walletAddress),
-    readOne(CONTRACTS.EURC, walletAddress),
+    readNativeUsdc(walletAddress),
+    readErc20(CONTRACTS.EURC, walletAddress),
   ]);
   return { address: walletAddress, usdc, eurc };
 }

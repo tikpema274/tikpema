@@ -175,7 +175,26 @@ export async function handler(event) {
       // "0 USDC" tells a funded user they have nothing — the same fail-open the vault panel shipped
       // and the reason walletTokenBalances returns null at all. [[absence-must-never-read-as-safe]]
       const unreadable = bal.usdc === null && bal.eurc === null;
-      const part = (v, sym) => (v === null ? `${sym}: could not be read just now` : `${v} ${sym}`);
+      // ⭐⭐ A RENDER, AND THE ONE CASE THAT MUST NOT ROUND INTO A LIE. `usdc` is now the NATIVE
+      // 18-dp balance, so the sentence has to round or it reads "12.500000000000000000 USDC". But a
+      // plain toFixed(6) turns a real, non-zero dust balance into "0.000000 USDC" — re-creating in
+      // the sentence the exact falsehood the native read was adopted to remove, one layer later.
+      // ⚠️ No wallet is known to be in that state: MEASURED 2026-09-10 on both live wallets
+      // (agent SCA `0x058957de…6947f9e`, `0xc54d…e621`): the two views AGREE EXACTLY,
+      // native/1e12 == balanceOf, dust = 0.
+      // The branch guards a reachable state, not an observed one. [[absence-must-never-read-as-safe]]
+      const show = (v) => {
+        const n = Number(v);
+        // Unparseable is reported as unread, never as an amount — a render must not invent one.
+        if (!Number.isFinite(n)) return null;
+        if (n > 0 && n < 1e-6) return "less than 0.000001";
+        return n.toFixed(6);
+      };
+      const part = (v, sym) => {
+        if (v === null) return `${sym}: could not be read just now`;
+        const s = show(v);
+        return s === null ? `${sym}: could not be read just now` : `${s} ${sym}`;
+      };
       return json(200, {
         executed: false,
         decision,

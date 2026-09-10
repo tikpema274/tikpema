@@ -20,7 +20,28 @@ export const CONTRACTS = {
   AGENTIC_COMMERCE: "0x0747EEf0706327138c69792bF28Cd525089e4583",
 };
 
+// ═══ ⭐⭐ ONE ASSET, TWO PRECISION VIEWS — AND THEY ARE NOT TWO BALANCES ══════════════════════
+// On Arc, USDC is the NATIVE gas token AND an ERC-20 at the address above. Both interfaces answer
+// about the SAME balance at different scales:
+//
+//   · native  (eth_getBalance, msg.value, address.balance)  → 18 decimals
+//   · ERC-20  (balanceOf, transfer, allowance)              → 6 decimals
+//
+// ⛔ NEVER ADD THEM, and never show two USDC rows — that double-counts one balance.
+// ⚠️ Reusing a raw integer across the two shifts the amount by 10^12: an ERC-20 amount passed as
+// msg.value sends a millionth of a millionth of what was meant, and a native amount passed to
+// `transfer` tries to send a trillion times too much. Convert at the boundary, every time.
+//
+// 🚨 AND THE 6-dp VIEW IS LOSSY: anything below 1e-6 USDC is INVISIBLE to `balanceOf`. A
+// `balanceOf` of 0 does NOT prove the balance is zero. ⚠️ That is a property of the INTERFACE, not
+// a state observed today: MEASURED 2026-09-10 on both live wallets
+// (agent SCA `0x058957de…6947f9e`, `0xc54d…e621`): the two views AGREE EXACTLY,
+// native/1e12 == balanceOf, dust = 0 —
+// so no wallet here is currently carrying invisible residue. Circle's Arc compatibility guidance
+// still makes the NATIVE balance the canonical source for a wallet display, and reading it removes
+// a LATENT falsehood rather than a live one. [[arc-eth-getbalance-18-decimals]]
 export const USDC_DECIMALS = 6;
+export const USDC_NATIVE_DECIMALS = 18;
 
 // ══ NO API RESPONSE MAY BE STORED. THIS IS A MONEY-PATH HEADER. ═══════════════════════════
 //

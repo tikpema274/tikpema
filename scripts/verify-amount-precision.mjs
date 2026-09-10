@@ -163,6 +163,47 @@ section("⭐⭐ ROUNDING HAS A DIRECTION WHEN THE NUMBER IS A REQUIREMENT");
   check("⭐ the absence placeholder survives both", requiredAmount(null) === "…" && availableAmount(undefined) === "…");
 }
 
+// ═══ ⭐⭐ WHICH VIEW OF USDC IS CANONICAL — added 2026-09-10 ═════════════════════════════════
+// 🚨 THE REASON THIS SECTION EXISTS IS THAT §1 WAS GREEN THROUGH THE CHANGE THAT PROMPTED IT.
+// `_balances.mjs` moved its USDC read from the ERC-20 `balanceOf` view to the NATIVE `getBalance`
+// view — a change to which number a user is shown — and this suite reported 26/0 across it, because
+// its marker `formatUnits(raw, USDC_DECIMALS)` still matched: the EURC read uses that exact call.
+// The check was pinned to "does this file read a balance", which stayed true, rather than to "which
+// view of USDC is canonical", which is the thing that changed.
+//
+// ⭐ ON ARC THE 6-dp VIEW IS LOSSY BY CONSTRUCTION: everything under 1e-6 USDC is invisible to
+// `balanceOf`, and `_balances.mjs` says in its own header that "zero is a CLAIM". Reverting this
+// read would restore that claim silently.
+// ⚠️ NOT because dust is currently present — MEASURED 2026-09-10 on both live wallets
+// (agent SCA `0x058957de…6947f9e`, `0xc54d…e621`): the two views AGREE EXACTLY,
+// native/1e12 == balanceOf, dust = 0.
+// The guard holds a latent falsehood closed; it is not evidence anything is losing digits today.
+//
+// ⚠️ EURC IS DELIBERATELY THE OTHER WAY and is asserted so: it is an ordinary ERC-20 with NO native
+// view, so `balanceOf` is the only way to read it and is exact. The asymmetry reads like an untidied
+// inconsistency, which is exactly why it needs a check holding it in place.
+section("4 — ⭐⭐ USDC IS READ NATIVELY; EURC IS READ AS AN ERC-20");
+{
+  const bal = read("netlify/functions/_balances.mjs");
+  check("⭐⭐ USDC is read through the NATIVE view — getBalance, not balanceOf",
+    /getBalance\(\{\s*address:/.test(bal), "the canonical source for a wallet display on Arc");
+  check("⭐ …at NATIVE decimals, not the 6-dp token scale",
+    /formatUnits\(raw, USDC_NATIVE_DECIMALS\)/.test(bal),
+    "reusing the 6-dp scale on an 18-dp value shifts the amount by 10^12");
+  check("⛔⛔ …and USDC is NOT read through balanceOf anywhere in this file",
+    !/CONTRACTS\.USDC/.test(bal),
+    "the lossy view must not come back as a second reader of the same balance");
+  check("⭐ EURC IS still read as an ERC-20 — it has no native view and balanceOf is exact",
+    /readErc20\(CONTRACTS\.EURC/.test(bal) && /formatUnits\(raw, USDC_DECIMALS\)/.test(bal));
+  // 🚨 The render that consumes it must not undo the fix one layer later: a non-zero balance below
+  // the display floor has to say so, not print "0.000000".
+  const aa = read("netlify/functions/agent-act.mjs");
+  check("⭐⭐ the show_balance sentence ROUNDS the 18-dp value", /toFixed\(6\)/.test(aa));
+  check("⭐⭐ …and does NOT round a real dust balance down to zero",
+    /less than 0\.000001/.test(aa),
+    "toFixed(6) alone would reprint the exact falsehood the native read removed");
+}
+
 console.log(`\n${"═".repeat(72)}`);
 if (fail) { console.log(`❌ ${fail} failed, ${pass} passed.\n`); process.exit(1); }
 console.log(`✅ ALL GREEN   pass ${pass} / fail 0`);
