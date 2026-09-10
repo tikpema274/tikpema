@@ -250,7 +250,9 @@ export const MAX_PENDING_AGE_MS = 60 * 60 * 1000; // 1h
 // lands within seconds of submit (~10 blocks observed for fill 495663: snapshot 52457045 -> tx
 // 52457055), so a 500-block window (~4 min at ~0.5s/block, well past the 120s CONFIRM_GRACE_MS)
 // always contains a landed fill with margin. DEFENCE-IN-DEPTH against Arc's 10,000-block eth_getLogs
-// cap (-32614) — NOT a correctness fix: a DCA fill ages out at MAX_PENDING_AGE_MS (~7,200 blocks)
+// RANGE cap (`-32012`; re-measured 2026-09-10, was written as -32614 which Arc no longer returns —
+// and a separate 20,000-RESULT cap `-32602` exists, see shared/discover-cursor.mjs)
+// — NOT a correctness fix: a DCA fill ages out at MAX_PENDING_AGE_MS (~7,200 blocks)
 // BEFORE an unbounded snapshotBlock->latest scan could reach 10k (~83 min), so the cap is never
 // actually hit today; the bound guards a faster block time or a raised age-out. (fb7adf9's message
 // overclaimed this as fixing a live "aged fills permanently unconfirmable" bug — corrected here.) It

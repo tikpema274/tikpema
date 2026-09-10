@@ -69,6 +69,36 @@ check("🚨 an unreadable RECEIPT STORE refuses the tick — zero owners is not 
   /store-unreadable/.test(fn));
 check("⭐ the cursor key is shared, not restated", CURSOR_KEY.length > 0 && fn.includes("CURSOR_KEY"));
 
+// ═══ ⭐⭐ THE SECOND CAP: THE FILTER IS WHAT KEEPS A LEGAL WINDOW LEGAL ════════════════════════
+// Arc caps eth_getLogs TWICE — 10,000 BLOCKS (`-32012`) and 20,000 RESULTS (`-32602`). WINDOW is
+// sized against the first. Nothing sizes the second: it is held by the discovery query being
+// SELECTIVE, and that is a property of a filter in another file, which is exactly the kind of
+// load-bearing fact that gets refactored away by someone who does not know it is load-bearing.
+//
+// ⛔ MEASURED 2026-09-10 on the same 10,000-block window: WITH the `to: BRIDGE_CONTRACT` topic the
+// query returns 611 logs; WITHOUT it the identical request returns `-32602`. Headroom is ~20-30x
+// today (611 at head, 977 at head-5,000,000, cap 20,000) and it is the topic constraint that
+// provides it.
+//
+// 🚨 AND THE FAILURE WOULD BE A SILENT STALL, NOT AN ERROR. `sweepVerdict` refuses to advance the
+// cursor on an unreadable tick — correct, and asserted above — so a window that can NEVER succeed
+// is retried every tick forever. Discovery stops, and the only symptom is `cursorLag` climbing.
+// A guard that costs one regex is cheap against a failure whose signature is "nothing happens".
+{
+  const sweep = readFileSync(new URL("../netlify/functions/bridge-discover-sweep.mjs", import.meta.url), "utf8");
+  const call = sweep.match(/getLogs\(\{[\s\S]{0,260}?\}\)/);
+  check("⭐ the discovery getLogs call is findable — the check has something to be about", !!call);
+  const q = call?.[0] ?? "";
+  check("⭐⭐ it still narrows by the USDC CONTRACT, not the whole chain", /address:\s*CONTRACTS\.USDC/.test(q));
+  check("⭐⭐ …and by the RECIPIENT topic — the constraint measured to be worth 611 logs vs -32602",
+    /to:\s*BRIDGE_CONTRACT/.test(q),
+    "dropping this makes a correctly-sized window exceed the 20,000-result cap");
+  check("⭐ …and by the Transfer event, not every log at that address", /event:\s*TRANSFER/.test(q));
+  // ⚠️ Pinned so the two caps stay distinguishable in code as well as in prose: a future edit that
+  // "fixes" WINDOW to chase a result-cap error would be treating the wrong cap.
+  check("⭐ WINDOW is still the BLOCK cap, unchanged at 10,000", WINDOW === 10000n, String(WINDOW));
+}
+
 console.log(`\n${"═".repeat(72)}`);
 console.log(`${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

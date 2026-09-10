@@ -155,7 +155,10 @@ export async function confirmSwapLanded({ walletAddress, tokenIn, tokenOut, amou
   let inLegs, outLegs;
   try {
     // Bound the scan when a window is given (dca-tick): toBlock = min(fromBlock + N, head). This is
-    // DEFENCE-IN-DEPTH against Arc's 10,000-block eth_getLogs cap (-32614), NOT a live bug fix: a DCA
+    // DEFENCE-IN-DEPTH against Arc's 10,000-block eth_getLogs RANGE cap (`-32012`; the code was
+    // re-measured 2026-09-10 — it was written here as -32614, which Arc no longer returns. Arc also
+    // caps RESULTS at 20,000 with `-32602`, which a correctly-sized window can still hit — both are
+    // documented in shared/discover-cursor.mjs). NOT a live bug fix: a DCA
     // fill ages out at MAX_PENDING_AGE_MS (~7,200 blocks) BEFORE an unbounded snapshot->latest scan
     // could reach 10k (~83 min), so the cap is never actually hit today — the bound guards a faster
     // block time or a raised age-out. (fb7adf9's message overclaimed this as fixing a live "aged

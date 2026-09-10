@@ -45,7 +45,11 @@ import { bridgeMechanicCopy } from "../../shared/bridge-mechanic.mjs";
  *  DepositForBurn leg carrying maxFee and destinationDomain. */
 export const TOKEN_MESSENGER_V2 = "0x8fe6b999dc680ccfdd5bf7eb0974218be2542daa";
 
-/** ⚠️ Arc caps eth_getLogs at 10,000 blocks (-32614). The cap is exclusive of the 10,000th, so 9,999.
+/** ⚠️ Arc caps eth_getLogs at 10,000 blocks (`-32012`; re-measured 2026-09-10 — written here as
+ *  -32614, which Arc no longer returns). ⭐ AND THAT IS ONLY THE RANGE CAP: a second cap refuses
+ *  above 20,000 RESULTS with `-32602`, so a correctly-sized window is safe only while its filter
+ *  stays selective. Measured headroom and what consumes it: shared/discover-cursor.mjs.
+ *  The cap is exclusive of the 10,000th, so 9,999.
  *  ⚠️ ONE WINDOW IS ~1.5-2.1 HOURS OF ARC, NOT A FIXED DURATION — the block rate varies. Measured
  *  2026-09-07: 0.533 s/block over the last 1,000,000 blocks but 0.757 over the last 1,000, and a
  *  live 90s sample gave 0.752. An earlier comment here said a flat "0.514s, so one window is ~85.6

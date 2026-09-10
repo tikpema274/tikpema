@@ -27,7 +27,41 @@
 // the lag grows without bound. `cursorLag` is reported on every tick precisely so "we are not
 // scanning" cannot look like "there is nothing to scan".
 
-/** Arc's eth_getLogs cap. Windows are inclusive, so 10,000 blocks is `from + 9999`. */
+// ═══ ⭐⭐ ARC CAPS `eth_getLogs` TWICE, AND ONLY ONE OF THEM IS ABOUT BLOCKS ═══════════════════
+// Re-measured 2026-09-10, because the figure below was carrying an error code Arc no longer returns.
+//
+//   1. A RANGE cap  — `-32012 requested range too large` above 10,000 blocks. This is what WINDOW
+//      is sized against, and it is unchanged.
+//   2. A RESULT cap — `-32602 request exceeded max allowed range: query exceeds max results 20000`.
+//      ⚠️ THIS ONE FIRES ON A CORRECTLY-SIZED WINDOW. A 10,000-block request is not automatically
+//      safe; it is safe only while its FILTER keeps the match count under 20,000.
+//
+// ⛔ THE OLD COMMENT SAID `-32614`, AND NOTHING RETURNS THAT ANY MORE. It was repeated in four
+// files. Nothing ever branched on it — every use was prose — so no handler went dead, but a reader
+// diagnosing a live failure would have been looking for the wrong string, and the single-cap framing
+// hid the second cap entirely.
+//
+// ⭐ MEASURED HEADROOM, so the next reader knows how much room exists rather than guessing:
+// the discovery filter (USDC address + Transfer topic0 + `to: BRIDGE_CONTRACT`) returned
+// **611 logs** over a 10k window at head and **977** at head-5,000,000 — against a 20,000 cap, so
+// ~20-30x. The live query narrows further still by `from: owners`, so the real count is lower.
+// ⛔ AND WHAT WOULD CONSUME IT: dropping the `to:` topic. MEASURED on the SAME window, the same
+// address query without that constraint returns `-32602`. The selectivity is not incidental — it is
+// what keeps a correctly-sized window under the second cap. `from: owners` is an OR-array, so the
+// match count also grows with the owner set; that is the slow way to arrive at the same failure.
+//
+// ⚠️ AND THE FAILURE IS A STALL, NOT AN ERROR ANYONE SEES. `sweepVerdict` correctly refuses to
+// advance the cursor on an unreadable tick (above), so a window that can never succeed would be
+// retried every tick forever and discovery would silently stop — visible only as `cursorLag`
+// growing. That is why the headroom is written down instead of assumed.
+//
+// ⭐ IF IT EVER DOES FIRE, THE ERROR IS ACTIONABLE: `-32602` names the safe sub-range in its own
+// message (`retry with the range 61378356-61380259`). A handler could halve or adopt that range
+// rather than stall. NOT BUILT — with 20-30x headroom that would be untested money-path code for a
+// condition that cannot currently occur, and an unexercised retry path is its own hazard.
+
+/** Arc's eth_getLogs RANGE cap. Windows are inclusive, so 10,000 blocks is `from + 9999`.
+ *  ⚠️ See above: this bounds BLOCKS only. The 20,000-RESULT cap is bounded by the filter. */
 export const WINDOW = 10000n;
 /** Per tick. 30,000 blocks ≈ 4-6h of Arc at the rates measured above — enough to catch up after an
  *  outage without a long run. ⚠️ A CONSTANT, deliberately, not a figure derived from block time:
