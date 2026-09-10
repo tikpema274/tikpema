@@ -73,14 +73,14 @@ const baseFixture = () => ({
     { power: "emergencyWithdraw", present: true, matched: [{ signature: "emergencyWithdraw()", selector: "0xdb2e21bc" }], holder: "0x5b96…", holderKind: "eoa", severity: "funds-movement" },
   ],
   powersPresent: ["emergencyWithdraw", "pausable"],
-  sources: { mode: "quorum", endpoints: ["https://arc-testnet.drpc.org", "https://rpc.testnet.arc.network"], required: 2, independenceVerified: false, note: "Quorum covers PROVIDER integrity…" },
+  sources: { mode: "quorum", endpoints: ["https://arc-testnet.drpc.org", "https://rpc.testnet.arc.io"], required: 2, independenceVerified: false, note: "Quorum covers PROVIDER integrity…" },
   coverage: {
     checked: [{ id: "power:pausable", kind: "power", group: "pausable" }, { id: "power:emergencyWithdraw", kind: "power", group: "emergencyWithdraw" }],
     notChecked: [{ id: "power:denylist", kind: "power", group: "denylist", reason: "not in this caller's scan selection" }],
     totals: { checked: 2, notChecked: 1 },
     summary: "2 checks ran, 1 did not.",
   },
-  reads: [{ method: "eth_getCode", httpStatus: 200, retriedAttempts: 1, endpoint: "https://rpc.testnet.arc.network" }],
+  reads: [{ method: "eth_getCode", httpStatus: 200, retriedAttempts: 1, endpoint: "https://rpc.testnet.arc.io" }],
   refusal: null,
 });
 

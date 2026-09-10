@@ -45,7 +45,7 @@ const TARGETS = {
   },
 };
 
-const RPCS = ["https://rpc.testnet.arc.network", "https://arc-testnet.drpc.org"];
+const RPCS = ["https://rpc.testnet.arc.io", "https://arc-testnet.drpc.org"];
 const COMPANION = "https://app.tikpema.xyz/api/dd-identity";
 const GATEWAYS = [
   (c) => `https://ipfs.io/ipfs/${c}`,

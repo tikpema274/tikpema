@@ -30,7 +30,7 @@ async function withBackoff(fn, tries = 5) {
     }
   }
 }
-const c = createPublicClient({ transport: http("https://rpc.testnet.arc.network") });
+const c = createPublicClient({ transport: http("https://rpc.testnet.arc.io") });
 const cfg = JSON.parse(readFileSync(join(homedir(), ".config", "netlify", "config.json"), "utf8"));
 const token = cfg.users[Object.keys(cfg.users)[0]].auth.token;
 const siteID = JSON.parse(readFileSync(".netlify/state.json", "utf8")).siteId;

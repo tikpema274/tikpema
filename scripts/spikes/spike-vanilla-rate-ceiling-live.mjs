@@ -24,7 +24,7 @@
 import { execSync } from "node:child_process";
 
 const SELLER_URL = "https://app.tikpema.xyz/.netlify/functions/x402-vanilla-seller";
-const RPC = "https://rpc.testnet.arc.network";
+const RPC = "https://rpc.testnet.arc.io";
 const USDC = "0x3600000000000000000000000000000000000000";
 const DELEGATE = "0x6db396c1a37024fd3bee1f3dbf3020aa3b2bb380";
 const EXPECTED_CAP = 6;          // VANILLA_SELLER_SETTLES_PER_MIN is unset in prod ⇒ the default

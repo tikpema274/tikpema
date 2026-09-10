@@ -25,7 +25,7 @@
 import { keccak256, toHex, encodeAbiParameters, parseAbiParameters, encodeFunctionData } from "viem";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
 
-const RPC = "https://rpc.testnet.arc.network";
+const RPC = "https://rpc.testnet.arc.io";
 const USDC = "0x3600000000000000000000000000000000000000";
 const CHAIN_ID = 5042002;
 const SELLER = "0x1a63e59d1419cf48e2bd48cb54db85f27818dc99";

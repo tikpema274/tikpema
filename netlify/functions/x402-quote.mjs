@@ -40,7 +40,7 @@ import { X402_VERSION } from "../../shared/x402/version.mjs";
 import { resourceObject } from "../../shared/x402/resource.mjs";
 
 const PENDING_STORE = "x402-quote-pending";
-const ARC_RPC = "https://rpc.testnet.arc.network";
+const ARC_RPC = "https://rpc.testnet.arc.io";
 
 /** Transport for the Gateway balance read. Injected into _x402-confirm so that module stays testable. */
 const rpcCall = async ({ method, params }) => {

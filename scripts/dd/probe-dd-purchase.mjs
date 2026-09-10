@@ -46,7 +46,7 @@ const SUBJECT = arg("--address", "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"); 
 const POLL_MIN = Number(arg("--poll", "20"));
 const HANDLE = arg("--handle");
 
-const RPC = "https://rpc.testnet.arc.network";
+const RPC = "https://rpc.testnet.arc.io";
 const GATEWAY = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
 const USDC = "0x3600000000000000000000000000000000000000";
 const AVAILABLE_BALANCE_SEL = "0x3ccb64ae";

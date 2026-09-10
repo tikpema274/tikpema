@@ -30,7 +30,7 @@
 
 import { fetchX402Requirements, payX402, DEFAULT_SELLER_URL } from "../../netlify/functions/_x402.mjs";
 
-const RPC = "https://rpc.testnet.arc.network";
+const RPC = "https://rpc.testnet.arc.io";
 const USDC = "0x3600000000000000000000000000000000000000";
 const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const CONFIRM = process.argv.includes("--confirm");

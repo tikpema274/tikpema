@@ -70,7 +70,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // --- config (Arc source chain; destinations come from BRIDGE_DESTINATIONS via --dest) ---
 const ARC = {
   blockchain: "ARC-TESTNET",
-  rpc: "https://rpc.testnet.arc.network",
+  rpc: "https://rpc.testnet.arc.io",
   explorer: "https://testnet.arcscan.app",
   cctpDomain: 26,
   usdc: "0x3600000000000000000000000000000000000000",

@@ -32,9 +32,21 @@
  * ⚠️ Two mirrors of one node agree perfectly and are worth nothing. Agreement is not evidence of
  * independence; independence is an asserted property that must be re-verified out of band.
  */
+// ⛔⛔ `rpc.testnet.arc.network` AND `rpc.testnet.arc.io` ARE THE SAME BACKEND — DO NOT LIST BOTH.
+// The hostname moved to arc.io (Circle's Arc web properties 301 across, and the compatibility guide
+// names arc.io), so this entry was renamed on 2026-09-10. MEASURED that day, by the same method this
+// file's own header demands and by which `arc-testnet.rpc.thirdweb.com` was once REJECTED: both
+// hostnames returned BYTE-IDENTICAL eth_gasPrice (0x51f4d5c00), eth_maxPriorityFeePerGas
+// (0x77359400), chainId, web3_clientVersion and the same non-standard -32601 for net_peerCount and
+// txpool_status. An alias, not a second node.
+// 🚨 Adding the old name back alongside this one would make the quorum read TWO, act like TWO, and
+// be worth ONE — the "two mirrors of one node" failure named four lines above, arriving through a
+// rename rather than through a provider.
+// ⚠️ AND THE OLD COMMENT HERE WAS STALE: it said "direct reth/v1.11.3". web3_clientVersion now
+// answers `arc/v1`. The backend identification is re-read, not inherited.
 export const ARC_QUORUM_ENDPOINTS = Object.freeze([
-  "https://rpc.testnet.arc.network", // Arc public — direct reth/v1.11.3, no CDN
-  "https://arc-testnet.drpc.org",    // dRPC — verified distinct backend
+  "https://rpc.testnet.arc.io",    // Arc public — web3_clientVersion `arc/v1`, measured 2026-09-10
+  "https://arc-testnet.drpc.org",  // dRPC — verified distinct backend
 ]);
 
 /** The tags `quorumClient` throws, mapped to what they MEAN. Exported so the report, the tests and

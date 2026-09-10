@@ -97,7 +97,7 @@ export { escalateProviderIntegrity, isSystemicReadFailure, refusalReport } from 
 // JSON, HTML page, OpenAPI) advertises from it, so an example can never name a chain the
 // endpoint would reject — they cannot disagree because they read the same array.
 
-const ARC_RPC = "https://rpc.testnet.arc.network";
+const ARC_RPC = "https://rpc.testnet.arc.io";
 
 /** Transport for the Gateway balance read. Injected into _dd-x402 / _x402-confirm so those modules
  *  stay testable without a chain, and so this file remains the only place that knows a URL. */

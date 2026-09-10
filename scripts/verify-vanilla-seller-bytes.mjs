@@ -40,7 +40,7 @@ const section = async (title, fn) => {
   catch (e) { fail++; console.log(`  ❌ 🚨 SECTION CRASHED — ${String(e?.message ?? e).slice(0, 90)}`); }
 };
 
-const RPC = "https://rpc.testnet.arc.network";
+const RPC = "https://rpc.testnet.arc.io";
 const USDC = "0x3600000000000000000000000000000000000000";
 const CHAIN_ID = 5042002;
 const PRICE = "10000";

@@ -234,7 +234,7 @@ node --env-file=.env scripts/dd/probe-dd-purchase.mjs --url "<draft>/.netlify/fu
 The probe does this in Phase 3, but do it yourself too — the seller is the party with an interest.
 
 ```bash
-curl -s https://rpc.testnet.arc.network -H 'content-type: application/json' -d '{
+curl -s https://rpc.testnet.arc.io -H 'content-type: application/json' -d '{
   "jsonrpc":"2.0","id":1,"method":"eth_call","params":[{
     "to":"0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
     "data":"0x3ccb64ae0000000000000000000000003600000000000000000000000000000000000000000000000000000000000000b407967319d56218c7e1c369125490e665a16ac4"

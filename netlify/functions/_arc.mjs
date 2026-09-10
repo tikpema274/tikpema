@@ -2,7 +2,7 @@
 export const ARC = {
   blockchain: "ARC-TESTNET",          // Circle SDK chain id
   chainId: 5042002,
-  rpc: "https://rpc.testnet.arc.network",
+  rpc: "https://rpc.testnet.arc.io",
   explorer: "https://testnet.arcscan.app",
 };
 

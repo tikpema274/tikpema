@@ -24,7 +24,7 @@
 import { keccak256, toHex } from "viem";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
 
-const RPC = "https://rpc.testnet.arc.network";
+const RPC = "https://rpc.testnet.arc.io";
 const USDC = "0x3600000000000000000000000000000000000000";
 const SELLER_URL = "https://app.tikpema.xyz/.netlify/functions/x402-vanilla-seller";
 const CHAIN_ID = 5042002;

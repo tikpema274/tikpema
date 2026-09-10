@@ -19,7 +19,7 @@
 
 import { fetchX402Requirements, payX402 } from "../../netlify/functions/_x402.mjs";
 
-const RPC = "https://rpc.testnet.arc.network";
+const RPC = "https://rpc.testnet.arc.io";
 const GW = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
 const USDC = "0x3600000000000000000000000000000000000000";
 const arg = (f, d) => { const i = process.argv.indexOf(f); return i >= 0 ? process.argv[i + 1] : d; };

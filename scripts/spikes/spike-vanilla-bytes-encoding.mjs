@@ -34,7 +34,7 @@ import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-
 import { keccak256, toHex } from "viem";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
 
-const RPC = "https://rpc.testnet.arc.network";
+const RPC = "https://rpc.testnet.arc.io";
 const USDC = "0x3600000000000000000000000000000000000000";
 const CHAIN_ID = 5042002;
 const SELLER = process.env.VANILLA_SELLER_ADDRESS;

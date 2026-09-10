@@ -1,5 +1,101 @@
 ---
 
+# ⛔ AGENT ON-CHAIN HISTORY IN DD — PARKED. Feasible, and that was never the question.
+
+**2026-09-10. Read-only scoping. NOTHING BUILT.** Could DD report an agent's on-chain history —
+"has interacted with N contracts", "has never exceeded X per transaction", "owner has changed K
+times"? Measured the feasibility, then parked it on an argument that has nothing to do with
+feasibility.
+
+## 1. ⭐⭐ THE DECIDING ARGUMENT — HISTORY DISCRIMINATES IN THE WRONG DIRECTION
+
+**History is trivially defeated by deploying a fresh address, which costs an adversary nothing.**
+
+So the signal is **strongest on the agent you already trust and absent on the one you don't.** A
+long-lived honest agent accumulates a rich record; the thing you are actually trying to catch
+deploys this morning and has none. An instrument whose reading is best exactly where it is least
+needed is not a weak instrument — it is an inverted one.
+
+⭐ **AND THE ENGINE ALREADY READS SOMETHING BETTER.** `scripts/dd/` reports **what the OWNERS CAN
+DO** — a property of the CONTRACT, not of its past. A fresh deployment still carries whatever
+powers its code grants: `upgradeTo`, `pause`, `denylist`, `emergencyWithdraw`, a settable fee
+recipient. **Redeploying resets a history to zero; it does not reset a power to none.** The existing
+read is adversary-proof in the exact place history is defeated.
+
+⛔ So history would be **a weaker instrument bolted onto a stronger one**, sharing its surface and
+its reputation. That is the whole decision. Everything below is supporting detail.
+
+## 2. ⛔ CONDUCT IS VISIBLE. CORRECTNESS NEVER IS.
+
+**A research agent citing FABRICATED sources and one citing REAL sources produce an IDENTICAL chain
+trace**: an x402 payment, a settle receipt, a balance decrement. Byte for byte the same shape.
+
+The chain records that money moved. It cannot record that the work was good. Every claim history
+could support is about **conduct**, and the question a buyer actually has is about **correctness** —
+and no amount of transaction data crosses that gap. A service that reported history beside an
+owner-powers manifest would invite exactly that inference.
+
+**The other blind spots, stated so they are not rediscovered as objections later:**
+* **Intent.** "Sent 5 USDC to X" does not say whether that was the task, a mistake, or a compromised
+  key acting. Intent is not on chain.
+* **Counterparty identity.** Only that an address received value — never who controls it.
+* **Future behaviour.** A year of clean history is not a bond. An address can rug in one
+  transaction, and the powers that let it do so were readable the whole time.
+
+## 3. FEASIBILITY — MEASURED, SINCE IT WAS ASKED
+
+**Possible via the Blockscout index, and cheap there. NOT possible by walking blocks inside a paid
+request.**
+
+⭐ `testnet.arcscan.app` is a full Blockscout instance with a working v2 API *and* an
+Etherscan-compatible v1. **MEASURED: the complete history of a real agent SCA — 183 token transfers,
+4 pages, `next_page_params` exhausted — in 1.7 seconds.** 10 rapid requests, 10 × HTTP 200, no
+throttling. It also returns DD-adjacent metadata free: `is_contract`, `proxy_type: eip1967`,
+`implementations`, `is_verified`, `creator_address_hash`, `creation_transaction_hash`.
+
+⛔ **Walking blocks is out by two orders of magnitude.** Arc runs ~0.51 s/block (~168,000
+blocks/day). A one-year scan is `61,388,356 / 10,000` = **6,139 windows per leg**, and an address
+needs both the sender and recipient legs — **~12,278 requests**. Our own bridge backfill measured
+**55 of 151 windows FAILING**. This is **81× that scan**, inside a request a buyer is waiting on.
+
+**Two traps found while measuring, worth keeping whoever picks this up:**
+* 🚨 `/counters` returned `transactions_count: "0"` for an address whose `/transactions` returned 3
+  items. An aggregate reading zero on an active address is absence-reads-as-safe, arriving through a
+  vendor's front door.
+* 🚨 **For a smart account, `/transactions` is nearly empty** — the bundler originates, the account
+  participates. The busy SCA showed **3 transactions but 183 token transfers**. Reading the obvious
+  endpoint would report "almost no activity" for an active agent, and every Tikpema agent wallet is
+  an SCA.
+
+⚠️ **AND A LIVE DISCREPANCY WITH OUR OWN CODE.** `shared/discover-cursor.mjs` documents the cap as
+*"Arc caps eth_getLogs at 10,000 blocks (-32614)"*. Measured today the codes are **-32012**
+(`requested range too large`) and **-32602** (`query exceeds max results 20000` — a **RESULT** cap,
+not a block cap, whose error names the safe sub-range). Depth is fine: address-filtered logs answer
+back to genesis, and state is archival — `eth_getBalance` at head-5,000,000 returned **15.635654
+USDC**, matching a balance trajectory already recorded in this repo. Not scoped here; flagged
+because the cursor logic may be pinned to a stale understanding.
+
+## 4. ⛔ AND THE DATA DOES NOT EXIST YET
+
+**Arc testnet is exactly one year old** — genesis `2025-09-10T14:38:07Z`, head 61,388,356 at
+`2026-09-10T11:10:53Z`. **Mainnet has zero history**, and will accrue from nothing.
+
+So even setting aside §1, there is at most one year of *testnet* conduct to report, about agents
+operating with testnet stakes.
+
+## 5. ⛔ REOPEN TRIGGER — A CAPABILITY, NOT A DATE
+
+**Reopen when mainnet history has ACCUMULATED *and* there is a use for conduct data that the
+owner-powers read does not already answer.**
+
+⭐ **NOT "when mainnet launches."** A date trigger fires on somebody else's announcement and implies
+a dependency that does not exist — nothing about Arc's launch makes an inverted instrument correct.
+Both halves are required: data alone does not create a question, and a question alone cannot be
+answered without data. [[reopen-trigger-names-capability-not-noun]]
+
+
+---
+
 # 🚨 A DEPLOY THAT LOOKED EXACTLY LIKE A SUCCESS — AND THE CENSUS THAT NOW RUNS ITSELF
 
 **2026-09-09 / 09-10.** Shipped `b5bfa68`. Production reached `d2cad68` as deploy `6aa1e403`.

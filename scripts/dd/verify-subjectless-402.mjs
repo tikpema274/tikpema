@@ -90,7 +90,7 @@ mock.module("@netlify/blobs", {
 
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init) => {
-  if (String(url).includes("rpc.testnet.arc.network")) {
+  if (String(url).includes("rpc.testnet.arc.io")) {
     calls.rpc++;
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x" }), {
       headers: { "content-type": "application/json" },
