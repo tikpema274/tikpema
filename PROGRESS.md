@@ -1,5 +1,198 @@
 ---
 
+# ⭐⭐ USDC IS READ NATIVELY — SERVER AND CLIENT — AND THE SCALE IS ASSERTED, NOT TRUSTED
+
+**2026-09-10/11.** `20bd168` (server) and `8793764` (client), both live. On Arc USDC is the native
+gas token, and the ERC-20 `balanceOf` view of it is **lossy**: anything under 1e-6 USDC is invisible
+there, so `balanceOf() == 0` does not prove a balance is zero. Circle's own guidance — *"USDC for
+Every Action"*, 28 Aug — states it outright: the native balance is ground truth, the ERC-20 view
+truncates.
+
+## 1. THE CLAIM THE CODE WAS ALREADY MAKING ABOUT ITSELF
+
+`_balances.mjs` said, in its own header, *"Zero is a CLAIM ('you hold nothing') and an RPC hiccup is
+not entitled to make it."* It then guarded the RPC-failure path to a false zero and left the
+**truncation** path wide open. The doctrine was right and one of its two routes was unwatched.
+
+⚠️ **HONEST SCOPE, AND THE CHAIN REFUTED MY FIRST DRAFT.** I wrote — in four places — that gas leaves
+residue below the 6-dp floor so wallets "reliably" hold invisible dust. That was a PREDICTION.
+MEASURED on both live wallets: `native/1e12 == balanceOf`, **dust = 0**. So this closes a LATENT
+falsehood, not one being told — and the same measurement is the proof there is no 10^12 shift.
+
+## 2. 🚨 WHY THE CLIENT HALF WAS DEFERRED TWICE — THE FAILURE IS FAIL-OPEN
+
+Three consumers across two files, and the scales differ by 10^12. `useModularWallet` holds a
+**pre-sign guard**: `if (units > raw) throw "Insufficient funds"`. Move `raw` to the native read and
+leave `units` at 1e6 — the single most natural half-edit — and `units` is always smaller: the guard
+**passes every spend**, including ones the wallet cannot cover. It does not refuse loudly; it stops
+refusing, while the code above it still reads as protected.
+
+⭐ Every consumer moved in one edit, and `BigInt(Math.round(amountUsdc * 1e6))` became `parseUnits`,
+exact instead of float arithmetic on money.
+
+⚠️ **AND ONE ARGUMENT DELIBERATELY DID NOT MOVE.** In
+`availableAmount(formatUnits(raw, USDC_NATIVE_DECIMALS), USDC_DECIMALS)` the first is a SCALE and had
+to change; the second is DISPLAY PRECISION and stays 6. Changing both is as wrong as changing
+neither, and looks tidier.
+
+## 3. ⭐⭐ THE GUARDS FOUND THREE THINGS THE MANUAL TRACE DID NOT
+
+* **A false positive of my own.** The first assertion flagged `metamask.ts`'s EURC read as a leftover
+  6-dp consumer. It is not — EURC is an ordinary ERC-20 with **no native view**, and `balanceOf` is
+  exact for it. A guard that cannot tell the two tokens apart would push someone to "fix" the correct
+  one. Scoped, with the reason recorded.
+* **A FIFTH SITE, found because an assertion REFUSED TO WRITE when its anchor matched TWICE.** I had
+  traced one `Math.round(amountUsdc * 1e6)`; there were two. Both feed `approve(...)` — the 6-decimal
+  ERC-20 interface — and both are **correct** at 6. ⛔ **THE RULE IS NOT "EVERYTHING IS 18":** native
+  scale is for balances and `msg.value`, token scale for approve/transfer/allowance, and both live in
+  one file. Tidying an approve to native would authorise 10^12 times the budget.
+* 🚨 **TWO GUARDS SILENTLY CHECKING THE WRONG TOKEN.** `verify-amount-precision` pinned
+  `formatUnits(raw, USDC_DECIMALS)` per producer. When USDC moved, `useModularWallet` failed
+  HONESTLY — but `_balances.mjs` and `metamask.ts` kept passing, because each holds a legitimate
+  **EURC** read matching the same pattern. One file failed; two **changed subject** while reporting
+  the USDC producer checked. The marker now accepts either scale: §1 asks *does this producer round*,
+  §4 and `test:clientnative` ask *which view is canonical*.
+
+⚠️ **A BOUNDARY FOUND BY MUTATING AND DELIBERATELY NOT CLOSED:** the widened marker proves a
+formatted raw exists SOMEWHERE in a file, not that a named producer survives. Artificial mutation,
+not worth a position check — recorded so nobody reads the check as stronger than it is.
+
+## 4. THE RENDER HAD TO CHANGE TOO, AND NAIVELY WOULD HAVE UNDONE IT
+
+`agent-act`'s `show_balance` sentence now rounds an 18-dp value — but a plain `toFixed(6)` prints
+`0.000000 USDC` for a real dust balance, reprinting one layer later the exact falsehood the native
+read removes. It says **"less than 0.000001"** instead.
+
+
+---
+
+# ⭐⭐ THE SCA SIGNS FOR ITSELF — app-kit 1.14.0, ERC-1271, PROVEN ON-CHAIN
+
+**2026-09-10.** `c03372a` (upgrade) and `2616c44` (the defect it exposed), both live. The held
+app-kit decision is closed.
+
+## 1. THE SIZE WAS OVERSTATED BY THE RECORD
+
+MEASURED by resolving in an isolated copy of `package.json` + `package-lock.json` + `.npmrc`, then
+again for real, identical both times: **9 version changes · 27 added · 0 removed · 0 DOWNGRADES.**
+All nine are the Circle suite moving together. viem, @noble and cross-fetch **unchanged**.
+
+⭐ `.npmrc`'s header warns of *"90 changes, 49 added, 39 removed… a tree replacement"* — accurate for
+the CLEAN RE-RESOLUTION it describes, which is a different operation. Sizing the targeted upgrade
+from that paragraph overestimates it substantially.
+⭐ **`npm ci` verified, exit 0** — Netlify's install, and the one that rejected a lock before.
+
+## 2. ✅ PROVEN, BY A LIVE SPEND, NOT A MOCK
+
+A `pay_for_service` produced a valid burn intent from the SCA: **Gateway ATTESTED it** and Circle's
+ledger committed 0.1035 USDC. An attestation only exists if the signature validated. Under 1.8.1 this
+died at `invalid_signature` with nothing committed.
+
+⚠️ **THE PRIZE IS NARROWER THAN RECORDED.** It is NOT "DELEGATE_ADDRESS is gone" — `_x402-vanilla.mjs`
+still needs a real EOA (the batched x402 scheme requires `ecrecover(sig)==from` and accepts no
+contract signature, so the Researcher's EIP-3009 buys are untouched), and `_delegate.mjs` still owns
+the authorization machinery. **SIX consumers, ONE removed.** MEASURED after the change: the delegate
+is still **authorised on-chain** for both SCAs.
+
+## 3. 🚨 THE SAME RUN EXPOSED A LIMIT THE HEADER HAD HIDDEN
+
+The MINT leg failed. This path passes a destination adapter and **no forwarder**, so App Kit submits
+`gatewayMint` FROM `to.address` — the RECIPIENT — and Circle holds no wallet for a third party.
+The header called tx `0xbf56e6be…` *"the exact shape proven on-chain"* **without recording that its
+recipient must be a wallet WE CONTROL.** That omission is what made a third-party test look
+reasonable.
+
+⛔ The obvious fix is unavailable: `_ubspend` avoids this with `useForwarder:true`, but the forwarder
+carries a FLAT ~0.2055 USDC fee and a 10 USDC floor — on a 0.1 payment the fee is twice the payment.
+A **CONSTRAINT**, not a bug.
+
+## 4. ⛔ AND THE STAKES WERE SMALLER THAN I SAID — WATCHED TO COMPLETION
+
+```
+Circle's ledger   1.5100 -> 1.4065 -> 1.5100    reserved, then RELEASED
+on-chain          1.510000 THROUGHOUT            never moved at all
+```
+
+**A committed-but-unminted burn intent EXPIRES AND RELEASES BACK.** Nothing was burned on Arc; no
+funds were at risk in either direction. I framed the reservation as "committed and undelivered" with
+an implied risk and built a recorder believing it was funds-recovery. ⭐ It is a **COMPLETION AID**:
+the user still wanted to pay, and the attestation lets that be submitted by a wallet we DO control
+instead of re-signing a second reservation.
+
+## 5. WHAT THE CATCH BLOCK WAS THROWING AWAY
+
+It rethrew and kept **nothing**, while the error's own text said what was being discarded — *"Use the
+attestation and signature in `error.cause.trace` to reattempt"*. Now recorded before the rethrow,
+never-throwing and awaited (a Netlify function can freeze the instant it returns).
+⚠️ **A latent hazard fixed alongside:** `causeStr` was a bare `JSON.stringify`, which THROWS on a
+BigInt — one BigInt in a cause would have thrown a TypeError *from inside the catch*, replacing the
+real failure and losing the 1098 classification that depends on it.
+
+## 6. 🚨 THE SUITE FAILED FIRST, AND IT WAS RIGHT TO
+
+`verify-ub-auto-allocation` asserted `sourceAccount:` in every spend site — the **mechanism**, not the
+property. The property is *"auto-allocation picks CHAINS, never the WALLET"*, and it still holds:
+`address: owner` IS the pin. The guard now accepts either shape and asserts what it only implied —
+that no spend site may name a wallet from `process.env`, the cap-bypass seam.
+⭐ The guard beside it HELD: *"spendSourceSchema declares allocations as OPTIONAL — if this fails, an
+npm bump made it REQUIRED."* Written specifically to catch this upgrade breaking a money path.
+
+
+---
+
+# ⭐ THE DASHBOARD FOLDS — and the count I hand-wrote was wrong within one deploy
+
+**2026-09-10.** `2d5b0bc` (folds) and `f6751d0` (the count defect it introduced), both live.
+`#/dashboard` was twelve cards under four headings; the three action groups now collapse.
+
+⛔ **THE CONSEQUENCE LINE STAYS IN THE `<summary>`.** *"This leaves you."* and *"Nothing leaves you."*
+are not subtitles — they ARE the safety mechanism. The file's header records that a flat grid gave
+Bridge and Deposit identical weight and **the author of this app clicked the wrong one**. Shut, the
+consequence is now read BEFORE a card is even visible, which is arguably safer than the open page.
+
+⭐⭐ **NATIVE `<details>`, FORCED BY AN EXISTING GUARD.** `verify-dashboard-copy` §3 decides the money
+boundaries **by document order** — "there is no undo" must follow "This leaves you". Conditional
+rendering would drop shut cards out of the DOM and gut it. Your guard picked the implementation.
+
+## 🚨 AND I SHIPPED A FALSE NUMBER TO PRODUCTION
+
+The "Ask your agent" fold declared **6** and contained **7** — the "What else is built →" link is a
+`quick-card` in the same grid. Shut, the summary stated a false count **on the one line a reader sees
+before deciding whether to open the section**. A hand-written number duplicating a fact the content
+already holds, in a change whose entire point was careful guarding, and it drifted inside one deploy.
+The guard now DERIVES the count per fold and compares.
+
+## ⛔ TWO GUARD DEFECTS IN MY OWN NEW GUARD, both found by mutating it
+
+* **Vacuous by construction.** This suite's `rendered` is TEXT ONLY — every tag stripped, deliberately
+  — and my structural assertions ran against it, where a tag regex can never match. "Shut by default"
+  went green against a string with no tags in it.
+* **Pinned to the catch branch, not the default.** Even against markup, flipping the default to OPEN
+  left it **24/0 GREEN**: node has no `localStorage`, so the initializer throws and the catch returns
+  false, making EVERY possible default render shut. An empty-store stub — the honest fixture, what a
+  first-time visitor has — makes the real branch run.
+
+## SMALLER THINGS IN THE SAME STRETCH
+
+* **`875698a` — Arc caps `eth_getLogs` TWICE.** Four files said *"10,000 blocks (-32614)"*; Arc returns
+  **-32012** for range and **-32602** for a **20,000-RESULT** cap that fires on a correctly-sized
+  window. Nothing branched on the code, so no handler went dead — the defect was the single-cap
+  framing. MEASURED headroom: the discovery filter returns 611 logs at head, 977 at head-5,000,000,
+  against 20,000. ⛔ Dropping the `to:` topic makes the identical request return -32602, and
+  `sweepVerdict` would then retry a never-succeeding window forever — discovery stops, symptom is
+  `cursorLag` climbing. Guarded, mutation-proven.
+* **`fe14cf2` — `rpc.testnet.arc.network` → `arc.io`, 22 files.** Both hostnames returned BYTE-IDENTICAL
+  gas heuristics, chainId and client version: an ALIAS. ⛔ 7 files deliberately NOT changed —
+  `agent-metadata/dd-service.json` is FROZEN and content-addressed, and PROGRESS/FINDINGS record
+  measurements *taken against that hostname*. 🚨 The DD quorum list now warns that adding the old name
+  back would make the quorum read TWO, act like TWO, and be worth ONE.
+* **`91d68d6` — an exemption whose REASON was false.** `test:ddwatch` sat outside `test:all` declared
+  "network-dependent". It is not: no fetch, 98 assertions, 0.4s. ⛔ `gate:registry` asserts an unwired
+  guard IS DECLARED; it cannot assert the reason is TRUE, because a reason is prose.
+
+
+---
+
 # ⛔ AGENT ON-CHAIN HISTORY IN DD — PARKED. Feasible, and that was never the question.
 
 **2026-09-10. Read-only scoping. NOTHING BUILT.** Could DD report an agent's on-chain history —
