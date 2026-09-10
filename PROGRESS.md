@@ -1,5 +1,129 @@
 ---
 
+# 🚨 A DEPLOY THAT LOOKED EXACTLY LIKE A SUCCESS — AND THE CENSUS THAT NOW RUNS ITSELF
+
+**2026-09-09 / 09-10.** Shipped `b5bfa68`. Production reached `d2cad68` as deploy `6aa1e403`.
+
+`deploy:prod` was run for `d2cad68` and the shell prompt came back. Production served `f7a7402` for
+three more hours. The deploy record `6aa1c346` sat at state `new`, `updated_at == created_at`,
+`available_functions: []`, **`error_message: null`** — the CLI had been killed during the esbuild
+bundling phase, before a single byte uploaded. Nothing was red anywhere.
+
+⭐ **THE SERVED BUNDLE HASH IS WHAT SETTLED IT** — `index-BSPcFU8e.js` on the wire against
+`index-BnYPuAo3.js` in `dist/`. Two instruments, not two reads of one: the deploy list (control
+plane) and `blobs-probe` (data plane) agreed independently.
+
+## 1. 🚨 I REPORTED THREE ORPHANS. THERE WERE EIGHT.
+
+The first count came from `listSiteDeploys` at its default page size. `sweep:deploys`, paged to
+exhaustion, found **8 abandoned deploys since the 2026-08-15 baseline** across 551 records / 6 pages
+— 6 production, 2 preview, 7 never touching their own record.
+
+⛔ **The filter was mine, and it is the exact blindness the sweep exists to prevent.** A first-page
+read is a reasonable way to ask "did my deploy survive" and a useless way to ask "is this
+happening". Same family as the 3-page cap that hid 23 records on 2026-08-15 — *a cap you choose
+yourself is still a filter, and it arrives feeling like a decision.*
+
+## 2. ⛔ AND CANCELLING THEM WAS NOT NEEDED — THE STATED REASON WAS WRONG
+
+The recommendation was "cancel, or `gate:deployed` check 5 fails the next deploy". **False.** Check 5
+scopes to deploys created *after the published one*, so `6aa1c346` left scope the moment the next
+deploy published. The scan narrows to zero on a successful publish by construction.
+
+**DECISION: cancel nothing.** Cancelling converts clean abandonment evidence into the same ambiguous
+`"Deploy canceled"` state that already makes **46 records** uncountable. The census line in
+`deploy-loss-log.jsonl` is what makes leaving them safe to count later.
+
+## 3. THE FIX — A DELTA GATE, DELIBERATELY NOT A CRON
+
+`deploy:prod` now ends in `gate:deployloss`. The census had gone **25 days between ledger lines**
+(baseline 2026-08-15 → 2026-09-09) while those 8 accumulated; it only ever ran when a human
+remembered.
+
+⭐ **WHY A DEPLOY HOOK, MEASURED:** 100/100 recent deploys are `deploy_source: "cli"` with
+`build_id: null`. Nothing but the local machine deploys this site, so **an orphan can only be created
+by a local `netlify deploy`** — running the census on every deploy has complete coverage of the event
+that creates one. A scheduled function would poll for an event only this machine can cause, and would
+need an **account-wide Netlify PAT in production env** (there is none — 33 keys, none Netlify-shaped)
+readable by 131 functions. The account's most powerful credential, bought for a monitoring
+convenience. Rejected.
+
+⚠️ **THE VERDICT IS THE DELTA, NOT THE TOTAL.** 8 losses stand by decision, so a gate on the total
+would fail every deploy forever — *an alert that fires on routine work is one nobody reads.* Gate
+mode fails only on a loss the last census had not recorded. Census mode (`sweep:deploys`) is
+unchanged and still exits 1 on any standing loss.
+
+## 4. ⭐⭐ THE TWO FAILURE MODES IT IS BUILT AGAINST — BOTH SILENT, BOTH SAFE-LOOKING
+
+* **A MISSING BASELINE IS NOT AN EMPTY ONE.** Absent, empty, unparseable, or unrecognised-shape
+  ledgers all report not-ok and **exit 2**. `previousCensus` returns *no `lossIds` field at all*, so
+  there is nothing an accidental `previous = {}` could read as "no previous losses". A corrupt last
+  line does **not** silently fall back to an older good one — a silent re-baseline would change what
+  the gate means on exactly the run the ledger misbehaves.
+* **A GATE THAT CANNOT FAIL.** The baseline is read **before** this run appends its own line.
+  Appending first would make every run its own baseline and leave `appeared` permanently empty —
+  green, and indistinguishable from working in every passing run.
+
+Also added a vacuity guard: a scan returning 0 deploys exits 2 **and appends nothing**, because a
+zero-scan baseline would make every standing loss read as NEW forever after.
+
+## 5. THE VERDICT IS A PURE FUNCTION, AND IT WAS MUTATION-PROVEN
+
+`verdictFor` maps (scanned, exhausted, gateNew, baselineOk, appearedCount, standingLosses) → 0/1/2
+with no API, clock or filesystem — *the exit code is the check, and output is a separate channel*
+(measured 2026-09-03: nine assertions printing ❌ after a `process.exit`, suite green). A
+**96-combination matrix** asserts no cannot-measure state can return 0.
+
+⭐ **42/0 green proves nothing until it has been made to fail.** Three mutations, all caught:
+
+| mutation | red |
+|---|---:|
+| absent ledger returns an empty baseline | 4 |
+| `verdictFor` folds "no baseline" 2 → 0 | 2 |
+| baseline reads the FIRST ledger line, not the last | 7 |
+
+Lib restored to matching checksum, green again. Registered in `suites` **110 → 111** and confirmed
+reachable through `run-suites` — a guard outside the gate is what `e186bec` existed to fix.
+
+## 6. THE REDEPLOY, AND WHY IT SURVIVED
+
+`test:all` **110/0/0** in 11.1 min → `gate:watch` → `gate:rpc` → build → publish → `gate:deployed`
+all five → `gate:forgery` 5/0 → `gate:spec`. Deploy `6aa1e403`, published `2026-09-09T23:33:53Z`,
+confirmed by an independent `blobs-probe` read afterwards.
+
+⭐ **`✔ Deploying functions from cache`** — 131 functions came from cache instead of a cold esbuild
+pass, so the 15–25 minute window that orphaned the previous three never opened. That is the
+difference, not anything about the code.
+
+⚠️ `capture:window` recorded a **fourth consecutive no-window** — `ddTree` unchanged at
+`1d179a64bfbe`. A prediction that the card work would rotate the DD surface was **wrong**; it touched
+no DD-surface file. The refusal banner stays proven in-process only.
+
+## 7. SMALLER THINGS IN THE SAME PASS
+
+* **`bridge-discover-sweep.mjs`** now names its own boundary. It scans `Transfer` filtered to the
+  USDC **contract**, which sees the ERC-20 leg only — Arc emits an EIP-7708 system-emitter Transfer
+  for *every* USDC movement, so **a plain native-value send to the bridge contract would be invisible
+  to it** while the tick reports a clean, contiguous, fully-served window. Correct for the path we
+  build (the kit pulls via `transferFrom`), but this is the one function whose entire job is to find
+  burns the record layer never saw, and a discovery scan must not inherit a completeness it does not
+  have. Comment only — no path in this app sends native USDC there.
+* **`docs/dd-rungs-in-plain-language.md`** — the ladder as a buyer reads it, grouped by the four
+  questions they actually ask, with no selectors or rung numbers. ⭐ Records that **rungs never land
+  in `notChecked`** (that belongs to the nine owner-power groups) and that the measured Arc figure is
+  **0 power groups of 270**; the oft-quoted 9.6% is *sub-checks*.
+* **Path B baseline #3 was found already DONE** (2026-07-23, **M = 0 phantoms of N = 12**, all
+  `COMPLETE`) while `session-close-2026-07-23` had listed it as "NEXT" for 49 days. Two records of
+  one thread, one updated. The stale one is corrected; what is actually open is a #4 after further
+  traffic, and no reusable harness exists for it.
+
+⚠️ **STILL OPEN from the audit at the top of this file:** nine `test:*` scripts sit outside `suites`.
+Four `*live` ones are plausibly deliberate; `test:bridgecopy`, `test:acktoken`, `test:policystore`
+and `test:quoteretention` look like the unwired-guard pattern. **Not audited.**
+
+
+---
+
 # 🚨 THE NANOPAYMENT PAGE SAID THE PAID BUY HAD NEVER RUN. IT HAD, FOR 20 DAYS — AND BOTH GUARDS REQUIRED THE FALSEHOOD.
 
 **2026-09-09.** Shipped `9bf0e6e`, live as deploy `6aa1779972dbb39721c91a2c`.

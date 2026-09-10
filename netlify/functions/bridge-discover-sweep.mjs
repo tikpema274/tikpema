@@ -105,6 +105,24 @@ export const handler = async (event) => {
   const cands = [];
   for (const w of windows) {
     try {
+      // ⚠️⚠️ THIS FILTER SEES THE ERC-20 LEG ONLY — AND THAT IS AN ASSUMPTION, NOT A GUARANTEE.
+      // Arc emits EVERY USDC movement as an EIP-7708 Transfer from the system emitter (18-dp), and
+      // the ERC-20 contract emits its own 6-dp Transfer only for ERC-20-interface activity. So one
+      // `transfer()` produces BOTH, while a plain NATIVE-VALUE send produces ONLY the system event.
+      // Scoping `address` to CONTRACTS.USDC therefore cannot see a native send to BRIDGE_CONTRACT.
+      //
+      // ⭐ It is correct for the path we build: the kit pulls via `transferFrom`, so the ERC-20
+      // emitter fires and every burn this sweeper is meant to find is visible here. But Circle's own
+      // compatibility guidance is explicit that "an application should not assume that USDC enters a
+      // contract only through ERC-20 methods" — native value can reach a contract address and move
+      // its USDC balance.
+      //
+      // ⛔ WHY IT MATTERS MORE HERE THAN ANYWHERE ELSE: this function's entire job is to find burns
+      // THE RECORD LAYER NEVER SAW. A discovery scan is the one place that must not quietly inherit
+      // a completeness it does not have — the filter IS the hypothesis, and a native-value burn would
+      // be invisible to it while the tick reports a clean, contiguous, fully-served window.
+      // Closing it means reading the system emitter too, and reconciling 18-dp against 6-dp so a
+      // single movement is credited ONCE. Not built: no path in this app sends native USDC here.
       const t = await c.getLogs({ address: CONTRACTS.USDC, event: TRANSFER,
         args: { from: owners, to: BRIDGE_CONTRACT }, fromBlock: w.fromBlock, toBlock: w.toBlock });
       let d = [];
