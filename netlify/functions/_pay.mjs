@@ -2,12 +2,21 @@ import { AppKit } from "@circle-fin/app-kit";
 import { createCircleWalletsAdapter } from "@circle-fin/adapter-circle-wallets";
 
 // PAY PLANE. The agent pays USDC from its Gateway (Unified Balance) to any
-// recipient on Arc Testnet. The agent wallet is a dev-controlled SCA, which
-// CANNOT sign Gateway spends (ecrecover rejects the SCA's ERC-1271 signature).
-// So an authorized EOA delegate (DELEGATE_ADDRESS) signs the spend while funds
-// are sourced from the SPENDER'S OWN SCA (sourceAccount). Same-chain Arc->Arc,
-// NO forwarder — this is the exact shape proven on-chain (0.1 USDC delivered,
-// tx 0xbf56e6be...7133501).
+// recipient on Arc Testnet. Same-chain Arc->Arc, NO forwarder.
+//
+// ⭐⭐ THE SCA SIGNS FOR ITSELF (app-kit >=1.14.0). This used to read: the agent wallet is a
+// dev-controlled SCA which CANNOT sign Gateway spends, so an authorized EOA delegate signs while
+// funds come from the SCA. Gateway now validates ERC-1271, so the account that holds the balance
+// authorises the spend. `DELEGATE_ADDRESS` is no longer read on this path.
+//
+// ⛔ IT IS NOT GONE FROM THE APP, AND SAYING SO WOULD BE THE OVERCLAIM. `_x402-vanilla.mjs` still
+// requires the EOA — the batched x402 header scheme needs `ecrecover(sig) == from` and accepts NO
+// contract signature, so the Researcher's EIP-3009 data buys are unaffected by this upgrade.
+// `_delegate.mjs` still owns the authorization machinery. What changed is one plane, not the model.
+//
+// ⚠️ The shape previously proven on-chain (0.1 USDC delivered, tx 0xbf56e6be...7133501) was the
+// DELEGATE shape. This path's on-chain proof is therefore OWED AGAIN, and it is a money
+// instruction: the ERC-1271 spend has never been accepted by Gateway here.
 //
 // The Circle Wallets adapter submits async; App Kit's waitForTransaction throws
 // (code 1098 / "transaction hash required", sometimes surfaced as a 5001 mint
@@ -21,11 +30,13 @@ import { createCircleWalletsAdapter } from "@circle-fin/adapter-circle-wallets";
 export async function agentPay({ recipientAddress, amountUsdc, sourceAccount }) {
   const apiKey = process.env.CIRCLE_API_KEY;
   const entitySecret = process.env.CIRCLE_ENTITY_SECRET;
-  const owner = sourceAccount;                      // SCA depositor (holds balance)
-  const delegate = process.env.DELEGATE_ADDRESS;    // EOA signer
+  const owner = sourceAccount;                      // the SCA: holds the balance AND signs (ERC-1271)
   if (!apiKey || !entitySecret) throw new Error("Missing CIRCLE_API_KEY or CIRCLE_ENTITY_SECRET");
   if (!owner) throw new Error("agentPay requires a `sourceAccount` (the session's agent SCA)");
-  if (!delegate) throw new Error("Missing DELEGATE_ADDRESS (run the delegate authorization)");
+  // ⛔ THE `DELEGATE_ADDRESS` REQUIREMENT IS GONE, and removing it is deliberate rather than tidy:
+  // a precondition on a variable the path no longer reads would refuse a spend for a reason that
+  // has stopped existing — a guard that fails closed on nothing. It is still required by
+  // _x402-vanilla.mjs and _delegate.mjs, which is why the ENV VAR stays set.
 
   const amount = String(amountUsdc);
   const kit = new AppKit();
@@ -36,8 +47,29 @@ export async function agentPay({ recipientAddress, amountUsdc, sourceAccount }) 
     token: "USDC",
     from: [{
       adapter,
-      address: delegate,        // delegate signs
-      sourceAccount: owner,     // funds drawn from the SCA's Gateway balance
+      // ⭐⭐ THE SCA SIGNS FOR ITSELF — app-kit >=1.14.0, ERC-1271. There is no delegate here and
+      // no `sourceAccount`: the account that HOLDS the balance is the account that AUTHORISES the
+      // spend, which is what a self-custodial claim should have looked like all along.
+      //
+      // WHAT THIS REPLACED: `address: delegate, sourceAccount: owner`. Gateway used to accept only
+      // ECDSA, so an SCA could not sign its own spend and an authorised EOA (DELEGATE_ADDRESS) had
+      // to sign while funds were drawn from the SCA. 1.14.0's Gateway validates ERC-1271 and the
+      // SDK detects a contract signer from on-chain bytecode, marking the request `contractSigner`.
+      //
+      // ⚠️ THE DETECTION HAS THREE DEFAULT-FALSE PATHS, read verbatim from 1.14.0's
+      // `isContractSigner`: bytecode `0x` or undefined (an EOA *or* an UNDEPLOYED SCA), a
+      // `readBytecode` that THROWS (logged to a console.warn nobody reads), and a call site that
+      // defaults false when the adapter is not EVM-like. ⭐ ALL THREE FAIL CLOSED AT GATEWAY —
+      // `contractSigner:false` makes it expect ecrecover, a contract signature is refused, and NO
+      // FUNDS MOVE. The cost is an intermittent refusal with no visible reason, not a loss.
+      //
+      // ⭐ THE UNDEPLOYED-SCA PATH IS UNREACHABLE THROUGH THIS APP, and it is worth knowing WHY,
+      // because the reason is not the delegate we just deleted. `ubDeposit` submits
+      // `approve(USDC, gateway)` FROM THE SCA before the deposit — a first transaction that DEPLOYS
+      // the account. So bytecode exists before anything signs, independently of `ensureDelegate`.
+      // MEASURED 2026-09-10: both live SCAs read 209 bytes. ⚠️ The one way in is an EXTERNAL
+      // permissionless `depositFor` crediting an SCA that never transacted; this app never does it.
+      address: owner,           // the SCA holds the balance AND signs for it (ERC-1271)
       // ⭐ NO `allocations` — this is how AUTO-ALLOCATION IS ENABLED. Supplying the key (for any
       // source) disables it and pins the draw to whatever we name. Omitting it makes the kit call
       // getBalances and pick chains itself, greedily: tier 1 = SAME CHAIN AS THE DESTINATION,

@@ -44,8 +44,22 @@ for (const f of SITES) {
   check(`⭐⭐ ${f.split("/").pop()} passes NO \`allocations\``,
     !/allocations\s*:/.test(code));
   check(`  …and still calls unifiedBalance.spend`, /unifiedBalance\.spend\(/.test(code));
-  check(`  …and still pins the SOURCE ACCOUNT (auto-allocation picks CHAINS, never the wallet)`,
-    /sourceAccount:/.test(code));
+  // ═══ ⭐⭐ TWO SHAPES NOW, ONE PROPERTY — updated 2026-09-10 with the app-kit 1.14.0 upgrade ═════
+  // This asserted `sourceAccount:` literally, which was asserting the MECHANISM, not the property.
+  // The mechanism changed under a CORRECT fix and the check went red:
+  //   · _ubspend.mjs — delegate shape: `address: delegate, sourceAccount: owner`. An EOA signs
+  //     because Gateway used to accept only ecrecover.
+  //   · _pay.mjs — ERC-1271 shape: `address: owner`, NO sourceAccount. There is no signer/source
+  //     split any more; the account that HOLDS the balance is the one that AUTHORISES it.
+  // ⭐ THE PROPERTY IS UNCHANGED AND IS WHAT MATTERS: the wallet is pinned EXPLICITLY, from the
+  // caller's session. Auto-allocation picks CHAINS; it must never pick the WALLET.
+  const pinned = /sourceAccount:\s*owner\b/.test(code) || /address:\s*owner\b/.test(code);
+  check(`  …and still pins the wallet FROM THE SESSION (auto-allocation picks CHAINS, never the wallet)`,
+    pinned, pinned ? "" : "neither `sourceAccount: owner` nor `address: owner` — the kit would choose");
+  // ⛔ AND NEVER FROM ENV. AGENT_WALLET_ADDRESS is not the spender: a per-user spend sourced from a
+  // shared env wallet is the cap-bypass seam _pay.mjs's own header was written about.
+  check(`  ⛔ …and never names a spend wallet from env`,
+    !/(address|sourceAccount):\s*process\.env/.test(code));
 }
 // The count is asserted so a NEW spend site cannot be added with allocations and go unnoticed.
 {
