@@ -1,5 +1,68 @@
 ---
 
+# 🚨 THE NUMBER CAME FROM CONVERSATION, AND IT REACHED THE PAGE THAT EXISTS TO REFUSE THAT
+
+**2026-09-11.** `988f8fc` shipped `/snapshot/2026-08-27` — a dated, one-off measurement of the
+Circle x402 Discovery catalog, page and JSON from one frozen object. The first real result of
+building it was not a number. It was finding out that a number I had been handed was unsourced.
+
+## WHAT HAPPENED
+
+The brief specified **1,246 listings**. The only harvest on disk is
+`circle-index-2026-08-27.harvest.json` — **1,003 listings, captured 2026-08-27**. The 1,246 is
+real: it came from a re-read on 2026-09-09. ⛔ **But that re-read's DATA WAS NEVER SAVED**, so no
+network table, no host concentration, no per-row anything can be derived from it.
+
+Publishing "1,246" beside a breakdown computed from the 1,003 harvest would have been **two
+datasets wearing one date** — and dating the page `2026-09-11` because that is when it was written
+would have made a four-day-old figure and a two-week-old table look like one measurement.
+
+⭐ **So the artifact is `/snapshot/2026-08-27`** — dated when the MEASUREMENT was taken, not when
+the page was written. The discipline the page exists to demonstrate, applied to the page first.
+
+## ⭐⭐ THE FAILURE IS THE SAME ONE, FOR THE FOURTH TIME THIS WEEK
+
+**A number that lives in conversation is not a measurement.** It reads exactly like one — it is
+specific, it is recent, it was right when someone said it — and nothing about it announces that it
+has no artifact behind it.
+
+This is the same shape as the three stale rows in the open-decisions list corrected hours earlier
+([[decisions-open-verified]]): `dd-analyze` described as unbuilt while live and taking payment, the
+in-app DD panel as a design task while rendering in `VaultPanel`, CCTP upfront fees as unadopted
+while `depositForBurnWithFees` was being called. And the same as the truncated delegate address
+completed from memory, which produced a confident "not authorised" about a wallet that does not
+exist ([[truncate-owner-identities-in-public-records]]).
+
+⛔ **AND IT REACHED THE ONE ARTIFACT BUILT TO PREVENT IT.** The snapshot page's whole thesis is
+that an undated measurement rots and someone cites it in six months. An unsourced number very
+nearly went onto it, under a date that would have made it uncheckable. The instrument does not
+protect its own inputs.
+
+## HOW IT WAS CAUGHT, AND WHAT THAT COSTS
+
+`ls scripts/x402-census/*.json` — one command. The harvest is dated in its own filename and states
+`listingsCollected: 1003` in its own metadata.
+
+⭐ **The catch was not diligence, it was the ORDER OF WORK.** Deriving the network table from the
+harvest required opening the harvest, and the harvest disagreed. Had the page needed only a total,
+1,246 would have shipped. **A derived figure gets checked because deriving it requires the source;
+a quoted figure never touches one.**
+
+## HOW TO APPLY
+
+* ⭐ **A figure in a brief is an input to verify, not a given** — including one from the person who
+  would know. `verify-dictated-reasons-before-recording` says the verdict is usually right and the
+  mechanism misremembered; here the number was right and its *provenance* was absent.
+* ⛔ **Prefer deriving over quoting even when quoting is cheaper.** Deriving forces contact with the
+  artifact. That contact is the check.
+* ⚠️ **If a measurement is worth citing later, SAVE ITS DATA, not its headline.** The 2026-09-09
+  re-read produced a true number and no artifact — so two weeks on, it can be repeated but not
+  used. §5 of `verify-snapshot-page.mjs` now re-derives every published figure from the harvest
+  rather than trusting the page's own constants, for exactly this reason.
+
+
+---
+
 # ⭐⭐ USDC IS READ NATIVELY — SERVER AND CLIENT — AND THE SCALE IS ASSERTED, NOT TRUSTED
 
 **2026-09-10/11.** `20bd168` (server) and `8793764` (client), both live. On Arc USDC is the native
