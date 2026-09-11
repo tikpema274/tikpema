@@ -29,7 +29,7 @@
 // Those disagree; that is DD's copy to fix, not this page's to repeat. Until it is fixed this
 // entry says "over x402" and stops there — the one claim that is true either way.
 
-import { SNAPSHOTS, DATES, LATEST } from "./snapshot.mjs";
+import { SNAPSHOTS, DATES, LATEST, PAIRS } from "./snapshot.mjs";
 
 // ⭐⭐ THE SNAPSHOT ENTRY IS DERIVED, NOT TYPED. It was hand-written once, and within a fortnight
 // it was quoting 1,003 listings and 25 hosts at a page serving 1,162 and 48 — a second copy of a
@@ -48,8 +48,12 @@ const ENTRIES = [
            unedited, at its own dated URL — the pair is the point, and the newest never overwrites it.
            Composition only: liveness and advertised-vs-live price were NOT measured, because both need
            calls to ${nf(S.totals.distinctResourceUrls)} third-party endpoints that have not been made,
-           and each page lists that as a gap rather than leaving it blank.`,
+           and each page lists that as a gap rather than leaving it blank. Where two readings exist they
+           are compared, led by the question worth asking: which offers now name a different payout
+           address. That comparison refuses to render at all if either reading fails its testnet
+           self-check, because a filtered reading has a different denominator.`,
     links: DATES.map((d) => [`/snapshot/${d}`, `/snapshot/${d}`])
+      .concat(PAIRS.map((p) => [`what differs: ${p}`, `/snapshot/diff/${p}`]))
       .concat([[`JSON`, `/snapshot/${LATEST}.json`]]),
   },
   {

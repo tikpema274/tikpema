@@ -22,8 +22,9 @@
 // Zero network. Zero money.
 
 import builtHandler, { validateEntries, REQUIRED_ENTRY_KEYS, page } from "../netlify/functions/built.mjs";
-import { SNAPSHOTS, DATES, LATEST } from "../netlify/functions/snapshot.mjs";
+import { SNAPSHOTS, DATES, LATEST, PAIRS } from "../netlify/functions/snapshot.mjs";
 import { handler as snapshotHandler } from "../netlify/functions/snapshot.mjs";
+import { handler as diffHandler } from "../netlify/functions/snapshot-diff.mjs";
 import { readFileSync } from "node:fs";
 
 let pass = 0, fail = 0;
@@ -112,7 +113,8 @@ const S = SNAPSHOTS[LATEST];
 const snapSection = sections.find((s) => /Snapshot —/.test(s));
 check("⭐ there is a snapshot entry to be about", Boolean(snapSection));
 check("⭐⭐ built.mjs IMPORTS the snapshot data rather than restating it",
-  /import \{ SNAPSHOTS, DATES, LATEST \} from "\.\/snapshot\.mjs"/.test(code));
+  /import \{[^}]*\bSNAPSHOTS\b[^}]*\} from "\.\/snapshot\.mjs"/.test(code) &&
+  /\bS\.totals\.listings\b/.test(code));
 for (const [label, v] of [["listings", S.totals.listings], ["accepts rows", S.totals.acceptsRows],
                           ["hosts", S.totals.distinctHosts], ["URLs", S.totals.distinctResourceUrls]]) {
   check(`⭐⭐ the entry states the CURRENT ${label}`, snapSection.includes(n(v)), String(v));
@@ -137,9 +139,14 @@ section("3 — ⭐ EVERY SNAPSHOT LINK RESOLVES TO A SNAPSHOT THAT EXISTS");
   check("⭐ there are snapshot links to check", hrefs.length >= DATES.length, `${hrefs.length} links`);
   check("⭐⭐ every dated snapshot has a link", DATES.every((d) => hrefs.includes(`/snapshot/${d}`)),
     DATES.join(", "));
+  check("⭐⭐ …and every comparison between them", PAIRS.every((p) => hrefs.includes(`/snapshot/diff/${p}`)),
+    PAIRS.join(", ") || "no pairs");
+  // ⚠️ /snapshot/diff/... is a DIFFERENT function. Sending it to snapshotHandler would 404 it and
+  // report a dead link on a page whose link is fine — the check must dispatch the way the CDN does.
   let allOk = true, detail = "";
   for (const h of hrefs) {
-    const r = await snapshotHandler({ path: h.replace(/\?.*$/, ""), queryStringParameters: {} });
+    const fn = h.startsWith("/snapshot/diff") ? diffHandler : snapshotHandler;
+    const r = await fn({ path: h.replace(/\?.*$/, ""), queryStringParameters: {} });
     if (r.statusCode !== 200) { allOk = false; detail += `${h}→${r.statusCode} `; }
   }
   check("⭐⭐ each one actually 200s through the real handler", allOk, detail || `${hrefs.length} checked`);

@@ -104,10 +104,14 @@ for (const d of DATES) {
   check(`⭐⭐ ${d}: Arc's absence is a RESULT, not a missing key`,
     J.arc?.state === "verified-absent" && J.arc.rows === 0 && /Is Arc in the catalog/.test(P));
 }
-// ⭐ THE NEW GAP THAT ONLY EXISTS BECAUSE THERE ARE TWO. Reported, not silently absent.
-check("⭐⭐ the diff is declared NOT PUBLISHED rather than left unmentioned",
-  jsons[LATEST].notMeasured.some((g) => g.field === "changeBetweenSnapshots" && g.state === "not-published") &&
-  /No diff view is published/.test(pages[LATEST]));
+// ⭐ THE ROW THAT ONLY EXISTS BECAUSE THERE ARE TWO — and it CLOSED rather than being deleted.
+// ⛔ When a declared gap is filled, the row must say where the answer went. Deleting it leaves a
+// reader who saw the earlier JSON with a question that has silently stopped being acknowledged.
+check("⭐⭐ the change-between-snapshots row still exists, now pointing at the comparison",
+  jsons[LATEST].notMeasured.some((g) => g.field === "changeBetweenSnapshots" &&
+    g.state === "published-separately" && g.reason.includes("/snapshot/diff")));
+check("⭐⭐ …and every page LINKS the comparison, so it is reachable not just referenced",
+  DATES.every((d) => pages[d].includes("/snapshot/diff/")));
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
 section("3 — 🚨 THE siwx TRAP IS ON EVERY PAGE, UNDER ITS OWN HEADING");

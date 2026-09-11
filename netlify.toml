@@ -381,6 +381,25 @@
 # ⛔ THE DATE IS IN THE PATH DELIBERATELY. A snapshot served from a bare, undated URL looks current
 # forever — someone cites it in six months and is not wrong to. `/snapshot` bare therefore 302s
 # (never 200s) to the dated artifact, and the destination SAYS it redirected.
+# ⛔ THE DIFF RULES MUST PRECEDE THE :date ONES. `/snapshot/diff/<pair>` has three segments so
+# `/snapshot/:date` cannot match it — but `/snapshot/diff` alone has two and WOULD be swallowed by
+# the dated-page rule, which would 404 it as an unknown date instead of redirecting to the newest
+# comparison. Order is the whole safety here.
+[[redirects]]
+  from = "/snapshot/diff/:pair.json"
+  to = "/.netlify/functions/snapshot-diff"
+  status = 200
+
+[[redirects]]
+  from = "/snapshot/diff/:pair"
+  to = "/.netlify/functions/snapshot-diff"
+  status = 200
+
+[[redirects]]
+  from = "/snapshot/diff"
+  to = "/.netlify/functions/snapshot-diff"
+  status = 200
+
 [[redirects]]
   from = "/snapshot/:date.json"
   to = "/.netlify/functions/snapshot"

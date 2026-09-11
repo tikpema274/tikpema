@@ -38,6 +38,8 @@
 // ⚠️ EVERY FIELD CARRIES ITS OWN STATE: verified | not-measured | not-remeasured | could-not-check,
 // with a reason. A blank is not a finding, and "nobody has checked this" is a state worth printing.
 
+import { pairsFor } from "../../shared/x402-diff.mjs";
+
 const SOURCE = "https://api.circle.com/v2/x402/discovery/resources?limit=100&offset=N";
 
 // ⭐ THE FROZEN OBJECTS. Page and JSON both render from these; neither can state a figure the other
@@ -195,10 +197,14 @@ export const SNAPSHOTS = Object.freeze({
         reason: "EIP-1967 has no Solana equivalent — the question differs per ecosystem, it is not one check" }),
       Object.freeze({ field: "serviceQuality", state: "could-not-check",
         reason: "no on-chain or catalog signal distinguishes a service that works from one that does not" }),
-      // ⭐ NEW GAP, AND IT ONLY EXISTS BECAUSE THERE ARE NOW TWO SNAPSHOTS.
-      Object.freeze({ field: "changeBetweenSnapshots", state: "not-published",
-        reason: "the two harvests are diffable and the diff is the interesting artifact, but no diff " +
-          "view has been built and no per-listing change set is published here" }),
+      // ⭐ THIS GAP CLOSED. It read `not-published` while no comparison existed; the comparison now
+      // exists at /snapshot/diff, so the row states where it is rather than being deleted — a reader
+      // who saw the old JSON needs to find the answer, not find the question gone.
+      Object.freeze({ field: "changeBetweenSnapshots", state: "published-separately",
+        reason: "what differs between two readings is computed and published at /snapshot/diff, led " +
+          "by which offers name a different payout address. It is a separate artifact because a " +
+          "comparison can be refused (a filtered reading has a different denominator) while both " +
+          "snapshots it spans remain perfectly sound" }),
     ]),
   }),
 });
@@ -206,6 +212,9 @@ export const SNAPSHOTS = Object.freeze({
 // ⭐ THE NEWEST, DERIVED — not a second constant that can fall out of step with the map.
 export const DATES = Object.freeze(Object.keys(SNAPSHOTS).sort());
 export const LATEST = DATES[DATES.length - 1];
+// ⭐ Derived by the same function the diff page uses; §0 of verify-snapshot-diff asserts the two
+// date lists have not drifted apart, which sharing the derivation alone would not catch.
+export const PAIRS = Object.freeze(pairsFor(DATES));
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const n = (x) => Number(x).toLocaleString("en-GB");
@@ -328,8 +337,10 @@ ${DATES.map((d) => {
 <td class="r">${n(T.totals.distinctHosts)}</td><td class="r">${T.arc.rows}</td>
 <td><a href="/snapshot/${esc(d)}.json">JSON</a></td></tr>`;
 }).join("")}</table>
-<p class="sub">Each was harvested separately and none has been edited since. No diff view is published
-— the numbers above are side by side, but no per-listing change set has been computed for readers.</p>
+<p class="sub">Each was harvested separately and none has been edited since.</p>
+${PAIRS.length ? `<p>What differs between two of them, including which offers now name a different
+payout address: ${PAIRS.map((p) => `<a href="/snapshot/diff/${esc(p)}">${esc(p)}</a>`).join(" &middot; ")}</p>`
+  : `<p class="sub">Only one reading exists, so there is nothing to compare it against.</p>`}
 
 <footer>Captured ${D} · published ${S.publishedAt} · composition only ·
 <a href="/snapshot/${D}.json">JSON</a> · <a href="/built">what else is built</a></footer>
