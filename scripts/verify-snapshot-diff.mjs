@@ -49,6 +49,12 @@ const n = (x) => Number(x).toLocaleString("en-GB");
 // newline in the middle. Two assertions in the first draft of this file were wrong this way, and
 // both looked like page defects. Match `flat` for prose; match `html` for structure.
 const flat = html.replace(/\s+/g, " ");
+// ⭐⭐ AND A TAG-STRIPPED VIEW FOR PROSE THAT SPANS INLINE MARKUP. Three assertions in this file's
+// drafts failed on a CORRECT page because a sentence ran across `<b>`/`<i>` or a source newline —
+// `24 of them belong to a single host` is `<b>24</b> of them…` in the HTML. The rule that emerged:
+// match `text` for anything a human reads as a sentence, `html` for structure (tags, headings,
+// attributes), `flat` only when the markup itself is part of the claim.
+const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 
 console.log("╔══════════════════════════════════════════════════════════════════════╗");
 console.log("║  /snapshot/diff — refuses a wrong denominator, claims no events      ║");
@@ -172,6 +178,79 @@ check("⭐ payoutOwnership is a declared gap",
     `${same.payTo.comparableOffers} comparable offers, 0 changed`);
   check("⛔ …and the self-comparison reports no presence differences either — the control is sound",
     same.presence.resources.absentFromLater === 0 && same.presence.resources.presentOnlyInLater === 0);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("4b — ⛔ THE FOUR PARTS, IN ORDER, AND NO COMPANY IN A HEADING");
+// ⛔ ORDER IS THE ASSERTION, not presence. The benign reading placed AFTER the distinguishing check
+// reads as a concession; placed after the structural limit it reads as an afterthought. And a count
+// published without part 2 at all is an accusation. Each part is pinned by a phrase and the four
+// indices must ascend.
+{
+  const parts = [
+    ["1 the measurement", "offers name a different payout address"],
+    ["2 the benign reading", "The ordinary explanation fits it"],
+    ["3 what would distinguish", "What would tell the two apart, and has not been done"],
+    ["4 the structural limit", "cannot reach at any effort"],
+  ];
+  const at = parts.map(([, needle]) => flat.indexOf(needle));
+  parts.forEach(([label], i) => check(`⭐⭐ part ${label} is present`, at[i] >= 0));
+  check("⭐⭐⭐ …and all four appear IN THAT ORDER",
+    at.every((x, i) => x >= 0 && (i === 0 || x > at[i - 1])),
+    at.join(" < "));
+
+  // 1 — derived, not typed.
+  const pt = data.payTo.pattern;
+  check("⭐⭐ the measurement is derived: distinct new addresses equals the changed-offer count",
+    pt.distinctNewAddresses === data.payTo.changedCount && pt.oneAddressPerChangedOffer === true,
+    `${pt.distinctNewAddresses} addresses / ${data.payTo.changedCount} offers`);
+  check("⭐ …and the concentration figure comes from the data",
+    text.includes(`${n(pt.topHost.changedOffers)} of them belong to a single host`),
+    `${pt.topHost?.changedOffers} on the top host`);
+  check("⭐⭐ …and the cross-chain claim is derived, not asserted",
+    pt.topHostSpansMultipleChains === (pt.topHost.chains.length > 1) &&
+    pt.topHost.chains.every((c) => flat.includes(c === "eip155:8453" ? "Base" : "Solana")));
+  check("⛔ the page states the figures are derived rather than recorded by hand",
+    /derived from the two harvests, not recorded by hand/.test(text));
+
+  // 2 — the benign reading must be NAMED, not gestured at.
+  check("⭐⭐ the benign reading names the mechanism",
+    /one payout address per endpoint is a reasonable/i.test(text) &&
+    /regenerates every address together when it re-keys or redeploys/i.test(text));
+  check("⭐⭐ …and gives the reason it is the likelier reading",
+    /wants few destinations/.test(text));
+
+  // 3 — a NAMED check, and explicitly not done.
+  check("⭐⭐ the distinguishing check is named specifically, not gestured at",
+    /402<\/code> challenge/.test(html) && /the address it names is the one in this reading/.test(text));
+  check("⭐⭐ …and is stated as NOT performed", /Those requests have not been made/.test(text));
+  check("⭐⭐⭐ …and the page says on-chain reads would NOT settle it",
+    /independent addresses are consistent with per-endpoint derivation/.test(text) &&
+    /a shared deployer is consistent with systematic provisioning/.test(text),
+    "a read that cannot change what we publish is activity, not measurement");
+
+  // 4 — a property of the instrument, not a hedge.
+  check("⭐⭐⭐ the structural limit is stated as a property of the instrument",
+    /A catalog records where money is pointed/.test(text) &&
+    /never records who pointed it, or why/.test(text) &&
+    /no amount of further care with this data would make it so/.test(text));
+  check("⭐⭐ …and it is a declared field, so the JSON carries it too",
+    data.notMeasured.some((g) => g.field === "whoChangedTheEntry" &&
+      g.state === "structurally-unanswerable" && /limit of the instrument/.test(g.reason)));
+
+  // ⛔ NO COMPANY IN A HEADING. The host belongs in the data and the resource URLs, nowhere else.
+  const headings = [...html.matchAll(/<h[12]>([\s\S]*?)<\/h[12]>/g)].map((m) => m[1]);
+  const titleTag = html.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? "";
+  const hostNames = new Set(data.payTo.changes.map((c) => { try { return new URL(c.resource).host; } catch { return ""; } }));
+  check("⭐ there are hosts to keep out of the headings", hostNames.size > 0, [...hostNames].join(", "));
+  check("⛔⛔ no host appears in ANY heading",
+    [...hostNames].every((h) => headings.every((x) => !x.includes(h))),
+    "a finding whose most quotable sentence is a company name is an accusation wearing a measurement's clothes");
+  check("⛔⛔ …nor in the <title>", [...hostNames].every((h) => !titleTag.includes(h)));
+  check("⛔ …nor in the meta description a link preview would quote",
+    [...hostNames].every((h) => !(html.match(/<meta name="description" content="([^"]*)"/)?.[1] ?? "").includes(h)));
+  check("⭐ …but the host IS still visible in the data, so nothing is hidden",
+    [...hostNames].every((h) => html.includes(h)) && Boolean(pt.topHost?.host));
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════

@@ -109,6 +109,58 @@ flag is a claim, the rows are the evidence.</p>
 </main></body></html>`;
 }
 
+// ⭐⭐ THE FOUR-PART PARAGRAPH, IN A FIXED ORDER, AND THE ORDER IS THE POINT.
+//   1. the measurement    2. the benign reading, named plainly and FIRST
+//   3. what would distinguish them, named as a check nobody has run
+//   4. ⛔ what the catalog STRUCTURALLY cannot say
+// A count without (2) is an accusation. (3) without (4) implies the question is merely unfinished,
+// when the decisive part of it is unreachable by this instrument at any effort.
+//
+// ⛔ THE HOST IS NOT NAMED HERE. It appears in the resource URLs in the table below, which is where
+// it already was — but a finding whose most quotable sentence is a company name is an accusation
+// wearing a measurement's clothes. `pattern.topHost` stays in the JSON, out of the prose.
+function patternBlock(P, from, to) {
+  const pt = P.pattern;
+  const chains = (pt.topHost?.chains ?? []).map((c) => netName(c));
+  return `<div class="box">
+<b>What the pattern looks like.</b>
+<!-- 1 — THE MEASUREMENT -->
+Between the ${esc(from)} and ${esc(to)} readings, <b>${n(pt.changedOffers)}</b> offers name a
+different payout address${pt.topHost ? `, and <b>${n(pt.topHost.changedOffers)}</b> of them belong to a
+single host` : ""}${pt.topHostSpansMultipleChains
+  ? `, which changed on ${chains.map(esc).join(" and ")} in the same window` : ""}.
+They point to <b>${n(pt.distinctNewAddresses)}</b>
+${pt.oneAddressPerChangedOffer ? "<b>distinct</b> addresses — one per offer, none reused" : "addresses"},
+and ${pt.newAddressesAlreadyPresentInEarlierReading === 0
+  ? "none of them appears anywhere in the earlier reading"
+  : `${n(pt.newAddressesAlreadyPresentInEarlierReading)} of them already appeared in the earlier reading`}.
+Both figures are derived from the two harvests, not recorded by hand.
+<br><br>
+<!-- 2 — THE BENIGN READING, FIRST AND PLAIN -->
+<b>The ordinary explanation fits it.</b> Deriving one payout address per endpoint is a reasonable
+and common design — it makes revenue attributable per route without a ledger — and a service built
+that way regenerates every address together when it re-keys or redeploys. A host rotating all of its
+endpoints at once, on every chain it serves, is exactly what that looks like.
+⭐ Diversion tends the other way: someone redirecting payments wants <i>few</i> destinations, not
+${n(pt.distinctNewAddresses)}.
+<br><br>
+<!-- 3 — WHAT WOULD DISTINGUISH THEM, AND THAT NOBODY HAS RUN IT -->
+<b>What would tell the two apart, and has not been done:</b> ask each endpoint for its own
+<code>402</code> challenge and see whether the address it names is the one in this reading. That is
+the operator's own server asserting the change, which no third party can assert for it.
+<b>Those requests have not been made</b> — not by us, and as far as we know by nobody else.
+⛔ On-chain reads would not settle it either: independent addresses are consistent with per-endpoint
+derivation <i>and</i> with freshly generated keys, and a shared deployer is consistent with
+systematic provisioning <i>and</i> with systematic exfiltration.
+<br><br>
+<!-- 4 — THE STRUCTURAL LIMIT -->
+<b>⛔ And there is a question this instrument cannot reach at any effort.</b> A catalog records
+<i>where</i> money is pointed. It never records <i>who</i> pointed it, or why. A repoint is a write
+to Circle's index; no chain witnessed it, so no chain can testify about it. Nothing here is evidence
+about any operator's conduct, and no amount of further care with this data would make it so.
+</div>`;
+}
+
 function page({ from, to, diff, redirected }) {
   const d = diff;
   const P = d.payTo;
@@ -148,6 +200,7 @@ ${P.changedCount === 0
      A changed entry is a changed catalog entry; ownership was not checked on any chain, and routine
      key rotation and a takeover look identical from here.`}
 </div>
+${P.changedCount ? patternBlock(P, from, to) : ""}
 ${P.changedCount ? `<div class="wrap"><table>
 <tr><th>resource</th><th>network</th><th>payout in ${esc(from)}</th><th>payout in ${esc(to)}</th><th>state</th></tr>
 ${rowsFor(P.changes)}</table></div>

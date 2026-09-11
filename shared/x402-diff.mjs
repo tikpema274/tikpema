@@ -143,6 +143,36 @@ export function diffHarvests(a, b, { labelA, labelB } = {}) {
   }
   payToChanges.sort((x, y) => x.resource.localeCompare(y.resource) || x.network.localeCompare(y.network));
 
+  // ⭐⭐ THE SHAPE OF THE CHANGE, DERIVED — because the shape is what separates the readings, and
+  // the count alone does not. Someone diverting payments wants FEW destinations; one address per
+  // endpoint is an accounting pattern, not a wallet. This is computed so the page can state the
+  // benign reading from evidence rather than from charity.
+  // ⛔ `topHost` is DATA. The renderer must not put it in a heading — a finding whose most quotable
+  // sentence is a company name is an accusation wearing a measurement's clothes.
+  const newAddrs = [], perHost = {};
+  for (const c of payToChanges) {
+    for (const a of c.onlyInLater) newAddrs.push(a);
+    const h = host(c.resource);
+    if (h) { (perHost[h] ??= { host: h, count: 0, chains: new Set() }); perHost[h].count++; perHost[h].chains.add(c.network); }
+  }
+  const distinctNew = new Set(newAddrs);
+  const earlierAddrs = A.allPayTo;
+  const top = Object.values(perHost).sort((x, y) => y.count - x.count)[0] ?? null;
+  const pattern = {
+    state: "verified",
+    changedOffers: payToChanges.length,
+    distinctNewAddresses: distinctNew.size,
+    // ⭐ One address per changed offer, with none reused, is the signature of per-endpoint derivation.
+    oneAddressPerChangedOffer: distinctNew.size === payToChanges.length,
+    newAddressesAlreadyPresentInEarlierReading:
+      [...distinctNew].filter((a) => earlierAddrs.has(a)).length,
+    topHost: top ? { host: top.host, changedOffers: top.count, chains: [...top.chains].sort() } : null,
+    topHostSpansMultipleChains: top ? top.chains.size > 1 : false,
+    _why: "Diversion favours few destinations; per-endpoint derivation produces one address per " +
+      "endpoint and regenerates them together. These fields let a reader weigh those without " +
+      "being told which to believe.",
+  };
+
   const hostsA = new Set(Object.keys(A.hosts)), hostsB = new Set(Object.keys(B.hosts));
   const netKeys = [...new Set([...Object.keys(A.networks), ...Object.keys(B.networks)])];
 
@@ -174,6 +204,7 @@ export function diffHarvests(a, b, { labelA, labelB } = {}) {
       comparableOffers: comparableKeys,
       changedCount: payToChanges.length,
       changes: payToChanges,
+      pattern,
       _method: "per (resource, network, asset, scheme), the SET of payTo values in each reading, " +
         "compared only where both readings carry at least one. Set-valued because the key is not " +
         "unique — 834 keys carry conflicting rows — so no row is paired with a specific successor.",
@@ -204,6 +235,12 @@ export function diffHarvests(a, b, { labelA, labelB } = {}) {
       { field: "payoutOwnership", state: "not-measured",
         reason: "a changed payTo is a changed catalog entry; whether the same party controls both " +
           "addresses was not checked on any chain" },
+      // ⛔ A PROPERTY OF THE INSTRUMENT, NOT A HEDGE. No amount of care with this data reaches
+      // authorisation: the repoint is a database write that the chain never witnessed.
+      { field: "whoChangedTheEntry", state: "structurally-unanswerable",
+        reason: "the catalog records where money is pointed, never who pointed it or why. A repoint " +
+          "is a write to Circle's index; no on-chain read can testify about it, so this is a limit " +
+          "of the instrument rather than a gap in the effort" },
       { field: "liveness", state: "not-measured",
         reason: "no third-party endpoint was called in either reading, so neither says whether any of " +
           "these services answered" },
