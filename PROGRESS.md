@@ -1,5 +1,102 @@
 ---
 
+# THE SECOND MEASUREMENT — AND THE UNSAVED 1,246 IS NOW UNRECONCILABLE, PERMANENTLY
+
+**2026-09-11.** A fresh harvest of the Circle x402 Discovery index, run as a separate act from the
+page that publishes it. **12 requests to Circle's own API.** `/snapshot/2026-09-11` now sits
+*alongside* `/snapshot/2026-08-27`; the older page is byte-for-byte unchanged.
+
+## WHAT THE SECOND READING SAYS
+
+| | 2026-08-27 | 2026-09-11 | Δ |
+|---|---|---|---|
+| listings | 1,003 | **1,162** | +159 |
+| accepts rows | 3,808 | **4,215** | +407 |
+| distinct URLs | 960 | **1,094** | +134 |
+| **hosts** | 25 | **48** | **+23** |
+| distinct payout addresses | 111 | 128 | +17 |
+| networks | 16 | 16 | 0 |
+| **Arc rows** | **0** | **0** | **0** |
+| top-1 host share | 55.5% | 50.1% | −5.4pp |
+| top-5 host share | 81.5% | 75.3% | −6.2pp |
+
+⭐ **The interesting number is HOSTS, not listings.** 25 → 48 in fifteen days, with **zero hosts
+lost**. QuickNode's row count did not move at all (2,112 → 2,112); its *share* fell because
+everyone else arrived. Two clusters account for most of the new names: `*.gateway-402.com`
+fronting Google/Alibaba APIs, and `*.paysponge.com` fronting TripAdvisor, Wolfram Alpha, fal,
+2captcha, RentCast. **The catalog is broadening into resellers of existing APIs**, not new
+services.
+
+⛔ **Arc is still absent.** 15 days, +159 listings, +23 hosts, still zero rows. That is now a
+*trend* rather than a snapshot, and it is the second dated artifact saying so.
+
+## 🚨 THE 1,246 CAN NEVER BE RECONCILED — AND THIS HARVEST PROVES IT
+
+The previous entry recorded that the **1,246** figure came from an unsaved re-read on 2026-09-09.
+Today's saved harvest reads **1,162** — *lower*, two days later, on a catalog that has otherwise
+only grown.
+
+⛔ **There is no way to tell which of four explanations is right**, and there never will be: the
+index genuinely shrank; the 1,246 counted accepts rows or some other unit; it was read through a
+different filter; or it was misremembered. **All four are consistent with every artifact that
+exists**, because the only thing that could discriminate — the data behind the 1,246 — was never
+written down.
+
+⭐ **That is the cost, stated concretely.** Not "the number was unsourced" as a discipline point,
+but: *a real reading, taken by a careful person, is now permanently unusable, and it sits between
+two saved harvests that cannot be joined across it.* The 15-day gap is a measurement. The 2-day
+gap inside it is a hole.
+
+## ⭐⭐ THE HARVEST WAS DISCARDED ONCE, AND ITS OWN SELF-CHECK DID NOT CATCH WHY
+
+The harvester passed its scoped self-check on the first run — Base Sepolia 396 rows, Polygon Amoy
+396 rows, both present, so the `siwx=false` filter was provably not applied. **The counts were
+right. The file was still wrong.**
+
+One line projected `payTo` through `.toLowerCase()`. Base58 is **case-sensitive**, so that invented
+a different address for all **1,087** Solana payouts, and de-checksummed the EVM ones — which
+2026-08-27 had stored verbatim.
+
+🚨 **It was invisible to every check that existed.** Row count, network count, sentinel rows, page
+totals: all correct. It surfaced only when the two harvests were compared, where **110 of 111
+payout addresses read as "gone" and 127 of 128 as "new"** — a catalog-wide payout rotation that did
+not happen. Corrected, the real churn is **45 new, 28 gone, 83 persisting**.
+
+⭐ **THE RULE: a projection PRESERVES; normalise at COMPARE time, never at HARVEST time.** The
+harvest was deleted and re-run rather than repaired in place, because a file that has been
+hand-corrected is no longer a reading. `verify-snapshot-page.mjs §7` now asserts case is preserved
+and that most payouts persist across harvests — the second is the one that would have caught it,
+and it only became expressible once a second harvest existed.
+
+## WHAT THE NEW PAGE WILL NOT SAY
+
+* ⛔ **It does not restate 838.** The CLI was not re-run today, so the size of the `siwx=false` gap
+  *today* is unknown. The page cites the 165-listing gap **with 2026-08-27 attached to it** and
+  states that only the trap's *existence* was re-confirmed — by 792 testnet rows being present at
+  all. A measured number carried forward under a new date stops being a snapshot.
+* ⛔ **No liveness, no price agreement.** Still ~1,094 uninvited third-party calls. Not made.
+* ⛔ **No diff view.** Declared as `changeBetweenSnapshots: not-published` rather than left
+  unmentioned. The tables above are side by side; no per-listing change set is published.
+
+## ⭐ ONE THING THE SECOND HARVEST KNOWS THAT THE FIRST DID NOT
+
+2026-08-27 recorded that it "read no `total` field" — which was a statement about the harvester's
+looking, not about the API. This one looked: **every one of the 12 pages returned `total: 1162`,
+matching the 1,162 collected exactly.** So this measurement can say the index did *not* drift while
+being read; the older one still cannot, and its page says so rather than inheriting the newer
+harvest's confidence.
+
+## FILES
+
+New: `scripts/x402-census/harvest-index.mjs` (discard-on-fail; refuses to overwrite a dated file),
+`scripts/x402-census/circle-index-2026-09-11.harvest.json`. Modified:
+`netlify/functions/snapshot.mjs` (one frozen object per date, newest derived not declared, unknown
+date 404s rather than falling through), `scripts/verify-snapshot-page.mjs` (**80 assertions**, up
+from 31; §6 pins the old snapshot against its own harvest, §7 guards the harvester). Six mutations
+run, six caught. `netlify.toml` unchanged — `/snapshot/:date` was already generic.
+
+---
+
 # 🚨 THE NUMBER CAME FROM CONVERSATION, AND IT REACHED THE PAGE THAT EXISTS TO REFUSE THAT
 
 **2026-09-11.** `988f8fc` shipped `/snapshot/2026-08-27` — a dated, one-off measurement of the
