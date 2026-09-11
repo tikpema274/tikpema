@@ -1,6 +1,6 @@
 ---
 
-# THE SECOND MEASUREMENT — AND THE UNSAVED 1,246 IS NOW UNRECONCILABLE, PERMANENTLY
+# THE SECOND MEASUREMENT — AND THE CATALOG SHRANK BY 84 IN THE LAST TWO DAYS
 
 **2026-09-11.** A fresh harvest of the Circle x402 Discovery index, run as a separate act from the
 page that publishes it. **12 requests to Circle's own API.** `/snapshot/2026-09-11` now sits
@@ -22,7 +22,8 @@ page that publishes it. **12 requests to Circle's own API.** `/snapshot/2026-09-
 
 ⭐ **The interesting number is HOSTS, not listings.** 25 → 48 in fifteen days, with **zero hosts
 lost**. QuickNode's row count did not move at all (2,112 → 2,112); its *share* fell because
-everyone else arrived. Two clusters account for most of the new names: `*.gateway-402.com`
+everyone else arrived. ⚠️ *When* they arrived is not knowable — see the 09-09 reconciliation below,
+which has no host data. Two clusters account for most of the new names: `*.gateway-402.com`
 fronting Google/Alibaba APIs, and `*.paysponge.com` fronting TripAdvisor, Wolfram Alpha, fal,
 2captcha, RentCast. **The catalog is broadening into resellers of existing APIs**, not new
 services.
@@ -30,22 +31,56 @@ services.
 ⛔ **Arc is still absent.** 15 days, +159 listings, +23 hosts, still zero rows. That is now a
 *trend* rather than a snapshot, and it is the second dated artifact saying so.
 
-## 🚨 THE 1,246 CAN NEVER BE RECONCILED — AND THIS HARVEST PROVES IT
+## ⛔ I SAID THE 1,246 COULD NEVER BE RECONCILED. IT RECONCILES EXACTLY.
 
-The previous entry recorded that the **1,246** figure came from an unsaved re-read on 2026-09-09.
-Today's saved harvest reads **1,162** — *lower*, two days later, on a catalog that has otherwise
-only grown.
+**The first draft of this entry claimed the 2026-09-09 re-read left "no network table, no host
+concentration, no per-row anything". That was wrong, and wrong in the specific way this whole
+exercise is about: I asserted an absence without reading the place it was saved.** The breakdown is
+in the memory note `x402-directories-do-not-support-arc`, written the day it was measured. Not a
+harvest file — prose — but a **per-network accepts table**, and it is enough.
 
-⛔ **There is no way to tell which of four explanations is right**, and there never will be: the
-index genuinely shrank; the 1,246 counted accepts rows or some other unit; it was read through a
-different filter; or it was misremembered. **All four are consistent with every artifact that
-exists**, because the only thing that could discriminate — the data behind the 1,246 — was never
-written down.
+⭐ It checks out internally before it is used: the seven networks it names sum to 3,953, and the
+nine it elides are today worth exactly 346. 3,953 + 346 = **4,299** — the accepts total that note
+states. The figures were recorded faithfully.
 
-⭐ **That is the cost, stated concretely.** Not "the number was unsourced" as a discipline point,
-but: *a real reading, taken by a careful person, is now permanently unusable, and it sits between
-two saved harvests that cannot be joined across it.* The 15-day gap is a measurement. The 2-day
-gap inside it is a hole.
+| | 2026-08-27 | 2026-09-09 *(prose)* | 2026-09-11 |
+|---|---|---|---|
+| listings | 1,003 | 1,246 | **1,162** |
+| accepts rows | 3,808 | 4,299 | **4,215** |
+
+**Between 09-09 and 09-11 the catalog SHRANK by exactly 84 listings and exactly 84 accepts rows.**
+One row per listing — so 84 *single-network* listings were delisted. Where:
+
+| network | 09-09 | 09-11 | Δ |
+|---|---:|---:|---:|
+| Polygon | 637 | 555 | **−82** |
+| Solana mainnet | 825 | 823 | −2 |
+| Base | 1,327 | 1,327 | 0 |
+| Base Sepolia / Polygon Amoy / Solana devnet / Avalanche | 396 / 396 / 264 / 108 | *identical* | 0 |
+| the other nine | 346 | 346 | 0 |
+
+⭐⭐ **Nothing else moved at all.** A 5-figure match plus an exact 346 on the remainder is not
+coincidence: **82 Polygon-only listings and 2 Solana-only listings were removed, and the rest of
+the catalog was static for two days.**
+
+⚠️ **AND IT REDATES THE GROWTH IN THE TABLE ABOVE.** Base went 1,164 → 1,327 over the fortnight —
+but it was already 1,327 on 09-09. *All* of Base's growth happened in the first thirteen days; the
+last two were a contraction. The 15-day Δ is real and the story "the catalog is growing" is only
+true of the first two-thirds of it.
+
+## ⛔ WHAT THE UNSAVED READ STILL COSTS — smaller, and now nameable
+
+The 09-09 note has listings, accepts, 16 networks, seven per-network counts, and a category split.
+It does **not** have hosts, distinct URLs, `payTo` addresses, or any per-row data. So:
+
+* ✅ **answerable**: did the catalog grow or shrink, and on which chains.
+* ⛔ **not answerable, ever**: whether the 23 new hosts arrived before or after 09-09, whether the
+  84 delisted rows belong to one seller or 84, and which payout addresses left.
+
+⭐ **The lesson survives the correction, and sharpens.** *"A number in conversation is not a
+measurement"* was right about the risk and wrong about this instance — the number **had** an
+artifact, in a place I did not look before declaring it absent. The rule that actually applies is
+the older one: **be refuted by what you READ, not by what you failed to find.** Fifth instance.
 
 ## ⭐⭐ THE HARVEST WAS DISCARDED ONCE, AND ITS OWN SELF-CHECK DID NOT CATCH WHY
 
