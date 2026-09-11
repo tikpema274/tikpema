@@ -211,7 +211,7 @@ if (!prov.ok) {
   console.log(`\n   ⭐ DIRECTION: REPO IS AHEAD. The live bytes are this repo's own commit:`);
   console.log(`      ${prov.commit}`);
   console.log(`      published ${pAt ?? "?"}. A reviewed change was never published.`);
-  console.log(`      Run  npm run deploy:site -- --prod`);
+  console.log(`      Run  npm run deploy:site:prod   (in a terminal — --prod refuses non-interactively)`);
 } else {
   // 🚨 The served bytes match NO version of this file that git has ever held.
   console.log(`\n   🚨 DIRECTION: LIVE IS AHEAD. The served bytes match none of the ${prov.scanned} committed`);

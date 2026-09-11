@@ -118,6 +118,7 @@
     "test:siteclaims": "node scripts/verify-site-claims.mjs",
     "gate:sitelive": "node scripts/verify-site-live.mjs && node scripts/record-guard-run.mjs gate:sitelive",
     "deploy:site": "node scripts/deploy-site.mjs && npm run gate:sitelive",
+    "deploy:site:prod": "node scripts/deploy-site.mjs --prod && npm run gate:sitelive",
     "test:custodynotice": "npx tsx scripts/verify-custody-notice.tsx",
     "test:receive": "npx tsx scripts/verify-receive-and-paylink.tsx",
     "test:vaultexit": "npx tsx scripts/verify-vault-exit-copy.tsx",

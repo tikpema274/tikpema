@@ -1,7 +1,12 @@
 // deploy-site.mjs — publish site/index.html to tikpema.xyz, with the leak proven closed FIRST.
 //
 //   npm run deploy:site            # DRAFT only. Prints the function count and stops.
-//   npm run deploy:site -- --prod  # draft → assert 0 functions → promote. Refuses otherwise.
+//   npm run deploy:site:prod       # draft → assert 0 functions → promote → gate. Refuses otherwise.
+//
+// ⛔ NOT `npm run deploy:site -- --prod`: npm appends passthrough args to the LAST command in an
+// `&&` chain, so `--prod` lands on `gate:sitelive`, NOT on this script — it silently drafts and the
+// gate then reports "repo ahead". Measured 2026-09-12. `deploy:site:prod` routes the flag correctly.
+// To run this file directly: `node scripts/deploy-site.mjs --prod` (needs a real terminal; see below).
 //
 // ═══ 🚨 WHY THIS IS NOT `netlify deploy --prod --dir=site` ══════════════════════════════════════
 // That exact command was run as a DRAFT on 2026-08-31 and bundled **120 functions**, including
