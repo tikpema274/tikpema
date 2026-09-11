@@ -29,15 +29,28 @@
 // Those disagree; that is DD's copy to fix, not this page's to repeat. Until it is fixed this
 // entry says "over x402" and stops there — the one claim that is true either way.
 
+import { SNAPSHOTS, DATES, LATEST } from "./snapshot.mjs";
+
+// ⭐⭐ THE SNAPSHOT ENTRY IS DERIVED, NOT TYPED. It was hand-written once, and within a fortnight
+// it was quoting 1,003 listings and 25 hosts at a page serving 1,162 and 48 — a second copy of a
+// number that had moved. [[duplicate-source-of-truth-is-the-recurring-bug]]
+// ⛔ Do not re-inline these figures "to keep this file self-contained". The import IS the fix.
+const S = SNAPSHOTS[LATEST];
+const nf = (x) => Number(x).toLocaleString("en-GB");
+
 const ENTRIES = [
   {
-    title: "Snapshot — the Circle x402 catalog, 27 Aug 2026",
-    state: "A one-off measurement. Not maintained, and the page says so.",
-    body: `1,003 listings, 3,808 accepts rows, 16 networks, 960 URLs across just 25 hosts. Arc: zero.
-           Composition only — liveness and advertised-vs-live price were NOT measured, because both
-           need calls to 960 third-party endpoints that have not been made, and the page lists that
-           as a gap rather than leaving it blank. Machine-readable twin at /snapshot/2026-08-27.json.`,
-    href: "/snapshot/2026-08-27",
+    title: `Snapshot — the Circle x402 catalog, ${DATES.length} dated readings`,
+    state: `${DATES.length} one-off measurements, newest ${S.label}. Not maintained, and each page says so.`,
+    body: `On ${S.capturedAt}: ${nf(S.totals.listings)} listings, ${nf(S.totals.acceptsRows)} accepts rows,
+           ${S.totals.networks} networks, ${nf(S.totals.distinctResourceUrls)} URLs across just
+           ${S.totals.distinctHosts} hosts. Arc: ${S.arc.rows}. The earlier reading is still there,
+           unedited, at its own dated URL — the pair is the point, and the newest never overwrites it.
+           Composition only: liveness and advertised-vs-live price were NOT measured, because both need
+           calls to ${nf(S.totals.distinctResourceUrls)} third-party endpoints that have not been made,
+           and each page lists that as a gap rather than leaving it blank.`,
+    links: DATES.map((d) => [`/snapshot/${d}`, `/snapshot/${d}`])
+      .concat([[`JSON`, `/snapshot/${LATEST}.json`]]),
   },
   {
     title: "DD — on-chain due diligence",
@@ -122,8 +135,31 @@ const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 // authored constants in this file, never user input — the only reason that is safe.
 const squash = (s) => String(s).replace(/\s+/g, " ").trim();
 
-function page() {
-  const entries = ENTRIES.map((e) => `
+// 🚨 THIS CONTRACT 502'd PRODUCTION. An entry added with `href:` instead of `links:` reached
+// `e.links.length` in the render below and threw — the whole page, not one section.
+// ⛔ Do NOT relax this to `e.links?.length`. Optional chaining would have shipped a 200 with an
+// entry silently missing its links, which is the same defect wearing a success code.
+// ⭐ EXPORTED ON PURPOSE, so a suite can prove it REFUSES rather than grep for its source text. A
+// guard asserted by regex stayed green when the whole loop was wrapped in `if (false)`.
+export const REQUIRED_ENTRY_KEYS = ["title", "state", "body", "links"];
+
+export function validateEntries(entries) {
+  entries.forEach((e, i) => {
+    for (const k of REQUIRED_ENTRY_KEYS) {
+      if (e[k] === undefined) throw new Error(`built.mjs: ENTRIES[${i}] (${e.title ?? "untitled"}) is missing \`${k}\``);
+    }
+    if (!Array.isArray(e.links)) throw new Error(`built.mjs: ENTRIES[${i}] \`links\` must be an array, got ${typeof e.links}`);
+  });
+  return entries;
+}
+
+// ⭐⭐ `entries` IS A PARAMETER SO THE CALL SITE ITSELF IS TESTABLE. With ENTRIES hard-wired, a
+// suite could prove validateEntries refuses bad input and STILL be green after the call to it was
+// commented out — the validator alive, the render unguarded. Passing a bad list to page() is the
+// only assertion that covers the wiring rather than the function.
+export function page(entries = ENTRIES) {
+  validateEntries(entries);
+  const rendered = entries.map((e) => `
     <section>
       <h2>${esc(e.title)}</h2>
       <p class="state">${esc(e.state)}</p>
@@ -156,7 +192,7 @@ function page() {
 <h1>Built</h1>
 <p class="sub">What exists, and what each thing actually is right now. If an entry sounds narrow,
 that is the entry being accurate.</p>
-${entries}
+${rendered}
 <footer>Everything above is on Arc testnet or is a document. Nothing here is on mainnet.
 Source: <a href="https://github.com/tikpema274/tikpema">github.com/tikpema274/tikpema</a>.</footer>
 </main></body></html>`;

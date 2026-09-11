@@ -42,7 +42,7 @@ const SOURCE = "https://api.circle.com/v2/x402/discovery/resources?limit=100&off
 
 // ⭐ THE FROZEN OBJECTS. Page and JSON both render from these; neither can state a figure the other
 // lacks. Frozen so a later edit cannot quietly diverge one view from the other.
-const SNAPSHOTS = Object.freeze({
+export const SNAPSHOTS = Object.freeze({
 
   // ══════════════════════════════════════════════════════════════════════════════════════════
   // ⛔ FIRST MEASUREMENT — FROZEN. Do not "correct" these numbers against a later harvest.
@@ -204,8 +204,8 @@ const SNAPSHOTS = Object.freeze({
 });
 
 // ⭐ THE NEWEST, DERIVED — not a second constant that can fall out of step with the map.
-const DATES = Object.freeze(Object.keys(SNAPSHOTS).sort());
-const LATEST = DATES[DATES.length - 1];
+export const DATES = Object.freeze(Object.keys(SNAPSHOTS).sort());
+export const LATEST = DATES[DATES.length - 1];
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const n = (x) => Number(x).toLocaleString("en-GB");
