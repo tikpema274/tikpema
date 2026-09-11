@@ -1,5 +1,85 @@
 ---
 
+# THE UB-SPEND FIX, PRE-REGISTERED — ONE SIGNING MODEL ON BOTH PLANES, PROVEN BY ONE LIVE SPEND
+
+**2026-09-11. DECIDED: fix and prove, not delete.** Deleting `agent-ub-spend` would make the FROZEN
+ERC-8004 identity (`unified.json`, CID `bafkreidoeond3…`) over-claim — `gateway_spend` is one of its
+**five declared paths to value** and `agent-ub-spend` one of its **three declared chokepoints** —
+correctable only by a superseding CID, as the DD doc needed. We will not create a second false frozen
+document to avoid one live spend. Code is committed **before** the spend runs; the spend is the user's.
+
+## THE FIX — `_ubspend.mjs`, parallel to `_pay.mjs`'s 2026-09-10 change
+
+`from: [{ address: delegate, sourceAccount: owner }]` → `from: [{ address: owner }]`. The SCA signs
+for itself (ERC-1271, app-kit ≥1.14.0); `DELEGATE_ADDRESS` is no longer read on this path and its
+precondition is deleted with it. The **env var stays set** — `_delegate.mjs`, `_x402-vanilla.mjs`
+and `_ubdeposit.mjs`'s per-user grant still use it. The self-custody property — *the account that
+holds the balance authorises the spend* — was true on the same-chain plane and false on this one;
+it is now true on both.
+
+## ⛔ THE COST, CONFIRMED FROM CODE — NOT 0.2055 FROM MEMORY
+
+* **Floor: 10 USDC** — deployed `AGENT_UB_SPEND_FLOOR_USDC=10`, code default 10. The minimum the
+  endpoint accepts (`agent-ub-spend.mjs`). Cap 50, day-ceiling 60, so 10 is runnable.
+* **Forwarder fee: NOT a fixed constant we charge.** The `~0.2055` figure is a *comment* in
+  `_pay.mjs:34`; the wrapper's message says `~0.2 flat`; the one **measured** L2 forwarder fee on
+  record is `0.054129` USDC for a 2-USDC bridge (`_bridge.mjs:634`). So `0.2055` is an estimate, and
+  this run produces the real number. ⭐ **The true out-of-pocket loss is the fee alone (~0.2 or
+  less).** The ~9.8 remainder is *delivered* to `recipientAddress` — the fire tool defaults it to
+  `0x6fb2…fc58`, a wallet we control on Base Sepolia — so it is recoverable, not spent.
+
+## THE PRE-REGISTRATION — each row a claim, derived, with its instrument
+
+| # | claim | how it is established | before the run |
+|---|---|---|---|
+| 1 | the SDK accepts the new shape (`address: owner`, no `allocations`, no `sourceAccount` in `from[]`) | `verify-ub-auto-allocation` (offline) — and it is byte-for-byte `_pay.mjs`'s proven shape | ⭐ **PROVABLE OFFLINE, and proven: a suite establishes this. The spend is NOT needed for row 1.** |
+| 2 | ⭐ the **Forwarding Service** accepts a burn intent carrying a **CONTRACT (ERC-1271)** signature | the live spend: a 200 + `transferId` | **NEVER OBSERVED.** The 09-10 proof was SAME-CHAIN, `useForwarder:false`. The forwarder is a different consumer of the attestation. **This is the unknown the run exists to settle.** |
+| 3 | the mint lands on Base Sepolia | read the destination chain for the mint tx (`transferId` → mint hash) | PREDICTION: lands. Measured by the run. |
+| 4 | delivered amount, from the destination chain | Base Sepolia recipient balance delta / mint value; fee = `10 − delivered` | PREDICTION ≈ 9.8. The exact fee is this run's output, not `0.2055`. |
+| 5 | ledger rows that MOVE | `recordAgentSpend(agent=EXECUTOR, owner, amountUsdc=10, source="ub_spend")` → this owner's rolling-UTC-day total **+10** (vs ceiling 60); Circle Gateway unified balance debits **10** (Arc burn) | records the **amount (10, incl. fee)**, not delivered; written **after** success/`submitted`, **once** |
+| 5b | ledger rows that MUST NOT move | ⛔ any OTHER owner's day total (per-user isolation); the deposit-cap ledger; vault/DD counters; and no double-count when the result is `submitted` | |
+| 6 | authorisation state afterwards | `isAuthorizedForBalance(token, owner, delegate)` before/after (`probe-delegate-status`) | **UNCHANGED.** The fix does not touch delegate authorisation; the grant persists but is now unused here, and ERC-1271 self-signing needs no grant. |
+
+## ⭐ THIS IS THE FIRST EXERCISE OF THIS PATH SINCE app-kit 1.8.x
+
+The last live UB spend was **2026-07-08** (`transferId b2d3178a…`, pre-1.14.0). Everything since is
+prediction. **If the spend fails, that is a finding about the 1.14.0 upgrade on the forwarder path —
+not only about this fix.** Row 2 is where such a failure would surface.
+
+## THE SUITES — updated, and checked for VACUOUS PASS
+
+* `verify-ub-auto-allocation` (in `test:all` via `test:ub`): the `NOT A PERMANENT NO-OP` assertion is
+  about **chain allocation**, which the signing fix does not touch — it stays true and meaningful, so
+  it is **kept**, not removed. The assertion that was pinned on the word **`delegate`** (the deleted
+  mechanism) is **repinned on the property**: a Base draw through the **forwarder** with a **contract
+  (ERC-1271)** signature is still unproven. Added: `address: owner` present AND `address: delegate`
+  absent — a revert of the fix reddens here. Mutation-checked: reverting the shape → 2 red; a stale
+  "delegate signs" comment → red. [[guard-pinned-to-location-not-behaviour]]
+* `verify-per-user-threading` (⛔ **NOT in `test:all`** — needs a deployed `DELEGATE_ADDRESS` + real
+  chain; run manually with `--env-file=.env`): the `sourceAccount`-required throw is unchanged. Added
+  **1b**, a behavioural proof the `DELEGATE_ADDRESS` precondition is gone — with creds present and a
+  valid owner but the var deleted, the OLD code threw `Missing DELEGATE_ADDRESS` synchronously before
+  the network; the fixed path must get past that point. Mutation-checked: re-adding the precondition
+  → red. [[binding-tested-across-what-it-binds]]
+* ⛔ The grep-style movers (`verify-amount-zero-floor`, `verify-executor-amount-integrity`,
+  `verify-provisioning-status`, `verify-no-prose-state-recovery`) all read the **wrapper**
+  `agent-ub-spend.mjs` or the unchanged 1098 catch — **none read the signing shape**, so none needed
+  edits. Stated rather than silently skipped.
+
+## HOW THE SPEND IS RUN — the user's, not mine
+
+`node scripts/probe-ub-auth.mjs` (free auth proof) → `node scripts/fire-ub-spend.mjs --amount 10`
+(DRY, prints the exact call) → `--confirm` (⚠️ SENDS 10 USDC). No `--env-file` — that loads the DEV
+secret and the guard refuses it.
+
+**Files.** `netlify/functions/_ubspend.mjs` (signing shape + header),
+`scripts/verify-ub-auto-allocation.mjs` (repinned §3, +2 assertions, 26/0),
+`scripts/verify-per-user-threading.mjs` (+§1b). `test:all` **117/0, exit 0**; tsc + build clean. ⚠️ **UNDEPLOYED until the
+proof:** the code ships, but this is a money path with an unobserved row (2), so it deploys with the
+same session that runs the spend — not before.
+
+---
+
 # THE THIRD READING IS SCHEDULED, AND ITS NUMBER WAS DEFINED BEFORE IT EXISTS
 
 **2026-09-11, evening. NOTHING FETCHED. NOTHING PUBLISHED.** The third harvest of the Circle x402

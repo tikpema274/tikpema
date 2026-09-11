@@ -49,6 +49,40 @@ await throwsWithout("ubSpend() without sourceAccount",
 await throwsWithout("agentPay() without sourceAccount",
   () => agentPay({ recipientAddress: "0x" + "1".repeat(40), amountUsdc: "1" }), "requires a .sourceAccount");
 
+// ── 1b. THE DELEGATE PRECONDITION IS GONE FROM ubSpend (fix 2026-09-11). ──
+// ⭐ Non-vacuous by CONSTRUCTION: the old code checked `if (!delegate) throw "Missing
+// DELEGATE_ADDRESS"` AFTER the creds+owner checks and BEFORE any SDK/network call. So with creds
+// and a valid owner present but DELEGATE_ADDRESS deleted, the OLD path threw that string
+// synchronously; the FIXED path has no such check and must get past it (reaching the network, where
+// dummy creds fail differently — or timing out, which equally proves it got past the deleted check).
+// ⛔ If someone re-introduces delegate signing here, this reddens. A pure source grep would not tell
+// "the check is gone" from "the check moved"; driving it does. [[binding-tested-across-what-it-binds]]
+{
+  const savedDelegate = process.env.DELEGATE_ADDRESS;
+  const savedKey = process.env.CIRCLE_API_KEY, savedSecret = process.env.CIRCLE_ENTITY_SECRET;
+  delete process.env.DELEGATE_ADDRESS;
+  process.env.CIRCLE_API_KEY = "dummy-key-not-real";        // present, so we pass the creds gate…
+  process.env.CIRCLE_ENTITY_SECRET = "dummy-secret";        // …and reach where the delegate check used to be
+  const GOT_PAST = Symbol("got-past-the-deleted-check");
+  try {
+    const outcome = await Promise.race([
+      ubSpend({ recipientAddress: "0x" + "1".repeat(40), amountUsdc: "1", sourceAccount: "0x" + "a".repeat(40) })
+        .then(() => GOT_PAST).catch((e) => e),
+      new Promise((r) => setTimeout(() => r(GOT_PAST), 6000)), // a network attempt = past the check
+    ]);
+    const msg = outcome === GOT_PAST ? "" : (outcome?.message || String(outcome));
+    if (/DELEGATE_ADDRESS/i.test(msg)) {
+      no("ubSpend no longer requires DELEGATE_ADDRESS", `it still threw the delegate precondition: ${msg}`);
+    } else {
+      ok(`ubSpend got past the deleted delegate check ${outcome === GOT_PAST ? "(reached the network / timed out)" : `(failed later: "${msg.slice(0, 60)}")`}`);
+    }
+  } finally {
+    if (savedDelegate === undefined) delete process.env.DELEGATE_ADDRESS; else process.env.DELEGATE_ADDRESS = savedDelegate;
+    if (savedKey === undefined) delete process.env.CIRCLE_API_KEY; else process.env.CIRCLE_API_KEY = savedKey;
+    if (savedSecret === undefined) delete process.env.CIRCLE_ENTITY_SECRET; else process.env.CIRCLE_ENTITY_SECRET = savedSecret;
+  }
+}
+
 // ── 2. THE SEAM — executeAction refuses an unowned spend rather than defaulting. ──
 console.log("\n2. THE SEAM — executeAction(pay_for_service) with no resolved wallet");
 const unowned = await executeAction(

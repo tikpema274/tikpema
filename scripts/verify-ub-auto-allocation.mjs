@@ -130,17 +130,34 @@ section("3 — the asymmetry is documented where it bites");
 // _pay is same-chain (Arc->Arc): Arc is tier 1 forever, so auto-allocation is a PERMANENT no-op.
 // _ubspend is cross-chain (Arc->Base): the DESTINATION is tier 1, so once Base is funded this path
 // silently changes source chain. Those are different risks and the code must say so.
+//
+// ⭐⭐ UPDATED 2026-09-11 WITH THE DELEGATE->OWNER SIGNING FIX — AND CHECKED FOR VACUOUS PASS.
+// The "NOT A PERMANENT NO-OP" property is about CHAIN allocation (destination is tier 1 on a
+// cross-chain spend), which the signing fix does not touch — so it stays true and this assertion
+// still means something. But the SECOND assertion used to pin on the word "delegate", the MECHANISM
+// that the fix DELETED. Left as-is it would pass on a stale comment; updated to remove "delegate" it
+// would go red on a correct file. So it is repinned on the PROPERTY that is still unproven: a Base-
+// sourced draw through the FORWARDER accepting a CONTRACT (ERC-1271) signature — which _pay.mjs's
+// same-chain, useForwarder:false proof does NOT establish. [[guard-pinned-to-location-not-behaviour]]
 {
   const pay = readFileSync("netlify/functions/_pay.mjs", "utf8");
   const ub = readFileSync("netlify/functions/_ubspend.mjs", "utf8");
   check("_pay.mjs records that it is SAME-CHAIN, hence tier 1 forever",
     /SAME-CHAIN|same-chain/.test(pay) && /tier 1/i.test(pay));
-  check("⭐⭐ _ubspend.mjs warns it is NOT a permanent no-op",
+  check("⭐⭐ _ubspend.mjs warns it is NOT a permanent no-op (chain allocation — unchanged by the signing fix)",
     /NOT A PERMANENT NO-OP/i.test(ub));
-  check("⭐⭐ …and names the unproven Base delegate authorisation",
-    /delegate/i.test(ub) && /Base/.test(ub) && /unproven|UNPROVEN/.test(ub));
+  // ⛔ Pins on the PROPERTY (forwarder + contract signature unproven), never on the deleted mechanism.
+  // A regression that re-introduced `delegate` signing would NOT satisfy these terms.
+  check("⭐⭐ …and names the STILL-unproven property: a Base draw through the forwarder with a contract signature",
+    /forwarder/i.test(ub) && /Base/.test(ub) && /(ERC-?1271|contract sig)/i.test(ub) && /unproven|UNPROVEN/.test(ub));
+  check("  ⛔ …and no longer describes the signer as a delegate (the fix deleted it from this path)",
+    !/delegate('s)? (authority|authorisation|signs|signer) (on|for|there)/i.test(ub),
+    "a stale 'delegate signs' comment here would be describing a path that no longer exists");
   check("  …and records that enabling now does NOT pre-prove the Base draw",
     /DOES NOT PRE-PROVE/i.test(ub));
+  // ⭐⭐ THE SIGNING MODEL IS NOW THE SAME ON BOTH PLANES — asserted so a revert of the fix reddens here.
+  check("⭐⭐ _ubspend.mjs signs as the owner (ERC-1271), NOT via a delegate address",
+    /address:\s*owner\b/.test(strip(ub)) && !/address:\s*delegate\b/.test(strip(ub)));
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
