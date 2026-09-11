@@ -375,6 +375,27 @@
   to = "/.netlify/functions/built"
   status = 200
 
+# ── /snapshot — a DATED, one-off measurement of the Circle x402 Discovery catalog ──────────────
+# 🚨 ABOVE THE SPA FALLBACK, same as /built. Three routes, and the ORDER matters: the .json rule
+# must precede the dated-page rule or the page swallows it.
+# ⛔ THE DATE IS IN THE PATH DELIBERATELY. A snapshot served from a bare, undated URL looks current
+# forever — someone cites it in six months and is not wrong to. `/snapshot` bare therefore 302s
+# (never 200s) to the dated artifact, and the destination SAYS it redirected.
+[[redirects]]
+  from = "/snapshot/:date.json"
+  to = "/.netlify/functions/snapshot"
+  status = 200
+
+[[redirects]]
+  from = "/snapshot/:date"
+  to = "/.netlify/functions/snapshot"
+  status = 200
+
+[[redirects]]
+  from = "/snapshot"
+  to = "/.netlify/functions/snapshot"
+  status = 200
+
 # SPA fallback
 [[redirects]]
   from = "/*"

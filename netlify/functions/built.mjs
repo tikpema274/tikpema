@@ -31,6 +31,15 @@
 
 const ENTRIES = [
   {
+    title: "Snapshot — the Circle x402 catalog, 27 Aug 2026",
+    state: "A one-off measurement. Not maintained, and the page says so.",
+    body: `1,003 listings, 3,808 accepts rows, 16 networks, 960 URLs across just 25 hosts. Arc: zero.
+           Composition only — liveness and advertised-vs-live price were NOT measured, because both
+           need calls to 960 third-party endpoints that have not been made, and the page lists that
+           as a gap rather than leaving it blank. Machine-readable twin at /snapshot/2026-08-27.json.`,
+    href: "/snapshot/2026-08-27",
+  },
+  {
     title: "DD — on-chain due diligence",
     state: "Live on Arc testnet.",
     body: `POST an address, pay $0.06 USDC over x402, get one signed report with a coverage manifest
