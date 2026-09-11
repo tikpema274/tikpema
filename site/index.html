@@ -4,13 +4,13 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Tikpema — an AI agent that moves USDC under caps you can read</title>
-<meta name="description" content="An AI agent that sends, swaps, bridges and researches with USDC on Arc — every action bounded by a per-transaction cap and one shared daily ceiling, and every refusal named. Plus three operations you sign yourself, where no cap applies." />
+<meta name="description" content="Tikpema runs an AI agent on a wallet of your own: it sends, swaps, bridges, researches and settles jobs in USDC on Arc — every action bounded by a per-transaction cap and one shared daily ceiling, and every refusal named. Plus a due-diligence service any agent can pay, and three operations you sign yourself." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600&family=Instrument+Sans:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700&family=Instrument+Sans:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
 <style>
   :root{
-    --navy:#0a0e14; --navy-2:#11161f; --brand:#e0a44c; --brand-hi:#edb663;
+    --navy:#0a0e14; --navy-2:#11161f; --navy-3:#0d1218; --brand:#e0a44c; --brand-hi:#edb663;
     --brand-soft:rgba(224,164,76,.10); --brand-line:rgba(224,164,76,.35);
     --emerald:#2dd4a0; --fg:#e6e9ef; --fg-dim:#cbc5b6; --muted:#8b95a3; --line:rgba(255,255,255,.08);
   }
@@ -18,8 +18,14 @@
   html{scroll-behavior:smooth}
   body{background:var(--navy);color:var(--fg);font-family:'Instrument Sans',system-ui,-apple-system,sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}
   a{color:inherit;text-decoration:none}
+  ::selection{background:rgba(224,164,76,.28);color:#fff}
   .wrap{position:relative;z-index:1;max-width:1080px;margin:0 auto;padding:0 24px}
-  nav{display:flex;align-items:center;justify-content:space-between;padding:26px 0;border-bottom:1px solid var(--line)}
+
+  /* subtle top glow */
+  .glow{position:fixed;inset:0;z-index:0;pointer-events:none;
+    background:radial-gradient(720px 420px at 50% -8%,rgba(224,164,76,.10),transparent 70%)}
+
+  nav{display:flex;align-items:center;justify-content:space-between;padding:24px 0;border-bottom:1px solid var(--line)}
   .brand{display:flex;align-items:center;gap:12px;font-weight:600;font-size:20px;letter-spacing:-.02em}
   .brand .mark{width:34px;height:34px;border-radius:9px;flex:none}
   .nav-links{display:flex;align-items:center;gap:26px;font-size:14px;color:var(--muted)}
@@ -27,11 +33,14 @@
   .nav-launch{font-size:14px;color:#241708;background:var(--brand);padding:9px 18px;border-radius:8px;font-weight:600}
   .nav-launch:hover{background:var(--brand-hi)}
   @media(max-width:640px){.nav-links a:not(.nav-launch){display:none}}
-  .hero{padding:88px 0 56px;text-align:center}
-  .eyebrow{display:inline-block;font-size:13px;font-weight:500;color:var(--fg-dim);padding:6px 14px;border:1px solid var(--brand-line);border-radius:100px;background:rgba(224,164,76,.06);margin-bottom:30px}
-  .hero h1{font-family:'Fraunces',Georgia,serif;font-size:clamp(36px,6vw,56px);line-height:1.1;font-weight:600;letter-spacing:-.025em;margin:0 auto 24px;max-width:18ch;color:var(--fg)}
-  .hero h1 .accent{color:var(--fg)}
-  .hero p{font-size:clamp(16px,2.2vw,19px);color:#97a1b0;max-width:56ch;margin:0 auto 38px;line-height:1.65}
+
+  /* hero */
+  .hero{padding:96px 0 8px;text-align:center}
+  .eyebrow{display:inline-flex;align-items:center;gap:9px;font-family:'Space Mono',monospace;font-size:12px;letter-spacing:.04em;color:var(--fg-dim);padding:7px 15px;border:1px solid var(--brand-line);border-radius:100px;background:rgba(224,164,76,.06);margin-bottom:30px}
+  .eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--emerald)}
+  .hero h1{font-family:'Fraunces',Georgia,serif;font-size:clamp(38px,6.2vw,60px);line-height:1.08;font-weight:600;letter-spacing:-.028em;margin:0 auto 24px;max-width:17ch;color:var(--fg)}
+  .hero h1 .accent{color:var(--brand-hi)}
+  .hero p{font-size:clamp(16px,2.2vw,19px);color:#9aa4b3;max-width:58ch;margin:0 auto 38px;line-height:1.65}
   .cta-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
   .btn-primary{display:inline-flex;align-items:center;gap:10px;font-size:16px;font-weight:600;color:#241708;background:var(--brand);padding:15px 28px;border-radius:9px;transition:background .15s ease}
   .btn-primary:hover{background:var(--brand-hi)}
@@ -39,64 +48,83 @@
   .btn-primary:hover .arrow{transform:translateX(4px)}
   .btn-ghost{display:inline-flex;align-items:center;gap:8px;font-size:16px;font-weight:500;color:#c9d2de;padding:15px 26px;border-radius:9px;border:1px solid rgba(236,230,216,.16)}
   .btn-ghost:hover{border-color:rgba(224,164,76,.4);background:rgba(224,164,76,.04)}
-  .proof{display:flex;gap:26px;justify-content:center;flex-wrap:wrap;margin-top:48px}
+  .proof{display:flex;gap:14px 26px;justify-content:center;flex-wrap:wrap;margin-top:44px}
   .proof .item{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:14px}
   .proof .dot{width:7px;height:7px;border-radius:50%;background:var(--emerald);flex:none}
-  .planes{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:64px 0 0}
-  @media(max-width:640px){.planes{grid-template-columns:1fr}}
-  .plane{border:1px solid var(--line);border-radius:16px;padding:28px;background:var(--navy-2)}
-  .plane .tag{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--brand-hi);font-weight:600;margin-bottom:12px}
-  .plane h3{font-size:20px;font-weight:600;margin-bottom:8px;letter-spacing:-.01em}
-  .plane p{color:var(--muted);font-size:15px;line-height:1.6}
-  .how{margin:84px 0 0}
-  .how h2{font-family:'Fraunces',Georgia,serif;font-size:clamp(26px,4vw,36px);font-weight:600;letter-spacing:-.02em;text-align:center;margin-bottom:8px}
-  .how .sub{text-align:center;color:var(--muted);margin-bottom:44px}
-  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden}
-  @media(max-width:760px){.steps{grid-template-columns:1fr}}
-  .step{background:var(--navy);padding:28px 26px}
-  .step .n{font-size:13px;color:var(--brand-hi);width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;background:rgba(224,164,76,.12);font-weight:700;margin-bottom:16px}
-  .step h4{font-size:17px;font-weight:600;margin-bottom:6px}
-  .step p{color:var(--muted);font-size:14px;line-height:1.55}
-  .built{margin:84px 0 0;text-align:center}
-  .built .label{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-bottom:20px}
-  .chips{display:flex;flex-wrap:wrap;gap:12px;justify-content:center}
-  .chip{border:1px solid var(--line);border-radius:9px;padding:10px 18px;font-size:14px;color:var(--fg);background:var(--navy-2)}
-  .chip b{color:var(--brand-hi);font-weight:600}
-  .final{margin:84px 0 0;text-align:center;border:1px solid var(--line);border-radius:20px;padding:56px 28px;background:var(--navy-2)}
-  .final h2{font-family:'Fraunces',Georgia,serif;font-size:clamp(26px,4.4vw,40px);font-weight:600;letter-spacing:-.02em;margin-bottom:14px;color:var(--fg)}
-  .final p{color:var(--muted);max-width:50ch;margin:0 auto 30px;line-height:1.6}
-  footer{margin:70px 0 40px;padding-top:28px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:14px}
-  footer .brand{font-size:16px}
-  .foot-links{display:flex;gap:22px;flex-wrap:wrap}
-  .foot-links a:hover{color:var(--fg)}
-  .testnet{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.08em;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:4px 9px}
-  .sect{margin:84px 0 0}
-  .sect h2{font-family:'Fraunces',Georgia,serif;font-size:clamp(24px,3.4vw,32px);font-weight:600;letter-spacing:-.02em;margin-bottom:8px}
-  .sect .sub{color:var(--muted);margin-bottom:26px;max-width:66ch;line-height:1.6}
+
+  /* thesis band */
+  .thesis{margin:64px 0 0;border:1px solid var(--line);border-radius:18px;padding:34px 32px;background:linear-gradient(180deg,var(--navy-2),var(--navy-3))}
+  .thesis p{font-family:'Fraunces',Georgia,serif;font-size:clamp(19px,2.5vw,24px);line-height:1.5;font-weight:400;letter-spacing:-.01em;color:var(--fg-dim);max-width:60ch}
+  .thesis p b{color:var(--fg);font-weight:600}
+  .thesis .k{color:var(--brand-hi)}
+
+  /* two planes */
+  .planes{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0 0}
+  @media(max-width:700px){.planes{grid-template-columns:1fr}}
+  .plane{border:1px solid var(--line);border-radius:16px;padding:26px;background:var(--navy-2)}
+  .plane .tag{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--brand-hi);font-weight:700;margin-bottom:12px}
+  .plane h3{font-size:19px;font-weight:600;margin-bottom:8px;letter-spacing:-.01em}
+  .plane p{color:var(--muted);font-size:14.5px;line-height:1.62}
+  .plane p b{color:var(--fg-dim)}
+
+  /* generic section */
+  .sect{margin:92px 0 0}
+  .sect .kicker{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--brand);margin-bottom:14px}
+  .sect h2{font-family:'Fraunces',Georgia,serif;font-size:clamp(26px,4vw,36px);font-weight:600;letter-spacing:-.02em;margin-bottom:10px}
+  .sect .sub{color:var(--muted);margin-bottom:30px;max-width:68ch;line-height:1.65}
+
   .cards{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   @media(max-width:760px){.cards{grid-template-columns:1fr}}
-  .card{border:1px solid var(--line);border-radius:14px;padding:22px;background:var(--navy-2)}
+  .card{border:1px solid var(--line);border-radius:14px;padding:22px;background:var(--navy-2);transition:border-color .15s ease}
+  .card:hover{border-color:var(--brand-line)}
   .card h3{font-size:17px;font-weight:600;margin-bottom:6px}
-  .card p{color:var(--muted);font-size:14.5px;line-height:1.6}
-  .card .expect{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);color:var(--fg-dim);font-size:13.5px;line-height:1.6}
+  .card>p{color:var(--muted);font-size:14.5px;line-height:1.6}
+  .card .expect{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);color:var(--fg-dim);font-size:13.5px;line-height:1.62}
   .card .expect b{color:var(--fg);font-weight:600}
   .num{font-family:'Space Mono',monospace;color:var(--emerald)}
+
+  /* behaviour list */
+  .docs{display:flex;flex-direction:column;gap:10px}
+  .doc{border:1px solid var(--line);border-radius:12px;padding:18px 22px;background:var(--navy-2);display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}
+  .doc .dt{font-weight:600;font-size:15px;min-width:210px;flex:none;max-width:100%}
+  .doc .dd{color:var(--muted);font-size:14px;flex:1;min-width:240px;line-height:1.6}
+  .doc .dd a{color:var(--brand-hi)}
+
+  /* the on-chain job flow */
+  .flow{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  @media(max-width:760px){.flow{grid-template-columns:1fr 1fr}}
+  @media(max-width:440px){.flow{grid-template-columns:1fr}}
+  .fstep{background:var(--navy);padding:22px 20px}
+  .fstep .n{font-family:'Space Mono',monospace;font-size:12px;color:var(--brand-hi);margin-bottom:12px}
+  .fstep h4{font-size:15px;font-weight:600;margin-bottom:5px}
+  .fstep p{color:var(--muted);font-size:13px;line-height:1.55}
+
+  /* sells table */
   .tbl{width:100%;border-collapse:collapse;font-size:14.5px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
-  .tbl th,.tbl td{text-align:left;padding:12px 16px;border-bottom:1px solid var(--line)}
-  .tbl th{color:var(--muted);font-weight:500;font-size:13px;letter-spacing:.04em;text-transform:uppercase;background:var(--navy-2)}
+  .tbl th,.tbl td{text-align:left;padding:13px 16px;border-bottom:1px solid var(--line);vertical-align:top}
+  .tbl th{color:var(--muted);font-weight:500;font-size:12px;letter-spacing:.06em;text-transform:uppercase;background:var(--navy-2)}
   .tbl tr:last-child td{border-bottom:none}
   .tbl td:last-child{font-family:'Space Mono',monospace;color:var(--emerald);white-space:nowrap}
   .mono2{font-family:'Space Mono',monospace;font-size:13px;color:var(--emerald)}
   .mono3{font-family:'Space Mono',monospace;font-size:12.5px;color:var(--muted);word-break:break-all}
-  .note{margin-top:14px;color:var(--muted);font-size:13.5px;line-height:1.6;max-width:72ch}
-  .docs{display:flex;flex-direction:column;gap:10px}
-  .doc{border:1px solid var(--line);border-radius:11px;padding:16px 20px;background:var(--navy-2);display:flex;gap:16px;align-items:baseline;flex-wrap:wrap}
-  .doc .dt{font-weight:600;font-size:15px}
-  .doc .dd{color:var(--muted);font-size:14px;flex:1;min-width:220px;line-height:1.55}
+  .note{margin-top:16px;color:var(--muted);font-size:13.5px;line-height:1.65;max-width:80ch}
+  .note code{color:var(--fg-dim)}
+
+  /* final */
+  .final{margin:96px 0 0;text-align:center;border:1px solid var(--brand-line);border-radius:20px;padding:58px 28px;background:linear-gradient(180deg,rgba(224,164,76,.05),var(--navy-2))}
+  .final h2{font-family:'Fraunces',Georgia,serif;font-size:clamp(26px,4.4vw,40px);font-weight:600;letter-spacing:-.02em;margin-bottom:14px;color:var(--fg)}
+  .final p{color:var(--muted);max-width:52ch;margin:0 auto 30px;line-height:1.65}
+
+  footer{margin:72px 0 40px;padding-top:28px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:14px}
+  footer .brand{font-size:16px}
+  .foot-links{display:flex;gap:22px;flex-wrap:wrap}
+  .foot-links a:hover{color:var(--fg)}
+  .testnet{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.08em;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:4px 9px}
   @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
 <body>
+<div class="glow"></div>
 <div class="wrap">
   <nav>
     <a class="brand" href="/">
@@ -114,19 +142,20 @@
     </a>
     <div class="nav-links">
       <a href="#agent">What it does</a>
+      <a href="#jobs">On-chain jobs</a>
       <a href="#sells">What it sells</a>
       <a class="nav-launch" href="https://app.tikpema.xyz">Launch App ↗</a>
     </div>
   </nav>
 
   <header class="hero">
-    <div class="eyebrow">Arc Testnet · chain 5042002 · USDC is the gas</div>
+    <div class="eyebrow"><span class="dot"></span> Arc Testnet · chain 5042002 · USDC is the gas</div>
     <h1>An agent that moves money <span class="accent">under caps you can read</span></h1>
     <p>
       Tikpema runs an AI agent on a wallet of your own. It can send, swap, bridge, research and
-      schedule — each action bounded by a per-transaction cap and one shared daily ceiling, each
-      refusal named rather than silent. And three operations it cannot touch at all, because you
-      sign those yourself.
+      settle on-chain jobs — each action bounded by a per-transaction cap and one shared daily
+      ceiling, each refusal named rather than silent. The point isn't that an agent can move money.
+      It's that you can see exactly what would stop it.
     </p>
     <div class="cta-row">
       <a class="btn-primary" href="https://app.tikpema.xyz">Open the app <span class="arrow">→</span></a>
@@ -139,33 +168,62 @@
     </div>
   </header>
 
+  <section class="thesis">
+    <p>
+      Moving stablecoins is the easy part — Arc settles it in under a second, in USDC, with no
+      second gas token. The hard part is letting <span class="k">software</span> do it on your
+      behalf. Tikpema is the layer that makes that <b>safe to watch</b>: every agent action is
+      capped before it is signed, every refusal is named, and the three operations that carry no
+      cap are the ones <b>you sign yourself</b>.
+    </p>
+  </section>
+
+  <!-- the two planes, up front, because it is the product's central distinction -->
+  <div class="planes">
+    <div class="plane">
+      <div class="tag">The agent plane</div>
+      <h3>The agent acts — under caps</h3>
+      <p>Runs on a Circle wallet the app provisions for you. You sign in with a passkey; the server
+        signs the transaction; <b>you pay no gas</b>. Every action is bounded, and the caps are
+        enforced <b>before anything is signed</b> — not reported afterwards.</p>
+    </div>
+    <div class="plane">
+      <div class="tag">Your plane</div>
+      <h3>You act — no cap at all</h3>
+      <p>Send, bridge and swap also exist in a second form, signed by you in MetaMask. The agent has
+        no part in them, which is exactly why the caps do not apply — and <b>you pay the gas</b>.
+        You sign those yourself.</p>
+    </div>
+  </div>
+
   <section class="sect" id="agent">
+    <div class="kicker">The agent plane</div>
     <h2>What the agent does, and what bounds it</h2>
     <div class="sub">
-      These run on a Circle wallet the app provisions for you. You sign in with a passkey; the server
-      signs the transaction; you pay no gas. Every one is capped, and the caps are enforced before
-      anything is signed — not reported afterwards.
+      Each of these runs under a per-transaction cap and one daily ceiling shared across every agent.
+      The caps are enforced at the server before a signature exists — and when one refuses, it names
+      the exact limit at the moment it applies.
     </div>
     <div class="cards">
       <div class="card">
         <h3>Send USDC</h3>
         <p>To any address on Arc.</p>
-        <div class="expect"><b>Expect:</b> refused above a per-transaction cap, and the error names the
-          exact limit. Irreversible once it confirms — there is
-          no allowlist behind it.</div>
+        <div class="expect"><b>Expect:</b> refused above a per-transaction cap, and the error names
+          the exact limit. Irreversible once it confirms — there is no allowlist behind it.</div>
       </div>
       <div class="card">
         <h3>Swap USDC ↔ EURC</h3>
         <p>On Arc, through the agent wallet.</p>
-        <div class="expect"><b>Expect:</b> the cap is on the USDC-<i>equivalent</i>, not the number you
-          typed, because EURC is not a dollar.
-          The review states a floor you are guaranteed to receive.</div>
+        <div class="expect"><b>Expect:</b> the cap is on the USDC-<i>equivalent</i>, not the number
+          you typed, because EURC is not a dollar. The review states a floor you are guaranteed to
+          receive, and flags a floor sitting far above mid-market as anomalous, not favourable.</div>
       </div>
       <div class="card">
         <h3>Bridge to another chain</h3>
         <p>USDC off Arc via CCTP.</p>
-        <div class="expect"><b>Expect:</b> capped, and a live fee is taken from the amount. The fee is exact at execution; <b>the arrival is an estimate</b> —
-          the delivered figure appears only once the destination chain has been read.</div>
+        <div class="expect"><b>Expect:</b> capped, and a live fee is taken from the amount. The fee
+          is exact at execution; <b>the arrival is an estimate</b> — the delivered figure appears
+          only once the destination chain has been read.</div>
       </div>
       <div class="card">
         <h3>Recurring swap (DCA)</h3>
@@ -174,38 +232,43 @@
           ceiling at execution time, not at setup. A schedule cannot outrun its limits.</div>
       </div>
       <div class="card">
-        <h3>Research a question</h3>
-        <p>A sourced brief, with its hash written on-chain.</p>
-        <div class="expect"><b>Expect:</b> pricing is free and runs first — <span class="num">0.20–0.40 USDC</span>
-          per job. Nothing is delivered or charged until you approve. An evaluator then judges two
-          things only: whether the brief answers the question, and whether its sources are relevant.
-          <b>Not depth, not correctness.</b> Sources are real — they are the pages actually
-          fetched — but a brief with no sources can still ship.</div>
+        <h3>Unified balance</h3>
+        <p>One USDC balance across Arc and Base, via Circle Gateway.</p>
+        <div class="expect"><b>Expect:</b> deposits and spends are capped like everything else and
+          draw on the same daily ceiling. Getting funds out runs through us — that is stated at the
+          deposit itself, not buried.</div>
       </div>
       <div class="card">
         <h3>Plan an action</h3>
-        <p>Describe one; the agent proposes.</p>
+        <p>Describe one in words; the agent proposes.</p>
         <div class="expect"><b>Expect:</b> a proposal, not an execution. Nothing moves until you
-          approve it separately. The research fee buys the analysis, not the action.</div>
-      </div>
-      <div class="card">
-        <h3>Unified balance</h3>
-        <p>One USDC balance across chains, via Circle Gateway.</p>
-        <div class="expect"><b>Expect:</b> deposits and spends are capped like everything else, and
-          draw on the same daily ceiling.</div>
-      </div>
-      <div class="card">
-        <h3>Four agents, each stoppable</h3>
-        <p>Researcher, Second opinion, Executor, Vault.</p>
-        <div class="expect"><b>Expect:</b> two of them move funds and say so on the card. You can
-          pause any one, or all of them, instantly. <b>One daily ceiling is shared across every
-          agent</b> — a research purchase and a bridge draw on the same budget.</div>
+          approve it separately, and the proposed step carries the same caps as any other.</div>
       </div>
     </div>
 
-    <div class="sect" style="margin-top:42px">
-      <h2 style="font-size:20px">How it behaves when something is wrong</h2>
-      <div class="docs">
+    <div style="margin-top:20px">
+      <div class="cards">
+        <div class="card">
+          <h3>Four agents, each stoppable</h3>
+          <p>Researcher · Second opinion · Executor · Vault.</p>
+          <div class="expect"><b>Expect:</b> two of them move funds and say so on the card. You can
+            pause any one, or all of them, instantly. <b>One daily ceiling is shared across every
+            agent</b> — a research purchase and a bridge draw on the same budget.</div>
+        </div>
+        <div class="card">
+          <h3>A vault it can inspect</h3>
+          <p>Deposit into an allowlisted ERC-4626 vault — after it reads the vault.</p>
+          <div class="expect"><b>Expect:</b> before a deposit, the agent reports the vault's owner
+            powers, withdraw mechanics and whether it is funded — as plain disclosure, framed as
+            what to know, never as an accusation. The deposit is capped and gated on your
+            acknowledgement.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sect" style="margin-top:44px">
+      <h2 style="font-size:22px;font-family:'Fraunces',serif">How it behaves when something is wrong</h2>
+      <div class="docs" style="margin-top:22px">
         <div class="doc">
           <span class="dt">A cap refuses before anything is signed</span>
           <span class="dd">Every action is bounded by a per-transaction cap and one daily ceiling
@@ -215,11 +278,11 @@
         </div>
         <div class="doc">
           <span class="dt">Bridged amounts are read, not calculated</span>
-          <span class="dd">The fee you are shown is the fee that is charged: the quote is sealed to your
-            wallet, the destination and the amount, and the bridge is refused rather than re-priced if
-            it no longer matches. What <b>arrives</b> is a separate question — the confirmation shows
-            the arrival as an <b>estimate</b>, then advances to a <b>measured</b> figure only after the
-            destination chain has been read. The interface never infers it.</span>
+          <span class="dd">The fee you are shown is the fee that is charged: the quote is sealed to
+            your wallet, the destination and the amount, and the bridge is refused rather than
+            re-priced if it no longer matches. What <b>arrives</b> is a separate question — the
+            confirmation shows arrival as an <b>estimate</b>, then advances to a <b>measured</b>
+            figure only after the destination chain has been read. The interface never infers it.</span>
         </div>
         <div class="doc">
           <span class="dt">The swap floor is in the calldata, and price-checked</span>
@@ -239,11 +302,45 @@
     </div>
   </section>
 
+  <section class="sect" id="jobs">
+    <div class="kicker">On-chain jobs · ERC-8183</div>
+    <h2>Research it can settle on-chain</h2>
+    <div class="sub">
+      Ask the agent a research question and it runs as a real on-chain job: funded into escrow,
+      answered as a sourced brief, judged, and settled — or refunded. Today this is a
+      <b>personal</b> loop — your own agent funds its own research budget, so the same wallet is
+      client, provider and evaluator — but the escrow, the state machine and the USDC settlement
+      are the real ERC-8183 lifecycle, not a mock.
+    </div>
+    <div class="flow">
+      <div class="fstep"><div class="n">01</div><h4>Priced first</h4><p>The agent prices the job at
+        <span class="num">0.20–0.40 USDC</span>, or declines it if it is advice rather than research.
+        Nothing is charged until you approve.</p></div>
+      <div class="fstep"><div class="n">02</div><h4>Funded into escrow</h4><p>On approval the budget
+        is funded into the job's on-chain escrow. The work runs against that budget.</p></div>
+      <div class="fstep"><div class="n">03</div><h4>Hash submitted</h4><p>The brief's
+        <b>keccak256 hash</b> is submitted on-chain; the bytes themselves are held off-chain. The
+        chain proves integrity, not availability.</p></div>
+      <div class="fstep"><div class="n">04</div><h4>Judged, then settled</h4><p>An evaluator returns
+        a verdict, which settles the escrow to the provider or refunds it.</p></div>
+    </div>
+    <div class="note">
+      The evaluator is a second, tools-less model call, and it judges <b>exactly two things</b>:
+      whether the brief responsively answers the question, and whether its cited sources are
+      relevant — <b>not</b> depth, correctness or completeness. Sources are the pages actually
+      fetched, but a brief with no sources can still ship: citation enforcement is off in this
+      environment, and the page says so rather than promising "cited every time". A refund can be a
+      quality verdict from the judge, or an earlier force-reject that never reached it — those are
+      different, and the app labels which.
+    </div>
+  </section>
+
   <section class="sect" id="self-signed">
+    <div class="kicker">Your plane</div>
     <h2>Three things the agent cannot do</h2>
     <div class="sub">
       Send, bridge and swap also exist in a second form, signed by you in MetaMask. The agent has no
-      part in them — which is exactly why the caps above do not apply.
+      part in them — which is why the caps above do not apply, and why you sign those yourself.
     </div>
     <div class="cards">
       <div class="card">
@@ -264,26 +361,35 @@
   </section>
 
   <section class="sect" id="sells">
+    <div class="kicker">Paid services · x402</div>
     <h2>What it sells</h2>
     <div class="sub">
       Three endpoints answer HTTP 402 and take payment in USDC on Arc, per call, with no account and
-      no API key. An agent can pay them directly.
+      no API key. An agent can pay them directly — the same primitive Tikpema's own Researcher uses
+      to buy data.
     </div>
     <table class="tbl">
       <tr><th>Endpoint</th><th>What you get</th><th>Price</th></tr>
-      <tr><td>Due diligence</td><td>An on-chain report on a contract: who can upgrade it, who can pause it, what that would cost you</td><td>0.06 USDC</td></tr>
+      <tr><td>Due diligence</td><td>An on-chain report on a contract: who can upgrade it, who can pause it, and what that would cost you — facts read from the chain, never a score</td><td>0.06 USDC</td></tr>
       <tr><td>Vanilla x402 seller</td><td>A reference paid endpoint, EIP-3009 settlement end to end</td><td>0.01 USDC</td></tr>
       <tr><td>Quote</td><td>A priced answer to a research question</td><td>0.001 USDC</td></tr>
     </table>
     <div class="note">
       Due diligence answers for <b>Arc Testnet only</b>. Base and Base Sepolia are recognised and
       deliberately refused: the report says every Arc provider syncs from one permissioned validator
-      set, and that sentence is false elsewhere. A service should not answer for a chain whose
-      assumptions it does not hold. It has its own OpenAPI description, and an on-chain identity you can check without asking us: <code class="mono2">ownerOf(851891)</code> and <code class="mono2">tokenURI(851891)</code> on the ERC-8004 registry at <code class="mono3">0x8004A818BFB912233c491871b3d84c89A494BD9e</code> resolve to the service owner and to a content-addressed document whose hash you can verify yourself. Its own identity endpoint tells you to trust that endpoint <b>last</b> and read the chain instead — the service flags trusted-mutable surfaces in other people’s contracts, and does not exempt itself.
+      set, and that sentence is false elsewhere — a service should not answer for a chain whose
+      assumptions it does not hold. It carries its own OpenAPI description and an on-chain identity
+      you can check without asking us: <code class="mono2">ownerOf(851891)</code> and
+      <code class="mono2">tokenURI(851891)</code> on the ERC-8004 registry at
+      <code class="mono3">0x8004A818BFB912233c491871b3d84c89A494BD9e</code> resolve to the service
+      owner and to a content-addressed document whose hash you can verify yourself. Its own identity
+      endpoint tells you to trust that endpoint <b>last</b> and read the chain instead — it flags
+      trusted-mutable surfaces in other people's contracts, and does not exempt itself.
     </div>
   </section>
 
   <section class="sect" id="reading">
+    <div class="kicker">Reading</div>
     <h2>Things to read</h2>
     <div class="sub">Documents, not services. Nothing here takes payment or moves money.</div>
     <div class="docs">
@@ -297,12 +403,19 @@
       <div class="doc">
         <span class="dt">What is actually built</span>
         <span class="dd">A running index of every live surface, with what each one is and what it
-          costs. <a style="color:var(--brand-hi)" href="https://app.tikpema.xyz/built">app.tikpema.xyz/built</a></span>
+          costs. <a href="https://app.tikpema.xyz/built">app.tikpema.xyz/built</a></span>
+      </div>
+      <div class="doc">
+        <span class="dt">A dated reading of the Circle x402 catalog</span>
+        <span class="dd">A one-off, immutable snapshot of the Circle x402 discovery index — counts,
+          hosts and payout addresses on a fixed date, and a diff against an earlier reading that
+          says only what two instants can, never that anything "changed" in between.
+          <a href="https://app.tikpema.xyz/snapshot">app.tikpema.xyz/snapshot</a></span>
       </div>
       <div class="doc">
         <span class="dt">arc-x402-reference</span>
         <span class="dd">A standalone EIP-3009 buyer and seller for Arc, extracted so it can be read
-          without the rest of the codebase. A library, not a service. v0.2.0.</span>
+          without the rest of the codebase. A library, not a service.</span>
       </div>
     </div>
   </section>
@@ -310,7 +423,7 @@
   <section class="final">
     <h2>Everything here is on Arc Testnet</h2>
     <p>
-      The USDC is play money, the caps are real, and the refusals are real. Sign in with a passkey,
+      The USDC is play money. The caps are real, and the refusals are real. Sign in with a passkey,
       ask the agent to move something, and watch it decline when you go over.
     </p>
     <a class="btn-primary" href="https://app.tikpema.xyz">Open the app <span class="arrow">→</span></a>
@@ -321,6 +434,7 @@
     <div class="foot-links">
       <a href="https://app.tikpema.xyz">Launch App</a>
       <a href="#agent">What it does</a>
+      <a href="#jobs">On-chain jobs</a>
       <a href="#sells">What it sells</a>
       <a href="https://x.com/TikpemaGb">X ↗</a>
     </div>
