@@ -1,5 +1,185 @@
 ---
 
+# THE COMPARISON — AND A 502 THAT SURVIVED test:all BECAUSE THE PAGE HAD NO TEST
+
+**2026-09-11, later the same day.** `/snapshot/diff/2026-08-27..2026-09-11` is live beside the two
+dated readings, and `/built` came back from a 502 that was live for one deploy cycle. Three commits:
+`1b46f40`, `4b8f30d`, `d4480e2`. Prod serves `d4480e2`, `test:all` 117/0.
+
+## 🚨 THE OUTAGE FIRST, BECAUSE ITS CAUSE IS THE MORE USEFUL FINDING
+
+`988f8fc` added a Snapshot entry to `/built`'s `ENTRIES` with an `href:` key where `page()` reads
+`e.links.length`. The render threw — **a 502 on the whole index, not one broken section.**
+
+⛔ **It survived `test:all` and two pushes because `/built` had NO LOCAL TEST.** Its only check was
+`gate:deployed`'s HTTP probe, which runs *after* the deploy. The cheapest imaginable failure — a
+missing key in an object literal, catchable by rendering the page once — cost a live outage and a
+whole extra deploy cycle.
+
+⭐ **The gap was never the typo. It was a published surface whose only instrument was downstream of
+publishing.** That is now closed by `verify-built-index.mjs`, and the closing was harder than the
+fix.
+
+### ⭐⭐⭐ THREE DRAFTS OF THAT GUARD PASSED THE MUTATION IT EXISTED TO CATCH
+
+Each failure was a different shape, and the third is the one worth remembering:
+
+1. **Pinned to source text.** It grepped for the validation loop. Wrapping the whole loop in
+   `if (false)` left it green. → Exported `validateEntries` and fed it the bad shape.
+   [[guard-pinned-to-location-not-behaviour]]
+2. **Covered the function, not the wiring.** It proved `validateEntries` refuses bad input, but
+   commenting out the *call* stayed green. → Made `entries` a parameter of `page()`.
+   [[guard-belongs-on-the-caller-set]]
+3. **⛔ THE PROBE COULD NOT DISCRIMINATE.** It asserted only *"page() threw"* — and with the
+   validator call removed, `page()` **still throws**, as the original TypeError. Both states produce
+   a throw. → Assert the validator's *own message*. Only that catches the real mutation.
+   [[probe-must-discriminate-between-states]]
+
+⛔ **And the fix is a required-key contract with a loud throw, NOT `e.links?.length`.** Optional
+chaining would ship a **200** with an entry silently missing its links — the same defect wearing a
+success code. The suite asserts that chaining is absent.
+
+⭐ **The quieter defect in the same entry never showed at all.** It hard-coded *"1,003 listings … 25
+hosts"* while `/snapshot` served 1,162 and 48. The page that exists to say what is true would have
+been describing something that no longer was, and **nothing would ever have alerted anybody**. It is
+now derived from `snapshot.mjs`'s exported data. [[duplicate-source-of-truth-is-the-recurring-bug]]
+
+## THE COMPARISON — WHAT IT MEASURED
+
+| | 2026-08-27 | 2026-09-11 |
+|---|---:|---:|
+| distinct resource URLs | 960 | 1,094 — 877 in both, 83 absent from the later, 217 only in it |
+| hosts | 25 | 48 — **23 new, none absent** |
+| **offers naming a different payout address** | | **27** of 2,315 present in both |
+| offers advertising a different amount | | 208 |
+
+⭐ **The payout row is the one nobody else is positioned to notice**, and it leads the page. 27
+distinct new addresses — **one per offer, none reused, none present anywhere in the earlier
+reading**. 24 belong to a single host and changed on Base *and* Solana in the same window; 15 of the
+27 are EVM, 12 Solana.
+
+## ⭐⭐ THE ON-CHAIN FOLLOW-UP WAS SCOPED AND DECLINED, AND THE PAGE SAYS SO
+
+The obvious next step was `eth_getCode` across the 27. It was scoped and **not run**, for a reason
+that is not cost:
+
+> Independent addresses are consistent with per-endpoint derivation **and** with freshly generated
+> keys. A shared deployer is consistent with systematic provisioning **and** with systematic
+> exfiltration.
+
+⛔ **The instrument cannot separate the hypotheses that motivated it.** 27 reads would have landed
+back on what the page already said. ⭐ **A read that cannot change what we publish is activity, not
+measurement** — the operator's phrasing, and it belongs in the record.
+
+⚠️ Two further boundaries found while scoping: `eth_getCode` returning empty is **EOA *or* an
+undeployed CREATE2 address** — indistinguishable, and the counterfactual case is the likelier one
+here. And **plain JSON-RPC has no deployer query at all**; that needs a block explorer, which
+returns nothing for exactly those no-code addresses. [[wallet-type-is-not-inferable-from-name]]
+
+⭐⭐ **The discriminating instrument is not on-chain.** Each endpoint's own live `402` challenge names
+the address it currently asks payment to — the operator's server asserting the change, which no
+third party can assert for it. That is the liveness probe both snapshots declare `not-measured`, and
+it remains unmade.
+
+## ⛔ HOW IT IS PUBLISHED — THE COUNT WAS ALREADY LIVE AND BARE
+
+`4b8f30d` shipped *"27 offers name a different payout address"* with no reading beside it. **That
+inverted the risk**: the exposure was never publishing the analysis, it was publishing the count
+without it. `d4480e2` adds a four-part paragraph, and **the ORDER is asserted**, not just the
+presence:
+
+1. **the measurement** — dated, sourced, derived from `pattern` in `shared/x402-diff.mjs`;
+2. **the benign reading, FIRST and named** — per-endpoint address derivation is an ordinary design,
+   and a host rotating every endpoint at once is what it looks like. ⭐ With the reason it is
+   likelier: *diversion wants FEW destinations, not 27*;
+3. **the discriminator, named and stated as not done** — the 402 challenge;
+4. **⛔ the structural limit** — a catalog records *where* money is pointed, never *who* pointed it
+   or why. A repoint is a write to Circle's index; no chain witnessed it, so no chain can testify.
+   `whoChangedTheEntry: structurally-unanswerable`, a distinct JSON state from every `not-measured`.
+
+⭐ **The order carries the meaning.** The benign reading placed after the discriminator reads as a
+concession; after the structural limit, as an afterthought. Moving it turns the suite red.
+
+⛔ **No company in a headline.** The host stays in the resource URLs and in `pattern.topHost`, where
+it already was. Asserted absent from every `<h1>`/`<h2>`, from the `<title>`, **and from the meta
+description a link preview would quote** — a finding whose most quotable sentence is a company name
+is an accusation wearing a measurement's clothes. Published openly rather than privately: *a
+measurement we would only show selectively is one we should not have made.*
+
+## 🚨 THE GATE REFUSES — IT DOES NOT WARN
+
+Comparing an unfiltered harvest against a `siwx=false` one shows ~165 disappearances, **every one a
+testnet row**: a plausible count, a coherent breakdown, no error anywhere. So `diffHarvests` returns
+`{ gate, computed: false }` and **nothing else** — no `payTo`, no `presence`, no `networks` — and the
+route serves **409** with a refusal page carrying zero figures.
+
+⭐ **A warning on a wrong number is still a wrong number published, and the warning is the skippable
+part.** ⛔ And the gate counts sentinel rows **from the rows**: the two harvest generations store
+their self-check under different keys and shapes (`testnetSelfCheck` vs `selfCheck`), and a stored
+flag is a claim while rows are evidence. The test fixture is a harvest that still says
+`selfCheck.passed: true` with its testnet rows stripped. [[absence-must-never-read-as-safe]]
+
+## ⭐ THE JOIN HAD NO ROW IDENTITY, AND THAT CHANGED THE SHAPE
+
+`(resource, network, asset, scheme)` is **not unique**: 4,215 rows collapse to 2,774 distinct keys —
+**1,441 collisions across 909 groups, 834 of them carrying conflicting values** (the same URL offered
+at both 0 and 20000). A last-write-wins join drops a third of the rows and reports confident numbers
+over the survivors.
+
+⭐ So the comparison is **set-valued per key**, not row-paired: it invents no identity and loses no
+row. The regression fixture is two identical offers **in a different order** — a row-paired join
+reports a repoint that never happened. [[flow-is-not-meaning]]
+
+## ⛔ NO EVENT IS CLAIMED, AND THE VOCABULARY IS ENFORCED
+
+Neither harvest can bound what it missed, so a listing absent from the later reading may be
+withdrawn, renamed, or missed by paging. Fields are `absentFromLater` / `presentOnlyInLater`; the
+prose says *"absent from the 2026-09-11 reading"*. `FORBIDDEN_VERBS` — removed, deleted, added,
+delisted, disappeared — is asserted against the **rendered** page, and the JSON ships the list so an
+agent inherits the constraint.
+
+Likewise **"unchanged" is not "stable"**: two instants 15 days apart bound their endpoints and say
+nothing about the interval. Its own `<h2>`, and the suite asserts it appears **above** the tables —
+a caveat below the numbers is read after the numbers.
+
+## ⚠️ THIRD TIME A PROSE ASSERTION WENT RED ON A CORRECT PAGE
+
+Three assertions across these suites failed because a sentence spanned an inline `<b>`/`<i>` or a
+source newline — `24 of them belong to a single host` is `<b>24</b> of them…` in the HTML. Each
+looked like a page defect and was not.
+
+⭐ **The rule, now written into the file:** match a **tag-stripped, whitespace-collapsed** view for
+anything a human reads as a sentence; match raw HTML for structure (tags, headings, attributes);
+match the collapsed-but-tagged view only when the markup itself is part of the claim.
+
+## ⛔ TWO CLAIMS ELSEWHERE WENT FALSE, AND THE CLAIMS WERE FIXED, NOT THE TESTS
+
+* `snapshot.mjs` said `changeBetweenSnapshots: "not-published"`. It now says
+  `"published-separately"` and names where the answer went. **A filled gap must not be deleted** — a
+  reader who saw the earlier JSON would find the question gone rather than the answer.
+* `/built` now links every comparison, and its guard dispatches diff links to the diff handler
+  rather than 404ing them against the snapshot one.
+
+## FILES
+
+New: `shared/x402-diff.mjs` (pure, no I/O), `netlify/functions/snapshot-diff.mjs`,
+`scripts/verify-snapshot-diff.mjs` (**83 assertions**), `scripts/verify-built-index.mjs` (**34**).
+Modified: `netlify/functions/built.mjs` (derived entry, exported `validateEntries`, `page(entries)`),
+`netlify/functions/snapshot.mjs` (exports `SNAPSHOTS`/`DATES`/`LATEST`/`PAIRS`; **81 assertions**),
+`netlify.toml` (three diff rules **above** `/snapshot/:date` — bare `/snapshot/diff` has two segments
+and would otherwise be swallowed and 404'd as an unknown date), `package.json`.
+
+**Mutations: 24 run across these three commits, 24 caught** — 7 on `/built` in `1b46f40`, 9 on the
+comparison in `4b8f30d`, 8 on the paragraph in `d4480e2`. (The 6 against the snapshot pages belong to
+the previous entry.) Including: the gate warning instead of
+refusing, the gate trusting the stored flag, a last-write-wins join, the page saying "removed", the
+payout section demoted, the interval caveat moved to a footer, the benign reading dropped, the benign
+reading moved after the structural limit, a host in the `<h2>`, a host in the meta description, part
+4 softened to "we have not checked further", the discriminator claimed as done, and `/built`'s three
+escapes above.
+
+---
+
 # THE SECOND MEASUREMENT — AND THE CATALOG SHRANK BY 84 IN THE LAST TWO DAYS
 
 **2026-09-11.** A fresh harvest of the Circle x402 Discovery index, run as a separate act from the
