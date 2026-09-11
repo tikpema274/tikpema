@@ -1,5 +1,47 @@
 ---
 
+# ✅ THE MARKETING PAGE — REFRESHED FOR WHAT TIKPEMA NOW IS, AND LIVE
+
+**2026-09-11 (UTC; 09-12 local).** `tikpema.xyz` rewritten and deployed. Commits `dd28998` (page),
+`905e3ad` (deploy-command fix). Live gate `✅ IN SYNC`: local == served == published, sha256
+`c2dd41ab…` (26,740 bytes), deploy `6aa488d58dda578242139c45` ready `23:03:50Z`. Pushed.
+
+## WHAT CHANGED, AND WHY IT WAS A REFRESH — NOT A REWRITE
+The page was already audited-TRUE (`docs/marketing-site-claim-audit.md`), and memory warns a
+confident rewrite restates unverified claims *harder to spot*. So this preserved every true
+sentence and caveat and changed structure + positioning:
+- **Thesis up front** — "moving stablecoins is the easy part; letting software do it on your behalf
+  is the hard part; Tikpema is the layer that makes that safe to watch." The two planes
+  (agent-under-caps vs you-signed-no-cap) now lead as the central distinction.
+- **New on-chain-jobs (ERC-8183) section** — priced → funded escrow → keccak256 hash submitted
+  (bytes off-chain) → judged → settled/refunded. ⛔ The **self-loop is stated outright** ("your own
+  agent funds its own research budget, so the same wallet is client, provider and evaluator") — the
+  #1 rewrite risk the audit named, defused rather than implied.
+- Added: vault-inspection card, honest unified-balance custody line, a dated-snapshot reading entry;
+  x402 framed as "the same primitive Tikpema's own Researcher uses to buy data".
+
+## CLAIM DISCIPLINE HELD (the part that mattered)
+No FALSE-list claims — no "cited every time", no bytes-on-chain, no blanket "gasless", no "any
+chain". Every honest caveat kept (uncited briefs can ship; evaluator judges TWO things only; hash
+not bytes; you pay the gas on the self-signed plane). Every pinned value present. `test:siteclaims`
+**26/0**; self-audited each new sentence against the claim-audit FALSE list and the self-loop trap;
+HTML tags balanced; `/built` and `/snapshot` links verified live. [[marketing-site-two-netlify-sites]]
+
+## 🚨 THE DEPLOY BUG FOUND WHILE SHIPPING — `deploy:site -- --prod` NEVER PROMOTED
+`npm run deploy:site -- --prod` appends `--prod` to the LAST command in the `&&` chain
+(`gate:sitelive`), not to `deploy-site.mjs` — so it silently DRAFTED and the gate reported "repo
+ahead". Measured: two attempted prod deploys only drafted. Fix (`905e3ad`): dedicated
+**`deploy:site:prod`** = `node scripts/deploy-site.mjs --prod && npm run gate:sitelive`, plus the two
+docs that printed the broken command corrected. ⛔ `--prod` refuses a non-TTY stdin by design, so it
+runs only in a real terminal (not Claude Code's `!` prefix or the Bash tool) — the USER promotes.
+[[a-later-command-is-not-proof-of-an-earlier-one]]
+
+**Files.** `site/index.html` (refresh), `package.json` + `scripts/deploy-site.mjs` +
+`scripts/verify-site-live.mjs` (deploy fix). A private preview artifact was published for layout
+review before the deploy.
+
+---
+
 # ⛔ THE AGENT SWAP CARD HID THE FLOOR AND ASSERTED A FALSE ONE — FIXED
 
 **2026-09-11.** The manual swap card showed the true floor ("guaranteed at least X — reverts below
