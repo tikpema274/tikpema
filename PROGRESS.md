@@ -1,5 +1,49 @@
 ---
 
+# ⛔ THE AGENT SWAP CARD HID THE FLOOR AND ASSERTED A FALSE ONE — FIXED
+
+**2026-09-11.** The manual swap card showed the true floor ("guaranteed at least X — reverts below
+this"); the AGENT proposal card (`SwapProposalBody`) showed the estimate plus *"reverts rather than
+filling more than 1% worse"* — a claim the code's own comment and `docs/swap-slippage-copy-overclaim`
+call false. **Confirmed RENDERED, not a comment:** the string shipped in `index-C7lG2SXb.js`, local
+and prod. The 2026-08-30 "closure" grepped `slippage` (absent) and missed the `1% worse` phrasing.
+
+## ONE RATE MECHANISM, TWO DISCLOSURES
+
+Both paths route through the **same** Arc AMM adapter `0xbbd70b01…`, quote from the **same**
+`createSwap` producer with **byte-identical** request bodies (`_swap.mjs:251` == `:483`, no slippage),
+and extract `minTokenOut` the same way. So the paths **cannot execute at systematically different
+rates** — this is NOT the bridge's two-mechanism shape, and the rate copy is safe stated generally.
+What differed was the **floor disclosure**: correct on manual, false-and-absent on agent.
+
+## THE FIX
+
+* `_proposal.mjs` carries `indicativeMinOut` — the estimate's `stopLimit` (the SDK returns it beside
+  `estimatedOutput`). ⛔ It is the ESTIMATE's floor, **not** the binding `minTokenOut` (the B1 path
+  re-quotes at execution), so it is shown as indicative, never "guaranteed". Absent/zero → `null`.
+* `SwapProposalBody` (`jobTimeline.tsx`): the `1% worse` line is gone; the card now shows *"will not
+  fill below about {indicativeMinOut}"* and states the exact minimum is set from a fresh quote **at
+  execution**, below which the swap reverts. No fabricated percentage.
+
+## ⭐ THE GAP THAT LET IT SHIP: THE AGENT CARD HAD NO RENDER GUARD
+
+The manual card had `verify-manual-swap-copy.tsx`; the agent proposal body had **none** — so the
+false claim lived in unguarded rendered JSX. New `verify-swap-proposal-copy.tsx` (15 assertions,
+in `test:all`) renders `ProposalCard` and asserts, on the RENDERED output: no `1% worse` / no bare
+`N% worse`, the floor number present and DISTINCT from the estimate, "will not fill below", "at
+execution", and NOT "guaranteed"; plus the null-floor case shows the mechanism without a number.
+Mutation-checked: re-adding `1% worse` → 5 red, dropping the floor render → 4 red.
+`verify-swap-proposal.mjs` gains the `stopLimit`→`indicativeMinOut` assertions (distinct from the
+estimate; null when absent/zero). [[assert-on-rendered-output-not-source-regex]]
+[[human-facing-field-ships-with-its-render-assertion]]
+
+**Files.** `netlify/functions/_proposal.mjs`, `src/components/jobTimeline.tsx`,
+`scripts/verify-swap-proposal.mjs` (24/0), `scripts/verify-swap-proposal-copy.tsx` (new, 15/0),
+`package.json`. `test:all` **118/0**; tsc + build clean; the built bundle no longer contains
+`1% worse` and now contains `will not fill below`.
+
+---
+
 # ⛔ THE PRE-REGISTRATION WAS COMPLETE ON FIGURES AND INCOMPLETE ON PREREQUISITES
 
 **2026-09-11, after the run did not submit.** A correction to the committed prediction in

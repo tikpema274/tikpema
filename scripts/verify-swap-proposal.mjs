@@ -17,7 +17,9 @@ import { mock } from "node:test";
 const WALLET = "0xbafec950627579cf786acf875e6e216995e995a3";
 const EURC_USD = 1.20;
 
-let estimateReturn = { estimatedOutput: { token: "EURC", amount: "4.31" } }; // the REAL shape
+// ⭐ THE REAL SHAPE carries BOTH estimatedOutput AND stopLimit (the estimate's floor). The floor
+// is what the agent card now discloses — see the FLOOR DISCLOSURE block below.
+let estimateReturn = { estimatedOutput: { token: "EURC", amount: "4.31" }, stopLimit: { token: "EURC", amount: "4.05" } };
 let estimateThrows = false;
 
 mock.module("../netlify/functions/_swap.mjs", {
@@ -77,6 +79,27 @@ console.log("HAPPY PATH — the server re-derives everything that gates money");
   check("rate re-priced from the SDK's estimatedOutput (4.31)", p?.indicativeAmountOut === 4.31, `${p?.indicativeAmountOut}`);
   check("the model's invented amountOut (999) does NOT survive", p?.indicativeAmountOut !== 999);
   check("reasoning truncated (a runaway model cannot bloat the deliverable)", p?.reasoning.length === 600);
+  // ⭐⭐ THE FLOOR IS CARRIED — the worst case the agent card discloses (2026-09-11). Derived from
+  // the SDK's stopLimit (4.05), NOT from estimatedOutput (4.31), so a mock that set them equal
+  // could not tell the two apart. [[fixtures-that-agree-cannot-discriminate]]
+  check("the FLOOR (stopLimit) is carried as indicativeMinOut (4.05), distinct from the estimate (4.31)",
+    p?.indicativeMinOut === 4.05, `${p?.indicativeMinOut}`);
+}
+
+console.log("\nTHE FLOOR — present, distinct, and null when the SDK omits it");
+{
+  estimateThrows = false;
+  // ⛔ A missing stopLimit must NOT fabricate a floor — it becomes null and the card shows the
+  // mechanism only. [[field-name-must-be-true-in-every-case]]
+  estimateReturn = { estimatedOutput: { token: "EURC", amount: "4.31" } }; // no stopLimit
+  const noFloor = await validateProposal({ action: "swap", tokenIn: "USDC", tokenOut: "EURC", amountIn: 5 }, ctx);
+  check("absent stopLimit → indicativeMinOut null (no fabricated floor)", noFloor?.indicativeMinOut === null, `${noFloor?.indicativeMinOut}`);
+  check("…and the estimate still prices (the floor is additive, not required)", noFloor?.indicativeAmountOut === 4.31);
+  // A zero/garbled stopLimit is also refused rather than shown as a real floor.
+  estimateReturn = { estimatedOutput: { token: "EURC", amount: "4.31" }, stopLimit: { token: "EURC", amount: "0" } };
+  const zeroFloor = await validateProposal({ action: "swap", tokenIn: "USDC", tokenOut: "EURC", amountIn: 5 }, ctx);
+  check("zero stopLimit → indicativeMinOut null (not a real floor)", zeroFloor?.indicativeMinOut === null, `${zeroFloor?.indicativeMinOut}`);
+  estimateReturn = { estimatedOutput: { token: "EURC", amount: "4.31" }, stopLimit: { token: "EURC", amount: "4.05" } }; // restore
 }
 
 console.log("\nTHE SDK SHAPE — the bug that made every swap unproposable");

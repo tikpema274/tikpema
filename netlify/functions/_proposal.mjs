@@ -253,6 +253,17 @@ async function validateSwapProposal(raw, ctx) {
   const amountOut = Number(estimate?.estimatedOutput?.amount ?? NaN);
   if (!Number.isFinite(amountOut) || amountOut <= 0) return noProposal(NO_PROPOSAL.SWAP_ZERO_OUTPUT, { raw: JSON.stringify(estimate?.estimatedOutput ?? null).slice(0, 120) });
 
+  // ⭐⭐ THE FLOOR — the worst case, carried so the agent card can DISCLOSE it (2026-09-11).
+  // The SDK estimate returns `stopLimit` alongside `estimatedOutput`; it is the floor OF THIS
+  // ESTIMATE. ⛔ It is NOT the binding on-chain `minTokenOut` — the executing B1 path re-quotes
+  // `createSwap` at execution and Circle sets that fresh, so this is INDICATIVE, never a guarantee.
+  // The manual path shows the BINDING floor (it decodes the actual calldata before the user signs);
+  // the agent path proposes before execution, so the honest floor it can show at approve time is
+  // this estimate's. Rendered as "won't fill below about X … exact minimum set at execution",
+  // never as "guaranteed". A missing/garbled stopLimit → null (the card shows the mechanism only,
+  // no fabricated number). [[field-name-must-be-true-in-every-case]] [[human-facing-field-ships-with-its-render-assertion]]
+  const minOut = Number(estimate?.stopLimit?.amount ?? NaN);
+
   return {
     action: "swap_tokens",     // the executor's step type — never the model's string
     tokenIn,                   // OUR symbol, from OUR allowlist
@@ -262,11 +273,13 @@ async function validateSwapProposal(raw, ctx) {
     cap,
     // INDICATIVE ONLY, exactly like the bridge's fee. The rate moves; agentSwap fetches its OWN
     // quote at execution, and that quote carries an on-chain `minTokenOut` below which the adapter
-    // reverts. The number shown at approve time is a courtesy, never a commitment.
+    // reverts. The numbers shown at approve time are a courtesy, never a commitment.
     // ⛔ THIS USED TO CREDIT "the 1% slippage cap (_swap.mjs)" — WRONG. `slippageBps: 100` is passed
     // only to `estimateSwapOnly`; the executing B1 path sends no slippage field, so the binding
-    // minimum is Circle's. ⚠️ No percentage replaces it — see the note at jobTimeline's SwapProposalBody.
+    // minimum is Circle's. ⭐ The FIX is not a percentage — it is showing the estimate's own floor
+    // (`indicativeMinOut`) and stating the exact minimum is set at execution. See SwapProposalBody.
     indicativeAmountOut: Number(amountOut.toFixed(6)),
+    indicativeMinOut: Number.isFinite(minOut) && minOut > 0 ? Number(minOut.toFixed(6)) : null,
     pricedAt: new Date().toISOString(),
     reasoning: String(raw.reasoning || "").slice(0, MAX_REASONING),
     validatedAt: new Date().toISOString(),

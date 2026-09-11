@@ -33,6 +33,10 @@ export type SwapProposal = {
   valueUsdc: number;
   cap: number;
   indicativeAmountOut: number;
+  /** ⭐ The estimate's FLOOR (stopLimit) — the worst case, disclosed at approve time. Indicative,
+   *  NOT the binding on-chain minimum (that is set fresh at execution). null when the estimate
+   *  carried no usable stopLimit → the card shows the mechanism without a number. */
+  indicativeMinOut?: number | null;
   /** ⭐ When estimateSwapOnly actually ran — see _proposal.mjs. Optional: older proposals lack it. */
   pricedAt?: string;
   reasoning?: string;
@@ -431,14 +435,18 @@ function BridgeProposalBody({ proposal, ...rest }: ProposalCardProps & { proposa
 // INDICATIVE, exactly like the bridge's fee — it is re-priced at execution, and the swap carries
 // an ON-CHAIN MINIMUM below which the adapter reverts rather than filling.
 //
-// ⛔ THIS USED TO SAY "a 1% slippage cap makes the swap revert", AND THAT WAS WRONG. Our
-// `slippageBps: 100` reaches only `estimateSwapOnly` — the free estimate. The EXECUTING path
-// (the B1 `createSwap` HTTP quote in _swap.mjs) sends no slippage parameter at all, so the
-// `minTokenOut` that actually binds is Circle's, not ours.
-// ⚠️ AND NO PERCENTAGE REPLACES IT. A figure was measured, but from four quotes at one moment on
-// one route — enough to prove the 1% claim false, not enough to assert a different constant.
-// Naming the new number would repeat the original defect with a fresher value.
-// See docs/swap-slippage-copy-overclaim.md.
+// ⛔ THIS USED TO SAY "the swap reverts rather than filling more than 1% worse", AND THAT WAS
+// WRONG — a RENDERED claim, not just a comment (it shipped in the bundle; the earlier "closure"
+// grepped "slippage" and missed the "1% worse" phrasing). Our `slippageBps: 100` reaches only
+// `estimateSwapOnly` — the free estimate. The EXECUTING path (the B1 `createSwap` HTTP quote in
+// _swap.mjs) sends no slippage parameter at all, so the `minTokenOut` that actually binds is
+// Circle's, not ours, and one sample measured ~3%, not 1%.
+// ⭐ THE FIX (2026-09-11) IS NOT A PERCENTAGE — it is disclosing the estimate's OWN floor
+// (`indicativeMinOut`, the SDK's stopLimit) and stating plainly that the exact minimum is set from
+// a fresh quote at execution. The manual path shows the BINDING floor (it decodes the calldata
+// before the user signs); the agent path proposes before execution, so it shows the ESTIMATE's
+// floor and says so — never "guaranteed". A user picking "let the agent do it" now sees a worst
+// case, not a fabricated one. See docs/swap-slippage-copy-overclaim.md.
 function SwapProposalBody({ proposal, ...rest }: ProposalCardProps & { proposal: SwapProposal }) {
   return (
     <ProposalShell
@@ -458,9 +466,15 @@ function SwapProposalBody({ proposal, ...rest }: ProposalCardProps & { proposal:
         <>
           You would receive roughly{" "}
           <span className="mono">{proposal.indicativeAmountOut}</span> {proposal.tokenOut} at the
-          current rate. This is an indicative price, not a quote: the rate is re-checked at
-          execution, and the swap reverts rather than filling more than 1% worse. Both are
-          stablecoins, so this is a currency conversion (USD↔EUR exposure) — not a trade.
+          current rate
+          {proposal.indicativeMinOut != null && (
+            <>, and it will not fill below about{" "}
+              <span className="mono">{proposal.indicativeMinOut}</span> {proposal.tokenOut}</>
+          )}
+          . This is an indicative price, not a quote: it is re-checked against a fresh quote at
+          execution, which sets the exact on-chain minimum below which the swap reverts rather than
+          filling at a worse rate. Both are stablecoins, so this is a currency conversion (USD↔EUR
+          exposure) — not a trade.
           {/* ⭐ WHEN IT WAS PRICED, NOT JUST WHAT IT PRICED AT. An indicative number with no
               timestamp cannot be judged for freshness — the reader cannot tell a figure measured
               seconds ago from one measured before a long approval pause. CoinGecko's price already
