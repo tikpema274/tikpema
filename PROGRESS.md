@@ -1,5 +1,64 @@
 ---
 
+# ⛔ THE PRE-REGISTRATION WAS COMPLETE ON FIGURES AND INCOMPLETE ON PREREQUISITES
+
+**2026-09-11, after the run did not submit.** A correction to the committed prediction in
+[THE UB-SPEND FIX, PRE-REGISTERED] — **recorded separately, NOT amended.** A prediction is immutable
+so that a later failure cannot be re-attributed; the fix for an incomplete one is a linked correction,
+never an edit. This is that link.
+
+## WHAT THE COST LINE SAID, AND WHY IT WAS NOT WRONG
+
+The pre-registration's cost line: **~0.2055 forwarder fee + a 10 USDC floor.** Every figure in it is
+correct and confirmed from code — the floor is the deployed `AGENT_UB_SPEND_FLOOR_USDC=10`, the fee
+is `_pay.mjs`'s own estimate (the run measures the real one). **That is the cost of the SPEND.**
+
+## WHAT IT OMITTED — A PREREQUISITE, NOT A FIGURE
+
+The RUN also required a **Gateway unified balance ≥ 10** to source the spend from. **Neither candidate
+SCA had it** — measured read-only 2026-09-11:
+
+| account | Gateway unified (Arc) | wallet USDC (Arc) |
+|---|--:|--:|
+| `0x6Fb2…FC58` (probe/fire default — identity CONTINGENT, see below) | **0** | 13.000000 |
+| `0xc54d…e621` (shared `AGENT_WALLET_ADDRESS`) | **2.074610** | 27.831972 |
+
+Both are below the floor, so **no reachable account could source a 10-USDC spend**. The spend needed
+a **prior deposit that did not exist** — and a deposit pays no forwarder fee, so it never appeared in
+a *cost* line that only reasoned about the spend.
+
+## ⭐ WHY THIS IS A DISTINCT FAILURE WORTH NAMING
+
+**A committed prediction that omits a prerequisite is not wrong about its figures — it is incomplete
+about what the run needs.** The cost line answered "what does the spend cost" flawlessly and never
+asked "what must already be true for the spend to happen at all". Those are different questions, and
+a pre-registration that is audited only for figure-correctness passes while missing the second. The
+class: *a prediction's cost model can be exactly right and still not describe the run,* because a
+precondition is not a cost. [[absence-must-never-read-as-safe]]
+
+## TWO THINGS THIS ENTRY DOES NOT CLAIM
+
+* ⛔ **The stop point is UNKNOWN.** Neither of us has what `--confirm` printed. The only proven fact
+  is capture-absence ⇒ `fire-ub-spend` did not submit. "Insufficient funds" is a guess, and a weak
+  one: that error surfaces *inside* `ubSpend` after a submit, which would have WRITTEN a capture — so
+  the run more likely stopped BEFORE submit (dry-only, or a session-secret guard). Recorded as
+  UNKNOWN, not inferred from the balance.
+* ⛔ **The depositor identity is CONTINGENT.** Every balance above for `0x6Fb2…FC58` assumes it is the
+  SCA the session resolves to; it is the tooling's DEFAULT, used as OWNER in some scripts and as the
+  spent-from SCA in others. The clean resolution is the `gateway-balance` endpoint's `depositor`
+  field (authenticated, read-only). [[default-is-not-a-reading]] [[wallet-type-is-not-inferable-from-name]]
+
+## THE COMPLETED PREREQUISITE (for when the spend is re-run — the user's to run)
+
+Fund the **session-resolved** depositor SCA's Gateway unified balance to **≥10** (deposit ~11 for
+headroom; under the deposit cap 100 and day-ceiling 60), **from that SCA's own Arc USDC**, via
+`agent-ub-deposit` → `depositFor`. ⛔ **NOT from the DD revenue wallet `0xb407…6ac4`** — it must stay
+at 0.000000 for Transfer-to-payTo reconciliation; the deposit is internal to the spender and never
+touches it. Then `probe` → `dry` → `--confirm`. The committed prediction's rows are unchanged; this
+entry only adds the prerequisite in front of them.
+
+---
+
 # THE UB-SPEND FIX, PRE-REGISTERED — ONE SIGNING MODEL ON BOTH PLANES, PROVEN BY ONE LIVE SPEND
 
 **2026-09-11. DECIDED: fix and prove, not delete.** Deleting `agent-ub-spend` would make the FROZEN
