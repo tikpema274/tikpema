@@ -270,8 +270,106 @@ export const pairId = (from, to) => `${from}..${to}`;
  * ⛔ They hold SEPARATE date lists — snapshot.mjs keys its frozen SNAPSHOTS, snapshot-diff.mjs keys
  * the harvest files — and those two lists can drift apart. Sharing the derivation does not prevent
  * that; only an assertion does, and verify-snapshot-diff.mjs §0 compares the two lists directly.
+ *
+ * ⭐⭐ EVERY ORDERED PAIR, NOT ONLY ADJACENT ONES. With three readings the interval question has
+ * to be answerable BOTH WAYS: `08-27..09-25` spans the middle reading, `09-11..09-25` follows it.
+ * A key equal at 08-27 and 09-25 that differs at 09-11 is the "changed and changed back" case the
+ * interval caveat warns about — and only the SPAN pair can be shown to have been misled by it.
+ * Adjacent-only would have hidden exactly the comparison the third reading exists to make.
+ * For two dates this is unchanged: one pair. Sorted `from..to`, so the LAST entry is always the
+ * newest adjacent pair — the bare `/snapshot/diff` redirect and the page copy both rely on that.
  */
 export function pairsFor(dates) {
   const s = [...dates].sort();
-  return s.slice(0, -1).map((d, i) => pairId(d, s[i + 1]));
+  const out = [];
+  for (let i = 0; i < s.length; i++) for (let j = i + 1; j < s.length; j++) out.push(pairId(s[i], s[j]));
+  return out.sort();
+}
+
+/**
+ * ⭐⭐⭐ THE TEST OF "UNCHANGED ≠ STABLE". Three readings, in time order a → b → c.
+ *
+ * Every two-reading diff on this site carries the caveat that "equal at two instants" is not
+ * "stable". A third reading is the first instrument that can put a NUMBER on how often that caveat
+ * mattered — and the number was defined HERE, before the third harvest existed, so the day it is
+ * read nobody re-derives what to count. Per key, over the SET of values (same join as diffHarvests):
+ *
+ *   unchangedAcrossAllThree      a == b == c   — equal at all three instants. Still not "stable",
+ *                                                 but the caveat did not bite at any reading we have.
+ *   unchangedThenChanged   ⭐     a == b != c   — THE NUMBER. The pair 08-27..09-11 reported this key
+ *                                                 "unchanged"; the next reading shows it moved. This
+ *                                                 is how many keys a pair-only reader would have
+ *                                                 called settled that were not.
+ *   changedThenHeld              a != b == c   — moved once, then equal at the last two instants.
+ *   changedThenReverted    ⭐     a != b, b != c, a == c
+ *                                              — the SPAN pair 08-27..09-25 reads "unchanged" for
+ *                                                 this key, and it is wrong: the middle reading saw
+ *                                                 a different value. The caveat's own example,
+ *                                                 counted.
+ *   changedTwice                 a != b, b != c, a != c — a different value at every reading.
+ *
+ * The five states partition the comparable keys, and the result says so (`partitions`).
+ *
+ * ⛔ Only keys carrying a non-empty set in ALL THREE readings are comparable. A key absent from
+ * any reading is a presence question, and mixing it in would inflate every row with churn.
+ * ⛔ The gate is the same one: all three readings must pass auditHarvest, or nothing is computed.
+ */
+export function stabilityAcrossThree(a, b, c, { labelA, labelB, labelC } = {}) {
+  const audits = [auditHarvest(a, labelA), auditHarvest(b, labelB), auditHarvest(c, labelC)];
+  const gate = {
+    passed: audits.every((x) => x.passed),
+    readings: audits,
+    refusal: audits.every((x) => x.passed) ? null
+      : audits.filter((x) => !x.passed).map((x) => `${x.label}: ${x.reason}`).join("; "),
+  };
+  if (!gate.passed) return { gate, computed: false };
+
+  const A = index(a.rows), B = index(b.rows), C = index(c.rows);
+  const measure = (field) => {
+    const r = {
+      comparable: 0, unchangedAcrossAllThree: 0, unchangedThenChanged: 0, changedThenHeld: 0,
+      changedThenReverted: 0, changedTwice: 0,
+      examples: { unchangedThenChanged: [], changedThenReverted: [] },
+    };
+    for (const k of A[field].keys()) {
+      const sa = A[field].get(k), sb = B[field].get(k), sc = C[field].get(k);
+      if (!sa?.size || !sb?.size || !sc?.size) continue;
+      r.comparable++;
+      const ab = setEq(sa, sb), bc = setEq(sb, sc), ac = setEq(sa, sc);
+      const [resource, network] = k.split("|");
+      if (ab && bc) r.unchangedAcrossAllThree++;
+      else if (ab) {
+        r.unchangedThenChanged++;
+        if (r.examples.unchangedThenChanged.length < 12) r.examples.unchangedThenChanged.push({ resource, network, first: [...sa].sort(), third: [...sc].sort() });
+      } else if (bc) r.changedThenHeld++;
+      else if (ac) {
+        r.changedThenReverted++;
+        if (r.examples.changedThenReverted.length < 12) r.examples.changedThenReverted.push({ resource, network, ends: [...sa].sort(), middle: [...sb].sort() });
+      } else r.changedTwice++;
+    }
+    // ⭐ The five states partition the comparable keys. Stated here so a renderer can trust the sum.
+    r.partitions = r.unchangedAcrossAllThree + r.unchangedThenChanged + r.changedThenHeld +
+      r.changedThenReverted + r.changedTwice === r.comparable;
+    return r;
+  };
+  const payTo = measure("payTo"), amount = measure("amount");
+  return {
+    gate,
+    computed: true,
+    readings: audits.map((x) => ({ label: x.label, capturedAt: x.capturedAt })),
+    payTo,
+    amount,
+    // ⭐⭐ THE VERDICT ON THE CAVEAT, stated as counts and never as "stable". A zero in both misled
+    // rows says the pairs did not mislead over THESE keys at THESE three instants — no more.
+    pairMisled: {
+      byFirstPair: payTo.unchangedThenChanged + amount.unchangedThenChanged,
+      bySpanPair: payTo.changedThenReverted + amount.changedThenReverted,
+      _reads: "byFirstPair: keys the a..b pair called unchanged that c shows moved. bySpanPair: keys " +
+        "the a..c pair calls unchanged that b shows moved in between. Either non-zero is a pair that " +
+        "misled; both zero is silence over these keys, not stability.",
+    },
+    _method: "per (resource, network, asset, scheme), the SET of payTo values and the SET of amounts " +
+      "in each of three readings, compared only where all three carry at least one. Same set-valued " +
+      "join as diffHarvests; no row is paired with a successor.",
+  };
 }

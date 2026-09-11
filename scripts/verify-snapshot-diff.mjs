@@ -25,7 +25,9 @@
 import { handler } from "../netlify/functions/snapshot-diff.mjs";
 import { PAIRS as DIFF_PAIRS, DATES as HARVEST_DATES, HARVESTS } from "../netlify/functions/snapshot-diff.mjs";
 import { DATES as SNAPSHOT_DATES, PAIRS as SNAPSHOT_PAIRS, handler as snapshotHandler } from "../netlify/functions/snapshot.mjs";
-import { diffHarvests, auditHarvest, FORBIDDEN_VERBS, pairsFor, SENTINELS } from "../shared/x402-diff.mjs";
+import { diffHarvests, auditHarvest, FORBIDDEN_VERBS, pairsFor, SENTINELS, stabilityAcrossThree } from "../shared/x402-diff.mjs";
+import { spawnSync } from "node:child_process";
+import { readdirSync } from "node:fs";
 
 let pass = 0, fail = 0;
 const check = (l, c, x = "") => {
@@ -325,6 +327,84 @@ section("7 — GROUNDED: THE PAGE'S FIGURES COME FROM THE HARVESTS ON DISK");
   check("⛔ every payout change names a resource that exists in BOTH readings",
     data.payTo.changes.every((c) => urlsA.has(c.resource) && urlsB.has(c.resource)),
     `${data.payTo.changes.length} changes checked`);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("8 — ⭐⭐⭐ THREE READINGS: THE NUMBER THAT TESTS \"UNCHANGED ≠ STABLE\" IS DEFINED BEFORE IT EXISTS");
+// ⛔ Written 2026-09-11 with TWO harvests on disk, for a third scheduled 2026-09-25. The counts are
+// fixed by fixture here so the day the third reading lands nothing is re-derived: the command prints
+// them, and this section is what says the command computes the right thing.
+{
+  // ⭐ Every ordered pair, so the interval question is answerable BOTH ways — and the last entry is
+  // still the newest adjacent pair, which the bare /snapshot/diff redirect relies on.
+  const three = pairsFor(["2026-09-25", "2026-08-27", "2026-09-11"]);
+  check("⭐ three dates yield three pairs: both adjacent AND the span",
+    JSON.stringify(three) === JSON.stringify(["2026-08-27..2026-09-11", "2026-08-27..2026-09-25", "2026-09-11..2026-09-25"]),
+    three.join(" "));
+  check("⭐ …and the LAST pair is the newest adjacent one, so NEWEST_PAIR keeps its meaning",
+    three[three.length - 1] === "2026-09-11..2026-09-25");
+  check("⭐ two dates still yield exactly one pair (today's live state is unchanged by this)",
+    pairsFor(["2026-09-11", "2026-08-27"]).length === 1 && DIFF_PAIRS.length === 1, DIFF_PAIRS.join(","));
+
+  // ⭐⭐ EVERY COUNTER GETS A DISTINCT VALUE — 1 / 2 / 5 / 4, with unchanged-all at 3 — because the
+  // first draft had held == reverted == 1 and a mutation wiring bySpanPair to the WRONG counter stayed
+  // green. Fixtures that agree cannot discriminate. Key 6 is absent from C and must not be counted.
+  const S = Object.keys(SENTINELS).map((network) => ({ resource: "https://sentinel.test/x", network, asset: "u", scheme: "exact", payTo: "S", amount: "1" }));
+  const mk = (id, payTo, amount = "1") => ({ resource: `https://x.test/${id}`, network: "eip155:8453", asset: "USDC", scheme: "exact", payTo, amount });
+  const STATES = {           //  A    B    C
+    1: ["a", "a", "a"],      //  unchanged across all three           (1 + 2 sentinels = 3)
+    2: ["a", "a", "c"],      //  unchanged A..B then changed by C      (1)  ⭐ THE NUMBER
+    3: ["a", "b", "b"], 7: ["a", "b", "b"],                                    // changed then held (2)
+    4: ["a", "b", "a"], 8: ["a", "b", "a"], 9: ["a", "b", "a"], 13: ["a", "b", "a"], 14: ["a", "b", "a"], // reverted (5)
+    5: ["a", "b", "c"], 10: ["a", "b", "c"], 11: ["a", "b", "c"], 12: ["a", "b", "c"],       // changed twice (4)
+  };
+  const at = (i) => Object.entries(STATES).map(([id, v]) => mk(id, v[i]));
+  const A = { rows: [...at(0), mk(6, "a", "1"), ...S], listingsCollected: 15 };
+  const B = { rows: [...at(1), mk(6, "a", "2"), ...S], listingsCollected: 15 };
+  const C = { rows: [...at(2),                  ...S], listingsCollected: 14 };
+  const s = stabilityAcrossThree(A, B, C, { labelA: "A", labelB: "B", labelC: "C" });
+  check("⭐ the fixture passes the gate, so this section tests the counts and not the gate", s.computed === true);
+  const p = s.payTo;
+  const N = Object.keys(STATES).length;
+  check("⭐ comparable = keys carrying a value in ALL THREE (key 6 is absent from C and does not count)",
+    p.comparable === N + S.length, `comparable ${p.comparable}`);
+  check("⭐ key 1 + sentinels: unchanged across all three is 3", p.unchangedAcrossAllThree === 3, String(p.unchangedAcrossAllThree));
+  check("⭐⭐⭐ key 2: unchanged A..B then changed by C — THE NUMBER — is exactly 1", p.unchangedThenChanged === 1, String(p.unchangedThenChanged));
+  check("⭐ changed then held is 2, and is NOT counted as misleading", p.changedThenHeld === 2, String(p.changedThenHeld));
+  check("⭐⭐ equal at A and C, different at B — the span pair misled — is exactly 5", p.changedThenReverted === 5, String(p.changedThenReverted));
+  check("⭐ changed twice is 4", p.changedTwice === 4, String(p.changedTwice));
+  check("⭐ the five states partition the comparable keys, and the result says so", p.partitions === true);
+  check("⭐ amounts are measured on the same join: key 6's amount change is not comparable (absent from C), so amount.unchangedThenChanged is 0",
+    s.amount.unchangedThenChanged === 0 && s.amount.comparable === N + S.length, `${s.amount.unchangedThenChanged} / ${s.amount.comparable}`);
+  check("⭐ pairMisled sums payTo + amount for each pair — 1 and 5, nothing else in the fixture has those values",
+    s.pairMisled.byFirstPair === 1 && s.pairMisled.bySpanPair === 5,
+    JSON.stringify({ f: s.pairMisled.byFirstPair, s: s.pairMisled.bySpanPair }));
+  check("⭐ the examples name the key and both values, so a reader can go and look",
+    p.examples.unchangedThenChanged[0]?.resource === "https://x.test/2" && p.examples.changedThenReverted[0]?.resource === "https://x.test/4");
+  check("⛔ the result never says \"stable\"", !/\bstable\b/i.test(JSON.stringify(s).replace(/not stability|not \"stable\"/g, "")));
+  // ⭐ Row ORDER within a reading is not a change (same regression as §5, one reading further).
+  const Bshuf = { ...B, rows: [...B.rows].reverse() };
+  const s2 = stabilityAcrossThree(A, Bshuf, C, {});
+  check("⭐ reordering a reading's rows changes no count", JSON.stringify({ ...s2.payTo, examples: 0 }) === JSON.stringify({ ...p, examples: 0 }));
+  // ⛔ The gate is the same gate: one filtered reading and NOTHING is computed.
+  const Cf = { ...C, rows: C.rows.filter((r) => !(r.network in SENTINELS)) };
+  const s3 = stabilityAcrossThree(A, B, Cf, { labelC: "C-filtered" });
+  check("⛔ a filtered THIRD reading is refused — no payTo, no amount, no pairMisled", s3.computed === false && !("payTo" in s3) && !("pairMisled" in s3),
+    s3.gate.refusal ?? "");
+
+  // ⭐⭐ THE DAY'S COMMAND, RUN TODAY: it must refuse, fetch nothing, and write nothing.
+  const dir = new URL("./x402-census/", import.meta.url);
+  const filesBefore = readdirSync(dir).sort().join(",");
+  const run = spawnSync(process.execPath, [new URL("./take-reading.mjs", dir).pathname], { encoding: "utf8", timeout: 20_000 });
+  const today = new Date().toISOString().slice(0, 10);
+  if (today < "2026-09-25") {
+    check("⛔ before 2026-09-25 `npm run census:reading` exits 3 and says why", run.status === 3 && /not before 2026-09-25/.test(run.stderr), `exit ${run.status}`);
+    check("⛔ …without invoking the harvester (no harvester banner in stdout)", !/harvest-index —/.test(run.stdout) && !/page +1/.test(run.stdout));
+    check("⛔ …and the census directory is byte-for-byte the same file list", readdirSync(dir).sort().join(",") === filesBefore);
+  } else {
+    // ⚠️ On or after the day this suite must not run the harvester as a side effect of test:all.
+    check("⚠️ on/after 2026-09-25 this suite does not exercise the live command (it would harvest); the wiring assertions in §0 take over", true);
+  }
 }
 
 console.log(`\n${fail ? "❌ FAILURES" : "✅ ALL GREEN"}   pass ${pass} / fail ${fail}\n`);

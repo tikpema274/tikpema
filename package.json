@@ -113,6 +113,7 @@
     "test:snapshot": "node scripts/verify-snapshot-page.mjs",
     "test:builtindex": "node scripts/verify-built-index.mjs",
     "test:snapshotdiff": "node scripts/verify-snapshot-diff.mjs",
+    "census:reading": "node scripts/x402-census/take-reading.mjs",
     "test:siteclaims": "node scripts/verify-site-claims.mjs",
     "gate:sitelive": "node scripts/verify-site-live.mjs && node scripts/record-guard-run.mjs gate:sitelive",
     "deploy:site": "node scripts/deploy-site.mjs && npm run gate:sitelive",

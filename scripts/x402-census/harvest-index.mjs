@@ -26,7 +26,7 @@
 // SAME keys AND THE SAME VALUES as circle-index-2026-08-27 so the two are diffable. See the payTo
 // comment below for what one line of "tidying" did to the first attempt at this file.
 
-import { writeFileSync, existsSync } from "node:fs";
+import { writeFileSync, existsSync, readdirSync } from "node:fs";
 
 const BASE = "https://api.circle.com/v2/x402/discovery/resources";
 const PAGE = 100;
@@ -39,6 +39,10 @@ if (existsSync(OUT)) {
   console.error(`✖ ${OUT} already exists. A snapshot is dated and immutable — refusing to overwrite.`);
   process.exit(2);
 }
+// ⭐ WHICH READING THIS IS, READ FROM DISK — the first draft hard-coded "Second dated reading", which
+// would have been a false claim inside every harvest after the second. A field must hold in every case.
+const PRIOR = readdirSync(new URL("./", import.meta.url)).filter((f) => /^circle-index-\d{4}-\d{2}-\d{2}\.harvest\.json$/.test(f)).sort();
+const ORDINAL = ["first", "second", "third", "fourth", "fifth", "sixth"][PRIOR.length] ?? `${PRIOR.length + 1}th`;
 
 const listings = [];
 const totalsSeen = [];
@@ -116,7 +120,7 @@ if (missing.length) {
 
 writeFileSync(OUT, JSON.stringify({
   _what: `Circle x402 discovery index, harvested ${date}, ALL networks. A projection — see _droppedFields and _cannotAnswer.`,
-  _why: "Second dated reading, to sit alongside circle-index-2026-08-27 and make a DIFF possible. Never replaces it.",
+  _why: `Dated reading number ${PRIOR.length + 1} (the ${ORDINAL}), to sit alongside ${PRIOR.map((f) => f.replace(".harvest.json", "")).join(", ") || "nothing yet"} and make a DIFF possible. Never replaces any of them.`,
   source: `${BASE}?limit=${PAGE}&offset=N — fetched DIRECTLY.`,
   _siwx: "NO siwx parameter sent, in either direction. The CLI appends siwx=false, which on 2026-08-27 hid 165 of 1,003 listings INCLUDING EVERY TESTNET ROW. The sentinel counts below are the proof this harvest was unfiltered.",
   harvestedAt: startedAt,
@@ -149,4 +153,4 @@ writeFileSync(OUT, JSON.stringify({
 }, null, 1) + "\n");
 
 console.log(`\n✅ SELF-CHECK PASSED — written to ${OUT}`);
-console.log(`   ⚠️ This is a SECOND dated reading. It does not replace 2026-08-27; the pair is the point.`);
+console.log(`   ⚠️ This is the ${ORDINAL.toUpperCase()} dated reading. It replaces none of ${PRIOR.length} before it; the pairs are the point.`);

@@ -1,5 +1,89 @@
 ---
 
+# THE THIRD READING IS SCHEDULED, AND ITS NUMBER WAS DEFINED BEFORE IT EXISTS
+
+**2026-09-11, evening. NOTHING FETCHED. NOTHING PUBLISHED.** The third harvest of the Circle x402
+Discovery index is set for **2026-09-25** — a fortnight after the second, matching the 08-27 → 09-11
+interval so the two new pairs span comparable gaps. On the day it is one command:
+`npm run census:reading`. Today that command **refuses with exit 3**, and the suite asserts it does.
+
+## ⛔ THE DATE COLLISION WAS THE GUARD WORKING
+
+The instruction arrived as "run the third harvest" on a day that already owned a harvest. The
+harvester keys its file on the DATE and refuses to overwrite (`harvest-index.mjs`, the `existsSync`
+check) — so a same-day third reading cannot exist, and **that is the property that makes the set
+trustworthy**, not an obstacle. ⛔ The tempting workaround — a time component in the filename — was
+declined: it changes the recorded naming method, and a ten-hour interval answers nothing about a
+fortnight. The date was chosen; the command now carries it as `NOT_BEFORE`.
+
+## ⭐⭐⭐ THE NUMBER, RECORDED NOW SO NOBODY RE-DERIVES IT ON THE DAY
+
+Every diff page says *"unchanged ≠ stable"* and can only disclaim it. A third reading is the first
+instrument that can put a number on the caveat. `stabilityAcrossThree(a, b, c)` in
+`shared/x402-diff.mjs` — pure, fixture-tested, same set-valued join as `diffHarvests`, same gate —
+partitions every key present in all three readings into five states, and two of them are the point:
+
+| state | means | which pair it indicts |
+|---|---|---|
+| **`unchangedThenChanged`** ⭐ | a == b ≠ c | **08-27..09-11 said "unchanged"; 09-25 shows it moved.** How many keys a pair-only reader would have called settled that were not — *whether a pair ever misled us.* |
+| **`changedThenReverted`** ⭐ | a ≠ b, a == c | **08-27..09-25 says "unchanged"; 09-11 saw a different value.** The caveat's own "changed and changed back", counted. |
+| `unchangedAcrossAllThree` | a == b == c | none — and still not "stable", only silent at three instants |
+| `changedThenHeld` / `changedTwice` | a ≠ b == c / all differ | neither pair misled |
+
+`pairMisled.byFirstPair` and `.bySpanPair` sum those over payTo and amount. ⛔ The result never
+says "stable"; a zero in both is silence over these keys at these instants, and the suite asserts
+the word is absent.
+
+## ⭐ `pairsFor` NOW EMITS EVERY ORDERED PAIR, NOT ONLY ADJACENT ONES
+
+Adjacent-only would have produced `09-11..09-25` and never `08-27..09-25` — hiding exactly the
+span comparison the `changedThenReverted` row indicts. Three dates → three pairs; two dates → one,
+so nothing served today changes (§8 asserts `DIFF_PAIRS.length === 1` still). Sorted `from..to`,
+the last entry remains the newest adjacent pair, which the bare `/snapshot/diff` redirect relies on.
+
+## ⛔ WHAT THE DAY'S COMMAND CANNOT DO, AND PRINTS INSTEAD
+
+The diff route and the snapshot page import harvests **statically**, and the snapshot page carries
+hand-written MEASURED prose per date. Neither can be pre-wired for a file that does not exist, and
+neither should be script-generated. So `take-reading.mjs` spawns the harvester (byte-identical
+method: no `siwx`, discard unless Base Sepolia AND Polygon Amoy both appear, no `.toLowerCase()`
+on payTo — all three live in the harvester, the wrapper adds nothing), prints the five counts the
+moment the file lands, and then prints the wiring steps anchored on **symbols**: `HARVESTS`/`LABEL`
+in `snapshot-diff.mjs`, a `SNAPSHOTS` entry in `snapshot.mjs`, the numbers under the existing
+"unchanged is not stable" `<h2>`, then `test:all` (§0 goes red on a harvest with no page), commit,
+deploy, `gate:deployed`. A session's work with tests — the same as the second reading.
+
+## SMALLER, IN THE SAME STRETCH
+
+* The harvest's `_why` field hard-coded *"Second dated reading"* — a claim that would have been
+  false inside every harvest after the second. Now derived from the files on disk (ordinal + the
+  dates it sits beside). Metadata only; the method is untouched. [[field-name-must-be-true-in-every-case]]
+* **A fixture that agreed with itself passed a wrong wiring.** The first §8 fixture had
+  `changedThenHeld == changedThenReverted == 1`, and a mutation pointing `bySpanPair` at the wrong
+  counter stayed green. Every counter now has a distinct value (3 / 1 / 2 / 5 / 4).
+  [[fixtures-that-agree-cannot-discriminate]]
+* 🚨 **I destroyed my own uncommitted edits with `git checkout <file>`** while restoring after a
+  mutation, then ran the next mutation against HEAD and read "0 red" — on a suite that had crashed
+  at import. Redone from a scratch copy; every later restore came from that copy, never from git.
+  [[a-later-command-is-not-proof-of-an-earlier-one]]
+
+**Mutations: 9 run, 9 caught** — the-number counted under the wrong condition, adjacent-only
+pairs, reverted folded into changed-twice, the third reading ignored in comparability (caught by a
+crash, exit 1), the gate trusting two readings, `bySpanPair` and `byFirstPair` each wired to the
+wrong counter, `partitions` forced true, and the date guard removed from the command (exit 2 ≠ 3:
+the harvester's own overwrite guard refused, and the suite noticed the wrong exit code).
+
+**Files.** `shared/x402-diff.mjs` (+`stabilityAcrossThree`, `pairsFor` all-pairs),
+`scripts/x402-census/take-reading.mjs` (new), `scripts/x402-census/harvest-index.mjs` (`_why`
+derived), `scripts/verify-snapshot-diff.mjs` (§8, **103** assertions, was 83), `package.json`
+(`census:reading`). `test:all` **117/0, exit 0** (read from `$?`), 8.5 min. ⚠️ **UNDEPLOYED by choice:** nothing served changes
+for two readings; the 2026-09-25 deploy carries it.
+
+⛔ **Not done, by instruction:** the 402-liveness probe on the 27 repointed offers. The page names
+it as the discriminator and records it as not performed — that record is complete.
+
+---
+
 # THE COMPARISON — AND A 502 THAT SURVIVED test:all BECAUSE THE PAGE HAD NO TEST
 
 **2026-09-11, later the same day.** `/snapshot/diff/2026-08-27..2026-09-11` is live beside the two
