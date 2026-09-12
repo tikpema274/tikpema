@@ -43,6 +43,7 @@ import CustodyNotice from "./CustodyNotice";
 import WalletGuardNotice from "./WalletGuardNotice";
 import { decodeAndVerifySwap, SwapDecodeError, type DecodedSwap } from "../lib/decodeSwapCalldata";
 import { displayAmount } from "../lib/formatAmount";
+import SwapTabs from "./SwapTabs";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 type Token = "USDC" | "EURC";
@@ -271,6 +272,7 @@ export default function ManualSwapPanel({ wallet: w }: { wallet: UnifiedWallet }
   if (!isMetaMask) {
     return (
       <div className="plane">
+        <SwapTabs active="manual" />
         <div className="panel-eyebrow">Swap · your own wallet</div>
         <h2>Swap from your own wallet</h2>
         {/* 🚨 THIS PANEL IS WHY THE COMPONENT EXISTS. It used to branch on `activeKind` alone and
@@ -288,6 +290,7 @@ export default function ManualSwapPanel({ wallet: w }: { wallet: UnifiedWallet }
 
   return (
     <div className="plane plane--form">
+      <SwapTabs active="manual" />
       <div className="panel-eyebrow">Swap · your own wallet</div>
       <h2>Swap from your own wallet</h2>
       <div className="sub">

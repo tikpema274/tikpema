@@ -22,6 +22,7 @@ export type SwapFillFloorSource = "circle" | "caller" | "unknown";
 export declare function swapFillFloorSource(requestBody: unknown): SwapFillFloorSource;
 export interface SwapFillFloorCopy {
   readonly summary: string;
+  readonly single: string;
 }
 export declare const SWAP_FILL_FLOOR_COPY: Readonly<Record<SwapFillFloorSource, SwapFillFloorCopy>>;
 export declare function swapFillFloorCopy(v: unknown): SwapFillFloorCopy;

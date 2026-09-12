@@ -71,6 +71,9 @@ export const COMPONENTS = {
   // destination is visible. Its suite renders the review with real numbers and asserts the
   // beneficiary appears IN FULL — a truncation would silently undo the panel's whole purpose.
   ManualSwapPanel:      { suite: "verify-manual-swap-copy.tsx" },
+  // The swap-surface tab strip. Its one claim is the Recurring "paused" pill, bound to the gate and
+  // asserted (present iff gated, agreeing with the page notice) in verify-dca-fill-floor-copy.
+  SwapTabs:             { suite: "verify-dca-fill-floor-copy.tsx" },
   // ⭐ THE ONE STATEMENT OF THE CUSTODY POSITION, consumed by all three self-signed panels. It
   // exists because three copies of this sentence had already drifted (send/bridge identical, swap
   // divergent) AND the suites drifted with them — one weakened its regex to

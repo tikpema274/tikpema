@@ -165,7 +165,9 @@ import { budgetConfig, dcaDaySpend } from "./_budget.mjs";
 // ⚠️ The unblock condition, the guard that enforces (4), and the scope note below all stay — this
 // flag flipping is not permission to delete the reasoning that produced it. Flip it BACK to true
 // if any of the four stops holding; the conditions are the standing bar, not a one-time hurdle.
-export const CREATE_GATED = false;
+// ⛔ ONE SOURCE, shared with the client tab strip so the pill, the page notice, and this enforcement
+// cannot disagree. Flip it in shared/dca-gate.mjs. [[dca-gate]]
+export { DCA_CREATE_GATED as CREATE_GATED } from "../../shared/dca-gate.mjs";
 
 export const MANDATE_STORE = "dca-mandates";
 export const FILLS_STORE = "dca-fills";       // idempotency claims + per-fill audit

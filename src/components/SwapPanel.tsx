@@ -2,12 +2,33 @@ import { useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import { describeError } from "../lib/describeError";
 import { displayAmount } from "../lib/formatAmount";
+import SwapTabs from "./SwapTabs";
+// ⛔ The floor row is DERIVED from the executing swap's request body, not written here: this path
+// runs executeAction → _swap B1 (createSwap) with no slippage param, so Circle's minTokenOut binds.
+// If _swap ever sends slippage, SWAP_FILL_FLOOR_SOURCE flips and the fill-floor guard reddens.
+import { swapFillFloorCopy, SWAP_FILL_FLOOR_SOURCE } from "../../shared/swap-fill-floor.mjs";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 type Token = "USDC" | "EURC";
 
 const shortAddr = (a: string) =>
   a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
+
+// ⭐ THE SUMMARY BLOCK — its own component so the static preview can render the "amount entered"
+// state (renderToStaticMarkup emits only a panel's INITIAL state). No live price exists on this
+// path (the agent executes directly, no quote), so the rows carry the MECHANIC, never a number the
+// panel cannot know before execution — the reference-UI defect this deliberately avoids.
+export function AgentSwapSummary({ amount, tokenIn, tokenOut }: { amount: number; tokenIn: Token; tokenOut: Token }) {
+  return (
+    <div className="summary-block">
+      <div className="summary-row"><span>Amount</span><b className="mono">{amount} {tokenIn} → {tokenOut}</b></div>
+      <div className="summary-row"><span>Signed by</span><span>a server key, within your per-swap cap and daily ceiling</span></div>
+      {/* ⛔ NOT a number — no quote exists on this path. The rate is stated as a mechanic. */}
+      <div className="summary-row"><span>Rate</span><span>the current rate when it runs — indicative until then</span></div>
+      <div className="summary-row"><span>Minimum out</span><span>{swapFillFloorCopy(SWAP_FILL_FLOOR_SOURCE).single}</span></div>
+    </div>
+  );
+}
 
 // SwapPanel — the Swap USDC<->EURC form, matching SendPanel. It does NOT touch the
 // swap engine (_swap.mjs / App Kit): it builds a structured swap_tokens action and
@@ -64,6 +85,7 @@ export default function SwapPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   if (!w.agentWallet) {
     return (
       <div className="plane">
+        <SwapTabs active="agent" />
         <div className="panel-eyebrow">Swap</div>
         <h2>Swap USDC ↔ EURC</h2>
         <div className="sub" style={{ marginBottom: 0 }}>
@@ -85,6 +107,7 @@ export default function SwapPanel({ wallet: w }: { wallet: UnifiedWallet }) {
 
   return (
     <div className="plane">
+      <SwapTabs active="agent" />
       <div className="panel-eyebrow">Swap</div>
       {/* ⭐ THE TITLE CARRIES THE DISTINCTION, not just body text. Two swap forms — one capped,
           one not — is a materially higher confusion risk than bridge or send ever had. */}
@@ -138,10 +161,15 @@ export default function SwapPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         <span className="status" style={{ margin: 0 }}>
           {tokenIn}
         </span>
-        <button className="emerald" disabled={swapping || !amountValid} onClick={swap}>
-          {swapping ? "Swapping…" : `Swap ${amountValid ? amountNum : 0} ${tokenIn}`}
-        </button>
       </div>
+
+      {/* ⭐ THE SUMMARY BLOCK, once there is an amount to describe. No quote exists on this path,
+          so it states the mechanic (incl. the producer-bound floor row), never a pre-quote figure. */}
+      {amountValid && <AgentSwapSummary amount={amountNum} tokenIn={tokenIn} tokenOut={tokenOut} />}
+
+      <button className="emerald btn-wide" disabled={swapping || !amountValid} onClick={swap}>
+        {swapping ? "Swapping…" : `Swap ${amountValid ? amountNum : 0} ${tokenIn}`}
+      </button>
 
       {confirm && (
         <div className="status" style={{ color: "var(--emerald)" }}>

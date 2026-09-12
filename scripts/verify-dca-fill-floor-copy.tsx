@@ -24,7 +24,10 @@ import {
   SWAP_FILL_FLOOR_SOURCES, SWAP_FILL_FLOOR_COPY, SWAP_FILL_FLOOR_SOURCE,
   swapFillFloorSource, swapFillFloorCopy, swapExecuteRequestBody, SLIPPAGE_KEYS,
 } from "../shared/swap-fill-floor.mjs";
-const { default: DcaPanel } = await import("../src/components/DcaPanel");
+const { default: DcaPanel, DcaCreatePausedNotice } = await import("../src/components/DcaPanel");
+const { AgentSwapSummary } = await import("../src/components/SwapPanel");
+const { default: SwapTabs } = await import("../src/components/SwapTabs");
+const { DCA_CREATE_GATED } = await import("../shared/dca-gate.mjs");
 
 let pass = 0, fail = 0;
 const check = (l: string, c: unknown, x = "") => {
@@ -44,7 +47,8 @@ console.log("╚═════════════════════�
 // ── 1. THE CLOSED SET, BOTH DIRECTIONS ─────────────────────────────────────────────────────────
 check("⭐ three sources, and `unknown` is one of them",
   JSON.stringify(SWAP_FILL_FLOOR_SOURCES) === JSON.stringify(["circle", "caller", "unknown"]));
-check("⭐⭐ every source has copy", SWAP_FILL_FLOOR_SOURCES.every((s) => !!SWAP_FILL_FLOOR_COPY[s]?.summary));
+check("⭐⭐ every source has copy (both the recurring `summary` and the single-swap `single`)",
+  SWAP_FILL_FLOOR_SOURCES.every((s) => !!SWAP_FILL_FLOOR_COPY[s]?.summary && !!SWAP_FILL_FLOOR_COPY[s]?.single));
 check("⭐⭐ …and every copy key is a declared source — no dead entries",
   Object.keys(SWAP_FILL_FLOOR_COPY).every((k) => SWAP_FILL_FLOOR_SOURCES.includes(k as never)));
 
@@ -88,6 +92,37 @@ check("⛔ …and says a per-fill minimum EXISTS", /minimum/i.test(circleCopy) &
 // ⛔ NO PERCENTAGE — a rate stated as a property is the ≤1%/~3% error this replaces.
 check("⛔ the floor sentence states NO percentage (no ≤1% / ~3% figure)",
   !/%|\bpercent\b|\b\d+(\.\d+)?\s*%/.test(circleCopy), circleCopy);
+
+// ── 5. THE AGENT SWAP SUMMARY renders the single-swap floor copy, same producer binding ─────────
+const agentRendered = strip(React.createElement(AgentSwapSummary, { amount: 25, tokenIn: "USDC", tokenOut: "EURC" } as never));
+const circleSingle = SWAP_FILL_FLOOR_COPY.circle.single;
+check("⭐⭐ AgentSwapSummary renders the `circle` single-swap floor sentence (from the shared module)",
+  agentRendered.includes(circleSingle));
+check("⭐ …and NOT the `caller` single sentence", !agentRendered.includes(SWAP_FILL_FLOOR_COPY.caller.single));
+check("⛔ the single sentence NAMES Circle and set-at-execution", /Circle/.test(circleSingle) && /when it runs|at the moment it runs/i.test(circleSingle));
+check("⛔ the single sentence states NO percentage", !/%|\bpercent\b/.test(circleSingle), circleSingle);
+// ⛔ the agent path has no live quote — it must NOT state a rate/impact/fee NUMBER pre-execution.
+check("⛔ AgentSwapSummary states no pre-quote figure (no %/USDC-out number in the rate/min rows)",
+  !/\d+(\.\d+)?\s*%/.test(agentRendered));
+
+// ── 6. THE TAB STRIP — labels carry the product difference, and the paused pill agrees with the gate ─
+const tabsPaused = strip(React.createElement(SwapTabs, { active: "recurring", dcaPaused: true } as never));
+const tabsOpen = strip(React.createElement(SwapTabs, { active: "recurring", dcaPaused: false } as never));
+check("⭐ tab labels name WHO/WHEN, not order types (no Market/Limit/DCA)",
+  tabsPaused.includes("Agent swap") && tabsPaused.includes("Sign it yourself") && tabsPaused.includes("Recurring")
+  && !/\bMarket\b/.test(tabsPaused) && !/\bLimit\b/.test(tabsPaused));
+check("⛔ paused pill shows when the gate is on", /paused/i.test(tabsPaused));
+check("⛔ …and is ABSENT when the gate is off (not a decoration)", !/paused/i.test(tabsOpen));
+// ⭐⭐ THE PILL AND THE PAGE NOTICE AGREE — both trace to the gate, so the strip's "paused" and the
+// page's "New schedules are paused" cannot say different things.
+const pausedNotice = strip(React.createElement(DcaCreatePausedNotice, {} as never));
+check("⭐⭐ the paused pill and the page notice agree (both say paused)",
+  /paused/i.test(tabsPaused) && /New schedules are paused/i.test(pausedNotice));
+// ⭐ THE DEFAULT PILL STATE IS THE SHARED GATE — no second source. A change to DCA_CREATE_GATED
+// moves the live pill without touching this component.
+const tabsDefault = strip(React.createElement(SwapTabs, { active: "recurring" } as never));
+check("⭐ default (no prop) reflects DCA_CREATE_GATED (the single gate source)",
+  /paused/i.test(tabsDefault) === DCA_CREATE_GATED, `gate=${DCA_CREATE_GATED}`);
 
 console.log(`\n${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

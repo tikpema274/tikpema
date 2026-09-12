@@ -911,3 +911,53 @@ button.btn-wide { display: block; width: 100%; margin-top: 14px; padding: 13px 0
   .fold > .fold-note { padding: 0 18px; }
   .fold > *:last-child { padding-bottom: 20px; }
 }
+
+/* ── Swap surface tab strip (SwapTabs.tsx) ────────────────────────────────────────────────────
+   Wayfinding across the three swap PAGES (agent / manual / recurring). Tabs are links, not a
+   segmented toggle — they navigate. Amber-on-ink, same accent grammar as the nav rail. */
+.swap-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 2px;
+}
+.swap-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 10px 10px 0 0;
+  color: var(--paper-dim);
+  font-family: "Space Mono", monospace;
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+}
+.swap-tab:hover {
+  color: var(--paper);
+  background: rgba(236, 230, 216, 0.05);
+}
+.swap-tab.active {
+  color: var(--amber-hi);
+  background: var(--amber-soft);
+  border-bottom-color: var(--amber);
+}
+.swap-tab-pill {
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: 999px;
+  padding: 1px 7px;
+  opacity: 0.85;
+}
+@media (max-width: 440px) {
+  .swap-tabs { gap: 2px; }
+  .swap-tab { padding: 8px 10px; font-size: 0.74rem; }
+}

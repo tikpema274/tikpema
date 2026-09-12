@@ -63,22 +63,28 @@ export function swapFillFloorSource(requestBody) {
  * unable to state another. ⛔ No percentage in any of them: a rate stated as a property is exactly
  * the "≤1% worse" / "~3%" error this exists to prevent.
  */
+// ⭐ TWO PHRASINGS OF THE SAME FACT, ONE PRODUCER. `summary` is for a recurring mandate ("each
+// fill"); `single` is for one swap now (the agent path, which executes directly). Both are bound to
+// the same derived source, so a slippage param flips BOTH — there is no second producer to drift.
 export const SWAP_FILL_FLOOR_COPY = Object.freeze({
   circle: Object.freeze({
     summary:
       "Each fill has an on-chain minimum below which it will not swap. That minimum is set by " +
       "Circle at the moment each fill runs — it is not a rate Tikpema picks in advance — so it " +
       "moves with the market from one fill to the next.",
+    single:
+      "This swap will not go through below an on-chain minimum set by Circle at the moment it " +
+      "runs — not a rate Tikpema picks in advance.",
   }),
   caller: Object.freeze({
     // Only reachable once _swap sends a slippage param. Named so the guard reddens BEFORE this ships.
-    summary:
-      "Each fill will not swap below a minimum Tikpema sets in advance for every fill.",
+    summary: "Each fill will not swap below a minimum Tikpema sets in advance for every fill.",
+    single: "This swap will not go below a minimum Tikpema sets in advance.",
   }),
   unknown: Object.freeze({
     // ⛔ Claims neither. A body we could not inspect cannot say whose minimum binds.
-    summary:
-      "How each fill's on-chain minimum is set could not be determined.",
+    summary: "How each fill's on-chain minimum is set could not be determined.",
+    single: "How this swap's on-chain minimum is set could not be determined.",
   }),
 });
 

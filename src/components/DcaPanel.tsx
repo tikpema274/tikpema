@@ -8,6 +8,20 @@ import { describeError } from "../lib/describeError";
 // each fill routes executeAction → _swap B1 (createSwap) which sends no slippage param, so Circle's
 // minTokenOut binds. If _swap ever sends slippage, SWAP_FILL_FLOOR_SOURCE flips and the guard reddens.
 import { swapFillFloorCopy, SWAP_FILL_FLOOR_SOURCE } from "../../shared/swap-fill-floor.mjs";
+import SwapTabs from "./SwapTabs";
+
+// ⭐ EXPORTED so the static preview can render the paused page notice BESIDE the Recurring tab's
+// paused pill and show they agree — the fetch that flips `createGated` never runs under
+// renderToStaticMarkup. Rendered inside DcaPanel only when the gate is on.
+export function DcaCreatePausedNotice() {
+  return (
+    <div style={{ marginTop: 10, border: "1px solid var(--warn)", borderRadius: 10, padding: "12px 16px", fontSize: 14, lineHeight: 1.6 }}>
+      <b>New schedules are paused.</b> We're not accepting new recurring swaps while we finish
+      work on how unconfirmed swaps are counted against your daily limit.{" "}
+      <b>Any schedule you already have keeps running, and you can still cancel it below.</b>
+    </div>
+  );
+}
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 type Token = "USDC" | "EURC";
@@ -199,6 +213,7 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
 
   return (
     <div className="plane">
+      <SwapTabs active="recurring" />
       <div className="panel-eyebrow">Recurring swap · DCA</div>
       <h2>Swap on a schedule, while you're away.</h2>
       {/* ═══ ⭐ SIGNED OUT, THIS PAGE WAS A WALL ════════════════════════════════════════════════
@@ -212,23 +227,10 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       )}
 
       {/* ── 🚧 THE GATE NOTICE. Says what is closed AND what still works, because a user with a
-          running schedule must never be left wondering whether they can still stop it. ────── */}
-      {createGated && (
-        <div
-          style={{
-            marginTop: 10,
-            border: "1px solid var(--warn)",
-            borderRadius: 10,
-            padding: "12px 16px",
-            fontSize: 14,
-            lineHeight: 1.6,
-          }}
-        >
-          <b>New schedules are paused.</b> We're not accepting new recurring swaps while we finish
-          work on how unconfirmed swaps are counted against your daily limit.{" "}
-          <b>Any schedule you already have keeps running, and you can still cancel it below.</b>
-        </div>
-      )}
+          running schedule must never be left wondering whether they can still stop it. Its wording
+          must AGREE with the Recurring tab's pill — both trace to the same gate — so it is an
+          exported component the preview renders beside the paused pill to prove they agree. ────── */}
+      {createGated && <DcaCreatePausedNotice />}
 
       {/* ── THE CUSTODIAL DISCLOSURE BAND — LEADS THE PAGE, BEFORE THE FORM. ──────────────
           Not a tooltip, not below the fold, not softened. Reads back the user's live numbers.
