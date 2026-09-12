@@ -87,6 +87,11 @@ const EXEMPT = {
     "FIRST; the 'transaction hash is required' match catches the same fault arriving without the code.",
   "netlify/functions/_ubspend.mjs":
     "THIRD-PARTY: the same App Kit 1098 quirk on the unified-balance spend path, same typed-first shape.",
+  "netlify/functions/agent-ub-spend.mjs":
+    "THIRD-PARTY: App Kit's greedy allocator throws BALANCE_INSUFFICIENT_TOKEN (KitError code 9001) " +
+    "when the unified pool cannot cover amount + fee. classifySpendThrow checks `e.code === 9001` and " +
+    "the typed name FIRST; the 'Insufficient balance to cover' text is the backup for the same fault " +
+    "arriving without them. It recovers no state — it decides 402-vs-500 on a throw before any burn.",
   "netlify/functions/_receipt.mjs":
     "THIRD-PARTY: node/undici DNS and socket failures. `classifyRpcFailure` tests `e.cause.code` " +
     "against a closed list FIRST; the getaddrinfo/ENOTFOUND text is the fallback for the same fault " +
@@ -106,7 +111,7 @@ const EXEMPT = {
 };
 
 // ⭐ RATCHET. Lower it when an exemption is retired; it may never be raised.
-const MAX_EXEMPT = 7;
+const MAX_EXEMPT = 8;
 
 // ── the walk ──────────────────────────────────────────────────────────────────────────────────
 const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) =>

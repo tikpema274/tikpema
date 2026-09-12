@@ -7,6 +7,51 @@ import { canSpendDay, recordAgentSpend, makeRefuser, REFUSAL } from "./_budget.m
 import { AGENT } from "./_agents.mjs";
 import { assertNotPaused } from "./_pause.mjs";
 import { ubSpend } from "./_ubspend.mjs";
+import { GATEWAY } from "./_gateway.mjs";
+
+// ── read-only: the owner's Arc UNIFIED balance (the pool the spend sources from). Necessary-not-
+// sufficient: the cross-chain fee is added ON TOP at execution (measured 2026-09-12: recipient got
+// the full amount, source paid amount + ~0.056), so `unified < amount` is a certain shortfall while
+// the fee BOUNDARY is caught in the catch as a 402 too. A failed read returns null → we do NOT
+// refuse on a read we could not make (the SDK's own allocator still gates, classified below).
+async function unifiedArcBalance(depositor) {
+  try {
+    const res = await fetch(`${GATEWAY.API_BASE}/v1/balances`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: "USDC", sources: [{ domain: GATEWAY.ARC_DOMAIN, depositor }] }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const b = Array.isArray(data?.balances) ? data.balances[0] : null;
+    const n = Number(b?.balance);
+    return Number.isFinite(n) ? n : null;
+  } catch { return null; }
+}
+
+// ⭐⭐ A CLIENT CONDITION IS A 402, NOT A 500. The SDK's greedy allocator throws
+// BALANCE_INSUFFICIENT_TOKEN (KitError code 9001) when the pool cannot cover amount + fees — a USER
+// condition, not a fault: the allocator throws BEFORE any burn intent is signed, so no funds move.
+// A blanket `catch → 500` made that indistinguishable from a real break to any monitor (a 500 pages
+// an operator for a user error) — the same class as a 200 that hides a failure. So classify:
+// typed-first (code / name), prose ("Insufficient balance to cover") as the backup for the same
+// fault surfaced without them. Everything else stays a 500. Exported so a suite drives it directly.
+// [[check-whose-failure-mode-is-a-pass]] [[verify-facts-before-sharing-words]]
+export function classifySpendThrow(e, amount) {
+  const msg = e?.message || "";
+  const insufficient =
+    e?.code === 9001 ||
+    /BALANCE_INSUFFICIENT_TOKEN/.test(`${e?.name ?? ""} ${msg}`) ||
+    /insufficient balance to cover/i.test(msg);
+  if (insufficient) {
+    return { status: 402, body: {
+      error: `Insufficient unified balance to cover ${amount} USDC plus the cross-chain fee. No funds moved — top up and retry.`,
+      need: amount, blocked: true,
+    } };
+  }
+  return { status: 500, body: { error: msg } };
+}
 
 // POST /api/agent-ub-spend { recipientAddress, amountUsdc, destinationChain? }  (auth)
 //
@@ -107,6 +152,19 @@ export async function handler(event) {
   const day = await canSpendDay({ amountUsdc: amount, owner });
   if (!day.allowed) return json(400, { error: await refuse(REFUSAL.DAY_CEILING, day.reason, amount), blocked: true });
 
+  // ── PRE-FLIGHT BALANCE CHECK — the DEPOSIT's model (pre-check → 402 that names the figures),
+  // BEFORE any signing. The unified pool must at least cover the amount; the cross-chain fee is
+  // added on top at execution, so this catches a gross shortfall cheaply and the fee boundary is
+  // classified as a 402 in the catch. ⛔ We refuse ONLY on a read that succeeded and is short — a
+  // failed read (null) never refuses (do not turn an unreadable balance into a false decline). ──
+  const unified = await unifiedArcBalance(owner);
+  if (unified != null && unified < amount) {
+    return json(402, {
+      error: `Insufficient unified balance: ${unified} USDC on Arc, need at least ${amount} USDC plus the cross-chain fee. No funds moved — top up and retry.`,
+      available: unified, need: amount, blocked: true,
+    });
+  }
+
   try {
     const r = await ubSpend({
       recipientAddress,
@@ -141,6 +199,8 @@ export async function handler(event) {
       spender: owner,
     });
   } catch (e) {
-    return json(500, { error: e.message });
+    // ⛔ NOT a blanket 500. A client insufficient-balance condition → 402; only a real fault → 500.
+    const c = classifySpendThrow(e, amount);
+    return json(c.status, c.body);
   }
 }
