@@ -1,5 +1,39 @@
 ---
 
+# ✅ THE 500 BLANKET CATCH IS FIXED — A CLIENT INSUFFICIENT-BALANCE IS NOW A 402
+
+**2026-09-12.** `18c0396`, pushed to `origin/main` (`a292297..18c0396`). NOT yet deployed — the fix
+reaches app.tikpema.xyz only on the next `deploy:prod`. Closes queued item #1 below.
+
+`agent-ub-spend.mjs` used to end `catch (e) { return json(500, { error: e.message }) }`. App Kit's
+greedy allocator throws `BALANCE_INSUFFICIENT_TOKEN` (KitError code 9001) when the unified pool
+cannot cover **amount + the cross-chain fee** — a USER condition (it throws BEFORE any burn intent is
+signed, so **no funds move**). The blanket catch paged an operator for a user error and was
+indistinguishable from a real break to any monitor — the 500 mirror of a 200 that hides a failure.
+
+## WHAT CHANGED
+- **`classifySpendThrow(e, amount)`** — exported pure classifier. **Typed-first** (`code === 9001` /
+  name `BALANCE_INSUFFICIENT_TOKEN`), the prose `"Insufficient balance to cover"` as the **backup**
+  for the same fault surfaced bare → **402** (names amount + fee, "no funds moved"). Everything else
+  stays **500** — a classifier that laundered all throws to 402 would hide real faults, the mirror of
+  the bug. Both directions asserted.
+- **Pre-flight** after the day-ceiling gate: reads the owner's Arc unified balance (read-only Gateway
+  POST) and refuses **402 naming the figures** ONLY when the read succeeds and is short. A failed read
+  (`null`) **never refuses** — an unreadable balance is not a false decline. Deposit's model.
+- The fee is added on top at execution, so a fee-boundary shortfall the pre-flight can't see is caught
+  in the catch as a 402 too. [[ub-spend-headroom-and-500-blanket-catch]]
+
+## VERIFICATION
+- `verify-ub-spend-refusal.mjs` (new suite, wired into `test:all` + the `suites` array): **8/0**.
+  Drives the classifier both directions — three shapes of the fault → 402, an unrelated fault + a
+  1098 async quirk → 500, amount echoed not hard-coded. **Mutation-checked**: blanket-500 → 6 red;
+  launder-all-to-402 → 3 red. [[check-whose-failure-mode-is-a-pass]]
+- `verify-no-prose-state-recovery`: declared a **THIRD-PARTY exemption** for the App Kit message
+  match (typed-first, recovers no state); ratchet **7 → 8**; **15/15**.
+- `test:all` **119/119**, `tsc --noEmit` clean, build stamp null, gitleaks clean.
+
+---
+
 # ✅ THE UB SPEND LANDED — ROW 2 CONFIRMED ON CHAIN, RECONCILED AGAINST THE PRE-REGISTRATION
 
 **2026-09-12.** The cross-chain UB spend executed end to end, both sides read on chain (not inferred).
@@ -38,9 +72,8 @@ so it is safe for headroom (the 1.0 top-up left ample margin). [[ub-spend-headro
   proven live. [[erc8004-identity-brick3-state]] neighbours; see the pre-reg for the immutable claim.
 
 ## ⛔ STILL UNFIXED — queued (see [[decisions-open-verified]])
-1. **The 500 blanket catch** — `agent-ub-spend.mjs` returns 500 for a client insufficient-balance
-   condition; a user error and a real fault are indistinguishable to a monitor. Deposit's shape
-   (pre-check → 402 naming figures) is the model.
+1. ~~**The 500 blanket catch**~~ — ✅ **FIXED 2026-09-12 (`18c0396`, pushed; NOT yet deployed).** See
+   the top section. A client insufficient-balance is now a 402; only a real fault is a 500.
 2. **The 202 echo** — `agent-ub-deposit` returns the REQUESTED `amountUsdc` with no "settled-so-far"
    field beside it, readable as a funded balance. Add a settled figure or rename.
 
