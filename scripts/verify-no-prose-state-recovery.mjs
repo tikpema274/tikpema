@@ -83,8 +83,11 @@ const EXEMPT = {
     "(BlobsConsistencyError / MissingBlobsEnvironmentError) and falls back to the library's fixed " +
     "message text only so a future RENAME of the class still classifies. Typed-first, prose-as-backup.",
   "netlify/functions/_pay.mjs":
-    "THIRD-PARTY: Circle App Kit's async-waiter quirk (issue 1098). `e?.code === 1098` is checked " +
-    "FIRST; the 'transaction hash is required' match catches the same fault arriving without the code.",
+    "THIRD-PARTY: Circle App Kit error text on TWO surfaces. (1) the async-waiter quirk (issue 1098) " +
+    "— `e?.code === 1098` FIRST, the 'transaction hash is required' match catches it without the code. " +
+    "(2) classifyPayThrow — the mint leg reverts for a non-Gateway recipient with code 5001 checked " +
+    "alongside App Kit's 'Requested resource not found' / 'Mint failure' text; it recovers no state, it " +
+    "decides 4xx-vs-500 on a throw before any burn, and drops the SDK's calldata + retry advice.",
   "netlify/functions/_ubspend.mjs":
     "THIRD-PARTY: the same App Kit 1098 quirk on the unified-balance spend path, same typed-first shape.",
   "netlify/functions/agent-ub-spend.mjs":

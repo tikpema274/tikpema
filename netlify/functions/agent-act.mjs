@@ -871,6 +871,12 @@ export async function handler(event) {
     if (e instanceof TxPendingError) {
       return json(202, { executed: true, pending: true, txId: e.txId, error: e.message });
     }
+    // ⛔ A CLASSIFIED PAY FAILURE CARRIES ITS OWN STATUS AND NO CALLDATA. agentPay wraps every spend
+    // throw (recipient-unpayable → 4xx; anything else → sanitised 500) so the raw SDK mint error —
+    // ~600 chars of calldata plus a "reattempt via config.retry" the user can't act on — never
+    // reaches this bare 500. Same class as agent-ub-spend's classifySpendThrow (18c0396).
+    // [[check-whose-failure-mode-is-a-pass]]
+    if (e?.payClassified) return json(e.payStatus, e.payBody);
     return json(500, { error: e.message });
   }
 }

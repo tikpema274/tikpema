@@ -129,10 +129,58 @@ export async function agentPay({ recipientAddress, amountUsdc, sourceAccount }) 
       // Spend submitted; the mint lands shortly. Not a failure.
       return { state: "submitted", pending: true, recipientAddress, amountUsdc: amount };
     }
-    // 🚨 THE BURN MAY ALREADY BE COMMITTED. Record the recovery material BEFORE rethrowing.
+    // 🚨 THE BURN MAY ALREADY BE COMMITTED. Record the recovery material (the attestation in
+    // cause.trace) BEFORE we drop it — this is the ONLY place it survives.
     await recordStrandNeverThrows({ owner, recipientAddress, amountUsdc: amount, error: e, causeStr, msg });
-    throw e;
+    // ⛔ AND DO NOT RETHROW THE RAW ERROR. `throw e` carried e.cause (the ~600-char attestation
+    // calldata) and a message telling the user to "reattempt via config.retry" — advice they
+    // cannot act on and a BLIND-RETRY TRAP (it produced a SECOND off-chain reservation on
+    // 2026-09-12, 10:49 then 10:50). Same class as agent-ub-spend's 500 blanket catch (18c0396),
+    // on the pay plane. Classify to a clean refusal; the raw detail lives in the strand + this log.
+    console.error(`[pay] spend failed owner=${owner} -> ${recipientAddress} code=${e?.code ?? "?"} name=${e?.name ?? "?"}: ${msg}`);
+    const c = classifyPayThrow(e, { recipientAddress, amountUsdc: amount });
+    const clean = new Error(c.body.error);      // ⛔ a NEW error — never `throw e` (it holds calldata)
+    clean.payClassified = true;
+    clean.payStatus = c.status;
+    clean.payBody = c.body;
+    clean.code = e?.code ?? null;               // keep the typed code for any downstream inspector
+    if (e?.name) clean.name = e.name;
+    throw clean;
   }
+}
+
+// ⭐⭐ A RECIPIENT THAT CANNOT RECEIVE IS A 4xx, AND NO CALLDATA LEAKS IN EITHER BRANCH.
+// The pay-plane sibling of classifySpendThrow (18c0396). App Kit submits `gatewayMint` FROM the
+// RECIPIENT; for a non-Circle-Gateway address Circle holds no wallet and the mint reverts (code
+// 5001 ONCHAIN_TRANSACTION_REVERTED, "Requested resource not found") — a deterministic user/config
+// condition that WILL NOT succeed on retry, not a fault to page an operator for.
+// ⭐ MEASURED 2026-09-12: on-chain Gateway availableBalance never moved (1.51 throughout); the burn
+// was only an off-chain RESERVATION that releases. So: name the condition, say no payment was made,
+// and DROP the SDK's calldata and its "reattempt via config.retry" advice.
+// ⛔ Everything else stays a 500 but SANITISED — the raw viem/SDK message carries calldata, so it is
+// logged + stranded, never returned in the body. Exported so a suite drives it directly.
+// [[check-whose-failure-mode-is-a-pass]] [[verification-method-must-not-mutate]]
+export function classifyPayThrow(e, { recipientAddress, amountUsdc } = {}) {
+  const msg = e?.message || "";
+  // The phrase can arrive in the message OR nested in cause.trace; check both. Tested against `msg`
+  // (a prose local) directly, not a composed haystack, so verify-no-prose-state-recovery SEES this
+  // as the third-party-text match it is and the _pay.mjs exemption actually covers it.
+  const causeStr = safeJson(e?.cause) ?? "";
+  const recipientUnpayable =
+    /requested resource not found/i.test(msg) ||
+    /requested resource not found/i.test(causeStr) ||
+    (e?.code === 5001 && /mint failure/i.test(msg));
+  if (recipientUnpayable) {
+    return { status: 400, body: {
+      error: `That recipient can't receive a Gateway payment${recipientAddress ? ` (${recipientAddress})` : ""} — it isn't a Circle Gateway account, so there is nowhere for the payment to land. No payment was made, and retrying will not change that.`,
+      recipientUnpayable: true, blocked: true,
+      recipientAddress: recipientAddress ?? null,
+      amountUsdc: amountUsdc ?? null,
+    } };
+  }
+  return { status: 500, body: {
+    error: `The payment could not be completed and its status is unconfirmed. Check your balance before retrying.`,
+  } };
 }
 
 /** JSON that cannot throw — BigInts, cycles and getters all degrade instead of raising.
