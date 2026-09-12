@@ -1,5 +1,45 @@
 ---
 
+# ✅ THE APP DEPLOYED — SWAP FLOOR FIX LIVE, AND A POST-GATE FLAGGED A STALE ORPHAN (NOT OURS)
+
+**2026-09-11, 23:15–23:51Z.** First app prod deploy of the session, run as `npm run deploy:prod` in
+the background. HEAD `decce86` → **live tree `a287dd48d805`, deploy `6aa48dac4f4fd676156c5441`**.
+`gate:deployed` **✅ VERIFIED** (served == HEAD, control==data, no orphans newer than it).
+
+## WHAT WENT LIVE
+Three commits touched the deployable surface (`src`/`netlify/functions`/`shared`):
+- **`ff192ff` — the swap floor fix (user-visible).** Confirmed serving on the live app: new bundle
+  `index-C7lG2SXb.js` → **`index-B8r2f9Zj.js`**, "will not fill below" PRESENT (1), "more than 1%
+  worse" ABSENT (0). [[human-facing-field-ships-with-its-render-assertion]]
+- `d2a2e12` — the `_ubspend` ERC-1271 signing change (server; unreachable from the UI, UB-spend
+  money path still gated behind the pending live spend — nothing auto-moved). [[prediction-can-omit-a-prerequisite]]
+- `95635d7` — `shared/x402-diff.mjs` `stabilityAcrossThree` (inert until the 2026-09-25 census).
+
+`test:all` **118/0**; `gate:watch`, `gate:rpc` green; build stamped and served.
+
+## 🚨 THE CHAIN EXITED 1 — AND THE DEPLOY STILL SUCCEEDED
+`deploy:prod` ends in post-deploy gates. `gate:deployed` (the one that proves the ship) passed;
+the **final** step `gate:deployloss` failed the chain on its delta: **one new abandoned deploy,
+`6aa3b77cbb7c5f4998970c0c`**. ⭐ But that orphan was created **2026-09-11T08:10Z — ~15h BEFORE this
+deploy**, `never-touched`; it only appeared now because it aged past the census's 6h threshold since
+the last census (12:43Z, when it was <6h old). **Not from this run**, and older than the live
+deploy so it cannot affect what is served. [[establish-which-action-produced-the-outcome]]
+
+⛔ **A non-zero exit is not "the deploy failed" — read WHICH step.** A failure BEFORE `netlify
+deploy` ships nothing; a failure in a POST gate means the code is live and a check flagged something
+to reconcile, not re-deploy. Here it was the latter, and the flag was benign.
+[[a-later-command-is-not-proof-of-an-earlier-one]]
+
+## THE CENSUS RECORDED IT — GATE NOW GREEN
+The failed run appended its census line (the sweep records every run), so `6aa3b77c` is now on the
+ledger. Re-ran `gate:deployloss` → **✅ 0 new losses (12 carried), exit 0**. Committed the census +
+refusal-window captures (`26393ed`); build stamp cleared to null. [[a-scope-report-is-not-a-deploy-report]]
+
+**Both surfaces current:** tikpema.xyz (marketing, `c2dd41ab…`) and app.tikpema.xyz (tree
+`a287dd48…`) both live and gate-verified. `origin/main` == `26393ed`, tree clean.
+
+---
+
 # ✅ THE MARKETING PAGE — REFRESHED FOR WHAT TIKPEMA NOW IS, AND LIVE
 
 **2026-09-11 (UTC; 09-12 local).** `tikpema.xyz` rewritten and deployed. Commits `dd28998` (page),
