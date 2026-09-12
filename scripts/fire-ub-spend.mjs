@@ -78,7 +78,21 @@ try {
 } catch (e) {
   // ⚠️ A TRANSPORT FAILURE IS NOT A "DIDN'T HAPPEN". The request may have reached the server and
   // moved funds before the socket died, so this is captured as UNKNOWN rather than as a failure.
-  transportError = String(e?.name ?? e);
+  //
+  // 🚨 CAPTURE THE CAUSE, NOT JUST THE NAME. A fetch failure throws a bare `TypeError`; the real
+  // reason (ECONNRESET / ENOTFOUND / UND_ERR_SOCKET …) lives in e.cause / e.cause.code. Storing only
+  // the name left "the request never left" and "it arrived and we lost the reply" INDISTINGUISHABLE
+  // from the capture — the exact ambiguity that made last night's run unresolvable until the chain
+  // settled it. So keep the cause alongside the name.
+  transportError = {
+    name: String(e?.name ?? e),
+    causeCode: e?.cause?.code ?? null,       // ECONNRESET | ENOTFOUND | UND_ERR_SOCKET | UND_ERR_HEADERS_TIMEOUT | …
+    causeMessage: e?.cause?.message ?? (e?.cause != null ? String(e.cause) : null),
+    // ⛔ THE CAUSE IS EVIDENCE, NOT A VERDICT. A code like ECONNRESET is STRONG evidence the request
+    // never left — but NOT proof: the socket can die AFTER the server received it and moved funds.
+    // The CHAIN is the arbiter; this only narrows where to look first, it does not answer "did it move".
+    note: "cause narrows WHERE it failed — it is not proof funds did/didn't move. Reconcile ON-CHAIN.",
+  };
 }
 
 // 🚨 DURABLE CAPTURE FIRST — before any poll, any assertion, any print. This is the fix for the
@@ -93,9 +107,17 @@ writeFileSync(CAPTURE, JSON.stringify(capture, null, 2));
 console.log(`\n  ⭐ capture written to ${CAPTURE} BEFORE any polling — evidence survives a timeout.`);
 
 if (transportError) {
-  console.error(`\n🚨 TRANSPORT FAILED (${transportError}) — this is NOT proof nothing happened.`);
-  console.error(`   The request may have reached the server. Reconcile on-chain before re-firing;`);
-  console.error(`   a blind retry is how one spend becomes two.\n`);
+  const { name, causeCode } = transportError;
+  const neverLeftCodes = new Set(["ECONNRESET", "ENOTFOUND", "ECONNREFUSED", "UND_ERR_SOCKET", "EAI_AGAIN"]);
+  console.error(`\n🚨 TRANSPORT FAILED (${name}${causeCode ? ` / ${causeCode}` : ""}) — this is NOT proof nothing happened.`);
+  if (causeCode && neverLeftCodes.has(causeCode)) {
+    console.error(`   ${causeCode} is STRONG evidence the request never left — but evidence, NOT proof:`);
+    console.error(`   the socket can die after the server received it and moved funds.`);
+  } else if (!causeCode) {
+    console.error(`   No cause code was captured, so we cannot even guess where it failed.`);
+  }
+  console.error(`   The request may have reached the server. ⛔ THE CHAIN IS THE ARBITER — reconcile`);
+  console.error(`   on-chain before re-firing; a blind retry is how one spend becomes two.\n`);
   process.exit(3);
 }
 
