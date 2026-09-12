@@ -1,5 +1,46 @@
 ---
 
+# ✅ THE DCA FILL-FLOOR GAP IS CLOSED — A MECHANIC STATEMENT BOUND TO THE PRODUCER
+
+**2026-09-12.** `b69c2ee`, pushed to `origin/main` (`146216c..b69c2ee`). NOT yet deployed. Closes the
+one actionable gap from the swap-surface scope: DCA authorized N future fills disclosing caps + the
+day ceiling but **not the per-fill floor** — the pre-`ff192ff` gap, stating no number rather than a
+false one.
+
+## THE STATEMENT
+DCA consent now carries: *"Each fill has an on-chain minimum below which it will not swap. That
+minimum is set by Circle at the moment each fill runs — it is not a rate Tikpema picks in advance —
+so it moves with the market from one fill to the next."* It **names whose floor binds** (Circle — each
+fill routes `executeAction → _swap` B1 `createSwap`, which sends NO slippage param, so Circle's
+`minTokenOut` binds), says a per-fill minimum **exists** and is **set at execution**, and states **NO
+percentage** (`≤1%` was the agent-card bug; `~3%` was one measurement — a figure as a property).
+
+## ⭐ DERIVED FROM THE PRODUCER — red rather than silently false
+- **`shared/swap-fill-floor.mjs`** (+ `.d.mts`) — `swapExecuteRequestBody()` builds the exact
+  `createSwap` body; `swapFillFloorSource(body)` derives `circle | caller | unknown` from whether the
+  body carries a slippage-shaped key; copy keyed by source; `SWAP_FILL_FLOOR_SOURCE` computed at load
+  from the real builder. Same shape as `[[bridge-mechanic]]`.
+- **`_swap.mjs`** — BOTH `createSwap` fetches (`agentSwap`, the DCA path, and `buildSwapCallData`)
+  now build their body via the shared function → one object, no drift.
+- **`DcaPanel.tsx`** — renders `swapFillFloorCopy(SWAP_FILL_FLOOR_SOURCE).summary`; no hand-typed copy.
+
+## VERIFICATION
+- `verify-dca-fill-floor-copy.tsx` (new, wired into `test:all`): **15/0**. Closed set + copy
+  completeness; derives source from the producer and asserts `circle`; asserts `_swap` USES the shared
+  builder (no inlined body bypasses the bind); asserts the panel renders the `circle` sentence and NOT
+  the `caller` one; asserts it names Circle, set-at-execution, minimum-exists, and NO percentage.
+- **Mutation-proven** (the required test): adding a slippage param to `swapExecuteRequestBody` flips
+  the source to `caller` and reddens the guard — **6 assertions**, incl. the panel rendering the wrong
+  copy and Circle no longer being named.
+- `test:all` **121/121**, `tsc --noEmit` clean, build stamp null, gitleaks clean.
+
+⭐ The swap-surface scope (report-only, this session) also confirmed: **manual LIMIT does not exist**
+(aspirational — no `LimitPanel`, "limit" in code = the `stopLimit` floor field only); the four
+surfaces should stay **separate** (different consent models); and **no panel** replicates the
+reference-UI defect of stating a derived figure before its quote exists.
+
+---
+
 # ✅ THE PAY MINT-FAILURE LEAK IS FIXED — A RAW SDK ERROR NO LONGER REACHES THE USER
 
 **2026-09-12.** `687dc89`, pushed to `origin/main` (`6175bb2..687dc89`). NOT yet deployed. Same class
