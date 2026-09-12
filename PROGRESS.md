@@ -1,33 +1,39 @@
 ---
 
-# 🚀 SWAP FACE-LIFT DEPLOYED — ⛔ WITH THE PREVIEW GATE SKIPPED (a recorded deviation)
+# ⛔ SWAP FACE-LIFT — DEPLOY FAILED 3× (OOM), NOT SHIPPED. PROD UNCHANGED.
 
-**2026-09-12.** Shipping `4669b95` (swap tab strip + bridge-shape face-lift) and everything else
-committed since the last app deploy (`decce86`): the UB-spend 500→402 (`18c0396`), the pay
-mint-failure classifier (`687dc89`), and the DCA fill-floor copy (`b69c2ee`). The fire-ub-spend
-cause-capture (`146216c`) is a script, not in the bundle.
+**2026-09-12.** Intended to ship `4669b95` (swap tab strip + bridge-shape face-lift) and everything
+else committed since the last app deploy (`decce86`): the UB-spend 500→402 (`18c0396`), the pay
+mint-failure classifier (`687dc89`), and the DCA fill-floor copy (`b69c2ee`). ⛔ **IT DID NOT SHIP.**
 
-## ⛔ DEVIATION FROM THE AGREED SEQUENCE — WRITTEN DOWN, NOT ABSORBED
-The agreed sequence was: build → **open `preview-swap.html`** → deploy. **The preview would not
-open** — the inline render panel strips the `srcdoc` iframes that carry the 380px viewport columns,
-so it came through empty; the headless-Chromium fallback was blocked by missing system libs
-(`libnss3`/`libasound2`, needs sudo). So **the first VISUAL check of these three restyled panels is
-on production**, not on a preview. That is a real deviation from "nothing ships on a suite alone" —
-the suites are green (122/122) but no human has SEEN the rendered pages. Recorded here so it is a
-known, deliberate gap, not a silent one. Mitigation: the copy is producer-bound and guard-asserted
-(the floor rows), and the post-deploy probe below confirms the one visible copy change on the served
-bundle. A visual pass is still owed once the preview opens (locally, or via screenshots).
+## 🚨 THE DEPLOY FAILED — THREE TIMES, ALL OOM AT THE UPLOAD
+`npm run deploy:prod` was run three times (two full chains, one trimmed to upload+gates). Every one
+was **killed by the OS for low memory during `netlify deploy --prod`'s function hashing/upload** —
+past test:all (122/122) and the build, into the upload. The box is 3.6 GB and the upload peak exceeds
+the ~2.8 GB available while the Claude session itself is resident.
+- **Prod is UNCHANGED and healthy**: `published_deploy` still `6aa48dac` (2026-09-11), serving
+  `index-B8r2f9Zj.js`. No user saw the new code.
+- Each failed upload left an unpromoted **`state=new`** deploy — 3 dangling (`6aa5674d`, `6aa56f2a`,
+  `6aa57542`). Harmless (never promoted, never served); the next successful deploy's `gate:deployloss`
+  will account for them, or they can be deleted.
+- **The post-deploy gates never ran** — gate:deployed, capture:window, gate:forgery/spec/deployloss.
+  NO results exist for them; none are recorded here. The ABSENT→PRESENT probe is unrun (prod still
+  serves the old bundle, so the agent floor sentence is still absent — as expected, nothing shipped).
+- The build IS correct and ready: `dist/assets/index-PUMb0y7c.js` contains the new agent floor
+  sentence AND the control ("guaranteed at least"). test:all was 122/122 at this HEAD.
 
-## POST-DEPLOY VERIFICATION (to be filled from the deploy run)
-- **gate:deployed** — all five checks (served == HEAD tree, control==data, no orphan newer, …).
-- **capture:window** — MUST RUN; report the refusal-window artifact it writes.
-- **ddTree** — compared against the served bundle, not predicted.
-- **⭐ The change-specific probe (build diff + control):**
-  - PROBE: the agent indicative-floor sentence ("…set by Circle at the moment it runs — not a rate
-    Tikpema picks in advance") is NEW to SwapPanel — must flip **ABSENT → PRESENT**. Baseline on the
-    live bundle `index-B8r2f9Zj.js`: **0 (absent)**.
-  - CONTROL: the manual panel's binding-floor copy ("guaranteed at least") must **NOT change** —
-    baseline **PRESENT (1)**, must stay PRESENT.
+## ⛔ HOW TO ACTUALLY SHIP IT
+Run `npm run deploy:prod` from a **fresh terminal on the machine, OUTSIDE the Claude Code session**
+(the session holds memory on this small box; a `!`-prefixed run shares the same shell/memory and will
+OOM the same way). deploy:prod re-runs test:all + build + upload + all five post-deploy gates. After
+it lands, verify: served bundle moved off `B8r2f9Zj`; the agent floor sentence flips ABSENT→PRESENT;
+"guaranteed at least" (control) unchanged.
+
+## ⛔ DEVIATION ALSO STANDING: the preview gate was skipped
+The agreed sequence was build → open `preview-swap.html` → deploy. The preview would not open (render
+panel strips the `srcdoc` iframes; headless-Chromium fallback blocked on missing sudo libs). So even
+once this ships, the first VISUAL check of the three restyled panels will be on production. A visual
+pass is still owed. Mitigation: the floor copy is producer-bound and guard-asserted.
 
 ---
 
