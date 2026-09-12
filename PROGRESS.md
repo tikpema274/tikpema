@@ -1,5 +1,53 @@
 ---
 
+# ✅ THE PAY MINT-FAILURE LEAK IS FIXED — A RAW SDK ERROR NO LONGER REACHES THE USER
+
+**2026-09-12.** `687dc89`, pushed to `origin/main` (`6175bb2..687dc89`). NOT yet deployed. Same class
+as the 402 fix below (`18c0396`), on the **pay plane** — found by a live UI incident, then read on
+chain.
+
+## THE INCIDENT (read-only investigation)
+A `pay_for_service` in the UI (session SCA `0x0589…7f9e`, 0.1 USDC to `0x0c5E…2532`) showed the raw
+App Kit error: *"Mint failure: … reattempt via 'config.retry'. Cause: … Requested resource not found"*
+plus ~600 chars of attestation calldata, in a **500** body. **Two identical attempts** (10:49:20,
+10:50:48 UTC) — the SDK's own "reattempt" advice is a blind-retry trap.
+
+**Cause (confirmed on chain):** App Kit submits `gatewayMint` FROM the RECIPIENT; the recipient's own
+Gateway `availableBalance` = **0** (not a Circle depositor), so Circle holds no wallet for it → the
+mint reverts (code 5001 `ONCHAIN_TRANSACTION_REVERTED`). Exactly the `_pay.mjs` diagnosis.
+
+## ⭐ WHAT HAPPENED TO THE 0.1 (×2) — THE CHAIN, NOT THE ERROR BODY
+| view | reads | meaning |
+|---|---|---|
+| on-chain Gateway `availableBalance(USDC, SCA)` | **1.51 USDC** | custody — **unchanged** (matches the 09-10 baseline) |
+| off-chain Circle ledger `/v1/balances` | **1.303 USDC**, `pendingBatch 0` | down **0.207** = both attempts RESERVED (~0.1035 each) |
+
+**No burn landed on Arc** (SCA nonce 1; availableBalance never moved). Both mints **reverted**; nothing
+in flight. The user's hypothesis (burn ok, mint failed → funds mid-flight) is **refuted by the chain** —
+the burn was only an off-chain *reservation* that releases on expiry (as MEASURED 09-10). ⚠️ As of the
+read it had **not yet released** — worth a later on-chain re-check; custody is intact regardless.
+A record survived: `recordStrandNeverThrows` wrote a `pay-strands` strand (attestation) per attempt
+BEFORE the throw. ⚠️ Nothing sweeps that store.
+
+## THE FIX
+- **`_pay.mjs`** — `classifyPayThrow(e, {recipientAddress, amountUsdc})`, exported pure classifier.
+  Recipient-unpayable → **400** naming the recipient, "no payment was made, retrying will not change
+  that". Everything else → **500 but SANITISED** (raw message carries calldata → logged + stranded,
+  never returned). `agentPay` records the strand, logs the raw, then throws a **new clean error**
+  (payStatus/payBody) — never `throw e` (it held `e.cause` = the calldata).
+- **`agent-act.mjs`** — top-level catch routes `e.payClassified` → `json(status, body)` before the
+  bare 500. `agent-execute-plan`'s per-step `error: e.message` is clean now too (via the `_pay` change).
+
+## VERIFICATION
+- `verify-pay-refusal.mjs` (new, wired into `test:all`): **12/0** — the measured signature → 400, both
+  directions, and ⛔ NO branch leaks calldata / attestation / `config.retry`. **Mutation-checked**:
+  blanket-500 → 8 red; leak-raw-message → 2 red.
+- `verify-no-prose-state-recovery`: classifier tests `msg` directly so the scanner SEES it; expanded
+  the existing `_pay.mjs` exemption reason (no new exemption, no ratchet change); **15/15**.
+- `test:all` **120/120**, `tsc --noEmit` clean, build stamp null, gitleaks clean.
+
+---
+
 # ✅ THE 500 BLANKET CATCH IS FIXED — A CLIENT INSUFFICIENT-BALANCE IS NOW A 402
 
 **2026-09-12.** `18c0396`, pushed to `origin/main` (`a292297..18c0396`). NOT yet deployed — the fix
