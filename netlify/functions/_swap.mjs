@@ -5,6 +5,10 @@ import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
 import { CONTRACTS, ARC, USDC_DECIMALS, swapCapUsdc } from "./_arc.mjs";
 import { publicClient } from "./_predict.mjs";
 import { withRetry } from "./_retry.mjs";
+// ⛔ ONE BODY, SHARED WITH THE FLOOR-SOURCE DERIVATION. The DCA consent copy is bound to whether this
+// body carries a slippage param; building it here from the same function keeps the claim honest —
+// add a slippage key in swap-fill-floor.mjs and the copy guard reddens. See that file's header.
+import { swapExecuteRequestBody } from "../../shared/swap-fill-floor.mjs";
 
 // SWAP PLANE. Pricing/estimates still go through App Kit + the Circle Wallets adapter
 // (kitAndAdapter, below), but the EXECUTING swap now runs the proven B1 path
@@ -248,7 +252,9 @@ export async function buildSwapCallData({ walletAddress, tokenIn, tokenOut, amou
   const res = await fetch(SWAP_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${kitKey}` },
-    body: JSON.stringify({ tokenInAddress, tokenOutAddress, tokenInChain: "Arc_Testnet", fromAddress: walletAddress, toAddress: walletAddress, amount: amountBase.toString() }),
+    // ⛔ NO SLIPPAGE FIELD — Circle's returned minTokenOut is the binding floor. Built via the shared
+    // producer so the DCA consent copy stays bound to this fact. [[swap-fill-floor]]
+    body: JSON.stringify(swapExecuteRequestBody({ tokenInAddress, tokenOutAddress, fromAddress: walletAddress, toAddress: walletAddress, amount: amountBase.toString() })),
   });
   if (!res.ok) throw new Error(`createSwap HTTP ${res.status}: ${(await res.text()).slice(0, 180)}`);
   const body = await res.json();
@@ -480,7 +486,9 @@ export async function agentSwap({ walletAddress, tokenIn, tokenOut, amountIn, co
   const res = await fetch(SWAP_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${kitKey}` },
-    body: JSON.stringify({ tokenInAddress, tokenOutAddress, tokenInChain: "Arc_Testnet", fromAddress: walletAddress, toAddress: walletAddress, amount: amountBase.toString() }),
+    // ⛔ NO SLIPPAGE FIELD — Circle's returned minTokenOut is the binding floor. Built via the shared
+    // producer so the DCA consent copy stays bound to this fact. [[swap-fill-floor]]
+    body: JSON.stringify(swapExecuteRequestBody({ tokenInAddress, tokenOutAddress, fromAddress: walletAddress, toAddress: walletAddress, amount: amountBase.toString() })),
   });
   if (!res.ok) throw new Error(`createSwap HTTP ${res.status}: ${(await res.text()).slice(0, 180)}`);
   const body = await res.json();

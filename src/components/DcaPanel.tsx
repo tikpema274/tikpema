@@ -4,6 +4,10 @@ import type { useWallet } from "../wallet/useWallet";
 import { agentClient } from "../lib/agentClient";
 import { arcTestnet } from "../config/chain";
 import { describeError } from "../lib/describeError";
+// ⛔ The per-fill floor sentence is DERIVED from the executing swap's request body, not written here:
+// each fill routes executeAction → _swap B1 (createSwap) which sends no slippage param, so Circle's
+// minTokenOut binds. If _swap ever sends slippage, SWAP_FILL_FLOOR_SOURCE flips and the guard reddens.
+import { swapFillFloorCopy, SWAP_FILL_FLOOR_SOURCE } from "../../shared/swap-fill-floor.mjs";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 type Token = "USDC" | "EURC";
@@ -295,6 +299,7 @@ export default function DcaPanel({ wallet: w }: { wallet: UnifiedWallet }) {
           <b>counted against your daily total as soon as it is submitted</b> — not when it
           confirms — so a swap that is still settling can never quietly free up room for another
           one. If we then see on-chain that it <b>failed</b>, the amount is given back.
+          {" "}{swapFillFloorCopy(SWAP_FILL_FLOOR_SOURCE).summary}
         </div>
 
         <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 12, cursor: "pointer" }}>
