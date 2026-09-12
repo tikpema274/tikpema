@@ -1,5 +1,49 @@
 ---
 
+# ✅ THE UB SPEND LANDED — ROW 2 CONFIRMED ON CHAIN, RECONCILED AGAINST THE PRE-REGISTRATION
+
+**2026-09-12.** The cross-chain UB spend executed end to end, both sides read on chain (not inferred).
+`transferId dc599b63-5166-4226-8a32-3abcc7531211`, source `txHash
+0x91af4fe02e84b4afd41dbaf94eda0f84bc159c5236eb0b0c9d5913886c469fc4`. Corroborated independently:
+Arc unified `0x06b0` **11.000000 → 0.943546** (debit **10.056454**); Base Sepolia recipient
+`balanceOf` **10.000000**. ⛔ This reconciliation sits BESIDE the committed prediction
+([THE UB-SPEND FIX, PRE-REGISTERED]) — the prediction is NOT amended.
+
+## RECONCILIATION — the pre-registration, row by row
+| row | verdict | measured |
+|---|---|---|
+| 1 SDK accepts the `address: owner` shape | ✅ **HELD** | built + submitted (200 + transferId); also provable offline |
+| 2 ⭐ Forwarding Service accepts an **ERC-1271** signature | ✅ **HELD — the headline** | the never-observed unknown, now confirmed: transferId + source tx + mint |
+| 3 mint lands on Base Sepolia | ✅ **HELD** | recipient `balanceOf` = 10.000000 on Base Sepolia |
+| 4 delivered ≈ 9.8, fee = 10 − delivered | ⛔ **WRONG (mechanic)** | delivered = **full 10**; fee charged **ON TOP**, source paid **10.056454**. "fee = 10 − delivered" is wrong (that would be 0). Fee = **0.056454**, not the predicted ~0.2055 |
+| 5 recordAgentSpend +10; unified debits **10** | ⚠️ **PARTIAL** | unified debited **10.056454**, not 10 (the debit figure was wrong by the fee); the ledger `amountUsdc=10` row not read here (prod Blobs) |
+| 5b must-not-move (other owners, deposit cap, vault/DD) | ⭕ **NOT EVALUATED** | needs a ledger diff not done this run |
+| 6 authorisation unchanged (ERC-1271 needs no grant) | ✅ **HELD for the spend** | the spend signed via ERC-1271, no delegate; (the DEPOSIT separately ran addDelegate on 0x06b0) |
+
+## ⭐ THE MECHANIC CORRECTION — fee is UPFRONT, not deducted
+Every prior statement (pre-reg row 4, the marketing draft, [[unified-balance-capability]]) assumed the
+forwarder fee is **deducted from the amount** (deliver ~9.8). MEASURED: the recipient gets the **full
+amount** and the source pays **amount + fee**. My "~9.8 delivered" was wrong in the MECHANIC, not just
+the figure. **Measured fee: 0.056454 USDC.**
+⚠️ And the fee was QUOTABLE but the quote was a CEILING: `estimateSpend` predicted ~0.109 (gas 0.056 +
+forwarder 0.053 + provider 0.00025); the actual charge (0.056454) ≈ the gas line only — the forwarder
+component estimated was not charged on this route. Observed, not explained: estimateSpend over-predicts,
+so it is safe for headroom (the 1.0 top-up left ample margin). [[ub-spend-headroom-and-500-blanket-catch]]
+
+## ✅ WHAT THIS CLOSES
+- **The Forwarding Service accepts an ERC-1271 (contract) signature** — never observed before; the
+  09-10 proof was same-chain, `useForwarder:false`. Row 2 was the whole reason for the run.
+- **First exercise of this path since app-kit 1.8.x (2026-07-08).** "Should still work" was a
+  prediction across the 1.14.0 upgrade; it is now a **measurement**. The `_ubspend` ERC-1271 fix is
+  proven live. [[erc8004-identity-brick3-state]] neighbours; see the pre-reg for the immutable claim.
+
+## ⛔ STILL UNFIXED — queued (see [[decisions-open-verified]])
+1. **The 500 blanket catch** — `agent-ub-spend.mjs` returns 500 for a client insufficient-balance
+   condition; a user error and a real fault are indistinguishable to a monitor. Deposit's shape
+   (pre-check → 402 naming figures) is the model.
+2. **The 202 echo** — `agent-ub-deposit` returns the REQUESTED `amountUsdc` with no "settled-so-far"
+   field beside it, readable as a funded balance. Add a settled figure or rename.
+
 # ✅ THE APP DEPLOYED — SWAP FLOOR FIX LIVE, AND A POST-GATE FLAGGED A STALE ORPHAN (NOT OURS)
 
 **2026-09-11, 23:15–23:51Z.** First app prod deploy of the session, run as `npm run deploy:prod` in
