@@ -1,5 +1,36 @@
 ---
 
+# 🚀 SWAP FACE-LIFT DEPLOYED — ⛔ WITH THE PREVIEW GATE SKIPPED (a recorded deviation)
+
+**2026-09-12.** Shipping `4669b95` (swap tab strip + bridge-shape face-lift) and everything else
+committed since the last app deploy (`decce86`): the UB-spend 500→402 (`18c0396`), the pay
+mint-failure classifier (`687dc89`), and the DCA fill-floor copy (`b69c2ee`). The fire-ub-spend
+cause-capture (`146216c`) is a script, not in the bundle.
+
+## ⛔ DEVIATION FROM THE AGREED SEQUENCE — WRITTEN DOWN, NOT ABSORBED
+The agreed sequence was: build → **open `preview-swap.html`** → deploy. **The preview would not
+open** — the inline render panel strips the `srcdoc` iframes that carry the 380px viewport columns,
+so it came through empty; the headless-Chromium fallback was blocked by missing system libs
+(`libnss3`/`libasound2`, needs sudo). So **the first VISUAL check of these three restyled panels is
+on production**, not on a preview. That is a real deviation from "nothing ships on a suite alone" —
+the suites are green (122/122) but no human has SEEN the rendered pages. Recorded here so it is a
+known, deliberate gap, not a silent one. Mitigation: the copy is producer-bound and guard-asserted
+(the floor rows), and the post-deploy probe below confirms the one visible copy change on the served
+bundle. A visual pass is still owed once the preview opens (locally, or via screenshots).
+
+## POST-DEPLOY VERIFICATION (to be filled from the deploy run)
+- **gate:deployed** — all five checks (served == HEAD tree, control==data, no orphan newer, …).
+- **capture:window** — MUST RUN; report the refusal-window artifact it writes.
+- **ddTree** — compared against the served bundle, not predicted.
+- **⭐ The change-specific probe (build diff + control):**
+  - PROBE: the agent indicative-floor sentence ("…set by Circle at the moment it runs — not a rate
+    Tikpema picks in advance") is NEW to SwapPanel — must flip **ABSENT → PRESENT**. Baseline on the
+    live bundle `index-B8r2f9Zj.js`: **0 (absent)**.
+  - CONTROL: the manual panel's binding-floor copy ("guaranteed at least") must **NOT change** —
+    baseline **PRESENT (1)**, must stay PRESENT.
+
+---
+
 # ✅ THE DCA FILL-FLOOR GAP IS CLOSED — A MECHANIC STATEMENT BOUND TO THE PRODUCER
 
 **2026-09-12.** `b69c2ee`, pushed to `origin/main` (`146216c..b69c2ee`). NOT yet deployed. Closes the
