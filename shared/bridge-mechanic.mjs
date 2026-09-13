@@ -125,6 +125,31 @@ export function bridgeMechanicCopy(v) {
   return BRIDGE_MECHANIC_COPY[bridgeMechanicOf(v)];
 }
 
+/**
+ * ⭐⭐ THE PROPOSAL'S FEE SENTENCE — ONE PRODUCER, TWO READERS. The conversational agent shows a
+ * bridge proposal twice: `agent-act` writes it into the reply `message`, and `MyAgentPanel` renders
+ * the same figures beside the confirm button. Both said "(taken from the amount)" by hand — the
+ * DEDUCTED mechanic's words — on a path that has charged the fee ON TOP since upfront fees
+ * (`_bridge.mjs` bridgeFee → mechanic "upfront"). Two hand-typed copies of a claim the producer
+ * above already owns, both false, neither guarded. [[duplicate-source-of-truth-is-the-recurring-bug]]
+ *
+ * ⛔ NO SURFACE WRITES THIS SENTENCE ITSELF. The placement phrase comes from BRIDGE_MECHANIC_COPY,
+ * keyed by the mechanic the SERVER priced — so a surface can only state the mechanic it was handed.
+ * ⚠️ ANSWERABLE FOR `unknown`: the arrival clause is dropped, because "so ~N arrives" is itself a
+ *    mechanic claim (it asserts net is the number to expect). A fee it cannot place, it does not
+ *    extend into an arrival.
+ * ⚠️ 4dp MINIMUM. At 2dp the fee and the arrival collapse into the SAME displayed number
+ *    (bridging 0.1: 0.0532 fee / 0.0468 arriving both render "~0.05"); the fee is FLAT, so the
+ *    smaller the bridge the worse the ratio, and 2dp is exactly where it becomes invisible.
+ */
+export function bridgeProposalFeeLine({ feeUsdc, netUsdc, destinationLabel, mechanic }) {
+  const key = bridgeMechanicOf(mechanic);
+  const m = BRIDGE_MECHANIC_COPY[key];
+  const fee = `Cross-chain fee ~${Number(feeUsdc).toFixed(4)} USDC (${m.feePlacement})`;
+  if (key === "unknown") return `${fee}.`;
+  return `${fee}, so ~${Number(netUsdc).toFixed(4)} USDC arrives on ${destinationLabel}.`;
+}
+
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 // ⭐⭐ A SECOND AXIS: WHO SIGNS THE BURN — AND IT IS NOT THE MECHANIC
 // ══════════════════════════════════════════════════════════════════════════════════════════════

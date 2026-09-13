@@ -1,4 +1,5 @@
 import { BRIDGE_TIMING, MINT_TIMING } from "../../shared/bridge-timing.mjs";
+import { bridgeProposalFeeLine } from "../../shared/bridge-mechanic.mjs";
 import { useEffect, useRef, useState } from "react";
 import { agentClient } from "../lib/agentClient";
 import SignInPrompt from "./SignInPrompt";
@@ -764,13 +765,13 @@ export function AgentSummary({
           <b>Bridge {b.amountUsdc} USDC → {b.destination.label}</b>
         </div>
         <div style={{ opacity: 0.85, marginBottom: 8 }}>
-          {/* ⚠️ 4dp MINIMUM ON EVERY BRIDGE AMOUNT. At 2dp the fee and the arrival collapse into
-              the SAME displayed number: bridging 0.1 USDC the true split is 0.0532 fee /
-              0.0468 arriving, and both render "~0.05" — the user cannot see that 53% went to
-              fees. The fee is FLAT, so the smaller the bridge the worse the ratio, and 2dp is
-              exactly where it becomes invisible. USDC is 6dp; never round bridge amounts to 2. */}
-          Cross-chain fee ~{Number(b.feeUsdc).toFixed(4)} USDC (taken from the amount) ·
-          {" "}~{Number(b.netUsdc).toFixed(4)} USDC arrives on {b.destination.label}.
+          {/* ⛔ DERIVED FROM THE MECHANIC THE SERVER PRICED, NEVER TYPED HERE. This line said
+              "(taken from the amount)" by hand — the DEDUCTED wording — on the agent path, which
+              has charged the fee ON TOP since upfront fees. `bridgeProposalFeeLine` owns the
+              sentence (and the 4dp minimum: at 2dp fee and arrival collapse into "~0.05");
+              `b.mechanic` absent → "unknown" → no placement claimed, no arrival extended.
+              verify-bridge-mechanic-pairing §10 refuses either mechanic's literal on this file. */}
+          {bridgeProposalFeeLine({ feeUsdc: b.feeUsdc, netUsdc: b.netUsdc, destinationLabel: b.destination.label, mechanic: b.mechanic })}
           <br />
           Funds leave Arc — {BRIDGE_TIMING}.
         </div>

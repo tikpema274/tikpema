@@ -2,6 +2,7 @@ import { amountFloorViolation } from "./_amount-floor.mjs";
 import { TxPendingError } from "./_circle.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { BRIDGE_TIMING } from "../../shared/bridge-timing.mjs";
+import { bridgeMechanicOf, bridgeProposalFeeLine } from "../../shared/bridge-mechanic.mjs";
 import { json, parseBody, dateAnchor, sendCapUsdc, bridgeCapUsdc, swapCapUsdc, maxSpendUsdc } from "./_arc.mjs";
 import { SWAP_TOKENS } from "./_swap.mjs";
 import { executeAction, valueOfStep, STEP_TYPES } from "./_actions.mjs";
@@ -598,6 +599,9 @@ export async function handler(event) {
           destination: { key: dest.key, label: dest.label },
           feeUsdc: Number(fee.feeUsdc.toFixed(6)),
           netUsdc: Number(fee.netUsdc.toFixed(6)),
+          // ⭐ THE MECHANIC TRAVELS WITH THE FIGURES. The panel keys its fee sentence on this; without
+          // it, it can only say "unknown" — never guess a placement. Normalised, never raw.
+          mechanic: bridgeMechanicOf(fee.mechanic),
           cap: bcap,
           feeDisclosure: {
             feeRatio: band.feeRatio,
@@ -611,8 +615,11 @@ export async function handler(event) {
           },
         },
         message:
-          `Bridge ${amount} USDC from Arc to ${dest.label}. The cross-chain fee is ~${fee.feeUsdc.toFixed(4)} USDC ` +
-          `(taken from the amount), so ~${fee.netUsdc.toFixed(4)} USDC arrives on ${dest.label}. ` +
+          // ⛔ THE FEE SENTENCE IS DERIVED, NOT TYPED. This said "(taken from the amount)" by hand — the
+          // deducted mechanic's words — after the path had moved to upfront fees. The producer that
+          // owns the mechanic writes it; this line only supplies the figures.
+          `Bridge ${amount} USDC from Arc to ${dest.label}. ` +
+          `${bridgeProposalFeeLine({ feeUsdc: fee.feeUsdc, netUsdc: fee.netUsdc, destinationLabel: dest.label, mechanic: fee.mechanic })} ` +
           `${BRIDGE_TIMING}. Confirm to bridge.`,
       });
     }

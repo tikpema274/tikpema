@@ -17,6 +17,11 @@ export interface BridgeMechanicCopy {
 export declare const BRIDGE_MECHANIC_COPY: Readonly<Record<BridgeMechanic, BridgeMechanicCopy>>;
 export declare function bridgeMechanicOf(v: unknown): BridgeMechanic;
 export declare function bridgeMechanicCopy(v: unknown): BridgeMechanicCopy;
+/** The proposal's one-line fee sentence, keyed on the mechanic the server priced. `unknown` claims
+ *  no placement and extends no arrival. Both the reply message and the confirm panel read it. */
+export declare function bridgeProposalFeeLine(args: {
+  feeUsdc: number | string; netUsdc: number | string; destinationLabel: string; mechanic: unknown;
+}): string;
 
 // ── the SECOND axis: who signs the burn. Independent of the mechanic; see the .mjs header. ──────
 // ⚠️ `mustStay: boolean | null` — null on `unknown`, because "we do not know" is not "you may go".

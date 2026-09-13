@@ -25,6 +25,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   BRIDGE_MECHANICS, BRIDGE_MECHANIC_COPY, bridgeMechanicOf, bridgeMechanicCopy,
   BRIDGE_SIGNERS, BRIDGE_SIGNER_COPY, bridgeSignerOf, bridgeSignerCopy,
+  bridgeProposalFeeLine,
 } from "../shared/bridge-mechanic.mjs";
 import React from "react";
 const { BridgeQuoteSummary } = await import("../src/components/BridgeQuoteSummary");
@@ -460,6 +461,56 @@ section("9 — ⚠️ TRIPWIRE: THE 'will be charged' SENTENCE LIVES ON EXACTLY 
   check("🚨 the ceiling qualifier reaches EXACTLY ONE panel — the deducted one",
     ceilingPanels.length === 1 && ceilingPanels[0] === "ManualBridgePanel",
     ceilingPanels.join(", ") || "none");
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("10 — 🚨 THE CONVERSATIONAL AGENT SURFACE DERIVES ITS FEE SENTENCE — NEITHER MECHANIC BY HAND");
+{
+  // ═══ 🚨 THE DEFECT THIS PINS ═══════════════════════════════════════════════════════════════
+  // `MyAgentPanel` (the bridge-proposal confirm) and `agent-act` (the reply message) each said
+  // "(taken from the amount)" BY HAND — the deducted mechanic's words — on the agent path, which has
+  // charged the fee ON TOP since upfront fees (`bridgeFee` declares "upfront", §5 above). Live and
+  // false, and §9's panel census never looked at this file. Fixed by deriving both from
+  // `bridgeProposalFeeLine`, keyed on the mechanic the server priced.
+  //
+  // ⭐⭐ BOTH DIRECTIONS, ON THE PRODUCER'S RENDERED OUTPUT: the upfront line carries the upfront
+  // placement and NOT the deducted one; the deducted line the reverse; `unknown` claims neither and
+  // extends no arrival. Then the SURFACES are pinned to the producer by source: they call it, and
+  // carry NO placement literal of EITHER mechanic — so a hand-typed sentence of either kind fails
+  // here, whichever direction it lies in. (§5 is the mirror for the self-signed panel.)
+  const UP = BRIDGE_MECHANIC_COPY.upfront.feePlacement;
+  const DED = BRIDGE_MECHANIC_COPY.deducted.feePlacement;
+  const line = (mechanic) => bridgeProposalFeeLine({ feeUsdc: 0.054071, netUsdc: 1, destinationLabel: "Base", mechanic });
+  check("⭐ the two placements are DIFFERENT strings — or the pairing below cannot discriminate", UP !== DED && UP.length > 0 && DED.length > 0);
+  check("⭐⭐ upfront line carries the UPFRONT placement", line("upfront").includes(`(${UP})`), line("upfront"));
+  check("⛔ …and NOT the deducted one", !line("upfront").includes(DED) && !/taken from the amount/.test(line("upfront")));
+  check("⭐⭐ deducted line carries the DEDUCTED placement", line("deducted").includes(`(${DED})`), line("deducted"));
+  check("⛔ …and NOT the upfront one", !line("deducted").includes(UP));
+  check("⭐⭐ `unknown` claims NEITHER placement and extends NO arrival",
+    !line(undefined).includes(UP) && !line(undefined).includes(DED) && !/arrives/.test(line(undefined)), line(undefined));
+  check("⭐ the fee renders at 4dp (0.054071 → 0.0541), where fee and arrival cannot collapse", /~0\.0541 USDC/.test(line("upfront")));
+
+  const stripSrc = (f) => readFileSync(f, "utf8").replace(/\{\/\*[\s\S]*?\*\/\}/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+  const surfaces = [
+    ["src/components/MyAgentPanel.tsx", /^import\s*\{[^}]*\bbridgeProposalFeeLine\b[^}]*\}\s*from\s*"\.\.\/\.\.\/shared\/bridge-mechanic\.mjs"/m],
+    ["netlify/functions/agent-act.mjs", /^import\s*\{[^}]*\bbridgeProposalFeeLine\b[^}]*\}\s*from\s*"\.\.\/\.\.\/shared\/bridge-mechanic\.mjs"/m],
+  ];
+  for (const [f, importRe] of surfaces) {
+    const src = stripSrc(f);
+    check(`⭐⭐ ${f} imports the sentence from the producer`, importRe.test(src));
+    check(`⭐⭐ ${f} CALLS bridgeProposalFeeLine(…mechanic…)`, /bridgeProposalFeeLine\(\{[^}]*\bmechanic\b/.test(src));
+    check(`⛔⛔ ${f} carries NO deducted-placement literal ("${DED}" / "taken from the amount")`,
+      !src.includes(DED) && !/taken from the amount/.test(src), "a hand-typed deducted sentence on the upfront path");
+    check(`⛔⛔ ${f} carries NO upfront-placement literal either ("${UP}") — derived means neither`,
+      !src.includes(UP), "a hand-typed upfront sentence is right today and unguarded tomorrow");
+  }
+  // ⭐ THE MECHANIC REACHES THE PANEL FROM THE SERVER, normalised — the panel keys on `b.mechanic`,
+  // so the server must put it there, and via bridgeMechanicOf, never raw.
+  const act = stripSrc("netlify/functions/agent-act.mjs");
+  check("⭐⭐ agent-act threads `mechanic: bridgeMechanicOf(fee.mechanic)` into the bridge proposal", /mechanic:\s*bridgeMechanicOf\(fee\.mechanic\)/.test(act));
+  const panel = stripSrc("src/components/MyAgentPanel.tsx");
+  check("⭐⭐ the panel keys the sentence on the SERVER's mechanic (`mechanic: b.mechanic`), not a constant",
+    /bridgeProposalFeeLine\(\{[^}]*mechanic:\s*b\.mechanic\b/.test(panel) && !/mechanic:\s*"(upfront|deducted)"/.test(panel));
 }
 
 console.log(`\n${fail ? "❌ FAILURES" : "✅ ALL GREEN"}   pass ${pass} / fail ${fail}\n`);
