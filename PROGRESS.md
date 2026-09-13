@@ -1,3 +1,53 @@
+# ✅ DECLARED-DECIMALS GATE — A NON-6-DP TOKEN IS REFUSED BEFORE toMinor, NOT MIS-SCALED (`25e1027`)
+
+**2026-09-13.** Committed and PUSHED (origin/main `25e1027`), test:all **123/123** (7.6 min), **NOT DEPLOYED** —
+prod still serves `e493289` (6aa5f4b1). Two swap commits await T's deploy run: `d840f72` (resolver) + this.
+
+## THE DEFECT — THE CAPS WERE NEVER THE UNITS BUG; THE DECIMALS ARE
+Re-derived first: per-swap cap and day ceiling are USDC-EQUIVALENT and CONVERTED — `valueInUsdc` prices any
+non-USDC token via `kit.getTokenRates` and both `_actions.mjs` (plan path) and `_swap.mjs:459-469` (manual path)
+compare the converted value; DCA fills ledger `fillValueUsdc`. A third token gets the RIGHT cap if Circle
+prices it, and refuses if not. Only the DCA create-time check skips non-USDC (documented, fill-time authoritative).
+
+What does NOT convert: `toMinor` (`_swap.mjs:30`), `capBase` (`:462`), `parseUnits`/`formatUnits` in
+`_swap-confirm.mjs:104/130/218`, `formatUnits` in `_dca.readTokenBalance` (`:443`) — all hardcode
+`USDC_DECIMALS`=6. An 18-dp token would have its amount, its cap AND its receipt mis-scaled by 10^12 in the
+SAME direction, silently, with the cap conversion upstream saying everything was fine.
+
+## THE DECISION — (b) DECLARE AND REFUSE, NOT (a) READ `getTokenDecimals`
+Every stablecoin this venue can list is 6-dp (USDC, EURC, USYC, USDT); Circle's Arc_Testnet rates endpoint
+prices exactly USDC/EURC (measured 09-13); the Swap Kit exposes NO supported-tokens call (only
+`getSwapSupportedChains`, `getTokenRates`, `getTokenDecimals`). So no non-6-dp token is arriving within days,
+and (a) would add a network call and a failure mode to a money path for a branch nothing exercises — an
+unexercised conversion on a money path is untested code. (b) costs one map lookup and makes the day it
+matters LOUD. `getTokenDecimals` earns its place the day a declared-non-6 token has to be supported.
+
+## THE FIX — `_swap-tokens.mjs`, off the DD surface (ddTree unchanged `2f4f2793…`, 38 files)
+- `SWAP_TOKEN_DECIMALS = Object.freeze({ USDC: 6, EURC: 6 })` — commented as CLAIMS about the chain, to be
+  verified against `decimals()` on Arc before an entry is added. A default is not a reading.
+- `swapTokenAddress()` throws when a symbol's declared decimals differ from `USDC_DECIMALS` **or are absent** —
+  an absent entry must never read as 6. Every scaling site already resolves BEFORE it scales, so the one gate
+  covers `buildSwapCallData`, `agentSwap`, `readTokenBalance` and `confirmSwapLanded`.
+
+## THE GUARD — `test:swaptokens` §4, MUTATION-PROVEN EVERY RUN
+Two sandbox copies of `netlify/functions` (+`shared`) under `node_modules/.cache/tikpema-swap-mutation`, a
+fixture token `MUT18` declared at 18 dp, and `toMinor` replaced by a sentinel throw so "reached toMinor" is
+OBSERVABLE. **GATED** must refuse with the decimals message and never raise the sentinel; the **UNGATED
+CONTROL** (gate cut from the copy) must raise it — proving the fixture genuinely reaches `toMinor` and only
+the gate stops it, so §4 cannot pass vacuously on an earlier refusal (Missing KIT_KEY, unknown symbol).
+- **RED STATE RECORDED** with the gate cut from the REAL file: **24/6** — `MUTATION_REACHED_TOMINOR` on all
+  four `_swap.mjs` checks, `readTokenBalance("MUT18")` went to the chain (`balanceOf` on the fixture address
+  returned `0x`), `confirmSwapLanded` did not reject. Green **30/0** after.
+- ⚠️ The first draft of the control CRASHED when the gate was absent (its "cut" step threw "shape changed")
+  — exit 1, but no ❌ line named the defect. Fixed: the control tolerates an absent gate and the GATED
+  checks report it. A verdict is earned by assertions, not by a throw.
+- test:all 123/123 — the new `USDC_DECIMALS` import from `_arc.mjs` broke no explicit-namedExports mock.
+
+## ALSO THIS SESSION
+Pushed the 7 commits local was ahead by (`4c03518..a85cf78`) — nothing was published before that.
+
+---
+
 ---
 
 # ✅ ONE TOKEN RESOLVER, THROWS ON UNKNOWN — THE THREE EURC-ELSE-USDC TERNARIES ARE GONE (`d840f72`)
