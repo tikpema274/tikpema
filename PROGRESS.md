@@ -1,5 +1,51 @@
 ---
 
+# ✅ ONE TOKEN RESOLVER, THROWS ON UNKNOWN — THE THREE EURC-ELSE-USDC TERNARIES ARE GONE (`d840f72`)
+
+**2026-09-13.** Committed, test:all **123/123** (8.6 min), **NOT DEPLOYED** — that run is T's.
+
+## THE DEFECT, BEFORE IT COULD FIRE
+`_dca.mjs` readTokenBalance, `_swap-confirm.mjs` tokenAddr and `job-swap-approve.mjs` tokenAddress each
+carried `sym === "EURC" ? CONTRACTS.EURC : CONTRACTS.USDC`. With two tokens the else-branch was USDC by
+coincidence. The day the list gains a third symbol — the mainnet stable list will — each ternary would have
+resolved "USDT" to USDC's contract and read a USDT mandate's balance, confirmed its logs, and checked its
+approval against the WRONG token, silently, while SWAP_TOKENS validation upstream said the symbol was fine.
+Two enforcement points, one bound. Found by the 2026-09-13 token-list audit; unreachable today, which is
+exactly why it is fixed today.
+
+## THE FIX
+- New `netlify/functions/_swap-tokens.mjs` owns `SWAP_TOKENS` and `swapTokenAddress(symbol)`: membership in
+  the list is checked FIRST (so a non-token CONTRACTS key such as IDENTITY_REGISTRY cannot resolve), the
+  address map second; anything unknown THROWS naming the symbol. Never a default.
+- Deliberately light (imports only `_arc.mjs`, never the App Kit) so `_swap-confirm.mjs` gains no SDK weight.
+  ⭐ Off the DD surface by placement: `_arc.mjs` IS on it, so the resolver does not live beside CONTRACTS.
+  **ddTree unchanged at `2f4f2793…` (38 files) — no vault-deposit window bought.**
+- `_swap.mjs` re-exports list + resolver (nine importers unchanged) and its own two `CONTRACTS[tIn]` lookups
+  route through it. `confirmSwapLanded` resolves both tokens BEFORE opening the witness client: an unknown
+  symbol refuses in ~1 ms with no network call behind it.
+- `job-swap-approve` imports the resolver from `_swap-tokens.mjs`, not via `_swap.mjs`: `verify-swap-approve`
+  mocks `_swap.mjs` with an explicit namedExports list, and a new name on that path stopped the suite
+  LOADING (seen during this work — the partial-mock-fails-at-instantiation shape, caught before commit).
+
+## THE GUARD — `test:swaptokens` (suite 35/123)
+Asserts the resolver; the **CALLER SET by message** — `readTokenBalance("USDT")` and
+`confirmSwapLanded(tokenIn:"USDT")` must reject with the RESOLVER's message, because an RPC failure also
+rejects and would read as a pass; and that no ternary or `CONTRACTS[token]` lookup survives in
+netlify/functions. **RED STATE RECORDED against the old callers: 15/5** — "readTokenBalance("USDT")
+resolved — it read SOME token's balance". Green 20/0 after.
+
+## TWO OF MY OWN ERRORS ON THE WAY, BOTH CAUGHT BEFORE THE COMMIT STOOD
+1. The suite's owner-import check was pinned to a LINE SHAPE (`find` took the first import mentioning
+   `_swap`) and went red on correct code. Rewritten to assert the meaning: imported from `_swap-tokens.mjs`.
+2. A `;` chain let the commit through a 19/1 run. The amend was gated on `&&`. A later command proves
+   nothing about an earlier one.
+
+## PRE-EXISTING, RECORDED NOT FIXED
+`scripts/verify-swap-receipt.mjs` is NOT in package.json `suites` (no `test:swapreceipt` script exists) and
+HANGS at "PATH 2 — NULL HASH" on the pre-change code too (60 s cap, exit 124). test:all has never run it.
+
+---
+
 # ✅ THE SWAP PAIR + PRECISION FIX IS LIVE, AND THE FIRST LIVE QUOTED STATE HAS BEEN READ
 
 **2026-09-13, deploy `6aa5f4b18d14e22e6083c620` (created 02:56, published 03:22:39 CEST) from T's shell.**
