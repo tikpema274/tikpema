@@ -1,6 +1,40 @@
 ---
 
-# ⛔ SWAP FACE-LIFT — DEPLOY FAILED 3× (OOM), NOT SHIPPED. PROD UNCHANGED.
+# ✅ THE SWAP FACE-LIFT SHIPPED — FROM T'S SHELL, ON THE FOURTH RUN. PROD SERVES 4c03518.
+
+**2026-09-13 01:35 CEST (MEASURED).** `npm run deploy:prod` run from a terminal OUTSIDE the Claude session,
+as the entry below prescribed, completed the full chain: test:all (122 suites) → build → upload →
+gate:deployed → capture:window → gate:forgery → gate:spec → gate:deployloss. Deploy `6aa5da0e8d14e28cfd83c765`,
+created 01:02, published 01:35:49.
+
+- **What production serves, read three ways that agree**: gate:deployed ✅ 5/5 — commit `4c03518`, tree
+  `4b02fd6a9fc3`, control plane == data plane; `curl` of app.tikpema.xyz names bundle **`index-PUMb0y7c.js`**
+  (the bundle the entry below called "correct and ready"; moved off `B8r2f9Zj`); the agent floor sentence
+  flipped **ABSENT → PRESENT** in the served bundle (1 hit) and the control "guaranteed at least" is unchanged (1).
+- **Everything the failed runs carried is therefore live**: `4669b95` swap tab strip + face-lift, `18c0396`
+  UB-spend 500→402, `687dc89` pay mint-failure classifier, `b69c2ee` DCA fill-floor copy.
+- **The three OOM orphans** (`6aa5674d`, `6aa56f2a`, `6aa57542`, 09-12 16:53/17:26/17:52 CEST) were recorded by
+  this run's gate:deployloss as `newLossIds`, `baselineOk: true`, `resolvedLossIds: []` — losses 12 → 15,
+  `ambiguousCanceled` unchanged at 46. ⭐ Left in place, uncancelled: they are clean evidence of the pattern.
+- **The preview-gate deviation below is CLOSED differently than expected**: the "blocked on sudo libs" was
+  false. Playwright's headless shell only lacked `libnss3`/`libnspr4`/`libasound2`, which `apt-get download`
+  + `dpkg -x` unpack without root. The first visual pass of the quoted state ran the same night, as PNGs of the
+  real components + real `styles.css`, not on production.
+
+## WHAT THE FIRST VISUAL PASS FOUND (and what followed, committed separately)
+1. The token pair rendered asymmetrically — a live select for FROM beside "→ EURC" as plain text — while the
+   bridge renders FROM/TO as a matching `field-pair`. The pair IS fixed (`SWAP_TOKENS = [USDC, EURC]`, the only
+   pool on Arc Testnet), so the select is a DIRECTION toggle and TO is derived. Fixed on both swap panels with a
+   DISABLED select for TO, per the `select:disabled` rule already in `styles.css`.
+2. Mixed precision on one line: "USDC 4311.12 · EURC 49.328137" (2dp beside a raw 6dp reader), and the wallet
+   card's "3.00" over "Max (3)". Both routed through `displayAmount`; the Max case has a render guard that was
+   proven red (57/2) on the old component before green (59/0) on the new.
+3. Not changed, recorded: the "guaranteed at least" row is called the headline in code and is not one visually —
+   a bold phrase inside a five-row paragraph at body size.
+
+---
+
+# ⛔ SUPERSEDED BY THE ENTRY ABOVE — SWAP FACE-LIFT DEPLOY FAILED 3× (OOM) ON 2026-09-12; SHIPPED 2026-09-13 01:35
 
 **2026-09-12.** Intended to ship `4669b95` (swap tab strip + bridge-shape face-lift) and everything
 else committed since the last app deploy (`decce86`): the UB-spend 500→402 (`18c0396`), the pay
