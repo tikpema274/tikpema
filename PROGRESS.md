@@ -1,3 +1,64 @@
+# ✅ THE AGENT PROPOSAL'S FEE SENTENCE IS DERIVED FROM THE MECHANIC (`7c4f3d4`) — AND THE BRIDGE-FEE GAP IS RE-MAPPED
+
+**2026-09-13.** Committed and PUSHED (origin/main `7c4f3d4`), test:all **123/123** (7.5 min), tsc clean, ddTree
+unchanged `2f4f2793…`, **NOT DEPLOYED**. Three swap/bridge commits now await T's deploy run: `d840f72`, `25e1027`,
+`7c4f3d4`. Prod still serves `e493289`.
+
+## THE COPY DEFECT — LIVE, FALSE, IN TWO PLACES, UNGUARDED
+`MyAgentPanel.tsx:772` (the render) AND `agent-act.mjs:615` (the reply message) each hand-typed
+"(taken from the amount)" — the DEDUCTED mechanic's words — on the agent path, which has charged the fee ON
+TOP since upfront fees (`_bridge.mjs` `bridgeFee` declares `mechanic: "upfront"`). `verify-bridge-mechanic-pairing`
+pinned only `ManualBridgePanel`; §9's panel census never looked at this file.
+
+## THE FIX — ONE PRODUCER, TWO READERS
+`bridgeProposalFeeLine()` in `shared/bridge-mechanic.mjs`, keyed on the mechanic the SERVER priced. `agent-act`
+threads `mechanic: bridgeMechanicOf(fee.mechanic)` into the proposal and composes its message from the producer;
+the panel reads `b.mechanic` and calls the same function. `unknown` claims no placement and extends no arrival —
+"so ~N arrives" is itself a mechanic claim. Declaration added to `bridge-mechanic.d.mts`.
+
+## THE GUARD — §10, BOTH DIRECTIONS, RED STATES RECORDED
+Both directions on the producer's rendered output (upfront carries upfront and not deducted; deducted the
+reverse; unknown neither), then both surfaces pinned by source: they import and call it, and carry NO placement
+literal of EITHER mechanic. Four mutations, each run and restored: agent panel hand-types deducted **112/3**;
+agent panel hand-types upfront **112/3**; manual panel states upfront **114/1** (§5, pre-existing); server
+message hand-types deducted **113/2**. Green **115/0**.
+
+## THE BRIDGE-FEE GAP — RE-DERIVED FROM CALLERS, AND THE BOARD WAS WRONG ABOUT WHICH SURFACE
+⛔ **The `#/bridge` PANEL closed on 2026-09-01 (`8a35d80`)** — Get quote → sealed `quoteToken` → Bridge
+(`BridgePanel.tsx:338-343`, `agent-bridge.mjs:118/:123`). The memory note's headline had been false since that
+commit, and the 2026-09-10 "re-verification" kept it open by quoting the EXECUTOR's comment ("NO TOKEN MEANS A
+FRESH QUOTE") instead of opening the panel that decides which branch runs. `grep quoteToken BridgePanel.tsx` was
+the whole check. Memory note and index corrected.
+
+**What is actually un-bound:**
+- **Chat single action** — `agent-act` prices and shows "~fee"; the confirm calls `/api/agent-bridge` with NO
+  `quoteToken` (`agentClient.ts:73-74`) → the executor prices a fresh quote and burns that one. (⚠️ my scoping
+  report had this path on `job-bridge-approve`; it is not — that is the proposal CARD.)
+- **Chat plan** — `agent-act` prices per step (shown); `agent-execute-plan.mjs:128` re-prices for the band
+  preflight; `:386` executes with no token → a THIRD quote goes to calldata.
+- **Proposal card** — `job-bridge-approve.mjs:152-157` re-prices and seals its OWN quote at approve time, then
+  executes. Sealed to itself, not to the figure the card showed.
+- NOT involved: `#/bridge` (bound), `#/bridge-manual` (self-signed, deducted mechanic, user signs `maxFee`).
+- Receipt `feeDisclosed` (`_actions.mjs:693`) is the executor's fee, so on the un-bound paths it names a figure
+  nobody was shown.
+
+**Knowable before execution: YES** — `bridgeFee()` returns a Circle quote with `signedQuote` and a 120 s window
+(measured on three real quotes, docs/*preregistration*.md); `agent-act` already holds it and discards it. So the
+close is a BINDING fix, not a mechanic statement.
+
+## 📊 THE HUMAN PAUSE — MEASURED, READ-ONLY, BEFORE DECIDING HOW EXPIRY SHOULD BEHAVE
+Prod `agent-quotes` store, quotedAt (key) → usedAt (marker) on the chat PLAN path, **N=11** confirms
+2026-08-17..09-09: **min 3 s · median 11 s · max 76 s · 0 over 120 s · 0 over 90 s.** Approve+burn ride one
+userOp, so burn submission ≈ usedAt + seconds. ⚠️ Operator-driven runs, not third-party readers; the 76 s tail
+is 63% of the window. Fee spread across quotes is 0.054071–0.054208, so nearly every re-quote shows the same figure.
+
+**Decision recorded for the build (T's):** follow the `#/bridge` precedent — countdown from response landing on
+the client clock; at 0 the confirm becomes "Quote expired — price it again" and re-quotes in place showing
+old→new; server fail-closed regardless: an expired token returns `quoteExpired:true` WITH a fresh sealed
+`requote`, never a silent re-price. Countdown quiet until <30 s so the chat surface does not pressure the reader.
+
+---
+
 # ✅ DECLARED-DECIMALS GATE — A NON-6-DP TOKEN IS REFUSED BEFORE toMinor, NOT MIS-SCALED (`25e1027`)
 
 **2026-09-13.** Committed and PUSHED (origin/main `25e1027`), test:all **123/123** (7.6 min), **NOT DEPLOYED** —
