@@ -69,17 +69,32 @@ const { token } = await mintProdToken({ address: OWNER, secret: s });
 const forged = createHash("sha256")
   .update(`bridge|${OWNER.toLowerCase()}|${DEST}|${AMOUNT}|band:acknowledge|v2`).digest("hex");
 
-const res = await fetch(`${BASE}/api/agent-execute-plan`, {
+// ═══ ⭐⭐ TWO STEPS SINCE 2026-09-13 — THE SEAL COMES BEFORE THE ACK GATE ═════════════════════════
+// The plan executor now OPENS a sealed fee quote per bridge step before it compares any ack token;
+// a plan with no `quoteTokens` is answered 409 `requoted` BEFORE the ack comparison. So a single
+// post with only a forged ack proved nothing about the gate (the forged token was never compared).
+// Step 1 re-prices with `quoteOnly` (executes nothing) and hands back the sealed token; step 2 posts
+// that token WITH the forged ack. Now the gate is reached, and only the gate decides.
+// 🚨 THE SPEND GUARD MOVED EARLIER: step 2 is sent ONLY if step 1's band is `acknowledge`. Below that
+// band no ack is compared and a valid seal would EXECUTE — the probe must never send that request.
+const plan = [{ type: "bridge_usdc", amountUsdc: AMOUNT, destination: DEST, reasoning: "ack-forgery probe" }];
+const post = (body) => fetch(`${BASE}/api/agent-execute-plan`, {
   method: "POST",
   headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-  body: JSON.stringify({
-    plan: [{ type: "bridge_usdc", amountUsdc: AMOUNT, destination: DEST, reasoning: "ack-forgery probe" }],
-    ackTokens: { 0: forged },
-  }),
+  body: JSON.stringify(body),
   signal: AbortSignal.timeout(45_000),
 });
+const q = await post({ plan, quoteOnly: true });
+const qd = await q.json().catch(() => ({}));
+const qdisc = qd.stepDisclosures?.[0];
+console.log(`  step 1 (quoteOnly): HTTP ${q.status}  requoted=${qd.requoted}  executed=${qd.executed}  band=${qdisc?.band ?? "—"}  sealed=${typeof qdisc?.quoteToken === "string"}`);
+if (!(qd.executed === false && qd.requoted === true && typeof qdisc?.quoteToken === "string" && qdisc?.band === "acknowledge")) {
+  console.log("  ❌ step 1 did not yield a sealed acknowledge-band quote — step 2 is NOT sent (it could execute below the band)");
+  console.log("\n❌ FAILURES   pass 0 / fail 1"); process.exit(1);
+}
+const res = await post({ plan, quoteTokens: { 0: qdisc.quoteToken }, ackTokens: { 0: forged } });
 const d = await res.json().catch(() => ({}));
-const disc = d.stepDisclosures?.[0];
+const disc = d.stepDisclosures?.[0] ?? qdisc;
 
 console.log(`  HTTP ${res.status}   executed=${d.executed}   needsAck=${d.needsAck ?? false}`);
 if (disc) console.log(`  band=${disc.band}  feeRatio=${(disc.feeRatio * 100).toFixed(1)}%  fee=${disc.feeUsdc} of ${AMOUNT}\n`);
