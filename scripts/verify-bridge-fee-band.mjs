@@ -256,13 +256,16 @@ section("7 — THE GATE EXISTS ON BOTH SURFACES, AND LEAVES EVIDENCE");
   // path was the one users were least likely to find.
   const client = readFileSync(new URL("../src/lib/agentClient.ts", import.meta.url), "utf8");
   check("⭐⭐ the agent client can CARRY an ack token (it could not, so that path was a dead end)",
-    /bridge: \(amountUsdc: number, destination: string, token: string, ackToken\?: string\)/.test(client) &&
-    /\{ amountUsdc, destination, ackToken \}/.test(client));
+    // ⭐ RE-POINTED 2026-09-13: the client now also carries the SEALED quote token (and a quoteOnly
+    // re-price flag); the ack token still travels — the property is the same, the signature grew.
+    /bridge: async \(amountUsdc: number, destination: string, token: string, ackToken\?: string,/.test(client) &&
+    /\{ amountUsdc, destination, ackToken, quoteToken, quoteOnly \}/.test(client));
 
   const panel = readFileSync(new URL("../src/components/MyAgentPanel.tsx", import.meta.url), "utf8");
   check("⭐⭐ the agent panel RENDERS the acknowledge disclosure", /feeDisclosure\?\.band === "acknowledge"/.test(panel));
   check("⭐ …gates its button on the tick", /b\.feeDisclosure\?\.band === "acknowledge" && !bridgeAcked/.test(panel));
-  check("⭐ …passes the token through on confirm", /onConfirmBridge\(b\.amountUsdc, b\.destination\.key, b\.feeDisclosure\?\.ackToken\)/.test(panel));
+  // ⭐ RE-POINTED 2026-09-13: the confirm now passes the ack token AND the sealed quote token.
+  check("⭐ …passes the token through on confirm", /onConfirmBridge\(b\.amountUsdc, b\.destination\.key, b\.feeDisclosure\?\.ackToken, b\.quoteToken\)/.test(panel));
   check("  …and surfaces the warn band too, not only the hard gate", /feeDisclosure\?\.band === "warn"/.test(panel));
   check("⭐ …says plainly when the fee EXCEEDS the arrival", /More goes to the fee/.test(panel));
   // Receipt refresh rides the same path — one missing wiring caused two symptoms.
@@ -342,9 +345,11 @@ section("8 — CONSENT ON THE PLAN PATH: refuse at plan stage, never mid-flight"
   // as redundant with the monotonic rule and delete it.
   check("⭐⭐ every bridge step is re-priced BEFORE any step executes",
     /PRE-FLIGHT: RE-PRICE EVERY BRIDGE STEP BEFORE EXECUTING ANY OF THEM/.test(plan));
-  check("⭐⭐ …and it records BOTH reasons it exists, so it is not removed as redundant",
+  // ⭐ RE-POINTED 2026-09-13: the pre-flight's second reason (re-pricing a stale plan) moved to the
+  // SEAL — an expired quote is refused before the ack decision — and the comment says so explicitly.
+  check("⭐⭐ …and it records why it still exists, and where its former second reason went",
     /PREVENTS A MID-PLAN ABORT AFTER FUNDS HAVE MOVED/.test(plan) &&
-    /RE-PRICES A PLAN THAT SAT UNCONFIRMED ON SCREEN/.test(plan));
+    /re-pricing a stale plan — is now the seal.s job/.test(plan));
   check("⭐⭐ a step needing an unheld ack refuses the WHOLE plan with nothing executed",
     /Nothing was executed\. Confirm you accept that/.test(plan) && /needsAck: true/.test(plan));
   check("⭐ …and returns a FRESH disclosure so the ask reflects the current price",
@@ -361,13 +366,18 @@ section("8 — CONSENT ON THE PLAN PATH: refuse at plan stage, never mid-flight"
   // Bounded: each priced step is a live IRIS round trip inside a ~10s sync handler.
   check("⭐⭐ the priced-step count is BOUNDED on both sides of the flow",
     /MAX_PRICED_BRIDGE_STEPS = 4/.test(act) && /MAX_PREFLIGHT_BRIDGE_STEPS = 4/.test(plan));
+  // ⭐ RE-POINTED 2026-09-13: the plan executor trusts nothing client-echoed — quoteId authorizes
+  // nothing, and the FEE comes only from a sealed token it OPENS itself before step 1.
   check("  …and the executor does not trust that the plan came from a quote",
-    /must not trust that it came from a quote/.test(plan));
+    /IT AUTHORIZES NOTHING, AND THE SERVER TRUSTS NOTHING IN IT/.test(plan) &&
+    /openBridgeQuote\(token, \{ owner: session\.address/.test(plan));
 
   // Per-step, because two bridges in one plan can sit in different bands.
   check("⭐⭐ acceptance is PER STEP, not one blanket tick", /planAcked\[i\]/.test(panel) && /Record<number, boolean>/.test(panel));
+  // ⭐ RE-POINTED 2026-09-13: past the quote window the button becomes a RE-PRICE (no ack needed
+  // for a press that executes nothing); inside it, every required ack still gates.
   check("⭐ the confirm button is gated until every required step is accepted",
-    /disabled=\{planBusy \|\| !allPlanAcksGiven\}/.test(panel));
+    /disabled=\{planBusy \|\| \(!expired && !allPlanAcksGiven\)\}/.test(panel));
   // ═══ ⭐⭐ THE RULE IS NOW CALLED, NOT GREPPED ════════════════════════════════════════════════
   // 🚨 THIS ASSERTION PINNED AN EXPRESSION SHAPE — `planAcked[i] && planDisclosures` — and shapes
   // are not properties. It went RED when the identical rule was rewritten as a guard clause, and

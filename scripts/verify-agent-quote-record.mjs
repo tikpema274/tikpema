@@ -241,11 +241,21 @@ mock.module("../netlify/functions/_bridge.mjs", {
   namedExports: {
     ...realBridge,
     // ONLY the IRIS round trip is injected; the band, the token and the destination table are real.
+    // ⚠️ THE CURRENT SHAPE (upfront fees): `feeMinor`/`amountMinor` are BigInts, net = the amount, and
+    // the quote carries Circle's signed payload + expiry. The old `{ maxFee, netUsdc: amount − fee }`
+    // fixture was the DEDUCTED shape and could not be SEALED — agent-act now seals every bridge
+    // step's quote into the disclosure, so the fixture has to be a real quote's shape.
     bridgeFee: async ({ amountUsdc }) => ({
       feeUsdc: FEE,
-      netUsdc: amountUsdc - FEE,
-      maxFee: Math.round(FEE * 1e6),
-      amountMinor: Math.round(amountUsdc * 1e6),
+      netUsdc: amountUsdc,
+      feeMinor: BigInt(Math.round(FEE * 1e6)),
+      amountMinor: BigInt(Math.round(amountUsdc * 1e6)),
+      mechanic: "upfront",
+      // A well-formed signed quote: prefix byte + whole 32-byte words, mode byte 0x00 (TIMESTAMP)
+      // packed with the deadline — the same shape verify-bridge-fee-binding builds. The seal DECODES it.
+      quote: (() => { const dl = Math.floor(Date.now() / 1000) + 120; return {
+        signedQuote: "0x01" + "00".repeat(31) + "20" + "00" + BigInt(dl).toString(16).padStart(62, "0") + "ab".repeat(32),
+        expiry: { mode: "TIMESTAMP", expiresAt: dl } }; })(),
     }),
   },
 });
@@ -495,8 +505,10 @@ section("7 — ⭐⭐ IT AUTHORIZES NOTHING, AND CANNOT LEARN TO");
   // The client carries it end to end — the join is worthless if it stops at the browser.
   const client = readFileSync(new URL("../src/lib/agentClient.ts", import.meta.url), "utf8");
   const panel = readFileSync(new URL("../src/components/MyAgentPanel.tsx", import.meta.url), "utf8");
-  check("⭐ the client sends quoteId back on confirm", /\{ plan, ackTokens, quoteId \}/.test(client));
-  check("  …and the panel passes the one it was quoted", /onConfirm\(data\.plan, planAckTokens, data\.quoteId\)/.test(panel));
+  // ⭐ RE-POINTED 2026-09-13: the confirm now also carries the per-step SEALED quote tokens; quoteId
+  // still travels beside them (the join key, authorizing nothing).
+  check("⭐ the client sends quoteId back on confirm", /\{ plan, ackTokens, quoteId, quoteTokens, quoteOnly \}/.test(client));
+  check("  …and the panel passes the one it was quoted", /onConfirm\(data\.plan, planAckTokens, data\.quoteId, planQuoteTokens\)/.test(panel));
 
   // Retention is a decision. If both bounds vanish, this fails.
   check("⭐ retention is bounded by BOTH a TTL and a per-owner cap",

@@ -494,6 +494,10 @@ section("10 — 🚨 THE CONVERSATIONAL AGENT SURFACE DERIVES ITS FEE SENTENCE �
   const surfaces = [
     ["src/components/MyAgentPanel.tsx", /^import\s*\{[^}]*\bbridgeProposalFeeLine\b[^}]*\}\s*from\s*"\.\.\/\.\.\/shared\/bridge-mechanic\.mjs"/m],
     ["netlify/functions/agent-act.mjs", /^import\s*\{[^}]*\bbridgeProposalFeeLine\b[^}]*\}\s*from\s*"\.\.\/\.\.\/shared\/bridge-mechanic\.mjs"/m],
+    // ⭐ The proposal CARD (Discover run → approve). It said "taken out of the amount" by hand on the
+    // upfront path too — a third copy of the same falsehood — and now derives both its indicative
+    // sentence (bridgeMechanicCopy of the recorded mechanic) and its quoted line (the producer).
+    ["src/components/jobTimeline.tsx", /^import\s*\{[^}]*\bbridgeProposalFeeLine\b[^}]*\}\s*from\s*"\.\.\/\.\.\/shared\/bridge-mechanic\.mjs"/m],
   ];
   for (const [f, importRe] of surfaces) {
     const src = stripSrc(f);
@@ -508,9 +512,50 @@ section("10 — 🚨 THE CONVERSATIONAL AGENT SURFACE DERIVES ITS FEE SENTENCE �
   // so the server must put it there, and via bridgeMechanicOf, never raw.
   const act = stripSrc("netlify/functions/agent-act.mjs");
   check("⭐⭐ agent-act threads `mechanic: bridgeMechanicOf(fee.mechanic)` into the bridge proposal", /mechanic:\s*bridgeMechanicOf\(fee\.mechanic\)/.test(act));
+  const card = stripSrc("src/components/jobTimeline.tsx");
+  check("⭐⭐ the card's INDICATIVE sentence reads bridgeMechanicCopy(proposal.indicativeMechanic) — the recorded mechanic, not a constant",
+    /bridgeMechanicCopy\(proposal\.indicativeMechanic\)/.test(card) && !/out of<\/b> the amount/.test(card));
   const panel = stripSrc("src/components/MyAgentPanel.tsx");
   check("⭐⭐ the panel keys the sentence on the SERVER's mechanic (`mechanic: b.mechanic`), not a constant",
     /bridgeProposalFeeLine\(\{[^}]*mechanic:\s*b\.mechanic\b/.test(panel) && !/mechanic:\s*"(upfront|deducted)"/.test(panel));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("11 — ⭐⭐ THE CHAT SURFACE, RENDERED: every bridge step shows its sealed fee; the window is quiet, then loud, then a re-price");
+{
+  // A state behind a transition is untested by default: MyAgentPanel's initial render carries no
+  // proposal, so the per-step fee line and the countdown are asserted by rendering AgentSummary with
+  // the proposal shape agent-act returns. [[state-behind-a-transition-is-untested-by-default]]
+  const { AgentSummary } = await import("../src/components/MyAgentPanel");
+  const UP = BRIDGE_MECHANIC_COPY.upfront.feePlacement;
+  const disclosure = (over = {}) => ({ amountUsdc: 1, destinationKey: "base", destinationLabel: "Base", feeUsdc: 0.054071, netUsdc: 1,
+    mechanic: "upfront", feeRatio: 0.054, band: "none", ackToken: null, quoteToken: "t.t", expiresInMs: 120_000, ...over });
+  const base = { decision: { action: "plan" }, needsConfirm: true, plan: [{ type: "bridge_usdc", amountUsdc: 1, destination: "base" }], totalUsdc: 1, quoteId: "q" };
+  const render = (data, quotedAt, now) => strip(React.createElement(AgentSummary, {
+    data, planRun: null, planBusy: false, planMints: {}, planAcked: {}, onPlanAckChange: () => {}, bridgeReceipts: [],
+    onConfirm: () => {}, onRequotePlan: () => {}, quotedAt, now, bridgeRun: null, bridgeBusy: false, bridgeAcked: false,
+    walletReady: true, onAckChange: () => {}, mint: null, onConfirmBridge: () => {}, onRequoteBridge: () => {},
+    vaultAcked: false, onVaultAckChange: () => {}, vaultDelta: null, vaultRun: null, vaultBusy: false, onConfirmVault: () => {} } as any));
+  const t0 = 1_000_000;
+  const ordinary = render({ ...base, stepDisclosures: { 0: disclosure() } }, t0, t0 + 1_000);
+  check("⭐⭐ an ORDINARY-band bridge step renders its fee line (it used to render nothing below the warn band)",
+    /Step 1 — Cross-chain fee ~0\.0541 USDC/.test(ordinary), ordinary.slice(0, 120));
+  check("⭐⭐ …with the UPFRONT placement, derived", ordinary.includes(`(${UP})`));
+  check("⛔ …and not the deducted one", !/taken out of the amount|taken from the amount/.test(ordinary));
+  check("⭐ 119 s left: the window note is QUIET (no countdown above 30 s)", !/good for another/.test(ordinary) && /Confirm & execute/.test(ordinary));
+  const late = render({ ...base, stepDisclosures: { 0: disclosure() } }, t0, t0 + 100_000);
+  check("⭐ 20 s left: the window note appears, naming the seconds", /good for another 20s/.test(late), late.match(/good for another \d+s/)?.[0] ?? "absent");
+  const expired = render({ ...base, stepDisclosures: { 0: disclosure() } }, t0, t0 + 121_000);
+  check("⭐⭐ past the window: the button becomes a RE-PRICE, not a confirm", /Quote expired — price it again/.test(expired) && !/Confirm & execute/.test(expired));
+  const unknownWindow = render({ ...base, stepDisclosures: { 0: disclosure({ expiresInMs: undefined }) } }, t0, t0 + 999_000);
+  check("⛔ a server that sent no window is NOT treated as expired — ignorance is not expiry", /Confirm & execute/.test(unknownWindow) && !/price it again/.test(unknownWindow));
+  const requoted = render({ ...base, requoted: true, quoteExpiredNote: true, stepDisclosures: { 0: disclosure() } }, t0, t0 + 1_000);
+  check("⭐ after a 409 re-quote the surface SAYS the figure was priced again and nothing ran", /priced again — nothing ran/.test(requoted));
+  const single = { decision: { action: "bridge_usdc" }, needsBridgeConfirm: true, bridge: { amountUsdc: 1, destination: { key: "base", label: "Base" },
+    feeUsdc: 0.054071, netUsdc: 1, mechanic: "upfront", feeDisclosure: { band: "none", feeRatio: 0.054, ackToken: null }, quoteToken: "t.t", expiresInMs: 120_000 } };
+  const s1 = render(single, t0, t0 + 1_000), s2 = render(single, t0, t0 + 121_000);
+  check("⭐⭐ single-action: the fee line is derived (upfront placement) and the confirm is offered", s1.includes(`(${UP})`) && /Confirm & bridge/.test(s1));
+  check("⭐⭐ single-action: past the window the confirm becomes a re-price", /Quote expired — price it again/.test(s2) && !/Confirm & bridge/.test(s2));
 }
 
 console.log(`\n${fail ? "❌ FAILURES" : "✅ ALL GREEN"}   pass ${pass} / fail ${fail}\n`);

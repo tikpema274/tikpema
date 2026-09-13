@@ -8,7 +8,8 @@ import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusa
 import { daySpend, budgetConfig } from "./_budget.mjs";
 import { recordBridge, recordPendingBridge } from "./_bridge-record.mjs";
 import { TxPendingError } from "./_circle.mjs";
-import { resolveDestination, bridgeFee, bridgeFeeBand, bridgeAckToken } from "./_bridge.mjs";
+import { resolveDestination, bridgeFee, bridgeFeeBand, bridgeAckToken, openBridgeQuote, sealBridgeQuote, quoteWindowMs } from "./_bridge.mjs";
+import { bridgeMechanicOf } from "../../shared/bridge-mechanic.mjs";
 import { safeQuoteId, markQuoteUsed } from "./_quote-record.mjs";
 
 // POST /api/agent-execute-plan { plan: [ {type, ...}, ... ] }
@@ -46,7 +47,12 @@ export async function handler(event) {
   const session = requireSession(event);
   if (!session) return json(401, { error: "Authentication required" });
 
-  const { plan, ackTokens, quoteId: rawQuoteId } = parseBody(event); // ackTokens: { [stepIndex]: token }
+  // ackTokens: { [stepIndex]: token } — the band acknowledgement per bridge/vault step.
+  // quoteTokens: { [stepIndex]: token } — the SEALED fee quote per bridge step, issued by agent-act
+  //   with the figure the panel rendered. Opened below before step 1; never trusted as data.
+  // quoteOnly: true — re-price every bridge step, seal, return fresh disclosures, execute NOTHING.
+  //   The panel's "Quote expired — price it again" press; it must never reach the executor.
+  const { plan, ackTokens, quoteTokens, quoteId: rawQuoteId, quoteOnly } = parseBody(event);
   if (!Array.isArray(plan) || plan.length === 0) {
     return json(400, { error: "Provide a non-empty 'plan' array" });
   }
@@ -118,23 +124,92 @@ export async function handler(event) {
   }
 
   const dests = {};
+  for (const i of bridgeIdx) {
+    const dest = resolveDestination(plan[i].destination);
+    if (!dest) return json(200, { executed: false, blocked: `step ${i + 1}: unsupported destination "${plan[i].destination}"` });
+    dests[i] = dest;
+  }
+
+  // ═══ ⭐⭐ RE-QUOTE: PRICE EVERY BRIDGE STEP, SEAL, DISCLOSE — AND EXECUTE NOTHING ════════════════
+  // One builder for the two moments a fresh figure is owed: the panel's explicit "price it again"
+  // (`quoteOnly`) and a confirm that arrived with a missing or expired seal (below). Both return the
+  // same `stepDisclosures` shape agent-act's proposal carries, each step re-sealed, so the panel
+  // re-renders the proposal with the new figures and asks again. ⛔ Never called on the path that
+  // executes: the figure that reaches calldata comes only from an OPENED token.
+  const requote = async (reason) => {
+    const stepDisclosures = {};
+    for (const i of bridgeIdx) {
+      const s = plan[i];
+      const amt = Number(s.amountUsdc);
+      const dest = dests[i];
+      let fee;
+      try {
+        fee = await bridgeFee({ amountUsdc: amt, cctpDomain: dest.cctpDomain });
+      } catch (e) {
+        // ⚠️ DISTINCT FROM A BAND REFUSAL. Unreachable pricing is transient and upstream;
+        // telling the user to reconsider their amount would be wrong advice. Nothing has
+        // executed at this point, so retrying is safe and is the right response.
+        return json(200, {
+          executed: false,
+          blocked: `step ${i + 1}: cannot reach the bridge pricing service right now (${e.message}) — nothing was executed; try again shortly`,
+          priceUnavailable: true,
+        });
+      }
+      if (fee.feeMinor >= fee.amountMinor) {
+        return json(200, {
+          executed: false,
+          blocked: `step ${i + 1}: the fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC — as much as or more than the ${amt} USDC being moved. Nothing was executed.`,
+        });
+      }
+      const band = bridgeFeeBand({ amountUsdc: amt, feeUsdc: fee.feeUsdc, netUsdc: fee.netUsdc });
+      stepDisclosures[i] = {
+        amountUsdc: amt,
+        destinationKey: dest.key,
+        destinationLabel: dest.label,
+        feeUsdc: Number(fee.feeUsdc.toFixed(6)),
+        netUsdc: Number(fee.netUsdc.toFixed(6)),
+        mechanic: bridgeMechanicOf(fee.mechanic),
+        feeRatio: band.feeRatio,
+        band: band.band,
+        ackToken: band.band === "acknowledge"
+          ? bridgeAckToken({ owner: session.address, destinationKey: dest.key, amountUsdc: amt, band: band.band })
+          : null,
+        quoteToken: sealBridgeQuote({ owner: session.address, destinationKey: dest.key, amountUsdc: amt, fee }),
+        expiresInMs: quoteWindowMs(fee),
+      };
+    }
+    // 409 for a stale/missing seal on a CONFIRM (the caller expected execution and must re-confirm);
+    // 200 for the panel's own re-price press, which expected exactly this.
+    return json(reason === "quoteOnly" ? 200 : 409, {
+      executed: false, needsConfirm: true, requoted: true,
+      quoteExpired: reason === "expired", quoteRequired: reason === "missing",
+      ...(reason === "quoteOnly" ? {} : { blocked: reason === "expired"
+        ? "the bridge quote you were shown has expired — here is a fresh one; nothing was executed. Confirm the new figure to run the plan."
+        : "this plan's bridge step has no sealed quote — here is one; nothing was executed. Confirm the figure to run the plan." }),
+      stepDisclosures,
+    });
+  };
+  if (quoteOnly) return requote("quoteOnly");
+
+  // ═══ ⛔⛔ THE FEE THAT REACHES CALLDATA IS AN OPENED SEAL, NEVER A PRICE TAKEN HERE ═════════════
+  // Until 2026-09-13 this loop called `bridgeFee()` — a SECOND quote after the one agent-act showed
+  // — and then the executor, handed no token, priced a THIRD and signed it. Three quotes; the one
+  // charged was the one nobody saw. Now each bridge step's `quoteTokens[i]` is OPENED (HMAC over
+  // owner, destination, amount, fee, Circle's signedQuote and expiry) and that object is what the
+  // valuation, the band gate and — via `step.quoteToken` — the executor's calldata all read.
+  // ⛔ ALL OPENED BEFORE STEP 1. A plan whose bridge sits at step 3 must be refused before step 1
+  // moves money, or the re-confirm would be asked for after a partial execution.
+  // ⛔ A MISSING OR EXPIRED SEAL REFUSES THE WHOLE PLAN WITH FRESH QUOTES — never a silent re-price.
   const fees = {};
   for (const i of bridgeIdx) {
     const s = plan[i];
-    const dest = resolveDestination(s.destination);
-    if (!dest) return json(200, { executed: false, blocked: `step ${i + 1}: unsupported destination "${s.destination}"` });
-    dests[i] = dest;
+    const token = (quoteTokens || {})[i];
+    if (typeof token !== "string" || !token) return requote("missing");
     try {
-      fees[i] = await bridgeFee({ amountUsdc: Number(s.amountUsdc), cctpDomain: dest.cctpDomain });
+      fees[i] = openBridgeQuote(token, { owner: session.address, destinationKey: dests[i].key, amountUsdc: Number(s.amountUsdc) });
     } catch (e) {
-      // ⚠️ DISTINCT FROM A BAND REFUSAL. Unreachable pricing is transient and upstream;
-      // telling the user to reconsider their amount would be wrong advice. Nothing has
-      // executed at this point, so retrying is safe and is the right response.
-      return json(200, {
-        executed: false,
-        blocked: `step ${i + 1}: cannot reach the bridge pricing service right now (${e.message}) — nothing was executed; try again shortly`,
-        priceUnavailable: true,
-      });
+      console.log(`[agent-plan] step ${i + 1} quote refused: ${e.message}`);
+      return requote("expired");
     }
   }
 
@@ -199,33 +274,24 @@ export async function handler(event) {
   const baselineA = atomic(await daySpend({ owner: walletAddress }));
 
   // ══ PRE-FLIGHT, PART 2: THE ACKNOWLEDGE DECISION ═════════════════════════════════
-  // ⭐ The re-pricing that feeds this happens ABOVE, before valuation — same handler, same
-  // request, one live IRIS round trip per bridge step, read here rather than repeated.
+  // ⭐ The fee this reads is the OPENED SEAL from above — the figure agent-act showed, not a
+  // re-price. A plan that sat on screen past the quote window never reaches here: the open
+  // refused it with fresh quotes. So the band here cannot have drifted from the band shown;
+  // a changed fee arrives only as a re-quote → new disclosure → new ack.
   //
-  // 🚨 THIS IS NOT REDUNDANT WITH THE MONOTONIC ACK RULE. It serves TWO purposes, and
-  // removing it because the rule "already handles band changes" reintroduces both:
-  //
-  //   1. IT PREVENTS A MID-PLAN ABORT AFTER FUNDS HAVE MOVED. The executor stops at the
-  //      first refusal, so an unacknowledged bridge at step 3 aborts steps 3+ — with
-  //      steps 1-2 already on-chain and irreversible. Consent collected after a partial
-  //      execution is not consent. Checking here means the refusal costs nothing.
-  //   2. IT RE-PRICES A PLAN THAT SAT UNCONFIRMED ON SCREEN. The quote is a snapshot; a
-  //      user can leave it open for an hour. The fee is VOLATILE — 0.0541 / 0.053520 /
-  //      0.053196 / 0.053635 in one day, and 0.203065 three weeks earlier — so a plan
-  //      quoted below the acknowledge band can genuinely reach execution above it. The
-  //      monotonic rule decides WHETHER that is acceptable; this decides WHEN we find out.
+  // 🚨 STILL NOT REDUNDANT WITH THE MONOTONIC ACK RULE:
+  // IT PREVENTS A MID-PLAN ABORT AFTER FUNDS HAVE MOVED. The executor stops at the first refusal, so an unacknowledged bridge at
+  // step 3 aborts steps 3+ — with steps 1-2 already on-chain and irreversible. Consent
+  // collected after a partial execution is not consent. Checking here means the refusal costs
+  // nothing. (Its former second purpose — re-pricing a stale plan — is now the seal's job.)
   //
   // The monotonic rule itself needs no code: `acknowledge` is the top band and the only
   // one that gates, so an exact token match in _actions already means "current band is no
   // worse than the one acknowledged". An improvement simply stops gating.
   //
-  // ⚠️ BOUNDED — one live IRIS round trip per bridge step inside a ~10s sync handler that
-  // must still execute the plan. agent-act refuses to quote more bridge steps than this,
-  // so a plan reaching here is already within budget; the guard is repeated because this
-  // endpoint accepts a plan array directly and must not trust that it came from a quote.
-  // ⭐ NO PRICING HERE. `dests` and `fees` were resolved above, before valuation, and are reused —
-  // so the fee the day-ceiling counted is the SAME figure the user is asked to acknowledge. The
-  // step-count guard, the destination check and the pricing-reachability refusal all ran up there.
+  // ⭐ NO PRICING HERE, NO I/O. `dests` and `fees` come from the opened seals above, and the
+  // fee the day-ceiling counted is the SAME figure the user is asked to acknowledge. The
+  // step-count guard, the destination check and the seal checks all ran up there.
   const ackFor = {};
   for (const i of bridgeIdx) {
     const s = plan[i];
@@ -383,7 +449,10 @@ export async function handler(event) {
       // The token the PRE-FLIGHT verified, not one the client handed us for this step —
       // _actions recomputes and compares it again, so this is belt-and-braces rather than
       // trust, and it keeps the executor's gate identical on both bridge paths.
-      const r = await executeAction(ackFor[i] ? { ...step, ackToken: ackFor[i] } : step, actx);
+      // ⭐ AND THE OPENED SEAL'S TOKEN — the executor opens it again (pure, no I/O) and signs THAT
+      // fee. Without it a session caller is refused (`quoteRequired`), by design.
+      const stepIn = step?.type === "bridge_usdc" ? { ...step, quoteToken: (quoteTokens || {})[i] } : step;
+      const r = await executeAction(ackFor[i] ? { ...stepIn, ackToken: ackFor[i] } : stepIn, actx);
       if (!r.ok) {
         results.push({ index: i, step, ok: false, blocked: r.blocked });
         stoppedAt = i;

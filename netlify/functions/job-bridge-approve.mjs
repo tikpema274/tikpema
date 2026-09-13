@@ -6,7 +6,8 @@ import { formatUnits } from "viem";
 import { TxPendingError } from "./_circle.mjs";
 import { json, parseBody, bridgeCapUsdc, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { executeAction } from "./_actions.mjs";
-import { resolveDestination, bridgeFee, sealBridgeQuote, bridgeDebitMinor } from "./_bridge.mjs";
+import { resolveDestination, bridgeFee, sealBridgeQuote, openBridgeQuote, bridgeDebitMinor, bridgeFeeBand, quoteWindowMs } from "./_bridge.mjs";
+import { bridgeMechanicOf } from "../../shared/bridge-mechanic.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { publicClient } from "./_predict.mjs";
@@ -35,7 +36,9 @@ const BALANCE_OF_ABI = [
 // executeAction return, or re-derived live.
 //
 //   destination, amount → the persisted proposal (server-authored, server-validated)
-//   fee, netUsdc        → re-priced LIVE inside executeAction at execution time
+//   fee, netUsdc        → the SEALED quote persisted on the proposal by THIS handler on the
+//                         previous press (shown to the user, then OPENED here — never re-priced
+//                         on the executing press; an expired seal re-quotes and asks again)
 //   burnHash            → executeAction's OWN return value (_actions.mjs:191-201,
 //                         sourced from _bridge.mjs:192 `await waitForTx(...)` — a
 //                         CONFIRMED hash, not the racy App Kit waiter)
@@ -134,27 +137,69 @@ export async function handler(event) {
   if (owner.pending) return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
   const walletAddress = owner.walletAddress;
 
-  // ═══ ⭐⭐ ONE QUOTE, IN-REQUEST — AND THAT IS WHY THIS PATH IS NO LONGER "UN-BOUND" ════════════
+  // ═══ ⭐⭐ THE QUOTE IS SHOWN ON ONE PRESS AND OPENED ON THE NEXT — THE CLIENT STILL SENDS ONLY runId ═
   //
-  // The balance gate below must require `amount + fee`, and the constraint is that the fee must be
-  // the one whose `signedQuote` is actually submitted — never a second read. So the quote is
-  // fetched HERE, sealed, and handed to executeAction as a `quoteToken`. The gate and the burn then
-  // price from the same object by construction.
+  // Until 2026-09-13 this handler priced and sealed IN-REQUEST and executed in the same breath: the
+  // gate and the burn shared one quote (bound), but the figure they shared was one the user had never
+  // seen — the card showed `indicativeFeeUsdc`, priced by the background analyst possibly hours
+  // earlier. Sealed to itself, not to the disclosure.
   //
-  // ⭐ APPROVAL AND EXECUTION ARE THE SAME HTTP REQUEST HERE, which is what makes this possible:
-  // the quote's ~120s window is not crossed by a human pause. What the analyst showed at PROPOSAL
-  // time is `indicativeFeeUsdc`, possibly hours old, and it stays indicative — ⚠️ and under upfront
-  // fees an understating indicative figure now means the user needs MORE BALANCE than the proposal
-  // implied, not merely that less arrives. That gap is disclosure, not binding, and it is named
-  // rather than closed here.
+  // ⛔ SEALING AT PROPOSAL TIME CANNOT WORK ON THIS PATH. The proposal is written by a background job
+  // minutes-to-hours before anyone reads the card; Circle's quote window is 120 s. A seal made then
+  // would be expired on every approval, and "expired → re-quote" would be the ONLY path.
+  //
+  // ⭐ SO THE QUOTE STEP LIVES AT APPROVAL, AND THE TOKEN LIVES IN THE DELIVERABLE, SERVER-AUTHORED:
+  //   press 1 (no live quote on record) → price, seal, PERSIST on `entry.proposal.quote`, return 200
+  //           `{ quoted: true, quote }` and execute NOTHING — the card renders the figure + countdown;
+  //   press 2 (live quote on record)    → OPEN the persisted token; execute bound to it;
+  //   expired on press 2               → price, seal, persist a fresh one, return 409
+  //           `{ quoteExpired: true, quote }` — the card shows old → new and asks again.
+  // The client posts `{ runId }` and nothing else, on every press: the figure, the token and the
+  // decision of which press this is all come from the record THE SERVER WROTE. The trust boundary
+  // at the top of this file is intact.
+  //
+  // ⚠️ AND THE BALANCE GATE BELOW READS THE OPENED QUOTE, so the wallet is checked against the fee
+  // that will be signed — the same object, by construction.
+  const persistQuote = async ({ status, quoteExpired }) => {
+    let fee;
+    try {
+      fee = await bridgeFee({ amountUsdc: amount, cctpDomain: dest.cctpDomain });
+    } catch (e) {
+      return json(409, { error: `cannot price bridge to ${dest.label} right now: ${e.message}` });
+    }
+    if (fee.feeMinor >= fee.amountMinor) {
+      return json(409, { error: `the fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC — as much as or more than the ${amount} USDC being moved` });
+    }
+    const band = bridgeFeeBand({ amountUsdc: amount, feeUsdc: fee.feeUsdc, netUsdc: fee.netUsdc });
+    const quote = {
+      amountUsdc: amount,
+      destination: { key: dest.key, label: dest.label },
+      feeUsdc: Number(fee.feeUsdc.toFixed(6)),
+      netUsdc: Number(fee.netUsdc.toFixed(6)),
+      mechanic: bridgeMechanicOf(fee.mechanic),
+      band: band.band,
+      feeRatio: band.feeRatio,
+      quotedAt: new Date().toISOString(),
+      expiresInMs: quoteWindowMs(fee),
+      // The opaque handle, persisted server-side. The card never posts it back; press 2 reads it here.
+      quoteToken: sealBridgeQuote({ owner: session.address, destinationKey: dest.key, amountUsdc: amount, fee }),
+    };
+    await store.setJSON(run.jobId, { ...entry, proposal: { ...proposal, quote } });
+    // The token stays server-side; the card gets every figure and the window, not the handle.
+    const { quoteToken: _omit, ...shown } = quote;
+    return json(status, { executed: false, quoted: true, quoteExpired: !!quoteExpired, quote: shown });
+  };
+
+  const persisted = proposal.quote?.quoteToken;
+  if (typeof persisted !== "string" || !persisted) return persistQuote({ status: 200, quoteExpired: false });
   let fee;
   try {
-    fee = await bridgeFee({ amountUsdc: amount, cctpDomain: dest.cctpDomain });
+    fee = openBridgeQuote(persisted, { owner: session.address, destinationKey: dest.key, amountUsdc: amount });
   } catch (e) {
-    return json(409, { error: `cannot price bridge to ${dest.label} right now: ${e.message}` });
+    console.log(`[bridge-approve] persisted quote refused for job ${run.jobId}: ${e.message}`);
+    return persistQuote({ status: 409, quoteExpired: true });
   }
-  const quoteToken = sealBridgeQuote({
-    owner: session.address, destinationKey: dest.key, amountUsdc: amount, fee });
+  const quoteToken = persisted;
 
   // ── PRE-FLIGHT BALANCE GATE — runs BEFORE the lock and BEFORE any burn is submitted. ──
   // job #155341 approved a 10 USDC bridge against a 6.30 wallet; the burn reverted on-chain

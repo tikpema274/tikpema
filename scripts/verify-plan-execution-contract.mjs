@@ -37,8 +37,15 @@ mock.module("@netlify/blobs", { namedExports: { connectLambda: () => {},
 mock.module(R + "_auth.mjs", { namedExports: { ...realAuth, requireSession: () => ({ address: OWNER }) }});
 mock.module(R + "_agent-wallets.mjs", { namedExports: { ...realWallets, ensureOwnerWallet: async () => ({ walletAddress: OWNER }) }});
 mock.module(R + "_budget.mjs", { namedExports: { ...realBudget, daySpend: async () => 0, budgetConfig: () => ({ PERIOD_CEILING_USDC: 10000 }) }});
-mock.module(R + "_bridge.mjs", { namedExports: { ...realBridge,
-  bridgeFee: async ({ amountUsdc }) => ({ feeUsdc: 0.05, netUsdc: amountUsdc, maxFee: 50000, amountMinor: Math.round(amountUsdc * 1e6) }) }});
+// ⭐ A SEALABLE quote fixture (2026-09-13): the plan handler no longer prices bridge steps for
+// execution — it OPENS a sealed token per step. So the suite seals one per step with the REAL
+// `sealBridgeQuote` (the seal is code under test, the price is the fixture), and `bridgeFee` is
+// reached only by the handler's re-quote builder.
+process.env.SESSION_SECRET ||= ["plan", "contract", "suite", "not", "a", "credential"].join("-");
+const FEE = ({ amountUsdc }) => ({ feeUsdc: 0.05, netUsdc: amountUsdc, feeMinor: 50000n, amountMinor: BigInt(Math.round(amountUsdc * 1e6)),
+  mechanic: "upfront", quote: { signedQuote: "0x01" + "00".repeat(31) + "20" + "00" + BigInt(4102444800).toString(16).padStart(62, "0") + "ab".repeat(32),
+    expiry: { mode: "TIMESTAMP", expiresAt: 4102444800 } } });
+mock.module(R + "_bridge.mjs", { namedExports: { ...realBridge, bridgeFee: async (a) => FEE(a) }});
 // ⭐ The executor is the BOUNDARY — swapped per case so the handler's own bookkeeping is what is
 // under test, never the executor's. `valueOfStep` stays REAL.
 mock.module(R + "_actions.mjs", { namedExports: { ...realActions, executeAction: async (...a) => executorImpl(...a) }});
@@ -51,17 +58,31 @@ const ok = (l, c, x = "") => { if (c) { pass++; console.log(`  ✅ ${l}${x ? ` �
 const section = (t) => console.log(`\n── ${t} ${"─".repeat(Math.max(0, 58 - t.length))}`);
 
 /** @param {number[]} amounts one step per amount @param {Function} exec the executor stand-in */
-const runPlan = async (amounts, exec) => {
+const runPlan = async (amounts, exec, { withTokens = true } = {}) => {
   executorImpl = exec;
+  const plan = amounts.map((amountUsdc) => ({ type: "bridge_usdc", amountUsdc, destination: "base", reasoning: "contract" }));
+  // The sealed quote per bridge step — what agent-act's proposal carries and the panel hands back.
+  const quoteTokens = withTokens ? Object.fromEntries(plan.map((st, i) =>
+    [i, realBridge.sealBridgeQuote({ owner: OWNER, destinationKey: "base", amountUsdc: st.amountUsdc, fee: FEE(st) })])) : undefined;
   const out = await handler({ httpMethod: "POST", headers: { authorization: "Bearer x" },
-    body: JSON.stringify({ plan: amounts.map((amountUsdc) => ({ type: "bridge_usdc", amountUsdc, destination: "base", reasoning: "contract" })) }) });
-  return JSON.parse(out.body);
+    body: JSON.stringify({ plan, quoteTokens }) });
+  return { status: out.statusCode, ...JSON.parse(out.body) };
 };
 const run = (amountUsdc, exec) => runPlan([amountUsdc], async () => exec);
 
 console.log("╔══════════════════════════════════════════════════════════════════════╗");
 console.log("║  the plan execution contract — does `executed` mean what it says?    ║");
 console.log("╚══════════════════════════════════════════════════════════════════════╝");
+
+section("0 ⛔⛔ NO SEALED QUOTE ⇒ NOTHING RUNS, executed IS FALSE, and a FRESH quote comes back");
+{
+  let reached = 0;
+  const r = await runPlan([1], async () => { reached++; return { ok: true, kind: "bridge_usdc" }; }, { withTokens: false });
+  ok("⭐⭐ a plan with no quoteTokens is answered 409 `requoted` — a re-confirm, not a silent re-price",
+    r.status === 409 && r.requoted === true && r.quoteRequired === true, `status=${r.status} requoted=${r.requoted}`);
+  ok("⭐⭐ `executed` is FALSE and the executor was NEVER reached", r.executed === false && reached === 0, `executed=${r.executed} reached=${reached}`);
+  ok("⭐ …and the fresh disclosure carries a sealed token for the step", typeof r.stepDisclosures?.[0]?.quoteToken === "string");
+}
 
 section("1 ⛔⛔ NOTHING RAN ⇒ executed IS FALSE");
 {

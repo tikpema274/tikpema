@@ -10,7 +10,7 @@ import { walletTokenBalances } from "./_balances.mjs";
 import { SUPPORTED_VAULT_KEYS, resolveVault } from "./_vault.mjs";
 import { depositDisclosure } from "./_vault-disclosure.mjs";
 import { vaultDepositCapUsdc } from "./_arc.mjs";
-import { resolveDestination, bridgeFee, SUPPORTED_DESTINATION_LABELS, bridgeFeeBand, bridgeAckToken } from "./_bridge.mjs";
+import { resolveDestination, bridgeFee, SUPPORTED_DESTINATION_LABELS, bridgeFeeBand, bridgeAckToken, sealBridgeQuote, quoteWindowMs } from "./_bridge.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { budgetConfig } from "./_budget.mjs";
@@ -430,6 +430,7 @@ export async function handler(event) {
           destinationLabel: dest.label,
           feeUsdc: Number(fee.feeUsdc.toFixed(6)),
           netUsdc: Number(fee.netUsdc.toFixed(6)),
+          mechanic: bridgeMechanicOf(fee.mechanic),
           feeRatio: band.feeRatio,
           band: band.band,
           // Present ONLY when acceptance is required, so its presence is the signal to
@@ -438,6 +439,11 @@ export async function handler(event) {
             band.band === "acknowledge"
               ? bridgeAckToken({ owner: session.address, destinationKey: dest.key, amountUsdc: amt, band: band.band })
               : null,
+          // ⭐⭐ SEALED PER STEP — see the single-action proposal above for why. agent-execute-plan
+          // opens every one of these BEFORE step 1 and refuses the whole plan (with fresh quotes)
+          // if any is missing or expired, so a plan never burns a fee its reader did not see.
+          quoteToken: sealBridgeQuote({ owner: session.address, destinationKey: dest.key, amountUsdc: amt, fee }),
+          expiresInMs: quoteWindowMs(fee),
         };
       }
 
@@ -450,8 +456,9 @@ export async function handler(event) {
       // correlate answer nothing. This id travels with the plan to agent-execute-plan and
       // lands on every bridge receipt that plan produces, so "proposed vs ran" is one lookup.
       //
-      // 🚨 DIAGNOSTIC ONLY — nothing may ever read this back to authorize a bridge. The
-      // pre-flight in agent-execute-plan RE-PRICES rather than trusting this, deliberately.
+      // 🚨 DIAGNOSTIC ONLY — nothing may ever read this back to authorize a bridge. What
+      // authorizes the figure is the SEALED quoteToken on each step disclosure (HMAC, opened by
+      // the executor); this record is the join for "proposed vs ran", not a credential.
       //
       // ⚠️ FIRE-AND-CONTINUE. `recordQuoteNeverThrows` swallows everything: this is the quote
       // path, and losing the ability to propose a plan because diagnostics failed would trade
@@ -512,7 +519,8 @@ export async function handler(event) {
         vaultDisclosures,
         decision,
         // Echoed so the client can hand it back on confirm. It authorizes NOTHING — the
-        // executor re-prices and recomputes every gate regardless of what comes with it.
+        // executor recomputes every gate regardless; the FEE is authorized by the sealed
+        // quoteToken on each step disclosure, not by this id.
         quoteId,
         plan: steps,
         totalUsdc,
@@ -603,6 +611,19 @@ export async function handler(event) {
           // it, it can only say "unknown" — never guess a placement. Normalised, never raw.
           mechanic: bridgeMechanicOf(fee.mechanic),
           cap: bcap,
+          // ═══ ⭐⭐ THE FIGURE ABOVE IS SEALED, AND THE SEAL TRAVELS WITH IT ═══════════════════════
+          // Until 2026-09-13 this proposal showed a fee and then threw the quote away: the confirm
+          // reached /api/agent-bridge with no token, the executor priced a SECOND quote and signed
+          // that one, and the receipt's `feeDisclosed` named a figure nobody had seen. Now the quote
+          // that produced `feeUsdc` is sealed (owner, destination, amount, fee, Circle's signedQuote
+          // and expiry, all inside the MAC) and the panel hands it back verbatim on confirm; the
+          // executor OPENS it, never re-prices, and refuses without it. The fee in the calldata is
+          // the fee that was shown — the same binding #/bridge has had since 8a35d80.
+          quoteToken: sealBridgeQuote({ owner: session.address, destinationKey: dest.key, amountUsdc: amount, fee }),
+          // A DURATION, not a deadline — the tighter of our seal TTL and Circle's own window, so the
+          // client counts down on its own clock with no skew to disagree about. (Same reasoning as
+          // agent-bridge's quoteOnly response.)
+          expiresInMs: quoteWindowMs(fee),
           feeDisclosure: {
             feeRatio: band.feeRatio,
             band: band.band,

@@ -7,6 +7,7 @@ import { resolveDestination, bridgeFee, bridgeFeeBand, sealBridgeQuote, quoteWin
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { recordBridge, recordPendingBridge } from "./_bridge-record.mjs";
+import { bridgeMechanicOf } from "../../shared/bridge-mechanic.mjs";
 
 // POST /api/agent-bridge { amountUsdc, destination }  (auth required)
 //
@@ -64,24 +65,26 @@ export async function handler(event) {
   // ⭐ The quote is SEALED, not returned as a number the client posts back — `maxFee` reaches signed
   // calldata, and a caller-chosen one would let the caller choose what the burn authorises.
   // ⛔ NOTHING MOVES HERE. No wallet call, no allowance, no burn — bridgeFee is two read-only GETs.
-  if (quoteOnly) {
+  // ⭐ ONE PRICER for the quoteOnly turn AND the re-quote a stale confirm triggers below — so the
+  // figure a re-confirm shows is built exactly like the first one, not by a second, drifting copy.
+  const priceQuote = async () => {
     let fee;
     try { fee = await bridgeFee({ amountUsdc: amount, cctpDomain: dest.cctpDomain }); }
-    catch (e) { return json(200, { outcome: "quote_failed", executed: false, quoted: false, blocked: `cannot price bridge to ${dest.label}: ${e.message}` }); }
+    catch (e) { return { status: 200, body: { outcome: "quote_failed", executed: false, quoted: false, blocked: `cannot price bridge to ${dest.label}: ${e.message}` } }; }
     // ⚠️ SAME THRESHOLD, DIFFERENT CLAIM — see the fee-floor in _actions.mjs. Under upfront fees the
     // recipient receives the FULL amount, so a fee above the amount no longer means "nothing would
     // arrive"; it means the move costs more than it moves. The wording must not keep asserting a
     // mechanism that stopped being true.
     if (fee.feeMinor >= fee.amountMinor) {
-      return json(200, { outcome: "quote_failed", executed: false, quoted: false, blocked:
+      return { status: 200, body: { outcome: "quote_failed", executed: false, quoted: false, blocked:
         `the fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC — as much as or more than the ` +
         `${amount} USDC you are moving. The full ${amount} would still arrive, but you would pay ` +
-        `~${(amount + fee.feeUsdc).toFixed(4)} USDC to move it.` });
+        `~${(amount + fee.feeUsdc).toFixed(4)} USDC to move it.` } };
     }
     // ⚠️ The band is returned so the panel can escalate at 10%/25% EXACTLY as before. The
     // thresholds are untouched; only the moment the figure appears has changed.
     const band = bridgeFeeBand({ amountUsdc: amount, feeUsdc: fee.feeUsdc, netUsdc: fee.netUsdc });
-    return json(200, {
+    return { status: 200, body: {
       // ⭐ AN EXPLICIT DISCRIMINATOR. `executed: false` already means four different things on this
       // endpoint; the client switches on THIS and refuses anything it does not recognise, so a
       // FIFTH shape fails loudly instead of falling through to "Bridge did not execute".
@@ -93,6 +96,9 @@ export async function handler(event) {
         destination: { key: dest.key, label: dest.label },
         feeUsdc: Number(fee.feeUsdc.toFixed(6)),
         netUsdc: Number(fee.netUsdc.toFixed(6)),
+        // ⭐ THE MECHANIC, READ OFF THE QUOTE — BridgePanel keyed its copy on `quote?.mechanic ?? "upfront"`
+        // with nothing ever sending one, so the default was doing the reading. Now it is a reading.
+        mechanic: bridgeMechanicOf(fee.mechanic),
         band: band.band,
         feeRatio: band.feeRatio,
         // ═══ ⭐⭐ A DURATION, DERIVED — NOT OUR CONSTANT, AND NOT AN INSTANT ════════════════════
@@ -117,13 +123,30 @@ export async function handler(event) {
         // it could alter, and the figure the gate will trust lives inside the MAC.
         quoteToken: sealBridgeQuote({ owner: session.address, destinationKey: dest.key, amountUsdc: amount, fee }),
       },
-    });
-  }
+    } };
+  };
+  if (quoteOnly) { const q = await priceQuote(); return json(q.status, q.body); }
 
   const step = { type: "bridge_usdc", amountUsdc: amount, destination: dest.key, ackToken, quoteToken, reasoning: `bridge ${amount} USDC to ${dest.label}` };
 
   try {
     const r = await executeAction(step, { walletAddress, session });
+    // ═══ ⛔ A STALE OR MISSING QUOTE IS ANSWERED WITH A FRESH ONE, NEVER A SILENT RE-PRICE ══════
+    // The executor refused BEFORE pricing (expired seal → `quoteExpired`; no seal from a session
+    // caller → `quoteRequired`). Nothing was signed. The honest reply is a 409 carrying a new sealed
+    // quote so the panel can show the new figure — beside the old one — and ask for a re-confirm.
+    // The confirm that reaches the executor next carries THAT token, so the fee in the calldata is
+    // again the fee that was shown. Measured pause on the chat plan path (N=11, 2026-09-13): median
+    // 11 s, max 76 s against a 120 s window — this branch is the exception, not the flow.
+    if (!r.ok && (r.quoteExpired || r.quoteRequired)) {
+      const q = await priceQuote();
+      if (!q.body.quoted) return json(q.status, { ...q.body, quoteExpired: !!r.quoteExpired, quoteRequired: !!r.quoteRequired });
+      return json(409, {
+        outcome: "requote", executed: false,
+        quoteExpired: !!r.quoteExpired, quoteRequired: !!r.quoteRequired,
+        blocked: r.blocked, quote: q.body.quote,
+      });
+    }
     // A high-fee refusal carries its disclosure so the panel can render the band and
     // return the acknowledgment. The refusal is satisfiable, not terminal.
     if (!r.ok) return json(200, {

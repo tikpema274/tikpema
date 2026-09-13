@@ -83,6 +83,20 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   // bands, so this is keyed by step index rather than a single flag — one blanket tick
   // would be consent to whichever disclosure happened to render last.
   const [planAcked, setPlanAcked] = useState<Record<number, boolean>>({});
+  // ═══ ⭐⭐ THE QUOTE WINDOW, ON THE CLIENT CLOCK ══════════════════════════════════════════════
+  // A bridge proposal (single or plan step) now carries a SEALED quote and a DURATION
+  // (`expiresInMs`). `quotedAt` is stamped the moment the answer lands, on this clock, so the
+  // countdown never subtracts a server epoch from a device clock. The seal is what the server
+  // opens; the countdown is only so the button can turn into "price it again" BEFORE a press
+  // fails, rather than after. ⚠️ Shown only under 30 s — a visible timer on a chat surface
+  // pressures the reader, and the measured pause (median 11 s, max 76 s) rarely gets there.
+  const [quotedAt, setQuotedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (quotedAt == null) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [quotedAt]);
   const [mint, setMint] = useState<any>(null); // { state: 'pending'|'minted'|'failed', mintTx? }
   // ── VAULT DEPOSIT (propose → acknowledge → execute). Mirrors the bridge's shape, and the
   // acknowledgement is the vault's DISCLOSURE ack, not a fee band. `vaultDelta` carries the
@@ -173,6 +187,7 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       const token = await w.ensureSession(); // auth: token required by the endpoint
       const data = await agentClient.act(task, token);
       setResult(data);
+      setQuotedAt(Date.now()); // the client's own stamp for every quote this answer carries
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -183,12 +198,36 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   // quoteId comes straight from the quote that produced this plan and is passed through
   // untouched — it exists so the server-side record of what was PRICED can be joined to the
   // receipts of what RAN. It is not a credential and gates nothing.
-  async function confirmPlan(plan: unknown[], ackTokens?: Record<number, string>, quoteId?: string) {
+  // ⭐ A RE-QUOTE REPLACES THE PROPOSAL'S FIGURES IN PLACE — new fees, new seals, a fresh stamp — and
+  // clears every acknowledgement, because a tick given against one figure is not a tick for another.
+  function applyPlanRequote(res: any) {
+    setResult((prev: any) => (prev ? { ...prev, stepDisclosures: res.stepDisclosures, requoted: true, quoteExpiredNote: !!res.quoteExpired } : prev));
+    setQuotedAt(Date.now());
+    setPlanAcked({});
+    setPlanRun(null);
+  }
+  async function requotePlan(plan: unknown[], quoteId?: string) {
+    setPlanBusy(true);
+    try {
+      const token = await w.ensureSession();
+      const res = await agentClient.executePlan(plan, token, undefined, quoteId, undefined, true);
+      if (res?.requoted) applyPlanRequote(res);
+      else setPlanRun({ error: res?.blocked || "Could not re-price this plan." });
+    } catch (e: any) {
+      setPlanRun({ error: e.message });
+    } finally {
+      setPlanBusy(false);
+    }
+  }
+  async function confirmPlan(plan: unknown[], ackTokens?: Record<number, string>, quoteId?: string, quoteTokens?: Record<number, string>) {
     setPlanBusy(true);
     setPlanMints({});
     try {
       const token = await w.ensureSession();
-      const res = await agentClient.executePlan(plan, token, ackTokens, quoteId);
+      const res = await agentClient.executePlan(plan, token, ackTokens, quoteId, quoteTokens);
+      // ⛔ A 409 `requoted` means NOTHING RAN: the seal was missing or expired and the server priced
+      // a fresh figure instead of silently signing one. Show it and ask again — not an error.
+      if (res?.requoted) { applyPlanRequote(res); return; }
       setPlanRun(res);
       // Option A: any bridge step already fired its Arc burn and the plan moved
       // on. Poll each bridge step's destination mint INLINE (concurrently, in the
@@ -254,12 +293,40 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
     }
   }
 
-  async function confirmBridge(amountUsdc: number, destinationKey: string, ackToken?: string) {
+  // ⭐ Same shape as the plan: the fresh quote's figures, seal and window replace the proposal's, the
+  // ack is cleared, and the user confirms the figure they can now see.
+  function applyBridgeRequote(q: any, expired: boolean) {
+    setResult((prev: any) => (prev?.bridge ? { ...prev, bridge: { ...prev.bridge,
+      feeUsdc: q.feeUsdc, netUsdc: q.netUsdc, mechanic: q.mechanic,
+      feeDisclosure: { band: q.band, feeRatio: q.feeRatio, ackToken: q.ackToken ?? null },
+      quoteToken: q.quoteToken, expiresInMs: q.expiresInMs,
+    }, requoted: true, quoteExpiredNote: expired } : prev));
+    setQuotedAt(Date.now());
+    setBridgeAcked(false);
+    setBridgeRun(null);
+  }
+  async function requoteBridge(amountUsdc: number, destinationKey: string) {
+    setBridgeBusy(true);
+    try {
+      const token = await w.ensureSession();
+      const res = await agentClient.bridge(amountUsdc, destinationKey, token, undefined, undefined, true);
+      if (res?.quoted && res?.quote) applyBridgeRequote(res.quote, true);
+      else setBridgeRun({ blocked: res?.blocked || "Could not re-price this bridge." });
+    } catch (e: any) {
+      setBridgeRun({ error: e.message });
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+  async function confirmBridge(amountUsdc: number, destinationKey: string, ackToken?: string, quoteToken?: string) {
     setBridgeBusy(true);
     setMint(null);
     try {
       const token = await w.ensureSession();
-      const res = await agentClient.bridge(amountUsdc, destinationKey, token, ackToken);
+      const res = await agentClient.bridge(amountUsdc, destinationKey, token, ackToken, quoteToken);
+      // ⛔ `requote` = the seal was stale or missing; the server priced a fresh figure and signed
+      // NOTHING. Render the new figure beside a note and ask again.
+      if (res?.outcome === "requote" && res?.quote) { applyBridgeRequote(res.quote, !!res.quoteExpired); return; }
       setBridgeRun(res);
       // Stage 2: the Arc burn is done; poll until Circle's relayer mints (or fails).
       //
@@ -411,6 +478,9 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
             onPlanAckChange={setPlanAcked}
             bridgeReceipts={bridgeReceipts}
             onConfirm={confirmPlan}
+            onRequotePlan={requotePlan}
+            quotedAt={quotedAt}
+            now={now}
             bridgeRun={bridgeRun}
             bridgeBusy={bridgeBusy}
             bridgeAcked={bridgeAcked}
@@ -418,6 +488,7 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
             onAckChange={setBridgeAcked}
             mint={mint}
             onConfirmBridge={confirmBridge}
+            onRequoteBridge={requoteBridge}
             vaultAcked={vaultAcked}
             onVaultAckChange={setVaultAcked}
             vaultDelta={vaultDelta}
@@ -585,6 +656,9 @@ export function AgentSummary({
   onPlanAckChange,
   bridgeReceipts,
   onConfirm,
+  onRequotePlan,
+  quotedAt,
+  now,
   bridgeRun,
   bridgeBusy,
   bridgeAcked,
@@ -592,6 +666,7 @@ export function AgentSummary({
   onAckChange,
   mint,
   onConfirmBridge,
+  onRequoteBridge,
   vaultAcked,
   onVaultAckChange,
   vaultDelta,
@@ -606,14 +681,18 @@ export function AgentSummary({
   planAcked: Record<number, boolean>;
   onPlanAckChange: (v: Record<number, boolean>) => void;
   bridgeReceipts: any[];
-  onConfirm: (plan: unknown[], ackTokens?: Record<number, string>, quoteId?: string) => void;
+  onConfirm: (plan: unknown[], ackTokens?: Record<number, string>, quoteId?: string, quoteTokens?: Record<number, string>) => void;
+  onRequotePlan: (plan: unknown[], quoteId?: string) => void;
+  quotedAt: number | null;
+  now: number;
   bridgeRun: any;
   bridgeBusy: boolean;
   bridgeAcked: boolean;
   walletReady: boolean;
   onAckChange: (v: boolean) => void;
   mint: any;
-  onConfirmBridge: (amountUsdc: number, destinationKey: string, ackToken?: string) => void;
+  onConfirmBridge: (amountUsdc: number, destinationKey: string, ackToken?: string, quoteToken?: string) => void;
+  onRequoteBridge: (amountUsdc: number, destinationKey: string) => void;
   vaultAcked: boolean;
   onVaultAckChange: (v: boolean) => void;
   vaultDelta: VaultDelta;
@@ -642,6 +721,22 @@ export function AgentSummary({
     };
     const arrival = arrivalFor(bridgeRun?.burnHash);
   const d = data.decision || {};
+
+  // ⭐ SECONDS LEFT ON THE TIGHTEST QUOTE THIS ANSWER CARRIES — null when there is nothing to time
+  // (no quote, or a server that sent no window: ignorance is not expiry). Rendered only under 30 s.
+  const secondsLeftFor = (windows: Array<number | undefined>) => {
+    if (quotedAt == null) return null;
+    const ms = windows.filter((w) => Number.isFinite(Number(w))).map(Number);
+    if (!ms.length) return null;
+    return Math.ceil((Math.min(...ms) - (now - quotedAt)) / 1000);
+  };
+  const QUIET_ABOVE_S = 30;
+  const windowNote = (secs: number | null) =>
+    secs == null || secs > QUIET_ABOVE_S || secs <= 0 ? null : (
+      <div className="status" style={{ opacity: 0.8, marginBottom: 6 }}>
+        This quote is good for another {secs}s — after that it is priced again before anything runs.
+      </div>
+    );
 
   // ═══ ⭐⭐ A READ, RENDERED AS A READ ═══════════════════════════════════════════════════════
   // A balance answer is the one result on this page that moves nothing, and it is styled to say
@@ -829,15 +924,31 @@ export function AgentSummary({
           </div>
         )}
 
-        {!bridgeRun && (
-          <button
-            className="emerald"
-            disabled={bridgeBusy || !walletReady || (b.feeDisclosure?.band === "acknowledge" && !bridgeAcked)}
-            onClick={() => onConfirmBridge(b.amountUsdc, b.destination.key, b.feeDisclosure?.ackToken)}
-          >
-            {bridgeBusy ? "Bridging…" : "Confirm & bridge"}
-          </button>
+        {data.requoted && (
+          <div className="status" style={{ color: "var(--warn)", marginBottom: 6 }}>
+            {data.quoteExpiredNote
+              ? "The quote you were shown expired before you confirmed, so it was priced again — nothing ran. This is the current figure; confirm it to bridge."
+              : "Priced again — this is the current figure; confirm it to bridge."}
+          </div>
         )}
+        {!bridgeRun && windowNote(secondsLeftFor([b.expiresInMs]))}
+        {!bridgeRun && (() => {
+          // ⛔ AN EXPIRED QUOTE TURNS THE CONFIRM INTO A RE-PRICE, so a press past the window asks for
+          // a figure instead of failing against one. The server refuses a stale seal regardless.
+          const secs = secondsLeftFor([b.expiresInMs]);
+          const expired = secs !== null && secs <= 0;
+          return (
+            <button
+              className="emerald"
+              disabled={bridgeBusy || !walletReady || (!expired && b.feeDisclosure?.band === "acknowledge" && !bridgeAcked)}
+              onClick={() => expired
+                ? onRequoteBridge(b.amountUsdc, b.destination.key)
+                : onConfirmBridge(b.amountUsdc, b.destination.key, b.feeDisclosure?.ackToken, b.quoteToken)}
+            >
+              {bridgeBusy ? (expired ? "Pricing…" : "Bridging…") : expired ? "Quote expired — price it again" : "Confirm & bridge"}
+            </button>
+          );
+        })()}
 
         {bridgeRun?.blocked && <div style={{ marginTop: 6 }}>Your agent held off — {bridgeRun.blocked}.</div>}
         {bridgeRun?.error && <div style={{ marginTop: 6, color: "var(--warn)" }}>Error — {bridgeRun.error}.</div>}
@@ -998,6 +1109,16 @@ export function AgentSummary({
             accepted on its own. Rendered from the server's `stepDisclosures` — the band
             is never re-derived here from two numbers, which is how three surfaces came to
             disagree about one fact. */}
+        {/* ═══ ⭐⭐ EVERY BRIDGE STEP SHOWS ITS FEE, WHATEVER THE BAND ════════════════════════════
+            This used to render only the warn/acknowledge bands, so an ordinary-band bridge inside
+            a plan showed NO figure at all — disclosure triggered by severity, the original defect.
+            The figure below is the one sealed in `quoteToken`; the executor signs exactly it.
+            Derived from the mechanic, never typed (see verify-bridge-mechanic-pairing §10). */}
+        {Object.entries(planDisclosures).map(([k, d]: [string, any]) => (
+          <div key={`fee-${k}`} className="status" style={{ marginBottom: 6 }}>
+            Step {Number(k) + 1} — {bridgeProposalFeeLine({ feeUsdc: d.feeUsdc, netUsdc: d.netUsdc, destinationLabel: d.destinationLabel, mechanic: d.mechanic })}
+          </div>
+        ))}
         {Object.entries(planDisclosures).map(([k, d]: [string, any]) => {
           const i = Number(k);
           if (d.band === "warn") {
@@ -1062,15 +1183,31 @@ export function AgentSummary({
           );
         })}
 
-        {!planRun && (
-          <button
-            className="emerald"
-            disabled={planBusy || !allPlanAcksGiven}
-            onClick={() => onConfirm(data.plan, planAckTokens, data.quoteId)}
-          >
-            {planBusy ? "Executing…" : "Confirm & execute"}
-          </button>
+        {data.requoted && (
+          <div className="status" style={{ color: "var(--warn)", marginBottom: 6 }}>
+            {data.quoteExpiredNote
+              ? "A bridge quote in this plan expired before you confirmed, so the plan was priced again — nothing ran. These are the current figures; confirm them to execute."
+              : "Priced again — these are the current figures; confirm them to execute."}
+          </div>
         )}
+        {!planRun && windowNote(secondsLeftFor(Object.values(planDisclosures).map((d: any) => d?.expiresInMs)))}
+        {!planRun && (() => {
+          const secs = secondsLeftFor(Object.values(planDisclosures).map((d: any) => d?.expiresInMs));
+          const expired = secs !== null && secs <= 0;
+          // ⭐ The sealed quote per bridge step, handed back verbatim — the server opens them before
+          // step 1 and signs those fees. Keyed like ackTokens so one map shape covers both.
+          const planQuoteTokens: Record<number, string> = Object.fromEntries(
+            Object.entries(planDisclosures).filter(([, d]: [string, any]) => typeof d?.quoteToken === "string").map(([k, d]: [string, any]) => [Number(k), d.quoteToken]));
+          return (
+            <button
+              className="emerald"
+              disabled={planBusy || (!expired && !allPlanAcksGiven)}
+              onClick={() => expired ? onRequotePlan(data.plan, data.quoteId) : onConfirm(data.plan, planAckTokens, data.quoteId, planQuoteTokens)}
+            >
+              {planBusy ? (expired ? "Pricing…" : "Executing…") : expired ? "Quote expired — price it again" : "Confirm & execute"}
+            </button>
+          );
+        })()}
         {planRun?.blocked && <div style={{ marginTop: 6 }}>Plan blocked — {planRun.blocked}.</div>}
         {planRun?.error && <div style={{ marginTop: 6, color: "var(--warn)" }}>Error — {planRun.error}.</div>}
         {/* ⭐ GATED ON `results`, NOT ON `executed`. This used to read `planRun?.executed`, which was

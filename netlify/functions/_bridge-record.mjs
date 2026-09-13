@@ -197,6 +197,9 @@ function feePair(src, { burnHash } = {}) {
     // ⛔ `unknown` IS THE HONEST DEFAULT AND THE ONLY SAFE ONE. Defaulting to either mechanic would
     // make a permanent record assert something it was never told, about money that already moved.
     feeMechanic: bridgeMechanicOf(src?.feeMechanic),
+    // ⭐ WHEN THE DISCLOSED FEE WAS ISSUED (the seal's iat, ISO). Pairs with `at`: shown → burned is
+    // the human pause the quote window has to cover. null = not sealed (no-session path) or predates.
+    feeShownAt: typeof src?.feeShownAt === "string" ? src.feeShownAt : null,
   };
 }
 

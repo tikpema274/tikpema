@@ -128,7 +128,24 @@ const hostileBody = JSON.stringify({
   burnHash: CLIENT_LIE, mintTxHash: CLIENT_LIE, txHash: CLIENT_LIE,
   amountUsdc: 999999, destination: "ethereum", feeUsdc: 0, state: "minted",
 });
-const call = (body = hostileBody) => handler({ httpMethod: "POST", headers: {}, body, blobs: null });
+// ═══ ⭐⭐ TWO PRESSES, ONE ENDPOINT (2026-09-13) — the hostile body is sent on BOTH ═══════════════
+// Press 1 quotes (200 `quoted`; the seal persisted on the proposal; nothing executed), press 2
+// opens the persisted seal and executes. A press that does not quote (a rejection) returns as-is.
+// ⛔ The hostile body still reaches both presses and still dictates nothing.
+const rawCall = (body = hostileBody) => handler({ httpMethod: "POST", headers: {}, body, blobs: null });
+let quotedPresses = 0, tokenLeaked = false, persistedOk = true, quotedExec = 0;
+const call = async (body = hostileBody) => {
+  const before = execCalls;
+  const p1 = await rawCall(body);
+  const b1 = JSON.parse(p1.body);
+  if (!(p1.statusCode === 200 && b1.quoted === true && b1.executed === false)) return p1;
+  quotedPresses++;
+  if (execCalls !== before) quotedExec++;
+  if ("quoteToken" in (b1.quote || {})) tokenLeaked = true;
+  const rec = await deliv.get("job-1");
+  if (typeof rec?.proposal?.quote?.quoteToken !== "string") persistedOk = false;
+  return rawCall(body);
+};
 const parse = (r) => ({ status: r.statusCode, body: JSON.parse(r.body) });
 
 let pass = 0, fail = 0;
@@ -214,5 +231,10 @@ check("unsupported destination → 409", parse(await call()).status === 409);
 
 check("executeAction NEVER ran for any precondition failure", execCalls === 0, `calls=${execCalls}`);
 
+console.log("\nTHE FIRST PRESS — quoted, persisted, nothing executed, no token in the body");
+check("⭐⭐ every executing case was preceded by a QUOTED first press", quotedPresses >= 3, `quoted presses=${quotedPresses}`);
+check("⛔ a quoting press NEVER reached executeAction", quotedExec === 0, `executed on quote=${quotedExec}`);
+check("⛔ the sealed token is never in the response body", !tokenLeaked);
+check("⭐⭐ …and IS on the persisted proposal the second press opens", persistedOk);
 console.log(`\n${fail === 0 ? "✅ ALL WRITE-PATH CHECKS PASS" : "❌ FAILURE"} — ${pass} passed, ${fail} failed. Zero money, zero network.`);
 process.exit(fail === 0 ? 0 : 1);

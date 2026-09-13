@@ -538,6 +538,7 @@ export const REFUSAL = {
   CANNOT_READ:      "REFUSED_CANNOT_READ",      // a balance or contract read failed — fail-closed
   UNCONFIRMED:      "REFUSED_UNCONFIRMED",      // submitted but not witnessed; NOT a "did not happen"
   DISCLOSURE:       "REFUSED_DISCLOSURE",       // a required disclosure gate was not satisfied
+  UNBOUND_QUOTE:    "REFUSED_UNBOUND_QUOTE",    // a session caller reached a bridge with no sealed quote — nothing was shown, so nothing can be honoured
   UNKNOWN_STEP:     "REFUSED_UNKNOWN_STEP",     // unrecognised step type
 };
 

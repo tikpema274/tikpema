@@ -375,46 +375,58 @@ section("2 — ⛔ THE SEAL IS FAIL-CLOSED, AND A TAMPERED FEE CANNOT REACH CALL
   check("   …and no calldata was produced from it", capturedCallData === null);
 }
 
-section("3 — ⚠️ THE UN-BOUND PATH IS UNCHANGED, asserted on SOURCE and not by running it");
+section("3 — ⛔⛔ NO TOKEN FROM A SESSION CALLER IS A REFUSAL — the un-bound path is CLOSED to humans");
 {
-  // 🚨 WHY THIS IS NOT EXECUTED. Running it reaches the REAL `bridgeFee` inside `agentBridge`, and
-  // a module mock cannot intercept that: `mock.module` replaces what IMPORTERS see, not a module's
-  // own internal references. The first draft of this section therefore hit Circle's live Iris API
-  // and asserted against whatever it returned — it signed 54143 while the mock said 99999, which
-  // looked like a binding failure and was actually a network call. ⛔ A suite that silently needs
-  // the network is one that goes red on a train, so the property is asserted where it lives.
-  // [[verify-facts-before-sharing-words]]
-  const bridgeSrc  = readFileSync(new URL("../netlify/functions/_bridge.mjs", import.meta.url), "utf8");
-  const actionsSrc = readFileSync(new URL("../netlify/functions/_actions.mjs", import.meta.url), "utf8");
+  // ═══ 🚨 THE GAP THIS CLOSES (2026-09-13) ══════════════════════════════════════════════════════
+  // The executor used to answer a missing token with a FRESH quote — "correct for a caller with no
+  // confirm step". Every session caller has one. The chat single-action and plan paths reached
+  // here with no token, the executor priced a second (plan: third) quote and signed it, and the
+  // receipt's `feeDisclosed` named a figure nobody had seen. A fallback makes the binding
+  // OPTIONAL, and an optional binding is the gap with extra steps.
+  // ⭐ ASSERTED BY RUNNING IT, both ways: a session caller with no token is refused BEFORE pricing
+  // (bridgeFee never called, nothing signed); the branch survives only for a caller with NO session.
+  bridgeFeeCalls = 0; capturedCallData = null;
+  const noTok = await executeAction(
+    { type: "bridge_usdc", amountUsdc: AMOUNT, destination: "base", reasoning: "t" },
+    { walletAddress: OWNER, session: { address: OWNER } });
+  check("⭐⭐⭐ a SESSION caller with no quoteToken is REFUSED", noTok?.ok === false, String(noTok?.blocked ?? "").slice(0, 70));
+  check("⭐⭐ …with `quoteRequired`, so the caller can quote and re-confirm", noTok?.quoteRequired === true);
+  check("⭐⭐ …BEFORE pricing — bridgeFee was never called", bridgeFeeCalls === 0, `bridgeFee calls=${bridgeFeeCalls}`);
+  check("⛔ …and NOTHING was signed", capturedCallData === null);
+  check("⭐ …and it is not the quote-expired shape (a missing seal is not a stale one)", noTok?.quoteExpired !== true);
 
-  // ═══ 🚨 THE UN-BOUND PATH NO LONGER PRICES INSIDE agentBridge, AND THAT IS THE FIX ════════════
-  // It used to read `boundFee ?? await bridgeFee(...)`, so a caller that passed no fee got a fresh
-  // quote SILENTLY — a SECOND quote, seconds after the one that priced the cap and the ceiling, and
-  // it is the second one whose `signedQuote` the chain would have enforced. The gates would have
-  // bounded one quote and the contract another.
-  // ⭐ THE FEE IS NOW RESOLVED ONCE BY THE EXECUTOR and threaded in; a missing one REFUSES.
-  // ⛔ THE NEGATIVE HALF READS STRIPPED SOURCE, AND THE FIRST DRAFT DID NOT — so it failed on the
-  // COMMENT that explains the removal, which quotes the old expression verbatim. A negative source
-  // assertion must look at code; prose about code is not code.
-  const bridgeCode = bridgeSrc.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+  // ⚠️ THE SURVIVING BRANCH: no session, no human — a fresh quote is the only figure there is.
+  // No bridge caller without a session exists today; this pins what the branch does if one appears.
+  bridgeFeeCalls = 0; capturedCallData = null;
+  const internal = await executeAction(
+    { type: "bridge_usdc", amountUsdc: AMOUNT, destination: "base", reasoning: "t" },
+    { walletAddress: OWNER });
+  check("⚠️ a caller with NO session still prices (the internal/autonomous branch)", bridgeFeeCalls === 1 && internal?.ok === true, `calls=${bridgeFeeCalls} ok=${internal?.ok}`);
+  check("   …and its receipt says the fee was shown to NOBODY (feeShownAt null)", internal?.feeShownAt === null, String(internal?.feeShownAt));
+
+  // ═══ THE CALLER SET, BY SOURCE — every session path seals at disclosure and opens at execution ══
+  const src = (f) => readFileSync(new URL(`../netlify/functions/${f}`, import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+  const act = src("agent-act.mjs"), plan = src("agent-execute-plan.mjs"), approve = src("job-bridge-approve.mjs"), actions = src("_actions.mjs"), bridge = src("_bridge.mjs");
+  check("⭐⭐ agent-act SEALS the single-action proposal's quote (quoteToken beside the figure)",
+    /quoteToken: sealBridgeQuote\(\{ owner: session\.address, destinationKey: dest\.key, amountUsdc: amount, fee \}\)/.test(act));
+  check("⭐⭐ agent-act SEALS every plan bridge step's quote",
+    /quoteToken: sealBridgeQuote\(\{ owner: session\.address, destinationKey: dest\.key, amountUsdc: amt, fee \}\)/.test(act));
+  check("⭐⭐ agent-execute-plan OPENS each step's token before step 1 (and threads it into the step)",
+    /openBridgeQuote\(token, \{ owner: session\.address/.test(plan) && /quoteToken: \(quoteTokens \|\| \{\}\)\[i\]/.test(plan));
+  check("⛔ …and prices ONLY inside its re-quote builder, never for execution",
+    (plan.match(/bridgeFee\(/g) || []).length === 1 && /const requote = async/.test(plan));
+  check("⭐⭐ job-bridge-approve OPENS the PERSISTED token and executes with it — no in-request re-price on the burn",
+    /openBridgeQuote\(persisted, \{ owner: session\.address/.test(approve) && /const quoteToken = persisted;/.test(approve) &&
+    /proposal: \{ \.\.\.proposal, quote \}/.test(approve));
+  check("⭐ the executor refuses a session caller without a token BEFORE the pricing branch",
+    /else if \(ctx\.session\) \{[\s\S]{0,400}REFUSAL\.UNBOUND_QUOTE/.test(actions) && /quoteRequired: true/.test(actions));
   check("⭐⭐ agentBridge does NOT price — a missing fee is a refusal, not a fresh quote",
-    /const fee = boundFee;/.test(bridgeCode) &&
-    /refusing to burn without one/.test(bridgeCode) &&
-    !/boundFee \?\? await bridgeFee\(/.test(bridgeCode));
-  check("⭐ …and the executor resolves it exactly once, for BOTH branches",
-    /resolved\.bridgeFee = boundFee;/.test(actionsSrc) &&
-    /resolved\.bridgeFee = await bridgeFee\(/.test(actionsSrc));
-  // ⚠️ AND job-bridge-approve IS NO LONGER UN-BOUND. It seals in-request, so its balance gate and
-  // its burn price from one quote. What it loses is disclosure at PROPOSAL time, not binding.
-  const approveSrc = readFileSync(new URL("../netlify/functions/job-bridge-approve.mjs", import.meta.url), "utf8");
-  check("⭐⭐ job-bridge-approve seals in-request — its gate and its burn share one quote",
-    /sealBridgeQuote\(/.test(approveSrc) && /quoteToken,/.test(approveSrc));
-  check("⭐⭐ …and the bound branch does NOT price — it opens the seal",
-    /if \(step\.quoteToken\)/.test(actionsSrc) && /openBridgeQuote\(step\.quoteToken/.test(actionsSrc));
-  // ⛔ THE FALLBACK THAT MUST NOT EXIST. If opening a token could fall through to pricing, "the
-  // figure you saw" would silently become "some figure" on exactly the inputs an attacker controls.
+    /const fee = boundFee;/.test(bridge) && /refusing to burn without one/.test(bridge) && !/boundFee \?\? await bridgeFee\(/.test(bridge));
+  check("⭐⭐ the bound branch does NOT price — it opens the seal",
+    /if \(step\.quoteToken\)/.test(actions) && /openBridgeQuote\(step\.quoteToken/.test(actions));
   check("⛔ a FAILED open refuses — it never falls back to pricing",
-    /catch \(e\) \{\s*return \{ ok: false, blocked: `\$\{e\.message\}`, quoteExpired: true \};/.test(actionsSrc),
+    /catch \(e\) \{\s*return \{ ok: false, blocked: `\$\{e\.message\}`, quoteExpired: true \};/.test(actions),
     "a silent fallback would defeat the whole binding");
 }
 

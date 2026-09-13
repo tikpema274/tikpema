@@ -118,7 +118,17 @@ const seed = async () => {
     proposal: { action: "bridge_usdc", destination: "base", amountUsdc: 10, reasoning: "r" },
   });
 };
-const call = () => approve({ httpMethod: "POST", headers: {}, blobs: null, body: JSON.stringify({ runId: "r1" }) });
+// ⭐ TWO PRESSES (2026-09-13): press 1 quotes and persists the seal, press 2 opens it and executes.
+// The trigger behaviour under test happens on press 2; press 1 is asserted to quote and not execute.
+const rawCall = () => approve({ httpMethod: "POST", headers: {}, blobs: null, body: JSON.stringify({ runId: "r1" }) });
+let quotedPresses = 0;
+const call = async () => {
+  const p1 = await rawCall();
+  const b1 = JSON.parse(p1.body);
+  if (!(p1.statusCode === 200 && b1.quoted === true && b1.executed === false)) return p1;
+  quotedPresses++;
+  return rawCall();
+};
 const parse = (r) => ({ status: r.statusCode, body: JSON.parse(r.body) });
 
 let pass = 0, fail = 0;
@@ -177,6 +187,7 @@ console.log("\nCASE 3: normal approve → trigger is AWAITED and REACHES the ver
   check("mint double-verified", JSON.stringify(rec.mintVerifiedBy) === JSON.stringify(["iris", "destination-rpc"]));
 }
 
+check("⭐⭐ every executing case was preceded by a QUOTED first press", quotedPresses >= 3, `quoted presses=${quotedPresses}`);
 console.log(`\n${fail === 0 ? "✅ ALL PASS" : "❌ FAILURE"} — ${pass} passed, ${fail} failed. Zero money, zero real network.`);
 console.log("NOTE: CASE 3 proves the handler AWAITS and issues the trigger. It cannot prove Netlify");
 console.log("      delivers it post-response — that is a platform property, provable only on prod.");

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import SignInPrompt from "./SignInPrompt";
 import type { useWallet } from "../wallet/useWallet";
 import { JobTimeline, isTerminal, receiptInFlight } from "./jobTimeline";
-import type { TrackedJob } from "./jobTimeline";
+import type { TrackedJob, BridgeQuoteState } from "./jobTimeline";
 import { approveProposal as approve } from "../lib/approveProposal";
 import { mergeJobStatus } from "../lib/mergeJobStatus";
 import { readJson } from "../lib/readJson";
@@ -33,6 +33,7 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
   // other half; neither fully closes the eventual-consistency window).
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState("");
+  const [bridgeQuote, setBridgeQuote] = useState<BridgeQuoteState | null>(null);
 
   // Small local async runner: toggles busy + surfaces errors. This panel owns
   // its own busy/error so research progress doesn't clobber other panels.
@@ -99,7 +100,11 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
       const token = await wallet.ensureSession();
       // Routed by proposal.action (bridge → job-bridge-approve, swap → job-swap-approve).
       // Still posts ONLY { runId } — see src/lib/approveProposal.ts.
-      const { receipt } = await approve({ runId, proposal, token });
+      const r = await approve({ runId, proposal, token });
+      // ⭐ A bridge approve is two presses: the first returns the sealed quote the server persisted
+      // (rendered with a countdown), the second executes bound to it. A 409 re-quote lands here too.
+      if (r.quote) { setBridgeQuote({ quote: r.quote, quotedAt: Date.now(), expired: !!r.quoteExpired }); return; }
+      const receipt = r.receipt;
       // The receipt also arrives via the poll (which keeps running past `completed`).
       if (receipt) setTrackedJob((prev) => (prev ? { ...prev, receipt } : prev));
     } catch (e: any) {
@@ -295,6 +300,7 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
             onApprove={approveProposal}
             approving={approving}
             approveError={approveError}
+            bridgeQuote={bridgeQuote}
           />
         </div>
       )}

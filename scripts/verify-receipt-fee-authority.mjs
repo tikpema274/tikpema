@@ -71,11 +71,18 @@ const REAL_BRIDGE = await import("../netlify/functions/_bridge.mjs");
 const REAL_CIRCLE = await import("../netlify/functions/_circle.mjs");
 
 // ⭐ THE INJECTION. Two quotes, deliberately different, inside one executeAction call:
-//   bridgeFee()  → quote B (the gate's)      : fee 0.0600
-//   agentBridge() → quote C (what it signed)  : fee 0.0500
+//   the SEALED token → quote B (disclosed; the gate's) : fee 0.0600
+//   agentBridge()    → quote C (what it signed)         : fee 0.0500
 // C < B, i.e. charged less than disclosed — the FAVOURABLE direction, which satisfies the
 // invariant. The violating direction gets its own section below.
-const QUOTE_B = { amountMinor: 100000n, maxFee: 60000n, feeUsdc: 0.06, netUsdc: 0.04 };
+// ⭐ RE-POINTED 2026-09-13: B used to arrive through `bridgeFee()` on the executor's no-token
+// branch. A session caller with no token is now REFUSED (the binding), so B arrives the way every
+// disclosed fee now does — sealed at disclosure, opened at execution. `bridgeFee` must NOT be
+// called: if it is, the executor priced something nobody was shown.
+const QUOTE_B = { amountMinor: 100000n, feeMinor: 60000n, feeUsdc: 0.06, netUsdc: 0.1, mechanic: "upfront",
+  quote: (() => { const dl = 4102444800; return {
+    signedQuote: "0x01" + "00".repeat(31) + "20" + "00" + BigInt(dl).toString(16).padStart(62, "0") + "ab".repeat(32),
+    expiry: { mode: "TIMESTAMP", expiresAt: dl } }; })() };
 const QUOTE_C = { feeUsdc: 0.05, netUsdc: 0.05 };
 let bridgeFeeCalls = 0;
 
@@ -111,8 +118,9 @@ const ackToken = REAL_BRIDGE.bridgeAckToken({
   owner: OWNER, destinationKey: "base", amountUsdc: AMOUNT,
   band: REAL_BRIDGE.bridgeFeeBand({ amountUsdc: AMOUNT, feeUsdc: QUOTE_B.feeUsdc, netUsdc: QUOTE_B.netUsdc }).band,
 });
+const quoteToken = REAL_BRIDGE.sealBridgeQuote({ owner: OWNER, destinationKey: "base", amountUsdc: AMOUNT, fee: QUOTE_B });
 const run = () => executeAction(
-  { type: "bridge_usdc", destination: "base", amountUsdc: AMOUNT, ackToken },
+  { type: "bridge_usdc", destination: "base", amountUsdc: AMOUNT, ackToken, quoteToken },
   { walletAddress: OWNER, store: mkStore(), session: { address: OWNER } });
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════╗");
@@ -129,8 +137,10 @@ section("1 — the injection actually produced TWO different quotes");
       ` feeUsdc/amount = ${(r.feeUsdc / AMOUNT).toFixed(6)} — THE MISMATCH`);
   }
   check("⭐ executeAction succeeded (the gate passed with a matching ack token)", r?.ok === true, JSON.stringify(r?.blocked ?? r?.ok));
-  check("⭐⭐ bridgeFee was called, and agentBridge returned a DIFFERENT fee — B ≠ C is real",
-    bridgeFeeCalls >= 1 && QUOTE_B.feeUsdc !== QUOTE_C.feeUsdc, `bridgeFee calls=${bridgeFeeCalls}`);
+  check("⭐⭐ B came from the SEAL (bridgeFee NEVER called), and agentBridge returned a DIFFERENT fee — B ≠ C is real",
+    bridgeFeeCalls === 0 && QUOTE_B.feeUsdc !== QUOTE_C.feeUsdc, `bridgeFee calls=${bridgeFeeCalls}`);
+  check("⭐⭐ feeShownAt is the seal's own issuance stamp — the receipt says WHEN the disclosed figure was issued",
+    typeof r?.feeShownAt === "string" && !Number.isNaN(Date.parse(r.feeShownAt)), String(r?.feeShownAt));
 }
 
 section("2 — ⭐⭐ BOTH FEES ARE NAMED, and say what they ARE");

@@ -19,7 +19,16 @@ const ENDPOINT: Record<Proposal["action"], string> = {
   swap_tokens: "/api/job-swap-approve",
 };
 
-export type ApproveResult = { receipt?: Receipt };
+// ⭐ A QUOTE IS A RESULT, NOT AN ERROR. The bridge approve is now two presses on ONE endpoint, and
+// the client posts `{ runId }` on both: press 1 returns the sealed quote the server persisted
+// (200, `quoted`), press 2 executes bound to it — unless it expired, in which case the server
+// re-quotes (409, `quoteExpired`) and the card asks again. Either way `quote` is what to render.
+export type BridgeQuote = {
+  amountUsdc: number; destination: { key: string; label: string };
+  feeUsdc: number; netUsdc: number; mechanic?: string; band: string; feeRatio: number;
+  quotedAt: string; expiresInMs: number;
+};
+export type ApproveResult = { receipt?: Receipt; quote?: BridgeQuote; quoteExpired?: boolean };
 
 export async function approveProposal({
   runId,
@@ -41,6 +50,7 @@ export async function approveProposal({
 
   const data = await readJson(r);
 
+  if (data?.quoted && data?.quote) return { quote: data.quote, quoteExpired: !!data.quoteExpired };
   // 202 = a slow bridge burn (submitted, hash pending) — a real, recorded outcome, not an error.
   if (!r.ok && r.status !== 202) throw new Error(data?.error || "Approve failed");
 

@@ -1,5 +1,6 @@
 import { bridgeCapUsdc, swapCapUsdc } from "./_arc.mjs";
 import { resolveDestination, bridgeFee } from "./_bridge.mjs";
+import { bridgeMechanicOf } from "../../shared/bridge-mechanic.mjs";
 import { SWAP_TOKENS, valueInUsdc, estimateSwapOnly } from "./_swap.mjs";
 
 // PROPOSAL VALIDATION PLANE — the model PROPOSES, the server VALIDATES and RE-DERIVES.
@@ -181,6 +182,9 @@ export async function validateProposal(raw, ctx = {}) {
     // INDICATIVE ONLY. Re-priced at execution; the user is told this is not a quote.
     indicativeFeeUsdc: Number(fee.feeUsdc.toFixed(6)),
     indicativeNetUsdc: Number(fee.netUsdc.toFixed(6)),
+    // ⭐ WHERE that indicative fee sits (on top / out of the amount), read off the quote — the card
+    // derives its sentence from this and never types a mechanic. Absent on older records → unknown.
+    indicativeMechanic: bridgeMechanicOf(fee.mechanic),
     pricedAt: new Date().toISOString(),
     // Display-only prose. Never parsed, never acted on. Truncated so a runaway model
     // cannot bloat the deliverable.

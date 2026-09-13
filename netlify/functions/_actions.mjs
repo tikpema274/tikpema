@@ -330,8 +330,18 @@ export async function executeAction(step, ctx) {
   // quote for a different owner, destination or amount, and it is PURE — no I/O — so opening it
   // here costs nothing and cannot be a second read. A failure REFUSES; it never falls back to
   // pricing, because a silent fallback turns "the figure you saw" into "some figure".
-  // ⚠️ NO TOKEN MEANS A FRESH QUOTE, AT EXECUTION. That is correct for a caller with no confirm
-  // step to bind from, and it is why the un-bound path cannot disclose a fee in advance.
+  // ⛔⛔ NO TOKEN FROM A SESSION CALLER IS A REFUSAL, NOT A FRESH QUOTE. This branch used to price
+  // at execution for any caller without a token — "correct for a caller with no confirm step to
+  // bind from". But every session caller HAS a confirm step (that is what a session is for), and
+  // the fresh quote was how the chat single-action and plan paths burned a fee nobody had been
+  // shown: agent-act priced and displayed one figure, this branch priced and signed another, and
+  // the receipt's `feeDisclosed` named the second. A fallback here makes the binding OPTIONAL, and
+  // an optional binding is the gap with extra steps. So: a session caller with no token is refused
+  // BEFORE pricing, with `quoteRequired` so the caller can quote and re-confirm.
+  // ⚠️ THE FRESH-QUOTE BRANCH SURVIVES ONLY FOR A CALLER WITH NO SESSION (internal/autonomous), which
+  // has no human to show a figure to. No such bridge caller exists today (2026-09-13); the branch is
+  // kept so that if one appears it prices rather than crashes, and the binding suite asserts it is
+  // UNREACHABLE with a session. [[absence-must-never-read-as-safe]]
   const resolved = {};
   let boundFee = null;
   if (step.type === "bridge_usdc") {
@@ -345,6 +355,10 @@ export async function executeAction(step, ctx) {
         return { ok: false, blocked: `${e.message}`, quoteExpired: true };
       }
       resolved.bridgeFee = boundFee;
+    } else if (ctx.session) {
+      return refuse(REFUSAL.UNBOUND_QUOTE,
+        `this bridge has no sealed quote — the fee has to be shown before it can be signed; price it and confirm the figure`,
+        { quoteRequired: true });
     } else {
       try {
         resolved.bridgeFee = await bridgeFee({ amountUsdc: Number(step.amountUsdc), cctpDomain: dest0.cctpDomain });
@@ -696,6 +710,10 @@ export async function executeAction(step, ctx) {
       // carrying the quote's BigInt means that comparison never converts a float, and never has to
       // decide what to do about a rounding it could not perform exactly.
       feeDisclosedMinor: String(fee.feeMinor),
+      // ⭐ WHEN THE DISCLOSED FIGURE WAS ISSUED — the seal's own `iat`, so the human pause from shown
+      // to burned is measurable on every receipt rather than reconstructed from the quote store.
+      // null only on the no-session fresh-quote branch, where nothing was shown to anyone.
+      feeShownAt: Number.isFinite(fee.issuedAt) ? new Date(fee.issuedAt).toISOString() : null,
       // ⭐⭐ WHERE THE FEE WAS CHARGED, beside the figures it explains. `netUsdc` is meaningless
       // without it — the same number means "what arrives" on one path and "the amount, with the fee
       // on top" on the other.

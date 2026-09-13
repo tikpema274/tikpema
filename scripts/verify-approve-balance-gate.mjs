@@ -85,7 +85,24 @@ const seed = async (amount) => {
     proposal: { action: "bridge_usdc", destination: "base", amountUsdc: amount, reasoning: "r" },
   });
 };
-const call = () => handler({ httpMethod: "POST", headers: {}, blobs: null, body: JSON.stringify({ runId: "r1" }) });
+// ═══ ⭐⭐ TWO PRESSES, ONE ENDPOINT (2026-09-13) ════════════════════════════════════════════════
+// The approve now QUOTES on the first press (200 `quoted`, the seal persisted on the proposal, no
+// token in the body) and EXECUTES on the second, opening the persisted seal. Every case below is a
+// second-press case, so `call()` makes the first press, asserts its shape once, and returns the
+// second. A first press that does NOT quote (a rejection) is returned as-is.
+const rawCall = () => handler({ httpMethod: "POST", headers: {}, blobs: null, body: JSON.stringify({ runId: "r1" }) });
+let quotedPresses = 0, quoteShapeOk = true, tokenLeaked = false, persistedOk = true;
+const call = async () => {
+  const p1 = await rawCall();
+  const b1 = JSON.parse(p1.body);
+  if (!(p1.statusCode === 200 && b1.quoted === true && b1.executed === false)) return p1;
+  quotedPresses++;
+  if (!(typeof b1.quote?.feeUsdc === "number" && b1.quote.feeUsdc === Number(QUOTE_FEE_MINOR) / 1e6 && Number.isFinite(b1.quote.expiresInMs))) quoteShapeOk = false;
+  if ("quoteToken" in (b1.quote || {})) tokenLeaked = true;
+  const rec = await deliv.get("job-1");
+  if (typeof rec?.proposal?.quote?.quoteToken !== "string") persistedOk = false;
+  return rawCall();
+};
 const parse = (r) => ({ status: r.statusCode, body: JSON.parse(r.body) });
 const usdc = (n) => BigInt(Math.round(n * 1e6));
 
@@ -176,6 +193,12 @@ console.log("\nORDERING: read → reject-or-proceed → (only if funded) burn");
   check("⭐⭐ …and at ONE MICRO-USDC short the message still reads as a shortfall",
     seen.length >= 2 && seen[0] < seen[1], msg);
 }
+
+console.log("\n⭐ THE FIRST PRESS — quoted, persisted, nothing executed, no token in the body");
+check("⭐⭐ every executing case was preceded by a QUOTED first press", quotedPresses >= 5, `quoted presses=${quotedPresses}`);
+check("⭐⭐ the quote body carries the fee the seal holds (0.054129) and a window", quoteShapeOk);
+check("⛔ the sealed token is NEVER in the response body — it lives on the record", !tokenLeaked);
+check("⭐⭐ …and it IS on the persisted proposal, which the second press opens", persistedOk);
 
 console.log(`\n${fail === 0 ? "✅ ALL PASS" : "❌ FAILURE"} — ${pass} passed, ${fail} failed. Zero money.`);
 process.exit(fail === 0 ? 0 : 1);

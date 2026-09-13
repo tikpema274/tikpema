@@ -1,3 +1,6 @@
+import { useEffect, useState } from "react";
+import { bridgeMechanicCopy, bridgeProposalFeeLine } from "../../shared/bridge-mechanic.mjs";
+import type { BridgeQuote } from "../lib/approveProposal";
 // jobTimeline.tsx — shared paid-research-job rendering primitives.
 //
 // Extracted from ResearchPanel so both ResearchPanel and PredictPanel render
@@ -23,8 +26,14 @@ export type BridgeProposal = {
   cap: number;
   indicativeFeeUsdc: number;
   indicativeNetUsdc: number;
+  /** Where the indicative fee sits — set by the server off its quote; absent on older records. */
+  indicativeMechanic?: string;
   reasoning?: string;
 };
+
+/** ⭐ The SEALED quote the approve endpoint persisted on press 1, plus the client's own stamp for the
+ *  countdown. `expired` marks a 409 re-quote: the previous figure lapsed before the confirm landed. */
+export type BridgeQuoteState = { quote: BridgeQuote; quotedAt: number; expired: boolean };
 export type SwapProposal = {
   action: "swap_tokens";
   tokenIn: "USDC" | "EURC";
@@ -321,6 +330,8 @@ type ProposalCardProps = {
   approving?: boolean;
   onApprove?: () => void;
   error?: string;
+  /** Bridge only: the quote shown after the first press. The second press confirms it. */
+  bridgeQuote?: BridgeQuoteState | null;
   // Brick 2. A proposal only reaches the user if the SECOND analyst left it standing, so the
   // fact that it survived a real, independent check is part of the offer — not a footnote.
   secondOpinion?: SecondOpinion;
@@ -405,27 +416,72 @@ function ProposalShell({
   );
 }
 
-function BridgeProposalBody({ proposal, ...rest }: ProposalCardProps & { proposal: BridgeProposal }) {
+// A one-second tick while a quote is live, so the card can turn its button into "price it again"
+// BEFORE a press would fail against an expired seal. Quiet until the last 30 s.
+function useNow(active: boolean) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+const QUIET_ABOVE_S = 30;
+
+function BridgeProposalBody({ proposal, bridgeQuote, ...rest }: ProposalCardProps & { proposal: BridgeProposal }) {
+  const now = useNow(!!bridgeQuote && !rest.receipt);
+  const q = bridgeQuote?.quote ?? null;
+  const secondsLeft = q && bridgeQuote ? Math.ceil((Number(q.expiresInMs) - (now - bridgeQuote.quotedAt)) / 1000) : null;
+  const expired = secondsLeft !== null && Number.isFinite(secondsLeft) && secondsLeft <= 0;
+  // ═══ ⭐⭐ TWO PRESSES, ONE ENDPOINT, AND THE FIGURE BETWEEN THEM IS THE ONE SIGNED ═════════════
+  // Press 1 ("Get a quote") makes the server price, seal and PERSIST a quote on the proposal record;
+  // the card shows it. Press 2 ("Confirm") makes the server OPEN that persisted seal and burn exactly
+  // that fee. The card posts `{ runId }` both times — it never carries the figure or the token. An
+  // expired seal on press 2 comes back as a fresh quote (409) and the card asks again.
+  // ⛔ THE INDICATIVE FIGURE STAYS INDICATIVE. It was priced by the background analyst, possibly
+  // hours ago; it is shown as "about", never as the quote, and its mechanic sentence is DERIVED.
+  const indicative = bridgeMechanicCopy(proposal.indicativeMechanic);
   return (
     <ProposalShell
       {...rest}
       reasoning={proposal.reasoning}
-      cta={{ idle: `Approve — bridge ${proposal.amountUsdc} USDC`, busy: "Bridging…" }}
+      cta={q
+        ? (expired
+          ? { idle: "Quote expired — price it again", busy: "Pricing…" }
+          : { idle: `Confirm — bridge ${proposal.amountUsdc} USDC, fee ~${Number(q.feeUsdc).toFixed(4)} USDC`, busy: "Bridging…" })
+        : { idle: `Get a quote — bridge ${proposal.amountUsdc} USDC`, busy: "Pricing…" }}
       headline={
         <>
           Bridge <span className="mono">{proposal.amountUsdc}</span> USDC from Arc to{" "}
           <b>{proposal.destinationLabel}</b>.
         </>
       }
-      terms={
+      terms={q ? (
         <>
-          The cross-chain fee is taken <b>out of</b> the amount — about{" "}
-          <span className="mono">{proposal.indicativeFeeUsdc}</span> USDC right now, so roughly{" "}
-          <span className="mono">{proposal.indicativeNetUsdc}</span> USDC would arrive. This is an
-          indicative price, not a quote: the fee is re-checked at execution, and the bridge is
-          refused if it no longer makes sense. Bridging is one-way.
+          {bridgeQuote?.expired && (
+            <div style={{ color: "var(--warn)", marginBottom: 6 }}>
+              The quote you were shown expired before you confirmed, so it was priced again — nothing ran.
+              This is the current figure.
+            </div>
+          )}
+          <b>Quoted:</b> {bridgeProposalFeeLine({ feeUsdc: q.feeUsdc, netUsdc: q.netUsdc, destinationLabel: q.destination.label, mechanic: q.mechanic })}{" "}
+          This is the figure that will be signed — confirm and exactly this fee is charged. Bridging is one-way.
+          {secondsLeft !== null && !expired && secondsLeft <= QUIET_ABOVE_S && (
+            <div style={{ opacity: 0.8, marginTop: 4 }}>Good for another {secondsLeft}s — after that it is priced again before anything runs.</div>
+          )}
+          {expired && (
+            <div style={{ color: "var(--warn)", marginTop: 4 }}>This quote has expired. Price it again to see the current figure; nothing runs until you confirm one.</div>
+          )}
         </>
-      }
+      ) : (
+        <>
+          The cross-chain fee is {indicative.feePlacement} — about{" "}
+          <span className="mono">{proposal.indicativeFeeUsdc}</span> USDC when this was proposed. That is an
+          indicative price, not a quote: the next press fetches a live quote and shows it before anything
+          is signed. Bridging is one-way.
+        </>
+      )}
     />
   );
 }
@@ -739,7 +795,7 @@ export function ReceiptCard({ receipt }: { receipt: Receipt }) {
 // (Funded → Researching → Evaluating → Settled), showing a checkmark for passed
 // stages and a spinner for the active one, then a terminal result block.
 export function JobTimeline({
-  job, onApprove, approving, approveError,
+  job, onApprove, approving, approveError, bridgeQuote,
 }: {
   job: TrackedJob;
   // Optional: only ResearchPanel wires the proposal loop. PredictPanel passes none and
@@ -747,6 +803,7 @@ export function JobTimeline({
   onApprove?: () => void;
   approving?: boolean;
   approveError?: string;
+  bridgeQuote?: BridgeQuoteState | null;
 }) {
   const STAGES = ["Funding", "Researching", "Evaluating", "Settled"];
 
@@ -814,6 +871,7 @@ export function JobTimeline({
               approving={approving}
               onApprove={onApprove}
               error={approveError}
+              bridgeQuote={bridgeQuote}
               secondOpinion={job.secondOpinion}
             />
           )}

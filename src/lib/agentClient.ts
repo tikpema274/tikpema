@@ -61,8 +61,17 @@ export const agentClient = {
   // quoteId names the priced plan the server recorded when it quoted this. It is echoed back
   // PURELY so the run can be joined to the quote in diagnostics — it authorizes nothing, and
   // the server re-prices and recomputes every gate whether or not it arrives.
-  executePlan: (plan: unknown[], token: string, ackTokens?: Record<number, string>, quoteId?: string) =>
-    post("/api/agent-execute-plan", { plan, ackTokens, quoteId }, token),
+  // ⭐ quoteTokens: the SEALED fee quote per bridge step, exactly as agent-act's stepDisclosures
+  // carried them. The server OPENS them before step 1 and signs that fee; missing or expired ones
+  // come back as a 409 with fresh disclosures (`requoted`) and the plan is NOT executed — so this
+  // uses postRaw and hands the body back whatever the status, and the panel re-renders the figures.
+  // quoteOnly: re-price and re-seal every bridge step, execute nothing (the "price it again" press).
+  executePlan: async (plan: unknown[], token: string, ackTokens?: Record<number, string>, quoteId?: string,
+                      quoteTokens?: Record<number, string>, quoteOnly?: boolean) => {
+    const r = await postRaw("/api/agent-execute-plan", { plan, ackTokens, quoteId, quoteTokens, quoteOnly }, token);
+    if (!r.ok && !(r.status === 409 && r.body?.requoted)) throw new Error(r.body?.error || `Request failed: ${r.status}`);
+    return r.body;
+  },
 
   // Execute a confirmed cross-chain bridge (turn 2 of bridge propose->confirm).
   // Returns after the Arc burn; the destination mint is async (poll bridgeStatus).
@@ -70,8 +79,16 @@ export const agentClient = {
   // required when agent-act's quote returned band "acknowledge". Without it the server
   // REFUSES that bridge — which, before this was wired, made the agent panel a dead end
   // rather than a gate: refused with no disclosure and no way to accept.
-  bridge: (amountUsdc: number, destination: string, token: string, ackToken?: string) =>
-    post("/api/agent-bridge", { amountUsdc, destination, ackToken }, token),
+  // ⭐ quoteToken: the sealed quote agent-act's proposal carried — the figure the panel showed. The
+  // server opens it and signs THAT fee; without it (or past its window) it answers 409 `requote`
+  // with a fresh quote and executes nothing, which is why this reads the body on a 409 too.
+  // quoteOnly: price and seal only — the "price it again" press.
+  bridge: async (amountUsdc: number, destination: string, token: string, ackToken?: string,
+                 quoteToken?: string, quoteOnly?: boolean) => {
+    const r = await postRaw("/api/agent-bridge", { amountUsdc, destination, ackToken, quoteToken, quoteOnly }, token);
+    if (!r.ok && !(r.status === 409 && r.body?.outcome === "requote") && r.status !== 202) throw new Error(r.body?.error || `Request failed: ${r.status}`);
+    return r.body;
+  },
 
   // Execute a confirmed vault deposit (turn 2 of the agent's propose->confirm).
   // ⭐ THE SAME ENDPOINT THE VAULT PAGE USES — deliberately. A second deposit route would be a
