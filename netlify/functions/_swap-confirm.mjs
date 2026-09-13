@@ -1,5 +1,6 @@
 import { parseAbiItem, parseUnits, formatUnits, getAddress, pad, createPublicClient, http } from "viem";
-import { CONTRACTS, USDC_DECIMALS, ARC } from "./_arc.mjs";
+import { USDC_DECIMALS, ARC } from "./_arc.mjs";
+import { swapTokenAddress } from "./_swap-tokens.mjs";
 import { publicClient, arcChain } from "./_predict.mjs";
 import { withRetry } from "./_retry.mjs";
 
@@ -84,7 +85,8 @@ const TRANSFER = parseAbiItem("event Transfer(address indexed from, address inde
 // keccak256("Transfer(address,address,uint256)") — for parsing RAW receipt logs on the hash path.
 const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
-const tokenAddr = (sym) => (String(sym).toUpperCase() === "EURC" ? CONTRACTS.EURC : CONTRACTS.USDC);
+// ⭐ ONE resolver, THROWS on unknown — was a ternary whose else-branch was USDC (see _swap-tokens.mjs).
+const tokenAddr = (sym) => swapTokenAddress(sym);
 const explorerTx = (hash) => (hash ? `${ARC.explorer}/tx/${hash}` : null);
 
 // The tokenOut delivered to the wallet inside a tx's RAW logs (hash path). Best-effort readout.
@@ -119,10 +121,12 @@ function amountOutFromLogs(logs, tokenOutAddr, wallet) {
 //   { confirmed:true,  verifiedBy:"hash"|"logscan", txHash, tx, blockNumber, amountOut }
 //   { confirmed:false, reason }  where reason ∈ reverted | not-found | ambiguous:… | rpc-error:…
 export async function confirmSwapLanded({ walletAddress, tokenIn, tokenOut, amountIn, fromBlock, eventTxHash, scanWindowBlocks }) {
-  const pc = await witnessClient(); // WITNESS_RPC_URL if set + on-chain 5042002, else public RPC
-  const wallet = getAddress(walletAddress);
+  // ⭐ Resolve the tokens BEFORE opening any client: an unknown symbol refuses here, with no network call
+  // behind it, so the refusal can never be mistaken for an RPC failure.
   const inAddr = tokenAddr(tokenIn);
   const outAddr = tokenAddr(tokenOut);
+  const pc = await witnessClient(); // WITNESS_RPC_URL if set + on-chain 5042002, else public RPC
+  const wallet = getAddress(walletAddress);
   const amountInRaw = parseUnits(String(amountIn), USDC_DECIMALS);
 
   // ── PATH 1: HASH — the SDK gave us a hash; ask the chain what became of it. ──

@@ -25,8 +25,8 @@
 // through executeAction so it inherits all three, proven and fail-closed.
 
 import { formatUnits } from "viem";
-import { CONTRACTS, USDC_DECIMALS, swapCapUsdc } from "./_arc.mjs";
-import { SWAP_TOKENS } from "./_swap.mjs";
+import { USDC_DECIMALS, swapCapUsdc } from "./_arc.mjs";
+import { SWAP_TOKENS, swapTokenAddress } from "./_swap-tokens.mjs";
 import { publicClient } from "./_predict.mjs";
 import { withRetry, isTransient } from "./_retry.mjs";
 import { budgetConfig, dcaDaySpend } from "./_budget.mjs";
@@ -434,7 +434,9 @@ const BALANCE_OF_ABI = [
   { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ name: "account", type: "address" }], outputs: [{ name: "", type: "uint256" }] },
 ];
 export async function readTokenBalance(token, wallet) {
-  const address = String(token).toUpperCase() === "EURC" ? CONTRACTS.EURC : CONTRACTS.USDC;
+  // ⭐ ONE resolver, THROWS on an unknown symbol — before any RPC. This was a ternary whose else-branch
+  // was USDC, so a third token would have read USDC's balance for it. [[_swap-tokens.mjs]]
+  const address = swapTokenAddress(token);
   return withRetry(
     async () => {
       const raw = await publicClient().readContract({ address, abi: BALANCE_OF_ABI, functionName: "balanceOf", args: [wallet] });

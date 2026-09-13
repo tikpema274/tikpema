@@ -2,7 +2,7 @@ import { AppKit } from "@circle-fin/app-kit";
 import { createCircleWalletsAdapter } from "@circle-fin/adapter-circle-wallets";
 import { createViemAdapterFromProvider, resolveChainIdentifier } from "@circle-fin/adapter-viem-v2";
 import { circle, waitForTx, TxPendingError } from "./_circle.mjs";
-import { CONTRACTS, ARC, USDC_DECIMALS, swapCapUsdc } from "./_arc.mjs";
+import { ARC, USDC_DECIMALS, swapCapUsdc } from "./_arc.mjs";
 import { publicClient } from "./_predict.mjs";
 import { withRetry } from "./_retry.mjs";
 // ⛔ ONE BODY, SHARED WITH THE FLOOR-SOURCE DERIVATION. The DCA consent copy is bound to whether this
@@ -15,7 +15,10 @@ import { swapExecuteRequestBody } from "../../shared/swap-fill-floor.mjs";
 // (createSwap HTTP quote → viem-adapter getCallData → createContractExecutionTransaction),
 // NOT kit.swap() — that path submits async and cannot be confirm-gated. Arc Testnet: USDC/EURC only.
 
-export const SWAP_TOKENS = ["USDC", "EURC"];
+// ⭐ The list and the ONE symbol→address resolver live in _swap-tokens.mjs (light, off the DD surface);
+// re-exported here so the nine existing importers of SWAP_TOKENS are unchanged.
+export { SWAP_TOKENS, swapTokenAddress } from "./_swap-tokens.mjs";
+import { swapTokenAddress } from "./_swap-tokens.mjs";
 
 // ── B1 swap-execution constants (proven in scripts/spikes/spike-B1-direct-calldata.mjs) ──────────
 const SWAP_ADAPTER = "0xbbd70b01a1cabc96d5b7b129ae1aaabdf50dd40b"; // ground-truth AdapterContract (Arc testnet)
@@ -242,9 +245,9 @@ export function assertSwapBeneficiary({ tokens, tokenInAddress, tokenOutAddress,
 export async function buildSwapCallData({ walletAddress, tokenIn, tokenOut, amountIn }) {
   const tIn = String(tokenIn).toUpperCase();
   const tOut = String(tokenOut).toUpperCase();
-  const tokenInAddress = CONTRACTS[tIn];
-  const tokenOutAddress = CONTRACTS[tOut];
-  if (!tokenInAddress || !tokenOutAddress) throw new Error(`unsupported swap ${tIn}->${tOut} (USDC/EURC only)`);
+  // ⭐ ONE resolver, throws on unknown — never `CONTRACTS[sym]`, whose non-token keys would resolve.
+  const tokenInAddress = swapTokenAddress(tIn);
+  const tokenOutAddress = swapTokenAddress(tOut);
   const kitKey = process.env.KIT_KEY;
   if (!kitKey) throw new Error("Missing KIT_KEY (server env) — required for the swap quote");
   const amountBase = toMinor(amountIn);
@@ -393,9 +396,9 @@ export function swapCapRefusal({ token, amountBase, capBase, capUsdc, unitUsd })
 export async function agentSwap({ walletAddress, tokenIn, tokenOut, amountIn, confirm = false }) {
   const tIn = String(tokenIn).toUpperCase();
   const tOut = String(tokenOut).toUpperCase();
-  const tokenInAddress = CONTRACTS[tIn];
-  const tokenOutAddress = CONTRACTS[tOut];
-  if (!tokenInAddress || !tokenOutAddress) throw new Error(`unsupported swap ${tIn}->${tOut} (USDC/EURC only)`);
+  // ⭐ ONE resolver, throws on unknown — never `CONTRACTS[sym]`, whose non-token keys would resolve.
+  const tokenInAddress = swapTokenAddress(tIn);
+  const tokenOutAddress = swapTokenAddress(tOut);
   const kitKey = process.env.KIT_KEY;
   if (!kitKey) throw new Error("Missing KIT_KEY (server env) — required for the swap quote");
   const amountBase = toMinor(amountIn); // 6-dp minor units (USDC & EURC are both 6-dp on Arc)

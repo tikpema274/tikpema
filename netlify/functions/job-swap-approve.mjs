@@ -2,11 +2,12 @@ import { requiredAmount, availableAmount } from "../../shared/amount-direction.m
 import { getStore } from "@netlify/blobs";
 import { connectBlobs } from "./_blobs.mjs";
 import { formatUnits } from "viem";
-import { json, parseBody, CONTRACTS, USDC_DECIMALS, swapCapUsdc } from "./_arc.mjs";
+import { json, parseBody, USDC_DECIMALS, swapCapUsdc } from "./_arc.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { executeAction } from "./_actions.mjs";
 import { SWAP_TOKENS, valueInUsdc } from "./_swap.mjs";
+import { swapTokenAddress } from "./_swap-tokens.mjs";
 import { publicClient } from "./_predict.mjs";
 
 // POST /api/job-swap-approve { runId }   (auth)
@@ -42,7 +43,8 @@ const BALANCE_OF_ABI = [
   },
 ];
 
-const tokenAddress = (sym) => (String(sym).toUpperCase() === "EURC" ? CONTRACTS.EURC : CONTRACTS.USDC);
+// ⭐ ONE resolver, THROWS on unknown — was a ternary whose else-branch was USDC (see _swap-tokens.mjs).
+const tokenAddress = (sym) => swapTokenAddress(sym);
 const resolveToken = (t) => SWAP_TOKENS.find((x) => x.toUpperCase() === String(t || "").toUpperCase()) ?? null;
 
 async function readBalance(token, wallet) {
