@@ -311,16 +311,34 @@ export default function ManualSwapPanel({ wallet: w }: { wallet: UnifiedWallet }
 
       <div className="status" style={{ marginTop: 0, marginBottom: 18 }}>
         Swapping from <span className="mono">{w.address}</span>
+        {/* ⭐ BOTH THROUGH displayAmount. This line shipped as "USDC 4311.12 · EURC 49.328137" — the
+            USDC leg rendered at 2dp and the EURC leg raw from the reader at 6dp, on ONE line. The
+            reader keeps its digits (rule 1 in formatAmount.ts); the RENDER picks one precision for
+            both legs, or a reader is asked to compare figures written in two units. */}
         {" · USDC "}<span className="mono">{displayAmount(w.usdcBalance)}</span>
-        {" · EURC "}<span className="mono">{eurc ?? "…"}</span>
+        {" · EURC "}<span className="mono">{displayAmount(eurc)}</span>
       </div>
 
-      <div className="row">
-        <select value={tokenIn} onChange={(e) => { setTokenIn(e.target.value as Token); reset(); }} disabled={!!signedHash}>
-          <option value="USDC">USDC</option>
-          <option value="EURC">EURC</option>
-        </select>
-        <span className="status" style={{ margin: 0 }}>→ {tokenOut}</span>
+      {/* ⭐ FROM/TO AS A MATCHING PAIR, the bridge panel's shape. The pair is FIXED — the server's
+          SWAP_TOKENS is [USDC, EURC] and the venue supports nothing else — so the only decision here
+          is DIRECTION, and TO is derived from FROM. It used to render as a select beside "→ EURC" in
+          plain text, which reads as one live control and one label. A DISABLED select for TO says
+          "determined by your other choice"; text says "there was never a choice" (see the
+          `select:disabled` note in styles.css). `tokenOut` is still derived, never read from a DOM. */}
+      <div className="field-pair">
+        <div className="field">
+          <label htmlFor="ms-from">From</label>
+          <select id="ms-from" value={tokenIn} onChange={(e) => { setTokenIn(e.target.value as Token); reset(); }} disabled={!!signedHash}>
+            <option value="USDC">USDC</option>
+            <option value="EURC">EURC</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="ms-to">To</label>
+          <select id="ms-to" disabled value={tokenOut}>
+            <option value={tokenOut}>{tokenOut}</option>
+          </select>
+        </div>
       </div>
 
       <div className="amount-field">

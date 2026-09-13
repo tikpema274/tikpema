@@ -338,7 +338,9 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
               disabled={wdBusy || agentBal <= 0}
               onClick={() => setWdAmt(String(agentBal))}
             >
-              Max ({agentBal})
+              {/* ⭐ SAME PRECISION AS THE FIGURE ABOVE IT. This read "3.00" on the card and "Max (3)"
+                  on the button — one balance, two renderings. The CLICK still sets the exact value. */}
+              Max ({displayAmount(agentBal)})
             </button>
           </div>
 

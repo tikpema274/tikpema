@@ -130,20 +130,30 @@ export default function SwapPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         <span className="mono">{displayAmount(w.agentWallet.eurcBalance)}</span>
       </div>
 
-      <div className="row">
-        <select
-          value={tokenIn}
-          onChange={(e) => {
-            setTokenIn(e.target.value as Token);
-            reset();
-          }}
-        >
-          <option value="USDC">USDC</option>
-          <option value="EURC">EURC</option>
-        </select>
-        <span className="status" style={{ margin: 0 }}>
-          → {tokenOut}
-        </span>
+      {/* ⭐ FROM/TO AS A MATCHING PAIR — same shape and same reasoning as ManualSwapPanel and the
+          bridge: the pair is fixed (SWAP_TOKENS = [USDC, EURC]), the decision is DIRECTION, and TO
+          is a DISABLED select rather than text so it reads as determined, not as decoration. */}
+      <div className="field-pair">
+        <div className="field">
+          <label htmlFor="as-from">From</label>
+          <select
+            id="as-from"
+            value={tokenIn}
+            onChange={(e) => {
+              setTokenIn(e.target.value as Token);
+              reset();
+            }}
+          >
+            <option value="USDC">USDC</option>
+            <option value="EURC">EURC</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="as-to">To</label>
+          <select id="as-to" disabled value={tokenOut}>
+            <option value={tokenOut}>{tokenOut}</option>
+          </select>
+        </div>
       </div>
 
       <div className="row" style={{ marginTop: 8 }}>

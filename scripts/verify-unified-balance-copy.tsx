@@ -433,6 +433,20 @@ section("6 — ⭐ THE JUNE SHAPE: header → balance → action → explanation
   check("⭐ …and points at the action that DOES work", /Use the Deposit action above/.test(tx));
 }
 
+// ── ONE BALANCE, ONE RENDERING ─────────────────────────────────────────────────────────────────
+// 🚨 SEEN LIVE 2026-09-13: the card read "3.00" and the Max button beside it "Max (3)" — the same
+// balance at 2dp and at whatever Number() happened to print. The Max button is the control a user
+// presses precisely so they do not have to read the figure; it must be the figure they read.
+// ⭐ Asserted on the RENDERED output with a 4-dp balance (12.3456), so "same precision" is
+// discriminated from "both happen to be integers". [[refusal-reports-compared-quantity]]
+section("Max button renders the balance at the SAME precision as the card");
+{
+  const m = ymParked.match(/Max \(([^)]*)\)/);
+  check("⭐⭐ Max shows the 2dp rendering the card shows", !!m && m[1] === "12.35",
+    m ? `Max (${m[1]})` : "no Max button rendered");
+  check("  …and the raw 4-dp figure never reaches the button", !/Max \(12\.3456\)/.test(ymParked));
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");
