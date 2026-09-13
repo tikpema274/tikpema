@@ -1,5 +1,38 @@
 ---
 
+# ✅ THE SWAP PAIR + PRECISION FIX IS LIVE, AND THE FIRST LIVE QUOTED STATE HAS BEEN READ
+
+**2026-09-13, deploy `6aa5f4b18d14e22e6083c620` (created 02:56, published 03:22:39 CEST) from T's shell.**
+Prod serves commit `e493289` (contains `fecdb15`), tree `2e516a4ab64d`, bundle **`index-D3pyB-56.js`** —
+gate:deployed ✅ 6/6, control plane == data plane, `curl` names the same bundle the local build produced.
+ABSENT→PRESENT: `ms-from`/`ms-to`/`as-from` (the From/To pairs) 0 → 1 each; controls "guaranteed at least" and
+the DCA floor sentence unchanged at 1. gate:deployloss: `newLossIds []`, losses 15, ambiguousCanceled 46 — no
+orphan from either of tonight's runs (`8378318`).
+
+## THE LIVE QUOTED STATE — MEASURED by T, wallet 0x74b7…24E5, 1 USDC → EURC, ~03:30 CEST
+The first time the quoted state has been read on production rather than from a static render. As pasted:
+- Balance line **`USDC 35.32 · EURC 10.19`** — both legs 2dp. The `49.328137` shape is gone.
+- **From USDC / To EURC** as two fields where "→ EURC" text used to be.
+- **"You are guaranteed at least 0.780276 EURC — the swap reverts below this."** 6dp, read from calldata;
+  beneficiary shown in full, `✓ this is your wallet`; expiry 545s.
+- **"That guarantee is 9.68% below the mid-market value"** → band `warn` fired: the "noticeably below" sentence
+  and the **I understand — continue** gate, no sign button until acknowledged. `SWAP_BAND_WARN 0.05 ≤ 0.0968 <
+  SWAP_BAND_ACKNOWLEDGE 0.10` — 32 bp short of the acknowledge copy. Nothing was signed; the quote expired.
+
+## ⭐ THE 9.68% IS A VENUE READING, NOT A SLIPPAGE SETTING
+Circle's rates endpoint priced EURC at $1.1603 the same night (MEASURED, keyless), so mid-market is
+1 USDC ≈ 0.862 EURC; the pool's floor was 0.780. That ~9.5% gap is the testnet pool disagreeing with the
+reference (docs/swap-venue-price-disagreement.md), sitting just under the 10% "genuinely bad deal" line. A quote
+0.3% worse shows the acknowledge copy instead. Recorded as a data point that the band is doing its job on a thin
+pool — not as a defect.
+
+## LEFT AS IS, DECIDED
+Two precisions on one panel: 2dp on the balance line, 6dp in the review block ("You are spending 1.000000 USDC",
+"0.780276 EURC"). Deliberate under the formatAmount rule — a balance is a description, the floor is the figure
+being signed — and T chose to leave it after seeing it live.
+
+---
+
 # ✅ THE SWAP FACE-LIFT SHIPPED — FROM T'S SHELL, ON THE FOURTH RUN. PROD SERVES 4c03518.
 
 **2026-09-13 01:35 CEST (MEASURED).** `npm run deploy:prod` run from a terminal OUTSIDE the Claude session,
