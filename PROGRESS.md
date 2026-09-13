@@ -1,3 +1,21 @@
+# ✅ THE BRIDGE-FEE GAP IS CLOSED ON THE BOARD — MEMORY NOTE CORRECTED TO "CLOSED AT 6aa69367"
+
+**2026-09-13.** The memory note `agent-bridge-fee-undisclosed-pre-execution` and its index line now read
+**CLOSED 2026-09-13, deploy `6aa69367`, commit `a300359`** — sealed at disclosure, opened at execution, a
+REFUSAL (not a fallback) without a seal, on every session path. The note keeps its history below the closure:
+found 2026-09-01; the `#/bridge` panel surface closed the same day (`8a35d80`); the 09-10 re-verification read
+the executor's comment instead of the panel and kept a closed surface open for three days; the residual
+(chat single-action, chat plan, proposal card) was mapped and built 09-13 and shipped the same day.
+
+**What the note now records as proof:** `verify-bridge-fee-binding` §3 executed; red states M1 (7) / M2 (5);
+both sides of the prod probe MEASURED (200 blocked-at-cap AFTER pricing → 409 `requote`, `quoteRequired:true`;
+control 400→400); gate:forgery's live probe re-pointed to quote-then-post, gate unchanged, 5/5.
+
+**What the note records as still owed — not a code gap:** one real bridge from the chat path, T's to run, to
+settle the binding live rather than by suite. Not run yet.
+
+---
+
 # ✅ THE BINDING SHIPPED — DEPLOY 6aa69367, PROD SERVES 79cd88d; gate:forgery WENT RED ON ITS OWN PROBE
 
 **2026-09-13 12:43:40Z (MEASURED, published_deploy).** `npm run deploy:prod` launched DETACHED from the Claude
