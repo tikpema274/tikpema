@@ -27,6 +27,7 @@ const SWAP_URL = "https://api.circle.com/v1/stablecoinKits/swap";
 // mempool between build and mine. On-chain revert-on-expiry is the ultimate backstop (see agentSwap).
 const DEADLINE_SAFETY_MS = 20_000;
 const ALLOWANCE_ABI = [{ type: "function", name: "allowance", stateMutability: "view", inputs: [{ name: "o", type: "address" }, { name: "s", type: "address" }], outputs: [{ type: "uint256" }] }];
+// ⚠️ 6-dp is an ASSUMPTION here; swapTokenAddress (called before every toMinor) refuses a token declared otherwise.
 const toMinor = (human) => BigInt(Math.round(Number(human) * 10 ** USDC_DECIMALS));
 
 function kitAndAdapter() {
@@ -401,7 +402,7 @@ export async function agentSwap({ walletAddress, tokenIn, tokenOut, amountIn, co
   const tokenOutAddress = swapTokenAddress(tOut);
   const kitKey = process.env.KIT_KEY;
   if (!kitKey) throw new Error("Missing KIT_KEY (server env) — required for the swap quote");
-  const amountBase = toMinor(amountIn); // 6-dp minor units (USDC & EURC are both 6-dp on Arc)
+  const amountBase = toMinor(amountIn); // 6-dp minor units — GUARANTEED by swapTokenAddress's decimals gate above, not by the list happening to be USDC/EURC
   const client = circle();
 
   // ── (A) ALLOWANCE — approve the adapter, ONLY when the current allowance can't cover this swap.
