@@ -1,3 +1,79 @@
+# ✅ THE BRIDGE FEE IS BOUND ON EVERY SESSION PATH — SEALED AT DISCLOSURE, OPENED AT EXECUTION (`a300359`)
+
+**2026-09-13.** Committed and PUSHED (origin/main `a300359`), test:all **123/123** (9.3 min), tsc clean, ddTree
+unchanged `2f4f2793…` (38 files), **NOT DEPLOYED**. Four commits now await T's deploy run: `d840f72`, `25e1027`,
+`7c4f3d4`, `a300359`. Prod still serves `e493289`.
+
+## THE PROPERTY: the fee in the calldata is the fee that was shown
+`#/bridge` has had it since `8a35d80`. The conversational agent did not: `agent-act` priced and SHOWED a figure,
+then the chat single-action confirm reached `agent-bridge` with no token and the plan confirm reached
+`agent-execute-plan` with none — and `_actions.mjs` answered a missing token with a FRESH quote ("correct for a
+caller with no confirm step"). The plan path priced three times; the one charged was the one nobody saw. The
+proposal card (`job-bridge-approve`) sealed in-request, but to a figure the card had never shown. `feeDisclosed`
+on those receipts named the executor's own quote.
+
+## THE DECISION THAT CLOSED IT: the fallback becomes a REFUSAL
+`_actions.mjs`: a SESSION caller with no `quoteToken` → `REFUSAL.UNBOUND_QUOTE` + `quoteRequired`, before any
+pricing. The fresh-quote branch survives only for a caller with NO session (none exists today; the binding suite
+pins that it is unreachable with a session). A failed open still refuses — never re-prices. An optional binding
+is the gap with extra steps; this makes it mandatory.
+
+## PER SURFACE
+- **agent-act** seals per bridge step and on the single-action proposal (`quoteToken`, `expiresInMs`, `mechanic`).
+- **agent-bridge** — stale/missing seal → **409 `requote`** with a fresh sealed quote, nothing signed; one pricer
+  serves `quoteOnly` and the re-quote. The quote now carries `mechanic` (BridgePanel's `?? "upfront"` default had
+  been doing the reading — [[default-is-not-a-reading]]).
+- **agent-execute-plan** — `quoteTokens` per bridge index like `ackTokens`; OPENS every one before step 1; band
+  from the opened quote; threads the token into each step; missing/expired → **409 `requoted`** with fresh
+  per-step disclosures; `quoteOnly` re-prices without executing. Its own preflight pricing is gone except inside
+  the re-quote builder (asserted: exactly one `bridgeFee(` call site).
+- **job-bridge-approve** — ⚠️ DEVIATION FROM THE SPEC, stated: sealing at PROPOSAL time cannot work on this path.
+  The proposal is written by a background job minutes-to-hours before the card is read, against a 120 s window;
+  a seal made then is expired on every approval. So the quote step lives AT APPROVAL: press 1 prices, seals,
+  PERSISTS the token on `entry.proposal.quote`, returns 200 `quoted` (token never in the body); press 2 OPENS the
+  persisted seal and executes bound to it; expired → **409 `quoteExpired`** with a fresh persisted quote. The
+  client posts `{ runId }` on both presses — the "reads exactly ONE field" boundary is intact. `job-run-status`
+  projects the proposal minus the token.
+- **Receipts** — the executor result carries `feeShownAt` (the seal's `iat`, ISO); `_bridge-record` persists it.
+  Shown→burned is now measurable on EVERY bridge receipt, not reconstructed from the quote store. `feeDisclosed`
+  is true to its name on every session path for the first time.
+- **Client** — `agentClient.bridge`/`executePlan` carry the tokens and read a 409 body; `approveProposal` returns a
+  quote as a RESULT, not an error. `MyAgentPanel` stamps `quotedAt` on the client clock, shows the window only
+  under 30 s, turns the confirm into "Quote expired — price it again" at 0 (a press that executes nothing),
+  replaces figures in place on a re-quote and clears every ack. ⭐ **EVERY bridge step in a plan now renders its
+  fee line** — ordinary-band steps rendered NOTHING before (disclosure by severity, the original defect, alive on
+  the plan surface too). The proposal card gets the quote step + countdown, and its "taken **out of** the
+  amount" was a THIRD hand-typed deducted sentence on the upfront path — now derived from `indicativeMechanic`,
+  recorded on the proposal by `_proposal.mjs`.
+
+## MUTATION-PROVEN — `verify-bridge-fee-binding` §3, EXECUTED
+A session caller with no token: refused, `bridgeFee` never called, nothing signed, `quoteRequired`, not the
+expired shape. RED STATES RECORDED against `_actions.mjs`:
+- **M1** the executor prices its OWN quote when a token was supplied → **7 red** ("the SIGNED QUOTE in the burn
+  is the SEALED one", "bridgeFee was NEVER called on the bound path", "the APPROVE authorises amount + the SEALED
+  fee", "feeCharged and feeDisclosed are the SAME quote", …).
+- **M2** the fallback restored (a session caller with no token gets a fresh quote) → **5 red** ("a SESSION caller
+  with no quoteToken is REFUSED", "…BEFORE pricing", "…NOTHING was signed", …).
+Green after restore. `verify-bridge-mechanic-pairing` **§11** renders `AgentSummary` (exported for the guard —
+[[state-behind-a-transition-is-untested-by-default]]): the fee line on an ORDINARY-band step, quiet window at
+119 s, "good for another 20s" at 20 s, re-price at 0, no window ≠ expired, the re-quote note. 130/0.
+
+## BROKE CORRECTLY — RE-POINTED TO THE NEW MEANING, NOT LOOSENED
+- `verify-receipt-fee-authority`: quote B now arrives SEALED; `bridgeFee` must NOT be called; `feeShownAt` is the
+  seal's stamp. ⚠️ Its fixture — and `verify-agent-quote-record`'s, and `verify-plan-execution-contract`'s — still
+  carried the DEDUCTED shape (`maxFee`, `netUsdc: amount − fee`), which cannot be sealed. All three now use a
+  real quote's shape (BigInt minors, `mechanic`, a decodable `signedQuote` + expiry).
+- `verify-plan-execution-contract`: seals a token per step; new §0 — no token → 409 `requoted`, executor NEVER
+  reached, fresh disclosure carries a token.
+- `verify-approve-balance-gate` / `-writepath` / `verify-verifier-trigger`: two presses; every executing case
+  preceded by a QUOTED first press that executed nothing, persisted the token, and did not expose it.
+- `verify-bridge-fee-band` + `verify-agent-quote-record` source pins: client shape, confirm args, the ack-gate
+  expression, and the pre-flight's second reason ("re-prices a stale plan") moved to the seal — the comment says
+  so and the pin reads that. One pin went red on a line-WRAP of the guarded phrase; the phrase is kept on one line.
+- `verify-site-claims`: 16 named refusal reasons (derived count; `UNBOUND_QUOTE` is real).
+
+---
+
 # ✅ THE AGENT PROPOSAL'S FEE SENTENCE IS DERIVED FROM THE MECHANIC (`7c4f3d4`) — AND THE BRIDGE-FEE GAP IS RE-MAPPED
 
 **2026-09-13.** Committed and PUSHED (origin/main `7c4f3d4`), test:all **123/123** (7.5 min), tsc clean, ddTree
