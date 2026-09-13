@@ -1,3 +1,55 @@
+# ✅ THE BINDING SHIPPED — DEPLOY 6aa69367, PROD SERVES 79cd88d; gate:forgery WENT RED ON ITS OWN PROBE
+
+**2026-09-13 12:43:40Z (MEASURED, published_deploy).** `npm run deploy:prod` launched DETACHED from the Claude
+session (`nohup setsid`, 12:03:22Z) — the 09-12 OOM shape did not recur: node at 148% CPU / 774 MB RSS at
+4m47s into bundling with 1.92 GB available; upload landed. Deploy `6aa69367d8321b1b0f114617`. Ledgers +
+probe fix committed `bfe6238`. Everything since `e493289` is live: `d840f72` (token resolver), `25e1027`
+(decimals gate), `7c4f3d4` (derived fee sentence), `a300359` (the binding).
+
+## GATES — FOUR OF FIVE FROM THE CHAIN, ONE BY HAND AFTER A FIX
+- **gate:deployed ✅ 6/6** — commit `79cd88d`, tree `d04fb8f99aed`, `ready`, served tree == local tree, control
+  plane == data plane, 0 orphans (25 newer deploys scanned).
+- **capture:window RAN and WROTE** `dd-refusal-window-log.jsonl`: `at 12:43:58Z · commit 79cd88d · ddTree
+  2f4f2793 == previousDdTree · rotated:false · witnessed:null`. Nothing witnessed — expected with an unchanged
+  DD surface, and recorded rather than skipped.
+- ⛔ **gate:forgery FAILED 4/1 inside the chain**, which stopped it: gate:spec and gate:deployloss never ran
+  there. **The failure was the PROBE, not the gate.** `verify-ack-forgery` posted a plan with a forged ack and
+  NO `quoteTokens`; the executor now answers 409 `requoted` BEFORE any ack is compared, so the forged token was
+  never reached and "REFUSED" (`needsAck:true`) could not be true. Re-pointed to the new flow: step 1
+  `quoteOnly` (executes nothing, returns the sealed token), step 2 posts the token WITH the forged ack. ⭐ The
+  spend guard moved EARLIER — step 2 is sent only if step 1's band is `acknowledge`; below it a valid seal
+  would EXECUTE, and the old probe checked the band only after the request. **5/5 on prod**: `200
+  needsAck:true executed:false`, served token `7ce8d31e…` ≠ forged `91bc69c3…`.
+- **gate:spec ✅** and **gate:deployloss ✅** run by hand after the fix: **0 new losses, 15 carried**, 570 deploys
+  scanned, `unaccounted: 0`.
+
+## PROBES — DERIVED FROM THE REAL BUILD DIFF, MEASURED ON THE SERVED BUNDLE
+The pre-deploy build produced `index-mk86Bcf8.js`; the served bundle after is the same hash, so the probes
+derived from `served D3pyB-56` (byte-equal to the old local dist) vs the new build hold:
+- "priced again — nothing ran" **0 → 3** · "Get a quote — bridge" **0 → 1** · "quoteTokens" **0 → 1**
+- control "guaranteed at least" **1 → 1** (unmoved)
+- `REFUSED_UNBOUND_QUOTE` is **0 in the client bundle on BOTH builds** — a server-side code never ships in JS, so
+  its ABSENT→PRESENT had to be a FUNCTION probe, not a bundle probe:
+
+⭐ **THE UNBOUND_QUOTE FUNCTION PROBE, both sides MEASURED.** POST `/api/agent-bridge` with a prod session, no
+`quoteToken`, `amountUsdc: 1000` (40× the cap — refused on EITHER build; the discriminator is WHERE):
+- BEFORE (old build): **200 `blocked` "exceeds per-bridge limit of 25 USDC — 1000 USDC plus a 0.053946 USDC
+  fee…"** — it PRICED a fresh quote and fell to the cap. The silent pricing, caught in the act. `quoteRequired: null`.
+- AFTER: **409 `requote` · `quoteRequired: true` · "this bridge has no sealed quote — the fee has to be shown
+  before it can be signed"** · a fresh sealed quote in the body (fee 0.053937).
+- CONTROL: unsupported destination → **400 → 400**, unmoved.
+
+## ddTree — COMPARED, NOT PREDICTED
+prod `2f4f2793…` before (dd-vouched-build) · prod `2f4f2793…` after · local porcelain `2f4f2793…` (38 files).
+Unchanged; no vault-deposit window bought.
+
+## ⚠️ THE LIMIT, STATED
+Bytes shipping proves the code is there; the 409 proves the refusal fires on prod. That a quote BINDS — the
+fee in the calldata is the figure shown — is proven by the suites (M1 7 red / M2 5 red, `feebinding` 63/0) and
+settled live only by **one real bridge from the chat path**, which is T's to run. Not run yet.
+
+---
+
 # ✅ THE BRIDGE FEE IS BOUND ON EVERY SESSION PATH — SEALED AT DISCLOSURE, OPENED AT EXECUTION (`a300359`)
 
 **2026-09-13.** Committed and PUSHED (origin/main `a300359`), test:all **123/123** (9.3 min), tsc clean, ddTree
