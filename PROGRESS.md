@@ -1,3 +1,54 @@
+# ⭐ plan-path-watch: THE FIELD REPLACES THE PROSE MATCH — phases 1+2 shipped to git (3af6b4a), phase 3 gated on a FIELD streak; guards NOT reordered
+
+**2026-09-14.**
+
+## Phase 1 — the field, sentence unchanged (single producer)
+`netlify/functions/_refusal.mjs`: `capRefusal` / `ceilingRefusal` / `balanceRefusal` / `priceUnavailableRefusal` build
+`{kind, …figures}`; **`refusalSentence(field)` DERIVES the sentence**, byte-identical to the words it replaces.
+`agent-execute-plan` carries `results[i].refusal` on the loop's cap/ceiling refusals and a top-level `refusal` on
+priceUnavailable and the plan-level balance refusal — and writes none of those sentences itself. `bridgeBalanceRefusal`
+now builds the balance field and derives its sentence from the same module (have/need live in ONE object).
+**Proven by mutation** (plan suite §6, handler-driven): `results[0].blocked === refusalSentence(results[0].refusal)`;
+change `valuedUsdc` 200.05→300.05 or `capUsdc`→75 or balance `have`→1 and the sentence changes; the handler source
+contains no cap/ceiling/pricing sentence of its own. 35/35.
+
+## Phase 2 — the monitor reads the field; regex as ONE-deploy fallback; the branch is recorded
+`firstDisclosure`: band (structural, as before) → `results[0].refusal` / `body.refusal` with `kind:"cap"` (figures from
+the field) → `kind:"balance"` (a PRICED decision — need includes the sealed fee; recognised structurally so a future
+reorder cannot read as REFUSED_OTHER) → the sentence regex, LAST. Every disclosure carries **`matchedBy: "field" |
+"regex"`**; the tick record persists `matchedBy` and **`fieldStreak`** (consecutive HEALTHY ticks matched by the field;
+a regex-matched healthy tick or any non-healthy tick RESETS it). A 402 carrying a structured `refusal` passes the
+readability gate; a bare 402 stays HTTP_ERROR. The tick log prints both.
+
+**⭐ Promotion criterion, set now:** `FIELD_STREAK_TO_PROMOTE = 3` — three consecutive healthy ticks with
+`matchedBy === "field"`, read from the record (`promotionReady(record)`). "It stayed healthy" is NOT the criterion; the
+regex alone satisfies that. Phase 3 (drop the regex) only after the record shows it. Monitor suite 87 → 103/103.
+
+⛔ **Guard order untouched.** The balance pre-flight still sits after the cap in `agent-execute-plan`. Reordering
+waits for phase 3.
+
+## Report — the alert branch, read from the record of this file and the code
+- **Has REFUSED_OTHER ever fired live? No.** No BLOCKED tick of any reason has ever been observed: the 2026-09-05
+  entries record twenty healthy readings with `lastNotifiedAt: null` throughout ("a healthy monitor is structurally
+  incapable of exercising its own alert"), and the one calibration attempt (pointing `PLAN_WATCH_URL` at a wrong target)
+  **never landed** — `netlify env:set` does not reach a deployed function; tick 4 carried the correct target. The
+  webhook path of this monitor has never sent a message. **An unexercised alert path is not evidence of health**, and
+  the same is true of `decideNotify`'s regressed/first-failure/changed branches — all suite-proven, none live-proven.
+  Not re-read live here: no endpoint exposes the record; T's Discord channel history is the other instrument.
+- **Does it page on REFUSED_OTHER?** Yes: any non-HEALTHY outcome notifies on `first-failure` / `regressed` / `changed`,
+  then hourly (`REMINDER_MS` 60 min) while it persists, headline "🚨 AGENT BRIDGE PLANS ARE REFUSED ON PROD".
+- **Once a balance refusal can legitimately land there:** BEFORE this commit, a probe answered by the balance
+  pre-flight would have paged immediately and hourly under that headline — and worse, at 402 it would have read
+  HTTP_ERROR ("cannot verify"), also a page. AFTER this commit it reads HEALTHY / kind `balance` / matched by field: a
+  priced decision, no page. That is what makes the later reordering safe; it does not perform it.
+
+test:all 127/127. ddTree unchanged `2f4f2793…`. Not deployed.
+
+**Phase 3 checklist (not now):** deploy → read the record after ≥3 ticks → `fieldStreak ≥ 3` and every tick
+`matchedBy: "field"` → remove the regex branch and its fixture → only then choose the guard order on correctness.
+
+---
+
 # ⛔ plan-path-watch MATCHES A PROSE SENTENCE AT results[0] — REPORT + PROPOSAL (no code change) · and the fail-open is now RENDERED (2a17a8b)
 
 **2026-09-14.** Two follow-ups on the balance pre-flight, kept apart from tonight's deploy.
