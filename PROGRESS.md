@@ -43,8 +43,9 @@ amount consented to = amount burned = amount minted = **1.000000**. `feeDisclose
 
 ⚠️ **Which path:** the **agent PANEL** (`BridgePanel` → `agent-bridge`). The residual the memory names — the CHAT
 single-action / plan path — is still unrun. Same seal code, different surface; the surface is what a copy suite reads.
-This bridge ran on served `0a79079`, before `404628d` (balance pre-flight) — the wallet held 3.65, nothing there
-was exercised.
+**CORRECTION (same day):** this bridge ran on served **`34344b2`** (deploy `6aa81a8c`, published 16:28:32Z, T's shell,
+five gates green, 125/125) — which INCLUDES `404628d`. So the balance pre-flight WAS exercised, on its PASS side:
+have 3.654695 ≥ need 1.054045, `balanceChecked:true`. The REFUSAL side (have < amount + fee) is still unexercised live.
 
 ---
 
