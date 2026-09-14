@@ -40,63 +40,89 @@ check("⭐ _bridge.mjs exports bridgeBalanceRefusal", typeof bridgeBalanceRefusa
   typeof bridgeBalanceRefusal);
 
 const call = (args) => (typeof bridgeBalanceRefusal === "function" ? bridgeBalanceRefusal(args) : undefined);
+const M = (usdc) => BigInt(Math.round(usdc * 1e6));
+const one = (haveUsdc, amountUsdc, feeUsdc, destLabel = "Base (Sepolia)") =>
+  call({ haveMinor: haveUsdc == null ? haveUsdc : M(haveUsdc), steps: { amountMinor: M(amountUsdc), feeMinor: feeUsdc == null ? null : M(feeUsdc), destLabel } });
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-section("2 — ⭐⭐ THE VALUE: 5 from 3.65 to Base, fee 0.0021");
+section("2 — ⭐⭐ THE VALUE: 5 from 3.65 to Base, fee 0.0021 — compared in MINOR units, rendered at 6 dp");
 {
-  const r = call({ haveUsdc: 3.65, amountUsdc: 5, feeUsdc: 0.0021, destLabel: "Base (Sepolia)" });
+  const r = one(3.65, 5, 0.0021);
   check("🚨 refused", !!r, r ? `status ${r.status}` : "returned nothing");
   check("⭐ status 402 — a client condition, not a fault", r?.status === 402, `status ${r?.status}`);
-  check("⭐ the sentence names HAVE 3.65", /3\.65/.test(r?.body?.error ?? ""), r?.body?.error);
-  check("⭐ …and NEED, which is amount + fee = 5.0021, rounded UP", /5\.0021/.test(r?.body?.error ?? ""));
-  check("⭐ …and says no funds moved and nothing was quoted", /No funds moved/.test(r?.body?.error ?? "") && /not(hing was)? quoted/i.test(r?.body?.error ?? ""));
-  check("⭐ `error` AND `blocked` carry the sentence (the client throws on r.body.error for a non-2xx; the panel renders blocked)",
+  check("⭐ the sentence names HAVE at full 6 dp — 3.650000", /have 3\.650000 USDC/.test(r?.body?.error ?? ""), r?.body?.error);
+  check("⭐ …and NEED = amount + fee = 5.002100 at full 6 dp", /need 5\.002100 USDC/.test(r?.body?.error ?? ""));
+  check("⭐ …and says no funds moved and nothing was quoted", /No funds moved/.test(r?.body?.error ?? "") && /nothing was quoted/i.test(r?.body?.error ?? ""));
+  check("⭐ `error` AND `blocked` carry the sentence (client throws on r.body.error for a non-2xx; the panel renders blocked)",
     r?.body?.error && r?.body?.blocked === r?.body?.error);
   check("⭐ outcome is the client's known discriminator `quote_failed`, quoted:false, executed:false",
     r?.body?.outcome === "quote_failed" && r?.body?.quoted === false && r?.body?.executed === false);
-  check("⭐ have / need ride as numbers", r?.body?.have === 3.65 && Math.abs(r?.body?.need - 5.0021) < 1e-9, `have ${r?.body?.have} need ${r?.body?.need}`);
+  check("⭐ have / need ride as numbers; insufficient:true is the structural flag (NOT priceUnavailable)",
+    r?.body?.have === 3.65 && Math.abs(r?.body?.need - 5.0021) < 1e-9 && r?.body?.insufficient === true && !r?.body?.priceUnavailable, `have ${r?.body?.have} need ${r?.body?.need}`);
 }
 
-section("2b — the boundary: exactly enough passes; a hair short does not");
+section("2b — the boundary, in minor units: exactly enough passes; ONE micro-USDC short does not");
 {
-  check("⭐ have == amount + fee → allowed (null)", call({ haveUsdc: 5.0021, amountUsdc: 5, feeUsdc: 0.0021, destLabel: "Base" }) === null);
-  const r = call({ haveUsdc: 5.002099, amountUsdc: 5, feeUsdc: 0.0021, destLabel: "Base" });
+  check("⭐ have == amount + fee → allowed (null)", one(5.0021, 5, 0.0021) === null);
+  const r = call({ haveMinor: 5_002_099n, steps: { amountMinor: 5_000_000n, feeMinor: 2_100n, destLabel: "Base" } });
   check("⭐ one micro-USDC short → refused", r?.status === 402);
-  check("⭐ …and the rendered NEED is not rounded BELOW the real need (5.0021, not 5.00)", /5\.0021/.test(r?.body?.error ?? ""), r?.body?.error);
-  const r2 = call({ haveUsdc: 5.0020999, amountUsdc: 5, feeUsdc: 0.0021, destLabel: "Base" });
-  // ⛔ A NEGATIVE OVER AN ABSENT STRING PASSES VACUOUSLY — require the refusal first, then the absence.
-  check("⭐ …and the rendered HAVE is not rounded ABOVE the real balance (5.0020, not 5.0021)",
-    r2?.status === 402 && /have 5\.0020/.test(r2?.body?.error ?? "") && !/have 5\.0021/.test(r2?.body?.error ?? ""), r2?.body?.error);
+  check("⭐ …and the rendered NEED is the real need at 6 dp (5.002100), never rounded below it", /need 5\.002100/.test(r?.body?.error ?? ""), r?.body?.error);
+  // ⛔ A NEGATIVE OVER AN ABSENT STRING PASSES VACUOUSLY — require the refusal first, then the figure.
+  check("⭐ …and the rendered HAVE is the real balance at 6 dp (5.002099), never rounded above it",
+    r?.status === 402 && /have 5\.002099 USDC/.test(r?.body?.error ?? "") && !/have 5\.002100/.test(r?.body?.error ?? ""), r?.body?.error);
 }
 
 section("2c — before pricing, the fee is unknown: amount alone is a lower bound and still refuses");
 {
-  const r = call({ haveUsdc: 3.65, amountUsdc: 5, feeUsdc: null, destLabel: "Base" });
+  const r = one(3.65, 5, null);
   check("⭐ have < amount with no fee → refused", r?.status === 402);
-  check("⭐ the sentence says 'at least' the amount, and does not invent a fee figure", /at least 5/.test(r?.body?.error ?? "") && !/\+ ~/.test(r?.body?.error ?? ""), r?.body?.error);
-  check("⭐ have ≥ amount with no fee → allowed (the fee check comes after pricing)", call({ haveUsdc: 5, amountUsdc: 5, feeUsdc: null, destLabel: "Base" }) === null);
+  check("⭐ the sentence says 'at least' the amount, and does not invent a fee figure", /at least 5 USDC/.test(r?.body?.error ?? "") && !/\+ ~/.test(r?.body?.error ?? ""), r?.body?.error);
+  check("⭐ have ≥ amount with no fee → allowed (the fee check comes after pricing)", one(5, 5, null) === null);
 }
 
 section("2d — ⛔ an UNREAD balance is not a refusal and not a pass — it is null, and the caller says so");
 {
-  check("⭐ haveUsdc null → null (caller marks balanceChecked:false; Circle's backstop remains)", call({ haveUsdc: null, amountUsdc: 5, feeUsdc: 0.0021, destLabel: "Base" }) === null);
-  check("⭐ haveUsdc NaN → null too (NaN < need is false — never let it read as 'enough')", call({ haveUsdc: NaN, amountUsdc: 5, feeUsdc: 0.0021, destLabel: "Base" }) === null);
+  check("⭐ haveMinor null → null (caller marks balanceChecked:false; Circle's backstop remains)", one(null, 5, 0.0021) === null);
+  check("⭐ haveMinor undefined → null too", call({ haveMinor: undefined, steps: { amountMinor: 5_000_000n, feeMinor: 2_100n, destLabel: "Base" } }) === null);
+  check("⭐ an unparsable haveMinor → null, never 'enough'", call({ haveMinor: "not-a-number", steps: { amountMinor: 5_000_000n, feeMinor: 2_100n, destLabel: "Base" } }) === null);
+}
+
+section("2e — ⭐ PLAN scope: the sum of every bridge step's debit, refused as a WHOLE");
+{
+  const r = call({ haveMinor: 3_650_000n, scope: "plan", steps: [
+    { amountMinor: 2_000_000n, feeMinor: 54_129n, destLabel: "Base (Sepolia)" },
+    { amountMinor: 2_000_000n, feeMinor: 54_129n, destLabel: "Ethereum (Sepolia)" },
+  ] });
+  check("⭐ refused at 402", r?.status === 402);
+  check("⭐⭐ HAVE 3.650000 and NEED 4.108258 (2+2+0.054129+0.054129), both at 6 dp", /have 3\.650000 USDC/.test(r?.body?.error ?? "") && /need 4\.108258 USDC/.test(r?.body?.error ?? ""), r?.body?.error);
+  check("⭐ the breakdown names the amount, the fees and BOTH destinations", /\(4 \+ ~0\.108258 in fees, to Base \(Sepolia\) and Ethereum \(Sepolia\)\)/.test(r?.body?.error ?? ""));
+  check("⭐ it says the WHOLE plan is refused and nothing was executed", /whole plan is refused/.test(r?.body?.error ?? "") && /Nothing was executed/.test(r?.body?.error ?? ""));
+  check("⭐ a plan the wallet CAN fund → null", call({ haveMinor: 4_108_258n, scope: "plan", steps: [
+    { amountMinor: 2_000_000n, feeMinor: 54_129n, destLabel: "Base" }, { amountMinor: 2_000_000n, feeMinor: 54_129n, destLabel: "Ethereum" } ] }) === null);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-section("3 — THE WIRING: agent-bridge.mjs reads the balance and refuses on BOTH presses");
-const src = readFileSync("netlify/functions/agent-bridge.mjs", "utf8");
-check("⭐ the handler reads balanceOf(walletAddress) on the agent SCA (6-dp ERC-20 view, like agent-send)",
-  /functionName:\s*"balanceOf"[\s\S]{0,80}args:\s*\[walletAddress\]/.test(src));
-check("⭐ …at TOKEN decimals", /formatUnits\([^)]*,\s*USDC_DECIMALS\)/.test(src));
-check("⭐ the quote path calls bridgeBalanceRefusal AFTER pricing with the fee (amount + fee is the debit under upfront fees)",
-  /bridgeBalanceRefusal\(\{[^}]*feeUsdc:\s*fee\.feeUsdc/.test(src));
-check("⭐ the quote path also refuses BEFORE pricing on amount alone (no IRIS call for a wallet that cannot pay the amount)",
-  /bridgeBalanceRefusal\(\{[^}]*feeUsdc:\s*null/.test(src));
-check("⭐ the execute press refuses on amount alone before executeAction",
-  (() => { const i = src.indexOf("bridgeBalanceRefusal("); const j = src.indexOf("executeAction("); return i > 0 && j > 0 && i < j; })());
-check("⭐ the quote body says whether the balance was checked — balanceChecked is a boolean, true in every case it is true",
-  /balanceChecked:\s*[a-zA-Z!=]+/.test(src));
+section("3 — THE WIRING: every bridge-initiating surface is a CALLER of the one reader + one refusal");
+const src = (f) => readFileSync(f, "utf8").replace(/^\s*\/\/.*$/gm, "");
+const surfaces = {
+  "agent-bridge.mjs (agent panel + chat single-action CONFIRM)": src("netlify/functions/agent-bridge.mjs"),
+  "agent-act.mjs (chat proposal: plan + single-action)": src("netlify/functions/agent-act.mjs"),
+  "agent-execute-plan.mjs (plan execution)": src("netlify/functions/agent-execute-plan.mjs"),
+  "job-bridge-approve.mjs (proposal card)": src("netlify/functions/job-bridge-approve.mjs"),
+};
+for (const [name, code] of Object.entries(surfaces)) {
+  check(`⭐ ${name} reads via readBridgeBalanceMinor`, /readBridgeBalanceMinor\(walletAddress\)/.test(code));
+  check(`⭐ ${name} refuses via bridgeBalanceRefusal`, /bridgeBalanceRefusal\(\{/.test(code));
+  check(`⛔ ${name} has NO private balanceOf read left`, !/functionName:\s*"balanceOf"/.test(code));
+  check(`⭐ ${name} reports balanceChecked`, /balanceChecked/.test(code));
+}
+check("⭐ agent-act's plan proposal refuses with scope \"plan\"", /scope:\s*"plan"/.test(surfaces["agent-act.mjs (chat proposal: plan + single-action)"]));
+check("⭐ agent-execute-plan refuses with scope \"plan\" BEFORE the execution loop",
+  (() => { const c = surfaces["agent-execute-plan.mjs (plan execution)"]; const i = c.indexOf('scope: "plan"'); const j = c.indexOf("const results = [];"); return i > 0 && j > 0 && i < j; })());
+check("⭐ agent-execute-plan orders the balance refusal AFTER the cap (the monitor's probe must still read the cap sentence)",
+  /capWouldRefuse/.test(surfaces["agent-execute-plan.mjs (plan execution)"]));
+check("⛔ _bridge.mjs holds exactly ONE balanceOf ABI for the pre-flight (the only copy)",
+  (readFileSync("netlify/functions/_bridge.mjs", "utf8").match(/name:\s*"balanceOf"/g) || []).length === 1);
 
 console.log(`\n${fail ? "❌ FAILURES" : "✅ ALL GREEN"}   pass ${pass} / fail ${fail}\n`);
 process.exit(fail ? 1 : 0);

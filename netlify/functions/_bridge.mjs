@@ -17,7 +17,7 @@
 // ~1.5–14 USDC to Ethereum L1. Callers MUST refuse a bridge where fee ≥ amount.
 
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { encodeFunctionData, pad, getAddress } from "viem";
+import { encodeFunctionData, pad, getAddress, formatUnits } from "viem";
 import { circle, waitForTx } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { publicClient } from "./_predict.mjs";
@@ -163,7 +163,7 @@ const BATCH_ABI = [{
     { name: "target", type: "address" }, { name: "value", type: "uint256" }, { name: "data", type: "bytes" }] }],
 }];
 
-const toMinor = (usdc) => BigInt(Math.round(Number(usdc) * 10 ** USDC_DECIMALS));
+export const toMinor = (usdc) => BigInt(Math.round(Number(usdc) * 10 ** USDC_DECIMALS));
 const toUsdc = (minor) => Number(minor) / 10 ** USDC_DECIMALS;
 
 async function irisJson(url) {
@@ -420,38 +420,77 @@ export function bridgeFeeBand({ amountUsdc, feeUsdc, netUsdc }) {
   return { feeRatio, band, feeUsdc: fee, netUsdc: Number(netUsdc) };
 }
 
-// ═══ ⭐ THE BALANCE PRE-FLIGHT — OURS, BEFORE CIRCLE'S ═══════════════════════════════════════════
+// ═══ ⭐ THE BALANCE PRE-FLIGHT — OURS, BEFORE CIRCLE'S — ONE COMPUTATION FOR EVERY SURFACE ═══
 // 2026-09-14: a 5 USDC bridge from a wallet holding 3.65 was priced, SEALED, built into a userOp and
-// sent to Circle, which refused it pre-broadcast (`INSUFFICIENT_TOKEN`). Nothing on this path had
+// sent to Circle, which refused it pre-broadcast (`INSUFFICIENT_TOKEN`). Nothing on the panel path had
 // looked at the balance; Circle's refusal — documented as "the final backstop" — was the first and
 // only one, and its sentence named neither figure. agent-send has had this check from its first
-// version and agent-ub-spend since 18c0396; the bridge never did.
+// version, agent-ub-spend since 18c0396, job-bridge-approve since job #155341; the panel never did,
+// and the chat/plan surfaces had only the executor's mid-plan Circle refusal.
 //
-// ⭐ PURE, so a suite drives it with values. `haveUsdc` is the 6-dp `balanceOf` view (what an ERC-20
-// debit can actually spend — dust below 1e-6 is invisible to the transfer too). Under upfront fees
-// the debit is `amount + fee` (bridgeDebitMinor), so the fee is part of NEED once it is known; before
-// pricing the amount alone is a lower bound and still refuses.
+// ⛔ THIS IS THE ONLY COPY. 404628d added a float version here beside job-bridge-approve's BigInt
+// version — a drift pair with two sentences for one rule. Now: ONE reader (`readBridgeBalanceMinor`),
+// ONE comparison in MINOR UNITS (nothing to round — `balanceOf` is a BigInt and the debit is a
+// BigInt from ONE quote), ONE sentence shape, and every surface — panel, chat single-action, chat
+// plan, plan execution, proposal card — is a caller. [[duplicate-source-of-truth-is-the-recurring-bug]]
 //
 // ⛔ THREE OUTCOMES, NOT TWO. null means EITHER "enough" OR "unread" — the CALLER must say which
-// (`balanceChecked`), because an unread balance must never render as a checked one. A NaN `have`
-// is unread, not zero: `NaN < need` is false, and treating that as "enough" is the fail-open cap
-// pattern. [[nan-fail-open-cap-pattern]] [[refusal-reports-compared-quantity]]
-// Rounding has a direction: HAVE rounds down; NEED and the FEE (part of need) round up; 4 dp (the fee's precision).
-export function bridgeBalanceRefusal({ haveUsdc, amountUsdc, feeUsdc = null, destLabel }) {
-  const have = Number(haveUsdc);
-  if (haveUsdc == null || !Number.isFinite(have)) return null;          // unread — not our call
-  const amount = Number(amountUsdc);
-  const fee = feeUsdc == null ? null : Number(feeUsdc);
-  const need = fee == null ? amount : amount + fee;
-  if (have >= need) return null;                                         // enough
-  const haveStr = availableAmount(have, 4);
-  const needStr = requiredAmount(need, 4);
-  const error = fee == null
-    ? `Insufficient funds in your agent wallet: have ${haveStr} USDC, need at least ${amount} USDC to bridge to ${destLabel}` +
-      ` (the fee comes on top). No funds moved and nothing was quoted — top up the agent wallet and retry.`
-    : `Insufficient funds in your agent wallet: have ${haveStr} USDC, need ${needStr} USDC` +
-      ` (${amount} + ~${requiredAmount(fee, 4)} fee to ${destLabel}). No funds moved and nothing was quoted — top up the agent wallet and retry.`;
-  return { status: 402, body: { outcome: "quote_failed", executed: false, quoted: false, error, blocked: error, have, need, insufficient: true } };
+// (`balanceChecked`), because an unread balance must never render as a checked one, and must never
+// fall through to a shortfall sentence (the priceUnavailable precedent: "could not read" is
+// STRUCTURALLY distinct from "not enough"). [[absence-must-never-read-as-safe]]
+// Rounding has a direction and is applied ONLY at the render: HAVE rounds down; NEED and the fee
+// round up; all at the token's 6 dp so a 1-micro shortfall never renders as equality.
+// [[refusal-reports-compared-quantity]] [[required-figure-rounds-up]]
+const BALANCE_OF_ABI = [{ type: "function", name: "balanceOf", stateMutability: "view",
+  inputs: [{ name: "account", type: "address" }], outputs: [{ name: "", type: "uint256" }] }];
+
+/** The 6-dp ERC-20 view of what the agent wallet can spend — the view an ERC-20 debit meets.
+ *  `haveMinor` is null when the read failed; `checked` says which. Never throws. */
+export async function readBridgeBalanceMinor(walletAddress) {
+  try {
+    const raw = await publicClient().readContract({
+      address: CONTRACTS.USDC, abi: BALANCE_OF_ABI, functionName: "balanceOf", args: [walletAddress],
+    });
+    return { haveMinor: BigInt(raw), checked: true, error: null };
+  } catch (e) {
+    console.warn(`[bridge] balance read failed for ${walletAddress}: ${e?.message ?? e} — proceeding unchecked (Circle backstop)`);
+    return { haveMinor: null, checked: false, error: String(e?.message ?? e) };
+  }
+}
+
+/**
+ * The refusal, as a VALUE. `steps` is one or more `{ amountMinor, feeMinor|null, destLabel }` —
+ * one entry for a single bridge, every bridge step for a plan (NEED is the sum of all debits, so
+ * the whole plan is refused before step 1, never mid-plan). `feeMinor` null = not yet priced: the
+ * amount alone is a lower bound on the debit and still refuses.
+ * @returns null (enough, or unread) | { status: 402, body }
+ */
+export function bridgeBalanceRefusal({ haveMinor, steps, scope = "single" }) {
+  if (haveMinor == null) return null;                                     // unread — not our call
+  let have; try { have = BigInt(haveMinor); } catch { return null; }      // unparsable — unread
+  const list = Array.isArray(steps) ? steps : [steps];
+  let amountMinor = 0n, feeMinor = 0n, anyFee = false;
+  for (const st of list) {
+    amountMinor += BigInt(st.amountMinor);
+    if (st.feeMinor != null) { feeMinor += BigInt(st.feeMinor); anyFee = true; }
+  }
+  const needMinor = amountMinor + feeMinor;
+  if (have >= needMinor) return null;                                     // enough
+  const toU = (m) => Number(formatUnits(m, USDC_DECIMALS));
+  const have6 = availableAmount(toU(have), USDC_DECIMALS);
+  const need6 = requiredAmount(toU(needMinor), USDC_DECIMALS);
+  const amount6 = toU(amountMinor);
+  const fee6 = requiredAmount(toU(feeMinor), USDC_DECIMALS);
+  const dests = [...new Set(list.map((st) => st.destLabel).filter(Boolean))].join(" and ");
+  const error = scope === "plan"
+    ? `Insufficient funds in your agent wallet for this plan: have ${have6} USDC, its ${list.length} bridge step${list.length === 1 ? "" : "s"} need ` +
+      (anyFee ? `${need6} USDC (${amount6} + ~${fee6} in fees, to ${dests}). ` : `at least ${amount6} USDC to ${dests} (the fees come on top). `) +
+      `Nothing was executed — the whole plan is refused, not a step of it. Top up the agent wallet and retry.`
+    : anyFee
+      ? `Insufficient funds in your agent wallet: have ${have6} USDC, need ${need6} USDC (${amount6} + ~${fee6} fee to ${dests}). No funds moved and nothing was quoted — top up the agent wallet and retry.`
+      : `Insufficient funds in your agent wallet: have ${have6} USDC, need at least ${amount6} USDC to bridge to ${dests} (the fee comes on top). No funds moved and nothing was quoted — top up the agent wallet and retry.`;
+  return { status: 402, body: { outcome: "quote_failed", executed: false, quoted: false, error, blocked: error,
+    have: toU(have), need: toU(needMinor), insufficient: true } };
 }
 
 /**

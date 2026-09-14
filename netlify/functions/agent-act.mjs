@@ -10,7 +10,7 @@ import { walletTokenBalances } from "./_balances.mjs";
 import { SUPPORTED_VAULT_KEYS, resolveVault } from "./_vault.mjs";
 import { depositDisclosure } from "./_vault-disclosure.mjs";
 import { vaultDepositCapUsdc } from "./_arc.mjs";
-import { resolveDestination, bridgeFee, SUPPORTED_DESTINATION_LABELS, bridgeFeeBand, bridgeAckToken, sealBridgeQuote, quoteWindowMs } from "./_bridge.mjs";
+import { resolveDestination, bridgeFee, SUPPORTED_DESTINATION_LABELS, bridgeFeeBand, bridgeAckToken, sealBridgeQuote, quoteWindowMs, bridgeBalanceRefusal, readBridgeBalanceMinor } from "./_bridge.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { budgetConfig } from "./_budget.mjs";
@@ -463,6 +463,22 @@ export async function handler(event) {
       // ⚠️ FIRE-AND-CONTINUE. `recordQuoteNeverThrows` swallows everything: this is the quote
       // path, and losing the ability to propose a plan because diagnostics failed would trade
       // a capability for an observation. The return value is not branched on.
+      // ═══ ⭐ THE BALANCE PRE-FLIGHT AT PROPOSAL TIME — the whole plan, before a Confirm exists ═══
+      // Every bridge fee is priced above, so NEED is the sum of the debits the user would consent
+      // to. Refused here, the chat shows the shortfall with both figures instead of a Confirm button
+      // that leads to a mid-plan Circle refusal. Same reader, same sentence as every other surface
+      // (_bridge.mjs); agent-execute-plan repeats it at execution so a stale proposal cannot slip.
+      // ⛔ An unread balance is NOT a shortfall — the proposal proceeds, marked balanceChecked:false.
+      // ⛔ 200 + blocked, like every refusal on this endpoint: the chat renders "held off — …".
+      if (bridgeIdx.length > 0) {
+        const { haveMinor, checked } = await readBridgeBalanceMinor(walletAddress);
+        const short = bridgeBalanceRefusal({
+          haveMinor, scope: "plan",
+          steps: bridgeIdx.map((i) => ({ amountMinor: fees[i].amountMinor, feeMinor: fees[i].feeMinor, destLabel: resolveDestination(steps[i].destination).label })),
+        });
+        if (short) return json(200, { executed: false, decision, blocked: short.body.blocked, insufficient: true, have: short.body.have, need: short.body.need, balanceChecked: checked });
+      }
+
       const quotedAt = new Date().toISOString();
       const quoteId = mintQuoteId();
       await recordQuoteNeverThrows({
@@ -598,6 +614,14 @@ export async function handler(event) {
       // surface re-derives a ratio from feeUsdc and amountUsdc — that is how three
       // renderings of one fact drifted apart in the first place.
       const band = bridgeFeeBand({ amountUsdc: amount, feeUsdc: fee.feeUsdc, netUsdc: fee.netUsdc });
+      // ⭐ The balance pre-flight at proposal time — the fee is priced, so NEED is amount + fee.
+      // Refused here, the chat shows both figures instead of a Confirm that agent-bridge would 402.
+      // Same reader, same sentence as the panel (_bridge.mjs). Unread → proceed, balanceChecked:false.
+      {
+        const { haveMinor, checked } = await readBridgeBalanceMinor(walletAddress);
+        const short = bridgeBalanceRefusal({ haveMinor, steps: { amountMinor: fee.amountMinor, feeMinor: fee.feeMinor, destLabel: dest.label } });
+        if (short) return json(200, { executed: false, decision, blocked: short.body.blocked, insufficient: true, have: short.body.have, need: short.body.need, balanceChecked: checked });
+      }
       return json(200, {
         executed: false,
         needsBridgeConfirm: true,

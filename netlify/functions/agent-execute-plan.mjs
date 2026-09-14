@@ -8,7 +8,7 @@ import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusa
 import { daySpend, budgetConfig } from "./_budget.mjs";
 import { recordBridge, recordPendingBridge } from "./_bridge-record.mjs";
 import { TxPendingError } from "./_circle.mjs";
-import { resolveDestination, bridgeFee, bridgeFeeBand, bridgeAckToken, openBridgeQuote, sealBridgeQuote, quoteWindowMs } from "./_bridge.mjs";
+import { resolveDestination, bridgeFee, bridgeFeeBand, bridgeAckToken, openBridgeQuote, sealBridgeQuote, quoteWindowMs, bridgeBalanceRefusal, readBridgeBalanceMinor } from "./_bridge.mjs";
 import { bridgeMechanicOf } from "../../shared/bridge-mechanic.mjs";
 import { safeQuoteId, markQuoteUsed } from "./_quote-record.mjs";
 
@@ -386,6 +386,30 @@ export async function handler(event) {
     }
   }
 
+  // ═══ ⭐ THE BALANCE PRE-FLIGHT, AT PLAN STAGE — the WHOLE plan, before step 1 ═══════════════════
+  // The executor's only balance refusal was Circle's INSUFFICIENT_TOKEN, and it fires per step —
+  // mid-plan, after steps 1..k-1 have already burned. The agreed rule: steps are irreversible, so a
+  // plan the wallet cannot fund is refused HERE, in full, with nothing executed. NEED is the sum of
+  // every bridge step's debit (amount + its sealed fee — the fees are already OPENED above, so the
+  // figures are the ones the user consented to). One reader, one comparison, in _bridge.mjs.
+  //
+  // ⛔ ORDERED AFTER THE CAP, DELIBERATELY. plan-path-watch probes this endpoint every 30 min with a
+  // 200 USDC bridge from a wallet that cannot fund it and judges HEALTHY on the per-bridge CAP
+  // sentence at results[0]. A balance refusal that pre-empted the cap would page as an outage on
+  // every tick. So: if any step would be cap-refused, the loop below answers exactly as before and
+  // this check is skipped; the balance refusal fires only for a plan the caps would let run.
+  // ⛔ An UNREAD balance is not a shortfall: the plan proceeds to Circle's backstop and the body
+  // says `balanceChecked:false`. [[absence-must-never-read-as-safe]] [[verify-plan-balance-preflight]]
+  const capWouldRefuse = plan.some((step, i) => atomic(values[i]) > capForA(step));
+  const { haveMinor, checked: balanceChecked } = capWouldRefuse ? { haveMinor: null, checked: false } : await readBridgeBalanceMinor(walletAddress);
+  if (!capWouldRefuse && bridgeIdx.length > 0) {
+    const short = bridgeBalanceRefusal({
+      haveMinor, scope: "plan",
+      steps: bridgeIdx.map((i) => ({ amountMinor: fees[i].amountMinor, feeMinor: fees[i].feeMinor, destLabel: dests[i].label })),
+    });
+    if (short) return json(short.status, { ...short.body, balanceChecked, stepsRun: 0, stepsTotal: plan.length, results: [] });
+  }
+
   // ── Execute in order; STOP at the first cap/ceiling breach or failure ──────
   const results = [];
   let stoppedAt = null;
@@ -517,6 +541,7 @@ export async function handler(event) {
     // the honest fix is to make the existing name true. [[field-name-must-be-true-in-every-case]]
     executed: stepsRun > 0,
     completed: allOk,
+    balanceChecked,
     quoteId,
     totalUsdc,
     ceiling,

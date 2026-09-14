@@ -135,11 +135,14 @@ console.log("CASE 1: balance 6.30 < amount 10 → clean 402, NO burn (the #15534
   // ⭐ RE-PINNED TO THE PROPERTY, NOT THE FORMAT: both figures appear, at the token's full 6-dp
   //    precision, and the printed pair still reads as a genuine shortfall.
   const shown = body.error || "";
-  check("message names have+need", /Have 6\.300000 USDC, need 10\.054129/.test(shown), shown);
+  // ⚠️ RE-POINTED 2026-09-14: the sentence is now the ONE shared shape from _bridge.mjs
+  //   (bridgeBalanceRefusal) — the same words the panel, chat and plan render. The figures and the
+  //   amount+fee breakdown are what this suite pins; the wording is whatever that one function says.
+  check("message names have+need", /have 6\.300000 USDC, need 10\.054129/.test(shown), shown);
   // ⭐ AND IT NAMES THE FEE SEPARATELY. "need 10.054129" against a 10 USDC bridge reads as an error
   // unless the fee is visible beside it — the reader must be able to see where the extra came from.
   check("⭐⭐ …and the message breaks the requirement into amount + fee",
-    /10 to bridge plus a 0\.054129 USDC fee/.test(shown), shown);
+    /\(10 \+ ~0\.054129 fee to /.test(shown), shown);
   const nums = [...shown.matchAll(/(\d+\.\d+)/g)].map((m) => Number(m[1]));
   check("⭐⭐ …and the printed pair does NOT read as sufficient — have < need on the SHOWN figures",
     nums.length >= 2 && nums[0] < nums[1], `${nums.join(" vs ")}`);
@@ -166,7 +169,7 @@ console.log("\nCASE 3a: balance 10.00 == amount but < amount + fee → 402 (the 
     status === 402, `got ${status}`);
   check("  …and nothing was submitted", execCalls === 0, `calls=${execCalls}`);
   check("⭐ …and the shortfall is only the fee, which the message must make visible",
-    /need 10\.054129/.test(body.error || "") && /plus a 0\.054129 USDC fee/.test(body.error || ""),
+    /need 10\.054129/.test(body.error || "") && /\+ ~0\.054129 fee/.test(body.error || ""),
     body.error);
 }
 

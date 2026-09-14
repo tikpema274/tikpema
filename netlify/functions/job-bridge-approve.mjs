@@ -1,26 +1,13 @@
-import { requiredAmount, availableAmount } from "../../shared/amount-direction.mjs";
 import { amountFloorViolation } from "./_amount-floor.mjs";
 import { getStore } from "@netlify/blobs";
 import { connectBlobs } from "./_blobs.mjs";
-import { formatUnits } from "viem";
 import { TxPendingError } from "./_circle.mjs";
-import { json, parseBody, bridgeCapUsdc, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
+import { json, parseBody, bridgeCapUsdc } from "./_arc.mjs";
 import { executeAction } from "./_actions.mjs";
-import { resolveDestination, bridgeFee, sealBridgeQuote, openBridgeQuote, bridgeDebitMinor, bridgeFeeBand, quoteWindowMs } from "./_bridge.mjs";
+import { resolveDestination, bridgeFee, sealBridgeQuote, openBridgeQuote, bridgeFeeBand, quoteWindowMs, bridgeBalanceRefusal, readBridgeBalanceMinor } from "./_bridge.mjs";
 import { bridgeMechanicOf } from "../../shared/bridge-mechanic.mjs";
 import { requireSession, internalToken } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
-import { publicClient } from "./_predict.mjs";
-
-const BALANCE_OF_ABI = [
-  {
-    type: "function",
-    name: "balanceOf",
-    stateMutability: "view",
-    inputs: [{ name: "account", type: "address" }],
-    outputs: [{ name: "", type: "uint256" }],
-  },
-];
 
 // POST /api/job-bridge-approve { runId }   (auth required)
 //
@@ -226,30 +213,17 @@ export async function handler(event) {
   // wallet's balance delta was exactly `amount + fee` with no gas component. If INSUFFICIENT_TOKEN
   // resurfaces on a wallet that appears to cover the debit, sponsorship may have changed.
   //
-  // Mirrors agent-send.mjs:66-81, including its swallow: a transient read hiccup must NOT
-  // block a funded user — executeAction's own INSUFFICIENT_TOKEN stays the final backstop.
-  try {
-    const raw = await publicClient().readContract({
-      address: CONTRACTS.USDC, abi: BALANCE_OF_ABI, functionName: "balanceOf", args: [walletAddress],
-    });
-    const needMinor = bridgeDebitMinor(fee);
-    if (BigInt(raw) < needMinor) {
-      const have = Number(formatUnits(raw, USDC_DECIMALS));
-      const need = Number(formatUnits(needMinor, USDC_DECIMALS));
-      // 402, mirroring job-run.mjs:80-87 { need, have, walletAddress }. No lock taken, no burn.
-      // ⭐ The message names BOTH parts, because "need 10.054129" against a 10 USDC bridge reads as
-      // an error unless the fee is visible beside it.
-      return json(402, {
-        error: `Insufficient funds to bridge. Have ${availableAmount(have, USDC_DECIMALS)} USDC, ` +
-          `need ${requiredAmount(need, USDC_DECIMALS)} — ${amount} to bridge plus a ` +
-          `${requiredAmount(fee.feeUsdc, USDC_DECIMALS)} USDC fee.`,
-        need,
-        have,
-        walletAddress,
-      });
-    }
-  } catch {
-    /* balance read hiccup — proceed; the burn's own INSUFFICIENT_TOKEN is the backstop */
+  // ⛔ ONE READER, ONE COMPARISON, IN _bridge.mjs. This block used to be its own copy (BigInt
+  // compare, its own sentence) beside the panel's float copy (404628d) — a drift pair with two
+  // sentences for one rule. Now this endpoint is a CALLER: same read, same minor-unit comparison,
+  // same sentence as the panel, the chat proposals and plan execution. A transient read failure
+  // still does NOT block a funded user (haveMinor null → no refusal, balanceChecked:false) —
+  // executeAction's own INSUFFICIENT_TOKEN stays the final backstop.
+  const { haveMinor, checked: balanceChecked } = await readBridgeBalanceMinor(walletAddress);
+  {
+    const short = bridgeBalanceRefusal({ haveMinor, steps: { amountMinor: fee.amountMinor, feeMinor: fee.feeMinor, destLabel: dest.label } });
+    // 402, mirroring job-run.mjs { need, have, walletAddress }. No lock taken, no burn.
+    if (short) return json(short.status, { ...short.body, walletAddress, balanceChecked });
   }
 
   const approvedAt = new Date().toISOString();
