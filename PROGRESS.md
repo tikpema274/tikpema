@@ -1,3 +1,54 @@
+# ⛔ plan-path-watch MATCHES A PROSE SENTENCE AT results[0] — REPORT + PROPOSAL (no code change) · and the fail-open is now RENDERED (2a17a8b)
+
+**2026-09-14.** Two follow-ups on the balance pre-flight, kept apart from tonight's deploy.
+
+## 1 · What the monitor matches on — read from `shared/plan-path-watch/watch.mjs`, verbatim
+`judgePlanProbe` → `firstDisclosure(body)`, two shapes:
+- **band:** `body.stepDisclosures[firstKey].band` is a string → `{kind:"band"}` — this one IS structural.
+- **cap:** `const capMsg = String(body?.results?.[0]?.blocked ?? "")` then
+  `/step ~([0-9]+(?:\.[0-9]+)?) exceeds per-bridge limit of ([0-9.]+)/i.exec(capMsg)` → `{kind:"cap", valuedUsdc, capUsdc}`.
+  **Yes — a prose sentence, at a position.** HEALTHY additionally requires `stepsRun === 0` (`assertNoSpend`). The
+  sentence is produced in `agent-execute-plan`'s execution loop (`results.push({… blocked: \`step ~${usd2(v)} exceeds
+  per-${label} limit of ${cap} USDC\`})`). Everything else that answers is BLOCKED (`REFUSED_OTHER`), which is why the
+  balance check had to sit after the cap: the probe's wallet cannot fund 200 USDC, and the balance sentence would have
+  been "refused before any disclosure" every 30 min.
+
+**Proposal (structural, preferred):** the cap refusal carries a machine field beside its sentence —
+`results[i].refusal = { kind: "cap", valuedUsdc, capUsdc, feeUsdc }` — and every other terminal refusal carries its own
+(`{kind:"balance", have, need}`, `{kind:"priceUnavailable"}`, `{kind:"ceiling", …}`). `firstDisclosure` keys on
+`results[0].refusal.kind === "cap"` (and `stepDisclosures[*].band` as today), never on `blocked`'s words. Sequence:
+(a) add the field, sentence unchanged; (b) deploy; (c) switch the monitor to the field with the regex as a
+one-deploy fallback; (d) confirm a healthy tick on the field alone; (e) drop the regex. **Only then** may the guard
+order be chosen on correctness grounds (balance before cap: "you cannot fund it" is the more useful first answer).
+The fundable-wallet alternative isolates the cap but leaves a monitor reading prose and adds a funded key to keep.
+⛔ **Not reordered in this commit; nothing in the monitor touched.**
+
+## 2 · `balanceChecked:false` was a disclosure nobody could see — now rendered (2a17a8b, NOT DEPLOYED)
+**Report:** no surface rendered it (`grep balanceChecked src/`: 0) — and it was not even CARRIED on the pre-press
+shapes: agent-act's proposals, agent-bridge's nested `quote`, the card's press-1 quote, the plan re-quote. Fourth
+written-hashed-never-projected (errata_note, dataDisclosure ×2).
+
+**Fix:** one producer, `shared/balance-unverified-copy.mjs`: *"Your agent wallet's balance could not be read just now, so
+it was not checked for this bridge — the bridge relies on the provider's own check before anything moves. This is not
+a shortfall: nothing about your balance is known here."* Renders ONLY on `=== false`; `true` and absent render nothing.
+Rendered on BridgeQuoteSummary (panel), the chat's single-action and plan cards, the proposal card after press 1.
+Carried by agent-act (plan + bridge object), agent-bridge (inside `quote`), job-bridge-approve press 1 (a read; the
+refusal stays at press 2), agent-execute-plan requote (a read; never a refusal there — the monitor's probe untouched).
+
+**Render test, red first** — `verify-balance-unverified-render.tsx` renders each surface with `balanceChecked:false` and
+asserts PRESENCE of the sentence before any negation. Against the pre-fix components: **pass 13 / FAIL 14** (every
+presence check red; the absence checks green, as an absent field must be). After: **27/27**. Mutation (one render
+removed): 2 red. Bodies proven handler-driven: plan suite §5 22/22, card suite CASE 5 27/27 (the persisted seal does
+NOT carry the flag — a reading, not part of the quote's identity). **test:all 127/127**, tsc clean.
+
+⚠️ Found by the suite that went red: press 1 now reads the chain, and unmocked viem retry-backoff cost ~5 s in
+`verify-verifier-trigger`'s hang case. In prod a slow Arc RPC adds that latency to a quote press before the fail-open
+disclosure appears — `publicClient()`'s retry policy is shared and untouched; noted, not changed.
+
+ddTree unchanged `2f4f2793…`. Not deployed.
+
+---
+
 # ✅ ONE BALANCE PRE-FLIGHT ON EVERY BRIDGE-INITIATING SURFACE — chat + plan at PLAN STAGE (b790971, NOT DEPLOYED)
 
 **2026-09-14.** `404628d` had put the pre-flight on the agent PANEL only — and as a float copy beside
