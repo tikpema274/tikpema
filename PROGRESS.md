@@ -1,3 +1,43 @@
+# 🚨 THE AGENT BRIDGE HAD NO BALANCE PRE-FLIGHT — CIRCLE'S "FINAL BACKSTOP" WAS THE ONLY ONE (404628d, NOT DEPLOYED)
+
+**2026-09-14, minutes after 6aa806ed went live.** T asked the agent panel to bridge **5** from a wallet holding
+**3.65**. "Get quote" priced it (IRIS never reads a balance) and **sealed** it; the Bridge press built the batched
+userOp and sent it to Circle, which refused pre-broadcast — `INSUFFICIENT_TOKEN`, no txHash. The panel rendered
+Circle's sentence, no have, no need, beside three cleared "—" fields (the press's `reset()`).
+
+**The gap.** grep `getBalance|balanceOf|Insufficient` over `agent-bridge.mjs`, `_bridge.mjs`, `_actions.mjs`: empty.
+`BridgePanel.tsx:110` `amountValid = amountNum > 0`, with the balance rendered two lines above the field. So a
+wallet that cannot pay gets a priced, sealed quote and a Circle round-trip, and the refusal is Circle's word with
+no compared quantity. `agent-send` has had the pre-flight since its first version; `agent-ub-spend` since
+`18c0396`; the bridge never did. Batching (approve + burn in ONE userOp) is why this cost nothing — the design
+PR-6 argued for, exercised again today.
+
+**Red state first** — `verify-bridge-balance-preflight` against the unfixed tree: **pass 0 / fail 24** (the pure
+function absent; every value check red; every wiring check red). ⚠️ The first draft had a vacuous negative
+("HAVE not rounded above" passed on an absent string); made to require the refusal first BEFORE the red was
+recorded, so the 24 are all earned.
+
+**The fix.** `_bridge.mjs` `bridgeBalanceRefusal({haveUsdc, amountUsdc, feeUsdc, destLabel})` — PURE, three
+outcomes: **refused** (402, `error === blocked`, outcome `quote_failed`, `have`/`need` as numbers), **enough**
+(null), **UNREAD** (null; NaN is unread, never "enough" — the fail-open cap pattern). HAVE rounds down; NEED and
+the fee round up. `agent-bridge.mjs` reads `balanceOf(walletAddress)` once at 6 dp and refuses: on the quote
+press BEFORE pricing (amount alone, no IRIS call) and AFTER pricing (amount + fee — under upfront fees the debit
+is both); on the execute press on amount alone before `executeAction`. The quoted body carries
+`balanceChecked`; a failed read proceeds unchecked to Circle's backstop and SAYS so. Rendered:
+
+> Insufficient funds in your agent wallet: have 3.6500 USDC, need 5.0021 USDC (5 + ~0.0021 fee to Base
+> (Sepolia)). No funds moved and nothing was quoted — top up the agent wallet and retry.
+
+**Caught by a sibling guard:** `test:refusalquantity`'s have/need census flagged the fee at `toFixed(4)` — a
+nearest-rounded figure in a have/need sentence — now `requiredAmount(fee, 4)`. 51/51. 24/24. **test:all
+125/125.** ddTree unchanged `2f4f2793…` (read from the regenerated stamp, then cleared). **Not deployed.**
+
+**Residual, named:** the PLAN path's bridge step (`agent-execute-plan` → `_actions`) still has only Circle's
+backstop. And "it never reached the chain" in the panel is Circle's `txHash:null`, not a chain read — T's agent
+SCA balance is to be read on Arc when the address is to hand.
+
+---
+
 # 🚨 PASSKEY "FUND AGENT" SENT 1e18 FOR 1 USDC — ONE VARIABLE SERVED TWO SCALES (de442ff, NOT DEPLOYED)
 
 **2026-09-14.** T reported a Fund-agent revert, "ERC20: transfer amount exceeds balance", on a wallet showing
