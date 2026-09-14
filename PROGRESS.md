@@ -1,3 +1,53 @@
+# ✅ ONE BALANCE PRE-FLIGHT ON EVERY BRIDGE-INITIATING SURFACE — chat + plan at PLAN STAGE (b790971, NOT DEPLOYED)
+
+**2026-09-14.** `404628d` had put the pre-flight on the agent PANEL only — and as a float copy beside
+`job-bridge-approve`'s older BigInt copy, a drift pair. The chat proposals and plan execution had the seal and no
+pre-flight: Circle's `INSUFFICIENT_TOKEN` fired per step, **mid-plan**, after steps 1..k-1 had burned.
+
+**Surfaces, enumerated by following the SEAL** (`sealBridgeQuote` ×5 call sites, `openBridgeQuote` ×3) rather than
+a function name:
+
+| surface | file | pre-flight now |
+|---|---|---|
+| agent panel Get quote / Bridge — and the chat single-action **Confirm** (it posts to the same endpoint) | `agent-bridge.mjs` | ✅ (404628d, re-pointed to the shared reader) |
+| chat proposal — plan steps | `agent-act.mjs:445` | ✅ NEW, at proposal time, scope plan |
+| chat proposal — single action | `agent-act.mjs:622` | ✅ NEW, at proposal time |
+| plan execution (chat plan confirm; one-step plans) | `agent-execute-plan.mjs` | ✅ NEW, **plan stage, before step 1** |
+| proposal card, press 2 | `job-bridge-approve.mjs` | ✅ its own copy REPLACED by the shared one |
+| manual self-signed bridge | `ManualBridgePanel` | out of scope — user's own key, client-side |
+
+**One rule, once:** `readBridgeBalanceMinor(walletAddress)` → `bridgeBalanceRefusal({haveMinor, steps, scope})` in
+`_bridge.mjs`. Compared in **minor units** (`balanceOf` BigInt vs Σ `amountMinor + feeMinor` from the SAME quotes —
+nothing to round); rendered at **full 6 dp**, HAVE down, NEED and fee up. No private `balanceOf` remains on any surface.
+
+> Insufficient funds in your agent wallet for this plan: have 3.650000 USDC, its 2 bridge steps need 4.108258 USDC
+> (4 + ~0.108258 in fees, to Base (Sepolia) and Ethereum (Sepolia)). Nothing was executed — the whole plan is
+> refused, not a step of it. Top up the agent wallet and retry.
+
+**Structurally distinct, as required:** `insufficient:true` + `have`/`need` vs `priceUnavailable:true`; an UNREAD
+balance is neither — `null` → proceed to Circle's backstop with `balanceChecked:false`. "Could not read" never falls
+through to "not enough".
+
+**⛔ Ordered AFTER the cap, deliberately.** `plan-path-watch` probes `agent-execute-plan` every 30 min with 200 USDC over
+the per-bridge cap from a wallet that cannot fund it, and judges HEALTHY on the cap sentence at `results[0]`. A
+balance refusal pre-empting it would page as an outage on every tick. So the plan-stage check runs only when no step
+would be cap-refused. `gate:forgery`'s 0.06 USDC probe stops at `needsAck`, before the check. Both verified by suite
+(§4) and by the in-chain gates on the next deploy.
+
+**Red state first** — `verify-plan-balance-preflight` drives the REAL `agent-execute-plan` under boundary mocks.
+Against the pre-change handler: **pass 9 / FAIL 9** — a 3.65 wallet with a 4.108258 plan reached `executeAction`
+TWICE (the mid-plan hazard, reproduced in the suite), no 402, no figures, `balanceChecked` absent; §4 (the monitor's
+cap probe) green before and after, as it must be. After: **18/18**. `verify-bridge-balance-preflight` rewritten for the
+minor-unit API, plan scope and four-surface wiring: **44/44**. `verify-approve-balance-gate`: three wording checks
+re-pointed to the shared sentence, figures unchanged: 24/24. **test:all 126/126.**
+
+**DD surface:** none of the five files is in `DD_SURFACE_DIRS/FILES` (`shared/onchain-*`, `shared/dd*`, `dd-analyze`,
+`dd-canary`, `_dd-*`, `_blobs`); **ddTree measured unchanged `2f4f2793…`** after test:all. **Ships alone — no refusal
+window.** Not deployed; T deploys from T's shell. Live proof owed after deploy: a chat-path plan the wallet cannot
+fund, refused with both figures, nothing on chain.
+
+---
+
 # ✅ feeDisclosed READ AGAINST THE CHAIN FOR THE FIRST TIME — THE FEE CONSENTED TO IS THE FEE THAT EXECUTED (agent PANEL path)
 
 **2026-09-14.** T bridged **1 USDC** Arc → Base Sepolia from the agent panel. Shown before pressing (T's report):
