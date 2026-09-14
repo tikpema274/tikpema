@@ -1,3 +1,51 @@
+# ✅ THE FUND-AGENT FIX IS PROVEN ON CHAIN — AND THE FAILED BRIDGE LEFT NOTHING, MEASURED
+
+**2026-09-14, read from Arc (rpc.testnet.arc.io) at block 62,090,134 / 15:56:22Z.** Two findings, kept distinct.
+
+## 1 · ⭐ PASSKEY FUND-AGENT — PROVEN ON CHAIN, 3.7 DAYS BROKEN, CLOSED
+
+Two `Transfer` events, **emitter `0x3600000000000000000000000000000000000000`** (the 6-dp ERC-20 USDC), from the
+passkey wallet `0xFd801D08…5767` to the agent SCA `0x058957de…47f9e`, **value `1000000` = 1 × 1e6** — the 6-dp
+figure on the 6-dp emitter. Via EntryPoint v0.7 `handleOps` with a paymaster (bundler EOAs `0xf18c33c9…`,
+`0x14e18ccd…`), at **15:10:32Z** (block 62,084,828, tx `0x8561260b…`) and **15:19:48Z** (block 62,085,897, tx
+`0xeb2ef46a…`) — both after the **15:04:48Z** publish of deploy `6aa806ed` (commit `0a79079`, carrying `de442ff`).
+
+⛔ **The read pinned the EMITTER, and that is the proof.** Arc emits two `Transfer` logs per USDC move: the
+ERC-20 one at `0x3600…` (6 dp) and the native one at `0xffff…fffe` (18 dp). The native view of a CORRECT 1 USDC
+transfer reads `1000000000000000000` = 1e18 — the exact figure the defect put into the calldata. A read that took
+the 18-dp log would have "confirmed" the bug on a correct transfer. **The proof is which emitter, not which
+number.** [[arc-emits-two-transfer-logs]]
+
+Timeline closed: broken live from **2026-09-10 21:59Z** (the deploy that served `8793764`) to **2026-09-14
+15:04:48Z** — **3 days 17 hours**; first correct passkey fund at 15:10:32Z, six minutes after publish. First
+passkey Hop-A transaction ever recorded in this file. [[one-variable-served-two-scales]]
+
+## 2 · THE FAILED BRIDGE LEFT NOTHING — A MEASUREMENT, NOT AN INFERENCE
+
+The 5-from-3.65 bridge attempt (refused by Circle pre-broadcast, `INSUFFICIENT_TOKEN`, `txHash:null`) happened
+after the second fund (the panel showed balance 3.65). In **15:19:48Z → 15:56:22Z**: **zero** logs with the SCA
+as sender or owner — no ERC-20 `Transfer`, no native `Transfer`, no `Approval`; **`balanceOf` identical at both
+ends, 3.654695**; and **none of BridgingKitContract's 14 logs** in the wider window (`0xC5567a…`) carry the SCA
+in topics or data. None of the six SCA transactions in the window touched it. No burn, no approve to it, no
+allowance standing.
+
+⛔ Circle's `txHash:null` is consistent with "never submitted" AND with "submitted, hash lost". **Both are
+refuted by the chain**, not by the null: nothing with this sender reached a block. [[read-the-chain-not-the-body]]
+
+⭐ **The arithmetic closes to the micro-USDC:** window start (14:55:03Z, block 62,083,040) `balanceOf` = 1.794695;
++1.000000 (15:10:32Z) +1.000000 (15:19:48Z) −0.04 (15:12:39Z) −0.10 (15:13:06Z) = **3.654695 = the balance now.**
+Every movement in the window is a logged transfer; nothing else — no gas from the SCA (paymaster-sponsored), no
+unlogged debit — fits in the remainder. That closure, not the absence of a log, is what leaves no room.
+
+(The 0.04 and 0.10 outflows at 15:12–15:13Z were approve + deposit to Circle's GatewayWallet
+`0x0077777d…19B9` — Unified-Balance deposits, separate actions in the same minutes, not bridges.)
+
+**Still owed:** a bridge within balance from the agent (e.g. 1.00 — now refused-by-us above 3.65 − fee once
+`404628d` deploys), to decode `depositForBurnWithFees`' fee from the calldata against the sealed fee — the first
+live reading of `feeDisclosed`.
+
+---
+
 # 🚨 THE AGENT BRIDGE HAD NO BALANCE PRE-FLIGHT — CIRCLE'S "FINAL BACKSTOP" WAS THE ONLY ONE (404628d, NOT DEPLOYED)
 
 **2026-09-14, minutes after 6aa806ed went live.** T asked the agent panel to bridge **5** from a wallet holding
