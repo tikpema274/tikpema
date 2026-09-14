@@ -456,6 +456,25 @@ export function notifyMessage({ kind, judgement, target, record }) {
  * a stale `producedAt` — visible in one read, with no history and no second key needed. The rolling
  * `recentProducedAt` then shows the CADENCE, so a reader can see the interval rather than infer it.
  */
+/**
+ * ⭐ THE SEND OUTCOME, AS A VALUE — the else-branch `if (r.ok)` never had. A genuine 400/404 or a
+ * network throw is invisible today: the alert is discarded with no status, no body, no count, so a
+ * monitor that cannot reach its channel looks identical to one whose path is healthy. (This is a
+ * real gap on its own merits; it is NOT what caused the 09-13 incident — there the sends returned
+ * r.ok throughout and the alerts landed. The reading was blind, the alerting was not.)
+ *
+ * `urlPresent:false` → the alert reached nobody because no webhook was configured — a failure.
+ * A throw → `network:<name>`. A non-ok response → the HTTP code, with a truncated body (a 204 ok
+ * carries none). Only `ok` resets the failure streak.
+ * @returns {{ lastSendStatus, lastSendBody, sendFailed }}
+ */
+export function classifySend({ urlPresent, ok, status, body, error } = {}) {
+  if (!urlPresent) return { lastSendStatus: "no-url", lastSendBody: null, sendFailed: true };
+  if (error != null) return { lastSendStatus: `network:${error}`, lastSendBody: String(error).slice(0, 200), sendFailed: true };
+  if (ok) return { lastSendStatus: status ?? null, lastSendBody: null, sendFailed: false };
+  return { lastSendStatus: status ?? null, lastSendBody: body == null ? null : String(body).slice(0, 200), sendFailed: true };
+}
+
 export function buildRecord({ judgement, target, producedAt, deployId = null, prev = null }) {
   const history = [producedAt, ...(Array.isArray(prev?.recentProducedAt) ? prev.recentProducedAt : [])]
     .filter((t) => typeof t === "string")
@@ -482,6 +501,12 @@ export function buildRecord({ judgement, target, producedAt, deployId = null, pr
     deployId,
     prevOutcome: prev?.outcome ?? null,
     lastNotifiedAt: prev?.lastNotifiedAt ?? null,
+    // ⭐ SEND OBSERVABILITY (else-branch), carried across ticks and overwritten by the handler when a
+    // send is attempted. A non-notify tick keeps the last known send state rather than nulling it.
+    lastSendStatus: prev?.lastSendStatus ?? null,
+    lastSendBody: prev?.lastSendBody ?? null,
+    lastSendAt: prev?.lastSendAt ?? null,
+    consecutiveSendFailures: Number.isFinite(prev?.consecutiveSendFailures) ? prev.consecutiveSendFailures : 0,
     // ⭐ COUNTS, CARRIED FORWARD. Monotonic, so a reset to 0 is itself a signal (a new store, or a
     // record that was rebuilt rather than updated).
     runCount: (Number.isFinite(prev?.runCount) ? prev.runCount : 0) + 1,

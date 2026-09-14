@@ -16,7 +16,7 @@ import {
   PROBE_AMOUNT_USDC, DEFAULT_TARGET_URL, DEFAULT_PROBE_OWNER,
   judgePlanProbe, decideNotify, shouldSkipRerun, evaluateRecord, notifyMessage, buildRecord,
   firstDisclosure, assertNoSpend, isCannotVerify, buildSkipRecord, judgeCadence, CADENCE,
-  FIELD_STREAK_TO_PROMOTE, promotionReady, PROBE_CONTRACT,
+  FIELD_STREAK_TO_PROMOTE, promotionReady, PROBE_CONTRACT, classifySend,
   TICK_HISTORY, intervalsOf,
 } from "../shared/plan-path-watch/watch.mjs";
 
@@ -413,6 +413,32 @@ section("12 ⭐ fieldStreak — earned from real bodies, RESET across a probe-co
   // a REQUOTED (cannot-verify) tick resets the streak too
   const rqTick = buildRecord({ judgement: judgePlanProbe(asRes(CAP.staleToken_press2), SPEND), target: "t", producedAt: new Date().toISOString(), prev: r });
   ok("⛔ a 409/REQUOTED tick is not healthy, so it resets the streak", rqTick.fieldStreak === 0 && !promotionReady(rqTick));
+}
+
+section("13 ⭐⭐ SEND OBSERVABILITY — the else-branch the old `if (r.ok)` never had");
+{
+  // a 204 ok: no failure, no body, streak resets
+  const okc = classifySend({ urlPresent: true, ok: true, status: 204, body: null });
+  ok("⭐ a 204 ok → sendFailed false, status 204, no body", okc.sendFailed === false && okc.lastSendStatus === 204 && okc.lastSendBody === null);
+  // a 400/404 rejection: captured status + truncated body, streak advances
+  const rej = classifySend({ urlPresent: true, ok: false, status: 400, body: "x".repeat(500) });
+  ok("⭐⭐ a 400 → sendFailed true, status 400, body TRUNCATED to <=200", rej.sendFailed === true && rej.lastSendStatus === 400 && rej.lastSendBody.length === 200);
+  ok("⭐ a 404 is captured too (a deleted webhook)", classifySend({ urlPresent: true, ok: false, status: 404, body: "not found" }).lastSendStatus === 404);
+  // a throw: network:<name>
+  const thr = classifySend({ urlPresent: true, error: "ENOTFOUND" });
+  ok("⭐⭐ a throw → status `network:<name>`, sendFailed true", thr.lastSendStatus === "network:ENOTFOUND" && thr.sendFailed === true);
+  // no url configured
+  ok("⭐ no webhook configured → status `no-url`, sendFailed true (the alert reached nobody)", classifySend({ urlPresent: false }).lastSendStatus === "no-url" && classifySend({ urlPresent: false }).sendFailed === true);
+  // ⛔ the incident case: an OK send is NOT a failure — this is what actually happened for 33h
+  ok("⛔ an r.ok send is NOT counted a failure (the 09-13 sends all returned ok)", classifySend({ urlPresent: true, ok: true, status: 204 }).sendFailed === false);
+
+  // buildRecord seeds and carries the fields; the streak logic composes at the handler, but the
+  // CARRY is buildRecord's job — a non-send tick must keep the last known state, not null it.
+  const seeded = buildRecord({ judgement: judgePlanProbe(res({ body: json(CAP_BODY) }), SPEND), target: "t", producedAt: new Date().toISOString(),
+    prev: { lastSendStatus: 400, lastSendBody: "boom", lastSendAt: "2026-09-14T00:00:00Z", consecutiveSendFailures: 3, probeContract: PROBE_CONTRACT } });
+  ok("⭐⭐ buildRecord CARRIES lastSendStatus/Body/At and consecutiveSendFailures from prev (a non-send tick keeps them)",
+    seeded.lastSendStatus === 400 && seeded.lastSendBody === "boom" && seeded.lastSendAt === "2026-09-14T00:00:00Z" && seeded.consecutiveSendFailures === 3);
+  ok("⭐ a fresh record (no prev) starts the streak at 0 and the fields null", (() => { const r = buildRecord({ judgement: judgePlanProbe(res({ body: json(CAP_BODY) }), SPEND), target: "t", producedAt: new Date().toISOString(), prev: null }); return r.consecutiveSendFailures === 0 && r.lastSendStatus === null; })());
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

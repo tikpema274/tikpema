@@ -4,7 +4,7 @@ import { issueSession } from "./_auth.mjs";
 import {
   OUTCOME, REASON, MIN_RERUN_MS, REMINDER_MS, PROBE_AMOUNT_USDC, PROBE_DESTINATION,
   DEFAULT_TARGET_URL, DEFAULT_STORE_NAME, DEFAULT_PROBE_OWNER, FUNCTION_NAME,
-  judgePlanProbe, shouldSkipRerun, decideNotify, notifyMessage, buildRecord, buildSkipRecord,
+  judgePlanProbe, shouldSkipRerun, decideNotify, notifyMessage, buildRecord, buildSkipRecord, classifySend,
   judgeCadence, isCannotVerify,
 } from "../../shared/plan-path-watch/watch.mjs";
 
@@ -204,18 +204,33 @@ export async function handler(event) {
 
   if (decision.notify) {
     const url = WEBHOOK_SOURCES.map((v) => process.env[v]).find((u) => (u || "").trim());
+    // ⛔ THE ELSE-BRANCH THE OLD `if (r.ok)` NEVER HAD. A 400/404 or a network throw used to be
+    // discarded with no status, no body, no count — a genuine unreachable channel was invisible.
+    // Now every send attempt records its outcome; only an ok resets the failure streak.
+    record.lastSendAt = producedAt;
+    let sc;
     if (url) {
       try {
         const r = await fetch(url, {
           method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify({ content: notifyMessage({ kind: decision.kind, judgement, target: TARGET, record }) }),
         });
+        const body = r.ok ? null : await r.text().catch(() => null);
+        sc = classifySend({ urlPresent: true, ok: r.ok, status: r.status, body });
         if (r.ok) record.lastNotifiedAt = producedAt;
-        else console.warn(`[plan-watch] webhook rejected HTTP ${r.status}`);
-      } catch (e) { console.warn(`[plan-watch] webhook failed — ${e?.message}`); }
+        else console.warn(`[plan-watch] webhook rejected HTTP ${r.status} — ${(sc.lastSendBody || "").slice(0, 80)}`);
+      } catch (e) {
+        sc = classifySend({ urlPresent: true, error: e?.name || "fetch-failed" });
+        console.warn(`[plan-watch] webhook failed — ${e?.message}`);
+      }
     } else {
+      sc = classifySend({ urlPresent: false });
       console.warn(`[plan-watch] NOTIFY ${decision.kind} but no webhook configured (${WEBHOOK_SOURCES.join(", ")})`);
     }
+    record.lastSendStatus = sc.lastSendStatus;
+    record.lastSendBody = sc.lastSendBody;
+    record.consecutiveSendFailures = sc.sendFailed ? (record.consecutiveSendFailures || 0) + 1 : 0;
+    console.log(`[plan-watch] SEND ${decision.kind} → status=${record.lastSendStatus} consecutiveFailures=${record.consecutiveSendFailures}`);
   }
 
   await store.setJSON(LATEST_KEY, record).catch((e) => console.warn(`[plan-watch] record write failed — ${e?.message}`));
