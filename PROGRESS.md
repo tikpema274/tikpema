@@ -1,3 +1,57 @@
+# ⭐ CORRECTION: THE ALERTING WORKED THROUGHOUT THE OUTAGE — TWO EARLIER CLAIMS WERE FALSE (send-observability shipped 0a1d15f, NOT DEPLOYED)
+
+**2026-09-14.** Reading the store's immutable `failure:*` keys refuted the premise this thread was built on.
+
+## What was FALSE, corrected
+- ⛔ *"the monitor's webhook has never sent a message"* (this file, ~2026-09-05 entry) — FALSE. The webhook had
+  been delivering since 09-05's successor. During the 33-hour reading outage, the sends **all returned `r.ok`** and
+  the ⚠️ CANNOT-VERIFY messages **landed in the "Spidey Bot" channel** — confirmed by T's scrollback at 17:30Z and
+  21:00Z on 09-14, and by `lastNotifiedAt` advancing hourly across every `failure:*` record (13:00Z 09-13 →
+  21:00Z 09-14; `lastNotifiedAt` is stamped only on `r.ok`).
+- ⛔ Any wording that the *"webhook is broken AND swallowed a real 28h outage alert"* (this file, the 214fec9-era
+  entry) — FALSE. Nothing was swallowed. The deploy logs show gate:watch resolving "Spidey Bot" at the 15:04 /
+  16:28 / 22:00Z deploys; the alerts reached that channel.
+
+## The genuine finding, stated cleanly
+`a300359` changed `agent-execute-plan`'s request contract (a bridge step now needs a sealed `quoteToken`). **The
+probe was not updated as a client of that endpoint**, so it posted a bare plan, got a 409, and the judge read
+**UNREADABLE** for 33 hours — while **correctly paging "CANNOT VERIFY THE AGENT PLAN PATH" the whole time.** The
+alerting worked; the reading did not. The fix (2447791, quote-then-post) restored the reading; the recovery at
+22:30Z was the first *green* message, which is why a scrollback misread it as the first message at all.
+
+## What "the RECOVERED is the first send ever" actually was
+A scrollback misread: the 33 hours of ⚠️ messages sat above the green ✅ recovery in a busy channel. The
+discriminating read — *what is in the channel at 17:30Z and 21:00Z specifically* — settled it in one line and was
+available from the start. [[a-reported-observation-is-not-a-measurement]]
+
+## What shipped (0a1d15f) and what did NOT
+- **SHIPPED — send observability (the else-branch `if (r.ok)` never had):** `classifySend` + `lastSendStatus`,
+  `lastSendBody`, `lastSendAt`, `consecutiveSendFailures`. A genuine 400/404/throw/no-url is now recorded instead
+  of discarded. This gap is real **on its own merits**, not because of this incident (here the sends were ok).
+- ⛔ **NOT built, by decision:** the URL fingerprint, the channel-id metadata GET, the fingerprint-change alert —
+  all designed against a wrong-target defect that **did not happen** (the deploy logs date the webhook to
+  "Spidey Bot" throughout; the metadata GET would add an external call + a rate-limit surface to the alerting path
+  to watch for a condition never observed). And **NOT the induced-page lever** — the outage exercised it live.
+
+## Store keys — correcting my OWN earlier claim this session
+I stated the store keeps only `latest` + 8 timestamps and that per-tick outcomes were not recoverable. FALSE: the
+handler writes an **immutable `failure:<producedAt>`** for every non-healthy tick (68 present). Non-healthy history
+is fully queryable; only *healthy* ticks are un-archived (latest + 8 `recentProducedAt`). That wrong claim made
+Discord look like the only record and let "sends failed" stand unchecked.
+
+## decideNotify branches — LIVE-proven vs not
+- **LIVE-proven by the outage against real traffic:** `regressed` (the 13:00Z 09-13 transition), `still-failing`
+  (hourly reminders), `still-failing-quiet` (the 30-min in-between ticks), `recovered` (22:30Z 09-14). All landed
+  in Spidey Bot.
+- **`changed`** — still unexercised (needs two consecutive *different* failure reasons back to back; the outage was
+  one reason, http-error, throughout).
+- **`first-failure`** — DEAD CODE, not merely unexercised: it fires only when `prevOutcome == null`, and the store
+  has been populated since 2026-09-05; `prevOutcome` cannot be null again without wiping the store.
+
+test:all 127/127. ddTree unchanged `2f4f2793`. Not deployed.
+
+---
+
 # 🚨 THE PLAN-PATH MONITOR WAS BLIND FOR 28h+ — a300359 CHANGED THE CONTRACT AND ITS CLIENT WAS NOT UPDATED (fix 2447791, NOT DEPLOYED)
 
 **2026-09-14.** Building item 1/2 (prove notify, exercise the balance branch) surfaced that the premise under both —
