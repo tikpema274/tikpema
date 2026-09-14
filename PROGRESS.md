@@ -1,3 +1,53 @@
+# ✅ feeDisclosed READ AGAINST THE CHAIN FOR THE FIRST TIME — THE FEE CONSENTED TO IS THE FEE THAT EXECUTED (agent PANEL path)
+
+**2026-09-14.** T bridged **1 USDC** Arc → Base Sepolia from the agent panel. Shown before pressing (T's report):
+fee **0.054045**, receive **1.000000**, leaves wallet **1.054045**. The calldata, the receipt and the destination
+were read from both chains; the panel was not the instrument.
+
+## THE BURN — Arc tx `0x4053c72f97f2c11554608f419f1cdc4af5e1db827b7cd1a4ee3aa406fc1ee5d6`, block 62,112,471, 19:13:51Z
+EntryPoint v0.6 `handleOps` → userOp sender = the SCA (nonce 939) → `execute(self, 0, …)` → `executeBatch` of TWO calls
+(the single-userOp design PR-6 argued for):
+
+| field | calldata (MEASURED) | shown (REPORTED by T) |
+|---|---|---|
+| `[0] approve(TMWF, amount)` | **1,054,045** = 1.054045 | leaves wallet 1.054045 |
+| `[1] depositForBurnWithFees.amount` | **1,000,000** = 1.000000 | receive 1.000000 |
+| fee | **54,045** = 0.054045 — the word `0x…d31d` inside `claim.signedQuote` (545 bytes; quote expiry 19:15:11Z, burn landed 80 s before it) | fee 0.054045 |
+| `maxFee` | **not an argument** of `depositForBurnWithFees` — set inside TMWF | — |
+| `mintRecipient` / `destinationDomain` / `burnToken` | the SCA / 6 / `0x3600…` | — |
+
+**What executed (MEASURED, receipt logs, all on the 6-dp emitter `0x3600…0000`):** `Transfer` SCA → TMWF **0.054045**
+(then TMWF → fee collector `0x08499f…`, split 0.005404 + 0.048641 to `0xb499ef…`) — the fee taken. `Transfer` SCA →
+TMWF → `0xb43db5…` → **`0x0` 1.000000** — the burn. **`DepositForBurn`** on TokenMessengerV2 `0x8fe6b9…`:
+`amount=1000000`, **`maxFee=0`** (EMPTY_MAX_FEE — the upfront path's expectation, measured), `minFinalityThreshold=2000`
+(SLOW), `mintRecipient` = the SCA, `depositor` = TMWF.
+
+## THE MINT — Base Sepolia (chainId 84532), emitter pinned `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
+One `Transfer` from `0x0` to `0x058957de…47f9e`, **`value=1000000` = 1.000000**, block 46,822,476, **19:14:00Z** — 9 s
+after the burn (SLOW tier; consistent with the 11 s measured before). `balanceOf` **32.331314 one block before →
+33.331314 at the mint block: delta exactly 1.000000** — the FULL amount, not amount minus fee. Mint tx
+`0x8798f868…dc5d`, status success.
+
+## MEASURED vs INFERRED vs REPORTED — stated
+- **MEASURED:** every calldata figure; the executed fee (0.054045) and burn (1.000000) as ERC-20 `Transfer` logs on the
+  6-dp emitter; `maxFee=0` in `DepositForBurn`; the mint value and the +1.000000 delta on Base, emitter pinned.
+- **INFERRED, corroborated:** that the `0xd31d` word in the signed quote IS Circle's `feeTotalAmount` — matched by value
+  and position, not by a published schema. Second instrument: the fee transferred on-chain was 54,045, and the approve
+  was amount + 54,045. Two independent readings agree.
+- **REPORTED, not measured here:** the figures shown before pressing. The seal's `feeShownAt` lives in the receipt
+  record, which was not read for this entry.
+
+## THE PROPERTY, as read
+fee consented to (reported) = fee sealed into the calldata (measured) = fee taken on-chain (measured) = **0.054045**;
+amount consented to = amount burned = amount minted = **1.000000**. `feeDisclosed` is true to its name on this path.
+
+⚠️ **Which path:** the **agent PANEL** (`BridgePanel` → `agent-bridge`). The residual the memory names — the CHAT
+single-action / plan path — is still unrun. Same seal code, different surface; the surface is what a copy suite reads.
+This bridge ran on served `0a79079`, before `404628d` (balance pre-flight) — the wallet held 3.65, nothing there
+was exercised.
+
+---
+
 # ✅ THE FUND-AGENT FIX IS PROVEN ON CHAIN — AND THE FAILED BRIDGE LEFT NOTHING, MEASURED
 
 **2026-09-14, read from Arc (rpc.testnet.arc.io) at block 62,090,134 / 15:56:22Z.** Two findings, kept distinct.
