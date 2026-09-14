@@ -68,6 +68,11 @@ export const REASON = Object.freeze({
   UNREACHABLE: "unreachable",
   TIMEOUT: "timeout",
   HTTP_ERROR: "http-error",
+  REQUOTED: "requoted",               // ⭐ a 409: the endpoint answered with a FRESH quote — our
+                                      //   press-2 token was missing/stale. Distinct from http-error:
+                                      //   "your token lapsed" is not "the function 500'd".
+  PROBE_QUOTE: "probe-quote-failed",  // ⭐ press 1 (quoteOnly) did not yield a sealed token — we could
+                                      //   not even begin the traversal. Distinct from a press-2 verdict.
   NOT_JSON: "not-json",
   WRONG_SHAPE: "wrong-shape",
   NO_SECRET: "no-secret",
@@ -79,6 +84,7 @@ export const REASON = Object.freeze({
 const CANNOT_VERIFY = new Set([
   REASON.UNREACHABLE, REASON.TIMEOUT, REASON.HTTP_ERROR,
   REASON.NOT_JSON, REASON.WRONG_SHAPE, REASON.NO_SECRET,
+  REASON.REQUOTED, REASON.PROBE_QUOTE,
 ]);
 
 export const isCannotVerify = (reason) => CANNOT_VERIFY.has(reason);
@@ -162,18 +168,35 @@ export function judgePlanProbe(res, spend = {}) {
   // ⛔ A MISSING CREDENTIAL IS UNREADABLE, NEVER HEALTHY AND NEVER BLOCKED. A monitor that
   // quietly no-ops without its secret reports success for a path it never examined.
   if (res?.secretMissing) return cannot(REASON.NO_SECRET, "no session secret available — the probe could not authenticate, so nothing was observed");
+  // ⛔ PRESS 1 IS ITS OWN CONDITION. The probe is quote-then-post; if press 1 (quoteOnly) did not
+  // return a sealed token, press 2 never happened and there is NO verdict about the guarded path.
+  // This is a NEW failure mode the single-post probe never had (press 1 now reads the chain, so a
+  // degraded Arc RPC can time it out). Named separately so "we could not get a quote" never reads as
+  // "the path refused" and never as the press-2 http-error bucket.
+  if (res?.press1) return cannot(REASON.PROBE_QUOTE, `the quote step (press 1) did not yield a sealed token: ${res.press1} — press 2 was not attempted, so the guarded path was not observed`);
   if (res?.timedOut) return cannot(REASON.TIMEOUT, "the endpoint did not answer before the deadline");
   if (res?.networkError) return cannot(REASON.UNREACHABLE, `the endpoint could not be reached (${res.networkError})`);
-  // ⚠️ NOT a health signal — only a readability one. The outage returned 200; this rejects 4xx/5xx
-  // as "we could not ask", which is a different claim from "the path is broken".
-  // ⭐ PHASE 2: a 402 that carries a structured `refusal` is an ANSWER, not an inability to ask — the
-  // plan-level balance refusal is 402 by contract (a client condition, like agent-ub-spend's). Only
-  // a 402 WITH the field passes; a bare 402 is still "we could not ask". Today the probe never
-  // reaches it (the cap answers first); this is what keeps a future guard reorder from turning the
-  // probe's reading into HTTP_ERROR. Nothing is reordered by this.
+
+  // ═══ ⛔ THE CLOSED SET OF READABLE STATUSES — the line whose old form ("status !== 200 →
+  //     http-error") made a 28-hour outage unreadable. A status is READABLE iff we can map its body
+  //     to a verdict about the guarded path. Exactly three are:
+  //       200  — a plan verdict: a disclosure (healthy), a per-step/cap refusal, or a spend alarm.
+  //       402 WITH a structured `refusal` — the plan-level balance refusal (a client condition, 402
+  //            by contract, like agent-ub-spend's). A priced decision → healthy; the field proves it
+  //            reached the balance guard. A BARE 402 (no field) is NOT readable — we cannot tell it
+  //            from an auth/quota 402 — so it stays http-error.
+  //       409  — a re-quote: our press-2 token was missing/stale and the endpoint answered with a
+  //            fresh quote. READABLE, but its own reason (REQUOTED), never healthy: the traversal did
+  //            not complete, though pricing plainly worked. Distinct from a 500 (http-error).
+  //     Everything else (4xx/5xx, or a 402 with no field) is NOT readable → http-error. Stated as a
+  //     set so the next status the endpoint learns to return is a deliberate addition here, not a
+  //     silent collapse into "healthy" or "cannot verify". [[a-category-label-became-a-position]]
   let body402 = null;
   if (res?.status === 402) {
     try { const b = JSON.parse(String(res.body ?? "")); if (isObj(b) && isObj(b.refusal)) body402 = b; } catch { /* fall through */ }
+  }
+  if (res?.status === 409) {
+    return cannot(REASON.REQUOTED, "the endpoint re-quoted (409) — the probe's sealed token was missing or stale, so press 2 did not reach a verdict; pricing worked but the traversal did not complete");
   }
   if (res?.status !== 200 && !body402) return cannot(REASON.HTTP_ERROR, `the endpoint answered HTTP ${res?.status}`);
 
@@ -259,8 +282,14 @@ export function judgePlanProbe(res, spend = {}) {
  * before cap) does not turn the probe's reading into REFUSED_OTHER. Nothing is reordered by this.
  */
 export const FIELD_STREAK_TO_PROMOTE = 3;
+/** ⛔ THE PROBE'S REQUEST CONTRACT, VERSIONED. Bumped when the probe changes what it sends or the
+ *  endpoint changes what it accepts — a300359 changed the latter and this monitor was NOT updated
+ *  with it, the omission that made the plan path unreadable for 28h+. A fieldStreak earned under a
+ *  different contract is evidence about a probe that no longer runs, so buildRecord DROPS it on a
+ *  contract change. "quote-then-post/1" is the two-press probe. */
+export const PROBE_CONTRACT = "quote-then-post/1";
 /** Phase 3 may drop the regex only when this is true of the LATEST record. */
-export const promotionReady = (record) => Number.isFinite(record?.fieldStreak) && record.fieldStreak >= FIELD_STREAK_TO_PROMOTE;
+export const promotionReady = (record) => record?.probeContract === PROBE_CONTRACT && Number.isFinite(record?.fieldStreak) && record.fieldStreak >= FIELD_STREAK_TO_PROMOTE;
 
 export function firstDisclosure(body) {
   const sd = body?.stepDisclosures;
@@ -443,8 +472,10 @@ export function buildRecord({ judgement, target, producedAt, deployId = null, pr
     // ⭐ PHASE 2: which branch produced the disclosure, and the streak of HEALTHY ticks matched by the
     // FIELD alone — the promotion criterion for dropping the regex (FIELD_STREAK_TO_PROMOTE).
     matchedBy: judgement.disclosure?.matchedBy ?? null,
+    probeContract: PROBE_CONTRACT,
+    // ⛔ the streak carries ONLY within the same probe contract; a bump invalidates it (see above).
     fieldStreak: judgement.outcome === OUTCOME.HEALTHY && judgement.disclosure?.matchedBy === "field"
-      ? (Number.isFinite(prev?.fieldStreak) ? prev.fieldStreak : 0) + 1
+      ? ((Number.isFinite(prev?.fieldStreak) && prev?.probeContract === PROBE_CONTRACT) ? prev.fieldStreak : 0) + 1
       : 0,
     spend: judgement.spend,
     target,

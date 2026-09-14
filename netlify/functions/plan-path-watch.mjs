@@ -48,7 +48,8 @@ const OWNER = process.env.PLAN_WATCH_OWNER || DEFAULT_PROBE_OWNER;
 const RECEIPTS_STORE = "bridge-receipts";
 const LATEST_KEY = "latest";
 const WEBHOOK_SOURCES = ["WATCH_ALERT_WEBHOOK"];
-const TIMEOUT_MS = 25_000;
+const TIMEOUT_MS = 20_000;        // per press
+const PROBE_BUDGET_MS = 40_000;   // both presses together — under the scheduled function wall-clock
 
 const nowIso = () => new Date().toISOString();
 
@@ -102,9 +103,48 @@ export async function handler(event) {
 
   const receiptsBefore = await countReceipts(receipts);
 
-  // ── the request ─────────────────────────────────────────────────────────────────────────────
-  let res = { status: null, contentType: null, body: null, networkError: null, timedOut: false };
+  // ── the request: QUOTE-THEN-POST, the way a real confirm traverses ────────────────────────────
+  // ⛔ a300359 (2026-09-13) added a seal step: a bridge plan with no `quoteToken` is answered with a
+  // 409 re-quote BEFORE the cap/balance guards run. The old single-post probe hit that 409 and the
+  // judge read every tick as http-error — a 28-hour+ outage nobody could see. THE PROBE IS A CLIENT
+  // OF agent-execute-plan; when that endpoint's request contract changed, this caller had to change
+  // with it. So the probe now does what the panel does:
+  //   press 1 (quoteOnly) → the endpoint prices, seals, returns stepDisclosures[i].quoteToken
+  //   press 2 (with those tokens) → the endpoint opens the seals and reaches the cap/balance guards
+  // Only press 2 carries a verdict about the guarded path; press 1 proves pricing+sealing worked.
+  //
+  // ⚠️ PRESS 1 NOW READS THE CHAIN (the requote path reads the agent balance for the fail-open
+  // disclosure, 2a17a8b), so publicClient()'s retry backoff can cost seconds on a degraded Arc RPC.
+  // That is a NEW failure mode the single-post probe did not have: press 1 can time out or come back
+  // without usable tokens. It is reported as its own condition (`press1` in the result), never
+  // folded into the press-2 verdict — "we could not even get a quote" is not "the path refused".
+  //
+  // ⭐ A TOTAL TIME BUDGET across both presses, not just a per-fetch timeout: two chain-reading
+  // presses back to back must not exceed the scheduled function's wall-clock.
+  const PLAN = [{ type: "bridge_usdc", amountUsdc: PROBE_AMOUNT_USDC, destination: PROBE_DESTINATION, reasoning: "plan-path-watch probe" }];
+  let res = { status: null, contentType: null, body: null, networkError: null, timedOut: false, press1: null };
   const secret = (process.env.SESSION_SECRET || "").trim();
+  const budgetStart = Date.now();
+  const budgetLeft = () => PROBE_BUDGET_MS - (Date.now() - budgetStart);
+
+  const post = async (token, body) => {
+    const perPress = Math.min(TIMEOUT_MS, Math.max(0, budgetLeft()));
+    if (perPress <= 0) return { status: null, contentType: null, body: null, networkError: null, timedOut: true };
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), perPress);
+    try {
+      const r = await fetch(TARGET, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+        signal: ac.signal,
+      });
+      return { status: r.status, contentType: r.headers.get("content-type"), body: await r.text(), networkError: null, timedOut: false };
+    } catch (e) {
+      return { status: null, contentType: null, body: null, networkError: e?.name === "AbortError" ? null : (e?.name || "fetch-failed"), timedOut: e?.name === "AbortError" };
+    } finally { clearTimeout(timer); }
+  };
+
   if (!secret) {
     // ⛔ NEVER a silent skip. A monitor that no-ops without its credential reports success for a
     // path it never examined.
@@ -114,24 +154,33 @@ export async function handler(event) {
     try { ({ token } = issueSession({ address: OWNER, method: "metamask" })); }
     catch (e) { res.networkError = `session mint failed: ${e?.name || "error"}`; }
     if (token) {
-      const ac = new AbortController();
-      const timer = setTimeout(() => ac.abort(), TIMEOUT_MS);
-      try {
-        const r = await fetch(TARGET, {
-          method: "POST",
-          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-          body: JSON.stringify({
-            plan: [{ type: "bridge_usdc", amountUsdc: PROBE_AMOUNT_USDC, destination: PROBE_DESTINATION, reasoning: "plan-path-watch probe" }],
-          }),
-          signal: ac.signal,
-        });
-        res.status = r.status;
-        res.contentType = r.headers.get("content-type");
-        res.body = await r.text();
-      } catch (e) {
-        if (e?.name === "AbortError") res.timedOut = true;
-        else res.networkError = e?.name || "fetch-failed";
-      } finally { clearTimeout(timer); }
+      // ── press 1: quote-only. Extract the sealed token per bridge step. ──
+      const p1 = await post(token, { plan: PLAN, quoteOnly: true });
+      const p1ok = p1.status === 200 && !p1.timedOut && !p1.networkError;
+      let quoteTokens = null;
+      if (p1ok) {
+        try {
+          const b1 = JSON.parse(String(p1.body ?? ""));
+          const sd = b1?.stepDisclosures;
+          if (sd && typeof sd === "object") {
+            quoteTokens = {};
+            for (const [i, d] of Object.entries(sd)) if (d && typeof d.quoteToken === "string") quoteTokens[i] = d.quoteToken;
+          }
+        } catch { /* fall through to press1 failure */ }
+      }
+      const gotTokens = quoteTokens && Object.keys(quoteTokens).length > 0;
+      if (!gotTokens) {
+        // ⛔ THE NEW FAILURE MODE, NAMED. press 1 did not yield a sealed token: it timed out (a slow
+        // chain read), the transport failed, it answered non-200, or it returned no stepDisclosures.
+        // The judge maps this to its own reason — NOT the press-2 http-error bucket.
+        res.press1 = p1.timedOut ? "timeout" : p1.networkError ? `unreachable:${p1.networkError}`
+          : p1.status !== 200 ? `status:${p1.status}` : "no-tokens";
+      } else {
+        // ── press 2: the real traversal, carrying the sealed tokens. This body is the verdict. ──
+        const p2 = await post(token, { plan: PLAN, quoteTokens });
+        res.status = p2.status; res.contentType = p2.contentType; res.body = p2.body;
+        res.networkError = p2.networkError; res.timedOut = p2.timedOut;
+      }
     }
   }
 

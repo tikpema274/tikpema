@@ -1,0 +1,149 @@
+{
+  "overCap_200": {
+    "press1": {
+      "status": 200,
+      "body": {
+        "executed": false,
+        "needsConfirm": true,
+        "requoted": true,
+        "balanceChecked": true,
+        "quoteExpired": false,
+        "quoteRequired": false,
+        "stepDisclosures": {
+          "0": {
+            "amountUsdc": 200,
+            "destinationKey": "base",
+            "destinationLabel": "Base (Sepolia)",
+            "feeUsdc": 0.0541,
+            "netUsdc": 200,
+            "mechanic": "upfront",
+            "feeRatio": 0.0002705,
+            "band": "none",
+            "ackToken": null,
+            "quoteToken": "eyJvIjoiMHhmZDgwMWQwODI0NzllNjlmOTNiZjc5Y2NiZjVmOWRmZTNjNjE1NzY3IiwiZCI6ImJhc2UiLCJhIjoyMDAsIm0iOiI1NDEwMCIsIm4iOiIyMDAwMDAwMDAiLCJmIjowLjA1NDEsInQiOjIwMCwiaWF0IjoxNzg5NDIxMjEyMzc0LCJxcyI6ImNpcmNsZSIsImZtIjoidXBmcm9udCIsInhtIjoiVElNRVNUQU1QIiwieGUiOjQxMDI0NDQ4MDAsInNxIjoiMHgwMTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGY0ODY1NzAwYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiJ9.i77egXYx1RR2i4xIjm4mG8f_xrzRm7wYmjxE36Ubqp8",
+            "expiresInMs": 180000
+          }
+        }
+      }
+    },
+    "press2": {
+      "status": 200,
+      "body": {
+        "executed": false,
+        "completed": false,
+        "balanceChecked": false,
+        "quoteId": null,
+        "totalUsdc": 200,
+        "ceiling": 1000,
+        "stoppedAt": 0,
+        "stepsRun": 0,
+        "stepsTotal": 1,
+        "blocked": "step ~200.05 exceeds per-bridge limit of 25 USDC",
+        "results": [
+          {
+            "index": 0,
+            "step": {
+              "type": "bridge_usdc",
+              "amountUsdc": 200,
+              "destination": "base",
+              "reasoning": "plan-path-watch probe"
+            },
+            "ok": false,
+            "blocked": "step ~200.05 exceeds per-bridge limit of 25 USDC",
+            "refusal": {
+              "kind": "cap",
+              "valuedUsdc": 200.0541,
+              "capUsdc": 25,
+              "capLabel": "bridge",
+              "feeUsdc": 0.0541
+            }
+          }
+        ]
+      }
+    },
+    "exec": 0
+  },
+  "underCapOverBalance_10": {
+    "press1": {
+      "status": 200,
+      "body": {
+        "executed": false,
+        "needsConfirm": true,
+        "requoted": true,
+        "balanceChecked": true,
+        "quoteExpired": false,
+        "quoteRequired": false,
+        "stepDisclosures": {
+          "0": {
+            "amountUsdc": 10,
+            "destinationKey": "base",
+            "destinationLabel": "Base (Sepolia)",
+            "feeUsdc": 0.0541,
+            "netUsdc": 10,
+            "mechanic": "upfront",
+            "feeRatio": 0.00541,
+            "band": "none",
+            "ackToken": null,
+            "quoteToken": "eyJvIjoiMHhmZDgwMWQwODI0NzllNjlmOTNiZjc5Y2NiZjVmOWRmZTNjNjE1NzY3IiwiZCI6ImJhc2UiLCJhIjoxMCwibSI6IjU0MTAwIiwibiI6IjEwMDAwMDAwIiwiZiI6MC4wNTQxLCJ0IjoxMCwiaWF0IjoxNzg5NDIxMjEyMzc5LCJxcyI6ImNpcmNsZSIsImZtIjoidXBmcm9udCIsInhtIjoiVElNRVNUQU1QIiwieGUiOjQxMDI0NDQ4MDAsInNxIjoiMHgwMTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGY0ODY1NzAwYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiJ9.sVoZCQ4OHVhEV2UBy10MgXOqgNYsRgMf3mgC-I-pMM8",
+            "expiresInMs": 180000
+          }
+        }
+      }
+    },
+    "press2": {
+      "status": 402,
+      "body": {
+        "outcome": "quote_failed",
+        "executed": false,
+        "quoted": false,
+        "error": "Insufficient funds in your agent wallet for this plan: have 2.600000 USDC, its 1 bridge step need 10.054100 USDC (10 + ~0.054100 in fees, to Base (Sepolia)). Nothing was executed — the whole plan is refused, not a step of it. Top up the agent wallet and retry.",
+        "blocked": "Insufficient funds in your agent wallet for this plan: have 2.600000 USDC, its 1 bridge step need 10.054100 USDC (10 + ~0.054100 in fees, to Base (Sepolia)). Nothing was executed — the whole plan is refused, not a step of it. Top up the agent wallet and retry.",
+        "have": 2.6,
+        "need": 10.0541,
+        "insufficient": true,
+        "refusal": {
+          "kind": "balance",
+          "have": 2.6,
+          "need": 10.0541,
+          "amount": 10,
+          "fee": 0.0541,
+          "dests": "Base (Sepolia)",
+          "scope": "plan",
+          "stepCount": 1
+        },
+        "balanceChecked": true,
+        "stepsRun": 0,
+        "stepsTotal": 1,
+        "results": []
+      }
+    },
+    "exec": 0
+  },
+  "staleToken_press2": {
+    "status": 409,
+    "body": {
+      "executed": false,
+      "needsConfirm": true,
+      "requoted": true,
+      "balanceChecked": true,
+      "quoteExpired": true,
+      "quoteRequired": false,
+      "blocked": "the bridge quote you were shown has expired — here is a fresh one; nothing was executed. Confirm the new figure to run the plan.",
+      "stepDisclosures": {
+        "0": {
+          "amountUsdc": 200,
+          "destinationKey": "base",
+          "destinationLabel": "Base (Sepolia)",
+          "feeUsdc": 0.0541,
+          "netUsdc": 200,
+          "mechanic": "upfront",
+          "feeRatio": 0.0002705,
+          "band": "none",
+          "ackToken": null,
+          "quoteToken": "eyJvIjoiMHhmZDgwMWQwODI0NzllNjlmOTNiZjc5Y2NiZjVmOWRmZTNjNjE1NzY3IiwiZCI6ImJhc2UiLCJhIjoyMDAsIm0iOiI1NDEwMCIsIm4iOiIyMDAwMDAwMDAiLCJmIjowLjA1NDEsInQiOjIwMCwiaWF0IjoxNzg5NDIxMjEyMzgxLCJxcyI6ImNpcmNsZSIsImZtIjoidXBmcm9udCIsInhtIjoiVElNRVNUQU1QIiwieGUiOjQxMDI0NDQ4MDAsInNxIjoiMHgwMTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGY0ODY1NzAwYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiJ9.jIgvgGxWeN-CsLYP_qG4G40whkqyNDu8K8ajbDsANsg",
+          "expiresInMs": 180000
+        }
+      }
+    }
+  }
+}

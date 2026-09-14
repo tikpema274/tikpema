@@ -16,7 +16,7 @@ import {
   PROBE_AMOUNT_USDC, DEFAULT_TARGET_URL, DEFAULT_PROBE_OWNER,
   judgePlanProbe, decideNotify, shouldSkipRerun, evaluateRecord, notifyMessage, buildRecord,
   firstDisclosure, assertNoSpend, isCannotVerify, buildSkipRecord, judgeCadence, CADENCE,
-  FIELD_STREAK_TO_PROMOTE, promotionReady,
+  FIELD_STREAK_TO_PROMOTE, promotionReady, PROBE_CONTRACT,
   TICK_HISTORY, intervalsOf,
 } from "../shared/plan-path-watch/watch.mjs";
 
@@ -32,6 +32,14 @@ const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm
 
 const res = (over = {}) => ({ status: 200, contentType: "application/json", body: "{}", networkError: null, timedOut: false, ...over });
 const json = (o) => JSON.stringify(o);
+// ⭐ REAL FIXTURES, CAPTURED FROM THE HANDLER (scripts/fixtures/plan-path-probe-capture.json), NOT
+// hand-written. Every synthetic phase-2 body was a body the live probe never produced; these are
+// the actual press-1/press-2 responses of the two-press probe against the real handler. Regenerate
+// with the capture harness if the endpoint's contract changes (and bump PROBE_CONTRACT).
+const CAP = JSON.parse(readFileSync("scripts/fixtures/plan-path-probe-capture.json", "utf8"));
+// The verdict the judge sees is PRESS 2's response (press 1 only yields the token).
+const asRes = (fixture) => res({ status: fixture.status, body: json(fixture.body) });
+const press2Res = (fixture) => res({ status: fixture.press2.status, body: json(fixture.press2.body) });
 /** The real production shape of a cap refusal, verbatim from the live probe on 2026-09-05. */
 const CAP_BODY = { executed: false, completed: false, stoppedAt: 0, stepsRun: 0, stepsTotal: 1, totalUsdc: 200,
   blocked: `step ~${(PROBE_AMOUNT_USDC + 0.053947).toFixed(2)} exceeds per-bridge limit of 25 USDC`,
@@ -355,52 +363,56 @@ section("9 ⭐⭐ CAN THE STORE SAY WHETHER IT KEPT RUNNING? — one read, no li
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-section("10 ⭐⭐ PHASE 2 — THE FIELD FIRST, THE REGEX AS FALLBACK, AND WHICH ONE MATCHED IS RECORDED");
+section("10 ⭐⭐ THE TWO-PRESS PROBE, JUDGED FROM CAPTURED BODIES — cap AND balance reach the FIELD");
 {
-  const FIELD_BODY = { ...CAP_BODY, results: [{ index: 0, ok: false,
-    blocked: "step ~200.05 exceeds per-bridge limit of 25 USDC",
-    refusal: { kind: "cap", valuedUsdc: 200.05, capUsdc: 25, capLabel: "bridge", feeUsdc: 0.05 } }] };
-  const jf = judgePlanProbe(res({ body: json(FIELD_BODY) }), SPEND);
-  ok("⭐ a body carrying results[0].refusal{kind:cap} is HEALTHY", jf.outcome === OUTCOME.HEALTHY && jf.disclosure?.kind === "cap");
-  ok("⭐⭐ …and says it was matched by the FIELD", jf.disclosure?.matchedBy === "field", `matchedBy=${jf.disclosure?.matchedBy}`);
-  ok("⭐ the figures come from the field, not the sentence", jf.disclosure?.valuedUsdc === 200.05 && jf.disclosure?.capUsdc === 25);
-  const jr = judgePlanProbe(res({ body: json(CAP_BODY) }), SPEND);
-  ok("⭐ the pre-field body (sentence only) is still HEALTHY — the one-deploy fallback", jr.outcome === OUTCOME.HEALTHY);
-  ok("⭐⭐ …and says it was matched by the REGEX — an OR cannot show the field works, so the branch is named", jr.disclosure?.matchedBy === "regex", `matchedBy=${jr.disclosure?.matchedBy}`);
-  // the field wins over a DIFFERENT sentence: figures are read from the field when both exist
-  const DISAGREE = { ...FIELD_BODY, results: [{ ...FIELD_BODY.results[0], blocked: "step ~999.99 exceeds per-bridge limit of 1 USDC" }] };
-  const jd = judgePlanProbe(res({ body: json(DISAGREE) }), SPEND);
-  ok("⭐ when field and sentence disagree, the FIELD is read (200.05, not 999.99)", jd.disclosure?.valuedUsdc === 200.05 && jd.disclosure?.matchedBy === "field");
-  // a malformed field falls back to the regex — and says so
-  const MALFORMED = { ...FIELD_BODY, results: [{ ...FIELD_BODY.results[0], refusal: { kind: "cap", valuedUsdc: "x" } }] };
-  ok("⭐ a malformed field falls to the regex and is labelled regex", judgePlanProbe(res({ body: json(MALFORMED) }), SPEND).disclosure?.matchedBy === "regex");
-  // a plan-level field at the top level (the balance refusal's shape) is read too
-  const TOP = { executed: false, stepsRun: 0, stepsTotal: 1, results: [], blocked: "Insufficient funds …",
-    refusal: { kind: "balance", have: 3.65, need: 200.05, amount: 200, fee: 0.05, dests: "Base", scope: "plan", stepCount: 1 } };
-  const jb = judgePlanProbe(res({ status: 402, body: json(TOP) }), SPEND);
-  ok("⭐⭐ a 402 balance refusal WITH the field is a PRICED decision — HEALTHY, kind balance, matched by field (need includes the fee)",
-    jb.outcome === OUTCOME.HEALTHY && jb.disclosure?.kind === "balance" && jb.disclosure?.matchedBy === "field", `${jb.outcome}/${jb.reason} ${JSON.stringify(jb.disclosure)}`);
-  ok("⛔ a bare 402 (no field) is still UNREADABLE http-error — not healthy, not blocked",
-    judgePlanProbe(res({ status: 402, body: json({ error: "Insufficient funds …" }) }), SPEND).reason === REASON.HTTP_ERROR);
-  ok("⛔ a 200 refusal with neither field nor sentence is still BLOCKED refused-other",
-    judgePlanProbe(res({ body: json({ executed: false, blocked: "something else", stepsRun: 0 }) }), SPEND).reason === REASON.REFUSED_OTHER);
+  // over-cap 200: press 2 is 200 with results[0].refusal{kind:cap} — the recurring probe's real body
+  const cap = judgePlanProbe(press2Res(CAP.overCap_200), SPEND);
+  ok("⭐⭐ the real over-cap press-2 body is HEALTHY", cap.outcome === OUTCOME.HEALTHY, `${cap.outcome}/${cap.reason}`);
+  ok("⭐ …disclosure kind cap, matched by the FIELD (not the regex)", cap.disclosure?.kind === "cap" && cap.disclosure?.matchedBy === "field", `${cap.disclosure?.kind}/${cap.disclosure?.matchedBy}`);
+  ok("⛔ …and the captured body carries results[0].refusal, so this is not a synthetic shape", CAP.overCap_200.press2.body.results?.[0]?.refusal?.kind === "cap");
+  ok("⛔ …and press 2 executed nothing (exec 0 in the capture)", CAP.overCap_200.exec === 0);
+
+  // under-cap-over-balance 10: press 2 is 402 with top-level refusal{kind:balance} — the branch the reorder rests on
+  const bal = judgePlanProbe(press2Res(CAP.underCapOverBalance_10), SPEND);
+  ok("⭐⭐ the real balance press-2 body (402) is HEALTHY — a priced decision, need includes the fee", bal.outcome === OUTCOME.HEALTHY, `${bal.outcome}/${bal.reason}`);
+  ok("⭐ …disclosure kind balance, matched by the FIELD", bal.disclosure?.kind === "balance" && bal.disclosure?.matchedBy === "field", `${bal.disclosure?.kind}/${bal.disclosure?.matchedBy}`);
+  ok("⛔ …the captured body is a 402 carrying refusal{kind:balance}", CAP.underCapOverBalance_10.press2.status === 402 && CAP.underCapOverBalance_10.press2.body.refusal?.kind === "balance");
+  ok("⛔ …and executed nothing", CAP.underCapOverBalance_10.exec === 0);
 }
 
-section("11 ⭐⭐ THE PROMOTION CRITERION IS A FIELD STREAK, NOT 'IT STAYED HEALTHY'");
+section("11 ⛔ THE READABLE-STATUS SET IS CLOSED — 409 and press-1 failure are NAMED, not http-error");
 {
-  const FIELD_BODY = { ...CAP_BODY, results: [{ index: 0, ok: false, blocked: "step ~200.05 exceeds per-bridge limit of 25 USDC",
-    refusal: { kind: "cap", valuedUsdc: 200.05, capUsdc: 25, capLabel: "bridge", feeUsdc: 0.05 } }] };
-  const tick = (body, prev, status = 200) => buildRecord({ judgement: judgePlanProbe(res({ status, body: json(body) }), SPEND), target: "t", producedAt: new Date().toISOString(), prev });
-  ok("⭐ FIELD_STREAK_TO_PROMOTE is 3", FIELD_STREAK_TO_PROMOTE === 3);
-  let r = tick(FIELD_BODY, null);
-  ok("⭐ first field-matched healthy tick → fieldStreak 1, matchedBy field", r.fieldStreak === 1 && r.matchedBy === "field", `streak=${r.fieldStreak}`);
-  r = tick(FIELD_BODY, r); r = tick(FIELD_BODY, r);
-  ok("⭐ three in a row → fieldStreak 3 → promotionReady", r.fieldStreak === 3 && promotionReady(r));
-  const regexTick = tick(CAP_BODY, r);
-  ok("⛔ a REGEX-matched healthy tick RESETS the streak — healthy is not the criterion", regexTick.fieldStreak === 0 && regexTick.matchedBy === "regex" && !promotionReady(regexTick), `streak=${regexTick.fieldStreak}`);
-  const blockedTick = tick({ executed: false, blocked: "x", stepsRun: 0 }, r);
-  ok("⛔ a BLOCKED tick resets it too", blockedTick.fieldStreak === 0 && blockedTick.matchedBy === null);
-  ok("⭐ a record without the field (pre-phase-2) is not promotion-ready", !promotionReady({ outcome: "healthy" }) && !promotionReady(null));
+  // 409 re-quote: a REAL captured body (a stale token). Its own reason, distinct from http-error.
+  const rq = judgePlanProbe(asRes(CAP.staleToken_press2), SPEND);
+  ok("⭐⭐ a real 409 re-quote → UNREADABLE with reason REQUOTED, NOT http-error", rq.outcome === OUTCOME.UNREADABLE && rq.reason === REASON.REQUOTED, `${rq.outcome}/${rq.reason}`);
+  ok("⛔ REQUOTED and HTTP_ERROR are different reasons (the 28h-outage bucket is not shared)", REASON.REQUOTED !== REASON.HTTP_ERROR);
+  ok("⭐ REQUOTED is cannot-verify — it claims nothing about the guarded path", isCannotVerify(REASON.REQUOTED));
+  // a 500 is still http-error
+  ok("⛔ a 500 is still http-error", judgePlanProbe(res({ status: 500, body: "oops" }), SPEND).reason === REASON.HTTP_ERROR);
+  // a bare 402 (no refusal field) is NOT readable
+  ok("⛔ a bare 402 with no refusal field stays http-error (cannot tell it from auth/quota)", judgePlanProbe(res({ status: 402, body: json({ error: "x" }) }), SPEND).reason === REASON.HTTP_ERROR);
+  // press-1 failure: its own reason, never the press-2 bucket
+  ok("⭐⭐ press-1 failure (no token) → PROBE_QUOTE, distinct from TIMEOUT/HTTP_ERROR", judgePlanProbe(res({ press1: "no-tokens", status: null, body: null }), SPEND).reason === REASON.PROBE_QUOTE);
+  ok("⭐ a press-1 TIMEOUT is still PROBE_QUOTE (it happened at press 1, not the verdict)", judgePlanProbe(res({ press1: "timeout" }), SPEND).reason === REASON.PROBE_QUOTE);
+  ok("⭐ PROBE_QUOTE is cannot-verify", isCannotVerify(REASON.PROBE_QUOTE));
+  ok("⛔ press-1 failure is checked BEFORE the status gate — a null status must not read as http-error", judgePlanProbe(res({ press1: "status:500", status: 500, body: "x" }), SPEND).reason === REASON.PROBE_QUOTE);
+}
+
+section("12 ⭐ fieldStreak — earned from real bodies, RESET across a probe-contract change");
+{
+  const tick = (fixture, prev) => buildRecord({ judgement: judgePlanProbe(press2Res(fixture), SPEND), target: "t", producedAt: new Date().toISOString(), prev });
+  let r = tick(CAP.overCap_200, null);
+  ok("⭐ a real cap tick stamps the current probe contract and fieldStreak 1", r.probeContract === PROBE_CONTRACT && r.fieldStreak === 1 && r.matchedBy === "field", `${r.probeContract} streak=${r.fieldStreak}`);
+  r = tick(CAP.underCapOverBalance_10, r); r = tick(CAP.overCap_200, r);
+  ok("⭐ three field-matched ticks (cap, balance, cap) → fieldStreak 3 → promotionReady", r.fieldStreak === 3 && promotionReady(r));
+  // ⛔ a streak from a DIFFERENT contract must not carry
+  const stale = { fieldStreak: 9, probeContract: "single-post/0", outcome: "healthy" };
+  ok("⛔ promotionReady is FALSE for a streak stamped with a different probe contract", !promotionReady(stale));
+  const afterBump = buildRecord({ judgement: judgePlanProbe(press2Res(CAP.overCap_200), SPEND), target: "t", producedAt: new Date().toISOString(), prev: stale });
+  ok("⛔ buildRecord DROPS the stale streak on a contract change — resets to 1, not 10", afterBump.fieldStreak === 1, `streak=${afterBump.fieldStreak}`);
+  // a REQUOTED (cannot-verify) tick resets the streak too
+  const rqTick = buildRecord({ judgement: judgePlanProbe(asRes(CAP.staleToken_press2), SPEND), target: "t", producedAt: new Date().toISOString(), prev: r });
+  ok("⛔ a 409/REQUOTED tick is not healthy, so it resets the streak", rqTick.fieldStreak === 0 && !promotionReady(rqTick));
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
