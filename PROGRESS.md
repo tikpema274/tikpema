@@ -1,3 +1,55 @@
+# 🚨 PASSKEY "FUND AGENT" SENT 1e18 FOR 1 USDC — ONE VARIABLE SERVED TWO SCALES (de442ff, NOT DEPLOYED)
+
+**2026-09-14.** T reported a Fund-agent revert, "ERC20: transfer amount exceeds balance", on a wallet showing
+96.00, and read the calldata first: amount `0de0b6b3a7640000` = 1e18. USDC is 6 dp, so that is
+1,000,000,000,000 USDC. The revert was correct.
+
+**Where.** `useModularWallet.ts` `fundAgentWallet`: `units = parseUnits(String(amountUsdc), USDC_NATIVE_DECIMALS)`
+for the `units > raw` guard against `eth_getBalance` (18 dp — correct), then the SAME `units` into
+`transfer(to, units)` — ERC-20, 6 dp. Introduced by `8793764` (2026-09-10, "USDC reads natively on both
+wallets"), which moved the guard to native and reused the variable. **LIVE IN PROD** — `79cd88d` carries the
+identical lines; every prod deploy since `6aa48dac` (2026-09-12). Every passkey Fund-agent since then reverted;
+no funds moved (atomic). MetaMask twin (`metamask.ts:333`, `Math.round(amountUsdc*1e6)`) unaffected.
+
+**The class, enumerated** (every scaling site outside swap, by grep): placeBet `:425` 6 ✓ · fundJob `:567` 6 ✓ ·
+MM send/fund `:278/:333/:395` 6 ✓ · agent-send `:144` 6 ✓ · UB deposit/withdraw 6 ✓ · vault `:1046` 6 ✓ ·
+bridge `:165` 6 ✓ · plan executor 6 ✓. **The only 18-dp write site in the tree was this one.** The two sibling
+sites already carry the comment "TOKEN scale, NOT native — the INVERSE of the balance read"; this one didn't.
+
+**⛔ THE GUARD REQUIRED THE FALSEHOOD.** `verify-client-native-balance` §3 asserted the exact line
+`parseUnits(String(amountUsdc), USDC_NATIVE_DECIMALS)` exists; §5 counted token-scaled amounts against
+APPROVES ONLY while its own prose said "approve/transfer/allowance". 123/123 green from 09-10 to today.
+[[a-guard-that-required-the-falsehood]] — second instance in this file's history.
+
+**Red state, recorded before the fix** (new §6 run against the unfixed file):
+```
+  ✅ the guard's `units` is produced at NATIVE scale — defined at USDC_NATIVE_DECIMALS
+  ❌ the transfer's `units` is produced at TOKEN scale — defined at USDC_NATIVE_DECIMALS — at 18 every fund is 10^12 too large and reverts
+  ❌ they are two different variables — one name cannot hold two scales — transfer=units guard=units
+  ❌ FAILURES   pass 24 / fail 2
+```
+§6 follows the DATA FLOW (which named variable reaches the transfer's args; at which decimals THAT variable
+was produced) instead of a window regex. §5 now counts approves + transfers. **The fix:** `nativeUnits` for
+the guard, `units` at `USDC_DECIMALS` for the transfer, names saying which interface each meets. 26/26.
+
+**Second defect, same panel — the leak.** viem's whole error (reason + "Contract Call: args (0x…,
+1000000000000000000) / sender / Docs / Version") rendered in `YourMoney` `fundErr` and the hook's status line,
+through `describeError`'s by-design byte-identical pass-through. Same class as the pay-plane mint leak
+(`687dc89`), unclassified on the client. New `src/lib/describeChainError.ts`: walk the cause chain for a
+revert reason → *"The chain refused this transaction: ERC20: transfer amount exceeds balance. Nothing was
+sent."* (93 chars); else `shortMessage`; else cut at the first detail block; else `describeError` unchanged.
+`verify-chain-error-copy.tsx` (`test:chainerror`) asserts on OUTPUT with a REAL viem
+`ContractFunctionExecutionError` — §1 records that `describeError` DOES leak (by design; goes red if that
+contract changes), §2 the classifier drops the 1e18 / hex / headers, §3 plain Error / string / message-less
+keep the honest path, §4 both call sites. **Mutation** (classifier collapsed to `describeError`): 9 red.
+
+**test:all 124/124** (was 123). **ddTree unchanged `2f4f2793…`** — no DD surface touched, no deposit window
+bought. `tsc` clean. **Not deployed.** Post-deploy proof: T funds the agent with a small amount from the
+passkey wallet on prod and reads the Transfer log's ERC-20 amount on Arc — it must equal the figure entered
+×1e6, and the receipt line must show that figure. The revert message, if any, must be one sentence.
+
+---
+
 # ✅ THE BRIDGE-FEE GAP IS CLOSED ON THE BOARD — MEMORY NOTE CORRECTED TO "CLOSED AT 6aa69367"
 
 **2026-09-13.** The memory note `agent-bridge-fee-undisclosed-pre-execution` and its index line now read
