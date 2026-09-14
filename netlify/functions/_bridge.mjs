@@ -23,6 +23,7 @@ import { ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { publicClient } from "./_predict.mjs";
 import { normalizeQuoteExpiry, assertQuoteUnexpired } from "./_quote-expiry.mjs";
 import { bridgeMechanicOf } from "../../shared/bridge-mechanic.mjs";
+import { availableAmount, requiredAmount } from "../../shared/amount-direction.mjs";
 
 export const BRIDGE_CONTRACT = "0xC5567a5E3370d4DBfB0540025078e283e36A363d"; // BridgingKitContract (Arc testnet)
 const IRIS = "https://iris-api-sandbox.circle.com"; // testnet IRIS
@@ -417,6 +418,40 @@ export function bridgeFeeBand({ amountUsdc, feeUsdc, netUsdc }) {
   const band =
     feeRatio >= FEE_BAND_ACKNOWLEDGE ? "acknowledge" : feeRatio >= FEE_BAND_WARN ? "warn" : "none";
   return { feeRatio, band, feeUsdc: fee, netUsdc: Number(netUsdc) };
+}
+
+// ═══ ⭐ THE BALANCE PRE-FLIGHT — OURS, BEFORE CIRCLE'S ═══════════════════════════════════════════
+// 2026-09-14: a 5 USDC bridge from a wallet holding 3.65 was priced, SEALED, built into a userOp and
+// sent to Circle, which refused it pre-broadcast (`INSUFFICIENT_TOKEN`). Nothing on this path had
+// looked at the balance; Circle's refusal — documented as "the final backstop" — was the first and
+// only one, and its sentence named neither figure. agent-send has had this check from its first
+// version and agent-ub-spend since 18c0396; the bridge never did.
+//
+// ⭐ PURE, so a suite drives it with values. `haveUsdc` is the 6-dp `balanceOf` view (what an ERC-20
+// debit can actually spend — dust below 1e-6 is invisible to the transfer too). Under upfront fees
+// the debit is `amount + fee` (bridgeDebitMinor), so the fee is part of NEED once it is known; before
+// pricing the amount alone is a lower bound and still refuses.
+//
+// ⛔ THREE OUTCOMES, NOT TWO. null means EITHER "enough" OR "unread" — the CALLER must say which
+// (`balanceChecked`), because an unread balance must never render as a checked one. A NaN `have`
+// is unread, not zero: `NaN < need` is false, and treating that as "enough" is the fail-open cap
+// pattern. [[nan-fail-open-cap-pattern]] [[refusal-reports-compared-quantity]]
+// Rounding has a direction: HAVE rounds down; NEED and the FEE (part of need) round up; 4 dp (the fee's precision).
+export function bridgeBalanceRefusal({ haveUsdc, amountUsdc, feeUsdc = null, destLabel }) {
+  const have = Number(haveUsdc);
+  if (haveUsdc == null || !Number.isFinite(have)) return null;          // unread — not our call
+  const amount = Number(amountUsdc);
+  const fee = feeUsdc == null ? null : Number(feeUsdc);
+  const need = fee == null ? amount : amount + fee;
+  if (have >= need) return null;                                         // enough
+  const haveStr = availableAmount(have, 4);
+  const needStr = requiredAmount(need, 4);
+  const error = fee == null
+    ? `Insufficient funds in your agent wallet: have ${haveStr} USDC, need at least ${amount} USDC to bridge to ${destLabel}` +
+      ` (the fee comes on top). No funds moved and nothing was quoted — top up the agent wallet and retry.`
+    : `Insufficient funds in your agent wallet: have ${haveStr} USDC, need ${needStr} USDC` +
+      ` (${amount} + ~${requiredAmount(fee, 4)} fee to ${destLabel}). No funds moved and nothing was quoted — top up the agent wallet and retry.`;
+  return { status: 402, body: { outcome: "quote_failed", executed: false, quoted: false, error, blocked: error, have, need, insufficient: true } };
 }
 
 /**

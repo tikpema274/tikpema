@@ -3,7 +3,10 @@ import { TxPendingError } from "./_circle.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody } from "./_arc.mjs";
 import { executeAction } from "./_actions.mjs";
-import { resolveDestination, bridgeFee, bridgeFeeBand, sealBridgeQuote, quoteWindowMs } from "./_bridge.mjs";
+import { resolveDestination, bridgeFee, bridgeFeeBand, sealBridgeQuote, quoteWindowMs, bridgeBalanceRefusal } from "./_bridge.mjs";
+import { formatUnits } from "viem";
+import { publicClient } from "./_predict.mjs";
+import { CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { recordBridge, recordPendingBridge } from "./_bridge-record.mjs";
@@ -54,6 +57,28 @@ export async function handler(event) {
   }
   const walletAddress = owner.walletAddress;
 
+  // ═══ ⭐ THE BALANCE PRE-FLIGHT — read once, applied on BOTH presses ═══════════════════════════
+  // 2026-09-14: a bridge the wallet could not pay was priced, sealed and sent to Circle before
+  // anything refused it. Same read as agent-send (balanceOf, the 6-dp ERC-20 view — the view an
+  // ERC-20 debit can actually spend), same 402 shape as agent-ub-spend (18c0396), and the refusal
+  // NAMES BOTH FIGURES. Circle's INSUFFICIENT_TOKEN stays the backstop; it is no longer the front.
+  // ⛔ A failed read is NOT a pass and NOT a refusal: `haveUsdc` stays null, bridgeBalanceRefusal
+  // returns null, and the quote body says `balanceChecked:false` so the client cannot render an
+  // unread balance as a checked one. [[absence-must-never-read-as-safe]]
+  let haveUsdc = null;
+  try {
+    const raw = await publicClient().readContract({
+      address: CONTRACTS.USDC,
+      abi: [{ type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ name: "account", type: "address" }], outputs: [{ name: "", type: "uint256" }] }],
+      functionName: "balanceOf",
+      args: [walletAddress],
+    });
+    haveUsdc = Number(formatUnits(raw, USDC_DECIMALS));
+  } catch (e) {
+    console.warn(`[agent-bridge] balance read failed for ${walletAddress}: ${e?.message ?? e} — proceeding unchecked (Circle backstop)`);
+  }
+  const balanceChecked = haveUsdc != null;
+
   // ackToken is the ONLY client-supplied value that reaches the gate, and it is not
   // trusted: _actions recomputes the expected token from the destination, amount and band
   // it priced ITSELF, and compares. A forged or stale token fails the comparison — the
@@ -68,6 +93,9 @@ export async function handler(event) {
   // ⭐ ONE PRICER for the quoteOnly turn AND the re-quote a stale confirm triggers below — so the
   // figure a re-confirm shows is built exactly like the first one, not by a second, drifting copy.
   const priceQuote = async () => {
+    // ⭐ Amount alone is a lower bound on the debit — refuse before spending an IRIS round-trip.
+    const short = bridgeBalanceRefusal({ haveUsdc, amountUsdc: amount, feeUsdc: null, destLabel: dest.label });
+    if (short) return { status: short.status, body: { ...short.body, balanceChecked } };
     let fee;
     try { fee = await bridgeFee({ amountUsdc: amount, cctpDomain: dest.cctpDomain }); }
     catch (e) { return { status: 200, body: { outcome: "quote_failed", executed: false, quoted: false, blocked: `cannot price bridge to ${dest.label}: ${e.message}` } }; }
@@ -75,6 +103,9 @@ export async function handler(event) {
     // recipient receives the FULL amount, so a fee above the amount no longer means "nothing would
     // arrive"; it means the move costs more than it moves. The wording must not keep asserting a
     // mechanism that stopped being true.
+    // ⭐ Now the fee is known: under upfront fees the debit is amount + fee, so NEED includes it.
+    const shortWithFee = bridgeBalanceRefusal({ haveUsdc, amountUsdc: amount, feeUsdc: fee.feeUsdc, destLabel: dest.label });
+    if (shortWithFee) return { status: shortWithFee.status, body: { ...shortWithFee.body, balanceChecked } };
     if (fee.feeMinor >= fee.amountMinor) {
       return { status: 200, body: { outcome: "quote_failed", executed: false, quoted: false, blocked:
         `the fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC — as much as or more than the ` +
@@ -91,6 +122,7 @@ export async function handler(event) {
       outcome: "quoted",
       executed: false,
       quoted: true,
+      balanceChecked,
       quote: {
         amountUsdc: amount,
         destination: { key: dest.key, label: dest.label },
@@ -126,6 +158,13 @@ export async function handler(event) {
     } };
   };
   if (quoteOnly) { const q = await priceQuote(); return json(q.status, q.body); }
+
+  // ⭐ The execute press: the sealed fee is opened inside executeAction, so refuse here on the
+  // amount alone (a lower bound that is never wrong); the fee-inclusive check ran at quote time.
+  {
+    const short = bridgeBalanceRefusal({ haveUsdc, amountUsdc: amount, feeUsdc: null, destLabel: dest.label });
+    if (short) return json(short.status, { ...short.body, balanceChecked });
+  }
 
   const step = { type: "bridge_usdc", amountUsdc: amount, destination: dest.key, ackToken, quoteToken, reasoning: `bridge ${amount} USDC to ${dest.label}` };
 
