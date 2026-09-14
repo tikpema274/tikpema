@@ -6,6 +6,7 @@ import { arcTestnet } from "../config/chain";
 import AddressDisplay from "./AddressDisplay";
 import SignInPrompt from "./SignInPrompt";
 import { describeError } from "../lib/describeError";
+import { describeChainError } from "../lib/describeChainError";
 import { displayAmount } from "../lib/formatAmount";
 
 const EXPLORER = arcTestnet.blockExplorers.default.url;
@@ -192,7 +193,10 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
       await w.refreshAgentWallet().catch(() => {});
       await w.refreshBalance?.().catch(() => {});
     } catch (e: any) {
-      setFundErr(describeError(e));
+      // ⛔ NOT describeError here: the connector throws viem's error, whose message carries the
+      // full request dump (args, calldata, sender). The reason is what a person needs; the hex
+      // blob beside a money figure is the leak. See describeChainError.
+      setFundErr(describeChainError(e));
     } finally {
       setFundBusy(false);
     }

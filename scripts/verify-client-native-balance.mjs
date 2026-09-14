@@ -93,7 +93,7 @@ check("⭐⭐ the amount is scaled to NATIVE units before the comparison",
 check("⛔ no float arithmetic on a money amount remains anywhere in this file",
   !/Math\.round\(amountUsdc \* 1e6\)/.test(mw),
   "parseUnits works from the string; the old form multiplied a float before flooring it");
-check("⭐ the guard still exists and still throws", /if \(units > raw\)/.test(mw) && /Insufficient funds/.test(mw));
+check("⭐ the guard still exists and still throws", /if \(\w+ > raw\)/.test(mw) && /Insufficient funds/.test(mw));
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
 section("4 — ⚠️ DISPLAY PRECISION DID *NOT* MOVE");
@@ -122,8 +122,42 @@ section("5 — ⭐⭐ THE INVERSE: AN ERC-20 APPROVE MUST *NOT* USE NATIVE SCALE
   check("⛔⛔ no approve is scaled natively", !natively,
     "approving at 18 decimals would authorise a trillion times the intended amount");
   const tokenScaled = [...mw.matchAll(/parseUnits\(String\(amountUsdc\),\s*USDC_DECIMALS\)/g)].length;
-  check("⭐⭐ both approve amounts are scaled at TOKEN decimals", tokenScaled === approves,
-    `${tokenScaled} token-scaled vs ${approves} approves`);
+  // ⛔ The count is approves PLUS transfers — both are ERC-20 amount arguments. The first draft
+  // pinned it to approves alone, which is how a transfer at 18 stayed invisible here (§6).
+  const transfers = [...mw.matchAll(/functionName:\s*"transfer"/g)].length;
+  check("⭐⭐ every ERC-20 amount (approve AND transfer) is scaled at TOKEN decimals",
+    tokenScaled === approves + transfers,
+    `${tokenScaled} token-scaled vs ${approves} approves + ${transfers} transfers`);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("6 — 🚨 THE INVERSE, FOR *TRANSFER* — ONE VARIABLE MUST NOT SERVE TWO SCALES");
+// ⛔ §5's prose said "token scale belongs to approve/TRANSFER/allowance" and then asserted only the
+// approves. §3 asserted the guard's amount is NATIVE — and that assertion was satisfied by the exact
+// line that put 1e18 into an ERC-20 `transfer`: fundAgentWallet computed `units` at 18 for the
+// `units > raw` comparison and passed the SAME `units` into `transfer(to, units)`. 1 USDC became
+// 0de0b6b3a7640000 = 1,000,000,000,000 USDC; the token reverted "transfer amount exceeds balance"
+// on a wallet showing 96. Live on prod from 8793764 (2026-09-10) to this fix, 123/123 green
+// throughout — THIS SUITE REQUIRED THE FALSEHOOD. [[a-guard-that-required-the-falsehood]]
+// ⭐ So this section follows the DATA FLOW inside fundAgentWallet rather than a window regex:
+// which variable reaches the transfer's args, and at which scale was THAT variable produced.
+{
+  const start = mw.indexOf("const fundAgentWallet = useCallback(");
+  check("⭐ fundAgentWallet is where it was", start > 0);
+  const body = mw.slice(start, mw.indexOf("\n  );", start));
+  const transfer = /functionName:\s*"transfer",\s*args:\s*\[[^,\]]+,\s*(\w+)\s*\]/.exec(body);
+  check("⭐ the ERC-20 transfer's amount argument is a named variable", !!transfer, transfer?.[1]);
+  const tName = transfer?.[1] ?? "";
+  const guard = /if \((\w+) > raw\)/.exec(body);
+  check("⭐ the pre-sign guard compares a named variable against the native raw", !!guard, guard?.[1]);
+  const gName = guard?.[1] ?? "";
+  const defOf = (n) => new RegExp(`const ${n} = parseUnits\\(String\\(amountUsdc\\),\\s*(USDC_DECIMALS|USDC_NATIVE_DECIMALS)\\)`).exec(body)?.[1];
+  check(`⭐⭐ the guard's \`${gName}\` is produced at NATIVE scale (it meets eth_getBalance, 18dp)`,
+    defOf(gName) === "USDC_NATIVE_DECIMALS", `defined at ${defOf(gName)}`);
+  check(`🚨 the transfer's \`${tName}\` is produced at TOKEN scale (it meets ERC-20 transfer, 6dp)`,
+    defOf(tName) === "USDC_DECIMALS", `defined at ${defOf(tName)} — at 18 every fund is 10^12 too large and reverts`);
+  check("⛔ they are two different variables — one name cannot hold two scales",
+    !!tName && !!gName && tName !== gName, `transfer=${tName} guard=${gName}`);
 }
 
 console.log(`\n${fail ? "❌ FAILURES" : "✅ ALL GREEN"}   pass ${pass} / fail ${fail}\n`);

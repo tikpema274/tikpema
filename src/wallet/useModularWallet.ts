@@ -21,6 +21,7 @@ import {
 import { sign as signWebauthn } from "webauthn-p256";
 import { arcTestnet } from "../config/chain";
 import { CONTRACTS, USDC_DECIMALS, USDC_NATIVE_DECIMALS } from "../config/contracts";
+import { describeChainError } from "../lib/describeChainError";
 
 // -- Client-plane config. CLIENT_KEY is browser-safe (domain restricted). --
 const clientKey = import.meta.env.VITE_CLIENT_KEY as string;
@@ -663,8 +664,16 @@ export function useModularWallet() {
       const raw = await publicClient.getBalance({ address: account.address });
       // ⭐ parseUnits, not `Math.round(amountUsdc * 1e6)`. The old form did float arithmetic on a
       // money amount before flooring it; parseUnits works from the string and is exact.
-      const units = parseUnits(String(amountUsdc), USDC_NATIVE_DECIMALS);
-      if (units > raw) {
+      // 🚨 TWO VARIABLES, ONE AMOUNT — AND THE NAMES SAY WHICH INTERFACE EACH MEETS. `nativeUnits`
+      // (18) exists ONLY to be compared against eth_getBalance. The ERC-20 `transfer` below takes
+      // `units` at TOKEN scale (6) — the same rule the approve sites above state. From 8793764
+      // (2026-09-10) to this fix ONE variable at 18 served both: the guard compared correctly and
+      // then the identical value went into the calldata, so 1 USDC was sent as 0de0b6b3a7640000 =
+      // 1e18 = a trillion USDC and every passkey fund reverted "transfer amount exceeds balance".
+      // The suite that asserted "the amount is scaled natively" was satisfied by that very line;
+      // verify-client-native-balance §6 now follows the variable that reaches `transfer`.
+      const nativeUnits = parseUnits(String(amountUsdc), USDC_NATIVE_DECIMALS);
+      if (nativeUnits > raw) {
         throw new Error(
           // ⛔ 2dp COMPOSED INTO A SELF-CONTRADICTORY REFUSAL. A real balance of 2.0549 against a
           //   need of 2.0512 rendered as "You have 2.05, need 2.05" — a refusal whose own numbers
@@ -684,6 +693,9 @@ export function useModularWallet() {
           transport: modularTransport,
         });
         setStatus("Funding your agent wallet…");
+        // ⚠️ TOKEN scale (6), NOT native — the INVERSE of the balance read above. These units feed
+        // an ERC-20 `transfer`; scaling them natively sends 10^12 times the amount (and reverts).
+        const units = parseUnits(String(amountUsdc), USDC_DECIMALS);
         const data = encodeFunctionData({
           abi: TRANSFER_ABI,
           functionName: "transfer",
@@ -705,7 +717,8 @@ export function useModularWallet() {
         await refreshBalance().catch(() => {});
         return { txHash: receipt.transactionHash };
       } catch (e: any) {
-        setStatus(`Error: ${e.message}`);
+        // The status line is rendered too — same leak as the panel's error slot, same cut.
+        setStatus(`Error: ${describeChainError(e)}`);
         throw e;
       } finally {
         setBusy(false);
