@@ -89,6 +89,10 @@ mock.module("../netlify/functions/_bridge.mjs", {
     BRIDGE_DESTINATIONS: { base: { label: "Base (Sepolia)", cctpDomain: 6, explorerTx: "https://sepolia.basescan.org/tx/" } },
     bridgeMintStatus: async () => ({ state: "minted", mintTxHash: "0x" + "7f".repeat(32), mintTx: "https://sepolia.basescan.org/tx/0x7f" }),
     resolveDestination: (n) => (String(n).toLowerCase() === "base" ? { key: "base", label: "Base (Sepolia)", cctpDomain: 6 } : null),
+    // ⚠️ The balance read is a BOUNDARY here (2026-09-14: press 1 now reads it for the fail-open
+    // disclosure). Unmocked, viem's retry-with-backoff against the faked fetch cost ~5 s and pushed
+    // the [hang] budget over — a timing failure that read as a hang. A funded read, instantly.
+    readBridgeBalanceMinor: async () => ({ haveMinor: 1_000_000_000n, checked: true, error: null }),
     // ⭐ The quote fetch is faked, not the sealing: job-bridge-approve seals in-request now, and the
     // seal is real code under test rather than a network dependency.
     bridgeFee: async ({ amountUsdc }) => ({

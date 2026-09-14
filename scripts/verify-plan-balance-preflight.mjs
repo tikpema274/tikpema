@@ -163,5 +163,31 @@ section("4 — ⛔ THE MONITOR'S PROBE: 200 over a 50 cap from a 3.65 wallet rea
   check("⭐ nothing executed", execCalls.length === 0);
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("5 — ⛔ THE FAIL-OPEN IS CARRIED TO THE PRE-PRESS BODIES (what the render suite then shows)");
+{
+  // plan re-quote card (agent-execute-plan quoteOnly)
+  balanceMinor = 10_000_000n; readThrows = false;
+  const ok = parse(await post({ plan: twoBridges, quoteOnly: true }));
+  check("⭐ requote body says balanceChecked:true when the read worked", ok.body.balanceChecked === true, `balanceChecked=${ok.body.balanceChecked}`);
+  readThrows = true;
+  const bad = parse(await post({ plan: twoBridges, quoteOnly: true }));
+  check("⛔ requote body says balanceChecked:false when the read failed — and still quotes (a read, never a refusal here)",
+    bad.body.balanceChecked === false && bad.body.requoted === true, `balanceChecked=${bad.body.balanceChecked} requoted=${bad.body.requoted}`);
+  readThrows = false;
+
+  // the panel / chat single-action CONFIRM endpoint (agent-bridge quoteOnly): the flag rides INSIDE quote
+  const { handler: bridgeHandler } = await import("../netlify/functions/agent-bridge.mjs");
+  const bpost = (body) => bridgeHandler({ httpMethod: "POST", headers: {}, blobs: null, body: JSON.stringify(body) });
+  balanceMinor = 10_000_000n;
+  const q1 = parse(await bpost({ amountUsdc: 1, destination: "base", quoteOnly: true }));
+  check("⭐ agent-bridge quoted body: quote.balanceChecked:true when read", q1.body.quoted === true && q1.body.quote?.balanceChecked === true, `quoted=${q1.body.quoted} inner=${q1.body.quote?.balanceChecked}`);
+  readThrows = true;
+  const q2 = parse(await bpost({ amountUsdc: 1, destination: "base", quoteOnly: true }));
+  check("⛔ agent-bridge quoted body: quote.balanceChecked:false when the read failed — still quoted, not refused",
+    q2.body.quoted === true && q2.body.quote?.balanceChecked === false, `quoted=${q2.body.quoted} inner=${q2.body.quote?.balanceChecked}`);
+  readThrows = false;
+}
+
 console.log(`\n${fail ? "❌ FAILURES" : "✅ ALL GREEN"}   pass ${pass} / fail ${fail}\n`);
 process.exit(fail ? 1 : 0);

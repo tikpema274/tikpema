@@ -2,6 +2,7 @@ import { MINT_TIMING } from "../../shared/bridge-timing.mjs";
 // ⛔ BOTH AXES COME FROM THE PRODUCER. This component states neither the fee placement nor the
 // leave/stay instruction in its own words — it renders the copy keyed by what the quote declares.
 import { bridgeMechanicCopy, bridgeSignerCopy } from "../../shared/bridge-mechanic.mjs";
+import { balanceUnverifiedNote } from "../../shared/balance-unverified-copy.mjs";
 import { displayAmount } from "../lib/formatAmount";
 import type { ReactNode } from "react";
 
@@ -100,6 +101,13 @@ export function BridgeQuoteSummary(
           Both, not either: a reader who scans the numbers gets the mechanic, and a reader who reads
           the prose gets it too, without either having to derive it from the other. */}
       {quote && <div className="summary-note">The fee is {mech.feePlacement}.</div>}
+      {/* ⛔ THE FAIL-OPEN, DISCLOSED. When the producer could not read the balance it proceeds on the
+          provider's own check — and says so here, before the press. Keyed on the PRODUCER's
+          `balanceChecked === false`; `true` and absent (a self-signed quote) render nothing.
+          One sentence, one producer: shared/balance-unverified-copy.mjs. */}
+      {quote && balanceUnverifiedNote(quote.balanceChecked) && (
+        <div className="summary-note" style={{ color: "var(--warn)" }}>{balanceUnverifiedNote(quote.balanceChecked)}</div>
+      )}
       {/* ⭐⭐ THIS QUALIFIES THE TWO ROWS ABOVE, so it sits under them rather than becoming a peer
           row. It is not a value — it is a statement ABOUT the value — and a `Binding: held` row
           would be jargon while `Quote valid: 3 min` would say something true but different,

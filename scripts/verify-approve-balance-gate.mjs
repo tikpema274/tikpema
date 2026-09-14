@@ -33,8 +33,9 @@ mock.module("../netlify/functions/_agent-wallets.mjs", { namedExports: { ...REAL
 
 // ── the balance the pre-flight read returns (6-dp minor units) ──
 let balanceMinor = 0n;
+let balanceReadThrows = false;   // ⛔ the fail-open case: the read fails, press 1 must SAY so
 mock.module("../netlify/functions/_predict.mjs", {
-  namedExports: { publicClient: () => ({ readContract: async () => balanceMinor }) },
+  namedExports: { publicClient: () => ({ readContract: async () => { if (balanceReadThrows) throw new Error("rpc down"); return balanceMinor; } }) },
 });
 
 // executeAction: instrumented so we can PROVE it is not called on the reject path.
@@ -202,6 +203,23 @@ check("⭐⭐ every executing case was preceded by a QUOTED first press", quoted
 check("⭐⭐ the quote body carries the fee the seal holds (0.054129) and a window", quoteShapeOk);
 check("⛔ the sealed token is NEVER in the response body — it lives on the record", !tokenLeaked);
 check("⭐⭐ …and it IS on the persisted proposal, which the second press opens", persistedOk);
+
+// ═══ ⛔ THE FAIL-OPEN, DISCLOSED AT PRESS 1 (2026-09-14) ═══════════════════════════════════════
+// When the balance read fails, press 2 proceeds on Circle's backstop. The card must be able to SAY
+// so before the confirm press — so press 1's quote carries `balanceChecked`, false on a failed read.
+console.log("\nCASE 5: press 1 carries balanceChecked — true on a read, FALSE when the read failed (still quoted)");
+{
+  await seed(10); balanceMinor = 20_000_000n; balanceReadThrows = false;
+  const b1 = JSON.parse((await rawCall()).body);
+  check("⭐ press 1 quote.balanceChecked === true when the read worked", b1.quoted === true && b1.quote?.balanceChecked === true, `quoted=${b1.quoted} inner=${b1.quote?.balanceChecked}`);
+  await seed(10); balanceReadThrows = true;
+  const b2 = JSON.parse((await rawCall()).body);
+  check("⛔ press 1 quote.balanceChecked === false when the read failed — and it still QUOTES (a disclosure, not a refusal)",
+    b2.quoted === true && b2.quote?.balanceChecked === false, `quoted=${b2.quoted} inner=${b2.quote?.balanceChecked}`);
+  check("⛔ …and the persisted seal does not carry the flag (it is a reading, not part of the quote's identity)",
+    !("balanceChecked" in ((await deliv.get("job-1"))?.proposal?.quote ?? {})));
+  balanceReadThrows = false;
+}
 
 console.log(`\n${fail === 0 ? "✅ ALL PASS" : "❌ FAILURE"} — ${pass} passed, ${fail} failed. Zero money.`);
 process.exit(fail === 0 ? 0 : 1);

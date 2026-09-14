@@ -174,7 +174,10 @@ export async function handler(event) {
     await store.setJSON(run.jobId, { ...entry, proposal: { ...proposal, quote } });
     // The token stays server-side; the card gets every figure and the window, not the handle.
     const { quoteToken: _omit, ...shown } = quote;
-    return json(status, { executed: false, quoted: true, quoteExpired: !!quoteExpired, quote: shown });
+    // ⛔ The fail-open, disclosed at press 1: the card renders this before the confirm press. The
+    // refusal itself stays at press 2 (the sealed figure), unchanged.
+    const { checked: balanceChecked } = await readBridgeBalanceMinor(walletAddress);
+    return json(status, { executed: false, quoted: true, quoteExpired: !!quoteExpired, quote: { ...shown, balanceChecked } });
   };
 
   const persisted = proposal.quote?.quoteToken;

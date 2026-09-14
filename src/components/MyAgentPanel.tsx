@@ -1,5 +1,6 @@
 import { BRIDGE_TIMING, MINT_TIMING } from "../../shared/bridge-timing.mjs";
 import { bridgeProposalFeeLine } from "../../shared/bridge-mechanic.mjs";
+import { balanceUnverifiedNote } from "../../shared/balance-unverified-copy.mjs";
 import { useEffect, useRef, useState } from "react";
 import { agentClient } from "../lib/agentClient";
 import SignInPrompt from "./SignInPrompt";
@@ -201,7 +202,7 @@ export default function MyAgentPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   // ⭐ A RE-QUOTE REPLACES THE PROPOSAL'S FIGURES IN PLACE — new fees, new seals, a fresh stamp — and
   // clears every acknowledgement, because a tick given against one figure is not a tick for another.
   function applyPlanRequote(res: any) {
-    setResult((prev: any) => (prev ? { ...prev, stepDisclosures: res.stepDisclosures, requoted: true, quoteExpiredNote: !!res.quoteExpired } : prev));
+    setResult((prev: any) => (prev ? { ...prev, stepDisclosures: res.stepDisclosures, requoted: true, quoteExpiredNote: !!res.quoteExpired, ...(typeof res.balanceChecked === "boolean" ? { balanceChecked: res.balanceChecked } : {}) } : prev));
     setQuotedAt(Date.now());
     setPlanAcked({});
     setPlanRun(null);
@@ -867,6 +868,10 @@ export function AgentSummary({
               `b.mechanic` absent → "unknown" → no placement claimed, no arrival extended.
               verify-bridge-mechanic-pairing §10 refuses either mechanic's literal on this file. */}
           {bridgeProposalFeeLine({ feeUsdc: b.feeUsdc, netUsdc: b.netUsdc, destinationLabel: b.destination.label, mechanic: b.mechanic })}
+          {/* ⛔ The fail-open, disclosed: agent-act could not read the balance when it proposed this. */}
+          {balanceUnverifiedNote(b.balanceChecked) && (
+            <div style={{ color: "var(--warn)", marginTop: 4 }}>{balanceUnverifiedNote(b.balanceChecked)}</div>
+          )}
           <br />
           Funds leave Arc — {BRIDGE_TIMING}.
         </div>
@@ -1036,6 +1041,10 @@ export function AgentSummary({
             <> + ~{Number(data.totalFeeUsdc).toFixed(4)} USDC in cross-chain fees</>
           )}:
         </div>
+        {/* ⛔ The fail-open, disclosed: the plan's balance could not be read when it was proposed or re-priced. */}
+        {balanceUnverifiedNote(data.balanceChecked) && (
+          <div style={{ color: "var(--warn)", marginBottom: 6 }}>{balanceUnverifiedNote(data.balanceChecked)}</div>
+        )}
         <ol style={{ margin: "0 0 8px 18px", padding: 0 }}>
           {data.plan.map((s: any, i: number) => {
             const r = runResults?.[i];

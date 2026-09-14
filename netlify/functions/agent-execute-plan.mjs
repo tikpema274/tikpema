@@ -180,8 +180,11 @@ export async function handler(event) {
     }
     // 409 for a stale/missing seal on a CONFIRM (the caller expected execution and must re-confirm);
     // 200 for the panel's own re-price press, which expected exactly this.
+    // ⛔ The fail-open, disclosed on the re-quote card too — a read, never a refusal here (the
+    // refusal is at plan stage below, after the cap, so the monitor's probe is untouched).
+    const { checked: balanceChecked } = await readBridgeBalanceMinor(walletAddress);
     return json(reason === "quoteOnly" ? 200 : 409, {
-      executed: false, needsConfirm: true, requoted: true,
+      executed: false, needsConfirm: true, requoted: true, balanceChecked,
       quoteExpired: reason === "expired", quoteRequired: reason === "missing",
       ...(reason === "quoteOnly" ? {} : { blocked: reason === "expired"
         ? "the bridge quote you were shown has expired — here is a fresh one; nothing was executed. Confirm the new figure to run the plan."

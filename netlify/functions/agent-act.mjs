@@ -470,8 +470,12 @@ export async function handler(event) {
       // (_bridge.mjs); agent-execute-plan repeats it at execution so a stale proposal cannot slip.
       // ⛔ An unread balance is NOT a shortfall — the proposal proceeds, marked balanceChecked:false.
       // ⛔ 200 + blocked, like every refusal on this endpoint: the chat renders "held off — …".
+      // ⛔ `balanceChecked` RIDES ON THE PROPOSAL TOO, not only the refusal — a read that failed is a
+      // disclosure the chat renders before Confirm (shared/balance-unverified-copy.mjs).
+      let planBalanceChecked;
       if (bridgeIdx.length > 0) {
         const { haveMinor, checked } = await readBridgeBalanceMinor(walletAddress);
+        planBalanceChecked = checked;
         const short = bridgeBalanceRefusal({
           haveMinor, scope: "plan",
           steps: bridgeIdx.map((i) => ({ amountMinor: fees[i].amountMinor, feeMinor: fees[i].feeMinor, destLabel: resolveDestination(steps[i].destination).label })),
@@ -530,6 +534,7 @@ export async function handler(event) {
       return json(200, {
         executed: false,
         needsConfirm: true,
+        ...(typeof planBalanceChecked === "boolean" ? { balanceChecked: planBalanceChecked } : {}),
         // Parallel to stepDisclosures — see the comment where it is built. Keyed by the same
         // step index so one `planAcked` map covers both kinds.
         vaultDisclosures,
@@ -617,16 +622,18 @@ export async function handler(event) {
       // ⭐ The balance pre-flight at proposal time — the fee is priced, so NEED is amount + fee.
       // Refused here, the chat shows both figures instead of a Confirm that agent-bridge would 402.
       // Same reader, same sentence as the panel (_bridge.mjs). Unread → proceed, balanceChecked:false.
+      const { haveMinor, checked: singleBalanceChecked } = await readBridgeBalanceMinor(walletAddress);
       {
-        const { haveMinor, checked } = await readBridgeBalanceMinor(walletAddress);
         const short = bridgeBalanceRefusal({ haveMinor, steps: { amountMinor: fee.amountMinor, feeMinor: fee.feeMinor, destLabel: dest.label } });
-        if (short) return json(200, { executed: false, decision, blocked: short.body.blocked, insufficient: true, have: short.body.have, need: short.body.need, balanceChecked: checked });
+        if (short) return json(200, { executed: false, decision, blocked: short.body.blocked, insufficient: true, have: short.body.have, need: short.body.need, balanceChecked: singleBalanceChecked });
       }
       return json(200, {
         executed: false,
         needsBridgeConfirm: true,
         decision,
         bridge: {
+          // ⛔ the fail-open, disclosed: rendered by the chat's confirm card when false
+          balanceChecked: singleBalanceChecked,
           amountUsdc: amount,
           destination: { key: dest.key, label: dest.label },
           feeUsdc: Number(fee.feeUsdc.toFixed(6)),

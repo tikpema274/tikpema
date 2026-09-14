@@ -110,6 +110,9 @@ export async function handler(event) {
       quoted: true,
       balanceChecked,
       quote: {
+        // ⛔ inside the quote too — BridgePanel keeps `res.quote`, and BridgeQuoteSummary renders the
+        // fail-open disclosure from it (shared/balance-unverified-copy.mjs).
+        balanceChecked,
         amountUsdc: amount,
         destination: { key: dest.key, label: dest.label },
         feeUsdc: Number(fee.feeUsdc.toFixed(6)),

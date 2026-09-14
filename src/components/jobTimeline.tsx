@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { bridgeMechanicCopy, bridgeProposalFeeLine } from "../../shared/bridge-mechanic.mjs";
+import { balanceUnverifiedNote } from "../../shared/balance-unverified-copy.mjs";
 import type { BridgeQuote } from "../lib/approveProposal";
 // jobTimeline.tsx — shared paid-research-job rendering primitives.
 //
@@ -467,6 +468,10 @@ function BridgeProposalBody({ proposal, bridgeQuote, ...rest }: ProposalCardProp
           )}
           <b>Quoted:</b> {bridgeProposalFeeLine({ feeUsdc: q.feeUsdc, netUsdc: q.netUsdc, destinationLabel: q.destination.label, mechanic: q.mechanic })}{" "}
           This is the figure that will be signed — confirm and exactly this fee is charged. Bridging is one-way.
+          {/* ⛔ The fail-open, disclosed: the approve endpoint could not read the balance at press 1. */}
+          {balanceUnverifiedNote((q as any).balanceChecked) && (
+            <div style={{ color: "var(--warn)", marginTop: 4 }}>{balanceUnverifiedNote((q as any).balanceChecked)}</div>
+          )}
           {secondsLeft !== null && !expired && secondsLeft <= QUIET_ABOVE_S && (
             <div style={{ opacity: 0.8, marginTop: 4 }}>Good for another {secondsLeft}s — after that it is priced again before anything runs.</div>
           )}
