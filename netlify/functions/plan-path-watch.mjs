@@ -144,7 +144,7 @@ export async function handler(event) {
   console.log(`[plan-watch] cadence-before-this-run=${cadence.cadence} runCount=${record.runCount} skipCount=${record.skipCount}`);
 
   console.log(
-    `[plan-watch] ${judgement.outcome.toUpperCase()} reason=${judgement.reason} ` +
+    `[plan-watch] ${judgement.outcome.toUpperCase()} reason=${judgement.reason} matchedBy=${record.matchedBy ?? "—"} fieldStreak=${record.fieldStreak} ` +
       `receipts=${receiptsBefore}→${receiptsAfter} detail=${judgement.detail}`
   );
 

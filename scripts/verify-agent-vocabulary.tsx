@@ -441,8 +441,11 @@ section("9 — 🚨 ONE ACTION, ONE BOUND, ON EVERY PATH THAT BOUNDS IT");
   // sends the user to change the wrong setting.
   check("⭐ agent-act's refusal names the governing cap, derived",
     /capLabelFor\(steps\[over\]\)/.test(act) && !/isBridge \? "bridge" : "transaction"/.test(act));
+  // ⚠️ RE-POINTED 2026-09-14: the cap refusal is now a FIELD (capRefusal) whose sentence is derived in
+  //   _refusal.mjs. The property — the refusal's cap and label come from the SAME helpers the check
+  //   read — is asserted on the field's construction. [[guard-pinned-to-location-not-behaviour]]
   check("⭐⭐ the plan executor's refusal reads the SAME helper the check read",
-    /per-\$\{capLabelForA\(step\)\} limit of \$\{capUsdcFor\(step\)\}/.test(plan),
+    /capRefusal\(\{[^}]*capUsdc:\s*capUsdcFor\(step\)[^}]*capLabel:\s*capLabelForA\(step\)/.test(plan),
     "it re-derived `isBridge ? bcap : cap` one line from the check — a second selection");
   check("🚨 …and that second inline selection is gone",
     !/limit of \$\{isBridge \? bcap : cap\}/.test(plan));

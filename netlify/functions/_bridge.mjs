@@ -23,7 +23,7 @@ import { ARC, CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 import { publicClient } from "./_predict.mjs";
 import { normalizeQuoteExpiry, assertQuoteUnexpired } from "./_quote-expiry.mjs";
 import { bridgeMechanicOf } from "../../shared/bridge-mechanic.mjs";
-import { availableAmount, requiredAmount } from "../../shared/amount-direction.mjs";
+import { balanceRefusal, refusalSentence } from "./_refusal.mjs";
 
 export const BRIDGE_CONTRACT = "0xC5567a5E3370d4DBfB0540025078e283e36A363d"; // BridgingKitContract (Arc testnet)
 const IRIS = "https://iris-api-sandbox.circle.com"; // testnet IRIS
@@ -477,20 +477,14 @@ export function bridgeBalanceRefusal({ haveMinor, steps, scope = "single" }) {
   const needMinor = amountMinor + feeMinor;
   if (have >= needMinor) return null;                                     // enough
   const toU = (m) => Number(formatUnits(m, USDC_DECIMALS));
-  const have6 = availableAmount(toU(have), USDC_DECIMALS);
-  const need6 = requiredAmount(toU(needMinor), USDC_DECIMALS);
-  const amount6 = toU(amountMinor);
-  const fee6 = requiredAmount(toU(feeMinor), USDC_DECIMALS);
   const dests = [...new Set(list.map((st) => st.destLabel).filter(Boolean))].join(" and ");
-  const error = scope === "plan"
-    ? `Insufficient funds in your agent wallet for this plan: have ${have6} USDC, its ${list.length} bridge step${list.length === 1 ? "" : "s"} need ` +
-      (anyFee ? `${need6} USDC (${amount6} + ~${fee6} in fees, to ${dests}). ` : `at least ${amount6} USDC to ${dests} (the fees come on top). `) +
-      `Nothing was executed — the whole plan is refused, not a step of it. Top up the agent wallet and retry.`
-    : anyFee
-      ? `Insufficient funds in your agent wallet: have ${have6} USDC, need ${need6} USDC (${amount6} + ~${fee6} fee to ${dests}). No funds moved and nothing was quoted — top up the agent wallet and retry.`
-      : `Insufficient funds in your agent wallet: have ${have6} USDC, need at least ${amount6} USDC to bridge to ${dests} (the fee comes on top). No funds moved and nothing was quoted — top up the agent wallet and retry.`;
+  // ⭐ THE FIELD FIRST; THE SENTENCE IS DERIVED FROM IT (refusalSentence, _refusal.mjs). Nothing here
+  // writes a number into prose — mutate the field and the sentence changes.
+  const refusal = balanceRefusal({ have: toU(have), need: toU(needMinor), amount: toU(amountMinor),
+    fee: anyFee ? toU(feeMinor) : null, dests, scope, stepCount: list.length });
+  const error = refusalSentence(refusal);
   return { status: 402, body: { outcome: "quote_failed", executed: false, quoted: false, error, blocked: error,
-    have: toU(have), need: toU(needMinor), insufficient: true } };
+    have: refusal.have, need: refusal.need, insufficient: true, refusal } };
 }
 
 /**

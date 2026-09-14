@@ -189,5 +189,41 @@ section("5 — ⛔ THE FAIL-OPEN IS CARRIED TO THE PRE-PRESS BODIES (what the re
   readThrows = false;
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("6 — ⭐⭐ A TERMINAL REFUSAL IS A FIELD, AND THE SENTENCE IS DERIVED FROM IT (phase 1)");
+{
+  const { refusalSentence, capRefusal, balanceRefusal, priceUnavailableRefusal, ceilingRefusal, REFUSAL_KIND } = await import("../netlify/functions/_refusal.mjs");
+  // (a) the handler's cap refusal carries the field, and its sentence IS the derivation of that field
+  balanceMinor = 3_650_000n; readThrows = false;
+  const probe = [{ type: "bridge_usdc", amountUsdc: 200, destination: "base", reasoning: "plan-path-watch probe" }];
+  const { r } = await run(probe);
+  const res0 = r.body?.results?.[0];
+  check("⭐ results[0].refusal is present on the cap refusal", !!res0?.refusal, JSON.stringify(res0?.refusal));
+  check("⭐ …kind:cap with valuedUsdc, capUsdc, capLabel, feeUsdc", res0?.refusal?.kind === "cap" && res0.refusal.valuedUsdc > 200 && res0.refusal.capUsdc === 50 && res0.refusal.capLabel === "bridge" && res0.refusal.feeUsdc === 0.054129,
+    JSON.stringify(res0?.refusal));
+  check("⭐⭐ results[0].blocked === refusalSentence(results[0].refusal) — derived, not written beside it", res0?.blocked === refusalSentence(res0?.refusal), res0?.blocked);
+  check("⭐ the sentence is byte-identical to the pre-field wording the monitor's regex reads", /^step ~200\.05 exceeds per-bridge limit of 50 USDC$/.test(res0?.blocked ?? ""), res0?.blocked);
+  // (b) MUTATE THE FIELD → THE SENTENCE MUST CHANGE (a sentence written alongside would not)
+  const mutated = refusalSentence({ ...res0.refusal, valuedUsdc: 300.05 });
+  check("⭐⭐ mutating valuedUsdc changes the sentence", mutated !== res0.blocked && /300\.05/.test(mutated), mutated);
+  check("⭐⭐ mutating capUsdc changes the sentence", /limit of 75 USDC/.test(refusalSentence({ ...res0.refusal, capUsdc: 75 })));
+  // (c) the plan-level balance refusal carries its field and derives its sentence too
+  const { r: bal } = await run(twoBridges);
+  check("⭐ the balance refusal carries refusal:{kind:balance, have, need}", bal.body?.refusal?.kind === "balance" && bal.body.refusal.have === 3.65 && Math.abs(bal.body.refusal.need - 4.108258) < 1e-9, JSON.stringify(bal.body?.refusal));
+  check("⭐⭐ its blocked === refusalSentence(refusal)", bal.body?.blocked === refusalSentence(bal.body?.refusal));
+  check("⭐⭐ mutating `have` changes the balance sentence", /have 1\.000000 USDC/.test(refusalSentence({ ...bal.body.refusal, have: 1 })));
+  // (d) priceUnavailable: the field is structurally distinct from balance and cap
+  const pu = priceUnavailableRefusal({ step: 0, detail: "quote 503" });
+  check("⭐ priceUnavailable derives its sentence and is its own kind", pu.kind === REFUSAL_KIND.PRICE_UNAVAILABLE && /step 1: cannot reach the bridge pricing service right now \(quote 503\)/.test(refusalSentence(pu)));
+  check("⭐ ceiling derives its sentence", /would exceed daily agent-spend ceiling of 1000 USDC \(already committed ~2\.50 today\)/.test(refusalSentence(ceilingRefusal({ ceilingUsdc: 1000, committedUsdc: 2.5 }))));
+  check("⛔ an unknown kind derives NO sentence (never a plausible label)", refusalSentence({ kind: "mystery" }) === null && refusalSentence(null) === null);
+  // (e) and the handler no longer WRITES any of these sentences itself — the only producer is _refusal.mjs
+  const { readFileSync } = await import("node:fs");
+  const handlerSrc = readFileSync("netlify/functions/agent-execute-plan.mjs", "utf8").replace(/^\s*\/\/.*$/gm, "");
+  check("⛔ agent-execute-plan writes NO cap / ceiling / pricing sentence of its own (no drift pair)",
+    !/exceeds per-\$\{/.test(handlerSrc) && !/would exceed daily agent-spend ceiling of \$\{/.test(handlerSrc) && !/cannot reach the bridge pricing service right now \(\$\{/.test(handlerSrc));
+  void capRefusal; void balanceRefusal;
+}
+
 console.log(`\n${fail ? "❌ FAILURES" : "✅ ALL GREEN"}   pass ${pass} / fail ${fail}\n`);
 process.exit(fail ? 1 : 0);

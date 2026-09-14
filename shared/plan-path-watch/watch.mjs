@@ -166,10 +166,19 @@ export function judgePlanProbe(res, spend = {}) {
   if (res?.networkError) return cannot(REASON.UNREACHABLE, `the endpoint could not be reached (${res.networkError})`);
   // ⚠️ NOT a health signal — only a readability one. The outage returned 200; this rejects 4xx/5xx
   // as "we could not ask", which is a different claim from "the path is broken".
-  if (res?.status !== 200) return cannot(REASON.HTTP_ERROR, `the endpoint answered HTTP ${res?.status}`);
+  // ⭐ PHASE 2: a 402 that carries a structured `refusal` is an ANSWER, not an inability to ask — the
+  // plan-level balance refusal is 402 by contract (a client condition, like agent-ub-spend's). Only
+  // a 402 WITH the field passes; a bare 402 is still "we could not ask". Today the probe never
+  // reaches it (the cap answers first); this is what keeps a future guard reorder from turning the
+  // probe's reading into HTTP_ERROR. Nothing is reordered by this.
+  let body402 = null;
+  if (res?.status === 402) {
+    try { const b = JSON.parse(String(res.body ?? "")); if (isObj(b) && isObj(b.refusal)) body402 = b; } catch { /* fall through */ }
+  }
+  if (res?.status !== 200 && !body402) return cannot(REASON.HTTP_ERROR, `the endpoint answered HTTP ${res?.status}`);
 
   let body;
-  try { body = JSON.parse(String(res.body ?? "")); }
+  try { body = body402 ?? JSON.parse(String(res.body ?? "")); }
   catch {
     return cannot(REASON.NOT_JSON, `the response was not JSON (content-type ${res.contentType || "none"}) — most likely the SPA fallback, which means the function is not deployed`);
   }
@@ -232,15 +241,48 @@ export function judgePlanProbe(res, spend = {}) {
  * The cap refusal names a value that INCLUDES the fee ("step ~200.05 exceeds…"), which is only
  * derivable if the fee was resolved — so it is positive evidence, not an absence of failure.
  */
+/**
+ * ═══ PHASE 2 (2026-09-14): THE FIELD FIRST, THE REGEX AS A ONE-DEPLOY FALLBACK ══════════════════
+ * agent-execute-plan now carries `refusal = {kind, …figures}` on every terminal refusal — at
+ * `results[i].refusal` for a step-level one and at the top level for a plan-level one — and derives
+ * its sentence from it (_refusal.mjs). This reader keys on the FIELD. The sentence regex remains
+ * only so the first deploy of the monitor cannot regress against a prod that has not yet shipped
+ * the field — and because the fallback is an OR, it cannot by itself show the field works. So
+ * EVERY disclosure names which branch produced it: `matchedBy: "field" | "regex"`, recorded on the
+ * tick. ⭐ PROMOTION CRITERION, set now: FIELD_STREAK_TO_PROMOTE consecutive HEALTHY ticks with
+ * matchedBy === "field" (buildRecord counts them as `fieldStreak`). "It stayed healthy" is not the
+ * criterion — the regex alone satisfies that. Phase 3 drops the regex once the streak is met.
+ *
+ * ⛔ A `balance` refusal is a PRICED decision too — its NEED includes the sealed fee, so reaching it
+ * proves valuation and pricing ran, exactly the property this monitor exists to observe. It is
+ * recognised here structurally (kind === "balance"), so a future reordering of the guards (balance
+ * before cap) does not turn the probe's reading into REFUSED_OTHER. Nothing is reordered by this.
+ */
+export const FIELD_STREAK_TO_PROMOTE = 3;
+/** Phase 3 may drop the regex only when this is true of the LATEST record. */
+export const promotionReady = (record) => Number.isFinite(record?.fieldStreak) && record.fieldStreak >= FIELD_STREAK_TO_PROMOTE;
+
 export function firstDisclosure(body) {
   const sd = body?.stepDisclosures;
   if (isObj(sd)) {
     const k = Object.keys(sd)[0];
     const d = k !== undefined ? sd[k] : null;
     if (isObj(d) && typeof d.band === "string") {
-      return { kind: "band", band: d.band, feeUsdc: d.feeUsdc ?? null, feeRatio: d.feeRatio ?? null };
+      return { kind: "band", band: d.band, feeUsdc: d.feeUsdc ?? null, feeRatio: d.feeRatio ?? null, matchedBy: "field" };
     }
   }
+  // ── the field (phase 2) ──
+  const f = isObj(body?.refusal) ? body.refusal : isObj(body?.results?.[0]?.refusal) ? body.results[0].refusal : null;
+  if (f && f.kind === "cap" && Number.isFinite(Number(f.valuedUsdc)) && Number.isFinite(Number(f.capUsdc))) {
+    const valued = Number(f.valuedUsdc);
+    return { kind: "cap", valuedUsdc: valued, capUsdc: Number(f.capUsdc),
+             feeImpliedUsdc: Number((valued - PROBE_AMOUNT_USDC).toFixed(6)), matchedBy: "field" };
+  }
+  if (f && f.kind === "balance" && Number.isFinite(Number(f.need)) && Number.isFinite(Number(f.have))) {
+    return { kind: "balance", haveUsdc: Number(f.have), needUsdc: Number(f.need),
+             feeImpliedUsdc: Number((Number(f.need) - PROBE_AMOUNT_USDC).toFixed(6)), matchedBy: "field" };
+  }
+  // ── the regex (fallback for ONE deploy; phase 3 removes it) ──
   const capMsg = String(body?.results?.[0]?.blocked ?? "");
   // "step ~200.05 exceeds per-bridge limit of 25 USDC" — the ~figure is the VALUED amount.
   const m = /step ~([0-9]+(?:\.[0-9]+)?) exceeds per-bridge limit of ([0-9.]+)/i.exec(capMsg);
@@ -249,7 +291,7 @@ export function firstDisclosure(body) {
     return { kind: "cap", valuedUsdc: valued, capUsdc: Number(m[2]),
              // ⭐ THE FEE IS VISIBLE IN THE VALUATION. valued > requested means amount + fee, the
              // post-f760077 semantics. Reported so a reader can see the mechanism, not just a verdict.
-             feeImpliedUsdc: Number((valued - PROBE_AMOUNT_USDC).toFixed(6)) };
+             feeImpliedUsdc: Number((valued - PROBE_AMOUNT_USDC).toFixed(6)), matchedBy: "regex" };
   }
   return null;
 }
@@ -398,6 +440,12 @@ export function buildRecord({ judgement, target, producedAt, deployId = null, pr
     reason: judgement.reason,
     detail: judgement.detail,
     disclosure: judgement.disclosure,
+    // ⭐ PHASE 2: which branch produced the disclosure, and the streak of HEALTHY ticks matched by the
+    // FIELD alone — the promotion criterion for dropping the regex (FIELD_STREAK_TO_PROMOTE).
+    matchedBy: judgement.disclosure?.matchedBy ?? null,
+    fieldStreak: judgement.outcome === OUTCOME.HEALTHY && judgement.disclosure?.matchedBy === "field"
+      ? (Number.isFinite(prev?.fieldStreak) ? prev.fieldStreak : 0) + 1
+      : 0,
     spend: judgement.spend,
     target,
     deployId,

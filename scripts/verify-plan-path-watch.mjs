@@ -16,6 +16,7 @@ import {
   PROBE_AMOUNT_USDC, DEFAULT_TARGET_URL, DEFAULT_PROBE_OWNER,
   judgePlanProbe, decideNotify, shouldSkipRerun, evaluateRecord, notifyMessage, buildRecord,
   firstDisclosure, assertNoSpend, isCannotVerify, buildSkipRecord, judgeCadence, CADENCE,
+  FIELD_STREAK_TO_PROMOTE, promotionReady,
   TICK_HISTORY, intervalsOf,
 } from "../shared/plan-path-watch/watch.mjs";
 
@@ -351,6 +352,55 @@ section("9 ⭐⭐ CAN THE STORE SAY WHETHER IT KEPT RUNNING? — one read, no li
   ok("⭐ the handler WRITES on the skip path rather than returning silently",
     /buildSkipRecord\(/.test(HANDLER) &&
     HANDLER.indexOf("buildSkipRecord(") < HANDLER.indexOf("skipped: true"));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("10 ⭐⭐ PHASE 2 — THE FIELD FIRST, THE REGEX AS FALLBACK, AND WHICH ONE MATCHED IS RECORDED");
+{
+  const FIELD_BODY = { ...CAP_BODY, results: [{ index: 0, ok: false,
+    blocked: "step ~200.05 exceeds per-bridge limit of 25 USDC",
+    refusal: { kind: "cap", valuedUsdc: 200.05, capUsdc: 25, capLabel: "bridge", feeUsdc: 0.05 } }] };
+  const jf = judgePlanProbe(res({ body: json(FIELD_BODY) }), SPEND);
+  ok("⭐ a body carrying results[0].refusal{kind:cap} is HEALTHY", jf.outcome === OUTCOME.HEALTHY && jf.disclosure?.kind === "cap");
+  ok("⭐⭐ …and says it was matched by the FIELD", jf.disclosure?.matchedBy === "field", `matchedBy=${jf.disclosure?.matchedBy}`);
+  ok("⭐ the figures come from the field, not the sentence", jf.disclosure?.valuedUsdc === 200.05 && jf.disclosure?.capUsdc === 25);
+  const jr = judgePlanProbe(res({ body: json(CAP_BODY) }), SPEND);
+  ok("⭐ the pre-field body (sentence only) is still HEALTHY — the one-deploy fallback", jr.outcome === OUTCOME.HEALTHY);
+  ok("⭐⭐ …and says it was matched by the REGEX — an OR cannot show the field works, so the branch is named", jr.disclosure?.matchedBy === "regex", `matchedBy=${jr.disclosure?.matchedBy}`);
+  // the field wins over a DIFFERENT sentence: figures are read from the field when both exist
+  const DISAGREE = { ...FIELD_BODY, results: [{ ...FIELD_BODY.results[0], blocked: "step ~999.99 exceeds per-bridge limit of 1 USDC" }] };
+  const jd = judgePlanProbe(res({ body: json(DISAGREE) }), SPEND);
+  ok("⭐ when field and sentence disagree, the FIELD is read (200.05, not 999.99)", jd.disclosure?.valuedUsdc === 200.05 && jd.disclosure?.matchedBy === "field");
+  // a malformed field falls back to the regex — and says so
+  const MALFORMED = { ...FIELD_BODY, results: [{ ...FIELD_BODY.results[0], refusal: { kind: "cap", valuedUsdc: "x" } }] };
+  ok("⭐ a malformed field falls to the regex and is labelled regex", judgePlanProbe(res({ body: json(MALFORMED) }), SPEND).disclosure?.matchedBy === "regex");
+  // a plan-level field at the top level (the balance refusal's shape) is read too
+  const TOP = { executed: false, stepsRun: 0, stepsTotal: 1, results: [], blocked: "Insufficient funds …",
+    refusal: { kind: "balance", have: 3.65, need: 200.05, amount: 200, fee: 0.05, dests: "Base", scope: "plan", stepCount: 1 } };
+  const jb = judgePlanProbe(res({ status: 402, body: json(TOP) }), SPEND);
+  ok("⭐⭐ a 402 balance refusal WITH the field is a PRICED decision — HEALTHY, kind balance, matched by field (need includes the fee)",
+    jb.outcome === OUTCOME.HEALTHY && jb.disclosure?.kind === "balance" && jb.disclosure?.matchedBy === "field", `${jb.outcome}/${jb.reason} ${JSON.stringify(jb.disclosure)}`);
+  ok("⛔ a bare 402 (no field) is still UNREADABLE http-error — not healthy, not blocked",
+    judgePlanProbe(res({ status: 402, body: json({ error: "Insufficient funds …" }) }), SPEND).reason === REASON.HTTP_ERROR);
+  ok("⛔ a 200 refusal with neither field nor sentence is still BLOCKED refused-other",
+    judgePlanProbe(res({ body: json({ executed: false, blocked: "something else", stepsRun: 0 }) }), SPEND).reason === REASON.REFUSED_OTHER);
+}
+
+section("11 ⭐⭐ THE PROMOTION CRITERION IS A FIELD STREAK, NOT 'IT STAYED HEALTHY'");
+{
+  const FIELD_BODY = { ...CAP_BODY, results: [{ index: 0, ok: false, blocked: "step ~200.05 exceeds per-bridge limit of 25 USDC",
+    refusal: { kind: "cap", valuedUsdc: 200.05, capUsdc: 25, capLabel: "bridge", feeUsdc: 0.05 } }] };
+  const tick = (body, prev, status = 200) => buildRecord({ judgement: judgePlanProbe(res({ status, body: json(body) }), SPEND), target: "t", producedAt: new Date().toISOString(), prev });
+  ok("⭐ FIELD_STREAK_TO_PROMOTE is 3", FIELD_STREAK_TO_PROMOTE === 3);
+  let r = tick(FIELD_BODY, null);
+  ok("⭐ first field-matched healthy tick → fieldStreak 1, matchedBy field", r.fieldStreak === 1 && r.matchedBy === "field", `streak=${r.fieldStreak}`);
+  r = tick(FIELD_BODY, r); r = tick(FIELD_BODY, r);
+  ok("⭐ three in a row → fieldStreak 3 → promotionReady", r.fieldStreak === 3 && promotionReady(r));
+  const regexTick = tick(CAP_BODY, r);
+  ok("⛔ a REGEX-matched healthy tick RESETS the streak — healthy is not the criterion", regexTick.fieldStreak === 0 && regexTick.matchedBy === "regex" && !promotionReady(regexTick), `streak=${regexTick.fieldStreak}`);
+  const blockedTick = tick({ executed: false, blocked: "x", stepsRun: 0 }, r);
+  ok("⛔ a BLOCKED tick resets it too", blockedTick.fieldStreak === 0 && blockedTick.matchedBy === null);
+  ok("⭐ a record without the field (pre-phase-2) is not promotion-ready", !promotionReady({ outcome: "healthy" }) && !promotionReady(null));
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

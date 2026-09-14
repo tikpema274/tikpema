@@ -10,6 +10,7 @@ import { recordBridge, recordPendingBridge } from "./_bridge-record.mjs";
 import { TxPendingError } from "./_circle.mjs";
 import { resolveDestination, bridgeFee, bridgeFeeBand, bridgeAckToken, openBridgeQuote, sealBridgeQuote, quoteWindowMs, bridgeBalanceRefusal, readBridgeBalanceMinor } from "./_bridge.mjs";
 import { bridgeMechanicOf } from "../../shared/bridge-mechanic.mjs";
+import { capRefusal, ceilingRefusal, priceUnavailableRefusal, refusalSentence } from "./_refusal.mjs";
 import { safeQuoteId, markQuoteUsed } from "./_quote-record.mjs";
 
 // POST /api/agent-execute-plan { plan: [ {type, ...}, ... ] }
@@ -149,10 +150,13 @@ export async function handler(event) {
         // ⚠️ DISTINCT FROM A BAND REFUSAL. Unreachable pricing is transient and upstream;
         // telling the user to reconsider their amount would be wrong advice. Nothing has
         // executed at this point, so retrying is safe and is the right response.
+        // ⭐ THE FIELD, and the sentence DERIVED from it (_refusal.mjs) — one producer.
+        const refusal = priceUnavailableRefusal({ step: i, detail: e.message });
         return json(200, {
           executed: false,
-          blocked: `step ${i + 1}: cannot reach the bridge pricing service right now (${e.message}) — nothing was executed; try again shortly`,
+          blocked: refusalSentence(refusal),
           priceUnavailable: true,
+          refusal,
         });
       }
       if (fee.feeMinor >= fee.amountMinor) {
@@ -450,7 +454,10 @@ export async function handler(event) {
     // A refusal must report the quantity the test actually compared.
     // [[refusal-reports-compared-quantity]] · [[duplicate-source-of-truth-is-the-recurring-bug]]
     if (vA > capForA(step)) {
-      results.push({ index: i, step, ok: false, blocked: `step ~${usd2(values[i])} exceeds per-${capLabelForA(step)} limit of ${capUsdcFor(step)} USDC` });
+      // ⭐ THE FIELD FIRST — plan-path-watch keys on `results[i].refusal.kind === "cap"` (phase 2), and
+      // the sentence is DERIVED from the same object, byte-identical to the one it replaces.
+      const refusal = capRefusal({ valuedUsdc: values[i], capUsdc: capUsdcFor(step), capLabel: capLabelForA(step), feeUsdc: fees[i]?.feeUsdc ?? null });
+      results.push({ index: i, step, ok: false, blocked: refusalSentence(refusal), refusal });
       stoppedAt = i;
       break;
     }
@@ -460,11 +467,13 @@ export async function handler(event) {
     //     collectively exceed the daily bound. Checked BEFORE the step executes,
     //     so an over-ceiling step never moves funds.
     if (baselineA + runningA + vA > ceilingA) {
+      const refusal = ceilingRefusal({ ceilingUsdc: ceiling, committedUsdc: (baselineA + runningA) / 1e6 });
       results.push({
         index: i,
         step,
         ok: false,
-        blocked: `would exceed daily agent-spend ceiling of ${ceiling} USDC (already committed ~${usd2((baselineA + runningA) / 1e6)} today)`,
+        blocked: refusalSentence(refusal),
+        refusal,
         dayCeiling: true,
       });
       stoppedAt = i;

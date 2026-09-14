@@ -356,12 +356,17 @@ section("8 — CONSENT ON THE PLAN PATH: refuse at plan stage, never mid-flight"
     /stepDisclosures: \{\s*\n\s*\[i\]: \{/.test(plan));
 
   // ⚠️ Unreachable pricing != too expensive. Collapsing them gives the wrong advice.
+  // ⚠️ RE-POINTED 2026-09-14 (phase 1 of the structural-refusal work): on the PLAN path the sentence is
+  //   DERIVED from a `{kind:"priceUnavailable"}` field by _refusal.mjs, so its words live there and
+  //   the handler only calls the producer. The property is unchanged — distinct message, structural
+  //   flag, "nothing was executed" — the location moved. [[guard-pinned-to-location-not-behaviour]]
+  const refusalSrc = readFileSync("netlify/functions/_refusal.mjs", "utf8");
   check("⭐⭐ IRIS-unreachable is a DISTINCT message from a band refusal, on both paths",
     /cannot reach the bridge pricing service right now/.test(act) &&
-    /cannot reach the bridge pricing service right now/.test(plan));
-  check("  …flagged structurally, not only in prose", /priceUnavailable: true/.test(act) && /priceUnavailable: true/.test(plan));
+    /priceUnavailableRefusal\(\{/.test(plan) && /cannot reach the bridge pricing service right now/.test(refusalSrc));
+  check("  …flagged structurally, not only in prose", /priceUnavailable: true/.test(act) && /priceUnavailable: true/.test(plan) && /kind: REFUSAL_KIND.PRICE_UNAVAILABLE/.test(refusalSrc));
   check("  …and the plan one says nothing executed, so retrying is safe",
-    /nothing was executed; try again shortly/.test(plan));
+    /nothing was executed; try again shortly/.test(refusalSrc) && /blocked: refusalSentence\(refusal\)/.test(plan));
 
   // Bounded: each priced step is a live IRIS round trip inside a ~10s sync handler.
   check("⭐⭐ the priced-step count is BOUNDED on both sides of the flow",
