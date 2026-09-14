@@ -1,3 +1,64 @@
+# 🚨 THE PLAN-PATH MONITOR WAS BLIND FOR 28h+ — a300359 CHANGED THE CONTRACT AND ITS CLIENT WAS NOT UPDATED (fix 2447791, NOT DEPLOYED)
+
+**2026-09-14.** Building item 1/2 (prove notify, exercise the balance branch) surfaced that the premise under both —
+a working monitor with a cap-earned `fieldStreak` — was false.
+
+## THE FINDING
+`a300359` ("the fee in the calldata…", deployed `6aa69367`, 2026-09-13 12:43Z) added a seal step to
+`agent-execute-plan`: a bridge plan with **no `quoteToken`** is answered **409 re-quote** BEFORE the cap/balance
+guards run. `plan-path-watch`'s probe posts a bare `{plan:[…]}` — no token — so since that deploy **every tick got a
+409**, and the judge's readability gate `if (status !== 200) return http-error` classified it UNREADABLE. **The plan
+path was unreadable for 28h+**, and my earlier phase-2 field reader (uncommitted to prod) could not have helped: the
+probe never reached the field. Driven locally against the real handler, the exact recurring probe returns
+`409 requoted`, `exec 0` — confirmed, not inferred.
+
+⭐ **THE LESSON, RECORDED AT THE SEAM:** the probe is a **CLIENT of `agent-execute-plan`**. `a300359` changed what that
+endpoint ACCEPTS (a bridge step now needs a sealed `quoteToken`), and the change shipped without updating this caller.
+**Any change to what `agent-execute-plan` accepts must list `plan-path-watch` (and the panel, and `job-bridge-approve`)
+as affected callers.** [[guard-belongs-on-the-caller-set]] · [[a-store-needs-a-who-notices-at-creation]]
+
+## THE FIX (2447791) — probe fixed, judge taught, streak reset, guards NOT reordered
+- **Probe:** quote-then-post, the traversal a real confirm makes — press 1 (`quoteOnly`) → `stepDisclosures[i].
+  quoteToken` → press 2 (with tokens) → the cap/balance guards. Only press 2 carries a verdict. Total budget
+  `PROBE_BUDGET_MS` 40s across both presses. **New failure mode, named:** press 1 now reads the chain (2a17a8b's
+  fail-open balance read in the requote path), so a degraded Arc RPC can time it out or return no token — `res.press1`
+  carries it, judged `PROBE_QUOTE`, never folded into the press-2 verdict.
+- **Judge — the CLOSED readable-status set** (replacing the line that made the outage unreadable): **200** (a plan
+  verdict), **402 WITH a structured `refusal`** (the balance branch, a priced decision), **409** (a re-quote →
+  `REASON.REQUOTED`, distinct: "your token lapsed" ≠ "the function 500'd"). Everything else, and a bare 402, is
+  http-error. `REQUOTED` and `PROBE_QUOTE` are new reasons, both cannot-verify.
+- **fieldStreak reset:** `PROBE_CONTRACT = "quote-then-post/1"` stamped on every record; a prior streak carries only
+  within the same contract, and `promotionReady` requires it. The streak earned under the single-post probe is dropped.
+- **Fixtures CAPTURED, not written** (`scripts/fixtures/plan-path-probe-capture.json`): the real press-2 bodies —
+  over-cap → `results[0].refusal{kind:cap, valuedUsdc:200.0541}` → HEALTHY/cap/field; under-cap-over-balance →
+  `402 refusal{kind:balance, have:2.6, need:10.0541}` → HEALTHY/balance/field; stale token → 409 → REQUOTED. 109/109.
+- test:all 127/127. ddTree unchanged `2f4f2793`. **No guard reordered.** Not deployed.
+
+## STILL OUTSTANDING — reports, not code
+- **Item 1 (prove notify): now likely already exercised, unintentionally.** If the webhook works, the monitor should
+  have paged "⚠️ CANNOT VERIFY THE AGENT PLAN PATH" when it flipped HEALTHY→UNREADABLE around 2026-09-13 12:43Z, then
+  hourly. ⛔ T to check the plan-watch Discord channel ("Spidey Bot", 1532157896501104744) since that time. Present →
+  notify path proven, branch = `regressed` via cannot-verify (NOT the induced page approved in item 1). Absent → the
+  webhook is broken AND swallowed a real 28h outage alert. Either way one send does not cover `first-failure`/`changed`.
+- **`first-failure` is DEAD CODE, not merely unproven.** `decideNotify` fires it only when `prevOutcome == null`, and the
+  record has been populated since 2026-09-05; `prevOutcome` can never be null again without wiping the store. It is
+  structurally unreachable in production and should be treated as such (kept only for a fresh-store bootstrap that will
+  not recur).
+- **Circle's backstop — MEASURED once, for one shape.** The 2a17a8b unverified-balance copy ("relies on the provider's
+  own check before anything moves") is backed by the 5-from-3.65 bridge (2026-09-14): Circle refused pre-broadcast
+  `INSUFFICIENT_TOKEN`, `txHash:null`, chain-confirmed nothing moved — the amount-exceeds-balance shape. NOT observed:
+  the fee-tips-it-over shape (amount fits, amount+fee does not). The sentence is honest for the common case; if exactness
+  is wanted it should say the provider's check HAS caught an over-amount, not imply a guarantee for every shape.
+- **Item 2 (balance branch) is now exercised by the captured fixture** (402/balance/field, exec 0) rather than a live
+  one-off — continuous coverage arrives when this fix deploys and the probe reaches the balance branch on a real tick,
+  which is a stronger place for it than a single manual run. The reorder's safety evidence is that captured body.
+
+⛔ **Sequencing:** this fix should deploy with (or before) tonight's four changes — until it does, the monitor stays
+blind. The induced-page lever (item 1) still comes AFTER a clean verified deploy, so an induced page is not confused
+with a real one. Guard reorder remains gated on a real `fieldStreak >= 3` under `quote-then-post/1`.
+
+---
+
 # ⭐ plan-path-watch: THE FIELD REPLACES THE PROSE MATCH — phases 1+2 shipped to git (3af6b4a), phase 3 gated on a FIELD streak; guards NOT reordered
 
 **2026-09-14.**
