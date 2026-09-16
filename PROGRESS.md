@@ -25640,3 +25640,11 @@ misses a duplicate PASSES the assert while x402/DD verify against the wrong netw
      address, never the domain. ⛔ UNGUARDED.
   THREE OF THE FOUR ARE UNGUARDED. The env-assert covers only #1 (via the Arc-domain Gateway wallet);
   it does not read the Base-6 wallet, the IRIS host, or any cctpDomain's paired address.
+
+### Gate 0 — CLEARED 2026-09-16 (screenshot-confirmed on prod)
+Live half MET by eyeball on prod: a plan balance-refusal rendered BOTH figures — "have 2.186714 USDC"
+(matches the real wallet balance at 6dp) and "need 7.728646 USDC (6 + ~1.728646 in fees, to Base
+(Sepolia) and Ethereum (Sepolia))" — fee broken out, destinations named, "not a step of it" present, and
+NOTHING executed (no tx, no funds moved). Unverified-balance half MET by the (b) render test, with its
+honest label: it proves the component renders when fed balanceChecked:false, NOT that a live handler
+produced it. Gate 0 clears; Deploy 1 (env-assert 80e5944, ALONE) may start.
