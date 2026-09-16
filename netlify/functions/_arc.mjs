@@ -1,4 +1,7 @@
 // Server-side mirror of Arc constants (functions can't import src/ TS cleanly).
+import { GATEWAY } from "./_gateway.mjs";
+import { assertSameEnvironment } from "./_env-assert.mjs";
+
 export const ARC = {
   blockchain: "ARC-TESTNET",          // Circle SDK chain id
   chainId: 5042002,
@@ -19,6 +22,29 @@ export const CONTRACTS = {
   // AgenticCommerce — ERC-8183 job/escrow contract (proxy), live on Arc Testnet.
   AGENTIC_COMMERCE: "0x0747EEf0706327138c69792bF28Cd525089e4583",
 };
+
+// ═══ 🚨 SAME-ENVIRONMENT STARTUP ASSERT — BLAST RADIUS IS TOTAL, BY DESIGN (2026-09-16) ══════════
+// Throws AT IMPORT unless the chain id, RPC host, Gateway API host and Gateway WALLET all belong to one
+// KNOWN environment (see _env-assert.mjs). This closes the partial-migration hole: three of those four
+// differ testnet↔mainnet, but the Gateway DOMAIN (26) does not, and until 2026-09-16 nothing tied the
+// Gateway pair to the chain pair — so a Gateway host/wallet moved to mainnet while the chain stayed
+// testnet (or a wallet typo'd into the other environment's near-identical address) would have served.
+//
+// ⛔ COST, STATED PLAINLY: _arc.mjs is imported by ~107 functions AND is on the DD surface
+// (DD_SURFACE_FILES in scripts/stamp-build.mjs — "dd-canary imports it"). So a genuine mismatch OR A
+// TYPO IN ENV_TABLE takes down EVERY Arc-touching function on cold start, and editing this file MOVES
+// ddTree (a DD refusal window until the canary re-binds). That is a NEW single point of failure on a
+// money path that already carries fail-closed dependencies; its failure mode is TOTAL, not degraded.
+// This is the intended direction (a half-migrated money path must refuse), but it is not free.
+//
+// ⭐ GATEWAY.WALLET is now LOAD-BEARING as the environment tell — it was NOT before 2026-09-16 (both
+// environments share Gateway domain 26; only the wallet address and the API host distinguish them).
+export const ENVIRONMENT = assertSameEnvironment({
+  chainId: ARC.chainId,
+  rpc: ARC.rpc,
+  gatewayApiBase: GATEWAY.API_BASE,
+  gatewayWallet: GATEWAY.WALLET,
+});
 
 // ═══ ⭐⭐ ONE ASSET, TWO PRECISION VIEWS — AND THEY ARE NOT TWO BALANCES ══════════════════════
 // On Arc, USDC is the NATIVE gas token AND an ERC-20 at the address above. Both interfaces answer

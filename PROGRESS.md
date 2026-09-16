@@ -25457,3 +25457,58 @@ listed=68; autonomous listed=70) — the deploy-only unknown is resolved.
 
 Files: new `netlify/functions/job-sweep.mjs`; `netlify.toml` (schedule block). Proof script
 `scripts/verify-sweep.mjs` untracked. tsc + build clean.
+
+## Same-environment startup assert — 2026-09-16 (Arc mainnet Gateway now published)
+
+Circle's MAINNET Gateway list now carries Arc: domain 26, wallet
+`0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE`. Testnet's Gateway wallet is
+`0x0077777d7EBA4688BDeF3E311b846F25870A19B9`, and the Gateway domain (26) is the SAME on both. So
+three of the four environment tells differ (chain id, RPC host, Gateway API host) while the domain does
+NOT — and until now nothing tied the Gateway pair to the chain pair. A partial migration (Gateway host
+or wallet moved to mainnet while the chain stayed testnet, or the reverse) would have served silently.
+
+**Built (report-only, NOT deployed):** `netlify/functions/_env-assert.mjs` (pure: `ENV_TABLE`,
+`classify`, `assertSameEnvironment`, `EnvironmentAssertionError`; not on the DD surface) + an import-time
+invocation in `_arc.mjs` that refuses unless chain id, RPC host, Gateway host and Gateway wallet all
+resolve to ONE known environment. Mainnet column populated ONLY with Circle-published values (the
+Gateway wallet + the mainnet Gateway API host); chainId and rpcHost have NO mainnet entry, so a
+mainnet-shaped value there reads UNKNOWN and refuses rather than being assumed. `scripts/verify-env-assert.mjs`
+proves discrimination in three directions (correct loads; partial-migration split throws naming both
+labels + producing values; unknown value refuses, never "probably testnet") and was mutation-verified
+red on a fall-through-to-testnet regression.
+
+⛔ **COST, STATED AS TOTAL.** `_arc.mjs` is imported by ~107 functions AND is on the DD surface
+(`DD_SURFACE_FILES` in `scripts/stamp-build.mjs` — "dd-canary imports it"). Consequences:
+1. A genuine mismatch **or a typo in `ENV_TABLE`** throws at import → **every Arc-touching function
+   fails on cold start.** The failure mode is TOTAL, not degraded — a new single point of failure on a
+   money path that already carries fail-closed dependencies. This is the intended direction (a
+   half-migrated money path must refuse), but it is not free.
+2. Editing `_arc.mjs` **moves ddTree** → this ships with a **DD refusal window** until the canary
+   re-binds on the new deploy. It does NOT ship alone.
+
+⭐ `GATEWAY.WALLET` is now **load-bearing as an environment tell** — it was not before 2026-09-16 (both
+environments shared Gateway domain 26; only the wallet address and the API host distinguish them). The
+two wallets differ by only a few characters and typo into each other, which is exactly why the wallet
+became the discriminator — and why `ENV_TABLE` entries are literals from their own published source,
+never derived by editing the other column.
+
+No config changed: API_BASE, RPC, chain id and every x402 network are untouched. This is the guard, not
+a migration.
+
+### WHEN THIS DEPLOYS (checklist — NOT done yet; committed, deploy deferred)
+Deploy is HELD: prod's five money-path commits still have an unverified live half, and this adds a
+total-blast-radius import-time throw plus a DD refusal window on top. When it does go:
+1. **Predict the window BEFORE the deploy starts**, then run `capture:window` BEFORE the trailing
+   gates. A window figure produced afterwards is not a prediction, and the canary's cron closes the
+   observation regardless of what else runs — so the number must be stated up front.
+2. **Prove the assert ran on a REAL COLD START in prod.** A 200 does not prove it — a warm container
+   never re-imports `_arc.mjs`. Force a fresh import (or read a first-load log line) and confirm
+   `ENVIRONMENT` resolved to `"testnet"`. If a cold start cannot be distinguished from a warm one, say
+   so rather than claiming the assert is proven live.
+
+### Full-migration behaviour (recorded at the table too)
+Because chainId and rpcHost have NO mainnet entry, the assert blocks a FULL migration, not only a
+partial one: pointing Arc at a mainnet chain id refuses to boot until those entries are added from a
+published source. Intended — read as the guard working. gatewayHost/gatewayWallet DO have mainnet
+entries, so a Gateway-only flip classifies as mainnet and yields a SPLIT (the half-migration case),
+not an UNKNOWN.
