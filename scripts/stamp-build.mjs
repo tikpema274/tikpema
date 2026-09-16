@@ -123,6 +123,8 @@ const DD_SURFACE_FILES = [
   "netlify/functions/_dd-exposure.mjs",
   "netlify/functions/_blobs.mjs",  // dd-canary imports it — it decides whether the store is readable
   "netlify/functions/_arc.mjs",    // dd-canary imports it
+  "netlify/functions/_gateway.mjs",   // _arc.mjs imports it (env-assert, 2026-09-16) → reached by dd-analyze; MUST be hashed
+  "netlify/functions/_env-assert.mjs",// _arc.mjs imports it (env-assert) → reached by dd-analyze; MUST be hashed
 
   // ═══ ⭐⭐ ADDED 2026-08-16 — THE CHARGING DECISION AND THE IDENTITY ITSELF ════════════════════
   // These were reached by dd-analyze and sat OUTSIDE ddTree, so the canary's verdict vouched for a
