@@ -23,11 +23,20 @@
 
 import { POWER_SIGS } from "../onchain-facts/index.mjs";
 import { unsignedAttestation } from "./attest.mjs";
+import { screenOfac } from "./ofac.mjs";
 
+// 0.3.0 — every report now carries `sanctions`: a deterministic OFAC SDN screen of the subject
+// (see ofac.mjs), computed in baseReport so it rides on EVERY path — including a chain-unreachable
+// refusal, because the screen is pure and needs no chain read. It sits INSIDE the signed canon
+// (attest.mjs excludes only `reads` and `attestation`), so a signature vouches for the exact pinned
+// list version via ddTree. The bump is deliberate for the same reason 0.1→0.2 was: a report that now
+// asserts a sanctions fact is a DIFFERENT claim, not the same claim with an extra field, and
+// `schemaVersion` sits inside the signed payload.
+//
 // 0.2.0 — `attestation` is now present on EVERY report (see baseReport). The bump is deliberate:
 // `schemaVersion` sits INSIDE the signed payload, so a different report shape must be a different
 // claim rather than the same claim with extra fields.
-export const SCHEMA_VERSION = "onchain-analyze/0.2.0";
+export const SCHEMA_VERSION = "onchain-analyze/0.3.0";
 
 /** Rides on every report, machine-readable, so no consumer can claim it was not told. */
 export const SEVERITY_MEANING =
@@ -126,6 +135,10 @@ export function baseReport({ address, chainId, chainName, blockNumber }) {
     schemaVersion: SCHEMA_VERSION,
     severityMeaning: SEVERITY_MEANING,
     subject: { address, chainId, chainName, blockNumber },
+    // ⭐ Present on EVERY report, both paths. A pure Set membership check against the pinned SDN
+    // snapshot — no chain read — so it is meaningful even on a chain-unreachable refusal. FACT only;
+    // the STOP decision is ofacVerdict() in ofac.mjs, kept out of the report (facts, not verdicts).
+    sanctions: screenOfac(address),
     shape: null,
     powers: [],
     coverage: { checked: [], notChecked: [], totals: { checked: 0, notChecked: 0 } },

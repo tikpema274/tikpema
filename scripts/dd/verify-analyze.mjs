@@ -11,6 +11,7 @@
 
 import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { assertReportValid, SCOPE_CLASSES, POWER_SCOPE } from "../../shared/onchain-analyze/schema.mjs";
+import { screenOfac } from "../../shared/onchain-analyze/ofac.mjs";
 import * as analyzeModule from "../../shared/onchain-analyze/index.mjs";
 import { POWER_SIGS, sel } from "../../shared/onchain-facts/index.mjs";
 import { DIAMOND_LOUPE_SIGS, UUPS_SIGS, EIP1967_ADMIN_SLOT, EIP1167_PREFIX, EIP1167_SUFFIX } from "../../shared/onchain-analyze/slots.mjs";
@@ -68,8 +69,11 @@ console.log("\n── ROW 2 · FAULT: own-code read defeated → unknown, and it
   ok(notCheckedPowers(r).length === powerGroups.length, `ALL ${powerGroups.length} power groups landed in notChecked (got ${notCheckedPowers(r).length})`);
   ok(r?.coverage.summary.includes("not a clean bill"), "coverage summary states this is not a clean bill");
   // First-class means it satisfies the same schema as any other report.
-  ok(["schemaVersion", "severityMeaning", "subject", "shape", "powers", "coverage", "reads", "refusal"].every((k) => k in r),
+  ok(["schemaVersion", "severityMeaning", "subject", "sanctions", "shape", "powers", "coverage", "reads", "refusal"].every((k) => k in r),
      "the refusal carries EVERY schema field — it is a first-class report");
+  // ⭐ The sanctions fact rides even on a REFUSAL, and it is the SAME fact the standalone screen produces.
+  ok(r?.sanctions?.status === screenOfac(SUBJ).status && r?.sanctions?.snapshot === screenOfac(SUBJ).snapshot,
+     `sanctions fact present on the refusal report and matches the screen (got ${r?.sanctions?.status})`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -323,6 +327,10 @@ console.log("\n── ROW 8 · ⭐ QUORUM MATRIX: agree→value, everything else
   const wrongChain = quorumClient([mkc(A, base(codeP)), mkc(B, base(codeP), 8453)]);
   const wc = await analyze(SUBJ, { client: wrongChain });
   ok(wc.refusal?.reason === "chain-unreachable", `mismatched chain ids across endpoints → refusal (got ${wc.refusal?.reason})`);
+  // ⭐ Even with NO usable chain, the OFAC screen still runs (it is pure) — a chain-unreachable
+  // report is NOT a sanctions-blind report. This is the whole reason sanctions lives in baseReport.
+  ok(wc.sanctions?.status === screenOfac(SUBJ).status,
+     `sanctions screened despite chain-unreachable (got ${wc.sanctions?.status})`);
 
   // 8. The completeness invariant still holds under quorum failure.
   for (const r of [dis, disShape, oneDown, bothDown]) {

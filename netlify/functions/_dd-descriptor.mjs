@@ -60,6 +60,16 @@ export const DD_RESPONSE_SCHEMA = Object.freeze({
     schemaVersion: { type: "string", description: "report schema version; changes when the shape changes" },
     severityMeaning: { type: "object", description: "⭐ SCOPE, NOT RANK: severity describes what a power CAN DO. It is never a score and does not order risks." },
     subject: { type: "object", description: "the address, chain and block the report is about" },
+    sanctions: {
+      type: "object",
+      description:
+        "⭐ DETERMINISTIC OFAC SDN SCREEN of the subject against a PINNED, in-report list version " +
+        "(carries its snapshot date). Tri-state: `listed` (on the SDN snapshot — a legal block, not " +
+        "a risk score), `not-listed`, or `unreadable` (the address was malformed — NOT a clearance). " +
+        "⚠️ A `not-listed` result against a snapshot with `listComplete:false` is NOT a clearance. A " +
+        "FACT, not a verdict — the STOP decision is the caller's; sanctions is a hard block a policy " +
+        "cannot override.",
+    },
     shape: { type: "object", description: "how the subject was classified (proxy, diamond, plain, unknown) and the evidence for it" },
     powers: { type: "array", description: "each power group the catalogue knows about, and what was observed for it" },
     coverage: {

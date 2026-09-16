@@ -181,7 +181,9 @@ export function openapiDocument() {
               description:
                 "The signed report. Carries `coverage` (checked / notChecked / totals / summary), " +
                 "`severityMeaning` (scope-not-rank: severity describes what a power CAN DO, it is " +
-                "never a score), and an ERC-1271 `attestation` verifiable against the on-chain " +
+                "never a score), a deterministic `sanctions` OFAC SDN screen of the subject against " +
+                "a pinned list version (tri-state; a `not-listed` against an incomplete snapshot is " +
+                "NOT a clearance), and an ERC-1271 `attestation` verifiable against the on-chain " +
                 "owner of ERC-8004 agentId 851891.",
             },
             400: { description: "Refused before analysis. Returned AS A REPORT with an empty coverage manifest — not an error envelope." },
