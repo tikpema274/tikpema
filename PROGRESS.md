@@ -25681,3 +25681,36 @@ ddTree 79e2f258… rotated from 2f4f2793…; recorded in dd-refusal-window-log.j
   prod-vs-working-tree — that is EXPECTED while diverged, NOT a failure. Do not "fix" it by redeploying
   main (that would ship the reorder). Deploy 2 (the reorder) is still blocked on updating test:plancontract
   (its third cap-first test, unfixed) before it can pass the deploy gate.
+
+## Deploy 2 COMPLETE — balance-before-cap reorder live (2026-09-16)
+
+DEPLOY: id `6aaab30ec4b518358d61b53c`, main HEAD `09d9a9c` (env-assert + reorder 1e936ff + DD-fix +
+plancontract fix). deploy:prod exit 0; test:all 128/0; gate:forgery/spec/deployloss all green (0 new
+losses). ⭐ DIVERGENCE CLOSED: prod now serves main HEAD, so gate:deployed matches the working tree
+again. Deployed main directly (no cherry-pick) → no dangling commit, no new tag; deploy1-live stays as
+the historical marker for what Deploy 1 shipped.
+
+⭐ DD WINDOW — THIRD READING, reported honestly (NOT "confirmed"): capture:window saw NO refusal window
+in its 150s poll — but the canary HAD ALREADY BOUND the new ddTree 514d26fe… (a health record exists for
+it in dd-canary-health) and the service served throughout. So this is capture's BENIGN branch — the
+canary refreshed the key before the first probe — i.e. the window was near-ZERO (closed before
+observation). ⛔ FAIL-OPEN RULED OUT: the health binding for the new ddTree proves the gate IS gating,
+not that it stopped. VERDICT: this reading is CONSISTENT with "cadence sets the ceiling" but CONFOUNDED —
+a small (comment-only, _env-assert.mjs) change and favorable canary timing coincide, so R3 alone cannot
+separate cadence from size. The DECISIVE size-independence evidence remains R1→R2 (Deploy 1's LARGER
+change gave a SHORTER window, 257.7s, than the first reading's ~409s — size-monotonicity already broken).
+Three readings now: ~409s, 257.7s, ~0 — all ≤ one */10 canary period.
+
+⭐ BALANCE-FIRST — LIVE, VERIFIED via the monitor's own probe (plan-path-watch record producedAt
+2026-09-16T16:00:46Z):
+  1. THE DISCRIMINATOR FIRED: disclosure.kind flipped cap → BALANCE (have 2.186714 / need 200.053806).
+     The same 200-over-cap probe that produced kind:cap for 71 straight ticks now produces a balance
+     refusal — only possible on balance-first code. The reorder took effect.
+  2. Monitor reads HEALTHY on kind:balance matchedBy field, and did NOT page (lastNotifiedAt unchanged at
+     2026-09-14T22:30Z). The phase-2 claim held live.
+  3. fieldStreak continued 71 → 84 (no reset across the reorder; now conflates cap-era + balance-era
+     ticks, exactly as recorded at the counter).
+Manual discriminating trigger for an independent eyeball (still valid): a 2-STEP plan with an over-cap
+step — "bridge 200 to Base then bridge 3 to Ethereum" — gives the top-level balance sentence
+("Insufficient funds … the whole plan is refused, not a step of it"), NOT the cap sentence ("exceeds
+per-bridge limit of 25 USDC"). Refuses before any funds move (stepsRun 0, results []).
