@@ -71,8 +71,11 @@ export function openapiDocument() {
     openapi: "3.1.0",
     info: {
       title: "Tikpema DD — on-chain due diligence",
-      version: "0.2.0",
-      summary: "One signed due-diligence report about an address, with an honest coverage manifest.",
+      version: "0.3.0",
+      summary:
+        "POST an address, pay per call over x402, and receive one signed due-diligence report whose " +
+        "coverage manifest — inside the signed payload, so it cannot be stripped — states exactly " +
+        "what was and was not checked.",
       description:
         // ⚠️ CORRECTED 2026-08-27. This said "EIP-3009 on Arc", which the live 402 contradicts:
         // it declares extra.name "GatewayWalletBatched". The old wording also omitted the deposit

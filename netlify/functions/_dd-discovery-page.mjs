@@ -110,7 +110,8 @@ export function discoveryPage({ method, health = null }) {
   code, pre { font-family: ui-monospace,SFMono-Regular,Menlo,monospace; }
   pre { background:#17171a; border:1px solid #2a2a2f; border-radius:10px; padding:1rem;
         overflow-x:auto; font-size:.85rem; }
-  .sub { color:#a09a92; margin:.25rem 0 0; }
+  .lede { font-size:1.05rem; color:#e9e6e1; margin:.6rem 0 0; }
+  .sub { color:#a09a92; margin:.4rem 0 0; }
   .warn { border-left:3px solid #d9a441; padding:.6rem 0 .6rem .9rem; margin:1rem 0; background:#1a170f; }
   /* ⚠️ Visually louder than .warn and placed ABOVE the curl: it qualifies a command the reader is
      about to copy, and a caveat under the thing it qualifies is one most readers never reach. */
@@ -124,8 +125,12 @@ export function discoveryPage({ method, health = null }) {
 </style></head>
 <body><main>
 
-<h1>On-chain due diligence, per call</h1>
-<p class="sub">You sent a <code>${esc(method)}</code>. This endpoint takes <b>POST</b> — here is how to call it.</p>
+<h1>DD — on-chain due diligence</h1>
+<p class="lede">POST an address, pay <b>${esc(DD_PRICE_HUMAN)}</b> over x402, and get one signed report with a
+coverage manifest that says exactly what was and was not checked. The manifest is inside the signed
+payload, so it cannot be stripped.</p>
+<p class="sub">Live on Arc testnet. You sent a <code>${esc(method)}</code> &mdash; this endpoint takes
+<b>POST</b>, and here is how to call it.</p>
 ${healthBanner(health)}
 <h2>Try it — this costs nothing</h2>
 <p>A POST without payment returns the <code>402</code> challenge and the full terms.</p>
