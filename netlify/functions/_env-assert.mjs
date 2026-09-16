@@ -38,6 +38,25 @@ export class EnvironmentAssertionError extends Error {
 //     classifies as mainnet and produces a SPLIT message (testnet chain vs mainnet Gateway) rather than
 //     an UNKNOWN. That split is the half-migration case this guard exists for — the one nothing noticed
 //     before 2026-09-16.
+//
+// ⚠️ RESIDUAL GAP — WHAT A PASSING ASSERT DOES NOT PROVE. Unanimity is AGREEMENT, not correctness: the
+//   assert proves the four values name ONE environment, NOT that the literals in this table are right.
+//   A consistently-WRONG value — e.g. a testnet slot mistyped to another testnet-shaped address — passes,
+//   because all four still agree on "testnet". The mutation proof (verify-env-assert) covers the
+//   CLASSIFIER (fall-through, split, unknown), NOT these literals. The literals are trusted from their
+//   published source; nothing here re-checks them against the chain. Keep them exact.
+//
+// 🚨 TWO STANDING GAPS THIS ASSERT DOES NOT CLOSE (true today, see PROGRESS "env-assert duplication gap"):
+//   (1) DUPLICATES. This reads ONE copy per lever — ARC.rpc and GATEWAY.WALLET. The RPC literal lives in
+//       6 files and the testnet Gateway wallet in 4 (_dd-x402/_x402-confirm/x402-quote + _gateway). A
+//       change here that misses a duplicate PASSES this assert while x402/DD verify against the wrong
+//       network's Gateway wallet. Fix = one source per lever + a grep-guard (HELD until the mainnet
+//       decision; it touches 5 DD-surface files and rides Deploy 1's refusal window when it ships).
+//   (2) DOMAIN-KEYED CHECKS. Arc's Gateway/CCTP domain is 26 and Base's is 6 on BOTH networks — the
+//       domain never discriminates testnet from mainnet; only the paired ADDRESS or IRIS host does. This
+//       assert covers the Arc-domain-26 case via the WALLET slot; Base domain 6, ARC_CCTP_DOMAIN 26, and
+//       the BRIDGE_DESTINATIONS cctpDomains are UNGUARDED (3 of 4). That is why the wallet, not the
+//       domain, is the discriminator here.
 export const ENV_TABLE = Object.freeze({
   chainId: Object.freeze({
     testnet: 5042002,

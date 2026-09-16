@@ -25551,3 +25551,92 @@ live half + the env-assert commit): driving the DEPLOYED handler with the 200 US
 402/refusal{kind:balance}/stepsRun 0. The currently-deployed handler is still cap-first, so a live drive
 today would return kind:cap — not the new behaviour — and I will not POST the prod money endpoint to
 "prove" something the deployed code cannot yet do, nor claim a live kind:balance result I have not seen.
+
+## DEPLOY ORDER — three separate deploys, unbundled (2026-09-16; HELD at Gate 0)
+
+Do NOT bundle 80e5944 (env-assert) with 1e936ff (guard reorder). Nothing deploys until Gate 0 clears.
+
+**Gate 0 — HELD (T, browser, no code).** prod's live half must be verified first: plan-refusal rendering
+BOTH figures against the real balance, and the unverified-balance copy on one surface. Not confirmed as
+of this writing. Until T confirms, no deploy runs.
+
+**Deploy 1 — env-assert (80e5944) ALONE, via detached checkout.** It is an import-time throw across ~107
+functions; its failure mode is TOTAL, so it ships alone → a boot failure has exactly one candidate cause.
+- Predicted DD refusal window (ON RECORD): **0 to ~10 minutes, one canary period, self-healing** — the
+  canary cron is `*/10` and editing `_arc.mjs` (a DD_SURFACE_FILE) rotates ddTree, so the DD service
+  refuses until the next canary run binds the new hash. Run `capture:window` AHEAD of the trailing gates
+  (before gate:forgery / gate:spec / gate:deployloss).
+- Cold-start proof (method a, framing corrected): do NOT add a log line (a second `_arc.mjs` edit would
+  cost another DD window to observe what the deployed config already determines). The assert's job is
+  UNANIMITY, not a specific label — an all-mainnet config would pass and be correct too — so there is no
+  string to read that we do not already know. Report it as: the first post-deploy invocation is
+  GUARANTEED COLD (a fresh deploy recycles containers), it returned non-500, therefore the import ran and
+  the assert did not throw — the four money-path values resolved to ONE environment. NOT a literal read of
+  "testnet"; do not write it as one.
+- Residual gap (recorded at the table in _env-assert.mjs too): a passing assert proves the four values
+  AGREE, not that the table's literals are CORRECT — a consistently-wrong testnet value passes. The
+  mutation proof covers the classifier, not the literals.
+
+**Between Deploy 1 and Deploy 2 — DELIBERATE DIVERGENCE. PROD SERVES 80e5944** (env-assert only); **main
+is at 1e936ff** (adds the guard reorder, NOT yet deployed). This is intended, not a lost deploy:
+- `gate:deployloss` counts limbo Netlify DEPLOY RECORDS, not git-commit divergence — it does NOT count
+  this. Nothing to annotate in the sweep.
+- `gate:deployed` compares prod to the LOCAL WORKING TREE (tree hash), not to main — so it matches the
+  just-built 80e5944 and passes. ⛔ OPERATIONAL RULE: leave the working tree at 80e5944 between the two
+  deploys; checking out main and running gate:deployed against prod-at-80e5944 would (correctly) report a
+  mismatch. The divergence is invisible to both instruments only while the working tree = the deployed commit.
+
+**Deploy 2 — guard reorder (1e936ff), ONLY after Deploy 1 is confirmed healthy.** Now the deferred
+verification can run on code that can actually produce it: drive the deployed handler with the probe's real
+200 USDC plan → expect 402, refusal{kind:balance}, stepsRun 0; confirm the next monitor tick reads HEALTHY
+/ kind balance / matchedBy field and does NOT page (stop and report if it does — that contradicts phase 2);
+confirm fieldStreak continued 71 → 72+ rather than resetting.
+
+**Deploy 3 — nothing queued. Leave room.**
+
+### Gate 0 — copy half: decided (b), the render test (2026-09-16)
+Evidence for the unverified-balance copy = `scripts/verify-balance-unverified-render.tsx`. ⚠️ HONEST
+LABEL, on the record: it proves the COMPONENT renders correctly when fed `balanceChecked:false` (and
+not when true/absent, and says "not a shortfall") — it does NOT prove a LIVE HANDLER produced that
+state. No prod occurrence was found (item 1: partial/capped logs, no user present). Not "verified on prod."
+
+### env-assert duplication gap — OUTRANKS the copy half; NOT BUILT (mainnet decision unmade)
+The assert reads ONE copy per lever — `ARC.rpc` (_arc.mjs) and `GATEWAY.WALLET` (_gateway.mjs) — but the
+RPC literal is in 6 files and the testnet Gateway wallet in 4. So a migration that updates the source and
+misses a duplicate PASSES the assert while x402/DD verify against the wrong network's Gateway wallet.
+- PROPERTY (proven in a throwaway model, no repo file touched): a one-copy assert stays GREEN while a
+  duplicate (dd-analyze.mjs) is left stale; the enforcer that catches it is a grep-guard that goes RED
+  NAMING the stale file. The runtime import-time assert CANNOT name a stale duplicate without importing
+  all copies (the wrong fix — DD-surface cycles, can't reach client TS, still misses the next new literal).
+- FIX (the bridge-mechanic / swap-fill-floor shape): ONE source per lever, others derive —
+  RPC → a `shared/`-root module (off the DD surface) imported by all 6 sites; Gateway wallet →
+  `GATEWAY.WALLET` imported by the 4 sites. Plus a build-time grep-guard test: the literal may appear
+  ONLY in the canonical source and the `_env-assert` ENV_TABLE; anywhere else = RED naming the file.
+- COST: one-time refactor of ~9 sites (literal → import). Touches DD-surface files (`_arc.mjs`,
+  `dd-analyze.mjs`, `shared/dd/chains.mjs`, `shared/onchain-analyze/endpoints.mjs`, `_dd-x402.mjs`), so
+  ddTree rotates and the carrying deploy buys ONE DD refusal window (0–~10 min, one canary period). The
+  shared-root source and the grep-guard test add no surface bytes themselves. The env-assert does NOT
+  grow — once there's one source, reading it covers every derivation. HELD until the mainnet decision.
+- ⭐ TRUE RIGHT NOW, INDEPENDENT OF ANY MIGRATION: a change to _arc.mjs/_gateway.mjs that misses a
+  duplicate PASSES the env-assert, and x402/DD payment verification would check against the TESTNET
+  Gateway wallet on mainnet with nothing saying so. This is a standing property of today's tree, not a
+  hypothetical of a migration nobody has decided on.
+- WINDOW: when the refactor ships it RIDES DEPLOY 1'S refusal window (env-assert, 80e5944) — not its
+  own. The window is priced per deploy; spending it twice for work that ships together is the recorded
+  mistake. So the one-source refactor lands in the SAME deploy as the env-assert if sequenced, or waits.
+
+- ⛔ THE FOUR DOMAIN-IDENTICAL / ADDRESS-DIFFERENT FLAGS (same entry, per the record). Arc's domain is
+  26 and Base's is 6 on BOTH networks, so the discriminator is ALWAYS the paired ADDRESS or the IRIS
+  HOST, NEVER the domain number. A check keyed on the domain alone passes on the wrong network:
+  1. Gateway `ARC_DOMAIN: 26` (_gateway.mjs:12) — discriminator = Gateway WALLET (0x0077…↔0x7777…).
+     ✅ GUARDED by the env-assert's wallet slot.
+  2. Gateway `BASE_SEPOLIA_DOMAIN: 6` (_gateway.mjs:15) — domain 6 is Base on Base-Sepolia AND
+     Base-mainnet; discriminator = the per-network Gateway wallet / USDC. ⛔ UNGUARDED.
+  3. `ARC_CCTP_DOMAIN = 26` (_bridge.mjs:30) — same 26 both networks; discriminator = the IRIS host
+     (iris-api-sandbox vs iris-api), NOT the domain. ⛔ UNGUARDED.
+  4. `BRIDGE_DESTINATIONS` cctpDomains (_bridge.mjs:43-50: base 6, eth 0, arb 3, op 2, avax 1, poly 7,
+     uni 10, linea 11) — CCTP domains are network-family constants, identical testnet↔mainnet;
+     discrimination rests on the paired testnet explorer URL / IRIS host / _receipt.mjs testnet USDC
+     address, never the domain. ⛔ UNGUARDED.
+  THREE OF THE FOUR ARE UNGUARDED. The env-assert covers only #1 (via the Arc-domain Gateway wallet);
+  it does not read the Base-6 wallet, the IRIS host, or any cctpDomain's paired address.
