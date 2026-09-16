@@ -45,7 +45,15 @@ process.env.SESSION_SECRET ||= ["plan", "contract", "suite", "not", "a", "creden
 const FEE = ({ amountUsdc }) => ({ feeUsdc: 0.05, netUsdc: amountUsdc, feeMinor: 50000n, amountMinor: BigInt(Math.round(amountUsdc * 1e6)),
   mechanic: "upfront", quote: { signedQuote: "0x01" + "00".repeat(31) + "20" + "00" + BigInt(4102444800).toString(16).padStart(62, "0") + "ab".repeat(32),
     expiry: { mode: "TIMESTAMP", expiresAt: 4102444800 } } });
-mock.module(R + "_bridge.mjs", { namedExports: { ...realBridge, bridgeFee: async (a) => FEE(a) }});
+// ⭐ BALANCE-FIRST REORDER (2026-09-16): agent-execute-plan now runs the balance pre-flight BEFORE the
+// per-step cap. This suite tests the CAP-STOP / `executed` contract, not the balance gate (that is
+// verify-plan-balance-preflight). Un-mocked, readBridgeBalanceMinor would hit the REAL RPC for the
+// real wallet balance and, being < a 200-over-cap plan, would balance-refuse FIRST — making this
+// suite non-deterministic and never reaching the cap loop. So mock the balance read to PASS: the
+// cap-stop contract is then what is exercised, deterministically. A real unfunded wallet balance-
+// refusing first is the reorder working, and is asserted in verify-plan-balance-preflight.
+mock.module(R + "_bridge.mjs", { namedExports: { ...realBridge, bridgeFee: async (a) => FEE(a),
+  readBridgeBalanceMinor: async () => ({ haveMinor: 10_000_000_000n, checked: true, error: null }) }});
 // ⭐ The executor is the BOUNDARY — swapped per case so the handler's own bookkeeping is what is
 // under test, never the executor's. `valueOfStep` stays REAL.
 mock.module(R + "_actions.mjs", { namedExports: { ...realActions, executeAction: async (...a) => executorImpl(...a) }});
