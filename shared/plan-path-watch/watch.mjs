@@ -149,7 +149,15 @@ export const DEFAULT_STORE_NAME = "plan-path-watch";
 
 /** The owner the probe acts as — the SAME wallet `gate:forgery` already probes with, so this
  *  introduces no new identity and no new wallet provisioning (`ensureOwnerWallet` takes its fast
- *  path on an already-mapped owner; a fresh address would MINT a Circle wallet). */
+ *  path on an already-mapped owner; a fresh address would MINT a Circle wallet).
+ *
+ *  🚨 LOAD-BEARING AFTER THE 2026-09-16 GUARD REORDER (balance-before-cap in agent-execute-plan). The
+ *  probe's non-spend invariant now lives in THIS WALLET'S STATE, not in a policy number: the 200 USDC
+ *  plan refuses because this wallet holds far under 200, not because 200 > the per-bridge cap (25).
+ *  ⛔ FUNDING THIS WALLET ABOVE THE PER-BRIDGE CAP REOPENS THE ORDERING QUESTION — a top-up past ~25
+ *  USDC would let the probe's plan pass the balance check and hit the cap (kind:cap returns), and a
+ *  top-up past ~200 could let a real bridge run. Keep it under the per-bridge cap, or move the probe to
+ *  a wallet that cannot be funded. This is the weakening the reorder accepted; it is not free. */
 export const DEFAULT_PROBE_OWNER = "0xfd801d082479e69f93bf79ccbf5f9dfe3c615767";
 
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -493,6 +501,13 @@ export function buildRecord({ judgement, target, producedAt, deployId = null, pr
     matchedBy: judgement.disclosure?.matchedBy ?? null,
     probeContract: PROBE_CONTRACT,
     // ⛔ the streak carries ONLY within the same probe contract; a bump invalidates it (see above).
+    // 🚨 KNOWN, NOT SILENT (2026-09-16): the reorder did NOT change probeContract (still the two-press
+    // quote-then-post traversal), so the streak CONTINUES across it — but the disclosure it counts flips
+    // from kind:cap to kind:balance the moment the reorder deploys. The counter therefore CONFLATES a
+    // cap-era prefix (the 71 earned through 2026-09-16) with balance-era ticks after it: a later
+    // fieldStreak of, say, 150 is NOT 150 balance-branch confirmations. It is one number over two readers.
+    // The cap reader's live evidence is FROZEN at 71 as of 2026-09-16; only the fixture covers it after.
+    // A per-branch streak would be the non-misleading design, but that is a change not made here.
     fieldStreak: judgement.outcome === OUTCOME.HEALTHY && judgement.disclosure?.matchedBy === "field"
       ? ((Number.isFinite(prev?.fieldStreak) && prev?.probeContract === PROBE_CONTRACT) ? prev.fieldStreak : 0) + 1
       : 0,

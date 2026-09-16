@@ -400,16 +400,26 @@ export async function handler(event) {
   // every bridge step's debit (amount + its sealed fee — the fees are already OPENED above, so the
   // figures are the ones the user consented to). One reader, one comparison, in _bridge.mjs.
   //
-  // ⛔ ORDERED AFTER THE CAP, DELIBERATELY. plan-path-watch probes this endpoint every 30 min with a
-  // 200 USDC bridge from a wallet that cannot fund it and judges HEALTHY on the per-bridge CAP
-  // sentence at results[0]. A balance refusal that pre-empted the cap would page as an outage on
-  // every tick. So: if any step would be cap-refused, the loop below answers exactly as before and
-  // this check is skipped; the balance refusal fires only for a plan the caps would let run.
-  // ⛔ An UNREAD balance is not a shortfall: the plan proceeds to Circle's backstop and the body
-  // says `balanceChecked:false`. [[absence-must-never-read-as-safe]] [[verify-plan-balance-preflight]]
-  const capWouldRefuse = plan.some((step, i) => atomic(values[i]) > capForA(step));
-  const { haveMinor, checked: balanceChecked } = capWouldRefuse ? { haveMinor: null, checked: false } : await readBridgeBalanceMinor(walletAddress);
-  if (!capWouldRefuse && bridgeIdx.length > 0) {
+  // ⭐ REORDERED 2026-09-16 — BALANCE NOW RUNS BEFORE THE PER-STEP CAP (was: after, gated by
+  //   `capWouldRefuse`). The promotion criterion the reorder waited on is met: plan-path-watch showed
+  //   fieldStreak 71, every tick matchedBy "field" on probeContract "quote-then-post/1" (all kind:cap).
+  //   KNOWN CONSEQUENCES, not afterthoughts:
+  //   • The 71-tick streak proves the CAP branch of the field reader ONLY. The BALANCE branch has
+  //     NEVER run on a live tick — its evidence is the captured fixture (real handler body: 402,
+  //     kind:balance, have 2.6 / need 10.0541 — scripts/fixtures/plan-path-probe-capture.json
+  //     `underCapOverBalance_10`). Do NOT read the streak as covering both branches.
+  //   • kind:cap GOES DARK in production after this. The probe's 200 USDC plan now refuses on BALANCE
+  //     first (the probe wallet holds far under 200), so nothing exercises the cap reader again on a
+  //     live tick. Today's fieldStreak 71 is the ONLY live evidence the cap reader works — it stops growing.
+  //   • THE PROBE'S SPEND INVARIANT MOVES FROM CODE TO WALLET STATE. Before: 200 > cap (25), a fixed
+  //     policy number enforced by this guard. After: 200 > balance, enforced only by the probe wallet
+  //     staying under 200 — weaker, and on the wallet that gets funded. See DEFAULT_PROBE_OWNER.
+  // ⛔ An UNREAD balance is STILL not a shortfall: bridgeBalanceRefusal returns null on a null/unparsable
+  //   haveMinor, so the plan proceeds to Circle's backstop with `balanceChecked:false`. The cap loop
+  //   below is UNCHANGED and still stops a too-large step for any plan the balance lets through.
+  //   [[absence-must-never-read-as-safe]] [[verify-plan-balance-preflight]]
+  const { haveMinor, checked: balanceChecked } = await readBridgeBalanceMinor(walletAddress);
+  if (bridgeIdx.length > 0) {
     const short = bridgeBalanceRefusal({
       haveMinor, scope: "plan",
       steps: bridgeIdx.map((i) => ({ amountMinor: fees[i].amountMinor, feeMinor: fees[i].feeMinor, destLabel: dests[i].label })),

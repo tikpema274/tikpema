@@ -17,9 +17,10 @@
 //      executeAction NEVER called, "whole plan" in the sentence.
 //   §2 pass — balance 10 → no refusal, both steps reach the executor.
 //   §3 read fails — balanceOf throws → NOT a shortfall: no 402, executor reached, balanceChecked:false.
-//   §4 ⛔ THE MONITOR'S PROBE IS UNCHANGED — a 200 USDC plan over the per-bridge cap from a poor wallet
-//      must still read as the CAP refusal at results[0] (plan-path-watch judges HEALTHY on that
-//      sentence), never as the balance sentence. This is the ordering that keeps the */30 monitor quiet.
+//   §4 ⭐ THE MONITOR'S PROBE AFTER THE 2026-09-16 REORDER (balance-before-cap) — a 200 USDC plan over
+//      the per-bridge cap from a poor wallet now reads as the BALANCE refusal at the TOP LEVEL (402,
+//      refusal{kind:balance}), NOT the cap sentence at results[0]. plan-path-watch judges that HEALTHY
+//      on the balance field (kind:balance, matchedBy field). kind:cap no longer fires on the live probe.
 
 import { mock } from "node:test";
 
@@ -152,15 +153,15 @@ section("3 — ⛔ READ FAILS: not a shortfall — the executor is reached and t
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-section("4 — ⛔ THE MONITOR'S PROBE: 200 over a 50 cap from a 3.65 wallet reads as the CAP refusal, not the balance");
+section("4 — ⭐ THE MONITOR'S PROBE (post-2026-09-16 reorder): 200 over a 50 cap from a 3.65 wallet reads as the BALANCE refusal, not the cap");
 {
   balanceMinor = 3_650_000n; readThrows = false;
   const probe = [{ type: "bridge_usdc", amountUsdc: 200, destination: "base", reasoning: "plan-path-watch probe" }];
   const { r } = await run(probe);
-  const capMsg = String(r.body?.results?.[0]?.blocked ?? "");
-  check("⭐ results[0].blocked is the per-bridge cap sentence plan-path-watch judges HEALTHY on", /exceeds per-bridge limit of 50/.test(capMsg), capMsg || JSON.stringify(r.body).slice(0, 120));
-  check("⛔ …and NOT the balance sentence at top level", !/Insufficient funds/.test(String(r.body.blocked ?? r.body.error ?? "")));
-  check("⭐ nothing executed", execCalls.length === 0);
+  // balance-before-cap: 3.65 < 200 refuses at the top level BEFORE the cap loop is entered.
+  check("⭐ 402 with a top-level refusal{kind:balance} — balance runs BEFORE the cap now", r.status === 402 && r.body?.refusal?.kind === "balance", `status=${r.status} kind=${r.body?.refusal?.kind}`);
+  check("⛔ …and NO cap sentence at results[0] — the cap loop was never reached (results empty)", !r.body?.results?.[0]?.refusal, `results=${JSON.stringify(r.body?.results ?? [])}`);
+  check("⭐ stepsRun 0, nothing executed", r.body?.stepsRun === 0 && execCalls.length === 0);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
@@ -193,8 +194,11 @@ section("5 — ⛔ THE FAIL-OPEN IS CARRIED TO THE PRE-PRESS BODIES (what the re
 section("6 — ⭐⭐ A TERMINAL REFUSAL IS A FIELD, AND THE SENTENCE IS DERIVED FROM IT (phase 1)");
 {
   const { refusalSentence, capRefusal, balanceRefusal, priceUnavailableRefusal, ceilingRefusal, REFUSAL_KIND } = await import("../netlify/functions/_refusal.mjs");
-  // (a) the handler's cap refusal carries the field, and its sentence IS the derivation of that field
-  balanceMinor = 3_650_000n; readThrows = false;
+  // (a) the handler's cap refusal carries the field, and its sentence IS the derivation of that field.
+  // ⭐ POST-2026-09-16 REORDER: the cap branch is reached ONLY when balance passes, so the probe wallet
+  // is funded ABOVE the 200 plan here (300 USDC) — otherwise balance-before-cap refuses first and there
+  // is no results[0] to read. This mirrors the real consequence: funding the probe wallet reopens the cap.
+  balanceMinor = 300_000_000n; readThrows = false;
   const probe = [{ type: "bridge_usdc", amountUsdc: 200, destination: "base", reasoning: "plan-path-watch probe" }];
   const { r } = await run(probe);
   const res0 = r.body?.results?.[0];
@@ -208,6 +212,7 @@ section("6 — ⭐⭐ A TERMINAL REFUSAL IS A FIELD, AND THE SENTENCE IS DERIVED
   check("⭐⭐ mutating valuedUsdc changes the sentence", mutated !== res0.blocked && /300\.05/.test(mutated), mutated);
   check("⭐⭐ mutating capUsdc changes the sentence", /limit of 75 USDC/.test(refusalSentence({ ...res0.refusal, capUsdc: 75 })));
   // (c) the plan-level balance refusal carries its field and derives its sentence too
+  balanceMinor = 3_650_000n; // reset below the plan need after §6(a) funded the wallet to 300
   const { r: bal } = await run(twoBridges);
   check("⭐ the balance refusal carries refusal:{kind:balance, have, need}", bal.body?.refusal?.kind === "balance" && bal.body.refusal.have === 3.65 && Math.abs(bal.body.refusal.need - 4.108258) < 1e-9, JSON.stringify(bal.body?.refusal));
   check("⭐⭐ its blocked === refusalSentence(refusal)", bal.body?.blocked === refusalSentence(bal.body?.refusal));

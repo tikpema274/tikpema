@@ -119,8 +119,8 @@ for (const [name, code] of Object.entries(surfaces)) {
 check("⭐ agent-act's plan proposal refuses with scope \"plan\"", /scope:\s*"plan"/.test(surfaces["agent-act.mjs (chat proposal: plan + single-action)"]));
 check("⭐ agent-execute-plan refuses with scope \"plan\" BEFORE the execution loop",
   (() => { const c = surfaces["agent-execute-plan.mjs (plan execution)"]; const i = c.indexOf('scope: "plan"'); const j = c.indexOf("const results = [];"); return i > 0 && j > 0 && i < j; })());
-check("⭐ agent-execute-plan orders the balance refusal AFTER the cap (the monitor's probe must still read the cap sentence)",
-  /capWouldRefuse/.test(surfaces["agent-execute-plan.mjs (plan execution)"]));
+check("⭐ agent-execute-plan orders the balance refusal BEFORE the per-step cap (2026-09-16 reorder — the monitor's probe now reads the balance field, not the cap)",
+  (() => { const c = surfaces["agent-execute-plan.mjs (plan execution)"]; const bal = c.indexOf("bridgeBalanceRefusal({"); const cap = c.indexOf("vA > capForA(step)"); return bal > 0 && cap > 0 && bal < cap; })());
 check("⛔ _bridge.mjs holds exactly ONE balanceOf ABI for the pre-flight (the only copy)",
   (readFileSync("netlify/functions/_bridge.mjs", "utf8").match(/name:\s*"balanceOf"/g) || []).length === 1);
 

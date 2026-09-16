@@ -25512,3 +25512,42 @@ partial one: pointing Arc at a mainnet chain id refuses to boot until those entr
 published source. Intended — read as the guard working. gatewayHost/gatewayWallet DO have mainnet
 entries, so a Gateway-only flip classifies as mainnet and yields a SPLIT (the half-migration case),
 not an UNKNOWN.
+
+## Guard reorder: balance-before-cap in agent-execute-plan — 2026-09-16 (committed, NOT deployed)
+
+Promotion criterion met (plan-path-watch: fieldStreak 71, every tick matchedBy "field", probeContract
+"quote-then-post/1", all kind:cap), so the plan-level balance pre-flight now runs BEFORE the per-step
+cap. Removed the `capWouldRefuse` gate that had deliberately deferred balance until after the cap; the
+balance refusal (`bridgeBalanceRefusal`) is now unconditional (still returns null on an unread/enough
+balance, so the Circle-backstop and enough-balance paths are unchanged), and the cap loop is untouched
+for any plan the balance lets through.
+
+KNOWN CONSEQUENCES (recorded at the code too — agent-execute-plan.mjs and watch.mjs — not afterthoughts):
+- **The 71-tick streak is CAP-branch evidence only.** The balance branch of the field reader has NEVER
+  run on a live tick; its sole evidence is the captured fixture (real handler body: 402, kind:balance,
+  have 2.6 / need 10.0541 — `scripts/fixtures/plan-path-probe-capture.json` `underCapOverBalance_10`).
+- **kind:cap GOES DARK in production.** The probe's 200 USDC plan now refuses on balance first (the probe
+  wallet holds far under 200), so nothing exercises the cap reader on a live tick again. fieldStreak 71
+  is the ONLY live evidence the cap reader works, and it stops accumulating as of 2026-09-16.
+- **The probe's spend invariant moved from CODE to WALLET STATE.** Before: 200 > cap (25/50), a fixed
+  policy number enforced by the guard. After: 200 > balance, enforced only by the probe wallet
+  (DEFAULT_PROBE_OWNER 0xfd80…5767) staying under 200 — weaker, and on the wallet that gets funded.
+  Funding it above the per-bridge cap reopens the ordering question (noted at DEFAULT_PROBE_OWNER).
+- **fieldStreak now CONFLATES cap-era and balance-era ticks under one counter.** The reorder did not
+  change probeContract, so the streak continues (71 → 72 …) but the disclosure it counts flips from
+  cap to balance. A later fieldStreak is NOT all-balance confirmations; the cap reader's live evidence
+  is frozen at 71. Stated, not silent. (A per-branch streak would be the non-misleading design; not
+  made here.)
+
+VERIFIED LOCALLY (no deploy): the monitor reads HEALTHY on the real kind:balance body with matchedBy
+"field" (won't page); buildRecord continues the streak across the reorder (71 cap-era → 72 balance-era);
+the cap reader still reads healthy/kind:cap on its fixture. Suites updated to the new order and green:
+verify-plan-balance-preflight (§4 flipped to balance-first, §6a funds the wallet to reach the cap field,
+§6c resets), verify-bridge-balance-preflight (the ordering assertion now checks balance-before-cap
+positionally, not the deleted `capWouldRefuse`), verify-plan-path-watch unchanged (117/0).
+
+DEFERRED to post-deploy (CANNOT be shown now without deploying, which is held behind prod's unverified
+live half + the env-assert commit): driving the DEPLOYED handler with the 200 USDC plan to show a LIVE
+402/refusal{kind:balance}/stepsRun 0. The currently-deployed handler is still cap-first, so a live drive
+today would return kind:cap — not the new behaviour — and I will not POST the prod money endpoint to
+"prove" something the deployed code cannot yet do, nor claim a live kind:balance result I have not seen.
