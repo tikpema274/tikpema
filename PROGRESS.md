@@ -25648,3 +25648,36 @@ Live half MET by eyeball on prod: a plan balance-refusal rendered BOTH figures �
 NOTHING executed (no tx, no funds moved). Unverified-balance half MET by the (b) render test, with its
 honest label: it proves the component renders when fed balanceChecked:false, NOT that a live handler
 produced it. Gate 0 clears; Deploy 1 (env-assert 80e5944, ALONE) may start.
+
+## Deploy 1 COMPLETE — env-assert live on prod (2026-09-16)
+
+⭐ DD REFUSAL WINDOW — SECOND READING: **257.7s (4m18s)** against a **≤~10-min prediction made BEFORE the
+run**. First reading (2026-08-16) was ~6m49s. This deploy changed a LARGER DD surface (two files ADDED to
+the hash — _gateway.mjs, _env-assert.mjs — plus _arc.mjs itself) yet produced a SHORTER window. VERDICT:
+~10 minutes is the CEILING set by the */10 canary cadence, INDEPENDENT of how much the surface changed —
+the window's value is just where in the cycle the deploy landed. The first sample was the SHAPE, not luck.
+(capture:window observed it live and timed it to close; banner rendered during a real refusal. New
+ddTree 79e2f258… rotated from 2f4f2793…; recorded in dd-refusal-window-log.jsonl.)
+
+- DEPLOY: id `6aaa93712829c83ce5fd2d45`, site tikpema-predict-test (app.tikpema.xyz). deploy:prod exit 0;
+  all suites + gate:watch/rpc/deployed/forgery/spec/deployloss green (deployloss: 0 new). 27m bundling.
+- TREE: `d0c7442` = `80e5944` (env-assert) + `1725dad` (DD-surface fix), cherry-picked. ⭐ THE REORDER
+  `1e936ff` IS ABSENT (verified: not an ancestor; balance-before-cap marker count 0; cap-first
+  capWouldRefuse present). Deploy 1 shipped env-assert ALONE, as intended.
+- COLD-START VERDICT (pre-registered framing): gate:deployed passed (its probe is the guaranteed-cold
+  first post-deploy hit); GET /api/dd-analyze → 405 (a handler response, non-500 ⇒ module loaded ⇒ _arc
+  imported ⇒ assert ran and DID NOT THROW); 0 EnvironmentAssertionError / module-load errors in the
+  cold-start logs. ⇒ the import ran and the assert did not throw — the four values resolved to ONE
+  environment. NOT a literal "testnet" read. No bare 5xx anywhere, so nothing uncalibrated.
+- ⭐ THE DD-SURFACE GAP THE GATE CAUGHT BY CONSTRUCTION: the first Deploy-1 attempt aborted fail-closed at
+  test:dd — verify-quorum-billing's whole-graph walk found that _arc.mjs's new imports pulled
+  _env-assert.mjs and _gateway.mjs into dd-analyze's execution graph while both sat OUTSIDE ddTree (a hash
+  not covering what the surface depends on; an edit to either would have left ddTree unrotated while DD
+  behaviour changed). Found by construction (graph re-derived every run), not by anyone noticing. FIX
+  (1725dad): both added to DD_SURFACE_FILES. ⛔ _env-assert.mjs and _gateway.mjs are DD-SURFACE FROM NOW
+  ON — their edits rotate ddTree and buy a refusal window (folds into the one-source refactor's window).
+- ⛔ DELIBERATE DIVERGENCE (until Deploy 2): prod serves `d0c7442` (env-assert + DD-fix, NO reorder); main
+  is AHEAD (`1725dad`: env-assert + reorder + docs + DD-fix). A future `gate:deployed` will flag
+  prod-vs-working-tree — that is EXPECTED while diverged, NOT a failure. Do not "fix" it by redeploying
+  main (that would ship the reorder). Deploy 2 (the reorder) is still blocked on updating test:plancontract
+  (its third cap-first test, unfixed) before it can pass the deploy gate.
