@@ -1,5 +1,7 @@
-// _env-assert.mjs — the SAME-ENVIRONMENT startup assert. PURE: no imports, no import-time side effect,
-// NOT on the DD surface. `_arc.mjs` invokes assertSameEnvironment() at load with the four real values;
+// _env-assert.mjs — the SAME-ENVIRONMENT startup assert. PURE: no imports, no import-time side effect.
+// ⚠️ ON THE DD SURFACE since 2026-09-16 (DD_SURFACE_FILES): `_arc.mjs` imports it, and dd-analyze reaches
+// _arc, so this module runs inside what ddTree must hash — edits here rotate ddTree and buy a refusal
+// window. (Its logic is still unit-testable in isolation.) `_arc.mjs` invokes assertSameEnvironment()
 // this file only defines the table and the check, so it is unit-testable in isolation.
 //
 // ⛔ WHY THIS EXISTS (2026-09-16). Four independent values decide which environment the money path is
