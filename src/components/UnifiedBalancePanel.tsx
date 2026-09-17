@@ -5,6 +5,7 @@ import { useGatewayBalance } from "../lib/useGatewayBalance";
 import type { useWallet } from "../wallet/useWallet";
 import { readJson } from "../lib/readJson";
 import UbExitStatus from "./UbExitStatus";
+import { UB_EXIT_PROOF } from "../lib/ubExitProof";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -599,9 +600,10 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
             ; it then lands in your agent's balance, which you can withdraw yourself. The wait is
             set by Arc's Gateway, not by us.{" "}
             <span id="ub-exit-evidence" hidden={!showEvidence}>
-              <b>⚠️ This has now been done once, end to end</b>: 1 USDC asked for on 2026-08-12 and
-              returned automatically on 2026-08-20 — one real run, not a track record, and it took
-              7 days and 4 hours, longer than the estimate, so treat the wait as a floor.{" "}
+              <b>⚠️ This has now been done once, end to end</b>: {UB_EXIT_PROOF.amount} asked for on{" "}
+              {UB_EXIT_PROOF.askedDate} and returned automatically on {UB_EXIT_PROOF.returnedDate} — one
+              real run, not a track record, and it took {UB_EXIT_PROOF.duration}, longer than the
+              estimate, so treat the wait as a floor.{" "}
               <b>It is built now:</b> we finish it automatically — <b>you do not have to come
               back</b>. Deposit only what you intend the agent to spend.
             </span>

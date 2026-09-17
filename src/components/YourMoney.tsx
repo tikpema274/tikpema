@@ -8,6 +8,7 @@ import SignInPrompt from "./SignInPrompt";
 import { describeError } from "../lib/describeError";
 import { describeChainError } from "../lib/describeChainError";
 import { displayAmount } from "../lib/formatAmount";
+import { UB_EXIT_PROOF } from "../lib/ubExitProof";
 
 const EXPLORER = arcTestnet.blockExplorers.default.url;
 
@@ -387,9 +388,10 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
               account</b> — so the exit runs through us. <b>It is built now:</b> you ask, Arc's
               Gateway holds the funds for a delay of about seven days, and we finish it
               automatically — <b>you do not have to come back</b>. <b>⚠️ This has now been done once, end
-              to end</b>: 1 USDC asked for on 2026-08-12 and returned automatically on 2026-08-20, with
-              nobody watching — one real run, not a track record. It took 7 days and 4 hours, longer
-              than the estimate, so treat the wait as the floor, not the ceiling.
+              to end</b>: {UB_EXIT_PROOF.amount} asked for on {UB_EXIT_PROOF.askedDate} and returned
+              automatically on {UB_EXIT_PROOF.returnedDate}, with nobody watching — one real run, not a
+              track record. It took {UB_EXIT_PROOF.duration}, longer than the estimate, so treat the
+              wait as the floor, not the ceiling.
             </div>
           )}
           {wdErr && (

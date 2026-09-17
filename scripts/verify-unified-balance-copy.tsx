@@ -73,6 +73,7 @@ mock.module("../src/lib/useGatewayBalance", {
 import React from "react";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
+import { UB_EXIT_PROOF } from "../src/lib/ubExitProof";
 
 let pass = 0, fail = 0;
 const check = (label: string, cond: boolean, extra = "") => {
@@ -195,6 +196,25 @@ section("1b — B1: the exit badge shows ONLY when funds are actually parked (fi
   check("⭐ empty (ready, total 0) → badge ABSENT", badgeEmpty === 0, `${badgeEmpty}×`);
   check("⭐ unavailable (error) → badge ABSENT", badgeErr === 0, `${badgeErr}×`);
   check("⭐ signed-out → badge ABSENT", badgeOut === 0, `${badgeOut}×`);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("1c — B2: the dated exit proof comes from ONE source (finding 10.2)");
+// ⭐ YourMoney's "Not included" note and UnifiedBalancePanel's evidence disclosure cite the SAME
+// completed run. Both now read src/lib/ubExitProof.ts. This pins the four VALUES to an independent
+// oracle (the literals below) AND asserts both rendered surfaces show each one — so editing the
+// source (UB_EXIT_PROOF) turns BOTH surfaces red here at once, which is what "one source" means.
+// The surrounding prose is free to differ; only the values are shared.
+{
+  const ORACLE = { amount: "1 USDC", askedDate: "2026-08-12", returnedDate: "2026-08-20", duration: "7 days and 4 hours" };
+  check("⭐ the shared source holds the known run's values (oracle match)",
+    UB_EXIT_PROOF.amount === ORACLE.amount && UB_EXIT_PROOF.askedDate === ORACLE.askedDate &&
+    UB_EXIT_PROOF.returnedDate === ORACLE.returnedDate && UB_EXIT_PROOF.duration === ORACLE.duration,
+    JSON.stringify(UB_EXIT_PROOF));
+  for (const [k, v] of Object.entries(ORACLE)) {
+    check(`⭐ YourMoney renders ${k} (${v}) from the source`, ymParked.includes(v));
+    check(`⭐ UnifiedBalancePanel renders ${k} (${v}) from the source`, ubParked.includes(v));
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
