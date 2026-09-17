@@ -25714,3 +25714,29 @@ Manual discriminating trigger for an independent eyeball (still valid): a 2-STEP
 step — "bridge 200 to Base then bridge 3 to Ethereum" — gives the top-level balance sentence
 ("Insufficient funds … the whole plan is refused, not a step of it"), NOT the cap sentence ("exceeds
 per-bridge limit of 25 USDC"). Refuses before any funds move (stepsRun 0, results []).
+
+## Deploy 3 COMPLETE — OFAC sanctions screen + DD "what it is" copy live (2026-09-17)
+
+Deploy `6aab0fecb3a76f35c17da4d0`, tree `dc2d3ffd7dc5` (main HEAD `c5b2163`). Prod = main HEAD; no
+divergence. Ships two commits:
+- `21c30ed` — deterministic OFAC SDN screen on the DD. `sanctions` fact on EVERY report (both paths,
+  incl. chain-unreachable — the screen is pure); pinned in-ddTree SDN snapshot; SCHEMA_VERSION
+  0.2.0→0.3.0; the fact is INSIDE the signed canon. Facts-not-verdicts; kept out of evaluatePolicy.
+- `c5b2163` — sharper /dd + OpenAPI "what DD is" lede; OpenAPI info.version 0.3.0.
+
+DD WINDOW — 4th reading: **48s (0m48s)**, banner variant self-clearing (no-record), seen 22:29:52 →
+GONE 22:30:40. PREDICTED before the run: non-zero and ≤~10 min, because BOTH ddTree (shared/
+onchain-analyze +2 files, edited schema/descriptor/openapi/discovery) AND the code identity
+(SCHEMA_VERSION 0.3.0) rotated — a guaranteed fresh binding, no chance of a pre-bound tree like
+Deploy 2. Outcome matches the cadence-sets-the-ceiling shape: R1 6m49s, R2 257.7s, now 48s — every
+reading under the */10 canary ceiling regardless of change size. capture:window OBSERVED the refusal
+(page rendered DURING it and said so); no funds at risk (dd-analyze refused, fail-closed).
+
+COLD-START PROOF: gate:deployed cold probe passed (served commit MATCHES `c5b2163`, non-500);
+**0 EnvironmentAssertionError** in the run → the same-environment assert (live since Deploy 1) passed
+at import across all functions, so every config lever still classifies TESTNET — no drift, and no
+config was changed. Not a literal testnet read.
+
+GATES: test:all (128 suites) green; gate:forgery 5/0 (forged public-input token REFUSED; server token
+differs from the forgeable one → key live in prod; NOTHING executed); gate:deployloss 0 NEW losses
+(15 carried). All green, chain exit 0.
