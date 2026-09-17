@@ -25740,3 +25740,59 @@ config was changed. Not a literal testnet read.
 GATES: test:all (128 suites) green; gate:forgery 5/0 (forged public-input token REFUSED; server token
 differs from the forgeable one → key live in prod; NOTHING executed); gate:deployloss 0 NEW losses
 (15 carried). All green, chain exit 0.
+
+## Deploy 4 COMPLETE — DEV-only #/dev/dd-card fixture route + engine-derived no-verdict detail (2026-09-17)
+
+Deploy `6aac09fe6b1529231aad2eed`, served tree `46c63e7423c7` (main HEAD `4adcc53`). Prod = main HEAD;
+gate:deployed VERIFIED (control plane == data plane, served commit matches, no orphaned deploys). Ships
+one commit `4adcc53`:
+- A **DEV-gated** `#/dev/dd-card` route renders the DD card's no-verdict state with no API and no real
+  refused vault. `import.meta.env.DEV` folds it to `null` in the prod build and the lazy `import()` is
+  eliminated — the route, `DevDdCard`, its fixtures and the engine module are **absent from dist/**
+  (grep-proven: route path, fixture sentinel, module name, engine string all absent). **`#/dev/dd-card`
+  is DEV-only and is NOT in production.**
+- The no-verdict refusal DETAIL is now **derived from `analyze()`** (`src/dev/engine-no-verdict.ts` runs
+  the engine over an unrecognised ERC-4626 vault surface on the offline mock chain) instead of a
+  hand-copied string. The old fixtures had drifted ("is an ERC-4626 vault" vs the engine's "presents an
+  ERC-4626 vault surface (fully or partially)"). Card-copy §F now asserts the rendered detail is
+  VERBATIM the engine's output — card and engine can never drift in wording again.
+
+DD WINDOW — 5th reading: **553s (9m13s)**, banner variant self-clearing (no-record), opened 16:11:15 →
+GONE 16:20:28; ddTree `ddc910aa…`→`596bcd84…`. PREDICTED before the run: non-zero, ≤10 min,
+self-clearing, SCHEMA_VERSION `onchain-analyze/0.3.0` unchanged. ⭐ The window is NOT caused by this
+commit — it rides **f3e4f09**'s DD-surface edits (`shared/onchain-analyze/index.mjs`,
+`shared/onchain-facts/vault-profiles.mjs`); `4adcc53` touched only `src/` + `scripts/`, so ddTree was
+already `596bcd84` and this deploy added nothing to the rotation.
+
+WINDOW DECOMPOSITION (from the refusal-window log + the */10 canary cadence): window = (wait for the
+next `*/10` tick) + (canary runtime + ≤15s observe lag). This reading = **524s wait + 29s canary**.
+Across the last four rotating deploys: 258s = 240+18, 48s = 7+41, 456s = 437+19, 553s = 524+29. The
+wait-for-tick term (0–600s) dominates and is set purely by where in the 10-min cron cycle the publish
+lands; canary runtime is bounded ~18–41s and shows **no growth**. ⭐ So the ceiling is **600s + canary
+runtime (~640s worst case), NOT 600s** — but it never approaches the 20-min (1200s) escalation
+threshold (dd-watch `GRACE_MS` = 2×canary period; capture:window `CLOSE_TIMEOUT` = 1200s). A window
+past 600s is still self-clearing and unalerted; only a `no-record` PERSISTING past 20m pages
+(`no-record-persisting` in shared/dd-watch/watch.mjs — the canary having stopped writing, a real fault,
+not a long-but-normal window). Nothing keys on 600s; the self-clearing label is `health.selfClearing`
+(reason-derived, duration-independent).
+
+COLD-START (1a): retroactive per-invocation function logs are **not fetchable via the CLI**
+(`netlify logs:function` is live-tail only), so no literal EnvironmentAssertionError grep-count over
+16:11–16:20 — stated plainly. Indirect proof of **0 EnvironmentAssertionError**: gate:deployed passed
+non-500 (served commit matches `4adcc53`); the self-clearing 503 banner rendered DURING the window (that
+path runs only AFTER env-assert passes); the service returned to 402 challenges; a fresh cold-start POST
+to `/api/dd-analyze` now returns **402**, not 500. Every observed response is inconsistent with the
+assert firing.
+
+CHAIN (1b) — from the chain, not response bodies (blocks 62596283–62597389 = the window, ~0.5s/block):
+**no Tikpema wallet originated a transaction.** EOA nonce Δ over [open−1, close] = 0 for DELEGATE
+`0x6db3…b380` and payTo `0xb407…6ac4`; AGENT/verifier `0xc54d…e621` is an SCA (no type-0 origination).
+**payTo received ZERO USDC** in the window (0 Transfer logs to it) → no x402 settlements, consistent
+with the service refusing. The only address a USDC-Transfer scan flagged, `0x0077777d…19B9`, is
+**Circle's shared Gateway Wallet contract** (`_gateway.mjs`/`_dd-x402.mjs`), not a Tikpema wallet — its
+transfers are unrelated chain-wide Gateway traffic and are correctly excluded.
+
+GATES: test:all 129/129 green; capture:window self-clearing self-healed at 553s; gate:deployed VERIFIED.
+The DD surface did not change in this commit → ddTree stable at `596bcd84` (43 files); SCHEMA_VERSION
+`onchain-analyze/0.3.0`. Runtime logs (dd-refusal-window-log.jsonl, deploy-loss-log.jsonl) carry the
+window entry but are NOT committed with this note.
