@@ -109,6 +109,14 @@ const render = (C: any) =>
     .trim();
 /** Raw markup — for claims about ATTRIBUTES rather than body text. */
 const markup = (C: any) => renderToStaticMarkup(<C wallet={wallet} />);
+/** Render with a CUSTOM wallet — for states the default fixture cannot reach (e.g. an empty login wallet). */
+const render2 = (C: any, wl: any) =>
+  renderToStaticMarkup(<C wallet={wl} />)
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&")
+    .replace(/&#(\d+);/g, (_: string, d: string) => String.fromCharCode(Number(d)))
+    .replace(/\s+/g, " ")
+    .trim();
 const n = (s: string, re: RegExp) => (s.match(re) || []).length;
 
 console.log("╔══════════════════════════════════════════════════════════════════════╗");
@@ -492,6 +500,28 @@ section("Max button renders the balance at the SAME precision as the card (B3: o
   check("  …and the card carries that same figure", ymParked.includes("12.345600"));
   check("  …and neither the old 2dp form nor a raw untrimmed figure reaches the button",
     !/Max \(12\.35\)/.test(ymParked) && !/Max \(12\.3456\)/.test(ymParked));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("B4 — every disclosure & badge on this fund-moving surface is under a PRESENCE test (finding 10.4)");
+// ⭐ These strings render on a surface that MOVES MONEY, yet had no test — a silent deletion or a
+// reword would ship unnoticed. Each is pinned in the state that actually shows it. Red-first:
+// removing any one from YourMoney.tsx turns exactly its check red (demonstrated in the B4 commit).
+{
+  // Parked state (funds committed): the two pocket badges + the "Not included" custody disclosure.
+  check('⭐ "You hold the key" — pocket 1 badge', ymParked.includes("You hold the key"));
+  check('⭐ "Withdraw any time" — pocket 2 badge', ymParked.includes("Withdraw any time"));
+  check('⭐ "Not included" — the parked-funds disclosure', ymParked.includes("Not included"));
+  check('⭐ custody: "Only your agent\'s own account can release these funds"',
+    ymParked.includes("Only your agent's own account can release these funds"));
+  // Unified balance a true 0 — the "fund me, not broken" line.
+  check('⭐ "Empty — nothing committed yet." — unified balance is a true 0',
+    ymEmpty.includes("Empty — nothing committed yet."));
+  // Login wallet empty — the fund-me line on pocket 1 (needs a wallet with usdcBalance 0).
+  gateway = { status: "ready", total: "7.5000", perChain: [] };
+  const ymEmptyLogin = render2(YourMoney, { ...wallet, usdcBalance: "0" });
+  check('⭐ "Empty — send USDC to the address above first." — login wallet is empty',
+    ymEmptyLogin.includes("Empty — send USDC to the address above first."));
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
