@@ -13,13 +13,17 @@
 //
 // Zero money, zero network: the RPC client is replaced wholesale, so nothing leaves this process.
 import { mock } from "node:test";
+import { sel } from "../shared/onchain-facts/index.mjs";
 
 const XYLO = "0x240Eb85458CD41361bd8C3773253a1D78054f747";
 const ZERO = "0x0000000000000000000000000000000000000000";
 const EOA = "0x5b967871bb9b2ce1ac7e3a3a2ab2ec5c1e4b8a2f";
 const OK_SLOT = "0x0000000000000000000000000000000000000000000000000000000000000000";
-// Any non-empty bytecode: enough to make isContract true so the owner/proxy branches are reached.
-const SOME_CODE = "0x60806040523480156100105760006000fd5b50" + "00".repeat(64);
+// Non-empty bytecode carrying the XyloVault governance fingerprint, so the RECOGNITION gate
+// recognises it (a faithful stand-in for XyloVault, which is a recognised vault). Without the
+// fingerprint this would be an UNRECOGNISED surface and the owner-power fields would be notChecked —
+// which is correct behaviour, but not the "healthy recognised vault" these degraded tests exercise.
+const SOME_CODE = "0x60806040" + sel("setFees(uint256,uint256,uint256)") + sel("emergencyWithdraw(address,uint256)") + "00".repeat(32);
 
 // The real, on-chain XyloVault digest, captured from a healthy read. Any degraded disclosure that
 // produced this string would let an ack minted on a good day authorise a deposit on a bad one.
@@ -180,11 +184,12 @@ console.log("\n── ⭐⭐ THE COINCIDENTAL SAFETY, PINNED · an unreadable VA
       !blocks.includes("not-a-contract"), blocks.join(","));
     check("⭐⭐ …and the deposit gate REFUSES, so the reassuring copy is unreachable",
       gateDeposit({ inspection: i, ackToken: undefined }).ok === false);
-    // ⚠️ The powers DO read as absent underneath — that is the coincidence. What makes it safe is
-    // that BLOCK short-circuits before anyone is shown them. Asserted so the dependency is EXPLICIT:
-    // if the BLOCK ever stops firing, these absences become user-visible claims.
-    check("⚠️ (recorded) underneath, the powers DO read as absent — the BLOCK is what makes that safe",
-      i.ownerPowers.emergencyWithdraw.present === false && i.ownerPowers.settableFees.present === false);
+    // ⚠️ Underneath, the powers are NOT CHECKED — with the bytecode unreadable, nothing was scanned,
+    // so the recognition gate leaves them present:null (not even a claim of absence). The BLOCK is
+    // what makes it safe; the notChecked is what keeps the section honest. Asserted so the dependency
+    // is EXPLICIT: if the BLOCK ever stops firing, a notChecked is at least not a reassuring "absent".
+    check("⚠️ (recorded) underneath, the powers are NOT CHECKED (present:null) — the BLOCK is what refuses",
+      i.ownerPowers.emergencyWithdraw.present === null && i.ownerPowers.settableFees.present === null);
     check("⭐ an ack cannot buy past it — BLOCK outranks acknowledgement",
       gateDeposit({ inspection: i, ackToken: "f".repeat(64) }).ok === false);
   }

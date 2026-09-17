@@ -36,6 +36,9 @@ import {
   EIP1967_IMPL_SLOT,
   classifyOwnerType,
 } from "../../shared/onchain-facts/index.mjs";
+// ⭐ The recognition gate for the false-clean-bill defect. "selector absent → power absent" is valid
+// ONLY inside a governance vocabulary we recognise; an unrecognised surface is NOT CHECKED, not clean.
+import { recognizeVaultProfile } from "../../shared/onchain-facts/vault-profiles.mjs";
 
 // ── The allowlist. One entry today — recon found exactly one live vault on Arc testnet and no
 // registry (see PROGRESS). A vault the agent may run against is a CONFIG decision, exactly like
@@ -389,6 +392,15 @@ export async function inspectVault(address, { owner = null } = {}) {
   const totalAssetsUsdc = totalAssets === null ? null : Number(totalAssets) / 10 ** USDC_DECIMALS;
   const isShell = totalAssets !== null && Number(totalAssets) === 0;
 
+  // ⭐⭐ RECOGNITION GATE — before any owner-power claim. The scan below looks for ONE admin
+  // vocabulary; a vault whose governance surface we do not recognise (e.g. a Morpho vault) has none
+  // of these selectors and would otherwise report "no powers" — a CLEAN BILL — while a Morpho V1
+  // Owner can raise the fee (no Guardian veto) and a Curator can set an exit-blocking gate. So:
+  // recognised → scan as below; UNRECOGNISED → the owner-power section is notChecked and the verdict
+  // BLOCKs (same logic as proxy-status-unreadable: a scan of the wrong vocabulary cannot be trusted).
+  const vaultProfile = isContract ? recognizeVaultProfile((sig) => hasSel(code, sig)) : null;
+  const powerSurfaceRecognised = vaultProfile !== null;
+
   // Owner powers (selector scan) + owner identity.
   const emergency = hasAny(code, POWER_SIGS.emergencyWithdraw);
   const feesSet = hasAny(code, POWER_SIGS.feesSettable);
@@ -551,6 +563,18 @@ export async function inspectVault(address, { owner = null } = {}) {
         : `${exitSentence({ declaredBps: withdrawFeeBps, measuredBps: measuredExitBps, maxFeeBps, performanceFeeBps })} ⚠️ Withdrawal locks, delays and cooldowns are NOT CHECKED by this inspector — whether an exit is immediate is UNKNOWN, not confirmed absent. Exit terms can also be changed by the owner (see owner powers).`,
   };
 
+  // ⭐ A vocabulary-dependent power finding is trustworthy ONLY inside a recognised profile. Outside
+  // one, each such field is NOT CHECKED — present:null, a reason, and NO reassuring absence note.
+  const POWER_UNRECOGNISED = "power-surface-unrecognised";
+  const notCheckedPower = (extra = "") => ({
+    present: null,
+    notChecked: true,
+    reason: POWER_UNRECOGNISED,
+    note:
+      "Not checked: this vault's admin/governance surface is not one this inspector recognises, so its " +
+      "owner powers were NOT scanned. This is 'not checked', NOT 'no powers'." + (extra ? ` ${extra}` : ""),
+  });
+
   const ownerPowers = {
     owner: ownerIdentity.address,
     // eoa | multisig | timelock | contract | renounced | unreadable | unreadable-kind | no-owner-fn
@@ -558,7 +582,11 @@ export async function inspectVault(address, { owner = null } = {}) {
     // classes that used to masquerade as it (defect A) — do not treat them as ownerless.
     ownerIdentity: ownerIdentity.type,
     ownerIdentityLabel: ownerIdentity.label,
-    settableFees: {
+    // ⭐ Which governance vocabulary this surface was recognised as (null → fields below are notChecked
+    // and the verdict BLOCKs). The absence of a recognised profile is itself the finding.
+    profile: vaultProfile?.name ?? null,
+    powerSurfaceRecognised,
+    settableFees: powerSurfaceRecognised ? {
       present: feesSet.length > 0,
       via: feesSet,
       currentBps: { deposit: depositFeeBps, withdraw: withdrawFeeBps, performance: performanceFeeBps },
@@ -568,31 +596,43 @@ export async function inspectVault(address, { owner = null } = {}) {
         feesSet.length > 0
           ? `The owner can change fees${maxFeeBps !== null ? ` up to a hard cap of ${(maxFeeBps / 100).toFixed(2)}%` : ""}. Your exit fee could be raised after you deposit.`
           : "No fee-setter found.",
-    },
-    emergencyWithdraw: {
+    } : notCheckedPower("A fee-setter in this vault's own vocabulary would not be seen here."),
+    emergencyWithdraw: powerSurfaceRecognised ? {
       present: emergency.length > 0,
       via: emergency,
       note:
         emergency.length > 0
           ? "The owner can withdraw tokens from the vault directly — including the underlying USDC. This is a drain/rug vector: if exercised, your withdraw could fail because the funds are gone. Strictly worse than an irreversible-deposit trap, because there the funds at least remain yours."
           : "No owner emergency-withdraw / sweep found.",
-    },
-    upgradeable: {
-      // `present` is TRI-STATE: true / false / null. null means UNKNOWN — never read it as "no".
-      present: upgradeSel ? true : proxySlotUnreadable ? null : proxyImpl,
-      viaSelector: upgradeSel,
-      viaProxySlot: proxySlotUnreadable ? null : proxyImpl,
-      proxySlotUnreadable,
-      note: proxySlotUnreadable
-        ? "⚠️ Whether this address is a proxy could NOT be determined — the EIP-1967 implementation slot was not read. This is not a claim that the slot is empty. Because every finding above comes from scanning THIS address's bytecode, and a proxy holds its logic elsewhere, the whole inspection is unverified while this is unknown."
-        : upgradeable
+    } : notCheckedPower(),
+    // ⚠️ Proxy detection (EIP-1967) is UNIVERSAL and stays regardless of profile; only the
+    // upgrade-via-SELECTOR claim is vocabulary-dependent.
+    upgradeable: (() => {
+      if (proxySlotUnreadable) return {
+        present: null, viaSelector: upgradeSel, viaProxySlot: null, proxySlotUnreadable: true,
+        note: "⚠️ Whether this address is a proxy could NOT be determined — the EIP-1967 implementation slot was not read. This is not a claim that the slot is empty. Because every finding above comes from scanning THIS address's bytecode, and a proxy holds its logic elsewhere, the whole inspection is unverified while this is unknown.",
+      };
+      if (proxyImpl) return {
+        present: true, viaSelector: upgradeSel, viaProxySlot: true, proxySlotUnreadable: false,
+        note: "The vault's logic can be replaced (proxy/upgradeable). Its rules can change without moving your funds.",
+      };
+      if (powerSurfaceRecognised) return {
+        present: upgradeSel ? true : false, viaSelector: upgradeSel, viaProxySlot: false, proxySlotUnreadable: false,
+        note: upgradeSel
           ? "The vault's logic can be replaced (proxy/upgradeable). Its rules can change without moving your funds."
           : "Not upgradeable — logic is fixed at this address (no proxy slot, no upgrade function).",
-    },
-    pausable: {
+      };
+      // Unrecognised and not an EIP-1967 proxy: the slot is empty (universal), but this vault's own
+      // upgrade vocabulary is UNASSESSED — never the reassuring "logic is fixed".
+      return {
+        present: null, notChecked: true, reason: POWER_UNRECOGNISED, viaSelector: null, viaProxySlot: false, proxySlotUnreadable: false,
+        note: "Not checked for vocabulary-specific upgradeability: the EIP-1967 proxy slot is empty (universal), but upgrade functions in this vault's UNRECOGNISED admin surface were NOT scanned — UNKNOWN, not absent.",
+      };
+    })(),
+    pausable: powerSurfaceRecognised ? {
       present: pausable,
       note: pausable ? "The vault can be paused; deposits/withdrawals may be halted." : "No pause function found — withdrawals cannot be frozen by a pause switch.",
-    },
+    } : notCheckedPower(),
   };
 
   // ── VERDICT ──────────────────────────────────────────────────────────────────────────────
@@ -624,6 +664,15 @@ export async function inspectVault(address, { owner = null } = {}) {
   // consulted, so there is no disclosure for a user to acknowledge their way past.
   if (proxySlotUnreadable)
     blocks.push({ code: "proxy-status-unreadable", detail: "Could not read the EIP-1967 implementation slot, so whether this address is a proxy is UNKNOWN. Every check above scans this address's own bytecode and would report a proxy stub as clean, so the inspection cannot be trusted. Refusing rather than disclosing an unverified vault." });
+
+  // 🚨 THE FALSE-CLEAN-BILL DEFECT. The owner-power scan knows ONE admin vocabulary; a CONFORMANT
+  // vault whose governance surface matches no known profile (e.g. a Morpho vault) would otherwise
+  // report "no settable fees, no emergency withdraw, not pausable" — a clean bill — while its Owner
+  // can still raise the fee and its Curator can gate withdrawals. Same fail-closed logic as
+  // proxy-status-unreadable: a scan of the wrong vocabulary cannot be trusted, so it BLOCKS. Only for
+  // ERC-4626 vaults — a non-conformant contract already BLOCKs as not-erc4626.
+  if (isContract && erc4626 && !powerSurfaceRecognised)
+    blocks.push({ code: "power-surface-unrecognised", detail: "This vault is ERC-4626 conformant but its admin/governance surface is not one this inspector recognises, so its owner powers could NOT be assessed — 'not checked', NOT 'no powers'. A different admin vocabulary (for example a Morpho vault's) can still raise fees or gate withdrawals. Refusing rather than disclosing an unverified power surface." });
 
   // ═══ ⭐⭐ THE SEVEN MIGRATED WARNS ARE GONE FROM HERE — STEP 2 IS DONE ════════════════════════
   // `emergency-withdraw`, `fees-settable`, `upgradeable` and the four owner-identity codes are now
