@@ -19,30 +19,45 @@
 export const NO_AMOUNT = "—";
 
 export const USDC_DP = 6;
+export const USDC_SHORT_DP = 2;
 
 /**
- * @param v the server's amount — a decimal string from `formatUnits`, or a number.
- * @returns a fixed-width 6dp string, or NO_AMOUNT when the value is not a usable number.
+ * ⭐⭐ THE ONE PLACE A USDC AMOUNT IS FLOORED FOR DISPLAY — shared by both formatters below, so the
+ * rule lives once. FLOOR toward zero at `dp` decimals — NEVER round up. A displayed balance that
+ * reads HIGHER than the true amount is the bridge 2dp defect: a user could act on a figure the wallet
+ * cannot cover. Snap the scaling first (`toFixed(9)`) so binary-fp error — 1.234567 * 1e6 is
+ * 1234567.0000000002 — does not floor an exact value one atomic unit down. Same snap-then-round-down
+ * as shared/amount-direction.mjs's availableAmount; for every real ≤6dp USDC value this is exact.
+ *
+ * ⚠️ Rejects non-numbers (Number(true)===1, Number([])===0) and whitespace so a non-amount never
+ * becomes a number. Returns NO_AMOUNT for anything unusable — never "0".
  */
-export function formatUsdc(v: unknown): string {
+function floorUsdcAt(v: unknown, dp: number): string {
   if (v === null || v === undefined || v === "") return NO_AMOUNT;
-  // ⚠️ Reject booleans and objects explicitly: Number(true) === 1 and Number([]) === 0, so a
-  // sloppy coercion would invent an amount out of a non-amount.
   if (typeof v !== "string" && typeof v !== "number") return NO_AMOUNT;
-  // 🚨 TRIM FIRST, THEN RE-CHECK FOR EMPTY. `Number("")` is 0 — so a whitespace-only string would
-  // otherwise render as "0.000000", which is this helper's exact failure mode arriving through its
-  // own front door. Caught by verify-format-usdc, not by review.
   const raw = typeof v === "number" ? v : v.trim();
   if (raw === "") return NO_AMOUNT;
   const n = Number(raw);
   if (!Number.isFinite(n)) return NO_AMOUNT;
-  // ⭐ FLOOR toward zero at 6dp — NEVER round up. A displayed balance that reads HIGHER than the true
-  // amount is the bridge 2dp defect at full precision: a user could act on a figure the wallet cannot
-  // cover. Snap the scaling first (`toFixed(9)`) so binary-fp error — 1.234567 * 1e6 is
-  // 1234567.0000000002 — does not floor an exact value one atomic unit down. Same snap-then-round-down
-  // as shared/amount-direction.mjs's availableAmount; for every real ≤6dp USDC value this is exact.
-  const scaled = Number((n * 1e6).toFixed(9));
-  return (Math.floor(scaled) / 1e6).toFixed(USDC_DP);
+  const scaled = Number((n * 10 ** dp).toFixed(9));
+  return (Math.floor(scaled) / 10 ** dp).toFixed(dp);
+}
+
+/**
+ * @param v the server's amount — a decimal string from `formatUnits`, or a number.
+ * @returns a fixed-width 6dp string (FLOORED), or NO_AMOUNT when the value is not a usable number.
+ */
+export function formatUsdc(v: unknown): string {
+  return floorUsdcAt(v, USDC_DP);
+}
+
+/**
+ * ⭐ The 2dp DISPLAY of a USDC amount — FLOORED, for a compact scan column where the exact 6dp lives
+ * one click away. Same flooring as `formatUsdc`, so it never overstates: 31.309999 → "31.30", never
+ * "31.31". NO_AMOUNT for an absent/unreadable value, never "0".
+ */
+export function formatUsdcShort(v: unknown): string {
+  return floorUsdcAt(v, USDC_SHORT_DP);
 }
 
 /**

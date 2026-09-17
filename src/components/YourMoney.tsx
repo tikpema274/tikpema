@@ -7,7 +7,7 @@ import AddressDisplay from "./AddressDisplay";
 import SignInPrompt from "./SignInPrompt";
 import { describeError } from "../lib/describeError";
 import { describeChainError } from "../lib/describeChainError";
-import { formatUsdc } from "../lib/formatUsdc";
+import { formatUsdc, formatUsdcShort } from "../lib/formatUsdc";
 import { UB_EXIT_PROOF } from "../lib/ubExitProof";
 
 const EXPLORER = arcTestnet.blockExplorers.default.url;
@@ -18,119 +18,52 @@ const go = (id: string) => {
   window.location.hash = "/" + id;
 };
 
-// ── THE REVERSIBILITY BADGE ──────────────────────────────────────────────────────────
-// Lifted from AgentsPanel's `movesFunds` badge, same visual grammar: bordered, its own
-// line, AMBER when the fact constrains you and neutral when it doesn't. There it marks
-// "can this agent move my money?"; here it marks "can I get this money back alone?".
-// Same question from the other side, so it earns the same styling.
-function Reversibility({ warn, children }: { warn?: boolean; children: React.ReactNode }) {
+// The reversibility badge in the Exit column — amber (⚠) when the fact constrains you, neutral (🔒)
+// when it doesn't. Same grammar as AgentsPanel's movesFunds badge.
+function Badge({ text, warn }: { text: string; warn?: boolean }) {
   return (
-    <div
+    <span
       style={{
-        padding: "5px 8px",
-        borderRadius: 7,
-        fontSize: "0.73rem",
-        lineHeight: 1.3,
+        display: "inline-block",
+        fontSize: "0.72rem",
+        padding: "2px 7px",
+        borderRadius: 6,
         border: `1px solid ${warn ? "var(--amber)" : "var(--line)"}`,
         background: warn ? "var(--amber-soft)" : "transparent",
         color: "var(--paper)",
       }}
     >
       {warn ? "⚠ " : "🔒 "}
-      {children}
-    </div>
-  );
-}
-
-// One pocket. Balance and reversibility on the SAME face — a number the user cannot act
-// on is just decoration, and a warning they meet after committing is just an alibi.
-function Pocket({
-  label,
-  amount,
-  unit = "USDC",
-  badge,
-  warn,
-  children,
-}: {
-  label: string;
-  amount: React.ReactNode;
-  unit?: string;
-  badge: React.ReactNode;
-  warn?: boolean;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div
-      className="status"
-      style={{
-        margin: 0,
-        padding: "14px 16px",
-        background: "var(--field)",
-        border: "1px solid var(--line)",
-        borderRadius: 12,
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-      }}
-    >
-      <div
-        style={{
-          color: "var(--muted)",
-          fontSize: "0.72rem",
-          letterSpacing: "0.06em",
-          textTransform: "uppercase",
-        }}
-      >
-        {label}
-      </div>
-      <div style={{ fontSize: "1.3rem", fontWeight: 600, color: "var(--paper)" }}>
-        {amount}{" "}
-        <span style={{ fontSize: "0.82rem", color: "var(--muted)", fontWeight: 400 }}>
-          {unit}
-        </span>
-      </div>
-      <Reversibility warn={warn}>{badge}</Reversibility>
-      {children}
-    </div>
+      {text}
+    </span>
   );
 }
 
 // Auto-refresh cadence for the wallet balances. Manual Refresh stays.
 const BALANCE_POLL_MS = 30_000;
 
-// ── YOUR MONEY — the three pockets ───────────────────────────────────────────────────
-// Extracted VERBATIM from the Dashboard, where it used to render inline, and moved onto
-// the Wallet page (#/wallet) — the page whose whole subject is "where is my money". It
-// renders ONLY in the connected state; the Wallet page owns the not-connected onboarding
-// path (create / restore passkey) and never delegates it here.
+// ── YOUR MONEY — the wallet overview ─────────────────────────────────────────────────
+// One table answering "where is every USDC, and which of these can I get back, alone?". Columns:
+// Asset | Where held | Balance | Exit. "Where held" distinguishes an on-chain read from Pocket 3's
+// off-chain Circle Gateway figure. The Total (top right) is USDC-only — EURC is NEVER summed (no USD
+// rate exists) and is its own row. The Total and "available now" sum the EXACT values and floor ONCE;
+// if ANY pocket is null/unavailable there is NO total number and the breakdown NAMES the missing
+// pocket — a sum must never silently omit a pocket.
 //
-// It takes the wallet as a PROP, exactly as it did on the Dashboard. There is no wallet
-// context/provider in this app: useWallet() is called ONCE in App.tsx and the object is
-// handed to every page. So the Fund / Withdraw / Refresh / Deposit handlers here are the
-// same function identities the Dashboard called — nothing about the move touches them.
+// It takes the wallet as a PROP. useWallet() is called ONCE in App.tsx; the Fund / Withdraw / Refresh
+// / Deposit handlers here are the SAME function identities they always were — the money paths are
+// byte-identical, only the layout changed.
 //
-// ── WHY THIS BLOCK IS SHAPED THE WAY IT IS ───────────────────────────────────────────
-// There are THREE pockets, and they differ in the only dimension a user cares about
-// under stress — can I get this back, alone?
+//   1. Your wallet     (passkey MSCA)  w.usdcBalance            → you hold the key.
+//   2. Agent's wallet  (dev SCA)       w.agentWallet.balance    → Withdraw now, instant, even paused.
+//      · EURC also held here, shown as its OWN row, never summed (EURC != $1).
+//   3. Unified balance (Gateway)       useGatewayBalance        → exit built, about seven days.
 //
-//   1. Your wallet     (passkey MSCA)  w.address / w.usdcBalance   → they hold the key.
-//   2. Agent's wallet  (dev SCA)       w.agentWallet.balance       → Withdraw, any time,
-//                                                                    even if paused.
-//   3. Unified balance (Gateway)       useGatewayBalance           → NO EXIT WE HAVE BUILT.
-//                                                                    Spendable cross-chain only.
-//
-// ⚠️ Pocket 3 read "NO WAY OUT… by ANY path" until 2026-07-31. That was FALSE, and the
-// falsehood is instructive: it was inferred from OUR repo (no withdrawal endpoint exists —
-// still true) and then stated about THE PROTOCOL. Arc's Gateway does expose a trustless
-// withdrawal, and the balance is keyed to an account only the agent can act as. The true
-// statement is narrower — WE HAVE NOT BUILT IT — and the narrowness is the point. Anything
-// absolute here is a claim about a contract this file has never read.
-//
-// They render left-to-right in the order money actually flows, each wearing its
-// reversibility ON ITS FACE. The badge idiom is lifted from AgentsPanel (amber = this one
-// constrains you; 🔒 = you're free) because that page already works: it answers "who can
-// touch my money?" at a glance. This one answers "where is my money, and which way does
-// it move?"
+// ⚠️ Pocket 3 read "NO WAY OUT… by ANY path" until 2026-07-31. That was FALSE — Arc's Gateway exposes
+// a trustless withdrawal keyed to an account only the agent can act as. The true statement is narrow:
+// WE HAVE NOT BUILT the automatic client trigger here; this panel EXPLAINS the exit and links to
+// #/unified, which carries the full flow. Anything absolute here is a claim about a contract this
+// file has never read.
 export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
   // Auto-update balances on a timer while a wallet is connected — reuses the
   // existing refreshAgentWallet (no new endpoint). Cleared on unmount. The
@@ -152,9 +85,7 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
   // Unchanged money paths: the same connector for hop A (destination = the SERVER-RESOLVED
   // agent wallet, never a constant) and the same agent-withdraw endpoint (which takes NO
   // recipient — the server pays the session's own login wallet, so it can only ever pay the
-  // caller). Same caps, same guardrails. What changed is only WHERE the controls live:
-  // beside the balance they act on, because a card that promises "Withdraw any time" and
-  // then sends you to another page to do it is a broken promise.
+  // caller). Same caps, same guardrails.
   const [fundAmt, setFundAmt] = useState("");
   const [fundBusy, setFundBusy] = useState(false);
   const [fundErr, setFundErr] = useState("");
@@ -164,6 +95,17 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
   const [wdBusy, setWdBusy] = useState(false);
   const [wdErr, setWdErr] = useState("");
   const [wdTx, setWdTx] = useState<string | null>(null);
+
+  // Which rows are expanded. Expansion holds ONLY the address + Copy, the exact 6dp amount, and the
+  // unified row's long custody note — never an action. The actions stay visible in the row.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const isExp = (id: string) => expanded.has(id);
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
 
   const agentSca = w.agentWallet?.address ?? null;
   const agentBal = Number(w.agentWallet?.balance ?? 0);
@@ -179,8 +121,7 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
   // ── B1 (finding 10.3): the exit badge is a CLAIM ABOUT EXITING COMMITTED FUNDS. On an empty or
   // unreadable unified balance there is nothing to exit, so "Exit built · about seven days" must NOT
   // render — a static badge advertises an exit for money that is not there. It appears ONLY when
-  // funds are parked; otherwise the badge states the pocket's actual condition, and drops the amber
-  // (there is nothing to warn about when nothing is committed).
+  // funds are parked; otherwise the badge states the pocket's actual condition, and drops the amber.
   const parked = gwParked > 0;
   const unifiedBadge = parked
     ? "Exit built · about seven days"
@@ -191,6 +132,20 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
         : unified.status === "error"
           ? "Balance unavailable"
           : "Checking balance…";
+
+  // ── THE TOTAL & "available now" — NULL-PRESERVING, EXACT-THEN-FLOOR. ─────────────────────────
+  // Read the null-preserving values, NOT the `?? 0` coerced agentBal/loginBal (those are for the
+  // fail-closed disable logic only). USDC-only; EURC excluded. If ANY pocket is null or unavailable,
+  // render NO total number and let the breakdown NAME the missing pocket.
+  const p1 = w.usdcBalance ?? null;
+  const p2 = w.agentWallet.balance ?? null;
+  const p3 = unified.status === "ready" ? (unified.total ?? null) : null;
+  const totalStr = p1 == null || p2 == null || p3 == null
+    ? null
+    : formatUsdcShort(String(Number(p1) + Number(p2) + Number(p3))); // exact sum, floor ONCE
+  const availStr = p1 == null || p2 == null
+    ? null
+    : formatUsdcShort(String(Number(p1) + Number(p2)));
 
   async function fundAgent() {
     setFundErr("");
@@ -247,216 +202,260 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
   // future caller — never a second onboarding path.
   if (!w.agentWallet) return null;
 
+  // The balance column: a null read is "unavailable" (never "0"), a true 0 is "0.00", else 2dp floor.
+  const balCell = (v: string | null) =>
+    v == null ? (
+      <span style={{ color: "var(--warn)" }}>unavailable</span>
+    ) : (
+      formatUsdcShort(v)
+    );
+
+  const eurcRaw = w.agentWallet.eurcBalance ?? null;
+
   return (
     <>
-      {/* ── YOUR MONEY — the three pockets, left to right in the order money flows.
-          One glance must answer: where is every USDC, and which of these can I
-          exit ALONE? */}
-      <div
-        style={{
-          color: "var(--muted)",
-          fontSize: "0.72rem",
-          letterSpacing: "0.06em",
-          textTransform: "uppercase",
-          margin: "0 0 10px",
-        }}
-      >
-        Your money
+      {/* ── HEADER: label left, USDC-only Total top-right. Null in any pocket → no number. ── */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", marginBottom: 4 }}>
+        <div style={{ color: "var(--muted)", fontSize: "0.72rem", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+          Your money
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ color: "var(--muted)", fontSize: "0.68rem", letterSpacing: "0.06em", textTransform: "uppercase" }}>Total</div>
+          {totalStr === null ? (
+            <div style={{ fontSize: "1.05rem", fontWeight: 600, color: "var(--warn)" }}>partly unavailable</div>
+          ) : (
+            <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "var(--paper)" }}>
+              {totalStr} <span style={{ fontSize: "0.8rem", color: "var(--muted)", fontWeight: 400 }}>USDC</span>
+            </div>
+          )}
+        </div>
       </div>
-      <div className="quick" style={{ marginBottom: 4 }}>
-        {/* 1. THE USER'S OWN WALLET (passkey MSCA) — w.address / w.usdcBalance.
-               Fully theirs; no caveat to make. */}
-        <Pocket label="Your wallet" amount={formatUsdc(w.usdcBalance)} badge="You hold the key">
-          <AddressDisplay address={w.address} />
-          <div className="qd">Yours. Send USDC here from any wallet, exchange, or faucet.</div>
 
-          {/* HOP A — the doorway from the user's wallet into the agent's float. Lives
-              on the pocket the money LEAVES, not on a separate page. Never hidden when
-              the wallet is empty (hiding it is what built the old dead end) — it just
-              says so. */}
-          <div className="row" style={{ gap: 8, alignItems: "center" }}>
-            <input
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="0.01"
-              placeholder="Amount"
-              value={fundAmt}
-              disabled={fundBusy || loginBal <= 0}
-              onChange={(e) => setFundAmt(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && fundAmt && !fundBusy) fundAgent();
-              }}
-              style={{ maxWidth: 110 }}
-            />
-            <button
-              className="emerald"
-              disabled={fundBusy || loginBal <= 0 || !fundAmt || Number(fundAmt) <= 0}
-              onClick={fundAgent}
-            >
-              {fundBusy ? "Moving…" : "Fund agent →"}
-            </button>
+      {/* ── BREAKDOWN LINE: "available now" (P1+P2) · unified. Names any missing pocket. ── */}
+      <div style={{ fontSize: "0.82rem", color: "var(--paper-dim)" }}>
+        {availStr !== null ? (
+          <>
+            <b>{availStr} USDC</b> available now
+          </>
+        ) : (
+          <>
+            {p1 !== null ? <><b>{formatUsdcShort(p1)} USDC</b> in your wallet</> : <span style={{ color: "var(--warn)" }}>your wallet unavailable</span>}
+            {"  ·  "}
+            {p2 !== null ? <><b>{formatUsdcShort(p2)}</b> in agent's wallet</> : <span style={{ color: "var(--warn)" }}>agent's wallet unavailable</span>}
+          </>
+        )}
+        {"  ·  "}
+        {p3 !== null ? <><b>{formatUsdcShort(p3)}</b> in unified balance (about seven days to exit)</> : <span style={{ color: "var(--warn)" }}>unified balance unavailable</span>}
+      </div>
+      <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginTop: 4, marginBottom: 12 }}>
+        EURC is shown as its own row and is <b>never</b> added to the USDC total — there is no USD rate for it.
+      </div>
+
+      {/* ── THE TABLE (a CSS grid, not a <table>, so it restacks at phone width). ── */}
+      <div className="ym-grid">
+        <div className="ym-head">
+          <div>Asset</div>
+          <div>Where held</div>
+          <div className="ym-bal">Balance</div>
+          <div>Exit</div>
+        </div>
+
+        {/* 1. YOUR WALLET (passkey MSCA) — fully yours. */}
+        <div className="ym-holding">
+          <div className="ym-main">
+            <div className="ym-asset">USDC</div>
+            <div>Your wallet<span className="ym-src">on-chain read</span></div>
+            <div className="ym-bal">{balCell(p1)}</div>
+            <div className="ym-exit"><Badge text="You hold the key" /></div>
           </div>
-          {loginBal <= 0 && (
-            <div className="qd">Empty — send USDC to the address above first.</div>
-          )}
-          {fundErr && (
-            <div className="qd" style={{ color: "var(--danger)" }}>{fundErr}</div>
-          )}
-          {fundTx && (
-            <div className="qd">
-              Moved into your agent's wallet.{" "}
-              <a href={`${EXPLORER}/tx/${fundTx}`} target="_blank" rel="noreferrer">
-                View transaction ↗
-              </a>
+          <div className="ym-actions">
+            <div>Yours. Send USDC here from any wallet, exchange, or faucet.</div>
+            <div className="row" style={{ gap: 8, alignItems: "center", marginTop: 6 }}>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                placeholder="Amount"
+                value={fundAmt}
+                disabled={fundBusy || loginBal <= 0}
+                onChange={(e) => setFundAmt(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && fundAmt && !fundBusy) fundAgent();
+                }}
+                style={{ maxWidth: 110 }}
+              />
+              <button
+                className="emerald"
+                disabled={fundBusy || loginBal <= 0 || !fundAmt || Number(fundAmt) <= 0}
+                onClick={fundAgent}
+              >
+                {fundBusy ? "Moving…" : "Fund agent →"}
+              </button>
             </div>
-          )}
-        </Pocket>
-
-        {/* 2. THE AGENT'S FLOAT (dev-controlled SCA) — what the agent actually
-               spends from. Reversible in one button: agent-withdraw returns
-               balanceOf(SCA), and it survives a pause. EURC lives here too, and is
-               shown as a SEPARATE amount — never summed (EURC != $1). */}
-        <Pocket
-          label="Agent's wallet"
-          amount={formatUsdc(w.agentWallet.balance)}
-          badge="Withdraw any time"
-        >
-          <AddressDisplay address={w.agentWallet.address} />
-          <div className="qd">
-            The working float.{" "}
-            <span className="mono">{formatUsdc(w.agentWallet.eurcBalance)}</span> EURC also held
-            here.
-          </div>
-
-          {/* THE EXIT. The badge above promises "Withdraw any time" — so the button
-              that honours it lives HERE, on the balance it returns. It is not bound by
-              the agent's pause or caps: those bound the agent, not the user reclaiming
-              their own money. */}
-          <div className="row" style={{ gap: 8, alignItems: "center" }}>
-            <input
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="0.01"
-              placeholder="Amount"
-              value={wdAmt}
-              disabled={wdBusy || agentBal <= 0}
-              onChange={(e) => setWdAmt(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && wdAmt && !wdBusy) withdraw();
-              }}
-              style={{ maxWidth: 110 }}
-            />
-            <button
-              disabled={wdBusy || agentBal <= 0 || !wdAmt || Number(wdAmt) <= 0}
-              onClick={withdraw}
-            >
-              {wdBusy ? "Withdrawing…" : "Withdraw ↩"}
-            </button>
-            <button
-              className="linkbtn"
-              disabled={wdBusy || agentBal <= 0}
-              onClick={() => setWdAmt(String(agentBal))}
-            >
-              {/* ⭐ SAME PRECISION AS THE FIGURE ABOVE IT. This read "3.00" on the card and "Max (3)"
-                  on the button — one balance, two renderings. The CLICK still sets the exact value. */}
-              Max ({formatUsdc(agentBal)})
-            </button>
-          </div>
-
-          {/* ── THE AMBER LINE. IT TRAVELS WITH THE WITHDRAW FORM, ALWAYS. ──────────
-              Withdraw returns the agent's PLAIN USDC — balanceOf(SCA) — and NOTHING
-              that is sitting in the Gateway unified balance. Say it here, next to the
-              button, BEFORE the user clicks and finds money missing. A Withdraw that
-              silently leaves funds behind is a lie, and this line is what stops it being
-              one. If this disclosure is ever separated from the button, the trap is back
-              — that includes moving the block between pages, which is exactly what just
-              happened to it.
-
-              ⚠️ This line USED to say "nothing can return it to you… cannot be withdrawn".
-              That was FALSE — see the v3 note in UnifiedBalancePanel.tsx. The Gateway
-              withdrawal path exists on-chain and the balance is keyed to an account only
-              your agent can act as. What is true is narrower and must stay narrow: WE
-              HAVE NOT BUILT IT. Do not restore an absolute. */}
-          {gwParked > 0 && (
-            <div className="qd" style={{ color: "var(--warn)" }}>
-              <b>Not included:</b>{" "}
-              <span className="mono">{unified.status === "ready" ? formatUsdc(unified.total) : "—"}</span>{" "}
-              USDC is in your unified balance. Committed to your agent's float. Only your
-              agent's own account can release these funds, and <b>Tikpema controls that
-              account</b> — so the exit runs through us. <b>It is built now:</b> you ask, Arc's
-              Gateway holds the funds for a delay of about seven days, and we finish it
-              automatically — <b>you do not have to come back</b>. <b>⚠️ This has now been done once, end
-              to end</b>: {UB_EXIT_PROOF.amount} asked for on {UB_EXIT_PROOF.askedDate} and returned
-              automatically on {UB_EXIT_PROOF.returnedDate}, with nobody watching — one real run, not a
-              track record. It took {UB_EXIT_PROOF.duration}, longer than the estimate, so treat the
-              wait as the floor, not the ceiling.
-            </div>
-          )}
-          {wdErr && (
-            <div className="qd" style={{ color: "var(--danger)" }}>{wdErr}</div>
-          )}
-          {wdTx && (
-            <div className="qd">
-              Returned to your wallet.{" "}
-              <a href={`${EXPLORER}/tx/${wdTx}`} target="_blank" rel="noreferrer">
-                View transaction ↗
-              </a>
-            </div>
-          )}
-        </Pocket>
-
-        {/* 3. THE UNIFIED BALANCE (Circle Gateway) — the only pocket with NO EXIT WE HAVE
-               BUILT, so it wears the amber badge. Keeps all four states (signed-out /
-               provisioning / loading / error) rather than rendering a broken card or a
-               bare "—" that reads as a fault.
-
-               ⚠️ THE BADGE WAS "Server-released, delayed" — false in the OPTIMISTIC
-               direction: it claimed a release mechanism we do not operate. It outlived the
-               v2 copy it belonged to and sat contradicting the body text on its own card.
-               A badge is copy. It must clear the same bar. Whatever it says must not imply
-               a release we do not perform. */}
-        <Pocket
-          label="Unified balance"
-          amount={unified.status === "ready" ? formatUsdc(unified.total) : "…"}
-          badge={unifiedBadge}
-          warn={parked}
-        >
-          {unified.status === "signed-out" && (
-            <SignInPrompt
-              wallet={w}
-              message="Sign in to see your balance."
-              onSignedIn={() => w.refreshAgentWallet().catch(() => {})}
-            />
-          )}
-          {unified.status === "provisioning" && <div className="qd">Setting up your wallet…</div>}
-          {unified.status === "loading" && <div className="qd">Reading your balance…</div>}
-          {unified.status === "error" && <div className="qd">Unified balance unavailable.</div>}
-          {unified.status === "ready" && (
-            <>
-              <div className="qd" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                {unified.perChain.map((p) => (
-                  <span key={p.chain}>
-                    {p.chain}:{" "}
-                    {p.ok ? (
-                      <span className="mono">{formatUsdc(p.usdc)}</span>
-                    ) : (
-                      <span style={{ color: "var(--muted)" }}>unavailable</span>
-                    )}
-                  </span>
-                ))}
+            {loginBal <= 0 && <div style={{ marginTop: 4 }}>Empty — send USDC to the address above first.</div>}
+            {fundErr && <div style={{ marginTop: 4, color: "var(--danger)" }}>{fundErr}</div>}
+            {fundTx && (
+              <div style={{ marginTop: 4 }}>
+                Moved into your agent's wallet.{" "}
+                <a href={`${EXPLORER}/tx/${fundTx}`} target="_blank" rel="noreferrer">View transaction ↗</a>
               </div>
-              {/* A true 0 means "fund me", not "broken". */}
-              {Number(unified.total) === 0 && (
-                <div className="qd">Empty — nothing committed yet.</div>
+            )}
+          </div>
+          <button className="linkbtn ym-toggle" onClick={() => toggle("wallet")}>{isExp("wallet") ? "less ▲" : "more ▼"}</button>
+          <div className="ym-more" hidden={!isExp("wallet")}>
+            <AddressDisplay address={w.address} />
+            <div className="ym-mono" style={{ marginTop: 4 }}>Exact: {formatUsdc(w.usdcBalance)} USDC</div>
+          </div>
+        </div>
+
+        {/* 2a. AGENT'S WALLET — USDC. Withdraw now returns it to your login wallet, instantly. */}
+        <div className="ym-holding">
+          <div className="ym-main">
+            <div className="ym-asset">USDC</div>
+            <div>Agent's wallet<span className="ym-src">on-chain read</span></div>
+            <div className="ym-bal">{balCell(p2)}</div>
+            <div className="ym-exit"><Badge text="Withdraw any time" /></div>
+          </div>
+          <div className="ym-actions">
+            {p2 == null
+              ? <div style={{ color: "var(--warn)" }}>Balance unavailable — Withdraw is disabled until it can be read.</div>
+              : <div><b>Withdraw</b> returns this to your login wallet <b>instantly</b> — survives an agent pause.</div>}
+            <div className="row" style={{ gap: 8, alignItems: "center", marginTop: 6 }}>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                placeholder="Amount"
+                value={wdAmt}
+                disabled={wdBusy || agentBal <= 0}
+                onChange={(e) => setWdAmt(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && wdAmt && !wdBusy) withdraw();
+                }}
+                style={{ maxWidth: 110 }}
+              />
+              <button
+                disabled={wdBusy || agentBal <= 0 || !wdAmt || Number(wdAmt) <= 0}
+                onClick={withdraw}
+              >
+                {wdBusy ? "Withdrawing…" : "Withdraw now"}
+              </button>
+              {/* ⭐ No "Max (—)": the value shows only when there IS a balance; disabled otherwise.
+                  The CLICK still sets the exact value (String(agentBal)) — byte-identical. */}
+              <button
+                className="linkbtn"
+                disabled={wdBusy || agentBal <= 0}
+                onClick={() => setWdAmt(String(agentBal))}
+              >
+                {p2 == null ? "Max" : `Max (${formatUsdc(p2)})`}
+              </button>
+            </div>
+            {wdErr && <div style={{ marginTop: 4, color: "var(--danger)" }}>{wdErr}</div>}
+            {wdTx && (
+              <div style={{ marginTop: 4 }}>
+                Returned to your wallet.{" "}
+                <a href={`${EXPLORER}/tx/${wdTx}`} target="_blank" rel="noreferrer">View transaction ↗</a>
+              </div>
+            )}
+          </div>
+          <button className="linkbtn ym-toggle" onClick={() => toggle("agent-usdc")}>{isExp("agent-usdc") ? "less ▲" : "more ▼"}</button>
+          <div className="ym-more" hidden={!isExp("agent-usdc")}>
+            <AddressDisplay address={w.agentWallet.address} />
+            <div className="ym-mono" style={{ marginTop: 4 }}>Exact: {formatUsdc(w.agentWallet.balance)} USDC</div>
+          </div>
+        </div>
+
+        {/* 2b. AGENT'S WALLET — EURC. Held here; the agent's Withdraw returns USDC only. */}
+        <div className="ym-holding">
+          <div className="ym-main">
+            <div className="ym-asset">EURC</div>
+            <div>Agent's wallet<span className="ym-src">on-chain read</span></div>
+            <div className="ym-bal">{balCell(eurcRaw)}</div>
+            <div className="ym-exit"><Badge text="No exit built" /></div>
+          </div>
+          <div className="ym-actions">
+            The agent's <b>Withdraw</b> returns USDC only — EURC stays in the agent wallet. <b>No exit is built</b> for it yet.
+          </div>
+          <button className="linkbtn ym-toggle" onClick={() => toggle("agent-eurc")}>{isExp("agent-eurc") ? "less ▲" : "more ▼"}</button>
+          <div className="ym-more" hidden={!isExp("agent-eurc")}>
+            <div className="ym-mono">Exact: {formatUsdc(w.agentWallet.eurcBalance)} EURC</div>
+          </div>
+        </div>
+
+        {/* 3. UNIFIED BALANCE (Circle Gateway) — off-chain figure. Conditional exit badge (B1). */}
+        <div className="ym-holding">
+          <div className="ym-main">
+            <div className="ym-asset">USDC</div>
+            <div>Unified balance<span className="ym-src">Circle Gateway · off-chain figure</span></div>
+            <div className="ym-bal">{unified.status === "ready" ? balCell(p3) : <span style={{ color: "var(--muted)" }}>…</span>}</div>
+            <div className="ym-exit"><Badge text={unifiedBadge} warn={parked} /></div>
+          </div>
+          <div className="ym-actions">
+            {unified.status === "signed-out" && (
+              <SignInPrompt
+                wallet={w}
+                message="Sign in to see your balance."
+                onSignedIn={() => w.refreshAgentWallet().catch(() => {})}
+              />
+            )}
+            {unified.status === "provisioning" && <div>Setting up your wallet…</div>}
+            {unified.status === "loading" && <div>Reading your balance…</div>}
+            {unified.status === "error" && <div>Unified balance unavailable.</div>}
+            {unified.status === "ready" && (
+              <>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                  {unified.perChain.map((p) => (
+                    <span key={p.chain}>
+                      {p.chain}:{" "}
+                      {p.ok ? <span className="ym-mono">{formatUsdc(p.usdc)}</span> : <span style={{ color: "var(--muted)" }}>unavailable</span>}
+                    </span>
+                  ))}
+                </div>
+                {/* A true 0 means "fund me", not "broken". */}
+                {Number(unified.total) === 0 && <div style={{ marginTop: 4 }}>Empty — nothing committed yet.</div>}
+                {/* ⭐ THE SHORT LINE STAYS NEXT TO THE NUMBER — the long custody note is in the expansion. */}
+                {parked && (
+                  <div style={{ marginTop: 6, color: "var(--warn)" }}>
+                    <b>Not included</b> in available now: <span className="ym-mono">{formatUsdc(unified.total)}</span> USDC committed to your agent's float.
+                  </div>
+                )}
+              </>
+            )}
+            <div style={{ marginTop: 8, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <button className="linkbtn" onClick={() => go("unified")}>Deposit →</button>
+              {/* ⭐ "Start exit →" NAVIGATES to #/unified (the full exit flow). It does NOT trigger the
+                  exit — no fund-moving control is added to this panel. */}
+              {parked && (
+                <button className="linkbtn" onClick={() => go("unified")}>Start exit →</button>
               )}
-            </>
+            </div>
+          </div>
+          <button className="linkbtn ym-toggle" onClick={() => toggle("unified")}>{isExp("unified") ? "less ▲" : "more ▼"}</button>
+          {/* ── THE LONG CUSTODY NOTE — ALWAYS IN THE DOM, visually hidden when collapsed (the
+              UnifiedBalancePanel evidence pattern), so the copy guards still find every string. It
+              renders only when funds are parked (there is nothing to disclose otherwise). If this is
+              ever separated from the unified balance, the "money silently left behind" trap is back.
+
+              ⚠️ This used to say "nothing can return it to you… cannot be withdrawn" — FALSE. The
+              Gateway withdrawal exists on-chain and the balance is keyed to an account only your
+              agent can act as. What is true is narrower and must stay narrow: only the account your
+              agent controls can release it, and Tikpema controls that account. Do not restore an
+              absolute. */}
+          {parked && (
+            <div className="ym-more" hidden={!isExp("unified")}>
+              Only your agent's own account can release these funds, and <b>Tikpema controls that
+              account</b> — so the exit runs through us. <b>It is built now:</b> you ask, Arc's Gateway
+              holds the funds for a delay of about seven days, and we finish it automatically —{" "}
+              <b>you do not have to come back</b>. <b>⚠️ This has now been done once, end to end</b>:{" "}
+              {UB_EXIT_PROOF.amount} asked for on {UB_EXIT_PROOF.askedDate} and returned automatically on{" "}
+              {UB_EXIT_PROOF.returnedDate}, with nobody watching — one real run, not a track record. It
+              took {UB_EXIT_PROOF.duration}, longer than the estimate, so treat the wait as the floor,
+              not the ceiling.
+            </div>
           )}
-          <button className="linkbtn" onClick={() => go("unified")}>
-            Deposit →
-          </button>
-        </Pocket>
+        </div>
       </div>
 
       <div className="row" style={{ marginTop: 12, alignItems: "baseline" }}>

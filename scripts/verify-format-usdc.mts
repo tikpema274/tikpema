@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { formatUsdc, formatBalance, NO_AMOUNT, USDC_DP } from "../src/lib/formatUsdc.ts";
+import { formatUsdc, formatUsdcShort, formatBalance, NO_AMOUNT, USDC_DP } from "../src/lib/formatUsdc.ts";
 
 // verify-format-usdc — an absence must never render as an amount, and 6dp is not optional.
 //
@@ -86,6 +86,30 @@ t("a real zero DOES render — a true 0 is a fact, not an absence", () => {
 t("NO_AMOUNT is not something a reader could mistake for a number", () => {
   assert.equal(NO_AMOUNT, "—");
   assert.ok(!/\d/.test(NO_AMOUNT));
+});
+
+console.log("\n── formatUsdcShort: 2dp, FLOORED (the redesign's scan column) ─────");
+
+t("⭐⭐ 2dp and FLOORED — never rounds up (same never-overstate rule as formatUsdc)", () => {
+  assert.equal(formatUsdcShort("31.309999"), "31.30", "31.309999 floors to 31.30, never 31.31");
+  assert.equal(formatUsdcShort("0.999999"), "0.99", "0.999999 floors to 0.99, never 1.00");
+  assert.equal(formatUsdcShort("36.309998"), "36.30", "must not round up to 36.31");
+  assert.equal(formatUsdcShort("2.5137"), "2.51");
+  assert.equal(formatUsdcShort("2"), "2.00");
+  // the invariant: the 2dp figure is never GREATER than the true value.
+  for (const v of ["31.309999", "0.999999", "36.309998", "99.999999"]) {
+    assert.ok(Number(formatUsdcShort(v)) <= Number(v), `${v} rendered ${formatUsdcShort(v)} > ${v}`);
+  }
+});
+
+t("⭐ formatUsdcShort: absence is not zero", () => {
+  assert.equal(formatUsdcShort(null), NO_AMOUNT);
+  assert.equal(formatUsdcShort(undefined), NO_AMOUNT);
+  assert.equal(formatUsdcShort(""), NO_AMOUNT);
+  assert.equal(formatUsdcShort("abc"), NO_AMOUNT);
+  assert.equal(formatUsdcShort(true as any), NO_AMOUNT);
+  assert.equal(formatUsdcShort([] as any), NO_AMOUNT);
+  assert.equal(formatUsdcShort("0"), "0.00", "a true 0 renders");
 });
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} verify-format-usdc: ${pass} passed, ${fail} failed`);

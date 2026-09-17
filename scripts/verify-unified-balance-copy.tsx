@@ -167,7 +167,11 @@ for (const [label, re, eYM, eUB] of [
   // ⚠️ UB 2 -> 1: the deposit card's copy of "about seven days" was cut (it renders 3× in the
   // How-this-works card and 2× in the withdraw block). The property is that the phrase stays
   // APPROXIMATE PROSE — never a hardened number — and one occurrence satisfies it exactly as two did.
-  ["the delay is DERIVED, never fixed", /about seven days/g, 2, 1],
+  // ⚠️ YourMoney 2 -> 3 with the redesign: "about seven days" now renders in the exit BADGE, the
+  // breakdown line ("…in unified balance (about seven days to exit)"), AND the custody note. Three
+  // legitimate, distinct sites — still APPROXIMATE PROSE, never a hardened number. Count stays EXACT
+  // so a fourth (duplicated) occurrence would still fail.
+  ["the delay is DERIVED, never fixed", /about seven days/g, 3, 1],
 ] as [string, RegExp, number, number][]) {
   const a = n(ymParked, re), b = n(ubParked, re);
   check(`⭐ ${label}`, a === eYM && b === eUB, `YourMoney ${a}/${eYM}, UnifiedBalancePanel ${b}/${eUB}`);
@@ -489,17 +493,16 @@ section("6 — ⭐ THE JUNE SHAPE: header → balance → action → explanation
 // presses precisely so they do not have to read the figure; it must be the figure they read.
 // ⭐ Asserted on the RENDERED output with a 4-dp balance (12.3456), so "same precision" is
 // discriminated from "both happen to be integers". [[refusal-reports-compared-quantity]]
-section("Max button renders the balance at the SAME precision as the card (B3: one USDC rule, 6dp)");
+section("Redesign precision: Balance column 2dp FLOORED, acted-on Max 6dp FLOORED");
 {
-  // ⭐ B3 (finding 10.1): every displayed USDC amount uses formatUsdc — 6dp, FLOORED. The balance
-  // "12.3456" renders "12.345600" on the card AND the Max button; one balance, one rendering, and a
-  // 6-dp figure can never overstate a spendable amount the way the old 2dp round could.
+  // ⭐ The redesign's rule: the compact Balance column is 2dp (formatUsdcShort), the acted-on Max is
+  // the exact 6dp (formatUsdc). Both FLOOR, so neither overstates. For "12.3456": column = 12.34,
+  // Max = 12.345600 — they differ BY DESIGN (scan vs act), and the column never rounds up to 12.35.
   const m = ymParked.match(/Max \(([^)]*)\)/);
-  check("⭐⭐ Max shows the same 6dp rendering the card shows", !!m && m[1] === "12.345600",
+  check("⭐⭐ Max (acted-on) shows the exact 6dp floor", !!m && m[1] === "12.345600",
     m ? `Max (${m[1]})` : "no Max button rendered");
-  check("  …and the card carries that same figure", ymParked.includes("12.345600"));
-  check("  …and neither the old 2dp form nor a raw untrimmed figure reaches the button",
-    !/Max \(12\.35\)/.test(ymParked) && !/Max \(12\.3456\)/.test(ymParked));
+  check("⭐ the Balance column shows the 2dp floor (12.34)", /class="ym-bal">12\.34</.test(ymMarkup));
+  check("  …and the 2dp column NEVER rounds up (no 12.35 anywhere)", !ymParked.includes("12.35"));
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
@@ -522,6 +525,37 @@ section("B4 — every disclosure & badge on this fund-moving surface is under a 
   const ymEmptyLogin = render2(YourMoney, { ...wallet, usdcBalance: "0" });
   check('⭐ "Empty — send USDC to the address above first." — login wallet is empty',
     ymEmptyLogin.includes("Empty — send USDC to the address above first."));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("REDESIGN — the Total: exact-then-floor, null-preserving, names the missing pocket");
+{
+  const wl = (usdc: any, agent: any) => ({ ...wallet, usdcBalance: usdc, agentWallet: { ...wallet.agentWallet, balance: agent } });
+  gateway = { status: "ready", total: "4.0", perChain: [] };
+
+  // ⭐ FLOORED total, exact-then-floor: 31.309999 + 0.99 + 4.0 = 36.299999 → 36.29 (NOT 36.30 round).
+  const t1 = render2(YourMoney, wl("31.309999", "0.99"));
+  check('⭐⭐ total 31.309999 + 0.99 + 4.0 renders 36.29 (floor), never 36.30 (round)',
+    t1.includes("36.29") && !t1.includes("36.30"));
+  // ⭐ where exact-then-floor legitimately reaches the next cent: 0.999999 → 36.309998 ≥ 36.30 → 36.30.
+  const t2 = render2(YourMoney, wl("31.309999", "0.999999"));
+  check('⭐ total 31.309999 + 0.999999 + 4.0 renders 36.30 (true 36.309998 ≥ 36.30)',
+    t2.includes("36.30") && !t2.includes("36.31"));
+
+  // ⭐⭐ NO-TOTAL RULE: any pocket null/unavailable → NO total number; the breakdown NAMES it, and no
+  //     silently-omitting sum is shown.
+  const un = render2(YourMoney, wl("31.309999", null));
+  check('⭐⭐ agent balance null → Total "partly unavailable" (no number)',
+    un.includes("partly unavailable") && !un.includes("36.29") && !un.includes("35.30"));
+  check('⭐ …breakdown NAMES the missing pocket', un.includes("agent's wallet unavailable"));
+  check('⭐ …and the known wallet figure is still shown', un.includes("31.30 USDC in your wallet"));
+
+  // ⭐⭐ DISABLED-MAX: a null balance disables Max and Withdraw and NEVER renders "Max (—)".
+  const unMarkup = renderToStaticMarkup(<YourMoney wallet={wl("31.309999", null) as any} />);
+  check('⭐⭐ Max on an unavailable balance is disabled', /<button[^>]*class="linkbtn"[^>]*disabled[^>]*>Max<\/button>|<button[^>]*disabled[^>]*class="linkbtn"[^>]*>Max<\/button>/.test(unMarkup) || /disabled[^>]*>Max<\/button>/.test(unMarkup));
+  check('⭐ …and renders bare "Max", never "Max (—)" or "Max (0…)"',
+    !un.includes("Max (—)") && !un.includes("Max ("));
+  gateway = { status: "ready", total: "7.5000", perChain: [] }; // restore
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

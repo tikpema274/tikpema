@@ -961,3 +961,42 @@ button.btn-wide { display: block; width: 100%; margin-top: 14px; padding: 13px 0
   .swap-tabs { gap: 2px; }
   .swap-tab { padding: 8px 10px; font-size: 0.74rem; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   YOUR MONEY — the redesigned wallet overview (src/components/YourMoney.tsx).
+   A CSS grid (not a <table>) so it restacks cleanly at phone width. Scoped .ym-*
+   classes, deliberately NOT reusing .qd (whose only real rules are .quick-card .qd,
+   which these rows would never inherit) — see finding 8.
+   ───────────────────────────────────────────────────────────────────────────── */
+.ym-head,
+.ym-main {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1.6fr);
+  gap: 10px;
+  align-items: start;
+}
+.ym-head {
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--line);
+}
+.ym-head .ym-bal { text-align: right; }
+.ym-holding { border-bottom: 1px solid var(--line); padding: 12px 0; }
+.ym-main .ym-asset { font-weight: 600; color: var(--paper); }
+.ym-main .ym-bal { text-align: right; font-variant-numeric: tabular-nums; color: var(--paper); font-weight: 600; }
+.ym-src { display: block; font-size: 0.72rem; color: var(--muted); }
+.ym-actions { margin-top: 8px; font-size: 0.8rem; color: var(--paper-dim); }
+.ym-toggle { margin-top: 6px; font-size: 0.72rem; }
+.ym-more { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 0.8rem; color: var(--paper-dim); }
+.ym-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Phone width: the four columns stack to one per holding — a card each. */
+@media (max-width: 560px) {
+  .ym-head { display: none; }
+  .ym-main { grid-template-columns: 1fr; gap: 2px; }
+  .ym-main .ym-bal { text-align: left; font-size: 1.05rem; margin-top: 2px; }
+  .ym-main .ym-exit { margin-top: 4px; }
+}
