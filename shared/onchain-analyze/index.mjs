@@ -33,6 +33,9 @@ import { makeCoverage } from "./coverage.mjs";
 import { detectShape } from "./shape.mjs";
 import { enumeratePowers, resolveOwner } from "./powers.mjs";
 import { baseReport, assertReportValid } from "./schema.mjs";
+import { hasSel, unread, POWER_SIGS } from "../onchain-facts/index.mjs";
+// ⭐ The recognition gate — the SAME source the deposit path (_vault.mjs) uses. No new vocabulary here.
+import { recognizeVaultProfile, ERC4626_METHODS } from "../onchain-facts/vault-profiles.mjs";
 
 export { SCHEMA_VERSION, SEVERITY_MEANING, SCOPE_CLASSES, POWER_SCOPE } from "./schema.mjs";
 // Attestation is OPT-IN and additive: analyze() neither signs nor requires a signer, so an
@@ -76,7 +79,38 @@ export async function analyze(address, { client } = {}) {
 
   const shape = await detectShape(cov, client, addr, blk);
   const owner = await resolveOwner(cov, client, addr, blk, shape);
-  const powers = await enumeratePowers(cov, shape, owner);
+
+  // ⭐⭐ RECOGNITION GATE — the SAME source the deposit path uses (recognizeVaultProfile). Only VAULTS
+  // (ERC-4626 conformant) are gated: analyze() serves ARBITRARY contracts, where "no vault powers" is
+  // a legitimate finding, never a refusal. An ERC-4626 vault whose control vocabulary this engine does
+  // NOT recognise gets a NO-VERDICT refusal below — scanning for the vocabularies we DO model would
+  // report a false clean bill. This MUST match the deposit gate (_vault.mjs); verify-recognition-
+  // agreement pins that the two paths never diverge. Scanned in the SAME effectiveCode the powers use.
+  const effCode = shape.effectiveCode;
+  const codeScannable = typeof effCode === "string" && !unread(effCode) && effCode !== "0x" && effCode.length > 2;
+  // ⭐ VAULT-SHAPED, not "fully conformant" — a fail-CLOSED bar. A real vault whose bytecode is
+  // missing a required selector (reached via fallback, a quirky impl, or a partial read) is STILL a
+  // vault; treating "11 of 12" as a non-vault and running the full scan reports a false clean bill (a
+  // failed probe reading as safe). So ANY ERC-4626 signal makes the surface vault-shaped and subject
+  // to the gate. Only a contract with NONE of the ERC-4626 methods is a confident non-vault that
+  // analyze() scans normally (it serves arbitrary contracts, most of which are not vaults). When the
+  // code itself is UNREADABLE, shape.class is already "unknown" → the shape-unclassified refusal
+  // below fires first, so a failed probe never reaches a clean scan.
+  const erc4626Hits = codeScannable ? ERC4626_METHODS.filter((s) => hasSel(effCode, s)).length : 0;
+  const vaultShaped = erc4626Hits > 0;
+  const unrecognisedVaultSurface = vaultShaped && recognizeVaultProfile((s) => hasSel(effCode, s)) === null;
+
+  let powers;
+  if (unrecognisedVaultSurface) {
+    // ⛔ Do NOT scan for our selectors on an unrecognised surface — that IS the false clean bill.
+    // Every power group lands in notChecked WITH THE REASON; the report refuses below.
+    for (const group of Object.keys(POWER_SIGS)) {
+      cov.skip(`power:${group}`, { kind: "power", group }, "power-surface-unrecognised — this ERC-4626 vault's control vocabulary is not one this engine models, so scanning for our selectors would report a false clean bill");
+    }
+    powers = [];
+  } else {
+    powers = await enumeratePowers(cov, shape, owner);
+  }
 
   const manifest = cov.manifest();
   const report = {
@@ -127,13 +161,17 @@ export async function analyze(address, { client } = {}) {
       summary:
         shape.class === "unknown"
           ? "could not classify this address's shape → nothing was scanned. This is an INDETERMINATE result, not a clean bill."
-          : `${manifest.totals.checked} checks ran, ${manifest.totals.notChecked} did not. Everything not checked is listed with a reason.`,
+          : unrecognisedVaultSurface
+            ? "this address presents an ERC-4626 vault surface this engine does not recognise → its owner powers were NOT scanned. This is a NO-VERDICT result, not a clean bill."
+            : `${manifest.totals.checked} checks ran, ${manifest.totals.notChecked} did not. Everything not checked is listed with a reason.`,
     },
     reads: cov.reads(),
     refusal:
       shape.class === "unknown"
         ? { reason: "shape-unclassified", detail: shape.evidence?.why ?? "the shape-determining reads did not complete" }
-        : null,
+        : unrecognisedVaultSurface
+          ? { reason: "power-surface-unrecognised", detail: "This address presents an ERC-4626 vault surface (fully or partially), but its admin/control surface is not a vocabulary this engine recognises. Scanning for the vocabularies it does model would report a false clean bill, so NO VERDICT is given — this is NOT a clean result. The deposit gate refuses the same input." }
+          : null,
   };
 
   // ⭐ The completeness invariant. Returns a refusal report if any catalogue group went unaccounted

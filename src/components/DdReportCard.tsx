@@ -105,7 +105,20 @@ export function DdReportResult({ data }: { data: any }) {
           subsystem exists to prevent. */}
       {refusal && (
         <div style={{ marginTop: 12, padding: "10px 12px", border: "1px solid var(--warn)", borderRadius: 8 }}>
-          <div style={{ fontWeight: 600 }}>No result — this is INDETERMINATE, not a clean bill.</div>
+          {/* ⭐ A power-surface-unrecognised refusal is a NO-VERDICT, distinct from a generic
+              indeterminate: the checker read the vault but does not recognise its control vocabulary,
+              so it gives no verdict rather than a false clean bill. Named explicitly, not as a
+              silent empty state. */}
+          {refusal.reason === "power-surface-unrecognised" ? (
+            <>
+              <div style={{ fontWeight: 600 }}>No verdict — this checker does not recognise this vault's control surface.</div>
+              <div style={{ marginTop: 6, fontSize: ".86rem" }}>
+                Its owner powers were <b>not</b> assessed, so this is <b>not</b> a clean bill — absence of findings here means &ldquo;not checked&rdquo;, never &ldquo;no powers&rdquo;.
+              </div>
+            </>
+          ) : (
+            <div style={{ fontWeight: 600 }}>No result — this is INDETERMINATE, not a clean bill.</div>
+          )}
           <div style={{ marginTop: 6, fontSize: ".86rem" }}>
             <span className="mono">{refusal.reason}</span> — {refusal.detail}
           </div>

@@ -15,11 +15,13 @@
 
 import { sel } from "./index.mjs";
 
-// The ERC-4626 required interface — a FROZEN standard, mirrored here for ONE purpose: to structurally
-// forbid a fingerprint from keying on it. Both Xylo and Morpho are ERC-4626 conformant, so an ERC-4626
-// selector would recognise EVERY vault. This is NOT a source of truth for conformance — the inspector
-// owns that; it is only the forbidden set the guard below enforces against.
-const ERC4626_METHODS = Object.freeze([
+// The ERC-4626 required interface — a FROZEN standard. Two consumers: (1) the structural guard below
+// forbids a fingerprint from keying on it (both Xylo and Morpho are conformant, so an ERC-4626
+// selector recognises EVERY vault); (2) analyze() (shared/onchain-analyze) uses it to decide "is this
+// a vault" before applying the recognition gate — the deposit path (inspectVault) applies the same
+// gate only to ERC-4626 vaults, and the recognition-agreement test pins that the two paths do not
+// diverge. It mirrors _vault.mjs's ERC4626_REQUIRED (same 12 methods, a frozen standard).
+export const ERC4626_METHODS = Object.freeze([
   "asset()", "totalAssets()", "convertToShares(uint256)", "convertToAssets(uint256)",
   "maxDeposit(address)", "maxWithdraw(address)", "previewDeposit(uint256)", "previewRedeem(uint256)",
   "deposit(uint256,address)", "mint(uint256,address)", "withdraw(uint256,address,address)", "redeem(uint256,address,address)",

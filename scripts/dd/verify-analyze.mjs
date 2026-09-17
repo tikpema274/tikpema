@@ -12,6 +12,8 @@
 import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { assertReportValid, SCOPE_CLASSES, POWER_SCOPE } from "../../shared/onchain-analyze/schema.mjs";
 import { screenOfac } from "../../shared/onchain-analyze/ofac.mjs";
+import { ERC4626_METHODS } from "../../shared/onchain-facts/vault-profiles.mjs";
+import { settleDecision, SETTLE_REASON } from "../../shared/x402/settle-gate.mjs";
 import * as analyzeModule from "../../shared/onchain-analyze/index.mjs";
 import { POWER_SIGS, sel } from "../../shared/onchain-facts/index.mjs";
 import { DIAMOND_LOUPE_SIGS, UUPS_SIGS, EIP1967_ADMIN_SLOT, EIP1167_PREFIX, EIP1167_SUFFIX } from "../../shared/onchain-analyze/slots.mjs";
@@ -338,6 +340,48 @@ console.log("\n── ROW 8 · ⭐ QUORUM MATRIX: agree→value, everything else
     if (n !== 9) { fail++; console.log(`  ❌ completeness invariant broke under quorum failure (${n}/9)`); }
   }
   ok(true, "the completeness invariant holds across every quorum failure mode (9/9 groups accounted for)");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+console.log("\n── ROW 9 · RECOGNITION GATE: an unrecognised VAULT power surface REFUSES (no clean bill) ──");
+{
+  const base = (code) => ({ [`code@${SUBJ}`]: code, [`slot@${EIP1967_IMPL_SLOT}`]: ZERO_WORD, [`call@0x8da5cb5b`]: word(OWNER), [`code@${OWNER}`]: "0x" });
+  const XYLO_GOV = ["setFees(uint256,uint256,uint256)", "emergencyWithdraw(address,uint256)"];
+  const MORPHO_GOV = ["setFee(uint96)", "setCurator(address)", "setIsSentinel(address,bool)", "setSendSharesGate(address)"];
+  const powerChecked = (r) => r.coverage.checked.filter((c) => c.kind === "power").length;
+  const powerNotChecked = (r) => r.coverage.notChecked.filter((n) => n.kind === "power").length;
+
+  // ⭐ Morpho-shaped: ERC-4626 conformant, vocabulary UNRECOGNISED → REFUSAL, no powers, never clean.
+  const m = await analyze(SUBJ, { client: mockClient(base(codeWith([...ERC4626_METHODS, ...MORPHO_GOV]))) });
+  ok(m.refusal?.reason === "power-surface-unrecognised", `Morpho vault → power-surface-unrecognised refusal (got ${m.refusal?.reason ?? "none"})`);
+  ok(m.powers.length === 0 && m.powersPresent.length === 0, "…and NO powers are presented as an inventory");
+  ok(powerChecked(m) === 0 && powerNotChecked(m) === 9, `…all 9 power groups notChecked, none scanned (checked ${powerChecked(m)}, notChecked ${powerNotChecked(m)})`);
+  ok(/not a clean/i.test(m.coverage.summary), "…coverage summary says it is NOT a clean bill");
+  // ⭐ ENDPOINT / BILLING: a no-verdict report is NOT charged, and specifically BECAUSE of the refusal
+  // (settleDecision refuses to settle any report with a refusal — authorization unspent). Asserting
+  // the REASON isolates the refusal from the unrelated unsigned-report reason. Not a refund, not a
+  // quote-time block: the settle-gate never charges for it.
+  ok(settleDecision(m).settle === false && settleDecision(m).reason === SETTLE_REASON.REFUSED,
+    `…and the endpoint does NOT charge for it, BECAUSE of the refusal (settle ${settleDecision(m).settle}, reason ${settleDecision(m).reason})`);
+  // CONTROL: the recognised report is NOT blocked by a refusal — its only bar to settling is signing,
+  // which the endpoint does. So a recognised vault stays chargeable; only the unrecognised one is free.
+  const xForBill = await analyze(SUBJ, { client: mockClient(base(codeWith([...ERC4626_METHODS, ...XYLO_GOV]))) });
+  ok(settleDecision(xForBill).reason !== SETTLE_REASON.REFUSED, `…while a recognised report is NOT refusal-blocked (reason ${settleDecision(xForBill).reason})`);
+
+  // ⭐ Xylo-shaped (REGRESSION): recognised → normal report, refusal null, powers scanned as before.
+  const x = await analyze(SUBJ, { client: mockClient(base(codeWith([...ERC4626_METHODS, ...XYLO_GOV]))) });
+  ok(x.refusal === null, `Xylo vault → NO refusal, verdict as before (got ${x.refusal?.reason ?? "null"})`);
+  ok(x.powers.find((p) => p.power === "feesSettable")?.present === true, "…and feesSettable is scanned present (regression)");
+
+  // ⭐ ERC-4626-only, no governance: unrecognised → REFUSAL (conformance ALONE is not recognition).
+  const e = await analyze(SUBJ, { client: mockClient(base(codeWith([...ERC4626_METHODS]))) });
+  ok(e.refusal?.reason === "power-surface-unrecognised", `ERC-4626-only → refusal (got ${e.refusal?.reason ?? "none"})`);
+
+  // ⛔ A NON-vault contract must be UNAFFECTED — analyze() serves arbitrary addresses, where "no vault
+  // powers" is a legitimate finding, never a refusal.
+  const n = await analyze(SUBJ, { client: mockClient(base(codeWith(["pause()"]))) });
+  ok(n.refusal === null, `a NON-vault contract is NOT gated (got ${n.refusal?.reason ?? "null"})`);
+  ok(n.powers.find((p) => p.power === "pausable")?.present === true, "…and its powers are scanned normally");
 }
 
 console.log(`\n${"═".repeat(92)}`);

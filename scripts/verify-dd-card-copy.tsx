@@ -170,5 +170,23 @@ section("E 🚨 A PROVIDER SPLIT IS SHOWN AS A POSITIVE FINDING");
     !/data sources disagreed/i.test(clean));
 }
 
+section("F ⭐ AN UNRECOGNISED CONTROL SURFACE RENDERS AS NO-VERDICT, NEVER CLEAN");
+{
+  const t = text(renderWith({
+    report: baseReport({
+      powersPresent: [],
+      refusal: { reason: "power-surface-unrecognised", detail: "This address is an ERC-4626 vault, but its admin/control surface is not a vocabulary this engine recognises." },
+    }),
+    policy: basePolicy(),
+    verifiability: { attestation: "signed" },
+  }));
+  check("⭐ says the checker does not recognise the vault's control surface", /does not recognise this vault/i.test(t) && /control surface/i.test(t), t.slice(0, 90));
+  check("⭐⭐ says NO VERDICT explicitly", /no verdict/i.test(t));
+  check("⭐⭐ says it is NOT a clean bill", /not a clean bill/i.test(t));
+  check("⭐ the reason code renders", /power-surface-unrecognised/.test(t));
+  check("🚨 no clean/safe verdict is shown — absence must not read as safe",
+    !/\bsafe\b/i.test(t) && !/Nothing was found against your rules/i.test(t), t.match(/\bsafe\b|Nothing was found/i)?.[0] ?? "clean");
+}
+
 console.log(`\n${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}\n`);
 process.exit(fail === 0 ? 0 : 1);
