@@ -138,7 +138,7 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
   // fail-closed disable logic only). USDC-only; EURC excluded. If ANY pocket is null or unavailable,
   // render NO total number and let the breakdown NAME the missing pocket.
   const p1 = w.usdcBalance ?? null;
-  const p2 = w.agentWallet.balance ?? null;
+  const p2 = w.agentWallet?.balance ?? null;
   const p3 = unified.status === "ready" ? (unified.total ?? null) : null;
   const totalStr = p1 == null || p2 == null || p3 == null
     ? null

@@ -558,6 +558,20 @@ section("REDESIGN — the Total: exact-then-floor, null-preserving, names the mi
   gateway = { status: "ready", total: "7.5000", perChain: [] }; // restore
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("REDESIGN — no agent wallet at all: the panel yields null, it does NOT throw");
+{
+  // ⭐⭐ REGRESSION PIN (b3ae036 → tsc TS18047): the Total was computed as `w.agentWallet.balance` BEFORE the
+  //     `if (!w.agentWallet) return null` guard, so a wallet with no agent SCA yet (provisioning / not created)
+  //     crashed the whole panel on render. `vite build` does not typecheck, so only a render proves it.
+  let threw: string | null = null;
+  let out = "<unset>";
+  try { out = renderToStaticMarkup(<YourMoney wallet={{ ...wallet, agentWallet: null } as any} />); }
+  catch (e: any) { threw = String(e?.message ?? e); }
+  check("⭐⭐ agentWallet: null does not throw on render", threw === null, threw ?? "");
+  check("⭐ …and renders nothing (the existing hasWallet guard)", out === "", out.slice(0, 80));
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");
