@@ -12,6 +12,7 @@
 // but analyze() returned a clean report for it — so the two DISAGREED. This guard turns that red.
 
 import { mock } from "node:test";
+import { readFileSync } from "node:fs";
 import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { ERC4626_METHODS } from "../../shared/onchain-facts/vault-profiles.mjs";
 import { EIP1967_IMPL_SLOT } from "../../shared/onchain-facts/index.mjs";
@@ -112,6 +113,20 @@ console.log("\n── FAIL-OPEN · a failed/partial/proxied vault probe must not
   });
   check("⭐ proxy-fronted Morpho vault → analyze REFUSES, not clean", proxy.refusal !== null, `refusal=${proxy.refusal?.reason ?? "NONE (clean bill!)"}`);
   check("   …deposit gate refuses the proxy stub", await depositBlocks(codeWith([])));
+}
+
+// ── DRIFT GUARD — the two ERC-4626 lists must stay identical sets. ──────────────────────────────
+// analyze() uses vault-profiles' ERC4626_METHODS; the deposit gate uses _vault.mjs's own
+// ERC4626_REQUIRED. They are byte-identical today but are SEPARATE declarations — deliberately NOT
+// unified (no deposit-path change). If they ever drift, the two paths could detect "is a vault"
+// differently and disagree. This asserts they are the same set; it goes red the moment either changes.
+console.log("\n── DRIFT GUARD · _vault ERC4626_REQUIRED === vault-profiles ERC4626_METHODS ──");
+{
+  const vaultSrc = readFileSync(new URL("../../netlify/functions/_vault.mjs", import.meta.url), "utf8");
+  const m = vaultSrc.match(/ERC4626_REQUIRED\s*=\s*\[([\s\S]*?)\]/);
+  const reqd = m ? [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]) : [];
+  const setEq = (a, b) => a.length === b.length && [...new Set(a)].sort().join("|") === [...new Set(b)].sort().join("|");
+  check("⭐ the two ERC-4626 lists are identical sets (12 each)", reqd.length === 12 && setEq(reqd, ERC4626_METHODS), `_vault:${reqd.length} vault-profiles:${ERC4626_METHODS.length}`);
 }
 
 console.log(`\n${"═".repeat(80)}`);
