@@ -22,6 +22,10 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DdReportResult } from "../src/components/DdReportCard";
+// ⭐ The no-verdict refusal, TAKEN FROM analyze() (not hand-copied). Section F renders the card with
+// THIS and asserts the rendered detail is verbatim the engine's — so the card and the engine can never
+// drift in wording. See src/dev/engine-no-verdict.ts.
+import { engineNoVerdictRefusal } from "../src/dev/engine-no-verdict";
 
 let pass = 0, fail = 0;
 const check = (label: string, cond: boolean, extra = "") => {
@@ -175,7 +179,7 @@ section("F ⭐ AN UNRECOGNISED CONTROL SURFACE RENDERS AS NO-VERDICT, NEVER CLEA
   const t = text(renderWith({
     report: baseReport({
       powersPresent: [],
-      refusal: { reason: "power-surface-unrecognised", detail: "This address is an ERC-4626 vault, but its admin/control surface is not a vocabulary this engine recognises." },
+      refusal: engineNoVerdictRefusal, // ⭐ the ENGINE's actual refusal, not a hand-copied paraphrase
     }),
     policy: basePolicy(),
     verifiability: { attestation: "signed" },
@@ -184,6 +188,13 @@ section("F ⭐ AN UNRECOGNISED CONTROL SURFACE RENDERS AS NO-VERDICT, NEVER CLEA
   check("⭐⭐ says NO VERDICT explicitly", /no verdict/i.test(t));
   check("⭐⭐ says it is NOT a clean bill", /not a clean bill/i.test(t));
   check("⭐ the reason code renders", /power-surface-unrecognised/.test(t));
+  // ⭐⭐ THE DETAIL THE CARD SHOWS IS THE ENGINE'S ACTUAL WORDING — asserted verbatim, so a card that
+  // paraphrased (as the old hand-copied fixture did: "is an ERC-4626 vault") goes RED here.
+  check("⭐⭐ the rendered refusal detail is VERBATIM the engine's analyze() output",
+    engineNoVerdictRefusal.detail.length > 0 && t.includes(engineNoVerdictRefusal.detail),
+    engineNoVerdictRefusal.detail.slice(0, 64) + "…");
+  check("   …and it is the corrected wording, not the drifted 'is an ERC-4626 vault'",
+    /presents an ERC-4626 vault surface/i.test(engineNoVerdictRefusal.detail) && !/\bis an ERC-4626 vault\b/i.test(engineNoVerdictRefusal.detail));
   check("🚨 no clean/safe verdict is shown — absence must not read as safe",
     !/\bsafe\b/i.test(t) && !/Nothing was found against your rules/i.test(t), t.match(/\bsafe\b|Nothing was found/i)?.[0] ?? "clean");
 }

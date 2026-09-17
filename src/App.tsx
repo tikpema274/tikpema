@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import ConnectPasskey from "./components/ConnectPasskey";
 import ResearchPanel from "./components/ResearchPanel";
 import MyAgentPanel from "./components/MyAgentPanel";
@@ -37,6 +37,12 @@ const NAV = [
   { id: "send", label: "Send" },
 ];
 
+// ⭐ DEV-ONLY fixture route. `import.meta.env.DEV` is statically replaced with `false` in the
+// production build, so this folds to `null` and the lazy `import()` is eliminated — the DevDdCard
+// module and its fixtures never enter dist/. Lets a developer see the DD card's no-verdict state
+// without the API or a real refused vault. Reached at #/dev/dd-card via `npm run dev:vite`.
+const DevDdCard = import.meta.env.DEV ? lazy(() => import("./dev/DevDdCard")) : null;
+
 function parseHash(): string {
   // Strip any `?intent` query (e.g. #/wallet?new) so deep-links still resolve to
   // the base route; the target page reads the intent from the raw hash itself.
@@ -56,6 +62,11 @@ export default function App() {
   const go = (id: string) => {
     window.location.hash = "/" + id;
   };
+
+  // DEV-ONLY: the DD-card fixture page (see DevDdCard above). Dead code in production.
+  if (import.meta.env.DEV && route === "dev/dd-card" && DevDdCard) {
+    return <Suspense fallback={<div style={{ padding: 24 }}>loading dev fixture…</div>}><DevDdCard /></Suspense>;
+  }
 
   let page: JSX.Element;
   switch (route) {
