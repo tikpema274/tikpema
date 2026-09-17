@@ -6,6 +6,7 @@ import type { useWallet } from "../wallet/useWallet";
 import { readJson } from "../lib/readJson";
 import UbExitStatus from "./UbExitStatus";
 import { UB_EXIT_PROOF } from "../lib/ubExitProof";
+import { formatUsdc } from "../lib/formatUsdc";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -219,7 +220,7 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
         {data && (
           <>
             <span style={{ fontSize: "1.6rem", fontWeight: 600, color: "var(--paper)" }}>
-              <span className="mono">{data.total}</span>{" "}
+              <span className="mono">{formatUsdc(data.total)}</span>{" "}
               <span style={{ fontSize: "0.85rem", color: "var(--muted)", fontWeight: 400 }}>USDC</span>
             </span>
             <div className="sub" style={{ marginTop: 8, display: "flex", gap: 16, flexWrap: "wrap" }}>
@@ -227,7 +228,7 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
                 <span key={p.chain}>
                   {p.chain}:{" "}
                   {p.ok ? (
-                    <span className="mono">{p.usdc} USDC</span>
+                    <span className="mono">{formatUsdc(p.usdc)} USDC</span>
                   ) : (
                     <span style={{ color: "var(--muted)" }}>unavailable</span>
                   )}

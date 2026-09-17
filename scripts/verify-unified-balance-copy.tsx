@@ -481,12 +481,17 @@ section("6 — ⭐ THE JUNE SHAPE: header → balance → action → explanation
 // presses precisely so they do not have to read the figure; it must be the figure they read.
 // ⭐ Asserted on the RENDERED output with a 4-dp balance (12.3456), so "same precision" is
 // discriminated from "both happen to be integers". [[refusal-reports-compared-quantity]]
-section("Max button renders the balance at the SAME precision as the card");
+section("Max button renders the balance at the SAME precision as the card (B3: one USDC rule, 6dp)");
 {
+  // ⭐ B3 (finding 10.1): every displayed USDC amount uses formatUsdc — 6dp, FLOORED. The balance
+  // "12.3456" renders "12.345600" on the card AND the Max button; one balance, one rendering, and a
+  // 6-dp figure can never overstate a spendable amount the way the old 2dp round could.
   const m = ymParked.match(/Max \(([^)]*)\)/);
-  check("⭐⭐ Max shows the 2dp rendering the card shows", !!m && m[1] === "12.35",
+  check("⭐⭐ Max shows the same 6dp rendering the card shows", !!m && m[1] === "12.345600",
     m ? `Max (${m[1]})` : "no Max button rendered");
-  check("  …and the raw 4-dp figure never reaches the button", !/Max \(12\.3456\)/.test(ymParked));
+  check("  …and the card carries that same figure", ymParked.includes("12.345600"));
+  check("  …and neither the old 2dp form nor a raw untrimmed figure reaches the button",
+    !/Max \(12\.35\)/.test(ymParked) && !/Max \(12\.3456\)/.test(ymParked));
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

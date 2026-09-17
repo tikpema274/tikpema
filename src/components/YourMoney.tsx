@@ -7,7 +7,7 @@ import AddressDisplay from "./AddressDisplay";
 import SignInPrompt from "./SignInPrompt";
 import { describeError } from "../lib/describeError";
 import { describeChainError } from "../lib/describeChainError";
-import { displayAmount } from "../lib/formatAmount";
+import { formatUsdc } from "../lib/formatUsdc";
 import { UB_EXIT_PROOF } from "../lib/ubExitProof";
 
 const EXPLORER = arcTestnet.blockExplorers.default.url;
@@ -266,7 +266,7 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
       <div className="quick" style={{ marginBottom: 4 }}>
         {/* 1. THE USER'S OWN WALLET (passkey MSCA) — w.address / w.usdcBalance.
                Fully theirs; no caveat to make. */}
-        <Pocket label="Your wallet" amount={displayAmount(w.usdcBalance)} badge="You hold the key">
+        <Pocket label="Your wallet" amount={formatUsdc(w.usdcBalance)} badge="You hold the key">
           <AddressDisplay address={w.address} />
           <div className="qd">Yours. Send USDC here from any wallet, exchange, or faucet.</div>
 
@@ -319,13 +319,13 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
                shown as a SEPARATE amount — never summed (EURC != $1). */}
         <Pocket
           label="Agent's wallet"
-          amount={displayAmount(w.agentWallet.balance)}
+          amount={formatUsdc(w.agentWallet.balance)}
           badge="Withdraw any time"
         >
           <AddressDisplay address={w.agentWallet.address} />
           <div className="qd">
             The working float.{" "}
-            <span className="mono">{displayAmount(w.agentWallet.eurcBalance)}</span> EURC also held
+            <span className="mono">{formatUsdc(w.agentWallet.eurcBalance)}</span> EURC also held
             here.
           </div>
 
@@ -361,7 +361,7 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
             >
               {/* ⭐ SAME PRECISION AS THE FIGURE ABOVE IT. This read "3.00" on the card and "Max (3)"
                   on the button — one balance, two renderings. The CLICK still sets the exact value. */}
-              Max ({displayAmount(agentBal)})
+              Max ({formatUsdc(agentBal)})
             </button>
           </div>
 
@@ -382,7 +382,7 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
           {gwParked > 0 && (
             <div className="qd" style={{ color: "var(--warn)" }}>
               <b>Not included:</b>{" "}
-              <span className="mono">{unified.status === "ready" ? unified.total : "—"}</span>{" "}
+              <span className="mono">{unified.status === "ready" ? formatUsdc(unified.total) : "—"}</span>{" "}
               USDC is in your unified balance. Committed to your agent's float. Only your
               agent's own account can release these funds, and <b>Tikpema controls that
               account</b> — so the exit runs through us. <b>It is built now:</b> you ask, Arc's
@@ -419,7 +419,7 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
                a release we do not perform. */}
         <Pocket
           label="Unified balance"
-          amount={unified.status === "ready" ? unified.total : "…"}
+          amount={unified.status === "ready" ? formatUsdc(unified.total) : "…"}
           badge={unifiedBadge}
           warn={parked}
         >
@@ -440,7 +440,7 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
                   <span key={p.chain}>
                     {p.chain}:{" "}
                     {p.ok ? (
-                      <span className="mono">{p.usdc}</span>
+                      <span className="mono">{formatUsdc(p.usdc)}</span>
                     ) : (
                       <span style={{ color: "var(--muted)" }}>unavailable</span>
                     )}

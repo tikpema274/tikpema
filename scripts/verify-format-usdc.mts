@@ -47,6 +47,19 @@ t("⭐⭐ SIX decimals always — the server's trimmed output is normalised", ()
   assert.equal(formatUsdc(0.000001), "0.000001", "one atomic unit must be visible");
 });
 
+t("⭐⭐ B3: a value beyond 6dp is FLOORED, never rounded up — a display must NEVER overstate a spendable balance", () => {
+  // .toFixed(6) rounds to NEAREST, so it would show MORE than the true amount — the bridge 2dp
+  // defect at full precision. A balance a user acts on must round DOWN, never up.
+  assert.equal(formatUsdc("1.2345678"), "1.234567", "the 7th decimal is dropped, not rounded up to …568");
+  assert.equal(formatUsdc("0.0000009"), "0.000000", "a sub-atomic amount floors to zero, never up to 0.000001");
+  assert.equal(formatUsdc("2.0549999"), "2.054999", "must not round 2.0549999 up to 2.055000");
+  assert.equal(formatUsdc("99.9999995"), "99.999999", "must not round up to 100.000000");
+  // The invariant, directly: the rendered figure is never GREATER than the true value.
+  for (const v of ["1.2345678", "0.0000009", "2.0549999", "99.9999995", "31.3", "0.99", "0"]) {
+    assert.ok(Number(formatUsdc(v)) <= Number(v), `${v} rendered ${formatUsdc(v)} which is GREATER than ${v}`);
+  }
+});
+
 t("⭐ 2dp would have hidden this — the reason the rule exists", () => {
   // Two balances that are materially different but identical at 2dp.
   assert.notEqual(formatUsdc("2.5137"), formatUsdc("2.5142"));

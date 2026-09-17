@@ -36,7 +36,13 @@ export function formatUsdc(v: unknown): string {
   if (raw === "") return NO_AMOUNT;
   const n = Number(raw);
   if (!Number.isFinite(n)) return NO_AMOUNT;
-  return n.toFixed(USDC_DP);
+  // ⭐ FLOOR toward zero at 6dp — NEVER round up. A displayed balance that reads HIGHER than the true
+  // amount is the bridge 2dp defect at full precision: a user could act on a figure the wallet cannot
+  // cover. Snap the scaling first (`toFixed(9)`) so binary-fp error — 1.234567 * 1e6 is
+  // 1234567.0000000002 — does not floor an exact value one atomic unit down. Same snap-then-round-down
+  // as shared/amount-direction.mjs's availableAmount; for every real ≤6dp USDC value this is exact.
+  const scaled = Number((n * 1e6).toFixed(9));
+  return (Math.floor(scaled) / 1e6).toFixed(USDC_DP);
 }
 
 /**
