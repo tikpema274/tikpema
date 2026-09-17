@@ -29,7 +29,12 @@ const handlers = {
 
 // The real engine output for an unrecognised vault. Top-level await: the module resolves only once
 // analyze() has produced the report, so importers see a settled value.
-export const engineNoVerdictReport = await analyze(SUBJ, { client: mockClient(handlers) });
+// The engine is untyped .mjs (tsc reads it via allowJs and infers `object`); the shape asserted here
+// is the one the guard below checks at module load, so a wrong assertion throws before any importer runs.
+export const engineNoVerdictReport = (await analyze(SUBJ, { client: mockClient(handlers) })) as {
+  refusal?: { reason: string; detail: string } | null;
+  [k: string]: unknown;
+};
 
 // LOUD if the engine ever stops producing this refusal for an unrecognised vault — the fixture and the
 // test must never silently fall back to a stale, clean, or differently-shaped result.
@@ -40,4 +45,4 @@ if (engineNoVerdictReport.refusal?.reason !== "power-surface-unrecognised") {
 }
 
 /** The engine's ACTUAL `{ reason, detail }` for a no-verdict vault — the words the DD card renders. */
-export const engineNoVerdictRefusal = engineNoVerdictReport.refusal as { reason: string; detail: string };
+export const engineNoVerdictRefusal = engineNoVerdictReport.refusal!;
