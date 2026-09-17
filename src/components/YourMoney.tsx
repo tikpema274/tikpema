@@ -175,6 +175,22 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
   const unified = useGatewayBalance(w, wdTx ? 1 : 0);
   const gwParked = unified.status === "ready" ? Number(unified.total ?? 0) : 0;
 
+  // ── B1 (finding 10.3): the exit badge is a CLAIM ABOUT EXITING COMMITTED FUNDS. On an empty or
+  // unreadable unified balance there is nothing to exit, so "Exit built · about seven days" must NOT
+  // render — a static badge advertises an exit for money that is not there. It appears ONLY when
+  // funds are parked; otherwise the badge states the pocket's actual condition, and drops the amber
+  // (there is nothing to warn about when nothing is committed).
+  const parked = gwParked > 0;
+  const unifiedBadge = parked
+    ? "Exit built · about seven days"
+    : unified.status === "ready"
+      ? "No funds committed"
+      : unified.status === "signed-out"
+        ? "Sign in to view"
+        : unified.status === "error"
+          ? "Balance unavailable"
+          : "Checking balance…";
+
   async function fundAgent() {
     setFundErr("");
     setFundTx(null);
@@ -402,8 +418,8 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
         <Pocket
           label="Unified balance"
           amount={unified.status === "ready" ? unified.total : "…"}
-          badge="Exit built · about seven days"
-          warn
+          badge={unifiedBadge}
+          warn={parked}
         >
           {unified.status === "signed-out" && (
             <SignInPrompt

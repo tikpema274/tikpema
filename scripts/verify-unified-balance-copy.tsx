@@ -176,6 +176,28 @@ check("  …and it is emitted as a real attribute, not swallowed by the child",
   /Exit built · about seven days/.test(ymMarkup));
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
+section("1b — B1: the exit badge shows ONLY when funds are actually parked (finding 10.3)");
+// ⭐ "Exit built · about seven days" is a claim about EXITING committed funds. On an EMPTY or
+// UNREADABLE unified balance there is nothing to exit, so the badge must NOT render — otherwise it
+// advertises an exit for money that is not there. Present ⟺ parked, absent in every other state.
+// A static badge that always shows cannot state this; removing the condition turns these red.
+{
+  gateway = { status: "ready", total: "7.5000", perChain: [] };
+  const badgeParked = n(render(YourMoney), /Exit built · about seven days/g);
+  gateway = { status: "ready", total: "0", perChain: [] };
+  const badgeEmpty = n(render(YourMoney), /Exit built · about seven days/g);
+  gateway = { status: "error" };
+  const badgeErr = n(render(YourMoney), /Exit built · about seven days/g);
+  gateway = { status: "signed-out" };
+  const badgeOut = n(render(YourMoney), /Exit built · about seven days/g);
+  gateway = { status: "ready", total: "7.5000", perChain: [] }; // restore
+  check("⭐ non-zero parked → badge PRESENT", badgeParked === 1, `${badgeParked}×`);
+  check("⭐ empty (ready, total 0) → badge ABSENT", badgeEmpty === 0, `${badgeEmpty}×`);
+  check("⭐ unavailable (error) → badge ABSENT", badgeErr === 0, `${badgeErr}×`);
+  check("⭐ signed-out → badge ABSENT", badgeOut === 0, `${badgeOut}×`);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
 section("2 — every prior falsehood is ABSENT from the RENDERED TREE");
 // ⭐ Checked across BOTH panels in BOTH balance states, so a falsehood cannot hide in a branch that
 // happens not to render in one scenario — and, because this is the rendered tree, it also cannot
