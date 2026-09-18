@@ -38,6 +38,21 @@ const go = (id: string) => {
 // So this page ranks the three pockets by what the
 // user can reclaim ALONE, and warns AT the deposit control, not below it. Reversibility is
 // the fact a user needs before committing money — never let reassurance crowd it out.
+// ═══ TREASURY PREFILL — #/unified?deposit= | ?withdraw= (2026-09-19) ═══════════════════════════════
+// A treasury PROPOSAL hands off here with an amount in the hash. It PREFILLS the named form and selects
+// its tab; it never pre-authorises — the deposit cap, the withdrawal's ~7-day disclosure and every
+// confirm run as before. Malformed / non-positive is DROPPED; if both are present, deposit wins and
+// withdraw is ignored (one proposal, one form). Read ONCE at mount.
+export function unifiedPrefillParams(hash: string): { tab?: "deposit" | "withdraw"; amount?: string } {
+  const q = hash.split("?")[1] ?? "";
+  const p = new URLSearchParams(q);
+  for (const tab of ["deposit", "withdraw"] as const) {
+    const n = Number(p.get(tab));
+    if (p.get(tab) !== null && Number.isFinite(n) && n > 0) return { tab, amount: String(n) };
+  }
+  return {};
+}
+
 export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWallet }) {
   // ⭐ THE EVIDENCE DISCLOSURE. Collapsed by DEFAULT, never OMITTED — the node always
   //    renders and is toggled with `hidden`, so a copy guard that reads rendered output
@@ -46,9 +61,10 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
   const [showEvidence, setShowEvidence] = useState(false);
   // ⭐ Which ACTION is showing. The tabs carry the two forms ONLY — the pending-withdrawal
   //    rows render above them and are never behind a tab. See the note at the tab strip.
-  const [tab, setTab] = useState<"deposit" | "withdraw">("deposit");
+  const [prefill] = useState(() => unifiedPrefillParams(typeof window === "undefined" ? "" : window.location.hash));
+  const [tab, setTab] = useState<"deposit" | "withdraw">(prefill.tab ?? "deposit");
   // Funding form state.
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount] = useState(prefill.tab === "deposit" ? prefill.amount ?? "" : "");
   const [funding, setFunding] = useState(false);
   const [fundError, setFundError] = useState("");
   const [fundOk, setFundOk] = useState<{ amountUsdc: number; tx: string } | null>(null);
@@ -164,6 +180,12 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
       <div className="sub">
         Read live across Arc Testnet and Base Sepolia.
       </div>
+      {prefill.tab && (
+        <div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>
+          <b>Filled in from a treasury proposal.</b> The {prefill.tab} form below carries the proposed amount —
+          check it; nothing moves until you confirm here.
+        </div>
+      )}
 
       {/* Balance card — same surface as the Dashboard "Agent unified balance" card.
           Degrades gracefully to an "unavailable" line if the read fails. */}
@@ -479,7 +501,7 @@ export default function UnifiedBalancePanel({ wallet: w }: { wallet: UnifiedWall
       </div>
 
       {bal.status === "ready" && tab === "withdraw" && (
-        <UbExitStatus token={() => w.ensureSession()} reloadKey={reloadKey} section="action" />
+        <UbExitStatus token={() => w.ensureSession()} reloadKey={reloadKey} section="action" initialAmount={prefill.tab === "withdraw" ? prefill.amount : undefined} />
       )}
 
       {/* Owner address — the agent wallet the unified balance is keyed to (the

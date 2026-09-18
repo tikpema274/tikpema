@@ -82,7 +82,9 @@ const check = (label: string, cond: boolean, extra = "") => {
 };
 const section = (t: string) => console.log(`\n── ${t} ${"─".repeat(Math.max(0, 62 - t.length))}`);
 
-const UnifiedBalancePanel = (await import("../src/components/UnifiedBalancePanel")).default;
+const UnifiedMod = await import("../src/components/UnifiedBalancePanel");
+const UnifiedBalancePanel = UnifiedMod.default;
+const { unifiedPrefillParams } = UnifiedMod;
 const YourMoney = (await import("../src/components/YourMoney")).default;
 const UbExitStatus = (await import("../src/components/UbExitStatus")).default;
 
@@ -603,6 +605,23 @@ section("REDESIGN — the unified Balance CELL says what the read actually did, 
   gateway = { status: "ready", total: "0", perChain: [] };
   check('⭐ ready, total 0 → cell renders "0.00" (a true zero is a number)', unifiedBalCell() === "0.00", JSON.stringify(unifiedBalCell()));
   gateway = { status: "ready", total: "7.5000", perChain: [] }; // restore
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("TREASURY PREFILL — #/unified?deposit= / ?withdraw= fills the form, says so, never pre-authorises");
+{
+  check("parser: deposit amount → tab deposit", JSON.stringify(unifiedPrefillParams("#/unified?deposit=30")) === JSON.stringify({ tab: "deposit", amount: "30" }));
+  check("parser: withdraw amount → tab withdraw", JSON.stringify(unifiedPrefillParams("#/unified?withdraw=2.5")) === JSON.stringify({ tab: "withdraw", amount: "2.5" }));
+  check("parser: malformed / non-positive dropped; both present → deposit wins, nothing coerced", JSON.stringify(unifiedPrefillParams("#/unified?deposit=abc")) === "{}" && JSON.stringify(unifiedPrefillParams("#/unified?withdraw=0")) === "{}" && JSON.stringify(unifiedPrefillParams("#/unified")) === "{}");
+  gateway = { status: "ready", total: "7.5000", perChain: [] };
+  (globalThis as any).window = { location: { hash: "#/unified?deposit=30" } };
+  const pre = renderToStaticMarkup(<UnifiedBalancePanel wallet={wallet} />);
+  delete (globalThis as any).window;
+  const preText = pre.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  check("⭐ banner names the source: 'Filled in from a treasury proposal'", /Filled in from a treasury proposal/.test(preText));
+  check("the deposit amount field carries 30", /value="30"/.test(pre));
+  const plain = renderToStaticMarkup(<UnifiedBalancePanel wallet={wallet} />).replace(/<[^>]+>/g, " ");
+  check("without params: NO banner", !/Filled in from a treasury proposal/.test(plain));
 }
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");

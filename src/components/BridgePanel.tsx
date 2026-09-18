@@ -26,6 +26,22 @@ const DESTINATIONS = [
   { key: "linea", label: "Linea (Sepolia)" },
 ];
 
+// ═══ TREASURY PREFILL — #/bridge?amount=&destination= (2026-09-19) ═══════════════════════════════
+// A treasury PROPOSAL hands off here with the amount and destination in the hash. Everything in a URL
+// is attacker-supplied, so it PREFILLS a form the user then reads and submits; it never pre-authorises
+// anything — the quote, the fee band, the ack gate and the seal all run exactly as before. Malformed
+// params are DROPPED, never coerced (the SendPanel payment-link rule). Read ONCE at mount.
+export function bridgePrefillParams(hash: string): { amount?: string; destination?: string } {
+  const q = hash.split("?")[1] ?? "";
+  const p = new URLSearchParams(q);
+  const out: { amount?: string; destination?: string } = {};
+  const a = Number(p.get("amount"));
+  if (Number.isFinite(a) && a > 0) out.amount = String(a);
+  const d = (p.get("destination") ?? "").trim();
+  if (DESTINATIONS.some((x) => x.key === d)) out.destination = d;
+  return out;
+}
+
 // BridgePanel — cross-chain USDC bridge (Arc → 8 EVM testnets via CCTP), matching
 // SendPanel/SwapPanel. It POSTs to /api/agent-bridge — the ONE endpoint that
 // enforces the per-bridge cap (AGENT_BRIDGE_CAP_USDC) + live fee-floor + day-ceiling
@@ -37,8 +53,10 @@ const DESTINATIONS = [
 // tx + net arrival and let the user leave — the bridge completes server-side. One
 // optional "Check status" polls the mint ONCE (no blocking loop).
 export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
-  const [destination, setDestination] = useState("base");
-  const [amount, setAmount] = useState("5");
+  // ⭐ Lazy initialiser: the hash is read exactly once, on mount — never re-applied over an edit.
+  const [prefill] = useState(() => bridgePrefillParams(typeof window === "undefined" ? "" : window.location.hash));
+  const [destination, setDestination] = useState(prefill.destination ?? "base");
+  const [amount, setAmount] = useState(prefill.amount ?? "5");
   const [bridging, setBridging] = useState(false);
   const [run, setRun] = useState<any>(null); // agent-bridge response
   const [error, setError] = useState("");
@@ -232,6 +250,12 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
           the assertion means. The other two lead sentences describe HOW BRIDGING WORKS and are now
           numbered steps in zone 3 — present, below the action, not in the way. */}
       <div className="sub">Bridges run within your per-bridge and daily safety caps.</div>
+      {(prefill.amount || prefill.destination) && (
+        <div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>
+          <b>Filled in from a treasury proposal.</b> Check the amount and destination below — the fee is quoted
+          here before anything moves, and nothing is sent until you confirm.
+        </div>
+      )}
 
       <div className="status" style={{ marginTop: 0, marginBottom: 18 }}>
         Bridging from{" "}

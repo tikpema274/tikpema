@@ -96,18 +96,22 @@ export default function UbExitStatus({
   reloadKey = 0,
   initial,
   section = "all",
+  initialAmount,
 }: {
   token: () => Promise<string>;
   reloadKey?: number;
   initial?: UbExitInitial;
   section?: UbExitSection;
+  /** A treasury-proposal PREFILL of the withdraw amount (2026-09-19). Prefills the field only; the user
+   *  still reads the ~7-day disclosure and confirms. Not the `initial` seam — that one is test-only data. */
+  initialAmount?: string;
 }) {
   const [data, setData] = useState<Payload | null>(initial?.data ?? null);
   const [error, setError] = useState(initial?.error ?? "");
   // ⚠️ Seeded state means the first paint is NOT loading — otherwise the seam would render the
   // spinner and prove nothing, which is exactly the failure it exists to end.
   const [loading, setLoading] = useState(!(initial?.data || initial?.error));
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount] = useState(initialAmount ?? "");
   const [busy, setBusy] = useState(false);
   const [startErr, setStartErr] = useState("");
   const [started, setStarted] = useState<{ amountUsdc?: string } | null>(null);

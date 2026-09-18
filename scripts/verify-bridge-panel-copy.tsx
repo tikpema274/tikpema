@@ -27,7 +27,9 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 
-const BridgePanel = (await import("../src/components/BridgePanel")).default;
+const BridgeMod = await import("../src/components/BridgePanel");
+const BridgePanel = BridgeMod.default;
+const { bridgePrefillParams } = BridgeMod;
 const { BridgeQuoteSummary } = await import("../src/components/BridgeQuoteSummary");
 
 let pass = 0, fail = 0;
@@ -206,6 +208,25 @@ check("⭐ the mint window still names a SLOW CASE, not a single number",
   /\d/.test(MINT_TIMING) && MINT_TIMING.includes(String(MINT_DEADLINE_MINUTES)), MINT_TIMING);
 check("⭐⭐ …and the panel renders that slow case, so copy and receipt bands cannot disagree",
   rendered.includes(String(MINT_DEADLINE_MINUTES)) && rendered.includes(MINT_TIMING));
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+console.log("\n── TREASURY PREFILL — #/bridge?amount=&destination= fills the form, says so, never pre-authorises ──");
+{
+  // Pure parser: attacker-supplied input PREFILLS a form the user then reads; malformed is DROPPED, never coerced.
+  check("parser: amount + known destination accepted", JSON.stringify(bridgePrefillParams("#/bridge?amount=25&destination=base")) === JSON.stringify({ amount: "25", destination: "base" }));
+  check("parser: unknown destination dropped, amount kept", JSON.stringify(bridgePrefillParams("#/bridge?amount=2&destination=solana")) === JSON.stringify({ amount: "2" }));
+  check("parser: non-positive / NaN amount dropped", JSON.stringify(bridgePrefillParams("#/bridge?amount=-1&destination=base")) === JSON.stringify({ destination: "base" }) && JSON.stringify(bridgePrefillParams("#/bridge?amount=abc")) === "{}");
+  check("parser: no query → nothing", JSON.stringify(bridgePrefillParams("#/bridge")) === "{}");
+  (globalThis as any).window = { location: { hash: "#/bridge?amount=25&destination=polygon" } };
+  const pre = renderToStaticMarkup(<BridgePanel wallet={wallet} />);
+  delete (globalThis as any).window;
+  const preText = pre.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  check("⭐ banner names the source: 'Filled in from a treasury proposal'", /Filled in from a treasury proposal/.test(preText));
+  check("⭐ …and says the fee is quoted before anything moves", /fee is quoted/.test(preText));
+  check("the amount field carries 25", /value="25"/.test(pre));
+  const plain = renderToStaticMarkup(<BridgePanel wallet={wallet} />).replace(/<[^>]+>/g, " ");
+  check("without params: NO banner", !/Filled in from a treasury proposal/.test(plain));
+}
 
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
