@@ -993,6 +993,24 @@ button.btn-wide { display: block; width: 100%; margin-top: 14px; padding: 13px 0
 .ym-more { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 0.8rem; color: var(--paper-dim); }
 .ym-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   TREASURY — six columns (Pocket · Where held · Balance · Share · Target · Drift),
+   the YourMoney idioms, scoped .tr-* (src/components/TreasuryPanel.tsx). Stacks to
+   one card per pocket at phone width.
+   ───────────────────────────────────────────────────────────────────────────── */
+.tr-head, .tr-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 2fr) minmax(0, 1fr) minmax(0, .8fr) minmax(0, .8fr) minmax(0, 1fr); gap: 10px; align-items: start; }
+.tr-head { color: var(--muted); font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; padding: 0 0 8px; border-bottom: 1px solid var(--line); }
+.tr-row { border-bottom: 1px solid var(--line); padding: 10px 0; font-size: 0.9rem; }
+.tr-pocket { font-weight: 600; color: var(--paper); }
+.tr-num { text-align: right; font-variant-numeric: tabular-nums; color: var(--paper); }
+.tr-src { display: block; font-size: 0.72rem; color: var(--muted); }
+@media (max-width: 720px) {
+  .tr-head { display: none; }
+  .tr-row { grid-template-columns: 1fr; gap: 2px; }
+  .tr-num { text-align: left; }
+  .tr-num::before { content: attr(data-l); color: var(--muted); font-size: 0.72rem; margin-right: 6px; }
+}
+
 /* Phone width: the four columns stack to one per holding — a card each. */
 @media (max-width: 560px) {
   .ym-head { display: none; }

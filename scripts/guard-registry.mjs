@@ -133,6 +133,10 @@ export const COMPONENTS = {
   // ⛔ The checkout SELL surface (2026-09-18): tells the merchant payments arrive DIRECTLY in their
   // login wallet, no escrow, no reversal by Tikpema, a refund is them sending it back. Same suite.
   SellPanel:      { suite: "verify-checkout-copy.tsx" },
+  // ⛔ The TREASURY console (2026-09-19). Its one claim: NOTHING HERE MOVES MONEY — proposals only, each
+  // confirmed on the surface that carries its caps and fee. Its suite asserts the line is present ABOVE
+  // the proposals and that no button.emerald exists on the page (mutation-checked).
+  TreasuryPanel:  { suite: "verify-treasury-copy.tsx" },
   SignInPrompt:   { noClaims: true },
   // 🚨 WAS `noClaims: true`, AND IT WENT STALE THE MOMENT IT GREW A CAP SENTENCE (2026-08-30) —
   // the SECOND time this exact staleness has happened, after SendPanel above. It now says swaps run
