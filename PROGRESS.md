@@ -25796,3 +25796,62 @@ GATES: test:all 129/129 green; capture:window self-clearing self-healed at 553s;
 The DD surface did not change in this commit → ddTree stable at `596bcd84` (43 files); SCHEMA_VERSION
 `onchain-analyze/0.3.0`. Runtime logs (dd-refusal-window-log.jsonl, deploy-loss-log.jsonl) carry the
 window entry but are NOT committed with this note.
+
+## Deploy 5 COMPLETE — wallet-surface series (findings 10.1–10.4 + "Your money" redesign) + gate:types (2026-09-18)
+
+Deploy `6aac8a25396131a3aa6c41f7`, served tree `ae193d256cc0` (main HEAD `e9755f3`), published 01:12:27Z.
+Prod = main HEAD; gate:deployed VERIFIED (published deploy `ready`, served tree + commit match, control
+plane == data plane, 0 orphans among the 25 deploys newer than it). Ships SEVEN commits past Deploy 4:
+- `ef66871` (10.3) — the "Exit built · about seven days" badge renders ONLY when unified funds are parked
+  (`gwParked > 0`); empty / error / signed-out / loading each state the pocket's actual condition, no amber.
+- `61f8ab1` (10.2) — the dated unified-exit proof (1 USDC, 2026-08-12 → 08-20, 7d 4h) has ONE source,
+  `src/lib/ubExitProof.ts`; both surfaces read it, and a test proves an edit reddens both at once.
+- `ea51702` (10.1) — one USDC formatting rule: every displayed amount in YourMoney + UnifiedBalancePanel
+  goes through `formatUsdc`, which now FLOORS toward zero — a display can never read higher than the true
+  balance (closes the bridge-2dp overstatement edge).
+- `7732479` (10.4) — presence tests for all six disclosure/badge strings on the fund-moving surface
+  ("You hold the key", "Withdraw any time", "Not included", "Only your agent's own account…", the two
+  Empty states); red-first per string.
+- `b3ae036` — "Your money" redesigned as a USDC overview: null-PRESERVING Total (any pocket unavailable →
+  no number, the breakdown NAMES the missing pocket; a sum never silently omits a pocket), EURC never
+  summed, 2dp column / 6dp acted-on figures, both floored once via `floorUsdcAt`. Handlers and every
+  fail-closed disable expression byte-identical; "Start exit →" navigates, adds no fund-moving control.
+- `03a6a76` — 🚨 b3ae036 shipped a RENDER CRASH: `w.agentWallet.balance` computed BEFORE the
+  `if (!w.agentWallet) return null` guard — a wallet with no agent SCA threw and took the panel down.
+  One character (`?.`); test pins it, RED recorded (2 failures, the exact TypeError), GREEN 88/0.
+- `e9755f3` — the class is now un-shippable: `gate:types` (`tsc --noEmit -p .`, ~16s) runs FIRST in
+  deploy:prod. tsc had flagged the crash (TS18047) and nothing in the pipeline could see it — `vite build`
+  does not typecheck. Proven to bite (fix reverted → exit 2 on the exact TS18047). Shipped GREEN: the four
+  pre-existing TS7016s (untyped .mjs imports, 4adcc53) resolved with `allowJs`, ⛔ NOT sibling `.d.mts`
+  files — a declaration file under a DD_SURFACE_DIR rotated ddTree (596bcd84 → 5fd51135) = a live
+  deposit-refusal window for a typing shim. Tried, measured, removed.
+
+⚠️ ATTEMPT #1 CRASHED. The first `deploy:prod` on e9755f3 (2026-09-17 ~23:29Z) passed gate:types →
+test:all → gate:watch → gate:rpc → build (stamp 23:29:58Z, dirty:false) and reached `netlify deploy`
+— Netlify created `6aac77f4286132e3893e4082` at 23:29:56Z — then the CLI and WSL died mid-bundle
+(machine reboot 00:06Z). Nothing half-shipped: the orphan never reached `ready`, prod kept serving
+Deploy 4 (`46c63e7423c7`/4adcc53) throughout, and gate:deployed run afresh at 00:11Z said so
+("A deploy finished — it just was not this one"). The orphan is LEFT UNTOUCHED per the deploy-loss
+policy (cancelled orphans launder into "deliberate" and can never be counted). Attempt #2 = this deploy,
+run in T's foreground terminal.
+
+DD WINDOW — **no-window** (6th capture). ddTree `596bcd84…` → `596bcd84…`, `rotated:false`, 1 probe,
+exit 0. PREDICTED before the run: none of the seven commits touches a DD_SURFACE_DIR (all `src/`,
+`scripts/`, `tsconfig`, `package.json`), so no rotation and no deposit-refusal window — observed exactly.
+SCHEMA_VERSION `onchain-analyze/0.3.0` unchanged; 43 DD files.
+
+DEPLOY-LOSS SWEEP (gate-new, 581 scanned, 6 pages, exhausted): **1 NEW loss — `6aabc7899bcc60d4722ee1ef`**,
+a production deploy created 2026-09-17 10:57:13Z that never left `new`. Explained: 4bc0d03 (committed
+09:12Z) was first deployed at ~10:57Z and that CLI was killed; the deploy that actually shipped 4bc0d03
+ran at 12:32Z (5th window reading). It was `tooYoung` (<6h) at the 12:41Z and 16:23Z sweeps and only
+crossed the line now. Counts: losses 15→16, limbo 38→39, preserved 23, unaccounted 0, `tooYoung:1` =
+tonight's `6aac77f4…`, which will be counted at the next sweep the same way. Two orphans in 24h, both the
+killed-CLI-mid-bundle class — the second one a hard machine death, not a session end.
+
+GATES in-chain (T's terminal): gate:types green (first run in the pipeline), test:all green, gate:watch,
+gate:rpc, build, netlify deploy --prod, gate:deployed VERIFIED, capture:window no-window, gate:forgery,
+gate:spec, gate:deployloss (1 new, recorded above). Suite counts were not captured from that terminal;
+the last per-commit counts are test:all 129/129 (b3ae036), wallet suite 88/0 (03a6a76),
+verify-dd-card-copy 29/0 + guard registry 28/0 (e9755f3). Runtime logs (dd-refusal-window-log.jsonl,
+deploy-loss-log.jsonl) and the regenerated build stamp carry this deploy's entries but are NOT committed
+with this note.
