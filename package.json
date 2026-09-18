@@ -95,6 +95,7 @@
     "test:prodsession": "node scripts/verify-prod-session.mjs",
     "test:quote": "node --experimental-test-module-mocks scripts/verify-agent-quote-record.mjs",
     "test:quoteretention": "node --experimental-test-module-mocks scripts/verify-quote-retention.mjs",
+    "test:checkoutstore": "node --experimental-test-module-mocks scripts/verify-checkout-store.mjs",
     "test:refusals": "node --experimental-test-module-mocks scripts/verify-refusal-visibility.mjs",
     "test:refusalstates": "npx tsx scripts/verify-refusal-states.tsx",
     "test:research": "node scripts/verify-citation-derivation.mjs && node scripts/verify-rate-consistency.mjs",
@@ -325,6 +326,7 @@
     "test:bridgecopy",
     "test:acktoken",
     "test:policystore",
-    "test:quoteretention"
+    "test:quoteretention",
+    "test:checkoutstore"
   ]
 }

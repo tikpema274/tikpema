@@ -1,0 +1,185 @@
+// _checkout.mjs — the CHECKOUT ORDER record: a merchant's request to be paid, and what happened to it.
+//
+// ═══ WHAT THIS IS, AND WHAT IT DELIBERATELY IS NOT ═══════════════════════════════════════════════
+// v1 is DIRECT settlement only (decided 2026-09-18): the buyer pays the merchant's login wallet from
+// the buyer's agent wallet through the EXISTING /api/agent-send path — same caps, same ledger, same
+// receipt shapes. Nothing in this module moves money. It records an order and the evidence that it
+// was paid. The `settlement` field exists so escrow (ERC-8183) can be added later WITHOUT a migration;
+// it is always "direct" today and nothing here branches on it.
+//
+// ⛔ A DIRECT PAYMENT CANNOT BE REVERSED by Tikpema. The pay surface says so BEFORE the seal; this
+// module has no refund path because there is none — a refund is the merchant sending it back.
+//
+// ═══ STATUS MACHINE — one write per transition, CAS-guarded, never re-opened ════════════════════
+//   open ──(txHash VERIFIED on chain)──▶ paid
+//   open ──(202: circleId, no hash)────▶ submitted ──(txHash verified later)──▶ paid
+//   open / submitted ──(expiresAt passed, read-time)──▶ expired   (derived, never written)
+// `paid` is terminal. A second "paid" is refused, not overwritten: the first hash is the receipt and
+// a later one would be a different payment for the same order — a fact to surface, not to absorb.
+// [[absence-must-never-read-as-safe]] — `submitted` is NOT paid: the panel says so.
+//
+// ═══ KEYS ══════════════════════════════════════════════════════════════════════════════════════
+//   id:<orderId>                    the record (the truth)
+//   m:<merchantLower>:<orderId>     an INDEX for the merchant's own listing (v1 writes it, lists nothing)
+// Both carry the same record. The index is a copy by design — a merchant listing must never scan the
+// whole store — and every write goes to the record FIRST; an index that lags is a stale listing, an
+// index that leads is a phantom order.
+//
+// ⚠️ READS ON THE PAY PATH ARE STRONG (per call, never store-level — a store-level option leaks into
+// writes). A cached `open` beside a fresh `paid` is a double payment invited. The handler must have
+// called connectBlobs(event) first (_blobs.mjs) or the strong read throws.
+import crypto from "node:crypto";
+import { getStore } from "@netlify/blobs";
+import { USDC_DECIMALS } from "./_amount-floor.mjs";
+
+export const CHECKOUT_STORE = "checkout-orders";
+export const ORDER_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+export const DESCRIPTION_MAX = 140;
+export const SETTLEMENT = Object.freeze({ DIRECT: "direct" });
+export const STATUS = Object.freeze({ OPEN: "open", SUBMITTED: "submitted", PAID: "paid", EXPIRED: "expired" });
+const READ_CONSISTENCY = "strong";
+
+const norm = (a) => String(a || "").toLowerCase();
+export const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+export const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
+
+/**
+ * Mint an order identifier. `o_` prefix + base36 time + 16 hex: unmistakable beside the repo's other
+ * id spaces (24-hex deploy ids, 40-hex commits, `q_` quotes), roughly sortable by eye.
+ */
+export function mintOrderId(now = Date.now()) {
+  return `o_${now.toString(36)}_${crypto.randomBytes(8).toString("hex")}`;
+}
+export const ORDER_ID_RE = /^o_[0-9a-z]{1,12}_[0-9a-f]{16}$/;
+/** A client-echoed id is either well-formed or null. Never throws. An id authorizes nothing. */
+export function safeOrderId(v) {
+  const s = typeof v === "string" ? v.trim() : "";
+  return ORDER_ID_RE.test(s) ? s : null;
+}
+
+export const orderKey = (id) => `id:${id}`;
+export const merchantKey = (merchant, id) => `m:${norm(merchant)}:${id}`;
+
+/**
+ * Build a new order record, or return `{ error }`. Pure: no store, no clock beyond `now`.
+ * - amount: parsed EXACTLY as a decimal string, at most 6 places, stored as a 6dp STRING. More than
+ *   6 places is REFUSED, not rounded: a typed price silently changed in either direction is a price
+ *   the merchant did not name (round up: the buyer pays more; floor: the merchant gets less). The
+ *   executors' Math.round (`_amount-floor.mjs`) judges what the CHAIN will see; a price is what a
+ *   person typed. Never a float on this path.
+ * - cap: an order nobody can pay is a defect at CREATE time, so the per-transaction send cap is
+ *   enforced here with the cap named, exactly as agent-send names it at pay time.
+ * - description: plain text, trimmed, bounded. Rendered as text, never HTML.
+ */
+export function buildOrder({ merchant, amountUsdc, description, capUsdc, now = Date.now() }) {
+  if (!ADDRESS_RE.test(merchant || "")) return { error: "merchant address is not a valid address" };
+  const units = parseUnits6(amountUsdc);
+  if (units === null) return { error: `amountUsdc must be a decimal number with at most ${USDC_DECIMALS} decimal places` };
+  if (units === 0n) return { error: "amountUsdc must be greater than zero" };
+  const cap = Number(capUsdc);
+  if (!Number.isFinite(cap)) return { error: "send cap unreadable — refusing to create an order" };
+  const amountStr = formatUnits6(units);
+  if (Number(amountStr) > cap) return { error: `amountUsdc exceeds the per-transaction send limit of ${cap} USDC — a link nobody can pay`, cap };
+  const desc = String(description ?? "").replace(/\s+/g, " ").trim();
+  if (!desc) return { error: "description is required — the buyer must be told what they are paying for" };
+  if (desc.length > DESCRIPTION_MAX) return { error: `description must be at most ${DESCRIPTION_MAX} characters` };
+  const id = mintOrderId(now);
+  return {
+    order: {
+      id,
+      merchant,
+      amountUsdc: amountStr,
+      description: desc,
+      settlement: SETTLEMENT.DIRECT,
+      status: STATUS.OPEN,
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + ORDER_TTL_MS).toISOString(),
+    },
+  };
+}
+
+/** Exact decimal-string → minor units. "1.5" → 1500000n; "1.2345678" → null (7 places); "1e-7",
+ *  "-1", "abc", "" → null. Numbers are stringified first so a typed number still parses exactly. */
+export function parseUnits6(v) {
+  const s = (typeof v === "number" ? String(v) : String(v ?? "")).trim();
+  const m = /^(\d+)(?:\.(\d{1,6}))?$/.exec(s);
+  if (!m) return null;
+  const whole = BigInt(m[1]);
+  const frac = BigInt((m[2] ?? "").padEnd(USDC_DECIMALS, "0"));
+  return whole * 10n ** BigInt(USDC_DECIMALS) + frac;
+}
+
+/** 6dp string from minor units — `1500000n` → "1.500000". Exact; no float. */
+export function formatUnits6(units) {
+  const s = units.toString().padStart(7, "0");
+  return `${s.slice(0, -6)}.${s.slice(-6)}`;
+}
+
+/** The status a READER should show: `expired` is derived from the clock, never written. */
+export function effectiveStatus(order, now = Date.now()) {
+  if (!order) return null;
+  if (order.status === STATUS.PAID) return STATUS.PAID;
+  if (order.expiresAt && Date.parse(order.expiresAt) <= now) return STATUS.EXPIRED;
+  return order.status;
+}
+
+/**
+ * The public view of an order — what a buyer (possibly signed out) may see. The merchant address IS
+ * shown: it is the payee, and naming the payee is the disclosure the pay surface exists to make.
+ */
+export function publicOrder(order, now = Date.now()) {
+  if (!order) return null;
+  const { id, merchant, amountUsdc, description, settlement, createdAt, expiresAt, paidTx, paidAt, circleId } = order;
+  return { id, merchant, amountUsdc, description, settlement, createdAt, expiresAt, status: effectiveStatus(order, now), paidTx: paidTx ?? null, paidAt: paidAt ?? null, circleId: circleId ?? null };
+}
+
+function store(s) { return s ?? getStore(CHECKOUT_STORE); }
+
+/** Strong read of the record. Returns { order, etag, readable }. `readable:false` ≠ absent. */
+export async function readOrder(id, s) {
+  try {
+    const res = await store(s).getWithMetadata(orderKey(id), { type: "json", consistency: READ_CONSISTENCY });
+    return { order: res?.data ?? null, etag: res?.etag ?? null, readable: true };
+  } catch {
+    return { order: null, etag: null, readable: false };
+  }
+}
+
+/** Write a NEW order: record first, then the merchant index. Refuses to overwrite an existing id. */
+export async function writeNewOrder(order, s) {
+  const st = store(s);
+  const res = await st.setJSON(orderKey(order.id), order, { onlyIfNew: true });
+  if (res?.modified === false) return { ok: false, reason: "order id already exists" };
+  await st.setJSON(merchantKey(order.merchant, order.id), order);
+  return { ok: true };
+}
+
+/**
+ * ⭐ THE ONLY STATUS TRANSITION WRITER. CAS on the etag of the record just read, so two buyers (or one
+ * buyer twice) cannot both mark the same order. Allowed: open→submitted, open→paid, submitted→paid.
+ * Everything else is refused with the reason named — including paid→paid (a second payment is a
+ * fact to surface, not to absorb) and any transition on an expired order.
+ */
+export async function transitionOrder({ id, from, to, patch, now = Date.now() }, s) {
+  const st = store(s);
+  const { order, etag, readable } = await readOrder(id, s);
+  if (!readable) return { ok: false, reason: "order store unreadable" };
+  if (!order) return { ok: false, reason: "no such order" };
+  const eff = effectiveStatus(order, now);
+  if (eff !== from) return { ok: false, reason: `order is ${eff}, not ${from}`, status: eff, order };
+  const legal = (from === STATUS.OPEN && (to === STATUS.SUBMITTED || to === STATUS.PAID)) ||
+                (from === STATUS.SUBMITTED && to === STATUS.PAID);
+  if (!legal) return { ok: false, reason: `transition ${from} → ${to} is not allowed`, status: eff, order };
+  const next = { ...order, ...patch, status: to, updatedAt: new Date(now).toISOString() };
+  try {
+    const res = etag
+      ? await st.setJSON(orderKey(id), next, { onlyIfMatch: etag })
+      : await st.setJSON(orderKey(id), next, { onlyIfNew: true });
+    if (res?.modified === false) return { ok: false, reason: "order changed under us — re-read", status: eff, order };
+  } catch (e) {
+    return { ok: false, reason: `order write failed: ${e?.message ?? e}` };
+  }
+  // Index second, best-effort: a lagging index is a stale listing, never a phantom or a lost payment.
+  try { await st.setJSON(merchantKey(order.merchant, id), next); } catch { /* record is the truth */ }
+  return { ok: true, order: next };
+}
