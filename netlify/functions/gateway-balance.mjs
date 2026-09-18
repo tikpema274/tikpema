@@ -19,14 +19,16 @@ import { GATEWAY } from "./_gateway.mjs";
 // Returns { depositor, unifiedBalanceUsdc, perChain: [{ chain, domain, usdc, ok }] }.
 // READ-ONLY: no deposit, no authorize, no spend — it cannot move money.
 
-const CHAINS = [
+// ⭐ EXPORTED (2026-09-19) so treasury-snapshot reads the SAME domains through the SAME reader — one source
+// for the Gateway read, never a copy. The handler below is unchanged.
+export const CHAINS = [
   { chain: "Arc Testnet", domain: GATEWAY.ARC_DOMAIN },
   { chain: "Base Sepolia", domain: GATEWAY.BASE_SEPOLIA_DOMAIN },
 ];
 
 // Read one domain's unified USDC for a depositor. Never throws — returns
 // { ok:false } on any failure so a single chain can't break the others.
-async function readDomain(depositor, domain) {
+export async function readDomain(depositor, domain) {
   try {
     const res = await fetch(`${GATEWAY.API_BASE}/v1/balances`, {
       method: "POST",

@@ -99,6 +99,7 @@
     "test:checkoutverify": "node scripts/verify-checkout-verify.mjs",
     "test:checkoutcopy": "npx tsx scripts/verify-checkout-copy.tsx",
     "test:treasuryplan": "node --experimental-test-module-mocks scripts/verify-treasury-plan.mjs",
+    "test:treasurysnapshot": "node scripts/verify-treasury-snapshot.mjs",
     "test:refusals": "node --experimental-test-module-mocks scripts/verify-refusal-visibility.mjs",
     "test:refusalstates": "npx tsx scripts/verify-refusal-states.tsx",
     "test:research": "node scripts/verify-citation-derivation.mjs && node scripts/verify-rate-consistency.mjs",
@@ -333,6 +334,7 @@
     "test:checkoutstore",
     "test:checkoutverify",
     "test:checkoutcopy",
-    "test:treasuryplan"
+    "test:treasuryplan",
+    "test:treasurysnapshot"
   ]
 }
