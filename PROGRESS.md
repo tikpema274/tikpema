@@ -26035,3 +26035,51 @@ dated `scripts/x402-census/` harvest, so `census:reading` on 2026-09-25 keeps it
 - **Standing rule restated: the row is a cache; the live 402 is the authority.** 325 Arc rows measures the
   INDEX, not payable endpoints. Nothing here was probed.
 Memory: `x402-directories-do-not-support-arc` (refuted for mainnet), `x402-catalog-listing-provenance`.
+
+## Deploy 8 COMPLETE — CHECKOUT v1 (direct settlement): #/sell → #/pay?order=, Pay in NAV (2026-09-18)
+
+Deploy `6aadb6016a0a4ee7d7b53989`, served tree `321e235a2cd5` (commit `d3f5739`), published 22:40:57Z.
+gate:deployed VERIFIED (published deploy `ready`, served tree + commit match, control plane == data plane, 0
+orphans). Run in T's foreground terminal. ⚠️ HEAD is `bcee3cc` (the census record, docs only, committed AFTER this
+build) — prod is one docs commit behind main by design; nothing in it is bundled.
+
+WHAT SHIPPED — seven commits `b1a3696..d3f5739`, decided 2026-09-18 (direct only; escrow + evaluator deferred with a
+`settlement:"direct"` field kept for a no-migration escrow later; merchant = any signed-in user, payTo = login
+wallet; `#/pay?order=<id>` is the 6th NAV item "Pay", `#/sell` minimal with a Dashboard card):
+- `b1a3696` `_checkout.mjs` — the order record, store `checkout-orders` (`id:<o_…>` truth + `m:<merchant>:<id>`
+  index), ONE CAS-guarded transition writer; paid terminal; submitted ≠ paid; expired derived; unreadable ≠
+  absent; amounts parsed EXACTLY, >6dp REFUSED (the borrowed minorUnitsOf rounds by design — a typed price is not
+  ours to change). 39/0.
+- `e4f03b3` `checkout-create` / `checkout-get` (PUBLIC, strong read) / `checkout-paid` + `_checkout-verify.mjs`:
+  the SERVER marks `paid` only after reading the receipt from the Arc RPC — USDC-EMITTED Transfer, from the
+  buyer's agent SCA, to the merchant, ≥ amount (🚨 Arc's 18-dp native mirror log filtered by EMITTER;
+  mutation-proven: without it 1.5 USDC reads as 1500000000000000000 units). 202 → `submitted`. 503 "unverified"
+  ≠ 409 "not a payment of this order". 21/0.
+- `ea04425` PayPanel — what / to whom / how much, the IRREVERSIBILITY LINE before the seal (mutation-proven:
+  moved below → red), SendOutcome reused (one receipt), marks paid/submitted/unverified.
+- `9abd7a4` SellPanel + "Sell something" card (internal fold 3→4); the seller told it is direct and final.
+- `f3c5b8e` NAV += Pay; routes; both routes linked (§8 pins it).
+- `388b562` two house guards caught the new code on the first test:all (130/132): `e?.message || "…"` →
+  describeError; bare catch around ensureOwnerWallet → the shared walletUnresolvableRefusal pattern.
+- `d3f5739` the Swap summary-block shape on both pages (T's preview read); every address AddressDisplay
+  (masked, click-to-expand, Copy) — AddressDisplay's own header argues against masking where the address IS the
+  content; recorded in a code comment, T's call.
+Money path: the UNCHANGED /api/agent-send (byte-identical across all seven commits). Nothing new signs.
+
+DD WINDOW — **no-window** (9th capture). ddTree `596bcd84…` unchanged, 1 probe. PREDICTED: no commit touches a
+DD_SURFACE_DIR / DD_SURFACE_FILE (checked before each commit) — observed exactly.
+DEPLOY-LOSS SWEEP: 0 new (losses 17, limbo 40, tooYoung 0).
+
+LIVE CHECK (no money): `GET /api/checkout-get?id=o_x` → 400 "a well-formed order id is required";
+`?id=<well-formed unknown>` → 404 "no such order" (the strong Blobs read works on prod); `checkout-create` /
+`checkout-paid` without a session → 401. Served bundle `assets/index-Y2exsFel.js`: NAV `pay`, PayPanel, SellPanel,
+the Sell card, the irreversibility line, the `/api/checkout-get` fetch — all PRESENT.
+
+⛔ NOT YET PROVEN: a live payment. The plan's step 3 is T's — create an order as merchant, pay it as buyer
+(small; never auto-funded), `checkout-get` shows `paid` with the hash, hash chain-verified independently, the
+merchant's login-wallet balance rises. Until then checkout is CODE ON PROD, not a capability; the 202 →
+`submitted` path is unit-proven only.
+
+GATES in-chain (T's terminal): gate:types, test:all 132/132, gate:watch, gate:rpc, build, netlify deploy --prod,
+gate:deployed VERIFIED, capture:window no-window, gate:forgery, gate:spec, gate:deployloss (0 new). Runtime logs
+and the build stamp carry this deploy's entries but are NOT committed with this note.
