@@ -572,6 +572,39 @@ section("REDESIGN — no agent wallet at all: the panel yields null, it does NOT
   check("⭐ …and renders nothing (the existing hasWallet guard)", out === "", out.slice(0, 80));
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("REDESIGN — the unified Balance CELL says what the read actually did, per state");
+{
+  // ⭐⭐ THE ELLIPSIS IS A CLAIM: "still reading". Before this pin the cell showed "…" for EVERY
+  //     non-ready state, so a FAILED read sat beside a header and badge that said "unavailable" while
+  //     the cell itself said "pending" — a softer claim than the truth. Each state is rendered and the
+  //     cell is read out of the UNIFIED row's markup (not the whole page, which also carries the
+  //     "Checking balance…" badge and the "Reading your balance…" row text).
+  const unifiedBalCell = (): string => {
+    const m = renderToStaticMarkup(<YourMoney wallet={wallet} />);
+    const row = m.slice(m.indexOf("Unified balance"));
+    const cell = row.match(/class="ym-bal">(.*?)<\/div>/);
+    return cell ? cell[1].replace(/<[^>]+>/g, "") : "<no cell>";
+  };
+  gateway = { status: "error" };
+  const errCell = unifiedBalCell();
+  check('⭐⭐ error → cell renders "unavailable" (the failed-read word), NOT the loading ellipsis',
+    errCell === "unavailable", JSON.stringify(errCell));
+  gateway = { status: "signed-out" };
+  const outCell = unifiedBalCell();
+  check('⭐ signed-out → cell renders NO_AMOUNT "—" (nothing was read), NOT the ellipsis',
+    outCell === "—", JSON.stringify(outCell));
+  gateway = { status: "loading" };
+  const loadCell = unifiedBalCell();
+  check('⭐ loading → cell renders "…" (genuinely in progress)', loadCell === "…", JSON.stringify(loadCell));
+  gateway = { status: "provisioning" };
+  const provCell = unifiedBalCell();
+  check('⭐ provisioning → cell renders "…" (genuinely in progress)', provCell === "…", JSON.stringify(provCell));
+  gateway = { status: "ready", total: "0", perChain: [] };
+  check('⭐ ready, total 0 → cell renders "0.00" (a true zero is a number)', unifiedBalCell() === "0.00", JSON.stringify(unifiedBalCell()));
+  gateway = { status: "ready", total: "7.5000", perChain: [] }; // restore
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

@@ -7,7 +7,7 @@ import AddressDisplay from "./AddressDisplay";
 import SignInPrompt from "./SignInPrompt";
 import { describeError } from "../lib/describeError";
 import { describeChainError } from "../lib/describeChainError";
-import { formatUsdc, formatUsdcShort } from "../lib/formatUsdc";
+import { formatUsdc, formatUsdcShort, NO_AMOUNT } from "../lib/formatUsdc";
 import { UB_EXIT_PROOF } from "../lib/ubExitProof";
 
 const EXPLORER = arcTestnet.blockExplorers.default.url;
@@ -36,6 +36,20 @@ function Badge({ text, warn }: { text: string; warn?: boolean }) {
       {warn ? "⚠ " : "🔒 "}
       {text}
     </span>
+  );
+}
+
+// The "Where held" cell: the holder on one line, the read-source qualifier on its OWN line beneath.
+// The qualifier is a separate BLOCK element with a real whitespace text node before it, so the
+// separation holds in the rendered layout AND in the text — textContent, copy-paste, a screen
+// reader all read "Your wallet on-chain read", never "Your walleton-chain read". (A block-displayed
+// <span> glued to the label separated the two visually but not textually.)
+function Held({ name, src }: { name: string; src: string }) {
+  return (
+    <div>
+      <div>{name}</div>{" "}
+      <div className="ym-src">{src}</div>
+    </div>
   );
 }
 
@@ -212,6 +226,22 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
 
   const eurcRaw = w.agentWallet.eurcBalance ?? null;
 
+  // The unified row's Balance cell, by the read's ACTUAL state. An ellipsis means "still reading" and
+  // nothing else: a FAILED read renders "unavailable" (the same word the header and badge use — a
+  // softer glyph there would claim the read is pending when it has failed), and a signed-out user,
+  // for whom nothing was read, gets NO_AMOUNT. Only loading / provisioning — genuinely in progress,
+  // with the row text saying which — may show "…".
+  const unifiedCell =
+    unified.status === "ready" ? (
+      balCell(p3)
+    ) : unified.status === "error" ? (
+      balCell(null)
+    ) : unified.status === "signed-out" ? (
+      <span style={{ color: "var(--muted)" }}>{NO_AMOUNT}</span>
+    ) : (
+      <span style={{ color: "var(--muted)" }}>…</span>
+    );
+
   return (
     <>
       {/* ── HEADER: label left, USDC-only Total top-right. Null in any pocket → no number. ── */}
@@ -264,7 +294,7 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
         <div className="ym-holding">
           <div className="ym-main">
             <div className="ym-asset">USDC</div>
-            <div>Your wallet<span className="ym-src">on-chain read</span></div>
+            <Held name="Your wallet" src="on-chain read" />
             <div className="ym-bal">{balCell(p1)}</div>
             <div className="ym-exit"><Badge text="You hold the key" /></div>
           </div>
@@ -313,7 +343,7 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
         <div className="ym-holding">
           <div className="ym-main">
             <div className="ym-asset">USDC</div>
-            <div>Agent's wallet<span className="ym-src">on-chain read</span></div>
+            <Held name="Agent's wallet" src="on-chain read" />
             <div className="ym-bal">{balCell(p2)}</div>
             <div className="ym-exit"><Badge text="Withdraw any time" /></div>
           </div>
@@ -371,7 +401,7 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
         <div className="ym-holding">
           <div className="ym-main">
             <div className="ym-asset">EURC</div>
-            <div>Agent's wallet<span className="ym-src">on-chain read</span></div>
+            <Held name="Agent's wallet" src="on-chain read" />
             <div className="ym-bal">{balCell(eurcRaw)}</div>
             <div className="ym-exit"><Badge text="No exit built" /></div>
           </div>
@@ -388,8 +418,8 @@ export default function YourMoney({ wallet: w }: { wallet: UnifiedWallet }) {
         <div className="ym-holding">
           <div className="ym-main">
             <div className="ym-asset">USDC</div>
-            <div>Unified balance<span className="ym-src">Circle Gateway · off-chain figure</span></div>
-            <div className="ym-bal">{unified.status === "ready" ? balCell(p3) : <span style={{ color: "var(--muted)" }}>…</span>}</div>
+            <Held name="Unified balance" src="Circle Gateway · off-chain figure" />
+            <div className="ym-bal">{unifiedCell}</div>
             <div className="ym-exit"><Badge text={unifiedBadge} warn={parked} /></div>
           </div>
           <div className="ym-actions">
