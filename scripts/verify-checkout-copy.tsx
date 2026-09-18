@@ -1,0 +1,118 @@
+// verify-checkout-copy.tsx — WHAT THE PAY SURFACE SAYS, rendered, per order state.
+//
+//   npx tsx scripts/verify-checkout-copy.tsx      (npm run test:checkoutcopy)
+//
+// ═══ THE ONE CLAIM THIS SURFACE EXISTS TO MAKE ══════════════════════════════════════════════════
+// A direct payment CANNOT be reversed by Tikpema (decided 2026-09-18: payTo = the merchant's login
+// wallet, no escrow in v1). The buyer must read that BEFORE the seal — so the line is asserted PRESENT
+// in the open state AND its position in the markup is BEFORE the seal button's. A line below the
+// button is a line read after the click. [[manual-send-confirmation-names-nothing]]
+//
+// ⚠️ RENDERED, NOT GREPPED. SSR cannot click Pay, so the post-action states are rendered through the
+// EXPORTED sub-component with crafted orders/results — the SendReviewBox / SendOutcome seam.
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { PayOrderView, PayDoor, IRREVERSIBLE_LINE } from "../src/components/PayPanel";
+
+let pass = 0, fail = 0;
+const check = (label: string, cond: boolean, detail = "") => {
+  console.log(`  ${cond ? "✅" : "❌"} ${label}${detail ? `  — ${detail}` : ""}`);
+  cond ? pass++ : fail++;
+};
+const section = (t: string) => console.log(`\n── ${t} ${"─".repeat(Math.max(0, 58 - t.length))}`);
+const strip = (h: string) => h.replace(/<[^>]*>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+
+const MERCHANT = "0x" + "ab".repeat(20);
+const AGENT = "0x" + "cd".repeat(20);
+const HASH = "0x" + "9f".repeat(32);
+const EXPL = "https://testnet.arcscan.app";
+const base = {
+  id: "o_mu7dugw0_a9f8523e2b9816f7", merchant: MERCHANT, amountUsdc: "1.500000", description: "Two coffees",
+  settlement: "direct", status: "open", createdAt: "2026-09-18T20:00:00.000Z", expiresAt: "2026-10-02T20:00:00.000Z",
+  paidTx: null, paidAt: null, circleId: null,
+};
+const wallet = (opts: { agentWallet?: any } = {}) => ({
+  address: "0x" + "77".repeat(20),
+  agentWallet: "agentWallet" in opts ? opts.agentWallet : { address: AGENT, balance: "4.000000" },
+  ensureSession: async () => "t", sendFromAgent: async () => ({}), refreshAgentWallet: async () => {},
+});
+const view = (order: any, extra: any = {}, w: any = wallet()) =>
+  renderToStaticMarkup(<PayOrderView order={order} wallet={w} paying={false} result={null} payError="" mark={null} onPay={() => {}} {...extra} />);
+
+console.log("╔══════════════════════════════════════════════════════════════════════╗");
+console.log("║  CHECKOUT PAY SURFACE — what it says, per state, rendered            ║");
+console.log("╚══════════════════════════════════════════════════════════════════════╝");
+
+section("1 — 🚨 OPEN: what, to whom, how much — and the irreversibility line ABOVE the seal");
+{
+  const m = view(base);
+  const t = strip(m);
+  check("what: the description is rendered", t.includes("Two coffees"));
+  check("to whom: the merchant address, UNTRUNCATED", t.includes(MERCHANT) && !t.includes(`${MERCHANT.slice(0, 6)}…`));
+  check("how much: the amount, 6dp, with the unit", /1\.500000 USDC/.test(t));
+  check("the agent spending-limits rail is present (same claim as SendPanel)", /spending limits apply/i.test(t));
+  const line = m.indexOf(IRREVERSIBLE_LINE);
+  const seal = m.search(/<button[^>]*class="emerald"[^>]*>Pay /);
+  check("🚨 the irreversibility line is PRESENT", line >= 0);
+  check("🚨 …and it says Tikpema cannot reverse it and a refund is the merchant's act",
+    /cannot be reversed/i.test(IRREVERSIBLE_LINE) && /merchant/i.test(IRREVERSIBLE_LINE) && /refund/i.test(IRREVERSIBLE_LINE));
+  check("🚨 …and it sits BEFORE the seal button in the markup", line >= 0 && seal > line, `line@${line} seal@${seal}`);
+  check("the seal names the amount", /Pay 1\.500000 USDC/.test(t));
+  check("no receipt, no tx link before paying", !/\/tx\//.test(m));
+}
+
+section("2 — OPEN without an agent wallet: the order is READABLE, the seal is not offered");
+{
+  const m = view(base, {}, wallet({ agentWallet: null }));
+  const t = strip(m);
+  check("⭐ door not wall: description, merchant and amount still render", t.includes("Two coffees") && t.includes(MERCHANT) && /1\.500000/.test(t));
+  check("no seal button", !/class="emerald"[^>]*>Pay /.test(m));
+  check("points at Wallet to set one up", /Set up your wallet/i.test(t) && /Wallet/.test(t));
+}
+
+section("3 — PAID: receipt with the hash and explorer link; no seal");
+{
+  const paid = { ...base, status: "paid", paidTx: HASH, paidAt: "2026-09-18T20:05:00.000Z" };
+  const m = view(paid);
+  const t = strip(m);
+  check("says paid", /\bPaid\b/.test(t));
+  check("⭐ shows the hash and an explorer link to THAT hash", t.includes(HASH) && m.includes(`href="${EXPL}/tx/${HASH}"`));
+  check("no seal button on a paid order", !/class="emerald"[^>]*>Pay /.test(m));
+  check("no irreversibility warning on a paid order (nothing left to decide)", !m.includes(IRREVERSIBLE_LINE));
+}
+
+section("4 — SUBMITTED is NOT paid; EXPIRED offers nothing");
+{
+  const sub = view({ ...base, status: "submitted", circleId: "circle-1" });
+  const st = strip(sub);
+  check("🚨 submitted does NOT say paid or confirmed", !/\bpaid\b/i.test(st.replace(/not (yet )?paid/i, "")) && !/confirmed/i.test(st));
+  check("…says submitted / not confirmed yet, names the Circle id, no tx link", /submitted/i.test(st) && st.includes("circle-1") && !/\/tx\//.test(sub));
+  check("…no seal (paying again would be a second payment)", !/class="emerald"[^>]*>Pay /.test(sub));
+  const exp = view({ ...base, status: "expired" });
+  const et = strip(exp);
+  check("expired says so and offers no seal", /expired/i.test(et) && !/class="emerald"[^>]*>Pay /.test(exp));
+}
+
+section("5 — the result of Pay renders through SendOutcome (200 / 202 / error), plus the mark");
+{
+  const ok = view(base, { result: { txHash: HASH }, mark: { status: "paid", paidTx: HASH } });
+  check("200 → SendOutcome receipt (confirmed on Arc + tx link) and order marked paid", /confirmed on Arc/.test(strip(ok)) && ok.includes(`/tx/${HASH}`) && /marked paid|Paid/.test(strip(ok)));
+  const pend = view(base, { result: { pending: true, txId: "circle-9" }, mark: { status: "submitted" } });
+  check("202 → submitted copy, agent-wallet address link, never 'confirmed', no tx link", /has not landed on Arc yet/.test(strip(pend)) && pend.includes(`/address/${AGENT}`) && !/confirmed/i.test(strip(pend)) && !/\/tx\//.test(pend));
+  const err = view(base, { payError: "Per-transaction cap is 5 USDC" });
+  check("error → the error only, no receipt", strip(err).includes("Per-transaction cap is 5 USDC") && !/\/tx\//.test(err) && !/confirmed/i.test(strip(err)));
+  const unv = view(base, { result: { txHash: HASH }, mark: { unverified: "receipt not available yet" } });
+  check("⭐ paid on chain but the mark is UNVERIFIED → says so, keeps the hash, does not say the order is paid", /unverified|could not yet verify/i.test(strip(unv)) && strip(unv).includes(HASH) && !/order (is )?paid/i.test(strip(unv)));
+}
+
+section("6 — the DOOR (no order in the link)");
+{
+  const m = renderToStaticMarkup(<PayDoor />);
+  const t = strip(m);
+  check("explains what a checkout link is and how to open one", /checkout link/i.test(t));
+  check("⭐ links Sell (every live route linked)", /#\/sell/.test(m) || /Sell something/.test(t));
+}
+
+console.log(`\n${"═".repeat(72)}`);
+if (fail) { console.log(`❌ ${fail} failed, ${pass} passed.\n`); process.exit(1); }
+console.log(`✅ ALL GREEN   pass ${pass} / fail 0\n`);

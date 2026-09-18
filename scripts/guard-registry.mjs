@@ -126,6 +126,10 @@ export const COMPONENTS = {
   // contain "limits apply", "cap", "ceiling" or "enforced", so a money claim written in those words
   // is invisible to it. The declaration was corrected by hand; the detector still cannot see it.
   SendPanel:      { suite: "verify-send-copy.tsx" },
+  // ⛔ The checkout PAY surface (2026-09-18). Two money claims: "agent spending limits apply" (it IS
+  // the agent-send path) and the one it exists for — a direct payment CANNOT be reversed by Tikpema,
+  // stated BEFORE the seal. Its suite asserts the line is present AND precedes the seal in the markup.
+  PayPanel:       { suite: "verify-checkout-copy.tsx" },
   SignInPrompt:   { noClaims: true },
   // 🚨 WAS `noClaims: true`, AND IT WENT STALE THE MOMENT IT GREW A CAP SENTENCE (2026-08-30) —
   // the SECOND time this exact staleness has happened, after SendPanel above. It now says swaps run
