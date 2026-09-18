@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import { formatUsdc } from "../lib/formatUsdc";
 import { describeError } from "../lib/describeError";
+import AddressDisplay from "./AddressDisplay";
 import type { PublicOrder } from "./PayPanel";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
@@ -106,11 +107,8 @@ export default function SellPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         </div>
       ) : (
         <>
-          {/* ⛔ THE SELLER'S SIDE OF THE IRREVERSIBILITY CLAIM, stated where the link is made. */}
-          <div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>
-            <b>Payments arrive directly in your wallet</b> — <span className="mono" style={{ wordBreak: "break-all" }}>{address}</span>.
-            There is no escrow: Tikpema does not hold the money and cannot reverse a payment. If you owe a buyer a
-            refund, that is you sending it back.
+          <div className="status row" style={{ marginTop: 0, marginBottom: 18, gap: 8, alignItems: "baseline" }}>
+            <span>Paid to</span> <AddressDisplay address={address} />
           </div>
 
           <div className="row" style={{ marginTop: 8, alignItems: "center", gap: 8 }}>
@@ -137,11 +135,22 @@ export default function SellPanel({ wallet: w }: { wallet: UnifiedWallet }) {
               style={{ width: "100%", maxWidth: 520 }}
             />
           </div>
-          <div className="row" style={{ marginTop: 8 }}>
-            <button className="emerald" disabled={busy || !amount || !description.trim()} onClick={create}>
-              {busy ? "Creating…" : "Create checkout link"}
-            </button>
+          {/* ⭐ THE SUMMARY BLOCK (the Swap/Pay shape): what the buyer will see, the mechanic, and the
+              seller's side of the irreversibility claim bordered off as a hazard — stated where the link
+              is made, above the seal. The payee address is UNTRUNCATED here. */}
+          <div className="summary-block">
+            <div className="summary-row"><span>Buyer sees</span><b>{description.trim() || "—"}</b></div>
+            <div className="summary-row"><span>Amount</span><b className="mono">{amount ? `${amount} USDC` : "—"}</b></div>
+            <div className="summary-row"><span>Paid to</span><AddressDisplay address={address} /></div>
+            <div className="summary-row"><span>Settlement</span><span>direct — the buyer's agent wallet pays your wallet on Arc; no escrow</span></div>
+            <div className="summary-hazard">
+              <b>Payments arrive directly in your wallet and cannot be reversed by Tikpema.</b> Tikpema does not hold
+              the money. If you owe a buyer a refund, that is you sending it back.
+            </div>
           </div>
+          <button className="emerald btn-wide" disabled={busy || !amount || !description.trim()} onClick={create}>
+            {busy ? "Creating…" : "Create checkout link"}
+          </button>
           {error && <div className="status" style={{ color: "var(--warn)" }}>{error}</div>}
 
           {created && (

@@ -4,6 +4,7 @@ import { describeError } from "../lib/describeError";
 import { formatUsdc } from "../lib/formatUsdc";
 import { arcTestnet } from "../config/chain";
 import { SendOutcome, type SendResult } from "./SendPanel";
+import AddressDisplay from "./AddressDisplay";
 
 const EXPLORER = arcTestnet.blockExplorers.default.url;
 type UnifiedWallet = ReturnType<typeof useWallet>;
@@ -109,22 +110,37 @@ export function PayOrderView({
     <div className="plane">
       <div className="panel-eyebrow">Pay</div>
       <h2>Pay a checkout link</h2>
+      <div className="sub">
+        Someone made this link to collect a payment. Read what it is for, who receives it and how much, then
+        settle it from your agent wallet — gasless on Arc.
+      </div>
 
-      {/* WHAT · TO WHOM · HOW MUCH — the disclosure, untruncated. The merchant address is the payee;
-          an ellipsis would hide exactly the characters a substituted link would change. */}
-      <div className="status" style={{ marginBottom: 6 }}>
-        <div style={{ fontSize: "0.72rem", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--muted)" }}>For</div>
-        <div style={{ fontSize: "1.05rem", color: "var(--paper)" }}>{order.description}</div>
-      </div>
-      <div className="status" style={{ marginTop: 0, marginBottom: 6 }}>
-        <div style={{ fontSize: "0.72rem", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--muted)" }}>To</div>
-        <div className="mono" style={{ wordBreak: "break-all" }}>{order.merchant}</div>
-      </div>
-      <div className="status" style={{ marginTop: 0, marginBottom: 12 }}>
-        <div style={{ fontSize: "0.72rem", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--muted)" }}>Amount</div>
-        <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "var(--paper)" }}>
-          {amount} <span style={{ fontSize: "0.8rem", color: "var(--muted)", fontWeight: 400 }}>USDC</span>
+      {open && w.agentWallet && (
+        <div className="status row" style={{ marginTop: 0, marginBottom: 18, gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+          <span>Paying from</span> <AddressDisplay address={agentAddress} />
+          {w.agentWallet.balance != null ? <span>· USDC <span className="mono">{formatUsdc(w.agentWallet.balance)}</span></span> : null}
         </div>
+      )}
+
+      {/* ⭐ THE SUMMARY BLOCK — the SwapPanel shape: what / to whom / how much as rows, the
+          mechanic rows beneath, the hazard bordered off inside the block, then the seal. The merchant
+          address is the payee and stays UNTRUNCATED here (an ellipsis hides exactly the characters a
+          substituted link would change); the "Paying from" line above may shorten. */}
+      <div className="summary-block">
+        <div className="summary-row"><span>For</span><b>{order.description}</b></div>
+        {/* Masked by default with click-to-expand + Copy (T, 2026-09-18). ⚠️ AddressDisplay's own header
+            says masking is wrong where the address IS the content; here the payee is the disclosure, so
+            the full address stays ONE TAP away and Copy always copies the full one. */}
+        <div className="summary-row"><span>To</span><AddressDisplay address={order.merchant} /></div>
+        <div className="summary-row"><span>Amount</span><b className="mono">{amount} USDC</b></div>
+        {open && w.agentWallet && (
+          <>
+            {/* Same claim as SendPanel's rail: this IS the agent send path. */}
+            <div className="summary-row"><span>Signed by</span><span>a server key, from your agent wallet — agent spending limits apply (per-transaction cap and daily ceiling, enforced on the server)</span></div>
+            {/* ⛔ BEFORE THE SEAL. See IRREVERSIBLE_LINE. A hazard, not a value — bordered off. */}
+            <div className="summary-hazard"><b>Cannot be undone.</b> {IRREVERSIBLE_LINE}</div>
+          </>
+        )}
       </div>
 
       {order.status === "paid" && (
@@ -164,26 +180,9 @@ export function PayOrderView({
       )}
 
       {open && w.agentWallet && (
-        <>
-          {/* Same claim as SendPanel's rail, same colour: this IS the agent send path. */}
-          <Status tone="success">
-            <b>Agent spending limits apply here.</b> This pays from your agent wallet, so the per-transaction cap and
-            the daily ceiling are enforced on the server. If you go over, the error names the exact limit.
-          </Status>
-          {/* ⛔ BEFORE THE SEAL. See IRREVERSIBLE_LINE. */}
-          <Status tone="warn">
-            <b>Cannot be undone.</b> {IRREVERSIBLE_LINE}
-          </Status>
-          <div className="status" style={{ marginTop: 0 }}>
-            Paying from <span className="mono" style={{ wordBreak: "break-all" }}>{agentAddress}</span>
-            {w.agentWallet.balance != null ? <> · balance <span className="mono">{formatUsdc(w.agentWallet.balance)}</span> USDC</> : null}
-          </div>
-          <div className="row" style={{ marginTop: 8 }}>
-            <button className="emerald" disabled={paying || !!result} onClick={onPay}>
-              {paying ? "Paying…" : `Pay ${amount} USDC`}
-            </button>
-          </div>
-        </>
+        <button className="emerald btn-wide" disabled={paying || !!result} onClick={onPay}>
+          {paying ? "Paying…" : `Pay ${amount} USDC`}
+        </button>
       )}
 
       {/* The outcome of the send, exactly as the Send page renders it — one receipt implementation. */}

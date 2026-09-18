@@ -49,11 +49,14 @@ section("1 — 🚨 OPEN: what, to whom, how much — and the irreversibility li
   const m = view(base);
   const t = strip(m);
   check("what: the description is rendered", t.includes("Two coffees"));
-  check("to whom: the merchant address, UNTRUNCATED", t.includes(MERCHANT) && !t.includes(`${MERCHANT.slice(0, 6)}…`));
+  // ⭐ Masked by default (T, 2026-09-18) via AddressDisplay: 0xabab…abab shown, click expands to the full
+  //    address, Copy copies the full one. The full address is therefore ONE TAP away, never absent.
+  const masked = `${MERCHANT.slice(0, 6)}…${MERCHANT.slice(-4)}`;
+  check("to whom: the merchant address, masked by default, with click-to-expand + Copy", t.includes(masked) && /Click to show full address/.test(m) && />Copy</.test(m));
   check("how much: the amount, 6dp, with the unit", /1\.500000 USDC/.test(t));
   check("the agent spending-limits rail is present (same claim as SendPanel)", /spending limits apply/i.test(t));
   const line = m.indexOf(IRREVERSIBLE_LINE);
-  const seal = m.search(/<button[^>]*class="emerald"[^>]*>Pay /);
+  const seal = m.search(/<button[^>]*class="emerald[^"]*"[^>]*>Pay /);
   check("🚨 the irreversibility line is PRESENT", line >= 0);
   check("🚨 …and it says Tikpema cannot reverse it and a refund is the merchant's act",
     /cannot be reversed/i.test(IRREVERSIBLE_LINE) && /merchant/i.test(IRREVERSIBLE_LINE) && /refund/i.test(IRREVERSIBLE_LINE));
@@ -66,8 +69,8 @@ section("2 — OPEN without an agent wallet: the order is READABLE, the seal is 
 {
   const m = view(base, {}, wallet({ agentWallet: null }));
   const t = strip(m);
-  check("⭐ door not wall: description, merchant and amount still render", t.includes("Two coffees") && t.includes(MERCHANT) && /1\.500000/.test(t));
-  check("no seal button", !/class="emerald"[^>]*>Pay /.test(m));
+  check("⭐ door not wall: description, merchant (masked, expandable) and amount still render", t.includes("Two coffees") && t.includes(`${MERCHANT.slice(0, 6)}…${MERCHANT.slice(-4)}`) && /1\.500000/.test(t));
+  check("no seal button", !/class="emerald[^"]*"[^>]*>Pay /.test(m));
   check("points at Wallet to set one up", /Set up your wallet/i.test(t) && /Wallet/.test(t));
 }
 
@@ -78,7 +81,7 @@ section("3 — PAID: receipt with the hash and explorer link; no seal");
   const t = strip(m);
   check("says paid", /\bPaid\b/.test(t));
   check("⭐ shows the hash and an explorer link to THAT hash", t.includes(HASH) && m.includes(`href="${EXPL}/tx/${HASH}"`));
-  check("no seal button on a paid order", !/class="emerald"[^>]*>Pay /.test(m));
+  check("no seal button on a paid order", !/class="emerald[^"]*"[^>]*>Pay /.test(m));
   check("no irreversibility warning on a paid order (nothing left to decide)", !m.includes(IRREVERSIBLE_LINE));
 }
 
@@ -88,10 +91,10 @@ section("4 — SUBMITTED is NOT paid; EXPIRED offers nothing");
   const st = strip(sub);
   check("🚨 submitted does NOT say paid or confirmed", !/\bpaid\b/i.test(st.replace(/not (yet )?paid/i, "")) && !/confirmed/i.test(st));
   check("…says submitted / not confirmed yet, names the Circle id, no tx link", /submitted/i.test(st) && st.includes("circle-1") && !/\/tx\//.test(sub));
-  check("…no seal (paying again would be a second payment)", !/class="emerald"[^>]*>Pay /.test(sub));
+  check("…no seal (paying again would be a second payment)", !/class="emerald[^"]*"[^>]*>Pay /.test(sub));
   const exp = view({ ...base, status: "expired" });
   const et = strip(exp);
-  check("expired says so and offers no seal", /expired/i.test(et) && !/class="emerald"[^>]*>Pay /.test(exp));
+  check("expired says so and offers no seal", /expired/i.test(et) && !/class="emerald[^"]*"[^>]*>Pay /.test(exp));
 }
 
 section("5 — the result of Pay renders through SendOutcome (200 / 202 / error), plus the mark");
@@ -119,7 +122,7 @@ section("7 — SELL: the merchant is told the money comes straight to their logi
   const w: any = { address: MERCHANT, agentWallet: { address: AGENT }, ensureSession: async () => "t", isAuthenticated: true };
   const m = renderToStaticMarkup(<SellPanel wallet={w} />);
   const t = strip(m);
-  check("names the payee: the merchant's own (login) wallet address, untruncated", t.includes(MERCHANT));
+  check("names the payee: the merchant's own (login) wallet, masked with click-to-expand + Copy", t.includes(`${MERCHANT.slice(0, 6)}…${MERCHANT.slice(-4)}`) && /Click to show full address/.test(m));
   check("⭐ says payments arrive DIRECTLY and a refund is the merchant sending it back", /directly/i.test(t) && /refund/i.test(t) && /send(ing)? it back/i.test(t));
   check("has an amount and a description field and a Create control", /Amount/.test(t) && /What is it for|description/i.test(t) && /Create checkout link/.test(t));
   const out = renderToStaticMarkup(<SellResult origin="https://app.tikpema.xyz" order={base as any} path={`/#/pay?order=${base.id}`} />);
@@ -128,7 +131,7 @@ section("7 — SELL: the merchant is told the money comes straight to their logi
   check("checkoutLink composes exactly that", checkoutLink("https://app.tikpema.xyz", base.id) === `https://app.tikpema.xyz/#/pay?order=${base.id}`);
   check("…and restates what the buyer will see: description, amount", ot.includes("Two coffees") && /1\.500000 USDC/.test(ot));
   const signedOut = strip(renderToStaticMarkup(<SellPanel wallet={{ ...w, address: null } as any} />));
-  check("signed out → no address, points at Wallet, no Create control", !signedOut.includes(MERCHANT) && /Wallet/.test(signedOut) && !/Create checkout link/.test(signedOut));
+  check("signed out → no address, points at Wallet, no Create control", !signedOut.includes(MERCHANT.slice(0, 6)) && /Wallet/.test(signedOut) && !/Create checkout link/.test(signedOut));
 }
 
 section("8 — ⛔ BOTH ROUTES ARE LINKED: Pay is a NAV item, Sell has a Dashboard card (the #/dca lesson)");
