@@ -25948,3 +25948,51 @@ id. Why disarmed (`:95-120`): the only scheduled function that can WIDEN a cap; 
 durable `observed:*` count on the post-finding-A population is non-zero, (2) retire if still zero on
 **2026-11-19**. ⚠️ Mainnet may arrive first; a zero count on testnet says nothing about mainnet failure rates —
 read the count, never arm on argument.
+
+## Deploy 7 COMPLETE — SendPanel receipt (hash + explorer link; honest 202) + txHash scope + mainnet index (2026-09-18)
+
+Deploy `6aad979456716102ccdbdbf1`, served tree `b113e7aba128` (main HEAD `aaa0b94`), published 20:22:05Z.
+Prod = main HEAD; gate:deployed VERIFIED (published deploy `ready`, served tree + commit match, control
+plane == data plane, 0 orphans among the 25 deploys newer than it). Run in T's foreground terminal.
+
+WHAT IS NEW IN THIS DEPLOY (vs Deploy 6, d0c1f4f): three commits —
+- `8b2edb7` — **SendPanel renders a receipt.** It used to collapse /api/agent-send's answer to
+  "Sent N USDC to 0x1234…abcd" and drop the `txHash` the server already returned. Two success shapes
+  exist and only one carries a hash, so the exported `SendOutcome` renders by shape:
+  · 200 `{txHash, tx}` → "Sent N USDC to <full address> ✓ — confirmed on Arc. view the transfer ↗"
+    (explorer link to THAT hash, hash shown; recipient UNTRUNCATED, ManualSendPanel's reasoning).
+  · 202 `{pending, txId}` → "Submitted … Circle accepted it but it has not landed on Arc yet, so there is
+    no transaction hash to show. Circle id … When it lands it will appear in your agent wallet's
+    transaction list — view the wallet on Arcscan ↗ — and in the balance on the Wallet page." The link is
+    the agent wallet's explorer ADDRESS page (a page that exists now), never an invented tx link, and the
+    word "confirmed" is deliberately absent. Replaced "check before sending again", which named no way to
+    check (the Circle id is a dead end for the user — see the scope below).
+  · failure → the error only, no receipt · idle → nothing.
+  verify-send-copy §9: 18 checks, RED recorded at both steps (import failure — no receipt component
+  existed; then 66/4 on the address-page claims against the old copy), GREEN 70/0. 400px with a full
+  42-char address wraps, no overflow. Prerequisite for checkout's PayPanel.
+- `c523d44` — docs only: `## 2026-09-18 — A 202 SEND NEVER RESOLVES TO A HASH` — the trace (the sweep
+  keeps only `state` from getTransaction and discards `data.transaction.txHash`; nothing maps txId → hash)
+  and the four-step scope, not built; plus the REVERSALS_ARMED=false consequence (a terminal-FAILED send
+  stays charged against the day ceiling until UTC midnight, no manual release; review 2026-11-19, mainnet
+  may arrive first).
+- `aaa0b94` — docs only: `docs/mainnet-list.md`, the before-mainnet INDEX — pointers only, detail at the
+  pointers; seeded with the two items above, five earlier PROGRESS.md mainnet sections, and the compliance
+  memory note.
+
+DD WINDOW — **no-window** (8th capture). ddTree `596bcd84…` → `596bcd84…`, `rotated:false`, 1 probe, exit 0.
+PREDICTED: none of the three commits touches a DD_SURFACE_DIR / DD_SURFACE_FILE (checked against
+stamp-build.mjs before commit) → no rotation, no deposit-refusal window — observed exactly.
+
+DEPLOY-LOSS SWEEP (gate-new, 583 scanned, exhausted): **0 new losses**; losses 17, limbo 40, tooYoung 0.
+
+LIVE CHECK (bundle-level — #/send is behind the agent-wallet gate, so this is the served JS
+`assets/index-7qlvbs7b.js` fetched after publish, not a DOM read): "confirmed on Arc" + `/tx/` link
+PRESENT; 202 copy "has not landed on Arc yet" + "view the wallet on Arcscan" + `/address/` href PRESENT;
+old prose confirm and "check before sending again" ABSENT.
+
+GATES in-chain (T's terminal): gate:types, test:all, gate:watch, gate:rpc, build, netlify deploy --prod,
+gate:deployed VERIFIED, capture:window no-window, gate:forgery, gate:spec, gate:deployloss (0 new).
+Pre-commit on the final tree: gate:types clean, test:all 129/129 (8.1 min), verify-send-copy 70/0.
+Runtime logs (dd-refusal-window-log.jsonl, deploy-loss-log.jsonl) and the build stamp carry this deploy's
+entries but are NOT committed with this note.
