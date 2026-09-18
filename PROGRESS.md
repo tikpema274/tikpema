@@ -25910,3 +25910,41 @@ gate:deployed VERIFIED, capture:window no-window, gate:forgery, gate:spec, gate:
 above). Pre-commit on the final tree: gate:types clean, test:all 129/129 (9.2 min), verify-unified-
 balance-copy 93/0. Runtime logs (dd-refusal-window-log.jsonl, deploy-loss-log.jsonl) and the build
 stamp carry this deploy's entries but are NOT committed with this note.
+
+## 2026-09-18 — A 202 SEND NEVER RESOLVES TO A HASH; the sweep discards the txHash Circle returns (scope, not built)
+
+Traced read-only while shipping the SendPanel receipt (`8b2edb7`). `/api/agent-send` answers **202
+`{pending, txId}`** when Circle accepted but did not confirm within the 60 s wait (`agent-send.mjs:157-173`),
+and that Circle id is a dead end for the user:
+- Server: charge ledgered `confirmation:"submitted"` + `circleId` (`agent-send.mjs:171`); `budget-sweep-cron`
+  (`*/30`, `netlify.toml:529`) resolves it via `getTransaction` (`budget-sweep.mjs:196-205`) and **keeps only
+  `state`**; `markChargeResolved` (`_budget.mjs:1130-1146`) persists `outcome`, `reason`, `observedAt` — no hash.
+- ⭐ Circle's response DOES carry it: `data.transaction.txHash` — `_circle.mjs:57` returns it on COMPLETE, `:76`
+  reads it on revert. It is thrown away one line after it arrives.
+- Client: `SendPanel` polls nothing; `useWallet.sendFromAgent` (`useWallet.ts:342-355`) returns the body as-is;
+  no endpoint maps `txId → txHash`; no activity view lists agent sends.
+Since `8b2edb7` the 202 receipt says so (no invented tx link, never "confirmed") and links the agent wallet's
+explorer ADDRESS page, where the transfer lists once it lands.
+
+FOUR-STEP SCOPE (not built):
+1. Capture — `budget-sweep.mjs:205` also read `data.transaction.txHash`; pass it to `markChargeResolved` as an
+   optional `txHash` on the `resolution` audit entry (one field in `_budget.mjs:1130-1146`; the audit reader
+   ignores unknown fields).
+2. Read — a session-authed endpoint that, given `circleId`, returns the resolution's `outcome`/`txHash` (audit
+   log keyed by owner + day, so bounded) — OR a direct `getTransaction` read from that endpoint, the shape the
+   DCA robust-path brief already designed (direct Circle id → getTransaction), which removes the sweep latency.
+3. Client — `SendPanel` keeps the 202's `txId`, polls the read (30 s, bounded, like the balance poll), swaps the
+   pending block for the 200 receipt when a hash arrives.
+4. Latency floor via the sweep: `*/30` + `RESOLVE_AFTER_MS` 30 m ⇒ 30–60 min after submit — honest only if the
+   copy says so; (2)'s direct read removes it.
+
+ADJACENT, SAME TRACE — `REVERSALS_ARMED = false` (`budget-sweep.mjs:120`, set in `459f3f3` 2026-08-21): on
+terminal FAILED/CANCELLED/DENIED the sweep takes the disarmed branch (`:214-228`) — writes `observed:<circleId>`,
+increments `wouldReverse`, deliberately does NOT `markChargeResolved`. **Consequence today: a 202 send that
+Circle later reports FAILED stays charged against the day ceiling until UTC midnight. Manual release: NONE for
+sends** — `reverseAgentSpend`/`reverseChargeById` are reached only from the disarmed sweep, `dca-tick.mjs:404`
+and `job-swap-receipt-background.mjs:190`; no endpoint, script or admin route reverses an agent-send charge by
+id. Why disarmed (`:95-120`): the only scheduled function that can WIDEN a cap; flip condition (1) arm when the
+durable `observed:*` count on the post-finding-A population is non-zero, (2) retire if still zero on
+**2026-11-19**. ⚠️ Mainnet may arrive first; a zero count on testnet says nothing about mainnet failure rates —
+read the count, never arm on argument.
