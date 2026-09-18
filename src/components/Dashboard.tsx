@@ -183,7 +183,7 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
         id="internal"
         eyebrow="Move money between your accounts"
         consequence="Nothing leaves you."
-        count={3}
+        count={4}
       >
         {/* ⚠️ The Wallet-page pointer is SUPPLEMENTARY and sits in the body, not the summary —
             partly because it is detail rather than consequence, and partly because a <button>
@@ -220,6 +220,13 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
           <ConsequenceCard title="Sell something" onClick={() => go("sell")}>
               A checkout link with what and how much. <span style={{ color: "var(--warn)" }}>Paid
               straight to your wallet</span> — no escrow, so a refund is you sending it back.
+            </ConsequenceCard>
+          {/* ⭐ TREASURY — every pocket of your USDC across chains, targets, and PROPOSED moves. In THIS
+              group because it moves nothing itself: each proposal is confirmed on Unified or Bridge, where
+              the caps and the fee quote already live. The card is the only way in (nav-less by decision). */}
+          <ConsequenceCard title="Treasury" onClick={() => go("treasury")}>
+              Your USDC across chains in one table, with targets. <span style={{ color: "var(--warn)" }}>Proposes
+              moves, moves nothing</span> — each one is confirmed on its own page.
             </ConsequenceCard>
         </div>
       </FoldSection>

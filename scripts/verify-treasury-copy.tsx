@@ -102,6 +102,16 @@ section("6 — states: signed-out door, loading, unreadable snapshot");
   check("unreadable snapshot → says it could not be read and nothing moved", /could not be read/i.test(unr) && /nothing (was )?moved/i.test(unr));
 }
 
+section("7 — ⛔ the route is LINKED: Dashboard card + App route (the #/dca lesson)");
+{
+  const { readFileSync } = await import("node:fs");
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const dash = readFileSync(new URL("../src/components/Dashboard.tsx", import.meta.url), "utf8");
+  check("the route resolves", app.includes('case "treasury"'));
+  check("⭐ the Dashboard card is the way in", dash.includes('go("treasury")'));
+  check("…and it is NOT a NAV item (by decision — the nav stays at six)", !/id:\s*"treasury"/.test(app.match(/const NAV = \[([\s\S]*?)\];/)?.[1] ?? ""));
+}
+
 console.log(`\n${"═".repeat(72)}`);
 if (fail) { console.log(`❌ ${fail} failed, ${pass} passed.\n`); process.exit(1); }
 console.log(`✅ ALL GREEN   pass ${pass} / fail 0\n`);

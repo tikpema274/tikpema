@@ -20,6 +20,7 @@ import Dashboard from "./components/Dashboard";
 import ReceivePanel from "./components/ReceivePanel";
 import PayPanel from "./components/PayPanel";
 import SellPanel from "./components/SellPanel";
+import TreasuryPanel from "./components/TreasuryPanel";
 import { useWallet } from "./wallet/useWallet";
 
 // Multi-page console. ONE useWallet() instance lives at the shell and is passed
@@ -107,6 +108,12 @@ export default function App() {
       break;
     case "sell":
       page = <SellPanel wallet={wallet} />;
+      break;
+    // ⭐ TREASURY (2026-09-19): per-user pockets across chains, targets, PROPOSED moves. Nav-less by
+    // decision — reached from the Dashboard "Treasury" card (money between your own accounts). It moves
+    // nothing; each proposal hands off to #/unified or #/bridge with a prefill.
+    case "treasury":
+      page = <TreasuryPanel wallet={wallet} />;
       break;
     // Reached via the AI Agent "Quick actions" Swap card, not the nav (like
     // #/nanopay) — Swap stays a sub-action of AI Agent, so the 5-item nav (Send is
