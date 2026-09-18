@@ -130,6 +130,9 @@ export const COMPONENTS = {
   // the agent-send path) and the one it exists for — a direct payment CANNOT be reversed by Tikpema,
   // stated BEFORE the seal. Its suite asserts the line is present AND precedes the seal in the markup.
   PayPanel:       { suite: "verify-checkout-copy.tsx" },
+  // ⛔ The checkout SELL surface (2026-09-18): tells the merchant payments arrive DIRECTLY in their
+  // login wallet, no escrow, no reversal by Tikpema, a refund is them sending it back. Same suite.
+  SellPanel:      { suite: "verify-checkout-copy.tsx" },
   SignInPrompt:   { noClaims: true },
   // 🚨 WAS `noClaims: true`, AND IT WENT STALE THE MOMENT IT GREW A CAP SENTENCE (2026-08-30) —
   // the SECOND time this exact staleness has happened, after SendPanel above. It now says swaps run

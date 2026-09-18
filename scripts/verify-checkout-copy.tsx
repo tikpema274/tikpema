@@ -13,6 +13,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PayOrderView, PayDoor, IRREVERSIBLE_LINE } from "../src/components/PayPanel";
+import SellPanel, { SellResult, checkoutLink } from "../src/components/SellPanel";
 
 let pass = 0, fail = 0;
 const check = (label: string, cond: boolean, detail = "") => {
@@ -111,6 +112,23 @@ section("6 — the DOOR (no order in the link)");
   const t = strip(m);
   check("explains what a checkout link is and how to open one", /checkout link/i.test(t));
   check("⭐ links Sell (every live route linked)", /#\/sell/.test(m) || /Sell something/.test(t));
+}
+
+section("7 — SELL: the merchant is told the money comes straight to their login wallet, and it's final");
+{
+  const w: any = { address: MERCHANT, agentWallet: { address: AGENT }, ensureSession: async () => "t", isAuthenticated: true };
+  const m = renderToStaticMarkup(<SellPanel wallet={w} />);
+  const t = strip(m);
+  check("names the payee: the merchant's own (login) wallet address, untruncated", t.includes(MERCHANT));
+  check("⭐ says payments arrive DIRECTLY and a refund is the merchant sending it back", /directly/i.test(t) && /refund/i.test(t) && /send(ing)? it back/i.test(t));
+  check("has an amount and a description field and a Create control", /Amount/.test(t) && /What is it for|description/i.test(t) && /Create checkout link/.test(t));
+  const out = renderToStaticMarkup(<SellResult origin="https://app.tikpema.xyz" order={base as any} path={`/#/pay?order=${base.id}`} />);
+  const ot = strip(out);
+  check("⭐ the produced link is origin + /#/pay?order=<id>", ot.includes(`https://app.tikpema.xyz/#/pay?order=${base.id}`));
+  check("checkoutLink composes exactly that", checkoutLink("https://app.tikpema.xyz", base.id) === `https://app.tikpema.xyz/#/pay?order=${base.id}`);
+  check("…and restates what the buyer will see: description, amount", ot.includes("Two coffees") && /1\.500000 USDC/.test(ot));
+  const signedOut = strip(renderToStaticMarkup(<SellPanel wallet={{ ...w, address: null } as any} />));
+  check("signed out → no address, points at Wallet, no Create control", !signedOut.includes(MERCHANT) && /Wallet/.test(signedOut) && !/Create checkout link/.test(signedOut));
 }
 
 console.log(`\n${"═".repeat(72)}`);

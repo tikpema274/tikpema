@@ -183,7 +183,7 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
         id="internal"
         eyebrow="Move money between your accounts"
         consequence="Nothing leaves you."
-        count={2}
+        count={3}
       >
         {/* ⚠️ The Wallet-page pointer is SUPPLEMENTARY and sits in the body, not the summary —
             partly because it is detail rather than consequence, and partly because a <button>
@@ -212,6 +212,14 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
           <ConsequenceCard title="Receive" onClick={() => go("receive")}>
               Your address and a QR to scan. <span style={{ color: "var(--warn)" }}>USDC on Arc
               only</span> — from another chain it will not arrive.
+            </ConsequenceCard>
+          {/* ⭐ SELL — a checkout link: "pay ME this much for THIS". In THIS group because money arriving
+              is not money leaving. The buyer's side (#/pay) is a NAV item; this card is the seller's
+              door, so both live routes are linked (the #/dca lesson). Direct to your wallet, no escrow,
+              no reversal by us — the panel says so before the link is made. */}
+          <ConsequenceCard title="Sell something" onClick={() => go("sell")}>
+              A checkout link with what and how much. <span style={{ color: "var(--warn)" }}>Paid
+              straight to your wallet</span> — no escrow, so a refund is you sending it back.
             </ConsequenceCard>
         </div>
       </FoldSection>
