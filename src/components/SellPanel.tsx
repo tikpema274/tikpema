@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import { formatUsdc } from "../lib/formatUsdc";
+import { describeError } from "../lib/describeError";
 import type { PublicOrder } from "./PayPanel";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
@@ -59,7 +60,9 @@ export default function SellPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       setAmount("");
       setDescription("");
     } catch (e: any) {
-      setError(e?.message || "Could not create the link");
+      // describeError, never `e?.message || "…"`: an empty-message throw must not become a confident
+      // sentence about what failed (verify-error-honesty).
+      setError(describeError(e));
     } finally {
       setBusy(false);
     }

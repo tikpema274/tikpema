@@ -16,7 +16,7 @@
 import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
-import { ensureOwnerWallet } from "./_agent-wallets.mjs";
+import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { safeOrderId, readOrder, transitionOrder, publicOrder, effectiveStatus, STATUS, TX_HASH_RE } from "./_checkout.mjs";
 import { fetchReceipt, verifyDirectPayment } from "./_checkout-verify.mjs";
 
@@ -41,10 +41,19 @@ export async function handler(event) {
   if (status === STATUS.PAID) return json(200, { order: publicOrder(order), note: "already paid" });
   if (status === STATUS.EXPIRED) return json(409, { error: "order expired", order: publicOrder(order) });
 
-  // The buyer's agent wallet — the only `from` the receipt may show.
-  let buyer;
-  try { buyer = (await ensureOwnerWallet(session))?.walletAddress ?? null; } catch { buyer = null; }
-  if (!buyer) return json(503, { error: "could not resolve your agent wallet — try again" });
+  // The buyer's agent wallet — the only `from` the receipt may show. Same wrapping as agent-send:
+  // a tagged external failure becomes the shared 503 refusal (retryable, "nothing happened");
+  // anything else re-throws unclaimed rather than borrowing a diagnosis it cannot honour; a wallet
+  // still provisioning gets the shared provisioning refusal. (verify-provisioning-status)
+  let w;
+  try { w = await ensureOwnerWallet(session); }
+  catch (e) {
+    if (!isWalletUnresolvable(e)) throw e;
+    return json(WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal(e));
+  }
+  if (w?.pending) return json(WALLET_PROVISIONING_STATUS, walletProvisioningRefusal());
+  const buyer = w?.walletAddress ?? null;
+  if (!buyer) return json(503, { error: "could not resolve your agent wallet — nothing was marked; try again" });
 
   if (!txHash) {
     // 202 path: submitted, NOT paid.

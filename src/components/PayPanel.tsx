@@ -226,7 +226,7 @@ export default function PayPanel({ wallet: w }: { wallet: UnifiedWallet }) {
         else if (!r.ok) setLoad({ state: "unreadable", reason: data?.error || `HTTP ${r.status}` });
         else setLoad({ state: "ready", order: data.order });
       } catch (e: any) {
-        if (alive) setLoad({ state: "unreadable", reason: e?.message || "network error" });
+        if (alive) setLoad({ state: "unreadable", reason: describeError(e) });
       }
     })();
     return () => { alive = false; };
@@ -263,7 +263,7 @@ export default function PayPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       else if (r.ok && j?.order?.status === "submitted") setMark({ status: "submitted" });
       else setMark({ unverified: j?.error || `HTTP ${r.status}` });
     } catch (e: any) {
-      setMark({ unverified: e?.message || "could not reach the server" });
+      setMark({ unverified: describeError(e) });
     } finally {
       setPaying(false);
     }
