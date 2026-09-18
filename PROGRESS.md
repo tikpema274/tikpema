@@ -25855,3 +25855,58 @@ the last per-commit counts are test:all 129/129 (b3ae036), wallet suite 88/0 (03
 verify-dd-card-copy 29/0 + guard registry 28/0 (e9755f3). Runtime logs (dd-refusal-window-log.jsonl,
 deploy-loss-log.jsonl) and the regenerated build stamp carry this deploy's entries but are NOT committed
 with this note.
+
+## Deploy 6 COMPLETE — "Where held" separator + per-state unified Balance cell (2026-09-18)
+
+Deploy `6aad7ce82630da4c5c6f45fe`, served tree `e82aa511db86` (main HEAD `d0c1f4f`), published 18:43:14Z.
+Prod = main HEAD; gate:deployed VERIFIED (published deploy `ready`, served tree + commit match, control
+plane == data plane, 0 orphans among the 25 deploys newer than it). Run in T's foreground terminal.
+
+WHAT IS NEW IN THIS DEPLOY (vs Deploy 5, e9755f3): two commits —
+- `ea72c1f` — docs only (the Deploy 5 record).
+- `d0c1f4f` — findings 10.5 + 10.6 from the first live read of Deploy 5:
+  · 10.5 "Where held": the cell was `<div>Your wallet<span class="ym-src">on-chain read</span></div>`. The
+    span is display:block (verified in the SERVED css), so the LAYOUT already broke the line, but the DOM
+    had no whitespace between the two texts — every text-level read (textContent, copy, screen reader)
+    concatenated: "Your walleton-chain read", "Unified balanceCircle Gateway · off-chain figure". New
+    `Held` helper: the qualifier is its own BLOCK element with a real whitespace text node — separated in
+    layout AND in text, all four rows.
+  · 10.6 unified Balance cell: one expression rendered "…" for EVERY non-ready state, so a FAILED read sat
+    beside a header and badge that said "unavailable" while the cell claimed "pending". `unifiedCell`
+    renders by the read's actual state: error → "unavailable" (balCell(null), the header/badge word);
+    signed-out → NO_AMOUNT "—" (nothing was read); loading / provisioning → "…" (genuinely in progress);
+    ready unchanged. Test: new section in verify-unified-balance-copy reads the cell out of the UNIFIED
+    row's markup per state. RED recorded with only the cell expression reverted (91/2 — exactly error
+    and signed-out, both "…"); GREEN 93/0.
+
+WHAT IS LIVE ON THE WALLET SURFACE AS OF THIS DEPLOY (the whole series; every commit below is an
+ancestor of d0c1f4f, verified with `git merge-base --is-ancestor`): B1 `ef66871` (10.3: exit badge only
+when funds are parked) · B2 `61f8ab1` (10.2: one source for the dated exit proof) · B3 `ea51702` (10.1:
+one USDC formatting rule, FLOORED) · B4 `7732479` (10.4: presence tests for every disclosure/badge) ·
+`b3ae036` (the "Your money" redesign: USDC-only null-preserving Total, four-holdings table, EURC its own
+row never summed) · `03a6a76` (null-safe agent-wallet read) · `e9755f3` (gate:types) · `d0c1f4f` (above).
+⭐ B1–B4 + the redesign were ALREADY live since Deploy 5 (01:12Z today); this deploy adds ONLY the
+separator and Balance-cell fixes. None of the listed commits is absent from the served build.
+
+LIVE CHECK (bundle-level — #/wallet is behind passkey sign-in, so this is the served JS
+`assets/index-Dd1wTMz-.js`, fetched after publish, not a DOM read): Held cells PRESENT ×4, old glued-span
+pattern ABSENT; `floorUsdcAt` (Math.floor on the snapped scale) PRESENT; "available now" breakdown and
+"partly unavailable" no-number rule PRESENT; EURC own-row/never-summed note PRESENT; `perChain.map`
+PRESENT; conditional badge expression (`"Exit built · about seven days"` : `"No funds committed"` …)
+PRESENT; `unifiedCell` branches PRESENT. Figures T read live on Deploy 5 (same formatting code):
+available now 32.29, EURC 0.17 = the 2dp FLOOR of on-chain 0.175418 (balanceOf read 2026-09-18), not a
+different read — the old `displayAmount` (nearest) showed 0.18.
+
+DD WINDOW — **no-window** (7th capture). ddTree `596bcd84…` → `596bcd84…`, `rotated:false`, 1 probe,
+exit 0. PREDICTED: neither commit touches a DD_SURFACE_DIR / DD_SURFACE_FILE (checked against
+stamp-build.mjs before commit) → no rotation, no deposit-refusal window — observed exactly.
+
+DEPLOY-LOSS SWEEP (gate-new, 582 scanned, exhausted): **1 NEW loss — `6aac77f4286132e3893e4082`**, the
+Deploy 5 attempt #1 that crashed mid-bundle last night (23:29Z), now past the 6h line and counted
+(predicted in the Deploy 5 record). losses 16→17, limbo 39→40, tooYoung 0. Left untouched per policy.
+
+GATES in-chain (T's terminal): gate:types, test:all, gate:watch, gate:rpc, build, netlify deploy --prod,
+gate:deployed VERIFIED, capture:window no-window, gate:forgery, gate:spec, gate:deployloss (1 new,
+above). Pre-commit on the final tree: gate:types clean, test:all 129/129 (9.2 min), verify-unified-
+balance-copy 93/0. Runtime logs (dd-refusal-window-log.jsonl, deploy-loss-log.jsonl) and the build
+stamp carry this deploy's entries but are NOT committed with this note.
