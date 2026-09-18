@@ -111,6 +111,18 @@
   to = "/.netlify/functions/agent-init"
   status = 200
 [[redirects]]
+  from = "/api/checkout-create"
+  to = "/.netlify/functions/checkout-create"
+  status = 200
+[[redirects]]
+  from = "/api/checkout-get"
+  to = "/.netlify/functions/checkout-get"
+  status = 200
+[[redirects]]
+  from = "/api/checkout-paid"
+  to = "/.netlify/functions/checkout-paid"
+  status = 200
+[[redirects]]
   from = "/api/agent-status"
   to = "/.netlify/functions/agent-status"
   status = 200
