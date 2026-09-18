@@ -25996,3 +25996,42 @@ gate:deployed VERIFIED, capture:window no-window, gate:forgery, gate:spec, gate:
 Pre-commit on the final tree: gate:types clean, test:all 129/129 (8.1 min), verify-send-copy 70/0.
 Runtime logs (dd-refusal-window-log.jsonl, deploy-loss-log.jsonl) and the build stamp carry this deploy's
 entries but are NOT committed with this note.
+
+## 2026-09-19 — CENSUS: ARC MAINNET IS IN CIRCLE'S x402 INDEX; listing provenance across three harvests (read-only; the dated 09-25 reading stands)
+
+**Measurements, not conclusions about cause.** Direct API read (`/v2/x402/discovery/resources`, unauthenticated,
+`limit=200`, paged to exhaustion, server `total` 1143 = collected), saved in the SESSION SCRATCHPAD only — not as a
+dated `scripts/x402-census/` harvest, so `census:reading` on 2026-09-25 keeps its interval. Cross-read with the saved
+08-27 and 09-11 harvests. No 402 probes (the ⛔ stands).
+
+- **2026-09-19 index:** 1,143 listings · 1,121 distinct services · 4,514 offers · 130 payTos · **49 hosts** with a
+  priced offer (50 over listings; `solana.x402.cryptorefills.com` lists with no `accepts`) · 17 networks.
+- **Arc mainnet `eip155:5042`** (chain id resolved from Arc's docs — `Chain ID (Mainnet) | 5042`, testnet
+  `5042002` — not guessed): **325 offers; 0 on 08-27, 0 on 09-11.** 323 of 325 are `exact` + `GatewayWalletBatched`;
+  **2 vanilla EIP-3009** (`api.exa.ai` /contents $0.001, /search $0.007, `acceptId: arc-usdc-circle`). Asset Arc
+  USDC `0x3600…0000`. Prices $0.001–$0.04. **Arc testnet `eip155:5042002`: still 0.**
+- **Provenance: 46 of 47 Arc-mainnet sellers were already in the catalog on 09-11** (any network) and ADDED a
+  network row; the 47th is a new payTo of `api.exa.ai`, a host listed since 08-27. **`np.orthogonal.com` alone is
+  253 offers / 42 payTos** (Base-only on 09-11).
+- **New-entrant rate: 1 genuinely new independent host in 8 days** (`agent.atinamos.co.uk`: 1 payTo, 4 offers,
+  vanilla, own domain). The 29 "new" / 27 "gone" payTos vs 09-11 are **two hosts rotating addresses**
+  (`agents.allium.so` 24/24, `parallelmpp.dev` 3/3). Prior fortnight 08-27→09-11: **23 new hosts, 12 of them
+  aggregator sub-hosts** (`*.gateway-402.com` ×6, `*.x402.paysponge.com` ×6). Hosts 25 → 48 → 49; payTos 111 → 128 → 130.
+- **Our payTo `0xb407967319d56218c7e1c369125490e665a16ac4`: ABSENT from all 1,143**, exact-case and
+  case-insensitive over every field. **DD is not listed after two submissions.** The catalog exposes no submission
+  state, so absence is absence of a row, not a recorded rejection.
+- **Index-wide `lastUpdated` is stale**: per-listing (1,057 of 1,075 listings share one value across their accepts
+  rows); distribution 08-11 ×3,300, 08-12 ×479, 08-28 ×381, 08-26 ×294, 09-01 ×56, 09-02 ×4 — **no row newer than
+  2026-09-02**, though 325 Arc rows and a new host appeared after 09-11. **The field does not track network-row
+  additions. Potentially a Circle-side defect, worth reporting.** (The saved harvests dropped `lastUpdated` by
+  design, so no cross-date diff of it exists; a "changed: 4510" line in the working run was that artefact.)
+- **Correction to record:** the 08-23 "843 services / 1,470 offers, zero testnet" figures came from the CAPPED CLI
+  read (`siwx=false`). The direct harvests — **08-27: 1,003 / 3,808; 09-11: 1,162 / 4,215** — are the comparable
+  baseline, and **both already carried 792 testnet offers** (Base Sepolia 396 + Polygon Amoy 396, all
+  `x402.quicknode.com`; plus Solana devnet 264 → 1,056 today). **"Zero on any testnet" was an artefact of the CLI
+  basis.** Likewise the 08-23 scheme split 975 batched / 465 vanilla is not comparable to today's full-basis
+  GatewayWalletBatched 1,690 vs vanilla 2,789 (38/62); whether the facilitator launch shifted anything is not
+  decidable from two bases. No facilitator field exists in the index.
+- **Standing rule restated: the row is a cache; the live 402 is the authority.** 325 Arc rows measures the
+  INDEX, not payable endpoints. Nothing here was probed.
+Memory: `x402-directories-do-not-support-arc` (refuted for mainnet), `x402-catalog-listing-provenance`.
