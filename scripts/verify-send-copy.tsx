@@ -23,7 +23,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
-import SendPanel from "../src/components/SendPanel";
+import SendPanel, { SendOutcome } from "../src/components/SendPanel";
 import ManualSendPanel, { SendReviewBox } from "../src/components/ManualSendPanel";
 // ⭐⭐ THE CUSTODY SENTENCE IS NOT RESTATED HERE. It is rendered from CustodyNotice and the panel's
 // output is asserted to CONTAIN it, so the expected text is COMPOSED from the same source that
@@ -303,6 +303,69 @@ section("8 — 🚨 THE SUBMITTED VALUES DO NOT SURVIVE THE SEND");
       && !/setSentHash\(null\)[\s\S]{0,200}setAmount\(amount\)/.test(code),
     hasControl ? "it reveals an empty form rather than emptying a revealed one"
                : "⛔ vacuous — there is no such control to test");
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("9 — 🚨 THE AGENT SEND SHOWS A RECEIPT — hash + explorer link — and never fakes one");
+{
+  // ⭐⭐ A money surface that moves funds and shows no receipt is a defect any surface built on it
+  //     inherits (PayPanel is next). Until this section, SendPanel rendered only "Sent N USDC to
+  //     0x1234…abcd": no tx hash, no explorer link, an ellipsised recipient. The server ALREADY returns
+  //     `{txHash, tx}` on 200 — it was thrown away at the panel.
+  // ⭐⭐ TWO success shapes exist and only ONE carries a hash: agent-send answers 202
+  //     `{pending, txId}` when Circle has accepted but not confirmed. That state must NOT render as
+  //     "confirmed" and must NOT invent an explorer link. [[absence-must-never-read-as-safe]]
+  //     Rendered through the EXPORTED sub-component with crafted results (SSR cannot click Send) —
+  //     the same seam as SendReviewBox above. [[state-behind-a-transition-is-untested-by-default]]
+  const EXPL = "https://testnet.arcscan.app";
+  const TO = "0x" + "ab".repeat(20);
+  const HASH = "0x" + "cd".repeat(32);
+  const okMarkup = renderToStaticMarkup(<SendOutcome result={{ txHash: HASH, tx: `${EXPL}/tx/${HASH}` }} error="" to={TO} amount={1.5} agentAddress={"0x" + "ef".repeat(20)} />);
+  const ok = strip(okMarkup);
+  check("⭐⭐ success (200) renders the tx hash", ok.includes(HASH));
+  check("⭐⭐ …and an explorer link to THAT hash", okMarkup.includes(`href="${EXPL}/tx/${HASH}"`));
+  check("⭐ …that opens in a new tab", /href="[^"]+\/tx\/[^"]+"[^>]*target="_blank"/.test(okMarkup));
+  check("⭐ …says what was sent and to whom, recipient UNTRUNCATED (the manual panel's reasoning)",
+    ok.includes("1.5 USDC") && ok.includes(TO) && !ok.includes(`${TO.slice(0, 6)}…`));
+  check("⭐ …and says it is confirmed on Arc", /confirmed on Arc/i.test(ok));
+
+  const AGENT = "0x" + "ef".repeat(20);
+  const pendMarkup = renderToStaticMarkup(<SendOutcome result={{ pending: true, txId: "circle-id-123", message: "accepted, confirming" }} error="" to={TO} amount={1.5} agentAddress={AGENT} />);
+  const pend = strip(pendMarkup);
+  check("🚨 pending (202) does NOT say confirmed", !/confirmed/i.test(pend));
+  check("🚨 …and renders NO tx link (there is no hash yet)", !/\/tx\//.test(pendMarkup));
+  check("⭐ …but says it was submitted and names the Circle id", /submitted/i.test(pend) && pend.includes("circle-id-123"));
+  // ⭐⭐ THE CIRCLE ID IS A DEAD END FOR THE USER (traced 2026-09-18: budget-sweep resolves the CAP
+  //     charge via getTransaction and never stores a hash; the client polls nothing). So the 202 must
+  //     say WHERE the transfer will show up — a page that exists now: the agent wallet's own address
+  //     page on the explorer, and the Wallet page balance. Not "check before sending again", which
+  //     named no way to check. [[absence-must-never-read-as-safe]]
+  check("⭐⭐ …links the AGENT WALLET's explorer ADDRESS page (a page that exists now)",
+    pendMarkup.includes(`href="${EXPL}/address/${AGENT}"`));
+  check("⭐ …that link opens in a new tab", /href="[^"]+\/address\/[^"]+"[^>]*target="_blank"/.test(pendMarkup));
+  check("⭐ …and names where it will appear: the wallet's transaction list and the Wallet page balance",
+    /transaction list/i.test(pend) && /Wallet page/.test(pend));
+  check("⛔ …and no longer tells the user to 'check before sending again' with nothing to check",
+    !/check before sending again/i.test(pend));
+  // The 200 receipt must NOT grow an address link — it already has the tx link, the stronger witness.
+  check("⭐ the 200 receipt links the TX, not the address page",
+    /\/tx\//.test(okMarkup) && !/\/address\//.test(okMarkup));
+
+  const errMarkup = renderToStaticMarkup(<SendOutcome result={null} error="Per-transaction cap is 5 USDC" to={TO} amount={1.5} agentAddress={"0x" + "ef".repeat(20)} />);
+  const err = strip(errMarkup);
+  check("⭐⭐ failure renders the error", err.includes("Per-transaction cap is 5 USDC"));
+  check("🚨 …and NO receipt: no 'Sent', no hash, no explorer link", !/\bSent\b/.test(err) && !/\/tx\//.test(errMarkup) && !/confirmed/i.test(err));
+
+  const idle = renderToStaticMarkup(<SendOutcome result={null} error="" to={TO} amount={1.5} agentAddress={"0x" + "ef".repeat(20)} />);
+  check("⭐ idle renders nothing", idle === "", JSON.stringify(idle.slice(0, 60)));
+
+  // ⭐ WIRING, on source: the panel keeps the server's result and renders it through SendOutcome —
+  //    a render cannot show that the handler stored `data` rather than a string.
+  const src = readFileSync("src/components/SendPanel.tsx", "utf8");
+  check("⭐ the panel stores sendFromAgent's RESULT (not a prose string) and renders <SendOutcome",
+    /const (r|res|result|data) = await w\.sendFromAgent\(/.test(src) && /<SendOutcome\b/.test(src));
+  check("⭐ the pre-send panel render carries no receipt",
+    !/\/tx\//.test(renderToStaticMarkup(<SendPanel wallet={wallet("modular")} />)));
 }
 
 console.log(`\n${"═".repeat(72)}`);
