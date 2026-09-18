@@ -131,6 +131,19 @@ section("7 — SELL: the merchant is told the money comes straight to their logi
   check("signed out → no address, points at Wallet, no Create control", !signedOut.includes(MERCHANT) && /Wallet/.test(signedOut) && !/Create checkout link/.test(signedOut));
 }
 
+section("8 — ⛔ BOTH ROUTES ARE LINKED: Pay is a NAV item, Sell has a Dashboard card (the #/dca lesson)");
+{
+  // On SOURCE, because a render of App needs the whole wallet. The claim is about wiring, not copy.
+  const { readFileSync } = await import("node:fs");
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const nav = app.match(/const NAV = \[([\s\S]*?)\];/)?.[1] ?? "";
+  check("⭐ 'pay' IS a NAV item", /id:\s*"pay"/.test(nav));
+  check("…and both routes resolve", app.includes('case "pay"') && app.includes('case "sell"'));
+  const dash = readFileSync(new URL("../src/components/Dashboard.tsx", import.meta.url), "utf8");
+  check("⭐ the Dashboard card is the way into Sell", dash.includes('go("sell")'));
+  check("…and the Pay door links Sell too", /window\.location\.hash = "\/sell"/.test(readFileSync(new URL("../src/components/PayPanel.tsx", import.meta.url), "utf8")));
+}
+
 console.log(`\n${"═".repeat(72)}`);
 if (fail) { console.log(`❌ ${fail} failed, ${pass} passed.\n`); process.exit(1); }
 console.log(`✅ ALL GREEN   pass ${pass} / fail 0\n`);

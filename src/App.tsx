@@ -18,6 +18,8 @@ import UnifiedBalancePanel from "./components/UnifiedBalancePanel";
 import PlanPanel from "./components/PlanPanel";
 import Dashboard from "./components/Dashboard";
 import ReceivePanel from "./components/ReceivePanel";
+import PayPanel from "./components/PayPanel";
+import SellPanel from "./components/SellPanel";
 import { useWallet } from "./wallet/useWallet";
 
 // Multi-page console. ONE useWallet() instance lives at the shell and is passed
@@ -25,9 +27,12 @@ import { useWallet } from "./wallet/useWallet";
 // Routing is a lightweight hash router (no dependency): the active view derives
 // from window.location.hash, so #/send etc. deep-link and the back button works.
 //
-// Nav is five items only — Dashboard, Wallet, AI Agent, Research, Send — every
-// one backed by working code. Swap and Bridge are NOT nav items: they remain
-// reachable inside AI Agent via natural-language tasks, exactly as today.
+// Nav is six items — Dashboard, Wallet, AI Agent, Research, Send, Pay — every one
+// backed by working code. Swap and Bridge are NOT nav items: they remain reachable
+// inside AI Agent via natural-language tasks, exactly as today.
+// ⭐ Pay (2026-09-18) is the SIXTH, decided by T against folding it into Send: a checkout link
+// must be reachable from NAV, not only from a card (the 22-day unlinked #/dca outage below).
+// Without ?order= it is the door, and it links Sell — so both checkout routes are linked.
 // Feedback sits in a muted low-priority slot at the foot of the sidebar.
 const NAV = [
   { id: "dashboard", label: "Dashboard" },
@@ -35,6 +40,7 @@ const NAV = [
   { id: "agent", label: "AI Agent" },
   { id: "research", label: "Research" },
   { id: "send", label: "Send" },
+  { id: "pay", label: "Pay" },
 ];
 
 // ⭐ DEV-ONLY fixture route. `import.meta.env.DEV` is statically replaced with `false` in the
@@ -92,6 +98,15 @@ export default function App() {
       break;
     case "send":
       page = <SendPanel wallet={wallet} />;
+      break;
+    // ⭐ CHECKOUT (2026-09-18, direct settlement only). #/pay?order=<id> is the buyer's side and a
+    // NAV item; #/sell is the seller's side, reached from the Dashboard "Sell something" card and
+    // from the Pay door. The buyer pays through the SAME agent-send path as #/send.
+    case "pay":
+      page = <PayPanel wallet={wallet} />;
+      break;
+    case "sell":
+      page = <SellPanel wallet={wallet} />;
       break;
     // Reached via the AI Agent "Quick actions" Swap card, not the nav (like
     // #/nanopay) — Swap stays a sub-action of AI Agent, so the 5-item nav (Send is

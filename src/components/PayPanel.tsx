@@ -175,7 +175,7 @@ export function PayOrderView({
             <b>Cannot be undone.</b> {IRREVERSIBLE_LINE}
           </Status>
           <div className="status" style={{ marginTop: 0 }}>
-            Paying from <span className="mono">{agentAddress}</span>
+            Paying from <span className="mono" style={{ wordBreak: "break-all" }}>{agentAddress}</span>
             {w.agentWallet.balance != null ? <> · balance <span className="mono">{formatUsdc(w.agentWallet.balance)}</span> USDC</> : null}
           </div>
           <div className="row" style={{ marginTop: 8 }}>
