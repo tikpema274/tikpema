@@ -26118,3 +26118,54 @@ Prompted by the checker wanting "2+ networks in accepts[]" and Circle's Facilita
   rows came from existing sellers adding a network.
 Memory: `x402-second-network-and-facilitator-findings`. ⛔ An accepts entry that cannot settle is a badge earned by an
 unbacked claim. Nothing here is a proposal.
+
+## Deploy 9 COMPLETE — MULTICHAIN TREASURY v1 (console + targets + proposed moves; moves nothing) (2026-09-19)
+
+Deploy `6aadca5ab83e9e03539c7d21`, served tree `14ba759e9ceb` (commit `b6187fe`), published 2026-09-19T00:09:48Z.
+gate:deployed VERIFIED (published deploy `ready`, served tree + commit match, control plane == data plane, 0
+orphans). Run in T's foreground terminal; this record written afterwards (the chain had exited). ⚠️ HEAD is
+`da2b7f0` (the second-network/facilitator findings, docs only, committed after the build) — prod is one docs
+commit behind main by design.
+
+WHAT SHIPPED — five commits `1dfc281..b6187fe`, decided 2026-09-19 (PER-USER pockets · MANUAL propose→confirm ·
+the pockets we can read AND move today · #/treasury via a Dashboard card, nav-less · cap-gated rails reused):
+- `1dfc281` `shared/treasury/plan.mjs` — strict policy normalizer (integer pcts ≤ 100, remainder stated as
+  unallocated, chains = DESTINATION_CHAINS keys, ≤ 4 dest rows, UNKNOWN FIELDS REFUSED) + the PURE planner: exact
+  micro-unit math; total NULL if any USDC pocket is unreadable → NO proposals; EURC never a pocket; moves clamped to
+  min(surplus, deficit, per-tx cap) with the clamp NAMED; only rails that exist (arc_sca→unified deposit ·
+  unified→arc_sca withdraw ~7 d · arc_sca→dest bridge · unified→dest = withdraw with a two-step note · dest→anything
+  NOT movable). `_treasury-policy.mjs` + `treasury-policy` (store `treasury-policy`, `o/<owner>` from the SESSION,
+  strong reads; the suite caught the derived `unallocatedPct` being persisted and refused on re-read — canonical
+  fields only now). 40/0; two mutations bite.
+- `0035853` `treasury-snapshot` — Arc SCA via walletTokenBalances, Gateway via gateway-balance's EXPORTED
+  `readDomain`/`CHAINS` (one source; unified = sum ONLY if every domain read OK), named-address USDC via rpcFallback
+  on DESTINATION_CHAINS; allSettled; the plan computed with live caps. READ-ONLY. Live read-only probe: Base Sepolia
+  `balanceOf(agent SCA)` = 3.893514 USDC. 10/0.
+- `dbc65b4` read-once prefill on the two handoff surfaces — the ONLY change to existing money surfaces:
+  BridgePanel `?amount=&destination=`, UnifiedBalancePanel `?deposit=|withdraw=` (UbExitStatus `initialAmount`);
+  malformed dropped, banner "Filled in from a treasury proposal…", nothing pre-authorised. +14 checks.
+- `a4987f0` TreasuryPanel — null-preserving USDC total ("partly unavailable — <pocket> unreadable"), six-column
+  tr-* grid, EURC shown never summed, targets editor (>100 % refused with the sum named), proposals as summary
+  blocks with cap/delay notes VERBATIM and "Do this on Unified/Bridge →" handoff links. ⛔ NOTHING_MOVES_LINE above
+  the proposals; NO button.emerald on the page (mutation-proven). A real ordering bug caught by its suite
+  (unreadable read rendered as "Reading…"). 22/0 (+3 wiring = 25).
+- `b6187fe` route + Dashboard "Treasury" card (internal fold 3→4), nav-less by decision.
+Executors byte-identical (`agent-send`, `agent-bridge`, `_bridge`, `_ubdeposit`, `_ubspend`, `_ubwithdraw`).
+v2 NOTED (not decided): a two-step bridge+swap proposal handing off to #/plan (USDC/EURC, testnet).
+
+DD WINDOW — **no-window** (10th capture). ddTree `596bcd84…` unchanged, 1 probe. PREDICTED: no commit touches a
+DD_SURFACE_DIR / DD_SURFACE_FILE (checked before each commit) — observed exactly.
+DEPLOY-LOSS SWEEP: 0 new (losses 17, limbo 40, tooYoung 0).
+
+LIVE CHECK (no session, no money): `GET /api/treasury-snapshot` → 401, `GET /api/treasury-policy` → 401. Served
+bundle `assets/index-CnAqZaBd.js`: NOTHING_MOVES_LINE, the Treasury card, the bridge prefill banner and the
+`/api/treasury-snapshot` fetch — all PRESENT.
+
+⛔ NOT YET PROVEN: the live loop. T sets targets → the console proposes → T confirms a move on Unified or Bridge
+(never auto-funded) → the snapshot re-read shows the new shares → the move's hash chain-verified independently.
+Until then the treasury is CODE ON PROD, not a capability. Also still unproven from Deploy 8: the live checkout
+payment.
+
+GATES in-chain (T's terminal): gate:types, test:all 135/135, gate:watch, gate:rpc, build, netlify deploy --prod,
+gate:deployed VERIFIED, capture:window no-window, gate:forgery, gate:spec, gate:deployloss (0 new). Runtime logs
+and the build stamp carry this deploy's entries but are NOT committed with this note.
