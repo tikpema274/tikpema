@@ -26270,3 +26270,51 @@ order. The real binding is the order id **on chain** — append 32 bytes (keccak
 `transfer(address,uint256)` calldata via Circle contract-execution (Solidity's ABI decoder ignores trailing
 calldata) and check `tx.input` in verify. That **changes `agent-send` (the money path)** and needs a **live proof**,
 so it is a Deploy of its own, not part of this fix.
+
+## 2026-09-19 — ⭐ FIRST CHECKOUT PAYMENT SETTLED AND VERIFIED ON ARC (money-path proof; read-only verification from the chain)
+
+**Run by T** (buyer login, agent SCA `0x3cb7…2de9`) against prod `30e960f` (5cd02dd one-hash-one-order + 30e960f
+wallet-gate both live, gate:deployed ✅). Nothing below was taken from a response body except step 1; every money fact
+was read from Arc RPC by block, and every store fact from the Blobs store directly.
+
+**Order** `o_mu8hewk4_7b898539e3d371c9` — 0.100000 USDC, "data", merchant `0x74b7b561fd71c68eb1da6b96a7a87033904b24e5`,
+created 14:27:38Z at **createdAtBlock 62928454**.
+
+**Chain (Arc testnet, rpc.testnet.arc.io):**
+- tx `0x79950cb47e7f3f8aa9228859909e1c4196a66a6714a5de4634e4ae1a86832bb4` — receipt **status 0x1**, **block 62928802**
+  (timestamp 14:30:31Z), submitted via EntryPoint `0x5ff1…2789` (ERC-4337 userOp, bundler `0x6bf8…bef7e`).
+- **Strictly after creation: 62928802 > 62928454 (+348 blocks).**
+- 5 logs. The **USDC-emitted** Transfer (emitter `0x3600…0000`): from `0x3cb76ac688f3fc02dfe4033d388989a44f132de9`
+  → to the merchant, **value 100000 = 0.100000 USDC** — exactly the order. The two 18-dp native mirrors
+  (emitter `0xffff…fffe`) were present and ignored, as `_checkout-verify.mjs` does: one mirrors the payment
+  (1e17), one is the EntryPoint→bundler gas refund (0.011048 USDC, paid by the paymaster, NOT the buyer).
+- **Buyer SCA balance at block 62928801 → 62928802: 0.990885 → 0.890885** (ERC-20 balanceOf, 6dp) — delta exactly
+  0.100000; native 18-dp view delta exactly 1e17 — **no gas in USDC from the buyer** (Gas Station sponsored).
+- Merchant balance 26.628582 → 26.728582 (+0.100000).
+- **Exactly one** USDC transfer to the merchant in blocks 62928454..62929249 (latest at verification): this tx. From
+  the buyer SCA: 1; of exactly 0.100000: 1. **No duplicate.**
+
+**Store (Blobs `checkout-orders`, read directly):**
+- record `id:o_mu8hewk4…`: `status:"paid"`, `paidTx` = the tx, `paidBy` = the buyer SCA, `paidUnits:"100000"`,
+  `paidAt 14:30:34.614Z`, `paidAtBlock 62928802` (3.6 s after the block).
+- **`tx:0x7995…2bb4` claim EXISTS, names ONLY `o_mu8hewk4…`**, `claimedAt 14:30:34.559Z` — 55 ms BEFORE the transition
+  (claim-then-transition, as designed). It is the only `tx:` key in the store.
+
+**Orders remaining open (11 in store, 1 paid):** the two UNBOUND legacy ones (`o_mu7ju1sf…` 0.15, `o_mu7jxx8h…` 0.11,
+createdAtBlock null — no seal offered, any hash refused as unbound); five 0.20 "data" (`o_mu8aqqbu…`, `o_mu8b3jz9…`,
+`o_mu8b5obw…`, `o_mu8b9nx9…`, `o_mu8bf3ft…`); 0.10 "try" `o_mu8b42ov…` (block 62907313); 0.12 "try" `o_mu8blkvc…`;
+0.10 "data" `o_mu8hcts6…` (block 62928259). All bound, all `paidTx:null`.
+
+**Return-to round trip — CONFIRMED LIVE by T** on the same run: `#/pay?order=…` signed out → Wallet → connect →
+brought back to the order (30e960f). Not chain-verifiable; T's observation, recorded as such.
+
+**⛔ REPLAY HALF STILL OUTSTANDING (T runs it; nothing here posts a hash).** Note the ordering in `checkout-paid`:
+verify (incl. block binding) BEFORE claim. A NEW order created now has createdAtBlock > 62928802 → posting this hash
+yields **409 code:"predates"**, which proves the block binding, not the claim. To exercise **replay**, post the hash
+against an EXISTING open order created before block 62928802 with amount ≤ 0.10 — `o_mu8b42ov…` or `o_mu8hcts6…` —
+from the same buyer login. Expected: 409 code:"replay" naming `o_mu8hewk4…`; that order stays open; the page links
+the paid order.
+
+**What this proves:** the whole direct-settlement path end to end — #/sell → link → #/pay → agent-send (userOp, gasless)
+→ chain → checkout-paid reads the receipt, binds block and hash, marks paid — with money that moved exactly once, for
+exactly the order amount, from the buyer to the merchant. Checkout v1 is no longer "on prod, unproven".
