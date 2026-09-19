@@ -26083,3 +26083,38 @@ merchant's login-wallet balance rises. Until then checkout is CODE ON PROD, not 
 GATES in-chain (T's terminal): gate:types, test:all 132/132, gate:watch, gate:rpc, build, netlify deploy --prod,
 gate:deployed VERIFIED, capture:window no-window, gate:forgery, gate:spec, gate:deployloss (0 new). Runtime logs
 and the build stamp carry this deploy's entries but are NOT committed with this note.
+
+## 2026-09-19 — SECOND-NETWORK / FACILITATOR FINDINGS (read-only; code + Circle docs; nothing proposed)
+
+Prompted by the checker wanting "2+ networks in accepts[]" and Circle's Facilitator Service launch. Facts, not conclusions.
+
+- **⛔ CORRECTION, LOAD-BEARING: there is NO Circle "accept payment on 2+ networks" rule and no Circle readiness
+  score.** Zero hits in Circle's `llms-full.txt`. The scorer is **agent-ready.dev, a THIRD PARTY**, checking 402 shape
+  and `accepts[]` fields only — no minimum network count, no settlement check. Circle's own wording is a tip
+  ("accept payment on more than one blockchain…"), not a criterion. **Every prior record framing "95/100" or "the
+  missing 5" as Circle's verdict (2026-08-18, ~:15249-15350) should be read against this.**
+- **Vanilla EIP-3009 on Base is a direct USDC transfer, no Gateway ledger**; a `balanceOf` / `Transfer` log on that
+  chain sees it (Circle: the facilitator "submits it to the USDC contract on the payment's blockchain"; Base
+  completion verifies the USDC `Transfer` event). Our seller (`x402-vanilla-seller.mjs`: `receiveWithAuthorization`
+  on `CONTRACTS.USDC`, signed by the Circle wallet that IS payTo, 200 inline with `X-Payment-Receipt`) is
+  **hard-wired to Arc testnet** (`NETWORK` asserted `eip155:5042002`, `ARC.rpc`, chain implied by the wallet).
+- **Circle's Facilitator Service**: hosted `verify` / `settle` / `status` for the `exact` scheme, opt-in per seller,
+  keyless trial (EIP-712 `Facilitator-Seller-Proof` signed by the payTo key) then a Circle API key. `/supported`
+  MEASURED 2026-09-19: `eip155:5042, 5042002, 8453, 84532, 137, 80002` — all `exact`, **no GatewayWalletBatched**. Its
+  settle response returns **the TX HASH on terminal success** (empty when pending; "Do not fulfill on pending") —
+  unlike the batched `/v1/x402/settle`, which returns a Gateway UUID. So **independent verification survives**; what
+  we would give up is submitting settlement ourselves and controlling timing, plus a Circle API key dependency.
+- **The settle-gate is NOT made redundant by atomicity**: it exists so analysis runs before money and we never charge
+  for a refusal or outage. What atomicity would remove is `confirmPayment`'s ledger polling, the 202 + handle and
+  `RETRIEVE_TIMEOUT_MS` — built for the measured 217 s Gateway credit gap (`_x402-confirm.mjs:6-12`).
+- **Second payTo**: DD has **no Transfer-log reconciliation**, only the aggregate `availableBalance` baseline
+  (`_dd-x402.mjs:670, :904-911`), so any unrelated Arc credit to `0xb407…6ac4` confirms an unpaid handle. A Base
+  vanilla payTo is on a different plane and cannot disturb that. `payTo` is per `accepts[]` entry.
+- **Arc mainnet is NOT a smaller step than Base**: it is the mainnet crossing — env-assert's absent mainnet rows + the
+  held 6-file / 4-file refactor, a mainnet revenue wallet and Circle wallet-set, the DD engine reading mainnet vaults
+  (**Arc mainnet is absent from `shared/dd/chains.mjs`**), plus the whole `docs/mainnet-list.md`. Base Sepolia +
+  vanilla is chain plumbing inside the testnet posture and an honest pair.
+- **Listing provenance stands**: DD not listed after two submissions; 1 genuinely new independent host in 8 days; Arc
+  rows came from existing sellers adding a network.
+Memory: `x402-second-network-and-facilitator-findings`. ⛔ An accepts entry that cannot settle is a badge earned by an
+unbacked claim. Nothing here is a proposal.
