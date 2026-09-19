@@ -1,4 +1,5 @@
 import { BRIDGE_TIMING, MINT_TIMING } from "../../shared/bridge-timing.mjs";
+import { goToWalletAndReturn } from "../lib/returnTo";
 import { useEffect, useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import { BridgeReceiptStatus } from "./bridgeReceiptStatus";
@@ -228,10 +229,10 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
               needs a wallet, points at Wallet. Not to be merged with the self-signed voice, which
               needs MetaMask ACTIVE and points at the landing page. */}
           Set up your wallet first — open{" "}
-          <button className="linkbtn" onClick={() => (window.location.hash = "/wallet")}>
+          <button className="linkbtn" onClick={goToWalletAndReturn}>
             Wallet
           </button>{" "}
-          to connect one, then come back here to bridge.
+          to connect one, then come back here to bridge. (You will be brought back to this page.)
         </div>
       </div>
     );

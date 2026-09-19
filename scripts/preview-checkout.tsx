@@ -50,7 +50,35 @@ function bothWidths(markup: string, tall = 760) {
 }
 const label = (n: string, t: string, note: string) => `<div class="pv-label">${n} — ${t}</div><div class="pv-note">${note}</div>`;
 
+// ── the FOUR states behind "no agent wallet" (AgentWalletGate, 2026-09-19) ─────────────────────────
+type GateState = "noAddress" | "noSession" | "resolving" | "failed";
+const gateWallet = (st: GateState) => ({
+  ...wallet,
+  address: st === "noAddress" ? null : wallet.address,
+  isAuthenticated: st === "resolving" || st === "failed",
+  agentWallet: null,
+  agentWalletResolving: st === "resolving",
+  agentWalletError: st === "failed" ? "session expired" : null,
+  refreshAgentWallet: async () => null,
+  activeKind: st === "noAddress" ? null : "modular",
+}) as any;
+const gate = (st: GateState) =>
+  renderToStaticMarkup(<PayOrderView order={FRESH as any} wallet={gateWallet(st)} paying={false} result={null} payError="" mark={null} onPay={() => {}} />);
+
 const sections = [
+  label("g1", "NO LOGIN WALLET — connect, with a return-to",
+    "The only state that leaves the page. The Wallet link now stashes #/pay?order=… in sessionStorage; the wallet page brings the buyer back the moment the wallet is ready. The order stays on screen."),
+  bothWidths(gate("noAddress"), 560),
+  label("g2", "WALLET, NO SESSION — Sign in INLINE",
+    "Was: “Set up your wallet first — open Wallet” (wrong: the wallet exists). Now: SignInPrompt on the order itself — one passkey tap, the buyer never leaves."),
+  bothWidths(gate("noSession"), 560),
+  label("g3", "SESSION, RESOLVE IN FLIGHT — Preparing your agent wallet",
+    "Was: the same send-away sentence during a network round-trip. Now: a spinner and the plain statement that the agent wallet is created for the login and needs NO funds to be created."),
+  bothWidths(gate("resolving"), 560),
+  label("g4", "SESSION, RESOLVE FAILED — the reason, ‘Nothing was paid’, Retry",
+    "🚨 The most important one. Was: a permanent “Set up your wallet first” with no reason and no way out (the failure was swallowed in useWallet). Now: the server's reason, the reassurance, and a Retry wired to refreshAgentWallet()."),
+  bothWidths(gate("failed"), 560),
+
   label("a1", "PROD order o_mu7ju1sf (0.15 USDC) — UNBOUND, no seal",
     "The real record as prod serves it today: no <code>createdAtBlock</code>. The new page reads that as UNBOUND: what / to whom / how much still render (door, not wall), the reason is stated, <b>no Pay button</b>, no irreversibility hazard. The money never moves on this link."),
   bothWidths(view(PROD_A), 620),
@@ -93,7 +121,7 @@ const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
   .pv-desk{width:560px;max-width:560px;margin:0}
   .pv-mob{border:1px solid var(--line-strong);border-radius:12px;background:var(--ink)}
 </style></head><body>
-  <div class="pv-label" style="color:var(--paper);font-size:15px">Checkout #/pay — one hash, one order (2026-09-19) — static preview</div>
+  <div class="pv-label" style="color:var(--paper);font-size:15px">Checkout #/pay — wallet gate (g1–g4) · one hash, one order (2026-09-19) — static preview</div>
   <div class="pv-note">Real PayOrderView, real styles.css, crafted props. a1/a2 are the two live prod records verbatim.
     Nothing here talks to a server; nothing can be paid from this file.</div>
   ${sections.join("\n")}

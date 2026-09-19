@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { goToWalletAndReturn } from "../lib/returnTo";
 import type { useWallet } from "../wallet/useWallet";
 import { describeError } from "../lib/describeError";
 import { formatUsdc, formatUsdcShort } from "../lib/formatUsdc";
@@ -71,7 +72,7 @@ export function TreasuryView({
     </>
   );
   if (s === "signed-out") return <div className="plane">{head}{wallet ? <SignInPrompt wallet={wallet} message="Sign in to read your treasury." /> : <div className="status">Sign in to read your treasury.</div>}</div>;
-  if (s === "no-wallet") return <div className="plane">{head}<div className="status">Set up your wallet first — open <button className="linkbtn" onClick={() => (window.location.hash = "/wallet")}>Wallet</button> to connect one.</div></div>;
+  if (s === "no-wallet") return <div className="plane">{head}<div className="status">Set up your wallet first — open <button className="linkbtn" onClick={goToWalletAndReturn}>Wallet</button> to connect one.</div></div>;
   // ⚠️ unreadable BEFORE the no-snapshot guard: an unreadable read has no snapshot either, and the suite
   //    caught this ordering rendering "Reading your pockets…" for a failed read — a pending claim for a failure.
   if (s === "unreadable") return <div className="plane">{head}<div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>Your treasury could not be read right now ({stateReason ?? "unknown"}). Nothing was moved. Try again in a moment.</div></div>;

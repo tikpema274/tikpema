@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { goToWalletAndReturn } from "../lib/returnTo";
 import type { useWallet } from "../wallet/useWallet";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
@@ -56,7 +57,7 @@ export default function SignInPrompt({
       </div>
       <div className="row" style={{ gap: 8, alignItems: "center", marginTop: 8 }}>
         {noWallet ? (
-          <button className="emerald" onClick={() => (window.location.hash = "/wallet")}>
+          <button className="emerald" onClick={goToWalletAndReturn}>
             Connect a wallet
           </button>
         ) : (

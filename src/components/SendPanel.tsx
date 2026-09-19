@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import { describeError } from "../lib/describeError";
+import AgentWalletGate from "./AgentWalletGate";
 import { displayAmount } from "../lib/formatAmount";
 import { arcTestnet } from "../config/chain";
 
@@ -171,24 +172,15 @@ export default function SendPanel({ wallet: w }: { wallet: UnifiedWallet }) {
 
   // Gate: mirror the original placement inside ConnectPasskey's `w.agentWallet`
   // truthy branch. Before a wallet is resolved there is nothing to send from.
+  // ⭐ Four states, not one (AgentWalletGate, 2026-09-19): a payment link (#/send?to=…) has the same
+  // buyer as a checkout link — the old single sentence sent them to a bare #/wallet and dropped the
+  // query, and rendered a FAILED resolve as "set up your wallet".
   if (!w.agentWallet) {
     return (
       <div className="plane">
         <div className="panel-eyebrow">Send</div>
         <h2>Send from your agent wallet</h2>
-        <div className="sub" style={{ marginBottom: 0 }}>
-          {/* ⛔ NOT "connect and fund it". The gate here is `!w.agentWallet` — the wallet EXISTING,
-              which follows from a session. Funding is not checked and does not unblock this page,
-              so naming it made a precondition out of something that is not one, and sent a user
-              with a connected empty wallet looking for a step they did not need. ⚠️ AGENT voice:
-              needs a wallet, points at Wallet. Not to be merged with the self-signed voice, which
-              needs MetaMask ACTIVE and points at the landing page. */}
-          Set up your wallet first — open{" "}
-          <button className="linkbtn" onClick={() => (window.location.hash = "/wallet")}>
-            Wallet
-          </button>{" "}
-          to connect one, then come back here to send.
-        </div>
+        <AgentWalletGate wallet={w} verb="send" nothingHappened="Nothing was sent." />
       </div>
     );
   }

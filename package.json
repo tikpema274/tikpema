@@ -99,6 +99,7 @@
     "test:checkoutverify": "node scripts/verify-checkout-verify.mjs",
     "test:checkoutpaid": "node --experimental-test-module-mocks scripts/verify-checkout-paid.mjs",
     "test:checkoutcopy": "npx tsx scripts/verify-checkout-copy.tsx",
+    "test:walletgate": "npx tsx scripts/verify-wallet-gate.tsx",
     "test:treasuryplan": "node --experimental-test-module-mocks scripts/verify-treasury-plan.mjs",
     "test:treasurysnapshot": "node scripts/verify-treasury-snapshot.mjs",
     "test:treasurycopy": "npx tsx scripts/verify-treasury-copy.tsx",
@@ -339,6 +340,7 @@
     "test:checkoutverify",
     "test:checkoutpaid",
     "test:checkoutcopy",
+    "test:walletgate",
     "test:treasuryplan",
     "test:treasurysnapshot",
     "test:treasurycopy"

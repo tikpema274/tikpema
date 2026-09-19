@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { goToWalletAndReturn } from "../lib/returnTo";
 import type { useWallet } from "../wallet/useWallet";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
@@ -198,7 +199,7 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
               needs a wallet, points at Wallet. Not to be merged with the self-signed voice, which
               needs MetaMask ACTIVE and points at the landing page. */}
           Set up your wallet first — open{" "}
-          <button className="linkbtn" onClick={() => (window.location.hash = "/wallet")}>Wallet</button>{" "}
+          <button className="linkbtn" onClick={goToWalletAndReturn}>Wallet</button>{" "}
           to connect one, then come back to deposit.
         </div>
       </div>

@@ -5,6 +5,7 @@ import { formatUsdc } from "../lib/formatUsdc";
 import { arcTestnet } from "../config/chain";
 import { SendOutcome, type SendResult } from "./SendPanel";
 import AddressDisplay from "./AddressDisplay";
+import AgentWalletGate from "./AgentWalletGate";
 
 const EXPLORER = arcTestnet.blockExplorers.default.url;
 type UnifiedWallet = ReturnType<typeof useWallet>;
@@ -191,13 +192,11 @@ export function PayOrderView({
         </Status>
       )}
 
-      {open && !w.agentWallet && (
-        <Status>
-          Set up your wallet first — open{" "}
-          <button className="linkbtn" onClick={() => (window.location.hash = "/wallet")}>Wallet</button>{" "}
-          to connect one, then come back to this link to pay.
-        </Status>
-      )}
+      {/* ⭐ FOUR states behind "no agent wallet", each with its own copy, and the buyer never loses
+          the order: only the no-wallet case leaves the page, and it leaves with a return-to.
+          (2026-09-19 live proof: the old single sentence sent a connected buyer away, dropped the
+          order id, and hid a failed resolve as "set up your wallet".) */}
+      {open && !w.agentWallet && <AgentWalletGate wallet={w} verb="pay" nothingHappened="Nothing was paid." />}
 
       {open && w.agentWallet && (
         <button className="emerald btn-wide" disabled={paying || !!result} onClick={onPay}>

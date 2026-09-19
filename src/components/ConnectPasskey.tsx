@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import type { useWallet } from "../wallet/useWallet";
 import YourMoney from "./YourMoney";
+import { returnAfterConnect } from "../lib/returnTo";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -29,6 +30,16 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
       history.replaceState(null, "", "#/wallet");
     }
   }, []);
+
+  // ⭐ RETURN-TO (2026-09-19). A page that needed the agent wallet sent the user here with
+  // goToWalletAndReturn(), which stashed where they were (e.g. #/pay?order=<id>). The moment the
+  // wallet is READY — the same condition as the "✓ Wallet ready" branch below — send them back and
+  // clear the stash. Keyed on readiness, not on mount: a user who lands here connected-but-resolving
+  // goes back only once the page they return to can actually proceed.
+  const ready = !!w.address && !!w.agentWallet;
+  useEffect(() => {
+    if (ready) returnAfterConnect();
+  }, [ready]);
 
   return (
     <div className="plane">

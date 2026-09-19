@@ -138,6 +138,11 @@ export const COMPONENTS = {
   // the proposals and that no button.emerald exists on the page (mutation-checked).
   TreasuryPanel:  { suite: "verify-treasury-copy.tsx" },
   SignInPrompt:   { noClaims: true },
+  // ⛔ The four-state "no agent wallet" gate shared by Pay and Send (2026-09-19). Its claims: the agent
+  // wallet "needs no funds to be created" (a precondition NOT being one — the same point SendPanel's
+  // gate was corrected on), and "Nothing was paid/sent" in the failed state. Both are pinned rendered,
+  // per state, in its suite — together with the return-to round trip and the un-swallowed failure.
+  AgentWalletGate: { suite: "verify-wallet-gate.tsx" },
   // 🚨 WAS `noClaims: true`, AND IT WENT STALE THE MOMENT IT GREW A CAP SENTENCE (2026-08-30) —
   // the SECOND time this exact staleness has happened, after SendPanel above. It now says swaps run
   // "within your per-transaction and daily safety caps" and links to an UNCAPPED twin, so it is the

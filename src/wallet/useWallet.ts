@@ -1,5 +1,6 @@
 // src/wallet/useWallet.ts
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { resolveAgentWallet } from "./resolveAgentWallet";
 import { useModularWallet } from "./useModularWallet";
 import {
   connectMetaMask as connectMetaMaskConnector,
@@ -55,6 +56,13 @@ export function useWallet() {
     balance: string | null; // USDC
     eurcBalance: string | null; // EURC — a second, distinct amount (not summed)
   } | null>(null);
+  // 🚨 WHY `agentWallet` IS NULL, when it is (2026-09-19). Until now a failed /api/my-wallet
+  // (expired session → 401, server down, six 202s) vanished into `.catch(() => {})`, and every
+  // page gated on `!agentWallet` told a just-connected user "Set up your wallet first" — forever,
+  // with no reason and no retry. These two fields let a page tell "resolving" from "failed" from
+  // "no session" from "no wallet". [[absence-must-never-read-as-safe]]
+  const [agentWalletResolving, setAgentWalletResolving] = useState(false);
+  const [agentWalletError, setAgentWalletError] = useState<string | null>(null);
 
   // Set when a returning user's SAVED passkey login fails (passkey deleted, wrong
   // device, or the prompt was dismissed). Surfaced as a CLEAR "couldn't log in"
@@ -77,6 +85,7 @@ export function useWallet() {
     authInFlight.current = null;
     persistSession(null);
     setAgentWallet(null); // a new/cleared session must re-resolve its own wallet
+    setAgentWalletError(null); // …and a stale failure must not be shown against the new one
   }, [persistSession]);
 
   const connectRegister = useCallback(
@@ -303,31 +312,25 @@ export function useWallet() {
 
   // Resolve (provisioning on first call) the user's OWN agent wallet from their
   // session. Idempotent server-side — a second call returns the same wallet.
+  // The loop (202 = provisioning, six tries) lives in resolveAgentWallet as a pure result; here
+  // it is RECORDED: success clears the error, failure stores it, and the throw is kept so existing
+  // callers' `.catch` still fire — but nothing is lost when they swallow it.
   const refreshAgentWallet = useCallback(async () => {
     const token = session?.token;
     if (!token) return null;
-    // 202 = "provisioning" (a rare sub-convergence race): the mapping exists but
-    // hasn't propagated to reads yet. Retry a few times; the store converges in
-    // ~11s. The common paths (first provision, or a returning user) return 200.
-    for (let i = 0; i < 6; i++) {
-      const r = await fetch("/api/my-wallet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      });
-      if (r.status === 202) {
-        await new Promise((res) => setTimeout(res, 3000));
-        continue;
+    setAgentWalletResolving(true);
+    try {
+      const res = await resolveAgentWallet({ token });
+      if ("error" in res) {
+        setAgentWalletError(res.error);
+        throw new Error(res.error);
       }
-      const data = await r.json();
-      if (!r.ok) throw new Error(data?.error || "Could not load your wallet");
-      setAgentWallet({
-        address: data.address,
-        balance: data.balance ?? null,
-        eurcBalance: data.eurcBalance ?? null,
-      });
-      return data;
+      setAgentWalletError(null);
+      setAgentWallet(res.wallet);
+      return res.wallet;
+    } finally {
+      setAgentWalletResolving(false);
     }
-    return null; // still provisioning; a later refresh will resolve it
   }, [session]);
 
   // Once a session exists (login, hire-time auth, or a restored session), resolve
@@ -694,6 +697,8 @@ export function useWallet() {
     isAuthenticated: !!session && session.exp * 1000 > Date.now(),
     // Per-user agent wallet (Brick 2a): the caller's own provisioned wallet.
     agentWallet,
+    agentWalletResolving,
+    agentWalletError,
     refreshAgentWallet,
     sendFromAgent,
     swapFromAgent,

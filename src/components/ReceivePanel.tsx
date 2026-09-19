@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { goToWalletAndReturn } from "../lib/returnTo";
 import qrcode from "qrcode-generator";
 import AddressDisplay from "./AddressDisplay";
 import type { useWallet } from "../wallet/useWallet";
@@ -124,7 +125,7 @@ export default function ReceivePanel({ wallet: w }: { wallet: UnifiedWallet }) {
       {!address ? (
         <div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>
           You are not signed in, so there is no address to show yet. Open your{" "}
-          <button className="linkbtn" onClick={() => (window.location.hash = "/wallet")}>
+          <button className="linkbtn" onClick={goToWalletAndReturn}>
             Wallet
           </button>{" "}
           to get one.
@@ -220,7 +221,7 @@ export default function ReceivePanel({ wallet: w }: { wallet: UnifiedWallet }) {
           <div className="sub" style={{ marginTop: 12 }}>
             Money received here lands in your own wallet — not your agent's float, and not your
             unified balance. Move it on from the{" "}
-            <button className="linkbtn" onClick={() => (window.location.hash = "/wallet")}>
+            <button className="linkbtn" onClick={goToWalletAndReturn}>
               Wallet page
             </button>{" "}
             when you want to.

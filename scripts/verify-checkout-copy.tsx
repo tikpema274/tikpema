@@ -67,11 +67,17 @@ section("1 — 🚨 OPEN: what, to whom, how much — and the irreversibility li
 
 section("2 — OPEN without an agent wallet: the order is READABLE, the seal is not offered");
 {
+  // ⚠️ This fixture has a LOGIN address and no session — which is the "address, no session" state,
+  // not "no wallet". Until 2026-09-19 it rendered "Set up your wallet first — open Wallet" (the
+  // send-away that lost the order id); now it renders Sign in INLINE. The no-address state is
+  // pinned in verify-wallet-gate.tsx together with the other three.
   const m = view(base, {}, wallet({ agentWallet: null }));
   const t = strip(m);
   check("⭐ door not wall: description, merchant (masked, expandable) and amount still render", t.includes("Two coffees") && t.includes(`${MERCHANT.slice(0, 6)}…${MERCHANT.slice(-4)}`) && /1\.500000/.test(t));
   check("no seal button", !/class="emerald[^"]*"[^>]*>Pay /.test(m));
-  check("points at Wallet to set one up", /Set up your wallet/i.test(t) && /Wallet/.test(t));
+  check("⭐ a connected login without a session is offered Sign in HERE, not sent to Wallet", /<button[^>]*>Sign in/.test(m) && !/Set up your wallet/i.test(t));
+  const noAddr = view(base, {}, { ...wallet({ agentWallet: null }), address: null });
+  check("⭐ no login wallet at all → points at Wallet to set one up (with return-to, not a bare link)", /Set up your wallet/i.test(strip(noAddr)) && /Wallet/.test(strip(noAddr)));
 }
 
 section("3 — PAID: receipt with the hash and explorer link; no seal");

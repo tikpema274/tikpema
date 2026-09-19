@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { goToWalletAndReturn } from "../lib/returnTo";
 import type { useWallet } from "../wallet/useWallet";
 import { describeError } from "../lib/describeError";
 import { displayAmount } from "../lib/formatAmount";
@@ -96,7 +97,7 @@ export default function SwapPanel({ wallet: w }: { wallet: UnifiedWallet }) {
               needs a wallet, points at Wallet. Not to be merged with the self-signed voice, which
               needs MetaMask ACTIVE and points at the landing page. */}
           Set up your wallet first — open{" "}
-          <button className="linkbtn" onClick={() => (window.location.hash = "/wallet")}>
+          <button className="linkbtn" onClick={goToWalletAndReturn}>
             Wallet
           </button>{" "}
           to connect one, then come back here to swap.

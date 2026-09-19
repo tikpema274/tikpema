@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { goToWalletAndReturn } from "../lib/returnTo";
 import type { useWallet } from "../wallet/useWallet";
 import { formatUsdc } from "../lib/formatUsdc";
 import { describeError } from "../lib/describeError";
@@ -103,7 +104,7 @@ export default function SellPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       {!address ? (
         <div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>
           You are not signed in, so there is no wallet to be paid to yet. Open your{" "}
-          <button className="linkbtn" onClick={() => (window.location.hash = "/wallet")}>Wallet</button> to get one.
+          <button className="linkbtn" onClick={goToWalletAndReturn}>Wallet</button> to get one.
         </div>
       ) : (
         <>
