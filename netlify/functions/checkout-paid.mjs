@@ -13,11 +13,21 @@
 // ⚠️ 503 "unverified" (RPC unreachable / receipt not yet available) is NOT a refusal: the order stays
 // as it was and the client may retry. 409 "not a payment of this order" IS a verdict from a receipt
 // we read. The two are never the same branch. [[absence-must-never-read-as-safe]]
+//
+// 🚨 ONE HASH, ONE ORDER (2026-09-19). The receipt test binds a transfer to the MERCHANT (from/to/
+// amount ≥); it never bound it to THIS order. So, in this order:
+//   1. the receipt verifies (incl. mined AFTER `order.createdAtBlock`; an order with none is UNBOUND
+//      → 409 code:"unbound", said, never passed);
+//   2. `tx:<hash>` is CLAIMED for this order (onlyIfNew) — a hash another order already holds → 409
+//      code:"replay" WITH THAT ORDER NAMED (`paidOrderId`); a claim already naming this order = a retry
+//      after a crashed transition → proceed;
+//   3. the transition. Claim before transition, so a CAS failure at 3 retries cleanly through 2.
+// Every 409 carries `code` so the pay surface renders the KIND of refusal, not a generic failure.
 import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
-import { safeOrderId, readOrder, transitionOrder, publicOrder, effectiveStatus, STATUS, TX_HASH_RE } from "./_checkout.mjs";
+import { safeOrderId, readOrder, transitionOrder, claimTxForOrder, publicOrder, effectiveStatus, STATUS, TX_HASH_RE } from "./_checkout.mjs";
 import { fetchReceipt, verifyDirectPayment } from "./_checkout-verify.mjs";
 
 export async function handler(event) {
@@ -65,10 +75,15 @@ export async function handler(event) {
   const got = await fetchReceipt(txHash);
   if (got.unreadable) return json(503, { error: `unverified: ${got.unreadable}`, order: publicOrder(order) });
   if (!got.receipt) return json(503, { error: "unverified: receipt not available yet — the transaction may still be confirming", order: publicOrder(order) });
-  const v = verifyDirectPayment({ receipt: got.receipt, merchant: order.merchant, amountUsdc: order.amountUsdc, from: buyer });
-  if (!v.paid) return json(409, { error: `not a payment of this order: ${v.reason}`, order: publicOrder(order) });
+  const v = verifyDirectPayment({ receipt: got.receipt, merchant: order.merchant, amountUsdc: order.amountUsdc, from: buyer, createdAtBlock: order.createdAtBlock });
+  if (!v.paid) return json(409, { error: `not a payment of this order: ${v.reason}`, code: v.code ?? "receipt", order: publicOrder(order) });
 
-  const t = await transitionOrder({ id, from: status, to: STATUS.PAID, patch: { paidTx: txHash, paidBy: buyer, paidAt: new Date().toISOString(), paidUnits: v.value.toString() } });
+  // The receipt pays this order. Now: does this hash already pay ANOTHER one? Claim before transition.
+  const claim = await claimTxForOrder({ txHash, orderId: id, merchant: order.merchant, paidBy: buyer });
+  if (claim.unreadable) return json(503, { error: `unverified: ${claim.reason}`, order: publicOrder(order) });
+  if (!claim.ok) return json(409, { error: `not a payment of this order: ${claim.reason}`, code: "replay", paidOrderId: claim.paidOrderId ?? null, order: publicOrder(order) });
+
+  const t = await transitionOrder({ id, from: status, to: STATUS.PAID, patch: { paidTx: txHash, paidBy: buyer, paidAt: new Date().toISOString(), paidUnits: v.value.toString(), paidAtBlock: v.minedAt } });
   if (!t.ok) return json(409, { error: t.reason, order: publicOrder(t.order ?? order) });
   return json(200, { order: publicOrder(t.order) });
 }

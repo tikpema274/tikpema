@@ -38,13 +38,21 @@ export type PublicOrder = {
   paidTx: string | null;
   paidAt: string | null;
   circleId: string | null;
+  /** The Arc head when the order was minted; a payment must be mined after it. `null` = an order
+   *  created before binding (2026-09-19) — UNBOUND, the server refuses every payment of it, so the
+   *  seal is not offered. */
+  createdAtBlock?: number | null;
 };
 
-/** What /api/checkout-paid said about the order after the send (or why it could not say). */
+/** What /api/checkout-paid said about the order after the send (or why it could not say).
+ *  ⚠️ `unverified` (503) and `refused` (409) are DIFFERENT facts: the first is "could not read", the
+ *  second is a VERDICT from a receipt the server read. Rendering a verdict as "could not yet verify"
+ *  would promise the buyer a paid order that will never come. */
 export type Mark =
   | { status: "paid"; paidTx?: string | null }
   | { status: "submitted" }
   | { unverified: string }
+  | { refused: string; code: "replay" | "predates" | "unbound" | "receipt" | string; paidOrderId: string | null }
   | null;
 
 // Read the order id from the hash query ONCE, at mount (the SendPanel payment-link pattern): re-reading
@@ -104,7 +112,11 @@ export function PayOrderView({
 }) {
   const amount = formatUsdc(order.amountUsdc);
   const agentAddress = w.agentWallet?.address ?? "";
-  const open = order.status === "open";
+  // 🚨 UNBOUND: no createdAtBlock (an order minted before 2026-09-19 binding). The server refuses every
+  // payment of it — and this page sends FIRST, reports SECOND. Offering the seal would move the money
+  // and never mark the order. So an unbound order is not `open` here: no seal, the reason on the page.
+  const unbound = order.status === "open" && (order.createdAtBlock === null || order.createdAtBlock === undefined);
+  const open = order.status === "open" && !unbound;
 
   return (
     <div className="plane">
@@ -171,6 +183,14 @@ export function PayOrderView({
         </Status>
       )}
 
+      {unbound && (
+        <Status tone="warn">
+          <b>This checkout link cannot be settled.</b> It predates payment binding (the order records no creation
+          block, so no transfer can be shown to belong to it) and the server will refuse any payment of it. Nothing
+          has been paid. Ask the seller for a new checkout link.
+        </Status>
+      )}
+
       {open && !w.agentWallet && (
         <Status>
           Set up your wallet first — open{" "}
@@ -199,6 +219,31 @@ export function PayOrderView({
         <Status tone="warn">
           <b>Could not yet verify</b> this payment against the order ({mark.unverified}). Your transfer is what the
           receipt above says it is; the order will show paid once the server can read it. Do not pay again.
+        </Status>
+      )}
+      {/* A 409 is a VERDICT: the server read the receipt and it does not pay THIS order. Say which
+          kind, and — for a replay — name and link the order the transaction DID pay. */}
+      {mark && "refused" in mark && (
+        <Status tone="warn">
+          <b>Not a payment of this order.</b>{" "}
+          {mark.code === "replay" && mark.paidOrderId ? (
+            <>
+              This transaction already paid order{" "}
+              <a href={`#/pay?order=${mark.paidOrderId}`} className="mono">{mark.paidOrderId}</a>. One transfer settles one
+              order; this order remains unpaid and nothing was marked. Paying it would be a second transfer.
+            </>
+          ) : mark.code === "unbound" ? (
+            <>
+              This checkout link cannot be settled: it predates payment binding, and the server refuses every payment
+              of it. This order remains unpaid. Ask the seller for a new checkout link.
+            </>
+          ) : (
+            <>
+              The server did not mark this order paid ({mark.refused}). This order remains unpaid and nothing was
+              marked.
+            </>
+          )}
+          {mark.code === "replay" || mark.code === "unbound" ? <> <span className="muted">({mark.refused})</span></> : null}
         </Status>
       )}
     </div>
@@ -260,6 +305,8 @@ export default function PayPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       const j = await r.json().catch(() => ({}));
       if (r.ok && j?.order?.status === "paid") setMark({ status: "paid", paidTx: j.order.paidTx });
       else if (r.ok && j?.order?.status === "submitted") setMark({ status: "submitted" });
+      // 409 = a verdict from a receipt the server READ; everything else (503, network) = could not read.
+      else if (r.status === 409 && typeof j?.error === "string") setMark({ refused: j.error, code: j.code ?? "receipt", paidOrderId: j.paidOrderId ?? null });
       else setMark({ unverified: j?.error || `HTTP ${r.status}` });
     } catch (e: any) {
       setMark({ unverified: describeError(e) });

@@ -21,9 +21,25 @@
 // ═══ KEYS ══════════════════════════════════════════════════════════════════════════════════════
 //   id:<orderId>                    the record (the truth)
 //   m:<merchantLower>:<orderId>     an INDEX for the merchant's own listing (v1 writes it, lists nothing)
-// Both carry the same record. The index is a copy by design — a merchant listing must never scan the
-// whole store — and every write goes to the record FIRST; an index that lags is a stale listing, an
-// index that leads is a phantom order.
+//   tx:<hashLower>                  the CLAIM: which order this transaction paid (2026-09-19, below)
+// Record and index carry the same record. The index is a copy by design — a merchant listing must
+// never scan the whole store — and every write goes to the record FIRST; an index that lags is a stale
+// listing, an index that leads is a phantom order.
+//
+// ═══ 🚨 BINDING A PAYMENT TO ONE ORDER (2026-09-19, found read-only before any live payment) ═══════
+// The receipt test (`_checkout-verify.mjs`) judges emitter / from / to / amount ≥. On its own that
+// binds a transfer to a MERCHANT, not to an ORDER: one 0.15 hash posted against every open order of
+// that merchant ≤ 0.15 would have marked them ALL paid, and a plain #/send made before an order existed
+// would have settled it. Two bindings now sit in front of the transition:
+//   1. THE CLAIM — `tx:<hash>` → { orderId } written onlyIfNew BEFORE `transitionOrder`. A hash settles
+//      at most one order; a second order posting it is refused WITH THE FIRST ORDER NAMED. Claim first,
+//      then transition: if the process dies between the two writes, the retry finds a claim naming its
+//      own order and proceeds — the claim is idempotent for its owner, exclusive for everyone else.
+//   2. `createdAtBlock` — the chain head when the order was minted; the receipt's block must be AFTER
+//      it (`verifyDirectPayment`). An order WITHOUT it is UNBOUND and refused as such, never passed.
+// ⛔ What this does NOT bind: two same-merchant, same-buyer, same-amount orders created before one
+// payment still collapse to whichever posts first — only the order id ON CHAIN settles that, and that
+// changes agent-send (the money path). Recorded in PROGRESS.md as the remaining gap; not built here.
 //
 // ⚠️ READS ON THE PAY PATH ARE STRONG (per call, never store-level — a store-level option leaks into
 // writes). A cached `open` beside a fresh `paid` is a double payment invited. The handler must have
@@ -59,6 +75,10 @@ export function safeOrderId(v) {
 
 export const orderKey = (id) => `id:${id}`;
 export const merchantKey = (merchant, id) => `m:${norm(merchant)}:${id}`;
+export const txClaimKey = (txHash) => `tx:${norm(txHash)}`;
+
+/** A block height as stored on an order: a non-negative safe integer NUMBER, nothing else. */
+export const isBlockHeight = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 
 /**
  * Build a new order record, or return `{ error }`. Pure: no store, no clock beyond `now`.
@@ -70,9 +90,13 @@ export const merchantKey = (merchant, id) => `m:${norm(merchant)}:${id}`;
  * - cap: an order nobody can pay is a defect at CREATE time, so the per-transaction send cap is
  *   enforced here with the cap named, exactly as agent-send names it at pay time.
  * - description: plain text, trimmed, bounded. Rendered as text, never HTML.
+ * - createdAtBlock: the Arc head at creation, REQUIRED. An order without it can never be shown to
+ *   pre-date a transfer, so no transfer can pay it — an unbound order is one nobody could pay, and
+ *   that is a defect at creation, refused here exactly like an amount over the cap.
  */
-export function buildOrder({ merchant, amountUsdc, description, capUsdc, now = Date.now() }) {
+export function buildOrder({ merchant, amountUsdc, description, capUsdc, createdAtBlock, now = Date.now() }) {
   if (!ADDRESS_RE.test(merchant || "")) return { error: "merchant address is not a valid address" };
+  if (!isBlockHeight(createdAtBlock)) return { error: "createdAtBlock unreadable — refusing to create an order no transfer could be bound to" };
   const units = parseUnits6(amountUsdc);
   if (units === null) return { error: `amountUsdc must be a decimal number with at most ${USDC_DECIMALS} decimal places` };
   if (units === 0n) return { error: "amountUsdc must be greater than zero" };
@@ -93,6 +117,7 @@ export function buildOrder({ merchant, amountUsdc, description, capUsdc, now = D
       settlement: SETTLEMENT.DIRECT,
       status: STATUS.OPEN,
       createdAt: new Date(now).toISOString(),
+      createdAtBlock,
       expiresAt: new Date(now + ORDER_TTL_MS).toISOString(),
     },
   };
@@ -126,11 +151,17 @@ export function effectiveStatus(order, now = Date.now()) {
 /**
  * The public view of an order — what a buyer (possibly signed out) may see. The merchant address IS
  * shown: it is the payee, and naming the payee is the disclosure the pay surface exists to make.
+ * `createdAtBlock` is exposed (null when the record predates binding) so the pay surface can decline
+ * to offer a seal on an order the server would refuse as unbound — BEFORE the money moves.
  */
 export function publicOrder(order, now = Date.now()) {
   if (!order) return null;
-  const { id, merchant, amountUsdc, description, settlement, createdAt, expiresAt, paidTx, paidAt, circleId } = order;
-  return { id, merchant, amountUsdc, description, settlement, createdAt, expiresAt, status: effectiveStatus(order, now), paidTx: paidTx ?? null, paidAt: paidAt ?? null, circleId: circleId ?? null };
+  const { id, merchant, amountUsdc, description, settlement, createdAt, expiresAt, paidTx, paidAt, circleId, createdAtBlock } = order;
+  return {
+    id, merchant, amountUsdc, description, settlement, createdAt, expiresAt, status: effectiveStatus(order, now),
+    paidTx: paidTx ?? null, paidAt: paidAt ?? null, circleId: circleId ?? null,
+    createdAtBlock: isBlockHeight(createdAtBlock) ? createdAtBlock : null,
+  };
 }
 
 function store(s) { return s ?? getStore(CHECKOUT_STORE); }
@@ -152,6 +183,35 @@ export async function writeNewOrder(order, s) {
   if (res?.modified === false) return { ok: false, reason: "order id already exists" };
   await st.setJSON(merchantKey(order.merchant, order.id), order);
   return { ok: true };
+}
+
+/**
+ * ⭐ CLAIM A TRANSACTION FOR ONE ORDER. `tx:<hash>` is written onlyIfNew — the same primitive that
+ * keeps `writeNewOrder` from overwriting an id. Called AFTER the receipt verified and BEFORE the
+ * transition (a hash that did not pay must never squat a claim; a claim without a transition must
+ * be re-enterable by its owner). Returns:
+ *   { ok: true }                       claimed now
+ *   { ok: true, prior: true }          already claimed BY THIS ORDER (retry after a crashed transition)
+ *   { ok: false, paidOrderId, reason } already claimed by ANOTHER order — the reason names it
+ *   { ok: false, unreadable: true }    the store could not say — never mistaken for either of the above
+ */
+export async function claimTxForOrder({ txHash, orderId, merchant, paidBy, now = Date.now() }, s) {
+  if (!TX_HASH_RE.test(txHash || "")) return { ok: false, reason: "malformed transaction hash" };
+  const st = store(s);
+  const key = txClaimKey(txHash);
+  const claim = { txHash: norm(txHash), orderId, merchant, paidBy, claimedAt: new Date(now).toISOString() };
+  let res;
+  try { res = await st.setJSON(key, claim, { onlyIfNew: true }); }
+  catch (e) { return { ok: false, unreadable: true, reason: `claim write failed: ${e?.message ?? e}` }; }
+  if (res?.modified !== false) return { ok: true };
+  // Someone holds it. Read WHO — strongly — and only a claim naming THIS order lets the caller through.
+  let prior;
+  try { prior = await st.getWithMetadata(key, { type: "json", consistency: READ_CONSISTENCY }); }
+  catch (e) { return { ok: false, unreadable: true, reason: `claim exists but could not be read: ${e?.message ?? e}` }; }
+  const holder = prior?.data?.orderId;
+  if (typeof holder !== "string" || !holder) return { ok: false, unreadable: true, reason: "claim exists but names no order — refusing to guess" };
+  if (holder === orderId) return { ok: true, prior: true };
+  return { ok: false, paidOrderId: holder, reason: `this transaction already paid order ${holder}` };
 }
 
 /**

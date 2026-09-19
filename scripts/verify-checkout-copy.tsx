@@ -30,7 +30,7 @@ const EXPL = "https://testnet.arcscan.app";
 const base = {
   id: "o_mu7dugw0_a9f8523e2b9816f7", merchant: MERCHANT, amountUsdc: "1.500000", description: "Two coffees",
   settlement: "direct", status: "open", createdAt: "2026-09-18T20:00:00.000Z", expiresAt: "2026-10-02T20:00:00.000Z",
-  paidTx: null, paidAt: null, circleId: null,
+  paidTx: null, paidAt: null, circleId: null, createdAtBlock: 62816113,
 };
 const wallet = (opts: { agentWallet?: any } = {}) => ({
   address: "0x" + "77".repeat(20),
@@ -145,6 +145,45 @@ section("8 — ⛔ BOTH ROUTES ARE LINKED: Pay is a NAV item, Sell has a Dashboa
   const dash = readFileSync(new URL("../src/components/Dashboard.tsx", import.meta.url), "utf8");
   check("⭐ the Dashboard card is the way into Sell", dash.includes('go("sell")'));
   check("…and the Pay door links Sell too", /window\.location\.hash = "\/sell"/.test(readFileSync(new URL("../src/components/PayPanel.tsx", import.meta.url), "utf8")));
+}
+
+section("9 — 🚨 REFUSED marks: a 409 is a VERDICT the buyer must read, never 'could not yet verify'");
+{
+  // The server READ the receipt and said "not a payment of this order". Rendering that through the
+  // unverified branch would tell the buyer "the order will show paid once the server can read it" —
+  // a false promise about a verdict already given. Each refusal has its own copy, pinned here.
+  const OTHER_ID = "o_mu7ju1sf_0123456789abcdef";
+  const replay = view(base, { result: { txHash: HASH }, mark: { refused: `not a payment of this order: this transaction already paid order ${OTHER_ID}`, code: "replay", paidOrderId: OTHER_ID } });
+  const rt = strip(replay);
+  check("🚨 replay: NAMES the order the transaction already paid", rt.includes(OTHER_ID), rt.slice(0, 200));
+  check("⭐ …and LINKS it (#/pay?order=<that id>), so the buyer can open the order that got the money", replay.includes(`#/pay?order=${OTHER_ID}`));
+  check("…says THIS order is still unpaid and nothing was marked", /still unpaid|not (been )?marked|remains unpaid/i.test(rt));
+  check("🚨 …does NOT promise 'will show paid once the server can read it' (that is the unverified copy)", !/once the server can read it/i.test(rt) && !/could not yet verify/i.test(rt));
+  check("…keeps the transfer hash visible (the money did move)", rt.includes(HASH));
+
+  const predates = view(base, { result: { txHash: HASH }, mark: { refused: "not a payment of this order: the transfer was mined in block 62816721, before this order was created at block 62816722", code: "predates", paidOrderId: null } });
+  const pt = strip(predates);
+  check("🚨 predates: renders the server's reason verbatim (both blocks visible)", pt.includes("62816721") && pt.includes("62816722"));
+  check("…says the order is still unpaid, no false promise", /still unpaid|remains unpaid/i.test(pt) && !/once the server can read it/i.test(pt));
+
+  const unbound = view(base, { result: { txHash: HASH }, mark: { refused: "not a payment of this order: the order is unbound — it has no createdAtBlock", code: "unbound", paidOrderId: null } });
+  const ut = strip(unbound);
+  check("unbound (server-side): says the link cannot be settled and to ask the seller for a NEW link", /cannot be settled|can no longer be settled/i.test(ut) && /new (checkout )?link/i.test(ut));
+}
+
+section("10 — 🚨 an UNBOUND order (createdAtBlock null: the two pre-binding prod orders) offers NO seal");
+{
+  // The pay path sends FIRST and reports SECOND. If the seal were offered on an order the server will
+  // refuse as unbound, the buyer's money would move and the order would never mark. So the refusal
+  // must happen BEFORE the money: no seal, and the reason on the page.
+  const m = view({ ...base, createdAtBlock: null });
+  const t = strip(m);
+  check("🚨 no seal button on an unbound order", !/class="emerald[^"]*"[^>]*>Pay /.test(m));
+  check("⭐ says why: the link predates payment binding / cannot be settled, ask the seller for a new one", /cannot be settled|predates/i.test(t) && /new (checkout )?link/i.test(t));
+  check("…still shows what / to whom / how much (door, not wall)", t.includes("Two coffees") && /1\.500000 USDC/.test(t));
+  check("…no irreversibility hazard (nothing to decide)", !m.includes(IRREVERSIBLE_LINE));
+  const bound = view(base);
+  check("(a bound order still offers the seal)", /class="emerald[^"]*"[^>]*>Pay /.test(bound));
 }
 
 console.log(`\n${"═".repeat(72)}`);

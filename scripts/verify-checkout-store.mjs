@@ -10,6 +10,11 @@
 //   4. `expired` is DERIVED from the clock at read time and blocks every transition.
 //   5. An UNREADABLE store is refused as unreadable — never treated as "no such order" (absence ≠ safe).
 //   6. CAS: a record changed between read and write is refused, not overwritten.
+//   7. 🚨 THE HASH CLAIM (2026-09-19): `tx:<hashLower>` is written onlyIfNew; a second order posting the same
+//      hash is refused WITH THE FIRST ORDER NAMED; the same order again is a no-op success (idempotent retry);
+//      an unreadable claim is UNREADABLE, never "someone else's".
+//   8. buildOrder records `createdAtBlock` and REFUSES an order without one — an unbound order is one nobody
+//      could pay, a defect at creation.
 import { mock } from "node:test";
 const mem = new Map();            // key -> { json, etag }
 let etagSeq = 0, unreadable = false, changeUnderUs = null;
@@ -22,6 +27,7 @@ mock.module("@netlify/blobs", {
         return e ? { data: JSON.parse(e.json), etag: e.etag } : null;
       },
       setJSON: async (k, v, opts = {}) => {
+        if (unreadable) throw new Error("store down"); // a store that is down is down for writes too
         const cur = mem.get(k);
         if (opts.onlyIfNew && cur) return { modified: false };
         if (opts.onlyIfMatch && (!cur || cur.etag !== opts.onlyIfMatch)) return { modified: false };
@@ -34,9 +40,13 @@ mock.module("@netlify/blobs", {
 });
 const C = await import("../netlify/functions/_checkout.mjs");
 const {
-  buildOrder, mintOrderId, safeOrderId, ORDER_ID_RE, orderKey, merchantKey, formatUnits6,
+  mintOrderId, safeOrderId, ORDER_ID_RE, orderKey, merchantKey, formatUnits6,
   effectiveStatus, publicOrder, readOrder, writeNewOrder, transitionOrder, STATUS, SETTLEMENT, ORDER_TTL_MS,
+  claimTxForOrder, txClaimKey,
 } = C;
+// Every order in this suite is bound at block 100 unless a case says otherwise (2026-09-19 binding).
+const BLOCK = 100;
+const buildOrder = (a) => C.buildOrder({ createdAtBlock: BLOCK, ...a });
 
 let pass = 0, fail = 0;
 const check = (l, c, x = "") => { if (c) { pass++; console.log(`  ✅ ${l}${x ? ` — ${x}` : ""}`); } else { fail++; console.log(`  ❌ ${l}${x ? ` — ${x}` : ""}`); } };
@@ -141,6 +151,49 @@ section("5 — expiry, absence, unreadable, CAS");
   const cas = await transitionOrder({ id: order.id, from: "open", to: "paid", patch: { paidTx: HASH1 }, now: NOW });
   check("⭐ CAS: a record changed under us is refused, not overwritten", !cas.ok && /changed under us/.test(cas.reason), cas.reason);
   check("…and the stored record is still open", JSON.parse(mem.get(orderKey(order.id)).json).status === "open");
+}
+
+section("6 — 🚨 the hash claim: one hash, one order; the same order retried is a no-op");
+{
+  reset();
+  const { order: a } = buildOrder({ merchant: MERCHANT, amountUsdc: "0.15", description: "A", capUsdc: 5, now: NOW });
+  const { order: b } = buildOrder({ merchant: MERCHANT, amountUsdc: "0.11", description: "B", capUsdc: 5, now: NOW + 1 });
+  await writeNewOrder(a); await writeNewOrder(b);
+  const c1 = await claimTxForOrder({ txHash: HASH1, orderId: a.id, merchant: MERCHANT, paidBy: BUYER_SCA, now: NOW });
+  check("⭐ first claim ok, not prior", c1.ok && !c1.prior, c1.reason);
+  check("key is tx:<hash lower-cased>; record names orderId, merchant, paidBy, claimedAt", txClaimKey("0xAB") === "tx:0xab" && (() => { const r = JSON.parse(mem.get(txClaimKey(HASH1)).json); return r.orderId === a.id && r.merchant === MERCHANT && r.paidBy === BUYER_SCA && r.claimedAt === new Date(NOW).toISOString(); })());
+  const etagBefore = mem.get(txClaimKey(HASH1)).etag;
+  const c2 = await claimTxForOrder({ txHash: HASH1, orderId: a.id, merchant: MERCHANT, paidBy: BUYER_SCA, now: NOW + 5 });
+  check("⭐ same hash, SAME order → ok with prior:true (idempotent retry after a crashed transition)", c2.ok && c2.prior === true, c2.reason);
+  check("…and the claim was not rewritten", mem.get(txClaimKey(HASH1)).etag === etagBefore);
+  const c3 = await claimTxForOrder({ txHash: HASH1, orderId: b.id, merchant: MERCHANT, paidBy: BUYER_SCA, now: NOW + 6 });
+  check("🚨 same hash, OTHER order → refused, and the reason NAMES the first order", !c3.ok && c3.reason.includes(a.id) && c3.paidOrderId === a.id, c3.reason);
+  check("…the claim still names A (never overwritten)", JSON.parse(mem.get(txClaimKey(HASH1)).json).orderId === a.id);
+  const c4 = await claimTxForOrder({ txHash: "0x" + HASH1.slice(2).toUpperCase(), orderId: b.id, merchant: MERCHANT, paidBy: BUYER_SCA, now: NOW + 7 });
+  check("🚨 the hash compares case-insensitively (upper-case hex is the same claim)", !c4.ok && c4.paidOrderId === a.id, c4.reason);
+  check("malformed hash → refused as malformed, nothing written", !(await claimTxForOrder({ txHash: "0x12", orderId: b.id, merchant: MERCHANT, paidBy: BUYER_SCA })).ok && !mem.has("tx:0x12"));
+  unreadable = true;
+  const ur = await claimTxForOrder({ txHash: HASH2, orderId: b.id, merchant: MERCHANT, paidBy: BUYER_SCA, now: NOW });
+  check("🚨 unreadable store → { unreadable }, NOT ok and NOT 'another order'", !ur.ok && ur.unreadable === true && !ur.paidOrderId, ur.reason);
+  unreadable = false;
+  // A claim that exists but cannot be read back (onlyIfNew said no; the read says nothing) is
+  // UNREADABLE — it must not be mistaken for "this order's" (absence is not safe).
+  mem.set(txClaimKey(HASH2), { json: "null", etag: "x" });
+  const ghost = await claimTxForOrder({ txHash: HASH2, orderId: b.id, merchant: MERCHANT, paidBy: BUYER_SCA, now: NOW });
+  check("🚨 a claim that exists but reads as nothing → unreadable, never ok", !ghost.ok && ghost.unreadable === true, ghost.reason);
+}
+
+section("7 — buildOrder records createdAtBlock and refuses an order it cannot bind");
+{
+  const r = C.buildOrder({ merchant: MERCHANT, amountUsdc: "1", description: "x", capUsdc: 5, now: NOW, createdAtBlock: 62816113 });
+  check("⭐ createdAtBlock is stored on the record", r.order?.createdAtBlock === 62816113, r.error);
+  check("…and the public view exposes it (the pay surface decides whether to offer a seal)", publicOrder(r.order, NOW).createdAtBlock === 62816113);
+  check("a legacy record without it reads createdAtBlock:null in public (never undefined, never 0)", publicOrder({ ...r.order, createdAtBlock: undefined }, NOW).createdAtBlock === null);
+  for (const bad of [undefined, null, NaN, -1, 1.5, "100", Infinity]) {
+    const x = C.buildOrder({ merchant: MERCHANT, amountUsdc: "1", description: "x", capUsdc: 5, now: NOW, createdAtBlock: bad });
+    check(`🚨 createdAtBlock ${String(bad)} → refused (an unbound order is one nobody could pay)`, !!x.error && /createdAtBlock|block/i.test(x.error), x.error);
+  }
+  check("block 0 is a (theoretical) valid binding", !!C.buildOrder({ merchant: MERCHANT, amountUsdc: "1", description: "x", capUsdc: 5, now: NOW, createdAtBlock: 0 }).order);
 }
 
 console.log(`\n${"═".repeat(72)}`);

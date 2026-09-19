@@ -26212,3 +26212,61 @@ minimum entity form, and whether entity/authorisation and the API surface are un
 provider path exercisable before KYB; Kotani's promote trigger (a) is met but its offramp is support-gated even in
 sandbox. Nothing decided. The Circle one-pager's "pending" row was corrected to match (no sandbox; onboarding to a
 live key). Memory: `tikpemapay-non-custodial-design` (new section).
+
+## 2026-09-19 — CHECKOUT: ONE HASH, ONE ORDER — payment bound to the order it pays (BUILT, UNCOMMITTED, NOT DEPLOYED; awaiting T's preview)
+
+**The gap (read-only find, 2026-09-19, before any live payment).** `verifyDirectPayment` judged a receipt by
+emitter / `from` (caller's SCA) / `to` (merchant) / amount ≥. That binds a transfer to a **merchant**, never to an
+**order**. Measured against prod: the unrelated 0.13 USDC `#/send` (tx `0xdf65…4a7f`, block 62816721, from a
+different login's SCA) would have satisfied `checkout-paid` for the 0.11 order `o_mu7jxx8h` had that login posted it;
+and one 0.15 hash posted twice would have marked BOTH prod orders paid. No replay record, no time bound, no order id
+anywhere on chain. `transitionOrder`'s CAS guards one order's etag — it never knew other orders existed.
+
+**Built (server, no money-path change):**
+- `_checkout.mjs` — `tx:<hashLower>` **claim** (`claimTxForOrder`, `onlyIfNew`, the `writeNewOrder` primitive).
+  Claimed **after** the receipt verifies and **before** the transition: a hash that did not pay never squats a claim;
+  a claim without a transition (process died between writes) is re-enterable by its own order (`prior:true`) and
+  exclusive for every other (`paidOrderId` named). An unreadable claim is `unreadable`, never "someone else's".
+  `buildOrder` now **requires `createdAtBlock`** (an unbound order is one nobody could pay → refused at creation);
+  `publicOrder` exposes it (`null` for the two pre-binding records).
+- `_checkout-verify.mjs` — the receipt's block must be **strictly after** `createdAtBlock` (a transfer IN the
+  creation block was already mined when that head was read). No `createdAtBlock` → `code:"unbound"`, refused **and
+  said**, never passed. Every refusal carries `code` (`unbound` | `predates` | `receipt`). `fetchBlockNumber` added
+  beside `fetchReceipt` (shared `rpcCall`; a null/non-hex head is unreadable, never 0).
+- `checkout-create.mjs` — one `eth_blockNumber`; head unreadable → 503, **no order written**.
+- `checkout-paid.mjs` — verify → claim → transition. Replay → 409 `code:"replay"` + `paidOrderId`, the error names
+  the order the hash already paid. Same order retried → 200 "already paid", zero writes.
+- `PayPanel.tsx` — a 409 is a **verdict**, rendered as `refused` (not the `unverified` copy, which promised "will
+  show paid once the server can read it"). Replay names AND links `#/pay?order=<paidOrderId>`. An **unbound** order
+  (`createdAtBlock:null`) offers **no seal** — the page sends first and reports second, so the refusal has to come
+  before the money. **What the merchant sees:** v1 has no merchant listing; the merchant's view is `checkout-get`,
+  which shows the second order still `open`. The 409 with the named order is what the *buyer* sees.
+- Suites: `verify-checkout-paid.mjs` NEW (31, handler-level: boundaries mocked, `_checkout`/`_checkout-verify`
+  real); store 39→60; verify 21→40; copy 37→50. Red-first on the pre-fix tree: store/verify/paid crashed at the new
+  sections (missing exports), copy 9 ❌.
+- DD surface: none of the 13 changed paths is in `DD_SURFACE_DIRS` / `DD_SURFACE_FILES` (checked by script).
+
+**Consequence for the two prod orders `o_mu7ju1sf` / `o_mu7jxx8h`:** they have no `createdAtBlock`; once deployed
+they are UNBOUND — no seal offered, any posted hash refused as unbound. Create fresh orders for the live proof.
+
+**⛔ KNOWN REMAINING GAP 2 — a replay attempt is INVISIBLE to the merchant (v1 accepts this).** The buyer sees
+the 409 naming the already-paid order. The merchant's only view is `checkout-get`, which shows the second order
+still `open` — indistinguishable from nobody having tried. Nothing records the attempt: `claimTxForOrder` refuses
+without writing, and the order record is untouched by design (a refused hash must not squat a claim, and a
+refusal is not a transition). What would close it: a merchant-visible **attempt log** (`att:<merchant>:<orderId>:<ts>`
+→ { txHash, code, paidOrderId, by }, written on every 409 verdict — never on a 503, which is not a verdict) surfaced
+by the merchant **listing** v1 never built (the `m:<merchant>:*` index exists for exactly that listing and lists
+nothing yet). Until then, a merchant who wants to know whether a link was ever contested has no way to ask.
+
+**Preview (T, before commit):** `npx tsx scripts/preview-checkout.tsx && open preview-checkout.html` — real
+`PayOrderView` + real CSS, crafted props; a1/a2 are the two prod records verbatim (unbound, no seal), c the payable
+fresh order, b the replay 409 naming + linking the paid order. ⛔ None of these is reachable in `dev:vite`: it is
+plain `vite` with no `/api` proxy, so `#/pay?order=…` lands in "could not be read" for every id; the replay 409
+additionally needs a deployed server and a live payment.
+
+**⛔ KNOWN REMAINING GAP 1 — not built, deliberately.** Two orders of the same merchant, same buyer, same amount,
+both created before one payment, still collapse to whichever posts the hash first: nothing on chain names the
+order. The real binding is the order id **on chain** — append 32 bytes (keccak of the order id) after the
+`transfer(address,uint256)` calldata via Circle contract-execution (Solidity's ABI decoder ignores trailing
+calldata) and check `tx.input` in verify. That **changes `agent-send` (the money path)** and needs a **live proof**,
+so it is a Deploy of its own, not part of this fix.
