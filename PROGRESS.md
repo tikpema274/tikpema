@@ -26569,3 +26569,42 @@ refuses too (never guesses). That closes the window between page load and the cl
 milliseconds between that read and the send: a cancel landing there still lets the transfer leave, after which
 the server refuses the hash (409 cancelled) and records the late note. Closing that gap would need `agent-send`
 itself to know about orders — a MONEY-PATH change, out of scope here, and its own decision.
+
+## Deploy 13 COMPLETE — CANCEL for checkout orders (+ the ledger gates' first live run) (2026-09-19)
+
+Deploy `6aaefdfa4dae12b461ae07c2`, served tree `664340eeaf28` (commit `1c76237`), created 21:26:18Z, published
+**2026-09-19T21:53:30Z** (27 min bundling), bundle `assets/index-BgdJ6HCa.js`. Run from T's shell; this record
+written afterwards from the artefacts. gate:deployed VERIFIED (ready, tree + commit match, control == data, 0
+orphans) — my run, read-only. ⚠️ Earlier the same evening a "deployed" report was premature: Netlify had received
+nothing for 1c76237 and prod still served 6e2b1ff — the chain was still in its pre-deploy gates. Verified only
+once the served commit changed.
+
+WHAT SHIPPED (13 files, `1c76237`): `STATUS.CANCELLED`, open → cancelled only (submitted refused — money in
+flight; paid never), cancelled terminal in `effectiveStatus`; `checkout-cancel.mjs` — MERCHANT-ONLY from the
+verified session against the RECORD's merchant (a buyer 403; a body field ignored), CAS via `transitionOrder`
+(both race directions pinned); `checkout-paid` refuses a cancelled order BEFORE any chain read (fetchReceipt
+asserted not called) and writes the LATE NOTE `late:<merchant>:<orderId>` { txHash, by, at, verified:false } —
+REPORTED, NOT VERIFIED; `checkout-list` surfaces `lateReport`; PayPanel cancelled state (banner suppressed once a
+result is on screen) + the late-landing buyer's copy + the PRE-SEND RE-READ (the client race NARROWED, not closed
+— closing it needs agent-send to know orders); SellPanel "Cancel link" on open rows with inline confirm; the
+`/api/checkout-cancel` redirect — which gate:routes CAUGHT MISSING on the first test:all. ⛔ DECIDED: the refused
+hash stays UNCLAIMED (an unverified tombstone = a griefing vector); the cross-talk onto another pre-dating open
+order of the same merchant is deliberate and pinned. Suites: store 73, cancel 26 (new), copy 107; test:all
+141/141. netlify/functions/agent-send + _checkout-verify byte-identical.
+
+⭐ **gate:ledger — FIRST LIVE RUN: PASS.** Both ledgers were committed to their last line (119 / 33 entries,
+16:32Z) — reproduced read-only here before the chain finished: exit 0. **stage:ledger — FIRST LIVE RUN: as
+designed** — after the chain, `git status` showed the two ledgers STAGED (`M ` in the index) and the regenerated
+build stamp dirty but NOT staged. Nothing committed by the chain.
+
+DD WINDOW — **no-window** (probe 1). ddTree `596bcd84…` **unrotated** (`rotated:false`, previous == current).
+PREDICTED (scripted DD-surface check before commit: none of 12 paths) — observed exactly.
+DEPLOY-LOSS SWEEP 21:54:33Z: **0 new** (losses 17, limbo 40, preserved 23, unaccounted 0; scanned 587).
+
+LIVE CHECK (no session, no money): `POST /api/checkout-cancel` → **401 "Authentication required"** (ours — before
+this deploy the path answered Netlify's 400 "missing form"); `GET` → 405. Served bundle carries "Cancel link",
+"Void this link?", "Yes, cancel it", "Keep it", "cancelled by the seller", "did go through", "A payment was
+reported after you cancelled", "recorded for the seller", `checkout-cancel`.
+
+⛔ NOT YET EXERCISED LIVE: a real cancel (one of the 0.20 "data" orders from #/sell — no money), and the
+late-note path (needs a real payment landing after a cancel — T's call whether to stage it).
