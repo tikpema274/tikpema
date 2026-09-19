@@ -26197,3 +26197,18 @@ record → this. Memory: `tikpemapay-gateway-sender-as-depositor-variant`.
 version, what is live (measured only; checkout and treasury marked "on prod, not yet proven"), what is pending, the
 ask (design review, ERC-1271 signing guidance, screening at the payout edge, a reference slot once live). ⛔ NOT
 sent; private until T shares it.
+
+### Eversend replied (2026-09-18 08:37, B2B & Partnerships) — the starter blocker changed shape
+
+Recorded from T's inbox 2026-09-19. Verbatim facts: (1) **"we don't currently have a sandbox, so there's no
+sandbox key. Testing is on the live environment with small real amounts… once you're onboarded."** → the
+"self-serve sandbox key → preflight → reconcile" path is REFUTED; the ramp-quote field reconcile now needs
+onboarding → a live key → low-value live transactions. (2) Ghana MoMo **collection is supported** as a corridor;
+T confirmed the launch is payout-only. (3) **"we deliver payouts into Ghana through a local partner arrangement
+rather than holding our own Ghana licence"** — the counterparty entity and exact authorisation are being confirmed
+with their compliance lead (pending). T's follow-up (11:53) asks for the onboarding path to a live key, the
+minimum entity form, and whether entity/authorisation and the API surface are uniform across payout corridors
+(NG, KE, UG, TZ, CI…) — awaiting reply. Consequence: Flutterwave's documented test-mode mocks are now the only
+provider path exercisable before KYB; Kotani's promote trigger (a) is met but its offramp is support-gated even in
+sandbox. Nothing decided. The Circle one-pager's "pending" row was corrected to match (no sandbox; onboarding to a
+live key). Memory: `tikpemapay-non-custodial-design` (new section).
