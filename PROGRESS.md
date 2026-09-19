@@ -26512,3 +26512,29 @@ Blobs store by key, or marked T-observed where a response body cannot be re-read
 
 Checkout v1 is a PROVEN capability: #/sell → link → #/pay → gasless userOp → Arc → receipt read, block-bound,
 hash-claimed, marked paid; one hash settles one order; a transfer cannot settle an order created after it.
+
+## 2026-09-19 — LEDGER COMMITTED (`f4a8016`): 14 deploys of gate baselines — and a CORRECTION to that commit's own summary
+
+**What was committed:** `dd-refusal-window-log.jsonl` + `deploy-loss-log.jsonl`, 14 lines each (268dcdd → 6e2b1ff,
+2026-09-15 08:31Z → 09-19 16:32Z), unstaged by habit since `e2080cc`. They are **gate inputs**: `capture-refusal-window`
+judges `rotated` against the log's last ddTree; `verify-deploy-loss-delta` takes the loss log's last line as its
+baseline. A fresh clone had been judging rotation against `2f4f2793` (prod has been `596bcd84` since 09-17) and the
+loss delta against the 09-15 census. `build-stamp.generated.mjs` cleared to null BEFORE staging; null in the tree.
+
+**⛔ CORRECTION — the commit message's content paragraph is WRONG; this entry is the accurate reading of the lines.**
+I wrote it from the two endpoints instead of the 14 lines. [[verify-facts-before-sharing-words]]
+- ddTree did NOT rotate once. It rotated **five times**: `2f4f2793` → `79e2f258` (09-16 13:45Z, d0c7442,
+  **observed-banner**, 17 probes) → `514d26fe` (09-16 16:01Z, 09d9a9c, no-window-despite-rotation, 26 probes) →
+  `3f5cee1f` (09-16 22:29Z, c5b2163, **observed-banner**, 4 probes) → `ddc910aa` (09-17 12:32Z, 4bc0d03,
+  **observed-banner**, 30 probes) → `596bcd84` (09-17 16:11Z, 4adcc53, **observed-banner**, 36 probes). Unrotated
+  since: the eight deploys 09-18 01:12Z → 09-19 16:32Z are all `no-window`, 1 probe.
+- The loss sweep was NOT "0 new on every deploy". Losses **15 → 16** at 09-18 01:13Z (e9755f3, the wallet-redesign
+  deploy whose first attempt crashed mid-bundle — orphan `6aac77f4` recorded at the time) and **16 → 17** at
+  09-18 18:44Z (d0c1f4f). Limbo 38 → 39 → 40 on the same two. Preserved 23 and unaccounted 0 throughout. The
+  seven deploys since (aaa0b94 → 6e2b1ff) are 0 new, 17 carried.
+
+**`268dcdd` (2026-09-15 08:31Z) — no deploy record beyond the ledger.** The commit is docs-only ("CORRECTION — the
+alerting worked throughout the outage"). Its ledger lines carry: ddTree `2f4f2793` unchanged (rotated:false),
+`no-window`, 1 probe; loss sweep 15 losses / 38 limbo / 23 preserved / 0 unaccounted, 574 deploys scanned. The
+window log carries no Netlify deploy id and no served tree, so a full Deploy-N record cannot be written from it;
+this paragraph is its record.
