@@ -105,6 +105,7 @@
     "test:checkoutcopy": "npx tsx scripts/verify-checkout-copy.tsx",
     "test:walletgate": "npx tsx scripts/verify-wallet-gate.tsx",
     "test:ledgergate": "node scripts/verify-ledger-gate.mjs",
+    "test:ledgerhook": "node scripts/verify-ledger-commit-hook.mjs",
     "test:treasuryplan": "node --experimental-test-module-mocks scripts/verify-treasury-plan.mjs",
     "test:treasurysnapshot": "node scripts/verify-treasury-snapshot.mjs",
     "test:treasurycopy": "npx tsx scripts/verify-treasury-copy.tsx",
@@ -349,6 +350,7 @@
     "test:checkoutcopy",
     "test:walletgate",
     "test:ledgergate",
+    "test:ledgerhook",
     "test:treasuryplan",
     "test:treasurysnapshot",
     "test:treasurycopy"

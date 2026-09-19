@@ -79,6 +79,43 @@ EOF
   echo "${GRN}✔ build stamp: staged as null.${OFF}"
 fi
 
+# ═══ THE LEDGERS ARE COMMITTED ALONE, OR NOT AT ALL (2026-09-19, after 625f7fd) ══════════════
+# dd-refusal-window-log.jsonl and deploy-loss-log.jsonl are gate baselines, appended by the deploy
+# chain and STAGED by its last link (stage:ledger). That leaves a populated index — and `git add`
+# is additive, so the next `git add PROGRESS.md && git commit` carried both ledgers along unnoticed
+# (625f7fd). A populated index the author forgot about is invisible at the prompt; the place the
+# mistake becomes history is HERE. So: a staged set that contains a ledger AND anything else is
+# refused, with the exact recovery printed. STRICT, deliberately — a ledger commit is its own act.
+# ⚠️ LIMITS: `git commit --no-verify` skips this; there is NO CI backstop (deploys are CLI-only).
+# Real, not absolute. Same paths as scripts/gate-ledger.mjs LEDGERS — keep them in step.
+LEDGER_A="dd-refusal-window-log.jsonl"
+LEDGER_B="deploy-loss-log.jsonl"
+STAGED_ALL=$(git diff --cached --name-only --diff-filter=ACMRD)
+if printf '%s\n' "$STAGED_ALL" | grep -qxE "$LEDGER_A|$LEDGER_B"; then
+  NON_LEDGER=$(printf '%s\n' "$STAGED_ALL" | grep -vxE "$LEDGER_A|$LEDGER_B" || true)
+  if [ -n "$NON_LEDGER" ]; then
+    cat >&2 <<EOF
+${RED}${BOLD}✖ pre-commit BLOCKED — a ledger file is staged together with other changes.${OFF}
+
+The two ledgers are committed ALONE, or not at all (they are gate baselines the deploy chain
+stages; 625f7fd carried them into a docs commit by accident). Also staged:
+
+$(printf '%s\n' "$NON_LEDGER" | sed 's/^/  /')
+
+${BOLD}Recovery — three lines, in this order:${OFF}
+
+  git restore --staged ${LEDGER_A} ${LEDGER_B}
+  git commit -m "<your message>"
+  git add ${LEDGER_A} ${LEDGER_B} && git commit -m "chore(ledger): deploy captures — refusal window + loss sweep"
+
+(Your staged set was not touched. --no-verify bypasses this and there is no CI backstop — the
+guard is real, not absolute; if you bypass it, say why in the commit message.)
+EOF
+    exit 1
+  fi
+  echo "${GRN}✔ ledgers: staged alone.${OFF}"
+fi
+
 # ═══ ⚠️ A NOTE ON WHAT THIS HOOK CANNOT CHECK, AND WHAT NEARLY SHIPPED BECAUSE OF IT ═════
 # `node --check` ANSWERS "IS THIS PARSEABLE", NEVER "DOES THIS RUN".
 #

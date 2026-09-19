@@ -27,3 +27,10 @@ const stagedLedgers = staged.filter((p) => present.includes(p));
 console.log(`ledger staged — commit it (${stagedLedgers.length ? stagedLedgers.join(", ") : "no ledger changes to stage"})`);
 const stampDirty = git("status", "--porcelain", "--", STAMP) !== "";
 if (stampDirty) console.log(`⚠️ ${STAMP} is dirty (non-null generated stamp) — it was NOT staged; run \`npm run stamp:clear\` before you commit so it is not swept in.`);
+// ⚠️ THE INDEX IS NOW POPULATED. `git add` is additive: the next `git add <anything> && git commit`
+// would carry these two along (625f7fd). The pre-commit hook refuses that mix; this line makes the
+// happy path one paste so the hook never has to fire.
+if (stagedLedgers.length) {
+  console.log(`\n⚠️ The index now holds these ${stagedLedgers.length} ledger file(s). Commit them BEFORE you stage anything else — the pre-commit hook refuses a mixed commit:\n`);
+  console.log(`  git commit -m "chore(ledger): deploy captures — refusal window + loss sweep"\n`);
+}
