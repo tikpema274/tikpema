@@ -26318,3 +26318,39 @@ the paid order.
 **What this proves:** the whole direct-settlement path end to end — #/sell → link → #/pay → agent-send (userOp, gasless)
 → chain → checkout-paid reads the receipt, binds block and hash, marks paid — with money that moved exactly once, for
 exactly the order amount, from the buyer to the merchant. Checkout v1 is no longer "on prod, unproven".
+
+## 2026-09-19 — ⭐ THE BINDING PROVEN LIVE: REPLAY REFUSED (one hash, one order). Predates case NOT yet run.
+
+**Run by T** after the first settled payment (previous entry): the same hash `0x7995…2bb4` — which paid
+`o_mu8hewk4_7b898539e3d371c9` — was posted against an existing open pre-tx order ≤ 0.10 (T reports
+`o_mu8b42ov_7fbce1bb9a3b862f`, 0.10 "try", createdAtBlock 62907313). **T observed: 409, code "replay", the error naming
+`o_mu8hewk4_7b898539e3d371c9`.** ⚠️ The response body is T's observation and CANNOT be re-read afterwards — a refused
+attempt writes nothing server-side, by design (gap 2, recorded on 09-19: a replay attempt is invisible to the
+merchant). Everything around it is verified read-only:
+
+**Store (Blobs `checkout-orders`, read directly, ~1 h after):**
+- Still **23 keys**, still **exactly one `tx:` key** — no second claim was written.
+- `tx:0x7995…2bb4` **byte-identical**: `orderId o_mu8hewk4…`, `claimedAt 2026-09-19T14:30:34.559Z`.
+- Target `o_mu8b42ov…`: `status open`, `paidTx null`, `paidBy null`, `paidAt null`, `circleId null`, **no `updatedAt`**
+  (never transitioned, never even `submitted`). The other ≤0.10 candidate `o_mu8hcts6…` identical.
+- No new `id:` keys → **no fresh order exists, so the predates case (§2 of the ask) was NOT run.** It remains: create an
+  order now (createdAtBlock > 62928802), post the same hash → expected 409 code "predates" naming both blocks; order
+  stays open; no `tx:` written.
+
+**Chain (Arc, latest 62931315):** USDC transfers to the merchant since block 62928454: **still 1** (the 0.10 at
+62928802). Buyer SCA `0x3cb7…2de9` balanceOf **0.890885** (unchanged since the payment); merchant **26.728582**
+(unchanged). **The refusal moved nothing.**
+
+**What is now proven live, end to end:** one hash settles exactly one order — the claim written 55 ms before the
+first transition refused the second order and left every record untouched. The block half (a transfer cannot settle
+an order created after it) is proven by construction in the first payment (62928802 > 62928454) and in the suites;
+its live refusal is the one run still outstanding.
+
+**⛔ THE DEFECT THIS CLOSED WAS REACHABLE ON PROD** from Deploy 8's publish (**2026-09-18T22:40:57Z**, d3f5739) to
+5cd02dd's publish (**2026-09-19T10:06:25Z**, deploy 6aae579f) — **11 h 25 min**. In that window `checkout-paid`
+accepted any successful USDC transfer from the caller's SCA to the merchant of at least the amount, with no block
+bound and no hash claim: **any past `#/send` to a merchant could have settled a later order for less**, and one
+transfer could have marked every ≤-amount order of that merchant paid. Measured exposure: two orders existed
+(`o_mu7ju1sf…` 0.15, `o_mu7jxx8h…` 0.11), one unrelated 0.13 transfer (`0xdf65…4a7f`, block 62816721) qualified for the
+0.11, and no `checkout-paid` call was made in the window (both orders read `paidTx:null` throughout). Found read-only
+before any live payment; closed before the first one.
