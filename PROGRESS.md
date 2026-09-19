@@ -26467,3 +26467,48 @@ exclusive; the same buyer paying the same merchant the same amount twice produce
 cross-talk. ⛔ **Still owed live, T runs it:** the predates refusal — a fresh bound order (createdAtBlock > the tx's
 block) + an OLD hash → 409 `code:"predates"` naming both blocks, order stays open, no `tx:` written. The listing now
 makes the fresh orders visible for it.
+
+## 2026-09-19 — ⭐⭐ CHECKOUT v1 MONEY-PATH PROOF — CLOSED. Two payments settled; both refusals proven live; the remaining gaps named.
+
+This closes the thread opened this morning as a read-only investigation ("that unrelated transfer WOULD have
+satisfied checkout-paid for the 0.11 order"). Everything below is either read from Arc by block, read from the
+Blobs store by key, or marked T-observed where a response body cannot be re-read.
+
+### PROVEN LIVE on prod (`6e2b1ff`, deploys 10–12)
+- **Two payments settled and verified from the chain**, same buyer SCA `0x3cb7…2de9` → merchant `0x74b7…24e5`:
+  - `o_mu8hewk4_7b898539e3d371c9` 0.100000 "data" — tx `0x79950cb4…2bb4`, **block 62928802 > createdAtBlock 62928454**
+    (+348); claim written **55 ms** before the transition.
+  - `o_mu8raz55_8448ec9aeba5f93b` 0.100000 "tea" — tx `0xbe08f7d3…8557`, **block 62961835 > createdAtBlock 62961647**
+    (+188); claim written **38 ms** before the transition.
+  Each: status 0x1; the USDC-emitted Transfer exactly 100000 units (18-dp mirrors ignored); buyer balanceOf
+  0.990885 → 0.890885 → 0.790885 (exactly 0.1 each, **no USDC to gas** — paymaster paid); merchant 26.628582 →
+  26.828582; **exactly two transfers to the merchant since 62928454**, distinct hashes, no duplicate.
+- **Exactly two `tx:` claim keys**, each naming only its own order; neither names the other. No third was ever written.
+- **REPLAY refused — twice** (T-observed 409 `code:"replay"`, the error naming the order the hash already paid).
+  Store: still two claims, byte-identical; targets never transitioned (no `updatedAt`, `paidTx/paidBy/paidAt` null).
+  Chain: transfers still two; balances unchanged. A refusal writes nothing and moves nothing.
+- **PREDATES refused** (T-observed 409 `code:"predates"`): old hash `0x7995…2bb4` (block **62928802**) posted against
+  the fresh "taxi" order `o_mu8rqd1q_f8f4f9285a390c81` 0.070000 (createdAtBlock **62963078**) — the error named both
+  blocks: "mined in block 62928802, before this order was created at block 62963078". Store: taxi still open,
+  never transitioned; still two claims. Chain: nothing moved (buyer 0.790885, merchant 26.828582).
+- **Return-to round trip** confirmed live by T (Deploy 11); **merchant listing** live (Deploy 12).
+- **The defect this closed was LIVE ON PROD for 11 h 25 min** — Deploy 8 publish 2026-09-18T22:40:57Z → 5cd02dd
+  publish 2026-09-19T10:06:25Z. Measured exposure in that window: two orders, one qualifying unrelated 0.13
+  transfer (`0xdf65…4a7f`, block 62816721), **zero `checkout-paid` calls**. Found read-only; closed before the first
+  live payment.
+
+### STILL OPEN — recorded, not built (each is a decision, not an oversight)
+- **GAP 1 — same merchant, same buyer, same amount, both created before one payment still collapse** to whichever
+  posts the hash first. Nothing on chain names the order. The only fix is the order id IN CALLDATA (32 bytes after
+  `transfer(address,uint256)`; Solidity ignores trailing calldata; verify checks `tx.input`) — **changes agent-send**,
+  the money path; its own deploy with its own live proof.
+- **GAP 2, attempt half — a 409 writes nothing**, so a contested link reads exactly like an untouched one to the
+  merchant. The state half is closed by the listing (Deploy 12). What closes the rest: an attempt log
+  (`att:<merchant>:<orderId>:<ts>` → { txHash, code, paidOrderId, by }, written on 409 VERDICTS, never on 503),
+  surfaced as a line in the merchant listing.
+- **No cancel** (separate decision, not taken). The **9 bound open orders** (eight 0.10–0.20 from today + "taxi"
+  0.07) stay payable by anyone holding the link until they expire (14 d). The 2 unbound legacy orders are not
+  payable (no seal, every hash refused) and expire 2026-10-02.
+
+Checkout v1 is a PROVEN capability: #/sell → link → #/pay → gasless userOp → Arc → receipt read, block-bound,
+hash-claimed, marked paid; one hash settles one order; a transfer cannot settle an order created after it.
