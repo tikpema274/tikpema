@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { goToWalletAndReturn } from "../lib/returnTo";
 import type { useWallet } from "../wallet/useWallet";
 import { formatUsdc } from "../lib/formatUsdc";
 import { describeError } from "../lib/describeError";
+import { arcTestnet } from "../config/chain";
 import AddressDisplay from "./AddressDisplay";
 import type { PublicOrder } from "./PayPanel";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
+const EXPLORER = arcTestnet.blockExplorers.default.url;
 
 // ═══ SELL — make a checkout link: "pay ME this much for THIS" ═══════════════════════════════════
 //
@@ -35,6 +37,130 @@ export function SellResult({ origin, order, path }: { origin: string; order: Pub
   );
 }
 
+/** One row of the merchant's listing: the public view plus the merchant's own fields (checkout-list). */
+export type MerchantOrderRow = PublicOrder & { paidBy?: string | null; paidUnits?: string | null; paidAtBlock?: number | null };
+export type MerchantListState =
+  | { state: "loading" }
+  | { state: "unreadable"; reason: string }
+  | { state: "listed"; orders: MerchantOrderRow[]; listedAt: string; truncated: boolean; total?: number };
+
+const LAG_LINE = "This list can lag by a few seconds — a link made moments ago may not be listed yet.";
+
+function CopyLink({ link }: { link: string }) {
+  const [note, setNote] = useState("");
+  return (
+    <span className="row" style={{ gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+      <span className="mono" style={{ wordBreak: "break-all", fontSize: ".85rem" }}>{link}</span>
+      <button className="linkbtn" onClick={async () => { try { await navigator.clipboard.writeText(link); setNote("copied"); } catch { setNote("select and copy"); } }}>Copy</button>
+      {note && <span className="status" style={{ margin: 0 }}>{note}</span>}
+    </span>
+  );
+}
+
+// ═══ YOUR CHECKOUT LINKS — the merchant's own orders, from /api/checkout-list ════════════════════
+//
+// A merchant who lost the tab had no way to find a link again (live, 2026-09-19). This lists what the
+// session's m:<merchant>:* index holds. Two rules the copy carries:
+//   ⚠️ THE LISTING IS EVENTUAL. An empty result is never rendered as "you have no orders": it says
+//      nothing is LISTED, that a link made seconds ago may be missing, and that absence of a row is not
+//      absence of an order. Unreadable is a THIRD state, distinct from empty. [[absence-must-never-read-as-safe]]
+//   ⛔ NOTHING INVENTED. A paid row shows its real hash and an explorer link to THAT hash; a submitted
+//      row has a Circle id and NO tx link; an unbound legacy row (no createdAtBlock) says "cannot be
+//      settled — make a new link" in the pay page's words and offers no link to share.
+// No cancel here — a separate decision. Nothing here moves money.
+/**
+ * The collapsed header's text — the ONE place the count is stated, so the honesty rules live in one
+ * function: loading says "listing…" (no number); unreadable shows NO number (neither zero nor a total is
+ * known); empty says "(none listed yet)" (never "(0)", which claims a known total against an eventual
+ * listing); truncated states the server's total, never the page's 100.
+ */
+export function listHeader(state: MerchantListState): string {
+  const base = "Your checkout links";
+  if (state.state === "loading") return `${base} (listing…)`;
+  if (state.state === "unreadable") return base;
+  if (state.orders.length === 0) return `${base} (none listed yet)`;
+  if (state.truncated) return `${base} (${typeof state.total === "number" ? state.total : `${state.orders.length}+`})`;
+  return `${base} (${state.orders.length})`;
+}
+
+export function MerchantOrders({ origin, state, open, onToggle, onRefresh }: { origin: string; state: MerchantListState; open: boolean; onToggle: () => void; onRefresh: () => void }) {
+  return (
+    <div style={{ marginTop: 28 }}>
+      <div className="row" style={{ alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+        {/* Collapsed by default: the header carries the (honest) count; everything else is behind the
+            click. The empty state's "absence of a row is not absence of an order" line lives on EXPAND
+            — the header says "(none listed yet)", which is already not a claim of zero. */}
+        <button className="linkbtn" aria-expanded={open} onClick={onToggle} style={{ fontSize: "1.05rem", fontWeight: 600 }}>
+          {open ? "▾" : "▸"} {listHeader(state)}
+        </button>
+        {open && <button className="linkbtn" onClick={onRefresh}>Refresh</button>}
+      </div>
+      {!open ? null : (
+      <>
+      {state.state === "loading" && <div className="status">Listing your checkout links…</div>}
+      {state.state === "unreadable" && (
+        <div className="status" style={{ borderLeft: "3px solid var(--warn)", paddingLeft: ".9rem" }}>
+          <b>Your links could not be listed right now</b> ({state.reason}). This says nothing about whether you have
+          any — try Refresh.
+        </div>
+      )}
+      {state.state === "listed" && state.orders.length === 0 && (
+        <div className="status">
+          <b>No checkout links listed for this wallet yet.</b> {LAG_LINE} Absence of a row is not absence of an
+          order — if you just made one, Refresh in a moment.
+        </div>
+      )}
+      {state.state === "listed" && state.orders.length > 0 && (
+        <>
+          <div className="status" style={{ marginTop: 4 }}>
+            {state.truncated ? <><b>Showing the newest 100 of {state.total ?? "more"}</b> — not all are listed. </> : null}
+            {LAG_LINE}
+          </div>
+          {state.orders.map((o) => {
+            const unbound = o.createdAtBlock === null || o.createdAtBlock === undefined;
+            return (
+              <div key={o.id} className="summary-block" style={{ marginTop: 10 }}>
+                <div className="summary-row"><span>For</span><b>{o.description}</b></div>
+                <div className="summary-row"><span>Amount</span><b className="mono">{formatUsdc(o.amountUsdc)} USDC</b></div>
+                <div className="summary-row"><span>Status</span><b>{o.status}</b></div>
+                <div className="summary-row"><span>Created</span><span title={o.createdAt}>{new Date(o.createdAt).toLocaleString()}</span></div>
+                <div className="summary-row"><span>Order</span><span className="mono" style={{ wordBreak: "break-all" }}>{o.id}</span></div>
+                {unbound ? (
+                  <div className="summary-hazard">
+                    <b>This link cannot be settled — make a new link.</b> It predates payment binding (no creation block);
+                    the pay page offers no seal on it and the server refuses any payment of it.
+                  </div>
+                ) : (
+                  <div className="summary-row"><span>Link</span><CopyLink link={checkoutLink(origin, o.id)} /></div>
+                )}
+                {o.status === "paid" && o.paidTx && (
+                  <div className="summary-row">
+                    <span>Paid</span>
+                    <span>
+                      <span className="mono" style={{ wordBreak: "break-all" }}>{o.paidTx}</span>{" "}
+                      <a href={`${EXPLORER}/tx/${o.paidTx}`} target="_blank" rel="noreferrer">view the transfer ↗</a>
+                      {o.paidAt ? <> · {new Date(o.paidAt).toLocaleString()}</> : null}
+                      {o.paidBy ? <> · from <AddressDisplay address={o.paidBy} /></> : null}
+                    </span>
+                  </div>
+                )}
+                {o.status === "submitted" && (
+                  <div className="summary-row">
+                    <span>Submitted</span>
+                    <span>accepted by Circle{o.circleId ? <> (Circle id <span className="mono">{o.circleId}</span>)</> : null}, not yet landed on Arc — <b>not paid</b> yet; no transaction hash</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </>
+      )}
+      </>
+      )}
+    </div>
+  );
+}
+
 export default function SellPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
@@ -42,8 +168,35 @@ export default function SellPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const [error, setError] = useState("");
   const [created, setCreated] = useState<{ order: PublicOrder; path: string } | null>(null);
   const [shareNote, setShareNote] = useState("");
+  const [list, setList] = useState<MerchantListState>({ state: "loading" });
+  const [listOpen, setListOpen] = useState(false); // collapsed by default; a create opens it
   const origin = typeof window === "undefined" ? "" : window.location.origin;
   const address = w.address;
+
+  // The merchant's own orders. Session-bound on the server (the prefix comes from the token). Refetched
+  // after a create, knowing the listing may still lag — the copy says so.
+  const refreshList = useCallback(async () => {
+    if (!address) return;
+    setList({ state: "loading" });
+    try {
+      const token = await w.ensureSession();
+      const r = await fetch("/api/checkout-list", { headers: { Authorization: `Bearer ${token}` } });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { setList({ state: "unreadable", reason: data?.error || `HTTP ${r.status}` }); return; }
+      setList({ state: "listed", orders: Array.isArray(data.orders) ? data.orders : [], listedAt: data.listedAt, truncated: !!data.truncated, total: data.total });
+    } catch (e: any) {
+      setList({ state: "unreadable", reason: describeError(e) });
+    }
+  }, [address, w]);
+  useEffect(() => { if (address) refreshList().catch(() => {}); }, [address, refreshList]);
+  // The order just created is pinned at the TOP of the rows even before the eventual listing carries
+  // it (dedupe by id once it does). The merchant sees what they just made without hunting.
+  const withCreated: MerchantListState = (() => {
+    const c = created?.order;
+    if (!c || list.state !== "listed") return list;
+    if (list.orders.some((o) => o.id === c.id)) return list;
+    return { ...list, orders: [c, ...list.orders] };
+  })();
 
   async function create() {
     setError("");
@@ -59,6 +212,8 @@ export default function SellPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);
       setCreated({ order: data.order, path: data.path });
+      setListOpen(true); // show what was just made, at the top, without hunting
+      refreshList().catch(() => {});
       setAmount("");
       setDescription("");
     } catch (e: any) {
@@ -163,6 +318,8 @@ export default function SellPanel({ wallet: w }: { wallet: UnifiedWallet }) {
               </div>
             </>
           )}
+
+          <MerchantOrders origin={origin} state={withCreated} open={listOpen} onToggle={() => setListOpen((o) => !o)} onRefresh={() => { refreshList().catch(() => {}); }} />
         </>
       )}
     </div>

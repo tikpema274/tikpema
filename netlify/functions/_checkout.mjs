@@ -75,6 +75,8 @@ export function safeOrderId(v) {
 
 export const orderKey = (id) => `id:${id}`;
 export const merchantKey = (merchant, id) => `m:${norm(merchant)}:${id}`;
+/** The listing prefix for ONE merchant — derived from a verified session address, never from a request field. */
+export const merchantPrefix = (merchant) => `m:${norm(merchant)}:`;
 export const txClaimKey = (txHash) => `tx:${norm(txHash)}`;
 
 /** A block height as stored on an order: a non-negative safe integer NUMBER, nothing else. */
@@ -162,6 +164,16 @@ export function publicOrder(order, now = Date.now()) {
     paidTx: paidTx ?? null, paidAt: paidAt ?? null, circleId: circleId ?? null,
     createdAtBlock: isBlockHeight(createdAtBlock) ? createdAtBlock : null,
   };
+}
+
+/**
+ * The MERCHANT's view of their own order: the public view plus the fields that are theirs to see —
+ * who paid, how many units, at which block. Served only by checkout-list, behind the session.
+ */
+export function merchantOrder(order, now = Date.now()) {
+  const pub = publicOrder(order, now);
+  if (!pub) return null;
+  return { ...pub, paidBy: order.paidBy ?? null, paidUnits: order.paidUnits ?? null, paidAtBlock: isBlockHeight(order.paidAtBlock) ? order.paidAtBlock : null };
 }
 
 function store(s) { return s ?? getStore(CHECKOUT_STORE); }

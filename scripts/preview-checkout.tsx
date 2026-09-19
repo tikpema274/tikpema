@@ -18,6 +18,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync, writeFileSync } from "node:fs";
 import { PayOrderView } from "../src/components/PayPanel";
+import { MerchantOrders } from "../src/components/SellPanel";
 
 const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 const fonts = readFileSync(new URL("../index.html", import.meta.url), "utf8")
@@ -65,7 +66,31 @@ const gateWallet = (st: GateState) => ({
 const gate = (st: GateState) =>
   renderToStaticMarkup(<PayOrderView order={FRESH as any} wallet={gateWallet(st)} paying={false} result={null} payError="" mark={null} onPay={() => {}} />);
 
+// ── YOUR CHECKOUT LINKS (#/sell listing) — the prod rows as of 2026-09-19 15:00Z, plus the three non-row states ──
+const ORIGIN = "https://app.tikpema.xyz";
+const listRows = [
+  { ...PROD_B, id: "o_mu8hewk4_7b898539e3d371c9", description: "data", amountUsdc: "0.100000", status: "paid", createdAt: "2026-09-19T14:27:38.452Z", createdAtBlock: 62928454, paidTx: "0x79950cb47e7f3f8aa9228859909e1c4196a66a6714a5de4634e4ae1a86832bb4", paidAt: "2026-09-19T14:30:34.614Z", paidBy: AGENT, paidUnits: "100000", paidAtBlock: 62928802 },
+  { ...PROD_B, id: "o_mu8hcts6_6ce7ab6b6b181c39", description: "data", amountUsdc: "0.100000", createdAt: "2026-09-19T14:25:00.000Z", createdAtBlock: 62928259 },
+  { ...PROD_B, id: "o_mu8blkvc_eabf0202ebd465f0", description: "try", amountUsdc: "0.120000", createdAt: "2026-09-19T10:20:00.000Z", createdAtBlock: 62908947 },
+  { ...PROD_B, id: "o_mu8b5obw_4f194018540eb160", description: "data", amountUsdc: "0.300000", status: "submitted", circleId: "circle-example", createdAt: "2026-09-19T10:05:00.000Z", createdAtBlock: 62907463 },
+  { ...PROD_A, createdAtBlock: null },
+] as any[];
+const listView = (state: any, open = true) => renderToStaticMarkup(<MerchantOrders origin={ORIGIN} state={state} open={open} onToggle={() => {}} onRefresh={() => {}} />);
+
 const sections = [
+  label("L0", "YOUR CHECKOUT LINKS — COLLAPSED (the default on #/sell): header with the honest count",
+    "Collapsed by default. The header is the only place the count is stated: listed → (N); truncated → the server's total; empty → (none listed yet), never (0); loading → (listing…); unreadable → no number at all. Click expands. A create auto-expands and pins the new link at the top."),
+  bothWidths(listView({ state: "listed", orders: listRows, listedAt: "2026-09-19T15:00:00.000Z", truncated: false }, false) + listView({ state: "listed", orders: listRows, listedAt: "t", truncated: true, total: 120 }, false) + listView({ state: "listed", orders: [], listedAt: "t", truncated: false }, false) + listView({ state: "loading" }, false) + listView({ state: "unreadable", reason: "list down" }, false), 420),
+  label("L1", "YOUR CHECKOUT LINKS — EXPANDED (paid / open / submitted / unbound rows)",
+    "The merchant's own orders from /api/checkout-list, newest first. The paid row shows the REAL hash + explorer link; the submitted row has a Circle id and NO tx link; the unbound legacy row says “cannot be settled — make a new link” and offers no link. The lag line is on every listed page."),
+  bothWidths(listView({ state: "listed", orders: listRows, listedAt: "2026-09-19T15:00:00.000Z", truncated: false }), 1400),
+  label("L2", "YOUR CHECKOUT LINKS — EMPTY (never “you have no orders”)",
+    "🚨 The listing is eventual. Empty says nothing is LISTED, that a link made moments ago may be missing, and that absence of a row is not absence of an order."),
+  bothWidths(listView({ state: "listed", orders: [], listedAt: "2026-09-19T15:00:00.000Z", truncated: false }), 300),
+  label("L3", "YOUR CHECKOUT LINKS — UNREADABLE (a third state, distinct from empty)",
+    "The store could not be listed: the reason, ‘says nothing about whether you have any’, Refresh."),
+  bothWidths(listView({ state: "unreadable", reason: "orders unreadable — the store could not be listed (list down); try again" }), 300),
+
   label("g1", "NO LOGIN WALLET — connect, with a return-to",
     "The only state that leaves the page. The Wallet link now stashes #/pay?order=… in sessionStorage; the wallet page brings the buyer back the moment the wallet is ready. The order stays on screen."),
   bothWidths(gate("noAddress"), 560),

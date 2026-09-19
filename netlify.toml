@@ -123,6 +123,10 @@
   to = "/.netlify/functions/checkout-paid"
   status = 200
 [[redirects]]
+  from = "/api/checkout-list"
+  to = "/.netlify/functions/checkout-list"
+  status = 200
+[[redirects]]
   from = "/api/treasury-policy"
   to = "/.netlify/functions/treasury-policy"
   status = 200

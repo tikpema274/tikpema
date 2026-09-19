@@ -13,7 +13,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PayOrderView, PayDoor, IRREVERSIBLE_LINE } from "../src/components/PayPanel";
-import SellPanel, { SellResult, checkoutLink } from "../src/components/SellPanel";
+import SellPanel, { SellResult, checkoutLink, MerchantOrders, listHeader } from "../src/components/SellPanel";
 
 let pass = 0, fail = 0;
 const check = (label: string, cond: boolean, detail = "") => {
@@ -190,6 +190,92 @@ section("10 — 🚨 an UNBOUND order (createdAtBlock null: the two pre-binding 
   check("…no irreversibility hazard (nothing to decide)", !m.includes(IRREVERSIBLE_LINE));
   const bound = view(base);
   check("(a bound order still offers the seal)", /class="emerald[^"]*"[^>]*>Pay /.test(bound));
+}
+
+section("11 — 🚨 YOUR CHECKOUT LINKS (the merchant listing): rows per state; nothing invented; absence ≠ no orders");
+{
+  const ORIGIN = "https://app.tikpema.xyz";
+  const row = (id: string, extra: any) => ({ ...base, id, ...extra });
+  const orders = [
+    row("o_mu8aqqbu_c87576aaf1375c4c", { status: "open", amountUsdc: "0.200000", description: "data", createdAt: "2026-09-19T10:00:00.000Z", createdAtBlock: 62906070 }),
+    row("o_mu8hewk4_7b898539e3d371c9", { status: "paid", amountUsdc: "0.100000", description: "paid one", paidTx: HASH, paidAt: "2026-09-19T14:30:34.614Z", paidBy: AGENT, paidUnits: "100000", createdAtBlock: 62928454 }),
+    row("o_mu8b5obw_4f194018540eb160", { status: "submitted", amountUsdc: "0.300000", description: "in flight", circleId: "circle-7", paidTx: null, createdAtBlock: 62907463 }),
+    row("o_mu7d0000_0000000000000000", { status: "expired", amountUsdc: "0.400000", description: "stale", createdAtBlock: 62800000 }),
+    row("o_mu7ju1sf_ae83dd7ebd87e0a5", { status: "open", amountUsdc: "0.150000", description: "legacy", createdAtBlock: null }),
+  ];
+  const listed = renderToStaticMarkup(<MerchantOrders origin={ORIGIN} state={{ state: "listed", orders, listedAt: "2026-09-19T15:00:00.000Z", truncated: false }} open onToggle={() => {}} onRefresh={() => {}} />);
+  const lt = strip(listed);
+  check("heading names the section", /Your checkout links/i.test(lt));
+  check("⭐ every row: id, amount, description", orders.every((o) => listed.includes(o.id) && lt.includes(o.description) && lt.includes(`${Number(o.amountUsdc).toFixed(6)}`)), lt.slice(0, 200));
+  const bound = orders.filter((o) => o.createdAtBlock !== null);
+  check("⭐ every BOUND row carries its copyable link (origin + /#/pay?order=<id>); the unbound one does not", bound.every((o) => listed.includes(checkoutLink(ORIGIN, o.id))) && (listed.match(/\/#\/pay\?order=/g) || []).length === bound.length, `links=${(listed.match(/\/#\/pay\?order=/g) || []).length} bound=${bound.length}`);
+  check("open row says open; expired row says expired; submitted row says submitted, NOT paid", /\bopen\b/i.test(lt) && /expired/i.test(lt) && /submitted/i.test(lt));
+  check("⭐ the PAID row shows the hash AND an explorer link to THAT hash", lt.includes(HASH) && listed.includes(`${EXPL}/tx/${HASH}`));
+  check("🚨 exactly ONE tx link on the page — no link without a hash (submitted has a circleId, not a tx)", (listed.match(/\/tx\//g) || []).length === 1);
+  check("submitted row names the Circle id, not a tx", lt.includes("circle-7"));
+  check("🚨 the UNBOUND legacy row says 'cannot be settled — make a new link' (the pay page's words)", /cannot be settled/i.test(lt) && /make a new link/i.test(lt));
+  check("🚨 …and the legacy row offers NO copy of its link (a link nobody can pay is not shared)", (() => { const seg = listed.slice(listed.indexOf("o_mu7ju1sf_ae83dd7ebd87e0a5")); const next = seg.slice(1).search(/o_mu[0-9a-z]+_[0-9a-f]{16}/); const rowHtml = next > 0 ? seg.slice(0, next + 1) : seg; return !/>Copy</.test(rowHtml); })());
+  check("⭐ a listed page STILL says a link made seconds ago may not be listed yet (the listing lags)", /seconds ago|may not be listed yet|can lag/i.test(lt));
+  check("no seal-like button (nothing here moves money; no cancel either)", !/class="emerald/.test(listed) && !/cancel/i.test(lt));
+
+  const empty = strip(renderToStaticMarkup(<MerchantOrders origin={ORIGIN} state={{ state: "listed", orders: [], listedAt: "2026-09-19T15:00:00.000Z", truncated: false }} open onToggle={() => {}} onRefresh={() => {}} />));
+  check("🚨 EMPTY is never 'you have no orders': it says nothing is LISTED and that a recent link may be missing", /no checkout links listed|nothing listed/i.test(empty) && /may not be listed yet|seconds/i.test(empty) && !/you have no (orders|links)/i.test(empty), empty.slice(0, 220));
+  check("🚨 …absence of a row is not absence of an order — said in those words", /absence of a row is not absence of an order/i.test(empty));
+  check("…and offers Refresh", /Refresh/.test(empty));
+
+  const unreadable = strip(renderToStaticMarkup(<MerchantOrders origin={ORIGIN} state={{ state: "unreadable", reason: "list down" }} open onToggle={() => {}} onRefresh={() => {}} />));
+  check("🚨 UNREADABLE is distinct from empty: names the reason, does not say 'no links', offers Refresh", /could not be listed|couldn't list/i.test(unreadable) && unreadable.includes("list down") && !/no checkout links listed/i.test(unreadable) && /Refresh/.test(unreadable));
+  const loading = strip(renderToStaticMarkup(<MerchantOrders origin={ORIGIN} state={{ state: "loading" }} open onToggle={() => {}} onRefresh={() => {}} />));
+  check("LOADING says so and does not say empty", /Listing|Loading/i.test(loading) && !/no checkout links/i.test(loading));
+  const truncated = strip(renderToStaticMarkup(<MerchantOrders origin={ORIGIN} state={{ state: "listed", orders, listedAt: "2026-09-19T15:00:00.000Z", truncated: true, total: 120 }} open onToggle={() => {}} onRefresh={() => {}} />));
+  check("a truncated listing SAYS it is (newest 100 of 120)", /newest 100|of 120|not all/i.test(truncated));
+
+  // the section is on #/sell for a signed-in merchant, below the form
+  const w: any = { address: MERCHANT, agentWallet: { address: AGENT }, ensureSession: async () => "t", isAuthenticated: true };
+  const page = renderToStaticMarkup(<SellPanel wallet={w} />);
+  check("⭐ #/sell carries the section (below the Create control)", page.indexOf("Your checkout links") > page.indexOf("Create checkout link"));
+  const out = strip(renderToStaticMarkup(<SellPanel wallet={{ ...w, address: null } as any} />));
+  check("signed out → no listing section (nothing to list without a session)", !/Your checkout links/i.test(out));
+}
+
+section("12 — 🚨 the listing is COLLAPSIBLE: header count per state (honest), collapsed by default, expands, auto-expands after a create");
+{
+  const ORIGIN = "https://app.tikpema.xyz";
+  const rows = [{ ...base, id: "o_mu8aqqbu_c87576aaf1375c4c", createdAtBlock: 1 }, { ...base, id: "o_mu8b3jz9_28071ae34b58668f", createdAtBlock: 2 }];
+  const listed = { state: "listed", orders: rows, listedAt: "2026-09-19T15:00:00.000Z", truncated: false } as any;
+  // ── the header text, pure ──
+  check("⭐ listed → 'Your checkout links (2)'", listHeader(listed) === "Your checkout links (2)", listHeader(listed));
+  check("🚨 loading → says listing, NO number", /listing/i.test(listHeader({ state: "loading" } as any)) && !/\d/.test(listHeader({ state: "loading" } as any)), listHeader({ state: "loading" } as any));
+  check("🚨 unreadable → NO number at all (neither zero nor a total is known)", !/\d/.test(listHeader({ state: "unreadable", reason: "x" } as any)) && !/none/i.test(listHeader({ state: "unreadable", reason: "x" } as any)), listHeader({ state: "unreadable", reason: "x" } as any));
+  check("⭐ empty → '(none listed yet)' — not '(0)', which would claim a known total", listHeader({ state: "listed", orders: [], listedAt: "t", truncated: false } as any) === "Your checkout links (none listed yet)");
+  check("⭐ truncated → the STATED total, not 100", listHeader({ state: "listed", orders: rows, listedAt: "t", truncated: true, total: 120 } as any) === "Your checkout links (120)");
+  check("truncated without a total → says 100+ , never a bare 100", /100\+/.test(listHeader({ state: "listed", orders: new Array(100).fill(rows[0]), listedAt: "t", truncated: true } as any)));
+
+  // ── rendered: collapsed by default (open=false) hides the rows; open=true shows them ──
+  const collapsed = renderToStaticMarkup(<MerchantOrders origin={ORIGIN} state={listed} open={false} onToggle={() => {}} onRefresh={() => {}} />);
+  check("🚨 collapsed: the header is a button with aria-expanded=false, showing the count", /<button[^>]*aria-expanded="false"[^>]*>[^<]*Your checkout links \(2\)/.test(collapsed), collapsed.slice(0, 200));
+  check("🚨 …and NO rows, no links, no lag line are rendered while collapsed", !collapsed.includes(rows[0].id) && !/\/#\/pay\?order=/.test(collapsed) && !/can lag/i.test(strip(collapsed)));
+  const expanded = renderToStaticMarkup(<MerchantOrders origin={ORIGIN} state={listed} open onToggle={() => {}} onRefresh={() => {}} />);
+  check("⭐ expanded: aria-expanded=true, the rows render exactly as before", /aria-expanded="true"/.test(expanded) && expanded.includes(rows[0].id) && expanded.includes(rows[1].id) && /can lag/i.test(strip(expanded)));
+  const emptyCollapsed = renderToStaticMarkup(<MerchantOrders origin={ORIGIN} state={{ state: "listed", orders: [], listedAt: "t", truncated: false }} open={false} onToggle={() => {}} onRefresh={() => {}} />);
+  const emptyOpen = strip(renderToStaticMarkup(<MerchantOrders origin={ORIGIN} state={{ state: "listed", orders: [], listedAt: "t", truncated: false }} open onToggle={() => {}} onRefresh={() => {}} />));
+  check("⭐ empty collapsed: header says (none listed yet); the absence line is on EXPAND (pinned choice)", /none listed yet/.test(strip(emptyCollapsed)) && !/absence of a row/i.test(strip(emptyCollapsed)) && /absence of a row is not absence of an order/i.test(emptyOpen) && /may not be listed yet/i.test(emptyOpen));
+  const unrOpen = strip(renderToStaticMarkup(<MerchantOrders origin={ORIGIN} state={{ state: "unreadable", reason: "list down" }} open onToggle={() => {}} onRefresh={() => {}} />));
+  check("unreadable expanded still names the reason and offers Refresh", unrOpen.includes("list down") && /Refresh/.test(unrOpen));
+  const loadingCollapsed = strip(renderToStaticMarkup(<MerchantOrders origin={ORIGIN} state={{ state: "loading" }} open={false} onToggle={() => {}} onRefresh={() => {}} />));
+  check("loading collapsed: header says listing…, no number", /listing/i.test(loadingCollapsed) && !/\(\d+\)/.test(loadingCollapsed));
+
+  // ── the page: collapsed by default on #/sell ──
+  const w: any = { address: MERCHANT, agentWallet: { address: AGENT }, ensureSession: async () => "t", isAuthenticated: true };
+  const page = renderToStaticMarkup(<SellPanel wallet={w} />);
+  check("🚨 #/sell renders the listing COLLAPSED by default (aria-expanded=false)", /Your checkout links[^<]*<\/button>/.test(page) ? /aria-expanded="false"/.test(page) : /aria-expanded="false"/.test(page));
+
+  // ── wiring that SSR cannot click: source pins ──
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../src/components/SellPanel.tsx", import.meta.url), "utf8");
+  check("⭐ the header button toggles (onClick={onToggle})", /aria-expanded=\{open\}[\s\S]{0,200}onClick=\{onToggle\}|onClick=\{onToggle\}[\s\S]{0,200}aria-expanded=\{open\}/.test(src));
+  check("⭐ a successful create AUTO-EXPANDS the listing (setListOpen(true) beside setCreated)", /setCreated\(\{ order: data\.order, path: data\.path \}\);[\s\S]{0,120}setListOpen\(true\)/.test(src));
+  check("⭐ …and the created order is pinned at the TOP of the rows even before the listing catches up (dedupe by id)", /created\?\.order[\s\S]{0,300}orders\.some|withCreated|pinned/.test(src));
 }
 
 console.log(`\n${"═".repeat(72)}`);
