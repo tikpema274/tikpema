@@ -26433,3 +26433,37 @@ order", "cannot be settled — make a new link". Closes the STATE half of GAP 2;
   payment and in the suites; not yet as a live refusal.
 
 Prod is at `6e2b1ff` == main. The three deploy-chain logs above remain uncommitted in the working tree.
+
+## 2026-09-19 — ⭐ SECOND CHECKOUT PAYMENT SETTLED AND VERIFIED ON ARC — two payments, one hash per order, two distinct claims
+
+**Run by T** (same buyer login, agent SCA `0x3cb7…2de9`) on prod `6e2b1ff`, via the new listing. Verified read-only
+from Arc RPC (by block; ⚠️ the public RPC now refuses a 35k-block `getLogs` range and rate-limits — scanned in
+5000-block chunks with backoff, the same throttle recorded in `dca-confirm-path-rpc-throttle`) and from the Blobs
+store directly. Nothing created, nothing posted, nothing moved by me.
+
+**Order** `o_mu8raz55_8448ec9aeba5f93b` — 0.100000 USDC, "tea", created 19:04:31Z at **createdAtBlock 62961647**.
+**Chain:** tx `0xbe08f7d3027347502fe3b4ab106a85c656b71c81f9b6dca5ebfed9bb61dc8557` — status **0x1**, **block
+62961835 > 62961647 (+188)**, timestamp 19:06:05Z, via EntryPoint `0x5ff1…2789` (bundler `0x636b…fbf5` this time).
+USDC-emitted Transfer (emitter `0x3600…0000`): from the buyer SCA → the merchant, **100000 units = 0.100000** exactly;
+the two 18-dp mirrors ignored (payment mirror + EntryPoint→bundler gas 0.010001 USDC, paid by the paymaster).
+**Store:** record `status:"paid"`, `paidTx` = the tx, `paidBy` = buyer SCA, `paidUnits "100000"`, `paidAt
+19:06:08.076Z`, `paidAtBlock 62961835`. **Two `tx:` claims now exist** (26 keys, 12 orders): `tx:0x7995…2bb4` →
+`o_mu8hewk4…` (claimed 14:30:34.559Z) and `tx:0xbe08…8557` → `o_mu8raz55…` (claimed 19:06:08.038Z, 38 ms before the
+transition). **Each names its own order; neither names the other.**
+**Transfers to the merchant since block 62928454: exactly TWO** — 62928802 (payment 1) and 62961835 (payment 2),
+distinct hashes, both from the buyer SCA, 0.100000 each. **No duplicates.**
+**Buyer SCA balance path** (balanceOf, 6dp; native 18-dp identical ×10¹²): 0.990885 → **0.890885** (payment 1, Δ
+0.100000) → 0.890885 unchanged until block 62961834 → **0.790885** (payment 2, Δ 0.100000) → 0.790885 at latest
+62962235. Total across both payments **exactly 0.200000; no USDC to gas** (native Δ exactly 1e17 each). Merchant
+26.628582 → 26.728582 → **26.828582**.
+
+**Orders now (12):** 2 paid (`o_mu8hewk4…` block 62928454, `o_mu8raz55…` block 62961647); **10 open** — 2 UNBOUND legacy
+(`o_mu7ju1sf…` 0.15, `o_mu7jxx8h…` 0.11; no seal, any hash refused) and **8 bound-and-unpaid**: five 0.20 "data"
+(`o_mu8aqqbu…` 62906070, `o_mu8b3jz9…` 62907265, `o_mu8b5obw…` 62907463, `o_mu8b9nx9…` 62907836, `o_mu8bf3ft…`
+62908343), `o_mu8b42ov…` 0.10 "try" 62907313, `o_mu8blkvc…` 0.12 "try" 62908947, `o_mu8hcts6…` 0.10 "data" 62928259.
+
+**What this adds to the proof:** the binding holds across payments — two orders, two hashes, two claims, each
+exclusive; the same buyer paying the same merchant the same amount twice produced two settled orders and zero
+cross-talk. ⛔ **Still owed live, T runs it:** the predates refusal — a fresh bound order (createdAtBlock > the tx's
+block) + an OLD hash → 409 `code:"predates"` naming both blocks, order stays open, no `tx:` written. The listing now
+makes the fresh orders visible for it.
