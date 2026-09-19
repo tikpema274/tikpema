@@ -26169,3 +26169,31 @@ payment.
 GATES in-chain (T's terminal): gate:types, test:all 135/135, gate:watch, gate:rpc, build, netlify deploy --prod,
 gate:deployed VERIFIED, capture:window no-window, gate:forgery, gate:spec, gate:deployloss (0 new). Runtime logs
 and the build stamp carry this deploy's entries but are NOT committed with this note.
+
+## 2026-09-19 — TikpemaPay: the sender-as-depositor Gateway variant recorded as DECIDED-PENDING; one-pager for Circle drafted (not sent)
+
+T asked for a read of an external pitch ("Complete architecture for Tikpemapay": depositFor on Arc/Base/Ethereum/
+Polygon → one Gateway pool → *your server draws funds* → CCTP to Polygon "where Eversend is funded" → Eversend →
+"Onafriq rails"; "want me to build all three now?"). Read against the record:
+- ⛔ As written it makes TikpemaPay CUSTODIAL (a Tikpema-owned Gateway depositor + a server that draws from the
+  pool), reversing the design of record (2026-09-14/15: non-custodial, sender's own wallet → Eversend's funding
+  address, Tikpema holds nothing) and the licensing reading built on it. A category change, not a feature.
+- Two claims not ours to make: "Onafriq rails" (Onafriq REJECTED 2026-09-16; Eversend pays out via its own licensed
+  partners) and "Polygon, where Eversend is funded" (Eversend's funding chain/address is the still-blocked
+  ramp-quote reconcile — unverified).
+- What was right: Base as a deposit source; `depositFor` naming the beneficiary; Gateway sub-second cross-chain
+  spend. None of it needs custody.
+**DECIDED-PENDING variant (T, 2026-09-19): sender as depositor.** `depositFor(USDC, amount, SENDER)` on the chain
+the sender holds USDC (Gateway mainnet: Base, Arc, Ethereum, Polygon …); the sender signs ONE EIP-712 burn intent
+to Eversend's sealed funding address on whatever Gateway-supported chain Eversend names; our server (or Circle's
+Forwarding Service) submits the mint — submitting a signed intent is not custody; the existing quote/seal,
+funding detector, orchestrator and receipts are unchanged. New: browser-side burn-intent signing (EOA + passkey
+SCA via ERC-1271; whether unified-balance-kit + Viem adapter runs in a browser is TO VERIFY) and a deposit UI
+disclosing the spend fee and the ~7-day Gateway withdrawal delay on leftovers. Direct pay-from-wallet stays for
+one-off senders. Order of operations unchanged: Eversend preflight key → T's non-custodial decision on the
+record → this. Memory: `tikpemapay-gateway-sender-as-depositor-variant`.
+**One-pager for Circle DRAFTED** as a private Claude Docs artifact
+(https://claude.ai/code/artifact/c74831cd-9e1b-4455-afb2-0abfd923af1d): what TikpemaPay is, the design + the rejected
+version, what is live (measured only; checkout and treasury marked "on prod, not yet proven"), what is pending, the
+ask (design review, ERC-1271 signing guidance, screening at the payout edge, a reference slot once live). ⛔ NOT
+sent; private until T shares it.
