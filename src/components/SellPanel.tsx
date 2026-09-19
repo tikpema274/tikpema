@@ -38,7 +38,8 @@ export function SellResult({ origin, order, path }: { origin: string; order: Pub
 }
 
 /** One row of the merchant's listing: the public view plus the merchant's own fields (checkout-list). */
-export type MerchantOrderRow = PublicOrder & { paidBy?: string | null; paidUnits?: string | null; paidAtBlock?: number | null };
+export type LateReport = { txHash: string; by: string; at: string; verified: false } | { unreadable: true } | null;
+export type MerchantOrderRow = PublicOrder & { paidBy?: string | null; paidUnits?: string | null; paidAtBlock?: number | null; lateReport?: LateReport };
 export type MerchantListState =
   | { state: "loading" }
   | { state: "unreadable"; reason: string }
@@ -83,7 +84,28 @@ export function listHeader(state: MerchantListState): string {
   return `${base} (${state.orders.length})`;
 }
 
-export function MerchantOrders({ origin, state, open, onToggle, onRefresh }: { origin: string; state: MerchantListState; open: boolean; onToggle: () => void; onRefresh: () => void }) {
+// ⛔ CANCEL (2026-09-19): the merchant's control, on OPEN rows only (incl. unbound legacy — cleanup). Not on
+// submitted (money in flight), never on paid. Inline confirm names the consequence; the server re-checks
+// everything (session = the record's merchant; the matrix; CAS against a concurrent payment). A cancelled
+// row that carries a LATE REPORT — a payment the buyer reported after the cancel, NOT verified by us —
+// warns the merchant to check their wallet: the buyer's real money must never reach a merchant who is
+// told nothing.
+export function MerchantOrders({ origin, state, open, onToggle, onRefresh, onCancel, confirmingId: confirmingProp }: {
+  origin: string; state: MerchantListState; open: boolean; onToggle: () => void; onRefresh: () => void;
+  onCancel?: (id: string) => Promise<void>;
+  /** Test/preview seam: which row shows its inline confirm. */
+  confirmingId?: string | null;
+}) {
+  const [confirmingLocal, setConfirming] = useState<string | null>(null);
+  const [cancelNote, setCancelNote] = useState<Record<string, string>>({});
+  const confirmingId = confirmingProp ?? confirmingLocal;
+  async function doCancel(id: string) {
+    if (!onCancel) return;
+    setCancelNote((n) => ({ ...n, [id]: "Cancelling…" }));
+    try { await onCancel(id); setCancelNote((n) => ({ ...n, [id]: "" })); }
+    catch (e: any) { setCancelNote((n) => ({ ...n, [id]: describeError(e) })); }
+    finally { setConfirming(null); }
+  }
   return (
     <div style={{ marginTop: 28 }}>
       <div className="row" style={{ alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
@@ -125,13 +147,39 @@ export function MerchantOrders({ origin, state, open, onToggle, onRefresh }: { o
                 <div className="summary-row"><span>Status</span><b>{o.status}</b></div>
                 <div className="summary-row"><span>Created</span><span title={o.createdAt}>{new Date(o.createdAt).toLocaleString()}</span></div>
                 <div className="summary-row"><span>Order</span><span className="mono" style={{ wordBreak: "break-all" }}>{o.id}</span></div>
-                {unbound ? (
+                {o.status === "cancelled" ? (
+                  <div className="summary-row"><span>Cancelled</span><span>{o.cancelledAt ? new Date(o.cancelledAt).toLocaleString() : "by you"} — the link is void; nobody can pay it</span></div>
+                ) : unbound ? (
                   <div className="summary-hazard">
                     <b>This link cannot be settled — make a new link.</b> It predates payment binding (no creation block);
                     the pay page offers no seal on it and the server refuses any payment of it.
                   </div>
                 ) : (
                   <div className="summary-row"><span>Link</span><CopyLink link={checkoutLink(origin, o.id)} /></div>
+                )}
+                {o.status === "cancelled" && o.lateReport && "unreadable" in o.lateReport && (
+                  <div className="summary-hazard">⚠️ Could not read whether a payment was reported against this cancelled order — check your wallet.</div>
+                )}
+                {o.status === "cancelled" && o.lateReport && "txHash" in o.lateReport && (
+                  <div className="summary-hazard">
+                    <b>⚠️ A payment was reported after you cancelled</b> ({new Date(o.lateReport.at).toLocaleString()}) —{" "}
+                    <b>not verified</b> by Tikpema. Check your wallet:{" "}
+                    <span className="mono" style={{ wordBreak: "break-all" }}>{o.lateReport.txHash}</span>{" "}
+                    <a href={`${EXPLORER}/tx/${o.lateReport.txHash}`} target="_blank" rel="noreferrer">view on Arcscan ↗</a>.
+                    If it is real, you may owe the buyer a refund — that is you sending it back.
+                  </div>
+                )}
+                {o.status === "open" && onCancel && (
+                  confirmingId === o.id ? (
+                    <div className="summary-hazard">
+                      <b>Void this link?</b> Anyone holding it will see it as cancelled and cannot pay it. A payment already
+                      sent cannot be undone — if one lands after this, you will see it here and may owe a refund.{" "}
+                      <button className="linkbtn" onClick={() => doCancel(o.id)}>Yes, cancel it</button> ·{" "}
+                      <button className="linkbtn" onClick={() => setConfirming(null)}>Keep it</button>
+                    </div>
+                  ) : (
+                    <div className="summary-row"><span></span><span><button className="linkbtn" onClick={() => setConfirming(o.id)}>Cancel link</button>{cancelNote[o.id] ? <> · <span className="status" style={{ margin: 0 }}>{cancelNote[o.id]}</span></> : null}</span></div>
+                  )
                 )}
                 {o.status === "paid" && o.paidTx && (
                   <div className="summary-row">
@@ -319,7 +367,21 @@ export default function SellPanel({ wallet: w }: { wallet: UnifiedWallet }) {
             </>
           )}
 
-          <MerchantOrders origin={origin} state={withCreated} open={listOpen} onToggle={() => setListOpen((o) => !o)} onRefresh={() => { refreshList().catch(() => {}); }} />
+          <MerchantOrders
+            origin={origin}
+            state={withCreated}
+            open={listOpen}
+            onToggle={() => setListOpen((o) => !o)}
+            onRefresh={() => { refreshList().catch(() => {}); }}
+            onCancel={async (id) => {
+              const token = await w.ensureSession();
+              const r = await fetch("/api/checkout-cancel", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ id }) });
+              const data = await r.json().catch(() => ({}));
+              if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);
+              if (created?.order?.id === id) setCreated(null);
+              await refreshList();
+            }}
+          />
         </>
       )}
     </div>

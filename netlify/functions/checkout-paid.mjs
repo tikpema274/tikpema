@@ -27,7 +27,7 @@ import { connectBlobs } from "./_blobs.mjs";
 import { json, parseBody } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
-import { safeOrderId, readOrder, transitionOrder, claimTxForOrder, publicOrder, effectiveStatus, STATUS, TX_HASH_RE } from "./_checkout.mjs";
+import { safeOrderId, readOrder, transitionOrder, claimTxForOrder, writeLateNote, publicOrder, effectiveStatus, STATUS, TX_HASH_RE } from "./_checkout.mjs";
 import { fetchReceipt, verifyDirectPayment } from "./_checkout-verify.mjs";
 
 export async function handler(event) {
@@ -50,6 +50,27 @@ export async function handler(event) {
   const status = effectiveStatus(order);
   if (status === STATUS.PAID) return json(200, { order: publicOrder(order), note: "already paid" });
   if (status === STATUS.EXPIRED) return json(409, { error: "order expired", order: publicOrder(order) });
+  // ⛔ CANCELLED — refused HERE, before the wallet lookup, the RPC and the verifier: no chain read, no
+  // verification against a dead order, no claim. If the buyer carries a hash, their transfer may have
+  // LANDED: it is in the merchant's wallet and the order is gone. That must not vanish into a generic
+  // error — the LATE NOTE records it (reported, NOT verified) for the merchant's listing, and the copy
+  // tells the buyer the truth. The hash stays unclaimed (see _checkout.mjs, "CANCEL AND THE PAYMENT THAT
+  // LANDED ANYWAY"). `by` is the session login — the SCA has not been resolved yet, on purpose.
+  if (status === STATUS.CANCELLED) {
+    let lateReported = false;
+    if (txHash) {
+      const n = await writeLateNote({ merchant: order.merchant, orderId: id, txHash, by: session.address });
+      lateReported = !!n.ok;
+    }
+    return json(409, {
+      error: txHash
+        ? "not a payment of this order: the seller cancelled it before your payment was recorded — your transfer is not undone; it is in the seller's wallet, and a refund is the seller sending it back"
+        : "this order was cancelled by the seller — nothing can be paid on it",
+      code: "cancelled",
+      lateReported,
+      order: publicOrder(order),
+    });
+  }
 
   // The buyer's agent wallet — the only `from` the receipt may show. Same wrapping as agent-send:
   // a tagged external failure becomes the shared 503 refusal (retryable, "nothing happened");

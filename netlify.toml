@@ -127,6 +127,10 @@
   to = "/.netlify/functions/checkout-list"
   status = 200
 [[redirects]]
+  from = "/api/checkout-cancel"
+  to = "/.netlify/functions/checkout-cancel"
+  status = 200
+[[redirects]]
   from = "/api/treasury-policy"
   to = "/.netlify/functions/treasury-policy"
   status = 200

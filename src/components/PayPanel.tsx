@@ -43,6 +43,8 @@ export type PublicOrder = {
    *  created before binding (2026-09-19) — UNBOUND, the server refuses every payment of it, so the
    *  seal is not offered. */
   createdAtBlock?: number | null;
+  /** Set when the seller voided the order (status "cancelled"). */
+  cancelledAt?: string | null;
 };
 
 /** What /api/checkout-paid said about the order after the send (or why it could not say).
@@ -53,7 +55,7 @@ export type Mark =
   | { status: "paid"; paidTx?: string | null }
   | { status: "submitted" }
   | { unverified: string }
-  | { refused: string; code: "replay" | "predates" | "unbound" | "receipt" | string; paidOrderId: string | null }
+  | { refused: string; code: "replay" | "predates" | "unbound" | "cancelled" | "receipt" | string; paidOrderId: string | null; lateReported?: boolean }
   | null;
 
 // Read the order id from the hash query ONCE, at mount (the SendPanel payment-link pattern): re-reading
@@ -184,6 +186,17 @@ export function PayOrderView({
         </Status>
       )}
 
+      {/* Suppressed once a RESULT is on screen: "Nothing can be paid on it" directly above a landed payment
+          reads as a contradiction at exactly the moment the buyer is anxious; the receipt + the refusal copy
+          below tell the whole story. */}
+      {order.status === "cancelled" && !result && (
+        <Status tone="warn">
+          <b>This checkout link was cancelled by the seller.</b> Nothing can be paid on it
+          {order.cancelledAt ? <> (cancelled {new Date(order.cancelledAt).toLocaleString()})</> : null}. If you still owe the
+          seller, ask them for a new link.
+        </Status>
+      )}
+
       {unbound && (
         <Status tone="warn">
           <b>This checkout link cannot be settled.</b> It predates payment binding (the order records no creation
@@ -230,6 +243,15 @@ export function PayOrderView({
               This transaction already paid order{" "}
               <a href={`#/pay?order=${mark.paidOrderId}`} className="mono">{mark.paidOrderId}</a>. One transfer settles one
               order; this order remains unpaid and nothing was marked. Paying it would be a second transfer.
+            </>
+          ) : mark.code === "cancelled" ? (
+            <>
+              The seller <b>cancelled this order before your payment was recorded</b>. Your transfer <b>did go through</b>{" "}
+              — it is in the seller's wallet (the hash and explorer link are in the receipt above). Tikpema cannot
+              reverse it; a refund is the seller sending it back.{" "}
+              {mark.lateReported
+                ? <>This payment has been <b>recorded for the seller</b> against the cancelled order, so they will see it in their list.</>
+                : <>Tell the seller the transaction hash.</>}
             </>
           ) : mark.code === "unbound" ? (
             <>
@@ -283,6 +305,30 @@ export default function PayPanel({ wallet: w }: { wallet: UnifiedWallet }) {
     setMark(null);
     setPaying(true);
     let data: SendResult | null = null;
+    // ⚠️ PRE-SEND RE-READ (2026-09-19). The order on screen was read once, at mount. The seller may have
+    // cancelled it since. Re-read it (public checkout-get, a STRONG read) right before the money moves and
+    // refuse to send unless it is still open.
+    //   WHAT THIS CLOSES: the window between page load and the click — minutes, hours, a tab left open.
+    //   WHAT IT DOES NOT CLOSE: the milliseconds between this read and sendFromAgent. A cancel that lands
+    //   in that gap still lets the transfer leave; the server then refuses the hash (409 cancelled) and
+    //   records a late note for the seller. Closing that gap would need agent-send itself to know about
+    //   orders — a money-path change, out of scope here and recorded as such in PROGRESS.md.
+    //   Unreadable ≠ cancelled: if the re-read fails we do NOT guess; we refuse to send and say so.
+    try {
+      const rr = await fetch(`/api/checkout-get?id=${encodeURIComponent(order.id)}`);
+      const rj = await rr.json().catch(() => ({}));
+      if (!rr.ok || !rj?.order) throw new Error(rj?.error || `HTTP ${rr.status}`);
+      if (rj.order.status !== "open") {
+        setLoad({ state: "ready", order: rj.order }); // the page re-renders in its true state (cancelled / paid / expired)
+        setPayError(`Not sent: this order is now ${rj.order.status}.`);
+        setPaying(false);
+        return;
+      }
+    } catch (e: any) {
+      setPayError(`Not sent: could not re-check the order before paying (${describeError(e)}). Nothing was paid — try again.`);
+      setPaying(false);
+      return;
+    }
     try {
       // THE money movement — the existing agent send, unchanged.
       data = (await w.sendFromAgent(order.merchant as `0x${string}`, Number(order.amountUsdc))) as SendResult;
@@ -305,7 +351,7 @@ export default function PayPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       if (r.ok && j?.order?.status === "paid") setMark({ status: "paid", paidTx: j.order.paidTx });
       else if (r.ok && j?.order?.status === "submitted") setMark({ status: "submitted" });
       // 409 = a verdict from a receipt the server READ; everything else (503, network) = could not read.
-      else if (r.status === 409 && typeof j?.error === "string") setMark({ refused: j.error, code: j.code ?? "receipt", paidOrderId: j.paidOrderId ?? null });
+      else if (r.status === 409 && typeof j?.error === "string") setMark({ refused: j.error, code: j.code ?? "receipt", paidOrderId: j.paidOrderId ?? null, lateReported: !!j.lateReported });
       else setMark({ unverified: j?.error || `HTTP ${r.status}` });
     } catch (e: any) {
       setMark({ unverified: describeError(e) });

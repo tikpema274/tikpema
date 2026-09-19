@@ -26538,3 +26538,34 @@ alerting worked throughout the outage"). Its ledger lines carry: ddTree `2f4f279
 `no-window`, 1 probe; loss sweep 15 losses / 38 limbo / 23 preserved / 0 unaccounted, 574 deploys scanned. The
 window log carries no Netlify deploy id and no served tree, so a full Deploy-N record cannot be written from it;
 this paragraph is its record.
+
+## 2026-09-19 — CANCEL for checkout orders — BUILT, UNCOMMITTED (T's preview); the client race is NARROWED, not closed
+
+**Why:** nine bound orders were payable by any link-holder until 2026-10-02 with no way to stop them.
+**What:** `STATUS.CANCELLED`; `open → cancelled` only (submitted = money in flight, refused; paid never; expired
+moot); `cancelled` is terminal in `effectiveStatus` (never flips to expired). `checkout-cancel.mjs` — session, the
+RECORD's merchant must equal the token's address (a buyer is 403; a `merchant` field is ignored), the matrix,
+CAS via `transitionOrder` (both race directions pinned in the store suite). `checkout-paid` refuses a cancelled
+order in the status block BEFORE the wallet lookup, the RPC and the verifier — `fetchReceipt` is asserted NOT
+called (zero RPC calls) — and, when a hash is present, writes the **LATE NOTE** `late:<merchant>:<orderId>`
+{ txHash, by: session login, at, verified:false } — **REPORTED, NOT VERIFIED**; `checkout-list` surfaces it on
+the cancelled row; the listing warns "a payment was reported after you cancelled — not verified — check your
+wallet; you may owe a refund". Pay page: a `cancelled` state; the buyer whose transfer landed after the cancel
+sees the truth (cancelled before the payment was recorded; the transfer DID go through; refund = the seller;
+recorded for the seller). Listing: `Cancel link` on open rows (incl. unbound legacy) with an inline confirm.
+
+**⛔ DECIDED — the refused hash stays UNCLAIMED (no tombstone).** `claimTxForOrder` could carry a `consumedBy`
+cleanly, but a claim is only safe once the receipt has verified FOR THE CALLER: order ids are public
+(`checkout-get`) and hashes are public on chain, so an unverified tombstone lets anyone strand another buyer's
+real payment by posting its hash against any cancelled order first — and verifying would be a chain read on a
+dead order, which this branch must not do. Consequence, pinned in `verify-checkout-cancel §4`: the same hash can
+still settle another pre-dating open order of the same merchant. The merchant received that money once; that
+settlement is a legitimate purchase, not a double-spend; the late note and the other order's `paidTx` then
+name the same hash — coherent, not hidden.
+
+**⚠️ THE CLIENT RACE IS NARROWED, NOT CLOSED.** `PayPanel.pay()` now re-reads the order (public `checkout-get`,
+strong) immediately before `sendFromAgent` and refuses to send unless it is still open; an unreadable re-read
+refuses too (never guesses). That closes the window between page load and the click. It does NOT close the
+milliseconds between that read and the send: a cancel landing there still lets the transfer leave, after which
+the server refuses the hash (409 cancelled) and records the late note. Closing that gap would need `agent-send`
+itself to know about orders — a MONEY-PATH change, out of scope here, and its own decision.

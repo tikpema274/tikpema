@@ -13,10 +13,27 @@
 // ═══ STATUS MACHINE — one write per transition, CAS-guarded, never re-opened ════════════════════
 //   open ──(txHash VERIFIED on chain)──▶ paid
 //   open ──(202: circleId, no hash)────▶ submitted ──(txHash verified later)──▶ paid
+//   open ──(the MERCHANT voids it)──────▶ cancelled                                  (2026-09-19)
 //   open / submitted ──(expiresAt passed, read-time)──▶ expired   (derived, never written)
-// `paid` is terminal. A second "paid" is refused, not overwritten: the first hash is the receipt and
-// a later one would be a different payment for the same order — a fact to surface, not to absorb.
+// `paid` and `cancelled` are terminal. A second "paid" is refused, not overwritten: the first hash is the
+// receipt and a later one would be a different payment for the same order — a fact to surface, not to
+// absorb. `submitted` is NOT cancellable: a circleId means money is in flight; let it land or fail.
 // [[absence-must-never-read-as-safe]] — `submitted` is NOT paid: the panel says so.
+//
+// ═══ CANCEL AND THE PAYMENT THAT LANDED ANYWAY (2026-09-19) ═══════════════════════════════════════
+// The CAS on `transitionOrder` makes cancel safe against a concurrent payment in BOTH directions: a cancel
+// that loses to a `paid` is refused ("order is paid, not open") and the payment survives; a `paid` that
+// loses to a cancel is refused ("order is cancelled, not open") and nothing is written. What the CAS
+// cannot help is the buyer whose transfer LANDED after the cancel — the money is in the merchant's wallet
+// and the order is dead. checkout-paid refuses that hash (409 cancelled) BEFORE any chain read, and writes
+// the LATE NOTE `late:<merchantLower>:<orderId>` { txHash, by, at, verified:false } — REPORTED, NOT
+// VERIFIED — which the merchant listing surfaces: "a payment was reported after cancel; check your wallet".
+// ⛔ THE REFUSED HASH STAYS UNCLAIMED, DELIBERATELY. A claim written without a chain read would let anyone
+// strand another buyer's real payment (order ids and hashes are public) by posting it against a cancelled
+// order first; a claim written WITH a chain read would be verification against a dead order. So the hash
+// can still settle another pre-dating open order of the same merchant — the merchant received that money
+// once, and that settlement is a legitimate purchase. The late note and the other order's paidTx then name
+// the same hash: coherent, not hidden. (verify-checkout-cancel §4 pins this.)
 //
 // ═══ KEYS ══════════════════════════════════════════════════════════════════════════════════════
 //   id:<orderId>                    the record (the truth)
@@ -52,7 +69,7 @@ export const CHECKOUT_STORE = "checkout-orders";
 export const ORDER_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 export const DESCRIPTION_MAX = 140;
 export const SETTLEMENT = Object.freeze({ DIRECT: "direct" });
-export const STATUS = Object.freeze({ OPEN: "open", SUBMITTED: "submitted", PAID: "paid", EXPIRED: "expired" });
+export const STATUS = Object.freeze({ OPEN: "open", SUBMITTED: "submitted", PAID: "paid", EXPIRED: "expired", CANCELLED: "cancelled" });
 const READ_CONSISTENCY = "strong";
 
 const norm = (a) => String(a || "").toLowerCase();
@@ -78,6 +95,8 @@ export const merchantKey = (merchant, id) => `m:${norm(merchant)}:${id}`;
 /** The listing prefix for ONE merchant — derived from a verified session address, never from a request field. */
 export const merchantPrefix = (merchant) => `m:${norm(merchant)}:`;
 export const txClaimKey = (txHash) => `tx:${norm(txHash)}`;
+/** A payment REPORTED against a cancelled order — never verified by us. One per order; the first report survives. */
+export const lateKey = (merchant, id) => `late:${norm(merchant)}:${id}`;
 
 /** A block height as stored on an order: a non-negative safe integer NUMBER, nothing else. */
 export const isBlockHeight = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
@@ -146,6 +165,7 @@ export function formatUnits6(units) {
 export function effectiveStatus(order, now = Date.now()) {
   if (!order) return null;
   if (order.status === STATUS.PAID) return STATUS.PAID;
+  if (order.status === STATUS.CANCELLED) return STATUS.CANCELLED; // terminal: never flips to expired
   if (order.expiresAt && Date.parse(order.expiresAt) <= now) return STATUS.EXPIRED;
   return order.status;
 }
@@ -158,11 +178,12 @@ export function effectiveStatus(order, now = Date.now()) {
  */
 export function publicOrder(order, now = Date.now()) {
   if (!order) return null;
-  const { id, merchant, amountUsdc, description, settlement, createdAt, expiresAt, paidTx, paidAt, circleId, createdAtBlock } = order;
+  const { id, merchant, amountUsdc, description, settlement, createdAt, expiresAt, paidTx, paidAt, circleId, createdAtBlock, cancelledAt } = order;
   return {
     id, merchant, amountUsdc, description, settlement, createdAt, expiresAt, status: effectiveStatus(order, now),
     paidTx: paidTx ?? null, paidAt: paidAt ?? null, circleId: circleId ?? null,
     createdAtBlock: isBlockHeight(createdAtBlock) ? createdAtBlock : null,
+    cancelledAt: cancelledAt ?? null,
   };
 }
 
@@ -198,6 +219,28 @@ export async function writeNewOrder(order, s) {
 }
 
 /**
+ * The late-payment note: a hash REPORTED against a cancelled order. onlyIfNew — the first report survives
+ * (a second is { ok, prior:true }). No chain read happens here or anywhere on this path: `verified:false`
+ * is part of the record so no reader can mistake it for a settlement.
+ */
+export async function writeLateNote({ merchant, orderId, txHash, by, now = Date.now() }, s) {
+  if (!TX_HASH_RE.test(txHash || "")) return { ok: false, reason: "malformed transaction hash" };
+  const st = store(s);
+  const note = { txHash: norm(txHash), orderId, merchant: norm(merchant), by: norm(by), at: new Date(now).toISOString(), verified: false };
+  try {
+    const res = await st.setJSON(lateKey(merchant, orderId), note, { onlyIfNew: true });
+    return res?.modified === false ? { ok: true, prior: true } : { ok: true };
+  } catch (e) { return { ok: false, unreadable: true, reason: `late note write failed: ${e?.message ?? e}` }; }
+}
+/** { txHash, by, at, verified:false } · null (readable, absent) · { unreadable:true } (the store could not say). */
+export async function readLateNote(merchant, orderId, s) {
+  try {
+    const res = await store(s).getWithMetadata(lateKey(merchant, orderId), { type: "json", consistency: READ_CONSISTENCY });
+    return res?.data ?? null;
+  } catch { return { unreadable: true }; }
+}
+
+/**
  * ⭐ CLAIM A TRANSACTION FOR ONE ORDER. `tx:<hash>` is written onlyIfNew — the same primitive that
  * keeps `writeNewOrder` from overwriting an id. Called AFTER the receipt verified and BEFORE the
  * transition (a hash that did not pay must never squat a claim; a claim without a transition must
@@ -228,7 +271,8 @@ export async function claimTxForOrder({ txHash, orderId, merchant, paidBy, now =
 
 /**
  * ⭐ THE ONLY STATUS TRANSITION WRITER. CAS on the etag of the record just read, so two buyers (or one
- * buyer twice) cannot both mark the same order. Allowed: open→submitted, open→paid, submitted→paid.
+ * buyer twice) cannot both mark the same order. Allowed: open→submitted, open→paid, open→cancelled,
+ * submitted→paid.
  * Everything else is refused with the reason named — including paid→paid (a second payment is a
  * fact to surface, not to absorb) and any transition on an expired order.
  */
@@ -239,7 +283,7 @@ export async function transitionOrder({ id, from, to, patch, now = Date.now() },
   if (!order) return { ok: false, reason: "no such order" };
   const eff = effectiveStatus(order, now);
   if (eff !== from) return { ok: false, reason: `order is ${eff}, not ${from}`, status: eff, order };
-  const legal = (from === STATUS.OPEN && (to === STATUS.SUBMITTED || to === STATUS.PAID)) ||
+  const legal = (from === STATUS.OPEN && (to === STATUS.SUBMITTED || to === STATUS.PAID || to === STATUS.CANCELLED)) ||
                 (from === STATUS.SUBMITTED && to === STATUS.PAID);
   if (!legal) return { ok: false, reason: `transition ${from} → ${to} is not allowed`, status: eff, order };
   const next = { ...order, ...patch, status: to, updatedAt: new Date(now).toISOString() };

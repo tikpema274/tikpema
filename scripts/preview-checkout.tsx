@@ -77,7 +77,29 @@ const listRows = [
 ] as any[];
 const listView = (state: any, open = true) => renderToStaticMarkup(<MerchantOrders origin={ORIGIN} state={state} open={open} onToggle={() => {}} onRefresh={() => {}} />);
 
+// ── CANCEL (2026-09-19): the pay page's cancelled state; the buyer whose transfer landed after; the control ──
+const CANCELLED = { ...FRESH, id: "o_mu8b42ov_7fbce1bb9a3b862f", description: "try", amountUsdc: "0.100000", status: "cancelled", cancelledAt: "2026-09-19T18:00:00.000Z" };
+const cancelRows = [
+  { ...FRESH, id: "o_mu8aqqbu_c87576aaf1375c4c", description: "data", amountUsdc: "0.200000" },
+  { ...CANCELLED, lateReport: null },
+  { ...CANCELLED, id: "o_mu8blkvc_eabf0202ebd465f0", description: "try", amountUsdc: "0.120000", cancelledAt: "2026-09-19T18:10:00.000Z", lateReport: { txHash: HASH, by: "0x7777777777777777777777777777777777777777", at: "2026-09-19T18:12:00.000Z", verified: false } },
+] as any[];
+const cancelList = (extra: any = {}) => renderToStaticMarkup(<MerchantOrders origin={ORIGIN} state={{ state: "listed", orders: cancelRows, listedAt: "t", truncated: false }} open onToggle={() => {}} onRefresh={() => {}} onCancel={async () => {}} {...extra} />);
+
 const sections = [
+  label("X1", "CANCEL — the pay page: cancelled by the seller (no seal, no hazard)",
+    "What a link-holder sees after the merchant voids the order. Nothing can be paid; ask the seller for a new link."),
+  bothWidths(view(CANCELLED), 560),
+  label("X2", "CANCEL — 🚨 the buyer whose transfer LANDED after the cancel (409 code:cancelled, lateReported:true)",
+    "The money is real and visible (receipt above, hash + explorer link). The copy says: the seller cancelled BEFORE the payment was recorded; the transfer DID go through and is in the seller's wallet; Tikpema cannot reverse it; a refund is the seller sending it back; the payment has been recorded for the seller. Never 'nothing was paid'."),
+  bothWidths(view(CANCELLED, { result: { txHash: HASH }, mark: { refused: "not a payment of this order: the seller cancelled it before your payment was recorded", code: "cancelled", paidOrderId: null, lateReported: true } }), 980),
+  label("X3", "CANCEL — the merchant's control: an open row (Cancel link), a cancelled row, a cancelled row WITH a late report",
+    "Open rows carry ‘Cancel link’. A cancelled row says when and offers no link. The third row shows the LATE REPORT: a payment reported after cancel, NOT verified, the hash + explorer link, ‘check your wallet… you may owe a refund’."),
+  bothWidths(cancelList(), 1200),
+  label("X4", "CANCEL — the inline confirm",
+    "‘Void this link?’ names the consequence (link-holders see it as cancelled; a payment already sent cannot be undone; a late one will show here) — Yes, cancel it · Keep it. Not a seal."),
+  bothWidths(cancelList({ confirmingId: "o_mu8aqqbu_c87576aaf1375c4c" }), 700),
+
   label("L0", "YOUR CHECKOUT LINKS — COLLAPSED (the default on #/sell): header with the honest count",
     "Collapsed by default. The header is the only place the count is stated: listed → (N); truncated → the server's total; empty → (none listed yet), never (0); loading → (listing…); unreadable → no number at all. Click expands. A create auto-expands and pins the new link at the top."),
   bothWidths(listView({ state: "listed", orders: listRows, listedAt: "2026-09-19T15:00:00.000Z", truncated: false }, false) + listView({ state: "listed", orders: listRows, listedAt: "t", truncated: true, total: 120 }, false) + listView({ state: "listed", orders: [], listedAt: "t", truncated: false }, false) + listView({ state: "loading" }, false) + listView({ state: "unreadable", reason: "list down" }, false), 420),
@@ -146,7 +168,7 @@ const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
   .pv-desk{width:560px;max-width:560px;margin:0}
   .pv-mob{border:1px solid var(--line-strong);border-radius:12px;background:var(--ink)}
 </style></head><body>
-  <div class="pv-label" style="color:var(--paper);font-size:15px">Checkout #/pay — wallet gate (g1–g4) · one hash, one order (2026-09-19) — static preview</div>
+  <div class="pv-label" style="color:var(--paper);font-size:15px">Checkout — cancel (X1–X4) · wallet gate (g1–g4) · one hash, one order (2026-09-19) — static preview</div>
   <div class="pv-note">Real PayOrderView, real styles.css, crafted props. a1/a2 are the two live prod records verbatim.
     Nothing here talks to a server; nothing can be paid from this file.</div>
   ${sections.join("\n")}

@@ -17,7 +17,7 @@ import { connectBlobs } from "./_blobs.mjs";
 import { getStore } from "@netlify/blobs";
 import { json } from "./_arc.mjs";
 import { requireSession } from "./_auth.mjs";
-import { CHECKOUT_STORE, merchantPrefix, merchantOrder } from "./_checkout.mjs";
+import { CHECKOUT_STORE, merchantPrefix, merchantOrder, readLateNote, STATUS } from "./_checkout.mjs";
 
 export const LIST_CAP = 100;
 export const LISTING_NOTE = "this listing can lag by a few seconds — a link made moments ago may not be listed yet; absence of a row is not absence of an order";
@@ -48,7 +48,15 @@ export async function handler(event) {
     try {
       const rec = await store.get(k, { type: "json" });
       const row = merchantOrder(rec, now);
-      if (row) rows.push(row); else unreadable.push(k.slice(prefix.length));
+      if (!row) { unreadable.push(k.slice(prefix.length)); continue; }
+      // A cancelled order may carry a LATE NOTE (a payment reported after the cancel — not verified).
+      // Surfaced on the row so the merchant is told; null = readable absence; unreadable stays visible.
+      row.lateReport = null;
+      if (row.status === STATUS.CANCELLED) {
+        const n = await readLateNote(rec.merchant, row.id);
+        row.lateReport = n && !n.unreadable ? { txHash: n.txHash, by: n.by, at: n.at, verified: false } : n?.unreadable ? { unreadable: true } : null;
+      }
+      rows.push(row);
     } catch { unreadable.push(k.slice(prefix.length)); }
   }
   rows.sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));

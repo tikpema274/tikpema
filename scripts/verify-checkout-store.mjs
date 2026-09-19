@@ -15,6 +15,10 @@
 //      an unreadable claim is UNREADABLE, never "someone else's".
 //   8. buildOrder records `createdAtBlock` and REFUSES an order without one — an unbound order is one nobody
 //      could pay, a defect at creation.
+//   9. 🚨 CANCEL (2026-09-19): open → cancelled ONLY; cancelled is TERMINAL and reads cancelled even past
+//      expiresAt; submitted / paid / expired refuse; the CAS race is safe BOTH ways (a cancel that loses to a
+//      concurrent paid is refused and the payment survives; a paid that loses to a concurrent cancel is refused
+//      and nothing is written). The late-payment note is onlyIfNew: the FIRST report survives.
 import { mock } from "node:test";
 const mem = new Map();            // key -> { json, etag }
 let etagSeq = 0, unreadable = false, changeUnderUs = null;
@@ -42,7 +46,7 @@ const C = await import("../netlify/functions/_checkout.mjs");
 const {
   mintOrderId, safeOrderId, ORDER_ID_RE, orderKey, merchantKey, formatUnits6,
   effectiveStatus, publicOrder, readOrder, writeNewOrder, transitionOrder, STATUS, SETTLEMENT, ORDER_TTL_MS,
-  claimTxForOrder, txClaimKey,
+  claimTxForOrder, txClaimKey, writeLateNote, readLateNote, lateKey,
 } = C;
 // Every order in this suite is bound at block 100 unless a case says otherwise (2026-09-19 binding).
 const BLOCK = 100;
@@ -194,6 +198,51 @@ section("7 — buildOrder records createdAtBlock and refuses an order it cannot 
     check(`🚨 createdAtBlock ${String(bad)} → refused (an unbound order is one nobody could pay)`, !!x.error && /createdAtBlock|block/i.test(x.error), x.error);
   }
   check("block 0 is a (theoretical) valid binding", !!C.buildOrder({ merchant: MERCHANT, amountUsdc: "1", description: "x", capUsdc: 5, now: NOW, createdAtBlock: 0 }).order);
+}
+
+section("9 — 🚨 cancel: open → cancelled only; terminal; the CAS race both ways; the late note");
+{
+  reset();
+  const mk = (desc, now) => { const { order } = buildOrder({ merchant: MERCHANT, amountUsdc: "0.1", description: desc, capUsdc: 5, now }); return order; };
+  const a = mk("A", NOW); await writeNewOrder(a);
+  const c1 = await transitionOrder({ id: a.id, from: "open", to: STATUS.CANCELLED, patch: { cancelledAt: new Date(NOW).toISOString(), cancelledBy: MERCHANT }, now: NOW });
+  check("⭐ open → cancelled with cancelledAt/cancelledBy", c1.ok && c1.order.status === "cancelled" && c1.order.cancelledAt && c1.order.cancelledBy === MERCHANT, c1.reason);
+  check("🚨 cancelled is TERMINAL: reads cancelled even after expiresAt has passed (never flips to expired)", effectiveStatus(c1.order, NOW + ORDER_TTL_MS + 1) === "cancelled");
+  check("public view carries status cancelled + cancelledAt", publicOrder(c1.order, NOW).status === "cancelled" && publicOrder(c1.order, NOW).cancelledAt === c1.order.cancelledAt);
+  // ── race, direction 1: PAID loses to a CANCEL that landed first ──
+  const p = await transitionOrder({ id: a.id, from: "open", to: "paid", patch: { paidTx: HASH1 }, now: NOW });
+  check("🚨 a paid that arrives AFTER the cancel is refused ('order is cancelled, not open'); nothing written", !p.ok && /cancelled, not open/.test(p.reason) && JSON.parse(mem.get(orderKey(a.id)).json).status === "cancelled" && !JSON.parse(mem.get(orderKey(a.id)).json).paidTx, p.reason);
+  const again = await transitionOrder({ id: a.id, from: "cancelled", to: STATUS.CANCELLED, patch: {}, now: NOW });
+  check("cancelled → cancelled is not a transition (the handler answers 200 idempotently WITHOUT writing)", !again.ok);
+  // ── race, direction 2: CANCEL loses to a PAID that landed first ──
+  const b = mk("B", NOW + 1); await writeNewOrder(b);
+  const pb = await transitionOrder({ id: b.id, from: "open", to: "paid", patch: { paidTx: HASH2, paidBy: BUYER_SCA }, now: NOW });
+  const cb = await transitionOrder({ id: b.id, from: "open", to: STATUS.CANCELLED, patch: { cancelledAt: "x" }, now: NOW });
+  check("🚨 a cancel that arrives AFTER the payment is refused ('order is paid, not open') and the payment SURVIVES", pb.ok && !cb.ok && /paid, not open/.test(cb.reason) && JSON.parse(mem.get(orderKey(b.id)).json).paidTx === HASH2, cb.reason);
+  // ── race, etag level: the record changed between the cancel's read and its write ──
+  const c = mk("C", NOW + 2); await writeNewOrder(c);
+  changeUnderUs = orderKey(c.id);
+  const cc = await transitionOrder({ id: c.id, from: "open", to: STATUS.CANCELLED, patch: { cancelledAt: "x" }, now: NOW });
+  check("🚨 CAS: the record changed under the cancel → refused 'changed under us', still open", !cc.ok && /changed under us/.test(cc.reason) && JSON.parse(mem.get(orderKey(c.id)).json).status === "open", cc.reason);
+  // ── the matrix at the transition level ──
+  const d = mk("D", NOW + 3); await writeNewOrder(d);
+  await transitionOrder({ id: d.id, from: "open", to: "submitted", patch: { circleId: "c-1" }, now: NOW });
+  const cs = await transitionOrder({ id: d.id, from: "submitted", to: STATUS.CANCELLED, patch: {}, now: NOW });
+  check("🚨 submitted → cancelled is NOT allowed (money in flight)", !cs.ok && /not allowed/.test(cs.reason), cs.reason);
+  const e = mk("E", NOW + 4); await writeNewOrder(e);
+  const ce = await transitionOrder({ id: e.id, from: "open", to: STATUS.CANCELLED, patch: {}, now: NOW + ORDER_TTL_MS + 60_000 });
+  check("expired refuses cancel (derived status blocks every transition)", !ce.ok && ce.status === "expired");
+  // ── the late-payment note: first report survives ──
+  const l1 = await writeLateNote({ merchant: MERCHANT, orderId: a.id, txHash: HASH1, by: "0x" + "77".repeat(20), now: NOW });
+  check("⭐ writeLateNote writes late:<merchantLower>:<orderId> { txHash, by, at, verified:false }", l1.ok && !l1.prior && (() => { const n = JSON.parse(mem.get(lateKey(MERCHANT, a.id)).json); return n.txHash === HASH1 && n.by && n.at === new Date(NOW).toISOString() && n.verified === false; })());
+  const l2 = await writeLateNote({ merchant: MERCHANT, orderId: a.id, txHash: HASH2, by: "0x" + "77".repeat(20), now: NOW + 5 });
+  check("🚨 a second report does NOT overwrite the first (onlyIfNew; prior:true)", l2.ok && l2.prior === true && JSON.parse(mem.get(lateKey(MERCHANT, a.id)).json).txHash === HASH1);
+  const rl = await readLateNote(MERCHANT, a.id);
+  check("readLateNote returns it; absent → null (readable), unreadable store → { unreadable }", rl?.txHash === HASH1 && (await readLateNote(MERCHANT, b.id)) === null);
+  unreadable = true;
+  const ru = await readLateNote(MERCHANT, a.id);
+  check("🚨 …unreadable store → { unreadable: true }, never null-as-absent", ru && ru.unreadable === true);
+  unreadable = false;
 }
 
 console.log(`\n${"═".repeat(72)}`);

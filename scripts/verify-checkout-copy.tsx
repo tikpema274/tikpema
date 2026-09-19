@@ -278,6 +278,57 @@ section("12 — 🚨 the listing is COLLAPSIBLE: header count per state (honest)
   check("⭐ …and the created order is pinned at the TOP of the rows even before the listing catches up (dedupe by id)", /created\?\.order[\s\S]{0,300}orders\.some|withCreated|pinned/.test(src));
 }
 
+section("13 — 🚨 CANCEL: the pay page's cancelled state; the buyer whose transfer landed after the cancel; the merchant's control");
+{
+  const ORIGIN = "https://app.tikpema.xyz";
+  // ── pay page: cancelled ──
+  const c = view({ ...base, status: "cancelled", cancelledAt: "2026-09-19T18:00:00.000Z" });
+  const ct = strip(c);
+  check("🚨 cancelled → says the SELLER cancelled it and nothing can be paid; no seal; no hazard", /cancelled by the seller/i.test(ct) && /nothing can be paid|cannot be paid/i.test(ct) && !/class="emerald[^"]*"[^>]*>Pay /.test(c) && !c.includes(IRREVERSIBLE_LINE));
+  check("…what / to whom / how much still render (door, not wall)", ct.includes("Two coffees") && /1\.500000 USDC/.test(ct));
+  // ── the buyer whose transfer LANDED after the cancel: the 409 with a real hash on screen ──
+  const late = view({ ...base, status: "cancelled" }, { result: { txHash: HASH }, mark: { refused: "not a payment of this order: the seller cancelled it before your payment was recorded", code: "cancelled", paidOrderId: null, lateReported: true } });
+  const lt = strip(late);
+  check("🚨 says the seller cancelled BEFORE the payment was recorded", /cancelled/i.test(lt) && /before your payment was recorded|before .* recorded/i.test(lt), lt.slice(0, 260));
+  check("🚨 says the transfer DID go through and is in the seller's wallet — never 'nothing happened'", /did go through|went through|is in the seller/i.test(lt) && !/nothing was paid/i.test(lt));
+  check("⭐ keeps the hash + explorer link on screen (the money is real and visible)", lt.includes(HASH) && late.includes(`${EXPL}/tx/${HASH}`));
+  check("⭐ says Tikpema cannot reverse it and a refund is the seller sending it back", /cannot (be )?revers/i.test(lt) && /refund/i.test(lt) && /seller/i.test(lt));
+  check("⭐ says the report was recorded for the seller (lateReported:true)", /recorded for the seller|the seller has been told|reported to the seller|seller will see/i.test(lt));
+  check("🚨 …and does NOT say 'Do not pay again' or 'will show paid' (that is the unverified copy)", !/once the server can read it/i.test(lt));
+  // ⭐ With a RESULT on screen the cancelled banner is suppressed: "Nothing can be paid on it" directly above a
+  //    landed payment reads as a contradiction at exactly the moment the buyer is anxious. The receipt + the
+  //    refusal copy tell the whole story. Without a result the banner must be there.
+  check("🚨 WITH a result: the section does NOT render 'Nothing can be paid on it'", !/Nothing can be paid on it/i.test(lt));
+  check("⭐ WITHOUT a result: it does", /Nothing can be paid on it/i.test(ct));
+
+  // ── the merchant listing: Cancel control with inline confirm; cancelled row; late report ──
+  const open = { ...base, id: "o_mu8aqqbu_c87576aaf1375c4c", status: "open", createdAtBlock: 62906070 };
+  const paidRow = { ...base, id: "o_mu8hewk4_7b898539e3d371c9", status: "paid", paidTx: HASH, paidAt: "t", paidBy: AGENT, createdAtBlock: 1 };
+  const sub = { ...base, id: "o_mu8b5obw_4f194018540eb160", status: "submitted", circleId: "circle-7", createdAtBlock: 1 };
+  const cancelledRow = { ...base, id: "o_mu8b42ov_7fbce1bb9a3b862f", status: "cancelled", cancelledAt: "2026-09-19T18:00:00.000Z", createdAtBlock: 1, lateReport: null };
+  const cancelledLate = { ...base, id: "o_mu8blkvc_eabf0202ebd465f0", status: "cancelled", cancelledAt: "2026-09-19T18:10:00.000Z", createdAtBlock: 1, lateReport: { txHash: HASH, by: "0x" + "77".repeat(20), at: "2026-09-19T18:12:00.000Z", verified: false } };
+  const legacy = { ...base, id: "o_mu7ju1sf_ae83dd7ebd87e0a5", status: "open", createdAtBlock: null };
+  const rows = [open, paidRow, sub, cancelledRow, cancelledLate, legacy];
+  const render = (extra: any = {}) => renderToStaticMarkup(<MerchantOrders origin={ORIGIN} state={{ state: "listed", orders: rows, listedAt: "t", truncated: false }} open onToggle={() => {}} onRefresh={() => {}} onCancel={async () => {}} {...extra} />);
+  const m = render();
+  const rowOf = (id: string) => { const i = m.indexOf(id); const rest = m.slice(i + 1); const re = /o_mu[0-9a-z]+_[0-9a-f]{16}/g; let mm; while ((mm = re.exec(rest))) { if (mm[0] !== id) return m.slice(i, i + 1 + mm.index); } return m.slice(i); };
+  check("⭐ an OPEN bound row has a 'Cancel link' control", /Cancel link/.test(strip(rowOf(open.id))));
+  check("⭐ an UNBOUND legacy row has it too (cleanup)", /Cancel link/.test(strip(rowOf(legacy.id))));
+  check("🚨 PAID has NO cancel control", !/Cancel link/.test(strip(rowOf(paidRow.id))));
+  check("🚨 SUBMITTED has NO cancel control (money in flight)", !/Cancel link/.test(strip(rowOf(sub.id))));
+  check("🚨 CANCELLED has NO cancel control; says Cancelled and when", !/Cancel link/.test(strip(rowOf(cancelledRow.id))) && /Cancelled/.test(strip(rowOf(cancelledRow.id))));
+  check("🚨 a cancelled row offers NO link to share", !/\/#\/pay\?order=o_mu8b42ov/.test(rowOf(cancelledRow.id)));
+  const lr = strip(rowOf(cancelledLate.id));
+  check("🚨 the cancelled row WITH a late report warns: a payment was reported after cancel, NOT VERIFIED, check your wallet", /payment was reported/i.test(lr) && /not verified/i.test(lr) && /check your wallet/i.test(lr), lr.slice(0, 300));
+  check("…names the reported hash and links the explorer (it IS a hash the buyer gave; the link lets the seller check)", lr.includes(HASH) && rowOf(cancelledLate.id).includes(`${EXPL}/tx/${HASH}`));
+  check("…and says a refund may be owed", /refund/i.test(lr));
+  // inline confirm: render with confirmingId set
+  const confirming = render({ confirmingId: open.id });
+  const cf = strip(confirming);
+  check("⭐ the inline confirm names the consequence: link-holders see it as cancelled; a payment already sent cannot be undone", /Void this link|cancel this link/i.test(cf) && /cannot be undone|cannot be reversed/i.test(cf) && /see it as cancelled|cannot pay it/i.test(cf), cf.slice(cf.indexOf("Void"), cf.indexOf("Void") + 200));
+  check("…with a Cancel and a Keep control, neither a seal", /<button[^>]*>[^<]*(Yes, cancel|Cancel it)/.test(confirming) && /<button[^>]*>[^<]*Keep/.test(confirming) && !/class="emerald/.test(confirming));
+}
+
 console.log(`\n${"═".repeat(72)}`);
 if (fail) { console.log(`❌ ${fail} failed, ${pass} passed.\n`); process.exit(1); }
 console.log(`✅ ALL GREEN   pass ${pass} / fail 0\n`);
