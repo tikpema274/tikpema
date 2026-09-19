@@ -26354,3 +26354,82 @@ transfer could have marked every ≤-amount order of that merchant paid. Measure
 (`o_mu7ju1sf…` 0.15, `o_mu7jxx8h…` 0.11), one unrelated 0.13 transfer (`0xdf65…4a7f`, block 62816721) qualified for the
 0.11, and no `checkout-paid` call was made in the window (both orders read `paidTx:null` throughout). Found read-only
 before any live payment; closed before the first one.
+
+## Deploys 10–12 COMPLETE — CHECKOUT BINDING · WALLET GATE · MERCHANT LISTING (2026-09-19) — records written after the fact
+
+Three production deploys ran from T's shell on 2026-09-19 without a PROGRESS.md record at the time. Written here from
+the artefacts each left: Netlify's deploy records (`netlify api getDeploy`), `gate:deployed` runs I made against each
+(read-only), the deploy chain's own captures in `dd-refusal-window-log.jsonl` / `deploy-loss-log.jsonl` (still
+UNCOMMITTED in the working tree — T's chain wrote them; they are the evidence for the DD-window and loss-sweep lines
+below), and the served bundles. ⚠️ Gates inside T's `deploy:prod` chain (gate:types, test:all, gate:watch, gate:rpc,
+gate:forgery, gate:spec) ran in T's terminal — I did not witness them; the test:all counts stated are MY pre-commit
+runs of the same tree. gate:deployed and the live checks below are mine.
+
+### Deploy 10 — one hash settles one order; a transfer must post-date its order (`5cd02dd`)
+Deploy `6aae579fb0540a7e753c185c`, published **2026-09-19T10:06:25Z**, served tree `cc513dd3ae79`, bundle
+`assets/index-C8_7_MX5.js`. gate:deployed VERIFIED (ready, tree + commit match, control == data, 0 orphans).
+WHAT SHIPPED (13 files): `_checkout.mjs` `tx:<hashLower>` CLAIM (`claimTxForOrder`, onlyIfNew; claim-then-transition;
+re-enterable by its own order, exclusive for every other; unreadable never mistaken for either) + `createdAtBlock`
+REQUIRED on `buildOrder`; `_checkout-verify.mjs` receipt block STRICTLY after `createdAtBlock`, no block → `unbound`
+refused AND said, every refusal carries `code`; `fetchBlockNumber`; `checkout-create` one `eth_blockNumber`, head
+unreadable → 503 and no order; `checkout-paid` verify → claim → transition, replay 409 `code:"replay"` +
+`paidOrderId`; `PayPanel` 409 = `refused` mark (never the "could not yet verify" copy), unbound order offers NO seal.
+Suites: verify-checkout-paid NEW (31), store 39→60, verify 21→40, copy 37→50; verify-checkout-copy §2 was
+found pinning a defect later (see Deploy 11). Pre-commit test:all 137/137 (incl. the new preview suite).
+DD WINDOW — **no-window** (probe 1, `windowSeconds` 150). ddTree `596bcd84…` **unrotated** (`rotated:false`,
+previous == current). PREDICTED (scripted DD-surface check before commit: none of 13 paths) — observed exactly.
+DEPLOY-LOSS SWEEP 10:07:46Z: **0 new** (losses 17, limbo 40, preserved 23, unaccounted 0; scanned 585).
+LIVE CHECK: both legacy orders answer `createdAtBlock:null` from `checkout-get` (→ unbound, no seal); served
+bundle carries "This checkout link cannot be settled", "already paid order", "Not a payment of this order".
+⛔ DEFECT WINDOW CLOSED BY THIS DEPLOY: Deploy 8 publish 2026-09-18T22:40:57Z → this publish, **11 h 25 min** in
+which any past #/send to a merchant could have settled a later order for less; zero checkout-paid calls in it.
+
+### Deploy 11 — wallet gate: return-to on every "open Wallet" link; four states behind a null agent wallet (`30e960f`)
+Deploy `6aae8a96b83e9e300d9c7bdd`, published **2026-09-19T13:43:07Z**, served tree `88008b2c9d1d`, bundle
+`assets/index-KP3gnLIG.js`. gate:deployed VERIFIED.
+WHAT SHIPPED (19 files, client-only; `netlify/functions/*` byte-identical): `src/lib/returnTo.ts`
+(`goToWalletAndReturn` stashes the FULL hash in sessionStorage — never localStorage — `returnAfterConnect` bounces
+back and clears); ALL TEN bare `location.hash = "/wallet"` sites replaced, src-wide pin asserts zero remain;
+`AgentWalletGate` (no address → connect with return-to · address, no session → SignInPrompt INLINE · resolving →
+"Preparing your agent wallet… needs no funds to be created" · FAILED → the reason, "Nothing was paid/sent", RETRY);
+`resolveAgentWallet.ts` — the /api/my-wallet loop as `{wallet}|{error}`, the failure that `.catch(() => {})` used
+to swallow now stored as `agentWalletError` (exported with `agentWalletResolving`); ConnectPasskey returns on ready.
+⚠️ verify-checkout-copy §2 HAD BEEN PINNING THE DEFECT (fixture = address + no session, asserted "Set up your
+wallet") — corrected. Suites: verify-wallet-gate NEW (42), copy 51. Pre-commit test:all 138/138.
+DD WINDOW — **no-window** (probe 1). ddTree `596bcd84…` **unrotated**. PREDICTED — observed.
+DEPLOY-LOSS SWEEP 13:44:23Z: **0 new** (losses 17, limbo 40, preserved 23, unaccounted 0; scanned 585).
+LIVE CHECK: bundle carries "Preparing your agent wallet", "needs no funds to be created", "Couldn't prepare your
+agent wallet", "You will be brought back to this page" (×2), `tikpema.returnTo`. **Return-to round trip CONFIRMED
+LIVE by T** (signed-out #/pay?order= → Wallet → connect → back on the order).
+
+### Deploy 12 — merchant listing: "Your checkout links" on #/sell, collapsible, honest count (`6e2b1ff`)
+Deploy `6aaeb21896f142b056d585e1`, published **2026-09-19T16:31:43Z**, served tree `87654a648309`, bundle
+`assets/index-Dqn9xUJi.js`. gate:deployed VERIFIED.
+WHAT SHIPPED (8 files): `checkout-list.mjs` (GET, session → `merchantPrefix(session.address)` and NOTHING else →
+the `m:` index that had been written since Deploy 8 and never read; rows = `merchantOrder()`; cap 100 stated;
+EVENTUAL, says so; list failure → 503 never `[]`); `_checkout.mjs` + `merchantPrefix`/`merchantOrder` only;
+`netlify.toml` `/api/checkout-list`; SellPanel `MerchantOrders` + `listHeader` (collapsed by default; (N) · server
+total on truncated · "(none listed yet)" never "(0)" · "(listing…)" · unreadable NO number; empty says "absence of a
+row is not absence of an order" on expand; paid row = real hash + explorer link, submitted = Circle id no link,
+unbound = "cannot be settled — make a new link" no link; create auto-expands + pins the new order). ⛔ NO CANCEL.
+Suites: verify-checkout-list NEW (22), copy 51→86. Pre-commit test:all 139/139.
+DD WINDOW — **no-window** (probe 1). ddTree `596bcd84…` **unrotated**. PREDICTED — observed.
+DEPLOY-LOSS SWEEP 16:32:54Z: **0 new** (losses 17, limbo 40, preserved 23, unaccounted 0; scanned 586).
+LIVE CHECK: anonymous `GET /api/checkout-list` → 401; `POST` → 405; bundle carries "Your checkout links",
+"(listing…)", "none listed yet", "This list can lag by a few seconds", "Absence of a row is not absence of an
+order", "cannot be settled — make a new link". Closes the STATE half of GAP 2; the ATTEMPT half stays open.
+
+### Live proof, already verified today (entries above: "FIRST CHECKOUT PAYMENT…" and "THE BINDING PROVEN LIVE…")
+- ⭐ **First checkout payment settled on Arc and verified FROM THE CHAIN:** `o_mu8hewk4_7b898539e3d371c9`,
+  0.100000 USDC, tx `0x79950cb47e7f3f8aa9228859909e1c4196a66a6714a5de4634e4ae1a86832bb4`, **block 62928802 >
+  createdAtBlock 62928454** (+348); USDC-emitted Transfer exactly 100000 units buyer SCA `0x3cb7…2de9` → merchant;
+  buyer 0.990885 → 0.890885 (no gas — paymaster paid 0.011048); merchant +0.100000; ONE transfer, no duplicate;
+  `tx:` claim names only this order, claimed 55 ms before the transition. Checkout v1 is PROVEN, not "on prod".
+- ⭐ **Replay refusal confirmed live:** same hash vs `o_mu8b42ov…` → 409 `code:"replay"` naming `o_mu8hewk4…`
+  (T-observed; not re-readable — a refusal writes nothing). Store: still one `tx:` key, byte-identical; target never
+  transitioned (no `updatedAt`). Chain: still one transfer; balances unchanged. Nothing moved.
+- ⛔ **Predates refusal STILL OWED LIVE:** a fresh order (createdAtBlock > 62928802) + the same hash → expected 409
+  `code:"predates"` naming both blocks, order stays open, no `tx:` written. Proven by construction in the first
+  payment and in the suites; not yet as a live refusal.
+
+Prod is at `6e2b1ff` == main. The three deploy-chain logs above remain uncommitted in the working tree.
