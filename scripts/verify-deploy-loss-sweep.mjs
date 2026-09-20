@@ -203,6 +203,59 @@ section("8 — THE MEASUREMENT REFUSES TO GUESS");
     clean.counts.losses === 0 && formatReport(clean, {}).some((l) => /0 NEW abandoned deploys/.test(l)));
 }
 
+section("N — ⭐ THE LISTING RETRIES A TRANSIENT FAILURE, AND EXHAUSTION IS STILL 'CANNOT MEASURE' (2026-09-20)");
+// Twice in three deploy:prod runs on 2026-09-20 the listing died with `spawnSync npx ETIMEDOUT` at the 90 s
+// per-call ceiling — exit 2, correct, but the chain died before stage:ledger and left the ledgers out of
+// step. A retry makes the MEASUREMENT more likely; it must never turn "could not measure" into "0 new".
+{
+  const timeoutErr = () => Object.assign(new Error("spawnSync npx ETIMEDOUT"), { code: "ETIMEDOUT" });
+  const page = (p) => (p === 1 ? [at(20 * H), at(1 * H)] : []);
+  const slept = [];
+  const sleep = (ms) => slept.push(ms);
+  // (a) first attempt times out, second succeeds → a real listing, and the retry count is REPORTED
+  {
+    let calls = 0;
+    const api = (_m, p) => { calls++; if (calls === 1) throw timeoutErr(); return page(p.page); };
+    const r = listAllDeploys({ site: "s", api, sleep });
+    ok("first attempt ETIMEDOUT, second succeeds → the listing is real", r.deploys.length === 2 && r.exhausted, `${r.deploys.length} deploys`);
+    ok("  …and it reports how many retries it took", r.retries === 1, `retries=${r.retries}`);
+    ok("  …with a backoff sleep between attempts", slept.length === 1 && slept[0] > 0, `slept ${slept.join(",")} ms`);
+    ok("  …and the attempts are capped at the bound", r.maxAttempts === 3, `maxAttempts=${r.maxAttempts}`);
+  }
+  // (b) EVERY attempt times out → throws, names the reason and the attempts; NEVER returns a listing
+  {
+    let calls = 0; slept.length = 0;
+    let err = null, result = null;
+    try { result = listAllDeploys({ site: "s", api: () => { calls++; throw timeoutErr(); }, sleep }); } catch (e) { err = e; }
+    ok("⛔ every attempt ETIMEDOUT → the listing THROWS (no count can exist)", err !== null && result === null);
+    ok("  …the error names the reason", /ETIMEDOUT/.test(err?.message ?? ""), err?.message?.slice(0, 80));
+    ok("  …and the attempts it made", /after 3 attempts/.test(err?.message ?? ""), err?.message?.slice(0, 120));
+    ok("  …and it made exactly the bound, no more", calls === 3, `calls=${calls}`);
+    ok("  …with backoff that grows", slept.length === 2 && slept[1] > slept[0], `slept ${slept.join(",")} ms`);
+  }
+  // (c) success on the first attempt → unchanged behaviour, retries 0
+  {
+    slept.length = 0;
+    const r = listAllDeploys({ site: "s", api: (_m, p) => page(p.page), sleep });
+    ok("success first time → retries 0, no sleep, same listing shape", r.retries === 0 && slept.length === 0 && r.deploys.length === 2 && r.pages === 1 && r.exhausted);
+  }
+  // (d) a NON-transient failure is NOT retried — a 401 or a malformed page fails at once
+  {
+    let calls = 0; let err = null;
+    try { listAllDeploys({ site: "s", api: () => { calls++; throw new Error("Unauthorized (401)"); }, sleep }); } catch (e) { err = e; }
+    ok("a non-transient error (401) is thrown at once, not retried", calls === 1 && /401/.test(err?.message ?? ""), `calls=${calls}`);
+  }
+  // (e) the three OUTCOMES the gate prints are distinct, and 'unmeasurable' never carries a count
+  {
+    const { describeListing } = await import("./lib/netlify-api.mjs");
+    ok("measured", describeListing({ retries: 0 }).kind === "measured");
+    const m = describeListing({ retries: 2 });
+    ok("measured-after-N-retries names N", m.kind === "measured-after-retries" && /2 retr/.test(m.text), m.text);
+    const u = describeListing(null, Object.assign(new Error("listAllDeploys: page 1 failed after 3 attempts — last error: spawnSync npx ETIMEDOUT")));
+    ok("unmeasurable names the reason and carries NO count", u.kind === "unmeasurable" && /ETIMEDOUT/.test(u.text) && !("count" in u), u.text);
+  }
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

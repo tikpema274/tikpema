@@ -45,7 +45,7 @@
 // "was it recorded" is a different question from "how long does it last".
 
 import { appendFileSync, readFileSync } from "node:fs";
-import { siteId, netlifyApi, listAllDeploys } from "./lib/netlify-api.mjs";
+import { siteId, netlifyApi, listAllDeploys, describeListing } from "./lib/netlify-api.mjs";
 import { classifyDeployLosses, formatReport, DEFAULT_MIN_AGE_HOURS } from "./lib/deploy-loss-sweep.mjs";
 import { previousCensus, diffLosses, formatDelta, verdictFor } from "./lib/deploy-loss-delta.mjs";
 
@@ -80,9 +80,16 @@ try {
   // the published one. Both of those are what hid 36 records for six weeks.
   listing = listAllDeploys({ site, api: netlifyApi, maxPages: MAX_PAGES });
 } catch (e) {
-  console.error(`deploy-loss-sweep: could not list deploys — ${e?.message?.split("\n")[0]}`);
+  // ⛔ retries exhausted (or a non-transient failure): still exit 2, still no count. The retry raised
+  // the odds of measuring; it never lowers the bar for what counts as a measurement.
+  console.error(`deploy-loss-sweep: ${describeListing(null, e).text}`);
   console.error("This is a FAILURE to measure. Exiting 2 so it cannot be read as \"nothing lost\".");
   process.exit(2);
+}
+{
+  const d = describeListing(listing);
+  if (d.kind === "measured-after-retries") console.error(`deploy-loss-sweep: ⚠️ ${d.text} — the count below is real, the API was flaky`);
+  else if (!AS_JSON) console.error(`deploy-loss-sweep: listing ${d.text} (${listing.pages} page${listing.pages === 1 ? "" : "s"}, ${listing.deploys.length} deploys)`);
 }
 
 const result = classifyDeployLosses(listing.deploys, { now: Date.now(), minAgeHours: MIN_AGE_HOURS });
