@@ -16,6 +16,23 @@ States — `OPEN` · `SCOPED` (written, not built) · `MEASURED <date>` (a fact 
 
 ---
 
+## ⛔ Read this first — what §0 blocks, and what does not wait for it (added 2026-09-20)
+
+**§0 does NOT block everything, but it blocks most of it.** Of the 22 rows in §0–7: **14 wait on §0** (§1 rows 2–3,
+§2 rows 2–4, all of §3, §4 row 2, all six of §7) — each names a chain-specific published value, a chain-specific
+funding route, or a real-money proof on the chosen chain, and under option C (Arc treasury + Base shopping wallet)
+§0 does not merely gate them, it **adds** rows (a Base wallet, a Base cap, a Base proof). **4 rows can be settled
+today on testnet with no reference to §0:** §1 row 1 (the literal refactor + grep-guard), §5 row 2 (KYC stays out),
+§6 row 1 (the REVERSALS review), §6 row 2 (the 202 four-step). **3 rows split:** §2 row 1's hygiene half (the spike
+scripts reading the prod cred) vs its mainnet-key half; §4 row 1's UNSET-caps half (swap, vault-deposit — settable
+on testnet prod now) vs its mainnet values; §5 row 1's *which flows are screened* half vs the vendor, whose coverage
+is chain-dependent.
+
+**The order that follows:** §1 row 1 is the floor. It is chain-agnostic, it is required under EVERY answer to §0
+(a Base shopping wallet is a second chain table, which is impossible while the first is spread over 51 files), and
+it is the row that makes §0's answer cheap to execute once taken. It is also bigger than the sketch made it look —
+see the sequencing note under §1. Then §6 and the settle-able halves, in any order. Then §0. Everything else after.
+
 ## 0. The one decision before everything
 
 | Item | Owner | Proof it is settled | State |
@@ -32,6 +49,60 @@ A migration that misses a duplicate passes the assert and verifies x402/DD again
 | **Testnet literals live in many files.** MEASURED 2026-09-20 (`git grep -l`, `*.md` excluded): `rpc.testnet.arc.io` in **23** files (5 src+netlify / 16 scripts / 2 other); chain id `5042002` in **51** (12 / 25 / 14); testnet Gateway wallet `0x0077…19B9` in **13** (5 / 7 / 1). The 09-20 sketch's 23 / 15 / 1 was a narrower scope; the 23 agrees. | code | One source per lever (`ARC.rpc`, `ARC.chainId`, `GATEWAY.WALLET`, Gateway host) + a **grep-guard** that fails the build on a second copy in `src`/`netlify`; the scripts either import the source or are declared spike/diag. Scoped 09-16, held until row 0. | SCOPED, held. → PROGRESS.md `### env-assert duplication gap — OUTRANKS the copy half`. |
 | **env-assert has NO mainnet chainId / rpcHost rows — BY DESIGN** (fail-closed: a full migration boots to UNKNOWN and REFUSES until both are added from a published source). gatewayWallet.mainnet (`0x7777…00eE`) and gatewayHost.mainnet are already present. | Circle → code | Circle's published Arc mainnet chain id + RPC host added to `_env-assert.mjs` with the source URL in the comment; `test:envassert` green; a deliberate partial flip still produces the SPLIT refusal. | OPEN — waits on the published values AND on the row above. → `netlify/functions/_env-assert.mjs` header. |
 | **All four levers agree on boot, in the deployed environment.** | code | `gate:deployed` after the mainnet deploy shows the assert classifying MAINNET on all four, no SPLIT, no UNKNOWN. | OPEN — cannot run before the two rows above. |
+
+### Sequencing note on §1 (added 2026-09-20 — what 23 / 51 / 13 implies)
+
+**The 51 are not 51 levers.** Read file by file, the chain-id hits split four ways, and only the first is refactor work:
+1. **Sources that ARE a lever today — three of them, for the same chain**: `netlify/functions/_arc.mjs` (server),
+   `src/config/chain.ts` (client bundle), `shared/dd/chains.mjs` (the DD engine, which must stay importable WITHOUT
+   `netlify/functions` — see the DD-core extraction design). So "one source per lever" means **one per PACKAGE**
+   (app-server, app-client, DD-core), not one per repo — and a cross-check that the three agree, which env-assert
+   does not do today (it reads ONE copy per lever). The Gateway wallet has ONE source (`_gateway.mjs`) but is
+   re-literalled in `_dd-x402`, `_x402-confirm`, `x402-quote` — those are the true duplicates.
+2. **Server/client files that re-literal a value instead of importing it**: `_dd-x402`, `_swap-confirm`,
+   `_x402-vanilla`, `x402-quote`, `x402-vanilla-seller`, `dd-identity`, `built.mjs`, `dd-analyze`,
+   `shared/onchain-analyze/endpoints.mjs`, `src/config/contracts.ts`, `site/index.html`. Refactor targets.
+3. **Suites and fixtures that PIN the value** (~25 `scripts/verify-*`, `scripts/dd/_mock-chain.mjs`,
+   `shared/dd-canary/fixtures.mjs`, `src/dev/dd-card-fixtures.ts`): a test that asserts `5042002` is doing its job;
+   after the refactor each either imports the source (and so tests nothing about the value) or stays a literal by
+   design as the CONTROL — the grep-guard must allowlist those explicitly, or it is either vacuous or red forever.
+4. **Records that MUST NOT change**: `agent-metadata/*.json` (registered ERC-8004 identities — `unified.json` is
+   FROZEN and self-referential; the chain id there is a fact about where the identity LIVES, and mainnet is a NEW
+   registration, not an edit), `evidence/`, the x402 census harvest. Allowlisted as records, never refactored.
+
+**⚠️ THE CONSTRAINT THE SKETCH MISSED — the DD surface.** `_arc.mjs`, `_gateway.mjs`, `_env-assert.mjs`, `_dd-x402.mjs`,
+`dd-analyze.mjs`, all of `shared/dd/` and `shared/onchain-analyze/` are in `DD_SURFACE_DIRS/FILES`. **ddTree is a
+CONTENT hash: any edit to any of them — a comment included — rotates it, and every deploy carrying a rotation has
+opened a deposit refusal window** (four observed-banner windows 09-16→09-17). The server-side half of §1 therefore
+cannot be sprinkled across deploys for free: each deploy that touches the surface is one window.
+
+**Can §1 be done incrementally? Yes — but split by SURFACE, not by lever.** "One lever at a time, each with its
+grep-guard" would put `_arc.mjs`/`_gateway.mjs`/`_env-assert.mjs` in every one of four deploys = four windows for
+one refactor. The incremental cut that costs one window:
+- **Increment A (no window, any number of deploys):** the client source (`src/config/chain.ts`, `contracts.ts`),
+  `site/index.html`, `built.mjs`, the ~25 suites and fixtures re-pointed to import their source, the scripts either
+  importing it or moved under `scripts/spikes/` (diag, allowlisted) — and the **grep-guard itself, landed FIRST in
+  warn-only** so its allowlist is measured against the tree before it can refuse a build. None of these files are on
+  the DD surface; `test:all` + `gate:deployed` prove each step.
+- **Increment B (exactly ONE window, one deploy):** every DD-surface file at once — `_arc.mjs` and `_gateway.mjs`
+  become the only server literals, `_dd-x402`/`_x402-confirm`/`x402-quote`/`dd-analyze`/`shared/onchain-analyze`
+  import them, `shared/dd/chains.mjs` keeps its own table (DD-core) and env-assert gains the **cross-package
+  agreement check**; the grep-guard flips from warn to refuse in the same deploy. Predicted DD-dirty before commit
+  (the scripted DD-surface check), the window captured as usual.
+- **What cannot be split at all:** the env-assert mainnet rows (§1 row 2) and the flip itself — those are one
+  change by construction, and they are not §1 row 1.
+
+**What is true about the codebase when §1 row 1 reads SETTLED:**
+- `git grep -lw 5042002` / the RPC host / the Gateway wallet returns **exactly** the source per package
+  (`_arc.mjs` + `_gateway.mjs`, `src/config/chain.ts`, `shared/dd/chains.mjs`), the env-assert table, the allowlisted
+  control suites, and the allowlisted records — and **nothing else**. The grep-guard enforces that list in `test:all`
+  with a control (a file that MUST contain the literal, so the guard is proven non-vacuous) and refuses on any other
+  hit, including in `scripts/` outside `spikes/`.
+- env-assert reads each lever from its package source and **refuses the boot when the packages disagree**, not only
+  when one lever's environment disagrees with another's.
+- A mainnet flip is then a diff of **three source files + the env-assert rows**, reviewable in one screen, and a flip
+  that misses a package is refused at boot rather than discovered as x402/DD verifying against the wrong Gateway.
+- The count row above re-measures to the allowlist size and no more — the number, not "fewer", is the proof.
 
 ## 2. Money — keys, funding, the revenue wallet
 
