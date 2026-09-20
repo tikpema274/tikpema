@@ -26730,3 +26730,23 @@ nothing of its own on the challenge path, so each entry is the platform report l
   catch-all answers 200 HTML and which leaves no function log).
 - **Round trip still owed.** Next artefact: the buyer's own request/response for the 15:14:52Z call (URL, method,
   headers — `payment-signature` vs `x-payment` — and body).
+
+## 2026-09-20 — 🚨 PUBLIC BUYER HARNESS REMOVED: `x402-pay.mjs` paid ANY posted seller from the delegate, unauthenticated
+
+**Found** while answering "how do you reach x402-quote": `POST /.netlify/functions/x402-pay { url }` → `payX402({ sellerUrl })`
+→ the DELEGATE EOA's Gateway balance settled to whatever seller was posted. No `requireSession`, no `assertNotPaused`, and
+`_x402.mjs:343` exempted it BY NAME from the budget-approved ceiling ("the standalone x402-pay.mjs harness… intentionally
+exempt") — leaving the per-call `AGENT_MAX_SPEND` backstop as the only bound. Its own header: "proves the buyer path in
+isolation… not wired into agent-act / the research engine". A harness that shipped as a production route.
+**Probed read-only** with an unreachable seller before touching it: 502 `{"executed":false,"step":"challenge","error":"fetch
+failed"}` — reachable, unauthenticated, spent nothing. Testnet exposure: the delegate's ~4.99 USDC Gateway balance, to anyone's
+x402 seller, one backstop-bounded call at a time. On mainnet the same file would have carried across (§2/§7 of the go/no-go).
+
+**Closed:** the function DELETED (no code imported it; no route, no test, no front-end caller — `git grep` found only
+comments). `verify-buyer-not-public.mjs` (test:all) is the guard on the CALLER SET: every importer of `payX402` must be
+allowlisted with its guard named (today only `_research.mjs`, reached via job-submit-background behind `requireInternal`,
+calling with `requireApproved:true`), no HTTP function may call `payX402`, and the harness file must not exist. Red-first
+(3 red on the old tree). The exemption comment in `_x402.mjs` corrected. gate:types, gate:registry 28/0, gate:routes 10/0,
+chain-literal guard clean; ⛔ NO DD-surface file touched — no ddTree rotation predicted for the deploy that carries this.
+[[guard-belongs-on-the-caller-set]] — a harness is a caller too. The go/no-go gains the row and a §7 follow-up: audit every
+money-moving function for session + pause before mainnet.

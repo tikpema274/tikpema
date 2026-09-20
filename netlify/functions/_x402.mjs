@@ -2,7 +2,7 @@
 //
 // Extracted verbatim from x402-pay.mjs (commit 6909b64, proven closed-loop) so
 // callers can drive the buyer as a FUNCTION rather than over HTTP. Phase 2's
-// research engine imports payX402() directly; x402-pay.mjs is now a thin HTTP
+// research engine imports payX402() directly; x402-pay.mjs WAS a thin HTTP
 // wrapper around this same core. Pure refactor — no behavior change.
 //
 // The flow (x402 protocol, Circle Gateway batching scheme):
@@ -340,9 +340,12 @@ export async function payX402({ sellerUrl, challenge, approvedUsdc, requireAppro
     // FAIL-CLOSED on the data-buy path: requireApproved:true (set only by
     // maybeBuyData) means a buy MUST carry a valid budget-approved ceiling — a
     // missing/invalid one is refused, not waved through to the AGENT_MAX_SPEND
-    // backstop. Callers that do NOT set requireApproved (the standalone x402-pay.mjs
-    // harness) are intentionally exempt; if they pass an approvedUsdc it is still
-    // enforced.
+    // backstop. Callers that do NOT set requireApproved are exempt from the ceiling but NOT from
+    // the backstop; if they pass an approvedUsdc it is still enforced. ⛔ The standalone x402-pay.mjs
+    // harness that used this exemption was REMOVED 2026-09-20 — it was a PUBLIC, unauthenticated
+    // route that paid any posted seller from the delegate (verify-buyer-not-public.mjs). The only
+    // caller today is _research.mjs, which sets requireApproved:true; the probe scripts call this
+    // from a shell with --env-file, never over HTTP.
     if (requireApproved && !(Number.isFinite(approvedUsdc) && approvedUsdc > 0))
       return { status: 200, body: { executed: false,
         blocked: `fail-closed: data buy requires a budget-approved ceiling (got ${approvedUsdc})` } };
