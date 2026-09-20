@@ -169,7 +169,16 @@ const DD_SURFACE_FILES = [
   // ⭐ ADDED 2026-08-26 — same reasoning as version.mjs: it shapes what the 402 ADVERTISES, and the
   // resource it names is what the payment signature binds to. A change here could publish a resource
   // the authorization does not match, so it must rotate the health key. Caught by the same guard.
-  "shared/x402/resource.mjs",           // the resource the challenge names — and the signature binds
+  "shared/x402/resource.mjs",
+  // ⭐ ADDED 2026-09-20 (mainnet §1, phase B) — BY DECISION, NOT AS A SIDE EFFECT. The ONE published offer
+  // (network + asset every 402 challenge names). _dd-x402 imports it, so dd-analyze reaches it, and the
+  // rule above is "nothing dd-analyze runs is outside the hash". A change to what the DD service TELLS
+  // BUYERS it settles on IS a change to the artefact's identity — a verifier must be able to tell a report
+  // sold under one published offer from one sold under another. So it rotates ddTree from now on, and
+  // that is the same cost version.mjs and resource.mjs already carry for the other two things a
+  // challenge names. The pin it replaced sat INSIDE _dd-x402 (already hashed); moving it out and NOT
+  // hashing it would have been a silent LOSS of coverage dressed as a refactor.
+  "shared/x402/published.mjs",           // the resource the challenge names — and the signature binds
 
   // ═══ ⭐⭐ ADDED 2026-08-16 — THE SHARED LADDER AND THE SECOND ENTRY POINT ════════════════════
   // 🚨 `_dd-rungs.mjs` CONTAINS THE HEALTH GATE ITSELF. Leaving it out would mean a change to the

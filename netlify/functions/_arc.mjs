@@ -1,6 +1,7 @@
 // Server-side mirror of Arc constants (functions can't import src/ TS cleanly).
 import { GATEWAY } from "./_gateway.mjs";
-import { assertSameEnvironment } from "./_env-assert.mjs";
+import { assertSameEnvironment, assertPackagesAgree } from "./_env-assert.mjs";
+import { CHAINS } from "../../shared/dd/chains.mjs"; // dd-core's OWN table — read here, never written; app-server → dd-core is the allowed direction
 
 export const ARC = {
   blockchain: "ARC-TESTNET",          // Circle SDK chain id
@@ -45,6 +46,10 @@ export const ENVIRONMENT = assertSameEnvironment({
   gatewayApiBase: GATEWAY.API_BASE,
   gatewayWallet: GATEWAY.WALLET,
 });
+// ⭐ AND THE PACKAGES AGREE (mainnet §1, phase B): dd-core keeps its own chain table by design, so a flip
+// that moves this file and forgets shared/dd/chains.mjs is refused HERE, at import — not discovered as
+// a paid DD report about the wrong chain. Pure check; the values are passed in, nothing is imported by it.
+assertPackagesAgree({ server: ARC, ddCore: CHAINS["arc-testnet"] });
 
 // ═══ ⭐⭐ ONE ASSET, TWO PRECISION VIEWS — AND THEY ARE NOT TWO BALANCES ══════════════════════
 // On Arc, USDC is the NATIVE gas token AND an ERC-20 at the address above. Both interfaces answer

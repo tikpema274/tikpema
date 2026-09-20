@@ -24,7 +24,9 @@
 // read does exist — authorizationState(payer,nonce) on Arc USDC — but ONLY for the token domain;
 // the Gateway contract reverts on that selector.)
 
-const GATEWAY_WALLET = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
+import { GATEWAY } from "./_gateway.mjs"; // constants only — no import-time side effect
+
+const GATEWAY_WALLET = GATEWAY.WALLET; // from the one server source (_gateway.mjs, constants only — this module stays import-light)
 const USDC = "0x3600000000000000000000000000000000000000";
 /** availableBalance(address token, address depositor) → uint256. Verified against the live contract;
  *  note balanceOf(address,address) REVERTS there, so this selector is not interchangeable. */

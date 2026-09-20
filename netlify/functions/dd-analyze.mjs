@@ -44,7 +44,7 @@ import { getStore } from "@netlify/blobs";
 // _dd-health's strong-consistency read throws. See _blobs.mjs.
 import { connectBlobs } from "./_blobs.mjs";
 import { BatchFacilitatorClient } from "@circle-fin/x402-batching/server";
-import { json } from "./_arc.mjs";
+import { json, ARC } from "./_arc.mjs";
 import {
   PENDING_STORE,
   resolvePayTo,
@@ -97,7 +97,7 @@ export { escalateProviderIntegrity, isSystemicReadFailure, refusalReport } from 
 // JSON, HTML page, OpenAPI) advertises from it, so an example can never name a chain the
 // endpoint would reject — they cannot disagree because they read the same array.
 
-const ARC_RPC = "https://rpc.testnet.arc.io";
+const ARC_RPC = ARC.rpc; // one source per package (mainnet §1, phase B) — was a literal
 
 /** Transport for the Gateway balance read. Injected into _dd-x402 / _x402-confirm so those modules
  *  stay testable without a chain, and so this file remains the only place that knows a URL. */

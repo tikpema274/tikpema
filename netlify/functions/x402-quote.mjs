@@ -39,6 +39,7 @@ import { ARC, CONTRACTS } from "./_arc.mjs";
 import { GATEWAY } from "./_gateway.mjs";
 import { X402_VERSION } from "../../shared/x402/version.mjs";
 import { resourceObject } from "../../shared/x402/resource.mjs";
+import { assertPublishedOffer } from "../../shared/x402/published.mjs";
 
 const PENDING_STORE = "x402-quote-pending";
 const ARC_RPC = ARC.rpc; // one source per package — see verify-chain-literals.mjs
@@ -58,9 +59,9 @@ const rpcCall = async ({ method, params }) => {
 // ⭐ DERIVED, NOT RESTATED — see the same block in _dd-x402.mjs. Both are published to buyers.
 const NETWORK = `eip155:${ARC.chainId}`; // CAIP-2, from ARC.chainId
 const ASSET = CONTRACTS.USDC; // USDC on Arc, from CONTRACTS
-if (NETWORK !== "eip155:5042002" || ASSET.toLowerCase() !== "0x3600000000000000000000000000000000000000") {
-  throw new Error(`x402-quote: published chain/asset changed — network="${NETWORK}" asset="${ASSET}"`);
-}
+// 🚨 ASSERTED AT IMPORT against the ONE published offer (shared/x402/published.mjs): the runtime is derived,
+// the offer is pinned, and a seller whose runtime disagrees with what buyers were told refuses to boot.
+assertPublishedOffer({ network: NETWORK, asset: ASSET, who: "x402-quote" });
 const VERIFYING_CONTRACT = GATEWAY.WALLET; // Gateway Wallet, from the one source
 const EXTRA = {
   name: "GatewayWalletBatched",

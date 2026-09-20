@@ -12,7 +12,10 @@
 //   3. unknown value (RPC host / wallet in neither column) -> throws UNKNOWN, never "probably testnet"
 
 import assert from "node:assert/strict";
-import { assertSameEnvironment, classify, ENV_TABLE, EnvironmentAssertionError } from "../netlify/functions/_env-assert.mjs";
+import { assertSameEnvironment, assertPackagesAgree, classify, ENV_TABLE, EnvironmentAssertionError } from "../netlify/functions/_env-assert.mjs";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
 
 const T = {
   chainId: 5042002,
@@ -80,6 +83,66 @@ check("chainId and rpcHost have NO mainnet entry (fail-closed by absence)", () =
 console.log("── the two Gateway wallets differ (the discriminator is real) ──────────────");
 check("testnet and mainnet Gateway wallets are distinct values", () => {
   assert.notEqual(ENV_TABLE.gatewayWallet.testnet, ENV_TABLE.gatewayWallet.mainnet);
+});
+
+console.log("\n── ⭐ cross-PACKAGE agreement: app-server vs dd-core (phase B, mainnet §1) ─────");
+// env-assert binds one package's four levers to ONE environment. It did not bind the PACKAGES to each
+// other: shared/dd/chains.mjs (dd-core) carries its own chain table by design, so a flip that moved the
+// server and forgot dd-core would boot, and the paid DD path would analyse the wrong chain. This pure
+// function takes both packages' values and REFUSES on any disagreement; _arc.mjs calls it at import.
+const S = { chainId: 5042002, rpc: "https://rpc.testnet.arc.io" };
+check("agreeing packages return quietly", () => {
+  assert.equal(assertPackagesAgree({ server: S, ddCore: { id: 5042002, rpc: "https://rpc.testnet.arc.io" } }), undefined);
+});
+check("the RPC compares by HOST — a trailing slash or a path is not a disagreement", () => {
+  assert.equal(assertPackagesAgree({ server: S, ddCore: { id: 5042002, rpc: "https://rpc.testnet.arc.io/" } }), undefined);
+});
+check("a chain-id disagreement REFUSES, naming chainId and BOTH values", () => {
+  const e = throws(() => assertPackagesAgree({ server: S, ddCore: { id: 5042999, rpc: S.rpc } }));
+  assert.ok(e instanceof EnvironmentAssertionError, "EnvironmentAssertionError (the boot refuses)");
+  assert.match(e.message, /chainId/); assert.match(e.message, /5042002/); assert.match(e.message, /5042999/);
+  assert.match(e.message, /app-server/); assert.match(e.message, /dd-core/);
+  assert.doesNotMatch(e.message, /rpcHost/, "does not blame the host");
+});
+check("an RPC-host disagreement REFUSES, naming rpcHost and BOTH hosts", () => {
+  const e = throws(() => assertPackagesAgree({ server: S, ddCore: { id: 5042002, rpc: "https://rpc.mainnet.arc.example" } }));
+  assert.ok(e instanceof EnvironmentAssertionError);
+  assert.match(e.message, /rpcHost/); assert.match(e.message, /rpc\.testnet\.arc\.io/); assert.match(e.message, /rpc\.mainnet\.arc\.example/);
+  assert.doesNotMatch(e.message, /chainId=/, "does not blame the chain id");
+});
+check("a MISSING dd-core value refuses — absence is not agreement", () => {
+  assert.ok(throws(() => assertPackagesAgree({ server: S, ddCore: undefined })) instanceof EnvironmentAssertionError);
+  assert.ok(throws(() => assertPackagesAgree({ server: S, ddCore: { rpc: S.rpc } })) instanceof EnvironmentAssertionError);
+});
+check("_env-assert.mjs stays PURE — no imports, so it can be called from anywhere including the DD surface", () => {
+  const src = readFileSync("netlify/functions/_env-assert.mjs", "utf8");
+  assert.doesNotMatch(src, /^\s*import\s/m, "an import would make the pure module impure");
+});
+check("⭐ THE BOOT REFUSES: a copy of _arc.mjs whose dd-core disagrees fails at IMPORT with the cross-package sentence", () => {
+  // Not a unit call — the real module, top-level, spawned: the throw happens where a cold start would hit it.
+  const { spawnSync } = require("node:child_process"); const { mkdtempSync, writeFileSync, rmSync } = require("node:fs");
+  const { tmpdir } = require("node:os"); const { join, resolve } = require("node:path");
+  const ROOT = resolve(".");
+  let arc = readFileSync("netlify/functions/_arc.mjs", "utf8")
+    .replace(/from "\.\/([^"]+)"/g, `from "${ROOT}/netlify/functions/$1"`)
+    .replace(/from "\.\.\/\.\.\/shared\//g, `from "${ROOT}/shared/`);
+  const mutated = arc.replace('ddCore: CHAINS["arc-testnet"]', 'ddCore: { id: 1, rpc: CHAINS["arc-testnet"].rpc }');
+  assert.notEqual(mutated, arc, "the call site was found and mutated");
+  const dir = mkdtempSync(join(tmpdir(), "arc-boot-")); const f = join(dir, "_arc.mutant.mjs"); writeFileSync(f, mutated);
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import("${f}").then(() => { console.log("BOOTED"); process.exit(0); }, (e) => { console.error(e.message); process.exit(3); })`], { cwd: ROOT, encoding: "utf8" });
+  rmSync(dir, { recursive: true, force: true });
+  assert.equal(r.status, 3, `the import must FAIL (got ${r.status}: ${(r.stdout + r.stderr).slice(0, 200)})`);
+  assert.match(r.stderr, /cross-package assert REFUSED/); assert.match(r.stderr, /dd-core=1\b/);
+  // and the UNMUTATED copy boots — the control that proves the harness itself is not what refused
+  const dir2 = mkdtempSync(join(tmpdir(), "arc-boot-")); const f2 = join(dir2, "_arc.ok.mjs"); writeFileSync(f2, arc);
+  const r2 = spawnSync(process.execPath, ["--input-type=module", "-e", `import("${f2}").then(() => { console.log("BOOTED"); process.exit(0); }, (e) => { console.error(e.message); process.exit(3); })`], { cwd: ROOT, encoding: "utf8" });
+  rmSync(dir2, { recursive: true, force: true });
+  assert.equal(r2.status, 0, `the unmutated copy must boot: ${(r2.stdout + r2.stderr).slice(0, 200)}`);
+});
+check("_arc.mjs CALLS assertPackagesAgree at import, against shared/dd/chains.mjs", () => {
+  const arc = readFileSync("netlify/functions/_arc.mjs", "utf8");
+  assert.match(arc, /import \{[^}]*CHAINS[^}]*\} from "\.\.\/\.\.\/shared\/dd\/chains\.mjs"/, "imports dd-core's table");
+  assert.match(arc, /assertPackagesAgree\(\{/, "calls it");
 });
 
 console.log(`\n${failed === 0 ? "✅ all directions discriminate" : `❌ ${failed} check(s) failed`}`);

@@ -141,3 +141,31 @@ export function assertSameEnvironment({ chainId, rpc, gatewayApiBase, gatewayWal
 
   return present[0]; // the one environment all four agree on
 }
+
+/**
+ * ═══ ⭐ CROSS-PACKAGE AGREEMENT — app-server vs dd-core (mainnet go/no-go §1, phase B) ═══════════
+ * assertSameEnvironment binds ONE package's four levers to one environment. It never bound the PACKAGES
+ * to each other: shared/dd/chains.mjs (dd-core) carries its OWN chain table by design — the DD engine must
+ * reach chains prod has never heard of, and must not import the app it audits — so a flip that moved
+ * _arc.mjs and forgot chains.mjs would boot, and the PAID DD path would analyse the wrong chain while the
+ * challenge named the right one. This takes both packages' values and REFUSES on any disagreement.
+ *
+ * PURE, like everything in this file: no import of either package — the CALLER (_arc.mjs) passes the
+ * values, so this module can be imported from the DD surface without an import-time side effect.
+ * Only server ↔ dd-core is checkable at boot; the CLIENT (src/config/chain.ts) is bound at test time by
+ * verify-chain-literals.mjs C1 and verify-site-claims.mjs — a function cannot import TypeScript source.
+ * ⚠️ An ABSENT dd-core value is a disagreement, never a pass.
+ */
+export function assertPackagesAgree({ server, ddCore } = {}) {
+  const diffs = [];
+  const sId = norm("chainId", server?.chainId), dId = norm("chainId", ddCore?.id);
+  if (!Number.isFinite(sId) || !Number.isFinite(dId) || sId !== dId) diffs.push(`chainId: app-server=${String(server?.chainId)} vs dd-core=${String(ddCore?.id)}`);
+  const sHost = norm("rpcHost", server?.rpc), dHost = norm("rpcHost", ddCore?.rpc);
+  if (!sHost || !dHost || sHost !== dHost) diffs.push(`rpcHost: app-server=${String(sHost || server?.rpc)} vs dd-core=${String(dHost || ddCore?.rpc)}`);
+  if (diffs.length) {
+    throw new EnvironmentAssertionError(
+      `cross-package assert REFUSED — app-server (_arc.mjs) and dd-core (shared/dd/chains.mjs) disagree: ${diffs.join("; ")}. ` +
+      `Both packages must name ONE chain; a flip that moves one and forgets the other is refused at boot, not discovered in a sold report.`
+    );
+  }
+}

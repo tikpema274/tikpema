@@ -45,15 +45,15 @@ import { readCircleError, httpStatusForCircleFailure } from "./_circle-error.mjs
 import { getStore } from "@netlify/blobs";
 import { connectBlobs } from "./_blobs.mjs";
 import { ARC, CONTRACTS } from "./_arc.mjs";
+import { assertPublishedOffer } from "../../shared/x402/published.mjs";
 
 // --- Arc Testnet / vanilla EIP-3009 constants (verified on-chain) ------------
 // ⭐ DERIVED — the THIRD copy of these two literals, found while fixing the other two. Fixing only
 // the copies you set out to fix is how the "1% slippage cap" claim survived in a fourth place.
 const NETWORK = `eip155:${ARC.chainId}`; // CAIP-2, from ARC.chainId
 const ASSET = CONTRACTS.USDC; // USDC on Arc (FiatTokenV2), from CONTRACTS
-if (NETWORK !== "eip155:5042002" || ASSET.toLowerCase() !== "0x3600000000000000000000000000000000000000") {
-  throw new Error(`x402-vanilla-seller: published chain/asset changed — network="${NETWORK}" asset="${ASSET}"`);
-}
+// 🚨 ASSERTED AT IMPORT against the ONE published offer (shared/x402/published.mjs) — see x402-quote.mjs.
+assertPublishedOffer({ network: NETWORK, asset: ASSET, who: "x402-vanilla-seller" });
 const BLOCKCHAIN = "ARC-TESTNET"; // Circle SDK chain id
 const PRICE_ATOMIC = "10000"; // $0.01 USDC (6-decimal atomic units)
 const MAX_TIMEOUT_SECONDS = 60; // authorization validity window we advertise

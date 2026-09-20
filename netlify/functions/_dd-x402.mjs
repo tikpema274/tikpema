@@ -51,6 +51,8 @@ import { X402_VERSION } from "../../shared/x402/version.mjs";
 import { resourceObject } from "../../shared/x402/resource.mjs";
 import { readGatewayBalance, confirmPayment, CONFIRM_REASON, RETRIEVE_TIMEOUT_MS, RETRIEVE_TIMEOUT_PROVENANCE } from "./_x402-confirm.mjs";
 import { ARC, CONTRACTS } from "./_arc.mjs";
+import { GATEWAY } from "./_gateway.mjs";
+import { assertPublishedOffer } from "../../shared/x402/published.mjs";
 // ⭐ The power catalogue is the SOURCE OF TRUTH for the floor stated in the 402. Imported, never
 // transcribed: a literal count in buyer-facing text is a second source of truth that rots silently
 // the day the catalogue changes, and this repo has been bitten by exactly that before.
@@ -72,11 +74,10 @@ export const DD_ASSET = CONTRACTS.USDC; // USDC on Arc, from CONTRACTS
 
 // 🚨 ASSERTED AT IMPORT, same reasoning as the price guard below: these two strings are PUBLISHED
 // in a payment challenge, so a silent change would advertise a different chain or a different token
-// to a paying buyer. Deriving them makes drift impossible; asserting them makes an INTENDED change
-// deliberate rather than incidental.
-if (DD_NETWORK !== "eip155:5042002" || DD_ASSET.toLowerCase() !== "0x3600000000000000000000000000000000000000") {
-  throw new Error(`_dd-x402: published chain/asset changed — network="${DD_NETWORK}" asset="${DD_ASSET}"`);
-}
+// to a paying buyer. Deriving them makes drift impossible; asserting them against the ONE published
+// offer (shared/x402/published.mjs — on the DD surface, by decision) makes an INTENDED change
+// deliberate rather than incidental. This pin was one of THREE copies until phase B of the mainnet §1.
+assertPublishedOffer({ network: DD_NETWORK, asset: DD_ASSET, who: "_dd-x402" });
 // ═══ ⛔⛔ TWO AXES, AND THE SENTENCE MUST NAME BOTH ═══════════════════════════════════════════
 // SETTLEMENT CHAIN (what you pay on) and SUBJECT CHAIN (what we analyse) are INDEPENDENT. Today
 // they coincide — both Arc Testnet — and that is exactly why the old sentence was safe: "a report
@@ -161,7 +162,7 @@ export function assertAcceptsDescribed(accepts) {
   return accepts;
 }
 
-export const DD_VERIFYING_CONTRACT = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"; // Gateway Wallet
+export const DD_VERIFYING_CONTRACT = GATEWAY.WALLET; // Gateway Wallet — from the one server source (_gateway.mjs)
 export const DD_EXTRA = Object.freeze({
   name: "GatewayWalletBatched",
   version: "1",
