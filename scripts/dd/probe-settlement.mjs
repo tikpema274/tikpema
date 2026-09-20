@@ -35,6 +35,21 @@ const RPC = ARC.rpc;
 const USDC = "0x3600000000000000000000000000000000000000";
 const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const CONFIRM = process.argv.includes("--confirm");
+// ═══ ⛔ RETIRED 2026-09-20 — the --confirm half REFUSES ═════════════════════════════════════════
+// This script answered Q1/Q2 on 2026-07-28 (Q1: `transaction` is a Circle settle id, not a tx hash; Q2: a
+// batched settle credits Gateway's INTERNAL ledger — `availableBalance(USDC, payTo)` on the GatewayWallet
+// — and emits NO Transfer to payTo). The seller was rewritten on that answer (_x402-confirm.mjs). But the
+// watch loop below still reads `balanceOf` + Transfer logs, so on a REAL success it prints "no delta, 0
+// logs" and a stale "design needs revising" verdict — exactly what happened in the 2026-09-20 review. A
+// paying instrument that reports a success as a failure is worse than none. The file stays as the RECORD
+// of the July measurement (the read-only half still runs); the paying half is retired in favour of
+// scripts/dd/probe-settlement-batch.mjs, which watches availableBalance and reports the settle latency.
+if (CONFIRM) {
+  console.error("⛔ probe-settlement.mjs --confirm is RETIRED (2026-09-20): it pays correctly but watches balanceOf, not the Gateway");
+  console.error("   availableBalance a batched settle moves, so it reports a real success as a failure. Use instead:");
+  console.error("   node --env-file=.env scripts/dd/probe-settlement-batch.mjs --runs 1 --confirm");
+  process.exit(2);
+}
 // --url <sellerUrl> targets a specific deployment (e.g. a DRAFT) instead of the prod default. The
 // deployed contract can only be proven against a real deployment, and a draft proves it without
 // publishing anything to prod.
