@@ -26884,3 +26884,44 @@ served on the same handle. Keep 15 min; a distribution needs `probe-settlement-b
 
 (The `probe-settlement.mjs` DECISION — retired, not fixed, not left with a warning — is recorded in the entry above and
 in `5d8f47a`.)
+
+## 2026-09-20 — ⭐⭐ THE DD MONEY STEP, PROVEN on the post-A+B tree — the THIRD real purchase (revenue wallet 0.12 → 0.18)
+
+**Run by T** (`scripts/dd/probe-dd-purchase.mjs --url https://app.tikpema.xyz/.netlify/functions/dd-analyze --confirm`,
+subject `0x0077777d7EBA4688BDeF3E311b846F25870A19B9` — the Gateway wallet, real code on Arc; $0.06 from the delegate).
+Script's claim: handle **`2234a767-97b0-4351-8aba-015a764ad065`**, confirmed at **260.7 s**. **Verified independently,
+read-only, not from the script:**
+1. **Revenue wallet `0xb407…6ac4`, from the chain:** GatewayWallet `availableBalance(USDC)` **120,000 → 180,000 atomic**
+   (0.120000 → 0.180000; the two prior purchases + this one — its whole history is now three DD sales, attributable).
+   USDC `balanceOf` **0 — unchanged** (the wallet has never held token USDC; the ledger, not the token).
+2. **Delegate `0x6db3…b380`:** `availableBalance` **4.863200 → 4.803200** (−60,000 atomic, exact). Double-entry closes.
+3. **The persisted artifact (`dd-analyze-pending/<handle>`):** keys `handle, payTo, amountAtomic "60000", baseline
+   "120000", settledAt 19:16:44.805Z, broadcast "accepted", payer, settleTransaction "62d139f4-2148-4a61-b8b6-d1d6f90ea569",
+   settleNetwork eip155:5042002, report, served:true, servedAt, confirmedEvidence { 180000 / 120000 / 60000, ageMs
+   257580 }`. **The settle-gate DECIDED TO CHARGE:** the record exists at all only because `settleDecision` passed every
+   `no(…)` branch (`settle-gate.mjs:90-135` — NO_REPORT / NO_COVERAGE_MANIFEST / COVERAGE_UNACCOUNTED / REFUSED /
+   UNSIGNED): the report has `refusal:null`, coverage **15 checked / 0 notChecked**, 5 powers found, the OFAC screen
+   (SDN snapshot 2026-09-16), `attestation.status:"signed"`. An indeterminate report is served unbilled and writes no
+   pending record. **Served bytes == frozen bytes:** `GET ?handle=` → 200, `canonicalize(served) === canonicalize(frozen)`
+   (canon keccak `0xc0e68876…`), same signature — retrieve never re-ran the analysis. (My verification GET re-served the
+   same bytes and moved `servedAt` 19:21:02Z → 19:25:56Z; permanent entitlement, nothing else changed.)
+4. **The attestation, ACTUALLY CHECKED on chain, not read as "signed":** `attestationDigest(report)` recomputed from the
+   served bytes with the canon/1 domain `tikpema-dd-attestation/canon1/prod`; `eth_call isValidSignature(digest, sig)`
+   on `verifyingContract 0xc54d4721…e621` → **`0x1626ba7e` (the ERC-1271 magic value)**; **control:** the same call with
+   the subject address tampered → **reverts** (rejected). `IdentityRegistry.ownerOf(851891)` →
+   `0xc54d4721…e621` — the account that validated the signature **is** agentId 851891's on-chain owner. keyClass
+   `registered`, keyId `circle-wallet:2c93ca5d…` (Circle signs; no key held here).
+5. **The seller's function log:** one invocation at **19:16:44.904Z, 1,667.71 ms, 167 MB** — the paid call (analysis of
+   15 checks + Circle signing + settle; the record's `settledAt` 19:16:44.805 sits inside it) — against a background of
+   17–337 ms unpaid calls (challenges, refusals, window probes). Seconds, not milliseconds: the analysis ran BEFORE money.
+
+**Proven, the four DD-specific properties on the tree that carries phases A+B:** (a) analyse-then-charge with the
+settle-gate deciding billability; (b) the artifact frozen and persisted before `settle()`, served byte-identical on
+retrieve; (c) the attestation signed by the DD identity and valid under ERC-1271 against agentId 851891's owner;
+(d) confirmation disclosed AGGREGATE-ONLY. Plus `DD_VERIFYING_CONTRACT` from `GATEWAY.WALLET` and the `PUBLISHED_OFFER`
+boot assert on the live seller. **Every paid check owed after Deploys 14–15 is now closed.**
+
+**Latency, three samples:** DD **260.7 s** today (settle 19:16:44.8 → confirmed ≈19:21:02, the probe's redemption at
++257.6 s), x402-quote **446.9 s** today, **~15.4 min** measured 2026-07-28. **`RETRIEVE_TIMEOUT_MS` STAYS 15 min:** two
+faster samples do not move a bound set by the worst case; the timeout bounds polling only and the entitlement never
+expires. [[verify-facts-before-sharing-words]] [[money-path-proof-discipline]]
