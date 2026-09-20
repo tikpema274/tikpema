@@ -26750,3 +26750,26 @@ calling with `requireApproved:true`), no HTTP function may call `payX402`, and t
 chain-literal guard clean; ⛔ NO DD-surface file touched — no ddTree rotation predicted for the deploy that carries this.
 [[guard-belongs-on-the-caller-set]] — a harness is a caller too. The go/no-go gains the row and a §7 follow-up: audit every
 money-moving function for session + pause before mainnet.
+
+## Deploy 15 COMPLETE — the public buyer harness REMOVED (x402-pay 404 on prod) (2026-09-20)
+
+Deploy `6ab011291e08e1be689753cb`, commit `ff5b313`, created 17:00:25Z, published **2026-09-20T17:26:13Z** (26 min
+bundling), bundle `assets/index-B7gzU5lx.js` (unchanged — a function-only change). **Run by T** from this working tree;
+the chain ran to completion this time: gate:ledger → types → test:all (incl. the new `test:buyernotpublic`) → watch →
+rpc → build → deploy → gate:deployed ✅ (in-chain, stamped) → capture:window → forgery → spec → gate:deployloss ✅
+(no ETIMEDOUT this run) → stage:ledger. Ledgers committed ALONE `89d15bd` after stamp:clear.
+
+WHAT SHIPPED: `netlify/functions/x402-pay.mjs` deleted — it was a LIVE, unauthenticated route that paid ANY posted
+seller from the delegate EOA's Gateway balance, exempt by name from the budget ceiling (found and probed read-only the
+same day; see the 2026-09-20 "PUBLIC BUYER HARNESS REMOVED" entry). `verify-buyer-not-public.mjs` guards the caller set
+in test:all. `_x402.mjs` exemption comment corrected.
+
+DD WINDOW — **no-window** (probe 1): ddTree **`349e755d…` unrotated**, exactly as predicted (no DD-surface file in the
+change). DEPLOY-LOSS SWEEP 17:27:46Z: **0 new** (17 carried, limbo 40, preserved 23, unaccounted 0; scanned 589).
+
+LIVE CHECK (read-only, no money): `POST /.netlify/functions/x402-pay` → **404** (was reachable, 502 on an unreachable
+seller, before this deploy). `x402-quote` challenge unchanged. **Option 2 is closed on prod.**
+
+STILL OWED: the paid x402-quote round trip — now via option 1 only: `node --env-file=.env
+scripts/dd/probe-settlement.mjs --confirm` (T runs; 0.001 USDC from the delegate; evidence = the store record with a
+handle + payTo's Gateway balance 14,000 → 15,000 atomic) — and the DD probe `--confirm` half ($0.06).
