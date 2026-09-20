@@ -5,6 +5,9 @@ pointer and is not repeated here** (two copies drift). Pointers into PROGRESS.md
 grep for it; the line number is where it was on the date added and will drift. Started 2026-09-18; add
 entries, mark them resolved, never silently delete.
 
+**The go/no-go itself lives in [`mainnet-go-no-go.md`](mainnet-go-no-go.md)** — one row per item with owner,
+proof and state. This file stays the index of pointers.
+
 ## Open
 
 - **A terminal-FAILED send stays charged against the day ceiling until UTC midnight, no manual release.**
