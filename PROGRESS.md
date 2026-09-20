@@ -26697,3 +26697,23 @@ T reported the paid x402-quote round trip run. Checked read-only, no money:
   batched signer ≠ depositor — an SCA via delegate is refused; a settle error returned without a handle). The
   buyer-side response is needed to place it. **The round trip stays OWED.** [[verify-facts-before-sharing-words]]
 - **DD probe `--confirm` ($0.06): STILL OWED** — revenue wallet unchanged at 0.120000 since the read-only half.
+
+### Deploy 14 — job #186639 (research panel, 16:26Z): the ESCROW path exercised; the SELLER path still not (read-only, 2026-09-20)
+1. **Job #186639 exercised the ERC-8183 escrow path end to end on the post-A+B tree, verified from Arc:** FUND
+   `0x13320a89…` block 63115215 (0.2 USDC, agent SCA `0x3cb7…2DE9` → escrow `0x0747…4583`), SUBMIT `0x4cfc25e1…`
+   block 63115252, SETTLE `0x57c09066…` block 63115274 (escrow → the same wallet; net zero USDC by the personal-agent
+   design, paymaster gas). `assertPackagesAgree` did not refuse the functions that ran. That is real coverage of the
+   escrow path and of the boot assert.
+2. **It covers NONE of the seller path:** no 402 answered, no `PUBLISHED_OFFER` assertion exercised by a paying buyer,
+   no Gateway-batched settle, no x402-quote handle. **The x402-quote round trip stays fully owed, as does the DD
+   probe `--confirm` half.** A 15:10Z "402 loop" cannot have come from this job (it ran ~75 min later and its capture
+   shows no x402-quote call); whether anything reached x402-quote at 15:10Z is undetermined — a loop leaves no store
+   or chain record; only the function log or the buyer's capture from that time can say.
+3. **CORRECTION, for future readers:** the research path buys from `DATA_SELLER_URL` — in production
+   `https://x402.quicknode.com/arc-testnet`, paid by vanilla EIP-3009 from the delegate EOA (`_research.mjs:416`,
+   `:471` → `payX402`) — **NOT from x402-quote**, which is reachable only from `_autonomy-test.mjs`. The 2026-08-29
+   memory entry ("Data purchase HAS fired 3×") mislabels the seller as x402-quote; `_research.mjs:70-78` records the
+   same defect. Do not read a research job as evidence about x402-quote.
+4. **#186639's data purchase was `not-attempted`** (`paidPathReached:false` — "the model judged no extra source was
+   needed", 16:26:23Z; no `data-budget` spend line). So the paid DATA path (QuickNode) is **untested on this tree**,
+   not confirmed.
