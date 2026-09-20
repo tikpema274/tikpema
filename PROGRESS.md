@@ -26717,3 +26717,16 @@ T reported the paid x402-quote round trip run. Checked read-only, no money:
 4. **#186639's data purchase was `not-attempted`** (`paidPathReached:false` — "the model judged no extra source was
    needed", 16:26:23Z; no `data-budget` spend line). So the paid DATA path (QuickNode) is **untested on this tree**,
    not confirmed.
+
+### Deploy 14 — the 15:10Z "402 loop": the function log (read-only, `netlify logs --source functions --function x402-quote`, 12:00–17:00Z)
+**Three invocations of x402-quote all day:** 15:14:52.899Z — **17 ms, cold start** (init 997 ms), the only call not
+mine; 15:19:29.494Z (206 ms) and 15:19:30.327Z (42 ms) — my two unpaid read-only challenge probes. The function logs
+nothing of its own on the challenge path, so each entry is the platform report line; the durations carry the finding:
+- **The 15:14:52 call cannot have settled.** `settle()` is a Circle round trip plus a Gateway balance read; my unpaid
+  probe took 206 ms warm just to build the challenge. 17 ms cold is the fastest exit — the unpaid 402 challenge or a
+  pre-work refusal. Consistent with the store (no record) and the chain (payTo balance unchanged at 14,000 atomic).
+- **One invocation, not a loop.** A buyer looping on 402 re-posts; that would be a burst. Whatever looped did so on the
+  buyer's side or against a path that never reached this function (e.g. an `/api/x402-quote` GET, which the SPA
+  catch-all answers 200 HTML and which leaves no function log).
+- **Round trip still owed.** Next artefact: the buyer's own request/response for the 15:14:52Z call (URL, method,
+  headers — `payment-signature` vs `x-payment` — and body).
