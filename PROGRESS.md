@@ -26848,3 +26848,39 @@ and reports latency); the read-only half still runs; the July header and Q1/Q2 t
 Not "fixed": rewriting a one-shot investigation into a second copy of the batch probe would be two instruments for one
 read; not "left with a warning": a warning beside a paying command that lies about its result is a trap with a label.
 [[never-mock-the-function-under-test]] — and never keep an instrument whose verdict contradicts the fact it just made.
+
+### Round trip — INDEPENDENT VERIFICATION of the batch probe's claim (handle `c9515652…`, "confirmed at 446.9 s"), read-only
+1. **The record:** `x402-quote-pending` now holds **7** keys (was 6, newest 2026-07-28T12:15:51Z). The new one, key ==
+   handle `c9515652-8b08-4dc3-a47b-cd4b1dce313c`: `payTo 0xc701…0df6`, `amountAtomic "1000"`, `baseline "14000"`,
+   `settledAt 1789930657284` (= **2026-09-20T18:57:37.284Z**), `payer 0x6db3…b380` (the delegate), `settleTransaction
+   "db2bc256-98ce-4654-a97e-47fecd7703d3"` (Circle's settle id), `settleNetwork "eip155:5042002"`; after redemption
+   `served:true, servedAt 1789931170497` (19:06:10.497Z), `confirmedEvidence { balanceNow "15000", baseline "14000",
+   amountAtomic "1000", ageMs 513213 }`.
+2. **payTo, from the chain:** GatewayWallet `availableBalance(USDC, payTo)` (eth_call `0x3ccb64ae`) **14,000 → 15,000
+   atomic** — 14,000 at 19:04:49Z, 15,000 at 19:05:19Z. USDC `balanceOf(payTo)` (eth_call `0x70a08231`) **0.800000,
+   UNCHANGED** — the batched settle touched the Gateway ledger, not the token. No Transfer to payTo.
+3. **The delegate, from the chain:** `availableBalance(USDC)` **4.864200 → 4.863200** (−0.001, exact; first movement
+   since 2026-08-29T11:48Z). Double-entry closes: +1,000 at payTo, −1,000 at the payer.
+4. **The seller's function log (x402-quote, 18:45–19:10Z), six invocations, all accounted for:** 18:47:18.9 (15 ms
+   cold — T's `probe-settlement.mjs` read-only half); 18:49:21.4 (195 ms — my control 402); **18:57:33.2 (15 ms cold)
+   and 18:57:35.1 (2.5 ms) — the batch probe's challenge fetches; 18:57:37.3 (587 ms, 154 MB) — THE SETTLE invocation**
+   (Circle settle + Gateway baseline read; the record's `settledAt` 18:57:37.284 sits inside it); 19:06:09.4 (378 ms —
+   my redemption, the confirmation read + serve). Nothing else touched the seller.
+**The script's "446.9 s" is consistent with the chain:** 18:57:37.3 + 446.9 s = 19:05:04Z, between my 19:04:49 (14,000)
+and 19:05:19 (15,000) reads. Proven by two independent observers (the probe's poll and mine), not by the script's word.
+
+**What this rules out / does not.** The batched signer path — EOA delegate, `from == signer == depositor` — works on the
+post-A+B tree. So "the seller's batched path is broken for its intended signer" is ruled out as a cause of the 15:14:52Z
+single unpaid contact; what that caller WAS (which wallet, which header) is still not determined — a 17 ms cold call
+left no payload. **The challenge equalled `PUBLISHED_OFFER`** on every fetch in this log window; A+B changed nothing a
+buyer sees.
+
+**Latency: 446.9 s (7.4 min) today vs ~15.4 min measured 2026-07-28 — n=1 today, n≈3 overall (the July runs gave ~3 min
+and ~14.5–15.4 min).** What it licenses: nothing about the tail — one sub-8-minute sample does not move a distribution
+whose observed maximum is above `RETRIEVE_TIMEOUT_MS` (15 min, `_x402-confirm.mjs:55`). What it does not license:
+shortening that timeout, or treating 7 min as typical. The design already carries the right consequence — the timeout
+only stops RECOMMENDING that the buyer keep polling; the entitlement never expires, and today's redemption at +8.5 min
+served on the same handle. Keep 15 min; a distribution needs `probe-settlement-batch.mjs --runs N` on more than one day.
+
+(The `probe-settlement.mjs` DECISION — retired, not fixed, not left with a warning — is recorded in the entry above and
+in `5d8f47a`.)
