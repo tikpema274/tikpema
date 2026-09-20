@@ -26925,3 +26925,21 @@ boot assert on the live seller. **Every paid check owed after Deploys 14–15 is
 +257.6 s), x402-quote **446.9 s** today, **~15.4 min** measured 2026-07-28. **`RETRIEVE_TIMEOUT_MS` STAYS 15 min:** two
 faster samples do not move a bound set by the worst case; the timeout bounds polling only and the entitlement never
 expires. [[verify-facts-before-sharing-words]] [[money-path-proof-discipline]]
+
+## 2026-09-20 — ⭐ §0 DECIDED: A, PURE ARC. Arc mainnet is live — verified read-only before it became a decision
+
+**T:** "Arc is launched." **Verified before recording** (docs.arc.io + the network, read-only): chain id **5042**
+(`eth_chainId` → `0x13b2` from `https://rpc.mainnet.arc.io` AND `https://rpc.drpc.mainnet.arc.io`, no credentials),
+explorer `explorer.arc.io` (200), USDC native `0x3600…0000` (6-dp ERC-20 interface, 18-dp gas — same as testnet),
+**Gateway on Arc mainnet** domain 26: wallet `0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE`, minter
+`0x2222222d7164433c4C09B0b0D809a9b52C04C205` (`/arc/references/contract-addresses`) — matching the Gateway pair
+`_env-assert.mjs` has carried since 09-16. ⚠️ `/arc/references/rpc-endpoints` still says "during the private mainnet
+phase, these endpoints are permissioned and require credentials" and "for mainnet, request gas USDC through your Circle
+point of contact" — reads are open today; writes and the first gas are where §2 will meet Circle.
+
+**Decision (T, offered A / C / not-yet): A — pure Arc.** Hold and spend on Arc mainnet; USDC-as-gas intact; one chain
+table. The reason for C ("the x402 marketplace is Base-centric") was already weakened by the 09-19 census — 325 offers /
+47 sellers on eip155:5042. **Consequence for the go/no-go:** the 14 rows §0 gated are unblocked and Arc-specific; none
+is added. §1 row 2 (env-assert mainnet rows) is READY TO FILL — both values are now published, and the fill is one
+DD-surface deploy that must cite the page. §3 row 1 is a docs read, not yet a service read (the two curls + the
+`arc-gateway-watch` flip still owed). [[verify-facts-before-sharing-words]] [[arc-vs-base-agent-shopping-decision]]
