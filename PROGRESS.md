@@ -26943,3 +26943,26 @@ table. The reason for C ("the x402 marketplace is Base-centric") was already wea
 is added. §1 row 2 (env-assert mainnet rows) is READY TO FILL — both values are now published, and the fill is one
 DD-surface deploy that must cite the page. §3 row 1 is a docs read, not yet a service read (the two curls + the
 `arc-gateway-watch` flip still owed). [[verify-facts-before-sharing-words]] [[arc-vs-base-agent-shopping-decision]]
+
+## Deploy 16 COMPLETE — the env-assert MAINNET ROWS (5042 / rpc.mainnet.arc.io) live; go/no-go §1 row 2 SETTLED (2026-09-20)
+
+Deploy `6ab03eae64d396a6d327855b`, commit `b498f10`, tree `b8e49e838d85`, created 20:14:38Z, published
+**2026-09-20T20:54:47Z** (40 min bundling). **Run by T** from this working tree; the chain ran to `capture:window`
+and stopped before `gate:deployloss` (as on Deploy 14). Remaining links re-run by hand, read-only, ~23:50Z:
+gate:deployed ✅ VERIFIED (stamp b498f10 / b8e49e83, THIS tree served, control == data); gate:forgery 5/0; gate:spec ✅;
+gate:deployloss ✅ **0 new** (17 carried); stage:ledger → stamp:clear → ledgers committed ALONE (`f9639f5`).
+
+WHAT SHIPPED: `ENV_TABLE.chainId.mainnet = 5042`, `ENV_TABLE.rpcHost.mainnet = "rpc.mainnet.arc.io"` (each citing
+docs.arc.io/arc/references/rpc-endpoints, read 2026-09-20; eth_chainId → 0x13b2 on that host), the header rewritten
+(full four-lever mainnet config boots as `mainnet`; any 1–3-lever half-migration is a SPLIT and refuses; an
+unpublished value is UNKNOWN), `verify-env-assert.mjs` red-first (+8). test:all 146/146 before deploy.
+
+DD WINDOW — **observed-banner** (probe 23 of 23): ddTree **ROTATED `349e755d…` → `4580f86b…`** (predicted: `_env-assert.mjs`
+is on the DD surface). **346 s**, self-clearing, `no-record` — in the 48–577 s range, above the ~280 s median.
+Rotation history today: 596bcd84 → 349e755d (Deploy 14, 224 s) → 4580f86b (Deploy 16, 346 s); Deploy 15 no-window.
+
+LIVE CHECK (read-only): the served tree still classifies `testnet` — the sources are testnet, only the TABLE gained rows;
+x402-quote's 402 → `eip155:5042002` / USDC / payTo `0xc701…`, unchanged; dd-analyze GET → 405 declared refusal, no banner.
+**Go/no-go §1 row 2 → SETTLED.** With §0 (A, pure Arc) and §1 rows 1–2 settled, a mainnet flip is now exactly: the three
+package sources + `shared/x402/published.mjs` moving together to 5042 / rpc.mainnet.arc.io / the mainnet Gateway pair —
+and env-assert refuses anything less. Row 3 (all four levers agree in the DEPLOYED env) is the flip itself.
