@@ -26815,3 +26815,36 @@ handle + payTo's Gateway balance 14,000 → 15,000 atomic) — and the DD probe 
   it will end "no delta, 0 logs" and print a STALE verdict ("internal ledger… design needs revising") — that verdict was
   already acted on in July. **Use `scripts/dd/probe-settlement-batch.mjs --runs 1 --confirm`** instead: it watches
   `availableBalance` (0x3ccb64ae) per run and reports the settle latency; same seller, same 0.001 USDC, same delegate.
+
+## 2026-09-20 — ⭐⭐ THE x402-quote ROUND TRIP, PROVEN on the post-A+B tree (Deploy 15, ff5b313) — the owed seller-path proof is CLOSED
+
+**Run by T** (`scripts/dd/probe-settlement-batch.mjs --runs 1 --confirm`, the delegate EOA `0x6db3…b380` paying 0.001
+USDC). **Verified read-only, from the store and the chain, at every step:**
+- **Challenge:** 402, v2, `eip155:5042002` / USDC `0x3600…` / payTo `0xc701…0df6` / 1000 atomic — **equals `PUBLISHED_OFFER`
+  exactly**, and is field-for-field the 2026-07-28 records. Phases A+B left the published offer unchanged.
+- **Settle accepted 18:57:37.284Z:** a 7th `x402-quote-pending` record — handle **`c9515652-8b08-4dc3-a47b-cd4b1dce313c`**,
+  payer `0x6db3…b380`, `baseline 14000`, `settleTransaction db2bc256-98ce-4654-a97e-47fecd7703d3` (Circle's settle id —
+  the July Q1 answer, an id not a hash), `served:false` — accepted, not yet confirmed.
+- **Money moved, double-entry, exact:** payTo's GatewayWallet `availableBalance(USDC)` **14,000 → 15,000 atomic** (seen
+  moved between 19:04:49Z and 19:05:19Z → flush ≤ 7 min 42 s after acceptance; the July measurement was ~3–15 min);
+  the delegate's `availableBalance` **4.864200 → 4.863200** (−0.001 exactly; first movement since 2026-08-29).
+  `balanceOf(payTo)` on the token unchanged, as expected (internal ledger).
+- **Serve-on-confirmation, the last link:** `GET x402-quote?handle=c9515652…` at 19:06:10Z → **200**, `payment.status
+  "confirmed"`, `evidence { balanceNow 15000, baseline 14000, amountAtomic 1000, ageMs 513213 }`, the dataset served (2
+  facts); the record flipped `served:true, servedAt 1789931170497`. Nothing was handed over before the chain agreed.
+**Proven:** 402 → delegate signs → Circle settles → the seller refuses to serve until `availableBalance` clears the
+sealed threshold → serves. The seller path is exercised end to end on the tree that carries `PUBLISHED_OFFER`, the
+cross-package boot assert, the one-source refactor and the buyer-harness removal. The DD probe's `--confirm` half
+($0.06) remains the one unrun paid check and is NOT owed by this proof — it is the DD seller, a different scheme.
+
+**The probe-settlement.mjs defect — and the DECISION.** `probe-settlement.mjs --confirm` pays correctly (same `payX402`)
+but its watch loop reads USDC `balanceOf(payTo)` + `Transfer` logs — the reads the July run used to DISCOVER that a
+batched settle credits Gateway's internal ledger. On today's real success it would have ended "no delta, 0 logs" and
+printed the stale verdict "Gateway credits an INTERNAL ledger… the design needs revising" — a paying instrument
+reporting a success as a failure. Three options were on the table: fix the watch, deprecate the file, leave it with a
+warning. **Decided: RETIRE the paying half, keep the file as the record** (`5d8f47a`). `--confirm` now refuses with
+the reason and names the replacement (`probe-settlement-batch.mjs --runs 1 --confirm`, which watches `availableBalance`
+and reports latency); the read-only half still runs; the July header and Q1/Q2 text stay as the measurement's record.
+Not "fixed": rewriting a one-shot investigation into a second copy of the batch probe would be two instruments for one
+read; not "left with a warning": a warning beside a paying command that lies about its result is a trap with a label.
+[[never-mock-the-function-under-test]] — and never keep an instrument whose verdict contradicts the fact it just made.
