@@ -64,13 +64,14 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { encodeFunctionData, pad, getAddress, createPublicClient, http, formatUnits } from "viem";
 import { BRIDGE_DESTINATIONS, resolveDestinationStrict } from "../netlify/functions/_bridge.mjs";
+import { ARC as ARC_SOURCE } from "../netlify/functions/_arc.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // --- config (Arc source chain; destinations come from BRIDGE_DESTINATIONS via --dest) ---
 const ARC = {
   blockchain: "ARC-TESTNET",
-  rpc: "https://rpc.testnet.arc.io",
+  rpc: ARC_SOURCE.rpc, // from the one server source
   explorer: "https://testnet.arcscan.app",
   cctpDomain: 26,
   usdc: "0x3600000000000000000000000000000000000000",

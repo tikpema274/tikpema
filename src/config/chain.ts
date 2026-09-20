@@ -16,4 +16,5 @@ export const arcTestnet = defineChain({
   testnet: true,
 });
 
-export const ARC_CHAIN_HEX = "0x4CEF52"; // 5042002
+// Derived from the one client source above, never restated (verify-chain-literals.mjs).
+export const ARC_CHAIN_HEX = `0x${arcTestnet.id.toString(16).toUpperCase()}`;

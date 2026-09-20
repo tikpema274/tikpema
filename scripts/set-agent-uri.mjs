@@ -72,6 +72,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { encodeFunctionData } from "viem";
+import { ARC } from "../netlify/functions/_arc.mjs";
 import { circle, waitForTx, TxPendingError } from "../netlify/functions/_circle.mjs";
 import { appendPointerMove, PointerHistoryError } from "./_pointer-history.mjs";
 
@@ -84,7 +85,7 @@ const COMPANION = "https://app.tikpema.xyz/api/dd-identity";
 
 // ⭐ TWO INDEPENDENT PROVIDERS, and every chain read must AGREE across both. One RPC is
 // one instrument; six reads of one instrument is still n=1.
-const RPCS = ["https://rpc.testnet.arc.io", "https://arc-testnet.drpc.org"];
+const RPCS = [ARC.rpc, "https://arc-testnet.drpc.org"];
 // ⚠️ NOT rpc.testnet.arc.com — that host does not resolve. The TLD is .network.
 
 const GATEWAYS = [

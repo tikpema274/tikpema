@@ -35,6 +35,8 @@
 // or just GET the retrieve URL again.
 
 import { fetchX402Requirements, payX402 } from "../../netlify/functions/_x402.mjs";
+import { ARC } from "../../netlify/functions/_arc.mjs";
+import { GATEWAY as GATEWAY_SOURCE } from "../../netlify/functions/_gateway.mjs";
 
 const arg = (name, dflt = null) => {
   const i = process.argv.indexOf(name);
@@ -42,12 +44,12 @@ const arg = (name, dflt = null) => {
 };
 const CONFIRM = process.argv.includes("--confirm");
 const URL = arg("--url");
-const SUBJECT = arg("--address", "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"); // Gateway Wallet: real code on Arc
+const SUBJECT = arg("--address", GATEWAY_SOURCE.WALLET); // Gateway Wallet: real code on Arc
 const POLL_MIN = Number(arg("--poll", "20"));
 const HANDLE = arg("--handle");
 
-const RPC = "https://rpc.testnet.arc.io";
-const GATEWAY = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
+const RPC = ARC.rpc;
+const GATEWAY = GATEWAY_SOURCE.WALLET;
 const USDC = "0x3600000000000000000000000000000000000000";
 const AVAILABLE_BALANCE_SEL = "0x3ccb64ae";
 const EXPECTED_PAYTO = "0xb407967319d56218c7e1c369125490e665a16ac4";

@@ -33,9 +33,9 @@ import { CONTRACTS } from "../netlify/functions/_arc.mjs";
 
 const IDENTITY_REGISTRY = "0x8004A818BFB912233c491871b3d84c89A494BD9e";
 const AGENT_URI = "ipfs://bafkreibdi6623n3xpf7ymk62ckb4bo75o3qemwkpfvp5i25j66itxvsoei";
-const RPC = "https://rpc.testnet.arc.io";
+const RPC = ARC.rpc;
 const ARC_CHAIN = {
-  id: 5042002,
+  id: ARC.chainId,
   name: "Arc Testnet",
   nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
   rpcUrls: { default: { http: [RPC] } },

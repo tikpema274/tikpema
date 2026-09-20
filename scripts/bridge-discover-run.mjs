@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { blockWindows, joinBurns, diffUndocumented, discoveredReceipt, sweepVerdict,
          TOKEN_MESSENGER_V2, DISCOVER_OUTCOME } from "../netlify/functions/_bridge-discover.mjs";
 import { BRIDGE_CONTRACT } from "../netlify/functions/_bridge.mjs";
-import { CONTRACTS } from "../netlify/functions/_arc.mjs";
+import { ARC, CONTRACTS } from "../netlify/functions/_arc.mjs";
 
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d; };
 
@@ -30,7 +30,7 @@ async function withBackoff(fn, tries = 5) {
     }
   }
 }
-const c = createPublicClient({ transport: http("https://rpc.testnet.arc.io") });
+const c = createPublicClient({ transport: http(ARC.rpc) });
 const cfg = JSON.parse(readFileSync(join(homedir(), ".config", "netlify", "config.json"), "utf8"));
 const token = cfg.users[Object.keys(cfg.users)[0]].auth.token;
 const siteID = JSON.parse(readFileSync(".netlify/state.json", "utf8")).siteId;

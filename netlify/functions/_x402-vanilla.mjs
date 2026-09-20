@@ -120,7 +120,7 @@
 //   1. Hit the seller with no payment → HTTP 402 + PaymentRequirements
 //      (base64 PAYMENT-REQUIRED header and/or body.accepts[0]).
 //   2. Guard the challenge, then build an EIP-3009 authorization and sign it
-//      against the USDC EIP-712 domain (name="USDC", version="2", chainId=5042002,
+//      against the USDC EIP-712 domain (name="USDC", version="2", chainId=ARC.chainId,
 //      verifyingContract=USDC) — verified to reproduce the token's on-chain
 //      DOMAIN_SEPARATOR bit-for-bit. primaryType follows the seller's advertised
 //      extra.eip3009Function (ReceiveWithAuthorization by default) so the signed
@@ -280,7 +280,7 @@ export async function payX402Vanilla({ sellerUrl, jobContext } = {}) {
     const domain = {
       name: requirements.extra.name, // "USDC"
       version: String(requirements.extra.version), // "2"
-      chainId: ARC.chainId, // 5042002
+      chainId: ARC.chainId,
       verifyingContract: CONTRACTS.USDC, // the USDC token itself (vanilla)
     };
 

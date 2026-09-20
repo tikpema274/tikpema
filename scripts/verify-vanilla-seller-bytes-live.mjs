@@ -24,10 +24,12 @@
 // down, this exits non-zero saying so in those words.
 import { keccak256, toHex, encodeAbiParameters, parseAbiParameters, encodeFunctionData } from "viem";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
+import { ARC } from "../netlify/functions/_arc.mjs";
+import { GATEWAY } from "../netlify/functions/_gateway.mjs";
 
-const RPC = "https://rpc.testnet.arc.io";
+const RPC = ARC.rpc;
 const USDC = "0x3600000000000000000000000000000000000000";
-const CHAIN_ID = 5042002;
+const CHAIN_ID = ARC.chainId;
 const SELLER = "0x1a63e59d1419cf48e2bd48cb54db85f27818dc99";
 
 let pass = 0, fail = 0;
@@ -100,7 +102,7 @@ try {
   console.log("\n── 2. THE CONTRACT BRANCH AN SCA NEEDS STILL EXISTS ────────────────");
   // A contract `from` must NOT take the ECRecover path — that branch is the whole reason for the
   // overload swap. Any deployed contract works as the probe; the Gateway Wallet is a known one.
-  const CTR = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
+  const CTR = GATEWAY.WALLET;
   const ctrData = encodeFunctionData({ abi: ABI, functionName: "receiveWithAuthorization",
     args: [CTR, SELLER, 10000n, 0n, BigInt(now + 600), msg.nonce, "0x" + "ab".repeat(100)] });
   const j = await rpc("eth_call", [{ from: SELLER, to: USDC, data: ctrData }, "latest"]);

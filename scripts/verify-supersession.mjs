@@ -29,6 +29,7 @@
 // never touched" read exactly like success — the absence-reads-as-safe shape again.
 
 import { createHash } from "node:crypto";
+import { ARC } from "../netlify/functions/_arc.mjs"; // the one server source — no credential, no env needed
 
 const TARGETS = {
   "dd-service-v1.1.0": {
@@ -45,7 +46,7 @@ const TARGETS = {
   },
 };
 
-const RPCS = ["https://rpc.testnet.arc.io", "https://arc-testnet.drpc.org"];
+const RPCS = [ARC.rpc, "https://arc-testnet.drpc.org"];
 const COMPANION = "https://app.tikpema.xyz/api/dd-identity";
 const GATEWAYS = [
   (c) => `https://ipfs.io/ipfs/${c}`,

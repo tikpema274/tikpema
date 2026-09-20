@@ -1,4 +1,4 @@
-// Arc Testnet contract addresses (chain 5042002).
+// Arc Testnet contract addresses (chain id: `arcTestnet.id` in ./chain.ts — the one client source).
 // USDC is the native gas token; 0x3600... is the ERC-20 interface to it (6 dp).
 export const CONTRACTS = {
   USDC: "0x3600000000000000000000000000000000000000",

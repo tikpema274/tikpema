@@ -18,9 +18,11 @@
 //   node --env-file=.env scripts/dd/probe-settlement-batch.mjs --url <seller> --runs 5 --confirm
 
 import { fetchX402Requirements, payX402 } from "../../netlify/functions/_x402.mjs";
+import { ARC } from "../../netlify/functions/_arc.mjs";
+import { GATEWAY } from "../../netlify/functions/_gateway.mjs";
 
-const RPC = "https://rpc.testnet.arc.io";
-const GW = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
+const RPC = ARC.rpc;
+const GW = GATEWAY.WALLET;
 const USDC = "0x3600000000000000000000000000000000000000";
 const arg = (f, d) => { const i = process.argv.indexOf(f); return i >= 0 ? process.argv[i + 1] : d; };
 const SELLER = arg("--url", "https://app.tikpema.xyz/.netlify/functions/x402-quote");

@@ -24,7 +24,7 @@ const RETRY = { retries: 3 };
 // CHAIN GUARD (non-negotiable): a wrong-chain endpoint returns logs from ANOTHER chain, which could
 // make the log-scan FALSELY CONFIRM a swap that never happened on Arc -> spentAmount advances on
 // nothing = a real wrong-spend, the exact phantom-fill class this whole witness exists to prevent.
-// So verify getChainId() === ARC.chainId (5042002) ONCE per cold-start; on mismatch OR unreachable,
+// So verify getChainId() === ARC.chainId ONCE per cold-start; on mismatch OR unreachable,
 // FAIL SAFE to the public RPC (never trust that an operator-supplied endpoint is on the right chain).
 // Memoised -> one verification read per container lifetime, not per call.
 let _witness = null;
@@ -125,7 +125,7 @@ export async function confirmSwapLanded({ walletAddress, tokenIn, tokenOut, amou
   // behind it, so the refusal can never be mistaken for an RPC failure.
   const inAddr = tokenAddr(tokenIn);
   const outAddr = tokenAddr(tokenOut);
-  const pc = await witnessClient(); // WITNESS_RPC_URL if set + on-chain 5042002, else public RPC
+  const pc = await witnessClient(); // WITNESS_RPC_URL if set + on-chain ARC.chainId, else public RPC
   const wallet = getAddress(walletAddress);
   const amountInRaw = parseUnits(String(amountIn), USDC_DECIMALS);
 
