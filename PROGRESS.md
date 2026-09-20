@@ -26773,3 +26773,45 @@ seller, before this deploy). `x402-quote` challenge unchanged. **Option 2 is clo
 STILL OWED: the paid x402-quote round trip — now via option 1 only: `node --env-file=.env
 scripts/dd/probe-settlement.mjs --confirm` (T runs; 0.001 USDC from the delegate; evidence = the store record with a
 handle + payTo's Gateway balance 14,000 → 15,000 atomic) — and the DD probe `--confirm` half ($0.06).
+
+### Deploy 15 — VERIFICATION CLOSED (read-only, 2026-09-20 ~18:50Z) + the exposure window of x402-pay
+1. **Prod serves `ff5b313`'s tree**: deploy `6ab011291e08e1be689753cb`, published **17:26:13.649Z**, tree `2b102321c4a0`
+   (`gate:deployed` ✅ after `npm run stamp` on `dd4a577` — "later commits touched only non-deployed files; the tree is
+   the identity"); control plane == data plane; 0 orphans. Bundle unchanged (function-only change).
+2. **THE CLOSING CHECK — x402-pay is gone, and the SPA catch-all is distinguished:** `POST /.netlify/functions/x402-pay`
+   → **404** (Netlify's not-found page, 3449 B); `POST /api/x402-pay` → **404** (same). `GET` on either → **200
+   text/html 1186 B** — that is the SPA catch-all answering ANY unknown GET (the quiet failure mode PROGRESS already
+   documents), so a GET can never prove a function absent; the POST 404 can, because the catch-all skips POST and a live
+   function answers it. Control: `POST /.netlify/functions/x402-quote` → 402. Before this deploy the same POST reached
+   the function (502 on an unreachable seller).
+3. ddTree **`349e755d` unrotated**, no-window (probe 1); loss sweep 17:27:46Z **0 new** (17 carried, 589 scanned);
+   `gate:ledger` **third live run PASS** (first link of the chain; re-run read-only after `89d15bd`: up to date).
+4. **EXPOSURE WINDOW.** `x402-pay.mjs` entered the tree in `3624c62` (2026-06-30 18:52 +0200, "Add pay-service:
+   delegate-signed Gateway spend as a guarded function" — the "guard" was the CHALLENGE-tamper guard; no session, no
+   auth, from the first commit), rewritten `6909b64` (07-01). The deploy-loss ledger's oldest scanned deploy is
+   2026-07-01T07:26Z, so it was on prod from **~2026-07-01 to 2026-09-20T17:26Z — ~81 days**; the first deploy the
+   window ledger can name that carried it is `456cd34` (08-16, the ledger's first line).
+   **What CAN be determined read-only:** the delegate EOA `0x6db3…b380`'s Gateway `availableBalance(USDC)` is
+   **4.864200 USDC now — UNCHANGED since 2026-08-29T11:48Z (4.8642, recorded)**. A third-party call that settled would
+   have debited it, so **no successful outside settle for the last 22 days.** Before that: 4.9928 (07-07) → 4.8643
+   (08-29) = −0.1285, of which the known runs account for ≈0.1263 (two DD purchases 0.12 → the revenue wallet's 0.120;
+   six x402-quote settles 0.006 → payTo 8,000→14,000; three QuickNode data buys 0.0003); a **residual ≈0.0022 USDC is
+   not attributable read-only** (a handful of 0.0001-class QuickNode calls would explain it; a 0.001-class outside
+   settle would too). **What CANNOT:** Netlify function logs for `x402-pay` return **0 lines over 720h — including my
+   own 16:0xZ probe today** (the log query resolves against the CURRENT deploy's functions; x402-quote returns 28 lines
+   back to 09-13 over the same window), so absence there is not evidence. `x402-quote-pending` only records payments to
+   OUR seller; an outside caller would have paid THEIR seller and left no record with us — only the balance delta.
+   Testnet money throughout; no mainnet key ever existed for this path.
+5. This addendum, committed alone.
+
+**B — WHICH NUMBER A BATCHED SETTLE MOVES (the probe's read-only half printed "payTo USDC 0.800000").**
+- `balanceOf(payTo)` on the USDC token `0x3600…` (selector `0x70a08231`) = **0.800000** — payTo's plain ERC-20 balance.
+  A Gateway-batched settle does **NOT** move it and emits **no** `Transfer` to payTo (the July Q2 answer: Gateway credits
+  an INTERNAL ledger; the seller's confirmation was rewritten for exactly this).
+- `availableBalance(USDC, payTo)` on the **GatewayWallet** `0x0077…19B9` (selector `0x3ccb64ae` + token + depositor,
+  `eth_call`) = **14,000 atomic** — this is what a settle moves (14,000 → 15,000), what `_x402-confirm.mjs` reads to
+  confirm before serving, and what the store's `confirmedEvidence` records (8,000 → 9,000 in July).
+- ⚠️ CONSEQUENCE: `probe-settlement.mjs --confirm` PAYS correctly but its watch loop reads `balanceOf` + Transfer logs, so
+  it will end "no delta, 0 logs" and print a STALE verdict ("internal ledger… design needs revising") — that verdict was
+  already acted on in July. **Use `scripts/dd/probe-settlement-batch.mjs --runs 1 --confirm`** instead: it watches
+  `availableBalance` (0x3ccb64ae) per run and reports the settle latency; same seller, same 0.001 USDC, same delegate.
