@@ -26683,3 +26683,17 @@ LIVE CHECKS ON THE NEW TREE (read-only, no money):
   challenge resource binds to the endpoint). `--confirm` ($0.06) NOT run — T's call.
 - ⛔ STILL OWED: the live x402-quote round trip with a paying buyer (both phases touched the seller path) —
   needs T at a wallet.
+
+### Deploy 14 — the owed x402-quote round trip: RUN by T, NOT EVIDENCED (read-only check 2026-09-20 ~15:25Z)
+T reported the paid x402-quote round trip run. Checked read-only, no money:
+- **Challenge** (unpaid POST): 402, v2, `eip155:5042002` / USDC `0x3600…` / payTo `0xc701…0df6` / 1000 atomic —
+  equals `PUBLISHED_OFFER` exactly and is field-for-field the pre-phase settlement records of 2026-07-28 (same
+  network, asset, payTo, price). **Seller behaviour unchanged by phases A+B.**
+- **Payment/settlement — ABSENT.** `x402-quote-pending` (strong, all keys): 6 records, newest 2026-07-28T12:15:51Z;
+  the seller only writes a record after `settle()` accepts, and none was written today. payTo's Gateway
+  `availableBalance(USDC)` on Arc = **14,000 atomic** = the July baseline 13,000 + 1,000 — no increment. Also: DD
+  revenue wallet still 0.120000; vanilla seller 0 inbound in the last 20,000 blocks.
+- Verdict: the buyer's attempt never produced a settleable payment at the seller (candidates: Gateway balance short;
+  batched signer ≠ depositor — an SCA via delegate is refused; a settle error returned without a handle). The
+  buyer-side response is needed to place it. **The round trip stays OWED.** [[verify-facts-before-sharing-words]]
+- **DD probe `--confirm` ($0.06): STILL OWED** — revenue wallet unchanged at 0.120000 since the read-only half.
