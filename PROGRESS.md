@@ -26606,5 +26606,42 @@ this deploy the path answered Netlify's 400 "missing form"); `GET` → 405. Serv
 "Void this link?", "Yes, cancel it", "Keep it", "cancelled by the seller", "did go through", "A payment was
 reported after you cancelled", "recorded for the seller", `checkout-cancel`.
 
-⛔ NOT YET EXERCISED LIVE: a real cancel (one of the 0.20 "data" orders from #/sell — no money), and the
-late-note path (needs a real payment landing after a cancel — T's call whether to stage it).
+⛔ NOT YET EXERCISED LIVE *(at the time of this record)*: a real cancel (one of the 0.20 "data" orders from #/sell — no
+money), and the late-note path (needs a real payment landing after a cancel — T's call whether to stage it).
+→ **CORRECTED 2026-09-20: the cancel WAS exercised live at 23:03:26Z the same night** — see the next entry. The
+late-note path remains unexercised.
+
+## 2026-09-20 — ⭐ CANCEL PROVEN LIVE (merchant + buyer side), re-verified read-only from the store and the chain
+
+**Run by T** on prod `1c76237` (Deploy 13), 2026-09-19 **23:03:26Z** (01:03:26 local), the night of the deploy — after
+the Deploy 13 record above was written, hence its "NOT YET EXERCISED". No money moved; none could.
+
+### T-observed (response bodies not re-readable)
+- **Merchant side, #/sell:** `Cancel link` on `o_mu8aqqbu_c87576aaf1375c4c` (0.200000 "data", created 09-19 11:20:52Z,
+  createdAtBlock 62906070). The inline confirm rendered as designed: *"Void this link? … A payment already sent cannot
+  be undone — if one lands after this, you will see it here and may owe a refund. Yes, cancel it · Keep it"*. After
+  confirming: the row read status **cancelled**, *"Cancelled 9/20/2026, 1:03:26 AM — the link is void; nobody can pay
+  it"*, and the **Link row was gone entirely**.
+- **Buyer side, `#/pay?order=o_mu8aqqbu_c87576aaf1375c4c`:** the details still render, **no Pay button**, and the copy:
+  *"This checkout link was cancelled by the seller. Nothing can be paid on it (cancelled 9/20/2026, 1:03:26 AM). If you
+  still owe the seller, ask them for a new link."*
+
+### Re-verified read-only 2026-09-20 (strong reads of `checkout-orders`, every key; Arc by block)
+- **The record:** `status:"cancelled"`, `cancelledAt: 2026-09-19T23:03:26.329Z`, `updatedAt: …26.330Z` (the CAS transition,
+  1 ms later), `cancelledBy == merchant` (`0x74b7…24e5` — the session's address, as the handler pins; a buyer is 403).
+  `paidTx/paidBy/paidAt` null. The `m:` index row mirrors `cancelled` + the same `cancelledAt`.
+- **Nothing else changed:** 28 keys — 13 `id:` + 13 `m:` + exactly the same **two `tx:` claims** (`0x7995…2bb4` →
+  `o_mu8hewk4…`, `0xbe08…8557` → `o_mu8raz55…`, claimedAt byte-identical to the 09-19 census). **No `late:` key exists.**
+  The other 12 orders: 2 paid (updatedAt unchanged 14:30:34Z / 19:06:08Z), 2 unbound legacy open, 8 bound open incl.
+  "taxi" — every one of the 10 open rows still `updatedAt: null`, `cancelledAt: null`.
+- **Chain:** buyer SCA `0x3cb7…2de9` USDC **0.790885**, merchant **26.828582** — both exactly the 09-19 closing figures.
+  Transfers to the merchant from block 62963078 (the last census) to head 63080476: **zero**.
+
+**What this proves:** open → cancelled lands as one CAS write with the merchant's session identity; the listing and the
+pay page both read the terminal state; a cancelled link offers no seal, so the money path is never entered. What it
+does NOT prove (unchanged from Deploy 13): **the late-note path** — a real payment landing after a cancel, refused with
+409 `cancelled` and recorded as `late:<merchant>:<orderId>` REPORTED-NOT-VERIFIED — is **still unexercised** (it needs a
+real transfer to land against a dead order; T's call whether to stage it). Also unchanged: the client race is narrowed,
+not closed (the ms between PayPanel's pre-send re-read and the send).
+
+**Open orders now: 9** (2 unbound legacy expiring 2026-10-02 + 7 bound-unpaid, incl. "taxi" 0.07); 1 cancelled; 2 paid.
