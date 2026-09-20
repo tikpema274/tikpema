@@ -26645,3 +26645,41 @@ real transfer to land against a dead order; T's call whether to stage it). Also 
 not closed (the ms between PayPanel's pre-send re-read and the send).
 
 **Open orders now: 9** (2 unbound legacy expiring 2026-10-02 + 7 bound-unpaid, incl. "taxi" 0.07); 1 cancelled; 2 paid.
+
+## Deploy 14 COMPLETE — CHAIN-LITERAL GUARD, phases A + B (one source per package; PUBLISHED_OFFER; cross-package boot assert) (2026-09-20)
+
+Deploy `6aafeb4645a27f3f1103df3b`, served tree `e692d4dc1c4c` (commit `643943a`), created 14:18:46Z, published
+**2026-09-20T14:55:41Z** (37 min bundling), bundle `assets/index-B7gzU5lx.js`. **Run by T** from this working tree;
+the chain reached `capture:window` and then stopped at `gate:deployloss` (`spawnSync npx ETIMEDOUT` listing deploys —
+a FAILURE TO MEASURE, exit 2, correctly not readable as "nothing lost"). The remaining links were re-run by hand
+afterwards, read-only: gate:deployed ✅ VERIFIED (stamp 643943a / e692d4dc, ready, THIS tree served, control ==
+data, 0 orphans); gate:forgery 5/0; gate:spec ✅; gate:deployloss (retry) ✅ **0 new** (17 carried, limbo 40,
+preserved 23, unaccounted 0, scanned 588); stage:ledger → stamp:clear → ledgers committed ALONE (`96ce36f`).
+⚠️ A "deployed" claim earlier the same session, made before Netlify had received anything, was answered with
+"not deployed" from the control plane — correct at 14:2xZ; the deploy was created 14:18Z and published 14:55Z.
+[[a-scope-report-is-not-a-deploy-report]]
+
+WHAT SHIPPED (`8bd4821` phase A + `643943a` phase B): the grep-guard `verify-chain-literals.mjs` in REFUSE mode
+(PHASE_B empty; 55 → 54 files classified, 0 unclassified; C1–C5 proven to fire by mutation on every run);
+`shared/x402/published.mjs` — ONE `PUBLISHED_OFFER` pin asserted by x402-quote / x402-vanilla-seller / _dd-x402
+(three in-code copies retired), **added to DD_SURFACE_FILES by decision** (the pin was hashed inside _dd-x402;
+moving it out unhashed would have lost coverage silently); `assertPackagesAgree` PURE in `_env-assert.mjs`, called
+from `_arc.mjs` against dd-core's `CHAINS` (boot refusal proven by spawning the real module); dd-analyze
+`ARC_RPC → ARC.rpc`, `_dd-x402` `DD_VERIFYING_CONTRACT → GATEWAY.WALLET`, `_x402-confirm` `GATEWAY_WALLET →
+GATEWAY.WALLET`; x402-quote's two re-literals (phase A). Decisions recorded: endpoints.mjs stays an independent
+provider-list (fail-closed via assertChain; list-independence ≠ provider-independence); attest-circle chainId is a
+record. test:all 145/145.
+
+DD WINDOW — **observed-banner** (probe 15 of 15): ddTree **ROTATED** `596bcd84…` → **`349e755d03ae…`** (predicted:
+six DD-surface files, incl. the new hashed file). Opened 14:57:12.405Z, closed 15:00:56.734Z, **224 s**, witnessed
+variant `self-clearing`, reason `no-record`, banner above the curl. Against the 20-rotation history (48–577 s,
+median ~280 s): in range, below median. The ledger line carries the previous tree, so `capture-refusal-window`
+judged the rotation against the committed baseline — `gate:ledger` did its job going in.
+
+LIVE CHECKS ON THE NEW TREE (read-only, no money):
+- The three sellers publish the ONE offer: x402-quote 402 → `eip155:5042002` / USDC `0x3600…` / v2; vanilla seller
+  402 → same pair; dd-analyze 402 → same pair, payTo the dedicated revenue wallet `0xb407…6ac4`, $0.06.
+- DD purchase probe, READ-ONLY half against prod: ✅ passed (revenue-wallet Gateway balance readable 0.120000;
+  challenge resource binds to the endpoint). `--confirm` ($0.06) NOT run — T's call.
+- ⛔ STILL OWED: the live x402-quote round trip with a paying buyer (both phases touched the seller path) —
+  needs T at a wallet.
