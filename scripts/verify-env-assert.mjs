@@ -73,11 +73,46 @@ check("a Gateway wallet in NEITHER column -> UNKNOWN refusal", () => {
   assert.ok(e instanceof EnvironmentAssertionError);
   assert.match(e.message, /NEITHER the testnet nor the mainnet column/i);
 });
-check("chainId and rpcHost have NO mainnet entry (fail-closed by absence)", () => {
-  assert.equal(ENV_TABLE.chainId.mainnet, undefined, "no invented mainnet chain id");
-  assert.equal(ENV_TABLE.rpcHost.mainnet, undefined, "no invented mainnet rpc host");
-  // consequence: a mainnet-shaped chain id is UNKNOWN, not 'mainnet'
+// ═══ 2026-09-20 — the mainnet chainId / rpcHost rows are FILLED from a PUBLISHED source ═══════════
+// Until this day the two rows were deliberately ABSENT ("fail-closed by absence": a mainnet chain id read UNKNOWN and
+// refused). Arc mainnet is now live and published — docs.arc.io/arc/references/rpc-endpoints + connect-to-arc:
+// chain id 5042, primary RPC https://rpc.mainnet.arc.io — and eth_chainId on that host answered 0x13b2 read-only the
+// same day. So the assert can now CLASSIFY a full mainnet config as "mainnet" (four levers agreeing), while a SPLIT and
+// an UNKNOWN value still refuse. The four-lever agreement is what makes a half-migration impossible, not the absence.
+const M = {
+  chainId: 5042,
+  rpc: "https://rpc.mainnet.arc.io",
+  gatewayApiBase: "https://gateway-api.circle.com",
+  gatewayWallet: "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE",
+};
+check("⭐ the mainnet chainId and rpcHost rows are the PUBLISHED values (5042, rpc.mainnet.arc.io)", () => {
+  assert.equal(ENV_TABLE.chainId.mainnet, 5042, "docs.arc.io: Chain ID (Mainnet) 5042");
+  assert.equal(ENV_TABLE.rpcHost.mainnet, "rpc.mainnet.arc.io", "docs.arc.io: primary RPC https://rpc.mainnet.arc.io");
+  assert.equal(classify("chainId", 5042), "mainnet");
+  assert.equal(classify("rpcHost", "https://rpc.mainnet.arc.io"), "mainnet");
+});
+check("⭐ a FULL mainnet config (all four levers) classifies as mainnet and does not throw", () => {
+  assert.equal(assertSameEnvironment(M), "mainnet");
+});
+check("a mainnet chain id with a TESTNET rpc/Gateway is a SPLIT, refused naming both sides (the migration hole stays closed)", () => {
+  const e = throws(() => assertSameEnvironment({ ...T, chainId: 5042 }));
+  assert.ok(e instanceof EnvironmentAssertionError);
+  assert.match(e.message, /spans TWO environments/);
+  assert.match(e.message, /mainnet: \{chainId=5042\}/); assert.match(e.message, /testnet: \{/);
+});
+check("a mainnet config with ONE testnet lever left behind (the Gateway wallet) is a SPLIT, refused", () => {
+  const e = throws(() => assertSameEnvironment({ ...M, gatewayWallet: T.gatewayWallet }));
+  assert.ok(e instanceof EnvironmentAssertionError); assert.match(e.message, /spans TWO environments/);
+});
+check("an unpublished chain id is STILL unknown → refused (the rows are exact values, not a mainnet catch-all)", () => {
   assert.equal(classify("chainId", 999999), null);
+  assert.equal(classify("rpcHost", "https://rpc.mainnet.arc.example"), null);
+  const e = throws(() => assertSameEnvironment({ ...M, chainId: 5043 }));
+  assert.match(e.message, /NEITHER the testnet nor the mainnet column/);
+});
+check("testnet and mainnet chain ids / RPC hosts are distinct values (the discriminators are real)", () => {
+  assert.notEqual(ENV_TABLE.chainId.testnet, ENV_TABLE.chainId.mainnet);
+  assert.notEqual(ENV_TABLE.rpcHost.testnet, ENV_TABLE.rpcHost.mainnet);
 });
 
 console.log("── the two Gateway wallets differ (the discriminator is real) ──────────────");

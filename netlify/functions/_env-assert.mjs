@@ -23,23 +23,25 @@ export class EnvironmentAssertionError extends Error {
 }
 
 // KNOWN values ONLY. A value absent here is UNKNOWN → refuse; it is NEVER assumed to be testnet.
-// A mainnet entry is present ONLY where Circle has PUBLISHED the value:
-//   · gatewayWallet.mainnet — from Circle's mainnet Gateway list (0x7777…00eE)
+// A mainnet entry is present ONLY where the value has been PUBLISHED, and each names its source:
+//   · gatewayWallet.mainnet — Circle's mainnet Gateway list (0x7777…00eE), 2026-09-16
 //   · gatewayHost.mainnet   — Circle's published mainnet Gateway API base
-// chainId and rpcHost have NO mainnet entry on purpose: Circle has not published Arc mainnet's chain id
-// or RPC endpoint to us, so a mainnet chain id or RPC host reads UNKNOWN and REFUSES — the fail-closed
-// direction. Do NOT invent one by mutating the testnet value. [[absence-must-never-read-as-safe]]
+//   · chainId.mainnet 5042 and rpcHost.mainnet rpc.mainnet.arc.io — ADDED 2026-09-20 from
+//     docs.arc.io/arc/references/rpc-endpoints ("Chain ID (Mainnet) 5042", "Primary (Circle)
+//     https://rpc.mainnet.arc.io") and /arc/references/connect-to-arc; eth_chainId on that host answered
+//     0x13b2 (= 5042) read-only the same day. Until then these two were deliberately ABSENT — the
+//     fail-closed direction while Circle had published nothing. Do NOT invent a value by mutating the
+//     testnet one; a new row is read from a page and cites it. [[absence-must-never-read-as-safe]]
 //
 // ⭐ BEHAVIOURAL CONSEQUENCE — READ THIS AS THE GUARD WORKING, NOT A BUG (for a future migrator):
-//   · Because chainId and rpcHost have NO mainnet entry, this assert ALSO blocks a FULL migration, not
-//     only a partial one. Point ARC.chainId / ARC.rpc at mainnet and the boot REFUSES (UNKNOWN) until
-//     you ADD those two mainnet entries here FROM A PUBLISHED SOURCE. That refusal is intended: a
-//     migration is not done until every one of the four values is a known mainnet value. Adding them is
-//     the migration step, not a workaround.
-//   · By contrast gatewayHost and gatewayWallet DO have mainnet entries, so flipping ONLY the Gateway
-//     classifies as mainnet and produces a SPLIT message (testnet chain vs mainnet Gateway) rather than
-//     an UNKNOWN. That split is the half-migration case this guard exists for — the one nothing noticed
-//     before 2026-09-16.
+//   · With all four mainnet rows present, a FULL migration (ARC.chainId, ARC.rpc, GATEWAY.API_BASE,
+//     GATEWAY.WALLET all mainnet) classifies as "mainnet" and BOOTS. Any HALF migration — one, two or
+//     three levers moved — classifies as a SPLIT and REFUSES, naming both sides. That split is the
+//     half-migration case this guard exists for — the one nothing noticed before 2026-09-16.
+//   · A value in NEITHER column (a typo, an unpublished chain) is UNKNOWN and REFUSES. The rows are
+//     exact values, not a mainnet catch-all.
+//   · Filling these rows is NOT the migration: the migration is the three package sources + these rows
+//     + shared/x402/published.mjs moving together (mainnet go/no-go §1). Today the sources are testnet.
 //
 // ⚠️ RESIDUAL GAP — WHAT A PASSING ASSERT DOES NOT PROVE. Unanimity is AGREEMENT, not correctness: the
 //   assert proves the four values name ONE environment, NOT that the literals in this table are right.
@@ -62,11 +64,11 @@ export class EnvironmentAssertionError extends Error {
 export const ENV_TABLE = Object.freeze({
   chainId: Object.freeze({
     testnet: 5042002,
-    // mainnet: <UNPUBLISHED — intentionally ABSENT; a mainnet chain id must read UNKNOWN and refuse>
+    mainnet: 5042,                    // docs.arc.io/arc/references/rpc-endpoints "Chain ID (Mainnet)", read 2026-09-20; eth_chainId → 0x13b2
   }),
   rpcHost: Object.freeze({
     testnet: "rpc.testnet.arc.io",
-    // mainnet: <UNPUBLISHED — intentionally ABSENT>
+    mainnet: "rpc.mainnet.arc.io",    // docs.arc.io/arc/references/rpc-endpoints "Primary (Circle)", read 2026-09-20
   }),
   gatewayHost: Object.freeze({
     testnet: "gateway-api-testnet.circle.com",
