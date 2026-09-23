@@ -26966,3 +26966,32 @@ x402-quote's 402 → `eip155:5042002` / USDC / payTo `0xc701…`, unchanged; dd-
 **Go/no-go §1 row 2 → SETTLED.** With §0 (A, pure Arc) and §1 rows 1–2 settled, a mainnet flip is now exactly: the three
 package sources + `shared/x402/published.mjs` moving together to 5042 / rpc.mainnet.arc.io / the mainnet Gateway pair —
 and env-assert refuses anything less. Row 3 (all four levers agree in the DEPLOYED env) is the flip itself.
+
+## 2026-09-23 — CHECKED: `onlyIfMatch: undefined` is NOT a silent CAS failure here (found in tikpemapay; read-only)
+**The finding that prompted it (tikpemapay, 2026-09-23):** `@netlify/blobs` treats `onlyIfMatch: undefined` as NO
+CONDITION — measured against the SDK's local `BlobsServer`, both writes landed. Any path that reaches `setJSON` with an
+undefined etag in `onlyIfMatch` is an unconditional write that reads as a successful CAS.
+
+**Checked every production `onlyIfMatch` call site — all three branch `etag ? onlyIfMatch : onlyIfNew`:**
+- `netlify/functions/_checkout.mjs:291-293` — `transitionOrder` (the checkout binding)
+- `netlify/functions/_budget.mjs:167-169` — `setIfMatch`
+- `netlify/functions/x402-vanilla-seller.mjs:269-271` — `claimSettleSlot`
+
+An undefined etag becomes a CREATE-ONLY write, refused on an existing key — never unconditional. **NO silent CAS failure
+in the checkout binding.** (`@netlify/blobs` 10.7.9 here returns `{ modified: false }` on the 412, the same as 11.1.0,
+so the `res?.modified !== false` checks read it correctly. The other `onlyIfMatch` hits are test fakes under `scripts/`,
+which honour it only when truthy — the same as the real SDK, so they hide nothing.)
+
+**Evidence the EDGE path returns a read etag:** live order `o_mu8hewk4…` moved open → paid on 2026-09-19 inside a real
+function reading with `READ_CONSISTENCY = "strong"`. Without a read etag, `transitionOrder` would have fallen back to
+`onlyIfNew` on an existing order and been refused — the order could never have been marked paid. (Also measured
+directly on tikpemapay's production store via the API path, 2026-09-23: `getWithMetadata` and `list()` both return
+etags.)
+
+**⚠️ THE SYMPTOM IF NETLIFY EVER STOPPED RETURNING ETAGS — loud and WRONG, not silent.** All three would refuse every
+write to an existing key, and each names a false cause:
+- checkout: **"order changed under us — re-read"** on EVERY transition — no order could be marked paid or cancelled;
+- budget: **"could not update after 24 attempts (contention)"** (`_budget.mjs` already notes this degradation);
+- the x402 seller: **"rate slot contention"** on every settle after the minute's first.
+If those appear together, or on an idle system, check whether `getWithMetadata` still returns an `etag` BEFORE hunting a
+concurrency bug — there is no contention; there is no etag.
