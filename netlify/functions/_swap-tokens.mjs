@@ -28,7 +28,9 @@ import { CONTRACTS, USDC_DECIMALS } from "./_arc.mjs";
 // The list. Arc Testnet's stablecoin service prices exactly these two (MEASURED 2026-09-13 via
 // GET /v1/stablecoinKits/rates?chain=Arc_Testnet). When this derives from that endpoint, the
 // resolver below is what keeps a derived symbol from silently becoming USDC.
-export const SWAP_TOKENS = ["USDC", "EURC"];
+// ⭐ ONE SOURCE: shared/plan-capabilities.mjs (pure data, read by the plan copy too). Re-exported.
+import { SWAP_TOKENS } from "../../shared/plan-capabilities.mjs";
+export { SWAP_TOKENS };
 
 // ═══ ⚠️ DECLARED DECIMALS — THE HARDCODE MADE HONEST ═══════════════════════════════════════════════
 // Every scaling site on the swap path hardcodes USDC_DECIMALS (6): toMinor and capBase in _swap.mjs,

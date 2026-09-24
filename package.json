@@ -192,7 +192,8 @@
     "test:scriptinert": "node scripts/verify-script-inert.mjs",
     "test:discovercursor": "node scripts/verify-discover-cursor.mjs",
     "test:pendingbuy": "npx tsx --experimental-test-module-mocks scripts/verify-pending-purchase.tsx",
-    "test:datapool": "npx tsx scripts/verify-data-pool-budget.tsx"
+    "test:datapool": "npx tsx scripts/verify-data-pool-budget.tsx",
+    "test:plancaps": "npx tsx scripts/verify-plan-capabilities.tsx"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -239,6 +240,7 @@
     "test:bridge",
     "test:quote",
     "test:copy",
+    "test:plancaps",
     "test:sendcopy",
     "test:feeauthority",
     "test:feerecon",

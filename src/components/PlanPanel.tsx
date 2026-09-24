@@ -7,6 +7,8 @@ import { approveProposal as approve } from "../lib/approveProposal";
 import { mergeJobStatus } from "../lib/mergeJobStatus";
 import { readJson } from "../lib/readJson";
 import { describeError } from "../lib/describeError";
+// ⭐ ONE SOURCE for what the agent can plan — the same list the classifier prompt and the pickers read.
+import { DESTINATION_ORDER, SWAP_TOKENS, destinationShortName } from "../../shared/plan-capabilities.mjs";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -179,8 +181,8 @@ export default function PlanPanel({ wallet }: { wallet: UnifiedWallet }) {
         measured, it is quoted as a measured figure with its timestamp; where it cannot,
         the agent says so rather than inventing a number.{" "}
         <b>Nothing moves until you approve it.</b> Today the agent can{" "}
-        <b>bridge USDC off Arc</b> (Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon,
-        Unichain, Linea) or <b>convert between USDC and EURC on Arc</b>.
+        <b>bridge USDC off Arc</b> ({DESTINATION_ORDER.prose.map(destinationShortName).join(", ")}) or{" "}
+        <b>convert between {SWAP_TOKENS.join(" and ")} on Arc</b>.
       </div>
 
       <div className="row" style={{ marginTop: 12 }}>

@@ -104,13 +104,19 @@ check("the declaration map is frozen (a runtime write cannot widen it)", Object.
     mkdirSync(`${base}/netlify`, { recursive: true });
     cpSync("netlify/functions", `${base}/netlify/functions`, { recursive: true });
     cpSync("shared", `${base}/shared`, { recursive: true });
+    // ⭐ The token LIST lives in shared/plan-capabilities.mjs (one source, re-exported by _swap-tokens.mjs),
+    // so the list mutation is applied there; the decimals map and the address lookup stay in the resolver.
+    const list = `${base}/shared/plan-capabilities.mjs`;
+    const listSrc = readFileSync(list, "utf8");
+    const listMut = listSrc.replace('export const SWAP_TOKENS = ["USDC", "EURC"];', 'export const SWAP_TOKENS = ["USDC", "EURC", "MUT18"];');
+    if (listMut === listSrc || !listMut.includes('"MUT18"]')) throw new Error("mutation fixture did not apply to the shared token list — its shape changed; fix the sandbox, not the gate");
+    writeFileSync(list, listMut);
     const tok = `${base}/netlify/functions/_swap-tokens.mjs`;
     let src = readFileSync(tok, "utf8");
     const before = src;
-    src = src.replace('export const SWAP_TOKENS = ["USDC", "EURC"];', 'export const SWAP_TOKENS = ["USDC", "EURC", "MUT18"];');
     src = src.replace("Object.freeze({ USDC: 6, EURC: 6 })", "Object.freeze({ USDC: 6, EURC: 6, MUT18: 18 })");
     src = src.replace("const address = CONTRACTS[sym];", 'const address = sym === "MUT18" ? "0x000000000000000000000000000000000000dEaD" : CONTRACTS[sym];');
-    if (src === before || !src.includes("MUT18: 18") || !src.includes("MUT18\"] ") && !src.includes('"MUT18"]')) throw new Error("mutation fixture did not apply — the resolver source shape changed; fix the sandbox, not the gate");
+    if (src === before || !src.includes("MUT18: 18") || !src.includes('sym === "MUT18"')) throw new Error("mutation fixture did not apply — the resolver source shape changed; fix the sandbox, not the gate");
     if (!gated) {
       // If there is no gate to cut (the red state: someone removed it), proceed — the GATED checks
       // below are what report that, as ❌ lines, not a crash. A verdict is earned by assertions.

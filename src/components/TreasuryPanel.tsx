@@ -1,3 +1,4 @@
+import { DESTINATION_ORDER } from "../../shared/plan-capabilities.mjs";
 import { useEffect, useState } from "react";
 import { goToWalletAndReturn } from "../lib/returnTo";
 import type { useWallet } from "../wallet/useWallet";
@@ -32,7 +33,8 @@ export type Snapshot = {
   readAt: string;
 };
 export type Draft = { arc_sca: number; unified: number; dest: { chain: string; address: string; pct: number }[] };
-const DEST_CHAINS = ["base", "ethereum", "arbitrum", "optimism", "avalanche", "polygon", "unichain", "linea"];
+// ⭐ ONE SOURCE: the picker order from shared/plan-capabilities.mjs (the same order BridgePanel shows).
+const DEST_CHAINS: readonly string[] = DESTINATION_ORDER.picker;
 
 const trim6 = (v: string) => String(Number(v));
 /** Where a proposal is confirmed — the hash route WITH the prefill the surface reads once at mount. */

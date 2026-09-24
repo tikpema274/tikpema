@@ -1,4 +1,5 @@
 import { parseBody, json, dateAnchor } from "./_arc.mjs";
+import { BRIDGE_DESTINATIONS, DESTINATION_ORDER, SWAP_TOKENS, PLAN_ACTIONS, destinationShortName } from "../../shared/plan-capabilities.mjs";
 
 // plan-quote.mjs — price an ACTION-PLANNING task before it runs.
 //
@@ -57,31 +58,52 @@ const BUDGET_MIN_USDC = 0.20;
 const BUDGET_MAX_USDC = 0.40;
 const BUDGET_DEFAULT_USDC = 0.30; // used only when the model returns an unparseable number
 
-const SYSTEM_PROMPT = `You are pricing an ACTION-PLANNING task for an AI agent that can execute on-chain actions.
+// ═══ THE LIST-SHAPED PARTS OF THE PROMPT COME FROM shared/plan-capabilities.mjs ═══════════════════
+// Only the lists are generated (destinations, the swap pair, the action count); the natural-language
+// examples stay hand-written and are checked by verify-plan-capabilities.tsx. ⭐ The WHOLE prompt is
+// pinned byte-for-byte to scripts/fixtures/plan-quote-system-prompt.txt on every run — a template edit
+// cannot silently change what the model reads; a deliberate change updates the fixture in the same diff.
+const COUNT_WORDS = ["ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE"];
+const PROMPT_WIDTH = 90; // the prompt's paragraph width; reproduces the pre-refactor line breaks exactly
+function destinationsLine() {
+  const names = DESTINATION_ORDER.prose.map(destinationShortName);
+  const words = names.map((n, i) => (i === names.length - 1 ? `or ${n}` : `${n},`));
+  const lines = [];
+  let cur = "     Supported destinations:";
+  for (const w of words) {
+    if ((cur + " " + w).length > PROMPT_WIDTH) { lines.push(cur); cur = "     " + w; } else cur += " " + w;
+  }
+  lines.push(cur + " (all testnets).");
+  return lines.join("\n");
+}
+if (Object.keys(BRIDGE_DESTINATIONS).length !== DESTINATION_ORDER.prose.length) {
+  throw new Error("plan-quote: DESTINATION_ORDER.prose does not cover BRIDGE_DESTINATIONS");
+}
+
+export const SYSTEM_PROMPT = `You are pricing an ACTION-PLANNING task for an AI agent that can execute on-chain actions.
 
 The agent researches the real economics of an action, then proposes a concrete plan the USER approves before anything executes. It is allowed — expected — to make a recommendation. What it cannot do is answer an unbounded opinion question.
 
 First, CLASSIFY the task. The test is EXECUTABILITY: can this resolve into a concrete, checkable action the agent could bound, price, and either execute or refuse?
 
-- ACCEPT if it describes one of the TWO supported on-chain actions, even loosely, even as a
+- ACCEPT if it describes one of the ${COUNT_WORDS[PLAN_ACTIONS.length]} supported on-chain actions, even loosely, even as a
   question. Asking "should I" is FINE here — the agent proposes, the user decides.
 
   1. BRIDGE — moving USDC off Arc to another chain:
      "bridge some USDC to Base", "move 5 USDC to Arbitrum", "should I bridge to Optimism or
      stay on Arc?", "what would it cost to move funds to Base and is it worth it?".
-     Supported destinations: Ethereum, Base, Arbitrum, Optimism, Avalanche, Polygon,
-     Unichain, or Linea (all testnets).
+${destinationsLine()}
 
-  2. SWAP — converting between USDC and EURC on Arc (a stablecoin FX conversion, USD↔EUR):
+  2. SWAP — converting between ${SWAP_TOKENS.join(" and ")} on Arc (a stablecoin FX conversion, USD↔EUR):
      "swap 5 USDC to EURC", "should I convert some USDC to EURC given where EUR/USD is?",
      "is now a good time to move into EURC?", "how much USDC should I convert to EURC?".
-     ONLY these two tokens exist on Arc. Both directions are supported.
+     ONLY these ${COUNT_WORDS[SWAP_TOKENS.length].toLowerCase()} tokens exist on Arc. Both directions are supported.
 
 - DECLINE if there is no executable action to bound:
   "what's the best chain?", "what should I invest in?", "is crypto a good idea?",
   "which token will go up?". These are opinion with nothing to price, nothing to refuse,
   and nothing to approve. Also DECLINE actions the agent cannot perform: swapping to any
-  token OTHER than USDC or EURC, anything off the supported-destination list, and anything
+  token OTHER than ${SWAP_TOKENS.join(" or ")}, anything off the supported-destination list, and anything
   not on-chain. Buying/holding/selling an arbitrary coin is NOT a supported action and is
   not investment advice the agent gives — decline it.
   When declining, say plainly that it needs a concrete action, and give one example of a

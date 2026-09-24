@@ -39,16 +39,10 @@ const FORWARD_HOOK = "0x636374702d666f727761726400000000000000000000000000000000
 // IRIS forwarding tier from Arc. Natural-language aliases feed the parser. The
 // fee fetch is the ultimate gate: if IRIS has no forwarding tier for a domain at
 // call time, the bridge is refused — so this list can't over-promise.
-export const BRIDGE_DESTINATIONS = {
-  ethereum: { label: "Ethereum (Sepolia)", cctpDomain: 0, explorerTx: "https://sepolia.etherscan.io/tx/", aliases: ["ethereum", "eth", "sepolia", "ethereum sepolia", "l1", "mainnet"] },
-  base: { label: "Base (Sepolia)", cctpDomain: 6, explorerTx: "https://sepolia.basescan.org/tx/", aliases: ["base", "base sepolia"] },
-  arbitrum: { label: "Arbitrum (Sepolia)", cctpDomain: 3, explorerTx: "https://sepolia.arbiscan.io/tx/", aliases: ["arbitrum", "arb", "arbitrum sepolia"] },
-  optimism: { label: "Optimism (Sepolia)", cctpDomain: 2, explorerTx: "https://sepolia-optimism.etherscan.io/tx/", aliases: ["optimism", "op", "optimism sepolia"] },
-  avalanche: { label: "Avalanche (Fuji)", cctpDomain: 1, explorerTx: "https://testnet.snowtrace.io/tx/", aliases: ["avalanche", "avax", "fuji"] },
-  polygon: { label: "Polygon (Amoy)", cctpDomain: 7, explorerTx: "https://amoy.polygonscan.com/tx/", aliases: ["polygon", "matic", "amoy", "polygon amoy"] },
-  unichain: { label: "Unichain (Sepolia)", cctpDomain: 10, explorerTx: "https://sepolia.uniscan.xyz/tx/", aliases: ["unichain"] },
-  linea: { label: "Linea (Sepolia)", cctpDomain: 11, explorerTx: "https://sepolia.lineascan.build/tx/", aliases: ["linea", "linea sepolia"] },
-};
+// ⭐ ONE SOURCE: the table lives in shared/plan-capabilities.mjs (pure data, also read by the client
+// pickers and the plan copy). Re-exported here so every existing importer keeps working unchanged.
+import { BRIDGE_DESTINATIONS } from "../../shared/plan-capabilities.mjs";
+export { BRIDGE_DESTINATIONS };
 
 // Resolve a natural-language destination name to a supported destination, or null.
 /**

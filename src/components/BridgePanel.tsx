@@ -1,3 +1,4 @@
+import { BRIDGE_DESTINATIONS, DESTINATION_ORDER } from "../../shared/plan-capabilities.mjs";
 import { BRIDGE_TIMING, MINT_TIMING } from "../../shared/bridge-timing.mjs";
 import { goToWalletAndReturn } from "../lib/returnTo";
 import { useEffect, useState } from "react";
@@ -16,16 +17,9 @@ const shortAddr = (a: string) =>
 // The CCTP-forwarded destinations agent-bridge accepts (keys mirror
 // BRIDGE_DESTINATIONS in _bridge.mjs; the endpoint resolves the key server-side).
 // Testnet labels kept honest — this is Arc Testnet.
-const DESTINATIONS = [
-  { key: "base", label: "Base (Sepolia)" },
-  { key: "ethereum", label: "Ethereum (Sepolia)" },
-  { key: "arbitrum", label: "Arbitrum (Sepolia)" },
-  { key: "optimism", label: "Optimism (Sepolia)" },
-  { key: "avalanche", label: "Avalanche (Fuji)" },
-  { key: "polygon", label: "Polygon (Amoy)" },
-  { key: "unichain", label: "Unichain (Sepolia)" },
-  { key: "linea", label: "Linea (Sepolia)" },
-];
+// ⭐ ONE SOURCE: keys and labels from shared/plan-capabilities.mjs, in its EXPLICIT picker order (Base
+// first — this panel's order before the list moved, kept as data rather than left to key order).
+const DESTINATIONS = DESTINATION_ORDER.picker.map((key) => ({ key, label: BRIDGE_DESTINATIONS[key as keyof typeof BRIDGE_DESTINATIONS].label }));
 
 // ═══ TREASURY PREFILL — #/bridge?amount=&destination= (2026-09-19) ═══════════════════════════════
 // A treasury PROPOSAL hands off here with the amount and destination in the hash. Everything in a URL
