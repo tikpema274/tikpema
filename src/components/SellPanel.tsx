@@ -32,7 +32,12 @@ export function SellResult({ origin, order, path }: { origin: string; order: Pub
     <div className="status" style={{ borderLeft: "3px solid var(--success)", paddingLeft: ".9rem" }}>
       <b>Checkout link created.</b> Anyone who opens it sees exactly this: <b>{order.description}</b> ·{" "}
       <b>{formatUsdc(order.amountUsdc)} USDC</b> · paid to your wallet.
-      <div className="mono" style={{ marginTop: 6, wordBreak: "break-all" }}>{link}</div>
+      {/* ⭐ CLICKABLE, SAME TAB. It was plain text, so the merchant could only see the order as a buyer
+          by copying it. The hash change routes to #/pay, which reads ?order= at mount — the path a
+          buyer's own click takes. No target: only the hash changes, so the app routes in place. */}
+      <div className="mono" style={{ marginTop: 6, wordBreak: "break-all" }}>
+        <a href={link} title="Open the pay page for this order">{link}</a>
+      </div>
     </div>
   );
 }

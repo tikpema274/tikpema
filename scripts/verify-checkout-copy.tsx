@@ -136,6 +136,15 @@ section("7 — SELL: the merchant is told the money comes straight to their logi
   check("⭐ the produced link is origin + /#/pay?order=<id>", ot.includes(`https://app.tikpema.xyz/#/pay?order=${base.id}`));
   check("checkoutLink composes exactly that", checkoutLink("https://app.tikpema.xyz", base.id) === `https://app.tikpema.xyz/#/pay?order=${base.id}`);
   check("…and restates what the buyer will see: description, amount", ot.includes("Two coffees") && /1\.500000 USDC/.test(ot));
+  // ⭐ THE CREATED LINK OPENS THE PAY PAGE. It was plain text: the only way to see the order as a buyer
+  // was to copy it. Same tab, no target: the hash change routes to #/pay, which mounts PayPanel and
+  // reads ?order= from the hash — the exact path a buyer's click takes.
+  const createdLink = `https://app.tikpema.xyz/#/pay?order=${base.id}`;
+  const anchors = [...out.matchAll(/<a\b[^>]*href="([^"]*)"[^>]*>/g)];
+  check("⭐ the created link is CLICKABLE — an anchor whose href is exactly the checkout link", anchors.some((a) => a[1] === createdLink), `hrefs=${JSON.stringify(anchors.map((a) => a[1]))}`);
+  // ⚠️ `.every()` on an EMPTY list is true — this passed vacuously in the red run. Require the anchor.
+  const own = anchors.filter((a) => a[1] === createdLink);
+  check("…opening in the SAME tab (no target) so the app routes to #/pay", own.length > 0 && own.every((a) => !/\btarget=/.test(a[0])));
   const signedOut = strip(renderToStaticMarkup(<SellPanel wallet={{ ...w, address: null } as any} />));
   check("signed out → no address, points at Wallet, no Create control", !signedOut.includes(MERCHANT.slice(0, 6)) && /Wallet/.test(signedOut) && !/Create checkout link/.test(signedOut));
 }
