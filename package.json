@@ -190,7 +190,8 @@
     "test:twoaxis": "node scripts/verify-dd-two-axis-copy.mjs",
     "test:discover": "node scripts/verify-bridge-discover.mjs",
     "test:scriptinert": "node scripts/verify-script-inert.mjs",
-    "test:discovercursor": "node scripts/verify-discover-cursor.mjs"
+    "test:discovercursor": "node scripts/verify-discover-cursor.mjs",
+    "test:pendingbuy": "npx tsx --experimental-test-module-mocks scripts/verify-pending-purchase.tsx"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -226,6 +227,7 @@
     "test:guardstaleness",
     "test:dca",
     "test:pendingspend",
+    "test:pendingbuy",
     "test:sweepdisarmed",
     "test:sweepdegraded",
     "test:wedge",

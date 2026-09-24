@@ -465,32 +465,81 @@ async function appendAudit(s, { owner, at, dedupeKey, ...entry }) {
  * ⚠️ ABSENT IS NOT "NO PAYMENT". Records written before this field existed carry no `settlement`,
  * and a seller that returns no PAYMENT-RESPONSE also yields none. `null` here means UNRECORDED, and
  * must never be read as "unpaid" — the spend counters are authoritative for that.
+ *
+ * ═══ 🚨 `confirmation: "pending"` — A BUY THAT MAY HAVE BEEN CHARGED ══════════════════════════════
+ * payX402 has two non-executed outcomes that are NOT "no money moved": ACCEPTED into a settlement
+ * batch (it WILL be charged) and a SETTLE TIMEOUT (`charged: null` — it MAY have been). Recording
+ * nothing for those under-counts real spend and lets the next buy through a cap that should already
+ * have moved. So they are recorded here as PENDING:
+ *   · COUNTED against the caps now — a charge that may land narrows the cap until it is resolved.
+ *     That is the safe direction: an over-count refuses a buy, an under-count widens the cap.
+ *   · INDEXED under `pending-buy:<owner>:<id>`, independent of the day, so an unresolved pending is
+ *     listable forever (listPendingPurchases) instead of ageing out of today's activity feed.
+ *   · RESOLVED later by resolvePendingPurchase: "confirmed" keeps the charge, "not-charged" reverses
+ *     it exactly once.
+ * ⚠️ The step-8 sweeper selects ONLY `confirmation: "submitted"` + circleId (listUnresolvedCharges),
+ * so it can never pick these up and reverse them with the wrong resolver.
+ *
+ * ⭐ ORDER: index FIRST, counters SECOND (with the pending id in `chargedIds`), audit THIRD. A crash
+ * after the index leaves a VISIBLE pending whose charge may not have landed — and a reversal credits
+ * ONLY a counter whose `chargedIds` contains this id, so that orphan can never become a phantom
+ * credit. A crash after the counters leaves an over-count with no audit row: the safe direction.
+ *
+ * ⭐ A CONFIRMED BUY (no `confirmation`) IS BYTE-IDENTICAL TO BEFORE: no index, no chargedIds, no
+ * pending fields on the audit row.
  */
 export async function recordSpend({
   jobId, jobPriceUsdc, amountUsdc, source, justification, store, at, owner,
-  agent = AGENT.RESEARCHER, settlement = null,
+  agent = AGENT.RESEARCHER, settlement = null, confirmation, pending,
 }) {
   const s = pickStore(store);
   const amt = round6(amountUsdc);
   const allowanceUsdc = jobAllowance(jobPriceUsdc);
+  const date = utcDate(at);
+
+  const isPending = confirmation === "pending";
+  if (confirmation !== undefined && !isPending) {
+    throw new Error(`recordSpend: unknown confirmation "${confirmation}" — only "pending" or absent`);
+  }
+  if (isPending && !pending?.reason) throw new Error("recordSpend: a pending spend must carry pending.reason");
+
+  const chargedKeys = [jobKey(jobId), dayKey(owner, date)];
+  let pendingId;
+  if (isPending) {
+    pendingId = pendingIdFor(pending.handle);
+    const record = {
+      pendingId, owner: ownerKey(owner), agent: normalizeAgent(agent), jobId, source,
+      amountUsdc: amt, chargedKeys, status: "pending",
+      reason: pending.reason, handle: pending.handle ?? null, retrieve: pending.retrieve ?? null,
+      payTo: pending.payTo ?? null, amountAtomic: pending.amountAtomic ?? null, seller: pending.seller ?? null,
+      timestamp: isoTs(at), date,
+    };
+    const created = typeof s.setIfNew === "function"
+      ? await s.setIfNew(pendingKey(owner, pendingId), record)
+      : (await s.setJSON(pendingKey(owner, pendingId), record), true);
+    // The same handle recorded twice is ONE pending, not two charges.
+    if (!created) return { alreadyRecorded: true, pendingId, allowanceUsdc };
+  }
+  // Pending charges carry their id so a reversal can prove the charge landed; confirmed ones don't.
+  const withCharge = (rec) => (isPending ? { chargedIds: [...(rec.chargedIds ?? []), pendingId] } : {});
 
   // Both counters are now COMPARE-AND-SET. A concurrent spend can no longer read the same
   // total and overwrite the other's increment — which used to silently widen the ceiling.
-  const jRec = await casUpdate(s, jobKey(jobId), (cur) => {
+  const jRec = await casUpdate(s, chargedKeys[0], (cur) => {
     const rec = cur ?? { jobId, jobPriceUsdc: Number(jobPriceUsdc), allowanceUsdc, spentUsdc: 0 };
     return {
       ...rec,
       jobPriceUsdc: Number(jobPriceUsdc),
       allowanceUsdc,
       spentUsdc: round6((rec.spentUsdc ?? 0) + amt),
+      ...withCharge(rec),
     };
   });
 
   // per-day running total (rolling UTC day, keyed to THIS owner's wallet)
-  const date = utcDate(at);
-  const dRec = await casUpdate(s, dayKey(owner, date), (cur) => {
+  const dRec = await casUpdate(s, chargedKeys[1], (cur) => {
     const rec = cur ?? { date, owner: ownerKey(owner), spentUsdc: 0 };
-    return { ...rec, spentUsdc: round6((rec.spentUsdc ?? 0) + amt) };
+    return { ...rec, spentUsdc: round6((rec.spentUsdc ?? 0) + amt), ...withCharge(rec) };
   });
 
   await appendAudit(s, {
@@ -503,9 +552,105 @@ export async function recordSpend({
     // ⭐ Only written when the caller actually has one. An explicit `null` would be a slot that
     // reads as "we looked and there was nothing", which is a different claim from "not recorded".
     ...(settlement ? { settlement } : {}),
+    ...(isPending
+      ? { confirmation: "pending", pendingId,
+          pending: { reason: pending.reason, handle: pending.handle ?? null, retrieve: pending.retrieve ?? null } }
+      : {}),
   });
 
-  return { jobSpentUsdc: jRec.spentUsdc, daySpentUsdc: dRec.spentUsdc, allowanceUsdc };
+  return { jobSpentUsdc: jRec.spentUsdc, daySpentUsdc: dRec.spentUsdc, allowanceUsdc, ...(isPending ? { pendingId } : {}) };
+}
+
+// ── PENDING DATA BUYS — the index, the list, the resolution ───────────────────────────────────
+const PENDING_PREFIX = "pending-buy:";
+const pendingKey = (owner, id) => `${PENDING_PREFIX}${ownerKey(owner)}:${id}`;
+// A seller handle is the natural id (it is what a resolver asks the seller about, and it makes a
+// repeated record of one payment idempotent). A settle timeout has NO handle, so it gets a unique id.
+function pendingIdFor(handle) {
+  return handle
+    ? `h-${String(handle).replace(/[^A-Za-z0-9_-]/g, "_")}`
+    : `t-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * Every UNRESOLVED pending data buy, across ALL days — for one owner, or for everyone (owner omitted,
+ * the operator's view). THROWS when the store cannot be listed: "we could not look" must never be
+ * returned as "there are none". An unreadable row is RETURNED, marked `unreadable`, never dropped —
+ * dropping it is how a pending would silently leave every view.
+ */
+export async function listPendingPurchases({ owner, store } = {}) {
+  const s = pickStore(store);
+  if (typeof s.list !== "function") throw new Error("budget: this store cannot list — pending purchases are UNKNOWN");
+  const prefix = owner ? `${PENDING_PREFIX}${ownerKey(owner)}:` : PENDING_PREFIX;
+  const keys = await s.list(prefix);
+  const rows = await Promise.all(keys.map(async (k) => {
+    try { return (await s.getJSON(k)) ?? { pendingId: k.slice(k.lastIndexOf(":") + 1), unreadable: true, status: "pending" }; }
+    catch { return { pendingId: k.slice(k.lastIndexOf(":") + 1), unreadable: true, status: "pending" }; }
+  }));
+  return rows
+    .filter((r) => r.status === "pending")
+    .sort((a, b) => String(a.timestamp ?? "").localeCompare(String(b.timestamp ?? "")));
+}
+
+const PENDING_OUTCOMES = new Set(["confirmed", "not-charged"]);
+
+/**
+ * Resolve one pending buy once its real outcome is known.
+ *   "confirmed"   — the charge stands; the pending leaves the list.
+ *   "not-charged" — the charge is REVERSED, exactly once, and only on a counter that carries this
+ *                   pending's id in `chargedIds` (proof the charge landed).
+ * 🚨 THIS CAN WIDEN A CAP (the not-charged branch credits budget back), so every guard is money-safety:
+ * an unknown outcome is refused, a resolved pending is never re-resolved (no credit after
+ * "confirmed"), and a second reversal of the same id is a no-op inside one CAS.
+ * ⚠️ The status flips BEFORE the counters are credited: a crash between them leaves the charge
+ * standing on a resolved pending — an over-count, the safe direction.
+ */
+export async function resolvePendingPurchase({ owner, pendingId, outcome, evidence, store, at } = {}) {
+  if (!PENDING_OUTCOMES.has(outcome)) return { resolved: false, reversed: false, refused: `unknown outcome "${outcome}"` };
+  if (!pendingId) return { resolved: false, reversed: false, refused: "no pendingId" };
+  const s = pickStore(store);
+  const key = pendingKey(owner, pendingId);
+  const existing = await s.getJSON(key);
+  if (!existing) return { resolved: false, reversed: false, refused: "no such pending purchase" };
+
+  let transitioned = false;
+  const rec = await casUpdate(s, key, (cur) => {
+    if (!cur || cur.status !== "pending") { transitioned = false; return cur ?? existing; }
+    transitioned = true;
+    return { ...cur, status: "resolved", outcome, evidence: evidence ?? null, resolvedAt: isoTs(at) };
+  });
+  if (!transitioned) return { resolved: false, reversed: false, refused: `already resolved (${rec?.outcome ?? "unknown"})` };
+
+  let credited = 0;
+  if (outcome === "not-charged") {
+    for (const k of rec.chargedKeys ?? []) {
+      const cur = await s.getJSON(k);
+      if (!cur || !(cur.chargedIds ?? []).includes(pendingId)) continue; // never landed ⇒ nothing to credit
+      let did = false;
+      await casUpdate(s, k, (c) => {
+        const charged = c?.chargedIds ?? [];
+        const reversed = c?.reversedIds ?? [];
+        if (!charged.includes(pendingId) || reversed.includes(pendingId)) { did = false; return c; }
+        did = true;
+        return { ...c, spentUsdc: round6(Math.max(0, (c.spentUsdc ?? 0) - Number(rec.amountUsdc))), reversedIds: [...reversed, pendingId] };
+      });
+      if (did) credited++;
+    }
+  }
+  const reversed = credited > 0;
+
+  // The trail, in the CHARGE's day bucket. A reversal row only when a counter actually moved — a row
+  // agentBreakdown subtracts must correspond to a credit that happened.
+  await appendAudit(s, reversed
+    ? { owner: rec.owner, at: rec.timestamp, dedupeKey: `pending-reversal-${pendingId}`, agent: rec.agent,
+        kind: "reversal", reverses: pendingId, source: rec.source, amountUsdc: rec.amountUsdc, allowed: true,
+        justification: `data purchase not charged: ${evidence ?? "resolved"}`, observedAt: isoTs(at) }
+    : { owner: rec.owner, at: rec.timestamp, dedupeKey: `pending-resolution-${pendingId}`, agent: rec.agent,
+        kind: "resolution", resolves: pendingId,
+        outcome: outcome === "confirmed" ? "CONFIRMED" : "NOT_CHARGED_NOTHING_TO_REVERSE",
+        justification: evidence ?? null, amountUsdc: 0, allowed: false, observedAt: isoTs(at) });
+
+  return { resolved: true, outcome, reversed };
 }
 
 // ── ⭐⭐ REFUSAL REASON CODES — the structured half of "it tried, and the cap stopped it" ──────

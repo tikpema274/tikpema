@@ -52,6 +52,18 @@ type ActivityEntry = {
   kind?: string;
   outcome?: string;       // resolution only — what the resolver actually observed
   timestamp?: string;
+  // "pending" — a data buy that was SENT and may still be charged (_budget.mjs recordSpend).
+  confirmation?: string;
+};
+export type PendingPurchase = {
+  pendingId: string;
+  agent: string | null;
+  amountUsdc: number | null;
+  reason: string | null;
+  handle: string | null;
+  source: string | null;
+  timestamp: string | null;
+  unreadable?: boolean;
 };
 type Roster = {
   owner: string;
@@ -63,6 +75,8 @@ type Roster = {
   // ⭐ Optional: an older server that does not send it leaves the flag undefined, which renders as
   // "nothing yet" exactly as before — a missing field must not itself become a false alarm.
   activityUnreadable?: boolean;
+  // null = the server could not read the pending list — shown as unknown, never as "none pending".
+  pendingPurchases?: PendingPurchase[] | null;
   breakdownUnreadable?: boolean;
 };
 
@@ -240,6 +254,11 @@ export default function AgentsPanel({ wallet: w }: { wallet: UnifiedWallet }) {
               onClose={() => setExpanded(null)}
             />
           )}
+
+          <PendingPurchasesNotice
+            items={data.pendingPurchases === undefined ? [] : data.pendingPurchases}
+            unreadable={data.pendingPurchases === null}
+          />
 
           {/* ── RECENT ACTIVITY (all agents) — refusals included, deliberately. ── */}
           <div className="panel-eyebrow" style={{ marginTop: 22 }}>Recent activity</div>
@@ -450,6 +469,41 @@ function AgentDetail({
 // with no `source` — one rule, not three copies that can drift apart.
 const NO_TYPE = "⚠️ no action type recorded for this entry";
 
+// ═══ ⭐ PENDING DATA BUYS — SENT, NOT YET SETTLED, MAY STILL BE CHARGED ══════════════════════════
+// A payment that was accepted into a settlement batch, or whose settle timed out, is neither a
+// purchase nor a refusal. It is counted against the limits until it resolves, and it is listed here
+// across ALL days, because the activity feed below shows today only and a pending must not age out
+// of view. ⛔ An unreadable list says so; it never renders as "nothing pending".
+export function PendingPurchasesNotice({ items, unreadable }: { items: PendingPurchase[] | null; unreadable: boolean }) {
+  if (unreadable) {
+    return (
+      <div className="status" style={{ marginTop: 18 }}>
+        We could not read pending data purchases just now — this is a failed read, not a sign that
+        none are pending.
+      </div>
+    );
+  }
+  if (!items || items.length === 0) return null;
+  return (
+    <div className="status" style={{ marginTop: 18 }}>
+      <div>
+        <b>{items.length} data purchase{items.length === 1 ? "" : "s"} awaiting settlement.</b>{" "}
+        The payment was sent and may still be charged. Until it settles it counts against the
+        limits, and the data was not used.
+      </div>
+      {items.map((p) => (
+        <div key={p.pendingId} className="sub" style={{ marginTop: 4 }}>
+          {p.unreadable
+            ? "one pending record could not be read"
+            : <>{p.source ?? "data seller"} · <span className="mono">{money(p.amountUsdc)}</span> USDC ·{" "}
+                {p.reason === "settle-timeout" ? "no answer from the seller" : "accepted, not yet confirmed"}
+                {p.timestamp ? ` · ${new Date(p.timestamp).toLocaleString()}` : ""}</>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Shared activity renderer — refusals are first-class, not hidden. "It tried, and the cap
 // stopped it" is precisely what an observability surface exists to show.
 //
@@ -501,7 +555,7 @@ export function ActivityList({ entries, showAgent }: { entries: ActivityEntry[];
               </span>
             ) : (
             <span style={{ color: e.allowed ? "var(--paper)" : "var(--danger)" }}>
-              {e.allowed ? "" : "refused · "}
+              {e.allowed ? (e.confirmation === "pending" ? "pending settlement · " : "") : "refused · "}
               {/* ═══ ⭐ A MISSING SOURCE MUST NOT BORROW THE IDENTITY OF A REAL ONE ════════════════
                   `?? "action"` rendered an entry with NO recorded source as the word "action" —
                   a plausible, generic label that reads as a FACT. A user auditing their own money

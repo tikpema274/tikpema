@@ -3,7 +3,7 @@ import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
 import { ensureOwnerWallet, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { AGENTS, isAgent } from "./_agents.mjs";
-import { budgetConfig, daySpend, agentBreakdown, auditLog } from "./_budget.mjs";
+import { budgetConfig, daySpend, agentBreakdown, auditLog, listPendingPurchases } from "./_budget.mjs";
 import { pauseStates, setPaused, globalHalt, ALL_AGENTS } from "./_pause.mjs";
 
 // GET/POST /api/agents   (auth)  — the AGENTS PAGE, in one call.
@@ -73,12 +73,16 @@ export async function handler(event) {
   // nothing at all, so the client COULD NOT have distinguished them.
   let activityUnreadable = false;
   let breakdownUnreadable = false;
-  const [states, spentToday, breakdown, recent] = await Promise.all([
+  const [states, spentToday, breakdown, recent, pendingPurchases] = await Promise.all([
     pauseStates({ owner }),
     daySpend({ owner }).catch(() => null),
     agentBreakdown({ owner }).catch(() => { breakdownUnreadable = true; return []; }),
     auditLog({ owner, date: new Date().toISOString().slice(0, 10) })
       .catch(() => { activityUnreadable = true; return []; }),
+    // ⭐ UNRESOLVED PENDING DATA BUYS, ACROSS ALL DAYS. `activity` above is TODAY only, so a pending
+    // that outlives its day would drop out of every view. ⛔ null — not [] — when unreadable: "we
+    // could not look" must not render as "nothing is pending".
+    listPendingPurchases({ owner }).catch(() => null),
   ]);
 
   const byAgent = new Map(breakdown.map((b) => [b.agent, b]));
@@ -136,5 +140,9 @@ export async function handler(event) {
     // Newest first — the page shows the last N. Includes REFUSALS: "your agent tried to buy X
     // and the cap stopped it" is exactly what an observability surface should show.
     activity: recent.slice(-50).reverse(),
+    pendingPurchases: pendingPurchases === null ? null : pendingPurchases.map((p) => ({
+      pendingId: p.pendingId, agent: p.agent ?? null, amountUsdc: p.amountUsdc ?? null, reason: p.reason ?? null,
+      handle: p.handle ?? null, source: p.source ?? null, timestamp: p.timestamp ?? null, unreadable: p.unreadable === true,
+    })),
   });
 }

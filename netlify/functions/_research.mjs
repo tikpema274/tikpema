@@ -12,7 +12,7 @@
 // not just read.
 
 import { exaSearch } from "./_exa.mjs";
-import { canSpend, recordSpend, recordBlocked, REFUSAL } from "./_budget.mjs";
+import { canSpend, recordSpend, recordBlocked, REFUSAL, shoutLedgerFailure } from "./_budget.mjs";
 import { AGENT } from "./_agents.mjs";
 import { assertNotPaused } from "./_pause.mjs";
 import { payX402, fetchX402Requirements } from "./_x402.mjs";
@@ -235,6 +235,7 @@ export const PURCHASE_OUTCOME = Object.freeze({
   BUDGET: "budget",                            // per-job / per-day budget refused
   PAUSED: "paused",                            // the Researcher is paused
   SETTLE_UNCONFIRMED: "settle-unconfirmed",    // payment did not confirm; no money moved
+  SETTLE_PENDING: "settle-pending",            // sent + may be/will be charged; recorded PENDING, data not used
   NO_USABLE_FACTS: "no-usable-facts",          // settled but the response yielded nothing
   ERROR: "error",                              // the purchase path threw
   UNCLASSIFIED: "unclassified",                // 🚨 the path RAN and hit an exit nobody enumerated
@@ -321,6 +322,12 @@ export function disclosureLine(outcome) {
       "No paid data purchase was attempted for this brief — the free source answered first, so the " +
       "paid path was never reached.";
   }
+  if (c === PURCHASE_OUTCOME.SETTLE_PENDING) {
+    // ⚠️ NOT the default "No paid data was purchased" line: that reads as "no money moved", and here
+    // money may have moved. The data was not used; the payment is recorded and may still settle.
+    return "A paid data purchase was sent but had not settled when this brief was written, so its " +
+      `data was not used${why}. The payment may still be charged; it is recorded as pending until it resolves.`;
+  }
   if (c === PURCHASE_OUTCOME.UNCLASSIFIED) {
     return "⚠️ NO PAID DATA WAS PURCHASED FOR THIS BRIEF, AND THE REASON WAS NOT RECORDED. " +
       "It rests on web sources alone. This is a defect in our reporting, not a statement about the " +
@@ -335,11 +342,32 @@ export function disclosureLine(outcome) {
   return `⚠️ No paid data was purchased for this brief, so it rests on web sources alone — ${why.slice(2, -1) || c}.`;
 }
 
+/**
+ * What a payX402 result means for the LEDGER — three answers, never two.
+ *   confirmed   — executed:true.
+ *   pending     — money WILL or MAY have moved and we cannot say which yet:
+ *                   pending:true              accepted into a settlement batch (it will be charged)
+ *                   charged === null          settle timeout: sent, no answer (it may have been)
+ *                   a handle, not executed    accepted, then the retrieve errored
+ *   not-charged — everything else: a guard refused before signing, a pre-broadcast timeout
+ *                 (charged:false), a seller that refused the payment.
+ * ⚠️ `charged === null` is compared STRICTLY: a refusal carries no `charged` at all (undefined), and
+ * reading that as "may have been charged" would book phantom spend for every blocked buy.
+ */
+export function classifyPayResult(res) {
+  const b = res?.body ?? {};
+  if (b.executed === true) return { kind: "confirmed" };
+  if (b.pending === true) return { kind: "pending", reason: "accepted-unconfirmed" };
+  if (b.charged === null) return { kind: "pending", reason: "settle-timeout" };
+  if (b.handle) return { kind: "pending", reason: "retrieve-failed" };
+  return { kind: "not-charged" };
+}
+
 // Run the decision → gate → buy sequence and return the purchased facts (an
 // array of { claim, source }), or [] if we didn't buy for any reason. Never
 // throws: every failure path logs and returns [] so research proceeds Exa-only.
 // `store` is the optional injectable budget store (undefined → Netlify Blobs).
-async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jobPrice, store, forceDecision, owner, outcome }) {
+export async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jobPrice, store, forceDecision, owner, outcome }) {
   // ⭐ CLAIM THE OBJECT ON ENTRY. From here on it can only be UNCLASSIFIED or better — so UNWIRED
   // surviving to the brief proves this function was never reached, which is a different bug from
   // "this function left by an unlabelled door".
@@ -470,8 +498,31 @@ async function maybeBuyData({ apiKey, model, question, groundingBlock, jobId, jo
     //    amount to the gated advertised price.
     const res = await payX402({ sellerUrl: process.env.DATA_SELLER_URL, challenge: chal, requestBody, approvedUsdc: amountUsdc, requireApproved: true, jobContext: { jobId, jobPrice } });
 
-    // 6. If the settle did NOT confirm, no money moved → return [] without recording.
-    if (!res?.body?.executed) {
+    // 6. NOT EXECUTED IS NOT ONE THING. This used to read "if !executed, no money moved" — an
+    //    under-count: payX402's pending (accepted into a batch, WILL be charged) and settle-timeout
+    //    (charged:null, MAY have been) both arrive as executed:false. Those are recorded PENDING —
+    //    counted against the caps and listed until resolved. Only a genuine not-charged records nothing.
+    const verdict = classifyPayResult(res);
+    if (verdict.kind === "pending") {
+      const p = res.body;
+      console.warn(`[research] purchase PENDING (${verdict.reason}) — recording, data not used: status=${res?.status} handle=${p.handle ?? "(none)"}`);
+      try {
+        await recordSpend({
+          agent: AGENT.RESEARCHER, jobId, jobPriceUsdc: jobPrice, amountUsdc,
+          source: sellerLabel(p.seller ?? configuredSeller()), justification, store, owner,
+          confirmation: "pending",
+          pending: { reason: verdict.reason, handle: p.handle ?? null, retrieve: p.retrieve ?? null,
+                     payTo: p.payTo ?? null, amountAtomic: String(p.atomic ?? p.amountAtomic ?? advAtomic), seller: p.seller ?? null },
+        });
+      } catch (e) {
+        // Money may have moved and nothing was recorded — the exact failure this branch exists to
+        // prevent. Swallowed (maybeBuyData never throws), but SHOUTED, never silent.
+        shoutLedgerFailure({ agent: AGENT.RESEARCHER, owner, amountUsdc, source: "x402 pending buy", err: e });
+      }
+      mark(outcome, "SETTLE_PENDING", `the payment was sent and had not settled (${verdict.reason}) — recorded as pending`);
+      return [];
+    }
+    if (verdict.kind === "not-charged") {
       console.warn(`[research] purchase did NOT settle (no spend): status=${res?.status} executed=${res?.body?.executed}`);
       mark(outcome, "SETTLE_UNCONFIRMED", "the purchase did not confirm — no money moved");
       return [];
