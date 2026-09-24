@@ -104,6 +104,34 @@ for (const [phrase, why] of [
   check(`"${phrase}" is gone from the rendered card — ${why}`, !rendered.includes(phrase));
 }
 
+section("4 — THE DECLINE STAYS A REFUSAL; A VAULT QUESTION GETS A BOUNDED POINTER, NOT A PICK");
+// The inspector answers "what can THIS vault's owner do to my deposit" for the ONE allowlisted vault.
+// It does not rank or recommend. The pointer must say so — a pointer that read as "go here for the
+// best vault" would turn a refusal into the recommendation it refuses to give.
+const { PlanDeclinedNotice } = (await import("../src/components/PlanPanel")) as any;
+const plain = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"')
+  .replace(/&amp;/g, "&").replace(/&#(\d+);/g, (_: string, d: string) => String.fromCharCode(Number(d))).replace(/\s+/g, " ").trim();
+const renderDecline = (task: string, reason = "") => typeof PlanDeclinedNotice === "function"
+  ? renderToStaticMarkup(<PlanDeclinedNotice task={task} reason={reason} />) : "";
+check("PlanDeclinedNotice is exported (the refusal is renderable on its own)", typeof PlanDeclinedNotice === "function");
+const vaultHtml = renderDecline("what's the best vault to put my USDC in?", "That is an opinion, not an action.");
+const vault = plain(vaultHtml);
+const pepe = plain(renderDecline("should I buy PEPE?"));
+check("the server's own reason is still shown", vault.includes("That is an opinion, not an action."));
+check("⭐ it is STILL A REFUSAL — the bound-price-refuse sentence survives, vault or not",
+  /not an open-ended opinion/.test(vault) && /not an open-ended opinion/.test(pepe));
+check("⭐ a vault question gets the pointer, in the agent's voice: it won't pick one",
+  /Your agent won't pick one/.test(vault), vault.slice(0, 160));
+check("…linking the Vault page", /href="#\/vault"/.test(vaultHtml));
+check("⭐⭐ …bounded: the SINGLE vault on its list, and what its owner can do with your deposit",
+  /single vault on its list/.test(vault) && /what that vault's owner can do with your deposit/.test(vault));
+check("⭐⭐ …and it says outright that it does not compare or rank", /doesn't compare vaults or say which is best/.test(vault));
+for (const claim of [/best vault is/i, /we recommend/i, /top vaults?/i, /safest vault/i, /highest yield/i, /compare vaults and/i]) {
+  check(`never claims a ranking — ${claim}`, !claim.test(vault));
+}
+check("a yield question gets it too", /Your agent won't pick one/.test(plain(renderDecline("where can I get yield on USDC?"))));
+check("⭐ a NON-vault decline gets no vault line (PEPE, chains)", !/vault/i.test(pepe) && !/vault/i.test(plain(renderDecline("what's the best chain?"))));
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

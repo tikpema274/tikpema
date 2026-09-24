@@ -33,6 +33,33 @@ const go = (id: string) => {
 // ⚠️ THE USER IS THE REASONING GATE. The server proves a proposal is well-FORMED and
 // ECONOMICAL, never that it is well-REASONED. ProposalCard renders the agent's "why"
 // above the numbers and above the button for exactly that reason.
+// ═══ THE DECLINE — a refusal, and for a vault question a BOUNDED pointer ══════════════════════════
+// "What's the best vault?" is the same open-ended opinion as "what's the best chain?" — the agent
+// refuses it. But the user is often reaching for a bounded question the Vault page DOES answer: what
+// the owner of the one allowlisted vault can do to a deposit. ⛔ The pointer must not read as "go here
+// for the best vault": the inspector covers a SINGLE vault and never compares or ranks, and the copy
+// says so. Shown only when the task mentions a vault or yield, so other refusals stay unchanged.
+const VAULT_TASK = /\b(vaults?|yield)\b/i;
+export function PlanDeclinedNotice({ task, reason }: { task: string; reason: string }) {
+  return (
+    <div className="status" style={{ marginTop: 12, color: "var(--warn)" }}>
+      {reason && <div>{reason}</div>}
+      <div style={{ marginTop: 4 }}>
+        Your agent can plan an action it is able to bound, price, and refuse — not an
+        open-ended opinion. "What's the best chain?" or "should I buy PEPE?" have nothing
+        to approve; "bridge 2 USDC to Base" or "convert 5 USDC to EURC" do.
+      </div>
+      {VAULT_TASK.test(task) && (
+        <div style={{ marginTop: 4 }}>
+          Looking for the best vault? Your agent won't pick one. The <a href="#/vault">Vault page</a>{" "}
+          covers the single vault on its list and shows what that vault's owner can do with your
+          deposit — it doesn't compare vaults or say which is best.
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PlanPanel({ wallet }: { wallet: UnifiedWallet }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -187,16 +214,7 @@ export default function PlanPanel({ wallet }: { wallet: UnifiedWallet }) {
         </button>
       </div>
 
-      {quoteDeclined && (
-        <div className="status" style={{ marginTop: 12, color: "var(--warn)" }}>
-          {quoteDeclined.reason && <div>{quoteDeclined.reason}</div>}
-          <div style={{ marginTop: 4 }}>
-            Your agent can plan an action it is able to bound, price, and refuse — not an
-            open-ended opinion. "What's the best chain?" or "should I buy PEPE?" have nothing
-            to approve; "bridge 2 USDC to Base" or "convert 5 USDC to EURC" do.
-          </div>
-        </div>
-      )}
+      {quoteDeclined && <PlanDeclinedNotice task={task} reason={quoteDeclined.reason} />}
 
       {quote && (
         <div
