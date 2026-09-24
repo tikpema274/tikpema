@@ -147,6 +147,32 @@ export const maxSpendUsdc = () => {
   return n;
 };
 
+// ═══ THE OPERATOR DATA POOL — two daily caps, FAIL-CLOSED INCLUDING UNSET ═══════════════════════
+// The Researcher's data buys are paid from the shared delegate EOA's Gateway balance: Tikpema's
+// money, not the user's. They are bounded by these two caps (_budget.mjs canSpend), NOT by the
+// user's PERIOD_CEILING_USDC — which caps the user's own send/swap/bridge and must not shrink for
+// money the user did not spend.
+//
+// ⚠️ STRICTER THAN THE HELPERS ABOVE, DELIBERATELY: those default when unset; these THROW. There is
+// no safe default for how much of someone else's money a user may draw, and a default would put a
+// number nobody chose on production the moment this deploys. So a deploy that has not set both
+// variables REFUSES EVERY DATA BUY until they are set — loud and fail-closed, never quietly open.
+function requiredPoolCap(name) {
+  const raw = process.env[name];
+  if (raw === undefined || String(raw).trim() === "") {
+    throw new Error(`${name} is not set — refusing the data purchase (no default for the operator pool)`);
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(`${name} is misconfigured (${JSON.stringify(raw)}); refusing the data purchase`);
+  }
+  return n;
+}
+/** Max a single user's data buys may draw from the operator pool per rolling UTC day. */
+export const poolUserDailyCapUsdc = () => requiredPoolCap("DATA_POOL_USER_DAILY_CAP_USDC");
+/** Max ALL users' data buys together may draw from the operator pool per rolling UTC day. */
+export const poolDailyCapUsdc = () => requiredPoolCap("DATA_POOL_DAILY_CAP_USDC");
+
 // Per-transaction cap on agent SENDS/TRANSFERS specifically (both user-directed
 // via agent-send and autonomous via agent-act/execute-plan). Separate from
 // AGENT_MAX_SPEND_USDC so the later tiered model can raise user-directed sends

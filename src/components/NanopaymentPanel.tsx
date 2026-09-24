@@ -34,7 +34,7 @@ export default function NanopaymentPanel() {
       <div className="sub">
         Mid-research, your agent sometimes needs a fresher fact than the open web
         can give. When it does, it can buy just that one data point — for a fraction
-        of a cent, settled on-chain in USDC, all within your budget.{" "}
+        of a cent, settled on-chain in USDC. Tikpema pays for it from its own balance, not your wallet.{" "}
         <b>In practice this is rare:</b> free sources answer most jobs, and only a
         question needing a live on-chain reading routes to a paid buy.
       </div>
@@ -57,7 +57,7 @@ export default function NanopaymentPanel() {
           <div className="step-title">Check the price</div>
           <div className="step-body">
             It reads the seller's price up front and refuses anything above a hard
-            per-buy cap or your daily budget — before any money moves.
+            per-buy cap or the daily data limit — before any money moves.
           </div>
         </div>
         <div>
@@ -94,8 +94,8 @@ export default function NanopaymentPanel() {
           <span className="mono" style={{ color: "var(--paper)" }}>
             $0.01
           </span>{" "}
-          max by default — and every purchase still has to fit inside your
-          per-job and daily spending caps.
+          max by default — and every purchase still has to fit a per-job allowance and a
+          daily limit on Tikpema's data balance. None of it comes out of your wallet.
         </div>
       </div>
 

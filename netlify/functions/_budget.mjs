@@ -27,6 +27,7 @@ import { amountFloorViolation, FLOOR_CONSEQUENCE } from "./_amount-floor.mjs";
 import { getStore } from "@netlify/blobs";
 import { connectBlobs } from "./_blobs.mjs";
 import { AGENT, normalizeAgent } from "./_agents.mjs";
+import { poolUserDailyCapUsdc, poolDailyCapUsdc } from "./_arc.mjs";
 
 const BUDGET_STORE = "data-budget";
 // The old single-array audit key. Entries are now per-key (see appendAudit) — this remains
@@ -251,6 +252,17 @@ const jobKey = (jobId) => `job:${jobId}`;
 const ownerKey = (owner) =>
   typeof owner === "string" && owner ? owner.toLowerCase() : "_global";
 const dayKey = (owner, date) => `day:${ownerKey(owner)}:${date}`;
+// ═══ THE OPERATOR DATA POOL — counted SEPARATELY from the user's day ═════════════════════════════
+// Data buys are paid from Tikpema's pool (the delegate EOA's Gateway balance), never the user's
+// wallet. They used to be charged to `day:<owner>` — the SAME counter that caps the user's own
+// send/swap/bridge/DCA — so the user's limit shrank for money they did not spend. They are now
+// counted here, against two caps of their own (_arc.mjs poolUserDailyCapUsdc / poolDailyCapUsdc):
+//   pool-day:<owner>:<date>   — this user's draws on the pool today (one user cannot burn it)
+//   pool-day-total:<date>     — everyone's draws today (the pool's own daily bound)
+// ⚠️ `pool-day-total:` deliberately does NOT start with `pool-day:` + an owner, so a prefix listing
+// of one user's pool rows can never sweep up the global total.
+const poolUserKey = (owner, date) => `pool-day:${ownerKey(owner)}:${date}`;
+const poolTotalKey = (date) => `pool-day-total:${date}`;
 
 // ── Core: the per-job allowance ───────────────────────────────────────────────
 export function jobAllowance(jobPriceUsdc) {
@@ -269,6 +281,17 @@ export async function daySpend({ owner, date, at, store } = {}) {
   const d = date ?? utcDate(at);
   const rec = await pickStore(store).getJSON(dayKey(owner, d));
   return rec?.spentUsdc ?? 0;
+}
+
+/** This user's draws on the operator data pool today. */
+export async function poolUserSpend({ owner, at, store } = {}) {
+  const rec = await pickStore(store).getJSON(poolUserKey(owner, utcDate(at)));
+  return round6(rec?.spentUsdc ?? 0);
+}
+/** Everyone's draws on the operator data pool today. */
+export async function poolTotalSpend({ at, store } = {}) {
+  const rec = await pickStore(store).getJSON(poolTotalKey(utcDate(at)));
+  return round6(rec?.spentUsdc ?? 0);
 }
 
 // ── DCA'S DAILY SHARE — a per-owner-per-day sub-counter, so an autonomous DCA tick can be
@@ -368,15 +391,35 @@ export async function canSpend({ jobId, jobPriceUsdc, amountUsdc, store, at, own
     };
   }
 
-  // (c) period ceiling (rolling UTC day, PER USER — this owner's own budget)
-  const dayA = atomic(await daySpend({ owner, at, store: s }));
-  const ceilA = atomic(cfg.PERIOD_CEILING_USDC);
-  if (dayA + amtA > ceilA) {
+  // (c) THE OPERATOR POOL — NOT the user's own daily limit. A data buy is paid by Tikpema, so it
+  //     is bounded by the pool's caps: per user (one user cannot burn the pool) and in total. The
+  //     user's PERIOD_CEILING_USDC is deliberately NOT read here — it caps THEIR money.
+  //     ⚠️ Replaced, not dropped: the old day-ceiling charge was also the only per-user bound on the
+  //     pool (the per-job allowance derives from a job price that round-trips to the user's wallet).
+  let userCapA, poolCapA;
+  try {
+    userCapA = atomic(poolUserDailyCapUsdc());
+    poolCapA = atomic(poolDailyCapUsdc());
+  } catch (e) {
+    // Fail-closed, and a VERDICT, not a throw — see (0).
+    return { allowed: false, code: REFUSAL.POOL_UNCONFIGURED, reason: e.message };
+  }
+  const userA = atomic(await poolUserSpend({ owner, at, store: s }));
+  if (userA + amtA > userCapA) {
     return {
-      allowed: false,
+      allowed: false, code: REFUSAL.DAY_CEILING,
       reason:
-        `period ceiling: ${round6((dayA + amtA) / 1e6)} > ${cfg.PERIOD_CEILING_USDC} USDC ` +
-        `daily (already spent ${round6(dayA / 1e6)} today ${utcDate(at)})`,
+        `data pool per-user daily cap: ${round6((userA + amtA) / 1e6)} > ${round6(userCapA / 1e6)} USDC ` +
+        `(this user already drew ${round6(userA / 1e6)} today ${utcDate(at)})`,
+    };
+  }
+  const poolA = atomic(await poolTotalSpend({ at, store: s }));
+  if (poolA + amtA > poolCapA) {
+    return {
+      allowed: false, code: REFUSAL.DAY_CEILING,
+      reason:
+        `data pool daily cap: ${round6((poolA + amtA) / 1e6)} > ${round6(poolCapA / 1e6)} USDC ` +
+        `(all users drew ${round6(poolA / 1e6)} today ${utcDate(at)})`,
     };
   }
 
@@ -503,7 +546,8 @@ export async function recordSpend({
   }
   if (isPending && !pending?.reason) throw new Error("recordSpend: a pending spend must carry pending.reason");
 
-  const chargedKeys = [jobKey(jobId), dayKey(owner, date)];
+  // The job counter plus the two POOL counters. ⛔ Never `day:<owner>` — that is the user's own limit.
+  const chargedKeys = [jobKey(jobId), poolUserKey(owner, date), poolTotalKey(date)];
   let pendingId;
   if (isPending) {
     pendingId = pendingIdFor(pending.handle);
@@ -536,9 +580,13 @@ export async function recordSpend({
     };
   });
 
-  // per-day running total (rolling UTC day, keyed to THIS owner's wallet)
-  const dRec = await casUpdate(s, chargedKeys[1], (cur) => {
+  // this user's draws on the operator pool today, then everyone's
+  const uRec = await casUpdate(s, chargedKeys[1], (cur) => {
     const rec = cur ?? { date, owner: ownerKey(owner), spentUsdc: 0 };
+    return { ...rec, spentUsdc: round6((rec.spentUsdc ?? 0) + amt), ...withCharge(rec) };
+  });
+  const tRec = await casUpdate(s, chargedKeys[2], (cur) => {
+    const rec = cur ?? { date, spentUsdc: 0 };
     return { ...rec, spentUsdc: round6((rec.spentUsdc ?? 0) + amt), ...withCharge(rec) };
   });
 
@@ -549,6 +597,9 @@ export async function recordSpend({
     source,
     justification,
     allowed: true,
+    // WHO PAID. The row stays under the owner (attribution: whose research drew on the pool), and
+    // says in data that the money was Tikpema's, not theirs.
+    fundedBy: "operator-pool",
     // ⭐ Only written when the caller actually has one. An explicit `null` would be a slot that
     // reads as "we looked and there was nothing", which is a different claim from "not recorded".
     ...(settlement ? { settlement } : {}),
@@ -558,7 +609,10 @@ export async function recordSpend({
       : {}),
   });
 
-  return { jobSpentUsdc: jRec.spentUsdc, daySpentUsdc: dRec.spentUsdc, allowanceUsdc, ...(isPending ? { pendingId } : {}) };
+  return {
+    jobSpentUsdc: jRec.spentUsdc, poolUserSpentUsdc: uRec.spentUsdc, poolTotalSpentUsdc: tRec.spentUsdc,
+    allowanceUsdc, ...(isPending ? { pendingId } : {}),
+  };
 }
 
 // ── PENDING DATA BUYS — the index, the list, the resolution ───────────────────────────────────
@@ -685,6 +739,7 @@ export const REFUSAL = {
   DISCLOSURE:       "REFUSED_DISCLOSURE",       // a required disclosure gate was not satisfied
   UNBOUND_QUOTE:    "REFUSED_UNBOUND_QUOTE",    // a session caller reached a bridge with no sealed quote — nothing was shown, so nothing can be honoured
   UNKNOWN_STEP:     "REFUSED_UNKNOWN_STEP",     // unrecognised step type
+  POOL_UNCONFIGURED: "REFUSED_POOL_UNCONFIGURED", // the operator data-pool caps are unset or garbled — fail-closed
 };
 
 // ── Record a REFUSED action (no spend; audit only) ────────────────────────────

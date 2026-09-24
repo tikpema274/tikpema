@@ -93,6 +93,10 @@ mock.module("../netlify/functions/_agent-wallets.mjs", {
 
 process.env.DATA_SELLER_URL = "https://seller.test/arc";
 process.env.DATA_PURCHASE_USDC = "0.01";
+// The operator-pool caps (fail-closed when unset — verify-data-pool-budget §1). Generous here: this
+// suite is about pending vs confirmed, not about the caps.
+process.env.DATA_POOL_USER_DAILY_CAP_USDC = "1";
+process.env.DATA_POOL_DAILY_CAP_USDC = "10";
 delete process.env.DD_WATCH_WEBHOOK; // the ledger-failure shout must not reach a network
 
 const research = await import("../netlify/functions/_research.mjs");
@@ -105,8 +109,9 @@ const BUDGET = () => stores.get("data-budget") ?? new Map();
 const reset = () => { for (const m of stores.values()) m.clear(); payCalls = 0; nextPay = null; };
 const audits = () => [...BUDGET().entries()].filter(([k]) => k.startsWith("audit:")).map(([, v]) => v.data);
 const allowedAudits = () => audits().filter((a) => a.allowed === true && !a.kind);
+// Data buys are charged to the OPERATOR POOL (per-user `pool-day:` rows), never the user's `day:`.
 const dayTotal = () => {
-  const rows = [...BUDGET().entries()].filter(([k]) => k.startsWith("day:")).map(([, v]) => v.data);
+  const rows = [...BUDGET().entries()].filter(([k]) => k.startsWith("pool-day:")).map(([, v]) => v.data);
   return rows.reduce((s, r) => s + Number(r.spentUsdc || 0), 0);
 };
 const jobTotal = (jobId: string) => Number(BUDGET().get(`job:${jobId}`)?.data?.spentUsdc ?? 0);
@@ -142,7 +147,7 @@ nextPay = { status: 202, body: {
   check("…carrying the seller's handle", pend[0]?.pending?.handle === "hdl-111");
   check("…and the reason accepted-unconfirmed", pend[0]?.pending?.reason === "accepted-unconfirmed");
   check("the job counter is charged (a charge that WILL land narrows the cap now)", Math.abs(jobTotal("job-1") - 0.0001) < 1e-9, `job=${jobTotal("job-1")}`);
-  check("the day counter is charged", Math.abs(dayTotal() - 0.0001) < 1e-9, `day=${dayTotal()}`);
+  check("the per-user pool counter is charged", Math.abs(dayTotal() - 0.0001) < 1e-9, `day=${dayTotal()}`);
   check("the outcome says PENDING, not 'no money moved'", r?.outcome?.code === "settle-pending", `code=${r?.outcome?.code}`);
   check("no facts are used from an unconfirmed buy", Array.isArray(r?.facts) && r!.facts.length === 0);
   const listed = await attempt("§1 list", listPending);
@@ -162,7 +167,7 @@ nextPay = { status: 502, body: {
   check("an audit entry is written with confirmation:\"pending\"", pend.length === 1, `got ${pend.length}`);
   check("…with reason settle-timeout", pend[0]?.pending?.reason === "settle-timeout");
   check("…and handle recorded as null (none exists), not invented", pend[0]?.pending && pend[0].pending.handle === null);
-  check("the day counter is charged (MAY-have-been-charged fails closed)", Math.abs(dayTotal() - 0.0001) < 1e-9, `day=${dayTotal()}`);
+  check("the per-user pool counter is charged (MAY-have-been-charged fails closed)", Math.abs(dayTotal() - 0.0001) < 1e-9, `day=${dayTotal()}`);
   check("the outcome says PENDING", r?.outcome?.code === "settle-pending", `code=${r?.outcome?.code}`);
   const listed = await attempt("§2 list", listPending);
   check("the pending is LISTED as unresolved", listed?.length === 1 && listed[0]?.reason === "settle-timeout");
@@ -211,7 +216,7 @@ nextPay = { status: 200, body: {
   check("it carries NO pending fields", a[0] && !("pending" in a[0]) && !("pendingId" in a[0]));
   check("it carries the settlement join", a[0]?.settlement?.id === "d63f301a-b4a2-433a-b605-c5d8a4775441");
   check("counters charged once", Math.abs(dayTotal() - 0.0001) < 1e-9 && Math.abs(jobTotal("job-4") - 0.0001) < 1e-9);
-  check("counter records carry no chargedIds (unchanged shape)", ![...BUDGET().entries()].some(([k, v]) => (k.startsWith("day:") || k.startsWith("job:")) && "chargedIds" in v.data));
+  check("counter records carry no chargedIds (unchanged shape)", ![...BUDGET().entries()].some(([k, v]) => (k.startsWith("pool-day") || k.startsWith("job:")) && "chargedIds" in v.data));
   check("outcome is purchased", r?.outcome?.code === "purchased", `code=${r?.outcome?.code}`);
   const listed = await attempt("§4 list", listPending);
   check("nothing listed as pending", Array.isArray(listed) && listed.length === 0);
@@ -290,7 +295,7 @@ reset();
   // Simulate: the pending index was written, then the process died before the counters moved.
   await attempt("§6b seed", () => storeOf("data-budget").setJSON(`pending-buy:${OWNER}:orphan-1`, {
     pendingId: "orphan-1", owner: OWNER, status: "pending", amountUsdc: 0.0001, jobId: "job-6c",
-    chargedKeys: [`job:job-6c`, `day:${OWNER}:${new Date().toISOString().slice(0, 10)}`],
+    chargedKeys: [`job:job-6c`, `pool-day:${OWNER}:${new Date().toISOString().slice(0, 10)}`],
     reason: "settle-timeout", handle: null, timestamp: new Date().toISOString(),
   }));
   const r = await attempt("§6b resolve", () => budget.resolvePendingPurchase({ owner: OWNER, pendingId: "orphan-1", outcome: "not-charged", evidence: "test" }));

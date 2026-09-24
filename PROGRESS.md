@@ -26995,3 +26995,122 @@ write to an existing key, and each names a false cause:
 - the x402 seller: **"rate slot contention"** on every settle after the minute's first.
 If those appear together, or on an idle system, check whether `getWithMetadata` still returns an `etag` BEFORE hunting a
 concurrency bug — there is no contention; there is no etag.
+
+---
+
+# 🛠️ THE OPERATOR DATA POOL — pending buys LEDGERED + a pool budget replaces the user's day charge (UNCOMMITTED, NOT DEPLOYED)
+
+**2026-09-24.** Two changes, built red-first, left uncommitted for review. Nothing deployed, nothing fund-moving.
+
+## The finding that started it (measured 2026-09-23/24)
+- The Researcher's x402 data buys are paid from the **shared delegate EOA's Gateway balance** (`0x6db396c1…`),
+  funded once by the operator (`depositFor(USDC, delegate, 5e6)`, see "depositFor funding technique" above).
+  Measured **4.8032 USDC** at Arc testnet block 63672854 (contract `availableBalance` and Circle `/v1/balances`
+  agree, `pendingBatch` 0). **Users are never debited for data** — the job escrow is client = provider = the
+  user's own SCA. So the pool is an operator SUBSIDY, not commingled user custody.
+- But the copy said "Spends your USDC to buy data", and every buy was charged to `day:<owner>` — the same
+  counter that caps the user's send/swap/bridge/DCA. **Why it was charged there:** `91ed463` designed data as
+  "carved out of the user's job payment" (the user was meant to pay); `aea98a9` made the ceiling per-user
+  because a GLOBAL counter let users block each other. Neither was pool-abuse control — but by accident it was
+  the only per-user bound on the pool. Hence REPLACED, not dropped.
+
+## Change 1 — the ledger leak (`_research.mjs` step 6)
+- Was: every `!executed` from payX402 → "no money moved", nothing recorded. Under-count: `pending:true`
+  (accepted into a batch — WILL be charged) and `charged:null` (settle timeout — MAY have been) are both
+  `executed:false`.
+- Now `classifyPayResult` → confirmed / **pending** (`accepted-unconfirmed`, `settle-timeout`,
+  `retrieve-failed`) / not-charged. A pending is recorded via `recordSpend({ confirmation:"pending" })`:
+  indexed at `pending-buy:<owner>:<id>` (id = the seller handle, or a unique id for a timeout, which has none),
+  **counted against the caps** (fail-closed), audited with the handle. `resolvePendingPurchase` →
+  "confirmed" keeps the charge, "not-charged" reverses it exactly once (status CAS + `chargedIds`/`reversedIds`
+  inside the counter CAS — each guard covers the other's mutation). The step-8 sweeper cannot touch these
+  (it selects `confirmation:"submitted"` only).
+- **Visible:** `/api/agents` returns `pendingPurchases` across ALL days (`null` when unreadable, never `[]`),
+  `AgentsPanel` renders `PendingPurchasesNotice`, activity rows read "pending settlement".
+- ⚠️ NOT built: an automatic resolver. Nothing calls `resolvePendingPurchase` yet — a pending stays visible
+  until someone resolves it. A handle-bearing pending could be resolved by polling its `retrieve` URL; a
+  settle-timeout has no handle and needs a human (or the clean-ledger work below).
+- ⚠️ Still classified not-charged: a seller non-200 AFTER the signature was sent with no handle and no
+  `charged:null` (payX402's "Seller did not return 200" branch). A 402 there is a refusal; a 5xx is
+  genuinely ambiguous. Left as it was — open question.
+- Suite `test:pendingbuy` (`scripts/verify-pending-purchase.tsx`): red **19 / 49** → green **54 / 0**.
+
+## Change 2 — the pool budget + the copy
+- `canSpend` (c): the user's `PERIOD_CEILING_USDC` is no longer read for a data buy. Replaced by a per-user
+  daily cap on POOL draws (`pool-day:<owner>:<date>`) and a global daily pool cap (`pool-day-total:<date>`).
+  Per-buy and per-job checks unchanged. `recordSpend` writes job + the two pool counters, never
+  `day:<owner>`; the per-owner audit row stays, now with `fundedBy: "operator-pool"`.
+- Config: `DATA_POOL_USER_DAILY_CAP_USDC`, `DATA_POOL_DAILY_CAP_USDC` (`_arc.mjs`). **Stricter than the
+  neighbouring helpers: UNSET THROWS too** — no default for how much of the operator's money a user may draw.
+  New refusal `REFUSED_POOL_UNCONFIGURED` (site count 16 → 17, `verify-site-claims` derives it).
+- 🚨 **DEPLOY PREREQUISITE:** neither variable is set in production (read 2026-09-24). Deploying change 2
+  without setting both **refuses every data buy** — fail-closed by design. `DATA_PURCHASE_USDC` (the
+  Researcher's absolute per-buy ceiling) is also unset in production, so it runs at its 0.01 default.
+- Copy: `_agents.mjs` Researcher `spends` + `description` (escrow moves the user's USDC; data is
+  Tikpema-paid), `NanopaymentPanel` (three sentences), a Dashboard comment. `movesFunds` stays **true** —
+  for the escrow.
+- **Knock-on:** the Agents page "spent today" (`budget.spentTodayUsdc` = `daySpend`) no longer includes data
+  buys. The per-agent Researcher figure (`agentBreakdown`, from the audit) still does — it is attribution of
+  pool draws, not the user's spend. Whether that card should label it as Tikpema-paid is an open copy decision.
+- Suite `test:datapool` (`scripts/verify-data-pool-budget.tsx`): red **12 / 40** → green **52 / 0**; three
+  mutations caught. `verify-ledger-concurrency` updated (day 2.6 → 2 + pool 0.6); `_budget-test.mjs`
+  (not in `test:all`) updated, 30 / 0.
+- ⚠️ Found, NOT fixed: ResearchPanel shows "Price to research this: X USDC", but the escrow's provider is the
+  user's own wallet, so the "price" returns to the user. No on-chain fee was verified either way.
+
+## 🔁 AUTOMATIC RESOLUTION OF PENDING BUYS — SCOPED, NOT BUILT
+- ⚠️ **Premise correction:** the handle is the SELLER's, not Circle's. payX402's 202 branch is the contract
+  OUR seller (`x402-quote`) implements: 202 + handle + retrieve URL, served once payTo's Gateway balance
+  reflects the payment. Circle's facilitator returns a settlement `transaction` UUID only on SUCCESS
+  (PAYMENT-RESPONSE). Whether QuickNode — the Researcher's only seller — ever answers 202 + handle is
+  UNVERIFIED; if it settles synchronously, its pendings will almost all be settle-timeouts, which have no handle.
+- **What fits the existing sweeper pattern** (a scheduled `pending-buy-sweep`, shaped like `ub-withdraw-sweep`):
+  `listPendingPurchases()` with no owner (the operator view) → for each HANDLE-bearing pending, GET its
+  `retrieve` URL under a timeout:
+  200 → `resolvePendingPurchase("confirmed")` with the seller's payment object as evidence;
+  202 → leave it; 404 / 5xx / timeout → leave it and FLAG — never infer not-charged from a seller error.
+- ⭐ **So an automatic resolver can only CONFIRM, never REVERSE.** A seller that has not served is not evidence
+  that no money moved. "not-charged" credits budget back — the one direction that widens a cap — and needs
+  POSITIVE evidence of non-settlement, which no retrieve read provides.
+- **What it could NOT resolve:** every settle-timeout (no handle, and the pending record does not yet carry
+  the signed authorization's nonce / validBefore — payX402's timeout body does not return them), and any
+  handle whose seller never answers 200. Those need either (a) payX402 returning the authorization nonce +
+  validBefore and a verified Gateway read of that nonce's state (NOT known to exist — unverified), or
+  (b) the clean-ledger reconciliation below attributing the pool balance delta.
+- **Expiry — never INTO a credit, never silently.** An unresolved pending must not auto-expire to not-charged.
+  Once the authorization can no longer settle (validBefore passed; QuickNode's batched `maxTimeoutSeconds`
+  is 604900 ≈ 7 days), it may move to a TERMINAL state `unresolved-assumed-charged`: the charge STANDS
+  (over-count, the safe direction), it leaves the user's "awaiting settlement" notice (after change 2 it is
+  operator money and no longer touches the user's limit), and it stays in an operator-facing list until the
+  reconciliation accounts for it. It must stay visible to the operator until then.
+
+## 🎚️ RECOMMENDED CAP VALUES (not set — setting them is the deploy prerequisite)
+Inputs: pool 4.8032 USDC (measured); QuickNode 0.0001 USDC/buy on Arc testnet (measured from its 402);
+`DATA_PURCHASE_USDC` unset in prod ⇒ 0.01 absolute per-buy ceiling; job budgets 0.20–0.40 ⇒ per-purchase
+sub-cap 0.03–0.06, so the binding per-buy maximum is **0.01**; maybeBuyData buys at most once per job.
+- **`DATA_POOL_USER_DAILY_CAP_USDC=0.10`** — protects the pool from ONE user (or one looping session/script).
+  Research jobs cost an abuser nothing net (the escrow returns to their own wallet, gas is sponsored), so
+  this is the only per-user bound. 0.10 = 1,000 buys/day at today's price, 10/day at the 0.01 ceiling.
+  Too low: a real heavy user's buys are refused and their briefs degrade to web-only (outcome `budget`,
+  disclosed) — at 0.01/buy a 0.02 cap would stop them after 2 jobs.
+- **`DATA_POOL_DAILY_CAP_USDC=0.50`** — protects the pool's RUNWAY against aggregate use and a seller price
+  jump. Worst case (every buy at 0.01, cap hit daily) ≈ 9.6 days of 4.80; at today's price, 5,000 buys/day
+  against 3 ever measured. Ratio 5:1 ⇒ five users can max out before everyone is cut off.
+  Too low: once hit, EVERY user's research degrades to web-only until the UTC day rolls over.
+- ⚠️ Judgement, not measurement: there is no usage history to size from (3 purchases ever). The global cap
+  should be revisited against the pool's top-up cadence, which is manual today.
+
+## 🧾 THE CLEAN POOL LEDGER — SCOPED, NOT BUILT
+The pool's history cannot be reconciled and is declared so: one 5.0 deposit (2026-07-01), 4.8032 left; spends
+the ledger never saw (the 07-01 standalone proofs, the removed public buyer route, the DD probes). Starting a
+clean ledger from a known balance needs, in order:
+1. **An opening balance at a named block**, firm only after QuickNode's batched `maxTimeoutSeconds: 604900`
+   (~7 days) passes with NO delegate signing — an authorization signed before the snapshot can still settle
+   after it. (Or record every outstanding authorization.) Candidate: 4.8032 @ 63672854.
+2. **One spender.** `scripts/dd/probe-settlement-batch.mjs` and `probe-dd-purchase.mjs` sign as the delegate
+   and never write `data-budget` — they must ledger, or get their own payer key so `payX402` is the pool's
+   only spender.
+3. **Top-ups as credits.** Deposits into the pool are manual and leave no ledger row.
+4. **Pending resolved** — change 1 records pendings; a resolver must drive them to confirmed / not-charged.
+5. **The check:** opening + credits − confirmed − pending = `availableBalance` + API `pendingBatch`, joined on
+   settlement ids; could run as a watch like `strong-read-watch`.

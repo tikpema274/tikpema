@@ -40,15 +40,23 @@ export const AGENTS = [
   {
     id: AGENT.RESEARCHER,
     label: "Researcher",
-    movesFunds: true, // buys data with your USDC — payX402 → EIP-3009, _research.mjs:301
+    // ⭐ TRUE, BUT FOR THE ESCROW — NOT THE DATA. Each research job's budget moves from the user's
+    // agent SCA into an ERC-8183 escrow (job-run-background.mjs: createJob → fund). The data it buys
+    // is NOT the user's money: payX402 pays from the shared delegate EOA's Gateway balance, which the
+    // operator funded (PROGRESS.md "depositFor funding technique"). This line used to say "buys data
+    // with your USDC", which was false in the direction of "your money".
+    movesFunds: true,
     // Written for the user, not for us — this is the card copy.
     description:
       "Reads your question, retrieves real sources, and writes a cited brief. It may buy data " +
-      "mid-research (paid APIs, on-chain reads) within its per-job allowance — that spend is " +
-      "capped and every purchase is recorded below.",
-    // WAS: "Buys data during research. Cannot move your funds." — the second sentence was FALSE.
-    // It spends the user's USDC. Say so first; bound it second; keep the distinction that does hold.
-    spends: "Spends your USDC to buy data. Capped per job and per day — it cannot send, swap, or bridge.",
+      "mid-research (paid APIs, on-chain reads). Tikpema pays for that data from its own balance, " +
+      "not your wallet, and every purchase is capped and recorded below.",
+    // WAS (1): "Buys data during research. Cannot move your funds." — the second sentence was FALSE
+    // (the escrow moves the user's USDC).
+    // WAS (2): "Spends your USDC to buy data." — ALSO false: the data is operator-paid, bounded by the
+    // operator-pool caps (_arc.mjs poolUserDailyCapUsdc / poolDailyCapUsdc), not the user's limit.
+    // Pinned verbatim by verify-data-pool-budget §8.
+    spends: "Holds each research job's budget in escrow from your agent wallet. Data it buys is paid by Tikpema, not from your USDC — capped per user and per day. It cannot send, swap, or bridge.",
   },
   {
     id: AGENT.ANALYST_B,

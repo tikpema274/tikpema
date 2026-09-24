@@ -22,7 +22,7 @@
 // simulates a store with no CAS and shows the money actually going missing.
 //
 //   node --env-file=.env scripts/verify-ledger-concurrency.mjs
-import { recordAgentSpend, recordSpend, auditLog, daySpend, agentBreakdown } from "../netlify/functions/_budget.mjs";
+import { recordAgentSpend, recordSpend, auditLog, daySpend, agentBreakdown, poolUserSpend } from "../netlify/functions/_budget.mjs";
 import { AGENT } from "../netlify/functions/_agents.mjs";
 
 const OWNER = "0xbafec950627579cf786acf875e6e216995e995a3";
@@ -135,8 +135,13 @@ console.log("\nAGENT ATTRIBUTION — the Agents page's data shape");
   check("researcher: 3 actions, 0.6 USDC", researcher?.actions === 3 && researcher?.spentUsdc === 0.6, JSON.stringify(researcher));
   check("executor: 2 actions, 2 USDC", executor?.actions === 2 && executor?.spentUsdc === 2, JSON.stringify(executor));
 
+  // ⭐ CHANGED 2026-09-24: data buys are paid from the OPERATOR POOL, not the user's wallet, so they
+  // no longer count against the user's day ceiling (which caps the user's OWN send/swap/bridge).
+  // It used to be 2.6 here — the user's limit shrank by 0.6 of money they did not spend.
   const day = await daySpend({ owner: OWNER, store });
-  check("the day CEILING stays OWNER-keyed (one budget across all agents)", day === 2.6, `${day}`);
+  check("the day CEILING is the user's own spend only — the executor's 2, not the pool-paid 0.6", day === 2, `${day}`);
+  const pool = await poolUserSpend({ owner: OWNER, store });
+  check("the researcher's 0.6 is counted against the operator pool instead, under concurrency", pool === 0.6, `${pool}`);
 }
 
 console.log("\nOWNER SCOPING — one user's audit is not another's");

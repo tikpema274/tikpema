@@ -16,9 +16,15 @@ import {
   recordBlocked,
   jobSpend,
   daySpend,
+  poolUserSpend,
   auditLog,
   budgetConfig,
 } from "./_budget.mjs";
+
+// ⭐ The operator-pool caps FAIL CLOSED when unset (_arc.mjs). This suite exercises the other caps, so
+// it sets them explicitly; §4 sets the per-user pool cap it tests.
+process.env.DATA_POOL_USER_DAILY_CAP_USDC ??= "2";
+process.env.DATA_POOL_DAILY_CAP_USDC ??= "100";
 
 // Fresh in-memory store per test → full isolation. JSON round-trip mimics the
 // Blobs store's serialization.
@@ -129,38 +135,27 @@ async function main() {
     check("job-3 total is 0.10 after the two allowed buys", (await jobSpend("job-3", { store })) === 0.1);
   }
 
-  // ── 4. Blocks a purchase that would exceed the per-period ceiling ───────────
-  //     Big job so per-purchase/allowance are generous; the DAY ceiling (across all
-  //     jobs) is the binding constraint. Two different jobs share it.
-  //
-  //     Amounts are DERIVED from the live PERIOD_CEILING_USDC, never hardcoded. This
-  //     test used to assume the 2.00 code default and silently went stale the moment the
-  //     deployed ceiling moved to 60 — two buys of 1.5 no longer exceeded it, so the
-  //     "blocked" assertions failed against perfectly correct code. Deriving the amounts
-  //     means the test tracks whatever the ceiling is, now and after the next change.
-  console.log("\n[4] block per-period ceiling (across jobs)");
+  // ── 4. Blocks a purchase that would exceed the per-user POOL cap ──────────
+  //     ⭐ CHANGED 2026-09-24. This used to test the user's PERIOD_CEILING_USDC. Data buys are paid
+  //     from the OPERATOR POOL, not the user's wallet, so they are bounded by the per-user pool cap
+  //     (DATA_POOL_USER_DAILY_CAP_USDC) and never touch the user's day counter. Two different jobs
+  //     share the pool cap. Amounts are DERIVED from the cap, never hardcoded.
+  console.log("\n[4] block per-user pool cap (across jobs)");
   {
     const store = memStore();
-    const CEIL = budgetConfig().PERIOD_CEILING_USDC;
-
-    // Each buy is 60% of the ceiling: one fits, two cannot (120% > 100%).
-    const buy = round6(CEIL * 0.6);
-    // Pick a job price large enough that the per-purchase sub-cap (price × 0.30 × 0.50 =
-    // price × 0.15) and the job allowance never bind — so the DAY ceiling is the only
-    // constraint under test. price × 0.15 ≥ buy  ⇒  price ≥ buy / 0.15. Use 10×CEIL, which
-    // clears that with margin for any sane pct config.
-    const price = round6(CEIL * 10);
+    const CAP = Number(process.env.DATA_POOL_USER_DAILY_CAP_USDC);
+    const buy = round6(CAP * 0.6);          // one fits, two cannot (120% > 100%)
+    const price = round6(CAP * 10);         // per-purchase / job allowance never bind
 
     const a = await canSpend({ jobId: "jobA", jobPriceUsdc: price, amountUsdc: buy, store, at: AT });
-    check(`jobA ${buy} allowed (ceiling ${CEIL})`, a.allowed === true, JSON.stringify(a));
+    check(`jobA ${buy} allowed (pool cap ${CAP})`, a.allowed === true, JSON.stringify(a));
     await recordSpend({ jobId: "jobA", jobPriceUsdc: price, amountUsdc: buy, source: "test", justification: "big1", store, at: AT });
 
-    // jobB: same amount passes the per-job caps, but day total 2×buy = 120% of the
-    // ceiling → blocked by the period ceiling.
     const b = await canSpend({ jobId: "jobB", jobPriceUsdc: price, amountUsdc: buy, store, at: AT });
-    check(`jobB ${buy} blocked by daily ceiling (${buy}+${buy} > ${CEIL})`, b.allowed === false, JSON.stringify(b));
-    check("reason cites period ceiling", /period ceiling/.test(b.reason || ""), b.reason);
-    check(`day total is ${buy} (blocked buy not recorded)`, (await daySpend({ date: AT.slice(0, 10), store })) === buy);
+    check(`jobB ${buy} blocked by the per-user pool cap (${buy}+${buy} > ${CAP})`, b.allowed === false, JSON.stringify(b));
+    check("reason cites the per-user pool cap", /data pool per-user daily cap/.test(b.reason || ""), b.reason);
+    check(`pool total is ${buy} (blocked buy not recorded)`, (await poolUserSpend({ at: AT, store })) === buy);
+    check("the user's own day counter is untouched", (await daySpend({ date: AT.slice(0, 10), store })) === 0);
   }
 
   // ── 5. Audit log records both allowed and blocked attempts ──────────────────
@@ -198,7 +193,8 @@ async function main() {
     check("recordSpend returns running job total 0.05", r2.jobSpentUsdc === 0.05, JSON.stringify(r2));
     check("recordSpend returns allowance 0.105", r2.allowanceUsdc === 0.105, JSON.stringify(r2));
     check("jobSpend reads back 0.05", (await jobSpend("job-6", { store })) === 0.05);
-    check("daySpend reads back 0.05", (await daySpend({ date: AT.slice(0, 10), store })) === 0.05);
+    check("poolUserSpend reads back 0.05 (data buys draw on the operator pool)", (await poolUserSpend({ at: AT, store })) === 0.05);
+    check("daySpend stays 0 (the user's own limit is not charged)", (await daySpend({ date: AT.slice(0, 10), store })) === 0);
     check("first recordSpend saw running total 0.02", r1.jobSpentUsdc === 0.02, JSON.stringify(r1));
   }
 

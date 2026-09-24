@@ -311,7 +311,8 @@ export default function Dashboard({ wallet: w }: { wallet: UnifiedWallet }) {
           {/* The AGENTS ROSTER (#/agents, nav-less). Leads with the trust distinction, because
               that is the thing worth knowing — but states NO COUNT.
               This card used to end "Only one can move your money." It was false (three of the
-              four do: the Researcher buys data with your USDC, plus the Executor and the Vault)
+              four do: the Researcher escrows each job's budget from your wallet — its data buys are
+              Tikpema-paid — plus the Executor and the Vault)
               and it was false in the reassuring direction. The roster's own headline counts its
               cards, but this card never fetches the roster — it has nothing to count, so it
               must not imply a number. The roster page itself does the counting. */}
