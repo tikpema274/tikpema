@@ -27194,3 +27194,35 @@ The parent-block anchor's one dependency. Read-only, against xylo-usdc (`preview
   code must NEVER silently substitute a `latest` read. Pin the anchor by `blockHash` (EIP-1898) rather than number,
   and read it on BOTH endpoints (the DD engine's quorum pattern) so one provider serving latest silently shows up
   as a disagreement.
+
+---
+
+# ✅ EXPIRED ESCROW BACKLOG RECLAIMED — PROVEN ON CHAIN (2026-09-25); the sweeper stays DISARMED
+
+T ran `scripts/escrow-reclaim.mjs --confirm` (built in `c91d22f`) from the dedicated gas wallet
+**"Tikpema escrow reclaim"** `0x0e5f1db5c52901a56a347baf6b50f42436f1d362` (walletId `172a5963-…`, created with
+`npm run create-wallet`, `circle_6900_singleowner_v4`). Verified FROM THE CHAIN against a baseline recorded
+BEFORE the run (block 63921577), never from the CLI's output — 11/11:
+1. **Exactly one `Refunded` event per job: 25 events, 25 distinct jobs, 25 txs**, no duplicates.
+2. **All 25 statuses `Expired`** (claimRefund's status — there is no "Refunded"); **every `budget` field unchanged**
+   (claimRefund transfers job.budget but never zeroes the field).
+3. **Each client received exactly its total**, from the ERC-20 `Transfer` logs only (Arc's native mirror log
+   ignored): `0x95d44b1a…` 45 · `0xfd801d08…` 12 · `0x74b7b561…` 1.65 · `0x5e06bbdf…` 0.40 · `0x7a0eb9c2…` 0.20;
+   nothing to any other address.
+4. **59.25 USDC left the escrow in those 25 txs, no more.**
+5. **Gas: sponsored — MEASURED.** All 25 userOps from the gas wallet carry paymaster
+   **`0x03df76c8…103b`** (NOT `0x7ceA…0a25`, which sponsors our older agent SCAs — the v4 wallet type uses a
+   different paymaster and factory `0xfa89dd20…6140`); 0 failed ops; the **first call DEPLOYED the wallet**
+   (`AccountDeployed` block 63925428, sponsored in the same tx); paymaster paid 0.328 USDC gas (≈0.013/claim);
+   the wallet's native balance **0 → 0**. ⇒ a zero-balance `circle_6900_singleowner_v4` wallet's first deploying
+   call IS sponsored by Gas Station on Arc testnet (previously unmeasured).
+6. **No expired-but-funded jobs remain:** a fresh sweep of all our records — 0 reclaimable, 360 settled, 0 unreadable;
+   escrow fees still 0/0.
+
+**Recipients:** 24 of 25 refunds went to users' own LOGIN wallets (June–July jobs signed client-side); `0x95d44b1a…`
+(45 USDC) is a Circle modular passkey wallet with 40 job-runs, not tied to a named person (Tikpema keeps no
+accounts) — T recognised it before confirming. One (0.2) went to the agent SCA of `0xbdefb566…`.
+
+**The sweeper stays DISARMED** (`RECLAIM_ARMED = false`). The backlog is closed by T's run; arming for future stalls
+is a separate decision (flip + set `ARMED_FROM_SEC` in one commit). The UI keeps the INTERIM stall copy ("returning
+it from there isn't automatic yet") until the sweeper is armed, live and proven on a real stall.
