@@ -698,6 +698,9 @@ export async function resolvePendingPurchase({ owner, pendingId, outcome, eviden
   await appendAudit(s, reversed
     ? { owner: rec.owner, at: rec.timestamp, dedupeKey: `pending-reversal-${pendingId}`, agent: rec.agent,
         kind: "reversal", reverses: pendingId, source: rec.source, amountUsdc: rec.amountUsdc, allowed: true,
+        // Pending buys are data buys (recordSpend), which are always operator-pool funded: the reversal
+        // must come off the POOL figure in agentBreakdown, never the user's.
+        fundedBy: "operator-pool",
         justification: `data purchase not charged: ${evidence ?? "resolved"}`, observedAt: isoTs(at) }
     : { owner: rec.owner, at: rec.timestamp, dedupeKey: `pending-resolution-${pendingId}`, agent: rec.agent,
         kind: "resolution", resolves: pendingId,
@@ -871,7 +874,11 @@ export async function agentBreakdown({ owner, date, store } = {}) {
   const by = new Map();
   for (const e of entries) {
     const id = normalizeAgent(e.agent);
-    const cur = by.get(id) ?? { agent: id, spentUsdc: 0, actions: 0, blocked: 0, reversals: 0 };
+    const cur = by.get(id) ?? { agent: id, spentUsdc: 0, poolSpentUsdc: 0, actions: 0, blocked: 0, reversals: 0 };
+    // ⭐ WHO PAID. A row funded by the operator pool (the Researcher's data buys — `fundedBy`, set by
+    // recordSpend) is Tikpema's money, not the user's: it goes to `poolSpentUsdc`, never `spentUsdc`.
+    // A reversal of such a row carries the same tag, so it comes off the pool figure too.
+    const pool = e.fundedBy === "operator-pool";
     if (e.kind === "resolution") {
       // Sweeper bookkeeping, not money — it retires a charge from the queue and says nothing about
       // spending. Skipped FIRST so it can never fall through to the allowed/blocked branches and be
@@ -884,10 +891,12 @@ export async function agentBreakdown({ owner, date, store } = {}) {
       // count; carrying a negative amountUsdc instead (the rejected alternative) would have done
       // BOTH: inflate actions AND make the trail read as a negative "spend". Kept a positive
       // amount + an explicit kind so the record stays legible to a human.
-      cur.spentUsdc = round6(cur.spentUsdc - Number(e.amountUsdc || 0));
+      if (pool) cur.poolSpentUsdc = round6(cur.poolSpentUsdc - Number(e.amountUsdc || 0));
+      else cur.spentUsdc = round6(cur.spentUsdc - Number(e.amountUsdc || 0));
       cur.reversals += 1;
     } else if (e.allowed) {
-      cur.spentUsdc = round6(cur.spentUsdc + Number(e.amountUsdc || 0));
+      if (pool) cur.poolSpentUsdc = round6(cur.poolSpentUsdc + Number(e.amountUsdc || 0));
+      else cur.spentUsdc = round6(cur.spentUsdc + Number(e.amountUsdc || 0));
       cur.actions += 1;
     } else {
       cur.blocked += 1;

@@ -132,7 +132,9 @@ console.log("\nAGENT ATTRIBUTION — the Agents page's data shape");
   const executor = rows.find((r) => r.agent === "executor");
 
   check("breakdown splits spend BY AGENT, not just by owner", rows.length === 2, JSON.stringify(rows));
-  check("researcher: 3 actions, 0.6 USDC", researcher?.actions === 3 && researcher?.spentUsdc === 0.6, JSON.stringify(researcher));
+  // ⭐ CHANGED 2026-09-25: the Researcher's data buys are Tikpema-paid (operator pool) — reported as
+  // poolSpentUsdc, never folded into the user's spentUsdc. Under concurrency the split must still hold.
+  check("researcher: 3 actions, 0 of the user's USDC + 0.6 Tikpema-paid", researcher?.actions === 3 && researcher?.spentUsdc === 0 && researcher?.poolSpentUsdc === 0.6, JSON.stringify(researcher));
   check("executor: 2 actions, 2 USDC", executor?.actions === 2 && executor?.spentUsdc === 2, JSON.stringify(executor));
 
   // ⭐ CHANGED 2026-09-24: data buys are paid from the OPERATOR POOL, not the user's wallet, so they

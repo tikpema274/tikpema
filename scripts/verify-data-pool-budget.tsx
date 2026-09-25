@@ -202,6 +202,26 @@ section("§8 THE COPY NO LONGER SAYS THE USER PAYS");
   }
 }
 
+// ── §9 ─────────────────────────────────────────────────────────────────────────────────────
+section("§9 agentBreakdown SPLITS the user's spend from Tikpema-paid data");
+{
+  setCaps("1", "5");
+  const s = mem();
+  await attempt("§9 pool buy", () => spend(s, A, 0.0001, "job-9"));
+  await attempt("§9 user spend", () => budget.recordAgentSpend({ owner: A, amountUsdc: 1, source: "swap_tokens", justification: "t", store: s, agent: AGENT.EXECUTOR }));
+  const rows: any[] = (await attempt("§9 breakdown", () => budget.agentBreakdown({ owner: A, store: s }))) ?? [];
+  const R = rows.find((r) => r.agent === "researcher"), E = rows.find((r) => r.agent === "executor");
+  check("⭐ the Researcher's USER spend excludes the pool buy", R?.spentUsdc === 0, JSON.stringify(R));
+  check("⭐ …and the pool buy is reported separately as poolSpentUsdc", R?.poolSpentUsdc === 0.0001);
+  check("…still counted as an action (activity, not money)", R?.actions === 1);
+  check("the Executor's own spend is unchanged", E?.spentUsdc === 1 && (E?.poolSpentUsdc ?? 0) === 0, JSON.stringify(E));
+  // A pending buy later resolved not-charged must come off the POOL figure, not the user's.
+  const r = await attempt("§9 pending", () => spend(s, A, 0.0002, "job-9b", { confirmation: "pending", pending: { reason: "settle-timeout", handle: null } }));
+  await attempt("§9 resolve", () => budget.resolvePendingPurchase({ owner: A, pendingId: r?.pendingId, outcome: "not-charged", store: s }));
+  const R2 = ((await attempt("§9 breakdown 2", () => budget.agentBreakdown({ owner: A, store: s }))) ?? []).find((x: any) => x.agent === "researcher");
+  check("⭐ a not-charged reversal comes off the POOL figure, never the user's", R2?.poolSpentUsdc === 0.0001 && R2?.spentUsdc === 0, JSON.stringify(R2));
+}
+
 setCaps(undefined, undefined);
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

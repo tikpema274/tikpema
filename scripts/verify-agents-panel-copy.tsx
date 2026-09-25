@@ -151,6 +151,24 @@ check("⭐⭐ the pause flag is read with STRONG consistency",
 check("⭐ …and the roster says the stop is available at any time, not just while watching",
   /at any time/i.test(rendered));
 
+section("5 — ⭐ THE CARD SPLITS THE USER'S SPEND FROM TIKPEMA-PAID DATA");
+// The Researcher's data buys are paid from Tikpema's pool, and its card says so. Its "spent today" used to
+// sum those buys as if they were the user's money. The job escrow is never in the audit, so EXCLUDING the
+// pool rows would make the card read 0.0000 forever while it bought data — hiding real activity. SPLIT.
+const cardOf = (over: any) => renderToStaticMarkup(
+  <RosterCard agent={{ id: "researcher", label: "Researcher", description: "x", spends: "x", movesFunds: true,
+    paused: false, pausedByAll: false, spentTodayUsdc: 0, actionsToday: 1, blockedToday: 0, ...over } as any}
+    busy={false} open={false} onToggle={() => {}} onExpand={() => {}} />,
+).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+const withPool = cardOf({ spentTodayUsdc: 0, poolSpentTodayUsdc: 0.0001 });
+check("⭐ the user's own spend is labelled as theirs", /0\.0000 USDC of yours/.test(withPool), withPool.slice(0, 200));
+check("⭐⭐ Tikpema-paid data is shown SEPARATELY, and says who paid", /0\.0001 USDC of data, paid by Tikpema/.test(withPool));
+check("…and the pool figure is NOT folded into the user's figure", !/0\.0001 USDC of yours/.test(withPool));
+const noPool = cardOf({ spentTodayUsdc: 1.5, poolSpentTodayUsdc: 0 });
+check("no Tikpema-paid line when the pool drew nothing", !/paid by Tikpema/.test(noPool) && /1\.50 USDC of yours/.test(noPool), noPool.slice(0, 160));
+const unreadable = cardOf({ spentTodayUsdc: null, poolSpentTodayUsdc: null });
+check("an unreadable breakdown renders as unknown, never as a zero", !/0\.0000 USDC/.test(unreadable) && /—/.test(unreadable), unreadable.slice(0, 160));
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

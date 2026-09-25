@@ -160,6 +160,33 @@ check("⭐ it asks for a FACTUAL, SOURCEABLE question rather than promising to a
 check("🚨 …and does not promise an answer to any question at all",
   !/answers? (any|every) question/i.test(rendered));
 
+// ═══ ⭐ A HOLD, NOT A CHARGE — the job budget goes into escrow and comes back ═══════════════════════
+// MEASURED 2026-09-25 on job #186705: fund → … → complete, then an INBOUND 0.2 USDC from the escrow
+// (0x0747ee…) back to the same agent wallet (client = provider = the user's own SCA). "Price to research
+// this" read as a charge; the user pays nothing for the research. ⚠️ "when the job settles" — not
+// unconditionally: a job that stalls after funding has NO automatic reclaim today (no claimRefund path).
+{
+  const holdMod: any = await import("../src/components/JobBudgetHold").catch(() => ({}));
+  const Hold = holdMod.JobBudgetHold;
+  const t = (subject: string) => typeof Hold === "function"
+    ? renderToStaticMarkup(<Hold budgetUsdc={0.2} subject={subject} />).replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ") : "";
+  const r = t("research"), a = t("action");
+  check("JobBudgetHold is exported (one component for both panels)", typeof Hold === "function");
+  check("⭐⭐ it says HELD, not charged", /Held, not charged/.test(r), r.slice(0, 160));
+  check("…with the amount", /0\.2 USDC/.test(r));
+  check("⭐ …where it goes and that it comes back — when the job settles", /into an on-chain escrow for this job/.test(r) && /comes back to your agent wallet when the job settles/.test(r));
+  check("⭐ …whether it passes or is rejected", /whether it passes or is rejected/.test(r));
+  check("⭐ …and who pays for the research itself", /Tikpema pays for the research itself, including any data it buys/.test(r));
+  check("the Plan variant names an action's research", /research for this action/.test(a), a.slice(0, 120));
+  for (const bad of [/\bPrice\b/, /fee is for/i, /\bcharged for\b/i, /\bcosts? you\b/i]) check(`never says ${bad}`, !bad.test(r) && !bad.test(a));
+  const src = (f: string) => readFileSync(new URL(`../src/components/${f}`, import.meta.url), "utf8");
+  check("⭐ 'Price to research' is gone from BOTH panels (source)", !/Price to research/.test(src("ResearchPanel.tsx")) && !/Price to research/.test(src("PlanPanel.tsx")));
+  check("⭐ both panels render the shared hold component (source)", /<JobBudgetHold/.test(src("ResearchPanel.tsx")) && /<JobBudgetHold/.test(src("PlanPanel.tsx")));
+  check("Plan's 'This fee is for the research only' is gone (source)", !/This fee is for the research only/.test(src("PlanPanel.tsx")));
+  check("⭐ the run buttons say the budget is HELD, not a price (source)",
+    /Run research · holds \{quote\.budgetUsdc\} USDC/.test(src("ResearchPanel.tsx")) && /Research this action · holds \$\{quote\.budgetUsdc\} USDC/.test(src("PlanPanel.tsx")));
+}
+
 console.log("\n╔══════════════════════════════════════════════════════════════════════");
 console.log(`║  ${fail === 0 ? "✅ ALL GREEN" : "❌ FAILURES"}   pass ${pass} / fail ${fail}`);
 console.log("╚══════════════════════════════════════════════════════════════════════");

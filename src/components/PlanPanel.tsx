@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import SignInPrompt from "./SignInPrompt";
+import { JobBudgetHold } from "./JobBudgetHold";
 import type { useWallet } from "../wallet/useWallet";
 import { JobTimeline, isTerminal, receiptInFlight } from "./jobTimeline";
 import type { TrackedJob, BridgeQuoteState } from "./jobTimeline";
@@ -223,15 +224,11 @@ export default function PlanPanel({ wallet }: { wallet: UnifiedWallet }) {
           className="status"
           style={{ marginTop: 14, padding: "16px 18px", background: "var(--field)", border: "1px solid var(--line)", borderRadius: 12 }}
         >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={{ color: "var(--muted)", fontSize: "0.8rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Price to research this action
-            </span>
-            <span style={{ fontSize: "1.2rem", fontWeight: 600, color: "var(--paper)" }}>{quote.budgetUsdc} USDC</span>
-          </div>
+          {/* A HOLD, NOT A CHARGE — the same escrow as #/research (JobBudgetHold). */}
+          <JobBudgetHold budgetUsdc={quote.budgetUsdc} subject="action" />
           <div style={{ marginTop: 6, color: "var(--paper-dim)" }}>
-            Your agent researches the action's economics from real sources. This fee is for the
-            research only — any action it proposes needs your separate approval.
+            Your agent researches the action's economics from real sources. Any action it proposes
+            needs your separate approval.
           </div>
           <div className="row" style={{ marginTop: 14 }}>
             <button
@@ -261,7 +258,7 @@ export default function PlanPanel({ wallet }: { wallet: UnifiedWallet }) {
                 })
               }
             >
-              {busy ? runStatus || "Working…" : `Research this action · ${quote.budgetUsdc} USDC`}
+              {busy ? runStatus || "Working…" : `Research this action · holds ${quote.budgetUsdc} USDC`}
             </button>
           </div>
         </div>

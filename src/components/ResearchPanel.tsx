@@ -1,3 +1,4 @@
+import { JobBudgetHold } from "./JobBudgetHold";
 import { useState, useEffect, useRef } from "react";
 import SignInPrompt from "./SignInPrompt";
 import type { useWallet } from "../wallet/useWallet";
@@ -208,14 +209,8 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
             borderRadius: 12,
           }}
         >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={{ color: "var(--muted)", fontSize: "0.8rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Price to research this
-            </span>
-            <span style={{ fontSize: "1.2rem", fontWeight: 600, color: "var(--paper)" }}>
-              {quote.budgetUsdc} USDC
-            </span>
-          </div>
+          {/* A HOLD, NOT A CHARGE — the budget goes into escrow and comes back (JobBudgetHold). */}
+          <JobBudgetHold budgetUsdc={quote.budgetUsdc} subject="research" />
           {/* Neutral, question-agnostic line — accurate for any accepted question
               (factual lookup, analytical synthesis, on-chain, market). Replaces the
               per-question quote.reasoning, which read price-specific for price
@@ -278,7 +273,7 @@ export default function ResearchPanel({ wallet }: { wallet: UnifiedWallet }) {
                 })
               }
             >
-              Run research · {quote.budgetUsdc} USDC
+              Run research · holds {quote.budgetUsdc} USDC
             </button>
             {/* ⛔ WAS "Continue with your passkey above first." — there is no passkey control
                 above, or anywhere on this page: it was the only occurrence of the word in the

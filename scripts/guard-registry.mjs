@@ -36,6 +36,7 @@
 export const COMPONENTS = {
   // ── covered ────────────────────────────────────────────────────────────────────────────────
   PlanPanel:            { suite: "verify-plan-card-copy.tsx" },
+  JobBudgetHold:        { suite: "verify-research-panel-copy.tsx" }, // the escrow HOLD wording on #/research and #/plan
   UnifiedBalancePanel:  { suite: "verify-unified-balance-copy.tsx" },
   YourMoney:            { suite: "verify-unified-balance-copy.tsx" },
   UbExitStatus:         { suite: "verify-ub-exit-view.tsx" },

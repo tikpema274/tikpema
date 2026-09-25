@@ -36,6 +36,8 @@ type Agent = {
   paused: boolean | null; // null = the switch could not be read — "unknown", never "running"
   pausedByAll: boolean;
   spentTodayUsdc: number;
+  // Tikpema-paid today (the operator data pool) — separate from the user's own spend; null when unreadable.
+  poolSpentTodayUsdc?: number | null;
   actionsToday: number;
   blockedToday: number;
 };
@@ -396,7 +398,13 @@ export function RosterCard({
 
       {/* 4. TODAY */}
       <div className="qd" style={{ color: "var(--paper)" }}>
-        <span className="mono">{money(a.spentTodayUsdc)}</span> USDC ·{" "}
+        {/* ⭐ WHOSE MONEY. `spentTodayUsdc` is the user's own; Tikpema-paid data buys (the Researcher's, from
+            the operator pool) are a SEPARATE clause, shown only when there were any. Summing them — the old
+            line — told the user their money bought data on a card that says Tikpema pays for it. */}
+        <span className="mono">{money(a.spentTodayUsdc)}</span> USDC of yours ·{" "}
+        {typeof a.poolSpentTodayUsdc === "number" && a.poolSpentTodayUsdc > 0 && (
+          <><span className="mono">{money(a.poolSpentTodayUsdc)}</span> USDC of data, paid by Tikpema ·{" "}</>
+        )}
         {a.actionsToday} action{a.actionsToday === 1 ? "" : "s"}
         {a.blockedToday > 0 && (
           <> · <span style={{ color: "var(--danger)" }}>{a.blockedToday} refused</span></>

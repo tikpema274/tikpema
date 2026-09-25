@@ -94,8 +94,8 @@ export async function handler(event) {
     // ⛔ NULL, NOT ZERO, WHEN THE BREAKDOWN COULD NOT BE READ.
     const stats = byAgent.get(a.id)
       ?? (breakdownUnreadable
-        ? { spentUsdc: null, actions: null, blocked: null }
-        : { spentUsdc: 0, actions: 0, blocked: 0 });
+        ? { spentUsdc: null, poolSpentUsdc: null, actions: null, blocked: null }
+        : { spentUsdc: 0, poolSpentUsdc: 0, actions: 0, blocked: 0 });
     return {
       id: a.id,
       label: a.label,
@@ -114,7 +114,8 @@ export async function handler(event) {
       // "running". (Enforcement fails CLOSED; this VIEW is merely honest about not knowing.)
       paused: states[ALL_AGENTS] === true ? true : states[a.id],
       pausedByAll: states[ALL_AGENTS] === true,
-      spentTodayUsdc: stats.spentUsdc,
+      spentTodayUsdc: stats.spentUsdc,        // the USER's money this agent spent today
+      poolSpentTodayUsdc: stats.poolSpentUsdc, // Tikpema-paid (operator pool) — separate, never summed in; null when unreadable, never ?? 0
       actionsToday: stats.actions,
       blockedToday: stats.blocked,
     };
