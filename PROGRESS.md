@@ -27241,3 +27241,203 @@ it from there isn't automatic yet") until the sweeper is armed, live and proven 
   (133 B) but the v4 factory `0xfa89dd20…` has NO CODE** — a mainnet v4 wallet must deploy via another factory, or
   Circle issues a different version there. `~/Arc-now2/mainnet-probe/probe.mjs` (outside the repo) reads paymaster,
   factory and scaCore from the run and asserts none; its header now states these predictions.
+
+---
+
+# 🧭 VAULT MANDATE — AUTONOMOUS EXIT IN v1; PIECES 1–2 + THE 5th RULE BUILT (UNCOMMITTED, NOT DEPLOYED) (2026-09-25)
+
+**Reversal (T, 2026-09-25):** autonomous WITHDRAWAL is IN v1, bounded by a per-rule `pause`|`exit` the user sets at
+mandate time. The governing rule: **EXIT ON A FINDING, NEVER ON A FAILURE TO READ.** OUTAGE/INCONCLUSIVE block
+deposits and pause; they never withdraw. A partial exit is reported as partial. OUT of scope: USDC↔EURC
+rebalancing, price rules, any market view. (Supersedes "Autonomous withdrawal is OUT of v1" above.)
+
+**T confirmed (2026-09-25):** (1) an unreadable rule does NOT veto an exit another rule established — else a vault
+owner disables exit rules by breaking one unrelated read; (2) `redemption-restricted` cannot be set to exit in v1;
+(3) an exit on a fee rise pays the raised fee, said in plain words.
+
+## Build order (money path marked)
+1. ✅ decision core `shared/vault-mandate/decide.mjs` — pure. 2. ✅ observation adapter `observe.mjs` — pure.
+3. mandate record + store + disclosure (the authorization artifact; stores each rule's `onFinding` explicitly).
+4. pre-deposit path — **MONEY (deposit)**, gated by a code constant. 5. exit executor — **MONEY (withdraw)**, its own
+constant. 6. scheduled re-check + UI. Transport for 2 (fetch+sign report, pin anchor by blockHash, read both
+endpoints) lands with 3.
+
+## What is built
+- **`decide.mjs`** — `validateMandateRules` (nothing defaulted; onFinding explicit) + `decideMandateAction`. A finding =
+  `violated` + evidence, outside a whole-check outage. Suite `test:mandatedecide`: red 1/49 → green 50/0, 5 mutations caught.
+- **`observe.mjs`** — two sources judged SEPARATELY: the SIGNED DD report (power rules via `evaluatePolicy`, owner via
+  `report.owner`) and OUR unsigned reads (fees, redemption, payability) counted only when 2 distinct endpoints agree at
+  the anchor blockHash. Suite `test:mandateobserve`: red 2/56 → green 58/0, 9 mutations caught.
+- **The 5th rule `vault-cannot-pay` — PAUSE-ONLY, refused as exit by the VALIDATOR** (`redeem-sim.mjs` + observe).
+  Suite `test:mandatecannotpay`: red 3/50 (all 3 vacuous) → green 55/0, 11 mutations caught incl. every collapse.
+
+## ⛔ WHY `vault-cannot-pay` ONLY PAUSES (recorded in decide.mjs STATE_RULES too)
+When a vault is short, it pays first come, first served. Every mandate on it sees the same signal in the same block,
+so an exit rule would make **Tikpema allocate the shortfall between its own users: the order the scheduler processes
+mandates would decide who gets paid.** That is the platform forming a view — the one thing the mandate forbids. A pause
+takes nobody's cash and stops us depositing into a vault already short.
+
+## The liquidity gap (measured read-only 2026-09-25, both endpoints)
+- XyloVault (verified source): `setStrategy` only stores an address; no code moves funds out except redeem/withdraw,
+  fees, and the owner's `emergencyWithdraw`. `totalAssets` is a storage COUNTER. `maxRedeem` = `balanceOf` ⇒
+  **redemption-restricted can never fire on xylo.**
+- With the vault's cash overridden to ZERO (eth_call state override): `previewRedeem` 1.998, `maxRedeem` full balance,
+  `totalAssets` 8,413,593 — **all three only look like liquidity checks.** Cash 8,413,597.67 vs counter 8,413,593.31.
+- A **simulated redeem** from the holder (our SCA `0x3d7d4c52…`, 1999996 shares) at a pinned block: OK → 1.998 as-is;
+  **reverts `ERC20: transfer amount exceeds balance`** with cash overridden to 0 / 0.5 USDC. ~60–110 ms/call, no gas
+  (the real redeem estimates 93,423 gas). Sound at a pinned block; a pass is "at block B" only.
+- Both endpoints answer a revert as **JSON-RPC code 3 + decodable Error(string) data**, for the shortfall and for
+  `XyloVault: INSUFFICIENT_BALANCE`.
+
+## Revert classification — the rule's whole safety property
+shortfall / USDC refusing → FINDING (pause) · `XyloVault: INSUFFICIENT_BALANCE` (+ZERO_SHARES/ZERO_ADDRESS/
+INSUFFICIENT_ALLOWANCE) → OUTAGE · RPC failure → OUTAGE · unrecognised → INCONCLUSIVE, never a finding.
+- 🚨 **THE VIEM TRAP (viem 2.52.2, probed):** `getContractError` turns ANY `-32603` into a `ContractFunctionRevertedError`,
+  and with no revert data copies the RPC MESSAGE into `.reason`. A `-32603` whose message is the bare string
+  `ERC20: transfer amount exceeds balance` arrives with `.reason` === the shortfall text and NO data. ⇒ **only decoded
+  Error(string) data is evidence; text never is.** Mutation C5 (trust `.reason`) is caught by exactly those fixtures.
+- `Pausable: paused` / `Blacklistable: account is blacklisted` are FiatToken source strings, NOT measured on Arc; if Arc
+  words them differently they fall to INCONCLUSIVE (still a pause).
+- A `-32000` + data shape (Arc does not use it) is not a revert to viem → OUTAGE: a shortfall would read as an outage —
+  the safe direction.
+- Payability reading by position: HOLDING shares → the simulated redeem (the aggregate does not say whether YOU get
+  paid); NO position → cash vs counter, valid ONLY on a vault profiled cash-only (`cashOnly: true`), else INCONCLUSIVE.
+
+## Disclosure — approved VERBATIM, pinned in `shared/vault-mandate/copy.mjs` (do not soften)
+> An exit is not guaranteed. When one of your rules says exit, we ask the vault to pay you. The vault may not be able
+> to: it may be short of USDC, its owner can move the funds out at any time, and USDC itself can refuse a transfer. We
+> check whether the vault could pay you at the moment we check, but that can change in the next block. If a vault
+> can't pay, your mandate pauses and your shares stay where they are. We can't recover them for you.
+
+> If the owner raises the exit fee to its cap and your rule exits, you pay that raised fee to leave.
+
+## Found on the way: the reclaim reports success without reading remaining shares (NOT fixed)
+`vaultWithdraw` (#/vault "Withdraw all (reclaim)" + chat/plan `vault_withdraw`) returns `confirmed` on any positive USDC
+delta and never reads shares-after. **Not producible on xylo** (redeem burns exactly N or reverts). **Never happened:**
+74 agent wallets, 8 with xyUSDC history, 14 redemptions, every one left 0 shares (explorer reconstruction == live
+`balanceOf` 8/8 on both endpoints). Only live route: shares arriving between the read and the redeem. **Fix separately,
+before piece 5** (which calls the same function): add a shares-after witness; "Reclaimed X; Y shares remain".
+
+## Open
+- Transport for piece 2 (not built). Piece 3 stores the five-rule catalogue.
+- `redemption-restricted` stays for vaults whose `maxRedeem` reflects limits; on xylo `vault-cannot-pay` is the one that means something.
+
+## 🧾 PIECE 3 — the mandate RECORD, its store, its disclosure (built 2026-09-25, UNCOMMITTED, NOT DEPLOYED)
+
+- **`shared/vault-mandate/record.mjs`** (pure): `buildMandateRecord`, `renderDisclosure`, `mandateFingerprint`,
+  `verifyMandateRecord`, `acknowledgeMandate`, `amendMandateRules`. **`netlify/functions/_vault-mandate-store.mjs`**:
+  `writeNewMandate`, `readMandate`, `acknowledgeStoredMandate`, `createVaultMandate` (store `vault-mandates`, key
+  `m/<owner>/<id>`, strong reads, store passed in). `copy.mjs` gains the verified/monitored/checked-after paragraphs verbatim.
+- **Nothing defaulted:** a client rule may carry only kind/subject/onFinding/limitBps; ids are the server's; a client
+  `baselineOwner` is refused. The owner-change rule stores the owner from the baseline (signed report, signer verified).
+- **Pause-only refused at WRITE:** the validator runs at build, amend, verify, every store write and every read.
+- **Disclosure BUILT FROM the record:** one line per rule ending "if found: pause." / "if found: exit." with
+  [verified by the signed report] or [monitored by Tikpema]; pause-only rules say so; the three provenance paragraphs;
+  the fee-rise sentence + this vault's fee cap (or "could not be read"); "An exit is not guaranteed … We can't recover
+  them for you." Verify re-renders and refuses a record whose stored disclosure differs from its rules.
+- **Fingerprint = sha256 over rules AND disclosure** (+ id, owner, wallet, vault, baseline). `mayAct` only when status
+  is active AND `ack.fingerprint` equals the fingerprint recomputed now ⇒ a changed rule — even rewritten with a
+  consistent disclosure and fingerprint — leaves the ack STALE and the mandate does not act. A new record is written
+  awaiting acknowledgement; only `acknowledgeStoredMandate` activates it, CAS on the read etag.
+- Suite `test:mandaterecord`: red **1/72** → green **73/0**; 12 mutations → **3 survived** (fingerprint without disclosure,
+  without rules — each masked by the other through verify's re-render; "new record written active" — the test was vacuous,
+  its fixture failed on a fingerprint mismatch). Fixed: 5 direct tests (each half of the fingerprint moved alone; the
+  control record proven otherwise actable) → **78/0**, all 13 mutations caught.
+- `test:literals` refused the first draft (literal chain ids / RPC hosts in the new tests and one comment) → fixture ids
+  (31337, a.example/b.example, the mock chain's own id), the comment reworded; guard clean, 0 controls failed.
+- ⚠️ **No HTTP endpoint.** `createVaultMandate` needs `readBaseline` (the transport). An endpoint without it would be a
+  create path with nothing to record the baseline from.
+
+## 🔌 THE TRANSPORT — its own piece (3b), before piece 4. Why:
+1. **Signing on the money path is a decision, not wiring.** `_vault-report.mjs` deliberately does NOT sign (the service
+   key spent on every deposit for a signature nobody reads). The mandate's OUTAGE rule treats an unsigned report as an
+   outage. Options: sign every pre-deposit check, or sign only the creation baseline and use the same-code unsigned
+   report for checks (then "verified" is true of the baseline, not of each check). T to decide.
+2. **Pinning without touching ddTree:** `analyze()` takes its block from the injected client's `pin()`, so the anchor can
+   be imposed by wrapping the client — no DD-surface edit. The quorum client keeps its own pin state; that wrapper needs
+   its own tests. `verifyAttestation` binds block NUMBER only (blockHash is "pass 2 not built").
+3. **Signer check = an on-chain ERC-1271 read** (`verifyAttestation`), a third network dependency per check; health gate
+   unskippable (as `_vault-report.mjs`).
+4. **Two-endpoint state reads** (fees, position, simulated redeem via `redeemSimulationOutcome`, cash vs counter) pinned by
+   blockHash, feeding `observeMandateCheck`. One read-only live run against xylo proves it.
+
+## 🔌 PIECE 3b — the check TRANSPORT, SIGNED PER CHECK (built 2026-09-25, UNCOMMITTED, NOT DEPLOYED)
+
+**Decision (T):** sign EVERY pre-deposit check. The disclosure says "verified by a signed report — anyone can check
+it"; the report in the receipt of the deposit that actually happened must be verifiable by the user. A baseline
+signature only verifies a decision made weeks earlier.
+
+- **`shared/vault-mandate/anchor.mjs`** — `resolveAnchor` (one below the LOWER head; both endpoints must return the SAME
+  hash) + `pinToAnchor` (wraps the injected client; pin() answers the anchor; never calls the inner pin). **No DD-surface
+  edit** — ddTree untouched.
+- **`shared/vault-mandate/state-reads.mjs`** — one endpoint's reading, EVERY read at the anchor blockHash; all-or-nothing.
+- **`netlify/functions/_vault-mandate-check.mjs`** — `signedCheckReport` (health → analyze at the anchor → sign → PIN
+  the identity → chain guard → verifyAttestation), `runMandateCheck`, `readBaseline` (for createVaultMandate),
+  `viemEndpointReader`, `productionDeps`, `CASH_ONLY_VAULTS` (xylo, with the source reason).
+- `observe.mjs` gains `reportFailure` so the OUTAGE says why (e.g. "signing the report failed: …").
+- Suite `test:mandatetransport`: red **4/48** (vacuous passes, two tightened) → green **52/0**; 13 mutations caught;
+  then +1 red→green for the chain guard below → **53/0**.
+
+**Two gaps found in code we did not edit (DD surface), closed in the transport instead:**
+1. 🚨 `verifyAttestation` reads `registry` and `verifyingContract` FROM THE REPORT and checks agentId/domain only via
+   `expect`. A report naming a registry of its own choosing (whose owner validates anything) would verify. The
+   transport pins registry, verifyingContract, agentId, chainId and domain to `DD_IDENTITY` BEFORE verifying.
+2. 🚨 `verifyAttestation` only calls `client.call`, never `assert`, so the quorum's chain guard never ran for
+   ownerOf / isValidSignature. The transport calls `verifyClient.assert()` first; a wrong chain refuses.
+   (Both matter to ANY consumer of verifyAttestation, including an outside verifier following our docs.)
+
+**Live, read-only (2026-09-25, both endpoints, signing DISABLED, health BYPASSED — labelled in the probe):**
+`scripts/probe-mandate-check.mjs` → anchor 63966235 (hash agreed by both), both readings identical (exit 10/10 bps,
+deposit 0, redemption full, position 1999996, simulated redeem → 1.998 USDC), decision PAUSE/OUTAGE (the expected
+result: no signed report). Wrapper live: inner quorum pinned FIRST to its head 63966269, report came back at the
+anchor 63966267, no refusal. **One check without signing = 30 JSON-RPC calls (15 per endpoint), ~0.93 s** (measured).
+⚠️ NOT run live: the signing + ERC-1271 verification leg (production DD identity; needs the DEPLOYED build's health
+record, so it belongs to the deployed endpoint), and the chain guard on the live verify quorum.
+
+**Block binding — what "number only" leaves open, and the call:**
+- canon/1 signs subject.address + chainId + blockNumber + the facts. Pass 2 would put the block HASH in the signed bytes.
+- Left open without it: the signature attests "our engine said X about block N on chain 5042002", not "block N is the
+  block with hash H". A report built from a provider serving a FABRICATED block N (or a local fork reusing the chain id)
+  still carries a valid signature; a verifier catches it only by re-reading the facts at N, not from the signature.
+  On a chain with reorgs, "block N" could also name two blocks.
+- **Recommendation: the mandate does NOT wait on pass 2.** (a) Arc has deterministic finality (Malachite BFT, final on
+  commit, no reorgs — docs.arc.io/arc/concepts/deterministic-finality), so N names one block forever; (b) our anchor
+  hash is agreed by two endpoints and every state read is BY HASH, so a lying provider fails the anchor; (c) pass 2
+  edits attest.mjs = ddTree rotation + a canon version bump for buyers. **But** the receipt must say the signature binds
+  the block NUMBER and the hash is Tikpema's unsigned record beside it. Reopen trigger (a capability, not a chain name):
+  running mandates on any chain WITHOUT deterministic finality makes pass 2 a precondition.
+
+**Cost — one signing call per check:**
+- Per check: 1 Circle `signMessage` (measured 2026-08-29: 0 USDC, 0 gas, no chain write) + ~36 JSON-RPC calls
+  (30 measured + ownerOf/isValidSignature ×2 endpoints + chain-id guards) + ~1 s of reads (signing latency unmeasured).
+- **8-week weekly schedule: 8 pre-deposit checks + 1 creation baseline = 9 signatures, ~320 RPC calls per mandate.**
+- Marginal money cost as measured: ~0 USDC. Circle's own price for signMessage on this account is NOT measured.
+  Comparator for the flat fee: the DD service's list price is 0.06 USDC per signed report → 9 × 0.06 = **0.54 USDC**
+  of report value per mandate.
+- ⚠️ The count scales with the re-check cadence (piece 6, undecided): a DAILY signed re-check would be 56 + 9 = 65
+  signatures (3.90 USDC at list price). An exit may add one fresh check before redeeming (piece 5 decision).
+- `test:all` after 3b: **154 passed / 1 FAILED** — `gate:registry`: the new `scripts/probe-mandate-check.mjs` was a file
+  nothing invoked. Registered as `npm run probe:mandatecheck` → `gate:registry` 28/0 (re-run alone, not a full re-run).
+
+---
+
+# 🔏 verifyAttestation PINNED — b24064c (was a929b12, amended for the notice date; 2026-09-25, local commit, NOT PUSHED, NOT DEPLOYED)
+
+Built red-first: `verify-attestation.mjs` 59/16 → 75/0; the forged report (erased findings, agentId 851891, fake registry,
+accept-all contract) is a PERMANENT case with a positive control. `test:all` 156/156. DD surface → the deploy rotates ddTree.
+The mandate transport's relax (no verifying-contract pin; passes `deps.identity`) stays with the uncommitted mandate work.
+The docs notice is dated **2026-09-26**: set by amending a929b12 → b24064c (unpushed) at 23:59 CEST 09-25, because no
+deploy could land before midnight — the 23:19 deploy was refused by gate:watch (dirty tree: the untracked mandate files),
+so the fix was not live on 09-25 and the notice must not claim the hole closed before it did.
+
+## Loose ends — recorded, NOT fixed
+1. **`netlify/functions/dd-identity.mjs` holds a SECOND copy of agentId, chainId and registry** (`AGENT_ID`, `CHAIN_ID`,
+   `REGISTRY`, lines ~35–38). The drift class removed from the chain literals: two records of one identity, nothing
+   binding them. It should import from `shared/dd/identity.mjs`, and a guard should fail if they disagree. (dd-identity is
+   NOT on the stamp's DD-surface list, so the fix does not rotate ddTree by itself; its chain id is allowlisted as a record in
+   `verify-chain-literals.mjs`, and the fix removes that entry.)
+2. **`verify-attestation.mjs --live` is broken.** It dynamic-imports `./attest-circle.mjs` and `./client.mjs` from
+   `scripts/dd/`, which no longer exist there. Git dates it: **`70b92c0` (2026-08-15 14:53 +0200)** moved both files into
+   `shared/dd/` and did not update the two dynamic imports (static imports would have failed at load; these only run
+   under `--live`). The live path — real Circle signature + real chain ERC-1271 — has been dead ~41 days. Only the
+   offline path runs in `test:all`, so nothing noticed.
