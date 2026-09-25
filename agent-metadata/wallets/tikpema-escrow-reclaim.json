@@ -1,0 +1,11 @@
+{
+  "name": "Tikpema escrow reclaim",
+  "walletSetId": "c80de252-0fc5-561d-b26a-4c07abeadd7d",
+  "blockchain": "ARC-TESTNET",
+  "accountType": "SCA",
+  "writtenAt": "2026-09-25T11:36:53.405Z",
+  "walletId": "172a5963-a536-54d7-bf3b-4c909db5e668",
+  "walletAddress": "0x0e5f1db5c52901a56a347baf6b50f42436f1d362",
+  "state": "LIVE",
+  "createDate": "2026-09-25T11:36:51Z"
+}
