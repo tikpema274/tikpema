@@ -193,7 +193,8 @@
     "test:discovercursor": "node scripts/verify-discover-cursor.mjs",
     "test:pendingbuy": "npx tsx --experimental-test-module-mocks scripts/verify-pending-purchase.tsx",
     "test:datapool": "npx tsx scripts/verify-data-pool-budget.tsx",
-    "test:plancaps": "npx tsx scripts/verify-plan-capabilities.tsx"
+    "test:plancaps": "npx tsx scripts/verify-plan-capabilities.tsx",
+    "test:escrowreclaim": "node scripts/verify-escrow-reclaim.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "^1.4.1",
@@ -230,6 +231,7 @@
     "test:dca",
     "test:pendingspend",
     "test:pendingbuy",
+    "test:escrowreclaim",
     "test:datapool",
     "test:sweepdisarmed",
     "test:sweepdegraded",

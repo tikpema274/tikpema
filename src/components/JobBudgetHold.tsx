@@ -8,9 +8,11 @@
 // that wallet. "Price" read as a charge; the user pays nothing for the research — Tikpema pays for the
 // model, the sources and any data it buys (the operator data pool).
 //
-// ⚠️ "WHEN THE JOB SETTLES" — NOT "ALWAYS". The escrow expires after 24h, and nothing in the code reclaims
-// an expired escrow today (no claimRefund path). A job that stalls after funding leaves the hold in place.
-// The copy promises only what the code delivers.
+// ⚠️ "WHEN THE JOB SETTLES" — NOT "ALWAYS". The escrow expires after 24h. claimRefund exists (permissionless,
+// full budget to the job's client) and escrow-reclaim-sweep can call it — but it ships DISARMED, so today a
+// stalled job's budget is returned only by T's manual run (scripts/escrow-reclaim.mjs). The INTERIM sentence
+// says exactly that. ⛔ Swap it for "comes back automatically once the job expires" ONLY once the sweeper is
+// armed, live and PROVEN on a real stalled job — not when it is merely built (verify-research-panel-copy).
 //
 // One component for both panels (#/research and #/plan) — the same escrow, so the same words.
 // Pinned by verify-research-panel-copy.
@@ -27,7 +29,8 @@ export function JobBudgetHold({ budgetUsdc, subject }: { budgetUsdc: number; sub
         This moves from your agent wallet into an on-chain escrow for this job, for the{" "}
         {subject === "action" ? "research for this action" : "research"}, and comes back to your agent wallet
         when the job settles, whether it passes or is rejected. Tikpema pays for the research itself,
-        including any data it buys.
+        including any data it buys. If a job stalls, the budget stays in escrow until the job expires 24 hours
+        after it starts; returning it from there isn't automatic yet.
       </div>
     </>
   );

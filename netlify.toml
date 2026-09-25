@@ -615,3 +615,10 @@
 # scripts/verify-plan-path-watch.mjs asserts this ordering against THIS FILE.
 [functions."plan-path-watch"]
   schedule = "*/30 * * * *"
+
+# Research-job ESCROW RECLAIM — SHIPS DISARMED (RECLAIM_ARMED = false in escrow-reclaim-sweep.mjs).
+# Every tick READS the escrow's platform/evaluator fees (admin-set, 0/0 today) and notifies on a change;
+# it records what it WOULD reclaim and moves nothing. Armed, it reclaims only jobs that expired after
+# ARMED_FROM_SEC — the June–July backlog is T's one-time run (scripts/escrow-reclaim.mjs), never a tick's.
+[functions."escrow-reclaim-sweep"]
+  schedule = "0 */6 * * *"

@@ -178,6 +178,13 @@ check("🚨 …and does not promise an answer to any question at all",
   check("⭐ …whether it passes or is rejected", /whether it passes or is rejected/.test(r));
   check("⭐ …and who pays for the research itself", /Tikpema pays for the research itself, including any data it buys/.test(r));
   check("the Plan variant names an action's research", /research for this action/.test(a), a.slice(0, 120));
+  // ⭐ THE STALL CASE — INTERIM WORDING. Nothing reclaims an expired escrow automatically yet (the reclaim
+  // sweeper ships DISARMED; the backlog is T's run). Swap to the automatic wording ONLY once the sweeper is
+  // live and proven — not when it is merely built. This pair of checks is the tripwire for that swap.
+  check("⭐⭐ it says what a STALLED job does today — held until expiry, and the return is not automatic yet",
+    /If a job stalls, the budget stays in escrow until the job expires 24 hours after it starts; returning it from there isn't automatic yet\./.test(r), r.slice(-260));
+  check("⛔ …and does NOT yet claim the return is automatic (that needs the sweeper live AND proven)",
+    !/comes back automatically once the job expires/.test(r) && !/comes back automatically once the job expires/.test(a));
   for (const bad of [/\bPrice\b/, /fee is for/i, /\bcharged for\b/i, /\bcosts? you\b/i]) check(`never says ${bad}`, !bad.test(r) && !bad.test(a));
   const src = (f: string) => readFileSync(new URL(`../src/components/${f}`, import.meta.url), "utf8");
   check("⭐ 'Price to research' is gone from BOTH panels (source)", !/Price to research/.test(src("ResearchPanel.tsx")) && !/Price to research/.test(src("PlanPanel.tsx")));
