@@ -172,7 +172,14 @@ export default function VaultPanel({ wallet: w }: { wallet: UnifiedWallet }) {
       } else if (data?.ok && data?.confirmed && data?.withdrawTx && Number.isFinite(data?.usdcReceived)) {
         // Success ONLY when the server proved it: mined tx + a real on-chain USDC delta. `usdcReceived`
         // is the real balance delta, so no "?" placeholder and no computed 70.772 can appear here.
-        setMsg({ ok: true, text: `Reclaimed — received ${data.usdcReceived} USDC back to your agent wallet.` });
+        // ⚠️ `remainderNote` is null ONLY when the server READ the share balance as zero afterwards;
+        // shares left behind, or a balance it could not read, is said — never implied away.
+        setMsg({
+          ok: true,
+          text:
+            `Reclaimed — received ${data.usdcReceived} USDC back to your agent wallet.` +
+            (data?.remainderNote ? ` ${data.remainderNote}` : ""),
+        });
       } else {
         // Resolved but NOT a proven reclaim with a real amount (e.g. an empty/intercepted 200). Render
         // failure honestly — never a computed or placeholder number. This also kills "received ? USDC".

@@ -515,6 +515,9 @@ export async function handler(event) {
         swap: r.swap, pay: r.pay, tx: r.tx,
         // bridge fire-and-continue payload (undefined for other step types):
         burnHash: r.burnHash, destination: r.destination, feeUsdc: r.feeUsdc, netUsdc: r.netUsdc,
+        // vault_withdraw: shares left behind, or a remainder we could not read (null = read as zero).
+        // The step is labelled "Reclaim your whole position" — its ✓ must not outrun this.
+        remainderNote: r.remainderNote,
       });
 
       // 🚨 A BRIDGE INSIDE A PLAN USED TO LEAVE NO RECORD AT ALL. The receipt write lived

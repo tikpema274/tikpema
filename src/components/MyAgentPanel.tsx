@@ -1072,6 +1072,10 @@ export function AgentSummary({
                 {describeStep(s)}
                 <b>{mark}</b>
                 <span style={{ opacity: 0.7 }}>{note}</span>
+                {/* ⚠️ A reclaim step's ✓ is the USDC that arrived; whether the WHOLE position went is this. */}
+                {r?.ok && r?.remainderNote && (
+                  <div style={{ marginTop: 2, color: "var(--warn)", fontSize: "0.92em" }}>{r.remainderNote}</div>
+                )}
                 {r?.ok && isBridge ? (
                   // Fire-and-continue bridge: Arc burn done, destination mint polls inline.
                   <div style={{ marginTop: 2, opacity: 0.85, fontSize: "0.92em" }}>
@@ -1259,6 +1263,8 @@ export function AgentSummary({
           ✓ Reclaimed <b>{Number(vw.usdcReceived).toFixed(6)} USDC</b> from the vault into your
           agent wallet — measured on-chain, not estimated.
         </div>
+        {/* ⚠️ Shares left behind, or a remainder the server could not read. null ONLY on a read zero. */}
+        {vw.remainderNote && <div style={{ marginTop: 4, color: "var(--warn)" }}>{vw.remainderNote}</div>}
         {vw.withdrawTx && <div style={{ marginTop: 4 }}><TxLink url={vw.withdrawTx} /></div>}
       </div>
     );

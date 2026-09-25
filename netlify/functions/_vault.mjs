@@ -1148,7 +1148,9 @@ export async function vaultDeposit({ walletAddress, vault, amountUsdc }) {
 // `usdcReceived` is the REAL on-chain USDC balance delta of the SCA (after − before), read from the
 // chain — never a shares×price estimate, never an SDK-returned figure. Same balance-delta-as-witness
 // discipline as the swap and deposit receipts. Returns a discriminated result:
-//   { confirmed: true,  usdcReceived, withdrawTx, … }  — mined status:success AND a real +delta read
+//   { confirmed: true,  usdcReceived, withdrawTx, position, sharesRemainingRaw, remainderNote, … }
+//                                                       — mined status:success AND a real +delta read;
+//                                                         `remainderNote` is null ONLY when shares-after READ 0
 //   { confirmed: false, reason, withdrawHash? }        — anything unproven; the caller reports failure
 // It NEVER returns a computed/placeholder amount for an unproven reclaim (that was the 70.772 bug and
 // yesterday's "received ? USDC").
@@ -1222,6 +1224,35 @@ export async function vaultWithdraw({ walletAddress, vault, shares }) {
     return { confirmed: false, withdrawHash: redHash, reason: "reclaim didn't confirm — no USDC was returned; your shares are still in the vault" };
   }
 
+  // WITNESS #3: the SHARE balance AFTER. The USDC delta proves money arrived; it says nothing about
+  // whether the POSITION is gone. Every caller labels this "reclaim your whole position", so a
+  // remainder must be said, not implied away. Not producible on XyloVault (redeem burns exactly
+  // `shares` or reverts), but shares arriving between the caller's balanceOf and this redeem leave
+  // a remainder on any vault. Three outcomes, kept apart: a read 0 → "emptied"; a read > 0 →
+  // "shares-remain"; no read → "unreadable", which is NEVER reported as emptied — the USDC is still
+  // real, so the reclaim stays confirmed, but the note says we cannot tell.
+  // [[absence-must-never-read-as-safe]]
+  let position, sharesRemainingRaw, remainderNote;
+  try {
+    const after = await readShareBalance({ walletAddress: owner, vault });
+    sharesRemainingRaw = after.raw.toString();
+    if (after.raw === 0n) {
+      position = "emptied";
+      remainderNote = null;
+    } else {
+      position = "shares-remain";
+      remainderNote =
+        `${after.formatted} ${vault.shareSymbol ?? "shares"} are still in the vault — this reclaim did not ` +
+        `empty your position. Reclaim again to redeem the rest.`;
+    }
+  } catch {
+    position = "unreadable";
+    sharesRemainingRaw = null;
+    remainderNote =
+      "We couldn't read your share balance after the reclaim, so we can't say whether any shares remain " +
+      "in the vault. Check the vault balance before treating the position as closed.";
+  }
+
   return {
     confirmed: true,
     withdrawHash: redHash,
@@ -1229,6 +1260,9 @@ export async function vaultWithdraw({ walletAddress, vault, shares }) {
     sharesRedeemedRaw: String(shares),
     usdcReceived: Number(deltaMinor) / 10 ** USDC_DECIMALS, // REAL on-chain balance delta
     verifiedBy: "usdc-balance-delta",
+    position,
+    sharesRemainingRaw,
+    remainderNote,
   };
 }
 

@@ -891,7 +891,10 @@ export async function handler(event) {
         tx: r.withdrawTx ?? null,
         message:
           `Reclaimed ${Number(r.usdcReceived).toFixed(6)} USDC from ${v.label} back into your agent ` +
-          `wallet — measured as the actual balance change on-chain, not an estimate.`,
+          `wallet — measured as the actual balance change on-chain, not an estimate.` +
+          // ⚠️ A reclaim that left shares behind (or whose remainder could not be read) says so here.
+          // null ONLY when the share balance after the redeem was READ as zero.
+          (r.remainderNote ? ` ${r.remainderNote}` : ""),
       });
     }
 
