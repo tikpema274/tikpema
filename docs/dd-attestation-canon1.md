@@ -1,5 +1,13 @@
 # DD report attestation — `canon/1` verifier specification
 
+> **⚠️ Notice (2026-09-26).** Before 2026-09-26, this document's example and our reference
+> `verifyAttestation()` took the registry and verifying contract from the report itself and did not
+> check the chain. A report checked that way was shown to be accepted by *some* contract, not by
+> agentId 851891's owner. Re-verify any report you checked before that date using the corrected
+> steps (§4, starting with step 0). Every paid report we have issued (three, all bought by our own
+> operator wallet) passes the corrected check. In-app reports are not stored by us; if you kept one,
+> you can re-verify it the same way.
+
 How to verify a signed report from the Tikpema DD Service without trusting any server we run, and
 without reading our source. A caller re-deriving the signed bytes must be able to reproduce them
 exactly; "read the implementation" is not a specification.
@@ -145,31 +153,59 @@ a missing field, because a missing field reads as safe and a present `status: "u
 }
 ```
 
-## 4. How to verify — the two on-chain halves
+## 4. How to verify — step 0, then the two on-chain halves
 
-Nothing is declared and nothing has to be trusted: both halves are chain reads.
+### Step 0 — the identity is compared, never used
+
+The `attestation` object is not signed. Its `agentId`, `registry`, `chainId` and `domain` are claims.
+Compare them with the constants at the top of this document and refuse any report that differs. Never
+use them as inputs. Check that your RPC's `eth_chainId` is 5042002 before either read.
+
+A report can name any registry it likes. If you ask *that* registry who owns `851891`, a forger's
+registry answers with a forger's contract, and a contract that accepts every signature returns
+`0x1626ba7e` for a report with every finding erased. That was demonstrated against the live chain on
+2026-09-25. The two reads below are only meaningful against the **pinned** registry.
+
+The verifying contract is **not** a constant to compare: it is whatever `ownerOf(851891)` returns on
+the pinned registry at the time you verify. If the identity's owner account is ever rotated, new
+reports verify against the new account (and old ones stop — see the durability caveat, §6).
+
+### The two on-chain halves
 
 ```
-1.  ownerOf(agentId) on the registry              → expect attestation.verifyingContract
-2.  isValidSignature(digest, signature) on that   → expect 0x1626ba7e
-    same contract
+0.  eth_chainId                                         → expect 5042002, else wrong-chain (indeterminate)
+1.  ownerOf(851891) on 0x8004a818…bd9e (PINNED)         → the verifying contract; must equal attestation.verifyingContract
+2.  isValidSignature(digest, signature) on THAT account → expect 0x1626ba7e
 ```
 
 Step 1 is what makes step 2 mean anything. A signature that validates against *some* contract proves
-nothing until that contract is shown to be the identity's owner of record.
+nothing until that contract is shown to be the identity's owner of record — on the identity's own
+registry, not on one the report names.
 
 ```js
 import { hashMessage } from "viem";
 
+// the constants at the top of this document — NOT read from the report
+const AGENT_ID = "851891";
+const REGISTRY = "0x8004a818bfb912233c491871b3d84c89a494bd9e";
+const CHAIN_ID = 5042002n;
+const DOMAIN   = "tikpema-dd-attestation/canon1/prod";
+
+// step 0 — claims are compared, never used
+if (att.agentId !== AGENT_ID || att.registry.toLowerCase() !== REGISTRY ||
+    att.chainId !== String(CHAIN_ID))                        → identity-mismatch
+if (att.domain !== DOMAIN)                                   → domain-mismatch
+if (BigInt(await rpc("eth_chainId")) !== CHAIN_ID)          → wrong-chain (indeterminate)
+
 const message = `${att.domain}\n${canonicalize(report)}`;
 const digest  = hashMessage(message);            // ⚠️ EIP-191 — see the footgun
 
-// ownerOf(agentId)
-const owner = "0x" + (await call(att.registry, "0x6352211e" + pad32(BigInt(att.agentId)))).slice(-40);
+// step 1 — ownerOf(AGENT_ID) on the PINNED registry: the verifying contract is derived here
+const owner = "0x" + (await call(REGISTRY, "0x6352211e" + pad32(BigInt(AGENT_ID)))).slice(-40);
 if (owner.toLowerCase() !== att.verifyingContract.toLowerCase()) → owner-key-mismatch
 
-// isValidSignature(bytes32,bytes)
-const ret = await call(att.verifyingContract, encodeIsValidSignature(digest, att.signature));
+// step 2 — isValidSignature(bytes32,bytes) on the account ownerOf returned
+const ret = await call(owner, encodeIsValidSignature(digest, att.signature));
 ret.slice(0, 10) === "0x1626ba7e"  → valid
 ```
 
@@ -205,11 +241,13 @@ that was checked and failed. **"Unverified" must never collapse into "invalid."*
 | `unsigned` | `false` | no attestation — the report was never signed |
 | `bad-signature` | `false` | the owning account rejected it: altered after signing, or signed by a different key |
 | `owner-key-mismatch` | `false` | `verifyingContract` is not `ownerOf(agentId)` — not attested by the identity it claims |
+| `identity-mismatch` | `false` | the attestation's `registry`, `agentId` or `chainId` is not this identity's — a claim that differs is refused before any read (the attestation object is not signed) |
 | `unknown-key` | `false` | attests a different `agentId` than the caller expected |
 | `domain-mismatch` | `false` | signed under a different domain (e.g. a dev key) |
 | `unsupported-canon` | `null` | this verifier does not implement that canonicalization — it has **learned nothing**, which is not the same as having disproved the signature |
 | `unsupported-method` | `null` | `method` is not `erc1271` |
 | `malformed-attestation` | `null` | required fields missing or `status` unrecognised |
+| `wrong-chain` | `null` | the verifying RPC's `eth_chainId` is not the identity's chain — nothing was read, so nothing was learned; **not** a negative result |
 | `indeterminate-rpc` | `null` | a chain read did not complete — **not** a negative result |
 
 ## 6. ⚠️ What a valid signature does and does not mean

@@ -111,9 +111,9 @@ console.log("\n── expect counts: provider-list and record entries are exact 
   });
 }
 {
-  const m = run("expect-record", (s) => s.replace(/("shared\/dd\/attest-circle\.mjs":\s*\{ cls: "record", expect: \{ chainId: )1/, "$13"));
+  const m = run("expect-record", (s) => s.replace(/("shared\/dd\/identity\.mjs":\s*\{ cls: "record", expect: \{ chainId: )1/, "$13"));
   check("record drift → exit 1, named as drift", () => {
-    assert.equal(m.exit, 1); assert.match(m.out, /shared\/dd\/attest-circle\.mjs: allowlisted as record with expect/);
+    assert.equal(m.exit, 1); assert.match(m.out, /shared\/dd\/identity\.mjs: allowlisted as record with expect/);
   });
 }
 {

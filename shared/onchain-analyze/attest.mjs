@@ -18,7 +18,8 @@
 //     ownerOf(agentId) → the SCA           (registry read, authoritative)
 //     isValidSignature(digest, sig) → 0x1626ba7e   (the SCA validates its own owner's signature)
 //
-// Both halves are on-chain reads. NOTHING is declared, so nothing has to be trusted. Verified by
+// Both halves are on-chain reads, made against the PINNED registry and agentId (shared/dd/identity.mjs),
+// never against what the report's own unsigned `attestation` object names — see verifyAttestation. Verified by
 // spike 2026-07-26: magic value returned; and three negative controls (raw-keccak digest, a garbage
 // signature, and the same message signed by a DIFFERENT Circle wallet) all returned 0xffffffff — so
 // the check discriminates by signer, and a dev/throwaway wallet is structurally invalid without any
@@ -30,17 +31,16 @@
 // Same rule as the rest of shared/: interpretation is shared, transport is per-caller.
 
 import { hashMessage } from "viem";
+import { DD_DOMAIN, DD_PINNED_IDENTITY } from "../dd/identity.mjs";
 
 export const CANON_VERSION = "canon/1";
 
 /** Domain-separated prefixes. A signature under one domain is MATHEMATICALLY invalid under the
  *  other — a relabelled `keyClass` does not help an attacker, because the bytes do not verify.
  *  Under (a′) the separation is additionally STRUCTURAL: a dev wallet is a different SCA, so its
- *  signature fails `isValidSignature` on the production account regardless of the domain string. */
-export const DOMAIN = Object.freeze({
-  prod: "tikpema-dd-attestation/canon1/prod",
-  dev: "tikpema-dd-attestation/canon1/dev",
-});
+ *  signature fails `isValidSignature` on the production account regardless of the domain string.
+ *  Defined in shared/dd/identity.mjs (one copy, beside the identity it separates). */
+export const DOMAIN = DD_DOMAIN;
 
 /** Rides on every attestation, machine-readable, so no consumer can claim it was not told.
  *  Mirrors SEVERITY_MEANING in schema.mjs — the caveat travels WITH the artifact, not in a doc
@@ -278,12 +278,28 @@ function encodeIsValidSignature(digest, signature) {
  *   null  — INDETERMINATE: we could not check. Distinct from false, and falsy on purpose, so a
  *           naive `if (v.valid)` still fails CLOSED while `v.reason` carries the real answer.
  *
+ * ═══ ⛔ THE ATTESTATION OBJECT IS NOT SIGNED — ITS IDENTITY FIELDS ARE CLAIMS, NEVER INPUTS ═══════
+ * canon/1 excludes `attestation` from the signed bytes, so `agentId`, `registry`, `chainId` and
+ * `domain` there can be rewritten by anyone. Until 2026-09-25 this function called `att.registry`
+ * and then `att.verifyingContract`: a report pointed at a registry of the forger's choosing, whose
+ * "owner" accepts any signature, verified as `valid: true` against the LIVE chain with every power
+ * finding erased. Now:
+ *   0a. the claims are compared with the PINNED identity (default: production) → identity-mismatch
+ *   0b. the client's eth_chainId must be the pinned chain, before either read → wrong-chain (null)
+ *   1.  ownerOf(pinned agentId) on the PINNED registry → the verifying contract, DERIVED here
+ *   2.  isValidSignature on THAT derived account
+ * The verifying contract is derived, never pinned, so rotating the identity's owner account keeps
+ * verifying new reports (old ones stop — the durability caveat, unchanged).
+ *
  * @param {object} report
  * @param {object} opts
  * @param {{call: Function}} opts.client   transport, injected — same interface analyze() takes
  * @param {{agentId?: string, domain?: string}} [opts.expect]  what the CALLER expected to be reading
+ * @param {{agentId: string, registry: string, chainId: string, domain: string}} [opts.identity]
+ *   the identity to pin against. Defaults to production; a test chain passes its own. Only these four
+ *   fields are read — a `verifyingContract` here is ignored, by design.
  */
-export async function verifyAttestation(report, { client, expect = {} } = {}) {
+export async function verifyAttestation(report, { client, expect = {}, identity = DD_PINNED_IDENTITY } = {}) {
   const boundTo = {
     chainId: report?.subject?.chainId ?? null,
     blockNumber: report?.subject?.blockNumber ?? null,
@@ -322,28 +338,63 @@ export async function verifyAttestation(report, { client, expect = {} } = {}) {
   if (expect.agentId && String(expect.agentId) !== String(att.agentId)) {
     return verdict(false, "unknown-key", { detail: `report attests agentId ${att.agentId}; caller expected ${expect.agentId}` });
   }
-  const wantDomain = expect.domain ?? DOMAIN.prod;
+  const wantDomain = expect.domain ?? identity.domain;
   if (att.domain !== wantDomain) {
     // Detected from the DECLARED domain before any call: under ERC-1271 the contract returns only
     // valid/invalid, so a domain mismatch would otherwise be indistinguishable from a bad signature.
     return verdict(false, "domain-mismatch", { detail: `signed under ${att.domain}; this verifier requires ${wantDomain}` });
   }
 
+  // ── step 0a: the report's identity CLAIMS against the pinned identity. Decided before any call, so a
+  //    forger's contracts are never asked anything. Addresses compare case-insensitively (canon/1
+  //    lowercases hex); agentId and chainId as decimal strings.
+  const claims = [
+    ["registry", String(att.registry).toLowerCase(), String(identity.registry).toLowerCase()],
+    ["agentId", String(att.agentId), String(identity.agentId)],
+    ["chainId", String(att.chainId ?? ""), String(identity.chainId)],
+  ];
+  for (const [field, claimed, pinned] of claims) {
+    if (claimed !== pinned) {
+      return verdict(false, "identity-mismatch", {
+        field,
+        detail: `attestation.${field} is ${claimed || "(missing)"}; the ${field} of agentId ${identity.agentId} is ${pinned} — the attestation object is not signed, so its identity is compared, never used`,
+      });
+    }
+  }
+
   if (!client?.call) throw new Error("verifyAttestation(): a transport client is required — ERC-1271 validity is an on-chain question and cannot be answered offline");
 
-  // ── the identity half: does the declared verifying contract actually own the agentId? ──
+  // ── step 0b: is the client on the pinned chain? A wrong chain has told us nothing about this identity,
+  //    which is not the same as disproving the signature → INDETERMINATE, never false.
+  let chainRaw;
+  try {
+    chainRaw = await client.call({ method: "eth_chainId", params: [] });
+  } catch (e) {
+    return verdict(null, "indeterminate-rpc", { detail: `eth_chainId did not complete: ${e?.message ?? e}` });
+  }
+  const chainHex = readHex(chainRaw);
+  if (!chainHex || !/^0x[0-9a-f]+$/i.test(chainHex)) {
+    return verdict(null, "indeterminate-rpc", { detail: `eth_chainId returned unusable data: ${JSON.stringify(chainRaw)?.slice(0, 80)}` });
+  }
+  if (BigInt(chainHex) !== BigInt(identity.chainId)) {
+    return verdict(null, "wrong-chain", {
+      detail: `the verification client is on chain ${BigInt(chainHex)}; agentId ${identity.agentId} is registered on chain ${identity.chainId} — nothing was read`,
+    });
+  }
+
+  // ── step 1: the verifying contract is DERIVED — ownerOf(pinned agentId) on the PINNED registry ──
   let ownerRaw;
   try {
     ownerRaw = await client.call({
       method: "eth_call",
-      params: [{ to: att.registry, data: SEL_OWNER_OF + wordFromUint(att.agentId) }, "latest"],
+      params: [{ to: identity.registry, data: SEL_OWNER_OF + wordFromUint(identity.agentId) }, "latest"],
     });
   } catch (e) {
-    return verdict(null, "indeterminate-rpc", { detail: `ownerOf(${att.agentId}) did not complete: ${e?.message ?? e}` });
+    return verdict(null, "indeterminate-rpc", { detail: `ownerOf(${identity.agentId}) did not complete: ${e?.message ?? e}` });
   }
   const ownerHex = readHex(ownerRaw);
   if (!ownerHex || ownerHex.length < 66) {
-    return verdict(null, "indeterminate-rpc", { detail: `ownerOf(${att.agentId}) returned unusable data: ${JSON.stringify(ownerRaw)?.slice(0, 80)}` });
+    return verdict(null, "indeterminate-rpc", { detail: `ownerOf(${identity.agentId}) returned unusable data: ${JSON.stringify(ownerRaw)?.slice(0, 80)}` });
   }
   const ownerOnChain = "0x" + ownerHex.slice(-40).toLowerCase();
   if (ownerOnChain !== att.verifyingContract.toLowerCase()) {
@@ -355,13 +406,13 @@ export async function verifyAttestation(report, { client, expect = {} } = {}) {
     });
   }
 
-  // ── the signature half: ERC-1271 against that same account ──
+  // ── step 2: ERC-1271 against the account ownerOf NAMED (equal to the claim, checked above) ──
   const digest = attestationDigest(report, { domain: att.domain });
   let ret;
   try {
     ret = await client.call({
       method: "eth_call",
-      params: [{ to: att.verifyingContract, data: encodeIsValidSignature(digest, att.signature) }, "latest"],
+      params: [{ to: ownerOnChain, data: encodeIsValidSignature(digest, att.signature) }, "latest"],
     });
   } catch (e) {
     return verdict(null, "indeterminate-rpc", { detail: `isValidSignature did not complete: ${e?.message ?? e}` });

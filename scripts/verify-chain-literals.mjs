@@ -28,7 +28,7 @@
 //               tests nothing — these stay literal BY DESIGN and are allowlisted one by one.
 //   record      a FACT about where something LIVES, never a lever: the registered ERC-8004
 //               identities (unified.json is FROZEN), the evidence dir, the census harvest, and the
-//               chain id beside AGENT_ID in dd-identity.mjs and beside agentId in attest-circle.mjs —
+//               chain id beside AGENT_ID in dd-identity.mjs and beside agentId in shared/dd/identity.mjs —
 //               deriving THOSE from ARC.chainId would make a mainnet flip silently claim identity
 //               851891 lives on mainnet. It does not.
 //   annotation  a comment that quotes the value (Circle's own doc examples). Reworded where cheap.
@@ -106,7 +106,7 @@ const ALLOW = {
   "shared/onchain-analyze/endpoints.mjs":      { cls: "provider-list", expect: { rpcHost: 2 }, why: "one ENTRY + one load-bearing DD-surface comment naming the arc.network alias as the same backend; independent by decision (T, 2026-09-20): assertChain() per endpoint fails a forgotten entry closed; C3 makes the list a flip-completeness check; list-independence ≠ provider-independence" },
   // records in code
   "netlify/functions/dd-identity.mjs":         { cls: "record", expect: { chainId: 1 }, why: "CHAIN_ID beside AGENT_ID 851891 — where the identity was REGISTERED; must NOT derive from ARC.chainId" },
-  "shared/dd/attest-circle.mjs":               { cls: "record", expect: { chainId: 1 }, why: "DD_IDENTITY.chainId beside agentId 851891 — asserted against the chain by verifyAttestation; a record like dd-identity (T, 2026-09-20)" },
+  "shared/dd/identity.mjs":                    { cls: "record", expect: { chainId: 1 }, why: "DD_PINNED_IDENTITY.chainId beside agentId 851891 — where the identity is REGISTERED; verifyAttestation pins against it and checks eth_chainId before any read; a record like dd-identity (T, 2026-09-20; moved from attest-circle.mjs 2026-09-25)" },
   // a claim on a static page, bound to the client source by a suite (it cannot import)
   "site/index.html":                           { cls: "site", expect: { chainId: 1 }, why: "static marketing page; verify-site-claims.mjs binds its chain-id claim to src/config/chain.ts" },
   // annotations left in place — comment-only quotations of a MEASURED or PUBLISHED fact; rewording would misquote
@@ -142,7 +142,7 @@ const ALLOW = {
 
 // ── phase B — real re-literals ON THE DD SURFACE, deliberately untouched in phase A ────────────
 // ⛔ EMPTY since phase B (2026-09-20): dd-analyze ARC_RPC, _dd-x402 DD_VERIFYING_CONTRACT + its pin, _x402-confirm
-// GATEWAY_WALLET all import their source; endpoints.mjs is a provider-list and attest-circle.mjs a record, by
+// GATEWAY_WALLET all import their source; endpoints.mjs is a provider-list and shared/dd/identity.mjs a record, by
 // decision. Refuse mode exits 1 if anything is ever listed here again — a DD-surface re-literal is fixed, not parked.
 const PHASE_B = {};
 

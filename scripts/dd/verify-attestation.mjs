@@ -61,6 +61,10 @@ const otherOwner = privateKeyToAccount(OTHER_KEY);
 const SCA = "0xc54d47211997aca90ef4fcfbc742a3b511b4e621";
 const REGISTRY = "0x8004a818bfb912233c491871b3d84c89a494bd9e";
 const AGENT_ID = "851891";
+const ARC_TESTNET_HEX = "0x" + (5042002).toString(16);
+// The forger's two contracts (see mockClient). Nothing here is deployed anywhere.
+const FAKE_REG = "0x" + "f0".repeat(20);
+const FAKE_VC = "0x" + "fa".repeat(20);
 
 const baseFixture = () => ({
   schemaVersion: "onchain-analyze/0.1.0",
@@ -90,17 +94,36 @@ const baseFixture = () => ({
  *  bare string. The live run caught this the hard way: the first version of this mock returned bare
  *  strings, the real client returned the envelope, and verifyAttestation correctly answered
  *  `indeterminate-rpc` rather than mis-verifying. Both shapes are now exercised. */
-function mockClient({ ownerKey = owner, registryOwner = SCA, throwOn = null, envelope = true, garbage = false } = {}) {
+// ⭐ The chain this mock stands in for holds FOUR contracts, each answering only for itself:
+//   REGISTRY  — the production IdentityRegistry: ownerOf(851891) → `registryOwner` (default the SCA)
+//   SCA       — the production account: isValidSignature = a REAL ecrecover against `ownerKey`
+//   FAKE_REG  — a forger's registry: ownerOf(anything) → FAKE_VC
+//   FAKE_VC   — a forger's account: isValidSignature → MAGIC for ANY input
+// plus any extra ERC-1271 accounts passed in `accounts` (the key-rotation case). A call to anything
+// else throws, so a verifier asking the wrong contract fails loudly instead of being answered.
+// `eth_chainId` answers `chainIdHex`; `log` records every call in order.
+function mockClient({ ownerKey = owner, registryOwner = SCA, throwOn = null, envelope = true, garbage = false,
+  chainIdHex = ARC_TESTNET_HEX, chainThrows = false, accounts = {} } = {}) {
   const wrap = (hex) => (garbage ? { unexpected: hex } : envelope ? { result: hex, query: {}, evidence: { httpStatus: 200 } } : hex);
+  const signers = { [SCA]: ownerKey, ...Object.fromEntries(Object.entries(accounts).map(([a, k]) => [a.toLowerCase(), k])) };
   return {
     calls: 0,
+    log: [],
     async call({ method, params }) {
       this.calls++;
-      if (throwOn && String(params?.[0]?.data ?? "").startsWith(throwOn)) throw new Error("simulated RPC exhaustion");
       const to = String(params?.[0]?.to ?? "").toLowerCase();
       const data = String(params?.[0]?.data ?? "");
+      this.log.push({ method, to, sel: data.slice(0, 10) });
+      if (method === "eth_chainId") {
+        if (chainThrows) throw new Error("simulated RPC exhaustion (eth_chainId)");
+        return wrap(chainIdHex);
+      }
+      if (throwOn && data.startsWith(throwOn)) throw new Error("simulated RPC exhaustion");
       if (to === REGISTRY && data.startsWith("0x6352211e")) return wrap("0x" + word(BigInt(registryOwner)));
-      if (data.startsWith("0x1626ba7e")) {
+      if (to === FAKE_REG && data.startsWith("0x6352211e")) return wrap("0x" + word(BigInt(FAKE_VC)));
+      if (to === FAKE_VC && data.startsWith("0x1626ba7e")) return wrap(MAGIC + "0".repeat(56));
+      if (data.startsWith("0x1626ba7e") && signers[to]) {
+        const ownerKey = signers[to];
         const body = data.slice(10);
         const digest = "0x" + body.slice(0, 64);
         const len = Number(BigInt("0x" + body.slice(128, 192)));
@@ -236,6 +259,79 @@ check("bare hex string (a plainer transport) → valid", v.valid === true, `reas
 v = await verifyAttestation(signed, { client: mockClient({ garbage: true }), expect: { agentId: AGENT_ID } });
 check("⭐ an UNRECOGNISED transport shape → indeterminate, never coerced", v.valid === null && v.reason === "indeterminate-rpc", `valid=${v.valid} reason=${v.reason}`);
 
+// ═══════════════════════════ THE FORGERY — PERMANENT ═══════════════════════════
+// ⛔ DO NOT DELETE OR WEAKEN. This is the report that verified as `valid: true` against the LIVE chain
+// on 2026-09-25 (state overrides, nothing deployed): a real report with every power finding erased,
+// the SAME agentId 851891, pointed at a registry of the forger's choosing whose "owner" is a contract
+// that accepts any signature. canon/1 excludes the whole `attestation` object from the signed bytes,
+// so agentId / registry / chainId / domain there are UNSIGNED CLAIMS. A verifier that uses them as
+// inputs asks the forger's own contracts whether the forger is honest.
+// The positive control below proves the fake contracts genuinely work — so if the pinning is ever
+// removed, the forged report VERIFIES and this section fails.
+section("THE FORGERY — erased findings, same agentId, fake registry, an accept-all contract");
+const forged = mutate((c) => {
+  c.powers = []; c.powersPresent = [];
+  c.attestation.registry = FAKE_REG;
+  c.attestation.verifyingContract = FAKE_VC;
+  c.attestation.signature = "0x" + "11".repeat(65);
+});
+check("the forgery keeps agentId 851891, the chain and the prod domain",
+  forged.attestation.agentId === AGENT_ID && forged.attestation.chainId === "5042002" && forged.attestation.domain === DOMAIN.prod);
+{
+  const fc = mockClient();
+  const fv = await verifyAttestation(forged, { client: fc, expect: { agentId: AGENT_ID } });
+  check("⛔⛔ the forged report is REFUSED — valid:false, identity-mismatch", fv.valid === false && fv.reason === "identity-mismatch", `valid=${fv.valid} reason=${fv.reason}`);
+  check("  …the refusal names the registry it was pointed at", /registry/.test(fv.detail ?? "") && (fv.detail ?? "").includes(FAKE_REG), fv.detail ?? "");
+  check("  …decided BEFORE any chain call — the forger's contracts are never asked", fc.calls === 0, `calls=${fc.calls}`);
+  const nv = await verifyAttestation(forged, { client: mockClient() });
+  check("⛔ …and refused with NO `expect` at all (the pin is the default, not an opt-in)", nv.valid === false && nv.reason === "identity-mismatch", `reason=${nv.reason}`);
+  // POSITIVE CONTROL: hand the verifier the forger's identity and the forgery goes through. This is
+  // what the unpinned verifier did with the report's own claims; it proves the fakes are not inert.
+  const cv = await verifyAttestation(forged, { client: mockClient(), identity: { agentId: AGENT_ID, registry: FAKE_REG, chainId: "5042002", domain: DOMAIN.prod } });
+  check("CONTROL: trusting the report's own registry → the forgery VERIFIES (the fakes are real)", cv.valid === true && cv.reason === "ok", `valid=${cv.valid} reason=${cv.reason}`);
+}
+{
+  const fv = await verifyAttestation(mutate((c) => { c.powers = []; c.powersPresent = []; c.attestation.verifyingContract = FAKE_VC; c.attestation.signature = "0x" + "11".repeat(65); }), { client: mockClient() });
+  check("the real registry but an accept-all verifying contract → owner-key-mismatch", fv.valid === false && fv.reason === "owner-key-mismatch", `reason=${fv.reason}`);
+  const cid = await verifyAttestation(mutate((c) => { c.attestation.chainId = "8453"; }), { client: mockClient() });
+  check("an attestation claiming a different chain id → identity-mismatch", cid.valid === false && cid.reason === "identity-mismatch", `reason=${cid.reason}`);
+  const aid = await verifyAttestation(mutate((c) => { c.attestation.agentId = "1"; }), { client: mockClient() });
+  check("an attestation claiming a different agentId (no expect) → identity-mismatch", aid.valid === false && aid.reason === "identity-mismatch", `reason=${aid.reason}`);
+  const reg = await verifyAttestation(mutate((c) => { c.attestation.registry = REGISTRY.toUpperCase().replace("0X", "0x"); }), { client: mockClient() });
+  check("the real registry in different hex CASE still verifies (compared case-insensitively)", reg.valid === true, `reason=${reg.reason}`);
+}
+
+section("THE CHAIN — eth_chainId before either read; a wrong chain is INDETERMINATE");
+{
+  const c1 = mockClient();
+  const ok1 = await verifyAttestation(signed, { client: c1, expect: { agentId: AGENT_ID } });
+  check("healthy → the FIRST call is eth_chainId, then ownerOf, then isValidSignature",
+    ok1.valid === true && c1.log.map((x) => x.method === "eth_chainId" ? "chainId" : x.sel).join(",") === "chainId,0x6352211e,0x1626ba7e",
+    c1.log.map((x) => x.method === "eth_chainId" ? "chainId" : x.sel).join(","));
+  const c2 = mockClient({ chainIdHex: "0x2105" });
+  const wc = await verifyAttestation(signed, { client: c2, expect: { agentId: AGENT_ID } });
+  check("⭐ a client on another chain → valid:null, reason wrong-chain (learned nothing ≠ disproved)", wc.valid === null && wc.reason === "wrong-chain", `valid=${wc.valid} reason=${wc.reason}`);
+  check("  …and neither ownerOf nor isValidSignature was asked", c2.log.every((x) => x.method === "eth_chainId"), JSON.stringify(c2.log));
+  const c3 = mockClient({ chainThrows: true });
+  const ct = await verifyAttestation(signed, { client: c3, expect: { agentId: AGENT_ID } });
+  check("eth_chainId unreadable → valid:null indeterminate-rpc", ct.valid === null && ct.reason === "indeterminate-rpc", `valid=${ct.valid} reason=${ct.reason}`);
+  const c4 = mockClient({ chainIdHex: "not-hex" });
+  const cg = await verifyAttestation(signed, { client: c4, expect: { agentId: AGENT_ID } });
+  check("eth_chainId returns garbage → valid:null, never coerced", cg.valid === null, `valid=${cg.valid} reason=${cg.reason}`);
+}
+
+section("KEY ROTATION — the verifying contract is DERIVED from ownerOf, never pinned");
+{
+  const SCA2 = "0x" + "5c".repeat(20);
+  const rotated = await attachAttestation(rpt, { sign: signWith(otherOwner), ...IDENT, verifyingContract: SCA2 });
+  const rc = mockClient({ registryOwner: SCA2, accounts: { [SCA2]: otherOwner } });
+  const rv = await verifyAttestation(rotated, { client: rc, expect: { agentId: AGENT_ID } });
+  check("⭐ ownerOf(851891) moved to a NEW account that signed the report → VALID", rv.valid === true && rv.reason === "ok", `reason=${rv.reason} ${rv.detail ?? ""}`);
+  check("  …and isValidSignature was asked of the account ownerOf NAMED", rc.log.some((x) => x.sel === "0x1626ba7e" && x.to === SCA2));
+  const old = await verifyAttestation(signed, { client: rc, expect: { agentId: AGENT_ID } });
+  check("  …while a report naming the OLD account → owner-key-mismatch (the documented durability caveat)", old.valid === false && old.reason === "owner-key-mismatch", `reason=${old.reason}`);
+}
+
 // ═══════════════════════════ THE NAMED FOOTGUN ═══════════════════════════
 section("THE FOOTGUN — EIP-191, not raw keccak256");
 
@@ -258,6 +354,13 @@ const spec = await import("node:fs/promises").then((fs) => fs.readFile(new URL("
 check("the footgun is NAMED in the verifier spec, not left to be discovered", /footgun/i.test(spec) && /EIP-191/.test(spec) && /0xffffffff/.test(spec));
 check("the spec states ecrecover CANNOT work against the SCA", /ecrecover/i.test(spec) && /smart contract account/i.test(spec));
 check("the spec carries the durability caveat", /valid \*now\*|valid NOW/i.test(spec));
+check("⭐ the spec has a STEP 0: the attestation object is unsigned, compare its identity with the constants",
+  /step 0/i.test(spec) && /not\s+signed/i.test(spec) && /never\s+use\s+them\s+as\s+inputs/i.test(spec));
+check("⭐ step 0 says to check eth_chainId before either read", /eth_chainId/.test(spec));
+check("⭐ the verdict table names identity-mismatch AND wrong-chain", /\|\s*`identity-mismatch`/.test(spec) && /\|\s*`wrong-chain`/.test(spec));
+check("⭐ the dated notice is at the top and says to re-verify", /^[\s\S]{0,1500}Re-verify any report you checked before/.test(spec));
+check("⛔ the corrected snippet no longer calls the registry or the account FROM THE REPORT",
+  !/call\(\s*att\.registry/.test(spec) && !/call\(\s*att\.verifyingContract/.test(spec));
 
 // ═══════════════════════════ OPTIONAL LIVE PASS ═══════════════════════════
 if (process.argv.includes("--live")) {

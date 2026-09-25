@@ -18,20 +18,11 @@
 // contract with no private key at all — see attest.mjs for why that makes ERC-1271 the binding.
 
 import { circle } from "../../netlify/functions/_circle.mjs";
-import { DOMAIN } from "../onchain-analyze/attest.mjs";
+import { DD_IDENTITY } from "./identity.mjs";
 
-/** The DD service's production identity. These are ASSERTED against the chain by verifyAttestation —
- *  nothing here is trusted merely because it is written down. */
-export const DD_IDENTITY = Object.freeze({
-  agentId: "851891",
-  walletId: "2c93ca5d-be5c-5f51-883d-1a220647f7b1",
-  verifyingContract: "0xc54d47211997aca90ef4fcfbc742a3b511b4e621",
-  registry: "0x8004a818bfb912233c491871b3d84c89a494bd9e",
-  chainId: "5042002",
-  domain: DOMAIN.prod,
-  keyId: "circle-wallet:2c93ca5d-be5c-5f51-883d-1a220647f7b1",
-  keyClass: "registered",
-});
+/** The DD service's production identity now lives in ./identity.mjs (pure, no credentials) so the
+ *  verifier can pin against it without importing a signer. Re-exported for the signing side. */
+export { DD_IDENTITY };
 
 /**
  * Build a `sign(message)` function backed by Circle.
