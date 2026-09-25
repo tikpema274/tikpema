@@ -27441,3 +27441,48 @@ so the fix was not live on 09-25 and the notice must not claim the hole closed b
    `shared/dd/` and did not update the two dynamic imports (static imports would have failed at load; these only run
    under `--live`). The live path — real Circle signature + real chain ERC-1271 — has been dead ~41 days. Only the
    offline path runs in `test:all`, so nothing noticed.
+
+---
+
+# 🎲 KNOWN FLAKE — test:hldraft races between CONCURRENT runs (2026-09-26, recorded, NOT fixed)
+
+`scripts/verify-hl-draft.mjs` writes its fixture to ONE fixed path, `/tmp/_hl_draft_fixture.json` (`:33`), runs
+`scripts/hl/draft.mjs --from` against it, and unlinks it at the end (`:149`). Two runs at once overwrite or delete each
+other's fixture mid-read. Seen in the 23:46 deploy chain (155/156): section 4 read the WRONG fixture ("REFUSES to draft —
+exit 0") and then `ENOENT … /tmp/_hl_draft_fixture.json` — three `deploy:prod` chains were running `test:all` at once.
+- **Measured:** alone 3/3 green (34/0); two copies side by side, 3 trials → 27/7 (+2 ENOENT), 31/3, 34/0 — 2 of 3 trials
+  broke. Not ordering inside one `test:all` (a single run cannot race itself); not network, date or deployed state; not
+  caused by 27027fd / b24064c / 2c7fa35 (last touched 432e32b, 2026-08-25).
+- **Fix (not tonight):** a per-run path (`mkdtempSync(join(tmpdir(), "hl-draft-"))`), removed in a `finally`.
+- **Standing rule it exposes:** ONE `deploy:prod` at a time. Three ran concurrently on 2026-09-25 (23:46/23:47/23:47; two
+  shared one log file). All three were refused before Netlify — by this flake and by gate:watch's dirty-tree check.
+
+---
+
+# 🚀 DEPLOY — 27027fd + b24064c + 2c7fa35 LIVE (published 2026-09-25T23:22:31Z = 01:22 CEST 09-26)
+
+**Deploy `6ab6fa47d007350052c5c0ef`**, commit **2c7fa35**, tree **b98fc657cbbf**, clean at stamp time (dirty:false). ONE
+`deploy:prod` (00:37 CEST): gate:ledger ✅ · gate:types ✅ · test:all **156/156** · gate:watch ✅ (tree clean) · gate:rpc ✅ ·
+build · `netlify deploy --prod` · **gate:deployed ✅ VERIFIED** (served tree == local, commit matches, control plane ==
+data plane, no orphans in 25 newer) · capture:window ✅ · gate:forgery 5/0 · gate:spec ✅ · gate:deployloss ✅ · stage:ledger.
+(Before it: three concurrent chains 23:46/23:47/23:47 + one at 23:19 — ALL refused before Netlify: gate:watch dirty-tree
+×3, test:hldraft race ×1. Nothing half-shipped.)
+
+## ddTree ROTATED — `dc3b66897d35` → `d79683273abc`
+Window **464 s (7.7 min)**, self-cleared (banner `self-clearing`, reason `no-record`, HTML, banner above curl), opened
+23:22:59Z (first observation) → closed 23:30:43Z. Inside the 48–577 s history: longer than 13 of 20 prior rotated windows
+(median 307 s). ⚠️ Timed from FIRST OBSERVATION, 28 s after publish (23:22:31Z) — the true window may be up to ~492 s.
+
+## Post-deploy checks (read-only, 2026-09-26 ~01:35 CEST)
+- **Check 4 — THE FORGERY, against the deployed verifier** (local tree == served tree b98fc657, proven by gate:deployed;
+  no deployed endpoint calls verifyAttestation — its consumers run this code). Purchase 2234a767 with all 9 powers erased,
+  agentId 851891, fake registry + accept-all contract as `eth_call` STATE OVERRIDES only, both Arc endpoints:
+  pre-fix verifier (27027fd) → **valid:true ok**; deployed → **valid:false identity-mismatch (field registry), 0 chain
+  calls**; control (forger's registry passed as the identity) → valid:true ok — the fakes are live.
+- **Check 5 — the three real purchase reports** (dd-analyze-pending, strong reads), deployed verifier, live Arc quorum
+  (2/2 endpoints): 2234a767 · 397b67b1 · e7e855fb → **all valid:true ok**, ownerOf(851891) = 0xc54d4721….
+- **Check 6 — the spec as served:** the app does NOT serve /docs (app.tikpema.xyz/docs/… = the SPA shell). The public
+  copy is GitHub `main`, which showed the OLD spec (0× step 0 / identity-mismatch / wrong-chain) until this push. The
+  notice is dated 2026-09-26: the fix went live 01:22 CEST 09-26 (23:22Z 09-25) and the reference code is published
+  by this push — the date never claims the hole closed before it did.
+- gate:deployloss: **17 losses = baseline 17 → 0 new** (newest loss 2026-09-17).
