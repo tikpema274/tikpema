@@ -27227,3 +27227,17 @@ went to the agent SCA of `0xbdefb566…`.
 **The sweeper stays DISARMED** (`RECLAIM_ARMED = false`). The backlog is closed by T's run; arming for future stalls
 is a separate decision (flip + set `ARMED_FROM_SEC` in one commit). The UI keeps the INTERIM stall copy ("returning
 it from there isn't automatic yet") until the sweeper is armed, live and proven on a real stall.
+
+## 📎 2026-09-25 — two recorded facts after the reclaim
+
+- **`0x95d44b1a…027c2` (45 of the 59.25 USDC):** T looked it up in the Circle console — it appears there as a
+  **modular passkey wallet created 2026-06-19T15:49:31, within T's own Circle account**. That is what is
+  established: a wallet in T's Circle account. It is **not** an identified person, and it is **not** a confirmation
+  that T still holds its passkey.
+- **Wallet types and paymasters differ — the mainnet probe must not assume `0x7ceA…0a25`.** New dev-controlled SCAs
+  are `circle_6900_singleowner_v4`. On Arc testnet the v4 gas wallet was sponsored by paymaster
+  **`0x03dF76C8…103b`** and deployed via factory **`0xfa89dd20…6140`**; our older agent SCAs use paymaster
+  `0x7ceA…0a25` (+ factory `0xf6102306…e536`). **On Arc MAINNET (read-only, 2026-09-25): the v4 paymaster has code
+  (133 B) but the v4 factory `0xfa89dd20…` has NO CODE** — a mainnet v4 wallet must deploy via another factory, or
+  Circle issues a different version there. `~/Arc-now2/mainnet-probe/probe.mjs` (outside the repo) reads paymaster,
+  factory and scaCore from the run and asserts none; its header now states these predictions.
