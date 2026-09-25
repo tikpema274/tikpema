@@ -27221,7 +27221,8 @@ BEFORE the run (block 63921577), never from the CLI's output — 11/11:
 
 **Recipients:** 24 of 25 refunds went to users' own LOGIN wallets (June–July jobs signed client-side); `0x95d44b1a…`
 (45 USDC) is a Circle modular passkey wallet with 40 job-runs, not tied to a named person (Tikpema keeps no
-accounts) — T recognised it before confirming. One (0.2) went to the agent SCA of `0xbdefb566…`.
+accounts). ⚠️ Whether T recognised it before confirming was NOT recorded — only that the reclaim ran. One (0.2)
+went to the agent SCA of `0xbdefb566…`.
 
 **The sweeper stays DISARMED** (`RECLAIM_ARMED = false`). The backlog is closed by T's run; arming for future stalls
 is a separate decision (flip + set `ARMED_FROM_SEC` in one commit). The UI keeps the INTERIM stall copy ("returning
