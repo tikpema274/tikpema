@@ -27486,3 +27486,112 @@ Window **464 s (7.7 min)**, self-cleared (banner `self-clearing`, reason `no-rec
   notice is dated 2026-09-26: the fix went live 01:22 CEST 09-26 (23:22Z 09-25) and the reference code is published
   by this push — the date never claims the hole closed before it did.
 - gate:deployloss: **17 losses = baseline 17 → 0 new** (newest loss 2026-09-17).
+
+---
+
+# 🧭 VAULT MANDATE — PIECE 4 (pre-deposit path, MONEY) — DESIGN RECORDED, NOT BUILT (2026-09-26)
+
+Design only. Two requirements (T): **(R1)** nothing in `_arc.mjs` (DD surface → a second refusal window); **(R2)** off by a
+code constant — a scheduled tick that deposits on its first run after deploy is a fund-moving run nobody approved.
+
+## Precedents (corrected)
+- The gate follows **`RECLAIM_ARMED` + `ARMED_FROM_SEC`** (`escrow-reclaim-sweep.mjs`). DCA's code constant is
+  **`DCA_CREATE_GATED`** (`shared/dca-gate.mjs`) — a gate on CREATING mandates, not on fills; DCA fills are gated by
+  mandate status. (First draft of this design said DCA had no code-constant gate — wrong; the search looked for
+  `*_ARMED` only.)
+- Deployed limits (`netlify env:get --context production`, 2026-09-26): `PERIOD_CEILING_USDC` **60**;
+  `AGENT_VAULT_DEPOSIT_CAP_USDC` unset → code default **25**; `DCA_CEILING_RESERVE_FRACTION` unset → **0.5** (DCA ≤ 30/day).
+
+## What piece 4 adds to the RECORD (vault-mandate/2)
+`amountPerDepositUsdc`, `maxTotalUsdc`, `cadence`, a `paused` status + flags, and the **vault disclosure token the user
+acknowledged** (`ackTokenFor` at the baseline). All inside the fingerprint and the rendered disclosure. No stored records
+exist (no create endpoint) → no migration.
+
+## R1 — the cap lives off-surface
+- **`shared/vault-mandate/limits.mjs`** (pure code constants): `MANDATE_DEPOSIT_MAX_USDC`, `MANDATE_TOTAL_MAX_USDC`,
+  `MANDATE_DAY_SHARE`, `MANDATE_MIN_CADENCE`. Not under any DD_SURFACE_DIRS (`shared/onchain-analyze`, `onchain-facts`,
+  `dd-canary`, `dd`) nor DD_SURFACE_FILES — a guard test asserts it. **No env var** (that would pull in `_arc.mjs` /
+  `_env-assert.mjs`). Existing caps are READ, never edited: importing `vaultDepositCapUsdc()` does not change `_arc.mjs`.
+- Effective amount = min(record amount, `MANDATE_DEPOSIT_MAX_USDC`, `vaultDepositCapUsdc()`, budget remaining);
+  `executeAction` re-enforces its own caps.
+- Other off-surface edits: `_budget.mjs` (`mandate-day:<owner>:<date>` sub-counter), `_vault.mjs` (`onSubmitted` hook),
+  `netlify.toml` (schedule).
+
+## R2 — off by a code constant
+- `MANDATE_DEPOSIT_ARMED = false`, `MANDATE_ARMED_FROM = null`, in `_vault-mandate-deposit.mjs`, flipped TOGETHER in their
+  own commit. Checked AT THE WRITE (just before the intent), not at the tick — any caller hits it.
+- **Decision 3 (T): the disarmed tick SIGNS its check** — runs anchor → signed report → verify → readings → decide, records
+  "WOULD DEPOSIT X", writes no intent, never calls `executeAction`. It proves the whole path, signing leg included, at
+  ~0 USDC; a read-only disarmed tick would leave signing untested until the first armed run. Test: disarmed touches
+  neither the intent store nor the executor.
+- No catch-up: next-due = max(now, `MANDATE_ARMED_FROM`); one deposit per window, never a backlog.
+
+## Order of operations (per mandate, per due window)
+0. **RECOVER FIRST** — an unresolved intent blocks everything for that mandate.
+1. **Free gates:** ARMED · global agent pause · `verifyMandateRecord` (active + ack fingerprint == recomputed) · due ·
+   budget remaining.
+2. **Limit preflight (reads):** amount vs caps · `canSpendDay` + mandate day share · SCA USDC balance. Fail → SKIP, no
+   check run, no signature spent.
+3. **CHECK:** `runMandateCheck` — anchor, report AT the anchor, signed, verified against the pinned identity, both
+   endpoints' readings by blockHash.
+4. **DECIDE:** `decideMandateAction` → deposit | pause (paused + flags) | exit (see decision 2).
+5. **INTENT:** create-only `vault-mandates` `d/<owner>/<id>/<seq>` BEFORE any signing — anchor, report digest, amount,
+   sharesPredicted, sharesBefore, usdcBefore, depositFee@check, `submitting`. Create-only on seq ⇒ no double deposit.
+6. **DEPOSIT** via `executeAction({ type: "vault_deposit" })` (pause, per-vault cap, day ceiling + ledger, `gateDeposit` on a
+   FRESH inspection) with the **STORED** ack token. A changed disclosure refuses → pause `DISCLOSURE_CHANGED`. ⛔ Never mint
+   the token from today's inspection — that is the mandate acknowledging its own disclosure.
+7. **POST-DEPOSIT ASSERTION** (scoped 2026-09-25): predicted = `previewDeposit` at the PARENT block; received = the vault's
+   `Deposit` event × the SCA share delta; fee re-read at parent; matched | mismatched | unreadable, no tolerance.
+   Mismatched/unreadable → pause; the deposit stays (no autonomous withdrawal here).
+8. **COMMIT:** intent `asserted`; record deposited total + next-due (CAS on etag); receipt = signed report, anchor hash,
+   readings, decision, tx, assertion.
+
+## Where the check cannot be skipped
+ONE function (`_vault-mandate-deposit.mjs`) calls `executeAction(vault_deposit)` for a mandate. It never trusts a passed
+decision: it re-runs `decideMandateAction` on the check it is given and refuses unless that check carries a report with
+verification `valid === true` and an anchor inside the freshness window. A source guard asserts no other file issues a
+mandate deposit. Mutations to catch: no check · stale check · unsigned report · a passed-in "deposit" decision · disarmed deposit.
+- **Decision 4 (T): the freshness window is UNSET.** It cannot be set without data. Measure the signing leg's latency
+  (anchor → signed + verified) on the disarmed tick and set the window from that distribution. Until measured, the
+  constant is `null` and an ARMED run with a null window REFUSES — arming requires the measurement first.
+
+## When the daily limit blocks
+The user's own budget, not a vault finding → **SKIP, never pause**; the mandate stays active.
+- At preflight (normal): no check, no intent; receipt "skipped: daily ceiling / mandate day share — nothing checked,
+  nothing deposited"; the next window checks afresh.
+- At deposit (a race — another spend took the room): `executeAction` refuses → intent `refused`; receipt shows the signed
+  check "checked, not deposited: daily ceiling". The check is never reused (bound to its anchor).
+
+## Crash between deposit and assertion
+Intent: `submitting` → `submitted`(Circle tx ids, via the `onSubmitted` hook) → `deposited`(hash) → `asserted` |
+`refused` | `not-deposited`. Recovery runs first each tick and READS THE CHAIN, never resubmits:
+- **Deposited** if a Circle id is COMPLETE, or a `Deposit` event for our SCA after the anchor block, or shares above
+  sharesBefore → take the hash, run the assertion now (historical state measured available ≥7 days on both endpoints).
+  If `executeAction`'s day-ceiling ledger row is missing, write it keyed by tx hash (idempotent).
+- **Not deposited** ONLY when Circle shows FAILED/none AND no event AND no share delta AND the intent is older than the
+  Circle deadline. An approve that landed without the deposit leaves an allowance — recorded, as on the manual path.
+- **Unreadable** stays pending and blocks the mandate — never read as "not deposited"; after N tries → pause INCONCLUSIVE.
+- One intent in flight per mandate.
+
+## Decision 2 (T): creation REFUSES exit rules until piece 5 ships
+The disclosure must not say "if found: exit." while nothing can exit. A code constant `EXIT_AVAILABLE = false`, checked
+at creation and amendment (the validator path); the executor treats an EXIT decision as a pause regardless. Flipped in
+piece 5's own commit, with the disclosure copy it enables.
+
+## Decisions 1 + 5 — PROPOSED values, T decides (reasoning from the deployed numbers above)
+- **`MANDATE_DAY_SHARE`: the user's reserve applies to ALL autonomous spend combined.** Mirror DCA's rule (user keeps
+  ≥ 0.5 × ceiling), but DCA and a mandate each taking 0.5 would together lock the user out. Proposed: mandate-day +
+  dca-day ≤ `(1 − userReserveFraction()) × ceiling` = 30 USDC/day today, plus a mandate-own cap of **0.25 × ceiling
+  (15 USDC/day)** so one autonomous feature cannot starve the other.
+- **`MANDATE_DEPOSIT_MAX_USDC`: 10.** Below the 25 vault cap; ≤ ⅔ of the mandate's 15/day so a single deposit never
+  exhausts its share; testnet and unproven.
+- **`cadence`: `daily` | `weekly` only, default weekly; `MANDATE_MIN_CADENCE` 24 h.** DCA's floor is 1 h, but each mandate
+  deposit costs a signed check (~36 JSON-RPC calls + 1 signMessage, measured ~0.93 s without signing). An 8-week weekly
+  mandate = 9 signatures; daily = 65. A deposit schedule is not trading — nothing needs sub-daily.
+- **`maxTotalUsdc`: required, ≥ one deposit; `MANDATE_TOTAL_MAX_USDC` 100.** Mirrors DCA's `totalBudgetAmount ≥
+  perTickAmount`. Bounded exposure while unproven: xylo's single-EOA owner holds `emergencyWithdraw`, so the whole position
+  is exposed to one key.
+- **Trigger (5):** piece 4 includes the scheduled tick, shipping disarmed; harmless now — no mandates exist and there is no
+  create endpoint (piece 6).
+
+**Nothing built.** Next: T's values for 1/5, then build red-first, disarmed.
