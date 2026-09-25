@@ -27114,3 +27114,83 @@ clean ledger from a known balance needs, in order:
 4. **Pending resolved** — change 1 records pendings; a resolver must drive them to confirmed / not-charged.
 5. **The check:** opening + credits − confirmed − pending = `availableBalance` + API `pendingBatch`, joined on
    settlement ids; could run as a watch like `strong-read-watch`.
+
+---
+
+# 🧭 VAULT MANDATE (DD-checked deposits) — DECISIONS RECORDED, NOTHING BUILT (2026-09-25)
+
+**Decisions (T, 2026-09-25):**
+- **Flat mandate fee**, with a DD check before EVERY deposit that the agent cannot skip. (Per-check billing
+  rejected: if the agent sets check frequency and each check is billed, Tikpema sets the frequency of its own
+  billing. The flat fee inverts the incentive toward under-checking — hence the mandatory pre-deposit check.)
+- **An inconclusive check blocks the deposit, pauses and flags the mandate.** The flag distinguishes
+  **OUTAGE** (our instrument failed: engine refusal / unsigned — retry) from **INCONCLUSIVE** (the engine
+  answered — complete, signed — but could not establish something: `POWER_UNREADABLE`,
+  `COVERAGE_BELOW_THRESHOLD`). ⚠️ This follows the POLICY verdict, not billing: the settle-gate's rule is
+  "charge for answers, not outages" (`shared/x402/settle-gate.mjs:3`) — an inconclusive report IS an answer
+  and would settle under per-check pricing; the flat fee makes that moot.
+- **Case A — a re-check that FAILED: never withdraw.** A non-finding is not evidence.
+- **Case B — a re-check that SUCCEEDED and found a refused power:** a per-power choice set by the user at
+  mandate time, **default pause-and-notify**. Not built.
+- **Autonomous withdrawal is OUT of v1:** a custody expansion beyond DCA's swap-only mandate; the exit fee is
+  controlled by the party being fled (xylo `settableFees` up to 20%); racing an owner holding
+  `emergencyWithdraw` is likely futile.
+
+**⭐ THE FINDING THAT REORDERS THE WORK (measured read-only 2026-09-25):** `xylo-usdc` (the ONLY allowlisted
+vault, `_vault.mjs:85`) is **not upgradeable** — logic fixed at its address; `pausable` absent;
+`settableFees` present (cap 20%, current deposit 0 / withdraw 10 / performance 1000 bps); `emergencyWithdraw`
+present; owner a single EOA; exit fee 10 bps declared = 9.999 measured. **Its powers can never change**, so a
+re-check for POWERS has almost nothing to find there. The feature's value depends on rules over **STATE**
+(fees, owner, redemption), which no policy rule consumes today. Also found: the in-app DD report is FREE today
+(`agent-dd-report.mjs` — session replaces payment), and no vault mandate / re-check exists anywhere yet.
+
+**Next (scoped, not built):** state rules — see the scoping entry that follows when written.
+
+## 🧭 VAULT MANDATE — POST-DEPOSIT ASSERTION + DISCLOSURE WORDING (scoped 2026-09-25, not built)
+
+**Post-deposit assertion — the bridge's predicted→measured rule, reused.** `sharesPredicted` =
+`previewDeposit(assets)` at the check block; `sharesReceived` = READ from the vault's own
+`Deposit(sender, owner, assets, shares)` event, cross-checked by the agent SCA's share-balance delta (two
+instruments). `delivery: "predicted" → "measured"` only by a read (bridge: `bridge-mint-settle-background.mjs`).
+Verdict `depositReconciliation.verdict ∈ matched | mismatched | unreadable` (bridge: `FEE_RECON_VERDICTS`,
+`_fee-reconcile.mjs:104`), both figures travel with it.
+- **No tolerance.** ERC-4626: `previewDeposit` ≤ shares actually minted in the same state, so rounding only
+  favours the depositor. Instead of tolerating share-price drift, READ the cause at the deposit's PARENT block:
+  (1) `depositFee()` parent ≠ check → `mismatched: deposit-fee-changed`; (2) received < `previewDeposit` at
+  parent → `mismatched: fewer-shares-than-preview` (exact — also catches a same-block fee raise ahead of our
+  tx; re-read the fee at the deposit block to attribute); (3) else `matched`, the quoted-vs-received gap shown
+  as a MEASURED share-price change. Receipt unreadable → `unreadable` → pause as INCONCLUSIVE, never `matched`.
+- **On mismatch:** mandate pauses + flags the reason; money already deposited stays (no autonomous withdrawal
+  v1); user told "This deposit cost more than quoted: we expected at least X shares and received Y (Z bps
+  fewer). The vault's deposit fee changed from A to B between our check and your deposit. The mandate is
+  paused; nothing further will be deposited until you review it." Receipt: both figures + blocks, both fee
+  readings + blocks, verdict + reason.
+- ⚠️ DEPENDS ON `eth_call` at a recent historical block — measured separately (see the next entry).
+
+**Disclosure wording (proposed) — VERIFIED vs MONITORED, not "trusted/untrusted":**
+> **Verified by a signed report — anyone can check it.** Who controls this vault and what they can do with your
+> deposit comes from a signed due-diligence report (Tikpema DD, agentId 851891). You or anyone else can verify it
+> against the chain without trusting us.
+> **Monitored by Tikpema — our own reading.** Fees, whether you can withdraw in full, and the vault's share price
+> come from our own reads of the vault, taken before each deposit. They aren't signed, so here you're relying on
+> us. They exist to pause your mandate early when something changes, and every figure we act on is recorded in
+> your receipt with the block it came from.
+> **Checked after each deposit.** We compare the shares you received with what the vault quoted. Because both
+> come from the chain, anyone can re-read them from the transaction in your receipt.
+(Owner changes are on the VERIFIED side: the signed report carries `holder`/`holderKind`, `powers.mjs:71-72`.)
+
+## 📏 MEASURED 2026-09-25 00:16Z — historical `eth_call` on Arc testnet: AVAILABLE on both configured endpoints
+
+The parent-block anchor's one dependency. Read-only, against xylo-usdc (`previewDeposit(1e6)`, `depositFee()`):
+- **`rpc.testnet.arc.io`** (head 63844442) and **`arc-testnet.drpc.org`** (head 63844446): every call SUCCEEDED
+  at latest and at blocks ≈1, 10, 60, 600 min, 1 day and 7 days old. None pruned.
+- ⚠️ Those values were identical at every block (the vault is idle: 999998 / 0), which cannot distinguish "served
+  history" from "silently served latest". **Control:** the delegate pool's Gateway `availableBalance` changed
+  4.8032 → 4.8031 between blocks 63752726 and 63753790 (the job #186705 settle). Both endpoints return 4.8032 at
+  63752726 and 4.8031 at 63753790 / latest ⇒ both honour the block parameter with real historical state.
+- (Contrast: RECEIPTS from 2026-07-17 were pruned on the public RPC — transaction history and state history
+  have different retention. Only the state depth the anchor needs — minutes — is measured here.)
+- **If it ever stops working:** a failed historical call is `unreadable` → the mandate pauses as INCONCLUSIVE; the
+  code must NEVER silently substitute a `latest` read. Pin the anchor by `blockHash` (EIP-1898) rather than number,
+  and read it on BOTH endpoints (the DD engine's quorum pattern) so one provider serving latest silently shows up
+  as a disagreement.
