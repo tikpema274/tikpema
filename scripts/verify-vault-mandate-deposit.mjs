@@ -32,7 +32,7 @@ import { DOMAIN } from "../shared/onchain-analyze/attest.mjs";
 import { analyze } from "../shared/onchain-analyze/index.mjs";
 import { EIP1967_IMPL_SLOT } from "../shared/onchain-facts/index.mjs";
 import { SUBJ, OWNER, ZERO_WORD, word, codeWith, mkc } from "./dd/_mock-chain.mjs";
-import { runMandateCheck } from "../netlify/functions/_vault-mandate-check.mjs";
+import { runMandateCheck, productionDeps } from "../netlify/functions/_vault-mandate-check.mjs";
 import {
   buildMandateRecord, acknowledgeMandate, verifyMandateRecord, amendMandateRules, mandateFingerprint,
   MANDATE_SCHEMA, MANDATE_STATUS,
@@ -46,7 +46,7 @@ import { depositVerdict, DEPOSIT_VERDICT } from "../shared/vault-mandate/asserti
 import { classifyIntent, RECOVERY_NOT_DEPOSITED_AFTER_MS } from "../shared/vault-mandate/recovery.mjs";
 import {
   MANDATE_DEPOSIT_ARMED, MANDATE_ARMED_FROM, MANDATE_CHECK_FRESHNESS_MS,
-  depositForMandate, runMandateTick, dueState, REFUSED,
+  depositForMandate, runMandateTick, dueState, REFUSED, productionTickDeps,
 } from "../netlify/functions/_vault-mandate-deposit.mjs";
 import { mandateDaySpend, recordMandateSpend, dcaDaySpend } from "../netlify/functions/_budget.mjs";
 
@@ -111,6 +111,8 @@ section("0 — R1 + R2: the caps live off the DD surface; the gate is a code con
   const exitSeam = src.filter((f) => f !== "shared/vault-mandate/record.mjs" && /\bexitAvailable\b/.test(readFileSync(f, "utf8")));
   ok("⭐ no production file passes `exitAvailable` (creation cannot be talked into an exit rule)", exitSeam.length === 0, exitSeam.join(", "));
   const tick = existsSync("netlify/functions/vault-mandate-tick.mjs") ? readFileSync("netlify/functions/vault-mandate-tick.mjs", "utf8") : "";
+  ok("⭐ depositForMandate REFUSES a passed `now` (a second clock) — it throws",
+    (await attemptAsync(() => depositForMandate({ record: {}, etag: '"e0"', checked: {}, amountUsdc: 1, deps: {}, now: 0 })))?.threw?.includes("second clock") === true);
   ok("the scheduled handler calls runMandateTick without a config", /runMandateTick\(/.test(tick) && !/config\s*:/.test(tick));
   const toml = readFileSync("netlify.toml", "utf8");
   ok("netlify.toml schedules vault-mandate-tick", /\[functions\."vault-mandate-tick"\]\s*\n\s*schedule\s*=\s*"[^"]+"/.test(toml));
@@ -347,10 +349,18 @@ function fakeReceipts() {
 const CLEAR_OBS = { r1: { status: "clear" }, r2: { status: "clear" }, r3: { status: "clear" }, r4: { status: "clear" } };
 const ANCHOR = { blockNumber: 999, blockHash: "0x" + "11".repeat(32) };
 const reading = (endpoint) => ({ endpoint, ok: true, blockHash: ANCHOR.blockHash, exitFee: { declaredBps: 10, measuredBps: 10 }, depositFeeBps: 0, redemption: { state: "full", positionShares: "100" }, payability: {} });
-const checked = (o = {}) => ({ anchor: ANCHOR, check: { outage: null, observations: CLEAR_OBS, anchor: ANCHOR },
-  report: { subject: { address: SUBJ, blockNumber: 999, chainId: MOCK_CHAIN_ID }, attestation: { status: "signed" } },
-  verification: { valid: true }, reportFailure: null, readings: [reading("a"), reading("b")], cost: { signCalls: 1 },
-  timing: { anchoredAt: T0 - 5_000, verifiedAt: T0 - 1_000 }, ...o });
+// ⭐ ONE clock function for the fixtures. A check records WHICH clock timed it (runMandateCheck attaches it to
+// `timing`, non-enumerable) and the write refuses any other — so the fixtures must share this one function.
+const FIXED_CLOCK = () => T0;
+const withClock = (timing, clk) => (timing ? Object.defineProperty({ ...timing }, "clock", { value: clk, enumerable: false }) : timing);
+const checked = ({ clock = FIXED_CLOCK, ...o } = {}) => {
+  const c = { anchor: ANCHOR, check: { outage: null, observations: CLEAR_OBS, anchor: ANCHOR },
+    report: { subject: { address: SUBJ, blockNumber: 999, chainId: MOCK_CHAIN_ID }, attestation: { status: "signed" } },
+    verification: { valid: true }, reportFailure: null, readings: [reading("a"), reading("b")], cost: { signCalls: 1 },
+    timing: { anchoredAt: T0 - 5_000, verifiedAt: T0 - 1_000 }, ...o };
+  c.timing = withClock(c.timing, clock);
+  return c;
+};
 const LIMITS = (o = {}) => ({ ceilingUsdc: () => 60, userReserveFraction: () => 0.5, vaultCapUsdc: () => 25,
   canSpendDay: async () => ({ allowed: true }), mandateDaySpend: async () => 0, dcaDaySpend: async () => 0,
   scaUsdcBalanceMinor: async () => 50_000_000n, ...o });
@@ -366,6 +376,7 @@ function execDeps({ record, exec, intents, mandates, receipts, facts, over = {} 
     deps: {
       executeAction: (...a) => executor.proxy.executeAction(...a),
       intents: intentsC.proxy, mandates: mandates ?? undefined, limits: LIMITS(),
+      now: FIXED_CLOCK, // the write reads its clock from deps, at the write — the SAME function the fixture checks carry
       previewAtAnchor: async () => 9_999_500n,
       readDepositFacts: async () => facts ?? { readable: true, depositBlock: 1001, parentBlock: 1000, predictedAtParent: 9_999_000n, eventShares: 9_999_000n, shareDelta: 9_999_000n, feeAtParentBps: 0, feeAtDepositBlockBps: 0 },
       recordMandateSpend: async (x) => { spends.push({ kind: "mandate-day", ...x }); },
@@ -381,7 +392,7 @@ section("6 — ⭐⭐ the WRITE gate: disarmed, and armed with the freshness win
   const record = activeRecord();
   const x = execDeps({ record });
   x.deps.mandates = x.mandates;
-  const d = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: x.deps, now: T0 }));
+  const d = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: x.deps }));
   ok("⭐⭐ disarmed (the shipped constants) → REFUSED at the write", d?.ok === false && d?.code === REFUSED.DISARMED, show(d));
   ok("  …it says what it WOULD have deposited", d?.wouldDeposit?.amountUsdc === 10, show(d?.wouldDeposit));
   ok("⭐⭐ …the INTENT STORE was not touched (0 calls)", x.intentsC.calls.length === 0, show(x.intentsC.calls.map((c) => c.fn)));
@@ -389,13 +400,13 @@ section("6 — ⭐⭐ the WRITE gate: disarmed, and armed with the freshness win
   ok("  …no ledger was written", x.spends.length === 0);
 
   const y = execDeps({ record }); y.deps.mandates = y.mandates;
-  const u = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: y.deps, now: T0,
+  const u = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: y.deps,
     config: { armed: true, armedFrom: T0 - DAY, freshnessMs: null } }));
   ok("⭐⭐ ARMED with the freshness window UNSET → REFUSED, by that rule", u?.ok === false && u?.code === REFUSED.FRESHNESS_UNSET, show(u));
   ok("  …nothing written, nothing executed", y.intentsC.calls.length === 0 && y.executor.calls.length === 0);
   for (const bad of [0, -1, NaN, "60000", Infinity]) {
     const z = execDeps({ record }); z.deps.mandates = z.mandates;
-    const r = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: z.deps, now: T0,
+    const r = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: z.deps,
       config: { armed: true, armedFrom: T0 - DAY, freshnessMs: bad } }));
     ok(`  a window of ${JSON.stringify(bad) ?? String(bad)} is not a window → refused, nothing executed`, r?.ok === false && r?.code === REFUSED.FRESHNESS_UNSET && z.executor.calls.length === 0, show(r));
   }
@@ -414,7 +425,7 @@ section("6 — ⭐⭐ the WRITE gate: disarmed, and armed with the freshness win
       mutant = await import(`../${mutantPath}`);
     } finally { if (existsSync(mutantPath)) unlinkSync(mutantPath); }
     const w = execDeps({ record }); w.deps.mandates = w.mandates;
-    const mu = await attemptAsync(() => mutant.depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: w.deps, now: T0,
+    const mu = await attemptAsync(() => mutant.depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: w.deps,
       config: { armed: true, armedFrom: T0 - DAY, freshnessMs: null } }));
     const caught = !(mu?.ok === false && mu?.code === REFUSED.FRESHNESS_UNSET);
     ok("⭐⭐ RED WITHOUT THE RULE: the excised module no longer refuses as FRESHNESS_UNSET (the case above would fail)", caught, `mutant → ${show(mu)}`);
@@ -422,7 +433,7 @@ section("6 — ⭐⭐ the WRITE gate: disarmed, and armed with the freshness win
   }
 
   const af = execDeps({ record }); af.deps.mandates = af.mandates;
-  const a = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: af.deps, now: T0,
+  const a = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: af.deps,
     config: { armed: true, armedFrom: null, freshnessMs: 60_000 } }));
   ok("armed with no ARMED_FROM → refused (the two are flipped together)", a?.ok === false && a?.code === REFUSED.ARMED_FROM_UNSET && af.executor.calls.length === 0, show(a));
 }
@@ -433,14 +444,25 @@ section("7 — the check cannot be skipped: the mutations the design names");
   const record = activeRecord();
   const run = async ({ c = checked(), amount = 10, rec = record, cfg = ARMED, extra = {}, over = {} } = {}) => {
     const x = execDeps({ record: rec, over }); x.deps.mandates = x.mandates;
-    const r = await attemptAsync(() => depositForMandate({ record: rec, etag: '"e0"', checked: c, amountUsdc: amount, deps: x.deps, now: T0, config: cfg, ...extra }));
+    const r = await attemptAsync(() => depositForMandate({ record: rec, etag: '"e0"', checked: c, amountUsdc: amount, deps: x.deps, config: cfg, ...extra }));
     return { r, x };
   };
   const refusedBy = ({ r, x }, code) => r?.ok === false && (!code || r?.code === code) && x.executor.calls.length === 0 && x.intentsC.calls.filter((c) => c.fn !== "listOpen").length === 0;
   ok("no check → refused, nothing executed", refusedBy(await run({ c: null }), REFUSED.NO_CHECK));
   ok("⭐ a STALE check (anchored 61 s ago, window 60 s) → refused", refusedBy(await run({ c: checked({ timing: { anchoredAt: T0 - 61_000, verifiedAt: T0 - 60_500 } }) }), REFUSED.STALE_CHECK));
-  ok("a check with no timing → refused as stale", refusedBy(await run({ c: checked({ timing: undefined }) }), REFUSED.STALE_CHECK));
-  ok("a check timed in the FUTURE → refused", refusedBy(await run({ c: checked({ timing: { anchoredAt: T0 + 5_000, verifiedAt: T0 + 6_000 } }) }), REFUSED.STALE_CHECK));
+  const noT = await run({ c: checked({ timing: undefined }) });
+  ok("a check with no timing → THROWS (it carries no clock, so it cannot prove it shares the write's)", /no clock/i.test(noT.r?.threw ?? "") && noT.x.executor.calls.length === 0, show(noT.r));
+  // ⭐ A NEGATIVE AGE IS A BUG, NOT A STALE CHECK: the anchor cannot be later than the write that reads it unless
+  // two clocks are being compared. It must be refused LOUDLY and under its own code, never filed as "stale".
+  const loud = []; const origErr = console.error; console.error = (...a) => { loud.push(a.join(" ")); };
+  let fut; try { fut = await run({ c: checked({ timing: { anchoredAt: T0 + 5_000, verifiedAt: T0 + 6_000 } }) }); } finally { console.error = origErr; }
+  ok("⭐ a check timed AFTER the write (negative age) → refused as a CLOCK BUG, not as stale", refusedBy(fut, REFUSED.CLOCK_BUG) && fut.r?.code !== REFUSED.STALE_CHECK, show(fut.r));
+  ok("  …and it is LOUD: console.error names the bug and both times", loud.some((l) => /CLOCK BUG/.test(l) && /negative/i.test(l) && l.includes(String(T0 + 5_000))), JSON.stringify(loud).slice(0, 200));
+  // Fresh at the gate (age 5 s), stale by the time the preview + limit reads finish and the intent would be written.
+  const reads = [T0, T0 + 56_000]; let ri = 0;
+  const seqClock = () => reads[Math.min(ri++, reads.length - 1)];
+  const slow = await run({ c: checked({ clock: seqClock }), over: { now: seqClock } });
+  ok("⭐ fresh at the gate but past the window AT THE WRITE → refused as stale, before the intent", refusedBy(slow, REFUSED.STALE_CHECK) && /at the write/.test(slow.r?.reason ?? ""), show(slow.r));
   ok("⭐ an UNSIGNED report (verification invalid) → refused", refusedBy(await run({ c: checked({ verification: { valid: false, reason: "owner-key-mismatch" } }) }), REFUSED.UNSIGNED));
   ok("no report at all → refused", refusedBy(await run({ c: checked({ report: null, verification: null }) }), REFUSED.UNSIGNED));
   ok("a report for ANOTHER address → refused", refusedBy(await run({ c: checked({ report: { ...checked().report, subject: { ...checked().report.subject, address: "0x" + "99".repeat(20) } } }) }), REFUSED.UNSIGNED));
@@ -471,7 +493,7 @@ section("8 — an ARMED deposit, end to end (fakes at every boundary)");
 {
   const record = activeRecord();
   const x = execDeps({ record }); x.deps.mandates = x.mandates;
-  const r = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: x.deps, now: T0, config: ARMED }));
+  const r = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: x.deps, config: ARMED }));
   ok("deposited + asserted matched", r?.ok === true && r?.verdict?.verdict === "matched", show(r));
   const ex = x.executor.calls[0]?.args?.[0], ctx = x.executor.calls[0]?.args?.[1];
   ok("ONE executeAction call, type vault_deposit, the record's vault, 10 USDC", x.executor.calls.length === 1 && ex?.type === "vault_deposit" && ex?.vault === "xylo-usdc" && ex?.amountUsdc === 10, show(ex));
@@ -500,38 +522,38 @@ section("8 — an ARMED deposit, end to end (fakes at every boundary)");
   // no double deposit: the seq is create-only
   const pre = fakeIntents({ preset: [[`d/${SESSION}/vm-1/1`, { status: "submitting" }]] });
   const y = execDeps({ record, intents: pre }); y.deps.mandates = y.mandates;
-  const dd = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: y.deps, now: T0, config: ARMED }));
+  const dd = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: y.deps, config: ARMED }));
   ok("⭐ an intent already exists for this seq → refused, the executor NOT called (no double deposit)", dd?.ok === false && dd?.code === REFUSED.INTENT_EXISTS && y.executor.calls.length === 0, show(dd));
 
   // the executor refuses on the disclosure → pause DISCLOSURE_CHANGED
   const z = execDeps({ record, exec: async () => ({ ok: false, blocked: "your acknowledgment does not match the vault's current disclosure", disclosure: { level: "WARN" } }) }); z.deps.mandates = z.mandates;
-  const dc = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: z.deps, now: T0, config: ARMED }));
+  const dc = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: z.deps, config: ARMED }));
   const zr = z.mandates._m.get(`${SESSION}/vm-1`)?.data;
   ok("⭐ a changed vault disclosure → the mandate PAUSES with DISCLOSURE_CHANGED", dc?.ok === false && zr?.status === "paused" && zr?.pause?.flags?.includes("DISCLOSURE_CHANGED"), show(zr?.pause));
   ok("  …the intent is marked refused", [...z.intentsC.proxy._m.values()][0]?.data?.status === "refused");
 
   // the executor refuses on the day ceiling (a race) → skip, never pause
   const w = execDeps({ record, exec: async () => ({ ok: false, blocked: "daily agent-spend ceiling: 70 > 60 USDC" }) }); w.deps.mandates = w.mandates;
-  const dl = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: w.deps, now: T0, config: ARMED }));
+  const dl = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: w.deps, config: ARMED }));
   const wr = w.mandates._m.get(`${SESSION}/vm-1`)?.data;
   ok("⭐ the daily limit refuses at the executor → 'checked, not deposited', the mandate stays ACTIVE", dl?.ok === false && dl?.code === REFUSED.EXECUTOR && wr?.status === "active" && wr?.progress?.depositedUsdc === 0, show(dl));
   ok("  …the intent is refused, the receipt keeps the signed check", [...w.intentsC.proxy._m.values()][0]?.data?.status === "refused" && dl?.receipt?.report?.attestation?.status === "signed");
 
   // the executor throws mid-flight → the intent stays open for recovery; nothing is declared
   const t = execDeps({ record, exec: async () => { throw new Error("socket hang up"); } }); t.deps.mandates = t.mandates;
-  const th = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: t.deps, now: T0, config: ARMED }));
+  const th = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: t.deps, config: ARMED }));
   const ti = [...t.intentsC.proxy._m.values()][0]?.data;
   ok("⭐ the executor throws → the intent stays OPEN (submitted), never 'not-deposited'", th?.ok === false && th?.code === REFUSED.OUTCOME_UNKNOWN && ti?.status === "submitted", show({ th, ti }));
   ok("  …the record is untouched (recovery reads the chain next tick)", t.mandates._m.get(`${SESSION}/vm-1`)?.data?.progress?.depositedUsdc === 0);
 
   // mismatched assertion → pause; the deposit stays counted
   const mm = execDeps({ record, facts: { readable: true, depositBlock: 1001, parentBlock: 1000, predictedAtParent: 9_999_000n, eventShares: 9_000_000n, shareDelta: 9_000_000n, feeAtParentBps: 0, feeAtDepositBlockBps: 0 } }); mm.deps.mandates = mm.mandates;
-  const mr = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: mm.deps, now: T0, config: ARMED }));
+  const mr = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: mm.deps, config: ARMED }));
   const mrec = mm.mandates._m.get(`${SESSION}/vm-1`)?.data;
   ok("⭐ fewer shares than quoted → the mandate PAUSES, the deposit is still counted (no autonomous withdrawal)",
     mr?.verdict?.verdict === "mismatched" && mrec?.status === "paused" && mrec?.progress?.depositedUsdc === 10, show(mrec?.pause));
   const ur = execDeps({ record, facts: { readable: false, why: "receipt unreadable" } }); ur.deps.mandates = ur.mandates;
-  await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: ur.deps, now: T0, config: ARMED }));
+  await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: ur.deps, config: ARMED }));
   const urec = ur.mandates._m.get(`${SESSION}/vm-1`)?.data;
   ok("an unreadable assertion → pause INCONCLUSIVE, never matched", urec?.status === "paused" && urec?.pause?.flags?.includes("INCONCLUSIVE"), show(urec?.pause));
 }
@@ -575,12 +597,15 @@ const checkDeps = () => ({ health: async () => ({ serving: true }), analyzeClien
   resolveVault: (k) => (k === "xylo-usdc" ? { ...VAULT, assetAddress: ASSET } : null), cashOnly: () => true });
 function tickDeps(record, { intents, over = {}, clock = T0 } = {}) {
   const x = execDeps({ record, intents });
+  // ONE clock for the tick and its checks (production wires the same function into both). At T0 it is the
+  // fixtures' FIXED_CLOCK, so checks built by `checked()` in runCheck overrides share it too.
+  const clk = clock === T0 ? FIXED_CLOCK : () => clock;
   const mandates = counting("mandates", fakeMandates([record]));
   const receipts = fakeReceipts();
   return { x, mandates, receipts, deps: {
-    ...x.deps, mandates: mandates.proxy, receipts, now: () => clock,
+    ...x.deps, mandates: mandates.proxy, receipts, now: clk,
     isPaused: async () => null,
-    runCheck: (rec) => runMandateCheck({ record: rec, deps: { ...checkDeps(), now: () => clock } }),
+    runCheck: (rec) => runMandateCheck({ record: rec, deps: { ...checkDeps(), now: clk } }),
     ...over,
   } };
 }
@@ -691,6 +716,73 @@ section("10 — the tick's order of operations");
   ok("⭐ no catch-up: armed later than the first due → next due is the ARMING moment", ds.due === false && ds.dueAt === T0 + 3 * DAY, show(ds));
   const ds2 = dueState({ record: activeRecord(), now: T0 + 30 * DAY, config: { armed: true, armedFrom: T0 } });
   ok("  …a month overdue is ONE deposit, not a backlog of four", ds2.due === true && ds2.windowsOverdue === undefined, show(ds2));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("11 — ⭐⭐ the clock: an ADVANCING clock, as in production (tick and check both read Date.now)");
+// Until 2026-09-26 every test here used ONE fixed clock for the tick start, the check and the write, so the
+// age at the write was always exactly 0. Production reads the clock at different moments, and the tick passed
+// its START time to the write while the check stamped its anchor LATER: age = tickStart − anchoredAt < 0, and
+// every armed deposit was refused as stale. A clock that advances on every read reproduces that.
+{
+  const advancing = (start, step) => { let t = start; return () => (t += step); };
+  const armedTick = async (records, clock) => {
+    const x = execDeps({ record: records[0] });
+    const mandates = fakeMandates(records);
+    const deps = { ...x.deps, mandates, receipts: fakeReceipts(), now: clock, isPaused: async () => null,
+      runCheck: (rec) => runMandateCheck({ record: rec, deps: { ...checkDeps(), now: clock } }) };
+    const res = await attemptAsync(() => runMandateTick({ deps, config: { ...ARMED, armedFrom: T0 - DAY } }));
+    return { res, x, mandates };
+  };
+  const loud = []; const origErr = console.error; console.error = (...a) => { loud.push(a.join(" ")); };
+  let one, three;
+  try {
+    one = await armedTick([activeRecord()], advancing(T0, 1_000));
+    three = await armedTick([activeRecord({ id: "vm-1" }), activeRecord({ id: "vm-2" }), activeRecord({ id: "vm-3" })], advancing(T0, 7_000));
+  } finally { console.error = origErr; }
+  const r1 = one.res?.results?.[0];
+  ok("⭐⭐ ONE armed mandate, advancing clock → DEPOSITED (not refused as stale)", r1?.outcome === "deposited" && one.x.executor.calls.length === 1, show({ outcome: r1?.outcome, code: r1?.code, reason: r1?.receipt?.reason ?? r1?.reason }));
+  ok("  …the age at the write is recorded, and it is NOT negative", Number.isFinite(r1?.receipt?.checkAgeMs) && r1.receipt.checkAgeMs >= 0, show(r1?.receipt?.checkAgeMs));
+  // Clock reads between the anchor and the write: verifiedAt, the early gate, then the write itself = 3 steps.
+  ok("  …and it is measured from the check's OWN anchor to a clock read AT the write (3 reads later = 3000 ms)", r1?.receipt?.checkAgeMs === 3_000, show(r1?.receipt?.checkAgeMs));
+  const rs = three.res?.results ?? [];
+  ok("⭐⭐ THREE mandates in one tick → all three deposited", rs.length === 3 && rs.every((r) => r.outcome === "deposited") && three.x.executor.calls.length === 3, show(rs.map((r) => [r.id, r.outcome, r.code])));
+  const ages = rs.map((r) => r.receipt?.checkAgeMs);
+  ok("⭐⭐ …the later mandates do NOT accumulate a larger apparent age (each is its own anchor → its own write)", ages.length === 3 && ages.every((a) => a === ages[0]) && ages[0] === 21_000, JSON.stringify(ages));
+  ok("  …no age is negative", ages.every((a) => Number.isFinite(a) && a >= 0), JSON.stringify(ages));
+  ok("  …and nothing on this path logged a CLOCK BUG", !loud.some((l) => /CLOCK BUG/.test(l)), JSON.stringify(loud).slice(0, 200));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("12 — ⭐⭐ ONE clock: the check and the write cannot diverge");
+// The stale gate compares the check's anchoredAt with the write's clock. That is only meaningful if both came
+// from the SAME clock. It used to hold by coincidence (both defaulted to Date.now); now it is checked by identity.
+{
+  const record = activeRecord();
+  const two = execDeps({ record }); two.deps.mandates = two.mandates;
+  const other = () => T0; // the SAME value, a DIFFERENT clock
+  const d2 = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked({ clock: other }), amountUsdc: 10, deps: two.deps, config: ARMED }));
+  ok("⭐⭐ two different clocks (even returning the same time) → THROWS, nothing written or executed",
+    /two clocks/i.test(d2?.threw ?? "") && two.executor.calls.length === 0 && two.intentsC.calls.length === 0, show(d2));
+  const dis = execDeps({ record }); dis.deps.mandates = dis.mandates;
+  const d3 = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked({ clock: other }), amountUsdc: 10, deps: dis.deps }));
+  ok("⭐ …it throws while DISARMED too, so the deployed disarmed tick proves the wiring before anything is armed", /two clocks/i.test(d3?.threw ?? ""), show(d3));
+
+  // runMandateCheck records the clock that timed it — and keeps it out of anything serialised.
+  const mine = () => T0;
+  const c1 = await attemptAsync(() => runMandateCheck({ record, deps: { ...checkDeps(), now: mine } }));
+  ok("runMandateCheck stamps timing.clock with the clock it used", c1?.timing?.clock === mine, show(c1?.timing));
+  ok("  …non-enumerable: a stored receipt never carries a function", !Object.keys(c1?.timing ?? {}).includes("clock") && !/clock/.test(JSON.stringify(c1?.timing ?? {})));
+  const c2 = await attemptAsync(() => runMandateCheck({ record, deps: checkDeps() }));
+  ok("  …with no clock given it falls back to Date.now, and says so", c2?.timing?.clock === Date.now);
+
+  // ⭐ THE PRODUCTION WIRING, built offline and inspected: the check's clock IS the tick's clock.
+  const fakeStore = () => ({ get: async () => null, getWithMetadata: async () => null, setJSON: async () => ({}), list: async () => ({ blobs: [] }) });
+  const prod = await attemptAsync(() => productionTickDeps({ getStore: fakeStore }));
+  ok("⭐⭐ production: the check deps' clock is the SAME function as the tick's (wired, not defaulted)",
+    typeof prod?.now === "function" && typeof prod?.checkDepsFor === "function" && prod.checkDepsFor().now === prod.now, show(prod?.threw ?? Object.keys(prod ?? {})));
+  const pd = productionDeps({ health: async () => ({}), resolveVault: () => null, now: mine });
+  ok("  …productionDeps carries the `now` it is given", pd.now === mine);
 }
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed`);

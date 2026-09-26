@@ -51,6 +51,7 @@ export const REFUSED = Object.freeze({
   UNSIGNED: "report-not-verified", STALE_CHECK: "stale-check", DECISION: "decision-not-deposit", AMOUNT: "amount",
   READINGS: "readings-unagreed", PREVIEW: "preview-unreadable", NO_ROOM: "no-room", INTENT_EXISTS: "intent-exists",
   INTENT_UNWRITABLE: "intent-unwritable", EXECUTOR: "executor-refused", OUTCOME_UNKNOWN: "outcome-unknown",
+  CLOCK_BUG: "clock-bug",
 });
 /** Pause flags this path adds to decide.mjs's FLAG set. */
 export const PAUSE_FLAG = Object.freeze({
@@ -153,12 +154,38 @@ function commitSeq({ deps, owner, id, seq, amountUsdc, deposited, verdict, now }
 
 /**
  * THE ONE FUNCTION THAT ISSUES A MANDATE DEPOSIT.
- * @param {{record, etag, checked, amountUsdc, deps, now:number, config?}} a
+ * @param {{record, etag, checked, amountUsdc, deps, config?}} a
  *   `checked` = runMandateCheck's result (+ timing). A `decision` passed alongside is IGNORED: it re-decides.
  *   `config` defaults to the shipped constants. ⛔ Only the test suite passes it (source-guarded).
+ *
+ * ═══ ⭐⭐ THE CLOCK IS READ HERE, AT THE WRITE — NEVER PASSED IN (fixed 2026-09-26) ════════════════
+ * This function used to take `now` from the tick, which read Date.now() ONCE at the tick's start — before the
+ * check stamped `anchoredAt`. So at the write, age = tickStart − anchoredAt was NEGATIVE, and the stale gate
+ * refused every armed deposit. The suite missed it because one fixed clock served the tick, the check and the
+ * write, so the age was always exactly 0. Now the clock (deps.now, else Date.now — the same source the check
+ * stamps with) is read here: once at the early gate, and again immediately before the intent is written, which
+ * is the moment the freshness window has to cover. A `now` argument THROWS: it would be a second clock.
+ * ⛔ A NEGATIVE AGE IS A BUG, NOT A STALE CHECK — refused under its own code and logged loudly.
  */
-export async function depositForMandate({ record, etag, checked, amountUsdc, deps, now, config = SHIPPED }) {
-  const t = Number.isFinite(now) ? now : Date.now();
+export async function depositForMandate({ record, etag, checked, amountUsdc, deps, config = SHIPPED, ...rest }) {
+  if (Object.prototype.hasOwnProperty.call(rest, "now")) {
+    throw new Error("depositForMandate reads its own clock at the write; a passed `now` is a second clock (the 2026-09-26 stale-check bug)");
+  }
+  const clock = typeof deps?.now === "function" ? deps.now : Date.now;
+  // ⭐⭐ ONE CLOCK, BY IDENTITY. The stale gate compares the check's anchoredAt with this clock, which only means
+  // something if the check was timed by THIS clock. It used to hold by coincidence (both defaulted to Date.now);
+  // now the check carries the clock that timed it and anything else throws — before the arming gate, so the
+  // deployed DISARMED tick exercises the wiring long before a deposit could depend on it.
+  if (checked && typeof checked === "object") {
+    const checkClock = checked.timing?.clock;
+    if (typeof checkClock !== "function") {
+      throw new Error("the check carries no clock identity (timing.clock), so it cannot prove it shares the write's clock");
+    }
+    if (checkClock !== clock) {
+      throw new Error("two clocks: the check was timed by a different clock than the write reads — wire the tick's clock into the check (productionDeps({ now }))");
+    }
+  }
+  const t = clock();
   const refuse = (code, reason, extra = {}) => ({ ok: false, code, reason, ...extra });
   const amount = Number(amountUsdc);
 
@@ -187,11 +214,23 @@ export async function depositForMandate({ record, etag, checked, amountUsdc, dep
       !same(checked.check?.anchor?.blockHash, anchor.blockHash)) {
     return refuse(REFUSED.UNSIGNED, `the check carries no signed, verified report for this vault at its anchor (${checked.reportFailure ?? checked.verification?.reason ?? "missing"})`);
   }
-  const anchoredAt = checked.timing?.anchoredAt, age = t - anchoredAt;
-  // Written as !(age <= window) so a missing window or time can only refuse.
-  if (!Number.isFinite(anchoredAt) || age < 0 || !(age <= config.freshnessMs)) {
-    return refuse(REFUSED.STALE_CHECK, `the check's anchor is ${Number.isFinite(age) ? `${age} ms` : "of unknown age"} old; the window is ${config.freshnessMs} ms`);
-  }
+  const anchoredAt = checked.timing?.anchoredAt;
+  const ageRefusal = (at, where) => {
+    const age = at - anchoredAt;
+    if (Number.isFinite(age) && age < 0) {
+      // Two clocks are being compared somewhere: the anchor cannot postdate the write that reads it.
+      console.error(`[vault-mandate] 🚨 CLOCK BUG: negative check age ${age} ms at ${where} — anchoredAt=${anchoredAt}, ` +
+        `clock=${at}, mandate ${record.owner}/${record.id}. Refusing; this is a defect, not a stale check.`);
+      return refuse(REFUSED.CLOCK_BUG, `negative check age (${age} ms) at ${where}: the anchor postdates the write — a clock defect, refused`);
+    }
+    // Written as !(age <= window) so a missing window or time can only refuse.
+    if (!Number.isFinite(anchoredAt) || !(age <= config.freshnessMs)) {
+      return refuse(REFUSED.STALE_CHECK, `the check's anchor is ${Number.isFinite(age) ? `${age} ms` : "of unknown age"} old at ${where}; the window is ${config.freshnessMs} ms`);
+    }
+    return null;
+  };
+  const early = ageRefusal(t, "the gate");
+  if (early) return early;
   // ⭐ RE-DECIDED HERE, from the record's rules and the check. Nothing passed in can say "deposit".
   const decision = decideMandateAction({ rules: record.rules, check: checked.check });
   if (decision.action !== ACTION.DEPOSIT) return refuse(REFUSED.DECISION, `the check decides ${decision.action}, not deposit (${decision.flags.join(", ")})`, { decision });
@@ -215,12 +254,17 @@ export async function depositForMandate({ record, etag, checked, amountUsdc, dep
   if (!room.ok) return refuse(REFUSED.NO_ROOM, room.reason);
 
   // ═══ 5. THE INTENT — create-only on the seq, BEFORE any signing ═══
+  // ⭐ The clock at THE WRITE: the preview and limit reads above take time, and this is the age that counts.
+  const tw = clock();
+  const late = ageRefusal(tw, "the write");
+  if (late) return late;
+  const checkAgeMs = tw - anchoredAt;
   const seq = record.progress.nextSeq;
   const key = vaultMandateIntentKey(record.owner, record.id, seq);
   const receiptBase = { mandate: { owner: record.owner, id: record.id }, seq, intentKey: key, amountUsdc: amount,
-    report: rep, verification: checked.verification, anchor, readings: checked.readings, decision, timing: checked.timing };
+    report: rep, verification: checked.verification, anchor, readings: checked.readings, decision, timing: checked.timing, checkAgeMs };
   let cur = {
-    schema: "vault-mandate-intent/1", owner: record.owner, id: record.id, seq, status: "submitting", createdAt: iso(t),
+    schema: "vault-mandate-intent/1", owner: record.owner, id: record.id, seq, status: "submitting", createdAt: iso(tw), checkAgeMs,
     walletAddress: record.walletAddress, vault: record.vault.key,
     anchor: { blockNumber: anchor.blockNumber, blockHash: anchor.blockHash }, reportDigest: digest(rep),
     amountUsdc: amount, amountMinor: amountMinor.toString(), sharesPredicted: sharesPredicted.toString(),
@@ -279,9 +323,10 @@ export async function depositForMandate({ record, etag, checked, amountUsdc, dep
   await writeIntent({ status: "asserted", verdict });
 
   // ═══ 8. COMMIT ═══
-  const commit = await commitSeq({ deps, owner: record.owner, id: record.id, seq, amountUsdc: amount, deposited: true, verdict, now: t });
+  const tc = clock();
+  const commit = await commitSeq({ deps, owner: record.owner, id: record.id, seq, amountUsdc: amount, deposited: true, verdict, now: tc });
   if (!commit.ok) warnings.push(`the record could not be committed: ${commit.why}`);
-  try { await deps.recordMandateSpend({ owner: record.walletAddress, amountUsdc: amount, at: t, chargeId: key }); }
+  try { await deps.recordMandateSpend({ owner: record.walletAddress, amountUsdc: amount, at: tc, chargeId: key }); }
   catch (e) { warnings.push(`the mandate-day counter could not be charged: ${String(e?.message ?? e)}`); }
   return { ok: true, intentKey: key, txHash, verdict, warnings,
     receipt: { ...receiptBase, outcome: "deposited", txHash, assertion: verdict } };
@@ -426,7 +471,8 @@ async function tickOne({ owner, id, deps, config, now }) {
   }
 
   // 5–8. THE WRITE — the gate inside refuses while disarmed.
-  const res = await depositForMandate({ record, etag: r.etag, checked, amountUsdc: amount, deps, now, config });
+  // No `now` here: the write reads its own clock (see depositForMandate).
+  const res = await depositForMandate({ record, etag: r.etag, checked, amountUsdc: amount, deps, config });
   if (res.code === REFUSED.DISARMED) {
     const full = await receipt({ ...base, outcome: "would-deposit", decision, note: `WOULD DEPOSIT ${amount} USDC — disarmed, nothing written, nothing executed` });
     return { owner, id, outcome: "would-deposit", amountUsdc: amount, receipt: full };
@@ -476,9 +522,12 @@ export async function productionTickDeps({ getStore, event = null }) {
   const read = (address, functionName, args, at) => agreed((c) => c.readContract({ address, abi: VAULT_ABI, functionName, args, ...at }));
   const mstore = getStore(store.VAULT_MANDATE_STORE);
   const health = () => rungs.healthDisclosure(event ?? { headers: {} });
+  // ⭐ ONE clock for the tick, its checks and its writes — wired, not two independent Date.now defaults.
+  const now = () => Date.now();
+  const checkDepsFor = () => check.productionDeps({ health, resolveVault: vault.resolveVault, now });
 
   return {
-    now: () => Date.now(),
+    now, checkDepsFor,
     mandates: store.mandateAdapter(mstore),
     intents: store.intentAdapter(mstore),
     receipts: store.receiptAdapter(getStore(store.VAULT_MANDATE_RECEIPT_STORE)),
@@ -492,7 +541,7 @@ export async function productionTickDeps({ getStore, event = null }) {
       dcaDaySpend: (owner) => budget.dcaDaySpend({ owner }),
       scaUsdcBalanceMinor: (owner) => agreed((c) => c.readContract({ address: arc.CONTRACTS.USDC, abi: ERC20_BAL, functionName: "balanceOf", args: [owner] })),
     },
-    runCheck: (record) => check.runMandateCheck({ record, deps: check.productionDeps({ health, resolveVault: vault.resolveVault }) }),
+    runCheck: (record) => check.runMandateCheck({ record, deps: checkDepsFor() }),
     previewAtAnchor: ({ vault: v, amountMinor, anchor }) => read(v.address, "previewDeposit", [amountMinor], { blockHash: anchor.blockHash }),
     executeAction: (step, ctx) => actions.executeAction(step, ctx),
     async readDepositFacts({ vault: v, holder, txHash, amountMinor }) {

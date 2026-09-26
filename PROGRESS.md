@@ -27805,3 +27805,63 @@ T deployed `4c48e41` (piece 4 + the settled disclosure wording). Checked afterwa
 T's read of piece 4 in production · the recovery values (chosen, not measured) and the lost-id residual risk · the
 freshness window, set from a measured signing latency — which needs a mandate (piece 6) or a probe, since the
 disarmed tick signs only for a due mandate · ARMED + ARMED_FROM flipped together in their own commit.
+
+---
+
+# 🐛 VAULT MANDATE — CLOCK BUG FIXED: every ARMED deposit would have been refused as stale (2026-09-26)
+
+Found reading the code for the freshness-window question, after deploy 6ab7dfa2. **Not live-harmful:** the path is
+disarmed, and the failure was fail-CLOSED (no deposit, never a wrong one). But arming after measuring the window
+would have produced a mandate that never deposits, reported as "stale check".
+
+## The bug
+`runMandateTick` read `Date.now()` ONCE, at the start of the tick, and passed it to `depositForMandate` as `now`.
+The check stamped `timing.anchoredAt` LATER, from its own `Date.now()`. At the write the gate computed
+`age = tickStart − anchoredAt` — **negative** — and `age < 0` sat in the stale branch, so **every armed deposit was
+refused as `stale-check`**; with several mandates in one tick, later ones more negative still. Reproduced red on
+the old code with an advancing clock: "the check's anchor is **-1000 ms** old".
+
+## Why the tests missed it
+The suite used **ONE fixed clock** for the tick start, the check and the write, so `anchoredAt == now` and the age
+was always exactly 0. The fixture made the two moments the same moment — the one thing production never does.
+⭐ **The rule: never mock the thing under test — and time is a thing under test.** A gate that compares two
+timestamps must be tested with a clock that ADVANCES between them, the way the real one does.
+
+## The fix
+- `depositForMandate` reads its own clock (deps.now): once at the early gate, and again **immediately before the
+  intent is written** — the moment the freshness window must cover. Both ages are measured from that check's own
+  anchor; `checkAgeMs` (age at the write) is recorded on the intent and in the receipt.
+- **A negative age is a BUG, not a stale check:** refused as `clock-bug`, with a loud `console.error` naming both
+  times and the mandate.
+- **A passed `now` throws** (it would be a second clock); the tick no longer passes one.
+- **ONE clock, by identity, not by coincidence.** Previously the check and the write agreed only because both
+  defaulted to `Date.now()`. Now `runMandateCheck` records the clock that timed it (`timing.clock`, non-enumerable
+  — never serialised into a receipt); `depositForMandate` THROWS if that is not the very function it reads, or if
+  the check carries none — before the arming gate, so the deployed DISARMED tick proves the wiring first.
+  `productionDeps({ now })` carries the clock; `productionTickDeps` builds one `now` and wires it into both
+  (`checkDepsFor()`).
+
+## Tests (test:mandatedeposit 198 → 215/0; test:all 157/157)
+Red first twice — the advancing-clock cases, then the two-clocks cases (the divergent-clock deposit went through,
+`ok:true`). Now: one armed mandate deposits with age 3000 ms (three clock reads after its anchor); three mandates
+in one tick deposit with ages [21000, 21000, 21000] — later ones do not accumulate; no age negative; a future
+anchor → `clock-bug`, logged; fresh at the gate but 61 s at the write → stale "at the write", before any intent;
+a passed `now` throws; two different clocks returning the SAME time → throws, armed or disarmed; production wiring
+inspected offline: `checkDepsFor().now === now`. Mutations caught (9): the original bug · negative filed as stale ·
+no re-check at the write · the write reusing the gate's read · a passed `now` accepted · identity not compared ·
+production not wiring the clock · the check not recording its clock · the clock leaking into serialised timing.
+
+## The four near-misses (read, not changed) — no other gate compares two clocks to allow or refuse
+1. **Recovery deadline** (`classifyIntent`: tick-start `now` − `intent.createdAt` from an EARLIER tick's write) —
+   the age is slightly UNDER-counted → leans to "pending", i.e. waits longer before "not deposited". Safe direction.
+2. **Due check** (`dueState`: tick-start `now` vs `nextDueAt`) — a mandate that falls due during a long tick waits
+   for the next hourly tick. Conservative. The arming-time comparison at the write uses a later clock than the
+   tick start, so it can only agree.
+3. **Day buckets at UTC midnight** — assignment, not a refusal. The room checks (`canSpendDay`, mandate + DCA day
+   counters) and the charges seconds later each read their own time, so across midnight room can be checked
+   against day D while the charge lands in D+1 (bounded by one deposit). Recovery charges a recovered deposit to
+   the day recovery runs → under-counts a past day, over-counts today → narrows the limit. `executeAction`'s own
+   check-then-charge straddles midnight the same way on every spend path (pre-existing).
+4. **Timestamp only** — a receipt's `at` is the tick start while its check timing is later, so `receipt.at <
+   timing.anchoredAt` can read oddly. No decision rests on it.
+(The fifth point from the audit — same clock by default, not by construction — is the identity fix above.)

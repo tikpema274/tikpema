@@ -107,6 +107,9 @@ export async function runMandateCheck({ record, deps }) {
   // taken the moment the anchor is agreed; `verifiedAt` when the signed report has verified (or failed).
   const clock = typeof deps.now === "function" ? deps.now : Date.now;
   const timing = { anchoredAt: null, verifiedAt: null, signingLatencyMs: null };
+  // ⭐ WHICH clock timed this check travels with it (non-enumerable: never serialised into a receipt), so the
+  // write can refuse to compare anchoredAt against any other clock (depositForMandate). See PROGRESS 2026-09-26.
+  Object.defineProperty(timing, "clock", { value: clock, enumerable: false });
   const whole = (reason) => ({ anchor: null, check: { outage: { reason }, observations: {}, anchor: null },
     report: null, verification: null, reportFailure: null, readings: [], cost, timing });
 
@@ -192,15 +195,18 @@ export function viemEndpointReader(rpc) {
 }
 
 /**
- * @param {{health:()=>Promise, resolveVault:Function, sign?:boolean, vaultAckToken?:Function}} o
+ * @param {{health:()=>Promise, resolveVault:Function, sign?:boolean, vaultAckToken?:Function, now?:Function}} o
  *   sign:false → signOptions omitted (probe only). vaultAckToken: readBaseline's disclosure-token reader;
  *   the create endpoint (piece 6) passes it — absent, readBaseline yields no token and creation refuses.
+ *   now: the clock the check stamps anchoredAt with. The mandate tick passes ITS clock, so the check and the
+ *   write share one clock by construction (depositForMandate throws otherwise); absent → Date.now (probes).
  */
-export function productionDeps({ health, resolveVault, sign = true, vaultAckToken = undefined }) {
+export function productionDeps({ health, resolveVault, sign = true, vaultAckToken = undefined, now = undefined }) {
   const readers = ARC_QUORUM_ENDPOINTS.map(viemEndpointReader);
   const quorum = () => quorumClient(ARC_QUORUM_ENDPOINTS.map((rpc) => chainClient("arc-testnet", { rpc })));
   return {
     health, resolveVault, vaultAckToken,
+    ...(typeof now === "function" ? { now } : {}),
     analyzeClient: quorum(),
     verifyClient: quorum(),
     signOptions: sign ? ddAttestationOptions() : { sign: async () => { throw new Error("signing disabled for this read-only run"); }, ...DD_IDENTITY },
