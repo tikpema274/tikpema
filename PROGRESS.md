@@ -28024,3 +28024,80 @@ its balanceOf) and the recognition gate refuses V2 — but adding a V2 profile w
 **Redemption semantics (done) → Morpho V2 profile → any allowlist widening.** The V2 profile can now be recognised
 without its holders reading "blocked"; its real signal (exit liquidity + a simulated redeem) plugs into the declared
 `exit-liquidity` slot when built.
+
+---
+
+# 🧭 VAULT MANDATE — FINDING A: MONITORING SEPARATE FROM DEPOSITING — SCOPED, DECISIONS RECORDED, NOTHING BUILT (2026-09-26)
+
+From the piece 5 design (finding A). Scope only.
+
+## The problem (read from piece 4's tick)
+A check runs only after every DEPOSIT gate passes: the mandate may act (a **paused** mandate is `may-not-act`, never
+checked) · due for a deposit · budget left · deposit room incl. the wallet holding the next deposit. And any PAUSE
+decision — an OUTAGE included — latches `status: paused`. So:
+- a **fully deposited mandate is never checked again** — its exit rules go dead exactly when the position is largest;
+- a weekly mandate leaves a finding unseen for **up to a week**;
+- **one transient RPC failure switches off every exit rule** until the user acts.
+
+## 1. A monitoring check
+- **Trigger:** a POSITION exists — the mandate has made ≥ 1 deposit and is not closed, AND the SCA's share balance
+  (at the anchor, both endpoints) is > 0 (a manual reclaim reads 0 → monitoring stops by itself) — and monitoring is
+  due (`lastCheckAt + interval`; a deposit check counts, one clock, never two signatures in the same hour). **No deposit
+  gate applies:** not budget, not due-for-deposit, not wallet room, not the deposit pause.
+- **Differs from the deposit check:** no preflight, no intent, no deposit; the same signed check, readings and decision.
+  DEPOSIT → record clear, nothing else · PAUSE → pause deposits + notify, keep monitoring · EXIT → piece 5's exit path.
+  Its own receipt and window key.
+
+## 2. Pause means "deposits paused", not "monitoring stopped"
+The record splits into **status** `active | exiting | exit-blocked | closed` · **deposits** `running | paused {flags,
+reason, at}` · **monitoring** `watching | degraded {since, consecutiveFailures} | stopped {why}`. `mayAct` splits into
+`mayDeposit` (active + acknowledged + deposits running) and `mayMonitor` (consistent, not closed); a stale
+acknowledgement keeps monitoring able to notify but removes exit authority. Resume (piece 6 UI) acts on deposits only.
+Monitoring stops only on: exit completed, mandate closed/cancelled, position read as 0, record inconsistent — never on a
+deposit pause, never on an outage. The tick needs two paths (deposit, monitoring); it can no longer skip on
+`may-not-act` before checking.
+
+## 3. Cost — one signature per check (weekly mandate, 8 weeks = 56 days)
+Measured basis: a signature is **0 USDC** marginal (Circle signMessage, 2026-08-29) + ~36 RPC calls; comparator = the
+DD list price, 0.06 USDC per signed report.
+
+| Monitoring | A: depositing weekly throughout (deposit checks count) | B: fully deposited, then held 8 weeks |
+|---|---|---|
+| none (today) | 9 signatures · 0.54 USDC | **0** |
+| weekly | 9 · 0.54 | 8 · 0.48 |
+| daily | **57** · 3.42 (~2,050 RPC calls) | 56 · 3.36 |
+| twice daily | **113** · 6.78 (~4,070 RPC calls) | 112 · 6.72 |
+
+Counting deposit and monitoring checks separately gives 65 / 121 in A. Monitoring multiplies signatures **6–13×**
+over the deposit-only count. Real constraints at ~0 marginal money: public-RPC load (Arc's has throttled us) and
+function time (~1 s of reads + signing, signing latency unmeasured).
+
+## 4. The OUTAGE / INCONCLUSIVE split
+| Outcome | Deposits | Monitoring | Exit rules |
+|---|---|---|---|
+| **OUTAGE** — we could not check | this window **skipped**, retried next tick, **no latch** | keeps running; `degraded`; notify after a threshold | armed (cannot fire during the outage — no finding without a check) |
+| **INCONCLUSIVE** — the vault may no longer be what the rules assume | **paused (latched)** | keeps running | armed |
+| **FINDING**, pause rule | **paused (latched)** | keeps running | other rules armed |
+| **FINDING**, exit rule | closed via the exit | until closed | fires (piece 5) |
+"Exit on a finding, never on a failure to read" is unchanged.
+
+## 5. What the user is told (Claude's wording — NOT approved)
+Disclosure: *"While you have money in this vault, we check your rules {cadence}, and before every deposit. Between
+checks we are not watching — a change can happen, and affect your money, before we see it. If we can't complete a
+check, we don't deposit, and we keep trying. If we haven't been able to check for {threshold}, we tell you — and until
+we can check again, your exit rules can't act."* Status lines for: deposits paused (still checking, exit rules on) ·
+outage (no deposit made, next try) · monitoring degraded (exit rules can't act until we can check). The cadence in the
+disclosure puts it inside the fingerprint; changing it invalidates existing acknowledgements (correct).
+
+## ⭐ DECISIONS (T, 2026-09-26)
+- **TAKE THE SPLIT (4 above).** An OUTAGE skips the window and retries, **never latches** — the latch adds no safety,
+  since a deposit cannot proceed without a successful check. **INCONCLUSIVE and findings latch.**
+- **Cadence is a CODE CONSTANT rendered from its value, not a user term.** A flat fee pushes toward under-checking, so
+  the cadence must not be something Tikpema varies per mandate. (Rendered into the disclosure like the day shares.)
+- **Monitoring ships AFTER piece 5.** Until exits exist its only new power is notifying sooner, at 6–13× the signatures.
+- **OPEN (T's decision):** the fee amount — **it cannot be set until signing latency is measured** (the freshness-window
+  measurement from piece 4) — and the two-state UI (deposits / watching).
+- **OPEN, AND A MEASUREMENT, NOT A JUDGEMENT: endpoint disagreement.** `observe` treats the two endpoints disagreeing
+  as INCONCLUSIVE, which under the split LATCHES; much of it may be provider lag. **How often do the two endpoints
+  actually disagree in practice?** Measure it (the disarmed tick's readings, or a probe over time) and let that decide
+  whether disagreement is transient-by-default (treated as an outage, latching only when it persists across ticks).
