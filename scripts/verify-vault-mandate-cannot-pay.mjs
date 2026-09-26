@@ -29,7 +29,7 @@ import {
 } from "../shared/vault-mandate/redeem-sim.mjs";
 import { observeMandateCheck } from "../shared/vault-mandate/observe.mjs";
 import { decideMandateAction, validateMandateRules, STATE_RULES, OBSERVED, CAUSE, ACTION, FLAG } from "../shared/vault-mandate/decide.mjs";
-import { EXIT_NOT_GUARANTEED, EXIT_FEE_RISE } from "../shared/vault-mandate/copy.mjs";
+import { EXIT_NOT_GUARANTEED, EXIT_FEE_RISE, PAYOUT_NOT_GUARANTEED } from "../shared/vault-mandate/copy.mjs";
 
 let pass = 0, fail = 0;
 const ok = (label, cond, extra = "") => {
@@ -200,6 +200,18 @@ section("5 — the disclosure words T approved, pinned verbatim");
     "whether the vault could pay you at the moment we check, but that can change in the next block. If a vault can't pay, " +
     "your mandate pauses and your shares stay where they are. We can't recover them for you.", show(EXIT_NOT_GUARANTEED));
   ok("  …it ends on 'We can't recover them for you.'", EXIT_NOT_GUARANTEED.endsWith("We can't recover them for you."));
+  // T, 2026-09-26: the vault-cannot-pay-only variant — a new opening, the approved ending unchanged.
+  ok("'Getting your USDC back is not guaranteed' — exact text", PAYOUT_NOT_GUARANTEED ===
+    "Getting your USDC back is not guaranteed. When you withdraw, the vault has to pay you, and it may not be able to: " +
+    "it may be short of USDC, its owner can move the funds out at any time, and USDC itself can refuse a transfer. We check " +
+    "whether the vault could pay you at the moment we check, but that can change in the next block. If a vault can't pay, " +
+    "your mandate pauses and your shares stay where they are. We can't recover them for you.", show(PAYOUT_NOT_GUARANTEED));
+  const TAIL_AT = "it may be short of USDC";
+  const tail = (t) => (typeof t === "string" && t.includes(TAIL_AT) ? t.slice(t.indexOf(TAIL_AT)) : null);
+  ok("⭐ the two share their ending EXACTLY, from 'it may be short of USDC' to 'We can't recover them for you.'",
+    tail(EXIT_NOT_GUARANTEED) !== null && tail(EXIT_NOT_GUARANTEED) === tail(PAYOUT_NOT_GUARANTEED));
+  ok("  …and the new opening never mentions an exit rule", typeof PAYOUT_NOT_GUARANTEED === "string" &&
+    !/exit/i.test(PAYOUT_NOT_GUARANTEED.slice(0, PAYOUT_NOT_GUARANTEED.indexOf(TAIL_AT))));
   ok("the fee-rise sentence, in plain words", EXIT_FEE_RISE ===
     "If the owner raises the exit fee to its cap and your rule exits, you pay that raised fee to leave.", show(EXIT_FEE_RISE));
 }

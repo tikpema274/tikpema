@@ -27721,3 +27721,31 @@ each once), each share word pinned to its constant, an unmapped share throws, T'
 from the text, the opening line, the zero-fee wording. Mutations: 7 tried, 6 caught at first; the survivor
 (hard-coding "a quarter" in the sentence — same text, invisible to any render test) is now caught by a source guard
 (the words may appear only in SHARE_WORDS). copy.mjs's placement comment now says "Nowhere else".
+
+---
+
+# ✅ VAULT MANDATE — the vault-cannot-pay paragraph matches its mandate (T, 2026-09-26), piece 4 still NOT DEPLOYED
+
+**The defect:** on a mandate with vault-cannot-pay and no exit rule, the disclosure carried the approved
+"An exit is not guaranteed. When one of your rules says exit, …" while no rule said exit. The paragraph belongs there
+(the vault may be unable to pay the user back) — its opening did not.
+
+**T approved a second opening (2026-09-26), `PAYOUT_NOT_GUARANTEED` in copy.mjs:**
+> Getting your USDC back is not guaranteed. When you withdraw, the vault has to pay you, and it may not be able to:
+> it may be short of USDC, its owner can move the funds out at any time, and USDC itself can refuse a transfer. We check
+> whether the vault could pay you at the moment we check, but that can change in the next block. If a vault can't pay,
+> your mandate pauses and your shares stay where they are. We can't recover them for you.
+
+- The ending (from "it may be short of USDC") is ONE string, `CANNOT_PAY_ENDING`, shared by both constants, so the
+  two cannot drift; each full paragraph is still pinned verbatim in test:mandatecannotpay. `EXIT_NOT_GUARANTEED`'s
+  text is unchanged.
+- **Selection (renderDisclosure):** any exit rule → the fee-rise sentence + `EXIT_NOT_GUARANTEED` (exit wins where
+  both apply); vault-cannot-pay with no exit rule → `PAYOUT_NOT_GUARANTEED`; neither → nothing. Never both.
+- Until piece 5 ships, creation refuses exit rules, so the new paragraph is the only one a live mandate can carry.
+
+**Tests:** red first — both suites failed at import (no `PAYOUT_NOT_GUARANTEED` export). Green: test:mandatecannotpay
+55 → **58/0** (new text verbatim; the shared ending identical; no "exit" in the new opening); test:mandaterecord
+97 → **101/0** (the four cases each render exactly the expected paragraphs — none / exit ×1 + fee ×1 / payout ×1 /
+exit wins ×1 + fee ×1 — never both, the disclosure ends on "We can't recover them for you." wherever one renders).
+Mutations, all caught: cannot-pay winning over exit · both paragraphs at once · the old behaviour · the cannot-pay
+paragraph dropped · a softened ending on the new paragraph.

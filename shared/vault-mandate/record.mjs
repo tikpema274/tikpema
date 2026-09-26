@@ -24,6 +24,7 @@ import { validateMandateRules, STATE_RULES, ON_FINDING } from "./decide.mjs";
 import { validateMandateTerms, EXIT_AVAILABLE, MANDATE_DAY_SHARE, MANDATE_AUTONOMOUS_MAX_SHARE } from "./limits.mjs";
 import {
   EXIT_NOT_GUARANTEED, EXIT_FEE_RISE, VERIFIED_PARAGRAPH, MONITORED_PARAGRAPH, CHECKED_AFTER_PARAGRAPH,
+  PAYOUT_NOT_GUARANTEED,
 } from "./copy.mjs";
 
 // vault-mandate/2 (piece 4): + the deposit TERMS, the vault disclosure token the user acknowledged
@@ -109,14 +110,16 @@ export function renderDisclosure(record) {
   // ⭐ THE EXIT PARAGRAPHS ARE CONDITIONAL (T, 2026-09-26). Decision 2 exists so a disclosure never talks about
   // exiting while nothing can exit. Placement follows copy.mjs (T, 2026-09-25):
   //   · the fee-rise sentence (+ the cap it names) — beside a rule set to EXIT;
-  //   · "An exit is not guaranteed" — beside any exit rule AND beside the vault-cannot-pay rule.
-  // A pause-only mandate without vault-cannot-pay renders neither.
+  //   · "An exit is not guaranteed" — beside any exit rule;
+  //   · "Getting your USDC back is not guaranteed" — beside vault-cannot-pay when NO rule exits (T, 2026-09-26).
+  // An exit rule wins where both apply; never both paragraphs. A pause-only mandate without vault-cannot-pay
+  // renders none of them.
   const rules = record.rules ?? [];
   const hasExit = rules.some((r) => r.onFinding === ON_FINDING.EXIT);
   const hasCannotPay = rules.some((r) => r.kind === "state" && r.subject === "vault-cannot-pay");
   const exitLines = [
     ...(hasExit ? [`${EXIT_FEE_RISE} ${capSentence}`] : []),
-    ...(hasExit || hasCannotPay ? [EXIT_NOT_GUARANTEED] : []),
+    ...(hasExit ? [EXIT_NOT_GUARANTEED] : hasCannotPay ? [PAYOUT_NOT_GUARANTEED] : []),
   ];
   const ackSentence = "You acknowledged this vault's disclosure as it read when you made this mandate. If the vault's terms " +
     "change, your mandate pauses and nothing is deposited until you have read them again.";

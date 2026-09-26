@@ -29,6 +29,7 @@ import {
 } from "../netlify/functions/_vault-mandate-store.mjs";
 import {
   EXIT_NOT_GUARANTEED, EXIT_FEE_RISE, VERIFIED_PARAGRAPH, MONITORED_PARAGRAPH, CHECKED_AFTER_PARAGRAPH,
+  PAYOUT_NOT_GUARANTEED,
 } from "../shared/vault-mandate/copy.mjs";
 
 let pass = 0, fail = 0;
@@ -326,11 +327,23 @@ section("6 — the disclosure's wording (T, 2026-09-26)");
   ok("⭐⭐ an exit rule → BOTH paragraphs render", has(exitOnly, EXIT_NOT_GUARANTEED) && has(exitOnly, EXIT_FEE_RISE));
   ok("  …the fee-rise sentence with this vault's cap beside it", has(exitOnly, `${EXIT_FEE_RISE} This vault's exit fee cap is 20.00%`));
   const cannotPay = textOf([{ kind: "state", subject: "vault-cannot-pay", onFinding: "pause" }]);
-  ok("⭐ vault-cannot-pay (pause) alone → 'An exit is not guaranteed' renders (copy.mjs placement), the fee-rise does not",
-    has(cannotPay, EXIT_NOT_GUARANTEED) && !has(cannotPay, EXIT_FEE_RISE));
   const both = textOf(INPUT_RULES);
-  ok("exit rules + vault-cannot-pay → both render, each exactly once",
-    both.split(EXIT_NOT_GUARANTEED).length === 2 && both.split(EXIT_FEE_RISE).length === 2);
+  // ⭐⭐ THE FOUR CASES (T, 2026-09-26): an exit rule wins where both apply; never both paragraphs.
+  const count = (t, x) => (typeof x === "string" && x.length ? t.split(x).length - 1 : NaN);
+  const cases = [
+    ["no exit rule, no vault-cannot-pay", none, { exit: 0, payout: 0, fee: 0 }],
+    ["exit rule only", exitOnly, { exit: 1, payout: 0, fee: 1 }],
+    ["vault-cannot-pay only", cannotPay, { exit: 0, payout: 1, fee: 0 }],
+    ["exit rule + vault-cannot-pay (exit wins)", both, { exit: 1, payout: 0, fee: 1 }],
+  ];
+  for (const [label, t, want] of cases) {
+    const got = { exit: count(t, EXIT_NOT_GUARANTEED), payout: count(t, PAYOUT_NOT_GUARANTEED), fee: count(t, EXIT_FEE_RISE) };
+    ok(`⭐⭐ ${label} → 'An exit…' ×${want.exit}, 'Getting your USDC back…' ×${want.payout}, fee-rise ×${want.fee}`,
+      t.length > 0 && got.exit === want.exit && got.payout === want.payout && got.fee === want.fee, JSON.stringify(got));
+  }
+  ok("⭐ never both paragraphs, in any case", cases.every(([, t]) => !(count(t, EXIT_NOT_GUARANTEED) > 0 && count(t, PAYOUT_NOT_GUARANTEED) > 0)));
+  ok("  …and the disclosure still ends on 'We can't recover them for you.' wherever either renders",
+    [exitOnly, cannotPay, both].every((t) => t.endsWith("We can't recover them for you.")));
 
   // ⭐ The shares are rendered from the constants; each word is pinned to its constant.
   ok("⭐ MANDATE_DAY_SHARE is 0.25 and renders as 'a quarter'", MANDATE_DAY_SHARE === 0.25 && shareWords(MANDATE_DAY_SHARE) === "a quarter");
