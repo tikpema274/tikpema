@@ -27671,8 +27671,8 @@ fingerprint, which is harmless only while no mandate exists.
   day-ceiling charge do not include it, and the next window can deposit again — up to one extra deposit
   (≤ 10 USDC) beyond what the record shows.
   Bounds, not a fix: the window is one line wide; the next deposit is ≥ 24 h away (cadence floor); a late
-  landing still shows in the share balance at the next check, and executeAction's vault cap and the daily
-  ceiling still bound each deposit. Not closed. Options if it matters before arming: pass a client
+  landing is VISIBLE in the share balance at the next check, but nothing reconciles it (no code compares it
+  to the record); executeAction's vault cap and the daily ceiling still bound each deposit. Not closed. Options if it matters before arming: pass a client
   idempotency key to Circle derived from the intent key (so the id can be looked up without the hook), or
   lengthen the deadline once real stuck-tx durations are measured.
 
