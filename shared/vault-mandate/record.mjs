@@ -21,7 +21,7 @@
 
 import { createHash } from "node:crypto";
 import { validateMandateRules, STATE_RULES, ON_FINDING } from "./decide.mjs";
-import { validateMandateTerms, EXIT_AVAILABLE } from "./limits.mjs";
+import { validateMandateTerms, EXIT_AVAILABLE, MANDATE_DAY_SHARE, MANDATE_AUTONOMOUS_MAX_SHARE } from "./limits.mjs";
 import {
   EXIT_NOT_GUARANTEED, EXIT_FEE_RISE, VERIFIED_PARAGRAPH, MONITORED_PARAGRAPH, CHECKED_AFTER_PARAGRAPH,
 } from "./copy.mjs";
@@ -34,6 +34,21 @@ export const MANDATE_SCHEMA = "vault-mandate/2";
 export const MANDATE_STATUS = Object.freeze({ AWAITING_ACK: "awaiting-ack", ACTIVE: "active", PAUSED: "paused" });
 const KNOWN_STATUS = new Set(Object.values(MANDATE_STATUS));
 const CADENCE_TEXT = Object.freeze({ daily: "once a day", weekly: "once a week" });
+
+// ── The day shares, in WORDS rendered from the constants (T, 2026-09-26), so the disclosure cannot drift
+// from the caps it describes. ⛔ An unmapped value THROWS rather than falling back to a decimal nobody
+// approved: changing MANDATE_DAY_SHARE or MANDATE_AUTONOMOUS_MAX_SHARE fails this module's import until its
+// words are written here. (Changing a share also changes every disclosure → every fingerprint → existing
+// acknowledgements go stale and those mandates stop until the user reads the new limit. That is intended.)
+const SHARE_WORDS = Object.freeze({ 0.25: "a quarter", 0.5: "half" });
+export function shareWords(fraction) {
+  const w = Object.prototype.hasOwnProperty.call(SHARE_WORDS, String(fraction)) ? SHARE_WORDS[String(fraction)] : undefined;
+  if (typeof w !== "string") throw new Error(`no approved words for the share ${JSON.stringify(fraction)}: add them to SHARE_WORDS (record.mjs) before changing the constant`);
+  return w;
+}
+// Resolved at import, so a bad constant fails on load, not first at a user's disclosure.
+const DAY_SHARE_WORDS = shareWords(MANDATE_DAY_SHARE);
+const AUTONOMOUS_SHARE_WORDS = shareWords(MANDATE_AUTONOMOUS_MAX_SHARE);
 /** Every deposit advances this; it is deliberately OUTSIDE the fingerprint, so the ack survives it. */
 export const freshProgress = () => ({ depositedUsdc: 0, depositCount: 0, nextSeq: 1, nextDueAt: null, lastDepositAt: null });
 
@@ -63,8 +78,9 @@ const sourceOf = (r) => (r.kind === "power" || r.subject === "owner-changed" ? S
 function describeRule(r) {
   if (r.kind === "power") return `The vault's owner ${POWER_TEXT[r.subject] ?? `holds the "${r.subject}" power`}`;
   switch (r.subject) {
-    case "exit-fee-above": return `The exit fee rises above ${pct(r.limitBps)}`;
-    case "deposit-fee-above": return `The deposit fee rises above ${pct(r.limitBps)}`;
+    // A limit of 0 is zero tolerance: "rises above 0.00%" reads as a threshold; the rule is "any fee at all".
+    case "exit-fee-above": return r.limitBps === 0 ? "The vault charges any exit fee at all" : `The exit fee rises above ${pct(r.limitBps)}`;
+    case "deposit-fee-above": return r.limitBps === 0 ? "The vault charges any deposit fee at all" : `The deposit fee rises above ${pct(r.limitBps)}`;
     case "owner-changed": return `The vault's owner changes from ${r.baselineOwner}`;
     case "redemption-restricted": return "You can redeem only part of your shares, or none";
     case "vault-cannot-pay": return "The vault cannot pay you: it holds less USDC than it owes, or a test redeem of your shares fails for lack of cash";
@@ -84,14 +100,29 @@ export function renderDisclosure(record) {
     ? `This vault's exit fee cap is ${pct(cap)}, from our reading when this mandate was made.`
     : "This vault's exit fee cap could not be read when this mandate was made.";
   const t = record.terms ?? {};
-  const tok = record.baseline?.vaultAckToken;
-  // ⚠️ These two sentences are piece 4's, NOT T-approved copy (copy.mjs holds the approved sentences).
+  // Wording by T, 2026-09-26. The vault ack token stays in the record (baseline.vaultAckToken, inside the
+  // fingerprint) and out of the text. The two shares are rendered from limits.mjs (SHARE_WORDS above).
   const termsSentence = `We deposit ${t.amountPerDepositUsdc} USDC ${CADENCE_TEXT[t.cadence] ?? `on cadence "${t.cadence}"`}, never more than ` +
-    `${t.maxTotalUsdc} USDC in total. Each deposit counts against your daily agent limit; when that limit has no room, the deposit is skipped, not forced.`;
-  const ackSentence = `You acknowledged this vault's disclosure as it read when this mandate was made (${typeof tok === "string" ? tok.slice(0, 12) : "none"}…). ` +
-    "If it changes, your mandate pauses until you review it.";
+    `${t.maxTotalUsdc} USDC in total. A mandate can use at most ${DAY_SHARE_WORDS} of your daily agent limit, and all your ` +
+    `autonomous agents together at most ${AUTONOMOUS_SHARE_WORDS} — so this never spends your whole day's room. When there is no room, ` +
+    "the deposit is skipped, not forced.";
+  // ⭐ THE EXIT PARAGRAPHS ARE CONDITIONAL (T, 2026-09-26). Decision 2 exists so a disclosure never talks about
+  // exiting while nothing can exit. Placement follows copy.mjs (T, 2026-09-25):
+  //   · the fee-rise sentence (+ the cap it names) — beside a rule set to EXIT;
+  //   · "An exit is not guaranteed" — beside any exit rule AND beside the vault-cannot-pay rule.
+  // A pause-only mandate without vault-cannot-pay renders neither.
+  const rules = record.rules ?? [];
+  const hasExit = rules.some((r) => r.onFinding === ON_FINDING.EXIT);
+  const hasCannotPay = rules.some((r) => r.kind === "state" && r.subject === "vault-cannot-pay");
+  const exitLines = [
+    ...(hasExit ? [`${EXIT_FEE_RISE} ${capSentence}`] : []),
+    ...(hasExit || hasCannotPay ? [EXIT_NOT_GUARANTEED] : []),
+  ];
+  const ackSentence = "You acknowledged this vault's disclosure as it read when you made this mandate. If the vault's terms " +
+    "change, your mandate pauses and nothing is deposited until you have read them again.";
   const text = [
-    `Vault mandate for ${v.label ?? v.key} (${v.address}) on chain ${v.chainId}. ${termsSentence}`,
+    // "at <address>", not "(<address>)": allowlist labels already end in "(xyUSDC)" and the parens doubled.
+    `Vault mandate for ${v.label ?? v.key} at ${v.address} on chain ${v.chainId}. ${termsSentence}`,
     ackSentence,
     "Before every deposit we check the rules you set:",
     ...ruleLines,
@@ -99,9 +130,7 @@ export function renderDisclosure(record) {
     VERIFIED_PARAGRAPH,
     MONITORED_PARAGRAPH,
     CHECKED_AFTER_PARAGRAPH,
-    "",
-    `${EXIT_FEE_RISE} ${capSentence}`,
-    EXIT_NOT_GUARANTEED,
+    ...(exitLines.length ? ["", ...exitLines] : []),
   ].join("\n");
   return { ruleLines, text };
 }

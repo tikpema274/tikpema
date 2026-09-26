@@ -20,8 +20,10 @@
 
 import {
   buildMandateRecord, renderDisclosure, mandateFingerprint, verifyMandateRecord,
-  acknowledgeMandate, amendMandateRules, MANDATE_STATUS, MANDATE_SCHEMA,
+  acknowledgeMandate, amendMandateRules, MANDATE_STATUS, MANDATE_SCHEMA, shareWords,
 } from "../shared/vault-mandate/record.mjs";
+import { readFileSync } from "node:fs";
+import { MANDATE_DAY_SHARE, MANDATE_AUTONOMOUS_MAX_SHARE } from "../shared/vault-mandate/limits.mjs";
 import {
   writeNewMandate, readMandate, acknowledgeStoredMandate, createVaultMandate, vaultMandateKey,
 } from "../netlify/functions/_vault-mandate-store.mjs";
@@ -308,6 +310,49 @@ section("5 — creating under a verified session");
   ok("⭐ exit on vault-cannot-pay via the create path → refused, nothing written",
     (await attemptAsync(() => createVaultMandate({ session: { address: OWNER }, walletAddress: WALLET,
       input: { vault: "xylo-usdc", rules: [{ kind: "state", subject: "vault-cannot-pay", onFinding: "exit" }] }, deps: ex })))?.ok === false && ex.store._map.size === 0);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("6 — the disclosure's wording (T, 2026-09-26)");
+{
+  const textOf = (rules) => build({ rules })?.record?.disclosure?.text ?? "";
+  const has = (t, x) => t.includes(x);
+  // ⭐ Decision 2: never talk about exiting while nothing can exit. Placement per copy.mjs.
+  const none = textOf([{ kind: "power", subject: "upgradeable", onFinding: "pause" }, { kind: "state", subject: "exit-fee-above", limitBps: 50, onFinding: "pause" }]);
+  ok("⭐⭐ no exit rule, no vault-cannot-pay → NEITHER exit paragraph renders", none.length > 0 && !has(none, EXIT_NOT_GUARANTEED) && !has(none, EXIT_FEE_RISE));
+  ok("  …nor the exit-fee-cap sentence that rides with the fee-rise one", none.length > 0 && !/exit fee cap/.test(none));
+  ok("  …and the text does not end on a dangling blank line", none.length > 0 && !none.endsWith("\n"));
+  const exitOnly = textOf([{ kind: "power", subject: "upgradeable", onFinding: "exit" }]);
+  ok("⭐⭐ an exit rule → BOTH paragraphs render", has(exitOnly, EXIT_NOT_GUARANTEED) && has(exitOnly, EXIT_FEE_RISE));
+  ok("  …the fee-rise sentence with this vault's cap beside it", has(exitOnly, `${EXIT_FEE_RISE} This vault's exit fee cap is 20.00%`));
+  const cannotPay = textOf([{ kind: "state", subject: "vault-cannot-pay", onFinding: "pause" }]);
+  ok("⭐ vault-cannot-pay (pause) alone → 'An exit is not guaranteed' renders (copy.mjs placement), the fee-rise does not",
+    has(cannotPay, EXIT_NOT_GUARANTEED) && !has(cannotPay, EXIT_FEE_RISE));
+  const both = textOf(INPUT_RULES);
+  ok("exit rules + vault-cannot-pay → both render, each exactly once",
+    both.split(EXIT_NOT_GUARANTEED).length === 2 && both.split(EXIT_FEE_RISE).length === 2);
+
+  // ⭐ The shares are rendered from the constants; each word is pinned to its constant.
+  ok("⭐ MANDATE_DAY_SHARE is 0.25 and renders as 'a quarter'", MANDATE_DAY_SHARE === 0.25 && shareWords(MANDATE_DAY_SHARE) === "a quarter");
+  ok("⭐ MANDATE_AUTONOMOUS_MAX_SHARE is 0.5 and renders as 'half'", MANDATE_AUTONOMOUS_MAX_SHARE === 0.5 && shareWords(MANDATE_AUTONOMOUS_MAX_SHARE) === "half");
+  ok("⭐ a share with no approved words THROWS (never a decimal nobody approved)", attempt(() => shareWords(0.3))?.threw !== undefined && attempt(() => shareWords("0.25x"))?.threw !== undefined);
+  ok("the terms sentence carries both, from the constants",
+    has(none, `at most ${shareWords(MANDATE_DAY_SHARE)} of your daily agent limit`) && has(none, `together at most ${shareWords(MANDATE_AUTONOMOUS_MAX_SHARE)} — so this never spends`));
+  // A hard-coded word renders the SAME text as the constant's, so no render test can see it: only the source can.
+  const src = readFileSync("shared/vault-mandate/record.mjs", "utf8");
+  ok("⭐ source guard: the words live ONLY in SHARE_WORDS (the sentence interpolates them)",
+    (src.match(/"a quarter"/g) ?? []).length === 1 && (src.match(/"half"/g) ?? []).length === 1 && !/at most (a quarter|half)\b/.test(src));
+  ok("T's two sentences, verbatim at 10 / 100 / weekly", has(none,
+    "We deposit 10 USDC once a week, never more than 100 USDC in total. A mandate can use at most a quarter of your daily agent limit, and all your autonomous agents together at most half — so this never spends your whole day's room. When there is no room, the deposit is skipped, not forced.") &&
+    has(none, "You acknowledged this vault's disclosure as it read when you made this mandate. If the vault's terms change, your mandate pauses and nothing is deposited until you have read them again."));
+  ok("the vault ack token is NOT in the text (it stays in the record)", !has(none, BASELINE.vaultAckToken.slice(0, 12)));
+
+  // The two render defects.
+  ok("the opening line reads 'at <address>', no doubled parentheses", has(none, `Vault mandate for ${VAULT.label} at ${VAULT.address} on chain`) && !/\) \(0x/.test(none));
+  const zero = textOf([{ kind: "state", subject: "deposit-fee-above", limitBps: 0, onFinding: "pause" }, { kind: "state", subject: "exit-fee-above", limitBps: 0, onFinding: "pause" }]);
+  ok("⭐ a zero-tolerance fee rule reads 'charges any … fee at all', never 'rises above 0.00%'",
+    has(zero, "The vault charges any deposit fee at all") && has(zero, "The vault charges any exit fee at all") && !/0\.00%/.test(zero));
+  ok("  …a non-zero limit still reads as a threshold", has(none, "The exit fee rises above 0.50%"));
 }
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed`);

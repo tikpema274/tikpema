@@ -2,7 +2,7 @@
 // test:mandatecannotpay. ⛔ Do not soften them: "We can't recover them for you." stays.
 // The mandate record (piece 3) renders these beside the vault's fee cap figure.
 
-/** Beside every mandate that has any exit rule, and beside the vault-cannot-pay rule. */
+/** Beside every mandate that has any exit rule, and beside the vault-cannot-pay rule. Nowhere else (renderDisclosure, record.mjs). */
 export const EXIT_NOT_GUARANTEED =
   "An exit is not guaranteed. When one of your rules says exit, we ask the vault to pay you. The vault may not be able to: " +
   "it may be short of USDC, its owner can move the funds out at any time, and USDC itself can refuse a transfer. We check " +

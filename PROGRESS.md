@@ -27641,20 +27641,12 @@ creation and amendment · the disarmed tick signs its check · freshness window 
 - `test:refusalquantity` flagged a bare `amount > 0` in the preflight → replaced with `amountFloorViolation`
   (the census ratchet is at its ceiling; no exemption added).
 
-## ⚠️ 1. Two disclosure sentences AWAITING T's REVIEW — Claude's wording, NOT approved
-They are rendered into every mandate disclosure (`renderDisclosure`, record.mjs) and marked there as not
-T-approved; `copy.mjs` still holds only approved copy. Verbatim templates:
-> `We deposit ${amountPerDepositUsdc} USDC ${"once a day" | "once a week"}, never more than ${maxTotalUsdc} USDC in total. Each deposit counts against your daily agent limit; when that limit has no room, the deposit is skipped, not forced.`
-
-> `You acknowledged this vault's disclosure as it read when this mandate was made (${first 12 hex of the token}…). If it changes, your mandate pauses until you review it.`
-
-As a user would read them (10 / 100 / weekly):
-> We deposit 10 USDC once a week, never more than 100 USDC in total. Each deposit counts against your daily agent limit; when that limit has no room, the deposit is skipped, not forced.
->
-> You acknowledged this vault's disclosure as it read when this mandate was made (abababababab…). If it changes, your mandate pauses until you review it.
-
-They must be approved or rewritten before any mandate is created (piece 6); changing them changes every
-fingerprint, which is harmless only while no mandate exists.
+## ✅ 1. Two disclosure sentences — RESOLVED (T rewrote them 2026-09-26; see the next entry)
+Claude's first wording (superseded, kept for the record): "We deposit {amount} USDC {cadence}, never more than
+{total} USDC in total. Each deposit counts against your daily agent limit; when that limit has no room, the deposit
+is skipped, not forced." and "You acknowledged this vault's disclosure as it read when this mandate was made
+({first 12 hex of the token}…). If it changes, your mandate pauses until you review it." Replaced by T's wording
+below; the token left the text and stays in the record.
 
 ## ⚠️ 2. Recovery values are CHOSEN, NOT MEASURED — and the residual risk
 - `RECOVERY_NOT_DEPOSITED_AFTER_MS = 30 min`: an intent is never declared not-deposited younger than this.
@@ -27691,3 +27683,41 @@ T's read of this commit · the two sentences above · measure the signing latenc
 (needs a mandate to exist → piece 6, or a probe) and set `MANDATE_CHECK_FRESHNESS_MS` · then flip ARMED +
 ARMED_FROM together in their own commit. Also for piece 6: the production `vaultAckToken` reader for
 `readBaseline` (until then creation refuses).
+
+---
+
+# ✅ VAULT MANDATE — DISCLOSURE WORDING SETTLED (T, 2026-09-26), piece 4 still NOT DEPLOYED
+
+## T's two sentences (replace Claude's), rendered by `renderDisclosure` (record.mjs)
+> We deposit {amount} USDC {once a day | once a week}, never more than {total} USDC in total. A mandate can use at
+> most a quarter of your daily agent limit, and all your autonomous agents together at most half — so this never
+> spends your whole day's room. When there is no room, the deposit is skipped, not forced.
+
+> You acknowledged this vault's disclosure as it read when you made this mandate. If the vault's terms change, your
+> mandate pauses and nothing is deposited until you have read them again.
+
+- The vault ack token stays in the record (`baseline.vaultAckToken`, inside the fingerprint) and OUT of the text.
+- **"a quarter" / "half" are RENDERED FROM THE CONSTANTS** (`MANDATE_DAY_SHARE`, `MANDATE_AUTONOMOUS_MAX_SHARE`) via
+  `SHARE_WORDS` + `shareWords()`, which THROWS on an unmapped value — resolved at import, so a changed constant
+  fails on load until its words are written. Changing a share changes every disclosure → every fingerprint →
+  existing acks go stale and those mandates stop until the user reads the new limit (intended). "at most half" stays
+  true under any env reserve (the code uses min(0.5, 1 − reserve)).
+
+## Three render fixes
+1. **Exit paragraphs are CONDITIONAL** (decision 2: no talk of exiting while nothing can exit). Placement is
+   copy.mjs's, T's 2026-09-25 approval, re-confirmed today when asked: the fee-rise sentence (+ the exit-fee-cap
+   sentence riding with it) only beside an EXIT rule; "An exit is not guaranteed" beside any exit rule AND beside the
+   vault-cannot-pay rule. A pause-only mandate without vault-cannot-pay renders neither.
+   ⚠️ Noted, not changed: on a vault-cannot-pay-only mandate the paragraph opens "When one of your rules says exit, …"
+   while none does — T's approved text, flagged for a later read.
+2. **Opening line:** "Vault mandate for {label} at {address} on chain {id}." — was "({address})", which doubled the
+   parentheses after labels like "XyloNet USDC Vault (xyUSDC)".
+3. **Zero-tolerance fee rules:** limitBps 0 reads "The vault charges any deposit fee at all" / "…any exit fee at all",
+   never "rises above 0.00%". Non-zero limits still read "rises above X%".
+
+## Tests
+`test:mandaterecord` 80 → **97/0**: both ways for the exit paragraphs (none / exit-only / cannot-pay-only / both,
+each once), each share word pinned to its constant, an unmapped share throws, T's sentences verbatim, token absent
+from the text, the opening line, the zero-fee wording. Mutations: 7 tried, 6 caught at first; the survivor
+(hard-coding "a quarter" in the sentence — same text, invisible to any render test) is now caught by a source guard
+(the words may appear only in SHARE_WORDS). copy.mjs's placement comment now says "Nowhere else".
