@@ -321,6 +321,35 @@ export async function recordDcaSpend({ owner, amountUsdc, at, store } = {}) {
   return rec.spentUsdc;
 }
 
+// ── THE VAULT MANDATE'S DAILY SHARE (piece 4) — the same shape as DCA's sub-counter above, its own key,
+// so the mandate's share (≤ 0.25 × ceiling) and mandate + DCA together (≤ 0.5 × ceiling) can both be
+// measured (shared/vault-mandate/limits.mjs mandateDayRoom). The hard canSpendDay stays the backstop.
+// ⭐ IDEMPOTENT BY chargeId (the intent key), the recordAgentSpend pattern: recovery may re-charge a
+// deposit it finds landed, and the membership test + the increment happen inside ONE casUpdate mutate.
+const mandateDayKey = (owner, date) => `mandate-day:${ownerKey(owner)}:${date}`;
+
+export async function mandateDaySpend({ owner, date, at, store } = {}) {
+  const d = date ?? utcDate(at);
+  const rec = await pickStore(store).getJSON(mandateDayKey(owner, d));
+  return rec?.spentUsdc ?? 0;
+}
+
+export async function recordMandateSpend({ owner, amountUsdc, at, store, chargeId } = {}) {
+  if (!chargeId) throw new Error("recordMandateSpend: a chargeId is required (the intent key), so a recovery re-charge is a no-op");
+  const s = pickStore(store);
+  const amt = round6(amountUsdc);
+  const date = utcDate(at);
+  let applied = true;
+  const rec = await casUpdate(s, mandateDayKey(owner, date), (cur) => {
+    const r = cur ?? { date, owner: ownerKey(owner), spentUsdc: 0 };
+    const charged = r.chargedIds ?? [];
+    if (charged.includes(chargeId)) { applied = false; return r; }
+    applied = true;
+    return { ...r, spentUsdc: round6((r.spentUsdc ?? 0) + amt), chargedIds: [...charged, chargeId] };
+  });
+  return { spentUsdc: rec.spentUsdc, applied };
+}
+
 // ── The gate: canSpend ────────────────────────────────────────────────────────
 // Checks in order and returns the FIRST failing reason:
 //   (a) amount ≤ per-purchase sub-cap

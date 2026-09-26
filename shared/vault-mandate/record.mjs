@@ -20,18 +20,27 @@
 //      acknowledgement stale, and a stale mandate does not act.
 
 import { createHash } from "node:crypto";
-import { validateMandateRules, STATE_RULES } from "./decide.mjs";
+import { validateMandateRules, STATE_RULES, ON_FINDING } from "./decide.mjs";
+import { validateMandateTerms, EXIT_AVAILABLE } from "./limits.mjs";
 import {
   EXIT_NOT_GUARANTEED, EXIT_FEE_RISE, VERIFIED_PARAGRAPH, MONITORED_PARAGRAPH, CHECKED_AFTER_PARAGRAPH,
 } from "./copy.mjs";
 
-export const MANDATE_SCHEMA = "vault-mandate/1";
-/** Piece 3 knows two statuses. Later pieces add paused/exited; anything unknown may not act. */
-export const MANDATE_STATUS = Object.freeze({ AWAITING_ACK: "awaiting-ack", ACTIVE: "active" });
+// vault-mandate/2 (piece 4): + the deposit TERMS, the vault disclosure token the user acknowledged
+// (baseline.vaultAckToken), a `paused` status with its flags, and `progress`. No /1 record was ever
+// stored (there is no create endpoint), so there is nothing to migrate.
+export const MANDATE_SCHEMA = "vault-mandate/2";
+/** Anything not listed may not act. `paused` is consistent but may not act until the user acts. */
+export const MANDATE_STATUS = Object.freeze({ AWAITING_ACK: "awaiting-ack", ACTIVE: "active", PAUSED: "paused" });
+const KNOWN_STATUS = new Set(Object.values(MANDATE_STATUS));
+const CADENCE_TEXT = Object.freeze({ daily: "once a day", weekly: "once a week" });
+/** Every deposit advances this; it is deliberately OUTSIDE the fingerprint, so the ack survives it. */
+export const freshProgress = () => ({ depositedUsdc: 0, depositCount: 0, nextSeq: 1, nextDueAt: null, lastDepositAt: null });
 
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const isAddr = (v) => typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v);
 const isFp = (v) => typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
+const isAckToken = isFp; // ackTokenFor (_vault.mjs): sha256 hex
 const pct = (bps) => `${(bps / 100).toFixed(2)}%`;
 
 // The fields a client may send per rule. Anything else (an id, a baselineOwner) is refused by name.
@@ -74,8 +83,17 @@ export function renderDisclosure(record) {
   const capSentence = Number.isInteger(cap)
     ? `This vault's exit fee cap is ${pct(cap)}, from our reading when this mandate was made.`
     : "This vault's exit fee cap could not be read when this mandate was made.";
+  const t = record.terms ?? {};
+  const tok = record.baseline?.vaultAckToken;
+  // ⚠️ These two sentences are piece 4's, NOT T-approved copy (copy.mjs holds the approved sentences).
+  const termsSentence = `We deposit ${t.amountPerDepositUsdc} USDC ${CADENCE_TEXT[t.cadence] ?? `on cadence "${t.cadence}"`}, never more than ` +
+    `${t.maxTotalUsdc} USDC in total. Each deposit counts against your daily agent limit; when that limit has no room, the deposit is skipped, not forced.`;
+  const ackSentence = `You acknowledged this vault's disclosure as it read when this mandate was made (${typeof tok === "string" ? tok.slice(0, 12) : "none"}…). ` +
+    "If it changes, your mandate pauses until you review it.";
   const text = [
-    `Vault mandate for ${v.label ?? v.key} (${v.address}) on chain ${v.chainId}. Before every deposit we check the rules you set:`,
+    `Vault mandate for ${v.label ?? v.key} (${v.address}) on chain ${v.chainId}. ${termsSentence}`,
+    ackSentence,
+    "Before every deposit we check the rules you set:",
     ...ruleLines,
     "",
     VERIFIED_PARAGRAPH,
@@ -96,13 +114,13 @@ const canonical = (v) => Array.isArray(v) ? `[${v.map(canonical).join(",")}]`
 export function mandateFingerprint(record) {
   const bound = {
     schema: record.schema, id: record.id, owner: record.owner, walletAddress: record.walletAddress,
-    vault: record.vault, rules: record.rules, baseline: record.baseline,
+    vault: record.vault, terms: record.terms, rules: record.rules, baseline: record.baseline,
     disclosure: { ruleLines: record.disclosure?.ruleLines ?? null, text: record.disclosure?.text ?? null },
   };
   return createHash("sha256").update(canonical(bound)).digest("hex");
 }
 
-function normalizeInputRules(input, baselineOwner) {
+function normalizeInputRules(input, baselineOwner, exitAvailable) {
   if (!Array.isArray(input)) return { errors: ["rules must be a list"] };
   const errors = [], rules = [];
   input.forEach((r, i) => {
@@ -112,6 +130,11 @@ function normalizeInputRules(input, baselineOwner) {
       errors.push(`rule[${i}]: field(s) ${extra.join(", ")} cannot be sent` +
         (extra.includes("baselineOwner") ? " (the baselineOwner is recorded by the server from the signed report)" : "") +
         (extra.includes("id") ? " (rule ids are assigned by the server)" : ""));
+      return;
+    }
+    // ⛔ Decision 2 (T): no rule may say exit while nothing can exit (EXIT_AVAILABLE, limits.mjs).
+    if (r.onFinding === ON_FINDING.EXIT && exitAvailable !== true) {
+      errors.push(`rule[${i}]: "${r.subject}" cannot exit yet — autonomous exit is not available until it ships (piece 5); choose pause`);
       return;
     }
     const rule = { id: `r${i + 1}`, kind: r.kind, subject: r.subject, onFinding: r.onFinding };
@@ -135,14 +158,19 @@ function checkBaseline(b) {
   if (b.signerVerified !== true) e.push("the baseline report's signer was not verified");
   if (!Number.isInteger(b.reportBlock)) e.push("the baseline names no report block");
   if (b.maxFeeBps !== null && b.maxFeeBps !== undefined && !Number.isInteger(b.maxFeeBps)) e.push("the baseline fee cap is not an integer");
+  // ⭐ The vault disclosure the user acknowledged. The deposit sends THIS token, never one minted from the
+  // day's inspection (that would be the mandate acknowledging its own disclosure).
+  if (!isAckToken(b.vaultAckToken)) e.push("the baseline carries no vault disclosure token for the user to acknowledge");
   return e;
 }
 
 /**
- * @param {{owner, walletAddress, vault:{key,address,chainId,label}, rules:Array, baseline:object, now:number, id:string}} a
- *   `owner` is the SESSION address; `rules` is the client's list; `baseline` comes from the transport.
+ * @param {{owner, walletAddress, vault:{key,address,chainId,label}, terms:object, rules:Array, baseline:object, now:number, id:string}} a
+ *   `owner` is the SESSION address; `terms` + `rules` are the client's; `baseline` comes from the transport.
+ *   `exitAvailable` defaults to EXIT_AVAILABLE. ⛔ Only the test suites pass it (a source guard in
+ *   test:mandatedeposit refuses any other caller): it exists so piece 5's record shapes stay testable.
  */
-export function buildMandateRecord({ owner, walletAddress, vault, rules, baseline, now, id } = {}) {
+export function buildMandateRecord({ owner, walletAddress, vault, terms, rules, baseline, now, id, exitAvailable = EXIT_AVAILABLE } = {}) {
   const errors = [];
   if (!isAddr(owner)) errors.push("no owner: a mandate is created only under a verified session");
   if (!isAddr(walletAddress)) errors.push("no agent wallet address");
@@ -150,23 +178,28 @@ export function buildMandateRecord({ owner, walletAddress, vault, rules, baselin
   if (typeof id !== "string" || !id) errors.push("no mandate id");
   if (!Number.isFinite(now)) errors.push("no creation time");
   errors.push(...checkBaseline(baseline));
+  const tv = validateMandateTerms(terms);
+  if (!tv.ok) errors.push(...tv.errors);
   if (errors.length) return { ok: false, errors };
 
-  const n = normalizeInputRules(rules, baseline.owner?.address);
+  const n = normalizeInputRules(rules, baseline.owner?.address, exitAvailable);
   if (n.errors) return { ok: false, errors: n.errors };
 
   const record = {
     schema: MANDATE_SCHEMA, id,
     owner: owner.toLowerCase(), walletAddress: walletAddress.toLowerCase(),
     vault: { key: vault.key, address: vault.address, chainId: vault.chainId, label: vault.label ?? vault.key },
+    terms: tv.terms,
     rules: n.rules,
     baseline: {
       owner: isAddr(baseline.owner?.address) ? baseline.owner.address : null,
       ownerKind: baseline.owner?.kind ?? null,
       reportBlock: baseline.reportBlock,
       maxFeeBps: Number.isInteger(baseline.maxFeeBps) ? baseline.maxFeeBps : null,
+      vaultAckToken: baseline.vaultAckToken,
     },
-    status: MANDATE_STATUS.AWAITING_ACK, ack: null,
+    status: MANDATE_STATUS.AWAITING_ACK, ack: null, pause: null,
+    progress: freshProgress(),
     createdAt: new Date(now).toISOString(),
   };
   record.disclosure = renderDisclosure(record);
@@ -187,6 +220,11 @@ export function verifyMandateRecord(record) {
   if (!isObj(record.vault) || !isAddr(record.vault.address)) errors.push("vault missing");
   const v = validateMandateRules(record.rules);
   if (!v.ok) errors.push(...v.errors);
+  const tv = validateMandateTerms(record.terms);
+  if (!tv.ok) errors.push(...tv.errors);
+  else if (tv.terms.cadence !== record.terms.cadence) errors.push("the stored terms name no cadence");
+  if (!isAckToken(record.baseline?.vaultAckToken)) errors.push("the record carries no acknowledged vault disclosure token");
+  if (!KNOWN_STATUS.has(record.status)) errors.push(`unknown status ${JSON.stringify(record.status)}`);
   for (const r of Array.isArray(record.rules) ? record.rules : []) {
     if (r?.subject === "owner-changed" && (!isAddr(record.baseline?.owner) || String(r.baselineOwner).toLowerCase() !== record.baseline.owner.toLowerCase())) {
       errors.push("the owner-change rule does not compare to the owner recorded at creation");
@@ -206,6 +244,7 @@ export function verifyMandateRecord(record) {
   const actErrors = [];
   if (ok) {
     if (record.status === MANDATE_STATUS.AWAITING_ACK) actErrors.push("awaiting the user's acknowledgement");
+    else if (record.status === MANDATE_STATUS.PAUSED) actErrors.push(`paused (${(record.pause?.flags ?? []).join(", ") || "no flags"}): ${record.pause?.reason ?? "no reason recorded"}`);
     else if (record.status !== MANDATE_STATUS.ACTIVE) actErrors.push(`status ${JSON.stringify(record.status)} may not act`);
     else if (!isObj(record.ack) || record.ack.fingerprint !== fingerprint) {
       actErrors.push("stale acknowledgement: the user acknowledged a different set of rules and disclosure");
@@ -225,16 +264,20 @@ export function acknowledgeMandate(record, fingerprint, now) {
   return { ok: true, record: { ...record, status: MANDATE_STATUS.ACTIVE, ack: { fingerprint, at: new Date(now).toISOString() } } };
 }
 
-/** New rules → a new version AWAITING a fresh acknowledgement. The baseline is carried over, never re-read from input. */
-export function amendMandateRules(record, rules, now) {
+/**
+ * New rules → a new version AWAITING a fresh acknowledgement. The baseline (and its vault ack token) and
+ * the terms are carried over, never re-read from input. `exitAvailable`: see buildMandateRecord.
+ */
+export function amendMandateRules(record, rules, now, { exitAvailable = EXIT_AVAILABLE } = {}) {
   const v = verifyMandateRecord(record);
   if (!v.ok) return { ok: false, errors: v.errors };
   const b = record.baseline;
   const built = buildMandateRecord({
-    owner: record.owner, walletAddress: record.walletAddress, vault: record.vault, rules, id: record.id, now,
-    baseline: { ok: true, reportSigned: true, signerVerified: true, owner: { address: b.owner, kind: b.ownerKind }, reportBlock: b.reportBlock, maxFeeBps: b.maxFeeBps },
+    owner: record.owner, walletAddress: record.walletAddress, vault: record.vault, terms: record.terms, rules, id: record.id, now, exitAvailable,
+    baseline: { ok: true, reportSigned: true, signerVerified: true, owner: { address: b.owner, kind: b.ownerKind }, reportBlock: b.reportBlock, maxFeeBps: b.maxFeeBps, vaultAckToken: b.vaultAckToken },
   });
   if (!built.ok) return built;
   // Recomputed with createdAt kept and amendedAt added; neither is in the fingerprint.
-  return { ok: true, record: { ...built.record, createdAt: record.createdAt, amendedAt: new Date(now).toISOString() } };
+  // ⭐ PROGRESS IS CARRIED: a fresh one would re-open the budget already deposited and reuse intent seqs.
+  return { ok: true, record: { ...built.record, progress: record.progress ?? freshProgress(), createdAt: record.createdAt, amendedAt: new Date(now).toISOString() } };
 }

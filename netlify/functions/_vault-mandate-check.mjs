@@ -102,8 +102,13 @@ export async function signedCheckReport({ address, anchor, deps }) {
  */
 export async function runMandateCheck({ record, deps }) {
   const cost = { signCalls: 0 };
+  // ⭐ TIMING (piece 4). The deposit refuses a check whose anchor is older than the freshness window, and
+  // that window is set from the MEASURED anchor → signed + verified latency (decision 4). `anchoredAt` is
+  // taken the moment the anchor is agreed; `verifiedAt` when the signed report has verified (or failed).
+  const clock = typeof deps.now === "function" ? deps.now : Date.now;
+  const timing = { anchoredAt: null, verifiedAt: null, signingLatencyMs: null };
   const whole = (reason) => ({ anchor: null, check: { outage: { reason }, observations: {}, anchor: null },
-    report: null, verification: null, reportFailure: null, readings: [], cost });
+    report: null, verification: null, reportFailure: null, readings: [], cost, timing });
 
   const v = deps.resolveVault(record?.vault?.key);
   if (!v) return whole(`vault ${JSON.stringify(record?.vault?.key)} is no longer on the allowlist`);
@@ -111,9 +116,12 @@ export async function runMandateCheck({ record, deps }) {
 
   const a = await resolveAnchor(deps.anchorReaders);
   if (!a.ok) return whole(`no anchor block: ${a.why}`);
+  timing.anchoredAt = clock();
 
   const [rep, readings] = await Promise.all([
-    signedCheckReport({ address: v.address, anchor: a.anchor, deps }),
+    signedCheckReport({ address: v.address, anchor: a.anchor, deps }).then((r) => {
+      timing.verifiedAt = clock(); timing.signingLatencyMs = timing.verifiedAt - timing.anchoredAt; return r;
+    }),
     Promise.all(deps.stateReaders.map((reader) =>
       readStateAtAnchor({ reader, vault: v, holder: record.walletAddress, anchor: a.anchor, cashOnly: deps.cashOnly(v.key) }))),
   ]);
@@ -125,14 +133,17 @@ export async function runMandateCheck({ record, deps }) {
     maxReportAgeBlocks: 0,
     report: rep.report, reportFailure: rep.why, stateReadings: readings,
   });
-  return { anchor: a.anchor, check, report: rep.report, verification: rep.verification, reportFailure: rep.why, readings, cost };
+  return { anchor: a.anchor, check, report: rep.report, verification: rep.verification, reportFailure: rep.why, readings, cost, timing };
 }
 
 /**
  * The baseline piece 3's createVaultMandate records: the owner from a SIGNED, VERIFIED report at an
  * anchor, and the vault's fee cap where both endpoints agree on it (else null → "could not be read").
+ * Piece 4: + `vaultAckToken`, the deposit gate's token for the disclosure the user is shown now
+ * (deps.vaultAckToken({vault, holder}) — production: depositDisclosure → ackTokenFor). Without one the
+ * baseline is refused: a mandate cannot deposit against a disclosure nobody acknowledged.
  */
-export async function readBaseline(vault, deps) {
+export async function readBaseline(vault, deps, { holder = null } = {}) {
   const a = await resolveAnchor(deps.anchorReaders);
   if (!a.ok) return { ok: false, why: `no anchor block: ${a.why}` };
   const rep = await signedCheckReport({ address: vault.address, anchor: a.anchor, deps });
@@ -140,7 +151,13 @@ export async function readBaseline(vault, deps) {
   const caps = await Promise.all(deps.stateReaders.map((r) =>
     r.read({ address: vault.address, fn: "MAX_FEE", args: [], blockHash: a.anchor.blockHash }).catch(() => null)));
   const agreed = caps.length >= 2 && caps.every((c) => typeof c === "bigint") && new Set(caps.map(String)).size === 1;
+  let vaultAckToken = null;
+  if (typeof deps.vaultAckToken === "function") {
+    try { vaultAckToken = await deps.vaultAckToken({ vault, holder }); }
+    catch (e) { return { ok: false, why: `the vault's deposit disclosure could not be read: ${String(e?.message ?? e)}`, cost: rep.cost }; }
+  }
   return {
+    vaultAckToken,
     ok: true, owner: rep.report.owner, reportBlock: rep.report.subject.blockNumber,
     reportSigned: true, signerVerified: true, maxFeeBps: agreed ? Number(caps[0]) : null,
     anchor: a.anchor, report: rep.report, cost: rep.cost,
@@ -155,6 +172,7 @@ const VAULT_ABI = parseAbi([
   "function maxRedeem(address) view returns (uint256)", "function convertToAssets(uint256) view returns (uint256)",
   "function previewRedeem(uint256) view returns (uint256)", "function totalAssets() view returns (uint256)",
   "function MAX_FEE() view returns (uint256)", "function redeem(uint256,address,address) returns (uint256)",
+  "function previewDeposit(uint256) view returns (uint256)",
 ]);
 
 export function viemEndpointReader(rpc) {
@@ -173,12 +191,16 @@ export function viemEndpointReader(rpc) {
   };
 }
 
-/** @param {{health:()=>Promise, resolveVault:Function, sign?:boolean}} o  sign:false → signOptions omitted (probe only) */
-export function productionDeps({ health, resolveVault, sign = true }) {
+/**
+ * @param {{health:()=>Promise, resolveVault:Function, sign?:boolean, vaultAckToken?:Function}} o
+ *   sign:false → signOptions omitted (probe only). vaultAckToken: readBaseline's disclosure-token reader;
+ *   the create endpoint (piece 6) passes it — absent, readBaseline yields no token and creation refuses.
+ */
+export function productionDeps({ health, resolveVault, sign = true, vaultAckToken = undefined }) {
   const readers = ARC_QUORUM_ENDPOINTS.map(viemEndpointReader);
   const quorum = () => quorumClient(ARC_QUORUM_ENDPOINTS.map((rpc) => chainClient("arc-testnet", { rpc })));
   return {
-    health, resolveVault,
+    health, resolveVault, vaultAckToken,
     analyzeClient: quorum(),
     verifyClient: quorum(),
     signOptions: sign ? ddAttestationOptions() : { sign: async () => { throw new Error("signing disabled for this read-only run"); }, ...DD_IDENTITY },

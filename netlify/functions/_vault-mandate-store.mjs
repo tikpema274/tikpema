@@ -22,6 +22,14 @@
 
 export const VAULT_MANDATE_STORE = "vault-mandates";
 export const vaultMandateKey = (owner, id) => `m/${String(owner).toLowerCase()}/${id}`;
+// Piece 4: the deposit INTENT, one per (mandate, seq), create-only — written BEFORE any signing, so a
+// second writer for the same seq loses and no seq is ever deposited twice. Same store, its own prefix.
+export const vaultMandateIntentKey = (owner, id, seq) => `d/${String(owner).toLowerCase()}/${id}/${seq}`;
+// Receipts (and the disarmed tick's would-deposit observations) live in their OWN store, so "a disarmed
+// run touches neither the intent store nor the executor" is a property of which store it holds.
+export const VAULT_MANDATE_RECEIPT_STORE = "vault-mandate-receipts";
+/** Intent states that still need the chain read before the mandate may act again. */
+export const INTENT_CLOSED = Object.freeze(["asserted", "refused", "not-deposited"]);
 
 import {
   buildMandateRecord, verifyMandateRecord, acknowledgeMandate, MANDATE_STATUS,
@@ -76,7 +84,79 @@ export async function acknowledgeStoredMandate({ store, owner, id, fingerprint, 
   return { ok: true, record: a.record };
 }
 
-const CREATE_INPUT_FIELDS = new Set(["vault", "rules"]);
+/**
+ * Replace a stored record under CAS on the etag just read. Re-verified before it is written (the same
+ * write-time rule as writeNewMandate): progress, pause and status may change here; a record whose rules,
+ * terms or disclosure no longer match its fingerprint never reaches the store.
+ */
+export async function updateStoredMandate({ store, owner, id, record, etag }) {
+  const v = verifyMandateRecord(record);
+  if (!v.ok) return { ok: false, errors: v.errors };
+  if (String(record.owner).toLowerCase() !== String(owner).toLowerCase() || record.id !== id) return { ok: false, errors: ["the record does not belong under this key"] };
+  if (!etag) return { ok: false, errors: ["no etag: the record cannot be updated safely"] };
+  let res;
+  try { res = await store.setJSON(vaultMandateKey(owner, id), record, { onlyIfMatch: etag }); }
+  catch (e) { return { ok: false, errors: [`mandate store unwritable: ${String(e?.message ?? e)}`] }; }
+  if (res?.modified === false) return { ok: false, conflict: true, errors: ["the mandate changed while it was being updated"] };
+  return { ok: true, etag: res?.etag ?? null };
+}
+
+/** Every stored mandate, as {owner, id}. Unreadable → throws (the tick reports it; never "no mandates"). */
+export async function listMandates({ store }) {
+  const { blobs } = await store.list({ prefix: "m/" });
+  return (blobs ?? []).map((b) => b.key.split("/")).filter((p) => p.length === 3).map(([, owner, id]) => ({ owner, id }));
+}
+
+/** The intent adapter the deposit path holds. Every method is over the SAME store, `d/` prefix. */
+export function intentAdapter(store) {
+  return {
+    async create(key, intent) {
+      const res = await store.setJSON(key, intent, { onlyIfNew: true });
+      return res?.modified === false ? { ok: false, exists: true } : { ok: true, etag: res?.etag ?? null };
+    },
+    async update(key, intent, etag) {
+      const res = await store.setJSON(key, intent, { onlyIfMatch: etag });
+      return res?.modified === false ? { ok: false, conflict: true } : { ok: true, etag: res?.etag ?? null };
+    },
+    /** Open intents for one mandate. A store failure is readable:false, NEVER an empty list. */
+    async listOpen(owner, id) {
+      try {
+        const { blobs } = await store.list({ prefix: `d/${String(owner).toLowerCase()}/${id}/` });
+        const out = [];
+        for (const b of blobs ?? []) {
+          const r = await store.getWithMetadata(b.key, { type: "json", consistency: READ_CONSISTENCY });
+          if (!r || r.data === null || r.data === undefined) return { readable: false, why: `intent ${b.key} listed but unreadable`, intents: [] };
+          if (!INTENT_CLOSED.includes(r.data.status)) out.push({ key: b.key, intent: r.data, etag: r.etag ?? null });
+        }
+        return { readable: true, intents: out };
+      } catch (e) { return { readable: false, why: `intent store unreadable: ${String(e?.message ?? e)}`, intents: [] }; }
+    },
+  };
+}
+
+/** The mandate adapter the tick holds: list, read (verified), CAS update (verified). */
+export function mandateAdapter(store) {
+  return {
+    list: () => listMandates({ store }),
+    read: ({ owner, id }) => readMandate({ store, owner, id }),
+    update: ({ owner, id, record, etag }) => updateStoredMandate({ store, owner, id, record, etag }),
+  };
+}
+
+/** Receipts: create-only when asked (a per-window observation), never overwriting one. */
+export function receiptAdapter(store) {
+  return {
+    async exists(key) { return (await store.get(key, { type: "json", consistency: READ_CONSISTENCY })) != null; },
+    async write(key, receipt, { onlyIfNew = false } = {}) {
+      const res = await store.setJSON(key, receipt, onlyIfNew ? { onlyIfNew: true } : {});
+      return res?.modified === false ? { ok: false, exists: true } : { ok: true };
+    },
+  };
+}
+
+// Piece 4 adds the deposit terms. The owner is still the session; the vault ack token comes from the
+// baseline (the server's reading), never from the request.
+const CREATE_INPUT_FIELDS = new Set(["vault", "rules", "amountPerDepositUsdc", "maxTotalUsdc", "cadence"]);
 
 /**
  * Create under a verified session. `deps`: store, now(), newId(), resolveVault(key) (the allowlist),
@@ -97,6 +177,7 @@ export async function createVaultMandate({ session, walletAddress, input, deps }
 
   const built = buildMandateRecord({
     owner: session.address, walletAddress, vault, rules: input.rules, baseline, now: deps.now(), id: deps.newId(),
+    terms: { amountPerDepositUsdc: input.amountPerDepositUsdc, maxTotalUsdc: input.maxTotalUsdc, cadence: input.cadence },
   });
   if (!built.ok) return built;
   const w = await writeNewMandate({ store: deps.store, record: built.record });

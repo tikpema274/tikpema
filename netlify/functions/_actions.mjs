@@ -764,8 +764,11 @@ export async function executeAction(step, ctx) {
     const gate = gateDeposit({ inspection, ackToken: step.ackToken, expectedAssetAddress: v.assetAddress });
     if (!gate.ok) return refuse(REFUSAL.DISCLOSURE, gate.blocked, { disclosure: gate.disclosure });
 
-    const dep = await vaultDeposit({ walletAddress, vault: v, amountUsdc: amount });
-    await ledger();
+    // ctx.onVaultSubmitted / ctx.chargeId: set ONLY by the vault mandate (_vault-mandate-deposit.mjs) —
+    // the Circle ids reach its intent before the wait, and the day-ceiling charge is keyed by that intent
+    // so a crash-recovery re-charge is a no-op. Absent, both are undefined and nothing changes.
+    const dep = await vaultDeposit({ walletAddress, vault: v, amountUsdc: amount, onSubmitted: ctx.onVaultSubmitted });
+    await ledger(ctx.chargeId ? { chargeId: ctx.chargeId } : {});
     return { ok: true, kind: "vault_deposit", vault: v.key, ...dep, disclosure: gate.disclosure };
   }
 

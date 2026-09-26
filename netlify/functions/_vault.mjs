@@ -1094,7 +1094,15 @@ export function gateDeposit({ inspection, ackToken, expectedAssetAddress }) {
 // terms, so we trust the chain delta, exactly as the swap receipt does.
 const toMinor = (usdc) => BigInt(Math.round(Number(usdc) * 10 ** USDC_DECIMALS));
 
-export async function vaultDeposit({ walletAddress, vault, amountUsdc }) {
+// `onSubmitted({stage, circleId})` (OPTIONAL, piece 4): called with each Circle transaction id the moment
+// Circle accepts it, BEFORE waiting on it — so a mandate's intent records the ids a crash-recovery reads.
+// ⚠️ Its failure is swallowed: the tx is already submitted, and throwing here would report a deposit
+// that may land as failed. Omitted, behaviour is unchanged for every existing caller.
+export async function vaultDeposit({ walletAddress, vault, amountUsdc, onSubmitted = null }) {
+  const submitted = async (stage, circleId) => {
+    if (typeof onSubmitted !== "function" || !circleId) return;
+    try { await onSubmitted({ stage, circleId }); } catch (e) { console.error(`[vault] onSubmitted(${stage}) failed: ${e?.message ?? e}`); }
+  };
   const owner = getAddress(walletAddress);
   const vaultAddr = getAddress(vault.address);
   const amountMinor = toMinor(amountUsdc);
@@ -1114,6 +1122,7 @@ export async function vaultDeposit({ walletAddress, vault, amountUsdc }) {
       abiParameters: [vaultAddr, amountMinor.toString()],
       fee: { type: "level", config: { feeLevel: "MEDIUM" } },
     });
+    await submitted("approve", apTx.data?.id);
     await waitForTx(client, apTx.data?.id);
   }
 
@@ -1126,6 +1135,7 @@ export async function vaultDeposit({ walletAddress, vault, amountUsdc }) {
     abiParameters: [amountMinor.toString(), owner],
     fee: { type: "level", config: { feeLevel: "MEDIUM" } },
   });
+  await submitted("deposit", depTx.data?.id);
   const depHash = await waitForTx(client, depTx.data?.id);
 
   const sharesAfter = (await tryRead(pc, vaultAddr, BAL_ABI, "balanceOf", [owner])) ?? sharesBefore;

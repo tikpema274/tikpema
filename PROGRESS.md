@@ -27595,3 +27595,99 @@ piece 5's own commit, with the disclosure copy it enables.
   create endpoint (piece 6).
 
 **Nothing built.** Next: T's values for 1/5, then build red-first, disarmed.
+
+---
+
+# 🛠️ VAULT MANDATE — PIECE 4 (pre-deposit path, MONEY) — BUILT DISARMED, COMMITTED, NOT DEPLOYED (2026-09-26)
+
+Built red-first against the design above (recorded in a678165) and T's values. **Ships disarmed:**
+`MANDATE_DEPOSIT_ARMED = false`, `MANDATE_ARMED_FROM = null`, `MANDATE_CHECK_FRESHNESS_MS = null`,
+`EXIT_AVAILABLE = false`. **Not deployed** by decision: T wants to read it before it goes live, even disarmed.
+Red state: `test:mandatedeposit` exited 1 before any code (`shared/vault-mandate/limits.mjs` not found).
+Green: `test:mandatedeposit` **198/0**; `test:mandaterecord` 80/0 (fixtures moved to `/2`); `test:all`
+**157/157, 0 failed, 0 not run** (8.6 min). Build stamp cleared after.
+
+## T's values (decided 2026-09-26), as code constants in `shared/vault-mandate/limits.mjs`
+10 USDC per deposit max · total budget required, ≥ one deposit, ≤ 100 · cadence `daily` | `weekly`, default
+weekly (stored explicitly), floor 24 h · mandate ≤ 0.25 × ceiling (15/day) · mandate + DCA ≤ 0.5 × ceiling
+(30/day), taken as min(0.5, 1 − DCA reserve) so an env reserve can only narrow it · exit rules refused at
+creation and amendment · the disarmed tick signs its check · freshness window unset; armed + unset REFUSES.
+
+## The two proofs T asked for
+1. **A disarmed run touches neither the intent store nor the executor, and still signs.** On the REAL
+   `runMandateCheck` (mock chain + throwaway key + ERC-1271 mock): 1 signMessage, verification valid, intent
+   adapter **0 calls** (not even recovery's read), executor **0 calls**, no ledger, record read-only; the
+   receipt says WOULD DEPOSIT 10 USDC and carries `timing.signingLatencyMs` — the measurement decision 4 needs.
+2. **Armed + freshness window unset REFUSES by that rule** (`code: freshness-window-unset`, nothing written or
+   executed). The suite then EXCISES the marked rule (`⟦rule:freshness-unset⟧`) from a copy of the module and
+   re-runs the case: RED — the mutant refuses as `stale-check` instead (the stale test is written
+   `!(age <= window)`, so a missing window can only refuse).
+   Ad-hoc mutations also caught (not in the suite): write gate removed · recovery run disarmed · no re-decision ·
+   disarmed pausing a mandate — each turned the suite red.
+
+## What was built
+- `shared/vault-mandate/limits.mjs` (pure, no env, no imports), `assertion.mjs` (parent-block
+  `previewDeposit`, Deposit event × share delta, no tolerance), `recovery.mjs` (chain-read classification).
+- `netlify/functions/_vault-mandate-deposit.mjs` — the arming constants; `depositForMandate`, the ONE issuer of a
+  mandate deposit (gate at the write, re-decides, signed + fresh check, stored ack token, create-only intent
+  before signing); `runMandateTick` (steps 0–8; recovery armed-only; one receipt per window); production wiring.
+- `netlify/functions/vault-mandate-tick.mjs` + `netlify.toml` schedule `17 * * * *`.
+- `record.mjs` → `vault-mandate/2`: terms + `baseline.vaultAckToken` inside the fingerprint; `paused` status;
+  `progress` outside it (amend CARRIES it). `_vault-mandate-store.mjs`: terms on create, CAS update, adapters.
+  `_vault-mandate-check.mjs`: check timing, `previewDeposit`, `vaultAckToken` required in the baseline.
+  `_budget.mjs`: `mandate-day:<owner>:<date>`, idempotent by chargeId. `_vault.mjs`: optional `onSubmitted`.
+- Guards: new files off the DD surface; `_arc.mjs`/`_env-assert.mjs` unchanged vs HEAD; only the deposit module
+  imports the mandate AND calls executeAction; no production caller passes `config` or `exitAvailable`.
+- `test:refusalquantity` flagged a bare `amount > 0` in the preflight → replaced with `amountFloorViolation`
+  (the census ratchet is at its ceiling; no exemption added).
+
+## ⚠️ 1. Two disclosure sentences AWAITING T's REVIEW — Claude's wording, NOT approved
+They are rendered into every mandate disclosure (`renderDisclosure`, record.mjs) and marked there as not
+T-approved; `copy.mjs` still holds only approved copy. Verbatim templates:
+> `We deposit ${amountPerDepositUsdc} USDC ${"once a day" | "once a week"}, never more than ${maxTotalUsdc} USDC in total. Each deposit counts against your daily agent limit; when that limit has no room, the deposit is skipped, not forced.`
+
+> `You acknowledged this vault's disclosure as it read when this mandate was made (${first 12 hex of the token}…). If it changes, your mandate pauses until you review it.`
+
+As a user would read them (10 / 100 / weekly):
+> We deposit 10 USDC once a week, never more than 100 USDC in total. Each deposit counts against your daily agent limit; when that limit has no room, the deposit is skipped, not forced.
+>
+> You acknowledged this vault's disclosure as it read when this mandate was made (abababababab…). If it changes, your mandate pauses until you review it.
+
+They must be approved or rewritten before any mandate is created (piece 6); changing them changes every
+fingerprint, which is harmless only while no mandate exists.
+
+## ⚠️ 2. Recovery values are CHOSEN, NOT MEASURED — and the residual risk
+- `RECOVERY_NOT_DEPOSITED_AFTER_MS = 30 min`: an intent is never declared not-deposited younger than this.
+  Circle's own `waitForTx` gives up at 60 s; 30 min was picked as comfortably longer, not from data.
+- `RECOVERY_MAX_TRIES = 12`: unreadable this many ticks in a row (≈12 h at the hourly schedule) → the mandate
+  pauses INCONCLUSIVE. The intent still blocks; nothing is guessed. Also a pick, not a measurement.
+- **The residual risk, in full.** The intent's Circle ids are written by the `onSubmitted` hook on the line
+  after Circle accepts each transaction. If the tick DIES between Circle accepting the deposit and the hook
+  writing its id, the intent holds no id, so recovery's Circle leg reads `NONE`. If that transaction is then
+  STUCK (the unstaked-nonce trap is a known way for a userOp to sit in SENT) for longer than 30 minutes, the
+  next ticks see no Deposit event and no share delta, and after the deadline recovery declares the intent
+  **not-deposited**, consumes its seq and frees the mandate. If the stuck transaction LANDS afterwards, that
+  call was **wrong**: the deposit happened, the mandate's `depositedUsdc`, the mandate-day counter and the
+  day-ceiling charge do not include it, and the next window can deposit again — up to one extra deposit
+  (≤ 10 USDC) beyond what the record shows.
+  Bounds, not a fix: the window is one line wide; the next deposit is ≥ 24 h away (cadence floor); a late
+  landing still shows in the share balance at the next check, and executeAction's vault cap and the daily
+  ceiling still bound each deposit. Not closed. Options if it matters before arming: pass a client
+  idempotency key to Circle derived from the intent key (so the id can be looked up without the hook), or
+  lengthen the deadline once real stuck-tx durations are measured.
+
+## ⚠️ 3. `_actions.mjs` was NOT in the design — two lines
+The design named `_vault.mjs` for the `onSubmitted` hook, but no mandate calls `vaultDeposit` directly: every
+deposit goes through `executeAction` (pause, per-vault cap, day ceiling, `gateDeposit` on a fresh inspection),
+and that is where `vaultDeposit` is called. So the hook had to be passed through:
+`vaultDeposit({ …, onSubmitted: ctx.onVaultSubmitted })` and `ledger(ctx.chargeId ? { chargeId: ctx.chargeId } : {})`
+— the second keys the day-ceiling charge by the intent, so a recovery re-charge is a no-op instead of a double
+charge. **Behaviour is unchanged without a mandate caller:** no other caller sets `ctx.onVaultSubmitted` or
+`ctx.chargeId`, so `onSubmitted` is `undefined` (vaultDeposit skips it) and `ledger({})` is the old call exactly.
+`_actions.mjs` is not on the DD surface.
+
+## Open, before arming
+T's read of this commit · the two sentences above · measure the signing latency on the deployed disarmed tick
+(needs a mandate to exist → piece 6, or a probe) and set `MANDATE_CHECK_FRESHNESS_MS` · then flip ARMED +
+ARMED_FROM together in their own commit. Also for piece 6: the production `vaultAckToken` reader for
+`readBaseline` (until then creation refuses).

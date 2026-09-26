@@ -62,16 +62,22 @@ const OWNER = "0xaaaa000000000000000000000000000000000001";
 const WALLET = "0xbbbb000000000000000000000000000000000002";
 const VAULT_OWNER = "0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6";
 const VAULT = { key: "xylo-usdc", address: "0x240Eb85458CD41361bd8C3773253a1D78054f747", chainId: 31337, label: "XyloNet USDC Vault (xyUSDC)" }; // fixture chain id (test:literals)
-const BASELINE = { ok: true, owner: { address: VAULT_OWNER, kind: "eoa" }, reportBlock: 63960000, reportSigned: true, signerVerified: true, maxFeeBps: 2000 };
+const BASELINE = { ok: true, owner: { address: VAULT_OWNER, kind: "eoa" }, reportBlock: 63960000, reportSigned: true, signerVerified: true, maxFeeBps: 2000, vaultAckToken: "ab".repeat(32) };
+// Piece 4 (vault-mandate/2): deposit terms. test:mandatedeposit covers them; here they are only present.
+const TERMS = { amountPerDepositUsdc: 10, maxTotalUsdc: 100, cadence: "weekly" };
 const INPUT_RULES = [
   { kind: "power", subject: "upgradeable", onFinding: "exit" },
   { kind: "state", subject: "exit-fee-above", limitBps: 50, onFinding: "exit" },
   { kind: "state", subject: "owner-changed", onFinding: "pause" },
   { kind: "state", subject: "vault-cannot-pay", onFinding: "pause" },
 ];
+// ⚠️ INPUT_RULES carries EXIT rules, which creation refuses until piece 5 (EXIT_AVAILABLE = false; proven in
+// test:mandatedeposit). This suite pins the record's semantics for the exit shapes piece 5 will enable, so its
+// builder passes the seam `exitAvailable: true`. The CREATE path (section 5) never does, and uses pause rules.
+const PAUSE_RULES = INPUT_RULES.map((r) => ({ ...r, onFinding: "pause" }));
 const NOW = Date.parse("2026-09-25T12:00:00Z");
 const build = (over = {}) => attempt(() => buildMandateRecord({
-  owner: OWNER, walletAddress: WALLET, vault: VAULT, rules: INPUT_RULES, baseline: BASELINE, now: NOW, id: "vm-1", ...over }));
+  owner: OWNER, walletAddress: WALLET, vault: VAULT, terms: TERMS, rules: INPUT_RULES, baseline: BASELINE, now: NOW, id: "vm-1", exitAvailable: true, ...over }));
 const refusedWith = (r, needle) => r?.ok === false && (!needle || (r.errors ?? []).join(" | ").includes(needle));
 
 console.log("╔══════════════════════════════════════════════════════════════════════╗");
@@ -278,21 +284,25 @@ section("5 — creating under a verified session");
   const deps = (over = {}) => ({ store: fakeStore(), now: () => NOW, newId: () => "vm-new",
     resolveVault: (k) => (k === "xylo-usdc" ? VAULT : null), readBaseline: async () => BASELINE, ...over });
   const d = deps();
-  const c = await attemptAsync(() => createVaultMandate({ session: { address: OWNER }, walletAddress: WALLET, input: { vault: "xylo-usdc", rules: INPUT_RULES }, deps: d }));
+  const c = await attemptAsync(() => createVaultMandate({ session: { address: OWNER }, walletAddress: WALLET, input: { vault: "xylo-usdc", ...TERMS, rules: PAUSE_RULES }, deps: d }));
   ok("created: written AWAITING acknowledgement, fingerprint returned to show the user",
     c?.ok === true && c?.record?.status === MANDATE_STATUS.AWAITING_ACK && c?.fingerprint === c?.record?.fingerprint && d.store._map.size === 1, show(c?.errors ?? c?.threw));
   ok("  …owned by the SESSION address", c?.record?.owner === OWNER);
+  ok("  …carrying the terms sent and the baseline's vault ack token", c?.record?.terms?.amountPerDepositUsdc === 10 && c?.record?.baseline?.vaultAckToken === BASELINE.vaultAckToken);
+  const ex5 = deps();
+  const cx = await attemptAsync(() => createVaultMandate({ session: { address: OWNER }, walletAddress: WALLET, input: { vault: "xylo-usdc", ...TERMS, rules: INPUT_RULES }, deps: ex5 }));
+  ok("⭐ exit rules via the create path → refused until piece 5, nothing written", cx?.ok === false && ex5.store._map.size === 0 && /cannot exit yet/.test((cx?.errors ?? []).join(" ")), show(cx));
   const spoof = await attemptAsync(() => createVaultMandate({ session: { address: OWNER }, walletAddress: WALLET,
-    input: { vault: "xylo-usdc", rules: INPUT_RULES, owner: WALLET }, deps: deps() }));
+    input: { vault: "xylo-usdc", ...TERMS, rules: PAUSE_RULES, owner: WALLET }, deps: deps() }));
   ok("⭐ an owner in the request body → refused (the owner is the session)", spoof?.ok === false, show(spoof));
   const noS = deps();
   ok("no session → refused, nothing written",
-    (await attemptAsync(() => createVaultMandate({ session: null, walletAddress: WALLET, input: { vault: "xylo-usdc", rules: INPUT_RULES }, deps: noS })))?.ok === false && noS.store._map.size === 0);
+    (await attemptAsync(() => createVaultMandate({ session: null, walletAddress: WALLET, input: { vault: "xylo-usdc", ...TERMS, rules: PAUSE_RULES }, deps: noS })))?.ok === false && noS.store._map.size === 0);
   const unk = deps();
   ok("a vault not on the allowlist → refused, nothing written",
-    (await attemptAsync(() => createVaultMandate({ session: { address: OWNER }, walletAddress: WALLET, input: { vault: "0x240Eb85458CD41361bd8C3773253a1D78054f747", rules: INPUT_RULES }, deps: unk })))?.ok === false && unk.store._map.size === 0);
+    (await attemptAsync(() => createVaultMandate({ session: { address: OWNER }, walletAddress: WALLET, input: { vault: "0x240Eb85458CD41361bd8C3773253a1D78054f747", ...TERMS, rules: PAUSE_RULES }, deps: unk })))?.ok === false && unk.store._map.size === 0);
   const fb = deps({ readBaseline: async () => ({ ok: false, why: "signer could not be verified" }) });
-  const cf = await attemptAsync(() => createVaultMandate({ session: { address: OWNER }, walletAddress: WALLET, input: { vault: "xylo-usdc", rules: INPUT_RULES }, deps: fb }));
+  const cf = await attemptAsync(() => createVaultMandate({ session: { address: OWNER }, walletAddress: WALLET, input: { vault: "xylo-usdc", ...TERMS, rules: PAUSE_RULES }, deps: fb }));
   ok("the baseline could not be read → refused, nothing written, the reason carried", cf?.ok === false && fb.store._map.size === 0 && /signer/.test((cf?.errors ?? []).join(" ")), show(cf));
   const ex = deps();
   ok("⭐ exit on vault-cannot-pay via the create path → refused, nothing written",

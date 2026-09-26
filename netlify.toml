@@ -622,3 +622,11 @@
 # ARMED_FROM_SEC — the June–July backlog is T's one-time run (scripts/escrow-reclaim.mjs), never a tick's.
 [functions."escrow-reclaim-sweep"]
   schedule = "0 */6 * * *"
+
+# VAULT MANDATE TICK (piece 4) — SHIPS DISARMED (MANDATE_DEPOSIT_ARMED = false in _vault-mandate-deposit.mjs).
+# Each due mandate is CHECKED (a signed report per check, verified; both endpoints' readings) and the receipt
+# records WOULD DEPOSIT X plus the signing latency the freshness window will be set from. No intent, no
+# executor while disarmed. Hourly: the shortest cadence is daily, and a skip waits for the next window anyway.
+# No mandates exist yet (no create endpoint until piece 6), so today every tick is a no-op.
+[functions."vault-mandate-tick"]
+  schedule = "17 * * * *"
