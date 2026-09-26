@@ -28101,3 +28101,132 @@ disclosure puts it inside the fingerprint; changing it invalidates existing ackn
   as INCONCLUSIVE, which under the split LATCHES; much of it may be provider lag. **How often do the two endpoints
   actually disagree in practice?** Measure it (the disarmed tick's readings, or a probe over time) and let that decide
   whether disagreement is transient-by-default (treated as an outage, latching only when it persists across ticks).
+
+---
+
+# 🧭 VAULT MANDATE — PIECE 5 (the EXIT executor, MONEY) — DESIGN RECORDED, NOTHING BUILT (2026-09-26)
+
+Design only; decisions are T's. Already decided (2026-09-25): exit on a FINDING, never on a failure to read (Case A —
+outage / inconclusive — never withdraws; Case B — a rule established violated and set to exit — may);
+`vault-cannot-pay` and `redemption-restricted` are pause-only; the mandate CLOSES after an exit and never resumes on its
+own; `EXIT_AVAILABLE = false` today (creation refuses exit rules until this ships).
+Inputs read: piece 4's tick, `vaultWithdraw` (with 27027fd's shares-after witness), `executeAction`'s reclaim branch,
+`agent-withdraw` / `agent-vault-withdraw`, the kill switch (`_pause.mjs`).
+
+## Three findings from the code that reshape piece 5
+- **A. The tick cannot reach most exits.** A check runs only when a deposit is due, with budget and room, on a mandate
+  not paused — so a fully deposited mandate is never checked again. → Scoped and decided separately: see "FINDING A:
+  MONITORING SEPARATE FROM DEPOSITING" (T: outage never latches; cadence a code constant; monitoring ships AFTER piece 5).
+- **B. The position is shared.** `vault_withdraw` redeems the SCA's WHOLE live share balance; the same SCA can hold
+  shares the user deposited by hand, outside the mandate. An exit either redeems everything or only what the mandate put
+  in (which needs the mandate to track the shares it received). **T's decision.**
+- **C. Going through `executeAction`'s reclaim path silently skips the pause.** `vault_withdraw` is `isReclaim` →
+  pause- and cap-exempt. Whatever point 7 decides, the exit needs its own step type or call with the gate explicit —
+  never inherited from `isReclaim`.
+
+## 1. Fresh signed check, or act on the finding check?
+- For a fresh check: the finding can disappear (fee lowered, owner changed back); a minutes-old check may not describe
+  the vault now.
+- For acting on the finding check: **findings don't decay the way deposit clearances do** — a deposit acts on ABSENCE
+  (which can become presence any block, hence piece 4's freshness window); an exit acts on a PRESENCE recorded at a block
+  in a signed report, which stays true. The user's instruction is "if found, exit" — it was found. **A fresh check gives
+  the party being exited a veto** (flicker the state so the fresh check misses it) — the inversion `decide.mjs` already
+  refuses ("an unreadable sibling does not veto a real finding"). The delay a signature adds is seconds against a
+  Circle userOp wait of tens of seconds.
+- **Whether vs how:** the finding check decides WHETHER; fresh UNSIGNED execution reads on both endpoints right before
+  the redeem decide HOW (shares, the preview quote, the fee, a simulated redeem). A fresh read that fails blocks the
+  redeem (retried), never cancels the exit, never resolves a failure to read into "done".
+- Open: a very old finding check (crash → recovery a day later) — do execution reads suffice, or attach a new signed
+  report for the receipt (without re-deciding)?
+
+## 2. Outcomes, established from the chain (never from the call's return)
+Before submitting: shares before, USDC before, the preview quote, the fee at execution — agreed by both endpoints.
+Circle only locates the tx; the outcome comes from the receipt and state: the vault's **Withdraw event** (owner =
+receiver = the SCA → shares burned, assets out) · the **ERC-20** USDC Transfer vault → SCA (ignore Arc's native 18-dp
+mirror log) · the **share delta** parent → redeem block (must equal the event) · **shares remaining** at the redeem
+block and at latest.
+
+| Outcome | Established by |
+|---|---|
+| **exited** | event present; event, Transfer and delta agree; shares remaining read **0** |
+| **exit-partial** | event present, shares burned > 0, shares remaining read **> 0** — report BOTH amounts (redeemed shares + USDC received; remaining shares + their previewRedeem value). Never "done". |
+| **unconfirmed** | submitted, but a receipt/event/balance unreadable or the instruments disagree → recovery. Never "failed", never "exited". |
+| **failed** | every instrument negative (reverted or Circle FAILED, no event, shares unchanged, past the deadline) — piece 4's not-deposited rule |
+`vaultWithdraw`'s USDC balance delta becomes a cross-check only (a concurrent inflow would overstate the redeem). The
+ERC-4337 trap: the outer tx can succeed while the inner redeem reverted — the event is the proof, not the receipt status.
+
+## 3. The full redeem reverts for lack of cash — stop, or take less?
+Usually known before submitting: the fresh simulated redeem reverts with the decoded shortfall (the `vault-cannot-pay`
+signal).
+- For "take what you can": the instruction is "get me out"; some USDC beats none; the vault may never recover; other
+  depositors race anyway.
+- For "stop": **this is the `vault-cannot-pay` argument itself** — with a shortfall the vault pays first come, first
+  served; every mandate sees the finding in the same block, so the scheduler's order would decide which of Tikpema's
+  users gets the cash — the platform allocating a shortfall between its own users, the reason that rule is pause-only.
+  It also contradicts the v1 decision against partial exits, and makes exit-partial a planned outcome.
+- "Stop" operationally: status **exit-blocked** (no deposits, finding recorded, user told); each monitoring pass
+  retries a FULL redeem only if the fresh simulation clears; nothing submitted that the simulation says reverts; the
+  user's manual reclaim stays open. Exit-partial still happens only unplanned (shares arriving mid-flight on a vault
+  that burns less than asked) — reported with both amounts. **T's decision.**
+- ⚠️ Note (added after the Morpho research): on Morpho V2 a redeem pays in full or reverts, and redeemable liquidity is
+  pool-shared and point-in-time (Galaxy USDC 8.8%) — the simulated redeem is the per-holder answer at a block.
+
+## 4. Arming — its own constants
+`MANDATE_EXIT_ARMED` + `MANDATE_EXIT_ARMED_FROM`, separate from the deposit pair, flipped together in their own commit.
+`EXIT_AVAILABLE` stays the creation gate, with a guard test **`EXIT_AVAILABLE ⇒ MANDATE_EXIT_ARMED`** (else users create
+exit rules nothing executes, and "if found: exit" is false). Safe order: ship piece 5 disarmed → arm exits (harmless —
+no exit rules exist) → flip `EXIT_AVAILABLE`. **Disarmed exit** mirrors disarmed deposit: the decision recorded, fresh
+execution reads + simulated redeem run, receipt says "WOULD EXIT: N shares, quote X USDC, simulation OK/reverts",
+nothing submitted. **ARMED_FROM:** only findings in checks anchored after arming may execute; a finding recorded while
+disarmed re-triggers only if found again.
+
+## 5. Recovery — crash between submitting a redeem and recording it
+- Intent before submitting, create-only, one per mandate exit (`x/<owner>/<id>`): `submitting → submitted (Circle id)
+  → redeemed (hash) → asserted | failed`; mandate status `exiting` BEFORE the intent, so no deposit can interleave.
+- `vaultWithdraw` needs the `onSubmitted` hook `vaultDeposit` got in piece 4.
+- **Close piece 4's residual risk here from the start:** a Circle idempotency key derived from the intent key, so a
+  crash between Circle accepting the tx and the hook recording its id cannot lose it (the SDK accepting
+  `idempotencyKey` on `createContractExecutionTransaction` is to VERIFY, not measured).
+- Classification as piece 4: **happened** if any one of Circle COMPLETE / a Withdraw event for the SCA after the anchor /
+  shares below shares-before; **didn't happen** only if every instrument is negative and past the deadline;
+  **unreadable** blocks and is never "didn't happen"; N consecutive unreadable → INCONCLUSIVE, keep reading.
+- Never resubmit while an intent is open. Recovery runs even while paused (reads + records only).
+
+## 6. The receipt, and what the user is told
+Receipt: the finding (rule, evidence, signed report, anchor number + hash) · execution reads (shares before, quote, fee
+at execution vs at the finding, simulation) · Circle ids + hash · event amounts, ERC-20 Transfer, share delta, shares
+remaining (redeem block + latest) · fee actually paid (quote − received, bps) · outcome · mandate status `exited`
+(terminal).
+Proposed copy (Claude's wording, NOT approved) — half-completed:
+> Your rule "{rule}" found {finding} at block {N}, so we asked the vault to pay you out. It paid part of your position:
+> {S₁} shares redeemed for {X} USDC (tx {hash}). **{S₂} shares, worth about {Y} USDC at the vault's current price, are
+> still in the vault** — the vault did not pay the rest. Your mandate is closed and will not deposit again. You can try
+> to withdraw the rest yourself from the vault page; it may fail for the same reason. We can't recover them for you.
+Unconfirmed: *"We asked the vault to pay you out, but we can't confirm the result yet. Don't withdraw manually until
+this resolves; we'll update this receipt from the chain."*
+
+## 7. Caps and gates — is an agent exit a reclaim or an agent action? (T's decision)
+- **As a reclaim (pause-exempt, like `agent-withdraw`):** money only returns to the user's own SCA; caps bound spending
+  and a redeem isn't spending; the pause protects from the agent, an exit protects from the vault; a user who pauses in
+  panic would block the exit they pre-authorised at the worst moment.
+- **As an agent action the kill switch stops (Claude argued this is stronger):**
+  1. `agent-withdraw`'s exemption is about WHO acts — its header: "This is the user reclaiming their own float — it is
+     NOT an agent action." An exit is the agent acting autonomously.
+  2. **Pausing never traps funds** — the user's manual reclaim (`agent-vault-withdraw`) stays pause-exempt. The question
+     is only whether the agent may act alone.
+  3. An exit COSTS money at a price set by the party being exited (the exit fee, up to the vault's `MAX_FEE`); an owner
+     who raises the fee and changes ownership can trigger an exit rule — the kill switch is the user's defence.
+  4. The kill switch is the backstop for OUR bugs (the clock bug showed code can be wrong in ways tests miss).
+  5. The pause fails closed — consistent with "never act on a failure to read".
+- If exits honour the pause: the Vault-agent pause, ALL_AGENTS and `AGENT_HALT` checked AT THE WRITE, before the intent
+  — not via `isReclaim` (finding C), with a test that a paused Vault agent refuses the exit while `agent-vault-withdraw`
+  still works. A blocked exit stays live and loud: status `exit-due-paused`, the user told *"Your rule '{rule}' found
+  {finding}. Your Vault agent is paused, so we did not exit. Resume it to let the exit run, or withdraw yourself —
+  withdrawing is never blocked."* In-flight work continues (a pause can't unsubmit; recovery reads).
+- **No spend caps** (day ceiling, per-vault cap, mandate share): capping an exit makes it a capped partial exit (point
+  3), and an exit isn't spend. **One sanity gate, not a cap:** the fee at execution must be ≤ the baseline `maxFeeBps`
+  the user was shown — above it the disclosure is false → pause INCONCLUSIVE rather than exit at an undisclosed price.
+  No day-ceiling ledger entry; the receipt is the record.
+
+**Decisions for T:** finding B (all shares vs the mandate's) · point 1's open case · point 3 (stop vs take less) ·
+point 7 (exempt vs gated). Built after piece 5: monitoring (finding A). Nothing is built.
