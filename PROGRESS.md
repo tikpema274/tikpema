@@ -27749,3 +27749,59 @@ from the text, the opening line, the zero-fee wording. Mutations: 7 tried, 6 cau
 exit wins ×1 + fee ×1 — never both, the disclosure ends on "We can't recover them for you." wherever one renders).
 Mutations, all caught: cannot-pay winning over exit · both paragraphs at once · the old behaviour · the cannot-pay
 paragraph dropped · a softened ending on the new paragraph.
+
+---
+
+# 🚀 DEPLOY 6ab7dfa2 — vault mandate piece 4 LIVE DISARMED (2026-09-26), verified read-only
+
+T deployed `4c48e41` (piece 4 + the settled disclosure wording). Checked afterwards, read-only, 2026-09-26 ~19:05Z.
+
+## 1. What prod serves
+- Deploy **`6ab7dfa290965ce69c9c6b1e`**, `ready`, production; created 15:07:14Z, **published 15:36:16.076Z** (~29 min
+  bundling). `commit_ref` null (CLI deploy, as always) → identity from the build stamp.
+- Served stamp (blobs-probe, data plane): **commit `4c48e418a0366f6cf7a7662544de64850068a454`, tree
+  `276858a044df58ba26186b8b518c87ede2f0d59ad37a41fa0639462fd3763edc`, dirty false**, stamped 15:07:16Z.
+- **gate:deployed ✅** — production serves this tree; control plane == data plane (both 6ab7dfa2); no orphaned
+  production deploys among the 25 newer. HEAD `9d98c64` (the deploy script's ledger commit) ≠ stamped `4c48e41`,
+  trees identical — the ledger files are outside the stamped surface. (A first run failed only on the LOCAL
+  stamp, cleared after the last test run; `npm run stamp` locally, re-run, then `stamp:clear`.)
+
+## 2. ddTree did NOT rotate; no window
+- ddTree **`d79683273abc5a6c…` unchanged** from the previous deploy (6ab6fa47, 2c7fa35). The capture recorded
+  `rotated:false, outcome:no-window, probes:1` at 15:36:30Z.
+- Independently: `git diff 2c7fa35 4c48e41` over the 26 DD-surface entries (DD_SURFACE_DIRS + FILES) = **0 files**.
+  The 12 deployed files that changed are all mandate / money-path files off the surface (_actions, _budget,
+  _vault, _vault-mandate-{check,deposit,store}, vault-mandate-tick, shared/vault-mandate/*). R1 held.
+- `GET /api/dd-analyze` → 405 (the declared GET refusal; no refusal-window banner).
+
+## 3. Ledgers + losses
+- **gate:ledger ✅** — dd-refusal-window-log 127 entries (last 15:36:30Z), deploy-loss-log 41 entries (last
+  15:37:21Z), both committed in 9d98c64.
+- **Loss sweep:** 17 losses = baseline 17 → **0 new** (re-run in gate mode with `--no-log`, nothing appended);
+  limbo 40, preserved 23, 46 ambiguous cancels not counted.
+
+## 4. The disarmed state is what is served
+- The constants live in `netlify/functions/_vault-mandate-deposit.mjs` and `shared/vault-mandate/limits.mjs`, both
+  inside the stamped surfaces (netlify/functions, shared, src), and the served tree == this tree. So the served
+  values are: **`MANDATE_DEPOSIT_ARMED = false`, `MANDATE_ARMED_FROM = null`, `MANDATE_CHECK_FRESHNESS_MS = null`,
+  `EXIT_AVAILABLE = false`.** (Evidence = tree identity; the function bundles themselves were not downloaded.)
+- **No create endpoint.** The deploy's `available_functions` (151) holds four mandate functions:
+  `_vault-mandate-check`, `_vault-mandate-deposit`, `_vault-mandate-store` (underscore modules, no route, no
+  handler — the existing pattern) and `vault-mandate-tick` (scheduled; Netlify 403s HTTP). `createVaultMandate` has
+  no call site outside the store module (one mention in _vault-mandate-check.mjs is a comment).
+- Blobs: store **`vault-mandates` is EMPTY** — no mandate, no intent.
+
+## 5. The scheduled tick
+- **Registered:** `function_schedules` on 6ab7dfa2 lists `{name: vault-mandate-tick, cron: "17 * * * *"}` (14
+  schedules in all) — registration observed, not inferred from netlify.toml.
+- **It has run:** `vault-mandate-receipts/last` =
+  `{"at":"2026-09-26T18:17:05.594Z","ok":true,"armed":false,"error":null,"results":[]}` — disarmed, no mandates,
+  nothing checked, nothing signed. `last` is overwritten each run, so this proves the 18:17 run only; the 16:17 and
+  17:17 runs are not evidenced here.
+- ⚠️ Not strictly read-only: each run WRITES that one `last` summary key (vault-mandate-tick.mjs). With no mandates
+  it writes nothing else — the receipt store holds only `last`.
+
+## Still open (unchanged)
+T's read of piece 4 in production · the recovery values (chosen, not measured) and the lost-id residual risk · the
+freshness window, set from a measured signing latency — which needs a mandate (piece 6) or a probe, since the
+disarmed tick signs only for a due mandate · ARMED + ARMED_FROM flipped together in their own commit.
