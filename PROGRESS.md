@@ -27865,3 +27865,108 @@ production not wiring the clock · the check not recording its clock · the cloc
 4. **Timestamp only** — a receipt's `at` is the tick start while its check timing is later, so `receipt.at <
    timing.anchoredAt` can read oddly. No decision rests on it.
 (The fifth point from the audit — same clock by default, not by construction — is the identity fix above.)
+
+---
+
+# 📏 MORPHO V2 ON ARC MAINNET — exit liquidity, the V2 power model, the maxRedeem defect (2026-09-26) — RESEARCH, NOTHING BUILT
+
+Read-only: `eth_call` on Arc mainnet (chain 5042, `rpc.mainnet.arc.io`, block ~22.91M), Morpho's public API
+(`api.morpho.org/graphql`), Morpho's VaultV2 source. **[M]** measured · **[API]** Morpho indexer · **[D]** documented.
+Context: T saw "Circle Guarded" Morpho vaults on **Arc Portal Earn** (`portal.arc.io/earn`, Circle's surface). All 29
+Arc mainnet Morpho vaults are **Vault V2** (none V1). Our real `analyze()` REFUSES Galaxy USDC
+(`power-surface-unrecognised`, no verdict) — the 4bc0d03 gate works. Memory: morpho-arc-mainnet-vaults-research.
+**This is tomorrow's decision. Nothing is built.**
+
+## 1. The exit-liquidity reading — generalises, with two corrections
+V2 has no withdrawal queue, cooldown or redeem timelock: a redeem pays IN FULL or REVERTS [D, `exit()`]. What a redeem
+can reach = **idle cash + the vault's own position in the ONE market named by the liquidity adapter's `liquidityData`,
+capped by that market's free liquidity (supply − borrow)**. Other markets are reachable only via `forceDeallocate`, at
+that adapter's penalty (max 2%).
+- **Correction A — recurse into vault-wrapping adapters.** 6 of 29 vaults use an adapter that wraps ANOTHER V2 vault.
+  Reading the inner vault's `maxWithdraw` returns 0 (V2's `max*` always return 0) — my first probe read **0%** where
+  the API said 100%. Recursing (the same reading on the inner vault, capped by the position) gives 100% [M], matching.
+- **Correction B — pools are shared.** [M] Galaxy USDC and Keyrock Prime USDC pull from the SAME market (USDC lent
+  against cirBTC, id `0xc2db…815d`, 96% utilised). Positions 79.79M + 75.01M = **154.8M against one 7.23M free pool =
+  4.7% together**. Per-vault figures (8.84%, 9.40%) each assume the whole pool. The pool moved 7.05M → 7.23M between
+  two reads minutes apart.
+- Caveats: point-in-time; market totals are as of `lastUpdate` (interest not accrued → free liquidity slightly
+  overstated); the definitive per-holder answer at a block is a simulated redeem.
+
+## 2. The 29 vaults [M; chain and API agree on 27, 2 are empty]
+| Vault | TVL | Redeemable now | Only via forceDeallocate |
+|---|---|---|---|
+| Galaxy USDC `0x8E35…12AF` | $79.8M | **8.84%** (shared pool) | 0 |
+| Keyrock Prime USDC `0x5bEf…3123` | $75.0M | **9.40%** (same pool) | 0 |
+| Galaxy EURC | $572K | 99.99% | 0 |
+| Bitwise Premium RWA USDC | $135K | **4.31%** | 6.04% at a 1% penalty |
+| Gauntlet USDC Prime / EURC Prime; Steakhouse Prime USDC ×2 / EURC | $95K–$10K | 100% | 0 |
+| Gauntlet USDC Balanced | $11 | 34.16% | 57.66% |
+| Dialectic RWA USDC | $3 | 47.87% | 51.94% at a 2% penalty |
+| 4 vault-wrapping (dust) | $1–3 | 100% (recursed) | 0 |
+| 12 test/dust vaults | ≤ $12 | ~100% | 0 |
+| 2 empty | $0 | n/a | n/a |
+Adapter types: market (23), vault-wrapping (6). Every vault and every wrapped inner vault is the same `VaultV2`
+bytecode (21,808 bytes).
+
+## 3. What a DD "exit liquidity" fact would report
+At the pinned block: idle cash · what a redeem can reach (via the liquidity market) · what force-deallocation can reach
+(with penalty) · recursion into wrapped vaults · **the shared-pool context** (the market's free liquidity against the
+total supply competing for it — without it, 8.84% reads as Galaxy's own). A part that cannot be read (unreadable, or an
+unrecognised adapter type) is `notChecked` — never 0% or 100%.
+⚠️ It lives in `shared/onchain-facts` — **on the DD surface: one ddTree rotation, one refusal window, a report schema
+version bump.** Prerequisite: DD's chain registry has **no Arc mainnet entry** (Arc testnet + Base only); the analyze
+run used a probe client.
+
+## 4. V2 recognition
+[M] The factory `0x3b0e…9f12` answers **`isVaultV2(address)`**: `true` for Galaxy, `false` for the xylo address and an
+EOA — definitive in one call, stronger than a selector fingerprint. The registry today is selector-only
+(`recognizeVaultProfile(hasSelector)`), so recognition needs a read path (or a fingerprint confirmed by the factory).
+The factory address is **chain-specific → it belongs in the chain registry**, not inline (also `test:literals`).
+Measured fingerprint: `submit`, `revoke`, `setIsSentinel`, `abdicate`, `forceDeallocate`, `liquidityAdapter` present;
+every V1 and xylo selector absent.
+
+## 5. ⭐ THE POWER MODEL CHANGE
+**Every V2 vault has every power, so presence says nothing.** The facts are, per power: **the timelock, whether it is
+abdicated (permanently switched off), and the current value.** Galaxy [M]: performance/management fee setters
+**timelock 0 → a raise is immediate** (fees 0 today; caps 50% of interest / 5% a year); exit gates
+(`sendSharesGate`, `receiveAssetsGate`) **abdicated → can never be set**; `addAdapter` / `increaseAbsoluteCap` **7 days**;
+`setIsAllocator` and `setForceDeallocatePenalty` 0. Owner, curator, allocator and both sentinels are EOAs.
+⚠️ **Our report shape assumes presence** (`powers` / `powersPresent`: a power found = a warning; absent = not held). For
+V2 it would say "every power present" on every vault and distinguish nothing. It needs a per-power
+{timelock, abdicated, current value} shape, new power groups (allocator, adapters, force-deallocate penalty, roles), and
+disclosure text for each (`assertDisclosureComplete` requires it).
+Roles: sentinels are enumerable only from events ([M] the RPC refused a from-genesis log query); "Circle Guarded" is
+checkable only as `isSentinel(circleAddress)`, and Circle has not published that address.
+
+## 6. The maxRedeem defect — three sites, and the order
+V2's `maxRedeem` ALWAYS returns 0 ("Gross underestimation because being revert-free cannot be guaranteed when calling
+the gate" — VaultV2.sol). Where we read it:
+1. **`inspectVault`** (`_vault.mjs:449–463`) — a V2 holder's redemption block displays **"blocked"** (no verdict code,
+   beside the unrecognised-surface BLOCK).
+2. **`state-reads.mjs:37`** (the mandate check) — a V2 holder reads **"blocked"** → a false `redemption-restricted`
+   FINDING ("you can redeem none of your shares").
+3. **Any liquidity reader that trusts an inner vault's `max*`** — my own probe hit it (the false 0% in correction A).
+The DD engine itself never reads `maxRedeem`.
+**Fix:** `maxRedeem`'s meaning is vault-type-dependent, so interpret it only under a recognised profile — the same rule
+as powers. Each profile declares its redemption signal: `xylo` → `maxRedeem` (documented = balanceOf); `morpho-v2` →
+the exit-liquidity fact + a simulated redeem; unrecognised → `unknown` with a reason, never "blocked", never "full".
+`state-reads.mjs` gets it through the allowlist entry, beside `CASH_ONLY_VAULTS`. Red first: a V2-shaped reader
+(`maxRedeem` 0, balance > 0, fully liquid) must stop reading "blocked" in both places; xylo unchanged. Off the DD surface.
+**Latent today** — xylo's `maxRedeem` = balance, and the recognition gate refuses V2 before anything acts. Adding a V2
+profile removes that second protection. **Order: redemption semantics → V2 profile → any allowlist widening.**
+
+## 7. What is reusable from "Scope 2" (parked 2026-09-17; it survives only as the comment in vault-profiles.mjs:35
+and the inspectVault-defect memory — PROGRESS never mentioned it)
+- ✅ The registry, recognition gate and structural guard (4bc0d03) — they already refuse Galaxy correctly.
+- ✅ The `notChecked` / no-verdict plumbing; owner classification (EOA / multisig / renounced); the quorum and anchor
+  machinery; the V1/V2 tells and the gate→exit mapping (confirmed against source; Galaxy's exit gates now measured
+  abdicated).
+- ⚠️ The vocabulary suite's `MORPHO_GOV` fixture is a **synthetic V1/V2 mix** — `setFee(uint96)` and `submitCap` are V1
+  and [M] absent from real V2 bytecode. Replace it with the measured V2 set.
+- ⚠️ `redeem-sim.mjs` decodes xylo's `Error(string)` shortfall; V2 reverts with custom errors and a Morpho market
+  liquidity revert needs its own decoding.
+- ❌ Not reusable: cash-vs-counter payability (V2 `totalAssets` is not cash); any `maxRedeem`-based redemption logic.
+- V1 can stay parked: there are no V1 vaults on Arc.
+
+**Decisions for tomorrow:** whether DD reports exit liquidity (a DD-surface change), whether to build the V2 profile and
+the power-model change, and landing the redemption-semantics fix first. Nothing is built.
