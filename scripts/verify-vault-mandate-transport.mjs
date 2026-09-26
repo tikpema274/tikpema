@@ -28,7 +28,9 @@ import { EIP1967_IMPL_SLOT } from "../shared/onchain-facts/index.mjs";
 import { SUBJ, OWNER, ZERO_WORD, word, codeWith, mkc } from "./dd/_mock-chain.mjs";
 import { pinToAnchor, resolveAnchor } from "../shared/vault-mandate/anchor.mjs";
 import { readStateAtAnchor } from "../shared/vault-mandate/state-reads.mjs";
-import { signedCheckReport, runMandateCheck, readBaseline } from "../netlify/functions/_vault-mandate-check.mjs";
+import { signedCheckReport, runMandateCheck, readBaseline, redemptionSignalForVault } from "../netlify/functions/_vault-mandate-check.mjs";
+// xylo-usdc is a xylo-profile vault, so its maxRedeem means something (shared/vault-redemption.mjs).
+const XYLO_SIG = redemptionSignalForVault("xylo-usdc");
 import { analyze } from "../shared/onchain-analyze/index.mjs";
 import { decideMandateAction, ACTION, OBSERVED, CAUSE } from "../shared/vault-mandate/decide.mjs";
 
@@ -221,7 +223,7 @@ function stubReader(endpoint, over = {}) {
 }
 {
   const rd = stubReader(A);
-  const r = await attemptAsync(() => readStateAtAnchor({ reader: rd, vault: VAULT, holder: HOLDER, anchor: ANCHOR, cashOnly: true }));
+  const r = await attemptAsync(() => readStateAtAnchor({ reader: rd, vault: VAULT, holder: HOLDER, anchor: ANCHOR, cashOnly: true, redemptionSignal: XYLO_SIG }));
   ok("a reading: endpoint + the anchor hash + ok", r?.ok === true && r?.endpoint === A && r?.blockHash === ANCHOR.blockHash, show(r));
   ok("⭐ EVERY read was made at the anchor block hash", rd.seen.length > 0 && rd.seen.every((s) => s.blockHash === ANCHOR.blockHash), `${rd.seen.length} reads`);
   ok("exit fee: declared 10 bps, measured from preview 10 bps", r?.exitFee?.declaredBps === 10 && r?.exitFee?.measuredBps === 10, show(r?.exitFee));
@@ -229,17 +231,17 @@ function stubReader(endpoint, over = {}) {
   ok("⭐ holding shares → the payability reading is a simulated redeem of EXACTLY those shares from the holder",
     r?.payability?.mode === "simulated-redeem" && r?.payability?.sharesRaw === "1999996" &&
     rd.seen.some((s) => s.fn === "simulateRedeem" && s.shares === "1999996" && s.holder === HOLDER), show(r?.payability));
-  const r0 = await attemptAsync(() => readStateAtAnchor({ reader: stubReader(A, { vals: { balanceOf: 0n, maxRedeem: 0n } }), vault: VAULT, holder: HOLDER, anchor: ANCHOR, cashOnly: true }));
+  const r0 = await attemptAsync(() => readStateAtAnchor({ reader: stubReader(A, { vals: { balanceOf: 0n, maxRedeem: 0n } }), vault: VAULT, holder: HOLDER, anchor: ANCHOR, cashOnly: true, redemptionSignal: XYLO_SIG }));
   ok("no position → the aggregate reading (cash vs counter), carrying the cashOnly profile",
     r0?.payability?.mode === "aggregate" && r0?.payability?.cashRaw === "300" && r0?.payability?.counterRaw === "200" && r0?.payability?.cashOnly === true, show(r0?.payability));
   ok("  …and the vault's cash is read from its ASSET's balanceOf(vault)", r0?.payability?.cashRaw === "300");
-  const part = await attemptAsync(() => readStateAtAnchor({ reader: stubReader(A, { vals: { maxRedeem: 5n } }), vault: VAULT, holder: HOLDER, anchor: ANCHOR, cashOnly: true }));
+  const part = await attemptAsync(() => readStateAtAnchor({ reader: stubReader(A, { vals: { maxRedeem: 5n } }), vault: VAULT, holder: HOLDER, anchor: ANCHOR, cashOnly: true, redemptionSignal: XYLO_SIG }));
   ok("maxRedeem below the position → partial", part?.redemption?.state === "partial");
-  const blk = await attemptAsync(() => readStateAtAnchor({ reader: stubReader(A, { vals: { maxRedeem: 0n } }), vault: VAULT, holder: HOLDER, anchor: ANCHOR, cashOnly: true }));
+  const blk = await attemptAsync(() => readStateAtAnchor({ reader: stubReader(A, { vals: { maxRedeem: 0n } }), vault: VAULT, holder: HOLDER, anchor: ANCHOR, cashOnly: true, redemptionSignal: XYLO_SIG }));
   ok("maxRedeem 0 with a position → blocked", blk?.redemption?.state === "blocked");
-  const t = await attemptAsync(() => readStateAtAnchor({ reader: stubReader(A, { throwOn: "withdrawFee" }), vault: VAULT, holder: HOLDER, anchor: ANCHOR, cashOnly: true }));
+  const t = await attemptAsync(() => readStateAtAnchor({ reader: stubReader(A, { throwOn: "withdrawFee" }), vault: VAULT, holder: HOLDER, anchor: ANCHOR, cashOnly: true, redemptionSignal: XYLO_SIG }));
   ok("⭐ a core read fails → the whole reading is ok:false (never a partial reading with a guessed field)", t?.ok === false && typeof t?.why === "string", show(t));
-  const nb = await attemptAsync(() => readStateAtAnchor({ reader: stubReader(A, { vals: { withdrawFee: "10" } }), vault: VAULT, holder: HOLDER, anchor: ANCHOR, cashOnly: true }));
+  const nb = await attemptAsync(() => readStateAtAnchor({ reader: stubReader(A, { vals: { withdrawFee: "10" } }), vault: VAULT, holder: HOLDER, anchor: ANCHOR, cashOnly: true, redemptionSignal: XYLO_SIG }));
   ok("a read that returns something other than an integer → ok:false", nb?.ok === false, show(nb));
 }
 
@@ -257,7 +259,8 @@ const RECORD = { vault: { key: "xylo-usdc", address: SUBJ, chainId: MOCK_CHAIN_I
     { id: "r4", kind: "state", subject: "vault-cannot-pay", onFinding: "pause" },
   ] };
 const deps5 = (over = {}) => ({ ...deps3(), anchorReaders: anchorReaders(), stateReaders: [stubReader(A), stubReader(B)],
-  resolveVault: (k) => (k === "xylo-usdc" ? { ...RECORD.vault, assetAddress: VAULT.assetAddress } : null), cashOnly: () => true, ...over });
+  resolveVault: (k) => (k === "xylo-usdc" ? { ...RECORD.vault, assetAddress: VAULT.assetAddress } : null), cashOnly: () => true,
+  redemptionSignal: redemptionSignalForVault, ...over });
 {
   const c = await attemptAsync(() => runMandateCheck({ record: RECORD, deps: deps5() }));
   ok("a clean check: anchored, signed, both endpoints read", c?.anchor?.blockNumber === 999 && c?.report?.attestation?.status === "signed" && c?.readings?.length === 2, show(c?.check?.outage ?? c?.threw ?? c?.anchor));

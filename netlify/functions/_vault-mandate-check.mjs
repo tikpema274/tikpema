@@ -36,6 +36,7 @@ import { pinToAnchor, resolveAnchor } from "../../shared/vault-mandate/anchor.mj
 import { readStateAtAnchor } from "../../shared/vault-mandate/state-reads.mjs";
 import { redeemSimulationOutcome } from "../../shared/vault-mandate/redeem-sim.mjs";
 import { observeMandateCheck } from "../../shared/vault-mandate/observe.mjs";
+import { redemptionSignalFor } from "../../shared/vault-redemption.mjs";
 
 /**
  * Vaults whose `totalAssets` is cash: no code path moves the asset anywhere but redeem/withdraw, fees
@@ -44,6 +45,18 @@ import { observeMandateCheck } from "../../shared/vault-mandate/observe.mjs";
 export const CASH_ONLY_VAULTS = Object.freeze({
   "xylo-usdc": "verified source (explorer, 2026-09-25): setStrategy only stores an address; totalAssets is a storage counter moved only by deposit/mint/withdraw/redeem/harvest",
 });
+
+/**
+ * WHICH VAULT PROFILE each allowlisted vault is — so the mandate's state reads know what `maxRedeem` MEANS
+ * (shared/vault-redemption.mjs). Declared here, beside CASH_ONLY_VAULTS, rather than recognised per check:
+ * the check reads by blockHash on two endpoints and does not re-derive the profile from bytecode.
+ * ⛔ Every allowlisted vault must be declared (test:redemptionsignal) — widening the allowlist without a
+ * declaration is red. An undeclared vault reads its redemption as UNKNOWN, never as maxRedeem.
+ */
+export const VAULT_PROFILE_OF = Object.freeze({
+  "xylo-usdc": "xylo", // XyloVault family — the inspector's recognition gate matches its setFees/emergencyWithdraw surface
+});
+export const redemptionSignalForVault = (key) => redemptionSignalFor(Object.prototype.hasOwnProperty.call(VAULT_PROFILE_OF, key) ? VAULT_PROFILE_OF[key] : null);
 
 // The verifying contract is deliberately absent: it is derived on-chain (ownerOf), never pinned.
 const IDENTITY_FIELDS = ["registry", "agentId", "chainId", "domain"];
@@ -126,7 +139,8 @@ export async function runMandateCheck({ record, deps }) {
       timing.verifiedAt = clock(); timing.signingLatencyMs = timing.verifiedAt - timing.anchoredAt; return r;
     }),
     Promise.all(deps.stateReaders.map((reader) =>
-      readStateAtAnchor({ reader, vault: v, holder: record.walletAddress, anchor: a.anchor, cashOnly: deps.cashOnly(v.key) }))),
+      readStateAtAnchor({ reader, vault: v, holder: record.walletAddress, anchor: a.anchor, cashOnly: deps.cashOnly(v.key),
+        redemptionSignal: deps.redemptionSignal?.(v.key) }))),
   ]);
   cost.signCalls += rep.cost.signCalls;
 
@@ -213,5 +227,6 @@ export function productionDeps({ health, resolveVault, sign = true, vaultAckToke
     identity: DD_IDENTITY,
     anchorReaders: readers, stateReaders: readers,
     cashOnly: (key) => key in CASH_ONLY_VAULTS,
+    redemptionSignal: redemptionSignalForVault,
   };
 }

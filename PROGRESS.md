@@ -27970,3 +27970,57 @@ and the inspectVault-defect memory — PROGRESS never mentioned it)
 
 **Decisions for tomorrow:** whether DD reports exit liquidity (a DD-surface change), whether to build the V2 profile and
 the power-model change, and landing the redemption-semantics fix first. Nothing is built.
+
+---
+
+# ✅ maxRedeem SEMANTICS — interpreted only under a recognised vault profile (2026-09-26), NOT DEPLOYED
+
+First step of the order recorded in "MORPHO V2 ON ARC MAINNET". Rides with whatever ships next.
+
+## The defect
+`maxRedeem` means different things per vault type, and we read it as if it meant one thing. On Morpho Vault V2 it
+**always returns 0, by design** ("Gross underestimation because being revert-free cannot be guaranteed when calling the
+gate" — VaultV2.sol). So a V2 holder read as **"blocked"** — a **false redemption-restricted finding** ("you can redeem
+none of your shares") on a vault that was fully liquid. Latent: the only allowlisted vault is xylo (whose `maxRedeem` is
+its balanceOf) and the recognition gate refuses V2 — but adding a V2 profile would have removed that second protection.
+
+## The three sites
+1. **`inspectVault`** (`_vault.mjs`) — mapped maxRedeem to full/partial/blocked for any vault.
+2. **`state-reads.mjs`** (the mandate check) — the same mapping, feeding `redemption-restricted` → `violated`.
+3. **Any liquidity reader that trusts an inner vault's `max*`** — the 2026-09-26 probe read 0% where the wrapped V2
+   vault was 100% redeemable. No such reader exists in the code; a source guard now keeps one from appearing silently.
+
+## The fix
+- **`shared/vault-redemption.mjs`** — the per-profile declaration and ONE classifier (`classifyRedemption`), replacing
+  the two duplicated mappings. `xylo` → `max-redeem`; `morpho-v2` → `exit-liquidity`, declared but NOT BUILT, so it
+  resolves to no signal with "not built yet"; unrecognised or undeclared → no signal, with a reason. **No signal ⇒
+  `unknown` — never "blocked", never "full".**
+- ⭐ **Why the map lives off the DD surface:** the profile registry (`shared/onchain-facts/vault-profiles.mjs`) is hashed
+  into ddTree; an edit there rotates the DD code identity and opens a refusal window. The profile NAME is the key; what
+  it means for redemption lives in `shared/vault-redemption.mjs`, outside every DD directory.
+- **`inspectVault`** asks for the signal of the profile it already recognised (line 401) and classifies through the
+  shared function; its redemption result gains `basis` (which signal the state rests on).
+- **`state-reads.mjs`** takes a `redemptionSignal`; with none it does not read `maxRedeem` at all (a vault lacking it
+  cannot fail the reading). `observe` already maps `unknown` to INCONCLUSIVE, so the mandate pauses as INCONCLUSIVE, not
+  on a false finding. A caller that passes no signal gets `unknown` (fail-safe).
+- **The allowlist declaration** — `VAULT_PROFILE_OF = { "xylo-usdc": "xylo" }` beside `CASH_ONLY_VAULTS` in
+  `_vault-mandate-check.mjs`, with `redemptionSignalForVault()`, wired through `productionDeps` into every reading
+  `runMandateCheck` takes.
+
+## The guards (test:redemptionsignal, 41/0; in test:all)
+- ⭐ **Every allowlisted vault must declare its profile** — adding a vault to `VAULT_ALLOWLIST` without a
+  `VAULT_PROFILE_OF` entry is red, so widening forces the redemption question to be answered.
+- ⭐ **Source guard on `maxRedeem` / `maxWithdraw` callers** — only `_vault.mjs` and `state-reads.mjs` may call them,
+  and both only through `classifyRedemption`.
+- No changed or new file is on the DD surface (checked against DD_SURFACE_DIRS + FILES; `test:dd`'s code-identity check
+  also green).
+- Red first: 29 of 41 failed on the old code — a V2-shaped holder read "blocked" in both places and `observe` returned
+  `violated`; the xylo controls passed (the baseline). Four ways of reintroducing the old behaviour are all caught: the
+  classifier ignoring the signal (7 failures) · inspectVault assuming xylo (3) · state-reads defaulting to maxRedeem (5)
+  · an undeclared vault treated as xylo (1). `test:mandatetransport` passes the xylo signal to its xylo-semantics cases.
+  test:all **158/158**.
+
+## What this unblocks
+**Redemption semantics (done) → Morpho V2 profile → any allowlist widening.** The V2 profile can now be recognised
+without its holders reading "blocked"; its real signal (exit liquidity + a simulated redeem) plugs into the declared
+`exit-liquidity` slot when built.

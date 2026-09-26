@@ -39,6 +39,7 @@ import {
 // ⭐ The recognition gate for the false-clean-bill defect. "selector absent → power absent" is valid
 // ONLY inside a governance vocabulary we recognise; an unrecognised surface is NOT CHECKED, not clean.
 import { recognizeVaultProfile } from "../../shared/onchain-facts/vault-profiles.mjs";
+import { redemptionSignalFor, classifyRedemption } from "../../shared/vault-redemption.mjs";
 
 // ── The allowlist. One entry today — recon found exactly one live vault on Arc testnet and no
 // registry (see PROGRESS). A vault the agent may run against is a CONFIG decision, exactly like
@@ -451,16 +452,22 @@ export async function inspectVault(address, { owner = null } = {}) {
   const maxRedeemUnread = ownerAddr ? (unread(maxRedeemRaw) || typeof maxRedeemRaw !== "bigint") : false;
   const shareBalUnread  = ownerAddr ? (unread(shareBalRaw)  || typeof shareBalRaw  !== "bigint") : false;
 
-  let redeemState, redeemableShares = null;
+  // ⭐⭐ maxRedeem IS INTERPRETED ONLY UNDER A RECOGNISED PROFILE (2026-09-26). Its meaning is
+  // vault-type-dependent: XyloVault's is the holder's balance, Morpho V2's is ALWAYS 0 by design, so a V2
+  // holder used to read "blocked". The profile recognised above declares the signal
+  // (shared/vault-redemption.mjs); without one the state is `unknown` with a reason — never blocked,
+  // never full. The mapping itself lives in classifyRedemption, shared with the mandate's state reads.
+  const redemptionSignal = redemptionSignalFor(vaultProfile?.name ?? null);
+  let redeemState, redeemableShares = null, redeemWhy = null;
   if (!ownerAddr) {
     redeemState = "unknown";
-  } else if (maxRedeemUnread || shareBalUnread) {
-    redeemState = "unknown";
+    redeemWhy = "no holder address was supplied, so this vault's per-holder redemption limit was not read — UNKNOWN, not unlimited";
   } else {
-    redeemableShares = maxRedeemRaw < shareBalRaw ? maxRedeemRaw : shareBalRaw;
-    redeemState = shareBalRaw === 0n ? "full"          // nothing held: nothing is being withheld
-      : maxRedeemRaw === 0n ? "blocked"
-      : maxRedeemRaw >= shareBalRaw ? "full" : "partial";
+    const c = classifyRedemption({
+      signal: redemptionSignal.signal, why: redemptionSignal.why,
+      maxRedeem: maxRedeemUnread ? null : maxRedeemRaw, shares: shareBalUnread ? null : shareBalRaw,
+    });
+    redeemState = c.state; redeemableShares = c.redeemableShares; redeemWhy = c.why;
   }
 
   // ── The conversions. A SECOND multicall, and deliberately so: `previewRedeem`/`convertToAssets`
@@ -506,6 +513,8 @@ export async function inspectVault(address, { owner = null } = {}) {
 
   const redemption = {
     state: redeemState, // full | partial | blocked | unknown
+    // WHICH signal the state rests on (e.g. "max-redeem"), or null when none applies to this vault type.
+    basis: ownerAddr ? redemptionSignal.signal : null,
     // ⛔ THE AMOUNT IS THE POINT OF THE PARTIAL STATE. Null in every other state, and null is
     // UNKNOWN — a consumer must not render it as zero.
     redeemableShares: redeemableShares === null ? null : redeemableShares.toString(),
@@ -520,11 +529,7 @@ export async function inspectVault(address, { owner = null } = {}) {
       maxFeeBps,
       probedAt: probeUnit ? probeUnit.toString() : null,
     },
-    why: !ownerAddr
-      ? "no holder address was supplied, so this vault's per-holder redemption limit was not read — UNKNOWN, not unlimited"
-      : (maxRedeemUnread || shareBalUnread)
-        ? "the redemption limit could not be read — whether you can withdraw right now is UNKNOWN, not blocked"
-        : null,
+    why: redeemWhy,
   };
 
   // Withdraw mechanics. No lock/delay/cooldown selector is a WARN or BLOCK on its own; the fee is
