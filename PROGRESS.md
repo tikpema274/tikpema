@@ -28187,8 +28187,9 @@ disarmed re-triggers only if found again.
 - **Close piece 4's residual risk here from the start:** a Circle idempotency key derived from the intent key, so a
   crash between Circle accepting the tx and the hook recording its id cannot lose it (the SDK accepting
   `idempotencyKey` on `createContractExecutionTransaction` is to VERIFY, not measured).
-- Classification as piece 4: **happened** if any one of Circle COMPLETE / a Withdraw event for the SCA after the anchor /
-  shares below shares-before; **didn't happen** only if every instrument is negative and past the deadline;
+- ⛔ **STRUCK (T, 2026-09-27) — see "PIECE 5 DECISIONS + DESIGN CORRECTIONS", C1.** ~~Classification as piece 4:
+  **happened** if any one of Circle COMPLETE / a Withdraw event for the SCA after the anchor / shares below
+  shares-before;~~ **didn't happen** only if every instrument is negative and past the deadline;
   **unreadable** blocks and is never "didn't happen"; N consecutive unreadable → INCONCLUSIVE, keep reading.
 - Never resubmit while an intent is open. Recovery runs even while paused (reads + records only).
 
@@ -28230,3 +28231,227 @@ this resolves; we'll update this receipt from the chain."*
 
 **Decisions for T:** finding B (all shares vs the mandate's) · point 1's open case · point 3 (stop vs take less) ·
 point 7 (exempt vs gated). Built after piece 5: monitoring (finding A). Nothing is built.
+
+---
+
+# 🧭 VAULT MANDATE — PIECE 5 DECISIONS + DESIGN CORRECTIONS; OPERATOR-ONLY CREATION SCOPED — NOTHING BUILT (2026-09-27)
+
+A read-only re-read of the piece 5 design against the code (vaultWithdraw since 27027fd, executeAction's reclaim
+branch, agent-vault-withdraw / agent-withdraw, _pause.mjs, piece 4's deposit path, the check transport), then T's
+decisions. Design only. Nothing is built.
+
+## ⭐ DECISIONS (T, 2026-09-27)
+- **Finding B — redeem ONLY THE MANDATE'S SHARES: `min(tracked, live)`.** Shares the user deposited by hand carry no
+  instruction, and an agent redeeming them acts beyond its authority. `min` because the user's manual reclaim
+  (agent-vault-withdraw, full balance, pause-exempt) can already have taken the mandate's shares. Consequence: the
+  mandate must TRACK the shares it received (C10), and the outcome table changes: shares remaining > 0 after an exit is
+  EXPECTED when the user holds shares of their own. "exited" = the burned shares equal the redeem amount, not "the
+  position reads 0".
+- **Point 3 — STOP, not take-less.** Recorded plainly: **this does NOT solve the ordering problem.** Whenever vault cash
+  covers some of Tikpema's users' exits but not all, the order the scheduler reaches mandates decides who is paid.
+  That holds on the first attempt, where every exit-rule mandate sees the finding in the same block and the later
+  simulations revert, and on every exit-blocked retry once cash returns. Stop only avoids Tikpema CHOOSING A PARTIAL
+  AMOUNT. It is bounded today (≤ 100 USDC per mandate, one vault), not solved.
+- **Point 7 — exits are GATED BY THE KILL SWITCH** (the Vault-agent pause, ALL_AGENTS, AGENT_HALT), checked at the
+  write, never inherited from `isReclaim` (finding C). The user's manual reclaim stays pause-exempt, so a pause never
+  traps funds. **Separate decision, belonging to monitoring: whether a pause also stops CHECKS.** Today it does (C7),
+  which makes `exit-due-paused` unreachable.
+- **Order — MINIMAL OPERATOR-ONLY CREATION GOES FIRST, ahead of arming anything.** Every blocker needs a mandate to
+  exist: the freshness window (signing latency), the fee (same measurement), how often the endpoints disagree, and the
+  live exit proof. Piece 4's deposit path has also never run with a mandate.
+- **Struck from the design: "Circle COMPLETE ⇒ happened"** (point 5). See C1.
+
+## DESIGN CORRECTIONS — what the piece 5 design assumed that the code does not support
+- **C1 — recovery could declare "exited" when nothing left the vault.** Point 5 took any one of Circle COMPLETE / a
+  Withdraw event for the SCA / shares below shares-before as "happened". But (a) Circle COMPLETE is the OUTER userOp,
+  and point 2 itself says the inner redeem can revert beneath it; (b) the event and the share drop are also produced by
+  the user's manual reclaim. The mandate would then go terminal with the shares possibly still in the vault. That is the
+  dangerous direction (for deposits the same rule errs safe). **Corrected:** Circle's id only LOCATES the tx hash. The
+  outcome comes from THAT transaction's logs and state (its Withdraw event, its ERC-20 Transfer, the share delta across
+  its block). An event that merely names the SCA is not ours. With the Circle id lost, the idempotency key (C4) is how
+  the tx is found again, never a scan for "any Withdraw for this owner".
+- **C2 — the tick cannot hold a redeem.** Scheduled functions have a 30 s execution limit (Netlify docs; not measured
+  here). `waitForTx` has a 60 s deadline (`_circle.mjs`), and `runMandateTick` runs every mandate in series, each with a
+  signed check. A killed invocation mid-wait would make recovery the NORMAL path. Exits, and probably armed deposits,
+  must run in a background function (15 min limit). Piece 4 has the same exposure, never exercised because no mandate
+  has run.
+- **C3 — the one-clock fix (16ff7f4) does not fit acting on a STORED finding.** `depositForMandate` refuses a check
+  without its clock identity, a non-enumerable function that is never serialised. Point 1 acts on a finding check that
+  may come back from storage (exit-blocked retries, a resumed pause, crash recovery), and a stored check has no clock.
+  Exit arming must use something that survives storage: **the anchor block's CHAIN timestamp against
+  `MANDATE_EXIT_ARMED_FROM`**, not wall-clock `anchoredAt`.
+- **C4 — `vaultWithdraw` is not reusable as it stands.** It has no `onSubmitted` hook and no idempotency key, and it
+  derives its result from the USDC balance delta, which the design demotes to a cross-check. Piece 5 needs a lower-level
+  submit-redeem factored out, with `vaultWithdraw` rebuilt on it. ⚠️ That refactor touches the DEPLOYED manual reclaim, a
+  live money path: `test:vaultwithdrawshares` must stay green. Idempotency: **the SDK wrapper accepts a caller key**
+  (installed SDK source: `idempotencyKey: t ?? <random uuid>` on the contract-execution create). NOT measured: what
+  Circle does on a REPEATED key. The key is probably required to be a UUID, so derive one deterministically from the
+  intent key.
+- **C5 — a fee finding is not in the signed report.** The report signs powers and owner. `exit-fee-above` and
+  `deposit-fee-above` come from our UNSIGNED reads on two endpoints. Point 1's argument still holds (the value at the
+  anchor hash is re-readable; historical eth_call was measured ≥ 7 days back), but the receipt and the copy must not
+  call a fee finding "signed". It is MONITORED / CHECKED-AFTER, in the disclosure's own terms.
+- **C6 — the fee sanity gate refuses on null.** `baseline.maxFeeBps` is null when the endpoints did not agree on
+  `MAX_FEE` at creation (readBaseline). A null cap must REFUSE the exit (pause INCONCLUSIVE), never pass. On xylo the
+  contract bounds the fee by `MAX_FEE`, so the gate is a tripwire for our own misreading.
+- **C7 — a paused record and the kill switch both stop the CHECK itself.** A `paused` mandate fails `mayAct` and is
+  never checked. `tickOne` also reads `deps.isPaused` as a free gate BEFORE the check (`_vault-mandate-deposit.mjs:431`).
+  So under today's code a paused agent never produces a finding, and `exit-due-paused` cannot be reached. That is the
+  monitoring decision above.
+- **C8 — an open deposit intent blocks the exit.** Recovery runs first and returns on `blocking`, and 12 unreadable
+  tries latch `paused`, which stops checks (C7). The Finding A record split is therefore a PREREQUISITE for exits
+  working, not a follow-on.
+- **C9 — the maxRedeem fix (6d04d13) constrains the execution reads.** Its source guard allows `maxRedeem` /
+  `maxWithdraw` only in `_vault.mjs` and `state-reads.mjs`, so the exit's fresh reads use the SIMULATED REDEEM, not
+  `maxRedeem`. `redeem-sim` decodes only XyloVault's errors: any other vault's revert is UNRECOGNISED, so the exit
+  blocks and retries. Correct, but exits are xylo-only until the V2 profile exists.
+- **C10 — Finding B has no data yet.** `commitSeq` records `depositedUsdc` and `depositCount`, not shares received.
+  Adding `progress.sharesTrackedRaw` now costs nothing (piece 4 is disarmed, zero mandates). After deposits are armed,
+  older mandates would lack it. A manual reclaim can also take the tracked shares, hence `min(tracked, live)`.
+- **C11 — the outcome agreement rule is unverified for xylo.** Point 2 requires the Withdraw event, the ERC-20 Transfer
+  and the share delta to agree. Whether xylo's `Withdraw.assets` is gross or net of its ~0.1% exit fee has not been
+  read (no xylo source or ABI in the repo). If gross, the event and the Transfer legitimately differ by the fee. Read
+  the verified source before writing that rule.
+- **C12 — the disarmed exit proves nothing live.** No mandate can hold an exit rule while `EXIT_AVAILABLE` is false,
+  and no mandate exists at all. The first exit that ever ran would be armed. Hence the operator mandate (below).
+- **C13 — the tick contradicts T's outage decision.** `tickOne` latches `paused` on ANY non-deposit decision, OUTAGE
+  included (`:461–470`), against "an outage skips and retries, never latches". Latent only while deposits are disarmed.
+- **C14 — the order of the switches.** Monitoring after piece 5 is fine as a BUILD order. Turning on `EXIT_AVAILABLE`
+  before monitoring ships is not: a fully deposited mandate is never checked again, so "if found: exit" would be mostly
+  false. The guard `EXIT_AVAILABLE ⇒ MANDATE_EXIT_ARMED` must also require monitoring to be live.
+- **C15 — the status names disagree.** Finding A: `active | exiting | exit-blocked | closed`. Piece 5 adds
+  `exit-due-paused` and a terminal `exited`. The code has `awaiting-ack | active | paused` (`record.mjs:35`). One set is
+  settled in the record split (schema /3) before piece 5 writes any of them.
+
+## REVISED BUILD ORDER
+0. **Operator-only creation** (scoped below). No money moves; it makes the measurements possible.
+1. Record split (status / deposits / monitoring, schema /3) + outage stops latching (C13, C15) + `sharesTrackedRaw` (C10).
+2. Pure exit outcome classifier: tx-bound (C1), with the xylo event semantics read first (C11). Red cases: an inner
+   revert under a COMPLETE userOp; a concurrent manual reclaim.
+3. Pure exit decision: arming by chain time (C3), the fee gate refusing on null (C6), the pause gate (point 7), stop.
+4. ⚠️ MONEY: factor submit-redeem out of `vaultWithdraw` with `onSubmitted` + `idempotencyKey` (C4). Touches the live
+   manual reclaim.
+5. ⚠️ MONEY, shipped DISARMED: the exit executor + exit recovery, in a background function (C2).
+6. Monitoring (Finding A), with the pause-stops-checks decision.
+7. The live proof, run by T, on the operator mandate.
+8. Arm exits → turn on `EXIT_AVAILABLE` last, each in its own commit, the guard requiring monitoring (C14).
+Arming DEPOSITS stays as recorded: the measured freshness window, then `MANDATE_DEPOSIT_ARMED` + `MANDATE_ARMED_FROM`
+together, in their own commit.
+
+## OPERATOR-ONLY CREATION — SCOPE (nothing built)
+
+### What it is
+The smallest path that puts a real mandate in the production store, **owned by the operator (T), on T's own agent
+wallet**, so the deployed tick runs it DISARMED and records what arming is waiting for: signing latency
+(`timing.signingLatencyMs`) → the freshness window and the fee; the two endpoints' readings → how often they disagree;
+WOULD DEPOSIT receipts. Later, the same mandate carries the live exit proof.
+- **Three operations, and no more:** create · acknowledge · cancel. Create and acknowledge reuse the existing core
+  unchanged (`createVaultMandate` → `buildMandateRecord`; `acknowledgeStoredMandate`). There is no list endpoint: the
+  record and the tick's receipts are read from the store by the operator.
+- **One deployed function, `vault-mandate-operator`, with no `/api` route and no UI.** Each call needs a valid prod
+  session (the browser-pasted token, as `scripts/dca-rehearsal-create.mjs` does; no prod SESSION_SECRET on the
+  laptop), AND `session.address` must be in **`OPERATOR_MANDATE_OWNERS`**: a code constant in a new
+  `shared/vault-mandate/operators.mjs` (off the DD surface, no env var, the limits.mjs rule). Anything else → 403, the
+  same response for "not signed in as an operator" and "no such operation", so it reveals nothing.
+- **A thin CLI, `scripts/vault-mandate-operator.mjs`** (the dca-rehearsal precedent: imports nothing from the app,
+  takes the pasted token, never mints one).
+- **Rules: pause-only in the first cut.** Creation uses the shipped `EXIT_AVAILABLE` (false), so exit rules are refused,
+  exactly as for anyone. The exit proof needs an exit rule before `EXIT_AVAILABLE` flips. That exception (operator
+  mandates may carry exit rules while exits are ARMED or in a disarmed-rehearsal state, with the disclosure saying
+  which) is **T's decision, scoped with piece 5**, not taken here.
+
+### What it must NOT be
+- **Not a user-facing endpoint.** No `/api/*` redirect, no UI link, no mention in any user copy. ⚠️ **"No route" is
+  NOT the security boundary**: `/.netlify/functions/vault-mandate-operator` is publicly reachable (only scheduled
+  functions 403). The boundary is session + `OPERATOR_MANDATE_OWNERS`, enforced in the handler before anything is read.
+- **Not creation on behalf of anyone.** Owner = the SESSION address, as in `createVaultMandate` (an `owner` or
+  `walletAddress` in the body is already refused). An operator cannot make a mandate for a user's wallet, and the
+  wallet is `ensureOwnerWallet(session)`.
+- **Not a bypass.** The same `buildMandateRecord` validation, limits, caps, baseline (signed report, verified signer)
+  and write-time verification. The record is written `awaiting-ack` and acts only after the operator acknowledges the
+  fingerprint they were shown. The `exitAvailable` test seam stays test-only (its source guard is unchanged).
+- **Not an arming switch.** It creates a record; the tick's shipped constants decide what that record may do.
+  Disarmed, it is checked, signed and receipted, and never deposits.
+- **Not piece 6.** No user create flow, no disclosure UI, no two-state status UI. Piece 6 reuses the ack-token reader
+  below and nothing else from here.
+- **Not on the DD surface.** No file under `DD_SURFACE_DIRS` / `DD_SURFACE_FILES` changes; ddTree does not rotate.
+
+### How it gets the vaultAckToken the production reader does not supply
+`readBaseline` already takes `deps.vaultAckToken({vault, holder})`, and `productionDeps` already accepts it. Nothing
+passes one, so creation refuses today (`checkBaseline`: "the baseline carries no vault disclosure token"). Build the
+**production reader once**, for this path and piece 6 alike, in `_vault-mandate-check.mjs` (off the surface):
+- It calls `depositDisclosure({ vault, owner: walletAddress })` (`_vault-disclosure.mjs`), the SAME function the
+  interactive deposit uses: inspectVault + the DD report + the dry-run gate.
+- ⚠️ **It returns the token ONLY when `ackRequired === true`**, never merely when `ackToken` is non-null.
+  `depositDisclosure` mints `ackToken` whenever the vault's own verdict is WARN, including when the gate has added a
+  BLOCK ("so a caller can still SHOW the token's disclosure"). Taking `ackToken` alone would bake a BLOCKED vault's
+  token into a mandate. BLOCK / not depositable → refuse creation with the gate's reasons.
+- ⚠️ A vault whose verdict is OK has no token, so `checkBaseline` refuses it. That is the current contract, not
+  something this path changes (xylo is WARN). Recorded so it is not mistaken for a bug when widening.
+- **The operator must SEE what the token stands for.** The create response returns the vault disclosure (level, warns,
+  holder / holderKind, withdraw and deposit fee: the digest's own inputs) beside the mandate disclosure text and
+  fingerprint. The vault token is inside the mandate fingerprint (schema /2), so acknowledging the fingerprint
+  acknowledges that vault disclosure. That is only honest if it was shown, so the CLI prints both before it offers the
+  ack.
+- The disclosure read (inspection at latest) and the baseline (report at an anchor) are two reads at two moments. If
+  the vault changes between them, the next deposit's re-inspection no longer matches the token, and executeAction's
+  gate refuses → the mandate pauses DISCLOSURE_CHANGED. That is fail-closed, so no extra binding is needed now.
+- ⚠️ Function time: readBaseline signs (latency unmeasured), and depositDisclosure inspects and fetches a report. A
+  synchronous function may run past its limit on the first call. If it does, the operator retries; creation is
+  create-only per id, so a retry makes a new mandate, never a double.
+
+### How an operator mandate is distinguishable from a user's
+- **`origin: "operator"`** on the record (a user mandate will carry `origin: "user"`), **inside the fingerprint**, so a
+  store edit that flips it leaves the acknowledgement stale and the mandate unable to act.
+- **Re-verified on every read:** `verifyMandateRecord` refuses `origin: "operator"` unless `owner` ∈
+  `OPERATOR_MANDATE_OWNERS`. A record minted as "operator" for anyone else cannot act, and removing an address from
+  the constant stops that operator's mandates (fail-closed).
+- **The only writer of `origin: "operator"` is the operator handler.** A source guard, in the style of the
+  `depositForMandate` guard, keeps any other caller of `createVaultMandate` from passing it; piece 6's user endpoint
+  hard-codes `"user"`.
+- Every tick receipt and summary line carries `origin`, so measurements taken from operator mandates are
+  labelled as such, and nobody later reads them as user behaviour.
+- **Schema:** `origin` is a record change. Recommendation: land it WITH the record split (schema /3, build step 1) or
+  make /3 now with `origin` alone and the split on top as /4. Either way an older-schema record already reads
+  "unknown schema" and cannot act, so an operator mandate made under an older schema is recreated, never migrated.
+  It is disposable by design.
+- **Cancel:** there is no terminal status today. Add `cancelled` (terminal, may not act; the tick skips it). This is
+  the first member of the split's terminal set, and it is needed so the operator can end a rehearsal without deleting
+  its audit trail.
+
+### Open for T
+- **The operator address(es)** for `OPERATOR_MANDATE_OWNERS`. They will be T's login address(es); truncate them in
+  any record other than the constant itself.
+- **Whether arming can be SCOPED to `origin: "operator"` first** (armed deposits for operator mandates only, then for
+  everyone). It would let the first real mandate deposit happen on T's wallet alone. A decision, not assumed here.
+- **The exit-rule exception for operator mandates** (above), decided with piece 5.
+- **Where step 0 sits against the schema** (with the split, or before it).
+
+Nothing is built.
+
+## ⭐ DECISIONS ON THE FOUR OPEN ITEMS (T, 2026-09-27)
+- **Operator addresses:** T's login address only, `0x74b7…24E5`. The full value appears ONLY in the constant
+  `OPERATOR_MANDATE_OWNERS` (shared/vault-mandate/operators.mjs), per the truncation rule for public records.
+- **Scoped arming: YES.** A SEPARATE constant arms deposits for `origin: "operator"` mandates only
+  (`MANDATE_DEPOSIT_ARMED_OPERATOR` + its own `MANDATE_ARMED_FROM_OPERATOR`, flipped together in their own commit).
+  **Never one constant serving both.** Checked at the write inside `depositForMandate`: an operator-armed run refuses
+  any record whose origin is not `"operator"` (re-verified against `OPERATOR_MANDATE_OWNERS`). Guard test: with only the
+  operator constant armed, a user-origin mandate is refused at the write, and a user-origin record edited to say
+  "operator" cannot act (stale ack + owner not in the constant).
+  ⚠️ **What it does and does not buy, from the code:** the SIGNING-LATENCY measurement does not need arming. The
+  DISARMED tick already signs every check and records `timing.signingLatencyMs` (piece 4, decision 3). The operator
+  mandate existing is what unblocks the measurement. Operator-scoped arming is what lets the **first REAL deposit**
+  land on T's wallet alone, and it still hits the `⟦rule:freshness-unset⟧` refusal until `MANDATE_CHECK_FRESHNESS_MS`
+  is set from that measurement. Order: operator mandate (disarmed) → measured window → set the window → arm OPERATOR
+  → the first real deposit on T's wallet → later, and separately, the user constant.
+- **Exit rules on operator mandates:** deferred to when piece 5 is built.
+- **Schema:** `origin` lands WITH the record split, schema /3. One bump. Operator creation (step 0) therefore builds on
+  /3, so the record split's schema work moves ahead of it (the split's tick behaviour can follow).
+
+## RULES KEPT FROM THIS SCOPE
+- **An unlinked function is still publicly reachable.** Every file in netlify/functions is served at
+  `/.netlify/functions/<name>` whether or not an `/api` route points at it (only scheduled functions 403). The
+  boundary is the session gate checked in the handler, never the absence of a route.
+- **`depositDisclosure` mints an `ackToken` even when the gate has added a BLOCK** (it is minted on the vault's own WARN,
+  "so a caller can still SHOW the token's disclosure"). A caller that takes the token alone can bake a blocked vault's
+  token into a mandate. Take it only with `ackRequired === true`.
