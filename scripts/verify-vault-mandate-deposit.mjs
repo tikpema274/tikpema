@@ -206,11 +206,11 @@ const activeRecord = (over = {}) => {
 };
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-section("2 — the record (vault-mandate/2): terms, the stored vault ack, exit refused until piece 5");
+section("2 — the record (vault-mandate/3): terms, the stored vault ack, exit refused until piece 5");
 {
   const b = build();
   const r = b?.record;
-  ok("builds, schema vault-mandate/2", b?.ok === true && MANDATE_SCHEMA === "vault-mandate/2" && r?.schema === "vault-mandate/2", show(b?.errors ?? b?.threw));
+  ok("builds, schema vault-mandate/3", b?.ok === true && MANDATE_SCHEMA === "vault-mandate/3" && r?.schema === "vault-mandate/3", show(b?.errors ?? b?.threw));
   ok("the terms are stored explicitly", r?.terms?.amountPerDepositUsdc === 10 && r?.terms?.maxTotalUsdc === 100 && r?.terms?.cadence === "weekly");
   ok("⭐ the vault disclosure token the user acknowledged is stored in the baseline", r?.baseline?.vaultAckToken === ACK);
   ok("progress starts at zero, seq 1, nothing due yet recorded", r?.progress?.depositedUsdc === 0 && r?.progress?.depositCount === 0 && r?.progress?.nextSeq === 1 && r?.progress?.nextDueAt === null, show(r?.progress));
@@ -228,13 +228,13 @@ section("2 — the record (vault-mandate/2): terms, the stored vault ack, exit r
   ok("⭐ the vault ack token is inside the fingerprint", mandateFingerprint(tok) !== fp);
   const a = activeRecord();
   const edited = clone(a); edited.terms.amountPerDepositUsdc = 9;
-  ok("⭐ an acknowledged record whose amount is edited in the store may NOT act", verifyMandateRecord(edited).mayAct === false);
-  const moved = clone(a); moved.progress = { depositedUsdc: 30, depositCount: 3, nextSeq: 4, nextDueAt: T0 + DAY, lastDepositAt: T0 };
-  ok("progress is NOT in the fingerprint (every deposit advances it; the ack stays valid)", verifyMandateRecord(moved).mayAct === true, show(verifyMandateRecord(moved).errors));
-  const paused = clone(a); paused.status = "paused"; paused.pause = { flags: ["FINDING"], reason: "x", at: new Date(T0).toISOString() };
+  ok("⭐ an acknowledged record whose amount is edited in the store may NOT act", verifyMandateRecord(edited).mayDeposit === false);
+  const moved = clone(a); moved.progress = { ...moved.progress, depositedUsdc: 30, depositCount: 3, nextSeq: 4, nextDueAt: T0 + DAY, lastDepositAt: T0 };
+  ok("progress is NOT in the fingerprint (every deposit advances it; the ack stays valid)", verifyMandateRecord(moved).mayDeposit === true, show(verifyMandateRecord(moved).errors));
+  const paused = clone(a); paused.deposits = { state: "paused", flags: ["FINDING"], reason: "x", at: new Date(T0).toISOString() };
   const pv = verifyMandateRecord(paused);
-  ok("⭐ a PAUSED record is consistent but may not act", pv.ok === true && pv.mayAct === false, show(pv.errors));
-  ok("an unknown status may not act", verifyMandateRecord({ ...clone(a), status: "exited" }).mayAct === false);
+  ok("⭐ deposits PAUSED → consistent, may not deposit, may still monitor", pv.ok === true && pv.mayDeposit === false && pv.mayMonitor === true, show(pv.errors));
+  ok("an unknown status may not act", verifyMandateRecord({ ...clone(a), status: "exited" }).mayDeposit === false);
 
   ok("no terms → refused", build({ terms: undefined })?.ok === false);
   ok("terms over the cap → refused", build({ terms: { ...TERMS, amountPerDepositUsdc: 11 } })?.ok === false);
@@ -513,7 +513,9 @@ section("8 — an ARMED deposit, end to end (fakes at every boundary)");
   const after = x.mandates._m.get(`${SESSION}/vm-1`)?.data;
   ok("⭐ the record: deposited total 10, count 1, seq 2, next due = now + one week (no backlog)",
     after?.progress?.depositedUsdc === 10 && after?.progress?.depositCount === 1 && after?.progress?.nextSeq === 2 && after?.progress?.nextDueAt === T0 + 7 * DAY, show(after?.progress));
-  ok("  …still active and still able to act", after?.status === "active" && verifyMandateRecord(after).mayAct === true);
+  ok("  …still active and still able to act", after?.status === "active" && after?.deposits?.state === "running" && verifyMandateRecord(after).mayDeposit === true);
+  ok("⭐⭐ Finding B: the shares this deposit RECEIVED are tracked (event = delta = 9999000), no gap",
+    after?.progress?.sharesTrackedRaw === "9999000" && after?.progress?.sharesTrackedGaps === 0, show(after?.progress));
   ok("the mandate-day counter was charged once, by the intent key", x.spends.filter((s) => s.kind === "mandate-day").length === 1 && x.spends[0].chargeId === r?.intentKey);
   ok("the receipt carries the signed report, the anchor hash, the readings, the decision, the tx and the assertion",
     r?.receipt?.report?.attestation?.status === "signed" && r?.receipt?.anchor?.blockHash === ANCHOR.blockHash && r?.receipt?.readings?.length === 2 &&
@@ -529,14 +531,16 @@ section("8 — an ARMED deposit, end to end (fakes at every boundary)");
   const z = execDeps({ record, exec: async () => ({ ok: false, blocked: "your acknowledgment does not match the vault's current disclosure", disclosure: { level: "WARN" } }) }); z.deps.mandates = z.mandates;
   const dc = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: z.deps, config: ARMED }));
   const zr = z.mandates._m.get(`${SESSION}/vm-1`)?.data;
-  ok("⭐ a changed vault disclosure → the mandate PAUSES with DISCLOSURE_CHANGED", dc?.ok === false && zr?.status === "paused" && zr?.pause?.flags?.includes("DISCLOSURE_CHANGED"), show(zr?.pause));
+  ok("⭐ a changed vault disclosure → DEPOSITS pause with DISCLOSURE_CHANGED; the status stays active",
+    dc?.ok === false && zr?.status === "active" && zr?.deposits?.state === "paused" && zr?.deposits?.flags?.includes("DISCLOSURE_CHANGED"), show(zr?.deposits));
+  ok("  …monitoring is untouched (still watching)", zr?.monitoring?.state === "watching");
   ok("  …the intent is marked refused", [...z.intentsC.proxy._m.values()][0]?.data?.status === "refused");
 
   // the executor refuses on the day ceiling (a race) → skip, never pause
   const w = execDeps({ record, exec: async () => ({ ok: false, blocked: "daily agent-spend ceiling: 70 > 60 USDC" }) }); w.deps.mandates = w.mandates;
   const dl = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: w.deps, config: ARMED }));
   const wr = w.mandates._m.get(`${SESSION}/vm-1`)?.data;
-  ok("⭐ the daily limit refuses at the executor → 'checked, not deposited', the mandate stays ACTIVE", dl?.ok === false && dl?.code === REFUSED.EXECUTOR && wr?.status === "active" && wr?.progress?.depositedUsdc === 0, show(dl));
+  ok("⭐ the daily limit refuses at the executor → 'checked, not deposited', the mandate stays ACTIVE", dl?.ok === false && dl?.code === REFUSED.EXECUTOR && wr?.status === "active" && wr?.deposits?.state === "running" && wr?.progress?.depositedUsdc === 0, show(dl));
   ok("  …the intent is refused, the receipt keeps the signed check", [...w.intentsC.proxy._m.values()][0]?.data?.status === "refused" && dl?.receipt?.report?.attestation?.status === "signed");
 
   // the executor throws mid-flight → the intent stays open for recovery; nothing is declared
@@ -551,11 +555,13 @@ section("8 — an ARMED deposit, end to end (fakes at every boundary)");
   const mr = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: mm.deps, config: ARMED }));
   const mrec = mm.mandates._m.get(`${SESSION}/vm-1`)?.data;
   ok("⭐ fewer shares than quoted → the mandate PAUSES, the deposit is still counted (no autonomous withdrawal)",
-    mr?.verdict?.verdict === "mismatched" && mrec?.status === "paused" && mrec?.progress?.depositedUsdc === 10, show(mrec?.pause));
+    mr?.verdict?.verdict === "mismatched" && mrec?.deposits?.state === "paused" && mrec?.deposits?.flags?.includes("DEPOSIT_MISMATCH") && mrec?.progress?.depositedUsdc === 10, show(mrec?.deposits));
+  ok("⭐ …a MISMATCHED deposit's shares are still established (event = delta) and tracked", mrec?.progress?.sharesTrackedRaw === "9000000" && mrec?.progress?.sharesTrackedGaps === 0, show(mrec?.progress));
   const ur = execDeps({ record, facts: { readable: false, why: "receipt unreadable" } }); ur.deps.mandates = ur.mandates;
   await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: ur.deps, config: ARMED }));
   const urec = ur.mandates._m.get(`${SESSION}/vm-1`)?.data;
-  ok("an unreadable assertion → pause INCONCLUSIVE, never matched", urec?.status === "paused" && urec?.pause?.flags?.includes("INCONCLUSIVE"), show(urec?.pause));
+  ok("an unreadable assertion → deposits pause INCONCLUSIVE, never matched", urec?.deposits?.state === "paused" && urec?.deposits?.flags?.includes("INCONCLUSIVE"), show(urec?.deposits));
+  ok("⭐⭐ …shares it could NOT establish are a GAP, never counted as 0 and never guessed", urec?.progress?.sharesTrackedRaw === "0" && urec?.progress?.sharesTrackedGaps === 1 && urec?.progress?.depositCount === 1, show(urec?.progress));
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
@@ -671,7 +677,7 @@ section("10 — the tick's order of operations");
   const waiting = build().record;
   const g = tickDeps(waiting);
   const r7 = await attemptAsync(() => runMandateTick({ deps: g.deps }));
-  ok("a mandate awaiting acknowledgement never acts", r7?.results?.[0]?.outcome === "may-not-act", show(r7?.results?.[0]));
+  ok("a mandate awaiting acknowledgement never deposits", r7?.results?.[0]?.outcome === "may-not-deposit", show(r7?.results?.[0]));
 
   // ARMED: recovery first; an unreadable open intent blocks the mandate
   signs = 0;
@@ -683,11 +689,21 @@ section("10 — the tick's order of operations");
   const i = tickDeps(record, { intents: fakeIntents({ preset: open }), over: { recovery: { circleState: async () => ({ state: "PENDING" }), findDepositEvent: async () => ({ found: false }), shareBalance: async () => 0n } } });
   const r9 = await attemptAsync(() => runMandateTick({ deps: i.deps, config: ARMED }));
   ok("⭐ armed: an intent still in flight → the mandate waits; one intent in flight per mandate", r9?.results?.[0]?.outcome === "blocked-by-recovery" && i.x.executor.calls.length === 0 && signs === 0, show(r9?.results?.[0]));
-  const j = tickDeps(record, { intents: fakeIntents({ preset: open }), over: { recovery: {
+  // A complete intent (the check's deposit fee + the predicted shares, as depositForMandate writes them), so the
+  // recovered deposit's assertion can reach a verdict.
+  const openFull = [[open[0][0], { ...open[0][1], depositFeeBpsAtCheck: 0, sharesPredicted: "9999500", amountMinor: "10000000" }]];
+  const j = tickDeps(record, { intents: fakeIntents({ preset: openFull }), over: { recovery: {
     circleState: async () => ({ state: "COMPLETE", txHash: "0x" + "ab".repeat(32) }), findDepositEvent: async () => ({ found: true, txHash: "0x" + "ab".repeat(32) }), shareBalance: async () => 9_999_000n } } });
   const r10 = await attemptAsync(() => runMandateTick({ deps: j.deps, config: ARMED }));
   const jr = [...j.mandates.proxy._m.values()][0]?.data;
   ok("⭐ armed: recovery finds the deposit LANDED → it asserts and commits, and NEVER resubmits", j.x.executor.calls.length === 0 && jr?.progress?.depositedUsdc === 10 && jr?.progress?.nextSeq === 2, show({ r: r10?.results?.[0]?.recovery, p: jr?.progress }));
+  ok("⭐ …a RECOVERED deposit's shares are tracked from its assertion, like any other", jr?.progress?.sharesTrackedRaw === "9999000" && jr?.progress?.sharesTrackedGaps === 0, show(jr?.progress));
+  const jg = tickDeps(record, { intents: fakeIntents({ preset: open }), over: { recovery: {
+    circleState: async () => ({ state: "COMPLETE", txHash: "0x" + "ab".repeat(32) }), findDepositEvent: async () => ({ found: true, txHash: "0x" + "ab".repeat(32) }), shareBalance: async () => 9_999_000n } } });
+  await attemptAsync(() => runMandateTick({ deps: jg.deps, config: ARMED }));
+  const jgr = [...jg.mandates.proxy._m.values()][0]?.data;
+  ok("⭐ …a recovered deposit whose intent lacks the check's fee cannot be asserted → a GAP, counted, not guessed",
+    jgr?.progress?.depositedUsdc === 10 && jgr?.progress?.sharesTrackedRaw === "0" && jgr?.progress?.sharesTrackedGaps === 1 && jgr?.deposits?.state === "paused", show({ p: jgr?.progress, d: jgr?.deposits }));
   ok("  …the day-ceiling ledger row is (re)written by the intent key, idempotently", j.x.spends.some((s) => s.kind === "agent" && s.chargeId === `d/${SESSION}/vm-1/1`) && j.x.spends.some((s) => s.kind === "mandate-day"));
   const k = tickDeps(record, { intents: fakeIntents({ preset: [[open[0][0], { ...open[0][1], createdAt: new Date(T0 - 2 * RECOVERY_NOT_DEPOSITED_AFTER_MS).toISOString() }]] }), over: { recovery: {
     circleState: async () => ({ state: "FAILED" }), findDepositEvent: async () => ({ found: false }), shareBalance: async () => 0n } } });
@@ -702,14 +718,56 @@ section("10 — the tick's order of operations");
   const l = tickDeps(exitRec, { over: { runCheck: async () => checked({ check: { outage: null, anchor: ANCHOR, observations: { r1: { status: "violated", evidence: { power: "upgradeable" } } } } }) } });
   const r12 = await attemptAsync(() => runMandateTick({ deps: l.deps, config: ARMED }));
   const lr = [...l.mandates.proxy._m.values()][0]?.data;
-  ok("⭐ an EXIT decision is treated as a PAUSE (EXIT_UNAVAILABLE), nothing executed", lr?.status === "paused" && lr?.pause?.flags?.includes("EXIT_UNAVAILABLE") && l.x.executor.calls.length === 0, show(lr?.pause ?? r12));
-  const m = tickDeps(record, { over: { runCheck: async () => checked({ check: { outage: { reason: "rpc down" }, observations: {}, anchor: ANCHOR } }) } });
-  await attemptAsync(() => runMandateTick({ deps: m.deps }));
-  ok("disarmed: a PAUSE decision is recorded as would-pause; the record is not written", m.mandates.calls.every((c) => c.fn !== "update") && [...m.receipts._m.values()][0]?.outcome === "would-pause");
-  const n = tickDeps(record, { over: { runCheck: async () => checked({ check: { outage: { reason: "rpc down" }, observations: {}, anchor: ANCHOR } }) } });
-  await attemptAsync(() => runMandateTick({ deps: n.deps, config: ARMED }));
-  const nr = [...n.mandates.proxy._m.values()][0]?.data;
-  ok("armed: an OUTAGE pauses (never exits, never deposits)", nr?.status === "paused" && nr?.pause?.flags?.includes("OUTAGE") && n.x.executor.calls.length === 0, show(nr?.pause));
+  ok("⭐ an EXIT decision is treated as a deposits PAUSE (EXIT_UNAVAILABLE), nothing executed",
+    lr?.deposits?.state === "paused" && lr?.deposits?.flags?.includes("EXIT_UNAVAILABLE") && l.x.executor.calls.length === 0, show(lr?.deposits ?? r12));
+
+  // ═══ ⭐⭐ THE OUTAGE / INCONCLUSIVE SPLIT (T, 2026-09-26, Finding A §4) ═══
+  // An OUTAGE — we could not check — skips this window and is retried next tick. It NEVER latches: the latch
+  // adds no safety, since a deposit cannot proceed without a successful check. INCONCLUSIVE and findings latch.
+  const OUTAGE_CHECK = () => checked({ check: { outage: { reason: "rpc down" }, observations: {}, anchor: ANCHOR } });
+  const PER_RULE_OUTAGE = () => checked({ check: { outage: null, anchor: ANCHOR, observations: { ...CLEAR_OBS, r3: { status: "unestablished", cause: "outage", why: "withdrawFee unreadable at b" } } } });
+  const INCONCLUSIVE_CHECK = () => checked({ check: { outage: null, anchor: ANCHOR, observations: { ...CLEAR_OBS, r3: { status: "unestablished", cause: "inconclusive", why: "the endpoints disagree on the exit fee" } } } });
+  const FINDING_CHECK = () => checked({ check: { outage: null, anchor: ANCHOR, observations: { ...CLEAR_OBS, r3: { status: "violated", evidence: { declaredBps: 90, limitBps: 50 } } } } });
+  const MIXED_CHECK = () => checked({ check: { outage: null, anchor: ANCHOR, observations: { ...CLEAR_OBS,
+    r1: { status: "unestablished", cause: "outage", why: "report unreadable" }, r3: { status: "unestablished", cause: "inconclusive", why: "disagree" } } } });
+  const runOnce = async (make, config) => {
+    let calls = 0;
+    const t = tickDeps(record, { over: { runCheck: async () => { calls++; return make(); } } });
+    const res = await attemptAsync(() => runMandateTick({ deps: t.deps, ...(config ? { config } : {}) }));
+    return { t, res, one: res?.results?.[0], rec: [...t.mandates.proxy._m.values()][0]?.data, calls: () => calls };
+  };
+
+  const o = await runOnce(OUTAGE_CHECK, ARMED);
+  ok("⭐⭐ armed: a whole-check OUTAGE does NOT latch — deposits still running, status active, record not written",
+    o.rec?.deposits?.state === "running" && o.rec?.status === "active" && o.t.mandates.calls.every((c) => c.fn !== "update"), show({ d: o.rec?.deposits, calls: o.t.mandates.calls.map((c) => c.fn) }));
+  ok("  …outcome outage-skipped, nothing executed, no intent", o.one?.outcome === "outage-skipped" && o.t.x.executor.calls.length === 0 && o.t.x.intentsC.calls.every((c) => c.fn === "listOpen"), show(o.one));
+  ok("⭐⭐ …the WINDOW IS NOT CONSUMED: the next tick in the same window checks again", await (async () => {
+    const again = await attemptAsync(() => runMandateTick({ deps: { ...o.t.deps, runCheck: async () => checked() }, config: ARMED }));
+    return again?.results?.[0]?.outcome !== "observed-this-window" && again?.results?.[0]?.outcome === "deposited";
+  })(), show(o.t.receipts._m.size));
+  ok("  …and the outage is still RECEIPTED (under its own key, not the window's)", [...o.t.receipts._m.values()].some((r) => r.outcome === "outage-skipped"), show([...o.t.receipts._m.keys()]));
+
+  const po = await runOnce(PER_RULE_OUTAGE, ARMED);
+  ok("⭐ armed: a single rule's OUTAGE (no finding, nothing inconclusive) does not latch either", po.rec?.deposits?.state === "running" && po.one?.outcome === "outage-skipped", show({ d: po.rec?.deposits, o: po.one?.outcome }));
+
+  const dz = await runOnce(OUTAGE_CHECK);
+  ok("disarmed: an OUTAGE is outage-skipped too, the record is not written", dz.one?.outcome === "outage-skipped" && dz.t.mandates.calls.every((c) => c.fn !== "update"), show(dz.one));
+  ok("  …and it does not consume the window either", dz.t.receipts._m.size === 1 && ![...dz.t.receipts._m.keys()].some((k) => /^w\/[^/]+\/[^/]+\/[^/]+$/.test(k)), show([...dz.t.receipts._m.keys()]));
+
+  const i2 = await runOnce(INCONCLUSIVE_CHECK, ARMED);
+  ok("⭐⭐ armed: an INCONCLUSIVE check LATCHES — deposits paused INCONCLUSIVE", i2.rec?.deposits?.state === "paused" && i2.rec?.deposits?.flags?.includes("INCONCLUSIVE"), show(i2.rec?.deposits));
+  ok("  …the status stays active and monitoring stays watching (pause ≠ stopped watching)", i2.rec?.status === "active" && i2.rec?.monitoring?.state === "watching");
+  ok("  …and a latched mandate does not deposit on the next tick", await (async () => {
+    const t2 = tickDeps(i2.rec, { over: { runCheck: async () => checked() } });
+    const r = await attemptAsync(() => runMandateTick({ deps: t2.deps, config: ARMED }));
+    return r?.results?.[0]?.outcome === "may-not-deposit" && t2.x.executor.calls.length === 0;
+  })());
+  const f2 = await runOnce(FINDING_CHECK, ARMED);
+  ok("⭐ armed: a FINDING on a pause rule LATCHES (deposits paused FINDING)", f2.rec?.deposits?.state === "paused" && f2.rec?.deposits?.flags?.includes("FINDING"), show(f2.rec?.deposits));
+  const m2 = await runOnce(MIXED_CHECK, ARMED);
+  ok("⭐ armed: an outage BESIDE an inconclusive → LATCHES (the outage does not excuse the inconclusive)", m2.rec?.deposits?.state === "paused" && m2.rec?.deposits?.flags?.includes("INCONCLUSIVE"), show(m2.rec?.deposits));
+  const di = await runOnce(INCONCLUSIVE_CHECK);
+  ok("disarmed: an INCONCLUSIVE check is recorded as would-pause; the record is not written", di.one?.outcome === "would-pause" && di.t.mandates.calls.every((c) => c.fn !== "update"), show(di.one));
 
   // no catch-up
   const ds = dueState({ record: activeRecord(), now: T0, config: { armed: true, armedFrom: T0 + 3 * DAY } });

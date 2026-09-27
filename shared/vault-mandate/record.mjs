@@ -28,12 +28,40 @@ import {
 } from "./copy.mjs";
 
 // vault-mandate/2 (piece 4): + the deposit TERMS, the vault disclosure token the user acknowledged
-// (baseline.vaultAckToken), a `paused` status with its flags, and `progress`. No /1 record was ever
-// stored (there is no create endpoint), so there is nothing to migrate.
-export const MANDATE_SCHEMA = "vault-mandate/2";
-/** Anything not listed may not act. `paused` is consistent but may not act until the user acts. */
-export const MANDATE_STATUS = Object.freeze({ AWAITING_ACK: "awaiting-ack", ACTIVE: "active", PAUSED: "paused" });
+// (baseline.vaultAckToken), a `paused` status with its flags, and `progress`.
+// ═══ vault-mandate/3 (2026-09-27, PROGRESS "FINDING A" §2 + "PIECE 5 DECISIONS") — ONE BUMP, THREE CHANGES ═══
+//   1. THE SPLIT. A pause means DEPOSITS paused, never "stopped watching". The record carries three halves:
+//        status      awaiting-ack | active | exiting | exit-blocked | closed | cancelled   (the mandate's lifecycle)
+//        deposits    running | paused {flags, reason, at}                                   (latched by findings /
+//                                                                                            inconclusive, NEVER by an outage)
+//        monitoring  watching | degraded {since, consecutiveFailures} | stopped {why}      (piece 5 / monitoring)
+//      and the single `mayAct` splits: `mayDeposit` (active, acknowledged against NOW, deposits running) and
+//      `mayMonitor` (consistent, not closed or cancelled). A stale acknowledgement keeps monitoring able to
+//      notify but removes the authority to deposit (and, in piece 5, to exit).
+//   2. ORIGIN ("user" | "operator"), INSIDE the fingerprint: flipping it in the store leaves the acknowledgement
+//      stale, so a relabelled mandate cannot act. Only the operator path may write "operator" (a source guard in
+//      test:mandaterecord); the create core defaults to "user" and refuses it in a request body.
+//   3. TRACKED SHARES (Finding B: an exit redeems min(tracked, live), never what the user deposited by hand).
+//      `progress.sharesTrackedRaw` = shares the mandate's own deposits RECEIVED, as established by the post-deposit
+//      assertion (event = share delta). A deposit whose shares could not be established adds a GAP
+//      (`sharesTrackedGaps`), never 0 and never a guess — piece 5 must refuse to treat a gapped figure as exact.
+// No /2 record was ever stored (no create endpoint exists), so nothing migrates: a /2 record reads "unknown
+// schema" and can do nothing.
+export const MANDATE_SCHEMA = "vault-mandate/3";
+/** The lifecycle. Anything not listed is inconsistent. */
+export const MANDATE_STATUS = Object.freeze({
+  AWAITING_ACK: "awaiting-ack", ACTIVE: "active", EXITING: "exiting", EXIT_BLOCKED: "exit-blocked", CLOSED: "closed", CANCELLED: "cancelled",
+});
 const KNOWN_STATUS = new Set(Object.values(MANDATE_STATUS));
+/** Terminal: neither deposits nor monitoring. */
+const TERMINAL_STATUS = new Set([MANDATE_STATUS.CLOSED, MANDATE_STATUS.CANCELLED]);
+/** A rule change re-opens the mandate for acknowledgement; these must never be re-opened or re-authorised that way. */
+const NOT_AMENDABLE = new Set([MANDATE_STATUS.CLOSED, MANDATE_STATUS.CANCELLED, MANDATE_STATUS.EXITING, MANDATE_STATUS.EXIT_BLOCKED]);
+export const DEPOSITS_STATE = Object.freeze({ RUNNING: "running", PAUSED: "paused" });
+export const MONITORING_STATE = Object.freeze({ WATCHING: "watching", DEGRADED: "degraded", STOPPED: "stopped" });
+/** Who made the mandate. ⛔ Only the operator path writes OPERATOR (source guard, test:mandaterecord). */
+export const MANDATE_ORIGIN = Object.freeze({ USER: "user", OPERATOR: "operator" });
+const KNOWN_ORIGIN = new Set(Object.values(MANDATE_ORIGIN));
 const CADENCE_TEXT = Object.freeze({ daily: "once a day", weekly: "once a week" });
 
 // ── The day shares, in WORDS rendered from the constants (T, 2026-09-26), so the disclosure cannot drift
@@ -51,7 +79,10 @@ export function shareWords(fraction) {
 const DAY_SHARE_WORDS = shareWords(MANDATE_DAY_SHARE);
 const AUTONOMOUS_SHARE_WORDS = shareWords(MANDATE_AUTONOMOUS_MAX_SHARE);
 /** Every deposit advances this; it is deliberately OUTSIDE the fingerprint, so the ack survives it. */
-export const freshProgress = () => ({ depositedUsdc: 0, depositCount: 0, nextSeq: 1, nextDueAt: null, lastDepositAt: null });
+export const freshProgress = () => ({ depositedUsdc: 0, depositCount: 0, nextSeq: 1, nextDueAt: null, lastDepositAt: null,
+  sharesTrackedRaw: "0", sharesTrackedGaps: 0 });
+export const freshDeposits = () => ({ state: DEPOSITS_STATE.RUNNING });
+export const freshMonitoring = () => ({ state: MONITORING_STATE.WATCHING });
 
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const isAddr = (v) => typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v);
@@ -145,7 +176,7 @@ const canonical = (v) => Array.isArray(v) ? `[${v.map(canonical).join(",")}]`
 /** sha256 over everything the user acknowledges: the rules AND the disclosure, plus what they bind to. */
 export function mandateFingerprint(record) {
   const bound = {
-    schema: record.schema, id: record.id, owner: record.owner, walletAddress: record.walletAddress,
+    schema: record.schema, id: record.id, origin: record.origin, owner: record.owner, walletAddress: record.walletAddress,
     vault: record.vault, terms: record.terms, rules: record.rules, baseline: record.baseline,
     disclosure: { ruleLines: record.disclosure?.ruleLines ?? null, text: record.disclosure?.text ?? null },
   };
@@ -201,9 +232,11 @@ function checkBaseline(b) {
  *   `owner` is the SESSION address; `terms` + `rules` are the client's; `baseline` comes from the transport.
  *   `exitAvailable` defaults to EXIT_AVAILABLE. ⛔ Only the test suites pass it (a source guard in
  *   test:mandatedeposit refuses any other caller): it exists so piece 5's record shapes stay testable.
+ *   `origin` defaults to "user". ⛔ Only the operator path passes "operator" (source guard, test:mandaterecord).
  */
-export function buildMandateRecord({ owner, walletAddress, vault, terms, rules, baseline, now, id, exitAvailable = EXIT_AVAILABLE } = {}) {
+export function buildMandateRecord({ owner, walletAddress, vault, terms, rules, baseline, now, id, exitAvailable = EXIT_AVAILABLE, origin = MANDATE_ORIGIN.USER } = {}) {
   const errors = [];
+  if (!KNOWN_ORIGIN.has(origin)) errors.push(`origin ${JSON.stringify(origin)} is not one of ${[...KNOWN_ORIGIN].join(", ")}`);
   if (!isAddr(owner)) errors.push("no owner: a mandate is created only under a verified session");
   if (!isAddr(walletAddress)) errors.push("no agent wallet address");
   if (!isObj(vault) || typeof vault.key !== "string" || !isAddr(vault.address) || !Number.isInteger(vault.chainId)) errors.push("no allowlisted vault");
@@ -218,7 +251,7 @@ export function buildMandateRecord({ owner, walletAddress, vault, terms, rules, 
   if (n.errors) return { ok: false, errors: n.errors };
 
   const record = {
-    schema: MANDATE_SCHEMA, id,
+    schema: MANDATE_SCHEMA, id, origin,
     owner: owner.toLowerCase(), walletAddress: walletAddress.toLowerCase(),
     vault: { key: vault.key, address: vault.address, chainId: vault.chainId, label: vault.label ?? vault.key },
     terms: tv.terms,
@@ -230,7 +263,8 @@ export function buildMandateRecord({ owner, walletAddress, vault, terms, rules, 
       maxFeeBps: Number.isInteger(baseline.maxFeeBps) ? baseline.maxFeeBps : null,
       vaultAckToken: baseline.vaultAckToken,
     },
-    status: MANDATE_STATUS.AWAITING_ACK, ack: null, pause: null,
+    status: MANDATE_STATUS.AWAITING_ACK, ack: null,
+    deposits: freshDeposits(), monitoring: freshMonitoring(),
     progress: freshProgress(),
     createdAt: new Date(now).toISOString(),
   };
@@ -239,15 +273,50 @@ export function buildMandateRecord({ owner, walletAddress, vault, terms, rules, 
   return { ok: true, record };
 }
 
+const isIso = (v) => typeof v === "string" && Number.isFinite(Date.parse(v));
+const isText = (v) => typeof v === "string" && v.length > 0;
+
+/** The operational halves' shapes. Each problem is named; a half that is not one of its states is inconsistent. */
+function operationalErrors(record) {
+  const e = [];
+  const d = record.deposits;
+  if (!isObj(d)) e.push("no deposits state");
+  else if (d.state === DEPOSITS_STATE.RUNNING) { /* nothing more */ }
+  else if (d.state === DEPOSITS_STATE.PAUSED) {
+    if (!Array.isArray(d.flags) || d.flags.length === 0 || !d.flags.every(isText)) e.push("deposits are paused with no flags saying why");
+    if (!isText(d.reason)) e.push("deposits are paused with no reason");
+    if (!isIso(d.at)) e.push("deposits are paused with no time");
+  } else e.push(`unknown deposits state ${JSON.stringify(d.state)}`);
+  const m = record.monitoring;
+  if (!isObj(m)) e.push("no monitoring state");
+  else if (m.state === MONITORING_STATE.WATCHING) { /* nothing more */ }
+  else if (m.state === MONITORING_STATE.DEGRADED) {
+    if (!isIso(m.since)) e.push("monitoring is degraded with no start time");
+    if (!(Number.isInteger(m.consecutiveFailures) && m.consecutiveFailures >= 1)) e.push("monitoring is degraded with no failure count");
+  } else if (m.state === MONITORING_STATE.STOPPED) {
+    if (!isText(m.why)) e.push("monitoring is stopped with no reason");
+  } else e.push(`unknown monitoring state ${JSON.stringify(m.state)}`);
+  const p = record.progress;
+  // ⭐ A decimal STRING: shares are 18-decimal on some vaults, so a JS number would silently lose precision.
+  if (!isObj(p) || typeof p.sharesTrackedRaw !== "string" || !/^\d+$/.test(p.sharesTrackedRaw)) e.push("the tracked shares are not a non-negative decimal string");
+  if (!isObj(p) || !(Number.isInteger(p.sharesTrackedGaps) && p.sharesTrackedGaps >= 0)) e.push("the tracked-share gap count is not a non-negative integer");
+  return e;
+}
+
 /**
  * Re-derive everything. `ok` = the record is internally consistent (valid rules, disclosure matches,
- * fingerprint matches). `mayAct` = ok AND active AND acknowledged against the fingerprint of NOW.
- * @returns {{ok:boolean, mayAct:boolean, fingerprint:string|null, errors:string[]}}
+ * fingerprint matches, the operational halves well-formed).
+ *   `mayDeposit` = ok AND active AND acknowledged against the fingerprint of NOW AND deposits running.
+ *   `mayMonitor` = ok AND not closed or cancelled. (A stale acknowledgement or a deposits pause keeps it true:
+ *                  watching the position is never switched off by a pause — Finding A.)
+ * ⛔ There is no `mayAct`: a caller must say which authority it needs.
+ * @returns {{ok:boolean, mayDeposit:boolean, mayMonitor:boolean, fingerprint:string|null, errors:string[]}}
  */
 export function verifyMandateRecord(record) {
-  if (!isObj(record)) return { ok: false, mayAct: false, fingerprint: null, errors: ["no record"] };
+  if (!isObj(record)) return { ok: false, mayDeposit: false, mayMonitor: false, fingerprint: null, errors: ["no record"] };
   const errors = [];
   if (record.schema !== MANDATE_SCHEMA) errors.push(`unknown schema ${JSON.stringify(record.schema)}`);
+  if (!KNOWN_ORIGIN.has(record.origin)) errors.push(`unknown origin ${JSON.stringify(record.origin)}`);
   if (!isAddr(record.owner) || !isAddr(record.walletAddress)) errors.push("owner or wallet address missing");
   if (!isObj(record.vault) || !isAddr(record.vault.address)) errors.push("vault missing");
   const v = validateMandateRules(record.rules);
@@ -257,6 +326,7 @@ export function verifyMandateRecord(record) {
   else if (tv.terms.cadence !== record.terms.cadence) errors.push("the stored terms name no cadence");
   if (!isAckToken(record.baseline?.vaultAckToken)) errors.push("the record carries no acknowledged vault disclosure token");
   if (!KNOWN_STATUS.has(record.status)) errors.push(`unknown status ${JSON.stringify(record.status)}`);
+  errors.push(...operationalErrors(record));
   for (const r of Array.isArray(record.rules) ? record.rules : []) {
     if (r?.subject === "owner-changed" && (!isAddr(record.baseline?.owner) || String(r.baselineOwner).toLowerCase() !== record.baseline.owner.toLowerCase())) {
       errors.push("the owner-change rule does not compare to the owner recorded at creation");
@@ -273,16 +343,19 @@ export function verifyMandateRecord(record) {
   }
   const ok = errors.length === 0;
 
-  const actErrors = [];
+  const depositErrors = [];
   if (ok) {
-    if (record.status === MANDATE_STATUS.AWAITING_ACK) actErrors.push("awaiting the user's acknowledgement");
-    else if (record.status === MANDATE_STATUS.PAUSED) actErrors.push(`paused (${(record.pause?.flags ?? []).join(", ") || "no flags"}): ${record.pause?.reason ?? "no reason recorded"}`);
-    else if (record.status !== MANDATE_STATUS.ACTIVE) actErrors.push(`status ${JSON.stringify(record.status)} may not act`);
+    if (record.status === MANDATE_STATUS.AWAITING_ACK) depositErrors.push("awaiting the user's acknowledgement");
+    else if (record.status !== MANDATE_STATUS.ACTIVE) depositErrors.push(`status ${JSON.stringify(record.status)} may not deposit`);
     else if (!isObj(record.ack) || record.ack.fingerprint !== fingerprint) {
-      actErrors.push("stale acknowledgement: the user acknowledged a different set of rules and disclosure");
+      depositErrors.push("stale acknowledgement: the user acknowledged a different set of rules and disclosure");
+    }
+    if (record.deposits.state === DEPOSITS_STATE.PAUSED) {
+      depositErrors.push(`deposits paused (${record.deposits.flags.join(", ")}): ${record.deposits.reason}`);
     }
   }
-  return { ok, mayAct: ok && actErrors.length === 0, fingerprint, errors: [...errors, ...actErrors] };
+  const mayMonitor = ok && !TERMINAL_STATUS.has(record.status);
+  return { ok, mayDeposit: ok && depositErrors.length === 0, mayMonitor, fingerprint, errors: [...errors, ...depositErrors] };
 }
 
 /** The user acknowledges the fingerprint they were shown. Anything else refuses. */
@@ -303,13 +376,21 @@ export function acknowledgeMandate(record, fingerprint, now) {
 export function amendMandateRules(record, rules, now, { exitAvailable = EXIT_AVAILABLE } = {}) {
   const v = verifyMandateRecord(record);
   if (!v.ok) return { ok: false, errors: v.errors };
+  // ⭐ An amendment returns the record to awaiting-ack, and an ack makes it active: a closed or cancelled mandate
+  // must not be re-opened that way, and one mid-exit must not be re-authorised by a rule change.
+  if (NOT_AMENDABLE.has(record.status)) return { ok: false, errors: [`a mandate that is ${record.status} cannot be amended`] };
   const b = record.baseline;
   const built = buildMandateRecord({
+    // ⭐ origin is CARRIED: an amendment cannot relabel who made the mandate.
+    origin: record.origin,
     owner: record.owner, walletAddress: record.walletAddress, vault: record.vault, terms: record.terms, rules, id: record.id, now, exitAvailable,
     baseline: { ok: true, reportSigned: true, signerVerified: true, owner: { address: b.owner, kind: b.ownerKind }, reportBlock: b.reportBlock, maxFeeBps: b.maxFeeBps, vaultAckToken: b.vaultAckToken },
   });
   if (!built.ok) return built;
   // Recomputed with createdAt kept and amendedAt added; neither is in the fingerprint.
   // ⭐ PROGRESS IS CARRIED: a fresh one would re-open the budget already deposited and reuse intent seqs.
-  return { ok: true, record: { ...built.record, progress: record.progress ?? freshProgress(), createdAt: record.createdAt, amendedAt: new Date(now).toISOString() } };
+  // ⭐ MONITORING IS CARRIED too: a rule change says nothing new about the position. Deposits restart as running
+  // (the fresh acknowledgement is the user's own act of resuming), exactly as the /2 amendment cleared its pause.
+  return { ok: true, record: { ...built.record, progress: record.progress ?? freshProgress(), monitoring: record.monitoring,
+    createdAt: record.createdAt, amendedAt: new Date(now).toISOString() } };
 }

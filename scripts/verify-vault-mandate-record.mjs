@@ -22,7 +22,7 @@ import {
   buildMandateRecord, renderDisclosure, mandateFingerprint, verifyMandateRecord,
   acknowledgeMandate, amendMandateRules, MANDATE_STATUS, MANDATE_SCHEMA, shareWords,
 } from "../shared/vault-mandate/record.mjs";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { MANDATE_DAY_SHARE, MANDATE_AUTONOMOUS_MAX_SHARE } from "../shared/vault-mandate/limits.mjs";
 import {
   writeNewMandate, readMandate, acknowledgeStoredMandate, createVaultMandate, vaultMandateKey,
@@ -151,10 +151,10 @@ section("2 — the disclosure is BUILT FROM the record");
 section("3 — ⭐⭐ the acknowledgement binds the rules AND the disclosure");
 {
   const v0 = attempt(() => verifyMandateRecord(rec));
-  ok("a fresh record verifies, but may NOT act before the acknowledgement", v0?.ok === true && v0?.mayAct === false, show(v0));
+  ok("a fresh record verifies, but may NOT act before the acknowledgement", v0?.ok === true && v0?.mayDeposit === false, show(v0));
   const acked = attempt(() => acknowledgeMandate(rec, rec?.fingerprint, NOW + 1000));
   ok("acknowledged with its own fingerprint → ACTIVE", acked?.ok === true && acked?.record?.status === MANDATE_STATUS.ACTIVE, show(acked?.errors ?? acked?.threw));
-  ok("  …and now it may act", attempt(() => verifyMandateRecord(acked?.record))?.mayAct === true);
+  ok("  …and now it may act", attempt(() => verifyMandateRecord(acked?.record))?.mayDeposit === true);
   // The fingerprint must bind BOTH halves directly, not only through verify's re-render: each is
   // changed alone here, with the other held fixed.
   const fp0 = attempt(() => mandateFingerprint(rec));
@@ -172,9 +172,9 @@ section("3 — ⭐⭐ the acknowledgement binds the rules AND the disclosure");
   const active = acked?.record;
   const changed = clone(active ?? {}); if (changed.rules) changed.rules[1].onFinding = "pause";
   const vc = attempt(() => verifyMandateRecord(changed));
-  ok("⭐⭐ a rule changed AFTER the acknowledgement (exit → pause) → may NOT act", vc?.mayAct === false, show(vc));
+  ok("⭐⭐ a rule changed AFTER the acknowledgement (exit → pause) → may NOT act", vc?.mayDeposit === false, show(vc));
   const lim = clone(active ?? {}); if (lim.rules) lim.rules[1].limitBps = 5000;
-  ok("⭐ a limit changed after the acknowledgement → may NOT act", attempt(() => verifyMandateRecord(lim))?.mayAct === false);
+  ok("⭐ a limit changed after the acknowledgement → may NOT act", attempt(() => verifyMandateRecord(lim))?.mayDeposit === false);
 
   // A consistent rewrite: rules changed, disclosure re-rendered, fingerprint recomputed, old ack kept.
   const rewritten = clone(active ?? {});
@@ -185,7 +185,7 @@ section("3 — ⭐⭐ the acknowledgement binds the rules AND the disclosure");
   }
   const vr = attempt(() => verifyMandateRecord(rewritten));
   ok("⭐⭐ rules + disclosure + fingerprint rewritten consistently, OLD ack kept → STALE, may NOT act",
-    vr?.ok === true && vr?.mayAct === false && (vr?.errors ?? []).join(" ").match(/stale|acknowledg/i), show(vr));
+    vr?.ok === true && vr?.mayDeposit === false && (vr?.errors ?? []).join(" ").match(/stale|acknowledg/i), show(vr));
 
   // A disclosure that does not match the rules, with a fingerprint computed over that mismatch.
   const lying = clone(active ?? {});
@@ -197,7 +197,7 @@ section("3 — ⭐⭐ the acknowledgement binds the rules AND the disclosure");
   }
   const vl = attempt(() => verifyMandateRecord(lying));
   ok("⭐⭐ a disclosure that does NOT match its rules → refused, even with a matching fingerprint and ack",
-    vl?.ok === false && vl?.mayAct === false && /disclosure/i.test((vl?.errors ?? []).join(" ")), show(vl));
+    vl?.ok === false && vl?.mayDeposit === false && /disclosure/i.test((vl?.errors ?? []).join(" ")), show(vl));
 
   const exitOnPauseOnly = clone(active ?? {});
   if (exitOnPauseOnly.rules) {
@@ -209,8 +209,8 @@ section("3 — ⭐⭐ the acknowledgement binds the rules AND the disclosure");
   ok("⭐ a hand-built record storing exit on vault-cannot-pay → refused by verify",
     attempt(() => verifyMandateRecord(exitOnPauseOnly))?.ok === false);
 
-  ok("status active but no ack → may NOT act", attempt(() => verifyMandateRecord({ ...clone(active ?? {}), ack: null }))?.mayAct === false);
-  ok("an unknown status → may NOT act", attempt(() => verifyMandateRecord({ ...clone(active ?? {}), status: "running" }))?.mayAct === false);
+  ok("status active but no ack → may NOT act", attempt(() => verifyMandateRecord({ ...clone(active ?? {}), ack: null }))?.mayDeposit === false);
+  ok("an unknown status → may NOT act", attempt(() => verifyMandateRecord({ ...clone(active ?? {}), status: "running" }))?.mayDeposit === false);
   ok("the wrong schema → refused", attempt(() => verifyMandateRecord({ ...clone(active ?? {}), schema: "vault-mandate/0" }))?.ok === false);
 
   const am = attempt(() => amendMandateRules(active, [{ kind: "state", subject: "exit-fee-above", limitBps: 100, onFinding: "pause" }], NOW + 5000));
@@ -248,12 +248,12 @@ section("4 — the store: write-time checks, re-verified on read, CAS on acknowl
   // already active — otherwise the write is refused for a fingerprint mismatch and this proves nothing.
   const pre = clone(rec ?? {}); pre.id = "vm-pre"; pre.fingerprint = attempt(() => mandateFingerprint(pre));
   pre.status = MANDATE_STATUS.ACTIVE; pre.ack = { fingerprint: pre.fingerprint, at: "x" };
-  ok("  (control: that pre-activated record is otherwise valid and would act)", attempt(() => verifyMandateRecord(pre))?.mayAct === true);
+  ok("  (control: that pre-activated record is otherwise valid and would act)", attempt(() => verifyMandateRecord(pre))?.mayDeposit === true);
   ok("⭐ a NEW record written already ACTIVE → refused (an acknowledgement only comes through acknowledge)",
     (await attemptAsync(() => writeNewMandate({ store: s2, record: pre })))?.ok === false && s2._map.size === 0);
 
   const r = await attemptAsync(() => readMandate({ store: st, owner: OWNER, id: "vm-1" }));
-  ok("read back: readable, verified, not yet actable", r?.readable === true && r?.record?.id === "vm-1" && r?.verdict?.ok === true && r?.verdict?.mayAct === false, show(r?.verdict ?? r?.threw));
+  ok("read back: readable, verified, not yet actable", r?.readable === true && r?.record?.id === "vm-1" && r?.verdict?.ok === true && r?.verdict?.mayDeposit === false, show(r?.verdict ?? r?.threw));
   ok("read with ANOTHER owner → absent", (await attemptAsync(() => readMandate({ store: st, owner: WALLET, id: "vm-1" })))?.record === null);
   const down = await attemptAsync(() => readMandate({ store: fakeStore({ failReads: true }), owner: OWNER, id: "vm-1" }));
   ok("⭐ a store that cannot be read → readable:false, NOT 'no mandate'", down?.readable === false && down?.record === null, show(down));
@@ -265,13 +265,13 @@ section("4 — the store: write-time checks, re-verified on read, CAS on acknowl
   ok("acknowledging with the right fingerprint → ACTIVE in the store", good?.ok === true &&
     st._map.get(vaultMandateKey(OWNER, "vm-1"))?.data?.status === MANDATE_STATUS.ACTIVE, show(good));
   const after = await attemptAsync(() => readMandate({ store: st, owner: OWNER, id: "vm-1" }));
-  ok("  …and read back it may act", after?.verdict?.mayAct === true);
+  ok("  …and read back it may act", after?.verdict?.mayDeposit === true);
 
   // Tampered in the store after the acknowledgement: re-verified on read, never trusted because it was checked on write.
   const key = vaultMandateKey(OWNER, "vm-1");
   if (st._map.has(key)) { const t = clone(st._map.get(key).data); t.rules[0].onFinding = "pause"; st._map.set(key, { data: t, etag: '"tampered"' }); }
   const tr = await attemptAsync(() => readMandate({ store: st, owner: OWNER, id: "vm-1" }));
-  ok("⭐ a record changed in the store after acknowledgement → read back it may NOT act", tr?.verdict?.mayAct === false, show(tr?.verdict));
+  ok("⭐ a record changed in the store after acknowledgement → read back it may NOT act", tr?.verdict?.mayDeposit === false, show(tr?.verdict));
 
   // CAS: the record changes between the acknowledge's read and write.
   const s3 = fakeStore(); await attemptAsync(() => writeNewMandate({ store: s3, record: rec }));
@@ -366,6 +366,157 @@ section("6 — the disclosure's wording (T, 2026-09-26)");
   ok("⭐ a zero-tolerance fee rule reads 'charges any … fee at all', never 'rises above 0.00%'",
     has(zero, "The vault charges any deposit fee at all") && has(zero, "The vault charges any exit fee at all") && !/0\.00%/.test(zero));
   ok("  …a non-zero limit still reads as a threshold", has(none, "The exit fee rises above 0.50%"));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("7 — ⭐⭐ vault-mandate/3: status / deposits / monitoring, origin, tracked shares");
+// PROGRESS 2026-09-26 "FINDING A" §2 + 2026-09-27 "PIECE 5 DECISIONS": pause means DEPOSITS paused, never
+// "stopped watching"; the one mayAct splits in two; origin is inside the fingerprint; the record carries the
+// shares its own deposits received so an exit can redeem min(tracked, live) and nothing the user deposited by hand.
+{
+  const fresh = build({ rules: PAUSE_RULES })?.record;
+  const acked = fresh ? attempt(() => acknowledgeMandate(fresh, fresh.fingerprint, NOW))?.record : null;
+  const v = (r) => attempt(() => verifyMandateRecord(r));
+  // A consistent variant of the acknowledged record: re-render + re-fingerprint, keep the OLD ack.
+  const rewrite = (r, f) => { const c = clone(r ?? {}); f(c); c.disclosure = attempt(() => renderDisclosure(c)); c.fingerprint = attempt(() => mandateFingerprint(c)); return c; };
+
+  ok("schema is vault-mandate/3", MANDATE_SCHEMA === "vault-mandate/3" && fresh?.schema === "vault-mandate/3", show(fresh?.schema));
+  ok("the status set is exactly: awaiting-ack, active, exiting, exit-blocked, closed, cancelled",
+    JSON.stringify(Object.values(MANDATE_STATUS).sort()) === JSON.stringify(["active", "awaiting-ack", "cancelled", "closed", "exit-blocked", "exiting"]), show(MANDATE_STATUS));
+  ok("a new record: awaiting-ack · deposits running · monitoring watching · no top-level `pause`",
+    fresh?.status === "awaiting-ack" && fresh?.deposits?.state === "running" && fresh?.monitoring?.state === "watching" && !("pause" in (fresh ?? {})),
+    show({ s: fresh?.status, d: fresh?.deposits, m: fresh?.monitoring }));
+  ok("⭐ tracked shares start at zero, with zero gaps", fresh?.progress?.sharesTrackedRaw === "0" && fresh?.progress?.sharesTrackedGaps === 0, show(fresh?.progress));
+
+  const va = v(acked);
+  ok("⭐⭐ verify returns mayDeposit AND mayMonitor, and no longer a single mayAct", va?.mayDeposit === true && va?.mayMonitor === true && !("mayAct" in (va ?? {})), show(va));
+  const vf = v(fresh);
+  ok("awaiting acknowledgement → may NOT deposit, may monitor (an amended mandate may already hold shares)", vf?.mayDeposit === false && vf?.mayMonitor === true, show(vf));
+
+  const pausedDep = clone(acked ?? {}); pausedDep.deposits = { state: "paused", flags: ["INCONCLUSIVE"], reason: "x", at: new Date(NOW).toISOString() };
+  const vp = v(pausedDep);
+  ok("⭐⭐ deposits PAUSED → consistent, may NOT deposit, STILL may monitor", vp?.ok === true && vp?.mayDeposit === false && vp?.mayMonitor === true, show(vp));
+  ok("  …and the status is untouched (still active)", pausedDep.status === "active" && vp?.ok === true);
+  for (const s of ["exiting", "exit-blocked"]) {
+    const x = v({ ...clone(acked ?? {}), status: s });
+    ok(`status ${s} → may NOT deposit, may monitor`, x?.ok === true && x?.mayDeposit === false && x?.mayMonitor === true, show(x));
+  }
+  for (const s of ["closed", "cancelled"]) {
+    const x = v({ ...clone(acked ?? {}), status: s });
+    ok(`⭐ status ${s} → may neither deposit nor monitor`, x?.ok === true && x?.mayDeposit === false && x?.mayMonitor === false, show(x));
+  }
+  const oldPaused = v({ ...clone(acked ?? {}), status: "paused" });
+  ok("⭐ the /2 status 'paused' is no longer a status → inconsistent, neither", oldPaused?.ok === false && oldPaused?.mayDeposit === false && oldPaused?.mayMonitor === false, show(oldPaused));
+  const stale = rewrite(acked, (c) => { c.rules[0].subject = "feesSettable"; });
+  const vs = v(stale);
+  ok("⭐ a stale acknowledgement → may NOT deposit, may still monitor (Finding A: notify, no authority)", vs?.ok === true && vs?.mayDeposit === false && vs?.mayMonitor === true, show(vs));
+  const broken = clone(acked ?? {}); if (broken.rules) broken.rules[0].subject = "feesSettable";
+  const vb = v(broken);
+  ok("an INCONSISTENT record (rule edited, disclosure not) → neither", vb?.ok === false && vb?.mayDeposit === false && vb?.mayMonitor === false, show(vb));
+
+  // shape checks on the two operational halves
+  const bad = (label, mut) => { const c = clone(acked ?? {}); mut(c); const r = v(c); ok(label, r?.ok === false && r?.mayDeposit === false && r?.mayMonitor === false, show(r?.errors)); };
+  bad("deposits paused with NO flags → inconsistent", (c) => { c.deposits = { state: "paused", flags: [], reason: "x", at: "2026-09-27T00:00:00.000Z" }; });
+  bad("deposits paused with no reason → inconsistent", (c) => { c.deposits = { state: "paused", flags: ["FINDING"], at: "2026-09-27T00:00:00.000Z" }; });
+  bad("an unknown deposits state → inconsistent", (c) => { c.deposits = { state: "stopped" }; });
+  bad("no deposits field → inconsistent", (c) => { delete c.deposits; });
+  bad("monitoring degraded without consecutiveFailures → inconsistent", (c) => { c.monitoring = { state: "degraded", since: "2026-09-27T00:00:00.000Z" }; });
+  bad("monitoring stopped without why → inconsistent", (c) => { c.monitoring = { state: "stopped" }; });
+  bad("no monitoring field → inconsistent", (c) => { delete c.monitoring; });
+  const deg = clone(acked ?? {}); deg.monitoring = { state: "degraded", since: "2026-09-27T00:00:00.000Z", consecutiveFailures: 3 };
+  ok("monitoring degraded {since, consecutiveFailures} → consistent, deposits unaffected", v(deg)?.ok === true && v(deg)?.mayDeposit === true, show(v(deg)?.errors));
+  bad("⭐ tracked shares as a NUMBER (precision loss) → inconsistent", (c) => { c.progress.sharesTrackedRaw = 9999000; });
+  bad("tracked shares negative → inconsistent", (c) => { c.progress.sharesTrackedRaw = "-1"; });
+  bad("tracked-share gaps not a non-negative integer → inconsistent", (c) => { c.progress.sharesTrackedGaps = 0.5; });
+  const moved = clone(acked ?? {}); if (moved.progress) { moved.progress.sharesTrackedRaw = "19998000"; moved.progress.sharesTrackedGaps = 1; }
+  ok("tracked shares are progress: advancing them leaves the acknowledgement valid", v(moved)?.mayDeposit === true, show(v(moved)?.errors));
+
+  // ── origin ──
+  ok("⭐ origin defaults to \"user\"", fresh?.origin === "user", show(fresh?.origin));
+  const op = build({ rules: PAUSE_RULES, origin: "operator" });
+  ok("origin \"operator\" is recorded when the builder is told so", op?.ok === true && op?.record?.origin === "operator", show(op?.errors ?? op?.threw));
+  ok("an origin outside {user, operator} → refused", refusedWith(build({ rules: PAUSE_RULES, origin: "admin" }), "origin"));
+  const fpUser = fresh?.fingerprint, fpOp = op?.record?.fingerprint;
+  ok("⭐⭐ origin is INSIDE the fingerprint (same record, only origin differs → different fingerprint)", typeof fpUser === "string" && typeof fpOp === "string" && fpUser !== fpOp);
+  const flippedNaive = clone(acked ?? {}); flippedNaive.origin = "operator";
+  const vn = v(flippedNaive);
+  ok("⭐⭐ a store edit flipping origin user→operator → the mandate cannot act (fingerprint no longer matches)", vn?.mayDeposit === false && vn?.mayMonitor === false, show(vn?.errors));
+  const flippedClean = rewrite(acked, (c) => { c.origin = "operator"; });
+  const vc = v(flippedClean);
+  ok("⭐⭐ …even rewritten CONSISTENTLY (fingerprint recomputed, old ack kept) → STALE, may NOT deposit", vc?.ok === true && vc?.mayDeposit === false && /stale|acknowledg/i.test((vc?.errors ?? []).join(" ")), show(vc));
+  const back = rewrite(op?.record ? attempt(() => acknowledgeMandate(op.record, op.record.fingerprint, NOW))?.record : null, (c) => { c.origin = "user"; });
+  ok("  …and operator→user likewise leaves the acknowledgement stale", v(back)?.mayDeposit === false, show(v(back)?.errors));
+  ok("an unknown origin on a stored record → inconsistent", v({ ...clone(acked ?? {}), origin: "system" })?.ok === false);
+  const am = attempt(() => amendMandateRules(op?.record ? attempt(() => acknowledgeMandate(op.record, op.record.fingerprint, NOW))?.record : null, [{ kind: "state", subject: "exit-fee-above", limitBps: 100, onFinding: "pause" }], NOW + 5000));
+  ok("⭐ amending CARRIES origin (an amendment cannot relabel a mandate)", am?.ok === true && am?.record?.origin === "operator", show(am?.errors ?? am?.threw ?? am?.record?.origin));
+  // ⭐ Amending re-opens a mandate for acknowledgement. A terminal mandate must not be re-opened that way, and one
+  // mid-exit must not be re-authorised by a rule change.
+  const NEW_RULES = [{ kind: "state", subject: "exit-fee-above", limitBps: 100, onFinding: "pause" }];
+  for (const s of ["closed", "cancelled", "exiting", "exit-blocked"]) {
+    ok(`⭐ amending a mandate that is ${s} → refused`, refusedWith(attempt(() => amendMandateRules({ ...clone(acked ?? {}), status: s }, NEW_RULES, NOW + 5000)), s), s);
+  }
+  const monAm = clone(acked ?? {}); monAm.monitoring = { state: "degraded", since: "2026-09-27T00:00:00.000Z", consecutiveFailures: 2 };
+  const am2 = attempt(() => amendMandateRules(monAm, NEW_RULES, NOW + 5000));
+  ok("amending carries MONITORING (a rule change does not reset what we know about the position)", am2?.record?.monitoring?.consecutiveFailures === 2, show(am2?.record?.monitoring ?? am2?.errors));
+
+  // ── the store ──
+  const st = fakeStore();
+  const pre = clone(fresh ?? {}); pre.id = "vm-dp"; pre.deposits = { state: "paused", flags: ["FINDING"], reason: "x", at: "2026-09-27T00:00:00.000Z" }; pre.fingerprint = attempt(() => mandateFingerprint(pre));
+  ok("⭐ a NEW record written with deposits already paused → refused (a new mandate starts running, watching)",
+    (await attemptAsync(() => writeNewMandate({ store: st, record: pre })))?.ok === false && st._map.size === 0);
+  await attemptAsync(() => writeNewMandate({ store: st, record: fresh }));
+  const k = vaultMandateKey(OWNER, "vm-1");
+  if (st._map.has(k)) { const t = clone(st._map.get(k).data); t.owner = WALLET; st._map.set(k, { data: t, etag: '"x"' }); }
+  const mis = await attemptAsync(() => readMandate({ store: st, owner: OWNER, id: "vm-1" }));
+  ok("a record naming another owner under this key → read back as neither", mis?.verdict?.mayDeposit === false && mis?.verdict?.mayMonitor === false, show(mis?.verdict));
+  const so = fakeStore(); await attemptAsync(() => writeNewMandate({ store: so, record: fresh }));
+  await attemptAsync(() => acknowledgeStoredMandate({ store: so, owner: OWNER, id: "vm-1", fingerprint: fresh?.fingerprint, now: NOW }));
+  if (so._map.has(k)) { const t = clone(so._map.get(k).data); t.origin = "operator"; so._map.set(k, { data: t, etag: '"flip"' }); }
+  const rf = await attemptAsync(() => readMandate({ store: so, owner: OWNER, id: "vm-1" }));
+  ok("⭐⭐ END TO END: acknowledged in the store, origin flipped in the store → read back it cannot deposit", rf?.readable === true && rf?.verdict?.mayDeposit === false, show(rf?.verdict));
+
+  // ── the create path writes "user", and cannot be asked for anything else ──
+  const cdeps = () => ({ store: fakeStore(), now: () => NOW, newId: () => "vm-new", resolveVault: (x) => (x === "xylo-usdc" ? VAULT : null), readBaseline: async () => BASELINE });
+  const cu = await attemptAsync(() => createVaultMandate({ session: { address: OWNER }, walletAddress: WALLET, input: { vault: "xylo-usdc", ...TERMS, rules: PAUSE_RULES }, deps: cdeps() }));
+  ok("⭐ the create path writes origin \"user\" by default", cu?.ok === true && cu?.record?.origin === "user", show(cu?.errors ?? cu?.record?.origin));
+  const cs = cdeps();
+  const cx = await attemptAsync(() => createVaultMandate({ session: { address: OWNER }, walletAddress: WALLET, input: { vault: "xylo-usdc", ...TERMS, rules: PAUSE_RULES, origin: "operator" }, deps: cs }));
+  ok("⭐⭐ origin in the REQUEST BODY → refused, nothing written (never client-chosen)", cx?.ok === false && cs.store._map.size === 0 && /origin/.test((cx?.errors ?? []).join(" ")), show(cx));
+
+  // ── ⭐⭐ THE SOURCE GUARD: nothing but the operator path writes "operator" ──
+  // Allowed: record.mjs (defines the value; amend carries record.origin), the store (forwards the argument it is
+  // given into the builder), and the operator handler (the ONE writer; it does not exist yet). Every other file
+  // that names the operator origin, or passes an `origin` into the builder or the create core, is red.
+  const src = ["netlify/functions", "shared", "src"].flatMap((d) => walkSrc(d)).filter((f) => /\.(mjs|js|ts|tsx|jsx)$/.test(f))
+    .map((f) => [f, readFileSync(f, "utf8")]);
+  const found = originWriters(src);
+  ok("⭐⭐ no file outside the operator path names the operator origin or passes an origin to the builder / create core", found.length === 0, found.join(", "));
+  // The detector is exercised against planted sources (never written to disk), so this suite cannot race another.
+  const plant = (label, s) => ok(`  (the guard catches ${label})`, originWriters([["netlify/functions/__planted.mjs", s]]).length === 1);
+  plant("MANDATE_ORIGIN.OPERATOR", `import { MANDATE_ORIGIN } from "../../shared/vault-mandate/record.mjs"; export const x = MANDATE_ORIGIN.OPERATOR;`);
+  plant("origin: \"operator\" passed to the create core", `export const x = (d) => createVaultMandate({ session: s, walletAddress: w, origin: "operator", input: i, deps: d });`);
+  plant("a VARIABLE origin passed to the create core", `export const x = (o) => createVaultMandate({ session: s, walletAddress: w, origin: o, input: i, deps: d });`);
+  plant("origin passed to buildMandateRecord", `export const x = () => buildMandateRecord({ owner: a, origin: "operator", rules: r });`);
+  ok("  (the operator handler, when it exists, IS allowed)", originWriters([["netlify/functions/vault-mandate-operator.mjs", `createVaultMandate({ session, walletAddress, origin: MANDATE_ORIGIN.OPERATOR, input, deps })`]]).length === 0);
+  ok("  (the word 'operator' in unrelated prose is not a hit)", originWriters([["netlify/functions/_pause.mjs", `// All agents are halted by the operator (AGENT_HALT).`]]).length === 0);
+}
+
+function walkSrc(dir) {
+  let out = [];
+  try {
+    for (const n of readdirSync(dir)) {
+      if (n === "node_modules" || n.startsWith(".")) continue;
+      const p = `${dir}/${n}`;
+      out = statSync(p).isDirectory() ? out.concat(walkSrc(p)) : out.concat([p]);
+    }
+  } catch { /* absent dir */ }
+  return out;
+}
+function originWriters(files) {
+  const ALLOWED = new Set(["shared/vault-mandate/record.mjs", "netlify/functions/_vault-mandate-store.mjs", "netlify/functions/vault-mandate-operator.mjs"]);
+  const names = (s) => /\bMANDATE_ORIGIN\s*\.\s*OPERATOR\b/.test(s) || /\borigin\s*:\s*["'`]operator["'`]/.test(s);
+  const passes = (s) => /\b(buildMandateRecord|createVaultMandate)\s*\(\s*\{[^}]*\borigin\b/s.test(s);
+  return files.filter(([f, s]) => !ALLOWED.has(f) && (names(s) || passes(s))).map(([f]) => f);
 }
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed`);

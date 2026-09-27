@@ -32,7 +32,7 @@ export const VAULT_MANDATE_RECEIPT_STORE = "vault-mandate-receipts";
 export const INTENT_CLOSED = Object.freeze(["asserted", "refused", "not-deposited"]);
 
 import {
-  buildMandateRecord, verifyMandateRecord, acknowledgeMandate, MANDATE_STATUS,
+  buildMandateRecord, verifyMandateRecord, acknowledgeMandate, MANDATE_STATUS, MANDATE_ORIGIN, DEPOSITS_STATE, MONITORING_STATE,
 } from "../../shared/vault-mandate/record.mjs";
 
 // 🚨 STRONG, as for the policy store: a mandate is a SAFETY input. A CDN-cached copy could let a
@@ -46,6 +46,9 @@ export async function writeNewMandate({ store, record }) {
   if (!v.ok) return { ok: false, errors: v.errors };
   if (record.status !== MANDATE_STATUS.AWAITING_ACK || record.ack !== null) {
     return { ok: false, errors: ["a new mandate is written awaiting acknowledgement; it is activated only by acknowledging it"] };
+  }
+  if (record.deposits?.state !== DEPOSITS_STATE.RUNNING || record.monitoring?.state !== MONITORING_STATE.WATCHING) {
+    return { ok: false, errors: ["a new mandate starts with deposits running and monitoring watching"] };
   }
   let res;
   try { res = await store.setJSON(vaultMandateKey(record.owner, record.id), record, { onlyIfNew: true }); }
@@ -64,7 +67,7 @@ export async function readMandate({ store, owner, id }) {
   const verdict = verifyMandateRecord(record);
   // The key is owner-scoped; a record naming another owner under this key is corrupt, not someone else's.
   if (String(record.owner ?? "").toLowerCase() !== String(owner).toLowerCase()) {
-    return { readable: true, record, etag: res.etag ?? null, verdict: { ...verdict, ok: false, mayAct: false, errors: [...verdict.errors, "the record names a different owner than its key"] }, errors: [] };
+    return { readable: true, record, etag: res.etag ?? null, verdict: { ...verdict, ok: false, mayDeposit: false, mayMonitor: false, errors: [...verdict.errors, "the record names a different owner than its key"] }, errors: [] };
   }
   return { readable: true, record, etag: res.etag ?? null, verdict, errors: [] };
 }
@@ -161,13 +164,15 @@ const CREATE_INPUT_FIELDS = new Set(["vault", "rules", "amountPerDepositUsdc", "
 /**
  * Create under a verified session. `deps`: store, now(), newId(), resolveVault(key) (the allowlist),
  * readBaseline(vault) (the transport: signed report + verified signer + owner + fee cap).
+ * `origin` is an ARGUMENT, never a request field (a body carrying it is refused below). Defaults to "user".
+ * ⛔ Only the operator path passes "operator" — the source guard in test:mandaterecord names the one file allowed.
  * @returns {{ok:true, record, fingerprint} | {ok:false, errors:string[]}}
  */
-export async function createVaultMandate({ session, walletAddress, input, deps }) {
+export async function createVaultMandate({ session, walletAddress, input, deps, origin = MANDATE_ORIGIN.USER }) {
   if (!isAddr(session?.address)) return { ok: false, errors: ["authentication required"] };
   if (input === null || typeof input !== "object" || Array.isArray(input)) return { ok: false, errors: ["the request body must be an object"] };
   const extra = Object.keys(input).filter((k) => !CREATE_INPUT_FIELDS.has(k));
-  if (extra.length) return { ok: false, errors: [`field(s) ${extra.join(", ")} cannot be sent; the owner is the signed-in session`] };
+  if (extra.length) return { ok: false, errors: [`field(s) ${extra.join(", ")} cannot be sent: the owner is the signed-in session, and the origin is set by the server`] };
   const vault = deps.resolveVault(input.vault);
   if (!vault) return { ok: false, errors: [`vault ${JSON.stringify(input.vault)} is not on the allowlist`] };
 
@@ -176,7 +181,7 @@ export async function createVaultMandate({ session, walletAddress, input, deps }
   catch (e) { baseline = { ok: false, why: String(e?.message ?? e) }; }
 
   const built = buildMandateRecord({
-    owner: session.address, walletAddress, vault, rules: input.rules, baseline, now: deps.now(), id: deps.newId(),
+    origin, owner: session.address, walletAddress, vault, rules: input.rules, baseline, now: deps.now(), id: deps.newId(),
     terms: { amountPerDepositUsdc: input.amountPerDepositUsdc, maxTotalUsdc: input.maxTotalUsdc, cadence: input.cadence },
   });
   if (!built.ok) return built;

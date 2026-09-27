@@ -28455,3 +28455,83 @@ Nothing is built.
 - **`depositDisclosure` mints an `ackToken` even when the gate has added a BLOCK** (it is minted on the vault's own WARN,
   "so a caller can still SHOW the token's disclosure"). A caller that takes the token alone can bake a blocked vault's
   token into a mandate. Take it only with `ackRequired === true`.
+
+---
+
+# ✅ VAULT MANDATE — RECORD SPLIT, SCHEMA vault-mandate/3 — BUILT RED-FIRST, NOT DEPLOYED (2026-09-27)
+
+Build step 1 of the revised order ("PIECE 5 DECISIONS + DESIGN CORRECTIONS"). One schema bump carrying four parts.
+Zero mandates exist, so nothing migrates: a /2 record reads "unknown schema" and can do nothing. No DD-surface file
+changed (ddTree unchanged). Files: `shared/vault-mandate/record.mjs`, `netlify/functions/_vault-mandate-store.mjs`,
+`netlify/functions/_vault-mandate-deposit.mjs`, plus the two suites.
+
+## The four parts
+1. **The status split (Finding A §2).**
+   - `status` = `awaiting-ack | active | exiting | exit-blocked | closed | cancelled`.
+     ⭐ **`awaiting-ack` was kept** although the decided list did not name it: a new or amended mandate needs a
+     state before acknowledgement.
+   - `deposits` = `running | paused {flags, reason, at}`. Every latch now pauses DEPOSITS only; status and
+     monitoring are untouched.
+   - `monitoring` = `watching | degraded {since, consecutiveFailures} | stopped {why}`. Nothing writes it yet
+     (monitoring ships after piece 5).
+   - A malformed shape in either half makes the record inconsistent.
+   - **`mayAct` is gone.** `verifyMandateRecord` returns `mayDeposit` (active, acknowledged against the fingerprint of
+     NOW, deposits running) and `mayMonitor` (consistent, not closed or cancelled). A deposits pause or a stale
+     acknowledgement leaves `mayMonitor` true.
+2. **`origin` (`"user" | "operator"`), INSIDE the fingerprint.** A store edit flipping it leaves the acknowledgement
+   stale, so the mandate cannot deposit. It defaults to `"user"`. `createVaultMandate` takes it only as an ARGUMENT
+   and refuses `origin` in a request body.
+3. **Tracked shares (Finding B).** `progress.sharesTrackedRaw` (a decimal string: shares can be 18-decimal) and
+   `progress.sharesTrackedGaps`. Filled at commit from the post-deposit assertion's ESTABLISHED figure (matched and
+   mismatched verdicts both passed event = share delta), on the normal and the recovered path alike.
+4. **An OUTAGE no longer latches (Finding A §4, T).** A decision whose only flag is OUTAGE returns `outage-skipped`,
+   armed or disarmed. It does not write the record, and its receipt goes under its own key (`<window>/outage/<at>`)
+   so the next tick in the same window checks again. INCONCLUSIVE and findings still latch. ⭐ An outage BESIDE an
+   inconclusive latches: the outage does not excuse the inconclusive.
+
+## Amend refuses terminal and exiting states
+`amendMandateRules` refuses a mandate that is `closed`, `cancelled`, `exiting` or `exit-blocked`. **Why:** an
+amendment returns the record to `awaiting-ack`, and an acknowledgement makes it `active`. So amend-then-acknowledge
+would REOPEN a closed mandate, or re-authorise one mid-exit by a rule change. Amending carries `origin` (it cannot
+relabel a mandate) and `monitoring` (a rule change says nothing new about the position).
+⚠️ Those four tests passed on the old code, but only because it rejected the new statuses as unknown. Once the
+statuses became valid, they are the guard (proven by mutation 3 below).
+
+## ⭐ An unestablished deposit records a GAP, never 0 shares
+A deposit whose received shares could not be established (unreadable assertion) increments `sharesTrackedGaps`
+and leaves `sharesTrackedRaw` alone: never counted as 0, never guessed. Piece 5 must refuse to treat a gapped figure
+as exact. **Found by fixing my own fixture:** the recovered-deposit test first failed because its preset intent
+lacked the check's deposit fee, so the recovered assertion was honestly `unreadable`, and the code correctly
+recorded a gap where the test expected shares. The fixture now carries a complete intent (tracked `9999000`), and
+**the incomplete-intent case has its own test** (deposit counted, 0 tracked, 1 gap, deposits paused).
+
+## Red first
+Before the implementation: `test:mandaterecord` **98 passed / 51 failed**, `test:mandatedeposit` **202 / 29**.
+- Outage-does-not-latch: red on BEHAVIOUR. The old tick wrote the record (`list, read, read, update`), latched
+  `paused`, and consumed the window key.
+- Origin flip: red on behaviour. The consistently rewritten record read `mayAct: true`.
+- Inconclusive-latches: red on SHAPE only. The old code already latched, as `status: paused`.
+After: **155/0** and **232/0**.
+
+## The six mutations (each put back, each turned a suite red)
+| # | Mutation | Result |
+|---|---|---|
+| 1 | the outage-only branch removed (the old latch returns) | mandatedeposit 225 / **7 failed** |
+| 2 | `origin` taken out of the fingerprint | mandaterecord 149 / **5 failed** |
+| 3 | amend allowed on terminal / exiting states | mandaterecord 150 / **4 failed** |
+| 4 | an unestablished deposit counted as 0 shares, no gap | mandatedeposit 230 / **2 failed** |
+| 5 | `mayMonitor` collapsed to "active and deposits running" | mandaterecord 150 / **4 failed** |
+| 6 | amend drops `origin` | mandaterecord 153 / **1 failed** |
+
+## ⚠️ The "operator" source guard passes VACUOUSLY today
+Nothing writes `origin` yet, so "no file outside the operator path names the operator origin or passes an origin to
+the builder or the create core" is green by absence. **What proves the guard are the planted-source cases:** the
+detector runs on in-memory sources (never written to disk, so it cannot race another suite) and catches
+`MANDATE_ORIGIN.OPERATOR`, `origin: "operator"` passed to the create core, a VARIABLE origin passed to the create
+core, and an origin passed to `buildMandateRecord`. It does not flag the allowed operator handler or the word
+"operator" in unrelated prose. Allowed files: `record.mjs`, `_vault-mandate-store.mjs`, and
+`netlify/functions/vault-mandate-operator.mjs`, which does not exist yet.
+
+## Left as is
+The refusal code string `"record-may-not-act"` (`REFUSED.RECORD`) was not renamed: nothing stored depends on it.
+Next: operator-only creation (step 0), on /3.

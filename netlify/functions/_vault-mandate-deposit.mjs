@@ -26,9 +26,13 @@
 //   piece 5) · 5 INTENT (create-only, before any signing) · 6 DEPOSIT with the STORED ack token · 7 the
 //   post-deposit ASSERTION · 8 COMMIT.
 // ⛔ The daily limit is the user's own budget, not a vault finding: it SKIPS, it never pauses.
+// ⛔ AN OUTAGE SKIPS TOO, AND NEVER LATCHES (T, 2026-09-26, Finding A §4). "We could not check" is retried at
+//   the next tick: its receipt is written under its own key, so the window stays open. The latch added no
+//   safety — a deposit cannot proceed without a successful check — and it switched off every exit rule on one
+//   RPC blip. INCONCLUSIVE and findings still latch, as a DEPOSITS pause (record /3): monitoring keeps running.
 
 import { createHash } from "node:crypto";
-import { verifyMandateRecord, MANDATE_STATUS } from "../../shared/vault-mandate/record.mjs";
+import { verifyMandateRecord, DEPOSITS_STATE } from "../../shared/vault-mandate/record.mjs";
 import { decideMandateAction, ACTION, FLAG } from "../../shared/vault-mandate/decide.mjs";
 import { CADENCE_MS, MANDATE_DEPOSIT_MAX_USDC, mandateDayRoom, effectiveDepositUsdc } from "../../shared/vault-mandate/limits.mjs";
 import { depositVerdict, DEPOSIT_VERDICT } from "../../shared/vault-mandate/assertion.mjs";
@@ -53,6 +57,12 @@ export const REFUSED = Object.freeze({
   INTENT_UNWRITABLE: "intent-unwritable", EXECUTOR: "executor-refused", OUTCOME_UNKNOWN: "outcome-unknown",
   CLOCK_BUG: "clock-bug",
 });
+/**
+ * Is this decision ONLY "we could not check"? A PAUSE whose one flag is OUTAGE: no finding, nothing inconclusive,
+ * nothing malformed. Anything beside the outage keeps its own latch (an outage never excuses an inconclusive).
+ */
+export const isOutageOnly = (decision) =>
+  decision?.action === ACTION.PAUSE && Array.isArray(decision.flags) && decision.flags.length === 1 && decision.flags[0] === FLAG.OUTAGE;
 /** Pause flags this path adds to decide.mjs's FLAG set. */
 export const PAUSE_FLAG = Object.freeze({
   DISCLOSURE_CHANGED: "DISCLOSURE_CHANGED", EXIT_UNAVAILABLE: "EXIT_UNAVAILABLE", DEPOSIT_MISMATCH: "DEPOSIT_MISMATCH",
@@ -118,13 +128,23 @@ async function mutateMandate({ deps, owner, id, mutate }) {
   return { ok: false, why: "the mandate kept changing while it was being updated" };
 }
 
-function pauseMandate({ deps, owner, id, flags, reason, now }) {
+/** Latch DEPOSITS paused. The status and monitoring are untouched: a pause is never "stopped watching". */
+function pauseDeposits({ deps, owner, id, flags, reason, now }) {
   return mutateMandate({ deps, owner, id, mutate: (rec) => {
-    const prev = rec.status === MANDATE_STATUS.PAUSED ? rec.pause?.flags ?? [] : [];
-    rec.status = MANDATE_STATUS.PAUSED;
-    rec.pause = { flags: [...new Set([...prev, ...flags])], reason, at: iso(now) };
+    const prev = rec.deposits?.state === DEPOSITS_STATE.PAUSED ? rec.deposits.flags ?? [] : [];
+    rec.deposits = { state: DEPOSITS_STATE.PAUSED, flags: [...new Set([...prev, ...flags])], reason, at: iso(now) };
     return rec;
   } });
+}
+
+/**
+ * The shares a verdict ESTABLISHED as received, or null. Matched and mismatched verdicts both passed the
+ * event = share-delta check (assertion.mjs), so their figure is two instruments agreeing; unreadable is nothing.
+ */
+function sharesEstablished(verdict) {
+  const v = verdict?.verdict, ev = verdict?.received?.event, delta = verdict?.received?.delta;
+  if (v !== DEPOSIT_VERDICT.MATCHED && v !== DEPOSIT_VERDICT.MISMATCHED) return null;
+  return typeof ev === "string" && /^\d+$/.test(ev) && ev === delta ? BigInt(ev) : null;
 }
 
 /**
@@ -139,13 +159,19 @@ function commitSeq({ deps, owner, id, seq, amountUsdc, deposited, verdict, now }
     if (deposited) {
       rec.progress.depositedUsdc = round6((p.depositedUsdc ?? 0) + amountUsdc);
       rec.progress.depositCount = (p.depositCount ?? 0) + 1;
+      // ⭐ Finding B: what THIS mandate's deposit received — the figure an exit redeems (min(tracked, live)).
+      // Not established → a GAP, never 0 and never a guess.
+      const got = sharesEstablished(verdict);
+      if (got !== null) rec.progress.sharesTrackedRaw = (BigInt(p.sharesTrackedRaw ?? "0") + got).toString();
+      else rec.progress.sharesTrackedGaps = (p.sharesTrackedGaps ?? 0) + 1;
       // ⭐ No backlog: the next window starts from NOW, not from the missed due time.
       rec.progress.nextDueAt = now + CADENCE_MS[rec.terms.cadence];
       rec.progress.lastDepositAt = now;
       if (verdict && verdict.verdict !== DEPOSIT_VERDICT.MATCHED) {
         const flag = verdict.verdict === DEPOSIT_VERDICT.MISMATCHED ? PAUSE_FLAG.DEPOSIT_MISMATCH : PAUSE_FLAG.INCONCLUSIVE;
-        rec.status = MANDATE_STATUS.PAUSED;
-        rec.pause = { flags: [flag], reason: `post-deposit assertion ${verdict.verdict}: ${verdict.detail}`, at: iso(now) };
+        const prev = rec.deposits?.state === DEPOSITS_STATE.PAUSED ? rec.deposits.flags ?? [] : [];
+        rec.deposits = { state: DEPOSITS_STATE.PAUSED, flags: [...new Set([...prev, flag])],
+          reason: `post-deposit assertion ${verdict.verdict}: ${verdict.detail}`, at: iso(now) };
       }
     }
     return rec;
@@ -204,7 +230,7 @@ export async function depositForMandate({ record, etag, checked, amountUsdc, dep
 
   // ── the record: consistent, active, acknowledged against the fingerprint of NOW ──
   const v = verifyMandateRecord(record);
-  if (!v.mayAct) return refuse(REFUSED.RECORD, `the mandate may not act: ${v.errors.join("; ")}`);
+  if (!v.mayDeposit) return refuse(REFUSED.RECORD, `the mandate may not deposit: ${v.errors.join("; ")}`);
 
   // ── the check: present, signed + verified, for THIS vault, AT the anchor, fresh ──
   if (!checked || typeof checked !== "object") return refuse(REFUSED.NO_CHECK, "no check was given; a deposit never goes ahead without one");
@@ -309,7 +335,7 @@ export async function depositForMandate({ record, etag, checked, amountUsdc, dep
     // A disclosure refusal is a vault finding → pause. Anything else (the daily limit taken by another spend,
     // the kill switch, a cap) is not → skip: "checked, not deposited".
     if (res?.disclosure) {
-      await pauseMandate({ deps, owner: record.owner, id: record.id, flags: [PAUSE_FLAG.DISCLOSURE_CHANGED], now: t,
+      await pauseDeposits({ deps, owner: record.owner, id: record.id, flags: [PAUSE_FLAG.DISCLOSURE_CHANGED], now: t,
         reason: `the vault's deposit disclosure no longer matches the one you acknowledged: ${res.blocked}` });
     }
     return refuse(REFUSED.EXECUTOR, `checked, not deposited: ${res?.blocked ?? "refused"}`,
@@ -392,7 +418,7 @@ async function recoverMandate({ record, deps, now }) {
     const tries = (intent.recoveryTries ?? 0) + (cls.state === RECOVERY_STATE.UNREADABLE ? 1 : 0);
     if (tries !== (intent.recoveryTries ?? 0)) await deps.intents.update(key, { ...intent, recoveryTries: tries }, etag).catch(() => null);
     if (cls.state === RECOVERY_STATE.UNREADABLE && tries >= RECOVERY_MAX_TRIES) {
-      await pauseMandate({ deps, owner: record.owner, id: record.id, flags: [PAUSE_FLAG.INCONCLUSIVE], now,
+      await pauseDeposits({ deps, owner: record.owner, id: record.id, flags: [PAUSE_FLAG.INCONCLUSIVE], now,
         reason: `deposit #${intent.seq}'s outcome could not be read after ${tries} tries: ${cls.why}` });
     }
     results.push({ key, state: cls.state, why: cls.why, tries });
@@ -427,7 +453,7 @@ async function tickOne({ owner, id, deps, config, now }) {
 
   // 1. FREE GATES
   const v = verifyMandateRecord(record);
-  if (!v.mayAct) return { owner, id, outcome: "may-not-act", reason: v.errors.join("; ") };
+  if (!v.mayDeposit) return { owner, id, outcome: "may-not-deposit", reason: v.errors.join("; ") };
   const paused = await deps.isPaused(record.walletAddress);
   if (paused) return { owner, id, outcome: "skipped", reason: paused };
   const ds = dueState({ record, now, config });
@@ -460,12 +486,20 @@ async function tickOne({ owner, id, deps, config, now }) {
 
   // 4. DECIDE — an EXIT is a pause until piece 5 (EXIT_AVAILABLE).
   const decision = decideMandateAction({ rules: record.rules, check: checked.check });
+  // ⭐ OUTAGE ONLY → skip, retry next tick, NEVER latch (armed or not). The receipt goes under its OWN key so the
+  // window stays open; `receipt()` would consume it and silence the retry for a whole cadence.
+  if (isOutageOnly(decision)) {
+    const reason = `we could not complete the check (${decision.unestablished.map((u) => u.why).join("; ") || "outage"}); nothing deposited, retried next tick`;
+    const full = { at: iso(now), armed, window: wkey, ...base, outcome: "outage-skipped", decision, flags: decision.flags, reason };
+    await deps.receipts.write(`${wkey}/outage/${iso(now)}`, full, { onlyIfNew: true }).catch(() => null);
+    return { owner, id, outcome: "outage-skipped", flags: decision.flags, reason, receipt: full };
+  }
   if (decision.action !== ACTION.DEPOSIT) {
     const flags = decision.action === ACTION.EXIT ? [...decision.flags, PAUSE_FLAG.EXIT_UNAVAILABLE] : decision.flags;
     const reason = decision.action === ACTION.EXIT
       ? "a rule you set to exit found something; autonomous exit is not available yet, so the mandate pauses"
       : `the check did not clear: ${flags.join(", ")}`;
-    if (armed) await pauseMandate({ deps, owner, id, flags, reason, now });
+    if (armed) await pauseDeposits({ deps, owner, id, flags, reason, now });
     const full = await receipt({ ...base, outcome: armed ? "paused" : "would-pause", decision, flags, reason });
     return { owner, id, outcome: full.outcome, flags, receipt: full };
   }
