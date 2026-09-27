@@ -22,6 +22,7 @@
 import { createHash } from "node:crypto";
 import { validateMandateRules, STATE_RULES, ON_FINDING } from "./decide.mjs";
 import { validateMandateTerms, EXIT_AVAILABLE, MANDATE_DAY_SHARE, MANDATE_AUTONOMOUS_MAX_SHARE } from "./limits.mjs";
+import { isOperatorOwner } from "./operators.mjs";
 import {
   EXIT_NOT_GUARANTEED, EXIT_FEE_RISE, VERIFIED_PARAGRAPH, MONITORED_PARAGRAPH, CHECKED_AFTER_PARAGRAPH,
   PAYOUT_NOT_GUARANTEED,
@@ -237,6 +238,7 @@ function checkBaseline(b) {
 export function buildMandateRecord({ owner, walletAddress, vault, terms, rules, baseline, now, id, exitAvailable = EXIT_AVAILABLE, origin = MANDATE_ORIGIN.USER } = {}) {
   const errors = [];
   if (!KNOWN_ORIGIN.has(origin)) errors.push(`origin ${JSON.stringify(origin)} is not one of ${[...KNOWN_ORIGIN].join(", ")}`);
+  else if (origin === MANDATE_ORIGIN.OPERATOR && !isOperatorOwner(owner)) errors.push("origin operator requires an owner in OPERATOR_MANDATE_OWNERS");
   if (!isAddr(owner)) errors.push("no owner: a mandate is created only under a verified session");
   if (!isAddr(walletAddress)) errors.push("no agent wallet address");
   if (!isObj(vault) || typeof vault.key !== "string" || !isAddr(vault.address) || !Number.isInteger(vault.chainId)) errors.push("no allowlisted vault");
@@ -317,6 +319,9 @@ export function verifyMandateRecord(record) {
   const errors = [];
   if (record.schema !== MANDATE_SCHEMA) errors.push(`unknown schema ${JSON.stringify(record.schema)}`);
   if (!KNOWN_ORIGIN.has(record.origin)) errors.push(`unknown origin ${JSON.stringify(record.origin)}`);
+  // ⭐ Re-checked on EVERY read: a record relabelled "operator" in the store for anyone else is inconsistent, even
+  // re-fingerprinted and re-acknowledged; and removing an address from the list stops that operator's mandates.
+  else if (record.origin === MANDATE_ORIGIN.OPERATOR && !isOperatorOwner(record.owner)) errors.push("an operator-origin record whose owner is not in OPERATOR_MANDATE_OWNERS");
   if (!isAddr(record.owner) || !isAddr(record.walletAddress)) errors.push("owner or wallet address missing");
   if (!isObj(record.vault) || !isAddr(record.vault.address)) errors.push("vault missing");
   const v = validateMandateRules(record.rules);
@@ -367,6 +372,21 @@ export function acknowledgeMandate(record, fingerprint, now) {
     return { ok: false, errors: ["the acknowledgement is for a different set of rules and disclosure; review the mandate again"] };
   }
   return { ok: true, record: { ...record, status: MANDATE_STATUS.ACTIVE, ack: { fingerprint, at: new Date(now).toISOString() } } };
+}
+
+/**
+ * Cancel: terminal, kept (never deleted — the record and its receipts are the audit trail). Refused when already
+ * closed or cancelled, and while an exit is IN FLIGHT (`exiting`: a submitted redeem must resolve first). Monitoring
+ * stops with it. `now` from the caller; `cancelledAt` is outside the fingerprint.
+ */
+export function cancelMandate(record, now) {
+  const v = verifyMandateRecord(record);
+  if (!v.ok) return { ok: false, errors: v.errors };
+  if (TERMINAL_STATUS.has(record.status)) return { ok: false, errors: [`the mandate is already ${record.status}`] };
+  if (record.status === MANDATE_STATUS.EXITING) return { ok: false, errors: ["an exit is in flight; it must resolve before the mandate can be cancelled"] };
+  if (!Number.isFinite(now)) return { ok: false, errors: ["no cancellation time"] };
+  return { ok: true, record: { ...record, status: MANDATE_STATUS.CANCELLED, cancelledAt: new Date(now).toISOString(),
+    monitoring: { state: MONITORING_STATE.STOPPED, why: "the mandate was cancelled" } } };
 }
 
 /**

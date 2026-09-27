@@ -323,6 +323,7 @@ export const FILE_UNWIRED_TOOLS = {
   "scripts/bridge-discover-run.mjs": "manual DISCOVERY-ONLY runner for the chain-derived bridge sweeper — reads chain + store, writes nothing. Its LOGIC is in netlify/functions/_bridge-discover.mjs and is asserted by test:discover; this file is the hand-run driver that points it at a block range.",
   "scripts/create-revenue-wallet.mjs": "ONE-OFF: created the DD revenue wallet. Re-running would create another.",
   "scripts/dca-rehearsal-create.mjs": "manual rehearsal fixture creator for DCA.",
+  "scripts/vault-mandate-operator.mjs": "operator CLI for the operator-only vault mandate path (create / ack / cancel with a pasted session token); run by hand, never by a suite.",
   "scripts/dd/batch.mjs": "manual batch driver for DD analysis over a list of addresses.",
   "scripts/dd/checks/code-exists.mjs": "a DD CHECK module — data for the engine, loaded by it, not a suite.",
   "scripts/dd/checks/payto-vs-token.mjs": "a DD CHECK module — a rule the DD engine loads and applies, not a suite that runs. Its assertions live inside the engine's verdict, which IS exercised by the DD suites.",

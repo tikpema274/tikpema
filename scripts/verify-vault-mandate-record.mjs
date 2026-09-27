@@ -432,20 +432,28 @@ section("7 — ⭐⭐ vault-mandate/3: status / deposits / monitoring, origin, t
   ok("tracked shares are progress: advancing them leaves the acknowledgement valid", v(moved)?.mayDeposit === true, show(v(moved)?.errors));
 
   // ── origin ──
+  // ⭐ An operator-origin record must be OWNED by an operator (OPERATOR_MANDATE_OWNERS: T's login address only), so
+  // the operator cases below are built for T. `freshT` is T's USER-origin twin: only origin differs from `op`.
+  const OPERATOR = "0x74b7b561fd71c68eb1da6b96a7a87033904b24e5";
+  const freshT = build({ rules: PAUSE_RULES, owner: OPERATOR })?.record;
+  const ackedT = freshT ? attempt(() => acknowledgeMandate(freshT, freshT.fingerprint, NOW))?.record : null;
   ok("⭐ origin defaults to \"user\"", fresh?.origin === "user", show(fresh?.origin));
-  const op = build({ rules: PAUSE_RULES, origin: "operator" });
+  const op = build({ rules: PAUSE_RULES, origin: "operator", owner: OPERATOR });
   ok("origin \"operator\" is recorded when the builder is told so", op?.ok === true && op?.record?.origin === "operator", show(op?.errors ?? op?.threw));
   ok("an origin outside {user, operator} → refused", refusedWith(build({ rules: PAUSE_RULES, origin: "admin" }), "origin"));
-  const fpUser = fresh?.fingerprint, fpOp = op?.record?.fingerprint;
+  const fpUser = freshT?.fingerprint, fpOp = op?.record?.fingerprint;
   ok("⭐⭐ origin is INSIDE the fingerprint (same record, only origin differs → different fingerprint)", typeof fpUser === "string" && typeof fpOp === "string" && fpUser !== fpOp);
   const flippedNaive = clone(acked ?? {}); flippedNaive.origin = "operator";
   const vn = v(flippedNaive);
   ok("⭐⭐ a store edit flipping origin user→operator → the mandate cannot act (fingerprint no longer matches)", vn?.mayDeposit === false && vn?.mayMonitor === false, show(vn?.errors));
-  const flippedClean = rewrite(acked, (c) => { c.origin = "operator"; });
+  const flippedClean = rewrite(ackedT, (c) => { c.origin = "operator"; });
   const vc = v(flippedClean);
   ok("⭐⭐ …even rewritten CONSISTENTLY (fingerprint recomputed, old ack kept) → STALE, may NOT deposit", vc?.ok === true && vc?.mayDeposit === false && /stale|acknowledg/i.test((vc?.errors ?? []).join(" ")), show(vc));
   const back = rewrite(op?.record ? attempt(() => acknowledgeMandate(op.record, op.record.fingerprint, NOW))?.record : null, (c) => { c.origin = "user"; });
   ok("  …and operator→user likewise leaves the acknowledgement stale", v(back)?.mayDeposit === false, show(v(back)?.errors));
+  const forged = rewrite(acked, (c) => { c.origin = "operator"; });
+  ok("⭐ a STRANGER's record rewritten consistently to say operator → INCONSISTENT (the owner is not an operator)",
+    v(forged)?.ok === false && v(forged)?.mayDeposit === false && v(forged)?.mayMonitor === false, show(v(forged)?.errors));
   ok("an unknown origin on a stored record → inconsistent", v({ ...clone(acked ?? {}), origin: "system" })?.ok === false);
   const am = attempt(() => amendMandateRules(op?.record ? attempt(() => acknowledgeMandate(op.record, op.record.fingerprint, NOW))?.record : null, [{ kind: "state", subject: "exit-fee-above", limitBps: 100, onFinding: "pause" }], NOW + 5000));
   ok("⭐ amending CARRIES origin (an amendment cannot relabel a mandate)", am?.ok === true && am?.record?.origin === "operator", show(am?.errors ?? am?.threw ?? am?.record?.origin));
@@ -485,12 +493,17 @@ section("7 — ⭐⭐ vault-mandate/3: status / deposits / monitoring, origin, t
 
   // ── ⭐⭐ THE SOURCE GUARD: nothing but the operator path writes "operator" ──
   // Allowed: record.mjs (defines the value; amend carries record.origin), the store (forwards the argument it is
-  // given into the builder), and the operator handler (the ONE writer; it does not exist yet). Every other file
+  // given into the builder), and the operator handler (the ONE writer). Every other file
   // that names the operator origin, or passes an `origin` into the builder or the create core, is red.
   const src = ["netlify/functions", "shared", "src"].flatMap((d) => walkSrc(d)).filter((f) => /\.(mjs|js|ts|tsx|jsx)$/.test(f))
     .map((f) => [f, readFileSync(f, "utf8")]);
   const found = originWriters(src);
   ok("⭐⭐ no file outside the operator path names the operator origin or passes an origin to the builder / create core", found.length === 0, found.join(", "));
+  // ⭐ NO LONGER VACUOUS once the handler exists: take it off the allowlist and it must be EXACTLY what is found —
+  // the one writer, and nothing else.
+  const withoutHandler = originWriters(src, ["shared/vault-mandate/record.mjs", "netlify/functions/_vault-mandate-store.mjs"]);
+  ok("⭐⭐ the guard is live: without the handler's allowlist entry, the handler — and only it — is found",
+    withoutHandler.length === 1 && withoutHandler[0] === "netlify/functions/vault-mandate-operator.mjs", withoutHandler.join(", ") || "(nothing — vacuous)");
   // The detector is exercised against planted sources (never written to disk), so this suite cannot race another.
   const plant = (label, s) => ok(`  (the guard catches ${label})`, originWriters([["netlify/functions/__planted.mjs", s]]).length === 1);
   plant("MANDATE_ORIGIN.OPERATOR", `import { MANDATE_ORIGIN } from "../../shared/vault-mandate/record.mjs"; export const x = MANDATE_ORIGIN.OPERATOR;`);
@@ -512,8 +525,8 @@ function walkSrc(dir) {
   } catch { /* absent dir */ }
   return out;
 }
-function originWriters(files) {
-  const ALLOWED = new Set(["shared/vault-mandate/record.mjs", "netlify/functions/_vault-mandate-store.mjs", "netlify/functions/vault-mandate-operator.mjs"]);
+function originWriters(files, allowed = ["shared/vault-mandate/record.mjs", "netlify/functions/_vault-mandate-store.mjs", "netlify/functions/vault-mandate-operator.mjs"]) {
+  const ALLOWED = new Set(allowed);
   const names = (s) => /\bMANDATE_ORIGIN\s*\.\s*OPERATOR\b/.test(s) || /\borigin\s*:\s*["'`]operator["'`]/.test(s);
   const passes = (s) => /\b(buildMandateRecord|createVaultMandate)\s*\(\s*\{[^}]*\borigin\b/s.test(s);
   return files.filter(([f, s]) => !ALLOWED.has(f) && (names(s) || passes(s))).map(([f]) => f);

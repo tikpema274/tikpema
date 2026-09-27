@@ -28535,3 +28535,109 @@ core, and an origin passed to `buildMandateRecord`. It does not flag the allowed
 ## Left as is
 The refusal code string `"record-may-not-act"` (`REFUSED.RECORD`) was not renamed: nothing stored depends on it.
 Next: operator-only creation (step 0), on /3.
+
+---
+
+# ✅ VAULT MANDATE — OPERATOR-ONLY CREATION PATH (step 0) — BUILT RED-FIRST, NOT DEPLOYED (2026-09-27)
+
+`netlify/functions/vault-mandate-operator.mjs`: create · ack · cancel, for the operator's OWN agent wallet. It moves no
+money and arms nothing. It exists so a real mandate can sit in the production store and the deployed, DISARMED tick
+can run it (signing latency → freshness window + fee; endpoint disagreement; WOULD DEPOSIT receipts). Built on record
+/3 (83e3d13). No DD-surface file changed.
+New: the handler · `shared/vault-mandate/operators.mjs` · `scripts/verify-vault-mandate-operator.mjs`
+(`test:mandateoperator`, in test:all) · `scripts/vault-mandate-operator.mjs` (the operator's CLI; exempted in
+guard-registry). Edited: `_vault-mandate-check.mjs` (the reader), `record.mjs` (operator ownership, `cancelMandate`),
+the record suite, `package.json`.
+
+## The gate design — the session gate IS the boundary
+- `/.netlify/functions/vault-mandate-operator` is publicly reachable whatever links to it. There is no `/api` route
+  and no UI link, and that protects nothing.
+- **`operatorGate` runs FIRST**: before the method check, the body parse, and loading any dependency.
+  Admitted = a valid session whose address is in `OPERATOR_MANDATE_OWNERS` (T's login address only, `0x74b7…24E5`;
+  the full value lives only in the constant).
+- **Every other caller gets the SAME 403**, byte-identical: `{"error":"forbidden"}` (names nothing), same status,
+  same headers. That covers no session, a garbage / wrong-secret / expired token, a VALID non-operator session with
+  any op or malformed JSON, and GET / OPTIONS.
+- **Zero dependencies are loaded for an unauthorised call.** `loadDeps` runs only after the gate, and the test
+  asserts both 0 loads and 0 calls.
+- **Constant work.** `operatorMatch` compares against EVERY entry with a same-length `timingSafeEqual`, whatever it
+  is given (member, stranger, null, garbage); `compared` always equals the list length (asserted). The gate's
+  statement is pinned in the source: `const operator = isOperatorOwner(session?.address ?? null);` with no branch
+  before it and one return. So a missing session cannot take a shorter path. (No injectable matcher: a seam on a
+  security gate would itself be a bypass.)
+- **Ownership is also re-checked on every read** (`record.mjs`): an `origin: "operator"` record whose owner is not on
+  the list is INCONSISTENT, even re-fingerprinted and re-acknowledged. Removing an address stops that operator's
+  mandates.
+- After the gate: POST only (405), JSON only, `op` ∈ {create, ack, cancel} (400). `ack` and `cancel` touch only
+  the session's own OPERATOR-origin mandates (a user-origin one → 409).
+- The wallet uses the canonical pattern: only a tagged `WalletUnresolvable` earns the retryable 503; pending →
+  provisioning 503; an untagged throw (a bug) → 500. This was caught by `test:ub` on the first `test:all` run: I had
+  written a blanket 503.
+
+## The ack-token reader — `vaultAckFromDisclosure` (`_vault-mandate-check.mjs`)
+- Pure over a `depositDisclosure` result (the SAME function the interactive deposit uses), with `digestOf` /
+  `tokenOf` injected from `_vault.mjs`.
+- **The token is returned ONLY when** `ackRequired === true` (exactly), the vault is depositable, no block is present,
+  and the token equals `sha256(disclosureDigest(inspection shown))`, so what is stored is what was shown.
+- `depositDisclosure` mints `ackToken` on the vault's own WARN even when the gate added a BLOCK. That case is refused
+  and returns NO token. The handler answers 409, writes nothing, and **never reads the baseline, so no signature is
+  spent on a blocked vault**.
+- An OK vault has no token → refused (a mandate baseline requires one; the current contract).
+- The disclosure is always returned so the operator sees why; a refusal's disclosure never carries the token.
+- **The handler passes that exact token into `readBaseline`**, and checks the stored `baseline.vaultAckToken` equals it.
+- **The create response shows the disclosure behind the token**: vault, level, warns, holder / holderKind,
+  withdraw + deposit fee, and the digest the token hashes. Beside it are the mandate text and rule lines, the
+  fingerprint, and a note that the fingerprint covers the vault disclosure. The CLI prints both and never
+  acknowledges for you.
+
+## Red first
+`test:mandateoperator` **5 / 65** before the code. The five were absence checks: no dependency loaded, no baseline
+read, no route, no UI mention, and building an operator record for T. ⚠️ My first draft had 12 "same 403" checks
+passing VACUOUSLY: with no module, the stub returned identical empty responses and the check only compared to the
+first case. Each case now must BE a 403 with a non-empty body. `test:mandaterecord` 154 / 2 (the two new checks).
+After: **74/0** and **156/0**.
+
+## The 14 mutations
+| # | Mutation | Result |
+|---|---|---|
+| 1 | method checked BEFORE the gate | red (2) |
+| 2 | control: a no-op edit | green, as it must be |
+| 3 | a different 403 for a valid non-operator session | red (6) |
+| 4 | dependencies loaded before the gate | red (1) |
+| 5 | membership check breaks after a hit | **survived** → replaced by 6 |
+| 6 | malformed input returns early, comparing nothing | red (1) |
+| 7 | reader ignores the BLOCK (checks ackRequired only) | red (1) |
+| 8 | reader ignores ackRequired (checks BLOCK only) | red (3) |
+| 9 | token not checked against the inspection shown | red (1) |
+| 10 | verify stops re-checking operator ownership | red (1) |
+| 11 | ack / cancel accept USER-origin mandates | red (2) |
+| 12 | gate returns early on no session | **survived the first test** → red after the fix |
+| 13 | gate short-circuits via a ternary | **survived the first test** → red after the fix |
+| 14 | gate short-circuits via `&&` | red after the fix |
+
+**The four my first tests missed, and why:**
+- **#5 is unobservable, not a test gap:** with a one-entry list, stopping after a hit does no less work. The real
+  early-exit risk is skipping the comparison for malformed input (#6), which is caught.
+- **#12 and #13 survived** because the membership count is measured on `operatorMatch`, not on the gate: a gate that
+  skipped the call for a missing session never reached the counted function. My first fix scanned the gate body
+  for a branch BEFORE the call; the ternary form put the branch INSIDE the statement and still passed.
+- **#14**, the same short-circuit written with `&&`, was added with the fix.
+- **The fix pins the statement itself**: `const x = isOperatorOwner(session?.address ?? null);` with no branch
+  before it and exactly one return. #12, #13 and #14 are red against it.
+- Consequence recorded: skipping the check on a missing session would reveal only whether a caller's OWN token is
+  valid, not who is on the list. It is pinned anyway, because the requirement is constant behaviour.
+
+## First `test:all` run: 157 / 2 — two real catches, both fixed
+- `test:ub`: a blanket 503 on the wallet (above). Also the textual guard that the try wraps ONLY
+  `await ensureOwnerWallet(session)`. The dep is bound to a local name so the scoped form reads as pinned.
+- `gate:registry`: the CLI was not registered. Exempted with a reason, beside `dca-rehearsal-create.mjs`.
+Final: **test:all 159 / 159**.
+
+## Open (three)
+1. **Body validation runs AFTER the baseline read.** It happens inside the create core, after `readBaseline` signs.
+   A bad rule (an exit rule, which creation refuses) costs one signature before it is refused. **To fix before T
+   runs anything.**
+2. **Function time is unmeasured.** Create reads the disclosure (inspect + DD report) and signs a baseline in ONE
+   synchronous function. If it times out, a retry makes a NEW mandate (create-only per id), never a double; the
+   abandoned one stays awaiting-ack, acts on nothing, and can be cancelled.
+3. **`MANDATE_DEPOSIT_ARMED_OPERATOR` is not built.** It is not needed until the freshness window is measured.

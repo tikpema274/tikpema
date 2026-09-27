@@ -181,6 +181,58 @@ export async function readBaseline(vault, deps, { holder = null } = {}) {
   };
 }
 
+/**
+ * THE MANDATE'S VAULT ACK TOKEN, from a `depositDisclosure` result (_vault-disclosure.mjs) — the SAME function
+ * the interactive deposit uses (inspectVault + the DD report + the dry-run gate). Pure: the caller reads the
+ * disclosure and injects `digestOf` (disclosureDigest) and `tokenOf` (ackTokenFor) from _vault.mjs.
+ *
+ * ═══ 🚨 THE TOKEN IS RETURNED ONLY WHEN ackRequired === true (T, 2026-09-27) ═══════════════════════════
+ * depositDisclosure mints `ackToken` whenever the vault's OWN verdict is WARN — deliberately, "so a caller can
+ * still SHOW the token's disclosure in a blocked state". The gate can ADD a BLOCK the inspection did not carry
+ * (an asset mismatch), and then `ackRequired` is false while `ackToken` is still set. A caller that took the
+ * token alone would bake a BLOCKED vault's token into a mandate baseline (and into its fingerprint). So:
+ * ackRequired must be exactly `true`, the vault depositable, no block present, and the token must be
+ * sha256 of the digest of the inspection SHOWN — what is stored is what was shown.
+ * ⚠️ A vault whose verdict is OK has no token, so a mandate cannot be made on it: `checkBaseline` requires
+ * one. That is the current contract, stated here so it is not mistaken for a bug when the allowlist widens.
+ *
+ * `disclosure` is always returned (refusals included), so the operator sees WHY; `token` only on success, and
+ * a refusal's disclosure never carries it.
+ * @returns {{ok:true, token:string, disclosure:object} | {ok:false, why:string, disclosure:object|null}}
+ */
+export function vaultAckFromDisclosure(d, { digestOf, tokenOf }) {
+  if (!d || typeof d !== "object") return { ok: false, why: "no vault disclosure was read", disclosure: null };
+  const insp = d.inspection;
+  let digest = null;
+  try { digest = insp ? digestOf(insp) : null; } catch { digest = null; }
+  const shown = {
+    vault: d.vault ?? null,
+    level: d.gate?.level ?? null, blocks: Array.isArray(d.gate?.blocks) ? d.gate.blocks : [], warns: Array.isArray(d.gate?.warns) ? d.gate.warns : [],
+    depositable: d.depositable === true, ackRequired: d.ackRequired === true,
+    holder: insp?.disclosure?.holder ?? null, holderKind: insp?.disclosure?.holderKind ?? null,
+    withdrawFeeBps: insp?.withdraw?.withdrawFeeBps ?? null,
+    depositFeeBps: insp?.ownerPowers?.settableFees?.currentBps?.deposit ?? null,
+    // The acknowledgement token is sha256(digest): shown so anyone can check which disclosure it stands for.
+    digest,
+  };
+  const no = (why) => ({ ok: false, why, disclosure: shown });
+  if (shown.level === "BLOCK" || shown.blocks.length) {
+    return no(`the vault is blocked for deposits: ${shown.blocks.map((b) => `${b.code} (${b.detail})`).join("; ") || "BLOCK"}`);
+  }
+  if (d.depositable !== true) return no("the vault is not depositable");
+  if (d.ackRequired !== true) {
+    return no(shown.level === "OK"
+      ? "this vault's disclosure carries no warnings, so it has no acknowledgement token, and a mandate's baseline requires one"
+      : "the disclosure does not require an acknowledgement (ackRequired is not true), so there is no token to record");
+  }
+  const token = d.ackToken;
+  if (typeof token !== "string" || !/^[0-9a-f]{64}$/.test(token)) return no("the disclosure's acknowledgement token is missing or malformed");
+  let expected = null;
+  try { expected = insp ? tokenOf(insp) : null; } catch { expected = null; }
+  if (token !== expected) return no("the acknowledgement token is not the one for the disclosure shown; nothing is recorded");
+  return { ok: true, token, disclosure: { ...shown, token } };
+}
+
 // ── production wiring (viem per endpoint; the DD quorum for analyze + verification) ─────────────
 const VAULT_ABI = parseAbi([
   "function withdrawFee() view returns (uint256)", "function depositFee() view returns (uint256)",
