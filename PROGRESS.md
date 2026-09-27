@@ -28641,3 +28641,58 @@ Final: **test:all 159 / 159**.
    synchronous function. If it times out, a retry makes a NEW mandate (create-only per id), never a double; the
    abandoned one stays awaiting-ack, acts on nothing, and can be cancelled.
 3. **`MANDATE_DEPOSIT_ARMED_OPERATOR` is not built.** It is not needed until the freshness window is measured.
+
+---
+
+# ✅ VAULT MANDATE — THE CREATE PREFLIGHT: a bad body is refused before the baseline is read (2026-09-27), NOT DEPLOYED
+
+Open item 1 of the operator path (b55e04a), fixed before T runs anything.
+
+## The flaw
+`createVaultMandate` checked the body's field names, then called `readBaseline`, which **signs a DD report**. Only
+then did `buildMandateRecord` check the terms and the rules, and it stopped at the terms errors. So a body that
+creation refuses (an exit rule while `EXIT_AVAILABLE` is false, bad terms) cost one signature first. On the operator
+handler it also cost the wallet resolution and the disclosure read.
+
+## ⭐ This also fixes piece 6's future user endpoint
+**Piece 6's future user endpoint has the same flaw today:** it will call the same create core, so a bad body from a
+user would cost a signature before it is refused. **That is a user-facing cost, not just an operator convenience.**
+It is fixed here, in the shared create core, **before piece 6 exists rather than after**.
+
+## The fix: one set of rules, run first
+- **`preflightMandateInput({ owner, origin, input })`** (`record.mjs`) runs every body check that does not need the
+  baseline: the field list (`CREATE_INPUT_FIELDS`, moved here from the store), origin and operator ownership, the
+  terms, and the rules (the fields a client may send, the exit refusal, `validateMandateRules`). It reports ALL
+  errors together and returns only `{ok}` / `{ok:false, errors}`, never a record or rules.
+- **Shared, not copied.** The builder and the preflight both call the same internal `termsAndRules` and
+  `originErrors`. The builder stays the authority and re-checks everything, now reporting terms and rule errors
+  together (it used to stop at the terms).
+- **The one wrinkle:** `validateMandateRules` needs an owner-changed rule's `baselineOwner`. The preflight validates
+  against a well-formed placeholder address that never leaves the function (asserted). This keeps the decision core
+  (`decide.mjs`) untouched.
+- **Called first in both places:** `createVaultMandate`, before the vault lookup and `readBaseline`; and the operator
+  handler's create, before the wallet, the disclosure and the baseline. It is the same function in both.
+- ⚠️ **One check cannot move:** an owner-changed rule on a vault whose owner the baseline could not read. Only the
+  signed read knows the owner, so that refusal still comes after it. Moving it would need a hook inside
+  `signedCheckReport` (the transport); it is a narrow case and was left.
+
+## Tests, red first
+Before: `test:mandaterecord` **159 / 15**, `test:mandateoperator` **74 / 3**.
+- **Red on behaviour:** the create core read the baseline ONCE for an exit rule and for bad terms before refusing;
+  the handler resolved the wallet, read the disclosure and read the baseline for an exit rule and bad terms, and
+  resolved the wallet and read the disclosure for an unknown field.
+- **Already green:** the create core's unknown-field check ran before the baseline read even before this change.
+After: **174/0** and **77/0**; `test:mandatedeposit` 232/0.
+- **Parity:** over 13 bodies (good, empty rules, exit rules, zero amount, missing total, hourly cadence, 7 decimals,
+  an unknown power, a missing limit, a missing onFinding, a duplicate rule, owner-changed, total < amount), the
+  preflight is ok ⇔ the builder, given a good baseline, is ok.
+
+## Six mutations, each red
+| # | Mutation | Result |
+|---|---|---|
+| 1 | the create core ignores the preflight (baseline read first again) | mandaterecord 169 / **5** |
+| 2 | the handler ignores the preflight | mandateoperator 74 / **3** |
+| 3 | the preflight checks terms only, not rules | mandaterecord 168 / **6** |
+| 4 | the builder drifts from the preflight (its own exit rule) | mandaterecord 173 / **1** (parity) |
+| 5 | the preflight leaks the placeholder-filled rules | mandaterecord 172 / **2** |
+| 6 | the preflight skips origin / owner | mandaterecord 172 / **2** |

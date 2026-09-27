@@ -33,7 +33,7 @@ import { requireSession } from "./_auth.mjs";
 import { json } from "./_arc.mjs";
 import { WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { isOperatorOwner } from "../../shared/vault-mandate/operators.mjs";
-import { MANDATE_ORIGIN, cancelMandate } from "../../shared/vault-mandate/record.mjs";
+import { MANDATE_ORIGIN, cancelMandate, preflightMandateInput } from "../../shared/vault-mandate/record.mjs";
 import { createVaultMandate, readMandate, acknowledgeStoredMandate, updateStoredMandate, VAULT_MANDATE_STORE } from "./_vault-mandate-store.mjs";
 import { vaultAckFromDisclosure } from "./_vault-mandate-check.mjs";
 
@@ -79,6 +79,11 @@ export function makeOperatorHandler(loadDeps) {
 }
 
 async function create({ session, input, deps }) {
+  // ⭐ THE PREFLIGHT FIRST: a body creation would refuse (an exit rule, bad terms, an unknown field) is refused here,
+  // before the wallet, the disclosure, or the baseline (which signs) — nothing read, nothing spent. The same function
+  // the create core runs; not a copy of its rules.
+  const pre = preflightMandateInput({ owner: session.address, origin: MANDATE_ORIGIN.OPERATOR, input });
+  if (!pre.ok) return json(400, { error: pre.errors.join("; "), errors: pre.errors });
   const vault = deps.resolveVault(input.vault);
   if (!vault) return json(400, { error: `vault ${JSON.stringify(input.vault)} is not on the allowlist` });
 

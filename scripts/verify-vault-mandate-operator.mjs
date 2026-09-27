@@ -248,6 +248,19 @@ section("4 — create (T): origin operator, awaiting ack, the response SHOWS wha
   ok("⭐ an `owner` in the body → refused, nothing written (never on behalf of anyone)", rw?.statusCode === 400 && x.store._map.size === 0, show(rw));
   const re = hx ? await attemptAsync(() => hx(ev({ headers: bearer(T_ADDR), body: { op: "create", vault: "xylo-usdc", ...TERMS, rules: [{ kind: "power", subject: "upgradeable", onFinding: "exit" }] } }))) : null;
   ok("an EXIT rule → refused (EXIT_AVAILABLE is false; the operator exception is deferred to piece 5)", re?.statusCode === 400 && x.store._map.size === 0 && /exit/i.test(re?.body ?? ""), show(re));
+  // ⭐⭐ THE PREFLIGHT, AT THE HANDLER: a bad body is refused before the wallet, the disclosure, or the baseline
+  // (which signs) — nothing read, nothing spent.
+  for (const [label, body] of [
+    ["an EXIT rule", { op: "create", vault: "xylo-usdc", ...TERMS, rules: [{ kind: "power", subject: "upgradeable", onFinding: "exit" }] }],
+    ["bad terms (11 per deposit)", { op: "create", vault: "xylo-usdc", ...TERMS, amountPerDepositUsdc: 11, rules: RULES }],
+    ["an unknown field", { op: "create", vault: "xylo-usdc", ...TERMS, rules: RULES, owner: STRANGER }],
+  ]) {
+    const p = operatorDeps();
+    const hp = H.makeOperatorHandler ? H.makeOperatorHandler(async () => p.deps) : null;
+    const rp = hp ? await attemptAsync(() => hp(ev({ headers: bearer(T_ADDR), body }))) : null;
+    ok(`⭐⭐ ${label} → 400 with NO wallet, disclosure or baseline read (no signature spent)`, rp?.statusCode === 400 && p.calls.length === 0 && p.store._map.size === 0, show({ s: rp?.statusCode, calls: p.calls }));
+  }
+
   // The wallet: the canonical refusals (test:ub's pattern), and an UNTAGGED throw never borrows them.
   const wcall = async (walletImpl) => {
     const w = operatorDeps(); w.deps.ensureOwnerWallet = walletImpl;

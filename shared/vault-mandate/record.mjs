@@ -214,6 +214,62 @@ function normalizeInputRules(input, baselineOwner, exitAvailable) {
   return v.ok ? { rules } : { errors: v.errors };
 }
 
+/**
+ * THE BODY'S TERMS AND RULES, checked once, for BOTH the builder and the preflight — one set of rules, not two.
+ * `baselineOwner` is the owner the signed baseline recorded; the preflight passes a placeholder (see below).
+ * @returns {{errors:string[], terms?:object, rules?:Array}}
+ */
+function termsAndRules({ terms, rules, baselineOwner, exitAvailable }) {
+  const errors = [];
+  const tv = validateMandateTerms(terms);
+  if (!tv.ok) errors.push(...tv.errors);
+  const n = normalizeInputRules(rules, baselineOwner, exitAvailable);
+  if (n.errors) errors.push(...n.errors);
+  return errors.length ? { errors } : { errors, terms: tv.terms, rules: n.rules };
+}
+
+/** Origin and owner, for the builder and the preflight alike. */
+function originErrors({ owner, origin }) {
+  const errors = [];
+  if (!KNOWN_ORIGIN.has(origin)) errors.push(`origin ${JSON.stringify(origin)} is not one of ${[...KNOWN_ORIGIN].join(", ")}`);
+  else if (origin === MANDATE_ORIGIN.OPERATOR && !isOperatorOwner(owner)) errors.push("origin operator requires an owner in OPERATOR_MANDATE_OWNERS");
+  if (!isAddr(owner)) errors.push("no owner: a mandate is created only under a verified session");
+  return errors;
+}
+
+/** The fields a create request may carry. The owner is the session and the origin is the path's; neither is sent. */
+export const CREATE_INPUT_FIELDS = Object.freeze(["vault", "rules", "amountPerDepositUsdc", "maxTotalUsdc", "cadence"]);
+
+// A well-formed address that is never anyone's owner: what an owner-changed rule is validated against BEFORE the
+// baseline exists. It lives only inside preflightMandateInput and is never returned or stored.
+const PREFLIGHT_OWNER_PLACEHOLDER = "0x" + "0".repeat(39) + "1";
+
+/**
+ * ═══ THE PREFLIGHT (2026-09-27): every check on a create BODY that does not need the baseline, run BEFORE it ═══
+ * The baseline read SIGNS a DD report. Until this existed, a body creation refuses (an exit rule, bad terms) cost
+ * that signature first — on the operator path and on piece 6's future user endpoint alike. So the create core and
+ * the operator handler run this first, and nothing is read until it passes.
+ * ⭐ It shares the builder's code (termsAndRules, originErrors, the field list): the builder is still the authority
+ * and re-checks everything; test:mandaterecord proves the two agree on a corpus of bodies.
+ * ⚠️ One check CANNOT move: an owner-changed rule on a vault whose owner the baseline could not read. Only the signed
+ * read knows, so that refusal still comes after it.
+ * @param {{owner:string, origin?:string, input:object, exitAvailable?:boolean}} a  `exitAvailable`: test seam only.
+ * @returns {{ok:true} | {ok:false, errors:string[]}}  — never a record, never rules.
+ */
+export function preflightMandateInput({ owner, origin = MANDATE_ORIGIN.USER, input, exitAvailable = EXIT_AVAILABLE } = {}) {
+  if (!isObj(input)) return { ok: false, errors: ["the request body must be an object"] };
+  const errors = [];
+  const extra = Object.keys(input).filter((k) => !CREATE_INPUT_FIELDS.includes(k));
+  if (extra.length) errors.push(`field(s) ${extra.join(", ")} cannot be sent: the owner is the signed-in session, and the origin is set by the server`);
+  errors.push(...originErrors({ owner, origin }));
+  const tr = termsAndRules({
+    terms: { amountPerDepositUsdc: input.amountPerDepositUsdc, maxTotalUsdc: input.maxTotalUsdc, cadence: input.cadence },
+    rules: input.rules, baselineOwner: PREFLIGHT_OWNER_PLACEHOLDER, exitAvailable,
+  });
+  errors.push(...tr.errors);
+  return errors.length ? { ok: false, errors } : { ok: true };
+}
+
 function checkBaseline(b) {
   if (!isObj(b)) return ["no baseline was read for this vault"];
   if (b.ok !== true) return [`the baseline could not be read: ${b.why ?? "unspecified"}`];
@@ -236,28 +292,23 @@ function checkBaseline(b) {
  *   `origin` defaults to "user". ⛔ Only the operator path passes "operator" (source guard, test:mandaterecord).
  */
 export function buildMandateRecord({ owner, walletAddress, vault, terms, rules, baseline, now, id, exitAvailable = EXIT_AVAILABLE, origin = MANDATE_ORIGIN.USER } = {}) {
-  const errors = [];
-  if (!KNOWN_ORIGIN.has(origin)) errors.push(`origin ${JSON.stringify(origin)} is not one of ${[...KNOWN_ORIGIN].join(", ")}`);
-  else if (origin === MANDATE_ORIGIN.OPERATOR && !isOperatorOwner(owner)) errors.push("origin operator requires an owner in OPERATOR_MANDATE_OWNERS");
-  if (!isAddr(owner)) errors.push("no owner: a mandate is created only under a verified session");
+  const errors = [...originErrors({ owner, origin })];
   if (!isAddr(walletAddress)) errors.push("no agent wallet address");
   if (!isObj(vault) || typeof vault.key !== "string" || !isAddr(vault.address) || !Number.isInteger(vault.chainId)) errors.push("no allowlisted vault");
   if (typeof id !== "string" || !id) errors.push("no mandate id");
   if (!Number.isFinite(now)) errors.push("no creation time");
   errors.push(...checkBaseline(baseline));
-  const tv = validateMandateTerms(terms);
-  if (!tv.ok) errors.push(...tv.errors);
+  // The SAME terms-and-rules check the preflight runs, now against the owner the signed baseline recorded.
+  const tr = termsAndRules({ terms, rules, baselineOwner: baseline?.owner?.address, exitAvailable });
+  errors.push(...tr.errors);
   if (errors.length) return { ok: false, errors };
-
-  const n = normalizeInputRules(rules, baseline.owner?.address, exitAvailable);
-  if (n.errors) return { ok: false, errors: n.errors };
 
   const record = {
     schema: MANDATE_SCHEMA, id, origin,
     owner: owner.toLowerCase(), walletAddress: walletAddress.toLowerCase(),
     vault: { key: vault.key, address: vault.address, chainId: vault.chainId, label: vault.label ?? vault.key },
-    terms: tv.terms,
-    rules: n.rules,
+    terms: tr.terms,
+    rules: tr.rules,
     baseline: {
       owner: isAddr(baseline.owner?.address) ? baseline.owner.address : null,
       ownerKind: baseline.owner?.kind ?? null,

@@ -514,6 +514,65 @@ section("7 — ⭐⭐ vault-mandate/3: status / deposits / monitoring, origin, t
   ok("  (the word 'operator' in unrelated prose is not a hit)", originWriters([["netlify/functions/_pause.mjs", `// All agents are halted by the operator (AGENT_HALT).`]]).length === 0);
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("8 — ⭐⭐ the PREFLIGHT: a bad body is refused BEFORE the baseline is read (no signature spent)");
+// Until 2026-09-27 the create core read the baseline — which SIGNS a DD report — and only then built the record,
+// where the terms and rules are checked. So a body creation refuses (an exit rule, bad terms) cost one signature
+// first. That is the operator path's flaw AND piece 6's future user endpoint's: a user-facing cost. The preflight
+// runs every body check that does not need the baseline, through the SAME functions the builder uses.
+{
+  const R = await import("../shared/vault-mandate/record.mjs");
+  const pf = R.preflightMandateInput;
+  ok("preflightMandateInput is exported from record.mjs", typeof pf === "function");
+  const P = (input, over = {}) => (typeof pf === "function" ? attempt(() => pf({ owner: OWNER, input, ...over })) : null);
+  const GOOD = { vault: "xylo-usdc", ...TERMS, rules: PAUSE_RULES };
+  const g = P(GOOD);
+  ok("a good body → ok, and NOTHING else (never a record, never rules)", g?.ok === true && Object.keys(g ?? {}).join() === "ok", show(g));
+  const ex = P({ ...GOOD, rules: [{ kind: "power", subject: "upgradeable", onFinding: "exit" }] });
+  ok("⭐ an EXIT rule → refused (EXIT_AVAILABLE is false)", ex?.ok === false && /cannot exit yet/.test((ex?.errors ?? []).join(" ")), show(ex));
+  const both = P({ ...GOOD, amountPerDepositUsdc: 11, rules: [{ kind: "power", subject: "upgradeable", onFinding: "exit" }] });
+  ok("⭐ bad terms AND an exit rule → BOTH reported at once (the builder used to stop at the terms)",
+    both?.ok === false && /per-deposit limit/.test((both?.errors ?? []).join(" ")) && /cannot exit yet/.test((both?.errors ?? []).join(" ")), show(both?.errors));
+  ok("an unknown body field → refused (the field check lives here now)", /cannot be sent/.test((P({ ...GOOD, owner: WALLET })?.errors ?? []).join(" ")));
+  ok("origin in the body → refused", /origin/.test((P({ ...GOOD, origin: "operator" })?.errors ?? []).join(" ")));
+  ok("origin operator for a non-operator owner → refused before any read", P(GOOD, { origin: "operator" })?.ok === false);
+  ok("no owner (no session) → refused", P(GOOD, { owner: null })?.ok === false);
+  ok("a client-supplied baselineOwner → refused", P({ ...GOOD, rules: [{ kind: "state", subject: "owner-changed", onFinding: "pause", baselineOwner: OWNER }] })?.ok === false);
+  const oc = P({ ...GOOD, rules: [{ kind: "state", subject: "owner-changed", onFinding: "pause" }] });
+  ok("⭐ an owner-changed rule is ACCEPTED without a baseline (only the baseline can say whether the owner is readable)", oc?.ok === true, show(oc));
+  ok("  …and the placeholder it validates against never leaves the function", !JSON.stringify(oc ?? {}).includes("0x0000"));
+  ok("exit on vault-cannot-pay → refused", P({ ...GOOD, rules: [{ kind: "state", subject: "vault-cannot-pay", onFinding: "exit" }] }, { exitAvailable: true })?.ok === false);
+  ok("the exitAvailable seam reaches the preflight too (piece 5's shapes stay testable)", P({ ...GOOD, rules: INPUT_RULES }, { exitAvailable: true })?.ok === true);
+
+  // ⭐⭐ PARITY: the preflight refuses EXACTLY when the builder (given a good baseline) refuses on the body.
+  const corpus = [
+    GOOD, { ...GOOD, rules: [] }, { ...GOOD, rules: INPUT_RULES }, { ...GOOD, amountPerDepositUsdc: 0 },
+    { ...GOOD, maxTotalUsdc: undefined }, { ...GOOD, cadence: "hourly" }, { ...GOOD, amountPerDepositUsdc: 1.0000001 },
+    { ...GOOD, rules: [{ kind: "power", subject: "nope", onFinding: "pause" }] }, { ...GOOD, rules: [{ kind: "state", subject: "exit-fee-above", onFinding: "pause" }] },
+    { ...GOOD, rules: [{ kind: "power", subject: "upgradeable" }] }, { ...GOOD, rules: [PAUSE_RULES[0], PAUSE_RULES[0]] },
+    { ...GOOD, rules: [{ kind: "state", subject: "owner-changed", onFinding: "pause" }] }, { ...GOOD, maxTotalUsdc: 5 },
+  ];
+  const mismatch = corpus.filter((input) => {
+    const pre = P(input)?.ok === true;
+    const b = build({ rules: input.rules, terms: { amountPerDepositUsdc: input.amountPerDepositUsdc, maxTotalUsdc: input.maxTotalUsdc, cadence: input.cadence }, exitAvailable: false });
+    return pre !== (b?.ok === true);
+  });
+  ok(`⭐⭐ parity over ${corpus.length} bodies: preflight ok ⇔ build ok (one set of rules, not two)`, typeof pf === "function" && mismatch.length === 0, show(mismatch));
+
+  // ── the create core runs it BEFORE the baseline ──
+  let reads = 0;
+  const pd = () => ({ store: fakeStore(), now: () => NOW, newId: () => "vm-pf", resolveVault: (k) => (k === "xylo-usdc" ? VAULT : null), readBaseline: async () => { reads++; return BASELINE; } });
+  const run = async (input) => { reads = 0; const d = pd(); const r = await attemptAsync(() => createVaultMandate({ session: { address: OWNER }, walletAddress: WALLET, input, deps: d })); return { r, reads, size: d.store._map.size }; };
+  const e1 = await run({ ...GOOD, rules: [{ kind: "power", subject: "upgradeable", onFinding: "exit" }] });
+  ok("⭐⭐ create core: an exit rule → refused with the baseline read ZERO times (no signature)", e1.r?.ok === false && e1.reads === 0 && e1.size === 0, show(e1));
+  const e2 = await run({ ...GOOD, amountPerDepositUsdc: 11 });
+  ok("⭐ create core: bad terms → refused, baseline read ZERO times", e2.r?.ok === false && e2.reads === 0, show(e2));
+  const e3 = await run({ ...GOOD, owner: WALLET });
+  ok("create core: an unknown field → refused, baseline read ZERO times", e3.r?.ok === false && e3.reads === 0);
+  const e4 = await run(GOOD);
+  ok("  (control: a good body reads the baseline exactly once and is written)", e4.r?.ok === true && e4.reads === 1 && e4.size === 1, show(e4.r?.errors));
+}
+
 function walkSrc(dir) {
   let out = [];
   try {

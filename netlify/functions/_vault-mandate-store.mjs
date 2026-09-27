@@ -32,7 +32,7 @@ export const VAULT_MANDATE_RECEIPT_STORE = "vault-mandate-receipts";
 export const INTENT_CLOSED = Object.freeze(["asserted", "refused", "not-deposited"]);
 
 import {
-  buildMandateRecord, verifyMandateRecord, acknowledgeMandate, MANDATE_STATUS, MANDATE_ORIGIN, DEPOSITS_STATE, MONITORING_STATE,
+  buildMandateRecord, verifyMandateRecord, acknowledgeMandate, preflightMandateInput, MANDATE_STATUS, MANDATE_ORIGIN, DEPOSITS_STATE, MONITORING_STATE,
 } from "../../shared/vault-mandate/record.mjs";
 
 // 🚨 STRONG, as for the policy store: a mandate is a SAFETY input. A CDN-cached copy could let a
@@ -158,21 +158,22 @@ export function receiptAdapter(store) {
 }
 
 // Piece 4 adds the deposit terms. The owner is still the session; the vault ack token comes from the
-// baseline (the server's reading), never from the request.
-const CREATE_INPUT_FIELDS = new Set(["vault", "rules", "amountPerDepositUsdc", "maxTotalUsdc", "cadence"]);
+// baseline (the server's reading), never from the request. The field list lives in record.mjs
+// (CREATE_INPUT_FIELDS), checked by the preflight below.
 
 /**
  * Create under a verified session. `deps`: store, now(), newId(), resolveVault(key) (the allowlist),
  * readBaseline(vault) (the transport: signed report + verified signer + owner + fee cap).
  * `origin` is an ARGUMENT, never a request field (a body carrying it is refused below). Defaults to "user".
+ * ⭐ THE PREFLIGHT RUNS FIRST (2026-09-27): every body check that does not need the baseline, before readBaseline —
+ * which SIGNS a DD report. A body creation refuses no longer costs a signature, here or at piece 6's user endpoint.
  * ⛔ Only the operator path passes "operator" — the source guard in test:mandaterecord names the one file allowed.
  * @returns {{ok:true, record, fingerprint} | {ok:false, errors:string[]}}
  */
 export async function createVaultMandate({ session, walletAddress, input, deps, origin = MANDATE_ORIGIN.USER }) {
   if (!isAddr(session?.address)) return { ok: false, errors: ["authentication required"] };
-  if (input === null || typeof input !== "object" || Array.isArray(input)) return { ok: false, errors: ["the request body must be an object"] };
-  const extra = Object.keys(input).filter((k) => !CREATE_INPUT_FIELDS.has(k));
-  if (extra.length) return { ok: false, errors: [`field(s) ${extra.join(", ")} cannot be sent: the owner is the signed-in session, and the origin is set by the server`] };
+  const pre = preflightMandateInput({ owner: session.address, origin, input });
+  if (!pre.ok) return pre;
   const vault = deps.resolveVault(input.vault);
   if (!vault) return { ok: false, errors: [`vault ${JSON.stringify(input.vault)} is not on the allowlist`] };
 
