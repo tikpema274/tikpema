@@ -28758,9 +28758,13 @@ T deployed `47e642a`. It carries five commits: the clock fix `16ff7f4`, the maxR
 - The only differences are on GET / OPTIONS, and they are NETLIFY EDGE headers set from the request method
   (`netlify-vary: query` vs `body,header=Cookie|Authorization`; `cache-status fwd=method`). They reflect the method
   the caller chose, not authorisation or the list.
-- ⏳ **PENDING (T): a VALID prod session for an address NOT on the list.** It cannot be made read-only without the
-  prod SESSION_SECRET: a dev-signed token is simply invalid in prod (row 3 above). This is the case requirement 1
-  names. The command for T is in "Open" below.
+- ✅ **CLOSED, MEASURED ON THE SERVED BUILD (T, 2026-09-27): a VALID prod session for an address NOT on the list.**
+  T minted a production session for the throwaway address `0xaaaa…0001` (no wallet) with the production
+  SESSION_SECRET (read by `netlify env:get` inside the command; never printed) and POSTed a create body. Result:
+  **`403 {"error":"forbidden"}`, `netlify-vary: body,header=Cookie|Authorization`**, identical to the
+  unauthenticated call. This is the case requirement 1 names (a real session that is not an operator gets the
+  same 403 as no session at all), and it was the last open item from check 4. A dev-signed token could not stand
+  in for it: in prod that token is simply invalid (row 3 above).
 
 ## 5. The disarmed state is what is served
 - The served tree == the tree at `47e642a` (gate:deployed). At that commit: **`MANDATE_DEPOSIT_ARMED = false`,
@@ -28774,10 +28778,11 @@ T deployed `47e642a`. It carries five commits: the clock fix `16ff7f4`, the maxR
   **"the tick runs on this deploy" is not yet evidenced**. Read `last` after 23:17Z.
 
 ## Open
-- **T: the valid-non-operator-session check.** It mints a prod session for a throwaway address (no wallet) and
-  prints only the status, the body and the vary header. The secret never reaches the terminal:
+- ✅ ~~T: the valid-non-operator-session check~~ — **closed 2026-09-27**: `403 {"error":"forbidden"}
+  body,header=Cookie|Authorization`, identical to the unauthenticated call (§4). The command it used, for the record:
   `! SESSION_SECRET="$(netlify env:get SESSION_SECRET --context production)" node -e 'import("./netlify/functions/_auth.mjs").then(async (m) => { const t = m.issueSession({ address: "0xaaaa000000000000000000000000000000000001", method: "metamask" }).token; const r = await fetch("https://app.tikpema.xyz/.netlify/functions/vault-mandate-operator", { method: "POST", headers: { authorization: "Bearer " + t, "content-type": "application/json" }, body: JSON.stringify({ op: "create", vault: "xylo-usdc" }) }); console.log(r.status, await r.text(), r.headers.get("netlify-vary")); })'`
   Expected: `403 {"error":"forbidden"} body,header=Cookie|Authorization`, identical to the unauthenticated call.
+  Observed: exactly that.
 - The first tick on this deploy (23:17Z): read `vault-mandate-receipts/last`.
 - The ledger double-append (§3).
 - Then T creates the operator mandate (CLI: `scripts/vault-mandate-operator.mjs`).
