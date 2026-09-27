@@ -28696,3 +28696,88 @@ After: **174/0** and **77/0**; `test:mandatedeposit` 232/0.
 | 4 | the builder drifts from the preflight (its own exit rule) | mandaterecord 173 / **1** (parity) |
 | 5 | the preflight leaks the placeholder-filled rules | mandaterecord 172 / **2** |
 | 6 | the preflight skips origin / owner | mandaterecord 172 / **2** |
+
+---
+
+# 🚀 DEPLOY 6ab98b57 — five commits live; the vault mandate still DISARMED (2026-09-27), verified read-only
+
+T deployed `47e642a`. It carries five commits: the clock fix `16ff7f4`, the maxRedeem fix `6d04d13`, record /3
+`83e3d13`, the operator creation path `b55e04a`, and the create preflight `47e642a`. Checked afterwards, read-only,
+2026-09-27 ~22:30–22:40Z.
+
+## 1. What prod serves
+- Deploy **`6ab98b57bb2c686014e79b46`**, `ready`, production. Created 21:32:07.428Z, **published 22:25:28.953Z**
+  (~53 min). `commit_ref` null (CLI deploy, as always), so identity comes from the build stamp.
+- Served stamp: **commit `47e642a51753bd56cb6c14ec0c510ac0c318972f`, tree `b10eec933c65…`**, stamped 21:32:09.387Z.
+- **gate:deployed ✅**: production serves this tree; control plane == data plane (both 6ab98b57); no orphaned
+  production deploys among the 25 newer. HEAD `d6f3d79` (the deploy chain's ledger commit) ≠ stamped `47e642a`;
+  the trees are identical, since the ledger files are outside the stamped surface.
+- The deploy's `available_functions`: **152** (was 151). The one new function is **`vault-mandate-operator`**.
+  `function_schedules` still lists `vault-mandate-tick` at `17 * * * *`.
+
+## 2. ddTree did NOT rotate; no window
+- The capture recorded **ddTree `d79683273abc5a6c…` == previous, `rotated:false`, `outcome:no-window`** at 22:25:44Z.
+- Independently: `git diff 4c48e41 47e642a` over the 26 DD-surface entries (4 dirs + 22 files, read from
+  `scripts/stamp-build.mjs`) = **0 files**. The 9 deployed files that changed are all off the surface:
+  `_vault-mandate-{check,deposit,store}`, `_vault`, `vault-mandate-operator`, and
+  `shared/vault-mandate/{operators,record,state-reads}`, `shared/vault-redemption`.
+  (My first run of this diff was invalid: the path extraction picked up quoted comment text and git refused `//`. It
+  was re-run on real paths only.)
+- `GET /api/dd-analyze` → **405** (the declared GET refusal).
+
+## 3. Ledgers + losses
+- **gate:ledger ✅**: dd-refusal-window-log 129 entries (last 22:25:44.773Z), deploy-loss-log 43 (last
+  22:26:37.019Z), both committed in `d6f3d79`.
+- **Loss sweep:** 17 losses, **0 new** (re-run `--gate-new --no-log`: "17 carried"; the ledger stayed at 43 lines).
+  Limbo 40, preserved 23; 46 ambiguous cancels not counted.
+- ⚠️ **ANOMALY, cause not established: this deploy appended TWICE to each ledger**; the two previous deploys
+  (`9d98c64`, `51fee25`) appended once.
+  - `dd-refusal-window-log`: the two new lines are **byte-identical**, including `at` = the capture script's own
+    start time to the millisecond. Two separate runs cannot produce that, and the script has ONE `appendFileSync`
+    (`capture-refusal-window.mjs:207`). So the line was duplicated outside that script.
+  - `deploy-loss-log`: two DIFFERENT observations 174 ms apart (22:26:36.845Z, 22:26:37.019Z), identical counts.
+    The script has one append site too (`deploy-loss-sweep.mjs:134`).
+  - `deploy:prod` calls `capture:window` and `gate:deployloss` once each. No count changed, and gate:ledger reads
+    both files as up to date, but a duplicated line would be counted twice by anything that counts entries. The
+    2026-09-21 commit `7747f18` already records "the two ledgers have drifted out of step five times and gate:ledger
+    cannot see it". **Not fixed; for T.**
+
+## 4. The operator function, from the SERVED build
+`POST/GET/OPTIONS https://app.tikpema.xyz/.netlify/functions/vault-mandate-operator`:
+
+| Caller | Response |
+|---|---|
+| no Authorization header, a create body | **403 `{"error":"forbidden"}`** |
+| `Bearer not-a-token` | identical |
+| a token for T's address signed with the DEV secret (a forged token in prod) | identical |
+| malformed JSON body | identical |
+| GET · OPTIONS | 403, identical body |
+
+- **The function's own response is byte-identical in all six**: status, body, and the headers it sets
+  (`content-type`, `cache-control`, `cdn-cache-control`).
+- The only differences are on GET / OPTIONS, and they are NETLIFY EDGE headers set from the request method
+  (`netlify-vary: query` vs `body,header=Cookie|Authorization`; `cache-status fwd=method`). They reflect the method
+  the caller chose, not authorisation or the list.
+- ⏳ **PENDING (T): a VALID prod session for an address NOT on the list.** It cannot be made read-only without the
+  prod SESSION_SECRET: a dev-signed token is simply invalid in prod (row 3 above). This is the case requirement 1
+  names. The command for T is in "Open" below.
+
+## 5. The disarmed state is what is served
+- The served tree == the tree at `47e642a` (gate:deployed). At that commit: **`MANDATE_DEPOSIT_ARMED = false`,
+  `MANDATE_ARMED_FROM = null`, `MANDATE_CHECK_FRESHNESS_MS = null`** (`_vault-mandate-deposit.mjs`),
+  **`EXIT_AVAILABLE = false`** (`limits.mjs`), `OPERATOR_MANDATE_OWNERS` = T's login address only. There is no
+  `MANDATE_DEPOSIT_ARMED_OPERATOR` (0 hits). (Evidence = tree identity; the bundles were not downloaded.)
+- Blobs (`netlify blobs:list`, read-only): **`vault-mandates` is EMPTY** (no mandate, no intent).
+  `vault-mandate-receipts` holds only `last` = `{"at":"2026-09-27T22:17:05.984Z","ok":true,"armed":false,"results":[]}`.
+- ⚠️ **That `last` is from the PREVIOUS deploy**: 22:17Z is before the 22:25Z publish. At the time of reading
+  (22:38Z) the new deploy's first tick (23:17Z) had not come due. The schedule is registered on 6ab98b57, but
+  **"the tick runs on this deploy" is not yet evidenced**. Read `last` after 23:17Z.
+
+## Open
+- **T: the valid-non-operator-session check.** It mints a prod session for a throwaway address (no wallet) and
+  prints only the status, the body and the vary header. The secret never reaches the terminal:
+  `! SESSION_SECRET="$(netlify env:get SESSION_SECRET --context production)" node -e 'import("./netlify/functions/_auth.mjs").then(async (m) => { const t = m.issueSession({ address: "0xaaaa000000000000000000000000000000000001", method: "metamask" }).token; const r = await fetch("https://app.tikpema.xyz/.netlify/functions/vault-mandate-operator", { method: "POST", headers: { authorization: "Bearer " + t, "content-type": "application/json" }, body: JSON.stringify({ op: "create", vault: "xylo-usdc" }) }); console.log(r.status, await r.text(), r.headers.get("netlify-vary")); })'`
+  Expected: `403 {"error":"forbidden"} body,header=Cookie|Authorization`, identical to the unauthenticated call.
+- The first tick on this deploy (23:17Z): read `vault-mandate-receipts/last`.
+- The ledger double-append (§3).
+- Then T creates the operator mandate (CLI: `scripts/vault-mandate-operator.mjs`).
