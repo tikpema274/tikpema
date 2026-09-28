@@ -29983,3 +29983,81 @@ Anything else is a finding.
   - "once-guard dropped" SURVIVED: the second call printed "lock NOT released", which a `/lock released/` count does
     not match. Normal runs now assert exactly ONE line matching `/released/` and no "NOT released".
 - Other suites that run the wrapper: test:ledgergate 38/0, test:ledgerhook 20/0, verify-bridge-receipts exit 0.
+
+---
+
+# ✅ VAULT MANDATE — PIECE 5 STEP 2: `submitRedeem` FACTORED OUT OF `vaultWithdraw` (2026-09-28), built red-first, NOT deployed
+
+⚠️ **MONEY PATH.** `vaultWithdraw` is the LIVE manual reclaim users can reach today. **Step 2 deploys ON ITS OWN, and T
+runs one live manual reclaim afterwards** (T's decision). It rides with `7f0e5ea` (the run lock's success lines), so
+its deploy is also the lock lines' first outing. **Not deployed tonight.**
+
+## ⭐⭐ THE CIRCLE DOCS FINDING (step 0 of the idempotency measurement): the key MUST be UUID v4 — a UUIDv5 is INVALID
+- **Documented format:** developers.circle.com/w3s/idempotent-requests — "you must generate and provide an idempotency
+  key formatted as a **UUID version 4** format". The installed SDK's own type docs for
+  `CreateContractExecutionTransactionForDeveloperRequest` say the same ("Universally unique identifier (UUID v4)").
+- ⛔ **The UUIDv5 originally proposed ("derive a UUIDv5 from the intent key") is INVALID**: a v5 carries version nibble 5
+  and breaks the documented format.
+- **The derivation used instead:** the first 16 bytes of **`sha256("tikpema/vault-mandate/idempotency/v1\n" + intentKey)`**,
+  with the **version nibble set to 4** and the **RFC 4122 variant bits** set. Deterministic (recovery recomputes it from
+  the intent key alone), and in FORMAT indistinguishable from a random v4. `shared/circle-idempotency.mjs`
+  (`idempotencyKeyFor`, `isV4Uuid`). The namespace is versioned and the derivation is PINNED by the suite: changing
+  either changes the key every open intent will be recovered by, so a new derivation takes a new namespace version.
+- **Documented about a repeated key:** "Subsequent requests with the same idempotencyKey parameter value will produce the
+  same result as the initial request"; SDK type docs: "it will be treated as the same request and the original response
+  will be returned."
+- **NOT documented (the measurement must answer these):**
+  - **a reused key with a DIFFERENT body on the Wallets endpoint** (`POST /developer/transactions/contractExecution`).
+    The only related error, `175403` 409 "Please use a new idempotency key", is listed under Smart Contract Platform
+    errors, a different product;
+  - **how long Circle retains a key** (a recovery hours or days later may or may not find the original transaction by it);
+  - whether the server ENFORCES the version nibble at all (the SDK does not validate: it sends `key ?? <random uuid>`).
+- The measurement's step 3 (a UUIDv5-shaped key) is now informational only: the design no longer depends on it.
+
+## What changed
+- **`submitRedeem({walletAddress, vault, shares, idempotencyKey?, onSubmitted?, client?})`** (`_vault.mjs`): the ONE
+  redeem call site. `redeem(shares, receiver=self, owner=self)`, then Circle's hash → `{circleId, redeemHash}`. It
+  establishes nothing about the outcome (the caller reads the chain).
+  - The key is checked BEFORE signing: not a v4-format UUID → throws, Circle never called. Passed to Circle as-is.
+    Omitted → the property is NOT sent (the SDK generates one, as before).
+  - `onSubmitted({stage:"redeem", circleId, idempotencyKey})` fires the moment Circle ACCEPTS, before the wait. Its
+    failure is swallowed and logged: the redeem is already submitted; the id is also returned.
+- **`vaultWithdraw` REBUILT on it**, passing no key and no hook: Circle receives the identical call. A malformed vault
+  address still throws before any read or signature.
+- ⚠️ **The key module is deliberately OUTSIDE `shared/vault-mandate/`.** The first placement failed `test:all`:
+  `test:mandatedeposit` forbids any file that IMPORTS mandate code and also names `executeAction`, and `_vault.mjs` names
+  it in a comment. The guard was kept; the module moved (nothing in it knows mandates; the namespace string unchanged).
+- Off the DD surface (`_vault.mjs`, `shared/circle-idempotency.mjs`): ddTree does not rotate.
+
+## Red first, mutations
+- **Red: 3 failing / 12 passing** (sections A and B skipped while the modules did not exist). The 12 passes are the
+  RECLAIM PINS, green against the OLD `vaultWithdraw` on purpose: they characterise today's behaviour before the
+  rebuild. Green: **test:vaultsubmitredeem 36/0**, **test:vaultwithdrawshares 22/0**; **test:all 163/163**;
+  gate:types ✅.
+- **The cases asked for** (only the Circle client and the chain faked): the key reaches Circle exactly · the hook fires
+  with the Circle id between the create and the wait · a hook that THROWS or REJECTS still leaves the redeem awaited and
+  its id + hash returned · Circle refusing the create → the hook never fires · the wait failing after acceptance → the
+  hook already holds the id · a v5 / raw / empty key → throws, Circle never called.
+- **The reclaim pins:** the identical Circle call (no key) · the order USDC-before → submit → wait → receipt →
+  USDC-after → shares · unreadable pre-balance → nothing signed · reverted receipt → refused · unreadable receipt +
+  USDC arrived → confirmed on the delta · unreadable receipt + no USDC → "cannot tell", no claim about the shares · no
+  USDC → never confirmed · unreadable post-balance → the hash carried · Circle FAILED → throws, as before.
+- **15 mutations, 15 red** (the key mutations re-run after the module moved).
+- ⭐⭐ **THE OLD RECLAIM SUITE CATCHES ONLY 2 OF THE 6 RECLAIM-PATH MUTATIONS.** `test:vaultwithdrawshares` alone:
+  | Reclaim-path mutation | old suite | new pins |
+  |---|---|---|
+  | a zero USDC delta confirmed | ❌ caught | ❌ caught |
+  | a reverted receipt not refused | ❌ caught | ❌ caught |
+  | the pre-sign USDC read's refusal dropped (signs blind) | **passes** | caught |
+  | unreadable receipt + no USDC falls through | **passes** | caught |
+  | the reclaim starts sending a (fixed) idempotency key | **passes** | caught |
+  | receiver = the vault, not the wallet | **passes** | caught |
+
+  **Four regressions in the live manual reclaim were previously INVISIBLE to its suite.** The new pins cover them.
+- ⚠️ Test bugs caught on the way: the call-shape check had a `||` precedence bug that passed whenever `blockchain` was
+  set; the "one redeem call site" count matched the signature in `_vault.mjs`'s ERC-4626 conformance list (now counts
+  `abiFunctionSignature:` call sites only).
+
+## Next
+- T deploys step 2 (+ `7f0e5ea`) on its own, then runs one live manual reclaim.
+- T runs the idempotency measurement (steps 1, 2, 4, 5 decide recovery; step 3 is informational).

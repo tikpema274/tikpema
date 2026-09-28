@@ -39,6 +39,7 @@ import {
 // ⭐ The recognition gate for the false-clean-bill defect. "selector absent → power absent" is valid
 // ONLY inside a governance vocabulary we recognise; an unrecognised surface is NOT CHECKED, not clean.
 import { recognizeVaultProfile } from "../../shared/onchain-facts/vault-profiles.mjs";
+import { isV4Uuid } from "../../shared/circle-idempotency.mjs";
 import { redemptionSignalFor, classifyRedemption } from "../../shared/vault-redemption.mjs";
 
 // ── The allowlist. One entry today — recon found exactly one live vault on Arc testnet and no
@@ -1156,6 +1157,41 @@ export async function vaultDeposit({ walletAddress, vault, amountUsdc, onSubmitt
   };
 }
 
+// ── MOVE: SUBMIT A REDEEM — the ONE redeem call, shared by the manual reclaim and the mandate's exit ────────
+// redeem(shares, receiver=self, owner=self) on the vault, then wait for Circle's hash. Returns {circleId, redeemHash}.
+// It establishes NOTHING about the outcome: the caller reads the chain (vaultWithdraw: the USDC delta; the exit:
+// classifyExitOutcome on THIS transaction).
+//
+// For the exit executor (piece 5, C4), two optional inputs make it RECOVERABLE:
+//   · `idempotencyKey` — passed to Circle as-is. It must be a v4-format UUID (Circle's documented format; derive it with
+//     shared/circle-idempotency.mjs from the intent key). A malformed key THROWS before anything is signed.
+//     Omitted, the property is not sent and the SDK generates one (the manual reclaim, unchanged).
+//   · `onSubmitted({stage:"redeem", circleId, idempotencyKey})` — called the moment Circle ACCEPTS, before the wait,
+//     so the intent records the id a crash-recovery reads. ⚠️ Its failure is swallowed and logged: the transaction is
+//     already submitted; throwing here would abandon a live redeem. The id is also in the return value.
+export async function submitRedeem({ walletAddress, vault, shares, idempotencyKey = undefined, onSubmitted = null, client = circle() }) {
+  if (idempotencyKey !== undefined && !isV4Uuid(idempotencyKey)) {
+    throw new Error("submitRedeem: idempotencyKey must be a v4-format UUID (derive it from the intent key); nothing was submitted");
+  }
+  const owner = getAddress(walletAddress);
+  const redTx = await client.createContractExecutionTransaction({
+    walletAddress,
+    blockchain: ARC.blockchain,
+    contractAddress: getAddress(vault.address),
+    abiFunctionSignature: "redeem(uint256,address,address)",
+    abiParameters: [String(shares), owner, owner],
+    fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+    ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
+  });
+  const circleId = redTx.data?.id;
+  if (typeof onSubmitted === "function" && circleId) {
+    try { await onSubmitted({ stage: "redeem", circleId, idempotencyKey: idempotencyKey ?? null }); }
+    catch (e) { console.error(`[vault] onSubmitted(redeem) failed: ${e?.message ?? e}`); }
+  }
+  const redeemHash = await waitForTx(client, circleId); // COMPLETE → hash; FAILED/timeout → throws
+  return { circleId, redeemHash };
+}
+
 // ── MOVE: WITHDRAW (redeem) — single call, NO approve ────────────────────────────────────────
 // redeem(shares, receiver=self, owner=self). msg.sender == owner, so the vault's allowance path
 // is skipped (see XyloVault source). `shares` is in the share token's base units (raw).
@@ -1171,7 +1207,7 @@ export async function vaultDeposit({ walletAddress, vault, amountUsdc, onSubmitt
 // yesterday's "received ? USDC").
 export async function vaultWithdraw({ walletAddress, vault, shares }) {
   const owner = getAddress(walletAddress);
-  const vaultAddr = getAddress(vault.address);
+  getAddress(vault.address); // a malformed vault address still throws HERE, before any read or signature (as before)
   const assetAddr = getAddress(vault.assetAddress);
   const client = circle();
   const pc = publicClient();
@@ -1185,15 +1221,9 @@ export async function vaultWithdraw({ walletAddress, vault, shares }) {
     return { confirmed: false, reason: "couldn't read your balance to verify the reclaim — not attempted; your shares are unchanged" };
   }
 
-  const redTx = await client.createContractExecutionTransaction({
-    walletAddress,
-    blockchain: ARC.blockchain,
-    contractAddress: vaultAddr,
-    abiFunctionSignature: "redeem(uint256,address,address)",
-    abiParameters: [String(shares), owner, owner],
-    fee: { type: "level", config: { feeLevel: "MEDIUM" } },
-  });
-  const redHash = await waitForTx(client, redTx.data?.id); // COMPLETE → hash; FAILED/timeout → throws
+  // The one redeem path (submitRedeem, below). No idempotency key and no hook: the manual reclaim sends exactly the
+  // call it always sent, and the SDK generates the key as before. Circle FAILED/timeout → throws, as before.
+  const { redeemHash: redHash } = await submitRedeem({ walletAddress, vault, shares, client });
 
   // The redeem must be MINED with status:success on-chain. (For an ERC-4337 SCA the OUTER tx can be
   // 'success' while the inner redeem reverted and moved nothing — WITNESS #2 below catches that.)
