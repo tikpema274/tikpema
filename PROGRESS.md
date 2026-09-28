@@ -29660,3 +29660,83 @@ says the executor misbehaved. **How it must surface:**
 3. **The liquidity-adapter re-check (V2).** The exit's fresh execution reads must confirm the vault's liquidity adapter
    is the one the finding check saw (the allocator's zero-timelock redirect, decided 2026-09-28). That belongs to the
    execution reads, not this decision. Required before any V2 vault can carry an exit rule (xylo has no adapter).
+
+---
+
+# ✅ VAULT MANDATE — PIECE 5: EXECUTOR BUILD ORDER DECIDED + BLOCKERS 1 AND 2 CLOSED IN CODE (2026-09-28), NOT deployed
+
+## ⭐ THE EXECUTOR BUILD ORDER (T, 2026-09-28)
+1. **Anchor chain time (blocker 1).** Own change, own deploy: the only edit to the RUNNING tick, and every later step
+   needs it (until it lands `decideExit` stops at gate 3, so a disarmed executor would only ever say
+   `anchor-time-unknown` and prove nothing past it). ✅ BUILT (below).
+   1b. **`MANDATE_MONITORING_LIVE` + load guard (blocker 2 / C14).** ✅ BUILT (below).
+2. ⚠️ MONEY — **factor `submitRedeem` out of `vaultWithdraw`** (`onSubmitted` + a deterministic `idempotencyKey`).
+   **Its OWN deploy, then T runs one live manual reclaim** (T: it touches a money path users can reach today). The
+   repeated-idempotency-key measurement runs WITH this step (T: that commit introduces the key; recovery is built on
+   its answer).
+3. `min(tracked, live)` pure + the mandate-machinery halt latch (the `BEYOND_MANDATE_SHARES` incident path).
+4. Exit intent + state machine (create-only `x/<owner>/<id>`, `exiting` before the intent; an open deposit intent blocks).
+5. Fresh execution reads, with blocker 3 as a STRUCTURAL refusal: a vault whose exit path goes through an adapter, with
+   no adapter recorded by the finding check, never submits (xylo: vacuous; V2: refuses until the DD V2 window records
+   one, then compares).
+6. ⚠️ MONEY, shipped disarmed: executor + recovery in a background function. ⚠️ A background function is PUBLIC at
+   `/.netlify/functions/<name>-background`: it authenticates its trigger and loads the finding from the store by id,
+   never from the payload.
+Deploys: (1+1b) → (2, then T's reclaim check) → (3–6 together, disarmed).
+
+## ⭐ DECISIONS (T, 2026-09-28)
+- **Step 2 is its own deploy**, with T's manual reclaim check after.
+- **Operator-only EXIT arming: YES**, mirroring `MANDATE_DEPOSIT_ARMED_OPERATOR` (its own constant, its own ARMED_FROM,
+  refused at the write for a non-operator origin). Not built.
+- **The live-proof rule: `exit-fee-above` with `limitBps: 0`.** xylo's ~10 bps trips it deterministically, and it is a
+  real finding, not a contrived one.
+- **The repeated-idempotency-key measurement runs WITH step 2.** T runs it. Payload: USDC `approve(<the wallet's own
+  address>, 0)` from a testnet agent SCA that is NOT the operator mandate's wallet (keeps its receipts clean); sponsored,
+  moves no funds. Steps: (0, Claude, read-only) Circle's documented `idempotencyKey` format + replay behaviour; (1) same
+  key + same payload twice: same tx id, a 409, or a new tx?; (2) same key + a DIFFERENT payload (`approve(self, 1)`);
+  (3) a UUIDv5-shaped key (what a key derived from the intent key looks like): accepted?; (4) ~30 s later, fetch every
+  returned id and count the approves that landed from the SCA in the window: exactly ONE per key?; (5) step 1 again
+  after the first tx is COMPLETE (recovery reuses the key after completion too). Answers 1, 2, 5 decide whether
+  recovery may re-send with the key or must only look the tx up.
+
+## STEP 1 — THE ANCHOR CARRIES THE BLOCK'S CHAIN TIME (blocker 1 closed in code)
+- `resolveAnchor` (`shared/vault-mandate/anchor.mjs`) returns `{blockNumber, blockHash, timestamp, endpoints}`. Every
+  endpoint must return the same hash AND the same timestamp. A disagreement, a missing value, or anything that is not
+  integer SECONDS is **no anchor**: never a timestamp taken from whichever endpoint answered, never a clock in its place.
+- **No extra RPC call.** The reader interface is now `block(n) → {hash, timestamp}`; production keeps the timestamp from
+  the `getBlock` it already made (it used to keep only `.hash`). `anchorBlockFacts` (pure, `_vault-mandate-check.mjs`)
+  turns viem's bigint into integer seconds; a missing block → null, a missing timestamp → null (then refused).
+- **One rule, one place:** `isChainSeconds` is exported from `anchor.mjs`; `exit-decision.mjs` imports it (its private
+  copy is gone).
+- It flows through: `runMandateCheck`'s `anchor` and `check.anchor` carry it; the deposit receipt gains the field. The
+  deposit intent (`anchor: {blockNumber, blockHash}`) and the baseline/fingerprint copy named fields only: unchanged.
+- **New refusal on the LIVE check:** a timestamp disagreement is an OUTAGE for deposit checks too. Since /3 an outage
+  skips and retries, never latches.
+- **Off the DD surface** (checked against `DD_SURFACE_DIRS/FILES`): ddTree does not rotate.
+- **📏 LIVE, read-only, 3/3** against `rpc.testnet.arc.io` + `arc-testnet.drpc.org`: both endpoints agreed on the
+  timestamp every time; seconds; 2 s behind the wall clock (e.g. block 64484161, ts 1790621671).
+
+## STEP 1b — `MANDATE_MONITORING_LIVE` (blocker 2 / C14 closed structurally)
+`limits.mjs`: `MANDATE_MONITORING_LIVE = false`, and two new load guards: it must be a literal boolean, and
+**`EXIT_AVAILABLE ⇒ MANDATE_MONITORING_LIVE`**. Flipping `EXIT_AVAILABLE` is now a load-time error until monitoring's
+OWN commit flips the constant. Nothing else reads it; ⛔ a `true` here is a claim about the code, flipped only with
+monitoring. Exits armed with `EXIT_AVAILABLE` off still load; monitoring alone still loads.
+
+## Red first, mutations
+- **Red:** transport 24/70 failing (measured with non-functional stub exports, so the red was per case, not one
+  module-load error); deposit 12 failing (its reader stub had the old shape); decision 10/54 failing. Green: transport
+  **70/0**, deposit **232/0**, decision **54/0**, classifier 47/0; **test:all 162/162**.
+- ⚠️ One test bug caught on the way: a default parameter (`timestamp = TS`) turned an explicit `undefined` back into a
+  valid timestamp, so two "missing" cases fed the code a real value. Fixed with rest args.
+- **11 mutations, 10 red:** timestamp agreement dropped · any finite number accepted · timestamp not returned · a
+  wall-clock fallback for a missing time · the reader's `Number()` without the bigint check · a missing block → empty
+  facts · a bigint passed through · the monitoring guard removed · the boolean guard removed · the guard reading ARMED
+  instead of MONITORING.
+- **The survivor is equivalent:** "validate only the first endpoint's timestamp". Once every timestamp must equal the
+  first, checking the first is checking all. The "timestamp on only ONE endpoint" case was vacuous in the red run
+  (refused for an unrelated reason) and is covered by the agreement mutation.
+
+## Blocker status
+1. ✅ closed in code, NOT deployed (step 1's own deploy).
+2. ✅ closed structurally (the guard); monitoring itself is still to build.
+3. OPEN: the liquidity-adapter re-check, built as a structural refusal in step 5.

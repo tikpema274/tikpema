@@ -185,26 +185,40 @@ section("6 — ⭐⭐ the pause gate's OWN call: Vault pause, ALL_AGENTS, AGENT_
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-section("7 — ⭐⭐ EXIT_AVAILABLE ⇒ MANDATE_EXIT_ARMED, enforced at LOAD");
+section("7 — ⭐⭐ EXIT_AVAILABLE ⇒ MANDATE_EXIT_ARMED ∧ MANDATE_MONITORING_LIVE, enforced at LOAD");
 {
   ok("the shipped constants satisfy it", !(LIM.EXIT_AVAILABLE === true && LIM.MANDATE_EXIT_ARMED !== true));
   // Load a COPY of limits.mjs (it has no imports) with the constants rewritten, from a temp dir outside the repo.
   const srcL = readFileSync("shared/vault-mandate/limits.mjs", "utf8");
-  const variant = async (avail, armed, from) => {
+  // monitoring defaults to TRUE in the variants that predate it, so each case isolates the guard it names.
+  const variant = async (avail, armed, from, monitoring = true) => {
     const s = srcL.replace(/export const EXIT_AVAILABLE = (true|false);/, `export const EXIT_AVAILABLE = ${avail};`)
       .replace(/export const MANDATE_EXIT_ARMED = (true|false);/, `export const MANDATE_EXIT_ARMED = ${armed};`)
-      .replace(/export const MANDATE_EXIT_ARMED_FROM = [^;]+;/, `export const MANDATE_EXIT_ARMED_FROM = ${from};`);
+      .replace(/export const MANDATE_EXIT_ARMED_FROM = [^;]+;/, `export const MANDATE_EXIT_ARMED_FROM = ${from};`)
+      .replace(/export const MANDATE_MONITORING_LIVE = (true|false);/, `export const MANDATE_MONITORING_LIVE = ${monitoring};`);
     const dir = mkdtempSync(join(tmpdir(), "limits-")); const p = join(dir, "limits.mjs"); writeFileSync(p, s);
     try { await import(pathToFileURL(p).href + `?v=${Math.random()}`); return "loaded"; } catch (e) { return `threw: ${String(e?.message ?? e)}`; }
   };
-  const rewrites = /export const MANDATE_EXIT_ARMED = (true|false);/.test(srcL) && /export const MANDATE_EXIT_ARMED_FROM = [^;]+;/.test(srcL);
-  ok("  (the variant loader can rewrite all three constants in the real source)", rewrites);
+  const rewrites = /export const MANDATE_EXIT_ARMED = (true|false);/.test(srcL) && /export const MANDATE_EXIT_ARMED_FROM = [^;]+;/.test(srcL)
+    && /export const MANDATE_MONITORING_LIVE = (true|false);/.test(srcL);
+  ok("  (the variant loader can rewrite all four constants in the real source)", rewrites);
   const bad = rewrites ? await variant(true, false, "null") : "no-rewrite";
   ok("⭐⭐ EXIT_AVAILABLE true + MANDATE_EXIT_ARMED false → the module REFUSES TO LOAD", /^threw:.*EXIT_AVAILABLE/.test(bad), bad);
   const armedNoFrom = rewrites ? await variant(false, true, "null") : "no-rewrite";
   ok("⭐ MANDATE_EXIT_ARMED true + no ARMED_FROM → refuses to load (flipped together)", /^threw:/.test(armedNoFrom), armedNoFrom);
-  ok("  (control: both true with an ARMED_FROM → loads)", rewrites && (await variant(true, true, String(T0))) === "loaded");
-  ok("  (control: the shipped off/off/null → loads)", rewrites && (await variant(false, false, "null")) === "loaded");
+  ok("  (control: both true with an ARMED_FROM, monitoring live → loads)", rewrites && (await variant(true, true, String(T0), true)) === "loaded");
+  ok("  (control: the shipped off/off/null/off → loads)", rewrites && (await variant(false, false, "null", false)) === "loaded");
+
+  // ═══ C14 (piece 5 blocker 2): EXIT_AVAILABLE also waits for MONITORING ═══
+  // A fully deposited mandate is never checked again until monitoring exists, so "if found: exit" would be mostly false.
+  ok("⭐ the shipped MANDATE_MONITORING_LIVE is false (monitoring is not built)", LIM.MANDATE_MONITORING_LIVE === false, String(LIM.MANDATE_MONITORING_LIVE));
+  const noMon = rewrites ? await variant(true, true, String(T0), false) : "no-rewrite";
+  ok("⭐⭐ EXIT_AVAILABLE true, exits ARMED, monitoring NOT live → the module REFUSES TO LOAD", /^threw:.*MONITORING/.test(noMon), noMon);
+  ok("  (control: exits armed, EXIT_AVAILABLE false, monitoring off → loads: arming without creation is allowed)",
+    rewrites && (await variant(false, true, String(T0), false)) === "loaded");
+  ok("  (control: monitoring live alone → loads: monitoring needs no exits)", rewrites && (await variant(false, false, "null", true)) === "loaded");
+  const monTyped = rewrites ? await variant(false, false, "null", "1") : "no-rewrite";
+  ok("  a non-boolean MANDATE_MONITORING_LIVE → refuses to load (only a literal true counts)", /^threw:.*MONITORING/.test(monTyped), monTyped);
 
   // The config seam: only the test suite may pass it (the deposit path's rule).
   const walk = (d) => { try { return readdirSync(d).flatMap((n) => { const p = `${d}/${n}`; return n === "node_modules" || n.startsWith(".") ? [] : statSync(p).isDirectory() ? walk(p) : [p]; }); } catch { return []; } };
