@@ -29866,3 +29866,77 @@ adapter-circle-wallets whose types carry `onBeforeAuthorize` with an Earn review
 8. **Our own use** would also need the app-kit upgrade (HELD): the installed earn-kit 1.6.1 refuses Arc mainnet.
 9. **Reach.** It gates the integrator's own signing only; Circle's listing (`exploreVaults`) is unchanged. It reaches
    only integrators who opt in.
+
+---
+
+# 🚀 DEPLOY 6abac4ec — piece 5 step 1 (anchor chain time) LIVE; the mandate still DISARMED (2026-09-28), verified read-only
+
+T deployed `73abcf3`; ledgers committed in `2286ecb`. Checked afterwards, read-only, 2026-09-28 ~20:55–21:06Z.
+
+## ⚠️ What this deploy carried: step 1 AND everything since the last deploy (47e642a → 73abcf3)
+"Step 1 on its own" held as a matter of RUNTIME change, not as a commit set. The served tree includes:
+- `dda505f` — **step 1, the one runtime change**: the anchor carries the block's chain timestamp (the live tick uses it).
+- `1f62d33` — step 1b: `MANDATE_MONITORING_LIVE` + its load guards. **`limits.mjs` is imported by the live deposit
+  path (`_vault-mandate-deposit.mjs:37`), so the new load guards run on EVERY tick.** With the shipped values (all
+  false) they must not throw: **a clean tick on this deploy is itself the proof they do not.**
+- `8f01a38` — the pure exit decision + **`_vault-mandate-exit.mjs`, now DEPLOYED BUT UNCALLED**: nothing at runtime
+  imports it, `exit-decision.mjs` or `exit-outcome.mjs` (grep over netlify/src/shared; the only hit is a comment in
+  `anchor.mjs`). It exports only `exitPauseCheck`, no handler.
+- `b10d956` — the pure exit classifier: no caller.
+- `507eced` + its revert `47f837c`: net zero. `64a452b` / `73abcf3`: PROGRESS only.
+
+## 1. What prod serves
+- Deploy **`6abac4ec846a15a879561a0c`**, `ready`, production. Created 19:50:04.462Z, **published 20:44:48.184Z**
+  (~55 min). `commit_ref` null (CLI deploy), so identity comes from the stamp.
+- Served stamp: **commit `73abcf366c71…`, tree `983f5c2cdc38…`**, stamped 19:50:07.130Z.
+- **gate:deployed ✅**: production serves this tree; control plane == data plane (both 6abac4ec); no orphaned production
+  deploys among the 25 newer. HEAD `2286ecb` (the ledger commit) ≠ stamped `73abcf3`; trees identical (ledgers are
+  outside the stamped surface). (The first run failed "the local build is stamped": the committed stamp is null by
+  design and had been cleared; `npm run stamp` → re-run ✅ → `stamp:clear`.)
+- `available_functions`: **153** (was 152). The one new function is **`_vault-mandate-exit`** (like the 68 other
+  `_`-prefixed helper modules, it is listed as a function; it has no handler). `function_schedules` still lists
+  `vault-mandate-tick` at `17 * * * *`.
+
+## 2. ddTree did NOT rotate; no window
+- The capture: **ddTree `d79683273abc5a6c…` == previous, `rotated:false`, `outcome:no-window`** at 20:45:05.533Z.
+- Independently: `git diff 47e642a 73abcf3` over the 26 DD-surface entries (4 dirs + 22 files from
+  `scripts/stamp-build.mjs`) = **0 files**. `GET /api/dd-analyze` → **405**.
+
+## 3. Ledgers + losses — ONE line each this time
+- **gate:ledger ✅**: dd-refusal-window-log **130** (last 20:45:05.533Z), deploy-loss-log **44** (last 20:48:37.329Z),
+  both committed in `2286ecb`, **ONE new line per ledger** (09-27 appended two each: `deploy:prod` launched twice).
+- **One deploy log** for this run: `deploy-logs/2026-09-28-2133.log` (09-27 had two, `-2313` and `-2314`).
+- **Loss sweep:** 17 losses, **0 new** (re-run `--gate-new --no-log`: "17 carried"; the ledger stayed at 44).
+
+## 4. The run lock's first real outing (8e60f16)
+The lock prints NOTHING on success; it speaks only when it refuses. So the log cannot show "acquired" / "released"
+lines. What it does show:
+- **Acquired at the start:** line 3 is the wrapper `run-lock.mjs --lock deploy -- npm run deploy:prod:chain`; line 7's
+  first link is `run-lock.mjs --assert-held --lock deploy`, which EXITS non-zero with "⛔ this must run under the
+  "deploy" lock" unless the token in its environment holds the live lock. The chain continued (gate:ledger ran next),
+  so the lock was held by this run.
+- **Reentrant reuse:** `capture:window` (line 15000), `gate:deployloss` (15113) and `stage:ledger` (15157) each ran
+  under `run-lock.mjs --lock deploy --reentrant`. The reentrant branch runs the command without acquiring when the env
+  token holds the lock; otherwise it falls through to `acquireLock`, which would have REFUSED (the outer run held it)
+  with a printed message. **No refusal appears anywhere in the log** and all three ran to completion. ⚠️ Limit: a
+  lock that had vanished mid-run would also let a nested call acquire silently; the assert at the start and the
+  absence of any refusal are the evidence, not a positive "reused" line.
+- **Released at the end:** the log's last write 20:48:37.917Z; `~/.cache/tikpema/` last modified **20:48:38.137Z**
+  (220 ms later, the lock file's removal) and is **empty now**.
+- Trigger worth noting, not acted on: a success-path line from the lock ("acquired" / "reused" / "released") would
+  make this check positive instead of inferential. T's call.
+
+## 5. ⏳ PENDING — THE POINT OF THIS DEPLOY: the anchor's chain timestamp on a live signed check
+- **Why not tonight:** the operator mandate `8379419c…` is DAILY and the tick observes once per window. The window key
+  `…/1790592761406-0` = the acknowledgement, 2026-09-28 **10:52:41.406Z**, window 0. Every tick until 2026-09-29
+  10:52:41Z reads `observed-this-window` and signs nothing (the 20:17Z `last` says exactly that). **The first signed,
+  anchored check under the new code is the 2026-09-29 11:17Z tick.**
+- **Baseline (before):** the 11:17Z receipt `w/0x74b7…24e5/8379419c-…/1790592761406-0` stores the check's full anchor as
+  **`{blockNumber: 64430336, blockHash: 0x161334d7…3267, endpoints: [rpc.testnet.arc.io, arc-testnet.drpc.org]}` — no
+  `timestamp` field.** The receipt stores `checked.anchor` whole, so the new field reaches it with no other change.
+- **To confirm on 2026-09-29 after 11:17Z:** the new window receipt's `anchor.timestamp` is present, integer seconds,
+  a few seconds before the tick; it names both endpoints (agreement is the condition for an anchor to exist at all:
+  a disagreement would read OUTAGE, `outage-skipped`); signing still ran (`timing.signingLatencyMs`, sample 2). Then
+  blocker 1 is closed LIVE and `decideExit` no longer refuses `anchor-time-unknown` on a check from this code.
+- **Also pending, tonight:** the 21:17Z tick on this deploy (`observed-this-window` expected). Its clean run is the
+  proof the new `limits.mjs` load guards do not throw at load.
