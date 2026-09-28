@@ -29297,3 +29297,148 @@ DD-surface window already scoped (the Arc mainnet registry entry carries the pin
 **When Morpho ships a new factory or adapter version, vaults using it fall to UNRECOGNISED until someone pins it**
 (after the one-off check on the new template). That is correct behaviour, not a defect, and it means **Morpho releases
 become refusals until we act.**
+
+---
+
+# 🧭 THE DD V2 WINDOW — BUILD ORDER (2026-09-28), decided, nothing built
+
+**The organising constraint (T):** EVERY piece is built, tested and reviewed BEFORE the deploy. One window, one schema
+bump, one version change for paying buyers. A second window to fix something shipped half-built is the thing to avoid.
+So the order is the order pieces land in the TREE; the deploy is a single step at the end.
+
+## ⛔ CORRECTION: block-hash binding does NOT change the canon, only the signed CONTENT
+The signature covers the whole report body except the `attestation` block (`shared/onchain-analyze/attest.mjs`,
+`canon/1`). Adding `subject.blockHash` to the body signs it under `canon/1` unchanged; the verifier gains a check of
+that hash against the chain. Claude's earlier line ("it changes the signed canon") was wrong, and T's decision text
+repeated it. Consequence: the verifier's "unsupported-canon" gate is untouched, and **the three reports already sold
+stay valid exactly as they are.**
+
+## ⭐ DECISIONS (T, 2026-09-28)
+1. **The paid endpoint does NOT start accepting Arc mainnet subjects in this window.** Registering the chain is not the
+   same as selling reports on it. Open that deliberately once V2 has run on real vaults. (`dd-analyze` keeps refusing
+   every chain except Arc testnet: "the frozen service".)
+2. **Draft deploy: YES, conditional.** Claude must first check, and report before step 7, that a draft cannot touch the
+   canary health store or open a refusal window.
+3. **Tagged releases: Claude's call from Morpho's own current tags:**
+   - **morpho-blue: `v1.0.0`** (`55d2d993`, released 2023-12-23, "Cantina Competition Fixes"). The only release, and the
+     source every immutable Morpho Blue singleton is deployed from.
+   - **vault-v2: `2026-08-13` first** (`2b139002`, the newest dated tag), then older in order (`2026-08-12`, `2026-07-29`,
+     `2026-07-08`, `2025-12-04`, …). **The FIRST tag that reproduces the deployed bytecode exactly is the reference.**
+     - Why this order: Arc mainnet's Morpho vaults appeared in the API after 2026-09-17, after every tag, so the newest
+       is the likeliest.
+     - Every tag back to at least `2025-12-04` contains `MorphoMarketV1AdapterV2(.sol|Factory.sol)` and
+       `MorphoVaultV1Adapter(.sol|Factory.sol)`, so the file list does not discriminate; only a bytecode match does.
+   - **The match decides, not the choice.** A contract that matches no tagged build gets **no pin**: it refuses. We do
+     not pin what we could not reproduce.
+
+## The one-off bytecode checks
+| Contract | Kind | Check |
+|---|---|---|
+| Morpho Blue `0x34CD04070dD72b14E241112F6d83812Df5Af7fCD` | immutable singleton | exact runtime bytecode vs `v1.0.0` |
+| VaultV2 factory (`0x3b0e…9f12`; full address to fetch from Morpho docs / API) | singleton | exact bytecode → pin code hash |
+| `MorphoMarketV1AdapterV2` factory (address to fetch) | singleton | exact bytecode → pin |
+| `MorphoVaultV1Adapter` factory (vault-wrapping; address to fetch) | singleton | exact bytecode → pin |
+| Galaxy vault `0x8E35…12AF` + adapter `0xeE00…7c2C` | template samples (immutables) | runtime bytecode with immutables MASKED (via `immutableReferences`) vs the template; disassembly scan for `SELFDESTRUCT` / delegatecall to a changeable target |
+
+- **Measured 2026-09-28:**
+  - **Explorer:** `explorer.arc.io` is Blockscout. Its front page loads, but **its API returns 403 to non-browser
+    clients** (`/api/v2/smart-contracts/…` and `/api?module=contract…`), so verified-source status cannot be read by
+    script.
+  - **Sourcify:** lists "Arc Mainnet" as supported, but **none of the three is verified there**: Morpho Blue, Galaxy's
+    adapter and Galaxy all return `match: null`.
+  - **`forge` is installed locally**, so the comparison against a local build is doable read-only.
+- **Claude, read-only:** fetch the factory addresses; `eth_getCode` on both endpoints; `forge build` morpho-blue and
+  vault-v2 at the tags above with their `foundry.toml` settings; compare; mask immutables; disassemble.
+- **⭐ T, BY HAND (two things):**
+  1. **Open each exit-path contract on `explorer.arc.io` in a browser and record whether verified source is shown**
+     (the API refuses scripts). The contracts are those in the table above.
+  2. **Approve the pins.**
+
+## Build order: in the tree, deploy last
+Each step lists: offline tests · Arc mainnet read-only proof BEFORE the deploy · after the deploy.
+
+**0. Bytecode checks + pins (data).** The output (addresses, code hashes, tag, compiler settings) goes into PROGRESS.
+- Before deploy: the table above.
+
+**1. Arc mainnet entry in the chain registry** (`shared/dd/chains.mjs`): chain ID, RPC endpoints, explorer, the pins.
+- Offline: registry-shape tests. **`test:literals` will flag the new chain ID and RPC host**: the registry is an allowed
+  "source" file, but the allowlist changes in the same step.
+- Before deploy: `eth_chainId` on both endpoints; every pinned hash matches on both; `isVaultV2(Galaxy)` true.
+- Not in this window: the paid endpoint accepting mainnet subjects (decision 1).
+
+**2. The V2 profile + the guard (factory attestation).**
+- Offline, mock-chain fixtures:
+  - an attested vault → recognised; an unattested vault → unrecognised;
+  - an unrecognised liquidity adapter → no redeemable value;
+  - an unrecognised other adapter → a degraded part + the "holds X%" finding;
+  - a mismatched Morpho Blue hash → no exit fact;
+  - a liquidity adapter changed between two checks → detected.
+- Before deploy: `analyze` on real mainnet vaults: Galaxy (liquidity binds), a 100%-idle vault (Gauntlet / Steakhouse
+  Prime), a vault-wrapping vault, and xylo as the "not V2" negative.
+
+**3. The V2 power model** (timelock · abdicated · current value; new groups; disclosure text for each).
+- Offline: replace the synthetic `MORPHO_GOV` fixture with the MEASURED V2 selector set; fixtures for 0 / 7 d /
+  abdicated.
+- Before deploy: Galaxy's live values vs the 2026-09-26 measurements (fee setters 0, `addAdapter` 7 d, exit gates
+  abdicated). A difference is a finding.
+- The mandate is unaffected until the allowlist is widened (separate work).
+
+**4. The exit-liquidity fact.**
+- Offline, fixtures:
+  - liquidity binds / position binds / idle only;
+  - the accrual invariance (both totals move, liquidity does not);
+  - recursion to depth 2; an unreadable part.
+- Before deploy, at the same block:
+  - Galaxy = Morpho's `liquidityUsd` = stored supplied − borrowed;
+  - Keyrock shows the same pool;
+  - the three suppliers' shares match the market page;
+  - an idle vault reads 100%.
+
+**5. Block-hash binding** (`subject.blockHash` in the body; the verifier checks it on chain).
+- Offline:
+  - a correct hash → valid, hash-bound;
+  - a wrong hash → invalid;
+  - **the three purchased reports, from their stored FROZEN bytes, still verify** (not hash-bound).
+- Before deploy: read those three frozen reports from Blobs (`dd-analyze-pending`) and verify them with the NEW verifier
+  against the real chain (ERC-1271, read-only). New signed reports need the production DD key, so they are proven only
+  after the deploy.
+
+**6. Schema `onchain-analyze/0.4.0` + descriptor + OpenAPI version + docs + canary fixtures.**
+- **`dd-openapi.mjs` hard-codes `version: "0.3.0"`** and is off the DD surface: it changes in the same deploy. Add a
+  guard that the served OpenAPI version equals `SCHEMA_VERSION`.
+- The descriptor is guarded to match `baseReport`'s keys, so it follows automatically.
+- `docs/dd-attestation-canon1.md` describes the hash field.
+- **Canary fixtures for V2**: without one, "healthy" says nothing about the new detector.
+- Offline: `test:dd` (code identity, descriptor guard), the canary fixture suite, `test:all`.
+
+**7. Review, then the draft deploy** (conditional on the isolation check, reported before this step). T reviews the
+diff; `test:all`; then `analyze` on Galaxy against mainnet from the draft's own URL.
+Known draft traps: no schedules fire, no build step runs, `COMMIT_REF` / `BUILD_ID` absent.
+
+**8. The single production deploy.**
+- **Expected:** a ddTree rotation and a refusal window, measured with `capture:window` (the last one was 464 s).
+- **The operator mandate** is covered by /3: its check during the window is `outage-skipped`, with no latch.
+- **After the deploy:**
+  - `gate:deployed` and `gate:forgery`;
+  - `gate:spec` (the served OpenAPI says 0.4.0);
+  - the first canary tick green, including the V2 fixture;
+  - a live, free in-app V2 report for Galaxy;
+  - one paid purchase, if T wants it (T runs it).
+- **If something fails:**
+  - **Health does not return to green** (deposits refused): republish `6ab98b57` at once. That is a second rotation back
+    to the known-good tree, a second window, accepted as the price.
+  - **Health is green but a V2 fact is wrong:** there is no switch to disable V2 without a deploy, so the choice is
+    republishing the old deploy or accepting a V2 fix in a second window. **That is why step 7 and every pre-deploy
+    proof above must pass first.**
+
+## What 0.3.0 → 0.4.0 means
+- **The three existing signed reports:** unchanged. They are frozen bytes, and `retrieve` serves exactly those bytes;
+  nothing is re-signed. The canon does not change, so they keep verifying: proven on the real bytes before the deploy
+  (step 5) and re-checked by `gate:forgery` after. Their `blockHashBound:false` is true and stays.
+- **What buyers receive from 0.4.0 on:**
+  - covered subjects (xylo-style): ADDITIVE, `subject.blockHash` plus an exit-liquidity section. For profiles without an
+    exit reading, that section says "not checked: not built for this profile", never absent;
+  - V2 subjects: a report where there used to be a refusal. No existing buyer holds a V2 report.
+- **The published offer** (network + asset + price) does not change. The OpenAPI version and the report shape do.
+- **`gate:spec`** must see 0.4.0 served and the new fields documented after the deploy, plus the new
+  OpenAPI-version = schema-version guard.
