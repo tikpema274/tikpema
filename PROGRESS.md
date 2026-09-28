@@ -29172,3 +29172,63 @@ what an exit acts on. Holder-specific facts stay out of DD.
 - **Cost to measure:** ~6–10 extra reads per endpoint on the signing path (the first latency sample was 1165 ms).
 - **Open before build:** whether the free-liquidity figure needs Morpho's expected-balance (accrued-interest) view, or
   whether the stored, pre-accrual value is what a redeem meets. To be answered from source first.
+
+---
+
+# ✅ EXIT LIQUIDITY — THE ACCRUED-INTEREST QUESTION, ANSWERED FROM SOURCE AND CHAIN (2026-09-28), nothing built
+
+The open question from "DD + MORPHO V2 + EXIT LIQUIDITY": does Morpho's free-liquidity figure need the expected-balance
+(accrued-interest) view, or is the stored, pre-accrual value what a redeem actually faces? It decides whether the
+number we sign is the one a redeem meets.
+
+## Answer: pre-accrual free liquidity IS what a redeem faces. Accrual does not move it.
+**Source: Morpho Blue `main`, `src/Morpho.sol`.**
+- `_accrueInterest` (483–509) adds the SAME `interest.toUint128()` to `totalBorrowAssets` (490) and to
+  `totalSupplyAssets` (491). The protocol fee only mints supply SHARES to the fee recipient (500–501); no assets.
+  **So supplied − borrowed is invariant under accrual.**
+- `withdraw` accrues first (214), subtracts the assets, then
+  `require(totalBorrowAssets <= totalSupplyAssets, INSUFFICIENT_LIQUIDITY)` (223). The most it can release is
+  supplied − borrowed, the same before and after accrual.
+
+**The V2 path to it: vault-v2 `main`.**
+1. `VaultV2.exit()` (811–829): idle cash, then `deallocateInternal(liquidityAdapter, …)` for the rest (610–629).
+2. `MorphoMarketV1AdapterV2.deallocate` (207–232): `Morpho.withdraw(marketParams, assets, 0, …)`.
+3. So a redeem meets exactly two limits: **market free liquidity** (accrual-invariant) and **the adapter's own
+   supply position** (accrual INCREASES it).
+
+**On chain (Arc mainnet, block 23200437, 12:45:19Z, read-only).** Morpho Blue `0x34CD…7fCD`, market
+`0xc2db…815d`:
+- **Stored:** supplied 179,813,196,372,046 · borrowed 175,586,946,257,645 → **free liquidity 4,226,250,114,401**.
+- `lastUpdate` 12:25:38Z → **1181 s of accrual pending**; market fee 0.
+- **Morpho API** (accrued view): supplied 179,813,202,187,550 · borrowed 175,586,952,073,149, **both higher by exactly
+  5,815,504** (≈ 5.82 USDC of pending interest). Its `liquidityAssets` is **4,226,250,114,401, identical to the stored
+  figure**. The invariance is measured, not only derived.
+- **Galaxy's adapter `0xeE00…7c2C`:** stored supply position 79,805,076.39 USDC (far above the liquidity: liquidity
+  binds for Galaxy).
+
+## Consequences for the signed number
+- **Free liquidity: sign the stored value at the block.** It is exact, it is what the redeem meets, and it is
+  re-checkable with two reads (`market(id)` at the block). No expected-balance view, no interest-rate-model call.
+- **The adapter's position:** read the adapter's public view `expectedSupplyAssets(marketId)` (line 251), not the
+  stored shares converted to assets. The stored figure understates by the pending interest. That matters only when
+  the position is the binding limit (a nearly fully liquid market).
+- **The percentage's denominator:** name the source (`totalAssets()` or `accrueInterestView()`, VaultV2 260 / 670);
+  pick one and state it.
+- **What accrual does not cover:** other transactions landing before a redeem in the next block. That is the
+  point-in-time limit, carried by the value's own block timestamp.
+
+## ⚠️ OPEN (not settled): is the DEPLOYED adapter the source that was read?
+- **What was done:** the adapter source was read from **vault-v2 `main`** (`MorphoMarketV1AdapterV2.sol`). The deployed
+  adapter `0xeE0080203a76690BcA40670dfd0cD1C30FAB7c2C` **answers like it**: `adaptiveCurveIrm()` →
+  `0xf026…3f20`, `morpho()` → the Morpho Blue above, `parentVault()` → Galaxy. The Morpho API's "MorphoMarketV1" is a
+  type label, not a version.
+- **What was NOT done:** proving the **deployed bytecode matches `main`**. Matching getters show the interface, not the
+  `deallocate` body.
+- **Why it matters:** the whole exit-liquidity fact rests on the adapter's `deallocate` path being the one read (a
+  `withdraw` of `assets` against the market, no extra limit). A different deployed version could add or change a
+  limit, and the signed number would then not be the one a redeem meets. The same applies to `VaultV2.exit()` and
+  Morpho Blue itself (Morpho Blue is immutable and widely deployed, but on Arc it is equally unproven here).
+- **What closes it:** an explorer source-verification check for the deployed adapter, VaultV2 and Morpho Blue on Arc;
+  or a **runtime-bytecode comparison against a local build** of the tagged source (compiler settings and immutables
+  accounted for).
+- **Where it belongs:** with the **V2 profile work**, before the exit-liquidity fact is built. Not now.
