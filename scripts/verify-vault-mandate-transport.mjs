@@ -26,9 +26,9 @@ import { quorumClient } from "../shared/onchain-analyze/quorum.mjs";
 import { DOMAIN } from "../shared/onchain-analyze/attest.mjs";
 import { EIP1967_IMPL_SLOT } from "../shared/onchain-facts/index.mjs";
 import { SUBJ, OWNER, ZERO_WORD, word, codeWith, mkc } from "./dd/_mock-chain.mjs";
-import { pinToAnchor, resolveAnchor } from "../shared/vault-mandate/anchor.mjs";
+import { pinToAnchor, resolveAnchor, isChainSeconds } from "../shared/vault-mandate/anchor.mjs";
 import { readStateAtAnchor } from "../shared/vault-mandate/state-reads.mjs";
-import { signedCheckReport, runMandateCheck, readBaseline, redemptionSignalForVault } from "../netlify/functions/_vault-mandate-check.mjs";
+import { signedCheckReport, runMandateCheck, readBaseline, redemptionSignalForVault, anchorBlockFacts } from "../netlify/functions/_vault-mandate-check.mjs";
 // xylo-usdc is a xylo-profile vault, so its maxRedeem means something (shared/vault-redemption.mjs).
 const XYLO_SIG = redemptionSignalForVault("xylo-usdc");
 import { analyze } from "../shared/onchain-analyze/index.mjs";
@@ -124,20 +124,42 @@ section("1 — ⭐⭐ the pin wrapper, on the REAL multi-endpoint client");
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-section("2 — the anchor: one block number, the SAME hash at both endpoints");
+section("2 — the anchor: one block number, the SAME hash AND chain time at both endpoints");
 {
-  const H = "0x" + "11".repeat(32);
-  const rdr = (endpoint, head, hashes = {}, { throwHead = false } = {}) => ({ endpoint,
+  const H = "0x" + "11".repeat(32), TS = 1_790_000_000;
+  // A reader's block(n) → {hash, timestamp} (seconds), from ONE block read per endpoint.
+  const rdr = (endpoint, head, blocks = {}, { throwHead = false } = {}) => ({ endpoint,
     blockNumber: async () => { if (throwHead) throw new Error("down"); return head; },
-    blockHash: async (n) => (n in hashes ? hashes[n] : null) });
-  const a1 = await attemptAsync(() => resolveAnchor([rdr(A, 100, { 98: H }), rdr(B, 99, { 98: H })]));
+    block: async (n) => (n in blocks ? blocks[n] : null) });
+  // Rest args, not a default: a default parameter turns an explicit `undefined` back into TS (the "missing" cases).
+  const at = (hash, ...t) => ({ 98: { hash, timestamp: t.length ? t[0] : TS } });
+  const a1 = await attemptAsync(() => resolveAnchor([rdr(A, 100, at(H)), rdr(B, 99, at(H))]));
   ok("anchor = one below the LOWER head, when both endpoints return the same hash", a1?.ok === true && a1?.anchor?.blockNumber === 98 && a1?.anchor?.blockHash === H, show(a1));
   ok("  …and it names both endpoints", a1?.anchor?.endpoints?.length === 2);
-  ok("⭐ the hashes DIFFER → refused", (await attemptAsync(() => resolveAnchor([rdr(A, 100, { 98: H }), rdr(B, 99, { 98: "0x" + "22".repeat(32) })])))?.ok === false);
-  ok("one endpoint does not have the block → refused", (await attemptAsync(() => resolveAnchor([rdr(A, 100, { 98: H }), rdr(B, 99, {})])))?.ok === false);
-  ok("one endpoint is down → refused", (await attemptAsync(() => resolveAnchor([rdr(A, 100, { 98: H }), rdr(B, 99, { 98: H }, { throwHead: true })])))?.ok === false);
-  ok("only ONE endpoint configured → refused", (await attemptAsync(() => resolveAnchor([rdr(A, 100, { 98: H })])))?.ok === false);
-  ok("the same endpoint twice → refused", (await attemptAsync(() => resolveAnchor([rdr(A, 100, { 98: H }), rdr(A, 100, { 98: H })])))?.ok === false);
+  ok("⭐⭐ …and it carries the block's CHAIN timestamp (seconds), agreed by both endpoints", a1?.anchor?.timestamp === TS, show(a1?.anchor));
+  ok("⭐ the hashes DIFFER → refused", (await attemptAsync(() => resolveAnchor([rdr(A, 100, at(H)), rdr(B, 99, at("0x" + "22".repeat(32)))])))?.ok === false);
+  ok("one endpoint does not have the block → refused", (await attemptAsync(() => resolveAnchor([rdr(A, 100, at(H)), rdr(B, 99, {})])))?.ok === false);
+  ok("one endpoint is down → refused", (await attemptAsync(() => resolveAnchor([rdr(A, 100, at(H)), rdr(B, 99, at(H), { throwHead: true })])))?.ok === false);
+  ok("only ONE endpoint configured → refused", (await attemptAsync(() => resolveAnchor([rdr(A, 100, at(H))])))?.ok === false);
+  ok("the same endpoint twice → refused", (await attemptAsync(() => resolveAnchor([rdr(A, 100, at(H)), rdr(A, 100, at(H))])))?.ok === false);
+
+  // ═══ the chain time (piece 5 blocker 1): exit arming compares it, so it must be agreed, never guessed ═══
+  const td = await attemptAsync(() => resolveAnchor([rdr(A, 100, at(H, TS)), rdr(B, 99, at(H, TS + 1))]));
+  ok("⭐⭐ same hash, DIFFERENT timestamps → refused (one endpoint is serving something else)", td?.ok === false && /timestamp/i.test(td?.why ?? ""), show(td));
+  for (const [label, bad] of [["missing", undefined], ["null", null], ["in MILLISECONDS (a Date.now() in disguise)", TS * 1000],
+    ["a bigint (the reader must normalise)", BigInt(TS)], ["a string", String(TS)], ["fractional", TS + 0.5], ["zero", 0]]) {
+    const r = await attemptAsync(() => resolveAnchor([rdr(A, 100, at(H, bad)), rdr(B, 99, at(H, bad))]));
+    ok(`a timestamp ${label} on BOTH endpoints → refused (never an anchor without chain time)`, r?.ok === false && /timestamp/i.test(r?.why ?? ""), show(r));
+  }
+  const one = await attemptAsync(() => resolveAnchor([rdr(A, 100, at(H, TS)), rdr(B, 99, at(H, undefined))]));
+  ok("a timestamp on only ONE endpoint → refused (never taken from the one that answered)", one?.ok === false, show(one));
+  ok("  (the shared rule: seconds accepted, milliseconds refused)", isChainSeconds(TS) && !isChainSeconds(TS * 1000) && !isChainSeconds(BigInt(TS)));
+
+  // The production reader's conversion (viem returns a bigint timestamp): pure, so it is tested here without RPC.
+  const f = anchorBlockFacts({ hash: H, timestamp: BigInt(TS), number: 98n });
+  ok("⭐ the production reader turns viem's bigint timestamp into integer seconds", f?.hash === H && f?.timestamp === TS, show(f));
+  ok("  …a missing block → null (never a block with guessed fields)", anchorBlockFacts(null) === null && anchorBlockFacts(undefined) === null);
+  ok("  …a block without a timestamp → timestamp null (resolveAnchor then refuses)", anchorBlockFacts({ hash: H })?.timestamp === null);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
@@ -248,7 +270,8 @@ function stubReader(endpoint, over = {}) {
 // ═════════════════════════════════════════════════════════════════════════════════════════════
 section("5 — ⭐ one check, end to end");
 const HH = "0x" + "11".repeat(32);
-const anchorReaders = () => [A, B].map((endpoint) => ({ endpoint, blockNumber: async () => 1000, blockHash: async () => HH }));
+const HTS = 1_790_000_000;
+const anchorReaders = () => [A, B].map((endpoint) => ({ endpoint, blockNumber: async () => 1000, block: async () => ({ hash: HH, timestamp: HTS }) }));
 // The chain id is the mock chain's own, read from a report, never a literal here (test:literals).
 const MOCK_CHAIN_ID = (await analyze(SUBJ, { client: mkc(A, HANDLERS) })).subject.chainId;
 const RECORD = { vault: { key: "xylo-usdc", address: SUBJ, chainId: MOCK_CHAIN_ID, label: "Xylo" }, walletAddress: HOLDER,
@@ -266,6 +289,8 @@ const deps5 = (over = {}) => ({ ...deps3(), anchorReaders: anchorReaders(), stat
   ok("a clean check: anchored, signed, both endpoints read", c?.anchor?.blockNumber === 999 && c?.report?.attestation?.status === "signed" && c?.readings?.length === 2, show(c?.check?.outage ?? c?.threw ?? c?.anchor));
   ok("  the report is at the anchor EXACTLY", Number.isInteger(c?.report?.subject?.blockNumber) && c.report.subject.blockNumber === c?.anchor?.blockNumber);
   ok("  one signing call", c?.cost?.signCalls === 1, show(c?.cost));
+  ok("⭐ the check's anchor carries the agreed CHAIN timestamp (what exit arming compares), in the check too",
+    c?.anchor?.timestamp === HTS && c?.check?.anchor?.timestamp === HTS, show(c?.anchor));
   const d = decideMandateAction({ rules: RECORD.rules, check: c?.check ?? {} });
   ok("⭐ …and the decider allows the deposit", d.action === ACTION.DEPOSIT, `${d.action} ${JSON.stringify(d.flags)} ${JSON.stringify(d.unestablished)}`.slice(0, 200));
 

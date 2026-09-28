@@ -592,7 +592,7 @@ function verifyClient() {
 function stubReader(endpoint) {
   const vals = { withdrawFee: 10n, depositFee: 0n, decimals: 6n, balanceOf: 0n, maxRedeem: 0n,
     convertToAssets: 1000000n, previewRedeem: 999000n, totalAssets: 200n, assetBalanceOf: 300n, MAX_FEE: 2000n };
-  return { endpoint, blockNumber: async () => 1000, blockHash: async () => ANCHOR.blockHash,
+  return { endpoint, blockNumber: async () => 1000, block: async () => ({ hash: ANCHOR.blockHash, timestamp: 1_790_000_000 }),
     async read({ address, fn }) { return vals[fn === "balanceOf" && String(address).toLowerCase() === ASSET ? "assetBalanceOf" : fn]; },
     async simulateRedeem() { return { outcome: "returned", assetsRaw: "0" }; } };
 }

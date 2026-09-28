@@ -29663,6 +29663,86 @@ says the executor misbehaved. **How it must surface:**
 
 ---
 
+# ✅ VAULT MANDATE — PIECE 5: EXECUTOR BUILD ORDER DECIDED + STEP 1 (ANCHOR CHAIN TIME) BUILT (2026-09-28), NOT deployed
+
+## ⭐ THE EXECUTOR BUILD ORDER (T, 2026-09-28)
+1. **Anchor chain time (blocker 1).** Own change, own deploy: the only edit to the RUNNING tick, and every later step
+   needs it (until it lands `decideExit` stops at gate 3, so a disarmed executor would only ever say
+   `anchor-time-unknown` and prove nothing past it). ✅ BUILT (below).
+   1b. **`MANDATE_MONITORING_LIVE` + load guard (blocker 2 / C14).** Its own commit (next entry).
+2. ⚠️ MONEY — **factor `submitRedeem` out of `vaultWithdraw`** (`onSubmitted` + a deterministic `idempotencyKey`).
+   **Its OWN deploy, then T runs one live manual reclaim** (T: it touches a money path users can reach today). The
+   repeated-idempotency-key measurement runs WITH this step (T: that commit introduces the key; recovery is built on
+   its answer).
+3. `min(tracked, live)` pure + the mandate-machinery halt latch (the `BEYOND_MANDATE_SHARES` incident path).
+4. Exit intent + state machine (create-only `x/<owner>/<id>`, `exiting` before the intent; an open deposit intent blocks).
+5. Fresh execution reads, with blocker 3 as a STRUCTURAL refusal: a vault whose exit path goes through an adapter, with
+   no adapter recorded by the finding check, never submits (xylo: vacuous; V2: refuses until the DD V2 window records
+   one, then compares).
+6. ⚠️ MONEY, shipped disarmed: executor + recovery in a background function. ⚠️ A background function is PUBLIC at
+   `/.netlify/functions/<name>-background`: it authenticates its trigger and loads the finding from the store by id,
+   never from the payload.
+Deploys: (1+1b) → (2, then T's reclaim check) → (3–6 together, disarmed).
+
+## ⭐ DECISIONS (T, 2026-09-28)
+- **Step 2 is its own deploy**, with T's manual reclaim check after.
+- **Operator-only EXIT arming: YES**, mirroring `MANDATE_DEPOSIT_ARMED_OPERATOR` (its own constant, its own ARMED_FROM,
+  refused at the write for a non-operator origin). Not built.
+- **The live-proof rule: `exit-fee-above` with `limitBps: 0`.** xylo's ~10 bps trips it deterministically, and it is a
+  real finding, not a contrived one.
+- **The repeated-idempotency-key measurement runs WITH step 2.** T runs it. Payload: USDC `approve(<the wallet's own
+  address>, 0)` from a testnet agent SCA that is NOT the operator mandate's wallet (keeps its receipts clean); sponsored,
+  moves no funds. Steps: (0, Claude, read-only) Circle's documented `idempotencyKey` format + replay behaviour; (1) same
+  key + same payload twice: same tx id, a 409, or a new tx?; (2) same key + a DIFFERENT payload (`approve(self, 1)`);
+  (3) a UUIDv5-shaped key (what a key derived from the intent key looks like): accepted?; (4) ~30 s later, fetch every
+  returned id and count the approves that landed from the SCA in the window: exactly ONE per key?; (5) step 1 again
+  after the first tx is COMPLETE (recovery reuses the key after completion too). Answers 1, 2, 5 decide whether
+  recovery may re-send with the key or must only look the tx up.
+
+## STEP 1 — THE ANCHOR CARRIES THE BLOCK'S CHAIN TIME (blocker 1 closed in code)
+- `resolveAnchor` (`shared/vault-mandate/anchor.mjs`) returns `{blockNumber, blockHash, timestamp, endpoints}`. Every
+  endpoint must return the same hash AND the same timestamp. A disagreement, a missing value, or anything that is not
+  integer SECONDS is **no anchor**: never a timestamp taken from whichever endpoint answered, never a clock in its place.
+- **No extra RPC call.** The reader interface is now `block(n) → {hash, timestamp}`; production keeps the timestamp from
+  the `getBlock` it already made (it used to keep only `.hash`). `anchorBlockFacts` (pure, `_vault-mandate-check.mjs`)
+  turns viem's bigint into integer seconds; a missing block → null, a missing timestamp → null (then refused).
+- **One rule, one place:** `isChainSeconds` is exported from `anchor.mjs`; `exit-decision.mjs` imports it (its private
+  copy is gone).
+- It flows through: `runMandateCheck`'s `anchor` and `check.anchor` carry it; the deposit receipt gains the field. The
+  deposit intent (`anchor: {blockNumber, blockHash}`) and the baseline/fingerprint copy named fields only: unchanged.
+- **New refusal on the LIVE check:** a timestamp disagreement is an OUTAGE for deposit checks too. Since /3 an outage
+  skips and retries, never latches.
+- **Off the DD surface** (checked against `DD_SURFACE_DIRS/FILES`): ddTree does not rotate.
+- **📏 LIVE, read-only, 3/3** against `rpc.testnet.arc.io` + `arc-testnet.drpc.org`: both endpoints agreed on the
+  timestamp every time; seconds; 2 s behind the wall clock (e.g. block 64484161, ts 1790621671).
+
+- **T deploys step 1 ON ITS OWN**, as agreed: it is the only change in this piece to the running tick.
+
+## Red first, mutations (step 1)
+- **Red:** transport **24/70** failing, measured with non-functional stub exports so the red was per case, not one
+  module-load error; deposit **12** failing (its reader stub had the old `blockHash(n)` shape). Green: transport
+  **70/0**, deposit **232/0**, decision 49/0 (unchanged), classifier 47/0; test:all **162/162** (run on the combined
+  tree, which is this commit + the next).
+- ⚠️ **A test bug, caught on the way.** The helper was `at(hash, timestamp = TS)`. A default parameter applies when the
+  argument is `undefined`, so `at(H, undefined)` handed the code a VALID timestamp: the "timestamp missing on both
+  endpoints" and "timestamp on only ONE endpoint" cases were not testing a missing timestamp at all. They showed up as
+  the only two failures against the finished code (it correctly returned an anchor for what was, in fact, a good
+  timestamp). Fixed with rest args (`at(hash, ...t)` → `t.length ? t[0] : TS`), so an explicit `undefined` stays
+  undefined; both cases then went green for the right reason. Lesson: a default parameter cannot express "absent".
+- **8 mutations, 7 red:** timestamp agreement dropped · any finite number accepted · timestamp not returned · a
+  wall-clock fallback for a missing time · the reader's `Number()` without the bigint check · a missing block → empty
+  facts · a bigint passed through.
+- **The survivor is equivalent:** "validate only the first endpoint's timestamp". Once every timestamp must equal the
+  first, checking the first is checking all. The one-endpoint case was vacuous in the red run (refused for an unrelated
+  reason) and is covered by the agreement mutation.
+
+## Blocker status
+1. ✅ closed in code, NOT deployed (its own deploy, T).
+2. OPEN at this commit: closed structurally by the next.
+3. OPEN: the liquidity-adapter re-check, built as a structural refusal in step 5.
+
+---
+
 # 📎 EARN KIT (Circle / Arc App Kits) — LAUNCH READ (2026-09-28), read-only, NOTHING recommended
 
 Sources, all read in full: arc.io/blog/embed-usdc-yield-into-your-product (the page shows **September 30, 2026**; read
