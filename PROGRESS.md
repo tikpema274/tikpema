@@ -28730,17 +28730,45 @@ T deployed `47e642a`. It carries five commits: the clock fix `16ff7f4`, the maxR
   22:26:37.019Z), both committed in `d6f3d79`.
 - **Loss sweep:** 17 losses, **0 new** (re-run `--gate-new --no-log`: "17 carried"; the ledger stayed at 43 lines).
   Limbo 40, preserved 23; 46 ambiguous cancels not counted.
-- ⚠️ **ANOMALY, cause not established: this deploy appended TWICE to each ledger**; the two previous deploys
-  (`9d98c64`, `51fee25`) appended once.
-  - `dd-refusal-window-log`: the two new lines are **byte-identical**, including `at` = the capture script's own
-    start time to the millisecond. Two separate runs cannot produce that, and the script has ONE `appendFileSync`
-    (`capture-refusal-window.mjs:207`). So the line was duplicated outside that script.
-  - `deploy-loss-log`: two DIFFERENT observations 174 ms apart (22:26:36.845Z, 22:26:37.019Z), identical counts.
-    The script has one append site too (`deploy-loss-sweep.mjs:134`).
-  - `deploy:prod` calls `capture:window` and `gate:deployloss` once each. No count changed, and gate:ledger reads
-    both files as up to date, but a duplicated line would be counted twice by anything that counts entries. The
-    2026-09-21 commit `7747f18` already records "the two ledgers have drifted out of step five times and gate:ledger
-    cannot see it". **Not fixed; for T.**
+- ⚠️ **ANOMALY: this deploy appended TWICE to each ledger** (the two previous deploys, `9d98c64` and `51fee25`,
+  appended once). **CAUSE ESTABLISHED 2026-09-28: `deploy:prod` RAN TWICE, as two concurrent chains, and each wrote
+  once.** The duplicate lines are KEPT: each is a real observation by a real run.
+  - ⛔ **CORRECTION.** This note first said the byte-identical refusal-window lines ("`at` = the script's own start
+    time to the millisecond") meant "two separate runs cannot produce that … so the line was duplicated outside that
+    script". **That inference was wrong.** Two processes can compute the same millisecond `started`. It was not a
+    retried write, a shell redirect, or a copy.
+  - **Two logs, two chains:** `deploy-logs/2026-09-27-2313.log` (created 23:13:59.44 +02:00) and
+    `…-2314.log` (23:14:18.58), **launched 19.1 s apart**. Each is a complete `deploy:prod` run: gate:ledger,
+    test:all, build, `netlify deploy --prod`.
+  - **Two production deploys, both published:**
+
+    | Chain | Deploy | Created | Published |
+    |---|---|---|---|
+    | 2313 | `6ab98b57bb2c686014e79b46` (serving) | 21:32:07.428Z | 22:25:28.953Z |
+    | 2314 | `6ab98b57b824cd3bf2ed64d8` | 21:32:07.412Z | 22:25:27.641Z |
+
+    `b824` was live for ~1.3 s before `bb2c` superseded it. Both built the same source (the same ddTree in both logs);
+    the second chain's gate:deployed verified `bb2c`, the other chain's deploy.
+  - **Each chain ran its own tail:** both logs show their own capture probe (`[22:25:46]` / `[22:25:47]`), their own
+    `NO WINDOW`, their own loss gate and `stage-ledger`. Each script has exactly one unconditional append
+    (`capture-refusal-window.mjs:207`, `deploy-loss-sweep.mjs:134`), so two processes → two lines per ledger. The
+    two loss lines differ ONLY in `observedAt` (174 ms apart; every other field identical): two observations. A
+    copy mechanism cannot produce a second probe trace or a second `observedAt`.
+  - Not explained: how chains launched 19 s apart converged to deploys created 16 ms apart and captures starting in
+    the same millisecond. The line count does not depend on it.
+  - **History:** the ONLY duplicate pair in either ledger (refusal-window 129 lines since 2026-08-16, loss 43 since
+    2026-08-15), both added in `d6f3d79`. Of 527 production deploys since 2026-06-16, `bb2c`/`b824` is the only pair
+    created < 1 s apart; every earlier close pair is 38 s–2 min apart and predates the ledgers.
+  - **The double LAUNCH had happened before:** 2026-09-25, `…-2346.log` / `…-2347.log` were created **19.0 s apart**,
+    the same pattern. The first chain failed test:all (`test:hldraft`, 155/1) and stopped before `netlify deploy`, so
+    only one chain deployed and the ledgers got single lines.
+  - **What was different this time:** both launched chains passed their gates. It was not the five commits, the new
+    function, or the 53-minute publish gap. The cause is launching
+    `nohup setsid npm run deploy:prod > deploy-logs/$(date +%F-%H%M).log … &` twice ~19 s apart (the shell history
+    shows that command repeated back to back).
+  - **Consequence:** no count changed and the serving deploy is correct, but anything counting ledger entries per
+    deploy counts this deploy twice. **`deploy:prod` has no lock against a concurrent run** — every gate passed in
+    both chains. Whether it should refuse to start while another run is in progress is **T's decision**.
 
 ## 4. The operator function, from the SERVED build
 `POST/GET/OPTIONS https://app.tikpema.xyz/.netlify/functions/vault-mandate-operator`:
