@@ -28792,3 +28792,86 @@ T deployed `47e642a`. It carries five commits: the clock fix `16ff7f4`, the maxR
 - ✅ ~~The first tick on this deploy~~: closed 2026-09-28, `last` at 09:17:05Z on 6ab98b57, disarmed, no mandates (§5).
 - The ledger double-append (§3).
 - Then T creates the operator mandate (CLI: `scripts/vault-mandate-operator.mjs`).
+
+---
+
+# 📏 VAULT MANDATE — THE FIRST DISARMED TICK ON A REAL MANDATE (2026-09-28 11:17Z), read-only
+
+The operator mandate **`8379419c-bb36-47cb-8053-145b1ecdfcae`** (origin operator, owner `0x74b7…24E5`, agent wallet
+`0x3cb7…2de9`; 10 USDC per deposit, 100 total, cadence **daily**; five pause-only rules: `upgradeable`,
+`owner-changed`, `exit-fee-above` 50, `deposit-fee-above` 50, `vault-cannot-pay`) was created at 10:26:21Z and
+acknowledged by T at 10:52:41Z. T verified by hand that the digest's sha256 equals the ack token (`e8413267…`).
+Deploy 6ab98b57 (`47e642a`, disarmed). Read at ~11:25Z with `netlify blobs:get/list`; nothing was written.
+
+## Preconditions, read before creation (09:41Z)
+- Agent wallet `0x3cb7…2de9` held **41.530885 USDC** on both endpoints (blocks 64419255 / 64419256, agreed).
+- Deployed `PERIOD_CEILING_USDC` = 60. The DCA reserve and the vault cap were unset in production, so the code
+  defaults applied (0.5 and 25).
+- `day:` / `mandate-day:` / `dca-day:` counters for 2026-09-28 were absent (i.e. 0). That absence was verified to be
+  real: `day:` keys for this wallet exist on 5 earlier days in the same format.
+- Room for 10 USDC: the mandate's share 15 (0.25 × 60), mandate + DCA 30, the ceiling 60.
+
+## A second mandate, cancelled
+**`5ef4c048-dc4e-443c-a411-a7cdb3e42fd9`**, created 10:32:51Z: a second `create` with identical terms, rules and ack
+token, awaiting-ack. It is the retry-makes-a-new-mandate case the operator entry recorded. **Cancelled at
+11:23:43Z** per its record (T had said ~10:58Z). At the 11:17Z tick it was therefore still awaiting-ack, and the tick
+reported it correctly as `may-not-deposit`, "awaiting the user's acknowledgement". It is now `cancelled` with
+monitoring `stopped`. The 12:17Z tick is the first that can show it ignored as cancelled.
+
+## 1. The tick
+- `last` (11:17:05.368Z): `ok:true, armed:false, error:null`.
+  Results: `5ef4c048 → may-not-deposit`; **`8379419c → would-deposit, 10 USDC`**.
+- Receipt `w/0x74b7…/8379419c…/1790592761406-0`: the window base is the acknowledgement (10:52:41.406Z), window 0.
+  `armed:false`, outcome `would-deposit`, note "WOULD DEPOSIT 10 USDC — disarmed, nothing written, nothing
+  executed".
+- **Decision: `deposit`; flags `[]`, findings `[]`, unestablished `[]`.**
+- The report was signed (agent 851891, key class registered). **Verification `valid:true`** (ERC-1271), bound to
+  chain 5042002, block 64430336, the xylo address. `reportFailure: null`, `signCalls: 1`.
+
+## 2. The five rules: all cleared, none inconclusive or outage
+The receipt stores the decision, not the per-rule observations. The evidence is from the signed report and the
+readings it carries.
+
+| Rule | Evidence | Clear |
+|---|---|---|
+| r1 `upgradeable` | Signed report: the `upgradeable` power is `present:false` (no selector); the EIP-1967 impl slot and the vault's code were read, 2/2 endpoints agreeing. Powers present: emergencyWithdraw, feesSettable, setStrategy, setFeeRecipient, transferOwnership. | ✅ (DD's caveat: absence of a selector is not proof of absence) |
+| r2 `owner-changed` | Signed report: owner `0x94e0…b3c6` (EOA) = the baseline owner | ✅ |
+| r3 `exit-fee-above` 50 | Both endpoints: declared 10 bps, measured (the vault's own preview) 10 bps | ✅ |
+| r4 `deposit-fee-above` 50 | Both endpoints: 0 bps | ✅ |
+| r5 `vault-cannot-pay` | Both endpoints: a simulated redeem of the holder's 999998 shares returned 999000 (paid, as of this block only) | ✅ |
+
+## 3. ⭐ THE MEASUREMENT (first sample)
+| Timing | Value |
+|---|---|
+| Tick start (receipt `at`) | 11:17:03.554Z |
+| `anchoredAt` | **11:17:04.165Z** (block 64430336, hash `0x161334d7…`) |
+| `verifiedAt` | **11:17:05.330Z** |
+| **`signingLatencyMs`** | **1165 ms** (anchor → report analysed, signed and verified) |
+| Tick summary written | 11:17:05.368Z (≈ 1.8 s for the whole tick, two mandates) |
+
+`checkAgeMs` is not recorded: it is measured at the deposit write, which a disarmed tick never reaches.
+**One sample.** The freshness window (`MANDATE_CHECK_FRESHNESS_MS`) must not be set from it. Daily cadence gives one
+signed sample per day.
+
+## 4. Nothing moved
+- No intent: `vault-mandates` has no `d/` keys.
+- No `day:` and no `mandate-day:` counter for 2026-09-28 (the executor's vault deposit would write both).
+- The mandate record was not written by the tick: its etag was unchanged (`89b06fa0…`). Progress is still zero
+  (`nextSeq` 1, `depositedUsdc` 0, `sharesTrackedRaw` "0").
+- 6ab98b57 is still the latest production deploy. Served: `MANDATE_DEPOSIT_ARMED = false`,
+  `MANDATE_ARMED_FROM = null`, `MANDATE_CHECK_FRESHNESS_MS = null`.
+
+## 5. Endpoint agreement (first sample)
+The same anchor block hash; both readings `ok:true`. The exit fee (declared and measured), the deposit fee,
+redemption (`full`, 999998 shares, basis `max-redeem`) and the simulated redeem were **identical on both
+endpoints**. The report's own reads were quorum 2/2. **0 disagreements in 1 check**: a sample, not yet a rate.
+
+## ⚠️ Noted: hand-deposited shares already in the wallet
+The agent wallet holds **999998 xyUSDC (≈ 1 USDC) that the mandate did not deposit** (its tracked shares are 0).
+This is Finding B in practice. Under T's decision a future exit redeems `min(tracked, live)`, so these stay. The
+first real deposit will land beside shares the mandate does not own.
+
+## Next
+More daily samples (latency + endpoint agreement) → set the freshness window from them → the operator arming
+constant (`MANDATE_DEPOSIT_ARMED_OPERATOR`, not built) → the first real deposit on T's wallet. Still open: the
+ledger double-append from deploy 6ab98b57.
