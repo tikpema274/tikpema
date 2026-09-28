@@ -29008,3 +29008,31 @@ double launch happened on 09-25, hidden because one chain failed its tests. Noth
 takes microseconds, so they never overlapped (and my first version of the mutation was invalid anyway: it used names
 the module did not import). The race now uses a start barrier (every racer busy-waits to the same instant), 5 rounds
 × 12, plus a pin that the lock is created only by `linkSync(tmp, path)`. Against those, #1 is red.
+
+---
+
+# 📏 VAULT MANDATE — THE SECOND TICK (2026-09-28 12:17Z): window dedupe works; the cancelled mandate is refused as cancelled
+
+Read-only, at 12:18Z (`netlify blobs:get vault-mandate-receipts last`, `blobs:list`). Deploy 6ab98b57, disarmed.
+`last` (12:17:05.771Z): `ok:true, armed:false, error:null`.
+
+## 1. The window dedupe works
+- **`8379419c-bb36-47cb-8053-145b1ecdfcae` → `observed-this-window`.** It did NOT check again. The daily window that
+  opened at the acknowledgement (10:52:41.406Z) was already observed by the 11:17Z tick.
+- There is still exactly ONE window receipt (`w/…/8379419c…/1790592761406-0`), its etag unchanged (`8f648915…`):
+  nothing re-signed, nothing rewritten.
+- The next window opens at 2026-09-29T10:52:41Z, so **the next signed check, and the second latency /
+  endpoint-agreement sample, is the 2026-09-29 11:17Z tick.**
+
+## 2. The cancelled mandate is refused AS CANCELLED
+- **`5ef4c048-dc4e-443c-a411-a7cdb3e42fd9` → `may-not-deposit`, reason `status "cancelled" may not deposit`.**
+  At 11:17Z the same mandate read "awaiting the user's acknowledgement": the cancel landed at 11:23:43Z, so this is the
+  first tick that could show it.
+- Nothing is checked, signed or written for it.
+
+## ⭐ DECISION (T, 2026-09-28): cancelled mandates STAY LISTED in the tick summary
+The tick reads a cancelled mandate every hour and lists it with its refusal. **That line is kept on purpose: it is
+evidence the gate works.** Seeing the tick read and refuse it each hour shows the refusal happening; silence would make
+"skipped correctly" indistinguishable from "never saw it" (the absence-reads-as-safe family). The record itself is
+kept as the audit trail.
+**Trigger to revisit:** if cancelled records ever make the summary hard to read.
