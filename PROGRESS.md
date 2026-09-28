@@ -29036,3 +29036,66 @@ evidence the gate works.** Seeing the tick read and refuse it each hour shows th
 "skipped correctly" indistinguishable from "never saw it" (the absence-reads-as-safe family). The record itself is
 kept as the audit trail.
 **Trigger to revisit:** if cancelled records ever make the summary hard to read.
+
+---
+
+# 🔎 DEFI RISK RATING — WHO ALREADY DOES THIS, VERIFIED (2026-09-28), research only, nothing built
+
+T's question (from the 2026-09-26 "trusted rating system" thread, until now held only in memory): not "does anyone rate
+DeFi protocols" (several do), but does anyone answer, **for the specific vault a user is about to deposit into**:
+**(a)** who can touch your money (owner powers, timelocks, upgradeability) · **(b)** can you get out RIGHT NOW (exit
+liquidity, not TVL) · **(c)** a coverage manifest saying what was NOT checked · **(d)** signed and re-checkable by a third
+party. Plus two probes: Galaxy USDC on Arc, and whether anyone refuses to rate what it does not recognise.
+
+**Method:** three read-only research agents fetched the providers' own pages, APIs and docs, and quoted them. They were
+told to write "could not verify" rather than infer. ⚠️ Some quotes came through a page summariser: close to the page,
+not guaranteed verbatim. The central Galaxy figure was re-checked directly against the Morpho API.
+
+## Per provider
+| Provider | (a) who can touch | (b) out right now | (c) not-checked | (d) signed / re-checkable | Refuses? |
+|---|---|---|---|---|---|
+| **Morpho app / API** (per vault, Morpho vaults only) | PARTIAL: roles named ("Owner… Curator… Guardian"); timelocks in the API, not on the page | **YES**: "Liquidity $4.22 M" beside Total Deposits | NO: "Warnings: None"; a generic "not exhaustive" | PARTIAL: on-chain getters; method not published; unsigned | **YES, on unrecognised INPUTS**: RED "not found on a recognized list… require a user to 'opt-in'" (asset / oracle / curator) |
+| **DefiLlama** | NO (no owner / timelock fields in the pool API) | NO (`tvlUsd` only) | NO | PARTIAL (raw data) | Rates nothing: "We present data, not opinions"; unclear data → "Unknown" |
+| **L2BEAT** (L2s, not vaults) | **YES** per contract: "Can be upgraded by… with 17d 8h delay" | PARTIAL: "exit window" = time before an upgrade, not liquidity | PARTIAL: "stages do not reflect project security" | PARTIAL: addresses + upgrade history re-checkable; unsigned | Per item: "under review" |
+| **vaults.fyi** (per vault) | NO, and says so: "Does not account for… upgrade mechanisms, or admin key exposure" | PARTIAL (pool-level liquidity) | **YES, model-wide**: "Does not include smart contract audit status…" | PARTIAL: formula-driven; unsigned | **YES, on short history**: < 6 months → "NULL composite score (Not Rated)" |
+| **Credora** (per vault, shown in the Morpho UI) | PARTIAL: timelock / guardian are score inputs; a missing one is "neutral (0)" | NO | NO | NO: "The underlying algorithm is proprietary" | Unrated = no curator agreement, not a refusal |
+| **Gauntlet** (its own vaults) | NO | PARTIAL: utilisation; its liquidity work is DEX depth for liquidations | NO | NO: proprietary simulations | Always grades "A+ to D" |
+| **Exponential → YO** | PARTIAL (folded into the grade) | NO | NO | NO: "our team of experts" | COULD NOT VERIFY (live site blocked; Wayback 2026-01-04 only) |
+| **DeFiSafety** (per protocol) | PARTIAL: scores whether controls are DISCLOSED, not the powers | NO | PARTIAL | PARTIAL: "replicable process" | COULD NOT VERIFY |
+| **Steakhouse** (curator) | PARTIAL: policy for all its vaults ("7-day timelocks"), not a per-vault readout | NO | NO (legal disclaimer) | NO | n/a (no rating) |
+| **Certora** | n/a for vaults | n/a | **YES, for code**: explicit assumptions ("fee-on-transfer… not supported") | **YES, for code**: public, re-runnable specs | n/a (proofs, not scores) |
+| **Chaos Labs** | NO (it sets protocol parameters) | NO | NO | PARTIAL (updates on chain; model not reproducible) | COULD NOT VERIFY |
+
+Not checked: Webacy. Hypernative / Block Analitica came up in searches only, not fetched.
+
+## Probe 1: Galaxy USDC on Arc (`0x8E35…12AF`, chain 5042)
+- **Morpho SHOWS the redeemable-now figure.** The vault page reads "Liquidity $4.22 M" beside "Total Deposits $79.79 M".
+  **Re-checked by me, 2026-09-28 12:31:51Z:** `liquidityUsd` 4,225,552 / `totalAssetsUsd` 79,791,918 =
+  **5.30% redeemable, down from 8.84% measured 2026-09-26.** It moved within two days: the point-in-time problem, live.
+- **The SHARED POOL is shown only one click away.** The vault page never mentions Keyrock; a user must read
+  "Utilization 97.64%" and follow the link to the market. The market page lists the suppliers:
+  **Galaxy 44.38% · Keyrock Prime 41.71% · a THIRD direct supplier `0x843E…B96a`, ~$25M (13.90%).**
+  ⚠️ **Correction to the 2026-09-26 research:** the pool is contested by three suppliers, not two. The "≈4.7% together"
+  figure counted Galaxy + Keyrock only.
+- **Nobody else shows either figure.** DefiLlama (no Arc in 17,024 pools) and vaults.fyi (Arc not supported) do not list
+  it. Arc Portal renders its data in the browser; the served HTML has no figures, and "Galaxy" does not appear in it.
+  A third-party tracker (github.com/jamesparser/yieldfloat) quotes Keyrock "Exit liquidity: deep (~$7.5M)", counting
+  the shared pool as Keyrock's own: exactly the misreading.
+
+## Probe 2: does anyone refuse?
+**Yes. "Everyone always produces a number" is FALSE:** Morpho RED opt-in on unrecognised inputs; vaults.fyi "Not Rated"
+on short history; DefiLlama rates nothing; L2BEAT per-item "under review".
+**What nobody does:** refuse because *the analyser does not recognise the contract's power surface*, and say per vault
+what was not checked. Credora does the opposite, scoring a missing timelock as neutral.
+
+## What this means for positioning (Claude's read; nothing decided)
+- The differentiator is **not** "we refuse and everyone scores". It is the combination nobody offers for a vault:
+  1. refusing on an **unrecognised power surface**, with a **per-vault coverage manifest** (our 4bc0d03 recognition gate);
+  2. **signed, re-checkable** facts (nobody signs; L2BEAT is re-checkable, for L2s);
+  3. **exit liquidity WITH the shared-pool contention** (Morpho shows the number but not the contention, and only for
+     Morpho vaults).
+- **Morpho's own app is the real competitor on (b)** for Morpho vaults. Our edge there is the contention context and
+  covering vaults beyond Morpho.
+- Still open for T, unchanged: build the rating at all (and if so as a separate consumer of DD), and whether DD reports
+  exit liquidity (a DD-surface change). This research strengthens the case for the latter, provided it carries
+  contention, since the number alone Morpho already shows.
