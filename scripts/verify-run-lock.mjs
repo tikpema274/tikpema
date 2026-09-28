@@ -19,7 +19,7 @@
 //
 // ⚠️ Every test uses its own temp lock dir (TIKPEMA_LOCK_DIR / `dir`), never ~/.cache/tikpema.
 
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, statSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, statSync, rmSync, openSync, closeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -274,6 +274,64 @@ section("7 — the wiring: the deploy scope shares `deploy`; escrow-reclaim --co
   const er = spawnSync(process.execPath, ["scripts/escrow-reclaim.mjs", "--confirm"], { env: { ...process.env, TIKPEMA_LOCK_DIR: ed, ESCROW_RECLAIM_WALLET_ADDRESS: "" }, encoding: "utf8", timeout: 20000 });
   ok("⭐⭐ escrow-reclaim --confirm while another reclaim holds the lock → exit 3, names the holder, nothing else ran",
     er.status === 3 && new RegExp(String(process.pid)).test(er.stderr) && /already running/i.test(er.stderr) && !/REFUSED: ESCROW/.test(er.stderr), `status=${er.status} ${er.stderr.trim().split("\n")[0]}`);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("8 — ⭐⭐ SUCCESS IS SAID, not inferred: a line on acquire and on release (T, 2026-09-28)");
+// The deploy 6abac4ec check could only INFER the lock ran (the assert passed, no refusal, the lock dir emptied): the
+// wrapper was silent on success. Silence must not have to mean success.
+{
+  const RL = new URL("./run-lock.mjs", import.meta.url).pathname;
+  const hasMsg = has("acquiredMessage") && has("releasedMessage");
+  ok("  (the messages are exported, pure)", hasMsg);
+  if (hasMsg) {
+    const lk = { pid: 4242, log: "/logs/run.log", startedAt: "2026-09-28T19:33:40.000Z" };
+    const a = L.acquiredMessage(lk, "deploy");
+    ok("acquire line names the LOCK, the PID and the LOG", /deploy/.test(a) && /\b4242\b/.test(a) && a.includes("/logs/run.log") && /acquired/i.test(a), a);
+    const r = L.releasedMessage(lk, "deploy", { released: true }, 0);
+    ok("release line names the LOCK, the PID, the LOG and the command's exit", /deploy/.test(r) && /\b4242\b/.test(r) && r.includes("/logs/run.log") && /released/i.test(r) && /exit(ed)?\D*0\b/i.test(r), r);
+    // startedAt is GIVEN here, so only the LOG can supply the "(unknown)" (a mutation survived when it was not).
+    const u = L.acquiredMessage({ pid: 1, log: null, startedAt: "2026-09-28T00:00:00.000Z" }, "deploy");
+    ok("an unknown log is SAID ('log (unknown)'), never left blank", /log \(unknown\)/.test(u), u);
+    const nr = L.releasedMessage(lk, "deploy", { released: false, why: "the lock is held by another run (PID 9); not touched" }, 0);
+    ok("⭐ a FAILED release says NOT released + why — never 'released'", /NOT released/.test(nr) && /another run/.test(nr) && !/lock released/i.test(nr), nr);
+  }
+
+  // The real wrapper, stdout redirected to a file (as `nohup … > deploy-logs/X.log` does): the log is that file.
+  const dir = tmp(); const env = { ...process.env, TIKPEMA_LOCK_DIR: dir };
+  const logf = join(dir, "run.log"); const fd = openSync(logf, "w");
+  const w = spawnSync(process.execPath, [RL, "--lock", "t", "--", process.execPath, "-e", "console.error('CHILD-RAN')"], { env, stdio: ["ignore", fd, "pipe"], encoding: "utf8" });
+  closeSync(fd);
+  const err = w.stderr ?? "";
+  const ia = err.search(/acquired/i), ic = err.indexOf("CHILD-RAN"), ir = err.search(/lock released/i);
+  ok("⭐⭐ the real wrapper prints the acquire line BEFORE the command and the release line AFTER it", w.status === 0 && ia >= 0 && ic > ia && ir > ic, JSON.stringify(err).slice(0, 220));
+  // The whole LINE, not a slice from the word "acquired" (which would cut the lock name off in front of it).
+  const lineA = err.split("\n").find((x) => /acquired/i.test(x)) ?? "", lineR = err.split("\n").find((x) => /lock released/i.test(x)) ?? "";
+  ok("  …the acquire line names the lock and the log the wrapper's stdout goes to", /(^|\s)t:/.test(lineA) && lineA.includes(logf), lineA);
+  const pidA = lineA.match(/PID (\d+)/)?.[1], pidR = lineR.match(/PID (\d+)/)?.[1];
+  ok("  …and the SAME PID on both lines (the holder's)", !!pidA && pidA === pidR, `${pidA} / ${pidR}`);
+  ok("  …the release line carries the command's exit", /exit(ed)?\D*0\b/i.test(err.slice(ir)));
+  // Exactly ONE release line of ANY kind: the child's exit and the process 'exit' hook both call release(), and only
+  // the first may speak (a mutation that dropped the guard printed a second "NOT released" line).
+  ok("⭐ exactly ONE release line, and no 'NOT released' on a normal run", (err.match(/released/gi) ?? []).length === 1 && !/NOT released/.test(err), JSON.stringify(err).slice(0, 220));
+  const seven = spawnSync(process.execPath, [RL, "--lock", "t", "--", process.execPath, "-e", "process.exit(7)"], { env, encoding: "utf8" });
+  ok("  a failing command → still ONE release line, naming exit 7 (and 7 passes through)", seven.status === 7 && (seven.stderr.match(/released/gi) ?? []).length === 1 && /lock released/i.test(seven.stderr) && /exit(ed)?\D*7\b/i.test(seven.stderr), seven.stderr.trim().split("\n").pop());
+
+  // Only a run that ACQUIRED may say so.
+  const re = spawnSync(process.execPath, [RL, "--lock", "t", "--", process.execPath, RL, "--lock", "t", "--reentrant", "--", process.execPath, "-e", "0"], { env, encoding: "utf8" });
+  ok("⭐ a nested --reentrant run does NOT print a second acquire/release (it acquired nothing)",
+    re.status === 0 && (re.stderr.match(/acquired/gi) ?? []).length === 1 && (re.stderr.match(/lock released/gi) ?? []).length === 1, JSON.stringify(re.stderr).slice(0, 200));
+  const hold = run(process.execPath, [RL, "--lock", "t", "--", process.execPath, "-e", "setTimeout(()=>{},2000)"], { env, stdio: "ignore" });
+  for (let i = 0; i < 40 && !existsSync(lockFile(dir, "t")); i++) await sleep(50);
+  const refused = spawnSync(process.execPath, [RL, "--lock", "t", "--", process.execPath, "-e", "0"], { env, encoding: "utf8" });
+  ok("⭐⭐ a REFUSED launch prints no acquire and no release line", refused.status === 3 && !/acquired/i.test(refused.stderr) && !/released/i.test(refused.stderr), refused.stderr.split("\n")[0]);
+  hold.kill("SIGTERM"); await hold.exited;
+  const asrt = spawnSync(process.execPath, [RL, "--lock", "t", "--", process.execPath, RL, "--assert-held", "--lock", "t"], { env, encoding: "utf8" });
+  ok("  --assert-held adds no line of its own (one acquire, one release)", asrt.status === 0 && (asrt.stderr.match(/acquired/gi) ?? []).length === 1, JSON.stringify(asrt.stderr).slice(0, 160));
+
+  // A release that FAILS is said, not swallowed: the command removes the lock before exiting.
+  const gone = spawnSync(process.execPath, [RL, "--lock", "t", "--", process.execPath, "-e", `require("fs").unlinkSync(${JSON.stringify(lockFile(dir, "t"))})`], { env, encoding: "utf8" });
+  ok("⭐⭐ the lock vanished mid-run → 'NOT released' with the reason, never 'lock released'", /NOT released/.test(gone.stderr) && !/lock released/i.test(gone.stderr), JSON.stringify(gone.stderr).slice(0, 200));
 }
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed`);

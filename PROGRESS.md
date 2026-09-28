@@ -29940,3 +29940,46 @@ lines. What it does show:
   blocker 1 is closed LIVE and `decideExit` no longer refuses `anchor-time-unknown` on a check from this code.
 - **Also pending, tonight:** the 21:17Z tick on this deploy (`observed-this-window` expected). Its clean run is the
   proof the new `limits.mjs` load guards do not throw at load.
+
+---
+
+# ✅ THE RUN LOCK SAYS SUCCESS (2026-09-28): a line on acquire, a line on release — built red-first (local tooling: run-lock never ships to Netlify)
+
+**T's decision (2026-09-28):** add one line on acquire and one on release, naming the lock, the PID and the log. The
+deploy 6abac4ec check could only INFER the lock ran end to end (the assert at the start passed, no refusal printed,
+the lock dir emptied 220 ms after the log's last write). **Silence should not have to mean success.** Rides with step 2
+(its first real outing will be step 2's deploy).
+
+## What it prints (stderr, which the deploy log captures)
+```
+🔒 deploy: lock acquired — PID <pid>, log <the file stdout goes to>, started <ISO>
+🔓 deploy: lock released — PID <pid>, log <…>, command exited <code>
+⚠️ deploy: lock NOT released — PID <pid>, log <…>, command exited <code>: <why>
+```
+- **Only the run that ACQUIRED speaks.** A nested `--reentrant` run acquired nothing and prints nothing; `--assert-held`
+  prints nothing; a REFUSED launch prints only its refusal.
+- **Exactly one release line.** Both the child's exit and the process `exit` hook call release; only the first speaks.
+- **A failed release is SAID.** `releaseLock`'s result was ignored before, so a lock that could not be removed was
+  silent too. Now: "NOT released" + why, never "released".
+- The log is the lock's own `log` field (`/proc/self/fd/1`, the file `nohup … > deploy-logs/X.log` points stdout at);
+  unknown → "(unknown)", never blank. The exit code on the release line is the one the wrapper passes through.
+
+## How a deploy check reads it now
+Section 5 of the next deploy record becomes direct: one `🔒 deploy: lock acquired` near the top of the log, NO second
+acquire (the three reentrant links reused it), one `🔓 deploy: lock released … command exited 0` as the last line.
+Anything else is a finding.
+
+## Red first, mutations
+- **Red: 9 failing** (78 passed). One new case passed vacuously ("a refused launch prints no acquire/release line":
+  true while nothing prints at all); the "acquire printed before acquiring" mutation covers it. Green **92/0**.
+- ⚠️ **A test bug on the way:** I sliced stderr from the word "acquired" to check the lock name, which cut off the name
+  in front of it. The line was right; the test now checks the whole line.
+- **9 mutations, 9 red in the end:** no acquire line · release result ignored (always "released") · no release line ·
+  acquire printed before acquiring (so a refused launch claims it) · the reentrant path also announcing · the exit
+  code not passed to the line · a blank log when unknown · the PID omitted · the once-guard dropped.
+- ⚠️ **Two needed better tests first:**
+  - "blank log when unknown" SURVIVED: the test object had no `startedAt`, so ITS "(unknown)" satisfied `/unknown/`.
+    Now `startedAt` is given and the test pins `log (unknown)`.
+  - "once-guard dropped" SURVIVED: the second call printed "lock NOT released", which a `/lock released/` count does
+    not match. Normal runs now assert exactly ONE line matching `/released/` and no "NOT released".
+- Other suites that run the wrapper: test:ledgergate 38/0, test:ledgerhook 20/0, verify-bridge-receipts exit 0.

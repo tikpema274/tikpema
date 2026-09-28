@@ -196,6 +196,22 @@ export function lockHeldBy({ name, dir = lockDir(), token, sys = realSys }) {
   return classifyLock(r.lock, sys).state === "live";
 }
 
+// ═══ SUCCESS IS SAID (T, 2026-09-28) ═════════════════════════════════════════════════════════════════
+// The wrapper used to be silent on success, so checking a deploy's lock meant INFERRING it (the assert passed, no
+// refusal printed, the lock dir emptied). Silence must not have to mean success: the run that ACQUIRES says so, and
+// says so again when it releases, naming the lock, its PID and its log. A nested --reentrant run acquired nothing and
+// says nothing; a refused launch says only its refusal; a release that FAILS says "NOT released" and why.
+const logOf = (l) => l?.log ?? "(unknown)";
+/** One line, printed by the run that took the lock. */
+export function acquiredMessage(lock, name) {
+  return `🔒 ${name}: lock acquired — PID ${lock?.pid}, log ${logOf(lock)}, started ${lock?.startedAt ?? "(unknown)"}`;
+}
+/** One line, printed by the same run when it lets go (`res` = releaseLock's result, `exit` = the command's exit). */
+export function releasedMessage(lock, name, res, exit) {
+  if (res?.released === true) return `🔓 ${name}: lock released — PID ${lock?.pid}, log ${logOf(lock)}, command exited ${exit}`;
+  return `⚠️ ${name}: lock NOT released — PID ${lock?.pid}, log ${logOf(lock)}, command exited ${exit}: ${res?.why ?? "unknown"}`;
+}
+
 /** The loud refusal. Names the holder and its log; says nothing was started; says what to do. */
 export function refusalMessage(res, name) {
   const l = res?.lock ?? {};
@@ -253,14 +269,22 @@ async function main() {
   const got = acquireLock({ name: a.name });
   if (!got.ok) { console.error(refusalMessage(got, a.name)); process.exit(LOCK_EXIT[got.code] ?? LOCK_EXIT.unreadable); }
 
+  console.error(acquiredMessage(got.lock, a.name));
   let released = false;
-  const release = () => { if (!released) { released = true; releaseLock({ name: a.name, token: got.token }); } };
-  process.on("exit", release);
+  const release = (exit) => {
+    if (released) return;
+    released = true;
+    console.error(releasedMessage(got.lock, a.name, releaseLock({ name: a.name, token: got.token }), exit));
+  };
+  process.on("exit", (code) => release(code));
   const child = spawn(a.cmd[0], a.cmd.slice(1), { stdio: "inherit", env: { ...process.env, [tokenVar(a.name)]: got.token } });
   // Forwarded, not handled: the command decides how to stop; the lock is released when it has.
   for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => child.kill(sig));
-  child.on("error", (e) => { console.error(`run-lock: could not start ${a.cmd[0]}: ${e.message}`); release(); process.exit(1); });
-  child.on("exit", (code, signal) => { release(); process.exit(code ?? (signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : 1)); });
+  child.on("error", (e) => { console.error(`run-lock: could not start ${a.cmd[0]}: ${e.message}`); release(1); process.exit(1); });
+  child.on("exit", (code, signal) => {
+    const exit = code ?? (signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : 1);
+    release(exit); process.exit(exit);
+  });
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) await main();
