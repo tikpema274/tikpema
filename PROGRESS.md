@@ -29232,3 +29232,68 @@ number we sign is the one a redeem meets.
   or a **runtime-bytecode comparison against a local build** of the tagged source (compiler settings and immutables
   accounted for).
 - **Where it belongs:** with the **V2 profile work**, before the exit-liquidity fact is built. Not now.
+
+---
+
+# 🧭 V2 EXIT PATH — THE BYTECODE CHECK IS A GUARD, NOT A ONE-OFF (2026-09-28), decided, nothing built
+
+## ⭐⭐ THE REFRAMING: the code at an address does not change. The WIRING does.
+None of the exit-path contracts is a proxy (VaultV2, the adapters, Morpho Blue). What changes is **which addresses are
+wired into the exit path**:
+- **The liquidity adapter:** `setLiquidityAdapterAndData` is an ALLOCATOR function, and **`setIsAllocator` has a ZERO
+  timelock on Galaxy**. The owner or curator can appoint an allocator and **redirect redemptions to any already-added
+  adapter within minutes.**
+- **The adapter set:** `addAdapter` has a 7-day timelock. **The zero-timelock redirect is the LARGER exposure.**
+- **The curator:** replacing the curator is instant, but a curator changes no code; it changes who can make the two
+  changes above.
+
+A report signed at block N correctly describes block N and can be wrong by N+100. A one-off check ("the deployed code
+matched `main` the day we looked") does not survive an owner who changes something. **Only a guard that runs on every
+check does.**
+
+## ⭐ DECISIONS (T, 2026-09-28)
+1. **Factory attestation is the pin.** Masked-immutable hashes stay as the FALLBACK for contracts no factory vouches for.
+   - Why not one hash per type: VaultV2 and the adapter carry IMMUTABLES (parent vault, Morpho address, asset,
+     interest-rate model) compiled into each instance's runtime code, so every instance has a different code hash.
+   - **The vault:** `VaultV2Factory.isVaultV2(vault)` (already the recognition decision).
+   - **Each adapter:** its factory's own record (an `isMorphoMarketV1AdapterV2(adapter)`-style mapping; the exact name is to
+     confirm from source).
+   - **The factories** (single instances per chain) and **Morpho Blue** (one immutable instance per chain): **exact
+     code hashes, pinned.**
+   - **The one-off** still runs **once per template** (and again for each newly pinned template): prove factory, adapter
+     template and Morpho Blue equal the source read (explorer verification or a local build), and that the template
+     has no `SELFDESTRUCT` and no delegatecall to a changeable target, which is what makes "code at an address does not
+     change" TRUE rather than assumed. After that, the per-check guard carries it.
+2. **An unrecognised NON-liquidity adapter DEGRADES that part of the exit fact** (its force-deallocatable share is
+   "not checked"), and **the report states the share of assets it holds**:
+   "an adapter of unrecognised code holds X% of this vault's assets". **That line is a FINDING in its own right, not a
+   gap.**
+   - The vault not factory-attested → the whole profile is UNRECOGNISED → DD refuses.
+   - The LIQUIDITY adapter unrecognised → powers are still reported, but **redeemable-now has no value** (never 0% or
+     100%), with the finding "redemptions are routed through an adapter of unrecognised code".
+   - Morpho Blue's hash does not match its pin → the exit fact has no value.
+   - The signed structure records each instance's factory attestation and code hash at the block, so a later check can
+     say WHAT changed (a different liquidity adapter; a different hash at the same address), not only that something did.
+3. **PIECE 5 SCOPE:** the exit's fresh execution reads **re-check the liquidity adapter against the one the finding
+   check saw.** One read. It closes the allocator's zero-timelock redirect between check and redeem. If it differs, the
+   exit does not submit: the redeem would take a route the finding check never examined.
+
+## Cost per check (Galaxy, one adapter; both endpoints, at the anchor block hash)
+`isVaultV2` (1, already planned) · the vault factory's code hash (1) · `adaptersLength` + `adapters(i)` +
+`liquidityAdapter` (2 + n) · per adapter its factory's attestation (1–2) · Morpho Blue's code hash (1).
+**≈ 7–8 calls per endpoint, run in parallel.** `eth_getCode` downloads the code (Morpho Blue is some KB);
+`eth_getProof` would return the hash directly, if Arc's endpoints support it (unmeasured). Measure the cost on the
+signing path (1165 ms at its first sample) before arming anything. The mandate gets the guard for free: it signs a check
+daily.
+
+## Where the pins live
+In the **chain registry** (`shared/dd/chains.mjs`), per chain: Morpho Blue `{address, codeHash}`; the VaultV2 factory
+`{address, codeHash}`; per adapter template its factory `{address, codeHash}`. The V2 profile (`vault-profiles.mjs`) names
+which registry entries it needs. Both files are on the DD surface: **changing a pin rotates ddTree, and that is
+intended.** Which code DD trusts should be a reviewed change that alters DD's identity. It lands in the SAME
+DD-surface window already scoped (the Arc mainnet registry entry carries the pins); no second window.
+
+## ⚠️ ACCEPTED CONSEQUENCE
+**When Morpho ships a new factory or adapter version, vaults using it fall to UNRECOGNISED until someone pins it**
+(after the one-off check on the new template). That is correct behaviour, not a defect, and it means **Morpho releases
+become refusals until we act.**
