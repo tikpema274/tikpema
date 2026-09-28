@@ -29099,3 +29099,76 @@ what was not checked. Credora does the opposite, scoring a missing timelock as n
 - Still open for T, unchanged: build the rating at all (and if so as a separate consumer of DD), and whether DD reports
   exit liquidity (a DD-surface change). This research strengthens the case for the latter, provided it carries
   contention, since the number alone Morpho already shows.
+
+---
+
+# 🧭 DD + MORPHO V2 + EXIT LIQUIDITY — DECIDED, SCOPED, NOTHING BUILT (2026-09-28)
+
+## ⭐ DECISIONS (T, 2026-09-28)
+1. **DD TAKES Morpho V2.** "The refusal is a smaller product than the report, and it is where the money is." Today DD
+   refuses every V2 vault (`power-surface-unrecognised`); every Morpho vault on Arc mainnet is V2.
+2. **Sign the STRUCTURE and the NUMBER.** The structure is what a signature is good for. The number is cheap and
+   re-checkable at its block.
+3. **Block-hash binding lands in the SAME window.** It is what makes "at this block" mean anything, and it changes
+   the signed canon (today `blockHashBound: false`, "pass 2 not built", `shared/onchain-analyze/attest.mjs`).
+
+## ⛔ T's correction, recorded
+T first argued the number was too stale to be worth signing: exit liquidity moves within minutes (8.84% on 09-26,
+5.30% on 09-28). **That was half wrong.** Stale *for a decision*, yes. But a signature over a past-block fact is a
+**receipt, not a forecast**, and historical `eth_call` (≥ 7 days on both endpoints, measured 2026-09-25) keeps
+"at block N, X% was redeemable" exactly re-checkable. The owner and powers in today's report are equally
+point-in-time; what protects both is binding the block, not omitting the fact.
+
+## What does NOT change: the mandate never needs this signed
+The mandate acts on fresh, unsigned two-endpoint reads at execution, including a **simulated redeem of the holder's
+own shares**: the exact per-holder answer. A signed pool figure from the finding check would be minutes old and is not
+what an exit acts on. Holder-specific facts stay out of DD.
+
+## ONE WINDOW: what batches into the single DD-surface change (schema `onchain-analyze/0.3.0` → `0.4.0`)
+1. **An Arc mainnet entry in the chain registry** (`shared/dd/chains.mjs` holds only `arc-testnet` and `base-sepolia`),
+   carrying the chain-specific **V2 factory address**.
+2. **The Morpho V2 profile** (`shared/onchain-facts/vault-profiles.mjs`): recognised by the factory's `isVaultV2`, with a
+   fingerprint as cross-check.
+3. **The V2 power model:** per power, timelock · abdicated · current value (not presence). New groups (allocator,
+   adapters, force-deallocate penalty, roles), each with disclosure text (`assertDisclosureComplete`).
+4. **The exit-liquidity fact** (below).
+5. **Block-hash binding** in the attestation canon.
+- The published offer / API description changes with the schema (`gate:spec`): a version change for paying buyers.
+  Build and test all five off-deploy, then ship them in ONE deploy and measure the window (the last rotation's was
+  464 s).
+- **Off the surface, no window needed:** the mandate's `VAULT_PROFILE_OF` entry and the `exit-liquidity` redemption
+  signal (a declared slot in `shared/vault-redemption.mjs`); V2 custom-error decoding in `redeem-sim`; replacing the
+  synthetic `MORPHO_GOV` test fixture.
+- **Already shipped:** the OFAC screen (`21c30ed` in HEAD).
+
+## The fact, scoped
+- **Structure (signed, slow-changing):** vault type; idle assets; each adapter's type (recognised?) and allocation; the
+  **liquidity adapter** (the only one a normal redeem draws from) and its target (market ID / inner vault); the
+  force-deallocate penalty per adapter; exit gates (set / abdicated).
+- **Redeemable now:** idle + min(the liquidity adapter's allocation, the target's free liquidity), in USDC and as a
+  percentage of vault assets.
+- **Force-deallocatable:** from the other adapters, with its penalty. A separate figure, never summed into
+  redeemable-now.
+- **Contention needs NO enumeration.** For a Morpho market, `market(id)` (total supplied / borrowed) and
+  `position(id, adapter)` are exact:
+  - others' claim = total supplied − ours;
+  - free liquidity = supplied − borrowed, open to ANY supplier, **first come, first served**.
+  This counts every supplier, including the third direct supplier the 09-26 research missed.
+- **Supplier identities are optional:** they need an event scan from market creation, and the RPC refused a
+  from-genesis log query before. If not enumerated, the aggregate stays exact and identities go under
+  "not checked" with the reason. The signed report never names a supplier it did not enumerate itself; a name from
+  Morpho's API is a third party's claim (a labelled, unsigned annotation at most).
+- **Recursion:** a vault-wrapping adapter is followed into the inner V2 vault to depth 2, then "not checked".
+  - An unrecognised adapter → its part is "not checked".
+  - An unrecognised LIQUIDITY adapter → **redeemable-now has no value**, never 0% or 100%. Idle cash only as a labelled
+    floor.
+- **"True at this block only", carried in the VALUE, not in a disclaimer:**
+  - `{redeemableNow, atBlock:{number, hash, timestamp}}`; every rendering reads "At 12:31Z (block N): 5.30%", never a
+    bare percentage (pinned by a test, as the disclosure share words are);
+  - show the driver, not a warning: "97.64% of the pool is lent out";
+  - show movement where there is history ("8.84% two days ago → 5.30% now");
+  - a meaning line on every result: "an observation at one block, not a promise; decisions re-read at the moment of
+    action".
+- **Cost to measure:** ~6–10 extra reads per endpoint on the signing path (the first latency sample was 1165 ms).
+- **Open before build:** whether the free-liquidity figure needs Morpho's expected-balance (accrued-interest) view, or
+  whether the stored, pre-accrual value is what a redeem meets. To be answered from source first.
