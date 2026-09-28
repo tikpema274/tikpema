@@ -29743,6 +29743,27 @@ Deploys: (1+1b) → (2, then T's reclaim check) → (3–6 together, disarmed).
 
 ---
 
+# ✅ VAULT MANDATE — PIECE 5 STEP 1b: EXIT_AVAILABLE CANNOT LOAD BEFORE MONITORING (2026-09-28), no runtime effect
+
+## `MANDATE_MONITORING_LIVE` (blocker 2 / C14 closed structurally)
+`limits.mjs`: `MANDATE_MONITORING_LIVE = false`, and two new load guards: it must be a literal boolean, and
+**`EXIT_AVAILABLE ⇒ MANDATE_MONITORING_LIVE`**. Flipping `EXIT_AVAILABLE` is now a load-time error until monitoring's
+OWN commit flips the constant. Nothing else reads it; ⛔ a `true` here is a claim about the code, flipped only with
+monitoring. Exits armed with `EXIT_AVAILABLE` off still load; monitoring alone still loads.
+
+Ten lines in `limits.mjs`; the shipped values (all false) load exactly as before, so nothing at runtime changes.
+
+## Red first, mutations
+- **Red:** decision **10/54** failing (the variant loader could not rewrite a constant that did not exist; the shipped
+  value read `undefined`). Green **54/0**; test:all **162/162** (combined tree).
+- **3 mutations, 3 red:** the monitoring guard removed · the boolean guard removed · the guard reading ARMED instead of
+  MONITORING.
+
+## Blocker status
+2. ✅ closed structurally (the guard). Monitoring itself is still to build; its commit flips the constant.
+
+---
+
 # 📎 EARN KIT (Circle / Arc App Kits) — LAUNCH READ (2026-09-28), read-only, NOTHING recommended
 
 Sources, all read in full: arc.io/blog/embed-usdc-yield-into-your-product (the page shows **September 30, 2026**; read

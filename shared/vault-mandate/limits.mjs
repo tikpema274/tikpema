@@ -49,15 +49,31 @@ export const EXIT_AVAILABLE = false;
 export const MANDATE_EXIT_ARMED = false;
 export const MANDATE_EXIT_ARMED_FROM = null;
 
+/**
+ * ═══ C14 (piece 5 blocker 2, T 2026-09-28): EXIT_AVAILABLE also waits for MONITORING ═══════════════════════
+ * Until monitoring (Finding A) ships, a mandate is checked only when a DEPOSIT is due, so a fully deposited mandate is
+ * never checked again and "if found: exit" would be mostly false. Nothing reads this constant except the load guard
+ * below: it exists so EXIT_AVAILABLE cannot be flipped before monitoring. ⛔ Flipped ONLY in the commit that makes
+ * monitoring live, never on its own — the guard trusts it, so a true here is a claim about the code.
+ */
+export const MANDATE_MONITORING_LIVE = false;
+
 // ⛔ ENFORCED AT LOAD, not merely documented: a module that violates these must not load, so no deploy can ship them.
 //   · EXIT_AVAILABLE ⇒ MANDATE_EXIT_ARMED: otherwise users create exit rules that nothing executes, and the disclosure's
 //     "if found: exit" is false.
 //   · MANDATE_EXIT_ARMED ⇒ a finite MANDATE_EXIT_ARMED_FROM: the two are set together.
+//   · EXIT_AVAILABLE ⇒ MANDATE_MONITORING_LIVE (C14), and the latter is a literal boolean: only `true` counts.
 if (EXIT_AVAILABLE && !MANDATE_EXIT_ARMED) {
   throw new Error("limits.mjs: EXIT_AVAILABLE is true but MANDATE_EXIT_ARMED is false — exit rules could be created that nothing executes");
 }
 if (MANDATE_EXIT_ARMED && !Number.isFinite(MANDATE_EXIT_ARMED_FROM)) {
   throw new Error("limits.mjs: MANDATE_EXIT_ARMED is true but MANDATE_EXIT_ARMED_FROM is unset — the two are flipped together");
+}
+if (typeof MANDATE_MONITORING_LIVE !== "boolean") {
+  throw new Error("limits.mjs: MANDATE_MONITORING_LIVE must be a literal boolean");
+}
+if (EXIT_AVAILABLE && !MANDATE_MONITORING_LIVE) {
+  throw new Error("limits.mjs: EXIT_AVAILABLE is true but MANDATE_MONITORING_LIVE is false — a fully deposited mandate is never checked again, so exit rules would mostly never fire (C14)");
 }
 
 // ── USDC in micro-units, so no comparison ever drifts (0.1 + 0.2 ≠ 0.3 in floats) ─────────────
