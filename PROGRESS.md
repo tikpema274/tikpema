@@ -29442,3 +29442,58 @@ Known draft traps: no schedules fire, no build step runs, `COMMIT_REF` / `BUILD_
 - **The published offer** (network + asset + price) does not change. The OpenAPI version and the report shape do.
 - **`gate:spec`** must see 0.4.0 served and the new fields documented after the deploy, plus the new
   OpenAPI-version = schema-version guard.
+
+---
+
+# ✅ THE DRAFT-DEPLOY ISOLATION CHECK (2026-09-28): the condition is met; step 7 NARROWED
+
+The condition T set for decision 2 of the V2 window: a draft must not be able to touch the canary health store or open a
+refusal window. Checked read-only against the code, the deploy API and Netlify's own documentation.
+
+## 1. A draft cannot touch the canary health store
+- **The only writer is `dd-canary`** (`writeHealth`, `netlify/functions/_dd-health.mjs`, store `dd-canary-health`). It
+  is a **scheduled** function (`*/10 * * * *`) with no `/api` route.
+- **Netlify docs** (docs.netlify.com/build/functions/scheduled-functions, fetched 2026-09-28), verbatim:
+  - "Scheduled functions only run on their schedule for published deploys — Deploy Previews and branch deploys won't
+    trigger them automatically"
+  - "You can't invoke scheduled functions directly with a URL."
+
+  A draft is never published, so **its canary never runs and it writes no health.** A draft deploy object DOES list
+  `function_schedules` (seen on the 2026-09-09 deploy-preview): registered is not firing.
+- **Even if it could:** the store is site-wide (plain `getStore`, not deploy-scoped), but records are keyed by code
+  identity, `health:<schemaVersion>:<catalogueFingerprint>:<build>`, with `build` = the ddTree content hash from the
+  build stamp (the deploy ID is NOT in the key). The V2 draft's key (0.4.0, new catalogue, new ddTree) differs from
+  production's in all three parts.
+
+## 2. A draft cannot open a refusal window on production
+A window opens only when PRODUCTION's served identity has no fresh health. A draft changes neither production's served
+code, its identity key, nor its canary (which refreshes every 10 min on the published deploy). After a draft,
+`gate:deployed` confirms the published deploy is unchanged (6ab98b57, same tree).
+
+## ⛔ RULES FOR EVERY DRAFT (T, 2026-09-28)
+1. **NEVER press "Run now" on a draft.** The draft's health key is **production's FUTURE key** (the same tree). A
+   verdict written there makes production start ALREADY-HEALTHY after the deploy (within the 30-minute health TTL), and
+   `capture:window` reports the rotation as **SUSPICIOUS** ("no window despite rotation"). Not unsafe (a real verdict
+   for the same code), but it corrupts the one measurement the deploy records.
+2. **A draft runs every non-scheduled function with PRODUCTION's environment and SITE-WIDE stores, money paths
+   included.** Read-only endpoints only: no purchases, no operator-mandate calls, no agent actions.
+3. **`deploy:draft` is NOT under the run lock.** Never run it during a production deploy.
+
+## ⭐ WHAT STEP 7 IS NOW WORTH: a BUNDLE SMOKE TEST, not a rehearsal
+On a draft the canary never runs, so its `dd-analyze` finds no health for its own identity and **refuses by design**
+(the dead-man's switch working). The paid endpoint also stays Arc-testnet-only (decision 1). **The draft cannot
+produce a single DD answer.**
+- **What the draft proves:**
+  - the bundle builds, deploys and loads, and the V2 code imports without errors;
+  - `dd-analyze`'s refusal names the NEW identity, proving the new ddTree is what got bundled;
+  - `gate:spec --url <draft>`: OpenAPI 0.4.0 served and valid, and the unpaid POST refused with a 402;
+  - then `gate:deployed`: production unchanged.
+- **The REAL pre-deploy proving is LOCAL:**
+  - `analyze` against Galaxy and the other mainnet vaults, read-only: a 100%-idle vault, a vault-wrapping vault, and
+    xylo as the "not V2" negative;
+  - the canary fixture suite, including the V2 fixture.
+- **Everything else waits for PRODUCTION:** the first canary tick green (with the V2 fixture), a live V2 report, newly
+  signed hash-bound reports, `gate:spec` on production, and the measured window.
+
+The build order (PROGRESS, "THE DD V2 WINDOW — BUILD ORDER") is otherwise unchanged. Step 7 now reads: review →
+`test:all` → draft **bundle smoke test** under the three rules above.
