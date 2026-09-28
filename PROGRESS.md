@@ -29497,3 +29497,86 @@ produce a single DD answer.**
 
 The build order (PROGRESS, "THE DD V2 WINDOW — BUILD ORDER") is otherwise unchanged. Step 7 now reads: review →
 `test:all` → draft **bundle smoke test** under the three rules above.
+
+---
+
+# ✅ VAULT MANDATE — PIECE 5, FIRST (NON-MONEY) PIECE: THE EXIT OUTCOME CLASSIFIER (2026-09-28), built red-first
+
+`shared/vault-mandate/exit-outcome.mjs` (`classifyExitOutcome`, pure) + `scripts/verify-vault-mandate-exit-outcome.mjs`
+(`test:mandateexit`, in test:all). It moves no money and has no caller yet: feeding it (locating the transaction, reading
+the receipt and balances on both endpoints) belongs to the executor and recovery pieces.
+
+## ⭐⭐ THE SOURCE FINDING: xylo's Withdraw event reports NET assets
+Read from xylo's VERIFIED source (`XyloVault`, compiler 0.8.30, `explorer.testnet.arc.io` — the old
+`testnet.arcscan.app` 301-redirects there), `redeem()`:
+```solidity
+assets = previewRedeem(shares);                  // net of the fee
+uint256 grossAssets = convertToAssets(shares);
+uint256 fee = grossAssets - assets;
+…
+asset.transfer(receiver, assets);                // the net amount, to the redeemer
+if (fee > 0) asset.transfer(feeRecipient, fee);  // the fee: a SEPARATE transfer
+emit Withdraw(msg.sender, receiver, _owner, assets, shares);
+```
+**So the event's `assets` equals the ERC-20 Transfer to the wallet EXACTLY. There is NO fee tolerance:** a mismatch is a
+real disagreement (→ unconfirmed), and a Transfer of the GROSS amount does not agree. The design's open item C11 is
+closed for xylo. What the classifier must handle instead: the transaction carries TWO ERC-20 transfers out of the vault
+(net → wallet, fee → `feeRecipient`), so it matches only the one TO THE WALLET. Another vault family needs its own
+reading of this, like its redemption signal.
+
+## ⭐⭐ BY DESIGN: no wallet-scanning input
+The classifier's input names ONLY the exit transaction's own receipt (located by its Circle id → hash) and the share
+balance across THAT transaction's block. **There is no input for "Withdraw events for this wallet"**, so the user's own
+manual reclaim, which emits exactly such an event, cannot be mistaken for the mandate's exit. This is the structural
+form of the struck rule (C1). A test pins it (no `withdrawEvents` / `findWithdraw` / `eventScan` / `getLogs` in the
+classifier).
+
+## How it decides
+1. **Circle only LOCATES the transaction.** PENDING, unreadable, no id recorded, or COMPLETE without a hash →
+   unconfirmed. FAILED with no hash (rejected before broadcast, `_circle.mjs`) → failed.
+2. **Then only that transaction's receipt counts, and three instruments must agree:**
+   - exactly one `Withdraw` from the VAULT with owner = receiver = the wallet;
+   - an ERC-20 Transfer from the USDC contract, vault → wallet, of the same amount (Arc's native mirror log and the fee
+     transfer are excluded by emitter and by recipient);
+   - the wallet's share balance falling by exactly the burned shares across the block (block − 1 → block).
+3. **Outcomes:**
+   - **exited:** the MANDATE's shares are gone. Shares left in the WALLET are reported as `otherSharesInWallet`
+     (Finding B), never a partial.
+   - **exit-partial:** BOTH amounts: shares redeemed + USDC received; the mandate's remaining shares + their value where
+     read (else null, never guessed). `done:false`.
+   - **failed:** only when the chain says so: the tx reverted; or the outer tx succeeded with NO redeem inside and the
+     shares did not move (the ERC-4337 trap).
+   - **unconfirmed:** everything else, including every unreadable fact, and shares that FELL in the block with no
+     Withdraw in our tx (a manual reclaim: not attributable).
+4. **Flags:** `BEYOND_MANDATE_SHARES` (below); `TRACKED_LOWER_BOUND` (the tracked figure had gaps). Tracked shares
+   already gone before the exit are stated (`trackedNotRedeemable`).
+
+## Red first, mutations
+- **Red: 4 / 39.** All four passes were vacuous negatives ("not exited", "not done", no scan input) that a missing
+  module satisfies. Green: **47 / 0**; test:all **161/161**.
+- **12 mutations, all red in the end:** the STRUCK rule "Circle COMPLETE ⇒ exited" (31 failures) · reading the native
+  mirror log · accepting the fee transfer · wallet shares left ⇒ partial · an unreadable receipt ⇒ failed · a manual
+  reclaim ⇒ failed · a fee tolerance · dropping the share-delta check · a Withdraw from any CONTRACT · to any RECEIVER ·
+  of any OWNER · unreadable shares with no event ⇒ failed.
+- ⚠️ **Four needed better tests first:**
+  - "any contract" and "any receiver" SURVIVED: the tests only asserted "not exited", and another check (the transfer
+    filter, the share delta) happened to refuse for a different reason, masking the missing filter. Fixed with ISOLATED
+    cases where everything else agrees, plus a third for another OWNER's shares.
+  - "unreadable shares with no event ⇒ failed": my first attempt never applied (the search string did not match), then
+    the valid retry survived because no case covered it. A case now does.
+
+## ⛔ FOR THE EXECUTOR PIECE: `BEYOND_MANDATE_SHARES` is NOT an ordinary flag
+It describes something the executor must NEVER do: the redeem burned more shares than `min(tracked, live)`, i.e. it took
+shares the user deposited by hand, **beyond the mandate's authority** (T's Finding B decision). The classifier still
+reports the outcome truthfully (the mandate's shares are gone → `exited`), because the chain is what it is; the flag
+says the executor misbehaved. **How it must surface:**
+- **It stops the mandate machinery**, not just this mandate: the executor's own invariant failed, so no further
+  autonomous exit or deposit runs for ANY mandate until a human has looked (the same class as the tick's CLOCK_BUG
+  refusal: a defect, not an outcome).
+- **The user is told plainly:** "Your mandate's exit redeemed N shares that were not the mandate's (shares you deposited
+  yourself), worth about X USDC. They are in your agent wallet as USDC. This should not have happened; we have stopped
+  all autonomous actions while it is investigated."
+- **The receipt records it as an incident:** both share counts, the tx, and the tracked figure the executor used.
+- **Never summarised as a success**, never folded into a generic warning, never auto-cleared.
+- **A test in the executor piece** must prove the executor cannot submit more than `min(tracked, live)`, so the flag
+  stays a detector of a defect, never an expected path.
