@@ -25,7 +25,6 @@
 import { verifyMandateRecord, MANDATE_STATUS } from "./record.mjs";
 import { decideMandateAction, ACTION } from "./decide.mjs";
 import { MANDATE_EXIT_ARMED, MANDATE_EXIT_ARMED_FROM } from "./limits.mjs";
-import { isChainSeconds } from "./anchor.mjs";
 
 const SHIPPED = Object.freeze({ armed: MANDATE_EXIT_ARMED, armedFrom: MANDATE_EXIT_ARMED_FROM });
 
@@ -41,6 +40,7 @@ export const EXIT_THEN = Object.freeze({ RETRY: "retry", PAUSE_INCONCLUSIVE: "pa
 const EXIT_STATUSES = new Set([MANDATE_STATUS.ACTIVE, MANDATE_STATUS.EXIT_BLOCKED]);
 const isBps = (v) => Number.isInteger(v) && v >= 0 && v <= 10000;
 // A chain timestamp is SECONDS. A value in the millisecond range is a wall-clock time in disguise and is refused.
+const isChainSeconds = (v) => Number.isInteger(v) && v > 1_000_000_000 && v < 100_000_000_000;
 
 /**
  * @param {{ record:object,

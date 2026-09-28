@@ -244,22 +244,12 @@ const VAULT_ABI = parseAbi([
   "function previewDeposit(uint256) view returns (uint256)",
 ]);
 
-/**
- * The anchor's view of a viem block: `{hash, timestamp}` from ONE getBlock (no extra call for the time). viem returns
- * the timestamp as a bigint; it becomes integer seconds here, and a missing one stays null (resolveAnchor refuses it).
- * A missing block → null, never a block with guessed fields.
- */
-export function anchorBlockFacts(b) {
-  if (!b) return null;
-  return { hash: b.hash ?? null, timestamp: typeof b.timestamp === "bigint" ? Number(b.timestamp) : null };
-}
-
 export function viemEndpointReader(rpc) {
   const pc = createPublicClient({ transport: http(rpc) });
   return {
     endpoint: rpc,
     blockNumber: async () => Number(await pc.getBlockNumber()),
-    block: async (n) => anchorBlockFacts(await pc.getBlock({ blockNumber: BigInt(n) })),
+    blockHash: async (n) => (await pc.getBlock({ blockNumber: BigInt(n) }))?.hash ?? null,
     read: ({ address, fn, args, blockHash }) => pc.readContract({ address, abi: VAULT_ABI, functionName: fn, args, blockHash }),
     async simulateRedeem({ vault, shares, holder, blockHash }) {
       try {
