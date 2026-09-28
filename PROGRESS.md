@@ -29834,3 +29834,35 @@ Labels: **[M]** measured today · **[S]** the SDK's published type definitions �
 
 **Gaps:** no mainnet Earn output seen (installed SDK is testnet-only; 1.8.0 not installed); the warnings vocabulary;
 the blog's shown date (09-30) vs the read date (09-28).
+
+---
+
+# ❓ OPEN QUESTION (T, 2026-09-28) — is Earn Kit's `onBeforeAuthorize` a real integration point for DD? NOT ANSWERED
+
+Kept open by T's instruction; recorded here so it is not answered by accident. What is established (EARN KIT read above):
+the hook is **fail-closed** (`'approve' | 'reject'`, awaited; SDK type comment, not measured), it receives the
+verified decode incl. **`summary.vault`**, and it exists **only in adapter-viem-v2 1.18.0's `/next` entry point** —
+**absent from adapter-circle-wallets** (latest 1.8.0), the adapter family our wallets use.
+
+## ⛔ THE GATING DEPENDENCY
+**Circle must ship `onBeforeAuthorize` in adapter-circle-wallets.** Until then it is not an integration point for
+Tikpema or for any integrator on Circle Wallets. Reopen trigger (the CAPABILITY, not a version number): a published
+adapter-circle-wallets whose types carry `onBeforeAuthorize` with an Earn review.
+
+## What else it would take (listed, not decided)
+1. **DD must recognise what the hook will see.** Earn Kit lists Morpho vaults only; DD refuses every Morpho vault today
+   (unrecognised). A hook calling DD now would reject every Earn Kit vault. The V2 profile (the DD V2 window) comes first.
+2. **The hook must tell deposits from exits.** `decoded.action` distinguishes them. A risk finding may refuse a
+   DEPOSIT; refusing a WITHDRAW would trap funds (the same principle as "pausing never traps funds"). Fail-closed on an
+   exit is the dangerous direction.
+3. **Freshness / binding.** The hook fires at authorization; a report is at block N. The same question as piece 4's
+   freshness window: how old a report may gate a signature, and whether the hook fetches a stored report or triggers a
+   new signed one (signing latency measured 1165 ms, 1 sample; a stored-report lookup is unmeasured).
+4. **DD unavailable = no deposits** (fail-closed). Correct direction, but an availability commitment the service does
+   not make today.
+5. **Payment.** DD is a paid x402 service (0.06 USDC). Who pays per authorization, and how, is unscoped.
+6. **Chain.** The report must be for `summary.vault` on the chain in the review, not just the address.
+7. **Stability.** The hook lives in a `/next` entry point: whether that API is stable is unverified.
+8. **Our own use** would also need the app-kit upgrade (HELD): the installed earn-kit 1.6.1 refuses Arc mainnet.
+9. **Reach.** It gates the integrator's own signing only; Circle's listing (`exploreVaults`) is unchanged. It reaches
+   only integrators who opt in.
