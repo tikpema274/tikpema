@@ -28776,6 +28776,12 @@ T deployed `47e642a`. It carries five commits: the clock fix `16ff7f4`, the maxR
 - ⚠️ **That `last` is from the PREVIOUS deploy**: 22:17Z is before the 22:25Z publish. At the time of reading
   (22:38Z) the new deploy's first tick (23:17Z) had not come due. The schedule is registered on 6ab98b57, but
   **"the tick runs on this deploy" is not yet evidenced**. Read `last` after 23:17Z.
+- ✅ **CLOSED, 2026-09-28 09:36Z (read-only, `netlify blobs:get`): the tick RUNS on this deploy.**
+  `vault-mandate-receipts/last` = `{"at":"2026-09-28T09:17:05.156Z","ok":true,"armed":false,"error":null,"results":[]}`
+  (ETag `070ace71…`, changed from `e7d963cd…`). At the time of reading, 6ab98b57 was still the latest production
+  deploy, so this run was served by it: on schedule, disarmed, no mandates. `vault-mandates` still EMPTY; the receipt
+  store holds only `last`. ⚠️ `last` is overwritten every run, so this evidences the 09:17Z run only, not every hour
+  in between.
 
 ## Open
 - ✅ ~~T: the valid-non-operator-session check~~ — **closed 2026-09-27**: `403 {"error":"forbidden"}
@@ -28783,6 +28789,6 @@ T deployed `47e642a`. It carries five commits: the clock fix `16ff7f4`, the maxR
   `! SESSION_SECRET="$(netlify env:get SESSION_SECRET --context production)" node -e 'import("./netlify/functions/_auth.mjs").then(async (m) => { const t = m.issueSession({ address: "0xaaaa000000000000000000000000000000000001", method: "metamask" }).token; const r = await fetch("https://app.tikpema.xyz/.netlify/functions/vault-mandate-operator", { method: "POST", headers: { authorization: "Bearer " + t, "content-type": "application/json" }, body: JSON.stringify({ op: "create", vault: "xylo-usdc" }) }); console.log(r.status, await r.text(), r.headers.get("netlify-vary")); })'`
   Expected: `403 {"error":"forbidden"} body,header=Cookie|Authorization`, identical to the unauthenticated call.
   Observed: exactly that.
-- The first tick on this deploy (23:17Z): read `vault-mandate-receipts/last`.
+- ✅ ~~The first tick on this deploy~~: closed 2026-09-28, `last` at 09:17:05Z on 6ab98b57, disarmed, no mandates (§5).
 - The ledger double-append (§3).
 - Then T creates the operator mandate (CLI: `scripts/vault-mandate-operator.mjs`).
