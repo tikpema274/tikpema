@@ -29740,3 +29740,76 @@ monitoring. Exits armed with `EXIT_AVAILABLE` off still load; monitoring alone s
 1. ✅ closed in code, NOT deployed (step 1's own deploy).
 2. ✅ closed structurally (the guard); monitoring itself is still to build.
 3. OPEN: the liquidity-adapter re-check, built as a structural refusal in step 5.
+
+---
+
+# 📎 EARN KIT (Circle / Arc App Kits) — LAUNCH READ (2026-09-28), read-only, NOTHING recommended
+
+Sources, all read in full: arc.io/blog/embed-usdc-yield-into-your-product (the page shows **September 30, 2026**; read
+on 09-28), community.arc.io "Earn Kit on Arc: Embedded USDC and EURC Lending Opportunities" (2026-09-28), docs.arc.io
+/app-kit/earn and its 8 sub-pages. Plus the SDK's own published types (installed earn-kit **1.6.1** via app-kit 1.14.0;
+latest **1.8.0** / provider-earn-service 1.7.0 read from npm tarballs, NOT installed) and ONE live read-only
+`exploreVaults` (no wallet, no key, nothing signed).
+Labels: **[M]** measured today · **[S]** the SDK's published type definitions · **[D]** documented prose.
+
+## 1. What it does
+- **Calls [D,S]:** `exploreVaults` / `exploreVaultsIterator` / `getVaults` (≤20 addresses) · `getDepositQuote` /
+  `getWithdrawalQuote` · `deposit` (same-chain; with `to` → cross-chain, an `execId`, `getCrossChainDepositStatus` /
+  `waitForCrossChainDeposit`) · `getPosition` (`currentBalance`, `shares`, `pnl` available|pending|unavailable) ·
+  `withdraw` (first one adds a share approval) · `retry(kitError)` for RESUMABLE ("might re-submit the execute
+  transaction").
+- **Execution [D,S]:** the SDK "fetches signed execution parameters from the service" and submits `execute()` to a
+  **Circle ADAPTER contract**, never the vault directly. The service can stop it: `EARN_PAUSED` 8104.
+- **Scope [D]:** Morpho-based vaults on Arc, USDC + EURC. "`exploreVaults` returns all Morpho vaults on the blockchain.
+  No allowlist is applied" (exception: gas-sponsored cross-chain destinations are manually allowlisted). "Does not
+  curate, recommend, or rank." "Supported" = protocol + asset (`EARN_UNSUPPORTED_VAULT` 1102): xylo is out by that rule
+  (not tested).
+- **[M]** installed 1.6.1 refuses mainnet: `"Arc" is not a supported earn chain. Supported chains: Arc_Testnet`; only
+  1.8.0's types name `'Arc'`. With app-kit HELD, our install cannot reach mainnet Earn. Testnet lists 2 vaults, both
+  mocks ("MockMorphoVault", "EarnKit USDC Vault" = the blog's example).
+
+## 2. Risk / governance surface
+- **[S] what exists:** `riskSignals {circleSentinel, warnings?: {type, level: YELLOW|RED}[] (e.g. 'ShortTimelock'),
+  earnKitWarnings?: string[]}`, `manager` (curator only), `fee {performance, management}`, `liquidityProfile
+  {totalDeposits, available, totalSupply, status: active|low_liquidity}`, `asOf`. `circleGuarded` = the deprecated flat
+  alias of `circleSentinel`. [D] community FAQ: "For select circle-guarded vaults, Circle may have a limited sentinel
+  role, which does not include managing strategy or protecting against losses." The `warnings` vocabulary is
+  undocumented.
+- **[S,D] what does not exist:** owner/curator powers, timelock values, allocator or liquidity-adapter identity,
+  holder-level redeemability, anything signed or block-bound.
+- **Before `deposit`, the developer sees `getDepositQuote` — NO risk fields** [D]: vaultName, deposit, expectedShares,
+  sharePrice, currentApy, fees, gasFees. Risk data is only on the discovery listing (and `earnKitWarnings` again on the
+  withdrawal quote).
+- **[M]** both testnet vaults: `available "1000000.0"` with `totalDeposits "0.0"`, `totalSupply "0.0"` →
+  **`available` is not what a holder can redeem** (probably the underlying market's liquidity: inference). All
+  riskSignals empty, manager null, fees null. No mainnet vault seen.
+
+## 3. Overlap with the vault mandate
+- **Shared:** the EXECUTION primitives (deposit / quote / position / withdraw = our `vaultDeposit` / `vaultWithdraw`
+  layer) and a pre-sign decode. It covers Morpho (our DD refuses: unrecognised); we cover xylo (it excludes). It adds
+  cross-chain deposit and P&L, which we lack.
+- **Piece 4 only:** the mandate (cadence, budget, per-deposit amount, ack fingerprint) · autonomous scheduling · a
+  signed DD check at an anchor before every deposit, reads agreed on two endpoints · pause rules · the kill switch ·
+  intent + chain-evidenced recovery (Earn Kit's `retry` is best-effort and may re-submit). Nothing like "exit on a
+  finding, never on a failure to read".
+- **Dependency difference:** an Earn Kit exit needs Circle's signing service up and unpaused; our reclaim calls the
+  vault directly.
+
+## 4. DD as a consumer input
+- **No metadata field** on a listing an integrator can fill: `riskSignals` is service-emitted.
+- **A pre-sign hook [S]:** adapter-viem-v2 **1.18.0** `/next`: `onBeforeAuthorize(request) → 'approve' | 'reject'`,
+  "awaited, fail-closed". For Earn it receives `EarnExecuteReview`: the exact `execute()` calldata + a decode
+  "verified against signed params" (`summary.vault`, `receiver`). An integrator could look up a DD report for
+  `summary.vault` and reject. **Absent** from adapter-circle-wallets 1.8.0 (our wallets' adapter family) and from our
+  installed viem 1.12.1. It gates signing only, not what is listed.
+- [D] the choice sits with the integrator ("decides what to offer"; "solely responsible" — blog disclosure).
+
+## 5. Facts for the V2 window (no conclusion drawn)
+- Earn Kit distributes exactly the Morpho vaults (V2 included) that DD refuses as unrecognised, with no allowlist.
+- Circle's liquidity figure is aggregate, service-reported, timestamped, and [M] not holder redeemability.
+- The scoped V2 exit fact (per-holder simulated redeem at a block, signed, liquidity adapter re-checked against the
+  zero-timelock allocator redirect) is information Earn Kit does not expose.
+- Overlap: `warnings` (e.g. ShortTimelock) and `circleSentinel`: undocumented vocabulary, unsigned.
+
+**Gaps:** no mainnet Earn output seen (installed SDK is testnet-only; 1.8.0 not installed); the warnings vocabulary;
+the blog's shown date (09-30) vs the read date (09-28).
