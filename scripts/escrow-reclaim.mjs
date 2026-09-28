@@ -12,6 +12,7 @@
 // and the Netlify CLI login (read-only Blobs access to job-runs / job-deliverables for OUR job ids).
 // Every result is recorded from the Refunded event (refunded:true), never from "the tx succeeded".
 import { pathToFileURL } from "node:url";
+import { acquireLock, releaseLock, breakStaleLock, refusalMessage, LOCK_EXIT } from "./run-lock.mjs";
 
 export async function runReclaimCli({ argv = [], env = {}, deps, log = () => {} }) {
   const confirm = argv.includes("--confirm");
@@ -55,6 +56,23 @@ export async function runReclaimCli({ argv = [], env = {}, deps, log = () => {} 
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  // ⭐ ONE --confirm AT A TIME (2026-09-28, scripts/run-lock.mjs). --confirm moves money: two concurrent runs could each
+  // submit claimRefund for the same job (the contract refuses the second, but it costs gas and muddles the record). The
+  // lock is taken HERE, in-process — this script is run with `node` directly, so an npm-level wrapper would not bind it —
+  // and BEFORE anything else: no config read, no network. A dry run takes no lock. Stale: --break-stale-lock (renames).
+  const CONFIRM = process.argv.includes("--confirm");
+  if (CONFIRM) {
+    if (process.argv.includes("--break-stale-lock")) {
+      const b = breakStaleLock({ name: "escrow-reclaim" });
+      if (b.ok) console.error(`⚠️ escrow-reclaim: a stale lock was broken — ${b.proof}. Kept as ${b.movedTo}.`);
+      else if (!b.absent) { console.error(`⛔ escrow-reclaim: --break-stale-lock refused — ${b.why}. Nothing was sent.`); process.exit(b.code === "held" ? LOCK_EXIT.held : LOCK_EXIT.unreadable); }
+    }
+    const lk = acquireLock({ name: "escrow-reclaim" });
+    if (!lk.ok) { console.error(refusalMessage(lk, "escrow-reclaim")); process.exit(LOCK_EXIT[lk.code] ?? LOCK_EXIT.unreadable); }
+    const release = () => releaseLock({ name: "escrow-reclaim", token: lk.token });
+    process.on("exit", release);
+    for (const [sig, code] of [["SIGINT", 130], ["SIGTERM", 143]]) process.on(sig, () => { release(); process.exit(code); });
+  }
   const { getStore } = await import("@netlify/blobs");
   const { readFileSync } = await import("node:fs");
   const cfg = JSON.parse(readFileSync(`${process.env.HOME}/.config/netlify/config.json`, "utf8"));
@@ -62,7 +80,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const siteID = JSON.parse(readFileSync(new URL("../.netlify/state.json", import.meta.url), "utf8")).siteId;
   const store = (name) => getStore({ name, siteID, token, consistency: "strong" });
   const core = await import("../netlify/functions/_escrow-reclaim.mjs");
-  const live = await core.liveDeps({ walletAddress: process.argv.includes("--confirm") ? process.env.ESCROW_RECLAIM_WALLET_ADDRESS ?? null : null });
+  const live = await core.liveDeps({ walletAddress: CONFIRM ? process.env.ESCROW_RECLAIM_WALLET_ADDRESS ?? null : null });
   const watch = store("escrow-watch");
   // WHOSE is each client? From our own agent-wallets map: an owner KEY is a login identity; a record's
   // walletAddress is that owner's agent wallet. Anything else is unattributed.

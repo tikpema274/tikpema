@@ -149,8 +149,13 @@ section("4 — ordering: a chain failure leaves the index clean; a gate:ledger f
 section("5 — package.json wiring: gate:ledger is the HEAD of deploy:prod, stage:ledger its TAIL");
 {
   const pkg = JSON.parse(execFileSync("cat", ["package.json"], { encoding: "utf8" }));
-  const chain = pkg.scripts["deploy:prod"];
-  const steps = chain.split("&&").map((s) => s.trim());
+  // Since 2026-09-28 deploy:prod is the run-lock WRAPPER; the chain is deploy:prod:chain, whose first step asserts the
+  // lock is held (scripts/run-lock.mjs, test:runlock). gate:ledger is the chain's first REAL step, right after it.
+  check("deploy:prod is the lock wrapper around deploy:prod:chain", pkg.scripts["deploy:prod"] === "node scripts/run-lock.mjs --lock deploy -- npm run deploy:prod:chain", pkg.scripts["deploy:prod"]);
+  const chain = pkg.scripts["deploy:prod:chain"] ?? "";
+  const all = chain.split("&&").map((s) => s.trim());
+  check("…the chain's step 0 is the lock assertion", all[0] === "node scripts/run-lock.mjs --assert-held --lock deploy", all[0]);
+  const steps = all.slice(1);
   check("⭐ first step is gate:ledger", steps[0] === "npm run gate:ledger", steps[0]);
   check("⭐ last step is stage:ledger", steps[steps.length - 1] === "npm run stage:ledger", steps[steps.length - 1]);
   check("…after gate:deployed and capture:window (which append what gets staged)", steps.indexOf("npm run capture:window") > steps.indexOf("npm run gate:deployed") && steps.indexOf("npm run stage:ledger") > steps.indexOf("npm run capture:window") && steps.indexOf("npm run stage:ledger") > steps.indexOf("npm run gate:deployloss"));

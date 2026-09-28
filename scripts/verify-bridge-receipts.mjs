@@ -990,8 +990,8 @@ section("14 — THE DEAD ENDPOINT: a permanent fault must not wear a transient c
   // ── THE GATE EXISTS AND BLOCKS DEPLOYS ─────────────────────────────────────────────────────
   const pkg = JSON.parse(fs3.readFileSync("package.json", "utf8"));
   check("⭐⭐ `gate:rpc` runs BEFORE the build in deploy:prod — a dead endpoint blocks the deploy",
-    /gate:rpc/.test(pkg.scripts["deploy:prod"]) &&
-    pkg.scripts["deploy:prod"].indexOf("gate:rpc") < pkg.scripts["deploy:prod"].indexOf("netlify deploy"));
+    /gate:rpc/.test(pkg.scripts["deploy:prod:chain"] ?? "") &&
+    pkg.scripts["deploy:prod:chain"].indexOf("gate:rpc") < pkg.scripts["deploy:prod:chain"].indexOf("netlify deploy")); // the chain behind the run-lock wrapper (2026-09-28)
   const gateSrc = fs3.readFileSync("scripts/verify-destination-rpcs.mjs", "utf8");
   check("⭐⭐ the gate fails on `unreachable` but only WARNS on transient — a gate that blocks on someone else's bad minute gets disabled",
     /kind === "unreachable"\) \|\| healthy\.length === 0 \|\| STRICT/.test(gateSrc));

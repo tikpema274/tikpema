@@ -28903,3 +28903,108 @@ first real deposit will land beside shares the mandate does not own.
 More daily samples (latency + endpoint agreement) → set the freshness window from them → the operator arming
 constant (`MANDATE_DEPOSIT_ARMED_OPERATOR`, not built) → the first real deposit on T's wallet. Still open: the
 ledger double-append from deploy 6ab98b57.
+
+---
+
+# 🔒 THE RUN LOCK — one deploy at a time (2026-09-28), BUILT RED-FIRST, NOT COMMITTED
+
+The deploy 6ab98b57 double-append was `deploy:prod` launched twice, 19 s apart. Both chains passed, two production
+deploys were created 16 ms apart and both published (b824 live ~1.3 s), and each appended to the ledgers. The same
+double launch happened on 09-25, hidden because one chain failed its tests. Nothing refused the second run.
+
+## T's decisions (2026-09-28)
+- **A lockfile with the holder's PID, checked at the start of the chain.** A second launch REFUSES, loudly (the running
+  PID, when it started, its log). It never queues or waits.
+- **Stale locks require `--break-stale-lock`. No automatic takeover:** "proven dead" still rests on reading /proc
+  correctly, and being wrong means two concurrent deploys, the thing this prevents.
+- **Never delete another run's lock; never proceed on an unreadable one.**
+- **Scope:** `deploy:prod`, `deploy:site` / `deploy:site:prod`, `sweep:deploys`, and the ledger scripts run by hand
+  (`capture:window`, `gate:deployloss`, `stage:ledger`) share the **`deploy`** lock. `escrow-reclaim --confirm` gets
+  its own (**`escrow-reclaim`**).
+- **The Netlify-side check is SCOPED, NOT BUILT.** It would refuse if Netlify lists a production deploy for this site
+  in new / uploading / building younger than ~90 min. It is cross-machine protection for a problem T does not have,
+  and it adds a network call and an age heuristic to the thing that must be simplest. **Reopen trigger: a second
+  machine or a second operator deploys this site.**
+
+## What was built: `scripts/run-lock.mjs` (library + CLI wrapper)
+- **Atomic acquire:** the content is written to `<lock>.tmp-<pid>-<token>`, then `link()`ed to `<name>.lock`. `link`
+  fails `EEXIST` if a lock exists, so exactly one of any number of simultaneous launches wins, and a crash cannot leave
+  a half-written lock. The temp file is always removed.
+- **The lock records** schema, name, `pid`, `startTime` (`/proc/<pid>/stat` field 22), `bootId`, `host`, `token`,
+  `startedAt`, `log` (the wrapper's stdout: under `nohup … > deploy-logs/X.log`, that log), `cmdline`. Mode 0600, in
+  `~/.cache/tikpema/` (`TIKPEMA_LOCK_DIR` overrides; every test uses a temp dir). Keyed by NAME, not by clone, so a
+  second checkout hits the same lock.
+- **Classification:**
+  - STALE only when proven: another boot (boot_id), no such process (kill 0 → ESRCH, or the /proc entry gone), or
+    the PID reused (alive, but the start time differs).
+  - EPERM → alive.
+  - Another host, or boot_id / liveness / start time unreadable → UNKNOWN, and unknown blocks.
+- **Refusals:** exit **3** held · **4** stale · **5** unreadable / unknown · **6** not held (`--assert-held`). Each names
+  the holder (PID, started, log) and says nothing was started. The stale refusal shows the proof and how to break it.
+- **`--break-stale-lock`:** re-proves staleness now, then RENAMES the lock to `<name>.lock.stale-<ts>-<token8>`
+  (evidence kept), never deletes it. It refuses a live or an unreadable lock. If the renamed file is not the one
+  proven stale (it changed in between), it is put back.
+- **The wrapper** (`--lock <name> -- <cmd>`): holds the lock for the whole command and exports
+  `TIKPEMA_LOCK_TOKEN_<NAME>`. The command's exit code passes through. It releases (by token) when the command exits,
+  success or failure, and forwards SIGINT / SIGTERM to the command. A `kill -9` leaves a stale lock, by design.
+  - `--assert-held`: 0 only when that token holds the live lock.
+  - `--reentrant`: inside the holder's run the command runs; by hand it takes the lock; during a deploy it is refused.
+
+## The wiring
+- `deploy:prod` = `node scripts/run-lock.mjs --lock deploy -- npm run deploy:prod:chain`.
+- **`deploy:prod:chain` = `node scripts/run-lock.mjs --assert-held --lock deploy && <the old chain, byte-identical>`**:
+  the lock comes before `gate:ledger` and `test:all`, so a doomed second launch costs nothing, and the chain cannot be
+  run around the wrapper.
+- `deploy:site` / `deploy:site:prod` → wrappers over new `deploy:site:chain` / `deploy:site:prod:chain` (same
+  assert-held first step, the old strings byte-identical behind it).
+- `capture:window`, `gate:deployloss`, `stage:ledger`, `sweep:deploys` = `run-lock --lock deploy --reentrant -- <old>`.
+- `escrow-reclaim.mjs --confirm`: takes `escrow-reclaim` **in-process** (it is run with `node` directly), before its
+  first `await` (no config read, no network). A dry run takes no lock. `--break-stale-lock` is supported.
+- Suites that read the chain now read `deploy:prod:chain`: `test:ledgergate` (step 0 = the lock assertion, then
+  `gate:ledger` … `stage:ledger` last) and `test:bridge` (`gate:rpc` before `netlify deploy`). `gate:registry`
+  follows the wrapper unchanged.
+- ⚠️ **Limits, stated:** `node scripts/<x>.mjs` run directly bypasses an npm-level wrapper (the deploy chain guards
+  itself with `--assert-held`; escrow locks in-process). One machine only. Linux /proc (WSL); macOS would need
+  `ps -o lstart=` and its own test. Under `setsid` there is no terminal, so the refusal lands in the second launch's
+  log (and its exit code 3).
+
+## Tests, red first: `test:runlock` (in test:all)
+- **Red: 2 / 59.** The two passes were vacuous: with no module nothing was acquired, so "no temp file left" and "lock
+  gone after SIGTERM" held trivially.
+- ⚠️ My first draft hung on a missing module: a child that died instantly exited before the listener was attached.
+  Every spawn now captures its exit at spawn time.
+- **Green: 77 / 0.** It covers:
+  - acquire + fields + mode + no temp;
+  - a live holder refused with PID and log;
+  - the three stale proofs, each REFUSED and the lock kept;
+  - four unknown cases blocking;
+  - four unreadable shapes (empty, bad JSON, missing fields, a directory) refused untouched, the refusal naming the
+    actual failure, and break refusing them;
+  - release only by token;
+  - break renames (not deletes), then a normal acquire wins;
+  - `lockHeldBy`;
+  - real processes: this process live, a real child live, its PID with a wrong start time reused, the child killed
+    = no such process;
+  - the CLI: a second launch exit 3 with its command never run, the exit code passing through (7), release on
+    failure, `--assert-held` in and out, `--reentrant` in (runs) and out (exit 3, never ran), SIGTERM releases, a
+    stale lock exit 4 without the flag and renamed with it;
+  - the wiring, including `escrow-reclaim --confirm` refused (exit 3, holder named) before anything else ran.
+
+## Mutations (each put back)
+| # | Mutation | Result |
+|---|---|---|
+| 1 | non-atomic acquire (exists-check then copy) | red (2): **the barrier race saw 2 and 3 WINNERS in rounds 2–3** + the mechanism pin |
+| 2 | another host treated as stale | red (2) |
+| 3 | the PID-reuse (start time) check removed | red (3) |
+| 4 | release ignores the token | red (2) |
+| 5 | break DELETES instead of renaming | red (3) |
+| 6 | automatic takeover of a stale lock | red (6) |
+| 7 | an unreadable lock read as absent | **survived the first test**: the retry loop still refused, for the wrong reason. The test now requires the refusal to name the read / parse failure → red (1) |
+| 8 | `--reentrant` runs without the holder's token | red (1) |
+| 9 | the wrapper does not release when the command exits | red (7) |
+| 10 | `--assert-held` always passes | red (1) |
+
+**#1 first SURVIVED as well.** The first race test spawned 8 processes, which start tens of ms apart while an acquire
+takes microseconds, so they never overlapped (and my first version of the mutation was invalid anyway: it used names
+the module did not import). The race now uses a start barrier (every racer busy-waits to the same instant), 5 rounds
+× 12, plus a pin that the lock is created only by `linkSync(tmp, path)`. Against those, #1 is red.
