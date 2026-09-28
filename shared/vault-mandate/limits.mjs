@@ -38,6 +38,28 @@ export const DEFAULT_CADENCE = "weekly";
  */
 export const EXIT_AVAILABLE = false;
 
+/**
+ * ═══ EXIT ARMING (piece 5, T 2026-09-28): its OWN pair, separate from the deposit pair ═══════════════════
+ * `MANDATE_EXIT_ARMED` + `MANDATE_EXIT_ARMED_FROM` (epoch ms), flipped TOGETHER in their own reviewed commit. Only
+ * findings in checks anchored (by the anchor block's CHAIN timestamp) AFTER `MANDATE_EXIT_ARMED_FROM` may execute: a
+ * finding recorded while disarmed is never acted on retroactively (shared/vault-mandate/exit-decision.mjs).
+ * Safe order: ship piece 5 disarmed → arm exits (harmless: no exit rules exist) → flip EXIT_AVAILABLE, which also waits
+ * for monitoring (C14).
+ */
+export const MANDATE_EXIT_ARMED = false;
+export const MANDATE_EXIT_ARMED_FROM = null;
+
+// ⛔ ENFORCED AT LOAD, not merely documented: a module that violates these must not load, so no deploy can ship them.
+//   · EXIT_AVAILABLE ⇒ MANDATE_EXIT_ARMED: otherwise users create exit rules that nothing executes, and the disclosure's
+//     "if found: exit" is false.
+//   · MANDATE_EXIT_ARMED ⇒ a finite MANDATE_EXIT_ARMED_FROM: the two are set together.
+if (EXIT_AVAILABLE && !MANDATE_EXIT_ARMED) {
+  throw new Error("limits.mjs: EXIT_AVAILABLE is true but MANDATE_EXIT_ARMED is false — exit rules could be created that nothing executes");
+}
+if (MANDATE_EXIT_ARMED && !Number.isFinite(MANDATE_EXIT_ARMED_FROM)) {
+  throw new Error("limits.mjs: MANDATE_EXIT_ARMED is true but MANDATE_EXIT_ARMED_FROM is unset — the two are flipped together");
+}
+
 // ── USDC in micro-units, so no comparison ever drifts (0.1 + 0.2 ≠ 0.3 in floats) ─────────────
 const micro = (usdc) => Math.round(Number(usdc) * 1e6);
 const fromMicro = (m) => m / 1e6;

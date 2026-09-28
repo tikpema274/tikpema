@@ -29580,3 +29580,83 @@ says the executor misbehaved. **How it must surface:**
 - **Never summarised as a success**, never folded into a generic warning, never auto-cleared.
 - **A test in the executor piece** must prove the executor cannot submit more than `min(tracked, live)`, so the flag
   stays a detector of a defect, never an expected path.
+
+---
+
+# ✅ VAULT MANDATE — PIECE 5: THE PURE EXIT DECISION (2026-09-28), built red-first, NOT deployed
+
+`shared/vault-mandate/exit-decision.mjs` (`decideExit`, pure) · `netlify/functions/_vault-mandate-exit.mjs`
+(`exitPauseCheck`: the exit's OWN pause call; the executor will live here) · `shared/vault-mandate/limits.mjs`
+(`MANDATE_EXIT_ARMED = false`, `MANDATE_EXIT_ARMED_FROM = null`, two load guards) ·
+`scripts/verify-vault-mandate-exit-decision.mjs` (`test:mandateexitdecide`, 49/0, Blobs faked with `mock.module`).
+
+## The gates, in order
+1. **Exit authority:** the record is consistent, ACKNOWLEDGED against the fingerprint of now, and `active` or
+   `exit-blocked` (a retry).
+   - `exiting` refuses: one exit at a time.
+   - A stale acknowledgement refuses: it keeps monitoring, not exit authority.
+   - A deposits pause does NOT block an exit (it is often this very finding that paused them).
+2. **The finding, RE-DECIDED** from the record's rules and the check. A passed-in "exit" is ignored.
+3. **The anchor** is the check's own and carries the block's CHAIN timestamp.
+4. **The fee sanity gate:**
+   - a NULL cap REFUSES → deposits pause INCONCLUSIVE (C6);
+   - a fee ABOVE the cap → refused, deposits pause INCONCLUSIVE, never an exit at an undisclosed price;
+   - a fee exactly AT the cap → go (the user was told "up to the cap");
+   - an unreadable fee → retry.
+5. **The pause gate:** an UNCHECKED pause refuses; a paused agent → `exit-due-paused` (the finding stays live and loud).
+6. **Arming.** `MANDATE_EXIT_ARMED`, then `MANDATE_EXIT_ARMED_FROM` against the anchor's chain time, STRICTLY after:
+   a finding recorded while disarmed never acts retroactively; a later check must find it again.
+
+## ⭐ THREE THINGS WORTH CARRYING
+1. **The load guard THROWS AT MODULE LOAD, so a violating `limits.mjs` cannot ship. That is stronger than a test.**
+   - `EXIT_AVAILABLE ⇒ MANDATE_EXIT_ARMED`: otherwise users create exit rules nothing executes, and the disclosure's
+     "if found: exit" is false.
+   - `MANDATE_EXIT_ARMED ⇒ a finite MANDATE_EXIT_ARMED_FROM`: the two are flipped together.
+
+   Any build that imports the module fails, not just a suite someone might skip. The test loads REWRITTEN COPIES of
+   the real source (from a temp dir) and proves the bad combinations throw and the good ones load.
+2. **Arming is checked LAST**, so a disarmed run still reports `wouldExit`. Every other gate is evaluated first, and
+   the disarmed tick's "WOULD EXIT" receipt then says whether the exit WOULD have passed authority, the re-decided
+   finding, the anchor, the fee and the pause, not merely "disarmed".
+3. **A millisecond timestamp is REFUSED: wall-clock time cannot pass as a chain timestamp.** A chain timestamp is
+   SECONDS. A value in the millisecond range (a `Date.now()` in disguise) and a bare wall-clock `anchoredAt` both
+   refuse (`anchor-time-unknown`). The one-clock identity guard does not survive storage (C3), so arming must rest on
+   something that does: the chain's own time.
+
+## The pause gate's OWN call
+`exitPauseCheck({walletAddress})` → `pauseReason({owner, agent: AGENT.VAULT})` → `{checked:true, reason}`.
+- Tested against the REAL `_pause.mjs`:
+  - a Vault-agent pause → stops the exit;
+  - ALL_AGENTS → stops it;
+  - AGENT_HALT (including an unrecognised value, which fails closed) → stops it;
+  - an unreadable store → stops it (fail closed);
+  - the EXECUTOR agent paused → does NOT stop a Vault-agent exit.
+- A source check: the module never routes through `executeAction` / `vault_withdraw` / `isReclaim` (finding C: that
+  branch skips the pause by design).
+- The user's manual reclaim stays pause-exempt: pausing never traps funds; it only stops the agent acting alone.
+
+## Red first, mutations
+- **Red: 3 / 46.** The three passes were true-and-vacuous: `EXIT_AVAILABLE` is false, the implication holds
+  trivially, and no production caller exists yet. Green **49 / 0**; test:all **162/162**.
+- **16 mutations, 15 red:**
+  - a null cap passing; a wall-clock fallback; a millisecond timestamp accepted;
+  - an anchor AT `ARMED_FROM` allowed; retroactive (ARMED_FROM not compared);
+  - an unchecked pause read as running; a pause reason ignored;
+  - a second exit in flight; exit authority = deposit authority; a passed-in decision trusted;
+  - the arming gate dropped; the pause checked for the WRONG agent; no pause call at all;
+  - both load guards removed.
+- **The survivor is an equivalent mutant:** "null cap: skip the comparison". The null-cap refusal one line earlier
+  always returns first, so the mutated line cannot change behaviour.
+
+## ⛔ BLOCKERS ON THE EXECUTOR (not notes: the executor does not arm until each is closed)
+1. **Anchor chain time.** `resolveAnchor` (`shared/vault-mandate/anchor.mjs`) returns only
+   `{blockNumber, blockHash, endpoints}`. It must read the anchor block's TIMESTAMP on BOTH endpoints and REQUIRE
+   AGREEMENT; a disagreement is no anchor. **This changes the DEPLOYED check's `anchor.mjs`** (the live disarmed tick
+   uses it), so it ships as its own reviewed change with the executor wiring. Until then `decideExit` refuses every
+   exit (`anchor-time-unknown`), which is safe but means nothing can execute.
+2. **C14: `EXIT_AVAILABLE` must also wait for MONITORING.** A fully deposited mandate is never checked again until
+   monitoring exists, so "if found: exit" would be mostly false. **There is no monitoring constant to guard against
+   yet.** When monitoring lands, the same load guard must add `EXIT_AVAILABLE ⇒ <monitoring live>`.
+3. **The liquidity-adapter re-check (V2).** The exit's fresh execution reads must confirm the vault's liquidity adapter
+   is the one the finding check saw (the allocator's zero-timelock redirect, decided 2026-09-28). That belongs to the
+   execution reads, not this decision. Required before any V2 vault can carry an exit rule (xylo has no adapter).
