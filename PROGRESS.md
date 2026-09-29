@@ -30409,3 +30409,59 @@ control than site access; this is the residual, and it is written in `halt.mjs` 
 ## Next
 - Step 4: the exit intent + state machine (create-only `x/<owner>/<id>`, `exiting` before the intent; an open deposit
   intent blocks). Steps 3–6 deploy together, disarmed.
+
+---
+
+# ✅ VAULT MANDATE — PIECE 5 STEP 4: THE EXIT INTENT + STATE MACHINE (2026-09-29), built red-first, NOT deployed
+
+T's rules: one exit intent per mandate, create-only, at `x/<owner>/<id>`; `submitting → submitted (Circle id) →
+redeemed (hash) → asserted | failed`; the mandate `exiting` BEFORE the intent; one exit at a time (never resubmit while
+an intent is open); an open DEPOSIT intent blocks the exit (C8); a crash between states leaves the intent readable and
+resolvable; an unreadable intent blocks, never read as absent.
+
+## `shared/vault-mandate/exit-intent.mjs` (new, pure)
+- `exitIntentKey` = `x/<owner lowercased>/<id>`. `buildExitIntent` → a `submitting` intent carrying the step-3 limit
+  (`sharesToRedeem`, `sharesTracked`, gaps 0, `liveSharesAtIntent`) and an idempotency key DERIVED from the intent key
+  (`circle-idempotency.mjs`, so recovery can recompute it). A zero or refused limit builds NOTHING.
+- `advanceExitIntent`: only submitting → submitted (needs the Circle id) → redeemed (needs a 64-hex hash) → asserted
+  (needs `exited` / `exit-partial`) | failed (needs a reason, or the chain's `failed`); submitting/submitted → failed
+  too. Skips, backwards moves, anything out of a terminal state, and replacing a recorded Circle id are refused;
+  `unconfirmed` never asserts; every move lands in `history`. `verifyExitIntent` requires each state's fields.
+- `resolveExitState` (after a crash): unreadable → **blocked** (never "no intent"); malformed → blocked; `exiting` +
+  no intent → nothing-submitted (a submit only ever follows a written intent); `submitting` → locate by the
+  idempotency key; `submitted` → read Circle; `redeemed` → classify from the chain; terminal → close; an OPEN intent
+  while the mandate is not `exiting` → blocked (inconsistent: a deposit could interleave).
+
+## `_vault-mandate-store.mjs`: `exitIntentAdapter` — strong read (`readable:false` on failure), create-only, CAS update.
+
+## `_vault-mandate-exit.mjs`: `beginMandateExit` + `advanceStoredExitIntent`
+Order: halt latch → the mandate (readable, consistent, `active` / `exit-blocked`; `exiting` refused) → the exit intent
+(unreadable blocks; open → exit-in-flight; terminal → refused) → open deposit intents (C8; unreadable blocks) → the
+step-3 share limit → **set `exiting` (CAS)** → **open deposit intents AGAIN** (a deposit working from the tick's
+earlier read can still write its intent after the first check; seen → the status is handed back, no exit intent) →
+the intent, create-only (a throw leaves `exiting` with no intent: nothing-submitted). **Nothing submits here**: step 6
+wires this to `submitMandateExitRedeem`.
+
+## Red first, mutations
+- Red **74/75** (the 1 pass vacuous). Two harness fixes first: absent modules made refusal cases pass vacuously; one
+  path crashed instead of reporting. Green **78/0** (`test:mandateexitintent`, Blobs faked in memory, the real
+  adapters). Covers each rule (incl. the op log: `exiting` written BEFORE the intent; a deposit intent slipped in
+  between → refused and handed back), a crash after every state read back and resolved, unreadable exit intent /
+  deposit intents / mandate all blocking, today's live case → nothing-to-redeem with nothing written.
+- **20 mutations, all red.** One (the first C8 check deleted) went red only after the test was strengthened to demand
+  ZERO writes: the re-check had masked it.
+- First `test:all` failed 2 suites (`test:literals`, `test:literalscontrols`): my fixture hard-coded Arc's chain id;
+  now the fixture chain id 31337, as the decision suite. test:all **165/165**. Off the DD surface.
+
+## ⚠️ Found: the deposit side of the race — closed in the NEXT commit (step 4b)
+`depositForMandate` worked from the record the tick read and never re-read it before executing, so `exiting` alone did
+not stop a deposit already in progress.
+
+## ⭐ DECISIONS (T, 2026-09-29) — amend the one-intent rule (step 4c, next)
+- **ATTEMPT SUFFIX, `x/<owner>/<id>/<n>`**, with `n` on the mandate record set in the SAME CAS that sets `exiting`.
+  Archive REJECTED: it needs an attempt number anyway (one live key → one derived idempotency key → a retry colliding
+  with attempt 1 at Circle) and adds a non-atomic move (copy, then a CAS overwrite that ends create-only on the key).
+- **Order is READS → INTENT → SUBMIT.** A vault refused by the fresh simulated redeem costs NO attempt and retries on a
+  later tick. Attempts are consumed only by real submissions that revert or fail at Circle.
+- **`exit-partial` must also be able to retry** (the intent asserts while the mandate still holds shares).
+- Retry policy: Claude proposes one with reasoning (step 4c).

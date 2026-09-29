@@ -35,6 +35,7 @@ import {
   buildMandateRecord, verifyMandateRecord, acknowledgeMandate, preflightMandateInput, MANDATE_STATUS, MANDATE_ORIGIN, DEPOSITS_STATE, MONITORING_STATE,
 } from "../../shared/vault-mandate/record.mjs";
 import { HALT_PREFIX, haltKey, haltStateFrom } from "../../shared/vault-mandate/halt.mjs";
+import { exitIntentKey } from "../../shared/vault-mandate/exit-intent.mjs";
 
 // 🚨 STRONG, as for the policy store: a mandate is a SAFETY input. A CDN-cached copy could let a
 // record the user just changed act on the rules it replaced.
@@ -144,6 +145,30 @@ export function mandateAdapter(store) {
     list: () => listMandates({ store }),
     read: ({ owner, id }) => readMandate({ store, owner, id }),
     update: ({ owner, id, record, etag }) => updateStoredMandate({ store, owner, id, record, etag }),
+  };
+}
+
+/**
+ * The EXIT intent (shared/vault-mandate/exit-intent.mjs): ONE per mandate, `x/<owner>/<id>`, same store.
+ * read → {readable:true, intent|null, etag} | {readable:false, why}: a store failure is NEVER "no intent".
+ * create is create-only; update is CAS on the etag just read.
+ */
+export function exitIntentAdapter(store) {
+  return {
+    async read(owner, id) {
+      try {
+        const r = await store.getWithMetadata(exitIntentKey(owner, id), { type: "json", consistency: READ_CONSISTENCY });
+        return { readable: true, intent: r?.data ?? null, etag: r?.etag ?? null };
+      } catch (e) { return { readable: false, why: `exit intent unreadable: ${String(e?.message ?? e)}` }; }
+    },
+    async create(key, intent) {
+      const res = await store.setJSON(key, intent, { onlyIfNew: true });
+      return res?.modified === false ? { ok: false, exists: true } : { ok: true, etag: res?.etag ?? null };
+    },
+    async update(key, intent, etag) {
+      const res = await store.setJSON(key, intent, { onlyIfMatch: etag });
+      return res?.modified === false ? { ok: false, conflict: true } : { ok: true, etag: res?.etag ?? null };
+    },
   };
 }
 
