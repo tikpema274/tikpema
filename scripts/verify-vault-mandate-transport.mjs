@@ -294,6 +294,21 @@ const deps5 = (over = {}) => ({ ...deps3(), anchorReaders: anchorReaders(), stat
   const d = decideMandateAction({ rules: RECORD.rules, check: c?.check ?? {} });
   ok("⭐ …and the decider allows the deposit", d.action === ACTION.DEPOSIT, `${d.action} ${JSON.stringify(d.flags)} ${JSON.stringify(d.unestablished)}`.slice(0, 200));
 
+  // ── piece 5 step 5, BLOCKER 3: the check RECORDS the vault's exit path (profile + adapter) from its code at the anchor
+  // block hash, on both endpoints. The exit's fresh reads compare against it (exit-path.mjs). Additive: it never
+  // changes the check itself.
+  const withCode = (code, over = {}) => ({ ...stubReader(over.endpoint ?? A), code: async ({ blockHash }) => { if (blockHash !== HH) throw new Error("not at the anchor"); return code; } });
+  const XYLO_BYTES = codeWith(["setFees(uint256,uint256,uint256)", "emergencyWithdraw(address,uint256)"]);
+  const cx = await attemptAsync(() => runMandateCheck({ record: RECORD, deps: deps5({ stateReaders: [withCode(XYLO_BYTES), withCode(XYLO_BYTES, { endpoint: B })] }) }));
+  ok("⭐ the check records the exit path: xylo, NO adapter, read at the anchor block hash on both endpoints",
+    cx?.exitPath?.readable === true && cx?.exitPath?.known === true && cx?.exitPath?.profile === "xylo" && cx?.exitPath?.adapter === null, show(cx?.exitPath));
+  ok("⭐ …a check that records no exit path is still the SAME check: readers without code() → exitPath unreadable, and the deposit decision unchanged",
+    c?.exitPath?.readable === false && decideMandateAction({ rules: RECORD.rules, check: c?.check ?? {} }).action === ACTION.DEPOSIT, show(c?.exitPath));
+  const cd = await attemptAsync(() => runMandateCheck({ record: RECORD, deps: deps5({ stateReaders: [withCode(XYLO_BYTES), withCode(codeWith(["setCurator(address)"]), { endpoint: B })] }) }));
+  ok("the endpoints DISAGREE on the code → exitPath unreadable (never one endpoint's answer)", cd?.exitPath?.readable === false, show(cd?.exitPath));
+  const cv = await attemptAsync(() => runMandateCheck({ record: RECORD, deps: deps5({ stateReaders: [withCode(codeWith(["setCurator(address)"])), withCode(codeWith(["setCurator(address)"]), { endpoint: B })] }) }));
+  ok("a V2-shaped surface → recorded as an UNKNOWN exit path (the exit will refuse it)", cv?.exitPath?.readable === true && cv?.exitPath?.known === false, show(cv?.exitPath));
+
   const s = await attemptAsync(() => runMandateCheck({ record: RECORD, deps: deps5({ signOptions: signOptions({ sign: async () => { throw new Error("circle 503"); } }) }) }));
   const o1 = s?.check?.observations?.r1;
   ok("⭐ signing fails → power + owner rules are OUTAGE, and the why says signing failed", o1?.status === OBSERVED.UNESTABLISHED && o1?.cause === CAUSE.OUTAGE && /sign/i.test(o1?.why ?? ""), show(o1));

@@ -511,7 +511,7 @@ async function tickOne({ owner, id, deps, config, now }) {
   // 3. CHECK — anchor, the report AT it, SIGNED, verified; both endpoints' readings by blockHash.
   const checked = await deps.runCheck(record);
   const base = { amountUsdc: amount, anchor: checked.anchor, report: checked.report, verification: checked.verification,
-    reportFailure: checked.reportFailure, readings: checked.readings, timing: checked.timing, cost: checked.cost };
+    reportFailure: checked.reportFailure, readings: checked.readings, exitPath: checked.exitPath, timing: checked.timing, cost: checked.cost };
 
   // 4. DECIDE — an EXIT is a pause until piece 5 (EXIT_AVAILABLE).
   const decision = decideMandateAction({ rules: record.rules, check: checked.check });

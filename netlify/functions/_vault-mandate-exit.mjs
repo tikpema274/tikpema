@@ -15,6 +15,9 @@ import { AGENT } from "./_agents.mjs";
 import { shareLimitForRecord } from "../../shared/vault-mandate/share-limit.mjs";
 import { buildHaltIncident, readHaltLatch } from "../../shared/vault-mandate/halt.mjs";
 import { MANDATE_STATUS } from "../../shared/vault-mandate/record.mjs";
+import { decideExit } from "../../shared/vault-mandate/exit-decision.mjs";
+import { readExitExecution } from "../../shared/vault-mandate/exit-reads.mjs";
+import { exitPathGate } from "../../shared/vault-mandate/exit-path.mjs";
 import { buildExitIntent, advanceExitIntent, exitIntentKey, retryDecision, buildNeverSubmittedIntent, settledOutcomeOf, verifyExitIntent, EXIT_INTENT_OPEN } from "../../shared/vault-mandate/exit-intent.mjs";
 
 /**
@@ -99,7 +102,7 @@ export async function haltIfBeyondMandate({ halt, classified, context, now }) {
  *          deps:{mandates, depositIntents, exitIntents, halt, now:Function}}} a
  * @returns {{ok:true, key:string, intent:object} | {ok:false, code:string, why:string, mandateExiting?:boolean}}
  */
-export async function beginMandateExit({ owner, id, liveShares, deps }) {
+export async function beginMandateExit({ owner, id, liveShares, expectShares = undefined, deps }) {
   const no = (code, why, extra = {}) => ({ ok: false, code, why, ...extra });
   const h = await readHaltLatch(deps?.halt);
   if (!h.readable) return no("halt-unreadable", h.why);
@@ -138,6 +141,11 @@ export async function beginMandateExit({ owner, id, liveShares, deps }) {
   const limit = shareLimitForRecord(record, liveShares);
   if (!limit.ok) return no(limit.code, limit.why);
   if (limit.nothingToRedeem) return no("nothing-to-redeem", `the mandate holds no shares of its own (tracked ${limit.tracked}); ${limit.notTheMandates} in the wallet are not the mandate's`);
+  // step 5: the fresh reads SIMULATED a redeem of `expectShares`. If the limit moved since (the record changed), that
+  // simulation was of another amount: refused BEFORE anything is written, and a later tick reads again.
+  if (expectShares !== undefined && String(expectShares) !== limit.shares) {
+    return no("limit-moved", `the reads simulated ${expectShares} shares but the limit is now ${limit.shares}: the simulation no longer covers this exit`);
+  }
   const built = buildExitIntent({ record, limit, now: deps.now(), attempt: next,
     retryOf: n > 0 ? { attempt: n, lastOutcome: rd.lastOutcome, kind: rd.kind } : null });
   if (!built.ok) return no("intent-unbuildable", built.why);
@@ -224,4 +232,66 @@ export async function settleExitAttempt({ owner, id, deps }) {
   const u = await deps.mandates.update({ owner, id, record: next, etag: r.etag });
   if (!u?.ok) return no("status-write-failed", (u?.errors ?? []).join("; ") || "the mandate changed while it was being settled");
   return { ok: true, attempt: n, status: next.status, lastOutcome: next.exit.lastOutcome, sharesTrackedRaw: next.progress.sharesTrackedRaw };
+}
+
+// ═══ PIECE 5 STEP 5: THE EXIT SEQUENCE — READS → INTENT → SUBMIT (T, 2026-09-29) ═══════════════════════════════
+// The order IS the safety property, so it is one function, in this order:
+//   1. READS     readExitExecution: a fresh anchor, the live shares → the limit, the exit fee, the exit path, a
+//                SIMULATED redeem of exactly the limit — on both endpoints, agreed. Nothing written.
+//   2. GATES     exitPathGate (blocker 3: the exit path the finding check recorded vs now; unknown REFUSES) and
+//                decideExit (authority, the finding re-decided, the anchor's chain time, the fee at execution, the pause,
+//                arming). Nothing written.
+//   3. INTENT    beginMandateExit, told the amount the reads simulated (`expectShares`): `exiting` + the attempt, then
+//                the create-only intent. The first write of the exit.
+//   4. SUBMIT    submitMandateExitRedeem (the step-3 bound + the halt latch), with the intent's idempotency key; the
+//                intent advances submitted (Circle id, via onSubmitted) → redeemed (hash).
+// ⛔ Every refusal in 1–2 writes NOTHING, so it burns no attempt: a vault short of cash is refused by the simulation and
+//    retried on a later tick. ⛔ A submit that THROWS leaves the intent OPEN (outcome unknown → recovery), never failed.
+// ⛔ `decide` defaults to decideExit with NO config: the shipped arming (MANDATE_EXIT_ARMED = false) applies, so in
+//    production this stops at step 2, disarmed. Tests inject an armed decider; no production code passes `config`.
+// ⚠️ NOT WIRED: no production caller (step 6: the background executor + recovery, which also classifies and settles).
+/**
+ * @param {{owner, id, finding:{check, anchor, exitPath}, deps:{mandates, depositIntents, exitIntents, halt, now, readers,
+ *          decide?, pauseCheck?, submit?}}} a
+ */
+export async function runMandateExit({ owner, id, finding, deps }) {
+  const stop = (stage, r) => ({ ok: false, stage, code: r.code, why: r.why, then: r.then ?? "none", ...(r.wouldExit ? { wouldExit: true } : {}) });
+  const h = await readHaltLatch(deps.halt);
+  if (!h.readable) return stop("halt", { code: "halt-unreadable", why: h.why });
+  if (h.halted) return stop("halt", { code: "halted", why: h.why });
+  const r = await deps.mandates.read({ owner, id });
+  if (!r?.readable || !r.record) return stop("mandate", { code: "mandate-unreadable", why: (r?.errors ?? []).join("; ") || "no mandate", then: "retry" });
+  const record = r.record;
+
+  // 1. READS
+  const reads = await readExitExecution({ record, readers: deps.readers });
+  if (!reads.ok) return stop("reads", reads);
+
+  // 2. GATES
+  const path = exitPathGate({ recorded: finding?.exitPath, fresh: reads.exitPath });
+  if (!path.ok) return stop("exit-path", path);
+  const pause = await (deps.pauseCheck ?? exitPauseCheck)({ walletAddress: record.walletAddress });
+  const decide = deps.decide ?? ((a) => decideExit(a));
+  const d = await decide({ record, finding, execution: { exitFeeBps: reads.exitFeeBps }, pause });
+  if (!d?.go) return stop("decide", d ?? { code: "no-decision", why: "the decision returned nothing" });
+
+  // 3. INTENT
+  const b = await beginMandateExit({ owner, id, liveShares: reads.liveShares, expectShares: reads.limit.shares, deps });
+  if (!b.ok) return stop("intent", b);
+  const attempt = b.intent.attempt;
+
+  // 4. SUBMIT
+  let s;
+  try {
+    s = await submitMandateExitRedeem({ record, liveShares: reads.liveShares, halt: deps.halt, idempotencyKey: b.intent.idempotencyKey, submit: deps.submit,
+      onSubmitted: async ({ circleId }) => { await advanceStoredExitIntent({ exitIntents: deps.exitIntents, owner, id, attempt, to: "submitted", circleId, at: deps.now() }); } });
+  } catch (e) {
+    return { ok: false, stage: "submit", code: "submit-outcome-unknown", attempt, then: "recover",
+      why: `the submit threw (${String(e?.message ?? e)}); the intent stays open and recovery reads Circle and the chain — never marked failed on an exception` };
+  }
+  if (!s.submitted) return { ok: false, stage: "submit", code: s.code, why: s.why, attempt, then: "recover" };
+  const adv = await advanceStoredExitIntent({ exitIntents: deps.exitIntents, owner, id, attempt, to: "redeemed", txHash: s.redeemHash, at: deps.now() });
+  return { ok: true, attempt, circleId: s.circleId, redeemHash: s.redeemHash, sharesSubmitted: s.sharesSubmitted,
+    reads: { anchor: reads.anchor, exitFeeBps: reads.exitFeeBps, measuredExitBps: reads.measuredExitBps, simulation: reads.simulation, exitPath: reads.exitPath },
+    ...(adv.ok ? {} : { warning: `the redeemed hash could not be recorded on the intent (${adv.why}); recovery finds it by the Circle id` }) };
 }

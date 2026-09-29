@@ -24,6 +24,7 @@
 // verifyAttestation marks the hash binding "pass 2 not built". The check records the anchor HASH beside
 // the report (both endpoints agreed on it). See PROGRESS for why the mandate does not wait on pass 2.
 
+import { readExitPath, agreedExitPath } from "../../shared/vault-mandate/exit-path.mjs";
 import { createPublicClient, http, parseAbi } from "viem";
 import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { attachAttestation, verifyAttestation } from "../../shared/onchain-analyze/attest.mjs";
@@ -134,14 +135,18 @@ export async function runMandateCheck({ record, deps }) {
   if (!a.ok) return whole(`no anchor block: ${a.why}`);
   timing.anchoredAt = clock();
 
-  const [rep, readings] = await Promise.all([
+  const [rep, readings, exitPaths] = await Promise.all([
     signedCheckReport({ address: v.address, anchor: a.anchor, deps }).then((r) => {
       timing.verifiedAt = clock(); timing.signingLatencyMs = timing.verifiedAt - timing.anchoredAt; return r;
     }),
     Promise.all(deps.stateReaders.map((reader) =>
       readStateAtAnchor({ reader, vault: v, holder: record.walletAddress, anchor: a.anchor, cashOnly: deps.cashOnly(v.key),
         redemptionSignal: deps.redemptionSignal?.(v.key) }))),
+    // piece 5 step 5, BLOCKER 3: the vault's EXIT PATH (profile + adapter) at the anchor, both endpoints. The exit's
+    // fresh reads compare against it (exit-path.mjs). Additive: unreadable is recorded as such and changes nothing else.
+    Promise.all(deps.stateReaders.map((reader) => readExitPath({ reader, vault: v, anchor: a.anchor }))),
   ]);
+  const exitPath = agreedExitPath(exitPaths);
   cost.signCalls += rep.cost.signCalls;
 
   const check = observeMandateCheck({
@@ -150,7 +155,7 @@ export async function runMandateCheck({ record, deps }) {
     maxReportAgeBlocks: 0,
     report: rep.report, reportFailure: rep.why, stateReadings: readings,
   });
-  return { anchor: a.anchor, check, report: rep.report, verification: rep.verification, reportFailure: rep.why, readings, cost, timing };
+  return { anchor: a.anchor, check, report: rep.report, verification: rep.verification, reportFailure: rep.why, readings, exitPath, cost, timing };
 }
 
 /**
@@ -261,6 +266,8 @@ export function viemEndpointReader(rpc) {
     blockNumber: async () => Number(await pc.getBlockNumber()),
     block: async (n) => anchorBlockFacts(await pc.getBlock({ blockNumber: BigInt(n) })),
     read: ({ address, fn, args, blockHash }) => pc.readContract({ address, abi: VAULT_ABI, functionName: fn, args, blockHash }),
+    // EIP-1898 by block HASH (measured 2026-09-29: both Arc testnet endpoints serve eth_getCode this way)
+    code: ({ address, blockHash }) => pc.request({ method: "eth_getCode", params: [address, { blockHash }] }),
     async simulateRedeem({ vault, shares, holder, blockHash }) {
       try {
         const r = await pc.simulateContract({ address: vault, abi: VAULT_ABI, functionName: "redeem", args: [shares, holder, holder], account: holder, blockHash });

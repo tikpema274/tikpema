@@ -30566,3 +30566,95 @@ retry submits **500**, and 200 of those are T's hand-deposited shares.
     refused, but only AFTER the `exiting` CAS, so the mandate was left **STUCK in `exiting`** with no intent of its own.
     The pre-read refuses before anything is written; the test now demands ZERO writes and the status still `active`.
 - test:all **165/165**. Off the DD surface.
+
+---
+
+# ✅ VAULT MANDATE — PIECE 5 STEP 5: FRESH EXECUTION READS, THE EXIT-PATH GATE (BLOCKER 3), AND THE ORDER READS → INTENT → SUBMIT (2026-09-29/30), built red-first, NOT deployed
+
+T's requirements: keep the order explicit and tested (READS, then INTENT, then SUBMIT); a vault refused by the fresh
+simulated redeem burns NO attempt — the intent must not exist yet, and a test proves the refusal path writes nothing;
+the fresh reads re-check the liquidity adapter against the one the finding check recorded (blocker 3): xylo trivially
+satisfied, a V2 vault REFUSES until the DD V2 profile exists, never skipping the comparison — a structural refusal.
+
+## The order — `runMandateExit` (`_vault-mandate-exit.mjs`), one function, this order
+1. **READS** — `readExitExecution` (`shared/vault-mandate/exit-reads.mjs`, new): a fresh anchor both endpoints agree
+   on (hash + chain time), then at that block hash on BOTH: live shares → the step-3 limit, the declared exit fee (+ the
+   preview-implied one, recorded), the exit path, and a SIMULATED redeem of EXACTLY the limit (never the whole wallet),
+   classified by `redeem-sim.mjs`. Every figure only where both agree; a failed read is a retry, never 0.
+2. **GATES** — `exitPathGate`, then `decideExit`.
+3. **INTENT** — `beginMandateExit` told the amount the reads simulated (`expectShares`): a moved limit → `limit-moved`,
+   refused BEFORE any write.
+4. **SUBMIT** — `submitMandateExitRedeem` (the step-3 bound + the halt latch) with the intent's idempotency key; the
+   intent advances submitted (Circle id via `onSubmitted`) → redeemed (hash).
+- **Proof of the order:** the op log (every chain read before the first store write; decide after the reads; the
+  intent before the submit), a source-order check on the function body, and mutation S16 (the intent written before
+  the reads → 16 failures).
+- **⭐ The refusal paths write NOTHING:** a simulated-redeem SHORTFALL, disagreeing endpoints, an unverifiable exit
+  path, no recorded exit path, a refused decision, the pause, the halt latch, a moved limit — each → ZERO store writes
+  (no `exiting`, no intent, no attempt), no submit. **After a shortfall the next run is attempt 1: nothing was burned.**
+- A submit that THROWS leaves the intent OPEN (`submit-outcome-unknown` → recovery); never marked failed on an
+  exception.
+- **Production stops before any write:** `decide` defaults to `decideExit` with NO config (shipped disarmed); a source
+  guard keeps `config` out of production. ⚠️ The default-decide test stops at `not-an-exit` (its fixture finding has
+  no exit observation), so it proves "nothing written", not "disarmed"; the disarmed gate is proven in
+  `test:mandateexitdecide`.
+- ⚠️ NOT WIRED: no production caller (step 6: the background executor, recovery, classification, settle).
+
+## BLOCKER 3 — `shared/vault-mandate/exit-path.mjs` (new): a STRUCTURAL refusal
+- The vault's PROFILE, recognised from its bytecode at the block hash (`vault-profiles.mjs`, the recognition the DD
+  engine and the deposit gate use), and the ADAPTER that profile routes redemptions through. `EXIT_PATHS`: xylo →
+  adapter `null` (redeems from its own cash).
+- `exitPathGate`: recorded missing/unreadable → `exit-path-unrecorded`; fresh unreadable → retry; **an UNKNOWN exit
+  path on EITHER side REFUSES, EVEN WHEN BOTH SIDES AGREE** (`exit-path-unverifiable`: "recorded unknown == fresh
+  unknown" is two readings that do not know where the liquidity comes from); a profile or adapter change → refused.
+- **Structural:** `assertExitPathRegistry` runs at module load — an entry declaring an adapter THROWS, because no
+  adapter reading or comparison exists. A V2 entry cannot be added by editing a table; it needs the DD V2 window's
+  profile AND an adapter reading here.
+- **The finding check records it:** `runMandateCheck` (`_vault-mandate-check.mjs`) reads the exit path on both
+  endpoints at the anchor and returns `exitPath`; the tick receipt carries it. ADDITIVE: a reader without `code()` →
+  `exitPath` unreadable, the check and the deposit decision unchanged (tested). The production reader gains
+  `code({address, blockHash})` (EIP-1898). ⚠️ This touches the check the LIVE tick runs — every receipt from the
+  steps 3–6 deploy on carries `exitPath`.
+
+## 📏 MEASURED LIVE, read-only (2026-09-29)
+- Both endpoints serve `eth_getCode` by block HASH; xylo's raw code is recognised `xylo`; its EIP-1967 implementation
+  slot is zero (not a proxy).
+- The production reader at a real agreed anchor (64658598): exit path xylo, no adapter, identical on both.
+- `readExitExecution` on the REAL operator mandate: as stored (tracked 0) → `nothing-to-redeem`, "1009998 in the wallet
+  are not the mandate's", NO simulation run. With tracked overridden to 500 IN MEMORY: anchor 64658625, live 1009998,
+  limit 500, fee 10 bps declared = 10 measured, exit path xylo, simulated redeem of 500 → PAID (an eth_call; nothing
+  signed).
+
+## Red first, mutations
+- `test:mandateexitreads` (new): red **53/54** (the pass vacuous: no `runMandateExit`, so nothing passed config) →
+  **54/0**. Transport: 4 new cases red → **74/0**.
+- **16 mutations, all red:** unknown-on-both accepted · no recorded path accepted · the registry guard removed · the
+  whole wallet simulated · a shortfall read as a pass · share disagreement unchecked · unrecognised read as paid · the
+  exit-path refusal ignored · the decision refusal ignored · `expectShares` ignored · a submit exception marking the
+  intent failed · unreadable code read as xylo · one endpoint's exit path accepted · the check trusting one endpoint's
+  code · production passing `config` · the intent before the reads.
+- test:all: the first run failed `test:dd` — **my own doing**: I ran `stamp:clear` while test:all was mid-run, nulling
+  the stamp its identity case reads. `test:dd` alone (stamp present) → all green, that case ✅. A clean re-run with the
+  tree untouched: **test:all 166/166**. (Also mine: a waiter using `pgrep -f` matched its OWN command line and never
+  fired.) ⛔ Never touch the stamp while test:all runs. Off the DD surface (all 8 changed paths checked).
+
+## ⚠️ A RECURRING PATTERN: an ABSENCE silently replaced by a DEFAULT, making a case prove something else (T, 2026-09-30)
+Three times in piece 5. Two in TEST HELPERS, one in PRODUCTION code — the same shape:
+1. **Step 1 (test helper):** `at(hash, timestamp = TS)` — the "missing timestamp" cases passed `undefined`, the default
+   put a valid timestamp back, and two cases never tested a missing timestamp.
+2. **Step 3 (PRODUCTION, `exit-outcome.mjs:62`):** `Number.isInteger(gaps) ? gaps : 0` read a missing gap count as 0 —
+   the default the share limit forbids. Found by review, not by a test.
+3. **Step 5 (test helper):** `run(st, { decide = goDecide })` — the "production default decide" case passed
+   `decide: undefined`, the helper's default put the ARMED decider back, and the case ran armed.
+
+**Ban or assert? ASSERT ON THE RECEIVED VALUE, plus a narrow presence rule — not a wholesale ban.**
+- A ban is mis-aimed: the suites hold **259** positional defaults across 156 files, nearly all harmless (`over = {}`,
+  `clock = T0`). A ban costs a sweep of hundreds of helpers and still would not catch #2, which is production code.
+- What made #1 and #3 silent is that the case asserted on the OUTCOME, never on what the subject was actually GIVEN.
+  **Rule 1 — a case that tests an ABSENCE asserts the subject RECEIVED the absence** (a spy on the boundary records
+  the input: the reader saw `timestamp: undefined`; the sequence ran `decideExit`, not `goDecide`). That turns the trap
+  from silent to loud wherever it hides, helper or not.
+- **Rule 2 — a helper parameter that a case may pass as ABSENT uses presence, not a default:** `"key" in opts` or rest
+  args, never `key = X`. Narrow and local: only the parameters cases vary to absence.
+- #2's shape in production is already the family `absence-must-never-read-as-safe`; the step-3/4 guards (`isKnownGapCount`,
+  unreadable → blocked) are its instances.
