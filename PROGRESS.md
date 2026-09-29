@@ -30061,3 +30061,41 @@ its deploy is also the lock lines' first outing. **Not deployed tonight.**
 ## Next
 - T deploys step 2 (+ `7f0e5ea`) on its own, then runs one live manual reclaim.
 - T runs the idempotency measurement (steps 1, 2, 4, 5 decide recovery; step 3 is informational).
+
+---
+
+# ✅ BLOCKER 1 CLOSED LIVE (2026-09-29 11:17Z): the first signed, anchored check under dda505f carries the anchor block's CHAIN timestamp, agreed by both endpoints, and it reaches the receipt
+
+Read-only, 11:18–11:25Z (`netlify blobs:get/list vault-mandate-receipts`, `eth_getBlockByNumber` on both endpoints).
+Deploy 6abac4ec (carries dda505f), disarmed. Closes section 5 (⏳ PENDING) of the deploy 6abac4ec entry.
+
+## The receipt
+- New window receipt `w/0x74b7…24e5/8379419c-…/1790592761406-1` (window 1 of the daily cadence; the poller saw it at
+  11:18:41Z). `last` = `{"at":"2026-09-29T11:17:07.124Z","ok":true,"armed":false,"error":null}`: 8379419c →
+  `would-deposit` (10 USDC, disarmed), 5ef4c048 → `may-not-deposit` (cancelled). Same outcome as yesterday's window 0.
+- **`anchor` = `{blockNumber: 64599777, blockHash: 0x88fe7600…6def7, timestamp: 1790680624, endpoints:
+  [rpc.testnet.arc.io, arc-testnet.drpc.org]}`** — the `timestamp` field is present. Baseline (window 0, 2026-09-28
+  11:17:03Z): `{blockNumber: 64430336, blockHash: 0x161334d7…3267, endpoints: [same two]}`, **no timestamp**; its
+  etag is unchanged (`8f648915…`), so it was not rewritten.
+
+## Checked against the chain, not only against the receipt
+- `eth_getBlockByNumber(64599777)` on **both** endpoints independently: hash `0x88fe7600…6def7` and timestamp
+  **1790680624** (= 2026-09-29 **11:17:04Z**) from each — identical to the receipt, on both.
+- Integer seconds: `isChainSeconds(1790680624) === true` (the real function from `shared/vault-mandate/anchor.mjs`,
+  the exact test `decideExit` applies at `exit-decision.mjs:79`). Not milliseconds, not a string.
+- A few seconds before the tick, as predicted: chain time 11:17:04Z → `timing.anchoredAt` 11:17:05.833Z (1.8 s later)
+  → `verifiedAt` 11:17:07.090Z.
+- Both endpoints are named, and the code only produces an anchor when they agree on hash AND timestamp (dda505f); a
+  disagreement would have read OUTAGE (`outage-skipped`), not this receipt.
+- **Signing still ran:** `report.attestation.signature` present; `timing.signingLatencyMs` **1257** (sample 2 after
+  1165 on window 0). Coverage 13/13 `ran`; payability returned `999000` on both readings.
+
+## What this closes, and what it does not
+- ✅ **Blocker 1 is closed LIVE:** a check from this code carries a chain timestamp that satisfies `decideExit`'s
+  anchor-time condition, so `decideExit` will no longer refuse `anchor-time-unknown` on such a check.
+- ⚠️ **`decideExit` itself was not exercised:** this check is `would-deposit` (no exit finding), so nothing called it.
+  What is proven is that the input it tests passes the test it applies.
+- ⚠️ **The timestamp is on the receipt's `anchor`, not inside the signed DD report** (the report carries no anchor
+  field). It reaches the receipt, which is what was to be confirmed; the attestation does not cover it.
+- The 21:17Z tick on this deploy (the `limits.mjs` load-guard proof) was not read directly; the **09:17Z** tick on the
+  same deploy ran clean (`error: null`, `observed-this-window`), which is the same proof.
