@@ -18,7 +18,7 @@ export async function handler(event) {
   if (event?.blobs) connectBlobs(event);
   const deps = await productionTickDeps({ getStore, event });
   const beat = await runMandateTick({ deps });
-  const summary = { at: new Date().toISOString(), ok: beat.ok, armed: beat.armed, error: beat.error ?? null,
+  const summary = { at: new Date().toISOString(), ok: beat.ok, armed: beat.armed, halted: beat.halted === true, error: beat.error ?? null,
     results: beat.results.map(({ owner, id, outcome, code, amountUsdc, reason }) => ({ owner, id, outcome, code, amountUsdc, reason })) };
   await getStore(VAULT_MANDATE_RECEIPT_STORE).setJSON("last", summary).catch(() => {});
   console.log(`[vault-mandate-tick] ${JSON.stringify(summary)}`);

@@ -30317,3 +30317,95 @@ identical on both.
 - **The mandate:** the wallet holds shares again, so the 2026-09-30 11:17Z check (window 2) simulates a redeem of
   1009998 shares, not the aggregate read. The mandate still tracks **0** shares of its own (`sharesTrackedRaw: "0"`):
   a manual deposit is not the mandate's.
+
+---
+
+# ✅ VAULT MANDATE — PIECE 5 STEP 3: THE SHARE LIMIT min(tracked, live) + THE HALT LATCH (2026-09-29), built red-first, NOT deployed
+
+T's requirements (2026-09-29): the share limit is pure, refuses a tracked figure with gaps and never reads a gap as 0;
+a test proves the executor cannot submit more than it, so `BEYOND_MANDATE_SHARES` only ever detects a defect; the halt
+latch stops ALL mandate machinery on that flag, the tick and the exit both read it and fail closed, and it is never
+auto-cleared: clearing is deliberate (a commit), not a dashboard toggle.
+
+## The share limit — `shared/vault-mandate/share-limit.mjs` (new, pure)
+- `mandateShareLimit({sharesTrackedRaw, sharesTrackedGaps, liveShares})` → `min(tracked, live)`;
+  `shareLimitForRecord(record, live)` reads `record.progress`.
+- **Refuses, never 0:** gaps > 0 (`tracked-has-gaps`: tracked is only a lower bound); a missing / non-integer / negative
+  gap count (`gaps-unknown`); a tracked figure that is not a decimal string (`tracked-unknown`); an unreadable live
+  balance (`live-unknown`). **A refusal carries no `shares` field.**
+- **Tracked is the ceiling:** it is the mandate's authority; no live figure raises the limit above it.
+- ⭐ **Today's live case is an ANSWER, not an error:** tracked `"0"` (the operator mandate never deposited), live
+  `1009998` (T's manual shares) → `{ok:true, shares:"0", nothingToRedeem:true, notTheMandates:"1009998"}`. An exit
+  would redeem nothing, and the manual shares stay.
+
+## The executor cannot submit more — `submitMandateExitRedeem` (`_vault-mandate-exit.mjs`)
+- Computes the limit ITSELF from the record + live balance. **A caller's `shares` argument is refused with an error**:
+  there is no way to hand the exit a number. The one `submitRedeem(` call in all mandate code (source guard), with
+  `shares: lim.shares`. Limit 0 → nothing submitted (`nothing-to-redeem`).
+- Tests: over a 4×5 grid of (tracked, live), exactly one submit of exactly the minimum, never above either; an
+  inflated live cannot raise it past tracked; the wallet and vault are the record's own.
+- **So BEYOND_MANDATE_SHARES is a defect detector:** a chain that burns what was submitted classifies `exited` with no
+  flag (1009498 manual shares reported apart); one share more burned than submitted → the flag fires.
+- ⚠️ **NOT WIRED:** no production caller (the executor is step 6). Arming, anchor, fee and pause stay with `decideExit`.
+
+## The halt latch — `shared/vault-mandate/halt.mjs` (new) + `haltAdapter` (`_vault-mandate-store.mjs`)
+- **Incident records, create-only**, `halt/<incidentId>` in the mandate store (`vault-mandates`, not the receipts
+  store). The id = the incident time + the tx hash's first 12 hex. A second incident is a second record; the first is
+  never overwritten. **Recording the same id twice is refused (exists) and the first stays byte-for-byte** — tested,
+  and red when `onlyIfNew` is removed.
+- **Set** by `haltIfBeyondMandate` on `BEYOND_MANDATE_SHARES` only (not `TRACKED_LOWER_BOUND`). The incident holds both
+  share counts, the tx, the block, the tracked figure the executor used, and the user's sentence ("…shares that were
+  not the mandate's (shares you deposited yourself)… we have stopped all autonomous actions while it is
+  investigated"). **A failed write still returns `halted:true, recorded:false`**: the caller stops regardless.
+- **Read** by `readHaltLatch` (shared): halted, unreadable, a malformed answer, or NO reader → fail closed. A key under
+  `halt/` that does not parse halts. A store whose list throws → `readable:false`, never "not halted".
+- **The tick** (`runMandateTick`) reads it BEFORE listing any mandate: halted or unreadable → `{ok:false, halted:true,
+  results:[]}`, no check, no deposit, for every mandate. The scheduled handler's `last` summary gains `halted`.
+- **The exit** (`submitMandateExitRedeem`) reads it first: halted or unreadable → nothing submitted.
+- **Never auto-cleared:** five halted ticks in a row stay halted; no mandate file deletes a halt record (source guard).
+
+### ⛔ How a human clears it
+**A commit.** Add the incident id to `MANDATE_HALT_CLEARED` in `shared/vault-mandate/halt.mjs`, with a comment (who
+looked, what was found, what changed), and deploy. It ships EMPTY and FROZEN. The incident record stays in the store as
+evidence. Reviewed, in git history, and it takes a deploy: never a dashboard toggle, never code.
+
+### ⚠️ The stated gap
+**Anyone with access to the site's Netlify Blobs can DELETE an incident record, and that lifts the halt** (the latch is
+"any uncleared record exists"). It also **destroys the evidence** of the incident. The store has no finer access
+control than site access; this is the residual, and it is written in `halt.mjs` too.
+
+## Aligned: the classifier refuses an unknown gap count (T, same pattern, same answer)
+- `exit-outcome.mjs:62` read a missing `sharesTrackedGaps` as **0** — the default the share limit forbids. It now
+  refuses: a missing or malformed count → `unconfirmed`, `refused: "gaps-unknown"`, not classified. **One predicate,
+  `isKnownGapCount`, exported from `share-limit.mjs` and used by both.**
+- ⚠️ **`TRACKED_LOWER_BOUND` is UNREACHABLE from our own exits:** the limit refuses gaps, so the executor never writes
+  an intent with gaps > 0. The flag stays (an intent from elsewhere, or a future design), and the classifier's comment
+  says so. **Its ABSENCE on our receipts is NOT evidence that a tracked figure was exact: it cannot appear there.**
+
+## Changed in existing files
+- `_vault-mandate-deposit.mjs`: the latch read at the top of `runMandateTick`; `halt: store.haltAdapter(mstore)` in
+  the production deps. `vault-mandate-tick.mjs`: `halted` in the summary.
+- `verify-vault-mandate-deposit.mjs`: its two tick fixtures gain a not-halted reader (without one the tick now fails
+  closed, as designed); the "only the deposit module imports mandate code AND uses `executeAction`" guard now strips
+  comments — the exit module's header EXPLAINS why it never routes through `executeAction` and was being counted.
+  Mutation M14 (a real call added) proves the guard still catches a call. 232/0.
+- `package.json`: `test:mandatehalt` in `test:all`.
+- Off the DD surface (all 9 changed paths checked): ddTree does not rotate.
+
+## Red first, mutations, and two real bugs
+- **Red:** halt suite **80/83** failing (the 3 passes vacuous: no module has no `shares` field; the tick already
+  proceeds; nothing deleted). Classifier: **8** new cases failing on the old default. Green: halt **86/0**, classifier
+  **57/0**, deposit **232/0**.
+- **17 mutations, all red:** a missing gap count read as 0 · gaps accepted · max for min · live only · an unread live
+  read as 0 · the exit honouring a caller's shares · the exit accepting a `shares` arg · the exit skipping the latch ·
+  an unreadable latch read as open · the tick skipping a missing reader · unparseable keys ignored · a failed latch
+  write reported not halted · a store list failure read as not halted · BEYOND not the trigger · the exit calling
+  `executeAction` · a second `submitRedeem` caller · code deleting a halt record. Plus: `onlyIfNew` removed → the three
+  duplicate-id tests red.
+- 🐛 **Caught by the tests, twice:** a refusal message ran `JSON.stringify` on the value it refused, so a BigInt input
+  made the function THROW instead of refusing — first in the share limit, then again in my classifier change (a `0n`
+  case added first, red, then fixed). Both now use one non-throwing `shown` from `share-limit.mjs`.
+
+## Next
+- Step 4: the exit intent + state machine (create-only `x/<owner>/<id>`, `exiting` before the intent; an open deposit
+  intent blocks). Steps 3–6 deploy together, disarmed.

@@ -212,6 +212,18 @@ section("7 — Finding B edge cases");
     short?.outcome === "exited" && short?.trackedNotRedeemable === "2000000", show(short));
   const gaps = classify(withIntent({ sharesTrackedGaps: 2 }));
   ok("tracked shares with gaps → still classified, and marked as a LOWER bound (never presented as exact)", gaps?.outcome === "exited" && gaps?.trackedIsLowerBound === true && gaps?.flags?.includes("TRACKED_LOWER_BOUND"), show(gaps));
+  // ⛔ A GAP COUNT IS NEVER READ AS 0 (piece 5 step 3, T 2026-09-29): the same rule and the same answer as the share
+  // limit (share-limit.mjs, GAPS_UNKNOWN). An intent whose gap count is missing or malformed is refused as malformed.
+  for (const g of [undefined, null, "0", 0.5, -1, NaN, true, 0n]) {
+    const r = classify(withIntent({ sharesTrackedGaps: g }));
+    ok(`⭐ an intent whose gap count is ${typeof g === "bigint" ? `${g}n` : JSON.stringify(g) ?? "undefined"} → refused as malformed (gaps-unknown), NEVER classified as if 0`,
+      r?.outcome === "unconfirmed" && r?.refused === "gaps-unknown" && /gap count/i.test(r?.why ?? "") && !r?.flags?.includes("TRACKED_LOWER_BOUND") && r?.mandateSharesRedeemed === undefined, show(r));
+  }
+  { const b = base(); const intent = { ...b.intent }; delete intent.sharesTrackedGaps;
+    const r = classify({ ...b, intent });
+    ok("⭐ the gap-count FIELD absent → refused the same way (an absence is not a clean count)", r?.outcome === "unconfirmed" && r?.refused === "gaps-unknown", show(r)); }
+  const zero = classify(withIntent({ sharesTrackedGaps: 0 }));
+  ok("a gap count of exactly 0 → classified normally (exited, no lower-bound flag)", zero?.outcome === "exited" && !zero?.flags?.includes("TRACKED_LOWER_BOUND"), show(zero?.outcome));
   const bad = classify(withIntent({ sharesToRedeem: "0" }));
   ok("an intent with nothing to redeem (0) → refused as malformed, not classified", bad?.outcome === "unconfirmed" && /intent/i.test(bad?.why ?? ""), show(bad));
 }

@@ -34,6 +34,7 @@ export const INTENT_CLOSED = Object.freeze(["asserted", "refused", "not-deposite
 import {
   buildMandateRecord, verifyMandateRecord, acknowledgeMandate, preflightMandateInput, MANDATE_STATUS, MANDATE_ORIGIN, DEPOSITS_STATE, MONITORING_STATE,
 } from "../../shared/vault-mandate/record.mjs";
+import { HALT_PREFIX, haltKey, haltStateFrom } from "../../shared/vault-mandate/halt.mjs";
 
 // 🚨 STRONG, as for the policy store: a mandate is a SAFETY input. A CDN-cached copy could let a
 // record the user just changed act on the rules it replaced.
@@ -143,6 +144,26 @@ export function mandateAdapter(store) {
     list: () => listMandates({ store }),
     read: ({ owner, id }) => readMandate({ store, owner, id }),
     update: ({ owner, id, record, etag }) => updateStoredMandate({ store, owner, id, record, etag }),
+  };
+}
+
+/**
+ * The HALT LATCH (shared/vault-mandate/halt.mjs), over the mandate store's `halt/` prefix.
+ * read() → {readable:true, halted, open, why} | {readable:false, why}: a store failure is NEVER "not halted".
+ * record(incident) → create-only `halt/<incidentId>`; there is no update and no delete (clearing is a commit).
+ */
+export function haltAdapter(store) {
+  return {
+    async read() {
+      let keys;
+      try { keys = ((await store.list({ prefix: HALT_PREFIX })).blobs ?? []).map((b) => b.key); }
+      catch (e) { return { readable: false, why: `halt latch unreadable: ${String(e?.message ?? e)}` }; }
+      return { readable: true, ...haltStateFrom({ keys }) };
+    },
+    async record(incident) {
+      const res = await store.setJSON(haltKey(incident.incidentId), incident, { onlyIfNew: true });
+      return res?.modified === false ? { ok: false, exists: true } : { ok: true };
+    },
   };
 }
 

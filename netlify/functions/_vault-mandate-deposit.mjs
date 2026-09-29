@@ -31,6 +31,7 @@
 //   safety — a deposit cannot proceed without a successful check — and it switched off every exit rule on one
 //   RPC blip. INCONCLUSIVE and findings still latch, as a DEPOSITS pause (record /3): monitoring keeps running.
 
+import { readHaltLatch } from "../../shared/vault-mandate/halt.mjs";
 import { createHash } from "node:crypto";
 import { verifyMandateRecord, DEPOSITS_STATE } from "../../shared/vault-mandate/record.mjs";
 import { decideMandateAction, ACTION, FLAG } from "../../shared/vault-mandate/decide.mjs";
@@ -521,6 +522,13 @@ async function tickOne({ owner, id, deps, config, now }) {
  */
 export async function runMandateTick({ deps, config = SHIPPED }) {
   const now = deps.now();
+  // ⛔ THE HALT LATCH FIRST (piece 5 step 3, shared/vault-mandate/halt.mjs). An uncleared BEYOND_MANDATE_SHARES incident
+  // stops ALL mandate machinery — every mandate, no check, no deposit — until a human clears it by a commit. Unreadable,
+  // malformed or absent (no reader in deps) is HALTED too: a latch that cannot be read is not a latch that is open.
+  const halt = await readHaltLatch(deps.halt);
+  if (!halt.readable || halt.halted) {
+    return { ok: false, armed: config?.armed === true, halted: true, error: halt.readable ? halt.why : `HALTED (fail closed): ${halt.why}`, results: [] };
+  }
   let list;
   try { list = await deps.mandates.list(); }
   catch (e) { return { ok: false, armed: config?.armed === true, error: `mandates could not be listed: ${String(e?.message ?? e)}`, results: [] }; }
@@ -565,6 +573,7 @@ export async function productionTickDeps({ getStore, event = null }) {
     mandates: store.mandateAdapter(mstore),
     intents: store.intentAdapter(mstore),
     receipts: store.receiptAdapter(getStore(store.VAULT_MANDATE_RECEIPT_STORE)),
+    halt: store.haltAdapter(mstore),
     isPaused: (wallet) => pause.assertNotPaused({ owner: wallet, agent: agents.AGENT.VAULT }),
     limits: {
       ceilingUsdc: () => Number(budget.budgetConfig().PERIOD_CEILING_USDC),

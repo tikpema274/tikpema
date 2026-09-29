@@ -30,6 +30,7 @@
 // (or Circle's terminal pre-broadcast rejection) to SAY so.
 
 import { decodeEventLog, parseAbiItem } from "viem";
+import { isKnownGapCount, SHARE_LIMIT_REFUSED, shown } from "./share-limit.mjs";
 
 export const EXIT_OUTCOME = Object.freeze({ EXITED: "exited", PARTIAL: "exit-partial", UNCONFIRMED: "unconfirmed", FAILED: "failed" });
 export const EXIT_FLAG = Object.freeze({ BEYOND_MANDATE_SHARES: "BEYOND_MANDATE_SHARES", TRACKED_LOWER_BOUND: "TRACKED_LOWER_BOUND" });
@@ -59,7 +60,16 @@ export function classifyExitOutcome({ config, intent, facts } = {}) {
   const toRedeem = asBig(intent?.sharesToRedeem);
   if (toRedeem === null || toRedeem <= 0n) return unconfirmed("the intent names no shares to redeem; it is malformed and nothing can be classified against it");
   const tracked = asBig(intent?.sharesTracked);
-  const gaps = Number.isInteger(intent?.sharesTrackedGaps) ? intent.sharesTrackedGaps : 0;
+  // ⛔ A GAP COUNT IS NEVER READ AS 0 (step 3, T 2026-09-29): the same test and the same answer as the share limit.
+  // Missing or malformed → the intent is malformed and is not classified (it used to default to 0 here).
+  if (!isKnownGapCount(intent?.sharesTrackedGaps)) {
+    return { ...unconfirmed(`the intent's tracked-shares gap count is unknown (${shown(intent?.sharesTrackedGaps)}); an unknown count is not zero, so nothing is classified against it`), refused: SHARE_LIMIT_REFUSED.GAPS_UNKNOWN };
+  }
+  const gaps = intent.sharesTrackedGaps;
+  // ⚠️ TRACKED_LOWER_BOUND IS UNREACHABLE FROM OUR OWN EXITS (step 3): the share limit REFUSES a tracked figure with
+  // gaps, so the executor never submits against one and never writes an intent with gaps > 0. The flag stays for an
+  // intent from elsewhere (or a future design that allows lower-bound exits). ⛔ Its ABSENCE on our receipts is
+  // therefore NOT evidence that a tracked figure was exact: it cannot appear there at all.
   if (gaps > 0) flags.push(EXIT_FLAG.TRACKED_LOWER_BOUND);
   const f = facts ?? {};
 

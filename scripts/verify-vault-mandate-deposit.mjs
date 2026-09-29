@@ -100,7 +100,10 @@ section("0 — R1 + R2: the caps live off the DD surface; the gate is a code con
   const src = ["netlify/functions", "shared", "src"].flatMap((d) => walk(d)).filter((f) => /\.(mjs|js|ts|tsx|jsx)$/.test(f));
   // "Knows the mandate" = IMPORTS a vault-mandate module (statically or dynamically); a comment naming one does not count.
   const importsMandate = (s) => /(from\s*|import\s*\(\s*)["'][^"']*vault-mandate[^"']*["']/.test(s);
-  const both = src.filter((f) => { const s = readFileSync(f, "utf8"); return importsMandate(s) && /\bexecuteAction\b/.test(s); });
+  // "Calls executeAction" = in CODE: comments are stripped, so a module that explains why it must NEVER route through
+  // executeAction (the exit, finding C) is not counted as calling it (piece 5 step 3).
+  const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
+  const both = src.filter((f) => { const s = readFileSync(f, "utf8"); return importsMandate(s) && /\bexecuteAction\b/.test(codeOnly(s)); });
   ok("  (the import detector sees the tick handler's import)", importsMandate(existsSync("netlify/functions/vault-mandate-tick.mjs") ? readFileSync("netlify/functions/vault-mandate-tick.mjs", "utf8") : ""));
   ok("⭐ only _vault-mandate-deposit.mjs both imports the mandate and calls executeAction", both.length === 1 && both[0] === "netlify/functions/_vault-mandate-deposit.mjs", both.join(", "));
   // The test seam (`config`) exists so this suite can arm a run. No production caller may pass it.
@@ -611,6 +614,8 @@ function tickDeps(record, { intents, over = {}, clock = T0 } = {}) {
   return { x, mandates, receipts, deps: {
     ...x.deps, mandates: mandates.proxy, receipts, now: clk,
     isPaused: async () => null,
+    // piece 5 step 3: the tick reads the halt latch FIRST and fails closed without a reader (test:mandatehalt)
+    halt: { async read() { return { readable: true, halted: false, open: [], cleared: [], unparseable: [], why: null }; } },
     runCheck: (rec) => runMandateCheck({ record: rec, deps: { ...checkDeps(), now: clk } }),
     ...over,
   } };
@@ -788,6 +793,7 @@ section("11 — ⭐⭐ the clock: an ADVANCING clock, as in production (tick and
     const x = execDeps({ record: records[0] });
     const mandates = fakeMandates(records);
     const deps = { ...x.deps, mandates, receipts: fakeReceipts(), now: clock, isPaused: async () => null,
+      halt: { async read() { return { readable: true, halted: false, open: [], cleared: [], unparseable: [], why: null }; } },
       runCheck: (rec) => runMandateCheck({ record: rec, deps: { ...checkDeps(), now: clock } }) };
     const res = await attemptAsync(() => runMandateTick({ deps, config: { ...ARMED, armedFrom: T0 - DAY } }));
     return { res, x, mandates };
