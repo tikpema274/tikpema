@@ -30113,3 +30113,58 @@ Deploy 6abac4ec (carries dda505f), disarmed. Closes section 5 (⏳ PENDING) of t
   field). It reaches the receipt, which is what was to be confirmed; the attestation does not cover it.
 - The 21:17Z tick on this deploy (the `limits.mjs` load-guard proof) was not read directly; the **09:17Z** tick on the
   same deploy ran clean (`error: null`, `observed-this-window`), which is the same proof.
+
+---
+
+# 🚀 DEPLOY 6abba32a — piece 5 step 2 (`submitRedeem` under the manual reclaim) LIVE; the mandate still DISARMED (2026-09-29), verified read-only
+
+T deployed `ebc87f8`; ledgers committed in `72211d2`. Checked afterwards, read-only, 2026-09-29 ~13:40–13:55Z.
+
+## What this deploy carried (73abcf3 → ebc87f8)
+- `8e399f0` — **step 2, the one runtime change**: `submitRedeem` factored out of `vaultWithdraw`
+  (`netlify/functions/_vault.mjs`) + `shared/circle-idempotency.mjs`. The manual reclaim now calls `submitRedeem`
+  with NO key and NO hook: the same Circle call as before. The only other caller of either is none at runtime (the
+  mandate exit does not call it yet).
+- `7f0e5ea` — the run lock's success lines (local tooling, not shipped).
+- `5882d7d`, `2286ecb`, `a92db9b`, `ebc87f8` — PROGRESS / ledgers only.
+- `git diff 73abcf3 ebc87f8`: 9 files; runtime = `_vault.mjs`, `shared/circle-idempotency.mjs`.
+
+## 1. What prod serves
+- Deploy **`6abba32a4531bf9fb724b95e`**, `ready`, production. Created 11:38:18.448Z, **published 12:11:46.673Z**
+  (~33 min; the build step alone 33m 30s). `commit_ref` null (CLI deploy), so identity comes from the stamp.
+- Served stamp: **commit `ebc87f8f58aa…`, tree `2f8addf23db9…`**, stamped 11:38:21.288Z.
+- **gate:deployed ✅** in the chain AND re-run independently (stamp → gate → `stamp:clear`, tree clean after): serves
+  this tree; control plane == data plane (both 6abba32a); no orphaned production deploys among the 25 newer. HEAD
+  `72211d2` (the ledger commit) ≠ stamped `ebc87f8`; trees identical.
+- `available_functions` **153** (unchanged: no new function). `function_schedules` still lists `vault-mandate-tick` at
+  `17 * * * *`.
+
+## 2. ddTree did NOT rotate; no window
+- The capture (12:12:24Z): **ddTree `d79683273abc` == previous**, "NO WINDOW OBSERVED — and this is NOT a pass":
+  nothing rotated, so nothing was expected or witnessed.
+- Independently: `git diff --name-only 73abcf3 ebc87f8` over the DD surface (4 dirs + 22 files parsed from
+  `scripts/stamp-build.mjs`, all 22 present) = **0 files**, `git diff` exit 0. `GET /api/dd-analyze` → **405**.
+  - ⚠️ Caught on the way: a first attempt parsed the list with comment text included; `git diff` died "fatal: '//' is
+    outside repository" and the pipe still printed "0 files". Redone with comments stripped and the exit code read.
+    A count from a command that failed is not a count.
+
+## 3. Ledgers + losses — ONE line each
+- **gate:ledger ✅** (re-run): dd-refusal-window-log **131** (was 130; last 12:12:22.062Z), deploy-loss-log **45**
+  (was 44; last 12:13:28.946Z), both committed in `72211d2`. **One new line per ledger.**
+- **One deploy log** for this run: `deploy-logs/2026-09-29-1325.log`.
+- **Loss sweep:** 17 losses, **0 new** (re-run `deploy-loss-sweep.mjs --gate-new --no-log`: "17 carried").
+
+## 4. ⭐ The run lock SAYS it ran — first real outing of 7f0e5ea; the check is DIRECT now, not inferred
+- Line 5: `🔒 deploy: lock acquired — PID 16510, log …/2026-09-29-1325.log, started 2026-09-29T11:25:48.860Z`
+- Last line: `🔓 deploy: lock released — PID 16510, log …/2026-09-29-1325.log, command exited 0`
+- **Same PID (16510), same log, on both.** Between them, line 8's `--assert-held` passed and the chain ran to the end.
+  On 09-28 the only evidence was the assert passing, no refusal, and the lock dir emptying 220 ms after the log's
+  last write.
+
+## 5. The mandate on the new code
+- The **13:17Z** tick (first ticks on this deploy: 12:17Z, 13:17Z) → `last` = `{ok:true, armed:false, error:null}`,
+  8379419c `observed-this-window`, 5ef4c048 `may-not-deposit` (cancelled). The window-0 and window-1 receipts' etags
+  are unchanged. Step 2 touches no tick code; this is the control, not a proof of step 2.
+
+## ⏳ PENDING — the point of this deploy: T's live manual reclaim
+The rebuilt `vaultWithdraw` is exercised only by a real reclaim. Until then, step 2 is deployed, not proven live.
