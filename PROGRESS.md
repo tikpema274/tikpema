@@ -30238,3 +30238,36 @@ latency inside the ~10 s ceiling. Its failure is swallowed (it can never abandon
 - **Stored, moves no money:** the `vault-reclaims` store and its session-gated GET.
 - **DISPLAY ONLY:** the stage text, the receipt card, a reclaim history list. The same card could serve the manual
   deposit, which has the same gap.
+
+---
+
+# ✅ STEP 2 PROVEN LIVE (2026-09-29): T's manual reclaim on deploy 6abba32a behaved exactly as before — read from the chain
+
+T ran "Withdraw all (reclaim)" on the Vault page; the panel said 0.999 USDC received, 41.53 → 42.53, shares zero.
+**The hash was not captured** (the reclaim stores nothing — see RECLAIM FEEDBACK above), so it was found from the
+chain: `eth_getLogs` for the vault's `Withdraw` with `owner = 0x3cb7…2de9` from block 64617865 (the baseline read
+before the reclaim) to 64618902 → **exactly one**: tx `0x0e7bb136…dbe6d4`, block **64618229**. Everything below read
+from BOTH `rpc.testnet.arc.io` and `arc-testnet.drpc.org`, identical on both (drpc's free plan refuses the log search;
+the tx, receipt, logs and historical balances it served).
+
+- **Receipt `status: success`.** Outer tx to the EntryPoint (`0x5FF1…2789`) from the bundler (`0x031e…d798`): the SCA
+  user operation.
+- **The call was `redeem(999998, wallet, wallet)`**: the one `redeem(uint256,address,address)` selector in the outer
+  calldata decodes to shares **999998**, receiver = owner = `0x3cb7…2de9`. Shares at block 64618228 (the block
+  before) = **999998**. ⭐ **The rebuilt code passed the full balance, as before.**
+- **`Withdraw` event** (log #19, emitted by the vault): sender = receiver = owner = the wallet, **shares 999998,
+  assets 999000**. Shares burned: log #14, the vault's own Transfer wallet → 0x0, 999998.
+- **The ERC-20 Transfer, not the native mirror:** log #16, emitter **`0x3600…0000` (USDC, 6dp)**, vault → wallet,
+  **999000**. Its native mirror is log #15 (emitter `0xffff…fffe`, 18dp, 999000000000000000) — not used.
+- **The balance change matches the event's assets:** USDC at block 64618228 = 41530885, at 64618229 = 42529885 → delta
+  **999000** = `assets` = the ERC-20 Transfer. The wallet paid no gas out of its USDC (the delta is exact; log #21 is
+  the EntryPoint paying the bundler).
+- **Shares now 0:** at block 64618229 and at latest.
+- Also in the tx: a **999 raw (0.000999 USDC) exit fee**, vault → `0x94e0…b3c6` (logs #17/#18). Assets out of the
+  vault in total 999999 = the `convertToAssets` read at the baseline (999999). The 999000 the wallet received is net
+  of that fee; the panel's "0.999" is the delta, correctly.
+
+**Conclusion:** step 2 did not change the live reclaim's behaviour — same call, full balance, same witnesses, the
+confirmed result shown. Closes the ⏳ PENDING on the deploy 6abba32a entry. The operator mandate's wallet now holds
+**0 shares**: its next signed check (2026-09-30 11:17Z, window 2) reads the vault in AGGREGATE mode, not a simulated
+redeem — expected, and worth reading when it lands.
