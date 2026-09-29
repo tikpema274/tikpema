@@ -30168,3 +30168,73 @@ T deployed `ebc87f8`; ledgers committed in `72211d2`. Checked afterwards, read-o
 
 ## ⏳ PENDING — the point of this deploy: T's live manual reclaim
 The rebuilt `vaultWithdraw` is exercised only by a real reclaim. Until then, step 2 is deployed, not proven live.
+
+---
+
+# 🧭 RECLAIM FEEDBACK — progress, receipt, storage: SCOPED (2026-09-29), nothing built
+
+**T's finding:** the manual reclaim's feedback is too thin and inconsistent with the product. Checkout shows a tx hash
+and an explorer link; research jobs show a settlement link; mandate deposits write a receipt. A reclaim shows one
+sentence ("Reclaimed — received X USDC…", `VaultPanel.tsx:180`), shows "Withdrawing…" while it runs, and **stores
+nothing**: `vaultWithdraw` discards the Circle id, and no blob or log line holds the hash. Once the panel updates there
+is no handle at all (confirmed on T's own reclaim today: the hash had to be found from the chain).
+
+## Three facts that shape it
+- **The reclaim is ONE synchronous request.** One redeem; Circle reaches COMPLETE in 2–3 s (measured, `_circle.mjs`);
+  Netlify's sync ceiling is ~10 s. The panel hears nothing until the end.
+- **A stored record CANNOT carry live progress.** Blobs reads are eventually consistent (~11 s measured) and a strong
+  read THROWS here. A panel polling the store during a 3 s reclaim would lag the request; stages shown from it would
+  be invented. The record is for AFTERWARDS: a reload, a timeout, history.
+- **Manual deposits are just as thin:** `VaultPanel.tsx:127` shows one sentence, stores nothing. Only MANDATE deposits
+  write a receipt. And the agent-chat reclaim (`MyAgentPanel.tsx:1262`) already shows a TxLink: the product disagrees
+  with itself.
+
+## 1. Progress while it runs — the stages that are knowable
+| stage | known because | honest wording |
+|---|---|---|
+| before signing | USDC balance read (witness #1) | "Checking your balance…" |
+| **submitted** | Circle accepted, id in hand (`onSubmitted`) | "Submitted to Circle — not on chain yet" |
+| **landed** | Circle COMPLETE + hash, **and** our receipt read `status: success` | "Landed in block N" |
+| **confirmed** | USDC delta > 0 (witness #2) | "Confirmed — received X USDC" |
+- ⚠️ For an SCA the outer tx can succeed while the inner redeem reverted: "landed" must NOT say money moved. Only
+  "confirmed" may.
+- **Mechanism: a STREAMED response**, each stage emitted when it happens. Not Blobs polling (above).
+- **A stop after "submitted"** (timeout, error) must read "Submitted (id …), outcome not yet known — do not retry",
+  plus a later resolving read. Today it shows a generic failure.
+
+## 2. A receipt afterwards — read from the chain, not derived
+Tx hash + explorer link, block, shares redeemed, USDC received, shares remaining.
+- ⚠️ **Today `sharesRedeemedRaw` is the INPUT** (the amount asked for), not a read. It must come from the Withdraw
+  event (`shares`, `assets`); the block from the tx receipt. USDC received (balance delta) and shares remaining
+  (balanceOf after) are already chain reads.
+- The receipt states the event's `assets` AND the balance delta, and says so if they disagree (two witnesses).
+- `shared/vault-mandate/exit-outcome.mjs` already parses Withdraw event + ERC-20 transfer + share delta for one tx,
+  but `_vault.mjs` must not import mandate code (`test:mandatedeposit`). The parse moves to a NEUTRAL shared module,
+  the `circle-idempotency.mjs` precedent.
+
+## 3. What is stored, and where
+- **Its OWN store, `vault-reclaims`**, key `o/<owner>/<circleId>` (the `bridge-receipts` pattern: both key parts are
+  also fields on the record, so the key is an index, not a second truth).
+- **NOT the mandate receipts store.** That store holds the mandate's SIGNED checks keyed by mandate/window; its readers
+  list those prefixes. `exit-outcome.mjs` deliberately treats a manual reclaim as NOT attributable to the mandate:
+  mixing a user-initiated reclaim into the mandate's evidence blurs exactly the line that code draws.
+- Record: owner, wallet, vault, circleId, status `submitted → landed → confirmed | unconfirmed | failed`, hash, block,
+  event shares/assets, balance delta, shares remaining. **Written at submit** (so a timed-out reclaim leaves its Circle
+  id), updated at the end.
+- Read by a session-gated GET (an unlinked function is still reachable: the SESSION GATE is the boundary).
+
+## 4. Step 2's `onSubmitted` is the hook for this — built, unused by `vaultWithdraw`
+It hands over the Circle id the moment Circle accepts, before the wait. `vaultWithdraw` passes no hook today and drops
+the id (`_vault.mjs:1226` keeps only `redeemHash`). ⚠️ The hook is AWAITED before `waitForTx`: a slow Blobs write adds
+latency inside the ~10 s ceiling. Its failure is swallowed (it can never abandon a live redeem); its latency is not.
+
+## 5. Money path vs display
+- **MONEY PATH:** wiring `onSubmitted` into `vaultWithdraw` (between submit and wait); passing OUR idempotency key
+  (today the SDK generates one we never see; storing it means generating it, which changes the Circle call step 2 kept
+  identical — it buys recovery of a cut-off reclaim); refusing a new reclaim while one is `submitted` and unresolved
+  (closes the "retrying could redeem twice" risk the code already warns of — a new gate); streaming the endpoint's
+  response; post-confirmation reads (the event parse) — read-only, but before the response, so they must never be able
+  to change `confirmed`.
+- **Stored, moves no money:** the `vault-reclaims` store and its session-gated GET.
+- **DISPLAY ONLY:** the stage text, the receipt card, a reclaim history list. The same card could serve the manual
+  deposit, which has the same gap.
