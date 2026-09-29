@@ -29402,6 +29402,20 @@ Each step lists: offline tests · Arc mainnet read-only proof BEFORE the deploy 
 - Before deploy: read those three frozen reports from Blobs (`dd-analyze-pending`) and verify them with the NEW verifier
   against the real chain (ERC-1271, read-only). New signed reports need the production DD key, so they are proven only
   after the deploy.
+- ➕ **ADDED 2026-09-29 (T): `subject.blockTimestamp` lands in this same step, beside `subject.blockHash`.** Same schema
+  bump, same ddTree rotation, same refusal window: no extra cost. NOT built before the window.
+  - **The nuance — direct, not newly available:** the timestamp is DERIVABLE from a signed block hash (hash → block →
+    its timestamp). Signing it makes the fact DIRECT in the report rather than something a reader must fetch and trust
+    the chain read for; it adds no information the hash does not already commit to.
+  - **Where it matters — `MANDATE_EXIT_ARMED_FROM`:** `decideExit` compares the anchor's CHAIN time against ARMED_FROM
+    (only checks anchored strictly after it may execute). Today that time is on the mandate receipt's `anchor`, NOT in
+    the signed report (confirmed live 2026-09-29 11:17Z: `anchor.timestamp` 1790680624, no anchor field in the signed
+    report). So the ARMED_FROM comparison rests on OUR OWN RECORD, not an attested fact. Signed, it rests on the
+    attestation. (Assumes the report's subject block is the mandate's anchor block — confirm when built.)
+  - **Offline, same shape as the hash:** a correct timestamp → valid; one that disagrees with the chain's block at
+    that hash → invalid; the three frozen reports still verify and read not-time-bound (absent never reads as bound).
+  - The verifier checks it on chain with the hash (one `getBlock`, no extra call — the same `{hash, timestamp}` reader
+    dda505f built for the anchor).
 
 **6. Schema `onchain-analyze/0.4.0` + descriptor + OpenAPI version + docs + canary fixtures.**
 - **`dd-openapi.mjs` hard-codes `version: "0.3.0"`** and is off the DD surface: it changes in the same deploy. Add a
