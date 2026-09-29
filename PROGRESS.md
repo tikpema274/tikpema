@@ -30271,3 +30271,49 @@ the tx, receipt, logs and historical balances it served).
 confirmed result shown. Closes the ⏳ PENDING on the deploy 6abba32a entry. The operator mandate's wallet now holds
 **0 shares**: its next signed check (2026-09-30 11:17Z, window 2) reads the vault in AGGREGATE mode, not a simulated
 redeem — expected, and worth reading when it lands.
+
+---
+
+# ✅ MANUAL REDEPOSIT VERIFIED FROM THE CHAIN (2026-09-29 14:13Z): 1.01 USDC into xylo, 1009998 shares — the mandate's observed position restored
+
+T redeposited from the Vault page after the reclaim, so the operator mandate's check has a real position to simulate
+again. Panel: "Deposited 1.01 USDC — received 1009998 xyUSDC."; balance 42.529885 → 41.52.
+
+**Before it: the disclosure gate.** The panel asks for the tick on EVERY manual deposit: the acknowledgment is page
+state, reset on each inspection, stored nowhere per user; the mandate's own acceptance (on its record, 2026-09-28
+10:52Z) is never consulted by the manual path. Checked read-only beforehand that the TERMS had not moved: the ack token
+computed for `0x3cb7…2de9` with ZERO shares (`inspectVault` + `analyze` over the two quorum endpoints +
+`applyReportDisclosure`; only the canary-health check skipped, locally) = **`e8413267…3228`, identical** to the
+mandate's `baseline.vaultAckToken`. Digest: warns emergency-withdraw, fees-settable, owner-is-eoa, performance-fee,
+set-strategy; `wf:10` (0.1% — matches the 999 raw fee in the reclaim), `df:0`; holder `0x94e0…b3c6`, kind eoa. The
+reclaim did not move it: the depositor's position is not in the digest.
+
+**A false start, recorded:** T's "around 15:10Z" was local time (UTC+1). A read at 14:10Z found nothing on chain from the
+reclaim (13:53:48Z) to 14:10:56Z — no Deposit on the vault from anyone, no USDC out of the wallet, allowance 0 — and
+said so rather than guessing. The deposit landed at 14:13Z.
+
+**Found by logs** (`eth_getLogs` from 64620081, the last empty read): one Approval (owner = wallet, spender = vault)
+and one `Deposit` (owner = wallet). Everything below read from BOTH `rpc.testnet.arc.io` and `arc-testnet.drpc.org`,
+identical on both.
+- **Approve** `0x5a9c4965…ead5f`, block **64620401** (14:13:39Z): status **success** (via the EntryPoint); inner call
+  **`approve(vault, 1010000)`** — the exact amount, not unlimited; Approval event from USDC `0x3600…`, 1010000. The
+  wallet's USDC did not move: gas sponsored.
+- **Deposit** `0xdb013bfa…6b112f`, block **64620408** (14:13:43Z): status **success**; inner call
+  **`deposit(1010000, wallet)`**. ERC-20 Transfer (log #22, emitter `0x3600…`, 6dp) wallet → vault **1010000**; the
+  native mirror (log #21, 18dp) not used. Share mint (log #23) 0x0 → wallet **1009998**. **`Deposit` event** (log #24):
+  sender = owner = wallet, **assets 1010000, shares 1009998**.
+
+| block | USDC | shares | allowance to vault |
+|---|---|---|---|
+| 64620400 (before) | 42529885 | 0 | 0 |
+| 64620401 (approve) | 42529885 | 0 | 1010000 |
+| 64620408 (deposit) | **41519885** | **1009998** | **0** |
+| latest | 41519885 | 1009998 | 0 |
+
+- USDC down exactly **1010000** = the event's assets = the Transfer. Shares **1009998**, as the panel said. The
+  allowance was consumed in full: nothing left approved.
+- ⚠️ **Display defect, not money:** "received 1009998 xyUSDC" is the RAW base-unit count (≈ 1.009998 xyUSDC); it reads as
+  a million tokens. Belongs with RECLAIM FEEDBACK (the same receipt card covers the manual deposit).
+- **The mandate:** the wallet holds shares again, so the 2026-09-30 11:17Z check (window 2) simulates a redeem of
+  1009998 shares, not the aggregate read. The mandate still tracks **0** shares of its own (`sharesTrackedRaw: "0"`):
+  a manual deposit is not the mandate's.
