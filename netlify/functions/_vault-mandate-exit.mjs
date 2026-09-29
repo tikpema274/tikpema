@@ -15,7 +15,7 @@ import { AGENT } from "./_agents.mjs";
 import { shareLimitForRecord } from "../../shared/vault-mandate/share-limit.mjs";
 import { buildHaltIncident, readHaltLatch } from "../../shared/vault-mandate/halt.mjs";
 import { MANDATE_STATUS } from "../../shared/vault-mandate/record.mjs";
-import { buildExitIntent, advanceExitIntent, exitIntentKey, EXIT_INTENT_OPEN, EXIT_INTENT_STATE } from "../../shared/vault-mandate/exit-intent.mjs";
+import { buildExitIntent, advanceExitIntent, exitIntentKey, retryDecision, buildNeverSubmittedIntent, settledOutcomeOf, verifyExitIntent, EXIT_INTENT_OPEN } from "../../shared/vault-mandate/exit-intent.mjs";
 
 /**
  * The pause input decideExit (shared/vault-mandate/exit-decision.mjs) requires: {checked:true, reason:string|null}.
@@ -81,11 +81,12 @@ export async function haltIfBeyondMandate({ halt, classified, context, now }) {
 // Order, and why each refusal comes where it does:
 //   0. the halt latch (step 3) — halted or unreadable: nothing starts.
 //   1. the mandate: readable, consistent, `active` or `exit-blocked`. `exiting` = an exit in flight → refused.
-//   2. the exit intent: UNREADABLE blocks (never "absent"); an OPEN one → exit-in-flight (never resubmit); a TERMINAL
-//      one → refused (one intent per mandate, one key; there is no second attempt key).
+//   2. every past ATTEMPT, x/…/1..n (n = record.exit.attempt; step 4c), through retryDecision: unreadable blocks
+//      (never "absent"), a missing number is inconsistent, an OPEN one → exit-in-flight (never resubmit), the caps
+//      (3 failed, 6 real attempts) and the hour after the last closed. Then x/…/<n+1> itself must read absent.
 //   3. open DEPOSIT intents (C8): any open, or unreadable → refused.
 //   4. the share limit (step 3): refused, or nothing to redeem → refused, NOTHING written.
-//   5. the mandate → `exiting` (CAS). Lost → refused, no intent.
+//   5. the mandate → `exiting` AND exit.attempt = n+1, in ONE CAS. Lost → refused, no intent.
 //   6. ⭐ open deposit intents AGAIN. The deposit path works from the record the tick read earlier and does not re-read
 //      it before writing its intent, so a deposit that read `active` can still write an intent after step 3. Seen
 //      here → the status is handed back (CAS) and the exit refuses; no exit intent. (The deposit side of this race is
@@ -114,15 +115,16 @@ export async function beginMandateExit({ owner, id, liveShares, deps }) {
     return no("status-may-not-exit", `status ${JSON.stringify(record.status)} may not begin an exit`);
   }
 
-  const x = await deps.exitIntents.read(owner, id);
-  if (!x?.readable) return no("exit-intent-unreadable", x?.why ?? "the exit intent could not be read; it is never treated as absent");
-  if (x.intent) {
-    if (EXIT_INTENT_OPEN.includes(x.intent.state)) return no("exit-in-flight", `an exit intent is open (${x.intent.state}): never resubmit while one is open`);
-    if (x.intent.state === EXIT_INTENT_STATE.ASSERTED || x.intent.state === EXIT_INTENT_STATE.FAILED) {
-      return no("exit-intent-exists", `the mandate's one exit intent is already ${x.intent.state}; there is no second intent`);
-    }
-    return no("exit-intent-malformed", `an exit intent exists in an unknown state ${JSON.stringify(x.intent.state)}`);
-  }
+  // 2. every past attempt, by number (strong GETs; never a list)
+  const n = record.exit?.attempt ?? 0;
+  const attempts = [];
+  for (let k = 1; k <= n; k++) attempts.push({ n: k, read: await deps.exitIntents.read(owner, id, k) });
+  const rd = retryDecision({ record, attempts, now: deps.now() });
+  if (!rd.ok) return no(rd.code, rd.why);
+  const next = rd.next;
+  const nx = await deps.exitIntents.read(owner, id, next);
+  if (!nx?.readable) return no("exit-intent-unreadable", nx?.why ?? `attempt ${next}'s key could not be read; it is never treated as absent`);
+  if (nx.intent) return no("exit-intent-exists", `attempt ${next} already has a record the mandate does not name`);
 
   const openDeposits = async () => {
     const d = await deps.depositIntents.listOpen(owner, id);
@@ -136,11 +138,13 @@ export async function beginMandateExit({ owner, id, liveShares, deps }) {
   const limit = shareLimitForRecord(record, liveShares);
   if (!limit.ok) return no(limit.code, limit.why);
   if (limit.nothingToRedeem) return no("nothing-to-redeem", `the mandate holds no shares of its own (tracked ${limit.tracked}); ${limit.notTheMandates} in the wallet are not the mandate's`);
-  const built = buildExitIntent({ record, limit, now: deps.now() });
+  const built = buildExitIntent({ record, limit, now: deps.now(), attempt: next,
+    retryOf: n > 0 ? { attempt: n, lastOutcome: rd.lastOutcome, kind: rd.kind } : null });
   if (!built.ok) return no("intent-unbuildable", built.why);
 
   // 5. `exiting` BEFORE the intent
-  const u = await deps.mandates.update({ owner, id, record: { ...record, status: MANDATE_STATUS.EXITING }, etag: r.etag });
+  const u = await deps.mandates.update({ owner, id, etag: r.etag,
+    record: { ...record, status: MANDATE_STATUS.EXITING, exit: { attempt: next, fromStatus: record.status } } });
   if (!u?.ok) return no("status-write-failed", (u?.errors ?? []).join("; ") || "the mandate could not be set exiting; no intent written");
 
   // 6. the re-check, now that no NEW deposit can start from a fresh read
@@ -160,14 +164,64 @@ export async function beginMandateExit({ owner, id, liveShares, deps }) {
   return { ok: true, key: built.intent.key, intent: built.intent };
 }
 
-/** Move the STORED exit intent one step (advanceExitIntent), under CAS. Unreadable, absent or a lost CAS → refused. */
-export async function advanceStoredExitIntent({ exitIntents, owner, id, at, ...step }) {
-  const x = await exitIntents.read(owner, id);
+/** Move the STORED exit intent of one attempt one step (advanceExitIntent), under CAS. Unreadable, absent or a lost CAS → refused. */
+export async function advanceStoredExitIntent({ exitIntents, owner, id, attempt, at, ...step }) {
+  const x = await exitIntents.read(owner, id, attempt);
   if (!x?.readable) return { ok: false, code: "exit-intent-unreadable", why: x?.why ?? "unreadable" };
   if (!x.intent) return { ok: false, code: "no-exit-intent", why: "there is no exit intent to advance" };
   const a = advanceExitIntent(x.intent, { at, ...step });
   if (!a.ok) return { ok: false, code: "refused-move", why: a.why };
-  const u = await exitIntents.update(exitIntentKey(owner, id), a.intent, x.etag);
+  const u = await exitIntents.update(exitIntentKey(owner, id, attempt), a.intent, x.etag);
   if (!u?.ok) return { ok: false, code: "conflict", why: "the exit intent changed while it was being advanced" };
   return { ok: true, intent: a.intent };
+}
+
+// ═══ PIECE 5 STEP 4c: SETTLING AN ATTEMPT — the mandate leaves `exiting` ═════════════════════════════════════
+// Reads the attempt the RECORD names (x/…/<exit.attempt>) and moves the mandate, in ONE CAS:
+//   exited        → `closed`, tracked shares 0 (the mandate's shares are gone)
+//   exit-partial  → `exit-blocked`, tracked shares − the shares the attempt redeemed. ⛔ Without this a retry would
+//                   compute min(OLD tracked, live), and live includes hand-deposited shares: the retry could take them.
+//   failed        → `exit-blocked`, tracked unchanged
+//   no intent     → a create-only NEVER-SUBMITTED record at that number (so every number ≤ n has a record), then the
+//                   status the attempt started from. If an intent lands first, the tombstone is refused and nothing moves.
+//   open          → refused: the attempt is in flight (recovery reads Circle / the chain first).
+// Unreadable, not exiting, or a lost CAS → refused, nothing written.
+export async function settleExitAttempt({ owner, id, deps }) {
+  const no = (code, why) => ({ ok: false, code, why });
+  const r = await deps.mandates.read({ owner, id });
+  if (!r?.readable) return no("mandate-unreadable", (r?.errors ?? []).join("; ") || "unreadable");
+  if (!r.record || !r.verdict?.ok) return no("mandate-inconsistent", (r?.verdict?.errors ?? ["no mandate"]).join("; "));
+  const record = r.record;
+  if (record.status !== MANDATE_STATUS.EXITING) return no("not-exiting", `status ${JSON.stringify(record.status)}: nothing to settle`);
+  const n = record.exit.attempt;
+  const x = await deps.exitIntents.read(owner, id, n);
+  if (!x?.readable) return no("exit-intent-unreadable", x?.why ?? `attempt ${n} could not be read; it is never treated as absent`);
+  const back = (lastOutcome, status, progress = record.progress) => ({ ...record, status, progress,
+    exit: { attempt: n, fromStatus: record.exit.fromStatus, lastOutcome } });
+  let next;
+  if (!x.intent) {
+    const tomb = buildNeverSubmittedIntent({ record, attempt: n, now: deps.now() });
+    let c;
+    try { c = await deps.exitIntents.create(tomb.key, tomb); } catch (e) { return no("tombstone-unwritten", `the never-submitted record could not be written (${String(e?.message ?? e)})`); }
+    if (c?.exists) return no("intent-appeared", `attempt ${n}'s intent appeared before its never-submitted record: re-read and settle again`);
+    if (!c?.ok) return no("tombstone-unwritten", "the never-submitted record could not be written");
+    next = back("not-submitted", record.exit.fromStatus);
+  } else {
+    if (EXIT_INTENT_OPEN.includes(x.intent.state)) return no("attempt-in-flight", `attempt ${n} is ${x.intent.state}: it resolves first`);
+    const v = verifyExitIntent(x.intent);
+    if (!v.ok) return no("exit-intent-malformed", v.errors.join("; "));
+    const outcome = settledOutcomeOf(x.intent);
+    if (outcome === "exited") next = back("exited", MANDATE_STATUS.CLOSED, { ...record.progress, sharesTrackedRaw: "0" });
+    else if (outcome === "exit-partial") {
+      const redeemed = x.intent.outcome?.mandateSharesRedeemed, tracked = record.progress.sharesTrackedRaw;
+      if (!/^\d+$/.test(String(redeemed ?? "")) || BigInt(redeemed) > BigInt(tracked)) {
+        return no("outcome-inconsistent", `the partial outcome's redeemed shares (${JSON.stringify(redeemed)}) do not fit the tracked ${tracked}`);
+      }
+      next = back("exit-partial", MANDATE_STATUS.EXIT_BLOCKED, { ...record.progress, sharesTrackedRaw: (BigInt(tracked) - BigInt(redeemed)).toString() });
+    } else if (outcome === "failed" || outcome === "not-submitted") next = back(outcome, outcome === "failed" ? MANDATE_STATUS.EXIT_BLOCKED : record.exit.fromStatus);
+    else return no("exit-intent-malformed", `attempt ${n} settled as ${JSON.stringify(outcome)}`);
+  }
+  const u = await deps.mandates.update({ owner, id, record: next, etag: r.etag });
+  if (!u?.ok) return no("status-write-failed", (u?.errors ?? []).join("; ") || "the mandate changed while it was being settled");
+  return { ok: true, attempt: n, status: next.status, lastOutcome: next.exit.lastOutcome, sharesTrackedRaw: next.progress.sharesTrackedRaw };
 }

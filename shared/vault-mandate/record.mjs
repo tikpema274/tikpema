@@ -353,8 +353,24 @@ function operationalErrors(record) {
   // ⭐ A decimal STRING: shares are 18-decimal on some vaults, so a JS number would silently lose precision.
   if (!isObj(p) || typeof p.sharesTrackedRaw !== "string" || !/^\d+$/.test(p.sharesTrackedRaw)) e.push("the tracked shares are not a non-negative decimal string");
   if (!isObj(p) || !(Number.isInteger(p.sharesTrackedGaps) && p.sharesTrackedGaps >= 0)) e.push("the tracked-share gap count is not a non-negative integer");
+  // ── piece 5 step 4c: the exit ATTEMPT, outside the fingerprint (like status). Absent = no exit ever begun (every
+  // record stored before 4c). `exiting` / `exit-blocked` ALWAYS name one: recovery reads x/…/<exit.attempt> by it.
+  const x = record.exit;
+  if (x !== undefined) {
+    if (!isObj(x)) e.push("the exit state is not an object");
+    else {
+      if (!(Number.isInteger(x.attempt) && x.attempt >= 1)) e.push("the exit attempt is not a positive integer");
+      if (!EXIT_FROM_STATUS.has(x.fromStatus)) e.push(`unknown exit fromStatus ${JSON.stringify(x.fromStatus)}`);
+      if (x.lastOutcome !== undefined && !EXIT_LAST_OUTCOME.has(x.lastOutcome)) e.push(`unknown exit lastOutcome ${JSON.stringify(x.lastOutcome)}`);
+    }
+  } else if (record.status === MANDATE_STATUS.EXITING || record.status === MANDATE_STATUS.EXIT_BLOCKED) {
+    e.push(`status ${JSON.stringify(record.status)} names no exit attempt`);
+  }
   return e;
 }
+/** Where an exit attempt may start from, and how one may have settled (step 4c). */
+const EXIT_FROM_STATUS = new Set([MANDATE_STATUS.ACTIVE, MANDATE_STATUS.EXIT_BLOCKED]);
+const EXIT_LAST_OUTCOME = new Set(["exited", "exit-partial", "failed", "not-submitted"]);
 
 /**
  * Re-derive everything. `ok` = the record is internally consistent (valid rules, disclosure matches,

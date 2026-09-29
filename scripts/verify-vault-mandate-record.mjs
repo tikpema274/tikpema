@@ -398,7 +398,8 @@ section("7 — ⭐⭐ vault-mandate/3: status / deposits / monitoring, origin, t
   ok("⭐⭐ deposits PAUSED → consistent, may NOT deposit, STILL may monitor", vp?.ok === true && vp?.mayDeposit === false && vp?.mayMonitor === true, show(vp));
   ok("  …and the status is untouched (still active)", pausedDep.status === "active" && vp?.ok === true);
   for (const s of ["exiting", "exit-blocked"]) {
-    const x = v({ ...clone(acked ?? {}), status: s });
+    // step 4c: `exiting` / `exit-blocked` always name an exit attempt (the record's `exit`)
+    const x = v({ ...clone(acked ?? {}), status: s, exit: { attempt: 1, fromStatus: "active" } });
     ok(`status ${s} → may NOT deposit, may monitor`, x?.ok === true && x?.mayDeposit === false && x?.mayMonitor === true, show(x));
   }
   for (const s of ["closed", "cancelled"]) {

@@ -149,15 +149,15 @@ export function mandateAdapter(store) {
 }
 
 /**
- * The EXIT intent (shared/vault-mandate/exit-intent.mjs): ONE per mandate, `x/<owner>/<id>`, same store.
+ * The EXIT intent (shared/vault-mandate/exit-intent.mjs): ONE per ATTEMPT, `x/<owner>/<id>/<n>`, same store (4c).
  * read → {readable:true, intent|null, etag} | {readable:false, why}: a store failure is NEVER "no intent".
  * create is create-only; update is CAS on the etag just read.
  */
 export function exitIntentAdapter(store) {
   return {
-    async read(owner, id) {
+    async read(owner, id, attempt) {
       try {
-        const r = await store.getWithMetadata(exitIntentKey(owner, id), { type: "json", consistency: READ_CONSISTENCY });
+        const r = await store.getWithMetadata(exitIntentKey(owner, id, attempt), { type: "json", consistency: READ_CONSISTENCY });
         return { readable: true, intent: r?.data ?? null, etag: r?.etag ?? null };
       } catch (e) { return { readable: false, why: `exit intent unreadable: ${String(e?.message ?? e)}` }; }
     },

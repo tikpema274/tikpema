@@ -30496,3 +30496,73 @@ in deps, the deposit EXECUTED and only then crashed (in `commitSeq`).
   of the fresh one.
 - The tests simulate the exit with direct store writes (no step-4 import), so this commit reviews on its own.
   test:all **165/165** on the combined tree. Off the DD surface.
+
+---
+
+# ✅ VAULT MANDATE — PIECE 5 STEP 4c: EXIT ATTEMPTS `x/<owner>/<id>/<n>`, SETTLING, AND THE RETRY POLICY (2026-09-29), built red-first, NOT deployed
+
+## 🚨 THE PARTIAL-RETRY FINDING — caught by the LIVE position, not by a test
+**Without dropping the tracked shares when a partial exit settles, a retry takes shares that are not the mandate's.**
+A mandate tracks 500; attempt 1 redeems 200 (exit-partial); 300 of the mandate's shares remain. The retry computes
+`min(tracked, live)`: tracked is still **500**, and live = the 300 remaining **+ T's 1009998 manual shares**. So the
+retry submits **500**, and 200 of those are T's hand-deposited shares.
+- ⛔ **AND THE DETECTOR WOULD NOT FIRE.** `BEYOND_MANDATE_SHARES` compares shares BURNED to the intent's
+  `sharesToRedeem`. The wrong figure is IN the intent: 500 burned against 500 submitted → no flag, a clean `exited`.
+  This is the executor's invariant broken by ORDINARY ARITHMETIC upstream of the detector — the one class step 3's
+  "the flag only ever detects a defect" does not cover, because the defect is in the number the flag trusts.
+- **Why it was visible at all:** T currently holds 1009998 manual xyUSDC shares in the operator mandate's wallet. With
+  ONLY the mandate's shares in the wallet, live = 300 and `min(500, 300)` = 300 is right BY ACCIDENT. The live
+  position, not the test design, is what made the wrong figure show up. ⭐ A case the live position caught.
+- **The fix:** `settleExitAttempt` writes `sharesTrackedRaw = tracked − mandateSharesRedeemed` in the SAME CAS that
+  moves the mandate to `exit-blocked`. Tested: partial 200 of 500 → tracked 300 → the retry at `/2` redeems **300**;
+  mutation C2 (no drop) → red. A partial whose redeemed figure is unreadable or exceeds tracked → refused
+  (`outcome-inconsistent`), never guessed.
+
+## T's decisions (2026-09-29) — what this builds
+- **ATTEMPT SUFFIX** `x/<owner>/<id>/<n>`, `n` on the mandate record (`exit.attempt`) set in the SAME CAS as `exiting`.
+  Archive rejected (needs an attempt number anyway; a non-atomic move).
+- **Order READS → INTENT → SUBMIT:** a vault the fresh simulated redeem refuses costs NO attempt and retries on a later
+  tick. Attempts are consumed only by real submissions that revert or fail at Circle — and by partial exits.
+- **exit-partial retries** (the intent asserts while the mandate still holds shares).
+
+## ⭐ THE RETRY POLICY (Claude's proposal, per T; `EXIT_RETRY_POLICY`, frozen)
+- **≤ 3 FAILED attempts.** An attempt exists only after the fresh simulated redeem passed, so a failure means Circle or
+  the chain refused a redeem the simulation had just approved: something the reads did not model. One or two retries
+  cover the transient (a nonce race, a Circle hiccup, a block moving under us); three is a pattern a human must see.
+- **≤ 6 REAL attempts in all, partials included.** A partial is progress, not failure, but a vault paying out a sliver
+  each time must not be chased forever.
+- **Never-submitted records count toward NEITHER cap:** nothing reached the chain.
+- **≥ 1 hour after the last attempt CLOSED:** the tick is hourly, so "a later tick", with a fresh check re-deciding the
+  finding each time.
+- A cash-short vault burns NOTHING: refused by the simulation before any intent; the next tick tries again.
+- A cap reached → `attempts-exhausted`, loud; what happens next is a human's call.
+
+## What was built
+- **`exit-intent.mjs`:** `exitIntentKey(owner, id, n)` (throws unless n is a positive integer); one idempotency key PER
+  ATTEMPT, derived from `/<n>` (a retry never reuses attempt 1's key at Circle); `buildNeverSubmittedIntent`;
+  `settledOutcomeOf`; `retryDecision` — reads EVERY past attempt by number: unreadable → blocked, a number with no record
+  → inconsistent, open → in flight, then the caps and the hour; returns `after-partial` / `after-failure` /
+  `after-not-submitted` from the LAST attempt's own intent.
+- **`record.mjs`:** `exit: {attempt, fromStatus, lastOutcome?}`, OUTSIDE the fingerprint (an attempt never stales the
+  acknowledgement). `exiting` / `exit-blocked` MUST name an attempt; no `exit` field = no exit ever begun. **The live
+  operator mandate `8379419c` verifies unchanged** (read from the store: `ok`, `mayDeposit` true).
+- **`beginMandateExit`:** reads x/…/1..n (strong GETs, never a list), `retryDecision`, then **`/<n+1>` itself must read
+  absent**, then `exiting` + `exit.attempt = n+1` in ONE CAS, then the intent at `/<n+1>`.
+- **`settleExitAttempt`:** exited → `closed`, tracked 0 · partial → `exit-blocked`, tracked − redeemed · failed →
+  `exit-blocked` · no intent → a create-only NEVER-SUBMITTED record at `/<n>`, then back to `fromStatus` (an intent
+  landing first refuses the tombstone; nothing moves) · open → refused (in flight).
+- **Recovery distinguishes, by the record's `exit.attempt` and that one key:** `exiting` + attempt 2 + `/2` open →
+  attempt 2 IN FLIGHT · `exit-blocked` + attempt 1 + `/1` failed + no `/2` → attempt 1 FAILED, attempt 2 NEVER STARTED ·
+  `exiting` + attempt 2 + `/2` absent → nothing submitted for attempt 2.
+
+## Red first, mutations
+- Red **58** failing (the 6 passing 4c cases hold for reasons true today). Green `test:mandateexitintent` **124/0**.
+- The record and decision suites each carried an `exiting` / `exit-blocked` fixture with no attempt — now inconsistent;
+  both name one (174/0, 54/0).
+- **17 mutations, all red** — after TWO survivors forced better tests:
+  - **C12** (the tombstone's `exists` check removed): still refused through the generic `!ok` branch; the test now
+    demands `intent-appeared`.
+  - ⭐ **C15** (the pre-read of `/<n+1>` removed): **create-only alone did NOT catch it safely.** The write still
+    refused, but only AFTER the `exiting` CAS, so the mandate was left **STUCK in `exiting`** with no intent of its own.
+    The pre-read refuses before anything is written; the test now demands ZERO writes and the status still `active`.
+- test:all **165/165**. Off the DD surface.

@@ -147,7 +147,7 @@ section("5 — the finding is RE-DECIDED, and the record must carry exit authori
   ok("a cancelled mandate → refused", go({ record: cancelled })?.code === "record");
   const exiting = { ...record(), status: "exiting" };
   ok("⭐ a mandate already EXITING (a redeem in flight) → refused: one exit at a time", go({ record: exiting })?.code === "record");
-  const blocked = { ...record(), status: "exit-blocked" };
+  const blocked = { ...record(), status: "exit-blocked", exit: { attempt: 1, fromStatus: "active", lastOutcome: "failed" } }; // 4c: exit-blocked names its attempt
   ok("an exit-BLOCKED mandate (a retry) → may go", go({ record: blocked })?.go === true, show(go({ record: blocked })));
   const depPaused = { ...record(), deposits: { state: "paused", flags: ["FINDING"], reason: "x", at: "2026-09-28T00:00:00.000Z" } };
   ok("⭐ deposits PAUSED (often by this very finding) does NOT block the exit", go({ record: depPaused })?.go === true, show(go({ record: depPaused })));
