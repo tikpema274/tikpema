@@ -30465,3 +30465,34 @@ not stop a deposit already in progress.
   later tick. Attempts are consumed only by real submissions that revert or fail at Circle.
 - **`exit-partial` must also be able to retry** (the intent asserts while the mandate still holds shares).
 - Retry policy: Claude proposes one with reasoning (step 4c).
+
+---
+
+# ✅ VAULT MANDATE — PIECE 5 STEP 4b: THE DEPOSIT WRITE RE-READS THE MANDATE (2026-09-29), built red-first, NOT deployed — ⚠️ MONEY PATH
+
+T: build the deposit-side re-read as its own step. It changes DEPLOYED money code that runs on every tick (disarmed
+today), so it deploys WITH steps 3–6 but is reviewed as its own commit.
+
+## The race it closes
+The tick reads the record; `depositForMandate` then wrote its deposit intent and executed from THAT read, never
+re-reading. An exit that set `exiting` in between (step 4) did not stop it. **Measured in the red run, on today's
+code:** with the mandate already `exiting`, the deposit EXECUTED and its intent ended `asserted`; with no mandate reader
+in deps, the deposit EXECUTED and only then crashed (in `commitSeq`).
+
+## The fix — block 5b in `depositForMandate`, AFTER the intent is created, BEFORE the executor
+- Re-read the mandate (`deps.mandates.read`, strong). Refused with the new `REFUSED.MANDATE_CHANGED` unless the FRESH
+  record verifies with `mayDeposit`: `exiting`, `exit-blocked`, `cancelled`, deposits paused, inconsistent, gone,
+  unreadable, a throw, or NO reader at all → refused. Our own intent is closed `refused` (nothing was signed), so it can
+  never block the exit (C8).
+- **Each side now writes its marker, then reads the other's:** the exit sets `exiting`, then re-reads the deposit
+  intents (step 4); the deposit creates its intent, then re-reads the mandate. With strong reads, at least one sees the
+  other and stops.
+
+## Red first, mutations
+- Red: **14** new cases failing. Green `test:mandatedeposit` **246/0**; the order is asserted (`intents.create` →
+  `mandates.read` → `executor`). No existing fixture needed changing.
+- **7 mutations, all red:** the re-read removed · status ignored · unreadable read as unchanged · no reader read as
+  fine · the intent left open on refusal · an absent mandate read as unchanged · the stale tick record checked instead
+  of the fresh one.
+- The tests simulate the exit with direct store writes (no step-4 import), so this commit reviews on its own.
+  test:all **165/165** on the combined tree. Off the DD surface.

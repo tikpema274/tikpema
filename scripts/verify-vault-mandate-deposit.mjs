@@ -568,6 +568,53 @@ section("8 — an ARMED deposit, end to end (fakes at every boundary)");
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
+section("8b — ⭐⭐ THE WRITE RE-READS THE MANDATE AFTER ITS INTENT (step 4b: the deposit side of the exit race)");
+// The tick reads the record, then the write works from that read. An exit can set the mandate `exiting` in between
+// (step 4). So the write, AFTER creating its intent and BEFORE the executor, re-reads the mandate (strong) and refuses
+// unless it may still deposit; its own intent is closed `refused`, so it never blocks the exit (C8). With the exit
+// re-checking deposit intents after setting `exiting`, each side writes its marker and then reads the other's.
+{
+  const record = activeRecord();
+  const log = [];
+  const logged = (name, impl) => new Proxy(impl, { get(t, k) { const v = t[k]; return typeof v === "function" ? (...a) => { log.push(`${name}.${String(k)}`); return v.apply(t, a); } : v; } });
+  const run = async ({ fresh, mandatesOver, drop = false } = {}) => {
+    const m = fakeMandates([fresh ?? record]);
+    const x = execDeps({ record, mandates: m });
+    x.deps.mandates = drop ? undefined : logged("mandates", mandatesOver ? { ...m, ...mandatesOver } : m);
+    x.deps.intents = logged("intents", x.deps.intents);
+    const exec = x.deps.executeAction; x.deps.executeAction = (...a) => { log.push("executor"); return exec(...a); };
+    log.length = 0;
+    const r = await attemptAsync(() => depositForMandate({ record, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: x.deps, config: ARMED }));
+    const intent = x.intentsC.proxy._m.get(`d/${SESSION}/vm-1/1`)?.data;
+    return { r, x, intent, log: [...log] };
+  };
+  const happy = await run();
+  const iCreate = happy.log.indexOf("intents.create"), iRead = happy.log.indexOf("mandates.read", iCreate), iExec = happy.log.indexOf("executor");
+  ok("⭐⭐ still active at the re-read → deposited; the mandate is re-read AFTER the intent is created and BEFORE the executor",
+    happy.r?.ok === true && iCreate >= 0 && iRead > iCreate && iExec > iRead, show(happy.log));
+  for (const [label, fresh] of [
+    ["EXITING (an exit began after the tick's read)", { ...record, status: "exiting" }],
+    ["deposits PAUSED meanwhile", { ...record, deposits: { state: "paused", flags: ["FINDING"], reason: "a rule found something", at: new Date(T0).toISOString() } }],
+    ["CANCELLED meanwhile", { ...record, status: "cancelled" }],
+    ["exit-blocked meanwhile", { ...record, status: "exit-blocked" }],
+  ]) {
+    const t = await run({ fresh });
+    ok(`⭐⭐ the mandate is ${label} at the re-read → REFUSED, the executor NOT called`, t.r?.ok === false && t.r?.code === REFUSED.MANDATE_CHANGED && !t.log.includes("executor") && t.x.executor.calls.length === 0, show({ code: t.r?.code, reason: t.r?.reason }));
+    ok("  …and its own intent is CLOSED (refused), so it can never block the exit (C8)", t.intent?.status === "refused", show(t.intent?.status));
+  }
+  const gone = await run({ mandatesOver: { async read() { return { readable: true, record: null }; } } });
+  ok("the mandate GONE at the re-read → refused, executor not called", gone.r?.ok === false && gone.r?.code === REFUSED.MANDATE_CHANGED && gone.x.executor.calls.length === 0, show(gone.r?.code));
+  const unread = await run({ mandatesOver: { async read() { return { readable: false, errors: ["blobs down"] }; } } });
+  ok("⭐ the re-read UNREADABLE → refused (never 'unchanged'), executor not called, intent closed",
+    unread.r?.ok === false && unread.r?.code === REFUSED.MANDATE_CHANGED && unread.x.executor.calls.length === 0 && unread.intent?.status === "refused", show(unread.r));
+  const throws = await run({ mandatesOver: { async read() { throw new Error("boom"); } } });
+  ok("the re-read THROWS → refused, executor not called", throws.r?.ok === false && throws.r?.code === REFUSED.MANDATE_CHANGED && throws.x.executor.calls.length === 0, show(throws.r));
+  const none = await run({ drop: true });
+  ok("⭐ NO mandate reader in deps → refused (fail closed), executor not called", none.r?.ok === false && none.r?.code === REFUSED.MANDATE_CHANGED && none.x.executor.calls.length === 0, show(none.r));
+  const incons = await run({ fresh: { ...record, rules: [] } });
+  ok("the re-read record INCONSISTENT (fails verification) → refused", incons.r?.ok === false && incons.r?.code === REFUSED.MANDATE_CHANGED && incons.x.executor.calls.length === 0, show(incons.r?.code));
+}
+
 section("9 — ⭐⭐ the DISARMED TICK: a real signed check, no intent, no executor");
 // The real transport: the shared mock chain, a throwaway key standing in for the DD wallet, an ERC-1271
 // mock that recovers the signer (the stand-ins verify-vault-mandate-transport uses).

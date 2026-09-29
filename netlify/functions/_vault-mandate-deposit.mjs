@@ -56,7 +56,7 @@ export const REFUSED = Object.freeze({
   UNSIGNED: "report-not-verified", STALE_CHECK: "stale-check", DECISION: "decision-not-deposit", AMOUNT: "amount",
   READINGS: "readings-unagreed", PREVIEW: "preview-unreadable", NO_ROOM: "no-room", INTENT_EXISTS: "intent-exists",
   INTENT_UNWRITABLE: "intent-unwritable", EXECUTOR: "executor-refused", OUTCOME_UNKNOWN: "outcome-unknown",
-  CLOCK_BUG: "clock-bug",
+  CLOCK_BUG: "clock-bug", MANDATE_CHANGED: "mandate-changed",
 });
 /**
  * Is this decision ONLY "we could not check"? A PAUSE whose one flag is OUTAGE: no finding, nothing inconclusive,
@@ -315,6 +315,34 @@ export async function depositForMandate({ record, etag, checked, amountUsdc, dep
     } catch (e) { warnings.push(`intent update to ${patch.status ?? "?"} failed: ${String(e?.message ?? e)}`); }
     cur = next;
   };
+
+  // ═══ 5b. RE-READ THE MANDATE — AFTER the intent, BEFORE the executor (piece 5 step 4b) ═══
+  // The record above is the one the tick READ; an exit can set it `exiting` since (beginMandateExit). Each side writes
+  // its marker and then reads the other's: the exit sets `exiting`, then re-reads the deposit intents; this write has
+  // created its intent, and now re-reads the mandate (strong). So at least one of the two sees the other and stops.
+  // ⛔ Anything but a readable, consistent record that may still deposit REFUSES: unreadable, absent, a throw, no
+  // reader at all. Our own intent is closed `refused` (nothing was signed), so it can never block the exit (C8).
+  {
+    let fresh = null, why = null;
+    try {
+      if (typeof deps.mandates?.read !== "function") why = "no mandate reader: the mandate cannot be re-read before depositing";
+      else {
+        const rr = await deps.mandates.read({ owner: record.owner, id: record.id });
+        if (!rr?.readable) why = `the mandate could not be re-read (${(rr?.errors ?? []).join("; ") || "unreadable"})`;
+        else if (!rr.record) why = "the mandate no longer exists";
+        else fresh = rr.record;
+      }
+    } catch (e) { why = `the mandate re-read failed (${String(e?.message ?? e)})`; }
+    if (fresh) {
+      const fv = verifyMandateRecord(fresh);
+      if (!fv.mayDeposit) why = `the mandate changed since this tick read it (${fv.errors.join("; ") || `status ${JSON.stringify(fresh.status)}`})`;
+    }
+    if (why) {
+      await writeIntent({ status: "refused", refusal: why });
+      return refuse(REFUSED.MANDATE_CHANGED, `nothing deposited: ${why}`, { intentKey: key, warnings,
+        receipt: { ...receiptBase, outcome: "checked-not-deposited", refusal: why } });
+    }
+  }
 
   // ═══ 6. THE DEPOSIT, with the STORED ack token ═══
   let res;
