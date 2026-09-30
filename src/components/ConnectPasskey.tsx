@@ -181,6 +181,34 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
             </button>
           </div>
         </div>
+      ) : !w.agentWallet && w.sessionError && !w.isAuthenticated ? (
+        // ⭐ SIGN-IN DID NOT PRODUCE A SESSION (2026-09-30) — said as what it was, never as a spinner.
+        // refused: the server said no, in ITS words. cancelled: the prompt was closed (a choice, not an
+        // error — no warning colour). failed: anything else, with its reason. See wallet/sessionError.ts.
+        <div className="status" style={{ marginTop: 10 }}>
+          {w.sessionError.kind === "cancelled" ? (
+            <div>
+              <b>Sign-in was cancelled.</b> Nothing was signed or changed — sign in again when you're ready.
+            </div>
+          ) : (
+            <div style={{ color: "var(--warn)" }}>
+              <b>{w.sessionError.kind === "refused" ? "Sign-in was refused." : "Sign-in didn't complete."}</b>{" "}
+              {w.sessionError.message}
+            </div>
+          )}
+          <div style={{ marginTop: 12, display: "flex", gap: 12, alignItems: "center" }}>
+            <button
+              className="emerald"
+              disabled={w.busy}
+              onClick={() => w.ensureSession().catch(() => { /* recorded as sessionError by ensureSession */ })}
+            >
+              {w.sessionError.kind === "cancelled" ? "Sign in again" : "Try again"}
+            </button>
+            <button className="linkbtn" disabled={w.busy} onClick={() => w.startOver()}>
+              Start over
+            </button>
+          </div>
+        </div>
       ) : !w.agentWallet ? (
         // Connected, but the agent wallet is still resolving from the session
         // (or auth was dismissed). This is the wallet that pays for jobs.
