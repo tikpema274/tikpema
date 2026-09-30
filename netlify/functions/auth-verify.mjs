@@ -5,9 +5,10 @@
 // Step 2 of session auth: verify the challenge, issue a session token.
 //   - metamask (EOA): ecrecover — recoverMessageAddress must return `address`.
 //   - passkey: OFF-CHAIN WebAuthn — webauthn-p256.verify against the credential's
-//     public key. The pubkey is captured at registration (login assertions don't
-//     return it) into a Blobs store, trust-on-first-use with onlyIfNew. No
-//     on-chain ERC-1271, so a fresh passkey needs no deployed smart account.
+//     public key. ⛔ 2026-09-30: ONLY a credential already stored logs in — the old
+//     trust-on-first-use registration (the client's own key + the client's own address)
+//     is refused until the proper fix binds the address to the key. See the MITIGATION
+//     block below. No on-chain ERC-1271, so a stored passkey needs no deployed account.
 // Identity stays the SCA address for BOTH methods (2a/2b mappings unchanged).
 import { getStore } from "@netlify/blobs";
 import { connectBlobs } from "./_blobs.mjs";
@@ -52,34 +53,30 @@ export async function handler(event) {
     if (!credentialId) return json(400, { error: "credentialId required" });
     if (!webauthn) return json(400, { error: "webauthn assertion required" });
 
+    // ═══ 🚨 MITIGATION (2026-09-30): NO FIRST-USE REGISTRATION; A FAILED READ IS REFUSED ════════════════════
+    // Until ab85757's replacement lands, this path ONLY logs in a credential the server ALREADY stores. The old
+    // trust-on-first-use branch took the CLIENT's publicKey for an unstored credentialId, verified the assertion
+    // against THAT key (webauthn-p256 checks no origin / rpId; every field is client-supplied) and issued a session
+    // for the CLIENT-SUPPLIED address — so a software key and any address got a session (proven locally, 2026-09-30).
+    // New passkey sign-ups stop until the proper fix binds the address to the key; existing users are unaffected;
+    // MetaMask (ecrecover, above) is unaffected. Tested: scripts/verify-auth-verify.mjs.
+    //   · a FAILED read → refused (never "unknown": an outage must not become a registration or a login)
+    //   · no stored record, or a stored record without a public key → refused; NOTHING is written
+    //   · a stored credential → verified against the STORED key; the session is the STORED address
+    //     (the request's `publicKey` and `address` are never used for a passkey session)
     const store = getStore(CRED_STORE);
-    const stored = await store.get(`cred:${credentialId}`, { type: "json" }).catch(() => null);
-
-    // Login assertions don't return the public key, so we verify against the
-    // STORED key. Registration supplies it (first use). Bind the identity to the
-    // stored/first address so a later request can't swap it.
-    let pubkey, boundAddress;
-    if (stored?.publicKey) {
-      pubkey = stored.publicKey;
-      boundAddress = stored.address;
-    } else {
-      if (!isHex(publicKey)) {
-        return json(400, { error: "unknown credential — publicKey required to register it" });
-      }
-      pubkey = publicKey;
-      boundAddress = address.toLowerCase();
+    let stored;
+    try { stored = await store.get(`cred:${credentialId}`, { type: "json" }); }
+    catch { return json(401, { error: "your passkey could not be read right now — nothing was changed; try again shortly" }); }
+    if (!stored || !isHex(stored.publicKey) || !isAddr(stored.address)) {
+      return json(401, { error: "this passkey is not registered here — new passkey sign-ups are paused while registration is being secured; use an existing passkey or MetaMask" });
     }
+    const pubkey = stored.publicKey;
+    const boundAddress = String(stored.address).toLowerCase();
 
     const hash = passkeyChallengeHash(nonce);
     const ok = await verifyWebauthn({ hash, publicKey: pubkey, signature, webauthn });
     if (!ok) return json(401, { error: "passkey verification failed" });
-
-    // Trust-on-first-use: bind credentialId → { publicKey, address } immutably.
-    if (!stored?.publicKey) {
-      await store
-        .set(`cred:${credentialId}`, JSON.stringify({ publicKey: pubkey, address: boundAddress, createdAt: new Date().toISOString() }), { onlyIfNew: true })
-        .catch(() => {});
-    }
 
     const { token, exp } = issueSession({ address: boundAddress, method });
     return json(200, { token, exp, identity: { address: boundAddress, method } });
