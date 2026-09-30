@@ -185,10 +185,13 @@ export default function ConnectPasskey({ wallet: w }: { wallet: UnifiedWallet })
         // ⭐ SIGN-IN DID NOT PRODUCE A SESSION (2026-09-30) — said as what it was, never as a spinner.
         // refused: the server said no, in ITS words. cancelled: the prompt was closed (a choice, not an
         // error — no warning colour). failed: anything else, with its reason. See wallet/sessionError.ts.
+        // ⛔ The cancelled line does NOT say "nothing was changed": after a NEW registration the auto-session
+        // effect prompts a second tap, and cancelling THAT leaves a passkey already created on the device and
+        // with Circle. Only "not signed in" is true in every case (guard-registry: ConnectPasskey is noClaims).
         <div className="status" style={{ marginTop: 10 }}>
           {w.sessionError.kind === "cancelled" ? (
             <div>
-              <b>Sign-in was cancelled.</b> Nothing was signed or changed — sign in again when you're ready.
+              <b>Sign-in was cancelled.</b> The passkey prompt was closed before you signed in — sign in again when you're ready.
             </div>
           ) : (
             <div style={{ color: "var(--warn)" }}>
