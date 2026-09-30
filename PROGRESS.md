@@ -30845,3 +30845,45 @@ WebAuthn signature against THAT key (which the client controls), and issues a se
 Nothing in the file ties the address to the public key; its header says "Identity stays the SCA address". A failed read
 of an EXISTING credential also lands in this branch. **Not traced downstream and NOT exercised.** If nothing else binds
 the address, a fresh passkey could open a session as ANY address. It outranks every item above.
+
+---
+
+# 🚀 DEPLOY 6abcfe35 — THE AUTH MITIGATION (94ef870), mitigation-only, from a hotfix worktree (2026-09-30), verified
+
+T deployed `hotfix/auth-verify-mitigation` from `/home/salifu/Arc-now2/tikpema-hotfix`: **ebc87f8 (what prod served) +
+cb92e9e (72211d2's ledger lines, cherry-picked) + 94ef870 (the mitigation + scripts/verify-auth-verify.mjs)**. Ledgers
+committed there as dcef35a. Nothing else reached production: steps 3–6 (2c19094 → 2f90898) remain undeployed.
+
+## Live check (read-only, no risk) — the served code IS the mitigation
+The proof's request WITHOUT a publicKey (a made-up address, a fresh credentialId) → **401 "this passkey is not registered
+here — new passkey sign-ups are paused while registration is being secured; use an existing passkey or MetaMask"**, no
+token. (The old code answered 400 "unknown credential — publicKey required to register it"; neither version issues a
+session or writes for that request, so the check exercises nothing.)
+
+## The deploy checks (re-run independently from the worktree; T's run went to the terminal, so there is NO deploy log)
+- **Production serves deploy `6abcfe35e358fc288c0a9a40`**, published **12:55:57Z**; served stamp **commit 94ef870, tree
+  0cce238dea25**. `gate:deployed` ✅ (control plane = data plane; no abandoned deploys among the 25 newer). HEAD dcef35a ≠
+  stamped 94ef870, trees identical (the ledger commit is outside the stamped surface).
+- **ddTree `d79683273abc` = previous, `rotated:false`, `no-window`** (capture 12:57:26Z).
+- **gate:ledger ✅ — 132 / 46, ONE new line each.**
+- **Loss sweep: 0 new** (17 carried; 594 deploys scanned, 23 preserved, 0 unaccounted).
+- ⚠️ No deploy log exists for this run: the wrapper writes `deploy-logs/X.log` only under `nohup … > deploy-logs/X.log`.
+
+## Found on the way
+- `test:scriptinert` silently depends on the untracked `.env` (`bridge-direct.mjs --dry-run` reads the agent wallet
+  address from it): a fresh worktree failed 4 cases until the repo's own `.env` was copied in. A test that needs an
+  untracked file.
+
+## Back into main
+2f90898 committed the step-6 fixes alone; main's uncommitted copies of the auth files were verified byte-identical to
+94ef870 and dropped; **3642afd merges the branch; b3a53cb commits the ledger lines alone** (the pre-commit hook refuses
+ledgers mixed with other changes — followed, not bypassed). main's auth-verify, suite and ledgers = the deployed branch's.
+
+## Still open
+- **The proper fix** (bind the passkey's address to its key at registration): not started, as decided. New passkey
+  sign-ups stay paused until it lands.
+- **Point 5 (was it ever used?)**: the agent-Send audit (read-only) found 66 transfers / 39.35 testnet USDC to non-owner,
+  non-contract addresses; the bulk to 0x0c5e…2532 (T: the Avalanche treasury address) and 0x12b3…a29c (T: the TikpemaPay
+  walkthrough sink). **0x433fd143…70726d is pending T's recognition**: an EOA (36 txs sent, 463 testnet USDC), not a
+  Circle wallet, signs in with MetaMask (record 2026-08-30), received 3.60 from 0xfd80…5767 (07-29 → 08-09) and 2.00 from
+  T's operator identity (09-05); in nothing in the repo or memory. Not covered: Gateway, CCTP, escrow and swap outflows.
