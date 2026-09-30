@@ -30928,3 +30928,108 @@ This is the case for the EXIT-LIQUIDITY FACT, measured rather than argued: a vau
 could redeem ~$102 at 12:34Z, the figure having fallen from 8.84% in four days; AND a redemption path changed by a
 zero-timelock allocator move that no deposit disclosure mentions. A signed "redeemable now, at block N" fact, plus a
 liquidity-adapter re-check (blocker 3), are exactly what would have shown both.
+
+---
+
+# 🔎 0x433fd143…70726d — UNIDENTIFIED, OPEN on the auth audit's fan-in list (2026-09-30, read-only)
+
+T does not recognise it, so it is **not treated as T's**. Read-only sources: prod Blobs (every key and value in 24
+stores), Circle (0x433f's agent wallet), the Arc testnet explorer (explorer.testnet.arc.io /api/v2, all 70 token
+transfers + 39 txs), git history. Nothing was written anywhere but the scratchpad.
+
+## 1. Who sent to it (every Tikpema identity; the chain shows MORE than the Circle audit did)
+| sender | what it is in Tikpema | transfers | USDC | when |
+|---|---|---|---|---|
+| 0x74b7…24e5 EOA | T's operator identity (MetaMask owner) | 4 direct | 3.20 | 06-28 08:59, 14:32, 14:33; 09-03 06:33 |
+| 0x3cb7…2de9 | the operator's agent SCA | 1 | 2.00 | 09-05 12:36 (between its own approve 12:31 and escrow approve 12:42) |
+| 0xc54d…e621 | the DEVELOPER-CONTROLLED DD SCA (owner of ids 850337 / 851823) | 6 | 3.50 | 06-28 → 07-01 |
+| 0xfd80…5767 | passkey owner; the repo's `DEFAULT_PROBE_OWNER`; 1 credential (created 07-04 23:23Z) | 3 direct | 0.30 | 06-28 15:19, 15:22; 07-03 10:32 |
+| 0x0589…7f9e | 0xfd80's agent SCA — chat-agent "user send" actions (data-budget audit rows `user send to <0x433f>`) | 6 | 3.60 | 07-29 ×3, 07-30 ×2, 08-09 |
+| 0x5e06…7db4 EOA | MetaMask owner (record 07-03 22:56Z, AFTER these sends); a prod bridge-preregistration subject | 2 | 0.20 | 07-03 10:39 |
+The 08-09 3.00 was typed as a chat plan by 0xfd80's session: agent-quotes `q/0xfd80…/2026-08-09T10:09:34Z` — "bridge 2
+usdc to base and then swap 2 eurc to usdc and then send 3 eurc to 0x433f…" (the step executed as `transfer_usdc` 3).
+(An earlier "fd80 matches 2 credentials" was a substring hit inside another address; 0xfd80 has ONE credential.)
+
+## 2. Timing
+Every Tikpema-origin transfer except two sits within 0–49 min of a commit in this repo (the 06-28 cluster, 06-29, 07-01,
+07-30, 09-03, 09-05); 07-03 is 3.5 h off, 08-09 is 2.0 d off. The operator's Circle history starts 07-29, so it cannot
+place anything earlier. Proximity to commits is what was measured; whose hand typed each send is NOT established.
+
+## 3. Its Tikpema account
+- `agent-wallets/owner:0x433f…` — method **metamask**, created **2026-08-30T14:28:41.555Z**. The record is written by
+  `ensureOwnerWallet(session)` on the first authenticated call, and a metamask session requires `ecrecover` of a
+  server-nonce message **to that address** (auth-verify's MetaMask branch — not the passkey hole). So: the 0x433f key
+  signed a Tikpema login on 08-30. Nine minutes later (14:37:47Z) T's operator EOA 0x74b7 signed the live manual-swap
+  test (tx 0x2997749a…, recorded in c961bb1). Adjacent; not the same key.
+- **Nothing else**: its agent wallet (0xa073…bdfc) has **0 Circle transactions and 0 balance**; no key or value in
+  job-runs, job-deliverables, checkout-orders, dca-*, vault-mandate*, ub-*, bridge-receipts, escrow-watch, pay-strands,
+  plan-path-watch, x402-quote-pending, dd-analyze-pending, agent-policy/pause, treasury-policy, passkey-credentials names
+  0x433f or its agent wallet. It appears only as a RECIPIENT (the quote above + 5 data-budget audit rows).
+
+## 4. Where its 463 USDC came from (reconciles: in 612.744051 − out 149.467725 = 463.276326; balance 463.203423; the gap
+is native gas over 38 txs)
+- **375.854635** from contract **0x461a…435d** on 06-26 18:14 — the return leg of a swap in which 0x433f sent **40 EURC**
+  (method 0xd5bcb9b5; it had earlier put 111 USDC through the same contract for ~1.3 EURC). Unverified contract, not in the repo.
+- **220.00** from fixed-20 senders (0x70e3…af8e, 0x3c33…752d, 0x319d…460f at ~3.95M txs each; 0xd4c0…daae, 0xdc19…0e35,
+  0x8383…6e06, 0xd844…9b3d), first on **2026-06-04 22:12Z** — faucet-shaped, NOT identified as any named faucet.
+- **12.80** from the six Tikpema identities above; **4.09** other (swap returns from pools, 0.00055 from 0xf1bb…a6ba).
+- Its own activity from 06-12 onward: TikpemaSwap (own deployment 0xd2f2…31bd) ×2 on 06-12, CCTP burns, Xylo/Arrow/Uniswap
+  swaps, a vault deposit (vUSYC2), a failed `stake`, a `bridgeWithPreapprovalAndHook` call to 0xc556…363d (09-04).
+  It was active on Arc testnet **three months before** its Tikpema record, and received from Tikpema identities from 06-28.
+
+## Status: OPEN — unidentified
+It is a MetaMask EOA that the operator identity, the DD developer SCA, and three other Tikpema owners each paid; it has
+used TikpemaSwap directly; it logged into Tikpema once (08-30) and did nothing there. Who holds its key is NOT established.
+The fan-in list stays open on this address. ⚠️ Found on the way: the public RPC (rpc.testnet.arc.io) no longer serves
+08-30 transactions (getTransaction → not found); the explorer does.
+
+---
+
+# 🔎 THE PROPER AUTH FIX — FEASIBILITY + THE 3 MISMATCHED CREDENTIALS (2026-09-30, read-only)
+
+Question: can the server DECIDE a passkey's address from its public key (so the client-supplied address disappears
+rather than being validated)? **Yes — measured.** Nothing was written anywhere; no Circle call was made.
+
+## The address is a pure function of the P-256 key
+- Circle's MSCA = CREATE2 from factory `0x0000000DF7E6…9AdD`, salt 0, mixed salt keccak(sender ‖ 0) where sender =
+  keccak(x, y), init = `initializeUpgradableMSCA` with the weighted-webauthn plugin `0x0000000C984A…73C8` owning (x, y).
+  modular-wallets-core 1.0.13 holds it as the internal, UNEXPORTED `computeAddress(owner)`.
+- **On chain:** 0xfd80…5767's deployment (tx 0x06fd55e2…, createAccount calldata) → the key recovered from it → the
+  offline derivation = 0xfd80…5767 exactly; the factory's `getAddress` view returns the same on **Arc testnet AND Arc
+  mainnet 5042** (factory deployed at the same address on both, 4514 bytes).
+- ⚠️ The browser does NOT derive locally: `toCircleSmartAccount` over the modular transport asks Circle's
+  `circle_getAddress`. `useModularWallet.ts` restoreLogin's comment "Pure derivation … no Circle round-trip" is wrong.
+
+## Every stored credential, derived (prod `passkey-credentials`, 19 records, dump 13:08Z)
+**16 MATCH; 3 MISMATCH**, all 2026-07-03: stored 0x9cbf…5eb0 (20:07:12Z), 0x7f89…7142 (20:40:58Z), 0x637f…2832
+(22:24:40Z). Keys valid P-256 points; stored and derived addresses all undeployed, nonce 0, balance 0.
+
+## The 3 are ab85757's own production test artifacts — established from the RECORD, not from code
+- **Circle NOT asked.** `circle_getAddress` returns a `ModularWallet` {id, state, createDate} ("creation response"),
+  and c1ae868 records that the lookup "silently minted new wallets" → T kept it off. Only ONE client key exists
+  (production `VITE_CLIENT_KEY` == local `.env`, a `TEST_CLIENT_…` key).
+- **Before ab85757 there was no credential store** (3945233: passkey = on-chain ERC-1271). ab85757 stored the
+  CLIENT's address on first use; the committed browser client sends Circle's address for the same key (would match).
+- **Each record lands 41–125 s after a production deploy published:** 6a4814bd 20:06:31Z → 20:07:12Z (two minutes
+  BEFORE ab85757 was committed at 20:09:25Z — prod ran the uncommitted tree); 6a481c4c 20:38:56Z → 20:40:58Z;
+  6a4834c4 22:23:55Z → 22:24:40Z.
+- ab85757's message: **"Proven on production (software authenticator producing real P-256 assertions): new passkey
+  user registers off-chain (SCA confirmed undeployed) → session; … the passkey session runs a FULL research job on its
+  own 2a wallet"**. The record shows exactly that, three times:
+
+| stored owner | credential | agent wallet (`ensureOwnerWallet`) | first tx | job |
+|---|---|---|---|---|
+| 0x9cbf…5eb0 | 20:07:12Z | 20:07:29Z (+17 s) | 20:07:57Z approve 0.2 → AGENTIC_COMMERCE | 147328, 0.2, funded |
+| 0x7f89…7142 | 20:40:58Z | 20:41:16Z (+18 s) | 20:41:46Z approve 0.2 → AGENTIC_COMMERCE | 147345, 0.2, funded |
+| 0x637f…2832 | 22:24:40Z | 22:24:43Z (+3 s) | 22:25:13Z approve 0.2; 22:25:53Z transfer 0.05 → 0x7da3…1a30 | 147404, 0.2, funded |
+
+- **All 32 stores read** (every key + value, 0 unreadable): the stored owners appear ONLY in passkey-credentials,
+  agent-wallets and job-runs (1 each); the DERIVED addresses appear in NO store. One evening, one job each, never again.
+- A software authenticator's key is never registered with Circle's RP, so Circle never produced those addresses —
+  outcome (b) ("Circle disagrees with the derivation") cannot apply to them. The test client itself is not in the repo;
+  session transcripts start 08-31. **Not recoverable: what address source that client used.**
+
+## Decision (T)
+Proceed: server derives, compares with the client's address (refuse on disagreement, adopt NEITHER), verifies against
+that key, writes only if new; login checks stored address == derive(stored key). **The 3 records are REFUSED, not
+exempted** — their keys were software keys from a 07-03 test that nobody holds.
