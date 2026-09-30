@@ -9,15 +9,24 @@
 //   3. job-run-background: the IDEMPOTENCY GUARD — a second invocation of a run already
 //      advanced past "starting" ABORTS before createJob (no second on-chain job).
 //   4. job-run-background: a genuine first call (status "starting") PROCEEDS to createJob.
+//   5. ⛔ (2026-09-30) job-run-background: a FAILED run read is REFUSED — never read as "no record".
+//      It used to `.catch(() => null)`, so an outage during a self-heal re-fire looked like a fresh
+//      run and went on to createJob + fund: a second on-chain job, funded twice. Now nothing is
+//      created and nothing written; the run stays "starting", so the self-heal re-fires it later.
 import { mock } from "node:test";
 
 const OWNER = "0xowner", WALLET = "0xwallet";
 
 const stores = {};
+const readThrows = new Set(); // store names whose get() throws (a Blobs outage)
+const writes = [];
 const mkStore = (name) => {
   stores[name] ??= new Map();
   const m = stores[name];
-  return { get: async (k) => (m.has(k) ? JSON.parse(m.get(k)) : null), setJSON: async (k, v) => void m.set(k, JSON.stringify(v)) };
+  return {
+    get: async (k) => { if (readThrows.has(name)) throw new Error("blobs down"); return m.has(k) ? JSON.parse(m.get(k)) : null; },
+    setJSON: async (k, v) => { writes.push([name, k, v?.status]); m.set(k, JSON.stringify(v)); },
+  };
 };
 mock.module("@netlify/blobs", { namedExports: { connectLambda: () => {}, getStore: mkStore } });
 mock.module("../netlify/functions/_auth.mjs", {
@@ -106,6 +115,27 @@ console.log("\n── job-run-background idempotency guard ──");
   const r2 = await callBg();
   check("re-invocation of a FUNDED run → aborts", r2.statusCode === 202 && /already/.test(r2.body || ""), r2.body);
   check("still no createJob", createJobCalls === 0);
+}
+
+console.log("\n── ⛔ job-run-background: a FAILED run read is REFUSED (2026-09-30) ──");
+{
+  createJobCalls = 0;
+  await seedRun({ status: "funded", jobId: "155999" }); // the run DID advance; the read cannot see it
+  readThrows.add("job-runs"); writes.length = 0;
+  const r = await callBg();
+  readThrows.delete("job-runs");
+  check("⭐⭐ the run read THROWS → createJob NOT called (no second on-chain job, no second fund)", createJobCalls === 0, `createJobCalls=${createJobCalls}`);
+  check("⭐ …nothing written (the record is not touched on a guess)", writes.length === 0, JSON.stringify(writes));
+  check("⭐ …and it says why (the run could not be read), without claiming the run is new", /could not be read|unreadable/i.test(r.body || ""), r.body);
+  const after = await runs.get("run:r1");
+  check("the stored run is unchanged (still funded, jobId intact)", after.status === "funded" && after.jobId === "155999", JSON.stringify(after));
+
+  createJobCalls = 0;
+  await seedRun({ status: "starting", jobId: undefined });
+  readThrows.add("job-runs"); writes.length = 0;
+  await callBg();
+  readThrows.delete("job-runs");
+  check("⭐ a 'starting' run whose read throws → also refused (it stays 'starting' for the self-heal to re-fire)", createJobCalls === 0 && writes.length === 0 && (await runs.get("run:r1")).status === "starting", `createJobCalls=${createJobCalls} writes=${JSON.stringify(writes)}`);
 }
 
 console.log(`\n${fail === 0 ? "✅ ALL PASS" : "❌ FAILURE"} — ${pass} passed, ${fail} failed. Zero money.`);

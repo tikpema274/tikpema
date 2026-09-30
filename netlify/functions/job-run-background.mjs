@@ -56,7 +56,19 @@ export async function handler(event) {
   // invocation already began. Do NOT abort on a missing/"starting" record: the first
   // legit call can race Blobs' eventual read and see null, and must still proceed.
   // (Narrows, does not close, the two-both-see-"starting" race — see job-run-status.)
-  const existing = await store.get(`run:${runId}`, { type: "json" }).catch(() => null);
+  //
+  // ⛔ A FAILED READ IS NOT "NO RECORD" (2026-09-30). This used to `.catch(() => null)`: a Blobs outage
+  // during a self-heal re-fire looked like a fresh run and went on to createJob + fund — a second
+  // on-chain job, funded twice, and the advanced record overwritten. Now a thrown read refuses:
+  // nothing created, nothing written. The run stays as it was; if it is still "starting", the
+  // job-run-status self-heal re-fires it once the store reads again. [[absence-must-never-read-as-safe]]
+  let existing;
+  try {
+    existing = await store.get(`run:${runId}`, { type: "json" });
+  } catch (e) {
+    console.error(`[job-run-background] run ${runId} could not be read — NOT creating: ${e?.message ?? e}`);
+    return { statusCode: 503, body: "run record could not be read — nothing created; the self-heal will retry" };
+  }
   if (existing && (existing.jobId || (existing.status && existing.status !== "starting"))) {
     return { statusCode: 202, body: `already ${existing.jobId ? "created (" + existing.jobId + ")" : existing.status} — not re-creating` };
   }
