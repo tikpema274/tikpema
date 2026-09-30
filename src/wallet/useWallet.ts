@@ -1,5 +1,6 @@
 // src/wallet/useWallet.ts
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { classifySessionError, type SessionError } from "./sessionError";
 import { resolveAgentWallet } from "./resolveAgentWallet";
 import { useModularWallet } from "./useModularWallet";
 import {
@@ -71,6 +72,15 @@ export function useWallet() {
   // Start over (see startOver).
   const [loginError, setLoginError] = useState<string | null>(null);
 
+  // ⭐ A REFUSED SIGN-IN, in the server's own words (2026-09-30). ensureSession's callers — the
+  // login-time effect below and ConnectPasskey's "Tap to finish setup" — swallowed its failure, so a
+  // 401 from auth-verify (e.g. "that address does not belong to this passkey — nothing was
+  // registered") left the page on "Preparing your wallet…" forever. ensureSession now RECORDS the
+  // failure here for every caller; a session, or a cleared one, clears it.
+  // [[absence-must-never-read-as-safe]]
+  // ⭐ CLASSIFIED (refused / cancelled / failed) — a cancelled prompt is not a refusal. See sessionError.ts.
+  const [sessionError, setSessionError] = useState<SessionError | null>(null);
+
   const persistSession = useCallback((s: Session | null) => {
     setSession(s);
     try {
@@ -86,6 +96,7 @@ export function useWallet() {
     persistSession(null);
     setAgentWallet(null); // a new/cleared session must re-resolve its own wallet
     setAgentWalletError(null); // …and a stale failure must not be shown against the new one
+    setSessionError(null); // …nor a refused sign-in from the previous attempt
   }, [persistSession]);
 
   const connectRegister = useCallback(
@@ -188,7 +199,7 @@ export function useWallet() {
         }),
       });
       const ch = await chRes.json();
-      if (!chRes.ok) throw new Error(ch?.error || "Could not start authentication");
+      if (!chRes.ok) throw Object.assign(new Error(ch?.error || "Could not start authentication"), { serverRefusal: chRes.status < 500, status: chRes.status });
 
       let verifyBody: Record<string, unknown>;
       if (ctx.kind === "metamask") {
@@ -214,15 +225,21 @@ export function useWallet() {
         body: JSON.stringify(verifyBody),
       });
       const data = await vRes.json();
-      if (!vRes.ok) throw new Error(data?.error || "Authentication failed");
+      if (!vRes.ok) throw Object.assign(new Error(data?.error || "Authentication failed"), { serverRefusal: vRes.status < 500, status: vRes.status });
 
       persistSession({ token: data.token, exp: data.exp, identity: data.identity });
+      setSessionError(null);
       return data.token as string;
     })();
 
     authInFlight.current = run;
     try {
       return await run;
+    } catch (e) {
+      // RECORDED, then rethrown — callers that swallow it no longer hide it. CLASSIFIED: the server's
+      // refusal (its `error` verbatim, marked serverRefusal above), a cancelled prompt, or another failure.
+      setSessionError(classifySessionError(e));
+      throw e;
     } finally {
       authInFlight.current = null;
     }
@@ -673,6 +690,7 @@ export function useWallet() {
     startOver,
     logout,
     loginError,
+    sessionError,
     activeKind,
     // ═══ ⭐⭐ PRESENCE, NOT ACTIVITY — and they are DIFFERENT QUESTIONS ═════════════════════════
     // `activeKind` answers "which wallet executes right now". This answers "is a MetaMask wallet
