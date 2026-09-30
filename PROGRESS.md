@@ -31127,3 +31127,26 @@ cirBTC→USDC borrowing draw on the USDC/cirBTC Morpho market drained on 09-30 (
   contract. 0x34CD is the Morpho Blue we have read before on Arc mainnet; a borrow quote (key-gated POST) would name the
   one the kit executes against. NOT run. Circle's economics are "cached projections, not live reads", per the SDK's
   own schema comment. The chain is the authority; the two agree here.
+
+---
+
+# 🔎 EARN KIT OFFERS GALAXY USDC, FIRST IN ITS ARC LIST, AT 5.57% REDEEMABLE, WITH NO RISK WARNING (2026-09-30 23:05Z, read-only)
+
+- **Earn Kit 1.8.1** (published 09-30; ours is 1.6.1). Its vault list is PUBLIC:
+  `GET https://api.circle.com/v1/earnKit/vaults/explore?chain=ARC` needs no key and returns **30 vaults**, the same no-allowlist
+  finding as 09-28. They include ones named "Test", "Test 3", "Arc Test 2", "pjvk", "USDC Test Vault", and two with NO name.
+- **Galaxy USDC `0x8e35…12af` is listed first.** Earn Kit's own record (asOf 23:04:48Z): totalDeposits 89,805,731.18,
+  liquidity/available 5,000,890.14, `status: "low_liquidity"` (also `liquidityProfile.status`), `circleGuarded: true`,
+  manager "Galaxy Curation" 0xec1a…4178 (curator), APY 0.62%.
+  **`riskSignals: {circleSentinel: true, warnings: [], earnKitWarnings: []}`**: the low-liquidity state is in `status`,
+  NOT in `riskSignals`. A consumer reading riskSignals alone sees a clean, Circle-guarded vault.
+- **On chain (Arc mainnet, block 23614220, 23:05:17Z):** totalAssets **89,805,740.36**; idle USDC in the vault
+  **5,000,890.144865** (it was 102.00 at 12:33Z); `liquidityAdapter()` **still 0x000…000**; the only adapter is still
+  0xeE00…7c2C. → **Redeemable now = the idle 5.00M = 5.57%.** Earn Kit's `available` equals the chain to the raw unit.
+- **What moved:** totalAssets +~5.0M since 12:33Z (84.80M → 89.81M), and idle went from 102 to 5.00M: someone deposited
+  ~5.0M. WHO is NOT established (no log scan run). With no liquidity adapter, a deposit stays idle, and
+  idle is the only thing a redemption can draw on. So **new deposits are the exit liquidity for existing holders**,
+  first come first served. That follows from the adapter state, not from any statement by Galaxy.
+- **Keyrock Prime USDC `0x5bef…3123`:** Earn Kit reports liquidity **39.84**, the drained cirBTC pool's free amount
+  exactly (see the Borrow Kit entry).
+- Not done: a deposit quote (POST, key-gated); who deposited the 5.0M; whether Earn Kit's UI surfaces `status`.
