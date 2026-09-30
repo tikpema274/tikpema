@@ -240,6 +240,18 @@ export async function handler(event) {
     await fills.setJSON(fillClaimKey(id, period), { mandateId: id, period, outcome, reason, tx, at: startedAt });
   };
 
+  // ⛔ READ A FILL CLAIM — a FAILED read THROWS, it is never "no claim" (2026-09-30). Both reads used to
+  // `.catch(() => null)`: before a swap, an unreadable claim read as "none" → the tick OVERWROTE it and
+  // swapped again (erasing a submitted fill's circleId); in the reconcile, it read as "claim missing" →
+  // the pending fill was DROPPED WITHOUT LEDGERING. The throw lands in the per-mandate boundary below,
+  // which changes no durable state (a Blobs-transient cause defers and counts toward the wedge alarm;
+  // anything else is recorded as this mandate's error) — the next tick retries the same step. The
+  // cause is kept so isBlobsTransient still classifies it. Tested: scripts/verify-dca-claim-read.mjs.
+  const readClaim = async (id, period) => {
+    try { return await fills.get(fillClaimKey(id, period), { type: "json" }); }
+    catch (e) { throw new Error(`fill claim ${id}/${period} could not be read — nothing changed; retried next tick`, { cause: e }); }
+  };
+
   // The immediate-resolve path (all the pre-submit SKIPs): patch the mandate AND resolve the claim.
   const record = async (m, key, period, outcome, { reason = null, tx = null, patch = {} } = {}) => {
     await patchMandate(m, key, outcome, { reason, tx, patch, period });
@@ -257,7 +269,7 @@ export async function handler(event) {
   const RECONCILE_TERMINAL_FAIL = new Set(["FAILED", "CANCELLED", "DENIED"]);
   const reconcilePending = async (m, key) => {
     const period = m.pendingPeriod;
-    const claim = await fills.get(fillClaimKey(m.id, period), { type: "json" }).catch(() => null);
+    const claim = await readClaim(m.id, period); // a failed read THROWS (see readClaim) — never "missing"
     // ── Defensive: the claim vanished, is no longer 'submitted', or carries NO circleId ──────
     // ⚠️ THE circleId CASE IS NOT HYPOTHETICAL AND IT IS NOT AN ERROR. Measured on prod
     // 2026-08-22: FOUR cancelled mandates carry a live pendingPeriod whose claims are the
@@ -587,7 +599,7 @@ export async function handler(event) {
       // it. (Netlify Blobs supports CAS via getWithEtag/setIfMatch if the race ever proves real;
       // read-before-write is adequate for one cron invoker per minute.) ──
       const claimKey = fillClaimKey(m.id, period);
-      const existingClaim = await fills.get(claimKey, { type: "json" }).catch(() => null);
+      const existingClaim = await readClaim(m.id, period); // a failed read THROWS (see readClaim) — never "no claim"
       if (existingClaim && existingClaim.status !== "claimed") {
         beat.skipped++; beat.details.push({ id: m.id, outcome: "already-recorded-this-period" });
         continue;
