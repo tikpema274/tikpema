@@ -30887,3 +30887,44 @@ ledgers mixed with other changes — followed, not bypassed). main's auth-verify
   walkthrough sink). **0x433fd143…70726d is pending T's recognition**: an EOA (36 txs sent, 463 testnet USDC), not a
   Circle wallet, signs in with MetaMask (record 2026-08-30), received 3.60 from 0xfd80…5767 (07-29 → 08-09) and 2.00 from
   T's operator identity (09-05); in nothing in the repo or memory. Not covered: Gateway, CCTP, escrow and swap outflows.
+
+---
+
+# 📏 GALAXY USDC — EXIT LIQUIDITY GONE (2026-09-30 ~12:34Z, Arc mainnet 5042) — a dated reading, read-only
+
+T saw Morpho's page read "Total Deposits $84.8M · Liquidity $79.52" (dollars) with a warning triangle. Verified:
+
+## The series (redeemable now ÷ total assets)
+**8.84% (2026-09-26) → 5.30% (2026-09-28 12:31:51Z) → 0.00012% (2026-09-30 12:33:58Z, block 23539614).**
+
+## From the chain (rpc.mainnet.arc.io)
+- **Galaxy USDC `0x8E35…12AF`:** totalAssets **84,804,306.53** USDC; idle (USDC.balanceOf(vault)) **102.000000**.
+- ⛔ **Galaxy's `liquidityAdapter()` is now `0x000…000` and `liquidityData()` is empty.** On 2026-09-26 it was the market
+  adapter `0xeE00…7c2C` — which is still Galaxy's ONLY adapter (`adapters(0)`, adaptersLength 1). So redemptions no
+  longer draw on the market at all: **redeemable now = the idle 102 USDC.** This is the allocator's zero-timelock
+  liquidity-adapter move this project already named as blocker 3 (setIsAllocator has a 0 timelock on Galaxy), observed
+  live. ⚠️ **WHEN and BY WHOM it changed is NOT established:** my event scan was invalid (viem's `getLogs` ignores a raw
+  `topics` param; it returned every vault log — ordinary Withdraws/Deposits/Transfers at 12:02–12:25Z, which I discarded).
+- **The USDC/cirBTC market `0xc2db905f…25815d`, LLTV 86%, via Morpho Blue `0x34CD…7fCD` `market(id)`** (block 23539826,
+  12:35:45Z; stored state last updated 12:11:14Z): totalSupply **184,966,385.678585**, totalBorrow **184,966,380.576724**
+  → **FREE 5.101861 USDC, utilisation 99.9999%**.
+
+## The shared pool — drained for EVERYONE, not only Galaxy's reach
+Suppliers (Morpho API `marketPositions`): **Galaxy's adapter 84,804,206.53 (45.85%) · Keyrock Prime's adapter `0x6adc…F5c3`
+75,008,909.99 (40.55%) · the third direct supplier `0x843E…B96a` 25,001,242.98 (13.52%)** · ~152k smaller. Eight vaults
+supply it. **Keyrock Prime `0x5bEf…3123`** keeps its liquidity adapter, but reaches only the pool's **5.10 USDC of 75.0M
+(0.000007%)**. Two separate facts, both true: (1) the pool is at 99.9999% utilisation — no supplier can exit; (2) Galaxy
+additionally has NO liquidity adapter, so even a refilled pool would not be reachable by a Galaxy redemption until an
+allocator sets one again.
+
+## Morpho's API (same minute) and the warning triangle
+`vaultV2ByAddress`: liquidity **102.00** ($101.98), idleAssets 102, liquidityAdapter **null**, totalAssets 84,804,297.97;
+**`warnings: [{type: "low_liquidity", level: "YELLOW"}]`** — same for Keyrock Prime. T's "$79.52" was a different moment
+(the idle figure moves). **Earn Kit's `riskSignals.warnings`: NOT read** — the installed earn-kit 1.6.1 rejects Arc
+mainnet (measured 2026-09-28); its types say `warnings[{type, level}]`, plausibly Morpho's, but that is unverified.
+
+## ⭐ Why this is recorded
+This is the case for the EXIT-LIQUIDITY FACT, measured rather than argued: a vault showing $84.8M of deposits whose holders
+could redeem ~$102 at 12:34Z, the figure having fallen from 8.84% in four days; AND a redemption path changed by a
+zero-timelock allocator move that no deposit disclosure mentions. A signed "redeemable now, at block N" fact, plus a
+liquidity-adapter re-check (blocker 3), are exactly what would have shown both.
