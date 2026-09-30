@@ -109,7 +109,10 @@ section("4 — ⭐ a CANCELLED prompt is not a refusal");
 
   const t = render({ sessionError: c });
   check("⭐⭐ RENDERED cancelled: says CANCELLED, never 'refused'", /cancel/i.test(t) && !/refused/i.test(t), t.slice(0, 220));
-  check("⭐ …says nothing was signed or changed", /nothing was (signed|changed)/i.test(t), t.slice(0, 220));
+  check("⭐ …says the prompt was closed before sign-in", /prompt was closed before you signed in/i.test(t), t.slice(0, 220));
+  // ⛔ NOT "nothing was changed": cancelling the session tap right after a NEW registration leaves a passkey
+  // already created (device + Circle). That claim was false in exactly that case — gate:registry caught it.
+  check("⛔ …and claims NOTHING about state — no 'nothing was signed/changed'", !/nothing was|changed/i.test(t), t.slice(0, 220));
   check("⭐ …does NOT show 'credential request failed.' or the browser's exception text", !/credential request failed|timed out or was not allowed/i.test(t), t.slice(0, 220));
   check("⭐ …offers to sign in again", /Sign in again|Try again/.test(t));
   const html = renderToStaticMarkup(<ConnectPasskey wallet={wallet({ sessionError: c }) as any} />);
