@@ -66,3 +66,15 @@ scripts/dd/verify-attestation.mjs:generic-api-key:57
 # (`gitleaks protect --staged`) finding, so no commit hash exists to pin it to yet. It will need
 # re-pinning if the constant moves.
 netlify/functions/_bridge-discover.mjs:generic-api-key:46
+
+# scripts/spikes/idempotency-key-repeat-2026-09-30T09-33-35-242Z.json — the repeated-idempotency-key measurement's
+# evidence (T ran it 2026-09-30). The five findings are its two Circle IDEMPOTENCY KEYS (K1 a8bb1a…a86a ×4, K3
+# 62ce54…1c76 ×1) under a JSON field named "key", which generic-api-key pattern-matches. NOT credentials: an
+# idempotency key authenticates nothing — it only de-duplicates requests made WITH our API key, it was single-use,
+# on a throwaway SCA (0x797c…fc79), and recording the exact key is the point of the evidence. Evidence JSON never
+# changes after the run, so these line-only fingerprints will not drift.
+scripts/spikes/idempotency-key-repeat-2026-09-30T09-33-35-242Z.json:generic-api-key:14
+scripts/spikes/idempotency-key-repeat-2026-09-30T09-33-35-242Z.json:generic-api-key:25
+scripts/spikes/idempotency-key-repeat-2026-09-30T09-33-35-242Z.json:generic-api-key:36
+scripts/spikes/idempotency-key-repeat-2026-09-30T09-33-35-242Z.json:generic-api-key:47
+scripts/spikes/idempotency-key-repeat-2026-09-30T09-33-35-242Z.json:generic-api-key:58

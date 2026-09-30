@@ -30658,3 +30658,46 @@ Three times in piece 5. Two in TEST HELPERS, one in PRODUCTION code — the same
   args, never `key = X`. Narrow and local: only the parameters cases vary to absence.
 - #2's shape in production is already the family `absence-must-never-read-as-safe`; the step-3/4 guards (`isKnownGapCount`,
   unreadable → blocked) are its instances.
+
+---
+
+# 📏 THE REPEATED-IDEMPOTENCY-KEY MEASUREMENT — RUN (2026-09-30, T): the KEY is the identity, not the payload
+
+T ran `scripts/spikes/spike-idempotency-key-repeat.mjs` (written 2026-09-30) on a DEDICATED throwaway SCA
+`0x797c…fc79` (not the operator mandate's wallet). Evidence: `scripts/spikes/idempotency-key-repeat-2026-09-30T09-33-35-242Z.json`
+(read back before recording). Payload: USDC `approve(self, 0|1)`, sponsored, no funds moved. Window from Arc block 64756035.
+
+| step | sent | Circle returned |
+|---|---|---|
+| 1a | K1 `a8bb1afc…` (v4) + approve(self,0) | id `0c83478c…` INITIATED |
+| 1b | K1 + approve(self,0), 0.4 s later | **the SAME id** `0c83478c…` INITIATED |
+| 2 | K1 + approve(self, **1**) | **the SAME id** `0c83478c…` QUEUED — the body is never read |
+| 3 | K3 `62ce542c-95a1-5c0b-…` (version nibble **5**) + approve(self,0) | **ACCEPTED**, id `18f893af…` — despite the docs requiring v4 |
+| 5 | K1 + approve(self,0), after `0c83478c…` was COMPLETE (**32 s** after 1a) | **the SAME id** `0c83478c…` COMPLETE |
+
+- **On chain, exactly ONE approve per key:** K1 → `0x0945…0cc9` (block 64756040, value **0** — the FIRST payload; step
+  2's `approve(self, 1)` was never executed); K3 → `0x671b…ffbf` (block 64756052). No unattributed approve. Verdict
+  K1 PASS, K3 PASS.
+- The id is constant; the STATE returned is the transaction's state at the moment (INITIATED → QUEUED → COMPLETE).
+
+## ⭐ WHAT IT SETTLES FOR STEP 6 (recovery)
+1. **May recovery RE-SEND with the key instead of searching? Only inside the MEASURED retention — 32 s — and a later
+   tick is far outside it. So: NO, recovery LOOKS UP; it never re-sends.** Within the window, a re-send is a lookup
+   (same id, nothing new). Beyond it, retention is UNMEASURED: if Circle has forgotten the key, a re-send CREATES a
+   second redeem of the intent's FIXED `sharesToRedeem` — from a wallet that may also hold hand-deposited shares, and
+   `BEYOND_MANDATE_SHARES` would not fire (burned == submitted: the 4c lesson). Recovery runs on the hourly tick, so it
+   is always "beyond". The key stays as the DUPLICATE GUARD for the submit itself (a double submit inside the window
+   is one transaction). Widening this needs a retention measurement (the same key re-sent at 1 h / 24 h).
+   **The lookup:** the submit sets `refId` = the intent key (`CreateContractExecutionTransactionInput.refId`), and
+   recovery lists the wallet's transactions (`listTransactions`, `walletIds`; there is NO refId filter) and matches
+   `refId`. ⚠️ UNMEASURED: that a `refId` we set comes back on the listed transaction (the model declares it; the spike
+   set none). Until measured, a lookup that finds nothing is NOT "never submitted".
+2. **"The key is the identity, not the payload" — CONFIRMED for the attempt suffix (4c).** Step 2 is exactly the retry
+   case: a DIFFERENT body under the SAME key got the FIRST transaction back. Had attempt 2 reused attempt 1's key (the
+   archive design), Circle would have answered attempt 2 with attempt 1's transaction — reverted or complete — and
+   nothing new would have been submitted. **Each attempt's OWN key (derived from `x/…/<n>`) is what stops a retry
+   being answered with the previous attempt's transaction.** (Tested since 4c: `/2`'s key ≠ `/1`'s.)
+3. **The docs/server disagreement on v4:** the docs say "UUID version 4"; the server ACCEPTED a v5-shaped key. Our
+   derivation stays v4-shaped (the documented contract), and `submitRedeem` keeps REFUSING a non-v4 key itself —
+   **the server does not enforce the format, so our own check is the only one.** Nothing relies on the server
+   rejecting a malformed key.

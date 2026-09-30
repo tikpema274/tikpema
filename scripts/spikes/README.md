@@ -163,6 +163,12 @@ STOPPED on a fired falsifier rather than repairing the prediction in place.
 
 | 4 | `spike-batched-burn-pr4.mjs` | **runs PR-4 — the first batched burn.** Pre-registered at `docs/batched-burn-preregistration.md`, committed `f760077` before the runner existed. ⭐ It calls the PRODUCTION path (`bridgeFee` → `sealBridgeQuote` → `openBridgeQuote` → `agentBridge`), unlike runs 1 and 2 which hand-encoded their calldata and therefore proved the CONTRACT rather than our code. Balance and allowance are READ before and after — never predicted, which is the run-1 correction — and the tx hash is written to disk BEFORE any read, so the one unrecoverable datum survives a crash mid-measurement. Streams reported separately, counts never compared. ⛔ A bare run and a bare `import()` both reach NO network and write NOTHING — verified, not assumed | **YES** (~0.054 USDC, `--send`) |
 
+## Piece 5 — the repeated-idempotency-key measurement (vault mandate exit recovery)
+
+| Script | What it establishes | Moves money? |
+|---|---|---|
+| `spike-idempotency-key-repeat.mjs` | What Circle does with a REPEATED `idempotencyKey` on `createContractExecutionTransaction`: same key + same payload twice; same key + a different payload; a UUIDv5-shaped key; one landed approve per key (counted on chain); the same key after COMPLETE. Decides whether exit recovery may RE-SEND with the derived key or only look the tx up. Records every response to `idempotency-key-repeat-<ISO>.json`. **Written 2026-09-30, NOT YET RUN** — T runs it. | no — `approve(self, 0/1)` on USDC from a dedicated throwaway SCA (sponsored); refuses the operator mandate's wallet |
+
 ## Superseded / dead-ends (kept for the honest trail, NOT proof)
 | Script | Why it's here |
 |---|---|

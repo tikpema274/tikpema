@@ -1,0 +1,137 @@
+{
+  "wallet": {
+    "address": "0x797cF30a9Ca2E3a2a28EA55C157A22719821fc79",
+    "walletId": "40cdc60c-4a00-546f-bee5-e27d8c3f9b71"
+  },
+  "startBlock": "64756035",
+  "keys": {
+    "K1": "a8bb1afc-86e7-4efd-b915-3cd6481fa86a",
+    "K3": "62ce542c-95a1-5c0b-9e41-6efdcac01c76"
+  },
+  "records": [
+    {
+      "label": "1a K1 approve(self,0)",
+      "key": "a8bb1afc-86e7-4efd-b915-3cd6481fa86a",
+      "keyIsV4": true,
+      "payload": "approve(self,0)",
+      "at": "2026-09-30T09:32:32.577Z",
+      "ok": true,
+      "id": "0c83478c-1220-55c4-8cc0-dcce5c2e5bed",
+      "state": "INITIATED",
+      "ms": 427
+    },
+    {
+      "label": "1b K1 approve(self,0)",
+      "key": "a8bb1afc-86e7-4efd-b915-3cd6481fa86a",
+      "keyIsV4": true,
+      "payload": "approve(self,0)",
+      "at": "2026-09-30T09:32:33.004Z",
+      "ok": true,
+      "id": "0c83478c-1220-55c4-8cc0-dcce5c2e5bed",
+      "state": "INITIATED",
+      "ms": 213
+    },
+    {
+      "label": "2  K1 approve(self,1)",
+      "key": "a8bb1afc-86e7-4efd-b915-3cd6481fa86a",
+      "keyIsV4": true,
+      "payload": "approve(self,1)",
+      "at": "2026-09-30T09:32:33.217Z",
+      "ok": true,
+      "id": "0c83478c-1220-55c4-8cc0-dcce5c2e5bed",
+      "state": "QUEUED",
+      "ms": 249
+    },
+    {
+      "label": "3  K3 approve(self,0)",
+      "key": "62ce542c-95a1-5c0b-9e41-6efdcac01c76",
+      "keyIsV4": false,
+      "payload": "approve(self,0)",
+      "at": "2026-09-30T09:32:33.466Z",
+      "ok": true,
+      "id": "18f893af-f135-58b8-b6b3-bf756f0dfb35",
+      "state": "INITIATED",
+      "ms": 188
+    },
+    {
+      "label": "5  K1 approve(self,0)",
+      "key": "a8bb1afc-86e7-4efd-b915-3cd6481fa86a",
+      "keyIsV4": true,
+      "payload": "approve(self,0)",
+      "at": "2026-09-30T09:33:04.370Z",
+      "ok": true,
+      "id": "0c83478c-1220-55c4-8cc0-dcce5c2e5bed",
+      "state": "COMPLETE",
+      "ms": 243
+    }
+  ],
+  "step4": {
+    "txs": [
+      {
+        "id": "0c83478c-1220-55c4-8cc0-dcce5c2e5bed",
+        "state": "COMPLETE",
+        "txHash": "0x0945632f4a444ba16880bc8ac179d44539293ac94c98f3a997f6b80f57110cc9",
+        "errorReason": null
+      },
+      {
+        "id": "18f893af-f135-58b8-b6b3-bf756f0dfb35",
+        "state": "COMPLETE",
+        "txHash": "0x671bf9141c9234e3d30ecaeaa2c01497b39b84310db5165a9aa3a538627effbf",
+        "errorReason": null
+      }
+    ],
+    "landed": [
+      {
+        "txHash": "0x0945632f4a444ba16880bc8ac179d44539293ac94c98f3a997f6b80f57110cc9",
+        "block": 64756040,
+        "value": "0"
+      },
+      {
+        "txHash": "0x671bf9141c9234e3d30ecaeaa2c01497b39b84310db5165a9aa3a538627effbf",
+        "block": 64756052,
+        "value": "0"
+      }
+    ]
+  },
+  "step5": {
+    "firstState": "COMPLETE",
+    "txs": [
+      {
+        "id": "0c83478c-1220-55c4-8cc0-dcce5c2e5bed",
+        "state": "COMPLETE",
+        "txHash": "0x0945632f4a444ba16880bc8ac179d44539293ac94c98f3a997f6b80f57110cc9",
+        "errorReason": null
+      },
+      {
+        "id": "18f893af-f135-58b8-b6b3-bf756f0dfb35",
+        "state": "COMPLETE",
+        "txHash": "0x671bf9141c9234e3d30ecaeaa2c01497b39b84310db5165a9aa3a538627effbf",
+        "errorReason": null
+      }
+    ],
+    "landed": [
+      {
+        "txHash": "0x0945632f4a444ba16880bc8ac179d44539293ac94c98f3a997f6b80f57110cc9",
+        "block": 64756040,
+        "value": "0"
+      },
+      {
+        "txHash": "0x671bf9141c9234e3d30ecaeaa2c01497b39b84310db5165a9aa3a538627effbf",
+        "block": 64756052,
+        "value": "0"
+      }
+    ]
+  },
+  "verdict": {
+    "K1": {
+      "landed": 1,
+      "pass": true
+    },
+    "K3": {
+      "accepted": true,
+      "landed": 1,
+      "pass": true
+    },
+    "unattributedApproves": []
+  }
+}
