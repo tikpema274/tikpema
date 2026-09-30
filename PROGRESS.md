@@ -30701,3 +30701,66 @@ T ran `scripts/spikes/spike-idempotency-key-repeat.mjs` (written 2026-09-30) on 
    derivation stays v4-shaped (the documented contract), and `submitRedeem` keeps REFUSING a non-v4 key itself —
    **the server does not enforce the format, so our own check is the only one.** Nothing relies on the server
    rejecting a malformed key.
+
+---
+
+# ✅ VAULT MANDATE — PIECE 5 STEP 6: EXIT RECOVERY, THE BACKGROUND EXECUTOR, THE TICK WIRING (2026-09-30), built red-first, NOT deployed
+
+Built on the repeated-idempotency-key measurement (cc77fef): **recovery LOOKS UP; it never re-sends** (key retention
+measured only to 32 s; a later-tick re-send could create a second redeem of the intent's fixed shares, with BEYOND blind
+to it). Each attempt's own key stops a retry being answered with the previous attempt's tx. Our v4 check is the only
+format guard.
+
+## What was built
+- **`submitRedeem` (`_vault.mjs`) gains an optional `refId`** — the exit intent's key, recovery's LOOKUP handle. A
+  non-string / empty refId throws before anything is signed. The MANUAL RECLAIM passes none: its call is unchanged
+  (tested: no `refId`, no `idempotencyKey`). `submitMandateExitRedeem` passes it through; `runMandateExit` submits with
+  `refId = the intent's key`.
+- **`shared/vault-mandate/exit-recovery.mjs` (new, pure)** — each open state resolves from its OWN instrument:
+  - `submitting` → `matchByRefId` on the wallet's listed Circle transactions (there is NO server-side refId filter):
+    exactly one → submitted; **NOT FOUND → STUCK (`submitting-unlocated`), NEVER "not submitted"** (the refId round
+    trip is UNMEASURED; an absence proves nothing, and recovery never re-sends); two → stuck (ambiguous); list
+    unreadable → wait. A same-shaped redeem WITHOUT our refId is never adopted.
+  - `submitted` → Circle's state: COMPLETE + hash → redeemed; FAILED, no hash → failed (never broadcast); FAILED WITH a
+    hash → redeemed (it reached the chain; the chain decides); pending / no hash / unreadable → wait.
+  - `redeemed` → `classifyExitOutcome` from the chain: exited / exit-partial → asserted; failed → failed;
+    **unconfirmed → wait** (never asserted, never failed).
+- **`recoverMandateExit` (`_vault-mandate-exit.mjs`)** — moves the attempt the record names as far as its instruments
+  allow, then settles (4c: closed / exit-blocked, tracked adjusted). ⛔ **BEYOND_MANDATE_SHARES: the halt is recorded
+  the moment the CHAIN shows it — before the intent is even advanced — and the close branch records it again before any
+  settle** (a crash between the assert and the halt). If the halt cannot be recorded, NOTHING is advanced or settled
+  (`halt-unrecorded`). It NEVER submits (source guard). Reads + records only, so it runs paused or halted.
+- **`vault-mandate-exit-background.mjs` (new, a PUBLIC background function)** — `requireInternal` (the HMAC over
+  SESSION_SECRET) BEFORE any store is opened (no / forged token → 401; GET → 405). `runExitJob`: the payload names only
+  owner, id and a receipt key that must be this mandate's own (`w/<owner>/<id>/…`); **the finding — check, anchor, exit
+  path — is loaded from the stored receipt; a payload's `check` / `exitPath` is IGNORED**; a receipt with no stored
+  check is refused; an `exiting` mandate gets RECOVERY, never a new exit. The result is written to `exit-run/<owner>/<id>/<ISO>`
+  (Netlify discards a background function's output). Disarmed: every run stops at `decideExit`.
+- **`_vault-mandate-exit-deps.mjs` (new)** — the production wiring: the wallet's Circle transactions (listWallets →
+  listTransactions, filtered from the intent's time), Circle's state, and the chain facts (the receipt and the share
+  balance around its block, both endpoints agreed). ⚠️ Network wiring, not exercised offline (the standing of
+  `productionTickDeps`); its first real run is live.
+- **The tick (`_vault-mandate-deposit.mjs`)** — an `exiting` mandate is RECOVERED (never checked or deposited; no
+  recovery wired → reported `exit-unrecovered`, never silent); an EXIT decision TRIGGERS the background executor with
+  THIS window's receipt key (awaited; a thrown or missing trigger is REPORTED); **the receipt now stores the `check`**, so
+  the executor re-decides from exactly what the tick saw. Production: `recoverExit` (the exit deps) and `triggerExit`
+  (POST to the background function with the internal token, from `URL` / `DEPLOY_URL`).
+
+## Red first, mutations
+- `test:mandateexitrecovery` (new): red **53/54** (the pass vacuous: nothing could re-send) → **57/0**.
+  `test:vaultsubmitredeem`: 4 new cases red → 42/0. Every mandate suite green.
+- **19 mutations, all red** — after two SURVIVORS forced better tests: R6 (no halt at classify) and R7 (a failed halt
+  ignored at classify) survived because the CLOSE branch still halted before the settle. New tests: the halt precedes
+  the INTENT's asserted write; a failed halt leaves the intent un-advanced; and R6b (no halt at close) is covered by a
+  crash-after-assert case. The rest: a re-send when not found · not-found read as never-submitted · any listed tx
+  adopted · ambiguous picks the first · unconfirmed read as failed · the payload's finding used · the receipt key's
+  ownership unchecked · the handler without auth · exiting → a new exit · the tick skipping recovery · an uncaught
+  trigger failure · no check in the receipt · no trigger on EXIT · FAILED-with-hash read as failed · refId validation
+  removed · runMandateExit dropping the refId.
+- test:all **167/167**. Off the DD surface.
+
+## ⚠️ Open
+- **The refId round trip is UNMEASURED** — until it is, a `submitting` intent that is not found stays stuck for a human.
+  The measurement is one send (the spike's `--refid` mode, next).
+- ⚠️ This touches the LIVE tick (recovery for exiting mandates, the exit trigger, `check` in receipts) and the
+  manual-reclaim money function (`refId`, additive). Steps 3–6 deploy together, disarmed.

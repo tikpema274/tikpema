@@ -18,7 +18,9 @@ import { MANDATE_STATUS } from "../../shared/vault-mandate/record.mjs";
 import { decideExit } from "../../shared/vault-mandate/exit-decision.mjs";
 import { readExitExecution } from "../../shared/vault-mandate/exit-reads.mjs";
 import { exitPathGate } from "../../shared/vault-mandate/exit-path.mjs";
-import { buildExitIntent, advanceExitIntent, exitIntentKey, retryDecision, buildNeverSubmittedIntent, settledOutcomeOf, verifyExitIntent, EXIT_INTENT_OPEN } from "../../shared/vault-mandate/exit-intent.mjs";
+import { matchByRefId, resolveSubmitting, resolveSubmitted, resolveRedeemed } from "../../shared/vault-mandate/exit-recovery.mjs";
+import { classifyExitOutcome, EXIT_FLAG } from "../../shared/vault-mandate/exit-outcome.mjs";
+import { buildExitIntent, advanceExitIntent, exitIntentKey, retryDecision, buildNeverSubmittedIntent, settledOutcomeOf, verifyExitIntent, resolveExitState, EXIT_INTENT_OPEN } from "../../shared/vault-mandate/exit-intent.mjs";
 
 /**
  * The pause input decideExit (shared/vault-mandate/exit-decision.mjs) requires: {checked:true, reason:string|null}.
@@ -47,7 +49,7 @@ export async function submitMandateExitRedeem(args) {
   if (args && Object.prototype.hasOwnProperty.call(args, "shares")) {
     throw new Error("submitMandateExitRedeem takes no share amount: it redeems min(tracked, live), computed from the record");
   }
-  const { record, liveShares, halt, idempotencyKey, onSubmitted = null, submit = null } = args ?? {};
+  const { record, liveShares, halt, idempotencyKey, refId, onSubmitted = null, submit = null } = args ?? {};
   const h = await readHaltLatch(halt);
   if (!h.readable) return { submitted: false, code: "halt-unreadable", why: h.why };
   if (h.halted) return { submitted: false, code: "halted", why: h.why };
@@ -59,7 +61,7 @@ export async function submitMandateExitRedeem(args) {
       why: `the mandate holds no shares of its own to redeem (tracked ${lim.tracked}); ${lim.notTheMandates} shares in the wallet are not the mandate's and stay` };
   }
   const { submitRedeem } = submit ? { submitRedeem: submit } : await import("./_vault.mjs");
-  const r = await submitRedeem({ walletAddress: record.walletAddress, vault: record.vault, shares: lim.shares, idempotencyKey, onSubmitted });
+  const r = await submitRedeem({ walletAddress: record.walletAddress, vault: record.vault, shares: lim.shares, idempotencyKey, refId, onSubmitted });
   return { submitted: true, sharesSubmitted: lim.shares, limit: lim, circleId: r?.circleId ?? null, redeemHash: r?.redeemHash ?? null };
 }
 
@@ -283,7 +285,7 @@ export async function runMandateExit({ owner, id, finding, deps }) {
   // 4. SUBMIT
   let s;
   try {
-    s = await submitMandateExitRedeem({ record, liveShares: reads.liveShares, halt: deps.halt, idempotencyKey: b.intent.idempotencyKey, submit: deps.submit,
+    s = await submitMandateExitRedeem({ record, liveShares: reads.liveShares, halt: deps.halt, idempotencyKey: b.intent.idempotencyKey, refId: b.intent.key, submit: deps.submit,
       onSubmitted: async ({ circleId }) => { await advanceStoredExitIntent({ exitIntents: deps.exitIntents, owner, id, attempt, to: "submitted", circleId, at: deps.now() }); } });
   } catch (e) {
     return { ok: false, stage: "submit", code: "submit-outcome-unknown", attempt, then: "recover",
@@ -294,4 +296,95 @@ export async function runMandateExit({ owner, id, finding, deps }) {
   return { ok: true, attempt, circleId: s.circleId, redeemHash: s.redeemHash, sharesSubmitted: s.sharesSubmitted,
     reads: { anchor: reads.anchor, exitFeeBps: reads.exitFeeBps, measuredExitBps: reads.measuredExitBps, simulation: reads.simulation, exitPath: reads.exitPath },
     ...(adv.ok ? {} : { warning: `the redeemed hash could not be recorded on the intent (${adv.why}); recovery finds it by the Circle id` }) };
+}
+
+// ═══ PIECE 5 STEP 6: RECOVERY — LOOK UP, CLASSIFY FROM THE CHAIN, SETTLE; NEVER RE-SEND ═════════════════════════
+// Runs every tick for an `exiting` mandate (and from the background executor). One pass moves the attempt the record
+// names as far as its instruments allow, then stops at the first `wait` / `stuck` / blocked:
+//   no intent   → settle (a never-submitted record, the prior status)
+//   submitting  → the wallet's Circle transactions, matched by refId (= the intent key) → submitted | STUCK (not found is
+//                 never "not submitted") | wait
+//   submitted   → Circle's state → redeemed | failed (no hash: never broadcast) | wait
+//   redeemed    → the CHAIN via classifyExitOutcome → asserted | failed | wait (unconfirmed)
+//   terminal    → settle (closed / exit-blocked, tracked adjusted — 4c)
+// ⛔ BEYOND_MANDATE_SHARES → the HALT incident is recorded FIRST; if it cannot be recorded, nothing further is written.
+// ⛔ It NEVER submits: the key's retention was measured only to 32 s (2026-09-30), so a re-send on a later tick could
+//    create a second redeem. It reads and records only, so it runs even while the agent is paused or halted.
+/**
+ * @param {{owner, id, deps:{mandates, exitIntents, halt, now, circleTxsForWallet, circleState, exitFacts, usdcAddress}}} a
+ */
+export async function recoverMandateExit({ owner, id, deps }) {
+  const steps = []; let halted = false;
+  const no = (code, why, extra = {}) => ({ ok: false, code, why, steps, ...(halted ? { halted: true } : {}), ...extra });
+  const recordHalt = async (classified, record, intent) => {
+    const h = await haltIfBeyondMandate({ halt: deps.halt, classified, now: deps.now(),
+      context: { owner, id, walletAddress: record.walletAddress, vault: record.vault?.address ?? null, sharesToRedeem: intent.sharesToRedeem, sharesTracked: intent.sharesTracked, sharesTrackedGaps: intent.sharesTrackedGaps } });
+    if (h.halted) halted = true;
+    return h;
+  };
+  for (let pass = 0; pass < 8; pass++) {
+    const r = await deps.mandates.read({ owner, id });
+    if (!r?.readable) return no("mandate-unreadable", (r?.errors ?? []).join("; ") || "unreadable");
+    if (!r.record) return no("no-mandate", "no such mandate");
+    const record = r.record;
+    if (record.status !== MANDATE_STATUS.EXITING) {
+      return { ok: true, code: steps.length ? "settled" : "not-exiting", status: record.status, steps, ...(halted ? { halted: true } : {}) };
+    }
+    const n = record.exit?.attempt;
+    const x = await deps.exitIntents.read(owner, id, n);
+    const res = resolveExitState({ record, read: x });
+    const advance = async (to, extra) => {
+      const a = await advanceStoredExitIntent({ exitIntents: deps.exitIntents, owner, id, attempt: n, to, at: deps.now(), ...extra });
+      steps.push({ attempt: n, to, ok: a.ok, ...(a.ok ? {} : { why: a.why }) });
+      return a;
+    };
+
+    if (res.action === "blocked") return no(res.code, res.why);
+    if (res.action === "nothing-submitted" || res.action === "close") {
+      if (res.action === "close" && x.intent?.outcome?.flags?.includes?.(EXIT_FLAG.BEYOND_MANDATE_SHARES)) {
+        const h = await recordHalt(x.intent.outcome, record, x.intent); // idempotent: create-only, an existing record counts
+        if (!h.recorded) return no("halt-unrecorded", h.why ?? "the BEYOND_MANDATE_SHARES incident could not be recorded; nothing is settled");
+      }
+      const st = await settleExitAttempt({ owner, id, deps });
+      steps.push({ attempt: n, settle: st.ok ? st.status : st.code });
+      if (!st.ok) return no(st.code, st.why);
+      continue;
+    }
+    if (res.action === "locate-by-idempotency-key") {
+      let lookup;
+      try { lookup = await deps.circleTxsForWallet({ walletAddress: record.walletAddress, since: x.intent.createdAt }); } catch { lookup = null; }
+      const readable = lookup?.readable === true;
+      const d = resolveSubmitting({ intent: x.intent, lookup: { readable, match: readable ? matchByRefId({ intent: x.intent, txs: lookup.txs }) : undefined } });
+      if (!d.to) return no(d.action === "wait" ? "wait" : d.code, d.why);
+      const a = await advance("submitted", { circleId: d.circleId });
+      if (!a.ok) return no(a.code, a.why);
+      continue;
+    }
+    if (res.action === "read-circle") {
+      let circle;
+      try { circle = await deps.circleState(res.circleId); } catch { circle = null; }
+      const d = resolveSubmitted({ intent: x.intent, circle });
+      if (!d.to) return no("wait", d.why);
+      const a = await advance(d.to, d.to === "redeemed" ? { txHash: d.txHash } : { reason: d.reason });
+      if (!a.ok) return no(a.code, a.why);
+      continue;
+    }
+    if (res.action === "classify") {
+      let facts;
+      try { facts = await deps.exitFacts({ intent: x.intent, record }); } catch { facts = null; }
+      const classified = classifyExitOutcome({ config: { vault: record.vault?.address, usdc: deps.usdcAddress, wallet: record.walletAddress },
+        intent: { sharesToRedeem: x.intent.sharesToRedeem, sharesTracked: x.intent.sharesTracked, sharesTrackedGaps: x.intent.sharesTrackedGaps }, facts: facts ?? {} });
+      if (classified.flags?.includes?.(EXIT_FLAG.BEYOND_MANDATE_SHARES)) {
+        const h = await recordHalt(classified, record, x.intent);
+        if (!h.recorded) return no("halt-unrecorded", h.why ?? "the BEYOND_MANDATE_SHARES incident could not be recorded; nothing is settled");
+      }
+      const d = resolveRedeemed({ classified });
+      if (!d.to) return no("wait", d.why, { classified: { outcome: classified.outcome, why: classified.why } });
+      const a = await advance(d.to, { outcome: d.outcome });
+      if (!a.ok) return no(a.code, a.why);
+      continue;
+    }
+    return no("unhandled", `no recovery for ${JSON.stringify(res.action)}`);
+  }
+  return no("recovery-bound", "recovery did not settle within its pass bound; read again next tick");
 }

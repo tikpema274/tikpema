@@ -473,6 +473,15 @@ async function tickOne({ owner, id, deps, config, now }) {
   if (!r?.readable) return { owner, id, outcome: "unreadable", reason: (r?.errors ?? []).join("; ") };
   if (!r.record) return { owner, id, outcome: "absent" };
 
+  // ⭐ piece 5 step 6: an EXITING mandate is RECOVERED — look up, classify from the chain, settle; never a re-send —
+  // and never checked or deposited (it may not deposit). Reads + records only, so it runs armed or not, paused or not.
+  if (r.record.status === "exiting") {
+    if (typeof deps.recoverExit !== "function") return { owner, id, outcome: "exit-unrecovered", reason: "an exiting mandate but no exit recovery is wired: it was NOT recovered this tick" };
+    let rec;
+    try { rec = await deps.recoverExit({ owner, id }); } catch (e) { rec = { ok: false, code: "threw", why: String(e?.message ?? e) }; }
+    return { owner, id, outcome: "exit-recovery", code: rec?.code ?? null, reason: rec?.why ?? null, recovery: rec };
+  }
+
   // 0. RECOVER FIRST. ⭐ Armed only: a disarmed run never touches the intent store (T's requirement 1).
   if (armed) {
     const rec = await recoverMandate({ record: r.record, deps, now });
@@ -511,7 +520,9 @@ async function tickOne({ owner, id, deps, config, now }) {
   // 3. CHECK — anchor, the report AT it, SIGNED, verified; both endpoints' readings by blockHash.
   const checked = await deps.runCheck(record);
   const base = { amountUsdc: amount, anchor: checked.anchor, report: checked.report, verification: checked.verification,
-    reportFailure: checked.reportFailure, readings: checked.readings, exitPath: checked.exitPath, timing: checked.timing, cost: checked.cost };
+    reportFailure: checked.reportFailure, readings: checked.readings, exitPath: checked.exitPath, timing: checked.timing, cost: checked.cost,
+    // step 6: the CHECK itself, so the exit executor re-decides from exactly what this tick saw (loaded from the store)
+    check: checked.check };
 
   // 4. DECIDE — an EXIT is a pause until piece 5 (EXIT_AVAILABLE).
   const decision = decideMandateAction({ rules: record.rules, check: checked.check });
@@ -530,6 +541,17 @@ async function tickOne({ owner, id, deps, config, now }) {
       : `the check did not clear: ${flags.join(", ")}`;
     if (armed) await pauseDeposits({ deps, owner, id, flags, reason, now });
     const full = await receipt({ ...base, outcome: armed ? "paused" : "would-pause", decision, flags, reason });
+    // ⭐ step 6: an EXIT decision TRIGGERS the background executor with THIS window's receipt key. It loads the finding
+    // from the store, and ships disarmed (it stops at decideExit). Awaited: an un-awaited fetch is often never sent.
+    if (decision.action === ACTION.EXIT) {
+      let exitTrigger;
+      if (typeof deps.triggerExit !== "function") exitTrigger = { ok: false, why: "no exit trigger is wired: the exit was NOT triggered" };
+      else {
+        try { exitTrigger = (await deps.triggerExit({ owner, id, receiptKey: wkey })) ?? { ok: true }; }
+        catch (e) { exitTrigger = { ok: false, why: `the exit trigger failed: ${String(e?.message ?? e)}` }; }
+      }
+      return { owner, id, outcome: full.outcome, flags, exitTrigger, receipt: full };
+    }
     return { owner, id, outcome: full.outcome, flags, receipt: full };
   }
 
@@ -602,6 +624,21 @@ export async function productionTickDeps({ getStore, event = null }) {
     intents: store.intentAdapter(mstore),
     receipts: store.receiptAdapter(getStore(store.VAULT_MANDATE_RECEIPT_STORE)),
     halt: store.haltAdapter(mstore),
+    // piece 5 step 6: recovery of exiting mandates, and the trigger for the background exit executor
+    recoverExit: async ({ owner, id }) => {
+      const { productionExitDeps } = await import("./_vault-mandate-exit-deps.mjs");
+      return (await productionExitDeps({ getStore, event })).recoverExit({ owner, id });
+    },
+    triggerExit: async ({ owner, id, receiptKey }) => {
+      const base = process.env.URL || process.env.DEPLOY_URL;
+      if (!base) return { ok: false, why: "no site URL (URL / DEPLOY_URL) to reach the exit executor" };
+      const { internalToken } = await import("./_auth.mjs");
+      const res = await fetch(`${base}/.netlify/functions/vault-mandate-exit-background`, {
+        method: "POST", headers: { "content-type": "application/json", "x-internal-token": internalToken() },
+        body: JSON.stringify({ owner, id, receiptKey }),
+      });
+      return { ok: res.status === 202 || res.ok, status: res.status };
+    },
     isPaused: (wallet) => pause.assertNotPaused({ owner: wallet, agent: agents.AGENT.VAULT }),
     limits: {
       ceilingUsdc: () => Number(budget.budgetConfig().PERIOD_CEILING_USDC),

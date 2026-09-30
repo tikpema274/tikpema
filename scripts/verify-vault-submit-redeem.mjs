@@ -134,6 +134,20 @@ if (hasSubmit && hasKey) {
       t?.circleId === "circle-tx-1" && t?.redeemHash === HASH && W.events.includes("wait:circle-tx-1") && W.creates.length === 1, JSON.stringify(t));
   }
 
+  // ── piece 5 step 6: the refId — recovery's LOOKUP handle (the idempotency-key measurement, 2026-09-30: recovery
+  // never re-sends; it finds the transaction by refId on the wallet's listed transactions).
+  reset();
+  await attempt(() => V.submitRedeem({ walletAddress: OWNER, vault: VAULT_DESC, shares: "5", idempotencyKey: KEY, refId: "x/0xabc/m-1/1" }));
+  check("⭐ step 6: a refId reaches Circle EXACTLY (createContractExecutionTransaction.refId)", W.creates.length === 1 && W.creates[0].refId === "x/0xabc/m-1/1", JSON.stringify(W.creates[0] ?? null));
+  reset();
+  await attempt(() => V.submitRedeem({ walletAddress: OWNER, vault: VAULT_DESC, shares: "5", idempotencyKey: KEY }));
+  check("no refId given → the property is not sent at all", W.creates.length === 1 && !("refId" in W.creates[0]), JSON.stringify(W.creates[0] ?? null));
+  for (const bad of ["", 5, null]) {
+    reset();
+    const t = await attempt(() => V.submitRedeem({ walletAddress: OWNER, vault: VAULT_DESC, shares: "5", idempotencyKey: KEY, refId: bad }));
+    check(`a refId of ${JSON.stringify(bad)} → THROWS before anything is signed (Circle never called)`, t?.threw !== undefined && W.creates.length === 0, JSON.stringify(t));
+  }
+
   reset();
   const noHook = await attempt(() => V.submitRedeem({ walletAddress: OWNER, vault: VAULT_DESC, shares: "5", idempotencyKey: KEY }));
   check("no hook → works (optional)", noHook?.redeemHash === HASH, JSON.stringify(noHook));
@@ -171,6 +185,7 @@ const run = () => V.vaultWithdraw({ walletAddress: OWNER, vault: VAULT_DESC, sha
   reset();
   const r = await run();
   check("the reclaim sends NO idempotency key (unchanged: the SDK generates one, as before)", W.creates.length === 1 && !("idempotencyKey" in W.creates[0]), JSON.stringify(W.creates[0] ?? null));
+  check("…and NO refId (step 6: the refId is the mandate exit's lookup handle only)", W.creates.length === 1 && !("refId" in W.creates[0]), JSON.stringify(W.creates[0] ?? null));
   check("the reclaim's Circle call is the same call", W.creates[0]?.abiFunctionSignature === "redeem(uint256,address,address)" &&
     JSON.stringify(W.creates[0]?.abiParameters) === JSON.stringify(["1999996", OWNER, OWNER]) && W.creates[0]?.contractAddress === VAULT &&
     JSON.stringify(W.creates[0]?.fee) === JSON.stringify({ type: "level", config: { feeLevel: "MEDIUM" } }), JSON.stringify(W.creates[0]));

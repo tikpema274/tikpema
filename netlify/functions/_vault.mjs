@@ -1169,9 +1169,14 @@ export async function vaultDeposit({ walletAddress, vault, amountUsdc, onSubmitt
 //   · `onSubmitted({stage:"redeem", circleId, idempotencyKey})` — called the moment Circle ACCEPTS, before the wait,
 //     so the intent records the id a crash-recovery reads. ⚠️ Its failure is swallowed and logged: the transaction is
 //     already submitted; throwing here would abandon a live redeem. The id is also in the return value.
-export async function submitRedeem({ walletAddress, vault, shares, idempotencyKey = undefined, onSubmitted = null, client = circle() }) {
+export async function submitRedeem({ walletAddress, vault, shares, idempotencyKey = undefined, refId = undefined, onSubmitted = null, client = circle() }) {
   if (idempotencyKey !== undefined && !isV4Uuid(idempotencyKey)) {
     throw new Error("submitRedeem: idempotencyKey must be a v4-format UUID (derive it from the intent key); nothing was submitted");
+  }
+  // piece 5 step 6: `refId` = the exit intent's key — recovery's LOOKUP handle (the 2026-09-30 measurement: recovery
+  // never re-sends; it finds the transaction by refId). Omitted by the manual reclaim, which sends exactly what it did.
+  if (refId !== undefined && (typeof refId !== "string" || refId.length === 0)) {
+    throw new Error("submitRedeem: refId must be a non-empty string (the exit intent's key); nothing was submitted");
   }
   const owner = getAddress(walletAddress);
   const redTx = await client.createContractExecutionTransaction({
@@ -1182,6 +1187,7 @@ export async function submitRedeem({ walletAddress, vault, shares, idempotencyKe
     abiParameters: [String(shares), owner, owner],
     fee: { type: "level", config: { feeLevel: "MEDIUM" } },
     ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
+    ...(refId !== undefined ? { refId } : {}),
   });
   const circleId = redTx.data?.id;
   if (typeof onSubmitted === "function" && circleId) {
