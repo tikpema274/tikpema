@@ -30,6 +30,13 @@
 //       ONE un-keyed approve(self, 0) to DEPLOY a fresh SCA, so deployment cannot contaminate step 1. Refused if deployed.
 //   WALLET_ADDRESS=0x… node --env-file=.env scripts/spikes/spike-idempotency-key-repeat.mjs --confirm
 //       THE MEASUREMENT (steps 1–5). Refused unless the SCA is deployed. Sends at most 5 approves.
+//   WALLET_ADDRESS=0x… node --env-file=.env scripts/spikes/spike-idempotency-key-repeat.mjs --refid
+//       THE refId ROUND TRIP (step 6's open question, T 2026-09-30) — ONE send: approve(self, 0) with a fresh v4 key AND a
+//       unique refId. Then reads it back THE WAY RECOVERY DOES (_vault-mandate-exit-deps.mjs circleTxsForWallet:
+//       listWallets → listTransactions {walletIds, blockchain, pageSize 50, order DESC}) and runs production's own
+//       matchByRefId on Circle's real response — right after the send, and again once COMPLETE. Also getTransaction(id).refId.
+//       PASS: the listed transaction carries the refId, and matchByRefId finds exactly that transaction. If it does not,
+//       recovery's `submitting` branch can NEVER resolve by lookup — the answer is recorded, not left unknown.
 // Credentials: CIRCLE_API_KEY + CIRCLE_ENTITY_SECRET from .env (the spikes' rule; never from Netlify production).
 
 import { createHash, randomUUID } from "node:crypto";
@@ -38,12 +45,15 @@ import { createPublicClient, http, encodeFunctionData, parseAbi, parseAbiItem, g
 import { circle } from "../../netlify/functions/_circle.mjs";
 import { ARC, CONTRACTS } from "../../netlify/functions/_arc.mjs";
 import { isV4Uuid } from "../../shared/circle-idempotency.mjs";
+import { matchByRefId, exitTxCandidates } from "../../shared/vault-mandate/exit-recovery.mjs";
+import { readCircleError, describeCircleError } from "../../netlify/functions/_circle-error.mjs";
+import { refidVerdict } from "./refid-verdict.mjs";
 
 const OPERATOR_MANDATE_WALLET = "0x3cb76ac688f3fc02dfe4033d388989a44f132de9"; // ⛔ never measured on
 const USDC = getAddress(CONTRACTS.USDC);
 const WAIT_MS = 30_000;
 const COMPLETE_DEADLINE_MS = 120_000;
-const MODE = process.argv.includes("--provision") ? "provision" : process.argv.includes("--warmup") ? "warmup" : process.argv.includes("--confirm") ? "confirm" : "dry";
+const MODE = process.argv.includes("--provision") ? "provision" : process.argv.includes("--warmup") ? "warmup" : process.argv.includes("--refid") ? "refid" : process.argv.includes("--confirm") ? "confirm" : "dry";
 const log = (s = "") => console.log(s);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -101,22 +111,23 @@ if (MODE === "dry") {
   log(`  1a/1b  K1 (v4) approve(self,0) ×2   2  K1 approve(self,1)   3  K3 (v5-shaped) approve(self,0)`);
   log(`  4      wait ${WAIT_MS / 1000}s, fetch every id, count on-chain approves (pass: one per key)`);
   log(`  5      wait for K1's first tx COMPLETE, K1 approve(self,0) again, wait, recount`);
-  log(deployed ? `\nReady: WALLET_ADDRESS=${SCA} node --env-file=.env scripts/spikes/spike-idempotency-key-repeat.mjs --confirm\n`
+  log(`  --refid: ONE approve(self,0) carrying a refId, read back as recovery lists it (the refId round trip)`);
+  log(deployed ? `\nReady: WALLET_ADDRESS=${SCA} node --env-file=.env scripts/spikes/spike-idempotency-key-repeat.mjs --confirm   (or --refid)\n`
     : `\nNot deployed yet: WALLET_ADDRESS=${SCA} node --env-file=.env scripts/spikes/spike-idempotency-key-repeat.mjs --warmup\n`);
   process.exit(0);
 }
 
 // ── one send, fully recorded, never throws ──────────────────────────────────────────────────────────
 const records = [];
-async function send(label, key, value) {
+async function send(label, key, value, extra = {}) {
   const t0 = Date.now();
-  const rec = { label, key, keyIsV4: key === undefined ? null : isV4Uuid(key), payload: `approve(self,${value})`, at: new Date(t0).toISOString() };
+  const rec = { label, key, keyIsV4: key === undefined ? null : isV4Uuid(key), payload: `approve(self,${value})`, ...extra, at: new Date(t0).toISOString() };
   try {
-    const r = await client.createContractExecutionTransaction({ ...call(value), ...(key !== undefined ? { idempotencyKey: key } : {}) });
+    const r = await client.createContractExecutionTransaction({ ...call(value), ...(key !== undefined ? { idempotencyKey: key } : {}), ...extra });
     Object.assign(rec, { ok: true, id: r.data?.id ?? null, state: r.data?.state ?? null, ms: Date.now() - t0 });
   } catch (e) {
-    const resp = e?.response;
-    Object.assign(rec, { ok: false, status: resp?.status ?? e?.status ?? null, code: resp?.data?.code ?? null, message: String(resp?.data?.message ?? e?.message ?? e).slice(0, 300), ms: Date.now() - t0 });
+    const c = readCircleError(e); // the ONE reader: status + code wherever the SDK puts them (measured 2026-09-30)
+    Object.assign(rec, { ok: false, status: c.status, code: c.code, message: c.message.slice(0, 300), ms: Date.now() - t0 });
   }
   records.push(rec);
   log(`  ${label.padEnd(26)} key ${key ? key.slice(0, 8) + "…" : "(none)"}  → ${rec.ok ? `id ${rec.id} state ${rec.state}` : `ERROR status ${rec.status} code ${rec.code}: ${rec.message}`}`);
@@ -142,6 +153,62 @@ if (MODE === "warmup") {
   const now = await pc.getCode({ address: SCA });
   log(`  warm-up tx ${t?.state} ${t?.txHash ?? ""}  → deployed now: ${now && now !== "0x" ? "yes" : "NO"}`);
   process.exit(now && now !== "0x" ? 0 : 1);
+}
+
+// ── REFID: the round trip — ONE send ────────────────────────────────────────────────────────────────
+if (MODE === "refid") {
+  if (!deployed) { console.error("⛔ The SCA is not deployed: run --warmup first."); process.exit(2); }
+  const key = randomUUID();
+  const refId = `x/refid-measure/${new Date().toISOString()}`; // the SHAPE of a real exit intent key (x/<owner>/<id>/<n>)
+  log(`\nREFID ROUND TRIP — ONE send: approve(self,0), key ${key}, refId ${refId}\n`);
+  const sent = await send("refid approve(self,0)", key, 0, { refId });
+  if (!sent.ok) { log(`\n⛔ Circle REFUSED the send carrying a refId (above) — recorded; nothing else sent.`); }
+  // exactly what recovery does in production (_vault-mandate-exit-deps.mjs circleTxsForWallet, FIXED 2026-09-30): list by
+  // walletIds ONLY (walletIds + blockchain → Circle 400 code 2), keep the candidates (here the contract is USDC), FETCH
+  // each (the listing omits refId), then production's matchByRefId. Any failed read → readable:false, never "not found".
+  const listAsRecovery = async () => {
+    try {
+      const r = await client.listTransactions({ walletIds: [wallet.id], pageSize: 50, order: "DESC" });
+      const listed = r.data?.transactions ?? [];
+      const listedOurs = listed.find((t) => t.id === sent.id) ?? null;
+      const candidates = exitTxCandidates({ txs: listed, since: sent.at, vault: USDC });
+      const fetched = [];
+      for (const c of candidates) { const g = await client.getTransaction({ id: c.id }); fetched.push(g.data?.transaction); }
+      const match = matchByRefId({ intent: { key: refId }, txs: fetched });
+      return { readable: true, listed: listed.length, candidates: candidates.length,
+        listedRefId: listedOurs ? (listedOurs.refId ?? null) : "not listed",
+        found: match.found === true && match.circleId === sent.id, match };
+    } catch (e) { const c = readCircleError(e); return { readable: false, status: c.status, code: c.code, why: describeCircleError(e).slice(0, 200) }; }
+  };
+  const readings = [];
+  if (sent.ok) {
+    await sleep(3000);
+    readings.push({ when: "~3 s after the send", ...(await listAsRecovery()) });
+    const t0 = Date.now(); let t;
+    while (Date.now() - t0 < COMPLETE_DEADLINE_MS) { t = await txOf(sent.id); if (["COMPLETE", "FAILED", "CANCELLED", "DENIED"].includes(t.state)) break; await sleep(2000); }
+    readings.push({ when: `after the transaction reached ${t?.state}`, ...(await listAsRecovery()) });
+    let got = null;
+    try { const { data } = await client.getTransaction({ id: sent.id }); got = { state: data?.transaction?.state ?? null, refId: data?.transaction?.refId ?? null, txHash: data?.transaction?.txHash ?? null }; }
+    catch (e) { got = { error: String(e?.message ?? e).slice(0, 200) }; }
+    readings.push({ when: "getTransaction(id)", getTransaction: got });
+  }
+  for (const r of readings) {
+    if (r.getTransaction) { log(`  getTransaction(id): state ${r.getTransaction.state}, refId ${JSON.stringify(r.getTransaction.refId)}`); continue; }
+    log(`  ${r.when}: ${r.readable ? `listed ${r.listed} (listing's own refId on ours: ${JSON.stringify(r.listedRefId)}); ${r.candidates} candidate(s) fetched; matchByRefId → ${r.match.found ? `found ${r.match.circleId}` : r.match.ambiguous ? "AMBIGUOUS" : "not found"}` : `UNREADABLE — ${r.why}`}`);
+  }
+  const lists = readings.filter((r) => r.readable !== undefined);
+  // ⛔ a failed read is never a finding: the verdict is refid-verdict.mjs (tested), not inline logic
+  const verdict = refidVerdict({ sentOk: sent.ok, reads: lists.map((r) => ({ readable: r.readable, found: r.found })) });
+  log(`\nVERDICT — ${verdict}`);
+  log({ "ROUND-TRIPS": "  Found on every read through the production lookup (list → fetch candidates → match refId): a submitting intent CAN be found.",
+    "ROUND-TRIPS-LATE": "  Found, but not on every read: findable, with a delay (or one read failed).",
+    "DOES-NOT-ROUND-TRIP": "  ⛔ Every read was READABLE and none carried the refId: recovery's submitting branch can NEVER resolve by lookup.",
+    "INCONCLUSIVE": "  ⚠️ A read FAILED and nothing was found: this run settles nothing (a failed read is never a finding).",
+    "SEND-REFUSED": "  ⛔ Circle refused a send carrying a refId." }[verdict]);
+  const out = `scripts/spikes/refid-roundtrip-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  writeFileSync(out, JSON.stringify({ wallet: { address: SCA, walletId: wallet.id }, sent: { ...sent, refId }, readings, verdict }, null, 2));
+  log(`\nRecorded → ${out}  (no secrets: ids, keys, refIds, hashes and addresses only)\n`);
+  process.exit(0);
 }
 
 // ── CONFIRM: the measurement ────────────────────────────────────────────────────────────────────────

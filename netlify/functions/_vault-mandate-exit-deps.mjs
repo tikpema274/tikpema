@@ -5,11 +5,13 @@
 //
 // Every chain figure is read on BOTH quorum endpoints and used only where they agree (the anchor's rule).
 
-/** @param {{getStore:Function, event?:object}} a */
-export async function productionExitDeps({ getStore, event = null }) {
-  const [{ createPublicClient, http, parseAbi }, { ARC_QUORUM_ENDPOINTS }, store, exit, check, circleMod, arc] = await Promise.all([
+/** @param {{getStore:Function, event?:object, circleClient?:object}} a — `circleClient`: the suite injects a fake that
+ *  behaves as Circle was MEASURED to (2026-09-30); production uses the credentialed client. */
+export async function productionExitDeps({ getStore, event = null, circleClient = null }) {
+  const [{ createPublicClient, http, parseAbi }, { ARC_QUORUM_ENDPOINTS }, store, exit, check, circleMod, arc, { exitTxCandidates }, { describeCircleError }] = await Promise.all([
     import("viem"), import("../../shared/onchain-analyze/endpoints.mjs"), import("./_vault-mandate-store.mjs"),
     import("./_vault-mandate-exit.mjs"), import("./_vault-mandate-check.mjs"), import("./_circle.mjs"), import("./_arc.mjs"),
+    import("../../shared/vault-mandate/exit-recovery.mjs"), import("./_circle-error.mjs"),
   ]);
   const mstore = getStore(store.VAULT_MANDATE_STORE);
   const rstore = getStore(store.VAULT_MANDATE_RECEIPT_STORE);
@@ -19,7 +21,7 @@ export async function productionExitDeps({ getStore, event = null }) {
     const vals = await Promise.all(clients.map((c) => fn(c).catch(() => null)));
     return vals.length >= 2 && vals.every((x) => typeof x === "bigint") && new Set(vals.map(String)).size === 1 ? vals[0] : null;
   };
-  const circle = () => circleMod.circle();
+  const circle = () => circleClient ?? circleMod.circle();
 
   async function circleState(id) {
     const { data } = await circle().getTransaction({ id });
@@ -41,17 +43,28 @@ export async function productionExitDeps({ getStore, event = null }) {
     readers: ARC_QUORUM_ENDPOINTS.map(check.viemEndpointReader),
     usdcAddress: arc.CONTRACTS.USDC,
     circleState,
-    /** The wallet's recent Circle transactions (there is no refId filter server-side; recovery matches refId). */
-    async circleTxsForWallet({ walletAddress, since }) {
+    /**
+     * The attempt's CANDIDATE transactions, each FETCHED so it carries its refId (recovery matches refId exactly).
+     * ⛔ MEASURED 2026-09-30, both fixed here: (1) `walletIds` + `blockchain` together → Circle 400 code 2 ("API parameter
+     * invalid") — walletIds alone already scopes one wallet on one chain; (2) the LISTING omits refId — only
+     * getTransaction carries it. ANY failed read → readable:false with Circle's status + code, never "not found".
+     */
+    async circleTxsForWallet({ walletAddress, since, vault }) {
       try {
         const w = await circle().listWallets({ address: walletAddress, blockchain: arc.ARC.blockchain });
         const wallet = (w.data?.wallets ?? []).find((x) => x.address.toLowerCase() === String(walletAddress).toLowerCase());
         if (!wallet) return { readable: false, why: "the wallet is not one of this entity's" };
-        const r = await circle().listTransactions({ walletIds: [wallet.id], blockchain: arc.ARC.blockchain, pageSize: 50, order: "DESC" });
-        const floor = Date.parse(since ?? "") - 60_000;
-        const txs = (r.data?.transactions ?? []).filter((t) => !Number.isFinite(floor) || Date.parse(t.createDate) >= floor);
+        const r = await circle().listTransactions({ walletIds: [wallet.id], pageSize: 50, order: "DESC" });
+        const candidates = exitTxCandidates({ txs: r.data?.transactions ?? [], since, vault });
+        const txs = [];
+        for (const c of candidates) {
+          const g = await circle().getTransaction({ id: c.id });
+          const t = g.data?.transaction;
+          if (!t || t.id !== c.id) return { readable: false, why: `getTransaction(${c.id}) returned no transaction` };
+          txs.push(t);
+        }
         return { readable: true, txs };
-      } catch (e) { return { readable: false, why: String(e?.message ?? e) }; }
+      } catch (e) { return { readable: false, why: `the Circle lookup failed: ${describeCircleError(e)}` }; }
     },
     /** The facts classifyExitOutcome reads, for THIS intent's transaction: Circle's state, the receipt, the share delta. */
     async exitFacts({ intent, record }) {

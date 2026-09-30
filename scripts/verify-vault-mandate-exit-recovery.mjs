@@ -253,6 +253,79 @@ section("RECOVERY — end to end over the real stores");
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════
+section("⭐ THE PRODUCTION WIRING, OFFLINE — against Circle's MEASURED behaviour (2026-09-30)");
+// fe19db8 shipped a lookup that could never work: `walletIds + blockchain` together → Circle 400 code 2 ("API parameter
+// invalid"), and the LISTING omits refId (only getTransaction carries it). No test caught it: the wiring was network
+// code with no offline coverage. This fake behaves as Circle was MEASURED to behave, and drives the REAL wiring.
+const EXD = await tryImport("../netlify/functions/_vault-mandate-exit-deps.mjs");
+const CI = await import("../netlify/functions/_circle-error.mjs");
+const sdkError = (message, status, code) => Object.assign(new Error(message), { status, code, url: "https://api.circle.com/v1/w3s/transactions", method: "GET" });
+function measuredCircle({ txs = [], getFails = new Set(), listFails = false } = {}) {
+  const calls = [];
+  return { calls,
+    async listWallets({ address }) { calls.push(["listWallets", address]); return { data: { wallets: [{ id: "w-1", address: WALLET }] } }; },
+    async listTransactions(input) {
+      calls.push(["list", input]);
+      if (listFails) throw sdkError("service unavailable", 503, 9);
+      if (input?.walletIds && input?.blockchain) throw sdkError("API parameter invalid", 400, 2); // MEASURED
+      return { data: { transactions: txs.map(({ refId, abiFunctionSignature, ...listed }) => listed) } }; // MEASURED: no refId
+    },
+    async getTransaction({ id }) {
+      calls.push(["get", id]);
+      if (getFails.has(id)) throw sdkError("upstream timeout", 504, 5);
+      return { data: { transaction: txs.find((t) => t.id === id) ?? null } }; // MEASURED: carries refId
+    },
+  };
+}
+const since = new Date(T0).toISOString();
+const TXS = [
+  { id: "c-ours", refId: XKEY, contractAddress: VADDR, operation: "CONTRACT_EXECUTION", createDate: new Date(T0 + 5000).toISOString(), state: "COMPLETE" },
+  { id: "c-other-contract", refId: "x/elsewhere", contractAddress: USDC, operation: "CONTRACT_EXECUTION", createDate: new Date(T0 + 6000).toISOString() },
+  { id: "c-too-early", refId: "x/older", contractAddress: VADDR, operation: "CONTRACT_EXECUTION", createDate: new Date(T0 - 3 * H).toISOString() },
+  { id: "c-a-transfer", contractAddress: undefined, operation: "TRANSFER", createDate: new Date(T0 + 7000).toISOString() },
+];
+const prodDeps = async (client) => { try { return await EXD.productionExitDeps({ getStore: (n) => memStore(n), event: null, circleClient: client }); } catch (e) { return { threw: e.message }; } };
+{
+  const fake = measuredCircle({ txs: TXS });
+  const d = await prodDeps(fake);
+  const r = await call(d?.circleTxsForWallet, { walletAddress: WALLET, since, vault: VADDR });
+  const list = fake.calls.find((c) => c[0] === "list")?.[1];
+  ok("⭐⭐ (a) the listing sends walletIds and NOT blockchain (the pair Circle rejects with 400 / code 2)", Array.isArray(list?.walletIds) && list.walletIds[0] === "w-1" && !("blockchain" in (list ?? {})), show(list));
+  ok("⭐⭐ (b) readable, and the candidates come back WITH refId — fetched one by one with getTransaction (the listing omits it)", r?.readable === true && r?.txs?.find((t) => t.id === "c-ours")?.refId === XKEY, show(r));
+  const m = XR.matchByRefId?.({ intent: { key: XKEY }, txs: r?.txs });
+  ok("⭐⭐ …so production's matchByRefId FINDS the attempt's transaction through the real wiring", m?.found === true && m?.circleId === "c-ours", show(m));
+  const gets = fake.calls.filter((c) => c[0] === "get").map((c) => c[1]);
+  ok("(b) only CANDIDATES are fetched: the vault as contract, a contract execution, created at/after the intent (−60 s)", JSON.stringify(gets) === JSON.stringify(["c-ours"]), show(gets));
+}
+{
+  const fake = measuredCircle({ txs: TXS, getFails: new Set(["c-ours"]) });
+  const d = await prodDeps(fake);
+  const r = await call(d?.circleTxsForWallet, { walletAddress: WALLET, since, vault: VADDR });
+  ok("⭐ a candidate's getTransaction FAILS → the whole lookup is UNREADABLE (never 'not found'), naming status + code", r?.readable === false && /504/.test(r?.why ?? "") && /code 5/.test(r?.why ?? ""), show(r));
+}
+{
+  const d = await prodDeps(measuredCircle({ listFails: true }));
+  const r = await call(d?.circleTxsForWallet, { walletAddress: WALLET, since, vault: VADDR });
+  ok("⭐ (c) the listing fails → unreadable, with Circle's status and code read from the SDK error ITSELF (not error.response)", r?.readable === false && /503/.test(r?.why ?? "") && /code 9/.test(r?.why ?? ""), show(r));
+}
+{
+  const e1 = CI.readCircleError?.(sdkError("API parameter invalid", 400, 2));
+  ok("(c) readCircleError (the ONE reader) reads an SDK error: status, code, message on the error", e1?.status === 400 && e1?.code === 2 && e1?.message === "API parameter invalid", show(e1));
+  const e2 = CI.readCircleError?.(Object.assign(new Error("Request failed"), { response: { status: 409, data: { code: 177, message: "conflict" } } }));
+  ok("(c) …and an axios-shaped error (response.status, response.data)", e2?.status === 409 && e2?.code === 177 && e2?.message === "conflict", show(e2));
+  const e3 = CI.readCircleError?.(new Error("socket hang up"));
+  ok("(c) …and a bare error: status/code null, the message kept", e3?.status === null && e3?.code === null && e3?.message === "socket hang up", show(e3));
+  ok("(c) describeCircleError names the message, status and code in one line", CI.describeCircleError?.(sdkError("API parameter invalid", 400, 2)) === "API parameter invalid (status 400, code 2)", CI.describeCircleError?.(sdkError("API parameter invalid", 400, 2)));
+}
+{
+  // recovery hands the vault to the lookup (the candidate filter needs it)
+  const st = memStore(); seed(st, exiting(), intentAt());
+  const cf = circleFake({ txs: [{ id: "c-9", refId: XKEY }] });
+  await recover(st, { circle: cf });
+  ok("recovery passes the VAULT to the lookup (for the candidate filter)", cf.calls.find((c) => c[0] === "list")?.[1]?.vault === VADDR, show(cf.calls.find((c) => c[0] === "list")?.[1]));
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
 section("THE SUBMIT CARRIES THE refId (runMandateExit → submitMandateExitRedeem)");
 {
   const sub = []; const st = memStore(); seed(st, active());

@@ -15,6 +15,21 @@
 
 const isHash = (v) => typeof v === "string" && /^0x[0-9a-fA-F]{64}$/.test(v);
 
+/**
+ * The listed transactions worth fetching (step 6 fix, 2026-09-30): MEASURED, Circle's LISTING omits `refId` — only
+ * getTransaction(id) carries it. So recovery lists the wallet, keeps the CANDIDATES — a contract execution on the vault,
+ * created at/after the intent (−60 s for clock skew) — and fetches each to read its refId. The listing only narrows; the
+ * match itself is exact (matchByRefId on the fetched transactions).
+ */
+export function exitTxCandidates({ txs, since, vault }) {
+  const floor = Date.parse(since ?? "") - 60_000;
+  if (!Number.isFinite(floor) || typeof vault !== "string") return [];
+  return (Array.isArray(txs) ? txs : []).filter((t) => t && typeof t.id === "string"
+    && String(t.contractAddress ?? "").toLowerCase() === vault.toLowerCase()
+    && t.operation === "CONTRACT_EXECUTION"
+    && Date.parse(t.createDate ?? "") >= floor);
+}
+
 /** Which listed Circle transaction carries refId = this intent's key. Exactly one → found; two → ambiguous. */
 export function matchByRefId({ intent, txs }) {
   const hits = (Array.isArray(txs) ? txs : []).filter((t) => t && t.refId === intent?.key && typeof t.id === "string");

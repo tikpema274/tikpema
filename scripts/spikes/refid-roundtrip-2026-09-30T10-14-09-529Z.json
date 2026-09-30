@@ -1,0 +1,39 @@
+{
+  "wallet": {
+    "address": "0x797cF30a9Ca2E3a2a28EA55C157A22719821fc79",
+    "walletId": "40cdc60c-4a00-546f-bee5-e27d8c3f9b71"
+  },
+  "sent": {
+    "label": "refid approve(self,0)",
+    "key": "e502101a-606a-47ae-9d50-ac7933b4eaa0",
+    "keyIsV4": true,
+    "payload": "approve(self,0)",
+    "refId": "x/refid-measure/2026-09-30T10:14:05.149Z",
+    "at": "2026-09-30T10:14:05.154Z",
+    "ok": true,
+    "id": "74c67458-c50b-55a3-998f-49201e5f7bfa",
+    "state": "INITIATED",
+    "ms": 585
+  },
+  "readings": [
+    {
+      "when": "~3 s after the send",
+      "readable": false,
+      "why": "API parameter invalid"
+    },
+    {
+      "when": "after the transaction reached COMPLETE",
+      "readable": false,
+      "why": "API parameter invalid"
+    },
+    {
+      "when": "getTransaction(id)",
+      "getTransaction": {
+        "state": "COMPLETE",
+        "refId": "x/refid-measure/2026-09-30T10:14:05.149Z",
+        "txHash": "0x876905495903c09e2203257fef342be2709cb0b7474176a876653a2ce9995f81"
+      }
+    }
+  ],
+  "verdict": "DOES-NOT-ROUND-TRIP"
+}

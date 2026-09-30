@@ -78,3 +78,9 @@ scripts/spikes/idempotency-key-repeat-2026-09-30T09-33-35-242Z.json:generic-api-
 scripts/spikes/idempotency-key-repeat-2026-09-30T09-33-35-242Z.json:generic-api-key:36
 scripts/spikes/idempotency-key-repeat-2026-09-30T09-33-35-242Z.json:generic-api-key:47
 scripts/spikes/idempotency-key-repeat-2026-09-30T09-33-35-242Z.json:generic-api-key:58
+
+# scripts/spikes/refid-roundtrip-2026-09-30T10-14-09-529Z.json — the FIRST --refid run's evidence (T, 2026-09-30).
+# The finding is its one Circle IDEMPOTENCY KEY (e502101a…eaa0) under a field named "key" — the same generic-api-key
+# false positive as the repeated-key evidence above. Not a credential: it authenticates nothing, was single-use, on the
+# throwaway SCA 0x797c…fc79. Evidence JSON never changes after the run, so the line-only fingerprint will not drift.
+scripts/spikes/refid-roundtrip-2026-09-30T10-14-09-529Z.json:generic-api-key:8

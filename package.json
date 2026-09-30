@@ -135,7 +135,7 @@
     "test:refusals": "node --experimental-test-module-mocks scripts/verify-refusal-visibility.mjs",
     "test:refusalstates": "npx tsx scripts/verify-refusal-states.tsx",
     "test:research": "node scripts/verify-citation-derivation.mjs && node scripts/verify-rate-consistency.mjs",
-    "test:spikes": "node scripts/verify-kit-key-guard.mjs && node scripts/spikes/verify-spike-index.mjs",
+    "test:spikes": "node scripts/verify-kit-key-guard.mjs && node scripts/spikes/verify-spike-index.mjs && node scripts/verify-refid-verdict.mjs",
     "test:sweep": "node scripts/verify-deploy-loss-sweep.mjs",
     "test:sweepdegraded": "node --experimental-test-module-mocks scripts/verify-sweep-degraded.mjs",
     "test:sweepdisarmed": "node --experimental-test-module-mocks scripts/verify-sweep-reverse-disabled.mjs",

@@ -183,3 +183,14 @@ export function httpStatusForCircleFailure(status) {
   // commit alters no known-status behaviour; only the advertised `retrySafe` tells the truth.
   return { httpStatus: 400, statusKnown: true, retrySafe: status === 429 };
 }
+
+/**
+ * One line naming what Circle said — its message, HTTP status and code — for a record a human reads
+ * (piece 5 step 6, 2026-09-30: a 400 / code 2 surfaced as a bare "API parameter invalid" because the
+ * caller read `error.response`). Built on readCircleError, never a second reader.
+ */
+export function describeCircleError(e) {
+  const c = readCircleError(e);
+  const bits = [c.status !== STATUS_UNKNOWN ? `status ${c.status}` : "no HTTP status", c.code !== null ? `code ${c.code}` : null].filter(Boolean);
+  return `${c.message || "unknown error"} (${bits.join(", ")})`;
+}

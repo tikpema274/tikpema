@@ -30764,3 +30764,84 @@ format guard.
   The measurement is one send (the spike's `--refid` mode, next).
 - ⚠️ This touches the LIVE tick (recovery for exiting mandates, the exit trigger, `check` in receipts) and the
   manual-reclaim money function (`refId`, additive). Steps 3–6 deploy together, disarmed.
+
+---
+
+# 🚨 THE refId MEASUREMENT FOUND A LIVE DEFECT IN COMMITTED CODE (fe19db8) — FOUR FIXES, red first, NOT committed (2026-09-30)
+
+## What the first `--refid` run actually showed (T ran it; `refid-roundtrip-2026-09-30T10-14-09-529Z.json`)
+The spike recorded **DOES-NOT-ROUND-TRIP — wrong for its reason.** Both listings had ERRORED ("API parameter invalid");
+the inline verdict counted an unreadable read as "the refId did not come back". Investigated read-only (bisecting
+`listTransactions` parameters against our own account; the SDK's types; the SDK's error object):
+1. **OUR BUG — the listing call was malformed.** Circle returns **HTTP 400, code 2, "API parameter invalid"** when
+   `walletIds` and `blockchain` are sent TOGETHER (URL `…/v1/w3s/transactions?blockchain=ARC-TESTNET&custodyType=DEVELOPER&walletIds=…`;
+   the SDK adds custodyType). Each parameter alone is fine; of every pair, only `walletIds + blockchain` fails; `order`
+   and `pageSize` are innocent. The SDK's own `ListTransactionsInput` type allows both — the API rejects them.
+2. **A REAL LIMITATION — Circle's LISTING omits `refId`.** The refId-carrying transaction IS in the wallet's listing, with
+   NO `refId` field (nor `abiFunctionSignature`, `userOpHash`, `feeLevel`, `estimatedFee`). **`getTransaction(id)` carries
+   it exactly** (`x/refid-measure/2026-09-30T10:14:05.149Z`).
+Only (2) could close recovery's submitting branch, and it does not: the lookup becomes list → fetch candidates → match.
+
+## 🚨 A LIVE DEFECT IN COMMITTED CODE THAT NO TEST CAUGHT — the standing gap, arriving
+**fe19db8 (step 6) shipped a recovery lookup that could NEVER work:** `circleTxsForWallet` sent `walletIds + blockchain`
+(→ every lookup `readable:false`, so a `submitting` intent would sit at "wait" forever), and even with that fixed it
+matched `refId` on a LISTING that never carries it. Not deployed. **No test caught it because the production wiring
+(`_vault-mandate-exit-deps.mjs`) is network code with no offline coverage** — the exact standing gap recorded at step 6
+("its first real run is live"). It arrived before the first live run only because T's measurement exercised the call.
+
+## The four fixes (red first)
+- **(a) The listing sends `walletIds` only** (it already scopes one wallet on one chain).
+- **(b) List → fetch → match:** `exitTxCandidates` (new, pure, `exit-recovery.mjs`) keeps the vault as contract, a
+  CONTRACT_EXECUTION, created at/after the intent (−60 s); each candidate is FETCHED with `getTransaction` (which carries
+  refId); production's `matchByRefId` matches exactly. A candidate fetch that fails → the whole lookup UNREADABLE, never
+  "not found". Recovery now hands the vault to the lookup.
+- **(c) Circle's error, read by the ONE reader.** The SDK (v10.8.0) throws a typed error carrying `status` + `code` on the
+  error itself, not under `error.response`. The wiring and the spike now use the EXISTING `readCircleError`
+  (`_circle-error.mjs`) plus a new `describeCircleError` built on it.
+  ⚠️ **Two near-misses of my own, both caught:** I first wrote a SECOND reader (`circleErrorOf`) — the sweep below found
+  the existing one ([[duplicate-source-of-truth-is-the-recurring-bug]]) — and I put it in `_circle.mjs`, which is ON THE
+  DD SURFACE: `test:redemptionsignal`'s guard went red ("no changed file is on the DD surface"), which would have rotated
+  ddTree and opened a deposit refusal window. `_circle.mjs` is restored byte-for-byte; the addition lives in
+  `_circle-error.mjs` (off the surface).
+- **(d) A FAILED READ IS NEVER A FINDING — the spike's verdict is now `refid-verdict.mjs`** (pure, tested by
+  `scripts/verify-refid-verdict.mjs`, in `test:spikes`): any unreadable read with no positive → INCONCLUSIVE; only
+  readable reads that ALL lack the refId → DOES-NOT-ROUND-TRIP; a readable read that says nothing about `found` →
+  INCONCLUSIVE. The spike's `--refid` lookup now mirrors the fixed production path.
+- **Offline coverage of the production wiring (new):** `productionExitDeps` takes an injectable `circleClient`; the
+  recovery suite drives the REAL wiring with a fake that behaves as Circle was MEASURED to (rejects `walletIds +
+  blockchain` with 400/code 2; the listing omits refId; getTransaction carries it).
+- Red: recovery **10** failing (the wiring had not even reached the fake — "Missing CIRCLE_API_KEY"), verdict **9** →
+  green recovery **68/0**, verdict **10/0**. **Mutations 8/8 red** (after one survivor: F6b — the verdict's last line was
+  untested until a readable-read-with-no-`found` case). test:all **167/167** (a run before the `_circle.mjs` revert failed
+  `test:redemptionsignal` — the guard doing its job). The spike's verdict in the committed JSON stands as recorded; its
+  reading is corrected in the spikes README. **Re-run of `--refid` owed** (expected ROUND-TRIPS through the fixed path).
+
+## ⚠️ THE GENERAL RULE: a failed read treated as an answer — the THIRD instance this week (T)
+A read-only sweep (production + spikes) for code that turns an exception / error / unreadable value into an ANSWER
+("not found", none, 0, false, [], "not submitted"). Verified by reading the top three myself; the rest are the sweep's
+reading, NOT yet re-verified. **Nothing fixed — these need T's triage.**
+- **Money, HIGH (verified):**
+  - `job-run-background.mjs:59` — `store.get(run:…).catch(() => null)`: a failed read → "no record" → the UNCONDITIONAL
+    `createJob` + fund runs. Its own comment: a second invocation "would create a SECOND on-chain job and fund it twice".
+    Only the eventual-consistency null was meant to proceed; `.catch` folds errors into it.
+  - `dca-tick.mjs:590` — the per-period claim read `.catch(() => null)` → "no claim" → overwritten `claimed` → the swap
+    is SUBMITTED AGAIN (the claim is the no-double-submit guard).
+  - `_ubwithdraw-record.mjs:97` `patchRecord` — a failed read returns null, and `ub-withdraw.mjs:202/211` ignores it and
+    withdraws anyway; a lost `amountAtomic` reads as "never broadcast" and permits a SECOND withdrawal.
+- **Money / accounting, MED (sweep's reading):** `dca-tick.mjs:260` (a failed claim read drops an in-flight fill's
+  pointer for good — never reconciled); `bridge-discover-sweep.mjs:90` (a failed cursor read → cold start → blocks
+  skipped for stranded-burn discovery), `:72/:161` (an unreadable receipt clobbered); `bridge-reconcile-background.mjs:154`
+  via `readReceipt` (a store error → "no receipt" → a `minted` receipt overwritten); `_vault.mjs:1118/1121/1147`
+  `vaultDeposit` (`?? 0n` on failed share/allowance reads → `sharesReceivedRaw` shown as the whole balance or 0 under
+  `verifiedBy: "share-balance-delta"`); plus ~12 lower (mislabelled refusals, UI zeros, a dead IRIS-outage branch).
+- **Spikes (evidence):** `spike-step4b` (a failed getTransaction → "never broadcast"), `spike-step8d` (all reads failed
+  → "a FINDING"), `spike-step2-money-prove`, `spike-batched-burn-pr4` (a null receipt → "FALSIFIER FIRED"), and the
+  `--confirm` verdict of this spike (an UNREADABLE id drops out of the per-key count).
+- Production reads Circle errors through `readCircleError` everywhere; three spikes/probes read `e.response.data` only.
+
+## 🚨🚨 OUT OF PATTERN — `auth-verify.mjs` passkey path: the ADDRESS is not bound to the passkey (VERIFY FIRST)
+Read myself (lines 52–88): for a `credentialId` the server has not stored, it takes the CLIENT's `publicKey`, verifies the
+WebAuthn signature against THAT key (which the client controls), and issues a session for the CLIENT-SUPPLIED `address`.
+Nothing in the file ties the address to the public key; its header says "Identity stays the SCA address". A failed read
+of an EXISTING credential also lands in this branch. **Not traced downstream and NOT exercised.** If nothing else binds
+the address, a fresh passkey could open a session as ANY address. It outranks every item above.

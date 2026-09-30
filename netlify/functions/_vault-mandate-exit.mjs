@@ -352,7 +352,7 @@ export async function recoverMandateExit({ owner, id, deps }) {
     }
     if (res.action === "locate-by-idempotency-key") {
       let lookup;
-      try { lookup = await deps.circleTxsForWallet({ walletAddress: record.walletAddress, since: x.intent.createdAt }); } catch { lookup = null; }
+      try { lookup = await deps.circleTxsForWallet({ walletAddress: record.walletAddress, since: x.intent.createdAt, vault: record.vault?.address }); } catch { lookup = null; }
       const readable = lookup?.readable === true;
       const d = resolveSubmitting({ intent: x.intent, lookup: { readable, match: readable ? matchByRefId({ intent: x.intent, txs: lookup.txs }) : undefined } });
       if (!d.to) return no(d.action === "wait" ? "wait" : d.code, d.why);
