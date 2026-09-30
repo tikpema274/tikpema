@@ -31074,3 +31074,33 @@ a partly-staged file is judged on disk content; (2) `--no-verify` skips it, no C
 by VOCABULARY (`nothing` fired here; `changed` alone would not), and it flags that a claim EXISTS, never whether it is
 TRUE — the falsity here was found by reading the flow. Pre-push instead of pre-commit: later (a bad commit already in
 history), no cheaper. Pre-commit is the right hook.
+
+---
+
+# ✅ AUTH FIX — PROVEN LIVE (2026-09-30, Deploy 6abd6238, hotfix 8703b83)
+
+The auth-verify hole (a client-supplied publicKey for any unstored credentialId → a session for whatever address the
+client sent, live since 2026-07-03) is CLOSED, and passkey registration is RESTORED, not refused in a new way.
+
+## Deploy — 2026-09-30T19:11:28Z → live ~20:02Z (deploy-logs/2026-09-30-2111.log)
+- Source: tikpema-hotfix, `dcef35a → acc5220 (derive) → 523ed1f (refusal screen) → 8703b83 (copy fix)`.
+- Lock: exactly one "🔒 acquired — PID 11249" and one "🔓 lock released — PID 11249 … exited 0"; no interference.
+- test:all 166/166 · gate:deployed ✅ tree 9d670833af05 (commit 8703b83, clean) · ddTree d79683273abc UNROTATED →
+  no window (none expected; not a pass) · gate:forgery 5/0 · gate:spec green · loss sweep 0 new (595 listed, 17 carried)
+  · ledgers committed on hotfix caa500c → gate:ledger up to date (47 loss entries).
+
+## Live proof — T, fresh browser profile, https://app.tikpema.xyz/#/wallet
+New passkey registered → "✓ Wallet ready", empty Your Money block, both wallets 0.00.
+
+## Read-only check (prod Blobs, strong reads, list+get only)
+- passkey-credentials: **19 → 20 records**; the new one `cred:jeVr3ajvsz7…`, createdAt **2026-09-30T20:11:34.539Z**
+  (after the deploy went live). stored **0x7dea…3def** = derivePasskeyAddress(stored publicKey) **0x7dea…3def —
+  MATCH** (exact, full-string compare). The two before it (09-01, 09-08) also MATCH.
+- agent-wallets: **1** record for the owner — `owner:0x7dea…3def`, method passkey, walletAddress 0x4b6c…f280,
+  createdAt 20:11:38.325Z (+3.8 s after the credential).
+
+## Open after closure
+- Merge hotfix back: main has 7ba5f09 (= 8703b83) but not the hotfix ledger commits (dcef35a, caa500c). Main's other
+  undeployed work (piece 5 steps 3–6, step 6 lookup fixes, the three failed-read fixes) is still NOT on prod.
+- The 3 mismatched 07-03 records stay REFUSED by decision (see the feasibility entry above).
+- Proposed, not built: gate:registry in .githooks/pre-commit (see the deploy-attempts entry).
