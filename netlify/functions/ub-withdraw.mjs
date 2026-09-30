@@ -192,27 +192,42 @@ export async function handler(event) {
   }
 
   // ═══ RECORD FIRST. See the header — this ordering is the design, not bookkeeping. ═══
-  const withdrawalId = randomUUID();
-  await createRecord({ owner, amountUsdc: amount, withdrawalId });
   // ⭐ THE MATURITY DATE IS WRITTEN AT CREATION, not derived later. It is the one fact a human
   // needs a week from now, and "recompute it from createdAt + delayBlocks" is exactly what nobody
   // does at the moment it matters. ⚠️ APPROXIMATE — derived from a BLOCK count, so it drifts with
   // block time and must never be rendered as a precise deadline.
+  // ⭐ ONE WRITE (2026-09-30): the maturity used to be PATCHED on after createRecord — a read-back
+  // that could fail silently, and the withdrawal was initiated anyway with no maturesApprox (so no
+  // overdue alert). Nothing is read back before money moves.
+  const withdrawalId = randomUUID();
   const maturesApprox = new Date(Date.now() + state.approxDelayDays * 86400 * 1000).toISOString();
-  await patchRecord({ owner, withdrawalId, fields: {
+  await createRecord({
+    owner, amountUsdc: amount, withdrawalId,
     amountAtomic: units.toString(),
     delayBlocks: state.delayBlocks,
     approxDelayDays: state.approxDelayDays,
     maturesApprox,
-  } });
+  });
 
   try {
     const res = await ubInitiateWithdrawal({ owner, amountUsdc: amount });
-    await patchRecord({ owner, withdrawalId, fields: {
-      state: STATE.WAITING,
-      initiateTxHash: res.txHash,
-      initiatedAt: new Date().toISOString(),
-    } });
+    // ⭐ THE WITHDRAWAL HAS STARTED. A record update that cannot land (a failed read, or the fresh
+    // record not yet visible) must NOT turn this into a failure — saying "failed" about a withdrawal
+    // that started is worse (T, 2026-09-30). The record stays INITIATING; the sweeper reconciles it
+    // against the chain. But it is said LOUDLY, with the tx hash, because the record lacks it.
+    let recorded = null, recordErr = null;
+    try {
+      recorded = await patchRecord({ owner, withdrawalId, fields: {
+        state: STATE.WAITING,
+        initiateTxHash: res.txHash,
+        initiatedAt: new Date().toISOString(),
+      } });
+    } catch (e) { recordErr = e; }
+    if (!recorded) {
+      console.error(`[ub-withdraw] 🚨 withdrawal ${withdrawalId} STARTED on chain (tx ${res.txHash}, owner ${owner}) but its record could NOT be updated — ` +
+        `${recordErr ? `read failed: ${String(recordErr?.message ?? recordErr).slice(0, 160)}` : "the record read back as absent"}. ` +
+        `It stays INITIATING; ub-withdraw-sweep reconciles it against the chain.`);
+    }
     return json(202, {
       status: "started",
       withdrawalId,

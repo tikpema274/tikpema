@@ -50,8 +50,15 @@ export const OPEN_STATES = Object.freeze([STATE.INITIATING, STATE.WAITING, STATE
 /**
  * ⭐ WRITTEN BEFORE THE CHAIN CALL. Returns the record so the caller can pass its id into
  * the on-chain step and update it afterwards.
+ *
+ * ⭐ EVERYTHING KNOWN BEFORE THE CHAIN CALL GOES IN THIS ONE WRITE (2026-09-30) — the amount in atomic
+ * units and the maturity (delayBlocks, approxDelayDays, maturesApprox). ub-withdraw used to write the
+ * record and then PATCH these on, and patchRecord's read-back could fail (or simply not see the fresh
+ * record yet) SILENTLY — the withdrawal was initiated anyway, with no maturesApprox, so its overdue
+ * alert could never fire. Nothing is read back before money moves.
  */
-export async function createRecord({ owner, amountUsdc, withdrawalId, now = () => new Date().toISOString() }) {
+export async function createRecord({ owner, amountUsdc, withdrawalId, amountAtomic = null, delayBlocks = null,
+  approxDelayDays = null, maturesApprox = null, now = () => new Date().toISOString() }) {
   if (!owner) throw new Error("createRecord requires an owner");
   if (!withdrawalId) throw new Error("createRecord requires a withdrawalId");
   const rec = {
@@ -59,6 +66,7 @@ export async function createRecord({ owner, amountUsdc, withdrawalId, now = () =
     withdrawalId,
     owner: norm(owner),
     amountUsdc: String(amountUsdc),
+    amountAtomic,
     state: STATE.INITIATING,
     createdAt: now(),
     updatedAt: now(),
@@ -67,13 +75,13 @@ export async function createRecord({ owner, amountUsdc, withdrawalId, now = () =
     // ⚠️ Set from the CHAIN's delay at initiation time, never from a constant — the delay is
     // a contract parameter and could change. Recorded so the estimate shown to the user is
     // reproducible after the fact.
-    delayBlocks: null,
-    approxDelayDays: null,
+    delayBlocks,
+    approxDelayDays,
     // ⭐ WRITTEN, NOT REMEMBERED. The maturity date is the one fact a human needs a week from
     // now, and "derive it from createdAt + delayBlocks" is exactly the sort of thing nobody
     // does at the moment it matters. APPROXIMATE by construction — the delay is in BLOCKS, so
     // this drifts with block time and must never be shown as a precise deadline.
-    maturesApprox: null,
+    maturesApprox,
     // ⭐ The honest end-state marker. `completed` means the funds reached the SCA; it does
     // NOT mean they reached the user. Anything rendering "your money is back" must consult
     // this, not the state alone.
@@ -91,18 +99,21 @@ export async function createRecord({ owner, amountUsdc, withdrawalId, now = () =
 }
 
 /** Merge-update. Never blind-overwrites: a concurrent sweeper tick must not erase a field
- *  it did not set. Returns the merged record, or null if the record vanished. */
+ *  it did not set. Returns the merged record, or null if the record is genuinely ABSENT.
+ *  ⛔ A FAILED READ THROWS (2026-09-30) — it used to `.catch(() => null)`, so "unreadable" and
+ *  "vanished" were the same null and every caller ignored it. [[absence-must-never-read-as-safe]] */
 export async function patchRecord({ owner, withdrawalId, fields, now = () => new Date().toISOString() }) {
   const k = key(owner, withdrawalId);
-  const prev = await store().get(k, { type: "json" }).catch(() => null);
+  const prev = await store().get(k, { type: "json" });
   if (!prev) return null;
   const next = { ...prev, ...fields, updatedAt: now() };
   await store().setJSON(k, next);
   return next;
 }
 
+/** The record, or null if ABSENT. A failed read THROWS — never null (see patchRecord). */
 export async function readRecord({ owner, withdrawalId }) {
-  return store().get(key(owner, withdrawalId), { type: "json" }).catch(() => null);
+  return store().get(key(owner, withdrawalId), { type: "json" });
 }
 
 /**

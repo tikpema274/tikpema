@@ -97,15 +97,30 @@ export const handler = async (event) => {
 
       if (res.step === "not-yet-matured") { out.waiting++; note("waiting", { withdrawableUsdc: res.withdrawableUsdc }); continue; }
 
-      await patchRecord({ owner, withdrawalId, fields: {
-        state: STATE.COMPLETED,
-        completeTxHash: res.txHash,
-        landedIn: res.landedIn,
-        completedAt: new Date().toISOString(),
-        // ⭐ The funds are in the SCA, NOT with the user. Recorded so nothing downstream can
-        // render "your money is back" from `state === completed` alone.
-        stillNeedsAgentWithdraw: true,
-      } });
+      // ⛔ THE CHAIN HAS COMPLETED IT; the record update is separate (2026-09-30). patchRecord used to
+      // return null silently on a failed read and this still counted "completed" — the record stayed
+      // WAITING and the next tick re-completed (the chain refuses, "N;O"). Now a record that could not
+      // be updated is reported as exactly that, LOUDLY, with the completion's tx hash.
+      let recorded = null, recordErr = null;
+      try {
+        recorded = await patchRecord({ owner, withdrawalId, fields: {
+          state: STATE.COMPLETED,
+          completeTxHash: res.txHash,
+          landedIn: res.landedIn,
+          completedAt: new Date().toISOString(),
+          // ⭐ The funds are in the SCA, NOT with the user. Recorded so nothing downstream can
+          // render "your money is back" from `state === completed` alone.
+          stillNeedsAgentWithdraw: true,
+        } });
+      } catch (e) { recordErr = e; }
+      if (!recorded) {
+        out.failed++;
+        note("completed-on-chain-record-not-updated", { txHash: res.txHash, movedUsdc: res.movedUsdc,
+          error: recordErr ? String(recordErr?.message ?? recordErr).slice(0, 160) : "record absent" });
+        console.error(`[ub-withdraw-sweep] 🚨 ${withdrawalId} COMPLETED ON CHAIN (tx ${res.txHash}, moved ${res.movedUsdc}) owner=${owner} but its record could NOT be updated — ` +
+          `${recordErr ? `read failed: ${String(recordErr?.message ?? recordErr).slice(0, 160)}` : "the record read back as absent"}. The record still says ${state}.`);
+        continue;
+      }
       out.completed++;
       note("completed", { txHash: res.txHash, movedUsdc: res.movedUsdc });
       console.log(`[ub-withdraw-sweep] COMPLETED ${withdrawalId} owner=${owner} moved=${res.movedUsdc} tx=${res.txHash} — funds are in the SCA, hop 3 (agent-withdraw) still pending`);
