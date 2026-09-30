@@ -31104,3 +31104,26 @@ New passkey registered → "✓ Wallet ready", empty Your Money block, both wall
   undeployed work (piece 5 steps 3–6, step 6 lookup fixes, the three failed-read fixes) is still NOT on prod.
 - The 3 mismatched 07-03 records stay REFUSED by decision (see the feasibility entry above).
 - Proposed, not built: gate:registry in .githooks/pre-commit (see the deploy-attempts entry).
+
+---
+
+# 🔎 BORROW KIT BORROWS FROM THE DRAINED POOL (2026-09-30 22:52Z, read-only)
+
+Circle's post (09-30 17:23Z): Onramp/Earn/Borrow Kits "now available on Arc Mainnet". Question: does Borrow Kit's
+cirBTC→USDC borrowing draw on the USDC/cirBTC Morpho market drained on 09-30 (see the Galaxy entry above)? **Yes.**
+- **Borrow Kit is Morpho Blue, by code:** @circle-fin/borrow-kit 1.0.0 (published 2026-09-30) → provider-borrow-service
+  1.0.0; the market schema's `protocol` is `z.enum(['morpho'])`; "Morpho Blue has no per-market cap". The Morpho address
+  is NOT hardcoded: it is resolved from the service's executionParams at borrow time.
+- **Circle's market list is public** (`GET https://api.circle.com/v1/borrowKit/markets?chain=ARC`, no key, 13 markets,
+  pagination {}). Two cirBTC/USDC markets, both LLTV 0.86, both collateral cirBTC 0x171a…, loan USDC 0x3600…:
+  - **`0xc2db905f…25815d`**: the SAME market id as the drained pool. Circle reports utilization 1, liquidity 39 USDC.
+  - `0xabd17639…b7b566`: a second, small one. Circle reports utilization 1, liquidity 0.
+- **On chain, Arc mainnet 5042, block 23612692, Morpho Blue 0x34CD…7fCD:** `0xc2db…815d` supply 184,974,753.73 /
+  borrow 184,974,713.90 → **FREE 39.84 USDC, util 0.9999998** (5.10 at 12:35Z → 39.84 now); `0xabd1…b566` supply
+  15,033.40 / borrow 15,033.40 → **FREE 0.00096 USDC**. The params (loan, collateral, LLTV) match Circle's listing.
+- **So: every cirBTC→USDC loan Borrow Kit offers today can lend at most ~39.84 USDC in total**, on launch day, until
+  suppliers refill. The EURC market (cirBTC/EURC `0x6ea1…daf4`) is at 99.35% (liquidity ~7,007 EURC per Circle).
+- ⚠️ Caveats: a Morpho market id hashes its PARAMS, not the Morpho address. Circle's API does not name the Morpho
+  contract. 0x34CD is the Morpho Blue we have read before on Arc mainnet; a borrow quote (key-gated POST) would name the
+  one the kit executes against. NOT run. Circle's economics are "cached projections, not live reads", per the SDK's
+  own schema comment. The chain is the authority; the two agree here.
