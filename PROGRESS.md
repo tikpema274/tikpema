@@ -31033,3 +31033,44 @@ rather than being validated)? **Yes — measured.** Nothing was written anywhere
 Proceed: server derives, compares with the client's address (refuse on disagreement, adopt NEITHER), verifies against
 that key, writes only if new; login checks stored address == derive(stored key). **The 3 records are REFUSED, not
 exempted** — their keys were software keys from a 07-03 test that nobody holds.
+
+---
+
+# 🚦 HOTFIX DEPLOY ATTEMPTS — 2026-09-30 (evening): two runs, NOTHING published; prod still 94ef870
+
+## Run 1 — 17:36:59Z, PID 219185 (deploy-logs/2026-09-30-1936.log)
+Died mid-`test:all` at 17:38:44Z with no failure line. Cause: **the machine (WSL) REBOOTED** — the lock-breaker
+proved it ("taken in another boot (boot_id 38701ccf…, now afd518c5…)"). Never reached build; nothing published.
+A relaunch at 20:11 local passed `--break-stale-lock` AFTER the `--` (it went to the chain, not the lock) → refused,
+nothing started (2026-09-30-2011.log).
+
+## Run 2 — 18:13:36Z, PID 1774 (deploy-logs/2026-09-30-2013.log)
+`--break-stale-lock` moved run 1's lock aside (deploy.lock.stale-2026-09-30T18-13-36-435Z-2aa98e0c) and acquired.
+**⛔ The live lock was then renamed by hand at 18:13:57Z — T ran**
+`mv ~/.cache/tikpema/deploy.lock ~/.cache/tikpema/deploy.lock.stale-$(date +%s)` **believing the launch had failed;
+it had already acquired.** → `deploy.lock.stale-1790792037` (PID 1774's own lock). For the rest of that run NO lock
+existed: a second deploy:prod would NOT have been refused. The chain ended "lock NOT released … no lock". Explained,
+not a code path — nothing in the repo writes an epoch-suffixed name (run-lock uses `stale-<ISO>-<token>`).
+⭐ The run-lock's own refusal message is the check: a launch that printed "🔒 deploy: lock acquired" DID acquire.
+
+`test:all` 165/166 — **FAILED gate:registry** §2: `ConnectPasskey` (declared `noClaims`) had grown a claim from
+523ed1f: *"Nothing was signed or changed"*. Chain stopped before build; nothing published.
+
+## ⭐ The gate was right — and the claim was FALSE in the exact case T was about to test live
+After a NEW registration the auto-session effect (useWallet.ts ~322) prompts a second passkey tap; cancelling it
+leaves a passkey ALREADY created on the device and with Circle — "nothing was changed" is false there. Fixed:
+hotfix **8703b83**, main **7ba5f09** (cherry-pick): "The passkey prompt was closed before you signed in — sign in again
+when you're ready." verify-session-refusal: RED on old copy 30/2 (exactly the two new checks), GREEN 32/32;
+gate:registry 28/0; tsc clean.
+
+## 🚨 The lesson — a copy change that ADDS a claim needs the CLAIMS gate, not the component's suites
+523ed1f's message listed four suites green (walletgate, custodynotice, ub, previewcheckout) — every suite that
+touches the component — and not gate:registry, the one gate that reads copy for claims. The only thing that ran it
+was the deploy chain, 30 min in.
+**Can commit time catch it? Yes, cheaply — NOT YET BUILT (T decides):** gate:registry is 1.3 s, reads files only,
+no network, no side effects. Wire it into `.githooks/pre-commit`, run only when the staged set touches
+`src/components/` or `scripts/guard-registry.mjs`. Limits, stated: (1) it reads the WORKING TREE, not the index —
+a partly-staged file is judged on disk content; (2) `--no-verify` skips it, no CI backstop; (3) it catches a claim
+by VOCABULARY (`nothing` fired here; `changed` alone would not), and it flags that a claim EXISTS, never whether it is
+TRUE — the falsity here was found by reading the flow. Pre-push instead of pre-commit: later (a bad commit already in
+history), no cheaper. Pre-commit is the right hook.
