@@ -66,6 +66,10 @@ mock.module("../netlify/functions/_bridge.mjs", {
     bridgeFeeBand: () => ({ band: "none", pct: 0 }),
     bridgeAckToken: tripwire("bridgeAckToken"),
     openBridgeQuote: tripwire("openBridgeQuote"),
+    // ⛔ ADDED 2026-10-01 — THE SAME FAILURE A THIRD TIME. d5239d7 made `_actions.mjs` import `bridgeAckSentence`;
+    // this enumerated stub lacked it, so the suite failed to LOAD (not an assertion) from that commit until test:all
+    // caught it the same evening. A tripwire: the pause must refuse before any acknowledgement is worded.
+    bridgeAckSentence: tripwire("bridgeAckSentence"),
   },
 });
 mock.module("../netlify/functions/_pay.mjs", { namedExports: { agentPay: tripwire("agentPay") } });
