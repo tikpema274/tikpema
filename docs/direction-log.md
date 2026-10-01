@@ -136,3 +136,26 @@ trust layer gets competition.
   PER STEP (bridge acknowledgement, vault disclosure in a plan) and refuses the whole plan before step 1. A Morpho V2
   DD profile would put the vault joint under the same per-step verdict. Watch for: a kit or framework that chains
   Onramp → swap → Earn/Borrow on the user's behalf; that is the flow that most needs a verifier between steps.
+
+## 2026-10-01 — Centrifuge brings institutional RWAs to Arc (X post + Arc spotlight)
+- **Source**: @silencexlm on X (19:15Z) → Arc House "Partner Spotlight / Centrifuge" (published 2026-10-01 19:09Z).
+- **Claim**: Janus Henderson (JTRSY: T-bills; JAAA: AAA CLOs) and New York Life (HYB: high-yield corporate) tokenized funds are
+  live on Arc via Centrifuge/Anemoy, as "composable ERC-4626 primitives" for lending collateral, yield vaults and treasury
+  allocation ("routing USDC into RWA tokens in a single transaction"); "standard deposit(), withdraw(), convertToAssets()".
+- **Checked** (the spotlight's own developer section; nothing on chain yet — it names no Arc addresses):
+  - The tokens implement **ERC-7540, the ASYNCHRONOUS vault standard**, alongside ERC-4626. Under 7540, redemption is a
+    request that is fulfilled later; the post itself says investors are **"submitting daily redemptions back to USDC"**.
+  - **Transfers are permissioned:** "Token transfers verify address eligibility against Centrifuge's permission registry";
+    the app does "identity verification, wallet whitelisting".
+  - Pricing is a **NAV oracle pushed cross-chain** to Arc, not a market price.
+- **Signal**: the most institutional assets yet on Arc are pitched to builders as plug-in 4626 collateral, while their EXIT is
+  asynchronous (daily at best), whitelist-gated, and priced by an oracle. For anything integrating them — a lending market
+  that must liquidate, a vault that must meet withdrawals, an agent routing a treasury — "can I get it back out, how fast,
+  and can whoever receives it even hold it?" is the whole question, and the "deposit()/withdraw()" framing hides it.
+  (A liquidation that must transfer the token to a non-whitelisted liquidator, or redeem on demand, does not work as it
+  would for a liquid 4626.)
+- **Changed**: no change in priorities; it strengthens the promise and widens Stage 1's case. DD's answer for these today
+  should be a refusal (unrecognised exit mechanics), which is correct and honest. The verdict worth building — after the
+  Morpho V2 profile — is an **exit-mode fact**: synchronous vs asynchronous (7540) redemption, the fulfilment cadence, and
+  whether the holder/receiver is eligible in the permission registry. Noted for roadmap Stage 1 as the second profile
+  candidate, not a commitment. Not done: on-chain reads of the Arc deployments (addresses not in the post).
