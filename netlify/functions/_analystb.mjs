@@ -1,6 +1,6 @@
 import { MARKET_ID_ALLOWLIST } from "./_cryptodata.mjs";
 import { estimateSwapOnly, valueInUsdc, SWAP_TOKENS } from "./_swap.mjs";
-import { bridgeFee, resolveDestination } from "./_bridge.mjs";
+import { bridgeFee, resolveDestination, bridgeAckSentence } from "./_bridge.mjs";
 
 // ANALYST B — "Markets & Execution". The second, INDEPENDENT opinion.
 //
@@ -292,13 +292,16 @@ async function analyseBridge({ destination, amountUsdc }) {
   if (burn >= 0.10) {
     return {
       verdict: "caution",
-      headline: `The fee eats ${pct(burn)}% of this bridge. It executes, but it is expensive for the size — a larger amount would amortise it better.`,
+      // ⭐ The fee fact comes from the SAME producer as the acknowledgement (2026-10-01). It used to describe the fee as
+      // consuming X% of the bridge — deduction copy on an upfront fee, where nothing comes out of the amount.
+      headline: `${bridgeAckSentence({ amountUsdc, feeUsdc, feeRatio: burn })} It executes, but it is expensive for the size — a larger amount would amortise it better.`,
       facts, feeUsdc, netUsdc: net,
     };
   }
   return {
     verdict: "proceed",
-    headline: `The bridge is economical: the fee is ${pct(burn)}% of the amount and ~${net.toFixed(2)} USDC would arrive.`,
+    // ⚠️ Full precision: toFixed(2) showed a 0.091 arrival as "0.09" — understating what arrives (2026-10-01).
+    headline: `The bridge is economical: the fee is ${pct(burn)}% of the amount and ~${net} USDC would arrive.`,
     facts, feeUsdc, netUsdc: net,
   };
 }

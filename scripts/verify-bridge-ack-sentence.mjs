@@ -55,11 +55,17 @@ mock.module("../netlify/functions/_circle.mjs", { namedExports: { ...REAL_CIRCLE
   circle: () => ({ createContractExecutionTransaction: async () => { executed++; return { data: { id: "tx_1" } }; } }),
   waitForTx: async () => "0x" + "ab".repeat(32) } });
 const B = await import("../netlify/functions/_bridge.mjs");
+// The analyst prices live via bridgeFee(); here it returns the same UPFRONT fee (net = the full amount) the
+// sealed quotes carry. The two refusal paths never call it (they open a sealed quote).
+const upfrontFee = ({ amountUsdc }) => ({ amountMinor: BigInt(Math.round(Number(amountUsdc) * 1e6)), feeMinor: 54_147n,
+  feeUsdc: 0.054147, netUsdc: Number(amountUsdc), mechanic: "upfront" });
 mock.module("../netlify/functions/_bridge.mjs", { namedExports: { ...B,
-  readBridgeBalanceMinor: async () => ({ checked: true, balanceMinor: 10n ** 12n }) } });
+  readBridgeBalanceMinor: async () => ({ checked: true, balanceMinor: 10n ** 12n }),
+  bridgeFee: async (args) => upfrontFee(args) } });
 const { executeAction } = await import("../netlify/functions/_actions.mjs");
 const { handler: planHandler } = await import("../netlify/functions/agent-execute-plan.mjs");
 const { issueSession } = await import("../netlify/functions/_auth.mjs");
+const { analystB } = await import("../netlify/functions/_analystb.mjs");
 
 const FAR = 4102444800;
 // The signed-quote LAYOUT the expiry decoder reads (prefix byte, offset word, mode<<248|deadline, payload) — same
@@ -105,6 +111,24 @@ for (const [name, src] of [["agent-execute-plan.mjs", plan], ["_actions.mjs", ac
 }
 check("⭐ the helper is exported once, from _bridge.mjs", typeof B.bridgeAckSentence === "function");
 for (const [p_, s] of [[a?.blocked, "single"], [p.blocked, "plan"]]) check(`⛔ ${s}: no "lose", no "only"`, !/\blose\b|\bonly\b/i.test(String(p_)));
+
+section("4 — 🚨 THE SECOND OPINION (_analystb) says the same thing, and does not round the arrival down");
+// caution band (fee ≥ 10%): the headline IS the shared sentence + its advice — no "eats", no third phrasing.
+const caution = await analystB({ proposal: { action: "bridge_usdc", amountUsdc: AMOUNT, destination: "base" }, walletAddress: WALLET });
+check("caution verdict at 54.1%", caution?.verdict === "caution", String(caution?.verdict));
+check("⭐⭐ the caution headline is EXACTLY the sentence + its advice",
+  caution?.headline === `${EXPECTED} It executes, but it is expensive for the size — a larger amount would amortise it better.`,
+  JSON.stringify(caution?.headline));
+check("⛔ …no \"eats\" / \"lose\" / \"only\"", !/\beats\b|\blose\b|\bonly\b/i.test(String(caution?.headline)));
+// proceed band (fee < 10%): 0.611 → 8.9%. The arrival is the full amount — never rounded to 2 dp ("0.61").
+const proceed = await analystB({ proposal: { action: "bridge_usdc", amountUsdc: 0.611, destination: "base" }, walletAddress: WALLET });
+check("proceed verdict at 8.9%", proceed?.verdict === "proceed", String(proceed?.verdict));
+check("⭐ the proceed headline states the FULL arrival, 0.611 — not 0.61", /\b0\.611 USDC/.test(String(proceed?.headline)) && !/\b0\.61 USDC/.test(String(proceed?.headline)),
+  JSON.stringify(proceed?.headline));
+const analyst = readFileSync(new URL("../netlify/functions/_analystb.mjs", import.meta.url), "utf8");
+check("⭐ _analystb.mjs calls bridgeAckSentence", /bridgeAckSentence\(/.test(analyst));
+check("⛔ _analystb.mjs: no \"eats\"", !/\beats\b/.test(analyst));
+check("⛔ _analystb.mjs: no 2-dp arrival (net.toFixed(2))", !/net\.toFixed\(2\)/.test(analyst));
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} verify-bridge-ack-sentence — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
