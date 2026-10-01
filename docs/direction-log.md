@@ -175,3 +175,10 @@ trust layer gets competition.
   - For any integrator, the exit therefore depends on: a fulfilled redeem request (timing set by the manager); the
     receiver being a member (a liquidator must be whitelisted); and the holder not being frozen. None of this is visible
     through the ERC-4626 `withdraw()` the spotlight points builders to.
+- **The same announcement, three versions, and the caveats thin out as it travels** (T found the Discord post, 10-01):
+  the blog's developer section names ERC-7540 (async) and the permission registry; the X post says "ERC-20 / ERC-4626
+  primitives"; the **Discord announcement says "Built on ERC-20 and ERC-4626 vault standards", does not mention ERC-7540
+  at all, and reduces the permission registry to "eligible investors … may be able to onboard."** Its pool IDs match the
+  chain (JTRSY 281474976710662 → vault 0x1277…2bb1; JAAA 281474976710663 → 0x2dc7…e5c4; HYB, linked only to the app root,
+  is 281474976710671 → 0xcf0c…a9ba). Signal: the version most builders read is the one that hides the exit mechanics, so a
+  verifier that states the exit mode from the chain is answering a question the announcement leaves out.
