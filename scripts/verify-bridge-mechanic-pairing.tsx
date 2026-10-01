@@ -558,5 +558,71 @@ section("11 — ⭐⭐ THE CHAT SURFACE, RENDERED: every bridge step shows its s
   check("⭐⭐ single-action: past the window the confirm becomes a re-price", /Quote expired — price it again/.test(s2) && !/Confirm & bridge/.test(s2));
 }
 
+section("12 — 🚨 THE ACKNOWLEDGEMENT CARDS: an upfront fee is never a loss, and all three say it from ONE place");
+{
+  // ═══ WHY (2026-10-01) ═══════════════════════════════════════════════════════════════════════════
+  // Three cards users read BEFORE acknowledging said "This bridge loses X% to fees" / "Step N loses X% to fees",
+  // and the consent itself said "most of this amount will be spent on the network fee". On the agent path the fee is
+  // UPFRONT: the full amount arrives and the fee is charged on top. Sections 3–11 watched "taken out of" / "on top
+  // of", never "loses", which is how these survived the mechanic change. The wording now lives in
+  // shared/bridge-ack-copy.mjs (React cannot import _bridge.mjs: it pulls Circle/Blobs/RPC clients in at module
+  // scope). _bridge.mjs re-exports the sentence for the server. The family below fails on any UPFRONT fee surface;
+  // DEDUCTED wording stays allowed on the self-signed path, where the fee really is deducted (§5).
+  const FAMILY = /\b(lose|loses|lost|eats|deducted|only)\b|most of (this|it|step|the amount)/i;
+  const ACK = await import("../shared/bridge-ack-copy.mjs").catch(() => null);
+  check("⭐ shared/bridge-ack-copy.mjs exists and exports the four producers",
+    !!ACK && ["bridgeAckSentence", "bridgeAckHeading", "bridgeAckConsent"].every((k) => typeof ACK[k] === "function") && typeof ACK?.BRIDGE_ACK_FLAT_FEE_NOTE === "string");
+  const SERVER = await import("../netlify/functions/_bridge.mjs");
+  check("⭐⭐ the server's bridgeAckSentence IS the shared one (re-export, not a copy)", !!ACK && SERVER.bridgeAckSentence === ACK.bridgeAckSentence);
+
+  // Literal expectations (fee 0.054147 on 0.1 → 54.1%), so a producer change cannot silently re-pin itself.
+  const SENT = "This bridge charges a fee of 0.0541 USDC on top of the 0.1 you're sending — 54.1% of the amount. The full 0.1 arrives; about 0.1541 leaves your wallet.";
+  const NOTE = "The cross-chain fee is flat, so it costs the same whether you bridge 0.1 or 100 USDC. Bridging a larger amount at once, or not bridging, both leave you with more.";
+  const H1 = "The fee is 54.1% of the amount, charged on top";
+  const HS = "Step 1: the fee is 54.1% of the amount, charged on top";
+  const C1 = "I understand the fee is charged on top of the amount, and I want to bridge anyway.";
+  const CS = "I understand step 1's fee is charged on top of its amount, and I want to run this plan anyway.";
+  const card = (text, head, consent) => { const a = text.indexOf(head), b = text.indexOf(consent); return a >= 0 && b > a ? text.slice(a, b + consent.length) : ""; };
+
+  const { AgentSummary } = await import("../src/components/MyAgentPanel");
+  const render = (data) => strip(React.createElement(AgentSummary, {
+    data, planRun: null, planBusy: false, planMints: {}, planAcked: {}, onPlanAckChange: () => {}, bridgeReceipts: [],
+    onConfirm: () => {}, onRequotePlan: () => {}, quotedAt: 1_000_000, now: 1_001_000, bridgeRun: null, bridgeBusy: false, bridgeAcked: false,
+    walletReady: true, onAckChange: () => {}, mint: null, onConfirmBridge: () => {}, onRequoteBridge: () => {},
+    vaultAcked: false, onVaultAckChange: () => {}, vaultDelta: null, vaultRun: null, vaultBusy: false, onConfirmVault: () => {} } as any));
+  const single = render({ decision: { action: "bridge_usdc" }, needsBridgeConfirm: true, bridge: { amountUsdc: 0.1, destination: { key: "base", label: "Base" },
+    feeUsdc: 0.054147, netUsdc: 0.1, mechanic: "upfront", feeDisclosure: { band: "acknowledge", feeRatio: 0.54147, ackToken: "a" }, quoteToken: "t.t", expiresInMs: 120_000 } });
+  const sc = card(single, H1, C1);
+  check("⭐⭐ AGENT BRIDGE CARD (MyAgentPanel): heading, the sentence, the flat-fee note, the consent", !!sc && sc.includes(SENT) && sc.includes(NOTE), sc.slice(0, 140) || single.slice(0, 160));
+  check("🚨 …and the card says none of the family (lose/loses/lost/eats/deducted/only/most of)", !!sc && !FAMILY.test(sc), (sc.match(FAMILY) || [""])[0]);
+
+  const plan = render({ decision: { action: "plan" }, needsConfirm: true, plan: [{ type: "bridge_usdc", amountUsdc: 0.1, destination: "base" }], totalUsdc: 0.1, quoteId: "q",
+    stepDisclosures: { 0: { amountUsdc: 0.1, destinationKey: "base", destinationLabel: "Base", feeUsdc: 0.054147, netUsdc: 0.1, mechanic: "upfront",
+      feeRatio: 0.54147, band: "acknowledge", ackToken: "a", quoteToken: "t.t", expiresInMs: 120_000 } } });
+  const pc = card(plan, HS, CS);
+  check("⭐⭐ PLAN STEP CARD (MyAgentPanel): heading, the sentence, the flat-fee note, the consent", !!pc && pc.includes(SENT) && pc.includes(NOTE), pc.slice(0, 140) || plan.slice(0, 160));
+  check("🚨 …and the card says none of the family", !!pc && !FAMILY.test(pc), (pc.match(FAMILY) || [""])[0]);
+
+  // BridgePanel's card is behind a fetched quote (state), so it is checked in SOURCE, scoped to its ack block.
+  const bp = readFileSync("src/components/BridgePanel.tsx", "utf8").replace(/\{\/\*[\s\S]*?\*\/\}/g, " ").replace(/^\s*\/\/.*$/gm, " ");
+  const a0 = bp.indexOf('disclosure?.band === "acknowledge"'); const blk = a0 >= 0 ? bp.slice(a0, bp.indexOf("</label>", a0)) : "";
+  check("⭐⭐ BRIDGE PANEL CARD: the ack block calls all four shared producers",
+    /bridgeAckHeading\(/.test(blk) && /bridgeAckSentence\(/.test(blk) && /BRIDGE_ACK_FLAT_FEE_NOTE/.test(blk) && /bridgeAckConsent\(/.test(blk), blk ? "" : "ack block not found");
+  check("🚨 …and its block writes none of the family by hand", !!blk && !FAMILY.test(blk), (blk.match(FAMILY) || [""])[0]);
+  for (const f of ["MyAgentPanel", "BridgePanel"]) {
+    const code = readFileSync(`src/components/${f}.tsx`, "utf8").replace(/\{\/\*[\s\S]*?\*\/\}/g, " ").replace(/^\s*\/\/.*$/gm, " ");
+    check(`⛔ ${f}: no hand-written "loses … to fees" / "most of this amount" anywhere`, !/loses \{|loses [0-9]|to fees|most of (this|step|it)/.test(code));
+  }
+
+  // The family over EVERY upfront fee string the copy module holds; deducted wording stays where it is TRUE.
+  const upStrings = Object.values(BRIDGE_MECHANIC_COPY.upfront).filter((v) => typeof v === "string").join(" | ");
+  check("🚨 BRIDGE_MECHANIC_COPY.upfront: none of the family", !FAMILY.test(upStrings), (upStrings.match(FAMILY) || [""])[0]);
+  const ackStrings = ACK ? [ACK.bridgeAckSentence({ amountUsdc: 0.1, feeUsdc: 0.054147, feeRatio: 0.54147 }), ACK.bridgeAckHeading({ feeRatio: 0.54147 }),
+    ACK.bridgeAckHeading({ feeRatio: 0.54147, step: 1 }), ACK.BRIDGE_ACK_FLAT_FEE_NOTE, ACK.bridgeAckConsent({}), ACK.bridgeAckConsent({ step: 1 })].join(" | ") : "";
+  check("🚨 shared/bridge-ack-copy.mjs: none of the family in anything it produces", !!ackStrings && !FAMILY.test(ackStrings), (ackStrings.match(FAMILY) || [""])[0]);
+  check("⭐ DEDUCTED copy is untouched and still says the fee comes out of the amount (true on the self-signed path)",
+    /taken out of the amount/.test(BRIDGE_MECHANIC_COPY.deducted.summary));
+}
+
 console.log(`\n${fail ? "❌ FAILURES" : "✅ ALL GREEN"}   pass ${pass} / fail ${fail}\n`);
 process.exit(fail ? 1 : 0);

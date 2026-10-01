@@ -8,6 +8,7 @@ import { partitionReceipts, collapseSummaryLine } from "../lib/bridgeReceiptColl
 import { BridgeQuoteSummary } from "./BridgeQuoteSummary";
 import { describeError } from "../lib/describeError";
 import { displayAmount } from "../lib/formatAmount";
+import { bridgeAckSentence, bridgeAckHeading, bridgeAckConsent, BRIDGE_ACK_FLAT_FEE_NOTE } from "../../shared/bridge-ack-copy.mjs";
 
 type UnifiedWallet = ReturnType<typeof useWallet>;
 
@@ -425,19 +426,17 @@ export default function BridgePanel({ wallet: w }: { wallet: UnifiedWallet }) {
           missing or stale (fail-closed, exactly like the vault deposit gate). */}
       {disclosure?.band === "acknowledge" && (
         <div className="status" style={{ border: "1px solid var(--warn)", borderRadius: 8, padding: 12, marginTop: 8 }}>
+          {/* ⭐ UPFRONT fee (mechanic default upfront, below): shared/bridge-ack-copy.mjs, the same words as the agent cards. */}
           <div style={{ fontWeight: 600, marginBottom: 4 }}>
-            This bridge loses {(disclosure.feeRatio * 100).toFixed(1)}% to fees
+            {bridgeAckHeading({ feeRatio: disclosure.feeRatio })}
           </div>
           <div style={{ lineHeight: 1.5 }}>
-            The cross-chain fee is flat, so it costs the same whether you bridge 0.1 or 100 USDC —
-            on a small amount that is most of it. Bridging a larger amount at once, or not bridging,
-            both leave you with more.
+            {bridgeAckSentence({ amountUsdc: amount, feeUsdc: disclosure.feeUsdc, feeRatio: disclosure.feeRatio })}{" "}
+            {BRIDGE_ACK_FLAT_FEE_NOTE}
           </div>
           <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 10, cursor: "pointer" }}>
             <input type="checkbox" checked={acked} onChange={(e) => setAcked(e.target.checked)} style={{ marginTop: 3 }} />
-            <span style={{ lineHeight: 1.5 }}>
-              I understand most of this amount will be spent on the network fee, and I want to bridge anyway.
-            </span>
+            <span style={{ lineHeight: 1.5 }}>{bridgeAckConsent()}</span>
           </label>
         </div>
       )}

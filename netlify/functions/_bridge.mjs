@@ -399,20 +399,9 @@ export const FEE_BAND_ACKNOWLEDGE = 0.25; // >=25%: disclosure alone is not cons
 export const FEE_BANDS = ["none", "warn", "acknowledge"]; // ordered least → most severe
 export const GATING_BANDS = ["acknowledge"];              // the ONLY bands that refuse
 
-/**
- * ⭐ THE ACKNOWLEDGEMENT SENTENCE — ONE PRODUCER for both paths that ask (2026-10-01).
- * The agent bridge's fee is charged ON TOP (`bridgeFee()` → mechanic "upfront"): the full amount arrives and
- * amount + fee leaves the wallet. Until 2026-10-01 agent-execute-plan still said "would lose X% to fees … so only
- * ~N would arrive" — deducted-fee copy on an upfront path, live — while _actions.mjs had been rewritten; neither
- * sentence was pinned. Both now call this, and verify-bridge-ack-sentence drives both paths and pins the exact text.
- * ⛔ No "lose", no "only": nothing is deducted. The percentage is OF the amount (feeRatio = fee / amount).
- */
-export function bridgeAckSentence({ amountUsdc, feeUsdc, feeRatio }) {
-  const amount = Number(amountUsdc), fee = Number(feeUsdc);
-  return `This bridge charges a fee of ${fee.toFixed(4)} USDC on top of the ${amount} you're sending — ` +
-    `${(Number(feeRatio) * 100).toFixed(1)}% of the amount. The full ${amount} arrives; about ` +
-    `${(amount + fee).toFixed(4)} leaves your wallet.`;
-}
+// ⭐ THE ACKNOWLEDGEMENT SENTENCE — ONE PRODUCER for server AND UI, in shared/ so the browser can import it (this module
+// cannot be bundled client-side). Used by _actions.mjs, agent-execute-plan.mjs and _analystb.mjs; see the file's header.
+export { bridgeAckSentence } from "../../shared/bridge-ack-copy.mjs";
 
 /** @returns {{feeRatio:number, band:"none"|"warn"|"acknowledge", feeUsdc:number, netUsdc:number}} */
 export function bridgeFeeBand({ amountUsdc, feeUsdc, netUsdc }) {

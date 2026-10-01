@@ -267,7 +267,12 @@ section("7 — THE GATE EXISTS ON BOTH SURFACES, AND LEAVES EVIDENCE");
   // ⭐ RE-POINTED 2026-09-13: the confirm now passes the ack token AND the sealed quote token.
   check("⭐ …passes the token through on confirm", /onConfirmBridge\(b\.amountUsdc, b\.destination\.key, b\.feeDisclosure\?\.ackToken, b\.quoteToken\)/.test(panel));
   check("  …and surfaces the warn band too, not only the hard gate", /feeDisclosure\?\.band === "warn"/.test(panel));
-  check("⭐ …says plainly when the fee EXCEEDS the arrival", /More goes to the fee/.test(panel));
+  // ⭐ RE-POINTED 2026-10-01: "More goes to the fee than arrives" was a DEDUCTED-era branch (fee > net). Under the
+  // agent path's UPFRONT fee net = the full amount, so it could fire only at fee > amount — which the quote-stage fee
+  // floor refuses first (agent-act.mjs:418 plan, :610 single), so it was unreachable. The property it stood for —
+  // the card says PLAINLY what arrives and what leaves — is now stated on every ack card by the shared sentence.
+  check("⭐ …says plainly what arrives and what leaves the wallet (the shared ack sentence, with the card's own figures)",
+    /bridgeAckSentence\(\{ amountUsdc: b\.amountUsdc, feeUsdc: b\.feeUsdc, feeRatio: b\.feeDisclosure\.feeRatio \}\)/.test(panel));
   // Receipt refresh rides the same path — one missing wiring caused two symptoms.
   check("⭐⭐ the agent panel refreshes receipts, so recovery is reachable from it",
     /const loadReceipts = async/.test(panel) && /await loadReceipts\(\)/.test(panel));

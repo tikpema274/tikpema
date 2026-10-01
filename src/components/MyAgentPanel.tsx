@@ -1,5 +1,6 @@
 import { BRIDGE_TIMING, MINT_TIMING } from "../../shared/bridge-timing.mjs";
 import { bridgeProposalFeeLine } from "../../shared/bridge-mechanic.mjs";
+import { bridgeAckSentence, bridgeAckHeading, bridgeAckConsent, BRIDGE_ACK_FLAT_FEE_NOTE } from "../../shared/bridge-ack-copy.mjs";
 import { balanceUnverifiedNote } from "../../shared/balance-unverified-copy.mjs";
 import { useEffect, useRef, useState } from "react";
 import { agentClient } from "../lib/agentClient";
@@ -893,19 +894,13 @@ export function AgentSummary({
             className="status"
             style={{ border: "1px solid var(--warn)", borderRadius: 8, padding: 12, marginBottom: 8 }}
           >
+            {/* ⭐ UPFRONT fee: wording from shared/bridge-ack-copy.mjs — never "loses", never "most of" (2026-10-01). */}
             <div style={{ fontWeight: 600, marginBottom: 4 }}>
-              This bridge loses {(b.feeDisclosure.feeRatio * 100).toFixed(1)}% to fees
+              {bridgeAckHeading({ feeRatio: b.feeDisclosure.feeRatio })}
             </div>
             <div style={{ lineHeight: 1.5 }}>
-              {Number(b.feeUsdc) > Number(b.netUsdc) ? (
-                <>
-                  More goes to the fee ({Number(b.feeUsdc).toFixed(4)} USDC) than arrives
-                  ({Number(b.netUsdc).toFixed(4)} USDC).{" "}
-                </>
-              ) : null}
-              The cross-chain fee is flat, so it costs the same whether you bridge 0.1 or 100 USDC —
-              on a small amount that is most of it. Bridging a larger amount at once, or not bridging,
-              both leave you with more.
+              {bridgeAckSentence({ amountUsdc: b.amountUsdc, feeUsdc: b.feeUsdc, feeRatio: b.feeDisclosure.feeRatio })}{" "}
+              {BRIDGE_ACK_FLAT_FEE_NOTE}
             </div>
             <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 10, cursor: "pointer" }}>
               <input
@@ -914,10 +909,7 @@ export function AgentSummary({
                 onChange={(e) => onAckChange(e.target.checked)}
                 style={{ marginTop: 3 }}
               />
-              <span style={{ lineHeight: 1.5 }}>
-                I understand most of this amount will be spent on the network fee, and I want to
-                bridge anyway.
-              </span>
+              <span style={{ lineHeight: 1.5 }}>{bridgeAckConsent()}</span>
             </label>
           </div>
         )}
@@ -1145,16 +1137,13 @@ export function AgentSummary({
           if (d.band !== "acknowledge") return null;
           return (
             <div key={k} className="status" style={{ border: "1px solid var(--warn)", borderRadius: 8, padding: 12, marginBottom: 8 }}>
+              {/* ⭐ UPFRONT fee: the same shared wording as the single-bridge card (2026-10-01). */}
               <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                Step {i + 1} loses {(d.feeRatio * 100).toFixed(1)}% to fees
+                {bridgeAckHeading({ feeRatio: d.feeRatio, step: i + 1 })}
               </div>
               <div style={{ lineHeight: 1.5 }}>
-                {Number(d.feeUsdc) > Number(d.netUsdc) ? (
-                  <>More goes to the fee ({Number(d.feeUsdc).toFixed(4)} USDC) than arrives
-                  ({Number(d.netUsdc).toFixed(4)} USDC). </>
-                ) : null}
-                Bridging {Number(d.amountUsdc).toFixed(4)} USDC to {d.destinationLabel}. The fee is flat,
-                so it costs the same whether you bridge this or far more.
+                {bridgeAckSentence({ amountUsdc: d.amountUsdc, feeUsdc: d.feeUsdc, feeRatio: d.feeRatio })}{" "}
+                {BRIDGE_ACK_FLAT_FEE_NOTE}
               </div>
               <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 10, cursor: "pointer" }}>
                 <input
@@ -1163,10 +1152,7 @@ export function AgentSummary({
                   onChange={(e) => onPlanAckChange({ ...planAcked, [i]: e.target.checked })}
                   style={{ marginTop: 3 }}
                 />
-                <span style={{ lineHeight: 1.5 }}>
-                  I understand most of step {i + 1} will be spent on the network fee, and I want to run
-                  this plan anyway.
-                </span>
+                <span style={{ lineHeight: 1.5 }}>{bridgeAckConsent({ step: i + 1 })}</span>
               </label>
             </div>
           );
