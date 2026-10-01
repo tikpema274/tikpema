@@ -158,4 +158,20 @@ trust layer gets competition.
   should be a refusal (unrecognised exit mechanics), which is correct and honest. The verdict worth building — after the
   Morpho V2 profile — is an **exit-mode fact**: synchronous vs asynchronous (7540) redemption, the fulfilment cadence, and
   whether the holder/receiver is eligible in the permission registry. Noted for roadmap Stage 1 as the second profile
-  candidate, not a commitment. Not done: on-chain reads of the Arc deployments (addresses not in the post).
+  candidate, not a commitment.
+- **Verified on chain (2026-10-01, read-only; Arc mainnet 5042, block ~23762899; addresses from Centrifuge's own API
+  api.centrifuge.io, where Arc is centrifugeId 14):**
+  - **3 vaults, all `kind: "Async"`, asset = Arc USDC**: JTRSY vault `0x1277…2bb1` / share `0xc18e…6040` (6 dp);
+    JAAA vault `0x2dc7…e5c4` / share `0xad48…f797` (6 dp); HYB vault `0xcf0c…a9ba` / share `0x4827…2505` (18 dp).
+    Created 2026-09-17. Each vault reports supportsInterface true for ERC-7540 operator, **async DEPOSIT and async
+    REDEEM**, and ERC-7575; `requestDeposit` / `requestRedeem` / `pendingRedeemRequest` are in the bytecode.
+  - **Nothing is invested on Arc yet:** every share token has `totalSupply 0`, every vault `totalAssets 0`. "Live" =
+    deployed and linked, no holders.
+  - **Deposits are async too.** The spotlight's "routing USDC into RWA tokens in a single transaction" does not hold for
+    these vaults: a deposit is a request, fulfilled by the manager, then claimed.
+  - **One transfer hook for all three, `0x8E68…24a4`:** `isMember`, `checkERC20Transfer` / `onERC20Transfer`,
+    `updateMember`, **`freeze` / `isFrozen`**, `updateRestriction`. An arbitrary address: `isMember(JTRSY, 0x…dEaD) =
+    (false, 0)`, so it cannot receive the token. The issuer can also FREEZE a holder.
+  - For any integrator, the exit therefore depends on: a fulfilled redeem request (timing set by the manager); the
+    receiver being a member (a liquidator must be whitelisted); and the holder not being frozen. None of this is visible
+    through the ERC-4626 `withdraw()` the spotlight points builders to.
