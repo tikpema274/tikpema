@@ -31235,3 +31235,50 @@ and a page on FAIL or UNTESTED, and a capped mainnet probe wallet so a FAIL is b
   the gate). If not, an env edit could change the key with no gate run. Either way the mainnet §2 row stands.
 
 ## (3) docs/mainnet-go-no-go.md §2: row ADDED, "The acknowledge gate is verified BETWEEN deploys" (T approved).
+
+---
+
+# ✅ ENV IS DEPLOY-FIXED, MEASURED (2026-10-01 09:37–09:54Z) · 🔎 THE SITE'S LINKED REPO (read-only)
+
+## The measurement: `AGENT_SEND_CAP_USDC` 10 → 9 → 10, no deploy
+Published deploy 6abe1aca throughout; **no deploy created in the window** (checked at every read). 5 GETs of
+`/api/agent-parameters/executor` per read (cache-busted):
+
+| read | env | send cap ×5 | deploys since start |
+|---|---|---|---|
+| 09:37:13Z baseline | 10 | 10 ×5 | none |
+| 09:37:28Z +0m | **9** | 10 ×5 | none |
+| 09:38:39Z +1m | **9** | 10 ×5 | none |
+| 09:42:50Z +5m | **9** | 10 ×5 | none |
+| 09:53:02Z +15m | **9** | 10 ×5 | none |
+| 09:53:16Z revert +0m | 10 | 10 ×5 | none |
+| 09:54:25Z revert +1m | 10 | 10 ×5 | none |
+
+- **Env values are fixed per deploy.** Three sources agree: this measurement, Netlify's docs, and the CLI's own reply to
+  `env:set` ("Changes will require a redeploy to take effect on any deployed versions of your project"). Env reverted
+  and confirmed 10.
+- ⚠️ Bound, stated: 35 requests over 17 min, all to deploy 6abe1aca. A cold instance started after the change was not
+  forced or identified. The three sources make a runtime re-read very unlikely; this window does not by itself exclude it.
+- **So:** "unchanged since it last passed" DOES cover SESSION_SECRET between deploys. A secret edit takes effect only at
+  the next deploy, which re-runs gate:forgery. The mainnet §2 row still stands (the gate itself is the deploy-time check).
+- 🚨 **A served sentence is FALSE:** `/api/agent-parameters/<agent>` tells users "re-read from configuration on every
+  request. An operator can change any of them at any time" (`disclaimer`; also the file header of agent-parameters.mjs).
+  Measured: an env change is invisible until a deploy. NOT FIXED. It needs copy that says the values change at a deploy.
+
+## The site's linked repo: `Tikpema/tikpema-predict-test`, a deploy path NOT exercised in 595 deploys
+- Netlify site 5464f1a6 (app.tikpema.xyz, created 2026-06-16): provider github, `repo_url
+  https://github.com/Tikpema/tikpema-predict-test`, branch `main` (allowed_branches [main]), **stop_builds false**
+  (auto-build ON), linked by a **deploy key** (no GitHub App installation), build cmd null, dir "". **Build hooks: none.**
+- **History: 595 deploys, 06-16 → 10-01.** deploy_source **cli: 591**, **agent_runner: 4** (06-17 13:05–13:15Z,
+  deploy-preview on branches `agent-6a329…`, titled "Register and login with modular passkey wallet…"; 2 ready, 2
+  error, none published to production). **No deploy carries commit_ref / commit_url / committer → none came from a
+  git trigger.** (`manual_deploy` is false on all 595, CLI included, so it does not distinguish.)
+- **The repo:** `Tikpema` is a GitHub USER account (created 2024-02-01), NOT `tikpema274` (our gh login; origin is
+  `tikpema274/tikpema`). The repo is 404 to tikpema274 AND to an unauthenticated request: private (or deleted), and
+  tikpema274 has no access. `Tikpema` has no public repos. Its webhooks could not be read (no access; also needs
+  admin:repo_hook). **Whether it is T's: not established from here.**
+- **Exposure:** if that repo exists and its Netlify webhook is live, a push to its `main` would start a production build
+  on app.tikpema.xyz. Netlify would run its own build (cmd null), bypassing the whole deploy:prod chain: run-lock,
+  test:all, every gate. It has never happened in 595 deploys. Nothing watches for it.
+- Read-only options for T: open github.com/Tikpema/tikpema-predict-test signed in as `Tikpema` to see whether it exists and
+  its webhooks. Or (a write, T decides) set the site to stop auto-builds / unlink the repo, since every deploy is CLI.
