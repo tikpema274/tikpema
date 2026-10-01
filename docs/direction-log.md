@@ -117,3 +117,22 @@ trust layer gets competition.
   **conditional release** (ERC-8183 escrow with an evaluator, already live for research) and **counterparty
   screening** (compliance, deferred). If B2B becomes a target, those two, not settlement speed, are the product.
   Noted for the mainnet go/no-go §5 (compliance), which already defers screening to exactly this point.
+
+## 2026-10-01 — "3 kits, one problem" (hackathon post)
+- **Source**: short community post on Onramp, Earn and Borrow Kits being live on Arc.
+- **Claim**: the three cover "getting money into the app → putting it to work → borrowing against it"; the value is
+  that developers can COMBINE them into an actual financial product instead of three integrations.
+- **Checked** (this week's measurements + Arc docs):
+  - **The chain does not compose as stated.** Borrow Kit takes **cirBTC** as collateral only (Arc docs: "Borrow: cirBTC
+    as collateral"). Onramp delivers USDC/EURC; Earn returns vault shares. So you cannot "borrow against" what you
+    onramped or put to work. Step 3 needs a different asset, i.e. a swap in between, which none of the three kits does.
+  - **Composing compounds unverified risk.** On launch day Earn's first-listed vault (Galaxy USDC) was 5.57% redeemable
+    with `riskSignals.warnings: []`, and Borrow's cirBTC→USDC market had ~40 USDC free of 185M. A product that chains
+    them inherits both, and neither kit warns about the other.
+- **Signal**: the ecosystem's next move is COMPOSITION, kits chained into products. Each joint is a decision point
+  where money moves on the previous step's output, which is exactly where a check belongs and where none exists.
+- **Changed**: nothing in priorities; it sharpens direction 1. **The check belongs at the JOINTS of a composed flow**,
+  not only on a single action. Tikpema already has that shape: the agent plan path prices, discloses and asks consent
+  PER STEP (bridge acknowledgement, vault disclosure in a plan) and refuses the whole plan before step 1. A Morpho V2
+  DD profile would put the vault joint under the same per-step verdict. Watch for: a kit or framework that chains
+  Onramp → swap → Earn/Borrow on the user's behalf; that is the flow that most needs a verifier between steps.
