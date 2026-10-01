@@ -31565,3 +31565,39 @@ hash covers these files. Env is deploy-fixed (measured).
   `fullPath.wouldBeCheckAgeMs`. After 3–4 samples: window = min(10 000 ms, 2 × max) (T, 8cd4ba9).
 - Then C (operator deposit arming + the window, own commit) → E (operator exit arming + EXIT_RULES_OPERATOR) → D
   (amend r3 → exit, re-ack) → the exit fires at the next window.
+
+---
+
+# 🔎 CENTRIFUGE RWAs ON ARC — VERIFIED ON CHAIN (2026-10-01, read-only)
+
+Trigger: @silencexlm on X + Arc House "Partner Spotlight / Centrifuge" (2026-10-01 19:09Z): Janus Henderson (JTRSY, JAAA)
+and New York Life (HYB) tokenized funds "live on Arc", pitched to builders as "composable ERC-4626 primitives" with
+"standard deposit(), withdraw()", and "routing USDC into RWA tokens in a single transaction".
+
+**Sources:** addresses from Centrifuge's own data API `api.centrifuge.io` (Arc = chainId 5042, centrifugeId 14). The
+centrifuge/protocol repo has NO Arc env file on main; docs.centrifuge.io blocked automated reads; explorer.arc.io is
+behind a Cloudflare challenge. Every fact below was re-read from **rpc.mainnet.arc.io** (block ~23762899).
+⚠️ A web-search summary labelled Arbitrum addresses as "Arc"; they have no code on Arc. A JAAA address I recalled
+(0x5a0f…cf64) was not sourced; its empty result proves nothing.
+
+| Fund | Vault | Share token | Asset | totalSupply |
+|---|---|---|---|---|
+| JTRSY, Janus Henderson Treasury Fund | `0x12774f79be1a24dbea8f20ae0b38c2667b672bb1` | `0xc18e6f730896971a79d748e8dea61067a9bc6040` (6 dp) | Arc USDC | 0 |
+| JAAA, Janus Henderson AAA CLO Fund | `0x2dc7a732f9acf50a024445536e89c0670b80e5c4` | `0xad48f183e586e92a591a610397ebf534609df797` (6 dp) | Arc USDC | 0 |
+| HYB, NYLIM US High Yield Bond Fund | `0xcf0c41d1bf0ae06e11bbff62deabd4b7595aa9ba` | `0x4827…2505` (18 dp, from vault.share()) | Arc USDC | 0 |
+
+(Contract addresses, not owner identities, so given in full.)
+- **All three `kind: "Async"`** (API) and on chain `supportsInterface` = true for ERC-7540 operator, **async deposit,
+  async redeem**, ERC-7575. `requestDeposit` / `requestRedeem` / `pendingRedeemRequest` are in the bytecode. Vaults are
+  12,018 bytes each, shares 7,448. Created 2026-09-17.
+- **Nothing invested on Arc:** every share `totalSupply 0`, every vault `totalAssets 0`. "Live" = deployed + linked.
+- **Deposits are async too**, so the spotlight's "single transaction" USDC→RWA routing does not hold for these vaults.
+- **One shared transfer hook `0x8E680873b4C77e6088b4Ba0aBD59d100c3D224a4`** (7,760 bytes): `isMember`,
+  `checkERC20Transfer` / `onERC20Transfer`, `updateMember`, **`freeze` / `isFrozen`**, `updateRestriction`.
+  `isMember(JTRSY, 0x…dEaD) = (false, 0)`: an arbitrary address cannot receive the token.
+- **The exit, for any integrator, depends on:** a redeem request the manager fulfils (on the manager's timing); the
+  receiver being a member (a liquidator must be whitelisted); the holder not being frozen. None of this is visible
+  through ERC-4626 `withdraw()`.
+- **DD:** should refuse today (no Arc-mainnet chain entry; async exit mechanics unrecognised). Correct and honest. NOT
+  run. Roadmap: an exit-mode fact (sync/async, fulfilment cadence, receiver/holder eligibility, freeze) is the
+  candidate SECOND profile after Morpho V2. Direction log 2201b40 + a617630.
