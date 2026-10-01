@@ -31282,3 +31282,28 @@ Published deploy 6abe1aca throughout; **no deploy created in the window** (check
   test:all, every gate. It has never happened in 595 deploys. Nothing watches for it.
 - Read-only options for T: open github.com/Tikpema/tikpema-predict-test signed in as `Tikpema` to see whether it exists and
   its webhooks. Or (a write, T decides) set the site to stop auto-builds / unlink the repo, since every deploy is CLI.
+
+## ✅ AUTO-BUILDS STOPPED on app site 5464f1a6 (2026-10-01 09:59:39Z, T approved)
+- **Changed exactly one setting:** `build_settings.stop_builds` false → **true**, via `netlify api updateSite` with body
+  `{"build_settings":{"stop_builds":true}}`.
+- **Confirmed from a FRESH getSite read** (not the command's output), diffed against a full pre-change snapshot: 4 fields
+  differ. `build_settings.stop_builds` false→true, plus three `updated_at` timestamps (site 09:59:39.132Z, build_settings
+  09:59:39.107Z, published_deploy 09:59:39.124Z). repo_url / repo_branch main / deploy_key_id **unchanged**. Published
+  deploy still 6abe1aca, ready. No deploy created.
+- **Closes (Netlify docs, stop-or-activate-builds):** git pushes to the linked repo build nothing (production, previews,
+  branch deploys); build-hook URLs build nothing (there are none anyway); `POST /api/v1/sites/{id}/builds` errors; the UI
+  "Trigger deploy" and "Retry with latest branch commit" buttons are unavailable. Those were the remaining ways to build
+  prod from that repo outside deploy:prod's gates.
+- **Unaffected:** CLI / API deploys of a locally built artifact, which is every real deploy (591 of 595). deploy:prod is
+  `netlify deploy --prod --dir=dist` and does not build from git. NOT exercised since the change: the next deploy:prod is
+  the proof.
+- **Does NOT close:** (1) the repo link and the deploy key stay; (2) anyone with Netlify account access can set
+  stop_builds back to false, the same access that can already CLI-deploy, so no new exposure; (3) **a relink re-activates
+  builds** (docs: "builds will be activated as part of the new configuration"); (4) whatever exists on the GitHub side
+  (Tikpema's repo webhook / deploy key) is untouched and unknown. Webhooks now arrive at a site that will not build.
+- **Unlink as well?** Hygiene, not a closure: with builds stopped, the link carries no build path. What it would remove:
+  Netlify **Agent Runners** (the 4 agent_runner previews of 06-17 need a linked repo), PR deploy previews (never used:
+  all 59 main previews were CLI), "Retry with latest branch commit". It would NOT touch CLI deploys, functions, env, or the
+  GitHub-side webhook/key. The docs do not say unlink removes those. ⚠️ Relinking later re-activates builds. A deliberate
+  relink must be followed by stop_builds again. Recommendation: unlink only once T knows whether `Tikpema` is T's, so the
+  GitHub side can be cleaned up in the same pass.
