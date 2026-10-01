@@ -31193,3 +31193,45 @@ Whether a Netlify env change reaches running functions without a redeploy is NOT
 Proposed row for §2 (Money), NOT added (T's checklist): "The acknowledge gate is verified BETWEEN deploys: a scheduled
 forgery probe (e.g. folded into plan-path-watch, server-side, minting its own probe session) with the same three verdicts
 and a page on FAIL or UNTESTED, and a capped mainnet probe wallet so a FAIL is bounded."
+
+---
+
+# 🔎 (1) THE PLAN-PATH ACK SENTENCE IS DEDUCTED COPY ON AN UPFRONT PATH · (2) ENV vs RUNNING FUNCTIONS (2026-10-01, read-only)
+
+## (1) "would lose 59.9% to fees … only ~0.0910 would arrive" on a 0.091 bridge: SCOPED, NOT FIXED
+- **Producer:** `netlify/functions/agent-execute-plan.mjs:319-321` (the ack refusal on the PLAN path; shown to the user as
+  "Plan blocked — {blocked}", `MyAgentPanel.tsx:1224`). Written in d64bb7f (2026-08-01) for the old DEDUCTED mechanic.
+- **The figures:** `fee.feeUsdc` and `fee.netUsdc` come from the sealed quote opened at l.216, priced by `bridgeFee()`
+  (l.148), which declares `mechanic: "upfront"` and sets `netUsdc = bridgeNetUsdc({amountMinor})` = **the full amount**
+  (`_bridge.mjs:215`, `:334`). `feeRatio` = fee / amount (`bridgeFeeBand`, `_bridge.mjs:411`).
+- **So the NUMBERS are right; the FRAMING is wrong.** Under upfront fees the recipient gets the full 0.091 and ~0.1456 leaves
+  the wallet. "~0.0910 would arrive" is TRUE; "would lose 59.9% to fees" and "only" describe a deduction that does not
+  happen. 59.9% is the fee as a share of the amount; of what leaves the wallet, it is 37.5%.
+- **The sibling was fixed, this one was not.** The single-action path, `_actions.mjs:601-603`, says "…on top of the X USDC you
+  are moving — the full X arrives, and ~(X+fee) USDC leaves your wallet". agent-act's fee-floor sentences (l.415-422, 614)
+  were also rewritten for upfront. agent-execute-plan:319 was missed.
+- **Tests:** NONE pins this sentence for mechanic correctness. verify-bridge-mechanic-pairing renders UI components (~31
+  sites) and never reads server `blocked` strings. verify-bridge-fee-band reads agent-execute-plan.mjs for recordBridge and
+  pre-flight shape only. verify-plan-path-watch carries the OLD sentence verbatim as a FIXTURE ("step 1 would lose 89.9%
+  … of 0.06 USDC") for its `executed` logic: input, not an assertion, but a fix would leave it stale.
+- Possibly related, not checked: `_analystb.mjs:301` "~${net} USDC would arrive" with a burn % (analyst headline).
+
+## (2) Does a Netlify env change reach RUNNING functions without a redeploy? DOCUMENTED NO, NOT MEASURED
+- **Netlify docs** (docs.netlify.com/build/functions/environment-variables): "Each deploy … uses the environment variable
+  values that were set at the time of deployment. To apply updated environment variable values, create a new deploy."
+- **History, read-only (Netlify API, names + timestamps only):** SESSION_SECRET last changed **2026-08-16 20:51:50Z**, before
+  gate:forgery became standing (08-18). Every passing run has seen one env value. The newest env change on the site is
+  DATA_POOL_*_CAP_USDC (2026-09-24 09:19Z); no observation of prod between it and the next deploy exists. No historical
+  measurement is available.
+- ⚠️ **A served sentence contradicts the docs:** `GET /api/agent-parameters/<agent>` tells callers its values are
+  "re-read from configuration on every request. An operator can change any of them at any time". If the docs hold, an env
+  change takes effect only at the next deploy. The measurement below settles which.
+- **Measurement design (needs an env change: T decides):** baseline taken 09:34Z (executor: send 10, swap 25, bridge 25,
+  per-tx 10, daily 60). Lower `AGENT_SEND_CAP_USDC` (production, last set 07-04) 10 → 9 with `netlify env:set` (stricter =
+  the safe direction; no deploy). GET agent-parameters/executor at +0, +1, +5, +15 min, then revert to 10 and re-read.
+  Any 9 without a deploy → runtime reads, so "unchanged since it last passed" does NOT cover SESSION_SECRET. Only 10 →
+  values are deploy-fixed. ⚠️ No deploy may run while it is 9 (it would bake 9 in).
+- **What it decides:** if deploy-fixed, the gate's last PASS covers SESSION_SECRET until the next deploy (which re-runs
+  the gate). If not, an env edit could change the key with no gate run. Either way the mainnet §2 row stands.
+
+## (3) docs/mainnet-go-no-go.md §2: row ADDED, "The acknowledge gate is verified BETWEEN deploys" (T approved).
