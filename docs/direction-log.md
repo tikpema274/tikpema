@@ -90,3 +90,30 @@ trust layer gets competition.
   copy) shows autonomy without a verifier removes the safeguard, not the human.
 - **Changed**: sharpened the pitch: Arc is the payment layer; **the trust layer is what's being built, and
   Tikpema builds it**. Bounded autonomy (caps, acknowledgements, refusal on doubt) is the position.
+
+## 2026-10-01 — "How Arc + AI Agents Can Fix Broken B2B Payments" (forum post, written 2026-04-25)
+- **Source**: Arc House member-lounge post by Sodiq Taiwo ("Skywalker"), 2026-04-25.
+- **Claim**: B2B payments break on slow approvals, invoice/PO mismatches, disputed delivery and costly cross-border
+  transfers. Agents read invoices, compare them with terms, *"verify whether goods were delivered"* from "available
+  data (logistics updates, confirmations)", approve "automatically", and Arc settles instantly in USDC at "near-zero
+  cost". Disputes are solved because "decisions are based on shared, verifiable data". The post itself raises
+  "trust, control, and how much decision-making we're comfortable handing over".
+- **Checked**:
+  - Arc fees are low (ERC-20 transfers target ~$0.001, Arc docs). Settlement is final on inclusion. True.
+  - **Delivery verification is asserted, not solved.** "Another agent verifies delivery using available data" is the
+    oracle problem: who attests that goods arrived, and who answers when the data is wrong. Nothing in the post or in
+    Arc's stack supplies it.
+  - **"Shared, verifiable data" resolves no dispute by itself.** Release conditions need an escrow with a defined
+    evaluator, not just fast settlement. ERC-8183 escrow exists on Arc and **we run it live** (research-for-hire, job
+    #145459, priced → funded → evaluated → settled).
+  - **The hard parts of cross-border B2B are missing:** compliance (sanctions/AML screening; ours is NOT built,
+    deferred to mainnet, with only manual payout screening) and the fiat edges (on/off-ramps; TikpemaPay's ramp work
+    is paused). "Near-zero cost" covers the USDC leg only.
+  - Tikpema's own merchant rail exists: checkout v1 proven live 09-19 (one payment hash ⇒ one order, replay refused).
+- **Signal**: the B2B narrative runs "agent decides → Arc settles" and skips the middle: who verifies the condition,
+  who holds the money until then, who screens the counterparty. Same gap as the thesis, in a new vertical:
+  verification before money moves.
+- **Changed**: nothing in priorities. It frames where the trust layer extends beyond DD's "is this contract safe":
+  **conditional release** (ERC-8183 escrow with an evaluator, already live for research) and **counterparty
+  screening** (compliance, deferred). If B2B becomes a target, those two, not settlement speed, are the product.
+  Noted for the mainnet go/no-go §5 (compliance), which already defers screening to exactly this point.
