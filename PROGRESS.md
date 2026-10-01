@@ -31314,3 +31314,7 @@ Published deploy 6abe1aca throughout; **no deploy created in the window** (check
 - Copy defect 1: `/api/agent-parameters` "re-read from configuration on every request": measured FALSE (above).
 - Copy defect 2: agent-execute-plan.mjs:319 "would lose 59.9% to fees" when the full amount arrives (fee on top).
 - All three are on the open list in memory (decisions-open-verified), each with its re-check.
+- **Downgraded to a NOTE (2026-10-01):** Netlify's notification attributed the stop to "Tikpema Gb", T's own display name
+  on the Netlify account. The GitHub `Tikpema` account (created 2024-02-01, since unused) is therefore **very likely T's
+  too**. The basis is the matching name, not a GitHub-side proof. With builds stopped, this closes the unexplained-account
+  question enough: a note, not an open risk.
