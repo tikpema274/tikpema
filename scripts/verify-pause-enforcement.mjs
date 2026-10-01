@@ -14,6 +14,7 @@
 //
 //   node --experimental-test-module-mocks --env-file=.env scripts/verify-pause-enforcement.mjs
 import { mock } from "node:test";
+import { mockShape, unstubbed } from "./lib/mock-shape.mjs";
 
 const OWNER = "0xbafec950627579cf786acf875e6e216995e995a3";
 
@@ -49,29 +50,6 @@ mock.module("../netlify/functions/_swap.mjs", {
     estimateSwapOnly: async () => ({ estimatedOutput: { amount: "1" } }),
   },
 });
-mock.module("../netlify/functions/_bridge.mjs", {
-  namedExports: {
-    agentBridge: tripwire("agentBridge"),
-    bridgeFee: async () => ({ maxFee: 1n, amountMinor: 100n, feeUsdc: 0.01, netUsdc: 0.99 }),
-    resolveDestination: () => ({ key: "base", label: "Base", cctpDomain: 6 }),
-    // ⛔ ADDED 2026-09-02, AND THE REASON MATTERS MORE THAN THE LINES.
-    // This stub provided three exports. On 2026-07-31 (d1a2ee1) `_actions.mjs` began importing
-    // `bridgeFeeBand` and `bridgeAckToken` too — and a partial mock that is missing an export does
-    // not fail an assertion, it fails MODULE INSTANTIATION. This suite stopped LOADING that day and
-    // stayed dead for 33 days without ever going red, because nothing ran it.
-    // 🚨 THE SUBJECT OF THIS SUITE IS THE KILL SWITCH. Thirty-three days with no proof that pause
-    // stops money.
-    // ⭐ These two are tripwires on purpose: neither should be REACHED once the pause refuses, so if
-    // the pause ever stops working they fail loudly instead of quietly returning something plausible.
-    bridgeFeeBand: () => ({ band: "none", pct: 0 }),
-    bridgeAckToken: tripwire("bridgeAckToken"),
-    openBridgeQuote: tripwire("openBridgeQuote"),
-    // ⛔ ADDED 2026-10-01 — THE SAME FAILURE A THIRD TIME. d5239d7 made `_actions.mjs` import `bridgeAckSentence`;
-    // this enumerated stub lacked it, so the suite failed to LOAD (not an assertion) from that commit until test:all
-    // caught it the same evening. A tripwire: the pause must refuse before any acknowledgement is worded.
-    bridgeAckSentence: tripwire("bridgeAckSentence"),
-  },
-});
 mock.module("../netlify/functions/_pay.mjs", { namedExports: { agentPay: tripwire("agentPay") } });
 mock.module("../netlify/functions/_circle.mjs", {
   namedExports: {
@@ -79,6 +57,22 @@ mock.module("../netlify/functions/_circle.mjs", {
     waitForTx: async () => "0xhash",
     TxPendingError: class extends Error {},
   },
+});
+// ⭐⭐ _bridge.mjs FROM ITS REAL SHAPE (2026-10-01) — the d5239d7 class, a third time. This mock was a hand-listed
+// `namedExports`; a new export used by _actions.mjs made this suite fail to LOAD (2026-07-31, 33 days dead; again
+// d5239d7). Now every FUNCTION of the real module is a TRIPWIRE by default (a new export can neither break loading nor
+// run real code), constants are real, and only the three doubles below are overridden. Imported here, AFTER the leaf
+// mocks above (_circle, _pay), so the real module binds them. scripts/lib/mock-shape.mjs.
+const realBridge = await import("../netlify/functions/_bridge.mjs");
+mock.module("../netlify/functions/_bridge.mjs", {
+  namedExports: mockShape(realBridge, {
+    stub: (name) => tripwire(name),
+    override: {
+      bridgeFee: async () => ({ maxFee: 1n, amountMinor: 100n, feeUsdc: 0.01, netUsdc: 0.99 }),
+      resolveDestination: () => ({ key: "base", label: "Base", cctpDomain: 6 }),
+      bridgeFeeBand: () => ({ band: "none", pct: 0 }),
+    },
+  }),
 });
 const realBudget = await import("../netlify/functions/_budget.mjs");
 mock.module("../netlify/functions/_budget.mjs", {

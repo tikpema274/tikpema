@@ -13,6 +13,7 @@
 //   2. A genuinely ABSENT receipt → still 404s, after a BOUNDED number of tries. It does
 //      not hang forever and does not retry-bomb the store.
 import { mock } from "node:test";
+import { mockShape, unstubbed } from "./lib/mock-shape.mjs";
 
 const OWNER = "0xc54d47211997aca90ef4fcfbc742a3b511b4e621";
 const BURN = "0x" + "a1".repeat(32);
@@ -31,11 +32,14 @@ const store = {
 mock.module("@netlify/blobs", { namedExports: { connectLambda: () => {}, getStore: () => store } });
 mock.module("../netlify/functions/_auth.mjs", { namedExports: { requireInternal: () => true } });
 mock.module("../netlify/functions/_circle.mjs", { namedExports: { circle: () => ({}), waitForTx: async () => BURN } });
+// ⭐ From the REAL module's shape (2026-10-01, scripts/lib/mock-shape.mjs): a new _bridge.mjs export can no longer make
+// this suite fail to LOAD (the d5239d7 class). Unlisted functions THROW, naming themselves; constants are real.
+const realBridgeShape = await import("../netlify/functions/_bridge.mjs");
 mock.module("../netlify/functions/_bridge.mjs", {
-  namedExports: {
+  namedExports: mockShape(realBridgeShape, { stub: unstubbed("_bridge"), override: {
     BRIDGE_DESTINATIONS: { base: { label: "Base (Sepolia)", cctpDomain: 6, explorerTx: "https://sepolia.basescan.org/tx/" } },
     bridgeMintStatus: async () => ({ state: "minted", mintTxHash: "0x" + "7f".repeat(32), mintTx: "https://sepolia.basescan.org/tx/0x7f" }),
-  },
+  } }),
 });
 mock.module("../netlify/functions/_receipt.mjs", {
   namedExports: { verifyMintOnChain: async () => ({ verified: true, chainId: 84532, blockNumber: 43964310, usdcAddress: "0x036c", usdcAmount: 9.79624 }) },

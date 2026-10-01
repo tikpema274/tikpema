@@ -20,6 +20,7 @@
 // Zero network. Zero money. Zero real Blobs.
 
 import { mock } from "node:test";
+import { mockShape, unstubbed } from "./lib/mock-shape.mjs";
 
 // Loop knobs BEFORE the settler is imported — it reads them at module scope. 1ms polls make the
 // four-minute deadline reachable in milliseconds.
@@ -87,11 +88,14 @@ mock.module("@netlify/blobs", {
 // ── injectable IRIS + destination chain ──────────────────────────────────────────────────────
 let irisResult = { state: "pending" };
 let chainResult = { verified: false, reason: "receipt_not_found" };
+// ⭐ From the REAL module's shape (2026-10-01, scripts/lib/mock-shape.mjs): a new _bridge.mjs export can no longer make
+// this suite fail to LOAD (the d5239d7 class). Unlisted functions THROW, naming themselves; constants are real.
+const realBridgeShape = await import("../netlify/functions/_bridge.mjs");
 mock.module("../netlify/functions/_bridge.mjs", {
-  namedExports: {
+  namedExports: mockShape(realBridgeShape, { stub: unstubbed("_bridge"), override: {
     bridgeMintStatus: async () => irisResult,
     BRIDGE_DESTINATIONS: { base: { label: "Base (Sepolia)", cctpDomain: 6, explorerTx: "https://x/" } },
-  },
+  } }),
 });
 mock.module("../netlify/functions/_receipt.mjs", {
   namedExports: { verifyMintOnChain: async () => chainResult },

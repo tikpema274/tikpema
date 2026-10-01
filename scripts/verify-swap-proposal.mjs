@@ -13,6 +13,7 @@
 //
 //   node --experimental-test-module-mocks --env-file=.env scripts/verify-swap-proposal.mjs
 import { mock } from "node:test";
+import { mockShape, unstubbed } from "./lib/mock-shape.mjs";
 
 const WALLET = "0xbafec950627579cf786acf875e6e216995e995a3";
 const EURC_USD = 1.20;
@@ -48,8 +49,11 @@ mock.module("../netlify/functions/_swap.mjs", {
     },
   },
 });
+// ⭐ From the REAL module's shape (2026-10-01, scripts/lib/mock-shape.mjs): a new _bridge.mjs export can no longer make
+// this suite fail to LOAD (the d5239d7 class). Unlisted functions THROW, naming themselves; constants are real.
+const realBridgeShape = await import("../netlify/functions/_bridge.mjs");
 mock.module("../netlify/functions/_bridge.mjs", {
-  namedExports: { resolveDestination: () => null, bridgeFee: async () => { throw new Error("n/a"); } },
+  namedExports: mockShape(realBridgeShape, { stub: unstubbed("_bridge"), override: { resolveDestination: () => null, bridgeFee: async () => { throw new Error("n/a"); } } }),
 });
 
 const { validateProposal } = await import("../netlify/functions/_proposal.mjs");

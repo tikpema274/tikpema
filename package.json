@@ -137,6 +137,7 @@
     "test:ledgergate": "node scripts/verify-ledger-gate.mjs",
     "test:ledgerhook": "node scripts/verify-ledger-commit-hook.mjs",
     "test:registryhook": "node scripts/verify-registry-commit-hook.mjs",
+    "test:mockshape": "node scripts/verify-mock-shape.mjs",
     "test:treasuryplan": "node --experimental-test-module-mocks scripts/verify-treasury-plan.mjs",
     "test:treasurysnapshot": "node scripts/verify-treasury-snapshot.mjs",
     "test:treasurycopy": "npx tsx scripts/verify-treasury-copy.tsx",
@@ -422,6 +423,7 @@
     "test:ledgergate",
     "test:ledgerhook",
     "test:registryhook",
+    "test:mockshape",
     "test:treasuryplan",
     "test:treasurysnapshot",
     "test:treasurycopy"

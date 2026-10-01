@@ -12,6 +12,7 @@
 //
 //   node --experimental-test-module-mocks --env-file=.env scripts/verify-second-opinion.mjs
 import { mock } from "node:test";
+import { mockShape, unstubbed } from "./lib/mock-shape.mjs";
 
 const WALLET = "0xbafec950627579cf786acf875e6e216995e995a3";
 
@@ -48,13 +49,18 @@ mock.module("../netlify/functions/_swap.mjs", {
     },
   },
 });
+// ⭐ From the REAL module's shape (2026-10-01, scripts/lib/mock-shape.mjs): a new _bridge.mjs export can no longer make
+// this suite fail to LOAD (the d5239d7 class). Unlisted functions THROW, naming themselves; constants are real.
+const realBridgeShape = await import("../netlify/functions/_bridge.mjs");
 mock.module("../netlify/functions/_bridge.mjs", {
-  namedExports: {
+  namedExports: mockShape(realBridgeShape, { stub: unstubbed("_bridge"), override: {
+    // pure wording the analyst's headline is built from (shared/bridge-ack-copy.mjs) — the REAL function, on purpose
+    bridgeAckSentence: realBridgeShape.bridgeAckSentence,
     resolveDestination: (d) => (String(d).toLowerCase() === "base" ? { key: "base", label: "Base", cctpDomain: 6 } : null),
     bridgeFee: async ({ amountUsdc }) => ({
       feeUsdc: 0.21, netUsdc: Number(amountUsdc) - 0.21, maxFee: 210000n, amountMinor: BigInt(Math.round(Number(amountUsdc) * 1e6)),
     }),
-  },
+  } }),
 });
 
 // The INDEPENDENT market source (CoinGecko). This is what B checks the chain against — and
