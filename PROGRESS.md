@@ -31484,3 +31484,23 @@ redeposit (09-28), not the mandate's**. Mandate 8379419c: active, deposited 0, t
 - The freshness window under load, beyond the sampled days.
 - Mainnet (this is Arc testnet 5042002, testnet USDC).
 - The fee and UI decisions.
+
+## ✅ BUILD A — DONE, DISARMED, NOT DEPLOYED (3667827)
+Operator arming pairs (deposit + exit) resolved per record by `shared/vault-mandate/arming.mjs`, EXIT_RULES_OPERATOR +
+the C14 waiver (in limits.mjs, as a waiver), operator `amend`, full-path timing in the disarmed tick
+(`receipt.fullPath.wouldBeCheckAgeMs`). All constants false/null. Full test:all 174/174.
+
+**Corrections to the order above, from what the code now enforces:**
+- **C's first deposit lands on the first tick AFTER `MANDATE_ARMED_FROM_OPERATOR`**, not on the 10:52:41Z schedule:
+  `dueState` moves an armed mandate's window base to its arming moment.
+- **E flips BOTH `MANDATE_EXIT_ARMED_OPERATOR`(+FROM) and `EXIT_RULES_OPERATOR`** in one commit. The load guard refuses
+  operator exit rules without operator exits armed. So **D (amend + re-ack) can only run AFTER E is deployed**, and
+  the exit then fires at the next window's check. Order: A → B → C (deposit) → E (deploy) → D (amend + ack) → exit.
+- B needs ≥7 daily `fullPath` samples, which start once A is deployed.
+
+## 🚨 TWO BROKEN COMMITS REACHED ORIGIN TODAY — found by test:all before build A was committed
+- `d5239d7` (fee copy) broke `test:pauseenforce`: an enumerated `_bridge.mjs` mock lacked the new export, so the
+  kill-switch suite failed to LOAD. The third time for that suite. Fixed `b5ec696` (tripwire).
+- `43a199b` (gate:forgery) broke `test:reachability`: `process.exit` above the checks, so all were positionally
+  stranded. Fixed `ae5281f` (finish() hoisted to the bottom; live re-run PASS).
+- **Cause:** both were committed and pushed after running only the suites they touched, not `test:all`.
