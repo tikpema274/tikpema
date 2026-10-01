@@ -339,11 +339,72 @@ section("7 — what it must NOT be: no route, no UI, no arming");
   ok("no front-end file mentions it", ui === "", ui);
   const h = H.__missing ? "" : readFileSync("netlify/functions/vault-mandate-operator.mjs", "utf8");
   ok("the handler never reaches the executor or the deposit path", h !== "" && !/executeAction|depositForMandate|runMandateTick|vaultDeposit/.test(h));
-  ok("the handler passes no test seam (exitAvailable / config)", h !== "" && !/\bexitAvailable\b|\bconfig\s*:/.test(h));
+  // Since 2026-10-01 (T, decision 1): `exitAvailable` appears EXACTLY ONCE — the amend, from deps.exitRulesOperator
+  // (bound to EXIT_RULES_OPERATOR in productionDeps). Never `config`. The deposit suite pins where and how.
+  ok("the handler passes no `config` seam, and `exitAvailable` only once, from deps.exitRulesOperator",
+    h !== "" && !/\bconfig\s*:/.test(h) && (h.match(/\bexitAvailable\b/g) ?? []).length === 1 && /exitAvailable:\s*deps\.exitRulesOperator\s*===\s*true/.test(h));
   ok("⭐ the gate runs before the method check, the body parse and any dependency (source order)", (() => {
     const gate = h.indexOf("operatorGate("), meth = h.indexOf("httpMethod"), parse = h.indexOf("JSON.parse"), load = h.indexOf("loadDeps(");
     return gate > 0 && [meth, parse, load].every((i) => i > gate);
   })());
+}
+
+// ═════════════════════════════════════════════════════════════════════
+section("8 — ⭐⭐ AMEND (piece 5 live exit, T 2026-10-01): an exit rule only for an OPERATOR mandate, only when EXIT_RULES_OPERATOR");
+{
+  const EXIT_RULES = [{ kind: "power", subject: "upgradeable", onFinding: "pause" }, { kind: "state", subject: "exit-fee-above", limitBps: 0, onFinding: "exit" }];
+  const setup = async (extraDeps = {}) => {
+    const t = operatorDeps();
+    Object.assign(t.deps, extraDeps);
+    const h = H.makeOperatorHandler ? H.makeOperatorHandler(async () => t.deps) : null;
+    const call = (body, who = T_ADDR) => (h ? attemptAsync(() => h(ev({ headers: bearer(who), body }))) : null);
+    const c = await call({ op: "create", vault: "xylo-usdc", ...TERMS, rules: RULES });
+    const fp = c?.body ? JSON.parse(c.body).fingerprint : null;
+    await call({ op: "ack", id: "vm-op-1", fingerprint: fp });
+    // progress as if it had deposited once — an amendment must CARRY it (tracked shares are what the exit redeems)
+    const key = vaultMandateKey(T_ADDR, "vm-op-1"), cur = t.store._map.get(key);
+    if (cur) { cur.data.progress = { ...cur.data.progress, depositedUsdc: 10, depositCount: 1, nextSeq: 2, sharesTrackedRaw: "9999980" }; }
+    return { t, call, key, fp };
+  };
+  {
+    const { t, call, key, fp } = await setup();
+    const before = clone(t.store._map.get(key)?.data);
+    const r = await call({ op: "amend", id: "vm-op-1", rules: EXIT_RULES });
+    ok("⭐⭐ SHIPPED (exitRulesOperator unbound/false): amending in an exit rule → REFUSED, the record untouched",
+      r?.statusCode === 400 && /cannot exit yet/.test(r?.body ?? "") && JSON.stringify(t.store._map.get(key)?.data) === JSON.stringify(before), show(r));
+    const r2 = await call({ op: "amend", id: "vm-op-1", rules: EXIT_RULES, exitAvailable: true });
+    ok("⭐⭐ …and a body field `exitAvailable: true` cannot open it (refused, not honoured)", r2?.statusCode === 400 && t.store._map.get(key)?.data?.fingerprint === fp, show(r2));
+    const r3 = await call({ op: "amend", id: "vm-op-1", rules: RULES.map((x) => ({ ...x })) });
+    ok("  a pause-only amendment works as before (→ awaiting-ack)", r3?.statusCode === 200 && t.store._map.get(key)?.data?.status === "awaiting-ack", show(r3));
+  }
+  {
+    const { t, call, key, fp } = await setup({ exitRulesOperator: true });
+    const r = await call({ op: "amend", id: "vm-op-1", rules: EXIT_RULES });
+    const st = t.store._map.get(key)?.data;
+    ok("⭐⭐ EXIT_RULES_OPERATOR on: an OPERATOR mandate takes an exit rule → 200, AWAITING a fresh acknowledgement",
+      r?.statusCode === 200 && st?.status === "awaiting-ack" && st?.fingerprint !== fp && st?.rules?.some((x) => x.subject === "exit-fee-above" && x.limitBps === 0 && x.onFinding === "exit"), show(r));
+    ok("⭐⭐ …PROGRESS CARRIED: tracked shares and deposits survive the amendment (they are what the exit redeems)",
+      typeof st?.amendedAt === "string" && st?.progress?.sharesTrackedRaw === "9999980" && st?.progress?.depositedUsdc === 10 && st?.progress?.nextSeq === 2, show({ amendedAt: st?.amendedAt, progress: st?.progress }));
+    ok("  …origin stays operator; the disclosure now says IF FOUND: EXIT", typeof st?.amendedAt === "string" && st?.origin === "operator" && /if found: exit/i.test((st?.disclosure?.ruleLines ?? []).join(" ")), show(st?.disclosure?.ruleLines));
+    const body = r?.body ? JSON.parse(r.body) : {};
+    ok("  …the response shows the new fingerprint and the disclosure to acknowledge", body.fingerprint === st?.fingerprint && Array.isArray(body.disclosure?.ruleLines), show(body));
+    const a = await call({ op: "ack", id: "vm-op-1", fingerprint: st?.fingerprint });
+    ok("⭐ acknowledging the shown fingerprint → ACTIVE with the exit rule", a?.statusCode === 200 && t.store._map.get(key)?.data?.status === "active" && verifyMandateRecord(t.store._map.get(key)?.data)?.ok === true, show(a));
+    // A USER-origin mandate is not the operator path's, even with the operator flag on.
+    const u = buildMandateRecord({ owner: T_ADDR, walletAddress: WALLET, vault: VAULT, terms: TERMS, rules: RULES, now: NOW, id: "vm-user",
+      baseline: { ok: true, owner: { address: VAULT_OWNER, kind: "eoa" }, reportBlock: 990, reportSigned: true, signerVerified: true, maxFeeBps: 2000, vaultAckToken: TOKEN } });
+    await t.store.setJSON(vaultMandateKey(T_ADDR, "vm-user"), u.record, { onlyIfNew: true });
+    const ua = await call({ op: "amend", id: "vm-user", rules: EXIT_RULES });
+    ok("⭐⭐ amending a USER-origin mandate through the operator path → REFUSED (409), untouched — even with EXIT_RULES_OPERATOR on",
+      ua?.statusCode === 409 && t.store._map.get(vaultMandateKey(T_ADDR, "vm-user"))?.data?.fingerprint === u.record?.fingerprint, show(ua));
+    const s = await call({ op: "amend", id: "vm-op-1", rules: EXIT_RULES }, STRANGER);
+    ok("  a non-operator session → the same bare 403", s?.statusCode === 403 && /forbidden/.test(s?.body ?? ""), show(s));
+  }
+  // The USER path through the record itself: no seam → the shipped EXIT_AVAILABLE (false) refuses.
+  const R = await load("../shared/vault-mandate/record.mjs");
+  const plain = R.buildMandateRecord({ owner: T_ADDR, walletAddress: WALLET, vault: VAULT, terms: TERMS, rules: EXIT_RULES, now: NOW, id: "vm-u2",
+    baseline: { ok: true, owner: { address: VAULT_OWNER, kind: "eoa" }, reportBlock: 990, reportSigned: true, signerVerified: true, maxFeeBps: 2000, vaultAckToken: TOKEN } });
+  ok("⭐⭐ a USER-origin build with an exit rule and no seam → REFUSED (EXIT_AVAILABLE, unchanged)", plain?.ok === false && /cannot exit yet/.test((plain?.errors ?? []).join(" ")), show(plain?.errors));
 }
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed`);

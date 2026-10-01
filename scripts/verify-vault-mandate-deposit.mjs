@@ -48,6 +48,9 @@ import {
   MANDATE_DEPOSIT_ARMED, MANDATE_ARMED_FROM, MANDATE_CHECK_FRESHNESS_MS,
   depositForMandate, runMandateTick, dueState, REFUSED, productionTickDeps,
 } from "../netlify/functions/_vault-mandate-deposit.mjs";
+import * as DEPMOD from "../netlify/functions/_vault-mandate-deposit.mjs";
+const ARMING = await import("../shared/vault-mandate/arming.mjs").catch((e) => ({ __missing: String(e?.message ?? e) }));
+const OPERATOR_ADDR = "0x74b7b561fd71c68eb1da6b96a7a87033904b24e5"; // OPERATOR_MANDATE_OWNERS[0] (operators.mjs)
 import { mandateDaySpend, recordMandateSpend, dcaDaySpend } from "../netlify/functions/_budget.mjs";
 
 let pass = 0, fail = 0;
@@ -110,9 +113,22 @@ section("0 — R1 + R2: the caps live off the DD surface; the gate is a code con
   const seam = src.filter((f) => f !== "netlify/functions/_vault-mandate-deposit.mjs" &&
     /(runMandateTick|depositForMandate)\s*\(\s*\{[^}]*\bconfig\s*:/s.test(readFileSync(f, "utf8")));
   ok("⭐ no production caller passes `config` (the arming seam) to the tick or the deposit", seam.length === 0, seam.join(", "));
-  // The record's `exitAvailable` seam keeps piece 5's shapes testable. Only record.mjs itself may name it.
-  const exitSeam = src.filter((f) => f !== "shared/vault-mandate/record.mjs" && /\bexitAvailable\b/.test(readFileSync(f, "utf8")));
-  ok("⭐ no production file passes `exitAvailable` (creation cannot be talked into an exit rule)", exitSeam.length === 0, exitSeam.join(", "));
+  // The record's `exitAvailable` seam keeps piece 5's shapes testable. record.mjs names it; and since 2026-10-01 (T's
+  // decision 1, piece 5 live exit) EXACTLY ONE production file may pass it — the operator endpoint, for its AMEND of an
+  // operator-origin record, from EXIT_RULES_OPERATOR (bound in its productionDeps). Nothing else may.
+  const OP_FILE = "netlify/functions/vault-mandate-operator.mjs";
+  const exitSeam = src.filter((f) => f !== "shared/vault-mandate/record.mjs" && f !== OP_FILE && /\bexitAvailable\b/.test(readFileSync(f, "utf8")));
+  ok("⭐ no production file other than the operator endpoint passes `exitAvailable` (a user path cannot be talked into an exit rule)", exitSeam.length === 0, exitSeam.join(", "));
+  const opSrc = existsSync(OP_FILE) ? readFileSync(OP_FILE, "utf8") : "";
+  const uses = opSrc.match(/\bexitAvailable\b/g) ?? [];
+  ok("⭐⭐ the operator endpoint names `exitAvailable` EXACTLY ONCE, as `exitAvailable: deps.exitRulesOperator === true`",
+    uses.length === 1 && /exitAvailable:\s*deps\.exitRulesOperator\s*===\s*true/.test(opSrc), `${uses.length} use(s)`);
+  ok("⭐⭐ …inside the AMEND, after the operator-origin read (never in create / the preflight)",
+    (() => { const a = opSrc.indexOf("async function amend("), r = opSrc.indexOf("readOperatorMandate(", a), e = opSrc.indexOf("exitAvailable", a);
+      const c0 = opSrc.indexOf("async function create("), c1 = opSrc.indexOf("\n}\n", c0);
+      return a > 0 && r > a && e > r && !opSrc.slice(c0, c1).includes("exitAvailable"); })());
+  ok("⭐ …and production binds it to the EXIT_RULES_OPERATOR constant (no env, no body field)",
+    /exitRulesOperator:\s*EXIT_RULES_OPERATOR\b/.test(opSrc) && /import\s*\{[^}]*\bEXIT_RULES_OPERATOR\b[^}]*\}\s*from\s*"\.\.\/\.\.\/shared\/vault-mandate\/limits\.mjs"/.test(opSrc));
   const tick = existsSync("netlify/functions/vault-mandate-tick.mjs") ? readFileSync("netlify/functions/vault-mandate-tick.mjs", "utf8") : "";
   ok("⭐ depositForMandate REFUSES a passed `now` (a second clock) — it throws",
     (await attemptAsync(() => depositForMandate({ record: {}, etag: '"e0"', checked: {}, amountUsdc: 1, deps: {}, now: 0 })))?.threw?.includes("second clock") === true);
@@ -442,6 +458,53 @@ section("6 — ⭐⭐ the WRITE gate: disarmed, and armed with the freshness win
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
+section("6b — ⭐⭐ OPERATOR-ONLY deposit arming: its OWN pair, never one constant serving both (T, 2026-09-27 / 10-01)");
+{
+  ok("shared/vault-mandate/arming.mjs exists and exports armingFor", !ARMING.__missing && typeof ARMING.armingFor === "function", ARMING.__missing ?? "");
+  ok("⭐ MANDATE_DEPOSIT_ARMED_OPERATOR ships false", DEPMOD.MANDATE_DEPOSIT_ARMED_OPERATOR === false, show(DEPMOD.MANDATE_DEPOSIT_ARMED_OPERATOR));
+  ok("⭐ MANDATE_ARMED_FROM_OPERATOR ships null", DEPMOD.MANDATE_ARMED_FROM_OPERATOR === null, show(DEPMOD.MANDATE_ARMED_FROM_OPERATOR));
+  const userRec = activeRecord();
+  const opRec = activeRecord({ origin: "operator", owner: OPERATOR_ADDR });
+  ok("  (fixtures: one user-origin and one operator-origin mandate, both verified)", userRec.origin === "user" && opRec.origin === "operator" && verifyMandateRecord(opRec).ok, show(verifyMandateRecord(opRec).errors));
+  const AF = T0 - DAY;
+  const arm = (rec, cfg) => (typeof ARMING.armingFor === "function" ? ARMING.armingFor(rec, cfg) : null);
+  ok("⭐⭐ user constant ON → a USER mandate is armed", arm(userRec, { armed: true, armedFrom: AF })?.armed === true);
+  ok("⭐⭐ user constant ON → an OPERATOR mandate is NOT armed (never one constant serving both)", arm(opRec, { armed: true, armedFrom: AF })?.armed === false);
+  ok("⭐⭐ operator constant ON → an OPERATOR mandate is armed, from the OPERATOR arming moment",
+    arm(opRec, { armedOperator: true, armedFromOperator: AF + 1 })?.armed === true && arm(opRec, { armedOperator: true, armedFromOperator: AF + 1 })?.armedFrom === AF + 1);
+  ok("⭐⭐ operator constant ON → a USER mandate is NOT armed", arm(userRec, { armedOperator: true, armedFromOperator: AF })?.armed === false);
+  const relabelled = { ...userRec, origin: "operator" };
+  ok("⭐ an operator-origin record whose owner is NOT an operator is not armed (re-checked against OPERATOR_MANDATE_OWNERS)",
+    arm(relabelled, { armedOperator: true, armedFromOperator: AF })?.armed === false);
+  ok("  an unknown origin is not armed by either constant", arm({ ...userRec, origin: "nobody" }, { armed: true, armedFrom: AF, armedOperator: true, armedFromOperator: AF })?.armed === false);
+  ok("  nothing on → nothing armed", arm(opRec, {})?.armed === false && arm(userRec, {})?.armed === false);
+
+  const at = async (rec, config) => { const x = execDeps({ record: rec }); x.deps.mandates = x.mandates;
+    const r = await attemptAsync(() => depositForMandate({ record: rec, etag: '"e0"', checked: checked(), amountUsdc: 10, deps: x.deps, config }));
+    return { r, x }; };
+  const OPCFG = { armedOperator: true, armedFromOperator: AF, freshnessMs: null };
+  const a1 = await at(opRec, OPCFG);
+  ok("⭐⭐ operator-armed + OPERATOR mandate → past the arming gate (stops at the next rule: the window is unset)", a1.r?.code === REFUSED.FRESHNESS_UNSET, show(a1.r));
+  const a2 = await at(userRec, OPCFG);
+  ok("⭐⭐ operator-armed + USER mandate → REFUSED as disarmed, nothing touched", a2.r?.code === REFUSED.DISARMED && a2.x.intentsC.calls.length === 0 && a2.x.executor.calls.length === 0, show(a2.r));
+  ok("  …and the refusal names the constant for ITS origin (MANDATE_DEPOSIT_ARMED, user)", /MANDATE_DEPOSIT_ARMED\b/.test(a2.r?.reason ?? "") && /user/i.test(a2.r?.reason ?? ""), show(a2.r?.reason));
+  const a3 = await at(opRec, { armed: true, armedFrom: AF, freshnessMs: null });
+  ok("⭐⭐ user-armed + OPERATOR mandate → REFUSED as disarmed", a3.r?.code === REFUSED.DISARMED && /MANDATE_DEPOSIT_ARMED_OPERATOR/.test(a3.r?.reason ?? ""), show(a3.r));
+  const a4 = await at(userRec, { armed: true, armedFrom: AF, freshnessMs: null });
+  ok("  (control: user-armed + USER mandate → past the arming gate)", a4.r?.code === REFUSED.FRESHNESS_UNSET, show(a4.r));
+  const a5 = await at(opRec, { armedOperator: true, armedFromOperator: null, freshnessMs: 30_000 });
+  ok("⭐ operator-armed with no MANDATE_ARMED_FROM_OPERATOR → refused (the two are set together)", a5.r?.code === REFUSED.ARMED_FROM_UNSET, show(a5.r));
+
+  const later = T0 + 3 * DAY;
+  ok("⭐ operator arming moves the OPERATOR mandate's window base to its arming moment",
+    dueState({ record: opRec, now: later + 1, config: { armedOperator: true, armedFromOperator: later } })?.dueAt === later);
+  ok("  …and leaves a USER mandate's base where it was", dueState({ record: userRec, now: later + 1, config: { armedOperator: true, armedFromOperator: later } })?.dueAt !== later);
+  ok("  …while the user constant moves the user mandate's base and not the operator's",
+    dueState({ record: userRec, now: later + 1, config: { armed: true, armedFrom: later } })?.dueAt === later &&
+    dueState({ record: opRec, now: later + 1, config: { armed: true, armedFrom: later } })?.dueAt !== later);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
 section("7 — the check cannot be skipped: the mutations the design names");
 {
   const record = activeRecord();
@@ -693,6 +756,37 @@ function tickDeps(record, { intents, over = {}, clock = T0 } = {}) {
   Object.assign(t2.receipts, { exists: async (k) => t.receipts._m.has(k), write: async (k, v, o = {}) => { if (o.onlyIfNew && t.receipts._m.has(k)) return { ok: false }; t.receipts._m.set(k, v); return { ok: true }; } });
   const next = await attemptAsync(() => runMandateTick({ deps: t2.deps }));
   ok("the next cadence window → a fresh signed observation", signs === 1 && next?.results?.[0]?.outcome === "would-deposit", show(next?.results?.[0]));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("9b — ⭐⭐ FULL-PATH TIMING in the DISARMED tick: anchor → the write's reads (T, 2026-10-01, decision 3)");
+// The freshness window gates anchor → WRITE (age checked at the gate and again at `tw`). The signing latency covers
+// anchor → verified only; preview + room run after the arming gate, so a disarmed tick never timed them. It now runs
+// the SAME reads (writePathReads) read-only and records the age the write would have seen. No window is set from it
+// here: that is T's decision on ≥7 samples.
+{
+  const record = activeRecord();
+  signs = 0;
+  let ms = T0;
+  const adv = () => (ms += 137); // every clock read advances 137 ms, so the reads after the check show up as age
+  const t = tickDeps(record, { over: { now: adv, runCheck: (rec) => runMandateCheck({ record: rec, deps: { ...checkDeps(), now: adv } }) } });
+  const res = await attemptAsync(() => runMandateTick({ deps: t.deps }));
+  const one = res?.results?.[0], fp = one?.receipt?.fullPath;
+  ok("the tick still says WOULD-DEPOSIT", one?.outcome === "would-deposit", show(one));
+  ok("⭐⭐ the receipt carries fullPath.wouldBeCheckAgeMs — a finite age on the tick's ONE clock", Number.isFinite(fp?.wouldBeCheckAgeMs) && fp.wouldBeCheckAgeMs > 0, show(fp));
+  ok("⭐ …longer than the signing latency alone (it covers the reads after the check too)",
+    Number.isFinite(one?.receipt?.timing?.signingLatencyMs) && fp?.wouldBeCheckAgeMs > one.receipt.timing.signingLatencyMs, show({ fp, sign: one?.receipt?.timing?.signingLatencyMs }));
+  ok("⭐ …and says the reads completed (ok) and which they were", fp?.ok === true && fp?.reads?.includes?.("previewAtAnchor") && fp?.reads?.includes?.("depositRoom"), show(fp));
+  ok("⭐⭐ …READ-ONLY: intent store 0 calls, executor 0, no ledger, the record never written",
+    t.x.intentsC.calls.length === 0 && t.x.executor.calls.length === 0 && t.x.spends.length === 0 && t.mandates.calls.every((c) => c.fn !== "update"), show(t.x.intentsC.calls.map((c) => c.fn)));
+  const u = tickDeps(activeRecord(), { over: { previewAtAnchor: async () => { throw new Error("rpc down"); } } });
+  const r2 = await attemptAsync(() => runMandateTick({ deps: u.deps }));
+  const fp2 = r2?.results?.[0]?.receipt?.fullPath;
+  ok("⭐ a failed read → fullPath {ok:false, why} and NO age (a missing measurement is never a number)",
+    r2?.results?.[0]?.outcome === "would-deposit" && fp2?.ok === false && fp2?.wouldBeCheckAgeMs === undefined && typeof fp2?.why === "string", show(fp2));
+  const src = readFileSync("netlify/functions/_vault-mandate-deposit.mjs", "utf8");
+  ok("⭐⭐ ONE code path: depositForMandate and the measurement both call writePathReads (the timed reads ARE the write's reads)",
+    (src.match(/\bwritePathReads\(/g) ?? []).length >= 3 && /async function writePathReads\(/.test(src));
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════

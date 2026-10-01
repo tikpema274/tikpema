@@ -33,7 +33,8 @@ import { requireSession } from "./_auth.mjs";
 import { json } from "./_arc.mjs";
 import { WALLET_PROVISIONING_STATUS, walletProvisioningRefusal, WALLET_UNRESOLVABLE_STATUS, walletUnresolvableRefusal, isWalletUnresolvable } from "./_agent-wallets.mjs";
 import { isOperatorOwner } from "../../shared/vault-mandate/operators.mjs";
-import { MANDATE_ORIGIN, cancelMandate, preflightMandateInput } from "../../shared/vault-mandate/record.mjs";
+import { MANDATE_ORIGIN, cancelMandate, preflightMandateInput, amendMandateRules } from "../../shared/vault-mandate/record.mjs";
+import { EXIT_RULES_OPERATOR } from "../../shared/vault-mandate/limits.mjs";
 import { createVaultMandate, readMandate, acknowledgeStoredMandate, updateStoredMandate, VAULT_MANDATE_STORE } from "./_vault-mandate-store.mjs";
 import { vaultAckFromDisclosure } from "./_vault-mandate-check.mjs";
 
@@ -50,7 +51,7 @@ export function operatorGate(event) {
 /** The one refusal every unauthorised caller receives. It names nothing. */
 const denied = () => json(403, { error: "forbidden" });
 
-const OPS = new Set(["create", "ack", "cancel"]);
+const OPS = new Set(["create", "ack", "cancel", "amend"]);
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
 /** @param {(event) => Promise<object>} loadDeps  called only AFTER the gate has admitted an operator */
@@ -71,6 +72,7 @@ export function makeOperatorHandler(loadDeps) {
     try {
       if (op === "create") return await create({ session, input: rest, deps });
       if (op === "ack") return await acknowledge({ session, input: rest, deps });
+      if (op === "amend") return await amend({ session, input: rest, deps });
       return await cancel({ session, input: rest, deps });
     } catch (e) {
       return json(500, { error: `the ${op} did not complete: ${String(e?.message ?? e)}` });
@@ -149,6 +151,31 @@ async function acknowledge({ session, input, deps }) {
   return json(200, { ok: true, id: a.record.id, status: a.record.status });
 }
 
+/**
+ * AMEND (piece 5 live exit, T 2026-10-01): new rules on the operator's OWN operator-origin mandate → a new version
+ * AWAITING a fresh acknowledgement (send {op:"ack", id, fingerprint} with the fingerprint returned). Progress is CARRIED
+ * (amendMandateRules), so the shares a deposit tracked survive — they are what an exit redeems.
+ * ⭐ THE ONE PLACE an exit rule can enter a mandate before EXIT_AVAILABLE: only here, only after readOperatorMandate has
+ * confirmed origin "operator" (and the gate, the operator session), and only while EXIT_RULES_OPERATOR is on — bound in
+ * productionDeps, never read from the body (a body field claiming exits are available is refused like any other unknown field).
+ * The C14 waiver this relies on is written at EXIT_RULES_OPERATOR in limits.mjs: an operator proof, not a precedent.
+ */
+async function amend({ session, input, deps }) {
+  const extra = Object.keys(input).filter((k) => k !== "id" && k !== "rules");
+  if (extra.length) return json(400, { error: `field(s) ${extra.join(", ")} cannot be sent with amend; only id and rules` });
+  const { r, res } = await readOperatorMandate({ session, id: input.id, deps });
+  if (res) return res;
+  const m = amendMandateRules(r.record, input.rules, deps.now(), { exitAvailable: deps.exitRulesOperator === true });
+  if (!m.ok) return json(400, { error: m.errors.join("; "), errors: m.errors });
+  const w = await updateStoredMandate({ store: deps.store, owner: session.address, id: r.record.id, record: m.record, etag: r.etag });
+  if (!w.ok) return json(409, { error: (w.errors ?? []).join("; ") || "the mandate could not be written" });
+  return json(200, {
+    ok: true, id: m.record.id, origin: m.record.origin, status: m.record.status, fingerprint: m.record.fingerprint,
+    disclosure: { text: m.record.disclosure.text, ruleLines: m.record.disclosure.ruleLines },
+    acknowledge: "Read the disclosure. To acknowledge these rules, send {op:\"ack\", id, fingerprint}.",
+  });
+}
+
 async function cancel({ session, input, deps }) {
   const { r, res } = await readOperatorMandate({ session, id: input.id, deps });
   if (res) return res;
@@ -176,6 +203,8 @@ async function productionDeps(event) {
       check.productionDeps({ health: () => rungs.healthDisclosure(event ?? { headers: {} }), resolveVault: vaultMod.resolveVault, vaultAckToken }),
       { holder }),
     digestOf: vaultMod.disclosureDigest, tokenOf: vaultMod.ackTokenFor,
+    // ⭐ The ONLY binding of the operator exit-rule switch: a code constant, never env or body (limits.mjs).
+    exitRulesOperator: EXIT_RULES_OPERATOR,
   };
 }
 

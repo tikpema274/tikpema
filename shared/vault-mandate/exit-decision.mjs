@@ -24,10 +24,15 @@
 
 import { verifyMandateRecord, MANDATE_STATUS } from "./record.mjs";
 import { decideMandateAction, ACTION } from "./decide.mjs";
-import { MANDATE_EXIT_ARMED, MANDATE_EXIT_ARMED_FROM } from "./limits.mjs";
+import { MANDATE_EXIT_ARMED, MANDATE_EXIT_ARMED_FROM, MANDATE_EXIT_ARMED_OPERATOR, MANDATE_EXIT_ARMED_FROM_OPERATOR } from "./limits.mjs";
 import { isChainSeconds } from "./anchor.mjs";
+import { armingFor } from "./arming.mjs";
 
-const SHIPPED = Object.freeze({ armed: MANDATE_EXIT_ARMED, armedFrom: MANDATE_EXIT_ARMED_FROM });
+// ⭐ BOTH PAIRS, resolved per record by armingFor (2026-10-01): the user pair arms user-origin mandates only, the
+// operator pair operator-origin mandates only — never one constant serving both.
+const SHIPPED = Object.freeze({ armed: MANDATE_EXIT_ARMED, armedFrom: MANDATE_EXIT_ARMED_FROM,
+  armedOperator: MANDATE_EXIT_ARMED_OPERATOR, armedFromOperator: MANDATE_EXIT_ARMED_FROM_OPERATOR });
+const EXIT_CONSTANT = Object.freeze({ user: ["MANDATE_EXIT_ARMED", "MANDATE_EXIT_ARMED_FROM"], operator: ["MANDATE_EXIT_ARMED_OPERATOR", "MANDATE_EXIT_ARMED_FROM_OPERATOR"] });
 
 export const EXIT_REFUSED = Object.freeze({
   RECORD: "record", NOT_AN_EXIT: "not-an-exit", ANCHOR_MISMATCH: "anchor-mismatch", ANCHOR_TIME: "anchor-time-unknown",
@@ -47,7 +52,7 @@ const isBps = (v) => Number.isInteger(v) && v >= 0 && v <= 10000;
  *   finding:{ check:{outage, observations, anchor:{blockNumber, blockHash}}, anchor:{blockNumber, blockHash, timestamp:number} },
  *   execution:{ exitFeeBps:number|null },
  *   pause:{ checked:true, reason:string|null } | undefined,
- *   config?:{armed:boolean, armedFrom:number|null} }} a   `config`: ⛔ test seam only (source-guarded).
+ *   config?:{armed:boolean, armedFrom:number|null, armedOperator?:boolean, armedFromOperator?:number|null} }} a   `config`: ⛔ test seam only (source-guarded).
  * @returns {{go:true, exitFindings, anchor, feeBps, capBps} | {go:false, code, why, then, wouldExit?:boolean}}
  */
 export function decideExit({ record, finding, execution, pause, config = SHIPPED } = {}) {
@@ -95,12 +100,14 @@ export function decideExit({ record, finding, execution, pause, config = SHIPPED
   if (!pause || pause.checked !== true) return no(EXIT_REFUSED.PAUSE_UNCHECKED, "the pause switch was not checked for this exit; never assumed running", EXIT_THEN.RETRY);
   if (pause.reason) return no(EXIT_REFUSED.PAUSED, `the exit is due but the agent is stopped: ${pause.reason}`, EXIT_THEN.EXIT_DUE_PAUSED);
 
-  // 6. ARMING, LAST
-  if (config?.armed !== true) {
-    return no(EXIT_REFUSED.DISARMED, "the exit path is disarmed (MANDATE_EXIT_ARMED = false): nothing is submitted", EXIT_THEN.NONE, { wouldExit: true });
+  // 6. ARMING, LAST — by THIS mandate's own constant (armingFor: user pair for user origin, operator pair for operator)
+  const arm = armingFor(record, config);
+  const [armedName, fromName] = EXIT_CONSTANT[arm.scope] ?? ["(no constant arms this origin)", "(none)"];
+  if (arm.armed !== true) {
+    return no(EXIT_REFUSED.DISARMED, `the exit path is disarmed for ${arm.scope ?? "this"} mandates (${armedName} = false)${arm.why ? `: ${arm.why}` : ""}: nothing is submitted`, EXIT_THEN.NONE, { wouldExit: true });
   }
-  if (!Number.isFinite(config.armedFrom)) return no(EXIT_REFUSED.ARMED_FROM_UNSET, "armed with no MANDATE_EXIT_ARMED_FROM: the two are set together", EXIT_THEN.NONE);
-  if (!(a.timestamp * 1000 > config.armedFrom)) {
+  if (!Number.isFinite(arm.armedFrom)) return no(EXIT_REFUSED.ARMED_FROM_UNSET, `armed with no ${fromName}: the two are set together`, EXIT_THEN.NONE);
+  if (!(a.timestamp * 1000 > arm.armedFrom)) {
     return no(EXIT_REFUSED.BEFORE_ARMED_FROM, "this finding's check was anchored before exits were armed; a finding recorded while disarmed is never acted on retroactively (a later check must find it again)", EXIT_THEN.NONE);
   }
   return { go: true, exitFindings: decision.exitFindings, anchor: a, feeBps: fee, capBps: cap };

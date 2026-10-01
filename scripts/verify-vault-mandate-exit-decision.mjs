@@ -227,5 +227,66 @@ section("7 — ⭐⭐ EXIT_AVAILABLE ⇒ MANDATE_EXIT_ARMED ∧ MANDATE_MONITORI
   ok("⭐ no production caller passes `config` (the exit arming seam) to decideExit", seam.length === 0, seam.join(", "));
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("8 — ⭐⭐ OPERATOR-ONLY exit arming: its OWN pair; each constant arms ITS origin only (T, 2026-09-28 / 10-01)");
+{
+  const OPERATOR_ADDR = "0x74b7b561fd71c68eb1da6b96a7a87033904b24e5"; // OPERATOR_MANDATE_OWNERS[0]
+  ok("⭐ MANDATE_EXIT_ARMED_OPERATOR ships false", LIM.MANDATE_EXIT_ARMED_OPERATOR === false, show(LIM.MANDATE_EXIT_ARMED_OPERATOR));
+  ok("⭐ MANDATE_EXIT_ARMED_FROM_OPERATOR ships null", LIM.MANDATE_EXIT_ARMED_FROM_OPERATOR === null, show(LIM.MANDATE_EXIT_ARMED_FROM_OPERATOR));
+  ok("⭐ EXIT_RULES_OPERATOR ships false", LIM.EXIT_RULES_OPERATOR === false, show(LIM.EXIT_RULES_OPERATOR));
+  const opRecord = () => {
+    const b = buildMandateRecord({ owner: OPERATOR_ADDR, origin: "operator", walletAddress: WALLET, vault: VAULT, terms: { amountPerDepositUsdc: 10, maxTotalUsdc: 100, cadence: "daily" },
+      rules: [{ kind: "state", subject: "exit-fee-above", limitBps: 50, onFinding: "exit" }, { kind: "state", subject: "vault-cannot-pay", onFinding: "pause" }],
+      baseline: BASELINE(), now: T0 - 86_400_000, id: "vm-op", exitAvailable: true });
+    if (!b.ok) throw new Error(JSON.stringify(b.errors));
+    return acknowledgeMandate(b.record, b.record.fingerprint, T0 - 86_400_000).record;
+  };
+  const OPARMED = { armedOperator: true, armedFromOperator: T0 - 3_600_000 };
+  const g = (rec, config) => decide({ record: rec, finding: finding(), execution: execution(), pause: notPaused, config });
+  const o1 = g(opRecord(), OPARMED);
+  ok("⭐⭐ operator exit constant ON + OPERATOR mandate → GO", o1?.go === true, show(o1));
+  const o2 = g(record(), OPARMED);
+  ok("⭐⭐ operator exit constant ON + USER mandate → refused: disarmed (it still says WOULD exit)", o2?.go === false && o2?.code === "disarmed" && o2?.wouldExit === true, show(o2));
+  const o3 = g(opRecord(), ARMED);
+  ok("⭐⭐ USER exit constant ON + OPERATOR mandate → refused: disarmed (never one constant serving both)", o3?.go === false && o3?.code === "disarmed", show(o3));
+  ok("  (control: USER exit constant ON + USER mandate → GO)", g(record(), ARMED)?.go === true);
+  const o4 = g(opRecord(), { armedOperator: true, armedFromOperator: null });
+  ok("⭐ operator-armed with no MANDATE_EXIT_ARMED_FROM_OPERATOR → refused (set together)", o4?.go === false && o4?.code === "armed-from-unset", show(o4));
+  const o5 = g(opRecord(), { armedOperator: true, armedFromOperator: T0 + 3_600_000 });
+  ok("⭐⭐ a finding anchored BEFORE the operator arming moment → refused (never retroactive)", o5?.go === false && o5?.code === "before-armed-from", show(o5));
+  const src = existsSync("shared/vault-mandate/exit-decision.mjs") ? readFileSync("shared/vault-mandate/exit-decision.mjs", "utf8") : "";
+  ok("  the exit decision resolves arming through armingFor (the deposit side's resolver, one rule for both)", /\barmingFor\(/.test(src));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+section("9 — ⭐⭐ THE C14 WAIVER (T, 2026-10-01): operator exit rules without monitoring — an OPERATOR PROOF, NOT A PRECEDENT");
+{
+  const srcL = readFileSync("shared/vault-mandate/limits.mjs", "utf8");
+  ok("⭐⭐ the waiver is WRITTEN AS A WAIVER in limits.mjs, naming why it is safe and what it must never become",
+    /C14 WAIVER/.test(srcL) && /NOT A PRECEDENT/.test(srcL) && /limitBps 0/.test(srcL) && /9 more daily deposits/.test(srcL) && /must not be extended to user mandates/i.test(srcL));
+  const can = /export const EXIT_RULES_OPERATOR = (true|false);/.test(srcL) && /export const MANDATE_EXIT_ARMED_OPERATOR = (true|false);/.test(srcL) && /export const MANDATE_EXIT_ARMED_FROM_OPERATOR = [^;]+;/.test(srcL);
+  ok("  (the variant loader can rewrite the three operator constants in the real source)", can);
+  const vop = async ({ rules, armedOp, fromOp, avail = false, armed = false, from = "null", monitoring = false }) => {
+    const s = srcL.replace(/export const EXIT_RULES_OPERATOR = (true|false);/, `export const EXIT_RULES_OPERATOR = ${rules};`)
+      .replace(/export const MANDATE_EXIT_ARMED_OPERATOR = (true|false);/, `export const MANDATE_EXIT_ARMED_OPERATOR = ${armedOp};`)
+      .replace(/export const MANDATE_EXIT_ARMED_FROM_OPERATOR = [^;]+;/, `export const MANDATE_EXIT_ARMED_FROM_OPERATOR = ${fromOp};`)
+      .replace(/export const EXIT_AVAILABLE = (true|false);/, `export const EXIT_AVAILABLE = ${avail};`)
+      .replace(/export const MANDATE_EXIT_ARMED = (true|false);/, `export const MANDATE_EXIT_ARMED = ${armed};`)
+      .replace(/export const MANDATE_EXIT_ARMED_FROM = [^;]+;/, `export const MANDATE_EXIT_ARMED_FROM = ${from};`)
+      .replace(/export const MANDATE_MONITORING_LIVE = (true|false);/, `export const MANDATE_MONITORING_LIVE = ${monitoring};`);
+    const dir = mkdtempSync(join(tmpdir(), "limits-op-")); const p = join(dir, "limits.mjs"); writeFileSync(p, s);
+    try { await import(pathToFileURL(p).href + `?v=${Math.random()}`); return "loaded"; } catch (e) { return `threw: ${String(e?.message ?? e)}`; }
+  };
+  const w1 = can ? await vop({ rules: true, armedOp: true, fromOp: String(T0), monitoring: false }) : "no-rewrite";
+  ok("⭐⭐ THE WAIVER: operator exit rules + operator exits ARMED + monitoring NOT live → LOADS", w1 === "loaded", w1);
+  const w2 = can ? await vop({ rules: true, armedOp: false, fromOp: "null" }) : "no-rewrite";
+  ok("⭐⭐ operator exit rules ON but operator exits NOT armed → REFUSES TO LOAD (rules nothing executes)", /^threw:.*EXIT_RULES_OPERATOR/.test(w2), w2);
+  const w3 = can ? await vop({ rules: false, armedOp: true, fromOp: "null" }) : "no-rewrite";
+  ok("⭐ operator exits armed with no MANDATE_EXIT_ARMED_FROM_OPERATOR → REFUSES TO LOAD", /^threw:.*MANDATE_EXIT_ARMED_FROM_OPERATOR/.test(w3), w3);
+  const w4 = can ? await vop({ rules: true, armedOp: true, fromOp: String(T0), avail: true, armed: true, from: String(T0), monitoring: false }) : "no-rewrite";
+  ok("⭐⭐ the waiver does NOT reach users: EXIT_AVAILABLE + exits armed + monitoring NOT live still REFUSES TO LOAD (C14 unchanged)", /^threw:.*MONITORING/.test(w4), w4);
+  ok("  (control: everything off → loads)", can && (await vop({ rules: false, armedOp: false, fromOp: "null" })) === "loaded");
+}
+
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

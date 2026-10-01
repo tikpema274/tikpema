@@ -40,15 +40,30 @@ import { depositVerdict, DEPOSIT_VERDICT } from "../../shared/vault-mandate/asse
 import { classifyIntent, RECOVERY_STATE, RECOVERY_MAX_TRIES } from "../../shared/vault-mandate/recovery.mjs";
 import { vaultMandateIntentKey } from "./_vault-mandate-store.mjs";
 import { amountFloorViolation } from "./_amount-floor.mjs";
+import { armingFor } from "../../shared/vault-mandate/arming.mjs";
 
 // ═══ THE ARMING CONSTANTS — flipped only in their own reviewed commit ═════════════════════════════
 export const MANDATE_DEPOSIT_ARMED = false;
 /** Epoch ms of the arming moment, set in the SAME commit that flips MANDATE_DEPOSIT_ARMED. */
 export const MANDATE_ARMED_FROM = null;
-/** Max age (ms) of a check's anchor at the write. null until measured on the disarmed tick (decision 4). */
+/**
+ * ═══ OPERATOR-ONLY deposit arming (T, 2026-09-27; built 2026-10-01 for the piece 5 live exit) ═══════════════════════
+ * Arms deposits for origin "operator" mandates ONLY, so the first real deposit lands on T's wallet alone. Its own
+ * ARMED_FROM, flipped together in their own reviewed commit. ⛔ Never one constant serving both: MANDATE_DEPOSIT_ARMED
+ * above arms USER-origin mandates only, and this pair OPERATOR-origin only (shared/vault-mandate/arming.mjs).
+ */
+export const MANDATE_DEPOSIT_ARMED_OPERATOR = false;
+export const MANDATE_ARMED_FROM_OPERATOR = null;
+/**
+ * Max age (ms) of a check's anchor at the WRITE — one window for both origins. null until set from MEASURED full-path
+ * samples (T, 2026-10-01, decision 3): the disarmed tick records `fullPath.wouldBeCheckAgeMs` (anchor → the write's own
+ * reads); the signing latency alone (anchor → verified) is not data for a gate that covers anchor → write.
+ */
 export const MANDATE_CHECK_FRESHNESS_MS = null;
 
-const SHIPPED = Object.freeze({ armed: MANDATE_DEPOSIT_ARMED, armedFrom: MANDATE_ARMED_FROM, freshnessMs: MANDATE_CHECK_FRESHNESS_MS });
+const SHIPPED = Object.freeze({ armed: MANDATE_DEPOSIT_ARMED, armedFrom: MANDATE_ARMED_FROM,
+  armedOperator: MANDATE_DEPOSIT_ARMED_OPERATOR, armedFromOperator: MANDATE_ARMED_FROM_OPERATOR, freshnessMs: MANDATE_CHECK_FRESHNESS_MS });
+const DEPOSIT_CONSTANT = Object.freeze({ user: ["MANDATE_DEPOSIT_ARMED", "MANDATE_ARMED_FROM"], operator: ["MANDATE_DEPOSIT_ARMED_OPERATOR", "MANDATE_ARMED_FROM_OPERATOR"] });
 
 export const REFUSED = Object.freeze({
   DISARMED: "disarmed", FRESHNESS_UNSET: "freshness-window-unset", ARMED_FROM_UNSET: "armed-from-unset",
@@ -112,6 +127,44 @@ async function depositRoom({ record, amountUsdc, deps }) {
     return { ok: true, usdcBeforeMinor: bal };
   } catch (e) {
     return { ok: false, reason: `a limit could not be read: ${String(e?.message ?? e)}` };
+  }
+}
+
+/**
+ * THE WRITE'S READS, between the arming/freshness gates and the intent: the agreed readings, previewDeposit at the anchor
+ * (both endpoints), the limits and balance (depositRoom). Read-only. Called by depositForMandate (armed) and by
+ * measureWritePath (the disarmed tick's full-path timing) — one path, so what is timed is what the write does.
+ * @returns {{ok:true, agreed, sharesPredicted:bigint, room, reads:string[]} | {ok:false, code, reason, reads:string[]}}
+ */
+async function writePathReads({ record, checked, amount, amountMinor, deps }) {
+  const agreed = agreedReading(checked.readings);
+  if (!agreed) return { ok: false, code: REFUSED.READINGS, reads: [], reason: "the two endpoints' readings do not agree on the deposit fee and position; the assertion would have nothing to compare to" };
+  let sharesPredicted = null;
+  try { sharesPredicted = await deps.previewAtAnchor({ vault: record.vault, amountMinor, anchor: checked.anchor }); } catch { sharesPredicted = null; }
+  if (typeof sharesPredicted !== "bigint") return { ok: false, code: REFUSED.PREVIEW, reads: ["agreedReading", "previewAtAnchor"], reason: "previewDeposit at the anchor could not be read on both endpoints" };
+  const room = await depositRoom({ record, amountUsdc: amount, deps });
+  if (!room.ok) return { ok: false, code: REFUSED.NO_ROOM, reads: ["agreedReading", "previewAtAnchor", "depositRoom"], reason: room.reason };
+  return { ok: true, agreed, sharesPredicted, room, reads: ["agreedReading", "previewAtAnchor", "depositRoom"] };
+}
+
+/**
+ * ⭐ FULL-PATH TIMING (T, 2026-10-01, decision 3) — the DISARMED tick's measurement of anchor → the write's reads.
+ * The freshness window gates the check's age at the WRITE (`tw − anchoredAt`), not at signing. A disarmed run stops at
+ * R2, before preview and room, so their time was never observed. This runs writePathReads READ-ONLY (no intent, no
+ * executor, no store write) on the tick's own clock and returns the age the write would have seen. A failed read is a
+ * failed MEASUREMENT ({ok:false, why}), never an age. ⛔ Called only on a disarmed run; it sets nothing — the window is T's.
+ */
+async function measureWritePath({ record, checked, amountUsdc, deps }) {
+  try {
+    const amount = Number(amountUsdc);
+    const w = await writePathReads({ record, checked, amount, amountMinor: BigInt(micro(amount)), deps });
+    if (!w.ok) return { ok: false, code: w.code, why: w.reason, reads: w.reads };
+    const anchoredAt = checked?.timing?.anchoredAt;
+    const age = deps.now() - anchoredAt;
+    if (!Number.isFinite(age) || age < 0) return { ok: false, why: `the age could not be computed (anchoredAt=${anchoredAt})`, reads: w.reads };
+    return { ok: true, wouldBeCheckAgeMs: age, reads: w.reads, signingLatencyMs: checked?.timing?.signingLatencyMs ?? null };
+  } catch (e) {
+    return { ok: false, why: `the measurement threw: ${String(e?.message ?? e)}` };
   }
 }
 
@@ -217,8 +270,12 @@ export async function depositForMandate({ record, etag, checked, amountUsdc, dep
   const amount = Number(amountUsdc);
 
   // ═══ R2 — THE WRITE GATE. Nothing below runs, reads or writes while disarmed. ═══
-  if (config?.armed !== true) {
-    return refuse(REFUSED.DISARMED, "the vault mandate deposit path is disarmed (MANDATE_DEPOSIT_ARMED = false): nothing was written, nothing executed",
+  // ⭐ By THIS mandate's own constant (armingFor): the user pair arms user-origin only, the operator pair operator-origin
+  // only. A record armed by nothing (an unknown origin, an operator origin whose owner is not an operator) is disarmed.
+  const arm = armingFor(record, config);
+  const [armedName, fromName] = DEPOSIT_CONSTANT[arm.scope] ?? ["(no constant arms this origin)", "(none)"];
+  if (arm.armed !== true) {
+    return refuse(REFUSED.DISARMED, `the vault mandate deposit path is disarmed for ${arm.scope ?? "this"} mandates (${armedName} = false)${arm.why ? `: ${arm.why}` : ""}: nothing was written, nothing executed`,
       { wouldDeposit: { amountUsdc: amount, vault: record?.vault?.key ?? null } });
   }
   /* ⟦rule:freshness-unset⟧ */
@@ -226,8 +283,8 @@ export async function depositForMandate({ record, etag, checked, amountUsdc, dep
     return refuse(REFUSED.FRESHNESS_UNSET, "the check freshness window is unset: arming requires the measured signing latency first (decision 4)");
   }
   /* ⟦/rule:freshness-unset⟧ */
-  if (!Number.isFinite(config.armedFrom)) return refuse(REFUSED.ARMED_FROM_UNSET, "armed with no MANDATE_ARMED_FROM: the two are set together");
-  if (t < config.armedFrom) return refuse(REFUSED.NOT_YET_ARMED, "this moment is before the arming moment");
+  if (!Number.isFinite(arm.armedFrom)) return refuse(REFUSED.ARMED_FROM_UNSET, `armed with no ${fromName}: the two are set together`);
+  if (t < arm.armedFrom) return refuse(REFUSED.NOT_YET_ARMED, "this moment is before the arming moment");
 
   // ── the record: consistent, active, acknowledged against the fingerprint of NOW ──
   const v = verifyMandateRecord(record);
@@ -271,14 +328,11 @@ export async function depositForMandate({ record, etag, checked, amountUsdc, dep
   const amountMinor = BigInt(micro(amount));
 
   // ── what the assertion will need, established BEFORE the intent (so it can never be missing after) ──
-  const agreed = agreedReading(checked.readings);
-  if (!agreed) return refuse(REFUSED.READINGS, "the two endpoints' readings do not agree on the deposit fee and position; the assertion would have nothing to compare to");
-  let sharesPredicted = null;
-  try { sharesPredicted = await deps.previewAtAnchor({ vault: record.vault, amountMinor, anchor }); } catch { sharesPredicted = null; }
-  if (typeof sharesPredicted !== "bigint") return refuse(REFUSED.PREVIEW, "previewDeposit at the anchor could not be read on both endpoints");
-
-  const room = await depositRoom({ record, amountUsdc: amount, deps });
-  if (!room.ok) return refuse(REFUSED.NO_ROOM, room.reason);
+  // ⭐ The write's reads, in ONE function: the disarmed tick times exactly these (measureWritePath), so the measured age is
+  // the age this write sees — not a copy of it that could drift.
+  const w = await writePathReads({ record, checked, amount, amountMinor, deps });
+  if (!w.ok) return refuse(w.code, w.reason);
+  const { agreed, sharesPredicted, room } = w;
 
   // ═══ 5. THE INTENT — create-only on the seq, BEFORE any signing ═══
   // ⭐ The clock at THE WRITE: the preview and limit reads above take time, and this is the age that counts.
@@ -460,7 +514,8 @@ async function recoverMandate({ record, deps, now }) {
 export function dueState({ record, now, config = SHIPPED }) {
   const cadenceMs = CADENCE_MS[record?.terms?.cadence];
   let base = Number.isFinite(record?.progress?.nextDueAt) ? record.progress.nextDueAt : Date.parse(record?.ack?.at ?? "");
-  if (config?.armed === true && Number.isFinite(config.armedFrom)) base = Math.max(base, config.armedFrom);
+  const arm = armingFor(record, config); // the record's OWN arming moment (user or operator pair)
+  if (arm.armed === true && Number.isFinite(arm.armedFrom)) base = Math.max(base, arm.armedFrom);
   if (!Number.isFinite(base) || !cadenceMs) return { due: false, dueAt: null, why: "no due time can be computed" };
   if (now < base) return { due: false, dueAt: base };
   return { due: true, dueAt: base, window: Math.floor((now - base) / cadenceMs) };
@@ -468,10 +523,11 @@ export function dueState({ record, now, config = SHIPPED }) {
 const windowKey = (record, ds) => `w/${record.owner}/${record.id}/${ds.dueAt}-${ds.window}`;
 
 async function tickOne({ owner, id, deps, config, now }) {
-  const armed = config?.armed === true;
   let r = await deps.mandates.read({ owner, id });
   if (!r?.readable) return { owner, id, outcome: "unreadable", reason: (r?.errors ?? []).join("; ") };
   if (!r.record) return { owner, id, outcome: "absent" };
+  // ⭐ Armed by THIS mandate's own constant (2026-10-01): an operator mandate by the operator pair, a user one by the user pair.
+  const armed = armingFor(r.record, config).armed === true;
 
   // ⭐ piece 5 step 6: an EXITING mandate is RECOVERED — look up, classify from the chain, settle; never a re-send —
   // and never checked or deposited (it may not deposit). Reads + records only, so it runs armed or not, paused or not.
@@ -559,7 +615,9 @@ async function tickOne({ owner, id, deps, config, now }) {
   // No `now` here: the write reads its own clock (see depositForMandate).
   const res = await depositForMandate({ record, etag: r.etag, checked, amountUsdc: amount, deps, config });
   if (res.code === REFUSED.DISARMED) {
-    const full = await receipt({ ...base, outcome: "would-deposit", decision, note: `WOULD DEPOSIT ${amount} USDC — disarmed, nothing written, nothing executed` });
+    // ⭐ decision 3: time the write's own reads, read-only, so the freshness window can be set from anchor → WRITE.
+    const fullPath = await measureWritePath({ record, checked, amountUsdc: amount, deps });
+    const full = await receipt({ ...base, outcome: "would-deposit", decision, fullPath, note: `WOULD DEPOSIT ${amount} USDC — disarmed, nothing written, nothing executed` });
     return { owner, id, outcome: "would-deposit", amountUsdc: amount, receipt: full };
   }
   const full = await receipt({ ...base, decision, ...(res.receipt ?? {}), outcome: res.ok ? "deposited" : "not-deposited", code: res.code ?? null, reason: res.reason ?? null });
@@ -577,17 +635,17 @@ export async function runMandateTick({ deps, config = SHIPPED }) {
   // malformed or absent (no reader in deps) is HALTED too: a latch that cannot be read is not a latch that is open.
   const halt = await readHaltLatch(deps.halt);
   if (!halt.readable || halt.halted) {
-    return { ok: false, armed: config?.armed === true, halted: true, error: halt.readable ? halt.why : `HALTED (fail closed): ${halt.why}`, results: [] };
+    return { ok: false, armed: config?.armed === true, armedOperator: config?.armedOperator === true, halted: true, error: halt.readable ? halt.why : `HALTED (fail closed): ${halt.why}`, results: [] };
   }
   let list;
   try { list = await deps.mandates.list(); }
-  catch (e) { return { ok: false, armed: config?.armed === true, error: `mandates could not be listed: ${String(e?.message ?? e)}`, results: [] }; }
+  catch (e) { return { ok: false, armed: config?.armed === true, armedOperator: config?.armedOperator === true, error: `mandates could not be listed: ${String(e?.message ?? e)}`, results: [] }; }
   const results = [];
   for (const { owner, id } of list) {
     try { results.push(await tickOne({ owner, id, deps, config, now })); }
     catch (e) { results.push({ owner, id, outcome: "error", reason: String(e?.message ?? e) }); }
   }
-  return { ok: true, armed: config?.armed === true, results };
+  return { ok: true, armed: config?.armed === true, armedOperator: config?.armedOperator === true, results };
 }
 
 // ═══ PRODUCTION WIRING ═══════════════════════════════════════════════════════════════════════════

@@ -508,6 +508,12 @@ section("7 — ⭐⭐ vault-mandate/3: status / deposits / monitoring, origin, t
   // The detector is exercised against planted sources (never written to disk), so this suite cannot race another.
   const plant = (label, s) => ok(`  (the guard catches ${label})`, originWriters([["netlify/functions/__planted.mjs", s]]).length === 1);
   plant("MANDATE_ORIGIN.OPERATOR", `import { MANDATE_ORIGIN } from "../../shared/vault-mandate/record.mjs"; export const x = MANDATE_ORIGIN.OPERATOR;`);
+  // ⭐ the READER allowance is behaviour, not a name: arming.mjs comparing is fine; arming.mjs ASSIGNING is caught.
+  ok("  (a reader that only COMPARES origin is allowed — the real arming.mjs)", originWriters(src.filter(([f]) => f === "shared/vault-mandate/arming.mjs")).length === 0);
+  ok("  (a READER that ASSIGNS the operator origin is still caught)",
+    originWriters([["shared/vault-mandate/arming.mjs", `import { MANDATE_ORIGIN } from "./record.mjs"; export const r = { origin: MANDATE_ORIGIN.OPERATOR };`]]).length === 1);
+  ok("  (a READER that passes an origin to the create core is still caught)",
+    originWriters([["shared/vault-mandate/arming.mjs", `export const x = (d) => createVaultMandate({ session: s, origin: o, deps: d });`]]).length === 1);
   plant("origin: \"operator\" passed to the create core", `export const x = (d) => createVaultMandate({ session: s, walletAddress: w, origin: "operator", input: i, deps: d });`);
   plant("a VARIABLE origin passed to the create core", `export const x = (o) => createVaultMandate({ session: s, walletAddress: w, origin: o, input: i, deps: d });`);
   plant("origin passed to buildMandateRecord", `export const x = () => buildMandateRecord({ owner: a, origin: "operator", rules: r });`);
@@ -585,11 +591,20 @@ function walkSrc(dir) {
   } catch { /* absent dir */ }
   return out;
 }
-function originWriters(files, allowed = ["shared/vault-mandate/record.mjs", "netlify/functions/_vault-mandate-store.mjs", "netlify/functions/vault-mandate-operator.mjs"]) {
-  const ALLOWED = new Set(allowed);
+// ⭐ READERS (2026-10-01): shared/vault-mandate/arming.mjs must COMPARE a record's origin to pick its arming constant
+// (operator pair vs user pair). A reader is allowed to name the operator origin ONLY as the right-hand side of === / !==;
+// it may never write `origin: "operator"`, pass an origin to the builder / create core, or use the name any other way.
+// Not a name-allowlist: a reader that grows a write is red again.
+function readerOnly(s) {
+  const uses = [...s.matchAll(/\bMANDATE_ORIGIN\s*\.\s*OPERATOR\b/g)];
+  return uses.every((m) => /(===|!==)\s*$/.test(s.slice(Math.max(0, m.index - 12), m.index))) &&
+    !/\borigin\s*:\s*["'`]operator["'`]/.test(s) && !/\borigin\s*:\s*MANDATE_ORIGIN/.test(s);
+}
+function originWriters(files, allowed = ["shared/vault-mandate/record.mjs", "netlify/functions/_vault-mandate-store.mjs", "netlify/functions/vault-mandate-operator.mjs"], readers = ["shared/vault-mandate/arming.mjs"]) {
+  const ALLOWED = new Set(allowed), READERS = new Set(readers);
   const names = (s) => /\bMANDATE_ORIGIN\s*\.\s*OPERATOR\b/.test(s) || /\borigin\s*:\s*["'`]operator["'`]/.test(s);
   const passes = (s) => /\b(buildMandateRecord|createVaultMandate)\s*\(\s*\{[^}]*\borigin\b/s.test(s);
-  return files.filter(([f, s]) => !ALLOWED.has(f) && (names(s) || passes(s))).map(([f]) => f);
+  return files.filter(([f, s]) => !ALLOWED.has(f) && (passes(s) || (names(s) && !(READERS.has(f) && readerOnly(s))))).map(([f]) => f);
 }
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed`);

@@ -58,6 +58,32 @@ export const MANDATE_EXIT_ARMED_FROM = null;
  */
 export const MANDATE_MONITORING_LIVE = false;
 
+/**
+ * ═══ OPERATOR-ONLY EXITS (T, 2026-09-28 decision; built 2026-10-01 for the piece 5 live exit) ═══════════════════════
+ * The first real autonomous exit runs on T's OWN operator mandate, on T's own wallet, before any user mandate can exit.
+ *   · `MANDATE_EXIT_ARMED_OPERATOR` + `MANDATE_EXIT_ARMED_FROM_OPERATOR`: arm exits for origin "operator" mandates ONLY
+ *     (shared/vault-mandate/arming.mjs). Flipped together, in their own reviewed commit. The user pair above never arms
+ *     an operator mandate, and this pair never arms a user mandate.
+ *   · `EXIT_RULES_OPERATOR`: lets the OPERATOR endpoint amend an exit rule onto an operator-origin mandate
+ *     (netlify/functions/vault-mandate-operator.mjs, its ONLY reader, bound in productionDeps). Users keep EXIT_AVAILABLE.
+ */
+export const MANDATE_EXIT_ARMED_OPERATOR = false;
+export const MANDATE_EXIT_ARMED_FROM_OPERATOR = null;
+export const EXIT_RULES_OPERATOR = false;
+
+/*
+ * ═══ ⚠️ C14 WAIVER (T, 2026-10-01) — FOR AN OPERATOR PROOF, NOT A PRECEDENT ═══════════════════════════════════════════
+ * C14 ties EXIT_AVAILABLE to MANDATE_MONITORING_LIVE because, without monitoring, a mandate is checked only when a
+ * deposit is due: a fully deposited mandate is never checked again, so "if found: exit" would mostly never fire.
+ * `EXIT_RULES_OPERATOR` is deliberately NOT tied to MANDATE_MONITORING_LIVE. That is a WAIVER, and it is safe ONLY for
+ * the piece 5 live proof on T's operator mandate:
+ *   · the proof's rule is `exit-fee-above` with `limitBps 0` — xylo's ~10 bps exit fee trips it on the NEXT check;
+ *   · after its first deposit the mandate (10/day, 100 total) has 9 more daily deposits, so it keeps being checked
+ *     every day until it exits — it cannot reach "fully deposited, never checked again" before the rule fires.
+ * ⛔ This waiver MUST NOT be extended to user mandates without monitoring. EXIT_AVAILABLE keeps its C14 guard below,
+ * unchanged; a user exit rule still cannot exist while monitoring is not live (test:mandateexitdecide §9 pins both).
+ */
+
 // ⛔ ENFORCED AT LOAD, not merely documented: a module that violates these must not load, so no deploy can ship them.
 //   · EXIT_AVAILABLE ⇒ MANDATE_EXIT_ARMED: otherwise users create exit rules that nothing executes, and the disclosure's
 //     "if found: exit" is false.
@@ -71,6 +97,15 @@ if (MANDATE_EXIT_ARMED && !Number.isFinite(MANDATE_EXIT_ARMED_FROM)) {
 }
 if (typeof MANDATE_MONITORING_LIVE !== "boolean") {
   throw new Error("limits.mjs: MANDATE_MONITORING_LIVE must be a literal boolean");
+}
+//   · EXIT_RULES_OPERATOR ⇒ MANDATE_EXIT_ARMED_OPERATOR: an operator exit rule nothing executes is the same false
+//     disclosure, on T's own mandate. (NOT ⇒ monitoring: the C14 WAIVER above.)
+//   · MANDATE_EXIT_ARMED_OPERATOR ⇒ a finite MANDATE_EXIT_ARMED_FROM_OPERATOR: set together.
+if (EXIT_RULES_OPERATOR && !MANDATE_EXIT_ARMED_OPERATOR) {
+  throw new Error("limits.mjs: EXIT_RULES_OPERATOR is true but MANDATE_EXIT_ARMED_OPERATOR is false — operator exit rules could be created that nothing executes");
+}
+if (MANDATE_EXIT_ARMED_OPERATOR && !Number.isFinite(MANDATE_EXIT_ARMED_FROM_OPERATOR)) {
+  throw new Error("limits.mjs: MANDATE_EXIT_ARMED_OPERATOR is true but MANDATE_EXIT_ARMED_FROM_OPERATOR is unset — the two are flipped together");
 }
 if (EXIT_AVAILABLE && !MANDATE_MONITORING_LIVE) {
   throw new Error("limits.mjs: EXIT_AVAILABLE is true but MANDATE_MONITORING_LIVE is false — a fully deposited mandate is never checked again, so exit rules would mostly never fire (C14)");
