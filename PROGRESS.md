@@ -31504,3 +31504,23 @@ the C14 waiver (in limits.mjs, as a waiver), operator `amend`, full-path timing 
 - `43a199b` (gate:forgery) broke `test:reachability`: `process.exit` above the checks, so all were positionally
   stranded. Fixed `ae5281f` (finish() hoisted to the bottom; live re-run PASS).
 - **Cause:** both were committed and pushed after running only the suites they touched, not `test:all`.
+
+## ⭐ THE FRESHNESS WINDOW — T's DECISION (2026-10-01)
+**window = min(10 000 ms, 2 × the maximum observed full-path age), set at 3–4 full-path samples.**
+- **Ceiling 10 s (T's reasoning):** Arc is ~2 blocks/s, so 10 s ≈ 20 blocks of drift between check and write. What can
+  change in that span is a FEE or an OWNER. The post-deposit assertion catches share mismatches, but NOT a fee changed
+  mid-window. 20 blocks is small enough that an owner acting inside it would have to be targeting this deposit, and
+  large enough to absorb a throttled RPC.
+- **⭐ Sample count is NOT what makes the window safe.** The window protects against stale state, and that is bounded
+  by its UPPER limit, the 10 s ceiling, whatever the number of samples. A small sample biases `2 × max` LOW (the max of
+  a few samples ≤ the true tail), and a too-low window FAILS SAFE: a stale-check refusal, which consumes that day's
+  window (_vault-mandate-deposit.mjs, the tick's receipt). It costs availability, never a stale deposit. So 3–4 samples
+  are sound. The earlier "≥ 7" was about estimating the tail for availability, not about safety.
+- **Early stale refusals are DATA, not failures**: each is visible on its receipt (`not-deposited`, code `stale-check`,
+  with the age). Widening the window later is a reviewed commit, made from those receipts.
+- **Samples come from the daily tick only** (the real 11:17 scheduled conditions). The first full-path sample is the
+  10-02 11:17Z tick (window 4 opens 10:52:41Z), so 3–4 samples by ~10-04/05. The tick's `fullPath.wouldBeCheckAgeMs`
+  is the measure. The 1165 / 1368 ms figures are signing latency only and do not count.
+- **No probe** unless the tick's samples prove unrepresentative. **No second operator mandate**: the tick is serial
+  (:644), so a second mandate's sample is seconds later on a warm instance (correlated, biased low), and it is a second
+  money-authorising record to manage before C.
