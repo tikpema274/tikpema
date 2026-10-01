@@ -31601,3 +31601,47 @@ behind a Cloudflare challenge. Every fact below was re-read from **rpc.mainnet.a
 - **DD:** should refuse today (no Arc-mainnet chain entry; async exit mechanics unrecognised). Correct and honest. NOT
   run. Roadmap: an exit-mode fact (sync/async, fulfilment cadence, receiver/holder eligibility, freeze) is the
   candidate SECOND profile after Morpho V2. Direction log 2201b40 + a617630.
+
+---
+
+# 🛠️ COMMIT-TIME GATES + MOCKS THAT CANNOT BREAK (2026-10-01) — built red-first, UNCOMMITTED pending T
+
+## 1. The pre-commit hook runs two fast gates on the STAGED content
+- **gate:registry** when src/components/ or scripts/guard-registry.mjs is staged (523ed1f's class).
+- **test:reachability** when anything under scripts/ or package.json is staged (43a199b's class; 1.9 s).
+- **Staged, not disk:** the index is exported ONCE (`git checkout-index`, ~1.1 s) and each gate runs on that copy
+  (~1–2 s), so a partly staged file is judged by exactly what will be committed. Proven both ways: a clean stage with the
+  claim only on disk → allowed; the claim staged with a clean working tree → refused.
+- **Bypass stated in the hook's own output** on every run/refusal: "--no-verify skips these checks and NO CI runs them
+  later (deploys are CLI-only): bypassing them is a deliberate act — say why in the commit message." **Fails closed**
+  (no node, or a gate script missing from the index → blocked).
+- **Limits recorded:** gate:registry recognises claim WORDS only (the §13 figures rule is in test:all), and it says a
+  claim EXISTS, never whether it is TRUE. Nothing fixes the latter: it takes a person reading the flow.
+- Suite `test:registryhook` (scripts/verify-registry-commit-hook.mjs): the REAL hook in throwaway clones; fixtures are
+  523ed1f's own sentence and an assertion stranded after a suite's last exit. **RED 4/8 → GREEN 12/0** (registry part),
+  then **RED 12/6 → GREEN 18/0** with reachability. test:ledgerhook still 20/0.
+- **What it would NOT have caught:** d5239d7 (a hand-written mock in ANOTHER suite). That class is fixed structurally
+  (§2), and the full test:all before a push stays the rule ([[run-test-all-before-push]]). A pre-push test:all (11 min) was
+  rejected as something nobody would run.
+
+## 2. The d5239d7 class, fixed structurally: `_bridge.mjs` mocks built from the REAL module's shape
+- `scripts/lib/mock-shape.mjs`: `mockShape(real, {stub, override})`. Constants are real, classes are kept, EVERY function
+  is a stub: a **tripwire** in the kill-switch suite, a loud **"unstubbed X() was called"** throw elsewhere. A new export
+  can neither break loading nor run real code. (A plain `{...real}` spread would let a new export run its REAL code
+  unnoticed in a "nothing moves" suite.)
+- Converted: verify-pause-enforcement (kill switch), verify-receipt-read-retry, verify-swap-proposal,
+  verify-bridge-receipts, verify-second-opinion (orphan).
+- **RED, reproduced on purpose** (in-place mutation, restored byte-identical): a new `_bridge.mjs` export used by its 16
+  importers → **all 5 hand-mocked suites FAILED TO LOAD**. **GREEN:** the same mutation on the converted mocks → all four
+  test:all suites pass with unchanged counts (24 / 10 / 24 / 191).
+- **Kill-switch proofs:** M1, pause check neutralised → **17 of 24 fail**, tripwires named (agentSwap, bridgeAckToken,
+  agentBridge, circle.transfer, agentPay). M2, a NEW `_bridge` export called BEFORE the pause → **8 fail, `__probeSpend`
+  REACHED** (the default tripwire catches a new money path; an enumerated mock would only fail to load, a plain spread
+  would run it and stay green). Control 24/0, nothing reached. **The check list is IDENTICAL before vs after** (25 lines,
+  same outcomes).
+- Guard `test:mockshape` (scripts/verify-mock-shape.mjs) 10/0: helper unit tests + "no suite hand-lists _bridge.mjs's
+  exports" + "the kill-switch suite defaults every _bridge function to a tripwire". Red (kill-switch suite reverted to
+  HEAD) → 8/2, naming it.
+- ⚠️ **Correction:** verify-second-opinion's crash since e269abc WAS this class (`bridgeAckSentence`). I earlier called it
+  unrelated. That was wrong: my before/after comparison already had e269abc in it. Converted, it is back to its DECLARED
+  orphan state, 30/2 (guard-registry.mjs:301). `bridgeAckSentence` is passed through as the real pure function there.
