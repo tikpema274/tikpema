@@ -31421,3 +31421,66 @@ between-deploys row are on the open list / go/no-go. Exit stays disarmed (piece 
   - NOT pinned: verify-bridge-mechanic-pairing (130/0) guards "taken out of" / "on top of", not "loses".
 - **Correct as they stand (DEDUCTED = the self-signed path):** ManualBridgePanel.tsx:425 "(taken from the amount)";
   shared/bridge-mechanic.mjs deducted copy.
+
+---
+
+# 🧭 PIECE 5 LIVE EXIT — SCOPE + T's DECISIONS (2026-10-01). Build A next, shipped DISARMED
+
+Goal: the first real autonomous exit, on T's operator mandate 8379419c, on T's own agent wallet.
+
+## Three corrections to the brief, from the code
+1. **`MANDATE_DEPOSIT_ARMED_OPERATOR` does not exist** (decided 09-27, never built). Today ONE deposit constant
+   (`MANDATE_DEPOSIT_ARMED`, _vault-mandate-deposit.mjs:45) and ONE exit constant (`MANDATE_EXIT_ARMED`, limits.mjs:49)
+   serve every mandate. Build A creates BOTH operator pairs.
+2. **The exit rule cannot exist before the first deposit.** The deposit gate re-decides from the record's rules at the
+   write (_vault-mandate-deposit.mjs:262). `exit-fee-above limitBps 0 → exit` would make the pre-deposit check decide
+   EXIT on xylo's ~10 bps, so the mandate would never deposit, tracked stays 0, and the exit redeems nothing. Order:
+   deposit FIRST, then amend r3 to the exit rule.
+3. **The freshness window gates DEPOSITS only.** The exit path gates on "anchored after MANDATE_EXIT_ARMED_FROM"
+   (exit-decision.mjs:103) + fresh execution reads (exitPathGate). The window matters here because the exit needs a
+   deposit. Also: the operator endpoint has no amend action; `amendMandateRules` exists and CARRIES progress.
+
+State (read-only, block 64973310): wallet 0x3cb7…2de9 holds 41.52 USDC and **1,009,998 xylo shares = T's MANUAL
+redeposit (09-28), not the mandate's**. Mandate 8379419c: active, deposited 0, tracked "0", all five rules → pause.
+
+## T's decisions (2026-10-01)
+1. **`EXIT_RULES_OPERATOR`**, a separate constant, passed ONLY by vault-mandate-operator.mjs, ONLY for origin
+   "operator". record.mjs's source guard is widened to exactly that one file. A user-origin call through any other path
+   must be proven still refused.
+2. **The C14 waiver: YES, written AS A WAIVER** in the code and here. It is for an OPERATOR PROOF, NOT A PRECEDENT.
+   C14 ties EXIT_AVAILABLE to MANDATE_MONITORING_LIVE because a fully deposited mandate is never checked again. Safe
+   for this proof: `limitBps 0` fires on the NEXT check, and the mandate has 9 more daily deposits (100 at 10/day),
+   so it keeps being checked daily until it exits. **It must not be extended to user mandates without monitoring.**
+3. **Full-path timing goes in build A. No provisional window.** The two samples (1165, 1368 ms) cover
+   anchor → verified; the gate covers anchor → WRITE (age checked at the gate and again at `tw`, :244–291). Preview +
+   room run only after the arming gate, so a disarmed tick never measures them today.
+
+## The order
+- **A (build, disarmed, T deploys; no money):** operator deposit pair `MANDATE_DEPOSIT_ARMED_OPERATOR` +
+  `MANDATE_ARMED_FROM_OPERATOR` and operator exit pair `MANDATE_EXIT_ARMED_OPERATOR` + `MANDATE_EXIT_ARMED_FROM_OPERATOR`,
+  each refusing at the write/decision any record not origin "operator" AND owner in OPERATOR_MANDATE_OWNERS.
+  `EXIT_RULES_OPERATOR` + the waiver. Operator amend + re-ack. Read-only full-path timing in the disarmed tick
+  (`wouldBeCheckAgeMs`).
+- **B (T decides):** ≥7 full-path samples → window = 2 × max observed, rounded up to the second.
+- **C (own commit, T deploys):** arm operator deposits + set the window. **Money: the tick deposits 10 USDC** from
+  0x3cb7…2de9 into xylo in the first window after ARMED_FROM (windows 10:52:41Z → the 11:17Z tick). T runs only the
+  deploy. Receipt: `deposited`, intent `…/1`, checkAgeMs ≤ window, Circle ids. Chain: Deposit 10,000,000 assets,
+  shares ≈ sharesPredicted, USDC −10.000000 exact. Record: depositedUsdc 10, sharesTrackedRaw = received, gaps 0.
+- **D (T runs, operator endpoint):** amend r3 → `exit-fee-above limitBps 0 → exit`, re-ack. No money. Progress unchanged.
+- **E (own commit, T deploys; may precede D's next window, inert without an exit rule):** arm operator exits.
+  **Money: the next check finds 10 > 0 → EXIT** → deposits pause → executor → fresh reads → exitPathGate → decideExit
+  → limit = min(tracked, live) = TRACKED → redeem via Circle. Receipt: exit intent `x/…/1` outcome `exited`, Withdraw
+  shares = tracked, USDC +assets. **Live shares back to 1,009,998: T's manual position untouched** (the key
+  assertion). Mandate CLOSED, sharesTrackedRaw "0".
+
+## What this run does NOT prove
+- User mandates (operator origin only; user constants stay off).
+- Other exit triggers (upgradeable, owner-changed, vault-cannot-pay). Only exit-fee-above fires.
+- Exit under stress: xylo is liquid (maxRedeem = full). Partial exit, exit-blocked and the BEYOND halt latch are not
+  exercised.
+- Recovery paths (submit-outcome-unknown, Circle 1098, idempotent retry), unless they happen to occur.
+- Monitoring (C14): waived, not exercised.
+- Tracked shares with gaps, or across several deposits (one deposit).
+- The freshness window under load, beyond the sampled days.
+- Mainnet (this is Arc testnet 5042002, testnet USDC).
+- The fee and UI decisions.
