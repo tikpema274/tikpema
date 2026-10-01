@@ -31349,3 +31349,54 @@ brings go/no-go rows forward (chain registry, revenue payTo, the §2 ack-gate ro
 first case); a general token/contract scanner (breadth); a rating product (stays a separate consumer of DD, as decided).
 
 **Decision owner: T.** Still open.
+
+---
+
+# ✅ DEPLOY 6abe1aca — PIECE 5 STEPS 3–6 + THE THREE FAILED-READ FIXES LIVE, ALL EXIT FLAGS DISARMED (2026-10-01)
+
+**Launched by T from main, deploy:prod, PID 30270** (log deploy-logs/2026-10-01-1021.log). Lock acquired 08:22:00.055Z
+and released "PID 30270 … command exited 1" (the exit is gate:forgery's; see below). One acquire, one release; no
+interference.
+
+## 1. What prod serves
+- Deploy **`6abe1acaf7462d095eed8b66`**, published **2026-10-01T09:02:33.605Z**, commit **`97c26d0`**, tree **`dd494bdd293e`**,
+  clean, stamped 08:33:16.601Z. 97c26d0 = 1cf1624 + PROGRESS.md only (outside the stamped surfaces
+  netlify/functions, shared, src), so the served CODE is 1cf1624's.
+- On prod now: piece 5 steps 3 (2c19094), 4 (3120988), 4b (6ed57a1, money path), 4c (b7b802e), 5 (908b4a1), 6 (fe19db8),
+  the step-6 lookup fix 2f90898, and the failed-read fixes 9ded42d (job-run), 5869e52 (dca-tick), fd14af6 (ub-withdraw).
+
+## 2. ddTree / window
+ddTree **d79683273abc** before and after → no rotation, **no window** (none expected; "NOT a pass").
+
+## 3. Gates
+- test:all **172/172** (10.0 min) · gate:watch, gate:rpc ✅ · gate:deployed **✅ 5/5** (served tree == local; control plane
+  == data plane; 0 orphans of 25 newer).
+- ⛔ **gate:forgery red in the chain**: Base fee ~0.0649 > the fixed 0.06 probe → fee floor before any band → exit 1 → the
+  `&&` chain stopped. **UNTESTED, not broken** (established by hand). Fixed in 43a199b (derived probe + VERDICT line).
+  **Re-run on this deploy: VERDICT=PASS** (fee 0.054553, probe 0.091, forged refused, served 78464d27… ≠ forged 0839aa55…).
+- Skipped by the chain, run by hand: gate:spec ✅ · loss sweep **0 new** (595 listed, 17 carried) · stage:ledger →
+  **ae631eb**: dd-refusal-window-log 133→**134**, deploy-loss-log 47→**48**: **one line each**. gate:ledger ✅ up to date.
+
+## 4. Exit-related flags DISARMED on the served build
+From commit 97c26d0, whose files the served tree hash covers: `EXIT_AVAILABLE = false` (shared/vault-mandate/limits.mjs:39),
+`MANDATE_EXIT_ARMED = false` (:49), `MANDATE_MONITORING_LIVE = false` (:59), `MANDATE_CHECK_FRESHNESS_MS = null`
+(_vault-mandate-deposit.mjs:49); also `MANDATE_DEPOSIT_ARMED = false` (:45), `MANDATE_ARMED_FROM = null` (:47). No env
+override reads any of them (grep: no `process.env.MANDATE*` / `EXIT*`). Env is deploy-fixed anyway (measured today).
+
+## 5. The ticks
+- 09:17Z and 10:17Z: `ok:true, armed:false, halted:false, error:null`; 8379419c "observed-this-window" (window 2 already
+  observed; the new `halted` field shows the step-3 code running). 5ef4c048 cancelled → may-not-deposit.
+- Window 3 opened 10:52:41Z (daily, base = ack.at 09-28 10:52:41Z). **11:17Z tick (11:17:09Z): `ok:true, armed:false,
+  halted:false, error:null`; 8379419c → `would-deposit` 10 USDC.**
+- **Receipt `w/0x74b7…24e5/8379419c…/1790592761406-3` (11:17:06.996Z) now carries `exitPath` AND `check`:**
+  - `exitPath: {readable:true, known:true, profile:"xylo", adapter:null}`
+  - `check`: outage null; r1 upgradeable clear · r2 owner-changed clear · r3 exit-fee 10 bps ≤ 50 clear · r4 deposit-fee
+    0 bps ≤ 50 clear · r5 vault-can-pay clear (simulated-redeem, sharesRaw 1009998). Both endpoints at block 64937858.
+  - decision `deposit`, depositAllowed, no findings / exitFindings / unestablished; note "WOULD DEPOSIT 10 USDC —
+    disarmed, nothing written, nothing executed". Report verification **valid** (erc1271, registered key, agentId 851891).
+  - ⭐ **timing: signingLatencyMs 1368** (one sign call). One MEASURED input for the freshness window. One sample, not a
+    distribution.
+
+## Deferred, open
+gate:forgery's chain position still stops later gates on an UNTESTED. The two copy defects and the ack-gate
+between-deploys row are on the open list / go/no-go. Exit stays disarmed (piece 5 arming is T's decision).
