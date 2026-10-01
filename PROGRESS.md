@@ -31318,3 +31318,34 @@ Published deploy 6abe1aca throughout; **no deploy created in the window** (check
   on the Netlify account. The GitHub `Tikpema` account (created 2024-02-01, since unused) is therefore **very likely T's
   too**. The basis is the matching name, not a GitHub-side proof. With builds stopped, this closes the unexplained-account
   question enough: a note, not an open risk.
+
+---
+
+# 🧭 RECOMMENDATION FOR T's OPEN DECISION "MORPHO V2 IN DD" (2026-10-01): widen DD in DEPTH, not breadth
+
+**Recommendation (Claude, not a decision):** build the Morpho V2 vault profile WITH exit liquidity as a reported fact next,
+aimed at being what Earn Kit's `onBeforeAuthorize` hook calls. Breadth (more chains, generic token/contract scanning,
+more feeds) is the data layers' home ground. Surf (researched today) has ~119 endpoints, no risk endpoints, no Arc.
+
+**The evidence, all measured this week:**
+- Earn Kit 1.8.1's public list offers **30 vaults on Arc mainnet, no allowlist**, Galaxy USDC first. Its `riskSignals` had
+  **warnings: []** + circleGuarded while **5.57%** was redeemable on chain (liquidityAdapter unset; see 09-30 / 10-01).
+  The integrator's own risk feed missed the exit fact DD exists to state.
+- **DD refuses all of them today** as unrecognised: honest, but silent exactly where agents are being handed deposits.
+- `onBeforeAuthorize` is the one place a DD verdict can gate an Earn Kit deposit (2026-09-28 read). That is a
+  distribution path a data layer does not have.
+
+**What it means (build order already fixed 09-26: redemption semantics ✅ 6d04d13 → V2 profile → allowlist widening):**
+1. Recognise V2 via the factory's `isVaultV2`; DD needs an **Arc mainnet (5042) entry in its chain registry** (none today).
+2. The power model: timelock / abdication / current value, not presence. E.g. Galaxy's zero-timelock allocator that
+   unset the liquidity adapter is the finding.
+3. Exit liquidity as a fact: redeemable now (idle + reachable adapter liquidity) vs totalAssets.
+
+**Costs:** a DD-surface change → ddTree rotates → one refusal window + a schema bump. It pulls DD onto mainnet, which
+brings go/no-go rows forward (chain registry, revenue payTo, the §2 ack-gate row). Every new profile must keep
+"unrecognised ⇒ refuse" true for what it does not understand.
+
+**Not yet:** lending markets / Borrow Kit (a second profile, after V2 proves the pattern; the drained cirBTC pool is its
+first case); a general token/contract scanner (breadth); a rating product (stays a separate consumer of DD, as decided).
+
+**Decision owner: T.** Still open.
