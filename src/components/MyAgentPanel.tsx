@@ -885,8 +885,10 @@ export function AgentSummary({
             the same bridge came to behave differently on two pages. */}
         {b.feeDisclosure?.band === "warn" && (
           <div className="status" style={{ color: "var(--warn)", marginBottom: 8 }}>
-            Heads up — {(b.feeDisclosure.feeRatio * 100).toFixed(1)}% of this bridge goes to the
-            network fee. The fee is flat, so bridging more at once costs the same.
+            {/* ⭐ The same fee fact as the ack card (shared/bridge-ack-copy.mjs): what arrives and what leaves, never a
+                share "of this bridge" — the fee is charged on top (2026-10-01; pairing §13 checks the figures). */}
+            Heads up — {bridgeAckSentence({ amountUsdc: b.amountUsdc, feeUsdc: b.feeUsdc, feeRatio: b.feeDisclosure.feeRatio })}{" "}
+            The fee is flat, so bridging more at once costs the same.
           </div>
         )}
         {b.feeDisclosure?.band === "acknowledge" && (
@@ -1129,8 +1131,8 @@ export function AgentSummary({
           if (d.band === "warn") {
             return (
               <div key={k} className="status" style={{ color: "var(--warn)", marginBottom: 8 }}>
-                Step {i + 1} — {(d.feeRatio * 100).toFixed(1)}% of that bridge goes to the network fee
-                ({Number(d.feeUsdc).toFixed(4)} USDC of {Number(d.amountUsdc).toFixed(4)}).
+                {/* ⭐ Shared fee fact, as the ack card: arrives + leaves, not "F USDC of A" (2026-10-01). */}
+                Step {i + 1} — {bridgeAckSentence({ amountUsdc: d.amountUsdc, feeUsdc: d.feeUsdc, feeRatio: d.feeRatio })}
               </div>
             );
           }

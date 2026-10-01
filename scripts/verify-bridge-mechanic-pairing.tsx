@@ -624,5 +624,65 @@ section("12 — 🚨 THE ACKNOWLEDGEMENT CARDS: an upfront fee is never a loss, 
     /taken out of the amount/.test(BRIDGE_MECHANIC_COPY.deducted.summary));
 }
 
+section("13 — ⭐⭐ STRUCTURAL: every upfront fee disclosure states what ARRIVES and what LEAVES — whatever its words");
+{
+  // ═══ WHY A WORD LIST IS NOT ENOUGH (2026-10-01) ═════════════════════════════════════════════════
+  // §12's family check caught "loses"; the warn-band lines then evaded it by describing the fee as PART of the amount
+  // ("X% of this bridge goes to the network fee", "F USDC of A") without one listed word. A word list catches
+  // phrasings, never omissions. This section is wording-blind: render the SAME proposal in the band and in band
+  // "none", take what the band ADDED (common prefix/suffix removed), and require that text to carry two FIGURES —
+  // the amount (what arrives; nothing is deducted) and amount + fee (what leaves the wallet). A disclosure that gives
+  // only a percentage cannot contain 0.3541 by accident, in any words. Figures are matched numerically, so "0.3" and
+  // "0.3000" both count as the amount.
+  const { AgentSummary } = await import("../src/components/MyAgentPanel");
+  const render = (data) => strip(React.createElement(AgentSummary, {
+    data, planRun: null, planBusy: false, planMints: {}, planAcked: {}, onPlanAckChange: () => {}, bridgeReceipts: [],
+    onConfirm: () => {}, onRequotePlan: () => {}, quotedAt: 1_000_000, now: 1_001_000, bridgeRun: null, bridgeBusy: false, bridgeAcked: false,
+    walletReady: true, onAckChange: () => {}, mint: null, onConfirmBridge: () => {}, onRequoteBridge: () => {},
+    vaultAcked: false, onVaultAckChange: () => {}, vaultDelta: null, vaultRun: null, vaultBusy: false, onConfirmVault: () => {} } as any));
+  const added = (withBand, without) => {
+    let a = 0; while (a < withBand.length && a < without.length && withBand[a] === without[a]) a++;
+    let b = 0; while (b < withBand.length - a && b < without.length - a && withBand[withBand.length - 1 - b] === without[without.length - 1 - b]) b++;
+    return withBand.slice(a, withBand.length - b);
+  };
+  const nums = (t) => (t.match(/\d+\.\d+|\d+/g) || []).map(Number);
+  const states = (t, amount, fee) => {
+    const n = nums(t);
+    return { arrives: n.some((x) => Math.abs(x - amount) < 1e-9), leaves: n.some((x) => Math.abs(x - (amount + fee)) < 5e-5) };
+  };
+  const FEE = 0.054147;
+  const single = (amount, band, ratio) => ({ decision: { action: "bridge_usdc" }, needsBridgeConfirm: true, bridge: { amountUsdc: amount,
+    destination: { key: "base", label: "Base" }, feeUsdc: FEE, netUsdc: amount, mechanic: "upfront",
+    feeDisclosure: { band, feeRatio: ratio, ackToken: band === "acknowledge" ? "a" : null }, quoteToken: "t.t", expiresInMs: 120_000 } });
+  const plan = (amount, band, ratio) => ({ decision: { action: "plan" }, needsConfirm: true, plan: [{ type: "bridge_usdc", amountUsdc: amount, destination: "base" }],
+    totalUsdc: amount, quoteId: "q", stepDisclosures: { 0: { amountUsdc: amount, destinationKey: "base", destinationLabel: "Base", feeUsdc: FEE, netUsdc: amount,
+      mechanic: "upfront", feeRatio: ratio, band, ackToken: band === "acknowledge" ? "a" : null, quoteToken: "t.t", expiresInMs: 120_000 } } });
+  const cases = [
+    ["agent bridge, WARN band", single, 0.3, "warn"], ["agent bridge, ACKNOWLEDGE band", single, 0.1, "acknowledge"],
+    ["plan step, WARN band", plan, 0.3, "warn"], ["plan step, ACKNOWLEDGE band", plan, 0.1, "acknowledge"],
+  ];
+  for (const [label, mk, amount, band] of cases) {
+    const ratio = FEE / amount;
+    const diff = added(render(mk(amount, band, ratio)), render(mk(amount, "none", ratio)));
+    const st = states(diff, amount, FEE);
+    check(`⭐⭐ ${label}: the band ADDS a disclosure`, diff.length > 20, diff.slice(0, 60));
+    check(`🚨 ${label}: it states what ARRIVES (${amount}) and what LEAVES (${(amount + FEE).toFixed(4)})`, st.arrives && st.leaves,
+      `arrives=${st.arrives} leaves=${st.leaves} — "${diff.slice(0, 150)}"`);
+  }
+  // BridgePanel's disclosure sits behind a fetched quote, so its structure is checked in source: EVERY band block
+  // renders the shared sentence (which is what carries both figures). It has no warn block today; one added later
+  // must call it too.
+  const bp = readFileSync("src/components/BridgePanel.tsx", "utf8").replace(/\{\/\*[\s\S]*?\*\/\}/g, " ").replace(/^\s*\/\/.*$/gm, " ");
+  const blocks = [...bp.matchAll(/\{disclosure\?\.band === "(warn|acknowledge)" && \(/g)].map((m) => bp.slice(m.index, bp.indexOf("</div>\n      )}", m.index)));
+  check("⭐ BridgePanel: at least one band block found", blocks.length >= 1, String(blocks.length));
+  check("🚨 BridgePanel: EVERY band block renders bridgeAckSentence (the arrives + leaves figures)",
+    blocks.length >= 1 && blocks.every((b) => /bridgeAckSentence\(/.test(b)), blocks.map((b) => b.slice(0, 40)).join(" | "));
+  // And the producer itself carries both figures for ANY amount/fee — the property, not one fixture.
+  const { bridgeAckSentence } = await import("../shared/bridge-ack-copy.mjs");
+  const grid = [[0.07, 0.054147], [0.3, 0.054147], [1.234567, 0.06], [25, 0.11]];
+  check("⭐ the shared sentence states both figures across a grid of amounts and fees",
+    grid.every(([a, f]) => { const x = states(bridgeAckSentence({ amountUsdc: a, feeUsdc: f, feeRatio: f / a }), a, f); return x.arrives && x.leaves; }));
+}
+
 console.log(`\n${fail ? "❌ FAILURES" : "✅ ALL GREEN"}   pass ${pass} / fail ${fail}\n`);
 process.exit(fail ? 1 : 0);
