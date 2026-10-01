@@ -31307,3 +31307,10 @@ Published deploy 6abe1aca throughout; **no deploy created in the window** (check
   GitHub-side webhook/key. The docs do not say unlink removes those. ⚠️ Relinking later re-activates builds. A deliberate
   relink must be followed by stop_builds again. Recommendation: unlink only once T knows whether `Tikpema` is T's, so the
   GitHub side can be cleaned up in the same pass.
+
+## 📌 OPEN LIST (2026-10-01): two copy defects + one unexplained link
+- **T: only the `tikpema274` GitHub account has ever been used.** So the `Tikpema` account the app site is linked to is
+  **unexplained**. Builds are stopped (09:59:39Z), so the path is closed either way. Kept as an OPEN ITEM, not a risk.
+- Copy defect 1: `/api/agent-parameters` "re-read from configuration on every request": measured FALSE (above).
+- Copy defect 2: agent-execute-plan.mjs:319 "would lose 59.9% to fees" when the full amount arrives (fee on top).
+- All three are on the open list in memory (decisions-open-verified), each with its re-check.
