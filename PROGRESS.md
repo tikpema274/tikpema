@@ -31524,3 +31524,44 @@ the C14 waiver (in limits.mjs, as a waiver), operator `amend`, full-path timing 
 - **No probe** unless the tick's samples prove unrepresentative. **No second operator mandate**: the tick is serial
   (:644), so a second mandate's sample is seconds later on a warm instance (correlated, biased low), and it is a second
   money-authorising record to manage before C.
+
+---
+
+# ✅ DEPLOY 6abe9d6d — BUILD A (piece 5 live-exit groundwork) + THE UPFRONT-FEE COPY FIXES LIVE, ALL DISARMED (2026-10-01)
+
+**Launched by T from main, deploy:prod**, PID 74756 (shell 74738), log deploy-logs/2026-10-01-1939.log. Lock acquired
+17:39:16.859Z, released "PID 74756 … command exited 0". One acquire, one release.
+
+## What prod serves
+- Deploy **`6abe9d6de5d3849d57f4668d`**, published **2026-10-01T18:31:23.655Z**, commit **`8cd4ba9`**, tree
+  **`d99d0f0af69d`**, clean, stamped 17:50:40Z. Re-read from blobs-probe 18:36Z: same.
+- Newly live since 6abe1aca: build A `3667827` (operator arming pairs via arming.mjs, EXIT_RULES_OPERATOR + the C14
+  waiver, operator amend, full-path timing); the upfront-fee copy family `d5239d7` · `e269abc` · `9dd681a` · `019f715`;
+  the test fixes `b5ec696` · `ae5281f` (scripts only).
+
+## Gates
+- test:all **174/174** (9.9 min) · gate:deployed **✅** · ddTree **d79683273abc** unrotated → **no window** (none
+  expected; "NOT a pass").
+- **gate:forgery `VERDICT=PASS`**: the first deploy log to carry the verdict line (43a199b). Served bd6b56a9… ≠
+  forged 9be8a154….
+- Loss sweep **0 new** (596 listed, 17 carried). Ledgers committed alone **88bcb39**: dd-refusal-window-log 134→**135**,
+  deploy-loss-log 48→**49**, one line each. gate:ledger ✅.
+
+## Disarmed on the served commit (read at 8cd4ba9)
+`MANDATE_DEPOSIT_ARMED_OPERATOR = false`, `MANDATE_ARMED_FROM_OPERATOR = null`, `MANDATE_EXIT_ARMED_OPERATOR = false`,
+`MANDATE_EXIT_ARMED_FROM_OPERATOR = null`, `EXIT_RULES_OPERATOR = false`, `EXIT_AVAILABLE = false`,
+`MANDATE_EXIT_ARMED = false`, `MANDATE_DEPOSIT_ARMED = false`, `MANDATE_CHECK_FRESHNESS_MS = null`. The served tree
+hash covers these files. Env is deploy-fixed (measured).
+
+## The fee copy is live, both sides
+- **Browser:** the served bundle `/assets/index-CyDsweFL.js` contains "…charged on top of the amount, and I want to
+  bridge anyway" and NO "loses … to fees" / "most of this amount".
+- **Server:** the deploy's own forgery probe (step 2) received *"step 1: This bridge charges a fee of 0.0543 USDC on top
+  of the 0.0905 you're sending — 60.0% of the amount. The full 0.0905 arrives; about 0.1448 leaves your wallet. Nothing
+  was executed. Confirm you accept that and run the plan again."*
+
+## Next
+- **B:** the first full-path sample is the **10-02 11:17Z** tick (window 4 opens 10:52:41Z). Its receipt should carry
+  `fullPath.wouldBeCheckAgeMs`. After 3–4 samples: window = min(10 000 ms, 2 × max) (T, 8cd4ba9).
+- Then C (operator deposit arming + the window, own commit) → E (operator exit arming + EXIT_RULES_OPERATOR) → D
+  (amend r3 → exit, re-ack) → the exit fires at the next window.
