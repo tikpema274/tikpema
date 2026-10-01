@@ -182,3 +182,40 @@ trust layer gets competition.
   chain (JTRSY 281474976710662 → vault 0x1277…2bb1; JAAA 281474976710663 → 0x2dc7…e5c4; HYB, linked only to the app root,
   is 281474976710671 → 0xcf0c…a9ba). Signal: the version most builders read is the one that hides the exit mechanics, so a
   verifier that states the exit mode from the chain is answering a question the announcement leaves out.
+
+## 2026-10-01 — SwiftPay live on Arc mainnet (forum post 2026-09-26) — the closest peer yet
+- **Source**: Arc House "Ecosystem Showcase" post by Benneth Chiegene (SwiftPay), 2026-09-26; getswiftpay.xyz.
+- **Claim**: an everyday-finance app for stablecoins, Nigeria/Africa first: Circle wallets (Google/email), send/request
+  to @username, swap USDC⇄EURC, CCTP deposits, invoices, BatchPay, on-chain payroll, RecurePay (recurring payments under
+  on-chain caps), savings pockets with round-ups, **Earn in "vetted Morpho USDC/EURC vaults through Circle App Kit"**, and
+  **ALLIE, an AI payments agent "within limits you set"** (a Developer-Controlled Wallet). Security: "No single key
+  controls them. Every contract is owned by a 48-hour timelock run by a 2-of-3 Safe … can pause … can never move user
+  funds, and withdrawals stay open even while paused." Testnet: 164 users, 6 businesses. Next: an audit, a naira ramp,
+  Gateway/Nanopayments for ALLIE. **"Builders … working on payments, ramps, FX or agents on Arc, we'd love to integrate."**
+- **Checked** (read-only, Arc mainnet block ~23770952; all 5 contracts EXACT-match verified on Sourcify):
+  - **Ownership claim TRUE.** All five (SwiftPaySend, BatchPay, RecurePayExecutor, SwiftPayrollExecutor, SwiftSaveVault)
+    are owned by timelock `0x9178…f2E3` (created block 22738272, 2026-09-25 19:35Z), `getMinDelay` = 172 800 s (48 h),
+    self-administered. PROPOSER + EXECUTOR + CANCELLER = Safe `0x0cbb…39c5`, **2-of-3**. No open executor. The guardian
+    (pause-only) is the same Safe; only the timelocked owner can unpause.
+  - **"Can never move user funds": TRUE for savings, by code.** `SwiftSaveVault.rescueTokens` is bounded to
+    `balance − totalLocked` (untracked mis-sends only); `withdraw` has no `whenNotPaused` (deliberately open while paused
+    or after a token is delisted). `SwiftPaySend.rescueTokens` is unbounded, but that contract holds funds only within
+    a call.
+  - **Not said in the post:** each executor is driven by a **single EOA operator** (RecurePay `0xAe0e…41fB`, Payroll
+    `0x77C3…C94E`), and fees go to a single EOA (`0x0387…b56d`). The operator is **bounded on chain by the payer's own
+    settings**: fixed recipients, per-period caps, replay-proof execution ids, constant fees (1% executors/BatchPay,
+    0.1% send). A stolen operator key can pay a payer's OWN chosen recipients up to their caps, never an attacker. Two
+    nuances: the operator picks WHEN and HOW MUCH (≤ cap), and the 1% fee is charged ON TOP of the cap (a RecurePay
+    `maxPerPeriod` of X lets up to 1.01·X leave per period).
+  - SwiftSaveVault holds 0 USDC / 0 EURC today. **Not checkable from here:** which Morpho vaults "vetted" means
+    (Earn Kit's own list put Galaxy USDC first, with empty warnings and 5.57% redeemable); ALLIE's "limits" (off-chain;
+    its wallet is custodial).
+- **Signal**: a well-engineered peer covering Tikpema's surface (wallet, send, swap, bridge, recurring, savings, earn, an
+  agent with limits) and launched first on mainnet. Its contract hygiene is strong and true as stated. Its trust gap is
+  exactly the thesis: **"vetted vaults" is an assertion, not a verifiable verdict**, and the agent's limits are not on
+  chain.
+- **Changed**: nothing in priorities; it **sharpens** them. (1) Competing on the app surface (send/payroll/savings) is
+  crowded and SwiftPay is ahead on mainnet; Tikpema's edge is the verifier, not the wallet. (2) **They ask builders to
+  integrate.** DD as the check behind their Earn "vetted" claim (before a deposit, can you get it back out?) is a concrete
+  first customer for roadmap Stage 2's "verdict in someone else's money path". A conversation for T to decide, not
+  a commitment. (3) Their published, verifiable ownership chain sets a bar Tikpema's own mainnet go/no-go should meet.
