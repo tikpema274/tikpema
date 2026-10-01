@@ -219,3 +219,28 @@ trust layer gets competition.
   integrate.** DD as the check behind their Earn "vetted" claim (before a deposit, can you get it back out?) is a concrete
   first customer for roadmap Stage 2's "verdict in someone else's money path". A conversation for T to decide, not
   a commitment. (3) Their published, verifiable ownership chain sets a bar Tikpema's own mainnet go/no-go should meet.
+
+## 2026-10-01 — Portage (Arc testnet demo: Gateway payout consolidation + conditional escrow)
+- **Source**: portage-landing.vercel.app/demo; github.com/erhnysr/portage (Solidity, created 2026-07-27, last push
+  2026-09-28, 0 stars, one developer); npm `@erhnysr/portage-sdk`.
+- **Claim**: apps receive USDC on many chains via Circle Gateway, consolidated into a per-app balance on Arc and paid
+  out on demand. "Nothing is custodied … no server holds a key." Testnet only.
+- **Checked**: the five README-listed contracts exist on Arc TESTNET (5042002; AppRegistry, Ledger, PayoutEngine,
+  PortageRouter, PortageMintForwarder; Ledger holds 2.4 USDC). Read from the repo (not audited):
+  - The deposit's burn intent pins `destinationCaller` (the forwarder) and `destinationRecipient` (the router). The
+    app/account metadata (`PayoutMeta`) is **bound to the transfer's specHash by an EIP-712 signature from the depositor**,
+    because Gateway's testnet API 500s on non-empty `hookData`. Unattributable deposits go to quarantine (governor resolves).
+  - A custody invariant (`custodyTotal == Σ appTotal`) enforced as test-suite invariants. App isolation is structural.
+  - A **ConditionalEscrow** with pluggable release conditions: Timelock, MutualRelease, **AttestationCondition** (a
+    payer-named attester makes ONE on-chain `attest(recipients, amounts)` call; any address may be the attester) and
+    **VerdictCondition** (resolves from an on-chain "Arena" contest vote, 60/30/10, not a risk verdict).
+- **Signal**: builders are composing Circle Gateway + conditional release on Arc, the B2B post's missing middle,
+  as open infrastructure. The attester/condition pattern is exactly the slot a verifier fills: "release when an
+  independent party says so". DD signs OFF-chain (ERC-1271-verifiable reports), while AttestationCondition needs an
+  ON-chain `attest()` from the attester's address. Plugging DD in would mean DD's own agent wallet transacting, or a
+  condition that verifies a DD signature. Not a fit today, but the shape is right.
+- **Changed**: nothing in priorities. Two notes. (1) Portage's **signed metadata bound to the transfer spec hash** is a
+  concrete technique for Tikpema's open **checkout GAP 1** (binding a payment to its order without calldata): the payer
+  signs (spec, order) and the settlement verifies it. An idea for when GAP 1 is picked up, not a decision. (2) A
+  "condition that verifies a DD-signed verdict" is a candidate integration shape for conditional release (escrow, B2B)
+  if that ever becomes a target. Not a commitment.
