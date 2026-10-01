@@ -116,6 +116,71 @@ EOF
   echo "${GRN}✔ ledgers: staged alone.${OFF}"
 fi
 
+# ═══ TWO FAST GATES ON THE STAGED CONTENT (2026-10-01) ════════════════════════════════════════════════
+# · gate:registry when src/components/ or scripts/guard-registry.mjs is staged. After 523ed1f: "Nothing was signed or
+#   changed" was added to ConnectPasskey (declared claim-free); the commit ran four suites but not gate:registry, the
+#   deploy chain caught it 30 minutes in, and the claim was FALSE in the exact case about to be tested live.
+# · test:reachability when anything under scripts/ (or package.json) is staged. After 43a199b: process.exit landed
+#   above a suite's checks, so they could not redden a run; it was pushed and caught only by a later full test:all.
+# ⭐ THE STAGED CONTENT, NOT THE DISK: the index is exported ONCE (git checkout-index, ~1 s) and each gate runs on that
+# copy (~1–2 s each), so a partly staged file is judged by exactly what will be committed.
+# ⚠️ LIMITS, said in the output too: --no-verify skips these and NO CI re-runs them (deploys are CLI-only). gate:registry
+# recognises claim WORDS only (the structural figures rule, mechanicpairing §13, lives in test:all) and says a claim
+# EXISTS, never whether it is TRUE. Neither gate replaces test:all: a broken mock in another suite (d5239d7's class)
+# is invisible here — the full test:all before a push is what catches that.
+# ⛔ FAILS CLOSED: no node, or a gate script missing from the index, blocks rather than skipping silently.
+STAGED_GATES=$(git diff --cached --name-only --diff-filter=ACMRD)
+REG_TRIGGER=$(printf '%s\n' "$STAGED_GATES" | grep -E '^(src/components/|scripts/guard-registry\.mjs$)' || true)
+REACH_TRIGGER=$(printf '%s\n' "$STAGED_GATES" | grep -E '^(scripts/|package\.json$)' || true)
+GATE_BYPASS="--no-verify skips these checks and NO CI runs them later (deploys are CLI-only): bypassing them is a deliberate act — say why in the commit message."
+if [ -n "$REG_TRIGGER" ] || [ -n "$REACH_TRIGGER" ]; then
+  if ! command -v node >/dev/null 2>&1; then
+    echo "${RED}${BOLD}✖ pre-commit BLOCKED — the staged-content gates cannot run: node is not installed (fails closed).${OFF}" >&2
+    echo "  ${GATE_BYPASS}" >&2
+    exit 1
+  fi
+  GATE_TMP=$(mktemp -d -t gates-precommit.XXXXXX)
+  trap 'rm -rf "$GATE_TMP"' EXIT
+  git checkout-index -a --prefix="$GATE_TMP/"
+  # run_gate <label> <script> <trigger list> — refuses the commit on a non-zero exit, quoting the gate's ❌ lines.
+  run_gate() {
+    if [ ! -f "$GATE_TMP/$2" ]; then
+      echo "${RED}${BOLD}✖ pre-commit BLOCKED — $1 cannot run: $2 is not in the index (fails closed).${OFF}" >&2
+      echo "  ${GATE_BYPASS}" >&2
+      exit 1
+    fi
+    GATE_OUT=$(cd "$GATE_TMP" && node "$2" 2>&1)
+    GATE_STATUS=$?
+    if [ "$GATE_STATUS" -ne 0 ]; then
+      cat >&2 <<EOF
+${RED}${BOLD}✖ pre-commit BLOCKED — $1 fails on the STAGED content.${OFF}
+
+$(printf '%s\n' "$GATE_OUT" | grep -E '❌' | sed 's/^/  /')
+
+Staged files that triggered it:
+$(printf '%s\n' "$3" | sed 's/^/  /')
+
+$4
+${GATE_BYPASS}
+EOF
+      exit 1
+    fi
+    echo "${GRN}✔ $1: green on the staged content.${OFF} (--no-verify skips this; no CI re-runs it)"
+  }
+  if [ -n "$REG_TRIGGER" ]; then
+    run_gate "gate:registry" "scripts/verify-guard-registry.mjs" "$REG_TRIGGER" \
+      "A component declared claim-free (scripts/guard-registry.mjs) now carries claim-bearing copy, or the registry broke.
+Either remove the claim, or declare the component's suite in the registry and pin the claim there — and check the
+claim is TRUE on every path that renders it (the gate cannot)."
+  fi
+  if [ -n "$REACH_TRIGGER" ]; then
+    run_gate "test:reachability" "scripts/verify-assertion-reachability.mjs" "$REACH_TRIGGER" \
+      "An assertion sits after a suite's last process.exit, so it can never redden a run. Move the exit below every
+check (a hoisted function at the bottom works — see scripts/verify-ack-forgery.mjs, ae5281f)."
+  fi
+  rm -rf "$GATE_TMP"; trap - EXIT
+fi
+
 # ═══ ⚠️ A NOTE ON WHAT THIS HOOK CANNOT CHECK, AND WHAT NEARLY SHIPPED BECAUSE OF IT ═════
 # `node --check` ANSWERS "IS THIS PARSEABLE", NEVER "DOES THIS RUN".
 #
