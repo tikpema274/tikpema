@@ -31400,3 +31400,24 @@ override reads any of them (grep: no `process.env.MANDATE*` / `EXIT*`). Env is d
 ## Deferred, open
 gate:forgery's chain position still stops later gates on an UNTESTED. The two copy defects and the ack-gate
 between-deploys row are on the open list / go/no-go. Exit stays disarmed (piece 5 arming is T's decision).
+
+---
+
+# 🛠️ THE "UPFRONT FEE AS A DEDUCTION" FAMILY (2026-10-01): server text fixed (d5239d7, e269abc), 3 UI sites OPEN
+
+- **Fixed, not deployed:**
+  - Both ack refusals (_actions.mjs, agent-execute-plan.mjs) and the _analystb caution headline now come from ONE
+    producer, `bridgeAckSentence` (_bridge.mjs), in T's wording ("…charges a fee of F USDC on top of the A you're sending
+    — X% of the amount. The full A arrives; about A+F leaves your wallet.").
+  - The _analystb proceed headline no longer rounds the arrival to 2 dp (0.611 had shown as "0.61").
+  - `test:acksentence` drives all three for real: red 6/10 → 16/0 (ack paths), then 18/6 → 24/0 (analyst).
+- **The grep** (lose, lost, eats, deducted, taken from/out of, net of, after fees across src / netlify/functions / shared,
+  63 hits): almost all comments or unrelated ("lost record", "lost a CAS race", precision). **Three live defects, all
+  rendered UI on the UPFRONT path:**
+  - `src/components/MyAgentPanel.tsx:897`: "This bridge loses {X}% to fees" (agent bridge ack card)
+  - `src/components/MyAgentPanel.tsx:1149`: "Step {N} loses {X}% to fees" (plan step ack card)
+  - `src/components/BridgePanel.tsx:429`: "This bridge loses {X}% to fees" (BridgePanel, mechanic upfront, l.344).
+    Its body "on a small amount that is most of it" leans the same way.
+  - NOT pinned: verify-bridge-mechanic-pairing (130/0) guards "taken out of" / "on top of", not "loses".
+- **Correct as they stand (DEDUCTED = the self-signed path):** ManualBridgePanel.tsx:425 "(taken from the amount)";
+  shared/bridge-mechanic.mjs deducted copy.
