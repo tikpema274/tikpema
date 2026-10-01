@@ -70,13 +70,6 @@ if (!s || s.length < 16 || /no value set/i.test(s)) {
 
 const { token } = await mintProdToken({ address: OWNER, secret: s });
 
-// ── the end of every run: ONE verdict line, then the exit code that names it ──────────────────────
-const finish = (verdict, why) => {
-  console.log(`\n${verdict === "PASS" ? "✅" : verdict === "UNTESTED" ? "⛔" : "❌"} ${verdictLine(verdict, why)}`);
-  if (verdict === "UNTESTED") console.log("   The acknowledge gate was NOT examined on this deploy — red, and not a pass.");
-  console.log(`   pass ${pass} / fail ${fail}\n`);
-  process.exit(EXIT[verdict]);
-};
 
 const post = (body) => fetch(`${BASE}/api/agent-execute-plan`, {
   method: "POST",
@@ -132,3 +125,13 @@ check("🚨🚨 the server-issued token DIFFERS from the forgeable one — the k
 
 const v = step2Verdict(r2.status, b2, { forged, disclosure: d1 });
 finish(v.verdict === "PASS" && fail > 0 ? "FAIL" : v.verdict, v.verdict === "PASS" && fail > 0 ? `${fail} check(s) failed beside a PASS verdict` : v.why);
+
+// ── the end of every run: ONE verdict line, then the exit code that names it ──────────────────────
+// ⭐ A hoisted declaration AT THE BOTTOM (2026-10-01): test:reachability's rule is positional — an assertion textually
+// after the last `process.exit(` cannot redden a run — so the only exit besides the missing-secret one lives last.
+function finish(verdict, why) {
+  console.log(`\n${verdict === "PASS" ? "✅" : verdict === "UNTESTED" ? "⛔" : "❌"} ${verdictLine(verdict, why)}`);
+  if (verdict === "UNTESTED") console.log("   The acknowledge gate was NOT examined on this deploy — red, and not a pass.");
+  console.log(`   pass ${pass} / fail ${fail}\n`);
+  process.exit(EXIT[verdict]);
+}
