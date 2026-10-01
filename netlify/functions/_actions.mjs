@@ -3,7 +3,7 @@ import { circle, waitForTx } from "./_circle.mjs";
 import { ARC, CONTRACTS, USDC_DECIMALS, sendCapUsdc, bridgeCapUsdc, swapCapUsdc, vaultDepositCapUsdc } from "./_arc.mjs";
 import { agentSwap, valueInUsdc, SWAP_TOKENS } from "./_swap.mjs";
 import { agentPay } from "./_pay.mjs";
-import { agentBridge, bridgeFee, resolveDestination, bridgeFeeBand, bridgeAckToken, openBridgeQuote } from "./_bridge.mjs";
+import { agentBridge, bridgeFee, resolveDestination, bridgeFeeBand, bridgeAckToken, openBridgeQuote, bridgeAckSentence } from "./_bridge.mjs";
 import { resolveVault, inspectVault, gateDeposit, applyReportDisclosure, vaultDeposit, vaultWithdraw, readShareBalance } from "./_vault.mjs";
 import { vaultDdReport } from "./_vault-report.mjs";
 import { canSpendDay, recordAgentSpend, shoutLedgerFailure, recordBlocked, REFUSAL } from "./_budget.mjs";
@@ -594,13 +594,10 @@ export async function executeAction(step, ctx) {
     const expected = bridgeAckToken({ owner: ctx.session?.address, destinationKey: dest.key, amountUsdc: amount, band: bandInfo.band });
     if (bandInfo.band === "acknowledge") {
       if (step.ackToken !== expected) {
-        const pct = (bandInfo.feeRatio * 100).toFixed(1);
         return {
           ok: false,
-          blocked:
-            `this bridge would lose ${pct}% to fees — the fee to ${dest.label} is ~${fee.feeUsdc.toFixed(4)} USDC ` +
-            `on top of the ${amount} USDC you are moving — the full ${amount} arrives, and ` +
-            `~${(amount + fee.feeUsdc).toFixed(4)} USDC leaves your wallet. Confirm you accept that before it runs.`,
+          blocked: `${bridgeAckSentence({ amountUsdc: amount, feeUsdc: fee.feeUsdc, feeRatio: bandInfo.feeRatio })} ` +
+            `Confirm you accept that before it runs.`,
           // Threaded so the UI renders the disclosure and can return the ack — it never
           // re-derives the band from the two numbers.
           feeDisclosure: { ...bandInfo, destinationKey: dest.key, amountUsdc: amount, ackToken: expected },

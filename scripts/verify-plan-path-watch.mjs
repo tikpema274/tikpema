@@ -51,7 +51,8 @@ const SPEND = { receiptsBefore: 22, receiptsAfter: 22 };
  *  from agent-execute-plan's consent return. This is the fixture that proves `executed` cannot
  *  discriminate: it shares its value with the outage while being the opposite verdict. */
 const ACK_BODY = { executed: false, needsAck: true,
-  blocked: "step 1 would lose 89.9% to fees — the fee to Base (Sepolia) is ~0.0539 USDC of 0.06 USDC...",
+  // Updated 2026-10-01 to the shared bridgeAckSentence (upfront fee; pinned by verify-bridge-ack-sentence).
+  blocked: "step 1: This bridge charges a fee of 0.0539 USDC on top of the 0.06 you're sending — 89.9% of the amount. The full 0.06 arrives; about 0.1139 leaves your wallet. Nothing was executed. Confirm you accept that and run the plan again.",
   stepDisclosures: { 0: { band: "acknowledge", feeUsdc: 0.053947, feeRatio: 0.899, ackToken: "abc" } } };
 
 console.log("╔══════════════════════════════════════════════════════════════════════╗");

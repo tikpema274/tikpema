@@ -8,7 +8,7 @@ import { ensureOwnerWallet, WALLET_PROVISIONING_STATUS, walletProvisioningRefusa
 import { daySpend, budgetConfig } from "./_budget.mjs";
 import { recordBridge, recordPendingBridge } from "./_bridge-record.mjs";
 import { TxPendingError } from "./_circle.mjs";
-import { resolveDestination, bridgeFee, bridgeFeeBand, bridgeAckToken, openBridgeQuote, sealBridgeQuote, quoteWindowMs, bridgeBalanceRefusal, readBridgeBalanceMinor } from "./_bridge.mjs";
+import { resolveDestination, bridgeFee, bridgeFeeBand, bridgeAckToken, openBridgeQuote, bridgeAckSentence, sealBridgeQuote, quoteWindowMs, bridgeBalanceRefusal, readBridgeBalanceMinor } from "./_bridge.mjs";
 import { bridgeMechanicOf } from "../../shared/bridge-mechanic.mjs";
 import { capRefusal, ceilingRefusal, priceUnavailableRefusal, refusalSentence } from "./_refusal.mjs";
 import { safeQuoteId, markQuoteUsed } from "./_quote-record.mjs";
@@ -316,8 +316,7 @@ export async function handler(event) {
         return json(200, {
           executed: false,
           blocked:
-            `step ${i + 1} would lose ${(band.feeRatio * 100).toFixed(1)}% to fees — the fee to ${dest.label} is ` +
-            `~${fee.feeUsdc.toFixed(4)} USDC of ${amt} USDC, so only ~${fee.netUsdc.toFixed(4)} would arrive. ` +
+            `step ${i + 1}: ${bridgeAckSentence({ amountUsdc: amt, feeUsdc: fee.feeUsdc, feeRatio: band.feeRatio })} ` +
             `Nothing was executed. Confirm you accept that and run the plan again.`,
           needsAck: true,
           stepDisclosures: {
