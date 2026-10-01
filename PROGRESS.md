@@ -31150,3 +31150,46 @@ cirBTC→USDC borrowing draw on the USDC/cirBTC Morpho market drained on 09-30 (
 - **Keyrock Prime USDC `0x5bef…3123`:** Earn Kit reports liquidity **39.84**, the drained cirBTC pool's free amount
   exactly (see the Borrow Kit entry).
 - Not done: a deposit quote (POST, key-gated); who deposited the 5.0M; whether Earn Kit's UI surfaces `status`.
+
+---
+
+# 🛠️ gate:forgery — DERIVED PROBE + UNTESTED VERDICT (43a199b), and the STANDING GAP between deploys (2026-10-01)
+
+## What happened
+Deploy 6abe1aca's chain exited 1 at gate:forgery. Prod's actual answer to step 1 (sent alone, quoteOnly, 09:05Z):
+`{"executed":false,"blocked":"step 1: the fee to Base (Sepolia) is ~0.0649 USDC — as much as or more than the 0.06 USDC
+being moved. Nothing was executed."}`. The fixed 0.06 probe only reaches the gate while 0.25 ≤ fee/amount < 1
+(`_bridge.mjs:373-374` bands; fee floor at `agent-execute-plan.mjs:161`); the fee crossed the top edge. The log said
+`requoted=undefined band=—`, so "broken or not examined?" had to be re-derived by hand. gate:spec / deployloss /
+stage:ledger were skipped by the `&&` chain and run by hand (green; ledgers ae631eb).
+
+## Was it a silent skip? NO: it failed CLOSED
+Every logged run 09-26 → 09-30 was 5/5 (fee 0.0543, ratio ~90%). Every earlier failure was red and stopped the chain
+(09-13 seal-before-ack; the "cannot value a bridge" outage; today). The weakness was a red that did not say WHICH red.
+
+## The fix (43a199b; scripts only, nothing to deploy)
+- (a) Step 0 quotes 1 USDC for the live fee; the probe = fee / 0.6, rounded up, ceiling 0.25 USDC (above → UNTESTED,
+  never a bigger probe). Spend guard unchanged: step 2 only on a sealed acknowledge-band quote.
+- (b) PASS (0) / FAIL (1) / UNTESTED (3, red). The last line is always `gate:forgery VERDICT=<…> — <why>`, quoting
+  prod's `blocked` text. **grep `gate:forgery VERDICT=` in a deploy log answers which red.** Logs before 43a199b do not
+  carry it: 2026-10-01-1021.log's red is UNTESTED, established by hand (above).
+- Suite test:forgeryverdict 36/0 (today's exact body → UNTESTED); mutations red 35/1 ×2.
+- **LIVE on deploy 6abe1aca:** fee 0.054553 → probe 0.091 (59.9%), forged REFUSED, served 78464d27… ≠ forged
+  0839aa55… → **VERDICT=PASS**. The acknowledge gate IS verified on the current deploy.
+- Cost per run: **0 USDC moved** when the gate holds. If the gate were broken, step 2 would enter the executor with a
+  probe of ≤ 0.25 + fee from the probe owner's agent wallet (0xfd80…5767): testnet USDC today.
+- ⚠️ Seen in passing, NOT fixed: prod's ack sentence said "the fee … is ~0.0546 USDC of 0.091 USDC, so only ~0.0910 would
+  arrive" while saying 59.9% is lost to fees. One of the two figures is wrong. Its own look.
+- Fee volatility, measured: 0.0649 (09:05Z) → 0.0546 (~09:40Z) on Base Sepolia.
+
+## 🚨 STANDING GAP — nothing checks the acknowledge gate BETWEEN deploys
+gate:forgery runs only inside deploy:prod. plan-path-watch (scheduled) hits agent-execute-plan between deploys, but
+only for VALUATION; it never presents a forged token. So between deploys **the strongest available claim is
+"unchanged since it last passed"**: no file in the path changed (the served tree is content-hashed), and that it passed
+at that deploy. That claim does NOT cover what can change without a code change. Most notably the token is keyed by the
+SESSION_SECRET env var (`_auth.mjs`; fail-closed if unset per its header). An env change is outside the tree hash.
+Whether a Netlify env change reaches running functions without a redeploy is NOT measured here.
+**Mainnet go/no-go: YES, it belongs there.** On mainnet a forged ack that entered the executor would bridge REAL USDC.
+Proposed row for §2 (Money), NOT added (T's checklist): "The acknowledge gate is verified BETWEEN deploys: a scheduled
+forgery probe (e.g. folded into plan-path-watch, server-side, minting its own probe session) with the same three verdicts
+and a page on FAIL or UNTESTED, and a capped mainnet probe wallet so a FAIL is bounded."
