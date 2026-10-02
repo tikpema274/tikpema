@@ -218,10 +218,9 @@ export async function attachAttestation(report, {
       registry: String(registry).toLowerCase(),
       chainId: String(chainId),
       signature: signature.toLowerCase(),
-      // Pass 2 is not built, so no blockHash exists to bind. Stated as a FIELD rather than left to
-      // inference: without it the payload binds an index, not state identity, so an old attestation
-      // does not by itself prove it is not describing a since-changed contract.
-      blockHashBound: false,
+      // Step 5 (2026-10-02): true when the SIGNED body carries subject.blockHash. ⚠️ This object is excluded from the
+      // signed bytes, so this is a CLAIM: verifyAttestation derives hashBound from the subject + the chain, never from here.
+      blockHashBound: typeof report?.subject?.blockHash === "string" && report.subject.blockHash.length > 0,
       validityMeaning: VALIDITY_MEANING,
     },
   };
@@ -303,11 +302,14 @@ export async function verifyAttestation(report, { client, expect = {}, identity 
   const boundTo = {
     chainId: report?.subject?.chainId ?? null,
     blockNumber: report?.subject?.blockNumber ?? null,
-    blockHash: null, // pass 2 not built — see attestation.blockHashBound
+    // ⭐ STEP 5 (2026-10-02): filled ONLY after the chain confirms the report's signed subject.blockHash/blockTimestamp.
+    // A report without them (the purchased reports, frozen) stays null here: absent never reads as bound.
+    blockHash: null,
+    blockTimestamp: null,
     address: report?.subject?.address ?? null,
   };
   const verdict = (valid, reason, extra = {}) => ({
-    valid, reason, boundTo,
+    valid, reason, boundTo, hashBound: false,
     method: report?.attestation?.method ?? null,
     keyClass: report?.attestation?.keyClass ?? null,
     agentId: report?.attestation?.agentId ?? null,
@@ -422,7 +424,34 @@ export async function verifyAttestation(report, { client, expect = {}, identity 
     return verdict(null, "indeterminate-rpc", { detail: `isValidSignature returned unusable data: ${JSON.stringify(ret)?.slice(0, 80)}` });
   }
   const magic = retHex.slice(0, 10).toLowerCase();
-  if (magic === MAGIC) return verdict(true, "ok", { digest, ownerOnChain });
+  if (magic === MAGIC) {
+    // ⭐ STEP 5: a report that SIGNS a block identity is checked against the chain at that block number. A different
+    // hash or timestamp → INVALID (the report describes a block the chain does not have); unreadable → null, never true.
+    const sh = report?.subject?.blockHash;
+    if (sh === undefined || sh === null) return verdict(true, "ok", { digest, ownerOnChain, hashBound: false });
+    let raw;
+    try {
+      const n = Number(report?.subject?.blockNumber);
+      if (!Number.isInteger(n) || n < 0) return verdict(null, "block-unreadable", { digest, ownerOnChain, detail: "the report signs a block hash but no usable block number" });
+      const out = await client.call({ method: "eth_getBlockByNumber", params: ["0x" + n.toString(16), false] });
+      raw = out && typeof out === "object" && "result" in out ? out.result : out;
+    } catch (e) {
+      return verdict(null, "block-unreadable", { digest, ownerOnChain, detail: `the bound block could not be read: ${e?.message ?? e}` });
+    }
+    if (!raw || typeof raw !== "object" || !/^0x[0-9a-fA-F]{64}$/.test(String(raw.hash)) || !/^0x[0-9a-fA-F]+$/.test(String(raw.timestamp))) {
+      return verdict(null, "block-unreadable", { digest, ownerOnChain, detail: "the chain returned no usable header for the bound block number" });
+    }
+    if (String(raw.hash).toLowerCase() !== String(sh).toLowerCase()) {
+      return verdict(false, "block-hash-mismatch", { digest, ownerOnChain, detail: `the report signs block hash ${sh} at block ${report.subject.blockNumber}; the chain has ${raw.hash}` });
+    }
+    const chainTs = Number(BigInt(raw.timestamp));
+    if (chainTs !== Number(report?.subject?.blockTimestamp)) {
+      return verdict(false, "block-timestamp-mismatch", { digest, ownerOnChain, detail: `the report signs timestamp ${report?.subject?.blockTimestamp}; the chain's block has ${chainTs}` });
+    }
+    boundTo.blockHash = String(sh).toLowerCase();
+    boundTo.blockTimestamp = chainTs;
+    return verdict(true, "ok", { digest, ownerOnChain, hashBound: true });
+  }
   return verdict(false, "bad-signature", {
     digest, ownerOnChain, returned: magic,
     detail: "the owning account did not validate this signature over the canonical bytes — the report was altered after signing, or it was signed by a different key",

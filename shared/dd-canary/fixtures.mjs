@@ -33,12 +33,20 @@ const powerGroups = Object.keys(POWER_SIGS);
 
 /** The hermetic transport. Any read the fixture did not declare is a THROWN miss, never a default —
  *  a fixture that silently reads a default is testing nothing. */
+// ⭐ The pinned block AND its header are declared together, here, for every fixture world (step 5, 2026-10-02: analyze()
+// binds the report to the pinned block's hash + timestamp). Only THIS tag is answered: a read of any other block is
+// still an undeclared miss.
+const PINNED = Object.freeze({ number: 1000, tag: "0x3e8" });
+const PINNED_HEADER = Object.freeze({ number: "0x3e8", hash: "0x" + "c0".repeat(32), timestamp: "0x6abfdbf0" });
 function mockClient(handlers = {}) {
   return {
     chain: { name: "canary-fixture" },
     assert: async () => 5042002,
-    pin: async () => ({ number: 1000, tag: "0x3e8" }),
+    pin: async () => ({ ...PINNED }),
     async call({ method, params }) {
+      if (method === "eth_getBlockByNumber" && params?.[0] === PINNED.tag && handlers.eth_getBlockByNumber === undefined) {
+        return { result: PINNED_HEADER, query: { endpoint: "fixture://", method, params, reproduce: "# fixture pinned header" }, evidence: { httpStatus: 200 } };
+      }
       const key =
         method === "eth_getCode" ? `code@${String(params[0]).toLowerCase()}`
         : method === "eth_getStorageAt" ? `slot@${String(params[1]).toLowerCase()}`

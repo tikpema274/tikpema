@@ -32183,3 +32183,44 @@ order is imposed; ~70-call bursts against public endpoints risk rate limits → 
   backoff), not verified: that run's notChecked reasons were not captured. In the mandate such a run exceeds the window →
   stale-check refusal (fail-safe; it would have refused anyway, exit fact no-value).
 - **LIVE determinism:** 3 Galaxy runs pinned to block 23907996 → keccak(canonical body) `0x6ef2885b…` ×3: **BYTE-IDENTICAL**.
+
+---
+
+# ✅ DD MORPHO V2 WINDOW — STEP 5: BLOCK-HASH + BLOCK-TIMESTAMP BINDING (2026-10-02, branch, NOT deployed)
+
+## Built
+- **`analyze()`** reads the PINNED block's header ONCE through the same client (quorum-agreed) and signs
+  `subject.blockHash` + `subject.blockTimestamp` (integer chain seconds) in the body: canon/1 unchanged, content bound
+  (09-28 correction). A header that is unreadable, malformed, or names another block → **refusal**
+  (`subject-block-unreadable` / `subject-block-mismatch`): a new report is never quietly unbound. `baseReport` carries
+  both on every report (null where never read). Coverage gains one entry, `subject:block`.
+- **`verifyAttestation()`**: after a valid ERC-1271 signature, a report that SIGNS a block identity is checked with
+  `eth_getBlockByNumber(subject.blockNumber)`: different hash → **invalid `block-hash-mismatch`**; different timestamp →
+  **invalid `block-timestamp-mismatch`**; unreadable → **`valid: null`, `block-unreadable`** (never true). Verdicts carry
+  `hashBound` + `boundTo.blockHash/blockTimestamp` ONLY when the chain confirms them. A report WITHOUT them (the
+  purchased reports) verifies as before with NO block read: `hashBound: false`, `boundTo.blockHash: null`.
+- `attestation.blockHashBound` = whether the signed body carries a hash (a CLAIM; the verdict derives from the chain).
+- ⚠️ **`shared/dd-canary/fixtures.mjs` changed (PRODUCTION, DD surface):** its hermetic fixture chain now declares the
+  pinned block's header beside the pinned block (only that tag; any other block read stays an undeclared miss). Without
+  it the DEPLOYED canary would have reported the detector broken after the window deploy.
+
+## Proof
+- **`test:blockbinding`** (scripts/dd/verify-block-binding.mjs): analyze binds both (in the signed bytes); header
+  unreadable / another block / malformed → refusal; verifier: correct → valid + hashBound; wrong hash / wrong timestamp →
+  invalid; unreadable → null; tampering breaks the signature; legacy → valid, not bound, no read. **RED (2 legit passes) →
+  GREEN 16/0.** Mutations (restored byte-identical): skip hash compare; unreadable → true; analyze ignores a header
+  problem; blockHashBound constant false: each caught.
+- Mock chains taught the header (they answer every pinned tag; the canary only its own): `_mock-chain.mockBlockHeader`
+  (shared, so the mandate suites' VERIFY mocks serve the SAME header analyze bound), the V2 fixtures, settle-gate,
+  facilitator. verify-settle-gate's coverage pin moved 1 → 2 checked (the header read; still "thin").
+- **test:all 184/184** (10.8 min).
+
+## Live, before deploy (read-only)
+- **The three purchased reports (Blobs `dd-analyze-pending`, frozen bytes)** verified with the NEW verifier against Arc
+  testnet (quorum): 2234a767 (schema 0.3.0, block 63135598), 397b67b1 (0.2.0, 56435867), e7e855fb (0.2.0, 56456637) →
+  **valid true, ok, agent 851891, hashBound false, boundTo.blockHash null**. Unchanged, and not read as bound.
+- **Fresh reports are bound and the chain agrees:** Galaxy (mainnet, block 23911124, 0x7d491c66…, ts 1790960164 =
+  16:56:04Z) and xylo (testnet = the paid path, block 65147240, 0x30a364d7…, 16:56:10Z): hash = and ts = on BOTH
+  endpoints of each chain.
+- **Not provable before deploy:** a NEW report signed by the production DD key verifying `hashBound: true` live (needs
+  the production key; after the window deploy).

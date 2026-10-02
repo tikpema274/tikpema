@@ -15,6 +15,7 @@
 // No facilitator, no key, no broadcast: `settle` is injected and records that it was called.
 
 import { analyze } from "../../shared/onchain-analyze/index.mjs";
+import { mockBlockHeader } from "./_mock-chain.mjs"; // step 5: analyze() binds the report to the pinned block's header
 import { settleDecision, runThenSettle, noChargeResponse, SETTLE_REASON } from "../../shared/x402/settle-gate.mjs";
 import { attachAttestation, unsignedAttestation } from "../../shared/onchain-analyze/attest.mjs";
 import { POWER_SIGS, sel, EIP1967_IMPL_SLOT } from "../../shared/onchain-facts/index.mjs";
@@ -79,7 +80,7 @@ function mockClient(handlers = {}) {
         : method === "eth_getStorageAt" ? `slot@${String(params[1]).toLowerCase()}`
         : method === "eth_call" ? `call@${String(params[0]?.data)}`
         : method;
-      const h = handlers[key];
+      const h = handlers[key] ?? (key === "eth_getBlockByNumber" ? mockBlockHeader(params[0]) : undefined);
       if (h === undefined) throw Object.assign(new Error(`mock: unhandled ${key}`), { transient: false });
       if (typeof h === "function") return h();
       return { result: h, query: { endpoint: "mock://", method, params, reproduce: `# mock ${key}` }, evidence: { httpStatus: 200 } };
@@ -161,7 +162,8 @@ section("CASE 2 — THIN report → STILL SETTLES");
   const ck = report.coverage.checked.filter((c) => c.kind === "power").length;
 
   check("engine RAN but MOST POWERS are unchecked", nc === 9 && ck === 0, `powers: ${ck} checked / ${nc} notChecked`);
-  check("overall coverage is thin", report.coverage.totals.checked === 1 && report.coverage.totals.notChecked === 11,
+  // 2 checked since step 5 (2026-10-02): the own-code read + the pinned block's header (subject:block). Still thin.
+  check("overall coverage is thin", report.coverage.totals.checked === 2 && report.coverage.totals.notChecked === 11,
     `total ${report.coverage.totals.checked} checked / ${report.coverage.totals.notChecked} notChecked`);
   check("refusal is still null (a thin answer is an answer)", report.refusal === null, report.refusal?.reason ?? "null");
   check("⭐⭐ THIN REPORT SETTLES", d.settle === true && d.reason === SETTLE_REASON.ANSWERED, d.reason);

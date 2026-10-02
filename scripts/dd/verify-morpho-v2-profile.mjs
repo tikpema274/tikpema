@@ -96,7 +96,8 @@ function client(handlers, { pins = PINS } = {}) {
       const key = method === "eth_getCode" ? `code@${String(params[0]).toLowerCase()}`
         : method === "eth_getStorageAt" ? `slot@${String(params[0]).toLowerCase()}@${String(params[1]).toLowerCase()}`
         : method === "eth_call" ? `call@${String(params[0]?.to).toLowerCase()}@${String(params[0]?.data)}` : method;
-      const v = handlers[key];
+      // step 5: the pinned block's header (analyze binds the report to it); a test may still override it.
+      const v = handlers[key] ?? (key === "eth_getBlockByNumber" ? { number: params[0], hash: "0x" + "ab".repeat(32), timestamp: "0x6abfdbf0" } : undefined);
       if (v === undefined) throw Object.assign(new Error(`mock: unhandled ${key}`), { transient: false, query: { endpoint: "mock://", method, params, reproduce: "# mock" } });
       if (typeof v === "function") return v();
       return { result: v, query: { endpoint: "mock://", method, params, reproduce: `# mock ${key}` }, evidence: { httpStatus: 200 } };

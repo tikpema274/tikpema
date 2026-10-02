@@ -16,6 +16,7 @@
 // here can move funds; that is a property of the module's shape (everything is injected), not of the
 // test being careful.
 
+import { mockBlockHeader } from "./_mock-chain.mjs";
 import { readFileSync } from "node:fs";
 import { analyze } from "../../shared/onchain-analyze/index.mjs";
 import { attachAttestation, unsignedAttestation } from "../../shared/onchain-analyze/attest.mjs";
@@ -75,7 +76,7 @@ function mockClient(handlers = {}) {
         : method === "eth_getStorageAt" ? `slot@${String(params[1]).toLowerCase()}`
         : method === "eth_call" ? `call@${String(params[0]?.data)}`
         : method;
-      const h = handlers[key];
+      const h = handlers[key] ?? (key === "eth_getBlockByNumber" ? mockBlockHeader(params[0]) : undefined); // step 5: the pinned block's header
       if (h === undefined) throw Object.assign(new Error(`mock: unhandled ${key}`), { transient: false });
       if (typeof h === "function") return h();
       return { result: h, query: { endpoint: "mock://", method, params, reproduce: `# mock ${key}` }, evidence: { httpStatus: 200 } };

@@ -13,6 +13,12 @@
 // instead of reports. (Learned the hard way while writing verify-policy.)
 
 import { sel } from "../../shared/onchain-facts/index.mjs";
+import { keccak256, toHex } from "viem";
+
+/** The block header a mock chain serves for a pinned tag (step 5, 2026-10-02: analyze() binds the report to the pinned
+ *  block's hash + timestamp, and verifyAttestation re-checks them). Deterministic in the tag, so a SEPARATE verify-side
+ *  mock can serve the SAME header with mockBlockHeader(tag). */
+export const mockBlockHeader = (tag) => ({ number: String(tag), hash: keccak256(toHex(`mock-block:${String(tag).toLowerCase()}`)), timestamp: "0x6abfdbf0" });
 
 export const SUBJ = "0x1111111111111111111111111111111111111111";
 export const IMPL = "0x2222222222222222222222222222222222222222";
@@ -37,7 +43,7 @@ export function mockClient(handlers = {}) {
         : method === "eth_getStorageAt" ? `slot@${String(params[1]).toLowerCase()}`
         : method === "eth_call" ? `call@${String(params[0]?.data)}`
         : method;
-      const h = handlers[key];
+      const h = handlers[key] ?? (key === "eth_getBlockByNumber" ? mockBlockHeader(params[0]) : undefined);
       if (h === undefined) throw Object.assign(new Error(`mock: unhandled ${key}`), { transient: false });
       if (typeof h === "function") return h();
       return { result: h, query: { endpoint: "mock://", method, params, reproduce: `# mock ${key}` }, evidence: { httpStatus: 200 } };

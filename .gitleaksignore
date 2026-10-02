@@ -24,6 +24,9 @@
 # reasoning, including the fact that these addresses hold sweepable Arc-testnet funds.
 scripts/dd/verify-attestation.mjs:generic-api-key:56
 scripts/dd/verify-attestation.mjs:generic-api-key:57
+# scripts/dd/verify-block-binding.mjs (step 5, 2026-10-02) reuses the SAME public key as a signing fixture:
+#   line 55  anvil account #1 -> 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 (derivation checked 2026-10-02)
+scripts/dd/verify-block-binding.mjs:generic-api-key:55
 
 # ═══ ⭐ THE SAME TWO ANVIL KEYS, AT THEIR HISTORICAL POSITION ════════════════════════════════════
 # 🚨 THE ENTRIES ABOVE ONLY SILENCE THE WORKING-TREE SCAN, AND THAT HID A DISAGREEMENT.

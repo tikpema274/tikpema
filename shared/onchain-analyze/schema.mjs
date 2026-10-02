@@ -130,11 +130,13 @@ export function assertReportValid(report) {
  * object via attachAttestation(); it is excluded from canon/1 by object, so its presence moves no
  * signature.
  */
-export function baseReport({ address, chainId, chainName, blockNumber }) {
+export function baseReport({ address, chainId, chainName, blockNumber, blockHash = null, blockTimestamp = null }) {
   return {
     schemaVersion: SCHEMA_VERSION,
     severityMeaning: SEVERITY_MEANING,
-    subject: { address, chainId, chainName, blockNumber },
+    // ⭐ blockHash + blockTimestamp (step 5, 2026-10-02): the PINNED block's identity, signed in the body under canon/1.
+    // Present on every report (null on refusals that never read it): an absent field must never read as "bound".
+    subject: { address, chainId, chainName, blockNumber, blockHash, blockTimestamp },
     // ⭐ Present on EVERY report, both paths. A pure Set membership check against the pinned SDN
     // snapshot — no chain read — so it is meaningful even on a chain-unreachable refusal. FACT only;
     // the STOP decision is ofacVerdict() in ofac.mjs, kept out of the report (facts, not verdicts).

@@ -25,7 +25,7 @@ import { recoverAddress } from "viem";
 import { quorumClient } from "../shared/onchain-analyze/quorum.mjs";
 import { DOMAIN } from "../shared/onchain-analyze/attest.mjs";
 import { EIP1967_IMPL_SLOT } from "../shared/onchain-facts/index.mjs";
-import { SUBJ, OWNER, ZERO_WORD, word, codeWith, mkc } from "./dd/_mock-chain.mjs";
+import { SUBJ, OWNER, ZERO_WORD, word, codeWith, mkc, mockBlockHeader } from "./dd/_mock-chain.mjs";
 import { pinToAnchor, resolveAnchor, isChainSeconds } from "../shared/vault-mandate/anchor.mjs";
 import { readStateAtAnchor } from "../shared/vault-mandate/state-reads.mjs";
 import { signedCheckReport, runMandateCheck, readBaseline, redemptionSignalForVault, anchorBlockFacts } from "../netlify/functions/_vault-mandate-check.mjs";
@@ -68,6 +68,7 @@ function verifyClient({ registryOwner = VC, signer = key, down = false, account 
   const wrap = (hex) => ({ result: hex, query: {}, evidence: { httpStatus: 200 } });
   return { async call({ method, params }) {
     if (down) throw new Error("rpc down");
+    if (method === "eth_getBlockByNumber") return wrap(mockBlockHeader(params[0])); // step 5: the SAME header analyze() bound
     if (method === "eth_chainId") return wrap("0x" + BigInt(chainId).toString(16));
     const to = String(params?.[0]?.to ?? "").toLowerCase(), data = String(params?.[0]?.data ?? "");
     if (to === REG && data.startsWith("0x6352211e")) return wrap("0x" + BigInt(registryOwner).toString(16).padStart(64, "0"));

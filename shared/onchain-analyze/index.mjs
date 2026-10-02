@@ -81,6 +81,19 @@ export async function analyze(address, { client } = {}) {
     };
   }
 
+  // ⭐ STEP 5: the PINNED block's hash + timestamp, read ONCE through the same client (quorum-agreed when it is a quorum),
+  // signed in the body. A header that cannot be read, or that names another block, REFUSES below: a new report is never
+  // quietly unbound. (The verifier re-checks both against the chain: verifyAttestation.)
+  let blockId = { hash: null, timestamp: null, problem: null };
+  {
+    const h = await cov.runCheck("subject:block", { kind: "subject" }, () => client.call({ method: "eth_getBlockByNumber", params: [blk.tag, false] }));
+    const b = h.ok ? h.value : null;
+    if (!b || typeof b !== "object") blockId.problem = "subject-block-unreadable";
+    else if (!/^0x[0-9a-fA-F]+$/.test(String(b.number)) || Number(BigInt(b.number)) !== Number(blk.number)) blockId.problem = "subject-block-mismatch";
+    else if (!/^0x[0-9a-fA-F]{64}$/.test(String(b.hash)) || !/^0x[0-9a-fA-F]+$/.test(String(b.timestamp))) blockId.problem = "subject-block-unreadable";
+    else blockId = { hash: String(b.hash).toLowerCase(), timestamp: Number(BigInt(b.timestamp)), problem: null };
+  }
+
   const shape = await detectShape(cov, client, addr, blk);
   const owner = await resolveOwner(cov, client, addr, blk, shape);
 
@@ -139,7 +152,7 @@ export async function analyze(address, { client } = {}) {
 
   const manifest = cov.manifest();
   const report = {
-    ...baseReport({ address: addr, chainId, chainName: client.chain?.name ?? null, blockNumber: blk.number }),
+    ...baseReport({ address: addr, chainId, chainName: client.chain?.name ?? null, blockNumber: blk.number, blockHash: blockId.hash, blockTimestamp: blockId.timestamp }),
     shape: {
       class: shape.class,
       family: shape.family,
@@ -203,6 +216,10 @@ export async function analyze(address, { client } = {}) {
     refusal:
       shape.class === "unknown"
         ? { reason: "shape-unclassified", detail: shape.evidence?.why ?? "the shape-determining reads did not complete" }
+        : blockId.problem
+          ? { reason: blockId.problem, detail: blockId.problem === "subject-block-mismatch"
+              ? "The block header returned for the pinned block number names a different block, so this report cannot be bound to the state it describes. NO VERDICT."
+              : "The pinned block's hash and timestamp could not be read, so this report cannot be bound to the state it describes (a report is signed only with its block identity). NO VERDICT — this is NOT a clean result." }
         : v2RefusalReason
           ? { reason: v2RefusalReason, detail: `Morpho Vault V2 recognition is by the pinned VaultV2Factory's attestation. ${v2.why}. NO VERDICT is given — this is NOT a clean result.` }
         : isV2 && pvCheck && !pvCheck.ok
