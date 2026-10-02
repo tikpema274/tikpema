@@ -357,3 +357,28 @@ trust layer gets competition.
   adds Arc, it arrives with distribution. **Next proof that would settle the output question:** their
   `pct_tvl_withdrawable` for Gauntlet WETH Prime (one browser view of the vault page, or one keyed API call), against
   0 measured.
+
+## 2026-10-02 — ⭐ MEASURED: a zero-timelock allocator removed Galaxy USDC's redemption route (block 23403623)
+- **Source**: our own chain reads (rpc.mainnet.arc.io + arc-mainnet.drpc.org, AGREE), prompted by Morpho's API reading
+  Galaxy at 0 on both liquidity fields where its page showed $4.22M on 09-28.
+- **Claim** (ours, now measured): the change between 09-28 and 09-30 was not the field; it was the vault's wiring.
+- **Checked**:
+  - Binary search on `liquidityAdapter()` by historical `eth_call`: block **23403622 = 0xeE00…7c2C** (set),
+    **23403623 = 0x0** (unset), **2026-09-29 17:23:55Z**, block hash 0x91e13722…63ec.
+  - That block's vault log: **`SetLiquidityAdapterAndData`** (topic0 0x9deb43d7…), sender **0x43e4…a537**, new adapter
+    0x0, data empty; **tx 0x87283833…8383**, status success, sent DIRECTLY by that address (code size 0: an **EOA**);
+    `isAllocator(0x43e4…a537)` true at 23403622; input decodes to `setLiquidityAdapterAndData(address,bytes)` (0x0, 0x).
+  - VaultV2.sol @2026-08-13: `setLiquidityAdapterAndData` requires only `isAllocator[msg.sender]` (:628): **no timelock,
+    not abdicable**. No notice was possible.
+  - Effect, same reads: totalAssets 84,807,145.54; idle 0; the cirBTC market 99.99% lent, **free 20.54 USDC**. Redeemable
+    by an ordinary redeem: **20.54 → 0**. ⚠️ The route was already nearly dry; what was removed is the ROUTE: market
+    liquidity freed later cannot reach a Galaxy redeemer until an allocator sets an adapter again, and new deposits stay
+    idle (the ~5.0M of 09-30 23:05Z became exit liquidity for whoever redeemed first; by 10-02 idle was 0).
+  - Our series stands (field meaning unchanged): 8.84% (09-26, adapter set) → 5.30% (09-28, chain at block 23198843
+    = 4,226,250.11 via the adapter) → **route removed 09-29 17:23:55Z** → 0.00012% (09-30 12:34Z, idle 102) → 5.57%
+    (09-30 23:05Z, idle 5.0M) → 0 (10-02: idle 0, market 100.00% lent).
+- **Signal**: on Morpho V2 the most consequential power over an exit is the one with NO delay: an allocator, here an EOA,
+  rewiring the redemption route. Timelocks and abdications (what ratings score) do not cover it.
+- **Changed**: recorded prominently in the roadmap as THE measured case for the exit-path re-check (piece 5's fresh
+  liquidity-adapter read; DD's `compareExitPath`). Step 3 names `setLiquidityAdapterAndData` and `setIsAllocator` among
+  `exitPowers` (T 10-02). Priorities unchanged.

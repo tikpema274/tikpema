@@ -31860,3 +31860,15 @@ were reachable through the liquidity adapter, which was SET then; 5.57% (09-30 2
 unset between 09-28 12:31Z and 09-30 12:34Z. Roadmap corrected in this commit; the branch entry annotated in its own.
 **Cause:** I generalised from today's state (adapter unset) backwards over a series I had recorded myself, without
 re-reading it. The record contradicted me two screens up.
+
+---
+
+# ⭐ DATED: GALAXY'S REDEMPTION ROUTE WAS REMOVED IN BLOCK 23403623 (2026-09-29 17:23:55Z) BY AN EOA ALLOCATOR (2026-10-02, read-only)
+
+Both endpoints agree on every line. Binary search on `liquidityAdapter()` (historical eth_call): 23403622 = 0xeE00…7c2C,
+**23403623 = 0x0** (hash 0x91e13722…63ec). Block log: `SetLiquidityAdapterAndData(sender 0x43e4…a537, 0x0, "")`, **tx
+0x87283833bf59c19101eb6f3f374017fd757059df7ef8ad4323fb5dbc516d8383**, success; `from` = 0x43e4…a537, code size 0 (EOA);
+`isAllocator` true at 23403622; input = `setLiquidityAdapterAndData(0x0, 0x)`. Allocator-immediate in VaultV2 (:628): not
+timelockable, not abdicable. Effect: redeemable 20.54 USDC → 0 (market already 99.99% lent); the ROUTE removed, not
+millions at that instant. Recorded prominently: roadmap (promise section) + direction log 2026-10-02.
+(Allocator address truncated per the owner-identity rule; the full value is re-derivable from the tx.)

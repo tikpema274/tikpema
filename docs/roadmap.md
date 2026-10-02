@@ -18,6 +18,15 @@ Webacy's published Morpho formula gives 16.83% (direction log 2026-10-02); Earn 
 warnings while only 5.57% was redeemable (its idle cash: liquidity adapter unset, its market fully lent); Borrow
 Kit lists a market with ~40 USDC free of 185M.
 
+> **⭐ THE MEASURED CASE (2026-09-29, Arc mainnet).** In block **23403623** (2026-09-29 17:23:55Z, tx
+> `0x87283833…8383`) a single **EOA allocator** (`0x43e4…a537`) called `setLiquidityAdapterAndData(0x0, 0x)` on **Galaxy
+> USDC** (~$84.8M), removing its **redemption route** in one transaction. That power is allocator-immediate in VaultV2:
+> **not timelockable, not abdicable, so no notice was possible.** From that block an ordinary redeem draws only on idle
+> cash; deposits stay idle and become the exit liquidity for whoever redeems first. ⚠️ At that instant the market behind
+> the route was already 99.99% lent: the route was carrying **20.54 USDC**. The removal took the ROUTE (future market
+> liquidity), not millions at that moment. This is what the exit-path re-check exists for: a deposit check that
+> confirmed a route at block N says nothing at block N+1. (Direction log 2026-10-02; PROGRESS "GALAXY … SETTLED".)
+
 **What "done" means for the promise:** an agent on Arc mainnet is about to deposit into a vault Circle's kits offer.
 Tikpema returns a signed verdict that states what can be redeemed now and who can change that. A vault it cannot
 read is refused. The same verdict gates Tikpema's own vault mandate. The check is proven continuously, not only at
