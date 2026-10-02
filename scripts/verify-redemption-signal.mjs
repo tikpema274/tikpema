@@ -24,7 +24,6 @@
 
 import { mock } from "node:test";
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import { toFunctionSelector } from "viem";
 import { codeWith } from "./dd/_mock-chain.mjs";
 import { readStateAtAnchor } from "../shared/vault-mandate/state-reads.mjs";
@@ -201,10 +200,16 @@ section("7 — off the DD surface");
   const stamp = readFileSync("scripts/stamp-build.mjs", "utf8");
   const dirs = JSON.parse(stamp.match(/const DD_SURFACE_DIRS = (\[[^\]]*\])/)[1]);
   const filesList = [...stamp.match(/const DD_SURFACE_FILES = \[([\s\S]*?)\n\];/)[1].matchAll(/^\s*"([^"]+)"/gm)].map((m) => m[1]);
-  const changed = execFileSync("git", ["diff", "--name-only", "HEAD"], { encoding: "utf8" }).split("\n").filter(Boolean)
-    .concat(execFileSync("git", ["ls-files", "--others", "--exclude-standard"], { encoding: "utf8" }).split("\n").filter(Boolean));
-  const onSurface = changed.filter((f) => dirs.some((d) => f.startsWith(`${d}/`)) || filesList.includes(f));
-  ok("⭐ no changed or new file is on the DD surface (no ddTree rotation)", onSurface.length === 0, onSurface.join(", ") || `${changed.length} files checked`);
+  // ⚠️ SCOPED 2026-10-02. This used to read the WORKING TREE (`git diff HEAD` + untracked) — true of 6d04d13 at the moment
+  // it was committed, and afterwards red for ANY uncommitted DD-surface edit by unrelated work (the Morpho V2 branch's
+  // chains.mjs / endpoints.mjs), green again once that work was committed. A check whose verdict depends on what else is
+  // uncommitted says nothing about THIS change. It now names the modules this change owns (6d04d13's production files).
+  const OWN = ["netlify/functions/_vault-mandate-check.mjs", "netlify/functions/_vault.mjs",
+    "shared/vault-mandate/state-reads.mjs", "shared/vault-redemption.mjs"];
+  const missing = OWN.filter((f) => { try { readFileSync(f); return false; } catch { return true; } });
+  ok("  the modules this guard covers all exist (a renamed one would make the check vacuous)", missing.length === 0, missing.join(", "));
+  const onSurface = OWN.filter((f) => dirs.some((d) => f.startsWith(`${d}/`)) || filesList.includes(f));
+  ok("⭐ none of the redemption-signal modules is on the DD surface (no ddTree rotation)", onSurface.length === 0, onSurface.join(", ") || `${OWN.length} modules checked`);
   ok("  the new module is not under a DD directory", !dirs.some((d) => "shared/vault-redemption.mjs".startsWith(`${d}/`)));
 }
 
