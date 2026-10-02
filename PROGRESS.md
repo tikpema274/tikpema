@@ -31872,3 +31872,47 @@ Both endpoints agree on every line. Binary search on `liquidityAdapter()` (histo
 timelockable, not abdicable. Effect: redeemable 20.54 USDC → 0 (market already 99.99% lent); the ROUTE removed, not
 millions at that instant. Recorded prominently: roadmap (promise section) + direction log 2026-10-02.
 (Allocator address truncated per the owner-identity rule; the full value is re-derivable from the tx.)
+
+---
+
+# 2026-10-02 — Evidence pages merged to main (6a78033); two findings recorded (T)
+
+**Merged** `feature/public-evidence` → main by fast-forward (e879730, e77fb93, 6a78033). Pages in `site/evidence/`,
+published to tikpema.xyz by `npm run deploy:site:prod` (T, in a terminal). `docs/evidence-pages.md` holds the rule.
+test:all 179/179 on 6a78033 (real exit 0). **STALE_AFTER_DAYS = 7 stands (T).**
+
+## ⭐ FINDING 1 — the marketing front page was one claim behind for 19 days, and nothing noticed
+- **Found by `gate:sitelive`**, generalised to the manifest today, on its first run: `index.html` REPO AHEAD — live is
+  dd28998 (2026-09-12), the repo is two commits on.
+- **The claim:** live says **"15 named refusal reasons"**. The repo said 16 from a300359 (2026-09-13 13:47 +0200) and 17
+  from 04cac3b (2026-09-24). So the live page has been wrong since **2026-09-13: 19 days** (measured from the commit dates;
+  the exact moment the 16th reason reached production was not re-derived).
+- **Why nobody saw it:** `test:siteclaims` (in test:all) binds the REPO's page to the code, and it was green the whole
+  time, correctly. The live page is checked only by `gate:sitelive`, which is NOT in test:all (network) and runs only at
+  the end of `deploy:site:prod`. No marketing deploy happened after 09-12, so nothing compared live against the repo.
+- **Same class as TikpemaPay's /about test count** (tikpemapay PROGRESS 2026-09-29: /about said 528 while the suite was
+  529, and no test failed): a public number whose check covers a COPY of the claim (the repo file, a pinned constant), not
+  the claim a reader actually sees. Every offline check stays green while the served page drifts.
+- **Closes on the first evidence deploy:** `deploy:site:prod` publishes the whole manifest, including "17".
+  ⚠️ **Still open after that:** nothing runs `gate:sitelive` between deploys. This is the same gap as (d) for the
+  evidence pages; a scheduled read of the served site would cover both.
+
+## ⛔ OPEN ITEM 2 — a suite whose result depends on which machine runs it
+- `test:scriptinert` §9 (d5ccbca, 2026-09-07) spawns `scripts/bridge-direct.mjs --dry-run`, which reads the repo's
+  `.env` (loadEnv) and needs `AGENT_WALLET_ADDRESS` (plus the CIRCLE_API_KEY / CIRCLE_ENTITY_SECRET names) **before it prints
+  the banner the section asserts**. With `.env` present: 93/0. In a checkout without it (a fresh clone, a git worktree):
+  4 red, all banner checks.
+- **Why it matters:** a check whose result depends on the machine can pass for the wrong reason, and fail for a reason that
+  says nothing about the code. On 10-02 the second case happened: two worktree runs reported it red, and I reported "main is
+  red" to T. It was not. The banner logic also runs only where the agent wallet's real address and the Circle key names are
+  present.
+- **Not fixed, deliberately:** a fix changes how a money-moving script is invoked (e.g. print the banner before the
+  credential reads, or a suite-supplied stand-in address). That is T's call. Until then: run test:all in a checkout that has
+  the repo's `.env`, and treat a §9 failure elsewhere as UNTESTED, not red.
+
+## ⚠️ Raised for T before the first evidence deploy: one address shown in full
+The Galaxy page prints the allocator `0x43e4a89e8f8cea5006e0eaefd12d746a5967a537` in full: its `isAllocator(sender)` and
+`eth_getCode(sender)` commands need it. The 10-02 PROGRESS entry above truncated it "per the owner-identity rule". It is a
+third party's address, emitted in the vault's own event, so the rule (written for OUR owners' wallets) arguably does not
+apply. But the two records disagree, and the page is the more public of the two. T decides; the page can be rebuilt with
+the commands deriving the address from the transaction instead.
