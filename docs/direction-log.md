@@ -65,7 +65,9 @@ trust layer gets competition.
 - **Signal**: the platform's own risk feed missed the exit fact. The trust layer is not just empty; its absence is
   measurable on launch day.
 - **Changed**: produced the **Morpho V2 recommendation** (PROGRESS 58486d7): widen DD in depth (V2 profile + exit
-  liquidity) aimed at Earn Kit's hook. Decision is T's.
+  liquidity) aimed at Earn Kit's hook. Decision is T's. ⛔ *Corrected 2026-10-02: T had already decided this on 09-28
+  (PROGRESS 0b1858b: DD takes V2, signs structure + number, block-hash binding in the same window). The recommendation
+  agrees with it; nothing was pending.*
 
 ## 2026-10-01 — Surf (crypto data layer)
 - **Source**: post on Surf Skill + Surf's own docs, pricing and repo.

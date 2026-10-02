@@ -24,7 +24,7 @@ deploy. A new user understands all of this from one screen.
 | Built and proven | Built, not yet live or armed | Not built |
 |---|---|---|
 | DD service: signed verdicts (ERC-1271), sold at 0.06 USDC over x402, 3 real purchases | Vault mandate pieces 1–5 deployed **disarmed** (deposits, exit, monitoring all off) | DD profile for Morpho V2 vaults (refused today as unrecognised) |
-| Caps, sealed fee quotes, per-step consent, acknowledge gate (forgery-proven) | The upfront-fee copy fixes (pushed, next deploy) | Exit liquidity as a reported DD fact |
+| Caps, sealed fee quotes, per-step consent, acknowledge gate (forgery-proven); the upfront-fee copy fixes (live 6abe9d6d, 10-01) | | Exit liquidity as a reported DD fact |
 | Send / swap / bridge / vault / escrow / checkout, each proven on chain | Mainnet §0 settled (pure Arc); §2 ack-gate row added | DD on Arc mainnet (chain registry has no 5042 entry) |
 | Auth hole closed and proven live; failed reads refuse, never "no record" | | A between-deploys check of the ack gate |
 | | | One coherent first-run experience |
@@ -39,14 +39,20 @@ Each stage lists its **goal**, what **exists**, what it **needs from T**, what i
 - **Goal:** DD returns a verdict on Morpho V2 vaults (what Earn Kit lists), stating exit liquidity as a fact.
 - **Exists:** DD engine and service; redemption semantics (6d04d13); recognition gate that refuses unknown vocabulary
   (4bc0d03); Morpho research and role getters (memory: morpho-vault-roles-verifiable-badge).
-- **Needs from T:** the **Morpho V2 in DD** decision (recommendation recorded, PROGRESS 58486d7). Whether exit
-  liquidity enters the signed report (a schema bump).
+- **Decided (T, 2026-09-28, PROGRESS 0b1858b), not open:** DD TAKES Morpho V2. It signs the STRUCTURE and the exit-
+  liquidity NUMBER (a past-block fact is a receipt, re-checkable by historical `eth_call`). Block-hash binding lands in
+  the SAME DD-surface change (schema `onchain-analyze/0.3.0` → `0.4.0`, one refusal window). ⚠️ This was listed here as
+  an open T decision on 10-01 (and Claude's 58486d7 was framed as a recommendation for it); corrected 10-02 so it is not
+  decided twice.
+- **Needs from T:** when that change deploys. Claude recommends: not before piece 5's exit has fired, because it
+  changes the signed canon the mandate's check verifies (today `boundTo.blockHash: null`) and rotates ddTree.
 - **Needs from Claude:**
   1. Recognise V2 via the factory's `isVaultV2`, and add an Arc mainnet (5042) entry to DD's chain registry.
   2. The power model: timelocks, abdications, current values, not mere presence (e.g. a zero-timelock allocator that
      can unset the liquidity adapter).
   3. Exit liquidity: redeemable now (idle + reachable adapter liquidity) vs total assets.
   4. Keep "unrecognised ⇒ refuse" true for every part the profile does not understand.
+  5. Block-hash binding in the attestation canon (decided 09-28: the same change).
 - **Cost:** a DD-surface change → ddTree rotates → one refusal window + a schema bump, planned per deploy.
 - **Done when:** DD returns a signed verdict for Galaxy USDC that states its redeemable share and the allocator power
   behind it, matching an independent chain read; a vault outside the profile is still refused.
@@ -54,8 +60,8 @@ Each stage lists its **goal**, what **exists**, what it **needs from T**, what i
 ### Stage 2 — The verdict is in the money path
 
 - **Goal:** the verdict gates real deposits, ours and others'.
-- **Exists:** vault mandate pieces 1–5 deployed disarmed; the window-3 receipt carries `exitPath` + `check`; one
-  signing-latency sample (1368 ms). Earn Kit's `onBeforeAuthorize` identified as the insertion point (09-28).
+- **Exists:** vault mandate pieces 1–5 deployed disarmed; the window-3 receipt carries `exitPath` + `check`; signing
+  latency 1165–1368 ms (4 samples, not window data); **full-path sample 1: `wouldBeCheckAgeMs` 1447 ms (10-02 tick)**. Earn Kit's `onBeforeAuthorize` identified as the insertion point (09-28).
 - **Needs from T:**
   - The freshness window value, once latency is measured (more than one sample).
   - Arming deposits (`MANDATE_DEPOSIT_ARMED` + `MANDATE_ARMED_FROM` together, own commit).
@@ -127,9 +133,9 @@ Each stage lists its **goal**, what **exists**, what it **needs from T**, what i
    file in the same commit.
 4. Mark a stage **done** only with its stated proof, quoted with where it came from.
 
-## Next, concretely (2026-10-01)
+## Next, concretely (2026-10-01; corrected 2026-10-02)
 
-1. **T:** decide Morpho V2 in DD (Stage 1). Everything in Stage 1 waits on it.
-2. **T:** when to deploy the upfront-fee copy fixes (d5239d7, e269abc, 9dd681a, 019f715).
+1. ~~**T:** decide Morpho V2 in DD~~. **Already decided by T on 09-28** (Stage 1 above). Stage 1 is a build, not a wait.
+2. ~~**T:** when to deploy the upfront-fee copy fixes~~. **Deployed** 10-01 (6abe9d6d, verified in bundle and server).
 3. **Claude, unblocked now:** Stage 3 items 1–2 (the scheduled forgery probe; moving gate:forgery in the chain) and
    collecting the latency distribution from the daily mandate ticks (Stage 2, item 1).

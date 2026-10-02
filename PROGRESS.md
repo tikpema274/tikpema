@@ -31323,6 +31323,12 @@ Published deploy 6abe1aca throughout; **no deploy created in the window** (check
 
 # 🧭 RECOMMENDATION FOR T's OPEN DECISION "MORPHO V2 IN DD" (2026-10-01): widen DD in DEPTH, not breadth
 
+> ⛔ **CORRECTION (2026-10-02): the decision was NOT open.** T decided it on **2026-09-28** ("DD TAKES Morpho V2"; sign
+> the structure AND the number; block-hash binding in the same window; PROGRESS 0b1858b, section "DD + MORPHO V2 + EXIT
+> LIQUIDITY — DECIDED, SCOPED"). This entry, the roadmap and the 10-01 session close recorded it as open, which is how
+> a decision gets made twice. What follows agrees with the 09-28 decision; read it as supporting reasoning, not a
+> pending ask. The roadmap is corrected in the same commit.
+
 **Recommendation (Claude, not a decision):** build the Morpho V2 vault profile WITH exit liquidity as a reported fact next,
 aimed at being what Earn Kit's `onBeforeAuthorize` hook calls. Breadth (more chains, generic token/contract scanning,
 more feeds) is the data layers' home ground. Surf (researched today) has ~119 endpoints, no risk endpoints, no Arc.
