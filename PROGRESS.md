@@ -31774,3 +31774,55 @@ The deploy record must state specifically, from the deploy log:
 This is what C (operator deposit arming, a money deploy) depends on. A PASS proves (1)–(3) on the green path only;
 the red path (forgery 1/3 still staging the ledgers) stays proven by test:deferredverdict alone until one occurs live.
 Also to verify live: the served agent-parameters disclaimer (all four agents) and the proposal line in the bundle.
+
+---
+
+# ✅ DEPLOY 6abfa931 — DEFERRED-VERDICT'S FIRST LIVE RUN + the two copy fixes LIVE, ALL DISARMED (2026-10-02)
+
+**Launched by T from main, deploy:prod.** Lock holder **PID 35030** (T noted PID 35012, the launching shell; it was not
+in the process table when read). Log `/home/salifu/Arc-now2/deploy-logs/2026-10-02-1440.log` (16,363 lines). Lock
+acquired 12:40:50.119Z; released "PID 35030 … **command exited 0**". Exactly one acquire and one release in the log.
+
+## What prod serves
+- Deploy **`6abfa93155a89459dc00a57f`**, published **2026-10-02T13:37:10.736Z**, commit **`544a98c`**, tree
+  **`33427e10af65`**, clean, stamped 12:53:08Z. gate:deployed **✅**: served tree + commit match, control plane == data
+  plane, no orphaned deploys among the 25 newer.
+- Newly live since 6abe9d6d: `25006e5` (agent-parameters disclaimer), `544a98c` (proposal fee line states what leaves).
+  `a33e577` (deferred-verdict) is scripts-only: it acted in THIS run, not in the bundle.
+
+## ⭐ THE DEFERRED-VERDICT WRAPPER'S FIRST LIVE RUN — the three points, from the log
+1. **All four steps ran.** The `[deferred-verdict] summary` block: `✓ gate:forgery: exit 0` · `✓ gate:spec: exit 0` ·
+   `✓ gate:deployloss: exit 0` · `✓ stage:ledger: exit 0`. None NOT RUN.
+2. **The chain exited with forgery's own code:** `gate:forgery VERDICT=PASS` (exit 0: served e9612e668f7c… ≠ forged
+   bcee8c1b1c05…) and the lock's release line says `command exited 0`. Equal, and no later step failed.
+3. **The ledgers were staged:** stage:ledger "ledger staged — commit it (dd-refusal-window-log.jsonl,
+   deploy-loss-log.jsonl)", the stamp correctly NOT staged. Committed alone **d4c7c2d** (135→136, 49→50, one line
+   each); gate:ledger now ✅ "both ledgers committed up to date".
+- ⚠️ **What this proves and what it does not:** the wrapper runs in the real chain, under the real lock, prints its
+  summary, and passes a PASS through as 0 with every step run. It is the GREEN path. The path it was built for
+  (forgery FAIL 1 / UNTESTED 3 → spec, deployloss and stage:ledger still run, chain exits 1 / 3) is proven only by
+  test:deferredverdict (the real chain string, npm stubbed) until a red occurs live. C can depend on it on that basis.
+
+## Gates
+- test:all **178/178** (10.3 min, in the chain). gate:types, gate:watch, gate:rpc passed (chain reached deploy).
+- capture:window: ddTree **d79683273abc** unrotated → "NO WINDOW OBSERVED — and this is NOT a pass" (none expected;
+  no DD-surface file changed). Recorded.
+- gate:spec ✅ (negative control, OpenAPI 3.1.0, price 0.060000 = code, unpaid POST → 402 at 60000 atomic).
+- gate:deployloss: 597 deploys scanned, 17 abandoned all CARRIED, **0 new**.
+
+## The two fixes, verified LIVE
+- **/api/agent-parameters:** the served disclaimer for **all four agents** (researcher, analyst_b, executor, vault) is
+  **byte-identical** to the pinned sentence (compared against the local handler), "MUTABLE, BUT ONLY BY A DEPLOY. …";
+  zero "every request" / "re-read" / "at any time" in any response.
+- **The proposal line:** served bundle `/assets/index-C9ydvJcg.js` contains `… USDC arrives on ${n} and
+  ~${(c+a).toFixed(4)} USDC leaves your wallet.` (net + fee). The chat reply (agent-act) uses the same producer; not
+  exercised live (it needs a real bridge proposal).
+
+## Disarmed
+No file under shared/vault-mandate or _vault-mandate-deposit.mjs changed 8cd4ba9 → 544a98c: every arming constant is
+still false/null as read at 8cd4ba9 (sample-1 entry). Tomorrow's 11:17Z tick (sample 2) runs on THIS deploy: a
+different function bundle, same mandate code. Note it beside the sample.
+
+## Next
+Samples 2 (10-03 11:17Z) and 3 (10-04) → window = min(10 000 ms, 2 × max) → C (operator deposit arming + the window,
+own commit, T deploys). C's deploy no longer stalls on a forgery UNTESTED.
