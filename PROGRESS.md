@@ -31866,12 +31866,15 @@ re-reading it. The record contradicted me two screens up.
 # ⭐ DATED: GALAXY'S REDEMPTION ROUTE WAS REMOVED IN BLOCK 23403623 (2026-09-29 17:23:55Z) BY AN EOA ALLOCATOR (2026-10-02, read-only)
 
 Both endpoints agree on every line. Binary search on `liquidityAdapter()` (historical eth_call): 23403622 = 0xeE00…7c2C,
-**23403623 = 0x0** (hash 0x91e13722…63ec). Block log: `SetLiquidityAdapterAndData(sender 0x43e4…a537, 0x0, "")`, **tx
-0x87283833bf59c19101eb6f3f374017fd757059df7ef8ad4323fb5dbc516d8383**, success; `from` = 0x43e4…a537, code size 0 (EOA);
+**23403623 = 0x0** (hash 0x91e13722…63ec). Block log: `SetLiquidityAdapterAndData(sender 0x43e4a89e8f8cea5006e0eaefd12d746a5967a537, 0x0, "")`, **tx
+0x87283833bf59c19101eb6f3f374017fd757059df7ef8ad4323fb5dbc516d8383**, success; `from` = 0x43e4a89e8f8cea5006e0eaefd12d746a5967a537, code size 0 (EOA);
 `isAllocator` true at 23403622; input = `setLiquidityAdapterAndData(0x0, 0x)`. Allocator-immediate in VaultV2 (:628): not
 timelockable, not abdicable. Effect: redeemable 20.54 USDC → 0 (market already 99.99% lent); the ROUTE removed, not
 millions at that instant. Recorded prominently: roadmap (promise section) + direction log 2026-10-02.
-(Allocator address truncated per the owner-identity rule; the full value is re-derivable from the tx.)
+(CORRECTED 2026-10-02, T: the allocator address is now written in full. It had been truncated "per the owner-identity
+rule", but that rule was written for OUR OWN wallets: this is a third party's address, emitted in the vault's own public
+event, and the evidence page prints it in full because both check-it-yourself commands need it. The record now matches
+the page, not the reverse. Full 0xeE00…7c2C / hash values are elided here only for length; both are on the page.)
 
 ---
 
@@ -31887,15 +31890,51 @@ test:all 179/179 on 6a78033 (real exit 0). **STALE_AFTER_DAYS = 7 stands (T).**
 - **The claim:** live says **"15 named refusal reasons"**. The repo said 16 from a300359 (2026-09-13 13:47 +0200) and 17
   from 04cac3b (2026-09-24). So the live page has been wrong since **2026-09-13: 19 days** (measured from the commit dates;
   the exact moment the 16th reason reached production was not re-derived).
-- **Why nobody saw it:** `test:siteclaims` (in test:all) binds the REPO's page to the code, and it was green the whole
-  time, correctly. The live page is checked only by `gate:sitelive`, which is NOT in test:all (network) and runs only at
-  the end of `deploy:site:prod`. No marketing deploy happened after 09-12, so nothing compared live against the repo.
+- **⭐ THE CHECK WAS NOT MISSING; IT RAN AT THE WRONG MOMENT (T).** Two checks exist, and each ran exactly as designed:
+  - `test:siteclaims` (in test:all) checks the REPO's page against the code. It was green the whole time, and correctly:
+    the repo said 16, then 17.
+  - `gate:sitelive` checks the SERVED page. It runs only at the end of `deploy:site:prod`. No marketing deploy happened
+    after 09-12, so for 19 days the one check that looks at what readers see never ran.
+  - So the served page is checked only when it is changed. It drifts precisely when nobody changes it, which is exactly
+    when nothing looks.
 - **Same class as TikpemaPay's /about test count** (tikpemapay PROGRESS 2026-09-29: /about said 528 while the suite was
-  529, and no test failed): a public number whose check covers a COPY of the claim (the repo file, a pinned constant), not
-  the claim a reader actually sees. Every offline check stays green while the served page drifts.
-- **Closes on the first evidence deploy:** `deploy:site:prod` publishes the whole manifest, including "17".
-  ⚠️ **Still open after that:** nothing runs `gate:sitelive` between deploys. This is the same gap as (d) for the
-  evidence pages; a scheduled read of the served site would cover both.
+  529, and no test failed). A public number checked against a COPY of the claim, not the claim a reader sees.
+- **Closes on the first evidence deploy:** `deploy:site:prod` publishes the whole manifest, including "17". That fixes
+  this instance only.
+
+### What would close the class — SCOPED, NOT BUILT
+The fix is a check that runs on a CLOCK, not on a deploy. Two shapes:
+
+**S1 — a scheduled `gate:sitelive`.** Run the existing script daily from a checkout of main; alert on any exit other
+than 0.
+- ✅ No new code. It is the full instrument: served bytes + the published deploy's own sha1, direction per file, live
+  files not in the repo.
+- ⚠️ It needs a git checkout (direction comes from history), Netlify CLI auth and the network. So it runs from a machine
+  (this WSL box via cron) or a scheduled cloud agent holding a Netlify token. That is the same machine-dependence as
+  OPEN ITEM 2: a machine that is off produces no run, and no run reads as quiet. It needs its own liveness signal
+  (alert when the last successful run is older than ~2 days).
+
+**S2 — the dd-watch pattern pointed at the marketing site.** A Netlify scheduled function on the app site
+(`site-watch`), with its own store, its own Discord channel (muting is per channel, so it must not share the money or DD
+channels), a push on transitions only, and a liveness record each tick.
+- Compares each served tikpema.xyz manifest file against the same path on **origin/main** (raw.githubusercontent;
+  public repo). "Differs for longer than a grace period" (~24 h; a deploy takes seconds) = pushed but not published, or
+  live ahead. That is exactly this 19-day case.
+- ⭐ It can carry (d) for the evidence pages in the same tick: read `data-block-ts` from the served pages and alert at
+  ≥ 7 days; re-verify the published `report.json` (one ERC-1271 eth_call on Arc testnet); optionally re-run the Galaxy
+  fact assertions (16 mainnet reads).
+- ⚠️ Costs:
+  - It is a new app-site function, so it ships with an app deploy. NOT before C and E: those carry nothing optional.
+  - It sees origin/main, not local main: an unpushed change is invisible to it. Acceptable, since unpushed means
+    unreviewed.
+  - It reports "differs from main", not the per-file direction; gate:sitelive stays the diagnostic.
+  - It needs the manifest from GitHub (tree API, unauthenticated, 60 requests/h; hourly is fine), or a committed
+    manifest file.
+  - Scheduled functions answer HTTP with 403 (netlify.toml notes). So no httpMethod guard: dd-watch's 2026-08-11 guard
+    refused its own cron for five days.
+
+S2 closes more (it is independent of any one machine, and it absorbs (d)). S1 is available today with no deploy. **Neither
+is built.**
 
 ## ⛔ OPEN ITEM 2 — a suite whose result depends on which machine runs it
 - `test:scriptinert` §9 (d5ccbca, 2026-09-07) spawns `scripts/bridge-direct.mjs --dry-run`, which reads the repo's
@@ -31910,9 +31949,8 @@ test:all 179/179 on 6a78033 (real exit 0). **STALE_AFTER_DAYS = 7 stands (T).**
   credential reads, or a suite-supplied stand-in address). That is T's call. Until then: run test:all in a checkout that has
   the repo's `.env`, and treat a §9 failure elsewhere as UNTESTED, not red.
 
-## ⚠️ Raised for T before the first evidence deploy: one address shown in full
-The Galaxy page prints the allocator `0x43e4a89e8f8cea5006e0eaefd12d746a5967a537` in full: its `isAllocator(sender)` and
-`eth_getCode(sender)` commands need it. The 10-02 PROGRESS entry above truncated it "per the owner-identity rule". It is a
-third party's address, emitted in the vault's own event, so the rule (written for OUR owners' wallets) arguably does not
-apply. But the two records disagree, and the page is the more public of the two. T decides; the page can be rebuilt with
-the commands deriving the address from the transaction instead.
+## ✅ DECIDED (T): the allocator address stays in full on the page
+The Galaxy page prints `0x43e4a89e8f8cea5006e0eaefd12d746a5967a537` in full; its `isAllocator(sender)` and
+`eth_getCode(sender)` commands need it. T: it is a third party's address from the vault's own public event; the
+truncation rule was written for our own wallets. The earlier entry (route removal, above) was corrected to match the page.
+⚠️ Not changed (not asked): docs/roadmap.md:22 and docs/direction-log.md:368,370 still show `0x43e4…a537`.
