@@ -109,12 +109,19 @@ const ALLOW = {
   "shared/dd/identity.mjs":                    { cls: "record", expect: { chainId: 1 }, why: "DD_PINNED_IDENTITY.chainId beside agentId 851891 — where the identity is REGISTERED; verifyAttestation pins against it and checks eth_chainId before any read; a record like dd-identity (T, 2026-09-20; moved from attest-circle.mjs 2026-09-25)" },
   // a claim on a static page, bound to the client source by a suite (it cannot import)
   "site/index.html":                           { cls: "site", expect: { chainId: 1 }, why: "static marketing page; verify-site-claims.mjs binds its chain-id claim to src/config/chain.ts" },
+  // the public evidence pages (scripts/public-pages, 2026-10-02) — GENERATED, never hand-edited; a rebuild moves
+  // these counts on purpose, and this table is where that move is seen.
+  "public/evidence/xylo-testnet/report.json":  { cls: "record", expect: { rpcHost: 13, chainId: 2 }, why: "the signed report published verbatim: its reads name the endpoints they were made on and its subject/attestation name the chain; the bytes are fixed by the signature" },
+  "public/evidence/xylo-testnet/index.html":   { cls: "site", expect: { rpcHost: 27, chainId: 1 }, why: "generated evidence page: every command names the endpoint its read was made on, so a stranger repeats THAT read; built by build-report-page.mjs from report.json" },
+  "scripts/public-pages/build-report-page.mjs": { cls: "record", expect: { rpcHost: 1 }, why: "IDENTITY_RPC: where agent 851891 is REGISTERED (Arc testnet) — signature validity is asked there whatever chain the subject is on; like shared/dd/identity.mjs" },
+  "scripts/public-pages/verify-report-file.mjs": { cls: "record", expect: { rpcHost: 2 }, why: "the stranger's verifier: its default RPC (and its usage line) is the identity's registration chain; --rpc overrides it" },
   // annotations left in place — comment-only quotations of a MEASURED or PUBLISHED fact; rewording would misquote
   "netlify/functions/built.mjs":               { cls: "annotation", expect: { chainId: 2 }, why: "comment-only: the 402 responses PROBED 2026-08-27 name eip155:<id> — a record of an observation" },
   "netlify/functions/_x402-vanilla.mjs":       { cls: "annotation", expect: { chainId: 2 }, why: "comment-only: quotes @circle-fin/x402-batching's own `networks:` example verbatim" },
   "scripts/dd/checks/repo-address-audit.mjs":  { cls: "annotation", expect: { chainId: 2 }, why: "comment-only: a worked example of the rule this check enforces" },
   // controls — suites and fixtures that PIN the value on purpose
   "scripts/verify-env-assert.mjs":             { cls: "control", why: "THE env-assert suite — pins all three on purpose (mixed-case wallet for normalisation)" },
+  "scripts/public-pages/verify-public-pages.mjs": { cls: "control", why: "offline suite: the identity RPC in its test context" },
   "scripts/verify-site-claims.mjs":            { cls: "control", why: "binds site/index.html's chain-id claim to the client source" },
   "scripts/verify-arc-gateway-watch.mjs":      { cls: "control", why: "fixture of Circle's Gateway list — the watch's control column" },
   "scripts/verify-fee-reconcile.mjs":          { cls: "control", why: "asserts the fee reconcile is chain-pinned" },
