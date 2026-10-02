@@ -31827,3 +31827,36 @@ different function bundle, same mandate code. Note it beside the sample.
 ## Next
 Samples 2 (10-03 11:17Z) and 3 (10-04) → window = min(10 000 ms, 2 × max) → C (operator deposit arming + the window,
 own commit, T deploys). C's deploy no longer stalls on a forgery UNTESTED.
+
+---
+
+# 📏 GALAXY "$4.22M → 0" SETTLED: a REAL change in the vault and the market, not in the field (2026-10-02, read-only)
+
+T's question: Morpho's API reports Galaxy USDC at 0 on BOTH `liquidity` and `forceDeallocatableLiquidity`, where its page
+showed "Liquidity $4.22M" on 09-28. A real change, a change in the field's meaning, or a different field?
+
+**The one check:** rebuild the redeemable figure FROM THE CHAIN at the 09-28 moment (Arc serves historical `eth_call`),
+both endpoints (rpc.mainnet.arc.io + arc-mainnet.drpc.org, AGREE). Block for 2026-09-28T12:31:51Z = **23198843**
+(0x74387be5…c261), by timestamp bisection.
+
+| | 09-28 12:31:51Z, block 23198843 | 10-02, block ~23901720 |
+|---|---|---|
+| `liquidityAdapter()` | **0xeE00…7c2C** (the market adapter; 160-byte liquidityData) | **UNSET** (data empty) |
+| idle USDC | 0 | 0 |
+| cirBTC market 0xc2db905f… | supply 179,813,196.37 · borrow 175,586,946.26 · **free 4,226,250.11** (97.64%) | supply = borrow = 189,908,826.01 · **free 0** (100.00%) |
+| Galaxy's position | 79,805,076.39 | 89,709,878.52 |
+| **redeemable by an ordinary redeem** (idle + adapter route) | **4,226,250.11 USDC = 5.30%** | **0** |
+
+- **09-28: the chain gives 4,226,250.11 USDC = 5.30%** = Morpho's `liquidityUsd` that day (4,225,552 USD, at the USDC
+  price). **The field meant then what it means now: idle + what the liquidity adapter's market can pay.**
+- **Today's two zeros are both TRUE:** `liquidity` 0 (no adapter, idle 0); `forceDeallocatable` 0 (the market has NO free
+  liquidity at all: 100.00% utilised). **Our series (8.84% → 5.30% → 0.00012% → 5.57% → 0) stands.**
+
+## ⛔ CORRECTION OF MY OWN ERROR (made earlier today, 10-02)
+I wrote that Galaxy's 5.57% / 8.84% were "Morpho MARKET liquidity, reachable only by force-deallocation" (roadmap
+promise paragraph; the step-2 PROGRESS entry on the branch; the step-2 report). **FALSE:** 8.84% (09-26) and 5.30% (09-28)
+were reachable through the liquidity adapter, which was SET then; 5.57% (09-30 23:05Z) was the vault's IDLE cash
+(PROGRESS "EARN KIT OFFERS GALAXY…": idle 5,000,890.14). Both were deliverable by an ORDINARY redeem. The adapter was
+unset between 09-28 12:31Z and 09-30 12:34Z. Roadmap corrected in this commit; the branch entry annotated in its own.
+**Cause:** I generalised from today's state (adapter unset) backwards over a series I had recorded myself, without
+re-reading it. The record contradicted me two screens up.

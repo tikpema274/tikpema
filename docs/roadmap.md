@@ -15,7 +15,7 @@ payments and data are being built by well-funded players (Circle's kits, ERC-800
 every vault, unknowns scored. *(Corrected 2026-10-02: this read "asked by nobody".)* The evidence that the ANSWER
 matters: on Ethereum, Gauntlet WETH Prime's ordinary redeem delivers 0 (measured: a 1-wei withdraw reverts) while
 Webacy's published Morpho formula gives 16.83% (direction log 2026-10-02); Earn Kit offered Galaxy USDC first with no
-warnings while its 5.57% was market liquidity reachable only by force-deallocation (liquidity adapter unset); Borrow
+warnings while only 5.57% was redeemable (its idle cash: liquidity adapter unset, its market fully lent); Borrow
 Kit lists a market with ~40 USDC free of 185M.
 
 **What "done" means for the promise:** an agent on Arc mainnet is about to deposit into a vault Circle's kits offer.
