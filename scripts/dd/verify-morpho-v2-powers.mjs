@@ -172,7 +172,8 @@ section("4 — exitPowers in the report; the old presence vocabulary is not appl
   ok("…the exit gates read abdicated, setLiquidityAdapterAndData reads not-timelockable", ex.find((x) => x.power === "setSendSharesGate")?.abdicated === true && ex.find((x) => x.power === "setLiquidityAdapterAndData")?.delay?.kind === "not-timelockable");
   const pnc = r.coverage.notChecked.filter((n) => n.kind === "power");
   ok("the presence groups are notChecked as NOT THIS PROFILE'S VOCABULARY (see powersV2)", pnc.length === Object.keys(POWER_SIGS).length && pnc.every((x) => /powersV2/.test(x.why ?? "")));
-  ok("⭐ no longer 'power model not built'; the report stays a NO-VERDICT only until the exit fact (step 4)", r.refusal?.reason === "v2-exit-fact-not-built", r.refusal?.reason);
+  // Since step 4 the no-verdict rests on the exit fact alone; this fixture does not answer the redeem simulation.
+  ok("⭐ no longer 'power model not built': the no-verdict now rests on the exit fact (exit-fact-no-value here)", r.refusal?.reason === "exit-fact-no-value", r.refusal?.reason);
 }
 
 section("5 — ⭐ completeness over THIS profile's catalogue");

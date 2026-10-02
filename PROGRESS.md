@@ -32092,3 +32092,54 @@ completeness invariant iterates THIS profile's catalogue. `powersPresent` is not
 - **= the 2026-09-26 measurements** (fee setters 0, exit gates abdicated, caps + addAdapter 7 d, setIsAllocator 0). ➕ New:
   **setForceDeallocatePenalty is timelock 0** (penalty 0 now; the curator can raise the force-exit cost at once). Three
   of the five exitPowers are immediate. Values: fees 0, gates 0x0, owner 0x032a…, curator 0xec1a….
+
+---
+
+# ✅ DD MORPHO V2 — STEP 4: THE EXIT-LIQUIDITY FACT, PROVEN BY A SIMULATED REDEEM (2026-10-02, branch, NOT deployed)
+
+## Built (`morpho-v2.mjs`: routeReach / exitLiquidityV2 / RedeemProbe; `index.mjs`)
+- **Candidate R** = idle + the liquidity route: a market adapter → the vault's position in the ONE market named by
+  `liquidityData`, capped by that market's free liquidity; a vault-wrapping adapter → the wrapped vault's own route, depth
+  1, only if the wrapped vault is itself attested V2 (else no value); unset → idle only.
+- **⭐ The proof:** `RedeemProbe` (583 B, source in the module), placed at `PROBE_ADDRESS` by **eth_call state override only**,
+  holding the vault's whole share supply (VaultV2.balanceOf = slot 12 in the pinned @2026-08-13 build), RETURNS
+  `(ok, revertData)` from withdraw/redeem instead of reverting. **Why:** with plain eth_call, an agreed revert on both
+  endpoints reaches the quorum as `unreadable` (both threw) and loses its revert data, indistinguishable from "nobody
+  answered". As a returned value, both endpoints AGREE on a revert, and an unreadable call stays unreadable.
+  - Below the supply ceiling: confirmed = withdraw(R) ok AND withdraw(R + δ) reverts (δ = max(1 whole unit, R/1000)).
+  - At the ceiling (R + δ ≥ previewRedeem(totalSupply)): confirmed = redeem(totalSupply) ok, value = that ceiling.
+    **Measured why:** on 0xD392…2eC5, withdraw(totalAssets) needs MORE shares than exist (virtual shares + round-up) →
+    `Panic(0x11)`; my first build reported that as a contradiction. The ceiling is what every existing share redeems for.
+- **⛔⛔ An unreadable simulation → `status: no-value, value: null`, never "0"** (T's rule). A contradiction (R reverts or
+  R + δ succeeds; or redeem-all reverts at the ceiling) → no value + the finding `redeem-simulation-contradicts`. An exit
+  gate set → no value (exit depends on the holder). Confirmed → refusal null; otherwise `exit-fact-no-value`.
+
+## Proof
+- **`test:morphov2exit`** (scripts/dd/verify-morpho-v2-exit.mjs): idle-only; **a proven 0 vs the SAME vault with the
+  simulation unreadable (status AND value differ)**; contradictions both ways; the market route (free binds / position
+  binds, shared-pool note); gate; the supply ceiling (ok / revert / unreadable). **RED 1/18 → GREEN 21/0.** Mutations:
+  unreadable → treated as read (before the ceiling change: "confirmed 0"; after it: the suite crashes, exit 1); contradiction
+  ignored; gate ignored; min → max on the route: each caught; restored byte-identical.
+- step-2/3 suites updated for the new statuses (no `not-computed` exists any more): 43/0, 30/0. **test:all 182/182** (12.0 min).
+
+## ⭐ LIVE, Arc mainnet, both endpoints, no disagreement (blocks 23905382–23905442)
+| Vault | Redeemable now | Proof |
+|---|---|---|
+| **Galaxy USDC** 0x8E35…12AF | **0 (confirmed)** | withdraw(1 USDC) → `TransferReverted()` (idle 0, no liquidity adapter) |
+| 0x3d1D…93b1 (100% idle) | 1 USDC = 100% | redeem(totalSupply) ok |
+| Steakhouse Prime USDC 0xbeef0007… | 14,788.99 = **49.80%** (idle; its market has 0 free) | withdraw(R) ok; R + δ → Morpho Blue "insufficient liquidity" |
+| Galaxy EURC 0x389a…1c18 | 309,883.55 = **61.67%** (idle 301,171 + market free 8,712) | withdraw(R) ok; R + δ → "insufficient liquidity" |
+| Gauntlet USDC Prime 0xD392…2eC5 (vault-wrapping) | 2,669,266 = 99.99% | redeem(totalSupply) ok, THROUGH the wrapped V2 vault |
+**Galaxy's 0 is a PROVEN zero**: a real redeem of 1 USDC reverts; an unreadable simulation would have given no value.
+
+## 🚨 FINDING (T's carry #1): the V2 guard does NOT fit the freshness window as built
+`analyze()` timed locally, 5 runs each, alternating, anchor already established (as in the mandate check):
+- xylo (testnet, the mandate's vault): **393–606 ms**, median 424 (4 reads / endpoint).
+- **Galaxy (mainnet, steps 2–4): 6,589–10,360 ms, median 7,361** (71 reads / endpoint, 71 checks).
+In the mandate check analyze sits between `anchoredAt` and `verifiedAt`, so it adds directly to `wouldBeCheckAgeMs`
+(sample 1 = 1,447 ms on xylo). Swapping in a V2 vault → **≈ 8–11.5 s against the 10 s ceiling (T)**: stale-check
+refusals on a share of days. **Cause: SERIAL reads** (~71 sequential quorum round trips × ~100 ms), not volume. Most reads
+are independent (35 timelock/abdicated, 12 values, the attestations). ⚠️ Local machine, not a Netlify function; the
+order of magnitude is the finding. **Must be fixed before the mandate allowlist widens to any V2 vault.** Fix options for T
+(not built): parallelise independent reads (cost: coverage order would vary run to run inside the signed body unless an
+order is imposed; ~70-call bursts against public endpoints risk rate limits → unreadable → no value).

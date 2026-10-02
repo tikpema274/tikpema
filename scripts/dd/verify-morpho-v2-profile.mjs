@@ -141,8 +141,9 @@ section("2 — ⭐ on V2 a PRESENCE scan says nothing: the presence groups are N
   ok("every presence group is in notChecked (none scanned)", powerNotChecked(r).length === Object.keys(POWER_SIGS).length && r.powers.length === 0, `${powerNotChecked(r).length}/${Object.keys(POWER_SIGS).length}`);
   ok("…each says WHY: presence is meaningless on V2; the power model (timelock · abdicated · current value) is step 3",
     powerNotChecked(r).every((x) => /V2/.test(x.why ?? "") && /timelock/.test(x.why ?? "") && /abdicat/.test(x.why ?? "")));
-  // Step 3 (2026-10-02) built the power model, so the no-verdict now rests on the exit fact (step 4), not the powers.
-  ok("⭐⭐ the report is still a NO-VERDICT (refusal v2-exit-fact-not-built since step 3), never a clean bill", r.refusal?.reason === "v2-exit-fact-not-built", r.refusal?.reason);
+  // Step 3 built the power model; step 4 the exit fact. This fixture does not answer the redeem simulation, so the exit
+  // fact has NO VALUE and the report stays a no-verdict (exit-fact-no-value), never a clean bill.
+  ok("⭐⭐ the report is still a NO-VERDICT (refusal exit-fact-no-value: the simulation is unanswered here), never a clean bill", r.refusal?.reason === "exit-fact-no-value", r.refusal?.reason);
   ok("powersPresent is empty, not a list of 'present' powers", Array.isArray(r.powersPresent) && r.powersPresent.length === 0);
 }
 
@@ -158,7 +159,8 @@ section("3 — the exit path: liquidity adapter unset, one attested market adapt
   ok("its share of the vault's real assets is stated, with its source (900 / (100 idle + 900) = 90.00%)",
     e?.adapters?.[0]?.shareBps === 9000 && /realAssets/.test(e?.adapters?.[0]?.shareSource ?? ""), `${e?.adapters?.[0]?.shareBps}`);
   ok("the liquidity adapter is recorded as UNSET (redemptions are served from idle only)", e?.liquidityAdapter?.set === false);
-  ok("⭐ redeemable-now carries NO number yet (computed in step 4), and says so", noScore(e?.redeemableNow) && e?.redeemableNow?.status === "not-computed", JSON.stringify(e?.redeemableNow));
+  // Since step 4 a number needs a PROVEN simulation; this fixture answers neither the gates nor the simulation.
+  ok("⭐ redeemable-now carries NO number without its proof (status no-value here), never 0", noScore(e?.redeemableNow) && e?.redeemableNow?.status === "no-value", JSON.stringify(e?.redeemableNow));
   ok("no findings on a fully recognised path", Array.isArray(e?.findings) && e.findings.length === 0, JSON.stringify(e?.findings));
 }
 
@@ -181,7 +183,8 @@ section("5 — ⭐ an UNRECOGNISED OTHER adapter degrades its own part and state
   ok("⭐⭐ the finding states its share: 'an adapter of unrecognised code holds 30.00% of this vault's assets'",
     (e?.findings ?? []).some((f) => /an adapter of unrecognised code holds 30\.00% of this vault's assets/.test(f.text)), JSON.stringify(e?.findings));
   ok("…and that finding is a FINDING (kind finding), not a gap", (e?.findings ?? []).some((f) => f.kind === "finding" && /30\.00%/.test(f.text)));
-  ok("…it does NOT by itself take the exit fact's value away (only its own part is degraded)", e?.redeemableNow?.status === "not-computed" && (e?.redeemableNow?.degraded ?? []).includes(AD_X), JSON.stringify(e?.redeemableNow));
+  ok("…it does NOT by itself take the exit fact's value away (the no-value reason is not that adapter; it is listed as degraded)",
+    !/unrecognised/.test(e?.redeemableNow?.reason ?? "") && (e?.redeemableNow?.degraded ?? []).includes(AD_X), JSON.stringify(e?.redeemableNow));
 
   const u = await run(world({ adapters: [{ a: AD_MM, kind: "mm", real: 600n }, { a: AD_X, kind: "x", real: 300n }],
     overrides: { [`call@${AD_X.toLowerCase()}@${data("realAssets")}`]: THROW } }));

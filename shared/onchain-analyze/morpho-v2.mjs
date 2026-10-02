@@ -21,7 +21,7 @@
 // Transport is injected (the same `client` as analyze); every read goes through `cov.runCheck` (kind "v2"), so each
 // is in the coverage manifest and in report.reads, reproducible.
 
-import { encodeFunctionData, parseAbi, keccak256 } from "viem";
+import { encodeFunctionData, decodeFunctionResult, encodeAbiParameters, decodeAbiParameters, parseAbi, keccak256 } from "viem";
 import { UNREADABLE, unread, hasSel } from "../onchain-facts/index.mjs";
 
 /** V2's distinctive governance selectors (none is ERC-4626). The CROSS-CHECK, never the decision. */
@@ -371,4 +371,161 @@ export function assertV2PowersComplete(pv) {
   const grouped = [...(g.immediate ?? []), ...(g.delayed ?? []).map((x) => x.power), ...(g.abdicated ?? []), ...(g.unreadable ?? [])];
   for (const p of names) if (grouped.filter((x) => x === p).length !== 1) problems.push(`power "${p}" is not in exactly one group`);
   return { ok: problems.length === 0, problems };
+}
+
+// ═══ STEP 4 — THE EXIT-LIQUIDITY FACT, PROVEN BY A SIMULATED REDEEM (T 2026-10-02) ═══════════════════════════════
+// redeemable-now = idle + what the LIQUIDITY ADAPTER's route can pay. That computed amount R is a CANDIDATE; the PROOF is
+// a simulated redeem: RedeemProbe (below), placed at PROBE_ADDRESS by eth_call STATE OVERRIDE only (never deployed), holds
+// the vault's whole totalSupply of shares (also by override: VaultV2.balanceOf is storage slot 12 in the pinned vault-v2
+// @2026-08-13 build every attested vault reproduces) and calls withdraw(R) and withdraw(R + δ), RETURNING (ok, revertData)
+// instead of reverting. So both endpoints agree on a revert as an ordinary VALUE, and an unreadable call stays unreadable.
+// ⭐ confirmed = withdraw(R) succeeds AND withdraw(R + δ) reverts (δ = max(1 whole unit, R / 1000)).
+// ⛔⛔ An UNREADABLE simulation → NO VALUE, never 0: on Galaxy today a proven 0 and an unread simulation look identical as a
+//    number and mean "nothing can leave" vs "we could not tell".
+// ⛔ A simulation that CONTRADICTS the computation → no value + a finding. Never pick one.
+// ⭐ AT THE SUPPLY CEILING the proof is redeem(totalSupply), not withdraw(R): VaultV2's share math (virtual shares, round-up)
+//    makes withdraw(totalAssets) need MORE shares than exist (measured 0xD392…2eC5: Panic 0x11), an amount no holder could
+//    withdraw. The honest ceiling is previewRedeem(totalSupply): what every existing share redeems for.
+// RedeemProbe source (solc 0.8.28, optimizer 200, paris, bytecode_hash none; 583 bytes):
+//   contract RedeemProbe {
+//     function probe(address vault, uint256 assets) external returns (bool ok, bytes memory ret) {
+//       (ok, ret) = vault.call(abi.encodeWithSignature("withdraw(uint256,address,address)", assets, address(this), address(this))); }
+//     function probeRedeem(address vault, uint256 shares) external returns (bool ok, bytes memory ret) {
+//       (ok, ret) = vault.call(abi.encodeWithSignature("redeem(uint256,address,address)", shares, address(this), address(this))); } }
+export const PROBE_ADDRESS = "0x00000000000000000000000000000000000dd0d0";
+export const PROBE_RUNTIME = "0x608060405234801561001057600080fd5b50600436106100365760003560e01c8063cbaefbd11461003b578063e357a60514610065575b600080fd5b61004e610049366004610186565b610078565b60405161005c9291906101e2565b60405180910390f35b61004e610073366004610186565b610126565b60405160248101829052306044820181905260648201526000906060906001600160a01b0385169060840160408051601f198184030181529181526020820180516001600160e01b0316635d043b2960e11b179052516100d8919061021e565b6000604051808303816000865af19150503d8060008114610115576040519150601f19603f3d011682016040523d82523d6000602084013e61011a565b606091505b50909590945092505050565b60405160248101829052306044820181905260648201526000906060906001600160a01b0385169060840160408051601f198184030181529181526020820180516001600160e01b0316632d182be560e21b179052516100d8919061021e565b6000806040838503121561019957600080fd5b82356001600160a01b03811681146101b057600080fd5b946020939093013593505050565b60005b838110156101d95781810151838201526020016101c1565b50506000910152565b821515815260406020820152600082518060408401526102098160608501602087016101be565b601f01601f1916919091016060019392505050565b600082516102308184602087016101be565b919091019291505056fea164736f6c634300081c000a";
+export const VAULTV2_BALANCEOF_SLOT = 12n;
+const XABI = parseAbi([
+  "function totalSupply() view returns (uint256)", "function totalAssets() view returns (uint256)", "function decimals() view returns (uint8)",
+  "function liquidityData() view returns (bytes)", "function liquidityAdapter() view returns (address)", "function isAdapter(address) view returns (bool)",
+  "function balanceOf(address) view returns (uint256)", "function convertToAssets(uint256) view returns (uint256)", "function morphoVaultV1() view returns (address)",
+  "function isVaultV2(address) view returns (bool)",
+  "function market(bytes32) view returns (uint128 totalSupplyAssets, uint128 totalSupplyShares, uint128 totalBorrowAssets, uint128 totalBorrowShares, uint128 lastUpdate, uint128 fee)",
+  "function position(bytes32, address) view returns (uint256 supplyShares, uint128 borrowShares, uint128 collateral)",
+  "function probe(address vault, uint256 assets) returns (bool ok, bytes ret)",
+  "function probeRedeem(address vault, uint256 shares) returns (bool ok, bytes ret)",
+  "function previewRedeem(uint256) view returns (uint256)",
+]);
+const MP_T = [{ type: "tuple", components: [{ type: "address", name: "loanToken" }, { type: "address", name: "collateralToken" }, { type: "address", name: "oracle" }, { type: "address", name: "irm" }, { type: "uint256", name: "lltv" }] }];
+async function xread(cov, client, blk, id, to, fn, args = [], extraParams) {
+  const data = encodeFunctionData({ abi: XABI, functionName: fn, args });
+  const r = await cov.runCheck(id, { kind: "v2" }, async () => {
+    const out = await client.call({ method: "eth_call", params: extraParams ? [{ to, data }, blk.tag, extraParams] : [{ to, data }, blk.tag] });
+    let v;
+    try { v = decodeFunctionResult({ abi: XABI, functionName: fn, data: out.result }); }
+    catch (e) { throw Object.assign(new Error(`${fn}: undecodable result`), { unreadableInput: true }); }
+    return { ...out, result: v };
+  });
+  return r.ok ? r.value : UNREADABLE;
+}
+
+/** What a liquidity route can pay, at the block. Returns {reach, basis} or {noValue: reason}. depth limits recursion. */
+async function routeReach(cov, client, blk, vault, depth, pins, tag) {
+  const la = await xread(cov, client, blk, `v2:exit:${tag}liquidityAdapter`, vault, "liquidityAdapter");
+  if (unread(la)) return { noValue: "the liquidity adapter could not be read" };
+  if (isZero(la)) return { reach: 0n, basis: "none (no liquidity adapter)" };
+  const mm = pins.morphoMarketV1AdapterV2Factory, v1 = pins.morphoVaultV1AdapterFactory;
+  const isMM = mm ? await read(cov, client, blk, `v2:exit:${tag}isMM`, mm.address, "isMorphoMarketV1AdapterV2", [la], "bool") : false;
+  if (unread(isMM)) return { noValue: "the liquidity adapter's attestation could not be read" };
+  if (isMM) {
+    const ld = await xread(cov, client, blk, `v2:exit:${tag}liquidityData`, vault, "liquidityData");
+    if (unread(ld)) return { noValue: "the liquidity adapter's market (liquidityData) could not be read" };
+    let mp;
+    try { [mp] = decodeAbiParameters(MP_T, ld); } catch { return { noValue: "the liquidity adapter's liquidityData is not a market (undecodable)" }; }
+    const id = keccak256(encodeAbiParameters(MP_T, [mp]));
+    const m = await xread(cov, client, blk, `v2:exit:${tag}market`, pins.morphoBlue.address, "market", [id]);
+    const p = await xread(cov, client, blk, `v2:exit:${tag}position`, pins.morphoBlue.address, "position", [id, la]);
+    if (unread(m) || unread(p)) return { noValue: "the liquidity market's state could not be read" };
+    const [tsa, tss, tba] = m;
+    const pos = tss === 0n ? 0n : (p[0] * tsa) / tss;
+    const free = tsa > tba ? tsa - tba : 0n;
+    return { reach: pos < free ? pos : free, basis: `the liquidity adapter's market ${id.slice(0, 12)}… (position ${pos}, free ${free})`, shared: true };
+  }
+  const isV1 = v1 ? await read(cov, client, blk, `v2:exit:${tag}isV1`, v1.address, "isMorphoVaultV1Adapter", [la], "bool") : false;
+  if (unread(isV1)) return { noValue: "the liquidity adapter's attestation could not be read" };
+  if (!isV1) return { noValue: "redemptions are routed through an adapter of unrecognised code" };
+  if (depth >= 1) return { noValue: "the liquidity route wraps a vault inside a wrapped vault (beyond depth 1): not followed" };
+  const inner = await xread(cov, client, blk, `v2:exit:${tag}inner`, la, "morphoVaultV1");
+  if (unread(inner)) return { noValue: "the wrapped vault's address could not be read" };
+  const att = await xread(cov, client, blk, `v2:exit:${tag}innerIsV2`, pins.vaultV2Factory.address, "isVaultV2", [inner]);
+  if (unread(att)) return { noValue: "whether the wrapped vault is V2 could not be read" };
+  if (att !== true) return { noValue: "the wrapped vault is not an attested Vault V2: its exit is not understood" };
+  const innerIdle = await (async () => {
+    const asset = await read(cov, client, blk, `v2:exit:${tag}innerAssetAddr`, inner, "asset", [], "address");
+    if (unread(asset)) return UNREADABLE;
+    return read(cov, client, blk, `v2:exit:${tag}innerIdle`, asset, "balanceOf", [inner], "uint");
+  })();
+  if (unread(innerIdle)) return { noValue: "the wrapped vault's idle balance could not be read" };
+  const ir = await routeReach(cov, client, blk, inner, depth + 1, pins, `${tag}inner:`);
+  if (ir.noValue) return { noValue: `the wrapped vault's route: ${ir.noValue}` };
+  const sh = await xread(cov, client, blk, `v2:exit:${tag}claimShares`, inner, "balanceOf", [la]);
+  const claim = unread(sh) ? UNREADABLE : await xread(cov, client, blk, `v2:exit:${tag}claim`, inner, "convertToAssets", [sh]);
+  if (unread(claim)) return { noValue: "the wrapping adapter's claim on the wrapped vault could not be read" };
+  const innerReach = innerIdle + ir.reach;
+  return { reach: claim < innerReach ? claim : innerReach, basis: `the wrapped vault ${inner.slice(0, 10)}… (its idle + ${ir.basis}; this vault's claim ${claim})`, shared: true };
+}
+
+/** Compute redeemable-now for an ATTESTED V2 vault and PROVE it by a simulated redeem. Never throws for a chain answer. */
+export async function exitLiquidityV2(cov, client, addr, blk, exitPath, pv) {
+  const prev = exitPath.redeemableNow;
+  if (prev?.status === "no-value") return prev;
+  const noValue = (reason) => ({ value: null, status: "no-value", reason, degraded: prev?.degraded ?? [] });
+  const gate = (name) => pv?.powers?.find((p) => p.power === name)?.currentValue;
+  for (const [g, label] of [["setSendSharesGate", "send-shares"], ["setReceiveAssetsGate", "receive-assets"]]) {
+    const v = gate(g);
+    if (v === null || v === undefined) return noValue(`the ${label} exit gate could not be read`);
+    if (!isZero(v)) return noValue(`an exit gate is set (${label} gate ${v}): whether a given holder can redeem depends on the gate, not on liquidity`);
+  }
+  if (exitPath.idleAssets === null) return noValue("the vault's idle balance could not be read");
+  const idle = BigInt(exitPath.idleAssets);
+  const ta = await xread(cov, client, blk, "v2:exit:totalAssets", addr, "totalAssets");
+  const ts = await xread(cov, client, blk, "v2:exit:totalSupply", addr, "totalSupply");
+  const dec = exitPath.asset ? await xread(cov, client, blk, "v2:exit:decimals", exitPath.asset, "decimals") : UNREADABLE;
+  if (unread(ta) || unread(ts) || unread(dec)) return noValue("the vault's totals or the asset's decimals could not be read");
+  const route = await routeReach(cov, client, blk, addr, 0, client.chain.pins, "");
+  if (route.noValue) return noValue(route.noValue);
+  const R = idle + route.reach;
+  const unit = 10n ** BigInt(dec);
+  const delta = R / 1000n > unit ? R / 1000n : unit;
+
+  // ── the PROOF: the probe, by state override, holding the whole supply of shares ──
+  const slot = keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [PROBE_ADDRESS, VAULTV2_BALANCEOF_SLOT]));
+  const override = { [PROBE_ADDRESS]: { code: PROBE_RUNTIME }, [addr]: { stateDiff: { [slot]: "0x" + ts.toString(16).padStart(64, "0") } } };
+  const sim = async (amount, id, fn = "probe") => {
+    const v = await xread(cov, client, blk, id, PROBE_ADDRESS, fn, [addr, amount], override);
+    return unread(v) ? null : { [fn === "probe" ? "amount" : "shares"]: amount.toString(), call: fn === "probe" ? "withdraw" : "redeem", ok: v[0], revertData: v[0] ? null : v[1] };
+  };
+  // The ceiling: what EVERY existing share redeems for. Liquidity at or above it (within δ) → prove it by redeem(totalSupply).
+  const ceiling = ts > 0n ? await xread(cov, client, blk, "v2:exit:previewRedeemSupply", addr, "previewRedeem", [ts]) : 0n;
+  if (unread(ceiling)) return noValue("previewRedeem(totalSupply) could not be read");
+  if (ts > 0n && R + delta >= ceiling) {
+    const all = await sim(ts, "v2:exit:simulate:redeemAll", "probeRedeem");
+    if (all === null) return noValue("the redeem simulation could not be read (an unreadable simulation is NOT a zero)");
+    if (all.ok !== true) {
+      exitPath.findings.push({ kind: "finding", code: "redeem-simulation-contradicts", text: `the simulated redeem contradicts the computed redeemable-now (${R}, at the supply ceiling ${ceiling}): redeem(totalSupply) reverted` });
+      return noValue("the simulated redeem contradicts the computation; no value is given rather than choosing one");
+    }
+    return {
+      value: ceiling.toString(), status: "confirmed", bps: ta > 0n ? Number((ceiling * 10000n) / ta) : null, delta: delta.toString(),
+      basis: `every share can be redeemed: liquidity (idle ${idle}${route.reach > 0n ? ` + ${route.basis}` : ""}) covers the whole supply's value ${ceiling}`,
+      proof: { method: "eth_call state override: RedeemProbe at PROBE_ADDRESS holding the whole share supply", redeemAll: all },
+      note: route.shared ? "point-in-time; the market's free liquidity is SHARED with every other supplier: first come, first served" : "point-in-time",
+      degraded: prev?.degraded ?? [],
+    };
+  }
+  const atR = R > 0n ? await sim(R, "v2:exit:simulate:atR") : undefined;
+  const aboveR = await sim(R + delta, "v2:exit:simulate:aboveR");
+  if (atR === null || aboveR === null) return noValue("the redeem simulation could not be read (an unreadable simulation is NOT a zero)");
+  const contradicts = (atR && atR.ok !== true) || aboveR.ok !== false;
+  if (contradicts) {
+    exitPath.findings.push({ kind: "finding", code: "redeem-simulation-contradicts", text: `the simulated redeem contradicts the computed redeemable-now (${R}): withdraw(R) ${atR ? (atR.ok ? "succeeded" : "reverted") : "not run"}, withdraw(${R + delta}) ${aboveR.ok ? "succeeded" : "reverted"}` });
+    return noValue("the simulated redeem contradicts the computation; no value is given rather than choosing one");
+  }
+  return {
+    value: R.toString(), status: "confirmed", bps: ta > 0n ? Number((R * 10000n) / ta) : null, delta: delta.toString(),
+    basis: `idle ${idle}${route.reach > 0n || !route.basis.startsWith("none") ? ` + ${route.basis}` : " (no liquidity adapter)"}`,
+    proof: { method: "eth_call state override: RedeemProbe at PROBE_ADDRESS holding the whole share supply", atR: atR ?? null, aboveR: aboveR ?? null },
+    note: route.shared ? "point-in-time; the market's free liquidity is SHARED with every other supplier: first come, first served" : "point-in-time",
+    degraded: prev?.degraded ?? [],
+  };
 }
