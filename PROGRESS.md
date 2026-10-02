@@ -31826,3 +31826,58 @@ different function bundle, same mandate code. Note it beside the sample.
 ## Next
 Samples 2 (10-03 11:17Z) and 3 (10-04) → window = min(10 000 ms, 2 × max) → C (operator deposit arming + the window,
 own commit, T deploys). C's deploy no longer stalls on a forgery UNTESTED.
+
+---
+
+# 🔎 DD MORPHO V2 — STEP 0: BYTECODE CHECKS (2026-10-02, branch `feature/dd-morpho-v2`, read-only) — pins PROPOSED, NOT approved
+
+Per the 09-28 build order (step 0). Nothing written to the chain registry yet; T's part (explorer.arc.io by hand + approving
+the pins) is outstanding.
+
+## Sources and method
+- **Addresses:** VaultV2Factory from Morpho's API (`vaultV2ByAddress(Galaxy, 5042).factory`); Galaxy's adapter, its
+  factory, Morpho Blue and the IRM from the chain (`adapters(0)`, `adapter.factory()/morpho()/adaptiveCurveIrm()`);
+  the vault-wrapping adapter factory from docs.morpho.org/get-started/resources/addresses (the chain tab is unlabelled in
+  the page text; attributed to Arc because the SAME tab lists 0x3b0e…9f12 and 0x6C2F…62Cc, both confirmed on Arc; its
+  bytecode then matched the template exactly).
+- **Reads:** block **23889038** (hash 0x788c4cbc…f6b0), both endpoints **rpc.mainnet.arc.io + arc-mainnet.drpc.org**
+  (eth_chainId 0x13b2 on both): every code hash, every getter AGREED.
+- **Builds (forge 1.7.1):** each repo at its tag with ITS OWN foundry.toml; compare runtime bytecode exactly, else with
+  immutables masked at the build's `immutableReferences`, then check each masked VALUE. Opcode walk (PUSH data skipped)
+  for SELFDESTRUCT / DELEGATECALL / CALLCODE.
+
+## Results (contract addresses in full; they are not owner identities)
+| Contract | Address | Runtime keccak (on chain) | Source / tag | Match | Immutables (values checked) | SD / DC / CC |
+|---|---|---|---|---|---|---|
+| Morpho Blue | `0x34CD04070dD72b14E241112F6d83812Df5Af7fCD` | `0xeb0972f2c33d0d3443136e2c42688082b9eef4ff1594a32e890f4f08669f1b08` (15,582 B) | morpho-blue **v1.0.0** (55d2d99), solc 0.8.19, via-IR, 999999 runs, paris | ⚠️ masked, **with `bytecode_hash=none`** (see below) | DOMAIN_SEPARATOR = keccak(typehash, 5042, this) = 0x40f2…6830 = the getter on both | 0/0/0 |
+| VaultV2Factory | `0x3b0eefaBfa22ec7CF2c73877ac16e78D76749f12` | `0xba55eb73d42937607d7e3c77f68353c2517c4fad4df02f0c9bbd2e4248475503` (23,124 B) | vault-v2 **2026-08-13** (2b139002), solc 0.8.28, via-IR, 100000 runs, cancun, bytecode_hash none | **EXACT** | none | 0/1*/0 |
+| MorphoMarketV1AdapterV2Factory | `0x6C2FF5114E45b50bc7195c2F1f87C98cbdad62Cc` | `0x6b28fe49a51d2abbe3a345b618e16c26b94e381c5390d7532511fd888935c2db` (13,633 B) | vault-v2 2026-08-13 | masked | morpho = Morpho Blue; adaptiveCurveIrm = 0xF026…3f20 | 0/0/0 |
+| MorphoVaultV1AdapterFactory | `0x77788033B22CEaB8D51Ec8F9dFD4a40E54F380B0` | `0x4e1024d5bfd17914a3ca6ad49905eabdfd60122ccd5a577406e7a4a765bd49ad` (5,775 B) | vault-v2 2026-08-13 | **EXACT** | none | 0/0/0 |
+| AdaptiveCurveIrm (➕ not in the 09-28 table) | `0xF02615d094Fc02fC031C35fe705e175aA4653f20` | `0xb89ab90e08f8cf6f3ff4916f5d64d27ea1b86bdcb02c92c18690677184074d43` (2,282 B) | morpho-blue-irm **2025-11-24**, own foundry.toml (999999 runs, paris, bytecode_hash none) | masked | MORPHO = Morpho Blue | 0/0/0 |
+| Galaxy USDC vault (instance) | `0x8E357432CC12ff425c36432F312968aEb16112AF` | `0xac3d89c4…bae57` (21,808 B) | VaultV2 @ 2026-08-13 | masked | asset = USDC 0x3600…0000; decimals 18; virtual shares 1e12 | 0/1†/0 |
+| Galaxy adapter (instance) | `0xeE0080203a76690BcA40670dfd0cD1C30FAB7c2C` | `0x0a0f03e9…9c38` (11,784 B) | MorphoMarketV1AdapterV2 @ 2026-08-13 | masked | factory 0x6C2F…62Cc; parentVault = Galaxy; asset USDC; morpho = Blue; adapterId = keccak("this", adapter) ✓; IRM 0xF026… | 0/0/0 |
+
+\* the factory's one DELEGATECALL byte is inside the embedded VaultV2 creation code it deploys (data in its runtime).
+† Galaxy's one DELEGATECALL is `ADDRESS GAS DELEGATECALL`: its target is the vault itself (the `multicall`,
+`address(this).delegatecall`, VaultV2.sol:247). A fixed target, so "code at an address does not change" holds.
+
+**Factory attestation, both endpoints, block 23889038:** `isVaultV2(Galaxy)` = true;
+`isMorphoMarketV1AdapterV2(0xeE00…7c2C)` = true; `morphoMarketV1AdapterV2(Galaxy)` = 0xeE00…7c2C. Galaxy's
+`liquidityAdapter` is still **0x0** (unset), `adaptersLength` 1.
+
+## ⭐ THE TAG: **vault-v2 `2026-08-13` reproduces every deployed vault-v2 contract** (2 exact, 3 masked), the FIRST tag
+tried, with its own settings. No older tag was needed. morpho-blue-irm **2025-11-24** (first tried) reproduces the IRM.
+
+## ⚠️ ONE DEVIATION, FOR T TO RULE ON: Morpho Blue and `bytecode_hash`
+morpho-blue v1.0.0's foundry.toml leaves `bytecode_hash` at the default (ipfs), so the tag's OWN settings build a
+53-byte metadata trailer (`a2 64 'ipfs' …`). The deployed code ends `a1 64 'solc' 43 000813 000a`: compiled with NO
+metadata hash, solc 0.8.19. With that ONE setting changed, the build matches byte for byte apart from the
+DOMAIN_SEPARATOR immutable, whose value is the one the source computes for chain 5042 at this address. The difference
+is the non-executable trailer only. **Under the rule as written ("the tag's settings"), strictly, the tag alone does not
+reproduce the trailer.** Claude's view: pin it, recording the deviation (the executable code is reproduced; the
+trailer's solc version 0.8.19 matches the tag's pragma). T decides.
+
+## Not checked (outside the exit path or not deployed for Galaxy)
+MorphoRegistry 0xdEBC…8765 and Blue Public Allocator 0x4c2f…47C2 (docs, same tab): not on a V2 redeem's path. A
+MorphoVaultV1Adapter INSTANCE: no Arc vault using one was read today (its factory is pinned-ready; an instance check
+needs a sample vault, step 2).
