@@ -32143,3 +32143,43 @@ are independent (35 timelock/abdicated, 12 values, the attestations). ⚠️ Loc
 order of magnitude is the finding. **Must be fixed before the mandate allowlist widens to any V2 vault.** Fix options for T
 (not built): parallelise independent reads (cost: coverage order would vary run to run inside the signed body unless an
 order is imposed; ~70-call bursts against public endpoints risk rate limits → unreadable → no value).
+
+---
+
+# ✅ DD MORPHO V2 — PARALLEL READS (≤ 8 in flight, FIXED order) (2026-10-02, branch, NOT deployed) — T's two conditions
+
+## Built
+- **`coverage.runChecks(tasks, {concurrency: 8})`**: executes with at most 8 in flight, then records every outcome through
+  `runCheck` **in list order**, so coverage entries and readIds (inside the signed body) never depend on completion order.
+  A rejected read is recorded exactly as before (a rate-limited read stays unreadable).
+- `morpho-v2.mjs`: independent reads as ordered batches (`V2_READ_CONCURRENCY = 8`): recognition (factory code +
+  isVaultV2); the wiring (Blue + factory codes, adaptersLength, liquidityAdapter, asset); the list + idle; every adapter's
+  code + attestations + realAssets + the liquidity adapter's isAdapter; ONE powers batch (values, penalties, 18
+  abdications, 17 timelocks); the exit totals; the route's paired reads; the two simulations. Check ids unchanged.
+
+## Proof — `test:morphov2parallel` (scripts/dd/verify-morpho-v2-parallel.mjs; fixture extracted to `_morpho-v2-world.mjs`)
+- RED 7/2 (no runChecks; peak in flight 1 = serial) → **GREEN 12/0**. Determinism and the rate-limit rule held on the
+  serial code too: pinned BEFORE the change, as invariants to keep.
+- **Determinism:** 6 runs under random per-call latency → ONE canonical body (attest.mjs `canonicalize`).
+- **Concurrency:** peak in flight > 1 and ≤ 8.
+- **Rate limit through the REAL quorum client:** endpoint B returns 429 on a timelock and the simulation → the timelock is
+  notChecked (`rpc-quorum-unmet`), its power in group **unreadable** (never immediate/0), redeemable-now **no-value**;
+  both endpoints 429 on the simulation → no-value.
+- **Mutations (each caught, restored byte-identical):** record in COMPLETION order → **6 distinct bodies in 6 runs** (the
+  risk T named was real); no concurrency cap → peak 20 / 48; a failed read recorded as `0n` → the rate-limited timelock
+  reads as a value.
+- test:all **183/183** (11.4 min).
+
+## Live re-timing — analyze(), anchor established first, 5 runs alternating
+| | ms | median | reads |
+|---|---|---|---|
+| xylo (testnet) | 626, 524, 714, 331, 350 | 524 | 8 |
+| **Galaxy (mainnet, V2 2–4), parallel** | 4,130, 3,984, 4,887, 4,207, **18,733** | **4,207** | 144 |
+| Galaxy, serial (before) | 6,589–10,360 | 7,361 | 142 |
+- **Typical: ≈ 4.2 s analyze → ≈ 5.2 s check age against the 10 s ceiling (≈ 5 s headroom).** Not the ~1 s estimated: the
+  dependency chain is ~12 batches deep and the 47-read powers batch alone is ~6 rounds at 8 in flight.
+- **The 18.7 s run** ended with 36 checks not done (vs 12) and redeemable-now **no-value, never 0**: the rate-limit rule
+  holding on live data. That rate limiting CAUSED the slowness is INFERRED (rpcCall retries transient errors with
+  backoff), not verified: that run's notChecked reasons were not captured. In the mandate such a run exceeds the window →
+  stale-check refusal (fail-safe; it would have refused anyway, exit fact no-value).
+- **LIVE determinism:** 3 Galaxy runs pinned to block 23907996 → keccak(canonical body) `0x6ef2885b…` ×3: **BYTE-IDENTICAL**.

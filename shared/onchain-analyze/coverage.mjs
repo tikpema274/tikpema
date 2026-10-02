@@ -107,6 +107,32 @@ export function makeCoverage() {
     },
 
     /**
+     * ⭐ AN ORDERED PARALLEL BATCH (2026-10-02). Executes `tasks` ({id, meta, fn}) with at most `concurrency` in flight,
+     * THEN records every outcome through runCheck IN LIST ORDER. Completion order varies run to run (latency); the
+     * manifest and the readIds must not, because coverage sits inside the signed body (attest.mjs canonicalize). So the
+     * order of entries and readIds is the order of `tasks`, whatever finished first. A rejected fn is recorded exactly as
+     * runCheck records a throw (its reason preserved: a rate-limited read stays UNREADABLE, never a value).
+     * Returns runCheck's results, in list order.
+     */
+    async runChecks(tasks, { concurrency = 8 } = {}) {
+      const settled = new Array(tasks.length);
+      let next = 0;
+      const worker = async () => {
+        while (next < tasks.length) {
+          const i = next++;
+          try { settled[i] = { ok: true, v: await tasks[i].fn() }; } catch (e) { settled[i] = { ok: false, e }; }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, tasks.length)) }, worker));
+      const out = [];
+      for (let i = 0; i < tasks.length; i++) {
+        const s = settled[i];
+        out.push(await this.runCheck(tasks[i].id, tasks[i].meta, async () => { if (!s.ok) throw s.e; return s.v; }));
+      }
+      return out;
+    },
+
+    /**
      * A check deliberately NOT run. `why` is required — an unstated skip is indistinguishable from
      * an oversight, which is the whole failure this file exists to prevent.
      */

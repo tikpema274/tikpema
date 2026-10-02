@@ -59,24 +59,38 @@ const DEC = {
 const lc = (a) => String(a).toLowerCase();
 const same = (a, b) => !!a && !!b && lc(a) === lc(b);
 
+// ═══ READS: ORDERED PARALLEL BATCHES (T 2026-10-02) ════════════════════════════════════════════════════════════════
+// Measured: 71 SERIAL quorum reads per endpoint took 6.6–10.4 s on Galaxy against the mandate's 10 s freshness ceiling.
+// Independent reads now go through coverage.runChecks: ≤ V2_READ_CONCURRENCY in flight, RECORDED IN LIST ORDER, so the
+// manifest and readIds (inside the signed body) are byte-identical run to run (test:morphov2parallel). A rejected read is
+// recorded exactly as before: a rate-limited read stays UNREADABLE, never a value.
+export const V2_READ_CONCURRENCY = 8;
+const callSpec = (client, blk, id, to, abi, fn, args, decode, extraParams) => {
+  const data = encodeFunctionData({ abi, functionName: fn, args });
+  return { id, meta: { kind: "v2" }, fn: async () => {
+    const out = await client.call({ method: "eth_call", params: extraParams ? [{ to, data }, blk.tag, extraParams] : [{ to, data }, blk.tag] });
+    return { ...out, result: decode(out.result) };
+  } };
+};
+const codeSpec = (client, blk, id, address) => ({ id, meta: { kind: "v2" }, fn: async () => {
+  const out = await client.call({ method: "eth_getCode", params: [address, blk.tag] });
+  const c = String(out.result ?? "");
+  return { ...out, result: c === "0x" || c === "" ? null : keccak256(c) };
+} });
+/** Run specs in parallel (capped), record in order; each value or UNREADABLE (never a default). */
+async function runAll(cov, specs) {
+  if (!specs.length) return [];
+  const rs = await cov.runChecks(specs, { concurrency: V2_READ_CONCURRENCY });
+  return rs.map((r) => (r.ok ? r.value : UNREADABLE));
+}
+const byDEC = (k) => (h) => DEC[k](h);
+const byABI = (abi, fn) => (h) => {
+  try { return decodeFunctionResult({ abi, functionName: fn, data: h }); }
+  catch { throw Object.assign(new Error(`${fn}: undecodable result`), { unreadableInput: true }); }
+};
 /** One eth_call through the coverage door. Returns the decoded value, or UNREADABLE (never a default). */
-async function read(cov, client, blk, id, to, fn, args, dec) {
-  const data = encodeFunctionData({ abi: ABI, functionName: fn, args });
-  const r = await cov.runCheck(id, { kind: "v2" }, async () => {
-    const out = await client.call({ method: "eth_call", params: [{ to, data }, blk.tag] });
-    return { ...out, result: DEC[dec](out.result) };
-  });
-  return r.ok ? r.value : UNREADABLE;
-}
-/** keccak of the runtime code at an address, or null for no code, or UNREADABLE. */
-async function codeHash(cov, client, blk, id, address) {
-  const r = await cov.runCheck(id, { kind: "v2" }, async () => {
-    const out = await client.call({ method: "eth_getCode", params: [address, blk.tag] });
-    const c = String(out.result ?? "");
-    return { ...out, result: c === "0x" || c === "" ? null : keccak256(c) };
-  });
-  return r.ok ? r.value : UNREADABLE;
-}
+const rspec = (client, blk, id, to, fn, args, dec) => callSpec(client, blk, id, to, ABI, fn, args, byDEC(dec));
+async function read(cov, client, blk, id, to, fn, args, dec) { return (await runAll(cov, [rspec(client, blk, id, to, fn, args, dec)]))[0]; }
 const pinCheck = (h, pin) => (unread(h) ? null : h === pin.codeHash);
 
 /**
@@ -87,14 +101,14 @@ const pinCheck = (h, pin) => (unread(h) ? null : h === pin.codeHash);
 export async function recogniseV2(cov, client, addr, blk, effCode) {
   const f = client.chain?.pins?.vaultV2Factory;
   if (!f) return null;
-  const fh = await codeHash(cov, client, blk, "v2:code@vaultV2Factory", f.address);
+  const [fh, att] = await runAll(cov, [codeSpec(client, blk, "v2:code@vaultV2Factory", f.address),
+    rspec(client, blk, "v2:isVaultV2", f.address, "isVaultV2", [addr], "bool")]);
   const factory = { address: f.address, codeHash: unread(fh) ? null : fh, codeHashMatchesPin: pinCheck(fh, f) };
   const fingerprint = typeof effCode === "string" && !unread(effCode)
     ? (V2_FINGERPRINT.every((s) => hasSel(effCode, s)) ? "agrees" : "disagrees") : "unreadable";
   const base = { method: "factory-attestation", factory, fingerprint, fingerprintSelectors: V2_FINGERPRINT };
   if (unread(fh)) return { ...base, status: "unreadable", why: "the pinned VaultV2Factory's code could not be read, so its attestation cannot be trusted or refused" };
   if (factory.codeHashMatchesPin !== true) return { ...base, status: "factory-mismatch", why: "the code at the pinned VaultV2Factory address does not match its pin: its attestation counts for nothing" };
-  const att = await read(cov, client, blk, "v2:isVaultV2", f.address, "isVaultV2", [addr], "bool");
   if (unread(att)) return { ...base, status: "unreadable", attested: null, why: "isVaultV2 could not be read" };
   if (att !== true) return { ...base, status: "not-v2", attested: false, why: "the pinned VaultV2Factory does not attest this address (a V2-looking fingerprint does not make it V2)" };
   if (fingerprint !== "agrees") return { ...base, status: "contradictory", attested: true, why: "the pinned factory attests this vault, but its code lacks V2's governance selectors: the two disagree" };
@@ -104,52 +118,67 @@ export async function recogniseV2(cov, client, addr, blk, effCode) {
 /** The exit-path guard for an ATTESTED V2 vault. Never throws for a chain answer; reads go through the coverage door. */
 export async function exitPathGuardV2(cov, client, addr, blk) {
   const pins = client.chain.pins;
-  const blueH = await codeHash(cov, client, blk, "v2:code@morphoBlue", pins.morphoBlue.address);
+  const VOUCH = [["morphoMarketV1AdapterV2", "morphoMarketV1AdapterV2Factory", "isMorphoMarketV1AdapterV2"],
+    ["morphoVaultV1Adapter", "morphoVaultV1AdapterFactory", "isMorphoVaultV1Adapter"]].filter(([, key]) => pins[key]);
+  // Batch 1 — independent: Morpho Blue's code, each adapter factory's code, the wiring getters.
+  const b1 = await runAll(cov, [
+    codeSpec(client, blk, "v2:code@morphoBlue", pins.morphoBlue.address),
+    ...VOUCH.map(([, key]) => codeSpec(client, blk, `v2:code@${key}`, pins[key].address)),
+    rspec(client, blk, "v2:adaptersLength", addr, "adaptersLength", [], "uint"),
+    rspec(client, blk, "v2:liquidityAdapter", addr, "liquidityAdapter", [], "address"),
+    rspec(client, blk, "v2:asset", addr, "asset", [], "address"),
+  ]);
+  const blueH = b1[0];
   const morphoBlue = { address: pins.morphoBlue.address, codeHash: unread(blueH) ? null : blueH, codeHashMatchesPin: pinCheck(blueH, pins.morphoBlue) };
-
   // The adapter factories that may vouch for an adapter: each counts only if ITS code matches ITS pin.
-  const vouchers = [];
-  for (const [kind, key, fn] of [["morphoMarketV1AdapterV2", "morphoMarketV1AdapterV2Factory", "isMorphoMarketV1AdapterV2"],
-    ["morphoVaultV1Adapter", "morphoVaultV1AdapterFactory", "isMorphoVaultV1Adapter"]]) {
-    const p = pins[key];
-    if (!p) continue;
-    const h = await codeHash(cov, client, blk, `v2:code@${key}`, p.address);
-    vouchers.push({ kind, key, fn, address: p.address, codeHashMatchesPin: pinCheck(h, p) });
-  }
+  const vouchers = VOUCH.map(([kind, key, fn], i) => ({ kind, key, fn, address: pins[key].address, codeHashMatchesPin: pinCheck(b1[1 + i], pins[key]) }));
+  const [n, liq, asset] = b1.slice(1 + VOUCH.length);
 
-  const n = await read(cov, client, blk, "v2:adaptersLength", addr, "adaptersLength", [], "uint");
-  const list = [];
+  // Batch 2 — the adapter list (its length is known) and the idle balance (its asset is known).
   let listReadable = !unread(n) && n <= BigInt(MAX_ADAPTERS_READ);
-  if (listReadable) {
-    for (let i = 0n; i < n; i++) {
-      const a = await read(cov, client, blk, `v2:adapters(${i})`, addr, "adapters", [i], "address");
-      if (unread(a)) { listReadable = false; break; }
-      list.push(a);
-    }
-  }
-  const liq = await read(cov, client, blk, "v2:liquidityAdapter", addr, "liquidityAdapter", [], "address");
-  const asset = await read(cov, client, blk, "v2:asset", addr, "asset", [], "address");
-  const idle = unread(asset) ? UNREADABLE : await read(cov, client, blk, "v2:idle", asset, "balanceOf", [addr], "uint");
+  const nn = listReadable ? Number(n) : 0;
+  const b2 = await runAll(cov, [
+    ...Array.from({ length: nn }, (_, i) => rspec(client, blk, `v2:adapters(${i})`, addr, "adapters", [BigInt(i)], "address")),
+    ...(unread(asset) ? [] : [rspec(client, blk, "v2:idle", asset, "balanceOf", [addr], "uint")]),
+  ]);
+  const list = b2.slice(0, nn);
+  if (list.some((a) => unread(a))) listReadable = false;
+  const idle = unread(asset) ? UNREADABLE : b2[nn];
+  const liqSet0 = !unread(liq) && !isZero(liq);
 
-  /** Recognise one adapter by the pinned factories' attestations. */
-  async function recognise(a) {
-    const h = await codeHash(cov, client, blk, `v2:code@adapter:${lc(a)}`, a);
+  // Batch 3 — every adapter's code + attestations + realAssets, and the liquidity adapter's (if outside the list).
+  const live = vouchers.filter((v) => v.codeHashMatchesPin === true); // a factory not matching its pin vouches for nothing
+  const recogSpecs = (a, withReal) => [
+    codeSpec(client, blk, `v2:code@adapter:${lc(a)}`, a),
+    ...live.map((v) => rspec(client, blk, `v2:${v.fn}:${lc(a)}`, v.address, v.fn, [a], "bool")),
+    ...(withReal ? [rspec(client, blk, `v2:realAssets:${lc(a)}`, a, "realAssets", [], "uint")] : []),
+  ];
+  const listed = listReadable ? list : [];
+  const extraLiq = liqSet0 && !listed.some((a) => same(a, liq)) ? liq : null;
+  const per = 1 + live.length;
+  const b3 = await runAll(cov, [
+    ...listed.flatMap((a) => recogSpecs(a, true)),
+    ...(extraLiq ? recogSpecs(extraLiq, false) : []),
+    ...(liqSet0 ? [rspec(client, blk, "v2:isAdapter(liquidityAdapter)", addr, "isAdapter", [liq], "bool")] : []),
+  ]);
+  const recogFrom = (a, vals) => {
     let recognisedAs = null, attestedBy = null, attestation = "none";
-    for (const v of vouchers) {
-      if (v.codeHashMatchesPin !== true) continue; // a factory not matching its pin vouches for nothing
-      const yes = await read(cov, client, blk, `v2:${v.fn}:${lc(a)}`, v.address, v.fn, [a], "bool");
-      if (unread(yes)) { attestation = "unreadable"; continue; }
-      if (yes) { recognisedAs = v.kind; attestedBy = v.address; attestation = "attested"; break; }
-    }
-    return { address: a, codeHash: unread(h) ? null : h, recognisedAs, attestedBy, attestation };
-  }
-
-  const adapters = [];
-  for (const a of list) {
-    const rec = await recognise(a);
-    const real = await read(cov, client, blk, `v2:realAssets:${lc(a)}`, a, "realAssets", [], "uint");
-    adapters.push({ ...rec, realAssets: unread(real) ? null : real.toString() });
-  }
+    live.forEach((v, i) => {
+      if (recognisedAs) return;
+      const yes = vals[1 + i];
+      if (unread(yes)) { attestation = "unreadable"; return; }
+      if (yes) { recognisedAs = v.kind; attestedBy = v.address; attestation = "attested"; }
+    });
+    return { address: a, codeHash: unread(vals[0]) ? null : vals[0], recognisedAs, attestedBy, attestation };
+  };
+  const adapters = listed.map((a, i) => {
+    const vals = b3.slice(i * (per + 1), (i + 1) * (per + 1));
+    const real = vals[per];
+    return { ...recogFrom(a, vals), realAssets: unread(real) ? null : real.toString() };
+  });
+  let k = listed.length * (per + 1);
+  const extraRec = extraLiq ? recogFrom(extraLiq, b3.slice(k, (k += per))) : null;
+  const isAdLiq = liqSet0 ? b3[k] : undefined;
   const allReal = listReadable && !unread(idle) && adapters.every((x) => x.realAssets !== null);
   const total = allReal ? adapters.reduce((s, x) => s + BigInt(x.realAssets), idle) : null;
   for (const x of adapters) {
@@ -163,8 +192,8 @@ export async function exitPathGuardV2(cov, client, addr, blk) {
   else if (!liqSet) liquidityAdapter = { address: null, set: false, note: "unset: redemptions are served from the vault's idle balance only" };
   else {
     const inList = adapters.find((x) => same(x.address, liq));
-    const rec = inList ? { recognisedAs: inList.recognisedAs, attestedBy: inList.attestedBy, attestation: inList.attestation, codeHash: inList.codeHash } : await recognise(liq);
-    const isAd = await read(cov, client, blk, "v2:isAdapter(liquidityAdapter)", addr, "isAdapter", [liq], "bool");
+    const rec = inList ? { recognisedAs: inList.recognisedAs, attestedBy: inList.attestedBy, attestation: inList.attestation, codeHash: inList.codeHash } : extraRec;
+    const isAd = isAdLiq;
     liquidityAdapter = { address: liq, set: true, recognisedAs: rec.recognisedAs, attestedBy: rec.attestedBy, attestation: rec.attestation,
       codeHash: rec.codeHash ?? null, isAdapter: unread(isAd) ? null : isAd };
   }
@@ -287,14 +316,7 @@ const PABI = parseAbi([
   "function adapterRegistry() view returns (address)", "function maxRate() view returns (uint64)",
   "function forceDeallocatePenalty(address) view returns (uint256)",
 ]);
-async function pread(cov, client, blk, id, to, fn, args, dec) {
-  const data = encodeFunctionData({ abi: PABI, functionName: fn, args });
-  const r = await cov.runCheck(id, { kind: "v2" }, async () => {
-    const out = await client.call({ method: "eth_call", params: [{ to, data }, blk.tag] });
-    return { ...out, result: DEC[dec](out.result) };
-  });
-  return r.ok ? r.value : UNREADABLE;
-}
+const pspec = (client, blk, id, to, fn, args, dec) => callSpec(client, blk, id, to, PABI, fn, args, byDEC(dec));
 const sel4 = (sig) => "0x" + keccak256(new TextEncoder().encode(sig)).slice(2, 10);
 const NOT_ENUM = "a mapping (isAllocator / isSentinel): not enumerable from state; the event scan is not built in this window (decision (b))";
 
@@ -304,10 +326,21 @@ export async function powersV2(cov, client, addr, blk, exitPath) {
   const vals = [["owner", "address"], ["curator", "address"], ["performanceFee", "uint"], ["managementFee", "uint"], ["performanceFeeRecipient", "address"],
     ["managementFeeRecipient", "address"], ["receiveSharesGate", "address"], ["sendSharesGate", "address"], ["receiveAssetsGate", "address"],
     ["sendAssetsGate", "address"], ["adapterRegistry", "address"], ["maxRate", "uint"]];
-  for (const [fn, dec] of vals) v[fn] = await pread(cov, client, blk, `v2:value:${fn}`, addr, fn, [], dec);
   const adapters = (exitPath?.adapters ?? []).map((x) => x.address);
+  const timed = V2_POWER_CATALOGUE.filter((p) => p.delay === T);
+  // ONE batch: the values, the per-adapter penalties, every abdication and every timelock (decreaseTimelock: per target).
+  const all = await runAll(cov, [
+    ...vals.map(([fn, dec]) => pspec(client, blk, `v2:value:${fn}`, addr, fn, [], dec)),
+    ...adapters.map((a) => pspec(client, blk, `v2:value:forceDeallocatePenalty:${lc(a)}`, addr, "forceDeallocatePenalty", [a], "uint")),
+    ...timed.flatMap((p) => [pspec(client, blk, `v2:abdicated:${p.power}`, addr, "abdicated", [sel4(p.signature)], "bool"),
+      ...(p.power === "decreaseTimelock" ? [] : [pspec(client, blk, `v2:timelock:${p.power}`, addr, "timelock", [sel4(p.signature)], "uint")])]),
+  ]);
+  let at = 0;
+  for (const [fn] of vals) v[fn] = all[at++];
   const penalties = {};
-  for (const a of adapters) { const p = await pread(cov, client, blk, `v2:value:forceDeallocatePenalty:${lc(a)}`, addr, "forceDeallocatePenalty", [a], "uint"); penalties[a] = unread(p) ? null : p.toString(); }
+  for (const a of adapters) { const p = all[at++]; penalties[a] = unread(p) ? null : p.toString(); }
+  const tl = {};
+  for (const p of timed) { tl[p.power] = { ab: all[at++], t: p.power === "decreaseTimelock" ? undefined : all[at++] }; }
 
   // The three mappings: a stated gap (decision (b)).
   cov.skip("v2:enumerate:allocators", { kind: "v2" }, `allocators: ${NOT_ENUM}`);
@@ -333,10 +366,10 @@ export async function powersV2(cov, client, addr, blk, exitPath) {
     let delay, abdicated;
     if (p.delay === NT) { delay = { kind: "not-timelockable", seconds: "0", note: "never passes timelocked(): callable at once by its holder" }; abdicated = "not-applicable"; }
     else {
-      const ab = await pread(cov, client, blk, `v2:abdicated:${p.power}`, addr, "abdicated", [sel4(p.signature)], "bool");
+      const { ab, t } = tl[p.power];
       abdicated = unread(ab) ? null : ab;
       if (p.power === "decreaseTimelock") delay = { kind: "timelocked", seconds: "per-target", note: "waits the TARGET selector's own current timelock (VaultV2.sol:355), so no timelock can be shortcut" };
-      else { const t = await pread(cov, client, blk, `v2:timelock:${p.power}`, addr, "timelock", [sel4(p.signature)], "uint"); delay = { kind: "timelocked", seconds: unread(t) ? null : t.toString() }; }
+      else delay = { kind: "timelocked", seconds: unread(t) ? null : t.toString() };
     }
     powers.push({ power: p.power, signature: p.signature, selector: sel4(p.signature), caller: p.caller, holders: holdersOf(p), delay, abdicated,
       currentValue: valueOf(p), scope: p.scope, reach: p.reach, exit: V2_EXIT_POWERS.includes(p.power) });
@@ -407,17 +440,8 @@ const XABI = parseAbi([
   "function previewRedeem(uint256) view returns (uint256)",
 ]);
 const MP_T = [{ type: "tuple", components: [{ type: "address", name: "loanToken" }, { type: "address", name: "collateralToken" }, { type: "address", name: "oracle" }, { type: "address", name: "irm" }, { type: "uint256", name: "lltv" }] }];
-async function xread(cov, client, blk, id, to, fn, args = [], extraParams) {
-  const data = encodeFunctionData({ abi: XABI, functionName: fn, args });
-  const r = await cov.runCheck(id, { kind: "v2" }, async () => {
-    const out = await client.call({ method: "eth_call", params: extraParams ? [{ to, data }, blk.tag, extraParams] : [{ to, data }, blk.tag] });
-    let v;
-    try { v = decodeFunctionResult({ abi: XABI, functionName: fn, data: out.result }); }
-    catch (e) { throw Object.assign(new Error(`${fn}: undecodable result`), { unreadableInput: true }); }
-    return { ...out, result: v };
-  });
-  return r.ok ? r.value : UNREADABLE;
-}
+const xspec = (client, blk, id, to, fn, args = [], extraParams) => callSpec(client, blk, id, to, XABI, fn, args, byABI(XABI, fn), extraParams);
+async function xread(cov, client, blk, id, to, fn, args = [], extraParams) { return (await runAll(cov, [xspec(client, blk, id, to, fn, args, extraParams)]))[0]; }
 
 /** What a liquidity route can pay, at the block. Returns {reach, basis} or {noValue: reason}. depth limits recursion. */
 async function routeReach(cov, client, blk, vault, depth, pins, tag) {
@@ -425,7 +449,12 @@ async function routeReach(cov, client, blk, vault, depth, pins, tag) {
   if (unread(la)) return { noValue: "the liquidity adapter could not be read" };
   if (isZero(la)) return { reach: 0n, basis: "none (no liquidity adapter)" };
   const mm = pins.morphoMarketV1AdapterV2Factory, v1 = pins.morphoVaultV1AdapterFactory;
-  const isMM = mm ? await read(cov, client, blk, `v2:exit:${tag}isMM`, mm.address, "isMorphoMarketV1AdapterV2", [la], "bool") : false;
+  const [isMM0, isV10] = await runAll(cov, [
+    ...(mm ? [rspec(client, blk, `v2:exit:${tag}isMM`, mm.address, "isMorphoMarketV1AdapterV2", [la], "bool")] : []),
+    ...(v1 ? [rspec(client, blk, `v2:exit:${tag}isV1`, v1.address, "isMorphoVaultV1Adapter", [la], "bool")] : []),
+  ]);
+  const isMM = mm ? isMM0 : false;
+  const isV1pre = v1 ? (mm ? isV10 : isMM0) : false;
   if (unread(isMM)) return { noValue: "the liquidity adapter's attestation could not be read" };
   if (isMM) {
     const ld = await xread(cov, client, blk, `v2:exit:${tag}liquidityData`, vault, "liquidityData");
@@ -433,15 +462,15 @@ async function routeReach(cov, client, blk, vault, depth, pins, tag) {
     let mp;
     try { [mp] = decodeAbiParameters(MP_T, ld); } catch { return { noValue: "the liquidity adapter's liquidityData is not a market (undecodable)" }; }
     const id = keccak256(encodeAbiParameters(MP_T, [mp]));
-    const m = await xread(cov, client, blk, `v2:exit:${tag}market`, pins.morphoBlue.address, "market", [id]);
-    const p = await xread(cov, client, blk, `v2:exit:${tag}position`, pins.morphoBlue.address, "position", [id, la]);
+    const [m, p] = await runAll(cov, [xspec(client, blk, `v2:exit:${tag}market`, pins.morphoBlue.address, "market", [id]),
+      xspec(client, blk, `v2:exit:${tag}position`, pins.morphoBlue.address, "position", [id, la])]);
     if (unread(m) || unread(p)) return { noValue: "the liquidity market's state could not be read" };
     const [tsa, tss, tba] = m;
     const pos = tss === 0n ? 0n : (p[0] * tsa) / tss;
     const free = tsa > tba ? tsa - tba : 0n;
     return { reach: pos < free ? pos : free, basis: `the liquidity adapter's market ${id.slice(0, 12)}… (position ${pos}, free ${free})`, shared: true };
   }
-  const isV1 = v1 ? await read(cov, client, blk, `v2:exit:${tag}isV1`, v1.address, "isMorphoVaultV1Adapter", [la], "bool") : false;
+  const isV1 = isV1pre;
   if (unread(isV1)) return { noValue: "the liquidity adapter's attestation could not be read" };
   if (!isV1) return { noValue: "redemptions are routed through an adapter of unrecognised code" };
   if (depth >= 1) return { noValue: "the liquidity route wraps a vault inside a wrapped vault (beyond depth 1): not followed" };
@@ -478,9 +507,10 @@ export async function exitLiquidityV2(cov, client, addr, blk, exitPath, pv) {
   }
   if (exitPath.idleAssets === null) return noValue("the vault's idle balance could not be read");
   const idle = BigInt(exitPath.idleAssets);
-  const ta = await xread(cov, client, blk, "v2:exit:totalAssets", addr, "totalAssets");
-  const ts = await xread(cov, client, blk, "v2:exit:totalSupply", addr, "totalSupply");
-  const dec = exitPath.asset ? await xread(cov, client, blk, "v2:exit:decimals", exitPath.asset, "decimals") : UNREADABLE;
+  const [ta, ts, dec0] = await runAll(cov, [xspec(client, blk, "v2:exit:totalAssets", addr, "totalAssets"),
+    xspec(client, blk, "v2:exit:totalSupply", addr, "totalSupply"),
+    ...(exitPath.asset ? [xspec(client, blk, "v2:exit:decimals", exitPath.asset, "decimals")] : [])]);
+  const dec = exitPath.asset ? dec0 : UNREADABLE;
   if (unread(ta) || unread(ts) || unread(dec)) return noValue("the vault's totals or the asset's decimals could not be read");
   const route = await routeReach(cov, client, blk, addr, 0, client.chain.pins, "");
   if (route.noValue) return noValue(route.noValue);
@@ -513,8 +543,11 @@ export async function exitLiquidityV2(cov, client, addr, blk, exitPath, pv) {
       degraded: prev?.degraded ?? [],
     };
   }
-  const atR = R > 0n ? await sim(R, "v2:exit:simulate:atR") : undefined;
-  const aboveR = await sim(R + delta, "v2:exit:simulate:aboveR");
+  const simSpec = (amount, id) => ({ ...xspec(client, blk, id, PROBE_ADDRESS, "probe", [addr, amount], override), amount });
+  const [s1, s2] = await runAll(cov, [...(R > 0n ? [simSpec(R, "v2:exit:simulate:atR")] : []), simSpec(R + delta, "v2:exit:simulate:aboveR")]);
+  const asSim = (v, amount) => (unread(v) ? null : { amount: amount.toString(), call: "withdraw", ok: v[0], revertData: v[0] ? null : v[1] });
+  const atR = R > 0n ? asSim(s1, R) : undefined;
+  const aboveR = asSim(R > 0n ? s2 : s1, R + delta);
   if (atR === null || aboveR === null) return noValue("the redeem simulation could not be read (an unreadable simulation is NOT a zero)");
   const contradicts = (atR && atR.ok !== true) || aboveR.ok !== false;
   if (contradicts) {
