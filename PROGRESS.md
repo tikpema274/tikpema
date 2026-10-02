@@ -31876,6 +31876,14 @@ DOMAIN_SEPARATOR immutable, whose value is the one the source computes for chain
 is the non-executable trailer only. **Under the rule as written ("the tag's settings"), strictly, the tag alone does not
 reproduce the trailer.** Claude's view: pin it, recording the deviation (the executable code is reproduced; the
 trailer's solc version 0.8.19 matches the tag's pragma). T decides.
+- ✅ **T RULED (2026-10-02): PIN Morpho Blue, with the deviation recorded.** Pin: `0x34CD04070dD72b14E241112F6d83812Df5Af7fCD`
+  → runtime keccak `0xeb0972f2c33d0d3443136e2c42688082b9eef4ff1594a32e890f4f08669f1b08`, source morpho-blue v1.0.0
+  (55d2d99) built with the tag's foundry.toml **except `bytecode_hash=none`** (the deployed trailer `a1 64 'solc' 43
+  000813`); executable code identical; DOMAIN_SEPARATOR checked. The deviation travels WITH the pin (the registry entry
+  carries it as a note, step 1), so a later reader does not mistake it for an unqualified tag match.
+- ⏳ Still open: T's explorer.arc.io results for the seven contracts (to follow), and approval of the other four
+  proposed pins (VaultV2Factory, both adapter factories, AdaptiveCurveIrm). The pins are WRITTEN in step 1 (chain
+  registry), all together.
 
 ## Not checked (outside the exit path or not deployed for Galaxy)
 MorphoRegistry 0xdEBC…8765 and Blue Public Allocator 0x4c2f…47C2 (docs, same tab): not on a V2 redeem's path. A
