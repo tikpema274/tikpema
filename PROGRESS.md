@@ -31881,9 +31881,13 @@ trailer's solc version 0.8.19 matches the tag's pragma). T decides.
   (55d2d99) built with the tag's foundry.toml **except `bytecode_hash=none`** (the deployed trailer `a1 64 'solc' 43
   000813`); executable code identical; DOMAIN_SEPARATOR checked. The deviation travels WITH the pin (the registry entry
   carries it as a note, step 1), so a later reader does not mistake it for an unqualified tag match.
-- ⏳ Still open: T's explorer.arc.io results for the seven contracts (to follow), and approval of the other four
-  proposed pins (VaultV2Factory, both adapter factories, AdaptiveCurveIrm). The pins are WRITTEN in step 1 (chain
-  registry), all together.
+- ✅ **T APPROVED the other four pins (2026-10-02):** VaultV2Factory, MorphoMarketV1AdapterV2Factory,
+  MorphoVaultV1AdapterFactory, AdaptiveCurveIrm. ⚠️ Correction to the approval's wording, so the record is exact: TWO are
+  EXACT matches (VaultV2Factory, MorphoVaultV1AdapterFactory); TWO are MASKED matches with every immutable value checked
+  (MorphoMarketV1AdapterV2Factory: morpho + IRM; AdaptiveCurveIrm: MORPHO), all from their tag's own settings. The pin
+  is the deployed runtime hash in every case (singletons, so the immutable values are part of what is pinned).
+- ⏸ **STEP 1 HELD (T) until the explorer.arc.io results arrive:** the explorer is a second witness on what the profile
+  rests on, and writing the pins first would make it a formality rather than a check.
 
 ## Not checked (outside the exit path or not deployed for Galaxy)
 MorphoRegistry 0xdEBC…8765 and Blue Public Allocator 0x4c2f…47C2 (docs, same tab): not on a V2 redeem's path. A
