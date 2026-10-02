@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { bridgeMechanicCopy, bridgeProposalFeeLine } from "../../shared/bridge-mechanic.mjs";
+import { bridgeMechanicCopy } from "../../shared/bridge-mechanic.mjs";
+import { bridgeProposalFeeLine } from "../../shared/bridge-ack-copy.mjs";
 import { balanceUnverifiedNote } from "../../shared/balance-unverified-copy.mjs";
 import type { BridgeQuote } from "../lib/approveProposal";
 // jobTimeline.tsx — shared paid-research-job rendering primitives.

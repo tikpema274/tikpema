@@ -31742,3 +31742,35 @@ UNTESTED on C would have blocked E until the ledgers were rebuilt by hand.** Roa
   response; source comments likewise; wired into test:all. **RED 5/11 → GREEN 16/0** (one interim red: my own history
   note quoted the false sentence; reworded).
 - Not on the DD surface (no ddTree rotation). test:all 178/178 with item 2 below.
+
+---
+
+# ✅ THE ORDINARY-BAND FEE LINE STATES WHAT LEAVES (2026-10-02) — §13 has no exception left; NOT deployed
+
+- **Gap:** `bridgeProposalFeeLine` (reply message, confirm panel, plan steps, job card quote) stated what arrives, not
+  what leaves: incomplete under §13 (every money disclosure states both, as figures).
+- **Not the shared producer, by design:** `bridgeAckSentence` is UPFRONT-only (says "on top", "the full amount
+  arrives") and takes amount + ratio; the proposal line serves all THREE mechanics from what the server priced (fee +
+  net) and carries no percentage. So its own form, **moved into `shared/bridge-ack-copy.mjs`** beside the ack forms
+  (removed from bridge-mechanic.mjs and its .d.mts, NOT re-exported: one home). Callers agent-act, MyAgentPanel,
+  jobTimeline import it from there. Placement words still come from BRIDGE_MECHANIC_COPY.
+- **Now:** "Cross-chain fee ~0.0541 USDC (charged on top of the amount), so ~2.0000 USDC arrives on Base and ~2.0541
+  USDC leaves your wallet." On both placed mechanics leaves = net + fee (upfront: net = amount; deducted: net =
+  amount − fee, the amount leaves), so one expression is true for both. `unknown` states neither figure.
+- **§13 extended** (test:mechanicpairing): rendered single + plan step in the ORDINARY band carry both figures
+  (numeric, wording-blind); producer grids for upfront and deducted; unknown states neither; one-home check; §12's
+  family covers the line; the three import pins moved. **RED 149/12 → GREEN 161/0.** Mutations (drop the leaves
+  clause; print net as leaves) → 4 fail each; restored byte-identical. gate:types clean.
+- Not on the DD surface. **test:all 178/178** (9.7 min) with both fixes.
+
+## ⭐ THE NEXT DEPLOY (T) CARRIES THESE TWO + a33e577 — and it is the deferred-verdict wrapper's FIRST LIVE RUN
+The deploy record must state specifically, from the deploy log:
+1. **Whatever gate:forgery returns (PASS / FAIL / UNTESTED), gate:spec, gate:deployloss and stage:ledger ALL RAN.**
+   Evidence: the `[deferred-verdict] summary` block lists all four with an exit code, none "NOT RUN" (unless one of
+   the three itself went red, which stops only the ones after it).
+2. **The chain exited with forgery's OWN code:** the run-lock's "command exited N" equals forgery's
+   `VERDICT=` (PASS 0 / FAIL 1 / UNTESTED 3), unless forgery passed and a later step failed.
+3. The ledgers were staged by stage:ledger (so the next deploy's gate:ledger is not BEHIND).
+This is what C (operator deposit arming, a money deploy) depends on. A PASS proves (1)–(3) on the green path only;
+the red path (forgery 1/3 still staging the ledgers) stays proven by test:deferredverdict alone until one occurs live.
+Also to verify live: the served agent-parameters disclaimer (all four agents) and the proposal line in the bundle.

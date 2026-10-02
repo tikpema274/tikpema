@@ -25,8 +25,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   BRIDGE_MECHANICS, BRIDGE_MECHANIC_COPY, bridgeMechanicOf, bridgeMechanicCopy,
   BRIDGE_SIGNERS, BRIDGE_SIGNER_COPY, bridgeSignerOf, bridgeSignerCopy,
-  bridgeProposalFeeLine,
 } from "../shared/bridge-mechanic.mjs";
+import * as MECH from "../shared/bridge-mechanic.mjs";
+// ⭐ The proposal line lives with the rest of the fee-disclosure family (2026-10-02). Read through the namespace so a
+// missing export fails the checks below, not the suite's load.
+import * as ACKCOPY from "../shared/bridge-ack-copy.mjs";
+const bridgeProposalFeeLine: (a: any) => string = (ACKCOPY as any).bridgeProposalFeeLine ?? (() => "");
 import React from "react";
 const { BridgeQuoteSummary } = await import("../src/components/BridgeQuoteSummary");
 import { bridgeNetUsdc, bridgeNetDeducted } from "../netlify/functions/_bridge.mjs";
@@ -481,6 +485,9 @@ section("10 — 🚨 THE CONVERSATIONAL AGENT SURFACE DERIVES ITS FEE SENTENCE �
   const UP = BRIDGE_MECHANIC_COPY.upfront.feePlacement;
   const DED = BRIDGE_MECHANIC_COPY.deducted.feePlacement;
   const line = (mechanic) => bridgeProposalFeeLine({ feeUsdc: 0.054071, netUsdc: 1, destinationLabel: "Base", mechanic });
+  check("⭐⭐ ONE home: shared/bridge-ack-copy.mjs exports bridgeProposalFeeLine, beside the acknowledgement forms",
+    typeof (ACKCOPY as any).bridgeProposalFeeLine === "function");
+  check("⛔ …and bridge-mechanic.mjs no longer does (a second export is a second home)", !("bridgeProposalFeeLine" in MECH));
   check("⭐ the two placements are DIFFERENT strings — or the pairing below cannot discriminate", UP !== DED && UP.length > 0 && DED.length > 0);
   check("⭐⭐ upfront line carries the UPFRONT placement", line("upfront").includes(`(${UP})`), line("upfront"));
   check("⛔ …and NOT the deducted one", !line("upfront").includes(DED) && !/taken from the amount/.test(line("upfront")));
@@ -492,12 +499,12 @@ section("10 — 🚨 THE CONVERSATIONAL AGENT SURFACE DERIVES ITS FEE SENTENCE �
 
   const stripSrc = (f) => readFileSync(f, "utf8").replace(/\{\/\*[\s\S]*?\*\/\}/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
   const surfaces = [
-    ["src/components/MyAgentPanel.tsx", /^import\s*\{[^}]*\bbridgeProposalFeeLine\b[^}]*\}\s*from\s*"\.\.\/\.\.\/shared\/bridge-mechanic\.mjs"/m],
-    ["netlify/functions/agent-act.mjs", /^import\s*\{[^}]*\bbridgeProposalFeeLine\b[^}]*\}\s*from\s*"\.\.\/\.\.\/shared\/bridge-mechanic\.mjs"/m],
+    ["src/components/MyAgentPanel.tsx", /^import\s*\{[^}]*\bbridgeProposalFeeLine\b[^}]*\}\s*from\s*"\.\.\/\.\.\/shared\/bridge-ack-copy\.mjs"/m],
+    ["netlify/functions/agent-act.mjs", /^import\s*\{[^}]*\bbridgeProposalFeeLine\b[^}]*\}\s*from\s*"\.\.\/\.\.\/shared\/bridge-ack-copy\.mjs"/m],
     // ⭐ The proposal CARD (Discover run → approve). It said "taken out of the amount" by hand on the
     // upfront path too — a third copy of the same falsehood — and now derives both its indicative
     // sentence (bridgeMechanicCopy of the recorded mechanic) and its quoted line (the producer).
-    ["src/components/jobTimeline.tsx", /^import\s*\{[^}]*\bbridgeProposalFeeLine\b[^}]*\}\s*from\s*"\.\.\/\.\.\/shared\/bridge-mechanic\.mjs"/m],
+    ["src/components/jobTimeline.tsx", /^import\s*\{[^}]*\bbridgeProposalFeeLine\b[^}]*\}\s*from\s*"\.\.\/\.\.\/shared\/bridge-ack-copy\.mjs"/m],
   ];
   for (const [f, importRe] of surfaces) {
     const src = stripSrc(f);
@@ -618,7 +625,8 @@ section("12 — 🚨 THE ACKNOWLEDGEMENT CARDS: an upfront fee is never a loss, 
   const upStrings = Object.values(BRIDGE_MECHANIC_COPY.upfront).filter((v) => typeof v === "string").join(" | ");
   check("🚨 BRIDGE_MECHANIC_COPY.upfront: none of the family", !FAMILY.test(upStrings), (upStrings.match(FAMILY) || [""])[0]);
   const ackStrings = ACK ? [ACK.bridgeAckSentence({ amountUsdc: 0.1, feeUsdc: 0.054147, feeRatio: 0.54147 }), ACK.bridgeAckHeading({ feeRatio: 0.54147 }),
-    ACK.bridgeAckHeading({ feeRatio: 0.54147, step: 1 }), ACK.BRIDGE_ACK_FLAT_FEE_NOTE, ACK.bridgeAckConsent({}), ACK.bridgeAckConsent({ step: 1 })].join(" | ") : "";
+    ACK.bridgeAckHeading({ feeRatio: 0.54147, step: 1 }), ACK.BRIDGE_ACK_FLAT_FEE_NOTE, ACK.bridgeAckConsent({}), ACK.bridgeAckConsent({ step: 1 }),
+    bridgeProposalFeeLine({ feeUsdc: 0.054147, netUsdc: 0.1, destinationLabel: "Base", mechanic: "upfront" })].join(" | ") : "";
   check("🚨 shared/bridge-ack-copy.mjs: none of the family in anything it produces", !!ackStrings && !FAMILY.test(ackStrings), (ackStrings.match(FAMILY) || [""])[0]);
   check("⭐ DEDUCTED copy is untouched and still says the fee comes out of the amount (true on the self-signed path)",
     /taken out of the amount/.test(BRIDGE_MECHANIC_COPY.deducted.summary));
@@ -682,6 +690,28 @@ section("13 — ⭐⭐ STRUCTURAL: every upfront fee disclosure states what ARRI
   const grid = [[0.07, 0.054147], [0.3, 0.054147], [1.234567, 0.06], [25, 0.11]];
   check("⭐ the shared sentence states both figures across a grid of amounts and fees",
     grid.every(([a, f]) => { const x = states(bridgeAckSentence({ amountUsdc: a, feeUsdc: f, feeRatio: f / a }), a, f); return x.arrives && x.leaves; }));
+
+  // ═══ THE ORDINARY BAND (2026-10-02): the PROPOSAL LINE was the one exception ═══════════════════════════════════
+  // Below the warn band the only fee disclosure is bridgeProposalFeeLine (reply message, confirm panel, plan steps,
+  // the job card's quote). It stated what arrives and not what leaves. Same rule, same wording-blind figure test.
+  // ⚠️ It serves THREE mechanics, so the figures are per mechanic: upfront arrives = amount, leaves = amount + fee;
+  // deducted arrives ≈ amount − fee, leaves = amount (= net + fee: on BOTH paths what leaves is net + fee).
+  // `unknown` states NEITHER: the record does not say which number arrived, and so not which one left.
+  const near = (t, x) => nums(t).some((n) => Math.abs(n - x) <= 6e-5); // 4dp display: rounding error ≤ 5e-5
+  for (const [label, mk, amount] of [["agent bridge, ORDINARY band (none)", single, 2], ["plan step, ORDINARY band (none)", plan, 2]]) {
+    const text = render(mk(amount, "none", FEE / amount));
+    check(`🚨 ${label}: the rendered proposal states what ARRIVES (${amount}) and what LEAVES (${(amount + FEE).toFixed(4)})`,
+      near(text, amount) && near(text, amount + FEE), text.slice(0, 160));
+  }
+  const pgrid = [[0.07, 0.054147], [2, 0.054147], [1.234567, 0.06], [25, 0.11]];
+  check("⭐⭐ upfront proposal line: arrives = amount AND leaves = amount + fee, across a grid",
+    pgrid.every(([a, f]) => { const t = bridgeProposalFeeLine({ feeUsdc: f, netUsdc: a, destinationLabel: "Base", mechanic: "upfront" }); return near(t, a) && near(t, a + f); }),
+    bridgeProposalFeeLine({ feeUsdc: 0.054147, netUsdc: 2, destinationLabel: "Base", mechanic: "upfront" }));
+  check("⭐⭐ deducted proposal line: arrives ≈ amount − fee AND leaves = the amount, across a grid",
+    pgrid.filter(([a, f]) => a > f).every(([a, f]) => { const t = bridgeProposalFeeLine({ feeUsdc: f, netUsdc: a - f, destinationLabel: "Base", mechanic: "deducted" }); return near(t, a - f) && near(t, a); }),
+    bridgeProposalFeeLine({ feeUsdc: 0.054147, netUsdc: 2 - 0.054147, destinationLabel: "Base", mechanic: "deducted" }));
+  const unk = bridgeProposalFeeLine({ feeUsdc: 0.054147, netUsdc: 2, destinationLabel: "Base", mechanic: undefined });
+  check("⛔ unknown proposal line: states NEITHER an arrival nor a departure figure (only the fee)", !near(unk, 2) && !near(unk, 2 + 0.054147) && !/leaves|arrives/.test(unk), unk);
 }
 
 console.log(`\n${fail ? "❌ FAILURES" : "✅ ALL GREEN"}   pass ${pass} / fail ${fail}\n`);

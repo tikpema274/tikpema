@@ -1,6 +1,5 @@
 import { BRIDGE_TIMING, MINT_TIMING } from "../../shared/bridge-timing.mjs";
-import { bridgeProposalFeeLine } from "../../shared/bridge-mechanic.mjs";
-import { bridgeAckSentence, bridgeAckHeading, bridgeAckConsent, BRIDGE_ACK_FLAT_FEE_NOTE } from "../../shared/bridge-ack-copy.mjs";
+import { bridgeProposalFeeLine, bridgeAckSentence, bridgeAckHeading, bridgeAckConsent, BRIDGE_ACK_FLAT_FEE_NOTE } from "../../shared/bridge-ack-copy.mjs";
 import { balanceUnverifiedNote } from "../../shared/balance-unverified-copy.mjs";
 import { useEffect, useRef, useState } from "react";
 import { agentClient } from "../lib/agentClient";
