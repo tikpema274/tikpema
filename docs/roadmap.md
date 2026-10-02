@@ -123,7 +123,7 @@ Each stage lists its **goal**, what **exists**, what it **needs from T**, what i
 | Risk-rating product | Stays a separate consumer of DD, as decided |
 | B2B conditional payments | A target customer; then conditional release (ERC-8183, live for research) + counterparty screening |
 | Compliance / AML | Stage 4 (go/no-go §5) |
-| On/off-ramps (TikpemaPay) | TikpemaPay is un-paused |
+| On/off-ramps (TikpemaPay); merging TikpemaPay into Tikpema | TikpemaPay is un-paused AND the exit has fired AND Morpho V2 is in DD; then as a DD **customer** (it calls the check before deposits), linked, not merged (direction log 2026-10-02) |
 | Peer-to-peer agent communication | Nobody in our stack provides it; revisit only if the direction log shows it becoming real |
 
 ## How each session uses this

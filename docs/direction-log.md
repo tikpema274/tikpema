@@ -246,3 +246,53 @@ trust layer gets competition.
   signs (spec, order) and the settlement verifies it. An idea for when GAP 1 is picked up, not a decision. (2) A
   "condition that verifies a DD-signed verdict" is a candidate integration shape for conditional release (escrow, B2B)
   if that ever becomes a target. Not a commitment.
+
+## 2026-10-02 — Idea (T): build TikpemaPay into Tikpema, "serves all your needs, you don't have to leave the app"
+- **Source**: T, in session, explicitly as an idea, not a decision.
+- **Claim**: one app covering funding (on/off-ramps, TikpemaPay's providers, accounts, Solana) and Tikpema's agent +
+  vault + DD would remove the friction of leaving the app.
+- **Checked** (from our own records, no new measurement): TikpemaPay is PAUSED since 2026-09-24; its Circle Onramp
+  (09-27) is local and unpushed; its repo AUTO-DEPLOYS on push to main (unlike Tikpema). Compliance/AML is not built and
+  is deferred to mainnet (go/no-go §5). The custody map (09-24) already rates Unified Balance as Tikpema's most custodial
+  path. The app layer is crowded: SwiftPay ships wallet, payroll, savings and an agent on Arc mainnet (entry 2026-10-01).
+- **Signal**: the instinct is right about one thing. Funding is the step just before the deposit we protect, and making
+  a user leave to do it is real friction.
+- **Changed**: nothing in priorities. **Deferred, as INTEGRATION, not absorption** (Claude's recommendation, T agreed to
+  record it):
+  - **Against a merge now:** it reverses the narrowing (Tikpema wins as the check others call, not a better wallet, and
+    an all-in-one app competes where SwiftPay and Circle's kits are strongest). Ramps pull KYC/AML, provider contracts
+    and per-country rules forward into a product whose promise is trust: done half-well, that damages the one thing it
+    sells. It widens custody surface before the vault exit has fired once. And "one coherent experience" is roadmap
+    stage 5 on purpose, built around a proven promise.
+  - **The shape to prefer:** when TikpemaPay is un-paused, make it **Tikpema's first customer**: it calls DD before any
+    deposit or yield action, the way we want SwiftPay's Earn to. That is a live stage-2 integration example in our own
+    code, gives "never leave the app" via linking (deep links, a shared wallet session) without one codebase carrying both
+    risk profiles, and makes the SwiftPay pitch credible ("we depend on it ourselves").
+  - **Comes back when:** the vault exit has fired AND Morpho V2 is in DD, and TikpemaPay is un-paused. Any experiment
+    starts on a BRANCH in the TikpemaPay repo (push to main deploys).
+
+## 2026-10-02 — "Your AI Agent Has a Wallet. But Does It Have an Identity?" (Agentic Economy post)
+- **Source**: a short "Agentic Economy" post T shared (tagged #AgentIdentity), author not recorded.
+- **Claim**: an agent should not be "an AI with a wallet"; we need to know which agent acts, who authorised it, what it
+  may do, and how that is revoked. Example: 50 USDC for 2 hours, specific contracts, a defined action set. Identity
+  should be verifiable, scoped, temporary when necessary, revocable, tied to clear permissions.
+- **Checked** (against our own records; nothing new measured): a wish, not a mechanism; it names no standard or wallet.
+  Against Tikpema:
+  - *Verifiable:* partly. DD has an ERC-8004 identity (agentId 851891) and its reports verify on chain (ERC-1271). The
+    agents' LIMITS are server-side, changeable by a deploy (agent-parameters, fixed 25006e5 to say exactly that); the
+    invariants document is pinned on IPFS but NOT yet recorded on chain. A third party trusts our deploys, it cannot check.
+  - *Scoped:* yes, server-enforced: per-tx / daily caps, the acknowledge gate, the vault mandate (one vault, 10 USDC per
+    deposit, 100 total, daily), close to the post's example.
+  - *Temporary:* by cadence and totals only, no expiry.
+  - *Revocable:* yes (cancel, kill switch, the halt latch).
+  - *Enforced on chain:* no. Custody map 09-24: no session keys in our wallet stack, no Circle scoped-delegation API;
+    the UB delegate holds a full allowance.
+- **Signal**: the identity layer is being described as "who acts + what it may do". Still identity: commoditising, per the
+  thesis. ⭐ What it leaves out is our layer: **a perfectly scoped agent can still put its whole 50 USDC into a vault it
+  cannot exit.** Permissions bound the BLAST RADIUS, not the DESTINATION. Scope says whether the agent MAY act; the check
+  says whether the destination is one to act on. Complementary, and the case for "be the check the kits call",
+  identity kits included.
+- **Changed**: nothing in priorities. Sharpens thesis direction 2 (trust exercised, not declared) into a named gap: our
+  scoping is real but only SERVER-verifiable. Candidates for stages 3–4, not builds now: publish a mandate's terms where a
+  third party can check them (e.g. beside the ERC-8004 identity, without editing the frozen unified.json); on-chain
+  limits when a wallet stack on Arc offers session keys / scoped delegation.
