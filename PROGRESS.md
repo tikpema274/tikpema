@@ -31909,3 +31909,43 @@ trailer's solc version 0.8.19 matches the tag's pragma). T decides.
 MorphoRegistry 0xdEBC…8765 and Blue Public Allocator 0x4c2f…47C2 (docs, same tab): not on a V2 redeem's path. A
 MorphoVaultV1Adapter INSTANCE: no Arc vault using one was read today (its factory is pinned-ready; an instance check
 needs a sample vault, step 2).
+
+---
+
+# ✅ DD MORPHO V2 — STEP 1: THE ARC MAINNET REGISTRY ENTRY + PINS (2026-10-02, branch `feature/dd-morpho-v2`, NOT deployed)
+
+Released by T after the explorer results. DD-surface change (ddTree will rotate at the ONE window deploy; intended).
+
+## What landed
+- **`shared/dd/chains.mjs` `"arc-mainnet"`:** id 5042, rpc `https://rpc.mainnet.arc.io`, explorer `https://explorer.arc.io`,
+  and `pins` (deep-frozen): morphoBlue · adaptiveCurveIrm · vaultV2Factory · morphoMarketV1AdapterV2Factory ·
+  morphoVaultV1AdapterFactory, each `{address, codeHash, source, match}`; **morphoBlue carries `deviation`
+  ("built with bytecode_hash=none …")** so it never reads as a plain tag match. Instances are NOT pinned (factory
+  attestation, step 2).
+- **`shared/onchain-analyze/endpoints.mjs` `ARC_MAINNET_QUORUM_ENDPOINTS`** = [rpc.mainnet.arc.io, arc-mainnet.drpc.org],
+  a SEPARATE list: the testnet `ARC_QUORUM_ENDPOINTS` (mandate, DD rungs, vault report) is untouched. Measured distinct
+  front ends 10-02: web3_clientVersion `arc/v1` vs `Geth/v10.0.0/drpc`; net_peerCount unsupported vs 0x2a; differing
+  -32601 texts; gasPrice agrees (chain state). Aggregator caveat stands: `independenceVerified: false`.
+- **⛔ Registered, NOT sold:** `_dd-descriptor` `SUPPORTED_CHAINS` is still exactly `["arc-testnet"]` (09-28 decision 1),
+  pinned by the new suite. (`base` was already registered and refused: the same precedent.)
+
+## Proof
+- **Offline `test:ddmainnetregistry`** (scripts/verify-dd-mainnet-registry.mjs, literals BY DESIGN): the entry; exactly
+  five pins with the reproduced address + hash, checksummed, match kind + source recorded, the deviation on Morpho
+  Blue only; frozen (an assignment does not take); the mainnet endpoint list (two hosts, none shared with testnet); the
+  paid surface still testnet-only. **RED 2/31 → GREEN 33/0.**
+- **Read-only chain proof `npm run probe:mainnetpins`** (scripts/dd/prove-mainnet-pins.mjs; reads the pins FROM the
+  registry): block **23894639** (0xc64b84fb…70ee), BOTH endpoints: chainId 5042, same block hash, **all five code
+  hashes = pins**, `isVaultV2(Galaxy)` true, Galaxy's `adapters(0)` = 0xeE00…7c2C, `isMorphoMarketV1AdapterV2` true.
+  Exit 0. UNREADABLE → exit 2, never a pass.
+- **Non-vacuity:** one pin's last hex digit changed → the probe fails it on BOTH endpoints (exit 1) and the suite fails
+  it (32/1); restored byte-identical.
+- **test:literals ✅ (refuse mode):** the build order predicted it would flag the new chain. It does not: it searches for
+  the TESTNET values (5042002, the testnet host), and mainnet values are not its needles. Prediction recorded as wrong.
+- **test:all exposed a mis-scoped check (fixed, own commit 85f7de9):** test:redemptionsignal §7 read the WORKING TREE
+  (`git diff HEAD` + untracked) and went red on this branch's uncommitted chains.mjs / endpoints.mjs; it would have
+  passed vacuously after commit. Now it names the four modules 6d04d13 owns; a DD file in the list → red.
+- **test:all 179/179** (10.0 min), with the step-1 files uncommitted (the exact condition that failed before).
+
+## Next: step 2 — the V2 profile + the factory-attestation guard (offline fixtures, then `analyze` on real mainnet
+vaults read-only). Still nothing deploys until the whole window is built (09-28 build order).

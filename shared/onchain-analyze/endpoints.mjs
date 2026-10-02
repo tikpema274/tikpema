@@ -49,6 +49,19 @@ export const ARC_QUORUM_ENDPOINTS = Object.freeze([
   "https://arc-testnet.drpc.org",  // dRPC — verified distinct backend
 ]);
 
+/**
+ * ⭐ ARC MAINNET (5042) — the same two-provider rule, for DD Morpho V2 (step 1, 2026-10-02). A SEPARATE list: the
+ * testnet list above feeds the mandate, the DD rungs and the vault report, and none of them may start reading mainnet
+ * by accident. MEASURED 2026-10-02 as distinct front ends by this file's method: web3_clientVersion `arc/v1` vs
+ * `Geth/v10.0.0/drpc`; net_peerCount -32601 "method not supported" vs 0x2a; txpool_status's -32601 texts differ;
+ * eth_gasPrice agrees (0x4a817c800: chain state). The aggregator caveat above applies: `independenceVerified: false`.
+ * ⛔ Not read by the paid path: dd-analyze still serves arc-testnet only (09-28 decision 1).
+ */
+export const ARC_MAINNET_QUORUM_ENDPOINTS = Object.freeze([
+  "https://rpc.mainnet.arc.io",    // Arc public — `arc/v1`, measured 2026-10-02
+  "https://arc-mainnet.drpc.org",  // dRPC — distinct front end, measured 2026-10-02
+]);
+
 /** The tags `quorumClient` throws, mapped to what they MEAN. Exported so the report, the tests and
  *  the escalation path all name the same four outcomes instead of three of them agreeing. */
 export const QUORUM_OUTCOMES = Object.freeze({
