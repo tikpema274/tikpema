@@ -31645,3 +31645,41 @@ behind a Cloudflare challenge. Every fact below was re-read from **rpc.mainnet.a
 - ⚠️ **Correction:** verify-second-opinion's crash since e269abc WAS this class (`bridgeAckSentence`). I earlier called it
   unrelated. That was wrong: my before/after comparison already had e269abc in it. Converted, it is back to its DECLARED
   orphan state, 30/2 (guard-registry.mjs:301). `bridgeAckSentence` is passed through as the real pure function there.
+
+---
+
+# 📏 FULL-PATH SAMPLE 1 — THE 10-02 11:17Z TICK (2026-10-02, read-only)
+
+Read 11:36Z (`netlify blobs:get vault-mandate-receipts last` + the window-4 key; `eth_getBlockByNumber` on both endpoints;
+the strong-read probe's build stamp). Deploy 6abe9d6d, disarmed. Nothing written, nothing run against prod.
+
+## The tick
+`last` = `{at 11:17:06.995Z, ok:true, armed:false, halted:false, error:null}`: **8379419c → `would-deposit` 10 USDC**;
+5ef4c048 → `may-not-deposit` (cancelled). Receipt `w/0x74b7…24e5/8379419c…/1790592761406-4` (`at` 11:17:04.905Z = the
+tick's start clock, before anchoring): decision `deposit`, no flags / findings / exitFindings / unestablished. Report
+verification **valid** (erc1271, registered key, agentId 851891).
+
+## ⭐ THE SAMPLE: `fullPath.wouldBeCheckAgeMs` = **1447 ms** (sample 1 of 3–4)
+`fullPath: {ok:true, wouldBeCheckAgeMs:1447, reads:[agreedReading, previewAtAnchor, depositRoom], signingLatencyMs:1322}`.
+- chain time of the anchor block 11:17:04Z → `anchoredAt` 11:17:05.514Z → `verifiedAt` 11:17:06.836Z (signing 1322 ms)
+  → write-path reads done 11:17:06.961Z. Preview + room added ~125 ms past signing.
+- **What it covers (read in code, not assumed):** `measureWritePath` runs the SAME `writePathReads` the armed path runs
+  (_vault-mandate-deposit.mjs:153–166); in the armed path nothing awaited sits between those reads and `tw = clock()`
+  (:339). So 1447 ms is the age the gate at the WRITE would see.
+- The age is measured from `anchoredAt` (the function's clock), as the gate measures it; the block itself was ~3 s old
+  at the would-be write. Signing samples so far (not window data): 1165, 1257, 1368, 1322 ms.
+- **One sample is not a window.** Window = min(10 000 ms, 2 × max) at 3–4 samples (T, 8cd4ba9). Next: 10-03 11:17Z.
+
+## Rules, exitPath, endpoints
+r1 upgradeable clear · r2 owner-changed clear · r3 exit-fee 10 bps ≤ 50 clear · r4 deposit-fee 0 ≤ 50 clear · r5
+vault-can-pay clear (simulated-redeem 1,009,998 shares → 1,008,990 assets). `exitPath {readable:true, known:true,
+profile:"xylo", adapter:null}`, outage null. **Both endpoints agreed:** both readings `ok` at blockHash 0xa60b…7454,
+identical values; DD coverage 13/13 `ran`, quorum 2/2. Re-read independently: block 65107352 on rpc.testnet.arc.io and
+arc-testnet.drpc.org → hash 0xa60b…7454, timestamp 1790939824, both. Position still 1,009,998 shares (T's manual one).
+
+## Disarmed on the served build
+Probe stamp: commit **8cd4ba9**, tree d99d0f0af69d, dirty:false (deploy 6abe9d6d, published 10-01 18:31:23Z). At
+8cd4ba9 every arming constant is false/null (deposit user + operator pairs, exit user + operator pairs,
+EXIT_RULES_OPERATOR, EXIT_AVAILABLE, MANDATE_MONITORING_LIVE, MANDATE_CHECK_FRESHNESS_MS). netlify/ shared/ src/ unchanged
+8cd4ba9 → HEAD. gate:deployed: published-deploy + orphan checks ✓; its one ✗ is "the local build is stamped" (fresh
+checkout, by design; not stamped, to leave the committed null stamp alone), not a prod mismatch.
