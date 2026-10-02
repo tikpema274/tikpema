@@ -1,4 +1,6 @@
-// deploy-site.mjs — publish site/index.html to tikpema.xyz, with the leak proven closed FIRST.
+// deploy-site.mjs — publish the site manifest (site/index.html + site/evidence/**) to tikpema.xyz, with the
+// leak proven closed FIRST. WHAT is published is siteFiles() in scripts/lib/marketing-site.mjs — one list,
+// shared with verify-site-live.mjs, so nothing can be published that the gate does not check.
 //
 //   npm run deploy:site            # DRAFT only. Prints the function count and stops.
 //   npm run deploy:site:prod       # draft → assert 0 functions → promote → gate. Refuses otherwise.
@@ -32,15 +34,15 @@
 // visible; run it after this, and periodically regardless.
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, copyFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, copyFileSync, readFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 
 // ⭐ SITE_ID / SITE_DOMAIN live in scripts/lib/marketing-site.mjs — ONE copy, with the provenance
 // of the UUID and why the NAME must never be used. verify-site-live.mjs imports the same constants,
 // so the deployer and the verifier can never disagree about which site they mean.
-import { SITE_ID, SITE_DOMAIN } from "./lib/marketing-site.mjs";
+import { SITE_ID, SITE_DOMAIN, SITE_DIR, siteFiles, servedUrl } from "./lib/marketing-site.mjs";
 const PROD = process.argv.includes("--prod");
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 
@@ -57,10 +59,16 @@ if (PROD && !process.stdin.isTTY) {
 
 // ── stage OUTSIDE the repo: no parent netlify.toml, no netlify/functions ────────────────────────
 const stage = mkdtempSync(join(tmpdir(), "tikpema-site-"));
-copyFileSync("site/index.html", join(stage, "index.html"));
-const localHash = sha(readFileSync("site/index.html"));
-console.log(`\n  staged   : ${stage}/index.html`);
-console.log(`  sha256   : ${localHash}`);
+const files = siteFiles();
+const local = new Map();
+for (const rel of files) {
+  mkdirSync(dirname(join(stage, rel)), { recursive: true });
+  copyFileSync(join(SITE_DIR, rel), join(stage, rel));
+  const buf = readFileSync(join(SITE_DIR, rel));
+  local.set(rel, { sha: sha(buf), bytes: buf.length });
+}
+console.log(`\n  staged   : ${stage}  (${files.length} files)`);
+for (const rel of files) console.log(`    ${local.get(rel).sha.slice(0, 16)}…  ${String(local.get(rel).bytes).padStart(7)}  ${rel}`);
 
 // ⛔ `cwd: stage` IS THE CONTAINMENT. Staging the page outside the repo does NOT prevent the
 // function bundle: `--dir` sets the PUBLISH directory, it does not move the CLI. Config discovery
@@ -125,8 +133,8 @@ console.log(`\n${"═".repeat(72)}`);
 console.log(`  ABOUT TO PUBLISH — this is live and immediate, with no CI in front of it.`);
 console.log(`    site id : ${SITE_ID}`);
 console.log(`    domain  : https://${SITE_DOMAIN}`);
-console.log(`    sha256  : ${localHash}`);
-console.log(`    bytes   : ${readFileSync("site/index.html").length}`);
+console.log(`    files   : ${files.length}`);
+for (const rel of files) console.log(`      ${local.get(rel).sha}  ${rel}`);
 console.log(`    replaces: ${(await fetch(`https://${SITE_DOMAIN}/`).then(r=>r.arrayBuffer()).then(b=>sha(Buffer.from(b))).catch(()=>"unreadable"))}`);
 console.log(`${"═".repeat(72)}`);
 const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -167,12 +175,21 @@ if (after.state !== "ready") {
 }
 console.log(`  ✅ published_deploy MOVED ${beforeId ?? "(none)"} → ${after.id}`);
 
-const served = await fetch(`https://${SITE_DOMAIN}/`, { headers: { "cache-control": "no-cache" } }).then((r) => r.arrayBuffer());
-const servedHash = sha(Buffer.from(served));
-console.log(`\n  served sha256 : ${servedHash}`);
-console.log(`  local  sha256 : ${localHash}`);
-if (servedHash !== localHash) {
-  console.error(`\n❌ THE SERVED PAGE IS NOT THE FILE. A "deploy succeeded" line is not evidence of an effect.`);
+// ⭐ EVERY manifest file, not the front page only: a page that went up and is not checked is how this
+// site drifted before.
+let bad = 0;
+for (const rel of files) {
+  let servedHash = "unreadable";
+  try {
+    const r = await fetch(servedUrl(rel), { headers: { "cache-control": "no-cache" } });
+    if (r.ok) servedHash = sha(Buffer.from(await r.arrayBuffer())); else servedHash = `HTTP ${r.status}`;
+  } catch {}
+  const ok = servedHash === local.get(rel).sha;
+  if (!ok) bad++;
+  console.log(`  ${ok ? "✅" : "❌"} ${rel}  served ${servedHash.slice(0, 16)}…  local ${local.get(rel).sha.slice(0, 16)}…`);
+}
+if (bad) {
+  console.error(`\n❌ ${bad} of ${files.length} SERVED FILES ARE NOT THE REPO'S. A "deploy succeeded" line is not evidence of an effect.`);
   process.exit(1);
 }
-console.log(`\n✅ ${SITE_DOMAIN} is serving site/index.html.\n`);
+console.log(`\n✅ ${SITE_DOMAIN} is serving all ${files.length} manifest files.\n`);

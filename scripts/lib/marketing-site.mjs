@@ -37,3 +37,38 @@ export const SITE_DOMAIN = "tikpema.xyz";
 // `custom_domain === SITE_DOMAIN`, which is the derivation this file already mandates.
 // [[probe-must-discriminate-between-states]] — an empty listing here means "wrong team" OR
 // "deleted", and nothing in the response tells you which.
+
+// ═══ ⭐⭐ WHAT IS PUBLISHED: THE MANIFEST, IN ONE PLACE (2026-10-02) ══════════════════════════════
+// Until 2026-10-02 the site was ONE file and both deploy-site.mjs and verify-site-live.mjs named it
+// directly. The evidence pages (site/evidence/**) made it many. ⛔ A second list in either script would
+// be a second source of truth for "what is live": the deployer could publish a file the verifier never
+// checks — a page SERVED but UNCHECKED, which is exactly how this site drifted before. So both read
+// siteFiles(), and the verifier also asks the platform for the published deploy's OWN file list, so a
+// file live but no longer in the repo is visible too.
+import { readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+
+export const SITE_DIR = "site";
+/** Directories under site/ that are published whole. Everything else in site/ (netlify.toml, README.md)
+ *  is NOT published: the deploy stages only manifest files into a directory outside the repo. */
+export const PUBLISHED_DIRS = Object.freeze(["evidence"]);
+
+/** Files a deploy may hold that the manifest does not, each with WHY it is harmless. Anything else extra
+ *  is a finding. */
+export const PLATFORM_FILES = Object.freeze({
+  "netlify.toml": "held by deploys made before deploy-site.mjs staged files; Netlify does not serve it (GET /netlify.toml → 404, measured 2026-10-02)",
+});
+
+/** The published files, as paths relative to site/ ("index.html", "evidence/x/index.html", …), sorted. */
+export function siteFiles(root = SITE_DIR) {
+  const walk = (rel) => readdirSync(join(root, rel), { withFileTypes: true }).flatMap((d) =>
+    d.isDirectory() ? walk(`${rel}/${d.name}`) : [`${rel}/${d.name}`]);
+  const out = ["index.html"];
+  for (const d of PUBLISHED_DIRS) {
+    try { if (statSync(join(root, d)).isDirectory()) out.push(...walk(d)); } catch {}
+  }
+  return out.sort();
+}
+
+/** The URL a published file is served at. */
+export const servedUrl = (rel) => `https://${SITE_DOMAIN}/${rel === "index.html" ? "" : rel}`;

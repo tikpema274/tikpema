@@ -1,4 +1,6 @@
-// verify-site-live.mjs — is tikpema.xyz serving the file in this repo? Read-only, one GET.
+// verify-site-live.mjs — is tikpema.xyz serving the files in this repo? Read-only: one GET per manifest
+// file + two platform reads. The manifest is siteFiles() (scripts/lib/marketing-site.mjs), the SAME list
+// deploy-site.mjs publishes — since 2026-10-02 that is site/index.html AND site/evidence/**.
 //
 //   npm run gate:sitelive
 //
@@ -26,209 +28,146 @@
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-// ⭐ ONE copy of the site identity, shared with deploy-site.mjs — see lib/marketing-site.mjs for
-// why the UUID and not the name. The deployer and the verifier must not be able to disagree.
-import { SITE_ID, SITE_DOMAIN } from "./lib/marketing-site.mjs";
+import { join } from "node:path";
+// ⭐ ONE copy of the site identity AND the manifest, shared with deploy-site.mjs — the deployer and the
+// verifier must not be able to disagree about which site, or which files.
+import { SITE_ID, SITE_DOMAIN, SITE_DIR, PLATFORM_FILES, siteFiles, servedUrl } from "./lib/marketing-site.mjs";
 
-const URL_ = process.argv.includes("--url") ? process.argv[process.argv.indexOf("--url") + 1] : `https://${SITE_DOMAIN}/`;
 const sha = (b) => createHash("sha256").update(b).digest("hex");
+const sha1 = (b) => createHash("sha1").update(b).digest("hex");
+const files = siteFiles();
 
-const local = readFileSync("site/index.html");
-const localHash = sha(local);
+// ═══ ⭐⭐ TWO INSTRUMENTS PER FILE ═══════════════════════════════════════════════════════════════
+// (1) SERVED: what a visitor receives at the file's URL. (2) PUBLISHED: what the platform says the
+// published deploy holds (listSiteFiles → sha1 per path). They come apart: on 2026-09-01 three deploys
+// uploaded and left published_deploy on a June deploy, every one exiting 0. A byte match on (1) alone does
+// not establish a publish; (2) alone does not establish what a visitor gets. ⛔ An unreadable answer is
+// UNKNOWN, never "fine". [[repeating-one-instrument-is-not-corroboration]] · [[absence-must-never-read-as-safe]]
+const platform = (op, data) => JSON.parse(execFileSync("npx", ["netlify", "api", op, "--data", JSON.stringify(data)],
+  { encoding: "utf8", timeout: 90_000, maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] }));
 
-let servedBuf, res;
-try {
-  res = await fetch(URL_, { headers: { "cache-control": "no-cache" }, signal: AbortSignal.timeout(30_000) });
-  servedBuf = Buffer.from(await res.arrayBuffer());
-} catch (e) {
-  // ⛔ UNREACHABLE IS NOT "IN SYNC". An absence must never fill the result slot as safety.
-  console.error(`\n✖ could not fetch ${URL_} — ${String(e?.message ?? e)}`);
-  console.error(`  VERDICT: UNKNOWN. This is not evidence the page is current, and not evidence it is stale.\n`);
-  process.exit(2);
-}
-if (!res.ok) {
-  console.error(`\n✖ ${URL_} returned HTTP ${res.status}. VERDICT: UNKNOWN, not in-sync.\n`);
-  process.exit(2);
-}
-const servedHash = sha(servedBuf);
-
-// ═══ ⭐⭐ SECOND INSTRUMENT: THE PLATFORM'S OWN PUBLISHED POINTER ════════════════════════════════
-// The byte comparison above answers "what does a visitor receive". It does NOT answer "did anything
-// ever get published" — and those come apart. On 2026-09-01 three deploys in a row uploaded and
-// left `published_deploy` sitting on a deploy from 26 June; every one of them exited 0. So ask the
-// platform directly and report BOTH. ⛔ An unreadable answer is UNKNOWN, never "fine".
-// [[repeating-one-instrument-is-not-corroboration]] · [[absence-must-never-read-as-safe]]
 function publishedDeploy() {
   try {
-    const out = execFileSync("npx", ["netlify", "api", "getSite", "--data", JSON.stringify({ site_id: SITE_ID })],
-      { encoding: "utf8", timeout: 90_000, maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
-    const site = JSON.parse(out);
-    return { ok: true, deploy: site?.published_deploy ?? null, name: site?.name ?? null };
-  } catch (e) {
-    return { ok: false, err: String(e?.message ?? e).split("\n")[0] };
-  }
+    const site = platform("getSite", { site_id: SITE_ID });
+    return { ok: true, deploy: site?.published_deploy ?? null };
+  } catch (e) { return { ok: false, err: String(e?.message ?? e).split("\n")[0] }; }
 }
+/** The published deploy's own files: Map "/path" → sha1. ⛔ Unreadable → ok:false, never an empty map. */
+function publishedFiles(deployId) {
+  try {
+    const list = platform("listSiteFiles", { site_id: SITE_ID });
+    if (!Array.isArray(list)) return { ok: false, err: "listSiteFiles returned no list" };
+    const mine = list.filter((f) => !deployId || f.deploy_id === deployId);
+    return { ok: true, files: new Map(mine.map((f) => [f.path, f.sha])) };
+  } catch (e) { return { ok: false, err: String(e?.message ?? e).split("\n")[0] }; }
+}
+
 // ═══ ⭐⭐ THE DIRECTION IS A CONTENT QUESTION, NOT A TIMESTAMP QUESTION ══════════════════════════
 // This used to compare `git log -1 --format=%aI -- site/index.html` against published_at. That is a
 // proxy, and it BREAKS in the single most ordinary workflow there is: edit the page, run the gate,
 // then deploy. An uncommitted edit changes the local BYTES while leaving the last-commit DATE
-// stale, so the file looks older than the deploy and the check printed
-//   🚨 DIRECTION: LIVE IS AHEAD ... someone drag-and-dropped
-// with nothing drag-and-dropped and the served bytes byte-identical to HEAD. ⛔ Firing the verdict
-// that means "the process was bypassed" on a routine edit is worse than staying silent: it is the
-// alarm nobody will believe the third time. MEASURED 2026-09-01, same command either side of one
-// commit and no publish in between: LIVE IS AHEAD → REPO IS AHEAD.
-//
-// ⭐ So ask the question directly. "Which way" is about PROVENANCE — were the served bytes ever in
-// this repo's history? — and that is answerable exactly, by hashing each historical version of the
-// file. Timestamps only ever approximated it. [[probe-must-discriminate-between-states]]
-// [[git-history-needs-a-reachability-query]] · [[establish-which-action-produced-the-outcome]]
+// stale, so the file looks older than the deploy and the check printed "LIVE IS AHEAD … someone
+// drag-and-dropped" with nothing drag-and-dropped. MEASURED 2026-09-01. ⭐ So ask the question
+// directly, per file: were the served bytes ever in this repo's history?
+// [[probe-must-discriminate-between-states]] · [[git-history-needs-a-reachability-query]]
 
-/** Is site/index.html modified relative to HEAD? What deploy-site.mjs publishes is the WORKING
- *  TREE, so a dirty file means the bytes about to go live are in no commit and were reviewed by
- *  nobody. That is a separate fact from the direction, and it is reported separately. */
-function worktreeDirty() {
+/** Is site/<rel> modified relative to HEAD? deploy-site.mjs publishes the WORKING TREE, so a dirty file
+ *  means bytes about to go live are in no commit and were reviewed by nobody. */
+function worktreeDirty(rel) {
   try {
-    const out = execFileSync("git", ["status", "--porcelain", "--", "site/index.html"], { encoding: "utf8" });
+    const out = execFileSync("git", ["status", "--porcelain", "--", join(SITE_DIR, rel)], { encoding: "utf8" });
     return { ok: true, dirty: out.trim() !== "" };
   } catch (e) { return { ok: false, err: String(e?.message ?? e).split("\n")[0] }; }
 }
 
-/** Find the commit whose site/index.html hashes to `hash`. null = these bytes were NEVER in git,
- *  which is the drag-and-drop signature. ⛔ An unreadable history returns ok:false and must NOT
- *  collapse into "never committed" — absence of a match and inability to look are different
- *  answers, and only one of them is alarming. [[absence-must-never-read-as-safe]] */
-function servedProvenance(hash) {
+/** The commit whose site/<rel> hashes to `hash`. null = never in git (the drag-and-drop signature).
+ *  ⛔ An unreadable history returns ok:false and must NOT collapse into "never committed". */
+function servedProvenance(rel, hash) {
+  const path = join(SITE_DIR, rel);
   try {
-    const shas = execFileSync("git", ["log", "--format=%H", "--", "site/index.html"], { encoding: "utf8" })
-      .trim().split("\n").filter(Boolean);
-    if (shas.length === 0) return { ok: false, err: "no commit in history touches site/index.html" };
+    const shas = execFileSync("git", ["log", "--format=%H", "--", path], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+    if (shas.length === 0) return { ok: true, commit: null, scanned: 0 };
     for (const c of shas) {
       let blob;
-      try {
-        blob = execFileSync("git", ["show", `${c}:site/index.html`],
-          { encoding: "buffer", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
-      } catch { continue; } // the file did not exist at that commit (e.g. it was deleted there)
+      try { blob = execFileSync("git", ["show", `${c}:${path}`], { encoding: "buffer", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }); }
+      catch { continue; }
       if (sha(blob) === hash) {
-        const subj = execFileSync("git", ["log", "-1", "--format=%h %ad %s", "--date=short", c], { encoding: "utf8" }).trim();
-        return { ok: true, commit: subj, sha: c, scanned: shas.length };
+        return { ok: true, commit: execFileSync("git", ["log", "-1", "--format=%h %ad %s", "--date=short", c], { encoding: "utf8" }).trim(), scanned: shas.length };
       }
     }
-    return { ok: true, commit: null, sha: null, scanned: shas.length };
+    return { ok: true, commit: null, scanned: shas.length };
   } catch (e) { return { ok: false, err: String(e?.message ?? e).split("\n")[0] }; }
 }
 
 const pub = publishedDeploy();
+console.log(`\nIS ${SITE_DOMAIN} SERVING THIS REPO'S ${files.length} FILES?`);
+if (pub.ok) console.log(`  published_deploy : ${pub.deploy?.id ?? "(NONE)"}  state=${pub.deploy?.state ?? "-"}  at=${pub.deploy?.published_at ?? "-"}`);
+else console.log(`  published_deploy : UNREADABLE — ${pub.err}`);
 
-console.log(`\nIS ${SITE_DOMAIN} SERVING THIS REPO'S PAGE?   ${URL_}`);
-console.log(`  local  site/index.html : ${localHash}  (${local.length} bytes)`);
-console.log(`  served                 : ${servedHash}  (${servedBuf.length} bytes)`);
-if (pub.ok) {
-  const d = pub.deploy;
-  console.log(`  published_deploy       : ${d?.id ?? "(NONE)"}  state=${d?.state ?? "-"}  at=${d?.published_at ?? "-"}`);
-} else {
-  console.log(`  published_deploy       : UNREADABLE — ${pub.err}`);
+// ── ⛔ NO PUBLISHED DEPLOY AT ALL is a failure even if bytes happen to match. ─────────────────────
+if (pub.ok && !pub.deploy?.id) { console.error(`\n❌ THE SITE HAS NO PUBLISHED DEPLOY. Whatever is being served, nothing was published.`); process.exit(1); }
+if (pub.ok && pub.deploy.state !== "ready") { console.error(`\n❌ published_deploy ${pub.deploy.id} is state=${pub.deploy.state}, not "ready".`); process.exit(1); }
+const pf = pub.ok ? publishedFiles(pub.deploy.id) : { ok: false, err: "no published deploy pointer" };
+if (!pf.ok) console.log(`  published files  : UNREADABLE — ${pf.err}`);
+
+let failed = 0, unknown = 0;
+const rows = [];
+for (const rel of files) {
+  const buf = readFileSync(join(SITE_DIR, rel));
+  const L = { sha: sha(buf), sha1: sha1(buf) };
+  let served = null, status = null;
+  try {
+    const r = await fetch(servedUrl(rel), { headers: { "cache-control": "no-cache" }, signal: AbortSignal.timeout(30_000) });
+    status = r.status;
+    if (r.ok) served = sha(Buffer.from(await r.arrayBuffer()));
+  } catch (e) { status = String(e?.message ?? e); }
+  const pubSha1 = pf.ok ? (pf.files.get(`/${rel}`) ?? "absent") : null;
+  const servedOk = served === L.sha;
+  const pubOk = pubSha1 === L.sha1;
+  let verdict;
+  if (served === null && status !== 404) { verdict = "UNKNOWN"; unknown++; }
+  else if (pubSha1 === null) { verdict = servedOk ? "UNKNOWN" : "DIFFERS"; servedOk ? unknown++ : failed++; }
+  else if (servedOk && pubOk) verdict = "IN SYNC";
+  else if (servedOk && !pubOk) { verdict = "SERVED ≠ PUBLISHED"; failed++; }
+  else { verdict = status === 404 && pubSha1 === "absent" ? "NOT PUBLISHED" : "DIFFERS"; failed++; }
+  rows.push({ rel, L, served, status, pubSha1, verdict });
+  console.log(`  ${verdict === "IN SYNC" ? "✅" : verdict === "UNKNOWN" ? "✖" : "❌"} ${verdict.padEnd(18)} ${rel}`);
 }
 
-// ── ⛔ NO PUBLISHED DEPLOY AT ALL is a failure even if the bytes happen to match. ────────────────
-if (pub.ok && !pub.deploy?.id) {
-  console.error(`\n❌ THE SITE HAS NO PUBLISHED DEPLOY. Whatever is being served, nothing was published.`);
+// ── files the published deploy holds that the manifest does not ────────────────────────────────
+if (pf.ok) {
+  for (const [path] of pf.files) {
+    const rel = path.replace(/^\//, "");
+    if (files.includes(rel)) continue;
+    if (PLATFORM_FILES[rel]) { console.log(`  ·  platform file      ${rel} — ${PLATFORM_FILES[rel]}`); continue; }
+    failed++;
+    console.log(`  ❌ LIVE, NOT IN REPO  ${rel} — the published deploy holds a file this repo does not publish`);
+  }
+}
+
+// ── per differing file: WHICH WAY, because the two directions mean opposite things ──────────────
+for (const r of rows.filter((x) => x.verdict === "DIFFERS")) {
+  console.log(`\n  ── ${r.rel}`);
+  console.log(`     local ${r.L.sha}  served ${r.served ?? `HTTP ${r.status}`}`);
+  if (r.served) {
+    const prov = servedProvenance(r.rel, r.served);
+    if (!prov.ok) console.log(`     ⚠️ DIRECTION UNDETERMINED — could not read history: ${prov.err}. Do not assume "repo ahead".`);
+    else if (prov.commit) console.log(`     ⭐ REPO IS AHEAD — live is this repo's own ${prov.commit}. A reviewed change was never published.`);
+    else console.log(`     🚨 LIVE IS AHEAD — the served bytes match none of the ${prov.scanned} committed version(s). Someone drag-and-dropped. Capture the live bytes into docs/baselines/ BEFORE overwriting them.`);
+  }
+  const d = worktreeDirty(r.rel);
+  if (d.ok && d.dirty) console.log(`     ⚠️ AND it has UNCOMMITTED changes: deploy-site.mjs publishes the working tree, so these bytes are in no commit. Commit first.`);
+  else if (!d.ok) console.log(`     ⚠️ could not determine whether it is dirty — ${d.err}`);
+}
+for (const r of rows.filter((x) => x.verdict === "NOT PUBLISHED")) {
+  console.log(`\n  ── ${r.rel}: in the repo, not on the site (404, absent from the published deploy). A file added and never deployed.`);
+}
+
+if (failed) {
+  console.log(`\n❌ ${failed} file(s) are not what the repo holds.${unknown ? ` ${unknown} more could not be read.` : ""}`);
+  console.log(`   To publish: npm run deploy:site:prod   (in a terminal — --prod refuses non-interactively)\n`);
   process.exit(1);
 }
-
-if (servedHash === localHash) {
-  if (!pub.ok) {
-    console.error(`\n✖ bytes match, but the published pointer could not be read.`);
-    console.error(`  VERDICT: UNKNOWN. A byte match alone does not establish that a publish happened.\n`);
-    process.exit(2);
-  }
-  if (pub.deploy.state !== "ready") {
-    console.error(`\n❌ bytes match but published_deploy ${pub.deploy.id} is state=${pub.deploy.state}, not "ready".\n`);
-    process.exit(1);
-  }
-
-  // ⛔⛔ BIND THE POINTER TO THE CONTENT. "A published deploy exists" and "the bytes I just fetched
-  // came from it" are DIFFERENT claims, and the second is the one the verdict asserts. Found by
-  // calibration 2026-09-01: pointed at a local server serving the repo file, this printed
-  // "✅ IN SYNC … and it is the published deploy" while published_deploy was a June deploy holding
-  // completely different bytes. A binding can only be tested ACROSS what it binds, so fetch the
-  // published deploy's OWN permalink and require it to carry the same file.
-  // [[binding-tested-across-what-it-binds]] · [[control-needs-ownership-and-stability]]
-  if (!pub.name) {
-    console.error(`\n✖ cannot build the published deploy's permalink (site name unreadable).`);
-    console.error(`  VERDICT: UNKNOWN — the pointer was not bound to the content.\n`);
-    process.exit(2);
-  }
-  const permalink = `https://${pub.deploy.id}--${pub.name}.netlify.app/`;
-  let pubHash = null;
-  try {
-    const r = await fetch(permalink, { headers: { "cache-control": "no-cache" }, signal: AbortSignal.timeout(30_000) });
-    if (r.ok) pubHash = sha(Buffer.from(await r.arrayBuffer()));
-  } catch {}
-  console.log(`  published bytes        : ${pubHash ?? "UNREADABLE"}  (${permalink})`);
-  if (pubHash === null) {
-    console.error(`\n✖ could not read the published deploy's own bytes.`);
-    console.error(`  VERDICT: UNKNOWN — an unread permalink is not a match.\n`);
-    process.exit(2);
-  }
-  if (pubHash !== localHash) {
-    console.error(`\n❌ THE BYTES AT ${URL_} MATCH THE REPO, BUT THE PUBLISHED DEPLOY DOES NOT.`);
-    console.error(`   published ${pub.deploy.id} serves ${pubHash}.`);
-    console.error(`   Whatever you just fetched, it is not what the published deploy holds.\n`);
-    process.exit(1);
-  }
-  console.log(`\n✅ IN SYNC — the live page is the file in this repo, and the published deploy holds it.\n`);
-  process.exit(0);
-}
-
-// ── They differ. Say WHICH WAY, because the two directions mean opposite things. ────────────────
-let lastTouch = "unknown";
-try {
-  lastTouch = execFileSync("git", ["log", "-1", "--format=%h %ad %s", "--date=short", "--", "site/index.html"], { encoding: "utf8" }).trim();
-} catch {}
-
-// ⭐ THE FINDING IS THE SENTENCE, NOT THE BYTES. At the moment this fires, "the live page is not
-// what is in the repo" is the whole result — WHICH bytes differ is noise, and a diff would bury the
-// one line a reader needs under 20,000 characters of markup. The two hashes are printed above as
-// evidence, not as a comparison to read.
-console.log(`\n❌ THE LIVE PAGE IS NOT WHAT IS IN THE REPO.`);
-console.log(`   site/index.html last changed in git: ${lastTouch}`);
-
-// ⭐ RESOLVE THE DIRECTION HERE rather than printing two branches and asking the reader to pick.
-// The publish timestamp is a fact the platform holds; comparing it to the file's commit date
-// answers the question the prose used to leave open.
-const dirty = worktreeDirty();
-const prov = servedProvenance(servedHash);
-const pAt = pub.ok ? pub.deploy?.published_at ?? null : null;
-
-if (!prov.ok) {
-  // ⛔ Could not look. That is not evidence either way, and "repo ahead" is the benign branch —
-  // assuming it is exactly how a drag-and-drop goes unnoticed.
-  console.log(`\n   ⚠️ DIRECTION UNDETERMINED — could not read the file's history: ${prov.err}`);
-  console.log(`      Do not assume "repo ahead". Resolve the history before deploying over the live bytes.`);
-} else if (prov.commit) {
-  // The served bytes ARE a commit in this repo. Live is simply behind HEAD.
-  console.log(`\n   ⭐ DIRECTION: REPO IS AHEAD. The live bytes are this repo's own commit:`);
-  console.log(`      ${prov.commit}`);
-  console.log(`      published ${pAt ?? "?"}. A reviewed change was never published.`);
-  console.log(`      Run  npm run deploy:site:prod   (in a terminal — --prod refuses non-interactively)`);
-} else {
-  // 🚨 The served bytes match NO version of this file that git has ever held.
-  console.log(`\n   🚨 DIRECTION: LIVE IS AHEAD. The served bytes match none of the ${prov.scanned} committed`);
-  console.log(`      version(s) of site/index.html — they were never in git. Someone drag-and-dropped.`);
-  console.log(`      The repo is no longer the source of truth and the path that caused the 66-day`);
-  console.log(`      drift is back in use.`);
-  console.log(`      Capture the live bytes into docs/baselines/ BEFORE overwriting them.`);
-}
-
-// ⭐ REPORTED SEPARATELY, BECAUSE IT IS A SEPARATE FACT. deploy-site.mjs publishes the WORKING
-// TREE, not HEAD — so a dirty file means the bytes about to go live are in no commit. This is the
-// state that used to be misread as a drag-and-drop; now it is named for what it is.
-if (dirty.ok && dirty.dirty) {
-  console.log(`\n   ⚠️ AND site/index.html HAS UNCOMMITTED CHANGES. deploy-site.mjs publishes the`);
-  console.log(`      working tree, so publishing now would put bytes on tikpema.xyz that are in no`);
-  console.log(`      commit and were reviewed by nobody. Commit first.`);
-} else if (!dirty.ok) {
-  console.log(`\n   ⚠️ could not determine whether site/index.html is dirty — ${dirty.err}`);
-}
-process.exit(1);
+if (unknown) { console.error(`\n✖ ${unknown} file(s) could not be read. VERDICT: UNKNOWN — not evidence of sync, not evidence of drift.\n`); process.exit(2); }
+console.log(`\n✅ IN SYNC — all ${files.length} files are served as the repo holds them, and the published deploy holds them.\n`);
+process.exit(0);

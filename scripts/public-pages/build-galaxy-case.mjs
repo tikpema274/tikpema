@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // build-galaxy-case.mjs — the Galaxy USDC route removal as a DATED ON-CHAIN RECORD (not a report).
 //
-//   node scripts/public-pages/build-galaxy-case.mjs     → public/evidence/galaxy-usdc-route-removal/{index.html, reads.json}
+//   node scripts/public-pages/build-galaxy-case.mjs     → site/evidence/galaxy-usdc-route-removal/{index.html, reads.json}
 //
 // ═══ ⭐ WHY THIS IS A DIFFERENT KIND OF PAGE ════════════════════════════════════════════════════
 // The deployed due-diligence service does not cover this vault (mainnet, Morpho Vault V2), so nothing here
@@ -20,7 +20,7 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeFunctionData, decodeFunctionResult, keccak256, encodeAbiParameters, toHex, parseAbi } from "viem";
-import { esc, page, mark, commands, fmtInt, fmtUnits6, isoUtc, bannedWordsIn, quorumReader } from "./_shell.mjs";
+import { esc, page, mark, commands, fmtInt, fmtUnits6, isoUtc, bannedWordsIn, quorumReader, ageBlock } from "./_shell.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 export const ENDPOINTS = ["https://rpc.mainnet.arc.io", "https://arc-mainnet.drpc.org"];
@@ -124,6 +124,11 @@ export function renderCase(f) {
   const body = `<div class="eyebrow">Dated on-chain record · Arc mainnet · not a signed report</div>
 <h1>Galaxy USDC: the redemption route was removed in one transaction</h1>
 <p class="mono">${esc(VAULT)} · chain ${esc(String(f.chainId))}</p>
+${ageBlock({
+  blockTs: f.nowTimestamp,
+  asOfHtml: `Current-state reads from block ${fmtInt(f.now)}, at ${esc(isoUtc(f.nowTimestamp))}. The removal itself (block ${fmtInt(BLOCK)}) is history and does not age.`,
+  staleHtml: `The reads under "At block ${fmtInt(f.now)}" are {age}. Since then the route may have been restored and the vault's balances will have moved. The removal at block ${fmtInt(BLOCK)} is unaffected.`,
+})}
 <div class="notice">
 <p><b>This is not a due-diligence report, and nothing on it is signed by Tikpema.</b> It does not need to be: every statement below is a public read of Arc mainnet, made on two endpoints that had to agree (<code>rpc.mainnet.arc.io</code> and <code>arc-mainnet.drpc.org</code>), and each one sits beside the command that repeats it. The deployed Tikpema due-diligence service does not cover this vault.</p>
 <p class="not-this">It is not a finding of wrongdoing, and it is not a recommendation about this vault. Morpho Vault V2 gives allocators this power by design.</p>
@@ -206,7 +211,7 @@ if (invokedDirectly) {
   const html = renderCase(f);
   const banned = bannedWordsIn(html);
   if (banned.length) { console.error(`⛔ banned words: ${banned.join(", ")}; nothing written`); process.exit(1); }
-  const out = join(ROOT, "public/evidence/galaxy-usdc-route-removal");
+  const out = join(ROOT, "site/evidence/galaxy-usdc-route-removal");
   mkdirSync(out, { recursive: true });
   const json = (o) => JSON.stringify(o, (_, v) => (typeof v === "bigint" ? v.toString() : v), 1);
   writeFileSync(join(out, "reads.json"), json({ builtAt: new Date().toISOString(), endpoints: ENDPOINTS, facts: { ...f, reads: undefined }, reads: q.log }) + "\n");

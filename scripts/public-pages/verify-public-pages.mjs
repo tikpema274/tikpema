@@ -12,13 +12,19 @@
 //   D. THE PUBLISHED PAGE IS THE PUBLISHED REPORT. The committed page names the digest that the committed
 //      report.json canonicalises to, and its block.
 //   E. THE GALAXY RECORD. assertFacts rejects each fact that no longer holds; the render follows the reads.
+//   F. AGE IN THE VIEWER'S BROWSER. ageOf at the edges; the page inlines ageOf's own source; the inline script,
+//      RUN against a stub DOM, shows the banner past the threshold and not before; no block time → refuse.
+//   G. ONE MANIFEST. Every file under site/evidence is in siteFiles(); the deployer and the gate both read it.
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeFunctionData, parseAbi } from "viem";
 import { renderReportPage, encodeIsValidSignature, SCHEMA_SCOPE } from "./render-report.mjs";
-import { bannedWordsIn } from "./_shell.mjs";
+import { bannedWordsIn, ageOf, STALE_AFTER_DAYS } from "./_shell.mjs";
+import { siteFiles } from "../lib/marketing-site.mjs";
+import { readdirSync } from "node:fs";
+import vm from "node:vm";
 import { assertFacts, renderCase } from "./build-galaxy-case.mjs";
 import { attestationDigest } from "../../shared/onchain-analyze/attest.mjs";
 
@@ -31,8 +37,8 @@ const section = (t) => console.log(`\n── ${t} ${"─".repeat(Math.max(0, 66 
 const count = (s, needle) => s.split(needle).length - 1;
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
-const REPORT = JSON.parse(readFileSync(join(ROOT, "public/evidence/xylo-testnet/report.json"), "utf8"));
-const PAGE = readFileSync(join(ROOT, "public/evidence/xylo-testnet/index.html"), "utf8");
+const REPORT = JSON.parse(readFileSync(join(ROOT, "site/evidence/xylo-testnet/report.json"), "utf8"));
+const PAGE = readFileSync(join(ROOT, "site/evidence/xylo-testnet/index.html"), "utf8");
 const CTX = {
   title: "t", vaultLabel: "A vault", notices: [], blockTimestamp: 1790000000,
   verification: { valid: true, reason: "ok" }, verifiedAt: "2026-10-02T00:00:00Z",
@@ -146,8 +152,58 @@ section("E. the Galaxy record");
   check("a failed control is disclosed, not hidden", hc.includes("does not isolate the cause"));
   const hr = renderCase({ ...good, adapterNow: "0x2222222222222222222222222222222222222222" });
   check("a restored route renders as restored", hr.includes("No. The liquidity adapter is"));
-  const committed = readFileSync(join(ROOT, "public/evidence/galaxy-usdc-route-removal/index.html"), "utf8");
+  const committed = readFileSync(join(ROOT, "site/evidence/galaxy-usdc-route-removal/index.html"), "utf8");
   check("the committed case page carries no verdict words", bannedWordsIn(committed).length === 0, bannedWordsIn(committed).join(","));
+}
+
+section("F. age is computed in the viewer's browser");
+{
+  const day = 86400, now = Date.UTC(2026, 9, 20) ;
+  const ts = now / 1000;
+  check("0 days → less than a day, not stale", ageOf(ts - 60, now, 7).text === "less than a day old" && !ageOf(ts - 60, now, 7).stale);
+  check("6 days → not stale", ageOf(ts - 6 * day - 60, now, 7).stale === false);
+  check("7 days → stale (the threshold is inclusive)", ageOf(ts - 7 * day - 60, now, 7).stale === true);
+  check("a block time in the future → cannot tell, not 'fresh'", ageOf(ts + 3600, now, 7).days === null);
+  check("an unreadable block time → cannot tell", ageOf("x", now, 7).days === null && ageOf(0, now, 7).days === null);
+  for (const [name, html] of [["xylo", PAGE], ["galaxy", readFileSync(join(ROOT, "site/evidence/galaxy-usdc-route-removal/index.html"), "utf8")]]) {
+    check(`${name}: the page inlines ageOf's OWN source`, html.includes(ageOf.toString()));
+    check(`${name}: the threshold written is STALE_AFTER_DAYS`, html.includes(`data-stale-days="${STALE_AFTER_DAYS}"`));
+    const m = html.match(/data-block-ts="(\d+)"/);
+    check(`${name}: a block time is written`, !!m && Number(m[1]) > 1.7e9);
+    check(`${name}: the 'as of' line sits above the first notice`, html.indexOf('class="asof"') < (html.indexOf('class="notice"') === -1 ? Infinity : html.indexOf('class="notice"')));
+    // RUN the page's inline script against a stub DOM at two clocks.
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+    const tmpl = html.match(/data-template="([^"]*)"/)[1].replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+    const runAt = (nowMs) => {
+      const rel = { textContent: "" }, banner = { hidden: true, innerHTML: "", getAttribute: () => tmpl };
+      const asof = { getAttribute: (a) => (a === "data-block-ts" ? m[1] : String(STALE_AFTER_DAYS)), querySelector: () => rel };
+      const document = { querySelector: (q) => (q === "[data-block-ts]" ? asof : banner) };
+      vm.runInNewContext(script, { document, Date: { now: () => nowMs }, Number, Math, isFinite });
+      return { rel: rel.textContent, banner };
+    };
+    const fresh = runAt(Number(m[1]) * 1000 + 2 * 86400e3);
+    check(`${name}: at 2 days the age shows and the banner stays hidden`, fresh.rel.includes("2 days old") && fresh.banner.hidden === true);
+    const old = runAt(Number(m[1]) * 1000 + 40 * 86400e3);
+    check(`${name}: at 40 days the banner shows, naming the age`, old.banner.hidden === false && old.banner.innerHTML.includes("40 days old") && !old.banner.innerHTML.includes("{age}"));
+    check(`${name}: the banner text carries no verdict words`, bannedWordsIn(`<p>${old.banner.innerHTML}</p>`).length === 0, bannedWordsIn(`<p>${old.banner.innerHTML}</p>`).join(","));
+  }
+  let threw = false; try { renderReportPage(REPORT, { ...CTX, blockTimestamp: null }); } catch { threw = true; }
+  check("no block time → the report page refuses to render (it could not show its age)", threw);
+}
+
+section("G. one manifest");
+{
+  const walk = (d) => readdirSync(join(ROOT, d), { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(`${d}/${e.name}`) : [`${d}/${e.name}`]);
+  const onDisk = walk("site/evidence").map((p) => p.replace(/^site\//, ""));
+  const man = siteFiles(join(ROOT, "site"));
+  check("every file under site/evidence is in the manifest", onDisk.every((f) => man.includes(f)), onDisk.filter((f) => !man.includes(f)).join(","));
+  check("the front page is in the manifest", man.includes("index.html"));
+  check("netlify.toml and README.md are NOT published", !man.includes("netlify.toml") && !man.includes("README.md"));
+  for (const f of ["scripts/deploy-site.mjs", "scripts/verify-site-live.mjs"]) {
+    const src = readFileSync(join(ROOT, f), "utf8").replace(/^\s*\/\/.*$/gm, "");
+    check(`${f} reads siteFiles()`, /siteFiles\(\)/.test(src));
+    check(`${f} names no single published file directly`, !/readFileSync\(\s*"site\/index\.html"/.test(src) && !/copyFileSync\(\s*"site\/index\.html"/.test(src));
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

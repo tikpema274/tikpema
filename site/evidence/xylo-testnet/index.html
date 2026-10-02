@@ -20,6 +20,9 @@ h2{font-size:1.2rem;margin:2.2em 0 .6em;padding-top:.8em;border-top:1px solid va
 .sub{color:var(--dim)}
 code,.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.86em;overflow-wrap:anywhere}
 a{color:var(--amber)}
+.asof{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9rem;margin:.4em 0 1em}
+.stale{border:2px solid var(--paper);padding:12px 16px;margin:12px 0 16px;font-weight:600}
+.stale[hidden]{display:none}
 .notice{border:1px solid var(--line);border-left:3px solid var(--amber);background:var(--ink2);padding:12px 16px;margin:16px 0}
 .notice p{margin:.3em 0}
 .prov{background:var(--ink2);border:1px solid var(--line);padding:12px 16px;margin:16px 0}
@@ -49,13 +52,28 @@ footer{margin-top:3em;padding-top:1em;border-top:1px solid var(--line);color:var
 <div class="eyebrow">Signed due-diligence report · Arc testnet</div>
 <h1>A XyloVault-family vault on Arc testnet</h1>
 <p class="mono">0x240eb85458cd41361bd8c3773253a1d78054f747 · chain 5042002</p>
+<p class="asof" data-block-ts="1790939824" data-stale-days="7">Report from block 65,107,352, produced 2026-10-02 11:17:04 UTC.<span class="age-rel"></span></p>
+<div class="stale" hidden data-template="This report is {age}. It describes the vault at block 65,107,352 (2026-10-02 11:17:04 UTC), not today: anything on this page may have changed since. The signature was checked when the page was built (2026-10-02T20:23:43Z), not when you opened it."></div>
+<script>(function(){var ageOf=function ageOf(blockTs, nowMs, staleAfterDays) {
+  var secs = nowMs / 1000 - Number(blockTs);
+  if (!(Number(blockTs) > 0) || !isFinite(secs) || secs < -300) return { days: null, stale: false, text: "" };
+  var days = Math.max(0, Math.floor(secs / 86400));
+  var text = days === 0 ? "less than a day old" : days === 1 ? "1 day old" : days + " days old";
+  return { days: days, stale: days >= staleAfterDays, text: text };
+};
+var el=document.querySelector("[data-block-ts]");if(!el)return;
+var a=ageOf(el.getAttribute("data-block-ts"),Date.now(),Number(el.getAttribute("data-stale-days")));
+if(a.days===null)return;
+el.querySelector(".age-rel").textContent=" ("+a.text+" by this device's clock)";
+if(a.stale){var b=document.querySelector(".stale");b.innerHTML=b.getAttribute("data-template").split("{age}").join(a.text);b.hidden=false;}
+})();</script>
 <div class="notice"><p><b>Arc testnet. This vault holds test money.</b> It is shown because it is the only kind of vault the deployed Tikpema due-diligence service recognises today.</p></div>
 <div class="notice"><p class="not-this"><b>Tikpema's own vault feature uses this vault on testnet.</b> This page is not a recommendation of it, and neither is anything on it.</p></div>
 <div class="prov">
 <p><b>Read from Arc testnet at block 65,107,352</b> (produced 2026-10-02T11:17:04 UTC; this time was read from the chain by the page's build and is not part of the signed report).</p>
 <p>Every read went to 2 endpoints (<code>rpc.testnet.arc.io</code> and <code>arc-testnet.drpc.org</code>), 8 reads in all (4 + 4). The report requires 2 of them to agree before it states a value. On this report they agreed on every read.</p>
 <p><b>Signed</b> by Tikpema's due-diligence agent, ERC-8004 agent <code>851891</code> on Arc testnet, through the account that owns it (<code>0xc54d47211997aca90ef4fcfbc742a3b511b4e621</code>, ERC-1271). The signature is checked against the chain, not against a database of ours. It covers the block number, not the block's hash.</p>
-<p>When this page was built (2026-10-02T19:41:34Z), the signature checked <b>valid</b> on chain.</p>
+<p>When this page was built (2026-10-02T20:23:43Z), the signature checked <b>valid</b> on chain.</p>
 <p class="counts">Checks run: 13 · concluded: 13 · did not conclude: 0</p>
 </div>
 <h2>Who can touch your deposit</h2>

@@ -333,7 +333,6 @@ export const FILE_UNWIRED_TOOLS = {
   "scripts/fire-ub-spend.mjs": "manual: MOVES REAL FUNDS. Never unattended. [[live-proof-fund-moving-user-runs]]",
   "scripts/freeze-dd-service.mjs": "ONE-OFF: froze the DD identity doc. Re-running is meaningless; the doc is frozen.",
   "scripts/lib/assert-transition.mjs": "a shared helper, imported by checks that need to assert a TRANSITION rather than a state. It holds the rule and two assertions; it is not itself a suite and has nothing to run.",
-  "scripts/lib/marketing-site.mjs": "helper imported by the marketing-site scripts, which are themselves manual.",
   "scripts/observe-per-user-cycle.mjs": "an OBSERVATION run — records what happened, asserts nothing.",
   "scripts/observe-swap-cycle.mjs": "an OBSERVATION run — records a real swap cycle for a human to read, asserts nothing, and costs money to repeat.",
   "scripts/pin-invariants.mjs": "regenerates pinned invariant bytes; run deliberately when a pin legitimately moves.",

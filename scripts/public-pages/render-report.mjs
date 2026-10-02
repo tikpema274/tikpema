@@ -16,7 +16,7 @@
 // ⛔ AN UNKNOWN SCHEMA VERSION OR PROFILE REFUSES TO RENDER. A renderer that silently skipped a field it
 // does not know (0.4.0's powersV2, exitPath) would turn an absence into a clean page.
 
-import { esc, page, mark, commands, curlFor, fmtInt } from "./_shell.mjs";
+import { esc, page, mark, commands, curlFor, fmtInt, ageBlock } from "./_shell.mjs";
 
 /** What each schema version does NOT measure. Keyed by version; a version not listed refuses. */
 export const SCHEMA_SCOPE = Object.freeze({
@@ -68,6 +68,8 @@ export function renderReportPage(report, ctx) {
     if (report[f] !== undefined && report[f] !== null) throw new Error(`render-report: report carries ${f}, which this renderer does not render; refusing`);
   }
   if (report.refusal) return renderRefusal(report, ctx);
+  // ⛔ No block time → no age → the page could not tell a reader how old it is. Refuse rather than render undated.
+  if (!(Number(ctx.blockTimestamp) > 0)) throw new Error("render-report: ctx.blockTimestamp is required; a page that cannot show its own age is not rendered");
 
   const r = report;
   const readsById = new Map(r.reads.map((x) => [x.readId, x]));
@@ -162,6 +164,11 @@ ${commands([
   const body = `<div class="eyebrow">Signed due-diligence report · ${esc(chainLabel(r))}</div>
 <h1>${esc(ctx.vaultLabel)}</h1>
 <p class="mono">${esc(r.subject.address)} · chain ${esc(String(r.subject.chainId))}</p>
+${ageBlock({
+  blockTs: ctx.blockTimestamp,
+  asOfHtml: `Report from block ${fmtInt(r.subject.blockNumber)}, produced ${esc(utc(ctx.blockTimestamp))}.`,
+  staleHtml: `This report is {age}. It describes the vault at block ${fmtInt(r.subject.blockNumber)} (${esc(utc(ctx.blockTimestamp))}), not today: anything on this page may have changed since. The signature was checked when the page was built (${esc(ctx.verifiedAt)}), not when you opened it.`,
+})}
 ${notices}
 ${prov}
 <h2>Who can touch your deposit</h2>
@@ -188,6 +195,8 @@ ${(ctx.siblings ?? []).map((s) => `<p><a href="${esc(s.href)}">${esc(s.text)}</a
       cmdsForRead(idsOf(checkById.get("shape:code@address"))));
   }
 }
+
+const utc = (ts) => new Date(Number(ts) * 1000).toISOString().replace(".000Z", " UTC").replace("T", " ");
 
 function rowHtml(state, q, bodyHtml, cmds = []) {
   return `<div class="row${state === "not" ? " not" : ""}">${state === "not" ? mark.notEstablished : mark.established}

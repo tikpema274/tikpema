@@ -111,8 +111,8 @@ const ALLOW = {
   "site/index.html":                           { cls: "site", expect: { chainId: 1 }, why: "static marketing page; verify-site-claims.mjs binds its chain-id claim to src/config/chain.ts" },
   // the public evidence pages (scripts/public-pages, 2026-10-02) — GENERATED, never hand-edited; a rebuild moves
   // these counts on purpose, and this table is where that move is seen.
-  "public/evidence/xylo-testnet/report.json":  { cls: "record", expect: { rpcHost: 13, chainId: 2 }, why: "the signed report published verbatim: its reads name the endpoints they were made on and its subject/attestation name the chain; the bytes are fixed by the signature" },
-  "public/evidence/xylo-testnet/index.html":   { cls: "site", expect: { rpcHost: 27, chainId: 1 }, why: "generated evidence page: every command names the endpoint its read was made on, so a stranger repeats THAT read; built by build-report-page.mjs from report.json" },
+  "site/evidence/xylo-testnet/report.json":  { cls: "record", expect: { rpcHost: 13, chainId: 2 }, why: "the signed report published verbatim: its reads name the endpoints they were made on and its subject/attestation name the chain; the bytes are fixed by the signature" },
+  "site/evidence/xylo-testnet/index.html":   { cls: "site", expect: { rpcHost: 27, chainId: 1 }, why: "generated evidence page: every command names the endpoint its read was made on, so a stranger repeats THAT read; built by build-report-page.mjs from report.json" },
   "scripts/public-pages/build-report-page.mjs": { cls: "record", expect: { rpcHost: 1 }, why: "IDENTITY_RPC: where agent 851891 is REGISTERED (Arc testnet) — signature validity is asked there whatever chain the subject is on; like shared/dd/identity.mjs" },
   "scripts/public-pages/verify-report-file.mjs": { cls: "record", expect: { rpcHost: 2 }, why: "the stranger's verifier: its default RPC (and its usage line) is the identity's registration chain; --rpc overrides it" },
   // annotations left in place — comment-only quotations of a MEASURED or PUBLISHED fact; rewording would misquote

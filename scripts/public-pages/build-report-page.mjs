@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// build-report-page.mjs — a signed report file → public/evidence/<slug>/{index.html, report.json}.
+// build-report-page.mjs — a signed report file → site/evidence/<slug>/{index.html, report.json}.
 //
 //   node scripts/public-pages/build-report-page.mjs <signed-report.json>
 //
@@ -66,7 +66,7 @@ const q = quorumReader(endpoints);
 const hdr = await q.read("eth_getBlockByNumber", ["0x" + BigInt(report.subject.blockNumber).toString(16), false]);
 const blockTimestamp = Number(BigInt(hdr.answer.result.timestamp));
 
-const outDir = join(ROOT, "public/evidence", cfg.slug);
+const outDir = join(ROOT, "site/evidence", cfg.slug);
 const reportPath = `/evidence/${cfg.slug}/report.json`;
 const html = renderReportPage(report, {
   ...cfg,
