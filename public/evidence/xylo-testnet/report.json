@@ -1,0 +1,484 @@
+{
+ "schemaVersion": "onchain-analyze/0.3.0",
+ "severityMeaning": "scope-not-rank: describes what the power can reach. Non-ordinal. MUST NOT be summed, ranked, averaged or aggregated into a score.",
+ "subject": {
+  "address": "0x240eb85458cd41361bd8c3773253a1d78054f747",
+  "chainId": 5042002,
+  "chainName": "arc-testnet",
+  "blockNumber": 65107352
+ },
+ "sanctions": {
+  "list": "OFAC SDN — digital-currency addresses (ETH)",
+  "snapshot": "2026-09-16",
+  "source": "https://sanctions.treasury.gov — SDN list, 'Digital Currency Address - ETH'",
+  "count": 4,
+  "listComplete": false,
+  "status": "not-listed",
+  "note": "not present in this OFAC SDN — digital-currency addresses (ETH) snapshot (2026-09-16), which is a PARTIAL SUBSET (listComplete=false) — this is NOT a clearance. Vendor the full SDN list before relying on a negative."
+ },
+ "shape": {
+  "class": "plain-contract",
+  "family": "plain",
+  "variant": null,
+  "scannedAddress": "0x240eb85458cd41361bd8c3773253a1d78054f747",
+  "evidence": {
+   "ownCodeBytes": 7811,
+   "implSlot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "shapesTestedFor": [
+    "eoa",
+    "eip1167-clone",
+    "eip1967-proxy (impl slot)",
+    "eip2535-diamond (loupe)"
+   ],
+   "residual": "NONE of the shapes tested for matched. This is the residual class, not a positive identification of an ordinary contract.",
+   "shapesNotTestedFor": [
+    "beacon proxies (EIP-1967 beacon slot)",
+    "proxies storing the implementation in a non-standard slot",
+    "EIP-1167 clone variants that are not the canonical 45-byte pattern",
+    "metamorphic (CREATE2-redeploy) contracts"
+   ]
+  }
+ },
+ "powers": [
+  {
+   "power": "emergencyWithdraw",
+   "present": true,
+   "matched": [
+    {
+     "signature": "emergencyWithdraw(address,uint256)",
+     "selector": "0x95ccea67"
+    }
+   ],
+   "holder": "0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6",
+   "holderKind": "eoa",
+   "severity": "funds-movement",
+   "severityReach": "can move or redirect assets held or deployed by the contract",
+   "evidence": {
+    "method": "selector-in-bytecode",
+    "scannedAddress": "0x240eb85458cd41361bd8c3773253a1d78054f747",
+    "readId": "r0",
+    "note": "presence of a selector is evidence of the power; ABSENCE is not proof of its absence (a power may be reachable via fallback/delegatecall with no selector)"
+   }
+  },
+  {
+   "power": "feesSettable",
+   "present": true,
+   "matched": [
+    {
+     "signature": "setFees(uint256,uint256,uint256)",
+     "selector": "0xcec10c11"
+    }
+   ],
+   "holder": "0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6",
+   "holderKind": "eoa",
+   "severity": "parameter-change",
+   "severityReach": "can change a stored parameter that affects users' economics",
+   "evidence": {
+    "method": "selector-in-bytecode",
+    "scannedAddress": "0x240eb85458cd41361bd8c3773253a1d78054f747",
+    "readId": "r0",
+    "note": "presence of a selector is evidence of the power; ABSENCE is not proof of its absence (a power may be reachable via fallback/delegatecall with no selector)"
+   }
+  },
+  {
+   "power": "setStrategy",
+   "present": true,
+   "matched": [
+    {
+     "signature": "setStrategy(address)",
+     "selector": "0x33a100ca"
+    }
+   ],
+   "holder": "0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6",
+   "holderKind": "eoa",
+   "severity": "funds-movement",
+   "severityReach": "can move or redirect assets held or deployed by the contract",
+   "evidence": {
+    "method": "selector-in-bytecode",
+    "scannedAddress": "0x240eb85458cd41361bd8c3773253a1d78054f747",
+    "readId": "r0",
+    "note": "presence of a selector is evidence of the power; ABSENCE is not proof of its absence (a power may be reachable via fallback/delegatecall with no selector)"
+   }
+  },
+  {
+   "power": "setFeeRecipient",
+   "present": true,
+   "matched": [
+    {
+     "signature": "setFeeRecipient(address)",
+     "selector": "0xe74b981b"
+    }
+   ],
+   "holder": "0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6",
+   "holderKind": "eoa",
+   "severity": "parameter-change",
+   "severityReach": "can change a stored parameter that affects users' economics",
+   "evidence": {
+    "method": "selector-in-bytecode",
+    "scannedAddress": "0x240eb85458cd41361bd8c3773253a1d78054f747",
+    "readId": "r0",
+    "note": "presence of a selector is evidence of the power; ABSENCE is not proof of its absence (a power may be reachable via fallback/delegatecall with no selector)"
+   }
+  },
+  {
+   "power": "transferOwnership",
+   "present": true,
+   "matched": [
+    {
+     "signature": "transferOwnership(address)",
+     "selector": "0xf2fde38b"
+    }
+   ],
+   "holder": "0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6",
+   "holderKind": "eoa",
+   "severity": "ownership-transfer",
+   "severityReach": "can hand these powers to a different holder",
+   "evidence": {
+    "method": "selector-in-bytecode",
+    "scannedAddress": "0x240eb85458cd41361bd8c3773253a1d78054f747",
+    "readId": "r0",
+    "note": "presence of a selector is evidence of the power; ABSENCE is not proof of its absence (a power may be reachable via fallback/delegatecall with no selector)"
+   }
+  },
+  {
+   "power": "pausable",
+   "present": false,
+   "matched": [],
+   "holder": "0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6",
+   "holderKind": "eoa",
+   "severity": "access-restriction",
+   "severityReach": "can prevent or delay a user's access to their own position",
+   "evidence": {
+    "method": "selector-in-bytecode",
+    "scannedAddress": "0x240eb85458cd41361bd8c3773253a1d78054f747",
+    "readId": "r0",
+    "note": "presence of a selector is evidence of the power; ABSENCE is not proof of its absence (a power may be reachable via fallback/delegatecall with no selector)"
+   }
+  },
+  {
+   "power": "upgradeable",
+   "present": false,
+   "matched": [],
+   "holder": "0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6",
+   "holderKind": "eoa",
+   "severity": "code-replacement",
+   "severityReach": "can replace the executing logic at this address",
+   "evidence": {
+    "method": "selector-in-bytecode",
+    "scannedAddress": "0x240eb85458cd41361bd8c3773253a1d78054f747",
+    "readId": "r0",
+    "note": "presence of a selector is evidence of the power; ABSENCE is not proof of its absence (a power may be reachable via fallback/delegatecall with no selector)"
+   }
+  },
+  {
+   "power": "denylist",
+   "present": false,
+   "matched": [],
+   "holder": "0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6",
+   "holderKind": "eoa",
+   "severity": "access-restriction",
+   "severityReach": "can prevent or delay a user's access to their own position",
+   "evidence": {
+    "method": "selector-in-bytecode",
+    "scannedAddress": "0x240eb85458cd41361bd8c3773253a1d78054f747",
+    "readId": "r0",
+    "note": "presence of a selector is evidence of the power; ABSENCE is not proof of its absence (a power may be reachable via fallback/delegatecall with no selector)"
+   }
+  },
+  {
+   "power": "withdrawalDelay",
+   "present": false,
+   "matched": [],
+   "holder": "0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6",
+   "holderKind": "eoa",
+   "severity": "access-restriction",
+   "severityReach": "can prevent or delay a user's access to their own position",
+   "evidence": {
+    "method": "selector-in-bytecode",
+    "scannedAddress": "0x240eb85458cd41361bd8c3773253a1d78054f747",
+    "readId": "r0",
+    "note": "presence of a selector is evidence of the power; ABSENCE is not proof of its absence (a power may be reachable via fallback/delegatecall with no selector)"
+   }
+  }
+ ],
+ "coverage": {
+  "checked": [
+   {
+    "id": "shape:code@address",
+    "kind": "shape",
+    "step": "own-code",
+    "outcome": "ran",
+    "readId": "r0",
+    "readIds": [
+     "r0",
+     "r1"
+    ],
+    "quorum": {
+     "agreed": 2,
+     "of": 2,
+     "endpoints": [
+      "https://rpc.testnet.arc.io",
+      "https://arc-testnet.drpc.org"
+     ]
+    }
+   },
+   {
+    "id": "shape:eip1967-impl-slot",
+    "kind": "shape",
+    "step": "impl-slot",
+    "outcome": "ran",
+    "readId": "r2",
+    "readIds": [
+     "r2",
+     "r3"
+    ],
+    "quorum": {
+     "agreed": 2,
+     "of": 2,
+     "endpoints": [
+      "https://rpc.testnet.arc.io",
+      "https://arc-testnet.drpc.org"
+     ]
+    }
+   },
+   {
+    "id": "owner:owner()",
+    "kind": "owner",
+    "outcome": "ran",
+    "readId": "r4",
+    "readIds": [
+     "r4",
+     "r5"
+    ],
+    "quorum": {
+     "agreed": 2,
+     "of": 2,
+     "endpoints": [
+      "https://rpc.testnet.arc.io",
+      "https://arc-testnet.drpc.org"
+     ]
+    }
+   },
+   {
+    "id": "owner:code@owner",
+    "kind": "owner",
+    "outcome": "ran",
+    "readId": "r6",
+    "readIds": [
+     "r6",
+     "r7"
+    ],
+    "quorum": {
+     "agreed": 2,
+     "of": 2,
+     "endpoints": [
+      "https://rpc.testnet.arc.io",
+      "https://arc-testnet.drpc.org"
+     ]
+    }
+   },
+   {
+    "id": "power:emergencyWithdraw",
+    "kind": "power",
+    "group": "emergencyWithdraw",
+    "outcome": "ran"
+   },
+   {
+    "id": "power:feesSettable",
+    "kind": "power",
+    "group": "feesSettable",
+    "outcome": "ran"
+   },
+   {
+    "id": "power:setStrategy",
+    "kind": "power",
+    "group": "setStrategy",
+    "outcome": "ran"
+   },
+   {
+    "id": "power:setFeeRecipient",
+    "kind": "power",
+    "group": "setFeeRecipient",
+    "outcome": "ran"
+   },
+   {
+    "id": "power:transferOwnership",
+    "kind": "power",
+    "group": "transferOwnership",
+    "outcome": "ran"
+   },
+   {
+    "id": "power:pausable",
+    "kind": "power",
+    "group": "pausable",
+    "outcome": "ran"
+   },
+   {
+    "id": "power:upgradeable",
+    "kind": "power",
+    "group": "upgradeable",
+    "outcome": "ran"
+   },
+   {
+    "id": "power:denylist",
+    "kind": "power",
+    "group": "denylist",
+    "outcome": "ran"
+   },
+   {
+    "id": "power:withdrawalDelay",
+    "kind": "power",
+    "group": "withdrawalDelay",
+    "outcome": "ran"
+   }
+  ],
+  "notChecked": [],
+  "totals": {
+   "checked": 13,
+   "notChecked": 0
+  },
+  "summary": "13 checks ran, 0 did not. Everything not checked is listed with a reason."
+ },
+ "reads": [
+  {
+   "readId": "r0",
+   "endpoint": "https://rpc.testnet.arc.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x240eb85458cd41361bd8c3773253a1d78054f747",
+    "0x3e17598"
+   ],
+   "reproduce": "curl -s -X POST https://rpc.testnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getCode\",\"params\":[\"0x240eb85458cd41361bd8c3773253a1d78054f747\",\"0x3e17598\"]}'",
+   "httpStatus": 200
+  },
+  {
+   "readId": "r1",
+   "endpoint": "https://arc-testnet.drpc.org",
+   "method": "eth_getCode",
+   "params": [
+    "0x240eb85458cd41361bd8c3773253a1d78054f747",
+    "0x3e17598"
+   ],
+   "reproduce": "curl -s -X POST https://arc-testnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getCode\",\"params\":[\"0x240eb85458cd41361bd8c3773253a1d78054f747\",\"0x3e17598\"]}'",
+   "httpStatus": 200
+  },
+  {
+   "readId": "r2",
+   "endpoint": "https://rpc.testnet.arc.io",
+   "method": "eth_getStorageAt",
+   "params": [
+    "0x240eb85458cd41361bd8c3773253a1d78054f747",
+    "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+    "0x3e17598"
+   ],
+   "reproduce": "curl -s -X POST https://rpc.testnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getStorageAt\",\"params\":[\"0x240eb85458cd41361bd8c3773253a1d78054f747\",\"0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc\",\"0x3e17598\"]}'",
+   "httpStatus": 200
+  },
+  {
+   "readId": "r3",
+   "endpoint": "https://arc-testnet.drpc.org",
+   "method": "eth_getStorageAt",
+   "params": [
+    "0x240eb85458cd41361bd8c3773253a1d78054f747",
+    "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+    "0x3e17598"
+   ],
+   "reproduce": "curl -s -X POST https://arc-testnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getStorageAt\",\"params\":[\"0x240eb85458cd41361bd8c3773253a1d78054f747\",\"0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc\",\"0x3e17598\"]}'",
+   "httpStatus": 200
+  },
+  {
+   "readId": "r4",
+   "endpoint": "https://rpc.testnet.arc.io",
+   "method": "eth_call",
+   "params": [
+    {
+     "to": "0x240eb85458cd41361bd8c3773253a1d78054f747",
+     "data": "0x8da5cb5b"
+    },
+    "0x3e17598"
+   ],
+   "reproduce": "curl -s -X POST https://rpc.testnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x240eb85458cd41361bd8c3773253a1d78054f747\",\"data\":\"0x8da5cb5b\"},\"0x3e17598\"]}'",
+   "httpStatus": 200
+  },
+  {
+   "readId": "r5",
+   "endpoint": "https://arc-testnet.drpc.org",
+   "method": "eth_call",
+   "params": [
+    {
+     "to": "0x240eb85458cd41361bd8c3773253a1d78054f747",
+     "data": "0x8da5cb5b"
+    },
+    "0x3e17598"
+   ],
+   "reproduce": "curl -s -X POST https://arc-testnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x240eb85458cd41361bd8c3773253a1d78054f747\",\"data\":\"0x8da5cb5b\"},\"0x3e17598\"]}'",
+   "httpStatus": 200
+  },
+  {
+   "readId": "r6",
+   "endpoint": "https://rpc.testnet.arc.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6",
+    "0x3e17598"
+   ],
+   "reproduce": "curl -s -X POST https://rpc.testnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getCode\",\"params\":[\"0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6\",\"0x3e17598\"]}'",
+   "httpStatus": 200
+  },
+  {
+   "readId": "r7",
+   "endpoint": "https://arc-testnet.drpc.org",
+   "method": "eth_getCode",
+   "params": [
+    "0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6",
+    "0x3e17598"
+   ],
+   "reproduce": "curl -s -X POST https://arc-testnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getCode\",\"params\":[\"0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6\",\"0x3e17598\"]}'",
+   "httpStatus": 200
+  }
+ ],
+ "refusal": null,
+ "attestation": {
+  "status": "signed",
+  "canon": "canon/1",
+  "domain": "tikpema-dd-attestation/canon1/prod",
+  "alg": "eip191-ecdsa-secp256k1",
+  "method": "erc1271",
+  "keyClass": "registered",
+  "keyId": "circle-wallet:2c93ca5d-be5c-5f51-883d-1a220647f7b1",
+  "agentId": "851891",
+  "verifyingContract": "0xc54d47211997aca90ef4fcfbc742a3b511b4e621",
+  "registry": "0x8004a818bfb912233c491871b3d84c89a494bd9e",
+  "chainId": "5042002",
+  "signature": "0xfbc2d690414d5b10864e7b7f210c4ad8ce89635bb571ce3468f8d14b827c97af0ccdf28d36ddba77783e931c0503bea3ad05524fe22a3654e7c839f3371f16d51c",
+  "blockHashBound": false,
+  "validityMeaning": "ERC-1271 answers 'is this signature valid NOW', not 'was it valid when issued'. Validity is a live contract call against the owning smart account: if that account's owner key is ever rotated, previously issued attestations STOP verifying. A signature also proves 'true at block N', never 'true now' — freshness is the verifier's policy decision, not something a signature can supply."
+ },
+ "owner": {
+  "address": "0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6",
+  "kind": "eoa"
+ },
+ "powersPresent": [
+  "emergencyWithdraw",
+  "feesSettable",
+  "setStrategy",
+  "setFeeRecipient",
+  "transferOwnership"
+ ],
+ "sources": {
+  "mode": "quorum",
+  "endpoints": [
+   "https://rpc.testnet.arc.io",
+   "https://arc-testnet.drpc.org"
+  ],
+  "required": 2,
+  "configured": 2,
+  "independenceVerified": false,
+  "integrity": {
+   "providerDisagreement": false,
+   "splits": [],
+   "note": "No endpoint disagreed on any slot that was read. This is not a claim that the endpoints are independent — see independenceVerified."
+  },
+  "note": "Quorum covers PROVIDER integrity (proxy bug, stale/pruned cache, hijacked endpoint, lying aggregator). It does NOT cover consensus integrity: every Arc provider syncs from the same permissioned validator set. Endpoint agreement is not evidence of endpoint independence."
+ }
+}

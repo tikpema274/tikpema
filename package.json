@@ -27,6 +27,7 @@
     "gate:price": "node scripts/verify-price-rendering.mjs",
     "gate:recovery": "node scripts/verify-recovery-file.mjs",
     "gate:registry": "node scripts/verify-guard-registry.mjs",
+    "test:evidence": "node scripts/public-pages/verify-public-pages.mjs",
     "guards:owed": "node scripts/verify-guards-owed.mjs",
     "test:guardstaleness": "node scripts/verify-guard-staleness.mjs",
     "gate:routes": "node scripts/verify-api-routes.mjs",
@@ -430,6 +431,7 @@
     "test:mockshape",
     "test:treasuryplan",
     "test:treasurysnapshot",
-    "test:treasurycopy"
+    "test:treasurycopy",
+    "test:evidence"
   ]
 }

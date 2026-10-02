@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Galaxy USDC route removal</title>
+<meta name="description" content="A dated on-chain record: Galaxy USDC&#39;s redemption route was removed at Arc mainnet block 23403623, by an allocator, with no delay possible.">
+<meta name="robots" content="noindex">
+<style>
+:root{--ink:#0f141a;--ink2:#161d25;--line:#2a333d;--paper:#ece6d8;--dim:#a9a293;--amber:#e0a44c}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--ink:#f7f3ea;--ink2:#efe9dc;--line:#d6cdbb;--paper:#1b1f24;--dim:#5d5649;--amber:#9a6412}}
+:root[data-theme="light"]{--ink:#f7f3ea;--ink2:#efe9dc;--line:#d6cdbb;--paper:#1b1f24;--dim:#5d5649;--amber:#9a6412}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--ink);color:var(--paper)}
+body{font:16px/1.6 Georgia,"Times New Roman",serif;padding:32px 16px 64px}
+main{max-width:760px;margin:0 auto}
+h1{font-size:1.75rem;line-height:1.25;margin:.2em 0 .4em;font-weight:600}
+h2{font-size:1.2rem;margin:2.2em 0 .6em;padding-top:.8em;border-top:1px solid var(--line);font-weight:600}
+.eyebrow{font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--amber)}
+.sub{color:var(--dim)}
+code,.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.86em;overflow-wrap:anywhere}
+a{color:var(--amber)}
+.notice{border:1px solid var(--line);border-left:3px solid var(--amber);background:var(--ink2);padding:12px 16px;margin:16px 0}
+.notice p{margin:.3em 0}
+.prov{background:var(--ink2);border:1px solid var(--line);padding:12px 16px;margin:16px 0}
+.prov p{margin:.4em 0}
+.counts{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9rem}
+.row{border:1px solid var(--line);padding:12px 16px;margin:10px 0;background:var(--ink)}
+.row.not{border-style:dashed}
+.row p{margin:.35em 0}
+.q{font-weight:600}
+.m{display:inline-block;font:12px/1.6 ui-monospace,Menlo,Consolas,monospace;padding:0 8px;border:1px solid var(--paper);color:var(--paper);margin-bottom:4px}
+.m-not{border-style:dashed}
+.reach{color:var(--dim);font-size:.95em}
+details.cmds{margin:.6em 0 0}
+details.cmds summary{cursor:pointer;color:var(--amber);font-size:.92em}
+.cmd{margin:.6em 0}
+.cmd-label,.cmd-expect{font-size:.88em;color:var(--dim)}
+pre{background:var(--ink2);border:1px solid var(--line);padding:10px;overflow-x:auto;margin:.3em 0;white-space:pre-wrap;word-break:break-all}
+blockquote{margin:.6em 0;padding:0 0 0 12px;border-left:2px solid var(--line);color:var(--dim)}
+table{border-collapse:collapse;width:100%;font-size:.92em}
+td,th{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+footer .not-this{color:var(--dim)}
+footer{margin-top:3em;padding-top:1em;border-top:1px solid var(--line);color:var(--dim);font-size:.9em}
+</style>
+</head>
+<body>
+<main>
+<div class="eyebrow">Dated on-chain record · Arc mainnet · not a signed report</div>
+<h1>Galaxy USDC: the redemption route was removed in one transaction</h1>
+<p class="mono">0x8E357432CC12ff425c36432F312968aEb16112AF · chain 5042</p>
+<div class="notice">
+<p><b>This is not a due-diligence report, and nothing on it is signed by Tikpema.</b> It does not need to be: every statement below is a public read of Arc mainnet, made on two endpoints that had to agree (<code>rpc.mainnet.arc.io</code> and <code>arc-mainnet.drpc.org</code>), and each one sits beside the command that repeats it. The deployed Tikpema due-diligence service does not cover this vault.</p>
+<p class="not-this">It is not a finding of wrongdoing, and it is not a recommendation about this vault. Morpho Vault V2 gives allocators this power by design.</p>
+</div>
+
+<h2>What happened, at block 23,403,623 (2026-09-29T17:23:55Z)</h2>
+<div class="row"><span class="m m-est" title="Established">■ Established</span>
+<p class="q">Did the vault&#39;s redemption route change?</p><p>Yes. At block 23,403,622 the vault's liquidity adapter was <code>0xeE0080203a76690BcA40670dfd0cD1C30FAB7c2C</code>. At block 23,403,623 it was none (the zero address).</p><details class="cmds"><summary>Check this yourself (4 commands)</summary>
+<div class="cmd"><div class="cmd-label">liquidityAdapter() at block 23,403,622 — rpc.mainnet.arc.io</div><pre><code>curl -s -X POST https://rpc.mainnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;data&quot;:&quot;0xad468d11&quot;},&quot;0x1651c66&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">liquidityAdapter() at block 23,403,622 — arc-mainnet.drpc.org</div><pre><code>curl -s -X POST https://arc-mainnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;data&quot;:&quot;0xad468d11&quot;},&quot;0x1651c66&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">liquidityAdapter() at block 23,403,623 — rpc.mainnet.arc.io</div><pre><code>curl -s -X POST https://rpc.mainnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;data&quot;:&quot;0xad468d11&quot;},&quot;0x1651c67&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">liquidityAdapter() at block 23,403,623 — arc-mainnet.drpc.org</div><pre><code>curl -s -X POST https://arc-mainnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;data&quot;:&quot;0xad468d11&quot;},&quot;0x1651c67&quot;]}&#39;</code></pre></div>
+</details></div>
+<div class="row"><span class="m m-est" title="Established">■ Established</span>
+<p class="q">What changed it?</p><p>Transaction <code>0x87283833bf59c19101eb6f3f374017fd757059df7ef8ad4323fb5dbc516d8383</code> (status: success), a direct call to the vault, emitted <code>SetLiquidityAdapterAndData</code> with sender <code>0x43e4a89e8f8cea5006e0eaefd12d746a5967a537</code> and new adapter <code>0x0000000000000000000000000000000000000000</code>.</p><details class="cmds"><summary>Check this yourself (4 commands)</summary>
+<div class="cmd"><div class="cmd-label">the vault&#39;s SetLiquidityAdapterAndData logs at block 23,403,623 — rpc.mainnet.arc.io</div><pre><code>curl -s -X POST https://rpc.mainnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getLogs&quot;,&quot;params&quot;:[{&quot;address&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;fromBlock&quot;:&quot;0x1651c67&quot;,&quot;toBlock&quot;:&quot;0x1651c67&quot;,&quot;topics&quot;:[&quot;0x9deb43d71422af41853c3921fb364b7647f9a9b136e46d66d45c1bf707af706c&quot;]}]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">the vault&#39;s SetLiquidityAdapterAndData logs at block 23,403,623 — arc-mainnet.drpc.org</div><pre><code>curl -s -X POST https://arc-mainnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getLogs&quot;,&quot;params&quot;:[{&quot;address&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;fromBlock&quot;:&quot;0x1651c67&quot;,&quot;toBlock&quot;:&quot;0x1651c67&quot;,&quot;topics&quot;:[&quot;0x9deb43d71422af41853c3921fb364b7647f9a9b136e46d66d45c1bf707af706c&quot;]}]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">the transaction receipt — rpc.mainnet.arc.io</div><pre><code>curl -s -X POST https://rpc.mainnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getTransactionReceipt&quot;,&quot;params&quot;:[&quot;0x87283833bf59c19101eb6f3f374017fd757059df7ef8ad4323fb5dbc516d8383&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">the transaction receipt — arc-mainnet.drpc.org</div><pre><code>curl -s -X POST https://arc-mainnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getTransactionReceipt&quot;,&quot;params&quot;:[&quot;0x87283833bf59c19101eb6f3f374017fd757059df7ef8ad4323fb5dbc516d8383&quot;]}&#39;</code></pre></div>
+</details></div>
+<div class="row"><span class="m m-est" title="Established">■ Established</span>
+<p class="q">Who sent it?</p><p><code>0x43e4a89e8f8cea5006e0eaefd12d746a5967a537</code>: an address with no code (a single key, not a contract or a multisig), and an allocator of this vault at block 23,403,622.</p><details class="cmds"><summary>Check this yourself (4 commands)</summary>
+<div class="cmd"><div class="cmd-label">the sender&#39;s code at block 23,403,623 — rpc.mainnet.arc.io</div><pre><code>curl -s -X POST https://rpc.mainnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x43e4a89e8f8cea5006e0eaefd12d746a5967a537&quot;,&quot;0x1651c67&quot;]}&#39;</code></pre><div class="cmd-expect">Expected: <code>0x (no code)</code></div></div>
+<div class="cmd"><div class="cmd-label">the sender&#39;s code at block 23,403,623 — arc-mainnet.drpc.org</div><pre><code>curl -s -X POST https://arc-mainnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x43e4a89e8f8cea5006e0eaefd12d746a5967a537&quot;,&quot;0x1651c67&quot;]}&#39;</code></pre><div class="cmd-expect">Expected: <code>0x (no code)</code></div></div>
+<div class="cmd"><div class="cmd-label">isAllocator(sender) at block 23,403,622 — rpc.mainnet.arc.io</div><pre><code>curl -s -X POST https://rpc.mainnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;data&quot;:&quot;0x4dedf20e00000000000000000000000043e4a89e8f8cea5006e0eaefd12d746a5967a537&quot;},&quot;0x1651c66&quot;]}&#39;</code></pre><div class="cmd-expect">Expected: <code>…0001 (true)</code></div></div>
+<div class="cmd"><div class="cmd-label">isAllocator(sender) at block 23,403,622 — arc-mainnet.drpc.org</div><pre><code>curl -s -X POST https://arc-mainnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;data&quot;:&quot;0x4dedf20e00000000000000000000000043e4a89e8f8cea5006e0eaefd12d746a5967a537&quot;},&quot;0x1651c66&quot;]}&#39;</code></pre><div class="cmd-expect">Expected: <code>…0001 (true)</code></div></div>
+</details></div>
+<div class="row"><span class="m m-est" title="Established">■ Established</span>
+<p class="q">How much did the vault hold at that block?</p><p>84,807,145.53 USDC (totalAssets).</p><details class="cmds"><summary>Check this yourself (2 commands)</summary>
+<div class="cmd"><div class="cmd-label">totalAssets() at block 23,403,623 — rpc.mainnet.arc.io</div><pre><code>curl -s -X POST https://rpc.mainnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;data&quot;:&quot;0x01e1d114&quot;},&quot;0x1651c67&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">totalAssets() at block 23,403,623 — arc-mainnet.drpc.org</div><pre><code>curl -s -X POST https://arc-mainnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;data&quot;:&quot;0x01e1d114&quot;},&quot;0x1651c67&quot;]}&#39;</code></pre></div>
+</details></div>
+
+<h2>Why no notice was possible</h2>
+<div class="row"><span class="m m-est" title="Established">■ Established</span>
+<p class="q">Does this change wait before it takes effect?</p><p>No. In the Vault V2 source that the deployed vaults are built from (tag 2026-08-13), the only condition is that the caller is an allocator. There is no timelock on this function, and it cannot be abdicated:</p>
+<blockquote><pre><code>function setLiquidityAdapterAndData(address newLiquidityAdapter, bytes memory newLiquidityData) external {
+    require(isAllocator[msg.sender], ErrorsLib.Unauthorized());
+    liquidityAdapter = newLiquidityAdapter;
+    liquidityData = newLiquidityData;
+    emit EventsLib.SetLiquidityAdapterAndData(msg.sender, newLiquidityAdapter, newLiquidityData);
+}</code></pre></blockquote>
+<p><a href="https://github.com/morpho-org/vault-v2/blob/2026-08-13/src/VaultV2.sol#L628-L633">VaultV2.sol lines 628–633</a></p></div>
+<div class="row"><span class="m m-est" title="Established">■ Established</span>
+<p class="q">What does the route do for a withdrawal?</p><p>An ordinary withdrawal is paid from the vault's idle cash and, beyond that, only through the liquidity adapter. With no adapter, a withdrawal larger than the idle cash is not topped up from anywhere, and the transfer fails:</p>
+<blockquote><pre><code>uint256 idleAssets = IERC20(asset).balanceOf(address(this));
+if (assets &gt; idleAssets &amp;&amp; liquidityAdapter != address(0)) {
+    deallocateInternal(liquidityAdapter, liquidityData, assets - idleAssets);
+}
+…
+SafeERC20Lib.safeTransfer(asset, receiver, assets);</code></pre></blockquote>
+<p><a href="https://github.com/morpho-org/vault-v2/blob/2026-08-13/src/VaultV2.sol#L807-L820">VaultV2.sol lines 807–820</a></p></div>
+
+<h2>At block 23,930,903 (2026-10-02T19:43:20Z)</h2>
+<p class="sub">Read when this page was built. It can be different now; every command below names its block.</p>
+<div class="row"><span class="m m-est" title="Established">■ Established</span>
+<p class="q">Is the route still removed?</p><p>Yes. The liquidity adapter is none.</p><details class="cmds"><summary>Check this yourself (2 commands)</summary>
+<div class="cmd"><div class="cmd-label">liquidityAdapter() at block 23,930,903 — rpc.mainnet.arc.io</div><pre><code>curl -s -X POST https://rpc.mainnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;data&quot;:&quot;0xad468d11&quot;},&quot;0x16d2817&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">liquidityAdapter() at block 23,930,903 — arc-mainnet.drpc.org</div><pre><code>curl -s -X POST https://arc-mainnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;data&quot;:&quot;0xad468d11&quot;},&quot;0x16d2817&quot;]}&#39;</code></pre></div>
+</details></div>
+<div class="row"><span class="m m-est" title="Established">■ Established</span>
+<p class="q">How much does the vault hold, and how much of it is idle?</p><p>totalAssets 89,710,305.44 USDC; idle cash 0.00 USDC.</p><details class="cmds"><summary>Check this yourself (4 commands)</summary>
+<div class="cmd"><div class="cmd-label">totalAssets() at block 23,930,903 — rpc.mainnet.arc.io</div><pre><code>curl -s -X POST https://rpc.mainnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;data&quot;:&quot;0x01e1d114&quot;},&quot;0x16d2817&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">totalAssets() at block 23,930,903 — arc-mainnet.drpc.org</div><pre><code>curl -s -X POST https://arc-mainnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;data&quot;:&quot;0x01e1d114&quot;},&quot;0x16d2817&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">USDC balanceOf(vault) at block 23,930,903 — rpc.mainnet.arc.io</div><pre><code>curl -s -X POST https://rpc.mainnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x3600000000000000000000000000000000000000&quot;,&quot;data&quot;:&quot;0x70a082310000000000000000000000008e357432cc12ff425c36432f312968aeb16112af&quot;},&quot;0x16d2817&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">USDC balanceOf(vault) at block 23,930,903 — arc-mainnet.drpc.org</div><pre><code>curl -s -X POST https://arc-mainnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x3600000000000000000000000000000000000000&quot;,&quot;data&quot;:&quot;0x70a082310000000000000000000000008e357432cc12ff425c36432f312968aeb16112af&quot;},&quot;0x16d2817&quot;]}&#39;</code></pre></div>
+</details></div>
+<div class="row"><span class="m m-est" title="Established">■ Established</span>
+<p class="q">Would an ordinary withdrawal of 1 USDC go through?</p><p>No. Simulated at this block, a withdrawal of 1 USDC by a holder reverts with <code>0xace2a47e</code> (<code>TransferReverted()</code>). The same call with 2 USDC of idle cash added goes through, so the revert is the empty idle balance, not the simulation.</p>
+<p class="sub">How the simulation works: a stand-in holder (<code>0x000000000000000000000000000000000000dEaD</code>) is given vault shares by an <code>eth_call</code> state override (the vault's <code>balanceOf</code> mapping, storage slot 12 in this build). Nothing is written to the chain; anyone can run it.</p><details class="cmds"><summary>Check this yourself (4 commands)</summary>
+<div class="cmd"><div class="cmd-label">withdraw(1 USDC) by the stand-in holder at block 23,930,903 — rpc.mainnet.arc.io</div><pre><code>curl -s -X POST https://rpc.mainnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;data&quot;:&quot;0xb460af9400000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000000000dead&quot;,&quot;from&quot;:&quot;0x000000000000000000000000000000000000dEaD&quot;},&quot;0x16d2817&quot;,{&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;:{&quot;stateDiff&quot;:{&quot;0x45117a726ea4f344045dc210793664a28d2d320b7e03f6bffdae553d24c3586c&quot;:&quot;0x0000000000000000000000000000000000000000000000001bc452c034295d00&quot;}}}]}&#39;</code></pre><div class="cmd-expect">Expected: <code>a revert with data 0xace2a47e</code></div></div>
+<div class="cmd"><div class="cmd-label">withdraw(1 USDC) by the stand-in holder at block 23,930,903 — arc-mainnet.drpc.org</div><pre><code>curl -s -X POST https://arc-mainnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;data&quot;:&quot;0xb460af9400000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000000000dead&quot;,&quot;from&quot;:&quot;0x000000000000000000000000000000000000dEaD&quot;},&quot;0x16d2817&quot;,{&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;:{&quot;stateDiff&quot;:{&quot;0x45117a726ea4f344045dc210793664a28d2d320b7e03f6bffdae553d24c3586c&quot;:&quot;0x0000000000000000000000000000000000000000000000001bc452c034295d00&quot;}}}]}&#39;</code></pre><div class="cmd-expect">Expected: <code>a revert with data 0xace2a47e</code></div></div>
+<div class="cmd"><div class="cmd-label">control: the same call with 2 USDC of idle cash added — rpc.mainnet.arc.io</div><pre><code>curl -s -X POST https://rpc.mainnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;data&quot;:&quot;0xb460af9400000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000000000dead&quot;,&quot;from&quot;:&quot;0x000000000000000000000000000000000000dEaD&quot;},&quot;0x16d2817&quot;,{&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;:{&quot;stateDiff&quot;:{&quot;0x45117a726ea4f344045dc210793664a28d2d320b7e03f6bffdae553d24c3586c&quot;:&quot;0x0000000000000000000000000000000000000000000000001bc452c034295d00&quot;},&quot;balance&quot;:&quot;0x1bc16d674ec80000&quot;}}]}&#39;</code></pre><div class="cmd-expect">Expected: <code>a result (the shares burned), no revert</code></div></div>
+<div class="cmd"><div class="cmd-label">control: the same call with 2 USDC of idle cash added — arc-mainnet.drpc.org</div><pre><code>curl -s -X POST https://arc-mainnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;,&quot;data&quot;:&quot;0xb460af9400000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000000000dead&quot;,&quot;from&quot;:&quot;0x000000000000000000000000000000000000dEaD&quot;},&quot;0x16d2817&quot;,{&quot;0x8E357432CC12ff425c36432F312968aEb16112AF&quot;:{&quot;stateDiff&quot;:{&quot;0x45117a726ea4f344045dc210793664a28d2d320b7e03f6bffdae553d24c3586c&quot;:&quot;0x0000000000000000000000000000000000000000000000001bc452c034295d00&quot;},&quot;balance&quot;:&quot;0x1bc16d674ec80000&quot;}}]}&#39;</code></pre><div class="cmd-expect">Expected: <code>a result (the shares burned), no revert</code></div></div>
+</details></div>
+
+<h2>What this record does not establish</h2>
+<div class="row not"><span class="m m-not" title="Not established">? Not established</span>
+<p class="q">Is the money gone?</p><p>Not established, and this record does not suggest it. The vault's assets are deployed in its markets. Vault V2 has a separate exit, <code>forceDeallocate</code>, which pulls from a market for a penalty set per adapter; this record does not compute what it would return.</p></div>
+<div class="row not"><span class="m m-not" title="Not established">? Not established</span>
+<p class="q">Who else can do this, and is a change already queued?</p><p>Not established. Allocators and sentinels are stored per address and cannot be listed from the vault's state, and a queued timelocked change is stored by its full content. This record checked one allocator: the sender above.</p></div>
+<div class="row not"><span class="m m-not" title="Not established">? Not established</span>
+<p class="q">Why the route was removed</p><p>Not established. The chain records what was done and by whom, not why.</p></div>
+
+<footer>
+<p class="not-this">This page is a record of public chain reads. It carries no score, no rating, no ranking and no recommendation, and it does not claim anything about this vault beyond what each read shows at its block.</p>
+<p><a href="/evidence/xylo-testnet/">A different kind of page: a signed due-diligence report, on Arc testnet →</a></p>
+<p><a href="reads.json">Every read behind this page (JSON)</a></p>
+</footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XyloVault report</title>
+<meta name="description" content="What a signed report establishes about A XyloVault-family vault on Arc testnet, at block 65107352, and what it could not establish.">
+<meta name="robots" content="noindex">
+<style>
+:root{--ink:#0f141a;--ink2:#161d25;--line:#2a333d;--paper:#ece6d8;--dim:#a9a293;--amber:#e0a44c}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--ink:#f7f3ea;--ink2:#efe9dc;--line:#d6cdbb;--paper:#1b1f24;--dim:#5d5649;--amber:#9a6412}}
+:root[data-theme="light"]{--ink:#f7f3ea;--ink2:#efe9dc;--line:#d6cdbb;--paper:#1b1f24;--dim:#5d5649;--amber:#9a6412}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--ink);color:var(--paper)}
+body{font:16px/1.6 Georgia,"Times New Roman",serif;padding:32px 16px 64px}
+main{max-width:760px;margin:0 auto}
+h1{font-size:1.75rem;line-height:1.25;margin:.2em 0 .4em;font-weight:600}
+h2{font-size:1.2rem;margin:2.2em 0 .6em;padding-top:.8em;border-top:1px solid var(--line);font-weight:600}
+.eyebrow{font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--amber)}
+.sub{color:var(--dim)}
+code,.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.86em;overflow-wrap:anywhere}
+a{color:var(--amber)}
+.notice{border:1px solid var(--line);border-left:3px solid var(--amber);background:var(--ink2);padding:12px 16px;margin:16px 0}
+.notice p{margin:.3em 0}
+.prov{background:var(--ink2);border:1px solid var(--line);padding:12px 16px;margin:16px 0}
+.prov p{margin:.4em 0}
+.counts{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9rem}
+.row{border:1px solid var(--line);padding:12px 16px;margin:10px 0;background:var(--ink)}
+.row.not{border-style:dashed}
+.row p{margin:.35em 0}
+.q{font-weight:600}
+.m{display:inline-block;font:12px/1.6 ui-monospace,Menlo,Consolas,monospace;padding:0 8px;border:1px solid var(--paper);color:var(--paper);margin-bottom:4px}
+.m-not{border-style:dashed}
+.reach{color:var(--dim);font-size:.95em}
+details.cmds{margin:.6em 0 0}
+details.cmds summary{cursor:pointer;color:var(--amber);font-size:.92em}
+.cmd{margin:.6em 0}
+.cmd-label,.cmd-expect{font-size:.88em;color:var(--dim)}
+pre{background:var(--ink2);border:1px solid var(--line);padding:10px;overflow-x:auto;margin:.3em 0;white-space:pre-wrap;word-break:break-all}
+blockquote{margin:.6em 0;padding:0 0 0 12px;border-left:2px solid var(--line);color:var(--dim)}
+table{border-collapse:collapse;width:100%;font-size:.92em}
+td,th{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+footer .not-this{color:var(--dim)}
+footer{margin-top:3em;padding-top:1em;border-top:1px solid var(--line);color:var(--dim);font-size:.9em}
+</style>
+</head>
+<body>
+<main>
+<div class="eyebrow">Signed due-diligence report · Arc testnet</div>
+<h1>A XyloVault-family vault on Arc testnet</h1>
+<p class="mono">0x240eb85458cd41361bd8c3773253a1d78054f747 · chain 5042002</p>
+<div class="notice"><p><b>Arc testnet. This vault holds test money.</b> It is shown because it is the only kind of vault the deployed Tikpema due-diligence service recognises today.</p></div>
+<div class="notice"><p class="not-this"><b>Tikpema's own vault feature uses this vault on testnet.</b> This page is not a recommendation of it, and neither is anything on it.</p></div>
+<div class="prov">
+<p><b>Read from Arc testnet at block 65,107,352</b> (produced 2026-10-02T11:17:04 UTC; this time was read from the chain by the page's build and is not part of the signed report).</p>
+<p>Every read went to 2 endpoints (<code>rpc.testnet.arc.io</code> and <code>arc-testnet.drpc.org</code>), 8 reads in all (4 + 4). The report requires 2 of them to agree before it states a value. On this report they agreed on every read.</p>
+<p><b>Signed</b> by Tikpema's due-diligence agent, ERC-8004 agent <code>851891</code> on Arc testnet, through the account that owns it (<code>0xc54d47211997aca90ef4fcfbc742a3b511b4e621</code>, ERC-1271). The signature is checked against the chain, not against a database of ours. It covers the block number, not the block's hash.</p>
+<p>When this page was built (2026-10-02T19:41:34Z), the signature checked <b>valid</b> on chain.</p>
+<p class="counts">Checks run: 13 · concluded: 13 · did not conclude: 0</p>
+</div>
+<h2>Who can touch your deposit</h2>
+<div class="row"><span class="m m-est" title="Established">■ Established</span>
+<p class="q">Who is the owner?</p><p>The vault's owner is <code>0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6</code>, an address with no code: a single key, not a contract or a multisig.</p><details class="cmds"><summary>Check this yourself (4 commands)</summary>
+<div class="cmd"><div class="cmd-label">eth_call via https://rpc.testnet.arc.io at block 65,107,352</div><pre><code>curl -s -X POST https://rpc.testnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;data&quot;:&quot;0x8da5cb5b&quot;},&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">eth_call via https://arc-testnet.drpc.org at block 65,107,352</div><pre><code>curl -s -X POST https://arc-testnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;data&quot;:&quot;0x8da5cb5b&quot;},&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://rpc.testnet.arc.io at block 65,107,352</div><pre><code>curl -s -X POST https://rpc.testnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://arc-testnet.drpc.org at block 65,107,352</div><pre><code>curl -s -X POST https://arc-testnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+</details></div>
+<div class="row"><span class="m m-est" title="Established">■ Established</span>
+<p class="q">Can someone pull assets out of the vault directly?</p><p>Yes. The vault's code contains <code>emergencyWithdraw(address,uint256)</code>. <span class="reach">What it can reach: can move or redirect assets held or deployed by the contract.</span></p>
+<p>Attributed to the owner, <code>0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6</code> (see "What we could not establish").</p><details class="cmds"><summary>Check this yourself (2 commands)</summary>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://rpc.testnet.arc.io at block 65,107,352</div><pre><code>curl -s -X POST https://rpc.testnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://arc-testnet.drpc.org at block 65,107,352</div><pre><code>curl -s -X POST https://arc-testnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+</details></div>
+<div class="row"><span class="m m-est" title="Established">■ Established</span>
+<p class="q">Can someone change the fees?</p><p>Yes. The vault's code contains <code>setFees(uint256,uint256,uint256)</code>. <span class="reach">What it can reach: can change a stored parameter that affects users&#39; economics.</span></p>
+<p>Attributed to the owner, <code>0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6</code> (see "What we could not establish").</p><details class="cmds"><summary>Check this yourself (2 commands)</summary>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://rpc.testnet.arc.io at block 65,107,352</div><pre><code>curl -s -X POST https://rpc.testnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://arc-testnet.drpc.org at block 65,107,352</div><pre><code>curl -s -X POST https://arc-testnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+</details></div>
+<div class="row"><span class="m m-est" title="Established">■ Established</span>
+<p class="q">Can someone redirect where deposits are deployed?</p><p>Yes. The vault's code contains <code>setStrategy(address)</code>. <span class="reach">What it can reach: can move or redirect assets held or deployed by the contract.</span></p>
+<p>Attributed to the owner, <code>0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6</code> (see "What we could not establish").</p><details class="cmds"><summary>Check this yourself (2 commands)</summary>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://rpc.testnet.arc.io at block 65,107,352</div><pre><code>curl -s -X POST https://rpc.testnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://arc-testnet.drpc.org at block 65,107,352</div><pre><code>curl -s -X POST https://arc-testnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+</details></div>
+<div class="row"><span class="m m-est" title="Established">■ Established</span>
+<p class="q">Can someone redirect where fees go?</p><p>Yes. The vault's code contains <code>setFeeRecipient(address)</code>. <span class="reach">What it can reach: can change a stored parameter that affects users&#39; economics.</span></p>
+<p>Attributed to the owner, <code>0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6</code> (see "What we could not establish").</p><details class="cmds"><summary>Check this yourself (2 commands)</summary>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://rpc.testnet.arc.io at block 65,107,352</div><pre><code>curl -s -X POST https://rpc.testnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://arc-testnet.drpc.org at block 65,107,352</div><pre><code>curl -s -X POST https://arc-testnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+</details></div>
+<div class="row"><span class="m m-est" title="Established">■ Established</span>
+<p class="q">Can these powers be handed to someone else?</p><p>Yes. The vault's code contains <code>transferOwnership(address)</code>. <span class="reach">What it can reach: can hand these powers to a different holder.</span></p>
+<p>Attributed to the owner, <code>0x94e0dc7ad29b94ec9819f6cec3364dd34f41b3c6</code> (see "What we could not establish").</p><details class="cmds"><summary>Check this yourself (2 commands)</summary>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://rpc.testnet.arc.io at block 65,107,352</div><pre><code>curl -s -X POST https://rpc.testnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://arc-testnet.drpc.org at block 65,107,352</div><pre><code>curl -s -X POST https://arc-testnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+</details></div>
+<div class="row not"><span class="m m-not" title="Not established">? Not established</span>
+<p class="q">Is the owner the only address that can use these powers?</p><p>The report attributes every power to the address returned by owner(). It does not read each function&#39;s access check, so it does not establish that the owner is the only address that can call it.</p></div>
+<h2>What can change without notice</h2>
+<div class="row not"><span class="m m-not" title="Not established">? Not established</span>
+<p class="q">Does any of these powers wait before it takes effect?</p><p>This version of the report does not read whether any power waits before it takes effect. It records which powers exist and who they are attributed to, not how long they take. If one takes effect immediately, this report would not show it.</p></div>
+<h2>Can you get out right now</h2>
+<div class="row not"><span class="m m-not" title="Not established">? Not established</span>
+<p class="q">What would a withdrawal return at this block?</p><p>This version of the report does not compute what a withdrawal would return right now.</p></div>
+<div class="row not"><span class="m m-not" title="Not established">? Not established</span>
+<p class="q">Can someone pause the vault?</p><p>The report found no function matching the signatures it searches for. That is not proof the vault cannot do this: a power can be reached without a named function. <span class="reach">What it would reach: can prevent or delay a user&#39;s access to their own position.</span></p><details class="cmds"><summary>Check this yourself (2 commands)</summary>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://rpc.testnet.arc.io at block 65,107,352</div><pre><code>curl -s -X POST https://rpc.testnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://arc-testnet.drpc.org at block 65,107,352</div><pre><code>curl -s -X POST https://arc-testnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+</details></div>
+<div class="row not"><span class="m m-not" title="Not established">? Not established</span>
+<p class="q">Can someone block a specific depositor?</p><p>The report found no function matching the signatures it searches for. That is not proof the vault cannot do this: a power can be reached without a named function. <span class="reach">What it would reach: can prevent or delay a user&#39;s access to their own position.</span></p><details class="cmds"><summary>Check this yourself (2 commands)</summary>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://rpc.testnet.arc.io at block 65,107,352</div><pre><code>curl -s -X POST https://rpc.testnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://arc-testnet.drpc.org at block 65,107,352</div><pre><code>curl -s -X POST https://arc-testnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+</details></div>
+<div class="row not"><span class="m m-not" title="Not established">? Not established</span>
+<p class="q">Can someone delay withdrawals?</p><p>The report found no function matching the signatures it searches for. That is not proof the vault cannot do this: a power can be reached without a named function. <span class="reach">What it would reach: can prevent or delay a user&#39;s access to their own position.</span></p><details class="cmds"><summary>Check this yourself (2 commands)</summary>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://rpc.testnet.arc.io at block 65,107,352</div><pre><code>curl -s -X POST https://rpc.testnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://arc-testnet.drpc.org at block 65,107,352</div><pre><code>curl -s -X POST https://arc-testnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+</details></div>
+<h2>What we could not establish</h2>
+<p class="sub">These are results, not failures: each is a question the report did not settle, with the reason.</p>
+<div class="row not"><span class="m m-not" title="Not established">? Not established</span>
+<p class="q">Can someone replace the vault&#39;s code?</p><p>The report found no function matching the signatures it searches for. That is not proof the vault cannot do this: a power can be reached without a named function. <span class="reach">What it would reach: can replace the executing logic at this address.</span></p><details class="cmds"><summary>Check this yourself (2 commands)</summary>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://rpc.testnet.arc.io at block 65,107,352</div><pre><code>curl -s -X POST https://rpc.testnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">eth_getCode via https://arc-testnet.drpc.org at block 65,107,352</div><pre><code>curl -s -X POST https://arc-testnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getCode&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+</details></div>
+<div class="row not"><span class="m m-not" title="Not established">? Not established</span>
+<p class="q">Could the code be replaced by a mechanism the report does not test for?</p><p>The report tested for eoa, eip1167-clone, eip1967-proxy (impl slot), eip2535-diamond (loupe); none matched (implementation slot <code>0x0000000000000000000000000000000000000000000000000000000000000000</code>). It did not test for: beacon proxies (EIP-1967 beacon slot); proxies storing the implementation in a non-standard slot; EIP-1167 clone variants that are not the canonical 45-byte pattern; metamorphic (CREATE2-redeploy) contracts.</p><details class="cmds"><summary>Check this yourself (2 commands)</summary>
+<div class="cmd"><div class="cmd-label">eth_getStorageAt via https://rpc.testnet.arc.io at block 65,107,352</div><pre><code>curl -s -X POST https://rpc.testnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getStorageAt&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+<div class="cmd"><div class="cmd-label">eth_getStorageAt via https://arc-testnet.drpc.org at block 65,107,352</div><pre><code>curl -s -X POST https://arc-testnet.drpc.org -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_getStorageAt&quot;,&quot;params&quot;:[&quot;0x240eb85458cd41361bd8c3773253a1d78054f747&quot;,&quot;0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc&quot;,&quot;0x3e17598&quot;]}&#39;</code></pre></div>
+</details></div>
+<div class="row not"><span class="m m-not" title="Not established">? Not established</span>
+<p class="q">Are the two endpoints independent of each other?</p><p>They agreed on every read. Whether they are independent of each other is not verified. Agreement also does not cover the chain itself: every Arc endpoint follows the same validator set.</p></div>
+<div class="row not"><span class="m m-not" title="Not established">? Not established</span>
+<p class="q">Is the vault&#39;s address on a sanctions list?</p><p>Not on the list checked: OFAC SDN — digital-currency addresses (ETH), snapshot 2026-09-16. That list is a partial subset, so this is not a clearance.</p></div>
+<h2>Check it yourself</h2>
+<p><b>1. One fact.</b> Each answer above has its commands: the exact read, at the report's block, on each endpoint. Paste one into a terminal and compare.</p>
+<p><b>2. The signature.</b> The report's canonical digest is <code>0x9a3ccd507d49345fb6a4da63a16a35d9726e5f09680a3cc267b38583c76e4d5b</code>. Ask the signing account whether it signed that digest, and ask the registry who owns agent 851891:</p>
+<details class="cmds"><summary>Check this yourself (2 commands)</summary>
+<div class="cmd"><div class="cmd-label">isValidSignature(digest, signature) on the signing account</div><pre><code>curl -s -X POST https://rpc.testnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0xc54d47211997aca90ef4fcfbc742a3b511b4e621&quot;,&quot;data&quot;:&quot;0x1626ba7e9a3ccd507d49345fb6a4da63a16a35d9726e5f09680a3cc267b38583c76e4d5b00000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000041fbc2d690414d5b10864e7b7f210c4ad8ce89635bb571ce3468f8d14b827c97af0ccdf28d36ddba77783e931c0503bea3ad05524fe22a3654e7c839f3371f16d51c00000000000000000000000000000000000000000000000000000000000000&quot;},&quot;latest&quot;]}&#39;</code></pre><div class="cmd-expect">Expected: <code>a result starting 0x1626ba7e (valid); anything else is not valid</code></div></div>
+<div class="cmd"><div class="cmd-label">ownerOf(851891) on the ERC-8004 registry</div><pre><code>curl -s -X POST https://rpc.testnet.arc.io -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;eth_call&quot;,&quot;params&quot;:[{&quot;to&quot;:&quot;0x8004a818bfb912233c491871b3d84c89a494bd9e&quot;,&quot;data&quot;:&quot;0x6352211e00000000000000000000000000000000000000000000000000000000000cffb3&quot;},&quot;latest&quot;]}&#39;</code></pre><div class="cmd-expect">Expected: <code>the signing account, 0xc54d47211997aca90ef4fcfbc742a3b511b4e621 (left-padded)</code></div></div>
+</details>
+<p><b>3. That the digest is this report.</b> The digest is computed from the report's bytes by a published rule, <a href="https://github.com/tikpema274/tikpema/blob/main/docs/dd-attestation-canon1.md">canon/1</a>. To recompute it and run both checks in one step: <a href="/evidence/xylo-testnet/report.json">download the signed report</a>, then from a clone of the source:</p>
+<pre><code>node scripts/public-pages/verify-report-file.mjs report.json</code></pre>
+<p class="sub">ERC-1271 answers &#39;is this signature valid NOW&#39;, not &#39;was it valid when issued&#39;. Validity is a live contract call against the owning smart account: if that account&#39;s owner key is ever rotated, previously issued attestations STOP verifying. A signature also proves &#39;true at block N&#39;, never &#39;true now&#39; — freshness is the verifier&#39;s policy decision, not something a signature can supply.</p>
+<footer>
+<p class="not-this">This page is an inventory. It carries no score, no rating, no ranking and no recommendation, and it does not claim the vault is safe. A report is true at its block; it can stop being true at the next one.</p>
+<p><a href="/evidence/galaxy-usdc-route-removal/">A different kind of page: a dated on-chain record from Arc mainnet, not a signed report →</a></p>
+<p>Report schema <code>onchain-analyze/0.3.0</code> · <a href="/evidence/xylo-testnet/report.json">signed report (JSON)</a></p>
+</footer>
+</main>
+</body>
+</html>
