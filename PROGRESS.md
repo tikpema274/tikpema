@@ -31888,6 +31888,22 @@ trailer's solc version 0.8.19 matches the tag's pragma). T decides.
   is the deployed runtime hash in every case (singletons, so the immutable values are part of what is pinned).
 - ⏸ **STEP 1 HELD (T) until the explorer.arc.io results arrive:** the explorer is a second witness on what the profile
   rests on, and writing the pins first would make it a formality rather than a check.
+- ✅ **EXPLORER RESULTS (T, by hand, 2026-10-02; explorer.arc.io, Arc mainnet): ALL SEVEN VERIFIED** (green tick on the
+  Contract tab). Names as T read them (the screenshot T attached is too low-resolution for Claude to read
+  independently; the record rests on T's transcription):
+  1. 0x34CD…7fCD → **"Morpho"** (the predicted naming case: a label, not a disagreement)
+  2. 0x3b0e…9f12 → "VaultV2Factory" · 3. 0x6C2F…62Cc → "MorphoMarketV1AdapterV2Factory" · 4. 0x7778…80B0 →
+     "MorphoVaultV1AdapterFactory" (the address attributed by inference from the docs tab: CONFIRMED) · 5. 0xF026…3f20 →
+     "AdaptiveCurveIrm"
+  6. Galaxy 0x8E35…12AF → token "Galaxy USDC (arcUSDC)", **creator = 0x3b…9f12, the VaultV2Factory**
+  7. Adapter 0xeE00…7c2C → "MorphoMarketV1AdapterV2", **creator = 0x6C…62Cc, the adapter factory**
+  - ⭐ **Two independent corroborations of the attestations:** the CREATOR field shows each instance deployed by the
+    factory that attests it. A different witness (the explorer's indexing of the creation tx) from the factory's own
+    `isVaultV2` / `isMorphoMarketV1AdapterV2` mapping (read on both endpoints).
+  - **Not captured:** compiler settings and full-vs-partial match (Contract tab). Not needed: by the 2026-10-02 ruling a
+    differing compiler version or a partial match does not change a pin (the bytes + our reproduction carry it). Recorded
+    as not captured, NOT as agreeing.
+  - **No disagreement on any of the seven.** Step 1 RELEASED (T).
 
 ## Not checked (outside the exit path or not deployed for Galaxy)
 MorphoRegistry 0xdEBC…8765 and Blue Public Allocator 0x4c2f…47C2 (docs, same tab): not on a V2 redeem's path. A
