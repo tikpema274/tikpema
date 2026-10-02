@@ -31990,8 +31990,10 @@ vaults read-only). Still nothing deploys until the whole window is built (09-28 
   recognised** (MorphoMarketV1AdapterV2 or MorphoVaultV1Adapter). The unrecognised paths are fixture-proven only.
 - **Galaxy 0x8E35…12AF:** one MM adapter 0xeE00…7c2C at 100% (89,709,866 USDC realAssets), **idle 0, liquidity adapter
   UNSET**. From VaultV2's source an ordinary redeem then has nothing to draw on (to be PROVEN in step 4 by a simulated
-  redeem; not claimed as measured). The 5.57% / 8.84% figures recorded earlier were Morpho MARKET liquidity, reachable
-  only through `forceDeallocate` (penalty).
+  redeem; not claimed as measured). ~~The 5.57% / 8.84% figures recorded earlier were Morpho MARKET liquidity, reachable
+  only through `forceDeallocate` (penalty).~~ ⛔ **FALSE, corrected 10-02 (main bab2fea):** 8.84% / 5.30% were reached
+  through the liquidity adapter, SET then (chain at block 23198843 = 5.30%); 5.57% (09-30) was IDLE cash. Both were
+  ordinary-redeem figures. The adapter was unset between 09-28 12:31Z and 09-30 12:34Z.
 - **100%-idle sample:** 0x3d1D042F334B6f8326c29721ECdd1882659E93b1 (1 USDC idle, adapter 0). ⚠️ The 09-28 examples
   (Gauntlet / Steakhouse Prime) are NO LONGER idle.
 - **Vault-wrapping sample:** 0xD392d1DEe50a37Cf3303aaD0aCBBc066A8462eC5: liquidity adapter = MorphoVaultV1Adapter
