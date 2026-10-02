@@ -32224,3 +32224,52 @@ order is imposed; ~70-call bursts against public endpoints risk rate limits → 
   endpoints of each chain.
 - **Not provable before deploy:** a NEW report signed by the production DD key verifying `hashBound: true` live (needs
   the production key; after the window deploy).
+
+---
+
+# ✅ DD MORPHO V2 WINDOW — STEP 6: SCHEMA 0.4.0 + DESCRIPTOR + OPENAPI + DOCS (2026-10-02, branch, NOT deployed)
+
+## Built
+- **`SCHEMA_VERSION` = `onchain-analyze/0.4.0`**, one bump for four content changes (changelog in schema.mjs): signed
+  block identity (step 5), `recognition`, `exitPath`, `powersV2`. canon/1 UNCHANGED.
+- **`recognition` / `exitPath` / `powersV2` are on EVERY report, null unless a recognised V2 vault** (the step-2 open
+  decision, taken as recommended: present, never absent, so a missing field cannot read as safe). The descriptor's
+  key-equality guard (described keys == baseReport keys) holds with the three documented.
+- **Descriptor** (`_dd-descriptor.mjs`): subject's blockHash/blockTimestamp; the three V2 fields described (redeemable-now:
+  a value ONLY when proven by a simulated redeem, `no-value` never 0).
+- **OpenAPI** `info.version` 0.3.0 → **0.4.0**.
+- **Docs page `/dd`** (`_dd-discovery-page.mjs`, "What you get"): one row, "Bound to" the exact block. ⛔ **The V2 profile is
+  deliberately NOT advertised there**: the paid endpoint still sells arc-testnet only (09-28 decision 1) and testnet has no
+  V2 pins, so it would claim what a buyer cannot get.
+- Canary fixtures: the pinned-header declaration (step 5) is the fixture change; the canary's code identity includes
+  SCHEMA_VERSION, so the bump rotates its key (intended, part of the one window).
+- Tests: verify-ofac-screen's pin reads "at least 0.3.0"; the step-2 suite asserts the V2 fields present-and-null.
+  **test:all 184/184** (11.7 min).
+
+## ⭐ DEPLOY RECORD NOTES FOR THE WINDOW (T, carry #1 and #2) — read before deploying the branch
+1. **⚠️ THE CANARY FIXTURE CHANGE IS DEPLOY-CRITICAL.** `shared/dd-canary/fixtures.mjs` now declares ONE pinned block's
+   header (tag `0x3e8`, a fixed hash + timestamp) beside the pinned block. analyze() now reads that header on every run;
+   if the declaration were wrong (wrong tag, malformed hash, number ≠ pin), every fixture report would REFUSE
+   (`subject-block-unreadable` / `-mismatch`) and the canary's verdict for the new code identity would be **fail**.
+   **Consequences, from the code:**
+   - **The paid DD endpoint refuses** for as long as the canary fails: the health record for the new identity is never
+     "serving". The ddTree rotation opens a refusal window on EVERY window deploy anyway (expected, measured ~464 s); a
+     wrong fixture turns that window from minutes into **indefinite, until a fix is deployed**.
+   - **⭐ The vault mandate stops too:** `_vault-mandate-check.mjs:77` refuses unless `health.serving === true` ("the DD
+     detector is not known good") → every tick is `outage-skipped`: no deposit AND no exit check. If piece 5 is armed by
+     then, **a broken canary also blocks the exit path**. Fail-safe (nothing moves on a bad check), but it couples the
+     mandate's exit to the canary fixture being right.
+   - **What makes it right today:** test:dd runs the canary fixtures against the REAL detector (verify-canary: "all fixtures
+     pass against the real detector", green); the declaration answers only its own tag.
+   - **Check after the deploy:** capture:window must record the window CLOSING (canary pass for the new ddTree); a window
+     that does not close = this failure → roll back.
+2. **⚠️ THE V2 LATENCY IS A CONSTRAINT ON WIDENING THE MANDATE'S ALLOWLIST, not a timing note.** Galaxy analyze() (V2 steps
+   2–4) runs a median **4.2 s** (max 4.9 s on clean runs; 18.7 s when rate-limited) against the **10 s** freshness ceiling.
+   The floor is a **~12-batch dependency chain** (recognise → wiring → adapters → powers → route → simulation), not read
+   volume: more concurrency does not shrink it, and every added V2 read that DEPENDS on an earlier one adds a round trip.
+   Rules before any V2 vault enters the mandate allowlist:
+   - measure full-path `wouldBeCheckAgeMs` on a V2 vault from the deployed function (not local), with ≥ 3 samples, and
+     require the max to sit under the window with margin;
+   - any change that lengthens the dependency chain re-opens this measurement;
+   - a rate-limited run already exceeds the ceiling (18.7 s): it refuses as a stale check (fail-safe), so the allowlist
+     must accept stale-check refusals on bad-RPC days as the cost.

@@ -141,6 +141,7 @@ ${healthBanner(health)}
   <tr><td>Price</td><td><b>${esc(DD_PRICE_HUMAN)}</b> per report, paid over x402 &mdash; Circle Gateway batched settlement on Arc</td></tr>
   <tr><td>Artifact</td><td>one signed on-chain due-diligence report about the address and chain you name</td></tr>
   <tr><td>Attestation</td><td>ERC-1271, verifiable against the on-chain owner of ERC-8004 agentId 851891</td></tr>
+  <tr><td>Bound to</td><td>the exact block it describes: its hash and timestamp are inside the signature, and a verifier re-checks both on chain. A report whose block identity could not be read is a refusal, never an unbound report.</td></tr>
   <tr><td>Chains</td><td><code>${esc(SUPPORTED_CHAINS.join(", "))}</code></td></tr>
 </table>
 

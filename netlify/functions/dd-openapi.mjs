@@ -71,7 +71,7 @@ export function openapiDocument() {
     openapi: "3.1.0",
     info: {
       title: "Tikpema DD — on-chain due diligence",
-      version: "0.3.0",
+      version: "0.4.0",
       summary:
         "POST an address, pay per call over x402, and receive one signed due-diligence report whose " +
         "coverage manifest — inside the signed payload, so it cannot be stripped — states exactly " +

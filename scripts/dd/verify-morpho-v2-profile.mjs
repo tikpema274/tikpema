@@ -234,7 +234,8 @@ section("9 — ⛔ a chain with NO V2 pins (arc-testnet, the paid path) is UNCHA
 {
   const r = await run(world(), { pins: null });
   ok("⭐⭐ no V2 reads at all (no isVaultV2, no factory code)", v2Reads(r).length === 0, String(v2Reads(r).length));
-  ok("no exitPath, no recognition block", r.exitPath === undefined && r.recognition === undefined);
+  // 0.4.0 (step 6): the V2 fields are PRESENT on every report and null here: never absent, so never read as safe.
+  ok("exitPath, recognition and powersV2 are present and NULL (0.4.0: never absent)", r.exitPath === null && r.recognition === null && r.powersV2 === null && "exitPath" in r);
   ok("the V2-shaped vault is refused exactly as before: power-surface-unrecognised", r.refusal?.reason === "power-surface-unrecognised", r.refusal?.reason);
 }
 

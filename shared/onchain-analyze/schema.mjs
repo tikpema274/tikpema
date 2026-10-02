@@ -36,7 +36,14 @@ import { screenOfac } from "./ofac.mjs";
 // 0.2.0 — `attestation` is now present on EVERY report (see baseReport). The bump is deliberate:
 // `schemaVersion` sits INSIDE the signed payload, so a different report shape must be a different
 // claim rather than the same claim with extra fields.
-export const SCHEMA_VERSION = "onchain-analyze/0.3.0";
+// 0.4.0 (DD Morpho V2 window, 2026-10-02) — four content changes, ONE bump: (1) `subject.blockHash` + `subject.blockTimestamp`
+// (the pinned block's identity, signed; verifyAttestation checks both on chain); (2) `recognition` (Morpho Vault V2 by the
+// pinned factory's attestation); (3) `exitPath` (the redemption route + redeemable-now PROVEN by a simulated redeem);
+// (4) `powersV2` (who · timelock · abdicated · current value). (2)–(4) are null on every report that is not a recognised
+// V2 vault: present, never absent, so a missing field can never read as safe. New refusal reasons: subject-block-
+// unreadable, subject-block-mismatch, recognition-unreadable, recognition-contradictory, exit-fact-no-value.
+// canon/1 is UNCHANGED; the three purchased reports (0.2.0 / 0.3.0) verify exactly as before (not hash-bound).
+export const SCHEMA_VERSION = "onchain-analyze/0.4.0";
 
 /** Rides on every report, machine-readable, so no consumer can claim it was not told. */
 export const SEVERITY_MEANING =
@@ -137,6 +144,10 @@ export function baseReport({ address, chainId, chainName, blockNumber, blockHash
     // ⭐ blockHash + blockTimestamp (step 5, 2026-10-02): the PINNED block's identity, signed in the body under canon/1.
     // Present on every report (null on refusals that never read it): an absent field must never read as "bound".
     subject: { address, chainId, chainName, blockNumber, blockHash, blockTimestamp },
+    // 0.4.0: the Morpho Vault V2 profile. null unless this is a V2 vault recognised by the pinned factory's attestation.
+    recognition: null,
+    exitPath: null,
+    powersV2: null,
     // ⭐ Present on EVERY report, both paths. A pure Set membership check against the pinned SDN
     // snapshot — no chain read — so it is meaningful even on a chain-unreachable refusal. FACT only;
     // the STOP decision is ofacVerdict() in ofac.mjs, kept out of the report (facts, not verdicts).

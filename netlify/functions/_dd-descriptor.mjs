@@ -59,7 +59,10 @@ export const DD_RESPONSE_SCHEMA = Object.freeze({
   properties: {
     schemaVersion: { type: "string", description: "report schema version; changes when the shape changes" },
     severityMeaning: { type: "object", description: "⭐ SCOPE, NOT RANK: severity describes what a power CAN DO. It is never a score and does not order risks." },
-    subject: { type: "object", description: "the address, chain and block the report is about" },
+    subject: { type: "object", description: "the address, chain and block the report is about. Since 0.4.0 it carries the block's `blockHash` and `blockTimestamp` (chain seconds), inside the signature; a verifier re-checks both on chain. A report whose block identity could not be read is a refusal, never an unbound report." },
+    recognition: { type: ["object", "null"], description: "0.4.0. How the subject was recognised as a Morpho Vault V2: the PINNED VaultV2Factory's attestation (its code hash checked against the pin), with the selector fingerprint only as a cross-check. null when the subject is not a recognised V2 vault." },
+    exitPath: { type: ["object", "null"], description: "0.4.0. ⭐ CAN YOU GET OUT: the redemption route (liquidity adapter, adapters and their attestations, Morpho Blue's pinned code) and `redeemableNow`: a value ONLY when PROVEN by a simulated redeem at this block; `no-value` (never 0) when the route is not understood or the simulation could not be read. Point-in-time; a market's free liquidity is shared. null when not a recognised V2 vault." },
+    powersV2: { type: ["object", "null"], description: "0.4.0. The V2 power model: per power, who can call it, its delay (a timelock is a true lower bound), whether it is abdicated, and its current value; grouped immediate / delayed / abdicated / unreadable; `exitPowers` named. Allocators, sentinels and pending changes are NOT enumerated (stated in coverage). null when not a recognised V2 vault." },
     sanctions: {
       type: "object",
       description:
