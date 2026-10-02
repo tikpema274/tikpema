@@ -15,10 +15,13 @@ import { STEP_TYPES } from "./_actions.mjs";
 
 // GET /api/agent-parameters/<agent>  (no auth, read-only, no writes, nothing on-chain)
 //
-// WHAT THIS IS: the agent's CURRENT, LIVE, MUTABLE operating parameters — the caps and limits
-// it is bounded by *right now*. An operator can change any of these at any time (they are env
-// configuration, re-read on every request), and they may differ from what they were a minute
-// ago or a minute from now.
+// WHAT THIS IS: the agent's CURRENT, MUTABLE operating parameters — the caps and limits it is
+// bounded by in the deploy serving the request. They are env configuration, and Netlify FIXES env
+// when a deploy is made: an operator changes one by editing the configuration AND deploying, and
+// an edit that is not deployed takes effect nowhere (not here, not in the money paths).
+// ⛔ This used to claim the values were fetched afresh per request and could change instantly. MEASURED FALSE
+// 2026-10-01: AGENT_SEND_CAP_USDC set to 9, 35 reads over 15 min all returned 10, no deploy in the
+// window. The served sentence is pinned by test:paramsclaim.
 //
 // ⚠️ WHAT THIS IS NOT: the immutable invariants. "The Researcher cannot move funds" is a
 // property of the system, not a number someone can raise — it is not in `parameters`, it is in
@@ -378,10 +381,12 @@ export async function handler(event) {
     mutable: true,
     readAt: new Date().toISOString(),
     disclaimer:
-      "LIVE AND MUTABLE. These are the agent's CURRENT operating parameters, re-read from " +
-      "configuration on every request. An operator can change any of them at any time, so a " +
-      "value here is true as of `readAt` and is NOT a promise about the future. They are the " +
-      "same values the money paths enforce. Do NOT read them as guarantees — for the guarantees " +
+      "MUTABLE, BUT ONLY BY A DEPLOY. These are the agent's CURRENT operating parameters, read " +
+      "from the environment configuration of the deploy that served this request. That " +
+      "configuration is fixed when a deploy is made: an operator changes a value by editing the " +
+      "configuration AND deploying again, and an edit that is not deployed takes effect nowhere — " +
+      "not here, and not in the money paths. So a value here is true for the deploy that served " +
+      "`readAt`, and is NOT a promise about the next one. They are the same values the money paths enforce. Do NOT read them as guarantees — for the guarantees " +
       "see `invariants`, and fetch the IPFS document it points at: nothing served from this " +
       "endpoint carries any authority, including the invariant text mirrored below.",
 

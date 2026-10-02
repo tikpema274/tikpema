@@ -31723,3 +31723,22 @@ UNTESTED on C would have blocked E until the ledgers were rebuilt by hand.** Roa
 - **Full test:all: 177 / 177** (11.6 min, after the registry fix; the first run was 176 / 1 on it).
 - **Not proven:** a live deploy run. The first deploy carrying it shows the summary block at the end of the log. A live
   UNTESTED/FAIL path is only exercised when one happens.
+
+---
+
+# ✅ /api/agent-parameters NO LONGER CLAIMS PER-REQUEST CHANGE (2026-10-02) — built red-first, NOT deployed
+
+- **The false claim (served to every caller):** "re-read from configuration on every request. An operator can change
+  any of them at any time". MEASURED FALSE 10-01: AGENT_SEND_CAP_USDC set to 9, 35 reads over 15 min all returned 10,
+  no deploy in the window. Netlify documents env as fixed at deploy; the CLI says the same.
+- **Served now:** "MUTABLE, BUT ONLY BY A DEPLOY. … read from the environment configuration of the deploy that served
+  this request. That configuration is fixed when a deploy is made: an operator changes a value by editing the
+  configuration AND deploying again, and an edit that is not deployed takes effect nowhere — not here, and not in the
+  money paths. So a value here is true for the deploy that served `readAt`, and is NOT a promise about the next one. …"
+  (guarantees/IPFS part unchanged). The header comment says the same. New fact stated: an UNDEPLOYED settings edit is
+  enforced nowhere, so the Netlify settings page can show a cap the money paths do not enforce.
+- **Pin `test:paramsclaim`** (scripts/verify-agent-parameters-claim.mjs): calls the REAL handler for all four agents,
+  the served disclaimer === the pinned literal; no "every request" / "re-read" / "at any time" anywhere in any
+  response; source comments likewise; wired into test:all. **RED 5/11 → GREEN 16/0** (one interim red: my own history
+  note quoted the false sentence; reworded).
+- Not on the DD surface (no ddTree rotation). test:all 178/178 with item 2 below.
