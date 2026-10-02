@@ -32008,3 +32008,48 @@ Per-profile catalogue + completeness over it; per power: role holder, `timelock(
 current value, pending change + executableAt; replace `powersPresent` by immediate / delayed / abdicated; allocators and
 sentinels are mappings (enumerate via events from a stated block → a coverage entry); schema 0.4.0 + a V2 DdReportCard
 rendering (step 6); decide whether `recognition` / `exitPath` sit on every report as null.
+
+---
+
+# 🧭 DD MORPHO V2 — STEP 3 DESIGN: THE V2 POWER CATALOGUE, FROM SOURCE (2026-10-02, branch, nothing built yet)
+
+Read from vault-v2 tag 2026-08-13 (the tag that reproduces every deployed vault-v2 contract on Arc), `src/VaultV2.sol`.
+
+## How V2's control works (source lines)
+- **Timelocked (curator `submit` → wait `timelock[selector]` → anyone executes; `timelocked()` :361):** the call is keyed
+  by its FULL calldata in `executableAt[data]`; it cannot run if `abdicated[selector]`. ⭐ **`decreaseTimelock` on X waits
+  X's CURRENT timelock (:355)**, so a power's timelock is a TRUE lower bound on how fast it can change: no shortcut.
+- **Abdication (`abdicate(selector)`, itself timelocked):** permanent. "When a timelocked function is abdicated, it
+  can't be called anymore" (:148).
+- **Revocation:** curator or ANY sentinel can `revoke` a pending submission (:370), so sentinels are the veto.
+
+## The catalogue (who · how fast · what it reaches)
+| Function | Caller | Delay | Reaches |
+|---|---|---|---|
+| setOwner · setCurator · setIsSentinel | owner | **immediate, not timelockable** | ownership / who can submit / who can veto |
+| setName · setSymbol | owner | immediate | cosmetic |
+| setIsAllocator | curator | timelock[sel] (Galaxy: 0) | who can move liquidity + set the liquidity adapter |
+| setReceiveSharesGate · setSendSharesGate · setReceiveAssetsGate · setSendAssetsGate | curator | timelock[sel] | ⛔ who may deposit / transfer / **exit** (sendShares + receiveAssets are the exit gates) |
+| setAdapterRegistry · addAdapter · removeAdapter | curator | timelock[sel] | where funds can be deployed |
+| setPerformanceFee · setManagementFee · set*FeeRecipient | curator | timelock[sel] | economics |
+| increaseAbsoluteCap · increaseRelativeCap | curator | timelock[sel] | how much can go to each id |
+| setForceDeallocatePenalty | curator | timelock[sel] | the cost of the force-exit route |
+| increaseTimelock · decreaseTimelock · abdicate | curator | timelock[sel] / the target's | the delays themselves |
+| decreaseAbsoluteCap · decreaseRelativeCap · revoke | curator or sentinel | immediate | de-risking only |
+| allocate · deallocate · **setLiquidityAdapterAndData** · setMaxRate | allocator (deallocate also sentinel) | **immediate, NOT timelockable, NOT abdicable** | where liquidity sits; **the redemption route** |
+
+## Report shape (step 3 builds this; the 0.4.0 bump lands in step 6)
+Per power: `{power, caller: owner|curator|curator+sentinel|allocator, holders, delay: {kind: immediate|timelocked,
+seconds|null}, abdicated, currentValue, reach}`. Grouped as **immediate / delayed (with seconds) / abdicated**; the
+completeness invariant iterates THIS profile's catalogue. `powersPresent` is not used for V2.
+
+## ⏸ Two decisions before the reads are built (T)
+1. **Enumerations from events.** `isAllocator`, `isSentinel` and pending `executableAt[data]` are mappings: not listable
+   from state. Options: (a) scan `SetIsAllocator` / `SetIsSentinel` / `Submit` / `Revoke` / `Accept` from the vault's
+   creation block (factory `CreateVaultV2` event) on every check (cost grows with history; Arc public RPC getLogs limits
+   unmeasured); (b) do not enumerate in v1: report "allocators/sentinels/pending: NOT CHECKED (mappings; event scan not
+   built)" in the coverage manifest, and still read the facts that ARE state (owner, curator, timelocks, abdications,
+   values). Claude recommends **(b) for this window**: a stated gap, not a guess; (a) after the window with its cost measured.
+2. **What counts as an exit power for the mandate's rules later:** the two exit gates + setIsAllocator +
+   setLiquidityAdapterAndData (immediate, allocator) + setForceDeallocatePenalty. Claude recommends naming these
+   `exitPowers` in the report so a rule can key on them without re-deriving the list.
