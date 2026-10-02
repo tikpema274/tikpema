@@ -31949,3 +31949,60 @@ Released by T after the explorer results. DD-surface change (ddTree will rotate 
 
 ## Next: step 2 — the V2 profile + the factory-attestation guard (offline fixtures, then `analyze` on real mainnet
 vaults read-only). Still nothing deploys until the whole window is built (09-28 build order).
+
+---
+
+# ✅ DD MORPHO V2 — STEP 2: RECOGNITION BY FACTORY ATTESTATION + THE EXIT-PATH GUARD (2026-10-02, branch, NOT deployed)
+
+## Built (`shared/onchain-analyze/morpho-v2.mjs` new; `index.mjs` +37)
+- **Recognition = the PINNED VaultV2Factory's `isVaultV2`**, its code hash re-checked against the pin on every run. The
+  selector fingerprint (`liquidityAdapter() adaptersLength() curator() isAllocator(address) abdicated(bytes4)
+  timelock(bytes4)`) is a CROSS-CHECK: V2-looking but not attested → UNRECOGNISED (`power-surface-unrecognised`);
+  attested but fingerprint absent → `recognition-contradictory`; factory code ≠ pin → its attestation counts for
+  nothing; attestation unreadable → `recognition-unreadable` (never "unrecognised", never recognised).
+- **A recognised V2 vault is a NO-VERDICT until step 3:** every presence group notChecked ("on Vault V2 every vault has
+  every power … timelock … abdicated … current value … step 3"), refusal `v2-power-model-not-built`.
+- **The exit-path guard (`report.exitPath`):** Morpho Blue code vs pin; both adapter factories' code vs pin; the adapter
+  list; each adapter recognised ONLY by a pinned factory's attestation, its code hash at the block, its realAssets and
+  share (of idle + Σ realAssets, the sum VaultV2 uses); the liquidity adapter + `isAdapter`; idle balance.
+  - Unrecognised LIQUIDITY adapter → `redeemableNow {value:null, status:"no-value"}` + finding "redemptions are routed
+    through an adapter of unrecognised code". Never 0%, never 100%.
+  - Unrecognised OTHER adapter → its part degraded (`redeemableNow.degraded`) + finding "an adapter of unrecognised code
+    holds X% of this vault's assets" (or "an unknown share" when not all real assets read).
+  - Morpho Blue ≠ pin or unreadable → no-value.
+  - ➕ **New from source:** `setLiquidityAdapterAndData` (allocator, no timelock) does NOT require an adapter, and
+    `deallocateInternal` requires `isAdapter` → a non-adapter liquidity adapter makes every redemption above idle REVERT:
+    its own finding + no-value.
+  - `compareExitPath(a, b)` names WHAT changed (liquidity adapter, code hash at the same address, adapters
+    added/removed, recognition, Morpho Blue hash).
+  - redeemable-now is otherwise `not-computed` (step 4).
+- **No V2 pins on the chain (arc-testnet, the paid path) → no V2 read at all**, no `recognition`/`exitPath` field: unchanged.
+
+## Proof
+- `test:morphov2profile` (scripts/dd/verify-morpho-v2-profile.mjs, mock keyed by target+calldata): **RED 8/35 → GREEN
+  43/0.** Mutations, each caught, restored byte-identical: fingerprint decides (2 fail); liquidity no-value removed (1);
+  other adapter takes the whole fact (1); a no-pins chain makes a read (1).
+- verify-analyze, verify-recognition-agreement, verify-analyze-agrees-with-vault, verify-dd-code-identity (with stamp)
+  green. **test:all 180/180** (11.4 min).
+
+## Read-only mainnet runs (quorum rpc.mainnet.arc.io + arc-mainnet.drpc.org, blocks ~23898262–23898494, no disagreement)
+- **All 32 V2 vaults (Morpho API, chainId 5042) are attested; Morpho Blue = pin everywhere; EVERY adapter on Arc is
+  recognised** (MorphoMarketV1AdapterV2 or MorphoVaultV1Adapter). The unrecognised paths are fixture-proven only.
+- **Galaxy 0x8E35…12AF:** one MM adapter 0xeE00…7c2C at 100% (89,709,866 USDC realAssets), **idle 0, liquidity adapter
+  UNSET**. From VaultV2's source an ordinary redeem then has nothing to draw on (to be PROVEN in step 4 by a simulated
+  redeem; not claimed as measured). The 5.57% / 8.84% figures recorded earlier were Morpho MARKET liquidity, reachable
+  only through `forceDeallocate` (penalty).
+- **100%-idle sample:** 0x3d1D042F334B6f8326c29721ECdd1882659E93b1 (1 USDC idle, adapter 0). ⚠️ The 09-28 examples
+  (Gauntlet / Steakhouse Prime) are NO LONGER idle.
+- **Vault-wrapping sample:** 0xD392d1DEe50a37Cf3303aaD0aCBBc066A8462eC5: liquidity adapter = MorphoVaultV1Adapter
+  0x4e6e…4679, attested by the pinned V1-adapter factory, `isAdapter` true.
+- **Negatives:** xylo (testnet) unchanged (no V2 read, 5 powers present, no refusal); Centrifuge JTRSY 0x1277…bb1
+  (mainnet) not attested → `power-surface-unrecognised`.
+- **Cost:** 13 V2 reads per endpoint (09-28 estimated 7–8: adds adapter code, idle, both factory codes); a full Galaxy
+  analyze ~2.3 s wall.
+
+## Step 3 must change the power shape (recorded for T)
+Per-profile catalogue + completeness over it; per power: role holder, `timelock(selector)`, `abdicated(selector)`,
+current value, pending change + executableAt; replace `powersPresent` by immediate / delayed / abdicated; allocators and
+sentinels are mappings (enumerate via events from a stated block → a coverage entry); schema 0.4.0 + a V2 DdReportCard
+rendering (step 6); decide whether `recognition` / `exitPath` sit on every report as null.
