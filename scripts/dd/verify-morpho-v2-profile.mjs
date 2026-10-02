@@ -135,13 +135,14 @@ section("1 — ⭐⭐ RECOGNITION is the pinned factory's attestation, not the f
     fp.refusal?.reason === "recognition-contradictory" && fp.recognition?.fingerprint === "disagrees", `${fp.refusal?.reason} / ${fp.recognition?.fingerprint}`);
 }
 
-section("2 — ⭐ on V2 a PRESENCE scan says nothing: the groups are NOT CHECKED until step 3, and it is a NO-VERDICT");
+section("2 — ⭐ on V2 a PRESENCE scan says nothing: the presence groups are NOT CHECKED (powersV2 instead), and it is a NO-VERDICT");
 {
   const r = await run(world());
   ok("every presence group is in notChecked (none scanned)", powerNotChecked(r).length === Object.keys(POWER_SIGS).length && r.powers.length === 0, `${powerNotChecked(r).length}/${Object.keys(POWER_SIGS).length}`);
   ok("…each says WHY: presence is meaningless on V2; the power model (timelock · abdicated · current value) is step 3",
     powerNotChecked(r).every((x) => /V2/.test(x.why ?? "") && /timelock/.test(x.why ?? "") && /abdicat/.test(x.why ?? "")));
-  ok("⭐⭐ the report is a NO-VERDICT (refusal v2-power-model-not-built), never a clean bill", r.refusal?.reason === "v2-power-model-not-built", r.refusal?.reason);
+  // Step 3 (2026-10-02) built the power model, so the no-verdict now rests on the exit fact (step 4), not the powers.
+  ok("⭐⭐ the report is still a NO-VERDICT (refusal v2-exit-fact-not-built since step 3), never a clean bill", r.refusal?.reason === "v2-exit-fact-not-built", r.refusal?.reason);
   ok("powersPresent is empty, not a list of 'present' powers", Array.isArray(r.powersPresent) && r.powersPresent.length === 0);
 }
 

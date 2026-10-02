@@ -38,8 +38,8 @@ import { hasSel, unread, POWER_SIGS } from "../onchain-facts/index.mjs";
 import { recognizeVaultProfile, ERC4626_METHODS } from "../onchain-facts/vault-profiles.mjs";
 // ⭐ Morpho Vault V2 (DD Morpho V2 step 2): recognition by the PINNED factory's attestation, then the exit-path guard.
 // A chain with no V2 pins (arc-testnet: the paid path) makes NO V2 read and is unchanged.
-import { recogniseV2, exitPathGuardV2 } from "./morpho-v2.mjs";
-export { compareExitPath, V2_FINGERPRINT } from "./morpho-v2.mjs";
+import { recogniseV2, exitPathGuardV2, powersV2, assertV2PowersComplete } from "./morpho-v2.mjs";
+export { compareExitPath, V2_FINGERPRINT, V2_POWER_CATALOGUE, V2_EXIT_POWERS } from "./morpho-v2.mjs";
 
 export { SCHEMA_VERSION, SEVERITY_MEANING, SCOPE_CLASSES, POWER_SCOPE } from "./schema.mjs";
 // Attestation is OPT-IN and additive: analyze() neither signs nor requires a signer, so an
@@ -116,7 +116,7 @@ export async function analyze(address, { client } = {}) {
     // ⛔ On Vault V2 every vault has every power: selector PRESENCE is meaningless there, so it is not scanned. The
     // facts are each power's timelock, whether it is abdicated, and its current value: the V2 power model (step 3).
     const why = isV2
-      ? "morpho-v2: on Vault V2 every vault has every power, so selector PRESENCE says nothing. The facts are each power's timelock, whether it is abdicated, and its current value: the V2 power model (DD Morpho V2 step 3), not built yet. Not checked."
+      ? "morpho-v2: not this profile's vocabulary. On Vault V2 every vault has every power, so selector PRESENCE says nothing; the V2 power model (who · timelock · abdicated · current value) is reported in powersV2 instead."
       : `morpho-v2 recognition could not be trusted (${v2.why}), so no power vocabulary applies. Not checked.`;
     for (const group of Object.keys(POWER_SIGS)) cov.skip(`power:${group}`, { kind: "power", group }, why);
     powers = [];
@@ -132,6 +132,8 @@ export async function analyze(address, { client } = {}) {
   }
 
   const exitPath = isV2 ? await exitPathGuardV2(cov, client, addr, blk) : undefined;
+  const pv = isV2 ? await powersV2(cov, client, addr, blk, exitPath) : undefined;
+  const pvCheck = pv ? assertV2PowersComplete(pv) : null;
 
   const manifest = cov.manifest();
   const report = {
@@ -148,6 +150,7 @@ export async function analyze(address, { client } = {}) {
     ...(v2 ? { recognition: { status: v2.status, profile: v2.profile ?? null, method: v2.method, factory: v2.factory,
       attested: v2.attested ?? null, fingerprint: v2.fingerprint, why: v2.why ?? null } } : {}),
     ...(exitPath ? { exitPath } : {}),
+    ...(pv ? { powersV2: pv } : {}),
     powers,
     powersPresent: powers.filter((p) => p.present).map((p) => p.power),
     // ⚠️ A quorum that cannot attest its own independence but implies it is itself a false clean
@@ -189,7 +192,7 @@ export async function analyze(address, { client } = {}) {
           : v2RefusalReason
             ? `Morpho Vault V2 recognition could not be trusted (${v2.status}) → nothing was assessed. This is a NO-VERDICT result, not a clean bill.`
           : isV2
-            ? "a Morpho Vault V2, recognised by its pinned factory's attestation. Its exit path was read; its powers were NOT (the V2 power model is not built yet). This is a NO-VERDICT result, not a clean bill."
+            ? "a Morpho Vault V2, recognised by its pinned factory's attestation. Its powers (powersV2) and exit path (exitPath) were read; allocators, sentinels and pending changes were NOT enumerated (listed in notChecked); redeemable-now is not computed yet. This is a NO-VERDICT result, not a clean bill."
           : unrecognisedVaultSurface
             ? "this address presents an ERC-4626 vault surface this engine does not recognise → its owner powers were NOT scanned. This is a NO-VERDICT result, not a clean bill."
             : `${manifest.totals.checked} checks ran, ${manifest.totals.notChecked} did not. Everything not checked is listed with a reason.`,
@@ -200,8 +203,10 @@ export async function analyze(address, { client } = {}) {
         ? { reason: "shape-unclassified", detail: shape.evidence?.why ?? "the shape-determining reads did not complete" }
         : v2RefusalReason
           ? { reason: v2RefusalReason, detail: `Morpho Vault V2 recognition is by the pinned VaultV2Factory's attestation. ${v2.why}. NO VERDICT is given — this is NOT a clean result.` }
+        : isV2 && pvCheck && !pvCheck.ok
+          ? { reason: "coverage-incomplete", detail: "The V2 power report does not account for every power in the V2 catalogue, so it cannot be trusted not to be a false clean bill.", problems: pvCheck.problems }
         : isV2
-          ? { reason: "v2-power-model-not-built", detail: "This is a Morpho Vault V2 (attested by the pinned factory). On V2 every vault holds every power, so presence says nothing; the facts are each power's timelock, abdication and current value, and that model is not built yet. NO VERDICT is given on its powers — this is NOT a clean result. The exit path (exitPath) was read." }
+          ? { reason: "v2-exit-fact-not-built", detail: "This is a Morpho Vault V2 (attested by the pinned factory). Its powers (powersV2: who · timelock · abdicated · current value) and exit path were read, but redeemable-now (the exit-liquidity fact) is not computed in this build. NO VERDICT is given — this is NOT a clean result." }
         : unrecognisedVaultSurface
           ? { reason: "power-surface-unrecognised", detail: "This address presents an ERC-4626 vault surface (fully or partially), but its admin/control surface is not a vocabulary this engine recognises. Scanning for the vocabularies it does model would report a false clean bill, so NO VERDICT is given — this is NOT a clean result. The deposit gate refuses the same input." }
           : null,

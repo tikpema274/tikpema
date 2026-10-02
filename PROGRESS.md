@@ -32053,3 +32053,42 @@ completeness invariant iterates THIS profile's catalogue. `powersPresent` is not
 2. **What counts as an exit power for the mandate's rules later:** the two exit gates + setIsAllocator +
    setLiquidityAdapterAndData (immediate, allocator) + setForceDeallocatePenalty. Claude recommends naming these
    `exitPowers` in the report so a rule can key on them without re-deriving the list.
+
+---
+
+# ✅ DD MORPHO V2 — STEP 3: THE V2 POWER MODEL (2026-10-02, branch, NOT deployed) — T: decision (b) + exitPowers
+
+## Built (`morpho-v2.mjs` +catalogue/powersV2/assertV2PowersComplete; `index.mjs` wires `report.powersV2`)
+- **`V2_POWER_CATALOGUE`: 30 powers** = VaultV2's 42 non-view functions (vault-v2 @2026-08-13) minus 12 user /
+  permissionless ones (deposit/mint/withdraw/redeem/transfer/transferFrom/approve/permit/multicall/accrueInterest/
+  forceDeallocate/submit). 18 curator-timelocked; owner ×5, curator+sentinel ×3, allocator ×4 not timelockable.
+- **Per power:** caller · holders (owner / curator address; allocators & sentinels **not-enumerated** with the reason) ·
+  `delay` (`timelock(selector)` read; `not-timelockable` by design; decreaseTimelock = "per-target", VaultV2.sol:355) ·
+  `abdicated` (read; `not-applicable` for functions that never pass `timelocked()`) · current value (fees, recipients,
+  gates, owner, curator, registry, maxRate, the liquidity adapter, per-adapter force-deallocate penalty) · scope · reach.
+- **Groups:** immediate / delayed (seconds) / abdicated / **unreadable** (an unread timelock or abdication never lands in
+  immediate or delayed).
+- **`exitPowers`** (T): setSendSharesGate, setReceiveAssetsGate, setIsAllocator, setLiquidityAdapterAndData,
+  setForceDeallocatePenalty, each with delay + abdicated + value.
+- **Decision (b):** coverage notChecked `v2:enumerate:allocators` / `sentinels` / `pending`, each with its reason.
+- **Completeness over THIS profile's catalogue** (`assertV2PowersComplete`); a miss → refusal `coverage-incomplete`.
+  The xylo presence groups are notChecked as "not this profile's vocabulary (see powersV2)".
+- Refusal on a recognised V2 vault is now **`v2-exit-fact-not-built`** (step 4 removes it).
+
+## Proof
+- **`test:morphov2powers`** (scripts/dd/verify-morpho-v2-powers.mjs): catalogue ∪ non-powers = the 42-function source list
+  (literal); groups; unreadable never guessed; holders; the three gaps; exitPowers; completeness. **RED 2/26 → GREEN 30/0**
+  (one interim red: my own regex, case). Mutations caught (restored byte-identical): unreadable timelock → "0";
+  unreadable abdication → false; the allocator gap dropped; an exit power dropped.
+- test:morphov2profile updated for the new refusal (v2-power-model-not-built → v2-exit-fact-not-built): 43/0.
+- **test:all 181/181** (11.4 min).
+
+## Live: Galaxy USDC, block 23902790, both endpoints, no disagreement, nothing unreadable (130 reads = 65 / endpoint)
+- **Immediate (19):** every owner + allocator power (incl. **setLiquidityAdapterAndData**), and timelock 0 on
+  setIsAllocator, setSendAssetsGate, all four fee setters/recipients, **setForceDeallocatePenalty**.
+- **Delayed 7 d (7):** addAdapter, removeAdapter, increaseAbsoluteCap, increaseRelativeCap, increaseTimelock, abdicate;
+  decreaseTimelock per-target.
+- **Abdicated (4):** **setSendSharesGate + setReceiveAssetsGate (both exit gates)**, setReceiveSharesGate, setAdapterRegistry.
+- **= the 2026-09-26 measurements** (fee setters 0, exit gates abdicated, caps + addAdapter 7 d, setIsAllocator 0). ➕ New:
+  **setForceDeallocatePenalty is timelock 0** (penalty 0 now; the curator can raise the force-exit cost at once). Three
+  of the five exitPowers are immediate. Values: fees 0, gates 0x0, owner 0x032a…, curator 0xec1a….
