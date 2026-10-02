@@ -382,3 +382,26 @@ trust layer gets competition.
 - **Changed**: recorded prominently in the roadmap as THE measured case for the exit-path re-check (piece 5's fresh
   liquidity-adapter read; DD's `compareExitPath`). Step 3 names `setLiquidityAdapterAndData` and `setIsAllocator` among
   `exitPowers` (T 10-02). Priorities unchanged.
+
+## 2026-10-02 — The name "DD" collides with Webacy's dd.xyz — DECIDED (T): Tier A copy only, after the V2 window
+- **Source**: the Webacy read above (dd.xyz 301-redirects to their vault monitor, our category); a rename cost scope
+  of this repo (public surfaces, ddTree surface, immutables), 2026-10-02.
+- **Claim**: our service's name collides with a live product in the same category. They cover eth / arb / base / opt /
+  pol / bsc; we are Arc. The cost today is a search result, not a customer.
+- **Checked** (what a rename would touch):
+  - **Signing domain** `tikpema-dd-attestation/canon1/prod` (shared/dd/identity.mjs) is signed inside the three sold
+    reports, and `verifyAttestation` requires `att.domain === identity.domain`: changing it invalidates them
+    (`domain-mismatch`) unless the verifier accepts both domains forever. Immutable in practice.
+  - **Identity documents** v1.0.0 and v1.1.0 (the registered tokenURI) carry "Tikpema DD Service" in content-addressed
+    bytes. The pointer can be superseded; the old name stays in those CIDs and in the sold reports regardless.
+  - **Internal names** (files, store keys, scheduled functions, env vars): a renamed file still listed in
+    `DD_SURFACE_FILES` makes ddTree null → the canary refuses to write → the paid endpoint AND the mandate refuse
+    indefinitely; renaming the store `dd-analyze-pending` orphans paid handles (404 unknown handle).
+  - **The copy a reader sees first** (/dd page title + body, OpenAPI title, canon1 spec title, Dashboard prose): checked
+    against scripts/stamp-build.mjs — neither `_dd-discovery-page.mjs` nor `dd-openapi.mjs` is in the DD surface, so
+    no ddTree rotation and no refusal window.
+- **Decision (T)**: **Tier A only, and not now.** The signing domain stays (a large permanent cost for a name
+  collision). Tier C (internal names) is refused outright. Tier A is cheap, outside ddTree, and covers what a reader
+  sees first; it is done as copy work **AFTER the V2 window deploy, not bundled into it**: that deploy already carries
+  a deploy-critical canary fixture and carries nothing optional. No names proposed.
+- **Changed**: nothing in priorities. Re-check the DD surface list when Tier A starts (the surface has grown before).
