@@ -20,6 +20,7 @@
 // ratcheted, not asserted away.
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { chainSteps } from "./lib/deploy-chain.mjs";
 import { CLAIM_SURFACES, COMPONENTS, MAX_UNCOVERED, UNWIRED_OK, UNWIRED_TRIGGERS, FILE_UNWIRED_OK, FILE_UNWIRED_TOOLS,
   ORPHAN_GUARD_DEBT, MAX_ORPHAN_GUARDS, PASSTHROUGH, DEBT_HORIZON } from "./guard-registry.mjs";
 import { triggerIsActionable } from "./lib/guard-staleness.mjs";
@@ -74,6 +75,9 @@ section("3 — EVERY NAMED SUITE EXISTS AND IS REACHABLE");
 const reachable = new Set();
 const expand = (cmd, depth = 0) => {
   if (depth > 6 || !cmd) return;
+  // ⭐ The deploy chain's deferred-verdict step names its gates WITHOUT `npm run` (scripts/deferred-verdict.mjs runs them):
+  // read the command as the steps it runs (scripts/lib/deploy-chain.mjs), or those gates look unwired (2026-10-02).
+  cmd = chainSteps(cmd).join(" && ");
   for (const m of cmd.matchAll(/npm run ([a-zA-Z:]+)/g)) expand(pkg.scripts[m[1]], depth + 1);
   for (const m of cmd.matchAll(/scripts\/[A-Za-z0-9_/-]+\.(?:mjs|tsx|mts)/g)) reachable.add(m[0]);
 };

@@ -18,6 +18,7 @@
 //
 // The git-facing properties run against REAL throwaway repos in the OS temp dir (removed after), never this one.
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { chainSteps } from "./lib/deploy-chain.mjs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -153,7 +154,9 @@ section("5 — package.json wiring: gate:ledger is the HEAD of deploy:prod, stag
   // lock is held (scripts/run-lock.mjs, test:runlock). gate:ledger is the chain's first REAL step, right after it.
   check("deploy:prod is the lock wrapper around deploy:prod:chain", pkg.scripts["deploy:prod"] === "node scripts/run-lock.mjs --lock deploy -- npm run deploy:prod:chain", pkg.scripts["deploy:prod"]);
   const chain = pkg.scripts["deploy:prod:chain"] ?? "";
-  const all = chain.split("&&").map((s) => s.trim());
+  // Expanded (scripts/lib/deploy-chain.mjs): gate:forgery's red is deferred by a wrapper that then runs gate:spec,
+  // gate:deployloss and stage:ledger, so the order is read as the chain RUNS it (2026-10-02).
+  const all = chainSteps(chain);
   check("…the chain's step 0 is the lock assertion", all[0] === "node scripts/run-lock.mjs --assert-held --lock deploy", all[0]);
   const steps = all.slice(1);
   check("⭐ first step is gate:ledger", steps[0] === "npm run gate:ledger", steps[0]);

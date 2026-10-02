@@ -84,7 +84,8 @@ Each stage lists its **goal**, what **exists**, what it **needs from T**, what i
 - **Needs from Claude:**
   1. A scheduled forgery probe (folded into plan-path-watch, server-side, minting its own probe session), same three
      verdicts, paging on FAIL **or** UNTESTED.
-  2. Move `gate:forgery` so an UNTESTED does not stop gate:spec / deployloss / stage:ledger.
+  2. ✅ BUILT 10-02 (not yet run in a live deploy): `gate:forgery`'s red is deferred by `scripts/deferred-verdict.mjs`;
+     gate:spec / deployloss / stage:ledger run regardless, and the chain exits with forgery's own code (test:deferredverdict).
   3. A scheduled DD self-check against a known vault set, so a silent regression in the verdict shows up between deploys.
 - **Done when:** one PASS observed between two deploys, and a deliberately broken probe pages within one cadence.
 
@@ -137,5 +138,5 @@ Each stage lists its **goal**, what **exists**, what it **needs from T**, what i
 
 1. ~~**T:** decide Morpho V2 in DD~~. **Already decided by T on 09-28** (Stage 1 above). Stage 1 is a build, not a wait.
 2. ~~**T:** when to deploy the upfront-fee copy fixes~~. **Deployed** 10-01 (6abe9d6d, verified in bundle and server).
-3. **Claude, unblocked now:** Stage 3 items 1–2 (the scheduled forgery probe; moving gate:forgery in the chain) and
+3. **Claude, unblocked now:** Stage 3 item 1 (the scheduled forgery probe; item 2 built 10-02) and
    collecting the latency distribution from the daily mandate ticks (Stage 2, item 1).

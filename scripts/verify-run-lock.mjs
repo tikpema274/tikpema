@@ -20,6 +20,7 @@
 // ⚠️ Every test uses its own temp lock dir (TIKPEMA_LOCK_DIR / `dir`), never ~/.cache/tikpema.
 
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, statSync, rmSync, openSync, closeSync } from "node:fs";
+import { chainSteps } from "./lib/deploy-chain.mjs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -256,7 +257,9 @@ section("7 — the wiring: the deploy scope shares `deploy`; escrow-reclaim --co
   const S = pkg.scripts;
   const WRAP = "node scripts/run-lock.mjs --lock deploy";
   ok("⭐⭐ deploy:prod IS the wrapper around deploy:prod:chain (the lock is taken before anything else)", S["deploy:prod"] === `${WRAP} -- npm run deploy:prod:chain`, S["deploy:prod"]);
-  const steps = (S["deploy:prod:chain"] ?? "").split("&&").map((s) => s.trim());
+  // Expanded (scripts/lib/deploy-chain.mjs): the deferred-verdict wrapper runs gate:forgery, then the steps that must
+  // run regardless of it, so "stage:ledger stays LAST" is read from the order the chain RUNS, not the raw string.
+  const steps = chainSteps(S["deploy:prod:chain"]);
   ok("⭐⭐ the chain's FIRST step asserts the lock is held (running the chain directly refuses)", steps[0] === "node scripts/run-lock.mjs --assert-held --lock deploy", steps[0]);
   ok("  …then gate:ledger, and stage:ledger stays LAST", steps[1] === "npm run gate:ledger" && steps.at(-1) === "npm run stage:ledger", `${steps[1]} … ${steps.at(-1)}`);
   ok("  …test:all is AFTER the lock (a doomed second launch costs nothing)", steps.indexOf("npm run test:all") > 0);

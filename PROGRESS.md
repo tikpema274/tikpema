@@ -31689,3 +31689,37 @@ Probe stamp: commit **8cd4ba9**, tree d99d0f0af69d, dirty:false (deploy 6abe9d6d
 EXIT_RULES_OPERATOR, EXIT_AVAILABLE, MANDATE_MONITORING_LIVE, MANDATE_CHECK_FRESHNESS_MS). netlify/ shared/ src/ unchanged
 8cd4ba9 → HEAD. gate:deployed: published-deploy + orphan checks ✓; its one ✗ is "the local build is stamped" (fresh
 checkout, by design; not stamped, to leave the committed null stamp alone), not a prod mismatch.
+
+---
+
+# 🛠️ gate:forgery NO LONGER STOPS THE GATES BEHIND IT (2026-10-02) — built red-first, NOT yet run in a live deploy
+
+## The defect
+deploy:prod:chain ended `… && capture:window && gate:forgery && gate:spec && gate:deployloss && stage:ledger`.
+gate:forgery runs after the deploy is LIVE and only reports. But its red (FAIL 1, or UNTESTED 3: a probe refused before
+the comparison, e.g. when the fee moves) stopped the three gates after it. stage:ledger then never staged the ledgers,
+and the NEXT deploy's first link (gate:ledger) refuses as BEHIND. **With C and E (the piece 5 money deploys) next, one
+UNTESTED on C would have blocked E until the ledgers were rebuilt by hand.** Roadmap Stage 3, item 2.
+
+## The fix
+- `scripts/deferred-verdict.mjs`: `node scripts/deferred-verdict.mjs gate:forgery -- gate:spec gate:deployloss stage:ledger`.
+  It runs the gate, then the steps after `--` (still `&&` among themselves: a red one stops the rest, as before), then
+  exits with the gate's OWN code, so the deploy log still says FAIL (1) vs UNTESTED (3). A closing summary lists every
+  step's exit or NOT RUN and points back at the VERDICT line. **Fails closed:** a step that cannot start or is killed = 1;
+  bad usage = 2. One process, no state file.
+- `scripts/lib/deploy-chain.mjs` `chainSteps()`: the chain as the steps it RUNS (the wrapper expanded). The order pins
+  in test:runlock and test:ledgergate ("stage:ledger stays LAST") and guard-registry's reachability walk now read it.
+- Unchanged: anything red BEFORE forgery (gate:deployed, capture:window) still stops everything after it.
+
+## Proof
+- **Suite `test:deferredverdict`** runs the post-deploy segment of the REAL deploy:prod:chain string with `npm` stubbed
+  on PATH (logs each `npm run X`, exits per scenario). **RED on the old chain: 12 / 10.** Forgery 3 → ran
+  `gate:deployed → capture:window → gate:forgery` and stopped; forgery 1 → the same. **GREEN 22 / 0.**
+- **Mutations (each caught, file restored byte-identical):** dropping forgery's code from the exit → 3 fail (exit 0
+  where 3 / 1 were due); a step that cannot start counted as 0 → 1 fails; `&&` among the later steps removed → 1 fails.
+- Order pins went red on the change as expected (runlock 91/1, ledgergate 36/2), green on chainSteps (92/0, 38/0).
+- **test:all caught one I missed:** gate:registry 27/1, "unwired and undeclared: gate:deployloss, gate:forgery,
+  gate:spec". Its walker follows `npm run X`, and the wrapper names its gates without it. Fixed through chainSteps → 28/0.
+- **Full test:all: 177 / 177** (11.6 min, after the registry fix; the first run was 176 / 1 on it).
+- **Not proven:** a live deploy run. The first deploy carrying it shows the summary block at the end of the log. A live
+  UNTESTED/FAIL path is only exercised when one happens.
