@@ -11,8 +11,12 @@ reading); `docs/mainnet-go-no-go.md` holds the mainnet detail; `PROGRESS.md` is 
 
 This is the trust layer applied to the riskiest single moment, the **deposit**. It is narrow on purpose. Identity,
 payments and data are being built by well-funded players (Circle's kits, ERC-8004, Surf, Tempo). The question
-"can I exit?" is asked by nobody, and the launch-day evidence shows it matters: Earn Kit offered Galaxy USDC first
-with no warnings while 5.57% was redeemable; Borrow Kit lists a market with ~40 USDC free of 185M.
+"can I exit?" IS asked, by ratings (Webacy publishes a "% of TVL withdrawable"), but answered as an unsigned number for
+every vault, unknowns scored. *(Corrected 2026-10-02: this read "asked by nobody".)* The evidence that the ANSWER
+matters: on Ethereum, Gauntlet WETH Prime's ordinary redeem delivers 0 (measured: a 1-wei withdraw reverts) while
+Webacy's published Morpho formula gives 16.83% (direction log 2026-10-02); Earn Kit offered Galaxy USDC first with no
+warnings while its 5.57% was market liquidity reachable only by force-deallocation (liquidity adapter unset); Borrow
+Kit lists a market with ~40 USDC free of 185M.
 
 **What "done" means for the promise:** an agent on Arc mainnet is about to deposit into a vault Circle's kits offer.
 Tikpema returns a signed verdict that states what can be redeemed now and who can change that. A vault it cannot

@@ -29065,8 +29065,9 @@ not guaranteed verbatim. The central Galaxy figure was re-checked directly again
 | **Steakhouse** (curator) | PARTIAL: policy for all its vaults ("7-day timelocks"), not a per-vault readout | NO | NO (legal disclaimer) | NO | n/a (no rating) |
 | **Certora** | n/a for vaults | n/a | **YES, for code**: explicit assumptions ("fee-on-transfer… not supported") | **YES, for code**: public, re-runnable specs | n/a (proofs, not scores) |
 | **Chaos Labs** | NO (it sets protocol parameters) | NO | NO | PARTIAL (updates on chain; model not reproducible) | COULD NOT VERIFY |
+| **Webacy "DD"** (dapp.webacy.com/vaults; ➕ added 2026-10-02, was "Not checked") | PARTIAL: weighted sub-scores (owner EOA/multisig, upgradeable, timelock present/sufficient, pause, curator); no per-power timelock / abdication / value | **ESTIMATE**: `pct_tvl_withdrawable`; Morpho = "idle market liquidity plus vault buffer, capped at TVL" — measured 10-02 to equal the FORCE-DEALLOCATABLE figure, not what a redeem delivers (Gauntlet WETH Prime: redeem 0 vs formula 16.83%) | NO per vault: framework counts (39 of 42 live); unknowns SCORED (unknown oracle = 40) | NO: unsigned; webhook HMAC only | **NO**: always a score + grade + verdict |
 
-Not checked: Webacy. Hypernative / Block Analitica came up in searches only, not fetched.
+Not checked: Hypernative / Block Analitica came up in searches only, not fetched. (Webacy: checked 2026-10-02, row above; direction log 2026-10-02.)
 
 ## Probe 1: Galaxy USDC on Arc (`0x8E35…12AF`, chain 5042)
 - **Morpho SHOWS the redeemable-now figure.** The vault page reads "Liquidity $4.22 M" beside "Total Deposits $79.79 M".

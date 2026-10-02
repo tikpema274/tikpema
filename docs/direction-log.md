@@ -13,8 +13,12 @@ Each entry carries:
 ## The standing thesis (revise it when an entry forces it)
 
 Agents need four layers: **identity, payments, data, trust**. The first three are commoditising fast and are owned by
-well-funded players (Circle's kits, ERC-8004, Surf-type data layers, Tempo). **The trust layer — verify before money
-moves, and "I don't know ⇒ no" — is empty**, and every piece assumes it exists. Tikpema builds it. Directions that follow:
+well-funded players (Circle's kits, ERC-8004, Surf-type data layers, Tempo). **The trust layer is not empty: it exists as
+RATINGS** (Webacy's DD, Credora, vaults.fyi, Gauntlet: a number for every vault, unknowns scored, unsigned; Webacy sells
+it over x402 with an MCP server). **What is empty is the CHECKABLE version: a verdict derived from the chain with the
+redemption route understood, a REFUSAL when it cannot tell ("I don't know ⇒ no"), a per-check coverage manifest, and a
+signature a third party can re-check at a block.** Tikpema builds that. *(Revised 2026-10-02: it read "the trust
+layer … is empty"; the Webacy entry below forced the change.)* Directions that follow:
 
 1. **Be the check the kits call**: DD in depth on what Circle hands agents (Morpho V2 + exit liquidity → Earn Kit's
    `onBeforeAuthorize`).
@@ -296,3 +300,60 @@ trust layer gets competition.
   scoping is real but only SERVER-verifiable. Candidates for stages 3–4, not builds now: publish a mandate's terms where a
   third party can check them (e.g. beside the ERC-8004 identity, without editing the frozen unified.json); on-chain
   limits when a wallet stack on Arc offers session keys / scoped delegation.
+
+## 2026-10-02 — Webacy "DD" vault monitor (dapp.webacy.com/vaults; dd.xyz) — the closest competitor found
+- **Source**: dapp.webacy.com/vaults (dd.xyz 301-redirects there) read from its page bundle; docs.webacy.com (llms.txt,
+  vault-ratings, v3 overview / detail schema, framework methodology, API intro); the OpenAPI spec (540 KB); the PUBLIC
+  `GET https://api.webacy.com/v3/framework` (no key). ⚠️ Per-vault data was NOT read: the API needs a key (or x402), and
+  the dashboard's `/api/vaults*` routes return a Cloudflare 403 to scripts (not bypassed).
+- **Claim**: "ERC-4626 vault risk monitoring" — composite 0–100 risk score → letter grade A+–F, listing verdict,
+  withdrawal state, % TVL withdrawable, large-redemption alerts, 90-day history.
+- **Checked**, against our four criteria:
+  - **(a) who can touch:** PARTIAL, as weighted sub-scores (EOA vs multisig + threshold, proxy/upgradeable, timelock
+    present/sufficient "7-day = gold standard", pause, pending admin change, curator identity/discretion, ownership
+    transfers). No per-power timelock / abdication / current value seen.
+  - **(b) out right now:** YES as an estimate: `pct_tvl_withdrawable`, `withdrawal_state`. Bundle definitions: Morpho =
+    "idle market liquidity plus vault buffer, capped at TVL"; lending = "1 − utilization"; Lagoon = "safe asset balance".
+  - **(c) not-checked:** NO per vault. `coverage` counts FRAMEWORK criteria (live: 42 defined, 39 live); per vault only
+    `drivers_complete` + per-criterion `data_quality.confidence`. Unknowns are SCORED: "Unknown / unverified" oracle = 40
+    ("Can't assess what isn't disclosed"); unverified code +65; "a category only appears on a vault when its signal is
+    present". Fail-closed only at RESPONSE level (4xx/5xx/`stale`).
+  - **(d) signed / re-checkable:** NO. Nothing in the spec signs a rating; the only signing is webhook HMAC (shared
+    secret). Evidence values per criterion, no block / no re-runnable reads.
+  - **Large Redemptions:** every 6 h, 24 h of `Withdraw` events (2 h Arbitrum, 6 h BSC) across 600+ vaults with TVL ≥
+    $500K; flagged when one wallet redeems > $500K or > 1% TVL. Exit ACTIVITY after the fact, not exit ABILITY.
+  - **Methodology:** weights, penalties, floors, grade bands published + a public taxonomy endpoint; sub-score curves
+    not fully specified, so a score is not reproducible from the docs.
+  - **Chains:** vault scoring eth, arb, base, opt, pol, bsc (docs say six and nine). **Arc: zero mentions in the spec.**
+  - **Refuses?** No: every vault gets a score, grade and verdict; vaults < $100K are only hidden on the dashboard.
+  - **Distribution:** the paid API answers 402 over **x402** (credit tokens) and ships an MCP server: agent-facing.
+- **⭐ MEASURED (T's priority): their published Morpho definition vs what a V2 redeem delivers.** A V2 vault redeems only
+  from idle + its LIQUIDITY ADAPTER; market liquidity is reachable only by `forceDeallocate` (a separate call, a
+  per-adapter penalty). Scan: 84 Ethereum V2 vaults > $1M (Morpho API) at block ~26105510: **12 have no liquidity
+  adapter, 4 of them 0% idle**; Base: 0 of 9 without an adapter.
+  - **Gauntlet WETH Prime `0x43fCd85E8D9D003D515f886891B7C742AC9f92da`** ($25.6M; Ethereum block 26105518, hash
+    0x23c1e07e…b500; ethereum-rpc.publicnode.com + rpc.mevblocker.io AGREE; code masked-matches vault-v2 2026-08-13):
+    totalAssets 9,494.573 WETH, idle 0, liquidity adapter unset, one MM adapter, 2 markets, penalty 0.001%.
+    - **Ours, an ordinary redeem: 0 WETH = 0.00%.** Simulated (`eth_call`, state override giving a test address ≈10 WETH
+      of shares at balanceOf slot 12; all four gates 0x0): withdraw 1 wei / 0.001 / 1 WETH → **REVERT `TransferReverted()`**
+      on both endpoints. Control: + 2 WETH idle → 1 WETH OK, 3 WETH reverts. The revert is the empty idle, not the setup.
+    - **Theirs, from their published formula:** idle + Σ min(vault position, market free liquidity), capped at TVL =
+      **1,597.69 WETH = 16.83%** (literal whole-market reading: 3,308.00 WETH = 34.84%).
+    - Force-deallocation route: 1,597.67 WETH net of penalty (16.83%).
+    - **Morpho's own API agrees with both of OUR numbers:** `liquidity` 0; `forceDeallocatableLiquidity` 1,597.689 WETH.
+  - **Sentora mWIN Main `0x7cBcfc4F64be199eDE6db1D916ddcdb69f666B57`** ($25.4M PYUSD, block 26105545, both agree; not
+    simulated: the mechanism is the one Gauntlet proves): ordinary redeem = idle **2,531 PYUSD = 0.01%**; their formula
+    **21.51%**; force route 21.29% net of a **1% penalty (≈54.7K PYUSD)**. Morpho API: `liquidity` 2,531.23,
+    `forceDeallocatable` 5,470,671.79: equal to ours.
+  - **What this shows, in their own terms:** their published Morpho definition yields a number an ordinary ERC-4626
+    redeem cannot deliver on these vaults; it is the force-deallocatable figure. ⚠️ **It does NOT show their OUTPUT is
+    wrong:** if they read Morpho's `liquidity` field they would publish 0 / 0.01%. Their output for these vaults was not
+    read (no key). On Gauntlet the force route costs 0.001%, so the gap there is the ROUTE (an agent calling standard
+    `withdraw` gets a revert); on Sentora it is also ≈54.7K PYUSD.
+- **Signal**: the trust layer is occupied as RATINGS, multi-chain, monitored, agent-facing over x402 + MCP. The empty
+  part is the checkable version.
+- **Changed**: the standing thesis line (above, revised 2026-10-02) and the roadmap's promise paragraph ("asked by
+  nobody" → asked, answered as unsigned numbers). Priorities unchanged; Stage 1 (DD Morpho V2) more urgent: if Webacy
+  adds Arc, it arrives with distribution. **Next proof that would settle the output question:** their
+  `pct_tvl_withdrawable` for Gauntlet WETH Prime (one browser view of the vault page, or one keyed API call), against
+  0 measured.
