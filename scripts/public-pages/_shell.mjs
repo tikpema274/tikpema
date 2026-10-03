@@ -60,7 +60,12 @@ export function fmtUnits6(raw) {
   return `${whole.toLocaleString("en-US")}.${cents.toString().padStart(2, "0")}`;
 }
 
-export const isoUtc = (unixSeconds) => new Date(Number(unixSeconds) * 1000).toISOString().replace(".000Z", "Z");
+/** ⭐ THE ONE DATE FORMAT on every evidence page: "2026-10-02 20:23 UTC" (T, 2026-10-03). Every date a reader sees goes
+ *  through this; test:evidence fails on an ISO "T…Z" stamp in visible text. */
+export const fmtUtc = (unixSeconds) => new Date(Number(unixSeconds) * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+/** Same format from an ISO string (e.g. a build's verifiedAt). */
+export const fmtUtcIso = (iso) => fmtUtc(Date.parse(iso) / 1000);
+export const isoUtc = fmtUtc; // legacy name, same single format
 
 /**
  * The two answer states. ⭐ SAME VISUAL WEIGHT: a "not established" row is not an error (no red) and not
@@ -75,8 +80,13 @@ export const mark = {
 /** A collapsible block of commands. */
 export function commands(list) {
   if (!list.length) return "";
+  // ⛔ EVERY COMMAND STATES ITS ANSWER (T, 2026-10-03): running a command needs nothing unstated; CHECKING its answer
+  // must not either. A command with no expected answer hands the reader raw hex and leaves the decoding to them.
+  for (const c of list) {
+    if (!c.expect || !c.read) throw new Error(`commands(): "${c.label}" has no ${!c.expect ? "expected answer" : "how-to-read line"}; every printed command must state both`);
+  }
   return `<details class="cmds"><summary>Check this yourself (${list.length} command${list.length === 1 ? "" : "s"})</summary>
-${list.map((c) => `<div class="cmd">${c.label ? `<div class="cmd-label">${esc(c.label)}</div>` : ""}<pre><code>${esc(c.command)}</code></pre>${c.expect ? `<div class="cmd-expect">Expected: <code>${esc(c.expect)}</code></div>` : ""}</div>`).join("\n")}
+${list.map((c) => `<div class="cmd">${c.label ? `<div class="cmd-label">${esc(c.label)}</div>` : ""}<pre><code>${esc(c.command)}</code></pre><div class="cmd-expect">Expected: <code>${esc(c.expect)}</code></div><div class="cmd-read">How to read it: ${esc(c.read)}</div></div>`).join("\n")}
 </details>`;
 }
 
@@ -102,17 +112,21 @@ export function ageOf(blockTs, nowMs, staleAfterDays) {
 /**
  * The "as of" line, the banner slot and the script that fills them.
  * @param blockTs   unix seconds of the block the data describes
- * @param asOfHtml  the always-visible sentence (no JS needed), e.g. "Report from block 1 at <date>"
+ * @param asOfHtml  the always-visible sentence (no JS needed). It MUST contain "{age}" exactly once, at the point the age
+ *                  belongs (T, 2026-10-03): the age is placed inside the sentence it qualifies, never appended after
+ *                  whatever happens to come last.
+ * @param afterHtml an optional separate sentence, in its own paragraph, that the age does NOT apply to
  * @param staleHtml the banner body; `{age}` is replaced in the browser with e.g. "9 days old"
  */
-export function ageBlock({ blockTs, asOfHtml, staleHtml, staleAfterDays = STALE_AFTER_DAYS }) {
-  return `<p class="asof" data-block-ts="${Number(blockTs)}" data-stale-days="${Number(staleAfterDays)}">${asOfHtml}<span class="age-rel"></span></p>
+export function ageBlock({ blockTs, asOfHtml, afterHtml = "", staleHtml, staleAfterDays = STALE_AFTER_DAYS }) {
+  if (asOfHtml.split("{age}").length !== 2) throw new Error('ageBlock(): asOfHtml must contain "{age}" exactly once');
+  return `<p class="asof" data-block-ts="${Number(blockTs)}" data-stale-days="${Number(staleAfterDays)}">${asOfHtml.replace("{age}", '<span class="age-rel"></span>')}</p>${afterHtml ? `\n<p class="asof">${afterHtml}</p>` : ""}
 <div class="stale" hidden data-template="${esc(staleHtml)}"></div>
 <script>(function(){var ageOf=${ageOf.toString()};
 var el=document.querySelector("[data-block-ts]");if(!el)return;
 var a=ageOf(el.getAttribute("data-block-ts"),Date.now(),Number(el.getAttribute("data-stale-days")));
 if(a.days===null)return;
-el.querySelector(".age-rel").textContent=" ("+a.text+" by this device's clock)";
+el.querySelector(".age-rel").textContent=", "+a.text+" by this device's clock";
 if(a.stale){var b=document.querySelector(".stale");b.innerHTML=b.getAttribute("data-template").split("{age}").join(a.text);b.hidden=false;}
 })();</script>`;
 }
@@ -138,7 +152,9 @@ a{color:var(--amber)}
 .notice p{margin:.3em 0}
 .prov{background:var(--ink2);border:1px solid var(--line);padding:12px 16px;margin:16px 0}
 .prov p{margin:.4em 0}
-.counts{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9rem}
+.summary{margin:16px 0}
+.summary p{margin:.35em 0}
+.r-count{color:var(--dim);font-size:.95em}
 .row{border:1px solid var(--line);padding:12px 16px;margin:10px 0;background:var(--ink)}
 .row.not{border-style:dashed}
 .row p{margin:.35em 0}
@@ -149,7 +165,8 @@ a{color:var(--amber)}
 details.cmds{margin:.6em 0 0}
 details.cmds summary{cursor:pointer;color:var(--amber);font-size:.92em}
 .cmd{margin:.6em 0}
-.cmd-label,.cmd-expect{font-size:.88em;color:var(--dim)}
+.cmd-label,.cmd-expect,.cmd-read{font-size:.88em;color:var(--dim)}
+.howto{font-size:.92em;border-left:3px solid var(--amber);padding:6px 12px;margin:16px 0}
 pre{background:var(--ink2);border:1px solid var(--line);padding:10px;overflow-x:auto;margin:.3em 0;white-space:pre-wrap;word-break:break-all}
 blockquote{margin:.6em 0;padding:0 0 0 12px;border-left:2px solid var(--line);color:var(--dim)}
 table{border-collapse:collapse;width:100%;font-size:.92em}
@@ -157,6 +174,17 @@ td,th{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertic
 footer .not-this{color:var(--dim)}
 footer{margin-top:3em;padding-top:1em;border-top:1px solid var(--line);color:var(--dim);font-size:.9em}
 `;
+
+/** The one line a stranger needs before the first command (T, 2026-10-03). Inserted ONCE, directly above the first
+ *  command block, so it sits where the reader first needs it. */
+export const HOWTO_RUN = "Each command needs only curl in a macOS or Linux terminal (on Windows: WSL or Git Bash). No key, no account, no settings.";
+export function withHowTo(body) {
+  const i = body.indexOf('<details class="cmds">');
+  if (i === -1) return body;
+  const j = body.lastIndexOf('<div class="row', i);
+  const at = j === -1 ? i : j;
+  return body.slice(0, at) + `<p class="howto">${esc(HOWTO_RUN)}</p>\n` + body.slice(at);
+}
 
 export function page({ title, description, body }) {
   return `<!doctype html>
@@ -171,7 +199,7 @@ export function page({ title, description, body }) {
 </head>
 <body>
 <main>
-${body}
+${withHowTo(body)}
 </main>
 </body>
 </html>

@@ -1,5 +1,5 @@
 {
- "builtAt": "2026-10-02T20:23:46.326Z",
+ "builtAt": "2026-10-03T00:24:51.686Z",
  "endpoints": [
   "https://rpc.mainnet.arc.io",
   "https://arc-mainnet.drpc.org"
@@ -18,11 +18,11 @@
   "senderCode": "0x",
   "senderIsAllocator": true,
   "totalAssetsAt": "84807145536819",
-  "now": "23935676",
-  "nowTimestamp": 1790972621,
+  "now": "23964188",
+  "nowTimestamp": 1790987087,
   "adapterNow": "0x0000000000000000000000000000000000000000",
   "idleNow": "0",
-  "totalAssetsNow": "89710356407860",
+  "totalAssetsNow": "89710439741064",
   "withdrawRevert": "0xace2a47e",
   "withdrawOk": false,
   "controlOk": true,
@@ -317,24 +317,24 @@
   {
    "method": "eth_getBlockByNumber",
    "params": [
-    "0x16d3abc",
+    "0x16daa1c",
     false
    ],
    "answer": {
     "result": {
-     "hash": "0xd15df9fda2fe09a17da22e0415b334b0b2f003eafad14fe318f6744f2c419d95",
-     "parentHash": "0x7bdc7baf8c096fc3972a2b05181418296605fe1b3dab2096ad85ccda5166f4a0",
+     "hash": "0xc66b99b48940e5b463356c590dcc33509c134ed5332a9f0df394ff30ccd0f267",
+     "parentHash": "0x4b5cb75705035bdc511eac02321dcec7d526a50965f113ad0635d6dcacaa81cb",
      "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
-     "miner": "0x0ef7b969d15ea587ac141a91ce766aed1a06143e",
-     "stateRoot": "0x6e11f23ae893ff79067e47e9ca780db4c8f682dae740c911bc440e9caf1024cc",
-     "transactionsRoot": "0xba600599b0bc5c41f215900733cddbc8a8a651dd5c03df77705258af246a655b",
-     "receiptsRoot": "0x956fb5990bf3926eb0973b4a17e9b95ee47068ad818b4f1581d51e20c1f95ec3",
-     "logsBloom": "0x00090000000000000000000402000000000040100000000000000100100100000000010000000208000000000001000000000000040000000000000000080000000000200010400000000108000400000100000000000020008100000000800000000000000008002000000000000000000000001000000000000010000000400020000000800002800000000090020000080000080000000100000000000000000000000000000000000020000400800000000000000000000000080000000000000402000000000008001000200000020000000000000040000044000000400800000000000000004400200180000000000004000001000000000002000400",
+     "miner": "0xd9153d9a997626d812a18dd64ee1eb1d45454123",
+     "stateRoot": "0x611b0989fc66e9ae5aa3a513f6ebb741313b039ba1de3a356d5800e963326566",
+     "transactionsRoot": "0x4436ab7a4fd03a9abb57449a451b038be80e8eb92865e8ba1a9d2dc19d441595",
+     "receiptsRoot": "0xb82c8ec854735bbbd2c86fa7fea2f2ffc7adb111c1d623b7959a8710f4c4ad0b",
+     "logsBloom": "0x000000400000000800000000000000000000000040000400000200000000000000000400000000100000000200200000000000008400000000000000022000180000020401404000000040080000108000040000014008200080000180000001000000000200010020000000000008000000000000000400000040100000000200000008000000000000000030020200000800010000000000000000000000008220000200000002000000200800000000000000002800000000000000008000005004020000001020080010000000000008000000001000000000020002a8400014000000000014044000000100000000000004000000410000000002000100",
      "difficulty": "0x0",
-     "number": "0x16d3abc",
+     "number": "0x16daa1c",
      "gasLimit": "0x1c9c380",
-     "gasUsed": "0xa571a",
-     "timestamp": "0x6ac012cd",
+     "gasUsed": "0x85aa8",
+     "timestamp": "0x6ac04b4f",
      "extraData": "0x00000004a817c800",
      "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
      "nonce": "0x0000000000000000",
@@ -342,16 +342,16 @@
      "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
      "blobGasUsed": "0x0",
      "excessBlobGas": "0x0",
-     "parentBeaconBlockRoot": "0x7bdc7baf8c096fc3972a2b05181418296605fe1b3dab2096ad85ccda5166f4a0",
+     "parentBeaconBlockRoot": "0x4b5cb75705035bdc511eac02321dcec7d526a50965f113ad0635d6dcacaa81cb",
      "requestsHash": "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-     "size": "0x135c",
+     "size": "0xb87",
      "uncles": [],
      "transactions": [
-      "0xd2ace6481ae874d67952242031ecf714b0b6d9d7802c359501a8d83a108b7c94",
-      "0x10a51008ef691602fb38b779b39b93e28c3fe4bb1c67d30083f275cfaf4e2632",
-      "0x612e958d7ef2f4722ab5cb334f05215b54e7fcf1b892ecde7932d3dedca144d3",
-      "0x5fb73fcfc074672f779382b6182341f9ea9e00dfa4b8be640e3b22475d58bcbb",
-      "0xbeb6ac7b20c0607a9508ca7b4e6c9fb292e6d39351fe813358cfddf779f66795"
+      "0x676bbc358b48e2441295239b67e0c3816d5698a8aacf5682e4f9ca4ec5e53072",
+      "0x66c09ec105714d76cf9453949dbd067c2ccaf50638896660374c8147714e5f00",
+      "0x900ee39123a2ededfd7280c0f253cc116cdbd40bb7d6079e80f01dccfc030f84",
+      "0x0d30bb61856a454d47d737587258d14bc690b32c0a2c2d5e1ede8557d56b7463",
+      "0x5abfea3408d7afa017f49a70f554b45845b8024fe81657045508fc31582cdaa3"
      ],
      "withdrawals": []
     }
@@ -359,11 +359,11 @@
    "commands": [
     {
      "endpoint": "https://rpc.mainnet.arc.io",
-     "command": "curl -s -X POST https://rpc.mainnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x16d3abc\",false]}'"
+     "command": "curl -s -X POST https://rpc.mainnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x16daa1c\",false]}'"
     },
     {
      "endpoint": "https://arc-mainnet.drpc.org",
-     "command": "curl -s -X POST https://arc-mainnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x16d3abc\",false]}'"
+     "command": "curl -s -X POST https://arc-mainnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x16daa1c\",false]}'"
     }
    ]
   },
@@ -374,7 +374,7 @@
      "to": "0x8E357432CC12ff425c36432F312968aEb16112AF",
      "data": "0xad468d11"
     },
-    "0x16d3abc"
+    "0x16daa1c"
    ],
    "answer": {
     "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
@@ -382,11 +382,11 @@
    "commands": [
     {
      "endpoint": "https://rpc.mainnet.arc.io",
-     "command": "curl -s -X POST https://rpc.mainnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0xad468d11\"},\"0x16d3abc\"]}'"
+     "command": "curl -s -X POST https://rpc.mainnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0xad468d11\"},\"0x16daa1c\"]}'"
     },
     {
      "endpoint": "https://arc-mainnet.drpc.org",
-     "command": "curl -s -X POST https://arc-mainnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0xad468d11\"},\"0x16d3abc\"]}'"
+     "command": "curl -s -X POST https://arc-mainnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0xad468d11\"},\"0x16daa1c\"]}'"
     }
    ]
   },
@@ -397,7 +397,7 @@
      "to": "0x3600000000000000000000000000000000000000",
      "data": "0x70a082310000000000000000000000008e357432cc12ff425c36432f312968aeb16112af"
     },
-    "0x16d3abc"
+    "0x16daa1c"
    ],
    "answer": {
     "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
@@ -405,11 +405,11 @@
    "commands": [
     {
      "endpoint": "https://rpc.mainnet.arc.io",
-     "command": "curl -s -X POST https://rpc.mainnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x3600000000000000000000000000000000000000\",\"data\":\"0x70a082310000000000000000000000008e357432cc12ff425c36432f312968aeb16112af\"},\"0x16d3abc\"]}'"
+     "command": "curl -s -X POST https://rpc.mainnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x3600000000000000000000000000000000000000\",\"data\":\"0x70a082310000000000000000000000008e357432cc12ff425c36432f312968aeb16112af\"},\"0x16daa1c\"]}'"
     },
     {
      "endpoint": "https://arc-mainnet.drpc.org",
-     "command": "curl -s -X POST https://arc-mainnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x3600000000000000000000000000000000000000\",\"data\":\"0x70a082310000000000000000000000008e357432cc12ff425c36432f312968aeb16112af\"},\"0x16d3abc\"]}'"
+     "command": "curl -s -X POST https://arc-mainnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x3600000000000000000000000000000000000000\",\"data\":\"0x70a082310000000000000000000000008e357432cc12ff425c36432f312968aeb16112af\"},\"0x16daa1c\"]}'"
     }
    ]
   },
@@ -420,19 +420,19 @@
      "to": "0x8E357432CC12ff425c36432F312968aEb16112AF",
      "data": "0x01e1d114"
     },
-    "0x16d3abc"
+    "0x16daa1c"
    ],
    "answer": {
-    "result": "0x0000000000000000000000000000000000000000000000000000519751ed2634"
+    "result": "0x0000000000000000000000000000000000000000000000000000519756e4b688"
    },
    "commands": [
     {
      "endpoint": "https://rpc.mainnet.arc.io",
-     "command": "curl -s -X POST https://rpc.mainnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0x01e1d114\"},\"0x16d3abc\"]}'"
+     "command": "curl -s -X POST https://rpc.mainnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0x01e1d114\"},\"0x16daa1c\"]}'"
     },
     {
      "endpoint": "https://arc-mainnet.drpc.org",
-     "command": "curl -s -X POST https://arc-mainnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0x01e1d114\"},\"0x16d3abc\"]}'"
+     "command": "curl -s -X POST https://arc-mainnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0x01e1d114\"},\"0x16daa1c\"]}'"
     }
    ]
   },
@@ -443,19 +443,19 @@
      "to": "0x8E357432CC12ff425c36432F312968aEb16112AF",
      "data": "0x0a28a47700000000000000000000000000000000000000000000000000000000000f4240"
     },
-    "0x16d3abc"
+    "0x16daa1c"
    ],
    "answer": {
-    "result": "0x0000000000000000000000000000000000000000000000000de228cc3084517f"
+    "result": "0x0000000000000000000000000000000000000000000000000de2254e1c5f8207"
    },
    "commands": [
     {
      "endpoint": "https://rpc.mainnet.arc.io",
-     "command": "curl -s -X POST https://rpc.mainnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0x0a28a47700000000000000000000000000000000000000000000000000000000000f4240\"},\"0x16d3abc\"]}'"
+     "command": "curl -s -X POST https://rpc.mainnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0x0a28a47700000000000000000000000000000000000000000000000000000000000f4240\"},\"0x16daa1c\"]}'"
     },
     {
      "endpoint": "https://arc-mainnet.drpc.org",
-     "command": "curl -s -X POST https://arc-mainnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0x0a28a47700000000000000000000000000000000000000000000000000000000000f4240\"},\"0x16d3abc\"]}'"
+     "command": "curl -s -X POST https://arc-mainnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0x0a28a47700000000000000000000000000000000000000000000000000000000000f4240\"},\"0x16daa1c\"]}'"
     }
    ]
   },
@@ -467,11 +467,11 @@
      "data": "0xb460af9400000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000000000dead",
      "from": "0x000000000000000000000000000000000000dEaD"
     },
-    "0x16d3abc",
+    "0x16daa1c",
     {
      "0x8E357432CC12ff425c36432F312968aEb16112AF": {
       "stateDiff": {
-       "0x45117a726ea4f344045dc210793664a28d2d320b7e03f6bffdae553d24c3586c": "0x0000000000000000000000000000000000000000000000001bc451986108a2fe"
+       "0x45117a726ea4f344045dc210793664a28d2d320b7e03f6bffdae553d24c3586c": "0x0000000000000000000000000000000000000000000000001bc44a9c38bf040e"
       }
      }
     }
@@ -485,11 +485,11 @@
    "commands": [
     {
      "endpoint": "https://rpc.mainnet.arc.io",
-     "command": "curl -s -X POST https://rpc.mainnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0xb460af9400000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000000000dead\",\"from\":\"0x000000000000000000000000000000000000dEaD\"},\"0x16d3abc\",{\"0x8E357432CC12ff425c36432F312968aEb16112AF\":{\"stateDiff\":{\"0x45117a726ea4f344045dc210793664a28d2d320b7e03f6bffdae553d24c3586c\":\"0x0000000000000000000000000000000000000000000000001bc451986108a2fe\"}}}]}'"
+     "command": "curl -s -X POST https://rpc.mainnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0xb460af9400000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000000000dead\",\"from\":\"0x000000000000000000000000000000000000dEaD\"},\"0x16daa1c\",{\"0x8E357432CC12ff425c36432F312968aEb16112AF\":{\"stateDiff\":{\"0x45117a726ea4f344045dc210793664a28d2d320b7e03f6bffdae553d24c3586c\":\"0x0000000000000000000000000000000000000000000000001bc44a9c38bf040e\"}}}]}'"
     },
     {
      "endpoint": "https://arc-mainnet.drpc.org",
-     "command": "curl -s -X POST https://arc-mainnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0xb460af9400000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000000000dead\",\"from\":\"0x000000000000000000000000000000000000dEaD\"},\"0x16d3abc\",{\"0x8E357432CC12ff425c36432F312968aEb16112AF\":{\"stateDiff\":{\"0x45117a726ea4f344045dc210793664a28d2d320b7e03f6bffdae553d24c3586c\":\"0x0000000000000000000000000000000000000000000000001bc451986108a2fe\"}}}]}'"
+     "command": "curl -s -X POST https://arc-mainnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0xb460af9400000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000000000dead\",\"from\":\"0x000000000000000000000000000000000000dEaD\"},\"0x16daa1c\",{\"0x8E357432CC12ff425c36432F312968aEb16112AF\":{\"stateDiff\":{\"0x45117a726ea4f344045dc210793664a28d2d320b7e03f6bffdae553d24c3586c\":\"0x0000000000000000000000000000000000000000000000001bc44a9c38bf040e\"}}}]}'"
     }
    ]
   },
@@ -501,27 +501,27 @@
      "data": "0xb460af9400000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000000000dead",
      "from": "0x000000000000000000000000000000000000dEaD"
     },
-    "0x16d3abc",
+    "0x16daa1c",
     {
      "0x8E357432CC12ff425c36432F312968aEb16112AF": {
       "stateDiff": {
-       "0x45117a726ea4f344045dc210793664a28d2d320b7e03f6bffdae553d24c3586c": "0x0000000000000000000000000000000000000000000000001bc451986108a2fe"
+       "0x45117a726ea4f344045dc210793664a28d2d320b7e03f6bffdae553d24c3586c": "0x0000000000000000000000000000000000000000000000001bc44a9c38bf040e"
       },
       "balance": "0x1bc16d674ec80000"
      }
     }
    ],
    "answer": {
-    "result": "0x0000000000000000000000000000000000000000000000000de228c6ff26e984"
+    "result": "0x0000000000000000000000000000000000000000000000000de22548eb03b963"
    },
    "commands": [
     {
      "endpoint": "https://rpc.mainnet.arc.io",
-     "command": "curl -s -X POST https://rpc.mainnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0xb460af9400000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000000000dead\",\"from\":\"0x000000000000000000000000000000000000dEaD\"},\"0x16d3abc\",{\"0x8E357432CC12ff425c36432F312968aEb16112AF\":{\"stateDiff\":{\"0x45117a726ea4f344045dc210793664a28d2d320b7e03f6bffdae553d24c3586c\":\"0x0000000000000000000000000000000000000000000000001bc451986108a2fe\"},\"balance\":\"0x1bc16d674ec80000\"}}]}'"
+     "command": "curl -s -X POST https://rpc.mainnet.arc.io -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0xb460af9400000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000000000dead\",\"from\":\"0x000000000000000000000000000000000000dEaD\"},\"0x16daa1c\",{\"0x8E357432CC12ff425c36432F312968aEb16112AF\":{\"stateDiff\":{\"0x45117a726ea4f344045dc210793664a28d2d320b7e03f6bffdae553d24c3586c\":\"0x0000000000000000000000000000000000000000000000001bc44a9c38bf040e\"},\"balance\":\"0x1bc16d674ec80000\"}}]}'"
     },
     {
      "endpoint": "https://arc-mainnet.drpc.org",
-     "command": "curl -s -X POST https://arc-mainnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0xb460af9400000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000000000dead\",\"from\":\"0x000000000000000000000000000000000000dEaD\"},\"0x16d3abc\",{\"0x8E357432CC12ff425c36432F312968aEb16112AF\":{\"stateDiff\":{\"0x45117a726ea4f344045dc210793664a28d2d320b7e03f6bffdae553d24c3586c\":\"0x0000000000000000000000000000000000000000000000001bc451986108a2fe\"},\"balance\":\"0x1bc16d674ec80000\"}}]}'"
+     "command": "curl -s -X POST https://arc-mainnet.drpc.org -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x8E357432CC12ff425c36432F312968aEb16112AF\",\"data\":\"0xb460af9400000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000000000dead\",\"from\":\"0x000000000000000000000000000000000000dEaD\"},\"0x16daa1c\",{\"0x8E357432CC12ff425c36432F312968aEb16112AF\":{\"stateDiff\":{\"0x45117a726ea4f344045dc210793664a28d2d320b7e03f6bffdae553d24c3586c\":\"0x0000000000000000000000000000000000000000000000001bc44a9c38bf040e\"},\"balance\":\"0x1bc16d674ec80000\"}}]}'"
     }
    ]
   }

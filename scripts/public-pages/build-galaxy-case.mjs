@@ -115,7 +115,49 @@ export function assertFacts(f) {
 }
 
 export function renderCase(f) {
-  const cmd = (k, label, expect) => f.reads[k].commands.map((c) => ({ label: `${label} — ${new URL(c.endpoint).host}`, command: c.command, expect }));
+  // ⭐ EVERY COMMAND STATES ITS ANSWER (T, 2026-10-03): the RAW result the build got (both endpoints agreed on it) and how
+  // to read it. Derived from the read itself, never typed; a key with no explanation THROWS (commands() refuses too).
+  const cmd = (k, label) => {
+    const { expect, read } = explain(k);
+    return f.reads[k].commands.map((c) => ({ label: `${label} — ${new URL(c.endpoint).host}`, command: c.command, expect, read }));
+  };
+  const raw = (k) => f.reads[k].answer.result;
+  const word = (x) => "0x" + BigInt(x).toString(16).padStart(64, "0");
+  const addrRead = (k) => {
+    const a = "0x" + String(raw(k)).slice(-40);
+    return BigInt(a) === 0n ? "an address, left-padded to 32 bytes. All zeros: the zero address, meaning no liquidity adapter is set."
+      : `an address, left-padded to 32 bytes: the last 40 hex characters are ${a}, the liquidity adapter.`;
+  };
+  const usdcRead = (k, what) => `${what}: a hex integer. Convert it to decimal and divide by 1,000,000 (USDC has 6 decimals): ${raw(k)} = ${fmtUnits6(BigInt(raw(k)))} USDC.`;
+  function explain(k) {
+    switch (k) {
+      case "adapterBefore": case "adapterAfter": case "adapterNow":
+        return { expect: raw(k), read: addrRead(k) };
+      case "totalAssetsAt": case "totalAssetsNow":
+        return { expect: raw(k), read: usdcRead(k, "totalAssets()") };
+      case "idleNow":
+        return { expect: raw(k), read: usdcRead(k, "the vault's USDC balance (its idle cash)") };
+      case "logs": {
+        const l = f.reads.logs.answer.result.find((x) => x.transactionHash.toLowerCase() === TX);
+        return { expect: `a log with transactionHash ${TX}, topics [${l.topics.join(", ")}]`,
+          read: `topics[0] is the event's signature hash (SetLiquidityAdapterAndData), topics[1] the sender (left-padded), topics[2] the new adapter (all zeros: none), topics[3] the hash of the new data (${l.topics[3]} is the hash of empty data).` };
+      }
+      case "receipt": {
+        const rc = f.reads.receipt.answer.result;
+        return { expect: `"status":"${rc.status}", "from":"${rc.from}", "to":"${rc.to}"`, read: "status 0x1 means the transaction succeeded; from is the address that sent it; to is the vault, so it was a direct call (no contract in between)." };
+      }
+      case "senderCode":
+        return { expect: raw(k), read: "0x means there is no code at the sender's address: a single key, not a contract or a multisig." };
+      case "isAllocator":
+        return { expect: raw(k), read: "a true/false value, left-padded to 32 bytes: ending in 1 means true (the sender was an allocator); all zeros would mean false." };
+      case "withdraw":
+        return { expect: `{"code":3,"message":"execution reverted","data":"${f.withdrawRevert}"} in place of a result`, read: `${TRANSFER_REVERTED} is the code for TransferReverted(): the vault tried to pay 1 USDC from a balance that was not there. Nothing is written to the chain; the shares exist only inside this call.` };
+      case "control":
+        return { expect: raw(k) ?? "a result, no error", read: "a result, not a revert: with 2 USDC of idle cash added, the same withdrawal goes through. The hex integer is the number of shares burned." };
+      default:
+        throw new Error(`build-galaxy-case: no expected answer for read "${k}"; refusing to print an undecoded command`);
+    }
+  }
   const z = "0x0000000000000000000000000000000000000000";
   const routeNow = f.adapterNow.toLowerCase() === z;
   const row = (state, q, body, cmds) => `<div class="row${state === "not" ? " not" : ""}">${state === "not" ? mark.notEstablished : mark.established}
@@ -126,7 +168,8 @@ export function renderCase(f) {
 <p class="mono">${esc(VAULT)} · chain ${esc(String(f.chainId))}</p>
 ${ageBlock({
   blockTs: f.nowTimestamp,
-  asOfHtml: `Current-state reads from block ${fmtInt(f.now)}, at ${esc(isoUtc(f.nowTimestamp))}. The removal itself (block ${fmtInt(BLOCK)}) is history and does not age.`,
+  asOfHtml: `The current-state reads below are from block ${fmtInt(f.now)} (${esc(isoUtc(f.nowTimestamp))}){age}.`,
+  afterHtml: `The removal at block ${fmtInt(BLOCK)} (${esc(isoUtc(f.blockTimestamp))}) is a past event. Those facts do not change with time.`,
   staleHtml: `The reads under "At block ${fmtInt(f.now)}" are {age}. Since then the route may have been restored and the vault's balances will have moved. The removal at block ${fmtInt(BLOCK)} is unaffected.`,
 })}
 <div class="notice">
@@ -143,7 +186,7 @@ ${row("est", "What changed it?",
   [...cmd("logs", `the vault's SetLiquidityAdapterAndData logs at block ${fmtInt(BLOCK)}`), ...cmd("receipt", "the transaction receipt")])}
 ${row("est", "Who sent it?",
   `<p><code>${esc(f.sender)}</code>: an address with no code (a single key, not a contract or a multisig), and an allocator of this vault at block ${fmtInt(BLOCK - 1n)}.</p>`,
-  [...cmd("senderCode", `the sender's code at block ${fmtInt(BLOCK)}`, "0x (no code)"), ...cmd("isAllocator", `isAllocator(sender) at block ${fmtInt(BLOCK - 1n)}`, "…0001 (true)")])}
+  [...cmd("senderCode", `the sender's code at block ${fmtInt(BLOCK)}`), ...cmd("isAllocator", `isAllocator(sender) at block ${fmtInt(BLOCK - 1n)}`)])}
 ${row("est", "How much did the vault hold at that block?",
   `<p>${esc(fmtUnits6(f.totalAssetsAt))} USDC (totalAssets).</p>`, cmd("totalAssetsAt", `totalAssets() at block ${fmtInt(BLOCK)}`))}
 
@@ -179,7 +222,7 @@ ${row("est", "Would an ordinary withdrawal of 1 USDC go through?",
     ? `<p>Yes, in a simulation at this block.</p>`
     : `<p>No. Simulated at this block, a withdrawal of 1 USDC by a holder reverts with <code>${esc(f.withdrawRevert)}</code>${f.withdrawRevert === TRANSFER_REVERTED ? " (<code>TransferReverted()</code>)" : ""}. ${f.controlOk ? "The same call with 2 USDC of idle cash added goes through, so the revert is the empty idle balance, not the simulation." : "⚠️ The control (the same call with 2 USDC of idle cash added) also reverted, so this simulation does not isolate the cause."}</p>
 <p class="sub">How the simulation works: a stand-in holder (<code>${esc(PROBE)}</code>) is given vault shares by an <code>eth_call</code> state override (the vault's <code>balanceOf</code> mapping, storage slot 12 in this build). Nothing is written to the chain; anyone can run it.</p>`,
-  [...cmd("withdraw", `withdraw(1 USDC) by the stand-in holder at block ${fmtInt(f.now)}`, `a revert with data ${TRANSFER_REVERTED}`), ...cmd("control", "control: the same call with 2 USDC of idle cash added", "a result (the shares burned), no revert")])}
+  [...cmd("withdraw", `withdraw(1 USDC) by the stand-in holder at block ${fmtInt(f.now)}`), ...cmd("control", "control: the same call with 2 USDC of idle cash added")])}
 
 <h2>What this record does not establish</h2>
 ${row("not", "Is the money gone?",

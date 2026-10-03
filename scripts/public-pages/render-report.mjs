@@ -16,7 +16,11 @@
 // ⛔ AN UNKNOWN SCHEMA VERSION OR PROFILE REFUSES TO RENDER. A renderer that silently skipped a field it
 // does not know (0.4.0's powersV2, exitPath) would turn an absence into a clean page.
 
-import { esc, page, mark, commands, curlFor, fmtInt, ageBlock } from "./_shell.mjs";
+import { esc, page, mark, commands, curlFor, fmtInt, ageBlock, fmtUtc, fmtUtcIso } from "./_shell.mjs";
+import { keccak256, toHex } from "viem";
+import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
+
+const selOf = (sig) => keccak256(toHex(sig)).slice(2, 10);
 
 /** What each schema version does NOT measure. Keyed by version; a version not listed refuses. */
 export const SCHEMA_SCOPE = Object.freeze({
@@ -73,8 +77,43 @@ export function renderReportPage(report, ctx) {
 
   const r = report;
   const readsById = new Map(r.reads.map((x) => [x.readId, x]));
-  const cmdsForRead = (ids) => ids.map((id) => readsById.get(id)).filter(Boolean)
-    .map((x) => ({ label: `${x.method} via ${x.endpoint} at block ${fmtInt(r.subject.blockNumber)}`, command: x.reproduce }));
+  // ⭐ EVERY PRINTED READ STATES ITS ANSWER, derived from the SIGNED report's own fields (never typed): the code size and
+  // the implementation slot from shape.evidence, the owner from owner, the owner's code from owner.kind. `codeCtx` says
+  // which selectors a code read should show present or absent for the row it sits in. A read this cannot explain THROWS
+  // (commands() refuses a command without an answer), so a new read type cannot reach the page undecoded.
+  const subj = r.subject.address.toLowerCase();
+  const expectFor = (x, codeCtx) => {
+    const [a0, a1] = x.params;
+    if (x.method === "eth_getCode" && String(a0).toLowerCase() === subj) {
+      const bytes = r.shape?.evidence?.ownCodeBytes;
+      if (!Number.isInteger(bytes)) throw new Error("render-report: no ownCodeBytes to state the code read's answer");
+      const present = (codeCtx?.present ?? []).map((sg) => `${selOf(sg)} (${sg})`);
+      const absent = (codeCtx?.absent ?? []).map((sg) => `${selOf(sg)} (${sg})`);
+      return {
+        expect: `"0x" followed by ${fmtInt(bytes * 2)} hex characters (${fmtInt(bytes)} bytes of code)`,
+        read: present.length ? `the vault's deployed code. Search the output for ${present.join(", ")}: it appears, so the function exists in the code.`
+          : absent.length ? `the vault's deployed code. Search the output for each of ${absent.join(", ")}: none appears. A function reached some other way would not show up here.`
+          : "the vault's deployed code at the report's block; its length should match.",
+      };
+    }
+    if (x.method === "eth_getStorageAt" && String(a0).toLowerCase() === subj) {
+      const v = r.shape?.evidence?.implSlot;
+      if (!v) throw new Error("render-report: no implSlot to state the slot read's answer");
+      return { expect: v, read: /^0x0*$/.test(v) ? "32 bytes of storage at the EIP-1967 implementation slot. All zeros: no implementation address is stored there, so this is not an EIP-1967 proxy." : "32 bytes at the EIP-1967 implementation slot: the last 40 hex characters are the implementation address." };
+    }
+    if (x.method === "eth_call" && String(a0?.to).toLowerCase() === subj && a0?.data === "0x8da5cb5b") {
+      const o = r.owner?.address;
+      if (!o) throw new Error("render-report: no owner to state the owner() read's answer");
+      return { expect: "0x" + o.toLowerCase().replace(/^0x/, "").padStart(64, "0"), read: `owner() returns an address, left-padded to 32 bytes: the last 40 hex characters are the owner, ${o.toLowerCase()}.` };
+    }
+    if (x.method === "eth_getCode" && r.owner?.address && String(a0).toLowerCase() === r.owner.address.toLowerCase()) {
+      if (r.owner.kind !== "eoa") throw new Error("render-report: the owner is not an EOA; state its code answer before rendering");
+      return { expect: "0x", read: "0x means there is no code at the owner's address: it is a key, not a contract or a multisig." };
+    }
+    throw new Error(`render-report: no expected answer for read ${x.readId} (${x.method}); refusing to print an undecoded command`);
+  };
+  const cmdsForRead = (ids, codeCtx) => ids.map((id) => readsById.get(id)).filter(Boolean)
+    .map((x) => ({ label: `${x.method} via ${x.endpoint} at block ${fmtInt(r.subject.blockNumber)}`, command: x.reproduce, ...expectFor(x, codeCtx) }));
   const checkById = new Map(r.coverage.checked.map((c) => [c.id, c]));
   const idsOf = (c) => (c?.readIds ?? (c?.readId ? [c.readId] : []));
 
@@ -93,7 +132,7 @@ export function renderReportPage(report, ctx) {
     sec1.push(rowHtml("est", POWER_QUESTION[p.power] ?? p.power,
       `<p>Yes. The vault's code contains ${sigs}. <span class="reach">What it can reach: ${esc(p.severityReach)}.</span></p>
 <p>Attributed to the owner, <code>${esc(p.holder)}</code> (see "What we could not establish").</p>`,
-      cmdsForRead(idsOf(checkById.get("shape:code@address")))));
+      cmdsForRead(idsOf(checkById.get("shape:code@address")), { present: p.matched.map((m) => m.signature) })));
   }
   sec1.push(rowHtml("not", "Is the owner the only address that can use these powers?", `<p>${esc(scope.holderAttribution)}</p>`));
 
@@ -138,13 +177,26 @@ export function renderReportPage(report, ctx) {
   const perEndpoint = endpoints.map((e) => r.reads.filter((x) => x.endpoint === e).length);
   const agreedAll = r.sources?.integrity?.providerDisagreement === false;
   const tot = r.coverage.totals;
+  // ⭐⭐ TWO COUNTS THAT MUST NOT BE READ AS ONE (T, 2026-10-03). "13 checks · 13 concluded" sat on a page listing 10
+  // unanswered questions and read as completeness. So: QUESTIONS first, counted from THIS PAGE'S OWN ROWS (the marks
+  // actually rendered, never a typed number); READS second, from coverage.totals, saying what that number does NOT mean.
+  const allRows = [...sec1, ...sec2, ...sec3, ...sec4].join("\n");
+  const nNot = allRows.split(mark.notEstablished).length - 1;
+  const nEst = allRows.split(mark.established).length - 1;
+  const ranN = tot.checked + tot.notChecked;
+  const readsLine = tot.notChecked === 0
+    ? `Reading: the report ran ${ranN} checks against the chain, and all ${ranN} got an answer from ${endpoints.length === 2 ? "both endpoints" : `all ${endpoints.length} endpoints`}. That says the reads completed. It does not say the questions are answered.`
+    : `Reading: the report ran ${ranN} checks against the chain; ${tot.checked} got an answer and ${tot.notChecked} did not (each is listed below). Even a full set of answers would not mean the questions are answered.`;
+  const summary = `<div class="summary">
+<p class="q-count"><b>Of the ${nEst + nNot} questions on this page, ${nEst} ${nEst === 1 ? "is" : "are"} established and ${nNot} ${nNot === 1 ? "is" : "are"} not established.</b> Each one not established is shown with its reason.</p>
+<p class="r-count">${esc(readsLine)}</p>
+</div>`;
   const v = ctx.verification;
   const prov = `<div class="prov">
-<p><b>Read from ${esc(chainLabel(r))} at block ${fmtInt(r.subject.blockNumber)}</b>${ctx.blockTimestamp ? ` (produced ${esc(new Date(ctx.blockTimestamp * 1000).toISOString().replace(".000Z", " UTC"))}; this time was read from the chain by the page's build and is not part of the signed report)` : ""}.</p>
+<p><b>Read from ${esc(chainLabel(r))} at block ${fmtInt(r.subject.blockNumber)}</b>${ctx.blockTimestamp ? ` (produced ${esc(fmtUtc(ctx.blockTimestamp))}; this time was read from the chain by the page's build and is not part of the signed report)` : ""}.</p>
 <p>Every read went to ${endpoints.length} endpoints (${endpoints.map((e) => `<code>${esc(new URL(e).host)}</code>`).join(" and ")}), ${fmtInt(r.reads.length)} reads in all (${perEndpoint.join(" + ")}). The report requires ${esc(String(r.sources?.required ?? endpoints.length))} of them to agree before it states a value. ${agreedAll ? "On this report they agreed on every read." : "On this report they did not agree on every read; each disagreement is listed below."}</p>
 <p><b>Signed</b> by Tikpema's due-diligence agent, ERC-8004 agent <code>${esc(r.attestation.agentId)}</code> on Arc testnet, through the account that owns it (<code>${esc(r.attestation.verifyingContract)}</code>, ERC-1271). The signature is checked against the chain, not against a database of ours. ${r.subject.blockHash ? "It covers the block's hash and timestamp." : "It covers the block number, not the block's hash."}</p>
-<p>${v?.valid === true ? `When this page was built (${esc(ctx.verifiedAt)}), the signature checked <b>valid</b> on chain.` : `When this page was built, the signature did not check valid (${esc(v?.reason ?? "unknown")}).`}</p>
-<p class="counts">Checks run: ${tot.checked + tot.notChecked} · concluded: ${tot.checked} · did not conclude: ${tot.notChecked}</p>
+<p>${v?.valid === true ? `When this page was built (${esc(fmtUtcIso(ctx.verifiedAt))}), the signature checked <b>valid</b> on chain.` : `When this page was built, the signature did not check valid (${esc(v?.reason ?? "unknown")}).`}</p>
 </div>`;
 
   const att = r.attestation;
@@ -153,8 +205,8 @@ export function renderReportPage(report, ctx) {
 <p><b>1. One fact.</b> Each answer above has its commands: the exact read, at the report's block, on each endpoint. Paste one into a terminal and compare.</p>
 <p><b>2. The signature.</b> The report's canonical digest is <code>${esc(ctx.digest)}</code>. Ask the signing account whether it signed that digest, and ask the registry who owns agent ${esc(att.agentId)}:</p>
 ${commands([
-  { label: "isValidSignature(digest, signature) on the signing account", command: curlFor(ctx.identityRpc, "eth_call", [isValidCall, "latest"]), expect: "a result starting 0x1626ba7e (valid); anything else is not valid" },
-  { label: `ownerOf(${att.agentId}) on the ERC-8004 registry`, command: curlFor(ctx.identityRpc, "eth_call", [{ to: att.registry, data: "0x6352211e" + BigInt(att.agentId).toString(16).padStart(64, "0") }, "latest"]), expect: `the signing account, ${att.verifyingContract.toLowerCase()} (left-padded)` },
+  { label: "isValidSignature(digest, signature) on the signing account", command: curlFor(ctx.identityRpc, "eth_call", [isValidCall, "latest"]), expect: "a result starting 0x1626ba7e (valid); anything else is not valid", read: "0x1626ba7e is the ERC-1271 code for 'this account signed this digest'. It is asked now, so it answers whether the signature is valid now." },
+  { label: `ownerOf(${att.agentId}) on the ERC-8004 registry`, command: curlFor(ctx.identityRpc, "eth_call", [{ to: att.registry, data: "0x6352211e" + BigInt(att.agentId).toString(16).padStart(64, "0") }, "latest"]), expect: `0x${att.verifyingContract.toLowerCase().slice(2).padStart(64, "0")}`, read: `an address, left-padded to 32 bytes: the last 40 hex characters are the account that owns agent ${att.agentId}, which must be the signing account above.` },
 ])}
 <p><b>3. That the digest is this report.</b> The digest is computed from the report's bytes by a published rule, <a href="${esc(ctx.specUrl)}">canon/1</a>. To recompute it and run both checks in one step: <a href="${esc(ctx.reportPath)}">download the signed report</a>, then from a clone of the source:</p>
 <pre><code>${esc(ctx.verifierCommand)}</code></pre>
@@ -166,10 +218,11 @@ ${commands([
 <p class="mono">${esc(r.subject.address)} · chain ${esc(String(r.subject.chainId))}</p>
 ${ageBlock({
   blockTs: ctx.blockTimestamp,
-  asOfHtml: `Report from block ${fmtInt(r.subject.blockNumber)}, produced ${esc(utc(ctx.blockTimestamp))}.`,
-  staleHtml: `This report is {age}. It describes the vault at block ${fmtInt(r.subject.blockNumber)} (${esc(utc(ctx.blockTimestamp))}), not today: anything on this page may have changed since. The signature was checked when the page was built (${esc(ctx.verifiedAt)}), not when you opened it.`,
+  asOfHtml: `Report from block ${fmtInt(r.subject.blockNumber)}, produced ${esc(utc(ctx.blockTimestamp))}{age}.`,
+  staleHtml: `This report is {age}. It describes the vault at block ${fmtInt(r.subject.blockNumber)} (${esc(utc(ctx.blockTimestamp))}), not today: anything on this page may have changed since. The signature was checked when the page was built (${esc(fmtUtcIso(ctx.verifiedAt))}), not when you opened it.`,
 })}
 ${notices}
+${summary}
 ${prov}
 <h2>Who can touch your deposit</h2>
 ${sec1.join("\n")}
@@ -192,11 +245,11 @@ ${(ctx.siblings ?? []).map((s) => `<p><a href="${esc(s.href)}">${esc(s.text)}</a
   function absentRow(p) {
     return rowHtml("not", POWER_QUESTION[p.power] ?? p.power,
       `<p>The report found no function matching the signatures it searches for. That is not proof the vault cannot do this: a power can be reached without a named function. <span class="reach">What it would reach: ${esc(p.severityReach)}.</span></p>`,
-      cmdsForRead(idsOf(checkById.get("shape:code@address"))));
+      cmdsForRead(idsOf(checkById.get("shape:code@address")), { absent: POWER_SIGS[p.power] ?? [] }));
   }
 }
 
-const utc = (ts) => new Date(Number(ts) * 1000).toISOString().replace(".000Z", " UTC").replace("T", " ");
+const utc = fmtUtc;
 
 function rowHtml(state, q, bodyHtml, cmds = []) {
   return `<div class="row${state === "not" ? " not" : ""}">${state === "not" ? mark.notEstablished : mark.established}

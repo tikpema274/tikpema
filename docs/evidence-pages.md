@@ -8,6 +8,12 @@ from the app.
 | `/evidence/xylo-testnet/` | A **signed** due-diligence report (XyloVault family, Arc testnet), rendered sentence by sentence from the report's fields, with the report's JSON beside it | `npm run evidence:build-report -- <signed-report.json>` |
 | `/evidence/galaxy-usdc-route-removal/` | A **dated on-chain record** (Arc mainnet), **not** a report. Every statement is a public read made on two endpoints that had to agree | `npm run evidence:build-galaxy` |
 
+**Every printed command states its answer and how to read it** (T, 2026-10-03). On the xylo page the answers come from
+the signed report's fields, and the build re-runs each printed read on its own endpoint and refuses to write if the chain
+disagrees. On the Galaxy page each answer is the raw result both endpoints agreed on. A read with no stated answer cannot
+be printed: `commands()` refuses it. The commands need only `curl` in a macOS or Linux terminal (on Windows: WSL or Git
+Bash), which the page says above the first command. All dates use one format: "2026-10-02 20:23 UTC".
+
 A stranger checks a downloaded report with `npm run evidence:verify-report -- report.json`. Exit codes:
 0 = valid, 1 = not valid, 2 = could not tell.
 

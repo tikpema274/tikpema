@@ -18,6 +18,8 @@ import { fileURLToPath } from "node:url";
 import { verifyAttestation, attestationDigest } from "../../shared/onchain-analyze/attest.mjs";
 import { renderReportPage } from "./render-report.mjs";
 import { bannedWordsIn, quorumReader } from "./_shell.mjs";
+import { keccak256, toHex } from "viem";
+import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const IDENTITY_RPC = "https://rpc.testnet.arc.io"; // where agent 851891 is registered (Arc testnet)
@@ -78,6 +80,34 @@ const html = renderReportPage(report, {
   verifierCommand: "node scripts/public-pages/verify-report-file.mjs report.json",
   identityRpc: IDENTITY_RPC,
 });
+// ⭐ THE PRINTED ANSWERS ARE CHECKED AGAINST THE CHAIN (T, 2026-10-03: every command states its answer). Each read the page
+// prints is re-run here, on ITS OWN endpoint at ITS pinned block, and compared with what the page says it returns —
+// computed from the signed report's fields, independently of the renderer. A mismatch writes nothing.
+{
+  const sel = (sig) => keccak256(toHex(sig)).slice(2, 10);
+  const present = report.powers.filter((p) => p.present).flatMap((p) => p.matched.map((m) => m.signature));
+  const absent = report.powers.filter((p) => !p.present).flatMap((p) => POWER_SIGS[p.power] ?? []);
+  const subj = report.subject.address.toLowerCase();
+  const problems = [];
+  for (const x of report.reads) {
+    const res = await fetch(x.endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: x.method, params: x.params }) }).then((r) => r.json()).catch((e) => ({ error: String(e) }));
+    if (res.error || typeof res.result !== "string") { problems.push(`${x.readId} ${x.method}: no usable answer (${JSON.stringify(res.error)})`); continue; }
+    const v = res.result.toLowerCase(), a0 = String(x.method === "eth_call" ? x.params[0].to : x.params[0]).toLowerCase();
+    if (x.method === "eth_getCode" && a0 === subj) {
+      if ((v.length - 2) / 2 !== report.shape.evidence.ownCodeBytes) problems.push(`${x.readId}: code is ${(v.length - 2) / 2} bytes, the page says ${report.shape.evidence.ownCodeBytes}`);
+      for (const sg of present) if (!v.includes(sel(sg))) problems.push(`${x.readId}: ${sg} (${sel(sg)}) is not in the code, the page says it is`);
+      for (const sg of absent) if (v.includes(sel(sg))) problems.push(`${x.readId}: ${sg} (${sel(sg)}) IS in the code, the page says none appears`);
+    } else if (x.method === "eth_getStorageAt") {
+      if (v !== report.shape.evidence.implSlot.toLowerCase()) problems.push(`${x.readId}: slot is ${v}, the page says ${report.shape.evidence.implSlot}`);
+    } else if (x.method === "eth_call") {
+      if (v.slice(-40) !== report.owner.address.toLowerCase().slice(2)) problems.push(`${x.readId}: owner() is ${v}, the page says ${report.owner.address}`);
+    } else if (x.method === "eth_getCode") {
+      if (v !== "0x") problems.push(`${x.readId}: the owner has code, the page says 0x`);
+    } else problems.push(`${x.readId}: ${x.method} has no stated answer to check`);
+  }
+  if (problems.length) { console.error(`⛔ the page's printed answers do not match the chain:\n  ${problems.join("\n  ")}\nnothing written`); process.exit(1); }
+  console.log(`  ✓ all ${report.reads.length} printed reads re-run on their own endpoints: every answer is the one the page states`);
+}
 const banned = bannedWordsIn(html);
 if (banned.length) { console.error(`⛔ the page contains banned words: ${banned.join(", ")}; nothing written`); process.exit(1); }
 

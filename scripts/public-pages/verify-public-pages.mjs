@@ -14,6 +14,9 @@
 //   E. THE GALAXY RECORD. assertFacts rejects each fact that no longer holds; the render follows the reads.
 //   F. AGE IN THE VIEWER'S BROWSER. ageOf at the edges; the page inlines ageOf's own source; the inline script,
 //      RUN against a stub DOM, shows the banner past the threshold and not before; no block time → refuse.
+//   H. THE THREE 10-03 FIXES (T). Every printed command states its answer AND how to read it (fresh renders and the
+//      committed pages); the curl line appears once, above the first command; ONE date format; the Galaxy age sits inside
+//      the sentence it qualifies, the removal in its own; a read the renderer cannot explain refuses.
 //   G. ONE MANIFEST. Every file under site/evidence is in siteFiles(); the deployer and the gate both read it.
 
 import { readFileSync } from "node:fs";
@@ -21,7 +24,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeFunctionData, parseAbi } from "viem";
 import { renderReportPage, encodeIsValidSignature, SCHEMA_SCOPE } from "./render-report.mjs";
-import { bannedWordsIn, ageOf, STALE_AFTER_DAYS } from "./_shell.mjs";
+import { bannedWordsIn, ageOf, STALE_AFTER_DAYS, commands, ageBlock, HOWTO_RUN } from "./_shell.mjs";
 import { siteFiles } from "../lib/marketing-site.mjs";
 import { readdirSync } from "node:fs";
 import vm from "node:vm";
@@ -59,7 +62,15 @@ section("A. not established is a result");
   for (const p of REPORT.powers.filter((p) => !p.present)) {
     check(`absent power '${p.power}' is drawn NOT established`, new RegExp(`\\? Not established</span>\\s*<p class="q">${Q[p.power].replace(/[?]/g, "\\?")}`).test(html));
   }
-  check("the counts line comes from coverage.totals", html.includes(`Checks run: ${REPORT.coverage.totals.checked + REPORT.coverage.totals.notChecked} · concluded: ${REPORT.coverage.totals.checked} · did not conclude: ${REPORT.coverage.totals.notChecked}`));
+  // ⭐ THE TWO COUNTS (T 2026-10-03): questions counted from the RENDERED rows, reads from coverage.totals.
+  const qm = html.match(/Of the (\d+) questions on this page, (\d+) (?:is|are) established and (\d+) (?:is|are) not established/);
+  check("the questions line exists", !!qm);
+  check("its numbers are the page's own rendered rows", qm && Number(qm[2]) === count(html, EST) && Number(qm[3]) === count(html, NOT) && Number(qm[1]) === count(html, EST) + count(html, NOT),
+    qm ? `${qm.slice(1).join("/")} vs est ${count(html, EST)} not ${count(html, NOT)}` : "");
+  const ranN = REPORT.coverage.totals.checked + REPORT.coverage.totals.notChecked;
+  check("the reads line comes from coverage.totals and says what it does NOT mean", html.includes(`the report ran ${ranN} checks against the chain, and all ${ranN} got an answer`) && html.includes("It does not say the questions are answered."));
+  check("the questions line comes BEFORE the reads line", html.indexOf('class="q-count"') > 0 && html.indexOf('class="q-count"') < html.indexOf('class="r-count"'));
+  check("the old single counts line is gone", !html.includes("Checks run:") && !html.includes("did not conclude:"));
   for (const k of ["delays", "exit", "holderAttribution"]) check(`schema scope '${k}' is stated`, html.includes(SCHEMA_SCOPE[REPORT.schemaVersion][k].slice(0, 40).replace(/'/g, "&#39;").replace(/"/g, "&quot;")));
   check("the partial sanctions list is NOT drawn as established", /\? Not established<\/span>\s*<p class="q">Is the vault&#39;s address on a sanctions list\?/.test(html));
 
@@ -85,14 +96,16 @@ section("A. not established is a result");
   // rows) and are now notChecked instead; the owner row was established, so it moves no not-established count.
   check("not-established rows = base + 3 forced − 2 absent rows they replace", count(h2, NOT) === count(html, NOT) + 3 - 2,
     `base ${count(html, NOT)} → ${count(h2, NOT)}`);
-  check("counts line reports 3 not concluded", h2.includes(`did not conclude: 3`));
+  const q2 = h2.match(/Of the (\d+) questions on this page, (\d+) (?:is|are) established and (\d+) (?:is|are) not established/);
+  check("forced: the questions line follows the rows (not a typed number)", q2 && Number(q2[2]) === count(h2, EST) && Number(q2[3]) === count(h2, NOT) && q2[0] !== qm[0]);
+  check("forced: the reads line says 3 did not get an answer", h2.includes("got an answer and 3 did not"));
   check("synthetic page carries no verdict words", bannedWordsIn(h2).length === 0, bannedWordsIn(h2).join(","));
 
   const r3 = clone(REPORT);
   r3.sources.integrity.providerDisagreement = true;
   check("provenance does not claim agreement when the report records a disagreement", !renderReportPage(r3, CTX).includes("they agreed on every read"));
   check("a number-only signature says so", html.includes("It covers the block number, not the block's hash."));
-  const r4 = clone(REPORT); r4.owner.address = '<img src=x onerror="alert(1)">';
+  const r4 = clone(REPORT); r4.shape.evidence.shapesNotTestedFor[0] = '<img src=x onerror="alert(1)">';
   check("report strings are escaped", !renderReportPage(r4, CTX).includes("<img src=x"));
   check("not-established is distinguished by outline only (no hazard red, no grey-out)", !/#e5484d|opacity|color:\s*grey|color:\s*gray/i.test(html));
 }
@@ -129,8 +142,17 @@ section("D. the published page is the published report");
 section("E. the Galaxy record");
 {
   const z = "0x0000000000000000000000000000000000000000";
-  const cmd = { commands: [{ endpoint: "https://rpc.mainnet.arc.io", command: "curl …" }] };
-  const reads = Object.fromEntries(["adapterBefore", "adapterAfter", "logs", "receipt", "senderCode", "isAllocator", "totalAssetsAt", "adapterNow", "totalAssetsNow", "idleNow", "withdraw", "control"].map((k) => [k, cmd]));
+  const TXH = "0x87283833bf59c19101eb6f3f374017fd757059df7ef8ad4323fb5dbc516d8383";
+  const pad = (h) => "0x" + h.replace(/^0x/, "").padStart(64, "0");
+  const ANS = {
+    adapterBefore: pad("ee0080203a76690bca40670dfd0cd1c30fab7c2c"), adapterAfter: pad("0"), adapterNow: pad("0"),
+    totalAssetsAt: pad((84807145536819n).toString(16)), totalAssetsNow: pad((89710305440370n).toString(16)), idleNow: pad("0"),
+    senderCode: "0x", isAllocator: pad("1"), control: pad("de228c6ff26e984"),
+    logs: [{ transactionHash: TXH, topics: ["0x9deb43d71422af41853c3921fb364b7647f9a9b136e46d66d45c1bf707af706c", pad("43e4a89e8f8cea5006e0eaefd12d746a5967a537"), pad("0"), "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"] }],
+    receipt: { status: "0x1", from: "0x43e4a89e8f8cea5006e0eaefd12d746a5967a537", to: "0x8e357432cc12ff425c36432f312968aeb16112af" },
+    withdraw: undefined,
+  };
+  const reads = Object.fromEntries(Object.keys(ANS).map((k) => [k, { answer: k === "withdraw" ? { error: { code: 3, data: "0xace2a47e" } } : { result: ANS[k] }, commands: [{ endpoint: "https://rpc.mainnet.arc.io", command: "curl …" }] }]));
   const good = {
     reads, chainId: 5042, adapterBefore: "0xeE0080203a76690BcA40670dfd0cD1C30FAB7c2C", adapterAfter: z, newAdapter: z,
     sender: "0x43e4a89e8f8cea5006e0eaefd12d746a5967a537", txStatus: "0x1", txFrom: "0x43e4a89e8f8cea5006e0eaefd12d746a5967a537",
@@ -204,6 +226,60 @@ section("G. one manifest");
     check(`${f} reads siteFiles()`, /siteFiles\(\)/.test(src));
     check(`${f} names no single published file directly`, !/readFileSync\(\s*"site\/index\.html"/.test(src) && !/copyFileSync\(\s*"site\/index\.html"/.test(src));
   }
+}
+
+section("H. the three 10-03 fixes");
+{
+  const visible = (h) => h.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<[^>]+>/g, " ");
+  // Counts NON-EMPTY answers: an element with nothing after "Expected:" / "How to read it:" is not an answer.
+  const tally = (h) => ({ cmd: count(h, '<div class="cmd">'),
+    exp: (h.match(/<div class="cmd-expect">Expected: <code>([^<]*)<\/code><\/div>/g) ?? []).filter((m) => !/<code><\/code>/.test(m)).length,
+    rd: (h.match(/<div class="cmd-read">How to read it: ([^<]*)<\/div>/g) ?? []).filter((m) => m.replace(/<[^>]+>|How to read it:/g, "").trim().length > 0).length });
+  const z = "0x0000000000000000000000000000000000000000";
+  const gFacts = (() => { // the E fixture, rebuilt here so H stands alone
+    const pad = (x) => "0x" + x.replace(/^0x/, "").padStart(64, "0");
+    const TXH = "0x87283833bf59c19101eb6f3f374017fd757059df7ef8ad4323fb5dbc516d8383";
+    const A = { adapterBefore: pad("ee0080203a76690bca40670dfd0cd1c30fab7c2c"), adapterAfter: pad("0"), adapterNow: pad("0"), totalAssetsAt: pad("4d2f"), totalAssetsNow: pad("4d30"), idleNow: pad("0"), senderCode: "0x", isAllocator: pad("1"), control: pad("1"),
+      logs: [{ transactionHash: TXH, topics: ["0x9d", pad("43e4"), pad("0"), "0xc5"] }], receipt: { status: "0x1", from: "0x43e4", to: "0x8e35" } };
+    const reads = Object.fromEntries([...Object.keys(A), "withdraw"].map((k) => [k, { answer: k === "withdraw" ? { error: { data: "0xace2a47e" } } : { result: A[k] }, commands: [{ endpoint: "https://rpc.mainnet.arc.io", command: "curl …" }, { endpoint: "https://arc-mainnet.drpc.org", command: "curl …" }] }]));
+    return { reads, chainId: 5042, adapterBefore: "0xeE0080203a76690BcA40670dfd0cD1C30FAB7c2C", adapterAfter: z, newAdapter: z, sender: "0x43e4a89e8f8cea5006e0eaefd12d746a5967a537", txStatus: "0x1",
+      txFrom: "0x43e4a89e8f8cea5006e0eaefd12d746a5967a537", txTo: "0x8E357432CC12ff425c36432F312968aEb16112AF", senderCode: "0x", senderIsAllocator: true, blockTimestamp: 1790702635,
+      totalAssetsAt: 84807145536819n, now: 23930903n, nowTimestamp: 1790950000, adapterNow: z, idleNow: 0n, totalAssetsNow: 89710305440370n, withdrawOk: false, withdrawRevert: "0xace2a47e", controlOk: true };
+  })();
+  const fresh = { xylo: renderReportPage(REPORT, CTX), galaxy: renderCase(gFacts) };
+  const committed = { xylo: PAGE, galaxy: readFileSync(join(ROOT, "site/evidence/galaxy-usdc-route-removal/index.html"), "utf8") };
+  for (const [kind, set] of [["fresh", fresh], ["committed", committed]]) for (const [name, h] of Object.entries(set)) {
+    const t = tally(h);
+    check(`${kind} ${name}: every command states an expected answer AND how to read it (${t.cmd})`, t.cmd > 0 && t.exp === t.cmd && t.rd === t.cmd, JSON.stringify(t));
+    check(`${kind} ${name}: the curl line appears exactly once`, count(h, '<p class="howto">') === 1);
+    check(`${kind} ${name}: …above the first command`, h.indexOf('<p class="howto">') < h.indexOf('<details class="cmds">'));
+    check(`${kind} ${name}: no ISO "T…Z" stamp anywhere a reader sees`, !/\d{4}-\d\d-\d\dT\d\d:\d\d/.test(visible(h)));
+    check(`${kind} ${name}: dates read "YYYY-MM-DD HH:MM UTC"`, /\d{4}-\d\d-\d\d \d\d:\d\d UTC/.test(visible(h)));
+  }
+  check("the curl line says curl, macOS/Linux, and the Windows route", /curl/.test(HOWTO_RUN) && /macOS or Linux/.test(HOWTO_RUN) && /WSL or Git Bash/.test(HOWTO_RUN));
+  // The Galaxy age: inside the reads sentence (right after its date, before its full stop); the removal in its OWN paragraph.
+  const g = fresh.galaxy;
+  const first = g.match(/<p class="asof" data-block-ts="\d+"[^>]*>([\s\S]*?)<\/p>/)[1];
+  check("galaxy: the age span sits inside the reads sentence, before its full stop", /UTC\)<span class="age-rel"><\/span>\.$/.test(first.trim()), first.slice(-80));
+  check("galaxy: the reads sentence does not mention the removal", !/removal/i.test(first));
+  const second = g.slice(g.indexOf(first) + first.length).match(/<p class="asof">([\s\S]*?)<\/p>/);
+  check("galaxy: the removal is its own paragraph, with no age span", !!second && /The removal at block 23,403,623/.test(second[1]) && !second[1].includes("age-rel"));
+  check("xylo: the age span sits inside the 'Report from block' sentence", /produced \d{4}-\d\d-\d\d \d\d:\d\d UTC<span class="age-rel"><\/span>\./.test(fresh.xylo));
+  let threw = false; try { ageBlock({ blockTs: 1, asOfHtml: "no placeholder", staleHtml: "x" }); } catch { threw = true; }
+  check("ageBlock refuses a sentence without {age}", threw);
+  threw = false; try { commands([{ label: "x", command: "curl", expect: "0x" }]); } catch { threw = true; }
+  check("commands() refuses a command without a how-to-read line", threw);
+  threw = false; try { commands([{ label: "x", command: "curl", read: "r" }]); } catch { threw = true; }
+  check("commands() refuses a command without an expected answer", threw);
+  const rx = clone(REPORT);
+  rx.reads.push({ readId: "r99", endpoint: "https://rpc.testnet.arc.io", method: "eth_getBalance", params: [rx.subject.address, "0x1"], reproduce: "curl …" });
+  rx.coverage.checked.find((c) => c.id === "shape:code@address").readIds.push("r99");
+  threw = false; try { renderReportPage(rx, CTX); } catch { threw = true; }
+  check("a read the renderer cannot explain refuses the page (no undecoded command reaches a reader)", threw);
+  // The answers the xylo page states are the SIGNED report's: owner padded, impl slot, code size.
+  check("xylo: owner() states the signed owner, left-padded", fresh.xylo.includes("0x" + REPORT.owner.address.toLowerCase().slice(2).padStart(64, "0")));
+  check("xylo: the code read states the signed code size", fresh.xylo.includes(`(${REPORT.shape.evidence.ownCodeBytes.toLocaleString("en-US")} bytes of code)`));
+  check("galaxy: each USDC read converts its own raw value", g.includes("0x" + "4d2f".padStart(64, "0") + " = 0.01 USDC"));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
