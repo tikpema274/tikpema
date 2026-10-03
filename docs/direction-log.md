@@ -405,3 +405,30 @@ trust layer gets competition.
   sees first; it is done as copy work **AFTER the V2 window deploy, not bundled into it**: that deploy already carries
   a deploy-critical canary fixture and carries nothing optional. No names proposed.
 - **Changed**: nothing in priorities. Re-check the DD surface list when Tier A starts (the surface has grown before).
+
+## 2026-10-03 — Circle "Friday Feature: data your agent can act on" (Arrays, Birdeye, QuickNode, vaults.fyi)
+- **Source**: Circle community post (Discord, 2026-10-02/03), shared by T. Read against the four Agent Marketplace listings,
+  rendered headlessly 2026-10-03 (the pages are client-rendered; their raw HTML has ~170 characters of text).
+- **Claim**: four services give agents market data, onchain analytics and infrastructure: "data your agent can act on".
+- **Checked** (from the listings, not from calling them):
+  - All four are marked **1P**. Payment networks: **QuickNode Arc, Base, Polygon, Solana** (132 endpoints, $0.0001 each);
+    **vaults.fyi Base** (10 endpoints, $0.002–$0.302); **Arrays Base** (15 endpoints, $0.008–$0.03); **Birdeye Solana** (46
+    endpoints, $0.003). **QuickNode is the only one that settles on Arc.** That is the payment network, not data coverage.
+  - **vaults.fyi sells the recommendation step outright:** `/v2/portfolio/best-vault/{address}` "recommend the single best
+    vault" ($0.004); `/v2/portfolio/best-deposit-options/{address}` "ranked deposit options … accounting for risk
+    tolerance" ($0.202); `/v2/detailed-vaults` "historical APY, **risk ratings**, curator info" ($0.302).
+  - Not checked: whether vaults.fyi covers Arc vaults (its `/v2/networks` answers only behind x402; not paid for), and what
+    its risk ratings consist of.
+  - Ours, for the record: the Researcher's three data buys paid **QuickNode** on Arc testnet (0.0001 each; see
+    data-purchase-has-fired-three-times). DD is still **not listed** after two submissions.
+- **Signal**: Circle is featuring the pipeline **discover → rank → deposit**, with the ranking sold as data an agent "can
+  act on". The step between "best vault" and "deposit" is still empty. That step asks who can change this vault without
+  notice, and whether an ordinary withdrawal would go through. Measured case: Galaxy USDC's redemption route was removed
+  by one EOA allocator with no delay (tikpema.xyz/evidence/galaxy-usdc-route-removal). A yield ranking would not show it;
+  a redeem simulation does. Same shape as Webacy (2026-10-02): the trust layer is sold as ratings and rankings; the
+  checkable, refuse-when-unsure version is not on the shelf. **vaults.fyi is upstream of DD, not a rival:** an agent asks
+  it for the best vault, and DD checks that vault before the deposit.
+- **Answer to the post's question, for Tikpema:** QuickNode, already in use and the only one paid on Arc. vaults.fyi is the
+  most relevant to the thesis, as the input DD would check, not as a data source we would act on.
+- **Changed**: nothing in priorities. The positioning line "complement to vaults.fyi" (agent-pipeline-safety-gap,
+  2026-07-21) is now confirmed against a live listing that sells recommendations as an endpoint.
