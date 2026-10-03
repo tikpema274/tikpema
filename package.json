@@ -28,6 +28,7 @@
     "gate:recovery": "node scripts/verify-recovery-file.mjs",
     "gate:registry": "node scripts/verify-guard-registry.mjs",
     "test:evidence": "node scripts/public-pages/verify-public-pages.mjs",
+    "test:swapnoroute": "node --experimental-test-module-mocks scripts/verify-swap-no-route.mjs",
     "evidence:build-report": "node scripts/public-pages/build-report-page.mjs",
     "evidence:build-galaxy": "node scripts/public-pages/build-galaxy-case.mjs",
     "evidence:verify-report": "node scripts/public-pages/verify-report-file.mjs",
@@ -435,6 +436,7 @@
     "test:treasuryplan",
     "test:treasurysnapshot",
     "test:treasurycopy",
-    "test:evidence"
+    "test:evidence",
+    "test:swapnoroute"
   ]
 }

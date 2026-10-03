@@ -9,6 +9,11 @@ import { withRetry } from "./_retry.mjs";
 // body carries a slippage param; building it here from the same function keeps the claim honest —
 // add a slippage key in swap-fill-floor.mjs and the copy guard reddens. See that file's header.
 import { swapExecuteRequestBody } from "../../shared/swap-fill-floor.mjs";
+// ⭐ A createSwap failure at the QUOTE stage (Circle's no-route 404/331001, or any other error / unreadable
+// reply) is classified HERE, at the source, into one of two sentences every surface shows — never the
+// provider's JSON alone. quoteStageError REFUSES after submission: the wording says nothing was charged.
+// [[first-external-user-swap-no-route]] (2026-10-03)
+import { quoteStageError } from "../../shared/swap-no-route.mjs";
 
 // SWAP PLANE. Pricing/estimates still go through App Kit + the Circle Wallets adapter
 // (kitAndAdapter, below), but the EXECUTING swap now runs the proven B1 path
@@ -260,12 +265,17 @@ export async function buildSwapCallData({ walletAddress, tokenIn, tokenOut, amou
     // producer so the DCA consent copy stays bound to this fact. [[swap-fill-floor]]
     body: JSON.stringify(swapExecuteRequestBody({ tokenInAddress, tokenOutAddress, fromAddress: walletAddress, toAddress: walletAddress, amount: amountBase.toString() })),
   });
-  if (!res.ok) throw new Error(`createSwap HTTP ${res.status}: ${(await res.text()).slice(0, 180)}`);
-  const body = await res.json();
+  if (!res.ok) {
+    const text = await res.text();
+    // User path: the caller's own EOA signs whatever this returns, and nothing has been approved here.
+    throw quoteStageError({ stage: "quote", status: res.status, bodyText: text, tokenIn: tIn, tokenOut: tOut, path: "user" });
+  }
+  let body;
+  try { body = await res.json(); } catch { throw quoteStageError({ stage: "quote", malformed: true, status: res.status, tokenIn: tIn, tokenOut: tOut, path: "user" }); }
   const q = body?.data ?? body;
   const T = q?.transaction;
   const EP = T?.executionParams;
-  if (!EP || typeof T.signature !== "string") throw new Error("createSwap response missing executionParams/signature");
+  if (!EP || typeof T.signature !== "string") throw quoteStageError({ stage: "quote", malformed: true, status: res.status, tokenIn: tIn, tokenOut: tOut, path: "user" });
 
   const deadlineMs = Number(EP.deadline) * 1000;
   if (!Number.isFinite(deadlineMs) || deadlineMs <= Date.now() + DEADLINE_SAFETY_MS) {
@@ -436,7 +446,14 @@ export async function agentSwap({ walletAddress, tokenIn, tokenOut, amountIn, co
   // withRetry retries the transient class (isTransient matches "request limit"), same fix _swap-confirm.mjs
   // uses. retries:3 keeps worst-case backoff (~2.85s) inside the sync-handler / tick budgets. A genuine
   // revert is NOT transient and still surfaces immediately.
+  // ⛔ THE BOUNDARY. "quote" until the line before the swap is SUBMITTED; quoteStageError refuses anything
+  // else, because its sentences say nothing was charged — unknown once a swap is in. test:swapnoroute pins
+  // that every quoteStageError below sits ABOVE `stage = "submitted"`.
+  let stage = "quote";
   let approveId = null;
+  // The base units an approval granted DURING THIS CALL, set only after it LANDED (waitForTx). A no-route
+  // answer below names it; a standing allowance from an earlier swap is left out (not news, not this attempt).
+  let approvedBase = null;
   const allowance = await withRetry(
     () => publicClient().readContract({ address: tokenInAddress, abi: ALLOWANCE_ABI, functionName: "allowance", args: [walletAddress, SWAP_ADAPTER] }),
     { retries: 3, label: "swap allowance read" }
@@ -483,6 +500,7 @@ export async function agentSwap({ walletAddress, tokenIn, tokenOut, amountIn, co
     });
     approveId = ap.data?.id;
     await waitForTx(client, approveId); // must LAND before the quote/submit — else tokenInputs would need a permit
+    approvedBase = approveBase;
   }
 
   // ── (B) B1 EXTRACTION — createSwap HTTP quote (key VERBATIM: it already carries the "KIT_KEY:" prefix;
@@ -494,12 +512,18 @@ export async function agentSwap({ walletAddress, tokenIn, tokenOut, amountIn, co
     // producer so the DCA consent copy stays bound to this fact. [[swap-fill-floor]]
     body: JSON.stringify(swapExecuteRequestBody({ tokenInAddress, tokenOutAddress, fromAddress: walletAddress, toAddress: walletAddress, amount: amountBase.toString() })),
   });
-  if (!res.ok) throw new Error(`createSwap HTTP ${res.status}: ${(await res.text()).slice(0, 180)}`);
-  const body = await res.json();
+  if (!res.ok) {
+    const text = await res.text();
+    // ⚠️ The approve above (if any) has ALREADY LANDED: say so, with the amount, in the same sentence.
+    throw quoteStageError({ stage, status: res.status, bodyText: text, tokenIn: tIn, tokenOut: tOut, approval: approvedBase === null ? null : { amountBase: approvedBase, token: tIn }, path: "agent" });
+  }
+  const landed = approvedBase === null ? null : { amountBase: approvedBase, token: tIn };
+  let body;
+  try { body = await res.json(); } catch { throw quoteStageError({ stage, malformed: true, status: res.status, tokenIn: tIn, tokenOut: tOut, approval: landed, path: "agent" }); }
   const q = body?.data ?? body;
   const T = q?.transaction;
   const EP = T?.executionParams;
-  if (!EP || typeof T.signature !== "string") throw new Error("createSwap response missing executionParams/signature");
+  if (!EP || typeof T.signature !== "string") throw quoteStageError({ stage, malformed: true, status: res.status, tokenIn: tIn, tokenOut: tOut, approval: landed, path: "agent" });
 
   // DEADLINE pre-submit guard (the residual): submit only with a safety margin left. The AdapterContract
   // ALSO reverts on-chain if the deadline has passed (revert = no funds moved = no ledger) — the ultimate
@@ -549,6 +573,9 @@ export async function agentSwap({ walletAddress, tokenIn, tokenOut, amountIn, co
   }
 
   // ── (C) SUBMIT the extracted { to, data } → authoritative Circle id (dev-controlled createContractExecution).
+  // ⛔ From here on, a failure is NOT quote-stage: what moved is unknown, so the "nothing was charged" wording
+  // is unavailable (quoteStageError refuses it). Failures below keep their existing path.
+  stage = "submitted";
   const sw = await client.createContractExecutionTransaction({
     walletAddress,
     blockchain: ARC.blockchain,

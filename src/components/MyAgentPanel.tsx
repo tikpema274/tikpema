@@ -1269,6 +1269,16 @@ export function AgentSummary({
     );
   }
 
+  // ⭐ A swap that failed at the QUOTE stage (agent-act's `noRoute` / `quoteFailed`). Not "held off": the agent
+  // did not decline. The sentence comes whole from shared/swap-no-route.mjs (with its details line) and is shown as is.
+  if (data.noRoute || data.quoteFailed) {
+    return (
+      <div className="status" style={{ margin: 0 }}>
+        {String(data.notice ?? "")}
+      </div>
+    );
+  }
+
   if (data.executed) {
     return (
       <div className="status" style={{ margin: 0 }}>

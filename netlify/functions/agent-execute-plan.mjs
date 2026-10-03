@@ -540,6 +540,14 @@ export async function handler(event) {
       if (e instanceof TxPendingError) {
         await recordPendingBridge({ e, session, amountRequested: step.amountUsdc, quoteId, stepIndex: i, quotePromoted });
       }
+      // ⭐ A QUOTE-STAGE swap failure (Circle's no-route, or any other createSwap failure) arrives as a SwapQuoteStageError whose
+      // message IS our sentence (shared/swap-no-route.mjs). Built only before submission, so its "nothing was charged" holds.
+      // `blocked` is the field swapFromAgent shows first; the plan halts here like any other refusal.
+      if (e?.swapQuoteStage) {
+        results.push({ index: i, step, ok: false, blocked: e.message, noRoute: e.kind === "no-route", quoteFailed: e.kind === "quote-failed" });
+        stoppedAt = i;
+        break;
+      }
       // A thrown error (incl. TxPendingError) stops the plan. Record and halt.
       results.push({ index: i, step, ok: false, error: e.message, pending: e.name === "TxPendingError" });
       stoppedAt = i;

@@ -940,6 +940,10 @@ export async function handler(event) {
     // reaches this bare 500. Same class as agent-ub-spend's classifySpendThrow (18c0396).
     // [[check-whose-failure-mode-is-a-pass]]
     if (e?.payClassified) return json(e.payStatus, e.payBody);
+    // ⭐ A QUOTE-STAGE swap failure (Circle's no-route, or any other createSwap failure) arrives as a SwapQuoteStageError whose
+    // message IS our sentence (shared/swap-no-route.mjs). Built only before submission, so its "nothing was charged" holds.
+    // Not a 500 and not "held off": the agent did not decline. The panel renders `notice` as is.
+    if (e?.swapQuoteStage) return json(200, { executed: false, noRoute: e.kind === "no-route", quoteFailed: e.kind === "quote-failed", notice: e.message });
     return json(500, { error: e.message });
   }
 }

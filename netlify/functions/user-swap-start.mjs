@@ -123,6 +123,10 @@ export async function handler(event) {
   try {
     built = await buildSwapCallData({ walletAddress: owner, tokenIn, tokenOut, amountIn });
   } catch (e) {
+    // ⭐ A QUOTE-STAGE swap failure (Circle's no-route, or any other createSwap failure) arrives as a SwapQuoteStageError whose
+    // message IS our sentence (shared/swap-no-route.mjs). Built only before submission, so its "nothing was charged" holds.
+    // Returned whole: the 180-char slice below would cut our own sentence mid-word.
+    if (e?.swapQuoteStage) return json(e.kind === "no-route" ? 409 : 502, { error: e.message, noRoute: e.kind === "no-route", quoteFailed: e.kind === "quote-failed" });
     return json(502, { error: `Could not price this swap right now: ${String(e.message).slice(0, 180)}` });
   }
 

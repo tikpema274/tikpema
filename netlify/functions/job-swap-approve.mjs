@@ -222,6 +222,9 @@ export async function handler(event) {
     return json(200, { executed: true, receipt, verifierTriggered });
   } catch (e) {
     await store.setJSON(run.jobId, { ...entry, receipt: undefined }); // release the lock
+    // ⭐ A QUOTE-STAGE swap failure (Circle's no-route, or any other createSwap failure) arrives as a SwapQuoteStageError whose
+    // message IS our sentence (shared/swap-no-route.mjs). Built only before submission, so its "nothing was charged" holds.
+    if (e?.swapQuoteStage) return json(e.kind === "no-route" ? 409 : 502, { error: e.message, noRoute: e.kind === "no-route", quoteFailed: e.kind === "quote-failed" });
     return json(500, { error: e.message });
   }
 }
