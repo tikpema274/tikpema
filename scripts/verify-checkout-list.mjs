@@ -47,7 +47,12 @@ const check = (l, c, x = "") => { if (c) { pass++; console.log(`  ✅ ${l}${x ? 
 const section = (t) => console.log(`\n── ${t} ${"─".repeat(Math.max(0, 60 - t.length))}`);
 const A = "0x" + "aa".repeat(20), B = "0x" + "bb".repeat(20);
 const NOW = Date.parse("2026-09-19T15:00:00.000Z");
-const get = (qs = "", extra = {}) => handler({ httpMethod: "GET", headers: { authorization: "Bearer t" }, queryStringParameters: qs ? Object.fromEntries(new URLSearchParams(qs)) : null, ...extra });
+// ⛔ THE CLOCK (2026-10-09): every fixture is built at NOW, but the handler derives `expired` from Date.now(). With the real
+// clock, the open and submitted rows (14-day TTL from 2026-09-19) silently became `expired` at 2026-10-03 ~14:59:56Z and this
+// suite went red for a reason that was not a defect. So the handler runs AT NOW — the same instant the fixtures were made —
+// scoped to each call; no assertion changed. §3 checks it really ran there (listedAt === NOW).
+const atNow = async (fn) => { const real = Date.now; Date.now = () => NOW; try { return await fn(); } finally { Date.now = real; } };
+const get = (qs = "", extra = {}) => atNow(() => handler({ httpMethod: "GET", headers: { authorization: "Bearer t" }, queryStringParameters: qs ? Object.fromEntries(new URLSearchParams(qs)) : null, ...extra }));
 const body = (r) => JSON.parse(r.body);
 const put = (order) => { mem.set(orderKey(order.id), JSON.stringify(order)); mem.set(merchantKey(order.merchant, order.id), JSON.stringify(order)); return order; };
 const mk = (merchant, amountUsdc, description, now, patch = {}) => put({ ...buildOrder({ merchant, amountUsdc, description, capUsdc: 5, createdAtBlock: 100, now }).order, ...patch });
@@ -103,6 +108,7 @@ section("3 — rows: publicOrder + merchant fields; expired derived; unbound fla
   const rows = Object.fromEntries(body(r).orders.map((o) => [o.description, o]));
   check("five rows", body(r).orders.length === 5);
   check("⭐ paid row carries paidTx, paidBy, paidUnits, paidAt, paidAtBlock (the merchant's own fields)", rows.paid.paidTx === paid.paidTx && rows.paid.paidBy === paid.paidBy && rows.paid.paidUnits === "100000" && rows.paid.paidAtBlock === 150 && !!rows.paid.paidAt, JSON.stringify(rows.paid));
+  check("⭐ the handler ran at the fixtures' clock (listedAt === NOW) — not the wall clock", body(r).listedAt === new Date(NOW).toISOString(), body(r).listedAt);
   check("open row: status open, paidTx null, paidBy null", rows.open.status === "open" && rows.open.paidTx === null && rows.open.paidBy === null);
   check("submitted row: status submitted, circleId, NO paidTx", rows.submitted.status === "submitted" && rows.submitted.circleId === "circle-1" && rows.submitted.paidTx === null);
   check("⭐ expired is DERIVED at read time (stored status is open)", rows.old.status === "expired" && JSON.parse(mem.get(orderKey(old.id))).status === "open");
