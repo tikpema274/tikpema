@@ -12,10 +12,11 @@
 // only for the step AFTER an approve confirmed.
 
 import { readFileSync } from "node:fs";
-import { InternalRpcError, InvalidParamsRpcError, RpcRequestError } from "viem";
+import { InternalRpcError, InvalidParamsRpcError, RpcRequestError, HttpRequestError } from "viem";
 import {
   CIRCLE_PAUSED_LINE, APPROVAL_LANDED_LINE, UNCONFIRMED_LINE,
   beforeAccepted, afterAccepted, notSentError, isPasskeyCancel,
+  WALLET_SERVICE_LINE, connectFailureLine, isCircleServiceFailure,
 } from "../src/lib/passkeySponsorship";
 import { describeChainError } from "../src/lib/describeChainError";
 
@@ -104,6 +105,31 @@ section("6 — the panel that shows createJob / fundJob errors renders describeC
   const pp = readFileSync("src/components/PredictPanel.tsx", "utf8");
   const run = pp.slice(pp.indexOf("async function run("), pp.indexOf("\n  }", pp.indexOf("async function run(")));
   check("PredictPanel run(): setError(describeChainError(e))", /setError\(describeChainError\(e\)\)/.test(run) && !/setError\(e\.message\)/.test(run));
+}
+
+section("7 — ⭐ CONNECT (2026-10-09, T): a MOCKED Circle failure at sign-in → \"Circle's wallet service didn't respond…\", never viem, never sponsorship");
+{
+  check("the line is T's words exactly", WALLET_SERVICE_LINE === "Circle's wallet service didn't respond. Nothing was changed. Try again in a few minutes.");
+  check("⛔ it does not mention gas sponsorship", !/sponsor|gas|paymaster/i.test(WALLET_SERVICE_LINE));
+  const failures = [
+    ...refusals,
+    ["an HTTP failure from Circle's endpoint", new HttpRequestError({ url: "https://modular-sdk.circle.com/v1/rpc/w3s/buidl/arcTestnet", status: 503, details: "Service Unavailable" })],
+    ["the network never answered", Object.assign(new TypeError("Failed to fetch"))],
+  ] as const;
+  for (const [label, raw] of failures) {
+    // what connect() would do: a mocked toCircleSmartAccount that throws Circle's failure
+    const toCircleSmartAccount = async () => { throw raw; };
+    const e = await settle(toCircleSmartAccount());
+    const shown = connectFailureLine(e);
+    check(`${label} → exactly the wallet-service line`, shown === WALLET_SERVICE_LINE, shown);
+    check(`${label} → no viem, version or details`, !/viem|Version|Details:/i.test(shown), shown);
+  }
+  check("a passkey cancel is not Circle's failure — its own message stays", !isCircleServiceFailure(cancel) && connectFailureLine(cancel) === cancel.message);
+  const ours = new Error("Couldn't log in with your saved passkey.");
+  check("our own plain message passes through", connectFailureLine(ours) === ours.message);
+  const connectBody = mw.slice(mw.indexOf("const connect = useCallback("), mw.indexOf("}, []);", mw.indexOf("const connect = useCallback(")));
+  check("⭐ connect()'s status line renders connectFailureLine, not ${e.message}",
+    /setStatus\(`Error: \$\{connectFailureLine\(e\)\}`\)/.test(connectBody) && !/\$\{e\.message\}/.test(connectBody), connectBody.slice(-300));
 }
 
 console.log(`\n${fail ? "❌ FAILURES" : "✅ ALL GREEN"}   pass ${pass} / fail ${fail}\n`);

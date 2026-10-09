@@ -55,3 +55,26 @@ export async function beforeAccepted<T>(step: () => Promise<T>, opts: { approval
 export async function afterAccepted<T>(step: () => Promise<T>): Promise<T> {
   try { return await step(); } catch (e) { throw unconfirmedError(e); }
 }
+
+// ═══ CONNECT (sign in / create with a passkey) — 2026-10-09, T ════════════════════════════════
+// The same outage hit "Connect a passkey": the panel showed "Error: Missing or invalid parameters… Version: viem@2.52.2".
+// Connecting is not a user-op and moves nothing, so its line says nothing about gas sponsorship (T: "Do NOT mention gas
+// sponsorship there"). Only a failure FROM CIRCLE'S SERVICE (a viem RPC/HTTP error, or the network) gets it; a passkey
+// cancel and our own messages pass through.
+export const WALLET_SERVICE_LINE = "Circle's wallet service didn't respond. Nothing was changed. Try again in a few minutes.";
+
+export function isCircleServiceFailure(e: unknown): boolean {
+  if (!e || isPasskeyCancel(e)) return false;
+  const v = e as { name?: unknown; shortMessage?: unknown; message?: unknown };
+  const msg = String(v.message ?? e);
+  if (typeof v.shortMessage === "string") return true;                                         // a viem BaseError
+  if (typeof v.name === "string" && /RpcError|RpcRequestError|HttpRequestError|TimeoutError/.test(v.name)) return true;
+  if (/Version: viem@/.test(msg)) return true;
+  return v.name === "TypeError" && /fetch|network/i.test(msg);                                 // the request never got an answer
+}
+
+/** What the connect status line shows for a failure: our line for Circle's service, else the message as is. */
+export function connectFailureLine(e: unknown): string {
+  if (isCircleServiceFailure(e)) return WALLET_SERVICE_LINE;
+  return String((e as { message?: unknown } | null)?.message ?? e);
+}

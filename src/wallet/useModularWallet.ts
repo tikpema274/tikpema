@@ -22,7 +22,7 @@ import { sign as signWebauthn } from "webauthn-p256";
 import { arcTestnet } from "../config/chain";
 import { CONTRACTS, USDC_DECIMALS, USDC_NATIVE_DECIMALS } from "../config/contracts";
 import { describeChainError } from "../lib/describeChainError";
-import { beforeAccepted, afterAccepted } from "../lib/passkeySponsorship";
+import { beforeAccepted, afterAccepted, connectFailureLine } from "../lib/passkeySponsorship";
 
 // -- Client-plane config. CLIENT_KEY is browser-safe (domain restricted). --
 const clientKey = import.meta.env.VITE_CLIENT_KEY as string;
@@ -344,7 +344,8 @@ export function useModularWallet() {
       setStatus(`Connected: ${smartAccount.address}`);
       return smartAccount;
     } catch (e: any) {
-      setStatus(`Error: ${e.message}`);
+      // (2026-10-09, T) never viem's text: Circle's service failing → "Circle's wallet service didn't respond…" (passkeySponsorship.ts)
+      setStatus(`Error: ${connectFailureLine(e)}`);
       throw e;
     } finally {
       setBusy(false);
