@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { describeChainError } from "../lib/describeChainError";
 import type { ModularWallet } from "../wallet/useModularWallet";
 import { JobTimeline, isTerminal } from "./jobTimeline";
 import type { TrackedJob } from "./jobTimeline";
@@ -59,7 +60,7 @@ export default function PredictPanel({ wallet }: { wallet: ModularWallet }) {
     try {
       await fn();
     } catch (e: any) {
-      setError(e.message);
+      setError(describeChainError(e));   // never viem's dump or version — a passkey refusal arrives as our line (passkeySponsorship.ts)
     } finally {
       setBusy(false);
     }

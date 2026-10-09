@@ -22,6 +22,7 @@ import { sign as signWebauthn } from "webauthn-p256";
 import { arcTestnet } from "../config/chain";
 import { CONTRACTS, USDC_DECIMALS, USDC_NATIVE_DECIMALS } from "../config/contracts";
 import { describeChainError } from "../lib/describeChainError";
+import { beforeAccepted, afterAccepted } from "../lib/passkeySponsorship";
 
 // -- Client-plane config. CLIENT_KEY is browser-safe (domain restricted). --
 const clientKey = import.meta.env.VITE_CLIENT_KEY as string;
@@ -433,18 +434,15 @@ export function useModularWallet() {
           args: [CONTRACTS.TIKPEMA_PREDICTION as `0x${string}`, units],
         });
         {
-          const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await Promise.all([
-            computeArcFees(),
-            nonceKeyZero(account),
-          ]);
-          const approveHash = await bundler.sendUserOperation({
+          const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await beforeAccepted(() => Promise.all([computeArcFees(), nonceKeyZero(account)]), {});
+          const approveHash = await beforeAccepted(() => bundler.sendUserOperation({
             calls: [{ to: CONTRACTS.USDC as `0x${string}`, data: approveData }],
             paymaster: true,
             nonce,
             maxPriorityFeePerGas,
             maxFeePerGas,
-          });
-          await bundler.waitForUserOperationReceipt({ hash: approveHash, timeout: 60000 });
+          }), {});
+          await afterAccepted(() => bundler.waitForUserOperationReceipt({ hash: approveHash, timeout: 60000 }));
         }
 
         // 2. Place the bet. Fresh nonce/fees now that the approve has settled.
@@ -454,22 +452,19 @@ export function useModularWallet() {
           functionName: "placeBet",
           args: [BigInt(marketId), isYes, units],
         });
-        const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await Promise.all([
-          computeArcFees(),
-          nonceKeyZero(account),
-        ]);
-        const betHash = await bundler.sendUserOperation({
+        const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await beforeAccepted(() => Promise.all([computeArcFees(), nonceKeyZero(account)]), { approvalLanded: true });
+        const betHash = await beforeAccepted(() => bundler.sendUserOperation({
           calls: [{ to: CONTRACTS.TIKPEMA_PREDICTION as `0x${string}`, data: betData }],
           paymaster: true,
           nonce,
           maxPriorityFeePerGas,
           maxFeePerGas,
-        });
-        const { receipt } = await bundler.waitForUserOperationReceipt({ hash: betHash, timeout: 60000 });
+        }), { approvalLanded: true });
+        const { receipt } = await afterAccepted(() => bundler.waitForUserOperationReceipt({ hash: betHash, timeout: 60000 }));
         setStatus(`Prediction placed: ${receipt.transactionHash}`);
         return receipt.transactionHash;
       } catch (e: any) {
-        setStatus(`Error: ${e.message}`);
+        setStatus(`Error: ${describeChainError(e)}`);   // never viem's dump or version (passkeySponsorship.ts)
         throw e;
       } finally {
         setBusy(false);
@@ -510,10 +505,8 @@ export function useModularWallet() {
         });
 
         setStatus("Creating job…");
-        const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await Promise.all(
-          [computeArcFees(), nonceKeyZero(account)]
-        );
-        const hash = await bundler.sendUserOperation({
+        const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await beforeAccepted(() => Promise.all([computeArcFees(), nonceKeyZero(account)]), {});
+        const hash = await beforeAccepted(() => bundler.sendUserOperation({
           calls: [
             { to: CONTRACTS.AGENTIC_COMMERCE as `0x${string}`, data: createJobData },
           ],
@@ -521,11 +514,11 @@ export function useModularWallet() {
           nonce,
           maxPriorityFeePerGas,
           maxFeePerGas,
-        });
-        const { receipt } = await bundler.waitForUserOperationReceipt({
+        }), {});
+        const { receipt } = await afterAccepted(() => bundler.waitForUserOperationReceipt({
           hash,
           timeout: 60000,
-        });
+        }));
 
         // Pull the jobId out of the JobCreated event the contract emits.
         const [created] = parseEventLogs({
@@ -538,7 +531,7 @@ export function useModularWallet() {
         setStatus(`Job #${jobId} created: ${receipt.transactionHash}`);
         return jobId;
       } catch (e: any) {
-        setStatus(`Error: ${e.message}`);
+        setStatus(`Error: ${describeChainError(e)}`);   // never viem's dump or version (passkeySponsorship.ts)
         throw e;
       } finally {
         setBusy(false);
@@ -575,18 +568,15 @@ export function useModularWallet() {
           args: [CONTRACTS.AGENTIC_COMMERCE as `0x${string}`, units],
         });
         {
-          const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await Promise.all([
-            computeArcFees(),
-            nonceKeyZero(account),
-          ]);
-          const approveHash = await bundler.sendUserOperation({
+          const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await beforeAccepted(() => Promise.all([computeArcFees(), nonceKeyZero(account)]), {});
+          const approveHash = await beforeAccepted(() => bundler.sendUserOperation({
             calls: [{ to: CONTRACTS.USDC as `0x${string}`, data: approveData }],
             paymaster: true,
             nonce,
             maxPriorityFeePerGas,
             maxFeePerGas,
-          });
-          await bundler.waitForUserOperationReceipt({ hash: approveHash, timeout: 60000 });
+          }), {});
+          await afterAccepted(() => bundler.waitForUserOperationReceipt({ hash: approveHash, timeout: 60000 }));
         }
 
         // 2. Fund the job. Fresh nonce/fees now that the approve has settled.
@@ -596,22 +586,19 @@ export function useModularWallet() {
           functionName: "fund",
           args: [BigInt(jobId), "0x"],
         });
-        const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await Promise.all([
-          computeArcFees(),
-          nonceKeyZero(account),
-        ]);
-        const fundHash = await bundler.sendUserOperation({
+        const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await beforeAccepted(() => Promise.all([computeArcFees(), nonceKeyZero(account)]), { approvalLanded: true });
+        const fundHash = await beforeAccepted(() => bundler.sendUserOperation({
           calls: [{ to: CONTRACTS.AGENTIC_COMMERCE as `0x${string}`, data: fundData }],
           paymaster: true,
           nonce,
           maxPriorityFeePerGas,
           maxFeePerGas,
-        });
-        const { receipt } = await bundler.waitForUserOperationReceipt({ hash: fundHash, timeout: 60000 });
+        }), { approvalLanded: true });
+        const { receipt } = await afterAccepted(() => bundler.waitForUserOperationReceipt({ hash: fundHash, timeout: 60000 }));
         setStatus(`Job funded: ${receipt.transactionHash}`);
         return { txHash: receipt.transactionHash };
       } catch (e: any) {
-        setStatus(`Error: ${e.message}`);
+        setStatus(`Error: ${describeChainError(e)}`);   // never viem's dump or version (passkeySponsorship.ts)
         throw e;
       } finally {
         setBusy(false);
@@ -701,18 +688,15 @@ export function useModularWallet() {
           functionName: "transfer",
           args: [toAgentSca as `0x${string}`, units],
         });
-        const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await Promise.all([
-          computeArcFees(),
-          nonceKeyZero(account),
-        ]);
-        const hash = await bundler.sendUserOperation({
+        const [{ maxPriorityFeePerGas, maxFeePerGas }, nonce] = await beforeAccepted(() => Promise.all([computeArcFees(), nonceKeyZero(account)]), {});
+        const hash = await beforeAccepted(() => bundler.sendUserOperation({
           calls: [{ to: CONTRACTS.USDC as `0x${string}`, data }],
           paymaster: true,
           nonce,
           maxPriorityFeePerGas,
           maxFeePerGas,
-        });
-        const { receipt } = await bundler.waitForUserOperationReceipt({ hash, timeout: 60000 });
+        }), {});
+        const { receipt } = await afterAccepted(() => bundler.waitForUserOperationReceipt({ hash, timeout: 60000 }));
         setStatus(`Agent wallet funded: ${receipt.transactionHash}`);
         await refreshBalance().catch(() => {});
         return { txHash: receipt.transactionHash };
