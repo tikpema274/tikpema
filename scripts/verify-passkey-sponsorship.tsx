@@ -12,7 +12,7 @@
 // only for the step AFTER an approve confirmed.
 
 import { readFileSync } from "node:fs";
-import { InternalRpcError, InvalidParamsRpcError, RpcRequestError, HttpRequestError } from "viem";
+import { InternalRpcError, InvalidParamsRpcError, RpcRequestError, HttpRequestError, UnknownRpcError, UserRejectedRequestError } from "viem";
 import {
   CIRCLE_PAUSED_LINE, APPROVAL_LANDED_LINE, UNCONFIRMED_LINE,
   beforeAccepted, afterAccepted, notSentError, isPasskeyCancel,
@@ -114,7 +114,8 @@ section("7 — ⭐ CONNECT (2026-10-09, T): a MOCKED Circle failure at sign-in �
   const failures = [
     ...refusals,
     ["an HTTP failure from Circle's endpoint", new HttpRequestError({ url: "https://modular-sdk.circle.com/v1/rpc/w3s/buidl/arcTestnet", status: 503, details: "Service Unavailable" })],
-    ["the network never answered", Object.assign(new TypeError("Failed to fetch"))],
+    // the REAL shape: viem's buildRequest wraps a transport's raw TypeError as UnknownRpcError (a BaseError)
+    ["the network never answered", new UnknownRpcError(new TypeError("Failed to fetch"))],
   ] as const;
   for (const [label, raw] of failures) {
     // what connect() would do: a mocked toCircleSmartAccount that throws Circle's failure
@@ -125,6 +126,8 @@ section("7 — ⭐ CONNECT (2026-10-09, T): a MOCKED Circle failure at sign-in �
     check(`${label} → no viem, version or details`, !/viem|Version|Details:/i.test(shown), shown);
   }
   check("a passkey cancel is not Circle's failure — its own message stays", !isCircleServiceFailure(cancel) && connectFailureLine(cancel) === cancel.message);
+  check("a wallet's rejection (code 4001) is a cancel, not Circle's failure", isPasskeyCancel(new UserRejectedRequestError(new Error("x"))) && !isCircleServiceFailure(new UserRejectedRequestError(new Error("x"))));
+  check("⭐ a bare TypeError NOT from viem is not classified as Circle's (typed: no viem marker)", !isCircleServiceFailure(new TypeError("Failed to fetch")));
   const ours = new Error("Couldn't log in with your saved passkey.");
   check("our own plain message passes through", connectFailureLine(ours) === ours.message);
   const connectBody = mw.slice(mw.indexOf("const connect = useCallback("), mw.indexOf("}, []);", mw.indexOf("const connect = useCallback(")));

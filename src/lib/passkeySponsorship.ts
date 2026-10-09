@@ -22,11 +22,12 @@ export const UNCONFIRMED_LINE =
 export type PasskeyPhase = "not-sent" | "sent-unconfirmed";
 export type PasskeyError = Error & { tikpemaPhase: PasskeyPhase; cause?: unknown };
 
+// ⭐ TYPED, never the wording (test:proserecovery): Circle's SDK awaits navigator.credentials.get/create OUTSIDE any try, so a
+// cancelled prompt arrives as the browser's own DOMException — `name` NotAllowedError (or AbortError). A wallet's rejection is
+// EIP-1193 code 4001 (viem's UserRejectedRequestError carries it).
 export function isPasskeyCancel(e: unknown): boolean {
-  const name = (e as { name?: unknown } | null)?.name;
-  if (name === "NotAllowedError" || name === "AbortError") return true;
-  const msg = String((e as { message?: unknown } | null)?.message ?? e ?? "");
-  return /NotAllowed|aborted|cancel|user rejected/i.test(msg);
+  const v = e as { name?: unknown; code?: unknown } | null;
+  return v?.name === "NotAllowedError" || v?.name === "AbortError" || v?.code === 4001;
 }
 
 function tagged(message: string, phase: PasskeyPhase, cause: unknown): PasskeyError {
@@ -59,18 +60,18 @@ export async function afterAccepted<T>(step: () => Promise<T>): Promise<T> {
 // ═══ CONNECT (sign in / create with a passkey) — 2026-10-09, T ════════════════════════════════
 // The same outage hit "Connect a passkey": the panel showed "Error: Missing or invalid parameters… Version: viem@2.52.2".
 // Connecting is not a user-op and moves nothing, so its line says nothing about gas sponsorship (T: "Do NOT mention gas
-// sponsorship there"). Only a failure FROM CIRCLE'S SERVICE (a viem RPC/HTTP error, or the network) gets it; a passkey
+// sponsorship there"). Only a failure FROM CIRCLE'S SERVICE (a viem RPC/HTTP error, including a request that never got an answer) gets it; a passkey
 // cancel and our own messages pass through.
 export const WALLET_SERVICE_LINE = "Circle's wallet service didn't respond. Nothing was changed. Try again in a few minutes.";
 
+// ⭐ TYPED: everything that fails inside a viem transport — Circle's RPC answer, an HTTP error, even a raw network TypeError —
+// reaches us as a viem BaseError (buildRequest wraps the unknown as UnknownRpcError), which carries `shortMessage` and
+// `version` as FIELDS. So the error's class marks it; its wording is never read.
 export function isCircleServiceFailure(e: unknown): boolean {
   if (!e || isPasskeyCancel(e)) return false;
-  const v = e as { name?: unknown; shortMessage?: unknown; message?: unknown };
-  const msg = String(v.message ?? e);
-  if (typeof v.shortMessage === "string") return true;                                         // a viem BaseError
-  if (typeof v.name === "string" && /RpcError|RpcRequestError|HttpRequestError|TimeoutError/.test(v.name)) return true;
-  if (/Version: viem@/.test(msg)) return true;
-  return v.name === "TypeError" && /fetch|network/i.test(msg);                                 // the request never got an answer
+  const v = e as { name?: unknown; shortMessage?: unknown; version?: unknown };
+  if (typeof v.shortMessage === "string" && typeof v.version === "string") return true;      // a viem BaseError
+  return typeof v.name === "string" && /RpcError|RpcRequestError|HttpRequestError|TimeoutError/.test(v.name);
 }
 
 /** What the connect status line shows for a failure: our line for Circle's service, else the message as is. */
