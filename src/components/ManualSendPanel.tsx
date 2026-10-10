@@ -89,6 +89,18 @@ export function SendReviewBox({
   );
 }
 
+// ═══ ⭐ WHICH WALLET SIGNS — NAMED, WITH ITS ADDRESS (2026-10-10) ═════════════════════════════════
+// T, after a 0.1 USDC send (tx 0x85387b00…, Arc Testnet, 12:09:47 UTC) "confirmed under the MetaMask label" while signed in with a
+// passkey: READ ON CHAIN, its sender 0x74b7…24E5 has no code and sent the transfer itself to the USDC contract — a plain MetaMask
+// transaction, so the label was TRUE. What was missing is WHICH wallet: a user signed in with a passkey and also connected to
+// MetaMask could not tell from "You sign this in MetaMask" that this is not the passkey wallet. So the line names the address
+// that signs. ⛔ There is no passkey variant: this form renders only when MetaMask is ACTIVE (`isMetaMask` below) and
+// `sendUsdcManual` exists only on the MetaMask connector — a passkey line here would describe a path that cannot run.
+export function signerLine(address?: string | null): string {
+  const a = typeof address === "string" && /^0x[0-9a-fA-F]{40}$/.test(address) ? ` (${address.slice(0, 6)}…${address.slice(-4)})` : "";
+  return `You sign this in MetaMask${a} — it moves this wallet's own USDC, not the agent's.`;
+}
+
 export default function ManualSendPanel({ wallet: w }: { wallet: UnifiedWallet }) {
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("0.1");
@@ -165,7 +177,7 @@ export default function ManualSendPanel({ wallet: w }: { wallet: UnifiedWallet }
     <div className="plane plane--form">
       <div className="panel-eyebrow">Send</div>
       <h2>Send from your own wallet</h2>
-      <div className="sub">You sign this in MetaMask — it moves your own USDC, not the agent's.</div>
+      <div className="sub">{signerLine(w.address)}</div>
 
       {/* ⛔ THE LINE THE AGENT SEND PANEL DOES NOT NEED, and the counterpart to the one it now
           carries. Stated only in this state, where the control is actually offered — a standing

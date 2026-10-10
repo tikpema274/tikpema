@@ -24,7 +24,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import SendPanel, { SendOutcome } from "../src/components/SendPanel";
-import ManualSendPanel, { SendReviewBox } from "../src/components/ManualSendPanel";
+import ManualSendPanel, { SendReviewBox, signerLine } from "../src/components/ManualSendPanel";
 // ⭐⭐ THE CUSTODY SENTENCE IS NOT RESTATED HERE. It is rendered from CustodyNotice and the panel's
 // output is asserted to CONTAIN it, so the expected text is COMPOSED from the same source that
 // produces the real text. A hardcoded regex would go red when the sentence changed even though this
@@ -366,6 +366,21 @@ section("9 — 🚨 THE AGENT SEND SHOWS A RECEIPT — hash + explorer link — 
     /const (r|res|result|data) = await w\.sendFromAgent\(/.test(src) && /<SendOutcome\b/.test(src));
   check("⭐ the pre-send panel render carries no receipt",
     !/\/tx\//.test(renderToStaticMarkup(<SendPanel wallet={wallet("modular")} />)));
+}
+
+// ═══ ⭐ WHICH WALLET SIGNS (2026-10-10) — T's 0.1 USDC send (tx 0x85387b00…) was read on chain: sender 0x74b7…24E5, no code,
+// sent by itself to the USDC contract — MetaMask. The label was true; it did not say WHICH wallet. Both states, rendered.
+{
+  console.log("\n── which wallet signs: named, with its address ──");
+  const MM = "0x74b7b561FD71C68Eb1Da6b96a7A87033904b24E5";
+  const mm = strip(renderToStaticMarkup(<ManualSendPanel wallet={{ ...wallet("metamask"), address: MM }} />));
+  check("⭐ MetaMask active → the line names MetaMask AND the address that signs", mm.includes("You sign this in MetaMask (0x74b7…24E5) — it moves this wallet's own USDC, not the agent's."));
+  check("…and no address known → still names MetaMask, without inventing one", signerLine(null) === "You sign this in MetaMask — it moves this wallet's own USDC, not the agent's." && signerLine("not-an-address") === signerLine(null));
+  const pk = strip(renderToStaticMarkup(<ManualSendPanel wallet={{ ...wallet("modular", { metamaskConnected: true }), address: "0x" + "ab".repeat(20) }} />));
+  check("⛔ passkey active → NO 'You sign this in MetaMask' line (the form isn't offered; the passkey cannot sign this send)", !/You sign this in MetaMask/.test(pk));
+  check("…it says to switch to MetaMask instead", /Switch to MetaMask/i.test(pk));
+  const none = strip(renderToStaticMarkup(<ManualSendPanel wallet={wallet("modular")} />));
+  check("…and with MetaMask not connected at all, to connect it", /Connect MetaMask/i.test(none) && !/You sign this in MetaMask/.test(none));
 }
 
 console.log(`\n${"═".repeat(72)}`);
