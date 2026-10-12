@@ -22,7 +22,7 @@ import { sign as signWebauthn } from "webauthn-p256";
 import { arcTestnet } from "../config/chain";
 import { CONTRACTS, USDC_DECIMALS, USDC_NATIVE_DECIMALS } from "../config/contracts";
 import { describeChainError } from "../lib/describeChainError";
-import { beforeAccepted, afterAccepted, connectFailureLine } from "../lib/passkeySponsorship";
+import { beforeAccepted, afterAccepted, connectFailureLine, recordCalls } from "../lib/passkeySponsorship";
 
 // -- Client-plane config. CLIENT_KEY is browser-safe (domain restricted). --
 const clientKey = import.meta.env.VITE_CLIENT_KEY as string;
@@ -81,7 +81,8 @@ function clearStoredCredentialStorage() {
 
 // Built once at module load.
 const passkeyTransport = toPasskeyTransport(clientUrl, clientKey);
-const modularTransport = toModularTransport(`${clientUrl}/arcTestnet`, clientKey);
+// (2026-10-12) recordCalls: every Circle call that fails is recorded, so a failed step names itself (passkeySponsorship.ts)
+const modularTransport = recordCalls(toModularTransport(`${clientUrl}/arcTestnet`, clientKey));
 const publicClient = createPublicClient({
   chain: arcTestnet,
   transport: modularTransport,
