@@ -31954,3 +31954,58 @@ The Galaxy page prints `0x43e4a89e8f8cea5006e0eaefd12d746a5967a537` in full; its
 `eth_getCode(sender)` commands need it. T: it is a third party's address from the vault's own public event; the
 truncation rule was written for our own wallets. The earlier entry (route removal, above) was corrected to match the page.
 ⚠️ Not changed (not asked): docs/roadmap.md:22 and docs/direction-log.md:368,370 still show `0x43e4…a537`.
+
+---
+
+# 🚨 FINDING: A TRANSPARENT PROXY WITH A LIVE ADMIN AND A RENOUNCED OWNER GETS A CLEAN REPORT — `upgradeable` reads absent (2026-10-29, read-only, NOT FIXED)
+
+**The shape:** an EIP-1967 transparent proxy whose `owner()` is the zero address and whose admin slot holds a live address.
+The report says `upgradeable` is not present and the owner is `renounced`, and `evaluatePolicy` passes it. But the admin
+can replace the implementation, which changes every rule in the report.
+
+- **Why:** on a transparent proxy the upgrade entry point is in the proxy (or its ProxyAdmin), not in the implementation.
+  The power scan only looks at `shape.effectiveCode`, which is the implementation (`shared/onchain-analyze/shape.mjs:114-115`),
+  so the `upgradeable` selectors aren't found there. `shape.mjs:93-120` reads the admin slot and records it as
+  `evidence.admin` (and uses it to name the variant), but nothing turns it into a power or an owner fact.
+  `policy.mjs` evaluates power groups only.
+- **`renounced` is honest about `owner()` and silent about the admin.** The owner tri-state is right: it is a confirmed
+  zero read. The report just never says that a second controller exists.
+- **The test that should have caught it:** `scripts/dd/verify-analyze.mjs:148-153` builds exactly this shape (impl + admin
+  slot set). It asserts the class and the scanned address, but never `upgradeable`.
+- **Measured with a mock client:** `shape eip1967-transparent, admin 0xadad…ad, owner {0x0, renounced},
+  upgradeable: false, refusal: null` → `evaluatePolicy` `{ passes: true, failures: [] }`.
+- **A related case:** when the admin slot can't be read, `shape.mjs:106` labels the proxy `eip1967-proxy` /
+  `indeterminate`, not transparent. That proxy also reports `upgradeable: false` unless the implementation has UUPS
+  selectors. A fix keyed on the class name `eip1967-transparent` would miss it.
+
+**Blast radius, checked 2026-10-29 (read-only):**
+- **Deposit path (`_vault.mjs`):** it inherits the blind spot in what it discloses. The `upgradeable` warn and the owner
+  warn now come only from the report (`applyReportDisclosure`, :885-969), and `renounced` is in `KNOWN_QUIET` (:939).
+  `inspectVault` still reads the implementation slot, but its own `upgradeable` warn was removed in step 2 (:683).
+  **It cannot pass the gate today, but only because of an unrelated block:** conformance is a selector scan of the
+  address's own bytecode (:333), so any proxy BLOCKs as `not-erc4626` (the known gap, :73-75). If that gap is fixed so
+  conformance follows the implementation, this shape would reach the gate with no upgrade warn and no owner warn.
+- **Allowlisted and evaluated vaults: none is a proxy.**
+  - XyloVault `0x240Eb85458CD41361bd8C3773253a1D78054f747` (Arc testnet, block 69,666,939, one endpoint only): the impl,
+    admin and beacon slots are all zero; `owner()` = `0x94e0…b3c6`; code is 7,829 bytes.
+  - Galaxy USDC `0x8E357432CC12ff425c36432F312968aEb16112AF` (Arc mainnet, block 28,473,539, both endpoints agree): all
+    three slots are zero; `owner()` = `0x032a…69c0`; code is 21,826 bytes.
+- **Sold reports: none is about a transparent proxy.** The store `dd-analyze-pending` holds 3 records, all accepted and
+  served:
+  - `397b67b1…` (2026-08-11): `0x0077777d…19b9`, `eip1967-uups`, admin slot empty, owner EOA;
+  - `e7e855fb…` (2026-08-11): `0x6db396c1…b380`, an EOA;
+  - `2234a767…` (2026-09-20): `0x0077777d…19b9`, again `eip1967-uups`, admin slot empty (re-read today: still zero).
+  Reports that were issued but not sold (the vault card, the deposit path, agent and mandate checks) are not stored
+  anywhere, so they can't be listed.
+
+**Not fixed. Plan approved by T on 2026-10-29:**
+1. An ordering test first (`verify-proxy-admin-ordering.mjs`), with its red run on today's tree recorded.
+2. Then the engine fix:
+   - an EIP-1967 admin that is set makes `upgradeable` present (holder = admin, method `eip1967-admin-slot`);
+   - `owner.stillControlledVia` is added;
+   - an unreadable admin goes to `notChecked`;
+   - schema 0.3.0 → 0.4.0.
+3. 1 and 2 land in one commit.
+4. `_vault.mjs` disclosure changes are a separate, later step.
+5. Then a record of every DD report issued: serve even if the write fails, count the failure in dd-health and alert;
+   no retention limit.
