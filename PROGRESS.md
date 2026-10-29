@@ -32009,3 +32009,81 @@ can replace the implementation, which changes every rule in the report.
 4. `_vault.mjs` disclosure changes are a separate, later step.
 5. Then a record of every DD report issued: serve even if the write fails, count the failure in dd-health and alert;
    no retention limit.
+
+---
+
+# ✅ LIVE: 2a6343b + e7f965b — the EIP-1967 admin is a power (schema 0.4.0), and a record of every DD report issued (2026-10-29)
+
+**Deployed by T** with `npm run deploy:prod` from e7f965b: exit 0; the post-deploy gates forgery, spec and deployloss
+passed. The ledger captures are committed as c792d8b (not pushed). Pushed range acb3673..e7f965b. git push does not deploy.
+
+- **Deploy:** Netlify `6ae34a5e887bf99f2106b028`, state `ready`, published 2026-10-29T14:07:54Z on app.tikpema.xyz.
+- **Live build stamp** (`/.netlify/functions/blobs-probe`): commit `e7f965b4b446…`, `dirty: false`, tree `8ea72eb9…`,
+  306 files. The previous deploy was `6acc8f62…` (2026-10-12), stamped `322cf0a`.
+- **ddTree:** `d7968327…f559` (45 files) → `e8f11f9377df9f24873cd5ed929892dd28f914605867d32c7a43b89851eab80b` (46 files).
+  It equals the value computed locally before the deploy. `_dd-issued.mjs` joined the DD surface.
+- **Refusal window: 126 s.** It opened at 14:08:19.984Z and closed at 14:10:25.519Z: 9 probes, the self-clearing banner
+  observed (`dd-refusal-window-log.jsonl`).
+  - `/api/dd-vouched-build`: `vouched`, build = `stamp.ddTree` = `e8f11f93…`, verdict `pass`, produced at 14:10:18Z, for
+    deploy `6ae34a5e…`.
+  - Afterwards, an unpaid POST to `/api/dd-analyze` gets the 402 quote again ($0.06, Arc testnet).
+  - During the window the deposit path would have BLOCKed as `dd-report-missing`. The function logs show no
+    vault-inspect, deposit or DD-card call between 11:30Z and 14:47Z, so no user hit it.
+
+**Live check by T** (signed in on app.tikpema.xyz, DevTools recording): Inspect vault + Run the check on XyloVault
+`0x240Eb85458CD41361bd8C3773253a1D78054f747`.
+- The full signed report:
+  - `schemaVersion: "onchain-analyze/0.4.0"`;
+  - shape `plain-contract` (impl slot 0);
+  - owner `{ kind: "eoa", stillControlledVia: [] }`;
+  - `upgradeable` present: false;
+  - attestation signed (agentId 851891);
+  - quorum 2/2; 13/13 checks; block 69,691,014.
+- **Issued records** (`npm run dd:issued`, read by Claude): **2 of 2**, both `schemaVersion onchain-analyze/0.4.0`,
+  `ddBuild e8f11f93…`, owner `{kind: eoa, stillControlledVia: []}`, notChecked 0, powers [emergencyWithdraw,
+  feesSettable, setStrategy, setFeeRecipient, transferOwnership].
+  - `2026-10-29T15:28:56.384Z` `deposit-disclosure` @69,690,926: shown `WARN` [emergency-withdraw, fees-settable,
+    owner-is-eoa, performance-fee, set-strategy]; attestation `unsigned` (vaultDdReport calls `analyze()` directly);
+    canon `7736a749…`.
+  - `2026-10-29T15:29:41.124Z` `in-app-card` @69,691,014: attestation `signed`, shown null, canon `b4171e17…`.
+- **No record holds a wallet address of the user.**
+  - Every record has exactly the fields v, issuedAt, path, subject, schemaVersion, ddBuild, canonHash, attestation,
+    shape, owner, powersPresent, notChecked, shown, pendingHandle.
+  - Only two addresses appear. One is the subject. The other is `0x94e0dc7a…b3c6` inside the disclosure digest
+    (`holder:`), which is XyloVault's own `owner()`, read on chain on 2026-10-29. That's the power holder, not the person
+    who was shown the report.
+- `dd-canary-health` has no `issued-record-failure/` keys, so no write has failed.
+- The paid path (`paid` / `paid-free`) and `mandate-check` have not been exercised live. They are covered by
+  `verify-dd-issued.mjs`.
+
+**⚠️ The admin-slot behaviour is covered by tests, not seen live.** No live subject is a transparent proxy: XyloVault and
+Galaxy USDC have all three EIP-1967 slots zero, and the sold reports are UUPS or EOA. So the live report above shows
+`stillControlledVia: []`, the empty case. The set and unreadable cases rest on:
+- `scripts/dd/verify-analyze.mjs`: the transparent-proxy shape asserts `upgradeable` present, held by the admin;
+- `scripts/dd/verify-proxy-admin-ordering.mjs`: a red run on the pre-fix tree, quoted in the 2a6343b message;
+- the mutation checks recorded in the 2a6343b and e7f965b messages.
+
+**Follow-ups found during the live check (read-only, not fixed):**
+1. **The session lasts 30 minutes and belongs to one tab.**
+   - It's set by `SESSION_TTL_SEC = 30 * 60` (`netlify/functions/_auth.mjs:17`) and stored in `sessionStorage`, which is
+     per tab.
+   - When it expires, `agentWallet` stays loaded: only `clearSession` clears it. So the vault page still renders the card
+     for a tab that is no longer signed in.
+   - The first live attempt failed this way: T signed in on the Wallet page in one tab, while the vault card was in a tab
+     whose session had expired.
+2. **"Run the check" and "Save" are silently disabled when the session has expired.**
+   - Both buttons have `disabled={… || !w.isAuthenticated}` (`src/components/DdReportCard.tsx:369`, `:395`), so a click
+     does nothing and nothing says why.
+   - Proposed smallest fix: drop `!w.isAuthenticated` from both. `w.ddReport` → `ensureSession()` already starts a fresh
+     passkey sign-in when the session has expired (`src/wallet/useWallet.ts:180-186`), or shows "Connect a wallet first".
+     Add a one-line hint that pressing will ask for the passkey.
+3. **The share read is skipped, yet the card can say "Couldn't read your on-chain balance".**
+   - `refreshShares` returns early on `!w.isAuthenticated` (`src/components/VaultPanel.tsx:78`). That early return
+     doesn't clear an earlier `sharesErr`, and `sharesErr` is checked before `!sharesProbed` (`:307` vs `:317`).
+   - A sign-in that fails or is cancelled inside `w.vaultShareBalance` → `ensureSession()` also sets `sharesErr`, with no
+     chain read at all.
+   - Either way, the warning "⚠ Couldn't read your on-chain balance" (`:310`) can describe a sign-in problem as a chain
+     read failure.
+   - Its Retry button calls the same `refreshShares`, so it is dead too while the session is expired.
+   - Not established which of the two produced T's message. The logs show an `auth-challenge` at 14:57:41Z with no
+     `auth-verify`, which fits a cancelled prompt.
