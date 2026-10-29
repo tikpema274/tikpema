@@ -20,6 +20,7 @@
 
 import { inspectVault, gateDeposit, applyReportDisclosure, ackTokenFor } from "./_vault.mjs";
 import { vaultDdReport } from "./_vault-report.mjs";
+import { recordIssued } from "./_dd-issued.mjs";
 
 /**
  * The deposit disclosure for one allowlisted vault, from the holder's point of view.
@@ -38,11 +39,15 @@ export async function depositDisclosure({ vault: v, owner = null, event = undefi
   // disclosure missing every owner power. gateDeposit refuses an inspection that never went
   // through here, so the omission fails closed rather than passing quietly — but it fails closed
   // at the GATE, which is far from whoever forgot it. Doing it here means nobody can forget.
-  inspection = applyReportDisclosure(inspection, await vaultDdReport(v.address, { event }));
+  const report = await vaultDdReport(v.address, { event });
+  inspection = applyReportDisclosure(inspection, report);
 
   // Dry-run the gate with NO ack, so the caller learns whether an ack is required and, if so,
   // exactly which token to send back. Never signs anything.
   const gate = gateDeposit({ inspection, ackToken: undefined, expectedAssetAddress: v.assetAddress });
+  // The issued-report record: what this caller is about to be shown. Never the holder; never throws.
+  await recordIssued({ path: "deposit-disclosure", report,
+    shown: { level: gate.disclosure.level, warnCodes: gate.disclosure.warns.map((w) => w.code), digest: gate.disclosure.digest } });
 
   // ⚠️ THESE TWO CONDITIONS ARE DELIBERATELY DIFFERENT, AND THE DIFFERENCE IS LOAD-BEARING.
   // `ackRequired` additionally demands an empty block list, because gateDeposit can ADD a block

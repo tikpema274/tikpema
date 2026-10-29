@@ -6,6 +6,7 @@ import { agentPay } from "./_pay.mjs";
 import { agentBridge, bridgeFee, resolveDestination, bridgeFeeBand, bridgeAckToken, openBridgeQuote, bridgeAckSentence } from "./_bridge.mjs";
 import { resolveVault, inspectVault, gateDeposit, applyReportDisclosure, vaultDeposit, vaultWithdraw, readShareBalance } from "./_vault.mjs";
 import { vaultDdReport } from "./_vault-report.mjs";
+import { recordIssued } from "./_dd-issued.mjs";
 import { canSpendDay, recordAgentSpend, shoutLedgerFailure, recordBlocked, REFUSAL } from "./_budget.mjs";
 import { AGENT } from "./_agents.mjs";
 import { assertNotPaused } from "./_pause.mjs";
@@ -757,8 +758,12 @@ export async function executeAction(step, ctx) {
     // same discipline the re-inspection already followed. A report fetched when the user was
     // reading the card is not evidence about the vault now.
     // ⚠️ A null report BLOCKS inside applyReportDisclosure; that decision is not duplicated here.
-    inspection = applyReportDisclosure(inspection, await vaultDdReport(v.address));
+    const ddReport = await vaultDdReport(v.address);
+    inspection = applyReportDisclosure(inspection, ddReport);
     const gate = gateDeposit({ inspection, ackToken: step.ackToken, expectedAssetAddress: v.assetAddress });
+    // The issued-report record, refused or not: the gate decided on this report. Never throws.
+    await recordIssued({ path: "deposit-execution", report: ddReport,
+      shown: { level: gate.disclosure.level, warnCodes: gate.disclosure.warns.map((w) => w.code), digest: gate.disclosure.digest } });
     if (!gate.ok) return refuse(REFUSAL.DISCLOSURE, gate.blocked, { disclosure: gate.disclosure });
 
     // ctx.onVaultSubmitted / ctx.chargeId: set ONLY by the vault mandate (_vault-mandate-deposit.mjs) —

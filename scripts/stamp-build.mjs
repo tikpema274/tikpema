@@ -120,6 +120,7 @@ const DD_SURFACE_FILES = [
   "netlify/functions/dd-canary.mjs",
   "netlify/functions/_dd-health.mjs",
   "netlify/functions/_dd-x402.mjs",
+  "netlify/functions/_dd-issued.mjs", // _dd-x402 imports it (issued-report record, 2026-10-29) → reached by dd-analyze; MUST be hashed
   "netlify/functions/_dd-exposure.mjs",
   "netlify/functions/_blobs.mjs",  // dd-canary imports it — it decides whether the store is readable
   "netlify/functions/_arc.mjs",    // dd-canary imports it

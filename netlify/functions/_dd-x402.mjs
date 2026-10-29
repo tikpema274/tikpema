@@ -60,6 +60,7 @@ import { POWER_SIGS } from "../../shared/onchain-facts/index.mjs";
 // ⭐ THE CALL SHAPE, IMPORTED. A hand-written copy here would be a second source of truth for the
 // thing agents call us with — see _dd-descriptor.mjs.
 import { DD_REQUEST_SCHEMA, DD_RESPONSE_SCHEMA, DD_OPENAPI_URL, SUPPORTED_CHAINS } from "./_dd-descriptor.mjs";
+import { recordIssued } from "./_dd-issued.mjs";
 
 export const PENDING_STORE = "dd-analyze-pending";
 
@@ -794,6 +795,8 @@ export async function runPaidAnalysis({ facilitator, rpcCall, store, payload, re
 
   // ── the engine did not produce a chargeable answer → the report is free, nothing was broadcast.
   if (!outcome.decision.settle) {
+    // An unsigned ANSWER is served free here and is a claim about the subject; a refusal is skipped inside.
+    await recordIssued({ path: "paid-free", report: outcome.report });
     return jsonResp(200, {
       ...outcome.body,
       price: DD_PRICE_HUMAN,
@@ -939,6 +942,8 @@ export async function retrievePaid({ handle, store, rpcCall, now = () => Date.no
   try {
     await store.setJSON(handle, { ...rec, served: true, servedAt: now(), confirmedEvidence: verdict.evidence });
   } catch { /* serving matters more than the bookkeeping write; a re-serve is harmless and idempotent */ }
+  // The issued-report record — one per serve (a re-serve is a second issuance). Never throws.
+  await recordIssued({ path: "paid", report: rec.report, pendingHandle: handle });
 
   return jsonResp(200, {
     ok: true,

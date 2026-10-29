@@ -38,6 +38,7 @@ import { readStateAtAnchor } from "../../shared/vault-mandate/state-reads.mjs";
 import { redeemSimulationOutcome } from "../../shared/vault-mandate/redeem-sim.mjs";
 import { observeMandateCheck } from "../../shared/vault-mandate/observe.mjs";
 import { redemptionSignalFor } from "../../shared/vault-redemption.mjs";
+import { recordIssued } from "./_dd-issued.mjs";
 
 /**
  * Vaults whose `totalAssets` is cash: no code path moves the asset anywhere but redeem/withdraw, fees
@@ -107,6 +108,8 @@ export async function signedCheckReport({ address, anchor, deps }) {
   if (v?.valid !== true) {
     return no(`the report's signature did not verify (${v?.reason ?? "unknown"}): ${v?.detail ?? ""}`.trim(), { verification: v });
   }
+  // The issued-report record: this signed, verified report is what the mandate acts on. Never throws.
+  await recordIssued({ path: "mandate-check", report: signed });
   return { report: signed, verification: v, why: null, cost };
 }
 

@@ -52,6 +52,7 @@ import { json } from "./_arc.mjs";
 import { connectBlobs } from "./_blobs.mjs";
 import { requireSession } from "./_auth.mjs";
 import { RUNG, runLadder, makeProduceReport, newCorrelationId, refusalReport } from "./_dd-rungs.mjs";
+import { recordIssued } from "./_dd-issued.mjs";
 import { evaluatePolicy, POLICY_CEILING } from "../../shared/onchain-analyze/policy.mjs";
 import { readPolicy } from "./_policy-store.mjs";
 import { POLICY_STATE, POLICY_AUTHORITY } from "../../shared/onchain-analyze/policy-doc.mjs";
@@ -83,6 +84,8 @@ export async function handler(event) {
 
     // ── the report — the SAME producer the paid path hands to runThenSettle ───────────────────
     const report = await makeProduceReport({ addr, chain, correlationId })();
+    // The issued-report record (a refusal is skipped inside). Never throws; never the session.
+    await recordIssued({ path: "in-app-card", report });
 
     // ── the policy verdict ─────────────────────────────────────────────────────────────────────
     // ⚠️⚠️ THE POLICY IS CLIENT-SUPPLIED ON THIS CUT, SO THE VERDICT IS DISPLAY-ONLY. It must NOT
