@@ -126,6 +126,17 @@ section("C. refuse, don't omit");
   const ref = renderReportPage({ ...clone(REPORT), refusal: { reason: "unrecognised-vocabulary", detail: "the governance code is not one the service recognises" } }, CTX);
   check("a refusal renders as declined", ref.includes("declined to describe") && ref.includes("not one the service recognises"));
   check("a refusal shows no inventory", !ref.includes("Who can touch your deposit"));
+  // 0.4.0: the published 0.3.0 report, re-labelled, still renders (a plain vault, nothing new to draw)…
+  const v4 = { ...clone(REPORT), schemaVersion: "onchain-analyze/0.4.0", owner: { ...REPORT.owner, stillControlledVia: [] } };
+  check("a 0.4.0 report with no second controller renders, with the 0.4.0 holder sentence",
+    renderReportPage(v4, CTX).includes("attributed to that admin"));
+  // …but a second controller, an unestablished one, or an admin-held power is not drawable yet and refuses.
+  const refuses = (r) => { try { renderReportPage(r, CTX); return false; } catch { return true; } };
+  check("0.4.0 with an EIP-1967 admin in stillControlledVia refuses",
+    refuses({ ...v4, owner: { ...v4.owner, stillControlledVia: [{ via: "eip1967-admin", address: "0x" + "ad".repeat(20), readId: "r9" }] } }));
+  check("0.4.0 with stillControlledVia not established (null) refuses", refuses({ ...v4, owner: { ...v4.owner, stillControlledVia: null } }));
+  check("0.4.0 with a power held through the admin slot refuses",
+    refuses({ ...v4, powers: [...v4.powers, { power: "upgradeable", present: true, matched: [], holder: "0x" + "ad".repeat(20), evidence: { method: "eip1967-admin-slot" } }] }));
 }
 
 section("D. the published page is the published report");

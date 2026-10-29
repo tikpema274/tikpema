@@ -29,6 +29,12 @@ export const SCHEMA_SCOPE = Object.freeze({
     exit: "This version of the report does not compute what a withdrawal would return right now.",
     holderAttribution: "The report attributes every power to the address returned by owner(). It does not read each function's access check, so it does not establish that the owner is the only address that can call it.",
   },
+  // 0.4.0: an EIP-1967 proxy admin is attributed the upgrade power, so "every power to owner()" is no longer true.
+  "onchain-analyze/0.4.0": {
+    delays: "This version of the report does not read whether any power waits before it takes effect. It records which powers exist and who they are attributed to, not how long they take. If one takes effect immediately, this report would not show it.",
+    exit: "This version of the report does not compute what a withdrawal would return right now.",
+    holderAttribution: "The report attributes each power to the address returned by owner(), except that on an EIP-1967 proxy with an admin, the power to replace the code is attributed to that admin. It does not read each function's access check, so it does not establish that the named holder is the only address that can call it.",
+  },
 });
 
 const REASON_SENTENCE = {
@@ -72,6 +78,13 @@ export function renderReportPage(report, ctx) {
     if (report[f] !== undefined && report[f] !== null) throw new Error(`render-report: report carries ${f}, which this renderer does not render; refusing`);
   }
   if (report.refusal) return renderRefusal(report, ctx);
+  // ⛔ 0.4.0: a power held by someone other than owner(), or a second controller, would be drawn below as
+  // "the vault's code contains …, attributed to the owner" — false on both counts. Not drawable yet: refuse.
+  const ctl = report.owner?.stillControlledVia;
+  if (ctl === null || (Array.isArray(ctl) && ctl.length > 0) ||
+      (report.powers ?? []).some((p) => p.present && p.evidence?.method !== "selector-in-bytecode")) {
+    throw new Error("render-report: the report names a controller other than owner() (or could not establish one), which this renderer does not draw; refusing");
+  }
   // ⛔ No block time → no age → the page could not tell a reader how old it is. Refuse rather than render undated.
   if (!(Number(ctx.blockTimestamp) > 0)) throw new Error("render-report: ctx.blockTimestamp is required; a page that cannot show its own age is not rendered");
 

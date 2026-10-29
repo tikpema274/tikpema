@@ -82,7 +82,11 @@ section("8 — ⭐ WIRED INTO THE REPORT: sanctions rides on baseReport and is S
   const rpt = baseReport({ address: LISTED, chainId: 5042002, chainName: "arc-testnet", blockNumber: 100 });
   ok("⭐ every report carries a `sanctions` fact", rpt.sanctions?.status === OFAC_STATUS.LISTED, rpt.sanctions?.status);
   ok("⭐ it is the SAME fact the standalone screen produces", JSON.stringify(rpt.sanctions) === JSON.stringify(screenOfac(LISTED)));
-  ok("⭐ schemaVersion bumped to 0.3.0 (a report asserting sanctions is a DIFFERENT claim)", SCHEMA_VERSION === "onchain-analyze/0.3.0", SCHEMA_VERSION);
+  // Re-pointed at 0.4.0 (the EIP-1967 admin): the property is that sanctions arrived WITH a bump (0.3.0) and
+  // no later version drops below it. The exact current version is pinned where its own claim is tested
+  // (verify-analyze ROW 10).
+  const [, maj, min] = /^onchain-analyze\/(\d+)\.(\d+)\.\d+$/.exec(SCHEMA_VERSION) ?? [];
+  ok("⭐ schemaVersion is 0.3.0 or later (a report asserting sanctions is a DIFFERENT claim)", maj === "0" && Number(min) >= 3, SCHEMA_VERSION);
 
   // ⭐⭐ THE SIGNING PROPERTY: canon excludes only `reads` and `attestation`. sanctions must be INSIDE
   // the signed bytes, so a signature vouches for the exact pinned list version (via ddTree). Prove it

@@ -25,6 +25,12 @@ import { EIP1967_IMPL_SLOT } from "../../shared/onchain-facts/index.mjs";
 import { SUBJ, IMPL, OWNER, ZERO_WORD, word, codeWith, mockClient, transientThrow, revertThrow, mkc }
   from "./_mock-chain.mjs";
 import { analyzeOnArc } from "./analyze-run.mjs";
+import { createHash } from "node:crypto";
+import { evaluatePolicy, POLICY_REASON } from "../../shared/onchain-analyze/policy.mjs";
+
+// ROW 10 · 6 — sha256 of the mocked plain-contract report minus schemaVersion and
+// owner.stillControlledVia, computed on the pre-0.4.0 tree (8308729) and equal on 0.4.0.
+const PLAIN_REPORT_HASH_PRE_0_4 = "d299581172a47e4b72a445affd6c5e409c4e154e98958bfed611146165031819";
 
 let pass = 0, fail = 0;
 const ok = (cond, label, detail = "") => {
@@ -151,6 +157,10 @@ console.log("\n── ROW 5 · SHAPES: each branch, and the diamond must NOT rea
   }) });
   ok(tp.shape.class === "eip1967-transparent" && tp.shape.variant === "transparent", `impl+admin slots set → transparent (got ${tp.shape.class})`);
   ok(tp.shape.scannedAddress === IMPL, "powers scanned in the implementation, not the proxy stub");
+  // ⭐ (0.4.0) this fixture always had an admin set — and never asserted what that means for upgrades.
+  const tpUp = tp.powers.find((p) => p.power === "upgradeable");
+  ok(tpUp?.present === true && tpUp.holder === OWNER && tpUp.evidence.method === "eip1967-admin-slot",
+    `transparent with an admin → upgradeable PRESENT, held by the admin (got present=${tpUp?.present}, holder=${tpUp?.holder}, method=${tpUp?.evidence?.method})`);
 
   const uu = await analyze(SUBJ, { client: mockClient({
     [`code@${SUBJ}`]: codeWith([]), [`slot@${EIP1967_IMPL_SLOT}`]: word(IMPL), [`slot@${EIP1967_ADMIN_SLOT}`]: ZERO_WORD,
@@ -382,6 +392,69 @@ console.log("\n── ROW 9 · RECOGNITION GATE: an unrecognised VAULT power sur
   const n = await analyze(SUBJ, { client: mockClient(base(codeWith(["pause()"]))) });
   ok(n.refusal === null, `a NON-vault contract is NOT gated (got ${n.refusal?.reason ?? "null"})`);
   ok(n.powers.find((p) => p.power === "pausable")?.present === true, "…and its powers are scanned normally");
+}
+
+console.log("\n── ROW 10 · ⭐ THE EIP-1967 ADMIN IS A POWER: `renounced` beside a live admin is not a clean bill (0.4.0) ──");
+{
+  // Before 0.4.0 the first case reported upgradeable ABSENT and passed a policy refusing it: the upgrade
+  // entry point of a transparent proxy is in the proxy, and only the implementation was scanned.
+  const ADMIN = "0x" + "ad".repeat(20);
+  const proxy = (adminSlot, implCode = codeWith(["pause()"])) => ({
+    [`code@${SUBJ}`]: codeWith(["upgradeToAndCall(address,bytes)"]), [`slot@${EIP1967_IMPL_SLOT}`]: word(IMPL),
+    [`slot@${EIP1967_ADMIN_SLOT}`]: adminSlot, [`code@${IMPL}`]: implCode, [`call@0x8da5cb5b`]: ZERO_WORD,
+  });
+  const refuseUpgrade = { rules: { upgradeable: "refuse" } };
+  const a0Version = (await analyze(SUBJ, { client: mockClient(proxy(word(ADMIN))) })).schemaVersion;
+  const upOf = (r) => r.powers.find((p) => p.power === "upgradeable");
+  const ncOf = (r) => r.coverage.notChecked.find((e) => e.group === "upgradeable");
+  const onceIn = (r) => [...r.coverage.checked, ...r.coverage.notChecked].filter((e) => e.group === "upgradeable").length === 1;
+
+  ok(a0Version === "onchain-analyze/0.4.0", `the schema is 0.4.0 — a report attributing a power to someone other than owner() is a different claim (got ${a0Version})`);
+
+  // 1 — renounced owner + live admin
+  const a = await analyze(SUBJ, { client: mockClient(proxy(word(ADMIN))) });
+  const up = upOf(a);
+  ok(a.refusal === null && a.owner.kind === "renounced", `renounced owner, answered report (kind=${a.owner.kind}, refusal=${a.refusal?.reason ?? null})`);
+  ok(up?.present === true, `1 · upgradeable PRESENT (got ${up?.present})`);
+  ok(up?.holder === ADMIN && up?.holderKind === "unclassified", `1 · held by the admin, kind unclassified (got ${up?.holder}, ${up?.holderKind})`);
+  ok(up?.evidence?.method === "eip1967-admin-slot" && up.evidence.slot === EIP1967_ADMIN_SLOT && up.evidence.readId === a.shape.evidence.adminReadId && !!up.evidence.readId,
+    `1 · evidence cites the admin-slot read (method=${up?.evidence?.method}, readId=${up?.evidence?.readId})`);
+  ok(a.reads.some((rd) => rd.readId === up?.evidence?.readId && rd.params?.[1] === EIP1967_ADMIN_SLOT), "1 · …and that readId resolves to the eth_getStorageAt of the admin slot");
+  ok(JSON.stringify(a.owner.stillControlledVia) === JSON.stringify([{ via: "eip1967-admin", address: ADMIN, readId: up?.evidence?.readId }]),
+    `1 · owner.stillControlledVia names the admin (got ${JSON.stringify(a.owner.stillControlledVia)})`);
+  const pa = evaluatePolicy(a, refuseUpgrade);
+  ok(pa.passes === false && pa.reason === POLICY_REASON.POWER_PRESENT && pa.failures.some((f) => f.group === "upgradeable"),
+    `1 · a policy refusing upgradeable FAILS with power-present (passes=${pa.passes}, reason=${pa.reason})`);
+
+  // 2 — admin slot unreadable → the class is indeterminate, and the power is UNKNOWN, never false
+  const u = await analyze(SUBJ, { client: mockClient(proxy(transientThrow)) });
+  ok(u.shape.class === "eip1967-proxy" && u.shape.variant === "indeterminate", `2 · class eip1967-proxy / indeterminate (got ${u.shape.class} / ${u.shape.variant})`);
+  ok(upOf(u) === undefined && ncOf(u)?.reason === "input-unreadable" && /admin slot could not be read/.test(ncOf(u)?.detail ?? ""), `2 · upgradeable in notChecked as input-unreadable, with the reason (got ${JSON.stringify(ncOf(u) ?? upOf(u)?.present)})`);
+  ok(u.owner.stillControlledVia === null, `2 · stillControlledVia null — NOT established, not [] (got ${JSON.stringify(u.owner.stillControlledVia)})`);
+  const pu = evaluatePolicy(u, refuseUpgrade);
+  ok(pu.passes === false && pu.unreadableFailures.some((f) => f.group === "upgradeable"), `2 · the policy gives unreadableFailures, not a pass (passes=${pu.passes}, reason=${pu.reason})`);
+
+  // 3 — admin zero + a UUPS implementation → unchanged: the selector, held by owner()
+  const z = await analyze(SUBJ, { client: mockClient({ ...proxy(ZERO_WORD, codeWith(UUPS_SIGS)), [`call@0x8da5cb5b`]: word(OWNER), [`code@${OWNER}`]: "0x" }) });
+  ok(z.shape.variant === "uups" && upOf(z)?.present === true && upOf(z).evidence.method === "selector-in-bytecode" && upOf(z).holder === OWNER,
+    `3 · UUPS unchanged: present by selector, held by owner() (got ${upOf(z)?.evidence?.method}, ${upOf(z)?.holder})`);
+  ok(Array.isArray(z.owner.stillControlledVia) && z.owner.stillControlledVia.length === 0, `3 · stillControlledVia [] (got ${JSON.stringify(z.owner.stillControlledVia)})`);
+
+  // 5 — exactly once in the manifest, in every case (assertReportValid would refuse a double)
+  ok(onceIn(a) && onceIn(u) && onceIn(z), "5 · upgradeable registered exactly once in cases 1–3");
+  ok([a, u, z].every((r) => r.refusal === null), "5 · …and none of the three is a coverage-incomplete refusal");
+
+  // 6 — a plain (non-proxy) contract: [] and the selector method, as before
+  const p = await analyze(SUBJ, { client: mockClient({ [`code@${SUBJ}`]: codeWith(["pause()"]), [`slot@${EIP1967_IMPL_SLOT}`]: ZERO_WORD, [`call@0x8da5cb5b`]: word(OWNER), [`code@${OWNER}`]: "0x" }) });
+  ok(JSON.stringify(p.owner.stillControlledVia) === "[]" && p.powers.every((x) => x.evidence.method === "selector-in-bytecode" && x.holder === OWNER),
+    "6 · plain contract: stillControlledVia [], every power by selector, held by owner()");
+  // ⭐ NO OTHER DRIFT: this hash is of the plain-contract report with schemaVersion and
+  // owner.stillControlledVia removed, computed on the PRE-FIX tree (8308729). Any other change to a
+  // non-proxy report moves it.
+  const { schemaVersion: _v, ...rest } = p;
+  const { stillControlledVia: _s, ...ownerRest } = p.owner;
+  const plainHash = createHash("sha256").update(JSON.stringify({ ...rest, owner: ownerRest })).digest("hex");
+  ok(plainHash === PLAIN_REPORT_HASH_PRE_0_4, `6 · plain report otherwise byte-identical to 0.3.0 (got ${plainHash.slice(0, 16)}…)`);
 }
 
 console.log(`\n${"═".repeat(92)}`);

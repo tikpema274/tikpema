@@ -12,6 +12,7 @@
 import { UNREADABLE, unread, sel, hasSel, POWER_SIGS, classifyOwnerType } from "../onchain-facts/index.mjs";
 import { unreadableInput } from "./coverage.mjs";
 import { POWER_SCOPE, SCOPE_REACH } from "./schema.mjs";
+import { EIP1967_ADMIN_SLOT } from "./slots.mjs";
 
 const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
 const addrFromWord = (w) => (w && w !== "0x" ? "0x" + String(w).slice(-40).toLowerCase() : null);
@@ -61,8 +62,45 @@ export async function enumeratePowers(cov, shape, owner) {
       continue;
     }
 
+    // 🚨 THE TRANSPARENT-PROXY ADMIN (2026-10-29). On an EIP-1967 proxy with an admin, the upgrade
+    // entry point is in the PROXY, behind the admin — not in the implementation this loop scans. So
+    // the implementation's selectors alone reported `upgradeable` absent while the admin could replace
+    // every rule in this report. The admin slot decides it, keyed on the FAMILY and the slot read, not
+    // on the class name: an unreadable admin makes the class `eip1967-proxy` (indeterminate), and that
+    // case is exactly the one that must not read as absent.
+    const admin = group === "upgradeable" ? proxyAdminOf(shape) : null;
+    // ⚠️ NOT cov.skip: a skip is "deliberately not run". This is an input that could not be read, so
+    // it is recorded the way an unreadable bytecode is — `input-unreadable`.
+    if (admin?.state === "unreadable") {
+      await cov.runCheck(`power:${group}`, meta, () => {
+        throw unreadableInput("the EIP-1967 admin slot could not be read — whether an admin can replace the implementation is UNKNOWN, not absent");
+      });
+      continue;
+    }
+
     const r = await cov.runCheck(`power:${group}`, meta, () => scanGroup(plan.code, sigs));
     if (!r.ok) continue; // already registered in notChecked, with its reason
+
+    if (admin?.state === "set") {
+      out.push({
+        power: group,
+        present: true,
+        // the implementation's own upgrade selectors, if any, still listed — they are a second route
+        matched: r.value.matched,
+        holder: admin.address,
+        // ⚠️ the admin's own code is not read in this version: EOA, ProxyAdmin or multisig is NOT established
+        holderKind: "unclassified",
+        severity: POWER_SCOPE[group],
+        severityReach: SCOPE_REACH[POWER_SCOPE[group]],
+        evidence: {
+          method: "eip1967-admin-slot",
+          slot: EIP1967_ADMIN_SLOT,
+          readId: admin.readId,
+          note: "the EIP-1967 admin slot holds a non-zero address: on a transparent proxy that address can replace the implementation, whatever owner() returns. What kind of account the admin is, and who controls it, was not read",
+        },
+      });
+      continue;
+    }
 
     out.push({
       power: group,
@@ -83,6 +121,32 @@ export async function enumeratePowers(cov, shape, owner) {
     });
   }
   return out;
+}
+
+/**
+ * The EIP-1967 admin, as the shape read it. `n/a` for any shape that is not an EIP-1967 proxy.
+ * ⚠️ `unreadable` is its own state and must never collapse into `zero`.
+ */
+export function proxyAdminOf(shape) {
+  if (shape?.family !== "eip1967") return { state: "n/a", address: null, readId: null };
+  const ev = shape.evidence ?? {};
+  if (ev.adminSlot === "unreadable") return { state: "unreadable", address: null, readId: null };
+  if (ev.admin && !isZeroAddr(ev.admin)) return { state: "set", address: ev.admin, readId: ev.adminReadId ?? null };
+  return { state: "zero", address: null, readId: null };
+}
+
+/**
+ * Who else controls the subject, beside owner(). Always present on an answered report:
+ *   []    — the checks this version makes found no second controller;
+ *   [..]  — each one found, with the read it came from;
+ *   null  — NOT ESTABLISHED (the admin slot, or the shape itself, could not be read). null is not [].
+ */
+export function stillControlledVia(shape) {
+  if (shape?.family === "unknown") return null;
+  const a = proxyAdminOf(shape);
+  if (a.state === "unreadable") return null;
+  if (a.state === "set") return [{ via: "eip1967-admin", address: a.address, readId: a.readId }];
+  return [];
 }
 
 /**

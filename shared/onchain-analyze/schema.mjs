@@ -25,6 +25,14 @@ import { POWER_SIGS } from "../onchain-facts/index.mjs";
 import { unsignedAttestation } from "./attest.mjs";
 import { screenOfac } from "./ofac.mjs";
 
+// 0.4.0 — the EIP-1967 admin is a power (2026-10-29). On an EIP-1967 proxy whose admin slot holds a
+// non-zero address, `upgradeable` is PRESENT with the admin as holder (evidence.method
+// "eip1967-admin-slot"); an unreadable admin slot puts `upgradeable` in notChecked, never `false`. And
+// `owner.stillControlledVia` names any second controller beside owner() ([] none found, null not
+// established). Before this, a transparent proxy with a renounced owner and a live admin reported
+// `upgradeable` absent and passed a policy refusing it. Same reasoning as every bump: a report that
+// attributes a power to someone other than owner() is a different claim, inside the signed payload.
+//
 // 0.3.0 — every report now carries `sanctions`: a deterministic OFAC SDN screen of the subject
 // (see ofac.mjs), computed in baseReport so it rides on EVERY path — including a chain-unreachable
 // refusal, because the screen is pure and needs no chain read. It sits INSIDE the signed canon
@@ -36,7 +44,7 @@ import { screenOfac } from "./ofac.mjs";
 // 0.2.0 — `attestation` is now present on EVERY report (see baseReport). The bump is deliberate:
 // `schemaVersion` sits INSIDE the signed payload, so a different report shape must be a different
 // claim rather than the same claim with extra fields.
-export const SCHEMA_VERSION = "onchain-analyze/0.3.0";
+export const SCHEMA_VERSION = "onchain-analyze/0.4.0";
 
 /** Rides on every report, machine-readable, so no consumer can claim it was not told. */
 export const SEVERITY_MEANING =

@@ -118,6 +118,8 @@ export async function detectShape(cov, client, addr, blk) {
         ...ev, implementation: impl,
         adminSlot: unread(admin) ? "unreadable" : adminS.value,
         admin: unread(admin) ? null : isZeroAddr(admin) ? null : admin,
+        // ⭐ the read the admin came from — powers.mjs cites it when the admin makes `upgradeable` present.
+        adminReadId: adminS.ok ? adminS.readId ?? null : null,
         variantBasis: variant === "transparent" ? "admin slot is set" :
                       variant === "uups" ? "admin slot empty and the implementation exposes upgradeTo/upgradeToAndCall" :
                       "admin slot empty or unreadable and no UUPS entry point observed — the family is certain, the variant is not",

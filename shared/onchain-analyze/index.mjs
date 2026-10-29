@@ -31,7 +31,7 @@ import { normalizeAddress } from "./normalize.mjs";
 import { INTEGRITY_OUTCOMES } from "./endpoints.mjs";
 import { makeCoverage } from "./coverage.mjs";
 import { detectShape } from "./shape.mjs";
-import { enumeratePowers, resolveOwner } from "./powers.mjs";
+import { enumeratePowers, resolveOwner, stillControlledVia } from "./powers.mjs";
 import { baseReport, assertReportValid } from "./schema.mjs";
 import { hasSel, unread, POWER_SIGS } from "../onchain-facts/index.mjs";
 // ⭐ The recognition gate — the SAME source the deposit path (_vault.mjs) uses. No new vocabulary here.
@@ -122,7 +122,9 @@ export async function analyze(address, { client } = {}) {
       scannedAddress: shape.effectiveCodeAddress ?? null,
       evidence: shape.evidence,
     },
-    owner: { address: owner.address, kind: owner.type },
+    // ⭐ stillControlledVia (0.4.0): `renounced` describes owner() only. A live EIP-1967 admin is a
+    // second controller, and it is named here so `renounced` can never stand next to it unchallenged.
+    owner: { address: owner.address, kind: owner.type, stillControlledVia: stillControlledVia(shape) },
     powers,
     powersPresent: powers.filter((p) => p.present).map((p) => p.power),
     // ⚠️ A quorum that cannot attest its own independence but implies it is itself a false clean
