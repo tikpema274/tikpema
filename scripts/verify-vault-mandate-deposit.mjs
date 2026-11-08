@@ -95,7 +95,9 @@ section("0 — R1 + R2: the caps live off the DD surface; the gate is a code con
 
   ok("⭐ MANDATE_DEPOSIT_ARMED ships false", MANDATE_DEPOSIT_ARMED === false);
   ok("⭐ MANDATE_ARMED_FROM ships null", MANDATE_ARMED_FROM === null);
-  ok("⭐ MANDATE_CHECK_FRESHNESS_MS ships null (unset until the signing latency is measured)", MANDATE_CHECK_FRESHNESS_MS === null);
+  // (T, 2026-11-08) set from the MEASURED full-path samples: 38 daily disarmed ticks, 2026-10-02 → 11-08, all ok;
+  // slowest `fullPath.wouldBeCheckAgeMs` = 2,183 ms (10-24 11:17Z). Rule (T, 8cd4ba9): min(10 000, 2 × max) = 4,366 ms.
+  ok("⭐ MANDATE_CHECK_FRESHNESS_MS ships 4366 (min(10 000, 2 × 2,183 ms), the slowest of 38 measured samples)", MANDATE_CHECK_FRESHNESS_MS === 4366);
   ok("⭐ EXIT_AVAILABLE ships false (piece 5 flips it)", EXIT_AVAILABLE === false);
 
   // ⭐ ONE function issues a mandate deposit. Any other file that knows about mandates and reaches the
@@ -516,6 +518,16 @@ section("7 — the check cannot be skipped: the mutations the design names");
   const refusedBy = ({ r, x }, code) => r?.ok === false && (!code || r?.code === code) && x.executor.calls.length === 0 && x.intentsC.calls.filter((c) => c.fn !== "listOpen").length === 0;
   ok("no check → refused, nothing executed", refusedBy(await run({ c: null }), REFUSED.NO_CHECK));
   ok("⭐ a STALE check (anchored 61 s ago, window 60 s) → refused", refusedBy(await run({ c: checked({ timing: { anchoredAt: T0 - 61_000, verifiedAt: T0 - 60_500 } }) }), REFUSED.STALE_CHECK));
+  // ⭐ THE SHIPPED WINDOW (2026-11-08): the boundary is inclusive (age <= window), read with the constant itself.
+  {
+    const SHIP = { ...ARMED, freshnessMs: MANDATE_CHECK_FRESHNESS_MS };
+    const aged = (ms) => checked({ timing: { anchoredAt: T0 - ms, verifiedAt: T0 - ms + 100 } });
+    const slowest = await run({ c: aged(2_183), cfg: SHIP });
+    ok("⭐ shipped window: a check as old as the SLOWEST measured sample (2,183 ms) is not stale", slowest.r?.code !== REFUSED.STALE_CHECK && slowest.r?.code !== REFUSED.FRESHNESS_UNSET, show(slowest.r));
+    const edge = await run({ c: aged(4_366), cfg: SHIP });
+    ok("  …exactly at the window (4,366 ms) is not stale", edge.r?.code !== REFUSED.STALE_CHECK && edge.r?.code !== REFUSED.FRESHNESS_UNSET, show(edge.r));
+    ok("  …one ms past it (4,367 ms) → refused as STALE, nothing executed", refusedBy(await run({ c: aged(4_367), cfg: SHIP }), REFUSED.STALE_CHECK));
+  }
   const noT = await run({ c: checked({ timing: undefined }) });
   ok("a check with no timing → THROWS (it carries no clock, so it cannot prove it shares the write's)", /no clock/i.test(noT.r?.threw ?? "") && noT.x.executor.calls.length === 0, show(noT.r));
   // ⭐ A NEGATIVE AGE IS A BUG, NOT A STALE CHECK: the anchor cannot be later than the write that reads it unless

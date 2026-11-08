@@ -59,7 +59,9 @@ export const MANDATE_ARMED_FROM_OPERATOR = null;
  * samples (T, 2026-10-01, decision 3): the disarmed tick records `fullPath.wouldBeCheckAgeMs` (anchor → the write's own
  * reads); the signing latency alone (anchor → verified) is not data for a gate that covers anchor → write.
  */
-export const MANDATE_CHECK_FRESHNESS_MS = null;
+// (T, 2026-11-08) SET from 38 measured disarmed ticks (2026-10-02 → 11-08, all ok): slowest wouldBeCheckAgeMs 2,183 ms
+// (10-24 11:17Z); min(10 000, 2 × 2,183) = 4,366. Setting it arms NOTHING — every arming constant above stays false/null.
+export const MANDATE_CHECK_FRESHNESS_MS = 4366;
 
 const SHIPPED = Object.freeze({ armed: MANDATE_DEPOSIT_ARMED, armedFrom: MANDATE_ARMED_FROM,
   armedOperator: MANDATE_DEPOSIT_ARMED_OPERATOR, armedFromOperator: MANDATE_ARMED_FROM_OPERATOR, freshnessMs: MANDATE_CHECK_FRESHNESS_MS });
